@@ -384,6 +384,11 @@ TOOL_REGISTRY: dict[str, ToolConfig] = {
         json_file="authored_path_stat.json",
         jq_hint="jq '.violations[] | {file, line, rule, message}'",
     ),
+    "signal_targets": ToolConfig(
+        command=_python("check_signal_targets.py", "--json"),
+        json_file="signal_targets.json",
+        jq_hint="jq '.violations[] | {file, line, rule, message}'",
+    ),
     "skip_list_substring": ToolConfig(
         command=_python("check_skip_list_substring.py", "--json"),
         json_file="skip_list_substring.json",
@@ -568,6 +573,14 @@ def _summarize_tests(data: QaReport) -> str:
     error_part = f", {errors} errored" if errors else ""
     line = f"{passed} passed, {failed} failed{error_part}, {skipped} skipped | coverage: {cov:.1f}%"
 
+    # Name a red run the failed/errored counts alone do not explain — a
+    # coverage-threshold miss exits non-zero over "0 failed" and a coverage
+    # percentage that rounds to looking fine (94.99% displays as "95.0%")
+    # (00466 N118). Without this the gate reported failure and named nothing.
+    unnamed_reason = s.get("unnamed_failure_reason")
+    if unnamed_reason:
+        line += f"\n   cause: {unnamed_reason}"
+
     # Name the failures (Plan 00226). A count alone forces a full re-run to
     # find out what broke, and a re-run may not reproduce an order-dependent
     # failure — during Plan 00224 one of two real failures was never
@@ -743,6 +756,7 @@ SUMMARIZERS: dict[str, Summarizer] = {
     "python_var_guidance": _summarize_violations,
     "eacces_safe": _summarize_violations,
     "authored_path_stat": _summarize_violations,
+    "signal_targets": _summarize_violations,
     "skip_list_substring": _summarize_violations,
     "unreachable_handle_branch": _summarize_violations,
     "declared_invariant_pairs": _summarize_violations,

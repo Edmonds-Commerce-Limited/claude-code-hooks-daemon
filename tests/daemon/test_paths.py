@@ -839,13 +839,18 @@ class TestSocketPathLengthFallback(unittest.TestCase):
             os.environ.pop("CLAUDE_HOOKS_SOCKET_PATH", None)
             os.environ.pop("XDG_RUNTIME_DIR", None)
 
-            with patch.object(Path, "is_dir", return_value=True):
+            # Whether this host has /run/user/{uid} must not decide whether the
+            # branch is tested: only that one directory exists, as far as the
+            # fallback can tell.
+            with patch.object(
+                Path, "is_dir", autospec=True, side_effect=lambda path: path == run_user_dir
+            ):
                 socket_path = get_socket_path(deep_path)
                 project_hash = get_project_hash(deep_path)
 
-                self.assertTrue(str(socket_path).startswith(str(run_user_dir)))
-                self.assertIn(f"hooks-daemon-{project_hash}", str(socket_path))
-                self.assertTrue(str(socket_path).endswith(".sock"))
+            self.assertTrue(str(socket_path).startswith(str(run_user_dir)))
+            self.assertIn(f"hooks-daemon-{project_hash}", str(socket_path))
+            self.assertTrue(str(socket_path).endswith(".sock"))
 
     def test_socket_path_over_limit_uses_tmp_fallback(self):
         """When neither XDG nor /run/user available, use /tmp fallback."""

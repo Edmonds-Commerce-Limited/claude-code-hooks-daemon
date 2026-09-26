@@ -688,6 +688,43 @@ interrupt a running handler) and lands with that branch. N40 is taken there too
 taken on the N38 fix branch (the chain's remaining linear per-token cost, which
 waits for the shell-parser consolidation).
 
+### N118 — ✅ Remedied — the tests-stage gate reported "0 failed" over a coverage-threshold miss and named nothing
+
+**Found by the N59 gate fixer** (`260926-n59-gatefix4-sonnet-5.md` on
+`worktree-n466-n59`). The full gate failed with only the `tests` stage red,
+and the gate's own one-line summary read `29642 passed, 0 failed, 20 skipped | coverage: 95.0%` — every count zero for a failure, and the
+coverage figure rounded to exactly the passing threshold. The actual cause,
+buried in `untracked/qa/tests.json.raw`, was pytest-cov's own end-of-run
+line: `FAIL Required test coverage of 95.0% not reached. Total coverage: 94.99%`. `run_tests.sh`'s text-fallback path (the one this project actually
+takes; `pytest-json-report` is not installed) never captured that line, and
+`finalize_passed_all` correctly turned `passed_all` False via the runner's
+own exit code — but nothing downstream said WHY, so a reader had to re-run
+the whole 34-minute suite and grep the raw log by hand.
+
+**Remedy:** `pytest_text_report.py` gained
+`find_unnamed_failure_reason(content, failed=, errors=, total=, exit_code=)`,
+which returns `None` whenever the failed/errored counts already explain a
+red run (or the run is clean, or nothing was collected), and otherwise
+returns pytest-cov's own fail line when present, or a generic
+`"pytest exited {exit_code} but reported no failed or errored tests"`
+fallback. `run_tests.sh`'s fallback branch now records this as
+`summary.unnamed_failure_reason`, and `llm_qa.py`'s `_summarize_tests`
+appends it as a `cause:` line whenever present. The real coverage gap
+itself was also a genuine defect: `safe_signal.py` (Plan 00466 N59) was at
+90.68% — `verified_daemon_process`'s `AccessDenied` branch reading a
+process's command line, `signal_verified_daemon`'s `NoSuchProcess`/
+`AccessDenied` branches around `send_signal`, `stop_verified_daemon`'s
+SURVIVED-after-both-grace-waits-time-out path and its NoSuchProcess race
+during `terminate`, and `signal_own_session_child`'s own-group re-check —
+were all real branches with no test exercising them. Six new tests in
+`tests/unit/utils/test_safe_signal.py` (monkeypatching the psutil calls
+those branches guard, plus one exercising the `os.getpgid` race with a
+faked return sequence) bring the file to 100%, closing the 0.01-point gap.
+RED confirmed: `find_unnamed_failure_reason` and the six `safe_signal.py`
+branches did not exist/were not exercised before this fix; every new test
+was run and seen to exercise its target line via `--cov-report=term-missing`
+before the fix, then again after.
+
 ### N110 — The local full QA gate tests one Python version, so a version-specific defect passes it and fails CI
 
 **Found by the N106 fixer.** N24 passed the full local gate and went red on
@@ -764,6 +801,8 @@ send people.
 the N38 lexer, and pin that the continued and single-line forms get the
 same verdict. It goes on the executed-body branch with N87 to N89 and N93,
 after N38.
+
+> > > > > > > main
 
 ### N99 — `dev-handlers.md` offers an agent a wrapper command that the daemon denies
 
@@ -1375,25 +1414,72 @@ coerces to `1` through `__index__`, and `os.getpgid(1)` is `1` here, because
 PID 1 is `tini`, the container's init. So a test that reached the timeout path
 ran `killpg(1, SIGKILL)` and ended the container. Both deaths came about 10 s
 after an N53 fixer ran those tests (11:07:16 and 11:35:54). The daemon restart
-at 11:35:59 is not the cause: `cmd_stop` signals only a pid that
-`read_pid_file(..., verify_daemon=True)` proved is a daemon.
+at 11:35:59 is not the cause: `cmd_stop` signalled only a pid that
+`read_pid_file(..., verify_daemon=True)` proved is a daemon. That proves "a
+daemon", not "this project's daemon", so `cmd_stop` is an instance of the class
+too; see the remedy below.
 
 **The class is wider than N53.** On main, `install/client_validator.py` reads a
 pid from a `daemon*.pid` file and sends SIGTERM, then SIGKILL, with no identity
 check. PID files survive a container restart, and a restarted container reuses
 small PIDs, so a stale file can name `claude` itself.
 
-**Remedy (in progress):**
+**Remedy (landed on `worktree-n466-n59`):** the class is registered in
+[`CLAUDE/Security/UnprovenSignalTarget.md`](../../Security/UnprovenSignalTarget.md).
 
-- a signal with a nonzero number goes only to a pid proven to be the intended
-  process: a verified daemon, or a child this code started in its own session
-  that still leads its group;
-- a detector that fails QA on any `os.kill` or `os.killpg` whose pid is not
-  proven that way;
-- a test-suite safety net that refuses any signal to pid 1, to init's group,
-  or to the test runner's own group or ancestors;
-- a guard on N53's branch in `_kill_process_group`: only a real int pid above
-  1 that leads its own group, and never this process's own group.
+- **One helper sends every nonzero signal.** `utils/safe_signal.py` refuses a
+  pid that is not a plain `int` above 1, as well as this process, the leader
+  of its group and its ancestors. It signals a daemon only when the daemon's command line shows
+  THIS project root (`signal_verified_daemon`, `stop_verified_daemon`). A
+  group gets a signal only when it is led by a still-running child we spawned
+  (`signal_own_session_child`).
+
+- **The Detector.** `scripts/qa/check_signal_targets.py` is `llm_qa`
+  `signal_targets` and `run_all.sh` check 33. It reads Python (rules
+  `raw-signal`, `unproven-process-handle`, `kill-command`) and every tracked
+  shell script outside `tests/` (rule `shell-unproven-kill`).
+
+  - The Python rules were RED on main at `client_validator.py:320,329`,
+    `process_verification.py:184,192` and `cli.py:788`, and on the N53
+    `killpg(getpgid(process.pid))` shape.
+  - The shell rule was RED on main's five shell sites.
+  - It now finds nothing in the 795 files it scans. Every one of the 23 shell
+    `kill` sites it sees was judged by hand; none was a false positive.
+
+- **Python sites fixed.** The installer's `_check_running_daemon` and
+  container enforcement now go through the helper. Enforcement signals
+  nothing when it has no project root. `kill_daemon_process` is removed.
+  `cmd_stop` takes a `verified_daemon_process` handle, which checks the
+  project root, and waits on that handle.
+
+- **Shell sites fixed.** Each now proves identity before it signals:
+
+  - `upgrade.sh` checks for a daemon server of this project root;
+  - `dummy-client-repo.sh` signals the proven pid, never its group, and
+    re-reads its command line immediately before the signal;
+  - the venv bootstrap watchdog checks the build's start time, and the group
+    kill sits beside its job-table check;
+  - the venv lock heartbeat and the resolver probe watchdog check that the
+    pid still has the parent recorded when it was started.
+
+- **Named, not built:** a rule for a `$!` signalled after its job may have
+  ended. The resolver probe watchdog was that shape. It is referred to the
+  owner with the DBF report.
+
+- **The test-suite safety net.** `tests/signal_safety_net.py` is installed by
+  a session-wide autouse fixture in `tests/conftest.py`. It refuses, without
+  delivering, any nonzero `os.kill`/`os.killpg` to:
+
+  - pid 0, 1 or -1, or group 1;
+  - the pytest process, its group or any ancestor;
+  - a Claude Code process.
+
+  It also records each refusal, so a test whose code swallows the error still
+  fails.
+
+- **N53's branch.** Its `_kill_process_group` should call
+  `signal_own_session_child`. The Detector reports the raw `killpg` when that
+  branch rebases.
 
 ### N58 — R-CHMOD-WORLD-WRITABLE denies a safe chmod when a later argument contains digits
 

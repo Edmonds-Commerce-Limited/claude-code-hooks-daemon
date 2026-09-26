@@ -56,6 +56,15 @@ _SKIPPED_COUNT_PATTERN = re.compile(r"(\d+) skipped")
 # itself passing in the same breath. Matches both "1 error" and "2 errors".
 _ERROR_COUNT_PATTERN = re.compile(r"(\d+) error")
 
+# pytest-cov's own end-of-run line when `[tool.coverage.report] fail_under` is
+# not met. Its plugin sets the session exit code non-zero for this even when
+# every collected test passed, so a summary reading "N passed, 0 failed" can
+# still be a red run for a reason the failed/errored counts never mention
+# (00466 N118).
+_COVERAGE_FAIL_PATTERN = re.compile(
+    r"FAIL Required test coverage of [\d.]+% not reached\. Total coverage: [\d.]+%"
+)
+
 
 def strip_ansi(text: str) -> str:
     """Remove SGR escape sequences so patterns match the plain text."""
@@ -131,6 +140,40 @@ def parse_pytest_text_output(content: str) -> dict[str, Any]:
         "passed_all": failed == 0 and errors == 0 and total > 0,
         "failed_tests": failed_tests,
     }
+
+
+def find_unnamed_failure_reason(
+    content: str, *, failed: int, errors: int, total: int, exit_code: int
+) -> str | None:
+    """Why a run is red when the failed/errored counts do not say.
+
+    ``finalize_passed_all`` already goes False whenever ``exit_code`` is
+    non-zero, even when ``failed`` and ``errors`` are both zero — a
+    coverage-threshold miss is the known case, exiting non-zero over a summary
+    line reading "29642 passed, 0 failed, 20 skipped". Nothing downstream
+    named that cause: the gate's own summary line showed "0 failed" and a
+    coverage percentage rounded to one decimal place, which read as passing
+    (94.99% displays as "95.0%").
+
+    Args:
+        content: Raw pytest stdout/stderr, with or without ANSI colouring.
+        failed: ``parse_pytest_text_output(...)["failed"]``.
+        errors: ``parse_pytest_text_output(...)["errors"]``.
+        total: ``parse_pytest_text_output(...)["total"]``.
+        exit_code: The runner's own process exit status.
+
+    Returns:
+        A short human reason, or ``None`` when the failed/errored counts
+        already explain a red run, when the run is clean, or when it
+        collected no tests at all (the "no tests ran" case already reads as
+        failed for its own, separately-named reason).
+    """
+    if exit_code == 0 or failed or errors or total == 0:
+        return None
+    match = _COVERAGE_FAIL_PATTERN.search(strip_ansi(content))
+    if match:
+        return match.group(0)
+    return f"pytest exited {exit_code} but reported no failed or errored tests"
 
 
 def finalize_passed_all(parsed_passed_all: bool, exit_code: int) -> bool:

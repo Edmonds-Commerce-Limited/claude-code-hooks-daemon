@@ -89,7 +89,7 @@ Full write-ups are in [NIGGLES.md](NIGGLES.md). One line each here:
 | N56  | Tests skip when run as root, so this container never runs them                                                 | Owner                                                           | 🔄 In progress                   |
 | N57  | `secret_file_guard` misses a protected path reached through an earlier assignment, alias or written file       | Guard-defects fix                                               | ⬜ Open                          |
 | N58  | R-CHMOD-WORLD-WRITABLE denies a safe chmod when a later argument contains digits                               | N53 review 2                                                    | ⬜ Open                          |
-| N59  | A signal went to a PID nobody proved was the intended process, and killed the container twice                  | Infra owner                                                     | 🔄 In progress                   |
+| N59  | A signal went to a PID nobody proved was the intended process, and killed the container twice                  | Infra owner                                                     | ✅ Remedied                      |
 | N60  | `curl_pipe_shell` denies a double-quoted `echo` argument that only mentions the pattern                        | Coordinator                                                     | ⬜ Open                          |
 | N61  | The `sensitive_content` commit gate misses a file that a same-command `git add` stages                         | upgrade-scripts                                                 | 🔄 In progress                   |
 | N62  | Nothing bounds a subagent's context, so long-lived agents burn the usage budget                                | Owner                                                           | ⬜ Open                          |
@@ -122,7 +122,7 @@ Full write-ups are in [NIGGLES.md](NIGGLES.md). One line each here:
 | N89  | A data-sink receiver is trusted after the command redefines it                                                 | N38 review 6                                                    | ⬜ Open (after N38)              |
 | N90  | `project_containment` denies every command, even one that writes nothing, when the project root is unresolved  | GD gate fixer                                                   | ✅ Remedied                      |
 | N91  | A project's extra `protected_paths` can be ignored for the daemon's life by the payload-capture and lint seams | N38 fix 8                                                       | 🔄 In progress (N38)             |
-| N92  | `pipe_blocker` reads a \`                                                                                      | \` inside a double-quoted regex as a pipe                       | N38 review 8                     |
+| N92  | `pipe_blocker` reads a \`\\                                                                                    | \` inside a double-quoted regex as a pipe                       | N38 review 8                     |
 | N93  | `project_containment` misses writes inside `eval '…'` and nested heredocs                                      | N38 review 8                                                    | ⬜ Open (after N38)              |
 | N94  | `github_auto_close_keywords` answers a repeated `git commit -F` from the previous request                      | N38 review 8                                                    | 🔄 In progress (N38 fix 9)       |
 | N95  | Test fixtures run setup git commands under a production 5-second budget, so a loaded host flakes the gate      | N81-83 gate fixer                                               | ⬜ Open                          |
@@ -135,6 +135,7 @@ Full write-ups are in [NIGGLES.md](NIGGLES.md). One line each here:
 | N105 | A skill redeploy leaves an untracked, unignored `.claude/hooks-daemon-backups/`                                | Upgrade review 11 (L9)                                          | ✅ Remedied                      |
 | N109 | The pending release-notes holding area mis-sorts past 99 callouts                                              | Coordinator                                                     | ✅ Remedied                      |
 | N110 | The local full QA gate tests one Python version, so a version-specific defect passes it and fails CI           | N106 fixer                                                      | ⬜ Open                          |
+| N118 | The tests-stage gate reported "0 failed" over a coverage-threshold miss and named nothing                      | N59 gate fixer 4                                                | ✅ Remedied                      |
 
 ## Tasks
 

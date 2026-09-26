@@ -1,15 +1,43 @@
 """Tests for ClientInstallValidator."""
 
 import json
+import subprocess
+import sys
 
+import pytest
 import yaml
 
 from claude_code_hooks_daemon.constants.paths import DaemonPath
+from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.install import bin_wrapper
 from claude_code_hooks_daemon.install.client_validator import (
     ClientInstallValidator,
     ValidationResult,
 )
+
+_DAEMON_MODULE = "claude_code_hooks_daemon.daemon.cli"
+#: Above Linux's default pid_max, so no process can have it.
+_NONEXISTENT_PID = 2**22 + 7
+
+
+@pytest.fixture
+def spawned():
+    """Start real sleeping children (argv appended), and reap them afterwards."""
+    children = []
+
+    def spawn(*argv):
+        child = subprocess.Popen(
+            [sys.executable, "-c", "import time; time.sleep(600)", *argv],
+            start_new_session=True,
+        )
+        children.append(child)
+        return child
+
+    yield spawn
+    for child in children:
+        if child.poll() is None:
+            child.kill()
+        child.wait(timeout=Timeout.PROCESS_SAMPLE)
 
 
 class TestValidationResult:
@@ -200,34 +228,25 @@ class TestCheckRunningDaemon:
     def test_permission_error_on_stop_records_warning(self, tmp_path, monkeypatch):
         """A daemon that survives SIGTERM due to PermissionError must warn.
 
-        Regression: the PermissionError on os.kill(SIGTERM) was swallowed by a
-        bare ``pass``, so the installer proceeded over a still-running daemon
-        with no signal to the user. The graceful-stop failure must surface as a
+        Regression: the PermissionError on the SIGTERM was swallowed by a bare
+        ``pass``, so the installer proceeded over a still-running daemon with
+        no signal to the user. The graceful-stop failure must surface as a
         warning telling the user to stop the daemon manually.
         """
-        import signal
-
         from claude_code_hooks_daemon.install import client_validator as cv_module
 
         project_root = tmp_path / "project"
-        project_root.mkdir()
         untracked_dir = project_root / ".claude" / "hooks-daemon" / "untracked"
         untracked_dir.mkdir(parents=True)
 
-        running_pid = 4242
+        running_pid = _NONEXISTENT_PID
         pid_file = untracked_dir / "daemon.pid"
         pid_file.write_text(str(running_pid))
 
-        def fake_kill(pid: int, sig: int) -> None:
-            # Existence probe (signal 0) succeeds: the daemon is alive.
-            if sig == 0:
-                return
-            # The installer lacks permission to terminate it.
-            if sig == signal.SIGTERM:
-                raise PermissionError("operation not permitted")
-            return
+        def stop_without_permission(pid, *, project_root, grace_seconds):
+            raise PermissionError("operation not permitted")
 
-        monkeypatch.setattr(cv_module.os, "kill", fake_kill)
+        monkeypatch.setattr(cv_module, "stop_verified_daemon", stop_without_permission)
 
         result = ClientInstallValidator._check_running_daemon(project_root)
 
@@ -235,6 +254,64 @@ class TestCheckRunningDaemon:
         warnings_text = "\n".join(result.warnings)
         assert str(running_pid) in warnings_text
         assert "permission" in warnings_text.lower()
+
+    def test_this_projects_daemon_is_stopped(self, tmp_path, spawned):
+        """A live daemon whose command line names THIS project root is stopped."""
+        project_root = tmp_path / "project"
+        untracked_dir = project_root / ".claude" / "hooks-daemon" / "untracked"
+        untracked_dir.mkdir(parents=True)
+        daemon = spawned(_DAEMON_MODULE, "--project-root", str(project_root), "start")
+        (untracked_dir / "daemon-abc.pid").write_text(str(daemon.pid))
+
+        result = ClientInstallValidator._check_running_daemon(project_root)
+
+        # The stop waited on, and so reaped, the child: the Popen can see only
+        # that it is gone, and the warning says how it went.
+        assert daemon.poll() is not None
+        assert any(f"Gracefully stopped daemon (PID {daemon.pid})" in w for w in result.warnings)
+
+    def test_a_pid_file_naming_a_live_non_daemon_never_signals_it(self, tmp_path, spawned):
+        """Plan 00466 N59: a stale PID file can name any process a restart reused.
+
+        The pre-fix installer sent SIGTERM then SIGKILL to whatever pid the
+        file held. Here it holds a live process that is not a daemon at all,
+        standing in for Claude Code after a container restart.
+        """
+        project_root = tmp_path / "project"
+        untracked_dir = project_root / ".claude" / "hooks-daemon" / "untracked"
+        untracked_dir.mkdir(parents=True)
+        bystander = spawned()
+        pid_file = untracked_dir / "daemon-abc.pid"
+        pid_file.write_text(str(bystander.pid))
+
+        result = ClientInstallValidator._check_running_daemon(project_root)
+
+        assert bystander.poll() is None, "the installer signalled a non-daemon"
+        assert any("Did not signal" in w and str(pid_file) in w for w in result.warnings)
+
+    def test_another_projects_daemon_is_never_signalled(self, tmp_path, spawned):
+        """A daemon of a different project root is left running."""
+        project_root = tmp_path / "project"
+        untracked_dir = project_root / ".claude" / "hooks-daemon" / "untracked"
+        untracked_dir.mkdir(parents=True)
+        other = spawned(_DAEMON_MODULE, "--project-root", str(tmp_path / "other"), "start")
+        (untracked_dir / "daemon-abc.pid").write_text(str(other.pid))
+
+        result = ClientInstallValidator._check_running_daemon(project_root)
+
+        assert other.poll() is None, "the installer signalled another project's daemon"
+        assert any("Did not signal" in w for w in result.warnings)
+
+    def test_an_unreadable_pid_file_is_reported_not_ignored(self, tmp_path):
+        project_root = tmp_path / "project"
+        untracked_dir = project_root / ".claude" / "hooks-daemon" / "untracked"
+        untracked_dir.mkdir(parents=True)
+        (untracked_dir / "daemon.pid").write_text("not-a-pid")
+
+        result = ClientInstallValidator._check_running_daemon(project_root)
+
+        assert result.passed is True
+        assert any("unreadable PID file" in w for w in result.warnings)
 
 
 class TestCheckDirectoryStructure:

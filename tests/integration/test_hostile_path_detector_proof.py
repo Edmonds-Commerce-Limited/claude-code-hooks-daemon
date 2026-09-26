@@ -29,9 +29,25 @@ RESOLVE_VENV_SH = REPO_ROOT / "scripts" / "lib" / "resolve_venv.sh"
 BASH = shutil.which("bash") or "/bin/bash"
 _TIMEOUT_SECONDS = 30
 
-# The exact pre-766677c1 watchdog line this reverts back to.
+# The current watchdog block: N30's hostile-PATH-safe wait plus N59's
+# parent-pid check (a kill only reaches a pid that is still this probe's
+# child, guarding against a reused pid -- see resolve_venv.sh's comment
+# above `_rv_candidate_runs`). Reverting this whole block back to the
+# pre-766677c1 one-liner below removes BOTH fixes, which is fine for this
+# proof: the hostile-PATH bug this test targets is N30's alone, since the
+# N59 parent check never gets a chance to fire in the good-candidate case
+# below (the candidate exits well before the timeout, so `wait "$pid"` in
+# the main flow returns and kills the watchdog first).
 _POST_FIX_WATCHDOG_LINE = (
-    '    ( _rv_wait_secs "$_RV_PROBE_TIMEOUT_SECS" && kill -KILL "$pid" 2>/dev/null ) &'
+    "    (\n"
+    '        if ! _rv_parent="$(_rv_parent_of "$pid")"; then\n'
+    "            exit 0\n"
+    "        fi\n"
+    '        if _rv_wait_secs "$_RV_PROBE_TIMEOUT_SECS" \\\n'
+    '            && [ "$(_rv_parent_of "$pid")" = "$_rv_parent" ]; then\n'
+    '            _rv_kill_out="$(kill -KILL "$pid" 2>&1)"\n'
+    "        fi\n"
+    "    ) &"
 )
 _PRE_FIX_WATCHDOG_LINE = '    ( sleep "$_RV_PROBE_TIMEOUT_SECS"; kill -KILL "$pid" 2>/dev/null ) &'
 
