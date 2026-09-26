@@ -664,6 +664,18 @@ class TestAnEarlierSegmentCanRunTheBody:
         assert _decision(DestructiveGitHandler(), command) == Decision.ALLOW
         assert _decision(ProjectContainmentHandler(), command) == Decision.ALLOW
 
+    def test_a_sink_inside_a_process_substitution_reads_its_own_stage(self, tmp_path: Path) -> None:
+        """The stage starts at ``<(``: the outer ``cat`` only reads a file
+        name, and a body the inner sink hands on is still judged."""
+        data = f"cat <(cat <<'EOF'\n{_outside(tmp_path)}\nEOF\n)"
+        _bash_run(data, tmp_path)
+        assert not (tmp_path / "evil.txt").exists()
+        assert _decision(ProjectContainmentHandler(), data) == Decision.ALLOW
+        run = f"cat <(cat <<'EOF' > >(bash)\n{_outside(tmp_path)}\nEOF\n); sleep 0.3"
+        _bash_run(run, tmp_path)
+        assert (tmp_path / "evil.txt").exists()
+        assert _decision(ProjectContainmentHandler(), run) == Decision.DENY
+
     def test_the_commit_idiom_stays_allowed(self, tmp_path: Path) -> None:
         command = (
             "git add -A && git commit -m \"$(cat <<'EOF'\n"

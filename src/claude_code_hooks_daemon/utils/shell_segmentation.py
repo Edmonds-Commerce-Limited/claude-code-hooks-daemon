@@ -1692,6 +1692,11 @@ def heredoc_consumers(command: str, heredocs: Sequence[Heredoc]) -> list[tuple[s
     for heredoc in heredocs:
         opener_start = heredoc.operator.start
         receiving = _receiving_segment(command, opener_start, newline_tracker)
+        # Inside `<(…)` or `>(…)` the stage starts at the opener: the command
+        # around it only reads a file name.
+        cut = max(receiving.rfind(opener) for opener in _PROCESS_SUBSTITUTIONS)
+        if cut >= 0:
+            receiving = receiving[cut + len(_PROCESS_SUBSTITUTIONS[0]) :]
         tail = _opener_tail(command, heredoc)
         pipeline = split_unquoted(tail, _PIPELINE_TERMINATORS)[0]
         downstream = split_unquoted(pipeline, ("|",))[1:]
