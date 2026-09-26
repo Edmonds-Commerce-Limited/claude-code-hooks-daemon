@@ -11,7 +11,7 @@ language ecosystems (PHP, JavaScript, Python, Ruby, Rust, Go, .NET, Swift).
 
 from typing import Any, ClassVar, Final
 
-from claude_code_hooks_daemon.constants import HookInputField
+from claude_code_hooks_daemon.constants import HandlerTag, HookInputField
 from claude_code_hooks_daemon.constants.handlers import HandlerID
 from claude_code_hooks_daemon.constants.priority import Priority
 from claude_code_hooks_daemon.constants.rule_ids import RuleID
@@ -111,6 +111,11 @@ class LockFileEditBlockerHandler(PreToolUseHandlerBase):
             handler_id=HandlerID.LOCK_FILE_EDIT_BLOCKER,
             priority=Priority.LOCK_FILE_EDIT_BLOCKER,
             terminal=True,
+            # Plan 00466 n24 security review, M3 (team-lead's explicit
+            # list): a hand-edited lock file can silently swap in an
+            # attacker-controlled dependency hash -- structurally
+            # fail-closed, not just BLOCKING.
+            tags=[HandlerTag.SAFETY, HandlerTag.BLOCKING],
         )
 
     def matches(self, hook_input: dict[str, Any]) -> bool:

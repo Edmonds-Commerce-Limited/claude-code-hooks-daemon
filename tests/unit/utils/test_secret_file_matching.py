@@ -7,12 +7,15 @@ realpath), and Bash path-mention detection with its two narrow exemptions
 position).
 """
 
+import errno
 import time
+from collections.abc import Callable, Iterator
 from pathlib import Path
 
 import pytest
 
 from claude_code_hooks_daemon.utils import secret_file_matching as sfm
+from claude_code_hooks_daemon.utils.shell_expansion import TooManyToEnumerateError
 
 #: Wall-clock ceiling for the wide-range tests below. The rejected path does
 #: no allocation at all, so it costs microseconds; a range materialised before
@@ -89,6 +92,33 @@ class TestPathIsProtected:
         link = tmp_path / "innocuous-name"
         link.symlink_to(target)
         assert sfm.path_is_protected(str(link), sfm.DEFAULT_PROTECTED_PATTERNS)
+
+    def test_a_symlink_loop_on_the_path_is_treated_as_protected(self, tmp_path: Path) -> None:
+        """Plan 00466 N24 review 4 (team-lead follow-up on R4-B1): once a
+        loop is hit, os.path.realpath's own answer for the rest of the path
+        is version-dependent (3.11 gives up unresolved, 3.13 keeps
+        resolving), so an innocuous-looking path routed through a loop must
+        not be able to slip past this check on one Python version but not
+        the other -- it fails closed (protected) on every version."""
+        loop = tmp_path / "loop"
+        loop.symlink_to(loop)
+        assert sfm.path_is_protected(
+            str(tmp_path / "loop" / ".." / "innocuous.txt"), sfm.DEFAULT_PROTECTED_PATTERNS
+        )
+
+    def test_nul_byte_in_path_does_not_raise(self) -> None:
+        """Plan 00466 N24 follow-up (guard-defects review 2, m3): the fuzzer
+
+        found ``os.path.realpath`` raising ``ValueError: embedded null
+        byte`` on 485/12000 fuzzed Write/Edit paths, uncaught here — only
+        ``OSError`` was handled. A NUL-bearing path cannot BE a symlink to a
+        protected target (the OS itself rejects it), so there is nothing
+        for the realpath check to discover; this must return the ordinary
+        glob-match answer on the raw path, not crash.
+        """
+        assert not sfm.path_is_protected(
+            "/proj/src/main.py\x00suffix", sfm.DEFAULT_PROTECTED_PATTERNS
+        )
 
 
 class TestBashMentionsProtectedPath:
@@ -294,6 +324,108 @@ class TestBashMentionsProtectedPath:
         gate rejects it because neither token edge carries a wildcard."""
         assert self._match("x = words[0].rsplit(y)") is None
         assert self._match("a = parts[0].split(z)") is None
+
+    def test_leading_wildcard_python_splat_operator_is_not_matched(self) -> None:
+        """Regression (N4, Plan 00466): a Python unpacking/splat ``*`` glued
+        to an identifier is not a shell glob wildcard, but the leading-
+        wildcard reverse-overlap branch of ``_glob_token_overlaps_stem``
+        cannot tell the difference. The reported Edit added ``rest =
+        [words[0], *words[position + 1 :]]`` -- the space before the
+        colon splits the slice into its own token, leaving ``*words[position``
+        to stand alone. Stripped of its ``*``/``[`` glob chars the residue is
+        ``wordsposition``, whose ``word`` PREFIX coincidentally overlaps the
+        ``.vault-password`` stem's ``word`` SUFFIX (``pass-word``) by 4
+        characters -- past the 2-char minimum. The pattern ``*.vault-password``
+        has NO trailing wildcard, so nothing on the pattern side can absorb
+        the residue's leftover ``sposition`` -- a genuine truncation would
+        need the token's ENTIRE residue to be a literal suffix of the stem,
+        not a boundary coincidence. The plain (bracket-free) unpacking shape
+        reproduces the same false match."""
+        assert self._match("rest = [words[0], *words[position + 1 :]]") is None
+        assert self._match("def f(*wordlist): pass") is None
+        assert self._match("call(*wordlist)") is None
+
+    def test_leading_wildcard_full_suffix_of_anchored_stem_still_matched(self) -> None:
+        """The fix above must not blunt a REAL truncation of an anchored
+        (no-trailing-wildcard) pattern: a token whose ENTIRE residue is a
+        literal suffix of the stem still glob-expands to the protected file
+        and must stay denied -- these already pass via the pre-existing
+        substring+fnmatch check, so this pins that the gate change leaves it
+        alone."""
+        assert self._match("cat *password") is not None
+        assert self._match("cat *ult-password") is not None
+
+    def test_leading_wildcard_with_an_internal_wildcard_too_still_matched(self) -> None:
+        """Regression (m1, Plan 00466 review): the N4 gate applies its
+        stricter ``stem_basename.endswith(residue)`` requirement to EVERY
+        leading-wildcard token, but that requirement is only correct for the
+        simple splat shape (``*identifier``, nothing else). A token that
+        carries ANOTHER wildcard besides its leading one -- ``*rd*rd``,
+        ``*word*word`` -- is not that shape: fnmatch expands the internal
+        ``*`` too, so the token can glob-match a protected name (``*rd*rd``
+        matches ``rd.vault-password``: contains ``rd``, then later another
+        ``rd``) without its residue needing to be a literal suffix of the
+        stem at all. Only the pre-existing overlap-length check should gate
+        this shape, exactly as before N4."""
+        assert self._match("cat *rd*rd") is not None
+        assert self._match("cat *word*word") is not None
+
+    def test_leading_wildcard_project_pattern_with_an_internal_wildcard_still_matched(
+        self,
+    ) -> None:
+        """The same regression against a PROJECT-configured pattern with its
+        own internal wildcard (``*secret*.json``): a token shaped
+        ``*on*.json`` can still glob-expand to a protected name
+        (``on-secret.json``) and must stay denied."""
+        patterns = ("*secret*.json",)
+        assert sfm.find_protected_mention("cat *on*.json", patterns) is not None
+
+    def test_interior_question_mark_truncation_is_matched(self) -> None:
+        """N10 (Plan 00466 review): a wildcard sitting in the MIDDLE of a
+        protected name is invisible to the edge-based checks above -- this
+        token has neither a leading nor a trailing wildcard, so it never
+        reached ``_glob_token_overlaps_stem`` at all, and its residue
+        (``.vault-pasword``, one ``s`` short of the real stem) is not a
+        substring of ``.vault-password`` either, so the pre-existing
+        substring+fnmatch check missed it too. ``fnmatch('.vault-password',
+        '.vault-pas?word')`` is True (the ``?`` absorbs the missing ``s``),
+        so a real protected file is reachable through this exact token."""
+        assert self._match("cat .vault-pas?word") is not None
+        assert self._match("cat .vault-p?ss") is not None
+
+    def test_interior_star_with_unrelated_prefix_is_matched(self) -> None:
+        """A second interior-wildcard shape: an unrelated literal PREFIX in
+        front of the token (``prod.``) does not save it, because the
+        protected pattern (``*.vault-password``) itself has an open leading
+        edge -- the two open edges can absorb each other's slack, and a real
+        file named ``prod.vault-password`` would match both."""
+        assert self._match("cat prod.vault-passw*rd") is not None
+
+    def test_interior_bracket_expression_truncation_is_matched(self) -> None:
+        """The interior wildcard can also be a bracket expression, not just
+        ``?``/``*``. ``[sz]`` expands to two concrete spellings
+        (``.vault-password`` and ``.vault-paszword``) -- the first is the
+        real protected stem exactly, so it must be caught even though its
+        sibling expansion is a genuine non-match."""
+        assert self._match("cat .vault-pas[sz]word") is not None
+
+    def test_unrelated_interior_wildcard_tokens_are_not_matched(self) -> None:
+        """The new interior-wildcard check must not become a blanket
+        "any glob token" denial -- ordinary, unrelated glob-shaped tokens
+        stay allowed."""
+        assert self._match("ls *.py") is None
+        assert self._match("ls src/*.md") is None
+        assert self._match("cat file?.txt") is None
+        assert self._match("cat repo[12].json") is None
+
+    def test_splat_false_positive_from_n4_still_allowed(self) -> None:
+        """The N10 fix must keep the N4 false-positive fix intact: it is
+        scoped to tokens with NEITHER a leading NOR a trailing wildcard, so
+        the Python unpacking splat shapes (leading-wildcard, no trailing)
+        that N4 fixed must still be allowed."""
+        assert self._match("rest = [words[0], *words[position + 1 :]]") is None
+        assert self._match("def f(*wordlist): pass") is None
+        assert self._match("call(*wordlist)") is None
 
     def test_python_list_literal_is_not_matched(self) -> None:
         """Regression (Plan 00305 Task 2.5, clippy-shim-fix agent report): an
@@ -745,6 +877,107 @@ class TestPythonDashCImportStatements:
         assert sfm.find_protected_mention(command, ("id_rsa",)) == "id_rsa"
 
 
+class TestBareHomePrefixTokenDoesNotCrash:
+    """N5 (Plan 00466), security fail-open: a token that is EXACTLY one of
+    ``_HOME_PREFIXES`` (the prefix with nothing following it, e.g. a quoted
+    Python string literal ``"~/"``) strips down to an EMPTY residual in
+    ``_normalised_token_forms`` -- ``token[len(prefix):]`` on a token equal to
+    the prefix is ``""``. That empty form then reached
+    ``path_matches_globs("", ...)`` with a real ``project_root``, which calls
+    ``os.path.relpath("", root)`` and raises ``ValueError: no path specified``
+    -- os.path.relpath rejects an empty PATH argument outright, regardless of
+    ``start``.
+
+    Reproduced live (00463's agent's transcript, replayed through the real
+    daemon by the coordinator): editing
+    ``subagent_full_qa_blocker.py`` to add
+    ``_HOME_PREFIXES: Final[tuple[str, ...]] = ("~/", "$HOME/", "${HOME}/",
+    "$PWD/", "${PWD}/")`` raised inside ``secret_file_guard``'s ``matches()``.
+    Because the exception happens in ``matches()``, not ``handle()``, the
+    daemon's non-strict per-handler catch (``core/chain.py``) logs it as
+    context and moves on -- which means THIS HANDLER, `secret_file_guard`,
+    is skipped for that write. That is a fail-OPEN on a security guard, not
+    mere noise: a write whose content also names a real protected path
+    would slip through unexamined. See
+    ``test_a_genuine_mention_alongside_the_crashing_token_is_still_denied``
+    below, which pins the fail-SAFE behaviour the fix must restore.
+
+    All tests here initialise ``ProjectContext`` (via ``monkeypatch``) so
+    ``resolve_project_root()`` returns a real root -- the crash needs a
+    non-``None`` ``project_root`` to reach ``os.path.relpath`` at all, which
+    an un-initialised unit-test process never supplies on its own.
+    """
+
+    PATTERNS = sfm.DEFAULT_PROTECTED_PATTERNS
+
+    @pytest.fixture(autouse=True)
+    def _project_root(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from claude_code_hooks_daemon.core import project_context as pc
+
+        monkeypatch.setattr(pc.ProjectContext, "_initialized", True, raising=False)
+        monkeypatch.setattr(
+            pc.ProjectContext, "project_root", classmethod(lambda cls: Path("/proj")), raising=False
+        )
+
+    def test_normalised_token_forms_never_yields_an_empty_string(self) -> None:
+        for prefix in sfm._HOME_PREFIXES:
+            assert "" not in sfm._normalised_token_forms(prefix), prefix
+
+    def test_each_bare_prefix_token_alone_does_not_raise(self) -> None:
+        for prefix in sfm._HOME_PREFIXES:
+            assert sfm.find_protected_mention_detail(prefix, self.PATTERNS) is None
+
+    def test_the_reported_tuple_literal_does_not_raise(self) -> None:
+        """The exact shape from the live transcript: a quoted string literal
+        equal to a home/pwd prefix, inside a Python tuple, as Write/Edit
+        CONTENT (the ``_script_content_mention`` route)."""
+        content = (
+            "_HOME_PREFIXES: Final[tuple[str, ...]] = "
+            '("~/", "$HOME/", "${HOME}/", "$PWD/", "${PWD}/")\n'
+        )
+        assert sfm.find_protected_mention_detail(content, self.PATTERNS) is None
+
+    def test_the_bare_expansion_marker_tuple_does_not_raise(self) -> None:
+        """The third live payload: single-character expansion markers,
+        individually quoted."""
+        content = '_UNSEEN_CD_PREFIXES: Final[tuple[str, ...]] = ("$", "~", "`")\n'
+        assert sfm.find_protected_mention_detail(content, self.PATTERNS) is None
+
+    def test_a_genuine_mention_alongside_the_crashing_token_is_still_denied(self) -> None:
+        """Fail-SAFE pin (team-lead item (c)): a content blob carrying BOTH a
+        home-prefix token AND a genuine protected-path mention must still
+        DENY. Before the fix, the crash on the home-prefix token happened
+        mid-scan and the real mention later in the same content was never
+        reached -- an exception is not a decision, and this handler's
+        contract has no silent-skip case."""
+        content = 'home = "~/"\nkey_path = "id_rsa"\n'
+        assert sfm.find_protected_mention_detail(content, self.PATTERNS) == ("id_rsa", "id_rsa")
+
+    def test_mention_scan_never_raises_over_a_corpus_of_path_operands(self) -> None:
+        """Class test (team-lead ask): the mention scan must be TOTAL over
+        every shell/Python path-expansion operand observed in the payloads
+        that triggered N5, alone and paired with ordinary code around them."""
+        operands = (
+            "~/",
+            "$HOME/",
+            "${HOME}/",
+            "$PWD/",
+            "${PWD}/",
+            "$PWD",
+            "${PWD}",
+            "$",
+            "~",
+            "`",
+            "./",
+            ".",
+            "..",
+        )
+        for operand in operands:
+            sfm.find_protected_mention_detail(operand, self.PATTERNS)
+            sfm.find_protected_mention_detail(f'x = "{operand}"\n', self.PATTERNS)
+            sfm.find_protected_mention_detail(f"path.startswith({operand!r})\n", self.PATTERNS)
+
+
 class TestTheImportExemptionCannotLaunderAMention:
     """A fake import must not blind the matcher to the SAME token elsewhere.
 
@@ -954,6 +1187,21 @@ class TestExemptions:
             "cat .claude/block-words.secret", sfm.DEFAULT_ALLOWED_CONSUMERS
         )
 
+    def test_deadline_is_forwarded_to_the_per_word_flag_position_check(self) -> None:
+        """Plan 00466 review 8 L1: an already-expired deadline must reach
+        `_paths_only_in_flag_position`'s own `find_protected_mention` calls
+        (via `find_protected_mention_detail` -> `iter_protected_mentions`)
+        and RAISE, the same fail-closed shape
+        `test_scan_deadline_denies_via_the_fail_closed_route` proves for the
+        ordinary scan -- deterministic (an already-past deadline), not a
+        wall-clock timing assertion. Before the fix this parameter did not
+        exist at all, so the deadline was silently dropped."""
+        cmd = "ansible-playbook site.yml .vault-pass"
+        with pytest.raises(TimeoutError):
+            sfm.is_exempt_invocation(
+                cmd, sfm.DEFAULT_ALLOWED_CONSUMERS, deadline=time.monotonic() - 1
+            )
+
 
 class TestLeadingCdPrefix:
     """Client report: a trusted consumer stopped being exempt the moment it
@@ -1131,6 +1379,860 @@ class TestIterProtectedMentions:
         assert not list(sfm.iter_protected_mentions("git status", sfm.DEFAULT_PROTECTED_PATTERNS))
 
 
+class TestInteriorWildcardDpIsBounded:
+    """B1 (Plan 00466 guard-defects review 2): the N10 interior-wildcard DP is
+    O(len(a) * len(b)) per call, and ``_interior_wildcard_mention`` calls it
+    once per bracket expansion, per non-both-edges pattern, per token — an
+    UNBOUNDED cost in the length of a single token. Since a PreToolUse
+    socket timeout is an ALLOW (``.claude/init.sh``), a token slow enough to
+    exhaust the client's 30s budget is a bypass, not just a nuisance:
+    placing it BEFORE a genuine mention in the same command delays the
+    verdict past the timeout while the real mention sits unscanned.
+
+    Every case here reproduces a review-measured shape (main: well under a
+    second; pre-fix branch: 15-35s) and pins it back under a small bound.
+    """
+
+    _BUDGET_SECONDS = 1.0
+
+    def test_the_60kb_bracket_and_star_bypass_shape_denies_fast(self) -> None:
+        """The review's own B1 evidence case: a[bc]x6 + 5000 stars + a,
+        immediately followed by a genuine mention — pre-fix this took
+        31.151s on the branch (0.096s on main)."""
+        token = "a" + "[bc]" * 6 + "*" * 5000 + "a"
+        command = f"cat {token}; cat .vault-pass"
+        start = time.perf_counter()
+        result = sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS)
+        elapsed = time.perf_counter() - start
+        assert result is not None
+        assert (
+            elapsed < self._BUDGET_SECONDS
+        ), f"took {elapsed:.3f}s, budget {self._BUDGET_SECONDS}s"
+
+    def test_two_hundred_bracket_and_star_tokens_denies_fast(self) -> None:
+        """The review's second timing case (105 KB): 200 x a[bc]x6<500*>a --
+        34.946s pre-fix (0.232s on main). 200 tokens x 64 bracket expansions
+        each is real volume (12800 intersection checks), not a per-token
+        blow-up, so this gets a more generous bound than the single-token
+        60 KB case above -- still a >20x improvement over pre-fix, and the
+        whole-scan deadline below is the backstop for volume like this."""
+        token = "a" + "[bc]" * 6 + "*" * 500 + "a"
+        command = " ".join([token] * 200)
+        start = time.perf_counter()
+        sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS)
+        elapsed = time.perf_counter() - start
+        assert elapsed < 3.0, f"took {elapsed:.3f}s"
+
+    def test_ordinary_one_megabyte_write_content_stays_bounded_by_the_deadline(
+        self,
+    ) -> None:
+        """The review's non-adversarial case: 1 MB of ordinary 'a*b ' tokens
+        (e.g. minified JS) -- 15-17s measured here pre-deadline vs main's own
+        4.564s baseline. Not achievable from the per-token DP budget alone:
+        no single token here is pathological, the cost is volume across
+        250k short tokens. This is exactly what the whole-scan deadline
+        exists for: with one supplied (as ``secret_file_guard`` supplies),
+        the call returns -- either with a real answer or a ``TimeoutError``
+        -- well inside the deadline instead of running past it, whichever
+        outcome it is. (Review 7 follow-up: the normalised-word stream no
+        longer has its own word-count cap, so ``TooManyToEnumerateError``
+        is no longer a possible outcome here -- ``TimeoutError`` or a real
+        answer are the only two.)"""
+        content = "a*b " * 250_000
+        start = time.perf_counter()
+        outcome = "completed"
+        try:
+            sfm.find_protected_mention_detail(
+                content, sfm.DEFAULT_PROTECTED_PATTERNS, deadline=time.monotonic() + 2.0
+            )
+        except TimeoutError:
+            outcome = "timed out"
+        except TooManyToEnumerateError:
+            outcome = "too many to enumerate"
+        elapsed = time.perf_counter() - start
+        assert elapsed < 3.0, f"{outcome} in {elapsed:.3f}s, past a 2s deadline"
+
+    def test_a_lone_long_star_run_collapses_to_near_zero_cost(self) -> None:
+        """Collapsing repeated '*' is language-preserving (``a**b`` and
+        ``a*b`` match the same set) and removes the dominant cost driver
+        directly, independent of the budget cap."""
+        token = "a" + "*" * 60_000 + "a"
+        start = time.perf_counter()
+        sfm.find_protected_mention_detail(f"cat {token}", sfm.DEFAULT_PROTECTED_PATTERNS)
+        elapsed = time.perf_counter() - start
+        assert elapsed < 0.1, f"took {elapsed:.3f}s"
+
+    def test_scan_deadline_denies_via_the_fail_closed_route(self) -> None:
+        """The whole-scan deadline is a backstop: forcing an artificially
+        tiny deadline must raise so the guard's own fail-closed wrapper (N11)
+        turns it into a deny, rather than the scan silently truncating and
+        answering "no mention" for content it never finished examining."""
+        with pytest.raises(TimeoutError):
+            list(
+                sfm.iter_protected_mentions(
+                    "cat .vault-pass extra words here",
+                    sfm.DEFAULT_PROTECTED_PATTERNS,
+                    deadline=time.monotonic() - 1,
+                )
+            )
+
+
+class TestOrdinaryVolumeContentCompletesFast:
+    """Team-lead's follow-up to review 3: n466-n24 measured
+    ``secret_file_guard`` at 12.3s for 1 MB and 49s for 4 MB (linear, ~12
+    us/byte) -- a 4 MB input exceeds the client's 30s timeout on its own,
+    independent of any single pathological token. Profiling (cProfile on a
+    1 MB Bash command and a 1 MB Write payload) found the constant factor
+    itself needed cutting, not just another cap: a real ``os.stat`` syscall
+    per token (``_realpath_if_resolvable``, unconditional even for a
+    glob-shaped token that could not plausibly BE a literal symlink name),
+    six unconditional regex ``.sub()`` calls per DP-intersection pair (most
+    of them no-ops on ordinary text), a fresh 2D list allocated per DP call,
+    and no memoisation despite a scan's token stream being heavily
+    repetitive for real content (source code, logs -- a bounded local
+    vocabulary reused throughout a file, not a fresh unique token every
+    time). Fixed: a per-token verdict cache scoped to one scan, the
+    ``os.stat`` skipped for glob-shaped tokens, the regex subs gated on a
+    cheap substring check, and the DP grid replaced by a two-row rolling
+    array. n24 is separately adding a whole-chain deadline and an input
+    size cap as a backstop for the residual case this cannot fully solve
+    (content with NO repetition at all, i.e. a fresh unique token every
+    time) -- these tests pin the COMMON case, which is now fast on its own
+    merits rather than merely bounded by hitting a timeout.
+
+    Review 7 follow-up (team-lead, second round): a FIXED wall-clock budget
+    (``_BUDGET_SECONDS``, raised 1.0 -> 2.5 -> 3.5 across two earlier rounds
+    fighting flakiness) is inherently sensitive to host load -- this suite
+    runs on a shared, often-loaded machine, and a fixed absolute threshold
+    either flakes under load or is too loose to catch a real regression.
+    The actual property under test is LINEARITY -- that scan cost grows
+    proportionally with input size, not quadratically or worse -- and that
+    is a property of a RATIO, not an absolute number. Each test now scans
+    the SAME shape at two sizes (100 KB and 1 MB) back-to-back in one run
+    and asserts the cost RATIO stays close to the size ratio: both
+    measurements suffer the identical load-driven slowdown factor, so the
+    ratio stays stable even when the machine is busy, while a genuine
+    algorithmic regression (quadratic or worse) still blows the ratio out
+    regardless of load. See :meth:`_assert_scan_cost_scales_linearly`.
+    """
+
+    #: Kept far below ``_LARGE_BYTES`` so the SMALL scan's own elapsed time
+    #: is never so close to zero that timer resolution/scheduling noise
+    #: dominates the ratio.
+    _SMALL_BYTES = 100 * 1024
+    _LARGE_BYTES = 1024 * 1024
+    #: A perfectly linear scan costs ~_LARGE_BYTES/_SMALL_BYTES times as
+    #: much (~10.24x here) when measured back-to-back; this sits well above
+    #: that (headroom for scheduling noise between the two measurements)
+    #: and well below what even a mild quadratic blow-up would produce at
+    #: this size ratio (~100x), so it still catches a real regression.
+    _MAX_COST_RATIO = 25.0
+
+    @staticmethod
+    def _vocabulary_command(target_bytes: int) -> str:
+        """A ~target_bytes command built from a small, realistic local
+        vocabulary of glob-shaped-looking short tokens, reused throughout --
+        the way an actual source file or log reuses identifiers, keywords
+        and punctuation, rather than a fresh unique token every time."""
+        vocabulary = [
+            f"{prefix}{index}{suffix}"
+            for prefix in ("tok", "var", "fn", "obj", "self.", "ctx.", "req.")
+            for index in range(40)
+            for suffix in ("", "*", "a", "b", "_id", "()")
+        ][:400]
+        words: list[str] = []
+        size = 0
+        index = 0
+        while size < target_bytes:
+            word = vocabulary[index % len(vocabulary)]
+            words.append(word)
+            size += len(word) + 1
+            index += 1
+        return " ".join(words)[:target_bytes]
+
+    @staticmethod
+    def _repeated_token_command(target_bytes: int) -> str:
+        """The review's own pre-existing ``a*b `` xN shape, parametrised on
+        size instead of a fixed repeat count."""
+        return ("a*b " * (target_bytes // 4 + 1))[:target_bytes]
+
+    @staticmethod
+    def _timed_scan(command: str) -> tuple[tuple[str, str] | None, float]:
+        start = time.perf_counter()
+        result = sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS)
+        return result, time.perf_counter() - start
+
+    def _assert_scan_cost_scales_linearly(
+        self, build: Callable[[int], str]
+    ) -> tuple[str, str] | None:
+        """Deterministic linearity check (see class docstring). Returns the
+        LARGE-size scan's result so callers can also assert correctness
+        (mention found / not found) without a third scan."""
+        _small_result, small_elapsed = self._timed_scan(build(self._SMALL_BYTES))
+        large_result, large_elapsed = self._timed_scan(build(self._LARGE_BYTES))
+        ratio = large_elapsed / max(small_elapsed, 1e-6)
+        assert ratio < self._MAX_COST_RATIO, (
+            f"cost scaled {ratio:.1f}x for a "
+            f"{self._LARGE_BYTES // self._SMALL_BYTES}x size increase "
+            f"({small_elapsed:.3f}s -> {large_elapsed:.3f}s) -- looks worse than linear"
+        )
+        return large_result
+
+    def test_ordinary_vocabulary_bash_command_scan_cost_scales_linearly(self) -> None:
+        """Plan 00466 review 8 L9: renamed from
+        ``test_one_megabyte_bash_command_completes_well_under_a_second`` --
+        this class moved off a fixed wall-clock budget onto the RATIO check
+        (see the class docstring), so the old name no longer described what
+        the test asserts.
+
+        Restored to this class's original contract (review 7 follow-up,
+        team-lead): large ORDINARY content -- no genuine mention, nothing
+        combinatorial about it -- completes fast AND answers correctly
+        (no mention found), rather than being denied outright. The
+        normalised-word stream no longer has a word-count cap of its own
+        (review 7 MAJOR-1's cap on this stream was the wrong instrument
+        for flat, linear-cost decoding; see
+        ``shell_expansion.TestIterNormalisedShellWordsDeadline`` for its
+        replacement, a TIME-based deadline)."""
+        result = self._assert_scan_cost_scales_linearly(self._vocabulary_command)
+        assert result is None
+
+    def test_one_megabyte_write_content_completes_well_under_a_second(self) -> None:
+        # The script-content route (Write/Edit to a .py/.sh/...) scans
+        # CONTENT the identical way the Bash route scans a command line --
+        # same `find_protected_mention_detail` call, same cost profile.
+        # Restored to this class's original contract: fast AND correct,
+        # not denied (see the sibling Bash test's docstring above).
+        result = self._assert_scan_cost_scales_linearly(self._vocabulary_command)
+        assert result is None
+
+    def test_repeated_identical_tokens_benefit_from_the_per_scan_cache(self) -> None:
+        """The review's own pre-existing 'a*b ' xN shape -- still fast (the
+        per-scan cache this class pins), and restored to this class's
+        original contract: completes and answers correctly (no mention),
+        not denied outright."""
+        result = self._assert_scan_cost_scales_linearly(self._repeated_token_command)
+        assert result is None
+
+    def test_a_genuine_mention_is_still_found_in_realistic_volume_content(self) -> None:
+        """The speed-up must not cost detection: a real mention placed at
+        the END of a large ordinary-vocabulary command is still found, fast."""
+        result = self._assert_scan_cost_scales_linearly(
+            lambda target_bytes: self._vocabulary_command(target_bytes) + " cat .vault-password"
+        )
+        assert result is not None
+
+
+class TestBraceAndFsWalkAreBounded:
+    """B1-R3 / M-1 (Plan 00466 review 3): review 2's own B1 fix, and its own
+    new M2 sub-fixes, EACH independently reintroduced B1's own defect class
+    -- a slow SAFETY-guard scan is a fail-open. m-1 (review 3's own minor):
+    the timing suite above pinned the DP/star shapes but had NO timing test
+    for `{a,b}`xN brace expansion or a `/**/` filesystem walk, which is
+    precisely why these shipped unfixed. This class is that pin, on the
+    reviewer's own exact shapes.
+    """
+
+    _BUDGET_SECONDS = 1.0
+
+    @pytest.mark.parametrize("repetitions", [20, 22, 40])
+    def test_brace_alternation_with_a_real_mention_denies_fast(self, repetitions: int) -> None:
+        """The blocker's exact exploit shape: a genuine `.vault-password`
+        mention sits in the SAME command as an exponential brace word --
+        pre-fix this took 36.3s at x20 and was killed past 90s at x22."""
+        command = f"cat .vault-password; echo {'{a,b}' * repetitions}"
+        start = time.perf_counter()
+        result = sfm.find_protected_mention_detail(
+            command,
+            sfm.DEFAULT_PROTECTED_PATTERNS,
+            deadline=time.monotonic() + sfm.SCAN_DEADLINE_SECONDS,
+        )
+        elapsed = time.perf_counter() - start
+        assert elapsed < self._BUDGET_SECONDS, f"took {elapsed:.3f}s"
+        assert result is not None
+
+    @pytest.mark.parametrize("repetitions", [20, 22, 40])
+    def test_brace_alternation_alone_stays_fast_even_past_the_cap(self, repetitions: int) -> None:
+        """No genuine mention this time -- past the shared expander's
+        spelling cap the scan must still raise (fail closed) fast, not
+        silently answer "no mention" after enumerating for tens of
+        seconds."""
+        command = "echo " + "{a,b}" * repetitions
+        start = time.perf_counter()
+        with pytest.raises(TooManyToEnumerateError):
+            list(
+                sfm.iter_protected_mentions(
+                    command,
+                    sfm.DEFAULT_PROTECTED_PATTERNS,
+                    deadline=time.monotonic() + sfm.SCAN_DEADLINE_SECONDS,
+                )
+            )
+        elapsed = time.perf_counter() - start
+        assert elapsed < self._BUDGET_SECONDS, f"took {elapsed:.3f}s"
+
+    def test_a_recursive_glob_token_rooted_at_the_filesystem_root_denies_fast(
+        self,
+    ) -> None:
+        """M-1's own reproducer: `cat /**/*.se?ret-zq9x; cat .vault-password`
+        took 9.5s pre-fix on this small container alone -- a real client
+        filesystem (large home dir, node_modules, mounted volumes) can push
+        a single such token well past the client's 30s chain budget. A
+        `/**/` token rooted at the bare filesystem root is refused
+        OUTRIGHT (fail closed) rather than walked at all, so this raises --
+        exactly like the deadline case above, ``secret_file_guard``'s own
+        wrapper is what turns the raise into a deny."""
+        command = "cat /**/*.se?ret-zq9x; cat .vault-password"
+        start = time.perf_counter()
+        with pytest.raises(TooManyToEnumerateError):
+            sfm.find_protected_mention_detail(
+                command,
+                sfm.DEFAULT_PROTECTED_PATTERNS,
+                deadline=time.monotonic() + sfm.SCAN_DEADLINE_SECONDS,
+            )
+        elapsed = time.perf_counter() - start
+        assert elapsed < self._BUDGET_SECONDS, f"took {elapsed:.3f}s"
+
+    def test_ten_root_rooted_recursive_glob_tokens_deny_fast(self) -> None:
+        """M-1's own multi-token reproducer -- 10 x `cat /**/*.se?ret-zq9x`
+        tokens, 9.0s pre-fix (the deadline caught it between tokens, but
+        the FIRST token alone already ran multiple seconds). The FIRST
+        token alone is refused outright now, so this raises immediately."""
+        command = " ".join(["cat /**/*.se?ret-zq9x"] * 10) + "; cat .vault-password"
+        start = time.perf_counter()
+        with pytest.raises(TooManyToEnumerateError):
+            sfm.find_protected_mention_detail(
+                command,
+                sfm.DEFAULT_PROTECTED_PATTERNS,
+                deadline=time.monotonic() + sfm.SCAN_DEADLINE_SECONDS,
+            )
+        elapsed = time.perf_counter() - start
+        assert elapsed < self._BUDGET_SECONDS, f"took {elapsed:.3f}s"
+
+    @pytest.mark.parametrize("size_kb", [94, 200])
+    def test_huge_no_op_regex_shaped_input_with_a_real_mention_denies_fast(
+        self, size_kb: int
+    ) -> None:
+        """The reviewer's 94 KB / 200 KB regex-shaped reproducer: a large
+        run of `a[bc]x6<*>a` immediately followed by a genuine mention (the
+        pre-existing DP/star-collapse cap already bounds this -- this test
+        pins it at the sizes review 3 specifically re-measured)."""
+        unit = "a" + "[bc]" * 6 + "*" * 500 + "a"
+        n = max(1, (size_kb * 1024) // (len(unit) + 1))
+        command = " ".join([unit] * n) + "; cat .vault-password"
+        start = time.perf_counter()
+        result = sfm.find_protected_mention_detail(
+            command,
+            sfm.DEFAULT_PROTECTED_PATTERNS,
+            deadline=time.monotonic() + sfm.SCAN_DEADLINE_SECONDS,
+        )
+        elapsed = time.perf_counter() - start
+        assert elapsed < sfm.SCAN_DEADLINE_SECONDS + self._BUDGET_SECONDS, f"took {elapsed:.3f}s"
+        assert result is not None
+
+
+class TestEdgeOpenTokensReachTheDpAgainstNonBothEdgesPatterns:
+    """M2a (Plan 00466 guard-defects review 2): a token whose OWN wildcard
+    sits at an edge (``*.vault-pas?word``, ``?rod.vault-passw*rd``,
+    ``*vault*password``) was excluded from the DP-intersection check
+    entirely -- it was gated on carrying NO edge wildcard, so it fell
+    through to the overlap heuristic, which the N4/m1 fix deliberately
+    narrowed and cannot re-widen. The DP is an EXACT glob-intersection test,
+    so running it for edge-open tokens too (against every pattern that is
+    NOT both-edges) closes this without reopening N4.
+    """
+
+    def test_leading_wildcard_plus_interior_question_mark_still_denies(self) -> None:
+        result = sfm.find_protected_mention_detail(
+            "cat *.vault-pas?word", sfm.DEFAULT_PROTECTED_PATTERNS
+        )
+        assert result is not None
+
+    def test_leading_question_mark_plus_interior_star_still_denies(self) -> None:
+        result = sfm.find_protected_mention_detail(
+            "cat ?rod.vault-passw*rd", sfm.DEFAULT_PROTECTED_PATTERNS
+        )
+        assert result is not None
+
+    def test_leading_wildcard_plus_literal_trailing_word_still_denies(self) -> None:
+        result = sfm.find_protected_mention_detail(
+            "cat *vault*password", sfm.DEFAULT_PROTECTED_PATTERNS
+        )
+        assert result is not None
+
+    def test_n4_false_positive_still_does_not_deny(self) -> None:
+        """The N4 shape this fix must not reopen: Python's unpacking
+        operator ``*words[position + 1 :]`` tokenises to ``*words[position``,
+        whose residue shares only a coincidental short edge with any stem,
+        with nowhere for the rest of it to go against an end-anchored
+        pattern."""
+        result = sfm.find_protected_mention_detail(
+            "echo *words[position", sfm.DEFAULT_PROTECTED_PATTERNS
+        )
+        assert result is None
+
+
+class TestUnexpandableBracketClassesAreTreatedAsWildcardInTheDp:
+    """M2b (Plan 00466 guard-defects review 2): a bracket expression that
+    ``_expand_bracket_expressions`` cannot enumerate (negated, a POSIX named
+    class, or an over-cap range) is left UNEXPANDED "so the fallback fails
+    CLOSED" -- but the DP previously read its ``[``/``]``/``!`` characters as
+    LITERAL, so it failed OPEN instead. Treating an unexpanded bracket
+    expression as a single ``?`` in the DP is a SUPERSET of what it can
+    really match, restoring the fail-closed direction.
+    """
+
+    def test_negated_bracket_with_bang_still_denies(self) -> None:
+        result = sfm.find_protected_mention_detail("cat id_r[!x]a", sfm.DEFAULT_PROTECTED_PATTERNS)
+        assert result is not None
+
+    def test_negated_bracket_with_caret_still_denies(self) -> None:
+        result = sfm.find_protected_mention_detail("cat id_r[^x]a", sfm.DEFAULT_PROTECTED_PATTERNS)
+        assert result is not None
+
+    def test_posix_named_class_still_denies(self) -> None:
+        result = sfm.find_protected_mention_detail(
+            "cat id_r[[:alpha:]]a", sfm.DEFAULT_PROTECTED_PATTERNS
+        )
+        assert result is not None
+
+    def test_over_cap_range_still_denies(self) -> None:
+        result = sfm.find_protected_mention_detail(
+            "cat id_[a-z][a-z]a", sfm.DEFAULT_PROTECTED_PATTERNS
+        )
+        assert result is not None
+
+
+class TestBraceExpansionBeforeTokenising:
+    """M2d (Plan 00466 guard-defects review 2): a real brace alternation
+    (``{s,}``) has no internal whitespace, so a shell reads it as ONE word --
+    but ``_tokenise`` splits on ``,`` (a general token delimiter), tearing it
+    apart before any spelling can be recognised. Brace words are found and
+    expanded against the RAW command text instead, the same conflict
+    ``enforce_llm_qa``'s M1 fix resolves for its own tokeniser.
+    """
+
+    def test_optional_middle_alternative_still_denies(self) -> None:
+        result = sfm.find_protected_mention_detail(
+            "cat .vault-pas{s,}word", sfm.DEFAULT_PROTECTED_PATTERNS
+        )
+        assert result is not None
+
+    def test_optional_trailing_alternative_still_denies(self) -> None:
+        result = sfm.find_protected_mention_detail("cat id_r{s,}a", sfm.DEFAULT_PROTECTED_PATTERNS)
+        assert result is not None
+
+    def test_bare_alternation_naming_the_exact_file_still_denies(self) -> None:
+        result = sfm.find_protected_mention_detail("cat {id_rsa,x}", sfm.DEFAULT_PROTECTED_PATTERNS)
+        assert result is not None
+
+    def test_both_edges_pattern_brace_alternative_still_denies(self) -> None:
+        result = sfm.find_protected_mention_detail(
+            "cat block-words.se{c,}ret", sfm.DEFAULT_PROTECTED_PATTERNS
+        )
+        assert result is not None
+
+
+class TestBraceSequenceExpansion:
+    """n466-n24 review 4, M-1: a brace SEQUENCE (`{start..end[..step]}`) is
+    a DIFFERENT syntax from the comma alternation above, and was not
+    covered by it at all -- `_raw_brace_expansions` read the whole `a..a`
+    body as one literal comma-free alternative, so `id_rs{a..a}` spelled
+    `id_rsa..a`, not `id_rsa`."""
+
+    def test_degenerate_alpha_sequence_still_denies(self) -> None:
+        result = sfm.find_protected_mention_detail(
+            "cat id_rs{a..a}", sfm.DEFAULT_PROTECTED_PATTERNS
+        )
+        assert result is not None
+
+    def test_a_real_alpha_range_reaching_the_name_still_denies(self) -> None:
+        result = sfm.find_protected_mention_detail(
+            "cat id_rs{y..a}", sfm.DEFAULT_PROTECTED_PATTERNS
+        )
+        assert result is not None
+
+    def test_degenerate_numeric_sequence_reaching_a_project_pattern(self) -> None:
+        result = sfm.find_protected_mention_detail(
+            "cat file{9..9}.mysecretfile", ("*.mysecretfile",)
+        )
+        assert result is not None
+
+    def test_an_unrelated_sequence_is_not_denied(self) -> None:
+        result = sfm.find_protected_mention_detail(
+            "cat file{1..5}.txt", sfm.DEFAULT_PROTECTED_PATTERNS
+        )
+        assert result is None
+
+    def test_a_huge_numeric_sequence_fails_closed(self) -> None:
+        with pytest.raises(TooManyToEnumerateError):
+            sfm.find_protected_mention_detail(
+                "cat id_rs{1..100000}", sfm.DEFAULT_PROTECTED_PATTERNS
+            )
+
+
+class TestShellWordNormalisation:
+    """n466-n24 review 4, M-1: the class behind `id_rs{a..a}` and
+    `id_rs{'a',x}` reaching a protected name -- quote removal, adjacency
+    concatenation, backslash escapes, ANSI-C `$'...'`, and an unresolvable
+    substitution ($VAR/${...}/$(...)/backtick/$((...))) collapsed to a
+    single `*` so the word is judged as a glob instead of silently losing
+    the substitution's contribution."""
+
+    def test_double_quote_adjacency_concatenation_still_denies(self) -> None:
+        result = sfm.find_protected_mention_detail('cat id_"rs"a', sfm.DEFAULT_PROTECTED_PATTERNS)
+        assert result is not None
+
+    def test_single_quote_adjacency_concatenation_still_denies(self) -> None:
+        result = sfm.find_protected_mention_detail("cat i'd'_rsa", sfm.DEFAULT_PROTECTED_PATTERNS)
+        assert result is not None
+
+    def test_brace_alternative_carrying_a_quote_still_denies(self) -> None:
+        result = sfm.find_protected_mention_detail(
+            "cat id_rs{'a',x}", sfm.DEFAULT_PROTECTED_PATTERNS
+        )
+        assert result is not None
+
+    def test_backslash_escape_still_denies(self) -> None:
+        result = sfm.find_protected_mention_detail("cat id_rs\\a", sfm.DEFAULT_PROTECTED_PATTERNS)
+        assert result is not None
+
+    def test_ansi_c_hex_escape_still_denies(self) -> None:
+        result = sfm.find_protected_mention_detail(
+            "cat id_rs$'\\x61'", sfm.DEFAULT_PROTECTED_PATTERNS
+        )
+        assert result is not None
+
+    def test_dollar_var_unknown_suffix_becomes_a_glob_and_still_denies(self) -> None:
+        result = sfm.find_protected_mention_detail("cat id_rs$x", sfm.DEFAULT_PROTECTED_PATTERNS)
+        assert result is not None
+
+    def test_command_substitution_naming_the_file_still_denies(self) -> None:
+        result = sfm.find_protected_mention_detail(
+            "cat ~/.ssh/$(echo id_rsa)", sfm.DEFAULT_PROTECTED_PATTERNS
+        )
+        assert result is not None
+
+    def test_double_quoted_var_plus_trailing_glob_still_denies(self) -> None:
+        result = sfm.find_protected_mention_detail(
+            'cat "$HOME"/.ssh/id_rs*', sfm.DEFAULT_PROTECTED_PATTERNS
+        )
+        assert result is not None
+
+    def test_an_ordinary_dollar_var_path_is_not_denied(self) -> None:
+        """The fail-closed direction only fires when a match is genuinely
+        POSSIBLE -- an ordinary $VAR-rooted path must stay allowed."""
+        result = sfm.find_protected_mention_detail(
+            "cat $SOME_CONFIG_DIR/readme.txt", sfm.DEFAULT_PROTECTED_PATTERNS
+        )
+        assert result is None
+
+
+class TestBothEdgesTextualIntersectionIsCwdAndExistenceIndependent:
+    """m-2 (n466-n24 review 4 addendum): the both-edges FS-truth route
+    denies a genuine ``?``-only interior truncation of a both-edges stem
+    only when the file actually EXISTS and is reachable from the caller's
+    cwd -- so a `cd` elsewhere in the same command, or a file the command
+    creates later in the SAME command, hid a real mention from it. Folding
+    the ``?``-only case into the textual DP (``_glob_intersection_mention``,
+    via ``_dp_intersection_is_meaningful``'s both-edges branch) needs
+    neither: it judges what the token's own text asserts, not what the
+    filesystem currently holds."""
+
+    def test_cd_elsewhere_still_denies_an_interior_question_mark_truncation(self) -> None:
+        result = sfm.find_protected_mention_detail(
+            "cd /tmp && cat /elsewhere/demo.se?ret",
+            sfm.DEFAULT_PROTECTED_PATTERNS,
+            cwd="/tmp",
+        )
+        assert result is not None
+        assert result[0] == "*.secret*"
+
+    def test_a_file_created_later_in_the_same_command_still_denies(self) -> None:
+        """The create-then-read shape: nothing on disk when the scan runs,
+        proving this does not depend on filesystem truth at all."""
+        result = sfm.find_protected_mention_detail(
+            "echo hi > /tmp/demo.secret && cat /tmp/demo.se?ret",
+            sfm.DEFAULT_PROTECTED_PATTERNS,
+            cwd="/tmp",
+        )
+        assert result is not None
+        assert result[0] == "*.secret*"
+
+    def test_an_unrelated_star_bearing_token_stays_allowed(self) -> None:
+        """The over-promiscuity control (Plan 00306/00311): a token that
+        carries its own ``*`` does not glob-intersect a both-edges pattern
+        just because some substring happens to line up -- a both-edges
+        pattern's own wildcards could absorb ANY such token, which is
+        exactly why only the bounded ``?`` case is folded in here."""
+        result = sfm.find_protected_mention_detail(
+            "cat report-[0-9]*.txt", sfm.DEFAULT_PROTECTED_PATTERNS, cwd="/tmp"
+        )
+        assert result is None
+
+    def test_another_unrelated_star_bearing_token_stays_allowed(self) -> None:
+        result = sfm.find_protected_mention_detail(
+            "cat secret*.py", sfm.DEFAULT_PROTECTED_PATTERNS, cwd="/tmp"
+        )
+        assert result is None
+
+
+class TestContentContextSkipsAggressiveGlobIntersection:
+    """n466-n24 review 4 addendum, false-positive fold-in: a Python
+    unpacking-plus-subscript token (``*words[subcommand_index``, from a real
+    list literal ``[*words[:subcommand_index], ...]``) is glob-shaped by the
+    crude tokeniser's own delimiter split, but names no real path and no
+    shell will ever expand it -- it is not Bash text at all. The AGGRESSIVE
+    glob-shaped heuristics (edge-overlap, DP intersection -- both-edges
+    included, per m-2 -- and the both-edges FS-truth route) are Bash-only;
+    ``context="content"`` restricts Write/Edit content scanning to the
+    literal matcher, per team-lead's explicit remedy: "the aggressive glob
+    intersection is for Bash command words, which the shell really
+    expands."""
+
+    def test_the_reported_python_unpacking_snippet_is_allowed_as_content(self) -> None:
+        content = "combined = [*words[:subcommand_index], extra_word]\n"
+        result = sfm.find_protected_mention_detail(
+            content, sfm.DEFAULT_PROTECTED_PATTERNS, context="content"
+        )
+        assert result is None
+
+    def test_the_same_snippet_denies_on_the_bash_route(self) -> None:
+        """Control: this is a context-gated allowance, not a blanket one --
+        confirms the default context is unaffected (though this specific
+        shape happens not to trip the bash-route heuristics either, since
+        the unclosed-bracket residue fix (a) also applies there)."""
+        content = "combined = [*words[:subcommand_index], extra_word]\n"
+        result = sfm.find_protected_mention_detail(content, sfm.DEFAULT_PROTECTED_PATTERNS)
+        assert result is None
+
+    def test_an_interior_wildcard_glob_denies_under_bash_context_regardless_of_source(
+        self,
+    ) -> None:
+        """Review 5: pins that ``context="bash"`` is not a per-language
+        exemption -- it is what the HANDLER now selects for anything a shell
+        genuinely executes (a typed Bash command, but also authored `.sh`/
+        `.bash`/Makefile/CI-YAML/shebang-shell content, per MAJOR-2's
+        scoping in secret_file_guard.py). The SAME interior-wildcard text
+        denies identically whether it arrived as a typed command or as
+        script content scanned with ``context="bash"`` -- there is no
+        content-shaped carve-out at the module level, only a caller-selected
+        context. ``context="content"`` stays the narrow exemption it always
+        was, for source that is genuinely NOT shell text (see the sibling
+        test below)."""
+        text = "cat prod.vault-passw*rd"
+        assert sfm.find_protected_mention_detail(text, sfm.DEFAULT_PROTECTED_PATTERNS) is not None
+        assert (
+            sfm.find_protected_mention_detail(text, sfm.DEFAULT_PROTECTED_PATTERNS, context="bash")
+            is not None
+        )
+
+    def test_the_same_glob_as_a_python_string_literal_stays_allowed_under_content_context(
+        self,
+    ) -> None:
+        """The genuinely context-dependent case: the identical text, quoted
+        as a Python string literal, is source code in a non-shell language
+        -- no shell will ever expand it -- so ``context="content"`` (what
+        secret_file_guard.py now selects only for non-shell-executed
+        content) must not run the aggressive glob-shaped heuristics on it."""
+        source_line = "pattern = 'prod.vault-passw*rd'\n"
+        assert (
+            sfm.find_protected_mention_detail(
+                source_line, sfm.DEFAULT_PROTECTED_PATTERNS, context="content"
+            )
+            is None
+        )
+
+    def test_a_quoted_literal_mention_still_denies_as_content(self) -> None:
+        content = 'x = open(".vault-password")\n'
+        result = sfm.find_protected_mention_detail(
+            content, sfm.DEFAULT_PROTECTED_PATTERNS, context="content"
+        )
+        assert result is not None
+
+    def test_a_script_brace_sequence_mention_still_denies_as_content(self) -> None:
+        """The literal matcher still catches a script's own protected-name
+        reference after brace-sequence expansion decodes it to the exact
+        name -- content scanning is restricted, not disabled."""
+        content = "cat id_rs{a..a}\n"
+        result = sfm.find_protected_mention_detail(
+            content, sfm.DEFAULT_PROTECTED_PATTERNS, context="content"
+        )
+        assert result is not None
+
+    def test_a_both_edges_interior_question_mark_glob_stays_allowed_as_content(self) -> None:
+        """The both-edges textual intersection (m-2) is itself Bash-only for
+        the identical reason -- a code token is not a shell word, so a
+        string literal that happens to look like a ``?``-only interior
+        truncation must not deny under content scanning."""
+        content = "pattern = 'demo.se?ret'\n"
+        assert (
+            sfm.find_protected_mention_detail("cat demo.se?ret", sfm.DEFAULT_PROTECTED_PATTERNS)
+            is not None
+        )
+        result = sfm.find_protected_mention_detail(
+            content, sfm.DEFAULT_PROTECTED_PATTERNS, context="content"
+        )
+        assert result is None
+
+
+class TestUnclosedBracketResidueIsLiteral:
+    """n466-n24 review 4 addendum, false-positive fold-in a: a ``[`` with no
+    matching ``]`` INSIDE the token is not a bracket class -- bash, like
+    ``fnmatch``, reads an unterminated bracket expression as a literal
+    character. ``_token_literal_residue`` used to strip it anyway (it was
+    listed in ``_GLOB_CHARS``, the same table used to compute a PATTERN's
+    stem), silently shortening a token's residue for no linguistic reason."""
+
+    def test_unmatched_bracket_survives_in_the_residue(self) -> None:
+        assert sfm._token_literal_residue("*words[subcommand_index") == "words[subcommand_index"
+
+    def test_a_complete_bracket_expression_is_still_removed_whole(self) -> None:
+        assert sfm._token_literal_residue("id_r[sx]a") == "id_ra"
+
+
+class TestBothEdgesFilesystemTruthRoute:
+    """M2c (Plan 00466 guard-defects review 2): a both-edges pattern
+    (``*.secret*``, ``*vault_pass*``) asserts only "contains this text
+    anywhere", so an interior-wildcard spelling of it stays deliberately
+    unreachable through the edge-overlap heuristic -- that check is gated on
+    an open edge by construction, exactly so it does not re-litigate the
+    N4/m1 false positives.
+
+    m-2 (n466-n24 review 4 addendum) folded a ``?``-only interior spelling
+    INTO the textual DP intersection (``_glob_intersection_mention``,
+    gated by ``_dp_intersection_is_meaningful``'s both-edges branch): a
+    ``?`` can only absorb one character, so a genuine intersection needs the
+    token's literal text to closely resemble the stem already -- a real
+    signal, denied whatever exists on disk or in which cwd. A token
+    carrying its own ``*`` stays excluded from that textual test (a both-
+    edges pattern's own wildcards can absorb an arbitrary run on either side
+    of an inserted literal, so ANY ``*``-bearing token trivially
+    "intersects" -- Plan 00306/00311's own false-positive class,
+    ``report-[0-9]*.txt``/``secret*.py``), so THIS class is what the
+    filesystem is still the one oracle for: expand the token's glob against
+    the HOOK's cwd (passed explicitly here, never the daemon process's own)
+    and deny only when a REAL protected-shaped file is what it names.
+    """
+
+    def test_interior_question_mark_spelling_denies_textually_with_no_real_file(self) -> None:
+        """m-2: the ``?``-only case denies from the token's text alone,
+        independent of whether the file exists."""
+        result = sfm.find_protected_mention_detail(
+            "cat demo.se?ret", sfm.DEFAULT_PROTECTED_PATTERNS, cwd="/tmp"
+        )
+        assert result is not None
+        assert result[0] == "*.secret*"
+
+    def test_interior_question_mark_spelling_denies_when_the_file_is_real(
+        self, tmp_path: Path
+    ) -> None:
+        (tmp_path / "demo.secret").write_text("x")
+        result = sfm.find_protected_mention_detail(
+            "cat demo.se?ret", sfm.DEFAULT_PROTECTED_PATTERNS, cwd=str(tmp_path)
+        )
+        assert result is not None
+        assert result[0] == "*.secret*"
+
+    def test_interior_star_spelling_denies_when_the_file_is_real(self, tmp_path: Path) -> None:
+        (tmp_path / "demo.secret").write_text("x")
+        result = sfm.find_protected_mention_detail(
+            "cat demo.s*t", sfm.DEFAULT_PROTECTED_PATTERNS, cwd=str(tmp_path)
+        )
+        assert result is not None
+        assert result[0] == "*.secret*"
+
+    def test_vault_pass_interior_spelling_denies_when_the_file_is_real(
+        self, tmp_path: Path
+    ) -> None:
+        (tmp_path / "vault_passwords.yml").write_text("x")
+        result = sfm.find_protected_mention_detail(
+            "cat vault?passwords.yml", sfm.DEFAULT_PROTECTED_PATTERNS, cwd=str(tmp_path)
+        )
+        assert result is not None
+        assert result[0] == "*vault_pass*"
+
+    def test_a_star_glob_that_expands_to_nothing_does_not_deny(self, tmp_path: Path) -> None:
+        """No real file named this way exists here -- a glob to nothing
+        reads nothing, so there is genuinely no disclosure to stop. Uses the
+        ``*`` spelling specifically (m-2): that shape is EXCLUDED from the
+        textual DP by design, so this still tests the FS route's own
+        allow-on-no-match behaviour, unlike the ``?`` spelling which now
+        denies textually regardless of what this test's tmp_path holds."""
+        result = sfm.find_protected_mention_detail(
+            "cat demo.s*t", sfm.DEFAULT_PROTECTED_PATTERNS, cwd=str(tmp_path)
+        )
+        assert result is None
+
+
+class TestExpandGlobTokenErrorHandling:
+    """n466-n24 review 4: ``_expand_glob_token`` must fail CLOSED (propagate)
+    on an expansion failure it cannot prove is a non-match -- except the one
+    narrow case that genuinely proves a negative: ENOENT on a directory
+    prefix that simply is not there."""
+
+    def test_a_missing_directory_prefix_allows(self, tmp_path: Path) -> None:
+        """A literal directory prefix that does not exist on disk proves,
+        by itself, that nothing under it can be a mention -- no exception
+        needed to reach that verdict, but it must still return ``None``
+        rather than raise."""
+        result = sfm._expand_glob_token(
+            "nonexistent_prefix_xyz/secret.txt",
+            sfm.DEFAULT_PROTECTED_PATTERNS,
+            None,
+            cwd=str(tmp_path),
+        )
+        assert result is None
+
+    def test_enoent_raised_mid_expansion_allows(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Forcing an ENOENT (rather than relying on it never firing) pins
+        the actual except-branch: it must be swallowed, not propagated."""
+
+        def _raise_enoent(self: Path, pattern: str) -> Iterator[Path]:
+            raise OSError(errno.ENOENT, "No such file or directory")
+            yield  # pragma: no cover -- makes this a generator function
+
+        monkeypatch.setattr(Path, "glob", _raise_enoent)
+        result = sfm._expand_glob_token(
+            "somefile.secret", sfm.DEFAULT_PROTECTED_PATTERNS, None, cwd=str(tmp_path)
+        )
+        assert result is None
+
+    def test_permission_denied_directory_in_the_glob_path_denies(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A directory that could not be READ (permission denied) is NOT
+        proof of a non-match -- it must propagate, not degrade to
+        "no mention", so the caller's fail-closed wrapper denies."""
+
+        def _raise_eacces(self: Path, pattern: str) -> Iterator[Path]:
+            raise PermissionError(errno.EACCES, "Permission denied")
+            yield  # pragma: no cover -- makes this a generator function
+
+        monkeypatch.setattr(Path, "glob", _raise_eacces)
+        with pytest.raises(PermissionError):
+            sfm._expand_glob_token(
+                "somefile.secret", sfm.DEFAULT_PROTECTED_PATTERNS, None, cwd=str(tmp_path)
+            )
+
+    def test_a_malformed_pattern_value_error_always_denies(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A ``ValueError`` (a malformed glob pattern) is never a proof of
+        absence -- always propagates, with no ENOENT-style exception."""
+
+        def _raise_value_error(self: Path, pattern: str) -> Iterator[Path]:
+            raise ValueError("malformed glob pattern")
+            yield  # pragma: no cover -- makes this a generator function
+
+        monkeypatch.setattr(Path, "glob", _raise_value_error)
+        with pytest.raises(ValueError):
+            sfm._expand_glob_token(
+                "somefile.secret", sfm.DEFAULT_PROTECTED_PATTERNS, None, cwd=str(tmp_path)
+            )
+
+
 _CWD = "/proj"
 _ENC = "group_vars/all/vault_passwords.yml"
 _ENC_TEMPLATE = "templates/app.secrets"
@@ -1205,6 +2307,153 @@ class TestEncryptedTargetInvocationDenies:
     def test_relative_token_without_a_cwd(self) -> None:
         assert not _encrypted_ok(f"cat {_ENC}", cwd=None)
         assert not _encrypted_ok(f"cat {_ENC}", cwd="proj")
+
+    def test_deadline_is_forwarded_to_iter_protected_mentions(self) -> None:
+        """Plan 00466 review 8 L1: an already-expired deadline must reach
+        the `iter_protected_mentions` call inside
+        `is_encrypted_target_invocation` and RAISE -- deterministic (an
+        already-past deadline), not a wall-clock timing assertion."""
+        with pytest.raises(TimeoutError):
+            sfm.is_encrypted_target_invocation(
+                f"cat {_ENC}",
+                sfm.DEFAULT_PROTECTED_PATTERNS,
+                cwd=_CWD,
+                is_encrypted=lambda path: path in _ENCRYPTED,
+                deadline=time.monotonic() - 1,
+            )
+
+
+def _grep_ok(command: str) -> bool:
+    return sfm.is_grep_pattern_only_mention(command, sfm.DEFAULT_PROTECTED_PATTERNS)
+
+
+class TestGrepPatternOnlyMentionAllows:
+    """Plan 00466 niggle (gd5_fp): searching FOR a protected name's literal
+    text is not reading the file -- only a FILE-TARGET argument is."""
+
+    def test_the_reported_false_positive(self) -> None:
+        assert _grep_ok("grep 'id_rsa' docs/ssh-setup.md")
+
+    def test_unquoted_pattern(self) -> None:
+        assert _grep_ok("grep id_rsa file.txt")
+
+    def test_egrep_and_fgrep(self) -> None:
+        assert _grep_ok("egrep id_rsa file.txt")
+        assert _grep_ok("fgrep id_rsa file.txt")
+
+    def test_explicit_e_flag(self) -> None:
+        assert _grep_ok("grep -e id_rsa file.txt")
+        assert _grep_ok("grep --regexp=id_rsa file.txt")
+
+    def test_flags_before_the_pattern(self) -> None:
+        assert _grep_ok("grep -n -i id_rsa file.txt")
+        assert _grep_ok("grep -rn id_rsa .")
+
+    def test_multiple_file_targets_none_protected(self) -> None:
+        assert _grep_ok("grep id_rsa a.txt b.txt c.txt")
+
+    def test_other_value_flag_does_not_disturb_classification(self) -> None:
+        """Plan 00466 review 8 MAJOR-A fix: `-A 3` consumes its own value
+        properly now, so it never shifts which word is the implicit
+        PATTERN."""
+        assert _grep_ok("grep -A 3 id_rsa file.txt")
+
+
+class TestGrepPatternOnlyMentionDenies:
+    """Every shape where a FILE TARGET (not the pattern) names a protected
+    path, or the command is not a clean single grep invocation, must still
+    deny -- this exemption must never widen past the search-pattern slot."""
+
+    def test_no_mention_is_not_an_exemption(self) -> None:
+        assert not _grep_ok("grep foo file.txt")
+
+    def test_protected_name_as_a_file_target(self) -> None:
+        assert not _grep_ok("grep foo id_rsa")
+
+    def test_protected_name_in_both_pattern_and_target(self) -> None:
+        assert not _grep_ok("grep id_rsa id_rsa")
+
+    def test_non_grep_head(self) -> None:
+        assert not _grep_ok("cat id_rsa")
+
+    def test_tilde_path_fails_closed(self) -> None:
+        assert not _grep_ok("grep pattern ~/.ssh/id_rsa")
+
+    def test_glob_target_fails_closed(self) -> None:
+        assert not _grep_ok("grep -l id_rsa *.txt")
+
+    def test_file_flag_value_is_a_real_file_target(self) -> None:
+        """Plan 00466 review 8 MAJOR-A: `-f`/`--file` makes grep itself OPEN
+        and READ the value -- it is a file target, not a search pattern.
+        Main denies each of these; an earlier version of this exemption
+        wrongly treated the value as pattern content and allowed them."""
+        assert not _grep_ok("grep -f id_rsa docs/a.md")
+        assert not _grep_ok("grep --file=id_rsa docs/a.md")
+        assert not _grep_ok("grep --file id_rsa docs/a.md")
+
+    def test_file_flag_attached_short_value(self) -> None:
+        assert not _grep_ok("grep -fid_rsa docs/a.md")
+
+    def test_file_flag_clustered_with_other_short_options(self) -> None:
+        assert not _grep_ok("grep -hf id_rsa docs/a.md")
+        assert not _grep_ok("grep -rhf id_rsa docs/a.md")
+
+    def test_exclude_from_flag_value_is_a_real_file_target(self) -> None:
+        assert not _grep_ok("grep --exclude-from=id_rsa -r x docs")
+        assert not _grep_ok("grep --exclude-from id_rsa -r x docs")
+
+    def test_deadline_is_forwarded_to_iter_protected_mentions(self) -> None:
+        """Plan 00466 review 8 L1: an already-expired deadline must reach
+        the `iter_protected_mentions` call inside
+        `is_grep_pattern_only_mention` and RAISE -- deterministic (an
+        already-past deadline), not a wall-clock timing assertion."""
+        with pytest.raises(TimeoutError):
+            sfm.is_grep_pattern_only_mention(
+                "grep id_rsa file.txt",
+                sfm.DEFAULT_PROTECTED_PATTERNS,
+                deadline=time.monotonic() - 1,
+            )
+
+    def test_compound_command_voids_the_exemption(self) -> None:
+        assert not _grep_ok("grep id_rsa file.txt; cat id_rsa")
+        assert not _grep_ok("grep id_rsa file.txt | xargs cat")
+
+    def test_substitution_voids_the_exemption(self) -> None:
+        assert not _grep_ok("grep id_rsa $(cat file.txt)")
+
+    def test_repeated_file_target_resolves_the_symlink_once(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Review 7 follow-up (team-lead's memoisation cut): this function
+        calls `_token_mention` directly for each file-target word, OUTSIDE
+        `iter_protected_mentions`'s own per-scan `mention_cache` -- so
+        without its own cache, the SAME repeated file-target word would
+        pay for a fresh `os.path.realpath` syscall every occurrence. The
+        cache is a dict LOCAL to this one call (never module-level, per
+        N23)."""
+        target = tmp_path / "real.vault-password"
+        target.write_text("x\n")
+        link = tmp_path / "innocuous-name"
+        link.symlink_to(target)
+        calls: list[str] = []
+        real_realpath_if_resolvable = sfm._realpath_if_resolvable
+
+        def counting_realpath_if_resolvable(token: str) -> str | None:
+            calls.append(token)
+            return real_realpath_if_resolvable(token)
+
+        monkeypatch.setattr(sfm, "_realpath_if_resolvable", counting_realpath_if_resolvable)
+        assert not sfm.is_grep_pattern_only_mention(
+            f"grep pattern {link} {link} {link}", sfm.DEFAULT_PROTECTED_PATTERNS
+        )
+        # The repeated link path is resolved at most TWICE in total: once
+        # inside `iter_protected_mentions`'s own internal mention scan
+        # (already deduped there by its pre-existing `mention_cache`), and
+        # once more from THIS function's own file-target check over the
+        # three repeated positional words -- deduped by ITS new cache, not
+        # three separate resolutions (which is what this test would show
+        # without the fix: one per positional occurrence).
+        assert calls.count(str(link)) == 2
 
     def test_commands_that_can_decrypt(self) -> None:
         """Ansible finds the vault password from config without the command naming it."""
@@ -1471,3 +2720,296 @@ class TestResolveConfiguredPatterns:
         via_handler = handler._patterns()
 
         assert via_resolver == via_handler == ("*.my-custom-secret-shape",)
+
+
+class TestNestedDashCAndEvalCommandsDeny:
+    """n466-n24 review 5 minor-1: `bash -c '…'`/`sh -c '…'`/`eval '…'` whose
+    ARGUMENT spells a protected name across a nested quote splice -- the
+    argument only reveals the real filename on a SECOND decode pass, which
+    :func:`shell_expansion.iter_normalised_shell_words` now performs
+    recursively (bounded by depth and by bytes)."""
+
+    def test_the_reported_bash_dash_c_nested_splice_denies(self) -> None:
+        command = "bash -c 'cat id_'\\''rs'\\''a'"
+        assert (
+            sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS) is not None
+        )
+
+    def test_the_equivalent_eval_nested_splice_denies(self) -> None:
+        command = "eval 'cat id_'\\''rs'\\''a'"
+        assert (
+            sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS) is not None
+        )
+
+    def test_two_levels_of_bash_dash_c_nesting_denies(self) -> None:
+        """RED test requested by team-lead: two levels of nesting."""
+        inner = "bash -c 'cat id_'\\''rs'\\''a'"
+        escaped_inner = inner.replace("'", "'\\''")
+        command = f"bash -c '{escaped_inner}'"
+        assert (
+            sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS) is not None
+        )
+
+    def test_mixed_double_and_single_quoting_denies(self) -> None:
+        """RED test requested by team-lead: mixed quoting."""
+        command = "bash -c \"cat id_'rs'a\""
+        assert (
+            sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS) is not None
+        )
+
+    def test_an_unrelated_bash_dash_c_command_stays_allowed(self) -> None:
+        command = "bash -c 'echo hello world'"
+        assert sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS) is None
+
+
+class TestReview6ClosedShellFeedShapes:
+    """n466-n24 review 6: closes the two "accepted simplifications" from
+    minor-1 (a flag between the interpreter and `-c`; `eval` joining only
+    its first argument word) as real, verified defects, plus three more
+    literal-content-to-a-shell shapes team-lead named explicitly."""
+
+    def test_a_flag_between_interpreter_and_dash_c_denies(self) -> None:
+        command = "bash -x -c 'cat id_'\\''rs'\\''a'"
+        assert (
+            sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS) is not None
+        )
+
+    def test_bash_lc_clustered_denies(self) -> None:
+        command = "bash -lc 'cat id_'\\''rs'\\''a'"
+        assert (
+            sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS) is not None
+        )
+
+    def test_an_arg_taking_option_before_dash_c_denies(self) -> None:
+        command = "bash -O extglob -c 'cat id_'\\''rs'\\''a'"
+        assert (
+            sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS) is not None
+        )
+
+    def test_eval_with_several_words_denies(self) -> None:
+        """Team-lead's own example: `eval cat id_\\'rs\\'a`."""
+        command = "eval cat id_\\'rs\\'a"
+        assert (
+            sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS) is not None
+        )
+
+    def test_eval_with_two_double_quoted_words_denies(self) -> None:
+        command = 'eval "cat" "id_\'rs\'a"'
+        assert (
+            sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS) is not None
+        )
+
+    def test_eval_after_builtin_prefix_denies(self) -> None:
+        command = "builtin eval cat id_\\'rs\\'a"
+        assert (
+            sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS) is not None
+        )
+
+    def test_eval_after_command_prefix_denies(self) -> None:
+        command = "command eval cat id_\\'rs\\'a"
+        assert (
+            sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS) is not None
+        )
+
+    def test_source_process_substitution_of_a_literal_echo_denies(self) -> None:
+        command = "source <(echo cat id_'\\''rs'\\''a')"
+        assert (
+            sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS) is not None
+        )
+
+    def test_source_process_substitution_of_a_non_literal_producer_with_no_mention_allows(
+        self,
+    ) -> None:
+        """review 6 MAJOR-2: a non-literal producer's own command text is
+        judged like any other nested command -- `cat somefile` mentions
+        nothing protected, so this is no longer failed closed just for
+        being an unrecognised producer."""
+        assert (
+            sfm.find_protected_mention_detail(
+                "source <(cat somefile)", sfm.DEFAULT_PROTECTED_PATTERNS
+            )
+            is None
+        )
+
+    def test_source_process_substitution_of_a_non_literal_producer_with_a_protected_argument_denies(
+        self,
+    ) -> None:
+        """The other half of MAJOR-2: a non-literal producer's OWN command
+        text is still scanned, so a protected path IN that text is caught."""
+        command = "source <(cat id_'\\''rs'\\''a')"
+        assert (
+            sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS) is not None
+        )
+
+    def test_source_process_substitution_of_a_completion_line_allows(self) -> None:
+        """The false positive review 6 MAJOR-2 exists to fix: common
+        shell-completion setup lines must not be denied wholesale."""
+        for command in (
+            "source <(kubectl completion bash)",
+            "source <(gh completion -s bash)",
+            "source <(helm completion bash)",
+            'eval "$(pip completion --bash)"',
+        ):
+            assert (
+                sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS) is None
+            ), command
+
+    def test_a_here_string_to_a_shell_denies(self) -> None:
+        command = "bash <<<'cat id_'\\''rs'\\''a'"
+        assert (
+            sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS) is not None
+        )
+
+    def test_a_literal_echo_piped_to_a_shell_denies(self) -> None:
+        command = "echo cat id_'\\''rs'\\''a' | bash"
+        assert (
+            sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS) is not None
+        )
+
+
+class TestReview7CommandSubstitutionMentions:
+    """Plan 00466 guard-defects review 7 MAJOR-2: `$(...)` and a backtick
+    span are re-parsed as their own nested command, end to end through
+    `find_protected_mention_detail`."""
+
+    def test_dollar_paren_bash_dash_c_denies(self) -> None:
+        command = "x=$(bash -c 'cat id_'\\''rs'\\''a')"
+        assert (
+            sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS) is not None
+        )
+
+    def test_backtick_bash_dash_c_denies(self) -> None:
+        command = "echo `bash -c 'cat id_'\\''rs'\\''a'`"
+        assert (
+            sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS) is not None
+        )
+
+    def test_dollar_paren_with_no_mention_allows(self) -> None:
+        assert (
+            sfm.find_protected_mention_detail("x=$(date +%s)", sfm.DEFAULT_PROTECTED_PATTERNS)
+            is None
+        )
+
+
+class TestReview7PipeWrapperMentions:
+    """Plan 00466 guard-defects review 7 MAJOR-3: a pipe-to-shell wrapper's
+    own options/positionals, `cat`-as-passthrough, and an output process
+    substitution, end to end."""
+
+    def test_sudo_dash_u_before_shell_denies(self) -> None:
+        command = "echo cat id_'\\''rs'\\''a' | sudo -u root bash"
+        assert (
+            sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS) is not None
+        )
+
+    def test_timeout_with_duration_before_shell_denies(self) -> None:
+        command = "echo cat id_'\\''rs'\\''a' | timeout 5 bash"
+        assert (
+            sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS) is not None
+        )
+
+    def test_cat_passthrough_with_no_argument_denies(self) -> None:
+        command = "echo cat id_'\\''rs'\\''a' | cat | bash"
+        assert (
+            sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS) is not None
+        )
+
+    def test_output_process_substitution_denies(self) -> None:
+        command = "echo cat id_'\\''rs'\\''a' > >(bash)"
+        assert (
+            sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS) is not None
+        )
+
+    def test_cat_here_string_piped_to_shell_denies(self) -> None:
+        command = "cat <<< 'cat id_'\\''rs'\\''a' | bash"
+        assert (
+            sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS) is not None
+        )
+
+    def test_ordinary_sudo_command_allows(self) -> None:
+        """Control: an ordinary sudo-wrapped, non-shell command allows."""
+        assert (
+            sfm.find_protected_mention_detail(
+                "sudo -u deploy ls -la", sfm.DEFAULT_PROTECTED_PATTERNS
+            )
+            is None
+        )
+
+
+class TestFileSchemeUrlMentions:
+    """review 7: a `file:` URL is a real, literal local-file READ route
+    (curl, wget, a Python urllib one-liner, `git clone file://...`, ...) in
+    a DIFFERENT spelling than a plain bash token -- percent-decoded, with
+    the scheme and an optional `localhost` host stripped, then judged
+    exactly like any other path mention."""
+
+    def test_curl_triple_slash_unencoded_denies(self) -> None:
+        command = "curl -s file:///root/.ssh/id_rsa"
+        assert (
+            sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS) is not None
+        )
+
+    def test_curl_percent_encoded_basename_denies(self) -> None:
+        command = "curl -s file:///root/.ssh/id_r%73a"
+        assert (
+            sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS) is not None
+        )
+
+    def test_wget_file_url_denies(self) -> None:
+        command = "wget file:///root/.ssh/id_rsa"
+        assert (
+            sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS) is not None
+        )
+
+    def test_file_url_with_localhost_host_denies(self) -> None:
+        command = "curl file://localhost/root/.ssh/id_rsa"
+        assert (
+            sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS) is not None
+        )
+
+    def test_git_clone_file_url_denies(self) -> None:
+        command = "git clone file:///root/.ssh/id_rsa /tmp/x"
+        assert (
+            sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS) is not None
+        )
+
+    def test_python_urllib_one_liner_denies(self) -> None:
+        command = "python3 -c \"import urllib.request; urllib.request.urlopen('file:///root/.ssh/id_rsa')\""
+        assert (
+            sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS) is not None
+        )
+
+    def test_file_url_to_a_non_protected_path_allows(self) -> None:
+        """Control: the route works, but a `file:` URL naming an ordinary
+        path is not itself a protected-path mention."""
+        command = "curl -s file:///etc/hostname"
+        assert sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS) is None
+
+    def test_uppercase_scheme_denies(self) -> None:
+        """Review 7 MAJOR-4: URL schemes are case-insensitive (RFC 3986),
+        and curl accepts `FILE://` exactly like `file://`."""
+        command = "curl FILE:///root/.ssh/id_rsa"
+        assert (
+            sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS) is not None
+        )
+
+    def test_mixed_case_scheme_denies(self) -> None:
+        command = "curl File:///root/.ssh/id_rsa"
+        assert (
+            sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS) is not None
+        )
+
+    def test_url_split_by_single_quote_denies(self) -> None:
+        """Review 7 MAJOR-4: a URL split by shell quoting never appears as
+        one contiguous `file:...` span in the RAW text -- only the
+        quote-decoded word reassembles it."""
+        command = "curl 'file:///root/.ssh/id_r'sa"
+        assert (
+            sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS) is not None
+        )
+
+    def test_url_split_by_double_quote_denies(self) -> None:
+        command = 'curl file:///root/.ssh/id_r"sa"'
+        assert (
+            sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS) is not None
+        )

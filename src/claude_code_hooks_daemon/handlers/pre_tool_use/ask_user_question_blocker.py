@@ -146,7 +146,14 @@ class AskUserQuestionBlockerHandler(PreToolUseHandlerBase):
         super().__init__(
             handler_id=HandlerID.ASK_USER_QUESTION_BLOCKER,
             priority=Priority.ASK_USER_QUESTION_BLOCKER,
-            tags=[HandlerTag.WORKFLOW, HandlerTag.TERMINAL],
+            # Plan 00466 n24 security review, M3: strict mode (the default)
+            # denies unconditionally, so BLOCKING is the true rendered
+            # behaviour (test_declared_behaviour_matches_source.py enforces
+            # this against the source, not just declared). Deliberately NOT
+            # SAFETY -- a workflow convention gate (declare-before-ask), not
+            # a dangerous-action guard, so it stays out of the SAFETY+
+            # BLOCKING structural fail-closed path M3 narrowed to.
+            tags=[HandlerTag.WORKFLOW, HandlerTag.TERMINAL, HandlerTag.BLOCKING],
         )
         self._formatter = RuleFormatter()
 

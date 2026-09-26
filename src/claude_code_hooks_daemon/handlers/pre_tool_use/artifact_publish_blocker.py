@@ -26,7 +26,7 @@ import shutil
 from pathlib import Path
 from typing import Any
 
-from claude_code_hooks_daemon.constants import HookInputField
+from claude_code_hooks_daemon.constants import HandlerTag, HookInputField
 from claude_code_hooks_daemon.constants.handlers import HandlerID
 from claude_code_hooks_daemon.constants.priority import Priority
 from claude_code_hooks_daemon.constants.rule_ids import RuleID
@@ -99,6 +99,12 @@ class ArtifactPublishBlockerHandler(PreToolUseHandlerBase):
             handler_id=HandlerID.ARTIFACT_PUBLISH_BLOCKER,
             priority=Priority.ARTIFACT_PUBLISH_BLOCKER,
             terminal=True,
+            # Plan 00466 n24 security review, M3: this blocks an irreversible
+            # external-disclosure path (a URL a human can share, once out
+            # never retractable) -- exactly the class of action structural
+            # fail-closed exists to protect. Fail-closed-on-raise, not just
+            # BLOCKING.
+            tags=[HandlerTag.SAFETY, HandlerTag.BLOCKING],
         )
         # Opt-in `source_disable` option (Plan 00293): when a project turns it
         # on, the handler ensures `.claude/settings.json` carries

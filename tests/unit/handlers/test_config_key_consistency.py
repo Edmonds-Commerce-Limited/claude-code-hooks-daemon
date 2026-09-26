@@ -1,28 +1,24 @@
 """Test config key consistency between HandlerID constants and registry.
 
 This test ensures that HandlerID constants are the actual single source of truth
-for config keys, not just documentation that gets ignored by the registry.
-
-CRITICAL: These tests demonstrate the bug where registry ignores HandlerID constants
-and auto-generates keys from class names instead.
+for config keys: the registry (``_get_config_key``) looks up each handler class's
+HandlerID constant first, and only auto-generates a key via ``_to_snake_case``
+for a class with no constant declared.
 """
 
-import pytest
-
 from claude_code_hooks_daemon.constants.handlers import HandlerID
-from claude_code_hooks_daemon.handlers.registry import _to_snake_case
+from claude_code_hooks_daemon.handlers.registry import (
+    _get_config_key_from_constant,
+    _to_snake_case,
+    iter_builtin_handler_classes,
+)
 
 
 class TestConfigKeyConsistency:
     """Tests for config key consistency between constants and registry."""
 
     def test_all_handler_constants_match_auto_generated_keys(self) -> None:
-        """Test that all HandlerID.*.config_key match _to_snake_case(class_name).
-
-        This test FAILS currently because constants don't match auto-generated keys.
-        Once we fix the registry to use constants, we'll update constants to match
-        the auto-generated keys (backward compatibility decision).
-        """
+        """Test that all HandlerID.*.config_key match _to_snake_case(class_name)."""
         mismatches = []
 
         for attr_name in dir(HandlerID):
@@ -56,24 +52,28 @@ class TestConfigKeyConsistency:
         )
 
     def test_registry_should_use_handler_id_constants(self) -> None:
-        """Test that registry uses HandlerID constants for config key lookups.
+        """Registry looks up the HandlerID constant for each handler class and
+        uses its config_key, rather than auto-generating one -- over every
+        handler ``register_all`` would actually register, not a mock scenario."""
+        refs = list(iter_builtin_handler_classes())
+        assert refs, "iter_builtin_handler_classes() yielded nothing to check"
 
-        This is a design test - registry SHOULD look up the HandlerID constant
-        for each handler class and use its config_key, not auto-generate.
+        fallback_used = []
+        for ref in refs:
+            class_name = ref.handler_cls.__name__
+            constant_key = _get_config_key_from_constant(class_name)
+            if constant_key is None:
+                fallback_used.append(class_name)
+                continue
+            assert ref.config_key == constant_key, (
+                f"{class_name}: registry used '{ref.config_key}', but its "
+                f"HandlerID constant says '{constant_key}'"
+            )
 
-        This test will FAIL until we implement the fix in registry.py.
-        """
-
-        # Mock scenario: If we had a handler class, the registry should
-        # look up its HandlerID constant and use config_key from there
-
-        # This test documents the DESIRED behavior (not current behavior)
-        # Current: registry does _to_snake_case(class_name)
-        # Desired: registry does HandlerID.lookup(class_name).config_key
-
-        # For now, this test just documents the requirement
-        # We'll implement the actual registry fix in Phase 3
-        pytest.skip("Design test - documents requirement, implementation pending")
+        assert not fallback_used, (
+            f"{len(fallback_used)} handler(s) have no HandlerID constant and fell "
+            f"back to _to_snake_case: {fallback_used}"
+        )
 
     def test_previously_mismatched_handlers_now_fixed(self) -> None:
         """Test that previously mismatched handlers are now fixed.

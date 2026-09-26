@@ -149,6 +149,29 @@ class TestFilePathIsCheckedNotJustContent:
         assert result.decision == Decision.DENY
         assert "zulu-host" not in (result.reason or "")
 
+    def test_secret_term_in_filename_reached_through_a_symlink_loop_still_matches(
+        self, tmp_path: Path
+    ) -> None:
+        """Plan 00466 N24 review 4 (team-lead follow-up on R4-B1): the
+        relative path text is normally built from ``realpath()``, which
+        ``os.path.realpath`` answers differently across Python versions once
+        a loop is on the path. A loop must not be able to make this check
+        silently stop scanning the path text on one version but not
+        another."""
+        secret_file = tmp_path / "terms-list.txt"
+        secret_file.write_text("zulu-host\n")
+        handler = _handler_with_secret_file(secret_file)
+
+        loop = tmp_path / "loop"
+        loop.symlink_to(loop)
+        routed = f"{loop}/../zulu-host-report.md"
+
+        with patch(
+            "claude_code_hooks_daemon.handlers.pre_tool_use.sensitive_content.resolve_project_root",
+            return_value=str(tmp_path),
+        ):
+            assert handler.matches(_write_input(routed, "clean body\n")) is True
+
     def test_clean_path_and_clean_content_does_not_match(self) -> None:
         handler = _handler_with_public_patterns(
             [{"name": "x", "pattern": "secretpath", "description": "d"}]
@@ -170,6 +193,48 @@ class TestInit:
     def test_default_public_patterns_is_empty(self) -> None:
         handler = SensitiveContentHandler()
         assert handler._public_patterns == []
+
+
+class TestNulByteFilePathIsDenied:
+    """A NUL-bearing Write/Edit ``file_path`` is denied outright, not silently scanned.
+
+    Plan 00466 N24 follow-up (guard-defects review 2, m3): the fuzzer found
+    ``Path(file_path).resolve()`` — reached via this handler's own
+    ``layout_for()`` call inside ``_is_excluded`` — raising ``ValueError:
+    embedded null byte`` on 485/12000 fuzzed Write/Edit paths. No real
+    filesystem path can ever contain a NUL byte (the OS itself rejects it),
+    so this is a classic path-truncation attack shape, not merely
+    unscannable text — a clear, handler-specific DENY, not a silent
+    "nothing matched" fall-through and not the chain's generic "evaluation
+    error" catch-all.
+    """
+
+    def test_matches_is_true(self) -> None:
+        handler = SensitiveContentHandler()
+        hook_input = _write_input("/tmp/foo\x00bar.py", "clean body\n")
+        assert handler.matches(hook_input) is True
+
+    def test_handle_denies_with_a_clear_reason(self) -> None:
+        handler = SensitiveContentHandler()
+        hook_input = _write_input("/tmp/foo\x00bar.py", "clean body\n")
+
+        result = handler.handle(hook_input)
+
+        assert result.decision == Decision.DENY
+        assert "NUL byte" in str(result.reason)
+
+    def test_edit_is_covered_too(self) -> None:
+        handler = SensitiveContentHandler()
+        hook_input = _edit_input("/tmp/foo\x00bar.py", "new")
+
+        result = handler.handle(hook_input)
+
+        assert result.decision == Decision.DENY
+
+    def test_an_ordinary_path_is_not_affected(self) -> None:
+        handler = SensitiveContentHandler()
+        hook_input = _write_input("/tmp/foo.py", "clean body\n")
+        assert handler.matches(hook_input) is False
 
 
 class TestMatchesIgnoresNonWriteEdit:
@@ -413,6 +478,24 @@ class TestSecretListSelfExclusion:
             return_value=str(tmp_path),
         ):
             assert handler.matches(_write_input(str(secret_file), "alpha-term\n")) is False
+
+    def test_a_symlink_loop_does_not_grant_the_self_exclusion(self, tmp_path: Path) -> None:
+        """Plan 00466 N24 review 4 (team-lead follow-up on R4-B1): the
+        self-exclusion compares ``realpath()`` results, which
+        ``os.path.realpath`` itself answers differently across Python
+        versions once a loop is on the path. A loop must never GRANT the
+        exemption -- otherwise which Python version is running decides
+        whether a write is scanned."""
+        list_name = "custom-terms-list.cfg"
+        secret_file = tmp_path / list_name
+        secret_file.write_text("alpha-term\nbeta-term\n")
+        handler = _handler_with_secret_file(secret_file)
+
+        loop = tmp_path / "loop"
+        loop.symlink_to(loop)
+        routed_through_loop = f"{loop}/../{list_name}"
+
+        assert handler.matches(_write_input(routed_through_loop, "beta-term")) is True
 
     def test_example_seed_file_is_still_checked(self, tmp_path: Path) -> None:
         """`.example` is TRACKED, so a real term pasted into it would be published."""
@@ -1676,6 +1759,38 @@ class TestPerDispatchHaystackCache:
         assert handler.matches(hook_input) is True
 
         handler.commit_side_effects(hook_input, Decision.DENY)
+
+        assert handler._cached_dispatch is None
+
+    def test_matches_does_not_cache_haystacks_once_its_dispatch_is_cancelled(
+        self, repo: Path, tmp_path: Path
+    ) -> None:
+        """Plan 00466 N40 m2: a straggling ``matches()`` call -- one whose
+        own chain dispatch the caller already gave up waiting on -- must not
+        populate ``_cached_dispatch`` with secret-bearing haystack text for a
+        verdict nobody will ever see. ``_cached_dispatch`` lives on an
+        instance that persists for the whole daemon process, so a stale
+        write here is exactly the retained-text leak
+        ``commit_side_effects`` above exists to prevent -- just reached by
+        an abandoned dispatch instead of a delivered one.
+        """
+        from claude_code_hooks_daemon.core.dispatch_cancellation import (
+            DispatchCancellation,
+            bind_dispatch_cancellation,
+            reset_dispatch_cancellation,
+        )
+
+        handler = _wordlist(tmp_path, "alpha-term")
+        _stage(repo, "notes/report.md", "alpha-term\n")
+        hook_input = _commit_input(repo)
+
+        token = DispatchCancellation()
+        token.cancel()
+        ctx_token = bind_dispatch_cancellation(token)
+        try:
+            assert handler.matches(hook_input) is True
+        finally:
+            reset_dispatch_cancellation(ctx_token)
 
         assert handler._cached_dispatch is None
 

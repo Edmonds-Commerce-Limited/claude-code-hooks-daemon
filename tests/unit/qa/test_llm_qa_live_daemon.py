@@ -69,11 +69,11 @@ class TestTheRegistryDeclaresEveryLiveDaemonConsumer:
 
         assert consumers == {"smoke_test", "tests"}
 
-    @pytest.mark.parametrize("name", sorted(llm_qa.TOOL_REGISTRY))
+    @pytest.mark.parametrize(
+        "name", sorted(name for name in llm_qa.TOOL_REGISTRY if name != "tests")
+    )
     def test_a_script_that_reaches_the_daemon_is_declared(self, name: str) -> None:
         config = llm_qa.TOOL_REGISTRY[name]
-        if name == "tests":
-            pytest.skip("tests reaches the daemon through tests/acceptance, not its script")
         script = next(Path(part) for part in config.command if part.endswith((".sh", ".py")))
         text = script.read_text(encoding="utf-8")
 
@@ -83,6 +83,22 @@ class TestTheRegistryDeclaresEveryLiveDaemonConsumer:
             f"{script.name} {'reaches' if reaches_daemon else 'does not reach'} the live "
             f"daemon, so TOOL_REGISTRY[{name!r}].live_daemon must be {reaches_daemon}"
         )
+
+    def test_tests_is_excluded_because_its_script_carries_no_live_daemon_marker(self) -> None:
+        """``tests`` runs ``run_tests.sh``, whose own text is pytest plumbing — none
+        of the ``_LIVE_DAEMON_MARKERS`` appear in it. It reaches the daemon only
+        indirectly, through the fixtures under ``tests/acceptance``, which the
+        generic per-script marker scan above cannot see. That gap, not a missing
+        script, is why ``tests`` is excluded from that parametrisation instead of
+        being scanned like every other entry."""
+        config = llm_qa.TOOL_REGISTRY["tests"]
+        script = next(Path(part) for part in config.command if part.endswith((".sh", ".py")))
+        text = script.read_text(encoding="utf-8")
+
+        assert config.live_daemon is True
+        assert not any(marker in text for marker in _LIVE_DAEMON_MARKERS)
+        assert (PROJECT_ROOT / "tests" / "acceptance").is_dir()
+        assert (PROJECT_ROOT / "tests" / "acceptance").is_dir()
 
 
 class TestEnsureLiveDaemon:

@@ -7,7 +7,7 @@ security vulnerabilities by allowing anyone to read, write, and execute files.
 import re
 from typing import Any
 
-from claude_code_hooks_daemon.constants import HookInputField
+from claude_code_hooks_daemon.constants import HandlerTag, HookInputField
 from claude_code_hooks_daemon.constants.handlers import HandlerID
 from claude_code_hooks_daemon.constants.priority import Priority
 from claude_code_hooks_daemon.constants.rule_ids import RuleID
@@ -81,6 +81,10 @@ class DangerousPermissionsHandler(PreToolUseHandlerBase):
             handler_id=HandlerID.DANGEROUS_PERMISSIONS,
             priority=Priority.DANGEROUS_PERMISSIONS,
             terminal=True,
+            # Plan 00466 n24 security review, M3: world-writable permissions
+            # are a real privilege-escalation surface -- structurally
+            # fail-closed, not just BLOCKING.
+            tags=[HandlerTag.SAFETY, HandlerTag.BLOCKING],
         )
         self._rule = Rule(
             rule_id=RuleID.CHMOD_WORLD_WRITABLE,

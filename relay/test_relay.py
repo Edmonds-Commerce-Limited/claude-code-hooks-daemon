@@ -221,6 +221,62 @@ def test_oversized_response_diagnostic_exit(binary: str, tmp: str) -> None:
     assert b"oversize" in proc.stderr, f"stderr={proc.stderr!r}"
 
 
+def _assert_pre_tool_use_deny(stdout: bytes) -> None:
+    text = stdout.decode("utf-8")
+    assert '"permissionDecision":"deny"' in text, f"stdout={stdout!r}"
+    assert '"hookEventName":"PreToolUse"' in text, f"stdout={stdout!r}"
+    assert stdout != b"{}", "must not be the ambiguous fail-open shape"
+
+
+def test_timeout_fail_closed_for_pre_tool_use(binary: str, tmp: str) -> None:
+    """Plan 00466 N40 review 2 MA3: a PreToolUse timeout must DENY, not `{}`.
+
+    `{}` is ALSO the shape a genuinely-judged "allow, nothing to add"
+    verdict takes (``HookResult.to_json``'s documented empty case), so
+    fabricating it on a transport failure is indistinguishable from a real
+    judged allow to whatever reads stdout next. Only a socket named for
+    PreToolUse is affected — the event's identity is already encoded in
+    which socket a connection arrived on (module docs).
+    """
+    sock = str(Path(tmp) / "pre-tool-use.sock")
+    StubServer(sock, "silent")
+    proc = run_relay(binary, [sock, "--timeout-ms", "500"], b'{"k":1}')
+    assert proc.returncode == 0, f"exit={proc.returncode} stderr={proc.stderr!r}"
+    _assert_pre_tool_use_deny(proc.stdout)
+    assert b"hooks-relay: timeout:" in proc.stderr, f"stderr={proc.stderr!r}"
+
+
+def test_mid_exchange_disconnect_fail_closed_for_pre_tool_use(binary: str, tmp: str) -> None:
+    sock = str(Path(tmp) / "pre-tool-use.sock")
+    server = StubServer(sock, "abort")
+    payload = b"x" * (4 * 1024 * 1024)
+    proc = run_relay(binary, [sock], payload)
+    server.join()
+    assert proc.returncode == 0, f"exit={proc.returncode} stderr={proc.stderr!r}"
+    _assert_pre_tool_use_deny(proc.stdout)
+
+
+def test_empty_response_fail_closed_for_pre_tool_use(binary: str, tmp: str) -> None:
+    """An EMPTY response (daemon closed cleanly, zero bytes) is a transport
+    fault, not the two-byte `{}` real verdict shape -- passing it through
+    untouched left any early daemon-side close read as a silent allow."""
+    sock = str(Path(tmp) / "pre-tool-use.sock")
+    server = StubServer(sock, "echo", b"")
+    proc = run_relay(binary, [sock], b'{"k":1}')
+    server.join()
+    assert proc.returncode == 0, f"exit={proc.returncode} stderr={proc.stderr!r}"
+    _assert_pre_tool_use_deny(proc.stdout)
+
+
+def test_timeout_fail_open_for_non_pre_tool_use_socket(binary: str, tmp: str) -> None:
+    """A non-PreToolUse socket keeps the original fail-open `{}` contract."""
+    sock = str(Path(tmp) / "session-start.sock")
+    StubServer(sock, "silent")
+    proc = run_relay(binary, [sock, "--timeout-ms", "500"], b'{"k":1}')
+    assert proc.returncode == 0, f"exit={proc.returncode} stderr={proc.stderr!r}"
+    assert proc.stdout == b"{}", f"stdout={proc.stdout!r}"
+
+
 TESTS: list[Callable[[str, str], None]] = [
     test_happy_path_roundtrip,
     test_daemon_absent_exec_fallback,
@@ -231,6 +287,10 @@ TESTS: list[Callable[[str, str], None]] = [
     test_mid_exchange_disconnect_diagnostic_exit,
     test_large_payload_roundtrip,
     test_oversized_response_diagnostic_exit,
+    test_timeout_fail_closed_for_pre_tool_use,
+    test_mid_exchange_disconnect_fail_closed_for_pre_tool_use,
+    test_empty_response_fail_closed_for_pre_tool_use,
+    test_timeout_fail_open_for_non_pre_tool_use_socket,
 ]
 
 

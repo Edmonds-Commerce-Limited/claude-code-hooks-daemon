@@ -25,7 +25,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from claude_code_hooks_daemon.utils import session_actions_signal
 from tests.unit.supervise._load import load_supervisor_module
@@ -77,12 +77,15 @@ def _decide(
 ) -> SupervisorTickOutcome:
     policy = _mod.CompactPolicy()
     machine = machine or _mod.CompactStateMachine(policy)
-    return _mod.decide_once(
-        machine,
-        sidecar_dir=sidecar_dir,
-        facts=facts or _facts(),
-        dry_run=dry_run,
-        freshness_seconds=policy.freshness_seconds,
+    return cast(
+        "SupervisorTickOutcome",
+        _mod.decide_once(
+            machine,
+            sidecar_dir=sidecar_dir,
+            facts=facts or _facts(),
+            dry_run=dry_run,
+            freshness_seconds=policy.freshness_seconds,
+        ),
     )
 
 

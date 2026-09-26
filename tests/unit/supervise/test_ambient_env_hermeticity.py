@@ -27,7 +27,7 @@ def _supervisor_env_var_names() -> dict[str, str]:
 
 
 def test_supervisor_defines_env_vars() -> None:
-    assert "CCY_MIN_EFFORT_LEVELS" in _supervisor_env_var_names().values()
+    assert "CCY_MODEL_RESTORE_SECONDS" in _supervisor_env_var_names().values()
 
 
 def test_every_supervisor_env_var_is_in_the_cleared_namespace() -> None:
@@ -44,8 +44,8 @@ def test_no_ambient_supervisor_variable_is_visible() -> None:
     assert leaked == []
 
 
-def test_a_session_minimum_would_change_the_verdict(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("CCY_MIN_EFFORT_LEVELS", "fable=low,opus=medium")
-    session_value = _mod._min_effort_levels_from_env()
-    monkeypatch.delenv("CCY_MIN_EFFORT_LEVELS")
-    assert _mod._min_effort_levels_from_env() != session_value
+def test_a_session_setting_would_change_the_verdict(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("CCY_MODEL_RESTORE_SECONDS", "7")
+    session_value = _mod._model_restore_delay_from_env()
+    monkeypatch.delenv("CCY_MODEL_RESTORE_SECONDS")
+    assert _mod._model_restore_delay_from_env() != session_value
