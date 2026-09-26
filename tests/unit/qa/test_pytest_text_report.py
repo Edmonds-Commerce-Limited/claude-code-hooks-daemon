@@ -18,6 +18,7 @@ from __future__ import annotations
 from claude_code_hooks_daemon.qa.pytest_text_report import (
     build_json_report_summary,
     finalize_passed_all,
+    find_unnamed_failure_reason,
     parse_pytest_text_output,
 )
 
@@ -320,3 +321,55 @@ class TestBuildJsonReportSummary:
         """The runner's own exit status is not redundant with the counts."""
         summary = build_json_report_summary(_JSON_SUMMARY_CLEAN, exit_code=1)
         assert summary["passed_all"] is False
+
+
+# Real pytest-cov output when [tool.coverage.report] fail_under is not met —
+# printed after the coverage table, before the short test summary section.
+_COVERAGE_FAIL_LINE = (
+    "\x1b[31m\x1b[1mFAIL Required test coverage of 95.0% not reached. "
+    "Total coverage: 94.99%\n\x1b[0m"
+)
+
+
+class TestFindUnnamedFailureReason:
+    """00466 N118: the gate must always NAME why a stage failed.
+
+    A coverage-threshold miss exits pytest non-zero over a summary reading
+    "N passed, 0 failed" — ``finalize_passed_all`` already turns that red, but
+    nothing named the cause, and the gate's own display rounds 94.99% to
+    "95.0%", which reads as passing.
+    """
+
+    def test_a_clean_exit_names_no_reason(self) -> None:
+        reason = find_unnamed_failure_reason(
+            _COVERAGE_FAIL_LINE, failed=0, errors=0, total=10, exit_code=0
+        )
+        assert reason is None
+
+    def test_a_failed_count_already_explains_itself(self) -> None:
+        reason = find_unnamed_failure_reason("", failed=2, errors=0, total=10, exit_code=1)
+        assert reason is None
+
+    def test_an_error_count_already_explains_itself(self) -> None:
+        reason = find_unnamed_failure_reason("", failed=0, errors=1, total=10, exit_code=1)
+        assert reason is None
+
+    def test_zero_total_is_already_explained_elsewhere(self) -> None:
+        reason = find_unnamed_failure_reason(
+            "no tests ran", failed=0, errors=0, total=0, exit_code=5
+        )
+        assert reason is None
+
+    def test_a_coverage_threshold_miss_is_named(self) -> None:
+        reason = find_unnamed_failure_reason(
+            _COVERAGE_FAIL_LINE, failed=0, errors=0, total=29662, exit_code=1
+        )
+        assert reason is not None
+        assert "94.99%" in reason
+        assert "95.0%" in reason
+
+    def test_an_unexplained_nonzero_exit_gets_a_generic_reason(self) -> None:
+        reason = find_unnamed_failure_reason(
+            "29642 passed, 20 skipped in 1.0s\n", failed=0, errors=0, total=29662, exit_code=1
+        )
+        assert reason == "pytest exited 1 but reported no failed or errored tests"

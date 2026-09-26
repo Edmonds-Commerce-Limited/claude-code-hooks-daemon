@@ -9,6 +9,43 @@ interrupt a running handler) and lands with that branch. N40 is taken there too
 taken on the N38 fix branch (the chain's remaining linear per-token cost, which
 waits for the shell-parser consolidation).
 
+### N118 — ✅ Remedied — the tests-stage gate reported "0 failed" over a coverage-threshold miss and named nothing
+
+**Found by the N59 gate fixer** (`260926-n59-gatefix4-sonnet-5.md` on
+`worktree-n466-n59`). The full gate failed with only the `tests` stage red,
+and the gate's own one-line summary read `29642 passed, 0 failed, 20 skipped | coverage: 95.0%` — every count zero for a failure, and the
+coverage figure rounded to exactly the passing threshold. The actual cause,
+buried in `untracked/qa/tests.json.raw`, was pytest-cov's own end-of-run
+line: `FAIL Required test coverage of 95.0% not reached. Total coverage: 94.99%`. `run_tests.sh`'s text-fallback path (the one this project actually
+takes; `pytest-json-report` is not installed) never captured that line, and
+`finalize_passed_all` correctly turned `passed_all` False via the runner's
+own exit code — but nothing downstream said WHY, so a reader had to re-run
+the whole 34-minute suite and grep the raw log by hand.
+
+**Remedy:** `pytest_text_report.py` gained
+`find_unnamed_failure_reason(content, failed=, errors=, total=, exit_code=)`,
+which returns `None` whenever the failed/errored counts already explain a
+red run (or the run is clean, or nothing was collected), and otherwise
+returns pytest-cov's own fail line when present, or a generic
+`"pytest exited {exit_code} but reported no failed or errored tests"`
+fallback. `run_tests.sh`'s fallback branch now records this as
+`summary.unnamed_failure_reason`, and `llm_qa.py`'s `_summarize_tests`
+appends it as a `cause:` line whenever present. The real coverage gap
+itself was also a genuine defect: `safe_signal.py` (Plan 00466 N59) was at
+90.68% — `verified_daemon_process`'s `AccessDenied` branch reading a
+process's command line, `signal_verified_daemon`'s `NoSuchProcess`/
+`AccessDenied` branches around `send_signal`, `stop_verified_daemon`'s
+SURVIVED-after-both-grace-waits-time-out path and its NoSuchProcess race
+during `terminate`, and `signal_own_session_child`'s own-group re-check —
+were all real branches with no test exercising them. Six new tests in
+`tests/unit/utils/test_safe_signal.py` (monkeypatching the psutil calls
+those branches guard, plus one exercising the `os.getpgid` race with a
+faked return sequence) bring the file to 100%, closing the 0.01-point gap.
+RED confirmed: `find_unnamed_failure_reason` and the six `safe_signal.py`
+branches did not exist/were not exercised before this fix; every new test
+was run and seen to exercise its target line via `--cov-report=term-missing`
+before the fix, then again after.
+
 ### N99 — `dev-handlers.md` offers an agent a wrapper command that the daemon denies
 
 **Found by the Plan 464 gate fixer** (`260926-p464-gatefix2-sonnet-5.md`

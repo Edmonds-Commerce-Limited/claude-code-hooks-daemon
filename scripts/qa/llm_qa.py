@@ -573,6 +573,14 @@ def _summarize_tests(data: QaReport) -> str:
     error_part = f", {errors} errored" if errors else ""
     line = f"{passed} passed, {failed} failed{error_part}, {skipped} skipped | coverage: {cov:.1f}%"
 
+    # Name a red run the failed/errored counts alone do not explain — a
+    # coverage-threshold miss exits non-zero over "0 failed" and a coverage
+    # percentage that rounds to looking fine (94.99% displays as "95.0%")
+    # (00466 N118). Without this the gate reported failure and named nothing.
+    unnamed_reason = s.get("unnamed_failure_reason")
+    if unnamed_reason:
+        line += f"\n   cause: {unnamed_reason}"
+
     # Name the failures (Plan 00226). A count alone forces a full re-run to
     # find out what broke, and a re-run may not reproduce an order-dependent
     # failure — during Plan 00224 one of two real failures was never

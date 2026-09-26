@@ -123,6 +123,20 @@ class TestThisProcessAndItsCallersAreRefused:
         with pytest.raises(RefusedSignalTarget):
             signal_verified_daemon(own_group, signal.SIGTERM, project_root=tmp_path)
 
+    def test_a_pid_that_leads_our_group_but_is_not_our_own_pid_is_refused(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """In this container the test process is its own group's leader, so
+        ``pid == os.getpid()`` (line 76) always fires before ``pid ==
+        os.getpgid(0)`` (line 78-79) can be reached. Fake a caller whose own
+        pid differs from its group leader's, which is the ordinary shape for
+        every process that is not a session/group leader itself."""
+        own_group = os.getpgid(0)
+        monkeypatch.setattr(os, "getpid", lambda: own_group + 1)
+
+        with pytest.raises(RefusedSignalTarget, match="own group"):
+            signal_verified_daemon(own_group, signal.SIGTERM, project_root=tmp_path)
+
 
 class TestADaemonPidIsSignalledOnlyWhenItIsThisProjectsDaemon:
     def test_this_projects_daemon_is_signalled(
@@ -167,6 +181,61 @@ class TestADaemonPidIsSignalledOnlyWhenItIsThisProjectsDaemon:
         handle = verified_daemon_process(daemon.pid, project_root=tmp_path)
 
         assert handle.pid == daemon.pid
+
+    def test_a_pid_whose_command_line_cannot_be_read_is_refused(
+        self,
+        tmp_path: Path,
+        children: list[subprocess.Popen[bytes]],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        daemon = _fake_daemon(children, tmp_path)
+
+        def denied(self: psutil.Process) -> list[str]:
+            raise psutil.AccessDenied(daemon.pid)
+
+        monkeypatch.setattr(psutil.Process, "cmdline", denied)
+
+        with pytest.raises(RefusedSignalTarget, match="cannot read"):
+            signal_verified_daemon(daemon.pid, signal.SIGTERM, project_root=tmp_path)
+        assert daemon.poll() is None, "a refused target must not have been signalled"
+
+    def test_a_daemon_gone_by_the_time_the_signal_is_sent_is_a_lookup_error(
+        self,
+        tmp_path: Path,
+        children: list[subprocess.Popen[bytes]],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """The identity proof can succeed and the pid still exit before
+        ``send_signal`` -- that race must still surface as ``ProcessLookupError``,
+        not silently do nothing."""
+        daemon = _fake_daemon(children, tmp_path)
+
+        def gone(self: psutil.Process, sig: int | None = None) -> None:
+            raise psutil.NoSuchProcess(daemon.pid)
+
+        monkeypatch.setattr(psutil.Process, "send_signal", gone)
+
+        with pytest.raises(ProcessLookupError):
+            signal_verified_daemon(daemon.pid, signal.SIGTERM, project_root=tmp_path)
+
+    def test_no_permission_to_send_the_signal_is_a_permission_error(
+        self,
+        tmp_path: Path,
+        children: list[subprocess.Popen[bytes]],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        # Tests run as root, which may signal anything, so the refusal the
+        # kernel would give an unprivileged caller is raised here instead.
+        daemon = _fake_daemon(children, tmp_path)
+
+        def denied(self: psutil.Process, sig: int | None = None) -> None:
+            raise psutil.AccessDenied(daemon.pid)
+
+        monkeypatch.setattr(psutil.Process, "send_signal", denied)
+
+        with pytest.raises(PermissionError):
+            signal_verified_daemon(daemon.pid, signal.SIGTERM, project_root=tmp_path)
+        assert daemon.poll() is None
 
 
 class TestADaemonProvenOnlyByItsRecordedEnvironmentIsSignalled:
@@ -321,6 +390,49 @@ class TestStoppingADaemonTermsThenKillsOnlyThisProjectsDaemon:
             stop_verified_daemon(daemon.pid, project_root=tmp_path, grace_seconds=_GRACE_SECONDS)
         assert daemon.poll() is None
 
+    def test_a_daemon_that_survives_term_and_kill_is_reported_survived(
+        self,
+        tmp_path: Path,
+        children: list[subprocess.Popen[bytes]],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Both grace waits time out: TERM did not reap it in time and neither
+        did the follow-up KILL, so the caller learns it must check back rather
+        than being told either outcome happened."""
+        daemon = _fake_daemon(children, tmp_path)
+
+        def always_times_out(self: psutil.Process, timeout: float | None = None) -> int:
+            raise psutil.TimeoutExpired(timeout if timeout is not None else 0.0, daemon.pid)
+
+        monkeypatch.setattr(psutil.Process, "wait", always_times_out)
+
+        outcome = stop_verified_daemon(
+            daemon.pid, project_root=tmp_path, grace_seconds=_GRACE_SECONDS
+        )
+
+        assert outcome is DaemonStop.SURVIVED
+
+    def test_a_daemon_that_exits_between_verification_and_terminate_is_already_gone(
+        self,
+        tmp_path: Path,
+        children: list[subprocess.Popen[bytes]],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A race distinct from the pid-already-gone case above: identity is
+        proven, then the process exits before ``terminate`` reaches it."""
+        daemon = _fake_daemon(children, tmp_path)
+
+        def gone(self: psutil.Process) -> None:
+            raise psutil.NoSuchProcess(daemon.pid)
+
+        monkeypatch.setattr(psutil.Process, "terminate", gone)
+
+        outcome = stop_verified_daemon(
+            daemon.pid, project_root=tmp_path, grace_seconds=_GRACE_SECONDS
+        )
+
+        assert outcome is DaemonStop.ALREADY_GONE
+
 
 class TestAGroupIsSignalledOnlyWhenOurOwnChildLeadsIt:
     def test_a_child_started_in_its_own_session_is_killed_with_its_group(
@@ -361,3 +473,34 @@ class TestAGroupIsSignalledOnlyWhenOurOwnChildLeadsIt:
 
         with pytest.raises(ProcessLookupError):
             signal_own_session_child(child, signal.SIGKILL)
+
+    def test_a_group_that_becomes_our_own_between_the_two_checks_is_refused(
+        self, children: list[subprocess.Popen[bytes]], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """``_refuse_own_lineage`` and the group-leadership check each read
+        ``os.getpgid`` separately; a group that becomes our own in between must
+        still be refused rather than group-killed just because it passed the
+        first, now-stale, check."""
+        child = _spawn(children, new_session=True)
+        real_getpgid = os.getpgid
+        calls = {"n": 0}
+
+        def fake_getpgid(pid: int) -> int:
+            calls["n"] += 1
+            if calls["n"] == 1:
+                # _refuse_own_lineage's own-group check (os.getpgid(0)): let
+                # it pass normally, so the function proceeds past line 228.
+                return real_getpgid(0)
+            if calls["n"] == 2:
+                # The leadership check (os.getpgid(child.pid)): still leads
+                # its own group, so it proceeds past line 230.
+                return pid
+            # The re-check (os.getpgid(0), line 235): the child's group has
+            # since become our own -- this must still be refused.
+            return child.pid
+
+        monkeypatch.setattr(os, "getpgid", fake_getpgid)
+
+        with pytest.raises(RefusedSignalTarget, match="own group"):
+            signal_own_session_child(child, signal.SIGKILL)
+        assert child.poll() is None, "our own group must not have been signalled"
