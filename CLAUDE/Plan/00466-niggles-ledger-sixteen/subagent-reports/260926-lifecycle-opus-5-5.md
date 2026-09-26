@@ -800,7 +800,7 @@ cost none.
   that is a different design: a group-owned lock with `0660`, which still
   lets that group block starts.
 
-## Round 6: the round-5 confirmation minors (INCOMPLETE: handed off at the merge)
+## Round 6: the round-5 confirmation minors (merge finished: see "Round 6 merge")
 
 Brief: `untracked/scratch/briefs/lifecycle-fix-6.md`. Reviews: D-RULE
 `...lifecycle-review-rule-5...0f30b73852699b8a.md`, D-PATH
@@ -904,3 +904,115 @@ Remaining steps, in order:
 6. Release notes: add a three-digit note for round 6 (uid ownership, the identity handshake, NUL-split cmdline, the CI passthrough on unknown, and socket attribution). Then commit.
 
 Do not queue the gate (brief).
+
+### Round 6 merge
+
+Brief: `untracked/scratch/briefs/lifecycle-merge-1.md`. Merge commit
+`dbbc83458` (main `fd4956813` into `26df53ea5`); the release notes and this
+subsection are in the commit after it. The gate is NOT queued: a short
+confirmation review of the merge comes first (brief).
+
+#### Resolutions
+
+- `cli.py` and `process_verification.py`: the saved
+  `untracked/scratch/merge-r6-partial/*.resolved` files, unchanged (see the
+  section above). main's `safe_signal` still calls
+  `_extract_project_root(process)` with a `psutil.Process`; that signature
+  is main's, so no caller changed.
+- **One proof, the stricter.** Two proofs covered "this pid is this
+  project's daemon": main's `safe_signal.verified_daemon_process` and this
+  branch's `_serves_this_project`. `cmd_stop` now uses main's. It compares
+  `normpath` roots, which is stricter than the branch's `realpath`. It
+  lacked the round-6 P5-1 uid rule, so `verified_daemon_process` now reads
+  `uids()` on the pinned handle. It refuses a process whose real or
+  effective uid is not this user's, and one whose owner cannot be read.
+  The other callers (`enforcement.py`, `client_validator.py`) get the same
+  rule.
+- `test_cli_commands.py`:
+  - main's side is taken in every hunk;
+  - HEAD's pidfd classes and the `_close_all_but` and
+    `_reject_unproven_real_signals` fixtures are dropped;
+  - `_UNREAL_PID`, `_CLI` and `short_dir` are kept, and main's duplicate
+    `_NONEXISTENT_PID` is folded into `_UNREAL_PID`;
+  - `test_a_pid_nobody_has_is_a_stale_pid_file` is now
+    `test_a_daemon_gone_before_it_is_proven_keeps_its_files` (N70: neither
+    cleanup is called);
+  - `test_a_proven_daemon_that_exits_before_sigterm_keeps_its_files` is new.
+    It uses a real daemon whose `terminate` raises `NoSuchProcess`.
+  - `TestCmdStopCleansUpOnlyWhatItStillOwns` is ported to a real daemon
+    process and the real `stop_verified_daemon`. A wrapper runs the
+    successor's start after the real stop returns. All 5 cases, including
+    the start-lock assertions, are kept.
+  - `TestCmdStopFallsBackAndCleansUpOnlyWhenProvenSafe` is dropped. Its
+    pidfd fallback cases have no code left to test, and its N70 case is the
+    new real-process test above.
+- `test_process_verification.py`: both import sets are merged. `Timeout`
+  and `kill_daemon_process` are gone; main deleted the function and
+  `TestKillDaemonProcess` with it. Two cases are added:
+  `test_a_daemon_naming_no_root_is_attributed_by_its_recorded_env_var`
+  and `test_the_flag_outranks_the_recorded_env_var`.
+- `test_cli_main.py`: back to main's text. The `os.execv` class
+  `TestAStartNamingNoRootIsRerunNamingIt` is dropped.
+- `test_safe_signal.py`: two cases are added,
+  `test_another_users_daemon_naming_this_project_is_refused` (faked
+  `os.geteuid`) and `test_a_pid_whose_owner_cannot_be_read_is_refused`.
+- `PLAN.md` ledger: `merge_ledger_table.py` reported
+  `differs_from_main=[N67, N69, N70]` and
+  `only_on_branch=[N126..N128, N139, N140, N160..N165]`. The N1-row Edit
+  re-aligned the table. N190-N193 have no ledger rows on either side; they
+  are recorded only in this report.
+- Stdlib containment: `pathlib-quadratic-containment` finds nothing on the
+  merged tree, so nothing needed moving.
+
+#### Release notes
+
+- `152-...` is renamed to `152-stop-leaves-a-successors-pid-file-and-socket-alone.md`
+  and rewritten. It described the pidfd fallback, which the merge removed.
+- `160-a-daemon-is-proven-by-its-owner-its-socket-and-its-answer.md` covers
+  round 6: uid ownership, the identity handshake, the NUL-split cmdline and
+  the exact launch shape, the CI passthrough only on a real down, and
+  socket and env attribution.
+
+#### RED proofs
+
+- The two new `test_safe_signal.py` cases failed on the merged tree before
+  the uid check: `DID NOT RAISE RefusedSignalTarget`, twice.
+- Mutations on a copy of the merged tree (`untracked/scratch/mut-r6m`):
+  - `ALREADY_GONE` deleting both files (main's pre-merge behaviour): both
+    N70 tests failed.
+  - The success path calling `cleanup_pid_file` and `cleanup_socket`
+    directly, instead of `_release_stopped_daemon_files`: 4 of the 5
+    `TestCmdStopCleansUpOnlyWhatItStillOwns` cases failed (successor,
+    lock-held probe, kept lock, unopenable lock). The fifth, "files
+    removed", passes by design.
+
+#### GREEN at `dbbc83458`
+
+- **1109 passed** in one serial run of the lifecycle, signal and relay
+  files:
+  - `test_cli_*`, `test_enforcement*`, `test_server_coverage`,
+    `test_server_liveness_reuse`, `test_process_verification`,
+    `test_controller`, `test_bootstrap_decision*`;
+  - `test_safe_signal`, `test_path_containment`, `test_client_validator`,
+    `test_signal_safety_net`, `test_signal_target_checker`,
+    `test_venv_heartbeat_signal_target`;
+  - every `test_init_sh_*`, `test_relay_*` and `test_forwarder_*` file,
+    the isolated-daemon files, `test_hooks_deploy_relay_guard` and
+    `test_ci_provisions_the_relay`.
+- **8 setup errors in that run** were all in the three isolated-daemon
+  files: `cli status` timed out after 5 s. The load average was 68 and I
+  was running semgrep at the same time. Rerun alone, the three files gave
+  8 passed.
+- `scripts/qa/run_semgrep_check.sh`: no violations. Its first run timed
+  out on one rule for `cli.py` under the same load and failed closed. The
+  rerun was clean.
+- `scripts/qa/check_signal_targets.py`: no signal to an unproven target
+  (2069 files).
+- ruff, black, mypy and pyright are clean on the 7 touched Python files.
+- `shellcheck -x` is clean on both `init.sh` files and the 7 shell scripts
+  the merge brought in.
+- `relay/build.sh` (`-D warnings`) built clean, and
+  `relay/test_relay.py` passed 13/13.
+- Daemon: restarted twice from the worktree. The second restart stopped
+  the live daemon through `stop_verified_daemon` and reported
+  `Daemon: RUNNING`.
