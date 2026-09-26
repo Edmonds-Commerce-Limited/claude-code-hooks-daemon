@@ -16,6 +16,14 @@ Design (mirrors :mod:`hook_command_migration`):
 - **Fail-safe.** A non-existent / unreadable / malformed / unwritable
   ``settings.json`` returns ``repaired=False`` rather than crashing session
   start. Session-start handlers must never raise on a broken client file.
+- **Compare-and-swap.** ``settings.json`` has other unlocked writers,
+  including Claude Code's own plugin CLI (``/plugin``,
+  ``claude plugin install|enable|disable``). This re-reads the file
+  immediately before replacing it: unchanged since the first read, the
+  computed merge is written as-is; changed, the reconciliation is recomputed
+  against the fresh content so a concurrent writer's change is folded in,
+  never lost; unparseable, the repair aborts without writing rather than
+  clobbering it.
 """
 
 from __future__ import annotations
@@ -75,7 +83,8 @@ def repair_settings_registrations(settings_path: Path) -> RepairResult:
         return RepairResult(repaired=False)
 
     try:
-        settings = json.loads(settings_path.read_text(encoding="utf-8"))
+        original_text = settings_path.read_text(encoding="utf-8")
+        settings = json.loads(original_text)
     except (OSError, json.JSONDecodeError, UnicodeDecodeError) as exc:
         logger.debug("registration repair skipped — cannot read %s: %s", settings_path, exc)
         return RepairResult(repaired=False)
@@ -95,6 +104,51 @@ def repair_settings_registrations(settings_path: Path) -> RepairResult:
             # copy2 preserves mtime/permissions and copies the exact bytes.
             shutil.copy2(settings_path, backup_path)
             backup_created = backup_path
+
+        # Plan 00468 G7: re-read immediately before replacing. Five things
+        # write settings.json with no lock between them — this repair, the
+        # legacy-command migrator, the upgrade deploy, install.py, and Claude
+        # Code itself via `/plugin` / `claude plugin install|enable|disable`
+        # (previously uncounted). Every writer here is atomic
+        # (temp + replace), so the failure mode without this re-read is a LOST
+        # UPDATE, not corruption — but a lost plugin-enable is exactly what a
+        # concurrent `/plugin` write must never suffer. If the file changed
+        # since our first read, recompute the reconciliation against the
+        # fresh content instead of clobbering it with our stale one; if the
+        # fresh content cannot be parsed, abort loudly without writing.
+        try:
+            current_text = settings_path.read_text(encoding="utf-8")
+        except OSError as exc:
+            logger.warning(
+                "settings registration repair aborted for %s: re-read failed: %s",
+                settings_path,
+                exc,
+            )
+            return RepairResult(repaired=False)
+
+        if current_text != original_text:
+            try:
+                current_settings = json.loads(current_text)
+            except json.JSONDecodeError as exc:
+                logger.warning(
+                    "settings registration repair aborted for %s: a concurrent "
+                    "writer left invalid JSON: %s",
+                    settings_path,
+                    exc,
+                )
+                return RepairResult(repaired=False)
+            if not isinstance(current_settings, dict):
+                logger.warning(
+                    "settings registration repair aborted for %s: a concurrent "
+                    "writer left a non-object JSON document",
+                    settings_path,
+                )
+                return RepairResult(repaired=False)
+            new_settings, reconcile_result = reconcile_settings_hooks(current_settings)
+            if not reconcile_result.changed:
+                # The concurrent writer already made this repair unnecessary.
+                return RepairResult(repaired=False)
+
         # Atomic write: stage the merged JSON in a sibling temp file, then rename
         # it into place. Path.replace() is atomic on the same filesystem, so a
         # crash mid-write can never leave settings.json truncated — readers see
