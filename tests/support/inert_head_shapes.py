@@ -58,9 +58,14 @@ ESCAPE_SHAPES: Final[tuple[str, ...]] = (
     "echo '@CMD@' &> f.sh; source f.sh",
     "echo '@CMD@' 2>&1 >f.sh",
     "echo '@CMD@' > >(bash)",
-    # printf -v assigns, and the variable can be run.
+    # printf -v assigns, and the variable can be run. The `bash -c` spellings
+    # are the ones only the `-v` refusal catches: `$cmd` as a head is
+    # withheld on its own, as a head built by expansion.
     "printf -v cmd '@CMD@'; $cmd",
     "printf -\"v\" cmd '@CMD@'; $cmd",
+    "printf -v cmd '@CMD@'; bash -c \"$cmd\"",
+    'printf -"v" cmd \'@CMD@\'; bash -c "$cmd"',
+    "printf -\\v cmd '@CMD@'; bash -c \"$cmd\"",
     # Not the bare head.
     "builtin echo '@CMD@'",
     "command echo '@CMD@'",
