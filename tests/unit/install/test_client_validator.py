@@ -3,7 +3,9 @@
 import json
 import subprocess
 import sys
+import time
 
+import psutil
 import pytest
 import yaml
 
@@ -20,9 +22,38 @@ _DAEMON_MODULE = "claude_code_hooks_daemon.daemon.cli"
 _NONEXISTENT_PID = 2**22 + 7
 
 
+def _wait_until_execed(pid: int) -> None:
+    """Block until ``pid``'s argv is the interpreter command this test spawned.
+
+    Immediately after ``fork()``, a child's ``/proc/<pid>/cmdline`` can still
+    be empty until ``execve()`` lands -- ``psutil.Process(pid).cmdline()``
+    then returns ``[]``, which reads exactly like "not a daemon server" to
+    ``verified_daemon_process`` (Plan 00466 N194, same family as
+    ``test_safe_signal.py``: reproduced under load as `pid N is not a daemon
+    server: []`). Poll for the real argv with a bounded deadline rather than a
+    fixed sleep, so a spawn that is merely slow under load still passes
+    deterministically while one that never execs still fails loudly instead
+    of being silently absorbed by a sleep long enough to paper over it.
+    """
+    deadline = time.monotonic() + Timeout.PROCESS_SAMPLE
+    process = psutil.Process(pid)
+    while time.monotonic() < deadline:
+        if _DAEMON_MODULE in process.cmdline():
+            return
+        time.sleep(0.01)
+    raise AssertionError(f"pid {pid} did not exec within {Timeout.PROCESS_SAMPLE}s")
+
+
 @pytest.fixture
 def spawned():
-    """Start real sleeping children (argv appended), and reap them afterwards."""
+    """Start real sleeping children (argv appended), and reap them afterwards.
+
+    A child spawned with the daemon module in its argv is waited on until its
+    ``execve()`` has actually landed (see ``_wait_until_execed``): otherwise a
+    caller that hands the pid straight to ``_check_running_daemon`` can read
+    the fork-but-not-yet-exec'd child's empty cmdline instead of the daemon
+    command line it will shortly become.
+    """
     children = []
 
     def spawn(*argv):
@@ -31,6 +62,8 @@ def spawned():
             start_new_session=True,
         )
         children.append(child)
+        if _DAEMON_MODULE in argv:
+            _wait_until_execed(child.pid)
         return child
 
     yield spawn
