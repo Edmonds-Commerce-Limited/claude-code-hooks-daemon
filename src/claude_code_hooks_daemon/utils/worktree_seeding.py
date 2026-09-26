@@ -35,6 +35,7 @@ import shutil
 from pathlib import Path
 
 from claude_code_hooks_daemon.core.worktree_seed import SEED_MODE_SYMLINK, SeedEntry
+from claude_code_hooks_daemon.utils.path_containment import path_is_relative_to
 
 logger = logging.getLogger(__name__)
 
@@ -76,7 +77,7 @@ def _describe_problem(root: Path, entry: SeedEntry) -> str | None:
     # POINTS: a path traversing a symlinked directory component inside the repo
     # has no '..' and is not absolute, yet can still resolve outside the tree.
     resolved = source.resolve()
-    if not resolved.is_relative_to(root.resolve()):
+    if not path_is_relative_to(resolved, root.resolve()):
         return f"{entry.path!r}: resolves to {resolved}, outside the repository root"
 
     if not source.is_file() and not source.is_dir():

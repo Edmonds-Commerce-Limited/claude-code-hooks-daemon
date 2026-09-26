@@ -25,6 +25,7 @@ from claude_code_hooks_daemon.core.utils import get_file_content, get_file_path
 from claude_code_hooks_daemon.core.workspace import resolve_workspace
 from claude_code_hooks_daemon.strategies.tdd import TddStrategyRegistry
 from claude_code_hooks_daemon.strategies.tdd.protocol import TddStrategy
+from claude_code_hooks_daemon.utils.path_containment import path_relative_to
 from claude_code_hooks_daemon.utils.path_exclusion import (
     handler_excludes_path,
     path_matches_globs,
@@ -633,7 +634,7 @@ class TddEnforcementHandler(PreToolUseHandlerBase):
                 candidates.append(workspace.root / test_dir / test_filename)
                 continue
             try:
-                relative_parts = Path(source_path).relative_to(workspace.root).parts
+                relative_parts = path_relative_to(Path(source_path), workspace.root).parts
             except ValueError:
                 # A mirror is defined relative to the workspace; a source the
                 # glob matched from outside it has no such relation, so the

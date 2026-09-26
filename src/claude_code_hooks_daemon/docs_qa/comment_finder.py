@@ -26,6 +26,7 @@ from claude_code_hooks_daemon.utils.git_repo import (
     git_visible_paths,
     project_path_is_protected,
 )
+from claude_code_hooks_daemon.utils.path_containment import path_relative_to
 
 logger = logging.getLogger(__name__)
 
@@ -102,7 +103,7 @@ def _iter_dir_files_git_filtered(directory: Path) -> list[Path]:
         if is_in_claude_config_dir(candidate, root, config_dir=config_dir):
             continue
         try:
-            rel = candidate.relative_to(root).as_posix()
+            rel = path_relative_to(candidate, root).as_posix()
         except ValueError:
             # Should not happen: `candidate` was reached by rglob-ing
             # `directory`, which `root` is either equal to or (via

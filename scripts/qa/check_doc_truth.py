@@ -92,6 +92,7 @@ from pathlib import Path
 from typing import Final
 
 from claude_code_hooks_daemon.utils.git_repo import git_visible_paths, project_path_is_protected
+from claude_code_hooks_daemon.utils.path_containment import path_relative_to
 from claude_code_hooks_daemon.utils.scan_scope import (
     relative_parts,
     vacuous_scan_failure,
@@ -522,7 +523,7 @@ def _iter_markdown(root: Path) -> list[Path]:
     )
     kept: list[Path] = []
     for path in candidates:
-        rel = path.relative_to(root).as_posix()
+        rel = path_relative_to(path, root).as_posix()
         if git_visible is not None and rel not in git_visible:
             continue
         if project_path_is_protected(rel):
@@ -549,7 +550,7 @@ def _check_shell_fences(
     """
     violations: list[Violation] = []
     for path in _iter_markdown(root):
-        rel_file = path.relative_to(root).as_posix()
+        rel_file = path_relative_to(path, root).as_posix()
         fence_tag: str | None = None
         for line_no, line in enumerate(
             path.read_text(encoding="utf-8", errors="replace").splitlines(), 1

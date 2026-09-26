@@ -397,16 +397,6 @@ _VB_CHILD_WATCHDOG=""
 VENV_BUILD_WATCHDOG_POLL_SECONDS=1
 
 #
-# _vb_signal_group() - Send a signal to a whole process group, reporting a miss.
-#
-_vb_signal_group() {
-    local sig="$1" pgid="$2" out
-    if ! out="$(kill "-$sig" -- "-$pgid" 2>&1)"; then
-        print_verbose "venv bootstrap: process group $pgid had already ended ($sig: $out)"
-    fi
-}
-
-#
 # _vb_job_running() - Is this job still running, by this shell's own job table?
 #
 # The job table is what proves a job's process group is still ours: its
@@ -424,9 +414,14 @@ _vb_job_running() {
 #
 # _vb_signal_job() - Signal a job's process group, only while it is still ours.
 #
+# The job-table check sits in this function, beside the kill, so no caller can
+# reach the group kill without it (Plan 00466 N59).
+#
 _vb_signal_job() {
-    if _vb_job_running "$2"; then
-        _vb_signal_group "$1" "$2"
+    local sig="$1" job="$2" out
+    _vb_job_running "$job" || return 0
+    if ! out="$(kill "-$sig" -- "-$job" 2>&1)"; then
+        print_verbose "venv bootstrap: process group $job had already ended ($sig: $out)"
     fi
 }
 
@@ -449,6 +444,35 @@ _vb_stop_job() {
 }
 
 #
+# _vb_process_identity() - A live pid's start time; fails when it is gone.
+#
+# Two processes that share a pid at different times never share a start time:
+# the second can only take the pid after the first has exited and the pid
+# space has wrapped. So this is what tells a reused pid from the one first
+# seen. The command line is deliberately NOT part of it, because a process
+# that execs keeps its pid and start time but changes its command line. Read
+# from /proc where it exists, because a slim container image may ship no `ps`;
+# elsewhere (macOS) from `ps`, whose `lstart` BSD ps supports.
+#
+_vb_process_identity() {
+    local pid="$1" stat rest identity
+    local -a fields
+    if [ -d /proc/self ]; then
+        [ -r "/proc/$pid/stat" ] || return 1
+        read -r stat < "/proc/$pid/stat" || return 1
+        # comm sits in parentheses and may hold spaces; the fields after it
+        # start at stat(5)'s field 3, so starttime (field 22) is index 19.
+        rest="${stat##*) }"
+        read -r -a fields <<< "$rest"
+        identity="${fields[19]:-}"
+    else
+        identity="$(ps -o lstart= -p "$pid")" || return 1
+    fi
+    [ -n "$identity" ] || return 1
+    printf '%s\n' "$identity"
+}
+
+#
 # _vb_watchdog() - Tell the build process when its bound has passed.
 #
 # This is how the bound holds on every platform, with or without a `timeout`
@@ -461,10 +485,19 @@ _vb_stop_job() {
 # bound, the build's process group id may belong to someone else (final
 # review N7).
 #
+# A live pid is not proof on its own: a build KILLed just after one poll
+# frees its pid for reuse before the next (Plan 00466 N59). So the build's
+# start time is recorded at launch, and the TERM goes only to a pid that still
+# carries it.
+#
 # Args: $1 the build process's pid, $2 the bound as an epoch deadline.
 #
 _vb_watchdog() {
-    local owner="$1" deadline="$2" probe out now
+    local owner="$1" deadline="$2" probe out identity current now
+    if ! identity="$(_vb_process_identity "$owner")"; then
+        print_verbose "venv bootstrap: the build process $owner is gone before the watchdog began"
+        return 0
+    fi
     while probe="$(kill -0 "$owner" 2>&1)"; do
         # Plan 00466 N30: an unknown "now" must never be silently treated as
         # "past the deadline" (N1's original hazard, for `sleep`, killed a
@@ -475,6 +508,14 @@ _vb_watchdog() {
             return 1
         fi
         if [ "$now" -ge "$deadline" ]; then
+            # Plan 00466 N59: a live pid at the bound is not proof on its own
+            # -- a build KILLed just after one poll frees its pid for reuse
+            # before the next, so the TERM goes only to a pid that still
+            # carries the identity recorded at watchdog start.
+            if ! current="$(_vb_process_identity "$owner")" || [ "$current" != "$identity" ]; then
+                print_verbose "venv bootstrap: pid $owner is no longer the build process; the watchdog stops"
+                return 0
+            fi
             print_warning "venv bootstrap: the build reached its ${_VB_CHILD_BOUND}s bound; stopping it"
             if ! out="$(kill -TERM "$owner" 2>&1)"; then
                 print_verbose "venv bootstrap: the build process $owner ended first ($out)"
