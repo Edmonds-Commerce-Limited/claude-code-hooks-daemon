@@ -72,6 +72,9 @@ class InstalledPluginEditAdvisorHandler(PreToolUseHandlerBase):
     @staticmethod
     def _targets(hook_input: dict[str, Any]) -> list[str]:
         if hook_input.get(HookInputField.TOOL_NAME) == ToolName.BASH:
+            # Advisory: text the tokeniser cannot read names no target, so it
+            # draws no advice. Silence claims nothing; only a DENY must fail
+            # closed on it (Plan 00466 N120).
             return get_bash_write_targets(hook_input)
         named = get_file_path(hook_input)
         if named is None and hook_input.get(HookInputField.TOOL_NAME) == ToolName.NOTEBOOK_EDIT:

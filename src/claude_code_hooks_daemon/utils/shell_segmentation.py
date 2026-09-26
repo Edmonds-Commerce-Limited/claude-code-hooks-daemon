@@ -36,6 +36,7 @@ from claude_code_hooks_daemon.utils.command_evasion import (
     git_subcommand_index,
     strip_reserved_word_prefix,
 )
+from claude_code_hooks_daemon.utils.heredoc_operators import Heredoc, scan_heredocs
 
 # Bash quoting characters. Inside single quotes NOTHING is special except the
 # closing quote -- in particular a backslash is a literal backslash, which is
@@ -64,44 +65,26 @@ _BACKTICK = "`"
 # newlines are segment separators, so the "command" before a pipe in the body
 # resolves to a line of English prose (Plan 00200's false positive, rediscovered
 # by Plan 00222's tests before it shipped).
-_QUOTED_HEREDOC_PATTERN = re.compile(
-    r"^\"\$\(\s*cat\s+<<-?\s*'(?P<delim>\w+)'.*\)\"$",
-    re.DOTALL,
-)
+#
+# The heredoc must be the WHOLE substitution (Plan 00466 N120): a regex ending
+# in ``.*\)"`` let ``)$(cmd)`` after the closer, or ``; cmd`` on the opener
+# line, ride inside a value blanked as prose. So the value is split into these
+# fixed parts and the heredoc between them is read by the shared scanner.
+_MESSAGE_SUBSTITUTION_OPEN = '"$('
+_MESSAGE_SUBSTITUTION_CLOSE = ')"'
+_MESSAGE_HEREDOC_HEAD_PATTERN = re.compile(r"\s*cat\s+")
 
 # The same bash fact as above, for a heredoc fed straight to a command's stdin
 # rather than wrapped in an argument value: `git commit -F - <<'EOF' ... EOF`.
 # Quoting the delimiter disables every expansion, so bash hands the body over
-# verbatim and never parses it as shell syntax.
+# verbatim and never parses it as shell syntax. The delimiter MUST be quoted: a
+# bare `<<EOF` still expands `$(...)` and backticks, so its body can genuinely
+# run a command and is deliberately left alone.
 #
-# The delimiter MUST be quoted. A bare `<<EOF` still expands `$(...)` and
-# backticks, so its body can genuinely run a command and is deliberately left
-# alone.
-#
-# DOTALL so the body may span newlines; non-greedy so the FIRST matching closing
-# delimiter ends the body rather than the last one in the command.
-#
-# The opener line may carry MORE than the delimiter. A heredoc opener and an
-# output redirect are independent redirections, so `cat > doc.md <<'EOF'` and
-# `cat <<'EOF' > doc.md` are the same command and bash cares about neither
-# order. Demanding a newline straight after the delimiter recognised only the
-# first, and an unrecognised heredoc is not a near miss: the body is scanned as
-# shell, so a paragraph of prose gets split on newlines and judged command by
-# command. Which of two identical commands got denied depended on word order.
-#
-# The delimiter charset is wider than `\w+` for the same reason -- `'EOF-1'`
-# and `'END.MD'` are ordinary and legal, and an unmatched delimiter exposes the
-# whole body. The closer then needs the lookahead: without it `EOF` is closed
-# by a body line reading `EOFDATA`, ending the body early and scanning the rest.
-#
-# The lookbehind keeps a here-string's `<<<'EOF'` from reading as `<<'EOF'`
-# from its second `<` (Plan 00466 N116): the next line is a command bash runs.
-_QUOTED_HEREDOC_BODY_PATTERN = re.compile(
-    r"(?P<opener>(?<!<)<<-?\s*(?P<quote>['\"])(?P<delim>[\w.\-]+)(?P=quote))"
-    r"(?P<opener_tail>[^\n]*)\n.*?\n"
-    r"(?P<closer>[ \t]*(?P=delim)(?![\w.\-]))",
-    re.DOTALL,
-)
+# Where a heredoc starts, what its delimiter is and which line closes it are
+# read by `scan_heredocs`, bash's grammar in one place (Plan 00466 N120). An
+# unrecognised heredoc is not a near miss: its body is scanned as shell, so a
+# paragraph of prose is split on newlines and judged command by command.
 
 # What a blanked body is replaced with: a single inert token that keeps the
 # heredoc's shape (opener, one body line, closer) so a caller splitting on
@@ -341,7 +324,8 @@ DATA_SINKS: frozenset[str] = frozenset(
 #: alternative's body):
 #:   1. The canonical heredoc-embedded message idiom: -m "$(cat <<'EOF' … EOF)"
 #:      (leading whitespace before the closing delimiter is tolerated — messages
-#:      are often re-indented).
+#:      are often re-indented). Any delimiter word, quoted or not, as bash
+#:      allows; whether the value is inert is `value_can_substitute`'s call.
 #:   2. A single- or double-quoted string (may span literal newlines).
 #:   3. A bare word (e.g. `-F commit-msg.txt`) as a fallback.
 #:
@@ -357,7 +341,8 @@ _MESSAGE_BODY_PATTERN = re.compile(
     r"(?P<flag>(?<![\w-])(?:-m|--message|-F|--file))"
     r"(?P<sep>=|\s+)"
     r"(?P<value>"
-    r"\"\$\(cat\s+<<-?\s*'?(?P<delim>\w+)'?\s*\n.*?\n[ \t]*(?P=delim)[ \t]*\n?\s*\)\""
+    r"\"\$\(cat\s+<<-?\s*(?P<dq>['\"]?)(?P<delim>[^\s'\"\\;&|<>()]+)(?P=dq)"
+    r"\s*\n.*?\n[ \t]*(?P=delim)[ \t]*\n?\s*\)\""
     r"|'(?:[^'\\]|\\.)*'"
     r'|"(?:[^"\\]|\\.)*"'
     r"|[^\s;&|<>()`]+"
@@ -660,9 +645,34 @@ def value_can_substitute(value: str) -> bool:
     """
     if value.startswith(_SINGLE_QUOTE) and value.endswith(_SINGLE_QUOTE):
         return False
-    if _QUOTED_HEREDOC_PATTERN.match(value):
+    if _is_message_heredoc_idiom(value):
         return False
     return _BACKTICK in value or any(opener in value for opener in _SUBSTITUTION_OPENERS)
+
+
+def _is_message_heredoc_idiom(value: str) -> bool:
+    """Is ``value`` exactly ``"$(cat <<'D'`` + body + ``D)"``, with blanks only
+    around the heredoc and nothing else anywhere in the substitution?"""
+    if not (
+        value.startswith(_MESSAGE_SUBSTITUTION_OPEN)
+        and value.endswith(_MESSAGE_SUBSTITUTION_CLOSE)
+        and len(value) >= len(_MESSAGE_SUBSTITUTION_OPEN) + len(_MESSAGE_SUBSTITUTION_CLOSE)
+    ):
+        return False
+    inner = value[len(_MESSAGE_SUBSTITUTION_OPEN) : -len(_MESSAGE_SUBSTITUTION_CLOSE)]
+    heredocs = scan_heredocs(inner).heredocs
+    if len(heredocs) != 1:
+        return False
+    heredoc = heredocs[0]
+    operator = heredoc.operator
+    if not (operator.quoted and heredoc.terminated):
+        return False
+    if not _MESSAGE_HEREDOC_HEAD_PATTERN.fullmatch(inner[: operator.start]):
+        return False
+    return (
+        not inner[operator.end : heredoc.body_start].strip()
+        and not inner[heredoc.closer_end :].strip()
+    )
 
 
 def strip_message_bodies(command: str) -> str:
@@ -789,29 +799,43 @@ def strip_quoted_heredoc_bodies(command: str) -> str:
 
     depth_tracker = _SubstitutionDepthTracker(command)
     newline_tracker = _LastNewlineTracker(command)
-
-    def _blank_if_nothing_can_execute_it(match: re.Match[str]) -> str:
+    pieces: list[str] = []
+    copied_to = 0
+    for heredoc in _quoted_heredocs(command):
+        opener_start = heredoc.operator.start
         # Three questions, because each was separately a real hole: who
         # RECEIVES the body, what it is PIPED ON to, and whether the whole
         # command sits in a SUBSTITUTION whose output lands in command
         # position. Any one of them failing keeps the body.
-        if not _receiver_is_data_sink(
-            command, match.start("opener"), depth_tracker, newline_tracker
-        ):
-            return match.group(0)
-        if not _downstream_is_all_data_sinks(match.group("opener_tail")):
-            return match.group(0)
-        # ``opener_tail`` is kept, not dropped: it holds whatever else the
-        # opener line carried, and that is usually a REDIRECT
-        # (`cat <<'EOF' > doc.md`). Erasing it would hide the destination from
-        # every caller that judges the blanked command -- blanking a body must
-        # remove no evidence but the body.
-        return (
-            f"{match.group('opener')}{match.group('opener_tail')}"
-            f"\n{_INERT_BODY_PLACEHOLDER}\n{match.group('closer')}"
-        )
+        if not _receiver_is_data_sink(command, opener_start, depth_tracker, newline_tracker):
+            continue
+        if not _downstream_is_all_data_sinks(_opener_tail(command, heredoc)):
+            continue
+        # Only the body lines are replaced. Everything else on the opener
+        # line is kept, and that is usually a REDIRECT (`cat <<'EOF' > doc.md`):
+        # blanking a body must remove no evidence but the body.
+        pieces.append(command[copied_to : heredoc.body_start])
+        pieces.append(f"{_INERT_BODY_PLACEHOLDER}\n")
+        copied_to = heredoc.closer_start
+    pieces.append(command[copied_to:])
+    return "".join(pieces)
 
-    return _QUOTED_HEREDOC_BODY_PATTERN.sub(_blank_if_nothing_can_execute_it, command)
+
+def _quoted_heredocs(command: str) -> list[Heredoc]:
+    """Every terminated quoted-delimiter heredoc, in opener order: the order
+    the incremental trackers require."""
+    heredocs = (
+        heredoc
+        for heredoc in scan_heredocs(command).heredocs
+        if heredoc.operator.quoted and heredoc.terminated
+    )
+    return sorted(heredocs, key=lambda heredoc: heredoc.operator.start)
+
+
+def _opener_tail(command: str, heredoc: Heredoc) -> str:
+    """What the opener line carries after the heredoc's delimiter word."""
+    line_end = command.find("\n", heredoc.operator.end)
+    return command[heredoc.operator.end : len(command) if line_end < 0 else line_end]
 
 
 def _receiver_is_data_sink(
@@ -1046,8 +1070,8 @@ def _heredoc_receiving_segments(command: str) -> list[str]:
     """
     newline_tracker = _LastNewlineTracker(command)
     return [
-        _receiving_segment(command, match.start("opener"), newline_tracker)
-        for match in _QUOTED_HEREDOC_BODY_PATTERN.finditer(command)
+        _receiving_segment(command, heredoc.operator.start, newline_tracker)
+        for heredoc in _quoted_heredocs(command)
     ]
 
 

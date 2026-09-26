@@ -2527,6 +2527,23 @@ class TestUntrackedClaudeMemoryPolicy:
         assert result.reason is not None
         assert "UNTRACKED CLAUDE MEMORY" in result.reason
 
+    def test_policy_blocks_a_memory_path_in_text_the_tokeniser_cannot_read(
+        self, policy_handler: MarkdownOrganizationHandler
+    ) -> None:
+        """Plan 00466 N120: shlex cannot read ``$'it\\'s'``, which bash runs,
+        and the ``cp`` after it writes memory. No raw regex covers ``cp``, so
+        the unreadable text itself must deny when it names a memory path."""
+        command = f"echo $'it\\'s' && cp notes.md {self.MEMORY_PATH}"
+        assert policy_handler.matches(self._bash(command)) is True
+        result = policy_handler.handle(self._bash(command))
+        assert result.decision == Decision.DENY
+        assert "UNTRACKED CLAUDE MEMORY" in (result.reason or "")
+
+    def test_policy_allows_unreadable_text_that_names_no_memory_path(
+        self, policy_handler: MarkdownOrganizationHandler
+    ) -> None:
+        assert policy_handler.matches(self._bash("echo $'it\\'s' && cp a.md b.md")) is False
+
     # --- reads are always allowed ---
 
     def test_policy_allows_bash_read_of_memory(

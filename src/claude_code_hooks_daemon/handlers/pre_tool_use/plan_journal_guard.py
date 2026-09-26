@@ -109,6 +109,9 @@ _PLAN_FOLDER_MENTION_RE: Final[re.Pattern[str]] = re.compile(
     r"(?:^|/)(\d{1,5})-[A-Za-z][^/]*/" + DEFAULT_JOURNAL_DIR_NAME + r"(?:/|$)"
 )
 
+#: What separates words in text the tokeniser could not read.
+_UNREADABLE_WORD_BREAK_RE: Final[re.Pattern[str]] = re.compile(r"[\s'\"`;&|<>()=]+")
+
 #: Characters meaning the shell builds the token at run time.
 _EXPANSION_CHARACTERS: Final[tuple[str, ...]] = ("$", "*", "?", "`", "{", "[")
 _HOME_PREFIX: Final[str] = "~"
@@ -346,6 +349,11 @@ class PlanJournalGuardHandler(PreToolUseHandlerBase):
             target = self._dayfile_target(raw, cwd, plan_dir)
             if target is not None:
                 return target
+        # Text the analysis could not read may write anywhere: fail closed
+        # when it names a day-file or a `JOURNAL/` directory (Plan 00466 N120).
+        for text in writes.unreadable:
+            if _could_mention_dayfile(text):
+                return self._unplaced_target(text.strip(), writes.directories, cwd, plan_dir)
         return None
 
     def _unplaced_target(
@@ -555,6 +563,18 @@ def _is_anchored(token: str) -> bool:
 
 def _names_journal_dir(text: str) -> bool:
     return DEFAULT_JOURNAL_DIR_NAME in text.split(_PATH_SEPARATOR)
+
+
+def _could_mention_dayfile(text: str) -> bool:
+    """Whether any word of unreadable shell text names a day-file or a
+    `JOURNAL/` directory. Quotes are separators here: the text could not be
+    tokenised, so a word is judged by what it names, not how it is quoted."""
+    for word in _UNREADABLE_WORD_BREAK_RE.split(text):
+        if _DAYFILE_MENTION_RE.search(word) or _PLAN_FOLDER_MENTION_RE.search(word):
+            return True
+        if _names_journal_dir(word):
+            return True
+    return False
 
 
 def _could_name_dayfile(token: str, directories: tuple[str, ...]) -> bool:

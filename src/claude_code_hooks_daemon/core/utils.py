@@ -10,7 +10,11 @@ from typing import Any, Final, NamedTuple, cast
 from claude_code_hooks_daemon.constants import HookInputField, ToolName
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.utils.command_evasion import normalise_line_continuations
-from claude_code_hooks_daemon.utils.heredoc_operators import HeredocScan, scan_heredocs
+from claude_code_hooks_daemon.utils.heredoc_operators import (
+    HeredocScan,
+    find_heredoc_operators,
+    scan_heredocs,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -456,6 +460,12 @@ def get_written_file_paths(hook_input: dict[str, Any]) -> list[str]:
     superset containing occasional phantoms from prose, and a handler that
     DENIES must never act on a path the command did not write.
 
+    Command text the tokeniser cannot read names no path here, deliberately:
+    a content guard judges a file it can name, and one it cannot name has
+    nothing to lint. Its silence claims nothing. A LOCATION guard is the
+    opposite case and must use :func:`scan_bash_write_targets` (Plan 00466
+    N120).
+
     Returns:
         Absolute paths, in command order, de-duplicated. Empty when this event
         authored nothing the daemon can name with confidence.
@@ -559,15 +569,152 @@ def _tokenise(text: str) -> list[str] | None:
     quote characters; see :func:`_resolve_write_target`.
 
     POSIX mode also rejects a trailing lone backslash ("No escaped character")
-    where non-POSIX tolerated it, and shlex rejects some text bash reads (an
-    ANSI-C ``$'it\\'s'``). Both come back as ``None``, never as a guess.
+    where non-POSIX tolerated it; that comes back as ``None``, never as a guess.
+
+    The text is first put through :func:`bash_text_for_shlex`, because shlex
+    and bash disagree in two places where shlex does NOT raise, and silently
+    reads the rest of the line wrong (Plan 00466 N120): shlex starts a comment
+    at a ``#`` inside a word, and does not know ANSI-C ``$'...'``. On main,
+    ``echo a#b > /opt/o.md`` and ``echo $'it\\'s' > /opt/x \\'`` both named no
+    target while bash wrote one.
     """
+    normalised = bash_text_for_shlex(text)
+    if normalised is None:
+        return None
     try:
-        lexer = shlex.shlex(text, posix=True, punctuation_chars=True)
+        lexer = shlex.shlex(normalised, posix=True, punctuation_chars=True)
         lexer.whitespace_split = True
+        lexer.commenters = ""
         return list(lexer)
     except ValueError:
         return None
+
+
+#: Characters after which an unquoted ``#`` starts a WORD, and so a comment.
+_COMMENT_PRECEDERS: Final[str] = " \t\n;&|()<>"
+#: Escapes an ANSI-C ``$'...'`` string decodes to one character.
+_ANSI_C_ESCAPES: Final[dict[str, str]] = {
+    "a": "\a",
+    "b": "\b",
+    "e": "\x1b",
+    "E": "\x1b",
+    "f": "\f",
+    "n": "\n",
+    "r": "\r",
+    "t": "\t",
+    "v": "\v",
+    "\\": "\\",
+    "'": "'",
+    '"': '"',
+    "?": "?",
+}
+#: The numeric and control escapes: octal, ``\xHH``, ``\uHHHH``, ``\UHHHHHHHH``, ``\cX``.
+_ANSI_C_NUMERIC_ESCAPE_RE: Final[re.Pattern[str]] = re.compile(
+    r"[0-7]{1,3}|x[0-9A-Fa-f]{1,2}|u[0-9A-Fa-f]{1,4}|U[0-9A-Fa-f]{1,8}|c."
+)
+_UNICODE_LIMIT: Final[int] = 0x10FFFF
+_CONTROL_MASK: Final[int] = 0x1F
+_BYTE_MASK: Final[int] = 0xFF
+_NUL: Final[str] = "\0"
+
+
+def bash_text_for_shlex(text: str) -> str | None:
+    """``text`` rewritten so shlex splits it where bash does; None if a quote
+    never closes.
+
+    Bash's comments are removed (a ``#`` starting a word, outside quotes, up to
+    the newline), so shlex can run with no comment character of its own: shlex
+    would also start one INSIDE a word, where bash does not. Each ANSI-C
+    ``$'...'`` string is decoded and re-quoted as a plain single-quoted word;
+    shlex reads ``$'it\\'s'`` as a quote closed at the escaped one.
+    Everything else is kept byte for byte.
+    """
+    out: list[str] = []
+    index = 0
+    length = len(text)
+    while index < length:
+        char = text[index]
+        if char == "\\":
+            out.append(text[index : index + 2])
+            index += 2
+        elif char == "'":
+            end = text.find("'", index + 1)
+            if end < 0:
+                return None
+            out.append(text[index : end + 1])
+            index = end + 1
+        elif char == '"':
+            end = _double_quote_end(text, index + 1)
+            if end < 0:
+                return None
+            out.append(text[index : end + 1])
+            index = end + 1
+        elif text.startswith("$'", index):
+            decoded = _ansi_c_string(text, index + 2)
+            if decoded is None:
+                return None
+            value, index = decoded
+            out.append("'" + value.replace("'", "'\"'\"'") + "'")
+        elif char == "#" and (index == 0 or text[index - 1] in _COMMENT_PRECEDERS):
+            line_end = text.find("\n", index)
+            index = length if line_end < 0 else line_end
+        else:
+            out.append(char)
+            index += 1
+    return "".join(out)
+
+
+def _double_quote_end(text: str, index: int) -> int:
+    """Index of the ``"`` closing a double-quoted span begun before ``index``, or -1."""
+    while index < len(text):
+        if text[index] == "\\":
+            index += 2
+        elif text[index] == '"':
+            return index
+        else:
+            index += 1
+    return -1
+
+
+def _ansi_c_string(text: str, index: int) -> tuple[str, int] | None:
+    """The value of the ``$'...'`` body starting at ``index``, and the index past
+    its closing quote; None if it never closes. Bash ends the value at a NUL."""
+    parts: list[str] = []
+    ended = False
+    while index < len(text):
+        char = text[index]
+        if char == "'":
+            return "".join(parts), index + 1
+        if char == "\\" and index + 1 < len(text):
+            escape = text[index + 1]
+            numeric = _ANSI_C_NUMERIC_ESCAPE_RE.match(text, index + 1)
+            if escape in _ANSI_C_ESCAPES:
+                decoded = _ANSI_C_ESCAPES[escape]
+                index += 2
+            elif numeric is not None:
+                decoded = _ansi_c_numeric(numeric.group())
+                index = numeric.end()
+            else:
+                decoded = char + escape
+                index += 2
+        else:
+            decoded = char
+            index += 1
+        ended = ended or decoded == _NUL
+        if not ended:
+            parts.append(decoded)
+    return None
+
+
+def _ansi_c_numeric(escape: str) -> str:
+    """One numeric or control ANSI-C escape, without its backslash."""
+    kind = escape[0]
+    if kind == "c":
+        return chr(ord(escape[1]) & _CONTROL_MASK)
+    if kind in "xuU":
+        code = int(escape[1:], 16)
+        return chr(code) if code <= _UNICODE_LIMIT else ""
+    return chr(int(escape, 8) & _BYTE_MASK)
 
 
 class HeredocBody(NamedTuple):
@@ -576,11 +723,16 @@ class HeredocBody(NamedTuple):
     ``opener_line`` is where the RECEIVER is named (``python3 - <<'PY'``), so a
     caller can tell a body that is data (fed to ``cat``) from one that is a
     program (fed to an interpreter).
+
+    ``ordinal`` counts the operators on ``opener_line`` naming the same
+    delimiter before this one, so ``cat <<'EOF'; bash <<'EOF'`` tells the
+    second body's receiver from the first's.
     """
 
     opener_line: str
     body: str
     delimiter: str
+    ordinal: int = 0
 
 
 def split_heredocs(command: str) -> tuple[str, list[HeredocBody]]:
@@ -605,7 +757,14 @@ def split_heredocs(command: str) -> tuple[str, list[HeredocBody]]:
         line_start = command.rfind("\n", 0, heredoc.operator.start) + 1
         line_end = command.find("\n", heredoc.operator.start)
         opener_line = command[line_start : len(command) if line_end < 0 else line_end]
-        heredocs.append(HeredocBody(opener_line, heredoc.body(command), heredoc.operator.delimiter))
+        delimiter = heredoc.operator.delimiter
+        column = heredoc.operator.start - line_start
+        ordinal = sum(
+            1
+            for operator in find_heredoc_operators(opener_line)
+            if operator.delimiter == delimiter and operator.start < column
+        )
+        heredocs.append(HeredocBody(opener_line, heredoc.body(command), delimiter, ordinal))
     return _without_spans(command, 0, len(command), _body_spans(command, scan)), heredocs
 
 

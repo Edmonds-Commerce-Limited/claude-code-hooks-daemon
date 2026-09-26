@@ -40,6 +40,7 @@ from claude_code_hooks_daemon.utils.cli_command import (
     daemon_cli_command_for_docs,
 )
 from claude_code_hooks_daemon.utils.cron_tick import TickKind, tick_sentinel
+from claude_code_hooks_daemon.utils.heredoc_operators import scan_heredocs
 
 # State file under the daemon untracked dir (never /tmp — B108).
 _STATE_FILENAME: Final[str] = "background-processes.jsonl"
@@ -73,13 +74,6 @@ _QUOTE_CHARS: Final[frozenset[str]] = frozenset({_SINGLE_QUOTE, _DOUBLE_QUOTE})
 _MASK_CHAR: Final[str] = " "
 _LINE_SEPARATOR: Final[str] = "\n"
 
-# A heredoc operator: ``<<`` or ``<<-`` followed by an optionally-quoted
-# delimiter word. ``<<<`` (a herestring) does not match: the lookbehind keeps
-# its last two characters from reading as ``<<`` (Plan 00466 N116).
-_HEREDOC_OPEN_RE: Final[re.Pattern[str]] = re.compile(
-    r"(?<!<)<<-?\s*(?P<quote>['\"]?)(?P<delim>[A-Za-z_][A-Za-z0-9_]*)(?P=quote)"
-)
-
 
 def _mask_heredoc_bodies(command: str) -> str:
     """Return ``command`` with heredoc bodies masked out.
@@ -91,20 +85,17 @@ def _mask_heredoc_bodies(command: str) -> str:
 
     Masking also protects the quote scanner that runs next: an unbalanced
     quote in prose would otherwise desynchronise it for the rest of the string.
+
+    Where bodies start and close is `scan_heredocs`'s call, so any delimiter
+    word bash accepts is read here too (Plan 00466 N120). Each body and its
+    closing line are masked; newlines are kept so line structure survives.
     """
-    masked: list[str] = []
-    pending_delimiters: list[str] = []
-    for line in command.split(_LINE_SEPARATOR):
-        if pending_delimiters:
-            # Inside a body: mask wholesale and do not scan for new operators.
-            masked.append(_MASK_CHAR * len(line))
-            if line.strip() == pending_delimiters[0]:
-                pending_delimiters.pop(0)
-            continue
-        masked.append(line)
-        # Several heredocs may open on one line; they close in order.
-        pending_delimiters.extend(match.group("delim") for match in _HEREDOC_OPEN_RE.finditer(line))
-    return _LINE_SEPARATOR.join(masked)
+    masked = list(command)
+    for heredoc in scan_heredocs(command).heredocs:
+        for index in range(heredoc.body_start, heredoc.closer_end):
+            if masked[index] != _LINE_SEPARATOR:
+                masked[index] = _MASK_CHAR
+    return "".join(masked)
 
 
 def _mask_quoted_spans(command: str) -> str:

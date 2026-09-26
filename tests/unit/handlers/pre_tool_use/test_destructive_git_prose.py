@@ -118,6 +118,36 @@ class TestAHereStringIsNotAHeredoc:
         assert result.result.decision == Decision.DENY
 
 
+class TestTheMessageHeredocIdiomIsTheWholeValue:
+    """Plan 00466 N120: ``-m "$(cat <<'EOF' ... EOF)"`` is inert only when
+    that heredoc is ALL the value holds. The idiom was recognised by a regex
+    whose ``.*`` let a second substitution after the closer, or a command on
+    the opener line, ride inside the blanked message; main blanked both."""
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            f"git commit -m \"$(cat <<'EOF'\nmsg\nEOF\n)$({_RESET_HARD})\"",
+            f"git commit -m \"$(cat <<'EOF' ; {_RESET_HARD}\nmsg\nEOF\n)\"",
+        ],
+    )
+    def test_a_command_beside_the_message_heredoc_is_denied(self, command: str) -> None:
+        chain = HandlerChain()
+        chain.add(DestructiveGitHandler())
+        payload = {"tool_name": "Bash", "tool_input": {"command": command}}
+        result = chain.execute(payload, strict_mode=False)
+        assert result.result.decision == Decision.DENY
+
+    @pytest.mark.parametrize("delimiter", ["EOF", "EOF-1", "END.MD"])
+    def test_the_idiom_alone_is_still_prose(self, delimiter: str) -> None:
+        command = f"git commit -m \"$(cat <<'{delimiter}'\nmentions {_RESET_HARD}\n{delimiter}\n)\""
+        chain = HandlerChain()
+        chain.add(DestructiveGitHandler())
+        payload = {"tool_name": "Bash", "tool_input": {"command": command}}
+        result = chain.execute(payload, strict_mode=False)
+        assert result.result.decision == Decision.ALLOW
+
+
 class TestTheGuardStillGuards:
     """Every subtraction above must cost the handler nothing that matters."""
 

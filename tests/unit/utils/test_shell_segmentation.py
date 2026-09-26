@@ -775,3 +775,77 @@ class TestQuotedHeredocCommandWords:
 
     def test_command_without_a_heredoc_reports_nothing(self) -> None:
         assert quoted_heredoc_command_words("git commit -m 'msg'") == []
+
+
+class TestHeredocsFollowBashGrammar:
+    """Plan 00466 N120: the body blanking uses the shared heredoc scanner.
+
+    Its regex took a quoted ``[\\w.\\-]+`` word, so any other quoted
+    delimiter exposed a prose body as shell, a second heredoc on one opener
+    line kept its body, and a ``<<'EOF'`` inside a COMMENT blanked the real
+    command on the next line.
+    """
+
+    @pytest.mark.parametrize(
+        ("opener", "closer"),
+        [("\\EOF", "EOF"), ('E"O"F', "EOF"), ("'END NOTES'", "END NOTES"), ("'EOF+1'", "EOF+1")],
+    )
+    def test_every_quoted_delimiter_spelling_blanks_the_body(
+        self, opener: str, closer: str
+    ) -> None:
+        command = f"cat > notes.md <<{opener}\nprose mentioning run_all.sh\n{closer}"
+        stripped = strip_quoted_heredoc_bodies(command)
+        assert "run_all.sh" not in stripped
+        assert stripped == f"cat > notes.md <<{opener}\nHEREDOC_BODY\n{closer}"
+
+    def test_a_backslash_delimiter_feeding_an_interpreter_is_reported(self) -> None:
+        assert quoted_heredoc_receivers("bash <<\\EOF\nbody\nEOF") == ["bash"]
+
+    def test_two_heredocs_on_one_line_are_both_blanked(self) -> None:
+        command = "cat <<'A' <<'B'\nfirst run_all.sh\nA\nsecond run_all.sh\nB"
+        stripped = strip_quoted_heredoc_bodies(command)
+        assert "run_all.sh" not in stripped
+        assert quoted_heredoc_command_words(command) == ["cat", "cat"]
+
+    def test_an_opener_in_a_comment_blanks_nothing(self) -> None:
+        command = "cat f # <<'EOF'\nrun_all.sh\nEOF"
+        assert strip_quoted_heredoc_bodies(command) == command
+        assert quoted_heredoc_command_words(command) == []
+
+    def test_an_empty_body_keeps_the_heredoc_shape(self) -> None:
+        assert strip_quoted_heredoc_bodies("cat <<'EOF'\nEOF") == "cat <<'EOF'\nHEREDOC_BODY\nEOF"
+
+    def test_an_unterminated_body_is_left_alone(self) -> None:
+        command = "cat <<'EOF'\nrun_all.sh"
+        assert strip_quoted_heredoc_bodies(command) == command
+
+
+class TestTheMessageHeredocIdiomMustBeTheWholeValue:
+    """Plan 00466 N120: ``"$(cat <<'EOF' ... EOF)"`` cannot substitute
+    anything only when that heredoc is the whole value."""
+
+    @pytest.mark.parametrize(
+        "value",
+        [
+            "\"$(cat <<'EOF'\nmsg\nEOF\n)$(rm -rf /)\"",
+            "\"$(cat <<'EOF' ; rm -rf /\nmsg\nEOF\n)\"",
+            "\"$(cat <<'EOF'\nmsg\nEOF\nrm -rf /\n)\"",
+            "\"$(rm -rf / ; cat <<'EOF'\nmsg\nEOF\n)\"",
+            '"$(cat <<EOF\nmsg\nEOF\n)"',
+            "\"$(cat <<'EOF'\nmsg\n)\"",
+        ],
+    )
+    def test_anything_beside_the_heredoc_can_substitute(self, value: str) -> None:
+        assert value_can_substitute(value) is True
+
+    @pytest.mark.parametrize(
+        "value",
+        [
+            "\"$(cat <<'EOF'\nmsg\nEOF\n)\"",
+            "\"$(cat <<'EOF'\nmsg\nEOF)\"",
+            "\"$(cat <<'EOF-1'\nmsg with $(x)\nEOF-1\n)\"",
+            "\"$( cat <<-'END.MD'\n\tmsg\n\tEND.MD\n )\"",
+        ],
+    )
+    def test_the_idiom_alone_cannot_substitute(self, value: str) -> None:
+        assert value_can_substitute(value) is False

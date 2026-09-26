@@ -1234,14 +1234,44 @@ class TestUnreadableCommandTextFailsClosed:
         result = self._decide(handler, f"cat > /repo/o.md <<{opener}\nit's done\n{closer}")
         assert result.decision == Decision.ALLOW
 
-    def test_text_bash_reads_but_the_tokeniser_cannot_denies(
+    def test_an_unterminated_ansi_c_string_denies_as_unreadable(
         self, handler: ProjectContainmentHandler
     ) -> None:
-        """An ANSI-C escape writes /opt/x in bash; nothing here can name it."""
-        result = self._decide(handler, "echo $'it\\'s' > /opt/x")
+        result = self._decide(handler, "echo $'it > /opt/x")
         assert result.decision == Decision.DENY
         assert RuleID.PROJECT_CONTAINMENT_EVALUATION_ERROR in (result.reason or "")
         assert "could not be read" in (result.reason or "")
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "echo $'it\\'s' > /opt/x",
+            "echo $'it\\'s' > /opt/x \\'",
+            "echo a#b > /opt/o.md",
+            "curl http://x/#frag > /opt/f",
+            "echo $'it\\'s' && mkdir /opt/newdir",
+            "echo $'it\\'s' && curl -o /opt/f http://x",
+            "echo x > $'/opt/a\\x41'",
+        ],
+    )
+    def test_text_shlex_misreads_without_raising_is_read_as_bash_reads_it(
+        self, handler: ProjectContainmentHandler, command: str
+    ) -> None:
+        """shlex starts a comment inside a word and does not know ANSI-C
+        quoting, and neither raises: on main each of these was allowed while
+        bash wrote outside the root."""
+        result = self._decide(handler, command)
+        assert result.decision == Decision.DENY
+        assert RuleID.WRITE_OUTSIDE_PROJECT_ROOT in (result.reason or "")
+
+    @pytest.mark.parametrize(
+        "command",
+        ["echo x # > /opt/o.md", "echo 'a #b' > /repo/o.md", "echo $'it\\'s' > /repo/o.md"],
+    )
+    def test_a_comment_or_an_in_root_ansi_c_write_is_allowed(
+        self, handler: ProjectContainmentHandler, command: str
+    ) -> None:
+        assert self._decide(handler, command).decision == Decision.ALLOW
 
     def test_an_unreadable_tail_after_an_in_root_write_denies(
         self, handler: ProjectContainmentHandler

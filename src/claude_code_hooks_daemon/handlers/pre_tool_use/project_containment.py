@@ -64,9 +64,11 @@ from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 # same set rather than risk drifting from it.
 from claude_code_hooks_daemon.core.utils import (
     _UNEXPANDABLE_CHARACTERS,
+    bash_text_for_shlex,
     expand_home,
     get_bash_command,
     scan_bash_write_targets,
+    split_heredocs,
 )
 from claude_code_hooks_daemon.utils.claude_config import claude_config_dir, session_config_dir
 from claude_code_hooks_daemon.utils.command_evasion import strip_reserved_word_prefix
@@ -560,10 +562,27 @@ class ProjectContainmentHandler(PreToolUseHandlerBase):
             Every destination path this command plainly names. Conservative in
             the same direction as the shared accessor: an unrecognised command
             yields nothing rather than a guess.
+
+        The shell outside heredoc bodies is split where bash splits it: an
+        ANSI-C ``$'it\\'s'`` or a comment read raw moves every later boundary,
+        and ``mkdir /opt/x`` after one went unseen (Plan 00466 N120). Text that
+        cannot be normalised is kept raw; the shared scan reports it as
+        unreadable. Bodies are split as they stand, as before.
         """
+        outside, heredocs = split_heredocs(command)
+        normalised = bash_text_for_shlex(outside)
+        texts = [outside if normalised is None else normalised]
+        texts.extend(heredoc.body for heredoc in heredocs)
+        targets: list[str] = []
+        for text in texts:
+            targets.extend(self._segment_targets(text, depth))
+        return targets
+
+    def _segment_targets(self, text: str, depth: int) -> list[str]:
+        """:meth:`_destination_targets` for one span of shell text."""
         targets: list[str] = []
 
-        for segment in split_unquoted(command, _SEGMENT_SEPARATORS):
+        for segment in split_unquoted(text, _SEGMENT_SEPARATORS):
             # `then mkdir /opt/x` runs mkdir: the reserved word is not the command.
             tokens = self._tokenise(strip_reserved_word_prefix(segment))
             if not tokens:

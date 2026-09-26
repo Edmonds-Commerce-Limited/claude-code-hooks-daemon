@@ -451,6 +451,32 @@ class TestUnplaceableDestinationsFailClosed:
     ) -> None:
         assert handler.matches(_bash(command, project)) is False, command
 
+    @pytest.mark.parametrize(
+        "command",
+        [
+            f"echo $'it\\'s' && echo '## 14:05' >> {_relative_live()}",
+            f"echo $'it\\'s' && cd {_live_journal_dir()} && echo x >> \"$F\"",
+            # Bash refuses this unterminated quote, but the analysis cannot
+            # tell that from text it misreads, and it names a day-file.
+            f"python3 -c \"open('{_relative_live()}', 'a').write('x')",
+            f"echo $'it && echo x >> {_relative_live()}",
+        ],
+    )
+    def test_text_the_tokeniser_cannot_read_is_denied_when_it_names_a_journal(
+        self, handler: PlanJournalGuardHandler, project: Path, command: str
+    ) -> None:
+        """Plan 00466 N120: shlex cannot read ``$'it\\'s'``, which bash runs
+        with everything after it. Unreadable text may write anywhere, so it
+        denies when it names a day-file or a ``JOURNAL/`` directory."""
+        assert handler.matches(_bash(command, project)) is True, command
+
+    def test_unreadable_text_that_names_no_journal_is_allowed(
+        self, handler: PlanJournalGuardHandler, project: Path
+    ) -> None:
+        output = project / "untracked" / "scratch" / "n.txt"
+        command = f"grep -c x {_relative_live()} > {output}\necho $'it\\'s'"
+        assert handler.matches(_bash(command, project)) is False
+
     def test_an_absolute_destination_after_cd_is_placed_not_failed_closed(
         self, handler: PlanJournalGuardHandler, project: Path
     ) -> None:
@@ -538,8 +564,6 @@ class TestBashSurfaceIsAllowed:
             f"env ; tail -n 5 {_relative_live()}",
             f"ruby -w {_relative_live()}",
             "echo 'no journal here' > untracked/scratch/x.md",
-            # An unterminated quote: bash refuses to run the command at all.
-            f"python3 -c \"open('{_relative_live()}', 'a').write('x')",
         ],
     )
     def test_is_allowed(
