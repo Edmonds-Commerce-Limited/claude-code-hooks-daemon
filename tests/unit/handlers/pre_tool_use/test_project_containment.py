@@ -760,3 +760,38 @@ class TestATildeIsADestinationLikeAnyOther:
         assert handler.matches(_bash("curl -s https://x/y -o ~/in-repo.txt", cwd="/workspace")) is (
             False
         )
+
+
+class TestAnUnresolvedRootDoesNotLockOutTargetlessCommands:
+    """Plan 00466 N90.
+
+    ``matches()`` used to resolve the project root before checking whether the
+    command names any write target at all. When the root cannot be resolved
+    (three test harnesses route events without initialising ``ProjectContext``
+    to prove this), that made EVERY command deny, ahead of every lower-priority
+    handler -- including one that writes nothing. The fix returns early when
+    ``_named_targets()`` is empty, before the root is ever resolved, and stays
+    fail-closed for a command that does name a target.
+    """
+
+    def test_a_no_target_command_is_allowed_even_when_the_root_is_unresolved(
+        self, handler: ProjectContainmentHandler, _project_root: Any
+    ) -> None:
+        _project_root.side_effect = RuntimeError(
+            "ProjectContext not initialized. "
+            "Call ProjectContext.initialize(config_path) during daemon startup."
+        )
+
+        assert handler.matches(_bash("git status")) is False
+        _project_root.assert_not_called()
+
+    def test_a_targeted_command_still_fails_closed_when_the_root_is_unresolved(
+        self, handler: ProjectContainmentHandler, _project_root: Any
+    ) -> None:
+        _project_root.side_effect = RuntimeError(
+            "ProjectContext not initialized. "
+            "Call ProjectContext.initialize(config_path) during daemon startup."
+        )
+
+        with pytest.raises(RuntimeError):
+            handler.matches(_write("/tmp/notes.md"))

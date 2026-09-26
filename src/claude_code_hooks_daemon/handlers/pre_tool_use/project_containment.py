@@ -229,12 +229,21 @@ class ProjectContainmentHandler(PreToolUseHandlerBase):
             command that writes two files reports both — naming one would send
             the reader back for a second denial.
         """
+        named_targets = self._named_targets(hook_input)
+        if not named_targets:
+            # Nothing to judge. Returning before the root is resolved (Plan
+            # 00466 N90) matters because resolving it can itself fail
+            # (`ProjectContext.project_root()` raises when uninitialised) --
+            # and a command naming no write target cannot escape the project
+            # either way, so there is nothing fail-closed protects here.
+            return []
+
         root = self._resolved_root()
         scratchpad = self._harness_scratchpad(hook_input)
         session_home = self._session_claude_home(hook_input)
         offending: list[str] = []
 
-        for candidate in self._named_targets(hook_input):
+        for candidate in named_targets:
             if candidate in offending:
                 continue
             if self._is_outside(candidate, root) and not self._is_permitted(
