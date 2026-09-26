@@ -29,6 +29,7 @@ from typing import Final
 
 from claude_code_hooks_daemon.config.loader import ConfigLoader
 from claude_code_hooks_daemon.config.models import Config, TransportConfig
+from claude_code_hooks_daemon.constants import DaemonPath
 from claude_code_hooks_daemon.constants.events import (
     EventIDMeta,
     raw_stdout_bash_keys,
@@ -638,9 +639,12 @@ def load_transport_config(project_root: Path) -> TransportConfig:
     (malformed YAML) or fails pydantic validation resolves the same way,
     with the failure logged rather than aborting the caller — a client's
     broken config must not take down forwarder regeneration entirely.
+
+    Only ``project_root``'s own config is read: an upward search would hand a
+    nested project the ENCLOSING repository's transport (Plan 00466 N24).
     """
+    config_path = project_root / DaemonPath.CLAUDE_DIR / DaemonPath.CONFIG_FILE
     try:
-        config_path = ConfigLoader.find_config(str(project_root))
         raw = ConfigLoader.load(config_path)
         merged = ConfigLoader.merge_with_defaults(raw)
         return Config.model_validate(merged).daemon.transport

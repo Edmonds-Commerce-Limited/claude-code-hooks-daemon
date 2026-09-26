@@ -18,6 +18,7 @@ Re-render the index: `bin/hooks-daemon remote-docs index`
 | -------- | ------ | -------- | ----------- |
 | `code.claude.com/docs/en/discover-plugins.md` | https://code.claude.com/docs/en/discover-plugins.md | 2026-09-24 | 2026-12-23 |
 | `code.claude.com/docs/en/hooks.md` | https://code.claude.com/docs/en/hooks.md | 2026-09-24 | 2026-12-23 |
+| `code.claude.com/docs/en/interactive-mode.md` | https://code.claude.com/docs/en/interactive-mode.md | 2026-09-25 | 2026-12-24 |
 | `code.claude.com/docs/en/plugin-marketplaces.md` | https://code.claude.com/docs/en/plugin-marketplaces.md | 2026-09-24 | 2026-12-23 |
 | `code.claude.com/docs/en/plugins-reference.md` | https://code.claude.com/docs/en/plugins-reference.md | 2026-09-24 | 2026-12-23 |
 | `code.claude.com/docs/en/plugins.md` | https://code.claude.com/docs/en/plugins.md | 2026-09-24 | 2026-12-23 |

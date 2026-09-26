@@ -100,6 +100,21 @@ class TestPipeBlockerExtraWhitelistInjection:
     regardless of `pipe_blocker`'s own verdict.
     """
 
+    @pytest.fixture(autouse=True)
+    def _project_context(self) -> None:
+        """``router.route(...)`` runs the WHOLE chain, including
+        ``enforce-project-containment`` (Plan 00466 N24: SAFETY+BLOCKING,
+        raises without an initialised ``ProjectContext`` and now correctly
+        DENIES on that raise, rather than failing open) -- so a call through
+        the real chain needs one, exactly like ``matches()``-only tests do
+        not (Plan 00466 N40 review 2 MA1, mirroring the same fix already
+        applied in ``test_handler_config_blocking.py``).
+        """
+        if not ProjectContext.is_initialized():
+            ProjectContext.initialize(
+                Path(__file__).resolve().parents[3] / ".claude" / "hooks-daemon.yaml"
+            )
+
     def test_matches_does_not_raise_on_the_injected_option(self) -> None:
         """The defect itself: `matches()` raised before reaching any verdict.
 

@@ -72,6 +72,106 @@ _INTERRUPTING_DECISIONS: Final[frozenset[str]] = frozenset({"deny", "ask"})
 # checked against that limit.
 _EVENT_PAYLOAD_READ_CHUNK_BYTES: Final[int] = 65536
 
+# Cap on how much MORE an oversized legacy-socket request is drained past
+# `SocketLimit.REQUEST_BUFFER_BYTES` before giving up (Plan 00466 N40 m5).
+# Draining exists so the peer's still-unread send does not trigger a Unix
+# domain socket RST when the server responds and closes; it must itself stay
+# bounded, or a sender that never stops writing would hang this connection
+# forever instead of getting an error back.
+_OVERSIZED_REQUEST_DRAIN_CAP_BYTES: Final[int] = SocketLimit.REQUEST_BUFFER_BYTES
+
+# Per-read timeout while draining an oversized request (Plan 00466 N40 m5).
+# The protocol has no length header, so silence this long reads as "the
+# sender is done", not "still arriving" -- see `_drain_oversized_request`.
+# Generous enough that a slow-but-still-sending peer is not cut off
+# prematurely, short enough that the client is not left waiting long for
+# its error response.
+_OVERSIZED_REQUEST_DRAIN_PER_READ_TIMEOUT_SECONDS: Final[float] = 0.5
+
+# Overall limit on draining one oversized request (Plan 00466 N40 review 2
+# nit 1). The per-read timeout and the byte cap above still let a sender
+# trickling a little just inside each read's timeout hold the connection for
+# hours; a real client has sent everything long before this.
+_OVERSIZED_REQUEST_DRAIN_TOTAL_SECONDS: Final[float] = 2.0
+
+# The drain's clock, named so a test can drive it without touching the
+# monotonic clock asyncio itself runs on.
+_drain_clock = time.monotonic
+
+
+@runtime_checkable
+class _ChunkReader(Protocol):
+    """What the drain needs of a stream: ``asyncio.StreamReader.read``."""
+
+    async def read(self, n: int = -1) -> bytes: ...
+
+
+#: The wire event name PreToolUse requests carry (`EventID.PRE_TOOL_USE`'s
+#: `wire_key.value`, and what ``event_json_key`` is set to for the
+#: ``pre-tool-use.sock`` listener -- see the ``wired_event_metas()`` loop
+#: that builds ``partial(self._handle_event_client, meta.wire_key.value)``).
+#: A plain string rather than importing ``EventID`` here: the two failure
+#: paths below run before ANY parsing of the payload, so nothing else in
+#: this module needs the full event-metadata machinery for this one check.
+_PRE_TOOL_USE_WIRE_KEY: Final[str] = "PreToolUse"
+
+#: Reason text for a transport-level PreToolUse deny (Plan 00466 N40 review 2
+#: MA3): a malformed/oversized/undecodable payload, or an uncaught exception,
+#: on the per-event socket used to answer `{}` -- indistinguishable from a
+#: real judged "allow, nothing to add" verdict to whatever reads it next (the
+#: relay, or a direct per-event-socket client). Neither the legacy socket
+#: (m5) nor the python transport (M1/N25) has ever fabricated that ambiguity;
+#: this closes the one remaining rung that did.
+_TRANSPORT_FAIL_CLOSED_REASON: Final[str] = (
+    "BLOCKED [transport-fail-closed]: the daemon could not produce a verdict "
+    "for this request (payload could not be read, or an internal error "
+    "occurred mid-dispatch). Denying out of caution -- this does not mean "
+    "the action itself is unsafe. If the daemon is wedged, run: "
+    "bin/hooks-daemon restart"
+)
+
+
+def _pre_tool_use_response_looks_valid(data: object) -> bool:
+    """True when ``data`` is one of PreToolUse's two legitimate response
+    shapes: ``{}`` (a real ALLOW with nothing to say -- ``HookResult.to_json``'s
+    documented empty-response case) or a dict with a ``hookSpecificOutput`` key
+    whose ``permissionDecision``, if present, is one of the four known values.
+
+    Server-side twin of ``init.sh``'s ``_pretooluse_response_looks_valid``
+    (Plan 00466 N24 review 3 MA2): a client on the relay rung never re-parses
+    the daemon's JSON, it only pumps bytes, so any non-empty response used to
+    pass straight through -- including ``{"error": "..."}`` from an
+    ``invalid_request``/``input_validation_failed`` path, and a malformed
+    ``{"result": ...}`` envelope, none of which is a judged PreToolUse
+    verdict. The python rung already refuses these; this makes the daemon
+    itself refuse to emit them on the PreToolUse wire in the first place, so
+    every consumer -- relay, nc, or a client dialling the socket directly --
+    gets the same guarantee.
+    """
+    if not isinstance(data, dict):
+        return False
+    if data == {}:
+        return True
+    hso = data.get("hookSpecificOutput")
+    if not isinstance(hso, dict):
+        return False
+    decision = hso.get("permissionDecision")
+    return decision is None or decision in ("allow", "deny", "ask", "defer")
+
+
+def _pre_tool_use_transport_deny_response() -> dict[str, Any]:
+    """A genuine PreToolUse DENY, in the same shape
+    ``HookResult._format_pre_tool_use_response`` emits for a real judged
+    deny -- never the ambiguous ``{}`` a transport failure used to answer.
+    """
+    return {
+        "hookSpecificOutput": {
+            "hookEventName": _PRE_TOOL_USE_WIRE_KEY,
+            "permissionDecision": "deny",
+            "permissionDecisionReason": _TRANSPORT_FAIL_CLOSED_REASON,
+        }
+    }
+
 
 def redacted_blocking_response(response_json: str) -> str:
     """Prepare a blocking response for the DEBUG log: redacted, then truncated.
@@ -347,7 +447,9 @@ def _pid_file_points_at_live_process(pid_file_path: Path | None) -> bool:
 class Controller(Protocol):
     """Protocol for controllers that can handle hook events."""
 
-    def process_request(self, request_data: dict[str, Any]) -> dict[str, Any]:
+    def process_request(
+        self, request_data: dict[str, Any], *, arrival_time: float | None = None
+    ) -> dict[str, Any]:
         """Process a request and return response dict."""
         ...
 
@@ -476,6 +578,7 @@ class HooksDaemon:
     __slots__ = (
         "_active_requests",
         "_event_servers",
+        "_event_socket_skips",
         "_idle_check_interval",
         "_input_validators",
         "_is_new_controller",
@@ -506,6 +609,9 @@ class HooksDaemon:
         self.controller = controller
         self.server: asyncio.Server | None = None
         self._event_servers: dict[str, asyncio.Server] = {}
+        # Wire event name -> why its per-event socket was not bound; reported
+        # by the ``health`` action (Plan 00466 N24 review 2 P1).
+        self._event_socket_skips: dict[str, str] = {}
         self.last_activity: float = time.time()
         self.shutdown_event = asyncio.Event()
         # Set once `start()` has finished both binding steps (legacy socket
@@ -743,16 +849,23 @@ class HooksDaemon:
         # can distinguish live containers from dead ones by mtime)
         touch_task = asyncio.create_task(self._touch_daemon_files_periodically())
 
+        # Start the straggler-health watchdog (Plan 00466 N40 M2): self-
+        # restarts once an abandoned handler dispatch has run too long.
+        straggler_monitor_task = asyncio.create_task(self._monitor_straggler_health())
+
         # Wait for shutdown event
         await self.shutdown_event.wait()
 
         # Cancel background tasks
         idle_monitor_task.cancel()
         touch_task.cancel()
+        straggler_monitor_task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await idle_monitor_task
         with contextlib.suppress(asyncio.CancelledError):
             await touch_task
+        with contextlib.suppress(asyncio.CancelledError):
+            await straggler_monitor_task
 
         logger.info("Daemon shutdown complete")
 
@@ -945,6 +1058,10 @@ class HooksDaemon:
                 "the legacy socket",
                 events_dir,
             )
+            self._event_socket_skips = {
+                meta.wire_key.value: f"events dir {events_dir} is a pre-existing symlink"
+                for meta in wired_event_metas()
+            }
             return
         if events_dir.exists():
             try:
@@ -960,6 +1077,7 @@ class HooksDaemon:
         events_dir.mkdir(parents=True, mode=0o750, exist_ok=True)
 
         bound: dict[str, asyncio.Server] = {}
+        skipped: dict[str, str] = {}
         for meta in wired_event_metas():
             event_socket_path = get_event_socket_path_in_dir(events_dir, meta.bash_key)
             if event_socket_path is None:
@@ -968,6 +1086,9 @@ class HooksDaemon:
                     "length limit even under the events dir; served only via "
                     "the legacy socket",
                     meta.json_key,
+                )
+                skipped[meta.wire_key.value] = (
+                    f"{events_dir / meta.bash_key}.sock exceeds the AF_UNIX path length limit"
                 )
                 continue
             try:
@@ -986,6 +1107,7 @@ class HooksDaemon:
                     meta.wire_key.value,
                     e,
                 )
+                skipped[meta.wire_key.value] = f"bind failed: {e}"
                 continue
             # Securing the socket is the second half of binding it, so it
             # shares the first half's best-effort contract: one event drops to
@@ -1008,10 +1130,12 @@ class HooksDaemon:
                     e,
                 )
                 await _discard_unsecured_socket(event_server, event_socket_path)
+                skipped[meta.wire_key.value] = f"could not be secured: {e}"
                 continue
             bound[meta.wire_key.value] = event_server
 
         self._event_servers = bound
+        self._event_socket_skips = skipped
         total_wired = len(wired_event_metas())
         if len(bound) < total_wired:
             # Plan 00290 F3 fix (canary run 2): the canary saw most events
@@ -1055,15 +1179,89 @@ class HooksDaemon:
             chunks.append(chunk)
         return b"".join(chunks)
 
+    @staticmethod
+    async def _drain_oversized_request(reader: _ChunkReader) -> None:
+        """Discard the rest of an over-limit legacy-socket request.
+
+        Plan 00466 N40 m5. Called after ``readline()`` raises on exceeding
+        ``SocketLimit.REQUEST_BUFFER_BYTES``: the sender's write may still be
+        landing, and responding + closing while data is still unread can make
+        a Unix domain socket RST rather than cleanly FIN-close, losing the
+        error response the caller is about to send.
+
+        This protocol carries no length header, so there is no way to know
+        "every byte the sender meant to send has now been read" versus "the
+        sender has gone quiet but is not done" -- the real client
+        (``init.sh``) sends its whole request with one blocking call before
+        it ever tries to read a response, so by the time we get here it has
+        nothing left to send, and ``reader.read()`` would otherwise block
+        forever waiting for bytes that are never coming (the peer is idle,
+        not at EOF). Each read is therefore individually bounded by
+        ``_OVERSIZED_REQUEST_DRAIN_PER_READ_TIMEOUT_SECONDS``: silence for
+        that long reads as "nothing more is coming", not as "still arriving".
+        The running total is additionally capped by
+        ``_OVERSIZED_REQUEST_DRAIN_CAP_BYTES`` so a sender that keeps
+        streaming cannot hang this connection indefinitely either, and the
+        elapsed time by ``_OVERSIZED_REQUEST_DRAIN_TOTAL_SECONDS`` so neither
+        can one that trickles.
+        """
+        deadline = _drain_clock() + _OVERSIZED_REQUEST_DRAIN_TOTAL_SECONDS
+        drained = 0
+        while drained < _OVERSIZED_REQUEST_DRAIN_CAP_BYTES:
+            remaining = deadline - _drain_clock()
+            if remaining <= 0:
+                return
+            try:
+                chunk = await asyncio.wait_for(
+                    reader.read(_EVENT_PAYLOAD_READ_CHUNK_BYTES),
+                    timeout=min(_OVERSIZED_REQUEST_DRAIN_PER_READ_TIMEOUT_SECONDS, remaining),
+                )
+            except (TimeoutError, ConnectionResetError, BrokenPipeError, OSError) as e:
+                logger.warning(
+                    "Oversized-request drain stopped early after %d bytes (%s)",
+                    drained,
+                    e,
+                )
+                break
+            if not chunk:
+                return
+            drained += len(chunk)
+
     async def _answer_event(
-        self, event_json_key: str, hook_input: Any, writer: asyncio.StreamWriter
+        self,
+        event_json_key: str,
+        hook_input: Any,
+        writer: asyncio.StreamWriter,
+        *,
+        arrival_time: float | None = None,
     ) -> None:
-        """Dispatch one parsed event-socket payload and write its response."""
+        """Dispatch one parsed event-socket payload and write its response.
+
+        Args:
+            arrival_time: ``time.perf_counter()`` reading taken at request
+                arrival (Plan 00466 N40 M1), forwarded to
+                ``_process_request`` so the chain deadline is measured from
+                before this coroutine was even scheduled, not from wherever
+                it happens to start executing.
+        """
         if isinstance(hook_input, dict) and not hook_input.get(HookInputField.HOOK_EVENT_NAME):
             hook_input[HookInputField.HOOK_EVENT_NAME] = event_json_key
 
         request_data = json.dumps({"event": event_json_key, "hook_input": hook_input})
-        response = await self._process_request(request_data)
+        response = await self._process_request(request_data, arrival_time=arrival_time)
+        if event_json_key == _PRE_TOOL_USE_WIRE_KEY and not _pre_tool_use_response_looks_valid(
+            response
+        ):
+            # Plan 00466 N24 review 3 MA2: _process_request answered, but not
+            # with a judged PreToolUse verdict (an invalid_request or
+            # input_validation_failed error envelope, for example). A
+            # byte-pump relay client cannot apply this check itself, so
+            # refuse to put a non-verdict shape on this wire at all.
+            logger.warning(
+                "Non-verdict response on PreToolUse event socket: %s",
+                json.dumps(response)[:200],
+            )
+            response = _pre_tool_use_transport_deny_response()
         response_json = json.dumps(response)
 
         if is_blocking_response(response):
@@ -1081,9 +1279,13 @@ class HooksDaemon:
         ``{"event": event_json_key, "hook_input": <parsed>}`` and dispatches
         through the SAME ``_process_request`` path the legacy socket uses
         (DESIGN-socket-relay.md §2). A malformed or oversized payload fails
-        open with an empty ``{}`` response — Claude Code must always receive
-        valid JSON, and ``{}`` carries no policy (the same passthrough
-        contract every unhandled event already gets).
+        open with an empty ``{}`` response for every event EXCEPT PreToolUse
+        — Claude Code must always receive valid JSON, and ``{}`` carries no
+        policy (the same passthrough contract every unhandled event already
+        gets). On the PreToolUse socket specifically, a malformed/oversized
+        payload, an uncaught exception, and (Plan 00466 N24 review 3 MA2) any
+        judged-but-non-verdict response all fail CLOSED instead, via
+        ``_pre_tool_use_transport_deny_response()``.
 
         **hook_event_name enrichment (Plan 00290 dogfood field report, commit
         9d353fd3 EMERGENCY suspension, defect 2)**: the legacy bash transport
@@ -1100,6 +1302,12 @@ class HooksDaemon:
         """
         self._active_requests += 1
         self.last_activity = time.time()
+        # Plan 00466 N40 M1: the chain deadline is measured from HERE, not
+        # from wherever `_process_request` eventually gets scheduled --
+        # `run_in_executor` queueing below must count against the budget
+        # too, or a request already judged late by the client's own socket
+        # timeout still looks on-time to the chain.
+        arrival_time = time.perf_counter()
         try:
             try:
                 raw = await self._read_event_payload(reader, SocketLimit.REQUEST_BUFFER_BYTES)
@@ -1110,17 +1318,29 @@ class HooksDaemon:
                     event_json_key,
                     exc,
                 )
-                writer.write(json.dumps({}).encode())
+                fail_response = (
+                    _pre_tool_use_transport_deny_response()
+                    if event_json_key == _PRE_TOOL_USE_WIRE_KEY
+                    else {}
+                )
+                writer.write(json.dumps(fail_response).encode())
                 await writer.drain()
             else:
-                await self._answer_event(event_json_key, hook_input, writer)
+                await self._answer_event(
+                    event_json_key, hook_input, writer, arrival_time=arrival_time
+                )
 
         except (BrokenPipeError, ConnectionResetError):
             self._log_lost_peer(None)
         except Exception as e:
             logger.exception("Error handling event-socket client (%s): %s", event_json_key, e)
+            fail_response = (
+                _pre_tool_use_transport_deny_response()
+                if event_json_key == _PRE_TOOL_USE_WIRE_KEY
+                else {}
+            )
             with contextlib.suppress(OSError):
-                writer.write(json.dumps({}).encode())
+                writer.write(json.dumps(fail_response).encode())
                 await writer.drain()
         finally:
             self._active_requests -= 1
@@ -1180,6 +1400,75 @@ class HooksDaemon:
                     break
         except asyncio.CancelledError:
             logger.debug("Idle timeout monitor cancelled")
+            raise
+
+    # How often the straggler watchdog polls health (Plan 00466 N40 M2).
+    # Cheap (one dict read from the shared dispatcher's own lock-protected
+    # state) -- no need for this to track `_idle_check_interval`.
+    _STRAGGLER_CHECK_INTERVAL_SECONDS = 10.0
+
+    async def _monitor_straggler_health(self) -> None:
+        """Self-restart once the oldest abandoned handler dispatch
+        ("straggler") has been running longer than
+        ``daemon.chain.straggler_restart_after_seconds`` (Plan 00466 N40
+        M2).
+
+        Enough stragglers pile up (each still consuming a thread, and for a
+        CPU-bound one, real CPU) that the shared dispatcher's straggler cap
+        (:mod:`core.bounded_dispatch`) denies every future PreToolUse call
+        outright -- and the command an agent would use to recover
+        (``bin/hooks-daemon restart``) is ITSELF a PreToolUse call, so
+        nothing short of a restart gets through. Exiting here is recovery,
+        not an outage: the client's own lazy auto-start (``ensure_daemon``
+        in ``init.sh``) brings up a fresh process on the very next hook
+        call, and that fresh process starts with zero stragglers.
+
+        A crash reading health (e.g. a legacy controller with no
+        ``get_health``, or one that raises) is logged and the loop keeps
+        ticking -- a watchdog that dies silently on its own defect is worse
+        than one that occasionally skips a cycle.
+        """
+        try:
+            while not self._shutdown_requested:
+                await asyncio.sleep(self._STRAGGLER_CHECK_INTERVAL_SECONDS)
+
+                if not (self._is_new_controller and isinstance(self.controller, Controller)):
+                    continue  # legacy controller: no get_health() to poll
+
+                try:
+                    health = self.controller.get_health()
+                except Exception:
+                    logger.exception("Straggler health check failed; skipping this cycle")
+                    continue
+
+                stragglers = health.get("stragglers")
+                if not isinstance(stragglers, dict):
+                    continue
+
+                restart_after = stragglers.get("restart_after_seconds")
+                if restart_after is None:
+                    continue  # self-restart disabled
+                oldest_age = stragglers.get("oldest_age_seconds", 0.0)
+                # At the cap every event holding a SAFETY+BLOCKING handler is
+                # refused, Stop included (which loops the agent), and nothing
+                # can be judged until a restart: waiting for age only prolongs
+                # it (Plan 00466 N40 review 2 mA3).
+                at_capacity = stragglers.get("at_capacity") is True
+                if at_capacity or oldest_age >= restart_after:
+                    logger.critical(
+                        "Self-restarting: %s (oldest abandoned handler dispatch has "
+                        "run %.1fs; restart threshold %.1fs; %s straggler(s) total). "
+                        "The client's own lazy auto-start will bring up a fresh "
+                        "daemon on the next hook call.",
+                        "the straggler cap is reached" if at_capacity else "a straggler is too old",
+                        oldest_age,
+                        restart_after,
+                        stragglers.get("count", "?"),
+                    )
+                    await self.shutdown()
+                    break
+        except asyncio.CancelledError:
+            logger.debug("Straggler health monitor cancelled")
             raise
 
     async def shutdown(self) -> None:
@@ -1269,36 +1558,66 @@ class HooksDaemon:
 
         try:
             # Read request (newline-delimited JSON)
-            request_data = await reader.readline()
+            try:
+                request_data = await reader.readline()
+            except ValueError as e:
+                # `readline()` re-raises asyncio's LimitOverrunError as a bare
+                # ValueError once the line exceeds `SocketLimit.REQUEST_
+                # BUFFER_BYTES` (Plan 00466 N40 m5). The sender's write may
+                # still be landing in the OS socket buffer at this point --
+                # writing a response and closing without draining it first
+                # can make a Unix domain socket RST instead of cleanly
+                # FIN-closing, and the client then sees a bare
+                # BrokenPipeError/ConnectionResetError with NO response at
+                # all, indistinguishable from the daemon having crashed. Drain
+                # first so the response actually arrives, and
+                # `.claude/init.sh`'s existing malformed_response handling
+                # (which fails CLOSED for PreToolUse) gets a real response to
+                # act on instead of nothing.
+                logger.warning("Oversized request on legacy socket: %s", e)
+                await self._drain_oversized_request(reader)
+                with contextlib.suppress(BrokenPipeError, ConnectionResetError, OSError):
+                    error_response = {
+                        "error": f"request exceeds {SocketLimit.REQUEST_BUFFER_BYTES} bytes"
+                    }
+                    writer.write((json.dumps(error_response) + "\n").encode())
+                    await writer.drain()
+            else:
+                if not request_data:
+                    logger.warning("Received empty request")
+                else:
+                    # Plan 00466 N40 M1: arrival is HERE, before
+                    # `_process_request`'s own `run_in_executor` queueing
+                    # delay -- see the matching note in `_handle_event_client`.
+                    arrival_time = time.perf_counter()
 
-            if not request_data:
-                logger.warning("Received empty request")
-                return
+                    # Parse and process request
+                    start_time = time.time()
+                    response = await self._process_request(
+                        request_data.decode(), arrival_time=arrival_time
+                    )
+                    elapsed_ms = (time.time() - start_time) * 1000
 
-            # Parse and process request
-            start_time = time.time()
-            response = await self._process_request(request_data.decode())
-            elapsed_ms = (time.time() - start_time) * 1000
+                    # Note: timing_ms removed - Claude Code schema doesn't
+                    # accept it as top-level field. Timing is logged below for
+                    # internal metrics only.
 
-            # Note: timing_ms removed - Claude Code schema doesn't accept it as top-level field
-            # Timing is logged below for internal metrics only
+                    # Send response
+                    response_json = json.dumps(response) + "\n"
 
-            # Send response
-            response_json = json.dumps(response) + "\n"
+                    # DEBUG: log responses that actually block or interrupt the
+                    # user. Read structurally from the decision fields — see
+                    # is_blocking_response for why a substring test over the
+                    # serialised response is not the same question.
+                    if is_blocking_response(response):
+                        log_blocking_response(
+                            response_json, debug_enabled=logger.isEnabledFor(logging.DEBUG)
+                        )
 
-            # DEBUG: log responses that actually block or interrupt the user.
-            # Read structurally from the decision fields — see
-            # is_blocking_response for why a substring test over the serialised
-            # response is not the same question.
-            if is_blocking_response(response):
-                log_blocking_response(
-                    response_json, debug_enabled=logger.isEnabledFor(logging.DEBUG)
-                )
+                    writer.write(response_json.encode())
+                    await writer.drain()
 
-            writer.write(response_json.encode())
-            await writer.drain()
-
-            logger.debug("Request processed in %.2fms", elapsed_ms)
+                    logger.debug("Request processed in %.2fms", elapsed_ms)
 
         except (BrokenPipeError, ConnectionResetError):
             # A peer that hung up is not a daemon fault, and this is the common
@@ -1383,11 +1702,18 @@ class HooksDaemon:
         except (OSError, RuntimeError) as exc:
             logger.warning("Payload capture failed for %s: %s", event, exc)
 
-    async def _process_request(self, request_data: str) -> dict[str, Any]:
+    async def _process_request(
+        self, request_data: str, *, arrival_time: float | None = None
+    ) -> dict[str, Any]:
         """Process incoming hook request.
 
         Args:
             request_data: JSON-encoded request string
+            arrival_time: ``time.perf_counter()`` reading taken at request
+                arrival (Plan 00466 N40 M1), from BEFORE this coroutine was
+                even scheduled -- see the callers' own notes. None (the
+                default) leaves the chain deadline measured from wherever
+                the request happens to actually start executing.
 
         Returns:
             Response dictionary with result or error
@@ -1453,9 +1779,12 @@ class HooksDaemon:
         loop = asyncio.get_running_loop()
 
         if self._is_new_controller and isinstance(self.controller, Controller):
-            # New DaemonController - use process_request directly
+            # New DaemonController - use process_request directly. `partial`
+            # carries `arrival_time` through run_in_executor, which only accepts
+            # positional args for the target callable (Plan 00466 N40 M1).
             result: dict[str, Any] = await loop.run_in_executor(
-                None, self.controller.process_request, request
+                None,
+                partial(self.controller.process_request, request, arrival_time=arrival_time),
             )
             if request_id:
                 result["request_id"] = request_id
@@ -1478,6 +1807,27 @@ class HooksDaemon:
             return response_dict
         else:
             return {"error": "Unknown controller type"}
+
+    def _with_event_socket_skips(self, health: dict[str, Any]) -> dict[str, Any]:
+        """Add the per-event sockets this daemon could not bind to ``health``.
+
+        The server owns the sockets, so it adds this reason itself; the
+        controller's reasons are kept as they are. A skipped event falls back
+        to the bash forwarder, so the relay does nothing for it
+        (Plan 00466 N24 review 2 P1).
+        """
+        if not self._event_socket_skips:
+            return health
+        reasons = [*health.get("degraded_reasons", []), "event_sockets"]
+        return {
+            **health,
+            "status": "degraded",
+            "degraded_reasons": reasons,
+            "event_socket_skips": [
+                {"event": event, "reason": reason}
+                for event, reason in self._event_socket_skips.items()
+            ],
+        }
 
     def _handle_system_request(
         self, hook_input: dict[str, Any], request_id: str | None
@@ -1512,7 +1862,7 @@ class HooksDaemon:
                     "stats": {"uptime_seconds": 0, "requests_processed": 0},
                     "handlers": {},
                 }
-            response = {"result": health_result}
+            response = {"result": self._with_event_socket_skips(health_result)}
 
         elif action == "handlers":
             if self._is_new_controller and isinstance(self.controller, Controller):

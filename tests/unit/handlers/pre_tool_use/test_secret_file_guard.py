@@ -855,10 +855,12 @@ class TestFailsClosedOnEvaluationError:
         assert "synthetic failure injected by the test" not in result.reason
 
     def test_read_route_exception_still_denies(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        def _raise(*_args: object, **_kwargs: object) -> bool:
-            raise ValueError("synthetic path_is_protected failure")
+        def _raise(*_args: object, **_kwargs: object) -> str | None:
+            raise ValueError("synthetic protecting_pattern failure")
 
-        monkeypatch.setattr(sfm, "path_is_protected", _raise)
+        # The Read route's own seam: it asks `protecting_pattern`, not
+        # `path_is_protected`, so patching the latter would inject nothing.
+        monkeypatch.setattr(sfm, "protecting_pattern", _raise)
         handler = _handler()
         hook_input = _hook_input("Read", {"file_path": "/proj/ordinary.py"})
 
@@ -892,7 +894,7 @@ class TestFailsClosedOnEvaluationError:
     def test_grep_directory_route_exception_still_denies(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.setattr(sfm, "path_is_protected", lambda *_a, **_k: False)
+        monkeypatch.setattr(sfm, "protecting_pattern", lambda *_a, **_k: None)
 
         def _raise(*_args: object, **_kwargs: object) -> None:
             raise OSError("synthetic directory-walk failure")

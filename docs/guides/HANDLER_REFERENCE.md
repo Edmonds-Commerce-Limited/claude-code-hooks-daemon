@@ -3184,17 +3184,22 @@ handlers:
 | **Type**       | Advisory                     |
 | **Event**      | PostToolUse                  |
 
-**Description:** Scans a completed tool call's response for budget/quota-exhaustion messaging and tells the agent to report it to you prominently instead of retrying the exhausted tool or quietly degrading to a worse alternative. These budgets are otherwise invisible: the harness replaces the tool result with a system message, so an agent can lose a capability mid-task and you never learn why the work came back thinner. Advisory only — it never blocks.
+**Description:** Matches a completed tool call's response against a small set of CHANNEL-SCOPED signals — never a keyword scanned across every tool's response — and tells the agent to report a hit to you prominently instead of retrying the exhausted tool or quietly degrading to a worse alternative. These budgets are otherwise invisible: the harness replaces the tool result with a system message, so an agent (or a dispatched sub-agent) can lose a capability mid-task and you never learn why. Advisory only — it never blocks.
 
-Matched shapes: the web-search refusal fragments, plus generic "budget…exhausted/used up/exceeded", "quota exceeded" and "budget…limit reached". It deliberately never keys on the ceiling NUMBER (e.g. `CLAUDE_CODE_MAX_WEB_SEARCHES`), which would false-fire on ordinary counts. Each hit is appended to an untracked `budget-exhaustion-events.jsonl` ledger.
+Two built-in signals, each matched ONLY against the tool it can genuinely arrive from:
 
-**Two self-referential guards** stop it feeding on its own material: a Bash command naming the handler or its ledger is skipped, and so is a tool RESPONSE containing either marker (reading a changelog entry that describes the detector is documentation, not a live signal). Both key on those markers only — prose that discusses budget exhaustion without naming the detector is still matched, by design.
+- **WebSearch** — the web-search budget-refusal text ("Web search was not performed" / "web search budget"), only when `tool_name == WebSearch`. Never keys on the ceiling NUMBER (e.g. `CLAUDE_CODE_MAX_WEB_SEARCHES_PER_SESSION`), which would false-fire on ordinary counts.
+- **Task/Agent** — a dispatched sub-agent cut off mid-task by a harness usage-limit rejection ("Agent terminated early due to an API error: You've hit your session/weekly limit..."), anchored at the START of the response so a sub-agent's own prose merely quoting the phrase mid-response cannot match. The advisory names which dispatch died (preferring `name`) and tells you to re-brief it once the limit resets. **Foreground dispatches only**: a background/teammate dispatch returns before any later limit hits, so its death never reaches this PostToolUse handler — see Plan 00470 Tasks 3.1/3.2 (StopFailure/Notification) for that separate channel.
 
-| Option           | Values     | Default                                                 | Effect                                                              |
-| ---------------- | ---------- | ------------------------------------------------------- | ------------------------------------------------------------------- |
-| `excluded_tools` | list       | `Read`, `Grep`, `Glob`, `Edit`, `Write`, `NotebookEdit` | Tools whose responses are never scanned (they return file content). |
-| `extra_patterns` | regex list | none                                                    | Additional project-specific shapes; additive to the built-ins.      |
-| `exclude_paths`  | glob list  | none                                                    | Exempt paths entirely; unions with `daemon.exclude_paths`.          |
+A prior "generic" keyword family (any "budget"/"quota"/"limit reached" wording, matched against any non-excluded tool) was removed: it had no confirmed channel and was a repeat false-positive source. Bash is excluded outright — its response is the model's own invoked command output, never a harness-populated field, so no command's stdout is ever scanned regardless of which verb produced it. Each hit is appended to an untracked `budget-exhaustion-events.jsonl` ledger.
+
+**Two structural guards** stop it feeding on its own material: any span of a tool response that structurally IS this handler's own ledger record (a JSON object carrying its record key set) is stripped before matching, and a tool RESPONSE containing a literal marker naming the handler or its ledger is skipped (reading a changelog entry that describes the detector is documentation, not a live signal). Prose that discusses budget exhaustion without naming the detector or matching a signal's own channel/shape is not matched, by design.
+
+| Option           | Values     | Default                                                         | Effect                                                                                                                                                                                                                                                         |
+| ---------------- | ---------- | --------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `excluded_tools` | list       | `Read`, `Grep`, `Glob`, `Edit`, `Write`, `NotebookEdit`, `Bash` | Tools whose responses are never scanned. Task/Agent are NOT excluded by default — see the description above.                                                                                                                                                   |
+| `extra_patterns` | regex list | none                                                            | Additional project-specific shapes, applied tool-agnostically to any tool not in `excluded_tools`. Pointing one at Bash requires removing `Bash` from `excluded_tools` and writing a pattern specific enough that ordinary output cannot match it by accident. |
+| `exclude_paths`  | glob list  | none                                                            | Exempt paths entirely; unions with `daemon.exclude_paths`.                                                                                                                                                                                                     |
 
 **Config example:**
 
@@ -3206,6 +3211,28 @@ handlers:
       options:
         extra_patterns:
           - "custom budget ceiling hit"
+```
+
+---
+
+#### agent_terminated_early_failure_detector
+
+| Property       | Value                                     |
+| -------------- | ----------------------------------------- |
+| **Config key** | `agent_terminated_early_failure_detector` |
+| **Type**       | Advisory                                  |
+| **Event**      | PostToolUseFailure                        |
+
+**Description:** The PostToolUseFailure sibling of `budget_exhaustion_detector`'s Agent/Task signal. A foreground Agent/Task dispatch that dies with `is_error: true` delivers its death through PostToolUseFailure's `error` field, not PostToolUse — `budget_exhaustion_detector` never receives this event. Matches the harness's own `Agent terminated early due to an API error: You've hit your session/weekly limit...` text — the live `error` field carries it BARE, with no `Error: ` prefix; that prefix belongs only to the transcript's own separate recording of the same occurrence, and is matched too, optionally — anchored at the response's start with the same stable `(error type rate_limit, HTTP 429` tail requirement as its sibling, channel-scoped to Task/Agent only. The advisory names which dispatch died (preferring `name`) and tells you to re-brief it once the limit resets. **Foreground dispatches only** — a background/teammate dispatch killed after moving to the background never reaches PostToolUse or PostToolUseFailure at all; see Plan 00470 Tasks 3.1/3.2 (StopFailure/Notification) for that channel. Never blocks.
+
+**Config example:**
+
+```yaml
+handlers:
+  post_tool_use_failure:
+    agent_terminated_early_failure_detector:
+      enabled: true
+      priority: 10
 ```
 
 ---

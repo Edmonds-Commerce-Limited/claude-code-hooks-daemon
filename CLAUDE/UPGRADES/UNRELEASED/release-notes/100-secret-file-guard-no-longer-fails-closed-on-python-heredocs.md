@@ -113,6 +113,19 @@ bash reads them:
   `$'…'` that decodes to a brace, or an unknown expansion where `eval`,
   `bash -c`, `ssh` or a similar word reads text again, now fails closed
   instead.
+- A quote-free word whose group bash reads differently from plain pairing:
+  `cat .vault-{},pass}` names `.vault-pass`, because bash reads a `}` before
+  the first comma as text. Only a word holding a quoting character used to
+  get bash's reading.
+- A here-string: `bash <<< $'cat .vault-\x7bpass,q\x7d'` runs the decoded
+  text. The guard read the here-string's word as a heredoc delimiter and
+  never looked at it.
+
+The same here-string mistake is fixed in the heredoc exemption shared by
+several guards. In `cat <<<'EOF'`, the line after is a command bash runs,
+but the guards read it as a quoted heredoc body and skipped it. So
+`destructive_git`, `pipe_blocker` and the other guards using that exemption
+now judge it, and `background_process_tracker` sees an `&` on it.
 
 The same change fixes how the heredoc data-sink exemption shared by several
 guards names its receiver. `sudo -p cat bash <<'EOF'` and

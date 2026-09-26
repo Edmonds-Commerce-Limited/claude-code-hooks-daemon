@@ -325,6 +325,9 @@ class TestEndToEndBlockingScenarios:
         (`daemon/controller.py`), and `project_containment` fails CLOSED
         (Plan 00466 N11) rather than open when it is not, which would
         otherwise pre-empt sed_blocker on this command's file argument.
+        ``enforce-project-containment`` is also ``SAFETY``+``BLOCKING``, so
+        N24's fail-closed-on-raise denies the WHOLE chain if it raises, and
+        ``terminated_by`` would name it rather than ``block-sed-command``.
         """
         # Create config
         config_file = project_context / ".claude" / "hooks-daemon.yaml"

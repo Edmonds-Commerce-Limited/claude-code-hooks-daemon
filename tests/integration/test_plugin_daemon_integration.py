@@ -147,6 +147,8 @@ def daemon_with_plugin(daemon_env_with_plugin: dict[str, Any]):
         sys.executable,
         "-m",
         "claude_code_hooks_daemon.daemon.cli",
+        "--project-root",
+        str(project_root),
         "start",
     ]
     with open("/dev/null", "w") as devnull:
@@ -166,7 +168,14 @@ def daemon_with_plugin(daemon_env_with_plugin: dict[str, Any]):
     time.sleep(1.5)
 
     # Get status to verify running
-    status_cmd = [sys.executable, "-m", "claude_code_hooks_daemon.daemon.cli", "status"]
+    status_cmd = [
+        sys.executable,
+        "-m",
+        "claude_code_hooks_daemon.daemon.cli",
+        "--project-root",
+        str(project_root),
+        "status",
+    ]
     status_result = subprocess.run(
         status_cmd,
         cwd=project_root,
@@ -184,7 +193,14 @@ def daemon_with_plugin(daemon_env_with_plugin: dict[str, Any]):
     yield daemon_env_with_plugin
 
     # Cleanup: Stop daemon
-    stop_cmd = [sys.executable, "-m", "claude_code_hooks_daemon.daemon.cli", "stop"]
+    stop_cmd = [
+        sys.executable,
+        "-m",
+        "claude_code_hooks_daemon.daemon.cli",
+        "--project-root",
+        str(project_root),
+        "stop",
+    ]
     subprocess.run(
         stop_cmd,
         cwd=project_root,
@@ -261,7 +277,14 @@ class TestPluginDaemonIntegration:
         test_env = os.environ.copy()
 
         # Get daemon status/health
-        status_cmd = [sys.executable, "-m", "claude_code_hooks_daemon.daemon.cli", "status"]
+        status_cmd = [
+            sys.executable,
+            "-m",
+            "claude_code_hooks_daemon.daemon.cli",
+            "--project-root",
+            str(project_root),
+            "status",
+        ]
         status_result = subprocess.run(
             status_cmd,
             cwd=project_root,
@@ -368,7 +391,14 @@ class TestPluginDaemonIntegration:
         test_env = os.environ.copy()
 
         # Start daemon
-        start_cmd = [sys.executable, "-m", "claude_code_hooks_daemon.daemon.cli", "start"]
+        start_cmd = [
+            sys.executable,
+            "-m",
+            "claude_code_hooks_daemon.daemon.cli",
+            "--project-root",
+            str(project_root),
+            "start",
+        ]
         with open("/dev/null", "w") as devnull:
             result = subprocess.run(
                 start_cmd,
@@ -397,7 +427,14 @@ class TestPluginDaemonIntegration:
         context_before = hook_output_before.get("additionalContext", "")
 
         # Stop daemon
-        stop_cmd = [sys.executable, "-m", "claude_code_hooks_daemon.daemon.cli", "stop"]
+        stop_cmd = [
+            sys.executable,
+            "-m",
+            "claude_code_hooks_daemon.daemon.cli",
+            "--project-root",
+            str(project_root),
+            "stop",
+        ]
         subprocess.run(
             stop_cmd,
             cwd=project_root,
@@ -408,7 +445,14 @@ class TestPluginDaemonIntegration:
         time.sleep(1)
 
         # Verify stopped
-        status_cmd = [sys.executable, "-m", "claude_code_hooks_daemon.daemon.cli", "status"]
+        status_cmd = [
+            sys.executable,
+            "-m",
+            "claude_code_hooks_daemon.daemon.cli",
+            "--project-root",
+            str(project_root),
+            "status",
+        ]
         status_result = subprocess.run(
             status_cmd,
             cwd=project_root,
@@ -540,7 +584,14 @@ plugins:
 
         # Start daemon
         test_env = os.environ.copy()
-        start_cmd = [sys.executable, "-m", "claude_code_hooks_daemon.daemon.cli", "start"]
+        start_cmd = [
+            sys.executable,
+            "-m",
+            "claude_code_hooks_daemon.daemon.cli",
+            "--project-root",
+            str(tmp_path),
+            "start",
+        ]
         with open("/dev/null", "w") as devnull:
             result = subprocess.run(
                 start_cmd,
@@ -565,7 +616,14 @@ plugins:
         time.sleep(1.5)
 
         # Verify daemon is RUNNING
-        status_cmd = [sys.executable, "-m", "claude_code_hooks_daemon.daemon.cli", "status"]
+        status_cmd = [
+            sys.executable,
+            "-m",
+            "claude_code_hooks_daemon.daemon.cli",
+            "--project-root",
+            str(tmp_path),
+            "status",
+        ]
         status_result = subprocess.run(
             status_cmd,
             cwd=tmp_path,
@@ -637,7 +695,14 @@ plugins:
 
         finally:
             # Cleanup
-            stop_cmd = [sys.executable, "-m", "claude_code_hooks_daemon.daemon.cli", "stop"]
+            stop_cmd = [
+                sys.executable,
+                "-m",
+                "claude_code_hooks_daemon.daemon.cli",
+                "--project-root",
+                str(tmp_path),
+                "stop",
+            ]
             subprocess.run(
                 stop_cmd,
                 cwd=tmp_path,
@@ -728,7 +793,14 @@ plugins:
         # Start daemon - should CRASH with missing plugin (FAIL FAST)
         # Plan 00100 Task 0.2: cli.py start polls for PID file up to 5s, so
         # the subprocess timeout must exceed that window plus fork overhead.
-        start_cmd = [sys.executable, "-m", "claude_code_hooks_daemon.daemon.cli", "start"]
+        start_cmd = [
+            sys.executable,
+            "-m",
+            "claude_code_hooks_daemon.daemon.cli",
+            "--project-root",
+            str(tmp_path),
+            "start",
+        ]
         result = subprocess.run(
             start_cmd,
             cwd=tmp_path,
@@ -752,7 +824,14 @@ plugins:
         ), "Error message should indicate daemon startup failure"
 
         # Verify daemon is NOT running
-        status_cmd = [sys.executable, "-m", "claude_code_hooks_daemon.daemon.cli", "status"]
+        status_cmd = [
+            sys.executable,
+            "-m",
+            "claude_code_hooks_daemon.daemon.cli",
+            "--project-root",
+            str(tmp_path),
+            "status",
+        ]
         status_result = subprocess.run(
             status_cmd,
             cwd=tmp_path,

@@ -89,7 +89,7 @@ class TestStagingIntoTheHoldingAreaIsNeverFlagged:
         "line",
         [
             "- [x] ✅ Every release-bound consequence is in the pending-release "
-            "holding area: `UNRELEASED/release-notes/01-thing.md`.",
+            "holding area: `UNRELEASED/release-notes/001-thing.md`.",
             "- [x] ✅ This plan has no release-bound consequences: internal refactor only.",
             "- [ ] ⬜ Write the release-notes callout into `UNRELEASED/release-notes/`.",
             "- [x] ✅ A config-changes manifest is staged in `UNRELEASED/config-changes/`.",

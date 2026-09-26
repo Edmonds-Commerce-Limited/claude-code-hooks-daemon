@@ -400,8 +400,11 @@ def _serialise(settings: Mapping[str, Any]) -> str:
 def _write_atomically(path: Path, text: str) -> None:
     """Write ``text`` to ``path`` via a temp file in the same directory.
 
-    The lost-update reasoning below (four unlocked writers, worst case a lost
-    update rather than corruption) only holds while every writer is atomic.
+    The lost-update reasoning below (five unlocked writers -- this merge, the
+    legacy-command migrator, the upgrade deploy, install.py, and Claude Code
+    itself via `/plugin` / `claude plugin install|enable|disable` -- worst
+    case a lost update rather than corruption) only holds while every writer
+    is atomic.
     ``write_text`` truncates before it writes, so an interruption left a
     half-written ``settings.json`` -- a file Claude Code cannot parse, taking
     every hook down with it (Plan 00364 Task 2.7). Same directory, so the
@@ -487,8 +490,9 @@ def run_settings_merge(
     if not report.changed:
         return MergeOutcome(status=MergeStatus.UNCHANGED, report=report, messages=tuple(notes))
 
-    # Re-read immediately before writing. Four things write this file with no
-    # lock between them; every whole-file writer here is atomic
+    # Re-read immediately before writing. Five things write this file with no
+    # lock between them (Plan 00468 G7 adds Claude Code's own plugin CLI to
+    # the count); every whole-file writer here is atomic
     # (`_write_atomically`), so the failure mode is a LOST UPDATE rather than
     # corruption, and re-reading is the cheap mitigation. A lock is worth
     # adding when one is actually observed, not in anticipation.

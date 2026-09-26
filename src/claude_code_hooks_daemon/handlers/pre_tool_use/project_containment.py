@@ -70,6 +70,7 @@ from claude_code_hooks_daemon.core.utils import (
 )
 from claude_code_hooks_daemon.utils.claude_config import claude_config_dir, session_config_dir
 from claude_code_hooks_daemon.utils.command_evasion import strip_reserved_word_prefix
+from claude_code_hooks_daemon.utils.realpath import has_symlink_loop, realpath
 from claude_code_hooks_daemon.utils.scratch_dir import acceptance_path
 from claude_code_hooks_daemon.utils.shell_segmentation import split_unquoted
 
@@ -349,7 +350,9 @@ class ProjectContainmentHandler(PreToolUseHandlerBase):
         path (Plan 00468 G10); see :func:`session_config_dir`."""
         return session_config_dir(hook_input.get(HookInputField.TRANSCRIPT_PATH))
 
-    def _offending_targets(self, hook_input: dict[str, Any], root: Path) -> list[str]:
+    def _offending_targets(
+        self, hook_input: dict[str, Any], root: Path, named_targets: list[str]
+    ) -> list[str]:
         """Every named write target in ``hook_input`` that lies outside ``root``.
 
         Args:
@@ -358,6 +361,9 @@ class ProjectContainmentHandler(PreToolUseHandlerBase):
                 as a parameter rather than re-resolved, so a caller that
                 already has it — ``handle()``, after ``matches()`` succeeded —
                 never risks a SECOND unguarded raise from re-resolving it).
+            named_targets: ``_named_targets(hook_input)``, already computed by
+                the caller so it can return before resolving ``root`` when
+                there is nothing to judge (Plan 00466 N90).
 
         Returns:
             The offending paths in the order they were named, de-duplicated. A
@@ -368,7 +374,7 @@ class ProjectContainmentHandler(PreToolUseHandlerBase):
         session_home = self._session_claude_home(hook_input)
         offending: list[str] = []
 
-        for candidate in self._named_targets(hook_input):
+        for candidate in named_targets:
             if candidate in offending:
                 continue
             if self._is_outside(candidate, root) and not self._is_permitted(
@@ -391,8 +397,17 @@ class ProjectContainmentHandler(PreToolUseHandlerBase):
         rather than propagating — see ``_ERROR_RULE`` for why.
         """
         try:
+            named_targets = self._named_targets(hook_input)
+            if not named_targets:
+                # Nothing to judge. Returning before the root is resolved (Plan
+                # 00466 N90) matters because resolving it can itself fail
+                # (`ProjectContext.project_root()` raises when uninitialised)
+                # -- and a command naming no write target cannot escape the
+                # project either way, so there is nothing fail-closed protects
+                # here. A raise from `_named_targets` itself still denies below.
+                return [], None, None
             root = self._resolved_root()
-            return self._offending_targets(hook_input, root), root, None
+            return self._offending_targets(hook_input, root, named_targets), root, None
         except Exception as exc:
             # Deliberately broad: ANY exception during evaluation must deny,
             # never propagate (Plan 00466 N11) -- see the docstring above.
@@ -631,9 +646,23 @@ class ProjectContainmentHandler(PreToolUseHandlerBase):
         ``relative_to`` is component-wise, which is the point: a string prefix
         test would read ``/repo-backup`` as being inside ``/repo``, and that is
         the usual way a containment check fails.
+
+        A symlink LOOP anywhere on ``candidate`` is never "within" anything
+        (Plan 00466 N24 review 4, team-lead follow-up on R4-B1): once a loop
+        is hit, ``os.path.realpath``'s own answer for the rest of the path is
+        version-dependent (3.11 gives up and appends the remainder
+        unresolved; 3.13 backs out and keeps resolving), so ``realpath()``
+        cannot give a version-independent containment answer for this shape.
+        Returning ``False`` here denies it whichever of the two roles called
+        this: the root-containment check (a loop candidate is never within
+        the project root, so it is flagged as offending) and every exemption
+        check (a loop candidate is never within an allowed path either, so
+        it is never exempted) both fail CLOSED.
         """
+        if has_symlink_loop(candidate):
+            return False
         try:
-            Path(candidate).resolve().relative_to(container)
+            Path(realpath(candidate)).relative_to(container)
         except ValueError:
             return False
         return True
