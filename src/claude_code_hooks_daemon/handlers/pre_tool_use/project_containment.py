@@ -66,7 +66,7 @@ from claude_code_hooks_daemon.core.utils import (
     _UNEXPANDABLE_CHARACTERS,
     expand_home,
     get_bash_command,
-    get_bash_write_targets,
+    scan_bash_write_targets,
 )
 from claude_code_hooks_daemon.utils.claude_config import claude_config_dir, session_config_dir
 from claude_code_hooks_daemon.utils.command_evasion import strip_reserved_word_prefix
@@ -207,6 +207,27 @@ _ERROR_RULE = Rule(
         "crash the same way."
     ),
 )
+
+#: How much of the unread text a deny message quotes.
+_UNREADABLE_EXCERPT_LENGTH = 200
+
+
+class UnreadableCommandError(Exception):
+    """Command text the write-target tokeniser could not read (Plan 00466 N120).
+
+    Not a crash, so it is RETURNED as the evaluation error rather than logged
+    with a traceback -- but it denies through the same fail-closed route,
+    because what the unread text writes is unknown, not nothing.
+    """
+
+    def __init__(self, unreadable: str) -> None:
+        excerpt = unreadable[:_UNREADABLE_EXCERPT_LENGTH]
+        super().__init__(
+            "This command could not be read from here on, so what it writes "
+            f"cannot be judged:\n  {excerpt!r}\n"
+            "Close any unbalanced quote or split the command. If it is "
+            "well-formed bash, the daemon's tokeniser is at fault: report it."
+        )
 
 
 @dataclass(frozen=True)
@@ -397,7 +418,7 @@ class ProjectContainmentHandler(PreToolUseHandlerBase):
         rather than propagating — see ``_ERROR_RULE`` for why.
         """
         try:
-            named_targets = self._named_targets(hook_input)
+            named_targets, unreadable = self._named_targets(hook_input)
             if not named_targets:
                 # Nothing to judge. Returning before the root is resolved (Plan
                 # 00466 N90) matters because resolving it can itself fail
@@ -405,9 +426,18 @@ class ProjectContainmentHandler(PreToolUseHandlerBase):
                 # -- and a command naming no write target cannot escape the
                 # project either way, so there is nothing fail-closed protects
                 # here. A raise from `_named_targets` itself still denies below.
+                if unreadable is not None:
+                    return [], None, UnreadableCommandError(unreadable)
                 return [], None, None
             root = self._resolved_root()
-            return self._offending_targets(hook_input, root, named_targets), root, None
+            offending = self._offending_targets(hook_input, root, named_targets)
+            if not offending and unreadable is not None:
+                # A named out-of-root target is the more useful answer, so
+                # the unread text denies only when nothing else did.
+                return [], None, UnreadableCommandError(unreadable)
+            return offending, root, None
+        except UnreadableCommandError as exc:
+            return [], None, exc
         except Exception as exc:
             # Deliberately broad: ANY exception during evaluation must deny,
             # never propagate (Plan 00466 N11) -- see the docstring above.
@@ -432,8 +462,9 @@ class ProjectContainmentHandler(PreToolUseHandlerBase):
             return None
         return candidate
 
-    def _named_targets(self, hook_input: dict[str, Any]) -> list[str]:
-        """Paths this tool call plainly names as a write target."""
+    def _named_targets(self, hook_input: dict[str, Any]) -> tuple[list[str], str | None]:
+        """Paths this tool call plainly names as a write target, and any
+        command text the shared tokeniser could not read (Plan 00466 N120)."""
         targets: list[str] = []
 
         tool_name = hook_input.get(HookInputField.TOOL_NAME, "")
@@ -443,11 +474,13 @@ class ProjectContainmentHandler(PreToolUseHandlerBase):
             if named:
                 targets.append(str(named))
 
-        # `get_bash_write_targets` returns [] for a non-Bash event, so this is
-        # safe to ask unconditionally. It is conservative by contract: a target
-        # needing shell expansion yields nothing rather than a guess, because a
-        # WRONG path would attribute a write to a file never touched.
-        targets.extend(get_bash_write_targets(hook_input))
+        # The scan is empty for a non-Bash event, so this is safe to ask
+        # unconditionally. It is conservative by contract: a target needing
+        # shell expansion yields nothing rather than a guess, because a WRONG
+        # path would attribute a write to a file never touched. Text it could
+        # not read is returned beside the paths, never folded into "nothing".
+        scan = scan_bash_write_targets(hook_input)
+        targets.extend(scan.paths)
 
         # Shapes that accessor deliberately does not resolve. Its premise is
         # "content this command AUTHORED", which is why Plan 00260 excluded
@@ -475,7 +508,7 @@ class ProjectContainmentHandler(PreToolUseHandlerBase):
                 for target in self._destination_targets(command)
             )
 
-        return targets
+        return targets, scan.unreadable
 
     @staticmethod
     def _resolve_against_cwd(target: str, cwd: Any) -> str:
@@ -629,9 +662,12 @@ class ProjectContainmentHandler(PreToolUseHandlerBase):
             return []
 
         inner = arguments[index + 1]
-        targets = list(
-            get_bash_write_targets({"tool_name": ToolName.BASH, "tool_input": {"command": inner}})
+        scan = scan_bash_write_targets(
+            {"tool_name": ToolName.BASH, "tool_input": {"command": inner}}
         )
+        if scan.unreadable is not None:
+            raise UnreadableCommandError(scan.unreadable)
+        targets = list(scan.paths)
         targets.extend(self._destination_targets(inner, depth + 1))
         return targets
 
@@ -787,7 +823,10 @@ class ProjectContainmentHandler(PreToolUseHandlerBase):
                 tracker.mark_disclosed(transcript_path, _ERROR_RULE.rule_id)
             message = formatter.verbose(_ERROR_RULE)
 
-        message += f"\n\nInternal error: {type(error).__name__}: {error}"
+        if isinstance(error, UnreadableCommandError):
+            message += f"\n\n{error}"
+        else:
+            message += f"\n\nInternal error: {type(error).__name__}: {error}"
         return GatingResult(decision=Decision.DENY, reason=message)
 
     def get_claude_md(self) -> str | None:

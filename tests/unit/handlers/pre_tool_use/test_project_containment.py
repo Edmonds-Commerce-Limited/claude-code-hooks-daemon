@@ -1180,3 +1180,78 @@ class TestProjectRootDoublePatchDoesNotLeakAcrossFiles:
             f"regression) -- stdout:\n{completed.stdout}\nstderr:\n{completed.stderr}"
         )
         assert "2 passed" in completed.stdout
+
+
+class TestUnreadableCommandTextFailsClosed:
+    """Plan 00466 N120: bash runs every complete command before one it cannot
+    parse, and text the tokeniser cannot read may write anywhere. Judged
+    through ``HandlerChain`` with the client-default non-strict mode.
+    """
+
+    _DELIMITERS = (
+        ("'my-notes'", "my-notes"),
+        ("EOF-1", "EOF-1"),
+        ("END.MD", "END.MD"),
+        ("\\EOF", "EOF"),
+        ('"EOF-1"', "EOF-1"),
+        ('E"O"F', "EOF"),
+    )
+
+    @staticmethod
+    def _decide(handler: ProjectContainmentHandler, command: str) -> Any:
+        chain = HandlerChain()
+        chain.add(handler)
+        return chain.execute(_bash(command, cwd=str(_ROOT)), strict_mode=False).result
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            'echo x > /opt/o.md\nx="u',
+            "cat > /opt/n.md <<<'EOF'\n)\"\nEOF",
+            "cat > /opt/n.md <<<'EOF'\necho it's",
+            'cat > /opt/o.md <<<hi\nx="u',
+        ],
+    )
+    def test_the_write_before_an_unreadable_line_denies_as_outside(
+        self, handler: ProjectContainmentHandler, command: str
+    ) -> None:
+        result = self._decide(handler, command)
+        assert result.decision == Decision.DENY
+        assert RuleID.WRITE_OUTSIDE_PROJECT_ROOT in (result.reason or "")
+
+    @pytest.mark.parametrize(("opener", "closer"), _DELIMITERS)
+    def test_a_prose_heredoc_outside_the_root_denies(
+        self, handler: ProjectContainmentHandler, opener: str, closer: str
+    ) -> None:
+        result = self._decide(handler, f"cat > /opt/o.md <<{opener}\nit's done\n{closer}")
+        assert result.decision == Decision.DENY
+        assert RuleID.WRITE_OUTSIDE_PROJECT_ROOT in (result.reason or "")
+
+    @pytest.mark.parametrize(("opener", "closer"), _DELIMITERS)
+    def test_the_same_heredoc_inside_the_root_is_allowed(
+        self, handler: ProjectContainmentHandler, opener: str, closer: str
+    ) -> None:
+        result = self._decide(handler, f"cat > /repo/o.md <<{opener}\nit's done\n{closer}")
+        assert result.decision == Decision.ALLOW
+
+    def test_text_bash_reads_but_the_tokeniser_cannot_denies(
+        self, handler: ProjectContainmentHandler
+    ) -> None:
+        """An ANSI-C escape writes /opt/x in bash; nothing here can name it."""
+        result = self._decide(handler, "echo $'it\\'s' > /opt/x")
+        assert result.decision == Decision.DENY
+        assert RuleID.PROJECT_CONTAINMENT_EVALUATION_ERROR in (result.reason or "")
+        assert "could not be read" in (result.reason or "")
+
+    def test_an_unreadable_tail_after_an_in_root_write_denies(
+        self, handler: ProjectContainmentHandler
+    ) -> None:
+        result = self._decide(handler, 'echo x > /repo/in.md\nx="u')
+        assert result.decision == Decision.DENY
+        assert RuleID.PROJECT_CONTAINMENT_EVALUATION_ERROR in (result.reason or "")
+
+    def test_an_unreadable_heredoc_body_does_not_deny(
+        self, handler: ProjectContainmentHandler
+    ) -> None:
+        result = self._decide(handler, "cat > /repo/a.md <<EOF\nit's > /opt/b\nEOF")
+        assert result.decision == Decision.ALLOW
