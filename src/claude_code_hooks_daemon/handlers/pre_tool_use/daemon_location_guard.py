@@ -16,7 +16,7 @@ from claude_code_hooks_daemon.utils.cli_command import (
     daemon_cli_command_for_docs,
 )
 from claude_code_hooks_daemon.utils.shell_segmentation import (
-    blank_inert_command_arguments,
+    is_wholly_inert_command,
     strip_inert_spans,
 )
 
@@ -140,15 +140,18 @@ class DaemonLocationGuardHandler(PreToolUseHandlerBase):
         # past by quoting. Blanking literals answers "what is this command's
         # TARGET?" — it cannot answer "is there a command here at all?".
         #
-        # `echo 'cd ...'` is separated from `bash -c 'cd ...'` by HEAD instead:
-        # `blank_inert_command_arguments` blanks the arguments of a bare
-        # `echo`/`printf`/`:`/`true` only when nothing can run them (Plan 00408
-        # Task 3.3). What still matches: a `grep`/`rg` FOR this rule's own
-        # text, the commit spellings `-am 'x'`, `-m"x"` and `-m'x'` (which
+        # `echo 'cd ...'` is separated from `bash -c 'cd ...'` by HEAD instead,
+        # and only when the WHOLE command is one bare `echo`/`printf`/`:`/`true`
+        # that nothing can make run (Plan 00408 Task 3.3); anything more is
+        # judged below exactly as before. What still matches: a compound that
+        # merely contains such an echo, a `grep`/`rg` FOR this rule's own text,
+        # the commit spellings `-am 'x'`, `-m"x"` and `-m'x'` (which
         # `_MESSAGE_BODY_PATTERN` does not recognise as message flags) and a
         # `gh ... --body 'x'`. Re-adding literal blanking is not the answer to
         # those, because that is what let `bash -c` through.
-        executable = _path_text(blank_inert_command_arguments(strip_inert_spans(command)))
+        if is_wholly_inert_command(command):
+            return False
+        executable = _path_text(strip_inert_spans(command))
         return bool(_CD_INTO_DAEMON_DIR.search(executable))
 
     def get_rules(self) -> list[Rule]:

@@ -42,7 +42,7 @@ from claude_code_hooks_daemon.utils.git_repo import GitRepo, is_linked_worktree
 from claude_code_hooks_daemon.utils.git_sync import current_branch, default_branch
 from claude_code_hooks_daemon.utils.one_shot_approval import OneShotApprovalStore
 from claude_code_hooks_daemon.utils.shell_segmentation import (
-    blank_inert_command_arguments,
+    is_wholly_inert_command,
     strip_inert_spans,
 )
 
@@ -279,10 +279,11 @@ def merge_target(command: str) -> str | None:
     there a command here at all?".
 
     An inert ``echo`` is told apart from ``bash -c`` by HEAD instead, with
-    ``blank_inert_command_arguments`` (Plan 00408 Task 3.3): the arguments of
-    a bare ``echo``/``printf``/``:``/``true`` are blanked, and only when
-    nothing can run them. What still matches is stated so the trade-off is
-    the one made: a ``grep``/``rg`` FOR a merge command, ``git commit -am
+    ``is_wholly_inert_command`` (Plan 00408 Task 3.3), and only when the WHOLE
+    command is one bare ``echo``/``printf``/``:``/``true`` that nothing can
+    make run; anything more is judged exactly as before. What still matches is
+    stated so the trade-off is the one made: a compound that merely contains
+    such an echo, a ``grep``/``rg`` FOR a merge command, ``git commit -am
     'x'``, ``-m"x"`` and ``-m'x'`` (spellings ``_MESSAGE_BODY_PATTERN`` does
     not recognise as message flags) and ``gh ... --body 'x'``. It is the safe
     direction for a gate, and it bites only where the key is switched on.
@@ -290,9 +291,10 @@ def merge_target(command: str) -> str | None:
     Because one copy is both matched and re-sliced, offsets need no
     reconciliation — the earlier two-pass form had to re-slice from the
     heredoc-stripped copy rather than the blanked one, and that hazard is gone.
-    The inert-head pass keeps that property by blanking to equal length.
     """
-    executable = blank_inert_command_arguments(strip_inert_spans(command))
+    if is_wholly_inert_command(command):
+        return None
+    executable = strip_inert_spans(command)
     git = _GIT_MERGE_RE.search(executable)
     if git is not None:
         tokens = _segment_tokens(executable[git.start(1) : git.end(1)])

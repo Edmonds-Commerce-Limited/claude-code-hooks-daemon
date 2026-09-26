@@ -1,7 +1,7 @@
 """Tests for DaemonLocationGuardHandler."""
 
 import pytest
-from tests.support.inert_head_shapes import ESCAPE_SHAPES, INERT_SHAPES, fill
+from tests.support.inert_head_shapes import INERT_SHAPES, NOT_INERT_SHAPES, fill
 
 from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.core import Decision
@@ -362,8 +362,8 @@ class TestAnInertHeadNamingADirectoryChangeIsNotOne:
     def test_no_inert_shape_is_matched(self, template: str) -> None:
         assert _guard_matches(fill(template, self._CD)) is False
 
-    @pytest.mark.parametrize("template", ESCAPE_SHAPES)
-    def test_every_escape_shape_is_still_matched(self, template: str) -> None:
+    @pytest.mark.parametrize("template", NOT_INERT_SHAPES)
+    def test_every_other_shape_is_still_matched(self, template: str) -> None:
         assert _guard_matches(fill(template, self._CD)) is True
 
 

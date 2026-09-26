@@ -47,7 +47,7 @@ from claude_code_hooks_daemon.utils.command_evasion import remove_word_quoting
 from claude_code_hooks_daemon.utils.path_predicates import path_is_dir
 from claude_code_hooks_daemon.utils.quoted_spans import blank_shell_literal_spans
 from claude_code_hooks_daemon.utils.shell_segmentation import (
-    blank_inert_command_arguments,
+    is_wholly_inert_command,
     strip_inert_spans,
 )
 
@@ -207,11 +207,14 @@ class PlanNumberHelperHandler(PreToolUseHandlerBase):
         # shell executes the argument of `bash -c "mkdir ..."`, so blanking it
         # decided that no mkdir EXISTED. In-word quoting is removed instead, as
         # bash removes it, so `mkdir "<plan-dir>/NNNNN-x"` names the folder.
-        # The arguments of a bare `echo`/`printf`/`:`/`true` ARE blanked, when
-        # nothing can run them: those heads never execute their text (Plan
-        # 00408 Task 3.3). The discovery rules do not get this pass, because
-        # `echo CLAUDE/Plan/0*` expands the glob and IS the scan.
-        scannable = remove_word_quoting(blank_inert_command_arguments(strip_inert_spans(command)))
+        # A WHOLE command that is one bare `echo`/`printf`/`:`/`true`, which
+        # nothing can make run, creates nothing: those heads never execute their
+        # text (Plan 00408 Task 3.3). The discovery rules do not get this
+        # exemption, because `echo CLAUDE/Plan/0*` expands the glob and IS the
+        # scan.
+        if is_wholly_inert_command(command):
+            return None
+        scannable = remove_word_quoting(strip_inert_spans(command))
 
         match = re.search(
             rf"{_MKDIR_COMMAND}[^{_COMMAND_SEPARATORS}]*?"

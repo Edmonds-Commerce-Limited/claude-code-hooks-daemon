@@ -9,7 +9,7 @@ from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
-from tests.support.inert_head_shapes import ESCAPE_SHAPES, INERT_SHAPES, fill
+from tests.support.inert_head_shapes import INERT_SHAPES, NOT_INERT_SHAPES, fill
 
 
 @pytest.fixture(autouse=True)
@@ -999,8 +999,8 @@ class TestHandRolledPlanFolderCreation:
     ) -> None:
         assert not handler.matches(_bash(fill(template, self._MKDIR)))
 
-    @pytest.mark.parametrize("template", ESCAPE_SHAPES)
-    def test_every_escape_shape_is_still_a_creation(
+    @pytest.mark.parametrize("template", NOT_INERT_SHAPES)
+    def test_every_other_shape_is_still_a_creation(
         self, handler: PlanNumberHelperHandler, template: str
     ) -> None:
         assert handler.matches(_bash(fill(template, self._MKDIR)))
