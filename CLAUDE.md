@@ -545,6 +545,10 @@ One line each; these fire with their own guidance when relevant. Full text: `bin
 
 - agent_isolation_advisor — isolate concurrent agents
 
+<!-- handler: agent-terminated-early-failure-detector -->
+
+- agent_terminated_early_failure_detector — a dead foreground sub-agent is surfaced on PostToolUseFailure
+
 <!-- handler: auto-approve-reads -->
 
 - auto_approve_reads — gated on bypassPermissions mode

@@ -87,7 +87,7 @@
 | 29 | recovery_cron_advisor | ADVISORY | Advisory handler that manages failsafe recovery cron across plan lifecycle |
 | 30 | goal_injection | ADVISORY | Write a goal-intent signal when a plan TRANSITIONS to In Progress |
 | 31 | markdown_table_formatter | NON-TERMINAL | Auto-format markdown tables after Write/Edit of .md files |
-| 32 | budget_exhaustion_detector | ADVISORY | Advisory PostToolUse handler that flags budget/quota-exhaustion messaging |
+| 32 | budget_exhaustion_detector | ADVISORY | Advisory PostToolUse handler that flags budget-exhaustion messaging |
 | 33 | model_downgrade_recorder | ADVISORY | Publish Claude Code's own automatic model-downgrade record, silently |
 | 34 | merge_qa_report | ADVISORY | Post-hoc plan/docs QA report over what a merge/pull/rebase just introduced |
 | 35 | daemon_sync_after_merge | ADVISORY | Advise a restart when a merge/pull/rebase changed daemon config or handlers |
@@ -201,6 +201,12 @@
 | Priority | Handler | Behaviour | Description |
 |----------|---------|----------|-------------|
 | 50 | worktree_remove | TERMINAL | Prune stale worktree registrations (and remove a named worktree) |
+
+### PostToolUseFailure (1 handler)
+
+| Priority | Handler | Behaviour | Description |
+|----------|---------|----------|-------------|
+| 10 | agent_terminated_early_failure_detector | ADVISORY | PostToolUseFailure advisory: surfaces a foreground Agent/Task dispatch killed by a harness usage limit |
 
 ### Daemon Plugin (1 handler)
 

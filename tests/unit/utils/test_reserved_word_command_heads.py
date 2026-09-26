@@ -29,9 +29,6 @@ from typing import Any
 import pytest
 
 from claude_code_hooks_daemon.constants.tools import ToolName
-from claude_code_hooks_daemon.handlers.post_tool_use.budget_exhaustion_detector import (
-    _is_content_passthrough_command,
-)
 from claude_code_hooks_daemon.handlers.pre_tool_use.issue_filing_gate import (
     IssueFilingGateHandler,
 )
@@ -215,10 +212,6 @@ class TestExemptionsAreNotWithheld:
         """A subshell's `set` ends with it, and one behind `then`/`do`/`else` may
         never run, so crediting either would stand the safety checks down."""
         assert detect_safe_mode_flags(split_statements(command)) == frozenset()
-
-    @pytest.mark.parametrize("command", ["time cat f", "! cat f"])
-    def test_budget_exhaustion_passthrough_is_recognised(self, command: str) -> None:
-        assert _is_content_passthrough_command(command) is True
 
 
 class TestReferenceRepoFreshnessReadsTheRealHead:

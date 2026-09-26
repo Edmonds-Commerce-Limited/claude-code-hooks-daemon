@@ -12,6 +12,12 @@
 hooks.bak/
 hooks.bak.*/
 
+# Skills a redeploy rescued rather than deleted because they differed from
+# the shipped copy (_preserve_replaced_skill in install/skills.py). Otherwise
+# untracked and unignored after any upgrade that redeployed a customised
+# skill, so `git status` shows it and a careless `git add -A` commits it.
+/hooks-daemon-backups/
+
 # Environment files (may contain local paths)
 hooks-daemon.env
 

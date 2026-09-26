@@ -76,7 +76,7 @@ Full write-ups are in [NIGGLES.md](NIGGLES.md). One line each here:
 | N43  | Log and payload redaction is inert while the daemon runs degraded on an unloadable config                      | Plan 00421 agent                                                | 🔄 In progress                   |
 | N44  | A PreToolUse handler raises `ValueError: no path specified` on an Edit, and the Edit goes through              | Plan 00464 agent                                                | ✅ Remedied                      |
 | N45  | A NUL byte in a configured word-list path makes the never-raising secret-term lookup raise                     | Plan 00421 agent                                                | 🔄 In progress                   |
-| N46  | `budget_exhaustion_detector` fires on a tool result that merely contains budget wording                        | Guard review 6                                                  | ⬜ Open                          |
+| N46  | `budget_exhaustion_detector` fires on a tool result that merely contains budget wording                        | Guard review 6                                                  | ✅ Remedied                      |
 | N47  | The ccy supervisor and Claude Code's settings.json both own effort, and they fight                             | Owner                                                           | 🔄 In progress                   |
 | N48  | `sed_blocker`'s git-commit exemption reaches across a newline                                                  | N38 review 2                                                    | ⬜ Open                          |
 | N49  | `daemon_location_guard` denies a daemon-directory `cd` that is only text inside a quoted argument              | Coordinator                                                     | ⬜ Open                          |
@@ -132,7 +132,8 @@ Full write-ups are in [NIGGLES.md](NIGGLES.md). One line each here:
 | N99  | `dev-handlers.md` offers an agent a wrapper command that the daemon denies                                     | Plan 464 gate fixer                                             | ⬜ Open (after 464)              |
 | N100 | A continuation on a heredoc opener line denies a body that is only written                                     | N38 reviews 6-9                                                 | ⬜ Open (after N38)              |
 | N101 | `secret_file_guard` fails closed with `TooManyToEnumerateError` on ordinary `python3 - <<'EOF'` commands       | N38 fix 11                                                      | ⬜ Open                          |
-| N105 | A skill redeploy leaves an untracked, unignored `.claude/hooks-daemon-backups/`                                | Upgrade review 11 (L9)                                          | ⬜ Open                          |
+| N105 | A skill redeploy leaves an untracked, unignored `.claude/hooks-daemon-backups/`                                | Upgrade review 11 (L9)                                          | ✅ Remedied                      |
+| N109 | The pending release-notes holding area mis-sorts past 99 callouts                                              | Coordinator                                                     | ✅ Remedied                      |
 | N110 | The local full QA gate tests one Python version, so a version-specific defect passes it and fails CI           | N106 fixer                                                      | ✅ Remedied                      |
 | N114 | A `py311` fingerprint venv is built on whatever Python uv prefers                                              | N110 fixer                                                      | ✅ Remedied                      |
 
