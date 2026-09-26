@@ -1016,3 +1016,152 @@ confirmation review of the merge comes first (brief).
 - Daemon: restarted twice from the worktree. The second restart stopped
   the live daemon through `stop_verified_daemon` and reported
   `Daemon: RUNNING`.
+
+## Round 7: review 7's shared findings (N202-N206)
+
+Brief: `untracked/scratch/briefs/lifecycle-fix-7.md`. Review:
+`...lifecycle-review-7-...92c829ed376b490d.md`, which found the merge READY
+and five defects shared with main. The fixes are in `ff92e2717` on top of
+`0164c8a00`.
+
+### Fixes
+
+- **N202** (§5): `cmd_start`'s parent waited a fixed 5 s for a PID file
+  that is written only after controller init. On a loaded host it reported
+  "failed to start (no PID file created)" while the daemon came up.
+  - Before the first fork, `cmd_start` opens a pipe, and the daemon holds
+    its write end for its whole life. The daemon writes its pid, then a
+    byte after config load and another after controller init.
+  - The parent (`_StartProgress`, `_await_started_daemon`) counts as
+    progress: a byte, a change in the PID file, or CPU time the daemon has
+    spent.
+  - It stops at end of file (the daemon exited), after
+    `Timeout.DAEMON_START_STALL_SEC` (10 s) with no progress, or at
+    `DAEMON_START_BUDGET_SEC` (30 s). 30 s plus `init.sh`'s own 15 s poll
+    stays inside the hook's 60 s.
+  - The message says which of those ended the wait. It also says what the
+    PID file showed: no file, a file from before this start, or a file
+    whose proof is still pending.
+- **N203** (S-1): `_root_from_flag` took the first `--project-root`, where
+  argparse keeps the last.
+  - `process_verification.add_global_arguments` is now the one definition of
+    `cli.main`'s global options, and `cli.build_parser()` is split out of
+    `main`.
+  - `_root_from_flag` parses the arguments after the module with those
+    options, a `-h` flag, a subcommand and whatever follows it. The parser
+    raises where argparse would exit.
+  - It raises `_UnreadableLaunch` for a line argparse refuses, for `-h`, for
+    any argument after `start`/`restart`, and for a relative root.
+    `_attributed_root` (now returning a `RootProof`) then refuses, and does
+    not fall back to the environment variable or the socket.
+  - `init.sh`'s `_hooks_daemon_argv_name_root` now requires exactly six
+    arguments, since a daemon's parser refuses anything after the
+    subcommand. The soundness test's two trailing-argument cases are now
+    "not a launch" on both sides.
+- **N204** (S-2): enforcement removed a stale PID file with no start lock,
+  and `is_process_running` read `AccessDenied` as dead.
+  - `remove_stale_pid_file` moved from `cli` to `server`, next to
+    `hold_start_lock`, so that enforcement and the installer can share it.
+    `init.sh` now imports it from there.
+  - Enforcement reads the file and hands it over. With no socket there is
+    no lock to take, so the file stays.
+  - `is_process_running` had no other caller and is removed.
+- **N205** (S-3): `client_validator` removed PID files and sockets with no
+  lock and no check.
+  - `_check_running_daemon`'s `ALREADY_GONE` path and
+    `cleanup_stale_runtime_files` go through `remove_stale_pid_file` and the
+    new `server.remove_dead_socket`, which takes the start lock and removes
+    only on `NOT_LIVE`.
+  - The lock comes from the socket paired with the PID file. Both are named
+    `daemon{suffix}` in the same directory, as `get_pid_path` and
+    `get_socket_path` build them.
+- **N206** (§2): a pid reused between psutil's re-check and `os.kill` got
+  the signal.
+  - `safe_signal._pinned` opens a pidfd BEFORE `verified_daemon_process`.
+    `signal_verified_daemon` and `stop_verified_daemon` send through it
+    (`_send`) and wait on it with `poll` (`_exited_within`).
+  - A pid reused at any point after the pin can only make the send fail
+    with `ESRCH`, which is reported as `ALREADY_GONE`.
+  - Where `pidfd_open` fails with `ENOSYS`, `EPERM`, `ENODEV`, `EMFILE` or
+    `ENFILE`, the proven psutil handle sends and waits, as before.
+- **Stale comments**: `init.sh:1324`,
+  `cli._reexec_daemon_launch_with_explicit_project_root`, the `safe_signal`
+  module docstring, `CLAUDE/Security/UnprovenSignalTarget.md`, the
+  `paths.read_pid_file` docstring, and the `cmd_stop` comment about pidfds.
+
+### Decision: `signal_verified_daemon_via_pidfd` is removed rather than called
+
+That function opened its pidfd AFTER the proof. A pid reused between the
+proof and the pin would have been pinned to the new process, which is the
+same window N206 is about. The fix pins before the proof, inside the two
+functions every caller already uses. That left the separate function with no
+caller and no purpose. No caller goes without a pidfd except on a kernel that
+cannot make one.
+
+### Ledger
+
+- `PLAN.md` rows for N190-N193, which were previously recorded only in this
+  report (round 6's P5-1/Sh-G, Sh-1, Sh-2 and Sh-3), and for N202-N206.
+- A `NIGGLES.md` entry for each of them.
+- Release note
+  `161-start-waits-on-a-starting-daemon-and-stop-pins-the-process-it-proves.md`.
+
+### RED proofs (on a `git archive` of `0164c8a00`)
+
+- **Setup**: the new and changed test files were copied into the archive,
+  with `PYTHONPATH` set to the copy's `src`. The two new `Timeout` names were
+  added to the copy so the integration test can import; that changes no
+  behaviour.
+- **Result: 25 failed, 7 passed.**
+- **The 25 failures**:
+  - all 5 `TestTheFlagIsReadAsTheDaemonsOwnParserReadsIt` cases;
+  - all 3 `test_a_daemon_launched_for_b_through_as_wrapper_is_never_stopped_by_a`
+    cases;
+  - 2 of `TestAStalePidFileGoesOnlyUnderTheStartLock`;
+  - 4 of `TestRuntimeFilesGoOnlyUnderTheStartLockAndOnlyWhileDead`;
+  - 5 of `TestTheSignalGoesThroughAPidfdPinnedBeforeTheProof`;
+  - all 5 `TestTheStartWaitFollowsTheDaemonsProgress` cases;
+  - the integration test, whose daemon sleeps 7 s in controller init. It got
+    exactly the field message: `ERROR: Daemon failed to start (no PID file created)`, exit 1.
+- **The 7 passes** are guards that already held at `0164c8a00`:
+  - enforcement with a lock held by a start, and with no socket;
+  - the installer with a PID file naming no process;
+  - safe_signal's reaped-pid lookup error and its no-pidfd fallback.
+- **A leak in the first run**: the integration test's daemon outlived the
+  test. Its teardown ran `stop` before the daemon had written a PID file,
+  which is N202 itself. I stopped that daemon through `stop_verified_daemon`.
+  The teardown now finds the daemon by its `--project-root` and stops it
+  through the verified path. A second RED run left nothing behind.
+
+### GREEN at `ff92e2717`
+
+- **1955 passed** in one serial run of `untracked/scratch/r7-targeted.sh`.
+  It covers:
+  - every `test_init_sh_*`, `test_relay_*`, `test_cli*`, `test_enforcement*`
+    and `test_server*` file;
+  - `test_process_verification`, `test_daemon_umask`,
+    `test_client_validator`, `test_safe_signal`, `test_signal_safety_net`
+    and `test_ci_passthrough`;
+  - `test_forwarder_jq_free`, `tests/daemon/test_server.py` and the relay
+    provisioning files;
+  - the three start-wait integration files.
+- **The first run failed 8**, all in
+  `test_init_sh_pretooluse_fail_closed.py`:
+  - 7 were the soundness test. It called `_root_from_flag`, which now
+    raises, and it expected `start [more]` to count as a launch.
+  - 1 was a fake python that counted helper runs by the text
+    `daemon.cli import`, but `init.sh` now imports from `daemon.server`.
+  - After the fixes described above, the file passed 173/173.
+- **Relay**: `relay/test_relay.py` passed 13/13. `relay/build.sh`
+  (`-D warnings`) built clean.
+- **Static checks**:
+  - `scripts/qa/run_semgrep_check.sh`, including the containment rule: no
+    violations.
+  - `scripts/qa/check_signal_targets.py`: no signal to an unproven target
+    (2070 files).
+  - ruff and black: clean on every touched file.
+  - mypy: no issues in `src` or `test_cli_cmd_start.py`.
+  - pyright: 0 errors on every touched file.
+  - shellcheck: clean on `init.sh`.
+- **Daemon**: restarted from the worktree; it reported `Daemon: RUNNING`
+  (PID 2632155).
