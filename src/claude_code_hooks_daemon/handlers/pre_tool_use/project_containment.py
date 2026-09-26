@@ -350,7 +350,9 @@ class ProjectContainmentHandler(PreToolUseHandlerBase):
         path (Plan 00468 G10); see :func:`session_config_dir`."""
         return session_config_dir(hook_input.get(HookInputField.TRANSCRIPT_PATH))
 
-    def _offending_targets(self, hook_input: dict[str, Any], root: Path) -> list[str]:
+    def _offending_targets(
+        self, hook_input: dict[str, Any], root: Path, named_targets: list[str]
+    ) -> list[str]:
         """Every named write target in ``hook_input`` that lies outside ``root``.
 
         Args:
@@ -359,6 +361,9 @@ class ProjectContainmentHandler(PreToolUseHandlerBase):
                 as a parameter rather than re-resolved, so a caller that
                 already has it — ``handle()``, after ``matches()`` succeeded —
                 never risks a SECOND unguarded raise from re-resolving it).
+            named_targets: ``_named_targets(hook_input)``, already computed by
+                the caller so it can return before resolving ``root`` when
+                there is nothing to judge (Plan 00466 N90).
 
         Returns:
             The offending paths in the order they were named, de-duplicated. A
@@ -369,7 +374,7 @@ class ProjectContainmentHandler(PreToolUseHandlerBase):
         session_home = self._session_claude_home(hook_input)
         offending: list[str] = []
 
-        for candidate in self._named_targets(hook_input):
+        for candidate in named_targets:
             if candidate in offending:
                 continue
             if self._is_outside(candidate, root) and not self._is_permitted(
@@ -392,8 +397,17 @@ class ProjectContainmentHandler(PreToolUseHandlerBase):
         rather than propagating — see ``_ERROR_RULE`` for why.
         """
         try:
+            named_targets = self._named_targets(hook_input)
+            if not named_targets:
+                # Nothing to judge. Returning before the root is resolved (Plan
+                # 00466 N90) matters because resolving it can itself fail
+                # (`ProjectContext.project_root()` raises when uninitialised)
+                # -- and a command naming no write target cannot escape the
+                # project either way, so there is nothing fail-closed protects
+                # here. A raise from `_named_targets` itself still denies below.
+                return [], None, None
             root = self._resolved_root()
-            return self._offending_targets(hook_input, root), root, None
+            return self._offending_targets(hook_input, root, named_targets), root, None
         except Exception as exc:
             # Deliberately broad: ANY exception during evaluation must deny,
             # never propagate (Plan 00466 N11) -- see the docstring above.

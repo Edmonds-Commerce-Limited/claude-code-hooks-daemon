@@ -856,6 +856,16 @@ caller that routes events without it is fully locked out.
 the root. A command that writes nothing cannot escape the project. Keep
 fail-closed for a command that does name a target, and pin both with tests.
 
+**Done, on `worktree-n466-n84-n90`:** `_offending_targets()` now reads
+`_named_targets()` first and returns `[]` immediately when it is empty,
+before `_resolved_root()` is ever called. A command that names a target
+still resolves the root and stays fail-closed if that raises. Pinned in
+`tests/unit/handlers/pre_tool_use/test_project_containment.py`
+(`TestAnUnresolvedRootDoesNotLockOutTargetlessCommands`): with
+`ProjectContext.project_root` patched to raise, a no-target command
+(`git status`) is allowed and `project_root` is never called, while a
+targeted `Write` still raises.
+
 ### N89 — A data-sink receiver is trusted after the command redefines it
 
 **Found by N38 review 6 (ledger candidate 3).** `cat() { bash; }; cat <<'E'`
@@ -934,6 +944,15 @@ nothing reported them.
 
 **Remedy:** teardown asserts `stop` exits 0 and that the pid is gone, and
 a test pins that a failed stop fails the test.
+
+**Done, on `worktree-n466-n84-n90`:** the `daemon_process` fixture's
+teardown now reads the daemon's pid from `pid_path` before calling `stop`,
+then runs `_assert_stopped_cleanly(stop_result, pid)`, which asserts
+`stop` exited 0 and that the pid no longer answers to signal 0. Pinned in
+`tests/integration/test_daemon_smoke.py::TestAssertStoppedCleanly` without
+starting a real daemon: a nonzero exit code fails, a pid that is still
+alive after a reported success fails, and a clean stop with no surviving
+pid passes.
 
 ### N83 — A parametrised live-daemon test skips its own `tests` case
 
