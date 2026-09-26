@@ -31,12 +31,15 @@ HOOKS_DEPLOY_SH = REPO_ROOT / "scripts" / "install" / "hooks_deploy.sh"
 _HOSTILE_UMASK = "077"
 
 
-def _run_bash(script: str, umask: str | None = None) -> subprocess.CompletedProcess[str]:
+def _run_bash(
+    script: str, umask: str | None = None, stub: str = ""
+) -> subprocess.CompletedProcess[str]:
     umask_line = f"umask {umask}" if umask else ""
     wrapper = f"""
 set -euo pipefail
 {umask_line}
 source "{HOOKS_DEPLOY_SH}"
+{stub}
 {script}
 """
     return subprocess.run(
@@ -98,12 +101,34 @@ class TestSetHookPermissionsRestoresExecBit:
 class TestSetHookPermissionsFailsLoudly:
     """A genuine chmod failure must NOT be silenced.
 
-    We simulate a chmod failure by pointing the function at a read-only
-    hooks directory owned by another user. If run as root we can still
-    chmod, so we skip that scenario — the assertion instead targets the
-    less extreme but sufficient contract: the function must not contain
-    ``2>/dev/null || true`` style silent suppression.
+    Root bypasses the file-mode-bit checks a read-only-directory setup would
+    otherwise use to provoke a real chmod failure, so the fault is injected
+    directly: a stubbed ``chmod`` shell function that fails for exactly one
+    hook file (the same technique ``test_settings_deploy_lib.py`` uses to
+    fault ``cp``), leaving the real filesystem permissions untouched.
     """
+
+    def test_a_failed_chmod_returns_nonzero_and_names_the_file(self, tmp_path: Path) -> None:
+        project_root = tmp_path / "project"
+        hooks_dir = project_root / ".claude" / "hooks"
+        good = _seed_non_executable_wrapper(hooks_dir, "pre-tool-use")
+        bad = _seed_non_executable_wrapper(hooks_dir, "post-tool-use")
+
+        stub = textwrap.dedent(f"""\
+            chmod() {{
+                case "$2" in
+                    *{bad.name}) return 1 ;;
+                esac
+                command chmod "$@"
+            }}
+        """)
+        result = _run_bash(f'set_hook_permissions "{project_root}"', stub=stub)
+
+        assert result.returncode == 1, f"stdout={result.stdout!r} stderr={result.stderr!r}"
+        assert bad.name in result.stderr, "the error must name the file whose chmod failed"
+        # The call that succeeded must still have been made -- one failure
+        # must not abort the loop for the other hook files.
+        assert (good.stat().st_mode & 0o777) == 0o755
 
     def test_source_does_not_silence_chmod(self) -> None:
         source = HOOKS_DEPLOY_SH.read_text()

@@ -1,6 +1,6 @@
 """Tests for skill deployment system."""
 
-import os
+import errno
 import shutil
 from collections.abc import Generator
 from pathlib import Path
@@ -138,29 +138,27 @@ class TestDeploySkills:
         with pytest.raises(FileNotFoundError, match="Skills directory not found"):
             deploy_skills(bad_source, temp_project)
 
-    # Plan 00351: this asked who owns `/` — uid 0 on every normal Linux system,
-    # whoever is running — so it was a constant `True` and the test never ran
-    # anywhere. CI's own skip list showed it skipping on a runner, where the
-    # process is the unprivileged `runner` user and the stated reason is false.
-    @pytest.mark.skipif(
-        os.geteuid() == 0, reason="Running as root - permission test not applicable"
-    )
     def test_deploy_skills_raises_if_target_not_writable(
-        self, daemon_source: Path, tmp_path: Path
+        self, daemon_source: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Test that deploy_skills raises error if target not writable."""
-        # Arrange - read-only project
-        readonly_project = tmp_path / "readonly"
-        readonly_project.mkdir()
-        readonly_project.chmod(0o444)  # Read-only
+        """deploy_skills propagates PermissionError when the target can't be written.
 
-        try:
-            # Act & Assert
-            with pytest.raises(PermissionError):
-                deploy_skills(daemon_source, readonly_project)
-        finally:
-            # Cleanup - restore permissions
-            readonly_project.chmod(0o755)
+        Root bypasses the filesystem's own permission bits, so `chmod(0o444)`
+        no longer faults this path when the process is root — this container
+        runs as root (Plan 00466 N56). Inject the fault at the write call
+        itself instead: `shutil.copytree` raising `PermissionError` is exactly
+        what a genuinely-unwritable target reports, whoever is running.
+        """
+        unwritable_project = tmp_path / "unwritable"
+        unwritable_project.mkdir()
+
+        def _raise_permission_error(*args: object, **kwargs: object) -> None:
+            raise PermissionError(errno.EACCES, "Permission denied")
+
+        monkeypatch.setattr(shutil, "copytree", _raise_permission_error)
+
+        with pytest.raises(PermissionError):
+            deploy_skills(daemon_source, unwritable_project)
 
     def test_deploy_skills_preserves_directory_structure(
         self, temp_project: Path, daemon_source: Path

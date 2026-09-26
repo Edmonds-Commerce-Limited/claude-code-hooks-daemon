@@ -619,6 +619,78 @@ immutable file where one is available. Replace Plan 00351's check with a
 detector that fails on any root-conditioned skip. Record the rule in the
 testing standards doc.
 
+**Done, on `worktree-n466-n56`:** the three skip sites are rewritten to
+fault the operation a way root cannot bypass, keeping each test's original
+assertion:
+
+- `test_skills.py`'s `test_deploy_skills_raises_if_target_not_writable`
+  monkeypatches `shutil.copytree` to raise `PermissionError` instead of
+  `chmod`-ing the target read-only.
+- `test_settings_deploy_lib.py`'s `test_a_failed_backup_stops_everything`
+  stubs the shell `cp` used for the backup copy (matched on its destination
+  suffix `*.bak-*`, so the install copy is untouched) — the same technique
+  `TestTheInstallCopyCanFail` already used for the install copy.
+- `test_bootstrap_decision.py`'s `test_untracked_not_writable` monkeypatches
+  `os.access` itself, since `access(2)` grants `W_OK` to a privileged real
+  UID regardless of the mode bits.
+
+`test_skipif_reasons_match_their_conditions.py` is replaced by
+`tests/integration/test_no_root_conditioned_skips.py`: a static scan over
+EVERY `.py` file under `tests/` — not just `test_*.py`/`conftest.py`, and
+with no exclusion list (review 2, B2: an earlier cut excluded a
+`fixtures`/`assets`/`__fixtures__` directory name and its own file, which
+pytest actually collects through). It classifies by data flow rather than by
+name (review 2, B1), so an alias, a local variable, a module constant, or
+one level of same-module helper (including a parameterised one called with
+literal arguments) is resolved the same as the direct call — covering
+`geteuid`/`getuid`/`getegid`/`getgid`/`getresuid`/`getresgid`,
+`getpass.getuser`, a `pwd`/`grp` lookup, an env check of
+`USER`/`LOGNAME`/`HOME`/`SUDO_*`, `Path.home()`/`os.path.expanduser("~")`,
+`os.access(...)`, and `<expr>.stat().st_uid`. It fails on a
+`skipif`/`xfail`/`unittest.skipIf`/`skipUnless` decorator, an `IfExp`
+marker, a hand-written `if <root check>: skip/xfail/skipTest/return`, or a
+conftest `pytest_ignore_collect`/`pytest_collection_modifyitems`/
+`pytest_runtest_setup` whose control flow depends on one — **and
+independently** on any skip-like call whose stated *reason* names root
+regardless of what its condition tests (review 1, F1: this is Plan 00351's
+own shape, which the first cut of the detector regressed). A reference it
+cannot resolve (a cross-module import, a class attribute) whose own name
+suggests process identity is reported as unproven rather than silently
+passed. `tests/relay_gate_guard.py` and its test are left alone (documented
+why): that guard's "Running as root" case is a reason-string classifier for
+a different, CI-only concern, not a root-conditioned skip itself.
+
+Review 1 (F5) also found two tests outside the three skip sites that were
+vacuous as root without skipping: `test_auto_continue_stop.py`'s
+`test_matches_handles_oserror_reading_transcript` (`chmod(0o000)`, root
+still reads the file) now monkeypatches `Path.open` inside
+`TranscriptReader._parse_tail`; `test_paths.py`'s
+`test_socket_path_over_limit_uses_run_user` (skipped when `/run/user/{uid}`
+is absent — a host-dependent skip, not a root one) now monkeypatches
+`Path.is_dir` so the branch runs deterministically. Review 2 (M1) found a
+third: `test_hooks_deploy_permissions.py`'s chmod-failure contract had been
+replaced by a lexical check on the installer's source because root's own
+chmod never fails; it now stubs `chmod` as a shell function that fails for
+one hook file, the same technique `test_settings_deploy_lib.py` uses for
+`cp`.
+
+Review 3 found two more evasions of the hand-written `if <root check>: ...`
+shape, both closed: a `pass`-only branch opposite a substantive one (`if root: pass else: assert ...`), and an `assert` gated by identity with no
+`else` at all. Both needed a new `_root_polarity` helper to tell which
+branch actually runs AS ROOT — only a no-op on that branch is a problem in a
+container that is always root; the reverse (no-op on the non-root branch) is
+fine and must not be flagged, or `getuid_used_non_skip` (already in the
+`_SHOULD_NOT_FIND` corpus) would false-positive. One evasion is left as a
+documented, owner-referred residual: `try: <op that only raises PermissionError as non-root> except PermissionError: return` followed by an
+unconditional skip has no syntactic root check anywhere — the
+root-dependence is a runtime property (what `open()` does), not something a
+static AST scan can read. It is tracked as
+`_KNOWN_RESIDUALS["try_except_permission_pass"]` in the detector's own test
+file, asserted to stay uncaught so a future fix flips that assertion red
+rather than the note going stale.
+
+The rule is recorded in `CLAUDE/QA.md`, next to the other test requirements.
+
 ### N55 — `register_all` ignores a handler's `get_default_enabled()` when its config block is absent
 
 **Found by goal-flip review 8 (RV8-n3), filed at review 9's request.** When a
