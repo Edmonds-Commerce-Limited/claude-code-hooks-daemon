@@ -839,26 +839,86 @@ Setting medium therefore needed two edits in two formats (`settings.json` and
 `ccy.env`, commits 909f9591 and e52bd9e5). Even then the restore path still
 lands on xhigh.
 
-**Candidate remedy:** make `settings.json` the single source of truth for the
-effort a model runs at.
+**Remedy (redesigned again after adversarial review 2**,
+`subagent-reports/260925-n47-review2.md`**, which found review 1's fix was
+still architecturally wrong at the root):** BLOCKER 1 — Claude Code SAVES
+every interactively-typed `/effort <level>` into `modelSettings` in the
+settings file the confirming `Enter` targets (`model-config.md:552-557`,
+`settings-reference.md:900`). So ANY supervisor-typed `/effort`, no matter
+how well the level behind it was resolved, permanently overwrites the
+owner's own saved level — the exact fight the whole redesign exists to end,
+just moved one layer down into the single source of truth itself.
 
-- The supervisor resolves a family's effort from the settings Claude Code
-  itself reads, in its precedence order: per-model `modelSettings` over
-  `effortLevel`, project over user.
-- The separate floor map and `CCY_MIN_EFFORT_LEVELS` are retired, and the
-  `ccy.env` lines go with them.
-- A switch back to a configured model sets that model's configured effort.
-  `xhigh` compensation applies only while a downgrade leaves the session on a
-  fallback model.
-- The fable anchor clamp (Plan 00297) stays as a ceiling.
+The supervisor now injects **no `/effort` of any kind, for any reason,
+ever**:
 
-RED tests:
+- The built-in floor map, `CCY_MIN_EFFORT_LEVELS`, the settings.json reader,
+  the coupled-effort correction and the downgrade-xhigh compensation are all
+  gone entirely, not just superseded.
+- The two behaviours those mechanisms provided are now DATA the owner adds
+  to their own `modelSettings` — a `claude-fable-5-1` entry at `low`
+  (replacing DROP ANCHOR) and `claude-opus-5`/`claude-opus-4-8` entries at
+  `xhigh` (replacing the downgrade compensation, covering Fable's two
+  automatic-fallback targets, and now broader than the old compensation
+  since it applies whenever Opus 5 or 4.8 serve, not only a fable-origin
+  episode). See `CLAUDE/development/CcySupervisor.md` for the exact entries.
+- MAJOR 4 fixed alongside: `model_downgrade_recorder`'s signal republishes
+  the SAME record for the life of a session, even after its episode fully
+  closed. A human who later manually switched back to the fallback family
+  produced the identical observation the old `session:from:to` attribution
+  key matched again, reopening an episode and firing `/model fable` at them.
+  A record now has an identity (`record_id`: the transcript entry's `uuid`,
+  or its line's byte offset; the standalone record of a downgrade keeps its
+  block's identity), the state machine spends that identity when the episode
+  recovers, and a record attributes only a drop observed within
+  `_DOWNGRADE_ATTRIBUTION_WINDOW_SECONDS` (300s) of the downgrade it records
+  (review 4 findings 3 and 4). Retroactive attribution of a drop seen before
+  its record was published applies the same judgement at the moment the drop
+  was seen, after the tick's reading, and writes a decision-log line.
+- `hooks-daemon check` holds no effort opinion either (review 4 finding 2):
+  "Effort Level" (which failed anything but `high` and recommended
+  `CLAUDE_CODE_EFFORT_LEVEL=high`, a pin on every model) is replaced by
+  "Effort Source", which warns only about such pins.
 
-- the restore lands on the configured effort, not xhigh;
-- no `/effort` is sent while live effort equals the configured effort;
-- a downgrade still gets xhigh;
-- a missing or unreadable settings file degrades to the current defaults with a
-  logged reason.
+**Correction (review 3**, `subagent-reports/260925-n47-review3.md`**): the
+`modelSettings` claim above is CONDITIONAL, and review 2's design doc
+overstated it.** Claude Code tracks ONE session-level effort value
+(`sessionEffort`), which starts `inherit` (per-model `modelSettings` applies)
+but is PINNED to a fixed value by ANY of: `/effort <level>`, `/effort auto`,
+an effort pick made in the `/model` picker's slider, `--effort`, or
+`CLAUDE_CODE_EFFORT_LEVEL`. Once pinned, that ONE value follows the session
+across every later model AND every automatic fallback — confirmed against
+`model-config.md:544-548` (explicit choice ranks first, no per-model
+qualifier) and the installed Claude Code 2.1.282 binary's `sessionEffort`
+resolver. `/effort auto` does NOT return to `inherit`; it pins to the
+model's BUILT-IN default (ignoring `modelSettings`) and additionally WRITES
+— it clears the current model's saved `modelSettings` entry
+(`settings-reference.md:1211`). **Nothing found un-pins a session mid-flight.**
+So: **`modelSettings` alone can make Fable run at low and its fallback run
+at xhigh only for a session that never touches `/effort`, an effort slider
+pick, `--effort`, or the env var.** If the owner wants a specific level
+right now, typing `/effort` remains a deliberate one-time choice that pins
+the REST of that session — exactly as before this plan — and no
+settings-only configuration recovers per-model behaviour within it. The
+owner decides whether that trade-off is acceptable; the fix here only
+removes the SUPERVISOR as a second party to the fight.
+
+`tests/unit/supervise/test_no_effort_injection.py` asserts on the PAYLOADS
+that the supervisor never types `/effort`, driving `decide_once` (and
+`run_worker` for the raw-input tap) through real sidecar sequences: Fable at
+medium, high, xhigh and max (the removed DROP ANCHOR's trigger), a whole
+attributed downgrade episode through restore and recovery, a manual model
+pick, the operator `/model` switch signal, a compaction and its resume, and a
+human-typed `/effort max`. Each scenario also asserts it reached its path.
+`test_settings_effort.py`, `test_drop_anchor.py`, `test_effort_restore.py`
+and `test_unattributed_effort_drop.py` are deleted outright (the behaviour
+they covered no longer exists) — `test_effort_restore.py`'s NON-effort tests
+(live `/model` auto-restore: backoff, delay, the off setting, confirm
+enters, family ranks, the dry-run marker, and the restore cap pinned as the
+literal 2) are restored under `test_model_restore.py`. `test_attributed_downgrade.py`
+covers the record identity, the attribution window, every retro-attribution
+and hot-reload backfill guard (each asserted on the `/model` payload or the
+exported state it owns), and the export round-trips.
 
 ### N46 — `budget_exhaustion_detector` fires on a tool result that merely contains budget wording
 
