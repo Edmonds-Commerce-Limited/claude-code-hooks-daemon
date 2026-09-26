@@ -116,7 +116,10 @@ def _run(forwarder: Path, events_dir: Path, *, cwd: Path | None = None) -> str:
     env["HOOKS_DAEMON_EVENTS_DIR"] = str(events_dir)
     completed = subprocess.run(
         ["bash", str(forwarder)],
-        input=b'{"tool_name":"Bash","hook_event_name":"PreToolUse"}',
+        input=(
+            b'{"tool_name":"Bash","hook_event_name":"PreToolUse",'
+            b'"synthetic_source":"test-probe","probe_as":"main"}'
+        ),
         capture_output=True,
         cwd=str(cwd) if cwd is not None else None,
         env=env,

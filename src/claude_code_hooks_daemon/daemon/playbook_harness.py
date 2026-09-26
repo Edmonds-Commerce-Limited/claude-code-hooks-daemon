@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import Any, Final
 
 from claude_code_hooks_daemon.constants.paths import ProjectPath
+from claude_code_hooks_daemon.constants.protocol import HookInputField
 from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.daemon.synthetic_traffic import (
     PLAYBOOK_PROBE,
@@ -89,6 +90,11 @@ class ExecutableProbe:
     #: no shell anywhere in this path.
     setup_actions: list[FixtureAction] = field(default_factory=list)
     cleanup_actions: list[FixtureAction] = field(default_factory=list)
+    #: Extra top-level event keys a test declared alongside its `tool_payload`
+    #: (`AcceptanceTest.extra_hook_input`) -- a precondition the payload
+    #: itself cannot carry, e.g. a fixture `transcript_path`. Merged into the
+    #: dispatched event by `build_event`.
+    extra_hook_input: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if not self.tool_name or not self.tool_name.strip():
@@ -204,7 +210,12 @@ def vet_probe_commands(
                 FixtureAction(
                     kind=kind,
                     path=resolved,
-                    content=_fixture_content(match),
+                    # `$CLAUDE_PROJECT_DIR` expanded the same way the target
+                    # PATH above is: a fixture that must embed its own
+                    # absolute location (e.g. a plugin install record's
+                    # `installPath`) states it portably rather than baking in
+                    # the rendering machine's root.
+                    content=expand_project_dir(_fixture_content(match), project_root),
                 )
             )
             break
@@ -311,7 +322,7 @@ def plan_probe(block: PlaybookBlock, project_root: Path) -> ExecutableProbe | Sk
     if not payload:
         return _skip(block, "declares no tool payload, so it is prose a human runs")
 
-    tool_input = _expand(dict(payload.get("tool_input") or {}), project_root)
+    tool_input = _expand(dict(payload.get(HookInputField.TOOL_INPUT) or {}), project_root)
 
     # An event states WHEN it fires relative to the tool call, so the world
     # has to match that claim or the handler answers a different question.
@@ -339,13 +350,16 @@ def plan_probe(block: PlaybookBlock, project_root: Path) -> ExecutableProbe | Sk
     names_a_file = bool(tool_input.get(_FILE_PATH_KEY))
     requires_existing_file = event_type == "PostToolUse" and names_a_file
     requires_absent_file = event_type == "PreToolUse" and names_a_file
+    extra_hook_input: dict[str, Any] = dict(
+        _expand(dict(block.get("extra_hook_input") or {}), project_root)
+    )
 
     return ExecutableProbe(
         test_number=block.get("test_number", 0),
         handler_name=block.get("handler_name", "unknown"),
         title=block.get("title", ""),
         event_type=event_type,
-        tool_name=str(payload.get("tool_name") or ""),
+        tool_name=str(payload.get(HookInputField.TOOL_NAME) or ""),
         tool_input=tool_input,
         expected_decision=str(block.get("expected_decision") or "").lower(),
         project_root=project_root,
@@ -354,6 +368,7 @@ def plan_probe(block: PlaybookBlock, project_root: Path) -> ExecutableProbe | Sk
         requires_absent_file=requires_absent_file,
         setup_actions=setup,
         cleanup_actions=cleanup,
+        extra_hook_input=extra_hook_input,
     )
 
 
@@ -392,7 +407,7 @@ def daemon_error(payload: PlaybookBlock) -> str | None:
     probes without the `tool_response` that `POST_TOOL_USE_INPUT_SCHEMA`
     requires, and the ALLOW half reported green.
     """
-    error = payload.get("error")
+    error = payload.get(HookInputField.ERROR)
     if not error:
         return None
     details = payload.get("details") or []
@@ -480,13 +495,18 @@ def build_event(probe: ExecutableProbe, run_id: str) -> dict[str, Any]:
         # blocking handler decline to deny a probe instead of turning this
         # very suite red.
         SYNTHETIC_SOURCE_FIELD: PLAYBOOK_PROBE,
+        # A declared precondition (`AcceptanceTest.extra_hook_input`), e.g.
+        # `transcript_path` pointing at a fixture Claude config. Spread last,
+        # so a test CAN override a fixed key above if it deliberately
+        # declares one -- there is no other way to state that precondition.
+        **probe.extra_hook_input,
     }
     if probe.event_type == "PostToolUse":
         # Required by the schema, and its absence is rejected before any
         # handler runs. Minimal rather than tool-specific: no handler reached
         # by a declared payload reads it, and inventing a richer shape per
         # tool would be fabricating detail the playbook never declared.
-        event["tool_response"] = {"success": True}
+        event[HookInputField.TOOL_RESPONSE] = {"success": True}
     return event
 
 

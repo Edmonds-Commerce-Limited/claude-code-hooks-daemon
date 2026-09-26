@@ -108,7 +108,16 @@ class BashSafeModeHandler(PreToolUseHandlerBase):
             handler_id=HandlerID.BASH_SAFE_MODE,
             priority=Priority.BASH_SAFE_MODE,
             terminal=False,
-            tags=[HandlerTag.VALIDATION, HandlerTag.QA_ENFORCEMENT, HandlerTag.NON_TERMINAL],
+            # Plan 00466 n24 security review, M3: opt-in, ships disabled by
+            # default, carries its own escape hatch -- an explicit,
+            # deliberate opt-out from structural fail-closed, not an
+            # oversight.
+            tags=[
+                HandlerTag.VALIDATION,
+                HandlerTag.QA_ENFORCEMENT,
+                HandlerTag.NON_TERMINAL,
+                HandlerTag.ADVISORY,
+            ],
         )
         # Config options: applied by blind setattr AFTER __init__. `_mode` is
         # a property so an unsupported value is rejected AT LOAD, inside the
@@ -194,7 +203,7 @@ class BashSafeModeHandler(PreToolUseHandlerBase):
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """True only when the command is missing a required prelude flag."""
-        if hook_input.get("tool_name") != ToolName.BASH:
+        if hook_input.get(HookInputField.TOOL_NAME) != ToolName.BASH:
             return False
         command = get_bash_command(hook_input)
         if not command:

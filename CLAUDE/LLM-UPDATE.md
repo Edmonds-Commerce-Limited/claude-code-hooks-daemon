@@ -499,16 +499,30 @@ bash "$tmp" --project-root "$PWD" "$TARGET_VERSION"
 # Verify daemon works
 .claude/hooks-daemon/bin/hooks-daemon status
 
-# Test hooks still work
-echo '{"tool_name": "Bash", "tool_input": {"command": "ls -la"}}' | \
-  .claude/hooks/pre-tool-use
-# Expected: {} (empty = allow)
+# Test hooks still work (the helper marks the probe and prints the verdict)
+.claude/hooks-daemon/bin/hooks-daemon probe PreToolUse --json '{"tool_name": "Bash", "tool_input": {"command": "ls -la"}}'
+# Expected: decision: allow
 
-# Test destructive git still blocked
-echo '{"tool_name": "Bash", "tool_input": {"command": "git reset --hard HEAD"}}' | \
-  .claude/hooks/pre-tool-use
-# Expected: {"hookSpecificOutput": {"permissionDecision": "deny", ...}}
 ```
+
+To test that destructive git is still blocked, save this payload as
+`untracked/scratch/probe-destructive-git.json` with the Write tool:
+
+```json
+{"tool_name": "Bash", "tool_input": {"command": "git reset --hard HEAD"}}
+```
+
+```bash
+.claude/hooks-daemon/bin/hooks-daemon probe PreToolUse --file untracked/scratch/probe-destructive-git.json
+# Expected: decision: deny
+```
+
+The payload goes in a file because the guards judge your own Bash command's
+text too: an `echo` or `--json` that spells out `git reset --hard` is denied
+before the probe runs. A shell heredoc is judged the same way. The helper
+marks the probe `"synthetic_source": "manual-probe"`. Without that marker,
+the daemon's verdict log records the probe as a real agent's tool call (see
+[DEBUGGING_HOOKS.md](DEBUGGING_HOOKS.md#probing-a-handler-by-hand-hooks-daemon-probe)).
 
 **RESTART CLAUDE CODE**: After upgrading, tell the user to restart their Claude Code session (exit and re-enter). New hook event types and settings changes only take effect after a session restart.
 
@@ -1101,7 +1115,7 @@ The daemon includes CLI commands for config operations:
 .claude/hooks-daemon/bin/hooks-daemon status
 
 # 3. Hook test
-echo '{"tool_name":"Bash","tool_input":{"command":"ls"}}' | bash .claude/hooks/pre-tool-use
+echo '{"tool_name":"Bash","tool_input":{"command":"ls"},"synthetic_source":"manual-probe"}' | bash .claude/hooks/pre-tool-use
 ```
 
 ### Full Verification (for major upgrades)
@@ -1159,7 +1173,7 @@ git -C .claude/hooks-daemon stash pop
 ls -la .claude/hooks/
 
 # 3. Test hook directly
-echo '{"tool_name":"Bash","tool_input":{"command":"test"}}' | bash .claude/hooks/pre-tool-use
+echo '{"tool_name":"Bash","tool_input":{"command":"test"},"synthetic_source":"manual-probe"}' | bash .claude/hooks/pre-tool-use
 ```
 
 If hooks still fail: Restart Claude Code session (only needed if new event types were added).

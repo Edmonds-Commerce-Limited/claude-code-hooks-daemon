@@ -30,6 +30,7 @@ from typing import Any
 from unittest.mock import patch
 
 import pytest
+from tests.claude_plugin_fixture import install_fake_plugin
 
 from claude_code_hooks_daemon.core import Decision
 from claude_code_hooks_daemon.handlers.pre_tool_use.agent_isolation_advisor import (
@@ -44,8 +45,12 @@ def _task_input(**tool_input: Any) -> dict[str, Any]:
 
 
 @pytest.fixture
-def handler() -> AgentIsolationAdvisorHandler:
-    return AgentIsolationAdvisorHandler()
+def handler(tmp_path: Path) -> AgentIsolationAdvisorHandler:
+    """Rooted at empty tmp dirs, so no real agent file or plugin answers."""
+    instance = AgentIsolationAdvisorHandler()
+    instance._project_root = tmp_path / "project"
+    instance._config_dir = tmp_path / "config"
+    return instance
 
 
 def _with_live_threads(count: int) -> Any:
@@ -112,6 +117,55 @@ class TestMatching:
     ) -> None:
         with _with_live_threads(4):
             assert handler.matches({"tool_name": "Task", "tool_input": {}}) is False
+
+
+class TestIsolationDeclaredByTheAgentDefinition:
+    """Plan 00468 P7: an agent whose own definition declares
+    ``isolation: worktree`` always runs isolated, so advising isolation for it
+    is a false alarm. DBF's ``conformance-reviewer`` is that shape."""
+
+    def test_a_plugin_agent_declaring_worktree_isolation_is_silent(
+        self, handler: AgentIsolationAdvisorHandler, tmp_path: Path
+    ) -> None:
+        assert handler._project_root is not None
+        assert handler._config_dir is not None
+        (handler._project_root / ".claude").mkdir(parents=True)
+        install_fake_plugin(
+            handler._config_dir,
+            handler._project_root,
+            agents={"conformance-reviewer.md": "name: conformance-reviewer\nisolation: worktree"},
+        )
+        agent = "defence-before-fix:conformance-reviewer"
+        with _with_live_threads(3):
+            assert handler.matches(_task_input(subagent_type=agent)) is False
+
+    def test_a_project_agent_declaring_worktree_isolation_is_silent(
+        self, handler: AgentIsolationAdvisorHandler
+    ) -> None:
+        assert handler._project_root is not None
+        agents_dir = handler._project_root / ".claude" / "agents"
+        agents_dir.mkdir(parents=True)
+        (agents_dir / "iso.md").write_text(
+            "---\nname: iso\ndescription: d\nisolation: worktree\n---\n\nBody.\n"
+        )
+        with _with_live_threads(3):
+            assert handler.matches(_task_input(subagent_type="iso")) is False
+
+    def test_an_agent_without_the_declaration_is_still_advised(
+        self, handler: AgentIsolationAdvisorHandler
+    ) -> None:
+        assert handler._project_root is not None
+        agents_dir = handler._project_root / ".claude" / "agents"
+        agents_dir.mkdir(parents=True)
+        (agents_dir / "plain.md").write_text("---\nname: plain\ndescription: d\n---\n\nBody.\n")
+        with _with_live_threads(3):
+            assert handler.matches(_task_input(subagent_type="plain")) is True
+
+    def test_an_unknown_agent_type_is_still_advised(
+        self, handler: AgentIsolationAdvisorHandler
+    ) -> None:
+        with _with_live_threads(3):
+            assert handler.matches(_task_input(subagent_type="nobody:knows")) is True
 
 
 class TestAdvice:

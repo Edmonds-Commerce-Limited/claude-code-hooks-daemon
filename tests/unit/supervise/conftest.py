@@ -20,6 +20,7 @@ their explicit setup still wins.
 from __future__ import annotations
 
 import json
+import os
 from typing import TYPE_CHECKING
 
 import pytest
@@ -38,6 +39,8 @@ def write_attributed_downgrade(
     session_id: str,
     original_family: str = "fable",
     fallback_family: str = "opus",
+    record_ts: str = "",
+    record_id: str = "uuid-attributed-1",
 ) -> Path:
     """Write the `.model-downgrade` signal the daemon's recorder publishes.
 
@@ -47,6 +50,14 @@ def write_attributed_downgrade(
     deliberately do NOT call this — that is the distinction the plan exists to
     draw, and leaving it implicit is what let the supervisor override a human
     in the field.
+
+    ``record_id`` identifies the underlying transcript record (Plan 00466 N47):
+    a test proving a NEW downgrade re-opens an episode after a prior one
+    closed must pass a DIFFERENT id, since the state machine refuses to
+    re-open from a record it has already spent. A record explains only a drop
+    observed within the attribution window of its event time; the default
+    empty ``record_ts`` makes that the moment the supervisor first reads the
+    signal, which suits a test that writes it just before driving the drop.
     """
     sidecar_dir.mkdir(parents=True, exist_ok=True)
     path = sidecar_dir / f"{session_id}{_mod._MODEL_DOWNGRADE_SIGNAL_SUFFIX}"
@@ -61,7 +72,8 @@ def write_attributed_downgrade(
                 "fallback_family": fallback_family,
                 "category": "cyber",
                 "scope": "session",
-                "record_ts": "2026-08-27T09:34:10.341Z",
+                "record_ts": record_ts,
+                "record_id": record_id,
             }
         ),
         encoding="utf-8",
@@ -69,10 +81,21 @@ def write_attributed_downgrade(
     return path
 
 
+AMBIENT_ENV_PREFIXES = ("CCY_", "CLAUDE_SUPERVISE_")
+
+
 @pytest.fixture(autouse=True)
-def _neutralise_ambient_flag_compact(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Clear ambient ``CCY_FLAG_COMPACT`` so tests default to the shipped-off state."""
-    monkeypatch.delenv(_mod._FLAG_COMPACT_ENV_VAR, raising=False)
+def _neutralise_ambient_ccy_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Clear every ambient supervisor variable so tests see the shipped defaults.
+
+    A ccy session exports its own tuning (``CCY_MIN_EFFORT_LEVELS``,
+    ``CCY_FLAG_COMPACT``, ...), which the supervisor reads at decision time.
+    Clearing the whole namespace, not one named variable, is what keeps a new
+    tunable from reintroducing the in-session-only failure (00466 N63).
+    """
+    for name in list(os.environ):
+        if name.startswith(AMBIENT_ENV_PREFIXES):
+            monkeypatch.delenv(name, raising=False)
 
 
 @pytest.fixture(autouse=True)

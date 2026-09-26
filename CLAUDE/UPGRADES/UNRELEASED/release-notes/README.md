@@ -29,11 +29,13 @@ refactors usually do not, and the plan's last Success Criterion then says
 ## File naming
 
 ```
-NN-kebab-case-slug.md
+NNN-kebab-case-slug.md
 ```
 
-`NN` is a two-digit ordinal in arrival order. The slug says what the callout
-is about without opening the file.
+`NNN` is a three-digit ordinal in arrival order, zero-padded (`005`, `042`,
+`107`). The fixed width keeps a plain string sort in numeric order past
+99 — a mixed two- and three-digit scheme would sort `100-` before `11-`.
+The slug says what the callout is about without opening the file.
 
 ## File structure (mandatory schema)
 
@@ -46,6 +48,10 @@ is about without opening the file.
 One to three sentences, in the voice of the release notes: what changed,
 what it means for the reader, and what (if anything) they can now stop doing.
 ```
+
+A change that answers an externally-reported GitHub issue credits it in the
+callout as `(reported as issue #N)`, so every such issue in a release is
+credited the same way.
 
 ## How the release handles this directory
 

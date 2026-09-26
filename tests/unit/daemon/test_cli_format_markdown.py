@@ -8,6 +8,7 @@ from unittest.mock import patch
 import pytest
 
 from claude_code_hooks_daemon.daemon.cli import cmd_format_markdown
+from claude_code_hooks_daemon.utils.claude_config import CLAUDE_CONFIG_DIR_ENV
 
 _UNALIGNED_TABLE = (
     "# Test\n"
@@ -308,6 +309,48 @@ def _git_commit_all(project_root: Path) -> None:
         check=True,
         capture_output=True,
     )
+
+
+class TestCmdFormatMarkdownSkipsTheClaudeConfigDir:
+    """Plan 00468 P3: Claude Code's config dir inside the project is never walked.
+
+    Git visibility cannot be relied on for it: the dir may be tracked, or the
+    project may not be a git repository at all.
+    """
+
+    def test_a_tracked_config_dir_is_not_rewritten(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _git_init_project(tmp_path)
+        own_file = tmp_path / "own.md"
+        own_file.write_text(_UNALIGNED_TABLE)
+        config = tmp_path / ".claude" / "ccy"
+        plugin_doc = config / "plugins" / "cache" / "p" / "SPEC.md"
+        plugin_doc.parent.mkdir(parents=True)
+        plugin_doc.write_text(_UNALIGNED_TABLE)
+        _git_commit_all(tmp_path)
+        monkeypatch.setenv(CLAUDE_CONFIG_DIR_ENV, str(config))
+
+        result = cmd_format_markdown(argparse.Namespace(path=tmp_path, check=False))
+
+        assert result == 0
+        assert _ALIGNED_MARKER in own_file.read_text()
+        assert plugin_doc.read_text() == _UNALIGNED_TABLE
+
+    def test_a_config_dir_in_a_non_git_project_is_not_reported(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        (tmp_path / "own.md").write_text("# Own\n\nAlready clean.\n")
+        config = tmp_path / ".claude" / "ccy"
+        plugin_doc = config / "plugins" / "SPEC.md"
+        plugin_doc.parent.mkdir(parents=True)
+        plugin_doc.write_text(_UNALIGNED_TABLE)
+        monkeypatch.setenv(CLAUDE_CONFIG_DIR_ENV, str(config))
+
+        result = cmd_format_markdown(argparse.Namespace(path=tmp_path, check=True))
+
+        assert result == 0, "the config dir's markdown must not surface as a finding"
+        assert plugin_doc.read_text() == _UNALIGNED_TABLE
 
 
 class TestCmdFormatMarkdownGitIgnore:

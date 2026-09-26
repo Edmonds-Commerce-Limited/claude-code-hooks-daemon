@@ -10,12 +10,15 @@ judges content and never gates a tool call.
 import subprocess
 from pathlib import Path
 
+import pytest
+
 from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.docs_qa.comment_finder import (
     DEFAULT_MIN_BLOCK_LINES,
     CommentBlockFinding,
     find_long_comment_blocks,
 )
+from claude_code_hooks_daemon.utils.claude_config import CLAUDE_CONFIG_DIR_ENV
 
 
 def _git(repo: Path, *args: str) -> None:
@@ -101,6 +104,49 @@ class TestFindLongCommentBlocks:
             path=target, start_line=1, end_line=5, line_count=5, preview="# x"
         )
         assert finding.path == target
+
+
+class TestFindLongCommentBlocksSkipsTheClaudeConfigDir:
+    """Plan 00468 P3: Claude Code's config dir inside the project is never walked.
+
+    Git visibility cannot be relied on for it: the dir may be tracked, or the
+    project may not be a git repository at all.
+    """
+
+    def test_a_tracked_config_dir_is_not_walked(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _init_repo(tmp_path)
+        body = "\n".join(f"# line {i}" for i in range(20))
+        own = tmp_path / "own.py"
+        own.write_text(f"{body}\ncode = 1\n")
+        config = tmp_path / ".claude" / "ccy"
+        plugin = config / "plugins" / "cache" / "p" / "hook.py"
+        plugin.parent.mkdir(parents=True)
+        plugin.write_text(f"{body}\ncode = 1\n")
+        _git(tmp_path, "add", "-A")
+        _git(tmp_path, "commit", "-m", "initial")
+        monkeypatch.setenv(CLAUDE_CONFIG_DIR_ENV, str(config))
+
+        found = {finding.path for finding in find_long_comment_blocks([tmp_path], min_lines=15)}
+
+        assert found == {own}
+
+    def test_a_config_dir_in_a_non_git_project_is_not_walked(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        body = "\n".join(f"# line {i}" for i in range(20))
+        own = tmp_path / "own.py"
+        own.write_text(f"{body}\ncode = 1\n")
+        config = tmp_path / ".claude" / "ccy"
+        plugin = config / "plugins" / "hook.py"
+        plugin.parent.mkdir(parents=True)
+        plugin.write_text(f"{body}\ncode = 1\n")
+        monkeypatch.setenv(CLAUDE_CONFIG_DIR_ENV, str(config))
+
+        found = {finding.path for finding in find_long_comment_blocks([tmp_path], min_lines=15)}
+
+        assert found == {own}
 
 
 class TestFindLongCommentBlocksGitIgnore:

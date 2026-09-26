@@ -149,13 +149,19 @@ def build_report(raw: dict[str, Any], root: Path) -> dict[str, Any]:
             }
         )
     summary = raw.get("summary", {})
+    files_analyzed = int(summary.get("filesAnalyzed", 0))
     return {
         "tool": _TOOL_NAME,
         "summary": {
-            "passed": not errors,
+            # A run that analysed nothing has not passed, it has not run: a
+            # bad --project scope makes pyright emit "No source files found"
+            # with filesAnalyzed 0, generalDiagnostics empty, and exit 0 --
+            # zero errors read alone is indistinguishable from a clean scan.
+            # Mirrors run_type_check.sh's mypy analysed-count requirement.
+            "passed": not errors and files_analyzed > 0,
             "total_errors": len(errors),
             "warnings": warnings,
-            "files_analyzed": int(summary.get("filesAnalyzed", 0)),
+            "files_analyzed": files_analyzed,
             "pyright_version": str(raw.get("version", "")),
         },
         "errors": errors,

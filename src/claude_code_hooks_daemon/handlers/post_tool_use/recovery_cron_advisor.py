@@ -37,6 +37,7 @@ PreToolUse plan_workflow handler.
 import logging
 import re
 from enum import Enum
+from pathlib import Path
 from typing import Any, ClassVar, Final
 
 from pydantic import ValidationError
@@ -59,6 +60,7 @@ from claude_code_hooks_daemon.core.utils import get_bash_command, get_file_path
 from claude_code_hooks_daemon.handlers.utils.bounded_fifo_map import BoundedFifoMap
 from claude_code_hooks_daemon.utils.config_cache import load_config_cached
 from claude_code_hooks_daemon.utils.cron_tick import TickKind, classify_tick, tick_sentinel
+from claude_code_hooks_daemon.utils.git_facts import project_relative_head_text
 from claude_code_hooks_daemon.utils.scratch_dir import acceptance_path
 
 logger = logging.getLogger(__name__)
@@ -352,6 +354,29 @@ def _edit_results_in_status_complete(new_string: str, old_string: str) -> bool:
     return False
 
 
+def _write_is_real_completion(file_path: str) -> bool:
+    """True only when THIS Write is what moved Status to Complete[d].
+
+    The caller already confirmed the WRITTEN content reads Complete; this
+    decides whether that is NEW or PRE-EXISTING -- ledger 00466 N3 sibling
+    to ``goal_injection``'s In-Progress flip check, and it shares that
+    handler's HEAD-comparison helper
+    (:func:`claude_code_hooks_daemon.utils.git_facts.project_relative_head_text`)
+    rather than duplicating it: the file has already landed on disk by the
+    time PostToolUse runs, so git HEAD stands in for "before". A path absent
+    at HEAD (new, or never committed) means there is nothing to flip FROM,
+    so a fresh Write that already reads Complete is a genuine transition.
+
+    Unlike goal_injection's Edit path, there is no ``old_string`` fragment to
+    inspect for a Write -- the whole file is the payload -- so this always
+    goes to HEAD rather than short-circuiting on a local text check first.
+    """
+    before_text = project_relative_head_text(Path(file_path), ProjectContext.project_root())
+    if before_text is None:
+        return True
+    return not _STATUS_COMPLETE_RE.search(before_text)
+
+
 def _detect_lifecycle_phase(
     hook_input: dict[str, Any], plan_dir: str = _FALLBACK_PLAN_DIR
 ) -> LifecyclePhase | None:
@@ -361,7 +386,10 @@ def _detect_lifecycle_phase(
 
     Detection rules:
     - CREATION: Write to an active PLAN.md (any content) OR a Bash call to mkplan.bash.
-    - COMPLETION: Write/Edit to active PLAN.md with **Status**: Complete in content.
+    - COMPLETION: Write/Edit to active PLAN.md that is a REAL TRANSITION to
+      **Status**: Complete (ledger 00466 N3 sibling) -- a Write whose content
+      reads Complete because the plan was ALREADY Complete before this call
+      is not a completion event at all (see ``_write_is_real_completion``).
     - PROGRESS: Edit to active PLAN.md touching task-status icons.
       (Completion takes priority over Progress when Status Complete is present.)
     """
@@ -387,9 +415,13 @@ def _detect_lifecycle_phase(
 
     if tool_name == ToolName.WRITE:
         content: str = tool_input.get("content", "")
-        # Completion check first (takes priority)
         if _STATUS_COMPLETE_RE.search(content):
-            return LifecyclePhase.COMPLETION
+            if _write_is_real_completion(file_path):
+                return LifecyclePhase.COMPLETION
+            # Already Complete before this Write landed: nothing lifecycle-
+            # relevant happened, so this event is not matched at all --
+            # never falls through to PROGRESS/CREATION.
+            return None
         # Any Write to an active PLAN.md that doesn't set Complete is Creation
         # UNLESS it contains progress markers (in which case it is Progress)
         if _text_has_progress_markers(content):

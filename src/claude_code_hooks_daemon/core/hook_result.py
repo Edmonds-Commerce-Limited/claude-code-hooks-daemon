@@ -1152,6 +1152,57 @@ class HookResult(BaseModel, Generic[DecisionT]):
         )
 
     @classmethod
+    def error_deny(
+        cls,
+        error_type: str,
+        error_details: str,
+    ) -> "HookResult":
+        """Create a FAIL-CLOSED error result (Plan 00466 n24 review, B1).
+
+        ``error()`` above is documented fail-open on purpose: for an event
+        type that cannot refuse (or where a false deny would be worse than a
+        false allow), an unexpected exception should not stop work outright.
+        PreToolUse is not that event type -- "no verdict" must never read as
+        "allowed" (the same principle N24's SAFETY+BLOCKING-raise handling
+        and N25/N34's deadline handling already apply INSIDE the chain; this
+        is its counterpart for an exception the chain itself never reached,
+        e.g. request parsing, size measurement, verdict logging, pseudo-event
+        dispatch).
+
+        Recovery must stay possible even so: the reason below points at the
+        daemon-recovery commands a client-side allowlist keeps reachable
+        (``bin/hooks-daemon`` / ``.claude/hooks-daemon/bin/hooks-daemon``
+        restart/status/logs/stop/start) so a wedged daemon cannot brick a
+        session.
+
+        Args:
+            error_type: Type of error (e.g. "internal_error").
+            error_details: Detailed error information.
+
+        Returns:
+            HookResult with a deny decision and recovery instructions.
+        """
+        context_lines = [
+            "WARNING: The hooks daemon encountered an error before it could "
+            "judge this call, and cannot tell whether it would have denied it.",
+            f"ERROR TYPE: {error_type}",
+            f"ERROR DETAILS: {error_details}",
+            "",
+            "RECOVERY: run `bin/hooks-daemon status` or `bin/hooks-daemon "
+            "restart` (or the `.claude/hooks-daemon/bin/hooks-daemon` "
+            "equivalent) -- these stay allowed even while other calls are "
+            "denied this way.",
+        ]
+        return cls(
+            decision=cast("DecisionT", Decision.DENY),
+            reason=(
+                "HOOKS DAEMON ERROR - denied for safety (no verdict was reached): "
+                f"{error_type}: {error_details}"
+            ),
+            context=context_lines,
+        )
+
+    @classmethod
     def configuration_error(cls, errors: list[str]) -> "HookResult":
         """Create a configuration error result for degraded mode.
 

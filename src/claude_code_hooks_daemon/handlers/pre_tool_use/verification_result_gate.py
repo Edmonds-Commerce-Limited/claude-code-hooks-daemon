@@ -238,7 +238,16 @@ class VerificationResultGateHandler(PreToolUseHandlerBase):
             handler_id=HandlerID.VERIFICATION_RESULT_GATE,
             priority=Priority.VERIFICATION_RESULT_GATE,
             terminal=False,
-            tags=[HandlerTag.VALIDATION, HandlerTag.QA_ENFORCEMENT, HandlerTag.NON_TERMINAL],
+            # Plan 00466 n24 security review, M3: a heuristic pattern
+            # detector that, by its own docstring, is expected to be
+            # imperfect -- an explicit, deliberate opt-out from structural
+            # fail-closed, not an oversight.
+            tags=[
+                HandlerTag.VALIDATION,
+                HandlerTag.QA_ENFORCEMENT,
+                HandlerTag.NON_TERMINAL,
+                HandlerTag.ADVISORY,
+            ],
         )
         # Config options: set via setattr AFTER __init__.
         self._mode: str = _MODE_WARN
@@ -271,7 +280,7 @@ class VerificationResultGateHandler(PreToolUseHandlerBase):
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """Cheap pre-filter: a Bash command that could contain a mutator."""
-        if hook_input.get("tool_name") != ToolName.BASH:
+        if hook_input.get(HookInputField.TOOL_NAME) != ToolName.BASH:
             return False
         command = get_bash_command(hook_input)
         if not command:

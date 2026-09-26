@@ -32,6 +32,14 @@ if [ -z "${OUTPUT_SH_LOADED+x}" ]; then
     source "$INSTALL_LIB_DIR/output.sh"
 fi
 
+# Ensure portable_time.sh (_hp_timestamp, Plan 00466 N30) is loaded.
+if ! declare -F _hp_timestamp > /dev/null; then
+    _sd_lib_dir="$(dirname "${BASH_SOURCE[0]}")"
+    # shellcheck source=../lib/portable_time.sh
+    source "${_sd_lib_dir%/install}/lib/portable_time.sh"
+    unset _sd_lib_dir
+fi
+
 # Exit status the settings-merge CLI uses for "I refused, nothing was written".
 # Deliberately not 1: a 1 from this step means ABORT to the calling scripts, and
 # aborting the idempotent fast path leaves new forwarders over old settings with
@@ -108,8 +116,13 @@ deploy_settings_json() {
         print_warning "Your settings.json differs from the daemon's; merging."
         print_warning "  Pre-upgrade copy: $snapshot_path"
     else
+        local backup_stamp
+        if ! backup_stamp=$(_hp_timestamp '%Y%m%d-%H%M%S'); then
+            print_error "deploy_settings_json: cannot determine a backup timestamp (see stderr above)"
+            return 1
+        fi
         local backup
-        backup="${target}.bak-$(date +%Y%m%d-%H%M%S)"
+        backup="${target}.bak-${backup_stamp}"
         if ! cp "$target" "$backup"; then
             print_error "Could not back up $target before merging it - aborting"
             return 1

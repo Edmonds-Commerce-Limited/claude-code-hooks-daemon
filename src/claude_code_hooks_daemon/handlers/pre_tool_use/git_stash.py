@@ -9,7 +9,7 @@ from claude_code_hooks_daemon.core import Decision, GatingResult, get_data_layer
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.core.utils import get_bash_command
-from claude_code_hooks_daemon.utils.command_evasion import GIT_INVOCATION
+from claude_code_hooks_daemon.utils.command_evasion import GIT_INVOCATION, remove_word_quoting
 
 # Shared teaching content for the (only) deny path — preserves the deny-mode
 # block message verbatim (Plan 00116, Task 3.2).
@@ -87,18 +87,22 @@ class GitStashHandler(PreToolUseHandlerBase):
         # command in a string, exactly as CLAUDE.md prescribes. Plan 00228
         # considered exempting quoted spans here and rejected it — those tests
         # are the specification, not an accident.
+        #
+        # In-word quoting is removed first because bash removes it: `git
+        # "stash"` stashes, and `git stash 'pop'` recovers (Plan 00408 Task
+        # 3.0's sibling sweep). The escape hatch below reads the raw command,
+        # since its quotes are what delimit the reason.
+        words = remove_word_quoting(command)
 
         # Allow recovery/query operations unconditionally
         # pop, apply, list, show — these retrieve stashed work
         # Note: drop/clear are blocked by DestructiveGitHandler
-        if re.search(GIT_INVOCATION + r"stash\s+(?:pop|apply|list|show)", command, re.IGNORECASE):
+        if re.search(GIT_INVOCATION + r"stash\s+(?:pop|apply|list|show)", words, re.IGNORECASE):
             return False
 
         # Check if this is a stash creation command
         is_stash = bool(
-            re.search(
-                GIT_INVOCATION + r"stash(?:\s+(?:push|save))?(?=\W|$)", command, re.IGNORECASE
-            )
+            re.search(GIT_INVOCATION + r"stash(?:\s+(?:push|save))?(?=\W|$)", words, re.IGNORECASE)
         )
         if not is_stash:
             return False

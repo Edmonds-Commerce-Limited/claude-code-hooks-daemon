@@ -85,14 +85,12 @@ class HookRegistrationCheckerHandler(SessionStartVerifiable, SessionStartHandler
         # already-installed project stop the "Missing hook registration" flood on
         # its next session without a reinstall. Opt-out via:
         #   handlers.session_start.hook_registration_checker.options.auto_repair_registrations: false
-        self.config: dict[str, Any] = {
-            "auto_migrate_settings": True,
-            "auto_repair_registrations": True,
-        }
-
-    def configure(self, config: dict[str, Any]) -> None:
-        """Apply per-handler config from the daemon's config loader."""
-        self.config.update(config)
+        #
+        # Both arrive as self._<option>, injected by the registry (Plan 00466
+        # N17: they were read from a configure() dict production never fills,
+        # so opting out did nothing).
+        self._auto_migrate_settings: object = True
+        self._auto_repair_registrations: object = True
 
     def _get_project_root(self) -> Path | None:
         """Get the project root directory.
@@ -196,7 +194,7 @@ class HookRegistrationCheckerHandler(SessionStartVerifiable, SessionStartHandler
         # only writes when at least one entry actually needs rewriting; the
         # audit below sees the post-migration shape.
         migration_result: MigrationResult | None = None
-        if self.config.get("auto_migrate_settings", True):
+        if self._auto_migrate_settings:
             try:
                 migration_result = migrate_settings_to_bash_invocation(claude_dir / _SETTINGS_FILE)
             except OSError as exc:
@@ -209,7 +207,7 @@ class HookRegistrationCheckerHandler(SessionStartVerifiable, SessionStartHandler
         # shape and the flood stops on this very session. Fail-safe: any
         # read/write error leaves the file untouched and the audit still warns.
         repair_result: RepairResult | None = None
-        if self.config.get("auto_repair_registrations", True):
+        if self._auto_repair_registrations:
             try:
                 repair_result = repair_settings_registrations(claude_dir / _SETTINGS_FILE)
             except OSError as exc:

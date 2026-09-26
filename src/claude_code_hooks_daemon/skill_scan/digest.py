@@ -16,8 +16,12 @@ from claude_code_hooks_daemon.skill_scan.constants import (
     MARKDOWN_SUFFIX,
     MAX_PAYLOAD_CHARS,
     SKILLS_SUBDIR,
+    USER_COMMANDS_DIRNAME,
+    USER_SKILLS_DIRNAME,
 )
 from claude_code_hooks_daemon.skill_scan.models import Cluster
+from claude_code_hooks_daemon.utils.claude_config import claude_config_dir
+from claude_code_hooks_daemon.utils.claude_plugins import resolve_enabled_plugins
 from claude_code_hooks_daemon.utils.secret_redaction import redact_text
 
 _NO_INVENTORY = "(none)"
@@ -44,16 +48,27 @@ def build_digest(
     return digest[:MAX_PAYLOAD_CHARS]
 
 
-def existing_skill_names(project_root: Path) -> list[str]:
-    """Names of existing ``.claude/skills/`` and ``.claude/commands/`` entries.
+def existing_skill_names(project_root: Path, *, config_dir: Path | None = None) -> list[str]:
+    """Names of every skill and command already available in this project.
 
     These are fed to the model so it never suggests what already exists
-    (existing-skill suppression). Markdown command files are listed by stem;
-    directories by name.
+    (existing-skill suppression): the project's ``.claude/skills/`` and
+    ``.claude/commands/``, the personal ones under the Claude config dir, and
+    each enabled Claude Code plugin's skills and commands by the scoped name
+    they are invoked with (Plan 00468 G14). Markdown command files are listed
+    by stem; directories by name; each name once, project first.
+
+    ``config_dir`` defaults to :func:`claude_config_dir`.
     """
+    config = config_dir if config_dir is not None else claude_config_dir()
+    directories = [
+        project_root.joinpath(*SKILLS_SUBDIR),
+        project_root.joinpath(*COMMANDS_SUBDIR),
+        config / USER_SKILLS_DIRNAME,
+        config / USER_COMMANDS_DIRNAME,
+    ]
     names: list[str] = []
-    for subdir in (SKILLS_SUBDIR, COMMANDS_SUBDIR):
-        directory = project_root.joinpath(*subdir)
+    for directory in directories:
         if not directory.is_dir():
             continue
         for entry in sorted(directory.iterdir()):
@@ -61,7 +76,9 @@ def existing_skill_names(project_root: Path) -> list[str]:
                 names.append(entry.name[: -len(MARKDOWN_SUFFIX)])
             else:
                 names.append(entry.name)
-    return names
+    inventory = resolve_enabled_plugins(project_root, config_dir=config)
+    names.extend(skill.scoped_name for skill in inventory.skills())
+    return list(dict.fromkeys(names))
 
 
 def build_model_prompt(digest: str, existing: list[str]) -> str:

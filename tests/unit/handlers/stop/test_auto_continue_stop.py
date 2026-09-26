@@ -4,7 +4,9 @@ This handler auto-continues when Claude asks confirmation questions before stopp
 preventing the need for user input and enabling true YOLO mode automation.
 """
 
+import errno
 import json
+import logging
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
@@ -14,6 +16,11 @@ import pytest
 from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.core import Decision, HookResult
 from claude_code_hooks_daemon.core.data_layer import reset_data_layer
+from claude_code_hooks_daemon.daemon.synthetic_traffic import (
+    MANUAL_PROBE,
+    PROBE_AS_FIELD,
+    SYNTHETIC_SOURCE_FIELD,
+)
 from claude_code_hooks_daemon.handlers.stop import auto_continue_stop
 from claude_code_hooks_daemon.handlers.stop.auto_continue_stop import (
     AutoContinueStopHandler,
@@ -97,6 +104,20 @@ class TestStopEventDiscriminators:
     def test_transcript_bytes_is_omitted_when_no_path_is_given(self, tmp_path: Path) -> None:
         records = self._log(tmp_path, {"stop_hook_active": False})
         assert "transcript_bytes" not in records[0]
+
+    def test_a_probe_is_recorded_as_synthetic(self, tmp_path: Path) -> None:
+        """Plan 00466 N12: `probe_as: main` lets a probe reach this handler, so
+        this debugging log must tell its lines apart from real stops, as
+        verdicts.jsonl does."""
+        records = self._log(
+            tmp_path, {"stop_hook_active": False, SYNTHETIC_SOURCE_FIELD: MANUAL_PROBE}
+        )
+        assert records[0]["synthetic"] == MANUAL_PROBE
+
+    def test_a_real_stop_carries_no_synthetic_field(self, tmp_path: Path) -> None:
+        """Omitted, not null: the idiom this record already uses."""
+        records = self._log(tmp_path, {"stop_hook_active": False})
+        assert "synthetic" not in records[0]
 
     def test_a_missing_transcript_omits_the_field_rather_than_breaking_the_line(
         self, tmp_path: Path
@@ -1120,26 +1141,50 @@ class TestAutoContinueStopHandlerEdgeCases:
         assert handler.matches(hook_input) is True
 
     def test_matches_handles_oserror_reading_transcript(
-        self, handler: AutoContinueStopHandler, tmp_path: Path
+        self, handler: AutoContinueStopHandler, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Should handle OSError when reading transcript."""
+        """Should handle OSError when reading transcript.
+
+        Root reads a mode-000 file (root bypasses read permission bits), so
+        `chmod(0o000)` no longer forces the OSError branch this test targets
+        when the process is root -- this container runs as root (Plan 00466
+        N56 review 1, F5). Monkeypatch the actual read call (`Path.open`
+        inside `TranscriptReader._parse_tail`) to raise OSError for this
+        specific transcript path instead, which is what a genuinely-unreadable
+        file would report.
+        """
         transcript_path = tmp_path / "unreadable.jsonl"
-        transcript_path.touch()
-        # Make file unreadable
-        transcript_path.chmod(0o000)
+        transcript_path.write_text('{"type": "message"}\n', encoding="utf-8")
+
+        real_open = Path.open
+        fault_calls = 0
+
+        # Any: passing through whichever overload of Path.open the caller used.
+        def _raise_oserror(self: Path, *args: Any, **kwargs: Any) -> Any:
+            nonlocal fault_calls
+            if self == transcript_path:
+                fault_calls += 1
+                raise OSError(errno.EACCES, "Permission denied")
+            return real_open(self, *args, **kwargs)
+
+        monkeypatch.setattr(
+            "claude_code_hooks_daemon.core.transcript_reader.Path.open", _raise_oserror
+        )
 
         hook_input = {
             "transcript_path": str(transcript_path),
             "stop_hook_active": False,
         }
 
-        try:
-            result = handler.matches(hook_input)
-            # Now returns True on read error — routing (fail open) happens in handle()
-            assert result is True
-        finally:
-            # Clean up - restore permissions so pytest can delete the file
-            transcript_path.chmod(0o644)
+        result = handler.matches(hook_input)
+        # The fault must actually have fired -- otherwise `result is True`
+        # cannot tell an exercised OSError path from an unread fixture line
+        # that also parses to a truthy `{"type": "message"}` match (both give
+        # the same result, so a normal read would pass here just as easily).
+        assert fault_calls >= 1, "Path.open on the transcript path was never called"
+        # Fail-open: an OSError reading the transcript tail must not crash
+        # matches() — routing (fail open) happens in handle().
+        assert result is True
 
     def test_matches_handles_unicode_decode_error(
         self, handler: AutoContinueStopHandler, mock_transcript_path: Path
@@ -2293,6 +2338,19 @@ class TestMessageStalenessHelpers:
         )
 
         assert _parse_iso_timestamp("not-a-timestamp") is None
+
+    def test_an_unparseable_timestamp_is_said_at_warning(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """00466 N29: "age unknown" turns the staleness check off for that
+        message, so the unparseable value is logged at WARNING, not debug."""
+        from claude_code_hooks_daemon.handlers.stop.auto_continue_stop import (
+            _parse_iso_timestamp,
+        )
+
+        with caplog.at_level(logging.WARNING):
+            assert _parse_iso_timestamp("n29-not-a-timestamp") is None
+        assert "n29-not-a-timestamp" in caplog.text
 
     def test_message_age_seconds_none_without_timestamp(self) -> None:
         """A message with no timestamp in raw has an unknowable age (None)."""
@@ -3488,6 +3546,37 @@ class TestHumanBlockedMarker:
         marker = read_marker(marker_dir / MARKER_FILENAME)
         assert marker is not None
         assert marker.session_id == "sess-1"
+
+    def test_a_probe_never_writes_the_marker(
+        self, handler: AutoContinueStopHandler, tmp_path: Path
+    ) -> None:
+        """Plan 00466 N12: a `probe_as: main` Stop probe now reaches this
+        handler, and the marker silences a session's failsafe cron. A probe
+        must not be able to switch recovery off, for its own session or any
+        real one it names."""
+        transcript = tmp_path / "t.jsonl"
+        self._write_assistant_text(
+            transcript,
+            "STOPPING BECAUSE: failsafe cron tick, nothing to resume, "
+            "blocked only on human input. Waiting.",
+        )
+        marker_dir = tmp_path / "untracked"
+        hook_input = {
+            "transcript_path": str(transcript),
+            "stop_hook_active": False,
+            "session_id": "sess-1",
+            SYNTHETIC_SOURCE_FIELD: MANUAL_PROBE,
+            PROBE_AS_FIELD: "main",
+        }
+        with patch(
+            "claude_code_hooks_daemon.handlers.stop.auto_continue_stop."
+            "ProjectContext.daemon_untracked_dir",
+            return_value=marker_dir,
+        ):
+            result = handler.handle(hook_input)
+
+        assert result.decision == Decision.ALLOW
+        assert not self._marker_path(marker_dir).exists()
 
     def test_ordinary_stopping_because_does_not_write_marker(
         self, handler: AutoContinueStopHandler, tmp_path: Path

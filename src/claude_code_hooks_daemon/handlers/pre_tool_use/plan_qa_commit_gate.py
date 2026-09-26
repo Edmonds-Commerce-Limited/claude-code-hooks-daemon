@@ -66,7 +66,6 @@ _MODE_BLOCK: Final[str] = "block"
 _MODE_OFF: Final[str] = "off"
 
 _FIELD_COMMAND: Final[str] = "command"
-_CWD_FIELD: Final[str] = "cwd"
 
 
 class PlanQaCommitGateHandler(PreToolUseHandlerBase):
@@ -77,10 +76,14 @@ class PlanQaCommitGateHandler(PreToolUseHandlerBase):
             handler_id=HandlerID.PLAN_QA_COMMIT_GATE,
             priority=Priority.PLAN_QA_COMMIT_GATE,
             terminal=False,
+            # Plan 00466 n24 security review, M3: a plan-QA gate, not a
+            # dangerous-action guard -- an explicit, deliberate opt-out from
+            # structural fail-closed, not an oversight.
             tags=[
                 HandlerTag.PLANNING,
                 HandlerTag.VALIDATION,
                 HandlerTag.GIT,
+                HandlerTag.ADVISORY,
             ],
         )
         # Injected by the registry for PLANNING-tagged handlers.
@@ -174,7 +177,7 @@ class PlanQaCommitGateHandler(PreToolUseHandlerBase):
         Nested/vendor repos and other worktrees own their history — this
         gate only polices the project's own plan tree.
         """
-        cwd_raw = hook_input.get(_CWD_FIELD)
+        cwd_raw = hook_input.get(HookInputField.CWD)
         if not cwd_raw:
             return False
         repo = GitRepo.resolve_for(Path(cwd_raw))

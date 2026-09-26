@@ -207,7 +207,16 @@ class DocsGenerator:
             heading: Section heading (e.g., "PreToolUse")
             handlers: Handler info tuples for this section
         """
-        handlers.sort(key=lambda h: h[3])
+        # Ledger 00466 N7 sibling: priority alone is not a total order --
+        # same-priority handlers otherwise keep whatever order
+        # HandlerRegistry.list_handlers() handed back, which is driven by
+        # register_all()'s two event_dir.glob("*.py") passes, wrapped in
+        # sorted() here (NOT pkgutil.walk_packages() upstream of it, which
+        # already sorts its own scan internally -- the glob passes are the
+        # actual source of the nondeterminism). Break ties on config_key
+        # (h[1], the value actually rendered in the "Handler" column) so
+        # the table is a pure function of the handler set regardless.
+        handlers.sort(key=lambda h: (h[3], h[1]))
         count = len(handlers)
         count_label = f"{count} handler{'s' if count != 1 else ''}"
         lines.append(f"\n### {heading} ({count_label})\n")

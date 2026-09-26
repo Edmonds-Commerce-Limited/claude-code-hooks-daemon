@@ -108,6 +108,44 @@ handlers:
     }
 
 
+def _pid_exists(pid: int) -> bool:
+    """Is a process with this pid alive right now?
+
+    Signal 0 sends nothing -- it only asks the kernel whether the pid can be
+    signalled, so this never risks the container-killing mistake Plan 00466
+    N59 traces (a real signal reaching a pid that was never proven to be the
+    intended process). `pid <= 1` is never treated as "alive to check": pid 1
+    is init and this function must never be the thing that makes a caller
+    compare something against it.
+    """
+    if pid <= 1:
+        return False
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        # Exists, but owned by someone else -- still alive.
+        return True
+    return True
+
+
+def _assert_stopped_cleanly(stop_result: subprocess.CompletedProcess[str], pid: int | None) -> None:
+    """Fail the test when `stop` did not actually stop the daemon.
+
+    Plan 00466 N84: the `daemon_process` fixture's teardown used to run
+    `stop` and ignore its result -- a `stop` that failed just leaked the
+    daemon, silently, for the rest of the container's life. Both halves of
+    "actually stopped" are checked: the CLI exited 0, and the pid it started
+    no longer exists.
+    """
+    assert (
+        stop_result.returncode == 0
+    ), f"daemon stop failed (exit {stop_result.returncode}): {stop_result.stderr!r}"
+    if pid is not None:
+        assert not _pid_exists(pid), f"daemon pid {pid} still running after `stop` reported success"
+
+
 @pytest.fixture
 def daemon_process(daemon_env: dict[str, Any]):
     """Start daemon process and ensure cleanup.
@@ -128,6 +166,8 @@ def daemon_process(daemon_env: dict[str, Any]):
         sys.executable,
         "-m",
         "claude_code_hooks_daemon.daemon.cli",
+        "--project-root",
+        str(project_root),
         "start",
     ]
     with open("/dev/null", "w") as devnull:
@@ -147,7 +187,14 @@ def daemon_process(daemon_env: dict[str, Any]):
     time.sleep(1)
 
     # Get status to verify running
-    status_cmd = [sys.executable, "-m", "claude_code_hooks_daemon.daemon.cli", "status"]
+    status_cmd = [
+        sys.executable,
+        "-m",
+        "claude_code_hooks_daemon.daemon.cli",
+        "--project-root",
+        str(project_root),
+        "status",
+    ]
     status_result = subprocess.run(
         status_cmd,
         cwd=project_root,
@@ -163,18 +210,34 @@ def daemon_process(daemon_env: dict[str, Any]):
     # Socket path already set in daemon_env from fixture
     yield daemon_env
 
-    # Cleanup: Stop daemon
-    stop_cmd = [sys.executable, "-m", "claude_code_hooks_daemon.daemon.cli", "stop"]
-    subprocess.run(
+    # Cleanup: Stop daemon. The pid is read BEFORE `stop` runs -- `stop` may
+    # remove the pid file on success, and the whole point of checking
+    # afterwards is to know whether the process behind that pid is really
+    # gone (Plan 00466 N84).
+    pid_path = daemon_env["pid_path"]
+    pid = int(pid_path.read_text().strip()) if pid_path.exists() else None
+
+    stop_cmd = [
+        sys.executable,
+        "-m",
+        "claude_code_hooks_daemon.daemon.cli",
+        "--project-root",
+        str(project_root),
+        "stop",
+    ]
+    stop_result = subprocess.run(
         stop_cmd,
         cwd=project_root,
         env=test_env,
         capture_output=True,
+        text=True,
         timeout=Timeout.SOCKET_CONNECT,
     )
 
     # Wait for cleanup
     time.sleep(0.5)
+
+    _assert_stopped_cleanly(stop_result, pid)
 
 
 def send_hook_event(
@@ -215,11 +278,49 @@ def send_hook_event(
             if b"\n" in chunk:  # Response ends with newline
                 break
 
-        response = json.loads(response_data.decode("utf-8"))
+        response: dict[Any, Any] = json.loads(response_data.decode("utf-8"))
         return response
 
     finally:
         sock.close()
+
+
+class TestAssertStoppedCleanly:
+    """Plan 00466 N84.
+
+    The ``daemon_process`` fixture's teardown used to call `stop` and ignore
+    its exit code entirely -- a daemon that failed to stop just leaked, and
+    nothing reported it. `_assert_stopped_cleanly` is the check the teardown
+    now runs: both that the CLI reported success AND that the pid it started
+    is actually gone. Pinned here directly, without starting a real daemon,
+    because the property under test is the CHECK failing loudly, not the
+    daemon's own start/stop behaviour (already covered by
+    ``test_daemon_starts_and_stops`` below).
+    """
+
+    def test_a_nonzero_exit_code_fails(self) -> None:
+        stop_result = subprocess.CompletedProcess(
+            args=["stop"], returncode=1, stdout="", stderr="boom"
+        )
+        with pytest.raises(AssertionError, match="daemon stop failed"):
+            _assert_stopped_cleanly(stop_result, pid=None)
+
+    def test_a_pid_still_alive_after_a_reported_success_fails(self) -> None:
+        stop_result = subprocess.CompletedProcess(args=["stop"], returncode=0, stdout="", stderr="")
+        # This test's own pid is certainly alive -- proving the check catches
+        # a `stop` that exits 0 while the process it named never actually died.
+        with pytest.raises(AssertionError, match="still running"):
+            _assert_stopped_cleanly(stop_result, pid=os.getpid())
+
+    def test_a_clean_stop_with_no_surviving_pid_passes(self) -> None:
+        stop_result = subprocess.CompletedProcess(args=["stop"], returncode=0, stdout="", stderr="")
+        # A pid that cannot exist (Plan 00466 N59's convention for a
+        # deliberately-nonexistent pid), so this asserts nothing raises.
+        _assert_stopped_cleanly(stop_result, pid=2**22 + 7)
+
+    def test_no_pid_to_check_still_requires_a_clean_exit(self) -> None:
+        stop_result = subprocess.CompletedProcess(args=["stop"], returncode=0, stdout="", stderr="")
+        _assert_stopped_cleanly(stop_result, pid=None)
 
 
 class TestDaemonSmoke:
@@ -231,7 +332,14 @@ class TestDaemonSmoke:
         test_env = os.environ.copy()
 
         # Start daemon (redirect output to /dev/null - don't capture to avoid waiting for child processes)
-        start_cmd = [sys.executable, "-m", "claude_code_hooks_daemon.daemon.cli", "start"]
+        start_cmd = [
+            sys.executable,
+            "-m",
+            "claude_code_hooks_daemon.daemon.cli",
+            "--project-root",
+            str(project_root),
+            "start",
+        ]
         with open("/dev/null", "w") as devnull:
             start_result = subprocess.run(
                 start_cmd,
@@ -246,7 +354,14 @@ class TestDaemonSmoke:
 
         # Verify running
         time.sleep(1)
-        status_cmd = [sys.executable, "-m", "claude_code_hooks_daemon.daemon.cli", "status"]
+        status_cmd = [
+            sys.executable,
+            "-m",
+            "claude_code_hooks_daemon.daemon.cli",
+            "--project-root",
+            str(project_root),
+            "status",
+        ]
         status_result = subprocess.run(
             status_cmd,
             cwd=project_root,
@@ -259,7 +374,14 @@ class TestDaemonSmoke:
         assert "RUNNING" in status_result.stdout, "Daemon not running after start"
 
         # Stop daemon
-        stop_cmd = [sys.executable, "-m", "claude_code_hooks_daemon.daemon.cli", "stop"]
+        stop_cmd = [
+            sys.executable,
+            "-m",
+            "claude_code_hooks_daemon.daemon.cli",
+            "--project-root",
+            str(project_root),
+            "stop",
+        ]
         stop_result = subprocess.run(
             stop_cmd,
             cwd=project_root,
@@ -409,7 +531,14 @@ class TestDaemonSmoke:
         test_env = os.environ.copy()
 
         # Start daemon (redirect output to /dev/null)
-        start_cmd = [sys.executable, "-m", "claude_code_hooks_daemon.daemon.cli", "start"]
+        start_cmd = [
+            sys.executable,
+            "-m",
+            "claude_code_hooks_daemon.daemon.cli",
+            "--project-root",
+            str(project_root),
+            "start",
+        ]
         with open("/dev/null", "w") as devnull:
             subprocess.run(
                 start_cmd,
@@ -422,7 +551,14 @@ class TestDaemonSmoke:
         time.sleep(1)
 
         # Restart daemon
-        restart_cmd = [sys.executable, "-m", "claude_code_hooks_daemon.daemon.cli", "restart"]
+        restart_cmd = [
+            sys.executable,
+            "-m",
+            "claude_code_hooks_daemon.daemon.cli",
+            "--project-root",
+            str(project_root),
+            "restart",
+        ]
         subprocess.run(
             restart_cmd,
             cwd=project_root,
@@ -435,7 +571,14 @@ class TestDaemonSmoke:
         time.sleep(1)
 
         # Verify running with new PID
-        status_cmd = [sys.executable, "-m", "claude_code_hooks_daemon.daemon.cli", "status"]
+        status_cmd = [
+            sys.executable,
+            "-m",
+            "claude_code_hooks_daemon.daemon.cli",
+            "--project-root",
+            str(project_root),
+            "status",
+        ]
         status_result = subprocess.run(
             status_cmd,
             cwd=project_root,
@@ -448,7 +591,14 @@ class TestDaemonSmoke:
         assert "RUNNING" in status_result.stdout, "Daemon not running after restart"
 
         # Cleanup
-        stop_cmd = [sys.executable, "-m", "claude_code_hooks_daemon.daemon.cli", "stop"]
+        stop_cmd = [
+            sys.executable,
+            "-m",
+            "claude_code_hooks_daemon.daemon.cli",
+            "--project-root",
+            str(project_root),
+            "stop",
+        ]
         subprocess.run(
             stop_cmd,
             cwd=project_root,
@@ -463,7 +613,14 @@ class TestDaemonSmoke:
         test_env = os.environ.copy()
 
         # Try to start again (daemon already running from fixture)
-        start_cmd = [sys.executable, "-m", "claude_code_hooks_daemon.daemon.cli", "start"]
+        start_cmd = [
+            sys.executable,
+            "-m",
+            "claude_code_hooks_daemon.daemon.cli",
+            "--project-root",
+            str(project_root),
+            "start",
+        ]
         result = subprocess.run(
             start_cmd,
             cwd=project_root,
@@ -520,7 +677,14 @@ class TestDaemonConfiguration:
         config_path.write_text("invalid: yaml: content: [")
 
         # Try to start daemon
-        start_cmd = [sys.executable, "-m", "claude_code_hooks_daemon.daemon.cli", "start"]
+        start_cmd = [
+            sys.executable,
+            "-m",
+            "claude_code_hooks_daemon.daemon.cli",
+            "--project-root",
+            str(tmp_path),
+            "start",
+        ]
         result = subprocess.run(
             start_cmd,
             cwd=tmp_path,
@@ -579,7 +743,14 @@ handlers: {}
 """)
 
         # Start daemon (redirect output to /dev/null)
-        start_cmd = [sys.executable, "-m", "claude_code_hooks_daemon.daemon.cli", "start"]
+        start_cmd = [
+            sys.executable,
+            "-m",
+            "claude_code_hooks_daemon.daemon.cli",
+            "--project-root",
+            str(tmp_path),
+            "start",
+        ]
         with open("/dev/null", "w") as devnull:
             result = subprocess.run(
                 start_cmd,
@@ -596,7 +767,14 @@ handlers: {}
 
         # Verify running
         time.sleep(1)
-        status_cmd = [sys.executable, "-m", "claude_code_hooks_daemon.daemon.cli", "status"]
+        status_cmd = [
+            sys.executable,
+            "-m",
+            "claude_code_hooks_daemon.daemon.cli",
+            "--project-root",
+            str(tmp_path),
+            "status",
+        ]
         status_result = subprocess.run(
             status_cmd,
             cwd=tmp_path,
@@ -609,7 +787,14 @@ handlers: {}
         assert "RUNNING" in status_result.stdout
 
         # Cleanup
-        stop_cmd = [sys.executable, "-m", "claude_code_hooks_daemon.daemon.cli", "stop"]
+        stop_cmd = [
+            sys.executable,
+            "-m",
+            "claude_code_hooks_daemon.daemon.cli",
+            "--project-root",
+            str(tmp_path),
+            "stop",
+        ]
         subprocess.run(
             stop_cmd,
             cwd=tmp_path,

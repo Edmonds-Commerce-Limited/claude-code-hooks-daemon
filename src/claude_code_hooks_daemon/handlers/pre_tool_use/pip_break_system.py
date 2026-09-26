@@ -8,7 +8,7 @@ Python installations managed by the OS package manager.
 import re
 from typing import Any
 
-from claude_code_hooks_daemon.constants import HookInputField
+from claude_code_hooks_daemon.constants import HandlerTag, HookInputField
 from claude_code_hooks_daemon.constants.handlers import HandlerID
 from claude_code_hooks_daemon.constants.paths import ProjectPath
 from claude_code_hooks_daemon.constants.priority import Priority
@@ -62,6 +62,10 @@ class PipBreakSystemHandler(PreToolUseHandlerBase):
             handler_id=HandlerID.PIP_BREAK_SYSTEM,
             priority=Priority.PIP_BREAK_SYSTEM,
             terminal=True,
+            # Plan 00466 n24 security review, M3: bypasses PEP 668 and can
+            # corrupt the system Python installation -- structurally
+            # fail-closed, not just BLOCKING.
+            tags=[HandlerTag.SAFETY, HandlerTag.BLOCKING],
         )
         self._rule = Rule(
             rule_id=RuleID.PIP_BREAK_SYSTEM_PACKAGES,

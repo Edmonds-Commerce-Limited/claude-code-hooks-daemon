@@ -48,8 +48,8 @@ logger = logging.getLogger(__name__)
 from pydantic import ValidationError as PydanticValidationError
 
 from claude_code_hooks_daemon.config.loader import ConfigLoader
-from claude_code_hooks_daemon.config.models import Config
-from claude_code_hooks_daemon.constants import Timeout
+from claude_code_hooks_daemon.config.models import Config, handler_options
+from claude_code_hooks_daemon.constants import DaemonPath, HandlerID, Timeout
 from claude_code_hooks_daemon.constants.modes import DaemonMode
 from claude_code_hooks_daemon.constants.permissions import FileMode
 from claude_code_hooks_daemon.core.event import EventType
@@ -81,6 +81,7 @@ from claude_code_hooks_daemon.daemon.permission_audit import (
     audit_untracked_permissions,
     tighten_permissions,
 )
+from claude_code_hooks_daemon.daemon.process_verification import daemon_process_project_root
 from claude_code_hooks_daemon.daemon.server import (
     DaemonAlreadyRunningError,
     _socket_liveness_sync,
@@ -97,6 +98,8 @@ from claude_code_hooks_daemon.install.install_stamp import read_install_stamp
 from claude_code_hooks_daemon.install.release_notes import load_release_notes_between
 from claude_code_hooks_daemon.issue_report.build import build_report
 from claude_code_hooks_daemon.issue_report.upstream import filing_command
+from claude_code_hooks_daemon.utils.claude_config import claude_config_dir, is_in_claude_config_dir
+from claude_code_hooks_daemon.utils.claude_plugins import resolve_enabled_plugins
 from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command
 from claude_code_hooks_daemon.utils.git_repo import (
     git_visible_ancestor_dirs,
@@ -113,6 +116,7 @@ from claude_code_hooks_daemon.utils.hook_registration import (
     validate_settings_hooks,
 )
 from claude_code_hooks_daemon.utils.markdown_format import format_markdown_text
+from claude_code_hooks_daemon.utils.plugin_hooks import ACKNOWLEDGED_PLUGINS_OPTION, health_lines
 from claude_code_hooks_daemon.utils.report_scrubbing import scrub_report
 from claude_code_hooks_daemon.utils.secret_redaction import get_active_secret_terms
 from claude_code_hooks_daemon.utils.session_action_items import (
@@ -193,6 +197,12 @@ def get_project_path(override_path: Path | None = None) -> Path:
             if is_inside_daemon_directory(current):
                 current = current.parent
                 continue
+            # A directory carrying its own config IS the project, so the search
+            # stops here whether or not that config is valid. Walking on past a
+            # broken one ran the daemon on an ENCLOSING repository's config and
+            # reported that file's unrelated errors (Plan 00466 N24 review 2 P2).
+            if (claude_dir / DaemonPath.CONFIG_FILE).is_file():
+                return _validate_installation(current)
             # Validate installation based on config
             try:
                 return _validate_installation(current)
@@ -762,6 +772,59 @@ def cmd_start(args: argparse.Namespace) -> int:
     sys.exit(0)
 
 
+def _open_pidfd(pid: int) -> int | None:
+    """Pin a pidfd to this exact ``pid`` instance, before it is proven.
+
+    Plan 00466 N24 review 3 mi5: opening this BEFORE
+    ``daemon_process_project_root`` closes the microsecond-scale TOCTOU
+    between that proof and the signal ``cmd_stop`` sends on its strength --
+    ``pid`` is just a number the kernel is free to hand to an unrelated new
+    process the instant the proven process exits, so a signal sent by
+    number after the proof can land on that impostor instead. A pidfd
+    names the exact process instance the kernel opened it against:
+    :func:`signal.pidfd_send_signal` through it either reaches that same
+    instance or raises ``ProcessLookupError`` (it has already exited) --
+    never a different process that has since reused the pid number.
+
+    Returns:
+        The pidfd, or ``None`` when ``os.pidfd_open`` is unsupported on this
+        platform (pre-3.9 Python, or non-Linux) or ``pid`` is already gone --
+        callers fall back to signalling by pid number in that case, which
+        only keeps the smaller race this function exists to close, rather
+        than refusing to stop the daemon at all.
+    """
+    try:
+        pidfd: int | None = os.pidfd_open(pid, 0)
+    except AttributeError:
+        logger.warning(
+            "os.pidfd_open unsupported on this platform (pid %d); falling back "
+            "to signalling by pid number",
+            pid,
+        )
+        pidfd = None
+    except OSError as e:
+        logger.warning(
+            "os.pidfd_open(%d) failed (%s); falling back to signalling by pid number",
+            pid,
+            e,
+        )
+        pidfd = None
+    return pidfd
+
+
+def _signal_proven_pid(pid: int, pidfd: int | None, sig: int) -> None:
+    """Signal the process ``pidfd`` was opened against, when available.
+
+    Raises the same exceptions ``os.kill`` would (``ProcessLookupError``,
+    ``PermissionError``, ...), so every caller built around ``os.kill``'s
+    contract -- the whole of ``cmd_stop`` below -- needs no other change.
+    """
+    if pidfd is not None:
+        signal.pidfd_send_signal(pidfd, sig)
+        return
+    os.kill(pid, sig)
+
+
 def cmd_stop(args: argparse.Namespace) -> int:
     """Stop running daemon.
 
@@ -783,55 +846,132 @@ def cmd_stop(args: argparse.Namespace) -> int:
         print("Daemon not running")
         return 0
 
-    # Send SIGTERM
+    # Pin the pidfd to THIS pid instance before proving anything about it
+    # (mi5, see `_open_pidfd`) -- every signal below goes through it.
+    pidfd = _open_pidfd(pid)
     try:
-        os.kill(pid, signal.SIGTERM)
-        print(f"Sent SIGTERM to daemon (PID: {pid})")
-
-        # Wait for process to exit (up to 5 seconds)
-        timeout = Timeout.SOCKET_CONNECT
-        interval = 0.1
-        elapsed = 0.0
-
-        while elapsed < timeout:
-            try:
-                os.kill(pid, 0)  # Check if still alive
-                time.sleep(interval)
-                elapsed += interval
-            except ProcessLookupError:
-                # Process exited
-                break
-
-        # Check if still running
-        try:
-            os.kill(pid, 0)
-            print(f"WARNING: Daemon still running after {timeout}s", file=sys.stderr)
-            print(f"Try: kill -9 {pid}", file=sys.stderr)
+        # verify_daemon proves only that the pid is SOME daemon server. Signal
+        # it only once it is proven to serve THIS project: a stale pid file
+        # whose pid was reused by another project's daemon must not get that
+        # daemon killed.
+        own_root = os.path.realpath(project_path)
+        proof = daemon_process_project_root(pid)
+        if proof.root is None:
+            print(f"ERROR: {proof.refusal}; refusing to signal it", file=sys.stderr)
             return 1
+        if proof.root != own_root:
+            # Refuse, and delete nothing (Plan 00466 N24 review 3 mi1): the PID
+            # file may be stale while this project's own daemon still serves the
+            # socket, or the attribution itself may be wrong, and deleting either
+            # file orphans a live daemon.
+            print(
+                f"ERROR: PID {pid} is attributed by {proof.source} to {proof.root}, not to "
+                f"{own_root}; refusing to signal it or delete its PID file and socket. "
+                f"If that is wrong, stop it by hand.",
+                file=sys.stderr,
+            )
+            return 1
+
+        # Send SIGTERM
+        try:
+            _signal_proven_pid(pid, pidfd, signal.SIGTERM)
+            print(f"Sent SIGTERM to daemon (PID: {pid})")
+
+            # Wait for process to exit (up to 5 seconds)
+            timeout = Timeout.SOCKET_CONNECT
+            interval = 0.1
+            elapsed = 0.0
+
+            while elapsed < timeout:
+                try:
+                    _signal_proven_pid(pid, pidfd, 0)  # Check if still alive
+                    time.sleep(interval)
+                    elapsed += interval
+                except ProcessLookupError:
+                    # Process exited
+                    break
+
+            # Check if still running
+            try:
+                _signal_proven_pid(pid, pidfd, 0)
+            except ProcessLookupError:
+                # Process exited successfully
+                print("Daemon stopped")
+                cleanup_pid_file(str(pid_path))
+                cleanup_socket(str(socket_path))
+                return 0
+
+            # SIGTERM's grace period elapsed and the process is still alive --
+            # escalate to SIGKILL rather than leaving the operator with an
+            # unrecoverable wedged daemon (Plan 00466 N40 review 2 MA2). A
+            # GIL-holding handler cannot even reach Python's signal-handling
+            # bytecode check to act on SIGTERM; SIGKILL is delivered by the
+            # kernel and cannot be caught, blocked or ignored.
+            # Re-prove before SIGKILL: the grace period is long enough for the
+            # pid to have exited and been reused -- and the SIGKILL itself
+            # still goes out through the SAME pidfd pinned above, so even a
+            # reused pid number cannot make it land on the wrong process.
+            if daemon_process_project_root(pid).root != own_root:
+                print(
+                    f"ERROR: PID {pid} no longer proves to be this project's daemon; "
+                    "refusing to escalate to SIGKILL",
+                    file=sys.stderr,
+                )
+                return 1
+            print(
+                f"WARNING: Daemon still running after {timeout}s; escalating to SIGKILL",
+                file=sys.stderr,
+            )
+            try:
+                _signal_proven_pid(pid, pidfd, signal.SIGKILL)
+            except ProcessLookupError:
+                print("Daemon stopped")
+                cleanup_pid_file(str(pid_path))
+                cleanup_socket(str(socket_path))
+                return 0
+
+            kill_timeout = Timeout.DAEMON_SIGKILL_GRACE
+            kill_elapsed = 0.0
+            while kill_elapsed < kill_timeout:
+                try:
+                    _signal_proven_pid(pid, pidfd, 0)
+                    time.sleep(interval)
+                    kill_elapsed += interval
+                except ProcessLookupError:
+                    break
+
+            try:
+                _signal_proven_pid(pid, pidfd, 0)
+                print(
+                    f"WARNING: Daemon still running after SIGKILL ({kill_timeout}s)",
+                    file=sys.stderr,
+                )
+                print(f"Try: kill -9 {pid}", file=sys.stderr)
+                return 1
+            except ProcessLookupError:
+                print("Daemon stopped")
+                cleanup_pid_file(str(pid_path))
+                cleanup_socket(str(socket_path))
+                return 0
+
         except ProcessLookupError:
-            # Process exited successfully
-            print("Daemon stopped")
+            print(f"Process {pid} not found (stale PID file)")
             cleanup_pid_file(str(pid_path))
             cleanup_socket(str(socket_path))
             return 0
-
-    except ProcessLookupError:
-        print(f"Process {pid} not found (stale PID file)")
-        cleanup_pid_file(str(pid_path))
-        cleanup_socket(str(socket_path))
-        return 0
-    except PermissionError:
-        print(f"ERROR: Permission denied to signal PID {pid}", file=sys.stderr)
-        return 1
-    except Exception as e:
-        print(f"ERROR: {e}", file=sys.stderr)
-        return 1
+        except PermissionError:
+            print(f"ERROR: Permission denied to signal PID {pid}", file=sys.stderr)
+            return 1
+        except Exception as e:
+            print(f"ERROR: {e}", file=sys.stderr)
+            return 1
+    finally:
+        if pidfd is not None:
+            os.close(pidfd)
 
 
-def _query_daemon_config_degraded(
-    socket_path: Path, pid: int | None
-) -> tuple[bool, list[str]] | None:
-    """Query the live daemon's own config-validation degraded state.
+def _query_daemon_health(socket_path: Path, pid: int | None) -> dict[str, Any] | None:
+    """Query the live daemon's own ``health`` result.
 
     Plan 00304: a real-repo canary found `status` reporting RUNNING and
     `check` byte-identical between a degraded and a healthy daemon -- only a
@@ -845,9 +985,9 @@ def _query_daemon_config_degraded(
         pid: The daemon's PID, or None if not running.
 
     Returns:
-        ``(is_degraded, config_errors)`` if the daemon answered, else
-        ``None`` (daemon not running or unreachable -- callers stay silent
-        rather than report a false degraded/healthy verdict).
+        The health result if the daemon answered, else ``None`` (daemon not
+        running or unreachable -- callers stay silent rather than report a
+        false degraded/healthy verdict).
     """
     if pid is None:
         return None
@@ -856,26 +996,42 @@ def _query_daemon_config_degraded(
     if response is None or "error" in response:
         return None
     result = response.get("result", {})
-    return result.get("status") == "degraded", result.get("config_errors", [])
+    return result if isinstance(result, dict) else None
 
 
-def _print_degraded_config_block(degraded_state: tuple[bool, list[str]] | None) -> None:
-    """Print the degraded-mode block if the daemon reported one.
+def _print_degraded_config_block(health: dict[str, Any] | None) -> None:
+    """Print what the daemon reported as degrading its configuration.
+
+    Only the ``config`` reason disables handlers; the others (stragglers, a
+    chain deadline the client timeout beats -- Plan 00466 N40 review 2 mA4)
+    leave every guard on, so they must not print the block saying enforcement
+    is off. A daemon that names no reasons predates them, and its ``degraded``
+    status meant config.
 
     Args:
-        degraded_state: Result of `_query_daemon_config_degraded`.
+        health: Result of `_query_daemon_health`.
     """
-    if degraded_state is None:
+    if health is None:
         return
-    is_degraded, config_errors = degraded_state
-    if not is_degraded:
-        return
-    print("\n🚨 CONFIGURATION DEGRADED 🚨")
-    print("Daemon is running in DEGRADED MODE — invalid configuration disabled enforcement")
-    print("for handlers that need config (a config-independent safety net still runs).")
-    for error in config_errors:
-        print(f"  - {error}")
-    print("Fix: correct .claude/hooks-daemon.yaml, then restart the daemon.")
+    reasons = health.get("degraded_reasons")
+    config_degraded = health.get("status") == "degraded" if reasons is None else "config" in reasons
+    if config_degraded:
+        print("\n🚨 CONFIGURATION DEGRADED 🚨")
+        print("Daemon is running in DEGRADED MODE — invalid configuration disabled enforcement")
+        print("for handlers that need config (a config-independent safety net still runs).")
+        for error in health.get("config_errors", []):
+            print(f"  - {error}")
+        print("Fix: correct .claude/hooks-daemon.yaml, then restart the daemon.")
+    deadline_problems = health.get("chain_deadline_problems", [])
+    if deadline_problems:
+        print("\nChain deadline cannot beat the client timeout (every guard is still on):")
+        for problem in deadline_problems:
+            print(f"  - {problem}")
+    socket_skips = health.get("event_socket_skips", [])
+    if socket_skips:
+        print("\nPer-event sockets not bound (these events use the bash forwarder, not the relay):")
+        for skip in socket_skips:
+            print(f"  - {skip.get('event')}: {skip.get('reason')}")
 
 
 def _print_install_stamp_line() -> None:
@@ -969,7 +1125,7 @@ def cmd_status(args: argparse.Namespace) -> int:
     # Config-validation degraded mode (Plan 00304). Surfaced for visibility;
     # the exit code stays liveness-based, same rationale as project-handler
     # health below — `health` is the command that returns non-zero on degrade.
-    _print_degraded_config_block(_query_daemon_config_degraded(socket_path, pid))
+    _print_degraded_config_block(_query_daemon_health(socket_path, pid))
 
     # Project-handler protection signal (Plan 00143). Surfaced for visibility;
     # the exit code stays liveness-based so existing "status == RUNNING" checks
@@ -1124,6 +1280,25 @@ def check_hook_registration_warnings(project_path: Path) -> list[str]:
     return warnings
 
 
+def _acknowledged_plugins(project_path: Path) -> list[str]:
+    """The plugin ids ``plugin_hooks_advisor`` is told to leave out.
+
+    An unreadable config acknowledges nothing, so every plugin is shown
+    without the mark; the reason is logged.
+    """
+    config_path = project_path / ".claude" / "hooks-daemon.yaml"
+    try:
+        config = Config.load_or_default(config_path)
+    except (ValueError, OSError) as exc:
+        logger.warning("health: cannot read %s, no plugin acknowledged: %s", config_path, exc)
+        return []
+    options = config.get_handler_config(
+        "session_start", HandlerID.PLUGIN_HOOKS_ADVISOR.config_key
+    ).options
+    value = options.get(ACKNOWLEDGED_PLUGINS_OPTION)
+    return [item for item in value if isinstance(item, str)] if isinstance(value, list) else []
+
+
 def cmd_health(args: argparse.Namespace) -> int:
     """Check daemon health status.
 
@@ -1193,6 +1368,13 @@ def cmd_health(args: argparse.Namespace) -> int:
             "`init-project-handlers`."
         )
 
+    # Plan 00468 G1: advisory, never changes the exit code.
+    print("\nClaude Code plugin hooks:")
+    for line in health_lines(
+        resolve_enabled_plugins(project_path), _acknowledged_plugins(project_path)
+    ):
+        print(line)
+
     # Project-handler protection signal (Plan 00143). Unlike hook-registration
     # drift, this DOES drive the exit code: a skipped project handler is a
     # silently-disabled protection, so CI / the session-start audit can detect
@@ -1202,33 +1384,45 @@ def cmd_health(args: argparse.Namespace) -> int:
     for line in _format_project_handler_health_lines(health_state):
         print(line)
 
-    healthy = status == "healthy" and not health_state.is_degraded
+    # Built-in handlers whose configured options could not be collected (Plan
+    # 00466 N19). Each runs on its defaults, so this drives the exit code too.
+    option_failures: dict[str, str] = result.get("option_failures", {})
+    print("\nHandler options:")
+    if not option_failures:
+        print("  OK — every handler received its configured options")
+    else:
+        print(f"  🚨 DEGRADED — {len(option_failures)} handler(s) running on defaults:")
+        for handler_key, reason in option_failures.items():
+            print(f"  - {handler_key}: {reason}")
+        print("  The daemon log has the traceback. This is a daemon defect; please report it.")
+
+    healthy = status == "healthy" and not health_state.is_degraded and not option_failures
     return 0 if healthy else 1
 
 
 def cmd_check_source_fresh(args: argparse.Namespace) -> int:
-    """Verify the running daemon's loaded code matches the working tree (Plan 00371).
+    """Verify the running daemon's loaded code and bound config match the working tree.
 
-    A daemon never hot-reloads: every handler module is imported once, at
-    startup, and a source edit afterwards has no effect until it is
-    restarted. This compares the running daemon's reported
-    ``source_fingerprint`` (from its ``_system``/``health`` socket action)
-    against a fresh fingerprint computed from the current on-disk source, so
-    a QA run or a script (``scripts/qa/run_smoke_test.sh``) can detect and
-    fail on a stale daemon by name instead of a live-dispatch result silently
-    grading the wrong code.
+    A daemon never hot-reloads: every handler module is imported, and the
+    config resolved, once at startup (Plans 00371, 00415), so a source or
+    config edit afterwards has no effect until it is restarted. This hands
+    the running daemon's whole ``_system``/``health`` payload, plus both
+    fingerprints computed from disk now, to the one combined verdict, so a
+    QA run or a script (``scripts/qa/run_smoke_test.sh``) can fail on a stale
+    daemon by name instead of a live-dispatch result silently grading the
+    wrong code or config.
 
     Args:
         args: Command-line arguments.
 
     Returns:
-        0 if the running daemon's loaded code matches the working tree,
-        1 if it does not, or if freshness could not be verified at all
-        (daemon not running, unreachable, or an error response).
+        0 if the running daemon's code and config both match the working
+        tree, 1 if either does not, or if freshness could not be verified at
+        all (daemon not running, unreachable, or an error response).
     """
     from claude_code_hooks_daemon.daemon.source_fingerprint import (
-        compute_current_project_fingerprint,
-        describe_fingerprint_mismatch,
+        compute_current_project_fingerprints,
+        describe_daemon_staleness,
     )
 
     project_path = get_project_path(getattr(args, "project_root", None))
@@ -1245,19 +1439,22 @@ def cmd_check_source_fresh(args: argparse.Namespace) -> int:
     request = {"event": "_system", "hook_input": {"action": "health"}}
     response = send_daemon_request(socket_path, request)
 
-    running_fingerprint: str | None = None
+    health: dict[str, Any] | None = None
     if response is not None and "result" in response:
-        running_fingerprint = response["result"].get("source_fingerprint")
+        health = response["result"]
     elif response is not None and "error" in response:
         print(f"Daemon health query failed: {response['error']}")
 
-    current_fingerprint = compute_current_project_fingerprint(project_path)
-    mismatch = describe_fingerprint_mismatch(running_fingerprint, current_fingerprint)
-    if mismatch is not None:
-        print(mismatch)
+    current = compute_current_project_fingerprints(project_path)
+    staleness = describe_daemon_staleness(health, current)
+    if staleness is not None:
+        print(staleness)
         return 1
 
-    print(f"Daemon source is fresh (source_fingerprint {current_fingerprint[:12]}).")
+    print(
+        f"Daemon is fresh: loaded code and bound config match the working tree "
+        f"(source_fingerprint {current.source[:12]}, config_fingerprint {current.config[:12]})."
+    )
     return 0
 
 
@@ -1294,14 +1491,21 @@ def cmd_check(args: argparse.Namespace) -> int:
     # canary caught that. Query the live daemon the same way `health` does.
     socket_path, pid_path, _drift_warning = _resolve_effective_daemon(args, project_path)
     pid = read_pid_file(str(pid_path))
-    _print_degraded_config_block(_query_daemon_config_degraded(socket_path, pid))
+    _print_degraded_config_block(_query_daemon_health(socket_path, pid))
 
     # 1. Claude Code optimal configuration (the verbose report SessionStart hides)
-    checks = OptimalConfigCheckerHandler()._run_checks()
+    checks = OptimalConfigCheckerHandler()._run_checks(project_path)
     passed = [c for c in checks if c["passed"]]
     print(f"Claude Code configuration: {len(passed)}/{len(checks)} optimal")
     for check in checks:
-        marker = "OK  " if check["passed"] else "MISS"
+        # A failing check flagged `warn` is an override to remove, not a
+        # setting that is missing (e.g. an effort pin, Plan 00466 N47).
+        if check["passed"]:
+            marker = "OK  "
+        elif check.get("warn"):
+            marker = "WARN"
+        else:
+            marker = "MISS"
         print(f"  [{marker}] {check['name']}: {check['current']}")
         if not check["passed"]:
             print(f"         Why:   {check['why']}")
@@ -1663,10 +1867,19 @@ def _print_mode_advisory(pre_mode: dict[str, Any]) -> None:
 #: importable package, and the daemon must not grow a dependency on the QA
 #: harness to print an advisory.
 _QA_RUN_LOCK_RELPATH: Final[str] = "untracked/qa/.llm_qa.lock"
+#: Reported when a run holds the lock but its pid cannot be read.
+_UNNAMED_HOLDER: Final[str] = "unknown"
+
+_QA_LOCK_CANNOT_TELL: Final[str] = (
+    "Could not tell whether a QA run is in progress: %s. Restarting without the warning."
+)
 
 
 def _qa_run_lock_holder(project_root: Path) -> str | None:
     """Return the pid recorded in the QA run lock, or None when nothing holds it.
+
+    A held lock whose pid cannot be read answers ``"unknown"``. None also
+    means "cannot tell", which is logged at WARNING where it happens.
 
     Held-ness is decided by a NON-BLOCKING ``flock`` attempt, never by the file
     existing — the kernel releases an ``flock`` when its holder exits, so a lock
@@ -1679,51 +1892,63 @@ def _qa_run_lock_holder(project_root: Path) -> str | None:
         return None
 
     # Every other OSError answers "I cannot tell", which for an ADVISORY means
-    # no warning. Propagating instead ended `hooks-daemon restart` with a
-    # traceback — a stronger refusal than the one the caller's docstring
+    # no restart warning. Propagating instead ended `hooks-daemon restart` with
+    # a traceback — a stronger refusal than the one the caller's docstring
     # promises never to make, on the daemon's most-used recovery verb (Plan
     # 00407 N10). The window is ordinary rather than exotic: `is_file()` and
     # `os.open` are two calls, so a QA run that finishes between them unlinks
     # the file; a lock owned by another user answers EACCES to the O_RDWR open;
-    # and NFS or overlayfs can refuse `flock` outright.
-    # "Cannot tell" is carried in a variable and returned once at the end rather
-    # than by a `return None` inside each handler: an early return from an
-    # except body is indistinguishable from success to a reader AND to the
-    # error-hiding audit, which rejects the shape outright. Same degradation,
-    # stated where it can be seen.
+    # and NFS or overlayfs can refuse `flock` outright. "Cannot tell" is logged
+    # at WARNING, so it is never mistaken for "no run in progress".
     fd: int | None = None
     try:
         fd = os.open(lock_path, os.O_RDWR)
     except OSError as exc:
-        logger.debug("QA run lock could not be opened (%s); reporting no holder", exc)
+        logger.warning(_QA_LOCK_CANNOT_TELL, f"its lock could not be opened ({exc})")
         fd = None
 
     if fd is None:
         return None
 
-    holder: str | None = None
     try:
-        try:
-            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError:
-            # Contention is the ANSWER here, not an error: a run holds the lock.
-            # Only this errno means held; reading the pid may still fail, and an
-            # unnamed holder is better than no warning at all.
-            try:
-                recorded = lock_path.read_text(encoding="utf-8").strip() or "unknown"
-            except OSError as exc:
-                logger.debug("QA run lock is held but unreadable (%s)", exc)
-                holder = None
-            else:
-                holder = recorded.removeprefix("pid=")
-        except OSError as exc:
-            logger.debug("QA run lock could not be tested (%s); reporting no holder", exc)
-            holder = None
-        else:
-            fcntl.flock(fd, fcntl.LOCK_UN)
+        held = _qa_lock_is_held(fd)
+    except OSError as exc:
+        logger.warning(_QA_LOCK_CANNOT_TELL, f"its lock could not be tested ({exc})")
+        held = False
     finally:
+        # Closing the descriptor releases an flock we acquired, so there is no
+        # explicit LOCK_UN: one sat outside every handler here and could end
+        # `restart` with a traceback (Plan 00408 Task 3.10).
         os.close(fd)
-    return holder
+    return _recorded_qa_lock_holder(lock_path) if held else None
+
+
+def _qa_lock_is_held(fd: int) -> bool:
+    """Probe with a NON-BLOCKING ``flock``; any other ``OSError`` propagates.
+
+    A lock this probe acquires is released when the caller closes ``fd``.
+    """
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        # Contention is the ANSWER here, not an error: a run holds the lock.
+        return True
+    return False
+
+
+def _recorded_qa_lock_holder(lock_path: Path) -> str:
+    """The pid a HELD lock records, or ``"unknown"`` when it cannot be read.
+
+    Only called once contention has proved the lock is held, so an unreadable
+    pid still answers "held": an unnamed holder keeps the restart warning,
+    where "nothing holds it" would drop it for a run that is in progress.
+    """
+    try:
+        recorded = lock_path.read_text(encoding="utf-8").strip()
+    except OSError as exc:
+        logger.warning("QA run lock is held but its pid is unreadable (%s)", exc)
+        recorded = ""
+    return recorded.removeprefix("pid=") or _UNNAMED_HOLDER
 
 
 def _warn_if_qa_run_in_progress(args: argparse.Namespace) -> None:
@@ -2050,9 +2275,11 @@ def _collect_enforcement_status_lines(project_path: Path) -> list[str]:
         ValidateEslintOnWriteHandler,
     )
     from claude_code_hooks_daemon.handlers.pre_tool_use.npm_command import NpmCommandHandler
+    from claude_code_hooks_daemon.handlers.registry import apply_handler_options
 
     config_file = project_path / ".claude" / "hooks-daemon.yaml"
     registry: ProjectRegistry
+    config: Config | None = None
     try:
         config_dict = ConfigLoader.load(config_file) if config_file.exists() else {}
         config = Config.model_validate(config_dict)
@@ -2069,13 +2296,20 @@ def _collect_enforcement_status_lines(project_path: Path) -> list[str]:
     # ProjectContext (that singleton is initialised at daemon startup, and
     # this CLI command talks to config files directly), so both handlers are
     # given `project_path` explicitly instead of relying on that singleton.
-    handlers: list[Any] = [
-        NpmCommandHandler(project_root=project_path),
-        LintOnEditHandler(),
-        ValidateEslintOnWriteHandler(workspace_root=project_path),
+    probes: list[tuple[str, Any]] = [
+        ("pre_tool_use", NpmCommandHandler(project_root=project_path)),
+        ("post_tool_use", LintOnEditHandler()),
+        ("post_tool_use", ValidateEslintOnWriteHandler(workspace_root=project_path)),
     ]
-    for handler in handlers:
+    handlers = [handler for _, handler in probes]
+    for event_key, handler in probes:
         handler._project_registry = registry
+        # Probed with its configured options, as the registry would run it
+        # (Plan 00466 N15): built bare, lint_on_edit probed every language.
+        if config is not None:
+            event_block = getattr(config.handlers, event_key)
+            apply_handler_options(handler, handler_options(event_block.get(handler.config_key)))
+            handler._project_languages = config.daemon.languages
 
     statuses: list[str] = []
     seen: set[str] = set()
@@ -2143,9 +2377,8 @@ def _collect_secret_redaction_status_lines(project_path: Path) -> list[str]:
         except (PydanticValidationError, OSError, ValueError):
             continue
 
-        handler_cfg = root_config.handlers.pre_tool_use.get("sensitive_content")
-        options = getattr(handler_cfg, "options", None)
-        configured = options.get("secret_word_list_path") if isinstance(options, dict) else None
+        options = handler_options(root_config.handlers.pre_tool_use.get("sensitive_content"))
+        configured = options.get("secret_word_list_path")
         message = secret_redaction.describe_secret_word_list_degradation(configured)
         if message and message not in seen:
             seen.add(message)
@@ -2940,46 +3173,18 @@ def cmd_generate_docs(args: argparse.Namespace) -> int:
 
 
 def _build_handler_config_mapping(config: Config) -> dict[str, dict[str, Any]]:
-    """Build the per-event handler_config mapping passed to ``register_all``.
+    """Thin re-export of the shared implementation (RV8-m2).
 
-    Derived from every field on the ``HandlersConfig`` model rather than a
-    hand-maintained list inlined here, so any event type the model declares —
-    ``status_line`` included, whose omission from the old inline list was the
-    original bug — is covered automatically. A missing event type here makes
-    ``register_all`` fall back to ``enabled=True`` for every handler in that
-    group, which is exactly what made ``handlers.status_line.<name>.enabled:
-    false`` inert.
-
-    ``HandlersConfig`` declares one field per WIRED event and refuses to
-    import otherwise (``_check_wired_event_field_coverage``), so iterating its
-    fields IS iterating the event registry: config under any wired event
-    reaches the registry whether or not a built-in handler directory exists
-    for it yet. ``test_cli_handler_config_mapping`` pins this per wired event
-    (Plan 00362 D2).
-
-    Each event's values are ``HandlerConfig`` instances (coerced by the model);
-    they are dumped to plain dicts because the registry reads them with
-    ``dict.get(...)``. Tag-filter keys (``enable_tags`` / ``disable_tags``) are
-    preserved as-is (lists), not dumped.
-
-    Args:
-        config: Loaded daemon configuration.
-
-    Returns:
-        Mapping of event-type config key -> {handler_key -> settings dict}.
+    Moved to ``handlers.registry.build_handler_config_mapping`` so a
+    handler-side gate can use it without importing this CLI module (a
+    handler importing ``daemon.cli`` runs the layering backwards). Kept here,
+    under its original name, so the many existing callers -- CLI commands and
+    tests alike, see ``test_cli_handler_config_mapping.py`` (Plan 00362 D2)
+    -- do not all need to change their import.
     """
-    from claude_code_hooks_daemon.config.models import HandlerConfig, HandlersConfig
+    from claude_code_hooks_daemon.handlers.registry import build_handler_config_mapping
 
-    mapping: dict[str, dict[str, Any]] = {}
-    for event_key in HandlersConfig.model_fields:
-        event_config = getattr(config.handlers, event_key, {})
-        if not isinstance(event_config, dict):
-            continue
-        mapping[event_key] = {
-            handler_key: (value.model_dump() if isinstance(value, HandlerConfig) else value)
-            for handler_key, value in event_config.items()
-        }
-    return mapping
+    return build_handler_config_mapping(config)
 
 
 def _build_initialised_controller(
@@ -3007,8 +3212,12 @@ def _build_initialised_controller(
     from claude_code_hooks_daemon.core.project_layout import ProjectLayout
     from claude_code_hooks_daemon.core.workspace import ProjectRegistry
     from claude_code_hooks_daemon.daemon.controller import DaemonController
+    from claude_code_hooks_daemon.daemon.source_fingerprint import compute_config_fingerprint
 
     controller = DaemonController()
+    # Hashed before initialise() touches anything, so it is the config as
+    # loaded -- the same model `check-source-fresh` resolves from disk.
+    config_fingerprint = compute_config_fingerprint(config)
     handler_config = _build_handler_config_mapping(config)
     controller.initialise(
         handler_config,
@@ -3025,9 +3234,12 @@ def _build_initialised_controller(
         project_registry=ProjectRegistry.from_config(config, project_path),
         claude_md=config.claude_md,
         chain=config.daemon.chain,
+        chain_deadline_problems=config.daemon.chain_deadline_problems,
+        strict_mode=config.daemon.strict_mode,
         write_claude_md_in_linked_worktree=write_claude_md_in_linked_worktree,
         worktree=config.worktree,
         reference_repos=config.reference_repos,
+        config_fingerprint=config_fingerprint,
     )
     return controller
 
@@ -3731,15 +3943,20 @@ def _resolve_transcript(args: argparse.Namespace) -> Path | None:
     Auto-discovery is a convenience, never a guess made silently — the caller
     prints which file was chosen, because analysing the wrong session produces
     a perfectly plausible report about somebody else's work.
+
+    Raises:
+        FileNotFoundError: auto-discovery found no project directory; the
+            message names the directory looked in (00466 N27).
     """
     named = getattr(args, "transcript", None)
     if named:
         candidate = Path(named)
         return candidate if candidate.is_file() else None
 
+    from claude_code_hooks_daemon.utils.claude_config import claude_project_dir
+
     project_path = get_project_path(getattr(args, "project_root", None))
-    slug = str(project_path).replace("/", "-")
-    session_dir = Path.home() / ".claude" / "projects" / slug
+    session_dir = claude_project_dir(project_path, must_exist=True)
     try:
         transcripts = sorted(
             session_dir.glob("*.jsonl"), key=lambda p: p.stat().st_mtime, reverse=True
@@ -3790,7 +4007,11 @@ def cmd_cache_gaps(args: argparse.Namespace) -> int:
     """
     from claude_code_hooks_daemon.daemon.cache_gap_analysis import analyse_transcript
 
-    transcript = _resolve_transcript(args)
+    try:
+        transcript = _resolve_transcript(args)
+    except FileNotFoundError as e:
+        print(f"ERROR: {e}. Pass --transcript PATH explicitly.", file=sys.stderr)
+        return 2
     if transcript is None:
         print(
             "ERROR: no transcript found. Pass --transcript PATH explicitly.",
@@ -4516,17 +4737,13 @@ def cmd_inject_goal(args: argparse.Namespace) -> int:
         except (OSError, yaml.YAMLError) as e:
             print(f"WARNING: could not read {config_file}: {e}", file=sys.stderr)
             config_data = {}
-        options = (
-            config_data.get("handlers", {})
-            .get("post_tool_use", {})
-            .get("goal_injection", {})
-            .get("options", {})
+        options = handler_options(
+            config_data.get("handlers", {}).get("post_tool_use", {}).get("goal_injection")
             if isinstance(config_data, dict)
-            else {}
+            else None
         )
-        if isinstance(options, dict):
-            mode = str(options.get("mode", mode))
-            raw_lines = options.get("lines")
+        mode = str(options.get("mode", mode))
+        raw_lines = options.get("lines")
 
     # Initialise the project context UNCONDITIONALLY (no private-state peeking):
     # a repeat initialise raises RuntimeError, which simply means an earlier
@@ -5515,10 +5732,14 @@ def _iter_markdown_candidates(
       -- even when ``project_root`` is not a git repository and the filter
       above is inert, so ``format-markdown`` never rewrites (or reports a
       would-reformat finding for) a protected file's content.
+    - Claude Code's config dir, when it sits in the project, is pruned
+      (Plan 00468 P3): it may be tracked, or the project may not be a git
+      repository, so git visibility alone does not keep it out.
     """
     from claude_code_hooks_daemon.utils.path_exclusion import is_path_excluded
 
     project_root_str = str(project_root)
+    config_dir = claude_config_dir()
     git_visible = git_visible_paths(project_root)
     descend_roots = None if git_visible is None else git_visible_ancestor_dirs(git_visible)
     for dirpath, dirnames, filenames in os.walk(root):
@@ -5527,6 +5748,8 @@ def _iter_markdown_candidates(
         for name in sorted(dirnames):
             child = current / name
             if _is_nested_git_repo_root(child):
+                continue
+            if is_in_claude_config_dir(child, project_root, config_dir=config_dir):
                 continue
             if descend_roots is not None and not _rel_is_git_visible(
                 child, project_root, descend_roots
@@ -5544,6 +5767,8 @@ def _iter_markdown_candidates(
                 # this skips it rather than handing it to read_text() to fail.
                 continue
             if is_path_excluded(str(candidate), exclude_paths, project_root=project_root_str):
+                continue
+            if is_in_claude_config_dir(candidate, project_root, config_dir=config_dir):
                 continue
             if git_visible is not None and not _rel_is_git_visible(
                 candidate, project_root, git_visible
@@ -5745,13 +5970,12 @@ def cmd_secret_meta(args: argparse.Namespace) -> int:
     override = getattr(args, "project_root", None)
     project_root = Path(override) if override else Path(get_project_path(None))
     config = load_config_safe(project_root) or {}
-    handler_options = (
+    guard_options = handler_options(
         config.get("handlers", {})
         .get("pre_tool_use", {})
-        .get(HandlerID.SECRET_FILE_GUARD.config_key, {})
-        .get("options", {})
-    ) or {}
-    allow_plain_hash = bool(handler_options.get("allow_plain_hash", False))
+        .get(HandlerID.SECRET_FILE_GUARD.config_key)
+    )
+    allow_plain_hash = bool(guard_options.get("allow_plain_hash", False))
 
     key_path = _daemon_untracked_dir(project_root) / KEY_FILE_NAME
     meta = collect_secret_meta(
@@ -5759,6 +5983,70 @@ def cmd_secret_meta(args: argparse.Namespace) -> int:
     )
     print(json.dumps(meta, indent=2))
     return 0
+
+
+def cmd_probe(args: argparse.Namespace) -> int:
+    """Send one hand-built payload through the project's hook entry point, marked.
+
+    Plan 00466 N12: a probe piped into ``.claude/hooks/<event>`` by hand is
+    recorded in ``verdicts.jsonl`` as a real agent's traffic unless it carries
+    ``synthetic_source``. This verb sets it (``manual-probe``) unless the
+    payload already names its own producer, then prints the verdict. ``--as``
+    names the thread the probe stands for (main by default), so MAIN- and
+    SUB-scoped handlers judge it too.
+
+    Returns:
+        0 when the daemon answered, whatever it decided; 1 when it gave no
+        verdict (not reached, event rejected, answer not JSON, timed out);
+        2 when the payload or event was wrong and nothing was sent.
+    """
+    from claude_code_hooks_daemon.daemon.hook_probe import (
+        PROBE_TIMEOUT_SECONDS,
+        ProbeInputError,
+        build_probe_event,
+        dispatch_probe,
+        entry_point_for,
+        probe_session_id,
+        render_verdict,
+        resolve_probe_event,
+    )
+    from claude_code_hooks_daemon.daemon.synthetic_traffic import ProbeThread
+
+    override = getattr(args, "project_root", None)
+    project_root = Path(override) if override else Path(get_project_path(None))
+    try:
+        raw = args.json if args.json is not None else Path(args.file).read_text(encoding="utf-8")
+        try:
+            payload = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            raise ProbeInputError(f"the payload is not valid JSON: {exc}") from exc
+        event = resolve_probe_event(args.event)
+        asked = getattr(args, "probe_as", None)
+        hook_event = build_probe_event(
+            payload,
+            event=event,
+            project_root=project_root,
+            session_id=probe_session_id(),
+            probe_as=ProbeThread(asked) if asked else None,
+        )
+        entry_point = entry_point_for(project_root, event)
+    except (ProbeInputError, OSError) as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 2
+
+    try:
+        outcome = dispatch_probe(entry_point, hook_event, project_root=project_root)
+    except subprocess.TimeoutExpired:
+        print(
+            f"ERROR: {entry_point} did not answer within {PROBE_TIMEOUT_SECONDS}s",
+            file=sys.stderr,
+        )
+        return 1
+    code, text = render_verdict(
+        event=event, entry_point=entry_point, hook_event=hook_event, outcome=outcome
+    )
+    print(text, file=sys.stdout if code == 0 else sys.stderr)
+    return code
 
 
 def cmd_contract_status(
@@ -6410,6 +6698,26 @@ def cmd_find_plan(args: argparse.Namespace) -> int:
     return 0
 
 
+def _print_plan_qa_checks(json_output: bool) -> int:
+    """Print every registered plan QA check with the stages it runs on."""
+    from claude_code_hooks_daemon.plan_qa.checks import all_checks
+
+    stages_by_check: dict[str, list[str]] = {}
+    for spec in all_checks():
+        stages = stages_by_check.setdefault(spec.check_id, [])
+        stage = f"{spec.stage.value}:{spec.level.value}"
+        if stage not in stages:
+            stages.append(stage)
+
+    if json_output:
+        print(json.dumps(stages_by_check, indent=2))
+        return 0
+    width = max(len(check_id) for check_id in stages_by_check)
+    for check_id, stages in stages_by_check.items():
+        print(f"{check_id:<{width}}  {', '.join(stages)}")
+    return 0
+
+
 def cmd_plan_qa(args: argparse.Namespace) -> int:
     """Run plan QA checks (Plan 00144): sweep, staged gate, or single-file lint.
 
@@ -6421,10 +6729,14 @@ def cmd_plan_qa(args: argparse.Namespace) -> int:
       checks) without committing.
     - ``--lint PATH``: run the Stage 1 edit-time checks against one file's
       current on-disk content.
+    - ``--list-checks``: print the registered check catalogue and the stages
+      each check runs on. It describes the daemon, not the project, so it
+      needs no plan tree; documentation points here rather than counting
+      checks (Plan 00466 N18).
 
     Args:
         args: Parsed CLI arguments with ``sweep``, ``check_staged``, ``lint``,
-            ``json_output`` and optional ``project_root``.
+            ``list_checks``, ``json_output`` and optional ``project_root``.
 
     Returns:
         0 when clean (or plan workflow / plan QA disabled in config),
@@ -6443,6 +6755,9 @@ def cmd_plan_qa(args: argparse.Namespace) -> int:
     from claude_code_hooks_daemon.plan_qa.report import CLEAN_SCOPE_TREE, format_cli_report
     from claude_code_hooks_daemon.plan_qa.runner import run_stage
     from claude_code_hooks_daemon.plan_qa.types import Stage
+
+    if getattr(args, "list_checks", False):
+        return _print_plan_qa_checks(bool(getattr(args, "json_output", False)))
 
     # An explicit --project-root is trusted as-is (plan QA needs a plan tree,
     # not a validated daemon installation); otherwise auto-detect as usual.
@@ -6690,13 +7005,19 @@ def cmd_docs_qa(args: argparse.Namespace) -> int:
     return 1 if findings else 0
 
 
-def _sensitive_content_guard() -> Any:
+def _sensitive_content_guard(project_root: Path) -> Any:
     """The project's configured sensitive-content scanner, or None.
 
     A capture writes to disk from this CLI, so the ``Write``-tool hook that
     normally inspects content never fires. Reusing the handler's own matching
     keeps one definition of "sensitive" rather than a second, weaker copy
     (Plan 00326 Task 2.5).
+
+    The handler gets ``project_root``'s configured options exactly as the
+    registry would give them. Built bare it had no public patterns (Plan
+    00466 N15). The word list path is resolved to an absolute path here,
+    because this CLI need not have initialised the project context the
+    handler would otherwise resolve it against.
 
     Returns None when the handler cannot be built. Capture then proceeds
     UNSCANNED rather than failing, matching how the daemon degrades
@@ -6705,13 +7026,29 @@ def _sensitive_content_guard() -> Any:
     its secrets with nothing to show that the check was skipped, which is
     the one degradation in this subsystem worth interrupting someone over.
     """
+    import yaml
+
     try:
+        from claude_code_hooks_daemon.constants import HandlerID
         from claude_code_hooks_daemon.handlers.pre_tool_use.sensitive_content import (
             SensitiveContentHandler,
         )
+        from claude_code_hooks_daemon.handlers.registry import apply_handler_options
+        from claude_code_hooks_daemon.utils.secret_redaction import (
+            resolve_secret_word_list_path,
+        )
 
-        return SensitiveContentHandler().scan_text
-    except (ImportError, RuntimeError, OSError) as exc:
+        config = Config.load_or_default(project_root / ".claude" / "hooks-daemon.yaml")
+        options = handler_options(
+            config.handlers.pre_tool_use.get(HandlerID.SENSITIVE_CONTENT.config_key)
+        )
+        word_list = resolve_secret_word_list_path(
+            options.get("secret_word_list_path"), project_root
+        )
+        handler = SensitiveContentHandler()
+        apply_handler_options(handler, {**options, "secret_word_list_path": str(word_list)})
+        return handler.scan_text
+    except (ImportError, RuntimeError, OSError, ValueError, yaml.YAMLError) as exc:
         logger.warning("sensitive-content guard unavailable for capture: %s", exc)
         print(
             "remote-docs: WARNING — the sensitive-content scanner is "
@@ -6760,9 +7097,11 @@ def cmd_remote_docs(args: argparse.Namespace) -> int:
         print(fetcher.warning, file=sys.stderr)
 
     if action == "add":
-        code = _remote_docs_add(args, tree, fetcher, now, _remote_docs_policy(resolved_root))
+        code = _remote_docs_add(
+            args, resolved_root, tree, fetcher, now, _remote_docs_policy(resolved_root)
+        )
     else:
-        code = _remote_docs_refresh(args, tree, fetcher, now)
+        code = _remote_docs_refresh(args, resolved_root, tree, fetcher, now)
 
     # Regenerated on every capture and refresh, never on demand: an index
     # that silently goes stale answers "we don't have that" confidently and
@@ -6820,7 +7159,7 @@ def _resolve_remote_docs_fetcher(args: argparse.Namespace) -> Any:
 
 
 def _remote_docs_add(
-    args: argparse.Namespace, tree: Path, fetcher: Any, now: Any, policy: Any
+    args: argparse.Namespace, project_root: Path, tree: Path, fetcher: Any, now: Any, policy: Any
 ) -> int:
     from claude_code_hooks_daemon.remote_docs.capture import CaptureError, derive_relative_path
     from claude_code_hooks_daemon.remote_docs.provenance import UNREVIEWED
@@ -6858,7 +7197,8 @@ def _remote_docs_add(
             now=now,
             licence=licence,
             stale_after_days=stale_after_days,
-            content_guard=getattr(args, "content_guard", None) or _sensitive_content_guard(),
+            content_guard=getattr(args, "content_guard", None)
+            or _sensitive_content_guard(project_root),
             force=force,
         )
     except CaptureError as exc:
@@ -6994,7 +7334,9 @@ def _remote_docs_check(
     return 1
 
 
-def _remote_docs_refresh(args: argparse.Namespace, tree: Path, fetcher: Any, now: Any) -> int:
+def _remote_docs_refresh(
+    args: argparse.Namespace, project_root: Path, tree: Path, fetcher: Any, now: Any
+) -> int:
     from claude_code_hooks_daemon.remote_docs.store import (
         RefreshOutcome,
         list_documents,
@@ -7019,7 +7361,8 @@ def _remote_docs_refresh(args: argparse.Namespace, tree: Path, fetcher: Any, now
             now=now,
             # The same guard `remote-docs add` applies. A refresh writes from a
             # CLI just as a capture does, so it bypasses the same hook.
-            content_guard=getattr(args, "content_guard", None) or _sensitive_content_guard(),
+            content_guard=getattr(args, "content_guard", None)
+            or _sensitive_content_guard(project_root),
         )
         print(f"{target}: {outcome.value}")
         if outcome is RefreshOutcome.REFUSED:
@@ -7239,15 +7582,11 @@ def cmd_skill_scan(args: argparse.Namespace) -> int:
     project_root = resolved_root
 
     config = Config.load_or_default(project_root / ".claude" / "hooks-daemon.yaml")
-    handler_cfg = config.handlers.session_start.get(HandlerID.SKILL_OPPORTUNITY_DETECTOR.config_key)
-    # The config model parses handler entries into HandlerConfig objects, but a
-    # raw dict is tolerated too (defensive: this path also runs against
-    # hand-built configs in tests).
-    if isinstance(handler_cfg, dict):
-        raw_options = handler_cfg.get("options", {})
-    else:
-        raw_options = getattr(handler_cfg, "options", {})
-    options = SkillScanOptions.from_dict(raw_options if isinstance(raw_options, dict) else {})
+    options = SkillScanOptions.from_dict(
+        handler_options(
+            config.handlers.session_start.get(HandlerID.SKILL_OPPORTUNITY_DETECTOR.config_key)
+        )
+    )
 
     state_path = _daemon_untracked_dir(project_root) / STATE_FILE_NAME
     force = bool(getattr(args, "force", False))
@@ -7260,16 +7599,9 @@ def cmd_skill_scan(args: argparse.Namespace) -> int:
             )
             return 0
 
-    sensitive_cfg = config.handlers.pre_tool_use.get(HandlerID.SENSITIVE_CONTENT.config_key)
-    if isinstance(sensitive_cfg, dict):
-        sensitive_options = sensitive_cfg.get("options", {})
-    else:
-        sensitive_options = getattr(sensitive_cfg, "options", {})
-    configured_word_list = (
-        sensitive_options.get("secret_word_list_path")
-        if isinstance(sensitive_options, dict)
-        else None
-    )
+    configured_word_list = handler_options(
+        config.handlers.pre_tool_use.get(HandlerID.SENSITIVE_CONTENT.config_key)
+    ).get("secret_word_list_path")
     secret_terms = get_cached_secret_terms(
         resolve_secret_word_list_path(configured_word_list, project_root)
     )
@@ -7369,6 +7701,25 @@ def cmd_housekeeping(args: argparse.Namespace) -> int:
     return 0
 
 
+def _report_transcripts_root(args: argparse.Namespace, project_root: Path) -> Path:
+    """The transcripts directory a report reads: ``--transcripts-dir``, else derived.
+
+    A derived directory that does not exist is named on stderr. The report
+    still runs (a fresh project has no transcripts yet), but an empty report
+    must never hide WHERE it looked (00466 N27).
+    """
+    from claude_code_hooks_daemon.utils.claude_config import claude_project_dir
+
+    override = getattr(args, "transcripts_dir", None)
+    if override:
+        return Path(override)
+    try:
+        return claude_project_dir(project_root, must_exist=True)
+    except FileNotFoundError as e:
+        print(f"NOTE: {e}; reporting no transcripts.", file=sys.stderr)
+        return claude_project_dir(project_root)
+
+
 def cmd_tool_report(args: argparse.Namespace) -> int:
     """Produce the tools-vs-tokens usage report (Plan 00293).
 
@@ -7388,15 +7739,14 @@ def cmd_tool_report(args: argparse.Namespace) -> int:
         2 on operational errors.
     """
     from claude_code_hooks_daemon.config.models import Config
-    from claude_code_hooks_daemon.tool_report.analyser import (
-        analyse_transcripts,
-        transcripts_root_for,
-    )
+    from claude_code_hooks_daemon.tool_report.analyser import analyse_transcripts
+    from claude_code_hooks_daemon.tool_report.plugin_costs import plugin_listing_costs
     from claude_code_hooks_daemon.tool_report.report import (
         build_report,
         render_markdown,
         report_to_json,
     )
+    from claude_code_hooks_daemon.utils.claude_plugins import resolve_enabled_plugins
 
     resolved_root = resolve_tree_root(args)
     if resolved_root is None:
@@ -7404,14 +7754,14 @@ def cmd_tool_report(args: argparse.Namespace) -> int:
     project_root = resolved_root
     config = Config.load_or_default(project_root / ".claude" / "hooks-daemon.yaml")
 
-    override = getattr(args, "transcripts_dir", None)
-    transcripts_root = Path(override) if override else transcripts_root_for(project_root)
+    transcripts_root = _report_transcripts_root(args, project_root)
 
     summary = analyse_transcripts(transcripts_root)
     report = build_report(
         summary,
         never_want=config.tool_policy.never_want_map(),
         low_use_max_calls=config.tool_policy.low_use_max_calls,
+        plugin_costs=plugin_listing_costs(resolve_enabled_plugins(project_root)),
     )
     markdown = render_markdown(report)
     payload = report_to_json(report)
@@ -7459,10 +7809,7 @@ def cmd_block_report(args: argparse.Namespace) -> int:
         0 on success (a project with no transcripts yet still reports),
         2 on operational errors.
     """
-    from claude_code_hooks_daemon.block_report.analyser import (
-        analyse_transcripts,
-        transcripts_root_for,
-    )
+    from claude_code_hooks_daemon.block_report.analyser import analyse_transcripts
     from claude_code_hooks_daemon.block_report.report import (
         build_report,
         render_markdown,
@@ -7485,8 +7832,7 @@ def cmd_block_report(args: argparse.Namespace) -> int:
     # _init_project_context_for_cli's own docstring for the failure modes.
     _init_project_context_for_cli(args)
 
-    override = getattr(args, "transcripts_dir", None)
-    transcripts_root = Path(override) if override else transcripts_root_for(project_root)
+    transcripts_root = _report_transcripts_root(args, project_root)
 
     summary = analyse_transcripts(transcripts_root)
     report = build_report(
@@ -9472,6 +9818,12 @@ def main() -> int:
         help="Run edit-time checks against one plan file's on-disk content",
     )
     parser_plan_qa.add_argument(
+        "--list-checks",
+        dest="list_checks",
+        action="store_true",
+        help="List every registered check and the stages it runs on",
+    )
+    parser_plan_qa.add_argument(
         "--json",
         dest="json_output",
         action="store_true",
@@ -10423,6 +10775,34 @@ def main() -> int:
         help="Project root for config + key resolution (trusted as-is; auto-detected by default)",
     )
     parser_secret_meta.set_defaults(func=cmd_secret_meta)
+
+    # probe (Plan 00466 N12) — a hand-built payload, marked as synthetic traffic
+    parser_probe = subparsers.add_parser(
+        "probe",
+        help="Send one hook payload through the project's entry point, marked "
+        "synthetic_source=manual-probe, and print the verdict",
+    )
+    parser_probe.add_argument(
+        "event",
+        help="Hook event: PreToolUse, pre-tool-use or pre_tool_use (any wired event)",
+    )
+    probe_payload = parser_probe.add_mutually_exclusive_group(required=True)
+    probe_payload.add_argument("--json", help="The payload as a JSON object")
+    probe_payload.add_argument("--file", type=Path, help="A file holding the JSON payload")
+    parser_probe.add_argument(
+        "--as",
+        dest="probe_as",
+        choices=["main", "sub"],
+        default=None,
+        help="Thread the probe stands for, so MAIN/SUB-scoped handlers judge it "
+        "(default: main; sub also sends agent_id=manual-probe-agent)",
+    )
+    parser_probe.add_argument(
+        "--project-root",
+        type=Path,
+        help="Project whose .claude/hooks/ entry point is used (auto-detected by default)",
+    )
+    parser_probe.set_defaults(func=cmd_probe)
 
     # contract-status (Plan 00327) — is the vendored hooks contract current upstream?
     parser_contract_status = subparsers.add_parser(

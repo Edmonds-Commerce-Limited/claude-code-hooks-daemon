@@ -79,20 +79,26 @@ def _no_errors(errors: list[BaseException]) -> None:
 
 
 class TestGoalInjectionLatches:
+    """RV5-M1/RV5-m4 (Plan 00466): ``_record_latch`` is a generic staticmethod
+    shared by ``handler._fired`` and ``handler._reasserted`` (RV3-m4), so
+    every call names WHICH map it is inserting into."""
+
     def test_concurrent_latching_never_raises(self) -> None:
         handler = GoalInjectionHandler()
         for index in range(_MAX_TRACKED_LATCHES):
-            handler._record_latch((f"seed{index}", "00001"))
+            handler._record_latch(handler._fired, (f"seed{index}", "00001"))
 
-        _no_errors(hammer(lambda w, i: handler._record_latch((f"w{w}-{i}", "00001"))))
+        _no_errors(
+            hammer(lambda w, i: handler._record_latch(handler._fired, (f"w{w}-{i}", "00001")))
+        )
         assert len(handler._fired) == _MAX_TRACKED_LATCHES
 
     def test_overflow_evicts_the_oldest_latch(self) -> None:
         handler = GoalInjectionHandler()
         for index in range(_MAX_TRACKED_LATCHES):
-            handler._record_latch((f"s{index}", "00001"))
+            handler._record_latch(handler._fired, (f"s{index}", "00001"))
 
-        handler._record_latch(("newcomer", "00001"))
+        handler._record_latch(handler._fired, ("newcomer", "00001"))
 
         assert not handler._fired.get(("s0", "00001"))
         assert handler._fired.get((f"s{_MAX_TRACKED_LATCHES - 1}", "00001"))

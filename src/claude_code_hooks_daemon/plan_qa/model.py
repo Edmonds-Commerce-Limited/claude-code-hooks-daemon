@@ -371,6 +371,11 @@ JOURNAL_CORRECTION_CATEGORY: Final[str] = "correction"
 #: A correction REF naming an entry in the SAME day-file.
 _SAME_FILE_ENTRY_REF_RE: Final[re.Pattern[str]] = re.compile(r"^\d{2}:\d{2}$")
 
+#: A correction REF naming an entry in an EARLIER day-file: ``YY-MM-DD/HH:MM``.
+_CROSS_FILE_ENTRY_REF_RE: Final[re.Pattern[str]] = re.compile(
+    r"^(\d{2})-(\d{2})-(\d{2})/(\d{2}:\d{2})$"
+)
+
 #: The plan scaffolder, deployed into the plan directory.
 MKPLAN_SCRIPT_NAME: Final[str] = "mkplan.bash"
 _CATEGORY_PLACEHOLDER: Final[str] = "<category>"
@@ -464,7 +469,8 @@ def corrected_entry_labels(headings: list[JournalEntryHeading]) -> frozenset[str
     """The ``HH:MM`` labels that this day-file's own corrections declare wrong.
 
     Only a ``correction`` entry whose REF names an entry in the SAME file
-    counts; a ``YY-MM-DD/HH:MM`` REF points at another day-file.
+    counts; a ``YY-MM-DD/HH:MM`` REF points at another day-file and is read by
+    :func:`cross_file_corrected_entries` instead.
     """
     return frozenset(
         heading.ref
@@ -473,6 +479,33 @@ def corrected_entry_labels(headings: list[JournalEntryHeading]) -> frozenset[str
         and heading.ref is not None
         and _SAME_FILE_ENTRY_REF_RE.match(heading.ref) is not None
     )
+
+
+def cross_file_corrected_entries(
+    headings: list[JournalEntryHeading],
+) -> frozenset[tuple[date, str]]:
+    """The ``(date, HH:MM)`` pairs an EARLIER day-file's corrections declare wrong.
+
+    A correction entry may live in today's day-file but name an entry in an
+    earlier one (``--ref YY-MM-DD/HH:MM``), because ``mkplan.bash --journal``
+    only ever appends to today's file — there is no way to append INTO the
+    earlier file itself. :func:`corrected_entry_labels` only reads a REF
+    naming an entry in the SAME file, so a cross-day REF must be collected
+    separately and matched against the file it names, not the file it lives
+    in.
+    """
+    voided: set[tuple[date, str]] = set()
+    for heading in headings:
+        if heading.category != JOURNAL_CORRECTION_CATEGORY or heading.ref is None:
+            continue
+        match = _CROSS_FILE_ENTRY_REF_RE.match(heading.ref)
+        if match is None:
+            continue
+        yy, mm, dd, label = match.groups()
+        voided.add(
+            (date(_JOURNAL_YEAR_BASE + int(yy), int(mm), int(dd)), label),
+        )
+    return frozenset(voided)
 
 
 def parse_journal_dayfile_name(filename: str) -> JournalDayfileName | None:

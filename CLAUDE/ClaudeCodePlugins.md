@@ -157,6 +157,55 @@ receives either variable. The full hook environment table is in
 
 ## Daemon support for Claude Code plugins
 
-Work to make the daemon aware of enabled Claude Code plugins, their agents,
-skills, hooks and LSP servers, is tracked in
+The daemon works out which Claude Code plugins are enabled for a project with
+one resolver, `utils/claude_plugins.resolve_enabled_plugins()`. It reads:
+
+- the Claude config dir: `$CLAUDE_CONFIG_DIR`, else `~/.claude`
+  (`utils/claude_config.claude_config_dir()`). This is the daemon's own
+  environment, fixed when it starts; a hook payload carries neither
+  `CLAUDE_CONFIG_DIR` nor `HOME`.
+- `plugins/installed_plugins.json` there. A `project` or `local` install counts
+  when its `projectPath` is this project, or lies in the same repository. Like
+  Claude Code, the daemon maps a linked git worktree to its main checkout, so
+  an install made in the main checkout also applies in every worktree of it
+  (`canonical_repo_root()`). `enabledPlugins` is still read from the
+  worktree's own `.claude/settings*.json`.
+- `enabledPlugins` from the four settings scopes, in the order managed, local,
+  project, user. Only file-based managed settings are read. With no entry
+  anywhere, the plugin's `defaultEnabled` applies.
+- each plugin's manifest and marketplace entry, for its agents, skills,
+  commands, hooks and LSP servers.
+
+Plugins from `@skills-dir`, `@synced` or `--plugin-dir`, and settings from MDM
+or a server, are not resolved. They are reported as unresolved, not guessed.
+
+What uses it:
+
+- The read-only dispatch logic (`dispatch_declaration`,
+  `subagent_report_size_blocker`) resolves a scoped `<plugin>:<agent>` id after
+  project, user and built-in agents. A plugin agent with no readable
+  frontmatter counts as able to write, because Claude Code then gives it every
+  tool.
+- `agent_isolation_advisor` stays quiet for an agent whose file declares
+  `isolation: worktree`.
+- `skill-scan` does not propose a skill that an enabled plugin, or your
+  personal skills, already cover.
+- `tool-report` shows each enabled plugin's always-on listing cost.
+- `lsp_noise_checker` asks for the config dir's `plugins/` tree to be excluded
+  when that dir is inside the project.
+- `plugin_hooks_advisor` names each enabled plugin that ships hooks at the
+  start of a new session, and singles out a `PreToolUse` hook (see
+  [above](#a-plugin-pretooluse-hook-can-replace-input-the-daemon-judged)). A
+  plugin id listed in its `acknowledged_plugins` option is left out.
+  `hooks-daemon health` lists every one, marking the acknowledged.
+- `installed_plugin_edit_advisor` advises when a write lands in an installed
+  plugin's files, which the next plugin update replaces.
+- `lsp_enforcement` treats the LSP tool as available only where an enabled
+  plugin declares a language server for the searched file type, since Claude
+  Code keeps the tool inactive until a code intelligence plugin is installed
+  ([tools-reference.md](../remote-docs/code.claude.com/docs/en/tools-reference.md),
+  its LSP tool section).
+  `ENABLE_LSP_TOOL` is not consulted.
+
+Remaining work is tracked in
 [Plan 00468](Plan/00468-claude-code-plugins-are-supported-properly/PLAN.md).

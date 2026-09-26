@@ -340,3 +340,55 @@ class TestAQuotedStringCanItselfBeAMerge:
         what `destructive_git` has always done.
         """
         assert merge_target(f"echo 'git merge {self._BRANCH}'") == self._BRANCH
+
+
+class TestTwoMergesThatWereMissed:
+    """Plan 00408 Task 3.7: two real merges answered "not a merge".
+
+    ``xargs git merge`` supplies the branch on stdin, so the segment holds no
+    positional; and ``git pull`` was simply not in the pattern set, although
+    naming a branch makes it merge that branch into the checked-out one.
+    """
+
+    def test_a_merge_whose_branch_arrives_on_stdin_is_still_a_merge(self) -> None:
+        assert merge_target("echo feature/x | xargs git merge") == module.UNNAMED_MERGE_TARGET
+
+    def test_a_bare_merge_merges_the_upstream_and_is_still_a_merge(self) -> None:
+        assert merge_target("git merge --no-ff") == module.UNNAMED_MERGE_TARGET
+
+    def test_the_stdin_merge_is_gated(self, checkout: Path) -> None:
+        assert _handler().matches(_bash("echo feature/x | xargs git merge")) is True
+
+    @pytest.mark.parametrize(
+        ("command", "expected"),
+        [
+            ("git pull . feature/x", "feature/x"),
+            ("git pull --no-rebase . feature/x", "feature/x"),
+            ("git pull origin feature/x", "feature/x"),
+            ("git pull origin +feature/x:feature/x", "feature/x"),
+            ("git pull --depth 1 origin feature/x", "feature/x"),
+            ("git -C /repo pull . feature/x", "feature/x"),
+        ],
+    )
+    def test_a_pull_naming_a_branch_merges_that_branch(self, command: str, expected: str) -> None:
+        assert merge_target(command) == expected
+
+    @pytest.mark.parametrize(
+        "command",
+        ["git pull", "git pull origin", "git pull --rebase", "git pull --ff-only origin"],
+    )
+    def test_a_pull_naming_no_branch_updates_from_upstream(self, command: str) -> None:
+        assert merge_target(command) is None
+
+    def test_pulling_another_branch_into_main_is_gated(self, checkout: Path) -> None:
+        assert _handler().matches(_bash("git pull . feature/x")) is True
+
+    def test_pulling_the_default_branch_into_itself_is_not_gated(self, checkout: Path) -> None:
+        """`git pull origin main` on main is the ordinary update, not a merge of work."""
+        assert _handler().matches(_bash("git pull origin main")) is False
+
+    def test_the_deny_names_the_pulled_branch(self, checkout: Path) -> None:
+        result = _handler().handle(_bash("git pull . feature/x"))
+
+        assert result.decision == Decision.DENY
+        assert "approve-merge feature/x" in (result.reason or "")

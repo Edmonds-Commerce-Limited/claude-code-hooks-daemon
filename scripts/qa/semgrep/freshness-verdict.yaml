@@ -1,0 +1,43 @@
+# Semgrep expression of the half-a-freshness-verdict defect class (Plan 00415).
+#
+# A running daemon binds two things at startup -- the code it imports and the
+# config it resolves -- and reports a fingerprint of each over its
+# `_system`/`health` socket action. A consumer that reads ONE of them out of the
+# payload and compares it alone is blind to the other: Plan 00415's defect was
+# exactly this, with `check-source-fresh` and the acceptance harness reading
+# `source_fingerprint` only, so a config edited without a restart was graded
+# FRESH.
+#
+# The combined verdict lives in daemon/source_fingerprint.py
+# (`describe_daemon_staleness`), which takes the WHOLE payload. Reading either
+# key anywhere else is the defect, whatever the consumer then does with it.
+#
+# Scope, stated honestly: the rule sees a key read by its literal name or by
+# the module's named constant. A key assembled at runtime is invisible to it.
+
+rules:
+  - id: freshness-verdict-read-piecemeal
+    languages: [python]
+    severity: WARNING
+    message: >-
+      A daemon's freshness is two fingerprints, code and config, and reading one
+      of them out of a health payload judges only half. Pass the whole payload
+      to claude_code_hooks_daemon.daemon.source_fingerprint.describe_daemon_staleness
+      with compute_current_project_fingerprints(project_root), and let it decide.
+    # Literal keys, not a `$KEY` metavariable filtered by regex: the literal
+    # lets semgrep skip every file that never mentions one, and the generic
+    # form TIMED OUT on daemon/cli.py -- a timeout semgrep reports as a
+    # warning while the gate still passes, which is a blind guard.
+    pattern-either:
+      - pattern: $X.get("source_fingerprint", ...)
+      - pattern: $X.get("config_fingerprint", ...)
+      - pattern: $X["source_fingerprint"]
+      - pattern: $X["config_fingerprint"]
+      - pattern: $X.get(HEALTH_KEY_SOURCE_FINGERPRINT, ...)
+      - pattern: $X.get(HEALTH_KEY_CONFIG_FINGERPRINT, ...)
+      - pattern: $X[HEALTH_KEY_SOURCE_FINGERPRINT]
+      - pattern: $X[HEALTH_KEY_CONFIG_FINGERPRINT]
+    paths:
+      exclude:
+        # The owner of the combined verdict: the one place both keys are read.
+        - "**/daemon/source_fingerprint.py"

@@ -24,6 +24,7 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
+from tests.claude_plugin_fixture import READ_ONLY_TOOLS, install_fake_plugin
 
 from claude_code_hooks_daemon.core import Decision
 from claude_code_hooks_daemon.handlers.pre_tool_use.dispatch_declaration import (
@@ -60,8 +61,8 @@ def handler(tmp_path: Any) -> DispatchDeclarationHandler:
     lookups (`resolve_agent_can_write`'s two bases) at fresh `tmp_path`
     subdirectories by default, neither of which exists. Left unset, a test
     that never sets `_project_root` resolves against the REAL checkout via
-    `resolve_lookup_root`'s cwd fallback, and `_home_dir` unset resolves
-    against the real `Path.home()` -- a real risk now that review finding M4
+    `resolve_lookup_root`'s cwd fallback, and `_config_dir` unset resolves
+    against the real Claude home -- a real risk now that review finding M4
     makes project/user agents consulted BEFORE the built-in table: this
     repo's own real `.claude/agents/` (or a developer's real `~/.claude/
     agents/`) could silently answer a lookup a test meant to be hermetic.
@@ -70,7 +71,7 @@ def handler(tmp_path: Any) -> DispatchDeclarationHandler:
     `_project_root` explicitly."""
     instance = DispatchDeclarationHandler()
     instance._project_root = tmp_path / "project"
-    instance._home_dir = tmp_path / "home"
+    instance._config_dir = tmp_path / "config"
     return instance
 
 
@@ -79,7 +80,7 @@ def strict_handler(tmp_path: Any) -> DispatchDeclarationHandler:
     instance = DispatchDeclarationHandler()
     instance._strict = True
     instance._project_root = tmp_path / "project"
-    instance._home_dir = tmp_path / "home"
+    instance._config_dir = tmp_path / "config"
     return instance
 
 
@@ -441,6 +442,54 @@ class TestReadOnlyDispatchAdvisory:
         assert len(result.context) == 1
         assert "code-reviewer" in result.context[0]
 
+    def test_plugin_agent_without_write_tool_is_advised(
+        self, handler: DispatchDeclarationHandler, tmp_path: Any
+    ) -> None:
+        """Plan 00468 P2: the audit's reproduction. A Write-less plugin agent
+        dispatched with a declared report path got nothing; `Explore` got the
+        advisory."""
+        project = tmp_path / "plugin-project"
+        (project / ".claude").mkdir(parents=True)
+        config = tmp_path / "plugin-config"
+        install_fake_plugin(
+            config,
+            project,
+            agents={
+                "conformance-reviewer.md": (
+                    f"name: conformance-reviewer\ndescription: d\ntools: {READ_ONLY_TOOLS}"
+                )
+            },
+        )
+        handler._project_root = project
+        handler._config_dir = config
+        agent = "defence-before-fix:conformance-reviewer"
+        hook_input = _task_input(_DECLARED_PROMPT_WITH_DESTINATION, subagent_type=agent)
+
+        result = handler.handle(hook_input)
+
+        assert result.decision == Decision.ALLOW
+        assert len(result.context) == 1
+        assert agent in result.context[0]
+        assert "no `Write` tool" in result.context[0]
+
+    def test_project_agent_with_a_colon_in_its_description_is_advised(
+        self, handler: DispatchDeclarationHandler, tmp_path: Any
+    ) -> None:
+        """Plan 00468 P6: this repository's real code-reviewer.md shape."""
+        agents_dir = tmp_path / ".claude" / "agents"
+        agents_dir.mkdir(parents=True)
+        (agents_dir / "code-reviewer.md").write_text(
+            "---\nname: code-reviewer\ndescription: Analyzes real quality issues: dead code\n"
+            "tools: Read, Glob, Grep, Bash\n---\n\nBody.\n"
+        )
+        handler._project_root = tmp_path
+        hook_input = _task_input(_DECLARED_PROMPT_WITH_DESTINATION, subagent_type="code-reviewer")
+
+        result = handler.handle(hook_input)
+
+        assert len(result.context) == 1
+        assert "no `Write` tool" in result.context[0]
+
 
 class TestConfiguredPlanDirectory:
     """Plan 00311 Task 1.1 (N1): declaration option 1 must recognise the
@@ -511,6 +560,101 @@ class TestConfiguredPlanDirectory:
         prompt = "Plan 00307: CLAUDE/Plan/00307-subagent-file-based-report-handoff/"
 
         result = handler.handle(_task_input(prompt))
+
+        assert result.decision == Decision.ALLOW
+        assert result.context == []
+
+
+class TestDestinationPhrasingRecognition:
+    """Plan 00466 N31: the destination check matches more than a fixed
+    "verb to/in/under/into path" grammar.
+
+    Found by the 00467 dogfood agent: a brief phrased as a label --
+    "File to write to: <path>" -- was NOT recognised, because the old
+    grammar required a preposition to be followed immediately by
+    whitespace, and the colon after "to" broke that. The fix recognises
+    any write-destination keyword ("write", "report", "file", "output",
+    "save") paired with a path-shaped token in the SAME clause (bounded by
+    sentence-ending punctuation or a newline) -- not only fixed phrases.
+
+    The clause boundary is what keeps the Plan 00460 review finding m4
+    distinction intact: a prompt that mentions a plan-folder path in one
+    sentence and a bare "write your findings there" in the next (see
+    ``_DECLARED_PROMPT`` at module level) must still NOT count as
+    declaring a destination -- the path and the verb are in different
+    clauses there.
+    """
+
+    def test_recognises_label_colon_path_phrasing(
+        self, handler: DispatchDeclarationHandler
+    ) -> None:
+        """The exact reported miss: 'File to write to: <path>'.
+
+        Deliberately NOT a ``CLAUDE/Plan/NNNNN-`` path -- that would satisfy
+        the separate plan-folder declaration route and mask a regression in
+        the destination-phrasing check this test targets.
+        """
+        prompt = (
+            "This is not plan work. File to write to: "
+            "/workspace/untracked/agent-reports/260924-probe-sonnet.md"
+        )
+
+        result = handler.handle(_task_input(prompt))
+
+        assert result.decision == Decision.ALLOW
+        assert result.context == []
+
+    def test_recognises_save_at_phrasing(self, handler: DispatchDeclarationHandler) -> None:
+        """ "save" + "at" (not one of the old to/in/under/into prepositions)."""
+        prompt = (
+            "This is not plan work. Save your findings at "
+            "untracked/scratch/findings.md when you are done."
+        )
+
+        result = handler.handle(_task_input(prompt))
+
+        assert result.decision == Decision.ALLOW
+        assert result.context == []
+
+    def test_recognises_report_destination_label_phrasing(
+        self, handler: DispatchDeclarationHandler
+    ) -> None:
+        """A bare "<label>: <path>" pairing with no verb-preposition grammar
+        at all. Deliberately not a ``CLAUDE/Plan/NNNNN-`` path, for the same
+        reason as the test above."""
+        prompt = (
+            "This is not plan work. Report destination: "
+            "untracked/agent-reports/260924-probe-sonnet-notes.md"
+        )
+
+        result = handler.handle(_task_input(prompt))
+
+        assert result.decision == Decision.ALLOW
+        assert result.context == []
+
+    def test_still_advises_when_no_path_is_present(
+        self, handler: DispatchDeclarationHandler
+    ) -> None:
+        """A brief that uses destination keywords but never names a path
+        must still draw the advisory -- recognising more PHRASINGS must not
+        turn into recognising a bare keyword as a declaration."""
+        prompt = "This is not plan work. Write a summary and report back when done."
+
+        result = handler.handle(_task_input(prompt))
+
+        assert result.decision == Decision.ALLOW
+        assert len(result.context) == 1
+        assert "DISPATCH DECLARATION" in result.context[0]
+
+    def test_plan_folder_mention_in_a_different_clause_still_not_a_destination(
+        self, handler: DispatchDeclarationHandler
+    ) -> None:
+        """Plan 00460 review finding m4, preserved: a path in one sentence
+        and the verb in the next must not pair up just because a looser
+        keyword search would find both somewhere in the prompt."""
+        hook_input = _task_input(_DECLARED_PROMPT, subagent_type="Explore")
+
+        result = handler.handle(hook_input)
 
         assert result.decision == Decision.ALLOW
         assert result.context == []

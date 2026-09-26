@@ -1,10 +1,10 @@
 # Hooks Daemon - Active Configuration
 
-> Generated on 2026-09-25 (v3.66.0) by `generate-docs`. Regenerate: `bin/hooks-daemon generate-docs`
+> Generated on 2026-09-26 (v3.66.0) by `generate-docs`. Regenerate: `bin/hooks-daemon generate-docs`
 
 ## Active Handlers
 
-### PreToolUse (65 handlers)
+### PreToolUse (67 handlers)
 
 | Priority | Handler | Behaviour | Description |
 |----------|---------|----------|-------------|
@@ -13,7 +13,7 @@
 | 11 | sed_blocker | BLOCKING | Block sed used for file modification - Claude gets sed wrong and causes file destruction |
 | 12 | absolute_path | BLOCKING | Require absolute paths for Read/Write/Edit tool file_path parameters |
 | 13 | error_hiding_blocker | BLOCKING | Block error-hiding patterns in code written via Write or Edit tools |
-| 14 | artifact_publish_blocker | TERMINAL | Deny artefact publishing; allow read-only enumeration |
+| 14 | artifact_publish_blocker | BLOCKING | Deny artefact publishing; allow read-only enumeration |
 | 14 | flaggable_content_channel_guard | BLOCKING | Deny content-revealing git/grep commands over configured flaggable paths |
 | 14 | issue_filing_gate | BLOCKING | Deny an upstream issue whose body nothing checked |
 | 14 | project_containment | BLOCKING | Deny a write to a path named outside the repository root |
@@ -24,29 +24,30 @@
 | 14 | subagent_cron_delete_blocker | BLOCKING | Deny ``CronDelete`` inside a subagent; the coordinator is unaffected |
 | 15 | root_recursion_guard | BLOCKING | Block recursive scanners (grep -r, find, fd, rg, ...) rooted at ``/``/home/etc |
 | 15 | worktree_file_copy | BLOCKING | Prevent copying files between worktrees and main repo |
-| 16 | curl_pipe_shell | TERMINAL | Block curl/wget piped to shell commands |
+| 16 | curl_pipe_shell | BLOCKING | Block curl/wget piped to shell commands |
 | 16 | write_clobber_guard | BLOCKING | Deny ``Write`` to an existing file that was not read this session |
 | 17 | pipe_blocker | BLOCKING | Block expensive commands piped to tail/head to prevent information loss |
 | 17 | self_matching_process_probe | BLOCKING | Block a liveness probe whose pattern matches the shell running it |
-| 18 | dangerous_permissions | TERMINAL | Block chmod 777 and dangerous permission commands |
+| 18 | dangerous_permissions | BLOCKING | Block chmod 777 and dangerous permission commands |
 | 18 | github_auto_close_keywords | BLOCKING | Deny git messages carrying GitHub auto-closing keyword references |
 | 19 | ancestry_preserving_merge | BLOCKING | Block (or, in warn mode, advise against) ancestry-severing merges |
 | 19 | git_stash | BLOCKING | Block or warn about git stash based on mode configuration |
 | 20 | git_message_backtick | BLOCKING | Block a double-quoted git message whose backticks would be executed |
-| 20 | lock_file_edit_blocker | TERMINAL | Block direct editing of package manager lock files |
+| 20 | lock_file_edit_blocker | BLOCKING | Block direct editing of package manager lock files |
 | 20 | merge_to_main_approval | BLOCKING | Deny a merge into the main checkout's default branch while the key is on |
 | 20 | upgrade_approval_guard | BLOCKING | Deny an agent action that grants or bypasses the owner's upgrade approval |
-| 21 | pip_break_system | TERMINAL | Block pip install --break-system-packages commands |
-| 22 | sudo_pip | TERMINAL | Block sudo pip install commands |
-| 23 | ask_user_question_blocker | TERMINAL | Allow AskUserQuestion only when every question is prefix-justified |
+| 21 | pip_break_system | BLOCKING | Block pip install --break-system-packages commands |
+| 22 | sudo_pip | BLOCKING | Block sudo pip install commands |
+| 23 | ask_user_question_blocker | BLOCKING | Allow AskUserQuestion only when every question is prefix-justified |
+| 30 | plan_status_snapshot | ADVISORY | Record a PLAN.md's pre-write status for `goal_injection` to consume |
 | 30 | qa_suppression | BLOCKING | Block QA suppression comments across all supported languages |
 | 31 | comment_changelog | BLOCKING | Block Write/Edit content that writes historical narrative into a comment |
 | 31 | plan_journal_guard | BLOCKING | Deny a journal entry written by hand rather than through `mkplan.bash --journal` |
 | 33 | comment_size | BLOCKING | Block/advise on over-long comments, tiered like plan-doc-size |
 | 33 | plan_number_helper | BLOCKING | Detect bash commands attempting to discover plan numbers and provide correct answer |
-| 34 | verification_result_gate | NON-TERMINAL | Advise when a verifier's exit status is never consumed before a mutator |
+| 34 | verification_result_gate | ADVISORY | Advise when a verifier's exit status is never consumed before a mutator |
 | 35 | tdd_enforcement | BLOCKING | Enforce TDD by blocking production file creation without corresponding test file |
-| 36 | bash_safe_mode | NON-TERMINAL | Require a bash safety prelude on multi-statement Bash invocations |
+| 36 | bash_safe_mode | ADVISORY | Require a bash safety prelude on multi-statement Bash invocations |
 | 36 | remote_docs_provenance | BLOCKING | Deny a remote-tree write whose content lacks valid provenance |
 | 37 | remote_docs_routing | BLOCKING | Route a fetch to the vendored copy; warn when that copy is stale |
 | 38 | lsp_enforcement | BLOCKING | Enforce LSP tool usage instead of Grep/Bash grep for symbol lookups |
@@ -55,20 +56,21 @@
 | 40 | gh_issue_comments | BLOCKING | Ensure gh issue view commands always include --comments flag |
 | 40 | gh_pr_comments | BLOCKING | Ensure gh pr view commands always include --comments flag |
 | 42 | global_npm_advisor | NON-TERMINAL | Advise on global npm/yarn package installations |
+| 42 | installed_plugin_edit_advisor | ADVISORY | Say so when a write lands in an installed Claude Code plugin's files |
 | 43 | plan_close_approval | BLOCKING | Deny an agent's terminal status flip of a PLAN.md while the key is on |
-| 43 | staged_lint_gate | NON-TERMINAL | Warn-first cheap-syntax-check backstop over staged files on git commit |
-| 44 | plan_qa_commit_gate | NON-TERMINAL | Warn-first cross-file plan QA gate on git commit |
+| 43 | staged_lint_gate | ADVISORY | Warn-first cheap-syntax-check backstop over staged files on git commit |
+| 44 | plan_qa_commit_gate | ADVISORY | Warn-first cross-file plan QA gate on git commit |
 | 44 | plan_qa_edit | BLOCKING | Blocking/advisory edit-time lint for plan documents |
 | 45 | plan_time_estimates | BLOCKING | Block time estimates in plan documents |
 | 46 | agent_isolation_advisor | ADVISORY | Advise ``isolation: worktree`` when peers are already active in this checkout |
 | 46 | plan_workflow | ADVISORY | Provide guidance when creating plan files |
-| 47 | docs_qa_commit_gate | NON-TERMINAL | Warn-first STAGED docs QA gate on git commit |
-| 47 | docs_qa_edit | NON-TERMINAL | Blocking/advisory EDIT-time lint for documentation-scoped files |
+| 47 | docs_qa_commit_gate | ADVISORY | Warn-first STAGED docs QA gate on git commit |
+| 47 | docs_qa_edit | ADVISORY | Blocking/advisory EDIT-time lint for documentation-scoped files |
 | 48 | dispatch_declaration | BLOCKING | Advise or (strict mode) require a file-handoff declaration on Task dispatch |
 | 49 | guard_config_commit_gate | ADVISORY | Report, at commit time, a config change that weakens this project's guards |
 | 49 | npm_command | ADVISORY | Enforce llm: prefixed npm commands and block direct npx tool usage |
 | 50 | markdown_organization | BLOCKING | Enforce markdown file organization rules |
-| 50 | validate_instruction_content | TERMINAL | Validates content being written to CLAUDE.md and README.md files |
+| 50 | validate_instruction_content | BLOCKING | Validates content being written to CLAUDE.md and README.md files |
 | 55 | web_search_year | ADVISORY | Validate WebSearch queries don't use outdated years |
 | 57 | daemon_docs_guard | ADVISORY | Warn when reading from the hooks-daemon internal CLAUDE/ docs directory |
 | 58 | flaggable_work_advisor | ADVISORY | Advise delegating safeguard-flaggable work BEFORE opening the content |
@@ -80,18 +82,18 @@
 |----------|---------|----------|-------------|
 | 20 | validate_eslint_on_write | ADVISORY | Run ESLint validation on TypeScript/TSX files after write |
 | 25 | lint_on_edit | BLOCKING | Run language-aware lint validation on files after Write/Edit |
-| 26 | markdown_table_formatter | NON-TERMINAL | Auto-format markdown tables after Write/Edit of .md files |
-| 27 | git_hooks_executable_fixer | NON-TERMINAL | Detect git's "not set as executable" hint and fix the hooks automatically |
-| 28 | background_process_tracker | ADVISORY | Track backgrounded Bash processes and advise on watchdog/harvest (never kills) |
-| 29 | command_hints | ADVISORY | Inject a rate-limited advisory HINT when a configured command is detected |
-| 30 | recovery_cron_advisor | ADVISORY | Advisory handler that manages failsafe recovery cron across plan lifecycle |
-| 31 | goal_injection | ADVISORY | Write a goal-intent signal when a plan flips to In Progress |
-| 32 | budget_exhaustion_detector | ADVISORY | Advisory PostToolUse handler that flags budget/quota-exhaustion messaging |
+| 26 | git_hooks_executable_fixer | NON-TERMINAL | Detect git's "not set as executable" hint and fix the hooks automatically |
+| 27 | background_process_tracker | ADVISORY | Track backgrounded Bash processes and advise on watchdog/harvest (never kills) |
+| 28 | command_hints | ADVISORY | Inject a rate-limited advisory HINT when a configured command is detected |
+| 29 | recovery_cron_advisor | ADVISORY | Advisory handler that manages failsafe recovery cron across plan lifecycle |
+| 30 | goal_injection | ADVISORY | Write a goal-intent signal when a plan TRANSITIONS to In Progress |
+| 31 | markdown_table_formatter | NON-TERMINAL | Auto-format markdown tables after Write/Edit of .md files |
+| 32 | budget_exhaustion_detector | ADVISORY | Advisory PostToolUse handler that flags budget-exhaustion messaging |
 | 33 | model_downgrade_recorder | ADVISORY | Publish Claude Code's own automatic model-downgrade record, silently |
 | 34 | merge_qa_report | ADVISORY | Post-hoc plan/docs QA report over what a merge/pull/rebase just introduced |
 | 35 | daemon_sync_after_merge | ADVISORY | Advise a restart when a merge/pull/rebase changed daemon config or handlers |
 
-### SessionStart (29 handlers)
+### SessionStart (30 handlers)
 
 | Priority | Handler | Behaviour | Description |
 |----------|---------|----------|-------------|
@@ -99,6 +101,7 @@
 | 49 | guard_config_drift | ADVISORY | Name any uncommitted change that weakens this project's guards |
 | 50 | project_handler_load_checker | ADVISORY | Loudly alert at session start when project handlers failed to load |
 | 51 | hook_registration_checker | ADVISORY | Validate hook registrations in Claude Code settings on session start |
+| 51 | plugin_hooks_advisor | ADVISORY | Name the enabled plugins whose hooks run beside the daemon's |
 | 52 | optimal_config_checker | ADVISORY | Check Claude Code environment for optimal configuration on session start |
 | 53 | git_filemode_checker | ADVISORY | Warn when git core.fileMode=false is detected |
 | 54 | gitignore_safety_checker | ADVISORY | Warn when required .claude/ paths are absent from .gitignore |
@@ -199,6 +202,12 @@
 | Priority | Handler | Behaviour | Description |
 |----------|---------|----------|-------------|
 | 50 | worktree_remove | TERMINAL | Prune stale worktree registrations (and remove a named worktree) |
+
+### PostToolUseFailure (1 handler)
+
+| Priority | Handler | Behaviour | Description |
+|----------|---------|----------|-------------|
+| 10 | agent_terminated_early_failure_detector | ADVISORY | PostToolUseFailure advisory: surfaces a foreground Agent/Task dispatch killed by a harness usage limit |
 
 ### Daemon Plugin (1 handler)
 

@@ -955,6 +955,37 @@ class TestHandRolledPlanFolderCreation:
         for command in variants:
             assert handler.matches(_bash(command)), f"Should still match: {command}"
 
+    @pytest.mark.parametrize(
+        ("command", "folder"),
+        [
+            ('bash -c "mkdir -p CLAUDE/Plan/00250-some-feature"', "CLAUDE/Plan/00250-some-feature"),
+            ("sh -c 'mkdir CLAUDE/Plan/00250-some-feature'", "CLAUDE/Plan/00250-some-feature"),
+            ('mkdir -p "CLAUDE/Plan/00250-some-feature"', "CLAUDE/Plan/00250-some-feature"),
+            ("mkdir -p CLAUDE/Plan/'00250-some-feature'", "CLAUDE/Plan/00250-some-feature"),
+        ],
+    )
+    def test_a_quoted_creation_is_still_a_creation(
+        self, handler: PlanNumberHelperHandler, command: str, folder: str
+    ) -> None:
+        """Plan 00408 Task 3.4: blanking literals decided whether a mkdir EXISTED.
+
+        ``bash -c "mkdir ..."`` runs the mkdir, and quoting the path changes
+        nothing about the folder created. The shape Plan 00407 N12 corrected in
+        both sibling guards: blanking literals answers "what is the target?",
+        never "is there a command here at all?".
+        """
+        assert handler.matches(_bash(command))
+        result = handler.handle(_bash(command))
+        assert f"`mkdir {folder}`" in (result.reason or "")
+
+    def test_a_commit_message_naming_a_creation_is_still_prose(
+        self, handler: PlanNumberHelperHandler
+    ) -> None:
+        """The inert spans that ARE data stay blanked after the fix."""
+        assert not handler.matches(
+            _bash("git commit -m 'document mkdir -p CLAUDE/Plan/00250-some-feature'")
+        )
+
 
 class TestGetRules:
     """get_rules() declares the 2 Rule objects (Decision B)."""
@@ -1081,3 +1112,39 @@ class TestDisclosureLadder:
         assert "Fix:" in result.reason
         assert "mkplan.bash" in result.reason
         assert "another-feature" in result.reason
+
+
+class TestEchoGlobPatternStaysLinear:
+    """The ``echo``/``printf`` glob-discovery patterns must not be quadratic.
+
+    Plan 00466 N40 review 2 MA2: ``_ARGUMENT_GAP`` (``[ \\t]+``) sits directly
+    beside ``[^_COMMAND_SEPARATORS]*``, whose negated class also allows space
+    and tab -- the classic adjacent-overlapping-quantifier shape. Both
+    quantifiers can claim the SAME run of blanked-quote whitespace, so the
+    engine tries every split point between them before giving up, which is
+    quadratic in the length of that run. A 20,000-character single-quote run
+    (blanked to whitespace by ``blank_shell_literal_spans``) measured
+    seconds; a linear pattern stays well under a generous bound.
+    """
+
+    _MAX_SECONDS = 2.0
+
+    @pytest.fixture
+    def handler(self, tmp_path: Path) -> PlanNumberHelperHandler:
+        handler = PlanNumberHelperHandler()
+        handler._workspace_root = tmp_path
+        handler._track_plans_in_project = "CLAUDE/Plan"
+        return handler
+
+    def test_long_quote_run_does_not_blow_up(self, handler: PlanNumberHelperHandler) -> None:
+        import time
+
+        command = "echo " + "'" * 20_000
+        start = time.monotonic()
+        handler.matches(_bash(command))
+        elapsed = time.monotonic() - start
+        assert elapsed < self._MAX_SECONDS, (
+            f"matches() took {elapsed:.2f}s on a 20,000-char quote run "
+            f"(bound {self._MAX_SECONDS}s) -- the echo/printf glob pattern "
+            "is quadratic again"
+        )

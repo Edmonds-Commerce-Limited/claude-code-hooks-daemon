@@ -314,7 +314,7 @@ Creates `RELEASES/vX.Y.Z.md` with: summary, changelog, upgrade instructions (if 
 **Fold in the pending callouts first.** `CLAUDE/UPGRADES/UNRELEASED/release-notes/`
 holds one short callout per plan that closed since the last release, written
 by the plan in the voice of the release notes (Plan 00360; schema in that
-directory's README). Read every `NN-*.md` there and place each under the
+directory's README). Read every `NNN-*.md` there and place each under the
 Highlights section, grouped by its `Audience` header where that helps the
 reader. These are the sentences the commit log cannot supply, so a callout is
 never dropped and never paraphrased down to a changelog line. Step 6 then
@@ -417,7 +417,7 @@ upgrade guide so the provenance of each sentence survives:
 ```bash
 TARGET="CLAUDE/UPGRADES/v{MAJOR}/v{PREV}-to-v{NEW}/release-notes"
 mkdir -p "$TARGET"
-git mv CLAUDE/UPGRADES/UNRELEASED/release-notes/[0-9][0-9]-*.md "$TARGET/"
+git mv CLAUDE/UPGRADES/UNRELEASED/release-notes/[0-9][0-9][0-9]-*.md "$TARGET/"
 ls CLAUDE/UPGRADES/UNRELEASED/release-notes/
 # Expected: README.md  (nothing else)
 ```
@@ -425,7 +425,7 @@ ls CLAUDE/UPGRADES/UNRELEASED/release-notes/
 If only `README.md` is present there is nothing to move and no `release-notes/`
 directory is created in the guide.
 
-**ABORT condition**: any `NN-*.md` file remains in `UNRELEASED/release-notes/`
+**ABORT condition**: any `NNN-*.md` file remains in `UNRELEASED/release-notes/`
 when moving to the next step, or a moved callout's sentence is absent from
 `RELEASES/vX.Y.Z.md`.
 
@@ -668,7 +668,12 @@ end-to-end against a fresh fixture project. Together they catch:
 # banned pattern to warn against — no agent shell ever sets it; Plan 00192).
 source scripts/lib/resolve_venv.sh
 PY="$(resolve_venv_python /workspace)"
-"$PY" -m pytest tests/acceptance/test_diagnostic_scripts.py tests/acceptance/test_install_sh_end_to_end.py tests/acceptance/test_tool_use_error_recovery.py tests/acceptance/test_stop_hook_hard_block.py tests/acceptance/test_skill_install_python_discovery.py tests/acceptance/test_playbook_harness.py -v
+# HOOKS_DAEMON_RELEASE_GATE=1 is the explicit signal blocking_gate_guard.py
+# (tests/acceptance/) requires before it escalates a skip of one of these
+# files to a failure — this IS that release-gate invocation, so it must be
+# set here (Plan 00466 N39 widened). An ad hoc run of these files with no
+# daemon running, and no signal set, gets the ordinary skip instead.
+HOOKS_DAEMON_RELEASE_GATE=1 "$PY" -m pytest tests/acceptance/test_diagnostic_scripts.py tests/acceptance/test_install_sh_end_to_end.py tests/acceptance/test_tool_use_error_recovery.py tests/acceptance/test_stop_hook_hard_block.py tests/acceptance/test_skill_install_python_discovery.py tests/acceptance/test_playbook_harness.py -v
 # Expected: 0 failed, 0 skipped. The pass COUNT is deliberately not stated —
 # see below.
 ```
@@ -990,7 +995,7 @@ gh release view vX.Y.Z --json tagName,isDraft,isPrerelease,url \
 # 4. Move UNRELEASED/post-upgrade-tasks/NN-*.md and UNRELEASED/pre-upgrade-tasks/NN-*.md
 #    into the versioned upgrade guide and populate each directory's README.md
 #    task index; fold every
-#    UNRELEASED/release-notes/NN-*.md callout into RELEASES/vX.Y.Z.md and move
+#    UNRELEASED/release-notes/NNN-*.md callout into RELEASES/vX.Y.Z.md and move
 #    the files into the guide's release-notes/
 # 5. Run QA: ./scripts/qa/llm_qa.py all
 # 6. Commit and push

@@ -94,14 +94,38 @@ class TestCmdCheck:
         assert "fix-Max Output Tokens" in out
         assert "code.claude.com" in out
 
+    def test_a_warning_check_is_marked_warn_rather_than_missing(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Plan 00466 N47 review 4 finding 2: an effort PIN is a warning about
+        what overrides settings.json, not a setting the user is missing."""
+        warning = {**_check("Effort Source", False), "warn": True}
+        with self._enter(_patches(checks=[warning])):
+            cmd_check(_args())
+        out = capsys.readouterr().out
+        assert "[WARN] Effort Source" in out
+        assert "[MISS]" not in out
+        assert "fix-Effort Source" in out
+
+    def test_the_config_checks_are_given_the_project_root(self, tmp_path: Any) -> None:
+        """Project and local settings files are read from the checked project."""
+        patches = _patches()
+        with (
+            self._enter(patches[1:]),
+            patch(_OPT_MODULE, return_value=[]) as run_checks,
+            patch("claude_code_hooks_daemon.daemon.cli.get_project_path", return_value=tmp_path),
+        ):
+            cmd_check(_args())
+        run_checks.assert_called_once_with(tmp_path)
+
     def test_reports_passing_config(self, capsys: pytest.CaptureFixture[str]) -> None:
         """Passing checks are listed as OK."""
-        checks = [_check("Agent Teams", True), _check("Effort Level", True)]
+        checks = [_check("Agent Teams", True), _check("Effort Source", True)]
         with self._enter(_patches(checks=checks)):
             cmd_check(_args())
         out = capsys.readouterr().out
         assert "Agent Teams" in out
-        assert "Effort Level" in out
+        assert "[OK  ] Effort Source" in out
 
     def test_reports_container_runtime(self, capsys: pytest.CaptureFixture[str]) -> None:
         with self._enter(_patches(runtime="podman", in_container=True)):

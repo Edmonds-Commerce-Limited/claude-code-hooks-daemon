@@ -1,4 +1,4 @@
-"""Read-only git facts, shared by both QA commit gates.
+"""Read-only git facts, shared by both QA commit gates and PostToolUse handlers.
 
 Everything a cross-file check needs from git, behind one small class:
 
@@ -18,6 +18,16 @@ for git plumbing that has nothing to do with plans — one of the edges
 :class:`plan_qa.gitfacts.GitFacts` subclasses this and adds the one genuinely
 plan-specific accessor, the plan counter, so plan QA's callers are unaffected
 and docs QA depends on this module alone.
+
+:func:`project_relative_head_text` is a THIRD caller family (ledger 00466
+N3): PostToolUse handlers reading "what did this file say a moment ago"
+after a Write/Edit has already landed on disk. Membership is checked
+against a caller-supplied project root (review nit n3 — this module stays
+core-free, per the paragraph above; every caller already resolves
+``ProjectContext.project_root()`` for its own other purposes), but HEAD is
+read from the file's OWN enclosing repository (ledger 00466 review m5) — a
+nested checkout under the project root is a separate repository the
+project root's repo never tracks.
 """
 
 from collections.abc import Sequence
@@ -27,7 +37,7 @@ from pathlib import Path
 from typing import Final
 
 from claude_code_hooks_daemon.constants.timeout import Timeout
-from claude_code_hooks_daemon.utils.git_repo import run_git
+from claude_code_hooks_daemon.utils.git_repo import GitRepo, run_git
 
 # name-status codes that carry TWO paths (old NUL new) in -z output.
 _TWO_PATH_STATUS_PREFIXES: Final[tuple[str, ...]] = ("R", "C")
@@ -157,6 +167,52 @@ class GitFactsBase:
         if result.returncode != 0:
             return None
         return result.stdout
+
+
+def project_relative_head_text(file_path: Path, project_root: Path) -> str | None:
+    """``file_path``'s content at git HEAD, resolved against ``project_root``.
+
+    Shared by every PostToolUse handler that needs "what did this file say a
+    moment ago" once a Write/Edit has already landed on disk (ledger 00466
+    N3): ``goal_injection`` and ``recovery_cron_advisor`` both compare a
+    just-written PLAN.md against this to tell a real status TRANSITION from
+    a write that merely lands on a file already in that state.
+
+    Returns ``None`` for every "nothing to compare against" case alike — no
+    repository, ``file_path`` outside ``project_root``, or a path HEAD has
+    never seen (new file, never committed) — so a caller with nothing to
+    diff against can only read the write as a genuine transition, never as
+    an error. Membership is a plain comparison (``Path.is_relative_to``),
+    never a caught ``ValueError``.
+
+    ``project_root`` is a parameter, not ``ProjectContext.project_root()``
+    called here, so this module stays core-free (review nit n3 — its own
+    docstring above claims exactly that, and every caller already resolves
+    ``ProjectContext.project_root()`` unguarded for its own other purposes,
+    so nothing is lost by asking it to pass the value through rather than
+    this module importing ``core`` to fetch it a second time).
+
+    HEAD is read from ``file_path``'s OWN enclosing repository (ledger
+    00466 review m5), not from ``project_root``'s — a nested checkout
+    under the project root (a linked worktree under ``untracked/worktrees/``,
+    or any other nested clone) is a SEPARATE repository whose HEAD the
+    project root's repo never tracks. Reading against the project root
+    there would run ``git show HEAD:<path-project-root-never-committed>``,
+    which always answers "absent" — silently misreading every write in a
+    nested checkout as a genuine transition. :func:`GitRepo.resolve_for`
+    (the same ``git -C <dir> rev-parse --show-toplevel`` this project
+    already centralises) finds the file's real containing repo; a project
+    root that is itself a plain git checkout (the common case) resolves to
+    itself, so nothing changes there.
+    """
+    root = project_root.resolve()
+    resolved = file_path.resolve()
+    if not resolved.is_relative_to(root):
+        return None
+    repo = GitRepo.resolve_for(resolved)
+    if repo is None or not resolved.is_relative_to(repo.root):
+        return None
+    return GitFactsBase(repo.root).head_file_text(resolved.relative_to(repo.root).as_posix())
 
 
 def _parse_name_status_z(output: str) -> tuple[StagedChange, ...]:

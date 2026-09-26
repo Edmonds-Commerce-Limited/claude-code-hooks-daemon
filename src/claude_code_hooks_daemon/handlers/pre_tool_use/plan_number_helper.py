@@ -13,10 +13,12 @@ veto, but that tag describes the CONTENT of the response, never its force -- it
 must not be read as an inability to block, or the denials this handler issues
 become inexplicable to whoever hits one.
 
-Matching is deliberately scoped to what the shell will EXECUTE. Quoted literals
-are blanked first (see ``utils.quoted_spans.blank_shell_literal_spans``), so
-prose or a regex that merely NAMES the plan directory is not mistaken for a
-scan of it.
+Matching is deliberately scoped to what the shell will EXECUTE. For the
+discovery rules, quoted literals are blanked first (see
+``utils.quoted_spans.blank_shell_literal_spans``), so prose or a regex that
+merely NAMES the plan directory is not mistaken for a scan of it. The ``mkdir``
+rule does not blank them: it asks whether a creation exists at all, and
+``bash -c "mkdir ..."`` is one (Plan 00408 Task 3.4).
 """
 
 import os.path
@@ -41,9 +43,10 @@ from claude_code_hooks_daemon.handlers.utils.plan_numbering import (
     next_plan_number_for_target,
 )
 from claude_code_hooks_daemon.install.plan_workflow import MKPLAN_SCRIPT_NAME
+from claude_code_hooks_daemon.utils.command_evasion import remove_word_quoting
 from claude_code_hooks_daemon.utils.path_predicates import path_is_dir
 from claude_code_hooks_daemon.utils.quoted_spans import blank_shell_literal_spans
-from claude_code_hooks_daemon.utils.shell_segmentation import strip_quoted_heredoc_bodies
+from claude_code_hooks_daemon.utils.shell_segmentation import strip_inert_spans
 
 # Shell metacharacters that terminate one command and begin another. Used inside a
 # NEGATED regex character class so a pattern anchored on `echo`/`printf` cannot run
@@ -59,7 +62,16 @@ _COMMAND_SEPARATORS: Final[str] = r";&|\n\r"
 # unrelated command and denied it as plan-number discovery. A line continuation
 # is not a counter-example: `\<newline>` is normalised away by
 # `get_bash_command` before any pattern here sees it.
-_ARGUMENT_GAP: Final[str] = r"[ \t]+"
+#
+# Wrapped in an ATOMIC group (Plan 00466 N40 review 2 MA2): the class it
+# precedes, `[^_COMMAND_SEPARATORS]*`, also allows space and tab, so the two
+# quantifiers can claim the SAME run of whitespace. Left ordinary, the engine
+# tries every way to split that run between them before giving up -- quadratic
+# in its length; a 20,000-character quote run (blanked to whitespace) took
+# over 2s. `(?>...)` commits the gap to everything it can take and never gives
+# characters back, which is semantically identical here: the class right
+# after it accepts space/tab too, so nothing that was reachable before is lost.
+_ARGUMENT_GAP: Final[str] = r"(?>[ \t]+)"
 
 # A `-name` pattern carrying this many consecutive literal digits is naming ONE
 # specific plan (e.g. `00036-*`), not sweeping for whichever plans happen to
@@ -181,16 +193,22 @@ class PlanNumberHelperHandler(PreToolUseHandlerBase):
         if plan_dir is None or _MKDIR_COMMAND not in command:
             return None
 
-        # Blank what the shell will not execute, and ONLY that: the body of a
-        # quoted-delimiter heredoc (content being written) and quoted literals.
-        # Scoping matters -- exempting the whole command because a heredoc
-        # appears anywhere in it is an evasion, since appending a throwaway
-        # heredoc would then wave the creation through.
-        scannable = blank_shell_literal_spans(strip_quoted_heredoc_bodies(command))
+        # Blank what the shell will not execute, and ONLY that: a heredoc body
+        # nothing on its line can run, and a `-m`/`-F` message value. Scoping
+        # matters -- exempting the whole command because a heredoc appears
+        # anywhere in it is an evasion, since appending a throwaway heredoc
+        # would then wave the creation through.
+        #
+        # Quoted literals are NOT blanked, which is a correction (Plan 00408
+        # Task 3.4, the shape Plan 00407 N12 fixed in both sibling guards): the
+        # shell executes the argument of `bash -c "mkdir ..."`, so blanking it
+        # decided that no mkdir EXISTED. In-word quoting is removed instead, as
+        # bash removes it, so `mkdir "<plan-dir>/NNNNN-x"` names the folder.
+        scannable = remove_word_quoting(strip_inert_spans(command))
 
         match = re.search(
             rf"{_MKDIR_COMMAND}[^{_COMMAND_SEPARATORS}]*?"
-            rf"(\S*{re.escape(plan_dir)}/\d{{1,{PLAN_NUMBER_WIDTH}}}-[^\s/]+)",
+            rf"([^\s\"']*{re.escape(plan_dir)}/\d{{1,{PLAN_NUMBER_WIDTH}}}-[^\s/\"']+)",
             scannable,
         )
         if match is None:

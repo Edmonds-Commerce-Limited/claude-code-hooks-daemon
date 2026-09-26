@@ -21,6 +21,18 @@ file is still a skip.
 
 **Keyed on `CI`, so nothing changes locally.** A developer without a Rust
 toolchain genuinely cannot run these and is not the defect this guards.
+
+**A root-conditioned skip is a different defect, caught elsewhere.** This
+guard's own tests exercise `skip_is_a_provisioning_failure("Running as
+root", ...)` as the "unrelated skip, leave it alone" case, which stays
+correct: converting a root skip into THIS guard's message would point at
+`relay/build.sh`, which has nothing to do with it. Plan 00466 N56 bans a
+root-conditioned skip outright, everywhere under `tests/`, regardless of CI —
+enforced statically (not just when it fires) by
+`tests/integration/test_no_root_conditioned_skips.py`. The two guards are
+complementary: that one fails a `skipif`/`xfail`/hand-written root check at
+collection time everywhere, this one turns a specific relay-provisioning
+*reason string* into a hard failure only in CI.
 """
 
 from __future__ import annotations

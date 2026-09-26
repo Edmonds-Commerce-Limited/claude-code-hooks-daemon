@@ -12,17 +12,25 @@ Modes:
     advisory: Always ALLOW with LSP guidance
     strict: Always DENY
 
-No-LSP modes (when ENABLE_LSP_TOOL env var not set):
-    block (default): Block anyway, include LSP setup guidance
-    advisory: Downgrade to advisory when LSP not available
-    disable: Handler doesn't match when LSP not available
+LSP counts as available only where an enabled Claude Code plugin declares a
+language server for the searched file type (Plan 00468 P5): Claude Code keeps
+the LSP tool inactive until a code intelligence plugin for the language is
+installed. The file type comes from the Grep ``glob``/``type``/``path`` or a
+grep/rg command's ``--include``/``-g``/``-t`` flags and file targets; when
+none names one, any enabled server counts.
+
+No-LSP modes (when no enabled plugin serves the searched file type):
+    advisory (default): Allow, and advise installing a code intelligence plugin
+    block: Block anyway, with the same advice
+    disable: Handler doesn't match
 """
 
-import json
 import logging
-import os
 import re
-from typing import Any
+import shlex
+from collections.abc import Mapping
+from pathlib import Path
+from typing import Any, Final
 
 from claude_code_hooks_daemon.constants import (
     HandlerID,
@@ -34,10 +42,13 @@ from claude_code_hooks_daemon.constants import (
 from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.core import Decision, GatingResult, get_data_layer
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
+from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.core.relevance import Relevance, RelevanceContext
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.core.utils import get_bash_command
-from claude_code_hooks_daemon.utils.path_predicates import path_is_file
+from claude_code_hooks_daemon.utils.claude_config import session_config_dir
+from claude_code_hooks_daemon.utils.claude_plugins import resolve_enabled_plugins
+from claude_code_hooks_daemon.utils.scratch_dir import acceptance_path
 
 logger = logging.getLogger(__name__)
 
@@ -60,27 +71,103 @@ class NoLspMode:
     DISABLE = "disable"
 
 
-# --- Environment variable ---
+# --- Which file types a search covers ---
 
-_LSP_ENV_VAR = "ENABLE_LSP_TOOL"
+_GREP_GLOB_KEY: Final[str] = "glob"
+_GREP_TYPE_KEY: Final[str] = "type"
+_GREP_PATH_KEY: Final[str] = "path"
+
+#: ripgrep ``--type`` names (``rg --type-list``) for languages that code
+#: intelligence plugins serve. An unlisted type names no file type.
+_RG_TYPE_EXTENSIONS: Final[Mapping[str, tuple[str, ...]]] = {
+    "c": (".c", ".h"),
+    "cpp": (".cpp", ".cc", ".cxx", ".hpp", ".hh", ".hxx", ".h"),
+    "cs": (".cs",),
+    "go": (".go",),
+    "java": (".java",),
+    "js": (".js", ".jsx", ".mjs", ".cjs"),
+    "kotlin": (".kt", ".kts"),
+    "lua": (".lua",),
+    "php": (".php",),
+    "py": (".py", ".pyi"),
+    "ruby": (".rb",),
+    "rust": (".rs",),
+    "swift": (".swift",),
+    "ts": (".ts", ".tsx", ".mts", ".cts"),
+}
+
+# A glob or path ending in one suffix (``*.ts``, ``src/a.py``) or a brace set
+# of them (``*.{ts,tsx}``).
+_BRACE_SUFFIXES = re.compile(r"\.\{([^{}]+)\}$")
+_ONE_SUFFIX = re.compile(r"\.([A-Za-z0-9_+-]+)$")
+
+# grep/rg options whose value names the searched files, and whether it is a
+# glob or an rg type name.
+_GLOB_OPTIONS: Final[frozenset[str]] = frozenset({"--include", "--glob", "-g"})
+_TYPE_OPTIONS: Final[frozenset[str]] = frozenset({"--type", "-t"})
+_REDIRECT_PREFIXES: Final[tuple[str, ...]] = (">", "<", "1>", "2>", "&>")
+
+_CODE_INTELLIGENCE_ADVICE = (
+    "Install a code intelligence plugin for the language (`/plugin`, Discover tab; "
+    "https://code.claude.com/docs/en/discover-plugins#code-intelligence) and its "
+    "language server binary."
+)
 
 
-def _settings_json_enables_lsp(context: RelevanceContext) -> bool:
-    """Whether ``.claude/settings.json`` sets ``ENABLE_LSP_TOOL`` in its ``env``.
+def _suffixes(glob_or_path: str) -> frozenset[str]:
+    """The file suffixes a glob or path ends in, lower-cased; empty if none."""
+    braces = _BRACE_SUFFIXES.search(glob_or_path)
+    if braces:
+        return frozenset(
+            f".{part.strip().lower()}" for part in braces.group(1).split(",") if part.strip()
+        )
+    single = _ONE_SUFFIX.search(glob_or_path)
+    return frozenset({f".{single.group(1).lower()}"}) if single else frozenset()
 
-    Malformed or absent settings mean "not configured", not an error: this is
-    advisory input to a report, so it degrades rather than aborts.
-    """
-    settings = context.project_root / ".claude" / "settings.json"
-    if not path_is_file(settings, unreadable_means=False):
-        return False
+
+def _type_suffixes(type_name: str) -> frozenset[str]:
+    return frozenset(_RG_TYPE_EXTENSIONS.get(type_name.strip().lower(), ()))
+
+
+def _grep_tool_suffixes(tool_input: Mapping[str, Any]) -> frozenset[str]:
+    found: set[str] = set()
+    for key in (_GREP_GLOB_KEY, _GREP_PATH_KEY):
+        value = tool_input.get(key)
+        if isinstance(value, str):
+            found |= _suffixes(value)
+    type_name = tool_input.get(_GREP_TYPE_KEY)
+    if isinstance(type_name, str):
+        found |= _type_suffixes(type_name)
+    return frozenset(found)
+
+
+def _invocation_suffixes(invocation: str) -> frozenset[str]:
+    """File suffixes one grep/rg invocation's options and file targets name."""
     try:
-        data = json.loads(settings.read_text(encoding="utf-8"))
-    except (OSError, ValueError) as exc:
-        logger.debug("Could not read %s for LSP relevance: %s", settings, exc)
-        return False
-    env = data.get("env") if isinstance(data, dict) else None
-    return bool(isinstance(env, dict) and env.get(_LSP_ENV_VAR))
+        tokens = shlex.split(invocation)
+    except ValueError as exc:
+        logger.debug("lsp_enforcement: unquoted split of %r: %s", invocation, exc)
+        tokens = invocation.split()
+    found: set[str] = set()
+    pending: str | None = None
+    for token in tokens[1:]:
+        if pending is not None:
+            found |= _type_suffixes(token) if pending in _TYPE_OPTIONS else _suffixes(token)
+            pending = None
+            continue
+        option, has_value, value = token.partition("=")
+        if option in _GLOB_OPTIONS | _TYPE_OPTIONS:
+            if not has_value:
+                pending = option
+            elif option in _TYPE_OPTIONS:
+                found |= _type_suffixes(value)
+            else:
+                found |= _suffixes(value)
+        elif token.startswith(_REDIRECT_PREFIXES):
+            break
+        elif not token.startswith("-"):
+            found |= _suffixes(token)
+    return frozenset(found)
 
 
 # --- Pattern detection constants ---
@@ -125,7 +212,17 @@ _COMMENT_MARKERS = frozenset(
 _IMPORTED_SYMBOL = re.compile(r"^[A-Z][a-zA-Z0-9]+$")
 
 # Bash grep/rg command pattern
-_BASH_GREP_PATTERN = re.compile(r"(?:^|\s|&&|\|\||;)\s*(?:grep|rg)\s+")
+#
+# A single required separator CHARACTER, not a class-then-quantified-class
+# pair (Plan 00466 N40 review 2 MA2): the previous
+# `(?:^|\s|&&|\|\||;)\s*` had a lone `\s` alternative directly beside `\s*`,
+# and both can claim the same run of whitespace -- quadratic on a long run
+# with no eventual match (99 KB froze a live daemon for 73.5s). `re.search`
+# tries every starting position, so a run of N separator characters before
+# "grep"/"rg" still matches at the LAST one without needing the whole run
+# consumed by one alternative -- correctness is unchanged, only the
+# backtracking ambiguity is gone.
+_BASH_GREP_PATTERN = re.compile(r"(?:^|[\s;&|])(?:grep|rg)\s+")
 
 # Flag-skip group consumed before the search pattern in a grep/rg command.
 # Handles, in priority order:
@@ -168,6 +265,81 @@ _LSP_OP_DEFINITION = "goToDefinition"
 _LSP_OP_REFERENCES = "findReferences"
 _LSP_OP_WORKSPACE_SYMBOL = "workspaceSymbol"
 
+# --- Acceptance-test plugin fixtures (hermeticity: CI has no Claude Code
+# plugin enabled at all; a dev container may have one enabled for its own
+# work. Two of this handler's own probes must DENY only because THEY declare
+# an LSP plugin, never because the container answering them happens to have
+# one -- so each carries its own fixture Claude config, pointed at through
+# `transcript_path` (`AcceptanceTest.extra_hook_input`), the same seam
+# `LspEnforcementHandler._hook_config_dir` reads via `session_config_dir`.
+
+_LSP_FIXTURE_ROOT: Final[str] = "acceptance-test-lsp-enforcement"
+_LSP_FIXTURE_WITH_PLUGIN: Final[str] = f"{_LSP_FIXTURE_ROOT}/with-plugin"
+_LSP_FIXTURE_WITHOUT_PLUGIN: Final[str] = f"{_LSP_FIXTURE_ROOT}/without-plugin"
+_LSP_FIXTURE_CLEANUP: Final[list[str]] = [f"rm -rf untracked/acceptance/{_LSP_FIXTURE_ROOT}"]
+
+#: A minimal plugin manifest declaring an LSP server INLINE (no separate
+#: `.lsp.json`): `command`/`extensionToLanguage` are read straight off it by
+#: `claude_plugins._ComponentCollector.lsp_servers`.
+_LSP_FIXTURE_MANIFEST_JSON: Final[str] = (
+    '{"name": "lsptest", "lspServers": {"pyright": '
+    '{"command": "pyright-langserver", "extensionToLanguage": {".py": "python"}}}}'
+)
+_LSP_FIXTURE_SETTINGS_JSON: Final[str] = '{"enabledPlugins": {"lsptest@lsptest-mkt": true}}'
+
+
+def _lsp_fixture_installed_plugins_json(install_path: str) -> str:
+    """`installed_plugins.json` content for one `scope: user` install record.
+
+    `scope: user` (not `project`/`local`) so `claude_plugins._choose_install`
+    takes the record unconditionally -- it never has to match a `projectPath`
+    against whichever checkout is running the probe.
+    """
+    return (
+        '{"plugins": {"lsptest@lsptest-mkt": [{"scope": "user", "installPath": "'
+        + install_path
+        + '", "version": "1.0.0"}]}}'
+    )
+
+
+def _lsp_fixture_with_plugin() -> tuple[list[str], str]:
+    """Setup commands and `transcript_path` for a fixture WITH an LSP plugin."""
+    base = f"untracked/acceptance/{_LSP_FIXTURE_WITH_PLUGIN}"
+    install_path = acceptance_path(_LSP_FIXTURE_WITH_PLUGIN, "plugins", "lsptest")
+    setup = [
+        f"mkdir -p {base}/plugins/lsptest/.claude-plugin",
+        f"printf '{_LSP_FIXTURE_SETTINGS_JSON}' > {base}/settings.json",
+        (
+            f"printf '{_lsp_fixture_installed_plugins_json(install_path)}' > "
+            f"{base}/plugins/installed_plugins.json"
+        ),
+        (
+            f"printf '{_LSP_FIXTURE_MANIFEST_JSON}' > "
+            f"{base}/plugins/lsptest/.claude-plugin/plugin.json"
+        ),
+    ]
+    transcript_path = acceptance_path(
+        _LSP_FIXTURE_WITH_PLUGIN, "projects", "lspfixture", "lspsession.jsonl"
+    )
+    return setup, transcript_path
+
+
+def _lsp_fixture_without_plugin() -> tuple[list[str], str]:
+    """Setup commands and `transcript_path` for a fixture with NO LSP plugin.
+
+    An empty, otherwise-untouched config dir: `resolve_enabled_plugins` reads
+    an absent `settings.json`/`installed_plugins.json` as "nothing enabled"
+    (`claude_plugins._read_json_object` returns None for a missing file), so
+    no plugin files are needed here, only the directory itself.
+    """
+    base = f"untracked/acceptance/{_LSP_FIXTURE_WITHOUT_PLUGIN}"
+    setup = [f"mkdir -p {base}"]
+    transcript_path = acceptance_path(
+        _LSP_FIXTURE_WITHOUT_PLUGIN, "projects", "lspfixture", "lspsession.jsonl"
+    )
+    return setup, transcript_path
+
+
 # Single rule: block_once/advisory/strict is a VERBOSITY/CADENCE knob on the
 # same concept, "use LSP instead of grep for a symbol lookup" -- not a
 # different violation per mode.
@@ -201,6 +373,10 @@ class LspEnforcementHandler(PreToolUseHandlerBase):
             tags=[HandlerTag.WORKFLOW, HandlerTag.BLOCKING, HandlerTag.TERMINAL],
         )
         self._formatter = RuleFormatter()
+        # Claude Code's config and managed-settings dirs; None means the
+        # resolver's defaults (test seams).
+        self._config_dir: Path | None = None
+        self._managed_dir: Path | None = None
 
     def get_default_enabled(self) -> bool:
         """Opt-in handler — off by default (Plan 00133).
@@ -218,30 +394,89 @@ class LspEnforcementHandler(PreToolUseHandlerBase):
 
     def _get_no_lsp_mode(self) -> str:
         """Get configured no_lsp_mode (set by registry via setattr)."""
-        return getattr(self, "_no_lsp_mode", NoLspMode.BLOCK)
+        return getattr(self, "_no_lsp_mode", NoLspMode.ADVISORY)
 
     def get_relevance(self, context: RelevanceContext) -> Relevance:
-        """Relevant only where an LSP is configured (Plan 00330).
-
-        The handler decides at fire time from the ``ENABLE_LSP_TOOL``
-        environment variable; the review runs in a CLI process, which
-        inherits that variable from the session, and also reads the
-        project's ``.claude/settings.json`` ``env`` block, since that is
-        where a project pins the setting for every session.
-        """
-        available = self._is_lsp_available() or _settings_json_enables_lsp(context)
+        """Relevant only where an enabled plugin declares a language server."""
+        available = bool(self._served_suffixes(context.project_root, None))
         return Relevance.when(
             available,
-            present=f"{_LSP_ENV_VAR} is set, so LSP tools are available",
+            present="an enabled Claude Code plugin provides a language server",
             absent=(
-                f"no LSP configured ({_LSP_ENV_VAR} unset in the environment and in "
-                ".claude/settings.json env)"
+                "no enabled Claude Code plugin provides a language server "
+                "(install a code intelligence plugin)"
             ),
         )
 
-    def _is_lsp_available(self) -> bool:
-        """Check if LSP is configured via environment variable."""
-        return bool(os.environ.get(_LSP_ENV_VAR))
+    def _project_root(self) -> Path:
+        root = getattr(self, "_workspace_root", None)
+        if root is not None:
+            return Path(root)
+        try:
+            return ProjectContext.project_root()
+        except RuntimeError as exc:
+            logger.debug("lsp_enforcement: no project context, using cwd: %s", exc)
+            return Path.cwd()
+
+    def _hook_config_dir(self, hook_input: dict[str, Any] | None) -> Path | None:
+        """The Claude config dir to resolve plugins from for this request.
+
+        ``self._config_dir`` is the pure test seam (set by a unit test); when
+        it is unset, the calling SESSION's own config dir -- read from the
+        hook payload's ``transcript_path`` (Plan 00468 G10) -- takes
+        precedence over the DAEMON's ambient one. That is what makes
+        ``get_acceptance_tests``' probes hermetic: a probe declares its own
+        fixture config via ``transcript_path`` (``AcceptanceTest.
+        extra_hook_input``), so the answer no longer depends on whatever
+        plugin the CONTAINER this daemon happens to run in has enabled.
+        ``None`` (no hook_input, or no resolvable session) falls through to
+        :func:`resolve_enabled_plugins`'s own default.
+        """
+        if self._config_dir is not None:
+            return self._config_dir
+        if hook_input is None:
+            return None
+        return session_config_dir(hook_input.get(HookInputField.TRANSCRIPT_PATH))
+
+    def _served_suffixes(
+        self, project_root: Path, hook_input: dict[str, Any] | None
+    ) -> frozenset[str]:
+        """Every file suffix an enabled plugin's language server declares."""
+        inventory = resolve_enabled_plugins(
+            project_root,
+            config_dir=self._hook_config_dir(hook_input),
+            managed_dir=self._managed_dir,
+        )
+        return frozenset(
+            suffix.lower() for server in inventory.lsp_servers() for suffix in server.extensions
+        )
+
+    @staticmethod
+    def _searched_suffixes(hook_input: dict[str, Any]) -> frozenset[str]:
+        """The file suffixes this search names; empty when it names none."""
+        tool_name = hook_input.get(HookInputField.TOOL_NAME)
+        if tool_name == ToolName.GREP:
+            tool_input = hook_input.get(HookInputField.TOOL_INPUT)
+            return _grep_tool_suffixes(tool_input) if isinstance(tool_input, dict) else frozenset()
+        command = get_bash_command(hook_input) or ""
+        found: set[str] = set()
+        for match in _BASH_GREP_EXTRACT.finditer(command):
+            invocation = command[match.start() :]
+            terminator = _SEGMENT_TERMINATOR.search(invocation)
+            found |= _invocation_suffixes(
+                invocation[: terminator.start()] if terminator else invocation
+            )
+        return frozenset(found)
+
+    def _lsp_coverage(self, hook_input: dict[str, Any]) -> tuple[bool, frozenset[str]]:
+        """Whether an enabled server covers this search, and the suffixes it names.
+
+        A search that names no file type is covered by any enabled server.
+        """
+        searched = self._searched_suffixes(hook_input)
+        served = self._served_suffixes(self._project_root(), hook_input)
+        covered = bool(searched & served) if searched else bool(served)
+        return covered, searched
 
     def _get_block_count(self, session_id: str | None = None) -> int:
         """Get number of previous blocks by this handler in ``session_id``.
@@ -271,10 +506,6 @@ class LspEnforcementHandler(PreToolUseHandlerBase):
         if tool_name not in (ToolName.GREP, ToolName.BASH):
             return False
 
-        # If no_lsp_mode=disable and LSP not available, skip
-        if self._get_no_lsp_mode() == NoLspMode.DISABLE and not self._is_lsp_available():
-            return False
-
         # A Bash grep/rg already scoped to ONE named file is a literal-string
         # check on a file the caller already knows about, not a project-wide
         # symbol lookup — LSP's goToDefinition/findReferences/workspaceSymbol
@@ -286,10 +517,14 @@ class LspEnforcementHandler(PreToolUseHandlerBase):
 
         # Extract the search pattern
         pattern = self._extract_search_pattern(hook_input, tool_name)
-        if not pattern:
+        if not pattern or not self._is_symbol_like(pattern):
             return False
 
-        return self._is_symbol_like(pattern)
+        # Last, because it reads the plugin inventory: with no_lsp_mode=disable,
+        # stay out of a search no enabled language server covers.
+        if self._get_no_lsp_mode() == NoLspMode.DISABLE:
+            return self._lsp_coverage(hook_input)[0]
+        return True
 
     def _is_single_file_bash_grep(self, command: str) -> bool:
         """True when EVERY grep/rg invocation in the command names one file.
@@ -440,7 +675,7 @@ class LspEnforcementHandler(PreToolUseHandlerBase):
         """
         tool_name = hook_input.get(HookInputField.TOOL_NAME)
         pattern = self._extract_search_pattern(hook_input, tool_name) or ""
-        lsp_available = self._is_lsp_available()
+        lsp_available, searched = self._lsp_coverage(hook_input)
         mode = self._get_mode()
         no_lsp_mode = self._get_no_lsp_mode()
 
@@ -449,7 +684,7 @@ class LspEnforcementHandler(PreToolUseHandlerBase):
             mode = LspEnforcementMode.ADVISORY
 
         suggested_op = self._suggest_lsp_operation(pattern)
-        dynamic_detail = self._build_dynamic_detail(pattern, suggested_op, lsp_available)
+        dynamic_detail = self._build_dynamic_detail(pattern, suggested_op, lsp_available, searched)
 
         # Determine decision based on mode
         if mode == LspEnforcementMode.ADVISORY:
@@ -469,24 +704,22 @@ class LspEnforcementHandler(PreToolUseHandlerBase):
             return GatingResult(decision=Decision.DENY, reason=deny_reason)
         return GatingResult(decision=Decision.ALLOW, context=[dynamic_detail])
 
-    def _build_dynamic_detail(self, pattern: str, suggested_op: str, lsp_available: bool) -> str:
+    @staticmethod
+    def _build_dynamic_detail(
+        pattern: str, suggested_op: str, lsp_available: bool, searched: frozenset[str]
+    ) -> str:
         """Build the per-invocation guidance (pattern, suggestion, availability)."""
-        lines = [
-            f"LSP tool available for this lookup: pattern '{pattern}' looks like a symbol search.",
-            "",
-            f"Suggested LSP operation: {suggested_op}",
-        ]
-
-        if not lsp_available:
-            lines.extend(
-                [
-                    "",
-                    "NOTE: LSP is not currently configured.",
-                    f"Set {_LSP_ENV_VAR}=1 in your environment to enable LSP tools.",
-                ]
+        if lsp_available:
+            return (
+                f"LSP tool available for this lookup: pattern '{pattern}' looks like a "
+                f"symbol search.\n\nSuggested LSP operation: {suggested_op}"
             )
-
-        return "\n".join(lines)
+        files = f"{', '.join(sorted(searched))} files" if searched else "this project"
+        return (
+            f"Pattern '{pattern}' looks like a symbol search, but no enabled Claude Code "
+            f"plugin provides a language server for {files}, so the LSP tool cannot "
+            f"answer it.\n\n{_CODE_INTELLIGENCE_ADVICE}"
+        )
 
     def get_claude_md(self) -> str | None:
         return (
@@ -503,7 +736,11 @@ class LspEnforcementHandler(PreToolUseHandlerBase):
             "**Grep/Bash grep is still appropriate for**: text patterns in content, "
             "log searching, finding strings in config files.\n\n"
             "Default mode (`block_once`): the first symbol-lookup grep in a session "
-            "is denied with guidance; subsequent retries are allowed."
+            "is denied with guidance; subsequent retries are allowed.\n\n"
+            "It enforces only where an enabled Claude Code plugin provides a language "
+            "server for the searched file type (from the glob, type or path). "
+            "Elsewhere the default `no_lsp_mode: advisory` only suggests installing "
+            "a code intelligence plugin."
         )
 
     def get_acceptance_tests(self) -> list[Any]:
@@ -524,6 +761,8 @@ class LspEnforcementHandler(PreToolUseHandlerBase):
             tool_name=ToolName.GREP,
             tool_input={"pattern": "log.*Error"},
         )
+        with_plugin_setup, with_plugin_transcript = _lsp_fixture_with_plugin()
+        without_plugin_setup, without_plugin_transcript = _lsp_fixture_without_plugin()
 
         return [
             AcceptanceTest(
@@ -533,7 +772,10 @@ class LspEnforcementHandler(PreToolUseHandlerBase):
                 description=(
                     "When using Grep to search for a class definition like "
                     "'class FrontController', the handler should block and suggest "
-                    "using LSP goToDefinition or workspaceSymbol instead."
+                    "using LSP goToDefinition or workspaceSymbol instead. Declares "
+                    "its own fixture plugin (via transcript_path) so the DENY holds "
+                    "regardless of whether this container's own Claude config "
+                    "enables an LSP plugin."
                 ),
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[
@@ -549,6 +791,36 @@ class LspEnforcementHandler(PreToolUseHandlerBase):
                     "records a valid SKIP rather than attempting this test."
                 ),
                 test_type=TestType.BLOCKING,
+                setup_commands=with_plugin_setup,
+                cleanup_commands=_LSP_FIXTURE_CLEANUP,
+                extra_hook_input={HookInputField.TRANSCRIPT_PATH: with_plugin_transcript},
+                recommended_model=RecommendedModel.SONNET,
+                requires_main_thread=True,
+            ),
+            AcceptanceTest(
+                title="Advisory Grep for class definition with no LSP plugin enabled",
+                command=class_lookup_probe.as_instruction(),
+                tool_payload=class_lookup_probe,
+                description=(
+                    "The mirror of 'Block Grep for class definition': the identical "
+                    "symbol-like pattern, but its fixture Claude config enables no "
+                    "plugin at all, so no_lsp_mode's default (advisory) must allow "
+                    "it instead of denying."
+                ),
+                expected_decision=Decision.ALLOW,
+                expected_message_patterns=[],
+                safety_notes=(
+                    "Uses Grep tool - safe, read-only operation. A project denying "
+                    'Grep at source (`permissions.deny: ["Grep"]` in '
+                    "`.claude/settings.json` -- the same generic mechanism "
+                    "artifact_publish_blocker documents for Artifact/enableArtifact) "
+                    "removes the tool entirely; a runner without it available "
+                    "records a valid SKIP rather than attempting this test."
+                ),
+                test_type=TestType.ADVISORY,
+                setup_commands=without_plugin_setup,
+                cleanup_commands=_LSP_FIXTURE_CLEANUP,
+                extra_hook_input={HookInputField.TRANSCRIPT_PATH: without_plugin_transcript},
                 recommended_model=RecommendedModel.SONNET,
                 requires_main_thread=True,
             ),
@@ -581,7 +853,10 @@ class LspEnforcementHandler(PreToolUseHandlerBase):
                 dispatch_as_bash=True,
                 description=(
                     "When using Bash to run rg searching for a function definition, "
-                    "the handler should block and suggest LSP tools instead."
+                    "the handler should block and suggest LSP tools instead. Declares "
+                    "its own fixture plugin (via transcript_path) so the DENY holds "
+                    "regardless of whether this container's own Claude config "
+                    "enables an LSP plugin."
                 ),
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[
@@ -590,6 +865,29 @@ class LspEnforcementHandler(PreToolUseHandlerBase):
                 ],
                 safety_notes="Uses rg - safe, read-only operation",
                 test_type=TestType.BLOCKING,
+                setup_commands=with_plugin_setup,
+                cleanup_commands=_LSP_FIXTURE_CLEANUP,
+                extra_hook_input={HookInputField.TRANSCRIPT_PATH: with_plugin_transcript},
+                recommended_model=RecommendedModel.SONNET,
+                requires_main_thread=True,
+            ),
+            AcceptanceTest(
+                title="Advisory Bash rg for function definition with no LSP plugin enabled",
+                command='rg "def get_bash_command" src/',
+                dispatch_as_bash=True,
+                description=(
+                    "The mirror of 'Block Bash rg for function definition': the "
+                    "identical symbol-like rg command, but its fixture Claude config "
+                    "enables no plugin at all, so no_lsp_mode's default (advisory) "
+                    "must allow it instead of denying."
+                ),
+                expected_decision=Decision.ALLOW,
+                expected_message_patterns=[],
+                safety_notes="Uses rg - safe, read-only operation",
+                test_type=TestType.ADVISORY,
+                setup_commands=without_plugin_setup,
+                cleanup_commands=_LSP_FIXTURE_CLEANUP,
+                extra_hook_input={HookInputField.TRANSCRIPT_PATH: without_plugin_transcript},
                 recommended_model=RecommendedModel.SONNET,
                 requires_main_thread=True,
             ),

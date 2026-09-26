@@ -25,7 +25,6 @@ rather than falling back to the overwrite this function exists to prevent.
 from __future__ import annotations
 
 import json
-import os
 import subprocess  # nosec B404 - runs bash on this repo's own shell library
 import sys
 import textwrap
@@ -185,39 +184,27 @@ class TestWhenNothingElseIsKeepingACopy:
         assert "WARNING" in result.stdout
         assert _backups(tmp_path)[0].name in result.stdout
 
-    @pytest.mark.skipif(
-        os.geteuid() == 0, reason="running as root, which ignores the directory mode"
-    )
     def test_a_failed_backup_stops_everything(self, tmp_path: Path) -> None:
-        """Losing the file is the one outcome worth aborting a deploy for."""
-        target = tmp_path / "client" / ".claude" / "settings.json"
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(_CLIENT_JSON, encoding="utf-8")
-        source = tmp_path / "daemon-settings.json"
-        source.write_text(_DAEMON_JSON, encoding="utf-8")
-        target.parent.chmod(0o555)
-        try:
-            script = textwrap.dedent(f"""
-                set -u
-                print_success() {{ echo "SUCCESS: $*"; }}
-                print_warning() {{ echo "WARNING: $*"; }}
-                print_error()   {{ echo "ERROR: $*"; }}
-                print_verbose() {{ :; }}
-                OUTPUT_SH_LOADED=1
-                source "{LIB}"
-                deploy_settings_json "{source}" "{target}" "" "" ""
-            """)
-            result = subprocess.run(  # nosec B603 B607 - bash, list form, no shell
-                ["bash", "-c", script],
-                capture_output=True,
-                text=True,
-                check=False,
-                timeout=Timeout.VALIDATION_CHECK,
-            )
-            assert result.returncode == 1
-            assert target.read_text() == _CLIENT_JSON, "the client file must survive"
-        finally:
-            target.parent.chmod(0o755)
+        """Losing the file is the one outcome worth aborting a deploy for.
+
+        Root bypasses a read-only directory mode, so `chmod(0o555)` no longer
+        faults the backup `cp` when the process is root — this container runs
+        as root (Plan 00466 N56). Stub `cp` to fail on the backup copy
+        specifically (its destination matches `*.bak-*`; the install copy's
+        destination does not), the same technique `TestTheInstallCopyCanFail`
+        already uses below for the install copy.
+        """
+        stub = textwrap.dedent("""
+            cp() {
+                case "$2" in
+                    *.bak-*) return 1 ;;
+                esac
+                command cp "$@"
+            }
+        """)
+        result, target = _invoke(tmp_path, client=_CLIENT_JSON, snapshot="", stub=stub)
+        assert result.returncode == 1
+        assert target.read_text() == _CLIENT_JSON, "the client file must survive"
 
 
 class TestTheInstallCopyCanFail:

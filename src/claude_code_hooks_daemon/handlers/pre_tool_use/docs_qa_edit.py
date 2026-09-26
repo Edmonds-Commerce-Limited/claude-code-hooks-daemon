@@ -30,7 +30,9 @@ corpus and no git subprocess — single-file invariants only. Two checks,
 so this handler loads (never BUILDS) the cached corpus via
 :func:`docs_qa.corpus.load_edit_corpus` — one cheap JSON read plus a ``stat``
 per indexed document to revalidate it, not a filesystem scan (the cold-index
-rule: building is SessionStart/CLI-only). If no cache exists yet (a session
+rule: building from nothing is SessionStart/CLI-only; ``merge_qa_report``
+refreshes a WARM index after a merge and stands down on a cold one, Plan
+00408 Task 2.1). If no cache exists yet (a session
 before the sweep has run), the corpus is ``cold`` and both checks degrade to
 silence — never a false positive, never a crash. Not yet covering a Bash-authored ``.md`` write
 (the same detection ``lint_on_edit`` uses) — deferred; Write/Edit is the
@@ -55,6 +57,7 @@ from claude_code_hooks_daemon.docs_qa.runner import run_stage
 from claude_code_hooks_daemon.docs_qa.types import CheckStage, Finding, Severity
 from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command_for_docs
 from claude_code_hooks_daemon.utils.path_predicates import path_is_file
+from claude_code_hooks_daemon.utils.realpath import realpath
 
 _MODE_BLOCK: Final[str] = "block"
 
@@ -96,10 +99,14 @@ class DocsQaEditHandler(PreToolUseHandlerBase):
             handler_id=HandlerID.DOCS_QA_EDIT,
             priority=Priority.DOCS_QA_EDIT,
             terminal=False,
+            # Plan 00466 n24 security review, M3: a docs-QA gate, not a
+            # dangerous-action guard -- an explicit, deliberate opt-out from
+            # structural fail-closed, not an oversight.
             tags=[
                 HandlerTag.DOCUMENTATION,
                 HandlerTag.VALIDATION,
                 HandlerTag.CONTENT_QUALITY,
+                HandlerTag.ADVISORY,
             ],
         )
         # Injected by the registry for DOCUMENTATION-tagged handlers.
@@ -142,7 +149,7 @@ class DocsQaEditHandler(PreToolUseHandlerBase):
         # re-resolve (or fail to) independently (Plan 00295 Task 1.2).
         project_root = ProjectContext.project_root().resolve()
         tool_input = hook_input.get(HookInputField.TOOL_INPUT, {})
-        file_path = Path(tool_input.get(_FIELD_FILE_PATH, "")).resolve()
+        file_path = Path(realpath(tool_input.get(_FIELD_FILE_PATH, "")))
         # Tri-state, matching plan_qa_edit: `CheckContext` types this field
         # `bool | None` because "I could not stat it" is a third answer, not a
         # flavour of False. Claiming True would send the read below into a
@@ -216,7 +223,7 @@ class DocsQaEditHandler(PreToolUseHandlerBase):
     @staticmethod
     def _rel_path(file_path: Path, project_root: Path) -> str | None:
         try:
-            return str(file_path.resolve().relative_to(project_root.resolve()))
+            return str(Path(realpath(file_path)).relative_to(project_root.resolve()))
         except ValueError:
             return None
 

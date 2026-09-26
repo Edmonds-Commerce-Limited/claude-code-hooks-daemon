@@ -46,6 +46,7 @@ from typing import Any, Final
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, HookInputField, Priority
 from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.core import Decision, GatingResult, get_data_layer
+from claude_code_hooks_daemon.core.dispatch_cancellation import is_dispatch_cancelled
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.core.utils import get_bash_command
@@ -57,10 +58,6 @@ _LOGGER = logging.getLogger(__name__)
 # Mode values (mirrors git_stash / ancestry_preserving_merge, Plan 00207).
 _MODE_BLOCK: Final[str] = "block"
 _MODE_WARN: Final[str] = "warn"
-
-# Hook input field carrying the tool call's working directory, used to
-# resolve a relative -F path the way git itself would.
-_CWD_FIELD: Final[str] = "cwd"
 
 # The nine closing keywords GitHub documents. Case-insensitivity and the
 # optional trailing colon ("Closes: #10") are applied in the pattern.
@@ -217,7 +214,7 @@ class GithubAutoCloseKeywordsHandler(PreToolUseHandlerBase):
         so a term in a git message file went unscanned there while the same
         term inline was denied (Plan 00412, D-PUB-2).
         """
-        cwd = hook_input.get(_CWD_FIELD)
+        cwd = hook_input.get(HookInputField.CWD)
         return [
             found.text
             for found in read_message_files(segment, cwd if isinstance(cwd, str) else None)
@@ -278,7 +275,12 @@ class GithubAutoCloseKeywordsHandler(PreToolUseHandlerBase):
         if transcript_path and tracker.was_disclosed(transcript_path, rule_id):
             message = self._formatter.terse(self._rule)
         else:
-            if transcript_path:
+            # Plan 00466 N40 m2: a straggler -- a handle() call whose own
+            # chain dispatch the caller already gave up waiting on -- must
+            # not spend the disclosure ladder for a verdict nobody sees.
+            # The tracker is process-lifetime shared state, so marking it
+            # here would wrongly silence a later, genuinely-delivered fire.
+            if transcript_path and not is_dispatch_cancelled():
                 tracker.mark_disclosed(transcript_path, rule_id)
             message = self._formatter.verbose(self._rule)
 

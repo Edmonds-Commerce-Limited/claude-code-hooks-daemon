@@ -806,6 +806,18 @@ handlers:
         with pytest.raises(ValueError, match="Unsupported format"):
             Config.load(txt_file)
 
+    def test_load_converts_recursion_error_to_value_error(self, tmp_path: Path) -> None:
+        """A pathologically nested config (RV9-n1) drives PyYAML's parser
+        past the recursion limit. It must leave by the same ValueError door
+        as a YAML syntax error -- not as a bare RecursionError, which is a
+        RuntimeError that `utils.config_cache.load_config_cached` cannot
+        cache and some callers' `except` clauses do not list."""
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text("[" * 5000 + "]" * 5000)
+
+        with pytest.raises(ValueError, match="nested too deeply"):
+            Config.load(config_file)
+
     def test_load_or_default_loads_existing_file(self, tmp_path: Path) -> None:
         """load_or_default loads file when it exists."""
         config_file = tmp_path / "config.yaml"

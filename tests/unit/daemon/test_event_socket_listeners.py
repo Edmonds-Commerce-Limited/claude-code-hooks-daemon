@@ -16,9 +16,10 @@ from typing import Any
 from unittest.mock import patch
 
 import pytest
+from tests.daemon._start_wait import wait_for_daemon_started
 
 from claude_code_hooks_daemon.config.models import DaemonConfig, LogLevel, TransportConfig
-from claude_code_hooks_daemon.constants import HandlerID, Priority
+from claude_code_hooks_daemon.constants import HandlerID, Priority, Timeout
 from claude_code_hooks_daemon.constants.events import wired_event_metas
 from claude_code_hooks_daemon.core.front_controller import FrontController
 from claude_code_hooks_daemon.core.handler import Handler
@@ -93,6 +94,78 @@ async def _connect_and_send_eof(socket_path: Path, payload: dict[str, Any]) -> d
     return dict(json.loads(raw_response.decode()))
 
 
+class TestStartedEvent:
+    """Plan 00466 N39 (widened): every test below used to synchronise on a
+    fixed ``asyncio.sleep(0.1)`` after ``asyncio.create_task(daemon.start())``,
+    which is a race under host load -- ``start()``'s two awaited binding
+    steps can outlast 100 ms, and the test then observes an empty
+    ``_event_servers``. ``started_event`` is the deterministic replacement:
+    set once both the legacy socket and the per-event listeners have
+    finished binding (or failed trying, best-effort), so a test can await it
+    directly instead of guessing a duration.
+    """
+
+    @pytest.mark.anyio
+    async def test_started_event_is_unset_before_start_is_awaited(
+        self, isolated_untracked_dir: Path, front_controller: FrontController
+    ) -> None:
+        config = _make_config(isolated_untracked_dir, relay_enabled=True)
+        daemon = HooksDaemon(config=config, controller=front_controller)
+        assert daemon.started_event.is_set() is False
+
+    @pytest.mark.anyio
+    async def test_started_event_is_set_once_binding_completes(
+        self, isolated_untracked_dir: Path, front_controller: FrontController
+    ) -> None:
+        config = _make_config(isolated_untracked_dir, relay_enabled=True)
+        daemon = HooksDaemon(config=config, controller=front_controller)
+        server_task = asyncio.create_task(daemon.start())
+
+        await wait_for_daemon_started(daemon, server_task, timeout=Timeout.SOCKET_CONNECT)
+
+        assert daemon._event_servers != {}
+
+        await daemon.shutdown()
+        await server_task
+
+    @pytest.mark.anyio
+    async def test_started_event_is_cleared_on_shutdown(
+        self, isolated_untracked_dir: Path, front_controller: FrontController
+    ) -> None:
+        """Plan 00466 N39 review1 MEDIUM-2: `started_event` marks "is
+        currently live", not merely "has started at least once" -- a caller
+        polling `is_set()` after a clean stop must see it unset."""
+        config = _make_config(isolated_untracked_dir, relay_enabled=True)
+        daemon = HooksDaemon(config=config, controller=front_controller)
+        server_task = asyncio.create_task(daemon.start())
+
+        await wait_for_daemon_started(daemon, server_task, timeout=Timeout.SOCKET_CONNECT)
+        assert daemon.started_event.is_set() is True
+
+        await daemon.shutdown()
+        await server_task
+
+        assert daemon.started_event.is_set() is False
+
+    @pytest.mark.anyio
+    async def test_started_event_is_set_even_when_transport_is_disabled(
+        self, isolated_untracked_dir: Path, front_controller: FrontController
+    ) -> None:
+        """No event sockets are bound with the transport off, but the daemon
+        has still finished starting -- the event marks readiness, not a
+        count of bound event sockets."""
+        config = _make_config(isolated_untracked_dir, relay_enabled=False)
+        daemon = HooksDaemon(config=config, controller=front_controller)
+        server_task = asyncio.create_task(daemon.start())
+
+        await wait_for_daemon_started(daemon, server_task, timeout=Timeout.SOCKET_CONNECT)
+
+        assert daemon._event_servers == {}
+
+        await daemon.shutdown()
+        await server_task
+
+
 class TestGating:
     @pytest.mark.anyio
     async def test_disabled_transport_binds_no_event_sockets(
@@ -101,7 +174,7 @@ class TestGating:
         config = _make_config(isolated_untracked_dir, relay_enabled=False)
         daemon = HooksDaemon(config=config, controller=front_controller)
         server_task = asyncio.create_task(daemon.start())
-        await asyncio.sleep(0.1)
+        await wait_for_daemon_started(daemon, server_task, timeout=Timeout.SOCKET_CONNECT)
 
         events_dir = get_event_socket_dir_from_untracked(isolated_untracked_dir)
         assert not events_dir.exists()
@@ -116,7 +189,7 @@ class TestGating:
         config = _make_config(isolated_untracked_dir, relay_enabled=True)
         daemon = HooksDaemon(config=config, controller=front_controller)
         server_task = asyncio.create_task(daemon.start())
-        await asyncio.sleep(0.1)
+        await wait_for_daemon_started(daemon, server_task, timeout=Timeout.SOCKET_CONNECT)
 
         events_dir = get_event_socket_dir_from_untracked(isolated_untracked_dir)
         assert events_dir.is_dir()
@@ -134,7 +207,7 @@ class TestGating:
         config = _make_config(isolated_untracked_dir, relay_enabled=True)
         daemon = HooksDaemon(config=config, controller=front_controller)
         server_task = asyncio.create_task(daemon.start())
-        await asyncio.sleep(0.1)
+        await wait_for_daemon_started(daemon, server_task, timeout=Timeout.SOCKET_CONNECT)
 
         reader, writer = await asyncio.open_unix_connection(str(config.socket_path_obj))
         request = {
@@ -164,7 +237,7 @@ class TestEofFraming:
         config = _make_config(isolated_untracked_dir, relay_enabled=True)
         daemon = HooksDaemon(config=config, controller=front_controller)
         server_task = asyncio.create_task(daemon.start())
-        await asyncio.sleep(0.1)
+        await wait_for_daemon_started(daemon, server_task, timeout=Timeout.SOCKET_CONNECT)
 
         events_dir = get_event_socket_dir_from_untracked(isolated_untracked_dir)
         socket_path = events_dir / "pre-tool-use.sock"
@@ -189,13 +262,15 @@ class TestEofFraming:
     async def test_malformed_json_fails_open_with_empty_object(
         self, isolated_untracked_dir: Path, front_controller: FrontController
     ) -> None:
+        """A non-gating event answers ``{}``. PreToolUse denies instead, which
+        ``test_event_socket_fail_closed_pretooluse.py`` pins."""
         config = _make_config(isolated_untracked_dir, relay_enabled=True)
         daemon = HooksDaemon(config=config, controller=front_controller)
         server_task = asyncio.create_task(daemon.start())
-        await asyncio.sleep(0.1)
+        await wait_for_daemon_started(daemon, server_task, timeout=Timeout.SOCKET_CONNECT)
 
         events_dir = get_event_socket_dir_from_untracked(isolated_untracked_dir)
-        socket_path = events_dir / "pre-tool-use.sock"
+        socket_path = events_dir / "post-tool-use.sock"
 
         reader, writer = await asyncio.open_unix_connection(str(socket_path))
         writer.write(b"{not valid json")
@@ -243,7 +318,7 @@ class TestRealisticClientDepth:
         config = _make_config(deep_untracked_dir, relay_enabled=True)
         daemon = HooksDaemon(config=config, controller=front_controller)
         server_task = asyncio.create_task(daemon.start())
-        await asyncio.sleep(0.1)
+        await wait_for_daemon_started(daemon, server_task, timeout=Timeout.SOCKET_CONNECT)
 
         expected_names = {f"{meta.bash_key}.sock" for meta in wired_event_metas()}
         assert len(daemon._event_servers) == len(expected_names), (
@@ -288,7 +363,7 @@ class TestBindShortfallIsSurfaced:
             paths_module, "get_event_socket_path_in_dir", side_effect=_flaky_resolver
         ):
             server_task = asyncio.create_task(daemon.start())
-            await asyncio.sleep(0.1)
+            await wait_for_daemon_started(daemon, server_task, timeout=Timeout.SOCKET_CONNECT)
             await daemon.shutdown()
             await server_task
 
@@ -296,6 +371,99 @@ class TestBindShortfallIsSurfaced:
         bound_count = expected_total - 2
         logs = "\n".join(get_memory_logs())
         assert f"Only {bound_count}/{expected_total} per-event socket(s) bound" in logs
+
+
+class TestSkippedSocketsReachHealth:
+    """Plan 00466 N24 review 2 P1: a log line is not a signal anyone watches.
+
+    A skipped per-event socket sends that event back to the bash forwarder
+    with nothing in ``health`` or ``status`` to say so. Health must go
+    degraded with its own reason and name every skipped event.
+    """
+
+    @staticmethod
+    def _health(daemon: HooksDaemon) -> dict[str, Any]:
+        response = daemon._handle_system_request({"action": "health"}, None)
+        return dict(response["result"])
+
+    @pytest.mark.anyio
+    async def test_a_path_length_skip_degrades_health_and_names_the_event(
+        self, isolated_untracked_dir: Path, front_controller: FrontController
+    ) -> None:
+        from claude_code_hooks_daemon.daemon import paths as paths_module
+
+        real_resolver = paths_module.get_event_socket_path_in_dir
+
+        def _too_long_for_pre_tool_use(events_dir: Path, event_file_name: str) -> Path | None:
+            if event_file_name == "pre-tool-use":
+                return None
+            return real_resolver(events_dir, event_file_name)
+
+        daemon = HooksDaemon(
+            config=_make_config(isolated_untracked_dir, relay_enabled=True),
+            controller=front_controller,
+        )
+        with patch.object(
+            paths_module, "get_event_socket_path_in_dir", side_effect=_too_long_for_pre_tool_use
+        ):
+            server_task = asyncio.create_task(daemon.start())
+            await asyncio.sleep(0.1)
+
+        health = self._health(daemon)
+        assert health["status"] == "degraded"
+        assert "event_sockets" in health["degraded_reasons"]
+        skips = health["event_socket_skips"]
+        assert [skip["event"] for skip in skips] == ["PreToolUse"]
+        assert "AF_UNIX" in skips[0]["reason"]
+
+        await daemon.shutdown()
+        await server_task
+
+    @pytest.mark.anyio
+    async def test_a_chmod_skip_is_named_too(
+        self, isolated_untracked_dir: Path, front_controller: FrontController
+    ) -> None:
+        events_dir = get_event_socket_dir_from_untracked(isolated_untracked_dir)
+        real_chmod = Path.chmod
+
+        def _refuse_stop(self: Path, mode: int, **kwargs: Any) -> None:
+            if self == events_dir / "stop.sock":
+                raise PermissionError(13, "Permission denied", str(self))
+            real_chmod(self, mode, **kwargs)
+
+        daemon = HooksDaemon(
+            config=_make_config(isolated_untracked_dir, relay_enabled=True),
+            controller=front_controller,
+        )
+        with patch.object(Path, "chmod", _refuse_stop):
+            server_task = asyncio.create_task(daemon.start())
+            await asyncio.sleep(0.1)
+
+        skips = self._health(daemon)["event_socket_skips"]
+        assert [skip["event"] for skip in skips] == ["Stop"]
+        assert "Permission denied" in skips[0]["reason"]
+
+        await daemon.shutdown()
+        await server_task
+
+    @pytest.mark.anyio
+    async def test_every_socket_bound_leaves_health_alone(
+        self, isolated_untracked_dir: Path, front_controller: FrontController
+    ) -> None:
+        daemon = HooksDaemon(
+            config=_make_config(isolated_untracked_dir, relay_enabled=True),
+            controller=front_controller,
+        )
+        server_task = asyncio.create_task(daemon.start())
+        await asyncio.sleep(0.1)
+
+        health = self._health(daemon)
+        assert health["status"] == "healthy"
+        assert "event_socket_skips" not in health
+        assert "degraded_reasons" not in health
+
+        await daemon.shutdown()
+        await server_task
 
 
 class TestSocketHygiene:
@@ -312,7 +480,7 @@ class TestSocketHygiene:
         config = _make_config(isolated_untracked_dir, relay_enabled=True)
         daemon = HooksDaemon(config=config, controller=front_controller)
         server_task = asyncio.create_task(daemon.start())
-        await asyncio.sleep(0.1)
+        await wait_for_daemon_started(daemon, server_task, timeout=Timeout.SOCKET_CONNECT)
 
         assert not stale_file.exists()
         assert events_dir.is_dir()
@@ -327,7 +495,7 @@ class TestSocketHygiene:
         config = _make_config(isolated_untracked_dir, relay_enabled=True)
         daemon = HooksDaemon(config=config, controller=front_controller)
         server_task = asyncio.create_task(daemon.start())
-        await asyncio.sleep(0.1)
+        await wait_for_daemon_started(daemon, server_task, timeout=Timeout.SOCKET_CONNECT)
 
         events_dir = get_event_socket_dir_from_untracked(isolated_untracked_dir)
         assert events_dir.is_dir()
@@ -359,7 +527,7 @@ class TestSocketHygiene:
         config = _make_config(isolated_untracked_dir, relay_enabled=True)
         daemon = HooksDaemon(config=config, controller=front_controller)
         server_task = asyncio.create_task(daemon.start())
-        await asyncio.sleep(0.1)
+        await wait_for_daemon_started(daemon, server_task, timeout=Timeout.SOCKET_CONNECT)
 
         assert daemon._event_servers == {}
         assert events_dir.is_symlink()
@@ -393,7 +561,7 @@ class TestSocketHygiene:
             side_effect=OSError("permission denied"),
         ):
             server_task = asyncio.create_task(daemon.start())
-            await asyncio.sleep(0.1)
+            await wait_for_daemon_started(daemon, server_task, timeout=Timeout.SOCKET_CONNECT)
 
         assert len(daemon._event_servers) > 0, "bind must still proceed best-effort"
         logs = "\n".join(get_memory_logs())
@@ -442,7 +610,7 @@ class TestSocketHygiene:
 
         with patch.object(Path, "chmod", _flaky_chmod):
             server_task = asyncio.create_task(daemon.start())
-            await asyncio.sleep(0.1)
+            await wait_for_daemon_started(daemon, server_task, timeout=Timeout.SOCKET_CONNECT)
 
         assert refused, "the fixture must actually have interfered with a chmod"
         assert (
@@ -467,7 +635,7 @@ class TestSocketHygiene:
         config = _make_config(isolated_untracked_dir, relay_enabled=True)
         daemon = HooksDaemon(config=config, controller=front_controller)
         server_task = asyncio.create_task(daemon.start())
-        await asyncio.sleep(0.1)
+        await wait_for_daemon_started(daemon, server_task, timeout=Timeout.SOCKET_CONNECT)
 
         with patch(
             "claude_code_hooks_daemon.daemon.server.shutil.rmtree",

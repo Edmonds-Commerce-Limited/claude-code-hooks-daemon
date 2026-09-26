@@ -5,15 +5,18 @@ cooldown suppression, completion bypassing cooldown, non-plan writes ignored,
 and Completed/ directory exclusion.
 """
 
+from pathlib import Path
 from typing import Any
 
 import pytest
+from tests.support.git_fixtures import run_git as _git
 
 from claude_code_hooks_daemon.config.models import (
     Config,
     PersistentCronConfig,
     PersistentCronsConfig,
 )
+from claude_code_hooks_daemon.constants.priority import Priority
 from claude_code_hooks_daemon.core import Decision
 from claude_code_hooks_daemon.handlers.post_tool_use.recovery_cron_advisor import (
     _CREATION_GUIDANCE,
@@ -31,6 +34,29 @@ from claude_code_hooks_daemon.utils.cron_enforcement import PROMPT_DELIVERY_CAP
 from claude_code_hooks_daemon.utils.cron_tick import DaemonTick, TickKind, classify_tick
 
 _RETIRED_SECTION = "Notes & Updates"
+
+
+@pytest.fixture(autouse=True)
+def _mock_project_root(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Ledger 00466 N3 sibling: the Write-path completion check now consults
+    git HEAD (``utils.git_facts.project_relative_head_text``), which needs a
+    resolved project root -- ``ProjectContext.project_root()`` is called
+    unguarded and would otherwise raise (uninitialised) for every test in
+    this module. Review nit n3: ``git_facts`` takes the root as a parameter
+    rather than importing ``ProjectContext`` itself, so this patches THIS
+    module's own import of it, not ``utils.git_facts``'s.
+
+    None of this module's existing fixtures live under ``tmp_path``, so for
+    them the path-membership check alone answers "nothing to compare
+    against" and every pre-existing assertion is unaffected -- the real
+    HEAD-comparison scenarios get their own fixture in
+    ``TestWriteCompletionIsTransitionBased`` below, rooted at ``tmp_path``.
+    """
+    monkeypatch.setattr(
+        "claude_code_hooks_daemon.handlers.post_tool_use.recovery_cron_advisor."
+        "ProjectContext.project_root",
+        classmethod(lambda cls: tmp_path),
+    )
 
 
 class TestCanonicalCronPromptMarker:
@@ -145,9 +171,9 @@ class TestInit:
         """Handler name should be 'recovery-cron-advisor'."""
         assert handler.name == "recovery-cron-advisor"
 
-    def test_priority_is_30(self, handler: RecoveryCronAdvisorHandler) -> None:
-        """Handler priority should be 30 (free PostToolUse slot)."""
-        assert handler.priority == 30
+    def test_priority_matches_constant(self, handler: RecoveryCronAdvisorHandler) -> None:
+        """Handler priority should match the Priority constant, not a literal."""
+        assert handler.priority == Priority.RECOVERY_CRON_ADVISOR
 
     def test_is_non_terminal(self, handler: RecoveryCronAdvisorHandler) -> None:
         """Handler should be non-terminal (advisory)."""
@@ -1053,3 +1079,81 @@ class TestGetAcceptanceTests:
         tests = handler.get_acceptance_tests()
         titles = [t.title.lower() for t in tests]
         assert any("complet" in t for t in titles)
+
+
+# ─── Write-path COMPLETION is transition-based (ledger 00466 N3 sibling) ────
+
+
+class TestWriteCompletionIsTransitionBased:
+    """The Write-path COMPLETION check fired on post-write STATE (does the
+    new content read Complete), not a TRANSITION -- the same defect shape
+    goal_injection had for In Progress. It now shares goal_injection's
+    HEAD-comparison helper (``utils.git_facts.project_relative_head_text``):
+    a Write that rewrites an already-Complete plan is not a completion
+    event at all, even though its content still reads Complete.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _capture_root(self, tmp_path: Path) -> None:
+        self._root = tmp_path
+
+    def _plan_path(self, folder: str = "00042-my-plan") -> Path:
+        plan_dir = self._root / "CLAUDE" / "Plan" / folder
+        plan_dir.mkdir(parents=True, exist_ok=True)
+        return plan_dir / "PLAN.md"
+
+    def _init_repo(self) -> None:
+        _git(self._root, "init")
+        _git(self._root, "config", "user.email", "t@example.com")
+        _git(self._root, "config", "user.name", "T")
+
+    def test_write_rewriting_an_already_committed_complete_plan_is_not_completion(
+        self,
+    ) -> None:
+        """The exact defect shape: content still reads Complete, but this
+        Write did not move it there -- it was already Complete at HEAD."""
+        self._init_repo()
+        plan = self._plan_path()
+        plan.write_text("**Status**: Complete\n", encoding="utf-8")
+        _git(self._root, "add", "-A")
+        _git(self._root, "commit", "-m", "complete")
+
+        plan.write_text("**Status**: Complete\n\n## Notes\n\nMore.\n", encoding="utf-8")
+        hook_input = _write_input(str(plan), plan.read_text(encoding="utf-8"))
+
+        assert _detect_lifecycle_phase(hook_input) is None
+
+    def test_write_creating_a_brand_new_complete_plan_is_completion(self) -> None:
+        """No repository at all: HEAD carries nothing, so this still reads
+        as a genuine completion -- matches the pre-existing contract."""
+        plan = self._plan_path()
+        plan.write_text("**Status**: Complete\n", encoding="utf-8")
+        hook_input = _write_input(str(plan), plan.read_text(encoding="utf-8"))
+
+        assert _detect_lifecycle_phase(hook_input) == LifecyclePhase.COMPLETION
+
+    def test_write_rewriting_a_committed_not_started_plan_to_complete_is_completion(
+        self,
+    ) -> None:
+        self._init_repo()
+        plan = self._plan_path()
+        plan.write_text("**Status**: Not Started\n", encoding="utf-8")
+        _git(self._root, "add", "-A")
+        _git(self._root, "commit", "-m", "create")
+
+        plan.write_text("**Status**: Complete\n", encoding="utf-8")
+        hook_input = _write_input(str(plan), plan.read_text(encoding="utf-8"))
+
+        assert _detect_lifecycle_phase(hook_input) == LifecyclePhase.COMPLETION
+
+    def test_edit_path_completion_is_unaffected(self) -> None:
+        """The already-transition-based Edit path needs no HEAD lookup at
+        all and must keep working unchanged."""
+        plan = self._plan_path()
+        hook_input = _edit_input(
+            str(plan),
+            new_string="**Status**: Complete",
+            old_string="**Status**: In Progress",
+        )
+
+        assert _detect_lifecycle_phase(hook_input) == LifecyclePhase.COMPLETION

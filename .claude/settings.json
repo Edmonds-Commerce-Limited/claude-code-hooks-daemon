@@ -1,5 +1,4 @@
 {
-  "plansDirectory": "./CLAUDE/Plan",
   "permissions": {
     "deny": [
       "Edit(//tmp/**)",

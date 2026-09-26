@@ -249,6 +249,69 @@ class TestHandleBlockMode:
         assert "plan-ref-format" in "\n".join(result.context)
 
 
+def _index_with_stats(*, distinct: int, allocated: int, closing: str) -> str:
+    """The fixture index plus a reconciliation bullet; the closing sum is line 11."""
+    return (
+        "# Plans Index\n\n## Active Plans\n\n"
+        "- [00001: first](00001-first/PLAN.md) - In Progress\n\n"
+        "## Plan Statistics\n\n"
+        f"- **Reconciliation**: **{distinct} distinct plan numbers**. That leaves\n"
+        f"  **1** of the {allocated} allocated numbers with no folder: 00002 — dropped.\n"
+        f"  {closing}\n"
+    )
+
+
+class TestPlanStatsArithmetic:
+    """Plan 00466 N13: the index's self-check line is judged at commit time.
+
+    The check ran only in full QA, so a README whose closing self-check
+    disagreed with the statistics above it was committed and pushed.
+    """
+
+    _CLOSING_LINE = 11
+
+    def _commit_index(self, repo: Path, text: str) -> Any:
+        (repo / _PLAN_DIR_REL / "README.md").write_text(text)
+        _git(repo, "add", "-A")
+        with _patched_root(repo):
+            return _handler("block").handle(_bash_input('git commit -m "Plan 00001: index"'))
+
+    def test_staging_a_disagreeing_index_is_denied_naming_the_line(self, repo: Path) -> None:
+        result = self._commit_index(
+            repo, _index_with_stats(distinct=2, allocated=4, closing="1 + 1 = 2. ✅")
+        )
+
+        assert result.decision == Decision.DENY
+        assert result.reason is not None
+        assert "plan-stats-arithmetic" in result.reason
+        assert f"line {self._CLOSING_LINE}" in result.reason
+
+    def test_staging_a_consistent_index_is_allowed(self, repo: Path) -> None:
+        result = self._commit_index(
+            repo, _index_with_stats(distinct=2, allocated=3, closing="2 + 1 = 3. ✅")
+        )
+
+        assert result.decision == Decision.ALLOW
+        assert "plan-stats-arithmetic" not in "\n".join(result.context)
+
+    def test_an_inherited_disagreement_does_not_deny_an_unrelated_commit(self, repo: Path) -> None:
+        """A commit that does not stage the index cannot be why it disagrees."""
+        (repo / _PLAN_DIR_REL / "README.md").write_text(
+            _index_with_stats(distinct=2, allocated=4, closing="1 + 1 = 2. ✅")
+        )
+        _git(repo, "add", "-A")
+        _git(repo, "commit", "-m", "broken index, committed before the gate existed")
+        (repo / "src").mkdir()
+        (repo / "src" / "thing.py").write_text("VALUE = 1\n")
+        _git(repo, "add", "-A")
+
+        with _patched_root(repo):
+            result = _handler("block").handle(_bash_input('git commit -m "Plan 00001: code"'))
+
+        assert result.decision == Decision.ALLOW
+        assert "plan-stats-arithmetic" in "\n".join(result.context)
+
+
 class TestGuardRails:
     def test_noop_when_cwd_in_foreign_repo(self, repo: Path, tmp_path: Path) -> None:
         other = tmp_path / "other-repo"

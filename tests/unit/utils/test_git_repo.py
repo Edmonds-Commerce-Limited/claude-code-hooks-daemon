@@ -116,6 +116,33 @@ class TestReadConfig:
         assert repo.read_config(_KEY) is None
 
 
+class TestRemoteUrls:
+    """Every configured remote's URL, whatever the remote is called (Plan 00408 3.8)."""
+
+    def test_no_remotes_is_empty(self, tmp_git_repo: Path) -> None:
+        assert GitRepo(tmp_git_repo).remote_urls() == ()
+
+    def test_every_remote_is_listed_not_only_origin(self, tmp_git_repo: Path) -> None:
+        run_git(tmp_git_repo, "remote", "add", "origin", "https://example.test/a.git")
+        run_git(tmp_git_repo, "remote", "add", "upstream", "https://example.test/b.git")
+
+        assert sorted(GitRepo(tmp_git_repo).remote_urls()) == [
+            "https://example.test/a.git",
+            "https://example.test/b.git",
+        ]
+
+    def test_returns_empty_when_git_unavailable(
+        self, tmp_git_repo: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        repo = GitRepo(tmp_git_repo)
+
+        def _raise(*_a: object, **_k: object) -> None:
+            raise OSError("git missing")
+
+        monkeypatch.setattr(subprocess, "run", _raise)
+        assert repo.remote_urls() == ()
+
+
 class TestWriteConfig:
     def test_write_then_read_roundtrips(self, tmp_git_repo: Path) -> None:
         repo = GitRepo(tmp_git_repo)

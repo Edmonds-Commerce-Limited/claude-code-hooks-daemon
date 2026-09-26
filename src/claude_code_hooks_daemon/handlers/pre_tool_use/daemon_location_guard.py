@@ -19,7 +19,7 @@ from claude_code_hooks_daemon.utils.shell_segmentation import strip_inert_spans
 
 _RULE = Rule(
     rule_id=RuleID.DAEMON_DIR_CD,
-    blocked="`cd` into `.claude/hooks-daemon/`",
+    blocked="`cd`/`pushd` into `.claude/hooks-daemon/`",
     why="Daemon CLI commands must be run from PROJECT ROOT, causing path confusion otherwise",
     fix="Run daemon commands from project root, e.g. `bin/hooks-daemon status`",
     verbose=(
@@ -36,7 +36,7 @@ _RULE = Rule(
 # command separators, so a `cd` into a SAFE directory cannot reach across a
 # `;`/`&&`/`|`/newline to a later reference of the config FILE. The directory
 # boundary after `hooks-daemon` is a path separator, whitespace, command
-# separator, quote or end-of-string — never a `.`, so the config files
+# separator, closing `)`/backtick or end-of-string — never a `.`, so the config files
 # `.claude/hooks-daemon.yaml` and `.claude/hooks-daemon.yaml.example` do NOT
 # match.
 #
@@ -47,9 +47,32 @@ _RULE = Rule(
 # `[ \t]+` cannot lose a line continuation, because `matches()` reads through
 # `get_bash_command`, which has already joined `cd \<newline>.claude/...` back
 # into one line by the time this pattern runs.
+#
+# `pushd` changes directory exactly as `cd` does, and either may carry options
+# before the path (`cd -- <path>`, `cd -P <path>`), which a single `[ \t]+` gap
+# could not span (Plan 00408 Tasks 3.5 and 3.9). `popd` and `cd -` are left
+# out: they name no path, and the directory they return to was entered by an
+# earlier command this rule already judged. A `)` or backtick also ends the
+# path, so `(cd <dir>)` and `` `cd <dir>` `` match rather than slipping past on
+# their closing character.
 _CD_INTO_DAEMON_DIR = re.compile(
-    r"\bcd[ \t]+[^\s;&|]*\.claude/hooks-daemon(?:/[^\s;&|]*)?(?=[\s;&|\"']|$)"
+    r"\b(?:cd|pushd)(?:[ \t]+-[A-Za-z-]*)*[ \t]+[^\s;&|]*\.claude/hooks-daemon"
+    r"(?:/[^\s;&|)`]*)?(?=[\s;&|)`]|$)"
 )
+
+# Quoting, an escape or a redundant `//` or `/./` INSIDE the path leaves the
+# directory unchanged, so they are normalised away before matching rather than
+# each taught to the pattern (Plan 00408 Task 3.9). Every quote goes, not just
+# the ones around a plain word: a path nested inside `bash -c '...'` keeps its
+# inner quotes otherwise. Removal can only join characters, so it can reveal a
+# path but not hide one.
+_PATH_QUOTING = re.compile(r"[\"'\\]")
+_REDUNDANT_SEPARATOR = re.compile(r"/(?:\.?/)+")
+
+
+def _path_text(command: str) -> str:
+    """``command`` with in-path quoting and redundant separators removed."""
+    return _REDUNDANT_SEPARATOR.sub("/", _PATH_QUOTING.sub("", command))
 
 
 class DaemonLocationGuardHandler(PreToolUseHandlerBase):
@@ -124,7 +147,7 @@ class DaemonLocationGuardHandler(PreToolUseHandlerBase):
         # heredoc and stops there. Recognising those flag spellings is Plan
         # 00408; re-adding literal blanking is not the answer, because that is
         # what let `bash -c` through.
-        executable = strip_inert_spans(command)
+        executable = _path_text(strip_inert_spans(command))
         return bool(_CD_INTO_DAEMON_DIR.search(executable))
 
     def get_rules(self) -> list[Rule]:
@@ -140,7 +163,7 @@ class DaemonLocationGuardHandler(PreToolUseHandlerBase):
         already has the command it just ran, but echoing it keeps the
         message unambiguous about what was blocked.
         """
-        command = hook_input.get("tool_input", {}).get("command", "")
+        command = get_bash_command(hook_input) or ""
 
         transcript_path = hook_input.get(HookInputField.TRANSCRIPT_PATH)
         tracker = get_data_layer().disclosure

@@ -1,0 +1,145 @@
+# Plan 00414: absent protected path is silent
+
+**Status**: Complete
+**Created**: 2026-09-15
+**Owner**: joseph
+**Priority**: Medium
+**Recommended Executor**: Sonnet
+**Execution Strategy**: Direct
+
+## Overview
+
+`secret_file_hygiene_checker` reports, at SessionStart, on every configured
+protected path **that exists on disk** — not gitignored, git-tracked,
+group/world-readable. A path that does not exist produces nothing.
+
+That is a reasonable rule for a hygiene checker and a poor one for the reader,
+because the two states it collapses are opposites. "Your word list is fine" and
+"you have no word list, so that guard has been inert since you cloned" are
+reported identically: by silence. The daemon's documented behaviour for a
+missing list is to stand the source down quietly, which is correct at runtime —
+a missing file must not break a session — and unhelpful exactly once, on the
+first run, to the one person who does not yet know the file is expected.
+
+This was found as N3 of ledger [00413](../00413-niggles-ledger-thirteen/PLAN.md)
+when a new collaborator cloned the repository. `.claude/block-words.secret` and
+its `.example` are both gitignored — deliberately, and `.gitignore:215-220`
+gives the reason: the rule ships before any such file exists so that a broad
+`git add` can never catch one. So the collaborator got a working daemon with
+`sensitive_content`'s word-list source permanently inert, and nothing anywhere
+said so.
+
+**The fix is NOT to track the example.** That was the first idea and it is
+wrong: it would weaken a deliberate defence-in-depth rule in order to fix a
+reporting gap. The reporting gap is the thing to fix.
+
+## Goals
+
+- A configured protected path that is ABSENT is distinguishable, at
+  SessionStart, from one that is present and healthy.
+
+- The distinction is drawn without ever opening the file, reading its contents,
+  or naming anything from inside it — the existing handler's metadata-only
+  contract is not negotiable and this must not erode it.
+
+- Silence continues to mean "checked, nothing wrong", so the advisory stays
+  worth reading. A handler that speaks every session about a state the owner
+  has deliberately chosen becomes noise, and noise is skimmed.
+
+## Non-Goals
+
+- **Blocking.** This is an advisory and stays one. A missing word list must
+  never stop a session; the whole point of standing the source down silently at
+  runtime is that the daemon keeps working.
+
+- **Tracking `*.secret.example`.** See above — the ignore rule is deliberate,
+  documented, and load-bearing.
+
+- **Changing what `sensitive_content` DOES with a missing list.** Standing the
+  source down is correct. This plan is about whether anyone is told.
+
+## Open questions
+
+These need settling before implementation, and they are genuinely open:
+
+- **Is "absent" always worth reporting, or only when it is unexpected?** A
+  project that never configured a word list has no gap; one that ships
+  `block-words.secret` in its config and lacks the file does. The second is a
+  real finding and the first is noise, and telling them apart may need an
+  explicit declaration rather than inference.
+
+  **Decided (unattended, 2026-09-24)**: report "absent" only when the
+  project's config names the protected path explicitly: `sensitive_content`'s
+  `secret_word_list_path` option, or a path-shaped literal (no glob, contains
+  a `/`) in `secret_file_guard`'s `protected_paths`, with that handler enabled.
+  A default nobody configured is no gap. Assumption: the owner's 'no known
+  defects' instruction; the owner can reverse this with one message.
+
+- **Once per checkout, or every session?** A one-shot notice is easy to miss
+  and easy to ignore; a per-session one is the noise failure above. The
+  existing `deployed_artefact_drift` and `reference_repo_sweep` handlers have
+  each already answered a version of this question — their answers should be
+  read before a third one is invented.
+
+  **Decided (unattended, 2026-09-24)**: report it once per config or content
+  change, keyed by a content hash of the findings in the daemon's untracked
+  dir, reusing the caching pattern of `gitignore_safety_checker`. A new
+  declaration, a moved path or a file lost again after being restored is told
+  again. Assumption: the owner's 'no known defects' instruction; the owner can
+  reverse this with one message.
+
+- **Defect or feature?** **Decided (unattended, 2026-09-24)**: classed as a
+  defect, because a silently inert guard is reported the same as a healthy
+  one. Assumption: the owner's 'no known defects' instruction; the owner can
+  reverse this with one message.
+
+## Tasks
+
+- [x] ✅ **Task 1.1**: Settle the two open questions above with the owner.
+  Settled by the rulings above.
+
+- [x] ✅ **Task 1.2**: Read how `deployed_artefact_drift` and
+  `reference_repo_sweep` decide when to speak, and reuse rather than reinvent.
+  `deployed_artefact_drift` speaks every session while drift lasts, keyed on
+  presence; `gitignore_safety_checker` keeps a content-hash cache under the
+  daemon's untracked dir. The once-only key reuses the latter's shape.
+
+- [x] ✅ **Task 1.3**: Failing test first: a configured-but-absent protected
+  path produces a finding; a configured-and-healthy one still produces silence.
+
+- [x] ✅ **Task 1.4**: Implement, keeping the metadata-only contract — assert in
+  a test that no code path opens a protected file. Absence is judged by
+  `stat()` alone. Plan 00459 has since added one sanctioned in-daemon format
+  read (`classify_at_rest`); the test stubs it so any other open would show.
+
+## Success Criteria
+
+- [x] ✅ A fresh clone whose config names a word list it does not have is told
+  so, once, in terms that say which guard is inert as a result.
+
+- [x] ✅ A checkout with nothing missing produces exactly the same output as
+  today.
+
+- [x] ✅ No protected file's contents are read on any path, proven by test.
+
+- [x] ✅ Full QA passes over the merged batch, the daemon is restarted, and CI
+  is green. Both plans' commits are ancestors of the B3 integration merge
+  `accd1d87d`, whose full gate was 39/39 at `76097e069`
+  (`untracked/scratch/gate-worktree-integration-b3.out`). Main has since moved
+  to `b85759a8a` through the CI-lsp merge (`ddc04bffe`, 39/39 at `21c933335`)
+  and the Python 3.13 fix; CI on `b85759a8a` is green (run 36209100721, all
+  five jobs). The daemon on main was restarted after `b85759a8a` and reports
+  RUNNING.
+
+- [x] ✅ Every release-bound consequence is in the pending-release holding
+  area: `CLAUDE/UPGRADES/UNRELEASED/release-notes/46-a-protected-path-your-config-names-but-lacks-is-now-reported.md`.
+
+## Delivery & Milestones
+
+- Graduated from ledger [00413](../00413-niggles-ledger-thirteen/PLAN.md) N3,
+  which was filed with the wrong fix (track the `.example`) and re-scoped once
+  `.gitignore`'s own comment showed the exclusion was deliberate.
+
+- Delivered at `7632d2652` (and `f21ffa55c`), reaching `main` via the B3
+  integration merge `accd1d87d` (gate 39/39 at `76097e069`). CI green on
+  `main` at `b85759a8a` (run 36209100721); daemon restarted and RUNNING.

@@ -42,6 +42,7 @@ _CHECKER = _REPO_ROOT / "scripts" / "qa" / "check_fail_open_inventory.py"
 _INVENTORY = _REPO_ROOT / "scripts" / "qa" / "fail-open-boundaries.yaml"
 
 _PY_SURFACE = "src/claude_code_hooks_daemon/core/chain.py"
+_BOUNDED_DISPATCH_SURFACE = "src/claude_code_hooks_daemon/core/bounded_dispatch.py"
 _RUST_SURFACE = "relay/hooks_relay.rs"
 _SHELL_SURFACE = "init.sh"
 
@@ -52,6 +53,7 @@ _ALL_PY_SURFACES = (
     _PY_SURFACE,
     "src/claude_code_hooks_daemon/core/front_controller.py",
     "src/claude_code_hooks_daemon/daemon/controller.py",
+    _BOUNDED_DISPATCH_SURFACE,
 )
 
 
@@ -210,6 +212,114 @@ boundaries:
 
         assert len(violations) == 1
         assert violations[0].ordinal == 1
+
+
+_ISINSTANCE_DISPATCH = """
+from claude_code_hooks_daemon.core.bounded_dispatch import DispatchSaturated, DispatchTimeout
+
+
+def execute() -> str:
+    outcome = dispatch()
+    if isinstance(outcome, DispatchTimeout):
+        return "not judged in time (timeout)"
+    if isinstance(outcome, DispatchSaturated):
+        return "not judged in time (saturated)"
+    return "judged"
+"""
+
+_ISINSTANCE_ORDINARY = """
+def execute() -> bool:
+    value = compute()
+    if isinstance(value, str):
+        return True
+    return False
+"""
+
+
+class TestIsinstanceDispatchBoundaries:
+    """Plan 00466 N40 m4: BoundedDispatcher.run() (bounded_dispatch.py)
+    returns a sentinel instead of raising when it cannot get a verdict in
+    time -- so the caller's fail-open decision is an ``isinstance`` check
+    against ``DispatchTimeout``/``DispatchSaturated``, not an ``except``
+    block, and the except-only scanner cannot see it.
+    """
+
+    def test_an_undeclared_isinstance_dispatch_branch_is_a_violation(
+        self, checker: ModuleType, tmp_path: Path
+    ) -> None:
+        _empty_surfaces(tmp_path)
+        _surface(tmp_path, _PY_SURFACE, _ISINSTANCE_DISPATCH)
+        inventory = _inventory(tmp_path, "boundaries: []\n")
+
+        violations = checker.scan(tmp_path, inventory)
+
+        assert len(violations) == 2
+        constructs = sorted(v.construct for v in violations)
+        assert constructs == [
+            "isinstance-dispatch DispatchSaturated",
+            "isinstance-dispatch DispatchTimeout",
+        ]
+        assert all(v.scope == "execute" for v in violations)
+
+    def test_an_isinstance_check_unrelated_to_dispatch_is_not_a_boundary(
+        self, checker: ModuleType, tmp_path: Path
+    ) -> None:
+        """The narrowing control: an ordinary isinstance check (type
+        narrowing that has nothing to do with a dispatch outcome) must not
+        be flagged, or the inventory becomes every isinstance in the file.
+        """
+        _empty_surfaces(tmp_path)
+        _surface(tmp_path, _PY_SURFACE, _ISINSTANCE_ORDINARY)
+        inventory = _inventory(tmp_path, "boundaries: []\n")
+
+        assert checker.scan(tmp_path, inventory) == []
+
+    def test_a_declared_isinstance_dispatch_branch_is_clean(
+        self, checker: ModuleType, tmp_path: Path
+    ) -> None:
+        _empty_surfaces(tmp_path)
+        _surface(tmp_path, _PY_SURFACE, _ISINSTANCE_DISPATCH)
+        inventory = _inventory(
+            tmp_path,
+            f"""
+boundaries:
+  - surface: {_PY_SURFACE}
+    scope: execute
+    construct: "isinstance-dispatch DispatchTimeout"
+    ordinal: 0
+    verdict: fail-open
+    induced_by: "a handler slow enough to exceed the chain deadline"
+    caller_controlled: true
+    trace: "context note; ALLOW when no SAFETY+BLOCKING handler is registered"
+  - surface: {_PY_SURFACE}
+    scope: execute
+    construct: "isinstance-dispatch DispatchSaturated"
+    ordinal: 0
+    verdict: fail-open
+    induced_by: "the bounded-dispatch pool or straggler cap being exhausted"
+    caller_controlled: true
+    trace: "context note; ALLOW when no SAFETY+BLOCKING handler is registered"
+""",
+        )
+
+        assert checker.scan(tmp_path, inventory) == []
+
+    def test_the_bounded_dispatch_surface_is_now_scanned(
+        self, checker: ModuleType, tmp_path: Path
+    ) -> None:
+        """Plan 00466 N40 m4: the surface itself was previously absent from
+        scope, so nothing in it was ever a candidate -- a missing surface
+        reads exactly like an empty one.
+        """
+        _empty_surfaces(tmp_path)
+        (tmp_path / _BOUNDED_DISPATCH_SURFACE).unlink()
+        inventory = _inventory(tmp_path, "boundaries: []\n")
+
+        violations = checker.scan(tmp_path, inventory)
+
+        assert len(violations) == 1
+        assert violations[0].surface == _BOUNDED_DISPATCH_SURFACE
+        assert "unreadable" in violations[0].detail
 
 
 class TestRowQuality:

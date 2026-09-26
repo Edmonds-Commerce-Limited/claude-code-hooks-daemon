@@ -49,7 +49,7 @@ _SCHEME_SEPARATOR: Final[str] = "://"
 _MAX_REPORTED_LINKS: Final[int] = 10
 
 
-def _is_skippable(target: str) -> bool:
+def is_skippable_link(target: str) -> bool:
     """Whether ``target`` is a shape this check never resolves.
 
     Mirrors ``docs_qa.checks.pointer_resolves._is_skippable``: an external
@@ -159,7 +159,7 @@ def _document_findings(
     misrouted = _Bucket()
     dead: list[str] = []
     for link in extract_link_targets(target.text):
-        if _is_skippable(link) or _resolves_literally(context, doc_dir_rel, link):
+        if is_skippable_link(link) or _resolves_literally(context, doc_dir_rel, link):
             continue
         relocated = resolver.resolve(source_dir, link)
         if relocated is None:
