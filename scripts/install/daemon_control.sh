@@ -77,6 +77,28 @@ _daemon_process_exists() {
 }
 
 #
+# _daemon_cli() - Run the daemon CLI for the project this shell stands in.
+#
+# The install and upgrade scripts `cd` to the project root before any of
+# these helpers run. The CLI is given that root resolved, which a new daemon
+# names, and the path the shell reached it by ($PWD, links unresolved), which
+# a daemon an older init.sh started through a link names (round 9b). A
+# daemon's own root text is never resolved, so without the second the old
+# daemon could not be proven, and so not stopped.
+#
+# Args:
+#   $1 - venv_python: Path to venv Python binary
+#   $@ - The CLI subcommand and its arguments
+#
+_daemon_cli() {
+    local venv_python="$1" physical_root
+    shift
+    physical_root="$(pwd -P)"
+    CLAUDE_HOOKS_DAEMON_CALLER_ROOT="$PWD" "$venv_python" -m claude_code_hooks_daemon.daemon.cli \
+        --project-root "$physical_root" "$@"
+}
+
+#
 # stop_daemon_safe() - Safely stop the daemon
 #
 # Stops daemon without failing if it's not running.
@@ -105,7 +127,7 @@ stop_daemon_safe() {
 
     # Stop daemon — daemon may not be running. `if` wrapper preserves
     # set -e safety while tolerating the expected "not running" exit code.
-    if "$venv_python" -m claude_code_hooks_daemon.daemon.cli stop 2>/dev/null; then :; fi
+    if _daemon_cli "$venv_python" stop 2>/dev/null; then :; fi
 
     return 0
 }
@@ -154,7 +176,7 @@ start_daemon_safe() {
     # Capture daemon output so errors are visible (Bug 00088-2)
     local daemon_output
     local exit_code
-    daemon_output=$("$venv_python" -m claude_code_hooks_daemon.daemon.cli start 2>&1) && exit_code=0 || exit_code=$?
+    daemon_output=$(_daemon_cli "$venv_python" start 2>&1) && exit_code=0 || exit_code=$?
 
     # Expose the starter result for callers that defer to the status poll.
     DAEMON_START_EXIT_CODE="$exit_code"
@@ -202,7 +224,7 @@ get_daemon_status() {
     fi
 
     # Capture both stdout and stderr
-    "$venv_python" -m claude_code_hooks_daemon.daemon.cli status 2>&1
+    _daemon_cli "$venv_python" status 2>&1
 }
 
 #
@@ -435,7 +457,7 @@ restart_daemon_quick() {
 
     print_info "Restarting daemon (quick)..."
 
-    if "$venv_python" -m claude_code_hooks_daemon.daemon.cli restart; then
+    if _daemon_cli "$venv_python" restart; then
         print_success "Daemon restarted"
         return 0
     else

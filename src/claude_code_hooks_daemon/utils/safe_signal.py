@@ -98,8 +98,13 @@ def _refuse_own_lineage(pid: int) -> None:
         raise RefusedSignalTarget(f"pid {pid} is an ancestor of this process")
 
 
-def verified_daemon_process(pid: object, *, project_root: Path | str) -> psutil.Process:
+def verified_daemon_process(
+    pid: object, *, project_root: Path | str, logical_root: str | None = None
+) -> psutil.Process:
     """A handle on ``pid``, proven to be the daemon server for ``project_root``.
+
+    ``logical_root`` is the caller's unresolved spelling of that root (see
+    :func:`root_names_project`).
 
     The returned :class:`psutil.Process` remembers the process's start time and
     re-checks it before every ``send_signal``/``terminate``/``kill``. That
@@ -150,7 +155,7 @@ def verified_daemon_process(pid: object, *, project_root: Path | str) -> psutil.
     attributed = _attributed_root(process, cmdline)
     if attributed.root is None:
         raise RefusedSignalTarget(f"pid {checked} is a daemon server, but {attributed.refusal}")
-    if not root_names_project(attributed.root, project_root):
+    if not root_names_project(attributed.root, project_root, logical_root=logical_root):
         raise RefusedSignalTarget(
             f"pid {checked} is a daemon for project root {attributed.root!r}, "
             f"not {str(project_root)!r}"
@@ -256,6 +261,7 @@ def stop_verified_daemon(
     project_root: Path | str,
     grace_seconds: float,
     kill_grace_seconds: float | None = None,
+    logical_root: str | None = None,
 ) -> DaemonStop:
     """SIGTERM this project's daemon at ``pid``, then SIGKILL it after the grace.
 
@@ -271,6 +277,8 @@ def stop_verified_daemon(
             after SIGKILL, which a process cannot catch, block or ignore, so
             this budget only needs to cover reaping -- not another chance to
             exit gracefully. Defaults to ``grace_seconds`` when omitted.
+        logical_root: The caller's unresolved spelling of ``project_root``,
+            see :func:`verified_daemon_process`.
 
     Raises:
         RefusedSignalTarget: See :func:`verified_daemon_process`.
@@ -279,7 +287,9 @@ def stop_verified_daemon(
     kill_wait = grace_seconds if kill_grace_seconds is None else kill_grace_seconds
     try:
         with _pinned(pid) as pidfd:
-            process = verified_daemon_process(pid, project_root=project_root)
+            process = verified_daemon_process(
+                pid, project_root=project_root, logical_root=logical_root
+            )
             _send(process, pidfd, signal.SIGTERM)
             if _exited_within(process, pidfd, grace_seconds):
                 return DaemonStop.TERMINATED

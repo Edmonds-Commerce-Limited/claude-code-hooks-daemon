@@ -261,9 +261,12 @@ class TestInitShPassesEnvVars:
         assert 'CLAUDE_HOOKS_PID_PATH="$PID_PATH"' in init_sh
 
     def test_init_sh_passes_project_root_to_cli(self) -> None:
-        """init.sh start_daemon() must pass --project-root to CLI."""
+        """init.sh start_daemon() must pass --project-root to CLI, resolved
+        (round 9b; behaviour pinned by
+        ``test_a_daemon_of_a_symlinked_project_is_stoppable.py``)."""
         init_sh = self._read_init_sh()
-        assert '--project-root "$PROJECT_PATH"' in init_sh
+        assert 'physical_root="$(cd -P -- "$PROJECT_PATH" && pwd -P)"' in init_sh
+        assert '--project-root "$physical_root"' in init_sh
 
 
 # ============================================================================

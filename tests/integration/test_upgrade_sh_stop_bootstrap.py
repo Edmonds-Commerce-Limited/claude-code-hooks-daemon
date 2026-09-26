@@ -235,6 +235,59 @@ class TestStopByPidFile:
         assert p2.wait(timeout=_REAP_SECONDS) == -signal.SIGTERM
 
 
+class TestAProjectReachedThroughALink:
+    """Round 9b: ``PROJECT_ROOT`` is the path the upgrade was run from,
+    link and all, while every current launcher names the resolved root. A
+    daemon naming either spelling of this project is this project's."""
+
+    @pytest.fixture
+    def linked(self, tmp_path: Path) -> tuple[Path, Path]:
+        """The project's real path and its path through a link."""
+        (tmp_path / "real" / "project").mkdir(parents=True)
+        (tmp_path / "link").symlink_to(tmp_path / "real")
+        return tmp_path / "real" / "project", tmp_path / "link" / "project"
+
+    @pytest.mark.parametrize("named", ["real", "link"])
+    def test_a_daemon_naming_either_spelling_is_stopped(
+        self,
+        tmp_path: Path,
+        linked: tuple[Path, Path],
+        children: list[subprocess.Popen[bytes]],
+        named: str,
+    ) -> None:
+        real, link = linked
+        daemon_dir, untracked = _untracked(tmp_path)
+        proc = _spawn_daemon(real if named == "real" else link)
+        children.append(proc)
+        _write_pid_file(untracked, "daemon-testhost.pid", proc.pid)
+
+        result = _run_stop_step(daemon_dir, tmp_path, project_root=link)
+
+        assert result.returncode == 0, f"stderr: {result.stderr}"
+        assert proc.wait(timeout=_REAP_SECONDS) == -signal.SIGTERM
+
+    def test_a_daemon_named_through_a_link_since_re_pointed_is_left_running(
+        self, tmp_path: Path, children: list[subprocess.Popen[bytes]]
+    ) -> None:
+        """The daemon's text is never resolved: the link it named names
+        another tree now, and the daemon serves the one it named then."""
+        (tmp_path / "old" / "project").mkdir(parents=True)
+        (tmp_path / "new" / "project").mkdir(parents=True)
+        link = tmp_path / "link"
+        link.symlink_to(tmp_path / "old")
+        daemon_dir, untracked = _untracked(tmp_path)
+        proc = _spawn_daemon(link / "project")
+        children.append(proc)
+        _write_pid_file(untracked, "daemon-testhost.pid", proc.pid)
+        link.unlink()
+        link.symlink_to(tmp_path / "new")
+
+        result = _run_stop_step(daemon_dir, tmp_path, project_root=tmp_path / "new" / "project")
+
+        assert result.returncode == 0, f"stderr: {result.stderr}"
+        assert _process_alive(proc.pid), "the stop step signalled another tree's daemon"
+
+
 class TestAPidThatIsNotThisProjectsDaemonIsNeverSignalled:
     """Plan 00466 N59: a stale PID file can name whatever reused that pid."""
 

@@ -84,6 +84,7 @@ from claude_code_hooks_daemon.daemon.permission_audit import (
     tighten_permissions,
 )
 from claude_code_hooks_daemon.daemon.process_verification import (
+    CALLER_ROOT_ENV_VAR,
     DAEMON_CLI_MODULE,
     PROJECT_ROOT_ENV_VAR,
     add_global_arguments,
@@ -1253,12 +1254,15 @@ def cmd_stop(args: argparse.Namespace) -> int:
     # escalation after the SIGTERM grace is Plan 00466 N40 review 2 MA2 -- a
     # GIL-holding handler cannot even reach Python's signal-handling bytecode
     # check to act on SIGTERM, and SIGKILL cannot be caught, blocked or ignored.
+    # The caller's logical root proves a daemon an older init.sh started
+    # through a link (round 9b); project_path is always resolved.
     try:
         outcome = stop_verified_daemon(
             pid,
             project_root=project_path,
             grace_seconds=Timeout.SOCKET_CONNECT,
             kill_grace_seconds=Timeout.DAEMON_SIGKILL_GRACE,
+            logical_root=getattr(args, "caller_logical_root", None),
         )
     except RefusedSignalTarget as refused:
         print(f"ERROR: Not signalling PID {pid}: {refused}", file=sys.stderr)
@@ -9325,6 +9329,9 @@ def main() -> int:
     """
     parser = build_parser()
     args = apply_global_project_root(parser.parse_args())
+    # Taken out of the environment so the daemon a start forks never carries
+    # a caller's hint on (round 9b); the relaunch below passes it on itself.
+    args.caller_logical_root = os.environ.pop(CALLER_ROOT_ENV_VAR, None) or None
 
     # Execute command
     if not hasattr(args, "func"):
@@ -11187,6 +11194,9 @@ def _reexec_daemon_launch_with_explicit_project_root(args: argparse.Namespace) -
 
     reexec_env = dict(os.environ)
     reexec_env[PROJECT_ROOT_ENV_VAR] = str(project_path)
+    caller_logical_root = getattr(args, "caller_logical_root", None)
+    if caller_logical_root is not None:
+        reexec_env[CALLER_ROOT_ENV_VAR] = caller_logical_root
 
     sys.stdout.flush()
     sys.stderr.flush()

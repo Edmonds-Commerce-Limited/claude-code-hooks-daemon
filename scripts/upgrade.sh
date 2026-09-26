@@ -551,7 +551,15 @@ _is_project_daemon_pid() {
             *) return 1 ;;
         esac
     fi
-    [ "${derived%/}" = "$root" ]
+    # PROJECT_ROOT is the path the upgrade was run from, links unresolved,
+    # and every current launcher names the root resolved (round 9b). The
+    # daemon's own text is never resolved: a link it named may name another
+    # tree by now.
+    derived="${derived%/}"
+    [ "$derived" = "$root" ] && return 0
+    local physical
+    physical="$(cd -P -- "$root" && pwd -P)" || return 1
+    [ "$derived" = "$physical" ]
 }
 
 _info "Stopping daemon (best-effort, PID-only)..."

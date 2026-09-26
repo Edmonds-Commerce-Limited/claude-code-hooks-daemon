@@ -825,6 +825,39 @@ class TestADaemonsRootTextIsNeverResolved:
             str(tmp_path / "link" / "project"), tmp_path / "new" / "project"
         )
 
+    def test_the_callers_logical_root_names_a_daemon_started_through_it(
+        self, tmp_path: Path
+    ) -> None:
+        """Round 9b: ``bin/hooks-daemon`` names its root resolved, and hands
+        over the link it was invoked through, which is how a daemon an older
+        ``init.sh`` started names it."""
+        (tmp_path / "real" / "project").mkdir(parents=True)
+        (tmp_path / "link").symlink_to(tmp_path / "real")
+        linked = tmp_path / "link" / "project"
+
+        assert root_names_project(
+            str(linked), tmp_path / "real" / "project", logical_root=str(linked)
+        )
+
+    def test_a_logical_root_naming_another_tree_is_no_candidate(self, tmp_path: Path) -> None:
+        """A logical root counts only as a spelling of the caller's own
+        tree: it resolves to where the caller's root does."""
+        (tmp_path / "project").mkdir()
+        (tmp_path / "other").mkdir()
+        other = str(tmp_path / "other")
+
+        assert not root_names_project(other, tmp_path / "project", logical_root=other)
+
+    @pytest.mark.parametrize("spelling", ["relative/project", "{root}/link/../link/project"])
+    def test_a_logical_root_not_in_normal_form_is_no_candidate(
+        self, tmp_path: Path, spelling: str
+    ) -> None:
+        (tmp_path / "real" / "project").mkdir(parents=True)
+        (tmp_path / "link").symlink_to(tmp_path / "real")
+        logical = spelling.format(root=tmp_path)
+
+        assert not root_names_project(logical, tmp_path / "real" / "project", logical_root=logical)
+
     def test_the_proof_carries_the_daemons_own_text(self, tmp_path: Path) -> None:
         (tmp_path / "real" / "project").mkdir(parents=True)
         (tmp_path / "link").symlink_to(tmp_path / "real")

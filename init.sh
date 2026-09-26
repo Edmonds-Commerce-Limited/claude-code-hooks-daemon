@@ -1541,6 +1541,15 @@ start_daemon() {
     # liveness before unlinking (reuse on live, unlink on stale). We already
     # short-circuit via is_daemon_running() above for the healthy-incumbent case.
 
+    # The daemon names its root resolved (round 9b): its text is never
+    # resolved, so a root named through a link was refused by every caller
+    # that resolves its own, bin/hooks-daemon included.
+    local physical_root
+    if ! physical_root="$(cd -P -- "$PROJECT_PATH" && pwd -P)"; then
+        echo "ERROR: cannot resolve the project root $PROJECT_PATH" >&2
+        return 1
+    fi
+
     # Start daemon using CLI (proper daemonization)
     # CRITICAL: Pass --project-root and export env vars so the CLI uses the
     # same paths we computed above. Without this, the CLI re-discovers the
@@ -1575,7 +1584,7 @@ start_daemon() {
         CLAUDE_HOOKS_SOCKET_PATH="$SOCKET_PATH" \
             CLAUDE_HOOKS_PID_PATH="$PID_PATH" \
             $PYTHON_CMD -m claude_code_hooks_daemon.daemon.cli \
-            --project-root "$PROJECT_PATH" start < /dev/null 2>&1)
+            --project-root "$physical_root" start < /dev/null 2>&1)
 
     # Wait for daemon to be ready (using deciseconds for integer arithmetic).
     #

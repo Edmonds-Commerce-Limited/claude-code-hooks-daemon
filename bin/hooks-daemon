@@ -300,6 +300,23 @@ if [ ! -d "$PROJECT_ROOT/.claude" ]; then
     exit 5
 fi
 
+# The same root as the caller reached it, links unresolved (round 9b). A
+# daemon an older init.sh started through a link names its root that way,
+# and a daemon's root text is never resolved, so `stop` could not prove it
+# from PROJECT_ROOT alone. The CLI takes this only as another spelling of
+# PROJECT_ROOT's own tree. A wrapper reached through a link to the wrapper
+# itself has no such spelling, so it hands over none.
+CALLER_ROOT=""
+if [ ! -L "${BASH_SOURCE[0]}" ]; then
+    _logical_daemon_dir="$(cd -L "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -L)"
+    if [ "$PROJECT_ROOT" = "$DAEMON_DIR" ]; then
+        CALLER_ROOT="$_logical_daemon_dir"
+    else
+        CALLER_ROOT="$(cd -L "$_logical_daemon_dir/../.." && pwd -L)"
+    fi
+fi
+
 # Derived anchor FIRST: argparse takes the last occurrence, so a caller's own
 # --project-root still overrides it.
-exec "$PYTHON" -m claude_code_hooks_daemon.daemon.cli --project-root "$PROJECT_ROOT" "$@"
+CLAUDE_HOOKS_DAEMON_CALLER_ROOT="$CALLER_ROOT" \
+    exec "$PYTHON" -m claude_code_hooks_daemon.daemon.cli --project-root "$PROJECT_ROOT" "$@"

@@ -269,6 +269,45 @@ class TestADaemonPidIsSignalledOnlyWhenItIsThisProjectsDaemon:
             )
         assert daemon.poll() is None
 
+    def test_a_daemon_named_through_a_link_is_stopped_for_the_logical_root_of_its_caller(
+        self, tmp_path: Path, children: list[subprocess.Popen[bytes]]
+    ) -> None:
+        """Round 9b: an older ``init.sh`` named the root through the link,
+        and ``bin/hooks-daemon`` names it resolved, handing over the link it
+        was invoked through as its logical root."""
+        (tmp_path / "real" / "project").mkdir(parents=True)
+        (tmp_path / "link").symlink_to(tmp_path / "real")
+        linked = tmp_path / "link" / "project"
+        daemon = _fake_daemon(children, linked)
+
+        outcome = stop_verified_daemon(
+            daemon.pid,
+            project_root=tmp_path / "real" / "project",
+            logical_root=str(linked),
+            grace_seconds=_GRACE_SECONDS,
+        )
+
+        assert outcome is DaemonStop.TERMINATED
+        assert daemon.wait(timeout=_GRACE_SECONDS) == -signal.SIGTERM
+
+    def test_a_logical_root_of_another_tree_proves_nothing(
+        self, tmp_path: Path, children: list[subprocess.Popen[bytes]]
+    ) -> None:
+        """A logical root that does not resolve to the caller's own tree is
+        no spelling of it, so another project's daemon is refused."""
+        (tmp_path / "project").mkdir()
+        (tmp_path / "other").mkdir()
+        daemon = _fake_daemon(children, tmp_path / "other")
+
+        with pytest.raises(RefusedSignalTarget, match="project root"):
+            stop_verified_daemon(
+                daemon.pid,
+                project_root=tmp_path / "project",
+                logical_root=str(tmp_path / "other"),
+                grace_seconds=_GRACE_SECONDS,
+            )
+        assert daemon.poll() is None
+
     def test_a_root_whose_dotdot_follows_a_link_proves_nothing(
         self, tmp_path: Path, children: list[subprocess.Popen[bytes]]
     ) -> None:

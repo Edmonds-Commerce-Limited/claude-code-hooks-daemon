@@ -47,6 +47,12 @@ _PROJECT_ROOT_FLAG = "--project-root"
 # it, this module only reads it.
 PROJECT_ROOT_ENV_VAR = "CLAUDE_HOOKS_DAEMON_PROJECT_ROOT"
 
+# Env var through which a launcher that names the root resolved hands the CLI
+# its caller's logical root, links unresolved (round 9b): the spelling a
+# daemon an older ``init.sh`` started carries. ``root_names_project`` takes it
+# only as a spelling of the caller's own tree.
+CALLER_ROOT_ENV_VAR = "CLAUDE_HOOKS_DAEMON_CALLER_ROOT"
+
 # Where a client install keeps the daemon, below the project it serves.
 _CLIENT_DAEMON_DIR = (".claude", "hooks-daemon")
 
@@ -181,7 +187,9 @@ def _normalize_root(root: str | Path) -> str:
     return os.path.normpath(str(root))
 
 
-def root_names_project(process_root: str, project_root: Path | str) -> bool:
+def root_names_project(
+    process_root: str, project_root: Path | str, *, logical_root: str | None = None
+) -> bool:
     """True when a daemon's normalised root text names ``project_root``.
 
     The daemon's text is never resolved (review 9, DR-1): a link it named
@@ -191,9 +199,24 @@ def root_names_project(process_root: str, project_root: Path | str) -> bool:
     given or resolved: a daemon started through a link is proven for a
     caller naming that link, and one naming the real tree for a caller
     naming it through a link.
+
+    ``logical_root`` is the caller's own spelling of its root before its
+    launcher resolved it (round 9b): a daemon an older ``init.sh`` started
+    through a link names that. It is a candidate only when it is absolute,
+    in normal form, and resolves to where ``project_root`` does; anything
+    else names some other tree, or none, and proves nothing.
     """
     caller = Path(project_root).absolute()
-    return process_root in (_normalize_root(caller), os.path.realpath(caller))
+    resolved = os.path.realpath(caller)
+    candidates = {_normalize_root(caller), resolved}
+    if (
+        logical_root is not None
+        and Path(logical_root).is_absolute()
+        and logical_root == _normalize_root(logical_root)
+        and os.path.realpath(logical_root) == resolved
+    ):
+        candidates.add(logical_root)
+    return process_root in candidates
 
 
 def _extract_project_root(proc: psutil.Process) -> str | None:
