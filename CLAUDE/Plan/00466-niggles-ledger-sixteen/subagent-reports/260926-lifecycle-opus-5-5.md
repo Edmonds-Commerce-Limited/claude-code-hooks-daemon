@@ -276,3 +276,105 @@ with TDD; the RED evidence is against the round-1 code (`0c6db306d`).
 - `relay/test_relay.py`: 13/13. The relay builds with `-D warnings`.
 - `shellcheck -x init.sh`, ruff, black, mypy and pyright: clean on every
   touched file.
+
+## Round 3: the round-2 re-review minors
+
+Brief: `untracked/scratch/briefs/lifecycle-fix-3.md`. Reviews: D-PATH
+`260926-150213-lifecycle-review-path-2-…md` and D-RULE
+`260926-150518-lifecycle-review-rule-2-…md`, both READY. Code commit
+`bdd523501`. Every finding is fixed with TDD. The RED evidence comes from a
+`git archive` of `1879f881a` with only the new tests laid over it, and a relay
+built from that tree: 28 targeted tests fail there and pass here.
+
+| Finding       | Fix                                                                                                                                                                                                                                                                                                           | RED proof (on `1879f881a`)                                                                                                                                                                                                                                         |
+| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| m-A           | The carve-out exempts a spelling only when the file it runs resolves to `<HOOKS_DAEMON_ROOT_DIR>/bin/hooks-daemon`. `_recovery_command`, the relay's `RECOVERY_LAUNCHERS` and the daemon's own transport deny use `cli.py`'s order, clone first. With no launcher, the deny names where the install's belongs | `TestOnlyThisInstallsLauncherIsExempt`: an unrelated root script is denied (relative, absolute and on a hand-off), and never named. Relay: `test_with_both_launchers_it_names_the_clones_first`. Server: `TestTheTransportDenyNamesThisInstallsLauncher` (2 cases) |
+| m-B           | `_release_stopped_daemon_files` runs under `server.hold_start_lock` (the flock a start holds across probe, PID write, unlink and bind). If the lock is still held after `Timeout.FILE_LOCK`, it leaves both files                                                                                             | `test_the_probe_and_both_removals_hold_the_start_lock` (each call records whether the lock is held); `test_a_start_that_keeps_the_lock_keeps_both_files`                                                                                                           |
+| Shared (N139) | `is_daemon_running` counts only ESRCH ("No such process" in the C locale) as dead. EPERM, or any other failure on a numeric pid, returns 0 and keeps the file. A non-numeric file is still stale                                                                                                              | `test_a_pid_it_may_not_signal_is_alive_and_keeps_its_file` (the builtin is shadowed with its real EPERM text, since root may signal anything)                                                                                                                      |
+| R2-1          | If `python3` cannot name the recovery command, `emit_hook_error` switches to a fixed message that says no command is exempt. The jq-less encoder and the transport fall back to `_hooks_daemon_static_deny` (exported)                                                                                        | `TestADenyNeedsNoPython3`: PATH without `python3`, with and without `jq`, for the daemon-down deny and for the transport                                                                                                                                           |
+| Cap           | Over the cap, the value is clamped to 45 with one WARNING that names the key, the value, the cap, the reason and the fix. The UNRELEASED manifest has a `changed` entry with the new `maximum: 45` field, which `check-config-migrations` reports only for a number above it                                  | `test_a_timeout_over_the_cap_takes_the_cap_and_warns_why`, `test_a_whole_config_over_the_cap_still_loads`, and `test_relay_timeout_cap_migration_advisory.py` (real manifest tree, `maximum` pinned to `Timeout.RELAY_TIMEOUT_CAP`)                                |
+| Shared (N140) | Reading stdin, parsing it and encoding the envelope all happen inside the handler. For PreToolUse, `invalid_hook_input` is a deny: "Hook input could not be parsed, so no guard judged this call"                                                                                                             | `TestInputThatCannotBeParsedIsDenied`: 1000-deep input, every depth from 980 to 1000 (993 parsed, then crashed in `json.dumps` with no answer), non-JSON, non-UTF-8, and a hand-off. Relay: `test_input_nested_too_deeply_to_parse_is_denied`                      |
+
+N139 and N140 are logged and marked ✅ in `NIGGLES.md` and `PLAN.md`. N128's
+entry records m-B. The release notes are 152 (m-B) and 153 (m-A and the
+cap), plus new notes 154 (N139) and 155 (N140 and R2-1).
+
+### Decision for the coordinator: clamp, do not refuse
+
+An over-cap `daemon.transport.timeout_seconds` now **starts the daemon with
+45 and a loud warning**. It is not refused. My reasoning:
+
+- Refusing fails closed and cannot be escaped from inside the session. The
+  daemon does not start, so every PreToolUse call is denied, including the
+  `Edit` that would fix the config. `restart` and `repair` re-read the same
+  config and refuse again. Only a human can clear it. The value in question
+  was accepted by main.
+- Clamping keeps the invariant the cap exists for. The effective relay wait
+  is 45, so wait plus hand-off plus margin still ends before the 60 s hook
+  timeout. The forwarder generator bakes `--timeout-ms` from the validated
+  model, so the relay gets 45 too. The one thing lost is that the config file
+  no longer states the effective value, which is why the warning exists.
+- It is reported before it bites. The upgrade advisory names the key, the
+  value and 45. The daemon log warns at every load with the key, the cap, the
+  reason and the fix. `HANDLER_REFERENCE.md` and note 153 say so.
+- The cost: the warning goes to the daemon log and to any CLI that validates
+  the config. It is not a SessionStart advisory. If the coordinator wants the
+  warning in front of the agent, the next step would be a health/SessionStart
+  line. I did not add one (YAGNI) without that call.
+
+### Other choices worth checking
+
+- **"This install" is `HOOKS_DAEMON_ROOT_DIR`.** `init.sh` resolves it from
+  `.claude/hooks-daemon.env` or the `.claude/hooks-daemon` default, and
+  exports it. The carve-out takes it as a new argument. A relative spelling
+  is now exempt from any `cwd` where it resolves to that launcher, for
+  example `bin/hooks-daemon` from inside the clone. It still runs the right
+  file. The accepted absolute spellings are the two project-rooted ones plus
+  `<daemon root>/bin/hooks-daemon`, so a custom root outside the project is
+  recoverable too. The relay cannot read the env file (no config, by design),
+  so it names the first existing file in `cli.py`'s order. That is the clone's
+  launcher whenever the clone has one.
+- **The test fixtures changed shape.** `_make_project` now models a client:
+  the launcher lives in the clone, and the root `bin/hooks-daemon` is a link
+  to it. `_make_self_install` models this repository. The `test_ci_passthrough`
+  and `test_emit_hook_error_jqless` fixtures had a root launcher unrelated to
+  their install, which is exactly m-A, so they now link to the install's
+  launcher. The three round-2 naming tests expect the clone's launcher first.
+- **The daemon's own deny had the same m-A class.**
+  `_TRANSPORT_FAIL_CLOSED_REASON` ended with a relative
+  `bin/hooks-daemon restart`, which in a client project runs nothing, or runs
+  the project's own script. It now ends with `daemon_cli_command("restart")`.
+  Not fixed, same class but outside the deny path:
+  `cmd_check_source_fresh` prints `Start it with: bin/hooks-daemon restart`,
+  and `source_fingerprint._RESTART_ADVICE` says the same. Both are
+  daemon-repo developer tooling, where that spelling is right.
+- **The EPERM test shadows `kill`.** Root may signal any process, so a real
+  EPERM would need a privilege drop. The rules forbid that kind of
+  root-conditioned branching. The shadow emits
+  `bash: kill: (<pid>) - <os.strerror(EPERM)>`, the builtin's own format.
+  The round-2 successor test's shadow now emits the ESRCH text. It really
+  was probing a dead pid.
+- **`hold_start_lock` polls** with `LOCK_NB` every 50 ms until
+  `Timeout.FILE_LOCK`, rather than blocking. A start that wedges while
+  holding the lock cannot hang `stop`. Two pidfd tests patched `os.close`
+  globally, which would have leaked the real lock fd. They now close every
+  descriptor except the fake pidfd, and count that one.
+
+### Verification (round 3)
+
+- The targeted files: `test_init_sh_pretooluse_fail_closed.py`,
+  `test_relay_guard_fail_open.py`, `test_cli_commands.py`,
+  `test_event_socket_fail_closed_pretooluse.py`, `test_transport_config.py`,
+  all of `tests/unit/install/`, `test_ci_passthrough.py`,
+  `test_emit_hook_error_jqless.py`, `test_server_liveness_reuse.py`,
+  `test_cli_check_config_migrations.py` and
+  `test_fail_open_inventory_checker.py`. Result: 1766 passed. Also every
+  other `init.sh` integration file, `tests/unit/config` and `tests/config`:
+  green.
+- `check_fail_open_inventory.py`: 39 scanned, 39 rows. No new boundary.
+- `relay/build.sh` (`-D warnings`) built clean; `relay/test_relay.py` 13/13.
+- `shellcheck init.sh`, ruff, black, mypy and pyright: clean on every
+  touched file.
+- `bin/hooks-daemon restart` from the worktree: RUNNING, 31/31 per-event
+  listeners.
+- Gate not queued, per the brief.
