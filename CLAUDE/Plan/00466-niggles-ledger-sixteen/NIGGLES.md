@@ -9,6 +9,23 @@ interrupt a running handler) and lands with that branch. N40 is taken there too
 taken on the N38 fix branch (the chain's remaining linear per-token cost, which
 waits for the shell-parser consolidation).
 
+### N99 — `dev-handlers.md` offers an agent a wrapper command that the daemon denies
+
+**Found by the Plan 464 gate fixer** (`260926-p464-gatefix2-sonnet-5.md`
+on `worktree-plan-464-commit-gate-repo`). The skill routes agents to the
+`init-project-handlers` verb and offers
+`bash .claude/skills/hooks-daemon/scripts/init-handlers.sh <…>` "for a human
+who prefers prompts". The script's self-update bootstrap re-execs a path
+computed by `mktemp`, so on 464's branch `destructive_git` denies it as
+`R-GIT-ALIAS-UNREAD`. That script-content scan is Plan 464 Task 1.11's
+intended behaviour. The doc does not say that an agent will be refused. An
+agent following the page as a whole would therefore hit a denial the page
+never mentions.
+
+**Remedy:** once 464 lands, the doc says the wrapper is for a human to run
+themselves (`! bash …`), and that an agent uses the verb. A copy-paste test
+should pin that each documented agent-facing command is allowed.
+
 ### N98 — Past the AF_UNIX limit, every hostname shares one fallback socket, PID file and events dir
 
 **Found by upgrade scripts round 13** (report

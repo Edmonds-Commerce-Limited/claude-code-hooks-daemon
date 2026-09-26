@@ -128,6 +128,7 @@ Full write-ups are in [NIGGLES.md](NIGGLES.md). One line each here:
 | N96 | `subagent_full_qa_blocker.py` is one 5,300-line handler                                                        | Coordinator                                                     | ⬜ Open (after 00463)            |
 | N97 | `block-curl-pipe-shell` denies prose that only mentions curl and bash                                          | N38 review 9                                                    | ⬜ Open (after N38)              |
 | N98 | Past the AF_UNIX limit, every hostname shares one fallback socket, PID file and events dir                     | Upgrade scripts round 13                                        | ⬜ Open (after N24, with N86)    |
+| N99 | `dev-handlers.md` offers an agent a wrapper command that the daemon denies                                     | Plan 464 gate fixer                                             | ⬜ Open (after 464)              |
 
 ## Tasks
 
