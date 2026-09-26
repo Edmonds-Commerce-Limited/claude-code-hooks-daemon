@@ -21,8 +21,15 @@ scan of 200 KB costs on this hardware, which is nowhere close.
 """
 
 import time
+from collections.abc import Callable
 
+import pytest
+
+from claude_code_hooks_daemon.utils.heredoc_operators import scan_heredocs
 from claude_code_hooks_daemon.utils.shell_segmentation import (
+    earlier_segments_are_inert,
+    heredoc_consumers,
+    known_variables,
     strip_inert_spans,
     strip_message_bodies,
     strip_quoted_heredoc_bodies,
@@ -94,3 +101,56 @@ class TestStripInertSpansCombinedIsLinear:
 
         assert elapsed < _MAX_SECONDS, f"took {elapsed:.2f}s, expected well under {_MAX_SECONDS}s"
         assert result
+
+
+#: Size ratio and the cost ratio a linear helper stays under: linear is 8,
+#: quadratic 64, so noise on a loaded host cannot turn one into the other.
+_SCALE = 8
+_LINEAR_BOUND = 24
+
+
+def _scaling(fn: Callable[[str], object], build: Callable[[int], str], unit: int) -> float:
+    """How many times longer ``fn`` takes on ``_SCALE`` times the input:
+    the best of three runs at each size."""
+    costs = []
+    for size in (unit, unit * _SCALE):
+        command = build(size)
+        runs = []
+        for _ in range(3):
+            start = time.perf_counter()
+            fn(command)
+            runs.append(time.perf_counter() - start)
+        costs.append(min(runs))
+    return costs[1] / costs[0]
+
+
+class TestRoundTwelveHelpersAreLinear:
+    """Plan 00466 N101 round 12: ``known_variables``, the N214 inert prefix
+    and ``heredoc_consumers`` scale linearly. A per-statement regex that ran
+    to the end of the text made 40,000 assignment statements hang."""
+
+    @pytest.mark.parametrize(
+        "build",
+        [
+            lambda n: "a=b; " * n + 'cat > "$a"',
+            lambda n: "".join(f"a{index}=b; " for index in range(n)) + "x",
+            lambda n: "echo x; " * n,
+            lambda n: "cat <<'EOF'\nx\nEOF\n" * n,
+            lambda n: "$PY <<'EOF'\nx\nEOF\n" * n,
+        ],
+        ids=["assignments", "distinct-names", "commands", "heredocs", "variable-receivers"],
+    )
+    @pytest.mark.parametrize(
+        "fn",
+        [
+            known_variables,
+            lambda command: earlier_segments_are_inert(command, len(command)),
+            lambda command: heredoc_consumers(command, scan_heredocs(command).heredocs),
+        ],
+        ids=["known_variables", "earlier_segments_are_inert", "heredoc_consumers"],
+    )
+    def test_the_cost_grows_linearly(
+        self, fn: Callable[[str], object], build: Callable[[int], str]
+    ) -> None:
+        ratio = _scaling(fn, build, 400)
+        assert ratio < _LINEAR_BOUND, f"{_SCALE}x the input cost {ratio:.1f}x the time"

@@ -31,6 +31,7 @@ from __future__ import annotations
 import contextvars
 import re
 import stat
+from collections import Counter
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -555,7 +556,7 @@ _NAME_WRITERS: frozenset[str] = frozenset(
 #: any assignments and ``builtin``/``command``/``time`` prefixes.
 _COMMAND_POSITION = (
     r"(?:^|[;&|(){}`\n]|(?<![\w-])(?:then|else|elif|do|if|while|until|time)(?=\s)"
-    r"|(?<!\S)!(?=\s))\s*(?:[A-Za-z_]\w*(?:\[[^\]]*\])?\+?=\S*\s+)*"
+    r"|(?<!\S)!(?=\s))\s*(?:[A-Za-z_]\w*(?:\[[^\]]*\])?\+?=[^\s;&|()<>`]*\s+)*"
     r"(?:(?:builtin|command|time)\s+(?:-\S+\s+)*)*"
 )
 _NAME_WRITER_PATTERN = re.compile(
@@ -572,6 +573,10 @@ _COMPUTED_COMMAND_PATTERN = re.compile(
 _QUOTING_CHARACTERS = re.compile(r"[\\'\"]")
 #: ``$NAME`` or ``${NAME}``.
 _VARIABLE_REFERENCE = re.compile(r"\$(?:\{(?P<braced>[A-Za-z_]\w*)\}|(?P<bare>[A-Za-z_]\w*))")
+#: Anything that reads a variable: ``$NAME``, ``${NAME…``, ``${#NAME}``.
+_REFERENCED_NAME = re.compile(r"\$\{?[#!]?([A-Za-z_]\w*)")
+#: Anything that may assign one: ``NAME=``, ``NAME+=``, ``NAME[KEY]=``.
+_ASSIGNED_NAME = re.compile(r"(?<![\w$])([A-Za-z_]\w*)(?:\[[^\]]*\])?\+?=")
 #: Characters in a value that bash splits or globs where it is used unquoted.
 _UNPLAIN_VALUE_CHARACTERS = frozenset(" \t\n*?[")
 #: Text that writes a variable through a computed name or an expansion
@@ -582,8 +587,9 @@ _COMPUTED_WRITE_PATTERN = re.compile(
 )
 #: A whole word that assigns a variable: ``NAME=value``.
 _ASSIGNMENT_WORD = re.compile(r"(?P<name>[A-Za-z_][A-Za-z0-9_]*)=(?P<value>.*)\Z", re.DOTALL)
-#: Characters that open a group, a substitution or a compound command.
-_NESTING_CHARACTERS = frozenset("(){}`")
+#: Characters that, unquoted, open a group, a substitution or a compound
+#: command.
+_NESTING_CHARACTERS: tuple[str, ...] = ("(", ")", "{", "}", "`")
 #: Reserved words: a statement opening with one is compound.
 _RESERVED_WORDS: frozenset[str] = frozenset(
     {
@@ -1692,7 +1698,7 @@ def heredoc_consumers(command: str, heredocs: Sequence[Heredoc]) -> list[tuple[s
         if not inert_prefix.allows(opener_start):
             consumers.append((None,))
             continue
-        words = [_consumer_word(stage, command, known) for stage in (receiving, *downstream)]
+        words = [_consumer_word(stage, known) for stage in (receiving, *downstream)]
         receiving_stage = receiving + " " + split_unquoted(pipeline, ("|",))[0]
         if (
             words[0] in DATA_SINKS
@@ -1710,20 +1716,20 @@ def body_may_run(consumers: Sequence[str | None]) -> bool:
     return any(word is None or word in SHELL_BODY_RUNNERS for word in consumers)
 
 
-def _consumer_word(stage: str, command: str, known: dict[str, str]) -> str | None:
+def _consumer_word(stage: str, known: dict[str, str]) -> str | None:
     """The command ``stage`` runs, or the one its variable is known to name."""
     word = _segment_command_word(stage)
-    return word if word is not None else _variable_command_word(stage, command, known)
+    return word if word is not None else _variable_command_word(stage, known)
 
 
-def _variable_command_word(stage: str, command: str, known: dict[str, str]) -> str | None:
+def _variable_command_word(stage: str, known: dict[str, str]) -> str | None:
     """The command a stage names through a variable, where the text says
     which (round 11, minor E): a literal basename after a quoted expansion
     (``"$VENV/bin/python"``), ``$SHELL`` or ``$BASH``, or a variable
     :func:`known_variables` pins to a value that does not split
-    (``PY=python3; $PY -``). Any assignment naming a shell wins. None --
-    unknown, judged fail closed by every caller -- when nothing says
-    (round 12, N212): ``$0``, ``${X:-…}``, ``PY='bash -e'``, ``read PY``."""
+    (``PY=python3; $PY -``). None -- unknown, judged fail closed by every
+    caller -- when nothing says (round 12, N212): ``$0``, ``${X:-…}``,
+    ``PY='bash -e'``, ``read PY``, or two assignments to one name."""
     match = _VARIABLE_COMMAND_PATTERN.match(strip_reserved_word_prefix(stage).lstrip("({ \t"))
     if match is None:
         return None
@@ -1738,12 +1744,6 @@ def _variable_command_word(stage: str, command: str, known: dict[str, str]) -> s
         return basename if match.group("quote") or plain else None
     if name in _SHELL_VARIABLES:
         return _SHELL_VARIABLES[name]
-    assignment = re.compile(rf"(?:^|[\s;&|(]){re.escape(name)}=([^\s;&|()<>]*)")
-    assigned = [resolve_shell_word(found.group(1)) for found in assignment.finditer(command)]
-    basenames = [literal.rsplit("/", 1)[-1] for literal in assigned if literal]
-    shells = [word for word in basenames if word in SHELL_BODY_RUNNERS]
-    if shells:
-        return shells[0]
     if value is None or not plain:
         return None
     return value.rsplit("/", 1)[-1] or None
@@ -1773,12 +1773,15 @@ def known_variables(command: str) -> dict[str, str]:
     unquoted = _QUOTING_CHARACTERS.sub("", text)
     if _NAME_WRITER_PATTERN.search(unquoted) or _PRINTF_TARGET_PATTERN.search(unquoted):
         return {}
+    assignments = Counter(match.group(1) for match in _ASSIGNED_NAME.finditer(text))
+    first_reference: dict[str, int] = {}
+    for match in _REFERENCED_NAME.finditer(text):
+        first_reference.setdefault(match.group(1), match.start())
     known: dict[str, str] = {}
     for name, (start, value) in _leading_assignments(text).items():
-        if _is_special_variable(name):
+        if _is_special_variable(name) or assignments[name] != 1:
             continue
-        assigned = re.findall(rf"(?<![\w$]){name}(?:\[[^\]]*\])?\+?=", text)
-        if len(assigned) != 1 or re.search(rf"\$\{{?[#!]?{name}\b", text[:start]):
+        if first_reference.get(name, len(text)) < start:
             continue
         known[name] = value
     for match in _COMPUTED_COMMAND_PATTERN.finditer(unquoted):
@@ -1799,7 +1802,7 @@ def _leading_assignments(text: str) -> dict[str, tuple[int, str]]:
             continue
         words = list(iter_shell_words(statement))
         if (
-            any(char in _NESTING_CHARACTERS for char in statement)
+            len(split_unquoted(statement, _NESTING_CHARACTERS)) > 1
             or None in words
             or words[0] in _RESERVED_WORDS
         ):

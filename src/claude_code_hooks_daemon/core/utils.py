@@ -62,9 +62,10 @@ _DD_OUTPUT_PREFIX: Final[str] = "of="
 
 #: Stop consuming operands here, so a later command is never absorbed into an
 #: earlier one's target list.
-_OPERAND_TERMINATORS: Final[frozenset[str]] = frozenset(
-    {"|", "&&", "||", ";", "&", "<", ">", ">>", ">|", "&>", "&>>"}
-)
+_OPERAND_TERMINATORS: Final[frozenset[str]] = frozenset({"|", "&&", "||", ";", "&"})
+
+#: Redirects that read: their word is no operand of the command.
+_INPUT_REDIRECT_OPERATORS: Final[frozenset[str]] = frozenset({"<", "<<", "<<-", "<<<"})
 
 _FLAG_PREFIX: Final[str] = "-"
 
@@ -832,6 +833,13 @@ def _collect_trailing_operands(
     expects_directory_value = False
     while index < len(tokens) and tokens[index] not in _OPERAND_TERMINATORS:
         token = tokens[index]
+        if token in _REDIRECT_OPERATORS or token in _INPUT_REDIRECT_OPERATORS:
+            # A redirect's word is no operand, and the operands after it are
+            # still the command's (Plan 00466 N101 round 12).
+            if token in _REDIRECT_OPERATORS and index + 1 < len(tokens):
+                targets.append(BashWriteDestination(tokens[index + 1]))
+            index += 2
+            continue
         if expects_directory_value:
             target_directory = token
             expects_directory_value = False

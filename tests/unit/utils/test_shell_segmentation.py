@@ -1048,6 +1048,7 @@ class TestKnownVariables:
             ("OUT='a b'\ncat > \"$OUT\"", {"OUT": "a b"}),
             ('A=1 B="x"; echo', {"A": "1", "B": "x"}),
             ('cd /repo && ls; OUT=o.md; cat > "$OUT"', {"OUT": "o.md"}),
+            ('D="v{X}/n (1)"; OUT=o.md; cat > "$OUT"', {"D": "v{X}/n (1)", "OUT": "o.md"}),
             ("OUT=o.md; cat <<'E' > \"$OUT\"\nread OUT\nE", {"OUT": "o.md"}),
         ],
     )

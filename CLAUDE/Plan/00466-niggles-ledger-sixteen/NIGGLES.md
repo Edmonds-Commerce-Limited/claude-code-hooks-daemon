@@ -873,6 +873,60 @@ outside it is pending stops the scan, and the rest is unreadable to the
 write guards. RED tests: `$( )`, backtick and `"$( )"` forms in
 `TestTheBashDifferential` and the line differential.
 
+### N212 — ✅ Remedied (n101 branch) — A variable receiver nothing pins was read as data
+
+**Found by N101 review 11 (shared MAJOR 1); main has it too.** A heredoc
+fed to a receiver named by a variable (`$0`, `${X:-bash}`, `env $V`,
+`command $V`, `exec $V`, `PY=$SH`, `PY='bash -e'`, `$P"sh"`,
+`"$(command -v bash)"`, `read PY`, `printf -v PY`, `declare -n`,
+`for PY in bash`) had `None` as its consumer, and `core/utils.py` read
+`None` as data. Bash ran each body, and each wrote outside the root.
+
+**Remedy:** `None` is unknown, and the body is read as shell
+(`body_may_run`). A variable receiver is known only through
+`known_variables`: a plain literal assignment earlier in the call, with no
+name writer anywhere in it. `PY=python3; $PY -` stays data; a bare `$PY -`
+is now judged as commands. `exec` and `builtin` are wrappers, so
+`exec bash <<'EOF'` names bash. RED tests: `TestAVariableReceiverIsUnknown`.
+
+### N213 — ✅ Remedied (n101 branch) — An unresolved write target may be an fd a process runs
+
+**Found by N101 review 11 (shared MAJOR 2); main has it too.** After
+`exec 3> >(bash)`, `OUT=/dev/fd/3; cat > "$OUT" <<'EOF'` runs the body. An
+unresolved sink target was treated as a file.
+
+**Remedy:** where the command opens an fd on a process (`>(`, `<(`, `exec`,
+`coproc`), an unresolved target is not inert. RED tests:
+`TestAnUnresolvedTargetMayBeAnOpenFd`.
+
+### N214 — ✅ Remedied (n101 branch) — An earlier segment can turn a sink into an executor
+
+**Found by N101 review 11 (shared MAJOR 3); main has it too.**
+`cat(){ bash; }; cat <<'EOF'`, `alias cat=bash` and
+`export LESSOPEN='|-bash %s'; less <<'EOF'` all run the body; the sink test
+read only the command name.
+
+**Remedy (coordinator ruling: a closed list):** a sink's body is data only
+when every earlier segment is on the inert allowlist in
+`shell_segmentation.earlier_segments_are_inert`: a literal assignment of a
+name that is not special, a proven `cd`, `echo`, `printf` without `-v`,
+`true`, `test`/`[`, and with no redirection
+`git status|add|diff|log|show|rev-parse|ls-files`, `grep`/`rg`/`ugrep`,
+`ls`, `cat`, `wc`, `head`, `tail`, `stat`, `file`, `find` without an acting
+option. Anything else earlier keeps the body judged. RED tests:
+`TestAnEarlierSegmentCanRunTheBody` and `TestEarlierSegmentsAreInert`.
+
+### N215 — ✅ Remedied (n101 branch) — Containment could not see a same-call variable target
+
+**Found by N101 review 11 (shared MAJOR 5); main has it too.**
+`OUT=/opt/o.md; cat > "$OUT" <<\EOF` writes outside the root; containment
+dropped any target needing expansion.
+
+**Remedy:** `project_containment` resolves `$NAME` from `known_variables`
+and denies any target that still needs expansion, naming it as written.
+RED tests: `TestAVariableWriteTargetIsResolvedOrUnknown` and the updated
+C6 tests in `test_project_containment.py`.
+
 ### N120 — ✅ Remedied (n101 branch) — A shell parse failure on a later line hides every write target before it
 
 **Found by N101 review 8 (MAJOR 2 and shared MAJOR 3); main has it too.**

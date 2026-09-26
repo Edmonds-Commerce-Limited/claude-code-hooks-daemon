@@ -154,6 +154,10 @@ Full write-ups are in [NIGGLES.md](NIGGLES.md). One line each here:
 | N181 | A heredoc inside `<(…)` or `>(…)` is not closed at `EOF)`, so lines bash runs are read as its body                                                | N101 review 10 (D-RULE)                                         | ✅ Remedied (n101 branch)        |
 | N182 | A pending heredoc's body is read from a newline inside a later `$( )` or backtick substitution                                                    | N101 review 10 (D-RULE)                                         | ✅ Remedied (n101 branch)        |
 | N194 | Daemon-signal tests (test_safe_signal.py, test_client_validator.py) read a spawned child's cmdline before its exec lands, so a loaded host flakes | Coordinator                                                     | ✅ Remedied                      |
+| N212 | A heredoc receiver named by a variable nothing pins (`$0`, `${X:-bash}`, `env $V`, `read PY`) was read as data                                    | N101 review 11 (D-RULE)                                         | ✅ Remedied (n101 branch)        |
+| N213 | An unresolved write target may be `/dev/fd/N` for an fd a process substitution opened, so the body may run                                        | N101 review 11 (D-RULE)                                         | ✅ Remedied (n101 branch)        |
+| N214 | A function, alias or environment an earlier segment sets can turn a sink into an executor                                                         | N101 review 11 (D-RULE)                                         | ✅ Remedied (n101 branch)        |
+| N215 | Containment could not see a same-call assignment to a variable write target (`OUT=/opt/o.md; cat > "$OUT"`)                                       | N101 review 11 (D-RULE)                                         | ✅ Remedied (n101 branch)        |
 
 ## Tasks
 
