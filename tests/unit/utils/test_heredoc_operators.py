@@ -153,6 +153,67 @@ class TestBodiesCloseByBashsRule:
         assert _bodies("x=\"$(cat <<'EOF'\nhello\nEOF)\"") == [("EOF", "hello", True)]
 
 
+class TestDollarQuotingAndSubstitutionWords:
+    """Plan 00466 N120 (round 9d). Each shape was checked against bash 5.2.
+
+    A delimiter read differently from bash never closes, so every later line
+    is taken for body and never judged; an ANSI-C string read as a plain
+    single quote ends at its escaped quote and invents an operator.
+    """
+
+    @pytest.mark.parametrize(
+        ("line", "expected"),
+        [
+            ("cat <<$'EOF'", [("EOF", True, False)]),
+            ("cat <<$'E\\x4fF'", [("EOF", True, False)]),
+            ("cat <<$'it\\'s'", [("it's", True, False)]),
+            ('cat <<$"EOF"', [("EOF", True, False)]),
+            ("cat <<$(echo)", [("$(echo)", False, False)]),
+            ("cat <<a$(echo x)b", [("a$(echo x)b", False, False)]),
+            ("cat <<$((1 + 2))", [("$((1 + 2))", False, False)]),
+            ("cat <<a$(echo ')')b", [("a$(echo ')')b", False, False)]),
+        ],
+    )
+    def test_the_delimiter_is_the_word_bash_reads(
+        self, line: str, expected: list[tuple[str, bool, bool]]
+    ) -> None:
+        assert _delimiters(line) == expected
+
+    @pytest.mark.parametrize(
+        "line",
+        [
+            "echo $'\\' <<\\EOF '\\'",
+            "echo $'\\' <<'EOF' '\\'",
+            "echo $'a\\'b <<EOF'",
+            "echo x$'\\'<<EOF'",
+        ],
+    )
+    def test_an_ansi_c_string_hides_the_operator_inside_it(self, line: str) -> None:
+        assert find_heredoc_operators(line) == []
+
+    def test_a_dollar_dollar_is_the_pid_not_an_ansi_c_opener(self) -> None:
+        assert _delimiters("echo $$'\\' <<\\EOF '\\'") == [("EOF", True, False)]
+
+    def test_an_ansi_c_opener_inside_double_quotes_is_literal(self) -> None:
+        assert _delimiters("echo \"$'\" <<'EOF' \"'\"") == [("EOF", True, False)]
+
+    @pytest.mark.parametrize(
+        ("opener", "closer"),
+        [("$'EOF'", "EOF"), ('$"EOF"', "EOF"), ("$(echo)", "$(echo)")],
+    )
+    def test_the_body_closes_where_bash_closes_it(self, opener: str, closer: str) -> None:
+        command = f"cat <<{opener}\nbody\n{closer}\necho hi > /opt/x"
+        scan = scan_heredocs(command)
+        assert _bodies(command) == [(closer, "body", True)]
+        assert command[scan.breaks[-1] + 1 :] == "echo hi > /opt/x"
+
+    def test_the_line_after_an_ansi_c_string_is_a_command(self) -> None:
+        command = "cat $'\\' <<'EOF' '\\'\ngit reset --hard\nEOF"
+        scan = scan_heredocs(command)
+        assert scan.heredocs == []
+        assert scan.breaks == [command.index("\n"), command.rindex("\n")]
+
+
 class TestCommandBreaks:
     def test_a_newline_inside_a_quoted_argument_is_not_a_break(self) -> None:
         command = 'echo "a\n<<EOF"\necho x'

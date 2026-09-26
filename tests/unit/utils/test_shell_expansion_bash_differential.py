@@ -19,6 +19,7 @@ from pathlib import Path
 
 import pytest
 
+from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.utils.shell_expansion import (
     TooManyToEnumerateError,
     expand_braces,
@@ -103,7 +104,7 @@ def _bash_spellings(words: list[str], tmp_path: Path) -> list[set[str]]:
         capture_output=True,
         text=True,
         check=True,
-        timeout=60,
+        timeout=Timeout.QA_TEST_TIMEOUT,
     )
     chunks = result.stdout.split(f"{_MARKER}\n")
     assert chunks[-1] == ""

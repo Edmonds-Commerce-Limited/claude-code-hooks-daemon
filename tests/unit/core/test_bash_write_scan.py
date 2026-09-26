@@ -10,6 +10,8 @@ as ``unreadable`` so a denying caller can fail closed on it.
 
 from __future__ import annotations
 
+import random
+
 import pytest
 
 from claude_code_hooks_daemon.core.utils import (
@@ -96,6 +98,46 @@ class TestUnreadableTextIsReported:
         assert scan.unreadable == "echo $'it > /opt/x"
 
 
+class TestTheTokeniserNeverRaises:
+    """shlex raises on an unclosed quote and a trailing lone backslash, and
+    ``bash_text_for_shlex`` turns both into "unreadable" before shlex sees
+    them, so no text makes the scan itself fail."""
+
+    def test_a_trailing_lone_backslash_is_unreadable(self) -> None:
+        scan = scan_bash_write_destinations("echo x > /opt/o.md\necho a\\")
+        assert [d.destination for d in scan.destinations] == ["/opt/o.md"]
+        assert scan.unreadable == "echo a\\"
+
+    def test_generated_shell_text_is_always_read_or_reported(self) -> None:
+        alphabet = ["'", '"', "\\", "$", "#", " ", "\n", "<<", "EOF", "a", ">", "(", ")", "`"]
+        generator = random.Random(466120)
+        for _ in range(3000):
+            text = "".join(generator.choice(alphabet) for _ in range(generator.randint(1, 14)))
+            scan = scan_bash_write_destinations(text, include_heredoc_bodies=True)
+            assert scan.unreadable is None or scan.unreadable.strip() != ""
+
+
+class TestABodyThatNeverClosesIsNotData:
+    """Plan 00466 N120 (round 9d). A heredoc whose closing line never comes is
+    either broken or a delimiter read differently from bash; in the second
+    case bash ran every line after its closer. Either way the reader does not
+    know where the data ends, so the text is unreadable, not a body."""
+
+    def test_its_text_is_reported_unreadable(self) -> None:
+        scan = scan_bash_write_destinations("cat > a.md <<EOF\nbody\necho hi > /opt/x")
+        assert [d.destination for d in scan.destinations] == ["a.md"]
+        assert scan.unreadable == "body\necho hi > /opt/x"
+
+    def test_an_opener_with_no_body_leaves_nothing_unread(self) -> None:
+        scan = scan_bash_write_destinations("cat > a.md <<EOF")
+        assert [d.destination for d in scan.destinations] == ["a.md"]
+        assert scan.unreadable is None
+
+    def test_a_closed_body_is_still_data(self) -> None:
+        scan = scan_bash_write_destinations("cat > a.md <<EOF\nit's\nEOF")
+        assert scan.unreadable is None
+
+
 class TestShlexReadsTheLineAsBashDoes:
     """Plan 00466 N120: two places shlex and bash disagree WITHOUT shlex
     raising, so the rest of the line was silently misread. Both named no
@@ -113,6 +155,10 @@ class TestShlexReadsTheLineAsBashDoes:
             ("echo x > $'/opt/a\\x41'", ["/opt/aA"]),
             ("echo x > $'/opt/q\\'s'", ["/opt/q's"]),
             ("echo x > $'/opt/n\\0ul'", ["/opt/n"]),
+            ("echo $$'a\\' > /opt/x \\'", ["/opt/x"]),
+            ("cat <<$'EOF'\nit's\nEOF\necho hi > /opt/x", ["/opt/x"]),
+            ("cat <<$(echo)\nit's\n$(echo)\necho hi > /opt/x", ["/opt/x"]),
+            ("cat $'\\' <<'EOF' '\\'\necho hi > /opt/x\nEOF", ["/opt/x"]),
         ],
     )
     def test_the_write_bash_performs_is_named(self, command: str, expected: list[str]) -> None:

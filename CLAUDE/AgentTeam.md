@@ -707,7 +707,7 @@ ENTIRE BRANCH REJECTED. [Suggest: return to planning / fix specific issues / red
 
 ### Template 1: Developer Agent
 
-```
+```text
 You are a DEVELOPER AGENT working on Plan NNNNN: [Plan Name], Task: [Task Description].
 
 CRITICAL WORKTREE ISOLATION:
@@ -749,7 +749,7 @@ SendMessage(type="message", recipient="team-lead",
 
 ### Template 2: Tester Agent
 
-```
+```text
 You are a TESTER AGENT verifying work for Plan NNNNN: [Plan Name], Task: [Task Description].
 
 CRITICAL WORKTREE:
@@ -790,7 +790,7 @@ If FAIL:
 
 **IMPORTANT**: See CLAUDE/QA.md for complete QA Agent role definition including library/plugin separation checks.
 
-```
+```text
 You are a QA AGENT verifying code quality for Plan NNNNN: [Plan Name], Task: [Task Description].
 
 CRITICAL WORKTREE:
@@ -833,7 +833,7 @@ If FAIL:
 
 ### Template 4: Senior Reviewer Agent
 
-```
+```text
 You are a SENIOR REVIEWER AGENT reviewing Plan NNNNN: [Plan Name], Task: [Task Description].
 
 CRITICAL WORKTREE:
@@ -874,7 +874,7 @@ If REJECTED:
 
 ### Template 5: Honesty Checker Agent (CRITICAL - VALUE VERIFICATION)
 
-```
+```text
 You are an HONESTY CHECKER AGENT auditing Plan NNNNN: [Plan Name], Task: [Task Description].
 
 CRITICAL WORKTREE:

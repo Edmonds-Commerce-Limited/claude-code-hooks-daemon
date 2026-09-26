@@ -729,7 +729,7 @@ b0a926b4f: `TestGlobErrorsAreCollectedPerBranch`, four new cases in
 `HandlerChain` in both guards, plus an absolute whole-path overflow; the
 over-long single name stays allowed.
 
-### N120 — A shell parse failure on a later line hides every write target before it
+### N120 — ✅ Remedied (n101 branch) — A shell parse failure on a later line hides every write target before it
 
 **Found by N101 review 8 (MAJOR 2 and shared MAJOR 3); main has it too.**
 `core/utils.py` `_tokenise` returns `[]` when shlex raises, so an unbalanced
@@ -752,6 +752,39 @@ following bash's grammar (any word, quoted or unquoted, including `EOF-1`,
 `core/utils.py`, `shell_segmentation.py` and `background_process_tracker.py`,
 and gives `bash_file_writes.py`'s `_heredoc` marker the `<<<` lookbehind it
 lacks (review 8 minor 4).
+
+**Same class, found while fixing it; main has each of these too:**
+
+- **The message-heredoc idiom.** `shell_segmentation`'s idiom regex ended
+  in `.*\)"`, so `git commit -m "$(cat <<'EOF' … EOF\n)$(git reset --hard)"`,
+  or a command on the opener line, was blanked as prose and
+  `destructive_git` allowed it. The value must now be exactly one quoted,
+  terminated heredoc fed to `cat`, as read by the shared scanner.
+- **shlex disagrees with bash without raising.** shlex starts a comment at a
+  `#` inside a word and does not know ANSI-C `$'...'`, so
+  `echo a#b > /opt/o.md`, `curl http://x/#frag > /opt/f` and
+  `echo $'it\'s' > /opt/x \'` named no target. `bash_text_for_shlex`
+  removes bash's real comments and re-quotes each decoded `$'...'` first.
+- **The segment splitter and the heredoc scanner read `$'...'` as a plain
+  quote.** `split_unquoted` stayed "inside a string" past the separator in
+  `echo $'it\'s' && pytest tests | tail -3`, and a quote in a comment
+  (`echo hi # it's\npytest … | tail -3`) did the same, so `pipe_blocker`
+  judged pytest as part of an `echo`. The scanner saw a `<<'EOF'` inside
+  `cat $'\' <<'EOF' '\'` and blanked the next line, which bash runs, from
+  `destructive_git`, `pipe_blocker` and `project_containment`.
+- **Delimiters bash reads differently.** `<<$'EOF'` and `<<$"EOF"` are
+  closed by `EOF`, and `<<$(echo)` and `<<a$(echo x)b` by their literal
+  text; the scanner closed none of them, so every later line was body. On
+  the branch before round 9d this also allowed
+  `cat <<$'EOF'\n…\nEOF\necho hi > /opt/x`, which main denied.
+
+**Remedy, as landed:** the three shell readers share one ANSI-C decoder
+(`utils/ansi_c.py`) and one comment rule (`heredoc_operators.COMMENT_PRECEDERS`);
+`$$` is read as the pid; the delimiter word takes `$'...'`, `$"..."` and a
+verbatim `$( )`/backtick span; a heredoc whose closer never comes is
+reported as unreadable text rather than data, so a delimiter still read
+differently from bash fails closed. Every shape above is pinned through
+`HandlerChain` and was RED at 79d3104e4.
 
 ### N116 — ✅ Remedied (n101 branch) — A here-string's `<<<` is read as a heredoc opener from its second `<`
 

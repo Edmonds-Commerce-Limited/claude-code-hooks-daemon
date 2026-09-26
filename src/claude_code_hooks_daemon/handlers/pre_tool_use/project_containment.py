@@ -227,8 +227,9 @@ class UnreadableCommandError(Exception):
         super().__init__(
             "This command could not be read from here on, so what it writes "
             f"cannot be judged:\n  {excerpt!r}\n"
-            "Close any unbalanced quote or split the command. If it is "
-            "well-formed bash, the daemon's tokeniser is at fault: report it."
+            "Close any unbalanced quote or heredoc, or split the command. If "
+            "it is well-formed bash, the daemon's tokeniser is at fault: "
+            "report it."
         )
 
 

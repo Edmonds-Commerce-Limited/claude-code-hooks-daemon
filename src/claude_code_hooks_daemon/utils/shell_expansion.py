@@ -4123,11 +4123,11 @@ class _GlobWalk:
             status = candidate.lstat() if last else candidate.stat()
         except OSError as exc:
             self._record(exc, directory, part)
-            return
-        if last:
-            yield candidate
-        elif stat.S_ISDIR(status.st_mode):
-            yield from self.select(candidate, index + 1)
+        else:
+            if last:
+                yield candidate
+            elif stat.S_ISDIR(status.st_mode):
+                yield from self.select(candidate, index + 1)
 
     def _select_wildcard(self, directory: Path, index: int, last: bool) -> Iterator[Path]:
         # A wildcard component is matched against the directory's entries;
@@ -4161,11 +4161,7 @@ class _GlobWalk:
         cached = self.listings.get(directory)
         if cached is not None:
             return cached
-        try:
-            entries = list(os.scandir(directory))
-        except OSError as exc:
-            self._record(exc, directory, None)
-            entries = []
+        entries = self._scan(directory)
         self.listings[directory] = entries
         for _entry in entries:
             if self.deadline is not None and time.monotonic() > self.deadline:
@@ -4178,6 +4174,16 @@ class _GlobWalk:
                         f"{self.max_entries_visited} entries visited"
                     )
         return entries
+
+    def _scan(self, directory: Path) -> list[os.DirEntry[str]]:
+        """The directory's entries. One that cannot be listed has none, and
+        its error has gone through ``_record``: skipped as proof of absence,
+        raised, or collected for the caller to deny on."""
+        try:
+            return list(os.scandir(directory))
+        except OSError as exc:
+            self._record(exc, directory, None)
+        return []
 
     def _is_dir(self, entry: os.DirEntry[str], *, follow_symlinks: bool) -> bool:
         try:

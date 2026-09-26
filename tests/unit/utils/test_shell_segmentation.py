@@ -94,6 +94,48 @@ class TestEscapeRules:
         assert split_unquoted(r"echo a\\ ; ls", (";",)) == [r"echo a\\ ", " ls"]
 
 
+class TestAnsiCStringsAndComments:
+    """Plan 00466 N120 (round 9d). Bash reads ``$'it\\'s'`` as one word and a
+    quote inside a comment as a character. Read as plain quotes, both left the
+    splitter "inside a string" across every later separator, so the next
+    command was judged as part of a whitelisted ``echo``."""
+
+    @pytest.mark.parametrize(
+        ("text", "expected"),
+        [
+            ("echo $'it\\'s' && pytest", ["echo $'it\\'s' ", " pytest"]),
+            ("echo $'a;b' ; ls", ["echo $'a;b' ", " ls"]),
+            ("echo $'\\\\' ; ls", ["echo $'\\\\' ", " ls"]),
+            ("echo hi # it's\npytest", ["echo hi # it's", "pytest"]),
+            ('ls # say "hi\ngit status', ['ls # say "hi', "git status"]),
+            ("echo x;# it's\nls", ["echo x", "# it's", "ls"]),
+        ],
+    )
+    def test_the_next_command_is_its_own_segment(self, text: str, expected: list[str]) -> None:
+        assert split_unquoted(text, CHAIN) == expected
+
+    @pytest.mark.parametrize(
+        ("text", "expected"),
+        [
+            ("echo $$'a;b' ; ls", ["echo $$'a;b' ", " ls"]),
+            ('echo "$\'" ; ls', ['echo "$\'" ', " ls"]),
+            ("echo a#'b;c' ; ls", ["echo a#'b;c' ", " ls"]),
+            ("echo \\#'b;c' ; ls", ["echo \\#'b;c' ", " ls"]),
+        ],
+    )
+    def test_what_bash_does_not_read_as_ansi_c_or_a_comment(
+        self, text: str, expected: list[str]
+    ) -> None:
+        assert split_unquoted(text, CHAIN) == expected
+
+    def test_a_separator_in_a_comment_still_splits(self) -> None:
+        """Judging comment text as commands is the conservative reading."""
+        assert split_unquoted("ls # a; git reset --hard", CHAIN) == ["ls # a", " git reset --hard"]
+
+    def test_an_unterminated_ansi_c_string_runs_to_the_end(self) -> None:
+        assert split_unquoted("echo $'it ; ls", CHAIN) == ["echo $'it ; ls"]
+
+
 class TestBothOriginalBypassesAreClosed:
     """The two production shapes that motivated this module."""
 

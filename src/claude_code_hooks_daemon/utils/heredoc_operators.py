@@ -13,11 +13,16 @@ The rules pinned here, all bash's:
    unquoted metacharacter (blank, newline, ``|&;()<>``). Any word is legal,
    ``EOF-1``, ``END.MD`` and ``my-notes`` included.
 3. The delimiter is that word after quote removal (``'...'``, ``"..."``,
-   ``\\x``). ANY quoting in it makes the body literal, so ``<<\\EOF`` and
-   ``<<E"O"F`` are quoted heredocs closed by ``EOF``.
+   ``\\x``, ``$'...'`` decoded, ``$"..."``). ANY quoting in it makes the body
+   literal, so ``<<\\EOF``, ``<<E"O"F`` and ``<<$'EOF'`` are quoted heredocs
+   closed by ``EOF``. A ``$( )``, ``$(( ))`` or backtick span in the word is
+   kept verbatim, blanks and quotes included, and quotes inside it do not
+   make the heredoc quoted: ``<<$(echo)`` is closed by the line ``$(echo)``.
 4. ``<<`` inside quotes, a comment or an arithmetic expansion is not an
    operator. Inside a double-quoted ``$( )`` or backtick substitution it is,
-   which is what makes ``-m "$(cat <<'EOF' ... EOF)"`` a heredoc.
+   which is what makes ``-m "$(cat <<'EOF' ... EOF)"`` a heredoc. An ANSI-C
+   ``$'...'`` string ends at its first UNESCAPED quote; ``$$`` is the pid,
+   so a quote after it is a plain one.
 5. Bodies start after the next newline that is not inside a quote, and one
    closes only on a line that IS the delimiter (after leading tabs, for
    ``<<-``). Inside a substitution, ``EOF)`` also ends it, as bash does.
@@ -31,15 +36,23 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Final
 
+from claude_code_hooks_daemon.utils.ansi_c import ansi_c_string
+
+#: Characters after which an unquoted ``#`` starts a WORD, and so a comment.
+COMMENT_PRECEDERS: Final[str] = " \t\n;&|()<>"
+
 _HEREDOC: Final[str] = "<<"
 _STRIP_TABS: Final[str] = "-"
 _BLANKS: Final[str] = " \t"
 _NEWLINE: Final[str] = "\n"
 _TAB: Final[str] = "\t"
 _METACHARACTERS: Final[str] = " \t\n|&;()<>"
-_COMMENT_PRECEDERS: Final[str] = " \t\n;|&()"
 _DOUBLE_QUOTE_ESCAPABLE: Final[str] = '$`"\\\n'
 _SUBSTITUTION_CLOSE: Final[str] = ")"
+_PID: Final[str] = "$$"
+_ANSI_C_OPEN: Final[str] = "$'"
+_LOCALE_OPEN: Final[str] = '$"'
+_SUBSTITUTION_OPEN: Final[str] = "$("
 
 _UNQUOTED: Final[str] = "unquoted"
 _DOUBLE: Final[str] = "double"
@@ -171,8 +184,14 @@ class _Scanner:
         char = text[index]
         if char == _NEWLINE:
             return self._newline(context)
-        if char == "\\":
+        if char == "\\" or text.startswith(_PID, index):
             self._index += 2
+            return True
+        if text.startswith(_ANSI_C_OPEN, index):
+            ansi_c = ansi_c_string(text, index + len(_ANSI_C_OPEN))
+            if ansi_c is None:
+                return False
+            self._index = ansi_c[1]
             return True
         if char == "'":
             closing = text.find("'", index + 1)
@@ -184,7 +203,7 @@ class _Scanner:
             self._stack.append(_Frame(_DOUBLE))
             self._index += 1
             return True
-        if char == "#" and (index == 0 or text[index - 1] in _COMMENT_PRECEDERS):
+        if char == "#" and (index == 0 or text[index - 1] in COMMENT_PRECEDERS):
             line_end = text.find(_NEWLINE, index)
             self._index = len(text) if line_end < 0 else line_end
             return True
@@ -300,6 +319,29 @@ def _read_word(text: str, start: int, terminators: str) -> tuple[str, bool, int]
             parts.append(text[index + 1])
             quoted = True
             index += 2
+        elif text.startswith(_PID, index):
+            parts.append(_PID)
+            index += len(_PID)
+        elif text.startswith(_ANSI_C_OPEN, index):
+            ansi_c = ansi_c_string(text, index + len(_ANSI_C_OPEN))
+            if ansi_c is None:
+                return None
+            parts.append(ansi_c[0])
+            quoted = True
+            index = ansi_c[1]
+        elif text.startswith(_LOCALE_OPEN, index):
+            closing, inner = _double_quoted_span(text, index + len(_LOCALE_OPEN))
+            if closing < 0:
+                return None
+            parts.append(inner)
+            quoted = True
+            index = closing + 1
+        elif text.startswith(_SUBSTITUTION_OPEN, index) or char == "`":
+            span_end = _verbatim_span_end(text, index)
+            if span_end < 0:
+                return None
+            parts.append(text[index:span_end])
+            index = span_end
         elif char == "'":
             closing = text.find("'", index + 1)
             if closing < 0:
@@ -318,6 +360,54 @@ def _read_word(text: str, start: int, terminators: str) -> tuple[str, bool, int]
             parts.append(char)
             index += 1
     return "".join(parts), quoted, index
+
+
+def _verbatim_span_end(text: str, start: int) -> int:
+    """Index past the ``$( )``, ``$(( ))`` or backtick span at ``start``, or -1.
+
+    Quotes inside the span are skipped whole, so a ``)`` or a blank in them
+    does not end it.
+    """
+    if text[start] == "`":
+        index = start + 1
+        while index < len(text):
+            if text[index] == "\\":
+                index += 2
+            elif text[index] == "`":
+                return index + 1
+            else:
+                index += 1
+        return -1
+    depth = 0
+    index = start + 1
+    while index < len(text):
+        char = text[index]
+        if char == "\\" or text.startswith(_PID, index):
+            index += 2
+        elif text.startswith(_ANSI_C_OPEN, index):
+            ansi_c = ansi_c_string(text, index + len(_ANSI_C_OPEN))
+            if ansi_c is None:
+                return -1
+            index = ansi_c[1]
+        elif char == "'":
+            closing = text.find("'", index + 1)
+            if closing < 0:
+                return -1
+            index = closing + 1
+        elif char == '"':
+            closing, _inner = _double_quoted_span(text, index + 1)
+            if closing < 0:
+                return -1
+            index = closing + 1
+        else:
+            if char == "(":
+                depth += 1
+            elif char == ")":
+                depth -= 1
+            index += 1
+            if depth == 0:
+                return index
+    return -1
 
 
 def _double_quoted_span(text: str, start: int) -> tuple[int, str]:

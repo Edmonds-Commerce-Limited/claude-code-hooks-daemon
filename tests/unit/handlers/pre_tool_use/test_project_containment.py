@@ -1285,3 +1285,44 @@ class TestUnreadableCommandTextFailsClosed:
     ) -> None:
         result = self._decide(handler, "cat > /repo/a.md <<EOF\nit's > /opt/b\nEOF")
         assert result.decision == Decision.ALLOW
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "cat <<$'EOF'\nbody\nEOF\necho hi > /opt/x",
+            'cat <<$"EOF"\nbody\nEOF\necho hi > /opt/x',
+            "cat <<$(echo)\nbody\n$(echo)\necho hi > /opt/x",
+            "cat <<a$(echo x)b\nbody\na$(echo x)b\necho hi > /opt/x",
+            "cat > /repo/o.md $'\\' <<'EOF' '\\'\necho hi > /opt/x\nEOF",
+        ],
+    )
+    def test_the_line_after_a_closer_bash_reads_is_judged(
+        self, handler: ProjectContainmentHandler, command: str
+    ) -> None:
+        """Plan 00466 N120 (round 9d): a delimiter spelled with ``$'...'``,
+        ``$"..."`` or a substitution, and an ANSI-C string holding a ``<<``,
+        made the scanner read a later command as body. Main denied the first
+        three; the branch at 79d3104e4 allowed all five."""
+        result = self._decide(handler, command)
+        assert result.decision == Decision.DENY
+        assert RuleID.WRITE_OUTSIDE_PROJECT_ROOT in (result.reason or "")
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "cat > /repo/o.md <<$'EOF'\nit's prose\nEOF",
+            "cat > /repo/o.md <<$(echo)\nit's prose\n$(echo)",
+        ],
+    )
+    def test_those_heredocs_still_keep_prose_out_of_the_tokeniser(
+        self, handler: ProjectContainmentHandler, command: str
+    ) -> None:
+        assert self._decide(handler, command).decision == Decision.ALLOW
+
+    def test_a_body_that_never_closes_denies_as_unreadable(
+        self, handler: ProjectContainmentHandler
+    ) -> None:
+        result = self._decide(handler, "cat > /repo/a.md <<EOF\nbody\necho hi > /opt/x")
+        assert result.decision == Decision.DENY
+        assert RuleID.PROJECT_CONTAINMENT_EVALUATION_ERROR in (result.reason or "")
+        assert "unbalanced quote or heredoc" in (result.reason or "")

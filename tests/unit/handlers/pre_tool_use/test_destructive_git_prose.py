@@ -148,6 +148,34 @@ class TestTheMessageHeredocIdiomIsTheWholeValue:
         assert result.result.decision == Decision.ALLOW
 
 
+class TestAnAnsiCStringCannotInventAHeredoc:
+    """Plan 00466 N120 (round 9d). Read as a plain quote, ``$'\\'`` closed at
+    its escaped quote, so a ``<<'EOF'`` INSIDE the ANSI-C string looked like a
+    quoted heredoc fed to ``cat`` and the next line was blanked as its body.
+    Bash runs that line. Main and the branch at 79d3104e4 both allowed it."""
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            f"cat $'\\' <<'EOF' '\\'\n{_RESET_HARD}\nEOF",
+            f"cat $'\\' <<\\EOF '\\'\n{_RESET_HARD}\nEOF",
+        ],
+    )
+    def test_the_line_bash_runs_is_judged(self, command: str) -> None:
+        chain = HandlerChain()
+        chain.add(DestructiveGitHandler())
+        payload = {"tool_name": "Bash", "tool_input": {"command": command}}
+        assert chain.execute(payload, strict_mode=False).result.decision == Decision.DENY
+
+    @pytest.mark.parametrize("opener", ["$'EOF'", '$"EOF"'])
+    def test_a_dollar_quoted_delimiter_is_a_quoted_heredoc(self, opener: str) -> None:
+        command = f"cat > notes.md <<{opener}\nmentions {_RESET_HARD}\nEOF"
+        chain = HandlerChain()
+        chain.add(DestructiveGitHandler())
+        payload = {"tool_name": "Bash", "tool_input": {"command": command}}
+        assert chain.execute(payload, strict_mode=False).result.decision == Decision.ALLOW
+
+
 class TestTheGuardStillGuards:
     """Every subtraction above must cost the handler nothing that matters."""
 

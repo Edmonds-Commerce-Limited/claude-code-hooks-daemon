@@ -32,11 +32,16 @@ import re
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 
+from claude_code_hooks_daemon.utils.ansi_c import ansi_c_string
 from claude_code_hooks_daemon.utils.command_evasion import (
     git_subcommand_index,
     strip_reserved_word_prefix,
 )
-from claude_code_hooks_daemon.utils.heredoc_operators import Heredoc, scan_heredocs
+from claude_code_hooks_daemon.utils.heredoc_operators import (
+    COMMENT_PRECEDERS,
+    Heredoc,
+    scan_heredocs,
+)
 
 # Bash quoting characters. Inside single quotes NOTHING is special except the
 # closing quote -- in particular a backslash is a literal backslash, which is
@@ -48,6 +53,12 @@ _DOUBLE_QUOTE = '"'
 # single quotes. A scanner blind to it flips its quote state on an escaped quote
 # and never leaves quoted mode.
 _ESCAPE_CHAR = "\\"
+
+# ANSI-C quoting: inside `$'...'` a backslash DOES escape, so `$'it\'s'` is one
+# word. `$$` is the pid, and the quote after it is a plain one.
+_ANSI_C_OPEN = "$'"
+_PID = "$$"
+_NEWLINE = "\n"
 
 # Spans that make bash RUN something and substitute its output. Backticks are
 # listed separately because the same character opens and closes them.
@@ -1307,10 +1318,39 @@ def split_unquoted(text: str, separators: Sequence[str]) -> list[str]:
     current: list[str] = []
     in_single = False
     in_double = False
+    in_comment = False
     index = 0
 
     while index < len(text):
         char = text[index]
+        unquoted = not in_single and not in_double
+
+        # A comment runs to the newline and its quotes are characters, but its
+        # separators still split: judging comment text as commands is the
+        # conservative reading, and a quote in it must not swallow later lines.
+        if in_comment or (unquoted and _starts_comment(text, index)):
+            in_comment = char != _NEWLINE
+            matched = next((sep for sep in separators if text.startswith(sep, index)), None)
+            if matched is not None:
+                segments.append("".join(current))
+                current = []
+                index += len(matched)
+                continue
+            current.append(char)
+            index += 1
+            continue
+
+        # `$$` is the pid; a `$'...'` string ends at its first UNESCAPED quote.
+        if unquoted and text.startswith(_PID, index):
+            current.append(_PID)
+            index += len(_PID)
+            continue
+        if unquoted and text.startswith(_ANSI_C_OPEN, index):
+            ansi_c = ansi_c_string(text, index + len(_ANSI_C_OPEN))
+            end = len(text) if ansi_c is None else ansi_c[1]
+            current.append(text[index:end])
+            index = end
+            continue
 
         # Rule 1: inside single quotes a backslash is literal, so escape
         # handling is skipped entirely and only the closing quote matters.
@@ -1339,3 +1379,8 @@ def split_unquoted(text: str, separators: Sequence[str]) -> list[str]:
 
     segments.append("".join(current))
     return segments
+
+
+def _starts_comment(text: str, index: int) -> bool:
+    """Is the unquoted character at ``index`` a ``#`` that starts a word?"""
+    return text[index] == "#" and (index == 0 or text[index - 1] in COMMENT_PRECEDERS)
