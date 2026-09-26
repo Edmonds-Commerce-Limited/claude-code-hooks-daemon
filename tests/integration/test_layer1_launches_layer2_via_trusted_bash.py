@@ -189,7 +189,9 @@ def client_project(tmp_path: Path, daemon_remote: Path) -> Path:
     _require_ok(_git("init", "-q", str(project), cwd=tmp_path), "client init")
     (project / ".claude" / "hooks-daemon.yaml").write_text("version: '1.0'\n")
     daemon_dir = project / ".claude" / "hooks-daemon"
-    _require_ok(_git("clone", "-q", str(daemon_remote), str(daemon_dir), cwd=tmp_path), "daemon clone")
+    _require_ok(
+        _git("clone", "-q", str(daemon_remote), str(daemon_dir), cwd=tmp_path), "daemon clone"
+    )
     _require_ok(_git("checkout", "-q", "v1.0.0", cwd=daemon_dir), "checkout tag")
     return project
 
@@ -289,7 +291,9 @@ class TestLayer1HandsItsBaselinesToLayer2:
         result = _run_layer1(client_project)
 
         assert result.returncode == 0, result.stdout + result.stderr
-        assert _stub_file(result.stdout, "HOOKS_DAEMON_OLD_DEFAULT_SETTINGS") == _OLD_SETTINGS.strip()
+        assert (
+            _stub_file(result.stdout, "HOOKS_DAEMON_OLD_DEFAULT_SETTINGS") == _OLD_SETTINGS.strip()
+        )
 
 
 class TestLayer2EnvAllowlistIsDecidedPerSetting:
@@ -334,11 +338,15 @@ class TestLayer2IsLaunchedOnATrustedBash:
 
         assert result.returncode == 0, result.stdout + result.stderr
         interpreter_line = next(
-            line for line in result.stdout.splitlines() if line.startswith("STUB_LAYER2_INTERPRETER:")
+            line
+            for line in result.stdout.splitlines()
+            if line.startswith("STUB_LAYER2_INTERPRETER:")
         )
         interpreter = interpreter_line.split(": ", 1)[1].strip()
         assert interpreter != str(bin_dir / "bash")
-        assert interpreter.startswith(("/usr/bin/", "/bin/", "/usr/sbin/", "/sbin/", "/usr/local/bin/", "/opt/homebrew/bin/"))
+        assert interpreter.startswith(
+            ("/usr/bin/", "/bin/", "/usr/sbin/", "/sbin/", "/usr/local/bin/", "/opt/homebrew/bin/")
+        )
 
     def test_without_a_hostile_path_the_upgrade_still_succeeds(self, client_project: Path) -> None:
         """The fix must not break the ordinary, non-hostile case."""
@@ -401,9 +409,13 @@ class TestLayer2EnvIsIsolatedFromTheCaller:
         feature rather than close a gap, and did until this test caught it.
         """
         work = tmp_path / "branch-work"
-        _require_ok(_git("clone", "-q", str(daemon_remote), str(work), cwd=tmp_path), "clone branch work")
+        _require_ok(
+            _git("clone", "-q", str(daemon_remote), str(work), cwd=tmp_path), "clone branch work"
+        )
         _require_ok(_git("checkout", "-q", "-b", "e2e-track", "v1.0.0", cwd=work), "cut branch")
-        _require_ok(_git("commit", "-q", "--allow-empty", "-m", "branch tip", cwd=work), "branch tip")
+        _require_ok(
+            _git("commit", "-q", "--allow-empty", "-m", "branch tip", cwd=work), "branch tip"
+        )
         _require_ok(_git("push", "-q", "origin", "e2e-track", cwd=work), "push branch")
 
         # The tracked ref IS the target: no positional version argument (that
@@ -491,7 +503,9 @@ def evil_remote(tmp_path: Path, daemon_remote: Path) -> Path:
     """Another repository carrying the same tag, whose Layer 2 announces itself."""
     remote = tmp_path / "evil-origin.git"
     work = tmp_path / "evil-work"
-    _require_ok(_git("clone", "-q", "--bare", str(daemon_remote), str(remote), cwd=tmp_path), "evil bare")
+    _require_ok(
+        _git("clone", "-q", "--bare", str(daemon_remote), str(remote), cwd=tmp_path), "evil bare"
+    )
     _require_ok(_git("clone", "-q", str(remote), str(work), cwd=tmp_path), "evil work")
     _require_ok(_git("config", "user.email", "evil@example.com", cwd=work), "email")
     _require_ok(_git("config", "user.name", "Evil", cwd=work), "name")
@@ -527,7 +541,9 @@ class TestLayer1FetchesOnlyFromOrigin:
     that config rewrites to a DIFFERENT repository than origin names.
     """
 
-    def test_a_global_safe_directory_is_honoured(self, tmp_path: Path, client_project: Path) -> None:
+    def test_a_global_safe_directory_is_honoured(
+        self, tmp_path: Path, client_project: Path
+    ) -> None:
         """A bind-mounted clone owned by another uid, trusted by the user's
         own `safe.directory`, is the usual devcontainer shape."""
         home = _home_with_gitconfig(tmp_path, "[safe]\n    directory = *\n")
@@ -576,9 +592,7 @@ class TestLayer1FetchesOnlyFromOrigin:
         assert result.returncode != 0
         assert _EVIL_MARKER not in result.stdout
 
-    def test_a_second_origin_url_is_refused(
-        self, client_project: Path, evil_remote: Path
-    ) -> None:
+    def test_a_second_origin_url_is_refused(self, client_project: Path, evil_remote: Path) -> None:
         clone_config = client_project / ".claude" / "hooks-daemon" / ".git" / "config"
         with clone_config.open("a") as handle:
             handle.write(f'[remote "origin"]\n    url = {evil_remote}\n')
@@ -594,7 +608,11 @@ class TestLayer1FetchesOnlyFromOrigin:
     ) -> None:
         key = f"url.{evil_remote}.insteadOf"
         if route == "count":
-            extra = {"GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": key, "GIT_CONFIG_VALUE_0": str(daemon_remote)}
+            extra = {
+                "GIT_CONFIG_COUNT": "1",
+                "GIT_CONFIG_KEY_0": key,
+                "GIT_CONFIG_VALUE_0": str(daemon_remote),
+            }
         else:
             extra = {"GIT_CONFIG_PARAMETERS": f"'{key}={daemon_remote}'"}
 

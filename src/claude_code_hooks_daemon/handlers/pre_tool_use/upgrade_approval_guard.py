@@ -25,7 +25,10 @@ answering it:
    parent wrote it; a command that sets the variable and runs Layer 2 IS that
    parent); or, on a command that runs the upgrade, setting a variable that
    picks its interpreter, venv, tools, forwarded flags or code
-   (``_UPGRADE_STEERING_VARS``), or exporting a shell function. The upgrade
+   (``_UPGRADE_STEERING_VARS``) by any spelling -- not only ``NAME=`` but
+   ``read``/``printf -v``/an indirect name, an ``x``-flagged ``declare``, a
+   computed ``export`` operand, ``set -a``, ``eval`` or sourcing another file
+   -- or exporting a shell function. The upgrade
    is recognised by what it is, not its file name: an entry point by name,
    Layer 1's own ``--skip-reading-confirmation`` flag, a script whose content
    carries the handoff variable (every copy of Layer 1 and Layer 2 does), or
@@ -37,7 +40,8 @@ answering it:
    installed.
 5. **Moving the daemon clone by hand** — ``checkout``/``switch``/``pull``/
    ``merge``/``reset`` (and the other ref-moving subcommands) on
-   ``.claude/hooks-daemon``, which installs a version the gate never saw.
+   ``.claude/hooks-daemon``, or writing into its ``.git/`` by any of the
+   routes in (2), which installs a version the gate never saw.
 
 Two distinct Rules (Decision B): route 3 is a different failure mode from
 1/2/4/5 — steering the gate's control flow, rather than forging or skipping
@@ -166,9 +170,31 @@ _UPGRADE_STEERING_VARS: Final[tuple[str, ...]] = (
     "LD_*",
     "DYLD_*",
     "PYTHON*",
+    # Layer 1's own handover to Layer 2: the baselines the config and
+    # settings merges diff against.
+    "HOOKS_DAEMON_OLD_DEFAULT_*",
+    # Where the venv build takes its packages and build backend from, and the
+    # interpreter uv would pick (review4 m1). Layer 1 forwards UV_* for the
+    # operator's own mirror or cache; an agent must not choose them.
+    "UV_INDEX*",
+    "UV_DEFAULT_INDEX",
+    "UV_EXTRA_INDEX_URL",
+    "UV_FIND_LINKS",
+    "UV_CONFIG_FILE",
+    "UV_PYTHON*",
+    "SSL_CERT_FILE",
+    "SSL_CERT_DIR",
+    "REQUESTS_CA_BUNDLE",
+    "CURL_CA_BUNDLE",
+    "HTTP_PROXY",
+    "HTTPS_PROXY",
+    "ALL_PROXY",
+    "http_proxy",
+    "https_proxy",
+    "all_proxy",
 )
 #: A wildcard name part; exported functions travel as `BASH_FUNC_<name>%%`.
-_WILDCARD_NAME: Final[str] = r"[A-Za-z0-9_]+(?:%%)?"
+_WILDCARD_NAME: Final[str] = r"[A-Za-z0-9_]*(?:%%)?"
 _STEERING_GROUP: Final[str] = "|".join(
     re.escape(name).replace(r"\*", _WILDCARD_NAME) for name in _UPGRADE_STEERING_VARS
 )
@@ -178,6 +204,20 @@ _STEERING_ASSIGN_RE: Final[re.Pattern[str]] = re.compile(
     # A function exported to the environment, which shadows a tool by name.
     r"|\bexport\s+-f\b|\b(?:declare|typeset)\s+-(?=[a-z]*f)(?=[a-z]*x)[a-z]+\b"
 )
+#: A steering NAME anywhere but a read (review4 MAJOR 1): `read -r BASH_ENV`,
+#: `printf -v BASH_ENV`, `n=BASH_ENV; export "$n=f"` and `export -- BASH_ENV`
+#: all set one with no `NAME=` token. `$NAME` and `${NAME}` only read it.
+_STEERING_NAME_RE: Final[re.Pattern[str]] = re.compile(rf"(?<![$\w{{])(?:{_STEERING_GROUP})(?!\w)")
+#: Builtins that can put a variable in the environment by a flag.
+_DECLARING_HEADS: Final[frozenset[str]] = frozenset({"declare", "typeset", "local"})
+#: An `export` operand naming its variable literally, with or without a value.
+_LITERAL_EXPORT_OPERAND_RE: Final[re.Pattern[str]] = re.compile(
+    r"^[A-Za-z_][A-Za-z0-9_]*(?:=.*)?$", re.DOTALL
+)
+#: The characters a variable name built from expansions can hold.
+_COMPUTED_NAME_RE: Final[re.Pattern[str]] = re.compile(r"[\w${}`]+")
+#: Commands that run shell code this handler cannot see (`eval`, sourcing).
+_OPAQUE_CODE_HEADS: Final[frozenset[str]] = frozenset({"eval", "source", "."})
 #: The upgrade's entry points by name: Layer 1 (and the skill shim of the same
 #: name), Layer 2, and the gate itself.
 _UPGRADE_ENTRY_RE: Final[re.Pattern[str]] = re.compile(
@@ -212,6 +252,8 @@ _WRAPPER_HEADS: Final[frozenset[str]] = frozenset(
 _DAEMON_CLONE_PATH_RE: Final[re.Pattern[str]] = re.compile(
     r"(?:^|/)\.claude/hooks-daemon(?:/\.git)?/?$"
 )
+#: The path parts naming the daemon clone's own git metadata.
+_DAEMON_CLONE_GIT_PARTS: Final[tuple[str, ...]] = (".claude", "hooks-daemon", ".git")
 #: git subcommands that move the checkout to another commit.
 _HEAD_MOVING_GIT_SUBCOMMANDS: Final[frozenset[str]] = frozenset(
     {"checkout", "switch", "pull", "merge", "rebase", "reset", "cherry-pick", "am", "revert"}
@@ -227,8 +269,16 @@ _REMOTE_MUTATING_SUBCOMMANDS: Final[frozenset[str]] = frozenset(
 )
 #: `git config` flags that write rather than read a value.
 _CONFIG_MUTATING_FLAGS: Final[frozenset[str]] = frozenset(
-    {"--add", "--unset", "--unset-all", "--replace-all", "--rename-section", "--remove-section",
-     "-e", "--edit"}
+    {
+        "--add",
+        "--unset",
+        "--unset-all",
+        "--replace-all",
+        "--rename-section",
+        "--remove-section",
+        "-e",
+        "--edit",
+    }
 )
 #: `git config` flags that read a value, so a `key value` positional PAIR is
 #: not what decides (a value can itself look like a second positional word).
@@ -422,7 +472,9 @@ def _script_run_is_upgrade(
     return _UPGRADE_SHAPED_ARG_RE.search(" ".join(arguments)) is not None
 
 
-def _shell_run_is_upgrade(operands: list[str], cwd: str | None, depth: int, *, steered: bool) -> bool:
+def _shell_run_is_upgrade(
+    operands: list[str], cwd: str | None, depth: int, *, steered: bool
+) -> bool:
     """Whether a shell given ``operands`` runs the upgrade.
 
     `-c` runs its string, which is scanned as a command; `-s` (or no script
@@ -464,7 +516,9 @@ def _segment_runs_upgrade(segment: str, cwd: str | None, depth: int, *, steered:
     return False
 
 
-def _command_runs_upgrade(command: str, cwd: str | None, depth: int = 0, *, steered: bool = False) -> bool:
+def _command_runs_upgrade(
+    command: str, cwd: str | None, depth: int = 0, *, steered: bool = False
+) -> bool:
     """Whether any stage of ``command`` runs the upgrade."""
     if depth > _MAX_INLINE_DEPTH:
         return False
@@ -474,15 +528,83 @@ def _command_runs_upgrade(command: str, cwd: str | None, depth: int = 0, *, stee
     )
 
 
+def _assigns_a_computed_name(word: str) -> bool:
+    """Whether ``word`` is `NAME=value` with a NAME only known at run time
+    (`$n=f`, `${n}_ENV=f`), not merely text holding `$` before an `=`."""
+    name, separator, _value = word.partition("=")
+    if not separator or _COMPUTED_NAME_RE.fullmatch(name) is None:
+        return False
+    return any(marker in name for marker in ("$", "`"))
+
+
+def _segment_exports_by_another_spelling(words: list[str]) -> bool:
+    """Whether a segment's words export something without a literal steering
+    `NAME=` (review4 MAJOR 1): a `declare`/`typeset`/`local` flag containing
+    `x`, an `export` with a flag or a computed operand, or a computed name in
+    any assignment (`env "$n=f"`)."""
+    if any(_assigns_a_computed_name(word) for word in words):
+        return True
+    head_words = _past_wrappers(words)
+    if not head_words:
+        return False
+    head = command_word(head_words[0])
+    operands = head_words[1:]
+    if head in _DECLARING_HEADS:
+        return any(word.startswith("-") and "x" in word for word in operands)
+    if head == "export":
+        return any(
+            word.startswith("-") or not _LITERAL_EXPORT_OPERAND_RE.match(word) for word in operands
+        )
+    return False
+
+
+def _segment_steers(segment: str) -> bool:
+    """Whether ``segment`` sets, exports or names a steering variable."""
+    if _STEERING_ASSIGN_RE.search(segment) or _STEERING_NAME_RE.search(segment):
+        return True
+    return _segment_exports_by_another_spelling(_shell_words(segment))
+
+
+def _turns_on_allexport(words: list[str]) -> bool:
+    """Whether `set` words turn on allexport (`-a` in a cluster, `-o allexport`)."""
+    for index, word in enumerate(words):
+        if word == "-o" and index + 1 < len(words) and words[index + 1] == "allexport":
+            return True
+        if word.startswith("-") and not word.startswith("--") and "a" in word[1:]:
+            return True
+    return False
+
+
+def _segment_prepares_the_shell(segment: str) -> bool:
+    """Whether ``segment`` can change the environment in ways this handler
+    cannot read: `eval`, sourcing a file, or `set -a` (every later assignment
+    is exported). These have ordinary uses (`eval "$(ssh-agent)"`, loading a
+    `.env`), so they count only on a command already recognised as running
+    the upgrade."""
+    words = _past_wrappers(_shell_words(segment))
+    if not words:
+        return False
+    head = command_word(words[0])
+    if head == "set":
+        return _turns_on_allexport(words[1:])
+    return head in _OPAQUE_CODE_HEADS
+
+
 def _bash_sets_bypass_env_var(command: str, cwd: str | None) -> bool:
     """Whether ``command`` sets the handoff variable, or steers an upgrade it runs."""
     segments = _live_segments(command)
     if any(_ENV_VAR_ASSIGN_RE.search(segment) for segment in segments):
         return True
-    steers = any(_STEERING_ASSIGN_RE.search(segment) for segment in segments)
-    if not steers:
+    if any(_segment_steers(segment) for segment in segments):
+        return _command_runs_upgrade(command, cwd, steered=True)
+    preparing = [segment for segment in segments if _segment_prepares_the_shell(segment)]
+    if not preparing:
         return False
-    return _command_runs_upgrade(command, cwd, steered=True)
+    return any(
+        _segment_runs_upgrade(segment, cwd, 0, steered=False)
+        for segment in segments
+        if segment not in preparing
+    )
 
 
 def _remote_mutates(words: list[str], index: int) -> bool:
@@ -621,12 +743,32 @@ def _is_venv_version_stamp(path: str) -> bool:
     return index + 1 < len(parts) and parts[index + 1].startswith("venv")
 
 
+def _is_daemon_clone_git_metadata(path: str) -> bool:
+    """Whether ``path`` is the daemon clone's `.git`, or anything under it.
+
+    review4 MAJOR 3 / review3 m2: an appended `url.insteadOf` or second
+    origin URL in `.claude/hooks-daemon/.git/config`, a hook, a moved tag, or
+    a `.git` gitfile pointing elsewhere all decide what the next fetch and
+    checkout install, with no `git config`/`remote` command to recognise.
+    """
+    parts = Path(path).parts
+    return any(
+        parts[index : index + len(_DAEMON_CLONE_GIT_PARTS)] == _DAEMON_CLONE_GIT_PARTS
+        for index in range(len(parts))
+    )
+
+
 def _guarded_write_target(path: str) -> str | None:
     """Which guarded surface ``path`` hits — for the deny message — or None."""
     if _has_upgrade_approvals_segment(path):
         return "the one-shot upgrade-approval marker directory (`upgrade-approvals/`)"
     if _is_venv_version_stamp(path):
         return "a venv's installer version stamp (`.daemon-version`)"
+    if _is_daemon_clone_git_metadata(path):
+        return (
+            "the daemon clone's own git metadata (`.claude/hooks-daemon/.git`), which "
+            "decides what the next upgrade fetches and checks out"
+        )
     return None
 
 
@@ -683,7 +825,8 @@ class UpgradeApprovalGuardHandler(PreToolUseHandlerBase):
                 "forging a venv's `.daemon-version` stamp (which would make the gate "
                 "believe the target is already installed), or moving the "
                 "`.claude/hooks-daemon` clone to another ref by hand (`checkout`, "
-                "`switch`, `pull`, `merge`, `reset`, `rebase` and the like), which "
+                "`switch`, `pull`, `merge`, `reset`, `rebase` and the like) or writing "
+                "into its `.git/` (a redirect into `.git/config`, a hook, a tag), which "
                 "installs a version the gate never read. Upgrade through "
                 "`scripts/upgrade.sh`, which runs the gate first.\n\n"
                 "What to do instead: report the gate's reasons to the user and STOP. "
@@ -706,7 +849,11 @@ class UpgradeApprovalGuardHandler(PreToolUseHandlerBase):
                 "setting it anywhere impersonates Layer 1.\n\n"
                 "On a command that runs the upgrade, these are denied too: "
                 f"{', '.join(f'`{name}`' for name in _UPGRADE_STEERING_VARS)}, and "
-                "exporting a shell function (`export -f`). The upgrade is recognised by "
+                "exporting a shell function (`export -f`). Every spelling counts: "
+                "naming one of those variables other than to read it (`read -r NAME`, "
+                "`printf -v NAME`, `n=NAME`), `declare`/`typeset`/`local` with an `x` "
+                "flag, `export` with a flag or a computed name, `set -a`, `eval`, and "
+                "sourcing another file. The upgrade is recognised by "
                 "what it is, not its file name: `upgrade.sh`, `upgrade_version.sh` or "
                 "`upgrade_gate_standalone.py` by name; Layer 1's "
                 "`--skip-reading-confirmation`; a script whose content carries the "
@@ -847,8 +994,12 @@ class UpgradeApprovalGuardHandler(PreToolUseHandlerBase):
             "command that runs the upgrade, setting a variable that picks its "
             "interpreter, venv, tools, flags, pass state, git view or code: "
             f"{', '.join(f'`{name}`' for name in _UPGRADE_STEERING_VARS)}, or "
-            "exporting a shell function. The upgrade is recognised by what it is, not "
-            "its file name: `upgrade.sh`/`upgrade_version.sh`/"
+            "exporting a shell function. Any spelling counts: naming one of those "
+            "variables other than to read it (`read -r NAME`, `printf -v NAME`, "
+            "`n=NAME`), `declare`/`typeset`/`local` with an `x` flag, `export` with a "
+            "flag or a computed name, and — on a command that runs the upgrade — "
+            "`set -a`, `eval` or sourcing another file. The upgrade is recognised by "
+            "what it is, not its file name: `upgrade.sh`/`upgrade_version.sh`/"
             "`upgrade_gate_standalone.py` by name, `--skip-reading-confirmation`, a "
             "script carrying `HOOKS_DAEMON_UPGRADE_HANDOFF`, or an unreadable script "
             '(`bash "$tmp"`) run with `--project-root` or the daemon clone as an '
@@ -856,9 +1007,10 @@ class UpgradeApprovalGuardHandler(PreToolUseHandlerBase):
             "4. Forging a venv's `.daemon-version` stamp under `untracked/venv*/`, by "
             "any of the routes in (2).\n"
             "5. Moving the `.claude/hooks-daemon` clone to another ref by hand "
-            "(`git -C .claude/hooks-daemon checkout|switch|pull|merge|reset|rebase ...`): "
-            "that installs a version the gate never read. Upgrade through "
-            "`scripts/upgrade.sh`; fetching, `show`, `log` and `describe` are fine.\n\n"
+            "(`git -C .claude/hooks-daemon checkout|switch|pull|merge|reset|rebase ...`), "
+            "or writing into its `.git/` (config, hooks, refs): that installs a version "
+            "the gate never read. Upgrade through `scripts/upgrade.sh`; fetching, "
+            "`show`, `log` and `describe` are fine.\n\n"
             "**If you hit this**: report the gate's reasons to the user and STOP. Do "
             "not retry with a different spelling — ask the owner to run the approval "
             "command themselves.\n\n"

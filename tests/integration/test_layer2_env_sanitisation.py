@@ -48,13 +48,18 @@ def _run(harness: str, env: dict[str, str]) -> subprocess.CompletedProcess[str]:
 
 def _base_env(**overrides: str) -> dict[str, str]:
     """A minimal, real environment: enough for bash itself to run."""
-    base = {"HOME": os.environ.get("HOME", "/root"), "PATH": os.environ.get("PATH", "/usr/bin:/bin")}
+    base = {
+        "HOME": os.environ.get("HOME", "/root"),
+        "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
+    }
     base.update(overrides)
     return base
 
 
 class TestBashEnvAndEnv:
-    def test_bash_env_does_not_reach_a_child_spawned_after_sanitisation(self, tmp_path: Path) -> None:
+    def test_bash_env_does_not_reach_a_child_spawned_after_sanitisation(
+        self, tmp_path: Path
+    ) -> None:
         """BASH_ENV is read at a non-interactive bash's OWN startup, so the
         outer harness process here has already sourced it once by the time
         any of the harness's own lines run -- that one run is unavoidable
@@ -103,12 +108,14 @@ class TestPath:
         harness = (
             "set -euo pipefail\n"
             f'source "{ENV_SANITISE_SH}"\n'
-            "expected=\"$(_gate_trusted_path)\"\n"
+            'expected="$(_gate_trusted_path)"\n'
             "_sanitise_layer2_env\n"
             'echo "EXPECTED=$expected"\n'
             'echo "ACTUAL=$PATH"\n'
         )
-        result = _run(harness, _base_env(PATH="/tmp/evil-bin:" + os.environ.get("PATH", "/usr/bin:/bin")))
+        result = _run(
+            harness, _base_env(PATH="/tmp/evil-bin:" + os.environ.get("PATH", "/usr/bin:/bin"))
+        )
 
         assert result.returncode == 0, result.stderr
         lines = dict(line.split("=", 1) for line in result.stdout.splitlines() if "=" in line)
@@ -117,7 +124,9 @@ class TestPath:
 
 
 class TestShelloptsAndBashopts:
-    def test_xtrace_forced_via_shellopts_does_not_survive_sanitisation(self, tmp_path: Path) -> None:
+    def test_xtrace_forced_via_shellopts_does_not_survive_sanitisation(
+        self, tmp_path: Path
+    ) -> None:
         """SHELLOPTS/BASHOPTS are bash-maintained and readonly -- `unset` on
         them errors under `set -e`; the fix neutralises the OPTIONS they
         primed at shell startup instead of the variable itself."""
@@ -368,10 +377,10 @@ class TestTheIncludeGuardCannotBeInherited:
         marker = tmp_path / "hostile_gate_tool_ran"
         harness = (
             "set -euo pipefail\n"
-            'export ENV_SANITISE_SH_LOADED=1\n'
+            "export ENV_SANITISE_SH_LOADED=1\n"
             "_gate_tool() {\n"
             f'    touch "{marker}"\n'
-            f'    printf \'%s\\n\' "{hostile_bin}/bash"\n'
+            f"    printf '%s\\n' \"{hostile_bin}/bash\"\n"
             "}\n"
             "export -f _gate_tool\n"
             f'source "{ENV_SANITISE_SH}"\n'
@@ -399,12 +408,8 @@ def layer2_head(tmp_path: Path) -> Path:
     shutil.copytree(REPO_ROOT / "scripts" / "lib", scripts / "lib")
     content = (REPO_ROOT / "scripts" / "upgrade_version.sh").read_text(encoding="utf-8")
     head = content[: content.index(_ARGUMENT_PARSING_LINE)]
-    reporter = (
-        'echo "L2_PATH=$PATH"\n'
-        'echo "L2_EXPECTED=$(_gate_trusted_path)"\n'
-        + "".join(
-            f'echo "L2_RESOLVES {tool}=$(command -v {tool} || echo none)"\n' for tool in _PLANTED_TOOLS
-        )
+    reporter = 'echo "L2_PATH=$PATH"\n' 'echo "L2_EXPECTED=$(_gate_trusted_path)"\n' + "".join(
+        f'echo "L2_RESOLVES {tool}=$(command -v {tool} || echo none)"\n' for tool in _PLANTED_TOOLS
     )
     script = scripts / "upgrade_version.sh"
     script.write_text(head + reporter, encoding="utf-8")

@@ -24,6 +24,8 @@ import subprocess
 from pathlib import Path
 from typing import Final
 
+import pytest
+
 from claude_code_hooks_daemon.install.upgrade_gate import SKIP_READING_FLAG, GateVerdict
 
 _LAYER2: Final[Path] = Path(__file__).resolve().parents[2] / "scripts" / "upgrade_version.sh"
@@ -194,52 +196,89 @@ def test_only_a_root_owned_unwritable_directory_is_trusted() -> None:
     assert "8#022" in body, "group- and world-write bits (022) are rejected"
 
 
-def test_gate_dir_is_trusted_rejects_a_group_or_world_writable_directory(
-    tmp_path: Path,
+# A `stat` that answers from the directory's NAME (`<owner>-<mode>`), so the
+# ownership half is decided the same way under any uid (review4 m3: a real
+# root-owned directory exists only when the suite runs as root). STAT_STYLE
+# picks which spelling it understands: GNU `-c` or BSD `-f`, the fallback
+# `_gate_dir_is_trusted` takes when `-c` fails. Parameter expansion only: its
+# PATH is the directory holding it.
+_FAKE_STAT = """\
+#!/bin/sh
+flag="$1"; format="$2"; dir="$3"
+case "$flag" in
+    -c) [ "$STAT_STYLE" = gnu ] || exit 1 ;;
+    -f) [ "$STAT_STYLE" = bsd ] || exit 1 ;;
+    *) exit 1 ;;
+esac
+name="${dir##*/}"
+owner="${name%%-*}"
+case "$format" in
+    %u) if [ "$owner" = root ]; then echo 0; else echo 1000; fi ;;
+    %a | %Lp) echo "${name#*-}" ;;
+    *) exit 1 ;;
+esac
+"""
+
+
+@pytest.mark.parametrize("style", ["gnu", "bsd"])
+@pytest.mark.parametrize(
+    ("name", "trusted"),
+    [
+        ("root-755", True),
+        ("root-555", True),
+        ("user-755", False),
+        ("root-777", False),
+        ("root-775", False),
+        ("root-757", False),
+        ("root-7x5", False),
+    ],
+)
+def test_gate_dir_is_trusted_decides_by_owner_and_write_bits(
+    tmp_path: Path, style: str, name: str, trusted: bool
 ) -> None:
     """Real execution of the pure ownership/permission check, isolated from
-    the rest of Layer 2 (no real upgrade, no network, no venv build)."""
+    the rest of Layer 2 (no real upgrade, no network, no venv build), with
+    `stat` stubbed so neither the uid running the suite nor chmod decides."""
     # _function_body() stops just before the closing brace (it is meant for
     # substring assertions, not re-execution), so it is added back here.
-    functions = "\n\n".join(
-        f"{_function_body(_script(), name)}\n}}" for name in ("_gate_dir_is_trusted",)
-    )
+    function = f"{_function_body(_script(), '_gate_dir_is_trusted')}\n}}"
+    fake_bin = tmp_path / "fake-bin"
+    fake_bin.mkdir()
+    (fake_bin / "stat").write_text(_FAKE_STAT)
+    (fake_bin / "stat").chmod(0o755)
     harness = tmp_path / "harness.sh"
     harness.write_text(
-        f'#!/bin/bash\nset -uo pipefail\nGATE_SAFE_PATH="/usr/bin:/bin:/usr/sbin:/sbin"\n'
-        f'{functions}\n"$@"\n'
+        f'#!/bin/bash\nset -uo pipefail\nGATE_SAFE_PATH="{fake_bin}"\n{function}\n"$@"\n'
     )
-    harness.chmod(0o755)
+    directory = tmp_path / name
+    directory.mkdir()
 
-    root_owned_unwritable = tmp_path / "root-like"
-    root_owned_unwritable.mkdir()
-    root_owned_unwritable.chmod(0o755)
-    world_writable = tmp_path / "world-writable"
-    world_writable.mkdir()
-    world_writable.chmod(0o777)
-    group_writable = tmp_path / "group-writable"
-    group_writable.mkdir()
-    group_writable.chmod(0o775)
-
-    # This harness runs as whatever uid the test process has; on the CI/agent
-    # container that is root (uid 0), so `root_owned_unwritable` genuinely
-    # passes the ownership half and the permission bits alone decide.
-    if os.geteuid() != 0:
-        return
-    assert (
-        subprocess.run(
-            ["bash", str(harness), "_gate_dir_is_trusted", str(root_owned_unwritable)],
-            check=False,
-        ).returncode
-        == 0
+    result = subprocess.run(
+        ["bash", str(harness), "_gate_dir_is_trusted", str(directory)],
+        env={**os.environ, "STAT_STYLE": style},
+        check=False,
     )
-    for unsafe in (world_writable, group_writable):
-        assert (
-            subprocess.run(
-                ["bash", str(harness), "_gate_dir_is_trusted", str(unsafe)], check=False
-            ).returncode
-            != 0
-        ), unsafe
+
+    assert (result.returncode == 0) is trusted, (name, style)
+
+
+def test_gate_dir_is_trusted_rejects_what_it_cannot_stat(tmp_path: Path) -> None:
+    """No `stat` answering either spelling is not trust."""
+    function = f"{_function_body(_script(), '_gate_dir_is_trusted')}\n}}"
+    empty_bin = tmp_path / "empty-bin"
+    empty_bin.mkdir()
+    harness = tmp_path / "harness.sh"
+    harness.write_text(
+        f'#!/bin/bash\nset -uo pipefail\nGATE_SAFE_PATH="{empty_bin}"\n{function}\n"$@"\n'
+    )
+    directory = tmp_path / "root-755"
+    directory.mkdir()
+
+    result = subprocess.run(
+        ["bash", str(harness), "_gate_dir_is_trusted", str(directory)], check=False
+    )
+
+    assert result.returncode != 0
 
 
 def test_imported_shell_functions_are_dropped_before_anything_runs() -> None:
