@@ -18,7 +18,7 @@ from pydantic import (
     model_validator,
 )
 
-from claude_code_hooks_daemon.constants import ConfigKey, EventKey, wired_event_metas
+from claude_code_hooks_daemon.constants import ConfigKey, EventKey, Timeout, wired_event_metas
 from claude_code_hooks_daemon.core.handler_scope import (
     SCOPE_CONFIG_KEY,
     HandlerScope,
@@ -1612,6 +1612,19 @@ class TransportConfig(BaseModel):
         """True when any rung requires the daemon's per-event listeners (§1.3)."""
         return self.relay_enabled or self.nc_enabled
 
+    @property
+    def client_budget_seconds(self) -> float:
+        """The tightest client socket timeout a request can meet under this config.
+
+        The python rung (``Timeout.SOCKET_DISPATCH_ROUNDTRIP``) is every
+        forwarder's fallback, so it always binds; an enabled per-event rung
+        adds ``timeout_seconds`` (relay ``--timeout-ms``, ``nc -w``).
+        """
+        budget = Timeout.SOCKET_DISPATCH_ROUNDTRIP
+        if self.per_event_sockets_needed:
+            return min(budget, float(self.timeout_seconds))
+        return budget
+
 
 class ChainConfig(BaseModel):
     """Handler-chain dispatch options — ``daemon.chain`` (Plan 00242).
@@ -1632,6 +1645,61 @@ class ChainConfig(BaseModel):
             Costs the extra handlers' execution time on the blocked path;
             ``CLAUDE/Plan/00242-terminal-handlers-are-a-flawed-primitive/
             MEASUREMENTS.md`` records the numbers.
+        deadline_seconds: Per-event chain deadline (Plan 00466 N25/N34/N40),
+            well under the client's own socket timeout (30s). Originally
+            motivated by that client-side timeout failing the WHOLE chain
+            open on expiry, so a merely slow handler bypassed every guard
+            behind it, not just itself; the client itself now fails CLOSED
+            on its own timeout for PreToolUse (Plan 00466 N40 M1/N25,
+            ``.claude/init.sh``), but this deadline still matters on its own
+            terms -- it is what tells a slow, merely-overloaded host apart
+            from an actually-malicious payload, denying only the
+            ``SAFETY``+``BLOCKING`` handlers that did not get to run rather
+            than the whole call. Checked BETWEEN handlers, and (Plan 00466
+            N40 m1) the
+            WHOLE per-handler loop is dispatched as ONE bounded call, on its
+            own fresh daemon thread (Plan 00466 N40 n1: not a thread pool —
+            see ``BoundedDispatcher``) — a handler slow enough within its own
+            ``matches()``/``handle()`` call (``secret_file_guard`` measured
+            at 48.958s on 4 MB input) reproduces the exact bypass this exists
+            to close otherwise, and the whole-chain dispatch bounds that case
+            too. Either way, a handler tagged both ``SAFETY`` and
+            ``BLOCKING`` not judged in time is denied, naming the handler,
+            "not judged in time"; any other not-yet-run handler is skipped
+            with a context note. ``None`` disables enforcement entirely (NOT
+            recommended: a slow handler can then exhaust the client's own
+            timeout, which fails the whole chain open with no guard getting
+            a say).
+        max_safety_input_bytes: Defence in depth alongside
+            ``deadline_seconds`` (Plan 00466 N34 remedy 3): the serialised
+            size of the WHOLE ``tool_input`` dict (Plan 00466 n24 review B1,
+            m5 -- a fixed field list missed MultiEdit's ``edits[]``,
+            NotebookEdit's ``new_source`` and, most importantly, Write/Edit's
+            own ``file_path``: B2's actual attack vector was a ~90 KB path
+            that never touched ``content`` at all; see
+            ``chain._safety_payload_size``) is
+            checked BEFORE dispatch is even attempted, so a truly pathological
+            payload fails fast and cheaply rather than paying dispatch
+            overhead only to be cut off by the deadline anyway. 2 MB (the
+            default) is comfortably above ordinary source files (typically
+            well under a few hundred KB) and even a large generated asset,
+            while still catching a payload far outside normal use early. This
+            is NOT the only guarantee against a slow handler — ``deadline_
+            seconds``'s per-handler bound (N34) already caps worst-case wall
+            clock regardless of size — so raising or disabling this (``None``)
+            is safe as long as ``deadline_seconds`` stays enforced. A SAFETY
+            +BLOCKING handler over the limit is denied, naming the size and
+            the limit; any other SAFETY handler is skipped with a context
+            note.
+        straggler_unhealthy_count: Plan 00466 N40 M2. ``get_health()``
+            reports "degraded" once this many BoundedDispatcher stragglers
+            (handlers still running past their own dispatch timeout) are
+            alive at once. None disables straggler-count-driven health
+            reporting.
+        straggler_restart_after_seconds: Plan 00466 N40 M2. The daemon
+            self-restarts once its OLDEST straggler has run this long,
+            rather than staying wedged behind an unbounded pileup. None
+            disables self-restart.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -1644,6 +1712,91 @@ class ChainConfig(BaseModel):
             "the first terminal deny)"
         ),
     )
+    deadline_seconds: Annotated[float, Field(gt=0)] | None = Field(
+        default=Timeout.CHAIN_DEADLINE_DEFAULT,
+        description=(
+            "Per-event chain deadline in seconds, well under the client's "
+            "own socket timeout. Enforced BETWEEN handlers and around each "
+            "handler's own matches()/handle() call (Plan 00466 N34). A "
+            "SAFETY+BLOCKING handler not judged in time is denied as 'not "
+            "judged in time'; any other not-yet-run handler is skipped. "
+            "None disables enforcement."
+        ),
+    )
+    max_safety_input_bytes: Annotated[int, Field(gt=0)] | None = Field(
+        default=Timeout.SAFETY_INPUT_SIZE_CAP_BYTES,
+        description=(
+            "Defence in depth alongside deadline_seconds (Plan 00466 N34): "
+            "a SAFETY handler whose bulk-text input (Bash command, Write "
+            "content, Edit old_string/new_string) exceeds this many bytes is "
+            "denied before dispatch is even attempted, rather than paying "
+            "dispatch overhead only to be cut off by the deadline. None "
+            "disables this check (deadline_seconds still applies)."
+        ),
+    )
+    straggler_unhealthy_count: Annotated[int, Field(ge=1)] | None = Field(
+        default=Timeout.STRAGGLER_UNHEALTHY_COUNT,
+        description=(
+            "Plan 00466 N40 M2: number of concurrently-abandoned handler "
+            "dispatches (BoundedDispatcher stragglers -- a handler still "
+            "running past its own deadline_seconds timeout) at or above "
+            "which get_health() reports 'degraded'. None disables straggler "
+            "health reporting entirely (status is never flipped by it)."
+        ),
+    )
+    straggler_restart_after_seconds: Annotated[float, Field(gt=0)] | None = Field(
+        default=Timeout.STRAGGLER_RESTART_AFTER_SECONDS,
+        description=(
+            "Plan 00466 N40 M2: once the OLDEST straggler has been running "
+            "this many seconds, the daemon self-restarts (exits; the "
+            "client's own lazy auto-start brings up a fresh process on the "
+            "next hook call) rather than staying wedged indefinitely with a "
+            "16-straggler pileup denying every PreToolUse call and no way "
+            "out short of a manual restart. None disables self-restart."
+        ),
+    )
+
+    def deadline_problem(self, client_budget_seconds: float, budget_name: str) -> str | None:
+        """Say why ``deadline_seconds`` cannot beat a client budget, if it cannot.
+
+        Plan 00466 N40 m6: the daemon's deadline-triggered deny names the
+        handler that was not judged in time, but only if it reaches the client
+        before the client's own timeout fires, with margin left to serialise
+        and flush it. Past that budget the client answers first -- a PreToolUse
+        call is still denied (``socket_timeout``), just without the name.
+
+        A problem, not a ``ValueError`` (Plan 00466 N40 review 2 mA4): a
+        rejected value stops the daemon starting, which leaves every guard off.
+        ``DaemonConfig.chain_deadline_problems`` collects this for health.
+
+        Args:
+            client_budget_seconds: The client timeout the deadline must beat.
+            budget_name: Names that timeout, so the operator can tell which
+                setting to change.
+
+        Returns:
+            The problem, or ``None`` when the deadline leaves the margin (or is
+            ``None``, which disables enforcement and has nothing to compare).
+        """
+        if self.deadline_seconds is None:
+            return None
+        margin = Timeout.CHAIN_DEADLINE_SOCKET_MARGIN_SECONDS
+        if self.deadline_seconds >= client_budget_seconds:
+            return (
+                f"daemon.chain.deadline_seconds ({self.deadline_seconds}s) is not "
+                f"below {budget_name} ({client_budget_seconds}s): the client gives "
+                "up before the daemon's deadline-triggered deny can be sent back. "
+                "Lower deadline_seconds."
+            )
+        if client_budget_seconds - self.deadline_seconds < margin:
+            return (
+                f"daemon.chain.deadline_seconds ({self.deadline_seconds}s) leaves "
+                f"less than {margin}s of margin before {budget_name} "
+                f"({client_budget_seconds}s) -- not enough time to serialise and "
+                "flush the deadline-triggered response. Lower deadline_seconds by "
+                f"at least {margin - (client_budget_seconds - self.deadline_seconds)}s."
+            )
+        return None
 
 
 class DaemonConfig(BaseModel):
@@ -1740,6 +1893,26 @@ class DaemonConfig(BaseModel):
         if isinstance(v, Path):
             return str(v)
         return v
+
+    @property
+    def chain_deadline_problems(self) -> list[str]:
+        """Why ``chain.deadline_seconds`` cannot beat the client timeout this
+        config deploys (Plan 00466 N40 review 2 mA4); empty when it can.
+
+        Checked against ``transport.client_budget_seconds``, not only the python
+        rung's constant: an enabled relay or ``nc`` rung gives up after
+        ``transport.timeout_seconds``, which may be shorter. The problem names
+        whichever setting binds. The daemon reports these in ``health`` as a
+        degraded reason; see ``ChainConfig.deadline_problem`` for why they are
+        not validation errors.
+        """
+        budget = self.transport.client_budget_seconds
+        if budget < Timeout.SOCKET_DISPATCH_ROUNDTRIP:
+            budget_name = "transport.timeout_seconds (the relay/nc client timeout)"
+        else:
+            budget_name = "the client's own socket timeout"
+        problem = self.chain.deadline_problem(budget, budget_name)
+        return [problem] if problem is not None else []
 
     @property
     def socket_path_obj(self) -> Path | None:

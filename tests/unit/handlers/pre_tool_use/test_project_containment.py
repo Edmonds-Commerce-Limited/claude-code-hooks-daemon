@@ -165,6 +165,87 @@ class TestTheWriteEditSurface:
         assert handler.matches(hook_input) is True
 
 
+class TestAnInProjectLinkOutOfTheRoot:
+    """Plan 00466 N24 review 3 B1: a link inside the root that points outside it.
+
+    Spelled with a run of ``/.`` past PATH_MAX, the path resolved to itself
+    rather than through the link, so the Write was allowed.
+    """
+
+    @pytest.fixture()
+    def linked_root(self, tmp_path: Path, _project_root: Any) -> Path:
+        root = tmp_path / "proj"
+        root.mkdir()
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        (root / "l_out").symlink_to(outside)
+        _project_root.return_value = root
+        return root
+
+    @pytest.mark.parametrize("filler", ["", "/." * 2_100, "/" * 4_200])
+    def test_a_write_through_the_link_matches(
+        self, handler: ProjectContainmentHandler, linked_root: Path, filler: str
+    ) -> None:
+        assert handler.matches(_write(f"{linked_root}{filler}/l_out/escape.txt")) is True
+
+    def test_a_write_beside_the_link_does_not_match(
+        self, handler: ProjectContainmentHandler, linked_root: Path
+    ) -> None:
+        assert handler.matches(_write(f"{linked_root}{'/.' * 2_100}/inside.txt")) is False
+
+
+class TestASymlinkLoopFollowedByDotDotOutOfTheRoot:
+    """Plan 00466 N24 review 4 R4-B1: a symlink LOOP, then ``..``, then a link out.
+
+    ``utils.realpath`` used to reimplement ``os.path.realpath``'s walk by
+    hand. Its symlink-loop handling matched CPython 3.11 but diverged from
+    3.13's rewrite of the same algorithm: after hitting the loop, 3.11's own
+    ``os.path.realpath`` gives up and appends the rest of the path
+    unresolved (so ``..`` cancels lexically and the write never reaches
+    ``l_out`` at all), while 3.13 backs out of the loop and keeps resolving,
+    reaching ``l_out`` and following it outside the root. A version-dependent
+    containment answer is not acceptable for a security check -- review 4
+    proved a REAL Write escapes through this shape -- so the handler must
+    DENY on every Python version, not merely agree with whichever answer
+    ``os.path.realpath`` happens to give. ``_is_within`` achieves this by
+    asking ``has_symlink_loop`` directly rather than inferring the loop from
+    ``realpath()``'s resolved string.
+    """
+
+    @pytest.fixture()
+    def looped_root(self, tmp_path: Path, _project_root: Any) -> Path:
+        root = tmp_path / "proj"
+        root.mkdir()
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        (root / "l_loop").symlink_to(root / "l_loop")  # self-referential loop
+        (root / "l_out").symlink_to(outside)
+        _project_root.return_value = root
+        return root
+
+    def test_it_denies_end_to_end(
+        self, handler: ProjectContainmentHandler, looped_root: Path
+    ) -> None:
+        """Hardcoded DENY -- must hold on every Python version this daemon
+        supports, not just whichever one ``os.path.realpath`` currently
+        resolves this shape outside the root on."""
+        target = f"{looped_root}/l_loop/../l_out/escape.txt"
+
+        assert handler.matches(_write(target)) is True
+        assert handler.handle(_write(target)).decision == Decision.DENY
+
+    def test_a_loop_that_never_leaves_the_root_still_denies(
+        self, handler: ProjectContainmentHandler, looped_root: Path
+    ) -> None:
+        """Even when the eventual target stays inside the root, a loop on the
+        path is denied outright -- the point is that its resolution cannot be
+        trusted, not that this particular target happens to be safe."""
+        target = f"{looped_root}/l_loop/../l_loop/inside.txt"
+
+        assert handler.matches(_write(target)) is True
+        assert handler.handle(_write(target)).decision == Decision.DENY
+
+
 class TestTheBashSurface:
     @pytest.mark.parametrize(
         "command",

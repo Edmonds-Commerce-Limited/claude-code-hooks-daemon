@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Any
 from claude_code_hooks_daemon.config.models import ChainConfig, VerdictLogConfig
 from claude_code_hooks_daemon.config.validator import ConfigValidator
 from claude_code_hooks_daemon.constants.modes import DaemonMode, ModeConstant
+from claude_code_hooks_daemon.core.bounded_dispatch import get_default_dispatcher
 from claude_code_hooks_daemon.core.chain import ChainExecutionResult
 from claude_code_hooks_daemon.core.claude_md_injector import ClaudeMdInjector
 from claude_code_hooks_daemon.core.data_layer import get_data_layer
@@ -49,7 +50,10 @@ if TYPE_CHECKING:
     from claude_code_hooks_daemon.core.handler import Handler
     from claude_code_hooks_daemon.core.project_layout import ProjectLayout
     from claude_code_hooks_daemon.core.workspace import ProjectRegistry
-    from claude_code_hooks_daemon.handlers.project_loader import ProjectHandlerDiscovery
+    from claude_code_hooks_daemon.handlers.project_loader import (
+        ProjectHandlerDiscovery,
+        ProjectHandlerLoadFailure,
+    )
 
 logger = logging.getLogger(__name__)
 
@@ -135,17 +139,20 @@ class DaemonController:
 
     __slots__ = (
         "_chain_config",
+        "_chain_deadline_problems",
         "_config",
         "_config_errors",
         "_config_fingerprint",
         "_degraded",
         "_initialised",
         "_mode_manager",
+        "_project_handler_load_failures",
         "_pseudo_dispatcher",
         "_registry",
         "_router",
         "_source_fingerprint",
         "_stats",
+        "_strict_mode",
         "_verdict_log_config",
     )
 
@@ -174,6 +181,18 @@ class DaemonController:
         # Chain dispatch options (Plan 00242): same narrow-slice DI idiom.
         # Defaults keep the deny short-circuit (collect_all_violations=False).
         self._chain_config: ChainConfig = ChainConfig()
+        # Why the chain deadline cannot beat the deployed client timeout
+        # (Plan 00466 N40 review 2 mA4): reported in health, not rejected.
+        self._chain_deadline_problems: list[str] = []
+        # Project handlers that failed to load this startup (reported in health).
+        self._project_handler_load_failures: list[ProjectHandlerLoadFailure] = []
+        # Strict-mode flag (Plan 00466 N24): same narrow-slice DI idiom as
+        # the two above. Previously read from `self._config.strict_mode`,
+        # which is always None on the real startup path (see the comment
+        # block above), so every install's `daemon.strict_mode` was inert.
+        # Defaults False -- fail-open for a non-safety handler, matching the
+        # pre-existing default before this was wired up.
+        self._strict_mode: bool = False
         self._pseudo_dispatcher: PseudoEventDispatcher | None = None
         # Content fingerprint of the code this daemon loaded at startup (Plan
         # 00371); None until initialise() computes it, and never recomputed
@@ -200,9 +219,11 @@ class DaemonController:
         project_registry: "ProjectRegistry | None" = None,
         claude_md: "ClaudeMdConfig | None" = None,
         chain: "ChainConfig | None" = None,
+        strict_mode: bool | None = None,
         write_claude_md_in_linked_worktree: bool = False,
         worktree: "WorktreeConfig | None" = None,
         reference_repos: "ReferenceReposConfig | None" = None,
+        chain_deadline_problems: list[str] | None = None,
         config_fingerprint: str | None = None,
     ) -> None:
         """Initialise the controller with handlers.
@@ -233,11 +254,19 @@ class DaemonController:
                 (pure progressive disclosure).
             chain: Optional ChainConfig (Plan 00242) — ``daemon.chain``.
                 None keeps the default: a terminal deny short-circuits.
+            strict_mode: ``daemon.strict_mode`` (Plan 00466 N24) — narrow
+                config-slice, same DI idiom as ``chain``/``verdict_log``.
+                None (every existing caller that does not pass it, e.g. most
+                unit tests) keeps the pre-existing default: fail-open for a
+                non-SAFETY+BLOCKING handler that raises.
             write_claude_md_in_linked_worktree: Regenerate the CLAUDE.md
                 block even when ``workspace_root`` is a linked git worktree.
                 Daemon startup leaves it False, so a worktree's branch never
                 carries an auto-committed regeneration that conflicts with
                 main's on merge; ``regenerate-docs`` passes True.
+            chain_deadline_problems: ``DaemonConfig.chain_deadline_problems``
+                (Plan 00466 N40 review 2 mA4). Each is logged and reported in
+                ``get_health()`` as the ``chain_deadline`` degraded reason.
             config_fingerprint: ``compute_config_fingerprint`` of the config
                 these slices came from (Plan 00415), reported by
                 ``get_health`` so a config edit without a restart reads as
@@ -266,6 +295,10 @@ class DaemonController:
         # back to VerdictLogConfig()'s own defaults (enabled).
         self._verdict_log_config = verdict_log or VerdictLogConfig()
         self._chain_config = chain or ChainConfig()
+        self._strict_mode = strict_mode if strict_mode is not None else False
+        self._chain_deadline_problems = list(chain_deadline_problems or [])
+        for problem in self._chain_deadline_problems:
+            logger.warning("Chain deadline: %s", problem)
 
         # Initialize ProjectContext singleton (single source of truth for project-level constants)
         # May already be initialized from CLI config validation
@@ -654,6 +687,10 @@ class DaemonController:
             write_load_failures,
         )
 
+        # Kept for get_health() too (Plan 00466 N40 review 2 nit 3): the
+        # state file serves the CLI and the SessionStart alert, but the
+        # daemon's own health answer said "healthy" while a handler was gone.
+        self._project_handler_load_failures = list(discovery.failures)
         try:
             write_load_failures(
                 discovery.failures,
@@ -911,7 +948,9 @@ class DaemonController:
         """
         return self._mode_manager.set_mode(mode, custom_message)
 
-    def process_event(self, event: HookEvent) -> ChainExecutionResult:
+    def process_event(
+        self, event: HookEvent, *, arrival_time: float | None = None
+    ) -> ChainExecutionResult:
         """Process a hook event.
 
         Routes the event to the appropriate handler chain.
@@ -919,6 +958,11 @@ class DaemonController:
 
         Args:
             event: Hook event to process
+            arrival_time: ``time.perf_counter()`` reading taken at request
+                arrival (Plan 00466 N40 M1) -- e.g. right after the socket
+                read, before any executor queueing delay. None (the
+                default) leaves the chain deadline measured from
+                ``HandlerChain.execute``'s own call, as before M1.
 
         Returns:
             Chain execution result
@@ -976,14 +1020,21 @@ class DaemonController:
                 logger.debug("StatusLine raw hook_input: %s", hook_input_dict)
                 get_data_layer().session.update_from_status_event(hook_input_dict)
 
-            # Get strict_mode from config (default to False if no config)
-            strict_mode = self._config.strict_mode if self._config else False
+            # strict_mode is a narrow config-slice threaded through
+            # initialise() (Plan 00466 N24), the same DI idiom as
+            # chain/verdict_log — NOT `self._config`, whose comment in
+            # __init__ explains why it is never populated by the real
+            # daemon startup path.
+            strict_mode = self._strict_mode
 
             result = self._router.route(
                 event.event_type,
                 hook_input_dict,
                 strict_mode=strict_mode,
                 collect_all=self._chain_config.collect_all_violations,
+                deadline_seconds=self._chain_config.deadline_seconds,
+                max_safety_input_bytes=self._chain_config.max_safety_input_bytes,
+                arrival_time=arrival_time,
             )
             processing_time = (time.perf_counter() - start_time) * 1000
             self._stats.record_request(event.event_type.value, processing_time)
@@ -1037,10 +1088,28 @@ class DaemonController:
             self._stats.record_error()
             logger.exception("Error processing event")
 
-            # Return error result
-            error_result = HookResult.error(
-                error_type="internal_error",
-                error_details=f"{type(e).__name__}: {e}",
+            # Plan 00466 n24 security review, B1: an exception anywhere in
+            # THIS method -- request conversion, the mode interceptor,
+            # router.route (the handler chain, which already fails closed on
+            # its own for a raise/timeout/oversize -- N24/N25/N34), pseudo-
+            # event dispatch -- used to reach here and get the FAIL-OPEN
+            # `HookResult.error()` (documented "Returns allow decision"),
+            # which is an ALLOW for PreToolUse. "No verdict" must never read
+            # as "allowed" here, same as inside the chain. Scoped to
+            # PreToolUse deliberately, per the review's own direction: other
+            # event types were not shown to have the same exploitability and
+            # a blanket fail-closed risks denying non-security flows (e.g.
+            # SessionStart) for no security benefit.
+            error_result = (
+                HookResult.error_deny(
+                    error_type="internal_error",
+                    error_details=f"{type(e).__name__}: {e}",
+                )
+                if event.event_type == EventType.PRE_TOOL_USE
+                else HookResult.error(
+                    error_type="internal_error",
+                    error_details=f"{type(e).__name__}: {e}",
+                )
             )
             return ChainExecutionResult(
                 result=error_result,
@@ -1082,13 +1151,17 @@ class DaemonController:
         except OSError as e:
             logger.warning("Failed to write verdict log: %s", e)
 
-    def process_request(self, request_data: dict[str, Any]) -> dict[str, Any]:
+    def process_request(
+        self, request_data: dict[str, Any], *, arrival_time: float | None = None
+    ) -> dict[str, Any]:
         """Process a raw request from the socket server.
 
         Parses the request, routes to handler chain, and formats response.
 
         Args:
             request_data: Raw request dictionary
+            arrival_time: ``time.perf_counter()`` reading taken at request
+                arrival (Plan 00466 N40 M1). See ``process_event``.
 
         Returns:
             Response dictionary per PRD 3.2.2 format
@@ -1097,13 +1170,24 @@ class DaemonController:
             event = HookEvent.model_validate(request_data)
         except Exception as e:
             logger.warning("Invalid request data: %s", e)
-            error_result = HookResult.error(
-                error_type="invalid_request",
-                error_details=str(e),
+            # Plan 00466 n24 security review, B1: no validated HookEvent
+            # exists yet at this point, so the event type is read directly
+            # off the raw request dict, best-effort -- same PreToolUse-only
+            # scoping as process_event's own catch-all above.
+            error_result = (
+                HookResult.error_deny(
+                    error_type="invalid_request",
+                    error_details=str(e),
+                )
+                if request_data.get("event") == EventType.PRE_TOOL_USE.value
+                else HookResult.error(
+                    error_type="invalid_request",
+                    error_details=str(e),
+                )
             )
             return error_result.to_response_dict("Unknown", 0.0)
 
-        result = self.process_event(event)
+        result = self.process_event(event, arrival_time=arrival_time)
 
         # Use to_json() for Claude Code hook format, not to_response_dict()
         hook_input_dict = event.hook_input.model_dump(by_alias=False)
@@ -1132,8 +1216,26 @@ class DaemonController:
         Returns:
             Health status dictionary
         """
+        degraded_reasons: list[str] = []
+        if self._degraded:
+            degraded_reasons.append("config")
+
+        # Plan 00466 N40 M2: surface the shared dispatcher's straggler state
+        # (handler calls still running past their own deadline_seconds
+        # timeout) -- a pileup is exactly what denies every future
+        # PreToolUse call once it reaches the dispatcher's own straggler
+        # cap, and that should be visible in health well before it does.
+        straggler_health = get_default_dispatcher().straggler_health()
+        unhealthy_count = self._chain_config.straggler_unhealthy_count
+        if unhealthy_count is not None and straggler_health.count >= unhealthy_count:
+            degraded_reasons.append("stragglers")
+        if self._chain_deadline_problems:
+            degraded_reasons.append("chain_deadline")
+        if self._project_handler_load_failures:
+            degraded_reasons.append("project_handlers")
+
         health: dict[str, Any] = {
-            "status": "degraded" if self._degraded else "healthy",
+            "status": "degraded" if degraded_reasons else "healthy",
             "initialised": self._initialised,
             "stats": self._stats.to_dict(),
             "handlers": self._router.get_handler_count(),
@@ -1145,10 +1247,32 @@ class DaemonController:
             # Plan 00415: fingerprint of the config bound at startup, the
             # other half of the freshness verdict. None until initialise().
             HEALTH_KEY_CONFIG_FINGERPRINT: self._config_fingerprint,
+            "stragglers": {
+                "count": straggler_health.count,
+                "oldest_age_seconds": straggler_health.oldest_age_seconds,
+                # Plan 00466 N40 M2: carried in get_health()'s own dict (not
+                # a separate accessor) so the daemon's self-restart watchdog
+                # (server.py's _monitor_straggler_health) needs no direct
+                # ChainConfig access -- get_health() stays the single
+                # source of truth for both count/age AND the threshold.
+                "restart_after_seconds": self._chain_config.straggler_restart_after_seconds,
+                # Plan 00466 N40 review 2 mA3: at the cap nothing can be
+                # judged, so the watchdog restarts without waiting for age.
+                "at_capacity": straggler_health.at_capacity,
+            },
         }
 
+        if degraded_reasons:
+            health["degraded_reasons"] = degraded_reasons
         if self._degraded:
             health["config_errors"] = self._config_errors
+        if self._chain_deadline_problems:
+            health["chain_deadline_problems"] = list(self._chain_deadline_problems)
+        if self._project_handler_load_failures:
+            health["project_handler_load_failures"] = [
+                {"filename": f.filename, "event_dir": f.event_dir, "reason": f.reason}
+                for f in self._project_handler_load_failures
+            ]
 
         # Plan 00466 N19: a handler whose options could not be collected runs
         # on its defaults, which is degraded protection the operator must see.

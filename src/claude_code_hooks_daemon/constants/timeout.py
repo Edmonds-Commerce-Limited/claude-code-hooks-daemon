@@ -33,6 +33,11 @@ class Timeout:
     DAEMON_IDLE = 600  # 10 minutes (daemon idle before shutdown)
     DAEMON_STARTUP = 30  # 30 seconds (wait for daemon to start)
     DAEMON_SHUTDOWN = 10  # 10 seconds (wait for daemon to shutdown)
+    # A process that ignores SIGTERM for the whole `SOCKET_CONNECT` grace
+    # period (Plan 00466 N40 review 2 MA2) is escalated to SIGKILL, which a
+    # process cannot catch, block or ignore -- this second, shorter budget is
+    # only for the OS to actually reap it afterward.
+    DAEMON_SIGKILL_GRACE = 2  # 2 seconds (wait after SIGKILL for the OS to reap)
     # A restart is a shutdown FOLLOWED BY a startup, so its budget is the sum.
     # Giving it DAEMON_SHUTDOWN alone asserts that stop-and-start fits inside
     # the stop budget -- structurally impossible whenever startup is the slower
@@ -46,6 +51,40 @@ class Timeout:
     # Hook dispatch timeouts (milliseconds)
     HOOK_DISPATCH = 5_000  # 5 seconds (max time for single handler)
     HOOK_TOTAL = 30_000  # 30 seconds (max time for all handlers in chain)
+    # Daemon-side chain deadline (seconds; Plan 00466 N25). Well under
+    # HOOK_TOTAL's 30s client budget: a client-side timeout fails the WHOLE
+    # chain OPEN (`.claude/init.sh` reads it as an empty context, an ALLOW
+    # for every non-Stop event), so a slow handler bypassed every guard
+    # behind it. Enforced inside `HandlerChain.execute` instead, where a
+    # SAFETY+BLOCKING handler can still be told from an advisory and denied
+    # rather than silently skipped.
+    CHAIN_DEADLINE_DEFAULT = 20
+
+    # Minimum gap wanted (Plan 00466 N40 m6) between ChainConfig's
+    # deadline_seconds and the client's own socket timeout
+    # (SOCKET_DISPATCH_ROUNDTRIP below, or a shorter relay/nc
+    # transport.timeout_seconds). With less, the client's timeout answers
+    # before the daemon's deadline-triggered deny, which names the handler,
+    # can be built and sent back. 5s covers serialising and flushing it.
+    # A shortfall is reported in health, not rejected (review 2 mA4).
+    CHAIN_DEADLINE_SOCKET_MARGIN_SECONDS = 5
+
+    # SAFETY handler input-size cap in bytes (Plan 00466 N34 remedy 3),
+    # defence in depth alongside CHAIN_DEADLINE_DEFAULT. Ordinary source
+    # files are typically well under a few hundred KB; 2 MiB stays
+    # comfortably above even a large generated asset while still catching a
+    # payload far outside normal use BEFORE dispatch overhead is spent on it.
+    SAFETY_INPUT_SIZE_CAP_BYTES = 2 * 1024 * 1024  # 2 MiB
+
+    # Straggler health thresholds (Plan 00466 N40 M2): an abandoned handler
+    # dispatch ("straggler") is one whose own BoundedDispatcher.run() call
+    # already gave up waiting on it -- it is still running in the
+    # background, consuming a thread (and, if CPU-bound, real CPU) with no
+    # verdict ever coming. A handful is unremarkable; enough of them at once,
+    # or one stuck long enough, means the daemon can no longer promise a
+    # timely verdict at all.
+    STRAGGLER_UNHEALTHY_COUNT = 4  # concurrent stragglers before DEGRADED health
+    STRAGGLER_RESTART_AFTER_SECONDS = 120  # oldest straggler's age before self-restart
 
     # Network/IO timeouts (seconds)
     SOCKET_CONNECT = 5  # 5 seconds (Unix socket connection)

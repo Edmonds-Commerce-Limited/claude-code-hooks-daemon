@@ -44,6 +44,7 @@ from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, HookInputF
 from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.constants.tools import ToolName
 from claude_code_hooks_daemon.core import Decision, GatingResult, get_data_layer
+from claude_code_hooks_daemon.core.dispatch_cancellation import is_dispatch_cancelled
 from claude_code_hooks_daemon.core.handler import WorkspaceScope
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
@@ -61,6 +62,7 @@ from claude_code_hooks_daemon.utils.path_exclusion import (
     handler_excludes_path,
     resolve_project_root,
 )
+from claude_code_hooks_daemon.utils.realpath import has_symlink_loop, realpath
 from claude_code_hooks_daemon.utils.scratch_dir import acceptance_path
 
 _LOGGER = logging.getLogger(__name__)
@@ -665,7 +667,39 @@ class SensitiveContentHandler(PreToolUseHandlerBase):
                 return f"matches entry {index} of {len(terms)} in the secret word list"
         return None
 
+    def _nul_byte_file_path_reason(self, hook_input: dict[str, Any]) -> str | None:
+        """Deny reason when a Write/Edit ``file_path`` embeds a NUL byte, else None.
+
+        Plan 00466 N24 follow-up (guard-defects review 2, m3): every path
+        operation this handler reaches for a Write/Edit call — starting with
+        ``_is_excluded``'s ``layout_for()`` call — ultimately calls the
+        platform's own realpath, which RAISES rather than resolving a
+        NUL-bearing path; no real filesystem path can ever contain one. That
+        makes it a classic path-truncation attack shape (many older API
+        layers silently stop reading at the NUL), not merely text this
+        handler cannot scan — so it is denied outright here, explicitly,
+        rather than left to fall through to "not excluded, not the secret
+        list, scan whatever haystacks come back" (now safe, since
+        ``core/workspace.py``'s resolution never raises, but still the wrong
+        verdict for a path this malformed) or the chain's generic
+        strict-mode/SAFETY+BLOCKING "evaluation error" catch-all.
+        """
+        tool_name = hook_input.get(HookInputField.TOOL_NAME)
+        if tool_name not in (ToolName.WRITE, ToolName.EDIT):
+            return None
+        tool_input: dict[str, Any] = hook_input.get(HookInputField.TOOL_INPUT, {})
+        file_path = str(tool_input.get(_FIELD_FILE_PATH, ""))
+        if "\x00" not in file_path:
+            return None
+        return (
+            "file_path contains an embedded NUL byte, which no real filesystem "
+            f"path can: {file_path!r}"
+        )
+
     def matches(self, hook_input: dict[str, Any]) -> bool:
+        if self._nul_byte_file_path_reason(hook_input) is not None:
+            return True
+
         haystacks = self._compute_and_cache(hook_input)
         if not haystacks:
             return False
@@ -699,9 +733,19 @@ class SensitiveContentHandler(PreToolUseHandlerBase):
         across a single dispatch, not a memo across calls: the index can be
         restaged between two textually identical commit commands, so a second
         dispatch pays for its own diff rather than inheriting a stale one.
+
+        Plan 00466 N40 m2: skips the WRITE (still returns the haystacks to
+        this call's own ``matches()``, whose boolean result is harmless) when
+        ``is_dispatch_cancelled()`` -- a straggling ``matches()`` call whose
+        own chain dispatch the caller already gave up waiting on. Caching
+        secret-bearing haystack text on an instance that lives for the whole
+        daemon process, for a verdict nobody will ever see, is exactly the
+        retained-text leak ``commit_side_effects`` exists to prevent, just
+        reached by an abandoned dispatch instead of a delivered one.
         """
         haystacks = self._compute_haystacks(hook_input)
-        self._cached_dispatch = (self._dispatch_key(hook_input), haystacks)
+        if not is_dispatch_cancelled():
+            self._cached_dispatch = (self._dispatch_key(hook_input), haystacks)
         return haystacks
 
     def _take_cached_haystacks(self, hook_input: dict[str, Any]) -> list[_Haystack]:
@@ -1094,8 +1138,15 @@ class SensitiveContentHandler(PreToolUseHandlerBase):
         project_root = resolve_project_root()
         if project_root is None:
             return ""
+        if has_symlink_loop(file_path):
+            # Plan 00466 N24 review 4 (team-lead follow-up on R4-B1): once a
+            # loop is hit, os.path.realpath's own answer for the rest of the
+            # path is version-dependent, so relative_to below cannot be
+            # trusted to say "outside the root" consistently. Fail closed by
+            # scanning the path AS SPELLED rather than skipping it outright.
+            return file_path
         try:
-            return str(Path(file_path).resolve().relative_to(Path(project_root).resolve()))
+            return str(Path(realpath(file_path)).relative_to(realpath(project_root)))
         except ValueError:
             # Outside the project root: not ours to judge.
             return ""
@@ -1147,8 +1198,16 @@ class SensitiveContentHandler(PreToolUseHandlerBase):
         configured = self._resolved_secret_list_path()
         if configured is None:
             return False
+        if has_symlink_loop(file_path) or has_symlink_loop(configured):
+            # Plan 00466 N24 review 4 (team-lead follow-up on R4-B1): once a
+            # loop is hit, os.path.realpath's own answer is version-
+            # dependent, so an equality test built on it cannot be trusted
+            # either way. Never grant the "this IS the list itself"
+            # exemption on an unreliable comparison -- fail closed by
+            # falling through to normal scanning.
+            return False
         try:
-            return Path(file_path).resolve() == configured.resolve()
+            return realpath(file_path) == realpath(configured)
         except (OSError, ValueError):
             # An unresolvable path is simply not the list; fall through to
             # normal scanning rather than failing open on the whole check.
@@ -1159,6 +1218,10 @@ class SensitiveContentHandler(PreToolUseHandlerBase):
         return [_RULE_PUBLIC_PATTERN, _RULE_SECRET_TERM]
 
     def handle(self, hook_input: dict[str, Any]) -> GatingResult:
+        nul_byte_reason = self._nul_byte_file_path_reason(hook_input)
+        if nul_byte_reason is not None:
+            return GatingResult(decision=Decision.DENY, reason=f"BLOCKED: {nul_byte_reason}")
+
         haystacks = self._take_cached_haystacks(hook_input)
         transcript_path = hook_input.get(HookInputField.TRANSCRIPT_PATH)
 

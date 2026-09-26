@@ -93,6 +93,33 @@ class TestPathIsProtected:
         link.symlink_to(target)
         assert sfm.path_is_protected(str(link), sfm.DEFAULT_PROTECTED_PATTERNS)
 
+    def test_a_symlink_loop_on_the_path_is_treated_as_protected(self, tmp_path: Path) -> None:
+        """Plan 00466 N24 review 4 (team-lead follow-up on R4-B1): once a
+        loop is hit, os.path.realpath's own answer for the rest of the path
+        is version-dependent (3.11 gives up unresolved, 3.13 keeps
+        resolving), so an innocuous-looking path routed through a loop must
+        not be able to slip past this check on one Python version but not
+        the other -- it fails closed (protected) on every version."""
+        loop = tmp_path / "loop"
+        loop.symlink_to(loop)
+        assert sfm.path_is_protected(
+            str(tmp_path / "loop" / ".." / "innocuous.txt"), sfm.DEFAULT_PROTECTED_PATTERNS
+        )
+
+    def test_nul_byte_in_path_does_not_raise(self) -> None:
+        """Plan 00466 N24 follow-up (guard-defects review 2, m3): the fuzzer
+
+        found ``os.path.realpath`` raising ``ValueError: embedded null
+        byte`` on 485/12000 fuzzed Write/Edit paths, uncaught here — only
+        ``OSError`` was handled. A NUL-bearing path cannot BE a symlink to a
+        protected target (the OS itself rejects it), so there is nothing
+        for the realpath check to discover; this must return the ordinary
+        glob-match answer on the raw path, not crash.
+        """
+        assert not sfm.path_is_protected(
+            "/proj/src/main.py\x00suffix", sfm.DEFAULT_PROTECTED_PATTERNS
+        )
+
 
 class TestBashMentionsProtectedPath:
     PATTERNS = sfm.DEFAULT_PROTECTED_PATTERNS
