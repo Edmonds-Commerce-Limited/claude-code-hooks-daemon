@@ -5,9 +5,12 @@ which requires careful mocking of os.fork, os.setsid, and related syscalls.
 """
 
 import argparse
+import contextlib
 import io
 import os
 import sys
+import time
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
@@ -19,12 +22,32 @@ from claude_code_hooks_daemon.daemon.process_verification import RootProof
 from claude_code_hooks_daemon.daemon.server import _SocketLiveness
 
 
-def _proven_to_serve(project: Path) -> Any:
-    """The started daemon's command line proves it serves ``project``."""
-    return patch(
-        "claude_code_hooks_daemon.daemon.cli.daemon_process_project_root",
-        return_value=RootProof(root=os.path.realpath(project), refusal=None),
+@contextlib.contextmanager
+def _proven_to_serve(project: Path, proven: bool = True) -> Iterator[None]:
+    """The started daemon, a process of this user's, is (or is not) proven
+    by its command line to serve ``project``."""
+    proof = RootProof(
+        root=os.path.realpath(project) if proven else None,
+        refusal=None if proven else "not a daemon server",
     )
+    with (
+        patch(
+            "claude_code_hooks_daemon.daemon.cli.daemon_process_project_root", return_value=proof
+        ),
+        patch("claude_code_hooks_daemon.daemon.cli.is_this_users_process", return_value=True),
+    ):
+        yield
+
+
+def _poll_clock() -> Any:
+    """``cli``'s clock, advanced only by its own sleeps, so the start poll's
+    wall-clock budget (Plan 00466 round 6, R5-1) runs out in as many ticks
+    as it takes seconds, at once."""
+    now = [0.0]
+    clock = MagicMock(wraps=time)
+    clock.monotonic.side_effect = lambda: now[0]
+    clock.sleep.side_effect = lambda seconds: now.__setitem__(0, now[0] + seconds)
+    return patch("claude_code_hooks_daemon.daemon.cli.time", clock)
 
 
 class TestCmdStartAlreadyRunning:
@@ -69,10 +92,6 @@ class TestCmdStartReportsTheDaemonItStarted:
         self, tmp_path: Path, pid_file_reads: list[int | None], proven: bool
     ) -> tuple[int, str]:
         args = argparse.Namespace(project_root=tmp_path)
-        proof = RootProof(
-            root=os.path.realpath(tmp_path) if proven else None,
-            refusal=None if proven else "not a daemon server",
-        )
         stdout = io.StringIO()
         with (
             patch("claude_code_hooks_daemon.daemon.cli.get_project_path", return_value=tmp_path),
@@ -86,12 +105,9 @@ class TestCmdStartReportsTheDaemonItStarted:
                 "claude_code_hooks_daemon.daemon.cli._socket_liveness_sync",
                 return_value=_SocketLiveness.NOT_LIVE,
             ),
-            patch(
-                "claude_code_hooks_daemon.daemon.cli.daemon_process_project_root",
-                return_value=proof,
-            ),
+            _proven_to_serve(tmp_path, proven),
             patch("os.fork", return_value=100),
-            patch("time.sleep"),
+            _poll_clock(),
             patch.object(sys, "stdout", stdout),
         ):
             result = cmd_start(args)
@@ -141,7 +157,7 @@ class TestCmdStartParentProcess:
                 return_value=_SocketLiveness.NOT_LIVE,
             ),
             patch("os.fork", return_value=100),  # Parent gets child PID
-            patch("time.sleep"),
+            _poll_clock(),
             _proven_to_serve(tmp_path),
         ):
             result = cmd_start(args)
@@ -186,7 +202,7 @@ class TestCmdStartParentProcess:
             ),
             patch.object(sys.stdout, "flush", side_effect=lambda: call_order.append("flush")),
             patch("os.fork", side_effect=fork),
-            patch("time.sleep"),
+            _poll_clock(),
             _proven_to_serve(tmp_path),
         ):
             cmd_start(args)
@@ -228,7 +244,7 @@ class TestCmdStartParentProcess:
                 return_value=_SocketLiveness.NOT_LIVE,
             ),
             patch("os.fork", return_value=100),
-            patch("time.sleep"),
+            _poll_clock(),
             _proven_to_serve(tmp_path),
         ):
             result = cmd_start(args)
@@ -257,7 +273,7 @@ class TestCmdStartParentProcess:
                 return_value=_SocketLiveness.NOT_LIVE,
             ),
             patch("os.fork", return_value=100),
-            patch("time.sleep"),
+            _poll_clock(),
         ):
             result = cmd_start(args)
             assert result == 1

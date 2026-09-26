@@ -18,7 +18,12 @@ These tests cover the server.py layer:
 
 import asyncio
 import contextlib
+import os
+import shutil
 import socket as socket_module
+import tempfile
+import threading
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
@@ -27,14 +32,17 @@ import pytest
 
 from claude_code_hooks_daemon.config.models import DaemonConfig, LogLevel
 from claude_code_hooks_daemon.constants import Timeout
+from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.daemon.server import (
     DaemonAlreadyRunningError,
+    DaemonIdentity,
     HooksDaemon,
     _pid_file_points_at_live_process,
     _probe_socket_live,
     _probe_socket_liveness,
     _socket_is_live,
     _SocketLiveness,
+    daemon_socket_identity,
 )
 
 
@@ -275,6 +283,19 @@ def test_pid_file_points_at_live_process_false_for_garbage(tmp_path: Path) -> No
     """A malformed PID file => False (treated as no live incumbent)."""
     pid_path = tmp_path / "daemon.pid"
     pid_path.write_text("not-a-pid")
+    assert _pid_file_points_at_live_process(pid_path) is False
+
+
+@pytest.mark.parametrize("text", ["0", "-1", "1", "007", " 12 "])
+def test_pid_file_points_at_live_process_false_for_what_names_no_pid(
+    tmp_path: Path, text: str
+) -> None:
+    """Plan 00466 round 6 (Sh-3): ``int()`` read ``0`` and ``-1`` as pids,
+    and signal 0 to either succeeds against this process's own group or
+    every process, so a corrupt PID file read as a live incumbent and the
+    child would not clear a dead socket. Signal 0 only: nothing is sent."""
+    pid_path = tmp_path / "daemon.pid"
+    pid_path.write_text(text)
     assert _pid_file_points_at_live_process(pid_path) is False
 
 
@@ -641,3 +662,84 @@ def test_start_lock_path_is_sibling_of_socket(tmp_path: Path) -> None:
     assert lock_path.parent == sock_path.parent
     assert lock_path.name.startswith(sock_path.name)
     assert lock_path != sock_path
+
+
+# --------------------------------------------------------------------------- #
+# The daemon's identity answer (Plan 00466 round 6, Sh-2)
+# --------------------------------------------------------------------------- #
+
+
+@pytest.fixture
+def short_socket() -> Iterator[Path]:
+    """AF_UNIX paths are capped near 108 bytes; ``tmp_path`` nests deeper."""
+    directory = Path(tempfile.mkdtemp(prefix="hd-identity-"))
+    yield directory / "daemon.sock"
+    shutil.rmtree(directory)
+
+
+@contextlib.contextmanager
+def _serving_daemon(daemon: HooksDaemon, path: Path) -> Iterator[None]:
+    """``daemon``'s own client handler, serving ``path`` from another thread."""
+    loop = asyncio.new_event_loop()
+    server = loop.run_until_complete(asyncio.start_unix_server(daemon._handle_client, str(path)))
+    thread = threading.Thread(target=loop.run_forever, daemon=True)
+    thread.start()
+    try:
+        yield
+    finally:
+        loop.call_soon_threadsafe(loop.stop)
+        thread.join(timeout=Timeout.REQUEST_LONG)
+        server.close()
+        loop.run_until_complete(server.wait_closed())
+        loop.close()
+
+
+def test_the_daemon_answers_which_project_it_serves(tmp_path: Path, short_socket: Path) -> None:
+    daemon = _make_daemon(short_socket)
+    with (
+        patch.object(ProjectContext, "project_root", return_value=tmp_path),
+        _serving_daemon(daemon, short_socket),
+    ):
+        identity = daemon_socket_identity(short_socket)
+    assert identity == DaemonIdentity(project_root=str(tmp_path), pid=os.getpid())
+
+
+def test_a_daemon_that_does_not_know_its_project_gives_no_identity(
+    short_socket: Path,
+) -> None:
+    daemon = _make_daemon(short_socket)
+    with (
+        patch.object(ProjectContext, "project_root", side_effect=RuntimeError("uninitialised")),
+        _serving_daemon(daemon, short_socket),
+    ):
+        assert daemon_socket_identity(short_socket) is None
+
+
+@pytest.mark.parametrize(
+    "answer",
+    [b"", b"not json\n", b"[]\n", b'{"result": {}}\n', b'{"result": {"project_root": 7}}\n'],
+)
+def test_a_listener_that_does_not_answer_as_a_daemon_gives_no_identity(
+    short_socket: Path, answer: bytes
+) -> None:
+    listener = socket_module.socket(socket_module.AF_UNIX, socket_module.SOCK_STREAM)
+    listener.bind(str(short_socket))
+    listener.listen(1)
+
+    def reply() -> None:
+        connection, _ = listener.accept()
+        with connection:
+            connection.recv(4096)
+            connection.sendall(answer)
+
+    replier = threading.Thread(target=reply, daemon=True)
+    replier.start()
+    try:
+        assert daemon_socket_identity(short_socket) is None
+    finally:
+        replier.join(timeout=Timeout.REQUEST_LONG)
+        listener.close()
+
+
+def test_no_socket_gives_no_identity(short_socket: Path) -> None:
+    assert daemon_socket_identity(short_socket) is None

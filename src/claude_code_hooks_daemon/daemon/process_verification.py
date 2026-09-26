@@ -13,6 +13,7 @@ from typing import Final
 import psutil
 
 from claude_code_hooks_daemon.constants import Timeout
+from claude_code_hooks_daemon.daemon.paths import is_self_install_mode, prospective_socket_path
 
 logger = logging.getLogger(__name__)
 
@@ -21,7 +22,7 @@ logger = logging.getLogger(__name__)
 # that transient CLI helpers (status/stop/logs/...) and the per-event hook
 # forwarders (the bash wrappers' python3 socket transport) are never mistaken
 # for a daemon server.
-_DAEMON_CLI_MODULE = "claude_code_hooks_daemon.daemon.cli"
+DAEMON_CLI_MODULE: Final = "claude_code_hooks_daemon.daemon.cli"
 
 # The ONLY subcommands that daemonize. Daemonization (os.fork x2, os.setsid,
 # HooksDaemon(...), asyncio.run(daemon.start())) lives solely in cmd_start,
@@ -36,16 +37,8 @@ _DAEMON_LAUNCH_SUBCOMMANDS = ("start", "restart")
 # Command-line flag that explicitly names a daemon's project root.
 _PROJECT_ROOT_FLAG = "--project-root"
 
-# Path fragments that mark the start of a daemon's venv directory, ordered from
-# most-specific to least-specific. The text preceding the matched fragment in
-# the interpreter path is the daemon's project root. The normal-install layout
-# nests its untracked dir under ``.claude/hooks-daemon/`` so that fragment MUST
-# be tested before the bare self-install fragment, otherwise a normal-install
-# path would resolve to ``{root}/.claude/hooks-daemon`` instead of ``{root}``.
-_VENV_PATH_MARKERS = (
-    "/.claude/hooks-daemon/untracked/venv",
-    "/untracked/venv",
-)
+# Where a client install keeps the daemon, below the project it serves.
+_CLIENT_DAEMON_DIR = (".claude", "hooks-daemon")
 
 
 def find_all_daemon_processes(project_root: str | Path | None = None) -> list[int]:
@@ -93,7 +86,7 @@ def find_all_daemon_processes(project_root: str | Path | None = None) -> list[in
             # Scope to our own project root when requested. A daemon whose root
             # cannot be determined is left alone — never terminated.
             if target_root is not None:
-                proc_root = _extract_project_root(cmdline)
+                proc_root = _root_from_flag(cmdline) or _root_from_listening_socket(proc)
                 if proc_root is None or proc_root != target_root:
                     continue
 
@@ -116,28 +109,6 @@ def _normalize_root(root: str | Path) -> str:
     return os.path.normpath(str(root))
 
 
-def _extract_project_root(cmdline: list[str] | None) -> str | None:
-    """Derive a daemon process's project root from its command line.
-
-    Resolution order:
-        1. An explicit ``--project-root PATH`` (or ``--project-root=PATH``) flag.
-        2. The project root embedded in the interpreter's venv path
-           (``{root}/untracked/venv...`` or
-           ``{root}/.claude/hooks-daemon/untracked/venv...``).
-
-    Returns:
-        The normalised project root, or ``None`` when it cannot be determined.
-    """
-    if not cmdline:
-        return None
-
-    flag_root = _root_from_flag(cmdline)
-    if flag_root is not None:
-        return flag_root
-
-    return _root_from_interpreter(cmdline[0])
-
-
 def _root_from_flag(cmdline: list[str]) -> str | None:
     """Extract the project root from a ``--project-root`` command-line flag."""
     for index, token in enumerate(cmdline):
@@ -149,12 +120,55 @@ def _root_from_flag(cmdline: list[str]) -> str | None:
     return None
 
 
-def _root_from_interpreter(interpreter: str) -> str | None:
-    """Extract the project root from the daemon interpreter's venv path."""
-    for marker in _VENV_PATH_MARKERS:
-        if marker in interpreter:
-            return _normalize_root(interpreter.split(marker, 1)[0])
-    return None
+def _project_of_socket(path: Path) -> str | None:
+    """The project whose daemon binds ``path`` as its natural socket, or None.
+
+    A client install's socket is ``{root}/.claude/hooks-daemon/untracked/...``
+    and a self-install's ``{root}/untracked/...``. A client install's daemon
+    clone is itself a self-install tree, but ``get_project_path`` never
+    serves it, so a socket there belongs to the project holding the clone.
+    """
+    untracked = path.parent
+    if untracked.name != "untracked":
+        return None
+    candidate = untracked.parent
+    if (candidate.parent.name, candidate.name) == _CLIENT_DAEMON_DIR:
+        candidate = candidate.parent.parent
+    natural = prospective_socket_path(candidate, self_install=is_self_install_mode(candidate))
+    return _normalize_root(candidate) if natural == path else None
+
+
+def _root_from_listening_socket(process: psutil.Process) -> str | None:
+    """The project whose natural socket ``process`` has bound, or None.
+
+    A daemon started without ``--project-root`` serves the project its
+    working directory finds, and leaves that directory at once
+    (``os.chdir("/")``). Its interpreter's venv names only the install it
+    runs from, which a worktree can share (Plan 00466 round 6, Sh-1). The
+    socket it binds names the project it serves. A socket anywhere else (an
+    override, the AF_UNIX-overflow fallback), or those of two projects,
+    prove nothing.
+    """
+    try:
+        if hasattr(process, "net_connections"):
+            connections = process.net_connections(kind="unix")
+        else:
+            connections = process.connections(kind="unix")
+    except psutil.Error as e:
+        logger.debug("Cannot read the sockets of PID %d: %s", process.pid, e)
+        return None
+    roots: set[str] = set()
+    for connection in connections:
+        # A unix socket's address is its path, which psutil's stubs do not
+        # say: they type every address as an (ip, port) pair.
+        address: object = connection.laddr
+        if isinstance(address, str) and address.startswith("/"):
+            root = _project_of_socket(Path(address))
+            if root is not None:
+                roots.add(root)
+    if len(roots) != 1:
+        return None
+    return roots.pop()
 
 
 @dataclass(frozen=True)
@@ -172,7 +186,27 @@ class RootProof:
 
 
 _FLAG_SOURCE: Final = f"its {_PROJECT_ROOT_FLAG} flag"
-_VENV_SOURCE: Final = "its interpreter's venv path"
+_SOCKET_SOURCE: Final = "the socket it listens on"
+
+
+def is_this_users_process(pid: int) -> bool:
+    """True when ``pid``'s real and effective uids are both this process's
+    effective uid.
+
+    Ownership is the owner's uid, never permission to signal (Plan 00466
+    round 6, P5-1): root may signal every process, so a process of another
+    user's passed as this user's whenever the hook ran as root.
+    """
+    # type() rather than isinstance(): see daemon_process_project_root.
+    if type(pid) is not int or pid <= 1:
+        return False
+    try:
+        uids = psutil.Process(pid).uids()
+    except psutil.Error as e:
+        logger.debug("Cannot read the owner of PID %d: %s", pid, e)
+        return False
+    euid = os.geteuid()
+    return bool(uids.real == euid and uids.effective == euid)
 
 
 def daemon_process_project_root(pid: int) -> RootProof:
@@ -189,14 +223,16 @@ def daemon_process_project_root(pid: int) -> RootProof:
     Returns:
         A proof with the resolved root, or with the reason there is none:
         ``pid`` is not a real ``int`` above 1, is this process, is gone or
-        inaccessible, is not a daemon server, or its command line names no root.
+        inaccessible, is not a daemon server, or neither its command line nor
+        the socket it listens on names a project.
     """
     # type() rather than isinstance(): a bool is an int, and a MagicMock pid
     # coerces to 1 through __index__ (Plan 00466 N59), so neither is a pid.
     if type(pid) is not int or pid <= 1 or pid == os.getpid():
         return RootProof(root=None, refusal=f"{pid!r} is not a pid another process can own")
     try:
-        cmdline = psutil.Process(pid).cmdline()
+        process = psutil.Process(pid)
+        cmdline = process.cmdline()
     except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess) as e:
         logger.debug("Cannot inspect PID %d cmdline: %s", pid, e)
         return RootProof(root=None, refusal=f"PID {pid} cannot be inspected ({type(e).__name__})")
@@ -205,11 +241,13 @@ def daemon_process_project_root(pid: int) -> RootProof:
     flag_root = _root_from_flag(cmdline)
     if flag_root is not None:
         return RootProof(root=os.path.realpath(flag_root), refusal=None, source=_FLAG_SOURCE)
-    venv_root = _root_from_interpreter(cmdline[0]) if cmdline else None
-    if venv_root is not None:
-        return RootProof(root=os.path.realpath(venv_root), refusal=None, source=_VENV_SOURCE)
+    socket_root = _root_from_listening_socket(process)
+    if socket_root is not None:
+        return RootProof(root=os.path.realpath(socket_root), refusal=None, source=_SOCKET_SOURCE)
     return RootProof(
-        root=None, refusal=f"PID {pid} is a daemon server whose command line names no project"
+        root=None,
+        refusal=f"PID {pid} is a daemon server whose command line names no project, "
+        "nor does a socket it listens on",
     )
 
 
@@ -315,7 +353,7 @@ def _is_daemon_server_process(cmdline: list[str] | None) -> bool:
 
     module_index: int | None = None
     for index, token in enumerate(cmdline):
-        if _DAEMON_CLI_MODULE in token:
+        if DAEMON_CLI_MODULE in token:
             module_index = index
             break
     if module_index is None:

@@ -25,11 +25,13 @@ from typing import Any
 from unittest.mock import Mock, call, patch
 
 import pytest
+from tests.daemon_like_process import answering_daemon_socket, silent_socket
 
 from claude_code_hooks_daemon.constants import Timeout
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.daemon import paths, server
 from claude_code_hooks_daemon.daemon.cli import (
+    _await_started_daemon,
     cmd_config,
     cmd_init_config,
     cmd_status,
@@ -1295,31 +1297,45 @@ class TestRemoveStalePidFile:
 class TestPidIsThisProjectsDaemon:
     """Plan 00466 round 4 (N139-A): EPERM proves a process, not this daemon."""
 
-    def test_a_live_socket_proves_it(self, short_dir: Path) -> None:
+    def test_a_socket_answering_as_this_projects_daemon_proves_it(self, short_dir: Path) -> None:
         socket_path = short_dir / "daemon.sock"
-        listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        listener.bind(str(socket_path))
-        listener.listen(1)
-        try:
+        with answering_daemon_socket(socket_path, short_dir, _UNREAL_PID):
             assert pid_is_this_projects_daemon(_UNREAL_PID, socket_path, short_dir)
-        finally:
-            listener.close()
+
+    def test_a_listener_that_does_not_answer_proves_nothing(self, short_dir: Path) -> None:
+        """Round 6 (Sh-2): any listener accepted the probe, and under the /tmp
+        socket fallback another user can bind the path first."""
+        socket_path = short_dir / "daemon.sock"
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as listener:
+            listener.bind(str(socket_path))
+            listener.listen(1)
+            assert not pid_is_this_projects_daemon(_UNREAL_PID, socket_path, short_dir)
+
+    def test_another_projects_daemon_answering_proves_nothing(
+        self, short_dir: Path, tmp_path: Path
+    ) -> None:
+        socket_path = short_dir / "daemon.sock"
+        with answering_daemon_socket(socket_path, tmp_path, _UNREAL_PID):
+            assert not pid_is_this_projects_daemon(_UNREAL_PID, socket_path, short_dir)
 
     def test_a_command_line_serving_this_project_proves_a_pid_of_this_user(
         self, short_dir: Path
     ) -> None:
-        """This test's own pid: this user may signal it (signal 0 only)."""
+        """This test's own pid, whose owner is this user."""
         proof = RootProof(root=os.path.realpath(short_dir), refusal=None)
         with patch(f"{_CLI}.daemon_process_project_root", return_value=proof):
             assert pid_is_this_projects_daemon(os.getpid(), short_dir / "none.sock", short_dir)
 
     def test_a_command_line_never_proves_another_users_pid(self, short_dir: Path) -> None:
-        """Round 5 (P4-2): another local user can name this project in its
-        arguments. Root may signal anything, so EPERM is the probe's."""
+        """Round 6 (P5-1, Sh-G): the rule asked whether this user may signal
+        the pid, and root may signal every process, so another user's process
+        naming this project in its arguments was proven. The owner decides.
+        Another uid's process is faked by changing the uid it is compared
+        with, not by launching one, which would need root."""
         proof = RootProof(root=os.path.realpath(short_dir), refusal=None)
         with (
             patch(f"{_CLI}.daemon_process_project_root", return_value=proof),
-            patch("os.kill", side_effect=PermissionError(errno.EPERM, "")),
+            patch("os.geteuid", return_value=os.geteuid() + 4242),
         ):
             assert not pid_is_this_projects_daemon(os.getpid(), short_dir / "none.sock", short_dir)
 
@@ -1342,6 +1358,32 @@ class TestPidIsThisProjectsDaemon:
 
     def test_an_unprovable_process_does_not(self, short_dir: Path) -> None:
         assert not pid_is_this_projects_daemon(_UNREAL_PID, short_dir / "none.sock", short_dir)
+
+
+class TestAwaitStartedDaemonIsBoundedByTheClock:
+    """Round 6 (R5-1, P5-2): ``cmd_start``'s parent counted 50 ticks, and
+    each tick's socket probe can take its whole timeout, so the poll could
+    run six times its budget and take the PreToolUse deny path to the 60 s
+    hook timeout. Nothing is stubbed: the PID file names a live process
+    that is not a daemon (this test's own, read only), and the socket
+    accepts every probe but never answers."""
+
+    _BUDGET_SEC = 1.0
+
+    def test_a_probe_that_takes_its_whole_timeout_cannot_stretch_the_poll(
+        self, short_dir: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(Timeout, "DAEMON_PID_POLL_BUDGET_SEC", self._BUDGET_SEC, raising=False)
+        pid_path = short_dir / "daemon.pid"
+        pid_path.write_text(f"{os.getpid()}\n")
+        socket_path = short_dir / "daemon.sock"
+        with silent_socket(socket_path) as accepted:
+            daemon_pid = _await_started_daemon(pid_path, socket_path, short_dir, None)
+        assert daemon_pid is None
+        # Each probe waits out its timeout, so a clock-bounded poll makes a
+        # handful where a tick-counted one made one per tick.
+        most = int(self._BUDGET_SEC / Timeout.SOCKET_LIVENESS_PROBE_SEC) + 1
+        assert 1 <= len(accepted) <= most, len(accepted)
 
 
 class TestCmdConfig:

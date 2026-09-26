@@ -1299,8 +1299,8 @@ _hooks_daemon_run_cli_helper() {
 
 #
 # _hooks_daemon_helper_proves_pid() - The daemon's own proof that live pid
-# $1 is this daemon: its socket answers, or, for a pid this user owns, its
-# command line (cli.pid_is_this_projects_daemon).
+# $1 is this daemon: its socket answers as this project's daemon, or, for a
+# pid this user owns, its command line (cli.pid_is_this_projects_daemon).
 _hooks_daemon_helper_proves_pid() {
     _hooks_daemon_run_cli_helper "prove:$1" '
 import sys
@@ -1312,87 +1312,100 @@ sys.exit(0 if pid_is_this_projects_daemon(int(sys.argv[1]), Path(sys.argv[2]), P
 ' "$1" "$SOCKET_PATH" "$PROJECT_PATH"
 }
 
+# Where the kernel's process table is mounted.
+_HOOKS_DAEMON_PROCFS=/proc
+
 #
-# _hooks_daemon_args_prove_this_project() - True when $1, a process's
-# arguments joined by the separator $2, is a daemon server of this project
-# in a form it is launched with: `-m <cli> --project-root <root>
-# start|restart` (init.sh's start_daemon, bin/hooks-daemon), or with no
-# --project-root, an interpreter in the project's own venv
-# (daemon_control.sh). A sufficient condition only (Plan 00466 round 5,
-# Sh-D): process_verification's rule accepts more, and anything this does
-# not prove goes to the daemon's helper. A test checks that everything this
-# proves is proven there too.
-_hooks_daemon_args_prove_this_project() {
-    local args="$1" sep="$2" physical
-    if _hooks_daemon_args_name_root "$args" "$sep" "$PROJECT_PATH"; then
+# _hooks_daemon_argv_prove_this_project() - True when the arguments are a
+# daemon server of this project, at the exact positions start_daemon and
+# bin/hooks-daemon launch it with: `<python> -m <cli> --project-root <root>
+# start|restart [more]`, with no other argument naming a root (Plan 00466
+# round 6, P5-3). A start or restart naming no root is re-run naming it
+# (cli._rerun_launch_naming_its_project). A sufficient condition only
+# (round 5, Sh-D): process_verification's rule accepts more, and anything
+# this does not prove goes to the daemon's helper. A test checks that
+# everything this proves is proven there too.
+_hooks_daemon_argv_prove_this_project() {
+    local physical
+    if _hooks_daemon_argv_name_root "$PROJECT_PATH" "$@"; then
         return 0
     fi
     physical="$(cd -P -- "$PROJECT_PATH" && pwd -P)" || return 1
-    [[ "$physical" != "$PROJECT_PATH" ]] &&
-        _hooks_daemon_args_name_root "$args" "$sep" "$physical"
+    [[ "$physical" != "$PROJECT_PATH" ]] && _hooks_daemon_argv_name_root "$physical" "$@"
+}
+
+_hooks_daemon_argv_name_root() {
+    local root="$1" index
+    shift
+    local -a argv=("$@")
+    ((${#argv[@]} >= 6)) || return 1
+    [[ "${argv[1]}" == "-m" && "${argv[2]}" == "claude_code_hooks_daemon.daemon.cli" &&
+        "${argv[3]}" == "--project-root" && "${argv[4]}" == "$root" &&
+        ("${argv[5]}" == "start" || "${argv[5]}" == "restart") ]] || return 1
+    # process_verification._root_from_flag takes the first flag it meets.
+    for ((index = 0; index < ${#argv[@]}; index++)); do
+        if ((index != 3)) && [[ "${argv[index]}" == "--project-root" ||
+            "${argv[index]}" == "--project-root="* ]]; then
+            return 1
+        fi
+    done
 }
 
 #
-# _hooks_daemon_args_launch() - True when the joined arguments $1 end with
-# a launch, or have it followed by more arguments: the pieces after the
-# separator $2 (-m, the module, its flags and a subcommand), each preceded
-# by it. Substring tests by parameter expansion, so nothing in a piece is a
-# pattern.
-_hooks_daemon_args_launch() {
-    local args="$1" sep="$2" launch="" piece followed
-    shift 2
-    for piece in "$@"; do
-        printf -v launch '%s%s%s' "$launch" "$sep" "$piece"
-    done
-    printf -v followed '%s%s' "$launch" "$sep"
-    [[ "${args%"$launch"}" != "$args" || "${args/"$followed"/}" != "$args" ]]
+# _hooks_daemon_cmdline_proves_this_project() - The procfs cmdline file $1
+# proves this project's daemon. Its arguments are read split at their NULs
+# (Plan 00466 round 6, R5-2), as psutil reads them: joined by newlines, one
+# argument holding a newline-separated launch read as that launch.
+_hooks_daemon_cmdline_proves_this_project() {
+    local -a argv
+    [[ -r "$1" ]] || return 1
+    mapfile -t -d '' argv < "$1" || return 1
+    _hooks_daemon_argv_prove_this_project "${argv[@]}"
 }
 
-_hooks_daemon_args_name_root() {
-    local args="$1" sep="$2" root="$3" sub marker
-    local module=claude_code_hooks_daemon.daemon.cli
-    local flag="${sep}--project-root"
-    for sub in start restart; do
-        if _hooks_daemon_args_launch "$args" "$sep" -m "$module" --project-root "$root" "$sub"; then
-            return 0
-        fi
-    done
-    if [[ "${args/"$flag"/}" != "$args" ]]; then
-        return 1
-    fi
-    # process_verification._VENV_PATH_MARKERS
-    for marker in /.claude/hooks-daemon/untracked/venv /untracked/venv; do
-        if [[ "${args#"$root$marker"}" != "$args" ]]; then
-            for sub in start restart; do
-                if _hooks_daemon_args_launch "$args" "$sep" -m "$module" "$sub"; then
-                    return 0
-                fi
-            done
-        fi
-    done
-    return 1
+#
+# _hooks_daemon_ps_args_prove_this_project() - The arguments ps prints, $1,
+# prove this project's daemon. ps joins them with spaces, so its words are
+# read as the arguments: a project whose path holds a space is left to the
+# helper, and one argument holding a whole launch line passes. Only a
+# process this user owns gets here, and it could as well run that line.
+_hooks_daemon_ps_args_prove_this_project() {
+    local -a argv
+    read -r -a argv <<< "$1"
+    _hooks_daemon_argv_prove_this_project "${argv[@]}"
 }
 
 #
 # _hooks_daemon_pid_args_prove_this_project() - The command line of pid $1
-# proves it is this project's daemon. Linux's procfs keeps the argument
-# boundaries, joined here by newlines. Elsewhere ps prints the arguments
-# joined by spaces, which loses them: an argument holding a whole launch
-# line then passes. Only a pid this user may signal gets here, and such a
-# process could just as well run that launch line itself.
+# proves it is this project's daemon: procfs's where it is mounted, else
+# ps's.
 _hooks_daemon_pid_args_prove_this_project() {
-    local procfs=/proc args newline=$'\n'
-    local cmdline="$procfs/$1/cmdline"
+    local cmdline="$_HOOKS_DAEMON_PROCFS/$1/cmdline" args
     if [[ -r "$cmdline" ]]; then
-        args="$(awk 'BEGIN { RS = "\0" } { printf "%s%s", sep, $0; sep = "\n" }' "$cmdline")" ||
-            return 1
-        _hooks_daemon_args_prove_this_project "$args" "$newline"
+        _hooks_daemon_cmdline_proves_this_project "$cmdline"
         return
     fi
     if ! args="$(ps -ww -o args= -p "$1")"; then
         return 1
     fi
-    _hooks_daemon_args_prove_this_project "$args" " "
+    _hooks_daemon_ps_args_prove_this_project "$args"
+}
+
+#
+# _hooks_daemon_pid_is_this_users() - True when pid $1's real and effective
+# uids are both this shell's effective uid. Ownership is the owner's uid,
+# never permission to signal (Plan 00466 round 6, P5-1): root may signal
+# every process, so `kill -0` passed another user's process as this user's.
+_hooks_daemon_pid_is_this_users() {
+    local owner="$_HOOKS_DAEMON_PROCFS/$1/status" uids
+    local -a ids
+    if [[ -r "$owner" ]]; then
+        uids="$(awk '$1 == "Uid:" { print $2, $3; exit }' "$owner")" || return 1
+    elif ! uids="$(ps -o ruid=,uid= -p "$1")"; then
+        return 1
+    fi
+    read -r -a ids <<< "$uids"
+    ((${#ids[@]} == 2)) && [[ "${ids[0]}" == "$EUID" && "${ids[1]}" == "$EUID" ]]
 }
 
 #
@@ -1425,11 +1438,13 @@ is_daemon_running() {
         # process of another user's) and anything else unrecognised mean it
         # may still run, so the daemon is not provably down and its PID file
         # stays. strerror text in the C locale is the one portable signal the
-        # builtin gives. For such a pid only the socket answering counts
-        # (round 5, P4-2): a command line is anyone's to write.
+        # builtin gives. A command line is anyone's to write, so it counts
+        # only for a process this user owns (round 5, P4-2; round 6, P5-1);
+        # for any other, only the socket answering as this daemon does.
         local probe_error=""
         if kill -0 "$pid" 2>/dev/null || probe_error="$(export LC_ALL=C; kill -0 "$pid" 2>&1)"; then
-            if _hooks_daemon_pid_args_prove_this_project "$pid" ||
+            if { _hooks_daemon_pid_is_this_users "$pid" &&
+                _hooks_daemon_pid_args_prove_this_project "$pid"; } ||
                 _hooks_daemon_helper_proves_pid "$pid"; then
                 return 0
             fi
@@ -1865,6 +1880,15 @@ _enter_passthrough_mode() {
 }
 
 #
+# _hooks_daemon_is_down() - True when is_daemon_running answers down (1):
+# neither running (0) nor unknown (2).
+_hooks_daemon_is_down() {
+    local running=0
+    is_daemon_running || running=$?
+    ((running == 1))
+}
+
+#
 # ensure_daemon() - Start daemon if not running (lazy startup)
 #
 # Idempotent function safe to call on every hook invocation.
@@ -1890,7 +1914,9 @@ ensure_daemon() {
         return 0
     fi
 
-    if is_daemon_running; then
+    local running=0
+    is_daemon_running || running=$?
+    if ((running == 0)); then
         # Daemon running — clean up stale CI passthrough flag if present
         local passthrough_flag
         passthrough_flag=$(_passthrough_flag_path)
@@ -1902,8 +1928,11 @@ ensure_daemon() {
     passthrough_flag=$(_passthrough_flag_path)
 
     # CI optimisation: skip start attempt if passthrough flag exists
-    # (daemon not installed in CI — no point trying repeatedly)
-    if _is_ci_environment && [[ -f "$passthrough_flag" ]] && ! _is_ci_enforced; then
+    # (daemon not installed in CI — no point trying repeatedly). Only for a
+    # daemon that is down (1): an unknown answer (2) must not skip a start
+    # (Plan 00466 round 6, R5-3).
+    if ((running == 1)) && _is_ci_environment && [[ -f "$passthrough_flag" ]] &&
+        ! _is_ci_enforced; then
         _enter_passthrough_mode
         return 0
     fi
@@ -1922,8 +1951,11 @@ ensure_daemon() {
         return 1
     fi
 
-    # CI environment (but not enforced): passthrough mode — daemon simply not installed
-    if _is_ci_environment; then
+    # CI environment (but not enforced): passthrough mode — daemon simply not
+    # installed. Only once it is down after the failed start: a pid still
+    # unknown (2) may be a daemon this start could not prove, and allowing
+    # every call on it would be failing open (round 6, R5-3).
+    if _is_ci_environment && _hooks_daemon_is_down; then
         echo "HOOKS DAEMON: Daemon unavailable in CI environment — passthrough mode active (handlers inactive)" >&2
         echo "HOOKS DAEMON: All operations will proceed without safety checks" >&2
         if ! touch "$passthrough_flag" 2>/dev/null; then
@@ -2768,16 +2800,20 @@ export -f _hooks_daemon_static_deny
 export -f validate_venv
 # is_daemon_running and everything it calls.
 export _HOOKS_DAEMON_PID_MAX
+export _HOOKS_DAEMON_PROCFS
 export -f _hooks_daemon_is_pid_text
 export -f _hooks_daemon_root_is_this_install
 export -f _hooks_daemon_run_cli_helper
 export -f _hooks_daemon_helper_proves_pid
-export -f _hooks_daemon_args_prove_this_project
-export -f _hooks_daemon_args_launch
-export -f _hooks_daemon_args_name_root
+export -f _hooks_daemon_argv_prove_this_project
+export -f _hooks_daemon_argv_name_root
+export -f _hooks_daemon_cmdline_proves_this_project
+export -f _hooks_daemon_ps_args_prove_this_project
 export -f _hooks_daemon_pid_args_prove_this_project
+export -f _hooks_daemon_pid_is_this_users
 export -f is_daemon_running
 export -f start_daemon
+export -f _hooks_daemon_is_down
 export -f ensure_daemon
 export -f send_request_stdin
 export -f forward_stop_event

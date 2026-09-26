@@ -182,11 +182,12 @@ class TestCmdStartStaleSocket:
             patch("claude_code_hooks_daemon.daemon.cli.write_cleanup_status"),
             patch("os.fork", return_value=100),  # parent branch
             patch("time.sleep"),
-            # The daemon that came up is proven to serve this project.
+            # The daemon that came up, this user's, is proven to serve this project.
             patch(
                 "claude_code_hooks_daemon.daemon.cli.daemon_process_project_root",
                 return_value=RootProof(root=os.path.realpath(tmp_path), refusal=None),
             ),
+            patch("claude_code_hooks_daemon.daemon.cli.is_this_users_process", return_value=True),
         ):
             result = cmd_start(args)
 

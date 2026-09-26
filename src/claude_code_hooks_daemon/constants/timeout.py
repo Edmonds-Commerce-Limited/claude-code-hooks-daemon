@@ -171,7 +171,7 @@ class Timeout:
 
     # Daemon startup polling (Plan 00100 Task 0.2)
     DAEMON_PID_POLL_INTERVAL_SEC = 0.1  # 100ms between PID-file checks
-    DAEMON_PID_POLL_MAX_ITERATIONS = 50  # 50 x 100ms = 5s ceiling
+    DAEMON_PID_POLL_BUDGET_SEC = 5.0  # wall-clock ceiling, however long a probe takes
     DAEMON_RESTART_VERIFY_TIMEOUT_SEC = 15  # Overall restart verification ceiling
 
     # Live-daemon socket-liveness probe (Plan 00127). Connect-timeout for

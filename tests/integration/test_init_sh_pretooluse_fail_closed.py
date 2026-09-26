@@ -14,6 +14,7 @@ Unix-socket servers to pin the new behaviour end-to-end.
 
 from __future__ import annotations
 
+import contextlib
 import errno
 import json
 import os
@@ -32,7 +33,11 @@ import pytest
 
 from claude_code_hooks_daemon.constants import Timeout
 from claude_code_hooks_daemon.daemon.paths import PID_MAX_LIMIT
-from tests.daemon_like_process import DAEMON_CLI_MODULE, daemon_like_process
+from tests.daemon_like_process import (
+    DAEMON_CLI_MODULE,
+    answering_daemon_socket,
+    daemon_like_process,
+)
 from tests.dispatch_timeouts import DispatchTestTimeout
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -1564,17 +1569,75 @@ class TestIsDaemonRunningRemovesOnlyItsOwnStalePidFile:
         pid_path = tmp_path / "daemon.pid"
         pid_path.write_text(str(self._UNREAL_PID))
         socket_dir = Path(tempfile.mkdtemp(prefix="hd-live-"))
-        listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         try:
-            listener.bind(str(socket_dir / "daemon.sock"))
-            listener.listen(1)
-            result = self._probe(
-                project, pid_path, socket_dir / "daemon.sock", self._eperm_prelude()
-            )
+            with answering_daemon_socket(socket_dir / "daemon.sock", project, self._UNREAL_PID):
+                result = self._probe(
+                    project, pid_path, socket_dir / "daemon.sock", self._eperm_prelude()
+                )
         finally:
-            listener.close()
             shutil.rmtree(socket_dir)
         assert "rc=0" in result.stdout, result.stderr
+
+    @pytest.mark.parametrize("answers_as", ["nothing", "another project"])
+    def test_a_socket_proves_only_an_answer_as_this_projects_daemon(
+        self, project: Path, tmp_path: Path, answers_as: str
+    ) -> None:
+        """Round 6 (Sh-2): any listener accepted the probe, so whoever bound
+        the path first (another user can, under the /tmp fallback) proved a
+        pid it may not signal to be this daemon."""
+        pid_path = tmp_path / "daemon.pid"
+        pid_path.write_text(str(self._UNREAL_PID))
+        socket_dir = Path(tempfile.mkdtemp(prefix="hd-live-"))
+        socket_path = socket_dir / "daemon.sock"
+        try:
+            with contextlib.ExitStack() as stack:
+                if answers_as == "nothing":
+                    listener = stack.enter_context(socket.socket(socket.AF_UNIX))
+                    listener.bind(str(socket_path))
+                    listener.listen(1)
+                else:
+                    other = _make_project(tmp_path / "other")
+                    stack.enter_context(
+                        answering_daemon_socket(socket_path, other, self._UNREAL_PID)
+                    )
+                result = self._probe(project, pid_path, socket_path, self._eperm_prelude())
+        finally:
+            shutil.rmtree(socket_dir)
+        assert "rc=2" in result.stdout, result.stderr
+
+    @staticmethod
+    def _fake_procfs(tmp_path: Path, pid: int, uid: int) -> Path:
+        """A procfs root holding ``pid``'s real command line and a status
+        naming ``uid`` as its owner: root may signal every process, so only
+        a faked owner can be another user's here."""
+        procfs = tmp_path / "procfs"
+        (procfs / str(pid)).mkdir(parents=True)
+        (procfs / str(pid) / "cmdline").write_bytes(Path(f"/proc/{pid}/cmdline").read_bytes())
+        (procfs / str(pid) / "status").write_text(
+            f"Name:\tpython\nUid:\t{uid}\t{uid}\t{uid}\t{uid}\nGid:\t0\t0\t0\t0\n"
+        )
+        return procfs
+
+    @pytest.mark.parametrize(
+        ("owner", "expected"), [("this user", "rc=0"), ("another user", "rc=2")]
+    )
+    def test_a_command_line_proves_only_a_process_this_user_owns(
+        self, project: Path, tmp_path: Path, nonexistent_socket: Path, owner: str, expected: str
+    ) -> None:
+        """Round 6 (P5-1, Sh-G): the command-line proof was reached through
+        ``kill -0``, and root may signal any process, so another user's
+        process naming this project in its arguments was proven. The owner's
+        uid decides now; the helper (``/bin/false``) proves nothing here."""
+        uid = os.geteuid() if owner == "this user" else os.geteuid() + 4242
+        with daemon_like_process(project) as pid:
+            pid_path = tmp_path / "daemon.pid"
+            pid_path.write_text(str(pid))
+            prelude = (
+                f"_HOOKS_DAEMON_PROCFS={self._fake_procfs(tmp_path, pid, uid)}\n"
+                "PYTHON_CMD=/bin/false"
+            )
+            result = self._probe(project, pid_path, nonexistent_socket, prelude)
+        assert expected in result.stdout, result.stderr
 
     def test_a_command_line_never_proves_a_pid_it_may_not_signal(
         self, project: Path, tmp_path: Path, nonexistent_socket: Path
@@ -1617,6 +1680,28 @@ class TestIsDaemonRunningRemovesOnlyItsOwnStalePidFile:
             result = self._probe(project, pid_path, nonexistent_socket, "PYTHON_CMD=/bin/false")
         assert "rc=0" in result.stdout, result.stderr
 
+    def test_an_argument_holding_a_launch_across_newlines_is_not_one(
+        self, project: Path, tmp_path: Path, nonexistent_socket: Path
+    ) -> None:
+        """Round 6 (R5-2): procfs's arguments were joined with newlines, so
+        one argument holding a launch split by newlines read as that launch,
+        which ``process_verification`` rejects. This process's arguments
+        really are that: the helper (``/bin/false``) proves nothing here."""
+        smuggled = "\n".join(["x", "-m", _CLI_MODULE, "--project-root", str(project), "start"])
+        process = subprocess.Popen(
+            [sys.executable, "-c", "import sys; sys.stdin.read()", smuggled],
+            stdin=subprocess.PIPE,
+        )
+        try:
+            pid_path = tmp_path / "daemon.pid"
+            pid_path.write_text(str(process.pid))
+            result = self._probe(project, pid_path, nonexistent_socket, "PYTHON_CMD=/bin/false")
+        finally:
+            assert process.stdin is not None
+            process.stdin.close()
+            process.wait(timeout=Timeout.REQUEST_LONG)
+        assert "rc=2" in result.stdout, result.stderr
+
     def test_another_projects_daemon_of_this_user_is_unknown(
         self, project: Path, tmp_path: Path, nonexistent_socket: Path
     ) -> None:
@@ -1640,15 +1725,12 @@ class TestIsDaemonRunningRemovesOnlyItsOwnStalePidFile:
         pid_path = tmp_path / "daemon.pid"
         pid_path.write_text(str(self._UNREAL_PID))
         socket_dir = Path(tempfile.mkdtemp(prefix="hd-live-"))
-        listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         try:
-            listener.bind(str(socket_dir / "daemon.sock"))
-            listener.listen(1)
-            result = self._probe(
-                project, pid_path, socket_dir / "daemon.sock", self._eperm_prelude()
-            )
+            with answering_daemon_socket(socket_dir / "daemon.sock", project, self._UNREAL_PID):
+                result = self._probe(
+                    project, pid_path, socket_dir / "daemon.sock", self._eperm_prelude()
+                )
         finally:
-            listener.close()
             shutil.rmtree(socket_dir)
         assert "rc=2" in result.stdout, result.stderr
 
@@ -1681,6 +1763,57 @@ class TestIsDaemonRunningRemovesOnlyItsOwnStalePidFile:
         assert marker.exists(), result.stderr
         assert pid_path.read_text() == str(self._UNREAL_PID)
 
+    def _ensure_in_ci(
+        self, project: Path, tmp_path: Path, statuses: str, *, flagged: bool
+    ) -> tuple[subprocess.CompletedProcess[str], Path, Path]:
+        """``ensure_daemon`` in an unenforced CI whose start fails, with
+        ``is_daemon_running`` answering ``statuses`` in turn (the last one
+        from then on); returns the result, the start marker and the flag."""
+        marker = tmp_path / "start-attempted"
+        flag = tmp_path / "passthrough-flag"
+        if flagged:
+            flag.touch()
+        prelude = (
+            f"_statuses=({statuses})\n"
+            "is_daemon_running() { local s=${_statuses[0]}; "
+            '((${#_statuses[@]} > 1)) && _statuses=("${_statuses[@]:1}"); return "$s"; }\n'
+            f"start_daemon() {{ : > {marker}; return 1; }}\n"
+            f"_passthrough_flag_path() {{ echo {flag}; }}\n"
+            "_is_ci_environment() { return 0; }\n_is_ci_enforced() { return 1; }\n"
+        )
+        script = (
+            f"source .claude/init.sh\n{prelude}\n"
+            "if ensure_daemon; then echo rc=0; else echo rc=$?; fi\n"
+        )
+        result = _run_script(project, script, None, socket_path=tmp_path / "none.sock")
+        return result, marker, flag
+
+    @pytest.mark.parametrize("flagged", [True, False], ids=["flag-set", "no-flag"])
+    def test_an_unknown_answer_is_never_a_ci_passthrough(
+        self, project: Path, tmp_path: Path, flagged: bool
+    ) -> None:
+        """Round 6 (R5-3): ``if is_daemon_running`` read unknown (2) as down,
+        so an unenforced CI allowed every call without trying the start the
+        contract asks for. The start is tried; while the answer stays unknown
+        the failure is reported, not passed through."""
+        result, marker, flag = self._ensure_in_ci(project, tmp_path, "2", flagged=flagged)
+        assert "rc=1" in result.stdout, result.stderr
+        assert marker.exists(), result.stderr
+        assert flag.exists() == flagged
+
+    def test_a_real_down_after_a_failed_start_takes_the_ci_passthrough(
+        self, project: Path, tmp_path: Path
+    ) -> None:
+        result, marker, flag = self._ensure_in_ci(project, tmp_path, "2 1", flagged=False)
+        assert "rc=0" in result.stdout, result.stderr
+        assert marker.exists(), result.stderr
+        assert flag.exists()
+
+    def test_a_real_down_with_the_flag_skips_the_start(self, project: Path, tmp_path: Path) -> None:
+        result, marker, _flag = self._ensure_in_ci(project, tmp_path, "1", flagged=True)
+        assert "rc=0" in result.stdout, result.stderr
+        assert not marker.exists()
+
     def test_a_pid_file_that_names_no_pid_is_removed(
         self, project: Path, tmp_path: Path, nonexistent_socket: Path
     ) -> None:
@@ -1703,22 +1836,26 @@ _CLI_MODULE = DAEMON_CLI_MODULE
 def _launch_lines(project: Path) -> list[tuple[list[str], bool]]:
     """Command lines, each with whether ``init.sh`` must prove it serves
     ``project`` without the helper: every form a daemon of it is launched
-    with. The rest are other projects', or not daemon servers."""
+    with. The rest are other projects', not daemon servers, or a launch's
+    arguments away from the positions a launch puts them (round 6, P5-3)."""
     client_python = f"{project}/.claude/hooks-daemon/untracked/venv-x/bin/python"
     self_python = f"{project}/untracked/venv-x/bin/python"
     other = f"{project}-other"
+    root = str(project)
     return [
         # start_daemon
-        ([client_python, "-m", _CLI_MODULE, "--project-root", str(project), "start"], True),
-        # bin/hooks-daemon
-        ([client_python, "-m", _CLI_MODULE, "--project-root", str(project), "restart"], True),
-        (["python3", "-m", _CLI_MODULE, "--project-root", str(project), "restart", "-x"], True),
-        # daemon_control.sh, and a self-install's
-        ([client_python, "-m", _CLI_MODULE, "start"], True),
-        ([self_python, "-I", "-m", _CLI_MODULE, "restart"], True),
+        ([client_python, "-m", _CLI_MODULE, "--project-root", root, "start"], True),
+        # bin/hooks-daemon, and every start or restart naming no root, which
+        # cli.main re-runs naming it (round 6, Sh-1)
+        ([client_python, "-m", _CLI_MODULE, "--project-root", root, "restart"], True),
+        (["python3", "-m", _CLI_MODULE, "--project-root", root, "restart", "-x"], True),
+        # Naming no root, a daemon serves whatever its working directory
+        # found; only its socket can say which (round 6, Sh-1).
+        ([client_python, "-m", _CLI_MODULE, "start"], False),
+        ([self_python, "-I", "-m", _CLI_MODULE, "restart"], False),
         ([client_python, "-m", _CLI_MODULE, "--project-root", other, "start"], False),
-        ([client_python, "-m", _CLI_MODULE, "--project-root", f"{project}x", "start"], False),
-        ([client_python, "-m", _CLI_MODULE, "--project-root", str(project), "status"], False),
+        ([client_python, "-m", _CLI_MODULE, "--project-root", f"{root}x", "start"], False),
+        ([client_python, "-m", _CLI_MODULE, "--project-root", root, "status"], False),
         ([client_python, "-m", _CLI_MODULE, "status"], False),
         ([client_python, "-m", _CLI_MODULE, "--project-root", other, "restart"], False),
         (["python3", "-m", _CLI_MODULE, "start"], False),
@@ -1726,68 +1863,163 @@ def _launch_lines(project: Path) -> list[tuple[list[str], bool]]:
         ([client_python, "-m", _CLI_MODULE, "--project-root=" + other, "start"], False),
         # The flag names the project wherever it stands, even after `start`.
         ([client_python, "-m", _CLI_MODULE, "start", "--project-root", other], False),
-        ([client_python, "-c", "pass", "--project-root", str(project), "start"], False),
+        (
+            [
+                client_python,
+                "-m",
+                _CLI_MODULE,
+                "--project-root",
+                root,
+                "start",
+                "--project-root",
+                other,
+            ],
+            False,
+        ),
+        (["--project-root=" + other, "-m", _CLI_MODULE, "--project-root", root, "start"], False),
+        ([client_python, "-c", "pass", "--project-root", root, "start"], False),
+        # The launch tokens anywhere but where a launch puts them.
+        ([client_python, "-c", "pass", "-m", _CLI_MODULE, "--project-root", root, "start"], False),
+        ([client_python, "-I", "-m", _CLI_MODULE, "--project-root", root, "start"], False),
+        ([client_python, "-m", _CLI_MODULE, "--project-root", root, "-v", "start"], False),
+        (["sh", "x", "-m", _CLI_MODULE, "--project-root", root, "start"], False),
+        ([client_python, "-m", f"{_CLI_MODULE}x", "--project-root", root, "start"], False),
     ]
+
+
+def _cmdline_bytes(argv: list[str]) -> bytes:
+    """``argv`` as procfs holds it: each argument NUL-terminated."""
+    return b"".join(argument.encode() + b"\0" for argument in argv)
+
+
+def _psutil_argv(data: bytes) -> list[str]:
+    """The arguments psutil reads from procfs ``data`` (``_pslinux.cmdline``)."""
+    text = data.decode()
+    if text.endswith("\0"):
+        text = text[:-1]
+    argv = text.split("\0")
+    if len(argv) == 1 and " " in text:
+        argv = text.split(" ")
+    return argv
 
 
 class TestTheHooksCommandLineProofIsSound:
     """Plan 00466 round 5 (Sh-D): ``init.sh`` proves a live pid of this
     user's from its command line without the half-second venv helper. Its
     rule is narrower than ``process_verification``'s: whatever it proves,
-    the daemon's rule proves too, and it proves every launch form."""
+    the daemon's rule proves too, and it proves every launch form. Round 6
+    (R5-2) reads procfs with the argument boundaries it keeps, so both
+    sides see the same arguments."""
 
     @staticmethod
     def _daemon_proves(cmdline: list[str], project: Path) -> bool:
+        """``process_verification``'s rule for a command line naming a root."""
         from claude_code_hooks_daemon.daemon.process_verification import (
-            _extract_project_root,
             _is_daemon_server_process,
+            _root_from_flag,
         )
 
-        root = _extract_project_root(cmdline)
+        root = _root_from_flag(cmdline)
         return (
             _is_daemon_server_process(cmdline)
             and root is not None
             and os.path.realpath(root) == os.path.realpath(project)
         )
 
-    def _init_sh_proves(self, project: Path, args: str, sep: str) -> bool:
+    @staticmethod
+    def _init_sh_proves(project: Path, function: str, argument: str) -> bool:
         script = (
             "source .claude/init.sh\n"
-            'if _hooks_daemon_args_prove_this_project "$ARGS" "$SEP"; '
-            "then echo rc=0; else echo rc=1; fi\n"
+            f'if {function} "$ARGUMENT"; then echo rc=0; else echo rc=1; fi\n'
         )
         result = _run_script(
             project,
             script,
             None,
             socket_path=project / "none.sock",
-            extra_env={"ARGS": args, "SEP": sep},
+            extra_env={"ARGUMENT": argument},
         )
         assert result.stdout.strip() in ("rc=0", "rc=1"), result.stderr
         return result.stdout.strip() == "rc=0"
 
-    @pytest.mark.parametrize("sep", ["\n", " "], ids=["procfs", "ps"])
-    def test_it_proves_the_launch_forms_and_nothing_the_daemon_would_not(
-        self, tmp_path: Path, sep: str
+    def _procfs_proves(self, project: Path, data: bytes) -> bool:
+        """``init.sh``'s proof for a procfs ``cmdline`` file holding ``data``."""
+        cmdline = project.parent / "cmdline"
+        cmdline.write_bytes(data)
+        return self._init_sh_proves(
+            project, "_hooks_daemon_cmdline_proves_this_project", str(cmdline)
+        )
+
+    def test_procfs_proves_the_launch_forms_and_nothing_the_daemon_would_not(
+        self, tmp_path: Path
     ) -> None:
         project = _make_project(tmp_path / "with space")
         for cmdline, launched in _launch_lines(project):
-            proven = self._init_sh_proves(project, sep.join(cmdline), sep)
+            proven = self._procfs_proves(project, _cmdline_bytes(cmdline))
             assert proven == launched, cmdline
             assert not proven or self._daemon_proves(cmdline, project), cmdline
+
+    def test_ps_proves_the_launch_forms_and_nothing_the_daemon_would_not(
+        self, tmp_path: Path
+    ) -> None:
+        """``ps`` joins the arguments with spaces, so its words are read as
+        them: a project whose path holds a space is left to the helper."""
+        for name, provable in (("plain", True), ("with space", False)):
+            project = _make_project(tmp_path / name)
+            for cmdline, launched in _launch_lines(project):
+                proven = self._init_sh_proves(
+                    project, "_hooks_daemon_ps_args_prove_this_project", " ".join(cmdline)
+                )
+                assert proven == (launched and provable), cmdline
+                assert not proven or self._daemon_proves(cmdline, project), cmdline
 
     def test_a_symlinked_project_is_proven_by_its_real_path(self, tmp_path: Path) -> None:
         project = _make_project(tmp_path / "real")
         (tmp_path / "link").symlink_to(project)
         cmdline = ["python3", "-m", _CLI_MODULE, "--project-root", str(project), "start"]
-        assert self._init_sh_proves(tmp_path / "link", "\n".join(cmdline), "\n")
+        assert self._procfs_proves(tmp_path / "link", _cmdline_bytes(cmdline))
 
     def test_argument_boundaries_count_where_procfs_keeps_them(self, tmp_path: Path) -> None:
         """One argument holding a whole launch line is not a launch."""
         project = _make_project(tmp_path / "proj")
         cmdline = ["bash", "-c", f"x -m {_CLI_MODULE} --project-root {project} start"]
         assert not self._daemon_proves(cmdline, project)
-        assert not self._init_sh_proves(project, "\n".join(cmdline), "\n")
+        assert not self._procfs_proves(project, _cmdline_bytes(cmdline))
+
+    @pytest.mark.parametrize(
+        ("case", "launched"),
+        [
+            ("an argument holding the launch across newlines", False),
+            ("a launch whose last argument ends in a newline", False),
+            ("a launch with no final NUL", True),
+            ("a launch followed by an empty argument", True),
+            ("a root cut in two by a NUL", False),
+        ],
+    )
+    def test_procfs_bytes_are_read_as_the_daemon_reads_them(
+        self, tmp_path: Path, case: str, launched: bool
+    ) -> None:
+        """Round 6 (R5-2): the arguments were joined with newlines, so one
+        argument holding a newline-separated launch read as that launch,
+        which ``process_verification`` rejects."""
+        project = _make_project(tmp_path / "proj")
+        root = str(project).encode()
+        module = _CLI_MODULE.encode()
+        launch = [b"python3", b"-m", module, b"--project-root", root, b"start"]
+        data = {
+            "an argument holding the launch across newlines": (
+                b"sleep\0x\n" + b"\n".join(launch[1:]) + b"\0"
+            ),
+            "a launch whose last argument ends in a newline": b"\0".join(launch) + b"\n\0",
+            "a launch with no final NUL": b"\0".join(launch),
+            "a launch followed by an empty argument": b"\0".join(launch) + b"\0\0",
+            "a root cut in two by a NUL": b"\0".join(
+                [*launch[:4], root[:4] + b"\0" + root[4:], b"start"]
+            ),
+        }[case]
+        proven = self._procfs_proves(project, data)
+        assert proven == launched
+        assert proven == self._daemon_proves(_psutil_argv(data), project)
 
 
 class TestTheStartupPollIsBoundedByTheClock:

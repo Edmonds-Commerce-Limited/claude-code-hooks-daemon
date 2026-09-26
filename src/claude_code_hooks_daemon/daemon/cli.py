@@ -84,12 +84,18 @@ from claude_code_hooks_daemon.daemon.permission_audit import (
     audit_untracked_permissions,
     tighten_permissions,
 )
-from claude_code_hooks_daemon.daemon.process_verification import daemon_process_project_root
+from claude_code_hooks_daemon.daemon.process_verification import (
+    DAEMON_CLI_MODULE,
+    daemon_process_project_root,
+    is_this_users_process,
+)
 from claude_code_hooks_daemon.daemon.server import (
     DaemonAlreadyRunningError,
+    DaemonIdentity,
     StartLockTimeout,
     _socket_liveness_sync,
     _SocketLiveness,
+    daemon_socket_identity,
     hold_start_lock,
 )
 from claude_code_hooks_daemon.daemon.validation import (
@@ -911,39 +917,41 @@ def remove_stale_pid_file(pid_path: Path, socket_path: Path, seen: str) -> bool:
     return False
 
 
-def _is_this_users_process(pid: int) -> bool:
-    """True when this user may signal ``pid``, a pid another process can own.
-
-    Signal 0 is never delivered: the kernel only checks the permission.
-    """
-    # type() rather than isinstance(): see daemon_process_project_root.
-    if type(pid) is not int or pid <= 1:
-        return False
-    try:
-        os.kill(pid, 0)
-    except OSError:
-        return False
-    return True
-
-
 def _serves_this_project(pid: int, project_root: Path) -> bool:
-    """True when ``pid``'s command line proves it serves ``project_root``."""
+    """True when ``pid`` is this user's and its command line, or the socket
+    it listens on, proves it serves ``project_root``.
+
+    A command line is anyone's to write, so it counts only for a process
+    this user owns (round 5, P4-2; round 6, P5-1): another user's process
+    naming this project in its arguments proves nothing.
+    """
+    if not is_this_users_process(pid):
+        return False
     proof = daemon_process_project_root(pid)
     return proof.root is not None and proof.root == os.path.realpath(project_root)
+
+
+def _socket_answers_for_project(socket_path: Path, project_root: Path) -> DaemonIdentity | None:
+    """The identity the daemon on ``socket_path`` answers with, when it
+    serves ``project_root``; else None (round 6, Sh-2)."""
+    identity = daemon_socket_identity(socket_path)
+    if identity is None or os.path.realpath(identity.project_root) != os.path.realpath(
+        project_root
+    ):
+        return None
+    return identity
 
 
 def pid_is_this_projects_daemon(pid: int, socket_path: Path, project_root: Path) -> bool:
     """Liveness for a live pid ``init.sh`` could not prove (Plan 00466 N139-A, Sh-D).
 
     A live process is not proof of this daemon. It is, for ``init.sh``'s
-    ``is_daemon_running``, when the socket answers, or when its command line
-    proves it serves this project. A command line is anyone's to write, so
-    it counts only for a process of this user's (round 5, P4-2): another
-    user's process naming this project in its arguments proves nothing.
+    ``is_daemon_running``, when the socket answers as this project's daemon,
+    or when the pid is proven to serve this project.
     """
-    if _socket_liveness_sync(socket_path) is _SocketLiveness.LIVE:
+    if _socket_answers_for_project(socket_path, project_root) is not None:
         return True
-    return _is_this_users_process(pid) and _serves_this_project(pid, project_root)
+    return _serves_this_project(pid, project_root)
 
 
 def _await_started_daemon(
@@ -954,15 +962,21 @@ def _await_started_daemon(
     A PID file still naming ``displaced``, the live pid it held before the
     fork, proves nothing about this start (round 5): a stale file of a pid
     since reused, or another user's, was reported as the started daemon.
-    A new pid counts once the socket answers or its command line proves it
-    serves this project.
+    A new pid counts once the socket answers as it, or it is proven to serve
+    this project.
+
+    The budget is wall-clock time (round 6, R5-1): a probe can take its whole
+    timeout, and a tick count then ran the PreToolUse deny path near the
+    hook's 60 s timeout. The last probe may overrun it by one probe.
     """
-    for _ in range(Timeout.DAEMON_PID_POLL_MAX_ITERATIONS):
+    deadline = time.monotonic() + Timeout.DAEMON_PID_POLL_BUDGET_SEC
+    while time.monotonic() < deadline:
         time.sleep(Timeout.DAEMON_PID_POLL_INTERVAL_SEC)
         daemon_pid = read_pid_file(str(pid_path))
         if daemon_pid is None or daemon_pid == displaced:
             continue
-        if _socket_liveness_sync(socket_path) is _SocketLiveness.LIVE or _serves_this_project(
+        identity = _socket_answers_for_project(socket_path, project_path)
+        if (identity is not None and identity.pid == daemon_pid) or _serves_this_project(
             daemon_pid, project_path
         ):
             return daemon_pid
@@ -10961,7 +10975,35 @@ def main() -> int:
         parser.print_help()
         return 1
 
+    _rerun_launch_naming_its_project(args)
     return cast("int", args.func(args))
+
+
+def _rerun_launch_naming_its_project(args: argparse.Namespace) -> None:
+    """Re-run a ``start`` or ``restart`` naming no ``--project-root``, naming it.
+
+    Such a daemon serves the project its working directory finds, and leaves
+    that directory at once (``os.chdir("/")``), so its command line said
+    nothing true about which project it serves (Plan 00466 round 6, Sh-1).
+    ``init.sh`` proves a daemon from its command line only in the form
+    ``start_daemon`` launches it with; re-running in that form keeps every
+    daemon provable without the daemon's slower helper. Returns only when
+    nothing needs re-running.
+    """
+    if args.func not in (cmd_start, cmd_restart) or getattr(args, "project_root", None):
+        return
+    project_path = get_project_path(None)
+    argv = [
+        sys.executable,
+        "-m",
+        DAEMON_CLI_MODULE,
+        "--project-root",
+        str(project_path),
+        *sys.argv[1:],
+    ]
+    sys.stdout.flush()
+    sys.stderr.flush()
+    os.execv(sys.executable, argv)
 
 
 if __name__ == "__main__":

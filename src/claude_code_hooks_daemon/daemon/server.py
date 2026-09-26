@@ -23,6 +23,7 @@ import stat
 import sys
 import time
 from collections.abc import Iterator
+from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
 from typing import Any, Final, Protocol, runtime_checkable
@@ -526,6 +527,73 @@ def _socket_liveness_sync(path: Path) -> _SocketLiveness:
     return _SocketLiveness.INDETERMINATE
 
 
+#: The system action a daemon answers with the project it serves and its pid.
+IDENTITY_ACTION: Final = "identity"
+
+
+@dataclass(frozen=True)
+class DaemonIdentity:
+    """What a daemon answers it is: the project it serves, and its pid."""
+
+    project_root: str
+    pid: int
+
+
+def _parse_identity(line: bytes) -> DaemonIdentity | None:
+    """The identity a daemon's answer line carries, or None for anything else."""
+    try:
+        answer = json.loads(line)
+    except ValueError:
+        return None
+    result = answer.get("result") if isinstance(answer, dict) else None
+    if not isinstance(result, dict):
+        return None
+    project_root, pid = result.get("project_root"), result.get("pid")
+    if not isinstance(project_root, str) or type(pid) is not int:
+        return None
+    return DaemonIdentity(project_root=project_root, pid=pid)
+
+
+async def _probe_daemon_identity(path: Path) -> DaemonIdentity | None:
+    """Ask the daemon on ``path`` who it is (Plan 00466 round 6, Sh-2).
+
+    A listener accepting the connection proves only that something bound the
+    path, which under the ``/tmp`` fallback another user can do first. Only
+    the daemon's own answer names the project it serves. The connect and the
+    answer are each bounded by ``SOCKET_LIVENESS_PROBE_SEC``.
+    """
+    request = {"event": "_system", "hook_input": {"action": IDENTITY_ACTION}}
+    try:
+        reader, writer = await asyncio.wait_for(
+            asyncio.open_unix_connection(path=str(path)),
+            timeout=Timeout.SOCKET_LIVENESS_PROBE_SEC,
+        )
+    except (TimeoutError, OSError):
+        return None
+    try:
+        writer.write(json.dumps(request).encode() + b"\n")
+        await writer.drain()
+        line = await asyncio.wait_for(reader.readline(), timeout=Timeout.SOCKET_LIVENESS_PROBE_SEC)
+    except (TimeoutError, OSError, ValueError) as exc:
+        logger.debug("No identity answer on %s: %s", path, exc)
+        return None
+    finally:
+        writer.close()
+        with contextlib.suppress(OSError):
+            await writer.wait_closed()
+    return _parse_identity(line)
+
+
+def daemon_socket_identity(path: Path) -> DaemonIdentity | None:
+    """Synchronous :func:`_probe_daemon_identity`, for callers outside the
+    event loop. Inside one there is no answer to wait for: None."""
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(_probe_daemon_identity(path))
+    return None
+
+
 def _pid_file_points_at_live_process(pid_file_path: Path | None) -> bool:
     """Return True iff ``pid_file_path`` exists and names a live process.
 
@@ -537,8 +605,10 @@ def _pid_file_points_at_live_process(pid_file_path: Path | None) -> bool:
     if pid_file_path is None or not pid_file_path.exists():
         return False
     try:
-        pid = int(pid_file_path.read_text().strip())
-    except (ValueError, OSError):
+        pid = parse_pid_text(pid_file_path.read_text())
+    except (UnicodeDecodeError, OSError):
+        return False
+    if pid is None:
         return False
     try:
         os.kill(pid, 0)  # Signal 0 checks existence without delivering a signal.
@@ -1977,6 +2047,14 @@ class HooksDaemon:
             else:
                 handlers = {}
             response = {"result": {"handlers": handlers}}
+
+        elif action == IDENTITY_ACTION:
+            try:
+                project_root = str(ProjectContext.project_root())
+            except RuntimeError as exc:
+                response = {"error": f"no project to name: {exc}"}
+            else:
+                response = {"result": {"project_root": project_root, "pid": os.getpid()}}
 
         elif action == ModeConstant.ACTION_GET_MODE:
             if self._is_new_controller and isinstance(self.controller, Controller):

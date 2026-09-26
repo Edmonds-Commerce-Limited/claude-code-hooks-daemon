@@ -1,17 +1,47 @@
 """Tests for daemon process verification logic."""
 
 import os
+from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import psutil
 
 from claude_code_hooks_daemon.constants import Timeout
+from claude_code_hooks_daemon.daemon.paths import prospective_socket_path
 from claude_code_hooks_daemon.daemon.process_verification import (
     daemon_process_project_root,
     find_all_daemon_processes,
     is_process_running,
+    is_this_users_process,
     kill_daemon_process,
 )
+
+_MODULE = "claude_code_hooks_daemon.daemon.cli"
+
+
+def _client_project(root: Path) -> Path:
+    """A client project at ``root``: its daemon's files live under
+    ``.claude/hooks-daemon/untracked``."""
+    (root / ".claude" / "hooks-daemon" / "untracked").mkdir(parents=True)
+    return root
+
+
+def _self_install_project(root: Path) -> Path:
+    """A self-install checkout at ``root``: the daemon's source is its own."""
+    (root / "src" / "claude_code_hooks_daemon").mkdir(parents=True)
+    (root / "untracked").mkdir()
+    return root
+
+
+def _natural_socket(project: Path, *, self_install: bool = False) -> Path:
+    return prospective_socket_path(project, self_install=self_install)
+
+
+def _listening(path: Path) -> SimpleNamespace:
+    """A unix connection psutil reports for a socket bound at ``path``."""
+    return SimpleNamespace(laddr=str(path), raddr="", status=psutil.CONN_NONE)
+
 
 # A pid no real process carries (above the kernel's pid_max ceiling), so no
 # test here can ever name a live process even if a mock is bypassed.
@@ -210,50 +240,47 @@ class TestFindAllDaemonProcessesProjectRootFilter:
         mock_proc.cmdline.return_value = cmdline
         return mock_proc
 
-    def test_filter_excludes_other_project_daemon_by_venv_path(self) -> None:
-        """Daemons whose venv path is under a different project root are excluded."""
+    def test_filter_excludes_other_project_daemon_by_its_socket(self, tmp_path: Path) -> None:
+        """A daemon naming no root is attributed by the socket it listens on
+        (Plan 00466 round 6, Sh-1)."""
+        ours_root, other_root = _client_project(tmp_path / "ours"), _client_project(
+            tmp_path / "other"
+        )
         ours = self._proc(
             pid=100,
-            cmdline=[
-                "/workspace/untracked/venv-py311-28fb230b/bin/python",
-                "-m",
-                "claude_code_hooks_daemon.daemon.cli",
-                "start",
-            ],
+            cmdline=[f"{ours_root}/untracked/venv-py311/bin/python", "-m", _MODULE, "start"],
         )
+        ours.net_connections.return_value = [_listening(_natural_socket(ours_root))]
         other = self._proc(
             pid=200,
-            cmdline=[
-                "/home/user/project/.claude/hooks-daemon/untracked/venv-py314-fefc85e6/bin/python",
-                "-m",
-                "claude_code_hooks_daemon.daemon.cli",
-                "restart",
-            ],
+            cmdline=[f"{ours_root}/untracked/venv-py311/bin/python", "-m", _MODULE, "restart"],
         )
+        other.net_connections.return_value = [_listening(_natural_socket(other_root))]
 
         with patch("psutil.process_iter", return_value=[ours, other]):
-            result = find_all_daemon_processes(project_root="/workspace")
+            result = find_all_daemon_processes(project_root=str(ours_root))
 
         assert result == [100]
 
-    def test_filter_excludes_other_project_normal_install(self) -> None:
-        """A normal-install daemon's project root is derived before .claude/."""
-        other = self._proc(
+    def test_the_venv_a_daemon_runs_from_attributes_nothing(self, tmp_path: Path) -> None:
+        """Round 6 (Sh-1): with no root named, the daemon serves whatever its
+        working directory found, so a venv under ``ours`` is no proof: a
+        worktree using this checkout's venv was attributed to this checkout,
+        and single-daemon enforcement would have terminated it."""
+        ours_root = _client_project(tmp_path / "ours")
+        stranger = self._proc(
             pid=300,
             cmdline=[
-                "/home/user/project/.claude/hooks-daemon/untracked/venv-py314-fefc85e6/bin/python",
+                f"{ours_root}/.claude/hooks-daemon/untracked/venv-py314/bin/python",
                 "-m",
-                "claude_code_hooks_daemon.daemon.cli",
+                _MODULE,
                 "start",
             ],
         )
+        stranger.net_connections.return_value = []
 
-        with patch("psutil.process_iter", return_value=[other]):
-            ours = find_all_daemon_processes(project_root="/home/user/project")
-            stranger = find_all_daemon_processes(project_root="/workspace")
-
-        assert ours == [300]
-        assert stranger == []
+        with patch("psutil.process_iter", return_value=[stranger]):
+            assert find_all_daemon_processes(project_root=str(ours_root)) == []
 
     def test_filter_matches_via_project_root_flag(self) -> None:
         """The --project-root cmdline flag identifies the daemon's project."""
@@ -309,12 +336,7 @@ class TestFindAllDaemonProcessesProjectRootFilter:
         """Trailing-slash differences in the project root still match."""
         proc = self._proc(
             pid=700,
-            cmdline=[
-                "/workspace/untracked/venv-py311-28fb230b/bin/python",
-                "-m",
-                "claude_code_hooks_daemon.daemon.cli",
-                "start",
-            ],
+            cmdline=["python", "-m", _MODULE, "--project-root", "/workspace", "start"],
         )
 
         with patch("psutil.process_iter", return_value=[proc]):
@@ -591,4 +613,97 @@ class TestDaemonProcessProjectRoot:
             proof = daemon_process_project_root(_UNREAL_PID)
 
         assert proof.refusal is None
-        assert proof.source in ("its --project-root flag", "its interpreter's venv path")
+        assert proof.source == "its --project-root flag"
+
+    def _daemon_naming_no_root(self, venv_root: Path, *sockets: Path) -> MagicMock:
+        process = self._process(
+            [f"{venv_root}/untracked/venv-py313/bin/python", "-m", _MODULE, "start"]
+        )
+        process.net_connections.return_value = [_listening(path) for path in sockets]
+        return process
+
+    def test_a_daemon_naming_no_root_serves_the_project_whose_socket_it_listens_on(
+        self, tmp_path: Path
+    ) -> None:
+        """Round 6 (Sh-1): it was attributed to the project owning its venv,
+        not to the one its working directory found, which it serves."""
+        venv_owner = _client_project(tmp_path / "venv-owner")
+        served = _client_project(tmp_path / "served")
+        process = self._daemon_naming_no_root(venv_owner, _natural_socket(served))
+        with patch("psutil.Process", return_value=process):
+            proof = daemon_process_project_root(_UNREAL_PID)
+
+        assert proof.root == os.path.realpath(served)
+        assert proof.source == "the socket it listens on"
+
+    def test_a_self_install_is_attributed_by_its_socket(self, tmp_path: Path) -> None:
+        served = _self_install_project(tmp_path / "dogfood")
+        process = self._daemon_naming_no_root(served, _natural_socket(served, self_install=True))
+        with patch("psutil.Process", return_value=process):
+            assert daemon_process_project_root(_UNREAL_PID).root == os.path.realpath(served)
+
+    def test_a_socket_in_a_daemon_clone_belongs_to_the_project_holding_it(
+        self, tmp_path: Path
+    ) -> None:
+        """A client install's clone is itself a self-install tree, but a
+        daemon never serves it: ``get_project_path`` skips it."""
+        served = _client_project(tmp_path / "client")
+        clone = served / ".claude" / "hooks-daemon"
+        (clone / "src" / "claude_code_hooks_daemon").mkdir(parents=True)
+        process = self._daemon_naming_no_root(served, _natural_socket(served))
+        with patch("psutil.Process", return_value=process):
+            assert daemon_process_project_root(_UNREAL_PID).root == os.path.realpath(served)
+
+    def test_no_projects_socket_attributes_nothing(self, tmp_path: Path) -> None:
+        served = _client_project(tmp_path / "served")
+        other = _client_project(tmp_path / "other")
+        for sockets in (
+            (),
+            (tmp_path / "elsewhere.sock",),
+            (served / ".claude" / "hooks-daemon" / "untracked" / "stray.sock",),
+            (_natural_socket(served), _natural_socket(other)),
+        ):
+            process = self._daemon_naming_no_root(served, *sockets)
+            with patch("psutil.Process", return_value=process):
+                proof = daemon_process_project_root(_UNREAL_PID)
+            assert proof.root is None, sockets
+            assert "names no project" in (proof.refusal or ""), sockets
+
+    def test_sockets_that_cannot_be_read_attribute_nothing(self, tmp_path: Path) -> None:
+        process = self._daemon_naming_no_root(_client_project(tmp_path / "served"))
+        process.net_connections.side_effect = psutil.AccessDenied(pid=_UNREAL_PID)
+        with patch("psutil.Process", return_value=process):
+            assert daemon_process_project_root(_UNREAL_PID).root is None
+
+
+class TestIsThisUsersProcess:
+    """Plan 00466 round 6 (P5-1, Sh-G): ownership is the owner's uid, never
+    permission to signal, which root holds over every process."""
+
+    def test_a_process_this_user_owns_is(self) -> None:
+        assert is_this_users_process(os.getpid())
+
+    def test_another_uids_process_is_not(self) -> None:
+        """Faked by changing the uid it is compared with: launching a process
+        as another uid would need root."""
+        with patch("os.geteuid", return_value=os.geteuid() + 4242):
+            assert not is_this_users_process(os.getpid())
+
+    def test_a_setuid_process_is_not(self) -> None:
+        """Real and effective uid must both be this user's."""
+        uids = SimpleNamespace(real=os.geteuid(), effective=os.geteuid() + 1, saved=0)
+        process = MagicMock(spec=psutil.Process)
+        process.uids.return_value = uids
+        with patch("psutil.Process", return_value=process):
+            assert not is_this_users_process(_UNREAL_PID)
+
+    def test_a_process_that_cannot_be_read_is_not(self) -> None:
+        for error in (psutil.NoSuchProcess(pid=_UNREAL_PID), psutil.AccessDenied(pid=_UNREAL_PID)):
+            with patch("psutil.Process", side_effect=error):
+                assert not is_this_users_process(_UNREAL_PID)
+
+    def test_what_is_no_pid_is_never_read(self) -> None:
+        with patch("psutil.Process") as process:
+            for pid in (0, 1, -1, True, MagicMock()):
+                assert not is_this_users_process(pid)
+        process.assert_not_called()
