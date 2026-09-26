@@ -85,3 +85,41 @@ All were run on a `git archive` scratch copy of main.
 The 126-site migration was split across four Sonnet subagents on disjoint
 file lists, then reviewed. The three flagged handlers, `core/` and the
 markdown walk were reviewed line by line.
+
+## Landing merge
+
+`git merge --no-ff main` (25 commits behind: N24, N84/N90, N46, N105, the
+three-digit release notes) produced merge commit `cc1c145bd`.
+
+- Conflicts were limited to plan documents. No `src/` file conflicted.
+  - `PLAN.md` ledger table: merged by `merge_ledger_table.py`, which found
+    100 rows with N106 the only branch-only row. No row differs from main
+    or appears twice. The N1-row Edit realigned the table.
+  - `NIGGLES.md`: the branch's N106 section and main's N110 section were
+    both kept, N106 first. The markdown formatter had turned the conflict
+    markers into a heading and a blockquote, and both were repaired by
+    hand. A diff against main shows only the N106 section added.
+- Generated docs did not conflict, and the daemon restart left them
+  unchanged.
+- Release note `98-…` became `120-a-deep-file-path-no-longer-stalls-pretooluse.md`,
+  with no duplicate ordinals. Main's holding-area test requires a
+  `# Callout:` title, so the note's `# Fix:` title was changed.
+- New stdlib containment calls from main: none. Running the
+  `pathlib-quadratic-containment` semgrep rule over `src/`, `scripts/` and
+  `.claude/project-handlers/` on the merged tree gives rc=0 and no
+  findings.
+- Tests on the worktree venv (Python 3.13):
+  - `tests/unit`: 24806 passed, 0 failed.
+  - `tests/integration` and `tests/daemon`: 4911 passed, 6 skipped, 6
+    failed and 3 errors on the first run. One failure was the release-note
+    title. The other eight failed because this worktree had no
+    `.claude/hooks-daemon.env`, so `init.sh` looked for
+    `resolve_venv.sh` under `.claude/hooks-daemon/`. That is a provisioning
+    gap in this worktree, not a code defect. It was provisioned with
+    `create_daemon_env`, as `setup_worktree.sh` step 9 does. On a rerun
+    the three affected files passed 104 of 104, and
+    `test_project_handler_priority_collisions.py` passed 2 of 2.
+- ruff, black, mypy and pyright are clean on all 94 Python files that
+  differ from main.
+- The worktree daemon was restarted and reports RUNNING. The gate was
+  queued on the commit that adds this section.
