@@ -130,17 +130,63 @@ with its own "Remedied" paragraph.
     `git archive` of main in that environment. With the standard setup
     they pass.
 
+## N126: the relay hands a failed PreToolUse exchange to the one carve-out
+
+Assigned by team-lead after the first report. The fix is committed with this
+report update.
+
+- **Mechanism.**
+  - The relay keeps every request byte it pumps. On a PreToolUse
+    mid-exchange failure (timeout, I/O, oversize or empty response) with a
+    `--fallback`, `judge_via_fallback` finishes reading stdin. It then runs
+    `/bin/bash <forwarder> --no-relay` with the whole request replayed on
+    stdin and `HOOKS_DAEMON_RELAY_FAILED=<class>: <detail>`.
+  - `init.sh` captures and unsets that variable at source time, so a daemon
+    the hook starts never inherits it.
+  - `send_request_stdin` then skips the nc rung and the socket, and calls
+    `fail('relay_exchange_failed', …)` with `daemon_reached = True`.
+    `emit_error_json` denies through the N67 carve-out, which resolves the
+    launcher and fails closed.
+  - The relay never parses the request and holds no second copy of the
+    carve-out.
+- **Fail-closed hand-off.** If stdin cannot be completed, or the forwarder
+  cannot be spawned, exits non-zero or writes nothing, the relay writes its
+  own deny, as before. With no `--fallback` the relay also denies as before.
+  Setting the variable by hand can only turn a call into a deny.
+- **Scope of the exemption.** It is exactly N67's set: the project's own
+  launcher with `restart`, `status`, `logs`, `stop` or `start`. `repair` is
+  not in that set. The brief said "restart or repair", but widening the set
+  would be a separate decision.
+- **Latency.** A wedged daemon costs one relay budget, not two: the
+  hand-off never contacts the daemon again.
+- **Tests.**
+  - `TestRelayMidExchangeFailureIsJudgedByTheOneCarveOut` (6 cases): the
+    real relay binary against a wedged `pre-tool-use.sock`, with a real
+    forwarder and `init.sh`. It covers the project's own restart, a planted
+    launcher, an ordinary call, a silent fallback, a failing fallback and a
+    1 MiB request replayed byte for byte.
+  - `TestARelayHandOffIsJudgedWithoutAskingTheDaemonAgain` (5 cases): the
+    `init.sh` side.
+  - RED: 7 of these fail against `HEAD`'s `init.sh` and a relay built from
+    `HEAD`'s source. Both fail-closed hand-off tests fail when a scratch
+    relay's answer check is mutated away.
+  - I marked the new payloads `synthetic_source`
+    (`test_live_probes_are_marked`).
+- **Verification.** Every test file that references `init.sh`, plus the
+  relay tests: 1493 passed. The one failure in that run was the unmarked
+  probe, now fixed; its file and the probe check then passed 41/41.
+  `relay/test_relay.py` passed 13/13. shellcheck, ruff, black, mypy and
+  pyright are clean, and the relay builds with `-D warnings`.
+- **Deploy.** The dogfood relay binary (`/workspace/untracked/bin/hooks-relay`)
+  must be rebuilt or redeployed after merge for this to take effect.
+
 ## For the reviewer
 
 - **N68** (owner decision) is unchanged. N67 edited `emit_hook_error`, the
   function that holds the NOT_INSTALLED branch. That branch still returns
   before the carve-out check and still fails open.
-- **New niggle N126**: the relay's PreToolUse deny has no recovery
-  carve-out. With a daemon that accepts but never answers, the relay denies
-  `bin/hooks-daemon restart` itself, even though its own deny text says to
-  run it. The relay is live in the dogfood config. Candidate remedies are
-  in the entry. I chose N126 because 111-118, 120, 122 and 123 are already
-  taken on other branches. Renumber it if that clashes.
+- **N126** was found in this batch and is remedied above. Team-lead
+  confirmed the number.
 - **Check-to-run window (N67)**: the launcher is judged at PreToolUse time
   and run afterwards. While the daemon is down every other tool call is
   denied, so only a process that is already running could swap the file in

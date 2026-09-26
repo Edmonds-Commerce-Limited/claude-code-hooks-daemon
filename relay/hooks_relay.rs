@@ -23,14 +23,18 @@
 //!   downstream of a fail-open `{}` could ever apply it. The socket's
 //!   identity is read from WHICH socket path argv names it -- already this
 //!   file's documented mechanism for knowing which request kind it is
-//!   relaying -- not a new dependency on hook semantics.
+//!   relaying -- not a new dependency on hook semantics. Before that deny,
+//!   the request is handed whole to the `--fallback` forwarder
+//!   (`judge_via_fallback`, Plan 00466 N126) so `init.sh`'s one recovery
+//!   carve-out judges it; the relay itself still never parses the request.
 //! - **Connect FIRST, before touching stdin.** While stdin is unread, the
 //!   bash forwarder can still be exec'd as a complete substitute; the moment
 //!   one stdin byte is consumed that door closes, and every later failure
 //!   must fail OPEN (`{}` on stdout, exit 0) because Claude Code must always
 //!   receive valid JSON — mirroring the bash rung's `emit_hook_error`
 //!   contract. `{}` carries no policy: it is "no opinion", the same thing a
-//!   passthrough hook emits today.
+//!   passthrough hook emits today. The PreToolUse exception is above: its
+//!   request is kept as it is read, so it can be replayed whole.
 //! - **`ensure_daemon` never moves.** Daemon-down lands here as a connect
 //!   failure, which execs the bash forwarder with stdin intact — so
 //!   auto-start and cold-start behaviour stay exactly today's bash code path.
@@ -56,7 +60,7 @@ use std::io::{self, ErrorKind, Read, Write};
 use std::net::Shutdown;
 use std::os::unix::net::UnixStream;
 use std::os::unix::process::CommandExt;
-use std::process::{exit, Command};
+use std::process::{exit, Command, Stdio};
 use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
@@ -77,6 +81,11 @@ const EXIT_CONNECT_FAIL: i32 = 10;
 const EXIT_TIMEOUT: i32 = 11;
 const EXIT_IO: i32 = 12;
 const EXIT_USAGE: i32 = 13;
+
+/// Names a failed PreToolUse exchange to the forwarder `judge_via_fallback`
+/// runs; `init.sh` reads it at source time. Twin of init.sh's
+/// `HOOKS_DAEMON_RELAY_FAILED`.
+const RELAY_FAILURE_ENV: &str = "HOOKS_DAEMON_RELAY_FAILED";
 
 struct Args {
     socket_path: String,
@@ -215,13 +224,98 @@ fn fail_body(args: &Args, detail: &str) -> String {
     }
 }
 
+/// The request bytes read from stdin so far, and whether stdin reached EOF.
+/// Kept so a failed PreToolUse exchange can be handed over whole.
+struct Request {
+    bytes: Vec<u8>,
+    complete: bool,
+}
+
+/// Plan 00466 N126: hand a failed PreToolUse exchange to the bash forwarder.
+///
+/// A wedged daemon must not deny its own restart, and whether a call is that
+/// restart is a judgement this file must not make: `init.sh` holds the one
+/// recovery carve-out, which resolves the launcher the command would run, and
+/// a second copy here would drift from it. So the forwarder is run with the
+/// whole request replayed on its stdin and `RELAY_FAILURE_ENV` naming the
+/// failure; its transport then skips the daemon and denies through that
+/// carve-out. Returns only when the hand-off itself failed -- stdin could not
+/// be completed, the forwarder could not run, exited non-zero or wrote
+/// nothing -- and the caller then writes its own deny.
+fn judge_via_fallback(script: &str, failure: &str, request: &mut Request) {
+    if !request.complete {
+        if let Err(err) = io::stdin().lock().read_to_end(&mut request.bytes) {
+            eprintln!("hooks-relay: judge: stdin read: {err}");
+            return;
+        }
+        request.complete = true;
+    }
+    let spawned = Command::new("/bin/bash")
+        .arg(script)
+        .arg("--no-relay")
+        .env(RELAY_FAILURE_ENV, failure)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn();
+    let mut child = match spawned {
+        Ok(child) => child,
+        Err(err) => {
+            eprintln!("hooks-relay: judge: running {script} failed: {err}");
+            return;
+        }
+    };
+    let Some(mut child_stdin) = child.stdin.take() else {
+        eprintln!("hooks-relay: judge: {script} has no stdin pipe");
+        return;
+    };
+    let payload = std::mem::take(&mut request.bytes);
+    // Written on its own thread: the forwarder may answer before it has read
+    // everything, and a pipe that fills would otherwise deadlock the wait.
+    let writer = thread::spawn(move || child_stdin.write_all(&payload));
+    let output = child.wait_with_output();
+    match writer.join() {
+        Ok(Ok(())) => {}
+        Ok(Err(err)) => {
+            eprintln!("hooks-relay: judge: replaying the request to {script} failed: {err}");
+            return;
+        }
+        Err(_) => {
+            eprintln!("hooks-relay: judge: the request writer thread panicked");
+            return;
+        }
+    }
+    let output = match output {
+        Ok(output) => output,
+        Err(err) => {
+            eprintln!("hooks-relay: judge: waiting on {script} failed: {err}");
+            return;
+        }
+    };
+    if !output.status.success() || output.stdout.is_empty() {
+        eprintln!(
+            "hooks-relay: judge: {script} gave no answer ({}, {} bytes)",
+            output.status,
+            output.stdout.len()
+        );
+        return;
+    }
+    let mut stdout = io::stdout();
+    if let Err(err) = stdout.write_all(&output.stdout).and_then(|()| stdout.flush()) {
+        eprintln!("hooks-relay: judge: stdout write failed: {err}");
+    }
+    exit(0);
+}
+
 /// Mid-exchange failure: stdin (partially) consumed, so exec'ing the fallback
-/// would replay a truncated payload — forbidden. Fails OPEN (`{}`) for every
-/// event except PreToolUse, which fails CLOSED (a genuine deny) instead —
-/// see `fail_body`. Either way stdout carries valid JSON and exit is 0, so
-/// Claude Code always receives something it can parse. Diagnostic
-/// invocations (`--no-fallback`) get the distinct class exit code instead.
-fn mid_exchange_fail(args: &Args, class: FailClass, detail: &str) -> ! {
+/// in place would replay a truncated payload — forbidden. Fails OPEN (`{}`)
+/// for every event except PreToolUse. A PreToolUse failure is first handed,
+/// with the whole request, to `judge_via_fallback` when a `--fallback` is
+/// given; if that cannot answer, or there is no fallback, it fails CLOSED (a
+/// genuine deny) — see `fail_body`. Either way stdout carries valid JSON and
+/// exit is 0, so Claude Code always receives something it can parse.
+/// Diagnostic invocations (`--no-fallback`) get the distinct class exit code
+/// instead.
+fn mid_exchange_fail(args: &Args, class: FailClass, detail: &str, request: &mut Request) -> ! {
     let (label, code) = match class {
         FailClass::Timeout => ("timeout", EXIT_TIMEOUT),
         FailClass::Io => ("io", EXIT_IO),
@@ -230,6 +324,11 @@ fn mid_exchange_fail(args: &Args, class: FailClass, detail: &str) -> ! {
     eprintln!("hooks-relay: {label}: {detail}");
     if args.no_fallback {
         exit(code);
+    }
+    if is_pre_tool_use_socket(&args.socket_path) {
+        if let Some(script) = &args.fallback {
+            judge_via_fallback(script, &format!("{label}: {detail}"), request);
+        }
     }
     let mut stdout = io::stdout();
     let body = fail_body(args, detail);
@@ -280,9 +379,15 @@ fn connect_with_deadline(args: &Args, deadline: Instant) -> UnixStream {
 
 /// Arm the socket's read or write timeout with the remaining overall budget.
 /// A zero/negative remainder is itself a timeout (std rejects Some(0) too).
-fn arm_timeout(args: &Args, stream: &UnixStream, deadline: Instant, for_read: bool) {
+fn arm_timeout(
+    args: &Args,
+    stream: &UnixStream,
+    deadline: Instant,
+    for_read: bool,
+    request: &mut Request,
+) {
     let Some(left) = remaining(deadline) else {
-        mid_exchange_fail(args, FailClass::Timeout, "overall budget exhausted");
+        mid_exchange_fail(args, FailClass::Timeout, "overall budget exhausted", request);
     };
     let armed = if for_read {
         stream.set_read_timeout(Some(left))
@@ -290,7 +395,12 @@ fn arm_timeout(args: &Args, stream: &UnixStream, deadline: Instant, for_read: bo
         stream.set_write_timeout(Some(left))
     };
     if let Err(err) = armed {
-        mid_exchange_fail(args, FailClass::Io, &format!("arming socket timeout: {err}"));
+        mid_exchange_fail(
+            args,
+            FailClass::Io,
+            &format!("arming socket timeout: {err}"),
+            request,
+        );
     }
 }
 
@@ -324,25 +434,49 @@ fn main() {
     // 2. Pump stdin → socket. Local stdin reads are not against the socket
     //    budget (the pipe is already written by Claude Code); socket writes
     //    are re-armed with the shrinking remainder before every chunk.
+    //    Every byte is also kept in `request` (see `judge_via_fallback`).
+    //    stdin is read through the unlocked handle, one lock per call, so
+    //    that hand-off can read the rest of it without deadlocking.
     let mut buf = vec![0u8; PUMP_BUF_BYTES];
-    let mut stdin = io::stdin().lock();
+    let mut request = Request {
+        bytes: Vec::new(),
+        complete: false,
+    };
+    let mut stdin = io::stdin();
     loop {
         let n = match stdin.read(&mut buf) {
             Ok(n) => n,
-            Err(err) => mid_exchange_fail(&args, FailClass::Io, &format!("stdin read: {err}")),
+            Err(err) => mid_exchange_fail(
+                &args,
+                FailClass::Io,
+                &format!("stdin read: {err}"),
+                &mut request,
+            ),
         };
         if n == 0 {
+            request.complete = true;
             break; // stdin EOF: full request payload sent
         }
-        arm_timeout(&args, &stream, deadline, false);
+        request.bytes.extend_from_slice(&buf[..n]);
+        arm_timeout(&args, &stream, deadline, false, &mut request);
         if let Err(err) = stream.write_all(&buf[..n]) {
-            mid_exchange_fail(&args, classify(&err), &format!("socket write: {}", describe(&err)));
+            mid_exchange_fail(
+                &args,
+                classify(&err),
+                &format!("socket write: {}", describe(&err)),
+                &mut request,
+            );
         }
     }
 
     // Half-close the write side: EOF is the request framing (DESIGN §2).
     if let Err(err) = stream.shutdown(Shutdown::Write) {
-        mid_exchange_fail(&args, FailClass::Io, &format!("socket half-close: {err}"));
+        mid_exchange_fail(
+            &args,
+            FailClass::Io,
+            &format!("socket half-close: {err}"),
+            &mut request,
+        );
     }
 
     // 3. Read the response to EOF — BUFFERED, not streamed to stdout. If any
@@ -350,12 +484,15 @@ fn main() {
     //    as the ONLY bytes on stdout; bytes already streamed would corrupt it.
     let mut response: Vec<u8> = Vec::new();
     loop {
-        arm_timeout(&args, &stream, deadline, true);
+        arm_timeout(&args, &stream, deadline, true, &mut request);
         let n = match stream.read(&mut buf) {
             Ok(n) => n,
-            Err(err) => {
-                mid_exchange_fail(&args, classify(&err), &format!("socket read: {}", describe(&err)))
-            }
+            Err(err) => mid_exchange_fail(
+                &args,
+                classify(&err),
+                &format!("socket read: {}", describe(&err)),
+                &mut request,
+            ),
         };
         if n == 0 {
             break; // daemon closed: response complete
@@ -365,6 +502,7 @@ fn main() {
                 &args,
                 FailClass::Oversize,
                 &format!("response exceeds {RESPONSE_CAP_BYTES} bytes"),
+                &mut request,
             );
         }
         response.extend_from_slice(&buf[..n]);
@@ -381,11 +519,14 @@ fn main() {
             &args,
             FailClass::Io,
             "daemon closed the connection with an empty response",
+            &mut request,
         );
     }
     let mut stdout = io::stdout();
     if let Err(err) = stdout.write_all(&response).and_then(|()| stdout.flush()) {
-        mid_exchange_fail(&args, FailClass::Io, &format!("stdout write: {err}"));
+        // Nothing more can be delivered: stdout itself is broken.
+        eprintln!("hooks-relay: io: stdout write: {err}");
+        exit(if args.no_fallback { EXIT_IO } else { 0 });
     }
     exit(0);
 }

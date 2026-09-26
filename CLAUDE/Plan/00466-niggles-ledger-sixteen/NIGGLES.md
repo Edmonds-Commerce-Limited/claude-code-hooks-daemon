@@ -3,7 +3,7 @@
 Newest first. Each entry says how it was found, why it happens, and the
 candidate remedies.
 
-### N126 — The relay's PreToolUse deny has no recovery carve-out, so a wedged daemon denies its own restart
+### N126 — ✅ Remedied — The relay's PreToolUse deny has no recovery carve-out, so a wedged daemon denies its own restart
 
 **Found by the lifecycle batch while fixing N67.** `init.sh` exempts the exact
 recovery command from every fail-closed PreToolUse deny, so a wedged daemon
@@ -27,6 +27,23 @@ works, but an unattended agent loops on the deny.
 
 Either way, the relay must not grow a second copy of the carve-out, because
 N67 showed that two copies drift.
+
+**Remedied (lifecycle batch, first remedy):** the relay keeps every request
+byte it reads. On a PreToolUse mid-exchange failure with a `--fallback`, it
+finishes reading stdin and runs the forwarder (`--no-relay`) with the whole
+request replayed on its stdin and `HOOKS_DAEMON_RELAY_FAILED` naming the
+failure (`judge_via_fallback`). `init.sh` captures and unsets that variable at
+source time. `send_request_stdin` then skips the nc rung and the socket and
+fails `relay_exchange_failed` ("reached"), so `emit_error_json` denies through
+the one N67 carve-out without waiting out the wedge again. The relay never
+parses the request. The hand-off fails closed: if stdin cannot be completed,
+or the forwarder cannot run, exits non-zero or writes nothing, the relay
+writes its own deny. Setting the variable by hand can only deny. RED against
+`HEAD` (its `init.sh` and a relay built from its source): 7 tests across
+`TestRelayMidExchangeFailureIsJudgedByTheOneCarveOut` and
+`TestARelayHandOffIsJudgedWithoutAskingTheDaemonAgain`. The two
+fail-closed hand-off tests fail when a scratch relay's answer check is
+mutated away. Release note 153.
 
 ### N109 — ✅ Remedied — the pending release-notes holding area mis-sorts past 99 callouts
 

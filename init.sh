@@ -75,6 +75,14 @@ _HOOKS_DAEMON_BOOTSTRAP_DETAIL=""
 _HOOKS_DAEMON_BOOTSTRAP_PID=""
 _HOOKS_DAEMON_BOOTSTRAP_ELAPSED=""
 
+# Set by hooks-relay (relay/hooks_relay.rs, judge_via_fallback; Plan 00466
+# N126) when it hands this forwarder a PreToolUse call whose exchange with
+# the daemon failed: send_request_stdin then denies through the recovery
+# carve-out without asking the daemon again. Captured and unset at once, so
+# a daemon this hook starts never inherits it. Setting it only ever denies.
+_HOOKS_DAEMON_RELAY_FAILED="${HOOKS_DAEMON_RELAY_FAILED:-}"
+unset HOOKS_DAEMON_RELAY_FAILED
+
 #
 # The daemon-recovery carve-out (Plan 00466 N24 review 3 MA4, N67), shared
 # verbatim by both python3 checks that apply it -- emit_hook_error's, via
@@ -1626,7 +1634,9 @@ send_request_stdin() {
     # (design §5: an empty capture means no verdict was ever delivered, so
     # replay is always safe).
     local _nc_replay_payload=""
-    if [[ -z "$response_mode" && -n "$event_sock_name" ]] \
+    # A relay hand-off (Plan 00466 N126) already knows the daemon did not
+    # answer, so it goes straight to the python3 rung's judged deny.
+    if [[ -z "$_HOOKS_DAEMON_RELAY_FAILED" && -z "$response_mode" && -n "$event_sock_name" ]] \
         && [[ "${HOOKS_DAEMON_NC_UNIX_CAPABLE:-0}" == "1" ]] \
         && command -v nc > /dev/null; then
         local _nc_events_dir="${HOOKS_DAEMON_EVENTS_DIR:-${events_dir_override:-$_untracked_dir/events${_hostname_suffix}}}"
@@ -1753,6 +1763,10 @@ _RESTART_ADVICE = [
 $_HOOKS_DAEMON_RECOVERY_PY
 
 project_path = sys.argv[3] if len(sys.argv) > 3 else ''
+
+# Plan 00466 N126: what hooks-relay reported when it handed this call over
+# after its own exchange with the daemon failed; empty otherwise.
+relay_failure = sys.argv[4] if len(sys.argv) > 4 else ''
 
 def _pretooluse_response_looks_valid(text):
     '''True when text parses as one of PreToolUse's two legitimate response
@@ -2112,6 +2126,14 @@ request = json.dumps({'event': event_name, 'hook_input': hook_input}) + '\n'
 
 socket_path = '$SOCKET_PATH'
 
+if relay_failure and event_name == 'PreToolUse' and not response_mode:
+    # The relay connected, sent this call and got no verdict; asking the
+    # daemon again would only wait out the same wedge. Deny through
+    # emit_error_json, whose one recovery carve-out judges this call.
+    daemon_reached = True
+    fail('relay_exchange_failed',
+        f'hooks-relay reached the daemon but got no verdict ({relay_failure})')
+
 try:
     sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     sock.settimeout(SOCKET_TIMEOUT_SECONDS)  # budget for connect+send+recv
@@ -2192,7 +2214,7 @@ except (BrokenPipeError, ConnectionResetError) as e:
 
 except Exception as e:
     fail(type(e).__name__, f'{type(e).__name__}: {e}')
-" "$event_name" "$response_mode" "${PROJECT_PATH:-}" <&3
+" "$event_name" "$response_mode" "${PROJECT_PATH:-}" "$_HOOKS_DAEMON_RELAY_FAILED" <&3
     local _rv=$?
     exec 3<&-
     if [[ -n "$_nc_replay_payload" ]]; then

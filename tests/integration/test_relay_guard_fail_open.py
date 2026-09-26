@@ -264,38 +264,61 @@ def test_relay_connect_fail_execs_fallback_with_stdin_intact(tmp_path: Path) -> 
     assert '{"payload":"data"}' in stdout
 
 
-@pytest.mark.skipif(not _RELAY_BINARY.exists(), reason="no built relay binary on this machine")
-def test_relay_pretooluse_timeout_deny_names_the_timeout() -> None:
-    """Plan 00466 N69: a daemon that accepts and never answers runs the
-    relay's budget out, and the deny says so in words. An expired socket
-    timeout surfaces as EAGAIN, which Rust prints as "Resource temporarily
-    unavailable (os error 11)" -- a label that names no cause."""
+@pytest.fixture
+def wedged_pretooluse_socket() -> Iterator[Path]:
+    """A ``pre-tool-use.sock`` whose daemon accepts and never answers: the
+    B2 GIL-hang shape, which runs the relay's budget out mid-exchange."""
     short_dir = Path(tempfile.mkdtemp(prefix="hd-"))
     sock = short_dir / "pre-tool-use.sock"
     server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     server.bind(str(sock))
-    server.listen(1)
+    server.listen(8)
+    # A short accept timeout lets the loop see `stop` promptly: closing a
+    # socket from another thread does not wake a blocked accept() on Linux.
+    server.settimeout(0.2)
     held: list[socket.socket] = []
+    stop = threading.Event()
 
     def _accept_and_hold() -> None:
-        conn, _ = server.accept()
-        held.append(conn)
+        while not stop.is_set():
+            try:
+                conn, _ = server.accept()
+            except TimeoutError:
+                continue
+            held.append(conn)
 
     acceptor = threading.Thread(target=_accept_and_hold, daemon=True)
     acceptor.start()
     try:
-        result = subprocess.run(
-            [str(_RELAY_BINARY), str(sock), "--timeout-ms", "500"],
-            input=b'{"k":1}',
-            capture_output=True,
-            timeout=_TIMEOUT_SECONDS,
-        )
+        yield sock
     finally:
+        stop.set()
         acceptor.join(_TIMEOUT_SECONDS)
+        server.close()
         for conn in held:
             conn.close()
-        server.close()
         shutil.rmtree(short_dir)
+
+
+def _run_relay(
+    sock: Path, payload: bytes, *extra: str, env: dict[str, str] | None = None
+) -> subprocess.CompletedProcess[bytes]:
+    return subprocess.run(
+        [str(_RELAY_BINARY), str(sock), "--timeout-ms", "500", *extra],
+        input=payload,
+        capture_output=True,
+        env=env,
+        timeout=_TIMEOUT_SECONDS,
+    )
+
+
+@pytest.mark.skipif(not _RELAY_BINARY.exists(), reason="no built relay binary on this machine")
+def test_relay_pretooluse_timeout_deny_names_the_timeout(wedged_pretooluse_socket: Path) -> None:
+    """Plan 00466 N69: a daemon that accepts and never answers runs the
+    relay's budget out, and the deny says so in words. An expired socket
+    timeout surfaces as EAGAIN, which Rust prints as "Resource temporarily
+    unavailable (os error 11)" -- a label that names no cause."""
+    result = _run_relay(wedged_pretooluse_socket, b'{"k":1}')
 
     assert result.returncode == 0, result.stderr.decode()
     hso = json.loads(result.stdout)["hookSpecificOutput"]
@@ -303,6 +326,138 @@ def test_relay_pretooluse_timeout_deny_names_the_timeout() -> None:
     reason = hso["permissionDecisionReason"]
     assert "timed out" in reason, reason
     assert "os error" not in reason, reason
+
+
+def _judging_project(tmp_path: Path) -> tuple[Path, dict[str, str]]:
+    """A project whose forwarder the relay can hand a failed exchange to.
+
+    Returns the forwarder and an env under which its ``ensure_daemon``
+    passes (a live pid file), so the only judge left is ``init.sh``'s own
+    recovery carve-out. The project has its own ``bin/hooks-daemon``.
+    """
+    untracked_dir = tmp_path / "untracked"
+    forwarder = _write_generated_forwarder(
+        tmp_path, "pre-tool-use", "PreToolUse", TransportConfig(), untracked_dir
+    )
+    launcher = tmp_path / "bin" / "hooks-daemon"
+    launcher.parent.mkdir()
+    launcher.write_text("#!/bin/bash\n")
+    pid_path = tmp_path / "daemon.pid"
+    pid_path.write_text(f"{os.getpid()}\n")
+    return forwarder, _base_env(tmp_path / "legacy.sock", pid_path)
+
+
+def _bash_call(command: str, cwd: Path) -> bytes:
+    return json.dumps(
+        {"tool_name": "Bash", "tool_input": {"command": command}, "cwd": str(cwd), **_MAIN_PROBE}
+    ).encode()
+
+
+def _decision(result: subprocess.CompletedProcess[bytes]) -> str | None:
+    assert result.returncode == 0, result.stderr.decode()
+    hso = json.loads(result.stdout)["hookSpecificOutput"]
+    decision: str | None = hso.get("permissionDecision")
+    return decision
+
+
+@pytest.mark.skipif(not _RELAY_BINARY.exists(), reason="no built relay binary on this machine")
+class TestRelayMidExchangeFailureIsJudgedByTheOneCarveOut:
+    """Plan 00466 N126: a wedged daemon must not deny its own restart.
+
+    On the PreToolUse socket the relay cannot hand a failed exchange to the
+    daemon, and it must not judge the payload itself (a second copy of the
+    carve-out would drift, as N67's two copies did). It hands the whole
+    request to the bash forwarder, whose ``init.sh`` applies the same judged
+    carve-out as every other transport failure.
+    """
+
+    def test_the_projects_own_restart_is_not_denied(
+        self, tmp_path: Path, wedged_pretooluse_socket: Path
+    ) -> None:
+        forwarder, env = _judging_project(tmp_path)
+        result = _run_relay(
+            wedged_pretooluse_socket,
+            _bash_call("bin/hooks-daemon restart", tmp_path),
+            "--fallback",
+            str(forwarder),
+            env=env,
+        )
+        assert _decision(result) is None
+
+    def test_a_restart_that_runs_a_planted_launcher_is_denied(
+        self, tmp_path: Path, wedged_pretooluse_socket: Path
+    ) -> None:
+        forwarder, env = _judging_project(tmp_path)
+        elsewhere = tmp_path / "elsewhere"
+        (elsewhere / "bin").mkdir(parents=True)
+        (elsewhere / "bin" / "hooks-daemon").write_text("#!/bin/bash\necho planted\n")
+        result = _run_relay(
+            wedged_pretooluse_socket,
+            _bash_call("bin/hooks-daemon restart", elsewhere),
+            "--fallback",
+            str(forwarder),
+            env=env,
+        )
+        assert _decision(result) == "deny"
+
+    def test_any_other_call_is_denied_and_the_reason_names_the_relay_failure(
+        self, tmp_path: Path, wedged_pretooluse_socket: Path
+    ) -> None:
+        forwarder, env = _judging_project(tmp_path)
+        result = _run_relay(
+            wedged_pretooluse_socket,
+            _bash_call("git reset --hard", tmp_path),
+            "--fallback",
+            str(forwarder),
+            env=env,
+        )
+        assert _decision(result) == "deny"
+        reason = json.loads(result.stdout)["hookSpecificOutput"]["permissionDecisionReason"]
+        assert "relay_exchange_failed" in reason, reason
+        assert "Hooks daemon reached" in reason, reason
+
+    def test_a_fallback_that_answers_nothing_leaves_the_relays_own_deny(
+        self, tmp_path: Path, wedged_pretooluse_socket: Path
+    ) -> None:
+        """The hand-off must fail closed: silence from the forwarder is not
+        an answer, so the relay writes its own deny."""
+        silent = tmp_path / "silent.sh"
+        silent.write_text("#!/bin/bash\ncat > /dev/null\nexit 0\n")
+        silent.chmod(0o755)
+        result = _run_relay(
+            wedged_pretooluse_socket,
+            _bash_call("bin/hooks-daemon restart", tmp_path),
+            "--fallback",
+            str(silent),
+        )
+        assert _decision(result) == "deny"
+
+    def test_a_fallback_that_fails_leaves_the_relays_own_deny(
+        self, tmp_path: Path, wedged_pretooluse_socket: Path
+    ) -> None:
+        failing = tmp_path / "failing.sh"
+        failing.write_text('#!/bin/bash\ncat > /dev/null\necho "{}"\nexit 3\n')
+        failing.chmod(0o755)
+        result = _run_relay(
+            wedged_pretooluse_socket,
+            _bash_call("bin/hooks-daemon restart", tmp_path),
+            "--fallback",
+            str(failing),
+        )
+        assert _decision(result) == "deny"
+
+    def test_the_fallback_receives_the_whole_request(
+        self, tmp_path: Path, wedged_pretooluse_socket: Path
+    ) -> None:
+        """The request is replayed byte for byte, however large."""
+        recorded = tmp_path / "recorded.bin"
+        recorder = tmp_path / "recorder.sh"
+        recorder.write_text(f'#!/bin/bash\ncat > "{recorded}"\necho "{{}}"\n')
+        recorder.chmod(0o755)
+        payload = _bash_call("echo " + "x" * (1024 * 1024), tmp_path)
+        result = _run_relay(wedged_pretooluse_socket, payload, "--fallback", str(recorder))
+        assert result.returncode == 0, result.stderr.decode()
+        assert recorded.read_bytes() == payload
 
 
 # ---------------------------------------------------------------------------

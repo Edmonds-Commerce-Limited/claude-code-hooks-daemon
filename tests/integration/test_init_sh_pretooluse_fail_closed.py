@@ -222,6 +222,7 @@ def _send(
     hook_input: dict[str, Any],
     *,
     socket_timeout: str = _FAST_TIMEOUT,
+    relay_failure: str | None = None,
 ) -> dict[str, Any]:
     env = {
         k: v for k, v in os.environ.items() if not k.startswith(("CLAUDE_HOOKS_", "HOOKS_DAEMON_"))
@@ -229,6 +230,8 @@ def _send(
     env["HOSTNAME"] = "pretooluse-fail-closed-fixture"
     env["CLAUDE_HOOKS_SOCKET_PATH"] = str(socket_path)
     env["CLAUDE_HOOKS_SOCKET_TIMEOUT"] = socket_timeout
+    if relay_failure is not None:
+        env["HOOKS_DAEMON_RELAY_FAILED"] = relay_failure
     script = (
         "source .claude/init.sh; "
         f"printf '%s' '{json.dumps(hook_input)}' | send_request_stdin '{event_name}'"
@@ -759,3 +762,86 @@ class TestDenyReasonNamesWhatHappened:
     ) -> None:
         reason = _reason(_send(project, undecodable_socket, "PreToolUse", _BASH_TOOL_INPUT))
         assert reason.startswith("Hooks daemon reached"), reason
+
+
+_RELAY_FAILURE = "timeout: socket read: timed out"
+
+
+class TestARelayHandOffIsJudgedWithoutAskingTheDaemonAgain:
+    """Plan 00466 N126: hooks-relay hands a failed PreToolUse exchange to the
+    forwarder with ``HOOKS_DAEMON_RELAY_FAILED`` set. The transport must not
+    ask the wedged daemon again (``valid_empty_socket`` would ALLOW if it
+    did), and must deny through the same recovery carve-out."""
+
+    def test_an_ordinary_call_is_denied_without_contacting_the_daemon(
+        self, project: Path, valid_empty_socket: Path
+    ) -> None:
+        response = _send(
+            project,
+            valid_empty_socket,
+            "PreToolUse",
+            _BASH_TOOL_INPUT,
+            relay_failure=_RELAY_FAILURE,
+        )
+        reason = _reason(response)
+        assert reason.startswith("Hooks daemon reached"), reason
+        assert "relay_exchange_failed" in reason
+        assert _RELAY_FAILURE in response["hookSpecificOutput"]["additionalContext"]
+
+    def test_the_projects_own_restart_is_exempt(
+        self, project: Path, valid_empty_socket: Path
+    ) -> None:
+        response = _send(
+            project,
+            valid_empty_socket,
+            "PreToolUse",
+            _recovery_input(project),
+            relay_failure=_RELAY_FAILURE,
+        )
+        hso = response["hookSpecificOutput"]
+        assert "permissionDecision" not in hso
+        assert "relay_exchange_failed" in hso["additionalContext"]
+
+    def test_a_planted_launcher_is_denied(
+        self, project: Path, tmp_path: Path, valid_empty_socket: Path
+    ) -> None:
+        elsewhere = tmp_path / "elsewhere"
+        _plant_launcher(elsewhere)
+        response = _send(
+            project,
+            valid_empty_socket,
+            "PreToolUse",
+            _recovery_input(elsewhere),
+            relay_failure=_RELAY_FAILURE,
+        )
+        assert _denied(response)
+
+    def test_another_event_ignores_it(self, project: Path, valid_empty_socket: Path) -> None:
+        """The relay hands over PreToolUse only; any other event still asks
+        the daemon."""
+        response = _send(
+            project,
+            valid_empty_socket,
+            "PostToolUse",
+            _BASH_TOOL_INPUT,
+            relay_failure=_RELAY_FAILURE,
+        )
+        assert response == {}
+
+    def test_it_is_not_inherited_past_init_sh(self, project: Path) -> None:
+        """Captured and unset at source time, so a daemon this hook starts
+        never runs with it."""
+        env = {k: v for k, v in os.environ.items() if not k.startswith("HOOKS_DAEMON_")}
+        env["HOOKS_DAEMON_RELAY_FAILED"] = _RELAY_FAILURE
+        script = 'source .claude/init.sh; printf "%s" "${HOOKS_DAEMON_RELAY_FAILED-unset}"'
+        result = subprocess.run(
+            [BASH, "-c", script],
+            cwd=project,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=Timeout.REQUEST_LONG,
+            check=False,
+        )
+        assert result.returncode == 0, result.stderr
+        assert result.stdout == "unset"
