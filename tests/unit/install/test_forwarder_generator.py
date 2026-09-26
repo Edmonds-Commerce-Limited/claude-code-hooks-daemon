@@ -18,6 +18,7 @@ from claude_code_hooks_daemon.config.models import TransportConfig
 from claude_code_hooks_daemon.constants import Timeout
 from claude_code_hooks_daemon.install.forwarder_generator import (
     INIT_SH_ANCHOR,
+    RELAY_DAEMON_ROOT_ENV,
     build_relay_guard_block,
     generate_forwarder_content,
     load_transport_config,
@@ -449,6 +450,21 @@ def test_guard_block_execs_with_fallback_and_stdin_intact() -> None:
         "pre-tool-use", TransportConfig(relay_enabled=True), Path("/p/u"), Path("/p")
     )
     assert 'exec "$_rl_bin" "$_rl_sock" --fallback "${BASH_SOURCE[0]}"' in block
+
+
+def test_guard_block_hands_the_relay_its_daemon_root() -> None:
+    """Plan 00466 round 4 (P3-2): the relay names this install's launcher by
+    the rule init.sh's carve-out applies, which needs the daemon root: the
+    untracked dir's parent in both install modes."""
+    block = build_relay_guard_block(
+        "pre-tool-use", TransportConfig(relay_enabled=True), Path("/p/u"), Path("/p")
+    )
+    assert f'        {RELAY_DAEMON_ROOT_ENV}="/p" \\\n            exec "$_rl_bin"' in block
+
+
+def test_the_daemon_root_variable_is_the_relays() -> None:
+    relay_source = (Path(__file__).resolve().parents[3] / "relay" / "hooks_relay.rs").read_text()
+    assert f'const DAEMON_ROOT_ENV: &str = "{RELAY_DAEMON_ROOT_ENV}";' in relay_source
 
 
 def test_guard_block_is_pure_builtin_no_subshell_spawn() -> None:

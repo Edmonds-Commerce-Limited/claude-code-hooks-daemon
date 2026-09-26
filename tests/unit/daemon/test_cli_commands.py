@@ -35,6 +35,8 @@ from claude_code_hooks_daemon.daemon.cli import (
     cmd_status,
     cmd_stop,
     get_project_path,
+    pid_is_this_projects_daemon,
+    remove_stale_pid_file,
     send_daemon_request,
 )
 from claude_code_hooks_daemon.daemon.process_verification import RootProof
@@ -77,6 +79,14 @@ _UNREAL_PID = 2**22 + 7
 
 #: The module whose names ``cmd_stop`` calls, for ``patch``.
 _CLI = "claude_code_hooks_daemon.daemon.cli"
+
+
+@pytest.fixture
+def short_dir() -> Iterator[Path]:
+    """AF_UNIX paths are capped near 108 bytes; ``tmp_path`` nests deeper."""
+    directory = Path(tempfile.mkdtemp(prefix="hd-stop-"))
+    yield directory
+    shutil.rmtree(directory)
 
 
 def _close_all_but(pinned_fd: int) -> Callable[[int], None]:
@@ -1004,13 +1014,6 @@ class TestCmdStopCleansUpOnlyWhatItStillOwns:
     only while it still holds the stopped pid, and the socket only when a
     probe finds nothing listening on it."""
 
-    @pytest.fixture
-    def short_dir(self) -> Iterator[Path]:
-        """AF_UNIX paths are capped near 108 bytes; ``tmp_path`` nests deeper."""
-        directory = Path(tempfile.mkdtemp(prefix="hd-stop-"))
-        yield directory
-        shutil.rmtree(directory)
-
     def _stop(self, tmp_path: Path, pid_path: Path, socket_path: Path, on_exit: Any) -> int:
         """Run ``cmd_stop`` against ``_UNREAL_PID``; ``on_exit`` runs when its
         exit is observed, which is where a successor's start lands."""
@@ -1141,6 +1144,144 @@ class TestCmdStopCleansUpOnlyWhatItStillOwns:
             os.close(holder)
         assert pid_path.exists()
         assert socket_path.exists()
+
+    def test_a_start_lock_that_cannot_be_opened_keeps_both_files(
+        self, tmp_path: Path, short_dir: Path
+    ) -> None:
+        """Plan 00466 round 4 (Sh-C): a symlink planted at the lock path is
+        refused, and without the lock the stop removes neither file."""
+        pid_path, socket_path = self._stale_files(short_dir)
+        target = short_dir / "planted-target"
+        Path(str(socket_path) + ".start.lock").symlink_to(target)
+        assert self._stop(tmp_path, pid_path, socket_path, lambda: None) == 0
+        assert pid_path.exists()
+        assert socket_path.exists()
+        assert not target.exists()
+
+
+class TestTheStartLockRefusesWhatIsNotItsOwnFile:
+    """Plan 00466 round 4 (Sh-C): ``O_CREAT`` through a link planted at the
+    lock path created or opened the file it named."""
+
+    def test_a_symlink_is_refused_and_its_target_never_created(self, short_dir: Path) -> None:
+        socket_path = short_dir / "daemon.sock"
+        target = short_dir / "target"
+        server.start_lock_path(socket_path).symlink_to(target)
+        with (
+            pytest.raises(OSError) as raised,
+            server.hold_start_lock(socket_path, Timeout.FILE_LOCK),
+        ):
+            pytest.fail("the lock was taken through a symlink")
+        assert raised.value.errno == errno.ELOOP
+        assert not target.exists()
+
+    def test_a_lock_that_is_not_a_regular_file_is_refused(self, short_dir: Path) -> None:
+        socket_path = short_dir / "daemon.sock"
+        os.mkfifo(server.start_lock_path(socket_path))
+        with (
+            pytest.raises(OSError) as raised,
+            server.hold_start_lock(socket_path, Timeout.FILE_LOCK),
+        ):
+            pytest.fail("the lock was taken on a FIFO")
+        assert raised.value.errno == errno.EINVAL
+
+    def test_a_regular_lock_file_is_taken(self, short_dir: Path) -> None:
+        socket_path = short_dir / "daemon.sock"
+        with server.hold_start_lock(socket_path, Timeout.FILE_LOCK):
+            assert server.start_lock_path(socket_path).is_file()
+
+
+class TestRemoveStalePidFile:
+    """Plan 00466 round 4 (Sh-A, Sh-B): ``init.sh`` removes a stale or
+    corrupt PID file through this, under the start lock a daemon start
+    writes its pid under."""
+
+    @pytest.mark.parametrize("text", [str(_UNREAL_PID), "0", "-1", "1", "", "junk"])
+    def test_a_file_naming_no_live_process_is_removed(self, short_dir: Path, text: str) -> None:
+        pid_path = short_dir / "daemon.pid"
+        pid_path.write_text(text)
+        assert remove_stale_pid_file(pid_path, short_dir / "daemon.sock", text)
+        assert not pid_path.exists()
+
+    def test_a_file_that_changed_since_it_was_read_stays(self, short_dir: Path) -> None:
+        pid_path = short_dir / "daemon.pid"
+        pid_path.write_text(str(os.getpid()))
+        assert not remove_stale_pid_file(pid_path, short_dir / "daemon.sock", str(_UNREAL_PID))
+        assert pid_path.read_text() == str(os.getpid())
+
+    def test_a_file_whose_pid_is_alive_stays(self, short_dir: Path) -> None:
+        pid_path = short_dir / "daemon.pid"
+        pid_path.write_text(str(os.getpid()))
+        assert not remove_stale_pid_file(pid_path, short_dir / "daemon.sock", str(os.getpid()))
+        assert pid_path.exists()
+
+    def test_it_holds_the_start_lock_while_it_removes(self, short_dir: Path) -> None:
+        pid_path = short_dir / "daemon.pid"
+        pid_path.write_text(str(_UNREAL_PID))
+        socket_path = short_dir / "daemon.sock"
+        held: list[bool] = []
+        real_unlink = Path.unlink
+
+        def unlink(path: Path, missing_ok: bool = False) -> None:
+            fd = os.open(server.start_lock_path(socket_path), os.O_RDWR)
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                held.append(False)
+            except BlockingIOError:
+                held.append(True)
+            finally:
+                os.close(fd)
+            real_unlink(path, missing_ok=missing_ok)
+
+        with patch.object(Path, "unlink", unlink):
+            assert remove_stale_pid_file(pid_path, socket_path, str(_UNREAL_PID))
+        assert held == [True]
+
+    def test_a_held_lock_leaves_the_file(
+        self, short_dir: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        pid_path = short_dir / "daemon.pid"
+        pid_path.write_text(str(_UNREAL_PID))
+        socket_path = short_dir / "daemon.sock"
+        monkeypatch.setattr(Timeout, "FILE_LOCK", 0)
+        with server.hold_start_lock(socket_path, Timeout.FILE_LOCK):
+            assert not remove_stale_pid_file(pid_path, socket_path, str(_UNREAL_PID))
+        assert pid_path.exists()
+
+    def test_a_lock_that_cannot_be_opened_leaves_the_file(self, short_dir: Path) -> None:
+        pid_path = short_dir / "daemon.pid"
+        pid_path.write_text(str(_UNREAL_PID))
+        socket_path = short_dir / "daemon.sock"
+        server.start_lock_path(socket_path).symlink_to(short_dir / "target")
+        assert not remove_stale_pid_file(pid_path, socket_path, str(_UNREAL_PID))
+        assert pid_path.exists()
+
+
+class TestPidIsThisProjectsDaemon:
+    """Plan 00466 round 4 (N139-A): EPERM proves a process, not this daemon."""
+
+    def test_a_live_socket_proves_it(self, short_dir: Path) -> None:
+        socket_path = short_dir / "daemon.sock"
+        listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        listener.bind(str(socket_path))
+        listener.listen(1)
+        try:
+            assert pid_is_this_projects_daemon(_UNREAL_PID, socket_path, short_dir)
+        finally:
+            listener.close()
+
+    def test_a_command_line_serving_this_project_proves_it(self, short_dir: Path) -> None:
+        proof = RootProof(root=os.path.realpath(short_dir), refusal=None)
+        with patch(f"{_CLI}.daemon_process_project_root", return_value=proof):
+            assert pid_is_this_projects_daemon(_UNREAL_PID, short_dir / "none.sock", short_dir)
+
+    def test_another_projects_daemon_does_not(self, short_dir: Path, tmp_path: Path) -> None:
+        proof = RootProof(root=os.path.realpath(tmp_path), refusal=None)
+        with patch(f"{_CLI}.daemon_process_project_root", return_value=proof):
+            assert not pid_is_this_projects_daemon(_UNREAL_PID, short_dir / "none.sock", short_dir)
+
+    def test_an_unprovable_process_does_not(self, short_dir: Path) -> None:
+        assert not pid_is_this_projects_daemon(_UNREAL_PID, short_dir / "none.sock", short_dir)
 
 
 class TestCmdConfig:

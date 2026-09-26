@@ -23,7 +23,8 @@ if [[ "${1:-}" != "--no-relay" && "${BASH_SOURCE[0]}" == "/workspace/.claude/hoo
     _rl_bin="${HOOKS_DAEMON_RELAY_BINARY:-/workspace/untracked/bin/hooks-relay}"
     _rl_sock="$_rl_events_dir/cwd-changed.sock"
     if [[ -x "$_rl_bin" && -S "$_rl_sock" ]]; then
-        exec "$_rl_bin" "$_rl_sock" --fallback "${BASH_SOURCE[0]}" \
+        HOOKS_DAEMON_RELAY_DAEMON_ROOT="/workspace" \
+            exec "$_rl_bin" "$_rl_sock" --fallback "${BASH_SOURCE[0]}" \
             --timeout-ms "30000"
     fi
 fi

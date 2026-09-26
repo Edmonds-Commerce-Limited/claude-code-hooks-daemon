@@ -3,6 +3,66 @@
 Newest first. Each entry says how it was found, why it happens, and the
 candidate remedies.
 
+### N162 — ✅ Remedied — The start lock is opened through a symlink, and an unopenable lock escapes `stop`
+
+**Found by the lifecycle batch's round-3 D-PATH re-review (Sh-C), on main as
+well.** `server._open_start_lock` opened `<socket>.start.lock` with
+`O_RDWR | O_CREAT` and no `O_NOFOLLOW`, so a symlink planted at that path
+was followed, and `O_CREAT` created or opened the file it named. Round 3
+also made `cmd_stop` take the lock, and only `StartLockTimeout` was caught
+there: an `OSError` opening it propagated after the daemon had already
+stopped.
+
+**Remedied (lifecycle batch, round 4):** the lock is opened with
+`O_NOFOLLOW | O_CLOEXEC` and must be a regular file (`fstat`), or `OSError`
+is raised. There is no ownership check: a host and a container sharing the
+untracked directory run as different users and share one lock, and the lock
+is only ever flocked. `_release_stopped_daemon_files` handles `OSError`
+explicitly and fails closed, leaving the PID file and socket. RED:
+`TestTheStartLockRefusesWhatIsNotItsOwnFile` (a symlink, whose target is
+never created, and a FIFO) and
+`test_a_start_lock_that_cannot_be_opened_keeps_both_files`. Release note
+157\.
+
+### N161 — ✅ Remedied — A PID file holding `0`, `1` or a negative number counts as a running daemon
+
+**Found by both lifecycle round-3 re-reviews (Sh-B, S-R3-1), on main as
+well.** `kill -0 0` signals the caller's own process group and succeeds, and
+pid 1 is init, which root may signal. `init.sh` accepted any `^[0-9]+$`, so a
+PID file holding `0` or `1` made `is_daemon_running` report a daemon running
+for ever and the hook never started one. Python's `read_pid_file` used
+`int()`, which also takes `-1`, `+12` and `1_2`, and `os.kill(0, 0)` succeeds
+there too. An empty file returned "not running" without being cleared.
+
+**Remedied (lifecycle batch, round 4):** one definition of a PID file's text
+in both languages: the digits of one pid from 2 to Linux's `PID_MAX_LIMIT`
+(4194304), with no leading zero, optionally followed by newlines
+(`paths.parse_pid_text`, `init.sh`'s `_hooks_daemon_is_pid_text`, pinned
+equal by a test). Anything else is corrupt, never counts as running, and
+`is_daemon_running` removes it as stale, under the start lock (N160). RED:
+`test_a_corrupt_pid_file_is_never_running_and_is_removed` and
+`test_read_pid_file_never_counts_a_corrupt_file_as_running`. Release note
+157\.
+
+### N160 — ✅ Remedied — `init.sh` removes a stale PID file outside the start lock
+
+**Found by the lifecycle batch's round-3 D-PATH re-review (Sh-A), on main as
+well.** `is_daemon_running` re-read the PID file, compared it and ran
+`rm -f`, without the start lock. A daemon start writes its pid while holding
+that lock, so a pid written between the compare and the `rm` was removed and
+the live daemon was orphaned. Round 3 put the Python side of stop under the
+lock; the bash side was left.
+
+**Remedied (lifecycle batch, round 4):** the bash side calls
+`cli.remove_stale_pid_file` in the daemon's venv. Under the start lock it
+removes the file only while it still holds exactly the text bash read, and
+that text names no live process. A lock that is held for the whole wait, or
+cannot be opened, leaves the file; so does a missing venv. A stale file left
+behind is harmless: it never counts as running, and a starting daemon
+overwrites it under the lock. RED:
+`test_a_stale_pid_file_is_removed_only_through_the_start_lock` and
+`TestRemoveStalePidFile`. Release note 157.
+
 ### N140 — ✅ Remedied — PreToolUse input the forwarder cannot parse is answered without a deny
 
 **Found by the lifecycle batch's round-2 D-RULE re-review, on main as well.**
@@ -45,6 +105,16 @@ of a numeric pid return 0 and keep the file. A PID file that holds no number
 is still stale. RED: `test_a_pid_it_may_not_signal_is_alive_and_keeps_its_file`
 (the builtin shadowed with the EPERM failure it reports, since root may
 signal anything). Release note 154.
+
+**Round 4 (N139-A, found by both round-3 re-reviews):** returning 0 on EPERM
+made `ensure_daemon` skip the start whenever a stale PID file named another
+user's process, for example after a reboot, so the daemon stayed down until
+someone ran `restart`. EPERM now answers "unknown" (2) unless the socket
+answers or the pid's command line proves it is this project's daemon
+(`cli.pid_is_this_projects_daemon`). Unknown never skips a start: `cli start`'s REUSE gate decides, and the daemon overwrites the PID file. The
+file of a live pid is never deleted, including by `read_pid_file(..., verify_daemon=True)`. RED: `test_a_pid_it_may_not_signal_is_unknown_and_keeps_its_file`,
+`test_a_pid_it_may_not_signal_does_not_stop_an_auto_start`, and the socket
+and command-line proofs.
 
 ### N128 — ✅ Remedied — Stop and the stale-PID checks delete a successor's PID file and socket
 

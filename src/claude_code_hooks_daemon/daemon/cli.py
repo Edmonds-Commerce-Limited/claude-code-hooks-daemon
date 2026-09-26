@@ -71,6 +71,8 @@ from claude_code_hooks_daemon.daemon.paths import (
     find_uv,
     get_pid_path,
     get_socket_path,
+    is_pid_alive,
+    parse_pid_text,
     python_venv_fingerprint,
     read_pid_file,
     read_socket_discovery_file,
@@ -868,6 +870,60 @@ def _release_stopped_daemon_files(pid: int, pid_path: Path, socket_path: Path) -
                 logger.info("Socket %s is not provably dead; leaving it", socket_path)
     except StartLockTimeout as exc:
         logger.warning("A daemon start holds %s; leaving its PID file and socket", exc)
+    except OSError as exc:
+        # Fail closed (round 4, Sh-C): without the lock, a start may be
+        # part-way through these paths, so neither is touched.
+        print(
+            f"WARNING: cannot open the start lock ({exc}); leaving the PID file "
+            f"{pid_path} and socket {socket_path} in place",
+            file=sys.stderr,
+        )
+
+
+def remove_stale_pid_file(pid_path: Path, socket_path: Path, seen: str) -> bool:
+    """Remove a PID file that names no live process, under the start lock.
+
+    ``init.sh``'s ``is_daemon_running`` calls this for a file whose pid it
+    found gone, or whose text is corrupt (Plan 00466 round 4, Sh-A, Sh-B). A
+    daemon start writes its pid while holding the same lock, so under it the
+    file goes only while it still holds exactly ``seen`` and that names no
+    live process. A lock that cannot be taken or opened leaves the file.
+
+    Returns:
+        True when the file was removed.
+    """
+    try:
+        with hold_start_lock(socket_path, Timeout.FILE_LOCK):
+            try:
+                current = pid_path.read_text()
+            except FileNotFoundError:
+                return False
+            if current.rstrip("\n") != seen:
+                logger.info("PID file %s changed since it was read; leaving it", pid_path)
+                return False
+            pid = parse_pid_text(seen)
+            if pid is not None and is_pid_alive(pid):
+                return False
+            pid_path.unlink()
+            return True
+    except StartLockTimeout as exc:
+        logger.warning("A daemon start holds %s; leaving the PID file", exc)
+    except (OSError, UnicodeDecodeError) as exc:
+        logger.warning("Cannot remove stale PID file %s under the start lock: %s", pid_path, exc)
+    return False
+
+
+def pid_is_this_projects_daemon(pid: int, socket_path: Path, project_root: Path) -> bool:
+    """Liveness for a pid this user may not signal (Plan 00466 round 4, N139-A).
+
+    ``kill -0`` failing with EPERM proves a process exists, not that it is
+    this daemon. It is, for ``init.sh``'s ``is_daemon_running``, when the
+    socket answers or the pid's command line proves it serves this project.
+    """
+    if _socket_liveness_sync(socket_path) is _SocketLiveness.LIVE:
+        return True
+    proof = daemon_process_project_root(pid)
+    return proof.root is not None and proof.root == os.path.realpath(project_root)
 
 
 def cmd_stop(args: argparse.Namespace) -> int:

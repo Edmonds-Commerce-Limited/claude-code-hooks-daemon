@@ -61,7 +61,7 @@ use std::io::{self, ErrorKind, Read, Write};
 use std::net::Shutdown;
 use std::os::unix::net::UnixStream;
 use std::os::unix::process::CommandExt;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{exit, Child, Command, Stdio};
 use std::sync::mpsc;
 use std::thread;
@@ -69,6 +69,12 @@ use std::time::{Duration, Instant};
 
 /// Matches the python3 transport's CLAUDE_HOOKS_SOCKET_TIMEOUT default (30 s).
 const DEFAULT_TIMEOUT_MS: u64 = 30_000;
+
+/// The longest `--timeout-ms` honoured. Twin of `Timeout.RELAY_TIMEOUT_CAP`
+/// (seconds), which the daemon's config clamps `transport.timeout_seconds`
+/// to. A forwarder deployed before that clamp keeps its old value until it
+/// is redeployed, so it is clamped here too (Plan 00466 round 4).
+const TIMEOUT_CAP_MS: u64 = 45_000;
 
 /// Response size cap. Twin of the daemon's
 /// `constants/protocol.py::SocketLimit.REQUEST_BUFFER_BYTES` (16 MiB): a
@@ -107,6 +113,15 @@ const JSON_MAX_DEPTH: usize = 32;
 /// client project's own unrelated `bin/hooks-daemon` is never the one a deny
 /// prints while the clone has its launcher (Plan 00466 round 3, m-A).
 const RECOVERY_LAUNCHERS: [&str; 2] = [".claude/hooks-daemon/bin/hooks-daemon", "bin/hooks-daemon"];
+
+/// The launcher's place under a daemon root.
+const INSTALL_LAUNCHER: &str = "bin/hooks-daemon";
+
+/// The daemon root the generated forwarder bakes in for `restart_command`
+/// (Plan 00466 round 4, P3-2). An environment variable rather than a flag,
+/// so a forwarder newer than this binary never makes it fail on usage. Kept
+/// from every process this one starts.
+const DAEMON_ROOT_ENV: &str = "HOOKS_DAEMON_RELAY_DAEMON_ROOT";
 
 struct Args {
     socket_path: String,
@@ -148,6 +163,10 @@ fn parse_args() -> Args {
                 None => usage_fail("--fallback requires a script path"),
             },
             "--timeout-ms" => match argv.next().map(|v| v.parse::<u64>()) {
+                Some(Ok(ms)) if ms > TIMEOUT_CAP_MS => {
+                    eprintln!("hooks-relay: --timeout-ms {ms} is over the cap; using {TIMEOUT_CAP_MS}");
+                    timeout_ms = TIMEOUT_CAP_MS;
+                }
                 Some(Ok(ms)) if ms > 0 => timeout_ms = ms,
                 _ => usage_fail("--timeout-ms requires a positive integer"),
             },
@@ -176,7 +195,11 @@ fn parse_args() -> Args {
 /// relay again (DESIGN §6.1). Only reachable while stdin is UNREAD.
 fn exec_fallback(script: &str) -> ! {
     // exec() only returns on failure — on success this process image is gone.
-    let err = Command::new("/bin/bash").arg(script).arg("--no-relay").exec();
+    let err = Command::new("/bin/bash")
+        .arg(script)
+        .arg("--no-relay")
+        .env_remove(DAEMON_ROOT_ENV)
+        .exec();
     eprintln!("hooks-relay: connect: fallback exec of {script} failed: {err}");
     exit(EXIT_CONNECT_FAIL);
 }
@@ -224,15 +247,15 @@ fn json_escape(s: &str) -> String {
 /// `HookResult._format_pre_tool_use_response` emits — never the two-byte
 /// `{}` a fail-open would use, which is indistinguishable from a real
 /// judged "allow, nothing to add" verdict.
-fn deny_pre_tool_use_json(detail: &str, restart: &str) -> String {
+fn deny_pre_tool_use_json(detail: &str, recovery: &str) -> String {
     format!(
         "{{\"hookSpecificOutput\":{{\"hookEventName\":\"PreToolUse\",\
          \"permissionDecision\":\"deny\",\"permissionDecisionReason\":\
          \"BLOCKED [transport-fail-closed]: hooks-relay could not obtain a verdict \
          from the daemon ({}). Denying out of caution -- this does not mean the \
-         action itself is unsafe. If the daemon is wedged, run: {}\"}}}}",
+         action itself is unsafe. {}\"}}}}",
         json_escape(detail),
-        json_escape(restart)
+        json_escape(recovery)
     )
 }
 
@@ -246,13 +269,64 @@ fn shell_quote(word: &str) -> String {
     format!("'{}'", word.replace('\'', "'\"'\"'"))
 }
 
+/// `os.path.dirname`: the parent, and the root is its own.
+fn dirname(path: &Path) -> &Path {
+    path.parent().unwrap_or(path)
+}
+
+/// The real path of the longest part of `path` that exists, with the rest
+/// appended as written: `init.sh`'s `_resolve`, which `cli_command.py`
+/// shares, so all three name the same launcher.
+fn resolve(path: &Path) -> PathBuf {
+    let mut head = path;
+    let mut tail = Vec::new();
+    loop {
+        if let Ok(real) = head.canonicalize() {
+            return tail.iter().rev().fold(real, |acc: PathBuf, name| acc.join(name));
+        }
+        match (head.parent(), head.file_name()) {
+            (Some(parent), Some(name)) => {
+                tail.push(name);
+                head = parent;
+            }
+            _ => return path.to_path_buf(),
+        }
+    }
+}
+
+/// The project a launcher at this resolved path manages, by the rule the
+/// launcher applies to itself: `init.sh`'s `_project_it_manages`.
+fn project_it_manages(launcher: &Path) -> PathBuf {
+    let daemon_dir = dirname(dirname(launcher));
+    let parent = dirname(daemon_dir);
+    if daemon_dir.file_name() == Some(OsStr::new("hooks-daemon"))
+        && parent.file_name() == Some(OsStr::new(".claude"))
+    {
+        return dirname(parent).to_path_buf();
+    }
+    daemon_dir.to_path_buf()
+}
+
+/// This install's launcher, resolved, or None when it is unknown: the one
+/// under `daemon_root` must manage `project`. `init.sh`'s `_installs_launcher`.
+fn installs_launcher(project: &Path, daemon_root: &Path) -> Option<PathBuf> {
+    if !project.is_absolute() || !daemon_root.is_absolute() {
+        return None;
+    }
+    let launcher = resolve(&daemon_root.join(INSTALL_LAUNCHER));
+    (project_it_manages(&launcher) == resolve(project)).then_some(launcher)
+}
+
 /// The exempt restart a deny names, as `init.sh`'s `_recovery_command`
-/// prints it: the project's launcher by absolute path, so it runs from any
-/// directory (Plan 00466 round 2, m1). The project is the one whose
-/// `.claude/hooks/` holds the `--fallback` forwarder; with no such forwarder
-/// the project-root spelling is all this file can name.
-fn restart_command(args: &Args) -> String {
-    let root = args
+/// prints it: this install's launcher by absolute path, so it runs from any
+/// directory (Plan 00466 round 2, m1), chosen by the same rule
+/// (round 4, P3-2). The project is the one whose `.claude/hooks/` holds the
+/// `--fallback` forwarder, and the daemon root is `DAEMON_ROOT_ENV`, or
+/// `init.sh`'s default for a forwarder generated without it. With no such
+/// forwarder the project-root spelling is all this file can name. None when
+/// the install is unknown, which `init.sh` also exempts nothing for.
+fn restart_command(args: &Args) -> Option<String> {
+    let project = args
         .fallback
         .as_deref()
         .map(Path::new)
@@ -260,24 +334,41 @@ fn restart_command(args: &Args) -> String {
         .filter(|hooks| hooks.file_name() == Some(OsStr::new("hooks")))
         .and_then(Path::parent)
         .filter(|claude| claude.file_name() == Some(OsStr::new(".claude")))
-        .and_then(Path::parent)
-        .and_then(Path::to_str);
-    let Some(root) = root else {
-        return format!("{} restart (from the project root)", RECOVERY_LAUNCHERS[0]);
+        .and_then(Path::parent);
+    let Some(project) = project else {
+        return Some(format!("{} restart (from the project root)", RECOVERY_LAUNCHERS[0]));
     };
-    let launchers = RECOVERY_LAUNCHERS.map(|launcher| format!("{root}/{launcher}"));
-    let chosen = launchers
-        .iter()
-        .find(|launcher| Path::new(launcher.as_str()).is_file())
-        .unwrap_or(&launchers[0]);
-    format!("{} restart", shell_quote(chosen))
+    let daemon_root = env::var_os(DAEMON_ROOT_ENV)
+        .map(PathBuf::from)
+        .unwrap_or_else(|| project.join(".claude/hooks-daemon"));
+    let launcher = installs_launcher(project, &daemon_root)?;
+    let belongs = daemon_root.join(INSTALL_LAUNCHER);
+    let mut spellings = RECOVERY_LAUNCHERS.map(|spelling| project.join(spelling)).to_vec();
+    spellings.push(belongs.clone());
+    let chosen = spellings
+        .into_iter()
+        .find(|spelling| launcher.is_file() && resolve(spelling) == launcher)
+        .unwrap_or(belongs);
+    Some(format!("{} restart", shell_quote(chosen.to_str()?)))
+}
+
+/// What a relay deny tells the agent to do about it.
+fn recovery_advice(args: &Args) -> String {
+    match restart_command(args) {
+        Some(restart) => format!("If the daemon is wedged, run: {restart}"),
+        None => "No daemon command is exempt from this deny: the daemon root this \
+                 forwarder names is not a daemon install of its project, so no \
+                 launcher is known to recover it. A human must restart the daemon \
+                 with the ! prefix, and correct HOOKS_DAEMON_ROOT_DIR."
+            .to_string(),
+    }
 }
 
 /// The fail-open/fail-closed body written on a mid-exchange failure, per
 /// `is_pre_tool_use_socket`.
 fn fail_body(args: &Args, detail: &str) -> String {
     if is_pre_tool_use_socket(&args.socket_path) {
-        deny_pre_tool_use_json(detail, &restart_command(args))
+        deny_pre_tool_use_json(detail, &recovery_advice(args))
     } else {
         "{}".to_string()
     }
@@ -590,6 +681,7 @@ fn judge_via_fallback(script: &str, failure: &str, request: &mut Request) {
         .arg(script)
         .arg("--no-relay")
         .env(RELAY_FAILURE_ENV, failure)
+        .env_remove(DAEMON_ROOT_ENV)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .spawn();

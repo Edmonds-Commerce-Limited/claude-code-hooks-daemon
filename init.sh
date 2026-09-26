@@ -131,17 +131,60 @@ def _is_absolute(path):
     return isinstance(path, str) and os.path.isabs(path)
 
 
-def _runs_the_installs_launcher(path, daemon_root):
+def _resolve(path):
+    """The real path of the longest part of path that exists, with the rest
+    appended as written. hooks-relay and cli_command.py resolve the same way,
+    so all three name the same launcher."""
+    head, tail = path, []
+    while not os.path.exists(head):
+        parent, name = os.path.split(head)
+        if parent == head:
+            return path
+        tail.append(name)
+        head = parent
+    return os.path.join(os.path.realpath(head), *reversed(tail))
+
+
+def _project_it_manages(launcher):
+    """The project a launcher at this resolved path manages, by the rule the
+    launcher applies to itself (bin/hooks-daemon): the parent of its bin/ is
+    the daemon root, <project>/.claude/hooks-daemon for a client install and
+    the project itself for a self-install."""
+    daemon_dir = os.path.dirname(os.path.dirname(launcher))
+    parent = os.path.dirname(daemon_dir)
+    if os.path.basename(daemon_dir) == "hooks-daemon" and os.path.basename(parent) == ".claude":
+        return os.path.dirname(parent)
+    return daemon_dir
+
+
+def _installs_launcher(project_path, daemon_root):
+    """This install s launcher, resolved, or None when it is unknown.
+
+    HOOKS_DAEMON_ROOT_DIR can be inherited from whatever started Claude Code,
+    so it is trusted only when the launcher under it manages this project
+    (Plan 00466 round 4, P3-1). Otherwise it names another project s install,
+    or none, and no command is known to recover this one."""
+    if not (_is_absolute(project_path) and _is_absolute(daemon_root)):
+        return None
+    try:
+        launcher = _resolve(os.path.join(daemon_root, _INSTALL_LAUNCHER))
+        if _project_it_manages(launcher) != _resolve(project_path):
+            return None
+    except (OSError, ValueError):
+        # An unresolvable path (an embedded NUL, a loop) names no install.
+        return None
+    return launcher
+
+
+def _runs_the_installs_launcher(path, project_path, daemon_root):
     """True when running path runs this install s launcher."""
-    if not _is_absolute(daemon_root):
+    launcher = _installs_launcher(project_path, daemon_root)
+    if launcher is None or not os.path.isfile(launcher):
         return False
     try:
-        will_run = os.path.realpath(path)
-        launcher = os.path.realpath(os.path.join(daemon_root, _INSTALL_LAUNCHER))
+        return _resolve(path) == launcher
     except (OSError, ValueError):
-        # An unresolvable path (an embedded NUL, a loop) is never exempt.
         return False
-    return will_run == launcher and os.path.isfile(launcher)
 
 
 def _absolute_launchers(project_path, daemon_root):
@@ -171,26 +214,61 @@ def _is_daemon_recovery_command(hi, project_path, daemon_root):
         for binary in _RECOVERY_BINARIES:
             if stripped == binary + " " + sub:
                 return _is_absolute(cwd) and _runs_the_installs_launcher(
-                    os.path.join(cwd, binary), daemon_root
+                    os.path.join(cwd, binary), project_path, daemon_root
                 )
         for launcher in _absolute_launchers(project_path, daemon_root):
             if stripped == shlex.quote(launcher) + " " + sub:
-                return _runs_the_installs_launcher(launcher, daemon_root)
+                return _runs_the_installs_launcher(launcher, project_path, daemon_root)
     return False
 
 
 def _recovery_command(project_path, daemon_root, sub):
     """The exempt command a deny names: the launcher by absolute path, so it
-    works from any directory. The first spelling that runs this install s
-    launcher wins; with none, where that launcher belongs, which is still
-    never a file of the project s own."""
-    spellings = _absolute_launchers(project_path, daemon_root)
-    for launcher in spellings:
-        if _runs_the_installs_launcher(launcher, daemon_root):
+    works from any directory, or None when this install s launcher is
+    unknown. The first spelling that runs it wins; with none, where it
+    belongs, which is still never a file of the project s own."""
+    if _installs_launcher(project_path, daemon_root) is None:
+        return None
+    for launcher in _absolute_launchers(project_path, daemon_root):
+        if _runs_the_installs_launcher(launcher, project_path, daemon_root):
             return shlex.quote(launcher) + " " + sub
-    if _is_absolute(daemon_root):
-        return shlex.quote(os.path.join(daemon_root, _INSTALL_LAUNCHER)) + " " + sub
-    return shlex.quote(spellings[0] if spellings else _INSTALL_LAUNCHER) + " " + sub
+    return shlex.quote(os.path.join(daemon_root, _INSTALL_LAUNCHER)) + " " + sub
+
+
+def _launcher_for_a_human(project_path):
+    """The launcher a human is told to run when the install is unknown."""
+    if not _is_absolute(project_path):
+        return _RECOVERY_BINARIES[0]
+    for binary in _RECOVERY_BINARIES:
+        spelling = os.path.join(project_path, binary)
+        if os.path.isfile(spelling):
+            if _project_it_manages(_resolve(spelling)) == _resolve(project_path):
+                return shlex.quote(spelling)
+    return shlex.quote(os.path.join(project_path, _RECOVERY_BINARIES[0]))
+
+
+def _recovery_advice(project_path, daemon_root):
+    """The TO FIX lines every PreToolUse deny ends with."""
+    restart = _recovery_command(project_path, daemon_root, "restart")
+    repair = _recovery_command(project_path, daemon_root, "repair")
+    if restart is None:
+        named_root = daemon_root or "unset"
+        return [
+            "TO FIX: no daemon command is exempt from this deny. HOOKS_DAEMON_ROOT_DIR",
+            f"({named_root}) is not a daemon install of this project",
+            f"({project_path}), so this hook cannot tell which launcher recovers it.",
+            "It may be inherited from the environment that started Claude Code, or",
+            "set in .claude/hooks-daemon.env. A human must correct it, and can",
+            "restart the daemon meanwhile with the ! prefix:",
+            f"! {_launcher_for_a_human(project_path)} restart",
+        ]
+    return [
+        f"TO FIX: run exactly {restart} (from any directory),",
+        "which stays allowed even while other calls are denied this way. If a",
+        "restart cannot start it (a broken venv), run exactly",
+        f"{repair}. A human can also",
+        f"run it directly (! {restart}), since Edit is denied here too.",
+    ]
 '
 }
 
@@ -219,14 +297,31 @@ sys.exit(0 if _is_daemon_recovery_command(hi, sys.argv[1], sys.argv[2]) else 1)
 #
 # _hooks_daemon_recovery_command() - The exempt command for recovery
 # subcommand $1, by the launcher's absolute path, as every deny names it.
+# Exits 3, printing nothing, when this install's launcher is unknown.
 _hooks_daemon_recovery_command() {
     local recovery_py
     _hooks_daemon_recovery_py recovery_py
     python3 -c "$recovery_py"'
 import sys
 
-print(_recovery_command(sys.argv[1], sys.argv[2], sys.argv[3]))
+command = _recovery_command(sys.argv[1], sys.argv[2], sys.argv[3])
+if command is None:
+    sys.exit(3)
+print(command)
 ' "${PROJECT_PATH:-}" "${HOOKS_DAEMON_ROOT_DIR:-}" "$1"
+}
+
+#
+# _hooks_daemon_recovery_advice() - The TO FIX lines a PreToolUse deny ends
+# with (see _recovery_advice above).
+_hooks_daemon_recovery_advice() {
+    local recovery_py
+    _hooks_daemon_recovery_py recovery_py
+    python3 -c "$recovery_py"'
+import sys
+
+print("\n".join(_recovery_advice(sys.argv[1], sys.argv[2])))
+' "${PROJECT_PATH:-}" "${HOOKS_DAEMON_ROOT_DIR:-}"
 }
 
 #
@@ -566,10 +661,9 @@ $_hd_venv_missing_remedy")
     # matching emit_error_json's socket_not_found wording: name the one
     # command that is actually allowed, and name the human fallback.
     local _pretooluse_deny_msg=""
-    local _hd_restart_cmd="" _hd_repair_cmd_abs=""
+    local _hd_advice=""
     if [[ "$_pretooluse_deny" == "true" ]] \
-        && ! { _hd_restart_cmd="$(_hooks_daemon_recovery_command restart)" \
-            && _hd_repair_cmd_abs="$(_hooks_daemon_recovery_command repair)"; }; then
+        && ! _hd_advice="$(_hooks_daemon_recovery_advice)"; then
         # Plan 00466 round 3 (R2-1): python3 names the recovery command, and
         # under set -e its failure here would end the hook with no answer at
         # all. It also judges the carve-out, so no command is exempt: say so.
@@ -582,7 +676,7 @@ $_hd_venv_missing_remedy")
             "commands, so none is allowed either. A human must fix python3, or run the" \
             "daemon launcher directly: ! ${HOOKS_DAEMON_ROOT_DIR:-$_hooks_daemon_checkout/.claude/hooks-daemon}/bin/hooks-daemon restart")
     elif [[ "$_pretooluse_deny" == "true" ]]; then
-        _pretooluse_deny_msg=$(printf '%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s' \
+        _pretooluse_deny_msg=$(printf '%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s' \
             "HOOKS DAEMON: could not connect at all — denied for safety" \
             "" \
             "Error: $error_type - $error_details" \
@@ -591,10 +685,7 @@ $_hd_venv_missing_remedy")
             "not because a guard judged it. Hook safety handlers are ACTIVE and" \
             "denying by default until the daemon answers again." \
             "" \
-            "TO FIX: run exactly $_hd_restart_cmd (from any directory), which stays" \
-            "allowed even while other calls are denied this way. If a restart cannot" \
-            "start it (a broken venv), run exactly $_hd_repair_cmd_abs." \
-            "A human can also run it directly (! $_hd_restart_cmd) since Edit is denied here too.")
+            "$_hd_advice")
     fi
 
     # Event-specific JSON formatting. jq is used only on this pure-error path
@@ -1138,12 +1229,42 @@ validate_venv() {
 }
 
 #
+# Linux's PID_MAX_LIMIT: no pid is larger. Twin of paths.PID_MAX_LIMIT.
+_HOOKS_DAEMON_PID_MAX=4194304
+
+#
+# _hooks_daemon_is_pid_text() - True when $1 is a PID file's text naming one
+# pid a daemon could hold (Plan 00466 round 4, Sh-B). 0 and negative numbers
+# are process groups to kill, so kill -0 on them succeeds against this
+# shell's own group; 1 is init. Twin of paths.parse_pid_text, which also
+# accepts the trailing newlines $(cat) has already dropped here.
+_hooks_daemon_is_pid_text() {
+    [[ "$1" =~ ^[1-9][0-9]{0,6}$ ]] && (($1 > 1 && $1 <= _HOOKS_DAEMON_PID_MAX))
+}
+
+#
+# _hooks_daemon_run_cli_helper() - Run the daemon package's python snippet
+# $1 with the remaining arguments, in the daemon's own venv. Fails when
+# there is no usable venv, which every caller treats as "not proven".
+_hooks_daemon_run_cli_helper() {
+    local snippet="$1"
+    shift
+    if [[ -z "$PYTHON_CMD" ]] && ! _resolve_python_cmd; then
+        return 1
+    fi
+    "$PYTHON_CMD" -c "$snippet" "$@"
+}
+
+#
 # is_daemon_running() - Check if daemon is running
 #
 # Returns:
-#   0 if daemon is running, or its pid names a process this user may not
-#     signal (which is not proof that it is down)
-#   1 if daemon is not running
+#   0 if daemon is running
+#   1 if daemon is not running (a stale or corrupt PID file, or none)
+#   2 if its pid names a process this user may not signal that nothing
+#     proves is this daemon: unknown, so a caller must not skip a start
+#     (Plan 00466 round 4, N139-A). `cli start` then decides, and its REUSE
+#     gate never displaces a live daemon.
 #
 is_daemon_running() {
     # Check if PID file exists
@@ -1155,12 +1276,7 @@ is_daemon_running() {
     local pid
     pid=$(cat "$PID_PATH" 2>/dev/null || echo "")
 
-    if [[ -z "$pid" ]]; then
-        return 1
-    fi
-
-    # Text that is not a pid names no process: the file is stale.
-    if [[ "$pid" =~ ^[0-9]+$ ]]; then
+    if _hooks_daemon_is_pid_text "$pid"; then
         # Check if process is alive
         if kill -0 "$pid" 2>/dev/null; then
             return 0
@@ -1173,19 +1289,36 @@ is_daemon_running() {
         local probe_error
         probe_error="$(export LC_ALL=C; kill -0 "$pid" 2>&1)" && return 0
         if [[ "$probe_error" != *"No such process"* ]]; then
-            return 0
+            # A live process is not proof of this daemon: the socket
+            # answering, or the pid's command line, decides.
+            if _hooks_daemon_run_cli_helper '
+import sys
+from pathlib import Path
+
+from claude_code_hooks_daemon.daemon.cli import pid_is_this_projects_daemon
+
+sys.exit(0 if pid_is_this_projects_daemon(int(sys.argv[1]), Path(sys.argv[2]), Path(sys.argv[3])) else 1)
+' "$pid" "$SOCKET_PATH" "$PROJECT_PATH"; then
+                return 0
+            fi
+            return 2
         fi
     fi
 
-    # Stale PID file: remove it only while it still names the pid found
-    # dead. A successor started meanwhile has written its own pid there,
-    # and removing that would orphan a live daemon (Plan 00466 round 2, S2).
-    # A PID file has no trailing newline, so read reports EOF with the line
-    # read; a file gone since the first read fails the redirect instead.
-    local current=""
-    if [[ -f "$PID_PATH" ]] && { read -r current || [[ -n "$current" ]]; } < "$PID_PATH" \
-        && [[ "$current" == "$pid" ]]; then
-        rm -f "$PID_PATH"
+    # Stale or corrupt: removed under the start lock a daemon start writes
+    # its pid under, and only while the file still holds what was read here
+    # (Plan 00466 round 2, S2; round 4, Sh-A). Without the daemon's venv it
+    # stays, which is harmless: it never counts as running, and a starting
+    # daemon overwrites it.
+    if ! _hooks_daemon_run_cli_helper '
+import sys
+from pathlib import Path
+
+from claude_code_hooks_daemon.daemon.cli import remove_stale_pid_file
+
+sys.exit(0 if remove_stale_pid_file(Path(sys.argv[1]), Path(sys.argv[2]), sys.argv[3]) else 1)
+' "$PID_PATH" "$SOCKET_PATH" "$pid"; then
+        : "the PID file stays: it was not provably stale under the lock"
     fi
     return 1
 }
@@ -1849,8 +1982,13 @@ send_request_stdin() {
         exec 3<&0
     fi
 
-    local _rv=0
-    python3 -c "
+    # python3's answer is captured, with its exit status appended after a
+    # final x, so exactly one document reaches stdout (Plan 00466 round 4):
+    # a python3 that answered and then failed must not have the fixed deny
+    # below printed after its answer. The suffix keeps the answer's bytes,
+    # trailing newlines included, which a bare $( ) would drop.
+    local _rv=0 _hd_answer
+    _hd_answer="$(python3 -c "
 import json
 import os
 import socket
@@ -1915,16 +2053,9 @@ $_recovery_py
 project_path = sys.argv[3] if len(sys.argv) > 3 else ''
 daemon_root = sys.argv[5] if len(sys.argv) > 5 else ''
 
-# The exempt restart, by absolute path so it works from any directory.
-_RESTART_COMMAND = _recovery_command(project_path, daemon_root, 'restart')
-
 # The recovery advice every daemon-side failure below ends with.
-_RESTART_ADVICE = [
-    f'TO FIX: run exactly {_RESTART_COMMAND} (from any directory),',
-    'which stays allowed even while other calls are denied this way. If a',
-    'restart cannot start it (a broken venv), run exactly',
-    f'{_recovery_command(project_path, daemon_root, \"repair\")}. Then use the',
-    'hooks-daemon skill to verify health (args=health).',
+_RESTART_ADVICE = _recovery_advice(project_path, daemon_root) + [
+    'Then use the hooks-daemon skill to verify health (args=health).',
     'If this recurs, use the hooks-daemon skill to check logs',
     '(args=logs) and report it.',
 ]
@@ -2003,10 +2134,8 @@ def emit_error_json(event_name, error_type, error_details):
             '',
             'If this is a PreToolUse call being denied for safety because of',
             'this timeout: a genuinely wedged daemon (not just a slow handler)',
-            'is fixed by restarting it -- run exactly',
-            f'{_RESTART_COMMAND} (from any directory), which stays',
-            'allowed even while other calls are denied this way.',
-        ]
+            'is fixed by restarting it.',
+        ] + _recovery_advice(project_path, daemon_root)
         if timeout_note:
             context_lines[1:1] = ['', timeout_note]
     elif error_type == 'connect_backlog_full':
@@ -2389,20 +2518,24 @@ except (BrokenPipeError, ConnectionResetError) as e:
 except Exception as e:
     fail(type(e).__name__, f'{type(e).__name__}: {e}')
 " "$event_name" "$response_mode" "${PROJECT_PATH:-}" "$_HOOKS_DAEMON_RELAY_FAILED" \
-        "${HOOKS_DAEMON_ROOT_DIR:-}" <&3 || _rv=$?
+        "${HOOKS_DAEMON_ROOT_DIR:-}" <&3; printf 'x%s' "$?")"
+    _rv="${_hd_answer##*x}"
+    _hd_answer="${_hd_answer%x*}"
     # Every PreToolUse path above answers and exits 0, so a failure here is
-    # python3 missing or crashing before it answered: no guard judged the
-    # call, and Claude Code runs a call whose hook wrote nothing (Plan 00466
-    # round 3, R2-1).
+    # python3 missing or crashing: no guard's verdict can be trusted, and
+    # Claude Code runs a call whose hook wrote nothing (Plan 00466 round 3,
+    # R2-1). Whatever python3 printed first is dropped.
     if [[ "$_rv" -ne 0 && "$event_name" == "PreToolUse" && -z "$response_mode" ]]; then
         _hooks_daemon_static_deny
         _rv=0
+    else
+        printf '%s' "$_hd_answer"
     fi
     exec 3<&-
     if [[ -n "$_nc_replay_payload" ]]; then
         rm -f "$_nc_replay_payload"
     fi
-    return $_rv
+    return "$_rv"
 }
 
 #

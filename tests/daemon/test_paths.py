@@ -12,6 +12,7 @@ from unittest.mock import MagicMock, patch
 from claude_code_hooks_daemon.daemon.paths import (
     _HOSTNAME_FALLBACK,
     _UNIX_SOCKET_PATH_LIMIT,
+    PID_MAX_LIMIT,
     _resolve_hostname_from_env,
     cleanup_pid_file,
     cleanup_socket,
@@ -23,6 +24,7 @@ from claude_code_hooks_daemon.daemon.paths import (
     get_socket_path,
     is_daemon_pid,
     is_pid_alive,
+    parse_pid_text,
     read_pid_file,
     read_socket_discovery_file,
     resolve_hostname,
@@ -466,6 +468,42 @@ class TestPIDFileOperations(unittest.TestCase):
                 return_value=False,
             ):
                 self.assertIsNone(read_pid_file(pid_path, verify_daemon=True))
+
+    def test_read_pid_file_verify_daemon_keeps_a_live_non_daemons_file(self):
+        """Plan 00466 round 4 (N139-A): the pid is alive, so its file stays; a
+        starting daemon overwrites it under the start lock."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pid_path = Path(tmpdir) / "test.pid"
+            write_pid_file(pid_path, os.getpid())
+            with patch(
+                "claude_code_hooks_daemon.daemon.paths.is_daemon_pid",
+                return_value=False,
+            ):
+                self.assertIsNone(read_pid_file(pid_path, verify_daemon=True))
+            self.assertEqual(pid_path.read_text(), str(os.getpid()))
+
+    def test_read_pid_file_never_counts_a_corrupt_file_as_running(self):
+        """Plan 00466 round 4 (Sh-B): ``kill(0, 0)`` and ``kill(-1, 0)`` succeed
+        against process groups, and pid 1 is init, so none is a daemon."""
+        for text in ("0", "-1", "1", "", "\n", " 12", "1_2", "+12", "007", "4194305"):
+            with self.subTest(text=text), tempfile.TemporaryDirectory() as tmpdir:
+                pid_path = Path(tmpdir) / "test.pid"
+                pid_path.write_text(text)
+                self.assertIsNone(read_pid_file(pid_path))
+
+    def test_read_pid_file_reads_undecodable_bytes_as_corrupt(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pid_path = Path(tmpdir) / "test.pid"
+            pid_path.write_bytes(b"\xff\xfe")
+            self.assertIsNone(read_pid_file(pid_path))
+
+    def test_parse_pid_text_accepts_only_a_daemons_pid(self):
+        self.assertEqual(parse_pid_text("12345"), 12345)
+        self.assertEqual(parse_pid_text("12345\n"), 12345)
+        self.assertEqual(parse_pid_text(str(PID_MAX_LIMIT)), PID_MAX_LIMIT)
+        for text in ("0", "-5", "1", "", "a", "12 ", "\n12", str(PID_MAX_LIMIT + 1)):
+            with self.subTest(text=text):
+                self.assertIsNone(parse_pid_text(text))
 
     def test_read_pid_file_verify_daemon_accepts_daemon_process(self):
         """read_pid_file(verify_daemon=True) returns the PID when it IS a daemon."""

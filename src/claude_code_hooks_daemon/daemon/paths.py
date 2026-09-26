@@ -1997,6 +1997,33 @@ def is_daemon_pid(pid: int) -> bool:
     return _is_daemon_server_process(cmdline)
 
 
+#: Linux's PID_MAX_LIMIT: ``/proc/sys/kernel/pid_max`` can never exceed it,
+#: so a larger number names no process. Twin of init.sh's
+#: ``_HOOKS_DAEMON_PID_MAX``.
+PID_MAX_LIMIT = 4_194_304
+
+_PID_TEXT = re.compile(r"[1-9][0-9]{0,6}")
+
+
+def parse_pid_text(text: str) -> int | None:
+    """The pid a PID file's text names, or None when the file is CORRUPT.
+
+    Only the digits of one pid a daemon could hold qualify, optionally
+    followed by newlines (Plan 00466 round 4, Sh-B). ``0`` and negative
+    numbers are process GROUPS to ``kill(2)``, so ``kill -0`` on them
+    succeeds against the caller's own group; ``1`` is init; anything else is
+    not a pid. None of these can ever count as a running daemon. Twin of
+    init.sh's ``_hooks_daemon_is_pid_text``.
+    """
+    stripped = text.rstrip("\n")
+    if not _PID_TEXT.fullmatch(stripped):
+        return None
+    pid = int(stripped)
+    if pid <= 1 or pid > PID_MAX_LIMIT:
+        return None
+    return pid
+
+
 def read_pid_file(pid_path: Path | str, verify_daemon: bool = False) -> int | None:
     """
     Read PID from file and verify process is alive.
@@ -2006,16 +2033,23 @@ def read_pid_file(pid_path: Path | str, verify_daemon: bool = False) -> int | No
         verify_daemon: When True, additionally require that the live PID's
             command line identifies a daemon SERVER process (guards against a
             stale PID file pointing at an unrelated process after reboot /
-            PID reuse). The stale PID file is cleaned up in that case too.
+            PID reuse). That file is left in place: its pid is alive, and a
+            starting daemon overwrites it under the start lock.
 
     Returns:
         PID if file exists and process is alive (and, when ``verify_daemon`` is
-        set, is a daemon server), None otherwise
+        set, is a daemon server), None otherwise. A corrupt file
+        (:func:`parse_pid_text`) is never running.
     """
     pid_path = Path(pid_path)
     try:
         with pid_path.open() as f:
-            pid = int(f.read().strip())
+            text = f.read()
+
+        pid = parse_pid_text(text)
+        if pid is None:
+            logger.debug("Corrupt PID file %s: %r", pid_path, text)
+            return None
 
         if not is_pid_alive(pid):
             # Stale PID file, clean it up
@@ -2023,17 +2057,16 @@ def read_pid_file(pid_path: Path | str, verify_daemon: bool = False) -> int | No
             return None
 
         if verify_daemon and not is_daemon_pid(pid):
-            # Alive but NOT our daemon (PID reuse / stale file): treat as not
-            # running and remove the misleading PID file.
+            # Alive but NOT our daemon (PID reuse / stale file): not running.
+            # The file stays (round 4, N139-A): its pid is alive.
             logger.debug("PID %d in %s is alive but is not a daemon server", pid, pid_path)
-            cleanup_pid_file(pid_path, pid)
             return None
 
         return pid
     except FileNotFoundError:
         return None
-    except ValueError as e:
-        logger.debug("Invalid PID value in %s: %s", pid_path, e)
+    except UnicodeDecodeError as e:
+        logger.debug("Corrupt PID file %s: %s", pid_path, e)
         return None
     except (OSError, PermissionError) as e:
         logger.debug("Failed to read PID file %s: %s", pid_path, e)

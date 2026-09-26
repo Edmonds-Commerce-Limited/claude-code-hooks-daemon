@@ -399,3 +399,28 @@ class TestTheTransportDenyNamesThisInstallsLauncher:
         ]
         assert reason.startswith("BLOCKED [transport-fail-closed]"), reason
         assert reason.endswith(f"run: {root / launcher} restart"), reason
+
+    def test_a_launcher_that_manages_another_project_names_no_command(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """Plan 00466 round 4 (P3-2): the rule init.sh's carve-out applies.
+        Its launcher links into another project's install, which is what it
+        runs, so no command is known to recover this one."""
+        root = tmp_path / "proj"
+        other = tmp_path / "other" / ".claude" / "hooks-daemon" / "bin" / "hooks-daemon"
+        other.parent.mkdir(parents=True)
+        other.write_text("#!/bin/bash\n")
+        (root / "bin").mkdir(parents=True)
+        (root / "bin" / "hooks-daemon").symlink_to(other)
+        monkeypatch.setattr(ProjectContext, "_initialized", True, raising=False)
+        monkeypatch.setattr(
+            ProjectContext, "project_root", classmethod(lambda cls: root), raising=False
+        )
+        monkeypatch.setattr(
+            ProjectContext, "self_install_mode", classmethod(lambda cls: True), raising=False
+        )
+        reason = _pre_tool_use_transport_deny_response()["hookSpecificOutput"][
+            "permissionDecisionReason"
+        ]
+        assert "No daemon command is exempt" in reason, reason
+        assert "run:" not in reason, reason

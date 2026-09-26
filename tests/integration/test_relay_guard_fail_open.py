@@ -50,7 +50,11 @@ from claude_code_hooks_daemon.daemon.synthetic_traffic import (
     TEST_PROBE,
     ProbeThread,
 )
-from claude_code_hooks_daemon.install.forwarder_generator import generate_forwarder_content
+from claude_code_hooks_daemon.install.forwarder_generator import (
+    RELAY_DAEMON_ROOT_ENV,
+    generate_forwarder_content,
+)
+from claude_code_hooks_daemon.utils.cli_command import install_recovery_command
 
 #: A probe sent through a hook forwarder is marked (Plan 00466 N12).
 _MAIN_PROBE = {SYNTHETIC_SOURCE_FIELD: TEST_PROBE, PROBE_AS_FIELD: ProbeThread.MAIN.value}
@@ -314,6 +318,21 @@ def _run_relay(
         env=env,
         timeout=_TIMEOUT_SECONDS,
     )
+
+
+@pytest.mark.skipif(not _RELAY_BINARY.exists(), reason="no built relay binary on this machine")
+def test_an_over_cap_timeout_from_an_old_forwarder_is_clamped(tmp_path: Path) -> None:
+    """Plan 00466 round 4: a forwarder deployed before the config clamp still
+    passes its old ``--timeout-ms``; the relay takes the cap instead."""
+    over = (Timeout.RELAY_TIMEOUT_CAP + 1) * Timeout.MILLISECONDS_PER_SECOND
+    result = subprocess.run(
+        [str(_RELAY_BINARY), str(tmp_path / "absent.sock"), "--timeout-ms", str(over)],
+        input=b"{}",
+        capture_output=True,
+        timeout=_TIMEOUT_SECONDS,
+    )
+    cap_ms = Timeout.RELAY_TIMEOUT_CAP * Timeout.MILLISECONDS_PER_SECOND
+    assert f"--timeout-ms {over} is over the cap; using {cap_ms}".encode() in result.stderr
 
 
 @pytest.mark.skipif(not _RELAY_BINARY.exists(), reason="no built relay binary on this machine")
@@ -620,18 +639,26 @@ class TestTheRelaysOwnDenyNamesTheAbsoluteLauncher:
     command ``init.sh``'s denies do, the project's launcher by absolute path,
     so it can be run from any directory."""
 
-    def _own_deny_reason(self, project: Path, wedged: Path) -> str:
+    def _own_deny_reason(self, project: Path, wedged: Path, daemon_root: Path | None = None) -> str:
+        """The relay's own deny, with ``daemon_root`` handed over as the
+        generated forwarder hands it (none: a forwarder from before that)."""
         hooks = project / ".claude" / "hooks"
         hooks.mkdir(parents=True, exist_ok=True)
         failing = hooks / "pre-tool-use"
         failing.write_text("#!/bin/bash\ncat > /dev/null\nexit 3\n")
         failing.chmod(0o755)
-        result = _run_relay(wedged, _bash_call("true", project), "--fallback", str(failing))
+        env = {k: v for k, v in os.environ.items() if not k.startswith("HOOKS_DAEMON_")}
+        if daemon_root is not None:
+            env[RELAY_DAEMON_ROOT_ENV] = str(daemon_root)
+        result = _run_relay(
+            wedged, _bash_call("true", project), "--fallback", str(failing), env=env
+        )
         assert _relays_own_deny(result), result.stdout
         reason: str = json.loads(result.stdout)["hookSpecificOutput"]["permissionDecisionReason"]
         return reason
 
-    def _init_sh_command(self, project: Path, daemon_root: Path) -> str:
+    def _init_sh_command(self, project: Path, daemon_root: Path) -> str | None:
+        """What init.sh names, or None when it knows no exempt command."""
         shutil.copy(_INIT_SH, project / ".claude" / "init.sh")
         env = {k: v for k, v in os.environ.items() if not k.startswith("HOOKS_DAEMON_")}
         env["HOOKS_DAEMON_ROOT_DIR"] = str(daemon_root)
@@ -642,9 +669,78 @@ class TestTheRelaysOwnDenyNamesTheAbsoluteLauncher:
             capture_output=True,
             text=True,
             timeout=_TIMEOUT_SECONDS,
-            check=True,
+            check=False,
         )
+        if result.returncode == 3:
+            return None
+        assert result.returncode == 0, result.stderr
         return result.stdout.strip()
+
+    @staticmethod
+    def _layout(project: Path, layout: str) -> Path:
+        """Build ``layout`` at ``project``; returns its daemon root."""
+
+        def script(path: Path, body: str = "#!/bin/bash\n") -> None:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(body)
+
+        clone = project / _CLONE_LAUNCHER
+        root_launcher = project / "bin" / "hooks-daemon"
+        (project / ".claude").mkdir(parents=True)
+        if layout == "client":
+            script(clone)
+            return project / ".claude" / "hooks-daemon"
+        if layout == "client, own root tool":
+            script(clone)
+            script(root_launcher, "#!/bin/bash\necho the project's own\n")
+            return project / ".claude" / "hooks-daemon"
+        if layout == "client, no clone launcher, own root tool":
+            script(root_launcher, "#!/bin/bash\necho the project's own\n")
+            return project / ".claude" / "hooks-daemon"
+        if layout == "self-install, clone linked":
+            script(root_launcher)
+            clone.parent.mkdir(parents=True)
+            clone.symlink_to(root_launcher)
+            return project
+        if layout == "self-install, real clone file":
+            script(root_launcher)
+            script(clone)
+            return project
+        if layout == "root of another project":
+            other = project.parent / f"{project.name}-other"
+            script(other / _CLONE_LAUNCHER)
+            return other / ".claude" / "hooks-daemon"
+        raise AssertionError(layout)
+
+    @pytest.mark.parametrize(
+        "layout",
+        [
+            "client",
+            "client, own root tool",
+            "client, no clone launcher, own root tool",
+            "self-install, clone linked",
+            "self-install, real clone file",
+            "root of another project",
+        ],
+    )
+    @pytest.mark.parametrize("dirname", ["proj", "with space"])
+    def test_init_sh_the_relay_and_the_daemon_name_one_launcher(
+        self, tmp_path: Path, wedged_pretooluse_socket: Path, layout: str, dirname: str
+    ) -> None:
+        """Plan 00466 round 4 (P3-2): the relay named the first launcher FILE
+        that existed, so a client's own ``bin/hooks-daemon`` or a real file at
+        a self-install's clone path could be named while the carve-out denied
+        it. One rule, over one table, in all three."""
+        project = tmp_path / dirname
+        daemon_root = self._layout(project, layout)
+        from_init_sh = self._init_sh_command(project, daemon_root)
+        from_daemon = install_recovery_command(project, daemon_root, "restart")
+        reason = self._own_deny_reason(project, wedged_pretooluse_socket, daemon_root)
+        assert from_daemon == from_init_sh, (from_daemon, from_init_sh)
+        if from_init_sh is None:
+            assert "No daemon command is exempt" in reason, reason
+        else:
+            assert reason.endswith(f"run: {from_init_sh}"), reason
 
     @pytest.mark.parametrize(
         ("launcher", "daemon_root"),
@@ -667,8 +763,9 @@ class TestTheRelaysOwnDenyNamesTheAbsoluteLauncher:
         project = tmp_path / dirname
         (project / launcher).parent.mkdir(parents=True)
         (project / launcher).write_text("#!/bin/bash\n")
-        reason = self._own_deny_reason(project, wedged_pretooluse_socket)
+        reason = self._own_deny_reason(project, wedged_pretooluse_socket, project / daemon_root)
         command = self._init_sh_command(project, project / daemon_root)
+        assert command is not None
         assert command.endswith(" restart") and str(project) in command, command
         assert f"run: {command}" in reason, reason
 
@@ -676,7 +773,9 @@ class TestTheRelaysOwnDenyNamesTheAbsoluteLauncher:
         self, tmp_path: Path, wedged_pretooluse_socket: Path
     ) -> None:
         """Plan 00466 round 3 (m-A): ``cli.py``'s order. A client project's
-        own ``bin/hooks-daemon`` is not the daemon, so it is never named."""
+        own ``bin/hooks-daemon`` is not the daemon, so it is never named. No
+        daemon root is handed over, as from a forwarder generated before it
+        was: the relay then takes init.sh's default, the daemon clone."""
         project = tmp_path / "proj"
         for launcher in (_CLONE_LAUNCHER, "bin/hooks-daemon"):
             (project / launcher).parent.mkdir(parents=True)

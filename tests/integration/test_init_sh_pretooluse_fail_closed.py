@@ -21,6 +21,7 @@ import shutil
 import socket
 import struct
 import subprocess
+import sys
 import tempfile
 import threading
 from collections.abc import Iterator
@@ -30,6 +31,7 @@ from typing import Any
 import pytest
 
 from claude_code_hooks_daemon.constants import Timeout
+from claude_code_hooks_daemon.daemon.paths import PID_MAX_LIMIT
 from tests.dispatch_timeouts import DispatchTestTimeout
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -1166,6 +1168,86 @@ class TestOnlyThisInstallsLauncherIsExempt:
         assert f"{project / _INSTALL_LAUNCHER} restart" in context, context
 
 
+class TestADaemonRootOfAnotherProjectIsUnknown:
+    """Plan 00466 round 4 (P3-1): ``HOOKS_DAEMON_ROOT_DIR`` can be inherited
+    from whatever started Claude Code, or set in ``.claude/hooks-daemon.env``.
+    The launcher manages the project it derives from its own location, so a
+    root that names another project's install recovers that project, never
+    this one. Such a root is unknown: nothing is exempt, and the deny says
+    why and what a human can run."""
+
+    def _point_root_elsewhere(self, project: Path, tmp_path: Path) -> Path:
+        other = _make_project(tmp_path / "other")
+        (project / ".claude" / "hooks-daemon.env").write_text(
+            f'HOOKS_DAEMON_ROOT_DIR="{other / ".claude" / "hooks-daemon"}"\n'
+        )
+        return other
+
+    def test_the_other_installs_launcher_is_denied(
+        self, project: Path, tmp_path: Path, nonexistent_socket: Path
+    ) -> None:
+        other = self._point_root_elsewhere(project, tmp_path)
+        hook_input = _recovery_input(project, f"{other / _INSTALL_LAUNCHER} restart")
+        assert _denied(_send(project, nonexistent_socket, "PreToolUse", hook_input))
+
+    @pytest.mark.parametrize("launcher", _RECOVERY_LAUNCHERS)
+    def test_this_projects_launcher_is_denied_too(
+        self, project: Path, tmp_path: Path, nonexistent_socket: Path, launcher: str
+    ) -> None:
+        """Fail closed: which launcher recovers this project is unknown."""
+        self._point_root_elsewhere(project, tmp_path)
+        hook_input = _recovery_input(project, f"{launcher} restart")
+        assert _denied(_send(project, nonexistent_socket, "PreToolUse", hook_input))
+
+    def test_the_deny_names_the_mismatch_and_a_human_command(
+        self, project: Path, tmp_path: Path, nonexistent_socket: Path
+    ) -> None:
+        other = self._point_root_elsewhere(project, tmp_path)
+        response = _send(project, nonexistent_socket, "PreToolUse", _BASH_TOOL_INPUT)
+        context = response["hookSpecificOutput"]["additionalContext"]
+        assert "no daemon command is exempt" in context, context
+        assert f"({other / '.claude' / 'hooks-daemon'})" in context, context
+        assert f"! {project / _INSTALL_LAUNCHER} restart" in context, context
+        assert f"run exactly {other / _INSTALL_LAUNCHER}" not in context, context
+
+    def test_the_startup_deny_names_the_mismatch(
+        self, project: Path, tmp_path: Path, nonexistent_socket: Path
+    ) -> None:
+        self._point_root_elsewhere(project, tmp_path)
+        result = _run_script(
+            project,
+            "source .claude/init.sh; emit_hook_error PreToolUse daemon_startup_failed x",
+            _BASH_TOOL_INPUT,
+            socket_path=nonexistent_socket,
+        )
+        reason = json.loads(result.stdout)["hookSpecificOutput"]["permissionDecisionReason"]
+        assert "no daemon command is exempt" in reason, reason
+
+    def test_a_root_inherited_from_the_environment_is_checked_too(
+        self, project: Path, tmp_path: Path, nonexistent_socket: Path
+    ) -> None:
+        other = _make_project(tmp_path / "other")
+        (project / ".claude" / "hooks-daemon.env").unlink()
+        hook_input = _recovery_input(project, f"{other / _INSTALL_LAUNCHER} restart")
+        result = _run_script(
+            project,
+            "source .claude/init.sh; send_request_stdin PreToolUse",
+            hook_input,
+            socket_path=nonexistent_socket,
+            extra_env={"HOOKS_DAEMON_ROOT_DIR": str(other / ".claude" / "hooks-daemon")},
+        )
+        assert _verdict(result) == "deny"
+
+    def test_a_root_that_links_to_this_install_is_still_exempt(
+        self, project: Path, tmp_path: Path, nonexistent_socket: Path
+    ) -> None:
+        link = tmp_path / "linked-root"
+        link.symlink_to(project / ".claude" / "hooks-daemon")
+        (project / ".claude" / "hooks-daemon.env").write_text(f'HOOKS_DAEMON_ROOT_DIR="{link}"\n')
+        hook_input = _recovery_input(project, f"{_INSTALL_LAUNCHER} restart")
+        assert not _denied(_send(project, nonexistent_socket, "PreToolUse", hook_input))
+
+
 #: The real PreToolUse forwarder's body after it sources ``init.sh``.
 _FORWARDER_BODY = """
 if ! ensure_daemon; then
@@ -1356,15 +1438,19 @@ class TestIsDaemonRunningRemovesOnlyItsOwnStalePidFile:
     whenever its pid could not be signalled, even if a successor had written
     its own pid there in the meantime, orphaning that live daemon."""
 
-    #: Above the kernel's pid limit, so it never names a live process.
-    _UNREAL_PID = 2**22 + 7
+    #: A pid no process holds: the highest free one below the kernel's limit.
+    _UNREAL_PID = next(
+        pid for pid in range(PID_MAX_LIMIT - 1, 1, -1) if not Path(f"/proc/{pid}").exists()
+    )
 
     def _probe(
         self, project: Path, pid_path: Path, socket_path: Path, prelude: str = ""
     ) -> subprocess.CompletedProcess[str]:
+        """``is_daemon_running``'s status, with the daemon's helpers run by
+        this test's own interpreter (the fixture project has no venv)."""
         script = (
-            f"source .claude/init.sh\n{prelude}\n"
-            "if is_daemon_running; then echo rc=0; else echo rc=1; fi\n"
+            f"source .claude/init.sh\nPYTHON_CMD={sys.executable}\n{prelude}\n"
+            "if is_daemon_running; then echo rc=0; else echo rc=$?; fi\n"
         )
         return _run_script(
             project,
@@ -1374,11 +1460,48 @@ class TestIsDaemonRunningRemovesOnlyItsOwnStalePidFile:
             extra_env={"CLAUDE_HOOKS_PID_PATH": str(pid_path)},
         )
 
+    @staticmethod
+    def _eperm_prelude() -> str:
+        """Root may signal anything, so ``kill -0`` is shadowed with the
+        failure the builtin reports for EPERM."""
+        return (
+            'kill() { if [[ "$1" == "-0" ]]; then '
+            f'{_kill_failure_message(errno.EPERM)} return 1; fi; builtin kill "$@"; }}'
+        )
+
     def test_a_stale_pid_file_is_removed(
         self, project: Path, tmp_path: Path, nonexistent_socket: Path
     ) -> None:
         pid_path = tmp_path / "daemon.pid"
         pid_path.write_text(str(self._UNREAL_PID))
+        result = self._probe(project, pid_path, nonexistent_socket)
+        assert "rc=1" in result.stdout, result.stderr
+        assert not pid_path.exists()
+
+    def test_a_stale_pid_file_is_removed_only_through_the_start_lock(
+        self, project: Path, tmp_path: Path, nonexistent_socket: Path
+    ) -> None:
+        """Plan 00466 round 4 (Sh-A): a daemon start writes its pid under the
+        start lock, so the removal takes it too. A lock that cannot be opened
+        (here a planted symlink, refused) leaves the file."""
+        pid_path = tmp_path / "daemon.pid"
+        pid_path.write_text(str(self._UNREAL_PID))
+        target = tmp_path / "planted-target"
+        Path(f"{nonexistent_socket}.start.lock").symlink_to(target)
+        result = self._probe(project, pid_path, nonexistent_socket)
+        assert "rc=1" in result.stdout, result.stderr
+        assert pid_path.read_text() == str(self._UNREAL_PID)
+        assert not target.exists()
+
+    @pytest.mark.parametrize("text", ["0", "-1", "1", "", "007", "junk", str(PID_MAX_LIMIT + 1)])
+    def test_a_corrupt_pid_file_is_never_running_and_is_removed(
+        self, project: Path, tmp_path: Path, nonexistent_socket: Path, text: str
+    ) -> None:
+        """Plan 00466 round 4 (Sh-B): ``kill -0 0`` probes this shell's own
+        process group and succeeds, and pid 1 is init, so a file holding
+        either read as a daemon running for ever."""
+        pid_path = tmp_path / "daemon.pid"
+        pid_path.write_text(text)
         result = self._probe(project, pid_path, nonexistent_socket)
         assert "rc=1" in result.stdout, result.stderr
         assert not pid_path.exists()
@@ -1402,21 +1525,90 @@ class TestIsDaemonRunningRemovesOnlyItsOwnStalePidFile:
         assert "rc=1" in result.stdout, result.stderr
         assert pid_path.read_text() == successor
 
-    def test_a_pid_it_may_not_signal_is_alive_and_keeps_its_file(
+    def test_a_pid_it_may_not_signal_is_unknown_and_keeps_its_file(
         self, project: Path, tmp_path: Path, nonexistent_socket: Path
     ) -> None:
-        """Plan 00466 N139: ``kill -0`` on another user's process fails with
-        EPERM. The process exists, so the daemon is not provably down and the
-        PID file is not stale. Root may signal anything, so the builtin is
-        shadowed with the failure it reports for EPERM."""
+        """Plan 00466 N139, round 4 (N139-A): ``kill -0`` on another user's
+        process fails with EPERM. The process exists, so its PID file stays,
+        but nothing proves it is this daemon: the answer is unknown (2)."""
         pid_path = tmp_path / "daemon.pid"
         pid_path.write_text(str(self._UNREAL_PID))
-        prelude = (
-            'kill() { if [[ "$1" == "-0" ]]; then '
-            f'{_kill_failure_message(errno.EPERM)} return 1; fi; builtin kill "$@"; }}'
-        )
-        result = self._probe(project, pid_path, nonexistent_socket, prelude)
+        result = self._probe(project, pid_path, nonexistent_socket, self._eperm_prelude())
+        assert "rc=2" in result.stdout, result.stderr
+        assert pid_path.read_text() == str(self._UNREAL_PID)
+
+    def test_a_pid_it_may_not_signal_runs_when_the_socket_answers(
+        self, project: Path, tmp_path: Path
+    ) -> None:
+        pid_path = tmp_path / "daemon.pid"
+        pid_path.write_text(str(self._UNREAL_PID))
+        socket_dir = Path(tempfile.mkdtemp(prefix="hd-live-"))
+        listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        try:
+            listener.bind(str(socket_dir / "daemon.sock"))
+            listener.listen(1)
+            result = self._probe(
+                project, pid_path, socket_dir / "daemon.sock", self._eperm_prelude()
+            )
+        finally:
+            listener.close()
+            shutil.rmtree(socket_dir)
         assert "rc=0" in result.stdout, result.stderr
+
+    def test_a_pid_it_may_not_signal_runs_when_its_command_line_proves_it(
+        self, project: Path, tmp_path: Path, nonexistent_socket: Path
+    ) -> None:
+        """A process whose command line is this project's daemon server."""
+        daemon_like = subprocess.Popen(
+            [
+                sys.executable,
+                "-c",
+                "import sys; sys.stdin.read()",
+                "claude_code_hooks_daemon.daemon.cli",
+                "--project-root",
+                str(project),
+                "start",
+            ],
+            stdin=subprocess.PIPE,
+        )
+        try:
+            pid_path = tmp_path / "daemon.pid"
+            pid_path.write_text(str(daemon_like.pid))
+            result = self._probe(project, pid_path, nonexistent_socket, self._eperm_prelude())
+            assert "rc=0" in result.stdout, result.stderr
+        finally:
+            # Closing its stdin ends this test's own child; no signal is sent.
+            assert daemon_like.stdin is not None
+            daemon_like.stdin.close()
+            daemon_like.wait(timeout=Timeout.REQUEST_LONG)
+
+    def test_a_pid_it_may_not_signal_does_not_stop_an_auto_start(
+        self, project: Path, tmp_path: Path, nonexistent_socket: Path
+    ) -> None:
+        """Round 4 (N139-A): the hook started no daemon while the stale PID
+        file named another user's process, and every event lost its guards
+        until someone ran restart. ``cli start`` decides, under its REUSE gate."""
+        pid_path = tmp_path / "daemon.pid"
+        pid_path.write_text(str(self._UNREAL_PID))
+        marker = tmp_path / "start-attempted"
+        prelude = (
+            self._eperm_prelude()
+            + f"\nstart_daemon() {{ : > {marker}; return 0; }}\n"
+            + "_is_ci_environment() { return 1; }\n"
+        )
+        script = (
+            f"source .claude/init.sh\nPYTHON_CMD={sys.executable}\n{prelude}\n"
+            "if ensure_daemon; then echo rc=0; else echo rc=$?; fi\n"
+        )
+        result = _run_script(
+            project,
+            script,
+            None,
+            socket_path=nonexistent_socket,
+            extra_env={"CLAUDE_HOOKS_PID_PATH": str(pid_path)},
+        )
+        assert "rc=0" in result.stdout, result.stderr
+        assert marker.exists(), result.stderr
         assert pid_path.read_text() == str(self._UNREAL_PID)
 
     def test_a_pid_file_that_names_no_pid_is_removed(
@@ -1429,6 +1621,10 @@ class TestIsDaemonRunningRemovesOnlyItsOwnStalePidFile:
         result = self._probe(project, pid_path, nonexistent_socket)
         assert "rc=1" in result.stdout, result.stderr
         assert not pid_path.exists()
+
+    def test_the_client_pid_limit_matches_the_daemons(self) -> None:
+        """``init.sh``'s ``_HOOKS_DAEMON_PID_MAX`` is ``paths.PID_MAX_LIMIT``."""
+        assert f"_HOOKS_DAEMON_PID_MAX={PID_MAX_LIMIT}\n" in INIT_SH.read_text()
 
 
 def _kill_failure_message(error: int) -> str:
@@ -1568,3 +1764,53 @@ class TestADenyNeedsNoPython3:
         )
         result = _run_script(project, script, _BASH_TOOL_INPUT, socket_path=valid_empty_socket)
         assert result.stdout == "", result.stdout
+
+
+def _path_with_a_failing_python3(tmp_path: Path) -> str:
+    """A PATH whose python3 runs the real one, then exits 7 whatever it did,
+    as a flush error at interpreter shutdown would."""
+    real = shutil.which("python3")
+    assert real is not None
+    bin_dir = tmp_path / "bin-failing-python3"
+    bin_dir.mkdir()
+    wrapper = bin_dir / "python3"
+    wrapper.write_text(f'#!/bin/bash\n"{real}" "$@"\nexit 7\n')
+    wrapper.chmod(0o755)
+    return f"{bin_dir}:{os.environ['PATH']}"
+
+
+class TestAPython3ThatFailsAfterAnsweringGivesOneAnswer:
+    """Plan 00466 round 4 (D-PATH note on R2-1): the fixed deny was printed
+    whenever python3 exited non-zero, after anything it had already written,
+    so stdout could carry two JSON documents."""
+
+    def test_pretooluse_gets_the_fixed_deny_alone(
+        self, project: Path, tmp_path: Path, valid_empty_socket: Path
+    ) -> None:
+        script = (
+            "set -euo pipefail\nsource .claude/init.sh\n"
+            f"PATH={_path_with_a_failing_python3(tmp_path)}\n"
+            "send_request_stdin PreToolUse\n"
+        )
+        result = _run_script(project, script, _BASH_TOOL_INPUT, socket_path=valid_empty_socket)
+        assert _verdict(result) == "deny", result.stdout
+
+    def test_another_event_keeps_its_answer_byte_for_byte(
+        self, project: Path, tmp_path: Path, valid_empty_socket: Path
+    ) -> None:
+        plain = _run_script(
+            project,
+            "source .claude/init.sh\nsend_request_stdin PostToolUse\n",
+            _BASH_TOOL_INPUT,
+            socket_path=valid_empty_socket,
+        )
+        failing = _run_script(
+            project,
+            "source .claude/init.sh\n"
+            f"PATH={_path_with_a_failing_python3(tmp_path)}\n"
+            "send_request_stdin PostToolUse\n",
+            _BASH_TOOL_INPUT,
+            socket_path=valid_empty_socket,
+        )
+        assert plain.stdout.endswith("\n"), plain.stdout
+        assert failing.stdout == plain.stdout

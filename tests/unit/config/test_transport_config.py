@@ -120,6 +120,14 @@ class TestTheRelayTimeoutFitsTheHookTimeout:
         handoff_ms = int(match.group(1).replace("_", ""))
         assert handoff_ms == Timeout.RELAY_HANDOFF_BUDGET * Timeout.MILLISECONDS_PER_SECOND
 
+    def test_the_relay_clamps_to_the_same_cap(self) -> None:
+        """Plan 00466 round 4: a forwarder deployed before the config clamp
+        still passes its old ``--timeout-ms``, so the relay clamps it too."""
+        match = re.search(r"const TIMEOUT_CAP_MS: u64 = ([\d_]+);", _RELAY_SOURCE.read_text())
+        assert match is not None
+        cap_ms = int(match.group(1).replace("_", ""))
+        assert cap_ms == Timeout.RELAY_TIMEOUT_CAP * Timeout.MILLISECONDS_PER_SECOND
+
     def test_the_cap_itself_is_accepted(self) -> None:
         transport = TransportConfig(timeout_seconds=Timeout.RELAY_TIMEOUT_CAP)
         assert transport.timeout_seconds == Timeout.RELAY_TIMEOUT_CAP

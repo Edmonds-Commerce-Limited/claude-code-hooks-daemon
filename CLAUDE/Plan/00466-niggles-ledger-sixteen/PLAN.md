@@ -140,6 +140,9 @@ Full write-ups are in [NIGGLES.md](NIGGLES.md). One line each here:
 | N128 | Stop and the stale-PID checks delete a successor's PID file and socket                                         | Lifecycle D-PATH review (S2)                                    | ✅ Remedied                      |
 | N139 | `is_daemon_running` reads EPERM from `kill -0` as a dead daemon and removes its PID file                       | Lifecycle round 2 re-reviews (shared)                           | ✅ Remedied                      |
 | N140 | PreToolUse input the forwarder cannot parse is answered without a deny                                         | Lifecycle D-RULE re-review (shared)                             | ✅ Remedied                      |
+| N160 | `init.sh` removes a stale PID file outside the start lock                                                      | Lifecycle round 3 D-PATH re-review (Sh-A, shared)               | ✅ Remedied                      |
+| N161 | A PID file holding `0`, `1` or a negative number counts as a running daemon                                    | Lifecycle round 3 re-reviews (Sh-B, S-R3-1, shared)             | ✅ Remedied                      |
+| N162 | The start lock is opened through a symlink, and an unopenable lock escapes `stop`                              | Lifecycle round 3 D-PATH re-review (Sh-C, shared)               | ✅ Remedied                      |
 
 ## Tasks
 

@@ -12,12 +12,14 @@ Logging:
 import asyncio
 import contextlib
 import enum
+import errno
 import fcntl
 import json
 import logging
 import os
 import shutil
 import signal
+import stat
 import sys
 import time
 from collections.abc import Iterator
@@ -36,7 +38,7 @@ from claude_code_hooks_daemon.daemon.config import DaemonConfig
 from claude_code_hooks_daemon.daemon.memory_log_handler import MemoryLogHandler
 from claude_code_hooks_daemon.daemon.payload_capture import capture_payload, resolve_capture_dir
 from claude_code_hooks_daemon.utils import secret_file_matching as sfm
-from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command
+from claude_code_hooks_daemon.utils.cli_command import recovery_command
 from claude_code_hooks_daemon.utils.log_elision import elide_record_arguments
 from claude_code_hooks_daemon.utils.scratch_dir import ensure_scratch_dir
 from claude_code_hooks_daemon.utils.secret_redaction import get_active_secret_terms, redact_text
@@ -131,7 +133,15 @@ _TRANSPORT_FAIL_CLOSED_REASON: Final[str] = (
     "BLOCKED [transport-fail-closed]: the daemon could not produce a verdict "
     "for this request (payload could not be read, or an internal error "
     "occurred mid-dispatch). Denying out of caution -- this does not mean "
-    "the action itself is unsafe. If the daemon is wedged, run: "
+    "the action itself is unsafe. "
+)
+#: Followed by the exempt restart init.sh's carve-out accepts.
+_TRANSPORT_RECOVERY_COMMAND: Final[str] = "If the daemon is wedged, run: "
+#: When no launcher is known to recover this project (Plan 00466 round 4).
+_TRANSPORT_RECOVERY_UNKNOWN: Final[str] = (
+    "No daemon command is exempt from this deny: this daemon's root is not a "
+    "daemon install of its project, so no launcher is known to recover it. A "
+    "human must restart the daemon with the ! prefix."
 )
 
 
@@ -168,13 +178,15 @@ def _pre_tool_use_transport_deny_response() -> dict[str, Any]:
     ``HookResult._format_pre_tool_use_response`` emits for a real judged
     deny -- never the ambiguous ``{}`` a transport failure used to answer.
     """
+    restart = recovery_command("restart")
+    recovery = (
+        _TRANSPORT_RECOVERY_UNKNOWN if restart is None else _TRANSPORT_RECOVERY_COMMAND + restart
+    )
     return {
         "hookSpecificOutput": {
             "hookEventName": _PRE_TOOL_USE_WIRE_KEY,
             "permissionDecision": "deny",
-            "permissionDecisionReason": (
-                _TRANSPORT_FAIL_CLOSED_REASON + daemon_cli_command("restart")
-            ),
+            "permissionDecisionReason": _TRANSPORT_FAIL_CLOSED_REASON + recovery,
         }
     }
 
@@ -316,10 +328,25 @@ def start_lock_path(socket_path: Path) -> Path:
 
 
 def _open_start_lock(socket_path: Path) -> int:
-    """Open (creating) the start lock beside ``socket_path``; returns its fd."""
+    """Open (creating) the start lock beside ``socket_path``; returns its fd.
+
+    Refuses a symlink (Plan 00466 round 4, Sh-C): ``O_CREAT`` through a link
+    planted at the lock path would create or open the file it points at. The
+    lock must also be a regular file, which ``O_NOFOLLOW`` alone does not
+    promise. No ownership check: a host and a container sharing the
+    untracked directory run as different users and share this one lock,
+    and a lock is only ever flocked, never read, written or truncated.
+
+    Raises:
+        OSError: the lock could not be opened, or is not a regular file.
+    """
     lock_path = start_lock_path(socket_path)
     lock_path.parent.mkdir(parents=True, exist_ok=True)
-    return os.open(str(lock_path), os.O_RDWR | os.O_CREAT, 0o600)
+    fd = os.open(str(lock_path), os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600)
+    if not stat.S_ISREG(os.fstat(fd).st_mode):
+        os.close(fd)
+        raise OSError(errno.EINVAL, "the start lock is not a regular file", str(lock_path))
+    return fd
 
 
 @contextlib.contextmanager
