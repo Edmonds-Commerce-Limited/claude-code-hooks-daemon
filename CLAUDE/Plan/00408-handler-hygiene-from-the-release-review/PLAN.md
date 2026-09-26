@@ -153,7 +153,7 @@ gate — were fixed in 00407 and shipped. This plan is the remainder.
   `echo 'X'` and `bash -c 'X'` are structurally identical — a command with a
   quoted argument — so nothing in the text separates them. Only knowing that
   `echo` does not EXECUTE its argument does, which means an allowlist of inert
-  commands (`echo`, `printf`, `:`, `true`), applied per segment head.
+  commands (`echo`, `printf`, `:`, `true`), applied to the WHOLE command.
 
   Build it as an ALLOWLIST, per N7's rule: the safe error is withholding an
   exemption, because a missing entry costs a false positive while a wrong entry
@@ -162,20 +162,29 @@ gate — were fixed in 00407 and shipped. This plan is the remainder.
   growing a private copy — that divergence is what produced N2, N3 and N12 in
   the first place.
 
-  - Done. `blank_inert_command_arguments` and `INERT_COMMAND_HEADS` sit
-    beside `strip_inert_spans`. They are adopted by both guards and by
+  - Done. `is_wholly_inert_command` and `INERT_COMMAND_HEADS` sit beside
+    `strip_inert_spans`. They are adopted by both guards and by
     `plan_number_helper`'s mkdir rule, which had the same false positive.
     The echo-glob discovery rule does not adopt them, because
-    `echo CLAUDE/Plan/0*` IS the scan. All four heads were kept.
-    `echo -e` and `printf %b` only shape output. `printf -v` is refused in
-    any quoting. A segment that is piped, redirected or carries any `$` is
-    refused. A bare head only: every wrapper is refused. The whole command
-    is refused if it defines or reroutes a head (`alias`, a function,
-    `eval`, `source`/`.`, `exec`, `enable`), builds a head by expansion,
-    or holds grouping, a compound command or unbalanced quoting. Text after
-    a heredoc opener's line is never exempt. The shapes live in
-    `tests/support/inert_head_shapes.py` and are proved against the
-    utility and against each guard.
+    `echo CLAUDE/Plan/0*` IS the scan. All four heads were kept, because
+    `echo -e` and `printf %b` only shape output.
+  - The exemption is WHOLE-COMMAND. The raw command must be one simple
+    command: no control operator, pipe, `&`, grouping, line break or
+    redirection (so no heredoc) outside quotes. It must open with spaces or
+    tabs, then the bare, unquoted name, then a space or tab. No argument
+    may expand: no `$` or backtick outside single quotes, and no unquoted
+    `~`, `{`, `*`, `?`, `[` or `!`. A `printf` may take no option. Any other
+    command is judged exactly as it would be with no exemption.
+  - Why whole-command: the first design blanked each inert SEGMENT of a
+    compound command. A review walked past it through a later segment in
+    three ways: an escaped `#` read as a comment, `$_` re-running the echo's
+    argument, and a `trap` or `BASH_ALIASES` rebinding. Every bash feature
+    that reaches across segments is another such bypass, so the per-segment
+    helper was removed rather than patched. A compound that merely contains
+    an `echo` keeps its false positive, which is the cheap error. The shapes
+    live in `tests/support/inert_head_shapes.py` and are proved against the
+    utility and against each guard. They include the review's shapes and
+    its full coverage-gap list.
 
 - [x] ✅ **Task 3.4**: `plan_number_helper` uses literal-blanking as an
   existence filter, the same shape N12 corrected in its two siblings —
