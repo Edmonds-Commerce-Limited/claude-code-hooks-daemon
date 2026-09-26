@@ -22,7 +22,6 @@ scripts that open the file internally are NOT detectable at command-text
 level — see the plan's RESEARCH-read-routes.md class-(d) rows.
 """
 
-import errno
 import fnmatch
 import itertools
 import logging
@@ -1879,11 +1878,6 @@ def find_protected_mention_strict(command: str, patterns: tuple[str, ...]) -> st
     return None
 
 
-#: The ``OSError`` numbers that prove a glob expands to nothing, rather than
-#: that its expansion could not be completed (:func:`_expand_glob_token`).
-_PROOF_OF_ABSENCE_ERRNOS: Final[frozenset[int]] = frozenset({errno.ENOENT, errno.ENAMETOOLONG})
-
-
 def _expand_glob_token(
     token: str,
     patterns: tuple[str, ...],
@@ -1910,19 +1904,14 @@ def _expand_glob_token(
     heuristic stem-overlap match in ``find_protected_mention`` does not have.
 
     ``max_expansions`` bounds how many glob RESULTS are examined across all
-    bases before giving up unmatched (``None`` means unbounded, the
-    pre-existing behaviour) — a PreToolUse hot path must not pay for an
-    unbounded directory listing.
+    bases (``None`` means unbounded) — a PreToolUse hot path must not pay
+    for an unbounded directory listing. A result past the bound was never
+    examined, so it raises ``TooManyToEnumerateError`` rather than allowing.
 
-    M-1 (Plan 00466 review 3): a pattern carrying a recursive ``**``
-    component is walked through :func:`shell_expansion.bounded_recursive_glob`
-    instead of ``Path.glob`` — ``Path.glob("**/…")`` only counts YIELDED
-    matches, so a token whose final component matches NOTHING still walks
-    the entire tree before concluding, however large it is. A non-recursive
-    pattern keeps using ``Path.glob`` (a single directory listing bounds
-    its own cost; not the shape review 3 flagged). ``deadline`` is forwarded
-    to the bounded walker so it is checked INSIDE the filesystem walk, not
-    only between tokens.
+    Every pattern is walked by :func:`shell_expansion.bounded_recursive_glob`
+    (M-1, Plan 00466 review 3: a recursive ``**`` walk is capped on entries
+    VISITED, not matches yielded). ``deadline`` is forwarded to it so it is
+    checked INSIDE the filesystem walk, not only between tokens.
     """
     token_path = Path(token)
     if token_path.is_absolute():
@@ -1949,71 +1938,35 @@ def _expand_glob_token(
 
     seen: set[str] = set()
     examined = 0
+    # Fail CLOSED (team-lead's review-4 refinement): an expansion that could
+    # not be completed is not a decision this function made. The walker
+    # itself skips a lookup that proves absence (a missing prefix, or a
+    # component longer than any name can be) and collects every other
+    # failure here while it goes on examining the other branches and bases,
+    # so one failure never hides a later match (Plan 00466 N101 round 9).
+    # A protected match anywhere wins; otherwise the first collected
+    # failure propagates to the caller's own fail-closed wrapper.
+    # TooManyToEnumerateError, TimeoutError and ValueError propagate as
+    # they arise.
+    errors: list[OSError] = []
     for base, pattern_str in search_specs:
         key = f"{base}:{pattern_str}"
         if key in seen:
             continue
         seen.add(key)
-        # Any pattern rooted at the bare filesystem anchor goes through the
-        # bounded walker, whether or not it spells `**` literally -- own
-        # live finding, own RED test: `/*/*/*/*/*/*/*.se?ret-zq9x` (one of
-        # review 3's own probe shapes) carries no `**` at all but still
-        # forces `Path.glob` to expand a full directory listing at every
-        # one of several root-relative levels. `bounded_recursive_glob`
-        # itself decides whether THIS pattern is broad enough to refuse.
-        if "**" in pattern_str or base == Path(base.anchor):
-            # Own walk, own cap on entries VISITED (not just matched) --
-            # TooManyToEnumerateError/TimeoutError deliberately propagate
-            # uncaught here: both are fail-closed signals for the caller's
-            # own wrapper, not "this token expands to nothing".
-            matches_iter: Iterator[Path] = shell_expansion.bounded_recursive_glob(
-                base, pattern_str, deadline=deadline
-            )
-        else:
-            # `Path.glob` is a generator function: the call itself never
-            # raises. A pattern it rejects (`a**b`) raises ValueError on the
-            # FIRST ITERATION, and an unreadable directory raises OSError
-            # mid-walk, so the guard must wrap the consumption, not the
-            # construction (Plan 00357 — a guard around the call alone let
-            # the exception escape and fail the calling security handler
-            # open). Consumed lazily, still.
-            matches_iter = base.glob(pattern_str)
-        # Fail CLOSED (team-lead's review-4 refinement): a blanket
-        # `except (OSError, ValueError): continue` here would mean ANY
-        # expansion failure degrades to "no mention", which is exactly the
-        # class this whole review round has been closing everywhere else --
-        # an exception during evaluation is not a decision this function
-        # actually made. But NOT every OSError means the same thing: ENOENT
-        # is filesystem TRUTH ("this directory prefix does not exist, so
-        # nothing under it can be a mention"), narrow enough to prove a
-        # negative and continue searching other bases. Anything else
-        # (permission denied, an I/O error, ...) means the expansion could
-        # not be COMPLETED -- this function cannot rule out a match hiding
-        # behind whatever raised, so it must NOT be treated as "expands to
-        # nothing"; it propagates uncaught to the caller's own fail-closed
-        # wrapper (secret_file_guard's N11 net for the Bash-mention route
-        # this function backs). `ValueError` (a malformed pattern) is never
-        # a proof of absence either way, so it always propagates.
-        # ENAMETOOLONG proves absence too (Plan 00466 N117): no entry can
-        # carry a name past the filesystem's limit, and a shell naming that
-        # path fails the same way, so nothing is read through it.
-        try:
-            for match in matches_iter:
-                examined += 1
-                matched = first_matching_glob(str(match), patterns, project_root=project_root)
-                if matched is not None:
-                    return matched
-                if max_expansions is not None and examined >= max_expansions:
-                    return None
-        except OSError as exc:
-            if exc.errno not in _PROOF_OF_ABSENCE_ERRNOS:
-                raise
-            logger.debug(
-                "secret_file_matching: %r under %s does not exist, no match possible: %s",
-                pattern_str,
-                base,
-                exc,
-            )
+        for match in shell_expansion.bounded_recursive_glob(
+            base, pattern_str, deadline=deadline, errors=errors
+        ):
+            examined += 1
+            if max_expansions is not None and examined > max_expansions:
+                raise shell_expansion.TooManyToEnumerateError(
+                    f"glob {token!r} expands past {max_expansions} examined paths"
+                )
+            matched = first_matching_glob(str(match), patterns, project_root=project_root)
+            if matched is not None:
+                return matched
+    if errors:
+        raise errors[0]
     return None
 
 

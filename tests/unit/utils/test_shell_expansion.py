@@ -540,6 +540,64 @@ class TestBoundedRecursiveGlob:
             list(bounded_recursive_glob(tmp_path, "**/*.zzz-marker-9f2c", max_entries_visited=100))
 
 
+class TestGlobErrorsAreCollectedPerBranch:
+    """Plan 00466 N101 round 9 (review 8 BLOCKER 1): one failed lookup must
+    not end the walk. With an ``errors`` list the walker records the error,
+    keeps examining every other branch, and leaves the verdict to the
+    caller."""
+
+    def test_an_unreadable_sibling_does_not_hide_a_later_match(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        (tmp_path / "a").mkdir()
+        (tmp_path / "b").mkdir()
+        (tmp_path / "b" / "f.zzz-marker-9f2c").touch()
+        real_scandir = os.scandir
+
+        def _fake_scandir(path: str | os.PathLike[str]) -> Iterator[os.DirEntry[str]]:
+            if Path(path) == tmp_path / "a":
+                raise PermissionError(errno.EACCES, "Permission denied")
+            return real_scandir(path)
+
+        monkeypatch.setattr(
+            "claude_code_hooks_daemon.utils.shell_expansion.os.scandir", _fake_scandir
+        )
+        errors: list[OSError] = []
+        matches = list(bounded_recursive_glob(tmp_path, "*/*.zzz-marker-9f2c", errors=errors))
+        assert [match.name for match in matches] == ["f.zzz-marker-9f2c"]
+        assert [error.errno for error in errors] == [errno.EACCES]
+
+    def test_a_whole_path_overflow_is_an_error_not_an_absence(self, tmp_path: Path) -> None:
+        """Every component is short; only the joined path is past PATH_MAX."""
+        long_dir = "d" * 200
+        (tmp_path / long_dir).mkdir()
+        pattern = f"{long_dir}/../" * 25 + "*.zzz-marker-9f2c"
+        errors: list[OSError] = []
+        assert list(bounded_recursive_glob(tmp_path, pattern, errors=errors)) == []
+        assert [error.errno for error in errors] == [errno.ENAMETOOLONG]
+        with pytest.raises(OSError) as raised:
+            list(bounded_recursive_glob(tmp_path, pattern))
+        assert raised.value.errno == errno.ENAMETOOLONG
+
+    def test_a_single_name_past_the_name_limit_is_an_absence(self, tmp_path: Path) -> None:
+        """No entry can carry that name, and bash opens the same component."""
+        errors: list[OSError] = []
+        pattern = "a" * 300 + "/*.zzz-marker-9f2c"
+        assert list(bounded_recursive_glob(tmp_path, pattern, errors=errors)) == []
+        assert errors == []
+
+    def test_a_wildcard_component_past_the_name_limit_is_matched_not_opened(
+        self, tmp_path: Path
+    ) -> None:
+        """Bash matches a wildcard component against directory entries; it
+        never opens it, so its length proves nothing."""
+        (tmp_path / "f.zzz-marker-9f2c").touch()
+        pattern = "*" * 300 + ".zzz-marker-9f2c"
+        assert [match.name for match in bounded_recursive_glob(tmp_path, pattern)] == [
+            "f.zzz-marker-9f2c"
+        ]
+
+
 class TestIterNormalisedShellWordsNestedCommands:
     """n466-n24 review 5 minor-1: a `bash -c '…'`/`sh -c '…'`/`eval '…'`
     ARGUMENT is itself a nested shell command, whose own quotes only

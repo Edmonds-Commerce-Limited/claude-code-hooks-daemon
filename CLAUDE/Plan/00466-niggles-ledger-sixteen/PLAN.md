@@ -145,6 +145,7 @@ Full write-ups are in [NIGGLES.md](NIGGLES.md). One line each here:
 | N115 | A `}` before the first comma of a quote-free brace word hides a brace-spelled path                             | N101 review 7 (D-SEC)                                           | ✅ Remedied (n101 branch)        |
 | N116 | A here-string's `<<<` is read as a heredoc opener from its second `<`                                          | N101 review 7 (D-SEC, D-RULE)                                   | ✅ Remedied (n101 branch)        |
 | N117 | A glob under a name too long to exist fails `secret_file_guard` closed with ENAMETOOLONG                       | N101 fix 8                                                      | ✅ Remedied (n101 branch)        |
+| N120 | A shell parse failure on a later line hides every write target before it                                       | N101 review 8 (D-RULE)                                          | 🔄 In progress (n101 branch)     |
 
 ## Tasks
 

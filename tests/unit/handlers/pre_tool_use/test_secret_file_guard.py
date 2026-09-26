@@ -1967,6 +1967,16 @@ def _through_chain(tool_name: str, tool_input: dict[str, Any]) -> tuple[Decision
     return result.result.decision, result.result.reason or ""
 
 
+def _through_chain_at(
+    tool_name: str, tool_input: dict[str, Any], cwd: Path
+) -> tuple[Decision, str]:
+    chain = HandlerChain()
+    chain.add(_handler())
+    hook_input = {**_hook_input(tool_name, tool_input), "cwd": str(cwd)}
+    result = chain.execute(hook_input, strict_mode=False)
+    return result.result.decision, result.result.reason or ""
+
+
 class TestTextTheShellNeverExpandsIsNotEnumerated:
     """Plan 00466 N101: an ordinary `python3 - <<'EOF'` program failed the
     guard CLOSED with TooManyToEnumerateError. Its body is handed to python
@@ -2786,6 +2796,35 @@ class TestRoundSevenFindingsAreClosed:
         exists."""
         command = "ls " + "a" * 300 + "/*.rest"
         decision, reason = _through_chain("Bash", {"command": command})
+        assert decision != Decision.DENY, reason
+
+    def test_a_relative_glob_past_path_max_once_joined_denies(self, tmp_path: Path) -> None:
+        """Review 8 BLOCKER 1, the reviewer's shape: `..` repeats through
+        one real long-named directory keep the relative word under
+        PATH_MAX, so bash opens it and reads the file, while the hook-cwd
+        join is over PATH_MAX."""
+        long_dir = "d" * 57
+        (tmp_path / long_dir).mkdir()
+        (tmp_path / "untracked").mkdir()
+        (tmp_path / "untracked" / "x.secret").touch()
+        tail = "untracked/*ecre*"
+        word = f"{long_dir}/../" * ((4095 - len(tail)) // (len(long_dir) + 4)) + tail
+        assert len(word) < 4096 < len(str(tmp_path)) + 1 + len(word)
+        decision, reason = _through_chain_at("Bash", {"command": f"cat {word}"}, tmp_path)
+        assert decision == Decision.DENY, reason
+        assert RuleID.SECRET_EVALUATION_ERROR in reason
+
+    def test_an_absolute_glob_past_path_max_denies(self, tmp_path: Path) -> None:
+        long_dir = "d" * 200
+        (tmp_path / long_dir).mkdir()
+        word = f"{tmp_path}/" + f"{long_dir}/../" * 21 + "*ecre*"
+        assert len(word) > 4096
+        decision, reason = _through_chain_at("Bash", {"command": f"cat {word}"}, tmp_path)
+        assert decision == Decision.DENY, reason
+
+    def test_a_single_name_past_the_name_limit_stays_allowed(self, tmp_path: Path) -> None:
+        word = "n" * 300 + "/*ecre*"
+        decision, reason = _through_chain_at("Bash", {"command": f"cat {word}"}, tmp_path)
         assert decision != Decision.DENY, reason
 
     def test_a_protected_path_beside_a_name_too_long_to_exist_still_denies_n117(self) -> None:

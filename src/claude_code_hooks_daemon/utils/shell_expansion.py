@@ -32,10 +32,11 @@ import itertools
 import logging
 import os
 import re
+import stat
 import time
 import tokenize
 from collections.abc import Iterator
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Final, NamedTuple
 
@@ -4005,6 +4006,7 @@ def bounded_recursive_glob(
     *,
     max_entries_visited: int = DEFAULT_MAX_GLOB_ENTRIES_VISITED,
     deadline: float | None = None,
+    errors: list[OSError] | None = None,
 ) -> Iterator[Path]:
     """Lazily yield paths under ``base`` matching ``pattern`` (which may
     contain a recursive ``**`` component), bounded by entries VISITED.
@@ -4038,6 +4040,13 @@ def bounded_recursive_glob(
     once per entry visited -- covering the walk ITSELF, not merely the
     per-token loop around it, which is exactly the gap review 3 found in
     the pre-existing per-token-only deadline check.
+
+    The walk goes one pattern component at a time (``_GlobWalk``). A failed
+    lookup that proves nothing about the target (permission denied, an I/O
+    error, a joined path past PATH_MAX) is an error. With ``errors=None``
+    the first such error propagates. With a list, it is appended and every
+    other branch is still walked, so one bad sibling cannot hide the rest;
+    the caller then decides (Plan 00466 N101 round 9).
     """
     is_root = bool(base.anchor) and str(base) == base.anchor
     if is_root:
@@ -4048,99 +4057,153 @@ def bounded_recursive_glob(
             raise TooManyToEnumerateError(
                 f"refusing to walk a broad glob rooted at the filesystem root: {base}/{pattern}"
             )
-    if _RECURSIVE_MARKER not in pattern:
-        # No recursive component: a single directory listing bounds the
-        # cost naturally (the pre-existing, non-flagged behaviour).
-        # `base.glob(pattern)` is a generator: a malformed pattern raises
-        # ValueError, an unreadable directory raises OSError, both on first
-        # iteration -- deliberately NOT caught here. Every current caller of
-        # this function reaches it through `_expand_glob_token`'s own
-        # ENOENT-narrow fail-closed wrapper around consuming this same
-        # iterator (Plan 00272/00357, Plan 00466 n466-n24 review 4), so
-        # catching a second time here would only duplicate that decision,
-        # not add one.
-        yield from base.glob(pattern)
-        return
+    walk = _GlobWalk(
+        parts=[part for part in pattern.split("/") if part],
+        errors=errors,
+        # A pattern with no `**` lists at most one directory per literal
+        # prefix, which bounds its own cost; only a recursive walk is capped.
+        max_entries_visited=max_entries_visited if _RECURSIVE_MARKER in pattern else None,
+        deadline=deadline,
+    )
+    if walk.parts:
+        yield from walk.select(base, 0)
 
-    parts = pattern.split("/")
+
+#: ``OSError`` numbers that prove a looked-up path does not exist, so no
+#: shell naming it can read anything through it. They are the lookups
+#: pathlib's own glob ignored.
+_ABSENT_ERRNOS: Final[frozenset[int]] = frozenset({errno.ENOENT, errno.ENOTDIR, errno.ELOOP})
+
+#: Name limit assumed when the filesystem cannot be asked (``PC_NAME_MAX``).
+_FALLBACK_NAME_MAX: Final[int] = 255
+
+
+def _name_max(directory: Path) -> int:
+    """The longest entry name ``directory``'s filesystem allows."""
     try:
-        marker_index = parts.index(_RECURSIVE_MARKER)
-    except ValueError:
-        # `**` occurs as a SUBSTRING of one segment (`a**b`) rather than as
-        # its own path component (`a/**/b`) -- not a recursive marker in
-        # the glob-syntax sense, so the whole pattern is treated as the
-        # (non-recursive) suffix with no prefix to descend through first.
-        logger.debug(
-            "shell_expansion: %r contains '**' but not as its own path segment; "
-            "treating as non-recursive",
-            pattern,
-        )
-        marker_index = -1
-    prefix_parts = parts[:marker_index] if marker_index >= 0 else []
-    suffix_pattern = "/".join(parts[marker_index + 1 :]) if marker_index >= 0 else pattern
+        limit = os.pathconf(directory, "PC_NAME_MAX")
+    except (OSError, ValueError) as exc:
+        logger.debug("shell_expansion: no PC_NAME_MAX for %r: %s", directory, exc)
+        return _FALLBACK_NAME_MAX
+    return limit if limit > 0 else _FALLBACK_NAME_MAX
 
-    start_dir = base.joinpath(*prefix_parts) if prefix_parts else base
-    if not start_dir.is_dir():
-        return
 
-    visited = 0
-    stack: list[Path] = [start_dir]
-    while stack:
-        current = stack.pop()
+def _is_glob_component(part: str) -> bool:
+    return any(char in part for char in "*?[")
+
+
+@dataclass
+class _GlobWalk:
+    """One glob walk: its pattern components and its per-call bookkeeping."""
+
+    parts: list[str]
+    errors: list[OSError] | None
+    max_entries_visited: int | None
+    deadline: float | None
+    visited: int = 0
+    listings: dict[Path, list[os.DirEntry[str]]] = field(default_factory=dict)
+
+    def select(self, directory: Path, index: int) -> Iterator[Path]:
+        """Paths under ``directory`` matching ``parts[index:]``."""
+        part = self.parts[index]
+        last = index == len(self.parts) - 1
+        if part == _RECURSIVE_MARKER:
+            yield from self._select_recursive(directory, index, last)
+        elif _is_glob_component(part):
+            yield from self._select_wildcard(directory, index, last)
+        else:
+            yield from self._select_literal(directory, index, last)
+
+    def _select_literal(self, directory: Path, index: int, last: bool) -> Iterator[Path]:
+        # Bash opens a literal component by name, so the lookup is the
+        # same one the shell makes (apart from the base prefix).
+        part = self.parts[index]
+        candidate = directory / part
         try:
-            entries = list(os.scandir(current))
+            status = candidate.lstat() if last else candidate.stat()
         except OSError as exc:
-            if exc.errno != errno.ENOENT:
-                # A directory that could not be READ (permission denied, an
-                # I/O error, ...) is not proof there is nothing inside it --
-                # this walk cannot rule out a protected-path mention hiding
-                # behind whatever raised, so it must NOT be silently treated
-                # as "contributes nothing" (Plan 00466 n466-n24 review 4).
-                # Propagates out of this generator to whichever caller is
-                # consuming it -- currently always `_expand_glob_token`,
-                # itself uncaught there, reaching the SAFETY guard's own
-                # fail-closed wrapper.
-                raise
-            # ENOENT is filesystem TRUTH: the directory was removed between
-            # being found as an entry and being scanned (a race), or never
-            # existed -- either way there is nothing under it to find, so
-            # skipping it proves a negative rather than masking a failure.
-            logger.debug("shell_expansion: %r no longer exists: %s", current, exc)
-            continue
-        for entry in entries:
-            if deadline is not None and time.monotonic() > deadline:
+            self._record(exc, directory, part)
+            return
+        if last:
+            yield candidate
+        elif stat.S_ISDIR(status.st_mode):
+            yield from self.select(candidate, index + 1)
+
+    def _select_wildcard(self, directory: Path, index: int, last: bool) -> Iterator[Path]:
+        # A wildcard component is matched against the directory's entries;
+        # bash never opens it, so its own length proves nothing.
+        part = self.parts[index]
+        for entry in self._list(directory):
+            if not fnmatch.fnmatchcase(entry.name, part):
+                continue
+            if last:
+                yield Path(entry.path)
+            elif self._is_dir(entry, follow_symlinks=True):
+                yield from self.select(Path(entry.path), index + 1)
+
+    def _select_recursive(self, directory: Path, index: int, last: bool) -> Iterator[Path]:
+        # `**` stands for zero or more directories (a superset of bash's
+        # own reading, with or without globstar). Huge or ignored trees
+        # are not descended into.
+        if not last:
+            yield from self.select(directory, index + 1)
+        for entry in self._list(directory):
+            if last:
+                yield Path(entry.path)
+            if entry.name in _PRUNED_DIR_NAMES:
+                continue
+            if self._is_dir(entry, follow_symlinks=False):
+                yield from self._select_recursive(Path(entry.path), index, last)
+
+    def _list(self, directory: Path) -> list[os.DirEntry[str]]:
+        # A `**` walk reaches each directory twice (as zero directories
+        # and as a descent), so each listing is read and counted once.
+        cached = self.listings.get(directory)
+        if cached is not None:
+            return cached
+        try:
+            entries = list(os.scandir(directory))
+        except OSError as exc:
+            self._record(exc, directory, None)
+            entries = []
+        self.listings[directory] = entries
+        for _entry in entries:
+            if self.deadline is not None and time.monotonic() > self.deadline:
                 raise TimeoutError("bounded_recursive_glob exceeded its deadline")
-            visited += 1
-            if visited > max_entries_visited:
-                raise TooManyToEnumerateError(
-                    f"glob walk under {start_dir} exceeded {max_entries_visited} " "entries visited"
-                )
-            entry_path = Path(entry.path)
-            try:
-                is_dir = entry.is_dir(follow_symlinks=False)
-            except OSError as exc:
-                # A stat race (the entry was removed between scandir and
-                # this check) means there is nothing left to descend into
-                # -- treated as a file, not a directory, so it is still
-                # tried against the leaf pattern below rather than dropped
-                # outright.
-                logger.debug("shell_expansion: could not stat %r: %s", entry_path, exc)
-                is_dir = False
-            if is_dir:
-                if entry.name in _PRUNED_DIR_NAMES:
-                    continue
-                stack.append(entry_path)
-            if _fnmatch_leaf(entry.name, suffix_pattern):
-                yield entry_path
+            if self.max_entries_visited is not None:
+                self.visited += 1
+                if self.visited > self.max_entries_visited:
+                    raise TooManyToEnumerateError(
+                        f"glob walk under {directory} exceeded "
+                        f"{self.max_entries_visited} entries visited"
+                    )
+        return entries
 
+    def _is_dir(self, entry: os.DirEntry[str], *, follow_symlinks: bool) -> bool:
+        try:
+            return entry.is_dir(follow_symlinks=follow_symlinks)
+        except OSError as exc:
+            self._record(exc, Path(entry.path).parent, entry.name)
+            return False
 
-def _fnmatch_leaf(name: str, pattern: str) -> bool:
-    """True when ``name`` matches ``pattern``'s final path component.
+    def _record(self, exc: OSError, directory: Path, component: str | None) -> None:
+        """Skip a lookup that proves absence; otherwise record or raise.
 
-    A ``**``-anchored glob's remaining pattern may still contain further
-    ``/`` components (rare in practice for a mention scan, but not
-    impossible); only the LEAF name is meaningful for a single directory
-    entry, so a multi-component suffix is reduced to its last segment.
-    """
-    leaf_pattern = pattern.rsplit("/", maxsplit=1)[-1]
-    return fnmatch.fnmatch(name, leaf_pattern)
+        ENAMETOOLONG proves absence only when the component bash would
+        open is longer than the filesystem's name limit. A joined path past
+        PATH_MAX is a fact about this walk's base, not about the target:
+        bash, opening the relative word, can still read it.
+        """
+        if exc.errno in _ABSENT_ERRNOS:
+            logger.debug("shell_expansion: %r under %r is absent: %s", component, directory, exc)
+            return
+        if (
+            exc.errno == errno.ENAMETOOLONG
+            and component is not None
+            and len(os.fsencode(component)) > _name_max(directory)
+        ):
+            logger.debug("shell_expansion: %r is longer than any name can be", component)
+            return
+        if self.errors is None:
+            raise exc
+        self.errors.append(exc)

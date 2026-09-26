@@ -19,6 +19,7 @@ import pytest
 from claude_code_hooks_daemon.constants import HandlerID, Priority
 from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.core import Decision
+from claude_code_hooks_daemon.core.chain import HandlerChain
 from claude_code_hooks_daemon.core.data_layer import reset_data_layer
 from claude_code_hooks_daemon.core.rule import Rule
 from claude_code_hooks_daemon.handlers.pre_tool_use.quarantine_artefact_read_guard import (
@@ -318,6 +319,41 @@ class TestBashGlobTokenExpansion:
         monkeypatch.chdir(tmp_path)
         payload = _hook_input("Bash", {"command": "cat docs/a**b.md topic-opus-security-DETAIL.md"})
         assert handler.matches(payload) is True
+
+    def test_a_relative_glob_past_path_max_once_joined_denies(
+        self,
+        handler: QuarantineArtefactReadGuardHandler,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Plan 00466 N101 round 9 (review 8 BLOCKER 1), strict route: the
+        relative word is under PATH_MAX and bash reads the artefact, while
+        the base-joined path is over it."""
+        long_dir = "d" * 57
+        (tmp_path / long_dir).mkdir()
+        (tmp_path / "topic-opus-security-DETAIL.md").write_text("raw")
+        word = f"{long_dir}/../" * ((4095 - len("*.md")) // (len(long_dir) + 4)) + "*.md"
+        assert len(word) < 4096 < len(str(tmp_path)) + 1 + len(word)
+        monkeypatch.chdir(tmp_path)
+        chain = HandlerChain()
+        chain.add(handler)
+        result = chain.execute(
+            _hook_input("Bash", {"command": f"grep -c pattern {word}"}), strict_mode=False
+        )
+        assert result.result.decision == Decision.DENY, result.result.reason
+
+    def test_a_single_name_past_the_name_limit_stays_allowed(
+        self,
+        handler: QuarantineArtefactReadGuardHandler,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.chdir(tmp_path)
+        chain = HandlerChain()
+        chain.add(handler)
+        command = "grep -c pattern " + "n" * 300 + "/*.md"
+        result = chain.execute(_hook_input("Bash", {"command": command}), strict_mode=False)
+        assert result.result.decision != Decision.DENY, result.result.reason
 
     def test_literal_detail_artefact_token_still_matches_without_filesystem(
         self, handler: QuarantineArtefactReadGuardHandler

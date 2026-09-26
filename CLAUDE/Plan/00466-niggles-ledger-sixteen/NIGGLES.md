@@ -711,6 +711,48 @@ name, no monkeypatch), and through `HandlerChain`
 all RED on main 01827942b. The corpus is back to round 7's verdicts: 85
 allowed, 54 `R-SECRET-BASH-MENTION`, 1 `R-SECRET-EVALUATION-ERROR`.
 
+**Narrowed in N101 round 9 (review 8 BLOCKER 1).** The kernel raises
+ENAMETOOLONG for two causes, and only one proves absence. The expander joins
+a relative word onto an absolute base, so a word bash opens under PATH_MAX
+(`..` repeats through one real long-named directory) can be over it once
+joined; round 8 read that as "no file" and allowed a real read. Every glob is
+now walked one component at a time (`shell_expansion._GlobWalk`, behind
+`bounded_recursive_glob`). ENAMETOOLONG proves absence only when the literal
+component bash would open is longer than `PC_NAME_MAX` (255 when the
+filesystem cannot be asked). Any other failure is collected while every
+other branch and base is still walked: a protected match anywhere denies on
+the match, and otherwise the first failure propagates and the guard fails
+closed. A result past the examination cap now raises instead of allowing.
+The quarantine guard's strict route uses the same expander. Tests, RED at
+b0a926b4f: `TestGlobErrorsAreCollectedPerBranch`, four new cases in
+`TestExpandGlobTokenErrorHandling`, the reviewer's shape through
+`HandlerChain` in both guards, plus an absolute whole-path overflow; the
+over-long single name stays allowed.
+
+### N120 — A shell parse failure on a later line hides every write target before it
+
+**Found by N101 review 8 (MAJOR 2 and shared MAJOR 3); main has it too.**
+`core/utils.py` `_tokenise` returns `[]` when shlex raises, so an unbalanced
+quote on any later line hides every write target, although bash runs every
+complete line before the bad one. `echo x > /opt/o.md` followed by a line
+`x="u` is allowed by `project_containment` on main and on the branch. The
+heredoc delimiter grammar makes it reachable with ordinary prose:
+`_HEREDOC_RE` accepts only `\w+`, so `<<'my-notes'`, `<<'EOF-1'`,
+`<<'END.MD'` and `<<\EOF` are not recognised, and an apostrophe in the body
+reaches shlex. On the branch, N116's `(?<!<)` also exposes
+`cat > /opt/n.md <<<'EOF'` followed by an unbalanced line.
+
+**Remedy (team-lead ruling, round 9):** judge the command line by line or by
+complete command, so every complete command before the unparseable point is
+judged; when any part still cannot be tokenised, return an "unknown targets"
+result that `project_containment` and every other write-denying caller fails
+closed on, and correct the `_tokenise` docstring. One shared delimiter parser
+following bash's grammar (any word, quoted or unquoted, including `EOF-1`,
+`END.MD`, `\EOF`, `'my-notes'`) replaces the delimiter regexes in
+`core/utils.py`, `shell_segmentation.py` and `background_process_tracker.py`,
+and gives `bash_file_writes.py`'s `_heredoc` marker the `<<<` lookbehind it
+lacks (review 8 minor 4).
+
 ### N116 — ✅ Remedied (n101 branch) — A here-string's `<<<` is read as a heredoc opener from its second `<`
 
 **Found by the N101 round-7 D-SEC and D-RULE reviews** (shared MAJOR,
