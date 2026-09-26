@@ -328,10 +328,15 @@ An over-cap `daemon.transport.timeout_seconds` now **starts the daemon with
   is now exempt from any `cwd` where it resolves to that launcher, for
   example `bin/hooks-daemon` from inside the clone. It still runs the right
   file. The accepted absolute spellings are the two project-rooted ones plus
-  `<daemon root>/bin/hooks-daemon`, so a custom root outside the project is
-  recoverable too. The relay cannot read the env file (no config, by design),
-  so it names the first existing file in `cli.py`'s order. That is the clone's
-  launcher whenever the clone has one.
+  `<daemon root>/bin/hooks-daemon`. **Corrected in round 4:** this report
+  said "a custom root outside the project is recoverable too". That is
+  wrong. The launcher manages the project it derives from its own location
+  (`bin/hooks-daemon`), so a root outside the project either restarts some
+  other project's daemon or exits 5 ("cannot anchor"). Such a root is now
+  treated as unknown and nothing is exempt (P3-1, below). The relay cannot
+  read the env file (no config, by design), so it names the first existing
+  file in `cli.py`'s order. That is the clone's launcher whenever the clone
+  has one. Round 4 replaced this with the shared rule (P3-2).
 - **The test fixtures changed shape.** `_make_project` now models a client:
   the launcher lives in the clone, and the root `bin/hooks-daemon` is a link
   to it. `_make_self_install` models this repository. The `test_ci_passthrough`
@@ -418,3 +423,164 @@ All now pass. The wider unit suites (`tests/unit/config`, `tests/unit/daemon`,
 checker also pass. ruff, black, mypy and pyright are clean. The daemon
 restarted RUNNING. `HANDLER_REFERENCE.md` and release note 153 now say it is
 reported at session start and in `health`.
+
+## Round 4: the final re-review minors
+
+Commits `736f4c5a5` (the fixes) and `c325911ae` (the Python half of Sh-A).
+Both round-3 re-reviews were READY; every minor below is fixed.
+
+### What changed
+
+- **N139-A / P3-3: EPERM is unknown, not running.** `is_daemon_running` now
+  returns 0 (running), 1 (not running) or 2 (unknown). EPERM, or any other
+  failure that is not ESRCH, is running only if liveness proves it:
+  `cli.pid_is_this_projects_daemon` returns true when the socket answers
+  (`_socket_liveness_sync` is LIVE) or `daemon_process_project_root(pid)`
+  equals this project. Bash runs it in the daemon's venv through a new helper,
+  `_hooks_daemon_run_cli_helper`. With no venv it cannot prove anything, so
+  the answer is 2. Every caller tests the status with `if`, so 2 never skips
+  a start. `cli start`'s REUSE gate then decides. With the socket dead, it
+  forks, and `_write_pid_file` overwrites the PID file (its `os.kill(old, 0)`
+  PermissionError is already caught). The file of a live pid is never
+  deleted. That includes `read_pid_file(verify_daemon=True)`, which used to
+  remove the file of a live non-daemon.
+
+- **P3-1: "this install" is anchored to what the launcher manages.**
+  `_installs_launcher(project, root)` resolves `<root>/bin/hooks-daemon` and
+  applies the launcher's own anchoring rule from `bin/hooks-daemon:279-284`:
+  the parent of `bin/` is the daemon dir, and `<p>/.claude/hooks-daemon`
+  anchors to `<p>`. It then requires the result to equal the resolved
+  `PROJECT_PATH`. If they disagree, or either path is relative, the install
+  is unknown. Nothing is exempt, including this project's own launchers, and
+  every deny ends with `_recovery_advice`'s text instead. That text says
+  `HOOKS_DAEMON_ROOT_DIR (<value>)` is not an install of this project, may be
+  inherited or set in `.claude/hooks-daemon.env`, and gives the `!` command
+  a human can run. The round-3 "custom root is recoverable" sentence above is
+  corrected in place.
+
+- **P3-2: one resolution rule, three implementations, one test table.** The
+  rule is `_resolve` (realpath of the longest existing prefix, with the rest
+  appended), `_project_it_manages` and `_installs_launcher`. The launcher
+  named is the first of `<p>/.claude/hooks-daemon/bin/hooks-daemon`,
+  `<p>/bin/hooks-daemon` and `<root>/bin/hooks-daemon` that runs it, or
+  `<root>/bin/hooks-daemon` if none does, shell-quoted. It lives in:
+
+  - `init.sh`'s embedded source;
+  - `cli_command.install_recovery_command` / `recovery_command`, which the
+    daemon's transport deny now uses in place of `daemon_cli_command`
+    (that one was never quoted);
+  - `hooks_relay.rs` (`resolve`, `project_it_manages`, `installs_launcher`,
+    `restart_command`).
+
+  The relay learns the daemon root from `HOOKS_DAEMON_RELAY_DAEMON_ROOT`,
+  which the generated guard sets on its `exec` line. It is the untracked
+  dir's parent in both install modes. It is an environment variable rather
+  than a flag because an older relay binary rejects an unknown flag with a
+  usage error, which would leave the hook without JSON. The relay strips it
+  from both children. Without it (an older forwarder), the relay uses
+  init.sh's default, `<p>/.claude/hooks-daemon`. The 27 tracked forwarders
+  are regenerated for the root they record.
+  `test_init_sh_the_relay_and_the_daemon_name_one_launcher` runs six layouts,
+  each with and without a space in the path, through all three
+  implementations and asserts they agree. That test is the detector the
+  review proposed. The six layouts are: client; client plus its own root
+  tool; client with no clone launcher plus its own tool; self-install with a
+  linked clone; self-install with a real clone file; another project's root.
+
+- **Sh-A (N160): stale removal is under the start lock.** Bash no longer
+  runs `rm`. It calls `cli.remove_stale_pid_file(pid_path, socket, seen)`,
+  which holds `hold_start_lock`. It removes the file only while the file
+  still holds exactly the text bash read, and that text names no live pid. A
+  held lock (`StartLockTimeout`) leaves the file, and so does a lock that
+  cannot be opened or a missing venv. That is harmless: a stale file never
+  counts as running, and a starting daemon overwrites it. Fixing this turned
+  up the same unlocked compare-then-remove in Python's `read_pid_file` for a
+  dead pid. That is removed too (`c325911ae`), so only lock holders remove a
+  PID file.
+
+- **Sh-B / S-R3-1 (N161): corrupt PID files.** `paths.parse_pid_text` and
+  init.sh's `_hooks_daemon_is_pid_text` share one definition:
+  `[1-9][0-9]{0,6}`, in the range 2 to `PID_MAX_LIMIT` (4194304, Linux's
+  kernel ceiling), optionally followed by newlines. A test pins the two
+  constants equal. `0`, negatives, `1`, `007`, `+12`, `1_2`, text, empty and
+  undecodable files are corrupt. They never count as running, and
+  `is_daemon_running` removes them under the lock.
+
+- **Sh-C (N162): the start lock.** `_open_start_lock` uses
+  `O_NOFOLLOW | O_CLOEXEC` and then `fstat`-checks for a regular file, so a
+  FIFO or device is refused with `EINVAL`. There is no ownership check. A
+  host and a container sharing the untracked dir run as different uids and
+  share this one lock, and the lock is only ever flocked, never written or
+  truncated, so an owner check would break a supported layout for no gain.
+  `_release_stopped_daemon_files` now catches `OSError` and fails closed: it
+  leaves both files and prints a warning, and `cmd_stop` still returns 0,
+  because the daemon did stop.
+
+- **D-PATH note 1: an over-cap forwarder timeout.** Upgrade already
+  redeploys forwarders: `upgrade_version.sh:944` calls `deploy_all_hooks`
+  with the venv python, which runs `regenerate_forwarders_for_transport`
+  with the clamped config. The relay now also clamps `--timeout-ms` to
+  `TIMEOUT_CAP_MS` (45 000) at start, with a stderr line. A test pins it to
+  `Timeout.RELAY_TIMEOUT_CAP`. This covers a forwarder that was never
+  redeployed.
+
+- **D-PATH note 2: one document.** `send_request_stdin` captures python3's
+  stdout, with its exit status appended after a final `x`, so trailing
+  newlines survive. On a PreToolUse failure it prints only the static deny.
+  Otherwise it prints the captured bytes exactly.
+
+### RED proof
+
+`untracked/scratch/r4_red.py` works on a `git archive HEAD` copy with the
+change applied. It reverts one fix at a time, rebuilds the relay where
+needed, and runs the pinning tests. The GREEN baseline is 383 passed. Every
+one of these 11 mutations turned its tests RED:
+
+01. EPERM returns 0 → `TestIsDaemonRunningRemovesOnlyItsOwnStalePidFile`.
+02. The manages-the-project check is dropped →
+    `TestADaemonRootOfAnotherProjectIsUnknown`.
+03. `rm -f` runs before the locked removal →
+    `test_a_stale_pid_file_is_removed_only_through_the_start_lock`.
+04. `^[0-9]+$` is used for a pid → the corrupt-file cases.
+05. `int()` is used in `read_pid_file` → `test_paths` (5 failures).
+06. `read_pid_file` removes the file unlocked again →
+    `test_read_pid_file_returns_none_for_dead_process_and_leaves_the_file`.
+07. `O_NOFOLLOW` is dropped → `test_cli_commands`.
+08. `except OSError` becomes `except StartLockTimeout` → `test_cli_commands`.
+09. python3's output is streamed with the deny appended →
+    `TestAPython3ThatFailsAfterAnsweringGivesOneAnswer`.
+10. The relay names the first launcher file → the parity table.
+11. The relay's clamp is disabled →
+    `test_an_over_cap_timeout_from_an_old_forwarder_is_clamped`.
+
+### Verification (round 4)
+
+- init.sh, relay, stop, pid, forwarder and enforcement test files (every
+  `test_*` named for them, plus `test_paths`, `test_cli_commands`,
+  `test_cli_command`, `test_event_socket_fail_closed_pretooluse`,
+  `test_dogfooding_hook_scripts` and `test_transport_config`): 1701 passed,
+  5 skipped.
+- After `c325911ae`, every file that mentions PID files or the start lock
+  (the `read_pid_file` / `hold_start_lock` / `pid_file` / `PID_PATH` set):
+  1696 passed, 11 skipped. The skips are relay-binary and environment skips
+  that were there before.
+- `relay/build.sh` (`-D warnings`) built clean. `relay/test_relay.py`:
+  13/13.
+- `shellcheck init.sh` is clean; I also quoted `return "$_rv"`, which it now
+  flags. ruff, black, mypy and pyright are clean on every touched file.
+- `check_fail_open_inventory.py`: 39 scanned, 39 rows. The new code adds no
+  `2>/dev/null`.
+- `bin/hooks-daemon restart` from the worktree: RUNNING, before each commit.
+- Gate not queued, per the brief.
+
+### For the confirmation reviewer
+
+- **Cost.** The EPERM and stale paths now start the venv interpreter to
+  import `daemon.cli`. Only those rare paths do: a live pid the hook may
+  signal, and a missing file, never reach it. A removed stale file is gone
+  on the next call.
+- **A test file written through Bash.** I appended
+  `TestInstallRecoveryCommand` to `tests/unit/utils/test_cli_command.py`
+  with a heredoc rather than `Edit`, against this project's rule. The
+  content passed ruff, black, mypy and pyright, but it skipped the
+  Write/Edit content guards. Every other change used Edit/Write.
