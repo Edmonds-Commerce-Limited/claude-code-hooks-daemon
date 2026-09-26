@@ -423,6 +423,12 @@ _REDIRECT_WORD_PATTERN = re.compile(
     r"(?P<fd>\d*|&)(?P<op><<<|<<-?|>>|>\||>&|<&|<>|>|<)(?P<rest>.*)"
 )
 _READ_OPERATORS: frozenset[str] = frozenset({"<", "<<", "<<-", "<<<"})
+#: Text that can leave an fd open on a process: a process substitution,
+#: ``exec`` with a redirect, or a ``coproc``. Where a command carries one, an
+#: unresolved write target may be ``/dev/fd/N`` for it (Plan 00466 N213).
+_FD_PROCESS_PATTERN = re.compile(r"[<>]\(|\bexec\b|\bcoproc\b")
+#: Characters that, outside quotes, make bash split or glob a word.
+_SPLITTING_CHARACTERS = frozenset("$`*?[")
 
 
 class _Word(NamedTuple):
@@ -933,6 +939,7 @@ def strip_quoted_heredoc_bodies(command: str) -> str:
 
     depth_tracker = _SubstitutionDepthTracker(command)
     newline_tracker = _LastNewlineTracker(command)
+    fds_may_run = _FD_PROCESS_PATTERN.search(command) is not None
     pieces: list[str] = []
     copied_to = 0
     for heredoc in _quoted_heredocs(command):
@@ -940,9 +947,11 @@ def strip_quoted_heredoc_bodies(command: str) -> str:
         # RECEIVES the body, what it is PIPED ON to, and whether the whole
         # command sits in a SUBSTITUTION whose output lands in command
         # position. Any one of them failing keeps the body.
-        if not _receiver_is_data_sink(command, heredoc, depth_tracker, newline_tracker):
+        if not _receiver_is_data_sink(
+            command, heredoc, depth_tracker, newline_tracker, fds_may_run
+        ):
             continue
-        if not _downstream_is_all_data_sinks(_opener_tail(command, heredoc)):
+        if not _downstream_is_all_data_sinks(_opener_tail(command, heredoc), fds_may_run):
             continue
         # Only the body lines are replaced. Everything else on the opener
         # line is kept, and that is usually a REDIRECT (`cat <<'EOF' > doc.md`):
@@ -976,6 +985,7 @@ def _receiver_is_data_sink(
     heredoc: Heredoc,
     depth_tracker: _SubstitutionDepthTracker,
     newline_tracker: _LastNewlineTracker,
+    fds_may_run: bool,
 ) -> bool:
     """Does the command feeding ``heredoc`` only READ it?
 
@@ -1010,10 +1020,10 @@ def _receiver_is_data_sink(
         return False
     opener_tail = _opener_tail(command, heredoc)
     receiving_stage = segment + " " + split_unquoted(opener_tail, ("|", *_PIPELINE_TERMINATORS))[0]
-    return _stage_is_inert_sink(receiving_stage)
+    return _stage_is_inert_sink(receiving_stage, fds_may_run)
 
 
-def _stage_is_inert_sink(stage: str) -> bool:
+def _stage_is_inert_sink(stage: str, fds_may_run: bool) -> bool:
     """Does ``stage`` run a :data:`DATA_SINKS` command whose every argument
     only reads the body (Plan 00466 N101 round 10, S1)?
 
@@ -1026,6 +1036,11 @@ def _stage_is_inert_sink(stage: str) -> bool:
     or an option's value it hands the body to nothing, so only the
     receiver's identity decides. Where it could be an OPTION of a sink with
     an allowlist, or an fd a redirect duplicates, it is not inert.
+
+    Two things make an unresolved word unknown wherever it sits (round 12).
+    Unquoted, bash may split it into several words, any of which may be an
+    option (MAJOR 1). As a file the sink writes, it may be ``/dev/fd/N`` for
+    a process the command opened an fd on, when ``fds_may_run`` (N213).
     """
     word = _segment_command_word(stage)
     if word is None or word not in DATA_SINKS:
@@ -1038,12 +1053,33 @@ def _stage_is_inert_sink(stage: str) -> bool:
     arguments = _arguments_after_command(words, word)
     if arguments is None:
         return False
-    remaining = _inert_redirects(arguments)
+    remaining = _inert_redirects(arguments, fds_may_run)
     if remaining is None:
         return False
     if word == "git":
         return _git_reads_body_as_data(remaining)
-    return _sink_arguments_are_inert(word, remaining)
+    return _sink_arguments_are_inert(word, remaining, fds_may_run)
+
+
+def _may_split(raw: str) -> bool:
+    """Could bash split or glob ``raw`` into several words? True when an
+    expansion or a glob character sits outside quotes."""
+    quote = ""
+    index = 0
+    while index < len(raw):
+        character = raw[index]
+        if character == "\\" and quote != "'":
+            index += 2
+            continue
+        if quote:
+            if character == quote:
+                quote = ""
+        elif character in "'\"":
+            quote = character
+        elif character in _SPLITTING_CHARACTERS:
+            return True
+        index += 1
+    return False
 
 
 def _segment_words(segment: str) -> list[_Word] | None:
@@ -1072,10 +1108,12 @@ def _arguments_after_command(words: list[_Word], command: str) -> list[_Word] | 
     return None
 
 
-def _inert_redirects(arguments: list[_Word]) -> list[_Word] | None:
+def _inert_redirects(arguments: list[_Word], fds_may_run: bool) -> list[_Word] | None:
     """``arguments`` without their redirects, or None if one could hand the
     body to something that runs it. An operator is read as written, so a
-    quoted ``'>'`` is an argument, as it is to bash."""
+    quoted ``'>'`` is an argument, as it is to bash. A redirect target is
+    never split (bash refuses an ambiguous one), so only ``fds_may_run``
+    makes an unresolved one unknown."""
     remaining: list[_Word] = []
     index = 0
     while index < len(arguments):
@@ -1102,23 +1140,31 @@ def _inert_redirects(arguments: list[_Word]) -> list[_Word] | None:
                 if target not in _INERT_FD_TARGETS:
                     return None
                 continue
-        if target is not None and not _is_inert_write_target(target):
+        if target is None:
+            if fds_may_run:
+                return None
+            continue
+        if not _is_inert_write_target(target):
             return None
     return remaining
 
 
-def _sink_arguments_are_inert(command: str, arguments: list[_Word]) -> bool:
+def _sink_arguments_are_inert(command: str, arguments: list[_Word], fds_may_run: bool) -> bool:
     allowed = _SINK_OPTIONS.get(command)
     value_options = _SINK_VALUE_OPTIONS.get(command, frozenset())
     output_options = _SINK_OUTPUT_OPTIONS.get(command, frozenset())
     index = 0
     while index < len(arguments):
-        argument = arguments[index].value
+        word = arguments[index]
+        argument = word.value
         index += 1
         if argument is None:
             # Could expand to an option: inert only for a sink with none
-            # that executes, or one whose every operand is a file it writes.
+            # that executes, or one whose every operand is a file it writes
+            # and cannot be an fd a process reads.
             if allowed is not None and command not in _SINK_OUTPUT_OPERANDS:
+                return False
+            if command in _SINK_OUTPUT_OPERANDS and (fds_may_run or _may_split(word.raw)):
                 return False
             continue
         if argument.startswith("-") and argument not in ("-", "--"):
@@ -1128,9 +1174,14 @@ def _sink_arguments_are_inert(command: str, arguments: list[_Word]) -> bool:
             if name in value_options and not has_value and len(name) == len("-x"):
                 if index >= len(arguments):
                     return False
-                next_value = arguments[index].value
+                next_word = arguments[index]
+                next_value = next_word.value
                 index += 1
                 if next_value is None:
+                    if _may_split(next_word.raw):
+                        return False
+                    if fds_may_run and name in output_options:
+                        return False
                     continue
                 value = next_value
                 has_value = "="
@@ -1167,12 +1218,15 @@ _VALUE_LETTERS: frozenset[str] = frozenset().union(*_SINK_VALUE_OPTIONS.values()
 def _git_reads_body_as_data(arguments: list[_Word]) -> bool:
     """``git`` with only inert global options, running a subcommand that
     reads stdin as data. ``-c``, ``--config-env`` and an alias can each run a
-    shell on the body. The ``-C`` directory may be unresolved; the
-    subcommand may not."""
+    shell on the body. The ``-C`` directory may be unresolved, but not
+    unquoted, where bash may split it into options; the subcommand may
+    not."""
     index = 0
     while index < len(arguments):
         argument = arguments[index].value
         if argument == _GIT_DIRECTORY_FLAG:
+            if index + 1 < len(arguments) and _may_split(arguments[index + 1].raw):
+                return False
             index += 2
             continue
         if argument in _GIT_INERT_GLOBAL_FLAGS:
@@ -1188,8 +1242,11 @@ def _is_inert_write_target(target: str) -> bool:
     A regular file, a directory (the write fails) or a path that does not
     exist yet (the write creates a regular file) is inert, as are
     ``/dev/null``, ``/dev/stdout`` and ``/dev/stderr``. Any other device or
-    ``/proc`` path, a FIFO, a socket, an unresolvable word, or a path ``stat``
-    cannot judge is not. A relative path is judged from the event's cwd
+    ``/proc`` path, a FIFO, a socket, a word that resolves to nothing, or a
+    path ``stat`` cannot judge is not. A word with an expansion never reaches
+    here: its caller judges it by whether it may split and whether the
+    command opens an fd on a process (Plan 00466 N213). A relative path is
+    judged from the event's cwd
     (:func:`bind_event_cwd`), or the process's own outside a dispatch.
     """
     resolved = resolve_shell_word(target)
@@ -1323,7 +1380,7 @@ class _LastNewlineTracker:
         return self._last_newline + 1
 
 
-def _downstream_is_all_data_sinks(opener_tail: str) -> bool:
+def _downstream_is_all_data_sinks(opener_tail: str, fds_may_run: bool) -> bool:
     """Does every command the body is PIPED ON to also just read it?
 
     ``cat <<'EOF' | bash`` passes :func:`_receiver_is_data_sink` — the receiver
@@ -1338,6 +1395,7 @@ def _downstream_is_all_data_sinks(opener_tail: str) -> bool:
 
     Args:
         opener_tail: Whatever the opener line carried after the delimiter.
+        fds_may_run: Whether the whole command opens an fd on a process.
 
     Returns:
         True when there are no downstream stages, or every one of them names a
@@ -1345,7 +1403,9 @@ def _downstream_is_all_data_sinks(opener_tail: str) -> bool:
         False, which withholds the exemption and scans the body.
     """
     pipeline = split_unquoted(opener_tail, _PIPELINE_TERMINATORS)[0]
-    return all(_stage_is_inert_sink(stage) for stage in split_unquoted(pipeline, ("|",))[1:])
+    return all(
+        _stage_is_inert_sink(stage, fds_may_run) for stage in split_unquoted(pipeline, ("|",))[1:]
+    )
 
 
 def quoted_heredoc_receivers(command: str) -> list[str]:

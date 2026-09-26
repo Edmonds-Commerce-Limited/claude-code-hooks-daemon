@@ -409,3 +409,108 @@ class TestAnUnresolvedSinkArgumentIsNoExecutor:
     def test_an_unresolved_word_that_can_run_the_body_still_judges_it(self, opener: str) -> None:
         command = f"{opener}\n{_RESET}\nEOF"
         assert _decision(DestructiveGitHandler(), command) == Decision.DENY
+
+
+# -- Round 12: review 11 MAJOR 1 and N213, run in bash first ------------------
+
+#: Programs the isolated run may use besides the recording ``git``.
+_ISOLATED_PROGRAMS = ("bash", "cat", "sort", "tee", "sleep")
+
+
+def _isolated_bash_run(script: str, tmp_path: Path) -> str:
+    """What the recording ``git`` reported when bash ran ``script`` with
+    ``PATH`` set only to a directory holding it. A child shell, a sort
+    compressor or a process substitution cannot reach the real git."""
+    recorders = tmp_path / "rec"
+    recorders.mkdir()
+    git = recorders / "git"
+    git.write_text('#!/bin/sh\necho "GIT $*" >&2\n')
+    git.chmod(0o755)
+    for program in _ISOLATED_PROGRAMS:
+        found = shutil.which(program)
+        assert found is not None
+        (recorders / program).symlink_to(found)
+    work = tmp_path / "work"
+    work.mkdir()
+    result = subprocess.run(
+        [str(recorders / "bash"), "--norc", "--noprofile", "-c", script],
+        cwd=work,
+        env={"LC_ALL": "C", "PATH": str(recorders)},
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=Timeout.QA_TEST_TIMEOUT,
+    )
+    return result.stdout + result.stderr
+
+
+#: Enough lines that ``sort -S 4K`` spills to a temporary file, and so runs
+#: its compressor on the body.
+_SPILLING_BODY = "\n".join([_RESET, *(f": {index:05d}" for index in range(3000))])
+
+
+class TestAnUnquotedUnresolvedWordMaySplit:
+    """MAJOR 1: bash splits an unquoted expansion into words, any of which
+    may be an option that runs the body. A quoted one stays one word."""
+
+    @pytest.mark.parametrize(
+        ("command", "ran"),
+        [
+            (
+                f"OUT='o.txt -S 4K --compress-program=bash'; sort -o $OUT <<'EOF'\n"
+                f"{_SPILLING_BODY}\nEOF",
+                _RAN_RESET,
+            ),
+            (
+                f"WT='. -c core.editor=bash'; git -C $WT commit -e -F - <<'EOF'\n{_RESET}\nEOF",
+                "GIT -C . -c core.editor=bash commit",
+            ),
+        ],
+        ids=["sort-output", "git-directory"],
+    )
+    def test_the_split_word_is_judged_as_an_option(
+        self, command: str, ran: str, tmp_path: Path
+    ) -> None:
+        assert ran in _isolated_bash_run(command, tmp_path)
+        assert _decision(DestructiveGitHandler(), command) == Decision.DENY
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            f"OUT='o.txt -S 4K --compress-program=bash'; sort -o \"$OUT\" <<'EOF'\n"
+            f"{_SPILLING_BODY}\nEOF",
+            f"WT=.; git -C \"$WT\" commit --dry-run -F - <<'EOF'\n{_RESET}\nEOF",
+        ],
+        ids=["sort-output", "git-directory"],
+    )
+    def test_a_quoted_word_stays_one_value(self, command: str, tmp_path: Path) -> None:
+        assert _RAN_RESET not in _isolated_bash_run(command, tmp_path)
+        assert _decision(DestructiveGitHandler(), command) == Decision.ALLOW
+
+
+class TestAnUnresolvedTargetMayBeAnOpenFd:
+    """N213: an unresolved write target may be ``/dev/fd/N`` for an fd a
+    process substitution runs, so where the command opens one the target is
+    not inert."""
+
+    _OPEN = "exec 3> >(bash); OUT=/dev/fd/3; "
+    _CLOSE = "\nexec 3>&-; sleep 0.3"
+
+    @pytest.mark.parametrize(
+        "sink",
+        [
+            "cat > \"$OUT\" <<'EOF'",
+            "tee \"$OUT\" <<'EOF'",
+            "cat <<'EOF' >> \"$OUT\"",
+        ],
+    )
+    def test_the_body_is_judged(self, sink: str, tmp_path: Path) -> None:
+        command = f"{self._OPEN}{sink}\n{_RESET}\nEOF{self._CLOSE}"
+        assert _RAN_RESET in _isolated_bash_run(command, tmp_path)
+        assert _decision(DestructiveGitHandler(), command) == Decision.DENY
+
+    def test_without_an_opened_fd_the_target_is_a_file(self, tmp_path: Path) -> None:
+        command = f"OUT=o.md; cat > \"$OUT\" <<'EOF'\n{_RESET}\nEOF"
+        assert _RAN_RESET not in _isolated_bash_run(command, tmp_path)
+        assert _decision(DestructiveGitHandler(), command) == Decision.ALLOW
