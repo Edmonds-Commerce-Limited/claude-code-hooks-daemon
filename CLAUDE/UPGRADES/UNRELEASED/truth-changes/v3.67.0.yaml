@@ -211,19 +211,39 @@ truth_changes:
       session is asked to create the job again.
   - topic: ccy-supervisor
     was: >
-      The ccy supervisor's per-model effort floor stands down only for an
-      effort level TYPED as `/effort <level>`. A level picked from the bare
-      `/effort` selector types nothing the supervisor can read, so the floor
-      puts the old level back. To keep a lower effort, type the level.
+      The ccy supervisor kept its own opinion of per-model effort: a built-in
+      floor table, a downgrade-restore compensation to `xhigh`, and a Fable
+      ceiling at `low` (DROP ANCHOR) -- each enforced by typing a real
+      `/effort <level>`.
     now: >
-      Effort drops are trusted (ledger 00422 N7): any observed effort drop the
-      supervisor did not inject itself is latched as the human's choice,
-      exactly like a typed `/effort <level>`. The floor stays off for the rest
-      of that model spell, whether the level came from the selector, was typed,
-      or came by any other route. The supervisor's own `/effort` injections are
-      recognised when they land and are never latched. This deliberately
-      mirrors the model-downgrade rule, where an unattributed model change gets
-      no restore.
+      The supervisor injects no `/effort` command of any kind, for any reason
+      (Plan 00466 N47 review 2). Claude Code saves every interactively-typed
+      `/effort <level>` except `max` (session-only, unless pinned through
+      `CLAUDE_CODE_EFFORT_LEVEL`) into your own settings.json under
+      `modelSettings`, so any supervisor-typed level permanently overwrote
+      your own saved choice --
+      the fight this removal ends. Fable at `low` and its fallback models at
+      `xhigh` are now per-model `modelSettings` levels you add yourself (see
+      `CLAUDE/development/CcySupervisor.md`), and they apply only in a session
+      that has never set its own effort via `/effort`, an effort pick in
+      `/model`, `--effort`, or the env var -- any of those pins one value
+      across every later model change for the rest of that session.
+  - topic: tool-controls
+    was: >
+      `hooks-daemon check` has an "Effort Level" line that passes only at
+      `high`, and its fix recommends `effortLevel: high` or
+      `export CLAUDE_CODE_EFFORT_LEVEL=high`.
+    now: >
+      The daemon holds no effort opinion (Plan 00466 N47). The line is
+      "Effort Source": it never recommends a level, and it shows `[WARN]`
+      when something pins ONE level on every model and overrides the
+      per-model `modelSettings` levels -- `CLAUDE_CODE_EFFORT_LEVEL`, the same
+      variable set through any settings file's own `env` object, or a
+      top-level `effortLevel` in the project's `.claude/settings.json` or
+      `.claude/settings.local.json`. It also warns when a project or local
+      settings file cannot be read or parsed, since a pin there cannot then be
+      ruled out. IF YOU SET `CLAUDE_CODE_EFFORT_LEVEL` BECAUSE `check` TOLD
+      YOU TO, UNSET IT.
   - topic: blocking-handlers
     was: >
       A missing secret word list leaves `sensitive_content`'s word-list source

@@ -1355,25 +1355,27 @@ class TestHeredocWrittenShellScripts:
         assert "DENY-BY-DEFAULT" in guidance
         assert "exemption" in guidance.lower()
 
-    def test_guidance_admits_the_md_exemption_is_write_tool_only(self, handler):
-        """The guidance must not promise a `.md` allowance the Bash route lacks.
+    def test_guidance_admits_the_bash_md_exemption_is_narrower_than_write(self, handler):
+        """The guidance must not promise the Bash route a blanket `.md` allowance
+        it does not have.
 
-        Plan 00260 Decision 1: a guidance defect is fixed IMMEDIATELY; only the
-        behaviour change is deferred. The old wording listed "`.md`
-        documentation files" as flatly Allowed, which is true for `Write` and
-        false for a Bash heredoc -- so an agent following it got denied and
-        learned the guard was unreliable.
+        Plan 00260 Task 3.1 landed the redirect-target parsing: a Bash
+        heredoc/redirect whose ONLY target is `.md`, with its sed text never
+        EXECUTED, is now allowed -- but `Write` allows every `.md` path
+        unconditionally, and the guidance must say the Bash exemption is the
+        narrower of the two rather than claiming parity.
 
         This is the same guard shape as the rest of this file: verdict and
         guidance asserted together, so neither can drift alone.
         """
         # The behaviour the guidance must now describe honestly.
-        assert handler.matches(self._bash(self._MARKDOWN_HEREDOC)) is True
+        assert handler.matches(self._bash(self._MARKDOWN_HEREDOC)) is False
 
         guidance = handler.get_claude_md()
         assert guidance is not None
-        assert "Write` tool" in guidance, "guidance must say the .md exemption is Write-tool-only"
-        assert "heredoc" in guidance, "guidance must name the heredoc case that is denied"
+        assert "Write` tool" in guidance
+        assert "heredoc" in guidance
+        assert "NARROWER" in guidance, "guidance must say the Bash .md exemption is narrower"
 
     def test_guidance_gives_the_allowed_bash_markdown_form(self, handler):
         """Naming only the denial teaches avoidance; name the working route too.
@@ -1388,30 +1390,51 @@ class TestHeredocWrittenShellScripts:
         assert guidance is not None
         assert "echo 'avoid sed' > NOTES.md" in guidance
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason=(
-            "Known BEHAVIOUR defect, Plan 00260 Task 3.1: the Bash branch blocks a "
-            "heredoc writing MARKDOWN while the Write branch allows .md. The GUIDANCE "
-            "half was fixed immediately per Decision 1 (it now states the exemption is "
-            "Write-tool-only and names the working echo-redirect form), so nothing "
-            "published is false any more. Only the behaviour is deferred, because "
-            "fixing it needs Task 3.1's redirect-target parsing -- a .md check bolted "
-            "into the Bash branch would be a second, weaker copy of it and would still "
-            "have to keep `cat > x.md <<EOF && sed -i ... real.py` blocked. Flips to a "
-            "plain pass when 3.1 lands; fails loudly if 'fixed' by accident."
-        ),
-    )
     def test_markdown_heredoc_mentioning_sed_is_not_blocked(self, handler):
         """`.md` documentation mentioning sed must be writable by EITHER route.
 
         `get_claude_md()` promises sed is allowed in `.md` documentation files.
-        That promise holds for `Write` and is false for a Bash heredoc.
-        Documenting the rule must not trip the rule -- this repository writes
-        exactly such prose, and a guard that blocks its own documentation is one
-        an agent learns to route around.
+        That promise now holds for `Write` AND for a Bash heredoc whose only
+        target is `.md` and whose sed text is never executed. Documenting the
+        rule must not trip the rule -- this repository writes exactly such
+        prose, and a guard that blocks its own documentation is one an agent
+        learns to route around.
         """
         assert handler.matches(self._bash(self._MARKDOWN_HEREDOC)) is False
+
+    def test_unquoted_heredoc_that_executes_sed_via_substitution_stays_blocked(self, handler):
+        """The `.md`-only exemption must not launder a genuinely EXECUTED sed.
+
+        An unquoted heredoc delimiter still expands `$(...)`, so this body
+        really does run `sed -i` -- the redirect target being `.md` must not
+        rescue it.
+        """
+        command = "cat > x.md <<EOF\n$(sed -i 's/a/b/' real.py)\nEOF"
+        assert handler.matches(self._bash(command)) is True
+
+    def test_heredoc_piped_to_an_interpreter_stays_blocked(self, handler):
+        """A heredoc fed to `bash` is not a write at all -- the body runs.
+
+        No redirect names a `.md` target here, so the exemption never has
+        anything to grant, and the sed mention in the body is denied same as
+        any other unexempted command.
+        """
+        command = "cat <<'EOF' | bash\nsed -i 's/a/b/' real.py\nEOF"
+        assert handler.matches(self._bash(command)) is True
+
+    def test_mixed_tee_target_with_a_non_markdown_file_stays_blocked(self, handler):
+        """Every AUTHORED destination must be `.md` -- one non-`.md` target
+        withholds the exemption from the whole command, `tee` writing every
+        operand it names."""
+        command = "cat <<'EOF' | tee a.md b.sh\nsed is mentioned here\nEOF"
+        assert handler.matches(self._bash(command)) is True
+
+    def test_redirect_then_a_separate_executed_sed_stays_blocked(self, handler):
+        """A `.md` redirect followed by a genuinely EXECUTED sed, chained with
+        `;`, is two commands -- the first writing `.md` does not exempt the
+        second, which runs sed as its own command head."""
+        command = "echo notes > x.md; sed -i 's/a/b/' real.py"
+        assert handler.matches(self._bash(command)) is True
 
 
 class TestDeclaredAcceptancePatternsAreProducible:

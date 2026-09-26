@@ -38,8 +38,23 @@ _BASE = DowngradeSignal(
 )
 
 
-def _signal(**overrides: object) -> DowngradeSignal:
-    return dataclasses.replace(_BASE, **overrides)
+def _signal(
+    *,
+    session_id: str = _BASE.session_id,
+    original_family: str | None = _BASE.original_family,
+    fallback_family: str | None = _BASE.fallback_family,
+    record_ts: str = _BASE.record_ts,
+    record_id: str = _BASE.record_id,
+) -> DowngradeSignal:
+    """``_BASE`` with the named fields replaced, each typed as the field it sets."""
+    return dataclasses.replace(
+        _BASE,
+        session_id=session_id,
+        original_family=original_family,
+        fallback_family=fallback_family,
+        record_ts=record_ts,
+        record_id=record_id,
+    )
 
 
 class TestPathing:
@@ -140,6 +155,46 @@ class TestRewriteDiscipline:
         assert read_downgrade_signal(tmp_path, _SESSION) == _signal(
             record_ts="2026-08-27T11:00:00.000Z"
         )
+
+    def test_a_different_record_id_is_a_different_record(self, tmp_path: Path) -> None:
+        """Two downgrades can share every other field, including a missing time."""
+        write_downgrade_signal(tmp_path, _signal(record_ts="", record_id="offset:10"), now=1.0)
+
+        written = write_downgrade_signal(
+            tmp_path, _signal(record_ts="", record_id="offset:900"), now=2.0
+        )
+
+        assert written is not None
+        found = read_downgrade_signal(tmp_path, _SESSION)
+        assert found is not None
+        assert found.record_id == "offset:900"
+
+
+class TestRecordIdentity:
+    """Plan 00466 N47 review 4 item 4: the record's identity is published."""
+
+    def test_the_record_id_is_written_and_read_back(self, tmp_path: Path) -> None:
+        write_downgrade_signal(tmp_path, _signal(record_id="uuid-1"), now=1.0)
+
+        payload = json.loads(signal_path(tmp_path, _SESSION).read_text(encoding="utf-8"))
+
+        assert payload["record_id"] == "uuid-1"
+        assert read_downgrade_signal(tmp_path, _SESSION) == _signal(record_id="uuid-1")
+
+    def test_a_signal_from_before_record_ids_reads_back_with_an_empty_one(
+        self, tmp_path: Path
+    ) -> None:
+        """An older daemon's file has no `record_id`; that is not a corrupt file."""
+        path = signal_path(tmp_path, _SESSION)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        payload = _signal(record_id="uuid-1").to_payload(now=1.0)
+        del payload["record_id"]
+        path.write_text(json.dumps(payload), encoding="utf-8")
+
+        found = read_downgrade_signal(tmp_path, _SESSION)
+
+        assert found is not None
+        assert found.record_id == ""
 
 
 class TestAttribution:

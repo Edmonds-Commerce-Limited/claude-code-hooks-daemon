@@ -269,6 +269,27 @@ class TestEmptyAndNoMatch:
     def test_unrelated_pattern_does_not_match(self) -> None:
         assert is_path_excluded("/proj/src/main.py", ["tests/fixtures/**"]) is False
 
+    def test_empty_file_path_with_a_project_root_does_not_raise(self) -> None:
+        """N5 (Plan 00466): an empty ``file_path`` reaching this matcher WITH a
+        ``project_root`` set used to call ``os.path.relpath("", root)``, which
+        raises ``ValueError: no path specified`` -- ``os.path.relpath`` treats
+        an empty PATH argument (not an empty ``start``) as an error regardless
+        of ``start``. An empty path can never match a real glob, so the
+        defined answer is False, not an exception a caller must guard against
+        before every call."""
+        assert path_matches_globs("", ["some/pattern/**"], project_root="/proj") is False
+        assert is_path_excluded("", ["some/pattern/**"], project_root="/proj") is False
+
+    def test_empty_file_path_does_not_match_a_bare_wildcard(self) -> None:
+        """n1 (Plan 00466 review): the docstring above says an empty
+        ``file_path`` yields "an empty candidate list that matches nothing",
+        but ``_candidate_paths`` returned ``[""]`` -- a list holding ONE
+        empty string, which DOES match ``*``/``**`` (``fnmatch("", "*")`` is
+        True). Not a regression (main behaved the same with no root), but
+        the code should match its own documented contract."""
+        assert path_matches_globs("", ["*"], project_root="/proj") is False
+        assert path_matches_globs("", ["**"], project_root="/proj") is False
+
 
 class TestDirectoryGlobs:
     def test_dir_glob_matches_absolute_path(self) -> None:
