@@ -82,13 +82,15 @@ def _sandbox_project(tmp_path: Path) -> Path:
     claude_dir.mkdir(parents=True)
     (claude_dir / "init.sh").write_text(_INIT_SH.read_text())
     (claude_dir / "hooks-daemon.env").write_text(
-        'export HOOKS_DAEMON_ROOT_DIR="$PROJECT_PATH/root"\n'
+        'export HOOKS_DAEMON_ROOT_DIR="$PROJECT_PATH/.claude/hooks-daemon"\n'
     )
     # The install's own launcher, and the root spelling linked to it: the
-    # carve-out exempts only a launcher that runs this install.
-    _write_launcher(proj / "root")
+    # carve-out exempts only a launcher that runs this install, and only an
+    # install that manages this project (Plan 00466 round 4, P3-1) -- a
+    # client install lives at <project>/.claude/hooks-daemon.
+    _write_launcher(claude_dir / "hooks-daemon")
     (proj / "bin").mkdir()
-    (proj / "bin" / "hooks-daemon").symlink_to(proj / "root" / "bin" / "hooks-daemon")
+    (proj / "bin" / "hooks-daemon").symlink_to(claude_dir / "hooks-daemon" / "bin" / "hooks-daemon")
     return proj
 
 

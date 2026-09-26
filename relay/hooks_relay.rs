@@ -295,16 +295,23 @@ fn resolve(path: &Path) -> PathBuf {
 }
 
 /// The project a launcher at this resolved path manages, by the rule the
-/// launcher applies to itself: `init.sh`'s `_project_it_manages`.
-fn project_it_manages(launcher: &Path) -> PathBuf {
-    let daemon_dir = dirname(dirname(launcher));
+/// launcher applies to itself: `init.sh`'s `_project_it_manages`. None when
+/// the path is not a `bin/hooks-daemon` at all (Plan 00466 round 5, R4-2).
+fn project_it_manages(launcher: &Path) -> Option<PathBuf> {
+    let bin_dir = dirname(launcher);
+    if launcher.file_name() != Some(OsStr::new("hooks-daemon"))
+        || bin_dir.file_name() != Some(OsStr::new("bin"))
+    {
+        return None;
+    }
+    let daemon_dir = dirname(bin_dir);
     let parent = dirname(daemon_dir);
     if daemon_dir.file_name() == Some(OsStr::new("hooks-daemon"))
         && parent.file_name() == Some(OsStr::new(".claude"))
     {
-        return dirname(parent).to_path_buf();
+        return Some(dirname(parent).to_path_buf());
     }
-    daemon_dir.to_path_buf()
+    Some(daemon_dir.to_path_buf())
 }
 
 /// This install's launcher, resolved, or None when it is unknown: the one
@@ -314,7 +321,7 @@ fn installs_launcher(project: &Path, daemon_root: &Path) -> Option<PathBuf> {
         return None;
     }
     let launcher = resolve(&daemon_root.join(INSTALL_LAUNCHER));
-    (project_it_manages(&launcher) == resolve(project)).then_some(launcher)
+    (project_it_manages(&launcher) == Some(resolve(project))).then_some(launcher)
 }
 
 /// The exempt restart a deny names, as `init.sh`'s `_recovery_command`

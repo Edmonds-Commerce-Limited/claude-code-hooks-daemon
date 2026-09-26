@@ -28,6 +28,7 @@ binary itself.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import shutil
@@ -55,6 +56,7 @@ from claude_code_hooks_daemon.install.forwarder_generator import (
     generate_forwarder_content,
 )
 from claude_code_hooks_daemon.utils.cli_command import install_recovery_command
+from tests.daemon_like_process import daemon_like_process
 
 #: A probe sent through a hook forwarder is marked (Plan 00466 N12).
 _MAIN_PROBE = {SYNTHETIC_SOURCE_FIELD: TEST_PROBE, PROBE_AS_FIELD: ProbeThread.MAIN.value}
@@ -194,11 +196,21 @@ def _base_env(sock_path: Path, pid_path: Path) -> dict[str, str]:
     return env
 
 
+@contextlib.contextmanager
+def _live_pid_file(project: Path, directory: Path) -> Iterator[Path]:
+    """A PID file in ``directory`` naming a process launched as the daemon of
+    the checkout ``_write_generated_forwarder`` builds at ``project`` is, so
+    is_daemon_running() proves it running (Plan 00466 round 5, Sh-D)."""
+    pid_path = directory / "daemon.pid"
+    with daemon_like_process(project) as pid:
+        pid_path.write_text(f"{pid}\n")
+        yield pid_path
+
+
 @pytest.fixture
-def live_pid_file(tmp_path: Path) -> Path:
-    pid_path = tmp_path / "daemon.pid"
-    pid_path.write_text(f"{os.getpid()}\n")
-    return pid_path
+def live_pid_file(tmp_path: Path) -> Iterator[Path]:
+    with _live_pid_file(tmp_path, tmp_path) as pid_path:
+        yield pid_path
 
 
 @pytest.fixture
@@ -354,9 +366,11 @@ def test_relay_pretooluse_timeout_deny_names_the_timeout(wedged_pretooluse_socke
 def _judging_project(tmp_path: Path) -> tuple[Path, dict[str, str]]:
     """A project whose forwarder the relay can hand a failed exchange to.
 
-    Returns the forwarder and an env under which its ``ensure_daemon``
-    passes (a live pid file), so the only judge left is ``init.sh``'s own
-    recovery carve-out. The project has its own ``bin/hooks-daemon``.
+    Returns the forwarder and its env. Under a relay hand-off
+    ``ensure_daemon`` returns before it looks at the daemon (N126 round 2,
+    F1), so the only judge left is ``init.sh``'s own recovery carve-out. The
+    PID file names no process, so a start would be tried if that ever
+    regressed. The project has its own ``bin/hooks-daemon``.
     """
     untracked_dir = tmp_path / "untracked"
     forwarder = _write_generated_forwarder(
@@ -365,9 +379,7 @@ def _judging_project(tmp_path: Path) -> tuple[Path, dict[str, str]]:
     launcher = tmp_path / "bin" / "hooks-daemon"
     launcher.parent.mkdir()
     launcher.write_text("#!/bin/bash\n")
-    pid_path = tmp_path / "daemon.pid"
-    pid_path.write_text(f"{os.getpid()}\n")
-    return forwarder, _base_env(tmp_path / "legacy.sock", pid_path)
+    return forwarder, _base_env(tmp_path / "legacy.sock", tmp_path / "no-daemon.pid")
 
 
 def _bash_call(command: str, cwd: Path) -> bytes:
@@ -710,7 +722,18 @@ class TestTheRelaysOwnDenyNamesTheAbsoluteLauncher:
             other = project.parent / f"{project.name}-other"
             script(other / _CLONE_LAUNCHER)
             return other / ".claude" / "hooks-daemon"
+        if layout == "root whose launcher links to another file of the project":
+            script(project / "any" / "file")
+            elsewhere = project.parent / f"{project.name}-elsewhere"
+            (elsewhere / "bin").mkdir(parents=True)
+            (elsewhere / "bin" / "hooks-daemon").symlink_to(project / "any" / "file")
+            return elsewhere
         raise AssertionError(layout)
+
+    #: Layouts whose daemon root is no install of the project: nothing is exempt.
+    _UNKNOWN_INSTALLS = frozenset(
+        {"root of another project", "root whose launcher links to another file of the project"}
+    )
 
     @pytest.mark.parametrize(
         "layout",
@@ -721,6 +744,7 @@ class TestTheRelaysOwnDenyNamesTheAbsoluteLauncher:
             "self-install, clone linked",
             "self-install, real clone file",
             "root of another project",
+            "root whose launcher links to another file of the project",
         ],
     )
     @pytest.mark.parametrize("dirname", ["proj", "with space"])
@@ -730,13 +754,19 @@ class TestTheRelaysOwnDenyNamesTheAbsoluteLauncher:
         """Plan 00466 round 4 (P3-2): the relay named the first launcher FILE
         that existed, so a client's own ``bin/hooks-daemon`` or a real file at
         a self-install's clone path could be named while the carve-out denied
-        it. One rule, over one table, in all three."""
+        it. One rule, over one table, in all three.
+
+        Round 5 (R4-2): a launcher is a ``bin/hooks-daemon``. A root whose
+        launcher links to any other file two levels below the project was
+        taken for this install, and that file then ran as the exempt
+        restart."""
         project = tmp_path / dirname
         daemon_root = self._layout(project, layout)
         from_init_sh = self._init_sh_command(project, daemon_root)
         from_daemon = install_recovery_command(project, daemon_root, "restart")
         reason = self._own_deny_reason(project, wedged_pretooluse_socket, daemon_root)
         assert from_daemon == from_init_sh, (from_daemon, from_init_sh)
+        assert (from_init_sh is None) == (layout in self._UNKNOWN_INSTALLS), from_init_sh
         if from_init_sh is None:
             assert "No daemon command is exempt" in reason, reason
         else:
@@ -924,7 +954,7 @@ def test_nc_capability_flag_unset_skips_nc_rung(
     assert request["hook_input"]["tool_input"]["command"] == "true"
 
 
-def test_nc_rung_round_trip_completes_promptly(live_pid_file: Path) -> None:
+def test_nc_rung_round_trip_completes_promptly(tmp_path: Path) -> None:
     """Regression (Plan 00290 Phase 6 measurement): the nc rung's `nc -U -w`
     invocation, missing `-N` (shutdown-on-stdin-EOF), never sent EOF to the
     daemon's EOF-framed per-event socket — the daemon never saw the
@@ -980,18 +1010,19 @@ def test_nc_rung_round_trip_completes_promptly(live_pid_file: Path) -> None:
         payload = json.dumps(
             {"tool_name": "Bash", "tool_input": {"command": "nc-roundtrip"}, **_MAIN_PROBE}
         ).encode()
-        env = _base_env(short_root / "no-such-legacy-daemon.sock", live_pid_file)
-        env["HOOKS_DAEMON_NC_UNIX_CAPABLE"] = "1"
+        with _live_pid_file(short_root, tmp_path) as live_pid_file:
+            env = _base_env(short_root / "no-such-legacy-daemon.sock", live_pid_file)
+            env["HOOKS_DAEMON_NC_UNIX_CAPABLE"] = "1"
 
-        start = time.monotonic()
-        result = subprocess.run(
-            ["bash", str(forwarder)],
-            input=payload,
-            capture_output=True,
-            env=env,
-            timeout=_TIMEOUT_SECONDS,
-        )
-        elapsed = time.monotonic() - start
+            start = time.monotonic()
+            result = subprocess.run(
+                ["bash", str(forwarder)],
+                input=payload,
+                capture_output=True,
+                env=env,
+                timeout=_TIMEOUT_SECONDS,
+            )
+            elapsed = time.monotonic() - start
         server.join()
 
         assert result.returncode == 0, result.stderr.decode()
@@ -1007,7 +1038,7 @@ def test_nc_rung_round_trip_completes_promptly(live_pid_file: Path) -> None:
         shutil.rmtree(short_root, ignore_errors=True)
 
 
-def test_nc_rung_honours_events_dir_env_override(live_pid_file: Path) -> None:
+def test_nc_rung_honours_events_dir_env_override(tmp_path: Path) -> None:
     """Task 2.5 (Plan 00295): HOOKS_DAEMON_EVENTS_DIR must outrank the
     natural `$_untracked_dir/events$_hostname_suffix` path the nc rung
     otherwise computes -- matching resolve_events_dir (transport_verify.py)
@@ -1046,17 +1077,18 @@ def test_nc_rung_honours_events_dir_env_override(live_pid_file: Path) -> None:
                 **_MAIN_PROBE,
             }
         ).encode()
-        env = _base_env(short_root / "no-such-legacy-daemon.sock", live_pid_file)
-        env["HOOKS_DAEMON_NC_UNIX_CAPABLE"] = "1"
-        env["HOOKS_DAEMON_EVENTS_DIR"] = str(override_events_dir)
+        with _live_pid_file(short_root, tmp_path) as live_pid_file:
+            env = _base_env(short_root / "no-such-legacy-daemon.sock", live_pid_file)
+            env["HOOKS_DAEMON_NC_UNIX_CAPABLE"] = "1"
+            env["HOOKS_DAEMON_EVENTS_DIR"] = str(override_events_dir)
 
-        result = subprocess.run(
-            ["bash", str(forwarder)],
-            input=payload,
-            capture_output=True,
-            env=env,
-            timeout=_TIMEOUT_SECONDS,
-        )
+            result = subprocess.run(
+                ["bash", str(forwarder)],
+                input=payload,
+                capture_output=True,
+                env=env,
+                timeout=_TIMEOUT_SECONDS,
+            )
         server.join()
 
         assert result.returncode == 0, result.stderr.decode()

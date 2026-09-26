@@ -647,6 +647,7 @@ def cmd_start(args: argparse.Namespace) -> int:
     sys.stderr.flush()
 
     # Daemonise process (fork and detach from terminal)
+    displaced = pid
     try:
         # First fork
         pid = os.fork()
@@ -654,12 +655,9 @@ def cmd_start(args: argparse.Namespace) -> int:
             # Parent process - poll for PID file (child startup time is
             # variable on slow hosts: imports + config load + handler init).
             # Plan 00100 Task 0.2: replace fixed 0.5s sleep with polling.
-            daemon_pid = None
-            for _ in range(Timeout.DAEMON_PID_POLL_MAX_ITERATIONS):
-                time.sleep(Timeout.DAEMON_PID_POLL_INTERVAL_SEC)
-                daemon_pid = read_pid_file(str(pid_path))
-                if daemon_pid is not None:
-                    break
+            daemon_pid = _await_started_daemon(
+                Path(pid_path), Path(socket_path), project_path, displaced
+            )
             if daemon_pid is not None:
                 print(f"Daemon started successfully (PID: {daemon_pid})")
                 print(f"Socket: {socket_path}")
@@ -913,17 +911,62 @@ def remove_stale_pid_file(pid_path: Path, socket_path: Path, seen: str) -> bool:
     return False
 
 
-def pid_is_this_projects_daemon(pid: int, socket_path: Path, project_root: Path) -> bool:
-    """Liveness for a pid this user may not signal (Plan 00466 round 4, N139-A).
+def _is_this_users_process(pid: int) -> bool:
+    """True when this user may signal ``pid``, a pid another process can own.
 
-    ``kill -0`` failing with EPERM proves a process exists, not that it is
-    this daemon. It is, for ``init.sh``'s ``is_daemon_running``, when the
-    socket answers or the pid's command line proves it serves this project.
+    Signal 0 is never delivered: the kernel only checks the permission.
+    """
+    # type() rather than isinstance(): see daemon_process_project_root.
+    if type(pid) is not int or pid <= 1:
+        return False
+    try:
+        os.kill(pid, 0)
+    except OSError:
+        return False
+    return True
+
+
+def _serves_this_project(pid: int, project_root: Path) -> bool:
+    """True when ``pid``'s command line proves it serves ``project_root``."""
+    proof = daemon_process_project_root(pid)
+    return proof.root is not None and proof.root == os.path.realpath(project_root)
+
+
+def pid_is_this_projects_daemon(pid: int, socket_path: Path, project_root: Path) -> bool:
+    """Liveness for a live pid ``init.sh`` could not prove (Plan 00466 N139-A, Sh-D).
+
+    A live process is not proof of this daemon. It is, for ``init.sh``'s
+    ``is_daemon_running``, when the socket answers, or when its command line
+    proves it serves this project. A command line is anyone's to write, so
+    it counts only for a process of this user's (round 5, P4-2): another
+    user's process naming this project in its arguments proves nothing.
     """
     if _socket_liveness_sync(socket_path) is _SocketLiveness.LIVE:
         return True
-    proof = daemon_process_project_root(pid)
-    return proof.root is not None and proof.root == os.path.realpath(project_root)
+    return _is_this_users_process(pid) and _serves_this_project(pid, project_root)
+
+
+def _await_started_daemon(
+    pid_path: Path, socket_path: Path, project_path: Path, displaced: int | None
+) -> int | None:
+    """The pid of the daemon ``cmd_start`` launched, once proven, else None.
+
+    A PID file still naming ``displaced``, the live pid it held before the
+    fork, proves nothing about this start (round 5): a stale file of a pid
+    since reused, or another user's, was reported as the started daemon.
+    A new pid counts once the socket answers or its command line proves it
+    serves this project.
+    """
+    for _ in range(Timeout.DAEMON_PID_POLL_MAX_ITERATIONS):
+        time.sleep(Timeout.DAEMON_PID_POLL_INTERVAL_SEC)
+        daemon_pid = read_pid_file(str(pid_path))
+        if daemon_pid is None or daemon_pid == displaced:
+            continue
+        if _socket_liveness_sync(socket_path) is _SocketLiveness.LIVE or _serves_this_project(
+            daemon_pid, project_path
+        ):
+            return daemon_pid
+    return None
 
 
 def cmd_stop(args: argparse.Namespace) -> int:
@@ -953,8 +996,9 @@ def cmd_stop(args: argparse.Namespace) -> int:
         pidfd = _open_pidfd(pid)
     except ProcessLookupError:
         # Exited since read_pid_file saw it. Nothing to signal, and its files
-        # are left alone: a successor may already own them, and a PID file
-        # that is merely stale is cleared by the next read_pid_file.
+        # are left alone: a successor may already own them. A PID file that
+        # is merely stale never counts as running; init.sh removes it under
+        # the start lock, and the next daemon start overwrites it.
         print(f"Daemon (PID {pid}) exited before it could be pinned; nothing to stop")
         return 0
     except OSError as e:

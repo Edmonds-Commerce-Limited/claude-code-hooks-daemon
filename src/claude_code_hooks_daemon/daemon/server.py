@@ -36,6 +36,7 @@ from claude_code_hooks_daemon.core.input_schemas import get_input_schema
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.daemon.config import DaemonConfig
 from claude_code_hooks_daemon.daemon.memory_log_handler import MemoryLogHandler
+from claude_code_hooks_daemon.daemon.paths import parse_pid_text
 from claude_code_hooks_daemon.daemon.payload_capture import capture_payload, resolve_capture_dir
 from claude_code_hooks_daemon.utils import secret_file_matching as sfm
 from claude_code_hooks_daemon.utils.cli_command import recovery_command
@@ -327,22 +328,46 @@ def start_lock_path(socket_path: Path) -> Path:
     return socket_path.with_name(socket_path.name + _START_LOCK_SUFFIX)
 
 
+def _owner_uid(path: Path) -> str:
+    """The uid owning ``path``, or why it cannot be read, for a message."""
+    try:
+        return str(os.lstat(path).st_uid)
+    except OSError as exc:
+        return f"unknown ({exc.strerror})"
+
+
 def _open_start_lock(socket_path: Path) -> int:
     """Open (creating) the start lock beside ``socket_path``; returns its fd.
 
     Refuses a symlink (Plan 00466 round 4, Sh-C): ``O_CREAT`` through a link
     planted at the lock path would create or open the file it points at. The
     lock must also be a regular file, which ``O_NOFOLLOW`` alone does not
-    promise. No ownership check: a host and a container sharing the
-    untracked directory run as different users and share this one lock,
-    and a lock is only ever flocked, never read, written or truncated.
+    promise.
+
+    The lock is created ``0600``, so only its owner (and root) can open it
+    (round 5, Sh-E). That is deliberate: a lock another user can open is one
+    another user can hold, and every start would then wait on them. A
+    second user sharing the untracked directory (a host beside a container
+    that is not root) therefore cannot take it; that open fails with a
+    ``PermissionError`` naming both users, and every caller fails closed on
+    it: a start does not run, and nothing is removed.
 
     Raises:
+        PermissionError: the lock belongs to a user this one cannot open it as.
         OSError: the lock could not be opened, or is not a regular file.
     """
     lock_path = start_lock_path(socket_path)
     lock_path.parent.mkdir(parents=True, exist_ok=True)
-    fd = os.open(str(lock_path), os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600)
+    try:
+        fd = os.open(str(lock_path), os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600)
+    except PermissionError as exc:
+        raise PermissionError(
+            exc.errno,
+            f"the start lock belongs to uid {_owner_uid(lock_path)}, and uid "
+            f"{os.geteuid()} cannot open it; a daemon of another user shares this "
+            "directory, and only its user (or root) can start or clean up after it",
+            str(lock_path),
+        ) from exc
     if not stat.S_ISREG(os.fstat(fd).st_mode):
         os.close(fd)
         raise OSError(errno.EINVAL, "the start lock is not a regular file", str(lock_path))
@@ -2039,10 +2064,14 @@ class HooksDaemon:
 
         pid = os.getpid()
 
-        # Check for stale PID file
+        # Check for stale PID file. The shared parser (round 5, P4-4): 0 and
+        # negative numbers are process groups, and kill(0, 0) succeeds
+        # against this daemon's own, so they would read as a live incumbent.
         if pid_file_path.exists():
             try:
-                old_pid = int(pid_file_path.read_text().strip())
+                old_pid = parse_pid_text(pid_file_path.read_text())
+                if old_pid is None:
+                    raise ValueError(f"no pid a daemon could hold in {pid_file_path}")
                 # Check if process exists
                 try:
                     os.kill(old_pid, 0)  # Signal 0 checks existence

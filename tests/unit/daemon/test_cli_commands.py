@@ -1190,6 +1190,41 @@ class TestTheStartLockRefusesWhatIsNotItsOwnFile:
         with server.hold_start_lock(socket_path, Timeout.FILE_LOCK):
             assert server.start_lock_path(socket_path).is_file()
 
+    def test_only_its_owner_may_open_the_lock(self, short_dir: Path) -> None:
+        """Round 5 (Sh-E): a lock another user can open is one another user
+        can hold, and every start would wait on them."""
+        socket_path = short_dir / "daemon.sock"
+        with server.hold_start_lock(socket_path, Timeout.FILE_LOCK):
+            mode = server.start_lock_path(socket_path).stat().st_mode
+        assert mode & 0o077 == 0
+
+    def test_another_users_lock_is_refused_by_name(self, short_dir: Path) -> None:
+        """Root opens anything, so the EACCES a second user gets is the
+        probe's. The refusal names both users, and nothing is removed."""
+        socket_path = short_dir / "daemon.sock"
+        lock_path = server.start_lock_path(socket_path)
+        lock_path.touch()
+        pid_path = short_dir / "daemon.pid"
+        pid_path.write_text(str(_UNREAL_PID))
+        real_open = os.open
+
+        def refuse_the_lock(path: str, *args: Any, **kwargs: Any) -> int:
+            if path == str(lock_path):
+                raise PermissionError(errno.EACCES, os.strerror(errno.EACCES), path)
+            return real_open(path, *args, **kwargs)
+
+        with patch("os.open", side_effect=refuse_the_lock):
+            with (
+                pytest.raises(PermissionError) as raised,
+                server.hold_start_lock(socket_path, Timeout.FILE_LOCK),
+            ):
+                pytest.fail("the lock was taken")
+            assert not remove_stale_pid_file(pid_path, socket_path, str(_UNREAL_PID))
+        message = str(raised.value)
+        assert f"uid {lock_path.stat().st_uid}" in message
+        assert f"uid {os.geteuid()} cannot open it" in message
+        assert pid_path.exists()
+
 
 class TestRemoveStalePidFile:
     """Plan 00466 round 4 (Sh-A, Sh-B): ``init.sh`` removes a stale or
@@ -1270,15 +1305,40 @@ class TestPidIsThisProjectsDaemon:
         finally:
             listener.close()
 
-    def test_a_command_line_serving_this_project_proves_it(self, short_dir: Path) -> None:
+    def test_a_command_line_serving_this_project_proves_a_pid_of_this_user(
+        self, short_dir: Path
+    ) -> None:
+        """This test's own pid: this user may signal it (signal 0 only)."""
         proof = RootProof(root=os.path.realpath(short_dir), refusal=None)
         with patch(f"{_CLI}.daemon_process_project_root", return_value=proof):
-            assert pid_is_this_projects_daemon(_UNREAL_PID, short_dir / "none.sock", short_dir)
+            assert pid_is_this_projects_daemon(os.getpid(), short_dir / "none.sock", short_dir)
+
+    def test_a_command_line_never_proves_another_users_pid(self, short_dir: Path) -> None:
+        """Round 5 (P4-2): another local user can name this project in its
+        arguments. Root may signal anything, so EPERM is the probe's."""
+        proof = RootProof(root=os.path.realpath(short_dir), refusal=None)
+        with (
+            patch(f"{_CLI}.daemon_process_project_root", return_value=proof),
+            patch("os.kill", side_effect=PermissionError(errno.EPERM, "")),
+        ):
+            assert not pid_is_this_projects_daemon(os.getpid(), short_dir / "none.sock", short_dir)
+
+    def test_a_gone_pid_is_not_proven_by_a_command_line(self, short_dir: Path) -> None:
+        proof = RootProof(root=os.path.realpath(short_dir), refusal=None)
+        with patch(f"{_CLI}.daemon_process_project_root", return_value=proof):
+            assert not pid_is_this_projects_daemon(_UNREAL_PID, short_dir / "none.sock", short_dir)
+
+    @pytest.mark.parametrize("pid", [0, 1, -1, True])
+    def test_what_is_no_pid_is_never_probed(self, short_dir: Path, pid: int) -> None:
+        """``kill(0, 0)`` succeeds against this process's own group."""
+        with patch("os.kill") as kill:
+            assert not pid_is_this_projects_daemon(pid, short_dir / "none.sock", short_dir)
+        kill.assert_not_called()
 
     def test_another_projects_daemon_does_not(self, short_dir: Path, tmp_path: Path) -> None:
         proof = RootProof(root=os.path.realpath(tmp_path), refusal=None)
         with patch(f"{_CLI}.daemon_process_project_root", return_value=proof):
-            assert not pid_is_this_projects_daemon(_UNREAL_PID, short_dir / "none.sock", short_dir)
+            assert not pid_is_this_projects_daemon(os.getpid(), short_dir / "none.sock", short_dir)
 
     def test_an_unprovable_process_does_not(self, short_dir: Path) -> None:
         assert not pid_is_this_projects_daemon(_UNREAL_PID, short_dir / "none.sock", short_dir)

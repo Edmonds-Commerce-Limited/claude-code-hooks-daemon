@@ -149,8 +149,13 @@ def _project_it_manages(launcher):
     """The project a launcher at this resolved path manages, by the rule the
     launcher applies to itself (bin/hooks-daemon): the parent of its bin/ is
     the daemon root, <project>/.claude/hooks-daemon for a client install and
-    the project itself for a self-install."""
-    daemon_dir = os.path.dirname(os.path.dirname(launcher))
+    the project itself for a self-install. None when the path is not a
+    bin/hooks-daemon at all (round 5, R4-2): any other file two levels below
+    a project manages nothing."""
+    bin_dir, name = os.path.split(launcher)
+    if name != "hooks-daemon" or os.path.basename(bin_dir) != "bin":
+        return None
+    daemon_dir = os.path.dirname(bin_dir)
     parent = os.path.dirname(daemon_dir)
     if os.path.basename(daemon_dir) == "hooks-daemon" and os.path.basename(parent) == ".claude":
         return os.path.dirname(parent)
@@ -1167,9 +1172,6 @@ fi
 # untracked/hooks-daemon-niggles.md (2026-05-14 field report).
 DAEMON_STARTUP_TIMEOUT=150
 
-# Daemon startup check interval (deciseconds)
-DAEMON_STARTUP_CHECK_INTERVAL=1
-
 # Export paths for use by forwarder scripts
 export HOOKS_DAEMON_ROOT_DIR
 export SOCKET_PATH
@@ -1243,16 +1245,154 @@ _hooks_daemon_is_pid_text() {
 }
 
 #
+# _hooks_daemon_root_is_this_install() - True when HOOKS_DAEMON_ROOT_DIR is
+# an install of this project, by the P3-1 rule (_installs_launcher above).
+# Its venv is run only then (Plan 00466 round 5, Sh-F).
+_hooks_daemon_root_is_this_install() {
+    local recovery_py
+    _hooks_daemon_recovery_py recovery_py
+    python3 -c "$recovery_py"'
+import sys
+
+sys.exit(0 if _installs_launcher(sys.argv[1], sys.argv[2]) is not None else 1)
+' "${PROJECT_PATH:-}" "${HOOKS_DAEMON_ROOT_DIR:-}"
+}
+
+# What the one run of the daemon's helper a hook may make judged, and its
+# answer (Plan 00466 round 5, R4-1).
+_HOOKS_DAEMON_HELPER_KEY=""
+_HOOKS_DAEMON_HELPER_STATUS=1
+
+#
 # _hooks_daemon_run_cli_helper() - Run the daemon package's python snippet
-# $1 with the remaining arguments, in the daemon's own venv. Fails when
-# there is no usable venv, which every caller treats as "not proven".
+# $2 with the remaining arguments, in the daemon's own venv, to answer the
+# question $1 names. Fails when the venv is not this install's or cannot be
+# used, which every caller treats as "not proven".
+#
+# Importing the daemon package costs about half a second, and the startup
+# poll asks the same question every tick (round 5, R4-1): 150 of those ran
+# the hook past its 60 s timeout, and PreToolUse failed open. So it runs at
+# most once per hook. The same question gets the cached answer; any other
+# is not proven.
 _hooks_daemon_run_cli_helper() {
-    local snippet="$1"
-    shift
+    local key="$1" snippet="$2"
+    shift 2
+    if [[ -n "$_HOOKS_DAEMON_HELPER_KEY" ]]; then
+        if [[ "$_HOOKS_DAEMON_HELPER_KEY" == "$key" ]]; then
+            return "$_HOOKS_DAEMON_HELPER_STATUS"
+        fi
+        return 1
+    fi
+    _HOOKS_DAEMON_HELPER_KEY="$key"
+    _HOOKS_DAEMON_HELPER_STATUS=1
+    if ! _hooks_daemon_root_is_this_install; then
+        return 1
+    fi
     if [[ -z "$PYTHON_CMD" ]] && ! _resolve_python_cmd; then
         return 1
     fi
-    "$PYTHON_CMD" -c "$snippet" "$@"
+    local rv=0
+    "$PYTHON_CMD" -c "$snippet" "$@" || rv=$?
+    _HOOKS_DAEMON_HELPER_STATUS="$rv"
+    return "$rv"
+}
+
+#
+# _hooks_daemon_helper_proves_pid() - The daemon's own proof that live pid
+# $1 is this daemon: its socket answers, or, for a pid this user owns, its
+# command line (cli.pid_is_this_projects_daemon).
+_hooks_daemon_helper_proves_pid() {
+    _hooks_daemon_run_cli_helper "prove:$1" '
+import sys
+from pathlib import Path
+
+from claude_code_hooks_daemon.daemon.cli import pid_is_this_projects_daemon
+
+sys.exit(0 if pid_is_this_projects_daemon(int(sys.argv[1]), Path(sys.argv[2]), Path(sys.argv[3])) else 1)
+' "$1" "$SOCKET_PATH" "$PROJECT_PATH"
+}
+
+#
+# _hooks_daemon_args_prove_this_project() - True when $1, a process's
+# arguments joined by the separator $2, is a daemon server of this project
+# in a form it is launched with: `-m <cli> --project-root <root>
+# start|restart` (init.sh's start_daemon, bin/hooks-daemon), or with no
+# --project-root, an interpreter in the project's own venv
+# (daemon_control.sh). A sufficient condition only (Plan 00466 round 5,
+# Sh-D): process_verification's rule accepts more, and anything this does
+# not prove goes to the daemon's helper. A test checks that everything this
+# proves is proven there too.
+_hooks_daemon_args_prove_this_project() {
+    local args="$1" sep="$2" physical
+    if _hooks_daemon_args_name_root "$args" "$sep" "$PROJECT_PATH"; then
+        return 0
+    fi
+    physical="$(cd -P -- "$PROJECT_PATH" && pwd -P)" || return 1
+    [[ "$physical" != "$PROJECT_PATH" ]] &&
+        _hooks_daemon_args_name_root "$args" "$sep" "$physical"
+}
+
+#
+# _hooks_daemon_args_launch() - True when the joined arguments $1 end with
+# a launch, or have it followed by more arguments: the pieces after the
+# separator $2 (-m, the module, its flags and a subcommand), each preceded
+# by it. Substring tests by parameter expansion, so nothing in a piece is a
+# pattern.
+_hooks_daemon_args_launch() {
+    local args="$1" sep="$2" launch="" piece followed
+    shift 2
+    for piece in "$@"; do
+        printf -v launch '%s%s%s' "$launch" "$sep" "$piece"
+    done
+    printf -v followed '%s%s' "$launch" "$sep"
+    [[ "${args%"$launch"}" != "$args" || "${args/"$followed"/}" != "$args" ]]
+}
+
+_hooks_daemon_args_name_root() {
+    local args="$1" sep="$2" root="$3" sub marker
+    local module=claude_code_hooks_daemon.daemon.cli
+    local flag="${sep}--project-root"
+    for sub in start restart; do
+        if _hooks_daemon_args_launch "$args" "$sep" -m "$module" --project-root "$root" "$sub"; then
+            return 0
+        fi
+    done
+    if [[ "${args/"$flag"/}" != "$args" ]]; then
+        return 1
+    fi
+    # process_verification._VENV_PATH_MARKERS
+    for marker in /.claude/hooks-daemon/untracked/venv /untracked/venv; do
+        if [[ "${args#"$root$marker"}" != "$args" ]]; then
+            for sub in start restart; do
+                if _hooks_daemon_args_launch "$args" "$sep" -m "$module" "$sub"; then
+                    return 0
+                fi
+            done
+        fi
+    done
+    return 1
+}
+
+#
+# _hooks_daemon_pid_args_prove_this_project() - The command line of pid $1
+# proves it is this project's daemon. Linux's procfs keeps the argument
+# boundaries, joined here by newlines. Elsewhere ps prints the arguments
+# joined by spaces, which loses them: an argument holding a whole launch
+# line then passes. Only a pid this user may signal gets here, and such a
+# process could just as well run that launch line itself.
+_hooks_daemon_pid_args_prove_this_project() {
+    local procfs=/proc args newline=$'\n'
+    local cmdline="$procfs/$1/cmdline"
+    if [[ -r "$cmdline" ]]; then
+        args="$(awk 'BEGIN { RS = "\0" } { printf "%s%s", sep, $0; sep = "\n" }' "$cmdline")" ||
+            return 1
+        _hooks_daemon_args_prove_this_project "$args" "$newline"
+        return
+    fi
+    if ! args="$(ps -ww -o args= -p "$1")"; then
+        return 1
+    fi
+    _hooks_daemon_args_prove_this_project "$args" " "
 }
 
 #
@@ -1261,10 +1401,10 @@ _hooks_daemon_run_cli_helper() {
 # Returns:
 #   0 if daemon is running
 #   1 if daemon is not running (a stale or corrupt PID file, or none)
-#   2 if its pid names a process this user may not signal that nothing
-#     proves is this daemon: unknown, so a caller must not skip a start
-#     (Plan 00466 round 4, N139-A). `cli start` then decides, and its REUSE
-#     gate never displaces a live daemon.
+#   2 if its pid names a live process that nothing proves is this daemon:
+#     unknown, so a caller must not skip a start (Plan 00466 round 4,
+#     N139-A; round 5, Sh-D). `cli start` then decides, and its REUSE gate
+#     never displaces a live daemon.
 #
 is_daemon_running() {
     # Check if PID file exists
@@ -1277,28 +1417,26 @@ is_daemon_running() {
     pid=$(cat "$PID_PATH" 2>/dev/null || echo "")
 
     if _hooks_daemon_is_pid_text "$pid"; then
-        # Check if process is alive
-        if kill -0 "$pid" 2>/dev/null; then
-            return 0
-        fi
+        # A live process is not proof of this daemon (round 5, Sh-D): after a
+        # reboot its pid can be anyone's. Its command line decides, then the
+        # daemon's helper.
+        #
         # Plan 00466 N139: only ESRCH means the process is gone. EPERM (a
         # process of another user's) and anything else unrecognised mean it
         # may still run, so the daemon is not provably down and its PID file
         # stays. strerror text in the C locale is the one portable signal the
-        # builtin gives.
-        local probe_error
-        probe_error="$(export LC_ALL=C; kill -0 "$pid" 2>&1)" && return 0
+        # builtin gives. For such a pid only the socket answering counts
+        # (round 5, P4-2): a command line is anyone's to write.
+        local probe_error=""
+        if kill -0 "$pid" 2>/dev/null || probe_error="$(export LC_ALL=C; kill -0 "$pid" 2>&1)"; then
+            if _hooks_daemon_pid_args_prove_this_project "$pid" ||
+                _hooks_daemon_helper_proves_pid "$pid"; then
+                return 0
+            fi
+            return 2
+        fi
         if [[ "$probe_error" != *"No such process"* ]]; then
-            # A live process is not proof of this daemon: the socket
-            # answering, or the pid's command line, decides.
-            if _hooks_daemon_run_cli_helper '
-import sys
-from pathlib import Path
-
-from claude_code_hooks_daemon.daemon.cli import pid_is_this_projects_daemon
-
-sys.exit(0 if pid_is_this_projects_daemon(int(sys.argv[1]), Path(sys.argv[2]), Path(sys.argv[3])) else 1)
-' "$pid" "$SOCKET_PATH" "$PROJECT_PATH"; then
+            if _hooks_daemon_helper_proves_pid "$pid"; then
                 return 0
             fi
             return 2
@@ -1310,7 +1448,7 @@ sys.exit(0 if pid_is_this_projects_daemon(int(sys.argv[1]), Path(sys.argv[2]), P
     # (Plan 00466 round 2, S2; round 4, Sh-A). Without the daemon's venv it
     # stays, which is harmless: it never counts as running, and a starting
     # daemon overwrites it.
-    if ! _hooks_daemon_run_cli_helper '
+    if ! _hooks_daemon_run_cli_helper "remove:$pid" '
 import sys
 from pathlib import Path
 
@@ -1387,15 +1525,18 @@ start_daemon() {
     # the socket file alone is not a reliable readiness signal. Combine with
     # is_daemon_running (PID alive) to guarantee the daemon we spawned is
     # the one we see.
-    local elapsed=0
-    while [[ $elapsed -lt $DAEMON_STARTUP_TIMEOUT ]]; do
+    #
+    # The budget is wall-clock time (Plan 00466 round 5, R4-1). A tick count
+    # stops being one when a tick's probe can take half a second, and the
+    # whole PreToolUse path must deny well inside the hook's 60 s timeout.
+    local deadline=$((SECONDS + (DAEMON_STARTUP_TIMEOUT + 9) / 10))
+    while ((SECONDS < deadline)); do
         if is_daemon_running && [[ -S "$SOCKET_PATH" ]]; then
             return 0
         fi
 
         # Sleep 0.1 seconds (1 decisecond)
         sleep 0.1
-        elapsed=$((elapsed + DAEMON_STARTUP_CHECK_INTERVAL))
     done
 
     # Final retry: the daemon may have bound the socket on the very tick
@@ -1408,7 +1549,7 @@ start_daemon() {
     # Genuine timeout. NOTE: do NOT unlink PID_PATH — if the daemon is still
     # coming up, the PID slot belongs to it. is_daemon_running() cleans
     # stale PID files on next call when the process is actually dead.
-    echo "ERROR: Daemon startup timeout (daemon not ready after ${DAEMON_STARTUP_TIMEOUT}/10 seconds)" >&2
+    echo "ERROR: Daemon startup timeout (daemon not ready after $(((DAEMON_STARTUP_TIMEOUT + 9) / 10)) seconds)" >&2
     if [[ -n "$start_output" ]]; then
         echo "Launcher output (may explain the failure):" >&2
         echo "$start_output" >&2
@@ -2625,6 +2766,16 @@ export -f _hooks_daemon_stdin_is_recovery_command
 export -f _hooks_daemon_recovery_command
 export -f _hooks_daemon_static_deny
 export -f validate_venv
+# is_daemon_running and everything it calls.
+export _HOOKS_DAEMON_PID_MAX
+export -f _hooks_daemon_is_pid_text
+export -f _hooks_daemon_root_is_this_install
+export -f _hooks_daemon_run_cli_helper
+export -f _hooks_daemon_helper_proves_pid
+export -f _hooks_daemon_args_prove_this_project
+export -f _hooks_daemon_args_launch
+export -f _hooks_daemon_args_name_root
+export -f _hooks_daemon_pid_args_prove_this_project
 export -f is_daemon_running
 export -f start_daemon
 export -f ensure_daemon

@@ -425,6 +425,38 @@ async def test_write_pid_file_overwrites_when_old_pid_dead(tmp_path: Path) -> No
 
 
 @pytest.mark.anyio
+@pytest.mark.parametrize("text", ["0", "-1", "1", "007", "+12", "1_2"])
+async def test_write_pid_file_treats_text_that_is_no_daemons_pid_as_stale(
+    tmp_path: Path, text: str
+) -> None:
+    """Plan 00466 round 5 (P4-4): ``int()`` read ``0`` as a pid, and
+    ``kill(0, 0)`` succeeds against this daemon's own process group, so with
+    the socket live a corrupt file refused the start as a live incumbent.
+    The shared parser never probes it."""
+    import os
+
+    sock_path = tmp_path / "pid_corrupt.sock"
+    pid_path = tmp_path / "daemon.pid"
+    pid_path.write_text(text)
+    daemon = _make_daemon(sock_path, pid_file_path=pid_path)
+
+    async def _live(_path: Path) -> bool:
+        return True
+
+    with (
+        patch("claude_code_hooks_daemon.daemon.server.os.kill") as kill,
+        patch(
+            "claude_code_hooks_daemon.daemon.server._probe_socket_live",
+            side_effect=_live,
+        ),
+    ):
+        await daemon._write_pid_file()
+
+    kill.assert_not_called()
+    assert pid_path.read_text().strip() == str(os.getpid())
+
+
+@pytest.mark.anyio
 async def test_write_pid_file_overwrites_when_pid_live_but_socket_dead(
     tmp_path: Path,
 ) -> None:

@@ -32,6 +32,7 @@ import pytest
 
 from claude_code_hooks_daemon.constants import Timeout
 from claude_code_hooks_daemon.daemon.paths import PID_MAX_LIMIT
+from tests.daemon_like_process import DAEMON_CLI_MODULE, daemon_like_process
 from tests.dispatch_timeouts import DispatchTestTimeout
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -1402,6 +1403,26 @@ class TestExportedFunctionsCarryTheirOwnRecoverySource:
         )
         assert result.stdout.strip() == "rc=0", result.stderr
 
+    def test_a_child_shell_judges_the_pid_file(
+        self, project: Path, tmp_path: Path, nonexistent_socket: Path
+    ) -> None:
+        """``is_daemon_running`` is exported, and so must be all it calls."""
+        pid_path = tmp_path / "daemon.pid"
+        script = (
+            "source .claude/init.sh; "
+            "bash -c 'if is_daemon_running; then echo rc=0; else echo rc=$?; fi'"
+        )
+        with daemon_like_process(project) as pid:
+            pid_path.write_text(str(pid))
+            result = _run_script(
+                project,
+                script,
+                None,
+                socket_path=nonexistent_socket,
+                extra_env={"CLAUDE_HOOKS_PID_PATH": str(pid_path)},
+            )
+        assert result.stdout.strip() == "rc=0", result.stderr
+
     def test_the_daemon_launch_does_not_inherit_hook_state(
         self, project: Path, tmp_path: Path, nonexistent_socket: Path
     ) -> None:
@@ -1555,32 +1576,81 @@ class TestIsDaemonRunningRemovesOnlyItsOwnStalePidFile:
             shutil.rmtree(socket_dir)
         assert "rc=0" in result.stdout, result.stderr
 
-    def test_a_pid_it_may_not_signal_runs_when_its_command_line_proves_it(
+    def test_a_command_line_never_proves_a_pid_it_may_not_signal(
         self, project: Path, tmp_path: Path, nonexistent_socket: Path
     ) -> None:
-        """A process whose command line is this project's daemon server."""
-        daemon_like = subprocess.Popen(
-            [
-                sys.executable,
-                "-c",
-                "import sys; sys.stdin.read()",
-                "claude_code_hooks_daemon.daemon.cli",
-                "--project-root",
-                str(project),
-                "start",
-            ],
-            stdin=subprocess.PIPE,
-        )
-        try:
+        """Round 5 (P4-2): another user's process can name this project in
+        its arguments, so for a pid this user may not signal only the socket
+        answering proves it. The bash side never reads that command line; the
+        helper is ``/bin/false`` here, and its own refusal is
+        ``TestPidIsThisProjectsDaemon`` (root may signal anything, so no real
+        process here can give the helper EPERM)."""
+        with daemon_like_process(project) as pid:
             pid_path = tmp_path / "daemon.pid"
-            pid_path.write_text(str(daemon_like.pid))
-            result = self._probe(project, pid_path, nonexistent_socket, self._eperm_prelude())
-            assert "rc=0" in result.stdout, result.stderr
+            pid_path.write_text(str(pid))
+            prelude = self._eperm_prelude() + "\nPYTHON_CMD=/bin/false"
+            result = self._probe(project, pid_path, nonexistent_socket, prelude)
+        assert "rc=2" in result.stdout, result.stderr
+        assert pid_path.read_text() == str(pid)
+
+    def test_a_live_pid_that_is_not_this_daemon_is_unknown(
+        self, project: Path, tmp_path: Path, nonexistent_socket: Path
+    ) -> None:
+        """Round 5 (Sh-D): ``kill -0`` succeeding proves a process, and after
+        a reboot a stale file's pid can be any process of this user's. It
+        read as running, so no start was tried and every call was denied."""
+        pid_path = tmp_path / "daemon.pid"
+        pid_path.write_text(str(os.getpid()))
+        result = self._probe(project, pid_path, nonexistent_socket)
+        assert "rc=2" in result.stdout, result.stderr
+        assert pid_path.read_text() == str(os.getpid())
+
+    def test_its_own_command_line_proves_a_pid_without_the_helper(
+        self, project: Path, tmp_path: Path, nonexistent_socket: Path
+    ) -> None:
+        """The hot path: a daemon launched by ``start_daemon`` is proven from
+        its command line, without the half-second venv helper (here a
+        ``PYTHON_CMD`` that always fails)."""
+        with daemon_like_process(project) as pid:
+            pid_path = tmp_path / "daemon.pid"
+            pid_path.write_text(str(pid))
+            result = self._probe(project, pid_path, nonexistent_socket, "PYTHON_CMD=/bin/false")
+        assert "rc=0" in result.stdout, result.stderr
+
+    def test_another_projects_daemon_of_this_user_is_unknown(
+        self, project: Path, tmp_path: Path, nonexistent_socket: Path
+    ) -> None:
+        with daemon_like_process(_make_project(tmp_path / "other")) as pid:
+            pid_path = tmp_path / "daemon.pid"
+            pid_path.write_text(str(pid))
+            result = self._probe(project, pid_path, nonexistent_socket)
+        assert "rc=2" in result.stdout, result.stderr
+
+    def test_the_helper_runs_only_under_this_installs_root(
+        self, project: Path, tmp_path: Path
+    ) -> None:
+        """Round 5 (Sh-F): the helper runs the venv under
+        ``HOOKS_DAEMON_ROOT_DIR``, which is trusted only when it is an install
+        of this project (P3-1). A root of another project's proves nothing,
+        even with this daemon's socket answering."""
+        other = _make_project(tmp_path / "other")
+        (project / ".claude" / "hooks-daemon.env").write_text(
+            f'HOOKS_DAEMON_ROOT_DIR="{other / ".claude" / "hooks-daemon"}"\n'
+        )
+        pid_path = tmp_path / "daemon.pid"
+        pid_path.write_text(str(self._UNREAL_PID))
+        socket_dir = Path(tempfile.mkdtemp(prefix="hd-live-"))
+        listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        try:
+            listener.bind(str(socket_dir / "daemon.sock"))
+            listener.listen(1)
+            result = self._probe(
+                project, pid_path, socket_dir / "daemon.sock", self._eperm_prelude()
+            )
         finally:
-            # Closing its stdin ends this test's own child; no signal is sent.
-            assert daemon_like.stdin is not None
-            daemon_like.stdin.close()
-            daemon_like.wait(timeout=Timeout.REQUEST_LONG)
+            listener.close()
+            shutil.rmtree(socket_dir)
+        assert "rc=2" in result.stdout, result.stderr
 
     def test_a_pid_it_may_not_signal_does_not_stop_an_auto_start(
         self, project: Path, tmp_path: Path, nonexistent_socket: Path
@@ -1625,6 +1695,182 @@ class TestIsDaemonRunningRemovesOnlyItsOwnStalePidFile:
     def test_the_client_pid_limit_matches_the_daemons(self) -> None:
         """``init.sh``'s ``_HOOKS_DAEMON_PID_MAX`` is ``paths.PID_MAX_LIMIT``."""
         assert f"_HOOKS_DAEMON_PID_MAX={PID_MAX_LIMIT}\n" in INIT_SH.read_text()
+
+
+_CLI_MODULE = DAEMON_CLI_MODULE
+
+
+def _launch_lines(project: Path) -> list[tuple[list[str], bool]]:
+    """Command lines, each with whether ``init.sh`` must prove it serves
+    ``project`` without the helper: every form a daemon of it is launched
+    with. The rest are other projects', or not daemon servers."""
+    client_python = f"{project}/.claude/hooks-daemon/untracked/venv-x/bin/python"
+    self_python = f"{project}/untracked/venv-x/bin/python"
+    other = f"{project}-other"
+    return [
+        # start_daemon
+        ([client_python, "-m", _CLI_MODULE, "--project-root", str(project), "start"], True),
+        # bin/hooks-daemon
+        ([client_python, "-m", _CLI_MODULE, "--project-root", str(project), "restart"], True),
+        (["python3", "-m", _CLI_MODULE, "--project-root", str(project), "restart", "-x"], True),
+        # daemon_control.sh, and a self-install's
+        ([client_python, "-m", _CLI_MODULE, "start"], True),
+        ([self_python, "-I", "-m", _CLI_MODULE, "restart"], True),
+        ([client_python, "-m", _CLI_MODULE, "--project-root", other, "start"], False),
+        ([client_python, "-m", _CLI_MODULE, "--project-root", f"{project}x", "start"], False),
+        ([client_python, "-m", _CLI_MODULE, "--project-root", str(project), "status"], False),
+        ([client_python, "-m", _CLI_MODULE, "status"], False),
+        ([client_python, "-m", _CLI_MODULE, "--project-root", other, "restart"], False),
+        (["python3", "-m", _CLI_MODULE, "start"], False),
+        ([f"{other}/untracked/venv/bin/python", "-m", _CLI_MODULE, "start"], False),
+        ([client_python, "-m", _CLI_MODULE, "--project-root=" + other, "start"], False),
+        ([client_python, "-c", "pass", "--project-root", str(project), "start"], False),
+    ]
+
+
+class TestTheHooksCommandLineProofIsSound:
+    """Plan 00466 round 5 (Sh-D): ``init.sh`` proves a live pid of this
+    user's from its command line without the half-second venv helper. Its
+    rule is narrower than ``process_verification``'s: whatever it proves,
+    the daemon's rule proves too, and it proves every launch form."""
+
+    @staticmethod
+    def _daemon_proves(cmdline: list[str], project: Path) -> bool:
+        from claude_code_hooks_daemon.daemon.process_verification import (
+            _extract_project_root,
+            _is_daemon_server_process,
+        )
+
+        root = _extract_project_root(cmdline)
+        return (
+            _is_daemon_server_process(cmdline)
+            and root is not None
+            and os.path.realpath(root) == os.path.realpath(project)
+        )
+
+    def _init_sh_proves(self, project: Path, args: str, sep: str) -> bool:
+        script = (
+            "source .claude/init.sh\n"
+            'if _hooks_daemon_args_prove_this_project "$ARGS" "$SEP"; '
+            "then echo rc=0; else echo rc=1; fi\n"
+        )
+        result = _run_script(
+            project,
+            script,
+            None,
+            socket_path=project / "none.sock",
+            extra_env={"ARGS": args, "SEP": sep},
+        )
+        assert result.stdout.strip() in ("rc=0", "rc=1"), result.stderr
+        return result.stdout.strip() == "rc=0"
+
+    @pytest.mark.parametrize("sep", ["\n", " "], ids=["procfs", "ps"])
+    def test_it_proves_the_launch_forms_and_nothing_the_daemon_would_not(
+        self, tmp_path: Path, sep: str
+    ) -> None:
+        project = _make_project(tmp_path / "with space")
+        for cmdline, launched in _launch_lines(project):
+            proven = self._init_sh_proves(project, sep.join(cmdline), sep)
+            assert proven == launched, cmdline
+            assert not proven or self._daemon_proves(cmdline, project), cmdline
+
+    def test_a_symlinked_project_is_proven_by_its_real_path(self, tmp_path: Path) -> None:
+        project = _make_project(tmp_path / "real")
+        (tmp_path / "link").symlink_to(project)
+        cmdline = ["python3", "-m", _CLI_MODULE, "--project-root", str(project), "start"]
+        assert self._init_sh_proves(tmp_path / "link", "\n".join(cmdline), "\n")
+
+    def test_argument_boundaries_count_where_procfs_keeps_them(self, tmp_path: Path) -> None:
+        """One argument holding a whole launch line is not a launch."""
+        project = _make_project(tmp_path / "proj")
+        cmdline = ["bash", "-c", f"x -m {_CLI_MODULE} --project-root {project} start"]
+        assert not self._daemon_proves(cmdline, project)
+        assert not self._init_sh_proves(project, "\n".join(cmdline), "\n")
+
+
+class TestTheStartupPollIsBoundedByTheClock:
+    """Plan 00466 round 5 (R4-1): the startup poll counted ticks, and every
+    tick could run the daemon's venv helper, about half a second. With a PID
+    file the hook cannot clear and a start that crashes, 150 ticks ran past
+    the 60 s hook timeout, and PreToolUse failed open. Nothing is stubbed
+    below but the crash itself and ``sleep``, which counts its ticks."""
+
+    #: The startup budget these runs give ``start_daemon``, in deciseconds.
+    _BUDGET = 20
+    #: What each ``sleep 0.1`` of the poll really takes here.
+    _TICK_SECONDS = 0.5
+
+    def _crashing_start(
+        self, project: Path, tmp_path: Path, pid_path: Path, prelude: str
+    ) -> tuple[subprocess.CompletedProcess[str], int, int]:
+        """The whole PreToolUse forwarder, with a daemon that crashes as it
+        starts; returns the result, the helper's runs and the poll's ticks."""
+        helper_runs = tmp_path / "helper-runs"
+        ticks = tmp_path / "ticks"
+        fake_python = tmp_path / "fake-python"
+        fake_python.write_text(
+            "#!/bin/bash\n"
+            'if [[ "$1" == -m ]]; then echo "ERROR: Daemon crashed: simulated" >&2; exit 1; fi\n'
+            f'if [[ "$2" == *"daemon.cli import"* ]]; then echo run >> "{helper_runs}"; fi\n'
+            f'exec "{sys.executable}" "$@"\n'
+        )
+        fake_python.chmod(0o755)
+        fake_bin = tmp_path / "fake-bin"
+        fake_bin.mkdir()
+        real_sleep = shutil.which("sleep")
+        assert real_sleep is not None
+        (fake_bin / "sleep").write_text(
+            f'#!/bin/bash\necho tick >> "{ticks}"\nexec "{real_sleep}" {self._TICK_SECONDS}\n'
+        )
+        (fake_bin / "sleep").chmod(0o755)
+        script = (
+            f"source .claude/init.sh\nPYTHON_CMD={fake_python}\n{prelude}\n"
+            "_is_ci_environment() { return 1; }\n_is_ci_enforced() { return 1; }\n"
+            f"DAEMON_STARTUP_TIMEOUT={self._BUDGET}\nPATH={fake_bin}:$PATH\n{_FORWARDER_BODY}"
+        )
+        result = _run_script(
+            project,
+            script,
+            _BASH_TOOL_INPUT,
+            socket_path=tmp_path / "no-daemon.sock",
+            extra_env={"CLAUDE_HOOKS_PID_PATH": str(pid_path)},
+        )
+
+        def count(path: Path) -> int:
+            return len(path.read_text().splitlines()) if path.exists() else 0
+
+        return result, count(helper_runs), count(ticks)
+
+    def test_a_pid_it_may_not_signal_and_a_crashing_start_are_denied_in_time(
+        self, project: Path, tmp_path: Path
+    ) -> None:
+        pid_path = tmp_path / "daemon.pid"
+        pid_path.write_text(str(TestIsDaemonRunningRemovesOnlyItsOwnStalePidFile._UNREAL_PID))
+        result, helper_runs, ticks = self._crashing_start(
+            project,
+            tmp_path,
+            pid_path,
+            TestIsDaemonRunningRemovesOnlyItsOwnStalePidFile._eperm_prelude(),
+        )
+        assert _verdict(result) == "deny", result.stderr
+        assert "Daemon crashed: simulated" in result.stdout + result.stderr
+        assert helper_runs == 1, result.stderr
+        # A tick really takes _TICK_SECONDS, so a clock-bounded poll ends
+        # after a fraction of the ticks a count-bounded one would take.
+        assert 0 < ticks < self._BUDGET, ticks
+
+    def test_a_stale_file_it_cannot_remove_and_a_crashing_start_are_denied_in_time(
+        self, project: Path, tmp_path: Path
+    ) -> None:
+        """The start lock cannot be opened (a planted symlink), so the stale
+        file stays, and every tick asked the helper to remove it again."""
+        pid_path = tmp_path / "daemon.pid"
+        pid_path.write_text(str(TestIsDaemonRunningRemovesOnlyItsOwnStalePidFile._UNREAL_PID))
+        Path(f"{tmp_path / 'no-daemon.sock'}.start.lock").symlink_to(tmp_path / "planted")
+        result, helper_runs, ticks = self._crashing_start(project, tmp_path, pid_path, "")
+        assert _verdict(result) == "deny", result.stderr
+        assert helper_runs == 1, result.stderr
+        assert 0 < ticks < self._BUDGET, ticks
 
 
 def _kill_failure_message(error: int) -> str:

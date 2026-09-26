@@ -5,14 +5,26 @@ which requires careful mocking of os.fork, os.setsid, and related syscalls.
 """
 
 import argparse
+import io
+import os
 import sys
 from pathlib import Path
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 from claude_code_hooks_daemon.daemon.cli import cmd_start
+from claude_code_hooks_daemon.daemon.process_verification import RootProof
 from claude_code_hooks_daemon.daemon.server import _SocketLiveness
+
+
+def _proven_to_serve(project: Path) -> Any:
+    """The started daemon's command line proves it serves ``project``."""
+    return patch(
+        "claude_code_hooks_daemon.daemon.cli.daemon_process_project_root",
+        return_value=RootProof(root=os.path.realpath(project), refusal=None),
+    )
 
 
 class TestCmdStartAlreadyRunning:
@@ -45,6 +57,66 @@ class TestCmdStartAlreadyRunning:
             assert result == 0
 
 
+class TestCmdStartReportsTheDaemonItStarted:
+    """Plan 00466 round 5: a PID file left naming a live process (a pid
+    since reused, or another user's) made the parent report that pid as the
+    daemon it had just started, before the child wrote its own."""
+
+    _DISPLACED = 4242
+    _STARTED = 5555
+
+    def _start(
+        self, tmp_path: Path, pid_file_reads: list[int | None], proven: bool
+    ) -> tuple[int, str]:
+        args = argparse.Namespace(project_root=tmp_path)
+        proof = RootProof(
+            root=os.path.realpath(tmp_path) if proven else None,
+            refusal=None if proven else "not a daemon server",
+        )
+        stdout = io.StringIO()
+        with (
+            patch("claude_code_hooks_daemon.daemon.cli.get_project_path", return_value=tmp_path),
+            patch(
+                "claude_code_hooks_daemon.daemon.cli.read_pid_file",
+                side_effect=[*pid_file_reads, *[pid_file_reads[-1]] * 100],
+            ),
+            patch("claude_code_hooks_daemon.daemon.cli.get_socket_path"),
+            patch("claude_code_hooks_daemon.daemon.cli.get_pid_path"),
+            patch(
+                "claude_code_hooks_daemon.daemon.cli._socket_liveness_sync",
+                return_value=_SocketLiveness.NOT_LIVE,
+            ),
+            patch(
+                "claude_code_hooks_daemon.daemon.cli.daemon_process_project_root",
+                return_value=proof,
+            ),
+            patch("os.fork", return_value=100),
+            patch("time.sleep"),
+            patch.object(sys, "stdout", stdout),
+        ):
+            result = cmd_start(args)
+        return result, stdout.getvalue()
+
+    def test_the_pid_the_file_held_before_the_fork_is_not_the_started_daemon(
+        self, tmp_path: Path
+    ) -> None:
+        result, output = self._start(tmp_path, [self._DISPLACED, self._DISPLACED], proven=True)
+        assert result == 1
+        assert "started successfully" not in output
+
+    def test_the_new_pid_is_reported_once_proven(self, tmp_path: Path) -> None:
+        result, output = self._start(
+            tmp_path, [self._DISPLACED, self._DISPLACED, self._STARTED], proven=True
+        )
+        assert result == 0
+        assert f"Daemon started successfully (PID: {self._STARTED})" in output
+
+    def test_a_new_pid_nothing_proves_is_not_reported(self, tmp_path: Path) -> None:
+        result, output = self._start(tmp_path, [None, self._STARTED], proven=False)
+        assert result == 1
+        assert "started successfully" not in output
+
+
 class TestCmdStartParentProcess:
     """Tests for the parent branch after first fork (pid > 0)."""
 
@@ -70,6 +142,7 @@ class TestCmdStartParentProcess:
             ),
             patch("os.fork", return_value=100),  # Parent gets child PID
             patch("time.sleep"),
+            _proven_to_serve(tmp_path),
         ):
             result = cmd_start(args)
             assert result == 0
@@ -91,6 +164,10 @@ class TestCmdStartParentProcess:
         args = argparse.Namespace(project_root=tmp_path)
         call_order: list[str] = []
 
+        def fork() -> int:
+            call_order.append("fork")
+            return 100
+
         with (
             patch(
                 "claude_code_hooks_daemon.daemon.cli.get_project_path",
@@ -108,8 +185,9 @@ class TestCmdStartParentProcess:
                 return_value=_SocketLiveness.NOT_LIVE,
             ),
             patch.object(sys.stdout, "flush", side_effect=lambda: call_order.append("flush")),
-            patch("os.fork", side_effect=lambda: call_order.append("fork") or 100),
+            patch("os.fork", side_effect=fork),
             patch("time.sleep"),
+            _proven_to_serve(tmp_path),
         ):
             cmd_start(args)
 
@@ -151,6 +229,7 @@ class TestCmdStartParentProcess:
             ),
             patch("os.fork", return_value=100),
             patch("time.sleep"),
+            _proven_to_serve(tmp_path),
         ):
             result = cmd_start(args)
 

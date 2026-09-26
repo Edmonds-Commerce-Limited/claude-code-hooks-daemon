@@ -3,6 +3,58 @@
 Newest first. Each entry says how it was found, why it happens, and the
 candidate remedies.
 
+### N165 — ✅ Remedied — `init.sh`'s daemon helper runs a venv that `HOOKS_DAEMON_ROOT_DIR` alone chose
+
+**Found by the lifecycle batch's round-4 D-PATH review (Sh-F), on main as
+well for `start_daemon`.** `_hooks_daemon_run_cli_helper` resolved and ran
+the venv under `HOOKS_DAEMON_ROOT_DIR` without the P3-1 check that the root
+is an install of this project. That variable can be inherited from whatever
+started Claude Code, so the helper's answer (is this pid our daemon; may this
+PID file go) could come from another project's code.
+
+**Remedied (lifecycle batch, round 5):** the helper first runs
+`_installs_launcher` (the P3-1 rule, with system `python3`) and proves nothing
+when the root is not this project's. RED:
+`test_the_helper_runs_only_under_this_installs_root` (another project's root,
+with this daemon's socket answering, is still unknown). Release note 159.
+
+### N164 — ✅ Remedied — The start lock's mode and its docstring disagree about a second user
+
+**Found by the lifecycle batch's round-4 D-PATH review (Sh-E), on main as
+well.** `_open_start_lock` creates the lock `0600` and opens it `O_RDWR`, but
+its docstring (and N162 above) said a host and a container running as
+different users share it. They cannot unless one is root: the second user's
+open fails with `EACCES`, and that failure surfaced as a bare `OSError`.
+
+**Remedied (lifecycle batch, round 5):** the mode stays `0600`. A lock another
+user can open is one another user can hold, and every start would then wait
+on them. The docstring now says only the owner (or root) can take it, and
+the second user's `PermissionError` is re-raised naming the lock's uid and
+its own. Every caller already fails closed on `OSError`: a start does not
+run, and `stop` and `remove_stale_pid_file` remove nothing. N162's "share one
+lock" sentence is wrong on this point. RED:
+`test_only_its_owner_may_open_the_lock`,
+`test_another_users_lock_is_refused_by_name`. Release note 159.
+
+### N163 — ✅ Remedied — A PID file whose pid this user may signal counts as running, whatever process it names
+
+**Found by the lifecycle batch's round-4 D-PATH review (Sh-D), on main as
+well.** `is_daemon_running` returned 0 as soon as `kill -0` succeeded. After
+a reboot a stale PID file's pid can belong to any process of this user's,
+which then read as the daemon: no start was tried, and every call was denied
+until someone ran the exempt restart. Round 4 fixed only the EPERM half.
+
+**Remedied (lifecycle batch, round 5):** a live pid is running only when it is
+proven. `init.sh` first matches the pid's command line against the forms a
+daemon of this project is launched with (`/proc/<pid>/cmdline` with its
+argument boundaries, or `ps` elsewhere), which costs no venv. Anything else
+goes to the daemon's helper (the socket answering, or
+`process_verification`'s full rule), at most once per hook; unproven is 2,
+unknown, and a start is tried. A test pins that every command line `init.sh`
+proves, the daemon's rule proves too. For another user's pid only the socket
+counts (P4-2). RED: `test_a_live_pid_that_is_not_this_daemon_is_unknown`,
+`TestTheHooksCommandLineProofIsSound`. Release note 159.
+
 ### N162 — ✅ Remedied — The start lock is opened through a symlink, and an unopenable lock escapes `stop`
 
 **Found by the lifecycle batch's round-3 D-PATH re-review (Sh-C), on main as

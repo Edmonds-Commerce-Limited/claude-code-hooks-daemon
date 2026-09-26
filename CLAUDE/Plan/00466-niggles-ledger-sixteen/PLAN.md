@@ -143,6 +143,9 @@ Full write-ups are in [NIGGLES.md](NIGGLES.md). One line each here:
 | N160 | `init.sh` removes a stale PID file outside the start lock                                                      | Lifecycle round 3 D-PATH re-review (Sh-A, shared)               | ✅ Remedied                      |
 | N161 | A PID file holding `0`, `1` or a negative number counts as a running daemon                                    | Lifecycle round 3 re-reviews (Sh-B, S-R3-1, shared)             | ✅ Remedied                      |
 | N162 | The start lock is opened through a symlink, and an unopenable lock escapes `stop`                              | Lifecycle round 3 D-PATH re-review (Sh-C, shared)               | ✅ Remedied                      |
+| N163 | A PID file whose pid this user may signal counts as running, whatever process it names                         | Lifecycle round 4 D-PATH review (Sh-D, shared)                  | ✅ Remedied                      |
+| N164 | The start lock's mode and its docstring disagree about a second user                                           | Lifecycle round 4 D-PATH review (Sh-E, shared)                  | ✅ Remedied                      |
+| N165 | `init.sh`'s daemon helper runs a venv that `HOOKS_DAEMON_ROOT_DIR` alone chose                                 | Lifecycle round 4 D-PATH review (Sh-F, shared)                  | ✅ Remedied                      |
 
 ## Tasks
 

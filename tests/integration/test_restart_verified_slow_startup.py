@@ -37,22 +37,29 @@ def _read_daemon_control_sh() -> str:
     return DAEMON_CONTROL_SH.read_text()
 
 
+def _parent_poll_body() -> str:
+    """The first-fork parent's PID-file poll: ``_await_started_daemon``,
+    which the parent branch calls (Plan 00466 round 5 moved it there)."""
+    content = _read_cli_py()
+    parent = re.search(
+        r"pid = os\.fork\(\).*?if pid > 0:\s*\n(.{1,2000}?)except OSError", content, re.DOTALL
+    )
+    assert parent is not None, "First-fork parent branch not found in cli.py"
+    assert "_await_started_daemon(" in parent.group(1), "the parent no longer polls"
+    poll = re.search(
+        r"\ndef _await_started_daemon\(.*?\) -> int \| None:\n(.*?)\n(?=\S)", content, re.DOTALL
+    )
+    assert poll is not None, "_await_started_daemon not found in cli.py"
+    return poll.group(1)
+
+
 # ----- cli.py: the first-fork parent branch must poll, not fixed-sleep ------
 
 
 def test_cli_start_uses_polling_loop_not_fixed_sleep() -> None:
     """The first-fork parent branch must NOT use `time.sleep(0.5)` before
     a single PID file check. It must poll with a short interval."""
-    content = _read_cli_py()
-
-    # Find the first-fork parent branch (the one that checks PID file after fork).
-    # It contains the distinctive sequence: after `if pid > 0:` it should poll.
-    # We search within a ~40-line window after the first `pid = os.fork()`.
-    match = re.search(
-        r"pid = os\.fork\(\).*?if pid > 0:\s*\n(.{1,2000}?)except OSError", content, re.DOTALL
-    )
-    assert match is not None, "First-fork parent branch not found in cli.py"
-    body = match.group(1)
+    body = _parent_poll_body()
 
     # Must NOT contain `time.sleep(0.5)` as a fire-and-forget single wait.
     has_fixed_half_second = re.search(r"time\.sleep\(\s*0\.5\s*\)", body) is not None
@@ -73,12 +80,7 @@ def test_cli_start_polls_with_short_interval() -> None:
     """The polling loop must use a short (≤200ms) interval so it exits
     quickly once the PID file appears. Accepts either a numeric literal or
     a reference to the `Timeout.DAEMON_PID_POLL_INTERVAL_SEC` constant."""
-    content = _read_cli_py()
-    match = re.search(
-        r"pid = os\.fork\(\).*?if pid > 0:\s*\n(.{1,2000}?)except OSError", content, re.DOTALL
-    )
-    assert match is not None
-    body = match.group(1)
+    body = _parent_poll_body()
 
     # Look for either: a short-enough literal sleep, or a reference to the
     # named polling-interval constant.

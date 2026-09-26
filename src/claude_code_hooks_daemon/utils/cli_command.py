@@ -230,9 +230,13 @@ def _resolve(path: Path) -> Path:
     return head.resolve().joinpath(*reversed(tail))
 
 
-def _project_it_manages(launcher: Path) -> Path:
+def _project_it_manages(launcher: Path) -> Path | None:
     """The project a launcher at this resolved path manages, by the rule the
-    launcher applies to itself (``bin/hooks-daemon``)."""
+    launcher applies to itself (``bin/hooks-daemon``). None when the path is
+    not a ``bin/hooks-daemon`` at all (Plan 00466 round 5, R4-2): any other
+    file two levels below a project manages nothing."""
+    if (launcher.parent.name, launcher.name) != ("bin", "hooks-daemon"):
+        return None
     daemon_dir = launcher.parent.parent
     if (daemon_dir.parent.name, daemon_dir.name) == _CLIENT_DAEMON_SEGMENTS:
         return daemon_dir.parent.parent

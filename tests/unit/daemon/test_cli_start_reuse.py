@@ -19,6 +19,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from claude_code_hooks_daemon.daemon.cli import cmd_start
+from claude_code_hooks_daemon.daemon.process_verification import RootProof
 from claude_code_hooks_daemon.daemon.server import DaemonAlreadyRunningError, _SocketLiveness
 
 
@@ -181,6 +182,11 @@ class TestCmdStartStaleSocket:
             patch("claude_code_hooks_daemon.daemon.cli.write_cleanup_status"),
             patch("os.fork", return_value=100),  # parent branch
             patch("time.sleep"),
+            # The daemon that came up is proven to serve this project.
+            patch(
+                "claude_code_hooks_daemon.daemon.cli.daemon_process_project_root",
+                return_value=RootProof(root=os.path.realpath(tmp_path), refusal=None),
+            ),
         ):
             result = cmd_start(args)
 
