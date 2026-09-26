@@ -1080,7 +1080,7 @@ class TestLspEnforcementAcceptanceTests:
         """Plan 00295 Task 3.9: a project can deny the Grep tool at source via
         `permissions.deny: ["Grep"]` in .claude/settings.json (the same
         generic mechanism artifact_publish_blocker's tests already document
-        for Artifact/enableArtifact) -- the two tests that dispatch the Grep
+        for Artifact/enableArtifact) -- every test that dispatches the Grep
         TOOL directly must say so, or a runner in such a project reports a
         false daemon defect instead of a valid SKIP."""
         from claude_code_hooks_daemon.core.acceptance_test import ToolPayload
@@ -1095,7 +1095,9 @@ class TestLspEnforcementAcceptanceTests:
             if isinstance(test.tool_payload, ToolPayload)
             and test.tool_payload.tool_name == ToolName.GREP
         ]
-        assert len(grep_tool_tests) == 2, "expected exactly the two Grep-tool probes"
+        # "Block Grep for class definition", its no-plugin mirror, and "Allow
+        # Grep for regex pattern" (Plan 00466 N80 added the mirror).
+        assert len(grep_tool_tests) == 3, "expected exactly the three Grep-tool probes"
         for test in grep_tool_tests:
             assert test.safety_notes is not None
             assert "permissions.deny" in test.safety_notes

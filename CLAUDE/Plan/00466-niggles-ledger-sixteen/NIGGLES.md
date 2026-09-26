@@ -659,6 +659,176 @@ interrupt a running handler) and lands with that branch. N40 is taken there too
 taken on the N38 fix branch (the chain's remaining linear per-token cost, which
 waits for the shell-parser consolidation).
 
+### N96 — `subagent_full_qa_blocker.py` is one 5,300-line handler
+
+**Found by the coordinator while harvesting the Plan 00463 gate fix.** The
+module grew over ten review rounds, each closing more evasion shapes, to
+5,294 lines. No other handler is close to that size. It holds command
+recognition, interpreter classification, wrapper peeling and the verdict
+in one file, so every future review reads all of it, and a regression in
+one part hides among the rest.
+
+**Remedy:** after Plan 00463 merges, split it along the seams it already
+has. Put the recognisers in `utils` next to `shell_segmentation`, keep the
+verdict and messages in the handler, and move behaviour-free tables to
+constants. It is a pure refactor with the test suite unchanged. Some of
+the recognition probably duplicates the 464 script-walk and wrapper
+machinery, so reuse that rather than moving it.
+
+### N95 — Test fixtures run setup git commands under a production 5-second budget, so a loaded host flakes the gate
+
+**Found by the N81 to N83 gate fixer.**
+`test_sensitive_content.py::TestStagedContentSurface::test_excluded_path_is_not_inspected`
+errored because a `git commit` in its FIXTURE timed out on
+`Timeout.GIT_CONTEXT` (5 s). That was the last test of a 28,651-test run
+with a load average of 6 on 8 cores. About 86 test files' git fixtures use
+that same production budget. The budget exists to bound the daemon's own
+git calls on the hook path. A fixture's setup is not what is under test,
+and it borrowing the hook budget turns host load into gate failures.
+
+**Remedy:** fixtures use a test-owned setup budget, a named constant with a
+generous bound. Assertions about the product's own timing stay on the
+product constant. A test pins that fixtures never import the hook-path
+budget.
+
+### N94 — `github_auto_close_keywords` answers a repeated `git commit -F` from the previous request
+
+**Found by N38 review 8 (its MAJOR, and on main too).** The handler caches
+its verdict on the shared handler instance, keyed by the command text alone.
+The verdict also depends on the message file, read relative to the request's
+cwd. Run `git commit -F msg.txt` with a harmless message in one directory,
+then with `Closes #12` in another: the second is allowed. Editing the file
+between two identical commands also keeps the stale answer.
+
+**Remedy:** N38 fix round 9 keys the memo by every input, sweeps every
+handler for per-instance per-request state, and extends the static detector
+to catch it. It lands with N38.
+
+### N93 — `project_containment` misses writes inside `eval '…'` and nested heredocs
+
+**Found by N38 review 8 (ledger candidate).** A write outside the project
+that sits inside `eval '…'`, inside `bash <<'OUTER'`, or after a moved
+heredoc closer is not seen. Every tree allows it, main included.
+
+**Remedy:** judge executed bodies as commands, as the guards now do. It
+belongs on the executed-body branch with N87 to N89.
+
+### N92 — `pipe_blocker` reads a `|` inside a double-quoted regex as a pipe
+
+**Found by N38 review 8 (ledger candidate).** `grep -E "a|HEAD|b" f` is
+denied as a pipe to `head`. It happens on every tree, including the live
+daemon. A double-quoted string is one word to bash, so there is no pipe
+there.
+
+**Remedy:** the pipe split must honour quoting, taking pipe positions from
+the N38 lexer. It starts after N38 merges.
+
+### N91 — A project's extra `protected_paths` can be ignored for the life of the daemon by the payload-capture and lint seams
+
+**Found by N38 fix round 8's static shared-state detector.**
+`secret_file_matching.resolve_configured_patterns()` sets its "resolved" flag
+BEFORE it checks whether `ProjectContext` is initialised. A first call made
+before the context is ready therefore fixes the patterns at the shipped
+defaults for the rest of the process. The project's own `protected_paths`
+are then never applied by the seams that use this function: payload capture
+and lint diagnostics. The guard itself reads its options separately.
+
+**Remedy:** the N38 branch replaces the flag with a memo keyed by its inputs,
+and a test fails on the old code. It lands with N38.
+
+### N90 — `project_containment` denies every command, even one that writes nothing, when the project root is unresolved
+
+**Found by the guard-defects gate fixer.** `project_containment.matches()`
+resolves `ProjectContext.project_root()` before it checks whether the
+command names any write target. When the root cannot be resolved, it fails
+closed on EVERY command ahead of every lower-priority handler. Three test
+harnesses that build a router without initialising `ProjectContext` showed
+it. In a real daemon the context is always initialised, but any future
+caller that routes events without it is fully locked out.
+
+**Remedy:** return early when `_named_targets()` is empty, before resolving
+the root. A command that writes nothing cannot escape the project. Keep
+fail-closed for a command that does name a target, and pin both with tests.
+
+### N89 — A data-sink receiver is trusted after the command redefines it
+
+**Found by N38 review 6 (ledger candidate 3).** `cat() { bash; }; cat <<'E'`
+and `alias cat=bash` both fail open on every tree. The heredoc blanking treats
+`cat` as a data sink, so the body is never judged, but bash runs it.
+
+**Remedy:** a receiver name is not trusted as a data sink once the same
+command defines a function or alias of that name, or runs `alias`, `eval` or
+`source` beforehand. In that case the body is judged. It builds on the N38
+lexer, so it goes on the executed-body branch with N87 and N88.
+
+### N88 — A data sink whose output feeds an executing process substitution hides the body
+
+**Found by N38 review 6 (ledger candidate 2).** In
+`tee >(bash) <<'E'` followed by `git reset --hard HEAD` and `E`, bash runs
+the reset. HEAD, base and main all allow it. `_downstream_is_all_data_sinks`
+looks at pipes only, not at `>(...)` redirect targets. This bypasses every
+guard that relies on heredoc blanking.
+
+**Remedy:** a `>(...)` or `<(...)` target that runs a shell (or anything
+off the data-sink list) makes the heredoc body executed. It goes on the
+executed-body branch with N87 and N89.
+
+### N87 — ANSI-C quoting in text handed to a shell is never decoded, so the command it carries is unseen
+
+**Found by N38 fix round 6.** In `bash -c $'echo a\ngit reset --hard HEAD'`,
+bash decodes `\n` to a newline and runs the reset as a second command. The
+guards see one `echo` with a literal `\n`, and allow it. Main allows it too.
+The same applies wherever an executed body arrives through `$'…'`: `sh -c`,
+`eval`, and a here-string fed to a shell.
+
+**Remedy:** decode `$'…'` (the full escape set: `\n`, `\t`, `\xHH`,
+`\nnn`, `\uHHHH`, `\cX`) before an executed body is lexed. If a string cannot
+be decoded, treat the command as unparseable and fail closed. It uses the
+N38 lexer, so it starts after N38 merges.
+
+### N86 — A discovery-file miss leaves the forwarders unable to find or start the daemon
+
+**Found by the upgrade refused-cases investigation**
+(`subagent-reports/260925-upgrade-refused-rootcause-opus-5-5.md` on
+`worktree-upgrade-scripts`, section 4.2). The daemon publishes its
+socket-path discovery file under the OS hostname. A forwarder running with a
+different `HOSTNAME` cannot find it. The upgrade apply's `env -i` dropped
+`HOSTNAME`, and that is fixed on that branch, but a deleted file or a crash
+lands in the same state. Then `cmd_start` sees a socket path over the
+AF_UNIX limit, reports "socket exists but its liveness is indeterminate",
+and refuses. The file does not exist, so the message is false, and the
+forwarder can never start a daemon from that state. Every PreToolUse call
+then fails open until N24 lands, and fails closed after it.
+
+**Remedy:** an absent socket path is NOT_LIVE, not indeterminate. The
+forwarder (`init.sh`) computes the same `/tmp` fallback name the Python CLI
+does, instead of depending only on the discovery file. It touches `init.sh`,
+so it starts after N24 merges.
+
+### N85 — `_MESSAGE_BODY_PATTERN` reads `\'` as an escape inside single quotes, which hides a command from every guard
+
+**Found by N38 review 5 (ledger candidate 2).** In
+`git commit -m 'a\'; git reset --hard HEAD; echo 'x'`, bash ends the first
+string at `a\'`, since a single-quoted string has no escapes. So bash runs
+the reset. `strip_message_bodies` instead treats `\'` as an escaped quote,
+and blanks everything up to the last `'`. Every guard that uses
+`strip_inert_spans` then allows the command. Main and the N38 branch both
+allow it.
+
+**Remedy:** the single-quote alternative becomes `'[^']*'`. Sweep `src/` for
+the same mistake in any other single-quote matcher. Round 6 of the N38 fix
+branch carries it, with a RED test through the real chain.
+
+### N84 — The `daemon_process` test fixture never checks that `stop` succeeded, so daemons leak
+
+**Found by the N24 gate fixer.** When N24's root-attribution check refused
+to signal a test daemon, the fixture's teardown ignored `stop`'s exit code.
+Eight daemons had been left running in the container from earlier runs, and
+nothing reported them.
+
+**Remedy:** teardown asserts `stop` exits 0 and that the pid is gone, and
+a test pins that a failed stop fails the test.
+
 ### N83 — A parametrised live-daemon test skips its own `tests` case
 
 **Found by the coordinator in CI run 36171017537.**
