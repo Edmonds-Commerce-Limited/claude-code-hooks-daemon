@@ -2363,6 +2363,19 @@ teardown-guard message — also done here, see item 1.
    both modes (absent/exact-match/wrong-value for the env var; declared vs
    undeclared file under each).
 
+**The original defect, fixed on `worktree-n466-guard-defects`** (review-5
+fix round, since merged). The three tests now reconfigure the fixture's own
+`mock` (`mock.side_effect = ...`) instead of adding a second patcher. The
+fixture gained a post-teardown tripwire assertion, so any future
+double-patch in this file fails at the fixture boundary. A regression test
+(`TestProjectRootDoublePatchDoesNotLeakAcrossFiles`) runs the exact
+polluter/victim pair together in one subprocess pytest invocation and
+asserts both pass. RED-pinned by reverting the polluter test alone: the
+regression test reproduces the original symptom (`Example: /repo/test.py`
+leaking into a reason string). ✅ Remedied. (The two branches had each
+written an N39 section, and both merged; this paragraph replaces the second
+copy.)
+
 ### N38 — The PreToolUse chain takes quadratic time on a command of quoted heredoc openers
 
 **Found by the Plan 00463 sixth review** (its nit n6), measured on `main` and
@@ -2399,40 +2412,6 @@ Also key the cache on the absence of overrides, or skip it whenever an
 override is set. RED test: resolve with `HOOKS_DAEMON_PYTHON=/x`, then with
 no override, and the second call must not return `/x`. Being fixed on
 `worktree-d-00376`.
-
-### N39 — Nine unit tests fail in a whole-suite run and pass when their files run alone
-
-**Found by the guard-defects agent** (its review-4 fix round): a plain
-whole-suite `pytest tests/unit` on this worktree gave 9 failures across
-`test_model_fallback_detector.py` (6), `test_absolute_path.py` (1),
-`rule_explain/test_lookup.py` (1) and
-`test_dangerous_invocation_corpus_checker.py` (1); the same four files run
-alone gave 0 failed. **Diagnosed by a parallel agent** (a companion
-worktree, full write-up cross-referenced from there): `main` does not
-reproduce it; this worktree does. Bisected to
-`test_project_containment.py`'s class-wide `_project_root` autouse fixture
-(`with patch(...) as mock`) being double-patched by three tests
-(`TestFailsClosedOnEvaluationError::test_an_uninitialised_project_root_still_denies`,
-`::test_an_evaluation_error_denial_uses_its_own_rule_id`,
-`TestChainLevelFailClosedBehaviour::test_an_evaluation_exception_still_denies_through_the_chain`)
-that ALSO called `monkeypatch.setattr(..., classmethod(lambda cls: _raise()))` on the exact same target.
-`monkeypatch`'s finalizer runs AFTER the fixture's own `with patch(...)`
-block has already restored the real classmethod, so the second patcher's
-teardown overwrote it AGAIN with the fixture's own stale `MagicMock` --
-permanently, for the rest of the pytest PROCESS. Every later test calling
-`ProjectContext.project_root()` in that process then inherited the fake
-root, explaining all four victim files.
-
-**Fixed** (guard-defects agent, review-5 fix round): the three tests now
-reconfigure the fixture's own `mock` (`mock.side_effect = ...`) instead of
-introducing a second patcher; the fixture gained a post-teardown tripwire
-assertion so any FUTURE double-patch in this file fails immediately, at
-the fixture boundary; a regression test
-(`TestProjectRootDoublePatchDoesNotLeakAcrossFiles`) runs the exact
-polluter/victim pair together in one subprocess pytest invocation and
-asserts both pass. RED-pinned by reverting the polluter test alone: the
-regression test reproduces the identical original symptom
-(`Example: /repo/test.py` leaking into a reason string). ✅ Remedied.
 
 ### N36 — `destructive_git` denies a `grep` whose search pattern is the text of a force branch delete
 
