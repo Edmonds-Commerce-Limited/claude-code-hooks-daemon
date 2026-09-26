@@ -112,6 +112,39 @@ the same file).
 - `3b5c28029` — the three fixes (tasks 2-3).
 - This report's commit.
 
-Gate queued DETACHED per the brief
-(`setsid -f bash /workspace/untracked/scratch/gate.sh worktree-plan-463-full-qa-gate`);
-HEAD at queue time: `3b5c28029`. Not waited on.
+Gate queued DETACHED per the brief at HEAD `3b5c28029`; team-lead cancelled
+it before it landed.
+
+## Task 5: N123, team-lead follow-up
+
+Team-lead flagged that the ratio-based fix for
+`test_a_lone_long_star_run_collapses_to_near_zero_cost` still asserted on
+wall-clock time (a `max(baseline * 20, 0.05)` floor), still exposed to the
+same host-contention flake main itself shows (0.09s against a 0.1s budget).
+Replaced it with a deterministic WORK count instead of time: added
+`dp_cell_counter()` to `secret_file_matching.py`, a `contextvars.ContextVar`-backed
+context manager that counts the DP grid cells `_globs_can_intersect`
+visits (a `ContextVar`, not a module global, per the no-per-request-state
+rule — no state leaks across concurrent calls, production pays nothing
+beyond a `None` check). The test now asserts the 60,000-`*` token's cell
+count EQUALS a literal `a*a` baseline's — after the star-run collapse the
+two are the identical 3-character string, so the grids are identical in
+size, deterministically, on every host, not merely small.
+
+RED: proved on a `git archive` scratch copy of the current (uncommitted)
+working tree with the collapse substitutions short-circuited
+(`if False and "**" in a: ...`) — the length cap fires and skips the DP
+entirely, dropping the long token's cell count to 0 against the
+baseline's 9, failing the equality assertion as expected.
+
+Logged as ledger N123 (NIGGLES.md write-up + PLAN.md table row, both
+✅ Remedied). `tests/unit/utils/test_secret_file_matching.py` (whole file):
+335 passed. `tests/unit/plan_qa` (ledger/PLAN.md edits): passed within the
+1181-test run. `ruff`, `black`, `mypy`, `pyright` on the two touched files:
+all clean. Daemon restarted: `RUNNING`.
+
+Commit: `a99332d4d`.
+
+Gate queued DETACHED per team-lead's instruction, only after this commit
+and this report:
+(`setsid -f bash /workspace/untracked/scratch/gate.sh worktree-plan-463-full-qa-gate`).
