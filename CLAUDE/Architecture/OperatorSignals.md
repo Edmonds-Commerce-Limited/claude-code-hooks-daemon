@@ -71,9 +71,9 @@ still-unconfirmed line the supervisor itself typed earlier in the session.
 Precedence: consumed at the supervisor's idle choke point ahead of the goal
 and model-switch/model-restore families (a host-initiated reboot warning is
 more time-critical than either), but still strictly subordinate to
-compact/continue/escape, the DROP ANCHOR emergency correction and the
-coupled-effort correction — none of those may ever be interrupted by an
-informational warning.
+compact/continue/escape — none of those may ever be interrupted by an
+informational warning. Effort has no place in this chain: the supervisor
+injects no effort command of any kind (Plan 00466 N47).
 
 **The status-line countdown is independent of the chat line.** The moment a
 valid signal is observed, a transient WARNING-level notice is posted on the

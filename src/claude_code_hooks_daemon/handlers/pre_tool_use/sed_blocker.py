@@ -14,7 +14,12 @@ from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.core import Decision, GatingResult, get_data_layer
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
-from claude_code_hooks_daemon.core.utils import get_bash_command, get_file_content, get_file_path
+from claude_code_hooks_daemon.core.utils import (
+    bash_write_destinations,
+    get_bash_command,
+    get_file_content,
+    get_file_path,
+)
 from claude_code_hooks_daemon.utils.command_evasion import RESERVED_WORD_PREFIX
 from claude_code_hooks_daemon.utils.scratch_dir import acceptance_path
 
@@ -142,6 +147,10 @@ class SedBlockerHandler(PreToolUseHandlerBase):
     2. A `gh` issue/PR/release body mentioning sed, same separator rule
     3. A command containing a grep, or an echo without a `sed 's/` substitution
        (so `cat f | sed 's/x/y/' | grep z` passes, `... | wc -l` does not)
+    4. A heredoc/redirect whose ONLY write target is a `.md` file, and whose
+       sed text is never EXECUTED (`cat > NOTES.md <<'EOF'` mentioning sed is
+       allowed; a command that actually RUNS sed, or that also writes a
+       non-`.md` target, stays denied regardless of this exemption)
     Exempts (Write): markdown files (.md) -- documentation can mention sed
 
     Why sed is dangerous for LLMs:
@@ -184,6 +193,11 @@ class SedBlockerHandler(PreToolUseHandlerBase):
 
                 # ALLOW: GitHub CLI (gh) commands with sed in text content
                 if self._is_gh_command(command):
+                    return False
+
+                # ALLOW: a heredoc/redirect writing ONLY to a .md target, whose
+                # sed text is never executed (a mention in documentation, not a run)
+                if self._is_markdown_only_write(command):
                     return False
 
                 # ALLOW: safe read-only commands (grep, echo, cat, etc.)
@@ -291,6 +305,36 @@ class SedBlockerHandler(PreToolUseHandlerBase):
                         return True
 
         return False
+
+    def _is_markdown_only_write(self, command: str) -> bool:
+        """Is this command a heredoc/redirect that writes ONLY to a `.md` file,
+        with the sed text it carries never EXECUTED?
+
+        Reuses the shared redirect-target parser (`bash_write_destinations`,
+        the same tokeniser `project_containment` uses to find what a Bash
+        command names as a destination) rather than a second, weaker regex
+        over the raw command text. The RAW (unresolved) destinations are
+        enough here -- unlike a location guard, this handler only needs the
+        target's extension, not its absolute path, so no `cwd` is required.
+        Only `authored` destinations count: a mere relocation (`cp`/`mv`)
+        puts no new sed-mentioning content on disk, so it is not what this
+        exemption is for.
+
+        Checked in this order:
+        - `_executes_sed` first, so a command that genuinely RUNS sed is never
+          exempted merely because it also happens to redirect to a `.md` file
+          (`> x.md; sed -i ...` chains a separate, executed sed and must stay
+          denied; an unquoted heredoc whose body carries `$(sed -i ...)`
+          likewise still executes it).
+        - every AUTHORED destination must be named and end in `.md` -- a
+          command with no nameable destination (e.g. piped to an interpreter
+          instead of redirected) or a MIXED target (`tee a.md b.sh`) is not
+          exempted.
+        """
+        if self._executes_sed(command):
+            return False
+        destinations = [d for d in bash_write_destinations(command) if d.authored]
+        return bool(destinations) and all(d.destination.endswith(".md") for d in destinations)
 
     def _executes_sed(self, command: str) -> bool:
         """Return True if the command actually EXECUTES sed (vs merely mentioning it).
@@ -417,12 +461,12 @@ class SedBlockerHandler(PreToolUseHandlerBase):
             "can silently destroy hundreds of files with no recovery possible.\n\n"
             "**THE RULE IS DENY-BY-DEFAULT, NOT A LIST OF BAD PATTERNS.** Any Bash "
             "command containing the WORD `sed` is blocked unless it matches one of the "
-            "four narrow exemptions below. This framing matters: an earlier version of "
+            "five narrow exemptions below. This framing matters: an earlier version of "
             "this guidance listed specific blocked shapes, which read as though anything "
             "unlisted was fine. It is not — `python3 -c \"print('sed')\"` is blocked, and "
             "so is `xargs sed 's/a/b/'` despite having no `-i`, no command-head position "
             "and no pipe stage.\n\n"
-            "**The four exemptions, in the order they are applied**:\n\n"
+            "**The five exemptions, in the order they are applied**:\n\n"
             "1. **None of them apply if sed is EXECUTED.** sed at a command HEAD (start, "
             "or after `;`, `&&`, `||`), any flag cluster containing `i`, `e` or `n`, or "
             "sed via `xargs`, is blocked no matter what else is in the command. So "
@@ -435,7 +479,15 @@ class SedBlockerHandler(PreToolUseHandlerBase):
             "no command separator between).\n"
             "3. A `gh` issue/PR/release body mentioning sed (same separator rule).\n"
             "4. The command contains a `grep`, or an `echo` that does not itself carry a "
-            "`sed 's/…'` substitution.\n\n"
+            "`sed 's/…'` substitution.\n"
+            "5. A heredoc/redirect whose ONLY write target is a `.md` file, and whose sed "
+            "text is never EXECUTED (`cat > NOTES.md <<'EOF'` mentioning sed in the body "
+            "is allowed). Checked with the same `get_written_file_paths` accessor "
+            "`lint_on_edit` uses to find what a Bash command AUTHORS, not a second regex "
+            "over the raw text — so a command that also writes a non-`.md` target "
+            "(`tee a.md b.sh`) or genuinely RUNS sed (`$(sed -i …)` in an UNQUOTED "
+            "heredoc body, or a separate `; sed -i …` after the redirect) is NOT "
+            "exempted and stays denied, whatever exemption 1 already covers.\n\n"
             "**Consequence worth internalising**: exemption 4 is a proxy for 'this looks "
             "read-only', and it is the reason two commands that BOTH cannot modify a file "
             "get opposite verdicts — `cat f | sed 's/x/y/' | grep z` is allowed while "
@@ -444,12 +496,17 @@ class SedBlockerHandler(PreToolUseHandlerBase):
             "**Write/Edit tool (a separate branch, different rule)**: a `.sh`/`.bash` file "
             "whose content contains sed is blocked; a `.md` file is always allowed; any "
             "other path is not examined.\n\n"
-            "**The `.md` exemption is Write-tool-only, and this catches people out.** "
-            "The Bash branch judges the COMMAND, not the destination, so "
-            "`cat > NOTES.md <<'EOF'` whose body mentions sed is DENIED even though "
-            "`Write` to that same path is allowed. Only exemption 4 can spare a Bash "
-            "write (so `echo 'avoid sed' > NOTES.md` is fine). **Write markdown about sed "
-            "with the `Write` tool**, not a heredoc, and this never bites.\n\n"
+            "**The `.md` exemptions are NARROWER on the Bash branch.** `Write` allows "
+            "ANY `.md` path unconditionally. The Bash branch (exemption 5) only allows a "
+            "heredoc/redirect whose SOLE write target is `.md` and whose sed is never "
+            "executed — `cat > NOTES.md <<'EOF'` mentioning sed is allowed, but "
+            "`cat > x.md <<EOF` with `$(sed -i …)` in an UNQUOTED body, `cat <<'EOF' | "
+            "bash` piping the body to an interpreter instead of writing it, a mixed "
+            "target (`tee a.md b.sh`), and `> x.md; sed -i …` chaining a separate "
+            "executed sed are all still denied. Also still allowed the older way: "
+            "`echo 'avoid sed' > NOTES.md` (exemption 4, the echo has no substitution). "
+            "**Write markdown about sed with the `Write` tool** when the shape is more "
+            "than a plain heredoc/redirect, and none of this applies.\n\n"
             "**Use instead**:\n"
             "- `Edit` tool — safe, atomic, verifiable\n"
             "- Parallel Haiku agents with `Edit` tool for bulk changes across many files:\n"

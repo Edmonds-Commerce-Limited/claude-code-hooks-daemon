@@ -55,7 +55,47 @@ while the runner ran considerably more.
   the check with the install line, it never skips. Never reach zero with a
   suppression comment or a rule downgrade — see
   [development/LSP.md](development/LSP.md)
-- **Tests** (Pytest) — **95% coverage minimum**
+- **Tests** (Pytest) — **95% coverage minimum**. **No test may skip, xfail or
+  early-return because the process is root.** This container, and the
+  dogfood server, run as root, so a root-conditioned skip is a test that
+  never runs where the work happens (Plan 00466 N56). Root bypasses file
+  mode bits, so a permission check needs a different fault instead of a
+  skip: monkeypatch the specific `os`/`open`/`Path` call to raise
+  `PermissionError`, replace the file with a directory or a dangling
+  symlink, or patch the exact predicate the code under test evaluates.
+  `tests/integration/test_no_root_conditioned_skips.py` statically scans
+  EVERY `.py` file under `tests/` — not just `test_*.py`/`conftest.py`, and
+  with no exclusion for `tests/fixtures/` or any other directory; it is not
+  opt-out. It classifies by data flow, not by name: a condition tainted by
+  `geteuid`/`getuid`/`getegid`/`getgid`/`getresuid`/`getresgid`,
+  `getpass.getuser`, a `pwd`/`grp` lookup, an env check of
+  `USER`/`LOGNAME`/`HOME`/`SUDO_*`, `Path.home()`/`os.path.expanduser("~")`,
+  `os.access(...)`, or `<expr>.stat().st_uid` is flagged however it reaches
+  the condition — through an alias, a local variable, a module constant, or
+  one level of same-module helper (a `def` or a zero-arg lambda, including a
+  parameterised helper called with literal arguments). It fails on a
+  `skipif`/`xfail`/`unittest.skipIf`/`skipUnless` decorator, an `IfExp`
+  marker, a hand-written `if <root check>: skip/xfail/skipTest/return`, or a
+  conftest `pytest_ignore_collect`/`pytest_collection_modifyitems`/
+  `pytest_runtest_setup` whose control flow depends on one — **and
+  independently** on any skip-like call whose stated *reason* names root,
+  whatever its condition actually tests (the shape Plan 00351 found). A
+  reference it cannot resolve (a cross-module import, a class attribute)
+  whose own name suggests process identity is reported as unproven rather
+  than silently passed. It also fails on a `pass`-only branch opposite a
+  substantive one, and on an `assert` gated by identity with no `else` at
+  all — both make the real check vacuous without ever calling anything
+  skip-like, and both need to know which branch runs AS ROOT (only a no-op
+  there is a problem, since this container is always root).
+  **Known residual** (owner referral, not silently accepted): `try: <permission-bypassing op> except PermissionError: return` followed by an
+  unconditional `pytest.skip(...)` has no syntactic root check at all — the
+  root-dependence is only observable at runtime (root never raises
+  `PermissionError`), which a static AST scan cannot see. A runtime probe
+  (patch the identity calls, diff the collected/skipped set under both
+  identities) would close it; nothing has attempted that yet. Tracked as
+  `_KNOWN_RESIDUALS["try_except_permission_pass"]` in the detector's own
+  test file, asserted to stay uncaught so a future fix flips that assertion
+  red instead of drifting unnoticed.
 - **Security** (Bandit) — zero HIGH/MEDIUM/LOW issues; only B101 is filtered
 - **Dependencies** (Deptry) — missing (DEP001) and misplaced (DEP004)
 - **Plan QA** / **Docs QA** (`run_corpus_qa.py`) — the `plan-qa --sweep` and
