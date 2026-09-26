@@ -686,3 +686,76 @@ class TestRecoveryCarveOutJudgesTheResolvedLauncher:
         link.symlink_to(project)
         response = _send(project, nonexistent_socket, "PreToolUse", _recovery_input(link))
         assert not _denied(response)
+
+
+@pytest.fixture
+def undecodable_socket() -> Iterator[Path]:
+    """Answers with bytes that are not UTF-8: the daemon was reached, and the
+    client's decode raises an error none of its named clauses classify."""
+    yield from _fake_server(respond=b"\xff\xfe\xfd\n")
+
+
+def _reason(response: dict[str, Any]) -> str:
+    hso = response["hookSpecificOutput"]
+    assert hso["permissionDecision"] == "deny"
+    return str(hso["permissionDecisionReason"])
+
+
+class TestDenyReasonNamesWhatHappened:
+    """Plan 00466 N69: a fail-closed deny says whether the daemon was reached.
+
+    "Reached" is true only once ``connect()`` has succeeded. A missing or
+    refused socket, a full accept backlog and an unclassified connect error
+    all fail before that, so each is "unreachable"; any failure after it,
+    classified or not, is "reached".
+    """
+
+    def test_a_missing_socket_is_unreachable(self, project: Path, nonexistent_socket: Path) -> None:
+        reason = _reason(_send(project, nonexistent_socket, "PreToolUse", _BASH_TOOL_INPUT))
+        assert reason.startswith("Hooks daemon unreachable"), reason
+
+    def test_a_refused_connection_is_unreachable(self, project: Path) -> None:
+        short_dir = Path(tempfile.mkdtemp(prefix="hd-"))
+        sock_path = short_dir / "fake.sock"
+        bound = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        bound.bind(str(sock_path))
+        try:
+            reason = _reason(_send(project, sock_path, "PreToolUse", _BASH_TOOL_INPUT))
+        finally:
+            bound.close()
+            shutil.rmtree(short_dir)
+        assert reason.startswith("Hooks daemon unreachable"), reason
+
+    def test_a_full_accept_backlog_is_unreachable(
+        self, project: Path, backlog_full_socket: Path
+    ) -> None:
+        """The kernel refused the connection, so the daemon never saw it."""
+        reason = _reason(_send(project, backlog_full_socket, "PreToolUse", _BASH_TOOL_INPUT))
+        assert reason.startswith("Hooks daemon unreachable"), reason
+
+    def test_an_unclassified_connect_error_is_unreachable_and_says_so(
+        self, project: Path, tmp_path: Path
+    ) -> None:
+        """The deny's context must not reuse the fail-open wording: guards
+        are not "inactive" (they are denying), and the Skill tool it names
+        is itself a PreToolUse call denied the same way."""
+        blocker = tmp_path / "not-a-dir"
+        blocker.write_text("x")
+        response = _send(project, blocker / "fake.sock", "PreToolUse", _BASH_TOOL_INPUT)
+        assert _reason(response).startswith("Hooks daemon unreachable")
+        context = response["hookSpecificOutput"]["additionalContext"]
+        assert "could not connect" in context
+        assert "inactive" not in context
+        assert "Skill tool" not in context
+
+    def test_a_timeout_after_connecting_is_reached(
+        self, project: Path, hanging_socket: Path
+    ) -> None:
+        reason = _reason(_send(project, hanging_socket, "PreToolUse", _BASH_TOOL_INPUT))
+        assert reason.startswith("Hooks daemon reached"), reason
+
+    def test_an_unclassified_error_after_connecting_is_reached(
+        self, project: Path, undecodable_socket: Path
+    ) -> None:
+        reason = _reason(_send(project, undecodable_socket, "PreToolUse", _BASH_TOOL_INPUT))
+        assert reason.startswith("Hooks daemon reached"), reason

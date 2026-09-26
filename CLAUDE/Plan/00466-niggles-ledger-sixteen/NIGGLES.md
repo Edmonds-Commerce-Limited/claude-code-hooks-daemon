@@ -1187,7 +1187,7 @@ was. Neither `Worktree.core.md` nor `HANDLER_REFERENCE.md` says so.
 **Remedy:** fall back only for EMFILE and an unsupported platform, and leave
 the files alone in the race. A RED test for each.
 
-### N69 — Two fail-closed deny messages misname what happened
+### N69 — ✅ Remedied — Two fail-closed deny messages misname what happened
 
 **Found by N24 reviews 3 and 4.**
 
@@ -1197,6 +1197,21 @@ the files alone in the race. A RED test for each.
 
 **Remedy:** use the version-aware verb already used by `emit_hook_error`, and
 map EAGAIN to "timed out".
+
+**Remedied (lifecycle batch):** N24 fix8 had already given `emit_error_json`
+a verb, but chose it by `error_type`, so an unclassified error raised AFTER
+`connect()` (an undecodable response) said "unreachable" and a full accept
+backlog, which the kernel refused, said "reached". The verb now comes from a
+`daemon_reached` flag set only once `connect()` returns. An unclassified
+PreToolUse failure also no longer carries the fail-open "safety handlers are
+inactive … Skill tool" context: before `connect()` it gets the "could not
+connect at all" text, after it a "the exchange with the daemon failed" text.
+The repeated restart advice is one `_RESTART_ADVICE` list. The relay's
+`describe()` prints a `WouldBlock`/`TimedOut` error as "timed out". RED:
+`TestDenyReasonNamesWhatHappened` (3 of 6 failed against `HEAD`; the other 3
+pin the fix8 verbs and fail when a `git archive` copy's verb is mutated back to
+"reached") and `test_relay_pretooluse_timeout_deny_names_the_timeout`, with the
+same assertion added to `relay/test_relay.py`. Release note 151.
 
 ### N68 — A moved-away daemon checkout reads as NOT_INSTALLED, which fails open
 

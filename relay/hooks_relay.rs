@@ -303,6 +303,16 @@ fn classify(err: &io::Error) -> FailClass {
     }
 }
 
+/// The error as a deny reason should name it. An expired socket timeout is
+/// EAGAIN on Linux, which `io::Error` prints as "Resource temporarily
+/// unavailable (os error 11)" -- true of the errno, silent about the cause.
+fn describe(err: &io::Error) -> String {
+    match classify(err) {
+        FailClass::Timeout => "timed out".to_string(),
+        FailClass::Io | FailClass::Oversize => err.to_string(),
+    }
+}
+
 fn main() {
     let args = parse_args();
     let deadline = Instant::now() + Duration::from_millis(args.timeout_ms);
@@ -326,7 +336,7 @@ fn main() {
         }
         arm_timeout(&args, &stream, deadline, false);
         if let Err(err) = stream.write_all(&buf[..n]) {
-            mid_exchange_fail(&args, classify(&err), &format!("socket write: {err}"));
+            mid_exchange_fail(&args, classify(&err), &format!("socket write: {}", describe(&err)));
         }
     }
 
@@ -343,7 +353,9 @@ fn main() {
         arm_timeout(&args, &stream, deadline, true);
         let n = match stream.read(&mut buf) {
             Ok(n) => n,
-            Err(err) => mid_exchange_fail(&args, classify(&err), &format!("socket read: {err}")),
+            Err(err) => {
+                mid_exchange_fail(&args, classify(&err), &format!("socket read: {}", describe(&err)))
+            }
         };
         if n == 0 {
             break; // daemon closed: response complete

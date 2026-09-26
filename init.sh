@@ -1731,6 +1731,21 @@ def _socket_timeout_note():
 # invalid_hook_input) -- every reader of this name tolerates that.
 hook_input = None
 
+# Plan 00466 N69: set once connect() succeeds. It alone decides whether a
+# failure message may say the daemon was reached -- an error_type does not,
+# because an unclassified exception can fire on either side of connect().
+daemon_reached = False
+
+# The recovery advice every daemon-side failure below ends with.
+_RESTART_ADVICE = [
+    'TO FIX: from the project root, run exactly bin/hooks-daemon restart (or',
+    '.claude/hooks-daemon/bin/hooks-daemon restart), which stays',
+    'allowed even while other calls are denied this way. Then use the',
+    'hooks-daemon skill to verify health (args=health).',
+    'If this recurs, use the hooks-daemon skill to check logs',
+    '(args=logs) and report it.',
+]
+
 # The daemon recovery commands a PreToolUse deny must never block, so a
 # wedged/slow daemon (the B2 GIL-hang shape: alive but not answering) can
 # still be recovered from inside the same session. Defines
@@ -1832,13 +1847,7 @@ def emit_error_json(event_name, error_type, error_details):
             'because the daemon has stopped accepting new connections (it is',
             'listening but wedged, not down).',
             '',
-            'TO FIX: from the project root, run exactly bin/hooks-daemon restart (or',
-            '.claude/hooks-daemon/bin/hooks-daemon restart), which stays',
-            'allowed even while other calls are denied this way. Then use the',
-            'hooks-daemon skill to verify health (args=health).',
-            'If this recurs, use the hooks-daemon skill to check logs',
-            '(args=logs) and report it.',
-        ]
+        ] + _RESTART_ADVICE
     elif error_type == 'connection_lost':
         # connect() SUCCEEDED (a ConnectionRefusedError, the genuine
         # daemon-down shape, is caught separately and never reaches here) --
@@ -1854,13 +1863,7 @@ def emit_error_json(event_name, error_type, error_details):
             'The daemon was REACHED (the connection succeeded), then the pipe',
             'broke before a response was received.',
             '',
-            'TO FIX: from the project root, run exactly bin/hooks-daemon restart (or',
-            '.claude/hooks-daemon/bin/hooks-daemon restart), which stays',
-            'allowed even while other calls are denied this way. Then use the',
-            'hooks-daemon skill to verify health (args=health).',
-            'If this recurs, use the hooks-daemon skill to check logs',
-            '(args=logs) and report it.',
-        ]
+        ] + _RESTART_ADVICE
     elif error_type == 'malformed_response':
         # The socket round-trip SUCCEEDED (connect+send+recv all completed),
         # but what came back was not a valid decision -- the daemon-side
@@ -1876,38 +1879,35 @@ def emit_error_json(event_name, error_type, error_details):
             'The daemon was REACHED and answered, but the response could not',
             'be parsed as a judged verdict for this call.',
             '',
-            'TO FIX: from the project root, run exactly bin/hooks-daemon restart (or',
-            '.claude/hooks-daemon/bin/hooks-daemon restart), which stays',
-            'allowed even while other calls are denied this way. Then use the',
-            'hooks-daemon skill to verify health (args=health).',
-            'If this recurs, use the hooks-daemon skill to check logs',
-            '(args=logs) and report it.',
-        ]
-    elif error_type in ('socket_not_found', 'connection_refused'):
+        ] + _RESTART_ADVICE
+    elif error_type in ('socket_not_found', 'connection_refused') \
+            or (event_name == 'PreToolUse' and not daemon_reached):
         # Plan 00466 N24 review 3 MA4 (owner decision): connect() itself
-        # never reached a daemon at all -- the socket is missing, or nothing
-        # is listening on it. For an INSTALLED project this used to fail
-        # OPEN unconditionally on the reasoning that ensure_daemon's
-        # auto-start already ran before this point, so 'merely absent'
-        # covered both a genuinely wedged/crashed daemon and a fresh clone
-        # before first install alike. It no longer does for PreToolUse: the
-        # PreToolUse branch below now denies this the same as a reached-but-
-        # unresponsive daemon, with the one exact-recovery-command carve-out.
+        # never reached a daemon at all -- the socket is missing, nothing is
+        # listening on it, or (N69) an error no clause above names, such as
+        # a socket this client may not open. The PreToolUse branch below
+        # denies all of these, with the one exact-recovery-command carve-out.
         context_lines = [
             'HOOKS DAEMON: could not connect at all',
             '',
             f'Error: {error_type} - {error_details}',
             '',
-            'No daemon answered this socket -- either it is not running, or',
-            'the socket itself is gone.',
+            'No daemon saw this call: the daemon is not running, its socket is',
+            'gone, or the socket cannot be opened (the Error line says which).',
             '',
-            'TO FIX: from the project root, run exactly bin/hooks-daemon restart (or',
-            '.claude/hooks-daemon/bin/hooks-daemon restart), which stays',
-            'allowed even while other calls are denied this way. Then use the',
-            'hooks-daemon skill to verify health (args=health).',
-            'If this recurs, use the hooks-daemon skill to check logs',
-            '(args=logs) and report it.',
-        ]
+        ] + _RESTART_ADVICE
+    elif event_name == 'PreToolUse':
+        # Plan 00466 N69: an error no clause above names, raised AFTER
+        # connect() succeeded. The daemon was reached; the exchange failed.
+        context_lines = [
+            'HOOKS DAEMON: the exchange with the daemon failed',
+            '',
+            f'Error: {error_type} - {error_details}',
+            '',
+            'The daemon was REACHED (the connection succeeded), but the exchange',
+            'failed before a verdict could be read.',
+            '',
+        ] + _RESTART_ADVICE
     else:
         context_lines = [
             'HOOKS DAEMON: Not currently running',
@@ -1979,16 +1979,14 @@ def emit_error_json(event_name, error_type, error_details):
         # handled entirely by emit_hook_error's own NOT_INSTALLED/
         # VENV_MISSING branches, upstream of ever reaching this transport at
         # all.
-        _POST_CONNECT_TYPES = ('socket_timeout', 'malformed_response', 'connection_lost',
-                                'connect_backlog_full')
         if error_type == 'malformed_response':
             verb = 'responded'
-        elif error_type in _POST_CONNECT_TYPES:
+        elif daemon_reached:
             verb = 'reached'
         else:
-            # socket_not_found, connection_refused, and every unclassified
-            # error_type alike: connect() itself never succeeded, so the
-            # daemon was never reached at all -- do not claim otherwise.
+            # Plan 00466 N69: connect() never succeeded -- a missing or
+            # refused socket, a full accept backlog, or an unclassified
+            # connect error -- so the daemon never saw this call.
             verb = 'unreachable'
         reason = f'Hooks daemon {verb} - no verdict produced ({error_type}) - denied for safety'
         if timeout_note:
@@ -2118,6 +2116,7 @@ try:
     sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     sock.settimeout(SOCKET_TIMEOUT_SECONDS)  # budget for connect+send+recv
     sock.connect(socket_path)
+    daemon_reached = True
     sock.sendall(request.encode('utf-8'))
     sock.shutdown(socket.SHUT_WR)
 

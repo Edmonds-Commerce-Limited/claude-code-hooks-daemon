@@ -264,6 +264,47 @@ def test_relay_connect_fail_execs_fallback_with_stdin_intact(tmp_path: Path) -> 
     assert '{"payload":"data"}' in stdout
 
 
+@pytest.mark.skipif(not _RELAY_BINARY.exists(), reason="no built relay binary on this machine")
+def test_relay_pretooluse_timeout_deny_names_the_timeout() -> None:
+    """Plan 00466 N69: a daemon that accepts and never answers runs the
+    relay's budget out, and the deny says so in words. An expired socket
+    timeout surfaces as EAGAIN, which Rust prints as "Resource temporarily
+    unavailable (os error 11)" -- a label that names no cause."""
+    short_dir = Path(tempfile.mkdtemp(prefix="hd-"))
+    sock = short_dir / "pre-tool-use.sock"
+    server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    server.bind(str(sock))
+    server.listen(1)
+    held: list[socket.socket] = []
+
+    def _accept_and_hold() -> None:
+        conn, _ = server.accept()
+        held.append(conn)
+
+    acceptor = threading.Thread(target=_accept_and_hold, daemon=True)
+    acceptor.start()
+    try:
+        result = subprocess.run(
+            [str(_RELAY_BINARY), str(sock), "--timeout-ms", "500"],
+            input=b'{"k":1}',
+            capture_output=True,
+            timeout=_TIMEOUT_SECONDS,
+        )
+    finally:
+        acceptor.join(_TIMEOUT_SECONDS)
+        for conn in held:
+            conn.close()
+        server.close()
+        shutil.rmtree(short_dir)
+
+    assert result.returncode == 0, result.stderr.decode()
+    hso = json.loads(result.stdout)["hookSpecificOutput"]
+    assert hso["permissionDecision"] == "deny"
+    reason = hso["permissionDecisionReason"]
+    assert "timed out" in reason, reason
+    assert "os error" not in reason, reason
+
+
 # ---------------------------------------------------------------------------
 # 2. binary-missing: guard's own -x test fails, falls straight through
 # ---------------------------------------------------------------------------
