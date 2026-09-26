@@ -9,8 +9,13 @@ give up on the whole command.
 
 from __future__ import annotations
 
+import shutil
+import subprocess
+from pathlib import Path
+
 import pytest
 
+from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.utils.heredoc_operators import (
     HeredocOperator,
     find_heredoc_operators,
@@ -237,3 +242,62 @@ class TestCommandBreaks:
         breaks = scan_heredocs(command).breaks
         assert breaks == [command.index("\n"), heredoc.closer_end]
         assert command[heredoc.body_start : heredoc.closer_end] == "hi\nEOF"
+
+
+_MARK = "echo MARK-RAN"
+
+#: ``(opener, closer)``: ``<<`` sits where bash reads no heredoc operator, or
+#: where the scanner cannot be sure it does. Bash 5.2 runs the line between
+#: them, so the scanner must never report that line as a body.
+_NON_OPERATOR_OPENERS: list[tuple[str, str]] = [
+    ("cat ${x:-<<\\EOF}", "EOF}"),
+    ("cat ${x:-<<'E F'}", "E F}"),
+    ("cat ${x:-<<$'EOF'}", "EOF}"),
+    ('cat ${x:-<<E"O"F}', "EOF}"),
+    ("cat ${x:-<<'EOF'}", "EOF}"),
+    ("cat ${x:-<<EOF}", "EOF}"),
+    ("cat ${x:-<<\\true }", "true"),
+    ("echo $(echo ${x:-<<EOF})", "EOF"),
+    ("(( y = 1 <<\\true ))", "true"),
+    ("(( z = 1<<$y ))", "$y"),
+    ("(( z = 1<<-1 ))", "1"),
+    ("echo $[1<<$y]", "$y]"),
+    ("for ((i=0; i<1<<EOF; i++)); do :; done", "EOF"),
+    ("echo `# <<'X-1'`", "X-1"),
+    ("a=(x <<EOF)", "EOF"),
+    ("shopt -s extglob\ncat @(x|<<EOF)", "EOF)"),
+    ("((cat <<EOF", "EOF\n) )"),
+]
+
+
+def _bash_ran_mark(script: str, tmp_path: Path) -> bool:
+    bash = shutil.which("bash")
+    assert bash is not None
+    result = subprocess.run(
+        [bash, "--norc", "--noprofile", "-c", script],
+        cwd=tmp_path,
+        env={"LC_ALL": "C", "PATH": "/usr/bin:/bin"},
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=Timeout.QA_TEST_TIMEOUT,
+    )
+    return "MARK-RAN" in result.stdout
+
+
+class TestNoOperatorOutsideAWordPosition:
+    """Plan 00466 N101 round 10 (review 9 BLOCKER A, shared S2).
+
+    Each case runs in bash first: the line it ran must not sit in any span
+    the scanner reports as a body.
+    """
+
+    @pytest.mark.parametrize(("opener", "closer"), _NON_OPERATOR_OPENERS)
+    def test_no_line_bash_runs_is_reported_as_a_body(
+        self, opener: str, closer: str, tmp_path: Path
+    ) -> None:
+        command = f"{opener}\n{_MARK}\n{closer}"
+        assert _bash_ran_mark(command, tmp_path)
+        mark = command.index(_MARK)
+        spans = [(h.body_start, h.closer_end) for h in scan_heredocs(command).heredocs]
+        assert [span for span in spans if span[0] <= mark < span[1]] == []
