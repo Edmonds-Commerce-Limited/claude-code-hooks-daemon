@@ -1286,3 +1286,86 @@ normalises, which are expected to pass there too.
 2. Once that is fixed, merge main if it has moved (it was still
    `44d1b1b3b` at this round's end). Then restart the daemon, commit, and
    queue the gate as the brief says.
+
+Both items are done in round 8b below.
+
+## Round 8b: a retried hook never restarts a slow start
+
+Code commit `3f32ef1e4`, on `4bb1fb789`. This fixes the open item above,
+following the coordinator's ruling: while a start is under way, no other
+start launches and no enforcement stops the daemon still starting.
+
+- **The launch lock** (`server.LaunchLock`, file `<socket>.launch.lock`):
+  - `cmd_start` takes it before the reuse gate. If another start holds
+    it, `cmd_start` waits up to `DAEMON_START_BUDGET_SEC`. It prints
+    nothing while it waits, so a hook that has stopped reading its output
+    cannot break the wait with EPIPE. Enforcement runs only under this
+    lock, so it never runs while a start of this socket is under way.
+  - The forked daemon inherits the lock's open file. The launcher closes
+    only its own copy after the fork. The daemon writes its pid into the
+    file, and releases the lock through
+    `HooksDaemon(serving=...)` once both binding steps are done. It also
+    releases it in the `finally` block when it exits.
+  - The lock is tied to the starting process by the kernel. flock is
+    released only when every holder has closed it or exited, so a lock
+    that can be taken proves the earlier start has either finished or
+    died.
+  - Once the lock is free, the waiting start runs the ordinary reuse
+    gate. If the daemon is serving, it is reused. If the lock was released
+    with no PID file, the earlier start died and a new one launches.
+    Taking the lock truncates the file, so a pid left by an earlier start
+    names nobody.
+  - The file is opened like the start lock: `O_NOFOLLOW`, regular file
+    only, `0600`. A lock that cannot be opened starts nothing.
+- **A start that never finishes** would now block every later start. The
+  later start says so, and names the lock. `stop` handles it: with no PID
+  file, it reads `start_under_way()`. That gives the pid only while the
+  lock is held against it. It then stops that pid through
+  `stop_verified_daemon`, the same proof (this user's, command line
+  serving this project, pidfd pinned) that it uses for a running daemon.
+  If the start has not named its daemon yet, `stop` reports that and
+  signals nothing.
+- `init.sh` itself is unchanged apart from one comment. A retried hook
+  still launches `cli start`, and that launcher now waits on the start
+  under way. The hook stops waiting at its own deadline, as before.
+- Tests:
+  - `tests/integration/test_a_retried_hook_never_restarts_a_slow_start.py`
+    runs the real forwarder three times, with `container` and `host`
+    variants. Enforcement is forced on or off through `sitecustomize`.
+    The daemon's controller init is slowed 7 s past a 2 s hook deadline.
+    Hooks 1 and 2 are denied as "starting". Hook 3 is answered. Every
+    launcher then finishes, and the record of daemons that reached init
+    must hold exactly the one daemon, which is still running.
+    - RED on a `git archive` of `4bb1fb789`: both variants recorded three
+      daemons. In the container variant, the first two were stopped.
+  - Unit tests:
+    - `TestAStartUnderWayIsWaitedOnNotRepeated` checks four cases:
+      - a start still under way at the budget is left alone, with no
+        enforcement and no fork;
+      - a start that ends serving is reused;
+      - a start that died is replaced;
+      - a lock that cannot be opened starts nothing.
+    - The daemon names itself and releases the lock only through
+      `serving`.
+    - `TestTheLaunchLock` covers the wait, release, a forked copy
+      surviving the launcher's close, holder naming, a stale pid and a
+      planted symlink.
+    - `serving` is called only after the bind.
+    - `TestCmdStopEndsAStartThatNeverFinishes` covers four cases:
+      - a daemon still starting is stopped;
+      - another project's pid is refused;
+      - a start that has not named its daemon is not signalled;
+      - with no start under way, it reports the daemon is not running.
+  - `cmd_start` unit tests that patched `get_socket_path` with a bare
+    MagicMock now pass a `tmp_path` socket. Otherwise the lock file would
+    be created in the current directory, under a mock's name.
+- **GREEN**:
+  - targeted run: 4521 passed. That covers the `init.sh` integration
+    tests, the relay guards, the slow-start and parallel-start tests, the
+    new test, `tests/daemon/`, `tests/unit/daemon/`, `tests/unit/install/`,
+    `safe_signal` and the CI passthrough.
+  - `relay/test_relay.py`: 13/13, after `relay/build.sh` (`-D warnings`).
+  - semgrep (containment rule included): clean.
+    `check_signal_targets.py`: clean.
+  - ruff, black, mypy and pyright: clean. shellcheck on `init.sh`: clean.
+- **Daemon**: restarted from the worktree; it reports `Daemon: RUNNING`.

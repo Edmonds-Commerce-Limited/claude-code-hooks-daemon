@@ -20,6 +20,16 @@
   starting; retry" instead of the hook running into Claude Code's 60-second
   timeout, which lets the call through unchecked. Retry the call; nothing
   needs fixing.
+- Only one start of a daemon runs at a time. A `start` that finds another
+  still under way waits for it, up to 30 seconds, and then uses the daemon
+  it started. It launches its own only if that start failed. Before, a
+  retried hook found no PID file yet and started a second daemon. In a
+  container, that start's single-daemon enforcement stopped the daemon
+  still starting, so a start slower than the hook's 15 seconds never
+  finished. A start that never finishes blocks later ones and says so.
+  `stop` (and `restart`) ends it, after proving its pid the way it proves
+  a running daemon's. The lock is `<socket>.launch.lock`, beside the
+  socket.
 - The proof of which project a daemon serves reads its `--project-root`
   the way the daemon's own argument parser did. When there are two, it
   uses the last one. An abbreviated `--project-r` and the
