@@ -166,6 +166,38 @@ class TestSingleQuotedArguments:
         assert f"cat x{_GROUPS}" in brace_expansion_view(command).text
 
 
+class TestTheInterpreterNameMustBeTheRealInterpreter:
+    """Brace text is only inert if `python3` really is Python. A relative
+    path, or a command that redefines the name first, can make it a shell
+    that then brace-expands the argument it was handed."""
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "./python3 -c 'cat x{a,b}{c,d}'",
+            "bin/python3 -c 'cat x{a,b}{c,d}'",
+            "/tmp/shim/python3 -c 'cat x{a,b}{c,d}'",
+            "python3() { bash -c \"$1\"; }; python3 -c 'cat x{a,b}{c,d}'",
+            "function python3 { bash; }; python3 -c 'cat x{a,b}{c,d}'",
+            "alias python3=bash; python3 -c 'cat x{a,b}{c,d}'",
+            "PATH=/tmp/shim:$PATH; python3 -c 'cat x{a,b}{c,d}'",
+            "export PATH=/tmp/shim:$PATH && python3 -c 'cat x{a,b}{c,d}'",
+            "hash -p /bin/bash python3; python3 -c 'cat x{a,b}{c,d}'",
+            "ln -s /bin/bash ./python3 && ./python3 - <<'EOF'\ncat x{a,b}{c,d}\nEOF",
+        ],
+    )
+    def test_an_untrusted_interpreter_name_keeps_its_text(self, command: str) -> None:
+        assert brace_expansion_view(command).text == command
+
+    @pytest.mark.parametrize("path", ["/usr/bin/python3", "/bin/python3", "/usr/local/bin/node"])
+    def test_a_system_interpreter_path_is_trusted(self, path: str) -> None:
+        assert "{" not in brace_expansion_view(f"{path} -c 'x = \"{_GROUPS}\"'").text
+
+    def test_function_calls_and_names_inside_a_body_are_not_redefinitions(self) -> None:
+        command = f"python3 - <<'EOF'\nalias = hash = 1\nmain()\nPATH = '{_GROUPS}'\nEOF"
+        assert "{" not in brace_expansion_view(command).text
+
+
 class TestUncertainInputIsReturnedUnchanged:
     @pytest.mark.parametrize(
         "command",

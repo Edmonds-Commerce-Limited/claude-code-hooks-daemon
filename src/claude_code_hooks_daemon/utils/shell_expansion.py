@@ -34,7 +34,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Final, NamedTuple
 
-from claude_code_hooks_daemon.utils.shell_segmentation import DATA_SINKS, segment_command_word
+from claude_code_hooks_daemon.utils.shell_segmentation import (
+    DATA_SINKS,
+    command_word,
+    segment_command_word,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -313,6 +317,22 @@ _MAX_VIEW_DEPTH: Final[int] = 32
 #: Characters that end a heredoc DELIMITER word when unquoted.
 _DELIMITER_STOP_CHARS: Final[str] = " \t\n;&|<>()"
 
+#: Directories an interpreter named by absolute path is trusted from. A bare
+#: name resolves through PATH; any other path (`./python3`, `/tmp/python3`)
+#: may be a shell under an interpreter's name, which then brace-expands the
+#: argument it was handed.
+_TRUSTED_INTERPRETER_DIRS: Final[tuple[str, ...]] = ("/usr/bin/", "/bin/", "/usr/local/bin/")
+
+#: Shell-level text (quotes and heredoc bodies blanked) that can make an
+#: interpreter's NAME run something else: a function definition, an alias,
+#: `hash -p`, `enable`, or a PATH assignment. Any of these anywhere in the
+#: command withdraws every neutralisation.
+_NAME_REDEFINITION_RE: Final[re.Pattern[str]] = re.compile(
+    r"(?:^|[\s;&|(`])(?:alias|hash|enable|function)(?=[\s;&|)]|$)"
+    r"|\bPATH\+?="
+    r"|[\w.-]\s*\(\s*\)"
+)
+
 
 def non_shell_interpreter_extension(basename: str) -> str | None:
     """The language extension of a non-shell interpreter ``basename``
@@ -352,6 +372,7 @@ class _PendingHeredoc:
     strip_tabs: bool
     quoted: bool
     receiver: str | None
+    receiver_is_interpreter: bool
     in_substitution: bool
     #: ``[start, end]`` of each later pipe stage; ``end`` is -1 while open.
     stages: list[list[int]] = field(default_factory=list)
@@ -389,7 +410,10 @@ def brace_expansion_view(command: str) -> BraceExpansionView:
         scanner.scan(0, closer=None, in_substitution=False, depth=0)
     except _ViewParseError:
         return BraceExpansionView(command, ())
-    return BraceExpansionView("".join(scanner.out), tuple(scanner.heredocs))
+    heredocs = tuple(scanner.heredocs)
+    if _NAME_REDEFINITION_RE.search(scanner.shell_level_text()):
+        return BraceExpansionView(command, heredocs)
+    return BraceExpansionView("".join(scanner.out), heredocs)
 
 
 class _BraceViewScanner:
@@ -399,6 +423,18 @@ class _BraceViewScanner:
         self.text = command
         self.out = list(command)
         self.heredocs: list[ScannedHeredoc] = []
+        #: Positions inside a quote, comment or heredoc body -- not shell
+        #: syntax, so never read as a redefinition of a command name.
+        self.masked = [False] * len(command)
+
+    def mask(self, start: int, end: int) -> None:
+        for index in range(start, end):
+            self.masked[index] = True
+
+    def shell_level_text(self) -> str:
+        return "".join(
+            " " if hidden else char for char, hidden in zip(self.text, self.masked, strict=True)
+        )
 
     def neutralise(self, start: int, end: int) -> None:
         for index in range(start, end):
@@ -409,9 +445,18 @@ class _BraceViewScanner:
     def command_word(self, start: int, end: int) -> str | None:
         return segment_command_word(self.text[start:end])
 
-    def owner_is_interpreter(self, command_start: int, quote_index: int) -> bool:
-        word = self.command_word(command_start, quote_index)
-        return word is not None and non_shell_interpreter_extension(word) is not None
+    def owner_is_interpreter(self, command_start: int, end: int) -> bool:
+        """Is the segment's command a non-shell interpreter named by a bare
+        name or from a trusted directory?"""
+        segment = self.text[command_start:end]
+        word = segment_command_word(segment)
+        if word is None or non_shell_interpreter_extension(word) is None:
+            return False
+        for raw in segment.split():
+            if command_word(raw) == word:
+                spelled = raw.replace('"', "").replace("'", "").lstrip("\\")
+                return "/" not in spelled or spelled.startswith(_TRUSTED_INTERPRETER_DIRS)
+        return False
 
     def scan(self, index: int, *, closer: str | None, in_substitution: bool, depth: int) -> int:
         """Scan one command context from ``index`` to its ``closer`` (``)``
@@ -440,6 +485,7 @@ class _BraceViewScanner:
                     raise _ViewParseError("unterminated single quote")
                 if not in_substitution and self.owner_is_interpreter(command_start, index):
                     self.neutralise(index + 1, end)
+                self.mask(index, end + 1)
                 index = end + 1
                 at_word_start = False
                 continue
@@ -447,11 +493,14 @@ class _BraceViewScanner:
                 end = self.ansi_c_end(index + 2)
                 if not in_substitution and self.owner_is_interpreter(command_start, index):
                     self.neutralise(index + 2, end)
+                self.mask(index, end + 1)
                 index = end + 1
                 at_word_start = False
                 continue
             if char == '"':
-                index = self.scan_double(index + 1, depth)
+                end = self.scan_double(index + 1, depth)
+                self.mask(index, end)
+                index = end
                 at_word_start = False
                 continue
             if text.startswith("$((", index):
@@ -480,7 +529,9 @@ class _BraceViewScanner:
                 raise _ViewParseError("unmatched )")
             if char == "#" and at_word_start:
                 newline = text.find("\n", index)
-                index = length if newline == -1 else newline
+                end = length if newline == -1 else newline
+                self.mask(index, end)
+                index = end
                 continue
             if text.startswith("<<<", index):
                 index += 3
@@ -638,6 +689,7 @@ class _BraceViewScanner:
                 strip_tabs=strip_tabs,
                 quoted=quoted,
                 receiver=self.command_word(command_start, index),
+                receiver_is_interpreter=self.owner_is_interpreter(command_start, index),
                 in_substitution=in_substitution,
             )
         )
@@ -681,6 +733,7 @@ class _BraceViewScanner:
             self.heredocs.append(
                 ScannedHeredoc(heredoc.receiver, text[body_start:body_end], heredoc.quoted)
             )
+            self.mask(body_start, body_end)
             if heredoc.quoted and not heredoc.in_substitution and self.body_is_inert(heredoc):
                 self.neutralise(body_start, body_end)
         return index
@@ -693,7 +746,7 @@ class _BraceViewScanner:
         <<'EOF'` authors a file a later command can run, the same
         write-then-execute route a Write of that file is judged whole for.
         """
-        if heredoc.receiver is None or non_shell_interpreter_extension(heredoc.receiver) is None:
+        if not heredoc.receiver_is_interpreter:
             return False
         return all(
             _reads_input_as_data(self.command_word(start, end)) for start, end in heredoc.stages
