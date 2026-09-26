@@ -765,8 +765,6 @@ growth is pinned by counting the segments it reads (8x, where the stdlib
 reads 63x), and `_is_plugin_component` is pinned by counting its probes (the
 same at depth 50 and 400, where main makes 103 and 803).
 
-> > > > > > > worktree-n466-superlinear
-
 ### N110 — The local full QA gate tests one Python version, so a version-specific defect passes it and fails CI
 
 **Found by the N106 fixer.** N24 passed the full local gate and went red on
@@ -869,6 +867,81 @@ its timing. No sleep-based ordering and no widened timeout remain in this
 test; `_TIMEOUT_SECONDS` (60s) bounds the wait as it already bounded
 `_finish`.
 
+### N196 — The multi-version gate lets the daemon idle out between its serial runs, times two guards by wall clock, and names errors with no cause
+
+**Found by N110 gate fix 2** (report `subagent-reports/260926-n110-opus-5-5.md`,
+section "Gate fix 2"). The N110 gate (head `2fa17dc73`) went red in three
+groups. Two are defects on this branch, and a third is a cost the timing
+tests hid:
+
+- **py3.13 rest ERRORED on 10 acceptance tests.** `run_test_matrix.py`
+  started the daemon once, before the first serial run. py3.12 rest's last
+  daemon traffic was at 18:47, and that run ended at 18:58:38. The daemon's
+  `idle_timeout_seconds: 600` stopped it at about 18:57, so py3.13 rest found
+  no daemon. The three declared release-gate files turned their skips into
+  errors. Fourteen more acceptance tests skipped quietly (31 skips, where
+  py3.12 had 17).
+- **The gate's summary named those 10 errors with no cause.** It printed node
+  ids only. The cause was in the shard's raw log, and pytest's short summary
+  cut each message to 80 columns before it reached the skip reason.
+- **`project_handlers`: 2 failures in `test_enforce_llm_qa.py`.** These tests
+  used wall-clock `< 1.0s` asserts. The stage runs alone, after the tests
+  stage, so the matrix did not starve them. Host load did (a load average
+  of 33 on 8 cores). Measured by growth, the handler was also QUADRATIC in a
+  word's length: 0.25 s at 100 KB, 0.82 s at 200 KB, 3.3 s at 400 KB. The
+  stdlib `shlex.read_token` grows its token with `self.token += c`, and
+  CPython only appends in place to a local. So the 200 KB case sat at 0.82 s
+  of CPU, just under the old bound.
+
+**✅ Remedied on `worktree-n466-n110`.**
+
+- `run_matrix` ensures the daemon before EVERY serial run.
+- A new pytest plugin, `claude_code_hooks_daemon.qa.first_error_lines`,
+  records each failed or errored test's first error line. Both the primary
+  and the extra runs load it. `tests.json` carries the line as `reason`, and
+  `llm_qa.py` prints it after the node id.
+- The blocking-gate guard now puts the skip reason on its message's first
+  line.
+- `utils/linear_shlex.LinearShlex` is the stdlib state machine with a list
+  accumulator. It is differentially tested against `shlex.shlex` over a
+  corpus and 12,000 random strings in four configurations. It is 52 to 70x
+  per 8x on stdlib and at most 24x on this class.
+- `enforce_llm_qa` tokenises with it, and its three timing tests now assert
+  `tests/scaling.py` growth ratios.
+
+### N197 — Fourteen `src/` modules still tokenise untrusted commands with the stdlib's quadratic `shlex`
+
+**Found by N110 gate fix 2 (N196).** `shlex.shlex.read_token` costs time
+quadratic in a token's length on 3.11 to 3.13 (measured 52 to 70x for 8x
+input). `project_containment`, `lsp_enforcement`, `sensitive_content`,
+`root_recursion_guard`, `merge_to_main_approval`, `markdown_organization`,
+`reference_repo_freshness`, `lint_on_edit`, `bash_file_writes`,
+`secret_file_matching`, `git_commit_parsing`, `process_probe`, `core/utils`
+and `kotlin_strategy` all use `shlex` on hook input or tool output. Not every
+one is on a hot path, and none has been measured here. Any of them that
+splits a Bash command can be made slow with one long word.
+
+**Remedy:** measure each site's growth on a long word with
+`tests/scaling.py`. Move every superlinear one to
+`claude_code_hooks_daemon.utils.linear_shlex.LinearShlex` (or
+`shlex.split`'s equivalent built on it). Then add a semgrep rule that bans
+`shlex.shlex`/`shlex.split` in `src/` and project handlers, as
+`pathlib-quadratic-containment` does for N106.
+
+### N198 — Merge-conflict markers reach the ledger on main, disguised as blockquotes
+
+**Found by N110 gate fix 2.** `NIGGLES.md` on main (`fd4956813`) carries two
+`> > > > > > > <branch>` lines: after N106 and after N100. They are the
+closing `>>>>>>>` markers of resolved merge conflicts. The markdown
+formatter rewrote them as nested blockquotes, and after that no check
+reads them as conflict markers. Neither plan QA nor docs QA flags them, and
+the staged-lint gate does not either.
+
+**Remedy:** find the merge step that commits an unresolved marker. Then add
+a staged-tree check for both spellings, raw and blockquoted, in tracked
+text. Both lines are removed on `worktree-n466-n110`, but that fixes the
+symptom only.
+
 ### N105 — A skill redeploy leaves an untracked, unignored `.claude/hooks-daemon-backups/`
 
 **Found by upgrade review 11 (L9), confirmed by upgrade round 16a.**
@@ -915,6 +988,13 @@ shell words. Keep fail-closed where the shell does expand the text. Pin both
 cases. It touches the guard that guard-defects just changed, so it goes on a
 fresh branch from main.
 
+**Second shape (N110 gate fix 2):** a plain shell glob,
+`ls -d untracked/venv-*/lib/python*/site-packages/_pytest`, is denied the
+same way. The shell does expand this one, so failing closed is right. But
+the deny reason calls it "a bug in the guard itself" and says to file an
+issue. A deliberate cap should be a named verdict that says how to narrow
+the glob.
+
 ### N100 — A continuation on a heredoc opener line (`cat > s.sh \⏎<<'EOF'`) denies a body that is only written
 
 **Found by N38 reviews 6 to 9 (candidate 4), unchanged on main.** When the
@@ -928,8 +1008,6 @@ send people.
 the N38 lexer, and pin that the continued and single-line forms get the
 same verdict. It goes on the executed-body branch with N87 to N89 and N93,
 after N38.
-
-> > > > > > > main
 
 ### N99 — `dev-handlers.md` offers an agent a wrapper command that the daemon denies
 

@@ -25,6 +25,8 @@ from typing import Any
 import pytest
 import yaml
 
+from claude_code_hooks_daemon.qa.first_error_lines import OPTION, PLUGIN
+
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 SCRIPTS_DIR = PROJECT_ROOT / "scripts" / "qa"
 CI_WORKFLOW = PROJECT_ROOT / ".github" / "workflows" / "qa.yml"
@@ -228,6 +230,7 @@ class _Harness:
         label = f"{run.version} {run.scope}"
         self.events.append(f"start {label}")
         failed = 1 if (run.version, run.scope) in self.red else 0
+        failed_tests = [f"tests/unit/test_x.py::test_{run.version}"] if failed else []
         outcome = self.matrix.RunOutcome(
             exit_code=1 if failed else 0,
             summary={
@@ -238,8 +241,9 @@ class _Harness:
                 "errors": 0,
                 "passed_all": not failed,
             },
-            failed_tests=[f"tests/unit/test_x.py::test_{run.version}"] if failed else [],
+            failed_tests=failed_tests,
             log=Path(f"/fake/{run.version}-{run.scope}.log"),
+            first_error_lines=dict.fromkeys(failed_tests, "Daemon not running"),
         )
         return _FakeJob(self.events, label, outcome)
 
@@ -278,6 +282,45 @@ class TestTheRunnerExecutesThePlan:
         assert events.index("ensure daemon") > phase_one_done
         assert events.index("start 3.12 rest") > events.index("ensure daemon")
         assert events.index("wait 3.12 rest") < events.index("start 3.13 rest")
+
+    def test_the_daemon_is_ensured_before_every_serial_run(self) -> None:
+        """00466 N196: the daemon idles out after ``idle_timeout_seconds``.
+        py3.12 rest's last daemon traffic was 11 minutes before it ended, so
+        the daemon ensured before it had exited by the time py3.13 rest
+        started, and py3.13's declared release gates ERRORED on the skip.
+        Each serial run needs its own check."""
+        matrix = _load_matrix()
+        harness = _Harness(matrix)
+        plan = matrix.plan_runs(["3.11", "3.12", "3.13"], "3.11")
+
+        matrix.run_matrix(plan, Path("/fake/py3.11/bin/python"), harness.deps())
+
+        serial = [e for e in harness.events if e == "ensure daemon" or e.endswith(" rest")]
+        assert serial == [
+            "ensure daemon",
+            "start 3.12 rest",
+            "wait 3.12 rest",
+            "ensure daemon",
+            "start 3.13 rest",
+            "wait 3.13 rest",
+        ]
+
+    def test_an_extra_runs_failure_carries_its_first_error_line(self) -> None:
+        matrix = _load_matrix()
+        harness = _Harness(matrix, red=frozenset({("3.13", "rest")}))
+        plan = matrix.plan_runs(["3.11", "3.13"], "3.11")
+
+        results = matrix.run_matrix(plan, Path("/fake/py3.11/bin/python"), harness.deps())
+        report = matrix.build_report(results, _primary_report(), wall_seconds=1.0)
+
+        failed = [t for t in report["tests"] if t["outcome"] == "failed"]
+        assert failed == [
+            {
+                "name": "[py3.13 rest] tests/unit/test_x.py::test_3.13",
+                "outcome": "failed",
+                "reason": "Daemon not running",
+            }
+        ]
 
     def test_an_unprovisionable_interpreter_fails_the_stage_and_says_so(self) -> None:
         matrix = _load_matrix()
@@ -356,6 +399,7 @@ class TestTheRunnerExecutesThePlan:
             },
             failed_tests=[],
             log=Path("/fake/3.12-unit.log"),
+            first_error_lines={},
         )
         result = matrix.RunResult(
             run=matrix.PlannedRun("3.12", "unit", 1, False),
@@ -403,6 +447,32 @@ class TestTheSummaryStatesTheVersionsTested:
         assert "py3.12 unit: ok" in summary and "py3.12 rest: ok" in summary
         assert "py3.13 unit: NOT RUN" in summary and "offline" in summary
 
+    def test_a_named_failure_is_followed_by_its_first_error_line(self) -> None:
+        llm_qa = _load("llm_qa_matrix_reason_under_test", SCRIPTS_DIR / "llm_qa.py")
+        matrix = _load_matrix()
+        harness = _Harness(matrix, red=frozenset({("3.13", "rest")}))
+        plan = matrix.plan_runs(["3.11", "3.13"], "3.11")
+        results = matrix.run_matrix(plan, Path("/fake/py3.11/bin/python"), harness.deps())
+        report = matrix.build_report(results, _primary_report(), wall_seconds=1.0)
+
+        summary = llm_qa._summarize_tests(report)
+
+        assert "[py3.13 rest] tests/unit/test_x.py::test_3.13 - Daemon not running" in summary
+
+
+class TestThePrimaryRunRecordsFirstErrorLines:
+    """run_tests.sh is the primary's runner; its failures must carry a reason too."""
+
+    def test_both_pytest_invocations_load_the_plugin(self) -> None:
+        script = (SCRIPTS_DIR / "run_tests.sh").read_text(encoding="utf-8")
+        assert script.count('"${FIRST_ERROR_ARGS[@]}"') == 2
+        assert f"-p {PLUGIN}" in script
+        assert f"{OPTION}=" in script
+
+    def test_both_report_builders_attach_the_lines(self) -> None:
+        script = (SCRIPTS_DIR / "run_tests.sh").read_text(encoding="utf-8")
+        assert script.count("attach_first_error_lines(tests, ") == 2
+
 
 class TestPytestLogParsing:
     def test_a_log_is_parsed_with_the_same_parser_run_tests_sh_uses(self, tmp_path: Path) -> None:
@@ -415,7 +485,7 @@ class TestPytestLogParsing:
             encoding="utf-8",
         )
 
-        outcome = matrix.outcome_from_log(log, exit_code=1)
+        outcome = matrix.outcome_from_log(log, exit_code=1, lines=tmp_path / "none.jsonl")
 
         assert outcome.summary["failed"] == 1
         assert outcome.summary["passed_all"] is False
@@ -424,16 +494,61 @@ class TestPytestLogParsing:
     def test_a_missing_log_is_red(self, tmp_path: Path) -> None:
         matrix = _load_matrix()
 
-        outcome = matrix.outcome_from_log(tmp_path / "never-written.log", exit_code=0)
+        outcome = matrix.outcome_from_log(
+            tmp_path / "never-written.log", exit_code=0, lines=tmp_path / "none.jsonl"
+        )
 
         assert outcome.summary["passed_all"] is False
+
+    def test_the_recorded_first_error_lines_are_read_back(self, tmp_path: Path) -> None:
+        matrix = _load_matrix()
+        log = tmp_path / "run.log"
+        log.write_text(
+            "=========== short test summary info ===========\n"
+            "ERROR tests/acceptance/test_a.py::test_b - test_a.py is a BLOCKING rel...\n"
+            "=========== 4 passed, 1 error in 0.50s ===========\n",
+            encoding="utf-8",
+        )
+        lines = tmp_path / "lines.jsonl"
+        lines.write_text(
+            json.dumps(
+                {
+                    "nodeid": "tests/acceptance/test_a.py::test_b",
+                    "when": "setup",
+                    "line": "test_a.py is a BLOCKING release gate and skipped: no daemon",
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+        outcome = matrix.outcome_from_log(log, exit_code=1, lines=lines)
+
+        assert outcome.first_error_lines == {
+            "tests/acceptance/test_a.py::test_b": (
+                "test_a.py is a BLOCKING release gate and skipped: no daemon"
+            )
+        }
+
+    def test_an_extra_run_loads_the_first_error_lines_plugin(self, tmp_path: Path) -> None:
+        matrix = _load_matrix()
+        run = matrix.PlannedRun("3.13", "rest", 2, False)
+        lines = tmp_path / "lines.jsonl"
+
+        argv = matrix.extra_pytest_argv(Path("/fake/py3.13/bin/python"), run, lines)
+
+        assert argv[:3] == ["/fake/py3.13/bin/python", "-m", "pytest"]
+        assert ["-p", PLUGIN] == argv[argv.index(PLUGIN) - 1 : argv.index(PLUGIN) + 1]
+        assert f"{OPTION}={lines}" in argv
+        assert argv[-2:] == ["tests", "--ignore=tests/unit"]
 
     def test_a_nonzero_exit_over_a_clean_summary_is_red(self, tmp_path: Path) -> None:
         matrix = _load_matrix()
         log = tmp_path / "run.log"
         log.write_text("=========== 5 passed in 0.50s ===========\n", encoding="utf-8")
 
-        assert matrix.outcome_from_log(log, exit_code=1).summary["passed_all"] is False
+        outcome = matrix.outcome_from_log(log, exit_code=1, lines=tmp_path / "none.jsonl")
+        assert outcome.summary["passed_all"] is False
 
 
 class TestThePrimaryReport:

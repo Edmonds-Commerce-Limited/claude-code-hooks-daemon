@@ -16,7 +16,11 @@ time and runs the whole suite under every version in it:
 - Phase 1 runs the primary and each extra's ``tests/unit`` at the same time.
   Phase 2 then runs each extra's remaining directories, one interpreter at a
   time: they drive the checkout's one live daemon (acceptance tests toggle its
-  transport), so two of them at once would contend.
+  transport), so two of them at once would contend. The daemon is started
+  before each of them if it has idled out.
+- Every run records each failed test's first error line (the
+  ``first_error_lines`` pytest plugin), and the report carries it as that
+  test's ``reason``.
 
 An extra interpreter that cannot be provisioned FAILS the stage and says so;
 the stage never quietly runs fewer versions than CI. Its report is written
@@ -38,6 +42,13 @@ from typing import IO, Any, Final, NamedTuple, Protocol
 
 import yaml
 
+from claude_code_hooks_daemon.qa.first_error_lines import (
+    OPTION as FIRST_ERROR_LINES_OPTION,
+)
+from claude_code_hooks_daemon.qa.first_error_lines import (
+    PLUGIN as FIRST_ERROR_LINES_PLUGIN,
+)
+from claude_code_hooks_daemon.qa.first_error_lines import read_first_error_lines
 from claude_code_hooks_daemon.qa.pytest_text_report import (
     finalize_passed_all,
     parse_pytest_text_output,
@@ -95,12 +106,17 @@ class PlannedRun(NamedTuple):
 
 
 class RunOutcome(NamedTuple):
-    """What one finished run reported."""
+    """What one finished run reported.
+
+    ``first_error_lines`` maps a failed test's node id to the first line of
+    its error, as the ``first_error_lines`` pytest plugin recorded it.
+    """
 
     exit_code: int
     summary: dict[str, Any]
     failed_tests: list[str]
     log: Path
+    first_error_lines: dict[str, str]
 
 
 class RunResult(NamedTuple):
@@ -236,16 +252,17 @@ def run_matrix(
         outcome = job.wait()
         results[run] = RunResult(run, outcome, deps.clock() - began, None)
 
-    serial = [r for r in plan if r.phase == PHASE_SERIAL]
-    if serial:
-        daemon_note = deps.ensure_daemon()
-        if daemon_note is not None:
-            print(daemon_note)
-    for run in serial:
+    for run in (r for r in plan if r.phase == PHASE_SERIAL):
         python = python_for(run)
         if python is None:
             results[run] = not_run(run)
             continue
+        # Before EVERY serial run, not once: the daemon exits after
+        # idle_timeout_seconds without traffic, and a run's later directories
+        # can go longer than that without touching it (00466 N196).
+        daemon_note = deps.ensure_daemon()
+        if daemon_note is not None:
+            print(daemon_note)
         began = deps.clock()
         outcome = deps.launch(run, python).wait()
         results[run] = RunResult(run, outcome, deps.clock() - began, None)
@@ -307,13 +324,22 @@ def build_report(
 
         if run.primary:
             continue
-        named = [f"[{_label(run)}] {node_id}" for node_id in result.outcome.failed_tests]
+        named: list[dict[str, Any]] = []
+        for node_id in result.outcome.failed_tests:
+            record: dict[str, Any] = {"name": f"[{_label(run)}] {node_id}", "outcome": "failed"}
+            reason = result.outcome.first_error_lines.get(node_id)
+            if reason:
+                record["reason"] = reason
+            named.append(record)
         if not run_passed and not named:
             named = [
-                f"[{_label(run)}] run exited {result.outcome.exit_code} naming no failing "
-                f"test; see {result.outcome.log}"
+                {
+                    "name": f"[{_label(run)}] run exited {result.outcome.exit_code} naming "
+                    f"no failing test; see {result.outcome.log}",
+                    "outcome": "failed",
+                }
             ]
-        tests += [{"name": name, "outcome": "failed"} for name in named]
+        tests += named
 
     summary["passed_all"] = passed_all
     report: dict[str, Any] = {
@@ -336,29 +362,37 @@ def _red_summary() -> dict[str, Any]:
     return dict.fromkeys(_COUNT_KEYS, 0) | {"passed_all": False}
 
 
-def outcome_from_log(log: Path, exit_code: int) -> RunOutcome:
+def outcome_from_log(log: Path, exit_code: int, *, lines: Path) -> RunOutcome:
     """An extra run's outcome, parsed from its console log.
 
     Uses the parser ``run_tests.sh`` uses for its own text fallback, combined
     with the exit status the same way, so a missing log or a non-zero exit over
-    a clean-looking summary is red.
+    a clean-looking summary is red. ``lines`` is the run's
+    ``--first-error-lines`` file.
     """
     content = log.read_text(encoding="utf-8", errors="replace") if log.is_file() else ""
     parsed = parse_pytest_text_output(content)
     summary = {key: parsed[key] for key in _COUNT_KEYS}
     summary["passed_all"] = finalize_passed_all(parsed["passed_all"], exit_code)
-    return RunOutcome(exit_code, summary, list(parsed["failed_tests"]), log)
+    return RunOutcome(
+        exit_code, summary, list(parsed["failed_tests"]), log, read_first_error_lines(lines)
+    )
 
 
 def outcome_from_primary_report(path: Path, exit_code: int) -> RunOutcome:
-    """The primary run's outcome, read from the ``tests.json`` run_tests.sh wrote."""
+    """The primary run's outcome, read from the ``tests.json`` run_tests.sh wrote.
+
+    run_tests.sh has already put each failure's first error line on its
+    record, and ``build_report`` carries the primary's records through as
+    they are, so none are collected here.
+    """
     if not path.is_file():
-        return RunOutcome(exit_code, _red_summary(), [], path)
+        return RunOutcome(exit_code, _red_summary(), [], path, {})
     report = json.loads(path.read_text(encoding="utf-8"))
     summary = dict(report.get("summary", {}))
     summary["passed_all"] = bool(summary.get("passed_all", False)) and exit_code == 0
     failed = [t.get("name", "") for t in report.get("tests", []) if t.get("outcome") == "failed"]
-    return RunOutcome(exit_code, summary, failed, path)
+    return RunOutcome(exit_code, summary, failed, path, {})
 
 
 # ── Real side effects ──────────────────────────────────────────────
@@ -458,11 +492,30 @@ class _PrimaryJob:
         return outcome_from_primary_report(TESTS_JSON, self._process.wait())
 
 
+def extra_pytest_argv(python: Path, run: PlannedRun, lines: Path) -> list[str]:
+    """The pytest command line for one extra run, recording first error lines to ``lines``."""
+    return [
+        str(python),
+        "-m",
+        "pytest",
+        "-p",
+        "no:cacheprovider",
+        "-p",
+        FIRST_ERROR_LINES_PLUGIN,
+        f"{FIRST_ERROR_LINES_OPTION}={lines}",
+        "--tb=short",
+        *SCOPE_PYTEST_ARGS[run.scope],
+    ]
+
+
 class _ExtraJob:
     """pytest over one scope under an extra interpreter, logged to a file."""
 
     def __init__(self, run: PlannedRun, python: Path) -> None:
         self._log = QA_OUTPUT_DIR / f"tests-py{run.version}-{run.scope}.log"
+        self._lines = QA_OUTPUT_DIR / f"first-error-lines-py{run.version}-{run.scope}.jsonl"
+        # The plugin appends, so a previous run's lines must not survive.
+        self._lines.unlink(missing_ok=True)
         env = dict(os.environ)
         venv_bin = python.parent
         # As CI does: the matrix venv's tools come first on PATH.
@@ -473,15 +526,7 @@ class _ExtraJob:
         self._log.parent.mkdir(parents=True, exist_ok=True)
         self._handle: IO[bytes] = self._log.open("wb")
         self._process = subprocess.Popen(
-            [
-                str(python),
-                "-m",
-                "pytest",
-                "-p",
-                "no:cacheprovider",
-                "--tb=short",
-                *SCOPE_PYTEST_ARGS[run.scope],
-            ],
+            extra_pytest_argv(python, run, self._lines),
             cwd=str(PROJECT_ROOT),
             env=env,
             stdout=self._handle,
@@ -491,7 +536,7 @@ class _ExtraJob:
     def wait(self) -> RunOutcome:
         exit_code = self._process.wait()
         self._handle.close()
-        return outcome_from_log(self._log, exit_code)
+        return outcome_from_log(self._log, exit_code, lines=self._lines)
 
 
 def launch(run: PlannedRun, python: Path) -> Job:
@@ -501,7 +546,7 @@ def launch(run: PlannedRun, python: Path) -> Job:
 
 
 def ensure_daemon() -> str | None:
-    """Start this checkout's daemon if it idled out during phase 1."""
+    """Start this checkout's daemon if it has idled out; run before each serial run."""
     status = subprocess.run(
         [str(DAEMON_CLI), "status"],
         capture_output=True,
@@ -521,7 +566,9 @@ def ensure_daemon() -> str | None:
         check=False,
     )
     output = f"{started.stdout}{started.stderr}".strip()
-    return f"daemon was not running before phase 2; `start` exited {started.returncode}: {output}"
+    return (
+        f"daemon was not running before a serial run; `start` exited {started.returncode}: {output}"
+    )
 
 
 def _print_runs(report: dict[str, Any]) -> None:

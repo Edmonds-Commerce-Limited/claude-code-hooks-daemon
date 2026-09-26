@@ -609,9 +609,11 @@ def _summarize_tests(data: QaReport) -> str:
     # Name the failures (Plan 00226). A count alone forces a full re-run to
     # find out what broke, and a re-run may not reproduce an order-dependent
     # failure — during Plan 00224 one of two real failures was never
-    # identified. Bounded so a mass breakage cannot flood the artifact.
-    names = [t.get("name", "") for t in data.get("tests", []) if t.get("outcome") == "failed"]
-    names = [name for name in names if name]
+    # identified. Bounded so a mass breakage cannot flood the artifact. Each
+    # carries its first error line when one was recorded (00466 N196): ten
+    # errored tests named with no cause sent the reader to a raw shard log.
+    failed = [t for t in data.get("tests", []) if t.get("outcome") == "failed" and t.get("name")]
+    names = [f"{t['name']} - {t['reason']}" if t.get("reason") else t["name"] for t in failed]
     if not names:
         return line
 

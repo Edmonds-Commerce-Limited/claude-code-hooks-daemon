@@ -140,12 +140,13 @@ def _skip_reason(longrepr: Any) -> str:
 
 
 def blocking_gate_skip_failure_message(test_file: Path | str, skip_reason: str) -> str:
+    # The skip reason is on the FIRST line: the QA gate's summary shows a
+    # failure's first line and nothing more (00466 N196).
     name = Path(test_file).name
     return (
-        f"{name} is a BLOCKING release gate, declared by RELEASING.md Step 12.0, "
-        f"which expects '0 failed, 0 skipped'. A skip here is an abort "
-        f"condition, not a pass — the gate did not run.\n\n"
-        f"Original skip reason: {skip_reason}\n\n"
+        f"{name} is a BLOCKING release gate and it skipped: {skip_reason}\n\n"
+        f"RELEASING.md Step 12.0 declares it and expects '0 failed, 0 skipped'. "
+        f"A skip here is an abort condition, not a pass — the gate did not run.\n\n"
         f"Satisfy the gate's precondition instead of accepting the skip — for a "
         f"daemon skip that is './bin/hooks-daemon restart'. To stop guarding "
         f"this file, remove it from the pytest command line in RELEASING.md "

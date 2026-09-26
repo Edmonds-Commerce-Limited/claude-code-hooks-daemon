@@ -113,7 +113,10 @@ while the runner ran considerably more.
     time.
   - **Phase 2** then runs each extra's other directories, one version at a
     time. Those tests drive the checkout's single live daemon, so two
-    versions at once would contend.
+    versions at once would contend. The daemon is started before EACH of
+    these runs if it has stopped: it exits after `idle_timeout_seconds`
+    without traffic, and one run's later directories can outlast that
+    (ledger 00466 N196).
   - If `uv` cannot find or install a version (for example, with no network),
     the stage **fails**. That version gets a `NOT RUN` line with the reason.
     The stage never passes on fewer versions than CI runs.
@@ -125,6 +128,11 @@ while the runner ran considerably more.
   - `tests.json` has an `interpreters` array with one entry per run: version,
     scope, counts, duration and error. Each extra's console log is at
     `untracked/qa/tests-py<X.Y>-<scope>.log`.
+  - Every run, primary and extra, loads the
+    `claude_code_hooks_daemon.qa.first_error_lines` pytest plugin. Each
+    failed or errored test's record in `tests.json` carries the first line
+    of its error as `reason`, and the gate's summary prints it after the
+    node id (ledger 00466 N196).
   - To run the whole stage alone, use `./scripts/qa/llm_qa.py tests`.
     `run_tests.sh` alone runs only the primary.
 - **Security** (Bandit) — zero HIGH/MEDIUM/LOW issues; only B101 is filtered
