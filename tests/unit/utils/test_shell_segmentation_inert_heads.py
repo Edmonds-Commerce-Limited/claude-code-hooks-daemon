@@ -16,6 +16,7 @@ from claude_code_hooks_daemon.utils.shell_segmentation import (
     INERT_COMMAND_HEADS,
     blank_inert_command_arguments,
 )
+from tests.scaling import SIZE_FACTOR, SUPERLINEAR_RATIO, scaling_ratio
 from tests.support.inert_head_shapes import ESCAPE_SHAPES, INERT_SHAPES, fill
 
 _MERGE = "git merge feature/x"
@@ -56,3 +57,25 @@ class TestEveryEscapeShapeKeepsItsText:
     @pytest.mark.parametrize("template", ESCAPE_SHAPES)
     def test_the_command_text_survives(self, template: str) -> None:
         assert _MERGE in blank_inert_command_arguments(fill(template, _MERGE))
+
+
+class TestTheScanStaysLinear:
+    """This module's scans have gone quadratic before (Plan 00466 N25).
+
+    Blanking segment by segment with a fresh slice of the whole command per
+    segment is the shape that did it, so the two inputs below are the ones
+    that would expose it: many exempt segments, and many that are not.
+    """
+
+    @pytest.mark.parametrize(
+        "segment",
+        [f"echo '{_MERGE}'; ", f"ls -la '{_MERGE}' && "],
+    )
+    def test_cost_grows_linearly_with_segment_count(self, segment: str) -> None:
+        segments = 2000
+
+        def work_at(count: int) -> str:
+            return blank_inert_command_arguments(segment * count)
+
+        ratio = scaling_ratio(work_at, segments, segment * (SIZE_FACTOR * segments))
+        assert ratio < SUPERLINEAR_RATIO, f"{ratio:.0f}x for {SIZE_FACTOR}x segments"
