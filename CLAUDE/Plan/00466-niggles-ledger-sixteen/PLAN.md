@@ -134,7 +134,7 @@ Full write-ups are in [NIGGLES.md](NIGGLES.md). One line each here:
 | N101 | `secret_file_guard` fails closed with `TooManyToEnumerateError` on ordinary `python3 - <<'EOF'` commands       | N38 fix 11                                                      | ⬜ Open                          |
 | N105 | A skill redeploy leaves an untracked, unignored `.claude/hooks-daemon-backups/`                                | Upgrade review 11 (L9)                                          | ⬜ Open                          |
 | N110 | The local full QA gate tests one Python version, so a version-specific defect passes it and fails CI           | N106 fixer                                                      | ✅ Remedied                      |
-| N111 | `setup_worktree.sh` builds a `py311` venv, then `uv sync` swaps its interpreter                                | N110 fixer                                                      | ⬜ Open                          |
+| N114 | A `py311` fingerprint venv is built on whatever Python uv prefers                                              | N110 fixer                                                      | ✅ Remedied                      |
 
 ## Tasks
 

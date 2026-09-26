@@ -71,8 +71,9 @@ def _write_stub_uv(tmp_path: Path, uv_log: Path, sleep_seconds: float) -> Path:
         sleep {sleep_seconds}
         if [ -n "${{UV_PROJECT_ENVIRONMENT:-}}" ]; then
             mkdir -p "$UV_PROJECT_ENVIRONMENT/bin"
-            : > "$UV_PROJECT_ENVIRONMENT/bin/python"
-            chmod +x "$UV_PROJECT_ENVIRONMENT/bin/python"
+            # A correct build: the venv runs the interpreter ensure_venv
+            # asked for, which create_venv_at_path checks (00466 N114).
+            ln -sf "{sys.executable}" "$UV_PROJECT_ENVIRONMENT/bin/python"
         fi
         exit 0
         """))

@@ -135,6 +135,31 @@ class TestTheSetupScriptProvisionsADevVenv:
             "--frozen" in line and "--all-extras" in line for line in sync_lines
         ), f"the dev sync must be `--frozen --all-extras` so the worktree matches uv.lock: {sync_lines}"
 
+    def test_the_dev_sync_pins_the_venvs_own_interpreter(self) -> None:
+        """00466 N114: an unpinned sync lets uv choose the interpreter."""
+        script = _SETUP_WORKTREE.read_text()
+        # Lines that RUN a sync: comments and the `echo` that prints the
+        # remedy only name one.
+        sync_lines = [
+            line
+            for line in script.splitlines()
+            if "uv sync" in line and not line.lstrip().startswith(("#", "echo"))
+        ]
+        assert sync_lines, "no uv sync invocation found in setup_worktree.sh"
+        unpinned = [
+            line.strip() for line in sync_lines if '--python "${WT_VENV_PYTHON}"' not in line
+        ]
+        assert (
+            not unpinned
+        ), f"the dev sync must pass --python for the venv's interpreter: {unpinned}"
+
+    def test_it_refuses_a_venv_whose_python_is_not_the_one_its_name_declares(self) -> None:
+        """00466 N114: a `py311` venv running 3.13 must stop the setup, not be used."""
+        script = _SETUP_WORKTREE.read_text()
+        assert "WT_DECLARED_PY" in script and "WT_ACTUAL_PY" in script
+        check = script[script.index("WT_DECLARED_PY=") :]
+        assert "exit 1" in check[: check.index("Venv Python matches its fingerprint")]
+
     def test_it_proves_pytest_imports_before_declaring_the_worktree_ready(self) -> None:
         script = _SETUP_WORKTREE.read_text()
         assert "import pytest" in script, (

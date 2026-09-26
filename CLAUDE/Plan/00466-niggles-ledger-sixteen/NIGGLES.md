@@ -687,24 +687,42 @@ the gate's version set against the workflow's matrix. The behaviour is
 documented in `CLAUDE/QA.md`, and the report is
 `subagent-reports/260926-n110-opus-5-5.md`.
 
-### N111 — `setup_worktree.sh` builds a `py311` venv, then `uv sync` swaps its interpreter
+### N114 — A `py311` fingerprint venv is built on whatever Python uv prefers
 
-**Found by the N110 fixer.** `setup_worktree.sh` step 4 builds the
-fingerprint venv with `ensure_venv ... python3` (3.11 here), and its path
-says so (`venv-…-py311-…`). Step 4b then runs `uv sync --frozen --all-extras` into it with no `--python`. uv replaces the interpreter with
-the one it prefers, which is its newest managed Python. Measured here: the
-worktree venvs of `worktree-n466-n101` and `worktree-n466-n105` are both
-named `py311`, but their `pyvenv.cfg` says 3.13.15. Replaying the same steps
-for N110 gave 3.12. So a worktree's gate, and its daemon, run under a
-different Python from main's, and from the one the fingerprint names. The
-Python a worktree tests under depends on what uv happened to have installed.
-N110's matrix stops this from narrowing the tests stage, but the fingerprint
-still does not describe the venv.
+**Found by the N110 fixer.** `ensure_venv ... python3` computes the venv's
+name from PATH's `python3` (3.11 here, so `venv-…-py311-…`). It then builds
+the venv with `HOOKS_DAEMON_PYTHON=python3`, and `create_venv_at_path` passed
+that bare name straight to `uv sync --python python3`. uv reads a bare
+`python3` as a VERSION request ("any 3.x"), not as the executable on PATH,
+so it builds on its own preferred interpreter. Measured here:
 
-**Remedy:** pass `--python "${WT_VENV_PATH}/bin/python"` (or the interpreter
-`ensure_venv` used) to that `uv sync`, with a test that the synced venv's
-`version_info` matches the fingerprint's `pyMM`. Also check `install_deps`
-in `venv-include.bash` for the same missing flag.
+- the worktree venvs of `worktree-n466-n101` and `worktree-n466-n105` are
+  named `py311` but run 3.13.15;
+- replaying the steps for N110 gave 3.12;
+- `uv sync --python python3` on a toy project built 3.12, and the same sync
+  with the resolved `/usr/bin/python3` built 3.11.
+
+So every worktree built by `setup_worktree.sh`, and any client install whose
+uv prefers a managed Python, ran its daemon and QA on a Python its venv's
+name denied. It was first blamed on `setup_worktree.sh`'s dev-extras sync,
+but that sync into an existing venv was measured NOT to swap. The swap
+happens when the venv is created.
+
+**✅ Remedied on `worktree-n466-n110`.**
+
+- `create_venv_at_path` resolves `HOOKS_DAEMON_PYTHON` with `command -v`,
+  hands uv the path, and fails before uv runs if the interpreter is missing.
+- After the sync it compares the built venv's X.Y with the requested
+  interpreter's. On a mismatch it fails loudly and removes the venv, so the
+  resolver's `venv-*` glob cannot pick it up.
+- `setup_worktree.sh` pins its dev-extras sync with `--python` for the venv's
+  own interpreter, and refuses a venv whose Python differs from the `pyMM`
+  in its name.
+- Pinned by `tests/integration/test_venv_sh_builds_on_the_fingerprinted_python.py`
+  (4 RED on main) and two new checks in
+  `tests/integration/test_worktree_daemon_env_provisioning.py` (RED on main).
+- Existing mislabelled worktree venvs are not rewritten. Rebuild one by
+  removing it and re-running the setup steps.
 
 ### N105 — A skill redeploy leaves an untracked, unignored `.claude/hooks-daemon-backups/`
 
