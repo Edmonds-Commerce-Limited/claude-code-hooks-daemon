@@ -1185,3 +1185,104 @@ Main had moved by N194 alone: waits for exec in `test_safe_signal.py` and
   - `check_signal_targets.py`: clean.
 - **Daemon**: restarted. The restart stopped the old daemon through the
   new pidfd path, and the daemon reported `Daemon: RUNNING` (PID 2666464).
+
+## Round 8 (review 8: R8-1 to R8-5, S8-1 = N225)
+
+Code commit `2088b3b30`, on `29f8f751d`. Every new test was run against a
+`git archive` of `29f8f751d` with the new test files overlaid: 18 failed and
+3 passed. The 3 that passed are the guard cases for roots that argparse
+normalises, which are expected to pass there too.
+
+- **R8-1 (hook-path budget)**:
+  - `init.sh` now runs `cli start` in a process substitution, with stdin
+    from `/dev/null`. It reads the output as it arrives and never waits for
+    the launcher to finish.
+  - The poll ends at `_HOOKS_DAEMON_START_DEADLINE`: 15 s of bash
+    `SECONDS`, counted from the hook's own start. This is a twin of
+    `Timeout.HOOK_START_DEADLINE_SEC` = 60 - 30 (the request) - 10
+    (`FILE_LOCK`, for the one helper run that may start just before the
+    deadline) - 5 (margin).
+  - After the launcher finishes, the poll continues for up to
+    `DAEMON_STARTUP_TIMEOUT` more, and never past the deadline.
+  - If the launcher is still running at the deadline,
+    `_HOOKS_DAEMON_STARTING` is set. `ensure_daemon` then skips every
+    diagnosis, and `emit_hook_error` denies with "the daemon is starting;
+    retry".
+  - A launcher still writing after the hook has answered gets EPIPE. Only
+    the CLI parent can hit that, and only after the fork, so the daemon
+    keeps starting.
+  - `timeout.py`'s comment is corrected.
+  - Tests:
+    - `TestAStartNeverRunsTheHookPastItsTimeout`: one test sums the bounds
+      from the real constants and from `init.sh`'s copies. The other runs
+      the real forwarder against a launcher that blocks until the test
+      releases it, and expects the "starting; retry" deny.
+    - RED on `29f8f751d`: the hook hung on the launcher until the 60 s guard.
+- **R8-2 (start-wait messages)**:
+  - `_pid_file_state` reads the PID file text. A pid that is not running
+    is named as such, and an exited daemon is never described as
+    "pending".
+  - The daemon writes `w` on the start pipe before waiting on a contended
+    start lock (a `LOCK_NB` attempt first). It writes `.` once it holds
+    the lock. The wait is not counted as a stall, and the budget message
+    says the daemon is waiting on the lock.
+  - `HooksDaemon(start_lock_waiting=...)`.
+- **R8-3**: `paths.socket_path_paired_with`. This host's PID file pairs
+  with `get_socket_path`. Another host's pairs with the `.sock` beside it,
+  through the same length fallback. The test uses a PID file of exactly
+  104 characters, with `XDG_RUNTIME_DIR` set to a directory owned by the
+  test.
+- **R8-4**: `_pinned` turns a `pidfd_open` errno that is not in
+  `_NO_PIDFD_ERRNOS` into `RefusedSignalTarget`. Every caller already warns
+  on that and signals nothing. Tested for `EINVAL` and `ENOMEM` at
+  `safe_signal`, enforcement and the installer, each against a real live
+  process.
+- **R8-5**: the `cmd_stop` comment and the `verified_daemon_process`
+  docstring now state the no-pidfd fallback and its window.
+- **S8-1 / N225**:
+  - `_root_from_flag` refuses a root containing `..` or one that differs
+    from its own `normpath`. It is checked on the `Path` argparse
+    produces, which already drops `.`, `//` and a trailing `/`.
+  - `verified_daemon_process` compares both roots with symlinks resolved.
+  - The ledger entry and PLAN row are added.
+- **GREEN**:
+  - targeted run: 2941 passed and 3 skipped. This covers the `init.sh`
+    integration tests, the slow-start test, the relay guards,
+    `tests/unit/daemon/`, the installer, `safe_signal`, the CI passthrough
+    and the wrapper environment.
+  - `relay/test_relay.py`: 13/13, after `relay/build.sh` (rustc
+    `-D warnings`).
+  - semgrep: clean. `check_signal_targets.py`: clean.
+  - ruff, black, mypy and pyright: clean. shellcheck on `init.sh`: clean.
+- **Daemon**: restarted from the worktree; it reports `Daemon: RUNNING`.
+- **Guard defect met**: `secret_file_guard` failed with
+  `TooManyToEnumerateError` (`R-SECRET-EVALUATION-ERROR`) on `init.sh`
+  Edits that combined a compound `[[ ... && ... ]]` test with several
+  fd-closing `exec` redirections, and on a heredoc that quoted them. The
+  same change went through once it was split into helper functions. This
+  belongs in an issue report.
+
+### Open after round 8 (the next fixer's steps)
+
+1. **A retry can restart a slow start from scratch.** After a "starting;
+   retry" deny, the retried hook finds no PID file, because a starting
+   daemon writes it only under the start lock, after controller init. So
+   the hook launches another `cli start`. Inside a container, that
+   launcher's `enforce_single_daemon` stops the daemon still starting,
+   since its command line proves it serves this project. Concurrent hooks
+   hit the same thing before this round, but the retry makes it happen
+   for any start longer than 15 s. Candidate fixes:
+
+   - `init.sh` does not launch while a daemon of this project is already
+     starting. It could prove that from the process table the same way
+     `is_daemon_running` proves a PID.
+   - Or enforcement leaves a peer that has not yet bound a socket and is
+     younger than `DAEMON_START_BUDGET_SEC`.
+
+   It needs a RED test first. For example: two forwarder runs a few
+   seconds apart against a launcher whose daemon initialises slowly, with
+   enforcement on.
+
+2. Once that is fixed, merge main if it has moved (it was still
+   `44d1b1b3b` at this round's end). Then restart the daemon, commit, and
+   queue the gate as the brief says.

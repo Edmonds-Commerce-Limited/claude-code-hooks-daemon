@@ -10,8 +10,16 @@
   1 while the daemon came up behind them. They now wait while the daemon
   is alive and making progress, up to 30 seconds. They report a failure
   when it exits, when it makes no progress for 10 seconds, or when the 30
-  seconds run out. The message says which, and whether a PID file was
-  waiting to be proven.
+  seconds run out. The message says which, and what the PID file held: no
+  file, a pid that is no longer running, or a pid still waiting to be
+  proven. A daemon waiting for another start to finish with the start
+  lock says so, and is not given up on as stuck.
+- A hook that has to start the daemon no longer waits for `start` to
+  finish. It waits at most 15 seconds from its own start. If the daemon is
+  still starting then, a PreToolUse call is denied with "the daemon is
+  starting; retry" instead of the hook running into Claude Code's 60-second
+  timeout, which lets the call through unchecked. Retry the call; nothing
+  needs fixing.
 - The proof of which project a daemon serves reads its `--project-root`
   the way the daemon's own argument parser did. When there are two, it
   uses the last one. An abbreviated `--project-r` and the
@@ -20,14 +28,22 @@
   A's wrapper, started B's daemon but was attributed to A. A's
   single-daemon enforcement could then stop it, and B could not. A
   command line that the parser would reject, or that names a relative
-  root, now proves nothing.
+  root or a root containing `..`, now proves nothing. A `..` after a
+  symlink goes somewhere other than where it seems to. For example,
+  `/var/run/../workspace` is `/workspace` when `/var/run` links to `/run`.
+  Roots are compared the way the daemon serves them, with symlinks
+  resolved.
 - `stop`, `restart` and single-daemon enforcement open a pidfd for the
   process before they check its identity, and send every signal through
   it. A process id reused at any point after that can only make the
   signal fail. Where the kernel has no pidfds, the checked psutil handle
-  still sends the signal, as before.
+  still sends the signal, as before. Any other failure to open the pidfd
+  now stops the signal and gives a warning, instead of crashing `start` or
+  the installer.
 - Stale runtime files are removed only under the start lock, and only
   while they are dead. This covers the installer's pre-install check and
   cleanup, and single-daemon enforcement outside a container. A live
   socket, or a PID file naming a live process (another user's
-  included), is left in place.
+  included), is left in place. The installer takes the start lock that
+  sits next to the daemon's real socket. That is true even when a long
+  project path moves the socket to the short fallback directory.

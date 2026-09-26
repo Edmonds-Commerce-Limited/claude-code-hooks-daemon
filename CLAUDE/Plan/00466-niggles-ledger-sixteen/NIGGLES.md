@@ -3,6 +3,25 @@
 Newest first. Each entry says how it was found, why it happens, and the
 candidate remedies.
 
+### N225 — ✅ Remedied — A `--project-root` with `..` through a link is attributed to a root its daemon does not serve
+
+**Found by lifecycle review 8 (S8-1), on main as well.** The proof read the
+flag and collapsed it with `normpath`, then `realpath`, while `cmd_start`
+serves `Path.resolve()`, which follows a link before it meets `..`. With
+`/var/run` a link to `/run`, a daemon launched with `--project-root /var/run/../workspace` serves `/workspace` and was attributed to
+`/var/workspace`. That project's single-daemon enforcement could stop
+`/workspace`'s daemon, and `/workspace` could not stop its own.
+`verified_daemon_process` also compared `normpath` strings, so a root named
+through a link never matched the resolved root the daemon serves.
+
+**Remedied (lifecycle batch, round 8):** a flag root that holds `..` or is
+not its own `normpath` proves nothing (`_root_from_flag`), and no later
+source is consulted for it. `verified_daemon_process` compares both roots
+resolved. RED: `test_a_root_that_is_not_its_own_normal_form_proves_nothing`
+(`/var/run/../workspace` among them) and, on real processes,
+`test_a_root_whose_dotdot_follows_a_link_proves_nothing` and
+`test_a_root_named_through_a_link_is_the_one_the_daemon_serves`.
+
 ### N206 — ✅ Remedied — A pid reused between psutil's start-time re-check and its `kill` is signalled
 
 **Found by lifecycle review 7 (§2), on main as well.** `stop_verified_daemon`
