@@ -87,8 +87,18 @@ def _registered_handler(router: EventRouter, name: str) -> Any:
     raise AssertionError(f"{name} was not registered")
 
 
+@pytest.mark.usefixtures("_project_context")
 class TestPipeBlockerExtraWhitelistInjection:
-    """The reported defect, driven through registry injection."""
+    """The reported defect, driven through registry injection.
+
+    Needs a live `ProjectContext` (the `_project_context` fixture): real
+    daemon startup always initializes one before routing
+    (`daemon/controller.py`), and `project_containment` -- registered here
+    too, through the real registry path these tests exist to drive -- fails
+    CLOSED rather than open when it is not (Plan 00466 N11). Without it,
+    `project_containment` denies every command below it in priority order
+    regardless of `pipe_blocker`'s own verdict.
+    """
 
     def test_matches_does_not_raise_on_the_injected_option(self) -> None:
         """The defect itself: `matches()` raised before reaching any verdict.

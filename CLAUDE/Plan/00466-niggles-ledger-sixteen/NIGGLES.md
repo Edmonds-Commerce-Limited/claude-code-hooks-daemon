@@ -1415,6 +1415,40 @@ override is set. RED test: resolve with `HOOKS_DAEMON_PYTHON=/x`, then with
 no override, and the second call must not return `/x`. Being fixed on
 `worktree-d-00376`.
 
+### N39 — Nine unit tests fail in a whole-suite run and pass when their files run alone
+
+**Found by the guard-defects agent** (its review-4 fix round): a plain
+whole-suite `pytest tests/unit` on this worktree gave 9 failures across
+`test_model_fallback_detector.py` (6), `test_absolute_path.py` (1),
+`rule_explain/test_lookup.py` (1) and
+`test_dangerous_invocation_corpus_checker.py` (1); the same four files run
+alone gave 0 failed. **Diagnosed by a parallel agent** (a companion
+worktree, full write-up cross-referenced from there): `main` does not
+reproduce it; this worktree does. Bisected to
+`test_project_containment.py`'s class-wide `_project_root` autouse fixture
+(`with patch(...) as mock`) being double-patched by three tests
+(`TestFailsClosedOnEvaluationError::test_an_uninitialised_project_root_still_denies`,
+`::test_an_evaluation_error_denial_uses_its_own_rule_id`,
+`TestChainLevelFailClosedBehaviour::test_an_evaluation_exception_still_denies_through_the_chain`)
+that ALSO called `monkeypatch.setattr(..., classmethod(lambda cls: _raise()))` on the exact same target.
+`monkeypatch`'s finalizer runs AFTER the fixture's own `with patch(...)`
+block has already restored the real classmethod, so the second patcher's
+teardown overwrote it AGAIN with the fixture's own stale `MagicMock` --
+permanently, for the rest of the pytest PROCESS. Every later test calling
+`ProjectContext.project_root()` in that process then inherited the fake
+root, explaining all four victim files.
+
+**Fixed** (guard-defects agent, review-5 fix round): the three tests now
+reconfigure the fixture's own `mock` (`mock.side_effect = ...`) instead of
+introducing a second patcher; the fixture gained a post-teardown tripwire
+assertion so any FUTURE double-patch in this file fails immediately, at
+the fixture boundary; a regression test
+(`TestProjectRootDoublePatchDoesNotLeakAcrossFiles`) runs the exact
+polluter/victim pair together in one subprocess pytest invocation and
+asserts both pass. RED-pinned by reverting the polluter test alone: the
+regression test reproduces the identical original symptom
+(`Example: /repo/test.py` leaking into a reason string). ✅ Remedied.
+
 ### N36 — `destructive_git` denies a `grep` whose search pattern is the text of a force branch delete
 
 **Found by the Plan 00463 agent** (review-5 fix round, its nit n9). Searching
@@ -1987,7 +2021,11 @@ Because quote state now decides which lines are judged, a file whose quote, subs
 
 On all 65 scanned scripts, the new tokeniser extracts the same 227 functions and the same captured names as before, and reports no unclosed spans. Report: [subagent-reports/260924-n466-n20-opus-5-5.md](subagent-reports/260924-n466-n20-opus-5-5.md).
 
-N16 is filed on the unmerged `worktree-n466-guard-defects` branch; it joins this file at integration.
+### N16 — `secret_file_guard`'s N4 splat exemption still false-positives against a BOTH-EDGES pattern
+
+**Found by the 00466 review** (nit n2, `subagent-reports/260924-n466-review-opus-5-5.md`), out of scope for the N10/N11 fix turn. N4 fixed the Python unpacking splat false positive (`*words[position + 1 :]`, `*wordlist`) against `*.vault-password` — the ONE shipped pattern with a leading wildcard and NO trailing one. The same splat shape is still denied against `*vault_pass*`, which has a wildcard on BOTH edges: `f(*assets)`, `f(*ssh_args)`, `f(*passthrough)` and `f(*assertions)` are each denied live, because the N4 fix's `pattern_has_trailing_wildcard` escape only widens the gate for a pattern with NO trailing wildcard — `*vault_pass*` has one, so the gate's stricter requirement never applies and the pre-N4 overlap-only behaviour (which is what produces this false positive) is untouched. `*assets`/`*args`-style splats are common Python, so this is a live nuisance, not a rare shape.
+
+**Candidate remedy:** the both-edges branch of `_glob_token_overlaps_stem` already has a stricter "near-total-match" discriminator (`_both_edges_residue_is_near_total_stem_match`) for exactly this over-promiscuity — a leading-wildcard-only token (no trailing wildcard of its own) matched against a both-edges pattern is presently routed through the SAME lenient overlap check as a genuine `*passXXX`-style truncation, rather than through that stricter discriminator. Route a token with no trailing wildcard of its own through the near-total-match test regardless of which edge(s) the PATTERN has open, and keep the existing near-total-match behaviour for tokens that themselves have a trailing wildcard too. RED tests: each `f(*assets)`-style splat against `*vault_pass*` is allowed; a genuine both-edges truncation (`*vault_pass*` reached via, e.g., `*zzz-passwd*`-shaped tokens) still denies.
 
 ### N19 — ✅ Remedied — the registry's options-collection failure is logged at debug level
 
@@ -2056,6 +2094,95 @@ N16 is filed on the unmerged `worktree-n466-guard-defects` branch; it joins this
 **Found by the 00466 review** as a pre-existing problem on main, security-relevant. `cat .vault-pas?word` and `cat prod.vault-passw*rd` name a protected file through a glob the shell expands, and the guard does not deny them. The mention scan handles a leading or trailing wildcard (the N4 overlap logic), but not a `?`, `*` or `[...]` inside the name.
 
 **Candidate remedy:** treat any shell-glob token as a pattern, and deny when the pattern could match a protected name. Compare against the protected basenames and stems, or expand it against the directory when that exists. Keep it no looser than the N4 rule. RED tests: interior `?`, `*` and bracket globs of each shipped protected pattern are denied, while unrelated globs such as `*.py` and `src/*.md` are allowed.
+
+**Remedy (implemented):** `secret_file_matching.py` gained `_globs_can_intersect(a, b)`, a real two-glob language-intersection test (standard sequence-alignment DP over `*`/`?`, O(len(a) · len(b))) — not another edge heuristic, because an interior wildcard has no edge for the existing leading/trailing overlap check to key on. A new `_interior_wildcard_mention` runs it for every token whose raw spelling carries glob syntax (`_is_glob_shaped(raw_form)`), over each of its bracket-expanded forms — so a finite bracket class (`.vault-pa[sz]word`) is covered too, even after expansion strips its wildcard-ness down to a plain literal, since the intersection test degenerates correctly to exact-match in that case. Scoped narrowly to keep N4 intact: only a token with NEITHER a leading NOR a trailing wildcard reaches it (an open-edge token is already handled by the pre-existing checks, N4/m1 fixes and all), and a pattern with wildcards on BOTH edges (`*.secret*`, `*vault_pass*`) is excluded — full intersection against a "contains this text anywhere" pattern is satisfiable by nearly any token carrying its own wildcard (`report-[0-9]*.txt` and `secret*.py` genuinely glob-intersect with `*.secret*`, live-verified as new false positives during implementation, neither is evidence of a protected file), the same over-promiscuity `_both_edges_residue_is_near_total_stem_match` already exists to guard against elsewhere in this module. RED tests (confirmed failing pre-fix, passing after) in `TestBashMentionsProtectedPath`: `test_interior_question_mark_truncation_is_matched`, `test_interior_star_with_unrelated_prefix_is_matched`, `test_interior_bracket_expression_truncation_is_matched`, plus `test_unrelated_interior_wildcard_tokens_are_not_matched` and `test_splat_false_positive_from_n4_still_allowed` pinning the N4 fix stays intact. Full `test_secret_file_matching.py` (203 tests) and `test_secret_file_guard.py` (82 tests) pass.
+
+**Correction (M2, guard-defects review 2)**: this entry's acceptance criterion
+("interior `?`, `*` and bracket globs of each shipped protected pattern are
+denied") was not met for 2 of the 6 shipped patterns — `*.secret*` and
+`*vault_pass*` (both-edges patterns, deliberately excluded from
+`_interior_wildcard_mention` above) stayed fully open to every interior
+spelling, an edge-plus-interior combination on any pattern escaped every
+check, and an unenumerable bracket class (`[!x]`, `[^x]`, `[[:alpha:]]`, an
+over-cap range) reached the DP with its brackets read as LITERAL characters
+instead of a wildcard, so it failed OPEN rather than closed. Brace expansion
+(`.vault-pas{s,}word`) was also uncovered for every pattern. Fixed on the
+guard-defects-review-2 branch: the DP now runs for edge-open tokens too
+(against every pattern that is not both-edges, gated by a new degenerate-
+orientation check so a leading-wildcard token is never blindly tested
+against a trailing-wildcard pattern — that combination is satisfiable by
+ANY literal on either side, which is not evidence of anything); an
+unexpanded bracket expression is substituted with `?` before the DP runs (a
+safe superset); both-edges patterns get a filesystem-truth route instead
+(`_both_edges_glob_mention`, gated by a cheap literal-overlap pre-filter so
+it never pays for a real directory listing on an unrelated token); and
+brace groups are expanded against the raw command text before tokenising,
+the same conflict `enforce_llm_qa`'s own M1 fix resolves. Pinned with 4 new
+test classes (16 tests) in `tests/unit/utils/test_secret_file_matching.py`.
+
+**Correction (M-1, guard-defects review 4)**: the brace-group expansion added
+by review 2's correction only ever split a group on `,` — a brace SEQUENCE
+(`{start..end[..step]}`, e.g. `id_rs{a..a}` reaching the exact protected name
+`id_rsa`) and quote-stripping inside a group or word (`id_"rs"a`, `i'd'_rsa`,
+`id_rs{'a',x}`) were both unhandled, and neither the module's crude
+delimiter-split tokeniser nor the brace stream ever saw a word carrying `$`,
+a backtick, or a quote as anything but a boundary — so a substitution-carrying
+word (`cat id_rs$x`) produced no token resembling the name at all. Fixed by
+scoping the remedy to the whole CLASS, not the two reported spellings: a lazy
+brace-sequence generator (numeric/alpha, either direction, optionally
+stepped, capped by the same `max_spellings` guard so `{1..100000}` still
+fails closed) plus a from-scratch bounded shell-word normaliser
+(`shell_expansion.normalise_word`/`iter_normalised_shell_words`) that strips
+quotes, decodes backslash/ANSI-C escapes, concatenates adjacent
+quoted/unquoted spans into one word the way a real shell does, and collapses
+any statically-unresolvable substitution (`$VAR`, `${...}`, `$(...)`, a
+backtick, `$((...))`) to a single `*` — turning the whole containing word
+into a glob judged by the pre-existing `_globs_can_intersect` DP infrastructure
+this same N10 remedy built, rather than needing new matching logic. Chained
+as a third additive stream in `iter_protected_mentions`. Own findings caught
+before commit (not in the review): the new stream initially bypassed the
+import-module-path exemption and double-reported ordinary mentions already
+found by the plain tokeniser — both fixed (see the review-4 fix report).
+Verified end-to-end through the real `SecretFileGuardHandler`, both shipped
+defaults and a project-configured exact pattern. Full detail:
+`subagent-reports/260924-n466-guards-review4-fix-sonnet-5.md`.
+
+**Correction (addendum, guard-defects review 4)**: two more gaps folded into
+the same class. (1) A false positive: ordinary Python (`[*words[:subcommand_index], ...]`) tripped the guard, because `_token_literal_residue` treated an
+UNCLOSED `[` as a wildcard character to strip (bash reads it as literal),
+and because Write/Edit CONTENT scanning ran the same AGGRESSIVE glob-shaped
+heuristics a real shell command needs, on source code that no shell ever
+expands. Fixed both: the residue fix, and a `context="bash"|"content"`
+parameter threaded through the whole mention-scan API, restricting content
+scanning to the literal/glob-pattern matcher only. (2) m-2 (the both-edges
+FS-truth route is cwd/existence-dependent): a `?`-only interior spelling of
+a both-edges pattern (`demo.se?ret`, `vault?passwords.yml`) now denies
+TEXTUALLY, via a both-edges branch in `_dp_intersection_is_meaningful` that
+treats the DP call as meaningful only when the token carries no `*` — a
+both-edges pattern's own wildcards can absorb the required substring
+adjacent to ANY `*` the token has, making the DP trivially satisfiable and
+reopening Plan 00306/00311's false-positive class otherwise
+(`report-[0-9]*.txt`, `secret*.py`); a `?` can only absorb one character
+each, so a genuine `?`-only intersection is a real signal. A `*`-bearing
+both-edges truncation (`demo.s*t`) still needs the FS-truth route
+unchanged — flagged to team-lead as a judgement call, not a full resolution
+of every example in the addendum's own RED-test wording. Full detail:
+`subagent-reports/260924-n466-guards-review4-fix-sonnet-5.md`, Addenda 1-2.
+
+**Correction (addendum, guard-defects review 5)**: review 5 found the
+addendum-4 `context` fix above was itself too broad -- `context="content"`
+was applied uniformly to EVERY `_SCRIPT_EXTENSIONS` entry, including
+`.sh`/`.bash`, whose content genuinely IS shell text a shell expands when
+the script runs, reopening the write-then-execute gap for those two
+extensions specifically. Fixed, and per team-lead's own follow-up widened
+further: `context="bash"` now applies to a `.sh`/`.bash` extension, a
+Makefile (`Makefile`/`makefile`/`GNUmakefile`/`.mk`), a CI workflow YAML
+(`.github/workflows/*.yml`/`.yaml`, `.gitlab-ci.yml`/`.yaml`), or an
+extensionless script identified by its own shebang naming a shell
+interpreter -- all newly recognised as scan-worthy at all, not just
+reclassified, since none but `.sh`/`.bash` was previously in
+`_SCRIPT_EXTENSIONS`. Full detail:
+`subagent-reports/260924-n466-guards-review4-fix-sonnet-5.md`, Addendum 3.
 
 ### N9 — ✅ Remedied — `docs_qa` judges gitignored markdown, so installing a Claude Code plugin fails local full QA
 
