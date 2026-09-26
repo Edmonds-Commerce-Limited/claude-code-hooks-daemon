@@ -9,23 +9,6 @@ interrupt a running handler) and lands with that branch. N40 is taken there too
 taken on the N38 fix branch (the chain's remaining linear per-token cost, which
 waits for the shell-parser consolidation).
 
-### N105 — The data-sink heredoc exemption trusts a sink name that the same command redefines
-
-**Found by the N101 round-2 fixer**, while applying D-RULE F5 to the Python
-exemption. `strip_quoted_heredoc_bodies` blanks the body of
-`cat() { bash; }; cat <<'EOF'`, of `alias cat=bash; cat <<'EOF'` and of
-`source x.sh; cat <<'EOF'`. In each case the name `cat` may run a shell,
-so every consumer of the blanked text (destructive_git, pipe_blocker and
-the others) judges a body that bash executes as prose. The cause is in
-`_receiver_is_data_sink`, which resolves the name but never asks whether
-the command line redefines it. This is on main as well: the N101 branch
-changed only how wrapper options are skipped.
-
-**Remedy:** withhold the exemption from every heredoc in a command whose
-shell-level text defines a function, an alias, `hash`, `enable`, PATH,
-`source` or `.`. That is the rule `brace_expansion_view` applies. Pin it
-through destructive_git with each redefinition form.
-
 ### N104 — `Write`/`Edit` of Python source with a long brace-alternation string fails `secret_file_guard` closed
 
 **Found by the N101 fixer**, whose own `Edit` of a scratch `.py` file was
@@ -36,21 +19,18 @@ N101 deliberately left that alone. A test pins it
 (`test_a_script_brace_sequence_mention_still_denies_as_content`), because a
 string literal can reach a shell through a variable that the shell-exec-call
 extraction cannot follow. The cost is that a long enough brace string in
-ordinary source fails closed. On the Bash route the same literal is allowed
-only in a program that cannot pass its text on (N101 round 2). A program
-that spawns, writes a file or imports unknown code has its literals
-enumerated as the content route does. A `Write` of a `.py` file is always
-the second kind, because the file itself is text a later command can run.
-So the content scan cannot be narrowed without the same reach analysis over
-the whole file, and without accepting that a written module can be imported
-by code the guard never sees.
+ordinary source fails closed. Since N101 round 3 the Bash route follows the
+same rule: every string literal of an exempted `python3` program is
+enumerated on its own with the normal caps, so the same literal fails
+closed there too. Only code braces (dicts, sets, f-string fields) are
+exempt, and only on the Bash tool's own command line.
 
-**Remedy:** choose one rule for non-shell code on both surfaces. Either
-brace spellings of string literals are enumerated, and a Bash-route heredoc
-body gets the same scan, or they are not, and the pinned content test is
-replaced by a shell-exec-literal pin. `"id_" + "rsa"` already defeats the
-spelling scan inside any interpreter, so weigh what the enumeration actually
-buys.
+**Remedy:** decide whether a string literal holding a real over-bound brace
+group should fail closed on both surfaces. If not, the alternative has to
+keep a brace-spelled path in any literal denied, which is what the
+enumeration buys. `"id_" + "rsa"` already defeats the spelling scan inside
+any interpreter, so weigh what the enumeration actually buys against the
+false positive.
 
 ### N103 — A `**` word the shell never globs walks the whole checkout, and a large tree fails the guard closed
 
@@ -109,23 +89,45 @@ fresh branch from main.
 `secret_file_matching._brace_expansion_tokens`. It ran `iter_brace_words` and
 `expand_braces` over the raw command, so a body's dict literals and f-strings
 tripped either the 500-word discovery cap or the 256-spelling cap.
-`shell_expansion.brace_expansion_view` now neutralises braces in one place
-only: the program text of a top-level `python3` command, either its
-single-quoted `-c` word or its one quoted-delimiter stdin heredoc. It does
-so only when no shell can read what the program prints: no pipe after it,
-no process substitution, no subshell, group, compound command or wrapper,
-no `exec`/`eval`/`coproc`, no redefinition of the name (including `source`
-and `.`), and no output file that another command in the line could run.
-Ruby, Perl, PHP and Node are judged as before, because they brace-expand in
-their own glob APIs. Argv is judged as before. A program that can pass its
-text on (it spawns a process, writes a file, runs code dynamically or
-imports anything outside a stdlib allowlist, see
-`utils/python_program_reach.py`) still has its string literals enumerated.
-The shell-exec literal scan now covers every Python spawn API. Round 2
+`shell_expansion.brace_expansion_view` now neutralises CODE braces in one
+place only: the program text of a top-level `python3` command, either its
+single-quoted `-c` word or its one quoted-delimiter stdin heredoc. Every
+string literal and comment of that program (found by Python's own
+`tokenize` and `ast`; a program that does not parse is not exempted) is
+enumerated on its own with the normal caps, so a brace-spelled path in any
+literal denies whatever the program does with it. The exemption holds only
+when no shell can read what the program prints: no pipe after it, no
+process substitution, no subshell, group, function definition, compound
+command or wrapper, no `exec`/`eval`/`coproc`, no redefinition of the name
+or what it loads (a function, an alias, `hash`, `enable`, PATH, a
+`PYTHON*` setting, `source` or `.`), and no output file that another
+command in the line could run. Heads and redefinition words are judged
+after quote and backslash removal, and a word that cannot be resolved with
+certainty withdraws the exemption. Ruby, Perl, PHP and Node are judged as
+before, because they brace-expand in their own glob APIs. Argv is judged as
+before. The shell-exec literal scan covers every Python spawn API and
+heredoc programs. Only the Bash tool's own command line gets the view (the
+guard's Bash route and payload capture); an authored script, a command
+segment and Write/Edit content are enumerated as on main. Rounds 2 and 3
 closed the D-RULE and D-SEC review findings; see
-`subagent-reports/260926-n101-fix2-opus-5-5.md`. The fix is in the shared
-stream, so payload capture and `flaggable_content_channel_guard` inherit
-it. The quarantine guard enumerates filesystem globs, not braces; see N103.
+`subagent-reports/260926-n101-fix2-opus-5-5.md` and
+`260926-n101-fix3-opus-5-5.md`. The quarantine guard enumerates filesystem
+globs, not braces; see N103.
+
+**Deliberate widening of the shared data-sink heredoc exemption** (D-RULE
+m1). The quote-aware command-word resolver in `shell_segmentation` (used by
+destructive_git, pipe_blocker, curl_pipe_shell, merge_to_main_approval,
+reference_repo_freshness, bash_flags and process_probe) now sees through
+`env`, `nice`, `nohup`, `timeout` and `command` as well as `sudo`, and
+resolves an interior backslash (`c\at` is `cat`). A heredoc body fed to a
+sink behind one of these is blanked where main scanned it. Each is sound:
+the wrapper execs the named command with the same stdin and runs nothing
+itself (`command` even bypasses functions), and the modes that do run a
+shell or change PATH (`sudo -s`, `env -S`, `env PATH=`) resolve to no
+command. It is also tightened: a quoted option value is one word
+(`sudo -p 'x cat' bash` names bash), and a word built by expansion,
+globbing or brace expansion (`$cat`, `` `echo cat` ``) names no command,
+where main resolved `$cat` to `cat`.
 
 ### N100 — A continuation on a heredoc opener line (`cat > s.sh \⏎<<'EOF'`) denies a body that is only written
 
@@ -294,10 +296,20 @@ fail-closed for a command that does name a target, and pin both with tests.
 and `alias cat=bash` both fail open on every tree. The heredoc blanking treats
 `cat` as a data sink, so the body is never judged, but bash runs it.
 
+The N101 round-2 fixer confirmed the same for `source x.sh; cat <<'EOF'`,
+and the class also covers `hash -p`, `enable`, `.` and a PATH change,
+quoted or escaped spellings included. `_receiver_is_data_sink` resolves
+the name but never asks whether the command line redefines it, so every
+consumer of the blanked text (destructive_git, pipe_blocker and the others)
+judges a body that bash executes as prose.
+
 **Remedy:** a receiver name is not trusted as a data sink once the same
-command defines a function or alias of that name, or runs `alias`, `eval` or
-`source` beforehand. In that case the body is judged. It builds on the N38
-lexer, so it goes on the executed-body branch with N87 and N88.
+command defines a function or alias of that name, or runs `alias`, `hash`,
+`enable`, `eval`, `source` or `.`, or changes PATH, beforehand, each judged
+after quote removal. In that case the body is judged. That is the rule
+`brace_expansion_view` applies to its own exemption. Pin it through
+destructive_git with each redefinition form. It builds on the N38 lexer, so
+it goes on the executed-body branch with N87 and N88.
 
 ### N88 — A data sink whose output feeds an executing process substitution hides the body
 

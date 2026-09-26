@@ -1980,24 +1980,31 @@ class TestTextTheShellNeverExpandsIsNotEnumerated:
         decision, reason = _through_chain("Bash", {"command": command})
         assert decision != Decision.DENY, reason
 
-    def test_python_heredoc_with_an_over_bound_brace_string_is_allowed(self) -> None:
-        command = f"python3 - <<'EOF'\nprint('{_OVER_BOUND_WORD}')\nEOF"
-        decision, reason = _through_chain("Bash", {"command": command})
-        assert decision != Decision.DENY, reason
-
-    def test_python_heredoc_piped_on_to_any_stage_still_fails_closed(self) -> None:
-        """No pipe stage may follow an exempted program (coordinator ruling
-        on D-RULE F1/F2): even `grep` can feed `tee gen.sh`-style routes, so
-        the over-bound word is enumerated again."""
-        command = f"python3 - <<'EOF' 2>&1 | grep -v noise\nprint('{_OVER_BOUND_WORD}')\nEOF"
+    @pytest.mark.parametrize(
+        "command",
+        [
+            f"python3 - <<'EOF'\nprint('{_OVER_BOUND_WORD}')\nEOF",
+            f"python3 -c 'print(\"{_OVER_BOUND_WORD}\")'",
+        ],
+    )
+    def test_an_over_bound_brace_string_literal_still_fails_closed(self, command: str) -> None:
+        """Round 3 (coordinator ruling): every string literal of an exempted
+        program is enumerated on its own with the guard's normal caps, so a
+        literal holding a real over-bound brace group fails closed as shell
+        text does. Only CODE braces (dicts, sets, f-string fields) are
+        exempt."""
         decision, reason = _through_chain("Bash", {"command": command})
         assert decision == Decision.DENY
         assert RuleID.SECRET_EVALUATION_ERROR in reason
 
-    def test_single_quoted_python_code_with_an_over_bound_string_is_allowed(self) -> None:
-        command = f"python3 -c 'print(\"{_OVER_BOUND_WORD}\")'"
+    def test_python_heredoc_piped_on_to_any_stage_still_fails_closed(self) -> None:
+        """No pipe stage may follow an exempted program (coordinator ruling
+        on D-RULE F1/F2): even `grep` can feed `tee gen.sh`-style routes, so
+        the program's code braces are enumerated again."""
+        command = f"python3 - <<'EOF' 2>&1 | grep -v noise\n{_MANY_BRACES_PROGRAM}\nEOF"
         decision, reason = _through_chain("Bash", {"command": command})
-        assert decision != Decision.DENY, reason
+        assert decision == Decision.DENY
+        assert RuleID.SECRET_EVALUATION_ERROR in reason
 
     def test_literal_protected_name_in_a_python_heredoc_still_denies(self) -> None:
         command = (
@@ -2188,8 +2195,9 @@ class TestRoundOneFalsePositivesStayAllowed:
         [
             f"python3 - <<'EOF'\n{_MANY_BRACES_PROGRAM}\nEOF",
             f"python3 <<'EOF'\n{_MANY_BRACES_PROGRAM}\nEOF",
-            f"python3 - <<'EOF'\nprint('{_OVER_BOUND_WORD}')\nEOF",
-            f"python3 -c 'print(\"{_OVER_BOUND_WORD}\")'",
+            "python3 -c '" + _MANY_BRACES_PROGRAM.replace("'", '"') + "'",
+            f"python3 - <<'EOF'\nimport subprocess\n{_MANY_BRACES_PROGRAM}\n"
+            "subprocess.run(['ls'], check=True)\nEOF",
             f"set -euo pipefail\ncd /proj && python3 - <<'EOF'\n{_MANY_BRACES_PROGRAM}\nEOF",
             f"python3 - <<'EOF' > out.json 2>&1\n{_MANY_BRACES_PROGRAM}\nEOF",
             f"python3 - <<'EOF'\nimport json\nfrom pathlib import Path\n{_MANY_BRACES_PROGRAM}\n"
@@ -2199,3 +2207,110 @@ class TestRoundOneFalsePositivesStayAllowed:
     def test_ordinary_python_program_is_allowed(self, command: str) -> None:
         decision, reason = _through_chain("Bash", {"command": command})
         assert decision != Decision.DENY, reason
+
+
+#: A heredoc program whose only braces are code: exempt on its own, so a
+#: construct that withdraws the exemption is seen as a fail-closed deny.
+_CODE_BRACES_HEREDOC = f"python3 - <<'EOF'\n{_MANY_BRACES_PROGRAM}\nEOF"
+
+
+class TestRoundTwoFindingsAreClosed:
+    """Plan 00466 N101 round 3: every D-RULE and D-SEC round-2 finding,
+    through the real handler. Each command was allowed at bc074732b."""
+
+    @pytest.mark.parametrize(
+        "body",
+        [
+            # D-SEC MAJOR 1: a shell call fetched by a name built at runtime
+            "import os, operator\n"
+            "f = operator.attrgetter('sys' + 'tem')(os)\n"
+            f"f('cat {_BRACE_PATH}')",
+            "import os, operator\n"
+            f"operator.methodcaller('sys' + 'tem', 'cat {_BRACE_PATH}')(os)",
+            # D-SEC MAJOR 2: a script written through a renamed os.open
+            "from os import open as o, pwrite, O_WRONLY, O_CREAT\n"
+            f"pwrite(o('g.sh', O_WRONLY | O_CREAT), b'cat {_BRACE_PATH}', 0)",
+            # D-RULE m2: a name computed from dir()
+            "import os, operator\n"
+            "n = [a for a in dir(os) if a.endswith('ystem')][0]\n"
+            f"operator.attrgetter(n)(os)('cat {_BRACE_PATH}')",
+            # A path spelled in a comment the program reads back
+            "import os\n"
+            "src = open('/proc/self/cmdline').read()\n"
+            f"print(src)  # cat {_BRACE_PATH}",
+        ],
+    )
+    def test_a_brace_spelled_literal_denies_whatever_reads_it_d_sec_1_2(self, body: str) -> None:
+        command = f"python3 - <<'EOF'\n{body}\nEOF\nbash g.sh"
+        assert RuleID.SECRET_BASH_MENTION in _deny_reason(command)
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            # D-RULE m3: code loaded before the program runs
+            f"PYTHONPATH=. python3 - <<'EOF'\nimport json\nprint('cat {_BRACE_PATH}')\nEOF",
+            f"python3 -W 'ignore::mod.Cat' - <<'EOF'\nprint('cat {_BRACE_PATH}')\nEOF",
+            f"python3 -c 'print(\"cat {_BRACE_PATH}\")'",
+        ],
+    )
+    def test_a_printing_program_has_its_literals_judged_d_rule_m3(self, command: str) -> None:
+        assert RuleID.SECRET_BASH_MENTION in _deny_reason(command)
+
+    @pytest.mark.parametrize(
+        "prefix",
+        [
+            # D-RULE B1: a quoted or escaped withdrawing head
+            "\\exec >gen.sh",
+            "'exec' >gen.sh",
+            "e\\xec >gen.sh",
+            ">gen.sh exec",
+            "X=1 exec >gen.sh",
+            "'source' defs.sh",
+            '"." ./defs.sh',
+            "\\eval 'exec >gen.sh'",
+            "$e >gen.sh",
+            # D-RULE M1: a quoted or escaped redefinition
+            "'hash' -p /bin/bash python3",
+            "\\hash -p /bin/bash python3",
+            'export "PATH=/opt/x"',
+            "export P\\ATH=/opt/x",
+            "export $v",
+            "export PYTHON\\PATH=.",
+        ],
+    )
+    def test_a_quoted_withdrawing_word_withdraws_the_exemption_d_rule_b1_m1(
+        self, prefix: str
+    ) -> None:
+        literal_route = f"{prefix}; python3 -c 'print(\"cat {_BRACE_PATH}\")'; bash gen.sh"
+        assert RuleID.SECRET_BASH_MENTION in _deny_reason(literal_route)
+        code_route = f"{prefix}; {_CODE_BRACES_HEREDOC}\nbash gen.sh"
+        assert RuleID.SECRET_EVALUATION_ERROR in _deny_reason(code_route)
+
+    @pytest.mark.parametrize(
+        "content",
+        [
+            f"#!/bin/bash\nset -euo pipefail\npython3 -c 'print(\"cat {_BRACE_PATH}\")'\n",
+            f"#!/bin/bash\npython3 - <<'EOF'\nprint('cat {_BRACE_PATH}')\nEOF\n",
+        ],
+    )
+    def test_writing_a_script_whose_python_prints_a_brace_path_denies_d_rule_b2(
+        self, content: str
+    ) -> None:
+        decision, reason = _through_chain(
+            "Write", {"file_path": "/proj/gen.sh", "content": content}
+        )
+        assert decision == Decision.DENY
+        assert RuleID.SECRET_SCRIPT_AUTHOR in reason
+
+    def test_writing_a_script_with_code_braces_is_enumerated_as_on_main_d_rule_b2(
+        self,
+    ) -> None:
+        """The view models the Bash tool's own command line only; a script's
+        output goes to whoever runs it later, so its text is enumerated whole
+        and over-bound code braces fail closed, as on main."""
+        content = f"#!/bin/bash\n{_CODE_BRACES_HEREDOC}\n"
+        decision, reason = _through_chain(
+            "Write", {"file_path": "/proj/gen.sh", "content": content}
+        )
+        assert decision == Decision.DENY
+        assert RuleID.SECRET_EVALUATION_ERROR in reason

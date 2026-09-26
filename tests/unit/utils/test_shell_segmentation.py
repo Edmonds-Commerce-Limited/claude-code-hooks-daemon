@@ -663,6 +663,54 @@ class TestQuotedHeredocCommandWords:
         allowlist caller treats as unknown, withholding the exemption."""
         assert quoted_heredoc_command_words(f"{prefix} cat <<'EOF'\nb\nEOF") == []
 
+    @pytest.mark.parametrize(
+        ("prefix", "command"),
+        [
+            ("sudo -p 'x cat'", "bash"),
+            ('sudo -p "x cat"', "bash"),
+            ("sudo --prompt 'x cat'", "bash"),
+            ("sudo -p x\\ cat", "bash"),
+            ("env -C 'a cat'", "bash"),
+            ("sudo -D 'a cat'", "bash"),
+        ],
+    )
+    def test_a_quoted_option_value_is_one_word(self, prefix: str, command: str) -> None:
+        """Plan 00466 N101 round 3 (D-SEC minor 3): splitting on whitespace
+        without quotes let `-p` consume `'x` and read `cat'` as the command,
+        a data sink, while sudo runs bash."""
+        assert quoted_heredoc_command_words(f"{prefix} {command} <<'EOF'\nb\nEOF") == [command]
+
+    @pytest.mark.parametrize(
+        "prefix",
+        [
+            "$c",
+            "${c}",
+            "$(echo cat)",
+            "`echo cat`",
+            "ca?",
+            "c*",
+            "{cat,bash}",
+            "$'cat'",
+            '"$c"',
+            "sudo -u $u cat",
+            "sudo $w",
+            "env $v cat",
+        ],
+    )
+    def test_a_word_that_cannot_be_resolved_names_no_command(self, prefix: str) -> None:
+        """Plan 00466 N101 round 3: an expansion, glob or brace group can
+        become any command, and an unquoted expansion in a wrapper option can
+        split into more words. Such a word resolves to nothing."""
+        assert quoted_heredoc_command_words(f"{prefix} <<'EOF'\nb\nEOF") == []
+
+    @pytest.mark.parametrize("prefix", ["'cat'", '"cat"', "\\cat", "c\\at", "c'a't", "/bin/cat"])
+    def test_a_quoted_or_escaped_name_resolves_after_quote_removal(self, prefix: str) -> None:
+        assert quoted_heredoc_command_words(f"{prefix} <<'EOF'\nb\nEOF") == ["cat"]
+
+    def test_an_expansion_after_the_command_word_does_not_matter(self) -> None:
+        heredoc = "cat > \"$(pwd)/notes.md\" <<'EOF'\nb\nEOF"
+        assert quoted_heredoc_command_words(heredoc) == ["cat"]
+
     def test_a_path_named_command_is_reduced_to_its_basename(self) -> None:
         assert quoted_heredoc_command_words("/bin/sh <<'EOF'\nb\nEOF") == ["sh"]
 
@@ -677,12 +725,14 @@ class TestQuotedHeredocCommandWords:
         command = "cat > a <<'A'\nx\nA\nbash <<'B'\ny\nB"
         assert quoted_heredoc_command_words(command) == ["cat", "bash"]
 
-    def test_an_expansion_built_command_word_is_reported_verbatim(self) -> None:
-        """Not resolved -- resolving it would mean running the command. It is
-        reported as-is so an allowlist caller simply fails to match it, which
-        is the safe direction and is why the expansion family needs no
-        normalisation."""
-        assert quoted_heredoc_command_words("$SHELL <<'EOF'\nb\nEOF") == ["SHELL"]
+    def test_an_expansion_built_command_word_names_no_command(self) -> None:
+        """Not resolved -- resolving it would mean running the command. Plan
+        00466 N101 round 3: reporting `$cat` as `cat` let an allowlist caller
+        match it, so an unresolvable word now names nothing and the body it
+        feeds is kept."""
+        assert quoted_heredoc_command_words("$SHELL <<'EOF'\nb\nEOF") == []
+        body = "$cat <<'EOF'\nb\nEOF"
+        assert strip_quoted_heredoc_bodies(body) == body
 
     def test_unquoted_heredoc_is_not_reported(self) -> None:
         assert quoted_heredoc_command_words("bash <<EOF\nbody\nEOF") == []

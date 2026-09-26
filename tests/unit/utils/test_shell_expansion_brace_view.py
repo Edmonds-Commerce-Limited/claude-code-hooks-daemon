@@ -19,7 +19,10 @@ from __future__ import annotations
 
 import pytest
 
-from claude_code_hooks_daemon.utils.shell_expansion import brace_expansion_view
+from claude_code_hooks_daemon.utils.shell_expansion import (
+    brace_expansion_view,
+    python_string_literals,
+)
 
 _GROUPS = "{a,b}{c,d}"
 
@@ -50,7 +53,7 @@ class TestPythonProgramTextIsNeutralised:
             f"python3 -u - <<'EOF'\nprint('{_GROUPS}')\nEOF",
             f"python3.12 - <<\"EOF\"\nprint('{_GROUPS}')\nEOF",
             f"/usr/bin/python3 - <<'EOF'\nprint('{_GROUPS}')\nEOF",
-            f"PYTHONPATH=src python3 - <<'EOF'\nprint('{_GROUPS}')\nEOF",
+            f"PYTHONDONTWRITEBYTECODE=1 python3 - <<'EOF'\nprint('{_GROUPS}')\nEOF",
             f"python3 -c 'print(\"{_GROUPS}\")'",
             f"python3 -B -W ignore -c 'print(\"{_GROUPS}\")'",
             f"python3 -c 'print(\"{_GROUPS}\")' 2>&1",
@@ -198,6 +201,11 @@ class TestTheInterpreterMustBePython:
             f"source defs.sh; python3 -c 'cat x{_GROUPS}'",
             f"source defs.sh && python3 - <<'EOF'\nprint('x{_GROUPS}')\nEOF",
             f"ln -s /bin/bash ./python3 && ./python3 - <<'EOF'\ncat x{_GROUPS}\nEOF",
+            # Round 3: interpreter startup settings that load other code
+            "PYTHONPATH=src python3 -c 'print(1, {1})'",
+            "export PYTHONPATH=src; python3 -c 'print(1, {1})'",
+            "PYTHONHOME=/x python3 -c 'print(1, {1})'",
+            "PYTHONUSERBASE=/x python3 -c 'print(1, {1})'",
         ],
     )
     def test_an_untrusted_interpreter_name_keeps_its_text(self, command: str) -> None:
@@ -210,6 +218,95 @@ class TestTheInterpreterMustBePython:
     def test_a_dot_argument_is_not_a_source_command(self) -> None:
         command = f"grep -rn x . ; python3 -c 'print(\"{_GROUPS}\")'"
         assert "{a,b}" not in brace_expansion_view(command).text
+
+
+#: A program the view exempts on its own: code braces only.
+_PROGRAM = f"python3 -c 'print({{1}}, \"{_GROUPS}\")'"
+
+
+def _spellings(name: str) -> list[str]:
+    """``name`` quoted, backslashed and partly quoted: every spelling bash
+    resolves to the same word after quote removal."""
+    spellings = [f"'{name}'", f'"{name}"', f"\\{name}"]
+    if len(name) > 1:
+        spellings += [
+            f"{name[0]}\\{name[1:]}",
+            f"{name[0]}'{name[1:]}'",
+            f'{name[:-1]}"{name[-1]}"',
+        ]
+    return spellings
+
+
+class TestWithdrawingWordsAreJudgedAfterQuoteRemoval:
+    """Plan 00466 N101 round 3 (D-RULE B1 and M1, D-SEC minor 3): bash
+    removes quotes and backslashes before it looks a name up, so `'exec'`,
+    `\\exec` and `e\\xec` are all `exec`. Every head and redefinition word is
+    compared after quote removal, and a word that cannot be resolved with
+    certainty withdraws the exemption."""
+
+    @pytest.mark.parametrize(
+        "head",
+        [
+            spelling
+            for name in ("exec", "eval", "source", ".", "coproc", "builtin", "command")
+            for spelling in _spellings(name)
+        ],
+    )
+    def test_a_quoted_or_escaped_withdrawing_head_withdraws(self, head: str) -> None:
+        assert _kept(f"{head} x >gen.sh; {_PROGRAM}; bash gen.sh")
+
+    @pytest.mark.parametrize(
+        "prefix",
+        [
+            ">gen.sh exec",
+            "X=1 exec >gen.sh",
+            "2>/dev/null 'exec' >gen.sh",
+            "$e >gen.sh",
+            "${e} >gen.sh",
+            "$(echo exec) >gen.sh",
+            "`echo exec` >gen.sh",
+            "ex?c >gen.sh",
+            "{exec,} >gen.sh",
+            "$'exec' >gen.sh",
+        ],
+    )
+    def test_a_head_behind_a_prefix_or_built_by_expansion_withdraws(self, prefix: str) -> None:
+        assert _kept(f"{prefix}; {_PROGRAM}; bash gen.sh")
+
+    @pytest.mark.parametrize(
+        "redefinition",
+        [
+            *(f"{spelling} -p /bin/true python3" for spelling in _spellings("hash")),
+            *(f"{spelling} python3=bash" for spelling in _spellings("alias")),
+            *(f"{spelling} -f ./x.so python3" for spelling in _spellings("enable")),
+            'export "PATH=/opt/x"',
+            "export P\\ATH=/opt/x",
+            "export 'PATH'=/opt/x",
+            "declare -x P'A'TH=/opt/x",
+            'printf -v "PA"TH /opt/x',
+            "read -r P\\ATH < f",
+            "export $v",
+            'declare "$v"',
+            "read -r $v < f",
+            "export PYTHON\\PATH=src",
+            "export 'PYTHONSTARTUP'=x",
+        ],
+    )
+    def test_a_quoted_or_escaped_redefinition_withdraws(self, redefinition: str) -> None:
+        assert _kept(f"{redefinition}; {_PROGRAM}")
+
+    @pytest.mark.parametrize(
+        "sibling",
+        [
+            "cd /x",
+            "cd '/x y'",
+            'echo "done"',
+            "echo $HOME",
+            "PYTHONDONTWRITEBYTECODE=1 true",
+        ],
+    )
+    def test_an_ordinary_sibling_keeps_the_exemption(self, sibling: str) -> None:
+        assert "{a,b}" not in brace_expansion_view(f"{sibling}; {_PROGRAM}").text
 
 
 class TestUncertainInputIsReturnedUnchanged:
@@ -227,29 +324,93 @@ class TestUncertainInputIsReturnedUnchanged:
         assert _kept(command)
 
 
-class TestLiteralsOfAProgramThatReachesBeyondStdout:
-    """A program that spawns, writes a file or loads unknown code hands its
-    string literals on, so the caller still enumerates them."""
+class TestEveryLiteralOfAnExemptedProgramIsReported:
+    """Plan 00466 N101 round 3 (coordinator ruling on D-SEC MAJOR 1 and 2):
+    only a Python string literal (or a comment the program can read back
+    from its own command line) can spell a path, so every one is reported
+    and the caller enumerates each on its own -- whatever the program does
+    with it. No analysis of what the program reaches is needed."""
 
-    def test_a_printing_program_reports_no_literals(self) -> None:
-        assert brace_expansion_view(_python_heredoc(f"print('{_GROUPS}')")).literals == ()
+    def test_a_printing_program_reports_its_literals(self) -> None:
+        literals = brace_expansion_view(_python_heredoc(f"print('cat x{_GROUPS}')")).literals
+        assert f"cat x{_GROUPS}" in literals
 
-    def test_a_spawning_program_reports_its_literals(self) -> None:
-        body = f"import subprocess\ncmd = 'cat x{_GROUPS}'\nsubprocess.run(cmd)"
+    @pytest.mark.parametrize(
+        "body",
+        [
+            # D-SEC MAJOR 1: a shell call fetched by a name built at runtime
+            "import os, operator\n"
+            "f = operator.attrgetter('sys' + 'tem')(os)\n"
+            f"f('cat x{_GROUPS}')",
+            # D-SEC MAJOR 2: a script written through a renamed os.open
+            "from os import open as o, pwrite, O_WRONLY, O_CREAT\n"
+            f"pwrite(o('g.sh', O_WRONLY | O_CREAT), b'cat x{_GROUPS}', 0)",
+            # D-RULE m2: a name computed from dir()
+            "import os\n"
+            "n = [a for a in dir(os) if a.endswith('ystem')][0]\n"
+            f"print(n, 'cat x{_GROUPS}')",
+        ],
+    )
+    def test_a_program_reaching_anything_reports_its_literals(self, body: str) -> None:
+        view = brace_expansion_view(_python_heredoc(body))
+        assert "{a,b}" not in view.text
+        assert any(f"cat x{_GROUPS}" in literal for literal in view.literals)
+
+    def test_a_comment_is_reported(self) -> None:
+        literals = brace_expansion_view(_python_heredoc(f"print(1)  # cat x{_GROUPS}")).literals
+        assert any(f"cat x{_GROUPS}" in literal for literal in literals)
+
+    def test_code_braces_are_not_reported(self) -> None:
+        body = "x = {'k': {1, 2}}\ny = [i for i in {3, 4}]\nprint(f'{x}{y!r:>{3}}')"
         literals = brace_expansion_view(_python_heredoc(body)).literals
-        assert f"cat x{_GROUPS}" in literals
+        assert not any("{1, 2}" in literal or "{3, 4}" in literal for literal in literals)
 
-    def test_a_program_redirected_into_a_file_reports_its_literals(self) -> None:
-        literals = brace_expansion_view(
-            _python_heredoc(f"print('cat x{_GROUPS}')", opener_tail=" > out.txt")
-        ).literals
-        assert f"cat x{_GROUPS}" in literals
+    def test_a_program_that_does_not_parse_is_not_exempted(self) -> None:
+        command = _python_heredoc(f"x = = '{_GROUPS}'")
+        assert _kept(command)
+        assert brace_expansion_view(command).literals == ()
 
-    def test_one_reaching_program_reports_every_programs_literals(self) -> None:
-        command = (
-            f"python3 -c 'print(\"a{_GROUPS}\")'\n" "python3 - <<'EOF'\nimport local_module\nEOF"
-        )
-        assert f"a{_GROUPS}" in brace_expansion_view(command).literals
+
+class TestPythonStringLiterals:
+    """``python_string_literals``: every literal the program's text spells,
+    found by Python's own tokenizer and parser."""
+
+    def test_every_kind_of_string_literal_is_reported(self) -> None:
+        literals = python_string_literals("a = 'x{a,b}'\nc = b'w{1,2}'\nd = r'\\d{a,b}'\n")
+        assert literals is not None
+        assert {"x{a,b}", "w{1,2}", "\\d{a,b}"} <= set(literals)
+
+    def test_implicit_concatenation_reports_each_part_and_the_whole(self) -> None:
+        literals = python_string_literals("x = '/p{a,' 'x}ss'\n")
+        assert literals is not None
+        assert {"/p{a,", "x}ss", "/p{a,x}ss"} <= set(literals)
+
+    def test_an_f_string_reports_its_literal_text_unescaped(self) -> None:
+        literals = python_string_literals("d = 1\nx = f'cat {d}/.p{{a,x}}ss'\n")
+        assert literals is not None
+        assert "/.p{a,x}ss" in literals
+
+    def test_a_string_inside_an_f_string_field_is_reported(self) -> None:
+        literals = python_string_literals("x = f'{g(\"p{a,b}\")}'\n")
+        assert literals is not None
+        assert "p{a,b}" in literals
+
+    def test_an_escape_spelled_brace_is_decoded(self) -> None:
+        literals = python_string_literals("x = 'p\\x7ba,b\\x7d'\n")
+        assert literals is not None
+        assert "p{a,b}" in literals
+
+    def test_a_comment_is_reported(self) -> None:
+        literals = python_string_literals("x = 1  # p{a,b}\n")
+        assert literals is not None
+        assert "# p{a,b}" in literals
+
+    def test_code_braces_are_not_literals(self) -> None:
+        assert python_string_literals("x = {'a': 1, 'b': {2, 3}}\n") == ("a", "b")
+
+    @pytest.mark.parametrize("source", ["print('x", "x = = 1\n", "def f(:\n", "x = '\0'\n"])
+    def test_text_that_does_not_tokenise_or_parse_is_none(self, source: str) -> None:
+        assert python_string_literals(source) is None
 
 
 class TestHeredocsAreReported:

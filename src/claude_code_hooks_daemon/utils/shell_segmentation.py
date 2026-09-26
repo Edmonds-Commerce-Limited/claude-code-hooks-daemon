@@ -29,7 +29,7 @@ that fact now lives, once.
 from __future__ import annotations
 
 import re
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 
 from claude_code_hooks_daemon.utils.command_evasion import (
@@ -187,6 +187,16 @@ class _WrapperGrammar:
 #: (`quoted_heredoc_command_words`, the data-sink exemption);
 #: `quoted_heredoc_receivers` must NOT use this: its caller matches against
 #: DANGEROUS names, where reporting only `sudo` would hide the interpreter.
+#:
+#: A deliberate WIDENING of the data-sink exemption (Plan 00466 N101 D-RULE
+#: m1): main skipped only `sudo`, so `env cat <<'EOF'` kept its body. Each
+#: wrapper here is sound to see through because it execs the named command
+#: with the same stdin and adds no execution of its own: `sudo` and `env`
+#: run it under another user or environment, `nice` and `nohup` change only
+#: scheduling and signals, `timeout` only bounds its run time, and
+#: `command` only bypasses shell functions (so it trusts a sink name LESS
+#: than a bare one, N89). The modes that do run a shell or change PATH are
+#: refused by the grammars above.
 _WRAPPER_GRAMMARS: dict[str, _WrapperGrammar] = {
     "sudo": _WrapperGrammar(
         flags=frozenset("AbBEHknNPS"),
@@ -448,6 +458,138 @@ def command_word(word: str) -> str:
     """
     unquoted = word.replace('"', "").replace("'", "")
     return unquoted.lstrip(_WORD_GROUPING_PREFIXES).rsplit("/", 1)[-1]
+
+
+#: Unquoted characters whose word bash changes by more than quote removal:
+#: parameter and command substitution, pathname globbing, brace expansion.
+_EXPANDING_CHARS = "$`*?[{}"
+
+#: Whitespace that ends an unquoted shell word.
+_WORD_BREAK_CHARS = " \t\n"
+
+
+def iter_shell_words(text: str) -> Iterator[str | None]:
+    """Each whitespace-delimited shell word of ``text``, quotes kept.
+
+    Quote-aware, so ``sudo -p 'x cat' bash`` is four words, not five
+    (Plan 00466 N101 round 3, D-SEC minor 3). A word's extent is certain
+    only while no substitution can hide whitespace inside it, so an
+    unterminated quote, ``$(``, ``${`` or a backtick yields ``None`` and
+    ends the stream: every word before it is exact, and nothing after it is
+    guessed at.
+    """
+    index = 0
+    length = len(text)
+    while True:
+        while index < length and text[index] in _WORD_BREAK_CHARS:
+            index += 1
+        if index >= length:
+            return
+        start = index
+        while index < length and text[index] not in _WORD_BREAK_CHARS:
+            end = _quoted_span_end(text, index)
+            if end is None:
+                yield None
+                return
+            index = end
+        yield text[start:index]
+
+
+def _quoted_span_end(text: str, index: int) -> int | None:
+    """Index past the escape, quoted span or plain character at ``index``;
+    ``None`` when its extent cannot be known without running the shell."""
+    char = text[index]
+    if char == "\\":
+        return min(index + 2, len(text))
+    if char == "`" or text.startswith(("$(", "${"), index):
+        return None
+    if char == "'":
+        end = text.find("'", index + 1)
+        return None if end == -1 else end + 1
+    if text.startswith("$'", index):
+        cursor = index + 2
+        while cursor < len(text):
+            if text[cursor] == "\\":
+                cursor += 2
+            elif text[cursor] == "'":
+                return cursor + 1
+            else:
+                cursor += 1
+        return None
+    if char == '"':
+        cursor = index + 1
+        while cursor < len(text):
+            if text[cursor] == "\\":
+                cursor += 2
+            elif text[cursor] == '"':
+                return cursor + 1
+            elif text[cursor] == "`" or text.startswith(("$(", "${"), cursor):
+                return None
+            else:
+                cursor += 1
+        return None
+    return index + 1
+
+
+def resolve_shell_word(word: str) -> str | None:
+    """The text bash makes of ``word`` by quote and backslash removal alone.
+
+    ``'exec'``, ``"exec"``, ``\\exec`` and ``e\\xec`` all resolve to
+    ``exec``: bash removes quotes before it looks a name up, so a name list
+    compared against the word as written is defeated by punctuation
+    (Plan 00466 N101 round 3, D-RULE B1 and M1). ``None`` when anything but
+    quote removal could change the word -- an expansion, a glob, a brace
+    group, ANSI-C quoting or an unterminated quote -- because a caller
+    comparing names must treat a word it cannot resolve as any name at all.
+    """
+    out: list[str] = []
+    index = 0
+    length = len(word)
+    while index < length:
+        char = word[index]
+        if char == "\\":
+            if index + 1 >= length:
+                return None
+            if word[index + 1] != "\n":
+                out.append(word[index + 1])
+            index += 2
+        elif char == "'":
+            end = word.find("'", index + 1)
+            if end == -1:
+                return None
+            out.append(word[index + 1 : end])
+            index = end + 1
+        elif char == '"':
+            closed = _resolve_double_quoted(word, index + 1, out)
+            if closed is None:
+                return None
+            index = closed
+        elif char in _EXPANDING_CHARS:
+            return None
+        else:
+            out.append(char)
+            index += 1
+    return "".join(out)
+
+
+def _resolve_double_quoted(word: str, index: int, out: list[str]) -> int | None:
+    """Append the double-quoted span starting at ``index`` to ``out``;
+    return the index past its closing quote, or ``None`` when it expands
+    something or never closes."""
+    while index < len(word):
+        char = word[index]
+        if char == '"':
+            return index + 1
+        if char in "$`":
+            return None
+        if char == "\\" and index + 1 < len(word) and word[index + 1] in '$`"\\\n':
+            if word[index + 1] != "\n":
+                out.append(word[index + 1])
+            index += 2
+            continue
+        out.append(char)
+        index += 1
+    return None
 
 
 def value_can_substitute(value: str) -> bool:
@@ -805,16 +947,18 @@ def quoted_heredoc_command_words(command: str) -> list[str]:
     receiver and must not be asked to satisfy the allowlist. ``git commit -F -``
     would otherwise fail on ``commit`` and ``jq -r .`` on ``.``.
 
-    ``sudo`` is skipped so ``sudo -E tee f`` resolves to ``tee``. That cannot
-    hide anything from an allowlist caller: ``sudo -E bash`` resolves to
-    ``bash``, which no list of data sinks contains, so the exemption is
-    withheld either way.
+    A wrapper (``sudo``, ``env``, ``nice``, ``nohup``, ``timeout``,
+    ``command``) is skipped with its options, so ``sudo -E tee f`` resolves
+    to ``tee``. That cannot hide anything from an allowlist caller:
+    ``sudo -E bash`` resolves to ``bash``, which no list of data sinks
+    contains, so the exemption is withheld either way. Skipping the wrappers
+    other than ``sudo`` is a deliberate widening; see :data:`_WRAPPER_GRAMMARS`.
 
-    A word built by EXPANSION (``$SHELL``, ``b$'ash'``) is reported as-is --
-    resolving it would mean running the command the caller exists to judge.
-    For an allowlist caller that needs no special handling: an unresolvable
-    word simply fails to match, which is the safe direction. This is why the
-    unbounded expansion family needs no normalisation here.
+    A word built by EXPANSION (``$SHELL``, ``b$'ash'``), globbing or brace
+    expansion, at or before the command word, names no command and is not
+    reported -- resolving it would mean running the command the caller
+    exists to judge, and an unresolvable word must never satisfy an
+    allowlist.
 
     Args:
         command: The raw Bash command string.
@@ -864,15 +1008,21 @@ def _segment_command_word(segment: str) -> str | None:
     options and their values, so `sudo -p cat bash` names bash. A word
     starting with `-` where a command should be, or a wrapper option the
     grammar does not know, names nothing (Plan 00466 N101).
+
+    Words are split with quotes respected and judged after quote removal
+    (:func:`iter_shell_words`, :func:`resolve_shell_word`), so
+    `sudo -p 'x cat' bash` names bash and `c\\at` names cat. A word bash
+    could change by expansion, globbing or brace expansion, up to and
+    including the command word, names nothing (Plan 00466 N101 round 3).
     """
-    words = strip_reserved_word_prefix(segment).split()
+    words = _resolved_segment_words(segment)
     index = 0
     while index < len(words):
-        resolved = command_word(words[index])
-        if not resolved:
-            index += 1
-            continue
-        if resolved.startswith("-"):
+        word = words[index]
+        if word is None:
+            return None
+        resolved = word.rsplit("/", 1)[-1]
+        if not resolved or resolved.startswith("-"):
             return None
         grammar = _WRAPPER_GRAMMARS.get(resolved)
         if grammar is None:
@@ -884,12 +1034,34 @@ def _segment_command_word(segment: str) -> str | None:
     return None
 
 
-def _skip_wrapper_arguments(grammar: _WrapperGrammar, words: list[str], index: int) -> int | None:
+def _resolved_segment_words(segment: str) -> list[str | None]:
+    """The segment's words after quote removal, ending at the first one that
+    cannot be resolved (reported as ``None``). Leading grouping punctuation
+    (`(`, `{`, and a `(` glued to the command word) opens a subshell or
+    group and names no command, so it is dropped."""
+    words: list[str | None] = []
+    for raw in iter_shell_words(strip_reserved_word_prefix(segment)):
+        if raw is not None and not words:
+            raw = raw.lstrip("(") if raw.strip("({") else ""
+            if not raw:
+                continue
+        resolved = None if raw is None else resolve_shell_word(raw)
+        words.append(resolved)
+        if resolved is None:
+            break
+    return words
+
+
+def _skip_wrapper_arguments(
+    grammar: _WrapperGrammar, words: Sequence[str | None], index: int
+) -> int | None:
     """Index of the word a wrapper runs, past its options, their values and
     its operands; ``None`` when any of them cannot be parsed with certainty."""
     operand_pending = grammar.operand is not None
     while index < len(words):
         word = words[index]
+        if word is None:
+            return None
         if word == "--":
             index += 1
             break
@@ -924,7 +1096,8 @@ def _skip_wrapper_arguments(grammar: _WrapperGrammar, words: list[str], index: i
     if operand_pending:
         if index >= len(words) or grammar.operand is None:
             return None
-        if not grammar.operand.fullmatch(words[index]):
+        operand = words[index]
+        if operand is None or not grammar.operand.fullmatch(operand):
             return None
         index += 1
     return index if index <= len(words) else None

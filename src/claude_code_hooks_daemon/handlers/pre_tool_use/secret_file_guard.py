@@ -1352,6 +1352,7 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
                 deadline=deadline,
                 cwd=cwd,
                 normalised_words=shared_words,
+                bash_tool_command=True,
             )
             if mention is None:
                 # review 6 minor-2: an interpreter one-liner's own

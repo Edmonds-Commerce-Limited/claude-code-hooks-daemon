@@ -22,20 +22,25 @@ way ``iter_protected_mentions`` already treats its own ``TimeoutError``.
 
 from __future__ import annotations
 
+import ast
 import errno
 import fnmatch
+import io
 import itertools
 import logging
 import os
 import re
 import time
+import tokenize
 from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Final, NamedTuple
 
-from claude_code_hooks_daemon.utils.python_program_reach import analyse_python_program
-from claude_code_hooks_daemon.utils.shell_segmentation import segment_command_word
+from claude_code_hooks_daemon.utils.shell_segmentation import (
+    resolve_shell_word,
+    segment_command_word,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -284,11 +289,16 @@ def iter_brace_words(text: str, *, max_words: int = DEFAULT_MAX_BRACE_WORDS) -> 
 # brace "spellings" models nothing bash does -- and hits the caps above,
 # failing a guard closed on a command that names no protected path.
 #
-# :func:`brace_expansion_view` neutralises exactly that program text, and
-# only while nothing on the command line can turn it back into shell text.
-# The guard fails closed, so every condition must be established: anything
-# the scanner is not sure about is returned unchanged, and the caller keeps
-# enumerating it and keeps failing closed past the cap.
+# :func:`brace_expansion_view` neutralises the braces of that program text
+# that are CODE -- dict and set displays, comprehensions, f-string fields --
+# and reports every string literal and comment for the caller to enumerate
+# on its own. Only a literal can spell a path, so a brace-spelled path in any
+# literal still denies, whoever reads the program's output and however the
+# call is reached. It does so only while nothing on the command line can
+# turn the program back into shell text. The guard fails closed, so every
+# condition must be established: anything the scanner is not sure about is
+# returned unchanged, and the caller keeps enumerating it and keeps failing
+# closed past the cap.
 
 #: The one interpreter whose program text is exempt, named bare (resolved
 #: through PATH) or from a system directory. Ruby, Perl, PHP and Node expand
@@ -376,8 +386,59 @@ _DELIMITER_STOP_CHARS: Final[str] = " \t\n;&|<>()"
 #: make `python3` name something else: a function definition, an alias,
 #: `hash -p`, `enable`, or any touch of PATH (`PATH=`, `export PATH=`,
 #: `read PATH`). Anywhere in the command, it withdraws every exemption.
+#: Quoted and escaped spellings are judged word by word after quote removal
+#: (:data:`_REDEFINING_WORDS`, :data:`_REDEFINED_VARIABLE_RE`).
 _NAME_REDEFINITION_RE: Final[re.Pattern[str]] = re.compile(
     r"(?:^|[\s;&|(`])(?:alias|hash|enable|function)(?=[\s;&|)]|$)" r"|\bPATH\b" r"|[\w.-]\s*\(\s*\)"
+)
+
+#: Words that redefine what a command name runs, compared after quote and
+#: backslash removal wherever they appear in a top-level command.
+_REDEFINING_WORDS: Final[frozenset[str]] = frozenset({"alias", "hash", "enable", "function"})
+
+#: A variable whose value changes which interpreter runs or what code it
+#: loads before the program: PATH, and every PYTHON* setting except the
+#: ones below. Matched inside a resolved word (`PATH=x`, `export PATH`).
+_REDEFINED_VARIABLE_RE: Final[re.Pattern[str]] = re.compile(
+    r"(?<![A-Za-z0-9_])(?:PATH|PYTHON[A-Z0-9_]*)(?![A-Za-z0-9_])"
+)
+
+#: PYTHON* settings that change only how the interpreter reports, buffers
+#: or encodes, never what code it loads.
+_HARMLESS_PYTHON_VARIABLES: Final[frozenset[str]] = frozenset(
+    {
+        "PYTHONDONTWRITEBYTECODE",
+        "PYTHONUNBUFFERED",
+        "PYTHONIOENCODING",
+        "PYTHONHASHSEED",
+        "PYTHONUTF8",
+        "PYTHONFAULTHANDLER",
+        "PYTHONNOUSERSITE",
+        "PYTHONSAFEPATH",
+    }
+)
+
+#: Builtins that assign a variable NAMED by an argument (`export $v`,
+#: `read -r "$v"`): an argument they take that cannot be resolved may name
+#: PATH, so it withdraws the exemption.
+_NAME_ASSIGNING_BUILTINS: Final[frozenset[str]] = frozenset(
+    {
+        "export",
+        "declare",
+        "typeset",
+        "readonly",
+        "local",
+        "read",
+        "printf",
+        "mapfile",
+        "readarray",
+        "let",
+        "getopts",
+        "unset",
+        "alias",
+        "hash",
+        "enable",
+    }
 )
 
 
@@ -394,9 +455,9 @@ class ScannedHeredoc(NamedTuple):
 class BraceExpansionView(NamedTuple):
     """``text``: the command with braces neutralised in exempted Python
     program text. ``heredocs``: every heredoc read, in order -- empty when
-    the command could not be parsed with confidence. ``literals``: the
-    string literals of every exempted program, when any of them can reach
-    beyond its own stdout -- the caller still enumerates their braces."""
+    the command could not be parsed with confidence. ``literals``: every
+    string literal and comment of every exempted program, which the caller
+    enumerates each on its own (:func:`python_string_literals`)."""
 
     text: str
     heredocs: tuple[ScannedHeredoc, ...]
@@ -458,17 +519,22 @@ def brace_expansion_view(command: str) -> BraceExpansionView:
       substitution, or under any wrapper (``sudo``, ``eval``, ``xargs``);
     - no top-level command re-routes the shell's stdout or runs text as
       shell (``exec``, ``eval``, ``coproc``), and nothing redefines
-      ``python3`` (a function, an alias, ``hash``, ``enable``, PATH,
-      ``source`` or ``.``);
+      ``python3`` or what it loads (a function, an alias, ``hash``,
+      ``enable``, PATH, a ``PYTHON*`` setting, ``source`` or ``.``). Heads
+      and redefinition words are judged after quote and backslash removal
+      (``'exec'``, ``\\exec`` and ``e\\xec`` are ``exec``), and a head, or an
+      argument of a name-assigning builtin, that cannot be resolved with
+      certainty withdraws the exemption;
+    - no subshell or function definition (a bare ``(``) at the top level;
     - stdout goes to the terminal, a descriptor dup, ``/dev/null``, or a
       file no other command in the line can execute;
-    - every Python option is one the scanner knows, and the program parses.
+    - every Python option is one the scanner knows, and the program both
+      tokenises and parses.
 
-    A program that can reach beyond its stdout (spawn, write a file, load
-    unknown code: see ``python_program_reach``), or whose stdout goes to a
-    file, has its string literals returned in ``literals`` -- and so do
-    the other exempted programs in the same line, since one can run what
-    another wrote.
+    Every string literal and comment of an exempted program is returned in
+    ``literals`` (Plan 00466 N101 round 3): only CODE braces are exempt, so
+    a brace-spelled path in a literal denies whatever the program does with
+    it. The conditions above keep code braces out of any shell's reach.
 
     Deliberately a scanner, not a shell parser: comments, backslash escapes,
     ``$'...'`` escapes, nested substitutions and heredoc bodies are tracked
@@ -482,19 +548,59 @@ def brace_expansion_view(command: str) -> BraceExpansionView:
         scanner.scan(0, closer=None, top=True, depth=0)
     except _ViewParseError:
         return BraceExpansionView(command, ())
-    heredocs = tuple(scanner.heredocs)
     literals: list[str] = []
-    hands_text_on = False
     for program in scanner.exempt_programs():
-        analysis = analyse_python_program(command[program.start : program.end])
-        if analysis is None:
+        program_literals = python_string_literals(command[program.start : program.end])
+        if program_literals is None:
             continue
         scanner.neutralise(program.start, program.end)
-        literals.extend(analysis.string_literals)
-        hands_text_on = hands_text_on or program.writes_a_file or analysis.reaches_beyond_stdout
-    return BraceExpansionView(
-        "".join(scanner.out), heredocs, tuple(literals) if hands_text_on else ()
-    )
+        literals.extend(program_literals)
+    return BraceExpansionView("".join(scanner.out), tuple(scanner.heredocs), tuple(literals))
+
+
+def python_string_literals(source: str) -> tuple[str, ...] | None:
+    """Every string literal and comment in the Python program ``source``,
+    or ``None`` when it does not tokenise or parse (Plan 00466 N101 round 3).
+
+    The boundaries are Python's own (:mod:`tokenize`, :mod:`ast`), so a
+    brace in code -- a dict or set display, a comprehension, an f-string
+    replacement field -- is never reported, and every literal is:
+
+    - each ``str`` and ``bytes`` token on its own, raw or not, with escapes
+      decoded (``'\\x7b'`` is ``{``), including each part of an implicit
+      concatenation;
+    - every constant the parsed program holds, which adds the concatenated
+      value (``'/p{a,' 'x}ss'``), the literal text of an f-string with
+      ``{{``/``}}`` unescaped, and strings nested in its fields;
+    - every comment, since a program can read its own command line back.
+
+    ``None`` makes the caller keep the program's text as shell text: an
+    unparseable program is not exempted.
+    """
+    try:
+        tokens = list(tokenize.generate_tokens(io.StringIO(source).readline))
+        tree = ast.parse(source)
+        literals: list[str] = []
+        for token in tokens:
+            if token.type == tokenize.COMMENT:
+                literals.append(token.string)
+            elif token.type == tokenize.STRING:
+                literals.extend(_constant_strings(ast.parse(token.string, mode="eval")))
+        literals.extend(_constant_strings(tree))
+    except (SyntaxError, ValueError, RecursionError, tokenize.TokenError):
+        return None
+    return tuple(dict.fromkeys(literals))
+
+
+def _constant_strings(tree: ast.AST) -> Iterator[str]:
+    """Every ``str`` or ``bytes`` constant in ``tree``; bytes decoded one
+    character per byte, so every byte keeps its own position."""
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Constant):
+            if isinstance(node.value, str):
+                yield node.value
+            elif isinstance(node.value, bytes):
+                yield node.value.decode("latin-1")
 
 
 class _BraceViewScanner:
@@ -513,6 +619,9 @@ class _BraceViewScanner:
         self.top_heredocs: dict[int, _PendingHeredoc] = {}
         self.single_quotes: dict[int, int] = {}
         self.saw_process_substitution = False
+        #: A bare `(` at the top level: a subshell or a function definition
+        #: (`python3() { ...; }`, however its name is spelled).
+        self.saw_top_level_paren = False
 
     def mask(self, start: int, end: int) -> None:
         for index in range(start, end):
@@ -538,12 +647,9 @@ class _BraceViewScanner:
     def exempt_programs(self) -> list[_Program]:
         """Every program whose braces may be neutralised; empty when any
         line-wide condition fails."""
-        if self.saw_process_substitution:
+        if self.saw_process_substitution or self.saw_top_level_paren:
             return []
         if _NAME_REDEFINITION_RE.search(self.shell_level_text()):
-            return []
-        heads = [self.word(segment.words[0]) for segment in self.segments if segment.words]
-        if any(head in _EXEMPTION_WITHDRAWING_HEADS for head in heads):
             return []
         programs: list[_Program] = []
         for segment in self.segments:
@@ -553,13 +659,64 @@ class _BraceViewScanner:
             if program.writes_a_file and not self.only_inert_siblings(segment):
                 continue
             programs.append(program)
+        # A `-c` program's own word is Python, not a shell word: its text
+        # may mention PATH without assigning it.
+        program_words = {program.start - 1 for program in programs}
+        if any(self.withdraws_the_exemption(segment, program_words) for segment in self.segments):
+            return []
         return programs
+
+    def head_index(self, segment: _Segment) -> int | None:
+        """Index of the segment's command word, past ``NAME=value`` words
+        and redirections (``>f exec`` is ``exec``); ``None`` if it has none."""
+        words = segment.words
+        index = 0
+        while index < len(words):
+            word = self.word(words[index])
+            redirect = _REDIRECT_RE.fullmatch(word)
+            if redirect is not None:
+                index += 1 if redirect.group("target") else 2
+            elif _ASSIGNMENT_RE.match(word):
+                index += 1
+            else:
+                return index
+        return None
+
+    def head(self, segment: _Segment) -> str | None:
+        """The segment's command word after quote removal; ``""`` when it
+        has none, ``None`` when it cannot be resolved."""
+        index = self.head_index(segment)
+        if index is None:
+            return ""
+        return resolve_shell_word(self.word(segment.words[index]))
+
+    def withdraws_the_exemption(self, segment: _Segment, program_words: set[int]) -> bool:
+        """Whether ``segment`` can re-route the shell's stdout, run text as
+        shell, or change what ``python3`` names or loads -- judged on every
+        word after quote and backslash removal (D-RULE B1 and M1). Words
+        starting at ``program_words`` are exempted program text."""
+        head = self.head(segment)
+        if head is None or head in _EXEMPTION_WITHDRAWING_HEADS:
+            return True
+        for span in segment.words:
+            if span[0] in program_words:
+                continue
+            raw = self.word(span)
+            resolved = resolve_shell_word(raw)
+            if resolved is None:
+                if head in _NAME_ASSIGNING_BUILTINS:
+                    return True
+                resolved = raw
+            if resolved in _REDEFINING_WORDS:
+                return True
+            for variable in _REDEFINED_VARIABLE_RE.finditer(resolved):
+                if variable.group(0) not in _HARMLESS_PYTHON_VARIABLES:
+                    return True
+        return False
 
     def only_inert_siblings(self, own: _Segment) -> bool:
         return all(
-            segment is own
-            or not segment.words
-            or self.word(segment.words[0]) in _INERT_SIBLING_HEADS
+            segment is own or self.head(segment) in _INERT_SIBLING_HEADS or not segment.words
             for segment in self.segments
         )
 
@@ -755,6 +912,7 @@ class _BraceViewScanner:
                 index = self.scan(index + 1, closer="`", top=False, depth=depth + 1)
                 continue
             if char == "(":
+                self.saw_top_level_paren = self.saw_top_level_paren or top
                 index = self.scan(index + 1, closer=")", top=False, depth=depth + 1)
                 continue
             if char == ")":

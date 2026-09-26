@@ -1192,6 +1192,7 @@ def find_protected_mention(
     *,
     deadline: float | None = None,
     context: MentionContext = "bash",
+    bash_tool_command: bool = False,
 ) -> str | None:
     """First protected glob a token of ``command`` mentions, else ``None``.
 
@@ -1206,9 +1207,16 @@ def find_protected_mention(
     review 8 L1) is forwarded straight through -- see
     :func:`find_protected_mention_detail`'s own docstring. ``context`` -- see
     :data:`MentionContext` -- defaults to ``"bash"``, so every pre-existing
-    caller keeps its exact prior behaviour unchanged.
+    caller keeps its exact prior behaviour unchanged. ``bash_tool_command``
+    -- see :func:`_brace_expansion_tokens`.
     """
-    detail = find_protected_mention_detail(command, patterns, deadline=deadline, context=context)
+    detail = find_protected_mention_detail(
+        command,
+        patterns,
+        deadline=deadline,
+        context=context,
+        bash_tool_command=bash_tool_command,
+    )
     return None if detail is None else detail[0]
 
 
@@ -1257,6 +1265,7 @@ def find_protected_mention_detail(
     cwd: str | None = None,
     context: MentionContext = "bash",
     normalised_words: list[str] | None = None,
+    bash_tool_command: bool = False,
 ) -> tuple[str, str] | None:
     """``(pattern, token)`` for the first protected mention, else ``None``.
 
@@ -1274,7 +1283,8 @@ def find_protected_mention_detail(
     simply omits it. ``context`` -- see :data:`MentionContext` -- defaults to
     ``"bash"``, unchanged from every pre-existing caller. ``normalised_words``
     (review 7 follow-up) is forwarded straight through -- see
-    :func:`bash_route_word_stream`.
+    :func:`bash_route_word_stream`. ``bash_tool_command`` -- see
+    :func:`_brace_expansion_tokens`.
     """
     return next(
         iter_protected_mentions(
@@ -1284,6 +1294,7 @@ def find_protected_mention_detail(
             cwd=cwd,
             context=context,
             normalised_words=normalised_words,
+            bash_tool_command=bash_tool_command,
         ),
         None,
     )
@@ -1297,6 +1308,7 @@ def iter_protected_mentions(
     cwd: str | None = None,
     context: MentionContext = "bash",
     normalised_words: list[str] | None = None,
+    bash_tool_command: bool = False,
 ) -> Iterator[tuple[str, str]]:
     """``(pattern, token)`` for EVERY protected mention in ``command``, in order.
 
@@ -1406,7 +1418,7 @@ def iter_protected_mentions(
         )
     tokens = itertools.chain(
         _tokenise(import_stripped),
-        _brace_expansion_tokens(command, context),
+        _brace_expansion_tokens(command, bash_tool_command=bash_tool_command),
         _normalised_word_tokens(
             import_stripped, deadline=deadline, words=words_for_normalised_stream
         ),
@@ -1454,7 +1466,7 @@ def iter_protected_mentions(
             yield (pattern, token)
 
 
-def _brace_expansion_tokens(command: str, context: MentionContext = "bash") -> Iterator[str]:
+def _brace_expansion_tokens(command: str, *, bash_tool_command: bool = False) -> Iterator[str]:
     """Lazily yield every concrete spelling of every raw brace-expansion word
     in ``command`` (B1-R3, Plan 00466 review 3).
 
@@ -1477,27 +1489,33 @@ def _brace_expansion_tokens(command: str, context: MentionContext = "bash") -> I
     template beforehand. Run over the EXPANDED spelling, matching that
     order.
 
-    Plan 00466 N101: on the ``"bash"`` route the brace words come from
-    :func:`shell_expansion.brace_expansion_view`, which neutralises only the
-    program text of a standalone `python3` command no shell reads the output
-    of -- text no shell expands, whose enumeration modelled nothing and
-    failed the guard closed on ordinary Python programs. The string literals
-    of such a program that can hand its text on (spawn, write a file, load
-    unknown code) are enumerated as well, each on its own. Everything else is
-    enumerated exactly as before, caps and fail-closed included.
-    ``"content"`` (a file being authored) is enumerated whole, as before:
-    the view models a COMMAND line, not a source file.
+    Plan 00466 N101: when ``bash_tool_command`` is set, the brace words come
+    from :func:`shell_expansion.brace_expansion_view`, which neutralises the
+    CODE braces (dict and set displays, comprehensions, f-string fields) of
+    a standalone `python3` program no shell reads the output of -- text no
+    shell expands, whose enumeration modelled nothing and failed the guard
+    closed on ordinary Python programs. Every string literal and comment of
+    that program is enumerated on its own, with the same caps. Everything
+    else is enumerated exactly as before, caps and fail-closed included.
+
+    Only a caller judging the Bash tool's own, whole command line sets it
+    (the guard's Bash route, payload capture): the view's safety argument
+    is that the line's top-level stdout reaches the model, not a shell. An
+    authored script, Makefile recipe or CI step (``context="bash"`` on the
+    Write/Edit route), a segment of a command, and ``"content"`` are all
+    enumerated whole, as on main (round 3, D-RULE B2): a script's output
+    goes to whoever runs it later.
 
     ``command`` is the RAW command: the view parses the Python program
     itself, which deleting import module paths would break (`import `
     alone does not parse). The deletion is applied to the view's text
     instead, which neutralising braces never touches.
     """
-    if context == "content":
-        sources: tuple[str, ...] = (_without_import_module_paths(command),)
-    else:
+    if bash_tool_command:
         view = shell_expansion.brace_expansion_view(command)
-        sources = (_without_import_module_paths(view.text), *view.literals)
+        sources: tuple[str, ...] = (_without_import_module_paths(view.text), *view.literals)
+    else:
+        sources = (_without_import_module_paths(command),)
     for source in sources:
         for word in shell_expansion.iter_brace_words(source):
             for spelling in shell_expansion.expand_braces(word):

@@ -134,7 +134,6 @@ Full write-ups are in [NIGGLES.md](NIGGLES.md). One line each here:
 | N102 | A grep regex such as `".*real_chain"` in a compound command is denied as a protected-file mention              | N101 fixer                                                      | ⬜ Open                          |
 | N103 | A `**` word the shell never globs walks the whole checkout, and a large tree fails the guard closed            | N101 fixer                                                      | ⬜ Open                          |
 | N104 | `Write`/`Edit` of Python source with a long brace-alternation string fails `secret_file_guard` closed          | N101 fixer                                                      | ⬜ Open                          |
-| N105 | The data-sink heredoc exemption trusts a sink name that the same command redefines                             | N101 round-2 fixer                                              | ⬜ Open                          |
 
 ## Tasks
 

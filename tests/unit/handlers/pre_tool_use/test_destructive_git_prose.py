@@ -28,6 +28,7 @@ import pytest
 
 from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.core import Decision
+from claude_code_hooks_daemon.core.chain import HandlerChain
 from claude_code_hooks_daemon.handlers.pre_tool_use.destructive_git import (
     DestructiveGitHandler,
 )
@@ -180,6 +181,14 @@ class TestTheGuardStillGuards:
             "command bash",
             "sudo -s cat",
             "env -S cat bash",
+            # Plan 00466 N101 round 3 (D-SEC minor 3): a quoted option value
+            # holding a space is one word, not a value plus a command.
+            "sudo -p 'x cat' bash",
+            "sudo --prompt 'x cat' bash",
+            'env -C "a cat" bash',
+            # ...and a command word bash builds by expansion is not a sink.
+            "$c",
+            "`echo cat`",
         ],
     )
     def test_a_heredoc_fed_to_an_interpreter_is_still_blocked(
@@ -196,6 +205,20 @@ class TestTheGuardStillGuards:
         the receiver is a recognised SINK instead.
         """
         assert _matches(handler, f"{receiver} <<'EOF'\n{body}\nEOF") is True
+
+    @pytest.mark.parametrize("receiver", ["sudo -p 'x cat' bash", "sudo --prompt 'x cat' bash"])
+    def test_a_quoted_wrapper_option_value_hides_no_shell_through_the_chain(
+        self, receiver: str
+    ) -> None:
+        """Plan 00466 N101 round 3 (D-SEC minor 3), through the real chain:
+        bc074732b read `cat'` as the receiver and blanked the body."""
+        chain = HandlerChain()
+        chain.add(DestructiveGitHandler())
+        command = f"{receiver} <<'EOF'\n{_RESET_HARD} HEAD\nEOF"
+        result = chain.execute(
+            {"tool_name": "Bash", "tool_input": {"command": command}}, strict_mode=False
+        )
+        assert result.result.decision == Decision.DENY
 
     @pytest.mark.parametrize("interpreter", ["bash", "sh", "python3", "ssh host"])
     def test_a_sink_piped_into_an_interpreter_is_still_blocked(

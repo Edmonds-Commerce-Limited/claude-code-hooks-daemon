@@ -2994,13 +2994,28 @@ _OVER_BOUND_WORD = "".join(
 
 
 class TestBraceStreamReadsOnlyShellExpandedText:
-    """Plan 00466 N101: every sfm caller (the guard, payload capture, the
-    flaggable-content channel guard) shares one brace stream, so the fix
-    lives here -- braces a shell never expands are not enumerated."""
+    """Plan 00466 N101: the brace stream skips the CODE braces of a Python
+    program no shell reads -- but only for a whole Bash tool command
+    (``bash_tool_command=True``: the guard's Bash route and payload
+    capture). A script's text, a segment of a command and authored content
+    are enumerated whole, as on main (round 3, D-RULE B2)."""
 
-    def test_python_heredoc_body_is_not_enumerated(self) -> None:
-        command = f"python3 - <<'EOF'\nprint('{_OVER_BOUND_WORD}')\nEOF"
-        assert sfm.find_protected_mention(command, sfm.DEFAULT_PROTECTED_PATTERNS) is None
+    _CODE_BRACES = "x = 1\n" + "\n".join(f"print(f'{{x}}', {{'k': {i}}})" for i in range(600))
+
+    def test_python_heredoc_code_braces_are_not_enumerated(self) -> None:
+        command = f"python3 - <<'EOF'\n{self._CODE_BRACES}\nEOF"
+        patterns = sfm.DEFAULT_PROTECTED_PATTERNS
+        assert sfm.find_protected_mention(command, patterns, bash_tool_command=True) is None
+
+    def test_a_python_string_literal_is_enumerated_on_its_own(self) -> None:
+        command = f"python3 - <<'EOF'\n{self._CODE_BRACES}\nprint('cat /r/.ssh/id_{{r,x}}sa')\nEOF"
+        patterns = sfm.DEFAULT_PROTECTED_PATTERNS
+        assert sfm.find_protected_mention(command, patterns, bash_tool_command=True) is not None
+
+    def test_without_the_bash_tool_flag_the_text_is_enumerated_whole(self) -> None:
+        command = f"python3 - <<'EOF'\n{self._CODE_BRACES}\nEOF"
+        with pytest.raises(TooManyToEnumerateError):
+            sfm.find_protected_mention(command, sfm.DEFAULT_PROTECTED_PATTERNS)
 
     def test_content_context_is_still_enumerated_whole(self) -> None:
         """The view models a command line, not an authored file: a file's
