@@ -80,6 +80,9 @@ _INCLUDE_FLAGS: Final[frozenset[str]] = frozenset({"-i", "--include"})
 _CONTINUING_SUBCOMMANDS: Final[frozenset[str]] = frozenset(
     {"merge", "cherry-pick", "revert", "rebase"}
 )
+_DIRECTORY_CHANGERS: Final[frozenset[str]] = frozenset({"cd", "pushd"})
+_CD_TOKEN_COUNT: Final[int] = 2
+_PREVIOUS_DIRECTORY: Final[str] = "-"
 _ASSIGNMENT: Final[re.Pattern[str]] = re.compile(r"[A-Za-z_][A-Za-z0-9_]*=.*")
 
 # `git diff` targets: the index against HEAD, or the working tree against it.
@@ -221,11 +224,29 @@ def _parse_commit(segment: str, cwd: Path) -> _Commit | None:
 
 
 def _commits(command: str, cwd: Path) -> Iterator[_Commit]:
-    """Every commit-recording git invocation in ``command``."""
+    """Every commit-recording git invocation in ``command``.
+
+    A ``cd``/``pushd`` earlier in the command moves the directory the later
+    segments run in, so ``cd repo && git commit`` is judged in ``repo``.
+    """
     for segment in split_unquoted(normalise_line_continuations(command), _SEGMENT_SEPARATORS):
+        cwd = _after_directory_change(segment, cwd)
         commit = _parse_commit(segment, cwd)
         if commit is not None:
             yield commit
+
+
+def _after_directory_change(segment: str, cwd: Path) -> Path:
+    """``cwd`` after ``segment`` when it is ``cd <dir>``/``pushd <dir>``, else ``cwd``.
+
+    ``cd -`` names a directory this command never states, so it is left alone.
+    """
+    tokens = _shell_tokens(strip_reserved_word_prefix(segment))
+    if len(tokens) != _CD_TOKEN_COUNT or tokens[0] not in _DIRECTORY_CHANGERS:
+        return cwd
+    if tokens[1] == _PREVIOUS_DIRECTORY:
+        return cwd
+    return cwd / Path(tokens[1]).expanduser()
 
 
 def _git_or_raise(root: Path, *args: str) -> str:
@@ -453,8 +474,8 @@ class ConflictMarkerCommitGateHandler(PreToolUseHandlerBase):
             "space-separated). A line of seven `=` counts only between an opener and a "
             "closer, so a setext heading underline is fine.\n\n"
             "It reads what the commit RECORDS: the index, the working tree for "
-            "`commit -a`, the named paths for a pathspec commit, and the repository "
-            "`git -C` names. A marker already in history never blocks an unrelated "
+            "`commit -a`, the named paths for a pathspec commit, in the repository an "
+            "earlier `cd` or `git -C` names. A marker already in history never blocks an unrelated "
             "edit, and deleting one is never blocked. **Fix:** resolve the conflict at "
             "each listed line and re-stage."
         )

@@ -2501,7 +2501,8 @@ file's marker line is withheld from the deny.
 **Fires when:** a Bash command runs `git commit` (not `--dry-run`) or
 `git merge|cherry-pick|revert|rebase --continue`. It reads what the command
 records: the index, the working tree for `commit -a`, the named paths for a
-pathspec commit (plus the index with `-i`), in the repository `git -C` names.
+pathspec commit (plus the index with `-i`), in the repository an earlier `cd`
+or `git -C` names.
 
 **Options:** none.
 

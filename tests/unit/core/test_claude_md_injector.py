@@ -560,6 +560,49 @@ class TestClaudeMdInjectorAutoCommit:
         )
         assert "hooks daemon" in log.stdout.lower()
 
+    def test_a_claude_md_holding_conflict_markers_is_not_auto_committed(
+        self, tmp_path: Path
+    ) -> None:
+        """Plan 00466 N211: the daemon's own commit bypasses the commit gate.
+
+        A PreToolUse gate never sees this commit, so the injector must refuse
+        to record a marker itself; the file stays dirty for a human to resolve.
+        """
+        from claude_code_hooks_daemon.core.claude_md_injector import ClaudeMdInjector
+
+        _init_git_repo(tmp_path)
+        close_marker = ">" * 7
+        (tmp_path / "CLAUDE.md").write_text(f"# Project\n\n{close_marker} main\n")
+        head_before = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=tmp_path, capture_output=True, text=True
+        ).stdout
+
+        handler = _StubHandler("h", "## H\n\nContent.")
+        ClaudeMdInjector(workspace_root=tmp_path, handlers=[handler]).inject()
+
+        head_after = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=tmp_path, capture_output=True, text=True
+        ).stdout
+        assert head_after == head_before, "a conflict marker was auto-committed"
+        assert f"{close_marker} main" in (tmp_path / "CLAUDE.md").read_text().splitlines()
+
+    def test_a_deleted_claude_md_is_still_committed(self, tmp_path: Path) -> None:
+        """No text means no marker: the marker check must not stop a deletion."""
+        from claude_code_hooks_daemon.core.claude_md_injector import ClaudeMdInjector
+
+        _init_git_repo(tmp_path)
+        (tmp_path / "CLAUDE.md").unlink()
+
+        ClaudeMdInjector._auto_commit_if_dirty(tmp_path / "CLAUDE.md")
+
+        status = subprocess.run(
+            ["git", "status", "--porcelain", "CLAUDE.md"],
+            cwd=tmp_path,
+            capture_output=True,
+            text=True,
+        )
+        assert status.stdout.strip() == ""
+
     def test_commit_message_flags_edits_from_outside_the_generated_block(
         self, tmp_path: Path
     ) -> None:

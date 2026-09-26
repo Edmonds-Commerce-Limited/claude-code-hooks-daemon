@@ -349,6 +349,28 @@ class TestWhatTheCommitRecords:
         assert result.decision == Decision.DENY
         assert "docs/page.md:2" in result.reason
 
+    def test_a_cd_earlier_in_the_command_names_the_repository(
+        self, handler: ConflictMarkerCommitGateHandler, repo: Path, tmp_path: Path
+    ) -> None:
+        elsewhere = _init(tmp_path / "elsewhere")
+        _stage(repo, "doc.md", f"# Doc\n\nfirst\n{CLOSE} main\n")
+        result = _verdict(handler, f"cd {repo} && git commit -m x", elsewhere)
+        assert result.decision == Decision.DENY
+
+    def test_a_relative_cd_resolves_against_the_cwd(
+        self, handler: ConflictMarkerCommitGateHandler, repo: Path
+    ) -> None:
+        _stage(repo, "doc.md", f"# Doc\n\nfirst\n{CLOSE} main\n")
+        result = _verdict(handler, f"cd {repo.name}; git commit -m x", repo.parent)
+        assert result.decision == Decision.DENY
+
+    def test_an_unresolvable_cd_leaves_the_directory_alone(
+        self, handler: ConflictMarkerCommitGateHandler, repo: Path
+    ) -> None:
+        _stage(repo, "doc.md", f"# Doc\n\nfirst\n{CLOSE} main\n")
+        result = _verdict(handler, "cd - && git commit -m x", repo)
+        assert result.decision == Decision.DENY
+
     def test_merge_continue_checks_the_index(
         self, handler: ConflictMarkerCommitGateHandler, repo: Path
     ) -> None:
