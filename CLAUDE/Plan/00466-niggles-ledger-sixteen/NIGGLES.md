@@ -26,6 +26,16 @@ over an edited skill, then check that `git status --porcelain` is empty.
 (The upgrade-scripts branch covers the directory in its snapshot, so a
 failed upgrade removes a copy it created.)
 
+**Remedied on `worktree-n466-n105`.** Added `/hooks-daemon-backups/` to
+`.claude/.gitignore` (the same file `install.py`'s `show_gitignore_instructions`
+reads as the client template — `daemon_dir / ".claude" / ".gitignore"` — so
+this one edit covers both the fresh-install template and this repository's own
+copy). Added a post-upgrade task for existing clients whose `.claude/.gitignore`
+predates the fix. RED test:
+`TestSkillRedeployLeavesCleanGitStatus` in
+`tests/claude_code_hooks_daemon/install/test_skills.py`, covering both a
+client-install layout and this dogfood repository's layout.
+
 ### N101 — `secret_file_guard` fails closed with `TooManyToEnumerateError` on ordinary `python3 - <<'EOF'` commands
 
 **Found by N38 fix round 11** (report `260926-n38-fix11-opus-5-5.md` on the
