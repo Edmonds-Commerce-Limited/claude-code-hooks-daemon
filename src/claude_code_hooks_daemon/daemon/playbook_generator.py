@@ -533,6 +533,10 @@ class PlaybookGenerator:
                     # 00319 Task 4.6). Emitted verbatim; unlike `tool_payload`
                     # there is no envelope to rebuild here.
                     "hook_input": test.hook_input,
+                    # Extra top-level event keys merged ALONGSIDE `tool_payload`
+                    # -- a declared precondition (e.g. `transcript_path`) the
+                    # payload itself cannot carry.
+                    "extra_hook_input": test.extra_hook_input,
                 }
                 result.append(test_dict)
                 test_number += 1
