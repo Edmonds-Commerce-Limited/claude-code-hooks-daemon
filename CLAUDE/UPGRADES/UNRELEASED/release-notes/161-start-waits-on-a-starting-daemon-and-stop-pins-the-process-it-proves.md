@@ -73,10 +73,24 @@
   `/var/run/../workspace` is `/workspace` when `/var/run` links to `/run`.
   The daemon's root is compared as written, never resolved: a link it
   named may have been re-pointed since, and a path from another mount
-  namespace means something else here. It matches the caller's root as
-  given or with the caller's symlinks resolved. So a daemon started
-  through a symlinked project path is stopped by a caller naming the same
-  path, as `init.sh` does, but not by one naming only the resolved path.
+  namespace means something else here.
+- **Symlinked projects.** Every launcher now names the project root with
+  its symlinks resolved: `init.sh`, the CLI, `bin/hooks-daemon`, the
+  install and upgrade scripts, and the skill's `daemon-cli.sh`. Before,
+  `init.sh` named it the way `pwd` spelt it, link and all, so for a
+  project reached through a symlink, `bin/hooks-daemon stop` and
+  `restart` refused the daemon a hook had started. The upgrade's stop was
+  refused silently, and the upgrade then reported success with the old
+  daemon still running. A daemon's root matches the caller's root as
+  given, with its symlinks resolved, or as the caller reached it before
+  resolving (`bin/hooks-daemon` and the scripts pass that on in
+  `CLAUDE_HOOKS_DAEMON_CALLER_ROOT`). The last is used only when it leads
+  to the same directory. So a daemon an older version started through the
+  link is stopped by a `stop`, `restart` or upgrade run through the same
+  link. A daemon naming a link that has since been pointed at another
+  directory is refused by a caller that reaches that directory any other
+  way. A caller that goes through the re-pointed link matches the
+  daemon's text, and the pid it signals is the one its own PID file names.
 - `stop`, `restart` and single-daemon enforcement open a pidfd for the
   process before they check its identity, and send every signal through
   it. A process id reused at any point after that can only make the
