@@ -3,6 +3,8 @@
 **Plan**: 00408
 **Audience**: client projects
 
+<!-- BLOCKED-EXAMPLE: the spellings below are what R-DAEMON-DIR-CD denies, quoted to announce it, not steps to run. -->
+
 `R-DAEMON-DIR-CD` now matches `pushd .claude/hooks-daemon` and `cd` with
 options before the path (`cd -- <path>`, `cd -P <path>`). It also matches
 quoting or an escape inside the path (`.claude/'hooks-daemon'`,

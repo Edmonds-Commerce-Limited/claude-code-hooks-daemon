@@ -310,11 +310,20 @@ class TestUpgradeSteeringVariables:
             "grep HOOKS_DAEMON_PYTHON scripts/upgrade.sh",
             "echo 'HOOKS_DAEMON_PYTHON=/x bash scripts/upgrade.sh'",
             'bash "$tmp" --project-root "$PWD" "$TARGET"',
-            "PATH=/opt/bin:$PATH bin/hooks-daemon status",
         ],
     )
     def test_allows_other_uses(self, handler: UpgradeApprovalGuardHandler, command: str) -> None:
         assert handler.matches(_bash(command)) is False, command
+
+    def test_allows_an_override_on_a_script_it_can_read(
+        self, handler: UpgradeApprovalGuardHandler, tmp_path: Path
+    ) -> None:
+        """A relative script is read against the hook's `cwd` (every real hook
+        input carries one); it is not the upgrade, so the override is fine."""
+        (tmp_path / "bin").mkdir()
+        (tmp_path / "bin" / "hooks-daemon").write_text('#!/bin/bash\nexec python -m cli "$@"\n')
+        command = "PATH=/opt/bin:$PATH bin/hooks-daemon status"
+        assert handler.matches(_bash(command, cwd=str(tmp_path))) is False
 
     def test_allows_an_override_on_a_script_that_is_not_the_upgrade(
         self, handler: UpgradeApprovalGuardHandler, tmp_path: Any
@@ -433,6 +442,48 @@ class TestSteeredRunOnAnUnresolvableScriptFailsClosed:
         result = handler.handle(hook_input)
         assert result.reason is not None
         assert result.reason.startswith(f"BLOCKED [{ENV_RULE_ID}]")
+
+    def test_a_steered_relative_script_with_no_cwd_is_denied(
+        self, handler: UpgradeApprovalGuardHandler
+    ) -> None:
+        """With no `cwd` in the hook input a relative path cannot be resolved,
+        which is the same "cannot tell" as an unreadable script."""
+        command = 'BASH_ENV=/tmp/evil.sh bash copy.sh "$p" "$d" "$v"'
+        assert handler.matches(_bash(command)) is True
+
+    def test_an_unsteered_relative_script_with_no_cwd_is_allowed(
+        self, handler: UpgradeApprovalGuardHandler
+    ) -> None:
+        assert handler.matches(_bash('bash copy.sh "$p" "$d" "$v"')) is False
+
+    def test_a_script_that_fails_to_open_is_reported_and_still_denied(
+        self,
+        handler: UpgradeApprovalGuardHandler,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """An OSError while reading the script is surfaced at WARNING, not
+        swallowed at debug, and a steered run of it still fails closed."""
+        script = tmp_path / "copy.sh"
+        script.write_text("#!/bin/bash\n")
+        real_open = Path.open
+
+        def _failing_open(self: Path, *args: Any, **kwargs: Any) -> Any:
+            if self == script:
+                raise OSError(5, "Input/output error", str(self))
+            return real_open(self, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "open", _failing_open)
+        command = f'BASH_ENV=/tmp/evil.sh bash {script} "$p" "$d" "$v"'
+
+        with caplog.at_level("WARNING"):
+            assert handler.matches(_bash(command)) is True
+
+        assert any(
+            record.levelname == "WARNING" and str(script) in record.getMessage()
+            for record in caplog.records
+        )
 
     def test_an_unresolvable_script_with_no_steering_is_still_allowed(
         self, handler: UpgradeApprovalGuardHandler

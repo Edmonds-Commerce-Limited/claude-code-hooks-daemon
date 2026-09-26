@@ -396,29 +396,14 @@ def _past_wrappers(words: list[str]) -> list[str]:
     return []
 
 
-def _script_carries_the_upgrade(script: Path) -> bool | None:
-    """Whether ``script`` is a copy of Layer 1 or 2; None when it cannot be read.
+def _script_carries_the_upgrade(script: Path) -> bool:
+    """Whether the file ``script`` is a copy of Layer 1 or 2.
 
-    ``script`` is a caller-supplied path (`check_eacces_safe_predicates`): a
-    raw ``is_file`` predicate raises ``PermissionError`` when an ancestor
-    directory is not traversable, and an uncaught raise here would crash
-    ``matches()`` for the whole handler, not just misjudge this one script.
-    Unreadable is answered as "not a file", the same outcome ``open()``
-    below already gives on any other read failure: the caller falls back to
-    judging by the command's own argument shape instead.
+    Raises ``OSError`` when it cannot be read; `_script_run_is_upgrade`
+    decides what "cannot tell" means for the command around it.
     """
-    if not path_is_file(script, unreadable_means=False):
-        return None
-    content: bytes | None
-    try:
-        with script.open("rb") as handle:
-            content = handle.read(_SCRIPT_READ_LIMIT)
-    except OSError as exc:
-        logger.debug("upgrade_approval_guard: cannot read %s (%s)", script, exc)
-        content = None
-    if content is None:
-        return None
-    return _UPGRADE_SCRIPT_SIGNATURE.encode() in content
+    with script.open("rb") as handle:
+        return _UPGRADE_SCRIPT_SIGNATURE.encode() in handle.read(_SCRIPT_READ_LIMIT)
 
 
 def _script_is_statically_unresolvable(script: str) -> bool:
@@ -447,28 +432,42 @@ def _script_run_is_upgrade(
     A script this handler can read AND resolve statically is judged by its
     content (every copy of Layer 1 and Layer 2 carries the handoff variable,
     whatever the file is named). Otherwise -- statically unresolvable
-    (`_script_is_statically_unresolvable`), or resolved but the READ failed --
-    a command that also carries a steering assignment counts as running the
+    (`_script_is_statically_unresolvable`), a relative path with no ``cwd``
+    to resolve it against, not a readable file, or a READ that failed -- a
+    command that also carries a steering assignment counts as running the
     upgrade outright: ``BASH_ENV`` runs inside Layer 2 before
     ``_sanitise_layer2_env`` ever gets a say, so "cannot tell" must not mean
-    "allow" once something is already steering it. A RELATIVE path this
-    handler never attempted to resolve (no ``cwd``) is a separate, pre-existing
-    gap -- not this fix's shape -- and keeps falling to the argument-shape
-    heuristic, the same as the unsteered case.
+    "allow" once something is already steering it. Unsteered, the command's
+    own argument shape decides.
+
+    ``path_is_file(..., unreadable_means=False)`` rather than a raw
+    ``is_file`` (`check_eacces_safe_predicates`): an untraversable ancestor
+    raises ``PermissionError`` there, which would crash ``matches()`` for the
+    whole handler rather than misjudge this one script.
     """
     if _script_is_statically_unresolvable(script):
-        if steered:
-            return True
-        return _UPGRADE_SHAPED_ARG_RE.search(" ".join(arguments)) is not None
+        return _cannot_tell_script(arguments, steered=steered)
     path = Path(script)
     if not path.is_absolute() and cwd is not None:
         path = Path(cwd) / path
-    if path.is_absolute():
-        carries = _script_carries_the_upgrade(path)
-        if carries is not None:
-            return carries
-        if steered:
-            return True
+    if not (path.is_absolute() and path_is_file(path, unreadable_means=False)):
+        return _cannot_tell_script(arguments, steered=steered)
+    try:
+        return _script_carries_the_upgrade(path)
+    except OSError as exc:
+        logger.warning(
+            "upgrade_approval_guard: cannot read %s to tell whether it is the upgrade (%s)",
+            path,
+            exc,
+        )
+        return _cannot_tell_script(arguments, steered=steered)
+
+
+def _cannot_tell_script(arguments: list[str], *, steered: bool) -> bool:
+    """The verdict on a script whose content cannot be judged: the upgrade
+    when anything steers the command, else whatever its arguments say."""
+    if steered:
+        return True
     return _UPGRADE_SHAPED_ARG_RE.search(" ".join(arguments)) is not None
 
 

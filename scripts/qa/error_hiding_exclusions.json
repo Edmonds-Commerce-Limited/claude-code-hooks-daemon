@@ -842,12 +842,6 @@
       "reason": "Plan 00200 Task 5.4: `if ! \"$venv_python\" --version > /dev/null 2>&1; then print_error \"Virtual environment Python failed to run...\"` -- exit code explicitly checked and a specific error printed on failure."
     },
     {
-      "file": "scripts/install/venv.sh",
-      "function": "install_package_editable",
-      "rule": "shell->/dev/null 2>&1",
-      "reason": "Plan 00200 Task 5.4: `if $pip_cmd > /dev/null 2>&1; then print_success ...` (quiet-mode branch) -- exit code explicitly checked; the non-quiet branch (same function) runs the command with output visible."
-    },
-    {
       "file": "scripts/qa/run_shell_check.sh",
       "lines": [
         21

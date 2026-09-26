@@ -478,7 +478,7 @@ class TestRemoteIdentity:
     @pytest.mark.parametrize(
         "url",
         [
-            "https://github.com/someone-else/claude-code-hooks-daemon.git",
+            "https://git.example/someone-else/claude-code-hooks-daemon.git",
             "https://evil.example/Edmonds-Commerce-Limited/claude-code-hooks-daemon.git",
             "/tmp/claude-code-hooks-daemon.git",
         ],
