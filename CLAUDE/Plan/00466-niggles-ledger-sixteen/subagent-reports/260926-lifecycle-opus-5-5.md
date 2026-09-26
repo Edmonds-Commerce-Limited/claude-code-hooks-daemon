@@ -1489,3 +1489,116 @@ copies of `c5b2befc8` (all this round's tests) and of main `44d1b1b3b`
     clean. `check_fail_open_inventory.py`: 39 scanned, 39 rows.
   - ruff, black, mypy and pyright: clean. shellcheck on `init.sh`: clean.
 - **Daemon**: restarted from the worktree; it reports `Daemon: RUNNING`.
+
+## Round 9b: a symlinked project's daemon stops (coordinator ruling)
+
+Code commit `2af36a9b5`, on `b95205856`; release note 161 in `9e984741b`.
+Main (`44d1b1b3b`) was already merged, so there was no merge. RED proofs
+ran on a `git archive` of `b95205856` under `untracked/scratch/red-9b/`.
+The acceptance test clones HEAD, so its RED run is the one made before
+the code commit.
+
+- **Launchers (ruling 1).** Found with grep for `--project-root`,
+  `daemon.cli` and the daemon-control helpers. Each now names the root
+  resolved:
+  - `init.sh` `start_daemon`: `--project-root "$physical_root"`
+    (`cd -P`). It returns 1 when the root cannot be resolved.
+    `PROJECT_PATH` itself is unchanged, because the recovery commands and
+    the argv liveness proof use it, and that proof already tries both
+    spellings.
+  - The CLI: `get_project_path` resolves, and the relaunch of a start
+    naming no root names that.
+  - `bin/hooks-daemon` and its template: already `cd -P`.
+  - `scripts/install/daemon_control.sh` (used by `upgrade_version.sh` and
+    `install_version.sh`): the new `_daemon_cli` passes
+    `--project-root "$(pwd -P)"` to `stop`, `start`, `status` and
+    `restart`. `--project-root` has been a global option since v2.2.0, so
+    the rollback's `restart_daemon_quick`, which runs old code, accepts it.
+  - The skill's `daemon-cli.sh` (both copies): `--project-root` resolved.
+  - Not launchers: `scripts/upgrade.sh` (Layer 1) stops by PID file and
+    never starts. `hooks_deploy.sh`, `venv.sh`, `install_version.sh` and
+    `upgrade.sh` pass `--project-root` only to subcommands that launch
+    nothing. `dummy-client-repo.sh` only stops.
+- **Logical root (ruling 2).** `bin/hooks-daemon` works out the root the
+  way the caller reached it (`cd -L` from its own unresolved path) and
+  passes it in `CLAUDE_HOOKS_DAEMON_CALLER_ROOT`. A wrapper reached
+  through a link to the wrapper itself passes an empty value, because its
+  own path says nothing about the project path. `daemon_control.sh`
+  passes `$PWD`, and `daemon-cli.sh` passes the `PROJECT_ROOT` it walked
+  up to.
+  - `cli.main` pops the variable onto `args.caller_logical_root`, so the
+    forked daemon does not carry it. The relaunch passes it on, and
+    `cmd_stop` gives it to `stop_verified_daemon(..., logical_root=)`.
+  - `root_names_project` adds it as a candidate only when it is absolute,
+    in normal form, and resolves to the caller's resolved root. The
+    daemon's text is compared, never resolved.
+  - Enforcement and `_serves_this_project` do not take it.
+- **Layer 1.** `upgrade.sh`'s `_is_project_daemon_pid` matched only
+  `PROJECT_ROOT` as given (the link path), so it would have missed every
+  daemon a current launcher starts. It now matches that root as given or
+  resolved.
+- **Socket (ruling 3).** The stop proof does not use the socket.
+- **Tests (all RED on `b95205856` unless noted):**
+  - `tests/integration/test_a_daemon_of_a_symlinked_project_is_stoppable.py`
+    uses real daemons, the real `init.sh` and the real wrapper, with the
+    project at `r/p` reached as `l/p`:
+    - `init.sh` names the resolved root (RED: link text).
+    - The wrapper stops, and restarts, an `init.sh`-started daemon, both
+      through the link and through the real path (RED: "is a daemon for
+      project root ..." and an aborted restart).
+    - A daemon started naming the link (the old-version shape) is stopped
+      through the link (RED).
+    - The new tree's wrapper, with the same PID file, refuses a daemon
+      whose link was re-pointed after launch. Another project's wrapper
+      is also refused. Both are guards: green before and after.
+    - The upgrade's `stop_daemon_safe` stops an `init.sh`-started daemon
+      and a link-text one. `restart_daemon_verified` replaces a link-text
+      one (RED: the old daemon survived while the restart reported
+      success).
+  - The acceptance fixture is reused:
+    `test_upgrade_through_a_link_replaces_a_daemon_naming_the_link` in
+    `tests/acceptance/test_install_sh_end_to_end.py` installs and upgrades
+    through the link while a link-text daemon runs. RED at `b95205856`:
+    "the upgrade left the old daemon (PID 444670) running". GREEN at
+    `2af36a9b5`, together with the two existing acceptance tests (3
+    passed).
+  - Unit tests:
+    - `root_names_project` with a logical root: proven, another tree, not
+      in normal form, relative.
+    - `stop_verified_daemon(logical_root=)` on real processes.
+    - The wrapper hands over the link (client install, and a relative
+      call from a logical `$PWD`), and nothing when reached through a
+      link to itself.
+    - `cli.main` pops the variable and the relaunch passes it on
+      (`test_cli_caller_logical_root.py`; RED: ImportError).
+    - Layer 1 stops a daemon naming either spelling (RED for the resolved
+      one) and leaves one naming a link since re-pointed.
+  - `test_cli_explicit_paths.py`'s structural check now pins the resolved
+    `--project-root`.
+- **Residual, for review 10.** A caller that goes through the re-pointed
+  link itself spells the daemon's text exactly, so under the ruling ("any
+  exact match proves it") the daemon is proven. The pid still comes from
+  this project's own PID file, so the case needs that file to name the
+  other tree's daemon (a reused pid). Closing it needs a kernel fact about
+  when the link was made, compared with the process's start. Through
+  psutil that start time is only as precise as `/proc/stat`'s
+  whole-second boot time, so I did not build it. Release note 161 states
+  the case.
+- **GREEN**:
+  - `tests/unit/install/`, `tests/unit/daemon/`, `test_safe_signal.py`,
+    `test_audit_shell.py`, `tests/unit/scripts/` and the daemon-control,
+    upgrade, skill-script and wrapper integration suites: 4453 passed and
+    1 failed (`test_init_sh_passes_project_root_to_cli`, the structural
+    check above), since fixed.
+  - `init.sh` suites (`test_init_sh_*.py`, the round 8b and fail-closed
+    suites, CI passthrough, the new file): 407 passed. Start and restart
+    suites (parallel reuse, slow init, restart safety, stop flow): 33
+    passed. The changed test files after lint: 1600 passed. Acceptance:
+    3 passed.
+  - `relay/build.sh` built clean; `relay/test_relay.py` 13/13.
+  - semgrep: clean. `check_signal_targets.py`: clean (2073 files).
+    `check_fail_open_inventory.py`: 39/39.
+  - ruff, black, mypy and pyright: clean on touched files. shellcheck on
+    the touched scripts reports only the SC1091 infos already present on
+    unchanged `source` lines.
+- **Daemon**: restarted from the worktree; it reports `Daemon: RUNNING`.
