@@ -248,8 +248,17 @@ class TestTheReviewExamplesAgainstThisRepository:
     @pytest.mark.parametrize(
         "path",
         [
-            "CLAUDE/Plan/00466-niggles-ledger-sixteen/NIGGLES.md",
-            "CLAUDE/Plan/00466-niggles-ledger-sixteen/JOURNAL/00466-Journal-26-09-24.md",
+            # A non-existent, invented plan number: the corpus does not need
+            # the file to exist to judge it, and a real open ledger's path
+            # eventually gets cited by an unrelated fix's rationale comment
+            # ("see NIGGLES.md N46 for why") -- a legitimate practice this
+            # project uses elsewhere -- which the mapper (rightly, for its
+            # general purpose) then reads as a real dependency, pulling in
+            # that citing module's own tests and flipping the verdict to
+            # tested. An invented plan number no source will ever cite stays
+            # docs-only regardless of what other plans' ledgers accumulate.
+            "CLAUDE/Plan/00000-example-ledger-for-tests/NIGGLES.md",
+            "CLAUDE/Plan/00000-example-ledger-for-tests/JOURNAL/00000-Journal-26-01-01.md",
         ],
     )
     def test_a_ledger_or_journal_entry_is_docs_only(

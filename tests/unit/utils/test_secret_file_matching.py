@@ -1455,12 +1455,37 @@ class TestInteriorWildcardDpIsBounded:
     def test_a_lone_long_star_run_collapses_to_near_zero_cost(self) -> None:
         """Collapsing repeated '*' is language-preserving (``a**b`` and
         ``a*b`` match the same set) and removes the dominant cost driver
-        directly, independent of the budget cap."""
-        token = "a" + "*" * 60_000 + "a"
-        start = time.perf_counter()
-        sfm.find_protected_mention_detail(f"cat {token}", sfm.DEFAULT_PROTECTED_PATTERNS)
-        elapsed = time.perf_counter() - start
-        assert elapsed < 0.1, f"took {elapsed:.3f}s"
+        directly, independent of the budget cap.
+
+        Measured as a ratio against an equivalent single-star token rather
+        than an absolute wall-clock budget: collapsing makes the two cost
+        the same regardless of how loaded the host running the test is, so
+        an absolute-second bound flakes under contention (a shared host
+        running many worktrees' gates at once) without the DP cost bound
+        having regressed at all. The min of several trials on each side
+        approximates the uncontended cost of both (contention only ever
+        adds delay), keeping the ratio meaningful even when the host is
+        busy; an actual O(n) or worse regression on the long token would
+        blow the ratio by orders of magnitude, not nudge it.
+        """
+
+        def elapsed_for(token: str) -> float:
+            start = time.perf_counter()
+            sfm.find_protected_mention_detail(f"cat {token}", sfm.DEFAULT_PROTECTED_PATTERNS)
+            return time.perf_counter() - start
+
+        baseline = min(elapsed_for("a*a") for _ in range(5))
+        long_token = "a" + "*" * 60_000 + "a"
+        long_elapsed = min(elapsed_for(long_token) for _ in range(5))
+        # The floor absorbs the constant-factor cost of handling a 60 KB
+        # string at all (regex substitution, tokenising) that a 3-byte
+        # baseline never pays and the ratio alone cannot account for; the
+        # ratio term is what actually catches a collapse regression, since
+        # an uncollapsed run would cost orders of magnitude more, not a
+        # fraction more, once the DP grid scales with the star count.
+        assert long_elapsed < max(
+            baseline * 20, 0.05
+        ), f"long={long_elapsed:.4f}s baseline={baseline:.4f}s"
 
     def test_scan_deadline_denies_via_the_fail_closed_route(self) -> None:
         """The whole-scan deadline is a backstop: forcing an artificially
