@@ -1,6 +1,6 @@
 # Callout: the skill-rescue backup directory is now gitignored
 
-**Plan**: 00466 (N105)
+**Plan**: 00466
 **Audience**: client projects
 
 `install/skills.py`'s `_preserve_replaced_skill` moves a deployed skill that
