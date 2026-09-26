@@ -136,6 +136,8 @@ Full write-ups are in [NIGGLES.md](NIGGLES.md). One line each here:
 | N109 | The pending release-notes holding area mis-sorts past 99 callouts                                              | Coordinator                                                     | ✅ Remedied                      |
 | N110 | The local full QA gate tests one Python version, so a version-specific defect passes it and fails CI           | N106 fixer                                                      | ⬜ Open                          |
 | N126 | The relay's PreToolUse deny has no recovery carve-out, so a wedged daemon denies its own restart               | Lifecycle batch (N67)                                           | ✅ Remedied                      |
+| N127 | The recovery exemption strips control characters, not just spaces                                              | Lifecycle D-RULE review (S1)                                    | ✅ Remedied                      |
+| N128 | Stop and the stale-PID checks delete a successor's PID file and socket                                         | Lifecycle D-PATH review (S2)                                    | ✅ Remedied                      |
 
 ## Tasks
 

@@ -843,6 +843,21 @@ def _signal_proven_pid(pid: int, pidfd: int | None, sig: int) -> None:
     os.kill(pid, sig)
 
 
+def _release_stopped_daemon_files(pid: int, pid_path: Path, socket_path: Path) -> None:
+    """Remove a stopped daemon's PID file and socket, but nothing a successor owns.
+
+    A daemon started while this one was stopping (a concurrent hook's
+    ``ensure_daemon``) writes its own pid and binds its own socket at the
+    same paths (Plan 00466 round 2, S2). The PID file goes only while it
+    still holds ``pid``; the socket only on a DEFINITIVE not-live probe.
+    """
+    cleanup_pid_file(str(pid_path), pid)
+    if _socket_liveness_sync(Path(socket_path)) is _SocketLiveness.NOT_LIVE:
+        cleanup_socket(str(socket_path))
+    else:
+        logger.info("Socket %s is not provably dead; leaving it", socket_path)
+
+
 def cmd_stop(args: argparse.Namespace) -> int:
     """Stop running daemon.
 
@@ -928,8 +943,7 @@ def cmd_stop(args: argparse.Namespace) -> int:
             except ProcessLookupError:
                 # Process exited successfully
                 print("Daemon stopped")
-                cleanup_pid_file(str(pid_path))
-                cleanup_socket(str(socket_path))
+                _release_stopped_daemon_files(pid, pid_path, socket_path)
                 return 0
 
             # SIGTERM's grace period elapsed and the process is still alive --
@@ -957,8 +971,7 @@ def cmd_stop(args: argparse.Namespace) -> int:
                 _signal_proven_pid(pid, pidfd, signal.SIGKILL)
             except ProcessLookupError:
                 print("Daemon stopped")
-                cleanup_pid_file(str(pid_path))
-                cleanup_socket(str(socket_path))
+                _release_stopped_daemon_files(pid, pid_path, socket_path)
                 return 0
 
             kill_timeout = Timeout.DAEMON_SIGKILL_GRACE
@@ -981,8 +994,7 @@ def cmd_stop(args: argparse.Namespace) -> int:
                 return 1
             except ProcessLookupError:
                 print("Daemon stopped")
-                cleanup_pid_file(str(pid_path))
-                cleanup_socket(str(socket_path))
+                _release_stopped_daemon_files(pid, pid_path, socket_path)
                 return 0
 
         except ProcessLookupError:

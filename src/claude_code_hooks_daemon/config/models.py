@@ -1562,6 +1562,8 @@ class TransportConfig(BaseModel):
         timeout_seconds: Relay ``--timeout-ms`` source (converted at deploy
             time); also the ``nc -w`` budget. Mirrors the python3 transport's
             30s default (``CLAUDE_HOOKS_SOCKET_TIMEOUT`` keeps overriding it).
+            At most ``Timeout.RELAY_TIMEOUT_CAP``, so the relay's wait and
+            its hand-off end before the hook timeout.
         relay_binary: Absolute-path override for the relay binary. ``None``
             means ``{untracked}/bin/hooks-relay``. EXEMPT from the
             repository-relative rule (Plan 00303): like a system binary
@@ -1606,6 +1608,27 @@ class TransportConfig(BaseModel):
             "relay_enabled."
         ),
     )
+
+    @field_validator("timeout_seconds")
+    @classmethod
+    def timeout_fits_the_hook_timeout(cls, value: int) -> int:
+        """Reject a relay wait that could outlast the hook (Plan 00466 N126 F3).
+
+        A failed PreToolUse exchange is handed to the forwarder after the
+        relay's wait, and Claude Code cancels the hook at its registered
+        timeout, which lets the tool call run unjudged.
+        """
+        if value > Timeout.RELAY_TIMEOUT_CAP:
+            raise ValueError(
+                f"timeout_seconds={value} is too long: it must be at most "
+                f"{Timeout.RELAY_TIMEOUT_CAP}. The relay waits this long for the daemon, "
+                f"then may take up to {Timeout.RELAY_HANDOFF_BUDGET}s handing a failed "
+                f"PreToolUse call to the forwarder, and {Timeout.RELAY_HOOK_TIMEOUT_MARGIN}s "
+                "is kept for start-up and the answer. Claude Code cancels the hook at the "
+                f"{Timeout.REGISTERED_HOOK_TIMEOUT}s hook timeout the daemon registers, and a "
+                "cancelled PreToolUse hook lets the call run unjudged."
+            )
+        return value
 
     @property
     def per_event_sockets_needed(self) -> bool:

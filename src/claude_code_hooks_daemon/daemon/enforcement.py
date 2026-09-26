@@ -104,4 +104,4 @@ def enforce_single_daemon(
         pid_from_file = read_pid_file(str(pid_path))
         if pid_from_file is not None and not is_process_running(pid_from_file):
             logger.info(f"Cleaning up stale PID file: {pid_path} (PID {pid_from_file})")
-            cleanup_pid_file(str(pid_path))
+            cleanup_pid_file(str(pid_path), pid_from_file)

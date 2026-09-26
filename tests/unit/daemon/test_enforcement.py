@@ -102,7 +102,7 @@ class TestEnforceSingleDaemon:
             enforce_single_daemon(config=mock_config, pid_path=pid_path)
 
         # Should clean up stale PID file
-        mock_cleanup.assert_called_once_with(str(pid_path))
+        mock_cleanup.assert_called_once_with(str(pid_path), stale_pid)
 
     def test_enforcement_disabled_in_non_container(self) -> None:
         """Outside container with enforcement enabled, uses conservative cleanup."""

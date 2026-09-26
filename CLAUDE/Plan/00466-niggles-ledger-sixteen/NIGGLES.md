@@ -3,6 +3,48 @@
 Newest first. Each entry says how it was found, why it happens, and the
 candidate remedies.
 
+### N128 — ✅ Remedied — Stop and the stale-PID checks delete a successor's PID file and socket
+
+**Found by the lifecycle batch's D-PATH review (S2), on main as well.**
+After an observed exit, `cmd_stop` called `cleanup_pid_file` and
+`cleanup_socket`, which unlinked unconditionally. `read_pid_file` removed a
+PID file whose pid was dead or not a daemon, and `init.sh`'s
+`is_daemon_running` ran `rm -f "$PID_PATH"` whenever `kill -0` failed. A
+successor started in between by a concurrent hook's `ensure_daemon` writes
+its own pid and binds its own socket at the same paths, so each of these
+could orphan a live daemon and let a second one start.
+
+**Remedied (lifecycle batch, round 2):**
+
+- `cleanup_pid_file(path, pid)` now requires the pid and removes the file
+  only while it still holds it; a file naming another pid, or no readable
+  pid, is left. `read_pid_file` and `enforcement` use it.
+- `cmd_stop`'s three cleanups go through `_release_stopped_daemon_files`,
+  which removes the socket only on a definitive `NOT_LIVE` probe
+  (`_socket_liveness_sync`), never on `LIVE` or `INDETERMINATE`.
+- `is_daemon_running` re-reads the PID file and removes it only while it
+  still names the pid it found dead, without a new stderr suppression.
+
+RED: `TestCmdStopCleansUpOnlyWhatItStillOwns` (a real successor socket and
+PID file written when the exit is observed), two `read_pid_file` successor
+tests and two `cleanup_pid_file` ownership tests in `test_paths.py`, and
+`TestIsDaemonRunningRemovesOnlyItsOwnStalePidFile` (a successor write inside
+the `kill -0` probe). Release note 152.
+
+### N127 — ✅ Remedied — The recovery exemption strips control characters, not just spaces
+
+**Found by the lifecycle batch's D-RULE review (S1), on main as well.** The
+carve-out compared `command.strip()` with the exempt text. `str.strip()`
+also removes vertical tab, form feed, the file/group/record/unit
+separators, NEL and the Unicode line separators, so `bin/hooks-daemon restart` with `\x1c` appended was exempt while bash handed the launcher the
+argument `restart\x1c`. A leading or trailing newline was exempt too.
+
+**Remedied (lifecycle batch, round 2):** the command is compared raw with
+only spaces and tabs stripped (`_RECOVERY_PADDING`), and anything that is
+not printable after that is rejected. RED:
+`TestRecoveryCommandTextMatchesExactly`, 13 control-character cases against
+the round-1 `init.sh`. Release note 150.
+
 ### N126 — ✅ Remedied — The relay's PreToolUse deny has no recovery carve-out, so a wedged daemon denies its own restart
 
 **Found by the lifecycle batch while fixing N67.** `init.sh` exempts the exact
@@ -44,6 +86,42 @@ writes its own deny. Setting the variable by hand can only deny. RED against
 `TestARelayHandOffIsJudgedWithoutAskingTheDaemonAgain`. The two
 fail-closed hand-off tests fail when a scratch relay's answer check is
 mutated away. Release note 153.
+
+**Remedied (lifecycle batch, round 2, from the D-RULE and D-PATH reviews):**
+
+- **F1, the hand-off reached fail-open states.** The relay runs the whole
+  forwarder, and its `ensure_daemon` could diagnose NOT_INSTALLED,
+  VENV_MISSING, VERSION_MISMATCH or CI passthrough, each of which allowed
+  the call the relay had already failed. Under a hand-off, `ensure_daemon`
+  now returns at once (no start, no diagnosis), and `emit_hook_error`
+  shadows every state flag and treats an unnamed event as the PreToolUse
+  call it is. The only outcomes are the carve-out's allow and a deny.
+  `TestARelayHandOffReachesOnlyTheCarveOut` covers seven forced states;
+  14 of its cases fail against the round-1 `init.sh`, and removing either
+  half in a scratch copy fails its own cases.
+- **F2 and the D-PATH note, the relay trusted any exit-0 output.** It now
+  delivers the forwarder's answer only when a strict parser (`JsonParser`,
+  std only) reads one complete document that is a PreToolUse deny with a
+  reason or the carve-out's context-only answer, with no unknown field,
+  duplicate key or invalid UTF-8. `{}`, truncated JSON, an allow and
+  everything else get the relay's own deny. RED: 20 shapes in
+  `TestTheRelayAcceptsOnlyAVerdictFromTheHandOff` against a relay built
+  from the round-1 source.
+- **F3 and m2, no hand-off deadline.** The hand-off has its own 10 s
+  deadline (`HANDOFF_TIMEOUT_MS`), after which the relay stops the forwarder
+  and denies. `transport.timeout_seconds` is capped at 45
+  (`Timeout.RELAY_TIMEOUT_CAP`): the relay wait, the hand-off and a 5 s
+  margin stay under the 60 s PreToolUse hook timeout the daemon registers
+  (`Timeout.REGISTERED_HOOK_TIMEOUT`, now the source of
+  `hook_registration`'s value). The vendored Claude Code hooks docs confirm
+  a timed-out PreToolUse command hook lets the call continue. The validator
+  says why when it rejects a value. Tests pin the arithmetic, the Rust twin
+  constant and the validator; one behavioural test runs a forwarder that
+  never exits (RED: it hung past the subprocess bound on the round-1 relay).
+- The relay's own deny names the project's launcher by absolute path,
+  byte-identical to `init.sh`'s (see N67 round 2).
+
+Release note 153.
 
 ### N109 — ✅ Remedied — the pending release-notes holding area mis-sorts past 99 callouts
 
@@ -1287,6 +1365,16 @@ install yet.
   removed denies;
 - or an install-command carve-out instead of the fail-open.
 
+**Further evidence (lifecycle batch reviews, left for this decision):**
+
+- **D-PATH S1:** a moved or missing checkout makes the settings command
+  `bash "$CLAUDE_PROJECT_DIR"/.claude/hooks/pre-tool-use` exit 127. Claude
+  Code treats that as a non-blocking error, so the call proceeds unjudged.
+- **D-RULE S2:** the NOT_INSTALLED, VENV_MISSING, VERSION_MISMATCH and
+  CI-passthrough states fail open for every PreToolUse call. A relay
+  hand-off can no longer reach them (N126 round 2, F1), but every other
+  call in those states still can.
+
 ### N67 — ✅ Remedied — The daemon-down repair carve-out trusts the command text, not the binary it runs
 
 **Found by N24 review 4 (mi-A).** While the daemon is unreachable, PreToolUse
@@ -1315,6 +1403,31 @@ from the project root. RED, proven against `HEAD`'s `init.sh` in a
 (`test_init_sh_pretooluse_fail_closed.py`), plus a planted-launcher test on
 the `emit_hook_error` path in `test_emit_hook_error_jqless.py` and in
 `test_ci_passthrough.py`. Release note 150.
+
+**Round 2 (lifecycle batch, from the D-RULE and D-PATH reviews):**
+
+- **`repair` joins the recovery set** (coordinator ruling, on both
+  reviewers' recommendation), under the same exact-match and launcher rule.
+  It fixes a venv that exists but cannot import the package, which
+  `restart` cannot.
+- **m1, no exempt spelling outside the project root.** The project's own
+  launcher by absolute path, shell-quoted exactly as `_recovery_command`
+  prints it, is exempt from any `cwd`. An unquoted path that bash would
+  split is not. Every deny (the transport's, `emit_hook_error`'s and the
+  relay's own) now names that absolute command, and `repair` beside it.
+- **m3, exported functions read an unexported variable.** The recovery
+  source is now the exported function `_hooks_daemon_recovery_py`, which
+  assigns it to a variable its caller names (no fork on the hot path).
+  `start_daemon` un-exports it inside the launch subshell, so it stays out
+  of the daemon's environment, as does the N126 variable. A child shell
+  that never sourced `init.sh` now applies the carve-out instead of
+  raising NameError and writing no JSON.
+
+RED against the round-1 `init.sh`: `TestRepairIsARecoveryCommand`,
+`TestTheAbsoluteLauncherIsExemptFromAnyDirectory` and
+`TestExportedFunctionsCarryTheirOwnRecoverySource`. The daemon-environment
+test fails when the un-export is removed from a scratch copy. Release
+note 150.
 
 ### N66 — Two singleton race tests depend on `time.sleep(0.02)`, so they can pass without the race happening
 

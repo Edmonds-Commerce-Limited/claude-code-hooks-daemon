@@ -42,6 +42,7 @@ from pathlib import Path
 import pytest
 
 from claude_code_hooks_daemon.config.models import TransportConfig
+from claude_code_hooks_daemon.constants import Timeout
 from claude_code_hooks_daemon.daemon.paths import _get_hostname_suffix
 from claude_code_hooks_daemon.daemon.synthetic_traffic import (
     PROBE_AS_FIELD,
@@ -458,6 +459,180 @@ class TestRelayMidExchangeFailureIsJudgedByTheOneCarveOut:
         result = _run_relay(wedged_pretooluse_socket, payload, "--fallback", str(recorder))
         assert result.returncode == 0, result.stderr.decode()
         assert recorded.read_bytes() == payload
+
+
+def _answering_fallback(tmp_path: Path, answer: bytes) -> Path:
+    """A fallback that drains stdin, writes ``answer`` and exits 0."""
+    answer_file = tmp_path / "answer.bin"
+    answer_file.write_bytes(answer)
+    script = tmp_path / "answering.sh"
+    script.write_text(f'#!/bin/bash\ncat > /dev/null\ncat "{answer_file}"\n')
+    script.chmod(0o755)
+    return script
+
+
+def _relays_own_deny(result: subprocess.CompletedProcess[bytes]) -> bool:
+    assert result.returncode == 0, result.stderr.decode()
+    hso = json.loads(result.stdout)["hookSpecificOutput"]
+    return bool(
+        hso["permissionDecision"] == "deny"
+        and hso["permissionDecisionReason"].startswith("BLOCKED [transport-fail-closed]")
+    )
+
+
+def _hso(**fields: str) -> bytes:
+    return json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse", **fields}}).encode()
+
+
+@pytest.mark.skipif(not _RELAY_BINARY.exists(), reason="no built relay binary on this machine")
+class TestTheRelayAcceptsOnlyAVerdictFromTheHandOff:
+    """Plan 00466 N126 round 2 (F2): the relay took any non-empty exit-0
+    output from the forwarder as the verdict, so ``{}``, truncated JSON or a
+    shape Claude Code ignores became an allow where the relay would have
+    denied. It now accepts only a complete PreToolUse document that is a
+    deny with a reason, or the carve-out's context-only answer; anything
+    else gets the relay's own deny."""
+
+    @pytest.mark.parametrize(
+        "answer",
+        [
+            b"{}",
+            b"{}\n",
+            b'{"hookSpecificOutput": {"hookEventName": "PreToolUse", "additionalCon',
+            b'{"hookSpecificOutput": {"hookEventName": "PreToolUse"}}',
+            b'{"systemMessage": "fail-open advisory"}',
+            b"[]",
+            b"null",
+            b'"deny"',
+            _hso(permissionDecision="allow"),
+            _hso(permissionDecision="ask", permissionDecisionReason="r"),
+            _hso(permissionDecision="deny"),
+            _hso(permissionDecision="deny", permissionDecisionReason="r") + b"{}",
+            _hso(additionalContext="c", permissionDecisionReason="r"),
+            _hso(additionalContext="c", continue_="x"),
+            json.dumps(
+                {"hookSpecificOutput": {"hookEventName": "PostToolUse", "additionalContext": "c"}}
+            ).encode(),
+            json.dumps(
+                {"hookSpecificOutput": {"hookEventName": "PreToolUse"}, "decision": "approve"}
+            ).encode(),
+            b'{"hookSpecificOutput": {"hookEventName": "PreToolUse", "additionalContext": "a",'
+            b' "additionalContext": "b"}}',
+            b'{"hookSpecificOutput": {"hookEventName": "PreToolUse", "additionalContext": "\\ud800"}}',
+            b'{"hookSpecificOutput": {"hookEventName": "PreToolUse", "additionalContext": "\xff"}}',
+            b'{"hookSpecificOutput": {"hookEventName": "PreToolUse", "additionalContext": "a\nb"}}',
+        ],
+    )
+    def test_anything_but_a_verdict_gets_the_relays_own_deny(
+        self, tmp_path: Path, wedged_pretooluse_socket: Path, answer: bytes
+    ) -> None:
+        fallback = _answering_fallback(tmp_path, answer)
+        result = _run_relay(
+            wedged_pretooluse_socket,
+            _bash_call("bin/hooks-daemon restart", tmp_path),
+            "--fallback",
+            str(fallback),
+        )
+        assert _relays_own_deny(result), result.stdout
+
+    @pytest.mark.parametrize(
+        "answer",
+        [
+            _hso(
+                permissionDecision="deny",
+                permissionDecisionReason='judged \N{LATIN SMALL LETTER E WITH ACUTE} \\ "q"',
+            ),
+            _hso(
+                permissionDecision="deny",
+                permissionDecisionReason="judged",
+                additionalContext="context",
+            ),
+            _hso(additionalContext="carve-out: the project's own restart"),
+            b'  {"hookSpecificOutput" : {"additionalContext": "\\u00e9\\ud83d\\ude00",'
+            b' "hookEventName": "PreToolUse"}}\n',
+        ],
+    )
+    def test_a_verdict_passes_through_byte_for_byte(
+        self, tmp_path: Path, wedged_pretooluse_socket: Path, answer: bytes
+    ) -> None:
+        fallback = _answering_fallback(tmp_path, answer)
+        result = _run_relay(
+            wedged_pretooluse_socket,
+            _bash_call("bin/hooks-daemon restart", tmp_path),
+            "--fallback",
+            str(fallback),
+        )
+        assert result.returncode == 0, result.stderr.decode()
+        assert result.stdout == answer
+
+    def test_a_fallback_that_never_finishes_gets_the_relays_own_deny(
+        self, tmp_path: Path, wedged_pretooluse_socket: Path
+    ) -> None:
+        """F3: the hand-off has its own deadline. Without one, a forwarder
+        that hangs holds the hook until Claude Code cancels it, and a
+        cancelled PreToolUse hook lets the call run unjudged."""
+        hanging = tmp_path / "hanging.sh"
+        hanging.write_text("#!/bin/bash\ncat > /dev/null\nexec sleep 3600\n")
+        hanging.chmod(0o755)
+        result = subprocess.run(
+            [
+                str(_RELAY_BINARY),
+                str(wedged_pretooluse_socket),
+                "--timeout-ms",
+                "500",
+                "--fallback",
+                str(hanging),
+            ],
+            input=_bash_call("bin/hooks-daemon restart", tmp_path),
+            capture_output=True,
+            timeout=Timeout.REGISTERED_HOOK_TIMEOUT,
+        )
+        assert _relays_own_deny(result), result.stdout
+
+
+@pytest.mark.skipif(not _RELAY_BINARY.exists(), reason="no built relay binary on this machine")
+class TestTheRelaysOwnDenyNamesTheAbsoluteLauncher:
+    """Plan 00466 round 2 (m1): the relay's own deny names the same exempt
+    command ``init.sh``'s denies do, the project's launcher by absolute path,
+    so it can be run from any directory."""
+
+    def _own_deny_reason(self, project: Path, wedged: Path) -> str:
+        hooks = project / ".claude" / "hooks"
+        hooks.mkdir(parents=True, exist_ok=True)
+        failing = hooks / "pre-tool-use"
+        failing.write_text("#!/bin/bash\ncat > /dev/null\nexit 3\n")
+        failing.chmod(0o755)
+        result = _run_relay(wedged, _bash_call("true", project), "--fallback", str(failing))
+        assert _relays_own_deny(result), result.stdout
+        reason: str = json.loads(result.stdout)["hookSpecificOutput"]["permissionDecisionReason"]
+        return reason
+
+    def _init_sh_command(self, project: Path) -> str:
+        shutil.copy(_INIT_SH, project / ".claude" / "init.sh")
+        result = subprocess.run(
+            ["bash", "-c", "source .claude/init.sh; _hooks_daemon_recovery_command restart"],
+            cwd=project,
+            capture_output=True,
+            text=True,
+            timeout=_TIMEOUT_SECONDS,
+            check=True,
+        )
+        return result.stdout.strip()
+
+    @pytest.mark.parametrize(
+        "launcher", ["bin/hooks-daemon", ".claude/hooks-daemon/bin/hooks-daemon"]
+    )
+    @pytest.mark.parametrize("dirname", ["proj", "with space"])
+    def test_it_names_the_command_init_sh_names(
+        self, tmp_path: Path, wedged_pretooluse_socket: Path, launcher: str, dirname: str
+    ) -> None:
+        project = tmp_path / dirname
+        (project / launcher).parent.mkdir(parents=True)
+        (project / launcher).write_text("#!/bin/bash\n")
+        reason = self._own_deny_reason(project, wedged_pretooluse_socket)
+        command = self._init_sh_command(project)
+        assert command.endswith(" restart") and str(project) in command, command
+        assert f"run: {command}" in reason, reason
 
 
 # ---------------------------------------------------------------------------

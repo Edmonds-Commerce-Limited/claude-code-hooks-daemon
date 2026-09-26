@@ -48,6 +48,22 @@ class Timeout:
     REQUEST_DEFAULT = 30  # 30 seconds (client request timeout)
     REQUEST_LONG = 60  # 1 minute (for long-running requests)
 
+    # The `timeout` the daemon registers in settings.json for its PreToolUse
+    # and PostToolUse hooks (seconds). Claude Code cancels a command hook at
+    # it, and a cancelled PreToolUse hook lets the tool call run unjudged.
+    REGISTERED_HOOK_TIMEOUT = 60
+    # Plan 00466 N126 round 2 (F3): how long hooks-relay waits for the
+    # forwarder it hands a failed PreToolUse exchange to (seconds). Twin of
+    # HANDOFF_TIMEOUT_MS in relay/hooks_relay.rs. A hand-off never starts or
+    # asks the daemon, so this bounds a bash start-up and one python3 check.
+    RELAY_HANDOFF_BUDGET = 10
+    # Headroom left under REGISTERED_HOOK_TIMEOUT after the relay's wait and
+    # its hand-off, for process start-up and writing the answer (seconds).
+    RELAY_HOOK_TIMEOUT_MARGIN = 5
+    # The most `transport.timeout_seconds` may be: the relay's wait plus its
+    # hand-off plus the margin must end before Claude Code cancels the hook.
+    RELAY_TIMEOUT_CAP = REGISTERED_HOOK_TIMEOUT - RELAY_HANDOFF_BUDGET - RELAY_HOOK_TIMEOUT_MARGIN
+
     # Hook dispatch timeouts (milliseconds)
     HOOK_DISPATCH = 5_000  # 5 seconds (max time for single handler)
     HOOK_TOTAL = 30_000  # 30 seconds (max time for all handlers in chain)

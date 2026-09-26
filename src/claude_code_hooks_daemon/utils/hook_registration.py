@@ -20,6 +20,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from claude_code_hooks_daemon.constants.events import EventID, wired_event_metas
+from claude_code_hooks_daemon.constants.timeout import Timeout
 
 # ---------------------------------------------------------------------------
 # Single source of truth: expected hook events in settings.json
@@ -336,7 +337,7 @@ _HOOK_COMMAND_KEY = "command"
 HOOK_COMMAND_TEMPLATE = 'bash "$CLAUDE_PROJECT_DIR"/.claude/hooks/{bash_key}'
 # The `bash ` lead-in, shared with the migrator's already-migrated check.
 BASH_INVOCATION_PREFIX = "bash "
-_DEFAULT_HOOK_TIMEOUT_SECONDS = 60
+_DEFAULT_HOOK_TIMEOUT_SECONDS = Timeout.REGISTERED_HOOK_TIMEOUT
 # PreToolUse / PostToolUse carry an explicit per-invocation timeout; all other
 # forwarders use Claude Code's default. Kept in lockstep with install.py's
 # ``_HOOKS_WITH_TIMEOUT`` via the shared EventID bash_keys.

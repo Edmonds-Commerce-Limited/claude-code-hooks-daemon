@@ -2019,16 +2019,14 @@ def read_pid_file(pid_path: Path | str, verify_daemon: bool = False) -> int | No
 
         if not is_pid_alive(pid):
             # Stale PID file, clean it up
-            with contextlib.suppress(Exception):
-                pid_path.unlink()
+            cleanup_pid_file(pid_path, pid)
             return None
 
         if verify_daemon and not is_daemon_pid(pid):
             # Alive but NOT our daemon (PID reuse / stale file): treat as not
             # running and remove the misleading PID file.
             logger.debug("PID %d in %s is alive but is not a daemon server", pid, pid_path)
-            with contextlib.suppress(Exception):
-                pid_path.unlink()
+            cleanup_pid_file(pid_path, pid)
             return None
 
         return pid
@@ -2072,17 +2070,27 @@ def cleanup_socket(socket_path: Path | str) -> None:
         logger.error("Unexpected error cleaning socket %s: %s", socket_path, e, exc_info=True)
 
 
-def cleanup_pid_file(pid_path: Path | str) -> None:
+def cleanup_pid_file(pid_path: Path | str, pid: int) -> None:
     """
-    Remove PID file if it exists.
+    Remove the PID file only while it still holds ``pid``.
+
+    A daemon started after ``pid`` was found gone writes its own pid here,
+    and removing that file would orphan the live successor (Plan 00466
+    round 2, S2). A file that names another pid, or no readable pid, is left.
 
     Args:
         pid_path: Path to PID file (Path object or string)
+        pid: The pid the caller found stopped or stale
     """
     try:
         pid_path = Path(pid_path)
-        if pid_path.exists():
-            pid_path.unlink()
+        if not pid_path.exists():
+            return
+        held = pid_path.read_text().strip()
+        if held != str(pid):
+            logger.debug("PID file %s now holds %r, not %d; leaving it", pid_path, held, pid)
+            return
+        pid_path.unlink()
     except (OSError, PermissionError) as e:
         logger.warning("Failed to cleanup PID file %s: %s", pid_path, e)
     except Exception as e:

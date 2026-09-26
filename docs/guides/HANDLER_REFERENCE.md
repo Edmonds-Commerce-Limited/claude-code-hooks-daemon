@@ -125,7 +125,7 @@ daemon:
   transport:
     relay_enabled: false # rung 1: exec the static Rust relay binary (opt-in)
     nc_enabled: false # rung 2: bash `nc -U` path, tried before python3 (opt-in)
-    timeout_seconds: 30 # relay --timeout-ms source; also the nc -w budget
+    timeout_seconds: 30 # relay --timeout-ms source; also the nc -w budget (max 45)
     relay_binary: null # absolute-path override; null = {untracked}/bin/hooks-relay
     relay_source: null # "build" | "download" | null — see below
 ```
@@ -135,6 +135,13 @@ the permanent bash+python3 transport. The last rung is never removed and
 carries every existing guarantee (`ensure_daemon` auto-start, fail-open JSON
 error emission on any failure) — enabling a faster rung only adds an
 earlier successful exit, it never removes the safety net.
+
+**`timeout_seconds` is capped at 45.** When the relay gets no verdict for a
+`PreToolUse` call, it hands the call to the bash forwarder for up to 10
+seconds more. Both waits plus a 5-second margin must end before the
+60-second hook timeout the daemon registers, because Claude Code runs a
+`PreToolUse` call unjudged when its hook times out. A larger value is
+rejected with that reason.
 
 **`relay_enabled`/`nc_enabled` and `relay_source` are two SEPARATE, both
 explicit, decisions** — nothing about this block acts implicitly:

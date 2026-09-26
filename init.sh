@@ -91,26 +91,47 @@ unset HOOKS_DAEMON_RELAY_FAILED
 # _is_daemon_recovery_command(hook_input, project_path).
 #
 # A call is exempt only when it is a Bash call whose WHOLE command is exactly
-# one launcher spelling plus one read-only-or-restart subcommand, and that
-# spelling, resolved against the Bash tool's working directory (the hook
-# input's cwd), is the SAME file it names from the project root. The text
-# alone is not enough: a relative launcher runs whatever the cwd holds, so a
-# planted bin/hooks-daemon would otherwise run while every guard is down.
-# Anything that cannot be resolved is not exempt. The launcher follows its
-# own symlinks to anchor itself, so a link to the real one is the real one.
+# one launcher spelling plus one recovery subcommand, and that spelling runs
+# the project's own launcher. A relative spelling is resolved against the
+# Bash tool's working directory (the hook input's cwd) and must be the SAME
+# file it names from the project root: the text alone is not enough, because
+# a relative launcher runs whatever the cwd holds, so a planted
+# bin/hooks-daemon would otherwise run while every guard is down. The
+# absolute spelling, shell-quoted exactly as _recovery_command prints it,
+# names the launcher itself and so works from any cwd. Anything that cannot
+# be resolved is not exempt. The launcher follows its own symlinks to anchor
+# itself, so a link to the real one is the real one.
 #
-# No single quotes in this block: it is a single-quoted shell string.
-_HOOKS_DAEMON_RECOVERY_PY='
+# Only spaces and tabs may pad the command. str.strip() would also drop
+# vertical tab, form feed, the separators and the Unicode line breaks, which
+# bash passes to the launcher as part of its argument.
+#
+# A function, not a variable, so the exported functions that run it still
+# have it in a child shell that never sourced this file (Plan 00466 round 2,
+# m3): it is exported with them, and start_daemon keeps it out of the
+# daemon's environment. It assigns the source to the variable its caller
+# names, which costs no fork on the hot path. No single quotes in this
+# block: it is a single-quoted shell string.
+_hooks_daemon_recovery_py() {
+    printf -v "$1" '%s' '
 import os
+import shlex
 
-_RECOVERY_BINARIES = ("bin/hooks-daemon", ".claude/hooks-daemon/bin/hooks-daemon")
-_RECOVERY_SUBCOMMANDS = ("restart", "status", "logs", "stop", "start")
+_REPO_LAUNCHER = "bin/hooks-daemon"
+_RECOVERY_BINARIES = (_REPO_LAUNCHER, ".claude/hooks-daemon/bin/hooks-daemon")
+_RECOVERY_SUBCOMMANDS = ("restart", "status", "logs", "stop", "start", "repair")
+_RECOVERY_PADDING = " \t"
+
+
+def _is_the_project_launcher(path):
+    try:
+        return os.path.isfile(os.path.realpath(path))
+    except (OSError, ValueError):
+        return False
 
 
 def _runs_the_project_launcher(binary, cwd, project_path):
     if not isinstance(cwd, str) or not os.path.isabs(cwd):
-        return False
-    if not isinstance(project_path, str) or not os.path.isabs(project_path):
         return False
     try:
         will_run = os.path.realpath(os.path.join(cwd, binary))
@@ -124,29 +145,50 @@ def _runs_the_project_launcher(binary, cwd, project_path):
 def _is_daemon_recovery_command(hi, project_path):
     if not isinstance(hi, dict) or hi.get("tool_name") != "Bash":
         return False
+    if not isinstance(project_path, str) or not os.path.isabs(project_path):
+        return False
     tool_input = hi.get("tool_input")
     if not isinstance(tool_input, dict):
         return False
     command = tool_input.get("command")
     if not isinstance(command, str):
         return False
-    stripped = command.strip()
+    stripped = command.strip(_RECOVERY_PADDING)
+    if not stripped.isprintable():
+        return False
     for binary in _RECOVERY_BINARIES:
+        own = os.path.join(project_path, binary)
+        absolute = shlex.quote(own)
         for sub in _RECOVERY_SUBCOMMANDS:
-            if stripped == f"{binary} {sub}":
+            if stripped == binary + " " + sub:
                 return _runs_the_project_launcher(binary, hi.get("cwd"), project_path)
+            if stripped == absolute + " " + sub:
+                return _is_the_project_launcher(own)
     return False
+
+
+def _recovery_command(project_path, sub):
+    """The exempt command a deny names: the launcher by absolute path, so it
+    works from any directory. The first spelling the project has wins."""
+    for binary in _RECOVERY_BINARIES:
+        own = os.path.join(project_path, binary)
+        if _is_the_project_launcher(own):
+            return shlex.quote(own) + " " + sub
+    return shlex.quote(os.path.join(project_path, _REPO_LAUNCHER)) + " " + sub
 '
+}
 
 #
 # _hooks_daemon_stdin_is_recovery_command() - True when stdin is an exempt
-# daemon recovery command (see _HOOKS_DAEMON_RECOVERY_PY above).
+# daemon recovery command (see _hooks_daemon_recovery_py above).
 #
 # Reads stdin (a PreToolUse hook_input JSON document) to EOF. Any parse
 # failure returns false (deny-by-default) -- this function decides whether a
 # call gets a CARVE-OUT, never whether it gets blocked outright.
 _hooks_daemon_stdin_is_recovery_command() {
-    python3 -c "$_HOOKS_DAEMON_RECOVERY_PY"'
+    local recovery_py
+    _hooks_daemon_recovery_py recovery_py
+    python3 -c "$recovery_py"'
 import json
 import sys
 
@@ -156,6 +198,19 @@ except Exception:
     sys.exit(1)
 sys.exit(0 if _is_daemon_recovery_command(hi, sys.argv[1]) else 1)
 ' "${PROJECT_PATH:-}"
+}
+
+#
+# _hooks_daemon_recovery_command() - The exempt command for recovery
+# subcommand $1, by the launcher's absolute path, as every deny names it.
+_hooks_daemon_recovery_command() {
+    local recovery_py
+    _hooks_daemon_recovery_py recovery_py
+    python3 -c "$recovery_py"'
+import sys
+
+print(_recovery_command(sys.argv[1], sys.argv[2]))
+' "${PROJECT_PATH:-}" "$1"
 }
 
 #
@@ -193,6 +248,19 @@ emit_hook_error() {
 
     # Log to stderr for debugging (agent won't see this)
     echo "HOOKS DAEMON ERROR [$error_type]: $error_details" >&2
+
+    # Plan 00466 N126 round 2 (F1): a relay hand-off is a PreToolUse call the
+    # relay has already failed, and the relay hands over only that socket's
+    # calls, so an unnamed event (a source-time guard) is that call too. Its
+    # only outcomes are the recovery carve-out's allow and a deny: every
+    # state below that would answer otherwise is shadowed for this call, so
+    # the standard branch judges it.
+    if [[ -n "${_HOOKS_DAEMON_RELAY_FAILED:-}" && ( -z "$event_name" || "$event_name" == "PreToolUse" ) ]]; then
+        event_name="PreToolUse"
+        local _HOOKS_DAEMON_CI_ENFORCED=false _HOOKS_DAEMON_REPO_UNCONFIGURED=false \
+            _HOOKS_DAEMON_VENV_MISSING=false _HOOKS_DAEMON_NOT_INSTALLED=false \
+            _HOOKS_DAEMON_VERSION_MISMATCH=false
+    fi
 
     # Plan 00466 N24 review 3 MA4: for PreToolUse, the STANDARD branch below
     # (an installed project whose daemon could not be reached at all --
@@ -473,7 +541,10 @@ $_hd_venv_missing_remedy")
     # command that is actually allowed, and name the human fallback.
     local _pretooluse_deny_msg=""
     if [[ "$_pretooluse_deny" == "true" ]]; then
-        _pretooluse_deny_msg=$(printf '%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s' \
+        local _hd_restart_cmd _hd_repair_cmd_abs
+        _hd_restart_cmd="$(_hooks_daemon_recovery_command restart)"
+        _hd_repair_cmd_abs="$(_hooks_daemon_recovery_command repair)"
+        _pretooluse_deny_msg=$(printf '%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s' \
             "HOOKS DAEMON: could not connect at all — denied for safety" \
             "" \
             "Error: $error_type - $error_details" \
@@ -482,9 +553,10 @@ $_hd_venv_missing_remedy")
             "not because a guard judged it. Hook safety handlers are ACTIVE and" \
             "denying by default until the daemon answers again." \
             "" \
-            "TO FIX: from the project root, run exactly bin/hooks-daemon restart (or" \
-            ".claude/hooks-daemon/bin/hooks-daemon restart), which stays allowed" \
-            "even while other calls are denied this way. A human can also run it directly (! bin/hooks-daemon restart) since Edit is denied here too.")
+            "TO FIX: run exactly $_hd_restart_cmd (from any directory), which stays" \
+            "allowed even while other calls are denied this way. If a restart cannot" \
+            "start it (a broken venv), run exactly $_hd_repair_cmd_abs." \
+            "A human can also run it directly (! $_hd_restart_cmd) since Edit is denied here too.")
     fi
 
     # Event-specific JSON formatting. jq is used only on this pure-error path
@@ -1041,11 +1113,19 @@ is_daemon_running() {
     # Check if process is alive
     if kill -0 "$pid" 2>/dev/null; then
         return 0
-    else
-        # Stale PID file, clean up
-        rm -f "$PID_PATH"
-        return 1
     fi
+
+    # Stale PID file: remove it only while it still names the pid found
+    # dead. A successor started meanwhile has written its own pid there,
+    # and removing that would orphan a live daemon (Plan 00466 round 2, S2).
+    # A PID file has no trailing newline, so read reports EOF with the line
+    # read; a file gone since the first read fails the redirect instead.
+    local current=""
+    if [[ -f "$PID_PATH" ]] && { read -r current || [[ -n "$current" ]]; } < "$PID_PATH" \
+        && [[ "$current" == "$pid" ]]; then
+        rm -f "$PID_PATH"
+    fi
+    return 1
 }
 
 #
@@ -1093,8 +1173,13 @@ start_daemon() {
     # remains the authority for success/failure either way; this capture
     # only stops a genuine startup failure's root cause from being silently
     # discarded on the timeout path.
+    #
+    # The recovery source is exported only for this hook's own child shells
+    # (see _hooks_daemon_recovery_py); the daemon is not one of them. The
+    # un-export happens inside the substitution's subshell, not here.
     local start_output
-    start_output="$(CLAUDE_HOOKS_SOCKET_PATH="$SOCKET_PATH" \
+    start_output="$(export -fn _hooks_daemon_recovery_py
+    CLAUDE_HOOKS_SOCKET_PATH="$SOCKET_PATH" \
     CLAUDE_HOOKS_PID_PATH="$PID_PATH" \
     $PYTHON_CMD -m claude_code_hooks_daemon.daemon.cli \
         --project-root "$PROJECT_PATH" start 2>&1)"
@@ -1460,6 +1545,15 @@ _enter_passthrough_mode() {
 #   1 if daemon failed and must report error to agent
 #
 ensure_daemon() {
+    # Plan 00466 N126 round 2 (F1): a relay hand-off goes straight to
+    # send_request_stdin, whose judged deny is the only answer it may get.
+    # A start could spend the whole hand-off budget, and every diagnosis
+    # below it (passthrough, not installed, venv missing, version mismatch)
+    # would answer the call the relay has already failed with an allow.
+    if [[ -n "$_HOOKS_DAEMON_RELAY_FAILED" ]]; then
+        return 0
+    fi
+
     if is_daemon_running; then
         # Daemon running — clean up stale CI passthrough flag if present
         local passthrough_flag
@@ -1608,6 +1702,8 @@ send_request_stdin() {
     # Only uses stdlib: socket, sys, json (no venv packages needed).
     local event_name="${1:-Unknown}"
     local response_mode="${2:-}"
+    local _recovery_py
+    _hooks_daemon_recovery_py _recovery_py
     # Plan 00290 (T4.1/T4.2, DESIGN-socket-relay.md §6.2): $3, when the
     # forwarder_generator inserted it (nc_enabled at deploy time), names this
     # event's per-event socket filename (its bash_key, e.g. "pre-tool-use") —
@@ -1746,23 +1842,28 @@ hook_input = None
 # because an unclassified exception can fire on either side of connect().
 daemon_reached = False
 
+# The daemon recovery commands a PreToolUse deny must never block, so a
+# wedged/slow daemon (the B2 GIL-hang shape: alive but not answering) can
+# still be recovered from inside the same session. Defines
+# _is_daemon_recovery_command and _recovery_command; see
+# _hooks_daemon_recovery_py.
+$_recovery_py
+
+project_path = sys.argv[3] if len(sys.argv) > 3 else ''
+
+# The exempt restart, by absolute path so it works from any directory.
+_RESTART_COMMAND = _recovery_command(project_path, 'restart')
+
 # The recovery advice every daemon-side failure below ends with.
 _RESTART_ADVICE = [
-    'TO FIX: from the project root, run exactly bin/hooks-daemon restart (or',
-    '.claude/hooks-daemon/bin/hooks-daemon restart), which stays',
-    'allowed even while other calls are denied this way. Then use the',
+    f'TO FIX: run exactly {_RESTART_COMMAND} (from any directory),',
+    'which stays allowed even while other calls are denied this way. If a',
+    'restart cannot start it (a broken venv), run exactly',
+    f'{_recovery_command(project_path, \"repair\")}. Then use the',
     'hooks-daemon skill to verify health (args=health).',
     'If this recurs, use the hooks-daemon skill to check logs',
     '(args=logs) and report it.',
 ]
-
-# The daemon recovery commands a PreToolUse deny must never block, so a
-# wedged/slow daemon (the B2 GIL-hang shape: alive but not answering) can
-# still be recovered from inside the same session. Defines
-# _is_daemon_recovery_command; see _HOOKS_DAEMON_RECOVERY_PY.
-$_HOOKS_DAEMON_RECOVERY_PY
-
-project_path = sys.argv[3] if len(sys.argv) > 3 else ''
 
 # Plan 00466 N126: what hooks-relay reported when it handed this call over
 # after its own exchange with the daemon failed; empty otherwise.
@@ -1837,9 +1938,8 @@ def emit_error_json(event_name, error_type, error_details):
             '',
             'If this is a PreToolUse call being denied for safety because of',
             'this timeout: a genuinely wedged daemon (not just a slow handler)',
-            'is fixed by restarting it -- from the project root, run exactly',
-            'bin/hooks-daemon restart (or .claude/hooks-daemon/bin/hooks-daemon',
-            'restart), which stays',
+            'is fixed by restarting it -- run exactly',
+            f'{_RESTART_COMMAND} (from any directory), which stays',
             'allowed even while other calls are denied this way.',
         ]
         if timeout_note:
@@ -2305,7 +2405,9 @@ sys.exit(0)
 
 # Export functions for use by forwarder scripts
 export -f emit_hook_error
+export -f _hooks_daemon_recovery_py
 export -f _hooks_daemon_stdin_is_recovery_command
+export -f _hooks_daemon_recovery_command
 export -f validate_venv
 export -f is_daemon_running
 export -f start_daemon

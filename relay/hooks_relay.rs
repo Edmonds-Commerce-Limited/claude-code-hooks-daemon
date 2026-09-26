@@ -56,11 +56,13 @@
 //! stderr so daemon logs / debug capture can attribute transport failures.
 
 use std::env;
+use std::ffi::OsStr;
 use std::io::{self, ErrorKind, Read, Write};
 use std::net::Shutdown;
 use std::os::unix::net::UnixStream;
 use std::os::unix::process::CommandExt;
-use std::process::{exit, Command, Stdio};
+use std::path::Path;
+use std::process::{exit, Child, Command, Stdio};
 use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
@@ -86,6 +88,23 @@ const EXIT_USAGE: i32 = 13;
 /// runs; `init.sh` reads it at source time. Twin of init.sh's
 /// `HOOKS_DAEMON_RELAY_FAILED`.
 const RELAY_FAILURE_ENV: &str = "HOOKS_DAEMON_RELAY_FAILED";
+
+/// How long `judge_via_fallback` waits for the forwarder (Plan 00466 N126
+/// round 2, F3). Twin of `Timeout.RELAY_HANDOFF_BUDGET`, which caps
+/// `transport.timeout_seconds` so this wait plus the relay's own ends before
+/// Claude Code cancels the hook -- a cancelled PreToolUse hook lets the call
+/// run unjudged.
+const HANDOFF_TIMEOUT_MS: u64 = 10_000;
+
+/// How often the hand-off checks whether the forwarder has exited.
+const HANDOFF_POLL_MS: u64 = 10;
+
+/// Nesting bound for `JsonParser`: a verdict document is two levels deep.
+const JSON_MAX_DEPTH: usize = 32;
+
+/// The launcher spellings `init.sh`'s `_recovery_command` names, in its
+/// order: the first the project has is the one a deny prints.
+const RECOVERY_LAUNCHERS: [&str; 2] = ["bin/hooks-daemon", ".claude/hooks-daemon/bin/hooks-daemon"];
 
 struct Args {
     socket_path: String,
@@ -203,24 +222,337 @@ fn json_escape(s: &str) -> String {
 /// `HookResult._format_pre_tool_use_response` emits — never the two-byte
 /// `{}` a fail-open would use, which is indistinguishable from a real
 /// judged "allow, nothing to add" verdict.
-fn deny_pre_tool_use_json(detail: &str) -> String {
+fn deny_pre_tool_use_json(detail: &str, restart: &str) -> String {
     format!(
         "{{\"hookSpecificOutput\":{{\"hookEventName\":\"PreToolUse\",\
          \"permissionDecision\":\"deny\",\"permissionDecisionReason\":\
          \"BLOCKED [transport-fail-closed]: hooks-relay could not obtain a verdict \
          from the daemon ({}). Denying out of caution -- this does not mean the \
-         action itself is unsafe. If the daemon is wedged, run: bin/hooks-daemon restart\"}}}}",
-        json_escape(detail)
+         action itself is unsafe. If the daemon is wedged, run: {}\"}}}}",
+        json_escape(detail),
+        json_escape(restart)
     )
+}
+
+/// Python's `shlex.quote`, which `init.sh`'s `_recovery_command` uses: a
+/// word of only safe characters as it is, anything else single-quoted.
+fn shell_quote(word: &str) -> String {
+    let safe = |c: char| c.is_ascii_alphanumeric() || "@%+=:,./_-".contains(c);
+    if !word.is_empty() && word.chars().all(safe) {
+        return word.to_string();
+    }
+    format!("'{}'", word.replace('\'', "'\"'\"'"))
+}
+
+/// The exempt restart a deny names, as `init.sh`'s `_recovery_command`
+/// prints it: the project's launcher by absolute path, so it runs from any
+/// directory (Plan 00466 round 2, m1). The project is the one whose
+/// `.claude/hooks/` holds the `--fallback` forwarder; with no such forwarder
+/// the project-root spelling is all this file can name.
+fn restart_command(args: &Args) -> String {
+    let root = args
+        .fallback
+        .as_deref()
+        .map(Path::new)
+        .and_then(Path::parent)
+        .filter(|hooks| hooks.file_name() == Some(OsStr::new("hooks")))
+        .and_then(Path::parent)
+        .filter(|claude| claude.file_name() == Some(OsStr::new(".claude")))
+        .and_then(Path::parent)
+        .and_then(Path::to_str);
+    let Some(root) = root else {
+        return format!("{} restart (from the project root)", RECOVERY_LAUNCHERS[0]);
+    };
+    let launchers = RECOVERY_LAUNCHERS.map(|launcher| format!("{root}/{launcher}"));
+    let chosen = launchers
+        .iter()
+        .find(|launcher| Path::new(launcher.as_str()).is_file())
+        .unwrap_or(&launchers[0]);
+    format!("{} restart", shell_quote(chosen))
 }
 
 /// The fail-open/fail-closed body written on a mid-exchange failure, per
 /// `is_pre_tool_use_socket`.
 fn fail_body(args: &Args, detail: &str) -> String {
     if is_pre_tool_use_socket(&args.socket_path) {
-        deny_pre_tool_use_json(detail)
+        deny_pre_tool_use_json(detail, &restart_command(args))
     } else {
         "{}".to_string()
+    }
+}
+
+/// Just enough of a JSON value to judge a hand-off answer's shape (no serde:
+/// module constraint). Only strings and objects are ever inspected.
+enum Json {
+    Scalar,
+    Str(String),
+    Array,
+    Object(Vec<(String, Json)>),
+}
+
+/// A strict RFC 8259 parser over the forwarder's answer: one complete value,
+/// nothing after it but whitespace, valid UTF-8, no duplicate object keys
+/// (which readers resolve differently), bounded nesting. Every method returns
+/// `None` on anything else, and the caller then treats the answer as absent.
+struct JsonParser<'a> {
+    bytes: &'a [u8],
+    pos: usize,
+    depth: usize,
+}
+
+impl JsonParser<'_> {
+    fn document(bytes: &[u8]) -> Option<Json> {
+        let mut parser = JsonParser {
+            bytes,
+            pos: 0,
+            depth: 0,
+        };
+        let value = parser.value()?;
+        parser.skip_whitespace();
+        (parser.pos == bytes.len()).then_some(value)
+    }
+
+    fn peek(&self) -> Option<u8> {
+        self.bytes.get(self.pos).copied()
+    }
+
+    fn next(&mut self) -> Option<u8> {
+        let byte = self.peek()?;
+        self.pos += 1;
+        Some(byte)
+    }
+
+    fn eat(&mut self, byte: u8) -> Option<()> {
+        (self.next()? == byte).then_some(())
+    }
+
+    fn skip_whitespace(&mut self) {
+        while matches!(self.peek(), Some(b' ' | b'\t' | b'\n' | b'\r')) {
+            self.pos += 1;
+        }
+    }
+
+    fn value(&mut self) -> Option<Json> {
+        self.skip_whitespace();
+        match self.peek()? {
+            b'{' => self.nested(Self::object),
+            b'[' => self.nested(Self::array),
+            b'"' => self.string().map(Json::Str),
+            b't' => self.literal(b"true"),
+            b'f' => self.literal(b"false"),
+            b'n' => self.literal(b"null"),
+            b'-' | b'0'..=b'9' => self.number(),
+            _ => None,
+        }
+    }
+
+    fn nested(&mut self, parse: fn(&mut Self) -> Option<Json>) -> Option<Json> {
+        if self.depth == JSON_MAX_DEPTH {
+            return None;
+        }
+        self.depth += 1;
+        let value = parse(self);
+        self.depth -= 1;
+        value
+    }
+
+    fn object(&mut self) -> Option<Json> {
+        self.eat(b'{')?;
+        let mut members: Vec<(String, Json)> = Vec::new();
+        self.skip_whitespace();
+        if self.peek()? == b'}' {
+            self.pos += 1;
+            return Some(Json::Object(members));
+        }
+        loop {
+            self.skip_whitespace();
+            let key = self.string()?;
+            if members.iter().any(|(seen, _)| *seen == key) {
+                return None;
+            }
+            self.skip_whitespace();
+            self.eat(b':')?;
+            let value = self.value()?;
+            members.push((key, value));
+            self.skip_whitespace();
+            match self.next()? {
+                b',' => {}
+                b'}' => return Some(Json::Object(members)),
+                _ => return None,
+            }
+        }
+    }
+
+    fn array(&mut self) -> Option<Json> {
+        self.eat(b'[')?;
+        self.skip_whitespace();
+        if self.peek()? == b']' {
+            self.pos += 1;
+            return Some(Json::Array);
+        }
+        loop {
+            self.value()?;
+            self.skip_whitespace();
+            match self.next()? {
+                b',' => {}
+                b']' => return Some(Json::Array),
+                _ => return None,
+            }
+        }
+    }
+
+    fn literal(&mut self, word: &[u8]) -> Option<Json> {
+        let end = self.pos.checked_add(word.len())?;
+        if self.bytes.get(self.pos..end)? != word {
+            return None;
+        }
+        self.pos = end;
+        Some(Json::Scalar)
+    }
+
+    fn digits(&mut self) -> usize {
+        let start = self.pos;
+        while matches!(self.peek(), Some(b'0'..=b'9')) {
+            self.pos += 1;
+        }
+        self.pos - start
+    }
+
+    fn number(&mut self) -> Option<Json> {
+        if self.peek() == Some(b'-') {
+            self.pos += 1;
+        }
+        match self.peek()? {
+            b'0' => self.pos += 1,
+            b'1'..=b'9' => {
+                self.digits();
+            }
+            _ => return None,
+        }
+        if self.peek() == Some(b'.') {
+            self.pos += 1;
+            if self.digits() == 0 {
+                return None;
+            }
+        }
+        if matches!(self.peek(), Some(b'e' | b'E')) {
+            self.pos += 1;
+            if matches!(self.peek(), Some(b'+' | b'-')) {
+                self.pos += 1;
+            }
+            if self.digits() == 0 {
+                return None;
+            }
+        }
+        Some(Json::Scalar)
+    }
+
+    fn hex4(&mut self) -> Option<u32> {
+        let end = self.pos.checked_add(4)?;
+        let hex = self.bytes.get(self.pos..end)?;
+        if !hex.iter().all(u8::is_ascii_hexdigit) {
+            return None;
+        }
+        self.pos = end;
+        u32::from_str_radix(std::str::from_utf8(hex).ok()?, 16).ok()
+    }
+
+    /// A `\u` escape's code point; a surrogate must be a complete pair.
+    fn unicode_escape(&mut self) -> Option<char> {
+        let first = self.hex4()?;
+        let code = match first {
+            0xD800..=0xDBFF => {
+                self.eat(b'\\')?;
+                self.eat(b'u')?;
+                let low = self.hex4()?;
+                if !(0xDC00..=0xDFFF).contains(&low) {
+                    return None;
+                }
+                0x10000 + ((first - 0xD800) << 10) + (low - 0xDC00)
+            }
+            0xDC00..=0xDFFF => return None,
+            _ => first,
+        };
+        char::from_u32(code)
+    }
+
+    fn string(&mut self) -> Option<String> {
+        self.eat(b'"')?;
+        let mut out: Vec<u8> = Vec::new();
+        loop {
+            match self.next()? {
+                b'"' => return String::from_utf8(out).ok(),
+                b'\\' => {
+                    let unescaped = match self.next()? {
+                        b'"' => '"',
+                        b'\\' => '\\',
+                        b'/' => '/',
+                        b'b' => '\u{8}',
+                        b'f' => '\u{c}',
+                        b'n' => '\n',
+                        b'r' => '\r',
+                        b't' => '\t',
+                        b'u' => self.unicode_escape()?,
+                        _ => return None,
+                    };
+                    let mut utf8 = [0u8; 4];
+                    out.extend_from_slice(unescaped.encode_utf8(&mut utf8).as_bytes());
+                }
+                0x00..=0x1F => return None,
+                byte => out.push(byte),
+            }
+        }
+    }
+}
+
+/// Plan 00466 N126 round 2 (F2): true when `answer` is a verdict the
+/// hand-off may deliver. The forwarder, with `RELAY_FAILURE_ENV` set, answers
+/// with one of exactly two documents: a PreToolUse deny with its reason, or
+/// the recovery carve-out's context-only answer. `{}`, truncated or partial
+/// JSON, an allow, an unknown field, or any other shape could only be an
+/// allow the relay has not judged, so it is refused and the caller denies.
+/// This reads the ANSWER's shape only; the request is still never parsed.
+fn is_hand_off_verdict(answer: &[u8]) -> bool {
+    let Some(Json::Object(top)) = JsonParser::document(answer) else {
+        return false;
+    };
+    let [(key, Json::Object(output))] = top.as_slice() else {
+        return false;
+    };
+    if key != "hookSpecificOutput" {
+        return false;
+    }
+    const FIELDS: [&str; 4] = [
+        "hookEventName",
+        "permissionDecision",
+        "permissionDecisionReason",
+        "additionalContext",
+    ];
+    let all_known_strings = output
+        .iter()
+        .all(|(name, value)| FIELDS.contains(&name.as_str()) && matches!(value, Json::Str(_)));
+    let field = |name: &str| {
+        output.iter().find_map(|(seen, value)| match value {
+            Json::Str(text) if seen == name => Some(text.as_str()),
+            _ => None,
+        })
+    };
+    if !all_known_strings || field("hookEventName") != Some("PreToolUse") {
+        return false;
+    }
+    match field("permissionDecision") {
+        Some(decision) => decision == "deny" && field("permissionDecisionReason").is_some(),
+        None => {
+            field("permissionDecisionReason").is_none() && field("additionalContext").is_some()
+        }
+    }
+}
+
+/// End the hand-off's forwarder: it is this process's own unreaped child,
+/// so its pid cannot have been reused.
+fn stop_forwarder(child: &mut Child, script: &str) {
+    if let Err(err) = child.kill() {
+        eprintln!("hooks-relay: judge: stopping {script} failed: {err}");
     }
 }
 
@@ -240,8 +572,9 @@ struct Request {
 /// whole request replayed on its stdin and `RELAY_FAILURE_ENV` naming the
 /// failure; its transport then skips the daemon and denies through that
 /// carve-out. Returns only when the hand-off itself failed -- stdin could not
-/// be completed, the forwarder could not run, exited non-zero or wrote
-/// nothing -- and the caller then writes its own deny.
+/// be completed, the forwarder could not run, exited non-zero, outlasted
+/// `HANDOFF_TIMEOUT_MS`, or answered with anything but a verdict
+/// (`is_hand_off_verdict`) -- and the caller then writes its own deny.
 fn judge_via_fallback(script: &str, failure: &str, request: &mut Request) {
     if !request.complete {
         if let Err(err) = io::stdin().lock().read_to_end(&mut request.bytes) {
@@ -250,6 +583,7 @@ fn judge_via_fallback(script: &str, failure: &str, request: &mut Request) {
         }
         request.complete = true;
     }
+    let deadline = Instant::now() + Duration::from_millis(HANDOFF_TIMEOUT_MS);
     let spawned = Command::new("/bin/bash")
         .arg(script)
         .arg("--no-relay")
@@ -264,43 +598,84 @@ fn judge_via_fallback(script: &str, failure: &str, request: &mut Request) {
             return;
         }
     };
-    let Some(mut child_stdin) = child.stdin.take() else {
-        eprintln!("hooks-relay: judge: {script} has no stdin pipe");
+    let (Some(mut child_stdin), Some(mut child_stdout)) = (child.stdin.take(), child.stdout.take())
+    else {
+        eprintln!("hooks-relay: judge: {script} has no stdin or stdout pipe");
+        stop_forwarder(&mut child, script);
         return;
     };
+    // The request is written, and the answer read, on threads of their own:
+    // the forwarder may answer before it has read everything, and every wait
+    // below must be bounded by the deadline. A thread still blocked when the
+    // deadline passes is abandoned; this process exits right afterwards.
     let payload = std::mem::take(&mut request.bytes);
-    // Written on its own thread: the forwarder may answer before it has read
-    // everything, and a pipe that fills would otherwise deadlock the wait.
-    let writer = thread::spawn(move || child_stdin.write_all(&payload));
-    let output = child.wait_with_output();
-    match writer.join() {
+    let (written_tx, written_rx) = mpsc::channel();
+    thread::spawn(move || {
+        // A send error means the hand-off already gave up on this write.
+        if written_tx.send(child_stdin.write_all(&payload)).is_err() {
+            // Intentionally empty: see comment above.
+        }
+    });
+    let (answer_tx, answer_rx) = mpsc::channel();
+    thread::spawn(move || {
+        let mut answer = Vec::new();
+        let read = child_stdout.read_to_end(&mut answer).map(|_| answer);
+        // A send error means the hand-off already gave up on this answer.
+        if answer_tx.send(read).is_err() {
+            // Intentionally empty: see comment above.
+        }
+    });
+    let answer = match answer_rx.recv_timeout(remaining(deadline).unwrap_or_default()) {
+        Ok(Ok(answer)) => answer,
+        Ok(Err(err)) => {
+            eprintln!("hooks-relay: judge: reading the answer from {script} failed: {err}");
+            stop_forwarder(&mut child, script);
+            return;
+        }
+        Err(_) => {
+            eprintln!("hooks-relay: judge: {script} gave no answer within {HANDOFF_TIMEOUT_MS} ms");
+            stop_forwarder(&mut child, script);
+            return;
+        }
+    };
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break status,
+            Ok(None) if remaining(deadline).is_some() => {
+                thread::sleep(Duration::from_millis(HANDOFF_POLL_MS));
+            }
+            Ok(None) => {
+                eprintln!("hooks-relay: judge: {script} did not exit within {HANDOFF_TIMEOUT_MS} ms");
+                stop_forwarder(&mut child, script);
+                return;
+            }
+            Err(err) => {
+                eprintln!("hooks-relay: judge: waiting on {script} failed: {err}");
+                stop_forwarder(&mut child, script);
+                return;
+            }
+        }
+    };
+    match written_rx.recv_timeout(remaining(deadline).unwrap_or_default()) {
         Ok(Ok(())) => {}
         Ok(Err(err)) => {
             eprintln!("hooks-relay: judge: replaying the request to {script} failed: {err}");
             return;
         }
         Err(_) => {
-            eprintln!("hooks-relay: judge: the request writer thread panicked");
+            eprintln!("hooks-relay: judge: the request was not replayed to {script} in time");
             return;
         }
     }
-    let output = match output {
-        Ok(output) => output,
-        Err(err) => {
-            eprintln!("hooks-relay: judge: waiting on {script} failed: {err}");
-            return;
-        }
-    };
-    if !output.status.success() || output.stdout.is_empty() {
+    if !status.success() || !is_hand_off_verdict(&answer) {
         eprintln!(
-            "hooks-relay: judge: {script} gave no answer ({}, {} bytes)",
-            output.status,
-            output.stdout.len()
+            "hooks-relay: judge: {script} gave no verdict ({status}, {} bytes)",
+            answer.len()
         );
         return;
     }
     let mut stdout = io::stdout();
-    if let Err(err) = stdout.write_all(&output.stdout).and_then(|()| stdout.flush()) {
+    if let Err(err) = stdout.write_all(&answer).and_then(|()| stdout.flush()) {
         eprintln!("hooks-relay: judge: stdout write failed: {err}");
     }
     exit(0);

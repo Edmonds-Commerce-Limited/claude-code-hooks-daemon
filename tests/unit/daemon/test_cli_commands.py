@@ -12,10 +12,12 @@ import argparse
 import errno
 import json
 import os
+import shutil
 import signal
 import socket
 import subprocess
 import sys
+import tempfile
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
@@ -974,6 +976,82 @@ class TestCmdStopFallsBackAndCleansUpOnlyWhenProvenSafe:
         cleanup_pid.assert_not_called()
         cleanup_sock.assert_not_called()
         assert "exited before SIGTERM reached it" in capsys.readouterr().out
+
+
+@pytest.mark.usefixtures("_reject_unproven_real_signals")
+class TestCmdStopCleansUpOnlyWhatItStillOwns:
+    """Plan 00466 round 2 (S2): after the proven daemon exits, ``cmd_stop``
+    deleted the PID file and socket unconditionally. A successor started in
+    the meantime (a concurrent hook's ``ensure_daemon``) had written its own
+    pid and bound its own socket there, and was orphaned. The PID file goes
+    only while it still holds the stopped pid, and the socket only when a
+    probe finds nothing listening on it."""
+
+    @pytest.fixture
+    def short_dir(self) -> Iterator[Path]:
+        """AF_UNIX paths are capped near 108 bytes; ``tmp_path`` nests deeper."""
+        directory = Path(tempfile.mkdtemp(prefix="hd-stop-"))
+        yield directory
+        shutil.rmtree(directory)
+
+    def _stop(self, tmp_path: Path, pid_path: Path, socket_path: Path, on_exit: Any) -> int:
+        """Run ``cmd_stop`` against ``_UNREAL_PID``; ``on_exit`` runs when its
+        exit is observed, which is where a successor's start lands."""
+        claude_dir = tmp_path / ".claude"
+        (claude_dir / "hooks-daemon").mkdir(parents=True)
+        (claude_dir / "hooks-daemon.yaml").write_text("version: '1.0'\n")
+        args = argparse.Namespace(
+            project_root=tmp_path, pid_file=str(pid_path), socket=str(socket_path)
+        )
+
+        def signal_it(pid: int, sig: int) -> None:
+            if sig == 0:
+                on_exit()
+                raise ProcessLookupError()
+
+        with (
+            patch("claude_code_hooks_daemon.daemon.cli.read_pid_file", return_value=_UNREAL_PID),
+            patch(
+                "claude_code_hooks_daemon.daemon.cli.daemon_process_project_root",
+                return_value=RootProof(root=os.path.realpath(tmp_path), refusal=None),
+            ),
+            patch("os.kill", side_effect=signal_it),
+        ):
+            return cmd_stop(args)
+
+    def test_the_stopped_daemons_files_are_removed(self, tmp_path: Path, short_dir: Path) -> None:
+        pid_path = short_dir / "daemon.pid"
+        pid_path.write_text(str(_UNREAL_PID))
+        socket_path = short_dir / "daemon.sock"
+        orphan = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        orphan.bind(str(socket_path))
+        orphan.close()  # bound, never listening: what a dead daemon leaves
+
+        assert self._stop(tmp_path, pid_path, socket_path, lambda: None) == 0
+
+        assert not pid_path.exists()
+        assert not socket_path.exists()
+
+    def test_a_successors_pid_file_and_live_socket_are_left_alone(
+        self, tmp_path: Path, short_dir: Path
+    ) -> None:
+        pid_path = short_dir / "daemon.pid"
+        pid_path.write_text(str(_UNREAL_PID))
+        socket_path = short_dir / "daemon.sock"
+        successor = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+
+        def successor_starts() -> None:
+            if not socket_path.exists():
+                pid_path.write_text(str(os.getpid()))
+                successor.bind(str(socket_path))
+                successor.listen(1)
+
+        try:
+            assert self._stop(tmp_path, pid_path, socket_path, successor_starts) == 0
+            assert pid_path.read_text() == str(os.getpid())
+            assert socket_path.exists()
+        finally:
+            successor.close()
 
 
 class TestCmdConfig:

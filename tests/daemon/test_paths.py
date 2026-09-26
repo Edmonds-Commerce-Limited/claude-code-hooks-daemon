@@ -376,6 +376,43 @@ class TestPIDFileOperations(unittest.TestCase):
             # Stale PID file should be cleaned up
             self.assertFalse(pid_path.exists())
 
+    def test_read_pid_file_keeps_a_successors_pid_file(self):
+        """Plan 00466 round 2 (S2): the stale pid is found dead, and a
+        successor writes its own pid before the cleanup runs."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pid_path = Path(tmpdir) / "test.pid"
+            write_pid_file(pid_path, 999999)
+            successor = os.getpid()
+
+            def _dead_while_the_successor_writes(pid: int) -> bool:
+                write_pid_file(pid_path, successor)
+                return False
+
+            with patch(
+                "claude_code_hooks_daemon.daemon.paths.is_pid_alive",
+                side_effect=_dead_while_the_successor_writes,
+            ):
+                self.assertIsNone(read_pid_file(pid_path))
+
+            self.assertEqual(pid_path.read_text(), str(successor))
+
+    def test_read_pid_file_verify_daemon_keeps_a_successors_pid_file(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pid_path = Path(tmpdir) / "test.pid"
+            write_pid_file(pid_path, os.getpid())
+
+            def _not_a_daemon_while_the_successor_writes(pid: int) -> bool:
+                write_pid_file(pid_path, 424242)
+                return False
+
+            with patch(
+                "claude_code_hooks_daemon.daemon.paths.is_daemon_pid",
+                side_effect=_not_a_daemon_while_the_successor_writes,
+            ):
+                self.assertIsNone(read_pid_file(pid_path, verify_daemon=True))
+
+            self.assertEqual(pid_path.read_text(), "424242")
+
     def test_read_pid_file_returns_none_for_missing_file(self):
         """Test read_pid_file returns None when file doesn't exist."""
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -508,7 +545,7 @@ class TestPIDFileOperations(unittest.TestCase):
             pid_path = Path(tmpdir) / "test.pid"
             pid_path.write_text("12345")
 
-            cleanup_pid_file(pid_path)
+            cleanup_pid_file(pid_path, 12345)
 
             self.assertFalse(pid_path.exists())
 
@@ -518,7 +555,7 @@ class TestPIDFileOperations(unittest.TestCase):
             pid_path = Path(tmpdir) / "nonexistent.pid"
 
             # Should not raise exception
-            cleanup_pid_file(pid_path)
+            cleanup_pid_file(pid_path, 12345)
 
     def test_cleanup_pid_file_accepts_string_path(self):
         """Test cleanup_pid_file accepts string paths."""
@@ -526,9 +563,29 @@ class TestPIDFileOperations(unittest.TestCase):
             pid_path = Path(tmpdir) / "test.pid"
             pid_path.write_text("12345")
 
-            cleanup_pid_file(str(pid_path))
+            cleanup_pid_file(str(pid_path), 12345)
 
             self.assertFalse(pid_path.exists())
+
+    def test_cleanup_pid_file_keeps_a_file_that_names_another_pid(self):
+        """Plan 00466 round 2 (S2): a successor that wrote its own pid owns
+        the file; removing it would orphan that live daemon."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pid_path = Path(tmpdir) / "test.pid"
+            pid_path.write_text("67890")
+
+            cleanup_pid_file(pid_path, 12345)
+
+            self.assertEqual(pid_path.read_text(), "67890")
+
+    def test_cleanup_pid_file_keeps_a_file_it_cannot_read_as_a_pid(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pid_path = Path(tmpdir) / "test.pid"
+            pid_path.write_text("not-a-pid")
+
+            cleanup_pid_file(pid_path, 12345)
+
+            self.assertEqual(pid_path.read_text(), "not-a-pid")
 
     @patch("pathlib.Path.unlink")
     def test_cleanup_pid_file_handles_exception(self, mock_unlink):
@@ -540,7 +597,7 @@ class TestPIDFileOperations(unittest.TestCase):
             pid_path.write_text("12345")
 
             # Should not raise exception
-            cleanup_pid_file(pid_path)
+            cleanup_pid_file(pid_path, 12345)
 
     @patch("pathlib.Path.unlink")
     def test_cleanup_pid_file_handles_unexpected_exception(self, mock_unlink):
@@ -552,7 +609,7 @@ class TestPIDFileOperations(unittest.TestCase):
             pid_path.write_text("12345")
 
             # Should not raise exception
-            cleanup_pid_file(pid_path)
+            cleanup_pid_file(pid_path, 12345)
 
 
 class TestSocketCleanup(unittest.TestCase):
