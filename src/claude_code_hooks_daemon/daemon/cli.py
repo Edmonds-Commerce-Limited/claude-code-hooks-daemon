@@ -125,7 +125,6 @@ from claude_code_hooks_daemon.utils.safe_signal import (
     DaemonStop,
     RefusedSignalTarget,
     stop_verified_daemon,
-    verified_daemon_process,
 )
 from claude_code_hooks_daemon.utils.secret_redaction import get_active_secret_terms
 from claude_code_hooks_daemon.utils.session_action_items import (
@@ -833,8 +832,7 @@ def cmd_stop(args: argparse.Namespace) -> int:
         return 0
     if outcome is DaemonStop.SURVIVED:
         print(
-            f"WARNING: Daemon still running after SIGKILL "
-            f"({Timeout.DAEMON_SIGKILL_GRACE}s)",
+            f"WARNING: Daemon still running after SIGKILL " f"({Timeout.DAEMON_SIGKILL_GRACE}s)",
             file=sys.stderr,
         )
         print(f"Try: kill -9 {pid}", file=sys.stderr)
