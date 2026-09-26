@@ -104,6 +104,20 @@ class TestProseIsNotACommand:
         assert _matches(handler, f"git commit -F - <<'EOF'\ndescribes {_FORCE}\nEOF") is False
 
 
+class TestAHereStringIsNotAHeredoc:
+    """Plan 00466 N116: `<<<'EOF'` is a here-string, so the line after it
+    is a command bash runs. Searched from its second `<`, it read as a
+    quoted heredoc opener and the command was blanked as prose."""
+
+    def test_a_force_push_after_a_here_string_is_denied(self) -> None:
+        command = f"cat <<<'EOF'\ngit push {_FORCE} origin main\nEOF"
+        chain = HandlerChain()
+        chain.add(DestructiveGitHandler())
+        payload = {"tool_name": "Bash", "tool_input": {"command": command}}
+        result = chain.execute(payload, strict_mode=False)
+        assert result.result.decision == Decision.DENY
+
+
 class TestTheGuardStillGuards:
     """Every subtraction above must cost the handler nothing that matters."""
 

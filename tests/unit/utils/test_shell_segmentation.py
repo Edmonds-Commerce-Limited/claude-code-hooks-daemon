@@ -204,6 +204,13 @@ class TestStripQuotedHeredocBodies:
         command = "git commit -F - <<-'EOF'\n\tprose mentioning run_all.sh\n\tEOF"
         assert "run_all.sh" not in strip_quoted_heredoc_bodies(command)
 
+    def test_a_here_string_is_not_a_heredoc_n116(self) -> None:
+        """Plan 00466 N116: `<<<'EOF'` is a here-string, so the next line is
+        a command bash runs. Searched from its second `<`, the opener read
+        as `<<'EOF'` and the line was blanked."""
+        command = "cat <<<'EOF'\nrun_all.sh\nEOF"
+        assert "run_all.sh" in strip_quoted_heredoc_bodies(command)
+
     def test_unquoted_delimiter_body_is_left_alone(self) -> None:
         """`<<EOF` DOES expand, so its body can genuinely run something."""
         command = "git commit -F - <<EOF\nvalue is $(./scripts/qa/run_all.sh)\nEOF"

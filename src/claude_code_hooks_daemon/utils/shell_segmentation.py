@@ -93,8 +93,11 @@ _QUOTED_HEREDOC_PATTERN = re.compile(
 # and `'END.MD'` are ordinary and legal, and an unmatched delimiter exposes the
 # whole body. The closer then needs the lookahead: without it `EOF` is closed
 # by a body line reading `EOFDATA`, ending the body early and scanning the rest.
+#
+# The lookbehind keeps a here-string's `<<<'EOF'` from reading as `<<'EOF'`
+# from its second `<` (Plan 00466 N116): the next line is a command bash runs.
 _QUOTED_HEREDOC_BODY_PATTERN = re.compile(
-    r"(?P<opener><<-?\s*(?P<quote>['\"])(?P<delim>[\w.\-]+)(?P=quote))"
+    r"(?P<opener>(?<!<)<<-?\s*(?P<quote>['\"])(?P<delim>[\w.\-]+)(?P=quote))"
     r"(?P<opener_tail>[^\n]*)\n.*?\n"
     r"(?P<closer>[ \t]*(?P=delim)(?![\w.\-]))",
     re.DOTALL,

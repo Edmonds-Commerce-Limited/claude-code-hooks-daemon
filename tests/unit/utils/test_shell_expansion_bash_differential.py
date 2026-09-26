@@ -59,6 +59,10 @@ _PRIMITIVES = (
     "'b'",
 )
 
+#: Brace primitives with no quoting character (Plan 00466 N115): bash's
+#: grouping of such a word differs from the quote-blind reading too.
+_QUOTE_FREE_PRIMITIVES = ("{", "}", "{}", ",", "..", ".qq-", "pass", "q", "1..2", "a")
+
 #: Python escapes that change a literal's braces or commas, for words read
 #: inside a program.
 _PYTHON_ESCAPES = ("\\x7b", "\\x7d", "\\173", "\\175", "\\x2c", "\\u007b")
@@ -68,17 +72,20 @@ _MARKER = "@@end@@"
 
 
 def _generated_words(seed: int, count: int, primitives: tuple[str, ...]) -> list[str]:
-    """Half free-form runs of primitives, half a group
+    """Half free-form runs of primitives; a quarter a group
     ``PRE{ALT,ALT}POST`` whose parts are runs of primitives, so most words
-    hold a group bash expands."""
+    hold a group bash expands; and a quarter the same group with a ``}``
+    or ``{}`` leading its first alternative, which bash reads as text."""
     rng = random.Random(seed)
 
     def run(low: int, high: int) -> str:
         return "".join(rng.choice(primitives) for _ in range(rng.randint(low, high)))
 
     words = [run(2, 9) for _ in range(count // 2)]
+    words += [f"{run(0, 2)}{{{run(0, 3)},{run(0, 3)}}}{run(0, 2)}" for _ in range(count // 4)]
     words += [
-        f"{run(0, 2)}{{{run(0, 3)},{run(0, 3)}}}{run(0, 2)}" for _ in range(count - len(words))
+        f"{run(0, 2)}{{{rng.choice(('}', '{}'))}{run(0, 3)},{run(0, 3)}}}{run(0, 2)}"
+        for _ in range(count - len(words))
     ]
     return words
 
@@ -121,6 +128,20 @@ class TestTheGuardReadsEverySpellingBashDoes:
 
     def test_every_spelling_bash_prints_is_one_the_guard_reads(self, tmp_path: Path) -> None:
         words = _generated_words(107, 2000, _PRIMITIVES)
+        missed = []
+        for word, spellings in zip(words, _bash_spellings(words, tmp_path), strict=True):
+            guard = _guard_spellings(word)
+            if guard is not None and not spellings <= guard:
+                missed.append((word, sorted(spellings - guard)))
+        assert missed == []
+
+    def test_every_spelling_bash_prints_of_a_quote_free_word_is_one_the_guard_reads(
+        self, tmp_path: Path
+    ) -> None:
+        """Plan 00466 N115: only a word holding a quoting character reached
+        bash's own grouping rules, so ``.qq-{},pass}`` was read as a ``{}``
+        pair and never spelled ``.qq-pass``."""
+        words = _generated_words(115, 2000, _QUOTE_FREE_PRIMITIVES)
         missed = []
         for word, spellings in zip(words, _bash_spellings(words, tmp_path), strict=True):
             guard = _guard_spellings(word)

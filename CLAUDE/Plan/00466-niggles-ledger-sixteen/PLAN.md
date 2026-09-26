@@ -138,6 +138,8 @@ Full write-ups are in [NIGGLES.md](NIGGLES.md). One line each here:
 | N111 | `$"…"` locale quoting keeps its `$` in `secret_file_guard`'s quote removal                                     | N101 review 6 (D-SEC)                                           | ✅ Remedied (n101 branch)        |
 | N112 | Braces decoded from `$'\x7b'` and run by `eval` or `bash -c` are never expanded                                | N101 review 6 (D-SEC)                                           | ✅ Remedied (n101 branch)        |
 | N113 | An unrelated unresolvable prefix switches off `secret_file_guard`'s N107 coverage                              | N101 review 6 (D-SEC)                                           | ✅ Remedied (n101 branch)        |
+| N115 | A `}` before the first comma of a quote-free brace word hides a brace-spelled path                             | N101 review 7 (D-SEC)                                           | ✅ Remedied (n101 branch)        |
+| N116 | A here-string's `<<<` is read as a heredoc opener from its second `<`                                          | N101 review 7 (D-SEC, D-RULE)                                   | ✅ Remedied (n101 branch)        |
 
 ## Tasks
 

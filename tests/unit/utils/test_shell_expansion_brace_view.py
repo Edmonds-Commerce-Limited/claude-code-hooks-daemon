@@ -673,10 +673,11 @@ class TestCodeWordsAreReported:
         assert len(streams.code_words) == 600
 
     def test_a_code_word_holding_quoted_whitespace_is_reported_whole(self) -> None:
-        """Plan 00466 N107: bash splits the text as one word."""
+        """Plan 00466 N107: bash splits the text as one word. Its value after
+        quote removal is read as a command too, as for any shell word."""
         streams = python_program_streams('y = x .p-{"} z","q"}\n')
         assert streams is not None
-        assert streams.shell_words == ('.p-{"} z","q"}',)
+        assert streams.shell_words == ('.p-{"} z","q"}', ".p-{}")
 
     def test_a_shell_word_inside_a_literal_is_reported(self) -> None:
         """Plan 00466 N101 round 7: every word bash splits is reported. Bash

@@ -83,8 +83,9 @@ _HOME_VARIABLE: Final[str] = "HOME"
 #: Device nodes are not files a handler should judge.
 _DEV_PREFIX: Final[str] = "/dev/"
 
-#: `<<EOF` / `<<-'EOF'` / `<<"EOF"`. Group 2 is the delimiter word.
-_HEREDOC_RE: Final[re.Pattern[str]] = re.compile(r"<<-?\s*(['\"]?)(\w+)\1")
+#: `<<EOF` / `<<-'EOF'` / `<<"EOF"`. Group 2 is the delimiter word. Never
+#: the last two characters of a here-string's `<<<` (Plan 00466 N116).
+_HEREDOC_RE: Final[re.Pattern[str]] = re.compile(r"(?<!<)<<-?\s*(['\"]?)(\w+)\1")
 _HEREDOC_DELIMITER_GROUP: Final[int] = 2
 
 #: Cheap "could this text name a write target at all?" test, run over a heredoc

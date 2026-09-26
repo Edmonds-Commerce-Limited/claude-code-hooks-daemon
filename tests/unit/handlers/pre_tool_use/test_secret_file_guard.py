@@ -2735,3 +2735,58 @@ class TestRoundSixFindingsAreClosed:
     def test_shapes_that_name_nothing_stay_allowed(self, command: str) -> None:
         decision, reason = _through_chain("Bash", {"command": command})
         assert decision != Decision.DENY, reason
+
+
+class TestRoundSevenFindingsAreClosed:
+    """Plan 00466 N101 round 8: the two findings `main` shares (N115,
+    N116), through the real handler."""
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "cat /proj/.vault-{},pass}",
+            "cat /proj/.vault-{q},pass}",
+            "cat /proj/.vault-{a}b,pass}",
+            "cat /proj/.vault-{..}a,pass}",
+            "cat /proj/.vault-{{}},pass}",
+        ],
+    )
+    def test_a_close_brace_before_the_first_comma_is_text_n115(self, command: str) -> None:
+        """N115: bash reads a `}` before any comma as text; only a word
+        holding a quoting character reached the reader that knows it."""
+        assert RuleID.SECRET_BASH_MENTION in _deny_reason(command)
+
+    def test_writing_a_script_with_a_leading_close_brace_group_denies_n115(self) -> None:
+        tool_input = {"file_path": "/proj/run.sh", "content": "cat /proj/.vault-{},pass}\n"}
+        decision, _reason = _through_chain("Write", tool_input)
+        assert decision == Decision.DENY
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            r"bash <<< $'cat /proj/.vault-\x7bpass,q\x7d'",
+            r"bash <<<$'cat /proj/.vault-\x7bpass,q\x7d'",
+            r"sh -s <<< $'cat /proj/.vault-\x7bpass,q\x7d'",
+            r"xargs -0 bash -c <<< $'cat /proj/.vault-\x7bpass,q\x7d'",
+            r"bash <<< $'cat /proj/.vault-\x7b\x7d,pass\x7d'",
+        ],
+    )
+    def test_a_here_string_word_is_read_as_a_word_n116(self, command: str) -> None:
+        """N116: at the second `<` of `<<<` the scanner saw `<<` and read
+        the here-string word as a heredoc delimiter."""
+        assert RuleID.SECRET_BASH_MENTION in _deny_reason(command)
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            'echo "$(cat <<< hi)" {a,b}',
+            r"bash <<< $'echo \x7ba,b\x7d'",
+            "cat <<< '{a,b}' && echo {c,d}",
+            "cat <<EOF\n{a,b}\nEOF",
+        ],
+    )
+    def test_here_strings_that_name_nothing_stay_allowed_n116(self, command: str) -> None:
+        """A here-string inside a substitution is not a heredoc, so the
+        substitution's extent is resolved rather than failed closed."""
+        decision, reason = _through_chain("Bash", {"command": command})
+        assert decision != Decision.DENY, reason

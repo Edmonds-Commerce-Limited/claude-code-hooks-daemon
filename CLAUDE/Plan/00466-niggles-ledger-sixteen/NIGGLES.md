@@ -9,6 +9,61 @@ interrupt a running handler) and lands with that branch. N40 is taken there too
 taken on the N38 fix branch (the chain's remaining linear per-token cost, which
 waits for the shell-parser consolidation).
 
+### N116 — ✅ Remedied (n101 branch) — A here-string's `<<<` is read as a heredoc opener from its second `<`
+
+**Found by the N101 round-7 D-SEC and D-RULE reviews** (shared MAJOR,
+reports `subagent-reports/260926-n101-dsec7-opus-5-5.md` and
+`…/260926-n101-drule7-opus-5-5.md`). The brace-word scanner in
+`shell_expansion._shell_brace_words` refused `<<` where `<<<` began, skipped
+the first `<` as a stop character, and then saw `<<` at the second. The
+here-string's word became a heredoc delimiter and was never read, so
+`bash <<< $'cat /proj/.vault-\x7bpass,q\x7d'` was allowed; bash runs the
+decoded text and brace-expands it. The same shape was allowed by main.
+
+**The class is wider than the guard.** Every parser that finds a heredoc
+opener by searching for `<<` makes the same mistake from the second `<`:
+
+- `_command_substitution_end` failed `echo "$(cat <<< hi)" {a,b}` closed as
+  "a heredoc inside".
+- `shell_segmentation._QUOTED_HEREDOC_BODY_PATTERN` blanked the line after
+  `cat <<<'EOF'` as a quoted heredoc body. That line is a command bash runs,
+  so `destructive_git` and `pipe_blocker` allowed it (probed on main
+  01827942b).
+- `core.utils.split_heredocs` took that line out of the command text, and
+  `background_process_tracker` masked it.
+
+**Remedied on the n101 branch.** Both shell-expansion scanners step over the
+whole `<<<`, and the three regexes carry a `(?<!<)` lookbehind. The view
+scanner already consumed `<<<` whole; main's normalised-word scan matches
+`<<<` on accumulated operators and was not affected. Tests, each RED on main
+01827942b: `test_a_here_string_word_is_read_as_a_word_n116` (five shapes,
+including `sh -s`, `xargs -0 bash -c` and the unspaced `<<<$'…'`) through
+`HandlerChain`; `TestAHereStringIsNotAHeredoc` through `HandlerChain` for
+`destructive_git`; and primitive tests for `strip_quoted_heredoc_bodies`,
+`split_heredocs` and `_command_is_backgrounded`.
+
+### N115 — ✅ Remedied (n101 branch) — A `}` before the first comma of a quote-free brace word hides a brace-spelled path
+
+**Found by the N101 round-7 D-SEC review** (shared MAJOR, report
+`subagent-reports/260926-n101-dsec7-opus-5-5.md`). Bash reads a `}` before
+a group's first comma as text, so `cat /proj/.vault-{},pass}` reads
+`/proj/.vault-}` and `/proj/.vault-pass`. The quote-blind reading pairs `{}`
+instead. The bash-accurate reader (`_BashBraces`) ran only on words holding
+a quoting character, in both `expand_braces` and the shell-word scanner, so
+31 of 167 fuzzed quote-free words that spell the path were allowed. Main
+allows them too.
+
+**Remedied on the n101 branch.** `expand_braces` reads every word both
+ways, and `iter_shell_brace_words` reports every word holding a brace,
+whatever its quoting. `iter_every_shell_brace_word` and the `every_word`
+switch are gone, because nothing is left for them to select. A word's value
+after quote removal is re-read as a command whenever it holds a brace. The
+bash differential test now draws a quarter of its words with a `}` or `{}`
+leading the first alternative, and a new run draws from quote-free
+primitives only. Both runs are RED before the fix. Tests:
+`test_a_close_brace_before_the_first_comma_is_text_n115` (five shapes) and
+the Write `.sh` case, through `HandlerChain`, RED on main 01827942b.
+
 ### N113 — ✅ Remedied (n101 branch) — An unrelated unresolvable prefix switches off `secret_file_guard`'s N107 coverage
 
 **Found by the N101 round-6 D-SEC review** (minor, report

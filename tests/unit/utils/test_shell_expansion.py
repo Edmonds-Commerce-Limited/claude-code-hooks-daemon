@@ -28,7 +28,6 @@ from claude_code_hooks_daemon.utils.shell_expansion import (
     bounded_recursive_glob,
     expand_braces,
     iter_brace_words,
-    iter_every_shell_brace_word,
     iter_normalised_shell_words,
     iter_shell_brace_words,
     normalise_word,
@@ -252,22 +251,51 @@ class TestIterShellBraceWords:
     @pytest.mark.parametrize(
         ("text", "expected"),
         [
-            ("cat {a,b}", []),
-            ("echo '{a,b}' x", ["'{a,b}'"]),
-            ("cat <<'EOF'\nplain {a,b}\nEOF", []),
+            ("cat {a,b}", ["{a,b}"]),
+            ("echo '{a,b}' x", ["'{a,b}'", "{a,b}"]),
+            ("cat <<'EOF'\nplain {a,b}\nEOF", ["{a,b}"]),
+            ("echo {a,b} '{c,d}' plain", ["{a,b}", "'{c,d}'", "{c,d}"]),
+            ("cat .p-{},q}", [".p-{},q}"]),
         ],
     )
-    def test_words_holding_no_quoting_are_left_to_iter_brace_words(
+    def test_every_word_holding_a_brace_is_reported_whatever_its_quoting_n115(
         self, text: str, expected: list[str]
     ) -> None:
+        """Plan 00466 N115: bash groups a quote-free word differently from
+        the quote-blind reading too."""
         assert list(iter_shell_brace_words(text)) == expected
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "bash <<< $'cat .p-\\x7bq,r\\x7d'",
+            "bash <<<$'cat .p-\\x7bq,r\\x7d'",
+            "sh -s <<< $'cat .p-\\x7bq,r\\x7d'",
+            "bash 2>/dev/null <<< $'cat .p-\\x7bq,r\\x7d'",
+        ],
+    )
+    def test_a_here_string_word_is_an_ordinary_word_n116(self, text: str) -> None:
+        """Plan 00466 N116: at the second `<` of `<<<`, `<<` was read as a
+        heredoc, and the here-string word became its delimiter."""
+        assert ".p-{q,r}" in list(iter_shell_brace_words(text))
+
+    def test_a_heredoc_after_a_here_string_is_still_a_heredoc(self) -> None:
+        text = "cat <<< x <<'EOF'\ncat .p-{\"} x\",q}\nEOF"
+        assert '.p-{"} x",q}' in list(iter_shell_brace_words(text))
+
+    def test_a_here_string_in_a_substitution_is_not_a_heredoc_n116(self) -> None:
+        text = 'echo "$(cat <<< hi)" .p-{"} x",q}'
+        assert '.p-{"} x",q}' in list(iter_shell_brace_words(text))
 
     def test_unresolvable_quoting_with_a_group_after_it_raises(self) -> None:
         with pytest.raises(UnresolvableBraceQuotingError):
             list(iter_shell_brace_words('echo "${x:-"a"}" .p-{"} x",q}'))
 
     def test_unresolvable_quoting_with_no_group_after_it_ends_the_scan(self) -> None:
-        assert list(iter_shell_brace_words('echo .p-{"a",b} "${x:-"a"}" done')) == ['.p-{"a",b}']
+        assert list(iter_shell_brace_words('echo .p-{"a",b} "${x:-"a"}" done')) == [
+            '.p-{"a",b}',
+            ".p-{a,b}",
+        ]
 
     def test_nesting_past_the_bound_raises(self) -> None:
         text = "echo " + "$(echo " * 10 + '.p-{"a",b}' + ")" * 10
@@ -312,12 +340,6 @@ class TestIterShellBraceWords:
         self, text: str
     ) -> None:
         assert list(iter_shell_brace_words(text)) == []
-
-    def test_every_word_holding_a_brace_is_reported_when_asked(self) -> None:
-        assert list(iter_every_shell_brace_word("echo {a,b} '{c,d}' plain")) == [
-            "{a,b}",
-            "'{c,d}'",
-        ]
 
     def test_a_word_quote_removal_leaves_unchanged_is_not_reread(self) -> None:
         """A lone `$` is a quoting character that quote removal keeps."""

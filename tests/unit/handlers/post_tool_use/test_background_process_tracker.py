@@ -160,6 +160,11 @@ class TestHeredocBodies:
         """``<<<`` takes a single-line word, not a delimited body."""
         assert _command_is_backgrounded('grep x <<< "a & b"') is False
 
+    def test_a_line_after_a_here_string_is_a_command_n116(self):
+        """Plan 00466 N116: from its second `<`, `<<<EOF` read as a heredoc
+        opener, and the command on the next line was masked as its body."""
+        assert _command_is_backgrounded("cat <<<EOF\nsleep 600 &\nEOF") is True
+
     def test_masking_preserves_length(self):
         assert len(_mask_heredoc_bodies(self.QUOTED_HEREDOC)) == len(self.QUOTED_HEREDOC)
 

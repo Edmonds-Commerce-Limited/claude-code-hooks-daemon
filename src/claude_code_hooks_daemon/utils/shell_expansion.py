@@ -215,13 +215,14 @@ def expand_braces(
     Plan 00466 review 3 -- the prior eager recursive expander took >45s on
     `{a,b}` x 22; this gives up in well under a second on the SAME input).
 
-    A word holding a quoting character (:data:`_QUOTING_CHARS`) is read a
-    second way too, as bash reads it (Plan 00466 N107): a quoted or escaped
-    brace or comma is not brace syntax, so ``.p-{"}",q}`` spells ``.p-q``.
-    The quote-blind reading above pairs ``{"}`` instead and never reaches
-    it. Both readings are returned, each under the same caps: the word may
-    be a fragment of a longer shell word whose quoting began before it, and
-    the quote-blind reading is the one every earlier caller relied on.
+    Every word is read a second way too, as bash reads it (Plan 00466 N107,
+    N115): a quoted or escaped brace or comma is not brace syntax, so
+    ``.p-{"}",q}`` spells ``.p-q``, and a ``}`` before a group's first
+    comma is text, so ``.p-{},q}`` does too. The quote-blind reading above
+    pairs ``{"}`` and ``{}`` instead and never reaches it. Both readings are
+    returned, each under the same caps: the word may be a fragment of a
+    longer shell word whose quoting began before it, and the quote-blind
+    reading is the one every earlier caller relied on.
     A substitution that cannot be placed with certainty raises
     :class:`UnresolvableBraceQuotingError` (:func:`_substitution_end`) when
     a group could be at stake (:func:`_may_hold_a_group`).
@@ -229,8 +230,6 @@ def expand_braces(
     spellings = _capped(
         _raw_brace_expansions(word, depth=0, max_depth=max_depth), word, max_spellings
     )
-    if _QUOTING_CHARS.isdisjoint(word):
-        return spellings
     try:
         braces = _BashBraces(word, max_depth=max_depth)
         quote_aware = _capped(
@@ -407,7 +406,11 @@ def _substitution_end(text: str, open_paren: int, substitutions: list[str] | Non
             raise UnresolvableBraceQuotingError(
                 f"a case command inside {text[open_paren - 1 : open_paren + 80]!r}"
             )
-        if text.startswith("<<", j) and not text.startswith("<<<", j):
+        if text.startswith(_HERE_STRING_OPERATOR, j):
+            j += len(_HERE_STRING_OPERATOR)
+            word_start = True
+            continue
+        if text.startswith("<<", j):
             raise UnresolvableBraceQuotingError(
                 f"a heredoc inside {text[open_paren - 1 : open_paren + 80]!r}"
             )
@@ -659,14 +662,17 @@ def shell_word_spellings(
 
 def iter_shell_brace_words(text: str) -> Iterator[str]:
     """Every word of ``text``, split as bash splits it, that holds a brace
-    and a quoting character (Plan 00466 N107).
+    (Plan 00466 N107, N115).
 
     :func:`iter_brace_words` splits on every whitespace character, quoted or
     not, so a group holding quoted whitespace (``.p-{"} x",q}``) reaches the
     expander in pieces, none of which spells the path. This splitter reads
     quotes, escapes and substitutions with :func:`_quoted_span_end` and
-    skips comments. A word holding no quoting character is found and read
-    the same way by :func:`iter_brace_words`, so it is not repeated.
+    skips comments. A word holding no quoting character is reported too:
+    bash's grouping rules differ from :func:`iter_brace_words`' quote-blind
+    pairing even there (a ``}`` before the first comma is text, so
+    ``.p-{},q}`` spells ``.p-q``). A here-string (``<<<``) word is an
+    ordinary word, not a heredoc delimiter (Plan 00466 N116).
 
     Text a shell may run is read as a command in its own right, as the
     quote-blind reading always did implicitly: every command substitution's
@@ -691,19 +697,11 @@ def iter_shell_brace_words(text: str) -> Iterator[str]:
     :class:`UnresolvableBraceQuotingError`, otherwise there is none left to
     miss and the scan ends.
     """
-    return _shell_brace_words(text, depth=0, every_word=False)
+    return _shell_brace_words(text, depth=0)
 
 
-def iter_every_shell_brace_word(text: str) -> Iterator[str]:
-    """Every word of ``text``, split as bash splits it, that holds a brace,
-    whatever its quoting: :func:`iter_shell_brace_words` for text whose
-    brace words :func:`iter_brace_words` does not all reach."""
-    return _shell_brace_words(text, depth=0, every_word=True)
-
-
-def _shell_brace_words(text: str, *, depth: int, every_word: bool) -> Iterator[str]:
-    """The words of :func:`iter_shell_brace_words`; with ``every_word``,
-    those holding no quoting character too."""
+def _shell_brace_words(text: str, *, depth: int) -> Iterator[str]:
+    """The words of :func:`iter_shell_brace_words`."""
     if depth > _MAX_NESTED_SHELL_DEPTH:
         raise UnresolvableBraceQuotingError("shell word nesting exceeds its depth bound")
     n = len(text)
@@ -713,7 +711,7 @@ def _shell_brace_words(text: str, *, depth: int, every_word: bool) -> Iterator[s
     while i < n:
         ch = text[i]
         if ch in _COMMAND_END_CHARS and command_words:
-            yield from _eval_words(command_words, depth=depth, every_word=every_word)
+            yield from _eval_words(command_words, depth=depth)
             command_words = []
         if ch == "\n":
             i += 1
@@ -721,14 +719,15 @@ def _shell_brace_words(text: str, *, depth: int, every_word: bool) -> Iterator[s
                 bodies, i = _read_heredoc_bodies(text, i, heredocs)
                 heredocs = []
                 for body_start, body_end, quoted in bodies:
-                    yield from _heredoc_body_words(
-                        text[body_start:body_end], quoted, depth=depth, every_word=every_word
-                    )
+                    yield from _heredoc_body_words(text[body_start:body_end], quoted, depth=depth)
             continue
         if ch in " \t":
             i += 1
             continue
-        if text.startswith("<<", i) and not text.startswith("<<<", i):
+        if text.startswith(_HERE_STRING_OPERATOR, i):
+            i += len(_HERE_STRING_OPERATOR)
+            continue
+        if text.startswith("<<", i):
             strip_tabs = text.startswith("<<-", i)
             i += 3 if strip_tabs else 2
             while i < n and text[i] in " \t":
@@ -754,19 +753,17 @@ def _shell_brace_words(text: str, *, depth: int, every_word: bool) -> Iterator[s
         if end is None:
             break
         word = text[i:end]
-        if "{" in word and "}" in word and (every_word or not _QUOTING_CHARS.isdisjoint(word)):
+        if _holds_braces(word):
             yield word
         for body in substitutions:
-            yield from _shell_brace_words(body, depth=depth + 1, every_word=every_word)
+            yield from _shell_brace_words(body, depth=depth + 1)
         value = word if _QUOTING_CHARS.isdisjoint(word) else normalise_word(word)
         if value != word:
-            yield from _nested_command_words(
-                value, depth=depth, every_word=every_word, decoded=_ANSI_C_OPENER in word
-            )
+            yield from _nested_command_words(value, depth=depth, decoded=_ANSI_C_OPENER in word)
         command_words.append(word)
         i = end
     if command_words:
-        yield from _eval_words(command_words, depth=depth, every_word=every_word)
+        yield from _eval_words(command_words, depth=depth)
 
 
 #: What ends a simple command for :func:`_eval_words`.
@@ -784,23 +781,21 @@ _EVAL_PREFIXES: Final[tuple[tuple[str, ...], ...]] = (
 _ANSI_C_OPENER: Final[str] = "$'"
 
 
-def _holds_quoted_braces(text: str) -> bool:
-    return "{" in text and "}" in text and not _QUOTING_CHARS.isdisjoint(text)
+def _holds_braces(text: str) -> bool:
+    return "{" in text and "}" in text
 
 
-def _nested_command_words(
-    code: str, *, depth: int, every_word: bool, decoded: bool
-) -> Iterator[str]:
+def _nested_command_words(code: str, *, depth: int, decoded: bool) -> Iterator[str]:
     """``code`` read as a command: a word's value after quote removal, when
     that removed something, or ``eval``'s joined arguments. Read when it
-    still holds a quoted brace, or whatever it holds when ANSI-C decoding
-    (``decoded``) made it, since a brace may come from that decoding
-    (``$'\\x7b'``) with no quote left."""
-    if decoded or _holds_quoted_braces(code):
-        yield from _shell_brace_words(code, depth=depth + 1, every_word=every_word or decoded)
+    still holds a brace, or whatever it holds when ANSI-C decoding
+    (``decoded``) made it, since a nested ``$'...'`` in it may decode to a
+    brace in turn (``$'$\\'\\\\x7b\\''``)."""
+    if decoded or _holds_braces(code):
+        yield from _shell_brace_words(code, depth=depth + 1)
 
 
-def _eval_words(words: list[str], *, depth: int, every_word: bool) -> Iterator[str]:
+def _eval_words(words: list[str], *, depth: int) -> Iterator[str]:
     """``eval``'s arguments after quote removal, joined by single spaces as
     ``eval`` joins them, read as a command."""
     if all(_QUOTING_CHARS.isdisjoint(word) for word in words):
@@ -810,9 +805,7 @@ def _eval_words(words: list[str], *, depth: int, every_word: bool) -> Iterator[s
         if tuple(values[: len(prefix)]) == prefix:
             code = " ".join(values[len(prefix) :])
             decoded = any(_ANSI_C_OPENER in word for word in words[len(prefix) :])
-            yield from _nested_command_words(
-                code, depth=depth, every_word=every_word, decoded=decoded
-            )
+            yield from _nested_command_words(code, depth=depth, decoded=decoded)
             return
 
 
@@ -906,11 +899,11 @@ def _read_heredoc_bodies(
     return bodies, min(i, n)
 
 
-def _heredoc_body_words(body: str, quoted: bool, *, depth: int, every_word: bool) -> Iterator[str]:
+def _heredoc_body_words(body: str, quoted: bool, *, depth: int) -> Iterator[str]:
     """Words of a heredoc body read as a command, which a shell fed the
     body runs; and, for an unquoted body, of the commands it substitutes,
     where quotes are text and a backslash and a substitution are not."""
-    yield from _shell_brace_words(body, depth=depth + 1, every_word=every_word)
+    yield from _shell_brace_words(body, depth=depth + 1)
     if quoted:
         return
     substitutions: list[str] = []
@@ -927,7 +920,7 @@ def _heredoc_body_words(body: str, quoted: bool, *, depth: int, every_word: bool
         if _may_hold_a_group(body, j):
             raise
     for nested in substitutions:
-        yield from _shell_brace_words(nested, depth=depth + 1, every_word=every_word)
+        yield from _shell_brace_words(nested, depth=depth + 1)
 
 
 def iter_brace_words(text: str, *, max_words: int = DEFAULT_MAX_BRACE_WORDS) -> Iterator[str]:
@@ -1397,7 +1390,7 @@ def python_program_streams(source: str) -> PythonProgramStreams | None:
     ``code_words`` are the words :func:`iter_brace_words` finds in the raw
     text, less those wholly inside one string literal or comment, which
     ``literals`` reports already (D-RULE-4 MAJOR 1). ``shell_words`` are
-    every word :func:`iter_every_shell_brace_word` finds, inside a literal
+    every word :func:`iter_shell_brace_words` finds, inside a literal
     or not (D-RULE-6 MAJOR 1): Python's quoting and bash's can disagree
     about where a literal ends, and an escape can change the literal's
     braces, so its decoded value does not stand for the word bash reads.
@@ -1439,7 +1432,7 @@ def python_program_streams(source: str) -> PythonProgramStreams | None:
     return PythonProgramStreams(
         tuple(dict.fromkeys(literals)),
         tuple(dict.fromkeys(_code_brace_words(source, found.spans))),
-        tuple(dict.fromkeys(iter_every_shell_brace_word(source))),
+        tuple(dict.fromkeys(iter_shell_brace_words(source))),
     )
 
 

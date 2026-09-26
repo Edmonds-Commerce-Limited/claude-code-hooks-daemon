@@ -74,10 +74,10 @@ _MASK_CHAR: Final[str] = " "
 _LINE_SEPARATOR: Final[str] = "\n"
 
 # A heredoc operator: ``<<`` or ``<<-`` followed by an optionally-quoted
-# delimiter word. ``<<<`` (a herestring) does not match — its next character is
-# ``<``, which cannot start a delimiter word.
+# delimiter word. ``<<<`` (a herestring) does not match: the lookbehind keeps
+# its last two characters from reading as ``<<`` (Plan 00466 N116).
 _HEREDOC_OPEN_RE: Final[re.Pattern[str]] = re.compile(
-    r"<<-?\s*(?P<quote>['\"]?)(?P<delim>[A-Za-z_][A-Za-z0-9_]*)(?P=quote)"
+    r"(?<!<)<<-?\s*(?P<quote>['\"]?)(?P<delim>[A-Za-z_][A-Za-z0-9_]*)(?P=quote)"
 )
 
 
