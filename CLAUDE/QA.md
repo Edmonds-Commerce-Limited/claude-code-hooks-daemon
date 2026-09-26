@@ -133,6 +133,9 @@ while the runner ran considerably more.
     failed or errored test's record in `tests.json` carries the first line
     of its error as `reason`, and the gate's summary prints it after the
     node id (ledger 00466 N196).
+  - `tests/conftest.py` loads that plugin, not a `-p` flag. A `-p` plugin
+    is imported before pytest-cov starts, so the package code it imports is
+    never measured: coverage fell to 92.61% with no test missing (N110).
   - To run the whole stage alone, use `./scripts/qa/llm_qa.py tests`.
     `run_tests.sh` alone runs only the primary.
 - **Security** (Bandit) — zero HIGH/MEDIUM/LOW issues; only B101 is filtered

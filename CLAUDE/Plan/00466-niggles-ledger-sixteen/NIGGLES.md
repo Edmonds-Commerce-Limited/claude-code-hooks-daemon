@@ -839,6 +839,35 @@ the gate's version set against the workflow's matrix. The behaviour is
 documented in `CLAUDE/QA.md`, and the report is
 `subagent-reports/260926-n110-opus-5-5.md`.
 
+**Round 3: the gate reported 92.61% coverage with every test passing.**
+The gate at `c9c38145c` ran 30,551 primary tests, the usual count, and
+coverage failed `fail_under=95`. The cause was N196's own fix, so main does
+not share it. `run_tests.sh` loaded the `first_error_lines` plugin with
+`-p claude_code_hooks_daemon.qa.first_error_lines`. pytest imports a `-p`
+plugin while it parses its arguments, before pytest-cov starts. That import
+runs the package `__init__`, which imports `core`, `constants`, `qa.runner`
+and more, so none of their module-level lines were measured.
+
+- Evidence: against `p408-inert-heads` (95.09%, 53,395 statements) the gate
+  had 1,713 more missing lines, and the largest gaps were import-only
+  modules: `constants/handlers.py` (164 of 165 missing), `constants/priority.py`
+  (160 of 160) and `core/__init__.py` (19 of 19).
+- Controlled measurement: the same 228 tests in `tests/unit/constants`, run
+  with and without the `-p` flag, gave `constants/priority.py` 160 missing
+  lines and 0 missing lines.
+- The shared-data-file and `--cov`-config candidates were ruled out. The
+  extra runs take no `--cov`, and the primary's coverage flags are unchanged
+  from main.
+
+**✅ Remedied on `worktree-n466-n110`.** `tests/conftest.py` loads the plugin
+through `pytest_plugins`, which runs after coverage has started. Neither
+`run_tests.sh` nor `run_test_matrix.py` passes `-p` any more.
+`TestThePluginLoadsAfterCoverageStarts` in
+`tests/unit/qa/test_run_test_matrix.py` evaluates `run_tests.sh`'s own
+`FIRST_ERROR_ARGS` in bash, and runs an extra run's argv, under `--cov` over
+one small test file. It asserts that the import-only `core/__init__.py` and
+`qa/__init__.py` have no missing lines. It was RED on `c9c38145c`.
+
 ### N114 — A `py311` fingerprint venv is built on whatever Python uv prefers
 
 **Found by the N110 fixer.** `ensure_venv ... python3` computes the venv's

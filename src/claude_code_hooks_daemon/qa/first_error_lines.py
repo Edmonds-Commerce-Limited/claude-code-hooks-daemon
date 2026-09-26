@@ -5,10 +5,13 @@ failure's message to the terminal width, and the gate's summary printed node
 ids only. Ten errored tests were named with no cause: the reason (no daemon
 was running) was in the shard's raw log alone.
 
-Loaded with ``-p claude_code_hooks_daemon.qa.first_error_lines`` and given
-``--first-error-lines=PATH``, it appends one JSON record per failed or errored
-test phase to PATH: ``{"nodeid", "when", "line"}``. Without the option it
-writes nothing. ``attach_first_error_lines`` puts each line on its test's
+This project's ``tests/conftest.py`` loads it through ``pytest_plugins``;
+elsewhere it loads with ``-p claude_code_hooks_daemon.qa.first_error_lines``.
+Never load it with ``-p`` in a coverage run: that imports the package before
+pytest-cov starts, so its import-time code goes unmeasured (00466 N110).
+Given ``--first-error-lines=PATH``, it appends one JSON record per failed or
+errored test phase to PATH: ``{"nodeid", "when", "line"}``. Without the option
+it writes nothing. ``attach_first_error_lines`` puts each line on its test's
 record in ``tests.json`` as ``reason``.
 """
 

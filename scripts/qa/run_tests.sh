@@ -18,7 +18,9 @@ FIRST_ERROR_LINES_FILE="${PROJECT_ROOT}/untracked/qa/first-error-lines.jsonl"
 # Each failed or errored test's first error line, put on its tests.json record
 # as "reason" so the gate's summary says why it failed, not only which (00466
 # N196). The plugin appends, so a previous run's file is removed first.
-FIRST_ERROR_ARGS=(-p claude_code_hooks_daemon.qa.first_error_lines --first-error-lines="${FIRST_ERROR_LINES_FILE}")
+# tests/conftest.py loads the plugin; `-p` would import the package before
+# coverage starts and leave its import-time code unmeasured (N110).
+FIRST_ERROR_ARGS=(--first-error-lines="${FIRST_ERROR_LINES_FILE}")
 
 # Source venv management
 # shellcheck source=../venv-include.bash

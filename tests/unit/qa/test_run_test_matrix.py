@@ -18,6 +18,8 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
+import subprocess
 import sys
 from pathlib import Path
 from typing import Any
@@ -463,15 +465,117 @@ class TestTheSummaryStatesTheVersionsTested:
 class TestThePrimaryRunRecordsFirstErrorLines:
     """run_tests.sh is the primary's runner; its failures must carry a reason too."""
 
-    def test_both_pytest_invocations_load_the_plugin(self) -> None:
+    def test_both_pytest_invocations_pass_the_option(self) -> None:
         script = (SCRIPTS_DIR / "run_tests.sh").read_text(encoding="utf-8")
         assert script.count('"${FIRST_ERROR_ARGS[@]}"') == 2
-        assert f"-p {PLUGIN}" in script
         assert f"{OPTION}=" in script
+
+    def test_the_plugin_is_not_loaded_with_dash_p(self) -> None:
+        """``-p`` imports the package before pytest-cov starts; see the class below."""
+        script = (SCRIPTS_DIR / "run_tests.sh").read_text(encoding="utf-8")
+        assert f"-p {PLUGIN}" not in script
 
     def test_both_report_builders_attach_the_lines(self) -> None:
         script = (SCRIPTS_DIR / "run_tests.sh").read_text(encoding="utf-8")
         assert script.count("attach_first_error_lines(tests, ") == 2
+
+
+# Import-only modules: every line runs when the module is imported, so any line
+# coverage reports missing was executed before measurement started.
+_IMPORT_ONLY_MODULES = (
+    "src/claude_code_hooks_daemon/core/__init__.py",
+    "src/claude_code_hooks_daemon/qa/__init__.py",
+)
+_SMALL_TARGET = "tests/unit/constants/test_tools.py"
+
+
+def _run_tests_sh_plugin_args(lines: Path) -> list[str]:
+    """run_tests.sh's own FIRST_ERROR_ARGS, evaluated by bash as the script does."""
+    script = (SCRIPTS_DIR / "run_tests.sh").read_text(encoding="utf-8")
+    assignments = [line for line in script.splitlines() if line.startswith("FIRST_ERROR_ARGS=(")]
+    assert len(assignments) == 1, assignments
+    completed = subprocess.run(
+        ["bash", "-c", f'{assignments[0]}\nprintf "%s\\n" "${{FIRST_ERROR_ARGS[@]}}"'],
+        env={"PATH": os.environ["PATH"], "FIRST_ERROR_LINES_FILE": str(lines)},
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    return completed.stdout.splitlines()
+
+
+def _missing_import_time_lines(plugin_args: list[str], tmp_path: Path) -> dict[str, int]:
+    """Measure a small target with the given plugin arguments, as the QA stage does."""
+    report = tmp_path / "coverage.json"
+    env = {
+        key: value
+        for key, value in os.environ.items()
+        if not key.startswith("COVERAGE_") and key != "PYTEST_ADDOPTS"
+    }
+    env["COVERAGE_FILE"] = str(tmp_path / ".coverage")
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "pytest",
+            "-q",
+            "-p",
+            "no:cacheprovider",
+            *plugin_args,
+            "--cov=src/claude_code_hooks_daemon",
+            "--cov-branch",
+            "--cov-fail-under=0",
+            f"--cov-report=json:{report}",
+            _SMALL_TARGET,
+        ],
+        cwd=PROJECT_ROOT,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert completed.returncode == 0, f"{completed.stdout}\n{completed.stderr}"
+    files = json.loads(report.read_text(encoding="utf-8"))["files"]
+    return {name: int(files[name]["summary"]["missing_lines"]) for name in _IMPORT_ONLY_MODULES}
+
+
+class TestThePluginLoadsAfterCoverageStarts:
+    """Import-time code is measured in the QA stage (00466 N110 round 3).
+
+    ``-p claude_code_hooks_daemon.qa.first_error_lines`` imports the plugin
+    while pytest parses its arguments, before pytest-cov starts measuring. The
+    import runs the package ``__init__``, which imports ``core`` and more, so
+    every module-level line of those modules went unmeasured: the primary run
+    reported 92.61% over tests that cover 95%. The suite's conftest loads the
+    plugin instead, after coverage has started.
+    """
+
+    def test_the_primary_runs_plugin_arguments_leave_import_time_code_measured(
+        self, tmp_path: Path
+    ) -> None:
+        plugin_args = _run_tests_sh_plugin_args(tmp_path / "lines.jsonl")
+
+        missing = _missing_import_time_lines(plugin_args, tmp_path)
+
+        assert missing == dict.fromkeys(_IMPORT_ONLY_MODULES, 0), (
+            f"run_tests.sh's plugin arguments {plugin_args} import the package "
+            "before coverage starts"
+        )
+
+    def test_an_extra_runs_plugin_arguments_leave_import_time_code_measured(
+        self, tmp_path: Path
+    ) -> None:
+        matrix = _load_matrix()
+        run = matrix.PlannedRun("3.13", "unit", 1, False)
+        argv = matrix.extra_pytest_argv(Path(sys.executable), run, tmp_path / "lines.jsonl")
+        plugin_args = argv[3 : len(argv) - len(matrix.SCOPE_PYTEST_ARGS[run.scope])]
+
+        missing = _missing_import_time_lines(plugin_args, tmp_path)
+
+        assert missing == dict.fromkeys(_IMPORT_ONLY_MODULES, 0)
+
+    def test_the_suites_conftest_registers_the_plugin(self, pytestconfig: pytest.Config) -> None:
+        assert pytestconfig.pluginmanager.get_plugin(PLUGIN) is not None
 
 
 class TestPytestLogParsing:
@@ -530,7 +634,7 @@ class TestPytestLogParsing:
             )
         }
 
-    def test_an_extra_run_loads_the_first_error_lines_plugin(self, tmp_path: Path) -> None:
+    def test_an_extra_run_records_first_error_lines(self, tmp_path: Path) -> None:
         matrix = _load_matrix()
         run = matrix.PlannedRun("3.13", "rest", 2, False)
         lines = tmp_path / "lines.jsonl"
@@ -538,7 +642,7 @@ class TestPytestLogParsing:
         argv = matrix.extra_pytest_argv(Path("/fake/py3.13/bin/python"), run, lines)
 
         assert argv[:3] == ["/fake/py3.13/bin/python", "-m", "pytest"]
-        assert ["-p", PLUGIN] == argv[argv.index(PLUGIN) - 1 : argv.index(PLUGIN) + 1]
+        assert PLUGIN not in argv
         assert f"{OPTION}={lines}" in argv
         assert argv[-2:] == ["tests", "--ignore=tests/unit"]
 

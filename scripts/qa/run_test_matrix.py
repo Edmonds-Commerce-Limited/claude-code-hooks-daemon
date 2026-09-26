@@ -19,8 +19,8 @@ time and runs the whole suite under every version in it:
   transport), so two of them at once would contend. The daemon is started
   before each of them if it has idled out.
 - Every run records each failed test's first error line (the
-  ``first_error_lines`` pytest plugin), and the report carries it as that
-  test's ``reason``.
+  ``first_error_lines`` pytest plugin, which ``tests/conftest.py`` loads), and
+  the report carries it as that test's ``reason``.
 
 An extra interpreter that cannot be provisioned FAILS the stage and says so;
 the stage never quietly runs fewer versions than CI. Its report is written
@@ -44,9 +44,6 @@ import yaml
 
 from claude_code_hooks_daemon.qa.first_error_lines import (
     OPTION as FIRST_ERROR_LINES_OPTION,
-)
-from claude_code_hooks_daemon.qa.first_error_lines import (
-    PLUGIN as FIRST_ERROR_LINES_PLUGIN,
 )
 from claude_code_hooks_daemon.qa.first_error_lines import read_first_error_lines
 from claude_code_hooks_daemon.qa.pytest_text_report import (
@@ -500,8 +497,6 @@ def extra_pytest_argv(python: Path, run: PlannedRun, lines: Path) -> list[str]:
         "pytest",
         "-p",
         "no:cacheprovider",
-        "-p",
-        FIRST_ERROR_LINES_PLUGIN,
         f"{FIRST_ERROR_LINES_OPTION}={lines}",
         "--tb=short",
         *SCOPE_PYTEST_ARGS[run.scope],

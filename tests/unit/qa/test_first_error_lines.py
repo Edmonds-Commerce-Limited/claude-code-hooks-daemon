@@ -140,7 +140,7 @@ class TestTheHooksInProcess:
 
 
 class TestThePluginInARealRun:
-    """The plugin is loaded by name, exactly as the QA scripts load it."""
+    """The plugin is loaded by name in a project without this suite's conftest."""
 
     def test_every_failed_and_errored_test_is_recorded_and_nothing_else(
         self, tmp_path: Path
