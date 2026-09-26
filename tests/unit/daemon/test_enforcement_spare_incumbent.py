@@ -14,6 +14,8 @@ from claude_code_hooks_daemon.daemon.enforcement import enforce_single_daemon
 from claude_code_hooks_daemon.utils.safe_signal import DaemonStop
 
 _STOP = "claude_code_hooks_daemon.daemon.enforcement.stop_verified_daemon"
+# The peers here are pids no process holds; each is taken to serve a socket.
+_SERVES = "claude_code_hooks_daemon.daemon.enforcement._serves_a_socket"
 
 
 class TestEnforceSparesLiveSocketOwner:
@@ -48,6 +50,7 @@ class TestEnforceSparesLiveSocketOwner:
                 "claude_code_hooks_daemon.daemon.enforcement.read_pid_file",
                 return_value=incumbent_pid,
             ),
+            patch(_SERVES, return_value=True),
             patch(_STOP, return_value=DaemonStop.TERMINATED) as mock_stop,
         ):
             enforce_single_daemon(
@@ -90,6 +93,7 @@ class TestEnforceSparesLiveSocketOwner:
                 "claude_code_hooks_daemon.daemon.enforcement.read_pid_file",
                 return_value=None,
             ),
+            patch(_SERVES, return_value=True),
             patch(_STOP, return_value=DaemonStop.TERMINATED) as mock_stop,
         ):
             enforce_single_daemon(

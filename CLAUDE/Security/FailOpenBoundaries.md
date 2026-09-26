@@ -93,6 +93,20 @@ bad config would begin refusing every tool call — so the fix is owner-gated.
 The inventory exists so that the decision is made against a list rather than
 against an impression.
 
+## The CI passthrough does not cover a start under way
+
+`init.sh`'s CI passthrough lets every call through unjudged when the daemon
+is not installed in CI. It applies only to a daemon proven down after a start
+that failed. A start still under way when the hook must answer is not that
+case, so the hook denies the call with "the daemon is starting; retry"
+(Plan 00466 review 9, DR-3). In CI without `ci_enabled: true`, a start that
+keeps hanging therefore denies every call rather than passing them through.
+That is deliberate: it fails closed, and the operator sees why.
+
+With `ci_enabled: true`, a start under way is CI-enforced exactly as a start
+that failed (DR-2). The call is denied with the CI-enforced reason, and no
+recovery command is exempt, since CI enforcement exempts none.
+
 ## What the Defence does not catch
 
 - **Anything outside the five surfaces.** D-PUB-3 (`sensitive_content.py`'s

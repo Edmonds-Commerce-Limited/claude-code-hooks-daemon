@@ -20,16 +20,46 @@
   starting; retry" instead of the hook running into Claude Code's 60-second
   timeout, which lets the call through unchecked. Retry the call; nothing
   needs fixing.
-- Only one start of a daemon runs at a time. A `start` that finds another
-  still under way waits for it, up to 30 seconds, and then uses the daemon
-  it started. It launches its own only if that start failed. Before, a
-  retried hook found no PID file yet and started a second daemon. In a
-  container, that start's single-daemon enforcement stopped the daemon
-  still starting, so a start slower than the hook's 15 seconds never
-  finished. A start that never finishes blocks later ones and says so.
-  `stop` (and `restart`) ends it, after proving its pid the way it proves
-  a running daemon's. The lock is `<socket>.launch.lock`, beside the
-  socket.
+- In CI, a start still under way when the hook must answer is not treated
+  as "daemon not installed". Without `ci_enabled`, the call is denied as
+  "starting; retry" instead of passing through, so a start that keeps
+  hanging denies every call: it fails closed. With `ci_enabled: true`, it
+  is denied with the CI-enforced reason, and the recovery command is not
+  exempt, as it is not for any CI-enforced denial.
+- Only one start of a project's daemon runs at a time, whatever socket it
+  uses. A `start` that finds another still under way waits for it, up to
+  30 seconds, and then uses the daemon it started. It launches its own
+  only if that start failed. Before, two hooks at once, or a hook retried
+  while the daemon was starting, found no PID file yet and started a
+  second daemon. In a container, that start's single-daemon enforcement
+  stopped the daemon still starting, so a start slower than the hook's 15
+  seconds never finished. The lock is `daemon.launch.lock` in the
+  project's untracked directory.
+- Single-daemon enforcement stops only a daemon that serves a socket. A
+  launcher has its daemon's command line, since the daemon is its fork,
+  so enforcement also stopped a second `start` waiting its turn, and a
+  daemon still starting. Neither has bound a socket, and neither is
+  stopped now.
+- A start that never finishes blocks later ones and says so. `stop` (and
+  `restart`) ends it, after proving its pid the way it proves a running
+  daemon's. Before its daemon has named itself, `stop` finds the
+  launcher holding the lock in the kernel's lock table (`/proc/locks`),
+  checks that it has the lock file open, and proves it the same way. If
+  nothing can be identified or proven, `stop` says so, signals nothing,
+  and exits 1. `stop` also exits 1 when it cannot read the lock, instead
+  of reporting "Daemon not running".
+- A `start` whose caller has gone, such as a hook that timed out while the
+  start waited its turn, still launches the daemon. Its output goes
+  nowhere instead of ending the start with a broken pipe.
+- **Mixed versions during an upgrade.** A launcher of the version before
+  this one does not know the launch lock, and one already running when
+  the upgrade begins can still stop a new start's daemon in a container.
+  The upgrade stops the old daemon before it starts the new one (step 4,
+  and again in step 15's restart), but it does not wait for an old
+  launcher already running. That window lasts as long as such a launcher
+  does, which is a few seconds. The upgrade's restart already checks that
+  a daemon is running rather than trusting the starter's exit code, so a
+  starter stopped this way does not fail the upgrade.
 - The proof of which project a daemon serves reads its `--project-root`
   the way the daemon's own argument parser did. When there are two, it
   uses the last one. An abbreviated `--project-r` and the
@@ -41,8 +71,12 @@
   root or a root containing `..`, now proves nothing. A `..` after a
   symlink goes somewhere other than where it seems to. For example,
   `/var/run/../workspace` is `/workspace` when `/var/run` links to `/run`.
-  Roots are compared the way the daemon serves them, with symlinks
-  resolved.
+  The daemon's root is compared as written, never resolved: a link it
+  named may have been re-pointed since, and a path from another mount
+  namespace means something else here. It matches the caller's root as
+  given or with the caller's symlinks resolved. So a daemon started
+  through a symlinked project path is stopped by a caller naming the same
+  path, as `init.sh` does, but not by one naming only the resolved path.
 - `stop`, `restart` and single-daemon enforcement open a pidfd for the
   process before they check its identity, and send every signal through
   it. A process id reused at any point after that can only make the

@@ -44,6 +44,7 @@ import psutil
 from claude_code_hooks_daemon.daemon.process_verification import (
     _attributed_root,
     _is_daemon_server_process,
+    root_names_project,
 )
 
 #: Init's pid and the group it leads; never a target.
@@ -146,16 +147,13 @@ def verified_daemon_process(pid: object, *, project_root: Path | str) -> psutil.
 
     if not _is_daemon_server_process(cmdline):
         raise RefusedSignalTarget(f"pid {checked} is not a daemon server: {cmdline!r}")
-    # Both sides resolved, as cmd_start resolves the root it serves (review
-    # 8, S8-1): a process this one may signal shares its mount namespace.
     attributed = _attributed_root(process, cmdline)
     if attributed.root is None:
         raise RefusedSignalTarget(f"pid {checked} is a daemon server, but {attributed.refusal}")
-    expected = os.path.realpath(Path(project_root).absolute())
-    actual = os.path.realpath(attributed.root)
-    if actual != expected:
+    if not root_names_project(attributed.root, project_root):
         raise RefusedSignalTarget(
-            f"pid {checked} is a daemon for project root {actual!r}, not {expected!r}"
+            f"pid {checked} is a daemon for project root {attributed.root!r}, "
+            f"not {str(project_root)!r}"
         )
     return process
 

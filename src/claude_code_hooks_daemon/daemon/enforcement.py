@@ -8,6 +8,8 @@ import logging
 import os
 from pathlib import Path
 
+import psutil
+
 from claude_code_hooks_daemon.config.models import Config
 from claude_code_hooks_daemon.constants import Timeout
 from claude_code_hooks_daemon.daemon.paths import read_pid_file
@@ -36,6 +38,43 @@ def _stop_peer_daemon(pid: int, project_root: Path) -> str | None:
     except (RefusedSignalTarget, PermissionError) as failure:
         return str(failure)
     return "it survived SIGKILL" if outcome is DaemonStop.SURVIVED else None
+
+
+def _serves_a_socket(pid: int) -> bool:
+    """True when ``pid`` has bound a unix socket to a path: it serves.
+
+    A launcher never binds one, and connects only as a client, whose socket
+    has no path of its own; a daemon binds its socket once it has started.
+    A process whose sockets cannot be read is not proven to serve.
+    """
+    try:
+        process = psutil.Process(pid)
+        if hasattr(process, "net_connections"):
+            connections = process.net_connections(kind="unix")
+        else:
+            connections = process.connections(kind="unix")
+    except psutil.Error as exc:
+        logger.info("Cannot read the sockets of PID %d (%s); it is not proven to serve", pid, exc)
+        return False
+    # A unix socket's address is its path, which psutil's stubs type as an
+    # (ip, port) pair.
+    addresses: list[object] = [connection.laddr for connection in connections]
+    return any(isinstance(address, str) and address for address in addresses)
+
+
+def _serving_only(pids: list[int]) -> list[int]:
+    """``pids`` less every process that serves no socket.
+
+    Such a process is a launcher, which can be waiting on this start's
+    launch lock, or a daemon still starting: a start under way, never a
+    daemon to stop (ledger 00466 N232, lifecycle round 9). Its command line
+    alone cannot tell it from a daemon, as the daemon is its fork.
+    """
+    serving = [pid for pid in pids if _serves_a_socket(pid)]
+    for pid in pids:
+        if pid not in serving:
+            logger.info(f"Sparing PID {pid}: it serves no socket, so it is a start under way")
+    return serving
 
 
 def enforce_single_daemon(
@@ -98,6 +137,8 @@ def enforce_single_daemon(
         if incumbent_pid is not None and incumbent_pid in other_daemons:
             logger.info(f"Sparing live socket owner (PID {incumbent_pid}) from enforcement")
             other_daemons = [pid for pid in other_daemons if pid != incumbent_pid]
+
+    other_daemons = _serving_only(other_daemons)
 
     logger.debug(f"Found {len(other_daemons)} other daemon process(es)")
 

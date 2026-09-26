@@ -41,7 +41,7 @@ import time
 from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Final, Literal, cast
+from typing import TYPE_CHECKING, Any, Final, Literal, TextIO, cast
 
 logger = logging.getLogger(__name__)
 
@@ -89,6 +89,7 @@ from claude_code_hooks_daemon.daemon.process_verification import (
     add_global_arguments,
     daemon_process_project_root,
     is_this_users_process,
+    root_names_project,
 )
 from claude_code_hooks_daemon.daemon.server import (
     DaemonAlreadyRunningError,
@@ -548,7 +549,7 @@ def _reap_stale_runtime_files(project_path: Path, config: Config) -> None:
     stale_total = stale_daemon + stale_sessions
     write_cleanup_status(project_path, stale_total)
     if stale_total > 0:
-        print(f"Cleaned up {stale_total} stale file(s) older than {stale_days} days")
+        _say_before_fork(f"Cleaned up {stale_total} stale file(s) older than {stale_days} days")
 
     # Plan 00181 Task 4.2 (Decision 1): SURFACE reclaimable stale/legacy venvs
     # (~187 MB each) — the biggest disk offender — but never auto-delete them
@@ -556,7 +557,43 @@ def _reap_stale_runtime_files(project_path: Path, config: Config) -> None:
     # operator's guarded `prune-venvs` call.
     venv_advisory = _stale_venv_advisory(project_path)
     if venv_advisory is not None:
-        print(venv_advisory)
+        _say_before_fork(venv_advisory)
+
+
+def _detach_from_a_closed_reader(stream: TextIO) -> None:
+    """Point ``stream`` at /dev/null, its reader having gone, and drop what it held.
+
+    A launcher outlives the hook that ran it while it waits on the launch
+    lock, and so its pipe's reader (review 9, DR-5). What it prints then is
+    read by nobody; the start it makes must not end on that.
+    """
+    devnull = os.open(os.devnull, os.O_WRONLY)
+    try:
+        os.dup2(devnull, stream.fileno())
+    finally:
+        os.close(devnull)
+    stream.flush()
+
+
+def _say_before_fork(text: str) -> None:
+    """Print ``text`` on stdout, which the start does not depend on being read."""
+    try:
+        print(text)
+    except BrokenPipeError:
+        _detach_from_a_closed_reader(sys.stdout)
+
+
+def _flush_before_fork() -> None:
+    """Flush stdout and stderr, so neither fork inherits and re-emits their buffers.
+
+    A reader that has gone is detached from, not raised on (review 9,
+    DR-5): a retried launcher still starts its daemon.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.flush()
+        except BrokenPipeError:
+            _detach_from_a_closed_reader(stream)
 
 
 def cmd_start(args: argparse.Namespace) -> int:
@@ -586,17 +623,19 @@ def cmd_start(args: argparse.Namespace) -> int:
     # socket (that stays on the fork path only).
     _reap_stale_runtime_files(project_path, config)
 
-    # One start at a time (Plan 00466 lifecycle round 8b): a hook retried
-    # while a daemon is still initialising finds no PID file, and its start
-    # stopped that daemon (enforcement, in a container) or ran a second one.
-    # A start under way is waited on here instead; only one that has ended
-    # or died leaves the lock free.
+    # One start at a time (Plan 00466 lifecycle round 8b, N232): a hook
+    # retried while a daemon is still initialising finds no PID file, and its
+    # start stopped that daemon (enforcement, in a container) or ran a second
+    # one. A start under way is waited on here instead; only one that has
+    # ended or died leaves the lock free. The lock is the project's, whatever
+    # socket this start uses, as enforcement's targets are (review 9, DR-4).
+    lock_path = launch_lock_path(project_path)
     try:
-        launch = LaunchLock.take(socket_path, Timeout.DAEMON_START_BUDGET_SEC)
+        launch = LaunchLock.take(lock_path, Timeout.DAEMON_START_BUDGET_SEC)
     except StartLockTimeout:
         print(
-            f"ERROR: another start of this daemon was still under way after "
-            f"{Timeout.DAEMON_START_BUDGET_SEC:g}s (it holds {launch_lock_path(socket_path)}); "
+            f"ERROR: another start of this project's daemon was still under way after "
+            f"{Timeout.DAEMON_START_BUDGET_SEC:g}s (it holds {lock_path}); "
             "not launching a second one. 'stop' ends a start that never finishes.",
             file=sys.stderr,
         )
@@ -692,8 +731,7 @@ def _start_under_launch_lock(
     # interactive terminal and corrupts exactly the captured output that tooling
     # parses. `restart` showed "Sent SIGTERM (PID: N) / Daemon stopped" twice
     # with the same pid, reading as two daemons killed.
-    sys.stdout.flush()
-    sys.stderr.flush()
+    _flush_before_fork()
 
     # Daemonise process (fork and detach from terminal). The daemon reports
     # its progress through this pipe, and holds its write end for its whole
@@ -896,7 +934,7 @@ def _serves_this_project(pid: int, project_root: Path) -> bool:
     if not is_this_users_process(pid):
         return False
     proof = daemon_process_project_root(pid)
-    return proof.root is not None and proof.root == os.path.realpath(project_root)
+    return proof.root is not None and root_names_project(proof.root, project_root)
 
 
 def _socket_answers_for_project(socket_path: Path, project_root: Path) -> DaemonIdentity | None:
@@ -1146,16 +1184,25 @@ def _await_started_daemon(
             )
 
 
-def _start_under_way(socket_path: Path) -> StartUnderWay | None:
-    """The start holding the launch lock, or None when none is seen."""
-    try:
-        return start_under_way(socket_path)
-    except OSError as exc:
-        print(
-            f"WARNING: cannot read the launch lock ({exc}); a daemon still starting is not seen",
-            file=sys.stderr,
-        )
-        return None
+def _starting_process(starting: StartUnderWay) -> int | None:
+    """The process to stop for a start under way, printing which; None if none is known.
+
+    The daemon it named, or before that the launcher the kernel's lock
+    table shows holding the lock (review 9, DR-5): a launcher that hangs
+    before its fork holds every later start off and names nothing.
+    """
+    if starting.pid is not None:
+        print(f"Stopping the daemon still starting (PID {starting.pid})")
+        return starting.pid
+    if starting.holder is not None:
+        print(f"Stopping the start still under way (launcher PID {starting.holder})")
+        return starting.holder
+    print(
+        "ERROR: a start is under way, but it has named no daemon and the process "
+        "holding its launch lock cannot be identified; nothing was signalled. Retry.",
+        file=sys.stderr,
+    )
+    return None
 
 
 def cmd_stop(args: argparse.Namespace) -> int:
@@ -1172,21 +1219,28 @@ def cmd_stop(args: argparse.Namespace) -> int:
     socket_path = _resolve_socket_path(args, project_path)
 
     pid = read_pid_file(str(pid_path), verify_daemon=True)
+    from_a_start = pid is None
     if pid is None:
         # A daemon still starting has no PID file yet, and holds every later
-        # start off (round 8b), so one that never finishes is stopped here.
-        starting = _start_under_way(socket_path)
-        if starting is None:
-            print("Daemon not running")
-            return 0
-        if starting.pid is None:
+        # start of this project off (round 8b), so one that never finishes
+        # is stopped here. A lock that cannot be read leaves unknown whether
+        # one is under way, which is not "not running".
+        try:
+            starting = start_under_way(launch_lock_path(project_path))
+        except OSError as exc:
             print(
-                "ERROR: a start is under way and its daemon has not named itself yet; retry",
+                f"ERROR: cannot read the launch lock ({exc}), so a daemon still "
+                "starting cannot be seen; nothing was stopped",
                 file=sys.stderr,
             )
             return 1
-        pid = starting.pid
-        print(f"Stopping the daemon still starting (PID {pid})")
+        if starting is None:
+            print("Daemon not running")
+            return 0
+        starting_pid = _starting_process(starting)
+        if starting_pid is None:
+            return 1
+        pid = starting_pid
 
     # Plan 00466 N59: verify_daemon proves only that the pid is SOME daemon.
     # stop_verified_daemon proves it serves THIS project root, and the pidfd
@@ -1239,7 +1293,24 @@ def cmd_stop(args: argparse.Namespace) -> int:
 
     print("Daemon stopped")
     _release_stopped_daemon_files(pid, pid_path, socket_path)
+    if from_a_start and _a_start_is_still_under_way(project_path):
+        # The launcher stopped had already forked: its daemon holds the lock.
+        print(
+            "ERROR: the start is still under way (its daemon has yet to name itself); "
+            "retry 'stop'",
+            file=sys.stderr,
+        )
+        return 1
     return 0
+
+
+def _a_start_is_still_under_way(project_path: Path) -> bool:
+    """True unless the launch lock is proven free; one it cannot read counts as held."""
+    try:
+        return start_under_way(launch_lock_path(project_path)) is not None
+    except OSError as exc:
+        print(f"WARNING: cannot read the launch lock ({exc})", file=sys.stderr)
+        return True
 
 
 def _query_daemon_health(socket_path: Path, pid: int | None) -> dict[str, Any] | None:

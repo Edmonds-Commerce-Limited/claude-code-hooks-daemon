@@ -181,6 +181,21 @@ def _normalize_root(root: str | Path) -> str:
     return os.path.normpath(str(root))
 
 
+def root_names_project(process_root: str, project_root: Path | str) -> bool:
+    """True when a daemon's normalised root text names ``project_root``.
+
+    The daemon's text is never resolved (review 9, DR-1): a link it named
+    may have been re-pointed since it started, and a path from another
+    mount namespace resolves here to whatever this side holds there. The
+    caller's own root is a path in this namespace, so it may be matched as
+    given or resolved: a daemon started through a link is proven for a
+    caller naming that link, and one naming the real tree for a caller
+    naming it through a link.
+    """
+    caller = Path(project_root).absolute()
+    return process_root in (_normalize_root(caller), os.path.realpath(caller))
+
+
 def _extract_project_root(proc: psutil.Process) -> str | None:
     """Derive a daemon process's project root, most authoritative source first.
 
@@ -384,9 +399,9 @@ def daemon_process_project_root(pid: int) -> RootProof:
     """Prove which real project root a live daemon SERVER pid serves.
 
     This is the proof a caller needs before it signals ``pid`` on behalf of one
-    project: compare ``root`` with that project's own ``os.path.realpath``.
-    ``realpath`` is safe here, unlike in :func:`_normalize_root`, because a pid
-    this process can signal lives in its own mount namespace.
+    project: match ``root`` to that project with :func:`root_names_project`.
+    ``root`` is the daemon's own normalised text, never resolved (review 9,
+    DR-1).
 
     Args:
         pid: Candidate process id.
@@ -414,7 +429,7 @@ def daemon_process_project_root(pid: int) -> RootProof:
         return RootProof(
             root=None, refusal=f"PID {pid} is a daemon server, but {attributed.refusal}"
         )
-    return RootProof(root=os.path.realpath(attributed.root), refusal=None, source=attributed.source)
+    return attributed
 
 
 def _is_daemon_server_process(cmdline: list[str] | None) -> bool:

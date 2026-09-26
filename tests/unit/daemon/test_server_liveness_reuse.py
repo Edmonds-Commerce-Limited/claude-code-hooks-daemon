@@ -22,6 +22,8 @@ import fcntl
 import os
 import shutil
 import socket as socket_module
+import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -35,6 +37,7 @@ import pytest
 from claude_code_hooks_daemon.config.models import DaemonConfig, LogLevel
 from claude_code_hooks_daemon.constants import Timeout
 from claude_code_hooks_daemon.core.project_context import ProjectContext
+from claude_code_hooks_daemon.daemon.paths import cleanup_stale_daemon_files
 from claude_code_hooks_daemon.daemon.server import (
     DaemonAlreadyRunningError,
     DaemonIdentity,
@@ -740,24 +743,43 @@ class TestTheLaunchLock:
         clock.sleep.side_effect = lambda seconds: now.__setitem__(0, now[0] + seconds)
         return patch("claude_code_hooks_daemon.daemon.server.time", clock)
 
-    def test_it_is_a_sibling_of_the_socket_apart_from_the_start_lock(self, tmp_path: Path) -> None:
-        sock_path = tmp_path / "d.sock"
-        assert launch_lock_path(sock_path).parent == tmp_path
-        assert launch_lock_path(sock_path) != HooksDaemon._start_lock_path(sock_path)
+    def test_it_is_the_projects_whatever_socket_a_start_uses(self, tmp_path: Path) -> None:
+        """Review 9, DR-4: enforcement picks its targets by project root, so
+        every start of one project takes one lock, and a start through a
+        link to the project takes the same one."""
+        project = tmp_path / "project"
+        project.mkdir()
+        (tmp_path / "link").symlink_to(project)
+        path = launch_lock_path(project)
+        assert path == launch_lock_path(tmp_path / "link")
+        assert path != launch_lock_path(tmp_path / "other")
+        assert path.name == "daemon.launch.lock"
+
+    def test_the_stale_file_reaper_never_removes_it(self, tmp_path: Path) -> None:
+        """A start reaps before it takes the lock; a lock unlinked under a
+        holder leaves the next start a fresh file, excluding nobody."""
+        path = launch_lock_path(tmp_path)
+        LaunchLock.take(path, Timeout.FILE_LOCK).release()
+        long_ago = time.time() - 365 * 86400
+        os.utime(path, (long_ago, long_ago))
+
+        cleanup_stale_daemon_files(tmp_path, max_age_days=1)
+
+        assert path.exists()
 
     def test_a_second_start_waits_out_its_budget_on_a_start_under_way(self, tmp_path: Path) -> None:
-        sock_path = tmp_path / "d.sock"
-        first = LaunchLock.take(sock_path, Timeout.FILE_LOCK)
+        path = launch_lock_path(tmp_path)
+        first = LaunchLock.take(path, Timeout.FILE_LOCK)
         try:
             with self._clock(), pytest.raises(StartLockTimeout):
-                LaunchLock.take(sock_path, Timeout.DAEMON_START_BUDGET_SEC)
+                LaunchLock.take(path, Timeout.DAEMON_START_BUDGET_SEC)
         finally:
             first.release()
 
     def test_a_start_that_ended_leaves_it_free(self, tmp_path: Path) -> None:
-        sock_path = tmp_path / "d.sock"
-        LaunchLock.take(sock_path, Timeout.FILE_LOCK).release()
-        LaunchLock.take(sock_path, Timeout.FILE_LOCK).release()
+        path = launch_lock_path(tmp_path)
+        LaunchLock.take(path, Timeout.FILE_LOCK).release()
+        LaunchLock.take(path, Timeout.FILE_LOCK).release()
 
     def test_a_forked_holder_keeps_it_when_the_launcher_closes_its_copy(
         self, tmp_path: Path
@@ -765,50 +787,127 @@ class TestTheLaunchLock:
         """``close`` is the launcher's, after the fork: the daemon holding
         the same open file keeps the start under way. A dup stands in for
         the forked copy."""
-        sock_path = tmp_path / "d.sock"
-        path = launch_lock_path(sock_path)
+        path = launch_lock_path(tmp_path)
+        path.parent.mkdir(parents=True)
         fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o600)
         fcntl.flock(fd, fcntl.LOCK_EX)
         launcher = LaunchLock(fd, path)
         daemon = LaunchLock(os.dup(fd), path)
         launcher.close()
         try:
-            assert start_under_way(sock_path) == StartUnderWay(pid=None)
+            under_way = start_under_way(path)
+            assert under_way is not None and under_way.pid is None
         finally:
             daemon.release()
-        assert start_under_way(sock_path) is None
+        assert start_under_way(path) is None
 
     def test_the_daemon_it_names_is_the_start_under_way(self, tmp_path: Path) -> None:
-        sock_path = tmp_path / "d.sock"
-        held = LaunchLock.take(sock_path, Timeout.FILE_LOCK)
+        path = launch_lock_path(tmp_path)
+        held = LaunchLock.take(path, Timeout.FILE_LOCK)
         try:
             held.name_holder()
-            assert start_under_way(sock_path) == StartUnderWay(pid=os.getpid())
+            assert start_under_way(path) == StartUnderWay(pid=os.getpid())
         finally:
             held.release()
 
     def test_a_pid_an_earlier_start_left_names_nobody(self, tmp_path: Path) -> None:
-        sock_path = tmp_path / "d.sock"
-        earlier = LaunchLock.take(sock_path, Timeout.FILE_LOCK)
+        path = launch_lock_path(tmp_path)
+        earlier = LaunchLock.take(path, Timeout.FILE_LOCK)
         earlier.name_holder()
         earlier.release()
-        held = LaunchLock.take(sock_path, Timeout.FILE_LOCK)
+        held = LaunchLock.take(path, Timeout.FILE_LOCK)
         try:
-            assert start_under_way(sock_path) == StartUnderWay(pid=None)
+            under_way = start_under_way(path)
+            assert under_way is not None and under_way.pid is None
         finally:
             held.release()
 
     def test_no_start_under_way_is_none(self, tmp_path: Path) -> None:
-        assert start_under_way(tmp_path / "d.sock") is None
+        assert start_under_way(launch_lock_path(tmp_path)) is None
 
     def test_a_planted_symlink_is_refused(self, tmp_path: Path) -> None:
-        sock_path = tmp_path / "d.sock"
-        launch_lock_path(sock_path).symlink_to(tmp_path / "planted")
+        path = launch_lock_path(tmp_path)
+        path.parent.mkdir(parents=True)
+        path.symlink_to(tmp_path / "planted")
         with pytest.raises(OSError):
-            LaunchLock.take(sock_path, Timeout.FILE_LOCK)
+            LaunchLock.take(path, Timeout.FILE_LOCK)
         with pytest.raises(OSError):
-            start_under_way(sock_path)
+            start_under_way(path)
         assert not (tmp_path / "planted").exists()
+
+
+#: Takes the launch lock named by argv[1], says so, and holds it until stdin closes.
+_HOLD_THE_LOCK = (
+    "import fcntl, os, sys; fd = os.open(sys.argv[1], os.O_RDWR | os.O_CREAT, 0o600); "
+    "fcntl.flock(fd, fcntl.LOCK_EX); print(os.getpid(), flush=True); sys.stdin.read()"
+)
+#: As _HOLD_THE_LOCK, but the taker forks and exits, leaving its child the lock.
+_HAND_THE_LOCK_ON = (
+    "import fcntl, os, sys; fd = os.open(sys.argv[1], os.O_RDWR | os.O_CREAT, 0o600); "
+    "fcntl.flock(fd, fcntl.LOCK_EX)\n"
+    "if os.fork():\n    os._exit(0)\n"
+    "print(os.getpid(), flush=True); sys.stdin.read()"
+)
+
+
+class TestTheLaunchLocksHolderBeforeItNamesADaemon:
+    """Review 9, DR-5: a launcher that hangs before its fork holds the lock
+    and names nothing. The kernel's lock table names it, by the pid that
+    took the lock and the file's inode; it must still hold the file open."""
+
+    @contextlib.contextmanager
+    def _held(self, path: Path, program: str) -> Iterator[int]:
+        """A real process holding ``path`` locked; yields the pid it prints.
+
+        It ends when its stdin closes, so no signal is ever sent to it."""
+        path.parent.mkdir(parents=True, exist_ok=True)
+        holder = subprocess.Popen(
+            [sys.executable, "-c", program, str(path)],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            text=True,
+        )
+        assert holder.stdin is not None and holder.stdout is not None
+        try:
+            yield int(holder.stdout.readline())
+        finally:
+            holder.stdin.close()
+            holder.wait(timeout=Timeout.PROCESS_SAMPLE)
+            holder.stdout.close()
+
+    def test_a_launcher_holding_it_is_named_by_the_lock_table(self, tmp_path: Path) -> None:
+        path = launch_lock_path(tmp_path)
+        with self._held(path, _HOLD_THE_LOCK) as launcher:
+            assert start_under_way(path) == StartUnderWay(pid=None, holder=launcher)
+
+    def test_a_taker_that_has_exited_names_no_holder(self, tmp_path: Path) -> None:
+        """The table still names the pid that took the lock; the child now
+        holding it is not that pid, so nothing is named."""
+        path = launch_lock_path(tmp_path)
+        with self._held(path, _HAND_THE_LOCK_ON):
+            assert start_under_way(path) == StartUnderWay(pid=None, holder=None)
+
+    def test_no_lock_table_names_no_holder(self, tmp_path: Path) -> None:
+        path = launch_lock_path(tmp_path)
+        with (
+            self._held(path, _HOLD_THE_LOCK),
+            patch("claude_code_hooks_daemon.daemon.server._PROC_LOCKS", tmp_path / "no-lock-table"),
+        ):
+            assert start_under_way(path) == StartUnderWay(pid=None, holder=None)
+
+    def test_a_table_line_for_another_file_names_no_holder(self, tmp_path: Path) -> None:
+        """A candidate that does not hold this very file open is not its holder,
+        whatever inode the table gives."""
+        path = launch_lock_path(tmp_path)
+        table = tmp_path / "locks"
+        with self._held(path, _HOLD_THE_LOCK) as launcher:
+            inode = path.stat().st_ino
+            table.write_text(
+                f"1: FLOCK  ADVISORY  WRITE {os.getppid()} 00:00:{inode} 0 EOF\n"
+                f"2: -> FLOCK  ADVISORY  WRITE {launcher} 00:00:{inode} 0 EOF\n"
+            )
+            with patch("claude_code_hooks_daemon.daemon.server._PROC_LOCKS", table):
+                assert start_under_way(path) == StartUnderWay(pid=None, holder=None)
 
 
 def test_start_lock_path_is_sibling_of_socket(tmp_path: Path) -> None:

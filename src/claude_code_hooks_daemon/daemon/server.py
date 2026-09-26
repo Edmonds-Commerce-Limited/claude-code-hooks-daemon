@@ -37,7 +37,7 @@ from claude_code_hooks_daemon.core.input_schemas import get_input_schema
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.daemon.config import DaemonConfig
 from claude_code_hooks_daemon.daemon.memory_log_handler import MemoryLogHandler
-from claude_code_hooks_daemon.daemon.paths import is_pid_alive, parse_pid_text
+from claude_code_hooks_daemon.daemon.paths import get_untracked_dir, is_pid_alive, parse_pid_text
 from claude_code_hooks_daemon.daemon.payload_capture import capture_payload, resolve_capture_dir
 from claude_code_hooks_daemon.utils import secret_file_matching as sfm
 from claude_code_hooks_daemon.utils.cli_command import recovery_command
@@ -318,10 +318,21 @@ _LOG_PROBE_INDETERMINATE = (
 _START_LOCK_SUFFIX = ".start.lock"
 # How often hold_start_lock retries a lock another process holds (seconds).
 _START_LOCK_POLL_SECONDS = 0.05
-# Suffix of the lock a start holds from its launch until its daemon serves.
-_LAUNCH_LOCK_SUFFIX = ".launch.lock"
+# Name, in a project's untracked directory, of the lock a start holds from its
+# launch until its daemon serves. Outside the stale-file reaper's "daemon-"
+# prefix: an unlinked lock excludes nobody.
+_LAUNCH_LOCK_NAME = "daemon.launch.lock"
 # Most bytes of the launch lock's pid text read; a pid is far shorter.
 _PID_TEXT_MAX_BYTES = 64
+# The kernel's table of file locks (Linux), one lock per line.
+_PROC_LOCKS = Path("/proc/locks")
+# The lock type /proc/locks names an flock by.
+_FLOCK_TYPE = "FLOCK"
+# Field positions in a /proc/locks line: "1: FLOCK ADVISORY WRITE <pid> <maj>:<min>:<ino> 0 EOF".
+# A process waiting on a lock has its own line, with "->" at _LOCK_TYPE_FIELD.
+_LOCK_TYPE_FIELD = 1
+_LOCK_PID_FIELD = 4
+_LOCK_FILE_FIELD = 5
 
 
 class StartLockTimeout(RuntimeError):
@@ -424,9 +435,14 @@ def _flock_within(lock_fd: int, lock_path: Path, timeout_seconds: float) -> None
             time.sleep(_START_LOCK_POLL_SECONDS)
 
 
-def launch_lock_path(socket_path: Path) -> Path:
-    """Sibling lock file a start holds from its launch until its daemon serves."""
-    return socket_path.with_name(socket_path.name + _LAUNCH_LOCK_SUFFIX)
+def launch_lock_path(project_path: Path) -> Path:
+    """The lock every start of ``project_path`` holds from its launch until its daemon serves.
+
+    One per project, whatever socket a start uses (review 9, DR-4):
+    single-daemon enforcement picks the daemons it stops by project root,
+    so a start on any socket must hold off every other start's enforcement.
+    """
+    return get_untracked_dir(project_path) / _LAUNCH_LOCK_NAME
 
 
 class LaunchLock:
@@ -447,14 +463,13 @@ class LaunchLock:
         self.path = path
 
     @classmethod
-    def take(cls, socket_path: Path, timeout_seconds: float) -> Self:
-        """Take the launch lock for ``socket_path``, waiting on a start under way.
+    def take(cls, path: Path, timeout_seconds: float) -> Self:
+        """Take the launch lock ``path``, waiting on a start under way.
 
         Raises:
             StartLockTimeout: a start still held it when the wait ran out.
             OSError: the lock could not be opened.
         """
-        path = launch_lock_path(socket_path)
         fd = _open_lock_file(path)
         try:
             _flock_within(fd, path, timeout_seconds)
@@ -488,31 +503,97 @@ class LaunchLock:
 
 @dataclass(frozen=True)
 class StartUnderWay:
-    """A start holds the launch lock; ``pid`` is the daemon it named, if any."""
+    """A start holds the launch lock.
+
+    ``pid`` is the daemon it named, if any. Before it names one, ``holder``
+    is the one process the kernel's lock table shows holding the lock,
+    which is the launcher before it forks (review 9, DR-5), or None where
+    that cannot be told. Neither is proven to be a daemon; ``stop`` proves
+    it before it signals.
+    """
 
     pid: int | None
+    holder: int | None = None
 
 
-def start_under_way(socket_path: Path) -> StartUnderWay | None:
-    """The start holding the launch lock for ``socket_path``, or None when none does.
+def start_under_way(path: Path) -> StartUnderWay | None:
+    """The start holding the launch lock ``path``, or None when none does.
 
     Raises:
         OSError: the lock could not be opened, so nothing is known.
     """
     # Read while the lock is held against us: the holder's pid, or nothing
     # before its daemon names itself. Stop still proves it before a signal.
-    path = launch_lock_path(socket_path)
     fd = _open_lock_file(path)
     try:
         try:
             fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
             text = os.pread(fd, _PID_TEXT_MAX_BYTES, 0).decode("ascii", errors="replace")
-            return StartUnderWay(pid=parse_pid_text(text))
+            named = parse_pid_text(text)
+            if named is not None:
+                return StartUnderWay(pid=named)
+            return StartUnderWay(pid=None, holder=_lock_holder(fd))
         fcntl.flock(fd, fcntl.LOCK_UN)
         return None
     finally:
         os.close(fd)
+
+
+def _lock_holder(fd: int) -> int | None:
+    """The one process the kernel's lock table shows holding ``fd``'s file.
+
+    ``/proc/locks`` names an flock by the pid that took it and its file by
+    inode. Its device is the superblock's, which a btrfs subvolume's
+    ``stat`` does not report, so only the inode is matched there; each
+    candidate must then hold this very file open, matched by device and
+    inode through its own fd table. A taker that has exited, or a process
+    in another pid namespace, names no holder here.
+
+    Returns:
+        The holder's pid, or None where there is no lock table or not
+        exactly one such process.
+    """
+    try:
+        table = _PROC_LOCKS.read_text(encoding="ascii", errors="replace")
+    except OSError as exc:
+        logger.info("Cannot read %s (%s); the launch lock's holder is unknown", _PROC_LOCKS, exc)
+        return None
+    target = os.fstat(fd)
+    candidates: set[int] = set()
+    for line in table.splitlines():
+        fields = line.split()
+        if len(fields) <= _LOCK_FILE_FIELD or fields[_LOCK_TYPE_FIELD] != _FLOCK_TYPE:
+            continue
+        if fields[_LOCK_FILE_FIELD].rpartition(":")[2] != str(target.st_ino):
+            continue
+        pid = parse_pid_text(fields[_LOCK_PID_FIELD])
+        if pid is not None:
+            candidates.add(pid)
+    holders = {pid for pid in candidates if _holds_open(pid, target)}
+    if len(holders) != 1:
+        logger.info("The launch lock's holder is unknown: candidates %s", sorted(candidates))
+        return None
+    return holders.pop()
+
+
+def _holds_open(pid: int, target: os.stat_result) -> bool:
+    """True when ``pid`` has the file ``target`` describes open."""
+    try:
+        descriptors = list(Path(f"/proc/{pid}/fd").iterdir())
+    except OSError as exc:
+        logger.debug("Cannot list the open files of pid %d: %s", pid, exc)
+        return False
+    for descriptor in descriptors:
+        try:
+            opened = descriptor.stat()
+        except OSError as exc:
+            # Closed since it was listed, or not a file: not this one.
+            logger.debug("Cannot stat %s: %s", descriptor, exc)
+            continue
+        if (opened.st_dev, opened.st_ino) == (target.st_dev, target.st_ino):
+            return True
+    return False
 
 
 def remove_stale_pid_file(pid_path: Path, socket_path: Path, seen: str) -> bool:

@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+import os
 import socket
 import subprocess
 import sys
@@ -36,20 +37,49 @@ DAEMON_CLI_MODULE = "claude_code_hooks_daemon.daemon.cli"
 _ACCEPT_POLL_SEC = 0.05
 
 
+#: The environment variable naming the path a stand-in daemon binds, if any.
+_BINDS_VAR = "DAEMON_LIKE_PROCESS_BINDS"
+#: What a stand-in that binds prints once it has.
+_BOUND = b"bound\n"
+_STAND_IN_CLI = f"""\
+import os
+import socket
+import sys
+
+path = os.environ.get("{_BINDS_VAR}")
+if path:
+    listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    listener.bind(path)
+    listener.listen(1)
+    sys.stdout.buffer.write({_BOUND!r})
+    sys.stdout.flush()
+sys.stdin.read()
+"""
+
+
 def _write_stand_in_package(directory: Path) -> None:
-    """A ``claude_code_hooks_daemon.daemon.cli`` that only waits on stdin."""
+    """A ``claude_code_hooks_daemon.daemon.cli`` that only waits on stdin,
+    having first bound a socket when it is asked to."""
     package = directory / "claude_code_hooks_daemon"
     (package / "daemon").mkdir(parents=True)
     (package / "__init__.py").write_text("")
     (package / "daemon" / "__init__.py").write_text("")
-    (package / "daemon" / "cli.py").write_text("import sys\n\nsys.stdin.read()\n")
+    (package / "daemon" / "cli.py").write_text(_STAND_IN_CLI)
 
 
 @contextlib.contextmanager
-def daemon_like_process(project_root: Path) -> Iterator[int]:
-    """Yield the pid of a process launched as ``project_root``'s daemon is."""
+def daemon_like_process(project_root: Path, *, binds: Path | None = None) -> Iterator[int]:
+    """Yield the pid of a process launched as ``project_root``'s daemon is.
+
+    With ``binds``, it has bound a unix socket there, as a daemon that
+    serves has; without, it is a launcher, or a daemon still starting.
+    """
     with tempfile.TemporaryDirectory(prefix="daemon-like-") as stand_in:
         _write_stand_in_package(Path(stand_in))
+        env = dict(os.environ)
+        env.pop(_BINDS_VAR, None)
+        if binds is not None:
+            env[_BINDS_VAR] = str(binds)
         process = subprocess.Popen(
             [
                 sys.executable,
@@ -60,14 +90,20 @@ def daemon_like_process(project_root: Path) -> Iterator[int]:
                 "start",
             ],
             cwd=stand_in,
+            env=env,
             stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE if binds is not None else None,
         )
         try:
+            if process.stdout is not None:
+                assert process.stdout.readline() == _BOUND
             yield process.pid
         finally:
             assert process.stdin is not None
             process.stdin.close()
             process.wait(timeout=Timeout.REQUEST_LONG)
+            if process.stdout is not None:
+                process.stdout.close()
 
 
 def _answer(connection: socket.socket, project_root: Path, pid: int) -> None:

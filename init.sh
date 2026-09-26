@@ -2049,17 +2049,19 @@ ensure_daemon() {
         return 0
     fi
 
-    # Still starting when this hook had to answer: no diagnosis below
-    # applies, and the answer is "retry" (Plan 00466 review 8, R8-1).
-    if [[ "${_HOOKS_DAEMON_STARTING:-false}" == "true" ]]; then
+    # ci_enabled: true — hard fail regardless of environment, and whether the
+    # start failed or is still under way (review 9, DR-2): CI enforcement
+    # exempts no recovery command, and a slow start must not open one.
+    if _is_ci_enforced; then
+        _HOOKS_DAEMON_CI_ENFORCED=true
         return 1
     fi
 
-    # Daemon failed to start — determine response based on environment/config
-
-    # ci_enabled: true — hard fail regardless of environment
-    if _is_ci_enforced; then
-        _HOOKS_DAEMON_CI_ENFORCED=true
+    # Still starting when this hook had to answer: no diagnosis below
+    # applies, and the answer is "retry" (Plan 00466 review 8, R8-1). In CI
+    # this skips the passthrough, so a start that keeps hanging denies every
+    # call (review 9, DR-3): fail closed.
+    if [[ "${_HOOKS_DAEMON_STARTING:-false}" == "true" ]]; then
         return 1
     fi
 

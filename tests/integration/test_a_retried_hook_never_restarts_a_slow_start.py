@@ -149,8 +149,9 @@ def _await_only(project: Path, daemon_pid: int) -> list[int]:
     return left
 
 
-@pytest.mark.parametrize("in_container", [True, False], ids=["container", "host"])
-def test_a_retried_hook_waits_on_the_start_under_way(root: Path, in_container: bool) -> None:
+def _slow_project(root: Path, in_container: bool) -> tuple[Path, Path, Path, dict[str, str]]:
+    """A project whose daemon's init is slowed; returns it, the ``python``
+    that starts it, the PID file and the environment a hook runs in."""
     project = _make_project(root / "p")
     subprocess.run(
         ["git", "-C", str(project), "remote", "add", "origin", "https://github.com/test/repo.git"],
@@ -176,6 +177,44 @@ def test_a_retried_hook_waits_on_the_start_under_way(root: Path, in_container: b
             "CLAUDE_HOOKS_SOCKET_TIMEOUT": str(Timeout.SOCKET_CONNECT),
         },
     )
+    return project, python, pid_path, env
+
+
+def _assert_one_daemon_started_and_kept(root: Path, project: Path, pid_path: Path) -> None:
+    """The PID file's daemon is the one process serving ``project``, and the
+    only one that ever reached controller init."""
+    daemon_pid = read_pid_file(str(pid_path))
+    assert daemon_pid is not None
+    assert _await_only(project, daemon_pid) == [daemon_pid]
+    started = (root / "started").read_text().split()
+    assert started == [str(daemon_pid)], started
+
+
+@pytest.mark.parametrize("in_container", [True, False], ids=["container", "host"])
+def test_two_concurrent_starts_start_one_daemon(root: Path, in_container: bool) -> None:
+    """Ledger 00466 N232: two hooks each ran ``start`` at once. The second
+    found no PID file and no live socket, so in a container its
+    single-daemon enforcement stopped the first start's daemon while it was
+    still initialising, and started another; elsewhere both initialised in
+    full. The second start now waits on the first."""
+    project, python, pid_path, env = _slow_project(root, in_container)
+    launch = [str(python), "-m", "claude_code_hooks_daemon.daemon.cli"]
+    launch += ["--project-root", str(project), "start"]
+    starts = [
+        subprocess.Popen(
+            launch, cwd=project, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
+        )
+        for _ in range(2)
+    ]
+    outputs = [start.communicate(timeout=2 * Timeout.DAEMON_START_BUDGET_SEC) for start in starts]
+
+    assert [start.returncode for start in starts] == [0, 0], outputs
+    _assert_one_daemon_started_and_kept(root, project, pid_path)
+
+
+@pytest.mark.parametrize("in_container", [True, False], ids=["container", "host"])
+def test_a_retried_hook_waits_on_the_start_under_way(root: Path, in_container: bool) -> None:
+    project, python, pid_path, env = _slow_project(root, in_container)
 
     first = _hook(project, env, python, _SHORT_DEADLINE)
     assert first[0] == "deny" and "starting" in first[1], first
@@ -185,8 +224,4 @@ def test_a_retried_hook_waits_on_the_start_under_way(root: Path, in_container: b
     answered = _hook(project, env, python, Timeout.HOOK_START_DEADLINE_SEC)
     assert answered[0] == "no-decision", answered
 
-    daemon_pid = read_pid_file(str(pid_path))
-    assert daemon_pid is not None
-    assert _await_only(project, daemon_pid) == [daemon_pid]
-    started = started_log.read_text().split()
-    assert started == [str(daemon_pid)], started
+    _assert_one_daemon_started_and_kept(root, project, pid_path)

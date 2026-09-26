@@ -15,6 +15,7 @@ from claude_code_hooks_daemon.daemon.process_verification import (
     daemon_process_project_root,
     find_all_daemon_processes,
     is_this_users_process,
+    root_names_project,
 )
 
 _MODULE = "claude_code_hooks_daemon.daemon.cli"
@@ -795,6 +796,44 @@ class TestTheFlagIsReadAsTheDaemonsOwnParserReadsIt:
                 except SystemExit:
                     command = None
             assert command is None, arguments
+
+
+class TestADaemonsRootTextIsNeverResolved:
+    """Review 9, DR-1 (coordinator ruling): the daemon's normalised root text
+    is matched with the caller's root as given and as resolved; the
+    daemon's own text is never resolved."""
+
+    def test_the_same_link_on_both_sides_names_the_project(self, tmp_path: Path) -> None:
+        (tmp_path / "real" / "project").mkdir(parents=True)
+        (tmp_path / "link").symlink_to(tmp_path / "real")
+        linked = tmp_path / "link" / "project"
+
+        assert root_names_project(str(linked), linked)
+
+    def test_the_real_root_names_a_caller_naming_it_through_a_link(self, tmp_path: Path) -> None:
+        (tmp_path / "real" / "project").mkdir(parents=True)
+        (tmp_path / "link").symlink_to(tmp_path / "real")
+
+        assert root_names_project(str(tmp_path / "real" / "project"), tmp_path / "link" / "project")
+
+    def test_a_link_since_re_pointed_names_nothing(self, tmp_path: Path) -> None:
+        (tmp_path / "old" / "project").mkdir(parents=True)
+        (tmp_path / "new" / "project").mkdir(parents=True)
+        (tmp_path / "link").symlink_to(tmp_path / "new")
+
+        assert not root_names_project(
+            str(tmp_path / "link" / "project"), tmp_path / "new" / "project"
+        )
+
+    def test_the_proof_carries_the_daemons_own_text(self, tmp_path: Path) -> None:
+        (tmp_path / "real" / "project").mkdir(parents=True)
+        (tmp_path / "link").symlink_to(tmp_path / "real")
+        linked = str(tmp_path / "link" / "project")
+        process = MagicMock(spec=psutil.Process)
+        process.cmdline.return_value = ["python", "-m", _MODULE, "--project-root", linked, "start"]
+
+        with patch("psutil.Process", return_value=process):
+            assert daemon_process_project_root(_UNREAL_PID).root == linked
 
 
 class TestIsThisUsersProcess:

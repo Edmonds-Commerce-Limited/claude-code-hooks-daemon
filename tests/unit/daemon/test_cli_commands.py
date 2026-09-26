@@ -19,6 +19,7 @@ import socket
 import subprocess
 import sys
 import tempfile
+import time
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
@@ -47,6 +48,7 @@ from claude_code_hooks_daemon.daemon.server import (
     LaunchLock,
     launch_lock_path,
     remove_stale_pid_file,
+    start_under_way,
 )
 from claude_code_hooks_daemon.utils import safe_signal
 from claude_code_hooks_daemon.utils.safe_signal import DaemonStop
@@ -444,10 +446,19 @@ def _spawn(
 def _daemon_for(
     children: list[subprocess.Popen[bytes]], root: Path, code: str = _SLEEP
 ) -> subprocess.Popen[bytes]:
-    """A real process whose command line is a daemon server for ``root``."""
-    return _spawn(
+    """A real process whose command line is a daemon server for ``root``.
+
+    Returned once it has exec'd: until then its command line is empty and
+    proves nothing (Plan 00466 N194)."""
+    daemon = _spawn(
         children, code, "claude_code_hooks_daemon.daemon.cli", "--project-root", str(root), "start"
     )
+    deadline = time.monotonic() + Timeout.PROCESS_SAMPLE
+    while "claude_code_hooks_daemon.daemon.cli" not in psutil.Process(daemon.pid).cmdline():
+        if time.monotonic() >= deadline:
+            raise AssertionError(f"pid {daemon.pid} did not exec within {Timeout.PROCESS_SAMPLE}s")
+        time.sleep(0.01)
+    return daemon
 
 
 class TestCmdStopEndsAStartThatNeverFinishes:
@@ -458,15 +469,16 @@ class TestCmdStopEndsAStartThatNeverFinishes:
     @staticmethod
     @contextlib.contextmanager
     def _under_way(tmp_path: Path, named: int | None) -> Iterator[None]:
-        """A start holding the launch lock, having named ``named``."""
-        sock_path = tmp_path / "d.sock"
-        held = LaunchLock.take(sock_path, Timeout.FILE_LOCK)
+        """A start of the project at ``tmp_path`` holding the launch lock,
+        having named ``named``."""
+        held = LaunchLock.take(launch_lock_path(tmp_path), Timeout.FILE_LOCK)
         if named is not None:
-            launch_lock_path(sock_path).write_text(f"{named}\n")
+            launch_lock_path(tmp_path).write_text(f"{named}\n")
         try:
             with (
                 patch(
-                    "claude_code_hooks_daemon.daemon.cli.get_socket_path", return_value=sock_path
+                    "claude_code_hooks_daemon.daemon.cli.get_socket_path",
+                    return_value=tmp_path / "d.sock",
                 ),
                 patch("claude_code_hooks_daemon.daemon.cli.read_pid_file", return_value=None),
             ):
@@ -474,14 +486,87 @@ class TestCmdStopEndsAStartThatNeverFinishes:
         finally:
             held.release()
 
+    @staticmethod
+    def _hung_launcher(
+        children: list[subprocess.Popen[bytes]], root: Path, lock_root: Path | None = None
+    ) -> subprocess.Popen[bytes]:
+        """A real process whose command line is a launcher of ``root``'s
+        daemon, hung before its fork holding ``lock_root``'s launch lock."""
+        lock = launch_lock_path(lock_root or root)
+        lock.parent.mkdir(parents=True, exist_ok=True)
+        code = (
+            "import fcntl, os, time; "
+            "fd = os.open(os.environ['LAUNCH_LOCK'], os.O_RDWR | os.O_CREAT, 0o600); "
+            "fcntl.flock(fd, fcntl.LOCK_EX); print('ready', flush=True); time.sleep(600)"
+        )
+        launcher = subprocess.Popen(
+            [
+                sys.executable,
+                "-c",
+                code,
+                "claude_code_hooks_daemon.daemon.cli",
+                "--project-root",
+                str(root),
+                "start",
+            ],
+            stdout=subprocess.PIPE,
+            start_new_session=True,
+            env={**os.environ, "LAUNCH_LOCK": str(lock)},
+        )
+        children.append(launcher)
+        assert launcher.stdout is not None
+        assert launcher.stdout.readline() == b"ready\n"
+        return launcher
+
+    def test_a_launcher_hung_before_its_fork_is_stopped(
+        self, tmp_path: Path, children: list[subprocess.Popen[bytes]]
+    ) -> None:
+        """Review 9, DR-5: it holds every later start off and names no
+        daemon; the kernel's lock table names it, and it is proven as a
+        daemon is before it is signalled."""
+        args = _stop_project(tmp_path)
+        launcher = self._hung_launcher(children, tmp_path)
+        with patch("claude_code_hooks_daemon.daemon.cli.read_pid_file", return_value=None):
+            assert cmd_stop(args) == 0
+        assert launcher.wait(timeout=Timeout.PROCESS_DEATH_WAIT) is not None
+        assert start_under_way(launch_lock_path(tmp_path)) is None
+
+    def test_a_lock_holder_that_launches_another_project_is_refused(
+        self, tmp_path: Path, children: list[subprocess.Popen[bytes]]
+    ) -> None:
+        """What holds the lock is proven like any daemon: one whose command
+        line names another project is not signalled."""
+        args = _stop_project(tmp_path / "mine")
+        stranger = self._hung_launcher(children, tmp_path / "theirs", lock_root=tmp_path / "mine")
+        with patch("claude_code_hooks_daemon.daemon.cli.read_pid_file", return_value=None):
+            assert cmd_stop(args) == 1
+        assert stranger.poll() is None
+
     def test_the_daemon_still_starting_is_stopped(
         self, tmp_path: Path, children: list[subprocess.Popen[bytes]]
     ) -> None:
         args = _stop_project(tmp_path)
-        daemon = _daemon_for(children, tmp_path)
-        with self._under_way(tmp_path, daemon.pid):
+        daemon = self._hung_launcher(children, tmp_path)
+        launch_lock_path(tmp_path).write_text(f"{daemon.pid}\n")
+        with patch("claude_code_hooks_daemon.daemon.cli.read_pid_file", return_value=None):
             assert cmd_stop(args) == 0
         assert daemon.wait(timeout=Timeout.PROCESS_DEATH_WAIT) is not None
+        assert start_under_way(launch_lock_path(tmp_path)) is None
+
+    def test_a_start_still_under_way_once_its_named_process_stopped_is_reported(
+        self,
+        tmp_path: Path,
+        children: list[subprocess.Popen[bytes]],
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """A launcher stopped after its fork leaves its daemon holding the
+        lock: that start is not over, and ``stop`` does not say it is."""
+        args = _stop_project(tmp_path)
+        stopped = _daemon_for(children, tmp_path)
+        with self._under_way(tmp_path, stopped.pid):
+            assert cmd_stop(args) == 1
+        assert stopped.wait(timeout=Timeout.PROCESS_DEATH_WAIT) is not None
+        assert "still under way" in capsys.readouterr().err
 
     def test_a_named_pid_that_serves_another_project_is_refused(
         self, tmp_path: Path, children: list[subprocess.Popen[bytes]]
@@ -492,17 +577,37 @@ class TestCmdStopEndsAStartThatNeverFinishes:
             assert cmd_stop(args) == 1
         assert other.poll() is None
 
-    def test_a_start_not_yet_named_is_reported_not_signalled(
+    def test_a_start_whose_holder_cannot_be_identified_is_reported_not_signalled(
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
+        """No lock table to read: nothing identifies the holder, so nothing
+        is signalled, and ``stop`` says so."""
         args = _stop_project(tmp_path)
         with (
             self._under_way(tmp_path, None),
+            patch("claude_code_hooks_daemon.daemon.server._PROC_LOCKS", tmp_path / "no-lock-table"),
             patch("claude_code_hooks_daemon.daemon.cli.stop_verified_daemon") as stop,
         ):
             assert cmd_stop(args) == 1
         stop.assert_not_called()
-        assert "has not named itself" in capsys.readouterr().err
+        assert "cannot be identified; nothing was signalled" in capsys.readouterr().err
+
+    def test_a_launch_lock_it_cannot_read_is_no_proof_nothing_runs(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Review 9: a lock it cannot open leaves a start under way unseen,
+        which is not "not running"."""
+        args = _stop_project(tmp_path)
+        planted = launch_lock_path(tmp_path)
+        planted.parent.mkdir(parents=True, exist_ok=True)
+        planted.symlink_to(tmp_path / "planted")
+        with (
+            patch("claude_code_hooks_daemon.daemon.cli.read_pid_file", return_value=None),
+            patch("claude_code_hooks_daemon.daemon.cli.stop_verified_daemon") as stop,
+        ):
+            assert cmd_stop(args) == 1
+        stop.assert_not_called()
+        assert "cannot read the launch lock" in capsys.readouterr().err
 
     def test_no_start_under_way_is_not_running(
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]

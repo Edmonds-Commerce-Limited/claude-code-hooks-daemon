@@ -221,19 +221,53 @@ class TestADaemonPidIsSignalledOnlyWhenItIsThisProjectsDaemon:
 
         assert handle.pid == daemon.pid
 
-    def test_a_root_named_through_a_link_is_the_one_the_daemon_serves(
+    def test_a_daemon_started_through_a_link_is_stopped_through_the_same_link(
         self, tmp_path: Path, children: list[subprocess.Popen[bytes]]
     ) -> None:
-        """Review 8, S8-1 (N225): ``cmd_start`` serves the resolved root, so
-        that is what the named one is compared as."""
-        served = tmp_path / "real" / "project"
-        served.mkdir(parents=True)
+        """Review 9, DR-1: ``init.sh`` names the root as ``pwd`` spells it,
+        link and all, and a ``stop`` from there names it the same way."""
+        (tmp_path / "real" / "project").mkdir(parents=True)
         (tmp_path / "link").symlink_to(tmp_path / "real")
         daemon = _fake_daemon(children, tmp_path / "link" / "project")
 
-        handle = verified_daemon_process(daemon.pid, project_root=served)
+        handle = verified_daemon_process(daemon.pid, project_root=tmp_path / "link" / "project")
 
         assert handle.pid == daemon.pid
+
+    def test_a_daemon_naming_the_real_root_is_proven_for_a_caller_naming_a_link(
+        self, tmp_path: Path, children: list[subprocess.Popen[bytes]]
+    ) -> None:
+        """Review 9, DR-1: the caller's own root may be resolved, since it is
+        a path in this process's own namespace."""
+        served = tmp_path / "real" / "project"
+        served.mkdir(parents=True)
+        (tmp_path / "link").symlink_to(tmp_path / "real")
+        daemon = _fake_daemon(children, served)
+
+        handle = verified_daemon_process(daemon.pid, project_root=tmp_path / "link" / "project")
+
+        assert handle.pid == daemon.pid
+
+    def test_a_daemon_named_through_a_link_since_re_pointed_is_refused(
+        self, tmp_path: Path, children: list[subprocess.Popen[bytes]]
+    ) -> None:
+        """Review 9, DR-1: the daemon's own root text is never resolved. It
+        was started for the tree the link named then; once the link names
+        another tree, it is not that tree's daemon. A path in another mount
+        namespace is the same case: only its text is known."""
+        (tmp_path / "old" / "project").mkdir(parents=True)
+        (tmp_path / "new" / "project").mkdir(parents=True)
+        link = tmp_path / "link"
+        link.symlink_to(tmp_path / "old")
+        daemon = _fake_daemon(children, link / "project")
+        link.unlink()
+        link.symlink_to(tmp_path / "new")
+
+        with pytest.raises(RefusedSignalTarget, match="project root"):
+            stop_verified_daemon(
+                daemon.pid, project_root=tmp_path / "new" / "project", grace_seconds=_GRACE_SECONDS
+            )
+        assert daemon.poll() is None
 
     def test_a_root_whose_dotdot_follows_a_link_proves_nothing(
         self, tmp_path: Path, children: list[subprocess.Popen[bytes]]

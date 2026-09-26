@@ -3,6 +3,7 @@
 import errno
 import fcntl
 import os
+import tempfile
 from pathlib import Path
 from unittest.mock import MagicMock, call, patch
 
@@ -17,6 +18,7 @@ from claude_code_hooks_daemon.daemon.paths import PID_MAX_LIMIT
 from claude_code_hooks_daemon.utils.safe_signal import DaemonStop, RefusedSignalTarget
 
 _STOP = "claude_code_hooks_daemon.daemon.enforcement.stop_verified_daemon"
+_SERVES = "claude_code_hooks_daemon.daemon.enforcement._serves_a_socket"
 _PROJECT_ROOT = Path("/workspace")
 
 
@@ -80,6 +82,7 @@ class TestEnforceSingleDaemon:
                 "claude_code_hooks_daemon.daemon.enforcement.find_all_daemon_processes",
                 return_value=[current_pid, other_pid_1, other_pid_2],
             ),
+            patch(_SERVES, return_value=True),
             patch(_STOP, return_value=DaemonStop.TERMINATED) as mock_stop,
         ):
             enforce_single_daemon(
@@ -187,6 +190,7 @@ class TestEnforceSingleDaemonProjectScoping:
                 "claude_code_hooks_daemon.daemon.enforcement.find_all_daemon_processes",
                 return_value=[os.getpid() + 1000],
             ),
+            patch(_SERVES, return_value=True),
             patch(_STOP) as mock_stop,
             patch("claude_code_hooks_daemon.daemon.enforcement.logger") as mock_logger,
         ):
@@ -339,6 +343,7 @@ class TestEnforceSingleDaemonKillFailure:
                 "claude_code_hooks_daemon.daemon.enforcement.find_all_daemon_processes",
                 return_value=[12345],
             ),
+            patch(_SERVES, return_value=True),
             patch(_STOP, new=stop),
             patch("claude_code_hooks_daemon.daemon.enforcement.logger") as mock_logger,
         ):
@@ -378,7 +383,10 @@ class TestEnforceSingleDaemonKillFailure:
         monkeypatch.setattr(os, "pidfd_open", failing)
         mock_config = MagicMock()
         mock_config.daemon.enforce_single_daemon_process = True
-        with daemon_like_process(tmp_path) as peer:
+        with (
+            tempfile.TemporaryDirectory(prefix="hd-enf-") as short,
+            daemon_like_process(tmp_path, binds=Path(short) / "s") as peer,
+        ):
             with (
                 patch(
                     "claude_code_hooks_daemon.daemon.enforcement.is_container_environment",
@@ -397,3 +405,50 @@ class TestEnforceSingleDaemonKillFailure:
             assert psutil.Process(peer).status() != psutil.STATUS_ZOMBIE
         mock_logger.error.assert_called_once()
         assert os.strerror(errno.EINVAL) in str(mock_logger.error.call_args)
+
+
+class TestOnlyADaemonThatServesIsStopped:
+    """Ledger 00466 N232 (lifecycle round 9): a launcher's command line is
+    its daemon's, since the daemon is its fork. Enforcement stopped a
+    concurrent start's launcher waiting on the launch lock, and a daemon
+    still starting. Only a process that has bound a socket serves; the rest
+    are starts under way. The stop and the peers are real."""
+
+    @staticmethod
+    def _enforce(project_root: Path) -> None:
+        config = MagicMock()
+        config.daemon.enforce_single_daemon_process = True
+        with patch(
+            "claude_code_hooks_daemon.daemon.enforcement.is_container_environment",
+            return_value=True,
+        ):
+            enforce_single_daemon(
+                config=config, pid_path=project_root / "daemon.pid", project_root=project_root
+            )
+
+    def test_a_start_under_way_is_never_stopped(self, tmp_path: Path) -> None:
+        with daemon_like_process(tmp_path) as launcher:
+            self._enforce(tmp_path)
+
+            assert psutil.Process(launcher).status() != psutil.STATUS_ZOMBIE
+
+    def test_a_daemon_that_serves_is_stopped(self, tmp_path: Path) -> None:
+        with (
+            tempfile.TemporaryDirectory(prefix="hd-enf-") as short,
+            daemon_like_process(tmp_path, binds=Path(short) / "s") as serving,
+        ):
+            self._enforce(tmp_path)
+
+            assert not psutil.pid_exists(serving) or (
+                psutil.Process(serving).status() == psutil.STATUS_ZOMBIE
+            )
+
+    def test_a_process_whose_sockets_cannot_be_read_is_not_stopped(self, tmp_path: Path) -> None:
+        with (
+            tempfile.TemporaryDirectory(prefix="hd-enf-") as short,
+            daemon_like_process(tmp_path, binds=Path(short) / "s") as serving,
+            patch.object(psutil.Process, "net_connections", side_effect=psutil.AccessDenied(pid=0)),
+        ):
+            self._enforce(tmp_path)
+
+            assert psutil.Process(serving).status() != psutil.STATUS_ZOMBIE

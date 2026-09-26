@@ -159,6 +159,7 @@ Full write-ups are in [NIGGLES.md](NIGGLES.md). One line each here:
 | N205 | The installer removes PID files and sockets with no lock or liveness check                                                                        | Lifecycle review 7 (S-3, shared)                                | ✅ Remedied                      |
 | N206 | A pid reused between psutil's start-time re-check and its `kill` is signalled                                                                     | Lifecycle review 7 (§2, shared)                                 | ✅ Remedied                      |
 | N225 | A `--project-root` with `..` through a link is attributed to a root its daemon does not serve                                                     | Lifecycle review 8 (S8-1, shared)                               | ✅ Remedied                      |
+| N232 | Two concurrent hook starts: the second's single-daemon enforcement stops the first's daemon while it initialises                                  | Lifecycle review 9 (§5, shared)                                 | ✅ Remedied                      |
 
 ## Tasks
 

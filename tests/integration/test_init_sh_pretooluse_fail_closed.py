@@ -2165,6 +2165,63 @@ class TestAStartNeverRunsTheHookPastItsTimeout:
         only answer by not waiting on it. The deadline is shortened, as the
         start poll's budget is above; nothing else is stubbed but the
         launcher and the venv check."""
+        result = self._hook_during_a_start_under_way(
+            project,
+            tmp_path,
+            "_is_ci_environment() { return 1; }\n_is_ci_enforced() { return 1; }\n",
+            _BASH_TOOL_INPUT,
+        )
+        assert _verdict(result) == "deny", result.stderr
+        reason = _reason(json.loads(result.stdout))
+        assert "starting" in reason, reason
+        assert "retry" in reason.lower(), reason
+
+    def test_under_ci_enforcement_a_start_under_way_admits_no_recovery_command(
+        self, project: Path, tmp_path: Path
+    ) -> None:
+        """Review 9, DR-2: with ``ci_enabled: true`` a start still under way
+        is as CI-enforced as a start that failed. CI enforcement exempts no
+        recovery command, so the exact one is denied here too."""
+        hook_input = _recovery_input(project)
+        allowed_elsewhere = self._hook_during_a_start_under_way(
+            project,
+            tmp_path / "unenforced",
+            "_is_ci_environment() { return 1; }\n_is_ci_enforced() { return 1; }\n",
+            hook_input,
+        )
+        assert _verdict(allowed_elsewhere) == "no-decision", allowed_elsewhere.stderr
+
+        result = self._hook_during_a_start_under_way(
+            project,
+            tmp_path / "enforced",
+            "_is_ci_environment() { return 0; }\n_is_ci_enforced() { return 0; }\n",
+            hook_input,
+        )
+
+        assert _verdict(result) == "deny", result.stderr
+        assert "ci_enabled: true" in json.loads(result.stdout)["reason"], result.stdout
+
+    def test_in_ci_without_enforcement_a_start_under_way_denies_as_starting(
+        self, project: Path, tmp_path: Path
+    ) -> None:
+        """Review 9, DR-3: CI's passthrough is for a daemon that is not
+        there. A start still under way is no such daemon, so the call is
+        denied as starting, and a start that keeps hanging keeps denying."""
+        result = self._hook_during_a_start_under_way(
+            project,
+            tmp_path,
+            "_is_ci_environment() { return 0; }\n_is_ci_enforced() { return 1; }\n",
+            _BASH_TOOL_INPUT,
+        )
+        assert _verdict(result) == "deny", result.stderr
+        assert "starting" in _reason(json.loads(result.stdout))
+        assert "passthrough" not in result.stderr
+
+    def _hook_during_a_start_under_way(
+        self, project: Path, tmp_path: Path, ci_prelude: str, hook_input: dict[str, Any]
+    ) -> subprocess.CompletedProcess[str]:
+        """The PreToolUse forwarder, answering while its launcher still runs."""
+        tmp_path.mkdir(exist_ok=True)
         release = tmp_path / "release"
         fake_python = tmp_path / "fake-python"
         fake_python.write_text(
@@ -2179,7 +2236,7 @@ class TestAStartNeverRunsTheHookPastItsTimeout:
         script = (
             f"source .claude/init.sh\nPYTHON_CMD={fake_python}\n"
             "validate_venv() { return 0; }\n"
-            "_is_ci_environment() { return 1; }\n_is_ci_enforced() { return 1; }\n"
+            f"{ci_prelude}"
             f"_HOOKS_DAEMON_START_DEADLINE=2\n{_FORWARDER_BODY}"
         )
         hook = subprocess.Popen(
@@ -2192,9 +2249,7 @@ class TestAStartNeverRunsTheHookPastItsTimeout:
             text=True,
         )
         try:
-            stdout, stderr = hook.communicate(
-                _stdin_text(_BASH_TOOL_INPUT), timeout=Timeout.REQUEST_LONG
-            )
+            stdout, stderr = hook.communicate(_stdin_text(hook_input), timeout=Timeout.REQUEST_LONG)
         except subprocess.TimeoutExpired:
             release.touch()
             hook.communicate()
@@ -2202,11 +2257,7 @@ class TestAStartNeverRunsTheHookPastItsTimeout:
         finally:
             release.touch()
 
-        result = subprocess.CompletedProcess(hook.args, hook.returncode, stdout, stderr)
-        assert _verdict(result) == "deny", stderr
-        reason = _reason(json.loads(stdout))
-        assert "starting" in reason, reason
-        assert "retry" in reason.lower(), reason
+        return subprocess.CompletedProcess(hook.args, hook.returncode, stdout, stderr)
 
 
 def _kill_failure_message(error: int) -> str:

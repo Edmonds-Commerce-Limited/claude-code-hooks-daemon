@@ -560,6 +560,44 @@ class TestCmdStartParentProcess:
             assert result == 1
 
 
+class TestALauncherWhoseReaderHasGoneStillStarts:
+    """Review 9, DR-5: a retried hook's launcher waits on the launch lock and
+    can outlive its hook, and so the reader of its stdout. What it printed
+    before the fork then raised BrokenPipeError at the flush, and the start
+    launched nothing."""
+
+    def test_a_closed_reader_does_not_stop_the_fork(self, tmp_path: Path) -> None:
+        read_end, write_end = os.pipe()
+        os.close(read_end)
+        stdout = io.TextIOWrapper(io.BufferedWriter(io.FileIO(write_end, "w")))
+        try:
+            with (
+                patch(
+                    "claude_code_hooks_daemon.daemon.cli.get_project_path", return_value=tmp_path
+                ),
+                patch("claude_code_hooks_daemon.daemon.cli.read_pid_file", return_value=None),
+                patch(
+                    "claude_code_hooks_daemon.daemon.cli.get_socket_path",
+                    return_value=tmp_path / "d.sock",
+                ),
+                patch(
+                    "claude_code_hooks_daemon.daemon.cli._socket_liveness_sync",
+                    return_value=_SocketLiveness.NOT_LIVE,
+                ),
+                patch(
+                    "claude_code_hooks_daemon.daemon.cli._stale_venv_advisory",
+                    return_value="printed before the fork, read by nobody",
+                ),
+                patch.object(sys, "stdout", stdout),
+                patch("os.fork", side_effect=OSError("the fork was reached")) as fork,
+            ):
+                result = cmd_start(argparse.Namespace(project_root=tmp_path))
+        finally:
+            stdout.close()
+        fork.assert_called_once()
+        assert result == 1
+
+
 class TestCmdStartChildProcess:
     """Tests for the child branch after first fork (pid == 0)."""
 
@@ -961,11 +999,13 @@ class TestAStartUnderWayIsWaitedOnNotRepeated:
         pid: int | None,
         liveness: _SocketLiveness,
         ends: bool,
+        sock_path: Path | None = None,
     ) -> tuple[int, MagicMock, MagicMock, str]:
-        """``cmd_start`` while another start holds the launch lock; returns
-        its result, the enforcement and fork mocks, and its stderr."""
-        sock_path = tmp_path / "d.sock"
-        under_way = LaunchLock.take(sock_path, Timeout.FILE_LOCK)
+        """``cmd_start`` on ``sock_path`` while another start of the project
+        holds the launch lock; returns its result, the enforcement and fork
+        mocks, and its stderr."""
+        sock_path = sock_path or tmp_path / "d.sock"
+        under_way = LaunchLock.take(launch_lock_path(tmp_path), Timeout.FILE_LOCK)
         now = [0.0]
         ticks = [0]
 
@@ -1022,7 +1062,7 @@ class TestAStartUnderWayIsWaitedOnNotRepeated:
         assert result == 0
         enforce.assert_not_called()
         fork.assert_not_called()
-        assert start_under_way(tmp_path / "d.sock") is None
+        assert start_under_way(launch_lock_path(tmp_path)) is None
 
     def test_a_start_that_died_without_a_pid_file_is_replaced(self, tmp_path: Path) -> None:
         result, enforce, fork, _ = self._start(
@@ -1031,10 +1071,28 @@ class TestAStartUnderWayIsWaitedOnNotRepeated:
         assert result == 1
         enforce.assert_called_once()
         fork.assert_called_once()
-        assert start_under_way(tmp_path / "d.sock") is None
+        assert start_under_way(launch_lock_path(tmp_path)) is None
+
+    def test_a_start_on_another_socket_of_the_project_is_waited_on(self, tmp_path: Path) -> None:
+        """Review 9, DR-4: enforcement stops every daemon of this project
+        root, whatever its socket, so a start on another socket of it (a
+        hostname suffix, a ``--socket`` override) waits too."""
+        result, enforce, fork, stderr = self._start(
+            tmp_path,
+            pid=None,
+            liveness=_SocketLiveness.NOT_LIVE,
+            ends=False,
+            sock_path=tmp_path / "other-host.sock",
+        )
+        assert result == 1
+        enforce.assert_not_called()
+        fork.assert_not_called()
+        assert "still under way" in stderr, stderr
 
     def test_a_lock_it_cannot_open_starts_nothing(self, tmp_path: Path) -> None:
-        launch_lock_path(tmp_path / "d.sock").symlink_to(tmp_path / "planted")
+        planted = launch_lock_path(tmp_path)
+        planted.parent.mkdir(parents=True)
+        planted.symlink_to(tmp_path / "planted")
         with (
             patch("claude_code_hooks_daemon.daemon.cli.get_project_path", return_value=tmp_path),
             patch(
@@ -1057,10 +1115,10 @@ class TestAStartUnderWayIsWaitedOnNotRepeated:
 
         def run_server(coroutine: Any) -> None:
             coroutine.close()
-            seen["starting"] = start_under_way(sock_path)
+            seen["starting"] = start_under_way(launch_lock_path(tmp_path))
             serving = daemon_class.call_args.kwargs["serving"]
             serving()
-            seen["served"] = start_under_way(sock_path)
+            seen["served"] = start_under_way(launch_lock_path(tmp_path))
 
         mock_config = MagicMock()
         mock_config.daemon.socket_path = str(sock_path)

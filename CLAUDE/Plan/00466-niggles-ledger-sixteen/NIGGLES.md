@@ -3,6 +3,33 @@
 Newest first. Each entry says how it was found, why it happens, and the
 candidate remedies.
 
+### N232 — ✅ Remedied — Two concurrent hook starts: the second's single-daemon enforcement stops the first's daemon while it initialises
+
+**Found by lifecycle review 9 (§5), on main (44d1b1b3b).** Two hooks each ran
+`cli start` at once, and nothing excluded the second launch
+(`init.sh:1057`). The second start's reuse gate saw no PID file and no live
+socket, since a daemon writes its PID file only once its controller is
+initialised (`cli.py:576-620`), so it ran `enforce_single_daemon`
+(`cli.py:623`). In a container, `find_all_daemon_processes` proved the first
+start's daemon by its `--project-root` flag and spared only a live socket's
+owner (`enforcement.py:90-103`), then SIGTERMed it while it was still
+initialising (`enforcement.py:117-125`) and forked a second daemon. The first
+hook got a spurious deny, and with three or more hooks at once it repeated.
+No call ran unjudged. A launcher's command line is also its daemon's (the
+daemon is its fork), so the same enforcement stopped a second launcher that
+was merely waiting: on main the RED run shows both.
+
+**Remedied (lifecycle batch, rounds 8b and 9):** every start of a project
+takes one launch lock (`daemon.launch.lock` in the project's untracked
+directory, whatever socket it uses) before it looks for a daemon, and the
+daemon it forks holds it until it serves. Enforcement runs only under that
+lock, and stops only a process that has bound a socket, which a launcher
+and a daemon still starting have not. RED on main:
+`test_two_concurrent_starts_start_one_daemon[container]` (a variant with
+main's helpers: "Container environment: Killing 1 other daemon process(es)",
+exit codes `[1, -15]`). RED on c5b2befc8: the same test, and
+`TestOnlyADaemonThatServesIsStopped::test_a_start_under_way_is_never_stopped`.
+
 ### N225 — ✅ Remedied — A `--project-root` with `..` through a link is attributed to a root its daemon does not serve
 
 **Found by lifecycle review 8 (S8-1), on main as well.** The proof read the
