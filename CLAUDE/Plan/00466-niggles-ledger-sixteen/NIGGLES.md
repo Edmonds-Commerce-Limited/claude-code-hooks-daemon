@@ -280,6 +280,8 @@ failure.
 a separate test that asserts `tests` reaches the daemon through
 `tests/acceptance`.
 
+**Remedied at commit `21a134f1e`.**
+
 ### N82 — A "design test" has been skipped as "implementation pending" since the registry-key work
 
 **Found by the coordinator in CI run 36171017537.**
@@ -291,6 +293,11 @@ handler's config key from its `HandlerID` constant, not from
 **Remedy:** check whether the registry now uses the constant. If it does,
 turn the skip into a real assertion. If not, implement the lookup RED-first
 and delete the skip.
+
+**Remedied at commit `637fc735a`.** The registry already derived the key
+from the constant (`_get_config_key_from_constant`); the skip was replaced
+with a real assertion over every handler `iter_builtin_handler_classes()`
+yields.
 
 ### N81 — `sed_blocker` denies a Bash heredoc that writes markdown, and a strict xfail pins the defect
 
@@ -305,6 +312,14 @@ is the owner's call.
 to exempt a write whose only target is a `.md` file and whose sed text is
 never executed. Flip the xfail into a passing test and remove the marker,
 then update the guidance.
+
+**Remedied at commit `e445fecc3`.** A fifth exemption checked with
+`bash_write_destinations()` (the same public, shared redirect-target parser
+`project_containment` and `get_written_file_paths()` are built on): every
+AUTHORED destination must end in `.md` and the sed text must never be
+EXECUTED. `get_claude_md()` and the class docstring now state the Bash
+`.md` exemption is narrower than `Write`'s unconditional one, not
+equivalent to it.
 
 ### N80 — A script overwritten earlier in the same command by an unlisted writer is judged by its old content
 
