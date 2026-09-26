@@ -9,6 +9,22 @@ interrupt a running handler) and lands with that branch. N40 is taken there too
 taken on the N38 fix branch (the chain's remaining linear per-token cost, which
 waits for the shell-parser consolidation).
 
+### N95 — Test fixtures run setup git commands under a production 5-second budget, so a loaded host flakes the gate
+
+**Found by the N81 to N83 gate fixer.**
+`test_sensitive_content.py::TestStagedContentSurface::test_excluded_path_is_not_inspected`
+errored because a `git commit` in its FIXTURE timed out on
+`Timeout.GIT_CONTEXT` (5 s). That was the last test of a 28,651-test run
+with a load average of 6 on 8 cores. About 86 test files' git fixtures use
+that same production budget. The budget exists to bound the daemon's own
+git calls on the hook path. A fixture's setup is not what is under test,
+and it borrowing the hook budget turns host load into gate failures.
+
+**Remedy:** fixtures use a test-owned setup budget, a named constant with a
+generous bound. Assertions about the product's own timing stay on the
+product constant. A test pins that fixtures never import the hook-path
+budget.
+
 ### N94 — `github_auto_close_keywords` answers a repeated `git commit -F` from the previous request
 
 **Found by N38 review 8 (its MAJOR, and on main too).** The handler caches
