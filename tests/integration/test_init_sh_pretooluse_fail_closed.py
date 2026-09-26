@@ -1724,6 +1724,8 @@ def _launch_lines(project: Path) -> list[tuple[list[str], bool]]:
         (["python3", "-m", _CLI_MODULE, "start"], False),
         ([f"{other}/untracked/venv/bin/python", "-m", _CLI_MODULE, "start"], False),
         ([client_python, "-m", _CLI_MODULE, "--project-root=" + other, "start"], False),
+        # The flag names the project wherever it stands, even after `start`.
+        ([client_python, "-m", _CLI_MODULE, "start", "--project-root", other], False),
         ([client_python, "-c", "pass", "--project-root", str(project), "start"], False),
     ]
 
