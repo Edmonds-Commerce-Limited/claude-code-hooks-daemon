@@ -2986,3 +2986,39 @@ class TestFileSchemeUrlMentions:
         assert (
             sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS) is not None
         )
+
+
+_OVER_BOUND_WORD = "".join(
+    "{" + a + "," + b + "}" for a, b in zip("acegikmoq", "bdfhjlnpr", strict=True)
+)
+
+
+class TestBraceStreamReadsOnlyShellExpandedText:
+    """Plan 00466 N101: every sfm caller (the guard, payload capture, the
+    flaggable-content channel guard) shares one brace stream, so the fix
+    lives here -- braces a shell never expands are not enumerated."""
+
+    def test_python_heredoc_body_is_not_enumerated(self) -> None:
+        command = f"python3 - <<'EOF'\nprint('{_OVER_BOUND_WORD}')\nEOF"
+        assert sfm.find_protected_mention(command, sfm.DEFAULT_PROTECTED_PATTERNS) is None
+
+    def test_content_context_is_still_enumerated_whole(self) -> None:
+        """The view models a command line, not an authored file: a file's
+        string literal may reach a shell through a variable."""
+        content = "cmd = 'cat /r/.ssh/id_rs{a..a}'\n"
+        assert (
+            sfm.find_protected_mention(content, sfm.DEFAULT_PROTECTED_PATTERNS, context="content")
+            is not None
+        )
+
+    def test_shell_words_are_still_enumerated_and_fail_closed(self) -> None:
+        with pytest.raises(TooManyToEnumerateError):
+            sfm.find_protected_mention(f"echo {_OVER_BOUND_WORD}", sfm.DEFAULT_PROTECTED_PATTERNS)
+
+    def test_a_brace_spelled_name_in_shell_words_still_matches(self) -> None:
+        command = "cat ~/.ssh/id_{r,x}sa"
+        assert sfm.find_protected_mention(command, sfm.DEFAULT_PROTECTED_PATTERNS) is not None
+
+    def test_a_literal_name_in_a_python_heredoc_still_matches(self) -> None:
+        command = f"python3 - <<'EOF'\nprint('{_OVER_BOUND_WORD}')\nopen('/r/.ssh/id_rsa')\nEOF"
+        assert sfm.find_protected_mention(command, sfm.DEFAULT_PROTECTED_PATTERNS) is not None

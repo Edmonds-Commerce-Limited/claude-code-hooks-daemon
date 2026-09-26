@@ -931,32 +931,32 @@ class _OneLinerFamily:
 
 _ONE_LINER_FAMILIES: Final[dict[str, _OneLinerFamily]] = {
     "python": _OneLinerFamily(
-        re.compile(r"^(?:python|pypy)\d?(?:\.\d+)*$"),
+        shell_expansion.NON_SHELL_INTERPRETERS[".py"],
         ".py",
         frozenset({"c"}),
         value_flags=frozenset({"-W", "-X", "--check-hash-based-pycs"}),
     ),
     "ruby": _OneLinerFamily(
-        re.compile(r"^ruby(?:\d+(?:\.\d+)*)?$"),
+        shell_expansion.NON_SHELL_INTERPRETERS[".rb"],
         ".rb",
         frozenset({"e"}),
         value_flags=frozenset({"-C", "-I", "-r"}),
     ),
     "perl": _OneLinerFamily(
-        re.compile(r"^perl(?:\d+(?:\.\d+)*)?$"),
+        shell_expansion.NON_SHELL_INTERPRETERS[".pl"],
         ".pl",
         frozenset({"e", "E"}),
         value_flags=frozenset({"-I"}),
     ),
     "node": _OneLinerFamily(
-        re.compile(r"^node(?:\d+(?:\.\d+)*)?$"),
+        shell_expansion.NON_SHELL_INTERPRETERS[".js"],
         ".js",
         frozenset({"e", "p"}),
         frozenset({"--eval", "--print"}),
         value_flags=frozenset({"-r", "--require"}),
     ),
     "php": _OneLinerFamily(
-        re.compile(r"^php(?:\d+(?:\.\d+)*)?$"),
+        shell_expansion.NON_SHELL_INTERPRETERS[".php"],
         ".php",
         frozenset({"r"}),
         value_flags=frozenset({"-d"}),
@@ -1068,14 +1068,46 @@ def _bash_interpreter_one_liner_mention(
             cursor += 1
         if code_index is None or code_index >= len(resolved_words):
             continue
-        code = resolved_words[code_index]
-        pseudo_path = "one_liner" + family.pseudo_ext
-        for literal in _shell_exec_call_literals(pseudo_path, code):
-            mention = sfm.find_protected_mention_detail(
-                literal, patterns, deadline=deadline, cwd=cwd, context="bash"
-            )
-            if mention is not None:
-                return mention
+        mention = _shell_exec_literal_mention(
+            family, resolved_words[code_index], patterns, deadline=deadline, cwd=cwd
+        )
+        if mention is not None:
+            return mention
+    # Plan 00466 N101: a heredoc fed to an interpreter (`python3 - <<'EOF'`)
+    # is the same program as its `-c` spelling, and its braces are no
+    # longer enumerated as shell words -- so its shell-exec calls get the
+    # identical extraction, or a brace-spelled path inside one would pass.
+    for heredoc in shell_expansion.brace_expansion_view(command).heredocs:
+        heredoc_family = (
+            None if heredoc.receiver is None else _match_one_liner_family(heredoc.receiver)
+        )
+        if heredoc_family is None:
+            continue
+        mention = _shell_exec_literal_mention(
+            heredoc_family, heredoc.body, patterns, deadline=deadline, cwd=cwd
+        )
+        if mention is not None:
+            return mention
+    return None
+
+
+def _shell_exec_literal_mention(
+    family: _OneLinerFamily,
+    code: str,
+    patterns: tuple[str, ...],
+    *,
+    deadline: float,
+    cwd: str | None,
+) -> tuple[str, str] | None:
+    """A protected mention in a shell-exec call's literal inside ``code``,
+    a program in ``family``'s language, judged as shell text."""
+    pseudo_path = "one_liner" + family.pseudo_ext
+    for literal in _shell_exec_call_literals(pseudo_path, code):
+        mention = sfm.find_protected_mention_detail(
+            literal, patterns, deadline=deadline, cwd=cwd, context="bash"
+        )
+        if mention is not None:
+            return mention
     return None
 
 

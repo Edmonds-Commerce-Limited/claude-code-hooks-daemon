@@ -130,7 +130,10 @@ Full write-ups are in [NIGGLES.md](NIGGLES.md). One line each here:
 | N98  | Past the AF_UNIX limit, every hostname shares one fallback socket, PID file and events dir                     | Upgrade scripts round 13                                        | ⬜ Open (after N24, with N86)    |
 | N99  | `dev-handlers.md` offers an agent a wrapper command that the daemon denies                                     | Plan 464 gate fixer                                             | ⬜ Open (after 464)              |
 | N100 | A continuation on a heredoc opener line denies a body that is only written                                     | N38 reviews 6-9                                                 | ⬜ Open (after N38)              |
-| N101 | `secret_file_guard` fails closed with `TooManyToEnumerateError` on ordinary `python3 - <<'EOF'` commands       | N38 fix 11                                                      | ⬜ Open                          |
+| N101 | `secret_file_guard` fails closed with `TooManyToEnumerateError` on ordinary `python3 - <<'EOF'` commands       | N38 fix 11                                                      | ✅ Remedied (n101 branch)        |
+| N102 | A grep regex such as `".*real_chain"` in a compound command is denied as a protected-file mention              | N101 fixer                                                      | ⬜ Open                          |
+| N103 | A `**` word the shell never globs walks the whole checkout, and a large tree fails the guard closed            | N101 fixer                                                      | ⬜ Open                          |
+| N104 | `Write`/`Edit` of Python source with a long brace-alternation string fails `secret_file_guard` closed          | N101 fixer                                                      | ⬜ Open                          |
 
 ## Tasks
 

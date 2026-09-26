@@ -9,7 +9,62 @@ interrupt a running handler) and lands with that branch. N40 is taken there too
 taken on the N38 fix branch (the chain's remaining linear per-token cost, which
 waits for the shell-parser consolidation).
 
-### N101 — `secret_file_guard` fails closed with `TooManyToEnumerateError` on ordinary `python3 - <<'EOF'` commands
+### N104 — `Write`/`Edit` of Python source with a long brace-alternation string fails `secret_file_guard` closed
+
+**Found by the N101 fixer**, whose own `Edit` of a scratch `.py` file was
+denied with `R-SECRET-EVALUATION-ERROR`. The string literal was
+`'{a,b}{c,d}…'`, with nine groups and 512 spellings. The `"content"` scan
+of non-shell source still enumerates brace spellings of the whole file, and
+N101 deliberately left that alone. A test pins it
+(`test_a_script_brace_sequence_mention_still_denies_as_content`), because a
+string literal can reach a shell through a variable that the shell-exec-call
+extraction cannot follow. The cost is that a long enough brace string in
+ordinary source fails closed. The same literal in a `python3 - <<'EOF'` body
+is now allowed, because N101 judges interpreter code only through its direct
+shell-exec calls.
+
+**Remedy:** choose one rule for non-shell code on both surfaces. Either
+brace spellings of string literals are enumerated, and a Bash-route heredoc
+body gets the same scan, or they are not, and the pinned content test is
+replaced by a shell-exec-literal pin. `"id_" + "rsa"` already defeats the
+spelling scan inside any interpreter, so weigh what the enumeration actually
+buys.
+
+### N103 — A `**` word the shell never globs walks the whole checkout, and a large tree fails the guard closed
+
+**Found by the N101 fixer.** The live daemon denied an ordinary
+``` grep ... | grep -v "^./x.py.*``" ``` with `R-SECRET-EVALUATION-ERROR`
+(`TooManyToEnumerateError`), with the hook cwd at the main checkout. The
+empty backtick substitution inside the double quotes collapses to `*`, so the
+word ends in `**`. `_both_edges_glob_mention` then walks it with
+`bounded_recursive_glob`, which gives up past 2,000 entries. The quarantine
+guard's strict scan does the same with `grep -rn x --include='**/*.md' .` from
+a worktree root. Unlike brace expansion, a quoted glob is not always inert:
+`find -name`, `grep --include`, git pathspecs and Python's `glob` all expand
+their own quoted arguments. So "the shell never globs it" does not settle
+the question, and N101's fix deliberately leaves it alone.
+
+**Remedy:** decide what a walk past the cap should mean for a word that no
+receiver on the line expands. One option is to judge it by spelling only
+(the interior-wildcard DP) and walk only when a globbing receiver owns it.
+Pin both guards, with the hook cwd at the main checkout.
+
+### N102 — A grep regex such as `".*real_chain"` in a compound command is denied as a protected-file mention
+
+**Found by the N101 fixer.** `grep -rln "…\|real_chain\|…" tests | awk …; grep -rn "def .*real_chain" tests`
+was denied `R-SECRET-BASH-MENTION` on `.vault-pass*`, matched token
+`.*real_chain\`. So was a `.*protected` grep regex in another compound
+command, and a single-quoted `'^decision: .*\|…'` pattern. Each is a regular
+expression handed to grep, not a path. The grep-pattern exemption
+(`is_grep_pattern_only_mention`) does not reach these shapes, because the
+command is compound or the pattern is one alternative among several.
+
+**Remedy:** extend the grep-pattern exemption to every grep in a compound
+command and to `\|`-alternation patterns, judging each grep by its own
+argument positions. A file operand must still deny. Pin both the compound
+and the single-command forms.
+
+### N101 — ✅ Remedied (n101 branch) — `secret_file_guard` fails closed with `TooManyToEnumerateError` on ordinary `python3 - <<'EOF'` commands
 
 **Found by N38 fix round 11** (report `260926-n38-fix11-opus-5-5.md` on the
 N38 branch). The live daemon on main twice denied an ordinary Bash command
@@ -27,6 +82,22 @@ fed to an interpreter, not expanded by the shell, so its bytes are not
 shell words. Keep fail-closed where the shell does expand the text. Pin both
 cases. It touches the guard that guard-defects just changed, so it goes on a
 fresh branch from main.
+
+**Remedied on the n101 branch.** The cause was one shared stream,
+`secret_file_matching._brace_expansion_tokens`. It ran `iter_brace_words` and
+`expand_braces` over the raw command, so a body's dict literals and f-strings
+tripped either the 500-word discovery cap or the 256-spelling cap. The new
+`shell_expansion.brace_expansion_view` neutralises braces in text no shell
+expands. That means a quoted heredoc body fed to a non-shell interpreter with
+no shell downstream, and a single-quoted argument owned by a non-shell
+interpreter. It returns the command unchanged when it is unsure. A body fed
+to a data sink is kept, because `cat > run.sh <<'EOF'` authors a runnable
+file, and `Write`/`Edit` content is still enumerated whole. An
+interpreter-fed heredoc body now gets the one-liner families' shell-exec
+literal scan, so a brace-spelled path inside a call such as Python's
+os-dot-system still denies. The fix is in the shared stream, so payload
+capture and `flaggable_content_channel_guard` inherit it. The quarantine
+guard enumerates filesystem globs, not braces; see N103.
 
 ### N100 — A continuation on a heredoc opener line (`cat > s.sh \⏎<<'EOF'`) denies a body that is only written
 

@@ -1406,7 +1406,7 @@ def iter_protected_mentions(
         )
     tokens = itertools.chain(
         _tokenise(import_stripped),
-        _brace_expansion_tokens(import_stripped),
+        _brace_expansion_tokens(import_stripped, context),
         _normalised_word_tokens(
             import_stripped, deadline=deadline, words=words_for_normalised_stream
         ),
@@ -1454,7 +1454,7 @@ def iter_protected_mentions(
             yield (pattern, token)
 
 
-def _brace_expansion_tokens(command: str) -> Iterator[str]:
+def _brace_expansion_tokens(command: str, context: MentionContext = "bash") -> Iterator[str]:
     """Lazily yield every concrete spelling of every raw brace-expansion word
     in ``command`` (B1-R3, Plan 00466 review 3).
 
@@ -1476,8 +1476,18 @@ def _brace_expansion_tokens(command: str) -> Iterator[str]:
     quote strips only once the alternative is chosen, not from the group
     template beforehand. Run over the EXPANDED spelling, matching that
     order.
+
+    Plan 00466 N101: on the ``"bash"`` route the brace words come from
+    :func:`shell_expansion.brace_expansion_view`, which neutralises a quoted
+    heredoc body or single-quoted argument fed to a non-shell interpreter or
+    data sink -- text no shell expands, whose enumeration modelled nothing
+    and failed the guard closed on ordinary Python programs. Text a shell
+    does expand is enumerated exactly as before, caps and fail-closed
+    included. ``"content"`` (a file being authored) is enumerated whole, as
+    before: the view models a COMMAND line, not a source file.
     """
-    for word in shell_expansion.iter_brace_words(command):
+    text = command if context == "content" else shell_expansion.brace_expansion_view(command).text
+    for word in shell_expansion.iter_brace_words(text):
         for spelling in shell_expansion.expand_braces(word):
             yield shell_expansion.normalise_word(spelling)
 

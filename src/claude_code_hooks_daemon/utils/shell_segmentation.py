@@ -751,6 +751,13 @@ def quoted_heredoc_command_words(command: str) -> list[str]:
     return [word for word in resolved_words if word is not None]
 
 
+def segment_command_word(segment: str) -> str | None:
+    """Public form of :func:`_segment_command_word`, for a caller outside
+    this module that must name a segment's command the same way the heredoc
+    exemption here does (``shell_expansion.brace_expansion_view``)."""
+    return _segment_command_word(segment)
+
+
 def _segment_command_word(segment: str) -> str | None:
     """Return the one word naming the command a segment runs, or None.
 

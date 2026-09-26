@@ -1945,3 +1945,111 @@ class TestFileSchemeUrlOnBashRoute:
         handler = _handler()
         cmd = "curl -s file:///etc/hostname"
         assert not handler.matches(_hook_input("Bash", {"command": cmd}))
+
+
+#: One word whose brace expansion has 512 spellings -- past the expander's
+#: 256 cap, so enumerating it raises TooManyToEnumerateError.
+_OVER_BOUND_WORD = "".join(
+    "{" + a + "," + b + "}" for a, b in zip("acegikmoq", "bdfhjlnpr", strict=True)
+)
+#: A Python program with more brace groups than the 500-word discovery cap.
+_MANY_BRACES_PROGRAM = "x = 1\n" + "\n".join(
+    f"print(f'{{x}}-{i}', {{'k': {i}}})" for i in range(600)
+)
+
+
+def _through_chain(tool_name: str, tool_input: dict[str, Any]) -> tuple[Decision, str]:
+    chain = HandlerChain()
+    chain.add(_handler())
+    result = chain.execute(_hook_input(tool_name, tool_input), strict_mode=False)
+    return result.result.decision, result.result.reason or ""
+
+
+class TestTextTheShellNeverExpandsIsNotEnumerated:
+    """Plan 00466 N101: an ordinary `python3 - <<'EOF'` program failed the
+    guard CLOSED with TooManyToEnumerateError. Its body is handed to python
+    verbatim, so its dict literals and f-strings are not shell brace groups;
+    enumerating their "spellings" hit the expander's caps and denied a
+    command that names no protected path. The same holds for a single-quoted
+    interpreter code argument. Text a shell does expand still fails closed
+    past the cap.
+    """
+
+    def test_python_heredoc_with_many_brace_groups_is_allowed(self) -> None:
+        command = f"python3 - <<'EOF'\n{_MANY_BRACES_PROGRAM}\nEOF"
+        decision, reason = _through_chain("Bash", {"command": command})
+        assert decision != Decision.DENY, reason
+
+    def test_python_heredoc_with_an_over_bound_brace_string_is_allowed(self) -> None:
+        command = f"python3 - <<'EOF'\nprint('{_OVER_BOUND_WORD}')\nEOF"
+        decision, reason = _through_chain("Bash", {"command": command})
+        assert decision != Decision.DENY, reason
+
+    def test_python_heredoc_piped_to_a_data_sink_is_allowed(self) -> None:
+        command = f"python3 - <<'EOF' 2>&1 | grep -v noise\nprint('{_OVER_BOUND_WORD}')\nEOF"
+        decision, reason = _through_chain("Bash", {"command": command})
+        assert decision != Decision.DENY, reason
+
+    def test_single_quoted_python_code_with_an_over_bound_string_is_allowed(self) -> None:
+        command = f"python3 -c 'print(\"{_OVER_BOUND_WORD}\")'"
+        decision, reason = _through_chain("Bash", {"command": command})
+        assert decision != Decision.DENY, reason
+
+    def test_literal_protected_name_in_a_python_heredoc_still_denies(self) -> None:
+        command = (
+            f"python3 - <<'EOF'\n{_MANY_BRACES_PROGRAM}\n"
+            "print(open('/proj/.vault-pass').read())\nEOF"
+        )
+        decision, reason = _through_chain("Bash", {"command": command})
+        assert decision == Decision.DENY
+        assert RuleID.SECRET_BASH_MENTION in reason
+
+    def test_brace_spelled_name_in_a_python_shell_exec_call_still_denies(self) -> None:
+        call = "os." + 'system("cat /proj/.vault-p{a,x}ss")'
+        command = f"python3 - <<'EOF'\nimport os\n{call}\nEOF"
+        decision, reason = _through_chain("Bash", {"command": command})
+        assert decision == Decision.DENY
+        assert RuleID.SECRET_BASH_MENTION in reason
+
+    def test_executed_bash_heredoc_expanding_to_a_protected_name_still_denies(self) -> None:
+        command = "bash <<'EOF'\ncat /proj/.vault-p{a,x}ss\nEOF"
+        decision, reason = _through_chain("Bash", {"command": command})
+        assert decision == Decision.DENY
+        assert RuleID.SECRET_BASH_MENTION in reason
+
+    def test_heredoc_authoring_a_script_that_expands_to_a_protected_name_still_denies(
+        self,
+    ) -> None:
+        command = "cat > run.sh <<'EOF'\ncat /proj/.vault-p{a,x}ss\nEOF"
+        decision, reason = _through_chain("Bash", {"command": command})
+        assert decision == Decision.DENY
+        assert RuleID.SECRET_BASH_MENTION in reason
+
+    def test_single_quoted_bash_c_expanding_to_a_protected_name_still_denies(self) -> None:
+        command = "bash -c 'cat /proj/.vault-p{a,x}ss'"
+        decision, reason = _through_chain("Bash", {"command": command})
+        assert decision == Decision.DENY
+        assert RuleID.SECRET_BASH_MENTION in reason
+
+    def test_over_bound_shell_words_still_fail_closed(self) -> None:
+        decision, reason = _through_chain("Bash", {"command": "echo " + "{a,b}" * 20})
+        assert decision == Decision.DENY
+        assert RuleID.SECRET_EVALUATION_ERROR in reason
+
+    def test_over_bound_executed_bash_heredoc_still_fails_closed(self) -> None:
+        command = f"bash <<'EOF'\necho {_OVER_BOUND_WORD}\nEOF"
+        decision, reason = _through_chain("Bash", {"command": command})
+        assert decision == Decision.DENY
+        assert RuleID.SECRET_EVALUATION_ERROR in reason
+
+    def test_over_bound_python_heredoc_piped_to_a_shell_still_fails_closed(self) -> None:
+        command = f"python3 - <<'EOF' | bash\nprint('echo {_OVER_BOUND_WORD}')\nEOF"
+        decision, reason = _through_chain("Bash", {"command": command})
+        assert decision == Decision.DENY
+        assert RuleID.SECRET_EVALUATION_ERROR in reason
+
+    def test_writing_shell_source_with_an_over_bound_word_still_fails_closed(self) -> None:
+        tool_input = {"file_path": "/proj/gen.sh", "content": f"echo {_OVER_BOUND_WORD}\n"}
+        decision, reason = _through_chain("Write", tool_input)
+        assert decision == Decision.DENY
+        assert RuleID.SECRET_EVALUATION_ERROR in reason
