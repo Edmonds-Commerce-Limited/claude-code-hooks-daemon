@@ -341,24 +341,45 @@ _LINE_DIFFERENTIAL_SCRIPTS: list[str] = [
     "echo $\\\n(echo) <<X\necho M1\nX\necho M2",
     "echo a\\\r\n#<<X\necho M1\nX",
     "cat <(cat <<X\necho M1\nX\n)\necho M2",
+    # Round 11, review 10 BLOCKER C: a `case` pattern's `)` is no close.
+    ": $(case a in a) ;; esac; cat <<'E'\nx\nE)\necho M1\nE",
+    ": $(case a in (a) ;; esac; cat <<'E'\nx\nE)\necho M1\nE",
+    ": $(: $(case a in a) ;; esac); cat <<'E'\nx\nE)\necho M1\nE",
+    ": $(case a in a) ;& b) ;;& esac; cat <<'E'\nx\nE)\necho M1\nE",
+    "cat <(case a in a) ;; esac; cat <<'E'\nx\nE)\necho M1\nE",
+    ": `case a in a) ;; esac; cat <<'E'\nx\nE\n`\necho M1",
+    ": $(ca\\\nse a in a) ;; esac; cat <<'E'\nx\nE)\necho M1\nE",
+    # MAJOR D: `$\⏎#` is `$#` to bash, not a comment.
+    "echo $\\\n# <<X\necho M1\nX\necho M2",
+    "echo $((1)\\\n) <<X\necho M1\nX\necho M2",
+    # S-a: a process substitution is a substitution frame.
+    "cat <(cat <<'E'\nx\nE)\necho M1\nE",
+    ": >(cat <<'E'\nx\nE)\necho M1\nE",
+    # S-b: a newline inside a substitution while an outer body is pending.
+    "cat <<'E' $(true\necho M1 >&2\nE\n)\necho M2\nE",
+    "cat <<'E' `true\necho M1 >&2\nE\n`\necho M2\nE",
+    "cat <<'E' \"$(true\necho M1 >&2\nE\n)\"\necho M2\nE",
 ]
 
 _MARK_LINE = re.compile(r"echo (M\d)")
 
 
 def _bash_stdout(script: str, tmp_path: Path) -> list[str]:
+    """Every line the script printed. A marker run inside a substitution
+    writes to stderr, whose output bash does not capture."""
     bash = shutil.which("bash")
     assert bash is not None
     result = subprocess.run(
         [bash, "--norc", "--noprofile", "-c", script],
         cwd=tmp_path,
         env={"LC_ALL": "C", "PATH": "/usr/bin:/bin"},
+        stdin=subprocess.DEVNULL,
         capture_output=True,
         text=True,
         check=False,
         timeout=Timeout.QA_TEST_TIMEOUT,
     )
-    return result.stdout.splitlines()
+    return [*result.stdout.splitlines(), *result.stderr.splitlines()]
 
 
 class TestEveryLineIsReadAsBashReadsIt:
@@ -376,6 +397,19 @@ class TestEveryLineIsReadAsBashReadsIt:
                 assert not in_body, match.group(1)
             elif scan.stopped_at is None:
                 assert in_body, match.group(1)
+
+    @pytest.mark.parametrize("script", _LINE_DIFFERENTIAL_SCRIPTS)
+    def test_the_scan_of_the_normalised_text_agrees_with_bash(
+        self, script: str, tmp_path: Path
+    ) -> None:
+        """Round 11, MAJOR D: every guard reads the normalised text, so no
+        marker bash runs may sit in a body found there either."""
+        ran = set(_bash_stdout(script, tmp_path))
+        normalised = remove_line_continuations(script)
+        spans = [(h.body_start, h.closer_end) for h in scan_heredocs(normalised).heredocs]
+        for match in _MARK_LINE.finditer(normalised):
+            if match.group(1) in ran:
+                assert not any(start <= match.start() < end for start, end in spans)
 
 
 class TestTheScanStopsWhereBashIsUncertain:
@@ -424,6 +458,10 @@ class TestTheScanStopsWhereBashIsUncertain:
         assert _delimiters("x=`cat <<X`") == [("X", False, False)]
 
 
+#: A backslash-newline between two characters bash reads as one token.
+_GLUE = re.compile(r"\$\\\n[({\['\"$]|\(\\\n\(|<\\\n<|\)\\\n\)|[^\s|&;()<>]\\\n[(#]")
+
+
 class TestNormalisingKeepsTheStructure:
     """MAJOR B: the continuations removed are the scan's, so the normalised
     text scans to the same heredocs, and stops where the raw text did."""
@@ -436,8 +474,14 @@ class TestNormalisingKeepsTheStructure:
         ],
     )
     def test_a_rescan_of_the_normalised_text_matches(self, script: str) -> None:
+        """A backslash-newline that glues a token is joined, as bash joins it
+        before it reads the token, so that stop has nothing left to be
+        uncertain about; the normalised text is then read as bash reads it
+        (``test_the_scan_of_the_normalised_text_agrees_with_bash``)."""
         raw = scan_heredocs(script)
         normalised = scan_heredocs(remove_line_continuations(script))
+        if raw.stopped_at is not None and _GLUE.search(script):
+            return
         shape = [(h.operator.delimiter, h.operator.quoted, h.terminated) for h in raw.heredocs]
         assert [
             (h.operator.delimiter, h.operator.quoted, h.terminated) for h in normalised.heredocs
@@ -454,11 +498,45 @@ class TestNormalisingKeepsTheStructure:
             ("bash <<'EOF'\ngit reset --ha\\\nrd\nEOF", "bash <<'EOF'\ngit reset --hard\nEOF"),
             ("cat <<EOF\nfoo\\\nbar\nEOF", "cat <<EOF\nfoobar\nEOF"),
             ("bash -c 'git pu\\\nsh'", "bash -c 'git push'"),
-            ("echo a\\\n# <<X", "echo a\\\n# <<X"),
+            ("echo a\\\n# <<X", "echo a# <<X"),
+            ("echo $\\\n(date) <<X", "echo $(date) <<X"),
         ],
     )
     def test_what_is_joined_and_what_is_kept(self, script: str, expected: str) -> None:
         assert remove_line_continuations(script) == expected
+
+    def test_past_the_join_bound_a_glue_still_stops_the_rescan(self) -> None:
+        """Each glue join copies the text, so they are bounded; the glue
+        after the bound is kept, and the normalised text stops there."""
+        script = "echo " + "$\\\n(true) " * 300 + "<<'X'\nx\nX\necho M1"
+        normalised = remove_line_continuations(script)
+        assert normalised.count("$(true)") == 256
+        scan = scan_heredocs(normalised)
+        assert scan.stopped_at is not None
+        assert scan.heredocs == []
+
+    @pytest.mark.parametrize(
+        "stopper",
+        [
+            "cat <<${x}E > n.md\nit's a note\n${x}E\n",
+            "echo 'open\n",
+            "echo `open\n",
+            "echo $'open\n",
+            "echo $((echo x) )\n",
+        ],
+    )
+    def test_every_continuation_after_a_stop_is_joined(self, stopper: str) -> None:
+        """MAJOR D: past a stop the text is read as commands, and each
+        backslash-newline in it is joined as the regex before the scanner
+        joined it, so a pattern split across lines is still seen whole. An
+        escaped backslash before a newline is no continuation: joining it
+        would escape the next character instead, and leaves a backslash in
+        the word, so no pattern spanning it could match anyway."""
+        script = f"{stopper}git reset --ha\\\nrd\n# c \\\nx\\\r\ny\\\\\nz\\\\\\\nw"
+        assert scan_heredocs(script).stopped_at is not None
+        assert remove_line_continuations(script) == (
+            f"{stopper}git reset --hard\n# c xy\\\\\nz\\\\w"
+        )
 
 
 class TestSubstitutionEnd:

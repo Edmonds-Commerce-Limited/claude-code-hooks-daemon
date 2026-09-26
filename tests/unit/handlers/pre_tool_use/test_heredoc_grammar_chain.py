@@ -9,6 +9,8 @@ The client-default non-strict mode is used throughout.
 from __future__ import annotations
 
 import os
+import shutil
+import subprocess
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
@@ -16,6 +18,7 @@ from unittest.mock import patch
 
 import pytest
 
+from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.core import Decision
 from claude_code_hooks_daemon.core.chain import HandlerChain
 from claude_code_hooks_daemon.core.data_layer import reset_data_layer
@@ -217,3 +220,192 @@ class TestAShellFedBodyIsCommands:
     def test_a_prose_body_to_a_file_stays_allowed(self) -> None:
         command = "cat > notes.md <<'EOF'\nit's > /opt/x, in prose\nEOF"
         assert _decision(ProjectContainmentHandler(), command) == Decision.ALLOW
+
+
+# -- Round 11: review 10 C, D, S-a, S-b, E and F, each run in bash first ------
+
+#: Commands the differential replaces with functions that only report.
+_RECORDERS = (
+    'git() { printf "GIT %s\\n" "$*" >&2; }\n'
+    'pytest() { printf "PYTEST\\n" >&2; }\n'
+    'tail() { printf "TAIL\\n" >&2; }\n'
+    'curl() { printf "CURL\\n" >&2; }\n'
+)
+_RAN_RESET = "GIT reset " + "--hard"
+
+
+def _bash_run(script: str, cwd: Path) -> str:
+    """What bash reported running, with ``git``, ``pytest``, ``tail`` and
+    ``curl`` replaced by recorders. Nothing is read from stdin."""
+    bash = shutil.which("bash")
+    assert bash is not None
+    result = subprocess.run(
+        [bash, "--norc", "--noprofile", "-c", _RECORDERS + script],
+        cwd=cwd,
+        env={"LC_ALL": "C", "PATH": "/usr/bin:/bin"},
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=Timeout.QA_TEST_TIMEOUT,
+    )
+    return result.stdout + result.stderr
+
+
+def _outside(tmp_path: Path) -> str:
+    """A write outside the project root the chain judges (``/repo``), that
+    bash can really perform."""
+    return f"echo hi > {tmp_path / 'evil.txt'}"
+
+
+#: ``{line}`` is a line bash RUNS after the heredoc that hides it.
+_RUN_AFTER_A_HIDING_HEREDOC: list[str] = [
+    # C: a `case` pattern's `)` inside a substitution frame.
+    ": $(case a in a) ;; esac; cat <<'E'\nx\nE)\n{line}\nE",
+    ": $(case a in (a) ;; esac; cat <<'E'\nx\nE)\n{line}\nE",
+    ": $(: $(case a in a) ;; esac); cat <<'E'\nx\nE)\n{line}\nE",
+    ": $(case a in a) ;& b) ;;& esac; cat <<'E'\nx\nE)\n{line}\nE",
+    ": \"$(case a in a) ;; esac; cat <<'E'\nx\nE)\"\n{line}\nE",
+    "cat <(case a in a) ;; esac; cat <<'E'\nx\nE)\n{line}\nE",
+    ": `case a in a) ;; esac; cat <<'E'\nx\nE\n`\n{line}",
+    # S-a: a process substitution closes a body at `E)` as `$( )` does.
+    "cat <(cat <<'E'\nx\nE)\n{line}\nE",
+    ": >(cat <<'E'\nx\nE)\n{line}\nE",
+    # S-b: the outer body starts after the substitution, not inside it.
+    "cat <<'E' $(true\n{line}\nE\n)\nx\nE",
+    "cat <<'E' `true\n{line}\nE\n`\nx\nE",
+    "cat <<'E' \"$(true\n{line}\nE\n)\"\nx\nE",
+]
+
+
+class TestTheBashDifferential:
+    """Round 11: each shape is run in bash, and every line bash ran is
+    judged by the guard that owns it."""
+
+    @pytest.mark.parametrize("shape", _RUN_AFTER_A_HIDING_HEREDOC)
+    def test_destructive_git(self, shape: str, tmp_path: Path) -> None:
+        command = shape.replace("{line}", _RESET)
+        assert _RAN_RESET in _bash_run(command, tmp_path)
+        assert _decision(DestructiveGitHandler(), command) == Decision.DENY
+
+    @pytest.mark.parametrize("shape", _RUN_AFTER_A_HIDING_HEREDOC)
+    def test_pipe_blocker(self, shape: str, tmp_path: Path) -> None:
+        command = shape.replace("{line}", _TAIL)
+        assert "PYTEST" in _bash_run(command, tmp_path)
+        assert _decision(PipeBlockerHandler(), command) == Decision.DENY
+
+    @pytest.mark.parametrize("shape", _RUN_AFTER_A_HIDING_HEREDOC)
+    def test_curl_pipe_shell(self, shape: str, tmp_path: Path) -> None:
+        command = shape.replace("{line}", _CURL)
+        assert "CURL" in _bash_run(command, tmp_path)
+        assert _decision(CurlPipeShellHandler(), command) == Decision.DENY
+
+    @pytest.mark.parametrize("shape", _RUN_AFTER_A_HIDING_HEREDOC)
+    def test_project_containment(self, shape: str, tmp_path: Path) -> None:
+        command = shape.replace("{line}", _outside(tmp_path))
+        _bash_run(command, tmp_path)
+        assert (tmp_path / "evil.txt").exists()
+        assert _decision(ProjectContainmentHandler(), command) == Decision.DENY
+
+
+class TestAContinuationAfterAStopIsJoined:
+    """MAJOR D: past a stop the normaliser joins every backslash-newline, so
+    a pattern split across lines is judged whole. The review's example, in
+    every guard."""
+
+    _STOP = "cat <<${x}E > notes.md\nit's a note\n${x}E\n"
+
+    @staticmethod
+    def _split(text: str) -> str:
+        middle = len(text) // 2
+        return text[:middle] + "\\\n" + text[middle:]
+
+    def test_bash_runs_the_joined_line(self, tmp_path: Path) -> None:
+        assert _RAN_RESET in _bash_run(self._STOP + self._split(_RESET), tmp_path)
+
+    @pytest.mark.parametrize(
+        ("handler", "line"),
+        [
+            (DestructiveGitHandler, _RESET),
+            (PipeBlockerHandler, _TAIL),
+            (CurlPipeShellHandler, _CURL),
+            (ProjectContainmentHandler, _OUTSIDE),
+            (SedBlockerHandler, _SED),
+        ],
+    )
+    def test_every_guard_sees_the_joined_line(self, handler: type[Handler], line: str) -> None:
+        assert _decision(handler(), self._STOP + self._split(line)) == Decision.DENY
+
+
+class TestAnUnresolvedReceiverIsNoShell:
+    """Minor E: a body fed to a command named by a variable is data to
+    containment, as it is on main, unless that variable is known to name a
+    shell."""
+
+    _PYTHON_BODY = "x = 'don\\'t'\nif len(x) > 1:\n    print(x)\n"
+
+    @pytest.mark.parametrize(
+        "opener",
+        [
+            "PY=python3; $PY - <<'EOF'",
+            "VENV=/usr; \"$VENV/bin/python3\" - <<'EOF'",
+            "PY=python3; ${PY} - <<'EOF'",
+        ],
+    )
+    def test_a_python_body_is_data(self, opener: str, tmp_path: Path) -> None:
+        command = f"{opener}\n{self._PYTHON_BODY}EOF"
+        assert "don't" in _bash_run(command, tmp_path)
+        assert _decision(ProjectContainmentHandler(), command) == Decision.ALLOW
+
+    @pytest.mark.parametrize(
+        "opener",
+        [
+            "SH=bash; $SH <<'EOF'",
+            "SH=/bin/sh; \"$SH\" <<'EOF'",
+            "D=/bin; $D/bash <<'EOF'",
+            "$SHELL <<'EOF'",
+            "${BASH} <<'EOF'",
+        ],
+    )
+    def test_a_body_a_known_shell_runs_is_commands(self, opener: str, tmp_path: Path) -> None:
+        command = f"{opener}\n{_outside(tmp_path)}\nEOF"
+        _bash_run(f"SHELL=/bin/bash\n{command}", tmp_path)
+        assert (tmp_path / "evil.txt").exists()
+        assert _decision(ProjectContainmentHandler(), command) == Decision.DENY
+
+
+class TestAnUnresolvedSinkArgumentIsNoExecutor:
+    """Minor F: only the receiver's identity decides whether a quoted body is
+    inert; a target or directory the reader cannot resolve does not."""
+
+    @pytest.mark.parametrize(
+        "opener",
+        [
+            "cat > \"$OUT\" <<'EOF'",
+            "cat > \"untracked/scratch/$NAME.md\" <<'EOF'",
+            "cat >\"$OUT\" <<'EOF'",
+            "git -C \"$WT\" commit -F - <<'EOF'",
+            "tee \"$OUT\" <<'EOF'",
+            "sort -o \"$OUT\" <<'EOF'",
+            "cat <<'EOF' >> \"$OUT\"",
+        ],
+    )
+    def test_prose_in_the_body_is_data(self, opener: str, tmp_path: Path) -> None:
+        command = f"{opener}\nnever run {_RESET}\nEOF"
+        assert _RAN_RESET not in _bash_run(
+            f"OUT={tmp_path / 'o.md'}; NAME=n; WT={tmp_path}\n{command}", tmp_path
+        )
+        assert _decision(DestructiveGitHandler(), command) == Decision.ALLOW
+
+    @pytest.mark.parametrize(
+        "opener",
+        [
+            "sort $OPT <<'EOF'",
+            "git \"$SUB\" <<'EOF'",
+            "less \"$X\" <<'EOF'",
+            "cat <<'EOF' >&\"$FD\"",
+        ],
+    )
+    def test_an_unresolved_word_that_can_run_the_body_still_judges_it(self, opener: str) -> None:
+        command = f"{opener}\n{_RESET}\nEOF"
+        assert _decision(DestructiveGitHandler(), command) == Decision.DENY

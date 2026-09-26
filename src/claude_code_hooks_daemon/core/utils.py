@@ -394,10 +394,12 @@ def scan_bash_write_destinations(
     from the one where the scan STOPPED: past that point the scanner cannot
     tell a body from a command (Plan 00466 N101 round 10).
 
-    A body fed to a SHELL (:data:`SHELL_BODY_RUNNERS`, or a receiver whose
-    name cannot be resolved) is commands, not data: its writes are read like
-    the command's own, and text in it the tokeniser cannot read is
-    ``unreadable`` (Plan 00466 N101 round 10, S3). With
+    A body fed to a SHELL (:data:`SHELL_BODY_RUNNERS`, named directly or by a
+    variable the command shows names one) is commands, not data: its writes
+    are read like the command's own, and text in it the tokeniser cannot read
+    is ``unreadable`` (Plan 00466 N101 round 10, S3). A body fed to a
+    receiver nothing names (``$PY -``) is data, as on main (round 11,
+    minor E). With
     ``include_heredoc_bodies``, so is an unreadable body fed to anything but
     a data sink.
     """
@@ -430,7 +432,7 @@ def _scan_destinations(command: str, include_heredoc_bodies: bool, depth: int) -
     consumers = heredoc_consumers(command, scan.heredocs)
     for heredoc, words in zip(scan.heredocs, consumers, strict=True):
         body = heredoc.body(command)
-        if any(word is None or word in SHELL_BODY_RUNNERS for word in words):
+        if any(word in SHELL_BODY_RUNNERS for word in words):
             # The shell reads each body line with its newline, and joins its
             # continuations as it reads.
             script = remove_line_continuations(body + "\n")

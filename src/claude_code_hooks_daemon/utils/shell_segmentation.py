@@ -34,6 +34,7 @@ import stat
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from typing import NamedTuple
 
 from claude_code_hooks_daemon.utils.ansi_c import ansi_c_string
 from claude_code_hooks_daemon.utils.command_evasion import (
@@ -125,6 +126,17 @@ _SUBSTITUTION_OPENER_PATTERN = re.compile(r"^(?:\$\(|`)")
 #: Commands that run a heredoc body fed to them as SHELL, so its redirects are
 #: writes the command performs (Plan 00466 N101 round 10, S3).
 SHELL_BODY_RUNNERS: frozenset[str] = frozenset({"sh", "bash", "zsh", "dash", "ksh", "source", "."})
+
+#: Variables bash or the login environment set to a shell, by the shell each
+#: names.
+_SHELL_VARIABLES: dict[str, str] = {"SHELL": "sh", "BASH": "bash"}
+
+#: A command word that is one variable expansion, optionally quoted and
+#: followed by a literal path tail: ``$PY``, ``"${PY}"``, ``$VENV/bin/python``.
+_VARIABLE_COMMAND_PATTERN = re.compile(
+    r"(?P<quote>\"?)\$(?:\{(?P<braced>[A-Za-z_]\w*)\}|(?P<bare>[A-Za-z_]\w*))"
+    r"(?P<tail>[^\s\"'`$\\;&|<>(){}*?\[]*)(?P=quote)(?=\s|$)"
+)
 
 #: A file-descriptor redirect, whose `&` is punctuation rather than a command
 #: separator: `2>&1`, `>&2`, `1>&2`, `&>log`, `&>>log`, `2>&-`.
@@ -411,6 +423,15 @@ _REDIRECT_WORD_PATTERN = re.compile(
     r"(?P<fd>\d*|&)(?P<op><<<|<<-?|>>|>\||>&|<&|<>|>|<)(?P<rest>.*)"
 )
 _READ_OPERATORS: frozenset[str] = frozenset({"<", "<<", "<<-", "<<<"})
+
+
+class _Word(NamedTuple):
+    """A shell word as written, and after quote removal (None when an
+    expansion leaves it unresolved)."""
+
+    raw: str
+    value: str | None
+
 
 #: The working directory of the event being judged. Per dispatch, never on a
 #: shared object: the daemon runs from `/`, and a relative write target lands
@@ -998,15 +1019,21 @@ def _stage_is_inert_sink(stage: str) -> bool:
 
     An allowlist in both halves: the command must be a listed sink, and each
     word must be one of the shapes that sink is known to take without
-    executing anything. A word the reader cannot resolve is not inert.
+    executing anything.
+
+    A word the reader cannot resolve (``"$OUT"``) is judged by where it sits
+    (round 11, minor F). As a file the sink writes, a ``git -C`` directory
+    or an option's value it hands the body to nothing, so only the
+    receiver's identity decides. Where it could be an OPTION of a sink with
+    an allowlist, or an fd a redirect duplicates, it is not inert.
     """
     word = _segment_command_word(stage)
     if word is None or word not in DATA_SINKS:
         return False
     if any(opener in stage for opener in _PROCESS_SUBSTITUTIONS):
         return False
-    words = _resolved_segment_words(stage)
-    if not words or words[-1] is None:
+    words = _segment_words(stage)
+    if not words:
         return False
     arguments = _arguments_after_command(words, word)
     if arguments is None:
@@ -1019,52 +1046,81 @@ def _stage_is_inert_sink(stage: str) -> bool:
     return _sink_arguments_are_inert(word, remaining)
 
 
-def _arguments_after_command(words: list[str | None], command: str) -> list[str] | None:
-    """The words after the one naming ``command`` (past any wrapper)."""
-    resolved = [word for word in words if word is not None]
-    for index, candidate in enumerate(resolved):
-        if candidate.rsplit("/", 1)[-1] == command:
-            return resolved[index + 1 :]
+def _segment_words(segment: str) -> list[_Word] | None:
+    """Every word of ``segment`` as written and after quote removal
+    (``None`` where an expansion leaves it unresolved); None when a word's
+    extent itself is unknown. Leading grouping punctuation is dropped, as
+    :func:`_resolved_segment_words` drops it."""
+    words: list[_Word] = []
+    for raw in iter_shell_words(strip_reserved_word_prefix(segment)):
+        if raw is None:
+            return None
+        if not words:
+            raw = raw.lstrip("(") if raw.strip("({") else ""
+            if not raw:
+                continue
+        words.append(_Word(raw, resolve_shell_word(raw)))
+    return words
+
+
+def _arguments_after_command(words: list[_Word], command: str) -> list[_Word] | None:
+    """The words after the one naming ``command`` (past any wrapper). Every
+    word up to it resolved, or :func:`_segment_command_word` named nothing."""
+    for index, candidate in enumerate(words):
+        if candidate.value is not None and candidate.value.rsplit("/", 1)[-1] == command:
+            return words[index + 1 :]
     return None
 
 
-def _inert_redirects(arguments: list[str]) -> list[str] | None:
+def _inert_redirects(arguments: list[_Word]) -> list[_Word] | None:
     """``arguments`` without their redirects, or None if one could hand the
-    body to something that runs it."""
-    remaining: list[str] = []
+    body to something that runs it. An operator is read as written, so a
+    quoted ``'>'`` is an argument, as it is to bash."""
+    remaining: list[_Word] = []
     index = 0
     while index < len(arguments):
-        match = _REDIRECT_WORD_PATTERN.fullmatch(arguments[index])
+        match = _REDIRECT_WORD_PATTERN.fullmatch(arguments[index].raw)
         index += 1
         if match is None:
             remaining.append(arguments[index - 1])
             continue
-        target = match.group("rest")
-        if not target:
+        rest = match.group("rest")
+        if rest:
+            target = resolve_shell_word(rest)
+        else:
             if index >= len(arguments):
                 return None
-            target = arguments[index]
+            target = arguments[index].value
             index += 1
         operator = match.group("op")
         if operator in _READ_OPERATORS:
             continue
-        if operator in _DUPLICATE_OPERATORS and (target.isdigit() or target == "-"):
-            if target not in _INERT_FD_TARGETS:
+        if operator in _DUPLICATE_OPERATORS:
+            if target is None:
                 return None
-            continue
-        if not _is_inert_write_target(target):
+            if target.isdigit() or target == "-":
+                if target not in _INERT_FD_TARGETS:
+                    return None
+                continue
+        if target is not None and not _is_inert_write_target(target):
             return None
     return remaining
 
 
-def _sink_arguments_are_inert(command: str, arguments: list[str]) -> bool:
+def _sink_arguments_are_inert(command: str, arguments: list[_Word]) -> bool:
     allowed = _SINK_OPTIONS.get(command)
     value_options = _SINK_VALUE_OPTIONS.get(command, frozenset())
     output_options = _SINK_OUTPUT_OPTIONS.get(command, frozenset())
     index = 0
     while index < len(arguments):
-        argument = arguments[index]
+        argument = arguments[index].value
         index += 1
+        if argument is None:
+            # Could expand to an option: inert only for a sink with none
+            # that executes, or one whose every operand is a file it writes.
+            if allowed is not None and command not in _SINK_OUTPUT_OPERANDS:
+                return False
+            continue
         if argument.startswith("-") and argument not in ("-", "--"):
             name, has_value, value = argument.partition("=")
             if allowed is not None and not _option_is_allowed(name, allowed):
@@ -1072,9 +1128,12 @@ def _sink_arguments_are_inert(command: str, arguments: list[str]) -> bool:
             if name in value_options and not has_value and len(name) == len("-x"):
                 if index >= len(arguments):
                     return False
-                value = arguments[index]
-                has_value = "="
+                next_value = arguments[index].value
                 index += 1
+                if next_value is None:
+                    continue
+                value = next_value
+                has_value = "="
             if name[:2] in output_options or name in output_options:
                 output = value if has_value else name[2:]
                 if not _is_inert_write_target(output):
@@ -1105,13 +1164,14 @@ def _option_is_allowed(name: str, allowed: frozenset[str]) -> bool:
 _VALUE_LETTERS: frozenset[str] = frozenset().union(*_SINK_VALUE_OPTIONS.values())
 
 
-def _git_reads_body_as_data(arguments: list[str]) -> bool:
+def _git_reads_body_as_data(arguments: list[_Word]) -> bool:
     """``git`` with only inert global options, running a subcommand that
     reads stdin as data. ``-c``, ``--config-env`` and an alias can each run a
-    shell on the body."""
+    shell on the body. The ``-C`` directory may be unresolved; the
+    subcommand may not."""
     index = 0
     while index < len(arguments):
-        argument = arguments[index]
+        argument = arguments[index].value
         if argument == _GIT_DIRECTORY_FLAG:
             index += 2
             continue
@@ -1349,12 +1409,42 @@ def heredoc_consumers(command: str, heredocs: Sequence[Heredoc]) -> list[tuple[s
         pipeline = split_unquoted(_opener_tail(command, heredoc), _PIPELINE_TERMINATORS)[0]
         downstream = split_unquoted(pipeline, ("|",))[1:]
         consumers.append(
-            (
-                _segment_command_word(receiving),
-                *(_segment_command_word(stage) for stage in downstream),
-            )
+            tuple(_consumer_word(stage, command) for stage in (receiving, *downstream))
         )
     return consumers
+
+
+def _consumer_word(stage: str, command: str) -> str | None:
+    """The command ``stage`` runs, or the one its variable is known to name."""
+    word = _segment_command_word(stage)
+    return word if word is not None else _variable_command_word(stage, command)
+
+
+def _variable_command_word(stage: str, command: str) -> str | None:
+    """The command a stage names through a variable, where the text says
+    which (round 11, minor E): a literal basename after the expansion
+    (``"$VENV/bin/python"``), ``$SHELL`` or ``$BASH``, or a literal
+    assignment in the same command (``PY=python3; $PY -``). An assignment
+    naming a shell wins over any other. None when nothing says."""
+    match = _VARIABLE_COMMAND_PATTERN.match(strip_reserved_word_prefix(stage).lstrip("({ \t"))
+    if match is None:
+        return None
+    tail = match.group("tail")
+    if tail:
+        basename = tail.rsplit("/", 1)[-1]
+        return basename if "/" in tail and basename else None
+    name = match.group("braced") or match.group("bare")
+    if name in _SHELL_VARIABLES:
+        return _SHELL_VARIABLES[name]
+    assignment = re.compile(rf"(?:^|[\s;&|(]){re.escape(name)}=([^\s;&|()<>]*)")
+    values = [resolve_shell_word(found.group(1)) for found in assignment.finditer(command)]
+    names = [value.rsplit("/", 1)[-1] for value in values if value]
+    shell = next((word for word in names if word in SHELL_BODY_RUNNERS), None)
+    if shell is not None:
+        return shell
+    if names and len(names) == len(values):
+        return names[-1]
+    return None
 
 
 def _heredoc_receiving_segments(command: str) -> list[str]:

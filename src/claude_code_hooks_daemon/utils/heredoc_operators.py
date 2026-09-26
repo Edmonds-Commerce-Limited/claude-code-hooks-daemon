@@ -19,8 +19,9 @@ The rules pinned here, all bash's (5.2):
    kept verbatim, blanks and quotes included, and quotes inside it do not
    make the heredoc quoted: ``<<$(echo)`` is closed by the line ``$(echo)``.
 4. ``<<`` is an operator only where bash reads a command: at top level, in a
-   ``$( )`` and in a backtick substitution (also inside double quotes, which
-   is what makes ``-m "$(cat <<'EOF' ... EOF)"`` a heredoc). Inside quotes, a
+   ``$( )``, ``<( )`` or ``>( )`` and in a backtick substitution (also inside
+   double quotes, which is what makes ``-m "$(cat <<'EOF' ... EOF)"`` a
+   heredoc). Inside quotes, a
    comment, ``${ }``, ``$[ ]``, ``$(( ))``, a bare ``(( ))``, an array
    ``a=( )`` or a pattern ``@( )`` it is text or a shift. A ``#`` right after
    an opening backtick starts a comment, which ends at the newline or at the
@@ -47,6 +48,10 @@ unreadable. The uncertain shapes: an unterminated quote or substitution, a
 two-character token (``$\\⏎(``, ``a\\⏎#``), a ``${``/``$[`` in a delimiter
 word, a newline inside an expansion or array while a body is pending, and a
 backtick substitution whose end falls inside a quote, a comment or a body.
+Round 11 adds two: the word ``case`` inside a substitution, whose patterns
+end in a ``)`` that closes nothing, and a newline inside a substitution
+while an operator opened outside it is pending (bash starts that body after
+the substitution).
 """
 
 from __future__ import annotations
@@ -67,6 +72,7 @@ _NEWLINE: Final[str] = "\n"
 _TAB: Final[str] = "\t"
 _BACKSLASH: Final[str] = "\\"
 _CONTINUATION: Final[str] = "\\\n"
+_CR_CONTINUATION: Final[str] = "\\\r\n"
 _METACHARACTERS: Final[str] = " \t\n|&;()<>"
 _DOUBLE_QUOTE_ESCAPABLE: Final[str] = '$`"\\\n'
 _SUBSTITUTION_CLOSE: Final[str] = ")"
@@ -85,9 +91,24 @@ _GLUE_AFTER_DOLLAR: Final[str] = "({['\"$"
 #: What a word character joined by a backslash-newline would turn into a
 #: token: ``a(`` opens an array or pattern, ``a#`` is no comment.
 _GLUE_AFTER_WORD: Final[str] = "(#"
+#: Characters that make a two-character token with themselves: ``((``,
+#: ``<<`` and the ``))`` that closes an arithmetic expansion.
+_GLUE_DOUBLED: Final[str] = "(<)"
+#: What a ``$`` joined by a backslash-newline turns into an expansion inside
+#: double quotes.
+_GLUE_AFTER_DOLLAR_IN_DOUBLE: Final[str] = "({[$"
 _ASSIGNMENT_WORD: Final[re.Pattern[str]] = re.compile(
     r"[A-Za-z_][A-Za-z0-9_]*(?:\[[^\]]*\])?\+?=\Z"
 )
+#: The ``case`` reserved word, whose patterns end in a ``)`` that closes
+#: nothing. Checked in a ``$( )`` span's text with its continuations removed.
+_CASE_WORD: Final[re.Pattern[str]] = re.compile(r"(?:^|[\s;&|()<>`])case(?=[\s;&|()<>]|$)")
+_CASE: Final[str] = "case"
+_PROCESS_SUBSTITUTION_OPENERS: Final[str] = "<>"
+#: A newline ending a line whose trailing backslash run is odd, with an
+#: optional carriage return before it: the continuation bash removes, and the
+#: one the regex before the scanner removed with it.
+_ODD_CONTINUATION: Final[re.Pattern[str]] = re.compile(r"(?<!\\)(?:\\\\)*(\\\r?\n)")
 
 _UNQUOTED: Final[str] = "unquoted"
 _DOUBLE: Final[str] = "double"
@@ -109,6 +130,15 @@ _WORD_FRAMES: Final[frozenset[str]] = frozenset(
 )
 #: Frames that close at their matching ``)``.
 _PAREN_FRAMES: Final[frozenset[str]] = frozenset({_SUBSTITUTION, _ARRAY, _PATTERN})
+#: Substitution frames, command and process, in which bash reads a command.
+_COMMAND_SUBSTITUTION_FRAMES: Final[frozenset[str]] = frozenset({_SUBSTITUTION, _BACKTICK})
+#: Characters a join-mode scan never glues forward from: a quote or escape
+#: opens a span read whole, a ``#`` may open a comment, and a blank or a
+#: newline ends a token.
+_NO_GLUE_LOOKAHEAD: Final[str] = "'\"`\\#" + _BLANKS + _NEWLINE
+#: Glues a join-mode scan joins before it stops at the next, as a plain scan
+#: does. No command written by hand comes near it.
+_MAX_GLUE_JOINS: Final[int] = 256
 
 
 @dataclass(frozen=True)
@@ -198,18 +228,34 @@ def remove_line_continuations(command: str) -> str:
 
     Derived from the scan, so a rescan of the result finds the same heredocs,
     breaks and stop as the raw text did (Plan 00466 N101 round 10, MAJOR B).
+
+    Two differences from the plain scan (round 11, MAJOR D). A
+    backslash-newline that glues two characters into one token (``$\\⏎(``)
+    is joined, as bash joins it before it reads the token, so the result
+    holds the token bash read and that stop has nothing left to be unsure
+    of. And past a stop every backslash-newline ending an odd backslash run
+    is joined, as the regex before the scanner joined it: the text there is
+    read as commands, and a pattern split across lines must be seen whole.
+    Two stay, because joining either would undo the stop in the rescan: one a
+    quoted body kept to keep its closer, and a glue past the join bound.
     """
-    if _CONTINUATION not in command:
+    if _CONTINUATION not in command and _CR_CONTINUATION not in command:
         return command
-    removed = set(scan_heredocs(command).continuations)
-    if not removed:
-        return command
+    scanner = _Scanner(command, join_glue=True)
+    scan = scanner.run()
+    text = scanner.text
+    removed = dict.fromkeys(scan.continuations, len(_CONTINUATION))
+    if scan.stopped_at is not None:
+        for match in _ODD_CONTINUATION.finditer(text):
+            start = match.start(1)
+            if start >= scan.stopped_at and start not in scanner.kept:
+                removed[start] = match.end(1) - start
     parts: list[str] = []
     copied_to = 0
     for index in sorted(removed):
-        parts.append(command[copied_to:index])
-        copied_to = index + len(_CONTINUATION)
-    parts.append(command[copied_to:])
+        parts.append(text[copied_to:index])
+        copied_to = index + removed[index]
+    parts.append(text[copied_to:])
     return "".join(parts)
 
 
@@ -227,8 +273,19 @@ class _Frame:
 class _Scanner:
     """A context stack over the text: quotes, substitutions, expansions."""
 
-    def __init__(self, text: str, *, start: int = 0, outer: _Frame | None = None) -> None:
+    def __init__(
+        self,
+        text: str,
+        *,
+        start: int = 0,
+        outer: _Frame | None = None,
+        join_glue: bool = False,
+    ) -> None:
         self._text = text
+        self._join_glue = join_glue
+        self._glue_joins = 0
+        #: Quoted-body continuations kept because removing one moves a closer.
+        self.kept: set[int] = set()
         self._index = start
         self._stack: list[_Frame] = [_Frame(_UNQUOTED)]
         if outer is not None:
@@ -240,6 +297,12 @@ class _Scanner:
         self._heredocs: list[Heredoc] = []
         self._breaks: list[int] = []
         self._stopped_at: int | None = None
+
+    @property
+    def text(self) -> str:
+        """The text scanned: the input, less any glue a join-mode scan
+        joined. Every offset the scan reports is into this text."""
+        return self._text
 
     def run(self) -> HeredocScan:
         while self._step():
@@ -306,6 +369,8 @@ class _Scanner:
     # -- contexts ----------------------------------------------------------
 
     def _double_quoted(self, frame: _Frame) -> bool:
+        if self._join_glue and self._text[self._index] == "$":
+            self._join_glue_after(self._index, in_double=True)
         text, index = self._text, self._index
         char = text[index]
         if char == _BACKSLASH:
@@ -326,6 +391,8 @@ class _Scanner:
         return True
 
     def _unquoted(self, frame: _Frame) -> bool:
+        if self._join_glue and self._text[self._index] not in _NO_GLUE_LOOKAHEAD:
+            self._join_glue_after(self._index, in_double=False)
         text, index = self._text, self._index
         char = text[index]
         context = frame.context
@@ -361,6 +428,10 @@ class _Scanner:
             return True
         if char == "`":
             return self._backtick(frame)
+        if char == _CASE[0] and context in _COMMAND_SUBSTITUTION_FRAMES and self._reads_case(frame):
+            # A pattern's `)` closes nothing until `esac`, and the scanner
+            # does not model it (round 11, BLOCKER C).
+            self._stop(index)
         if self._open_expansion(index):
             return True
         if context == _PARAMETER:
@@ -438,6 +509,11 @@ class _Scanner:
     def _open_paren(self, frame: _Frame) -> None:
         text, index = self._text, self._index
         before = self._char_before(index)
+        if before != "" and before in _PROCESS_SUBSTITUTION_OPENERS:
+            # `<(` and `>(` are read like `$(`: a body in one closes at `E)`.
+            self._stack.append(_Frame(_SUBSTITUTION, self._index_before(index), 1))
+            self._index += 1
+            return
         if (
             text.startswith(_BARE_ARITHMETIC_OPEN, index)
             and frame.context in _OPERATOR_FRAMES
@@ -460,9 +536,33 @@ class _Scanner:
         return self._text[start:index]
 
     def _starts_word(self, frame: _Frame, index: int) -> bool:
-        if index == 0 or self._text[index - 1] in COMMENT_PRECEDERS:
+        """Is ``index`` at a word start, past any continuation bash removed?"""
+        before = self._index_before(index)
+        if before < 0 or self._text[before] in COMMENT_PRECEDERS:
             return True
-        return frame.context == _BACKTICK and index - 1 == frame.start
+        return frame.context == _BACKTICK and before == frame.start
+
+    def _reads_case(self, frame: _Frame) -> bool:
+        """Is the word at the cursor the reserved word ``case``, continuations
+        joined? Any word that spells it counts, command position or not."""
+        text, index = self._text, self._index
+        before = self._index_before(index)
+        if not (
+            before < 0
+            or text[before] in _METACHARACTERS
+            or (frame.context == _BACKTICK and before == frame.start)
+        ):
+            return False
+        word: list[str] = []
+        while index < len(text) and len(word) <= len(_CASE):
+            if text.startswith(_CONTINUATION, index):
+                index += len(_CONTINUATION)
+                continue
+            if text[index] in _METACHARACTERS:
+                break
+            word.append(text[index])
+            index += 1
+        return "".join(word) == _CASE
 
     def _comment(self, index: int) -> None:
         """Skip a comment: to the newline, or to the backtick closing a
@@ -498,10 +598,15 @@ class _Scanner:
     def _backslash(self) -> bool:
         index = self._index
         if self._text.startswith(_CONTINUATION, index):
-            if self._glues_a_token(index):
-                self._stop(index)
-            else:
+            if not self._glues_a_token(index) or self._can_join_glue():
+                # In join mode a glue left here follows a character read as
+                # part of a longer construct (`$$`, a closing quote), which a
+                # rescan of the joined text reads the same way.
                 self._continuations.add(index)
+            else:
+                self._stop(index)
+                # Kept in the normalised text, so its rescan stops here too.
+                self.kept.add(index)
         self._index += 2
         return True
 
@@ -510,18 +615,44 @@ class _Scanner:
         two-character token the raw text does not have?"""
         before = self._char_before(index)
         after = self._char_after_continuations(index + len(_CONTINUATION))
-        if before == "$":
-            return after != "" and after in _GLUE_AFTER_DOLLAR
-        if before in ("(", "<"):
-            return after == before
-        return before != "" and before not in _METACHARACTERS and after in _GLUE_AFTER_WORD
+        return _is_glue(before, after, in_double=False)
+
+    def _join_glue_after(self, index: int, *, in_double: bool) -> None:
+        """Join mode: remove the backslash-newlines after ``index`` if they
+        glue its character to the next into one token, as bash removes them
+        before it reads the token. Backtick ends ahead move back with them."""
+        text = self._text
+        after = index + 1
+        if not text.startswith(_CONTINUATION, after) or not self._can_join_glue():
+            return
+        end = after
+        while text.startswith(_CONTINUATION, end):
+            end += len(_CONTINUATION)
+        if not _is_glue(text[index], text[end : end + 1], in_double=in_double):
+            return
+        self._glue_joins += 1
+        self._text = text[:after] + text[end:]
+        for frame in self._backticks:
+            if frame.end > index:
+                frame.end -= end - after
+
+    def _can_join_glue(self) -> bool:
+        """Join mode, with joins to spare. Each join copies the text, so a
+        bound keeps the scan linear; past it a glue stops the scan and is
+        kept, as in a plain scan."""
+        return self._join_glue and self._glue_joins < _MAX_GLUE_JOINS
 
     def _char_before(self, index: int) -> str:
         """The character bash sees before ``index``, past removed continuations."""
+        cursor = self._index_before(index)
+        return self._text[cursor] if cursor >= 0 else ""
+
+    def _index_before(self, index: int) -> int:
+        """Offset of :meth:`_char_before`, or -1 at the start of the text."""
         cursor = index - 1
         while cursor >= 1 and (cursor - 1) in self._continuations:
             cursor -= len(_CONTINUATION)
-        return self._text[cursor] if cursor >= 0 else ""
+        return cursor
 
     def _char_after_continuations(self, index: int) -> str:
         while self._text.startswith(_CONTINUATION, index):
@@ -549,10 +680,14 @@ class _Scanner:
 
     def _newline(self, frame: _Frame) -> bool:
         """A command ends here at top level; any pending bodies start after it."""
-        if self._pending and frame.context in _WORD_FRAMES:
+        if self._pending and (
+            frame.context in _WORD_FRAMES or any(op.start < frame.start for op in self._pending)
+        ):
             # Bash starts a pending body only once the word this newline sits
             # in is complete, which it may not be (bash 5.2 read
-            # `cat <<X ${y:-a⏎b}` with the body after `b}`).
+            # `cat <<X ${y:-a⏎b}` with the body after `b}`). An operator
+            # opened outside the substitution this newline sits in gets its
+            # body after the substitution, not inside it (round 11, S-b).
             self._stop(self._index)
         if len(self._stack) == 1:
             self._breaks.append(self._index)
@@ -669,7 +804,9 @@ class _Scanner:
                 operator.delimiter + _SUBSTITUTION_CLOSE
             )
 
-        if not (closes(next_line) or closes(joined)):
+        if closes(next_line) or closes(joined):
+            self.kept.add(line_end - 1)
+        else:
             self._continuations.add(line_end - 1)
 
     def _redirection(self, frame: _Frame) -> bool:
@@ -759,7 +896,12 @@ class _Scanner:
                 index = closing + 1
             elif text.startswith(_SUBSTITUTION_OPEN, index) or char == "`":
                 span_end = _verbatim_span_end(text, index)
-                if span_end < 0 or _CONTINUATION in text[index:span_end]:
+                if (
+                    span_end < 0
+                    or _CONTINUATION in text[index:span_end]
+                    or (char == "$" and _CASE_WORD.search(text[index:span_end]))
+                ):
+                    # A `case` pattern's `)` ended the span early.
                     return None
                 parts.append(text[index:span_end])
                 index = span_end
@@ -774,6 +916,20 @@ class _Scanner:
                 parts.append(char)
                 index += 1
         return "".join(parts), quoted, index
+
+
+def _is_glue(before: str, after: str, *, in_double: bool) -> bool:
+    """Do ``before`` and ``after`` make one token once the backslash-newline
+    between them is removed?"""
+    if not before or not after:
+        return False
+    if before == "$":
+        return after in (_GLUE_AFTER_DOLLAR_IN_DOUBLE if in_double else _GLUE_AFTER_DOLLAR)
+    if in_double:
+        return False
+    if before in _GLUE_DOUBLED:
+        return after == before
+    return before not in _METACHARACTERS and after in _GLUE_AFTER_WORD
 
 
 def _line_end(text: str, start: int, limit: int) -> int:
