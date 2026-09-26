@@ -28,6 +28,7 @@ from claude_code_hooks_daemon.utils.shell_expansion import (
     bounded_recursive_glob,
     expand_braces,
     iter_brace_words,
+    iter_every_shell_brace_word,
     iter_normalised_shell_words,
     iter_shell_brace_words,
     normalise_word,
@@ -154,9 +155,6 @@ class TestQuotedBracesAreNotBraceSyntax:
     @pytest.mark.parametrize(
         "word",
         [
-            '.p-{"${x:-"}"}",q}',
-            ".p-{${x:-'}'},q}",
-            ".p-{a,b}${x",
             '.p-{"$(case a in a) echo;; esac)",q}',
             '.p-{"$(cat <<E\n)\nE\n)",q}',
         ],
@@ -165,8 +163,52 @@ class TestQuotedBracesAreNotBraceSyntax:
         with pytest.raises(UnresolvableBraceQuotingError):
             expand_braces(word)
 
-    def test_unresolvable_quoting_with_no_group_at_stake_reads_quote_blind(self) -> None:
-        assert expand_braces('"${x:-"a"}"') == ['"$x:-"a""']
+    @pytest.mark.parametrize(
+        ("word", "spelling"),
+        [
+            ('.p-{"${x:-"}"}",q}', ".p-q"),
+            (".p-{${x:-'}'},q}", ".p-q"),
+            (".p-{a,b}${x", ".p-a*"),
+        ],
+    )
+    def test_a_parameter_expansion_is_read_as_bash_s_brace_scanner_reads_it(
+        self, word: str, spelling: str
+    ) -> None:
+        """Plan 00466 N101 round 7: bash's brace scanner opens a level at an
+        unquoted `${` and skips one inside double quotes, whatever the
+        parameter expansion's own rules; so does this."""
+        assert spelling in _spellings(word)
+
+    @pytest.mark.parametrize(
+        ("word", "spellings"),
+        [
+            ("{a}{b,c}", ["{a}b", "{a}c"]),
+            ("{pass},}", ["pass}", ""]),
+            ("{a{b,c}}", ["{ab}", "{ac}"]),
+            ("x{a,}", ["xa", "x"]),
+            ("{1..2x}{a,b}", ["{1..2x}a", "{1..2x}b"]),
+            ("{}{a,b}", ["{}a", "{}b"]),
+        ],
+    )
+    def test_a_group_is_what_bash_s_brace_scanner_accepts(
+        self, word: str, spellings: list[str]
+    ) -> None:
+        """Plan 00466 N101 round 7: a `}` before any comma is text, and a
+        body with no comma that is not a sequence is text."""
+        assert set(spellings) <= _spellings('""' + word)
+
+    def test_a_scan_past_its_budget_raises(self) -> None:
+        """Bash retries every `{` against the rest of the word, so many
+        unmatched braces cost the square of their number."""
+        with pytest.raises(TooManyToEnumerateError, match="budget"):
+            expand_braces('""' + "{a" * 8000 + ",}")
+
+    def test_no_brace_is_retried_once_no_closing_brace_is_left(self) -> None:
+        word = '""' + "{a" * 8000
+        assert expand_braces(word) == [word]
+
+    def test_unresolvable_quoting_with_no_group_at_stake_reads_as_before(self) -> None:
+        assert '"$x:-"a""' in expand_braces('"${x:-"a"}"')
 
 
 class TestIterShellBraceWords:
@@ -231,6 +273,51 @@ class TestIterShellBraceWords:
         text = "echo " + "$(echo " * 10 + '.p-{"a",b}' + ")" * 10
         with pytest.raises(TooManyToEnumerateError):
             list(iter_shell_brace_words(text))
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "bash -c $'cat .p-\\x7bq,r\\x7d'",
+            "eval $'cat .p-\\x7bq,r\\x7d'",
+            "ssh host $'cat .p-\\173q,r\\175'",
+            "su -c $'cat .p-\\u007bq,r\\u007d' root",
+        ],
+    )
+    def test_braces_decoded_from_ansi_c_quoting_are_read_n112(self, text: str) -> None:
+        """Plan 00466 N112: no quote survives the decoding."""
+        assert ".p-{q,r}" in list(iter_shell_brace_words(text))
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            ": ${x:-'a'} ; bash -c $'cat .p-\\x7b\"\\x7d\",q\\x7d'",
+            ": ${x:-'a'} ; eval $'cat .p-\\x7bq,r\\x7d'",
+            ": ${x:-'a'} ; eval \"cat .p-$(printf x)q,r}\"",
+            ": ${x:-'a'} ; bash -c \"$v\"",
+        ],
+    )
+    def test_a_group_that_may_arrive_after_unresolvable_quoting_raises_n113(
+        self, text: str
+    ) -> None:
+        """Plan 00466 N113: a decoded brace, or an unknown value a shell
+        reads again, after a span that cannot be resolved."""
+        with pytest.raises(UnresolvableBraceQuotingError):
+            list(iter_shell_brace_words(text))
+
+    @pytest.mark.parametrize(
+        "text",
+        [": ${x:-'a'} ; echo \"$HOME\" done", 'echo "${x:-"a"}" $\'tab\\there\''],
+    )
+    def test_nothing_that_may_arrive_after_unresolvable_quoting_ends_the_scan(
+        self, text: str
+    ) -> None:
+        assert list(iter_shell_brace_words(text)) == []
+
+    def test_every_word_holding_a_brace_is_reported_when_asked(self) -> None:
+        assert list(iter_every_shell_brace_word("echo {a,b} '{c,d}' plain")) == [
+            "{a,b}",
+            "'{c,d}'",
+        ]
 
     def test_a_word_quote_removal_leaves_unchanged_is_not_reread(self) -> None:
         """A lone `$` is a quoting character that quote removal keeps."""

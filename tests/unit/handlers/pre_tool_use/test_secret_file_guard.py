@@ -2620,15 +2620,15 @@ class TestQuotedBracesAreNotBraceSyntax:
         decision, _reason = _through_chain("Write", tool_input)
         assert decision == Decision.DENY
 
-    @pytest.mark.parametrize(
-        "command",
-        [
-            'cat /proj/.vault-{"${x:-"}"}",pass}',
-            'cat /proj/.vault-{"$(case a in a) echo;; esac)",pass}',
-        ],
-    )
-    def test_quoting_that_cannot_be_resolved_fails_closed(self, command: str) -> None:
+    def test_quoting_that_cannot_be_resolved_fails_closed(self) -> None:
+        command = 'cat /proj/.vault-{"$(case a in a) echo;; esac)",pass}'
         assert RuleID.SECRET_EVALUATION_ERROR in _deny_reason(command)
+
+    def test_a_parameter_expansion_in_a_group_is_read_as_bash_reads_it(self) -> None:
+        """Plan 00466 N101 round 7: bash's brace scanner reads `${` by a
+        fixed rule, so the group is resolved, not failed closed."""
+        command = 'cat /proj/.vault-{"${x:-"}"}",pass}'
+        assert RuleID.SECRET_BASH_MENTION in _deny_reason(command)
 
     @pytest.mark.parametrize(
         "command",
@@ -2641,5 +2641,97 @@ class TestQuotedBracesAreNotBraceSyntax:
         ],
     )
     def test_quoting_that_names_nothing_stays_allowed(self, command: str) -> None:
+        decision, reason = _through_chain("Bash", {"command": command})
+        assert decision != Decision.DENY, reason
+
+
+#: Brace words whose Python escapes change the literal's braces, so its
+#: decoded value spells nothing, while bash's reading of the raw text is a
+#: group with `pass` as an alternative. `Q` is the literal's quote.
+_ESCAPED_BRACE_WORDS = (
+    "/proj/.vault-{\\x7b,pass}",
+    "/proj/.vault-{pass,\\x7d}",
+    "/proj/.vault-{\\173,pass}",
+    "/proj/.vault-{pass,Q\\N{LEFT CURLY BRACKET}Q}",
+)
+
+
+def _literal_bash_reads_unquoted(word: str, quote: str) -> str:
+    """A triple-quoted literal holding ``word``. Bash reads the triple
+    quote as an empty string and a one-character one, so ``word`` is an
+    unquoted shell word to bash and inside the literal to Python."""
+    triple = quote * 3
+    return f"s = {triple}a{quote} {word.replace('Q', quote)} {quote}b{triple}"
+
+
+class TestRoundSixFindingsAreClosed:
+    """Plan 00466 N101 round 7: D-RULE-6 MAJOR 1 and the three D-SEC-6
+    findings `main` shares (N111, N112, N113), through the real handler."""
+
+    @pytest.mark.parametrize("word", _ESCAPED_BRACE_WORDS)
+    def test_an_escaped_brace_word_bash_reads_unquoted_denies_in_a_heredoc(self, word: str) -> None:
+        """D-RULE-6 MAJOR 1: the word is wholly inside a Python literal, and
+        only the literal's decoded value was enumerated."""
+        program = _literal_bash_reads_unquoted(word, "'")
+        command = f"python3 - <<'EOF'\n{program}\nEOF"
+        assert RuleID.SECRET_BASH_MENTION in _deny_reason(command)
+
+    @pytest.mark.parametrize("word", _ESCAPED_BRACE_WORDS)
+    def test_an_escaped_brace_word_bash_reads_unquoted_denies_in_dash_c(self, word: str) -> None:
+        program = _literal_bash_reads_unquoted(word, '"')
+        assert RuleID.SECRET_BASH_MENTION in _deny_reason(f"python3 -c '{program}'")
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            'cat $".vault-"pass',
+            'cat $".vault-"{"}",pass}',
+            'cat /proj/.vault-$"pa"ss',
+        ],
+    )
+    def test_locale_quoting_drops_its_dollar_n111(self, command: str) -> None:
+        """N111: bash reads `$"…"` as `"…"`; the guard kept the `$`, so the
+        token began `$.vault-`."""
+        assert RuleID.SECRET_BASH_MENTION in _deny_reason(command)
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            r"bash -c $'cat /proj/.vault-\x7bpass,q\x7d'",
+            r"eval $'cat /proj/.vault-\x7bpass,q\x7d'",
+            r"sh -c $'cat /proj/.vault-\173pass,q\175'",
+            r"su -c $'cat /proj/.vault-\u007bpass,q\u007d' root",
+            r"ssh host $'cat /proj/.vault-\x7bpass,q\x7d'",
+        ],
+    )
+    def test_braces_decoded_from_ansi_c_quoting_reach_a_shell_n112(self, command: str) -> None:
+        """N112: the decoded text holds a group but no surviving quote."""
+        assert RuleID.SECRET_BASH_MENTION in _deny_reason(command)
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            ": ${x:-'a'} ; bash -c $'cat /proj/.vault-\\x7b\"\\x7d\",pass\\x7d'",
+            ": ${x:-'a'} ; eval $'cat /proj/.vault-\\x7bpass,q\\x7d'",
+            ": ${x:-'a'} ; eval \"cat /proj/.vault-$(printf '\\x7b')pass,q}\"",
+        ],
+    )
+    def test_an_unrelated_unresolvable_prefix_does_not_end_the_scan_n113(
+        self, command: str
+    ) -> None:
+        """N113: the early exit looked only for a literal `{`."""
+        decision, _reason = _through_chain("Bash", {"command": command})
+        assert decision == Decision.DENY
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            ": ${x:-'a'} ; echo \"$HOME\" done",
+            'echo "${x:-"a"}" $\'tab\\there\'',
+            "python3 - <<'EOF'\ns = '''It' {a,b} 'x'''\nEOF",
+            "python3 - <<'EOF'\nprint('{\\x7b}'.format(1))\nEOF",
+        ],
+    )
+    def test_shapes_that_name_nothing_stay_allowed(self, command: str) -> None:
         decision, reason = _through_chain("Bash", {"command": command})
         assert decision != Decision.DENY, reason

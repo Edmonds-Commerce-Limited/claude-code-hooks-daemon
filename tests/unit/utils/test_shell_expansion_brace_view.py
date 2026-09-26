@@ -25,6 +25,7 @@ from claude_code_hooks_daemon.utils.shell_expansion import (
     iter_brace_words,
     python_program_streams,
     python_string_literals,
+    shell_word_spellings,
 )
 
 _GROUPS = "{a,b}{c,d}"
@@ -677,10 +678,24 @@ class TestCodeWordsAreReported:
         assert streams is not None
         assert streams.shell_words == ('.p-{"} z","q"}',)
 
-    def test_a_shell_word_wholly_inside_a_literal_is_not_reported(self) -> None:
+    def test_a_shell_word_inside_a_literal_is_reported(self) -> None:
+        """Plan 00466 N101 round 7: every word bash splits is reported. Bash
+        reads the braces of an ordinary literal as quoted text, so the word
+        itself spells nothing; its value is read as a command, as for any
+        shell word."""
         streams = python_program_streams("x = '.p-{\"} z\",q}'\n")
         assert streams is not None
-        assert streams.shell_words == ()
+        assert streams.shell_words[0] == "'.p-{\"} z\",q}'"
+        assert list(shell_word_spellings(streams.shell_words[0])) == []
+
+    @pytest.mark.parametrize("escape", ["\\x7b", "\\173", "\\u007b"])
+    def test_a_word_bash_reads_unquoted_inside_a_literal_is_reported(self, escape: str) -> None:
+        """D-RULE-6 MAJOR 1: the literal's decoded value is `.p-{{,q}`,
+        which spells nothing; bash reads the raw word as a group."""
+        streams = python_program_streams(f"s = '''a' .p-{{{escape},q}} 'b'''\n")
+        assert streams is not None
+        assert f".p-{{{escape},q}}" in streams.shell_words
+        assert ".p-q" in set(shell_word_spellings(f".p-{{{escape},q}}"))
 
 
 class TestPythonMustReadTheTextAsTheScannerDoes:

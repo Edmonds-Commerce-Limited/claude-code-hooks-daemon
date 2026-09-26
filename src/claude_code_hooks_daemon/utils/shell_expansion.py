@@ -222,9 +222,9 @@ def expand_braces(
     it. Both readings are returned, each under the same caps: the word may
     be a fragment of a longer shell word whose quoting began before it, and
     the quote-blind reading is the one every earlier caller relied on.
-    Quoting that cannot be resolved with certainty raises
-    :class:`UnresolvableBraceQuotingError` (:func:`_quoted_span_end`) when
-    a group could be at stake: a ``{`` other than a ``${``.
+    A substitution that cannot be placed with certainty raises
+    :class:`UnresolvableBraceQuotingError` (:func:`_substitution_end`) when
+    a group could be at stake (:func:`_may_hold_a_group`).
     """
     spellings = _capped(
         _raw_brace_expansions(word, depth=0, max_depth=max_depth), word, max_spellings
@@ -232,8 +232,9 @@ def expand_braces(
     if _QUOTING_CHARS.isdisjoint(word):
         return spellings
     try:
+        braces = _BashBraces(word, max_depth=max_depth)
         quote_aware = _capped(
-            _quote_aware_brace_expansions(word, depth=0, max_depth=max_depth), word, max_spellings
+            braces.expansions(0, len(word), depth=0, region=None), word, max_spellings
         )
     except UnresolvableBraceQuotingError:
         if _may_hold_a_group(word, 0):
@@ -262,10 +263,9 @@ def _capped(expansions: Iterator[str], word: str, max_spellings: int) -> list[st
 # `${...}`, and command and process substitutions: a brace or comma inside
 # any of them is text, not syntax. :data:`_BRACE_GROUP_RE` ignores quotes,
 # so a group whose first alternative is a quoted `"}"` hid a brace-spelled
-# path from the guard. :func:`_quoted_span_end` is the one scanner for those
-# spans; both the quote-aware expansion and the shell word splitter that
-# finds words holding quoted whitespace (:func:`iter_shell_brace_words`)
-# use it.
+# path from the guard. The quote-aware expansion is bash 5.2's own
+# (:class:`_BashBraces`), checked against bash by a differential test. :func:`_quoted_span_end` places the
+# spans the shell word splitter (:func:`iter_shell_brace_words`) skips.
 
 
 class UnresolvableBraceQuotingError(TooManyToEnumerateError):
@@ -431,67 +431,201 @@ def _substitution_end(text: str, open_paren: int, substitutions: list[str] | Non
     return n
 
 
-def _brace_syntax_mask(word: str) -> list[bool]:
-    """For each character of ``word``, whether it is an unquoted ``{``,
-    ``}`` or ``,`` -- the only characters bash's brace expansion reads as
-    syntax."""
-    mask = [False] * len(word)
-    i = 0
-    while i < len(word):
-        end = _quoted_span_end(word, i)
-        if end is not None:
-            i = end
-            continue
-        mask[i] = word[i] in "{},"
-        i += 1
-    return mask
+#: Brace-syntax characters one word's bash-aware expansion may visit before
+#: it gives up. Bash retries every `{` against the rest of the word, so a
+#: word of many unmatched braces costs the square of their number; past
+#: this it fails closed, like every other cap here.
+_BRACE_SCAN_BUDGET: Final[int] = 250_000
 
 
-def _quote_aware_brace_expansions(
-    word: str, *, depth: int, max_depth: int, region: tuple[int, int] | None = None
-) -> Iterator[str]:
-    """:func:`_raw_brace_expansions`, with only :func:`_brace_syntax_mask`'s
-    characters as brace syntax: the same innermost-group-first order, the
-    same sequences, the same comma split. Each alternative keeps its quotes,
-    which :func:`normalise_word` strips from the finished spelling.
+class _BashBraces:
+    """Bash 5.2's brace expansion (``braces.c``: ``brace_expand``,
+    ``expand_amble``, ``brace_gobbler``) over one word, lazily.
 
-    ``region``, when given, limits expansion to the groups opening inside
-    it (:func:`shell_word_spellings`); it moves with the text as they
-    expand."""
-    if depth > max_depth:
-        raise TooManyToEnumerateError(
-            f"brace nesting exceeds the depth cap ({max_depth}) in {word[:80]!r}"
-        )
-    low, high = region if region is not None else (0, len(word))
-    mask = _brace_syntax_mask(word)
-    opened: int | None = None
-    group: tuple[int, int] | None = None
-    for index in range(low, len(word)):
-        if not mask[index]:
-            continue
-        if word[index] == "{":
-            opened = index if index < high else None
-        elif word[index] == "}" and opened is not None:
-            group = (opened, index)
-            break
-    if group is None:
-        yield word
-        return
-    open_at, close_at = group
-    prefix, body, suffix = word[:open_at], word[open_at + 1 : close_at], word[close_at + 1 :]
-    alternatives = None if not _QUOTING_CHARS.isdisjoint(body) else _sequence_alternatives(body)
-    if alternatives is None:
-        commas = [i for i in range(open_at + 1, close_at) if mask[i] and word[i] == ","]
-        bounds = [open_at, *commas, close_at]
-        alternatives = iter([word[a + 1 : b] for a, b in itertools.pairwise(bounds)])
-    for alternative in alternatives:
-        shift = len(alternative) - (close_at + 1 - open_at)
-        yield from _quote_aware_brace_expansions(
-            prefix + alternative + suffix,
-            depth=depth + 1,
-            max_depth=max_depth,
-            region=(low, max(high + shift, low)),
-        )
+    Bash scans a word left to right for the first ``{`` that has a matching
+    ``}``, expands it, and expands the text after it on its own; each
+    alternative is expanded in turn. Every text it scans is a slice of the
+    word that starts and ends outside quoting, so the characters it acts on
+    -- unquoted ``{``, ``}``, ``,``, ``..`` and ``${`` -- are found once,
+    for the whole word, and each scan visits only those. The parser has
+    already turned ``$'...'`` into a quoted string and ``$"..."`` into
+    ``"..."``, so both are quoted here. A substitution whose extent cannot
+    be established raises :class:`UnresolvableBraceQuotingError`
+    (:func:`_substitution_end`)."""
+
+    def __init__(self, word: str, *, max_depth: int) -> None:
+        self.word = word
+        self.max_depth = max_depth
+        self.budget = _BRACE_SCAN_BUDGET
+        self.events = self._syntax_events()
+        self.positions = [position for position, _kind in self.events]
+        self.closers = [position for position, kind in self.events if kind == "}"]
+        self.separators = [position for position, kind in self.events if kind in ",."]
+
+    def _syntax_events(self) -> list[tuple[int, str]]:
+        """``(index, kind)`` of every character bash's scanner acts on:
+        ``{``, ``}``, ``,``, ``.`` for a ``..``, and ``$`` for a ``${``
+        outside quotes, which opens a level as ``{`` does."""
+        text = self.word
+        n = len(text)
+        events: list[tuple[int, str]] = []
+        quoted = ""
+        i = 0
+        while i < n:
+            ch = text[i]
+            nxt = text[i + 1] if i + 1 < n else ""
+            if ch == "\\" and quoted in ("", '"', "`"):
+                i += 2
+            elif ch == "$" and nxt == "{" and quoted != "'":
+                if not quoted:
+                    events.append((i, "$"))
+                i += 2
+            elif quoted:
+                if quoted == '"' and ch == "$" and nxt == "(":
+                    i = _substitution_end(text, i + 1, None)
+                    continue
+                if ch == quoted:
+                    quoted = ""
+                i += 1
+            elif ch == "$" and nxt == "'":
+                i = _quoted_span_end(text, i) or i + 1
+            elif ch in "\"'`":
+                quoted = ch
+                i += 1
+            elif ch in "$<>" and nxt == "(":
+                i = _substitution_end(text, i + 1, None)
+            else:
+                if ch in "{},":
+                    events.append((i, ch))
+                elif text.startswith("..", i):
+                    events.append((i, "."))
+                i += 1
+        return events
+
+    def _gobble(self, start: int, stop: int, satisfy: str) -> int | None:
+        """``brace_gobbler`` over ``word[start:stop]``: the index of the
+        first ``satisfy`` it accepts, or ``None``. A ``}`` closes a group
+        only after a ``,`` or a ``..`` not followed by ``}`` outside any
+        inner group; before that it is text. A ``{`` with whitespace or the
+        start before it and whitespace, the end or a ``}`` after it is
+        text."""
+        level = 0
+        commas = 0 if satisfy == "}" else 1
+        index = bisect.bisect_left(self.positions, start)
+        while index < len(self.events) and self.events[index][0] < stop:
+            self.budget -= 1
+            if self.budget < 0:
+                raise TooManyToEnumerateError(
+                    f"brace scan of {self.word[:80]!r} exceeds its budget"
+                )
+            position, kind = self.events[index]
+            index += 1
+            if kind == satisfy and level == 0 and commas > 0:
+                if not (kind == "{" and self._isolated(position, start, stop)):
+                    return position
+            elif kind in "{$":
+                level += 1
+            elif kind == "}" and level:
+                level -= 1
+            elif satisfy == "}" and level == 0 and kind in ",.":
+                after = self.word[position + 2] if position + 2 < stop else ""
+                if kind == "," or after != "}":
+                    commas += 1
+        return None
+
+    def _isolated(self, position: int, start: int, stop: int) -> bool:
+        before = self.word[position - 1] if position > start else ""
+        after = self.word[position + 1] if position + 1 < stop else ""
+        return before in ("", " ", "\t", "\n") and after in ("", " ", "\t", "\n", "}")
+
+    def _first_group(self, start: int, stop: int) -> tuple[int, int] | None:
+        """``(open, close)`` of the group ``brace_expand`` expands first in
+        ``word[start:stop]``. No ``{`` can match once no ``}``, or no
+        separator, is left after it."""
+        while True:
+            opened = self._gobble(start, stop, "{")
+            if opened is None:
+                return None
+            for later in (self.closers, self.separators):
+                following = bisect.bisect_right(later, opened)
+                if following == len(later) or later[following] >= stop:
+                    return None
+            closed = self._gobble(opened + 1, stop, "}")
+            if closed is not None:
+                return opened, closed
+            start = opened + 1
+
+    def top_level_groups(self) -> Iterator[tuple[int, int]]:
+        """Every group ``brace_expand`` reaches at the top level, in order."""
+        start = 0
+        while (group := self._first_group(start, len(self.word))) is not None:
+            yield group
+            start = group[1] + 1
+
+    def expansions(
+        self, start: int, stop: int, *, depth: int, region: tuple[int, int] | None
+    ) -> Iterator[str]:
+        """``brace_expand`` of ``word[start:stop]``. A group body with no
+        comma that is not a sequence is text. Each alternative keeps its
+        quotes, which :func:`normalise_word` strips from the finished
+        spelling. ``region``, when given, limits expansion to the groups
+        opening inside it (:func:`shell_word_spellings`)."""
+        if depth > self.max_depth:
+            raise TooManyToEnumerateError(
+                f"brace nesting exceeds the depth cap ({self.max_depth}) in {self.word[:80]!r}"
+            )
+        group = self._first_group(start, stop)
+        if group is None:
+            yield self.word[start:stop]
+            return
+        opened, closed = group
+        preamble = self.word[start:opened]
+        literal = self.word[opened : closed + 1]
+        tacks: Iterator[str]
+        if region is not None and not region[0] <= opened < region[1]:
+            tacks = iter([literal])
+        elif self._holds_a_raw_comma(opened + 1, closed):
+            tacks = self._amble(opened + 1, closed, depth=depth)
+        else:
+            sequence = _sequence_alternatives(self.word[opened + 1 : closed])
+            if sequence is not None:
+                tacks = sequence
+            elif closed + 1 < stop:
+                tacks = iter([literal])
+            else:
+                yield self.word[start:stop]
+                return
+        for tack in tacks:
+            if closed + 1 >= stop:
+                yield preamble + tack
+                continue
+            for rest in self.expansions(closed + 1, stop, depth=depth + 1, region=region):
+                yield preamble + tack + rest
+
+    def _amble(self, start: int, stop: int, *, depth: int) -> Iterator[str]:
+        """``expand_amble``: each alternative of a group body, split at the
+        commas the scanner accepts, expanded in turn."""
+        while True:
+            comma = self._gobble(start, stop, ",")
+            end = stop if comma is None else comma
+            yield from self.expansions(start, end, depth=depth + 1, region=None)
+            if comma is None:
+                return
+            start = comma + 1
+
+    def _holds_a_raw_comma(self, start: int, stop: int) -> bool:
+        """Whether ``word[start:stop]`` holds a ``,`` no backslash escapes,
+        which is what bash checks before it tries a sequence: it does not
+        read quotes here."""
+        i = start
+        while i < stop:
+            if self.word[i] == "\\":
+                i += 2
+            elif self.word[i] == ",":
+                return True
+            else:
+                i += 1
+        return False
 
 
 def shell_word_spellings(
@@ -509,26 +643,16 @@ def shell_word_spellings(
     piece between two such characters is expanded on its own, under the
     caps, and a piece holding no group adds nothing the other streams lack.
     A group holding quoted whitespace keeps its piece whole."""
-    mask = _brace_syntax_mask(word)
+    braces = _BashBraces(word, max_depth=max_depth)
+    groups = list(braces.top_level_groups())
     covered = [False] * len(word)
-    opens: list[int] = []
-    for index, is_syntax in enumerate(mask):
-        if not is_syntax or word[index] == ",":
-            continue
-        if word[index] == "{":
-            opens.append(index)
-        elif opens:
-            start = opens.pop()
-            if not opens:
-                covered[start : index + 1] = [True] * (index + 1 - start)
+    for start, end in groups:
+        covered[start : end + 1] = [True] * (end + 1 - start)
     cuts = [i for i, char in enumerate(word) if char.isspace() and not covered[i]]
     for low, high in itertools.pairwise([-1, *cuts, len(word)]):
-        piece = range(low + 1, high)
-        if not any(mask[i] and word[i] == "{" for i in piece):
+        if not any(low < start < high for start, _end in groups):
             continue
-        expansions = _quote_aware_brace_expansions(
-            word, depth=0, max_depth=max_depth, region=(low + 1, high)
-        )
+        expansions = braces.expansions(0, len(word), depth=0, region=(low + 1, high))
         for spelling in _capped(expansions, word, max_spellings):
             yield from normalise_word(spelling).split()
 
@@ -554,35 +678,42 @@ def iter_shell_brace_words(text: str) -> Iterator[str]:
     layer of quoting, and nesting is bounded by
     :data:`_MAX_NESTED_SHELL_DEPTH`.
 
+    ANSI-C decoding is the one quote removal that makes braces the raw text
+    lacks (``$'\\x7b'``), which :func:`iter_brace_words` never sees: text
+    decoded from a ``$'...'`` word is read as a command whatever it holds,
+    and every word of it holding a brace is reported (Plan 00466 N112).
+
     Its words are read by :func:`shell_word_spellings`.
 
     Where a span's extent cannot be resolved with certainty, the rest of
     ``text`` cannot be split with certainty either: if a group could still
-    follow (:func:`_may_hold_a_group`) this raises
+    arrive (:func:`_may_hold_a_group`) this raises
     :class:`UnresolvableBraceQuotingError`, otherwise there is none left to
     miss and the scan ends.
     """
-    for word, _start, _end in _shell_brace_words(text, depth=0, anchor=None):
-        yield word
+    return _shell_brace_words(text, depth=0, every_word=False)
 
 
-def _shell_brace_words(
-    text: str, *, depth: int, anchor: tuple[int, int] | None
-) -> Iterator[tuple[str, int, int]]:
-    """``(word, start, end)`` for :func:`iter_shell_brace_words`. ``start``
-    and ``end`` are the word's own span, or ``anchor`` -- the span of the
-    top-level word or heredoc body a nested command came from."""
+def iter_every_shell_brace_word(text: str) -> Iterator[str]:
+    """Every word of ``text``, split as bash splits it, that holds a brace,
+    whatever its quoting: :func:`iter_shell_brace_words` for text whose
+    brace words :func:`iter_brace_words` does not all reach."""
+    return _shell_brace_words(text, depth=0, every_word=True)
+
+
+def _shell_brace_words(text: str, *, depth: int, every_word: bool) -> Iterator[str]:
+    """The words of :func:`iter_shell_brace_words`; with ``every_word``,
+    those holding no quoting character too."""
     if depth > _MAX_NESTED_SHELL_DEPTH:
         raise UnresolvableBraceQuotingError("shell word nesting exceeds its depth bound")
     n = len(text)
     i = 0
     heredocs: list[tuple[str, bool, bool]] = []
     command_words: list[str] = []
-    command_start = 0
     while i < n:
         ch = text[i]
         if ch in _COMMAND_END_CHARS and command_words:
-            yield from _eval_words(command_words, depth=depth, span=anchor or (command_start, i))
+            yield from _eval_words(command_words, depth=depth, every_word=every_word)
             command_words = []
         if ch == "\n":
             i += 1
@@ -591,7 +722,7 @@ def _shell_brace_words(
                 heredocs = []
                 for body_start, body_end, quoted in bodies:
                     yield from _heredoc_body_words(
-                        text, body_start, body_end, quoted, depth=depth, anchor=anchor
+                        text[body_start:body_end], quoted, depth=depth, every_word=every_word
                     )
             continue
         if ch in " \t":
@@ -623,20 +754,19 @@ def _shell_brace_words(
         if end is None:
             break
         word = text[i:end]
-        span = anchor if anchor is not None else (i, end)
-        if _holds_quoted_braces(word):
-            yield word, *span
+        if "{" in word and "}" in word and (every_word or not _QUOTING_CHARS.isdisjoint(word)):
+            yield word
         for body in substitutions:
-            yield from _shell_brace_words(body, depth=depth + 1, anchor=span)
+            yield from _shell_brace_words(body, depth=depth + 1, every_word=every_word)
         value = word if _QUOTING_CHARS.isdisjoint(word) else normalise_word(word)
         if value != word:
-            yield from _nested_command_words(value, depth=depth, span=span)
-        if not command_words:
-            command_start = i
+            yield from _nested_command_words(
+                value, depth=depth, every_word=every_word, decoded=_ANSI_C_OPENER in word
+            )
         command_words.append(word)
         i = end
     if command_words:
-        yield from _eval_words(command_words, depth=depth, span=anchor or (command_start, n))
+        yield from _eval_words(command_words, depth=depth, every_word=every_word)
 
 
 #: What ends a simple command for :func:`_eval_words`.
@@ -650,24 +780,27 @@ _EVAL_PREFIXES: Final[tuple[tuple[str, ...], ...]] = (
 )
 
 
+#: What opens an ANSI-C quoted span, whose decoding can make braces.
+_ANSI_C_OPENER: Final[str] = "$'"
+
+
 def _holds_quoted_braces(text: str) -> bool:
     return "{" in text and "}" in text and not _QUOTING_CHARS.isdisjoint(text)
 
 
 def _nested_command_words(
-    code: str, *, depth: int, span: tuple[int, int]
-) -> Iterator[tuple[str, int, int]]:
-    """``code`` read as a command, when it still holds a quoted brace: a
-    word's value after quote removal, when that removed something, or
-    ``eval``'s joined arguments. A brace may come from quote removal itself
-    (``$'\\x7b'``)."""
-    if _holds_quoted_braces(code):
-        yield from _shell_brace_words(code, depth=depth + 1, anchor=span)
+    code: str, *, depth: int, every_word: bool, decoded: bool
+) -> Iterator[str]:
+    """``code`` read as a command: a word's value after quote removal, when
+    that removed something, or ``eval``'s joined arguments. Read when it
+    still holds a quoted brace, or whatever it holds when ANSI-C decoding
+    (``decoded``) made it, since a brace may come from that decoding
+    (``$'\\x7b'``) with no quote left."""
+    if decoded or _holds_quoted_braces(code):
+        yield from _shell_brace_words(code, depth=depth + 1, every_word=every_word or decoded)
 
 
-def _eval_words(
-    words: list[str], *, depth: int, span: tuple[int, int]
-) -> Iterator[tuple[str, int, int]]:
+def _eval_words(words: list[str], *, depth: int, every_word: bool) -> Iterator[str]:
     """``eval``'s arguments after quote removal, joined by single spaces as
     ``eval`` joins them, read as a command."""
     if all(_QUOTING_CHARS.isdisjoint(word) for word in words):
@@ -676,14 +809,17 @@ def _eval_words(
     for prefix in _EVAL_PREFIXES:
         if tuple(values[: len(prefix)]) == prefix:
             code = " ".join(values[len(prefix) :])
-            yield from _nested_command_words(code, depth=depth, span=span)
+            decoded = any(_ANSI_C_OPENER in word for word in words[len(prefix) :])
+            yield from _nested_command_words(
+                code, depth=depth, every_word=every_word, decoded=decoded
+            )
             return
 
 
 def _checked_word_end(text: str, start: int, substitutions: list[str] | None) -> int | None:
     """The end of the unquoted shell word at ``start``; ``None`` when a span
-    in it cannot be resolved and no brace follows, so nothing is left to
-    find. Re-raises when a brace does follow."""
+    in it cannot be resolved and no group can arrive after it, so nothing
+    is left to find. Re-raises when one can."""
     try:
         return _shell_word_end(text, start, substitutions)
     except UnresolvableBraceQuotingError:
@@ -695,12 +831,40 @@ def _checked_word_end(text: str, start: int, substitutions: list[str] | None) ->
 #: A `{` that could open a brace group: any not opening a `${`.
 _GROUP_OPENER_RE: Final[re.Pattern[str]] = re.compile(r"(?<!\$)\{")
 
+#: A `$'...'` span, its body (escapes undecoded) in group 1; an
+#: unterminated one runs to the end.
+_ANSI_C_SPAN_RE: Final[re.Pattern[str]] = re.compile(r"\$'((?:[^'\\]|\\.)*)", re.DOTALL)
+
+#: An expansion whose value is not known statically: a parameter, or a
+#: command or arithmetic substitution.
+_UNKNOWN_EXPANSION_RE: Final[re.Pattern[str]] = re.compile(r"\$[({A-Za-z_0-9@*#?$!-]|`")
+
+#: A word that hands text to a shell to read again: ``eval``, ``source``,
+#: ``.``, ``su``, ``ssh``, a shell by name, or an option cluster holding
+#: ``c`` (``-c``, ``-lc``).
+_SHELL_READER_RE: Final[re.Pattern[str]] = re.compile(
+    r"(?<![^\s;&|(`'\"])"
+    r"(?:eval|source|\.|su|ssh|(?:\S*/)?(?:ba|da|z|k|mk|a)?sh|-[A-Za-z]*c[A-Za-z]*)"
+    r"(?![^\s;&|)`'\"])"
+)
+
 
 def _may_hold_a_group(text: str, start: int) -> bool:
-    """Whether ``text`` from ``start`` holds a ``{`` other than a ``${``
-    with a ``}`` after it."""
+    """Whether a brace group could still arrive in ``text`` from ``start``
+    (Plan 00466 N113): a ``{`` other than a ``${`` with a ``}`` after it; a
+    ``$'...'`` whose decoded body holds a brace; or an expansion whose value
+    is unknown where a word hands text to a shell to read again. Only when
+    none of them can is it safe to stop scanning."""
     opener = _GROUP_OPENER_RE.search(text, start)
-    return opener is not None and text.find("}", opener.end()) != -1
+    if opener is not None and text.find("}", opener.end()) != -1:
+        return True
+    for span in _ANSI_C_SPAN_RE.finditer(text, start):
+        if not {"{", "}"}.isdisjoint(_decode_ansi_c_body(span.group(1))):
+            return True
+    return (
+        _UNKNOWN_EXPANSION_RE.search(text, start) is not None
+        and _SHELL_READER_RE.search(text, start) is not None
+    )
 
 
 def _shell_word_end(text: str, start: int, substitutions: list[str] | None) -> int:
@@ -742,21 +906,11 @@ def _read_heredoc_bodies(
     return bodies, min(i, n)
 
 
-def _heredoc_body_words(
-    text: str,
-    start: int,
-    end: int,
-    quoted: bool,
-    *,
-    depth: int,
-    anchor: tuple[int, int] | None,
-) -> Iterator[tuple[str, int, int]]:
+def _heredoc_body_words(body: str, quoted: bool, *, depth: int, every_word: bool) -> Iterator[str]:
     """Words of a heredoc body read as a command, which a shell fed the
     body runs; and, for an unquoted body, of the commands it substitutes,
     where quotes are text and a backslash and a substitution are not."""
-    body = text[start:end]
-    span = anchor if anchor is not None else (start, end)
-    yield from _shell_brace_words(body, depth=depth + 1, anchor=span)
+    yield from _shell_brace_words(body, depth=depth + 1, every_word=every_word)
     if quoted:
         return
     substitutions: list[str] = []
@@ -773,7 +927,7 @@ def _heredoc_body_words(
         if _may_hold_a_group(body, j):
             raise
     for nested in substitutions:
-        yield from _shell_brace_words(nested, depth=depth + 1, anchor=span)
+        yield from _shell_brace_words(nested, depth=depth + 1, every_word=every_word)
 
 
 def iter_brace_words(text: str, *, max_words: int = DEFAULT_MAX_BRACE_WORDS) -> Iterator[str]:
@@ -1210,9 +1364,10 @@ def python_string_literals(source: str) -> tuple[str, ...] | None:
 
 class PythonProgramStreams(NamedTuple):
     """What of a Python program the caller enumerates on its own:
-    ``literals`` (:func:`python_string_literals`), and ``code_words`` and
-    ``shell_words``, every brace word of the raw text not wholly inside one
-    literal or comment, found quote-blind and as bash splits it."""
+    ``literals`` (:func:`python_string_literals`); ``code_words``, every
+    brace word of the raw text found quote-blind and not wholly inside one
+    literal or comment; and ``shell_words``, every brace word of the raw
+    text as bash splits it."""
 
     literals: tuple[str, ...]
     code_words: tuple[str, ...]
@@ -1240,9 +1395,14 @@ def python_program_streams(source: str) -> PythonProgramStreams | None:
       ends.
 
     ``code_words`` are the words :func:`iter_brace_words` finds in the raw
-    text, and ``shell_words`` those :func:`iter_shell_brace_words` finds,
-    less those wholly inside one string literal or comment, which
-    ``literals`` reports already (D-RULE-4 MAJOR 1, N107).
+    text, less those wholly inside one string literal or comment, which
+    ``literals`` reports already (D-RULE-4 MAJOR 1). ``shell_words`` are
+    every word :func:`iter_every_shell_brace_word` finds, inside a literal
+    or not (D-RULE-6 MAJOR 1): Python's quoting and bash's can disagree
+    about where a literal ends, and an escape can change the literal's
+    braces, so its decoded value does not stand for the word bash reads.
+    Bash's own quoting makes a brace inside a shell quote text, so an
+    ordinary literal expands nothing.
     """
     if "\r" in source:
         return None
@@ -1279,7 +1439,7 @@ def python_program_streams(source: str) -> PythonProgramStreams | None:
     return PythonProgramStreams(
         tuple(dict.fromkeys(literals)),
         tuple(dict.fromkeys(_code_brace_words(source, found.spans))),
-        tuple(dict.fromkeys(_code_shell_words(source, found.spans))),
+        tuple(dict.fromkeys(iter_every_shell_brace_word(source))),
     )
 
 
@@ -1479,15 +1639,6 @@ def _code_brace_words(source: str, spans: list[tuple[int, int]]) -> Iterator[str
     for start, end in _brace_word_spans(source):
         if _outside_every_span(spans, start, end):
             yield source[start:end]
-
-
-def _code_shell_words(source: str, spans: list[tuple[int, int]]) -> Iterator[str]:
-    """Every word :func:`iter_shell_brace_words` finds in ``source`` that is
-    not wholly inside one of ``spans``. A word of a nested command is judged
-    by the span of the word or heredoc body it came from."""
-    for word, start, end in _shell_brace_words(source, depth=0, anchor=None):
-        if _outside_every_span(spans, start, end):
-            yield word
 
 
 def _outside_every_span(spans: list[tuple[int, int]], start: int, end: int) -> bool:
@@ -2765,6 +2916,11 @@ def _decode_span(
                     i += 2
             else:
                 i += 1
+            continue
+        if ch == "$" and text.startswith('"', i + 1):
+            # `$"..."` is locale translation: bash drops the `$` and reads
+            # the rest as `"..."` (Plan 00466 N111).
+            i += 1
             continue
         if ch == "$":
             piece, end = _consume_dollar(text, i, substitutions=substitutions)

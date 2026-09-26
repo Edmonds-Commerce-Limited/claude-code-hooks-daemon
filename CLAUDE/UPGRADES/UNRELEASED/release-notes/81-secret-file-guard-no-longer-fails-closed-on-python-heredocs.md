@@ -24,7 +24,10 @@ program joined in order with a space. A brace group split across literals
 (`'…{a,' + 'x}…'`, `''.join([...])`, `f'{"{"}'`) or across statements is
 therefore still seen whole. Every brace word of the program that reaches
 outside a literal (`x .p-{"a",z}`) is enumerated on its own as well, and
-fails closed past the cap, as before. The exemption applies only when no
+fails closed past the cap, as before. So is every word bash itself would
+split from the program text, inside a literal or not, read with bash's
+quoting: a literal such as `'''a' /p/.v-{\x7b,pass} 'b'''` decodes to text
+that spells nothing, but bash reads the middle word unquoted. The exemption applies only when no
 shell can read what the program prints:
 
 - no pipe follows the command, and no process substitution appears in the
@@ -89,9 +92,27 @@ alternative is a quoted `}`, could spell a protected path (`name-pass`) the
 guard never saw. A group
 holding quoted whitespace is now seen whole, and so is one inside text a
 shell may run (`bash -c '…'`, `eval`, a heredoc body). The earlier reading
-is kept alongside, so nothing that denied before is now allowed. Quoting the
-guard cannot resolve with certainty, such as a `${…}` holding quotes next
-to a brace group, fails closed with `R-SECRET-EVALUATION-ERROR`.
+is kept alongside, so nothing that denied before is now allowed. The
+bash-aware reading follows bash's own brace expansion: a `}` before any
+comma is text, a group with no comma that is not a sequence is text, and a
+`${…}` inside a group is read as bash's brace scanner reads it. A
+substitution the guard cannot place with certainty (a `case` or heredoc
+inside `$(…)`) next to a brace group fails closed with
+`R-SECRET-EVALUATION-ERROR`.
+
+Three shell forms that hid a brace-spelled or split path are now read as
+bash reads them:
+
+- `$"…"` locale quoting: bash drops the `$`, so `cat $".vault-"pass` names
+  `.vault-pass`. Earlier releases kept the `$`.
+- Braces made by ANSI-C decoding and handed to a shell:
+  `bash -c $'cat .vault-\x7bpass,q\x7d'` runs `cat .vault-{pass,q}`. Text
+  decoded from `$'…'` is now read as a command whatever it holds.
+- After quoting the guard cannot resolve, such as `: ${x:-'a'} ;`, the
+  guard stops scanning only when no brace group can still arrive. A
+  `$'…'` that decodes to a brace, or an unknown expansion where `eval`,
+  `bash -c`, `ssh` or a similar word reads text again, now fails closed
+  instead.
 
 The same change fixes how the heredoc data-sink exemption shared by several
 guards names its receiver. `sudo -p cat bash <<'EOF'` and

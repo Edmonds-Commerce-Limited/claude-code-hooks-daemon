@@ -135,6 +135,9 @@ Full write-ups are in [NIGGLES.md](NIGGLES.md). One line each here:
 | N103 | A `**` word the shell never globs walks the whole checkout, and a large tree fails the guard closed            | N101 fixer                                                      | ⬜ Open                          |
 | N104 | `Write`/`Edit` of Python source with a long brace-alternation string fails `secret_file_guard` closed          | N101 fixer                                                      | ⬜ Open                          |
 | N107 | `secret_file_guard` reads a quoted brace as brace syntax, so `{"}",pass}` hides a brace-spelled path           | N101 review 5 (D-RULE)                                          | ✅ Remedied (n101 branch)        |
+| N111 | `$"…"` locale quoting keeps its `$` in `secret_file_guard`'s quote removal                                     | N101 review 6 (D-SEC)                                           | ✅ Remedied (n101 branch)        |
+| N112 | Braces decoded from `$'\x7b'` and run by `eval` or `bash -c` are never expanded                                | N101 review 6 (D-SEC)                                           | ✅ Remedied (n101 branch)        |
+| N113 | An unrelated unresolvable prefix switches off `secret_file_guard`'s N107 coverage                              | N101 review 6 (D-SEC)                                           | ✅ Remedied (n101 branch)        |
 
 ## Tasks
 

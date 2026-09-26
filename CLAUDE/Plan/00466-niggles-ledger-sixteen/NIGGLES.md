@@ -9,6 +9,61 @@ interrupt a running handler) and lands with that branch. N40 is taken there too
 taken on the N38 fix branch (the chain's remaining linear per-token cost, which
 waits for the shell-parser consolidation).
 
+### N113 — ✅ Remedied (n101 branch) — An unrelated unresolvable prefix switches off `secret_file_guard`'s N107 coverage
+
+**Found by the N101 round-6 D-SEC review** (minor, report
+`subagent-reports/260926-n101-dsec6-opus-5-5.md`). When the brace-word
+scan meets a span it cannot place (`${x:-'a'}`), it stops early if no group
+can follow. That check looked only for a literal `{`, while the scan itself
+also reads decoded text. So `bash -c $'cat .vault-\x7b"\x7d",pass\x7d'` was
+denied alone and allowed after `: ${x:-'a'} ;`. Main allows both.
+
+**Remedied on the n101 branch.** `shell_expansion._may_hold_a_group` now
+considers every way a brace can arrive: a literal `{` other than `${` with
+a `}` after it, a `$'…'` whose decoded body holds a brace, and an expansion
+whose value is unknown (`$x`, `${…}`, `$(…)`, a backtick) where a word hands
+text to a shell to read again (`eval`, `source`, `.`, `su`, `ssh`, a shell
+by name, an option cluster holding `c`). Where any of them can, the scan
+raises and the guard fails closed. Tests:
+`test_an_unrelated_unresolvable_prefix_does_not_end_the_scan_n113` through
+`HandlerChain` (two shapes RED on main 937a4c772; the `$(printf …)` shape
+was already denied there) and the primitive tests in
+`TestIterShellBraceWords`. `echo "${x:-"a"}" $'tab\there'` and
+`: ${x:-'a'} ; echo "$HOME"` stay allowed.
+
+### N112 — ✅ Remedied (n101 branch) — Braces decoded from `$'\x7b'` and run by `eval` or `bash -c` are never expanded
+
+**Found by the N101 round-6 D-SEC review** (report
+`subagent-reports/260926-n101-dsec6-opus-5-5.md`), and allowed on main
+937a4c772. `bash -c $'cat .vault-\x7bpass,q\x7d'` runs `cat .vault-{pass,q}`. The raw text holds no brace, so the quote-blind stream
+sees none, and the nested reading re-read decoded text only when a quote
+character survived decoding.
+
+**Remedied on the n101 branch.** ANSI-C decoding is the one quote removal
+that makes braces the raw text lacks. Text decoded from a `$'…'` word, or
+`eval`'s arguments when one of them is one, is read as a command whatever
+it holds, and every word of it holding a brace is reported. Tests:
+`test_braces_decoded_from_ansi_c_quoting_reach_a_shell_n112` through
+`HandlerChain` for `bash -c`, `eval`, `sh -c`, `su -c` and `ssh` with
+`\x7b`, `\173` and `{`, each RED on main 937a4c772, and
+`test_braces_decoded_from_ansi_c_quoting_are_read_n112`.
+
+### N111 — ✅ Remedied (n101 branch) — `$"…"` locale quoting keeps its `$` in `secret_file_guard`'s quote removal
+
+**Found by the N101 round-6 D-SEC review** (report
+`subagent-reports/260926-n101-dsec6-opus-5-5.md`), and allowed on main
+937a4c772. Bash reads `$"…"` as `"…"` and drops the `$`.
+`shell_expansion._decode_span` kept it, so `cat $".vault-"pass` became the
+token `$.vault-pass`, which no protected name matches.
+
+**Remedied on the n101 branch.** An unquoted `$"` drops its `$` in
+`_decode_span`, so `normalise_word` and every stream built on it read
+`$"…"` as `"…"`. Inside double quotes `"$"` still keeps its `$`, as bash
+does. Tests: `test_locale_quoting_drops_its_dollar_n111` through
+`HandlerChain` (three shapes, RED on main 937a4c772),
+`test_locale_quoting_reads_as_double_quoting_n111`, and the bash
+differential test, which found it.
+
 ### N107 — ✅ Remedied (n101 branch) — `secret_file_guard` reads a quoted brace as brace syntax, so `{"}",pass}` hides a brace-spelled path
 
 **Found by the N101 round-5 D-RULE review** (observation, report
@@ -42,7 +97,18 @@ the guard enumerates, with main's quote-blind reading kept alongside it:
   escapes or braces, a `case` or heredoc inside `$(…)`, nesting past the
   bound) raises `UnresolvableBraceQuotingError`, a `TooManyToEnumerateError`,
   so the guard fails closed. This happens only when a group could be at
-  stake: a `{` other than a `${` with a `}` after it.
+  stake (see N113 for what that now covers).
+
+**Round 7.** The quote-aware reading is now bash's own brace expansion,
+ported from bash 5.2 `braces.c` (`brace_expand`, `expand_amble`,
+`brace_gobbler`). A `}` before any comma is text, a body with no comma
+that is not a sequence is text, and `${` opens a level as bash's scanner
+opens it, so a group holding `${x:-'}'}` is resolved rather than failed
+closed. `tests/unit/utils/test_shell_expansion_bash_differential.py`
+generates 2,000 words from quoting and brace primitives and requires every
+spelling bash prints with `printf '%s\n' WORD` to be one the guard reads.
+On a 600-word and a 300-program sample it found N111 first (257 misses),
+then the round-6 innermost-first pairing (15 and 20 misses).
 
 The 140-program false-positive corpus verdicts are unchanged. Tests:
 `TestQuotedBracesAreNotBraceSyntax` in the guard's tests, each RED on main
@@ -148,7 +214,16 @@ over-cap code word by a wildcard skeleton instead. That skeleton read
 braces without quotes, so a quoted `{` alternative produced a glob that
 could not match the path bash spells (D-RULE-5 MAJOR 1). None of the 140
 false-positive corpus programs reached that fallback, so round 6 deleted
-it. The scanner models CPython 3.8 to
+it. Round 7 (D-RULE-6 MAJOR 1) stopped trusting a literal's decoded value
+to stand for the words bash splits from its raw text. In `s = '''a' /p/.v-{\x7b,pass} 'b'''` Python's value is `/p/.v-{{,pass}`, which spells
+nothing, while bash reads the triple quote as `''` `'a'`, so the word is
+unquoted and spells `/p/.v-pass`. Every word bash splits from the raw
+program text that holds a brace is now enumerated as bash reads it,
+inside a literal or not (`iter_every_shell_brace_word`); bash's own
+quoting makes an ordinary literal's braces text, so it expands nothing.
+The quote-blind code words keep the containment rule. No corpus verdict
+moved, so the fallback the brief allowed (containment for literals whose
+raw text equals their value) was not needed. The scanner models CPython 3.8 to
 3.14 source grammar, apart from the shapes it withdraws. A program that
 declares an encoding other than UTF-8, or that Python would decode
 differently from the text the guard parsed, is not exempted. Nor is one
@@ -180,10 +255,11 @@ head redefined as a function on the command line (`cd() { …; }`,
 does. Two limits are the same as on main: a function inherited through the
 environment (`BASH_FUNC_cd%%`) or Claude Code's shell snapshot cannot be
 seen from the command text, and the model is bash, not zsh (whose `cd`
-runs `chpwd` hooks). Rounds 2 to 6 closed the D-RULE and D-SEC review
+runs `chpwd` hooks). Rounds 2 to 7 closed the D-RULE and D-SEC review
 findings; see `subagent-reports/260926-n101-fix2-opus-5-5.md`,
 `260926-n101-fix3-opus-5-5.md`, `260926-n101-fix4-opus-5-5.md`,
-`260926-n101-fix5-opus-5-5.md` and `260926-n101-fix6-opus-5-5.md`. Brace
+`260926-n101-fix5-opus-5-5.md`, `260926-n101-fix6-opus-5-5.md` and
+`260926-n101-fix7-opus-5-5.md`. Brace
 syntax is read quote-aware on this branch too; see N107. The
 quarantine guard enumerates filesystem globs, not braces; see N103, which
 also denies a Python program holding `{**d}` because the `**` word is
