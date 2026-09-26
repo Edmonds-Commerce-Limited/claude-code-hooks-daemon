@@ -9,6 +9,38 @@ interrupt a running handler) and lands with that branch. N40 is taken there too
 taken on the N38 fix branch (the chain's remaining linear per-token cost, which
 waits for the shell-parser consolidation).
 
+### N94 — `github_auto_close_keywords` answers a repeated `git commit -F` from the previous request
+
+**Found by N38 review 8 (its MAJOR, and on main too).** The handler caches
+its verdict on the shared handler instance, keyed by the command text alone.
+The verdict also depends on the message file, read relative to the request's
+cwd. Run `git commit -F msg.txt` with a harmless message in one directory,
+then with `Closes #12` in another: the second is allowed. Editing the file
+between two identical commands also keeps the stale answer.
+
+**Remedy:** N38 fix round 9 keys the memo by every input, sweeps every
+handler for per-instance per-request state, and extends the static detector
+to catch it. It lands with N38.
+
+### N93 — `project_containment` misses writes inside `eval '…'` and nested heredocs
+
+**Found by N38 review 8 (ledger candidate).** A write outside the project
+that sits inside `eval '…'`, inside `bash <<'OUTER'`, or after a moved
+heredoc closer is not seen. Every tree allows it, main included.
+
+**Remedy:** judge executed bodies as commands, as the guards now do. It
+belongs on the executed-body branch with N87 to N89.
+
+### N92 — `pipe_blocker` reads a `|` inside a double-quoted regex as a pipe
+
+**Found by N38 review 8 (ledger candidate).** `grep -E "a|HEAD|b" f` is
+denied as a pipe to `head`. It happens on every tree, including the live
+daemon. A double-quoted string is one word to bash, so there is no pipe
+there.
+
+**Remedy:** the pipe split must honour quoting, taking pipe positions from
+the N38 lexer. It starts after N38 merges.
+
 ### N91 — A project's extra `protected_paths` can be ignored for the life of the daemon by the payload-capture and lint seams
 
 **Found by N38 fix round 8's static shared-state detector.**
