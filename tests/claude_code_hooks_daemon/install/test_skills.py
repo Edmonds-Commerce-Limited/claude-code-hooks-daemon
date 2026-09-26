@@ -2,6 +2,7 @@
 
 import errno
 import shutil
+import subprocess
 from collections.abc import Generator
 from pathlib import Path
 
@@ -440,3 +441,97 @@ class TestRetiredSkillRemoval:
         deploy_skills(daemon_source_one_skill, temp_project)
 
         assert (temp_project / ".claude" / "skills" / "hooks-daemon" / "SKILL.md").is_file()
+
+
+# The real `.claude/.gitignore` this repository ships IS the template a client
+# install/upgrade copies verbatim (install.py's `show_gitignore_instructions`
+# reads `daemon_dir / ".claude" / ".gitignore"` literally). Reading it here
+# rather than hand-writing a copy means the test tracks the real file instead
+# of a fixture that can drift from it.
+_REAL_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
+_REAL_CLAUDE_GITIGNORE = (_REAL_PROJECT_ROOT / ".claude" / ".gitignore").read_text()
+
+
+def _run_git(args: list[str], cwd: Path) -> None:
+    # SECURITY: list-form subprocess, no shell=True, trusted system tool (git).
+    result = subprocess.run(
+        ["git", *args],
+        cwd=cwd,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, f"git {args} failed: {result.stderr}"
+
+
+def _init_git_repo(project: Path) -> None:
+    _run_git(["init"], project)
+    _run_git(["config", "user.email", "test@example.com"], project)
+    _run_git(["config", "user.name", "Test"], project)
+
+
+def _git_status_porcelain(project: Path) -> str:
+    result = subprocess.run(
+        ["git", "status", "--porcelain"],
+        cwd=project,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    return result.stdout
+
+
+class TestSkillRedeployLeavesCleanGitStatus:
+    """N105: a skill redeploy leaves an untracked, unignored backup directory.
+
+    `_preserve_replaced_skill` moves a deployed skill that differs from the
+    shipped one into `.claude/hooks-daemon-backups/skills/<name>` (Plan 00412
+    F-DEPL-2). Neither a fresh client install's `.claude/.gitignore` nor this
+    repository's own copy ignored that directory, so `git status` shows
+    `?? .claude/hooks-daemon-backups/` after any redeploy that rescues an
+    edited skill, and a careless `git add -A` commits the backup.
+    """
+
+    def _deploy_edit_redeploy_and_check_clean(
+        self, project: Path, daemon_source: Path, claude_gitignore_content: str
+    ) -> str:
+        claude_dir = project / ".claude"
+        claude_dir.mkdir(parents=True, exist_ok=True)
+        (claude_dir / ".gitignore").write_text(claude_gitignore_content)
+        (project / ".gitignore").write_text(".claude/hooks-daemon/\n")
+
+        _init_git_repo(project)
+        deploy_skills(daemon_source, project)
+        _run_git(["add", "-A"], project)
+        _run_git(["commit", "-m", "initial deploy"], project)
+
+        # Simulate a user customisation, which forces a rescue-to-backup on
+        # the next deploy rather than a plain overwrite.
+        skill_md = claude_dir / "skills" / "hooks-daemon" / "SKILL.md"
+        skill_md.write_text("# Hooks Daemon Skill\n\nMy own local notes.\n")
+        deploy_skills(daemon_source, project)
+
+        assert (claude_dir / "hooks-daemon-backups" / "skills").exists()
+        return _git_status_porcelain(project)
+
+    def test_client_install_layout(self, tmp_path: Path, daemon_source: Path) -> None:
+        """A fresh client install, set up the way `install.py` sets one up."""
+        project = tmp_path / "client-project"
+        project.mkdir()
+
+        status = self._deploy_edit_redeploy_and_check_clean(
+            project, daemon_source, _REAL_CLAUDE_GITIGNORE
+        )
+
+        assert status == ""
+
+    def test_dogfood_repository_layout(self, tmp_path: Path, daemon_source: Path) -> None:
+        """This repository's own layout: self-install mode, same `.claude/.gitignore`."""
+        project = tmp_path / "dogfood-project"
+        project.mkdir()
+
+        status = self._deploy_edit_redeploy_and_check_clean(
+            project, daemon_source, _REAL_CLAUDE_GITIGNORE
+        )
+
+        assert status == ""

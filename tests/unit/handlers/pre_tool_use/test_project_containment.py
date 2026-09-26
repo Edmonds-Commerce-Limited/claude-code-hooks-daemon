@@ -1092,6 +1092,61 @@ class TestATildeIsADestinationLikeAnyOther:
         )
 
 
+class TestAnUnresolvedRootDoesNotLockOutTargetlessCommands:
+    """Plan 00466 N90.
+
+    ``matches()`` used to resolve the project root before checking whether the
+    command names any write target at all. When the root cannot be resolved
+    (three test harnesses route events without initialising ``ProjectContext``
+    to prove this), that made EVERY command deny, ahead of every lower-priority
+    handler -- including one that writes nothing. The fix returns early when
+    ``_named_targets()`` is empty, before the root is ever resolved, and stays
+    fail-closed for a command that does name a target.
+    """
+
+    def test_a_no_target_command_is_allowed_even_when_the_root_is_unresolved(
+        self, handler: ProjectContainmentHandler, _project_root: Any
+    ) -> None:
+        _project_root.side_effect = RuntimeError(
+            "ProjectContext not initialized. "
+            "Call ProjectContext.initialize(config_path) during daemon startup."
+        )
+
+        assert handler.matches(_bash("git status")) is False
+        _project_root.assert_not_called()
+
+    def test_a_targeted_command_still_fails_closed_when_the_root_is_unresolved(
+        self, handler: ProjectContainmentHandler, _project_root: Any
+    ) -> None:
+        _project_root.side_effect = RuntimeError(
+            "ProjectContext not initialized. "
+            "Call ProjectContext.initialize(config_path) during daemon startup."
+        )
+
+        hook_input = _write("/tmp/notes.md")
+
+        assert handler.matches(hook_input) is True
+        result = handler.handle(hook_input)
+        assert result.decision == Decision.DENY
+        assert result.reason is not None
+        assert result.reason.startswith(f"BLOCKED [{RuleID.PROJECT_CONTAINMENT_EVALUATION_ERROR}]")
+
+    def test_a_raise_while_naming_targets_still_denies(
+        self, handler: ProjectContainmentHandler
+    ) -> None:
+        """The early return sits inside the N11 wrapper, so a fault in
+        ``_named_targets`` itself is an evaluation error, never an empty list."""
+
+        def _raise(self: object, _hook_input: object) -> list[str]:
+            raise RuntimeError("synthetic target-naming failure")
+
+        with patch.object(ProjectContainmentHandler, "_named_targets", _raise):
+            hook_input = _bash("git status")
+            assert handler.matches(hook_input) is True
+            result = handler.handle(hook_input)
+        assert result.decision == Decision.DENY
+
+
 class TestProjectRootDoublePatchDoesNotLeakAcrossFiles:
     """Plan 00466 N39 regression: the polluter/victim PAIR from the
     bisection, run together in one pytest PROCESS -- the shape the leak
