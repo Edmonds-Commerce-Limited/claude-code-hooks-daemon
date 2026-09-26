@@ -18,6 +18,8 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Final
 
+from claude_code_hooks_daemon.utils.path_containment import path_is_relative_to, path_relative_to
+
 #: The environment variable Claude Code reads for its config directory.
 CLAUDE_CONFIG_DIR_ENV: Final[str] = "CLAUDE_CONFIG_DIR"
 
@@ -82,9 +84,9 @@ def config_dir_within(project_root: Path, *, config_dir: Path | None = None) -> 
     directory = config_dir if config_dir is not None else claude_config_dir()
     resolved_root = project_root.resolve()
     resolved_dir = directory.resolve()
-    if resolved_dir == resolved_root or not resolved_dir.is_relative_to(resolved_root):
+    if resolved_dir == resolved_root or not path_is_relative_to(resolved_dir, resolved_root):
         return None
-    return resolved_dir.relative_to(resolved_root).as_posix()
+    return path_relative_to(resolved_dir, resolved_root).as_posix()
 
 
 def is_in_claude_config_dir(
@@ -106,12 +108,12 @@ def is_in_claude_config_dir(
     directory = config_dir if config_dir is not None else claude_config_dir()
     homes = {directory, directory.resolve()}
     if any(
-        root.is_relative_to(home)
+        path_is_relative_to(root, home)
         for root in {project_root, project_root.resolve()}
         for home in homes
     ):
         return False
-    return any(form.is_relative_to(home) for form in {path, path.resolve()} for home in homes)
+    return any(path_is_relative_to(form, home) for form in {path, path.resolve()} for home in homes)
 
 
 def session_config_dir(transcript_path: object) -> Path | None:

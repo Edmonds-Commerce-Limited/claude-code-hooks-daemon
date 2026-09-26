@@ -57,6 +57,7 @@ from claude_code_hooks_daemon.plan_qa.types import (
     DEFAULT_PLAN_DOC_BLOCK_LINES,
 )
 from claude_code_hooks_daemon.utils.authored_paths import authored_path
+from claude_code_hooks_daemon.utils.path_containment import path_relative_to
 from claude_code_hooks_daemon.utils.vendor_paths import (
     VendorScope,
     is_vendored_path_in_scopes,
@@ -205,7 +206,7 @@ def _finding_for(
 def _run_edit(context: CheckContext) -> list[Finding]:
     if context.file_path is None or context.file_content is None:
         return []
-    rel_path = str(context.file_path.relative_to(context.project_root))
+    rel_path = str(path_relative_to(context.file_path, context.project_root))
     if not is_module_doc_path(rel_path, context.policy.trees.agent):
         return []
     # The EDIT arm had no exclusion test at all, so a project that had

@@ -37,6 +37,7 @@ from pathlib import Path
 from typing import Final, Protocol
 
 from claude_code_hooks_daemon.utils.authored_paths import contained_authored_path
+from claude_code_hooks_daemon.utils.path_containment import path_relative_to
 
 #: Mirrors ``PlanWorkflowConfig.directory`` and the two archive fields'
 #: pydantic defaults. Stated here, as ``docs_qa.policy`` states
@@ -238,7 +239,7 @@ class PlanLinkResolver:
         return RelocatedPlanLink(
             plan_number=number,
             path=resolved,
-            rel_path=str(resolved.relative_to(self._project_root)),
+            rel_path=str(path_relative_to(resolved, self._project_root)),
         )
 
     def suggested_link(self, source_dir: Path, relocated: RelocatedPlanLink) -> str:

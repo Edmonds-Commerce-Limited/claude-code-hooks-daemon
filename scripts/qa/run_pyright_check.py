@@ -48,6 +48,8 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Final
 
+from claude_code_hooks_daemon.utils.path_containment import path_relative_to
+
 _PROJECT_ROOT: Final[Path] = Path(__file__).resolve().parents[2]
 _QA_OUTPUT_DIR_PARTS: Final[tuple[str, str]] = ("untracked", "qa")
 OUTPUT_FILENAME: Final[str] = "pyright.json"
@@ -119,7 +121,7 @@ def default_interpreter() -> Path:
 def _relative(file_path: str, root: Path) -> str:
     """Root-relative form when the file is under ``root``; verbatim otherwise."""
     try:
-        return Path(file_path).relative_to(root).as_posix()
+        return path_relative_to(Path(file_path), root).as_posix()
     except ValueError:
         return file_path
 

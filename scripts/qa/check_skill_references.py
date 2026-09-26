@@ -25,6 +25,7 @@ import sys
 from pathlib import Path
 
 from claude_code_hooks_daemon.utils.claude_config import claude_config_dir
+from claude_code_hooks_daemon.utils.path_containment import path_is_relative_to
 from claude_code_hooks_daemon.utils.scan_scope import (
     relative_parts,
     vacuous_scan_failure,
@@ -316,7 +317,7 @@ def _should_exclude(path: Path, root: Path, include_filter: str | None = None) -
         if part in _EXCLUDED_DIRS:
             return True
 
-    if path.resolve().is_relative_to(_CLAUDE_CONFIG_DIR):
+    if path_is_relative_to(path.resolve(), _CLAUDE_CONFIG_DIR):
         return True
 
     # Exclude test files

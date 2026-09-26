@@ -54,6 +54,7 @@ from claude_code_hooks_daemon.reference_repos.report import (
 )
 from claude_code_hooks_daemon.reference_repos.sweep import governed_roots
 from claude_code_hooks_daemon.utils.command_evasion import strip_reserved_word_prefix
+from claude_code_hooks_daemon.utils.path_containment import path_is_relative_to, path_relative_to
 from claude_code_hooks_daemon.utils.path_predicates import path_exists
 from claude_code_hooks_daemon.utils.shell_segmentation import (
     command_word,
@@ -395,7 +396,7 @@ class ReferenceRepoFreshnessHandler(PreToolUseHandlerBase):
 
     @staticmethod
     def _within(candidate: Path, root: Path) -> bool:
-        return candidate == root or candidate.is_relative_to(root)
+        return path_is_relative_to(candidate, root)
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """Engage only for a call that would read inside a governed root.
@@ -446,7 +447,7 @@ class ReferenceRepoFreshnessHandler(PreToolUseHandlerBase):
             # ancestor that is actually a checkout.
             candidate = root
             deepest: Path | None = None
-            for part in path.relative_to(root).parts:
+            for part in path_relative_to(path, root).parts:
                 candidate = candidate / part
                 # `unreadable_means=False`: "I could not look" must not become
                 # "this is a governed clone". A path whose ancestor is not

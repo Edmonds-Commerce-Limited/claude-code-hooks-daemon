@@ -116,6 +116,7 @@ from claude_code_hooks_daemon.utils.hook_registration import (
     validate_settings_hooks,
 )
 from claude_code_hooks_daemon.utils.markdown_format import format_markdown_text
+from claude_code_hooks_daemon.utils.path_containment import path_relative_to
 from claude_code_hooks_daemon.utils.plugin_hooks import ACKNOWLEDGED_PLUGINS_OPTION, health_lines
 from claude_code_hooks_daemon.utils.report_scrubbing import scrub_report
 from claude_code_hooks_daemon.utils.secret_redaction import get_active_secret_terms
@@ -4661,7 +4662,7 @@ def cmd_inject_goal(args: argparse.Namespace) -> int:
     joined = render_goal_line(
         plan_number,
         extract_plan_title(plan_text),
-        str(plan_dir.relative_to(project_path)),
+        str(path_relative_to(plan_dir, project_path)),
         mode=mode,
         raw_lines=raw_lines,
     )
@@ -5674,7 +5675,7 @@ def _iter_markdown_candidates(
             ):
                 continue
             try:
-                candidate_rel = candidate.relative_to(project_root).as_posix()
+                candidate_rel = path_relative_to(candidate, project_root).as_posix()
             except ValueError:
                 # Should not occur (see `_rel_is_git_visible`'s docstring):
                 # fall back to the candidate's own string form so the
@@ -5702,7 +5703,7 @@ def _rel_is_git_visible(path: Path, project_root: Path, visible: frozenset[str])
     both from the same walk) is treated as not visible rather than raising.
     """
     try:
-        rel = path.relative_to(project_root).as_posix()
+        rel = path_relative_to(path, project_root).as_posix()
     except ValueError:
         return False
     return rel in visible
@@ -6836,7 +6837,7 @@ def cmd_docs_qa(args: argparse.Namespace) -> int:
         if not lint_path.is_file():
             print(f"ERROR: Lint target does not exist: {lint_path}", file=sys.stderr)
             return 2
-        lint_rel_path = str(lint_path.relative_to(project_root))
+        lint_rel_path = str(path_relative_to(lint_path, project_root))
         # Same scope union the EDIT-stage handler uses (Plan 00284 Task 3.4):
         # the doc corpus's own scope, OR the generated-docs manifest (which
         # may legitimately name a path outside that scope — the default
@@ -6874,7 +6875,7 @@ def cmd_docs_qa(args: argparse.Namespace) -> int:
             file_content_before=lint_content,
             corpus=corpus,
         )
-        clean_scope = f"{lint_path.relative_to(project_root)} is clean"
+        clean_scope = f"{path_relative_to(lint_path, project_root)} is clean"
         findings = run_stage(CheckStage.EDIT, context)
     else:
         untracked_dir = _daemon_untracked_dir(project_root)

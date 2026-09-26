@@ -31,6 +31,7 @@ from claude_code_hooks_daemon.utils.authored_paths import (
     authored_path,
     contained_authored_path,
 )
+from claude_code_hooks_daemon.utils.path_containment import path_relative_to
 
 _PLAN_FOLDER_NUMBER_RE: Final[re.Pattern[str]] = re.compile(r"^(\d{1,5})-[a-zA-Z]")
 
@@ -119,7 +120,7 @@ def tree_targets(context: CheckContext) -> list[DocumentTarget]:
         plan_md = authored_path(folder.path, PLAN_DOC_FILENAME)
         targets.append(
             DocumentTarget(
-                rel_path=str(plan_md.relative_to(context.project_root)),
+                rel_path=str(path_relative_to(plan_md, context.project_root)),
                 plan_number=folder.number,
                 doc=folder.doc,
                 in_archive=folder.location in _ARCHIVED_LOCATIONS,
@@ -329,7 +330,7 @@ def journal_tree_targets(context: CheckContext) -> list[JournalEditTarget]:
                 continue
             targets.append(
                 JournalEditTarget(
-                    rel_path=str(entry.relative_to(context.project_root)),
+                    rel_path=str(path_relative_to(entry, context.project_root)),
                     plan_number=folder.number,
                     basename=entry.name,
                 )

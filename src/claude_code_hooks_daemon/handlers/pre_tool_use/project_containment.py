@@ -70,6 +70,7 @@ from claude_code_hooks_daemon.core.utils import (
 )
 from claude_code_hooks_daemon.utils.claude_config import claude_config_dir, session_config_dir
 from claude_code_hooks_daemon.utils.command_evasion import strip_reserved_word_prefix
+from claude_code_hooks_daemon.utils.path_containment import path_relative_to
 from claude_code_hooks_daemon.utils.realpath import has_symlink_loop, realpath
 from claude_code_hooks_daemon.utils.scratch_dir import acceptance_path
 from claude_code_hooks_daemon.utils.shell_segmentation import split_unquoted
@@ -648,7 +649,7 @@ class ProjectContainmentHandler(PreToolUseHandlerBase):
         if has_symlink_loop(candidate):
             return False
         try:
-            Path(realpath(candidate)).relative_to(container)
+            path_relative_to(Path(realpath(candidate)), container)
         except ValueError:
             return False
         return True

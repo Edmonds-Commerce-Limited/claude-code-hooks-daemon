@@ -1,0 +1,35 @@
+# Semgrep expression of the quadratic path-containment defect class (Plan 00466 N106).
+#
+# From Python 3.12, `PurePath.is_relative_to` and `PurePath.relative_to` test
+# containment as `other in self.parents`. Each parent visited is a new path
+# whose string is built from every segment above it, so one check on a path d
+# segments deep costs O(d^2); a hand-written `x in path.parents` costs the
+# same. A hook's `file_path` is caller-supplied and unbounded, and CI on 3.12
+# and 3.13 caught three PreToolUse handlers growing 24x-29x for an 8x deeper
+# path, through three different call sites. Python 3.11 compares `parts` and
+# grows 8x, which is why the defect only showed on the newer interpreters.
+#
+# claude_code_hooks_daemon.utils.path_containment answers the same questions
+# from `parts`, read once. It calls neither method, so this rule has no
+# exclusions.
+#
+# Scope: containment TESTS only. A loop over `path.parents` that probes the
+# filesystem at each level (finding a `.git`) is not matched; its cost is
+# covered by the timed deep-path sweep in
+# tests/unit/handlers/test_safety_handlers_hostile_input_performance.py.
+
+rules:
+  - id: pathlib-quadratic-containment
+    languages: [python]
+    severity: WARNING
+    message: >-
+      From Python 3.12 this walks `path.parents`, building every parent's
+      string, so it costs O(depth^2) on a deep caller-supplied path. Use
+      path_is_relative_to / path_relative_to from
+      claude_code_hooks_daemon.utils.path_containment, which read `parts`
+      once.
+    pattern-either:
+      - pattern: $P.relative_to(...)
+      - pattern: $P.is_relative_to(...)
+      - pattern: $X in $P.parents
+      - pattern: $X not in $P.parents

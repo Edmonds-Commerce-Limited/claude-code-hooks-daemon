@@ -61,6 +61,7 @@ from claude_code_hooks_daemon.utils.git_file_states import (
     scan_git_file_states,
     unignore_advice,
 )
+from claude_code_hooks_daemon.utils.path_containment import path_relative_to
 from claude_code_hooks_daemon.utils.session_helpers import is_resume_session
 
 _CHMOD_HINT: Final[str] = "chmod 600 <path> (owner read/write only)"
@@ -303,7 +304,7 @@ class SecretFileHygieneCheckerHandler(SessionStartHandlerBase):
     @staticmethod
     def _display_path(path: Path, project_root: Path) -> str:
         try:
-            return str(path.relative_to(project_root))
+            return str(path_relative_to(path, project_root))
         except ValueError:
             return str(path)
 
@@ -442,7 +443,7 @@ class SecretFileHygieneCheckerHandler(SessionStartHandlerBase):
                     return found, True
                 full_path = Path(current_dir) / name
                 if sfm.path_is_protected(str(full_path), patterns):
-                    found.append(str(full_path.relative_to(project_root)))
+                    found.append(str(path_relative_to(full_path, project_root)))
         return found, False
 
     def _collect_findings_permissions_only(

@@ -36,6 +36,8 @@ from dataclasses import dataclass
 from itertools import chain
 from pathlib import Path
 
+from claude_code_hooks_daemon.utils.path_containment import path_relative_to
+
 logger = logging.getLogger(__name__)
 
 # Group/other WRITE bits — the bug shape this audit exists to find.
@@ -63,7 +65,7 @@ class PermissionFinding:
 
 def _is_in_venv(path: Path, root: Path) -> bool:
     """True when ``path`` sits inside a virtualenv directory under ``root``."""
-    return any(part.startswith(_VENV_DIR_PREFIX) for part in path.relative_to(root).parts)
+    return any(part.startswith(_VENV_DIR_PREFIX) for part in path_relative_to(path, root).parts)
 
 
 def audit_untracked_permissions(

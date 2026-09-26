@@ -23,6 +23,7 @@ from typing import Any, Final
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, HookInputField, Priority
 from claude_code_hooks_daemon.core import AdvisoryResult, Decision, ProjectContext
 from claude_code_hooks_daemon.core.handler_bases import SessionStartHandlerBase
+from claude_code_hooks_daemon.utils.path_containment import path_relative_to
 from claude_code_hooks_daemon.utils.session_helpers import is_resume_session
 
 _SOURCE_FIELD: Final[str] = "source"
@@ -122,7 +123,7 @@ class RemoteDocsStalenessHandler(SessionStartHandlerBase):
     def _describe(self, tree: Path, document: Any) -> str:
         """One line per document: the path, and why it is listed."""
         try:
-            shown = document.path.relative_to(tree)
+            shown = path_relative_to(document.path, tree)
         except ValueError:
             shown = document.path
 

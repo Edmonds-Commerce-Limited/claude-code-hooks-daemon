@@ -34,6 +34,7 @@ from claude_code_hooks_daemon.docs_qa.types import (
 )
 from claude_code_hooks_daemon.utils.authored_paths import authored_path
 from claude_code_hooks_daemon.utils.markdown_fences import lines_outside_fences
+from claude_code_hooks_daemon.utils.path_containment import path_relative_to
 
 logger = logging.getLogger(__name__)
 
@@ -84,7 +85,7 @@ def _finding(rel_path: str, target: str, severity: Severity) -> Finding:
 def _run_edit(context: CheckContext) -> list[Finding]:
     if context.file_path is None or context.file_content is None:
         return []
-    rel_path = str(context.file_path.relative_to(context.project_root))
+    rel_path = str(path_relative_to(context.file_path, context.project_root))
     resident = context.policy.qa.resident_at_imports
     grandfathered = _matches_allowlist(rel_path, context.policy.qa.grandfather_allowlist)
     old_targets = (

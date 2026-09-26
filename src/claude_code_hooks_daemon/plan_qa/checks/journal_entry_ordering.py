@@ -47,6 +47,7 @@ from claude_code_hooks_daemon.utils.authored_paths import (
     authored_path,
     contained_authored_path,
 )
+from claude_code_hooks_daemon.utils.path_containment import path_relative_to
 
 CHECK_ID: Final[str] = "journal-entry-ordering"
 
@@ -174,7 +175,7 @@ def _live_journal_targets(context: CheckContext) -> list[JournalEditTarget]:
                 continue
             targets.append(
                 JournalEditTarget(
-                    rel_path=str(entry.relative_to(context.project_root)),
+                    rel_path=str(path_relative_to(entry, context.project_root)),
                     plan_number=folder.number,
                     basename=entry.name,
                 )

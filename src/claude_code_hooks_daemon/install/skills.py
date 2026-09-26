@@ -11,6 +11,8 @@ import stat
 from pathlib import Path
 from typing import Final
 
+from claude_code_hooks_daemon.utils.path_containment import path_relative_to
+
 logger = logging.getLogger(__name__)
 
 #: Skills this daemon used to deploy and no longer does. Deploying only ever
@@ -48,7 +50,7 @@ def _skills_source_root(daemon_source: Path) -> Path:
 
 def _relative_files(root: Path) -> set[Path]:
     """Every file under ``root``, as paths relative to it."""
-    return {p.relative_to(root) for p in root.rglob("*") if p.is_file()}
+    return {path_relative_to(p, root) for p in root.rglob("*") if p.is_file()}
 
 
 def _trees_match(source: Path, target: Path) -> bool:
