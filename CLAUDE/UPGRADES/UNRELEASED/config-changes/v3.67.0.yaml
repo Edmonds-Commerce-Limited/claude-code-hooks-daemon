@@ -176,6 +176,30 @@ config_changes:
   removed: []
 
   changed:
+    # Ledger 00466 N126: a new upper bound. `maximum` makes the advisory
+    # tell only a config holding more; the daemon starts with the cap either
+    # way, and warns, rather than refusing a config the last release took.
+    - key: daemon.transport.timeout_seconds
+      description: >-
+        Now at most 45. hooks-relay waits this long for the daemon, then may
+        spend up to 10s handing a failed PreToolUse call to the bash
+        forwarder, and Claude Code cancels the hook at the 60s timeout the
+        daemon registers. A cancelled PreToolUse hook lets the tool call run
+        unjudged, so the relay's wait must end with room to spare. A larger
+        value no longer takes effect: the daemon starts with 45 and logs a
+        warning naming this key.
+      example_yaml: |
+        daemon:
+          transport:
+            timeout_seconds: 45
+      migration_note: >-
+        Set daemon.transport.timeout_seconds to 45 or less in
+        .claude/hooks-daemon.yaml. Until you do, the daemon uses 45 and warns
+        at every start.
+      recommended: true
+      dormant: false
+      maximum: 45
+
     - key: handlers.pre_tool_use.lsp_enforcement.options.no_lsp_mode
       description: >-
         "No LSP" now means no enabled Claude Code plugin declares a language

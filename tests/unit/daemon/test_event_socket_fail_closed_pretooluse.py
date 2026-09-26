@@ -30,8 +30,12 @@ from claude_code_hooks_daemon.constants.protocol import SocketLimit
 from claude_code_hooks_daemon.core.front_controller import FrontController
 from claude_code_hooks_daemon.core.handler import Handler
 from claude_code_hooks_daemon.core.hook_result import Decision, HookResult
+from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.daemon.paths import get_event_socket_dir_from_untracked
-from claude_code_hooks_daemon.daemon.server import HooksDaemon
+from claude_code_hooks_daemon.daemon.server import (
+    HooksDaemon,
+    _pre_tool_use_transport_deny_response,
+)
 
 
 class _AllowHandler(Handler):
@@ -363,3 +367,35 @@ class TestGenericExceptionFailsClosedOnPreToolUseSocket:
 
         await daemon.shutdown()
         await server_task
+
+
+class TestTheTransportDenyNamesThisInstallsLauncher:
+    """Plan 00466 round 3 (m-A's class): the deny told a client to run
+    ``bin/hooks-daemon restart``, relative to wherever the agent stands. A
+    client's daemon launcher is ``.claude/hooks-daemon/bin/hooks-daemon``,
+    and a ``bin/hooks-daemon`` at its root is the project's own, if anything.
+    The deny names this install's launcher by absolute path."""
+
+    @pytest.mark.parametrize(
+        ("self_install", "launcher"),
+        [(False, ".claude/hooks-daemon/bin/hooks-daemon"), (True, "bin/hooks-daemon")],
+    )
+    def test_it_names_the_absolute_launcher(
+        self, monkeypatch: pytest.MonkeyPatch, self_install: bool, launcher: str
+    ) -> None:
+        root = Path("/a-project")
+        monkeypatch.setattr(ProjectContext, "_initialized", True, raising=False)
+        monkeypatch.setattr(
+            ProjectContext, "project_root", classmethod(lambda cls: root), raising=False
+        )
+        monkeypatch.setattr(
+            ProjectContext,
+            "self_install_mode",
+            classmethod(lambda cls: self_install),
+            raising=False,
+        )
+        reason = _pre_tool_use_transport_deny_response()["hookSpecificOutput"][
+            "permissionDecisionReason"
+        ]
+        assert reason.startswith("BLOCKED [transport-fail-closed]"), reason
+        assert reason.endswith(f"run: {root / launcher} restart"), reason

@@ -91,6 +91,21 @@ that never set the key would be told to change a value it already has.
 Key such an entry on the leaf value (`...daemon_stats.enabled`), not on the
 handler mapping, so the comparison is against a scalar.
 
+A `changed` entry may instead carry `maximum: N` for a key that gained an
+upper bound. The advisory then speaks only to a config holding a NUMBER
+larger than `N`, recommending `N` itself, and says nothing to an absent key,
+a value within the bound, or a value that is not a number (config validation
+reports that). `maximum` takes precedence over `recommended_value` and
+`only_if_set` on the same entry.
+
+```yaml
+  changed:
+    - key: daemon.transport.timeout_seconds
+      description: "Now at most 45"
+      recommended: true
+      maximum: 45
+```
+
 ## Key Format
 
 Config paths use dot notation mirroring the YAML structure:
@@ -113,7 +128,8 @@ The `check-config-migrations` CLI command:
    into the Recommended section when `recommended: true`)
 5. For **changed** keys with a `recommended_value`: promotes the change when the
    client's current value differs from `recommended_value` (default-flip path);
-   with `only_if_set: true`, only when the key is present in the client's config
+   with `only_if_set: true`, only when the key is present in the client's config;
+   with `maximum`, only when the client's value is a number above it
 6. For **removed** keys: warns if user still has the removed key (see note below)
 
 Note: Removed keys generate warnings only if they appear in the `renamed` section.

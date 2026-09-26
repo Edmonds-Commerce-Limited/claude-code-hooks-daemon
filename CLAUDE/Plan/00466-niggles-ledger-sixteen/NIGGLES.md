@@ -3,6 +3,49 @@
 Newest first. Each entry says how it was found, why it happens, and the
 candidate remedies.
 
+### N140 — ✅ Remedied — PreToolUse input the forwarder cannot parse is answered without a deny
+
+**Found by the lifecycle batch's round-2 D-RULE re-review, on main as well.**
+`send_request_stdin` sent a `json.loads` failure to `invalid_hook_input`,
+which `emit_error_json` answered with context only: no `permissionDecision`,
+so the call ran with no guard. JSON nested about 1000 deep raises
+`RecursionError` in the parser, so any tool whose input nests that far (in
+practice an MCP tool) skipped every PreToolUse guard on the plain forwarder.
+During a relay hand-off the relay accepted that context-only answer as the
+carve-out's allow. Two neighbours had the same effect with no JSON at all:
+input a few levels shallower parsed, then the request envelope's
+`json.dumps` raised outside any handler, and stdin that is not UTF-8 raised
+in `sys.stdin.read()` outside the `try`. The daemon's own socket already
+denied such input.
+
+**Remedied (lifecycle batch, round 3):** the read, the parse and the
+envelope encoding are all inside the handler, and for PreToolUse
+`invalid_hook_input` is denied with the reason "Hook input could not be
+parsed, so no guard judged this call". The recovery carve-out cannot apply,
+since it needs the parsed input. Other events keep the fail-open context.
+RED: `TestInputThatCannotBeParsedIsDenied` (1000-deep, every depth from 980
+to 1000, text that is not JSON, bytes that are not UTF-8, and the hand-off)
+and the relay's `test_input_nested_too_deeply_to_parse_is_denied`. Release
+note 155.
+
+### N139 — ✅ Remedied — `is_daemon_running` reads EPERM from `kill -0` as a dead daemon and removes its PID file
+
+**Found by both lifecycle round-2 re-reviews, on main as well.** `kill -0`
+fails with EPERM on another user's live process. `init.sh`'s
+`is_daemon_running` treated any failure as a dead daemon, returned 1 and
+removed the PID file (round 2 made that conditional on the file still naming
+the pid, but it still removed the file of a live process). `ensure_daemon`
+then tried to start a second daemon. The Python side
+(`_pid_file_points_at_live_process`) already treated `PermissionError` as
+alive.
+
+**Remedied (lifecycle batch, round 3):** only ESRCH ("No such process",
+read in the C locale) means the process is gone. EPERM and any other failure
+of a numeric pid return 0 and keep the file. A PID file that holds no number
+is still stale. RED: `test_a_pid_it_may_not_signal_is_alive_and_keeps_its_file`
+(the builtin shadowed with the EPERM failure it reports, since root may
+signal anything). Release note 154.
+
 ### N128 — ✅ Remedied — Stop and the stale-PID checks delete a successor's PID file and socket
 
 **Found by the lifecycle batch's D-PATH review (S2), on main as well.**
@@ -24,6 +67,11 @@ could orphan a live daemon and let a second one start.
   (`_socket_liveness_sync`), never on `LIVE` or `INDETERMINATE`.
 - `is_daemon_running` re-reads the PID file and removes it only while it
   still names the pid it found dead, without a new stderr suppression.
+- Round 3 (D-PATH m-B): `_release_stopped_daemon_files` makes both checks
+  under the start lock (`server.hold_start_lock`), which a start holds
+  across its probe, PID write, unlink and bind, so a probe can no longer land
+  between a successor's unlink and bind. A lock held past `Timeout.FILE_LOCK`
+  leaves both files. RED: `test_the_probe_and_both_removals_hold_the_start_lock`.
 
 RED: `TestCmdStopCleansUpOnlyWhatItStillOwns` (a real successor socket and
 PID file written when the exit is observed), two `read_pid_file` successor

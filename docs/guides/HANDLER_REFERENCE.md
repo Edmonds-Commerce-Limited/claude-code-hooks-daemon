@@ -140,8 +140,11 @@ earlier successful exit, it never removes the safety net.
 `PreToolUse` call, it hands the call to the bash forwarder for up to 10
 seconds more. Both waits plus a 5-second margin must end before the
 60-second hook timeout the daemon registers, because Claude Code runs a
-`PreToolUse` call unjudged when its hook times out. A larger value is
-rejected with that reason.
+`PreToolUse` call unjudged when its hook times out. A larger value does not
+take effect: the daemon starts with 45 and logs a warning that names the key,
+the cap and the fix. It does not refuse to start, because a daemon that is
+down denies every `PreToolUse` call, including the edit that would fix the
+config. `check-config-migrations` reports a larger value on upgrade.
 
 **`relay_enabled`/`nc_enabled` and `relay_source` are two SEPARATE, both
 explicit, decisions** — nothing about this block acts implicitly:

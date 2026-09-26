@@ -84,7 +84,11 @@ def _sandbox_project(tmp_path: Path) -> Path:
     (claude_dir / "hooks-daemon.env").write_text(
         'export HOOKS_DAEMON_ROOT_DIR="$PROJECT_PATH/root"\n'
     )
-    _write_launcher(proj)
+    # The install's own launcher, and the root spelling linked to it: the
+    # carve-out exempts only a launcher that runs this install.
+    _write_launcher(proj / "root")
+    (proj / "bin").mkdir()
+    (proj / "bin" / "hooks-daemon").symlink_to(proj / "root" / "bin" / "hooks-daemon")
     return proj
 
 

@@ -77,6 +77,7 @@ _FIELD_RECOMMENDED = "recommended"
 _FIELD_DORMANT = "dormant"
 _FIELD_RECOMMENDED_VALUE = "recommended_value"
 _FIELD_ONLY_IF_SET = "only_if_set"
+_FIELD_MAXIMUM = "maximum"
 
 
 class _Unset:
@@ -130,6 +131,9 @@ class ConfigChangeEntry:
             shipped default already equals ``recommended_value``, so a config
             that never set the key needs no advice and only an explicit
             override is worth flagging.
+        maximum: For a ``changed`` entry, the largest value the key now
+            accepts. A client whose config holds a larger number is told to
+            set this one; any other value, or none, gets no advice.
     """
 
     key: str
@@ -140,6 +144,7 @@ class ConfigChangeEntry:
     dormant: bool = False
     recommended_value: Any = UNSET
     only_if_set: bool = False
+    maximum: int | float | None = None
 
 
 def _change_entry_from_dict(e: dict[str, Any]) -> ConfigChangeEntry:
@@ -157,7 +162,13 @@ def _change_entry_from_dict(e: dict[str, Any]) -> ConfigChangeEntry:
         dormant=bool(e.get(_FIELD_DORMANT, False)),
         recommended_value=e.get(_FIELD_RECOMMENDED_VALUE, UNSET),
         only_if_set=bool(e.get(_FIELD_ONLY_IF_SET, False)),
+        maximum=e.get(_FIELD_MAXIMUM),
     )
+
+
+def _exceeds(value: Any, maximum: int | float) -> bool:
+    """True when ``value`` is a number above ``maximum``; a bool is not a number here."""
+    return isinstance(value, int | float) and not isinstance(value, bool) and value > maximum
 
 
 @dataclass
@@ -543,6 +554,23 @@ def _get_value_at_key(key: str, config: dict[str, Any]) -> Any:
     return current
 
 
+def _changed_suggestion(
+    changed: ConfigChangeEntry, version: str, recommended_value: Any, current_value: Any
+) -> AdvisorySuggestion:
+    """The suggestion a ``changed`` entry makes to a config holding ``current_value``."""
+    return AdvisorySuggestion(
+        key=changed.key,
+        description=changed.description,
+        version=version,
+        example_yaml=changed.example_yaml,
+        recommended=changed.recommended,
+        dormant=changed.dormant,
+        recommended_value=recommended_value,
+        current_value=current_value,
+        migration_note=changed.migration_note,
+    )
+
+
 def generate_migration_advisory(
     from_version: str,
     to_version: str,
@@ -616,25 +644,26 @@ def generate_migration_advisory(
         # holds the old value. Entries without a recommended_value are
         # documentation-only and produce no suggestion. An only_if_set entry
         # skips the absent-key case: its default already matches, so only an
-        # explicit override is worth a nudge.
+        # explicit override is worth a nudge. An entry with a maximum (a new
+        # upper bound) tells only a config holding a larger number.
         for changed in manifest.config_changes.changed:
+            current_value = _get_value_at_key(changed.key, user_config)
+            if changed.maximum is not None:
+                if _exceeds(current_value, changed.maximum):
+                    suggestions.append(
+                        _changed_suggestion(
+                            changed, manifest.version, changed.maximum, current_value
+                        )
+                    )
+                continue
             if changed.recommended_value is UNSET:
                 continue
-            current_value = _get_value_at_key(changed.key, user_config)
             if changed.only_if_set and current_value is UNSET:
                 continue
             if current_value != changed.recommended_value:
                 suggestions.append(
-                    AdvisorySuggestion(
-                        key=changed.key,
-                        description=changed.description,
-                        version=manifest.version,
-                        example_yaml=changed.example_yaml,
-                        recommended=changed.recommended,
-                        dormant=changed.dormant,
-                        recommended_value=changed.recommended_value,
-                        current_value=current_value,
-                        migration_note=changed.migration_note,
+                    _changed_suggestion(
+                        changed, manifest.version, changed.recommended_value, current_value
                     )
                 )
 

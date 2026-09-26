@@ -138,6 +138,8 @@ Full write-ups are in [NIGGLES.md](NIGGLES.md). One line each here:
 | N126 | The relay's PreToolUse deny has no recovery carve-out, so a wedged daemon denies its own restart               | Lifecycle batch (N67)                                           | ✅ Remedied                      |
 | N127 | The recovery exemption strips control characters, not just spaces                                              | Lifecycle D-RULE review (S1)                                    | ✅ Remedied                      |
 | N128 | Stop and the stale-PID checks delete a successor's PID file and socket                                         | Lifecycle D-PATH review (S2)                                    | ✅ Remedied                      |
+| N139 | `is_daemon_running` reads EPERM from `kill -0` as a dead daemon and removes its PID file                       | Lifecycle round 2 re-reviews (shared)                           | ✅ Remedied                      |
+| N140 | PreToolUse input the forwarder cannot parse is answered without a deny                                         | Lifecycle D-RULE re-review (shared)                             | ✅ Remedied                      |
 
 ## Tasks
 

@@ -91,16 +91,20 @@ unset HOOKS_DAEMON_RELAY_FAILED
 # _is_daemon_recovery_command(hook_input, project_path).
 #
 # A call is exempt only when it is a Bash call whose WHOLE command is exactly
-# one launcher spelling plus one recovery subcommand, and that spelling runs
-# the project's own launcher. A relative spelling is resolved against the
-# Bash tool's working directory (the hook input's cwd) and must be the SAME
-# file it names from the project root: the text alone is not enough, because
-# a relative launcher runs whatever the cwd holds, so a planted
-# bin/hooks-daemon would otherwise run while every guard is down. The
-# absolute spelling, shell-quoted exactly as _recovery_command prints it,
-# names the launcher itself and so works from any cwd. Anything that cannot
-# be resolved is not exempt. The launcher follows its own symlinks to anchor
-# itself, so a link to the real one is the real one.
+# one launcher spelling plus one recovery subcommand, and the file that
+# spelling runs is THIS daemon install's launcher, <daemon root>/bin/
+# hooks-daemon (Plan 00466 round 3, m-A): a client project may have a
+# bin/hooks-daemon of its own that has nothing to do with the daemon. A
+# relative spelling is resolved against the Bash tool's working directory
+# (the hook input's cwd): the text alone is not enough, because a relative
+# launcher runs whatever the cwd holds, so a planted bin/hooks-daemon would
+# otherwise run while every guard is down. An absolute spelling, shell-quoted
+# exactly as _recovery_command prints it, names the file itself and so works
+# from any cwd. Anything that cannot be resolved is not exempt. The launcher
+# follows its own symlinks to anchor itself, so a link to it is it.
+#
+# The spellings are tried in cli.py's order for "the project's launcher":
+# the daemon clone's first, then the project root's.
 #
 # Only spaces and tabs may pad the command. str.strip() would also drop
 # vertical tab, form feed, the separators and the Unicode line breaks, which
@@ -117,35 +121,41 @@ _hooks_daemon_recovery_py() {
 import os
 import shlex
 
-_REPO_LAUNCHER = "bin/hooks-daemon"
-_RECOVERY_BINARIES = (_REPO_LAUNCHER, ".claude/hooks-daemon/bin/hooks-daemon")
+_INSTALL_LAUNCHER = "bin/hooks-daemon"
+_RECOVERY_BINARIES = (".claude/hooks-daemon/bin/hooks-daemon", _INSTALL_LAUNCHER)
 _RECOVERY_SUBCOMMANDS = ("restart", "status", "logs", "stop", "start", "repair")
 _RECOVERY_PADDING = " \t"
 
 
-def _is_the_project_launcher(path):
-    try:
-        return os.path.isfile(os.path.realpath(path))
-    except (OSError, ValueError):
-        return False
+def _is_absolute(path):
+    return isinstance(path, str) and os.path.isabs(path)
 
 
-def _runs_the_project_launcher(binary, cwd, project_path):
-    if not isinstance(cwd, str) or not os.path.isabs(cwd):
+def _runs_the_installs_launcher(path, daemon_root):
+    """True when running path runs this install s launcher."""
+    if not _is_absolute(daemon_root):
         return False
     try:
-        will_run = os.path.realpath(os.path.join(cwd, binary))
-        own = os.path.realpath(os.path.join(project_path, binary))
+        will_run = os.path.realpath(path)
+        launcher = os.path.realpath(os.path.join(daemon_root, _INSTALL_LAUNCHER))
     except (OSError, ValueError):
         # An unresolvable path (an embedded NUL, a loop) is never exempt.
         return False
-    return will_run == own and os.path.isfile(own)
+    return will_run == launcher and os.path.isfile(launcher)
 
 
-def _is_daemon_recovery_command(hi, project_path):
+def _absolute_launchers(project_path, daemon_root):
+    """Every absolute spelling of the launcher, in the order a deny names them."""
+    spellings = []
+    if _is_absolute(project_path):
+        spellings.extend(os.path.join(project_path, binary) for binary in _RECOVERY_BINARIES)
+    if _is_absolute(daemon_root):
+        spellings.append(os.path.join(daemon_root, _INSTALL_LAUNCHER))
+    return spellings
+
+
+def _is_daemon_recovery_command(hi, project_path, daemon_root):
     if not isinstance(hi, dict) or hi.get("tool_name") != "Bash":
-        return False
-    if not isinstance(project_path, str) or not os.path.isabs(project_path):
         return False
     tool_input = hi.get("tool_input")
     if not isinstance(tool_input, dict):
@@ -156,25 +166,31 @@ def _is_daemon_recovery_command(hi, project_path):
     stripped = command.strip(_RECOVERY_PADDING)
     if not stripped.isprintable():
         return False
-    for binary in _RECOVERY_BINARIES:
-        own = os.path.join(project_path, binary)
-        absolute = shlex.quote(own)
-        for sub in _RECOVERY_SUBCOMMANDS:
+    cwd = hi.get("cwd")
+    for sub in _RECOVERY_SUBCOMMANDS:
+        for binary in _RECOVERY_BINARIES:
             if stripped == binary + " " + sub:
-                return _runs_the_project_launcher(binary, hi.get("cwd"), project_path)
-            if stripped == absolute + " " + sub:
-                return _is_the_project_launcher(own)
+                return _is_absolute(cwd) and _runs_the_installs_launcher(
+                    os.path.join(cwd, binary), daemon_root
+                )
+        for launcher in _absolute_launchers(project_path, daemon_root):
+            if stripped == shlex.quote(launcher) + " " + sub:
+                return _runs_the_installs_launcher(launcher, daemon_root)
     return False
 
 
-def _recovery_command(project_path, sub):
+def _recovery_command(project_path, daemon_root, sub):
     """The exempt command a deny names: the launcher by absolute path, so it
-    works from any directory. The first spelling the project has wins."""
-    for binary in _RECOVERY_BINARIES:
-        own = os.path.join(project_path, binary)
-        if _is_the_project_launcher(own):
-            return shlex.quote(own) + " " + sub
-    return shlex.quote(os.path.join(project_path, _REPO_LAUNCHER)) + " " + sub
+    works from any directory. The first spelling that runs this install s
+    launcher wins; with none, where that launcher belongs, which is still
+    never a file of the project s own."""
+    spellings = _absolute_launchers(project_path, daemon_root)
+    for launcher in spellings:
+        if _runs_the_installs_launcher(launcher, daemon_root):
+            return shlex.quote(launcher) + " " + sub
+    if _is_absolute(daemon_root):
+        return shlex.quote(os.path.join(daemon_root, _INSTALL_LAUNCHER)) + " " + sub
+    return shlex.quote(spellings[0] if spellings else _INSTALL_LAUNCHER) + " " + sub
 '
 }
 
@@ -196,8 +212,8 @@ try:
     hi = json.load(sys.stdin)
 except Exception:
     sys.exit(1)
-sys.exit(0 if _is_daemon_recovery_command(hi, sys.argv[1]) else 1)
-' "${PROJECT_PATH:-}"
+sys.exit(0 if _is_daemon_recovery_command(hi, sys.argv[1], sys.argv[2]) else 1)
+' "${PROJECT_PATH:-}" "${HOOKS_DAEMON_ROOT_DIR:-}"
 }
 
 #
@@ -209,8 +225,18 @@ _hooks_daemon_recovery_command() {
     python3 -c "$recovery_py"'
 import sys
 
-print(_recovery_command(sys.argv[1], sys.argv[2]))
-' "${PROJECT_PATH:-}" "$1"
+print(_recovery_command(sys.argv[1], sys.argv[2], sys.argv[3]))
+' "${PROJECT_PATH:-}" "${HOOKS_DAEMON_ROOT_DIR:-}" "$1"
+}
+
+#
+# _hooks_daemon_static_deny() - A PreToolUse deny that needs neither python3
+# nor jq (Plan 00466 round 3, R2-1): the answer when the encoder that would
+# carry the real reason could not run. Constant text, so nothing needs
+# escaping. python3 also recognises the recovery commands, so with it gone
+# none is exempt, and the text says a human must act.
+_hooks_daemon_static_deny() {
+    printf '%s\n' '{"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": "HOOKS DAEMON: denied for safety - this hook could not build its answer because python3 is missing or failing, so no guard judged this call. python3 is also what recognises the daemon recovery commands, so none is allowed either. A human must fix python3, or run the daemon launcher directly with the ! prefix: ! .claude/hooks-daemon/bin/hooks-daemon restart (or ! bin/hooks-daemon restart in the daemon repository itself)."}}'
 }
 
 #
@@ -540,10 +566,22 @@ $_hd_venv_missing_remedy")
     # matching emit_error_json's socket_not_found wording: name the one
     # command that is actually allowed, and name the human fallback.
     local _pretooluse_deny_msg=""
-    if [[ "$_pretooluse_deny" == "true" ]]; then
-        local _hd_restart_cmd _hd_repair_cmd_abs
-        _hd_restart_cmd="$(_hooks_daemon_recovery_command restart)"
-        _hd_repair_cmd_abs="$(_hooks_daemon_recovery_command repair)"
+    local _hd_restart_cmd="" _hd_repair_cmd_abs=""
+    if [[ "$_pretooluse_deny" == "true" ]] \
+        && ! { _hd_restart_cmd="$(_hooks_daemon_recovery_command restart)" \
+            && _hd_repair_cmd_abs="$(_hooks_daemon_recovery_command repair)"; }; then
+        # Plan 00466 round 3 (R2-1): python3 names the recovery command, and
+        # under set -e its failure here would end the hook with no answer at
+        # all. It also judges the carve-out, so no command is exempt: say so.
+        _pretooluse_deny_msg=$(printf '%s\n%s\n%s\n%s\n%s\n%s\n%s' \
+            "HOOKS DAEMON: could not connect at all — denied for safety" \
+            "" \
+            "Error: $error_type - $error_details" \
+            "" \
+            "python3 is missing or failing, and it is what recognises the daemon recovery" \
+            "commands, so none is allowed either. A human must fix python3, or run the" \
+            "daemon launcher directly: ! ${HOOKS_DAEMON_ROOT_DIR:-$_hooks_daemon_checkout/.claude/hooks-daemon}/bin/hooks-daemon restart")
+    elif [[ "$_pretooluse_deny" == "true" ]]; then
         _pretooluse_deny_msg=$(printf '%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s' \
             "HOOKS DAEMON: could not connect at all — denied for safety" \
             "" \
@@ -695,7 +733,17 @@ else:
 print(json.dumps(resp))
 ' "$event_name" "$context_msg" "$_HOOKS_DAEMON_CI_ENFORCED" "$_HOOKS_DAEMON_NOT_INSTALLED" \
             "$_hooks_daemon_checkout" "$_HOOKS_DAEMON_VENV_MISSING" "$venv_block_reason" \
-            "$_pretooluse_deny" "$_pretooluse_deny_msg"
+            "$_pretooluse_deny" "$_pretooluse_deny_msg" || {
+            # No jq and no working python3: nothing can encode the reason, but
+            # a deny must still reach Claude Code (Plan 00466 round 3, R2-1).
+            local _hd_encoder_rc=$?
+            if [[ "$event_name" == "PreToolUse" \
+                && ( "$_pretooluse_deny" == "true" || "$_HOOKS_DAEMON_CI_ENFORCED" == "true" ) ]]; then
+                _hooks_daemon_static_deny
+            else
+                return "$_hd_encoder_rc"
+            fi
+        }
     fi
 }
 
@@ -1093,7 +1141,8 @@ validate_venv() {
 # is_daemon_running() - Check if daemon is running
 #
 # Returns:
-#   0 if daemon is running
+#   0 if daemon is running, or its pid names a process this user may not
+#     signal (which is not proof that it is down)
 #   1 if daemon is not running
 #
 is_daemon_running() {
@@ -1110,9 +1159,22 @@ is_daemon_running() {
         return 1
     fi
 
-    # Check if process is alive
-    if kill -0 "$pid" 2>/dev/null; then
-        return 0
+    # Text that is not a pid names no process: the file is stale.
+    if [[ "$pid" =~ ^[0-9]+$ ]]; then
+        # Check if process is alive
+        if kill -0 "$pid" 2>/dev/null; then
+            return 0
+        fi
+        # Plan 00466 N139: only ESRCH means the process is gone. EPERM (a
+        # process of another user's) and anything else unrecognised mean it
+        # may still run, so the daemon is not provably down and its PID file
+        # stays. strerror text in the C locale is the one portable signal the
+        # builtin gives.
+        local probe_error
+        probe_error="$(export LC_ALL=C; kill -0 "$pid" 2>&1)" && return 0
+        if [[ "$probe_error" != *"No such process"* ]]; then
+            return 0
+        fi
     fi
 
     # Stale PID file: remove it only while it still names the pid found
@@ -1787,6 +1849,7 @@ send_request_stdin() {
         exec 3<&0
     fi
 
+    local _rv=0
     python3 -c "
 import json
 import os
@@ -1850,16 +1913,17 @@ daemon_reached = False
 $_recovery_py
 
 project_path = sys.argv[3] if len(sys.argv) > 3 else ''
+daemon_root = sys.argv[5] if len(sys.argv) > 5 else ''
 
 # The exempt restart, by absolute path so it works from any directory.
-_RESTART_COMMAND = _recovery_command(project_path, 'restart')
+_RESTART_COMMAND = _recovery_command(project_path, daemon_root, 'restart')
 
 # The recovery advice every daemon-side failure below ends with.
 _RESTART_ADVICE = [
     f'TO FIX: run exactly {_RESTART_COMMAND} (from any directory),',
     'which stays allowed even while other calls are denied this way. If a',
     'restart cannot start it (a broken venv), run exactly',
-    f'{_recovery_command(project_path, \"repair\")}. Then use the',
+    f'{_recovery_command(project_path, daemon_root, \"repair\")}. Then use the',
     'hooks-daemon skill to verify health (args=health).',
     'If this recurs, use the hooks-daemon skill to check logs',
     '(args=logs) and report it.',
@@ -1914,7 +1978,8 @@ def emit_error_json(event_name, error_type, error_details):
             '',
             f'Error: {error_type} - {error_details}',
             '',
-            'The hook input was not valid JSON, so no handler validated it.',
+            'The hook input could not be parsed (not UTF-8 JSON, or nested too',
+            'deeply to decode), so no handler validated it.',
             'The daemon itself is likely healthy — do NOT restart it.',
             'If this recurs, capture the exact hook input and report it.',
         ]
@@ -2070,14 +2135,14 @@ def emit_error_json(event_name, error_type, error_details):
                 'reason': reason,
             }
     elif event_name == 'PreToolUse' \
-            and error_type != 'invalid_hook_input' \
-            and not _is_daemon_recovery_command(hook_input, project_path):
+            and not _is_daemon_recovery_command(hook_input, project_path, daemon_root):
         # Plan 00466 N24 review 4 R4-MA1: deny for EVERY PreToolUse transport
-        # failure except invalid_hook_input (a payload that never reached the
-        # socket at all, so the daemon state is unrelated and unknown) and the
-        # exact daemon-recovery command (review 3 MA4's carve-out, checked via
-        # _is_daemon_recovery_command so this can never itself block the
-        # commands that would fix it). This used to be an ALLOWLIST of known
+        # failure except the exact daemon-recovery command (review 3 MA4's
+        # carve-out, checked via _is_daemon_recovery_command so this can
+        # never itself block the commands that would fix it). That includes
+        # invalid_hook_input (Plan 00466 N140): input that cannot be parsed
+        # reached no guard, and is never a recovery command, since that
+        # judgement needs the parsed input. This used to be an ALLOWLIST of known
         # error_types (socket_timeout, malformed_response, connection_lost,
         # connect_backlog_full, socket_not_found, connection_refused) that
         # denied, with everything else falling through to the fail-open
@@ -2103,6 +2168,9 @@ def emit_error_json(event_name, error_type, error_details):
             # connect error -- so the daemon never saw this call.
             verb = 'unreachable'
         reason = f'Hooks daemon {verb} - no verdict produced ({error_type}) - denied for safety'
+        if error_type == 'invalid_hook_input':
+            reason = ('Hook input could not be parsed, so no guard judged this call '
+                      f'({error_type}) - denied for safety')
         if timeout_note:
             reason = f'{reason}. {timeout_note}'
         response = {
@@ -2114,9 +2182,7 @@ def emit_error_json(event_name, error_type, error_details):
             }
         }
     else:
-        # Other events, and the two PreToolUse cases that still fail open:
-        # invalid_hook_input (a client-side parse failure that never reached
-        # the socket, so the daemon state is unrelated and unknown) and an
+        # Other events, and the one PreToolUse case that fails open: an
         # exact daemon-recovery command (Plan 00466 N24 review 3 MA4's
         # carve-out) on any of the error_types denied above.
         # hookSpecificOutput with context -- the existing, documented
@@ -2197,16 +2263,17 @@ def print_worktree(output):
     print(message, file=sys.stderr)
     sys.exit(1)
 
-# Read the raw hook_input payload from stdin (preserves control characters).
-raw = sys.stdin.read()
-
-# Parse it so we can wrap it ourselves (jq used to do this). Claude Code always
-# sends a JSON object; a parse failure is a real error, handled explicitly.
+# Read the raw hook_input payload from stdin (preserves control characters)
+# and parse it so we can wrap it ourselves (jq used to do this). Claude Code
+# always sends a JSON object; any failure to read, decode or parse it -- bytes
+# that are not UTF-8, or nesting deeper than the parser recurses -- is a real
+# error, handled explicitly (Plan 00466 N140: PreToolUse denies it).
 try:
+    raw = sys.stdin.read()
     hook_input = json.loads(raw)
 except Exception as exc:
     fail('invalid_hook_input',
-        f'Hook input was not valid JSON: {type(exc).__name__}: {exc}')
+        f'Hook input could not be parsed: {type(exc).__name__}: {exc}')
 
 # Status line injects its own event name into the payload (parity with the old
 # jq '. + {hook_event_name: \"Status\"}').
@@ -2221,8 +2288,15 @@ if event_name == 'Status' and isinstance(hook_input, dict):
         if _v is not None and _v.strip().isdigit():
             hook_input[_dst] = int(_v)
 
-# Wrap into the daemon request envelope; newline-terminated as the daemon expects.
-request = json.dumps({'event': event_name, 'hook_input': hook_input}) + '\n'
+# Wrap into the daemon request envelope; newline-terminated as the daemon
+# expects. The envelope is one level deeper than the input, so input that
+# only just parsed can still be too deep to encode.
+try:
+    request = json.dumps({'event': event_name, 'hook_input': hook_input}) + '\n'
+except Exception as exc:
+    hook_input = None
+    fail('invalid_hook_input',
+        f'Hook input could not be encoded for the daemon: {type(exc).__name__}: {exc}')
 
 socket_path = '$SOCKET_PATH'
 
@@ -2314,8 +2388,16 @@ except (BrokenPipeError, ConnectionResetError) as e:
 
 except Exception as e:
     fail(type(e).__name__, f'{type(e).__name__}: {e}')
-" "$event_name" "$response_mode" "${PROJECT_PATH:-}" "$_HOOKS_DAEMON_RELAY_FAILED" <&3
-    local _rv=$?
+" "$event_name" "$response_mode" "${PROJECT_PATH:-}" "$_HOOKS_DAEMON_RELAY_FAILED" \
+        "${HOOKS_DAEMON_ROOT_DIR:-}" <&3 || _rv=$?
+    # Every PreToolUse path above answers and exits 0, so a failure here is
+    # python3 missing or crashing before it answered: no guard judged the
+    # call, and Claude Code runs a call whose hook wrote nothing (Plan 00466
+    # round 3, R2-1).
+    if [[ "$_rv" -ne 0 && "$event_name" == "PreToolUse" && -z "$response_mode" ]]; then
+        _hooks_daemon_static_deny
+        _rv=0
+    fi
     exec 3<&-
     if [[ -n "$_nc_replay_payload" ]]; then
         rm -f "$_nc_replay_payload"
@@ -2408,6 +2490,7 @@ export -f emit_hook_error
 export -f _hooks_daemon_recovery_py
 export -f _hooks_daemon_stdin_is_recovery_command
 export -f _hooks_daemon_recovery_command
+export -f _hooks_daemon_static_deny
 export -f validate_venv
 export -f is_daemon_running
 export -f start_daemon

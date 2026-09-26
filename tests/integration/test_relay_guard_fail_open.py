@@ -61,6 +61,9 @@ _RELAY_BINARY = _REPO_ROOT / "untracked" / "relay-build" / "hooks-relay-x86_64-u
 
 _TIMEOUT_SECONDS = 15
 
+#: The daemon clone's launcher, which ``cli.py`` and a deny name first.
+_CLONE_LAUNCHER = ".claude/hooks-daemon/bin/hooks-daemon"
+
 
 class _RecordingSocketServer:
     """Minimal Unix-socket server: records one request, replies canned bytes."""
@@ -417,6 +420,27 @@ class TestRelayMidExchangeFailureIsJudgedByTheOneCarveOut:
         assert "relay_exchange_failed" in reason, reason
         assert "Hooks daemon reached" in reason, reason
 
+    def test_input_nested_too_deeply_to_parse_is_denied(
+        self, tmp_path: Path, wedged_pretooluse_socket: Path
+    ) -> None:
+        """Plan 00466 N140: the forwarder answered unparseable input with
+        context only, and the relay accepts that shape as the carve-out's
+        allow. It must deny, and say why."""
+        forwarder, env = _judging_project(tmp_path)
+        depth = 1000
+        payload = (
+            '{"tool_name": "mcp__deep__tool", "tool_input": {"value": '
+            + "[" * depth
+            + "]" * depth
+            + "}}"
+        ).encode()
+        result = _run_relay(
+            wedged_pretooluse_socket, payload, "--fallback", str(forwarder), env=env
+        )
+        assert _decision(result) == "deny"
+        reason = json.loads(result.stdout)["hookSpecificOutput"]["permissionDecisionReason"]
+        assert "invalid_hook_input" in reason, reason
+
     def test_a_fallback_that_answers_nothing_leaves_the_relays_own_deny(
         self, tmp_path: Path, wedged_pretooluse_socket: Path
     ) -> None:
@@ -607,11 +631,14 @@ class TestTheRelaysOwnDenyNamesTheAbsoluteLauncher:
         reason: str = json.loads(result.stdout)["hookSpecificOutput"]["permissionDecisionReason"]
         return reason
 
-    def _init_sh_command(self, project: Path) -> str:
+    def _init_sh_command(self, project: Path, daemon_root: Path) -> str:
         shutil.copy(_INIT_SH, project / ".claude" / "init.sh")
+        env = {k: v for k, v in os.environ.items() if not k.startswith("HOOKS_DAEMON_")}
+        env["HOOKS_DAEMON_ROOT_DIR"] = str(daemon_root)
         result = subprocess.run(
             ["bash", "-c", "source .claude/init.sh; _hooks_daemon_recovery_command restart"],
             cwd=project,
+            env=env,
             capture_output=True,
             text=True,
             timeout=_TIMEOUT_SECONDS,
@@ -620,18 +647,43 @@ class TestTheRelaysOwnDenyNamesTheAbsoluteLauncher:
         return result.stdout.strip()
 
     @pytest.mark.parametrize(
-        "launcher", ["bin/hooks-daemon", ".claude/hooks-daemon/bin/hooks-daemon"]
+        ("launcher", "daemon_root"),
+        [
+            # The daemon's own repository: the install is the project root.
+            ("bin/hooks-daemon", "."),
+            # A client project: the install is the daemon clone.
+            (_CLONE_LAUNCHER, ".claude/hooks-daemon"),
+        ],
     )
     @pytest.mark.parametrize("dirname", ["proj", "with space"])
     def test_it_names_the_command_init_sh_names(
-        self, tmp_path: Path, wedged_pretooluse_socket: Path, launcher: str, dirname: str
+        self,
+        tmp_path: Path,
+        wedged_pretooluse_socket: Path,
+        launcher: str,
+        daemon_root: str,
+        dirname: str,
     ) -> None:
         project = tmp_path / dirname
         (project / launcher).parent.mkdir(parents=True)
         (project / launcher).write_text("#!/bin/bash\n")
         reason = self._own_deny_reason(project, wedged_pretooluse_socket)
-        command = self._init_sh_command(project)
+        command = self._init_sh_command(project, project / daemon_root)
         assert command.endswith(" restart") and str(project) in command, command
+        assert f"run: {command}" in reason, reason
+
+    def test_with_both_launchers_it_names_the_clones_first(
+        self, tmp_path: Path, wedged_pretooluse_socket: Path
+    ) -> None:
+        """Plan 00466 round 3 (m-A): ``cli.py``'s order. A client project's
+        own ``bin/hooks-daemon`` is not the daemon, so it is never named."""
+        project = tmp_path / "proj"
+        for launcher in (_CLONE_LAUNCHER, "bin/hooks-daemon"):
+            (project / launcher).parent.mkdir(parents=True)
+            (project / launcher).write_text("#!/bin/bash\n")
+        reason = self._own_deny_reason(project, wedged_pretooluse_socket)
+        command = self._init_sh_command(project, project / ".claude" / "hooks-daemon")
+        assert command == f"{project / _CLONE_LAUNCHER} restart", command
         assert f"run: {command}" in reason, reason
 
 

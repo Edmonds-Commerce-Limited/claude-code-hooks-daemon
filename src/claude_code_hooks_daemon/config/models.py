@@ -1612,22 +1612,33 @@ class TransportConfig(BaseModel):
     @field_validator("timeout_seconds")
     @classmethod
     def timeout_fits_the_hook_timeout(cls, value: int) -> int:
-        """Reject a relay wait that could outlast the hook (Plan 00466 N126 F3).
+        """Cap a relay wait that could outlast the hook (Plan 00466 N126 F3).
 
         A failed PreToolUse exchange is handed to the forwarder after the
         relay's wait, and Claude Code cancels the hook at its registered
-        timeout, which lets the tool call run unjudged.
+        timeout, which lets the tool call run unjudged. A larger value is
+        lowered to the cap with a warning rather than refused (round 3): a
+        daemon that will not start denies every PreToolUse call, the Edit
+        that would fix the config included, and a value the previous release
+        accepted must not lock a session out. The cap keeps the invariant
+        either way. The upgrade advisory reports the value before it bites.
         """
         if value > Timeout.RELAY_TIMEOUT_CAP:
-            raise ValueError(
-                f"timeout_seconds={value} is too long: it must be at most "
-                f"{Timeout.RELAY_TIMEOUT_CAP}. The relay waits this long for the daemon, "
-                f"then may take up to {Timeout.RELAY_HANDOFF_BUDGET}s handing a failed "
-                f"PreToolUse call to the forwarder, and {Timeout.RELAY_HOOK_TIMEOUT_MARGIN}s "
-                "is kept for start-up and the answer. Claude Code cancels the hook at the "
-                f"{Timeout.REGISTERED_HOOK_TIMEOUT}s hook timeout the daemon registers, and a "
-                "cancelled PreToolUse hook lets the call run unjudged."
+            logger.warning(
+                "daemon.transport.timeout_seconds=%d is too long; using %d. The relay "
+                "waits this long for the daemon, then may take up to %ds handing a failed "
+                "PreToolUse call to the forwarder, and %ds is kept for start-up and the "
+                "answer. Claude Code cancels the hook at the %ds hook timeout the daemon "
+                "registers, and a cancelled PreToolUse hook lets the call run unjudged. "
+                "To fix: set it to %d or less in .claude/hooks-daemon.yaml.",
+                value,
+                Timeout.RELAY_TIMEOUT_CAP,
+                Timeout.RELAY_HANDOFF_BUDGET,
+                Timeout.RELAY_HOOK_TIMEOUT_MARGIN,
+                Timeout.REGISTERED_HOOK_TIMEOUT,
+                Timeout.RELAY_TIMEOUT_CAP,
             )
+            return Timeout.RELAY_TIMEOUT_CAP
         return value
 
     @property

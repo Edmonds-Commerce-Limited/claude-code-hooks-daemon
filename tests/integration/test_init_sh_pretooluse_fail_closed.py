@@ -14,6 +14,7 @@ Unix-socket servers to pin the new behaviour end-to-end.
 
 from __future__ import annotations
 
+import errno
 import json
 import os
 import shutil
@@ -47,22 +48,30 @@ def project(tmp_path: Path) -> Path:
 
 
 def _make_project(root: Path) -> Path:
-    """A project at ``root`` with a copy of ``init.sh`` and both launchers."""
+    """A client project at ``root`` with a copy of ``init.sh`` and both launchers.
+
+    The daemon is installed under ``.claude/hooks-daemon``, so its launcher is
+    ``.claude/hooks-daemon/bin/hooks-daemon``. The root ``bin/hooks-daemon``
+    links to it, so both spellings the carve-out accepts run this install.
+    """
     (root / ".claude" / "hooks-daemon" / "untracked").mkdir(parents=True)
     shutil.copy(INIT_SH, root / ".claude" / "init.sh")
     subprocess.run(["git", "init", "-q", str(root)], check=True, capture_output=True)
     (root / ".claude" / "hooks-daemon.env").write_text(
         'HOOKS_DAEMON_ROOT_DIR="$PROJECT_PATH/.claude/hooks-daemon"\n'
     )
-    # The project's own launchers, in both spellings the carve-out accepts:
-    # the recovery carve-out only exempts a command that resolves to one.
-    for launcher in _RECOVERY_LAUNCHERS:
-        (root / launcher).parent.mkdir(parents=True, exist_ok=True)
-        (root / launcher).write_text("#!/bin/bash\n")
+    installs_launcher = root / _INSTALL_LAUNCHER
+    installs_launcher.parent.mkdir(parents=True)
+    installs_launcher.write_text("#!/bin/bash\n")
+    (root / _ROOT_LAUNCHER).parent.mkdir()
+    (root / _ROOT_LAUNCHER).symlink_to(installs_launcher)
     return root
 
 
-_RECOVERY_LAUNCHERS = ("bin/hooks-daemon", ".claude/hooks-daemon/bin/hooks-daemon")
+_INSTALL_LAUNCHER = ".claude/hooks-daemon/bin/hooks-daemon"
+_ROOT_LAUNCHER = "bin/hooks-daemon"
+#: In ``cli.py``'s order: the daemon clone's launcher first.
+_RECOVERY_LAUNCHERS = (_INSTALL_LAUNCHER, _ROOT_LAUNCHER)
 
 
 def _recovery_input(
@@ -854,13 +863,13 @@ class TestARelayHandOffIsJudgedWithoutAskingTheDaemonAgain:
 def _run_script(
     project: Path,
     script: str,
-    hook_input: dict[str, Any] | None,
+    hook_input: dict[str, Any] | str | None,
     *,
     socket_path: Path,
     relay_failure: str | None = None,
     extra_env: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
-    """Run ``script`` in ``project`` with ``hook_input`` on stdin."""
+    """Run ``script`` in ``project`` with ``hook_input`` on stdin (a string as it is)."""
     env = {
         k: v for k, v in os.environ.items() if not k.startswith(("CLAUDE_HOOKS_", "HOOKS_DAEMON_"))
     }
@@ -877,12 +886,20 @@ def _run_script(
         [BASH, "-c", script],
         cwd=project,
         env=env,
-        input=json.dumps(hook_input) if hook_input is not None else "",
+        input=_stdin_text(hook_input),
         capture_output=True,
         text=True,
         timeout=Timeout.REQUEST_LONG,
         check=False,
     )
+
+
+def _stdin_text(hook_input: dict[str, Any] | str | None) -> str:
+    if hook_input is None:
+        return ""
+    if isinstance(hook_input, str):
+        return hook_input
+    return json.dumps(hook_input)
 
 
 def _verdict(result: subprocess.CompletedProcess[str]) -> str:
@@ -1008,21 +1025,21 @@ class TestTheAbsoluteLauncherIsExemptFromAnyDirectory:
         assert _verdict(unquoted_result) == "deny"
         assert _verdict(quoted_result) == "no-decision"
         context = json.loads(unquoted_result.stdout)["hookSpecificOutput"]["additionalContext"]
-        assert f"'{launcher}' restart" in context, context
+        assert f"'{spaced / _INSTALL_LAUNCHER}' restart" in context, context
 
     def test_the_transport_deny_names_the_absolute_command(
         self, project: Path, nonexistent_socket: Path
     ) -> None:
         response = _send(project, nonexistent_socket, "PreToolUse", _BASH_TOOL_INPUT)
         context = response["hookSpecificOutput"]["additionalContext"]
-        assert f"{project / 'bin' / 'hooks-daemon'} restart" in context, context
+        assert f"{project / _INSTALL_LAUNCHER} restart" in context, context
 
     def test_the_timeout_deny_names_the_absolute_command(
         self, project: Path, hanging_socket: Path
     ) -> None:
         response = _send(project, hanging_socket, "PreToolUse", _BASH_TOOL_INPUT)
         context = response["hookSpecificOutput"]["additionalContext"]
-        assert f"{project / 'bin' / 'hooks-daemon'} restart" in context, context
+        assert f"{project / _INSTALL_LAUNCHER} restart" in context, context
 
     def test_the_startup_failure_deny_names_the_absolute_command(
         self, project: Path, nonexistent_socket: Path
@@ -1035,7 +1052,7 @@ class TestTheAbsoluteLauncherIsExemptFromAnyDirectory:
         )
         assert _verdict(result) == "deny"
         reason = json.loads(result.stdout)["hookSpecificOutput"]["permissionDecisionReason"]
-        assert f"{project / 'bin' / 'hooks-daemon'} restart" in reason, reason
+        assert f"{project / _INSTALL_LAUNCHER} restart" in reason, reason
 
     def test_a_client_project_names_its_only_launcher(
         self, project: Path, nonexistent_socket: Path
@@ -1046,6 +1063,107 @@ class TestTheAbsoluteLauncherIsExemptFromAnyDirectory:
         context = response["hookSpecificOutput"]["additionalContext"]
         long_form = project / ".claude" / "hooks-daemon" / "bin" / "hooks-daemon"
         assert f"{long_form} restart" in context, context
+
+
+def _plant_unrelated_root_launcher(project: Path) -> Path:
+    """Replace the root ``bin/hooks-daemon`` link with a script of the project's own."""
+    unrelated = project / _ROOT_LAUNCHER
+    unrelated.unlink()
+    unrelated.write_text("#!/bin/bash\necho the project's own tool\n")
+    return unrelated
+
+
+def _make_self_install(root: Path) -> Path:
+    """The daemon's own repository: the install IS the project root.
+
+    ``bin/hooks-daemon`` is the launcher, and the clone-path spelling links
+    to it, as this repository's own checkout does.
+    """
+    project = _make_project(root)
+    (project / ".claude" / "hooks-daemon.env").write_text('HOOKS_DAEMON_ROOT_DIR="$PROJECT_PATH"\n')
+    (project / _ROOT_LAUNCHER).unlink()
+    (project / _INSTALL_LAUNCHER).rename(project / _ROOT_LAUNCHER)
+    (project / _INSTALL_LAUNCHER).symlink_to(project / _ROOT_LAUNCHER)
+    return project
+
+
+class TestOnlyThisInstallsLauncherIsExempt:
+    """Plan 00466 round 3 (m-A): the carve-out exempts the launcher that runs
+    THIS daemon install, and every deny names it first, in ``cli.py``'s order
+    (the clone's ``.claude/hooks-daemon/bin/hooks-daemon``, then the root
+    ``bin/hooks-daemon``). A client project's own unrelated
+    ``bin/hooks-daemon`` was exempt and was the command every deny named."""
+
+    @pytest.mark.parametrize("absolute", [False, True])
+    def test_an_unrelated_root_launcher_is_denied(
+        self, project: Path, nonexistent_socket: Path, absolute: bool
+    ) -> None:
+        unrelated = _plant_unrelated_root_launcher(project)
+        command = f"{unrelated} restart" if absolute else f"{_ROOT_LAUNCHER} restart"
+        hook_input = _recovery_input(project, command)
+        assert _denied(_send(project, nonexistent_socket, "PreToolUse", hook_input))
+
+    def test_an_unrelated_root_launcher_is_denied_on_a_hand_off(
+        self, project: Path, valid_empty_socket: Path
+    ) -> None:
+        _plant_unrelated_root_launcher(project)
+        response = _send(
+            project,
+            valid_empty_socket,
+            "PreToolUse",
+            _recovery_input(project),
+            relay_failure=_RELAY_FAILURE,
+        )
+        assert _denied(response)
+
+    def test_the_installs_launcher_is_still_exempt_beside_it(
+        self, project: Path, nonexistent_socket: Path
+    ) -> None:
+        _plant_unrelated_root_launcher(project)
+        hook_input = _recovery_input(project, f"{_INSTALL_LAUNCHER} restart")
+        assert not _denied(_send(project, nonexistent_socket, "PreToolUse", hook_input))
+
+    def test_the_deny_names_the_installs_launcher_not_the_unrelated_one(
+        self, project: Path, nonexistent_socket: Path
+    ) -> None:
+        unrelated = _plant_unrelated_root_launcher(project)
+        response = _send(project, nonexistent_socket, "PreToolUse", _BASH_TOOL_INPUT)
+        context = response["hookSpecificOutput"]["additionalContext"]
+        assert f"{project / _INSTALL_LAUNCHER} restart" in context, context
+        assert f"{unrelated} restart" not in context, context
+
+    def test_the_startup_deny_never_names_an_unrelated_launcher(
+        self, project: Path, nonexistent_socket: Path
+    ) -> None:
+        """With the clone's launcher gone, the deny names where this install's
+        launcher belongs, never the project's own script."""
+        unrelated = _plant_unrelated_root_launcher(project)
+        (project / _INSTALL_LAUNCHER).unlink()
+        result = _run_script(
+            project,
+            "source .claude/init.sh; emit_hook_error PreToolUse daemon_startup_failed x",
+            _BASH_TOOL_INPUT,
+            socket_path=nonexistent_socket,
+        )
+        reason = json.loads(result.stdout)["hookSpecificOutput"]["permissionDecisionReason"]
+        assert f"{project / _INSTALL_LAUNCHER} restart" in reason, reason
+        assert f"{unrelated} restart" not in reason, reason
+
+    @pytest.mark.parametrize("launcher", _RECOVERY_LAUNCHERS)
+    def test_a_self_install_exempts_both_spellings(
+        self, tmp_path: Path, nonexistent_socket: Path, launcher: str
+    ) -> None:
+        project = _make_self_install(tmp_path / "self")
+        hook_input = _recovery_input(project, f"{launcher} restart")
+        assert not _denied(_send(project, nonexistent_socket, "PreToolUse", hook_input))
+
+    def test_a_self_install_names_the_clone_spelling_first(
+        self, tmp_path: Path, nonexistent_socket: Path
+    ) -> None:
+        project = _make_self_install(tmp_path / "self")
+        response = _send(project, nonexistent_socket, "PreToolUse", _BASH_TOOL_INPUT)
+        context = response["hookSpecificOutput"]["additionalContext"]
+        assert f"{project / _INSTALL_LAUNCHER} restart" in context, context
 
 
 #: The real PreToolUse forwarder's body after it sources ``init.sh``.
@@ -1273,11 +1391,180 @@ class TestIsDaemonRunningRemovesOnlyItsOwnStalePidFile:
         pid_path.write_text(str(self._UNREAL_PID))
         successor = str(os.getpid())
         # Shadows the builtin for signal 0 only: the probe of the stale pid
-        # is where a successor's write lands.
+        # is where a successor's write lands. The stale pid really is gone,
+        # so the failure is the one the builtin reports for it.
         prelude = (
             'kill() { if [[ "$1" == "-0" ]]; then '
-            f'printf %s {successor} > "$PID_PATH"; return 1; fi; builtin kill "$@"; }}'
+            f'printf %s {successor} > "$PID_PATH"; '
+            f'{_kill_failure_message(errno.ESRCH)} return 1; fi; builtin kill "$@"; }}'
         )
         result = self._probe(project, pid_path, nonexistent_socket, prelude)
         assert "rc=1" in result.stdout, result.stderr
         assert pid_path.read_text() == successor
+
+    def test_a_pid_it_may_not_signal_is_alive_and_keeps_its_file(
+        self, project: Path, tmp_path: Path, nonexistent_socket: Path
+    ) -> None:
+        """Plan 00466 N139: ``kill -0`` on another user's process fails with
+        EPERM. The process exists, so the daemon is not provably down and the
+        PID file is not stale. Root may signal anything, so the builtin is
+        shadowed with the failure it reports for EPERM."""
+        pid_path = tmp_path / "daemon.pid"
+        pid_path.write_text(str(self._UNREAL_PID))
+        prelude = (
+            'kill() { if [[ "$1" == "-0" ]]; then '
+            f'{_kill_failure_message(errno.EPERM)} return 1; fi; builtin kill "$@"; }}'
+        )
+        result = self._probe(project, pid_path, nonexistent_socket, prelude)
+        assert "rc=0" in result.stdout, result.stderr
+        assert pid_path.read_text() == str(self._UNREAL_PID)
+
+    def test_a_pid_file_that_names_no_pid_is_removed(
+        self, project: Path, tmp_path: Path, nonexistent_socket: Path
+    ) -> None:
+        """Only a failure the builtin attributes to a live process counts as
+        alive: text that is not a pid names no process at all."""
+        pid_path = tmp_path / "daemon.pid"
+        pid_path.write_text("not-a-pid")
+        result = self._probe(project, pid_path, nonexistent_socket)
+        assert "rc=1" in result.stdout, result.stderr
+        assert not pid_path.exists()
+
+
+def _kill_failure_message(error: int) -> str:
+    """The shell statement printing the builtin's own failure for ``error``,
+    ``bash: kill: (<pid>) - <strerror>``, for a ``kill -0 <pid>`` shadow."""
+    return f'printf "bash: kill: (%s) - %s\\n" "$2" "{os.strerror(error)}" >&2;'
+
+
+#: Deeper than CPython's json parser recurses (Plan 00466 N140).
+_TOO_DEEP = 1000
+
+
+def _nested_call(depth: int) -> str:
+    """An MCP-shaped PreToolUse input whose tool_input nests ``depth`` lists."""
+    return (
+        '{"tool_name": "mcp__deep__tool", "tool_input": {"value": '
+        + "[" * depth
+        + "]" * depth
+        + "}}"
+    )
+
+
+_TRANSPORT = "source .claude/init.sh; send_request_stdin PreToolUse"
+
+
+class TestInputThatCannotBeParsedIsDenied:
+    """Plan 00466 N140: PreToolUse input the forwarder cannot parse was
+    answered with context only, which allows the call. JSON nested about
+    1000 deep raises RecursionError in ``json.loads``; a little shallower,
+    it parses and the request envelope's ``json.dumps`` raised outside any
+    handler, so the forwarder wrote nothing. Either way no guard judged the
+    call, so it is denied with a reason that says so."""
+
+    def test_deep_nesting_is_denied_on_the_plain_forwarder(
+        self, project: Path, valid_deny_socket: Path
+    ) -> None:
+        result = _run_script(
+            project, _TRANSPORT, _nested_call(_TOO_DEEP), socket_path=valid_deny_socket
+        )
+        assert _verdict(result) == "deny"
+        reason = json.loads(result.stdout)["hookSpecificOutput"]["permissionDecisionReason"]
+        assert "invalid_hook_input" in reason, reason
+        assert "could not be parsed" in reason, reason
+
+    def test_deep_nesting_is_denied_on_a_relay_hand_off(
+        self, project: Path, valid_empty_socket: Path
+    ) -> None:
+        result = _run_script(
+            project,
+            _TRANSPORT,
+            _nested_call(_TOO_DEEP),
+            socket_path=valid_empty_socket,
+            relay_failure=_RELAY_FAILURE,
+        )
+        assert _verdict(result) == "deny"
+
+    def test_every_depth_near_the_limit_gets_a_verdict(
+        self, project: Path, valid_deny_socket: Path
+    ) -> None:
+        """Parsed and forwarded, the daemon's deny comes back; not parsed or
+        not wrapped, the transport's own. Never no answer at all."""
+        for depth in range(_TOO_DEEP - 20, _TOO_DEEP + 1):
+            result = _run_script(
+                project, _TRANSPORT, _nested_call(depth), socket_path=valid_deny_socket
+            )
+            assert result.stdout.strip(), f"depth {depth}: no answer; stderr: {result.stderr}"
+            assert _verdict(result) == "deny", depth
+
+    def test_text_that_is_not_json_is_denied(self, project: Path, valid_empty_socket: Path) -> None:
+        result = _run_script(project, _TRANSPORT, "{not json", socket_path=valid_empty_socket)
+        assert _verdict(result) == "deny"
+
+    def test_bytes_that_are_not_utf8_are_denied(
+        self, project: Path, valid_empty_socket: Path
+    ) -> None:
+        script = "source .claude/init.sh; printf '\\xff\\xfe{}' | send_request_stdin PreToolUse"
+        result = _run_script(project, script, None, socket_path=valid_empty_socket)
+        assert _verdict(result) == "deny"
+
+    def test_another_event_still_fails_open(self, project: Path, valid_empty_socket: Path) -> None:
+        script = "source .claude/init.sh; send_request_stdin PostToolUse"
+        result = _run_script(
+            project, script, _nested_call(_TOO_DEEP), socket_path=valid_empty_socket
+        )
+        assert _verdict(result) == "no-decision"
+
+
+def _path_without_python3(tmp_path: Path, *, with_jq: bool) -> str:
+    """A PATH holding no python3; with ``jq`` when asked and the host has it."""
+    bin_dir = tmp_path / ("bin-jq" if with_jq else "bin-bare")
+    bin_dir.mkdir()
+    jq = shutil.which("jq")
+    if with_jq and jq is not None:
+        (bin_dir / "jq").symlink_to(jq)
+    return str(bin_dir)
+
+
+class TestADenyNeedsNoPython3:
+    """Plan 00466 round 3 (R2-1): the deny names its recovery command by
+    running python3 in a command substitution. Under ``set -e`` a missing
+    python3 ended the forwarder there with no JSON, which Claude Code treats
+    as a non-blocking hook error: the call ran. The transport itself is
+    python3 too. Without it, both still deny."""
+
+    @pytest.mark.parametrize("with_jq", [True, False])
+    def test_the_daemon_down_deny_survives(
+        self, project: Path, tmp_path: Path, nonexistent_socket: Path, with_jq: bool
+    ) -> None:
+        script = (
+            "set -euo pipefail\nsource .claude/init.sh\n"
+            f"PATH={_path_without_python3(tmp_path, with_jq=with_jq)}\n"
+            "emit_hook_error PreToolUse daemon_startup_failed x\n"
+        )
+        result = _run_script(project, script, _BASH_TOOL_INPUT, socket_path=nonexistent_socket)
+        assert _verdict(result) == "deny", result.stderr
+        reason = json.loads(result.stdout)["hookSpecificOutput"]["permissionDecisionReason"]
+        assert "python3" in reason, reason
+
+    def test_the_transport_deny_survives(
+        self, project: Path, tmp_path: Path, valid_empty_socket: Path
+    ) -> None:
+        script = (
+            "set -euo pipefail\nsource .claude/init.sh\n"
+            f"PATH={_path_without_python3(tmp_path, with_jq=True)}\n"
+            "send_request_stdin PreToolUse\n"
+        )
+        result = _run_script(project, script, _BASH_TOOL_INPUT, socket_path=valid_empty_socket)
+        assert _verdict(result) == "deny", result.stderr
+
+    def test_another_event_is_not_turned_into_a_deny(
+        self, project: Path, tmp_path: Path, valid_empty_socket: Path
+    ) -> None:
+        script = (
+            "source .claude/init.sh\n"
+            f"PATH={_path_without_python3(tmp_path, with_jq=True)}\n"
+            "send_request_stdin PostToolUse\n"
+        )
+        result = _run_script(project, script, _BASH_TOOL_INPUT, socket_path=valid_empty_socket)
+        assert result.stdout == "", result.stdout

@@ -144,6 +144,18 @@ def _write_launcher(directory: Path) -> None:
     launcher.write_text("#!/bin/bash\n")
 
 
+def _write_installs_launcher(project: Path) -> None:
+    """The daemon install's own launcher, and a root ``bin/hooks-daemon`` link to it.
+
+    The carve-out exempts only a launcher that runs this install (Plan 00466
+    round 3, m-A); a project's own unrelated ``bin/hooks-daemon`` is denied.
+    """
+    installs = project / ".claude" / "hooks-daemon"
+    _write_launcher(installs)
+    (project / "bin").mkdir()
+    (project / "bin" / "hooks-daemon").symlink_to(installs / "bin" / "hooks-daemon")
+
+
 def _recovery_input(cwd: Path) -> dict[str, Any]:
     """The exact recovery command, run by a Bash tool standing in ``cwd``."""
     return {
@@ -295,7 +307,7 @@ class TestNonCIDaemonFailure:
         """The exact recovery command must never be blocked by the deny above."""
         project = _create_project_structure(tmp_path, ci_enabled=None)
         _create_installed_stub(project)
-        _write_launcher(project)
+        _write_installs_launcher(project)
         result = _run_hook_via_forwarder("pre-tool-use", _recovery_input(project), project)
 
         assert result.returncode == 0
@@ -312,7 +324,7 @@ class TestNonCIDaemonFailure:
         impostor ``bin/hooks-daemon`` is denied like any other call."""
         project = _create_project_structure(tmp_path, ci_enabled=None)
         _create_installed_stub(project)
-        _write_launcher(project)
+        _write_installs_launcher(project)
         elsewhere = tmp_path / "elsewhere"
         _write_launcher(elsewhere)
         result = _run_hook_via_forwarder("pre-tool-use", _recovery_input(elsewhere), project)

@@ -17,10 +17,15 @@ hand-off can only end in that exemption or a deny:
   the forwarder, and denies anything else itself;
 - it has its own 10-second deadline, after which the relay denies.
 
-The relay's own deny now names the project's launcher by absolute path.
+The relay's own deny now names the daemon's launcher by absolute path, the
+daemon clone's `.claude/hooks-daemon/bin/hooks-daemon` first. A project's own
+unrelated `bin/hooks-daemon` is never exempt and never named: the exemption
+covers only a launcher that runs this daemon install.
 
-`transport.timeout_seconds` is now capped at 45. The relay's wait, the
+`daemon.transport.timeout_seconds` is now capped at 45. The relay's wait, the
 10-second hand-off and a 5-second margin must end before the 60-second hook
 timeout the daemon registers, because Claude Code lets a `PreToolUse` call
-run unjudged when its hook times out. A config above the cap is rejected
-with that reason. Rebuild or redeploy the relay binary to pick this up.
+run unjudged when its hook times out. A larger value does not stop the
+daemon starting: it runs with 45 and logs a warning naming the key, the cap
+and the fix, and the upgrade's config advisory reports it first. Rebuild or
+redeploy the relay binary to pick this up.

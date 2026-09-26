@@ -1,5 +1,6 @@
 """Tests for ``TransportConfig`` (Plan 00290, Task 2.1)."""
 
+import logging
 import re
 from pathlib import Path
 
@@ -123,13 +124,45 @@ class TestTheRelayTimeoutFitsTheHookTimeout:
         transport = TransportConfig(timeout_seconds=Timeout.RELAY_TIMEOUT_CAP)
         assert transport.timeout_seconds == Timeout.RELAY_TIMEOUT_CAP
 
-    def test_a_timeout_over_the_cap_is_rejected_and_says_why(self) -> None:
-        with pytest.raises(ValidationError) as excinfo:
-            TransportConfig.model_validate({"timeout_seconds": Timeout.RELAY_TIMEOUT_CAP + 1})
-        message = str(excinfo.value)
-        assert f"at most {Timeout.RELAY_TIMEOUT_CAP}" in message, message
+    def test_a_timeout_over_the_cap_takes_the_cap_and_warns_why(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Plan 00466 round 3: a value the last release accepted must not
+        stop the daemon starting. With no daemon, every PreToolUse call is
+        denied, the Edit that would fix the config among them, and neither
+        restart nor repair can help: a lockout only a human can clear. The
+        cap keeps the relay inside the hook timeout either way, so the value
+        is lowered to it, loudly."""
+        over = Timeout.RELAY_TIMEOUT_CAP + 1
+        with caplog.at_level(logging.WARNING, logger="claude_code_hooks_daemon.config.models"):
+            transport = TransportConfig.model_validate({"timeout_seconds": over})
+        assert transport.timeout_seconds == Timeout.RELAY_TIMEOUT_CAP
+        warnings = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
+        assert len(warnings) == 1, warnings
+        message = warnings[0]
+        assert "daemon.transport.timeout_seconds" in message, message
+        assert f"={over}" in message, message
+        assert f"using {Timeout.RELAY_TIMEOUT_CAP}" in message, message
         assert f"{Timeout.REGISTERED_HOOK_TIMEOUT}s hook timeout" in message, message
         assert "unjudged" in message, message
+        assert f"set it to {Timeout.RELAY_TIMEOUT_CAP} or less" in message, message
+
+    def test_a_whole_config_over_the_cap_still_loads(self) -> None:
+        config = Config.model_validate(
+            {
+                "version": "1.0",
+                "daemon": {"transport": {"timeout_seconds": Timeout.RELAY_TIMEOUT_CAP * 2}},
+            }
+        )
+        assert config.daemon.transport.timeout_seconds == Timeout.RELAY_TIMEOUT_CAP
+
+    def test_a_timeout_within_the_cap_is_kept_silently(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        with caplog.at_level(logging.WARNING, logger="claude_code_hooks_daemon.config.models"):
+            transport = TransportConfig(timeout_seconds=Timeout.RELAY_TIMEOUT_CAP - 1)
+        assert transport.timeout_seconds == Timeout.RELAY_TIMEOUT_CAP - 1
+        assert not [r for r in caplog.records if r.levelno >= logging.WARNING]
 
 
 class TestRelaySource:

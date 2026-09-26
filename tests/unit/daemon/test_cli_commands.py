@@ -10,6 +10,7 @@ Focused tests covering critical CLI paths including:
 
 import argparse
 import errno
+import fcntl
 import json
 import os
 import shutil
@@ -18,15 +19,16 @@ import socket
 import subprocess
 import sys
 import tempfile
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, call, patch
 
 import pytest
 
 from claude_code_hooks_daemon.constants import Timeout
 from claude_code_hooks_daemon.core.project_context import ProjectContext
+from claude_code_hooks_daemon.daemon import paths, server
 from claude_code_hooks_daemon.daemon.cli import (
     cmd_config,
     cmd_init_config,
@@ -72,6 +74,21 @@ def reset_project_context() -> None:
 # longer intercepts that path -- a hardcoded pid that happened to be live on
 # the host got a REAL SIGTERM and SIGKILL, the N59 crash class).
 _UNREAL_PID = 2**22 + 7
+
+#: The module whose names ``cmd_stop`` calls, for ``patch``.
+_CLI = "claude_code_hooks_daemon.daemon.cli"
+
+
+def _close_all_but(pinned_fd: int) -> Callable[[int], None]:
+    """``os.close`` for a test that pins a fake pidfd: every real descriptor
+    (the start lock ``cmd_stop`` takes) is closed, the fake one is not."""
+    real_close = os.close
+
+    def close(fd: int) -> None:
+        if fd != pinned_fd:
+            real_close(fd)
+
+    return close
 
 
 @pytest.fixture
@@ -766,7 +783,7 @@ class TestCmdStopSignalsThroughPidfdWhenAvailable:
         with (
             patch("claude_code_hooks_daemon.daemon.cli.read_pid_file", return_value=_UNREAL_PID),
             patch("os.pidfd_open", return_value=_SENTINEL_FD) as mock_pidfd_open,
-            patch("os.close") as mock_close,
+            patch("os.close", side_effect=_close_all_but(_SENTINEL_FD)) as mock_close,
             patch("signal.pidfd_send_signal", side_effect=record_pidfd_signal),
             patch("os.kill", side_effect=record_bare_kill),
             patch(
@@ -784,7 +801,7 @@ class TestCmdStopSignalsThroughPidfdWhenAvailable:
         assert bare_kill_calls == [], f"signalled by bare pid number: {bare_kill_calls}"
         mock_cleanup_pid.assert_called_once()
         mock_cleanup_sock.assert_called_once()
-        mock_close.assert_called_once_with(_SENTINEL_FD)
+        assert mock_close.call_args_list.count(call(_SENTINEL_FD)) == 1
 
     def test_sigkill_escalation_also_goes_through_the_same_pidfd(self, tmp_path: Path) -> None:
         """The SIGKILL escalation path reuses the SAME pidfd opened up front --
@@ -804,7 +821,7 @@ class TestCmdStopSignalsThroughPidfdWhenAvailable:
         with (
             patch("claude_code_hooks_daemon.daemon.cli.read_pid_file", return_value=_UNREAL_PID),
             patch("os.pidfd_open", return_value=_SENTINEL_FD),
-            patch("os.close") as mock_close,
+            patch("os.close", side_effect=_close_all_but(_SENTINEL_FD)) as mock_close,
             patch("signal.pidfd_send_signal", side_effect=record_pidfd_signal),
             patch("os.kill", side_effect=AssertionError("must not signal by bare pid number")),
             patch(
@@ -820,7 +837,7 @@ class TestCmdStopSignalsThroughPidfdWhenAvailable:
         assert result == 0
         assert signal.SIGTERM in pidfd_signals
         assert signal.SIGKILL in pidfd_signals
-        mock_close.assert_called_once_with(_SENTINEL_FD)
+        assert mock_close.call_args_list.count(call(_SENTINEL_FD)) == 1
 
     def test_open_pidfd_reports_a_gone_pid_instead_of_falling_back(self) -> None:
         """Plan 00466 N70: ESRCH means the process is not running, which
@@ -1052,6 +1069,78 @@ class TestCmdStopCleansUpOnlyWhatItStillOwns:
             assert socket_path.exists()
         finally:
             successor.close()
+
+    @staticmethod
+    def _stale_files(short_dir: Path) -> tuple[Path, Path]:
+        """A dead daemon's PID file and its bound, never-listening socket."""
+        pid_path = short_dir / "daemon.pid"
+        pid_path.write_text(str(_UNREAL_PID))
+        socket_path = short_dir / "daemon.sock"
+        orphan = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        orphan.bind(str(socket_path))
+        orphan.close()
+        return pid_path, socket_path
+
+    @staticmethod
+    def _start_lock(socket_path: Path) -> int:
+        """An fd open on the start lock a daemon start takes (``server.py``)."""
+        return os.open(str(socket_path) + ".start.lock", os.O_RDWR | os.O_CREAT, 0o600)
+
+    def test_the_probe_and_both_removals_hold_the_start_lock(
+        self, tmp_path: Path, short_dir: Path
+    ) -> None:
+        """Plan 00466 round 3 (m-B): a starting daemon holds the start lock
+        across its own probe, unlink and bind. A stop probing between that
+        unlink and bind found no socket, then removed the one just bound."""
+        pid_path, socket_path = self._stale_files(short_dir)
+        seen: dict[str, bool] = {}
+
+        def lock_is_held() -> bool:
+            fd = self._start_lock(socket_path)
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                return True
+            finally:
+                os.close(fd)
+            return False
+
+        def recording(name: str, real: Any) -> Any:
+            def record(*args: Any) -> Any:
+                seen[name] = lock_is_held()
+                return real(*args)
+
+            return record
+
+        with (
+            patch(f"{_CLI}.cleanup_pid_file", recording("pid", paths.cleanup_pid_file)),
+            patch(
+                f"{_CLI}._socket_liveness_sync", recording("probe", server._socket_liveness_sync)
+            ),
+            patch(f"{_CLI}.cleanup_socket", recording("socket", paths.cleanup_socket)),
+        ):
+            assert self._stop(tmp_path, pid_path, socket_path, lambda: None) == 0
+
+        assert seen == {"pid": True, "probe": True, "socket": True}
+        assert not pid_path.exists()
+        assert not socket_path.exists()
+
+    def test_a_start_that_keeps_the_lock_keeps_both_files(
+        self, tmp_path: Path, short_dir: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Whatever a start holding the lock is doing to these paths, it is
+        not provably done, so a stop that cannot take the lock removes
+        neither file."""
+        pid_path, socket_path = self._stale_files(short_dir)
+        monkeypatch.setattr(Timeout, "FILE_LOCK", 0)
+        holder = self._start_lock(socket_path)
+        fcntl.flock(holder, fcntl.LOCK_EX)
+        try:
+            assert self._stop(tmp_path, pid_path, socket_path, lambda: None) == 0
+        finally:
+            os.close(holder)
+        assert pid_path.exists()
+        assert socket_path.exists()
 
 
 class TestCmdConfig:

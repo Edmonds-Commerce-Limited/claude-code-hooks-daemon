@@ -85,8 +85,10 @@ from claude_code_hooks_daemon.daemon.permission_audit import (
 from claude_code_hooks_daemon.daemon.process_verification import daemon_process_project_root
 from claude_code_hooks_daemon.daemon.server import (
     DaemonAlreadyRunningError,
+    StartLockTimeout,
     _socket_liveness_sync,
     _SocketLiveness,
+    hold_start_lock,
 )
 from claude_code_hooks_daemon.daemon.validation import (
     check_for_nested_installation,
@@ -850,12 +852,22 @@ def _release_stopped_daemon_files(pid: int, pid_path: Path, socket_path: Path) -
     ``ensure_daemon``) writes its own pid and binds its own socket at the
     same paths (Plan 00466 round 2, S2). The PID file goes only while it
     still holds ``pid``; the socket only on a DEFINITIVE not-live probe.
+
+    Both happen under the start lock a successor holds across its own probe,
+    PID write, unlink and bind (round 3, m-B): outside it, a probe landing
+    between the successor's unlink and bind finds no socket and then removes
+    the one just bound. A lock still held when the wait runs out means a
+    start is part-way through these paths, so neither is touched.
     """
-    cleanup_pid_file(str(pid_path), pid)
-    if _socket_liveness_sync(Path(socket_path)) is _SocketLiveness.NOT_LIVE:
-        cleanup_socket(str(socket_path))
-    else:
-        logger.info("Socket %s is not provably dead; leaving it", socket_path)
+    try:
+        with hold_start_lock(Path(socket_path), Timeout.FILE_LOCK):
+            cleanup_pid_file(str(pid_path), pid)
+            if _socket_liveness_sync(Path(socket_path)) is _SocketLiveness.NOT_LIVE:
+                cleanup_socket(str(socket_path))
+            else:
+                logger.info("Socket %s is not provably dead; leaving it", socket_path)
+    except StartLockTimeout as exc:
+        logger.warning("A daemon start holds %s; leaving its PID file and socket", exc)
 
 
 def cmd_stop(args: argparse.Namespace) -> int:

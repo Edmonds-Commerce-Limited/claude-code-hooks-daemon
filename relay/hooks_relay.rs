@@ -102,9 +102,11 @@ const HANDOFF_POLL_MS: u64 = 10;
 /// Nesting bound for `JsonParser`: a verdict document is two levels deep.
 const JSON_MAX_DEPTH: usize = 32;
 
-/// The launcher spellings `init.sh`'s `_recovery_command` names, in its
-/// order: the first the project has is the one a deny prints.
-const RECOVERY_LAUNCHERS: [&str; 2] = ["bin/hooks-daemon", ".claude/hooks-daemon/bin/hooks-daemon"];
+/// The launcher spellings `init.sh`'s `_recovery_command` names, in the order
+/// `cli.py` resolves "the project's launcher": the daemon clone's first, so a
+/// client project's own unrelated `bin/hooks-daemon` is never the one a deny
+/// prints while the clone has its launcher (Plan 00466 round 3, m-A).
+const RECOVERY_LAUNCHERS: [&str; 2] = [".claude/hooks-daemon/bin/hooks-daemon", "bin/hooks-daemon"];
 
 struct Args {
     socket_path: String,

@@ -20,6 +20,7 @@ import shutil
 import signal
 import sys
 import time
+from collections.abc import Iterator
 from functools import partial
 from pathlib import Path
 from typing import Any, Final, Protocol, runtime_checkable
@@ -35,6 +36,7 @@ from claude_code_hooks_daemon.daemon.config import DaemonConfig
 from claude_code_hooks_daemon.daemon.memory_log_handler import MemoryLogHandler
 from claude_code_hooks_daemon.daemon.payload_capture import capture_payload, resolve_capture_dir
 from claude_code_hooks_daemon.utils import secret_file_matching as sfm
+from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command
 from claude_code_hooks_daemon.utils.log_elision import elide_record_arguments
 from claude_code_hooks_daemon.utils.scratch_dir import ensure_scratch_dir
 from claude_code_hooks_daemon.utils.secret_redaction import get_active_secret_terms, redact_text
@@ -121,13 +123,15 @@ _PRE_TOOL_USE_WIRE_KEY: Final[str] = "PreToolUse"
 #: real judged "allow, nothing to add" verdict to whatever reads it next (the
 #: relay, or a direct per-event-socket client). Neither the legacy socket
 #: (m5) nor the python transport (M1/N25) has ever fabricated that ambiguity;
-#: this closes the one remaining rung that did.
+#: this closes the one remaining rung that did. The restart it names follows
+#: in ``_pre_tool_use_transport_deny_response``: this install's launcher by
+#: absolute path, never a project-root ``bin/hooks-daemon`` that in a client
+#: project is the project's own (Plan 00466 round 3, m-A).
 _TRANSPORT_FAIL_CLOSED_REASON: Final[str] = (
     "BLOCKED [transport-fail-closed]: the daemon could not produce a verdict "
     "for this request (payload could not be read, or an internal error "
     "occurred mid-dispatch). Denying out of caution -- this does not mean "
     "the action itself is unsafe. If the daemon is wedged, run: "
-    "bin/hooks-daemon restart"
 )
 
 
@@ -168,7 +172,9 @@ def _pre_tool_use_transport_deny_response() -> dict[str, Any]:
         "hookSpecificOutput": {
             "hookEventName": _PRE_TOOL_USE_WIRE_KEY,
             "permissionDecision": "deny",
-            "permissionDecisionReason": _TRANSPORT_FAIL_CLOSED_REASON,
+            "permissionDecisionReason": (
+                _TRANSPORT_FAIL_CLOSED_REASON + daemon_cli_command("restart")
+            ),
         }
     }
 
@@ -296,6 +302,57 @@ _LOG_PROBE_INDETERMINATE = (
 # section atomic so near-simultaneous same-root starts cannot both observe a
 # socket as not-live and race to unlink a freshly-bound peer.
 _START_LOCK_SUFFIX = ".start.lock"
+# How often hold_start_lock retries a lock another process holds (seconds).
+_START_LOCK_POLL_SECONDS = 0.05
+
+
+class StartLockTimeout(RuntimeError):
+    """The start lock stayed held for the whole wait."""
+
+
+def start_lock_path(socket_path: Path) -> Path:
+    """Sibling lock-file path used to serialise concurrent same-root starts."""
+    return socket_path.with_name(socket_path.name + _START_LOCK_SUFFIX)
+
+
+def _open_start_lock(socket_path: Path) -> int:
+    """Open (creating) the start lock beside ``socket_path``; returns its fd."""
+    lock_path = start_lock_path(socket_path)
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    return os.open(str(lock_path), os.O_RDWR | os.O_CREAT, 0o600)
+
+
+@contextlib.contextmanager
+def hold_start_lock(socket_path: Path, timeout_seconds: float) -> Iterator[None]:
+    """Hold the start lock a daemon start holds across probe, unlink and bind.
+
+    For a caller outside the daemon that must not judge or remove the socket
+    or PID file while a start is part-way through them (Plan 00466 round 3,
+    m-B). Waits up to ``timeout_seconds`` for a holder to finish.
+
+    Raises:
+        StartLockTimeout: the lock was still held when the wait ran out.
+    """
+    lock_fd = _open_start_lock(socket_path)
+    try:
+        deadline = time.monotonic() + timeout_seconds
+        while True:
+            try:
+                fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except BlockingIOError:
+                if time.monotonic() >= deadline:
+                    raise StartLockTimeout(
+                        f"the start lock {start_lock_path(socket_path)} stayed held "
+                        f"for {timeout_seconds:g}s"
+                    ) from None
+                time.sleep(_START_LOCK_POLL_SECONDS)
+        try:
+            yield
+        finally:
+            fcntl.flock(lock_fd, fcntl.LOCK_UN)
+    finally:
+        os.close(lock_fd)
 
 
 class _SocketLiveness(enum.Enum):
@@ -893,7 +950,7 @@ class HooksDaemon:
     @staticmethod
     def _start_lock_path(socket_path: Path) -> Path:
         """Sibling lock-file path used to serialise concurrent same-root starts."""
-        return socket_path.with_name(socket_path.name + _START_LOCK_SUFFIX)
+        return start_lock_path(socket_path)
 
     async def _acquire_socket_and_bind(self, socket_path: Path | None) -> None:
         """Atomically reuse-or-acquire ``socket_path`` and bind the server.
@@ -920,8 +977,6 @@ class HooksDaemon:
             await self._bind_unix_server(socket_path)
             return
 
-        lock_path = self._start_lock_path(socket_path)
-        lock_path.parent.mkdir(parents=True, exist_ok=True)
         # Open (create) the lock file; the fd is held for the whole critical
         # section. flock is advisory but every daemon start takes the same lock,
         # so they serialise against each other.
@@ -931,7 +986,7 @@ class HooksDaemon:
         # the loser fails loudly (OSError -> exit 1) rather than silently
         # orphaning a daemon. The supported shared-untracked deployment is a
         # normal-disk bind mount (ext4) where flock works across PID namespaces.
-        lock_fd = os.open(str(lock_path), os.O_RDWR | os.O_CREAT, 0o600)
+        lock_fd = _open_start_lock(socket_path)
         try:
             # flock(LOCK_EX) is a BLOCKING syscall. Acquire it in a thread so a
             # competing in-process start (and, more importantly, the event loop
