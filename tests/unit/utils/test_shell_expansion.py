@@ -17,7 +17,7 @@ from __future__ import annotations
 import errno
 import os
 import time
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from pathlib import Path
 
 import pytest
@@ -29,6 +29,27 @@ from claude_code_hooks_daemon.utils.shell_expansion import (
     iter_brace_words,
     iter_normalised_shell_words,
 )
+from tests.scaling import SIZE_FACTOR, SUPERLINEAR_RATIO, scaling_ratio
+from tests.support.directory_reads import record_directory_reads
+
+
+def _assert_grows_linearly(
+    word_at: Callable[[int], str], expand: Callable[[str], object], small_n: int
+) -> None:
+    """``expand(word_at(8 * small_n))`` costs at most linearly more CPU than
+    ``expand(word_at(small_n))`` (00466 N199: a wall-clock bound failed under
+    host load while saying nothing about growth). A raise of
+    ``TooManyToEnumerateError`` is the expected fail-closed answer here and
+    counts as finishing."""
+
+    def work_at(size: int) -> None:
+        try:
+            expand(word_at(size))
+        except TooManyToEnumerateError:
+            return
+
+    ratio = scaling_ratio(work_at, small_n, word_at(SIZE_FACTOR * small_n))
+    assert ratio <= SUPERLINEAR_RATIO, f"cost grew {ratio:.0f}x for {SIZE_FACTOR}x input"
 
 
 class TestExpandBraces:
@@ -74,20 +95,28 @@ class TestExpandBraces:
     def test_exceeding_the_spelling_cap_is_fast(self) -> None:
         """B1-R3 (Plan 00466 review 3): the reviewer's exact blocker shape --
         `{a,b}` x 22 in one ~115-byte word -- must give up in well under 1s,
-        not the >45s the eager recursive expander took."""
-        word = "{a,b}" * 22
-        start = time.monotonic()
+        not the >45s the eager recursive expander took. Pinned by growth:
+        72 pairs against 9, both past the 256-spelling cap, where eager
+        expansion is 2**63 times the work. (Below the cap the spelling count
+        itself legitimately grows 2**n, so the smaller size must already be
+        past it.)"""
         with pytest.raises(TooManyToEnumerateError):
-            expand_braces(word, max_spellings=256)
-        assert time.monotonic() - start < 1.0
+            expand_braces("{a,b}" * 22, max_spellings=256)
+        _assert_grows_linearly(
+            lambda pairs: "{a,b}" * pairs,
+            lambda word: expand_braces(word, max_spellings=256),
+            9,
+        )
 
     def test_forty_repetitions_is_also_fast(self) -> None:
-        """The reviewer's third brace shape (x40)."""
-        word = "{a,b}" * 40
-        start = time.monotonic()
+        """The reviewer's third brace shape (x40): 40 pairs against 5."""
         with pytest.raises(TooManyToEnumerateError):
-            expand_braces(word, max_spellings=256)
-        assert time.monotonic() - start < 1.0
+            expand_braces("{a,b}" * 40, max_spellings=256)
+        _assert_grows_linearly(
+            lambda pairs: "{a,b}" * pairs,
+            lambda word: expand_braces(word, max_spellings=256),
+            40 // SIZE_FACTOR,
+        )
 
     def test_deeply_nested_group_exceeds_the_depth_cap_and_raises(self) -> None:
         """Own live finding (own RED test, not in the review report): a
@@ -99,11 +128,19 @@ class TestExpandBraces:
             expand_braces(word, max_spellings=100_000, max_depth=64)
 
     def test_deeply_nested_group_raise_is_fast(self) -> None:
-        word = "{a," * 2000 + "a" + "}" * 2000
-        start = time.monotonic()
+        """Depth 2000 against depth 250: the raise must not cost more than
+        linearly in the nesting (00466 N199)."""
+
+        def word_at(depth: int) -> str:
+            return "{a," * depth + "a" + "}" * depth
+
         with pytest.raises(TooManyToEnumerateError):
-            expand_braces(word, max_spellings=100_000, max_depth=64)
-        assert time.monotonic() - start < 1.0
+            expand_braces(word_at(2000), max_spellings=100_000, max_depth=64)
+        _assert_grows_linearly(
+            word_at,
+            lambda word: expand_braces(word, max_spellings=100_000, max_depth=64),
+            2000 // SIZE_FACTOR,
+        )
 
 
 class TestIterBraceWords:
@@ -134,11 +171,14 @@ class TestIterBraceWords:
         """B1-R3 / M-3 (Plan 00466 review): the 94 KB / 200 KB reproducer --
         a huge run of non-whitespace text carrying no brace at all -- must
         not trigger catastrophic backtracking (the abandoned
-        `\\S*\\{[^{}]*\\}\\S*` shape took 15s at 94 KB, >45s at 200 KB)."""
-        text = "a" * 200_000
-        start = time.monotonic()
-        assert list(iter_brace_words(text)) == []
-        assert time.monotonic() - start < 1.0
+        `\\S*\\{[^{}]*\\}\\S*` shape took 15s at 94 KB, >45s at 200 KB).
+        Pinned by growth, 200 KB against 25 KB (00466 N199)."""
+        assert list(iter_brace_words("a" * 200_000)) == []
+        _assert_grows_linearly(
+            lambda size: "a" * size,
+            lambda text: list(iter_brace_words(text)),
+            200_000 // SIZE_FACTOR,
+        )
 
 
 class TestBoundedRecursiveGlob:
@@ -155,11 +195,13 @@ class TestBoundedRecursiveGlob:
                 )
             )
 
-    def test_refusal_at_the_root_is_immediate(self) -> None:
-        start = time.monotonic()
+    def test_refusal_at_the_root_is_immediate(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Immediate means no directory is read at all (00466 N199: counted,
+        not timed)."""
+        reads = record_directory_reads(monkeypatch)
         with pytest.raises(TooManyToEnumerateError):
             list(bounded_recursive_glob(Path("/"), "**/*.se?ret-zq9x", max_entries_visited=100))
-        assert time.monotonic() - start < 1.0
+        assert reads == [], f"the refused walk read {reads[:5]}"
 
     def test_refuses_a_multi_wildcard_pattern_with_no_recursive_marker(self) -> None:
         """n466-n24 review 4, m-1: two or more wildcarded segments trip the
@@ -173,19 +215,21 @@ class TestBoundedRecursiveGlob:
                 )
             )
 
-    def test_root_refusal_with_recursive_marker_is_not_masked_by_a_huge_cap(self) -> None:
+    def test_root_refusal_with_recursive_marker_is_not_masked_by_a_huge_cap(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """The refusal must fire from the root check itself, not merely
         because `max_entries_visited` happens to be small -- raise the cap
         far past anything a real walk would hit and confirm it still
-        refuses immediately rather than attempting the walk."""
-        start = time.monotonic()
+        refuses without reading a single directory."""
+        reads = record_directory_reads(monkeypatch)
         with pytest.raises(TooManyToEnumerateError):
             list(
                 bounded_recursive_glob(
                     Path("/"), "**/*.se?ret-zq9x", max_entries_visited=10_000_000
                 )
             )
-        assert time.monotonic() - start < 1.0
+        assert reads == [], f"the refused walk read {reads[:5]}"
 
     def test_finds_a_real_match_under_a_small_tree(self, tmp_path: Path) -> None:
         target = tmp_path / "nested" / "dir"

@@ -2518,13 +2518,12 @@ class TestReview3Fixes(_ReassertionFixtures):
         assert len(owners) < 151, "plan ownership grew without bound across 150 reasserts"
 
     def test_refreshing_many_owners_renders_the_combined_text_once(
-        self, handler: GoalInjectionHandler
+        self, handler: GoalInjectionHandler, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """A5's timing half: refreshing N owners on a terminal write must
+        """A5's cost half: refreshing N owners on a terminal write must
         not re-derive the combined text (a full live-plan-dir scan) once
-        PER owner -- it should render once and write N times."""
-        import time as _time
-
+        PER owner -- it should render once and write N times. Counted, not
+        timed: a wall-clock bound here failed under host load (00466 N199)."""
         plan = self._plan_path("00296-first")
         plan.write_text(_plan_md("In Progress"), encoding="utf-8")
         handler.handle(
@@ -2534,17 +2533,44 @@ class TestReview3Fixes(_ReassertionFixtures):
         )
         for i in range(150):
             handler.handle(self._edit_input(plan, f"teammate-{i}", "- [ ] a", "- [x] a"))
+        # A second live plan, so the retirement below has a combined text to
+        # render and write to every owner. With no plan left live, the
+        # refresh only clears signals and renders nothing.
+        second = self._plan_path("00297-second")
+        second.write_text(_plan_md("In Progress"), encoding="utf-8")
+        handler.handle(
+            self._edit_input(
+                second, "sess-second", "**Status**: Not Started", "**Status**: In Progress"
+            )
+        )
 
         plan.write_text(_plan_md("Complete"), encoding="utf-8")
-        started = _time.monotonic()
+        scans: list[Path] = []
+        real_live_plan_refs = GoalLedger.live_plan_refs
+
+        def counting_live_plan_refs(self: GoalLedger, plan_dir: Path) -> Any:
+            scans.append(plan_dir)
+            return real_live_plan_refs(self, plan_dir)
+
+        monkeypatch.setattr(GoalLedger, "live_plan_refs", counting_live_plan_refs)
+        renders: list[int] = []
+        real_render = GoalInjectionHandler._render_combined
+
+        def counting_render(self: GoalInjectionHandler, refs: Any) -> Any:
+            renders.append(len(refs))
+            return real_render(self, refs)
+
+        monkeypatch.setattr(GoalInjectionHandler, "_render_combined", counting_render)
+        owners = GoalLedger(self._untracked / LEDGER_FILENAME).owning_sessions("00296")
         handler.handle(
             self._edit_input(
                 plan, "sess-original", "**Status**: In Progress", "**Status**: Complete"
             )
         )
-        elapsed = _time.monotonic() - started
 
-        assert elapsed < 0.1, f"retirement refresh took {elapsed:.3f}s for ~150 owners"
+        assert len(owners) > 1, "fixture premise: the plan has many owners to refresh"
+        assert renders == [1], f"combined text rendered {len(renders)} times, want once"
+        assert len(scans) == 1, f"{len(scans)} live-plan scans to refresh {len(owners)} owners"
 
     # ---- RV3-m8: a non-UTF-8 sibling plan must not crash a real dispatch -
 

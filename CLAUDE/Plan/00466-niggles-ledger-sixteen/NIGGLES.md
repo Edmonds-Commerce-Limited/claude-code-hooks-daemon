@@ -988,6 +988,68 @@ a staged-tree check for both spellings, raw and blockquoted, in tracked
 text. Both lines are removed on `worktree-n466-n110`, but that fixes the
 symptom only.
 
+### N199 — Tests assert absolute wall-clock bounds, so a loaded host fails them while they pass alone
+
+**Found by N110 gate fix 2, from N196 and team-lead's sweep request.** The
+two `test_enforce_llm_qa.py` failures (N196) were one case of a wider
+pattern. Main `fd4956813` fails `TestInteriorWildcardDpIsBounded` at load
+91 (n53-fix-7c), and the N101 branch saw 17 such unit failures at load 40,
+all of which pass alone. An absolute bound fails under load and says nothing
+about growth, which is what most of these tests exist to pin.
+
+**✅ Remedied on `worktree-n466-n110` for the performance-shaped tests.**
+Each now pins growth (thread CPU time at N against 8N, `tests/scaling.py`)
+or counts work. No bound was loosened.
+
+- `test_secret_file_matching.py`:
+  - Two wide-range tests count the code points `chr` builds (0).
+  - Three DP tests and the star-run test pin growth.
+  - The deadline test uses a fake clock, one tick per reading, and must
+    raise at the first reading past the deadline.
+  - The five brace and filesystem-walk tests pin growth, or count
+    directory reads (0 for a root-rooted glob), with a new
+    `tests/support/directory_reads.py`.
+  - The volume class measures thread CPU time instead of wall time.
+- `test_shell_segmentation_performance.py` (3) and
+  `test_shell_expansion.py` (4 growth tests, 2 directory-read counts).
+- `test_plan_number_helper.py` and `test_lsp_enforcement.py`: the
+  regex-linearity tests pin growth.
+- `test_goal_injection.py`: the owner-refresh test now counts live-plan
+  scans and renders (one each). As written it measured a path that renders
+  nothing: with no second live plan, a retirement only clears signals.
+- `test_handler_name_validation.py`: it counts package walks (one per event
+  type across three validations).
+- `test_venv_lock.py`: "released" is a non-blocking `flock` that succeeds,
+  not a timed second acquisition.
+
+RED on a mutated `git archive` copy of each file: a range that is built, a
+deadline never checked, a root glob that is walked, and a render per owner.
+Each one fails.
+
+**Still open: the remaining tests check that a timeout is honoured, or
+have no size to scale.**
+
+- A per-call budget: `tests/unit/core/test_input_schemas.py:586` (under 5
+  ms). `validate_input` builds a `Draft7Validator` on every call. Cache it
+  and count constructions.
+- Concurrency: `tests/daemon/test_server.py:390`. Replace the timing with a
+  `threading.Barrier` handler that only passes when all three requests are
+  in flight at once.
+- Bound honoured (wall time against a timeout): `test_init_sh_venv_self_heal.py:66`,
+  `test_relay_guard_fail_open.py:476`, `test_ensure_venv_lock.py:296`,
+  `test_resolve_venv_runnability_probe.py:149,278`,
+  `test_venv_bootstrap_driver.py:256,273,804`,
+  `test_venv_bootstrap_hostile_path_epoch.py:119,172`,
+  `test_paths_resolve_venv_diagnostics.py:1020` and
+  `test_venv_lock.py:203,241`. Their margins are wide, 3x to 20x the bound.
+  The deterministic form is an injected clock or an ordering check: the
+  hook returned while the build was still running.
+
+**Only on the N101 branch** (routed to team-lead): 13
+`test_secret_file_guard.py` tests hit the guard's own wall-clock scan
+deadline under load and fail closed. So a verdict that should be an allow
+depends on host load. That is a production concern, not only a test one.
+
 ### N105 — A skill redeploy leaves an untracked, unignored `.claude/hooks-daemon-backups/`
 
 **Found by upgrade review 11 (L9), confirmed by upgrade round 16a.**

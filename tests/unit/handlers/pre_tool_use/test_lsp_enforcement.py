@@ -1170,25 +1170,30 @@ class TestBashGrepPatternStaysLinear:
     run of whitespace, so a command with no eventual ``grep``/``rg`` makes
     the engine try every split point. Measured: 5k newlines 0.2s, 10k 0.78s,
     20k 2.84s -- quadratic. A 99 KB run froze a live daemon for 73.5s.
+    The cost at 20,000 newlines is compared with the cost at 2,500 (thread
+    CPU time, ``tests/scaling.py``), so host load cannot fail it (00466 N199).
     """
 
-    _MAX_SECONDS = 2.0
-
     def test_long_whitespace_run_does_not_blow_up(self) -> None:
-        import time
+        from tests.scaling import SIZE_FACTOR, SUPERLINEAR_RATIO, scaling_ratio
 
         from claude_code_hooks_daemon.handlers.pre_tool_use.lsp_enforcement import (
             LspEnforcementHandler,
         )
 
-        handler = LspEnforcementHandler()
-        command = "true" + "\n" * 20_000
-        hook_input = {"tool_name": "Bash", "tool_input": {"command": command}}
-        start = time.monotonic()
-        handler.matches(hook_input)
-        elapsed = time.monotonic() - start
-        assert elapsed < self._MAX_SECONDS, (
-            f"matches() took {elapsed:.2f}s on a 20,000-newline run "
-            f"(bound {self._MAX_SECONDS}s) -- _BASH_GREP_PATTERN is "
-            "quadratic again"
+        def command_at(size: int) -> str:
+            return "true" + "\n" * size
+
+        # A fresh handler per call, so no answer comes from an earlier call.
+        small_n = 20_000 // SIZE_FACTOR
+        ratio = scaling_ratio(
+            lambda size: LspEnforcementHandler().matches(
+                {"tool_name": "Bash", "tool_input": {"command": command_at(size)}}
+            ),
+            small_n,
+            command_at(SIZE_FACTOR * small_n),
+        )
+        assert ratio <= SUPERLINEAR_RATIO, (
+            f"matches() cost grew {ratio:.0f}x for {SIZE_FACTOR}x the newline run "
+            "-- _BASH_GREP_PATTERN is quadratic again"
         )
