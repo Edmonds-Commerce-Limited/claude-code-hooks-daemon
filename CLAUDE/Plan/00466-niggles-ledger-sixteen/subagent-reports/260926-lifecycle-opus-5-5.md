@@ -317,10 +317,8 @@ An over-cap `daemon.transport.timeout_seconds` now **starts the daemon with
 - It is reported before it bites. The upgrade advisory names the key, the
   value and 45. The daemon log warns at every load with the key, the cap, the
   reason and the fix. `HANDLER_REFERENCE.md` and note 153 say so.
-- The cost: the warning goes to the daemon log and to any CLI that validates
-  the config. It is not a SessionStart advisory. If the coordinator wants the
-  warning in front of the agent, the next step would be a health/SessionStart
-  line. I did not add one (YAGNI) without that call.
+- The coordinator accepted the clamp and asked for it at SessionStart too;
+  see "Round 3 follow-up" below.
 
 ### Other choices worth checking
 
@@ -378,3 +376,45 @@ An over-cap `daemon.transport.timeout_seconds` now **starts the daemon with
 - `bin/hooks-daemon restart` from the worktree: RUNNING, 31/31 per-event
   listeners.
 - Gate not queued, per the brief.
+
+### Round 3 follow-up: the clamp at SessionStart
+
+Coordinator ruling: keep the clamp, and show it at session start as well as
+in the log. No new handler was added. The existing config-problem advisory is
+`project_handler_load_checker`: it already names project handlers that failed
+to load and built-in handlers running on their defaults (N19,
+`_option_failures`). The clamp reaches it by the same injection idiom.
+
+- `TransportConfig` clamps in a `model_validator(mode="after")` and keeps
+  the configured value in a private attribute. `timeout_problem` is the one
+  text, used by both the log warning and the advisory.
+  `DaemonConfig.config_problems` collects such problems, currently only this
+  one.
+- `_build_initialised_controller` passes `config_problems` to
+  `DaemonController.initialise`. That logs them, reports them in `health` as
+  `config_problems` (not a degraded reason, since every guard is on), and
+  hands them to `register_all`. `register_all` injects them into any handler
+  that declares `_config_problems`.
+- The checker matches on them and adds a `⚠️ CONFIG VALUE NOT IN FORCE`
+  block. The block lists each problem with its fix, then gives the restart
+  and `health` commands. `verify_still_needed` is unchanged, so the tier
+  stays ACTION_SUGGESTED rather than ACTION_REQUIRED. `get_claude_md` covers
+  the new alert.
+
+RED (8 tests, run before the implementation, all failing):
+
+- `test_transport_config.py`: the clamp is kept as a problem; none within the
+  cap.
+- `test_cli_config_fingerprint_wiring.py`: the builder passes
+  `config_problems`.
+- `TestConfigProblemsReachSessionStart` in `test_controller.py`: a real
+  `initialise` → the SessionStart checker names it; `health` names it and
+  stays healthy; silent with none.
+- `TestConfigProblems` in `test_project_handler_load_checker.py`.
+
+All now pass. The wider unit suites (`tests/unit/config`, `tests/unit/daemon`,
+`tests/unit/handlers/session_start`, `tests/unit/install`, `tests/config`,
+`tests/daemon`) show 5304 passed. The integration tests that reference the
+checker also pass. ruff, black, mypy and pyright are clean. The daemon
+restarted RUNNING. `HANDLER_REFERENCE.md` and release note 153 now say it is
+reported at session start and in `health`.

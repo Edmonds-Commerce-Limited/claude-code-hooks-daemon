@@ -141,8 +141,10 @@ earlier successful exit, it never removes the safety net.
 seconds more. Both waits plus a 5-second margin must end before the
 60-second hook timeout the daemon registers, because Claude Code runs a
 `PreToolUse` call unjudged when its hook times out. A larger value does not
-take effect: the daemon starts with 45 and logs a warning that names the key,
-the cap and the fix. It does not refuse to start, because a daemon that is
+take effect: the daemon starts with 45, logs a warning that names the key,
+the cap and the fix, and repeats it at every session start
+(`project_handler_load_checker`'s `CONFIG VALUE NOT IN FORCE`) and in
+`health`. It does not refuse to start, because a daemon that is
 down denies every `PreToolUse` call, including the edit that would fix the
 config. `check-config-migrations` reports a larger value on upgrade.
 

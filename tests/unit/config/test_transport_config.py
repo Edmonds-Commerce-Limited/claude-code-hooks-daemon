@@ -147,6 +147,25 @@ class TestTheRelayTimeoutFitsTheHookTimeout:
         assert "unjudged" in message, message
         assert f"set it to {Timeout.RELAY_TIMEOUT_CAP} or less" in message, message
 
+    def test_the_clamp_is_kept_as_a_problem_to_report_at_session_start(self) -> None:
+        """A warning only in the daemon log goes unseen, so the model keeps
+        the same text for the daemon to hand to the SessionStart advisory."""
+        over = Timeout.RELAY_TIMEOUT_CAP + 1
+        problem = TransportConfig.model_validate({"timeout_seconds": over}).timeout_problem
+        assert problem is not None
+        assert "daemon.transport.timeout_seconds" in problem, problem
+        assert f"={over}" in problem, problem
+        assert f"using {Timeout.RELAY_TIMEOUT_CAP}" in problem, problem
+        assert f"set it to {Timeout.RELAY_TIMEOUT_CAP} or less" in problem, problem
+        config = Config.model_validate(
+            {"version": "1.0", "daemon": {"transport": {"timeout_seconds": over}}}
+        )
+        assert config.daemon.config_problems == [problem]
+
+    def test_a_timeout_within_the_cap_is_no_problem(self) -> None:
+        assert TransportConfig(timeout_seconds=Timeout.RELAY_TIMEOUT_CAP).timeout_problem is None
+        assert Config.model_validate({"version": "1.0"}).daemon.config_problems == []
+
     def test_a_whole_config_over_the_cap_still_loads(self) -> None:
         config = Config.model_validate(
             {

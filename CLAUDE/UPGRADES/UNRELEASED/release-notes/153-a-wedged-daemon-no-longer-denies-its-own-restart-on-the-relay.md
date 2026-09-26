@@ -26,6 +26,7 @@ covers only a launcher that runs this daemon install.
 10-second hand-off and a 5-second margin must end before the 60-second hook
 timeout the daemon registers, because Claude Code lets a `PreToolUse` call
 run unjudged when its hook times out. A larger value does not stop the
-daemon starting: it runs with 45 and logs a warning naming the key, the cap
-and the fix, and the upgrade's config advisory reports it first. Rebuild or
+daemon starting: it runs with 45 and warns, naming the key, the cap and the
+fix, in its log, in `health` and at every session start until the config is
+fixed. The upgrade's config advisory reports it first. Rebuild or
 redeploy the relay binary to pick this up.

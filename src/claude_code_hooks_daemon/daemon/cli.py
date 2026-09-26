@@ -3295,6 +3295,7 @@ def _build_initialised_controller(
         claude_md=config.claude_md,
         chain=config.daemon.chain,
         chain_deadline_problems=config.daemon.chain_deadline_problems,
+        config_problems=config.daemon.config_problems,
         strict_mode=config.daemon.strict_mode,
         write_claude_md_in_linked_worktree=write_claude_md_in_linked_worktree,
         worktree=config.worktree,

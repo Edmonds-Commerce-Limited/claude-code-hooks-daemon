@@ -8,7 +8,7 @@ import importlib
 import inspect
 import logging
 import pkgutil
-from collections.abc import Collection, Iterator, Mapping
+from collections.abc import Collection, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, TypeGuard
@@ -487,6 +487,7 @@ class HandlerRegistry:
         project_registry: "ProjectRegistry | None" = None,
         worktree: "WorktreeConfig | None" = None,
         reference_repos: "ReferenceReposConfig | None" = None,
+        config_problems: Sequence[str] = (),
     ) -> int:
         """Register all discovered handlers with the router.
 
@@ -513,6 +514,9 @@ class HandlerRegistry:
                 that attribute — attribute-selected rather than tag-selected,
                 because the two handlers that want it already carry the broad
                 ``git`` tag shared by handlers that do not
+            config_problems: ``DaemonConfig.config_problems`` (Plan 00466
+                round 3), injected as ``_config_problems`` onto handlers that
+                DECLARE that attribute, like ``_option_failures``
 
         Returns:
             Number of handlers registered
@@ -745,6 +749,12 @@ class HandlerRegistry:
                             option_failures_attr_name = "_option_failures"
                             if hasattr(instance, option_failures_attr_name):
                                 setattr(instance, option_failures_attr_name, self.option_failures)
+
+                            # Config values the daemon runs with other than as
+                            # written (Plan 00466 round 3), for the same alert.
+                            config_problems_attr_name = "_config_problems"
+                            if hasattr(instance, config_problems_attr_name):
+                                setattr(instance, config_problems_attr_name, tuple(config_problems))
 
                             # Inject the worktree merge-gate toggle for git-tagged
                             # handlers (Plan 00367 Phase 4) -- same DI idiom as
