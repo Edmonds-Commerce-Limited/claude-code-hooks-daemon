@@ -8,10 +8,22 @@
 //! - **std only, zero crates.** No Cargo.toml, no Cargo.lock, no dependency
 //!   tree to audit. Built with plain `rustc --target *-unknown-linux-musl`
 //!   (see relay/build.sh), yielding a fully static binary.
-//! - **No policy.** The relay never parses JSON, never reads config, never
-//!   starts the daemon, never retries, never writes files, and contains no
-//!   hook event names. The event is encoded in WHICH socket path argv names;
-//!   every allow/deny decision stays in the Python daemon.
+//! - **No policy, with one narrow carve-out.** The relay never parses the
+//!   REQUEST, never reads config, never starts the daemon, never retries,
+//!   never writes files. Every allow/deny decision for a request the daemon
+//!   actually judged stays in the Python daemon. The one exception (Plan
+//!   00466 N40 review 2 MA3): when the exchange fails mid-flight -- a
+//!   timeout, an I/O error, an oversized or EMPTY response -- on the
+//!   PreToolUse socket specifically, this file fabricates a deny rather than
+//!   the ambiguous `{}` it used to. `{}` is ALSO the shape a genuinely
+//!   judged "allow, nothing to add" verdict takes, so on a transport
+//!   failure it is indistinguishable from a real judged allow to whatever
+//!   reads stdout next -- exactly the python transport's OWN
+//!   `_pretooluse_response_looks_valid` contract, mirrored here because nothing
+//!   downstream of a fail-open `{}` could ever apply it. The socket's
+//!   identity is read from WHICH socket path argv names it -- already this
+//!   file's documented mechanism for knowing which request kind it is
+//!   relaying -- not a new dependency on hook semantics.
 //! - **Connect FIRST, before touching stdin.** While stdin is unread, the
 //!   bash forwarder can still be exec'd as a complete substitute; the moment
 //!   one stdin byte is consumed that door closes, and every later failure
@@ -30,7 +42,8 @@
 //! Argv:  hooks-relay <socket-path> [--fallback <script>] [--timeout-ms <n>]
 //!                    [--no-fallback]
 //! Exit codes:
-//!   0  — response delivered, or a mid-exchange failure emitted fail-open `{}`
+//!   0  — response delivered, or a mid-exchange failure emitted a fail-open
+//!        `{}` (non-PreToolUse) or a fail-closed deny (PreToolUse socket)
 //!   10 — connect failed and no `--fallback` was given (diagnostic mode)
 //!   11 — timeout      (only with `--no-fallback`: harness diagnostic mode)
 //!   12 — I/O error or oversized response (only with `--no-fallback`)
@@ -147,9 +160,66 @@ fn connect_fail(args: &Args, detail: &str) -> ! {
     }
 }
 
+/// True when `socket_path` names the PreToolUse per-event socket
+/// (`<events-dir>/pre-tool-use.sock` — `forwarder_generator.py`'s
+/// `event_file_name` for PreToolUse). Every other event stays on the
+/// original fail-open contract: PreToolUse is singled out because it is the
+/// one event whose fail-open `{}` gates a real, possibly destructive, tool
+/// call rather than merely dropping advisory context.
+fn is_pre_tool_use_socket(socket_path: &str) -> bool {
+    socket_path.ends_with("pre-tool-use.sock")
+}
+
+/// Minimal JSON string escaping for the one dynamic value embedded below —
+/// no serde in this file (module constraint), and the detail text is always
+/// this process's own `format!` output (a path, an errno message), never
+/// attacker-controlled, but escaped anyway rather than assumed safe.
+fn json_escape(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 2);
+    for c in s.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
+            c => out.push(c),
+        }
+    }
+    out
+}
+
+/// A genuine PreToolUse DENY, in the same `hookSpecificOutput` shape
+/// `HookResult._format_pre_tool_use_response` emits — never the two-byte
+/// `{}` a fail-open would use, which is indistinguishable from a real
+/// judged "allow, nothing to add" verdict.
+fn deny_pre_tool_use_json(detail: &str) -> String {
+    format!(
+        "{{\"hookSpecificOutput\":{{\"hookEventName\":\"PreToolUse\",\
+         \"permissionDecision\":\"deny\",\"permissionDecisionReason\":\
+         \"BLOCKED [transport-fail-closed]: hooks-relay could not obtain a verdict \
+         from the daemon ({}). Denying out of caution -- this does not mean the \
+         action itself is unsafe. If the daemon is wedged, run: bin/hooks-daemon restart\"}}}}",
+        json_escape(detail)
+    )
+}
+
+/// The fail-open/fail-closed body written on a mid-exchange failure, per
+/// `is_pre_tool_use_socket`.
+fn fail_body(args: &Args, detail: &str) -> String {
+    if is_pre_tool_use_socket(&args.socket_path) {
+        deny_pre_tool_use_json(detail)
+    } else {
+        "{}".to_string()
+    }
+}
+
 /// Mid-exchange failure: stdin (partially) consumed, so exec'ing the fallback
-/// would replay a truncated payload — forbidden. Fail OPEN instead: `{}` on
-/// stdout, exit 0, so Claude Code always receives valid JSON. Diagnostic
+/// would replay a truncated payload — forbidden. Fails OPEN (`{}`) for every
+/// event except PreToolUse, which fails CLOSED (a genuine deny) instead —
+/// see `fail_body`. Either way stdout carries valid JSON and exit is 0, so
+/// Claude Code always receives something it can parse. Diagnostic
 /// invocations (`--no-fallback`) get the distinct class exit code instead.
 fn mid_exchange_fail(args: &Args, class: FailClass, detail: &str) -> ! {
     let (label, code) = match class {
@@ -162,9 +232,10 @@ fn mid_exchange_fail(args: &Args, class: FailClass, detail: &str) -> ! {
         exit(code);
     }
     let mut stdout = io::stdout();
-    // If even stdout is broken there is no channel left to fail open on;
-    // the stderr line above is the only trace either way.
-    if let Err(err) = stdout.write_all(b"{}").and_then(|()| stdout.flush()) {
+    let body = fail_body(args, detail);
+    // If even stdout is broken there is no channel left to fail open (or
+    // closed) on; the stderr line above is the only trace either way.
+    if let Err(err) = stdout.write_all(body.as_bytes()).and_then(|()| stdout.flush()) {
         eprintln!("hooks-relay: io: fail-open write to stdout failed: {err}");
     }
     exit(0);
@@ -287,7 +358,19 @@ fn main() {
         response.extend_from_slice(&buf[..n]);
     }
 
-    // 4. Deliver the verdict bytes untouched.
+    // 4. Deliver the verdict bytes. An EMPTY response is a transport fault,
+    //    not a real judged verdict -- neither of PreToolUse's two legitimate
+    //    response shapes is zero bytes (the python transport's own
+    //    `_pretooluse_response_looks_valid`), so on the PreToolUse socket
+    //    this is treated exactly like any other mid-exchange failure rather
+    //    than delivered untouched.
+    if response.is_empty() && is_pre_tool_use_socket(&args.socket_path) {
+        mid_exchange_fail(
+            &args,
+            FailClass::Io,
+            "daemon closed the connection with an empty response",
+        );
+    }
     let mut stdout = io::stdout();
     if let Err(err) = stdout.write_all(&response).and_then(|()| stdout.flush()) {
         mid_exchange_fail(&args, FailClass::Io, &format!("stdout write: {err}"));

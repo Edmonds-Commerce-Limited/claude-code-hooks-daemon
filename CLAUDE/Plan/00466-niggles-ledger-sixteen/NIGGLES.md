@@ -3,6 +3,685 @@
 Newest first. Each entry says how it was found, why it happens, and the
 candidate remedies.
 
+### N109 — ✅ Remedied — the pending release-notes holding area mis-sorts past 99 callouts
+
+**Found:** `CLAUDE/UPGRADES/UNRELEASED/release-notes/` named callouts
+`NN-slug.md`, a two-digit arrival ordinal, and
+`tests/integration/test_pending_release_notes_holding_area.py` enforced
+`^\d{2}-`. Main held 85 notes numbered up to 93, and open branches carried
+about 20 more, so this release cycle passes 99. A mixed two- and three-digit
+scheme would mis-sort, because `release_slate._pending_release_notes` and the
+release fold both sort callouts by filename as a string, which puts `100-`
+before `11-`.
+
+**Remedy:** switched the holding area to a fixed three-digit ordinal,
+`NNN-kebab-slug.md`. RED: the holding-area test's name regex became
+`^\d{3}-`, proven to fail against the (then two-digit) files on disk, plus a
+new test asserting callout names sort in numeric order (a fixed width
+guarantees a string sort is a numeric sort). Every existing `NN-*.md` callout
+was `git mv`'d to zero-padded `0NN-*.md`. Updated every place stating the
+two-digit form: the holding-area README's naming section,
+`CLAUDE/development/RELEASING.md`'s two release-notes move steps,
+`.claude/agents/release-agent.md`, `.claude/skills/release/invoke.sh`, the
+two-digit example filenames in
+`tests/unit/plan_qa/checks/test_release_blocked_plan.py` and
+`.claude/project-handlers/pre_tool_use/test_plan_done_requires_holding_area.py`,
+and the one live-plan link still pointing at a two-digit pending callout
+(`CLAUDE/Plan/00399-.../PLAN.md`). `post-upgrade-tasks/` keeps its own `NN`
+rule unchanged — a different directory. No shipped template or daemon code
+parses the callout prefix with a digit-count regex, so nothing else needed a
+change.
+
+### N40 — ✅ Blockers/Majors/minors/nits all remedied — adversarial security review of the N24/N25/N34 fix (2 blockers, 3 majors, 6 minors, 4 nits)
+
+**Found by an adversarial, read-only security review**
+(`subagent-reports/260924-n466-n24-review-opus-5-5.md`) of `d7f2c875` (N24 +
+N25 + N34 combined). Verdict: NOT READY — inputs existed that turned a
+SAFETY+BLOCKING decision into ALLOW. Full report committed at `f8f2dfeb`.
+Findings and remediation status, in the report's own order:
+
+**B1 (blocker) — ✅ Remedied.** A lone UTF-16 surrogate anywhere in
+`tool_input` crashed `_safety_payload_size` (`chain.py`, strict
+`.encode("utf-8")`) OUTSIDE every handler's own try/except; the crash
+propagated to `controller.py`'s catch-all, which built an ALLOW (no
+decision) via the pre-existing, deliberately-fail-open `HookResult.error()`.
+Reproduced live: `git reset --hard HEAD # \ud800` allowed on this branch,
+denied on base `3104434b`; fail-open was new here, not pre-existing.
+
+Fixed in three layers: (1) `_safety_payload_size` rewritten to serialise the
+WHOLE `tool_input` via `json.dumps(..., ensure_ascii=False)` then
+`.encode("utf-8", "surrogatepass")`, wrapped in try/except returning 0 on
+`TypeError`/`ValueError` — this also happens to satisfy the report's m5
+finding (the old 4-field summation missed `file_path`/MultiEdit's `edits[]`/
+NotebookEdit's `new_source`) as a side effect, since the whole dict is now
+measured regardless of shape; (2) the measurement call site in
+`HandlerChain.execute` is now itself wrapped: any exception computing it
+denies immediately, chain-level, when the chain holds a SAFETY+BLOCKING
+handler (nothing to protect ⇒ degrades to an unmeasured/uncapped chain
+instead, never a regression); (3) new `HookResult.error_deny()` factory
+(fail-closed counterpart to the pre-existing `error()`, reason names the
+error, context gives `bin/hooks-daemon status`/`restart` recovery
+instructions) — `DaemonController.process_event`'s and `process_request`'s
+catch-all exception handlers now use it, but ONLY when the event is
+`PreToolUse`; every other event type keeps the pre-existing fail-open
+`error()` deliberately, per the review's own scoping. RED tests: a lone
+surrogate in each of `command`/`content`/`new_string`/`old_string` denies
+via the guard's own reason, not a crash
+(`tests/unit/core/test_chain.py`); a forced size-measurement crash denies
+chain-level when a SAFETY+BLOCKING handler exists and degrades gracefully
+when none does; `controller.py`'s router-exception and pre-validation
+catch-alls deny for `PreToolUse` and still fail open for every other event
+(`tests/unit/daemon/test_controller.py`, 4 new cases plus one pre-existing
+case's assertion flipped from ALLOW to DENY — a deliberate behaviour change,
+not a mistake). These tests exercise `chain.execute`/
+`controller.process_event`/`process_request` directly; the report's own
+real-socket reproducer is now ALSO automated, in
+`tests/integration/test_b1_surrogate_isolated_daemon.py`: an isolated daemon
+with the DEFAULT handler set (no probe handler needed — B1 lives in core
+dispatch) receives `git reset --hard HEAD~1 # \ud800` (B1's own manual
+reproducer) over a real socket and is still denied by
+`prevent-destructive-git`, plus a second case putting the same surrogate in
+`file_path` (B2's own vector) and asserting the daemon returns a
+well-formed verdict rather than crashing or hanging.
+
+**B2 (blocker) — ✅ Remedied.** `path_exclusion.py`'s `path_matches_globs`
+translated a client's exclude glob into a regex (`_glob_to_regex`) and
+matched it via `compiled.fullmatch(candidate)`. Against a `file_path` built
+from many short segments (`"a/" * n`) the backtracking regex engine went
+quadratic-or-worse AND held the GIL for the ENTIRE call: N34's
+`BoundedDispatcher` waits on `Future.result(timeout=remaining)` from a
+DIFFERENT thread, but nothing can run on that thread while the C-level `re`
+call holds the GIL, so the timed wait cannot even observe, let alone
+interrupt, the hang — N34's own core claim defeated by its own root cause.
+Reproduced live: `probe_n24r_p9_pathhang.py` measured 1.9s at 4000 segments
+(unbounded growth from there); `probe_n24r_p11_gil.py` over the real socket
+showed a single adversarial Write freezing concurrent PreToolUse calls until
+the CLIENT's 30s timeout (fail-open); `hooks-daemon stop` returned in ~6s
+but the daemon was still alive at 99% CPU (Python signal handlers only run
+between bytecodes) and needed SIGKILL.
+
+Replaced the regex translator with a hand-written linear matcher
+(`_tokenize_glob` + `_apply_prefix`/`_apply_literal`/`_apply_qmark`/
+`_apply_star`/`_apply_segstar`/`_glob_fullmatch`): each pattern tokenizes
+once (cached, as before) into `PREFIX`/`LITSTR`/`QMARK`/`STAR`/`SEGSTAR`/
+`ANYALL`, and matching is a left-to-right sweep over a boolean "reachable
+position" array per token — no backtracking is possible by construction.
+`SEGSTAR` (mid-pattern `**/`) needed care: an earlier, simpler design that
+treated it like a plain `.*` was caught by hand-tracing `**/secret` against
+`xsecret` — that shortcut would have matched (treating "x" as an admissible
+empty prefix) where the original regex correctly does not, since `**/`
+requires a COMPLETE, non-empty path segment. The shipped `SEGSTAR`
+implementation tracks two flags across one sweep (`armed`: a segment may
+start here but has consumed 0 chars; `open`: it has consumed ≥1) so a `/`
+only completes a landing when `open`, never on a zero-length attempt.
+Verified equivalent to the OLD regex translator (reconstructed standalone,
+not deleted from history) across 567 hand-picked edge cases (double
+slashes, embedded `\n`, empty patterns/text) plus 65,000 random-fuzzed
+`(pattern, text)` pairs spanning both alphabets — zero mismatches.
+
+Performance was iterated three times against the review's own ask ("a
+timing test on a 90 KB `file_path` under 50ms") plus a MORE realistic case
+(`error_hiding_blocker`'s actual 14 default excludes: 11 vendored-dir globs
+
+- 3 fixture globs, all sharing the `**/X/**` shape) — a naive per-token
+  sweep passed the first but not the second (81ms):
+
+1. `_apply_prefix` and `_apply_star` initially used a plain O(n) Python
+   loop; switched to `str.find`-driven scans, faster in isolation but WORSE
+   once combined with other patterns on this repo's own dense-slash
+   adversarial shape (many small `find` calls beat a tight loop only when
+   boundaries are sparse).
+2. The real win: a `**/<name>/**`-shaped exclude list shares its ENTIRE
+   `PREFIX`+`SEGSTAR` prefix across every pattern, diverging only at the
+   literal name — but each pattern recomputed that shared O(n) prefix from
+   scratch. Added a `step_cache` (keyed by `(token, id(input reachable), id(text))`, scoped to one `path_matches_globs` call, safe because the
+   cache and everything it references share that call's lifetime) so the
+   shared prefix work runs once per candidate, not once per pattern.
+3. With PREFIX/SEGSTAR now cached, `_apply_literal`'s per-position
+   `reachable[j] and text[j:j+ln]==literal` loop became the dominant cost,
+   because SEGSTAR's output on this dense text is itself dense (most
+   positions reachable). Rewrote it to drive from `text.find(literal, pos)`
+   instead: a literal like `node_modules` is typically ABSENT from the
+   candidate entirely, and `find` returning "not found" is one fast
+   C-level scan rather than up to `len(text)` Python-level slice
+   compares. Stress-tested this specifically against the classic
+   pathological shapes for naive substring search (dense overlapping
+   matches, periodic near-misses) up to 640 KB — stayed linear, no hidden
+   blowup reintroduced.
+
+Final measured timings (this repo's venv): the review's own 90 KB/4-pattern
+timing ask, ~25ms; the realistic 14-pattern `error_hiding_blocker` set on
+the same 90 KB adversarial path, ~30ms — both comfortably under the 50ms
+ask. The review's own `probe_n24r_p9_pathhang.py` reproducer, re-run
+unmodified against the fix: the final `n=45_000` case (the one that used to
+require `faulthandler`'s 8s watchdog + SIGKILL to recover from) now
+completes in 0.48s. RED tests in
+`tests/unit/utils/test_path_exclusion.py`: `TestGlobstarDoesNotCrossPartialSegments`
+(the `**/secret` vs `xsecret` regression, pinned permanently) and
+`TestLinearMatcherPerformance` (the review's own 90 KB/50ms ask, plus a
+45,000-segment/1s sanity bound matching the review's adversarial shape).
+Full `tests/unit/utils/test_path_exclusion.py` suite green (63 tests), plus
+423 passing across every handler test touching `path_exclusion`
+(`error_hiding_blocker`, `comment_size`, `comment_changelog`,
+`qa_suppression`, `security_antipattern`, vendor-exclusion tests) — no
+regressions.
+
+**B2 direction #4 sweep (fnmatch/regex-over-glob-translated-text
+elsewhere).** Grepped `src/` for other dynamic glob-to-regex translation
+(`fnmatch.translate`/hand-rolled `[^/]*`-style translators) matched via
+`.fullmatch()`/`.match()`. Four call sites use stdlib `fnmatch.fnmatch`
+(`core/project_layout.py`, `docs_qa/checks/generated_doc_hand_edit.py`,
+`utils/worktree_seed_suggestions.py`, `utils/secret_file_matching.py`):
+all match a BOUNDED string (a single path component/basename, or a small
+fixed-size joined window of path parts), never an attacker-supplied
+unbounded `file_path` reaching a SAFETY+BLOCKING guard in the hot PreToolUse
+path the way `path_exclusion.py` did — and `fnmatch.translate`'s output has
+no `**`-style nested-quantifier segment logic to begin with. Not fixed;
+noted here as the sweep's result rather than left silently undone. Every
+other `.fullmatch`/`.match` call in `utils/` is a static, hand-written,
+non-glob-derived regex against structured input (header lines, shell
+tokens, bracket expressions) — a different audit (ReDoS review of
+hand-written regexes), out of B2's specific scope.
+
+**Client fail-closed for PreToolUse — ✅ Remedied.** `init.sh`'s
+`send_request_stdin` (the python3 transport embedded in every hook
+forwarder) previously fell open for every event except Stop/SubagentStop on
+ANY failure, including a socket timeout against a daemon B2 had already
+proven could be demonstrably alive and simply stuck — the client-side half
+of exactly the gap B2 exploited. Team-lead's explicit, unattended decision
+(2026-09-24) superseded an earlier "the client does not fail closed"
+constraint. Two new failure classes now deny for `PreToolUse` specifically,
+leaving every other event and every other `PreToolUse` error type
+unchanged:
+
+1. `socket_timeout` (connect+send succeeded, the daemon was reached and is
+   alive, but nothing came back within `CLAUDE_HOOKS_SOCKET_TIMEOUT`,
+   default 30s).
+2. A new `malformed_response` check on the SUCCESS path: the round-trip
+   completed, but the bytes received are not one of PreToolUse's two
+   legitimate shapes (`{}` — a real ALLOW with nothing to say, matching
+   `HookResult.to_json`'s documented empty-response case — or a dict with a
+   `hookSpecificOutput` key whose `permissionDecision`, if present, is one
+   of the four known values). Previously the response was echoed to stdout
+   completely unvalidated.
+
+Both are DELIBERATELY narrower than "any transport failure at all":
+`socket_not_found`, `connection_refused` and `invalid_hook_input` (the
+daemon was never reached, or the caller's own payload never parsed
+client-side) keep the existing, separately-documented fail-open path
+(`ensure_daemon`'s auto-start already ran before this point) — denying
+every tool call whenever the daemon is merely absent would make Claude Code
+itself unusable during any daemon downtime, a materially different cost
+from a rare timeout or garbled response. A new
+`_is_daemon_recovery_command` allowlist (exact match only, no compound
+commands) exempts `bin/hooks-daemon`/`.claude/hooks-daemon/bin/hooks-daemon`
+`restart`/`status`/`logs`/`stop`/`start` from BOTH new deny paths, so a
+wedged daemon can always still be restarted from inside the same session —
+`bin/hooks-daemon restart && rm -rf /` is deliberately NOT exempt (the
+allowlist check is a whole-string `==`, not a prefix match).
+
+Pinned end-to-end against the REAL script (sourced, not reimplemented) in
+`tests/integration/test_init_sh_pretooluse_fail_closed.py`: a real bound
+AF_UNIX socket that accepts, reads the request, then never responds (the
+socket_timeout/GIL-hang shape) denies for PreToolUse but leaves Stop's
+existing fail-open unaffected; a socket that responds with unparseable
+bytes or valid-JSON-wrong-shape both deny; the exact recovery command still
+gets through under either failure (a compound variant does not); a
+legitimate `{}` and a legitimate real deny both pass through byte-identical
+to before; a nonexistent socket (genuinely no daemon) keeps the existing
+fail-open path. Confirmed RED first: replayed the same hanging-socket
+fixture against the pre-fix `init.sh` (git blob `362e2516`) and got the old
+fail-open `additionalContext`-only response with no `permissionDecision`.
+`shellcheck init.sh` clean; the embedded python3 block (extracted by line
+range) independently `compile()`-checked and its two new helper functions
+unit-tested in isolation before the end-to-end run. `.claude/init.sh` is a
+symlink to `../init.sh`, so no separate deploy-sync step was needed.
+
+**M1 — ✅ Remedied.** The chain deadline was measured from `HandlerChain. execute`'s own call, not request arrival — executor queueing between the
+socket read and the worker thread actually starting was invisible to the
+budget, so a request already judged late by the CLIENT's own 30s timeout
+could still look on-time to the chain. `HooksDaemon._handle_client`/
+`_handle_event_client` now stamp `arrival_time = time.perf_counter()`
+immediately after the socket read, threaded through `_process_request` →
+`DaemonController.process_request`/`process_event` → `EventRouter.route` →
+`HandlerChain.execute` as a new keyword-only parameter (`None` for every
+caller that predates M1, falling back to `execute()`'s own call time —
+unchanged behaviour). RED tests: a stale `arrival_time` (10s in the past)
+denies a SAFETY+BLOCKING handler immediately even though nothing is slow
+(`tests/unit/core/test_chain.py`); omitting `arrival_time` keeps the
+pre-existing behaviour. Pseudo-event dispatch and verdict logging in
+`process_event` still run AFTER the chain returns and are not themselves
+inside the arrival-anchored budget — a smaller, separately-tracked gap the
+review's own direction treated as optional ("or run them after the response
+is written"), left for a follow-up niggle rather than expanding this one's
+scope further.
+
+**M2 — ✅ Remedied.** `BoundedDispatcher`'s semaphore permit was released
+only when an abandoned ("straggler") call FINISHED, never when the caller
+gave up waiting on it — so enough concurrent stragglers (the review's own
+16-straggler reproducer) denied every future PreToolUse call permanently,
+with no way out short of a manual restart, and the restart command itself
+is a PreToolUse call. Three parts:
+
+1. *Release the slot.* `BoundedDispatcher.run` now releases its semaphore
+   permit the MOMENT `future.result(timeout=...)` gives up (not when the
+   straggler eventually finishes) via a new `_SinglePermit` wrapper shared
+   between the waiting thread and the worker thread, guaranteeing the
+   permit is released exactly once regardless of which side gets there
+   first. A new dispatch can proceed immediately even while the abandoned
+   call is still running.
+2. *Bound the stragglers.* Releasing the permit early reopens the gap it
+   used to close: nothing bounded how many abandoned calls could pile up.
+   A SEPARATE `max_stragglers` cap (defaults to `max_inflight`, Single
+   Source of Truth unless a caller splits them) refuses a NEW dispatch
+   outright once that many stragglers are already alive, independent of
+   ordinary inflight capacity. `BoundedDispatcher.straggler_health()`
+   reports the live count and the oldest one's age.
+3. *DEGRADED health + self-restart.* `DaemonController.get_health()` now
+   reports `status: "degraded"` (with `degraded_reasons: ["stragglers"]`)
+   once the straggler count reaches `daemon.chain.straggler_unhealthy_count`
+   (new `ChainConfig` field, default 4), and carries the count/oldest-age/
+   restart-threshold in a `stragglers` sub-dict. A new watchdog task,
+   `HooksDaemon._monitor_straggler_health`, polls this every 10s and
+   self-restarts (calls `shutdown()`, i.e. exits) once the OLDEST straggler
+   has run past `daemon.chain.straggler_restart_after_seconds` (default
+   120s) — recovery, not an outage: the client's own lazy `ensure_daemon`
+   auto-start in `init.sh` brings up a fresh, zero-straggler process on the
+   very next hook call.
+
+RED-first TDD throughout: `tests/unit/core/test_bounded_dispatch.py` (permit
+released immediately on timeout without double-releasing on the straggler's
+own later completion; straggler count/age tracked correctly; a new dispatch
+refused once the straggler cap is reached even with free inflight capacity);
+`tests/unit/daemon/test_controller.py` (`get_health()` reports zero/below-
+threshold/at-threshold/disabled straggler states); `tests/unit/daemon/ test_server_coverage.py` (the watchdog self-restarts past the threshold,
+stays quiet below it, tolerates a `None` threshold/missing `stragglers` key/
+a raising `get_health()`/a legacy controller with no `get_health()` at all,
+without crashing the loop). Also folded in review m3's two `BoundedDispatcher`
+edge cases while touching the same code: `thread.start()` raising no longer
+leaks the semaphore permit or the thread-tracking entry, and the worker now
+catches `BaseException` (not only `Exception`) so a `SystemExit`/
+`KeyboardInterrupt` inside a handler resolves the future instead of leaving
+it unresolved for the FULL remaining timeout.
+
+**M3 — ✅ Remedied (narrowed scope).** Fail-closed-on-raise was TAG-dependent
+(`chain.py`'s `_record_unjudged` requires both `HandlerTag.SAFETY` and
+`HandlerTag.BLOCKING`), and the review found 19 PreToolUse handlers that can
+genuinely deny but carried neither. Of those, 14 were COMPLETELY untagged
+(no fail-closed-relevant decision had ever been made about them at all);
+the other 5 (`enforce-tdd`, `qa-suppression-blocker`, `plan-*`, and 19 more
+across the whole tree) already carry `BLOCKING` alone, which reads as a
+deliberate-if-incomplete choice rather than an oversight — auditing that
+much larger 22-handler bucket one-by-one was judged out of scope for this
+niggle (see the follow-up note below) rather than rushed alongside the
+other review items still open.
+
+Of the 14 completely-untagged handlers: 6 are now `HandlerTag.SAFETY` +
+`HandlerTag.BLOCKING` — `artifact_publish_blocker` (irreversible external
+disclosure), `curl_pipe_shell`/`dangerous_permissions`/`sudo_pip`/
+`pip_break_system`/`lock_file_edit_blocker` (team-lead's explicit list: RCE,
+privilege escalation, system Python corruption, dependency-hash tampering).
+The other 8 are workflow/QA gates, not dangerous-action guards, and none
+gets `SAFETY`. Six are now explicitly `HandlerTag.ADVISORY` (a deliberate,
+commented opt-out rather than a silent gap): `bash_safe_mode` (ships
+disabled by default, has its own escape hatch), `docs_qa_commit_gate`,
+`docs_qa_edit`, `plan_qa_commit_gate`, `staged_lint_gate`,
+`verification_result_gate` (a heuristic detector, imperfect by its own
+docstring) — each denies only under a non-default config value. The other
+two, `ask_user_question_blocker` (strict mode, the shipped default, denies
+unconditionally) and `validate_instruction_content` (denies unconditionally
+on a pattern match, no config gate at all), deny under a DEFAULT install, so
+`HandlerTag.ADVISORY` would have understated them: a full-suite run (below)
+surfaced the pre-existing sibling guard
+`test_declared_behaviour_matches_source.py`, which independently requires
+`HandlerTag.BLOCKING` for any handler whose default behaviour denies (it
+feeds `scripts/qa/check_doc_truth.py`'s ground truth for the generated
+`.claude/HOOKS-DAEMON.md`). Tagged `HandlerTag.BLOCKING` instead —
+satisfies both registry tests, since this test's own early-return treats
+`BLOCKING` alone as an already-made fail-closed decision.
+
+New registry test, `tests/unit/handlers/test_pretooluse_fail_closed_tagging.py`:
+parametrised over every `pre_tool_use` handler, source-inspects each for a
+deny signal (`HookResult.deny`/`Decision.DENY`/`Decision.BLOCK` — the same
+heuristic the review's own enumeration probe used), and fails any COMPLETELY
+untagged denier that carries neither `SAFETY`+`BLOCKING` nor `ADVISORY` —
+opt-out-not-opt-in, so a NEW handler in this state fails the suite instead
+of the gap growing silently. Deliberately does not flag the pre-existing
+`BLOCKING`-only bucket (out of this niggle's narrowed scope, see above).
+RED confirmed first (exactly the 14 named above failed, nothing else).
+Full `pre_tool_use`/registry/chain regression stays green (4167 passed).
+
+**Follow-up recorded here, done below:** a full audit of the 22-handler
+`BLOCKING`-without-`SAFETY` bucket (`enforce-tdd`, `qa-suppression-blocker`,
+`plan-qa-edit`, `comment_size`, `comment_changelog`, `dispatch_declaration`,
+`merge_to_main_approval`, `plan_close_approval`, `plan_time_estimates`,
+`reference_repo_freshness`, `remote_docs_*`, `require_gh_*_comments`,
+`enforce_lsp_usage`, `enforce_markdown_organization`, and others) — deciding
+per-handler whether each should become `SAFETY`+`BLOCKING` or explicitly
+document why not — was deferred as real work this niggle did not do at the
+time. See "22-handler BLOCKING-without-SAFETY audit" below for the
+completed pass.
+
+**m1 — ✅ Remedied.** Thread-per-handler dispatch added ~12ms per event
+(69 thread creations for this repo's PreToolUse handler set, even when
+every one of them was fast). `HandlerChain.execute` now dispatches the
+WHOLE handler loop (a new private `_execute_handlers` method) as ONE call
+on the shared pool when `deadline_seconds` is set, not one dispatch per
+handler — `deadline_seconds=None` keeps the original zero-overhead
+synchronous path unchanged. The per-handler deadline CHECK stays inline
+(a cheap `time.perf_counter()` comparison, not a thread) and still
+attributes "not judged in time" to a SPECIFIC handler whenever the loop is
+still making progress — every handler that FINISHES, however late, is
+caught exactly as before. Only when the WHOLE dispatched call itself times
+out or the pool is saturated (some handler never returns at all, or the
+pool has no free capacity even for the whole chain) does the deny/skip
+reason name "chain" instead of a specific handler — nothing is left
+running on the calling thread that could still say which one it was. An
+edge case surfaced during implementation: an ALREADY-expired deadline
+(e.g. a stale `arrival_time`) is handled by calling `_execute_handlers`
+directly rather than dispatching it with `timeout=0.0` — every handler's
+own pre-loop check sees the same already-blown deadline from the first
+iteration, so nothing risks hanging, and this also avoids a genuine race
+`Future.result(timeout=0.0)` would have had (whether the freshly-started
+thread gets scheduled at all before the wait gives up).
+
+Five existing tests (`tests/unit/core/test_chain.py` ×4,
+`tests/unit/core/test_router.py` ×1) asserted the OLD per-handler
+attribution for a slow-but-finite handler exceeding the budget; updated to
+assert the new chain-level attribution instead — a deliberate behaviour
+change, not a regression, and the module docstring in `test_chain.py`
+records why. One real-socket E2E test
+(`tests/integration/test_n34_deadline_probe_isolated_daemon.py`) needed the
+same update. `_dispatch_matches_and_handle` and `_make_dispatch_call`
+(the per-handler dispatch closures) were dead code afterwards and deleted.
+Full targeted sweep green: `tests/unit/core/`, `tests/unit/daemon/`,
+`tests/unit/handlers/test_pretooluse_fail_closed_tagging.py`,
+`tests/unit/config/` (4729 passed, 1 skipped), plus the real-socket
+integration files touching chain dispatch (18 passed).
+`scripts/qa/check_fail_open_inventory.py`'s rows for the two `except Exception` boundaries that moved from `execute` into `_execute_handlers`
+were updated to match (boundaries unchanged, only their enclosing method).
+
+**m3 — ✅ Remedied** (folded into M2's work above, same files): the two
+`BoundedDispatcher.run` edge cases (`thread.start()` raising leaking the
+semaphore permit; `except Exception` not catching `BaseException`, leaving
+the future unresolved for the full timeout) are both fixed.
+
+**m2 — ✅ Remedied.** A straggler (a handler dispatch the caller already gave
+up waiting on, per M2 above) could still mutate PROCESS-LIFETIME state after
+its own verdict was discarded, for a decision nobody would ever see. Added
+`core/dispatch_cancellation.py`: a `DispatchCancellation` (wraps a
+`threading.Event`) created once per `HandlerChain.execute()` call, bound via
+a `contextvars.ContextVar` around the dispatched handler loop so nested
+handler code (in a different file, on the dispatched thread) can call
+`is_dispatch_cancelled()` without a parameter threaded through every
+signature. `execute()` calls `cancellation.cancel()` at the exact point it
+gives up on a `DispatchTimeout`/`DispatchSaturated` outcome, BEFORE building
+the fallback deny/allow. Two handlers had their own state write gated on it:
+`sensitive_content._compute_and_cache` (skips writing `_cached_dispatch`)
+and `github_auto_close_keywords.handle` (skips `tracker.mark_disclosed`).
+`lsp_enforcement` needed no change: its "spend" flows through
+`DaemonController.process_event`'s iteration over `result.decisions`, which
+is empty for an abandoned dispatch — the m1 one-thread-per-request redesign
+already structurally closed that one. RED test:
+`test_chain.py::TestDispatchCancellationReachesStragglingHandlerCode` (a
+handler that sleeps past its own deadline, then checks
+`is_dispatch_cancelled()` before recording a "written" vs "skipped-cancelled"
+outcome), plus one regression test per fixed handler
+(`test_sensitive_content.py`, `test_github_auto_close_keywords.py`).
+
+**m4 — ✅ Remedied.** `check_fail_open_inventory.py` only ever walked
+`ast.ExceptHandler` nodes, so `bounded_dispatch.py` — not even in its surface
+list — and the chain-level `isinstance(outcome, DispatchTimeout)`/
+`DispatchSaturated` branches in `chain.py::execute` (the fail-open decision
+BoundedDispatcher.run()'s sentinel-return shape produces) were both
+invisible to it. Added `bounded_dispatch.py` to `_PYTHON_SURFACES`; added
+`_isinstance_dispatch_boundaries`, walking `ast.If` nodes whose test is
+`isinstance(x, DispatchTimeout | DispatchSaturated)` (a new "isinstance-
+dispatch" construct shape alongside the existing "except X" one). RED test
+(`test_fail_open_inventory_checker.py::TestIsinstanceDispatchBoundaries`,
+with a narrowing-control test proving an ordinary unrelated `isinstance`
+check is NOT flagged) confirmed against the unmodified detector first. Six
+new inventory rows added: `chain.py::execute::isinstance-dispatch DispatchTimeout`/`DispatchSaturated` (both `fail-open` — ALLOW when no
+SAFETY+BLOCKING handler is registered) and four `bounded_dispatch.py` rows
+(`run::except FutureTimeoutError`, `_run_and_release::except BaseException`,
+both `not-fail-open` — they are the SOURCE of the decision, made by the
+caller, not a verdict made here). Fixing n2 below (replacing the `assert`
+with an explicit `elif`) split the single `isinstance-dispatch DispatchTimeout`
+row that had covered both sentinels via an `else`-branch `assert` into two
+independent rows, which is the more accurate shape. `check_fail_open_ inventory.py` passes clean (39/39).
+
+**m6 — ✅ Remedied.** `ChainConfig.deadline_seconds` only enforced `gt=0`; a
+configured value at or past the client's own socket timeout
+(`Timeout.SOCKET_DISPATCH_ROUNDTRIP`, 30s) would reproduce the exact bypass
+`deadline_seconds` exists to close — the client gives up and fails the WHOLE
+chain open before the daemon's own deadline-triggered deny can be built and
+sent back. Added a `model_validator(mode="after")` on `ChainConfig` that
+raises `ValueError` (surfaces as `pydantic.ValidationError`) when
+`deadline_seconds` is at/past `SOCKET_DISPATCH_ROUNDTRIP`, or leaves less
+than a new `Timeout.CHAIN_DEADLINE_SOCKET_MARGIN_SECONDS` (5s) margin —
+naming the configured value, the client timeout, and how much to lower it
+by. `None` (disabled enforcement) is never checked. RED-first in
+`test_chain_config.py::TestDeadlineBelowClientSocketTimeout`; includes a
+test that the shipped default (`Timeout.CHAIN_DEADLINE_DEFAULT` = 20s, 10s
+of margin) satisfies its own rule.
+
+**m5 — ✅ Remedied.** Three sub-findings, all fixed:
+
+1. *Non-monotonic measurement* was already fixed before this session
+   (`362e2516`, prior to this niggle's own work): `_safety_payload_size`
+   serialises the WHOLE `tool_input` dict with `surrogatepass` rather than
+   summing a fixed field list, closing the MultiEdit `edits[]`/NotebookEdit
+   `new_source`/`file_path` gaps the review measured.
+2. *Misattributed deny reason*: the size check runs BEFORE scope/`matches()`,
+   so it fires for the FIRST SAFETY+BLOCKING handler in PRIORITY order,
+   whichever that is — an oversized Write got denied naming
+   `prevent-destructive-git` regardless of relevance. `_apply_oversized_input`
+   now builds `reason=f"chain: input too large..."` instead of
+   `f"{handler.name}: ..."`, matching the existing "chain: not judged in
+   time" convention. RED test
+   (`test_oversized_input_deny_reason_does_not_misattribute_to_an_unrelated_handler`)
+   uses two SAFETY+BLOCKING handlers and asserts NEITHER name appears.
+3. *Server-side transport fail-open*: a request past
+   `SocketLimit.REQUEST_BUFFER_BYTES` (16 MiB) overran
+   `reader.readline()`'s own limit; the bare `ValueError` fell into
+   `_handle_client`'s generic exception handler, which tried to write an
+   error response and close WITHOUT draining the still-unread remainder of
+   the oversized send first — on a Unix domain socket this can make the
+   close send an RST instead of a clean FIN, and the client saw a raw
+   `ConnectionResetError`/`BrokenPipeError` with NO response at all (real
+   socket, `probe_n24r_p7_size.py`), indistinguishable from the daemon
+   having crashed outright and NOT covered by `.claude/init.sh`'s
+   `malformed_response` fail-closed-for-PreToolUse handling (which needs an
+   actual response to act on). Added `_drain_oversized_request`: drains the
+   remainder before responding, each `read()` bounded by a 0.5s
+   per-read timeout (the protocol carries no length header, so silence that
+   long reads as "the sender is done", not "still arriving" — the real
+   client sends its whole request in one blocking call before it ever tries
+   to read a response) and a running total capped at
+   `SocketLimit.REQUEST_BUFFER_BYTES` so a sender that never stops writing
+   cannot hang the connection either. RED test (real isolated daemon,
+   `test_a_payload_past_the_socket_buffer_limit_fails_closed_for_pretooluse`,
+   a genuine >16 MiB payload) confirmed the connection-reset-with-nothing
+   failure first; GREEN confirms a real `{"error": ...}` response now always
+   arrives.
+
+- **n1 — ✅ Remedied.** "Shared pool"/"thread pool" wording in
+  `bounded_dispatch.py` (class docstring, singleton comment),
+  `chain.py` (two docstrings), `config/models.py`'s `deadline_seconds`
+  field docstring, and `test_chain.py`'s module docstring all corrected:
+  `BoundedDispatcher` gives every call a FRESH daemon thread, bounded by a
+  shared semaphore — there is no fixed worker set and nothing is queued.
+- **n2 — ✅ Remedied.** `chain.py::execute`'s
+  `assert isinstance(outcome, DispatchSaturated)` (narrowing the `else` of
+  the DispatchTimeout check) replaced with an explicit `elif isinstance(...)`
+  and a `raise TypeError(...)` `else` — `-O` strips asserts, which would
+  have left `detail` silently unbound instead of failing loudly. Test:
+  `test_chain.py::TestUnexpectedDispatchOutcomeFailsLoud`, driving a fake
+  `BoundedDispatcher` subclass whose `run()` returns neither sentinel.
+- **n4 — ✅ Remedied.** Added `test_chain.py::TestUnderShippedDefaultDeadline`,
+  parametrised over `deadline_seconds` `[None, Timeout.CHAIN_DEADLINE_DEFAULT]`
+  — five representative core `execute()` behaviours (empty-chain allow,
+  matches-called-on-every-handler, terminal-deny-stops-the-chain,
+  raise-denies-only-in-strict-mode, first-restrictive-wins) now run under
+  BOTH the synchronous path and the real production-shipped threaded
+  dispatch path (a genuine thread, semaphore, and cancellation-token
+  bind/reset), not just `None`.
+- **n3** informational only (two SAFETY+BLOCKING handlers exceed the
+  review's 1s advisory threshold under 100 KB, both already under the
+  harness's 5s bound; `secret_file_guard`'s is the guard-defects branch's
+  known constant-factor issue) — no action needed here.
+- **P1** (`github_auto_close_keywords` cache bypass) is explicitly OUT of
+  this niggle's scope — routed by the coordinator to a different agent.
+
+**22-handler BLOCKING-without-SAFETY audit — ✅ Done.** The follow-up
+deferred below (originally "22 handlers") was live-rescanned across the
+FULL registry (every event, not only `pre_tool_use` — `HandlerChain.execute`'s
+fail-closed logic is generic across events) and found 24 at audit time: the
+21 `pre_tool_use` handlers the review named or implied, plus 3 more from
+other events (`lint_on_edit` (PostToolUse), `subagent_report_path_verifier`
+(SubagentStop), `failsafe_cron_blockage_suppressor` (UserPromptSubmit)) that
+carry the same tag shape. Audited each individually: all 24 are workflow/QA/
+governance gates (plan approval, doc placement, QA-suppression, TDD
+ordering, provenance, cadence optimisation, ...) whose fail-open consequence
+is "a process step did not happen", not a dangerous/irreversible ACTION —
+the bar the existing SAFETY roster (destructive git, secret disclosure,
+RCE-shaped constructs, write-clobbering, ...) is drawn at. None promoted;
+each recorded with its own specific reason (not a copy-pasted one) in a new
+`_AUDITED_BLOCKING_ONLY_REASONS` table in
+`test_pretooluse_fail_closed_tagging.py`, alongside a new
+`test_every_blocking_without_safety_handler_is_audited` (parametrised over
+the WHOLE registry, opt-out-not-opt-in: a future handler landing here with
+neither `SAFETY` nor a table row fails the suite) and a rot-guard
+(`test_the_audit_table_names_only_handlers_that_still_exist_and_still_need_it`)
+so a stale row — one for a handler later promoted, renamed, or removed —
+fails loudly instead of reading as coverage. RED confirmed by temporarily
+removing one row and observing the expected failure, then restoring it.
+
+**Full-suite sweep, incidental to M3 — 5 pre-existing failures found and fixed.**
+Running the WHOLE test suite (not just targeted files) after M3 surfaced 5
+failures predating this niggle's own changes, all from earlier N24/N25/N34
+work in this same plan:
+
+1. `test_handler_config_blocking.py`'s `test_sed_blocker_prevents_inline_edits_e2e`
+   and `test_disabled_handler_does_not_block_e2e` called `router.route(...)`
+   directly without initialising `ProjectContext`. `enforce-project-containment`
+   (`SAFETY`+`BLOCKING`) now correctly denies the WHOLE chain when it raises
+   for want of it (N24's fail-closed-on-raise, working as designed) — so
+   both tests were denied on `enforce-project-containment` before the
+   handler under test ever ran, rather than seeing that handler's own
+   verdict. Fixed by requesting the file's own pre-existing (opt-in, not
+   autouse) `project_context` fixture from `conftest.py` on those two tests
+   — the fixture already existed and other classes in the same file already
+   used it correctly.
+2. Three pending release-note callouts (`40`/`41`/`42`, written earlier in
+   this plan for N24/N25) failed `test_pending_release_notes_holding_area.py`'s
+   own shape check: `40`'s filename had an underscore
+   (`strict_mode`), which the `NN-kebab-slug.md` naming rule rejects —
+   `git mv`d to `strict-mode`. `41` and `42` both wrote `**Audience**: operators, security reviewers` — the schema requires exactly ONE of a
+   fixed enum (`operators`/`handler authors`/`client projects`/`everyone`),
+   not a comma list; "security reviewers" was not a recognised value at
+   all. Both narrowed to `**Audience**: operators`, matching this
+   directory's other daemon-behaviour notes.
+3. `CLAUDE/UPGRADES/UNRELEASED/post-upgrade-tasks/05-review-new-denials-from-strict-mode-and-safety-guards.md`
+   (also written for N24; numbered 05 at landing, clear of main's 02) existed on disk with no row in its directory's
+   `README.md` task index, failing `test_repo_hygiene_check.py`'s
+   post-upgrade-index-drift rule. Added the missing row.
+
+None of these three defects were introduced by THIS niggle's B1/B2/M3/init.sh
+work; they were latent since the commits that added each file, only
+surfaced now because a full (not targeted) suite run happened to be part of
+verifying M3. Fixed as small, self-contained corrections rather than left
+broken. Full `tests/integration/` suite green after (previously 7 failed /
+4187 passed / 8 skipped).
+
+### N34 — ✅ Remedied — `secret_file_guard`'s linear scan has enough constant factor to blow past the chain deadline on its own
+
+**Found while measuring N25's deadline margin, on request from the
+coordinator.** `SecretFileGuardHandler` scales LINEARLY with command length
+(confirmed up to 800 KB earlier under N25 Task 3 — doubling the input
+roughly doubles the time), but its constant factor (~12µs/byte, on a hostile
+"many small quoted tokens" command) is steep enough that size alone gets it
+into trouble:
+
+| Size | Wall-clock | % of the 20s `chain.deadline_seconds` budget                                 |
+| ---- | ---------- | ---------------------------------------------------------------------------- |
+| 1 MB | 12.315s    | 61.6%                                                                        |
+| 4 MB | 48.958s    | 244.8% — past BOTH the 20s daemon deadline AND the 30s client socket timeout |
+
+**This exposes a gap in N25's own deadline enforcement**, not a new bug in
+`secret_file_guard` itself: `HandlerChain.execute`'s deadline check
+(`core/chain.py`) runs BETWEEN handlers, in the per-handler loop, before
+each one starts. It has no way to interrupt a handler that is already
+running — so a single handler slow enough to exceed the deadline WITHIN its
+own `matches()`/`handle()` call blows straight through the budget with no
+check-in, and the client's own 30s socket timeout can still be reached
+before the daemon ever responds. At 4 MB, `secret_file_guard` alone
+reproduces the exact failure mode N25 set out to close: a slow handler
+silently allowing everything queued behind it (via the client's ALLOW
+fallback on timeout), just from ONE handler's own runtime rather than from
+being queued behind others.
+
+Originally reported per the coordinator's specific ask ("report
+secret_file_guard's wall-clock at 1 MB and 4 MB so we know its margin
+against the 20s deadline"), which was a measurement, not a remedy at the
+time. The coordinator then asked for remedy 2 (below) to be implemented
+before the security review, since the gap is the same fail-open class N25
+exists to close and could not ship open.
+
+**✅ Remedied**: remedy 2, an externally enforced per-handler deadline, plus
+remedy 3 as defence in depth.
+
+- New module `core/bounded_dispatch.py` (`BoundedDispatcher`): runs a
+  handler's combined `matches()`+`handle()` call on its own DAEMON thread
+  and waits on it with `Future.result(timeout=remaining)`, where `remaining`
+  is whatever is left of the chain's `deadline_seconds` budget when that
+  handler starts — not the handler's own execution time. `HandlerChain. execute` now routes every handler through this when `deadline_seconds` is
+  set (unchanged, fully synchronous, when it is `None`). On expiry the SAME
+  fail-closed verdict N25 already used applies: a `SAFETY`+`BLOCKING`
+  handler not judged in time is denied, naming the handler; anything else is
+  skipped with an advisory note — both pre-check (N25, between handlers) and
+  this new post-dispatch-timeout case now share one `_record_unjudged`
+  helper in `chain.py`.
+- The overrunning call is genuinely abandoned, not killed (Python cannot
+  force-stop a thread) — logged again at WARNING with its actual elapsed
+  time whenever it does finish. Deliberately NOT
+  `concurrent.futures.ThreadPoolExecutor`: its worker threads are
+  non-daemon and CPython registers an `atexit` hook
+  (`concurrent.futures.thread._python_exit`) that JOINS every one of them
+  before the interpreter may exit — discovered live, via the isolated-daemon
+  e2e test below: the daemon's own `stop` hung for the full straggler sleep
+  before this was caught and the dispatcher rewritten onto plain
+  `threading.Thread(daemon=True)` per call. Concurrency is still bounded (16
+  calls at once, by default, via a semaphore): a call beyond that returns
+  `DispatchSaturated` immediately rather than queuing, and is treated the
+  same as a timeout.
+- Remedy 3: a new `daemon.chain.max_safety_input_bytes` config key (default
+  2 MiB), checked once per chain execution against the combined size of a
+  handler's bulk-text `tool_input` fields (Bash `command`, Write `content`,
+  Edit `old_string`/`new_string`). A `SAFETY` handler over the limit is
+  denied/skipped (the same split as above) BEFORE dispatch is even
+  attempted — cheaper than paying thread-dispatch overhead only to be cut
+  off by the deadline regardless. Explicitly NOT the only guarantee — the
+  per-handler deadline bound above already caps worst-case wall clock
+  regardless of size — so it is safe to raise or disable (`null`) as long as
+  `deadline_seconds` stays enforced. `secret_file_guard`'s own constant
+  factor was deliberately left alone, per the coordinator: the guard-defects
+  branch is rewriting `secret_file_matching` onto a shared bounded expander
+  and will profile the 12µs/byte cost there.
+- RED tests: `tests/unit/core/test_bounded_dispatch.py` (the dispatcher in
+  isolation — completes-within-budget, times-out-without-waiting,
+  stray-finishes-in-background, saturation-fails-fast) and new cases in
+  `tests/unit/core/test_chain.py` (a SAFETY handler that oversleeps ITSELF
+  denies within the deadline, not after its own sleep; a slow advisory-only
+  handler allows with an advisory the same way; pool saturation denies; the
+  size cap denies/skips/passes-through in each direction; `deadline_seconds: null` leaves an oversleeping handler fully unbounded, confirming the new
+  mechanism is disabled exactly like the old one). An end-to-end test,
+  `tests/integration/test_n34_deadline_probe_isolated_daemon.py`, starts its
+  own isolated daemon with a 1s configured deadline and a probe handler that
+  sleeps 8s, and asserts over the REAL socket that the client gets its deny
+  back in well under 2s — not after 8s, and nowhere near the client's own
+  30s timeout.
+
 N34 is taken on the `worktree-n466-n24` branch (the chain deadline cannot
 interrupt a running handler) and lands with that branch. N40 is taken there too
 (the fail-open classes behind that branch's security-review blockers). N41 is
@@ -45,6 +724,85 @@ RED confirmed: `find_unnamed_failure_reason` and the six `safe_signal.py`
 branches did not exist/were not exercised before this fix; every new test
 was run and seen to exercise its target line via `--cov-report=term-missing`
 before the fix, then again after.
+
+### N110 — The local full QA gate tests one Python version, so a version-specific defect passes it and fails CI
+
+**Found by the N106 fixer.** N24 passed the full local gate and went red on
+CI. The cause was a cost that is quadratic only from Python 3.12, where
+stdlib `relative_to`/`is_relative_to` walk `path.parents`. The local gate
+runs one venv (`untracked/venv-workspace-py311-…`, Python 3.11), but CI's QA
+job runs 3.11, 3.12 and 3.13. So "gate green" does not imply "CI green" for
+any behaviour that differs between versions, and a merge made on gate
+evidence can turn main red.
+
+**Remedy:** make the gate cover every CI Python version, or at least the
+newest one alongside the oldest. For example, run the tests stage under
+each interpreter `uv` can provide, keeping the other stages on one. Or have
+the gate state which versions it ran and refuse to call itself a merge gate
+when that set is narrower than CI's matrix. Pin it with a test that reads
+the CI workflow's matrix and compares it to what the gate runs.
+
+### N105 — A skill redeploy leaves an untracked, unignored `.claude/hooks-daemon-backups/`
+
+**Found by upgrade review 11 (L9), confirmed by upgrade round 16a.**
+`install/skills.py` `_preserve_replaced_skill` moves a deployed skill that
+differs from the shipped one into `.claude/hooks-daemon-backups/skills/<name>`.
+Neither this repository's `.gitignore` nor the deployed `.claude/.gitignore`
+template ignores that directory. So after a dogfood redeploy, or a client
+upgrade that replaced an edited skill, `git status` shows
+`?? .claude/hooks-daemon-backups/`, and a careless `git add -A` commits the
+backup.
+
+**Remedy:** add `/hooks-daemon-backups/` to the deployed `.claude/.gitignore`
+template and to this repository's `.gitignore`. Test: run `deploy_skills`
+over an edited skill, then check that `git status --porcelain` is empty.
+(The upgrade-scripts branch covers the directory in its snapshot, so a
+failed upgrade removes a copy it created.)
+
+**Remedied on `worktree-n466-n105`.** Added `/hooks-daemon-backups/` to
+`.claude/.gitignore` (the same file `install.py`'s `show_gitignore_instructions`
+reads as the client template — `daemon_dir / ".claude" / ".gitignore"` — so
+this one edit covers both the fresh-install template and this repository's own
+copy). Added a post-upgrade task for existing clients whose `.claude/.gitignore`
+predates the fix. RED test:
+`TestSkillRedeployLeavesCleanGitStatus` in
+`tests/claude_code_hooks_daemon/install/test_skills.py`, covering both a
+client-install layout and this dogfood repository's layout.
+
+### N101 — `secret_file_guard` fails closed with `TooManyToEnumerateError` on ordinary `python3 - <<'EOF'` commands
+
+**Found by N38 fix round 11** (report `260926-n38-fix11-opus-5-5.md` on the
+N38 branch). The live daemon on main twice denied an ordinary Bash command
+with `TooManyToEnumerateError`. Both were quoted-heredoc Python programs,
+one editing `secret_file_guard.py` and one building recovery-cron hook
+inputs, and neither named a protected path. The guard enumerates the
+spellings a command could expand to, and a heredoc body with many
+brace-, glob- or bracket-like characters exceeds the bound. Failing closed
+is right for a command that could really expand to a protected name. Here
+the body is data handed to `python3`, so a legitimate command is denied.
+
+**Remedy:** reproduce with a python heredoc from those commands. Establish
+whether the enumeration should run on a quoted-heredoc body at all: it is
+fed to an interpreter, not expanded by the shell, so its bytes are not
+shell words. Keep fail-closed where the shell does expand the text. Pin both
+cases. It touches the guard that guard-defects just changed, so it goes on a
+fresh branch from main.
+
+### N100 — A continuation on a heredoc opener line (`cat > s.sh \⏎<<'EOF'`) denies a body that is only written
+
+**Found by N38 reviews 6 to 9 (candidate 4), unchanged on main.** When the
+redirect and the `<<'EOF'` sit on two physical lines joined by `\`+newline,
+the quoted-delimiter exemption is not granted, so a body that `cat` only
+writes is judged as a command. It is the documented fallback shape for
+writing a script that mentions a guarded word, so it fails where the docs
+send people.
+
+**Remedy:** join continuations before deciding the heredoc receiver, using
+the N38 lexer, and pin that the continued and single-line forms get the
+same verdict. It goes on the executed-body branch with N87 to N89 and N93,
+after N38.
+
+> > > > > > > main
 
 ### N99 — `dev-handlers.md` offers an agent a wrapper command that the daemon denies
 
@@ -193,6 +951,16 @@ caller that routes events without it is fully locked out.
 the root. A command that writes nothing cannot escape the project. Keep
 fail-closed for a command that does name a target, and pin both with tests.
 
+**Done, on `worktree-n466-n84-n90`:** `_offending_targets()` now reads
+`_named_targets()` first and returns `[]` immediately when it is empty,
+before `_resolved_root()` is ever called. A command that names a target
+still resolves the root and stays fail-closed if that raises. Pinned in
+`tests/unit/handlers/pre_tool_use/test_project_containment.py`
+(`TestAnUnresolvedRootDoesNotLockOutTargetlessCommands`): with
+`ProjectContext.project_root` patched to raise, a no-target command
+(`git status`) is allowed and `project_root` is never called, while a
+targeted `Write` still raises.
+
 ### N89 — A data-sink receiver is trusted after the command redefines it
 
 **Found by N38 review 6 (ledger candidate 3).** `cat() { bash; }; cat <<'E'`
@@ -272,6 +1040,15 @@ nothing reported them.
 **Remedy:** teardown asserts `stop` exits 0 and that the pid is gone, and
 a test pins that a failed stop fails the test.
 
+**Done, on `worktree-n466-n84-n90`:** the `daemon_process` fixture's
+teardown now reads the daemon's pid from `pid_path` before calling `stop`,
+then runs `_assert_stopped_cleanly(stop_result, pid)`, which asserts
+`stop` exited 0 and that the pid no longer answers to signal 0. Pinned in
+`tests/integration/test_daemon_smoke.py::TestAssertStoppedCleanly` without
+starting a real daemon: a nonzero exit code fails, a pid that is still
+alive after a reported success fails, and a clean stop with no surviving
+pid passes.
+
 ### N83 — A parametrised live-daemon test skips its own `tests` case
 
 **Found by the coordinator in CI run 36171017537.**
@@ -284,6 +1061,8 @@ failure.
 a separate test that asserts `tests` reaches the daemon through
 `tests/acceptance`.
 
+**Remedied at commit `21a134f1e`.**
+
 ### N82 — A "design test" has been skipped as "implementation pending" since the registry-key work
 
 **Found by the coordinator in CI run 36171017537.**
@@ -295,6 +1074,11 @@ handler's config key from its `HandlerID` constant, not from
 **Remedy:** check whether the registry now uses the constant. If it does,
 turn the skip into a real assertion. If not, implement the lookup RED-first
 and delete the skip.
+
+**Remedied at commit `637fc735a`.** The registry already derived the key
+from the constant (`_get_config_key_from_constant`); the skip was replaced
+with a real assertion over every handler `iter_builtin_handler_classes()`
+yields.
 
 ### N81 — `sed_blocker` denies a Bash heredoc that writes markdown, and a strict xfail pins the defect
 
@@ -309,6 +1093,14 @@ is the owner's call.
 to exempt a write whose only target is a `.md` file and whose sed text is
 never executed. Flip the xfail into a passing test and remove the marker,
 then update the guidance.
+
+**Remedied at commit `e445fecc3`.** A fifth exemption checked with
+`bash_write_destinations()` (the same public, shared redirect-target parser
+`project_containment` and `get_written_file_paths()` are built on): every
+AUTHORED destination must end in `.md` and the sed text must never be
+EXECUTED. `get_claude_md()` and the class docstring now state the Bash
+`.md` exemption is narrower than `Write`'s unconditional one, not
+equivalent to it.
 
 ### N80 — A script overwritten earlier in the same command by an unlisted writer is judged by its old content
 
@@ -1047,7 +1839,7 @@ covers the record identity, the attribution window, every retro-attribution
 and hot-reload backfill guard (each asserted on the `/model` payload or the
 exported state it owns), and the export round-trips.
 
-### N46 — `budget_exhaustion_detector` fires on a tool result that merely contains budget wording
+### N46 — ✅ Remedied — `budget_exhaustion_detector` fires on a tool result that merely contains budget wording
 
 **Found by the guard-defects review-6 agent.** Reading a diff whose source
 code contained the string "exceeded its byte budget" raised the "budget
@@ -1059,6 +1851,179 @@ output. A false alarm like this teaches agents to ignore the real one.
 meaning its exact shape and source. Never match free text inside a tool
 result's content, such as a file or a diff. Add a RED test that reads a file
 containing the phrase and expects no alert, and keep the real signal firing.
+
+**First remedy (superseded — patched one spelling, not the class).** Added
+`git`/`diff` to a `_CONTENT_PASSTHROUGH_VERBS` allowlist. Coordinator review
+correctly rejected this: any OTHER command that prints file content (`rg`,
+`awk`, `sed -n`, `less`, `python -c`, `bat`, `xxd`, `gh pr diff`, a `curl` of
+a raw file, ...) still fired, because a verb allowlist can only ever cover
+the verbs someone thought to list, and the next false positive just names
+another one.
+
+**Remedied (fix the other way round).** Established exactly where the
+harness's real signal appears: BUDGETS.md confirms exactly ONE channel and
+shape — the `WebSearch` tool's own `tool_response`, replaced verbatim with
+"Web search was not performed"/"web search budget" when the session's
+search budget is exhausted. Everything else the handler matched (a generic
+"budget"/"quota"/"limit reached" family, applied to ANY non-excluded tool's
+response) had no confirmed channel and was the repeat false-positive source
+(Plan 00400 N4 via `ps`; this entry via `git diff`) — removed rather than
+re-scoped, since a keyword cannot tell a delivered message from a file that
+merely discusses one.
+
+The handler now matches channel-scoped `_Signal(tool_names, pattern)` pairs
+(currently just `{"WebSearch"}` paired with the pinned fragment) instead of
+a bare pattern list: a signal is only even considered when the event's
+`tool_name` is one of its declared channels, so a diff, a log or a file's
+own prose is structurally unable to trigger a signal that only ever arrives
+through a different tool. `Bash` joins the default excluded tools outright
+— its `tool_response` is the model's own invoked command output, the same
+free-form class as a file's own content, and no tool the harness itself
+rate/quota-limits is reached by running a shell command, so nothing Bash
+prints is ever this handler's confirmed channel. The whole
+verb-allowlist/self-referential-command-marker machinery
+(`_CONTENT_PASSTHROUGH_VERBS`, `_is_content_passthrough_command`,
+`_leading_verb`, `_SELF_REFERENTIAL_COMMAND_MARKERS`) is deleted rather than
+kept dormant, since it embodied exactly the allowlist pattern this project
+rejects. An admin who has confirmed their OWN CLI reports a genuine quota
+signal through Bash can still re-include `"Bash"` via `excluded_tools` and
+pair it with a specific `extra_patterns` regex of their own — a structural
+marker they supply, not a keyword this handler guesses at.
+
+`TestNoArbitraryBashStdoutScanned` in
+`tests/unit/handlers/post_tool_use/test_budget_exhaustion_detector.py`
+RED-verified `rg`, `awk`, `python -c`, `git diff` and even a live `curl`
+fetch through Bash never fire regardless of the phrase they print, and that
+the real signal still fires through its own WebSearch channel. Swept
+`model_fallback_detector` and `model_fallback_records` for the same class:
+both already match the transcript's own structural JSON record shape
+(`subtype == "model_refusal_fallback"` / a `fallback`-typed content block),
+never a free-text keyword scan, so no free-text quoting of the phrase
+inside file content can trigger them — no fix needed there.
+
+**Review 1 (guard-defects reviewer, `260925-n46-review1-opus-5-5.md`) found
+the fix incomplete and added a second channel-scoped signal.** The
+`{"WebSearch"}` channel above covered a false positive that had already
+happened; it did nothing for the failure mode this very session hit — a
+dispatched sub-agent (Task/Agent) silently cut off mid-task by a harness
+weekly/session usage limit, with no alert surfaced to the lead. Added a
+second `_Signal`, `{Task, Agent}` (via the shared
+`SUBAGENT_DISPATCH_TOOL_NAMES` constant) paired with an `\A`-anchored
+pattern on "Agent terminated early due to an API error: You've hit your
+(session|weekly) limit...", so a sub-agent's own prose merely QUOTING that
+phrase mid-response (not at the start) cannot match. `Task`/`Agent` are
+removed from the default `excluded_tools` — they previously had no signal
+of their own so exclusion cost nothing, but a blanket exclusion now would
+silently drop the one signal this handler most needed. `_stringify_tool_response`
+was changed to read a dict `tool_response`'s own `"content"` field directly
+rather than JSON-dumping the whole envelope, so the anchor matches the true
+message start, not a `{"content": "` wrapper prefix. The advisory for this
+signal names which dispatch died (its `description` or `subagent_type`) and
+tells the lead to re-brief it once the limit resets.
+
+The review also found and fixed: Black on
+`tests/unit/utils/test_reserved_word_command_heads.py`; `HANDLER_REFERENCE.md`
+still describing the removed generic-keyword behaviour; a missing
+config-changes manifest entry (`v3.67.0.yaml`) for the `excluded_tools`
+default flip, with a migration note for a project whose `extra_patterns`
+targeted Bash per the v3.60.0 note; an over-claimed "confirmed" channel
+wording and a stale `CLAUDE_CODE_MAX_WEB_SEARCHES_PER_SESSION` env-var
+name, corrected at all three sites named; a vacuous
+`test_excluded_tools_configurable` test rewritten to target `WebSearch`
+(the one tool that can genuinely be suppressed) instead of `Bash` (which
+can never fire regardless of the option, post-fix); duplicated
+`TestNoArbitraryBashStdoutScanned` coverage collapsed to the one case that
+matters (`git diff` reproducing "exceeded its byte budget"); and two stale
+one-line comments in `.claude/hooks-daemon.yaml` and `init_config.py`
+describing the removed generic family. A documented `maxTurns`
+partial-output marker was left for a follow-up niggle if its verbatim shape
+is ever captured — the review flagged it as conditional ("if its verbatim
+shape is in the vendored docs or the transcripts"), and no such shape was
+found in either.
+
+**Review 2 (`260925-n46-review2-opus-5-5.md`) found review 1's Agent signal
+never fired on any real payload, and fixed the shape.** The documented
+`PostToolUse:Agent` `tool_response.content` (hooks.md:1775-1787) is an
+ARRAY of `{"type": "text", "text": ...}` blocks, not the bare string every
+review-1 test fed it; the reviewer's replay of 351 real Agent/Task results
+(`probe_n46r2_replay.py`) found 0 of 4 real occurrences firing and 0 false
+positives -- vacuous, not merely imprecise. `_stringify_tool_response` (now
+`_stringify_tool_response(tool_name, tool_response)`) gained
+`_join_text_blocks`, joining a list `content`'s `type == "text"` blocks in
+order; re-running the same replay after the fix fires 3 of 4 real
+occurrences (all `completed`-status), 0 false positives over 347 ordinary
+results. The 4th real occurrence (`is_error: true`) is delivered as a bare
+string to `PostToolUseFailure`, a DIFFERENT event this PostToolUse handler
+does not receive (hooks.md:2108-2151). The coordinator rejected leaving
+this as a follow-up niggle: a new sibling handler,
+`agent_terminated_early_failure_detector` (the first handler on
+`handlers/post_tool_use_failure/`), matches the same harness text -- as
+the top-level `error` field's own shape, `Error: Agent terminated early...`,
+anchored and tail-gated the same way -- channel-scoped to Task/Agent, and
+imports `dispatch_identity` (renamed from `_dispatch_identity`, now public
+for this cross-package reuse, the same shape `recovery_cron_advisor`'s
+`declares_failsafe_cron` already has) rather than duplicating the identity
+logic. Replaying all four real occurrences through BOTH handlers together
+(`probe_n46r3_combined_replay.py`) was reported as firing 4 of 4 at the
+time, 0 false positives over 362 ordinary results -- but that replay fed
+the failure handler the transcript's `toolUseResult` string (`"Error: " + content`), not the bare `error` field the live daemon actually sends;
+review 3 (below) found this made the count vacuous for the real shape --
+against the real hook it was 3 of 4 (the three `completed` occurrences
+only) until the anchor was fixed. For dispatch
+tools specifically, `_stringify_tool_response` no longer falls back to
+`json.dumps` of the whole `tool_response` dict when `content` is absent
+(an `async_launched`/`teammate_spawned` launch, 264 of 351 real results):
+that dict's other fields are the orchestrator's own dispatch `prompt` and
+run telemetry, and falling back to them let a project's `extra_patterns`
+fire on the BRIEF rather than the sub-agent's own reported text
+(review-2 MINOR-3) -- it returns `""` for that shape instead, which is
+also the honest expression of MINOR-4's foreground-only finding: 264 of
+351 real dispatches never reach `completed` through PostToolUse at all, so
+this signal cannot and does not attempt to cover them (Plan 00470 Tasks
+3.1/3.2 own that separate channel, via StopFailure/Notification).
+`_dispatch_identity` now reads `tool_input.name` FIRST (the handle a
+re-brief needs, set on 243 of 351 real calls; review-1's version ignored
+it entirely), falling back to `description`, `subagent_type`, then the
+`tool_response`'s own `agentId` before "an unnamed dispatch" (review-2
+MINOR-4). The anchor also now requires the harness's stable
+`(error type rate_limit, HTTP 429` tail nearby (review-2 NIT-6), so a
+report that merely opens with the bare sentence and nothing else does not
+match. The config-changes manifest's migration note had the operator
+instruction backwards (review-2 MAJOR-1: "add Bash back to `excluded_tools`"
+restores nothing -- it EXCLUDES Bash further; corrected to "set
+`excluded_tools` explicitly to the default WITHOUT Bash"). The
+review-1-introduced session UUID in the committed review-1 report and the
+release note's number (34, which also collided on sibling worktree
+branches) are addressed separately per the coordinator's own instructions
+for this round (history rewrite onto a clean branch; renumbered to 33
+against main's actual maximum of 32).
+
+**Review 3 found the new PostToolUseFailure handler's anchor required a
+prefix the live daemon never sends.** The regex demanded a leading
+`Error:\s*`, but Claude Code v2.1.282's real `error` field carries the BARE
+tool_result content (`error: ur`) -- the `Error: ` prefix belongs only to
+the transcript's own SEPARATE `toolUseResult` recording of the same
+occurrence (`toolUseResult == "Error: " + content`, confirmed across 2906
+real is_error results; the vendored contract's own Bash example,
+`"Exit code 1\n..."`, is unprefixed too). So the handler missed the one
+real death it exists for. Fixed by making the prefix optional
+(`(?:Error:\s*)?`), keeping the anchor; the test suite's primary fixture is
+now the bare-content shape, with the prefixed transcript shape kept as a
+second case. Re-running the combined replay -- this time feeding the
+failure handler the tool_result block's own CONTENT rather than
+`toolUseResult` -- fires 4 of 4 real occurrences, 0 false positives over
+366 ordinary results. A separate check against every real `is_error: true`
+tool_result content across the whole corpus (all tools, not just Task/
+Agent -- 3216+ such contents; the exact count grows as the corpus does)
+confirms the fixed anchor fires on the one real death among them, with 0
+false positives over the rest (`probe_n46r7_fixcheck.py`). Also caught in
+this round: a leading U+FEFF byte-order mark defeated `\s` in both this
+anchor and its PostToolUse sibling's (`_AGENT_TERMINATED_EARLY_RE`), fixed
+by tolerating an optional BOM in each; a stale sibling-module name
+(`agent_terminated_early_detector`, missing `_failure`) in
+`budget_exhaustion_detector.py`'s `dispatch_identity` docstring, corrected;
+and the new handler's class docstring broke mid-sentence on its first
+line, truncating its row in the generated `.claude/HOOKS-DAEMON.md`.
 
 ### N45 — A NUL byte in a configured word-list path makes the never-raising secret-term lookup raise
 
@@ -1133,6 +2098,11 @@ UNION the last-known-good snapshot's lists, the same set degraded
 mean "redact nothing". Pin it with a degraded-start test that captures a
 payload containing a term and asserts the term is redacted. Being fixed on
 `worktree-d-00421`.
+
+**Same root cause as N24 review 2's P2** (degraded mode turns guards off): a
+degraded daemon resolves nothing through the config it could not load. Both
+are fixed by that branch's `daemon/degraded_mode.py` and
+`secret_redaction.use_degraded_word_lists`, and not on the N24 branch.
 
 ### N42 — Quoted-heredoc blanking hides text that bash executes from the Bash command guards
 
@@ -1999,7 +2969,7 @@ test rather than given their own zero guard.
     `test_a_walker_enumerates_through_the_shared_walk` failed for all 16
     walkers. Examined counts on this repository are unchanged.
 
-### N25 — a slow handler runs out the client's 30 s budget, and a timeout is an ALLOW for the whole PreToolUse chain
+### N25 — ✅ Remedied — a slow handler runs out the client's 30 s budget, and a timeout is an ALLOW for the whole PreToolUse chain
 
 **Found by the guard-defects security review 2**
 ([report](subagent-reports/260924-n466-guards-review2-opus-5-5.md), B1 and
@@ -2035,7 +3005,70 @@ daemon that is merely slow (an overloaded host) would then block every tool
 call. The deadline belongs inside the daemon, where it can tell safety
 handlers from advisories.
 
-### N24 — `daemon.strict_mode` never reaches the live daemon, so every guard fails OPEN on a handler exception
+**✅ Remedied.** All three candidate remedies landed, on the same branch as
+N24 (which this depends on for its fail-closed wording):
+
+1. `ChainConfig.deadline_seconds` (`config/models.py`) is a new config key,
+   default `Timeout.CHAIN_DEADLINE_DEFAULT = 20` (seconds), threaded through
+   `DaemonController.initialise()` -> `process_event()` ->
+   `EventRouter.route()` -> `HandlerChain.execute()` the same narrow-slice DI
+   idiom N24 used for `strict_mode`. Inside `execute()`'s per-handler loop, a
+   deadline check runs before each handler: once exceeded, every remaining
+   SAFETY+BLOCKING handler is denied under N24's fail-closed rule with a "not
+   judged in time" reason naming the handler; every other remaining handler
+   is skipped with an advisory note instead of running. `deadline_seconds: None` disables enforcement entirely. Unit coverage: `test_chain.py`,
+   `test_router.py`, `test_chain_config.py`, `test_controller.py` (deadline
+   reaches the router end-to-end).
+2. `strip_inert_spans` (via `shell_segmentation.py`) is now linear. The root
+   cause was the same shape in three places: `strip_message_bodies`'s
+   segment/binary/subcommand resolution and `strip_quoted_heredoc_bodies`'s
+   substitution-depth and receiving-segment lookups all re-derived
+   prefix-dependent state from scratch (`command[:match_start]`) for every
+   regex match, instead of advancing incrementally in the guaranteed
+   left-to-right match order. Replaced with three stateful trackers
+   (`_SegmentTracker`, `_SubstitutionDepthTracker`, `_LastNewlineTracker`)
+   that each bound their per-match cost to the gap since the previous query.
+   Reproduced review 2's exact repros directly: the 40000-`-m`-flag case
+   (99.179s on main) now runs in 0.139s; the 5000-heredoc case (98.342s on
+   main) now runs in 0.453s. Timing tests pinned at 200 KB in
+   `tests/unit/utils/test_shell_segmentation_performance.py`; full
+   `destructive_git`/`curl_pipe_shell`/`shell_segmentation` regression stays
+   green.
+3. `tests/unit/handlers/test_safety_handlers_hostile_input_performance.py`
+   drives every `HandlerTag.SAFETY` `pre_tool_use` handler (23 of them,
+   discovered via `iter_builtin_handler_classes()`, never a hardcoded list)
+   with four hostile shapes — many small quoted/backslashed/wildcarded
+   tokens (the shape that actually caused #2's bug: many MATCHES, not one
+   giant token) and deep `$(...)` nesting — against both a `Bash` command
+   payload and a `Write` file-content payload, each under a 5s bound at
+   100 KB. Found no other super-linear handler. One handler,
+   `SecretFileGuardHandler`, is markedly slower than its peers (~1.3s at
+   100 KB vs \<0.25s for everything else) but measured LINEAR up to 800 KB
+   (doubling input doubles time) — a high constant factor, not a
+   superlinearity bug, so it is noted here rather than "fixed": worth a
+   follow-up look if it ever becomes a real bottleneck, but out of this
+   niggle's scope (which is specifically superlinear paths).
+
+**Harness extended (guard-defects review 3 follow-up).** Review 3 found a
+DIFFERENT class from the 100 KB-scale shapes above: COMBINATORIAL blowup on
+a SHORT input — `echo {a,b}` x20 (110 bytes) took 36s on a guard whose bug
+lives on the `guard-defects`/`463` branches, not this one.
+`TestCombinatorialSmallInputShapesStayLinear` (same file) adds brace
+expansion (x16/x20/x24), nested braces, `/**/` and `**/*` globs, bracket
+classes, and deep `eval`/`bash -c` nesting, all under 300 bytes, applied to
+both a `Bash` command and a `Write` `file_path`. It also sweeps this
+repository's own `.claude/project-handlers/` (`enforce_llm_qa` included)
+best-effort, via the same `ProjectHandlerLoader` the daemon uses — 28
+handlers swept in total. Clean on this branch (27/27 pass, ~7s): expected,
+since the vulnerable code these shapes target is not present here yet — the
+harness is the "class detector" the guard-defects/463 branches fix against,
+not a fix itself. Measuring `secret_file_guard`'s margin against the 20s
+deadline at 1 MB/4 MB (requested alongside this) surfaced a related but
+DISTINCT gap, filed separately as N34: the deadline check in `chain.py`
+only runs BETWEEN handlers, so one handler slow enough within its OWN
+execution is not covered at all.
+
+### N24 — ✅ Remedied — `daemon.strict_mode` never reaches the live daemon, so every guard fails OPEN on a handler exception
 
 **Found by the guard-defects security review 2**
 ([report](subagent-reports/260924-n466-guards-review2-opus-5-5.md), M3), with a
@@ -2068,6 +3101,135 @@ so here the crash denied" is false.
 RED tests: a live-path daemon with `strict_mode: true` denies on a raising
 handler; a SAFETY+BLOCKING handler that raises denies even with `strict_mode`
 off; a non-safety advisory handler that raises still allows, and says so.
+
+**✅ Remedied.** Both halves landed:
+
+1. `DaemonController` gained a narrow-slice `_strict_mode` (Plan 00466 N24),
+   the same DI idiom `_chain_config`/`_verdict_log_config` already use:
+   `initialise(strict_mode=...)` sets it, `process_event` reads
+   `self._strict_mode` instead of the never-populated `self._config`.
+   `_build_initialised_controller` (`daemon/cli.py`) threads
+   `config.daemon.strict_mode` through, so the real startup path (`cmd_start`
+   → `_build_initialised_controller` → `initialise()`) now actually carries
+   it. Unit coverage: `tests/unit/daemon/test_cli_strict_mode_wiring.py`
+   (the `_build_initialised_controller` DI slice) and
+   `tests/unit/daemon/test_controller.py` (through `get_controller()` +
+   `initialise(strict_mode=...)`, both True and False).
+2. `HandlerChain.execute` (`core/chain.py`) now denies unconditionally, on
+   any raise from `matches()` or `handle()`, when the handler carries both
+   `HandlerTag.SAFETY` and `HandlerTag.BLOCKING` — independent of
+   `strict_mode`. The reason names the handler and the underlying exception
+   ("evaluation error, denied for safety"), distinct from the strict-mode
+   "SYSTEM ERROR" wording so a verdict log can tell the two paths apart.
+   Non-safety/advisory handlers keep the pre-existing fail-open behaviour.
+   Unit coverage: `tests/unit/core/test_chain.py` (5 new cases: raise in
+   `handle()`, raise in `matches()`, the SAFETY-without-BLOCKING negative
+   control, the non-safety negative control, and strict_mode's own wording
+   still winning when both apply).
+
+Also added an acceptance-level, live-daemon check
+(`tests/integration/test_n24_strict_mode_probe_isolated_daemon.py`) that
+proves the wiring end-to-end against a real daemon process, without
+depending on N5's lifecycle: a probe handler raises ONLY for a payload
+marked `synthetic_source: n24-probe`, which no real Claude Code session ever
+sends. It started as a permanent file under this repository's own
+`.claude/project-handlers/` plus a socket test against the already-running
+shared daemon; both are now gone, superseded by this file, which starts its
+own isolated daemon (the same pattern `test_daemon_smoke.py` uses) in a tmp
+project and writes the probe's source into that tmp project's own
+`.claude/project-handlers/` before starting it — a probe this narrow has no
+business permanently installed in a maintainer-visible directory meant for
+genuinely useful project handlers.
+
+**NUL-byte realpath sweep (guard-defects review 2, m3, follow-up).** The
+fuzzer found `sensitive_content` raising `ValueError: embedded null byte`
+from a `realpath` call on 485/12000 fuzzed Write/Edit paths. With N24's
+Part 2 fix this had already stopped being a silent bypass (it denies as
+"evaluation error, denied for safety"), but that is the generic
+chain-level catch-all, not a clear handler-specific reason — so the raise
+itself is still a defect worth fixing at its source, four places:
+
+1. `core/workspace.py`'s `ProjectRegistry.for_path`/`layout_for` both called
+   `file_path.resolve()` unguarded — the shared root cause behind THREE
+   handlers, since it is reached via the `Handler.layout_for()` base method:
+   `error_hiding_blocker`, `security_antipattern` and `secret_file_guard`
+   (via `_is_excluded`), plus `sensitive_content` itself. A new
+   `_resolve_or_self` helper catches `(OSError, ValueError)` and falls back
+   to the unresolved path, which safely fails to match any real declared
+   project and so falls through to the same root-project/root-layout answer
+   an ordinary undeclared path already gets — never a crash, matching both
+   methods' own "never returns None" contract. Unit coverage:
+   `tests/unit/core/test_project_registry.py::TestAnUnresolvableFilePathDoesNotRaise`.
+2. `secret_file_guard`'s OWN separate raise: `utils/secret_file_matching.py`'s
+   `path_is_protected` calls `os.path.realpath` and only caught `OSError`,
+   not `ValueError`. Widened to `(OSError, ValueError)` — a NUL-bearing path
+   cannot BE a symlink to anything, so there is nothing for the realpath
+   check to discover; the raw-path glob match (which already ran first)
+   still stands. Unit coverage:
+   `tests/unit/utils/test_secret_file_matching.py::TestPathIsProtected::test_nul_byte_in_path_does_not_raise`.
+3. `issue_filing_gate`'s `_read` calls `path.stat()` on a `gh --body-file`
+   path and only caught `OSError`, not `ValueError`. Widened the same way —
+   still just "could not be read", the existing refusal-not-pass verdict.
+   Unit coverage:
+   `tests/unit/handlers/pre_tool_use/test_issue_filing_gate.py::TestABodyItDidNot::test_a_nul_byte_in_the_body_file_path_is_denied_not_raised`.
+4. `project_containment` was ALREADY safe: its `_is_within` wraps
+   `Path(candidate).resolve().relative_to(container)` in a single
+   `except ValueError:`, which already catches `.resolve()`'s NUL-byte raise
+   the same way it catches `.relative_to()`'s mismatch — no fix needed.
+
+`sensitive_content` itself gets a DIFFERENT, deliberate treatment beyond
+just "does not crash": a NUL byte can never appear in a real filesystem
+path, so a Write/Edit `file_path` carrying one is now denied OUTRIGHT with
+a clear, handler-specific reason ("file_path contains an embedded NUL
+byte...") — this is a classic path-truncation attack shape, and letting the
+now-safe fallback silently continue to "not excluded, not the secret list,
+scan whatever haystacks come back" would have been the wrong verdict even
+though it would no longer crash. Checked via `matches()` before any haystack
+computation runs, both `Write` and `Edit`. Unit coverage:
+`tests/unit/handlers/pre_tool_use/test_sensitive_content.py::TestNulByteFilePathIsDenied`.
+
+Swept every `HandlerTag.SAFETY` `pre_tool_use` handler (23, the same
+dynamic discovery as N25 Task 3) with NUL-bearing Write/Edit/Bash payloads
+after all four fixes: none raise.
+
+The N5 and N11 entries' "this repository runs `strict_mode: true`, so here
+the crash denied" claim is corrected below, in place, rather than restated
+here.
+
+**Review 2's pre-existing observations** (the N24/N40 review 2 report, P1 and
+P2), taken into scope by the coordinator:
+
+- **P2, degraded mode switches guards off.** An invalid config sends the
+  daemon DEGRADED, and that mode then ALLOWS `curl | bash` and skips project
+  SAFETY handlers. This is the same root cause as N43: a degraded daemon
+  resolves nothing through the config it could not load. It is NOT fixed on
+  this branch, because Plan 00421's branch `worktree-d-00421` already fixes
+  both. It adds `daemon/degraded_mode.py`, which runs every SAFETY or
+  BLOCKING built-in and project handler at its defaults, widened by the
+  last-known-good snapshot and HEAD's config. A `FailClosedGuard` stands in
+  for any guard that cannot be built. It also tags `curl_pipe_shell` SAFETY,
+  and redacts with `use_degraded_word_lists` (N43). A second mechanism here
+  would duplicate that one and conflict with it in `controller.py`.
+- **P2, nested layout.** The fix is on this branch. `get_project_path`
+  walked past a project whose own config failed to load, so the daemon ran
+  on the ENCLOSING repository's config and reported that file's unrelated
+  error. A directory whose `.claude/` holds `hooks-daemon.yaml` is now the
+  project root, valid or not, and a broken config there exits with its own
+  error. `load_transport_config` also stopped searching upward. Tests:
+  `TestGetProjectPath` in `tests/unit/daemon/test_cli_commands.py`, and
+  `test_load_transport_config_never_reads_an_enclosing_projects_config`.
+- **P1, silently skipped per-event socket.** The server records each skipped
+  event (path length, bind, chmod, a symlinked events dir) with its reason.
+  `health` goes degraded with the `event_sockets` reason and lists
+  `event_socket_skips`, and `status` and `check` name each event. The events
+  dir already falls back to a short directory. Test:
+  `TestSkippedSocketsReachHealth` in `test_event_socket_listeners.py`.
+- **`CLAUDE_HOOKS_SOCKET_TIMEOUT` below the deadline.** A PreToolUse socket
+  timeout still denies. The deny reason, its context and the stderr line now
+  name the variable and its value, and say it is shorter than the chain
+  deadline. `init.sh` carries a pinned copy of `Timeout.CHAIN_DEADLINE_DEFAULT`,
+  so the comparison is against the default. A project that configures a
+  different deadline is not seen by the client.
 
 ### N23 — `recovery_cron_advisor` hands one request's lifecycle phase to another, through the singleton
 
@@ -2186,7 +3348,7 @@ On all 65 scanned scripts, the new tokeniser extracts the same 227 functions and
 
 ### N11 — any exception in `secret_file_guard.matches()` lets the call through unless `strict_mode` is on
 
-**Found by the 00466 review** (major M4, `subagent-reports/260924-n466-review-opus-5-5.md`). N5's crash was the second time an exception in this guard's `matches()` skipped the guard entirely; Plan 00357 was the first. Under the default `strict_mode: false` the chain logs the exception and allows the call. This repository runs `strict_mode: true`, so here the crash denied, but a client on the defaults fails open. One raise path is still live after N5, though it isn't exploitable: a file path containing a NUL byte.
+**Found by the 00466 review** (major M4, `subagent-reports/260924-n466-review-opus-5-5.md`). N5's crash was the second time an exception in this guard's `matches()` skipped the guard entirely; Plan 00357 was the first. Under `strict_mode: false` the chain logs the exception and allows the call. **Correction (N24, guard-defects security review 2):** the sentence that stood here — "This repository runs `strict_mode: true`, so here the crash denied" — was false. `daemon.strict_mode` never reached the live daemon (see N24, now remedied), so a crash here fell open in EVERY install, including this repository's own, whatever `hooks-daemon.yaml` declared. With N24's fix live, a crash here now denies in this repository (`strict_mode: true`) and, independently, would also deny on any install once this guard is tagged `SAFETY`+`BLOCKING` (it already is) — see N24's Part 2. One raise path is still live after N5, though it isn't exploitable: a file path containing a NUL byte.
 
 **Candidate remedy:** make the guard structurally fail closed. A raise anywhere in its match or route computation becomes a deny naming the internal error, whatever the global `strict_mode`, because a protected-read guard that fails open is worse than a false deny. Pin it with a test that injects an exception at each stage. Then audit the other security guards that should behave the same (`sensitive_content`, `project_containment`, the destructive-git rules) and decide each one explicitly.
 

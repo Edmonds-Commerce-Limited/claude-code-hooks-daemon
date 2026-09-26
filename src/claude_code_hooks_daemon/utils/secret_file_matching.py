@@ -44,9 +44,11 @@ from claude_code_hooks_daemon.utils.command_evasion import (
     strip_transparent_reserved_words,
 )
 from claude_code_hooks_daemon.utils.path_exclusion import (
+    first_matching_glob,
     path_matches_globs,
     resolve_project_root,
 )
+from claude_code_hooks_daemon.utils.realpath import has_symlink_loop, realpath
 
 logger = logging.getLogger(__name__)
 
@@ -262,18 +264,43 @@ def path_is_protected(file_path: str, patterns: tuple[str, ...]) -> bool:
     innocuous while the target is protected, and vice versa — both spellings
     must be guarded or the symlink is a one-call bypass.
     """
+    return protecting_pattern(file_path, patterns) is not None
+
+
+def protecting_pattern(file_path: str, patterns: tuple[str, ...]) -> str | None:
+    """The first of ``patterns``, in order, protecting ``file_path`` or its realpath.
+
+    :func:`path_is_protected` for a caller that must also name the glob. It
+    resolves the realpath ONCE for the whole list: asked one pattern at a
+    time, each call walked every component of the path again, which for a
+    90 KB-deep ``file_path`` cost seconds (Plan 00466 N40 review 2 nit 4).
+    """
     if not file_path or not patterns:
-        return False
+        return None
+    if has_symlink_loop(file_path):
+        # Plan 00466 N24 review 4 (team-lead follow-up on R4-B1): once a
+        # loop is hit, os.path.realpath's own answer for the rest of the
+        # path is version-dependent, so the realpath comparison below cannot
+        # be trusted to catch a protected file reached through one. Treat a
+        # loop as protected by every pattern rather than let a version
+        # difference decide whether a secret is guarded.
+        return patterns[0]
     project_root = resolve_project_root()
-    if path_matches_globs(file_path, patterns, project_root=project_root):
-        return True
+    matches = [first_matching_glob(file_path, patterns, project_root=project_root)]
     try:
-        real = os.path.realpath(file_path)
-    except OSError:
-        return False
+        real = realpath(file_path)
+    except (OSError, ValueError) as exc:
+        # Plan 00466 N24 follow-up: a NUL-bearing path raises ValueError,
+        # not OSError -- the OS itself cannot realpath it, so it cannot BE
+        # a symlink to anything; nothing for this check to discover. The
+        # spelled path is still matched, above. Logged without the path,
+        # which may itself be a protected name.
+        logger.debug("protecting_pattern: no realpath (%s); matched as spelled", type(exc).__name__)
+        real = file_path
     if real != file_path:
-        return path_matches_globs(real, patterns, project_root=project_root)
-    return False
+        matches.append(first_matching_glob(real, patterns, project_root=project_root))
+    found = [pattern for pattern in matches if pattern is not None]
+    return min(found, key=patterns.index) if found else None
 
 
 def _tokenise(command: str) -> list[str]:
@@ -1629,9 +1656,9 @@ def _token_mention(
         # the "literal matcher" content scanning relies on exclusively.
         literal_forms = [raw_form] if expansions == [raw_form] else [raw_form, *expansions]
         for form in literal_forms:
-            for pattern in patterns:
-                if path_matches_globs(form, (pattern,), project_root=project_root):
-                    return pattern
+            matched = first_matching_glob(form, patterns, project_root=project_root)
+            if matched is not None:
+                return matched
         if context != "bash":
             continue
         for form in expansions:
@@ -1754,9 +1781,7 @@ def _token_mention(
             if realpath_cache is not None:
                 realpath_cache[token] = real
         if real is not None:
-            for pattern in patterns:
-                if path_matches_globs(real, (pattern,), project_root=project_root):
-                    return pattern
+            return first_matching_glob(real, patterns, project_root=project_root)
     return None
 
 
@@ -1783,18 +1808,18 @@ def find_protected_mention_strict(command: str, patterns: tuple[str, ...]) -> st
     project_root = resolve_project_root()
     for token in _tokenise(command):
         for form in _normalised_token_forms(token):
-            for pattern in patterns:
-                if path_matches_globs(form, (pattern,), project_root=project_root):
-                    return pattern
+            matched = first_matching_glob(form, patterns, project_root=project_root)
+            if matched is not None:
+                return matched
             if _is_glob_shaped(form):
                 match = _expand_glob_token(form, patterns, project_root)
                 if match is not None:
                     return match
         real = _realpath_if_resolvable(token)
         if real is not None:
-            for pattern in patterns:
-                if path_matches_globs(real, (pattern,), project_root=project_root):
-                    return pattern
+            matched = first_matching_glob(real, patterns, project_root=project_root)
+            if matched is not None:
+                return matched
     return None
 
 
@@ -1911,10 +1936,9 @@ def _expand_glob_token(
         try:
             for match in matches_iter:
                 examined += 1
-                match_str = str(match)
-                for pattern in patterns:
-                    if path_matches_globs(match_str, (pattern,), project_root=project_root):
-                        return pattern
+                matched = first_matching_glob(str(match), patterns, project_root=project_root)
+                if matched is not None:
+                    return matched
                 if max_expansions is not None and examined >= max_expansions:
                     return None
         except OSError as exc:

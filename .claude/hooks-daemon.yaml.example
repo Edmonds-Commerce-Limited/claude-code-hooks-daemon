@@ -479,12 +479,12 @@ handlers:
       enabled: false           # Enable for automatic markdown table alignment
       priority: 31  # Ledger 00466 RV6-M1: MUST stay above goal_injection's priority
 
-    budget_exhaustion_detector:  # Advisory when a tool response shows budget/quota-exhaustion messaging (Plan 00315)
+    budget_exhaustion_detector:  # Advisory on a WebSearch budget-refusal or a sub-agent usage-limit termination (channel-scoped) (Plan 00315)
       enabled: true   # On by default (opt-out); advisory-only, never blocks.
       priority: 32
       # options:
-      #   excluded_tools: [Read, Grep, Glob, Edit, Write, NotebookEdit]  # tools whose response is never scanned (default shown)
-      #   extra_patterns: []                   # additional regexes, additive to the built-in family
+      #   excluded_tools: [Read, Grep, Glob, Edit, Write, NotebookEdit, Bash]  # tools whose response is never scanned (default shown)
+      #   extra_patterns: []                   # additional regexes, additive to the built-in family; also applies to Task/Agent results
 
     model_downgrade_recorder:  # Publish Claude Code's own automatic model-downgrade record (Plan 00328)
       enabled: true   # On by default (opt-out); silent, and writes nothing unless a downgrade happened.
@@ -513,6 +513,12 @@ handlers:
     validate_eslint_on_write:  # Runs ESLint after file writes
       enabled: false           # Enable for automatic ESLint validation
       priority: 20
+
+  # PostToolUseFailure handlers (run when a tool call fails)
+  post_tool_use_failure:
+    agent_terminated_early_failure_detector:  # A foreground Agent/Task dispatch killed by a usage limit surfaces here (its error field), never on PostToolUse (Plan 00466 ledger 16 N46)
+      enabled: true   # On by default (opt-out); advisory-only, never blocks.
+      priority: 10
 
   # SessionStart handlers (run when session starts)
   session_start:

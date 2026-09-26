@@ -640,3 +640,45 @@ class TestComputeStartupSourceFingerprint:
         result = controller._compute_startup_source_fingerprint(tmp_path, None)
 
         assert result is None
+
+
+class TestHealthReportsProjectHandlerLoadFailures:
+    """Plan 00466 N40 review 2 nit 3: a project handler that raises at import
+    vanished while the daemon's own ``health`` said ``healthy``. The failure
+    was persisted for the CLI and the SessionStart alert, but anything asking
+    the daemon itself was told all was well."""
+
+    _RAISE_AT_IMPORT = 'raise RuntimeError("raises at import")\n'
+
+    def _controller_after_loading(self, tmp_path: Path) -> DaemonController:
+        pre_tool_use = tmp_path / "pre_tool_use"
+        pre_tool_use.mkdir()
+        (pre_tool_use / "import_raiser.py").write_text(self._RAISE_AT_IMPORT, encoding="utf-8")
+        controller = DaemonController()
+        controller._load_project_handlers(
+            project_handlers_config=ProjectHandlersConfig(enabled=True, path=str(tmp_path)),
+            workspace_root=tmp_path,
+        )
+        return controller
+
+    def test_an_import_failure_degrades_health_and_names_the_file(self, tmp_path: Path) -> None:
+        health_result = self._controller_after_loading(tmp_path).get_health()
+
+        assert health_result["status"] == "degraded"
+        assert "project_handlers" in health_result["degraded_reasons"]
+        (failure,) = health_result["project_handler_load_failures"]
+        assert failure["filename"] == "import_raiser.py"
+        assert failure["event_dir"] == "pre_tool_use"
+        assert "raises at import" in failure["reason"]
+
+    def test_clean_loading_leaves_health_untouched(self, tmp_path: Path) -> None:
+        controller = DaemonController()
+        controller._load_project_handlers(
+            project_handlers_config=ProjectHandlersConfig(enabled=True, path=str(tmp_path)),
+            workspace_root=tmp_path,
+        )
+
+        health_result = controller.get_health()
+
+        assert health_result["status"] == "healthy"
+        assert "project_handler_load_failures" not in health_result

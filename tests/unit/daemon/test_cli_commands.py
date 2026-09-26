@@ -10,6 +10,7 @@ Focused tests covering critical CLI paths including:
 
 import argparse
 import json
+import signal
 import socket
 import subprocess
 import sys
@@ -155,6 +156,60 @@ class TestGetProjectPath:
         # Should find the valid parent installation, not the invalid child
         assert result == tmp_path
 
+    @staticmethod
+    def _enclosing_install_with_nested_config(tmp_path: Path, child_config: str) -> Path:
+        """A valid enclosing install, and a nested project carrying its own config."""
+        parent_claude = tmp_path / ".claude"
+        (parent_claude / "hooks-daemon").mkdir(parents=True)
+        (parent_claude / "hooks-daemon.yaml").write_text(
+            "version: '1.0'\ndaemon:\n  log_level: INFO\n"
+        )
+        child = tmp_path / "nested"
+        (child / ".claude" / "hooks-daemon").mkdir(parents=True)
+        (child / ".claude" / "hooks-daemon.yaml").write_text(child_config)
+        return child
+
+    def test_invalid_config_is_reported_not_replaced_by_the_enclosing_project(
+        self, tmp_path: Path, monkeypatch: Any, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """A project's own broken config never falls through to an enclosing one.
+
+        Plan 00466 N24 review 2 P2: the nested project's config failed the
+        schema, so the search walked on upward and the daemon ran on the
+        ENCLOSING repository's config, reporting that file's unrelated error.
+        """
+        child = self._enclosing_install_with_nested_config(
+            tmp_path, "version: '1.0'\ndaemon:\n  log_level: NOT_A_LEVEL\n"
+        )
+        monkeypatch.chdir(child)
+
+        with pytest.raises(SystemExit) as exc_info:
+            get_project_path()
+
+        assert exc_info.value.code == 1
+        assert str(child / ".claude" / "hooks-daemon.yaml") in capsys.readouterr().err
+
+    def test_unparseable_config_is_reported_not_replaced_by_the_enclosing_project(
+        self, tmp_path: Path, monkeypatch: Any
+    ) -> None:
+        """A config that does not parse stops the search at its own project too."""
+        child = self._enclosing_install_with_nested_config(tmp_path, "daemon: [unclosed\n")
+        monkeypatch.chdir(child / ".claude")
+
+        with pytest.raises(SystemExit) as exc_info:
+            get_project_path()
+
+        assert exc_info.value.code == 1
+
+    def test_valid_nested_config_is_its_own_project(self, tmp_path: Path, monkeypatch: Any) -> None:
+        """The nearest config wins when it is valid, as before."""
+        child = self._enclosing_install_with_nested_config(
+            tmp_path, "version: '1.0'\ndaemon:\n  log_level: INFO\n"
+        )
+        monkeypatch.chdir(child)
+
+        assert get_project_path() == child
+
 
 class TestSendDaemonRequest:
     """Tests for send_daemon_request function."""
@@ -293,6 +348,7 @@ class TestCmdStatus:
             assert result == 1
 
 
+@pytest.mark.usefixtures("pid_proven_ours", "_reject_unproven_real_signals")
 class TestCmdStop:
     """Tests for cmd_stop command."""
 
@@ -421,19 +477,37 @@ class TestCmdStopSignalsOnlyThisProjectsDaemon:
         mock_cleanup_pid.assert_called_once()
         mock_cleanup_sock.assert_called_once()
 
-    def test_a_daemon_that_outlives_the_wait_is_reported(
-        self, tmp_path: Path, children: list[subprocess.Popen[bytes]]
+    def test_a_daemon_that_ignores_sigterm_is_escalated_to_sigkill(
+        self,
+        tmp_path: Path,
+        children: list[subprocess.Popen[bytes]],
+        capsys: pytest.CaptureFixture[str],
     ) -> None:
+        """A process that survives SIGTERM's grace period gets SIGKILL'd
+        (Plan 00466 N40 review 2 MA2).
+
+        A wedged daemon that ignores SIGTERM (e.g. holding the GIL in a
+        long-running C call) previously left ``stop``/``restart`` unable to
+        recover it at all -- exactly the state MA2's GIL-holding-handler
+        finding leaves the process in, and exactly the case ``init.sh``'s own
+        advice ("this is fixed by restarting it") assumes works. The identity
+        proof is re-checked by the SAME ``psutil.Process`` handle before the
+        SIGKILL goes out (it pins the pid's start time), so a pid recycled
+        during the grace cannot receive it -- no separate re-proof needed.
+        """
         args = _stop_project(tmp_path)
         daemon = _daemon_for(children, tmp_path, _IGNORE_TERM)
         with (
             patch("claude_code_hooks_daemon.daemon.cli.read_pid_file", return_value=daemon.pid),
             patch.object(Timeout, "SOCKET_CONNECT", 0.2),
             patch("claude_code_hooks_daemon.daemon.cli.cleanup_pid_file") as mock_cleanup_pid,
+            patch("claude_code_hooks_daemon.daemon.cli.cleanup_socket") as mock_cleanup_sock,
         ):
-            assert cmd_stop(args) == 1
-        assert daemon.poll() is None
-        mock_cleanup_pid.assert_not_called()
+            assert cmd_stop(args) == 0
+        assert daemon.wait(timeout=Timeout.PROCESS_SAMPLE) == -signal.SIGKILL
+        mock_cleanup_pid.assert_called_once()
+        mock_cleanup_sock.assert_called_once()
+        assert "escalated to SIGKILL" in capsys.readouterr().err
 
     def test_permission_denied(
         self, tmp_path: Path, children: list[subprocess.Popen[bytes]]
@@ -459,7 +533,7 @@ class TestCmdStopGenericException:
                 "claude_code_hooks_daemon.daemon.cli.read_pid_file", return_value=_NONEXISTENT_PID
             ),
             patch(
-                "claude_code_hooks_daemon.daemon.cli.verified_daemon_process",
+                "claude_code_hooks_daemon.daemon.cli.stop_verified_daemon",
                 side_effect=RuntimeError("unexpected"),
             ),
         ):

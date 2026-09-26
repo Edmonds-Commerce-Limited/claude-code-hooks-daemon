@@ -27,8 +27,42 @@
 boundaries:
   # ---------------------------------------------------------------- chain.py
   - surface: src/claude_code_hooks_daemon/core/chain.py
+    scope: _safety_payload_size
+    construct: "except (TypeError, ValueError)"
+    ordinal: 0
+    verdict: fail-open
+    induced_by: >-
+      a tool_input dict containing a value json.dumps(..., ensure_ascii=False)
+      cannot serialise (e.g. a non-JSON-native type, or a float policy that
+      rejects NaN/Infinity)
+    caller_controlled: true
+    trace: >-
+      NONE from this function itself -- returns 0 silently (Plan 00466 n24
+      security review B1: this function must never raise). The SAFETY
+      input-size cap (max_safety_input_bytes) is then simply not enforced
+      for this request, since a 0-byte measurement never exceeds the limit.
+      HandlerChain.execute's own except Exception (ordinal 0 below) only
+      catches what escapes THIS try/except, so a TypeError/ValueError caught
+      here never reaches it and leaves no other trace.
+
+  - surface: src/claude_code_hooks_daemon/core/chain.py
     scope: execute
     construct: "except Exception"
+    ordinal: 0
+    verdict: not-fail-open
+    reason: >-
+      Defence-in-depth wrapper (Plan 00466 n24 security review B1) around the
+      _safety_payload_size call site, for whatever that function's own
+      except (TypeError, ValueError) above does not foresee. When the chain
+      holds a SAFETY+BLOCKING handler this branch denies immediately
+      (crash_result = HookResult.deny(...), returned before the handler loop
+      even starts) -- fail-closed, not open. Only when NO SAFETY+BLOCKING
+      handler is registered does it degrade to "cap not enforced", which is
+      harmless because there is nothing that cap could have denied anyway.
+
+  - surface: src/claude_code_hooks_daemon/core/chain.py
+    scope: _execute_handlers_body
+    construct: "except BaseException"
     ordinal: 0
     verdict: fail-open
     induced_by: "any handler raising while judging the event"
@@ -36,12 +70,31 @@ boundaries:
     trace: >-
       logger.exception, AND the exception text is appended to
       accumulated_context, so it reaches the caller in the result's context.
-      In strict_mode this branch denies instead. Blast radius is one handler,
-      not the chain -- F-BYPS verified this one as correctly built.
+      In strict_mode this branch denies instead. A handler tagged both
+      HandlerTag.SAFETY and HandlerTag.BLOCKING denies on its own raise
+      unconditionally, whatever strict_mode says (Plan 00466 N24 -- a
+      raising safety guard has not judged the call, and strict_mode was
+      found inert in every real install). Only a non-SAFETY+BLOCKING
+      handler still falls through this fail-open branch. Blast radius is one
+      handler, not the chain -- F-BYPS verified this one as correctly built.
+      Plan 00466 N40 m1: this construct moved from `execute` into
+      `_execute_handlers` when the whole handler loop became a single
+      dispatched call rather than one dispatch per handler; the boundary
+      itself is unchanged. Plan 00466 N40 m2: `_execute_handlers` is now a
+      thin wrapper that binds/resets the per-dispatch cancellation token
+      around the actual loop, renamed `_execute_handlers_body` -- again the
+      boundary itself is unchanged, only its enclosing function's name.
+      Plan 00466 N40 review 2 mA2: widened from `except Exception` to
+      `except BaseException`, because SystemExit/KeyboardInterrupt both
+      inherit from BaseException, not Exception, and used to sail straight
+      through this catch (and through BoundedDispatcher's own
+      future.result() re-raise) and kill the daemon process instead of
+      denying the one call. The construct name changed; the boundary and
+      its fail-open/fail-closed split are otherwise unchanged.
 
   - surface: src/claude_code_hooks_daemon/core/chain.py
-    scope: execute
-    construct: "except Exception"
+    scope: _execute_handlers_body
+    construct: "except BaseException"
     ordinal: 1
     verdict: fail-open
     induced_by: "a handler raising in commit_side_effects, after the decision"
@@ -49,7 +102,90 @@ boundaries:
     trace: >-
       logger.exception plus an entry appended to final_result.context. The
       decision is already final here, so what fails open is the post-decision
-      commit (a rate limiter's rollback), not the verdict.
+      commit (a rate limiter's rollback), not the verdict. Plan 00466 N40 m1:
+      this construct moved from `execute` into `_execute_handlers` alongside
+      the row above; the boundary itself is unchanged. Plan 00466 N40 m2:
+      renamed to `_execute_handlers_body` alongside the row above, same
+      reason. Catches BaseException for the same reason as the row above
+      (Plan 00466 N40 review 2 mA2): a SystemExit from a commit would
+      otherwise end the daemon process.
+
+  - surface: src/claude_code_hooks_daemon/core/chain.py
+    scope: execute
+    construct: "isinstance-dispatch DispatchTimeout"
+    ordinal: 0
+    verdict: fail-open
+    induced_by: >-
+      a handler slow enough within its own matches()/handle() call (or the
+      combined per-handler loop) to exceed the chain's own deadline_seconds
+      budget (Plan 00466 N34/N40) -- BoundedDispatcher.run() returns
+      DispatchTimeout instead of raising, so this isinstance check (not an
+      except block) is the fail-open DECISION POINT (Plan 00466 N40 m4:
+      previously invisible to this scanner, which only walked except
+      blocks).
+    caller_controlled: true
+    trace: >-
+      logger.warning inside BoundedDispatcher.run() itself, PLUS a
+      chain-level context line ("Chain not judged in time"/"Chain skipped").
+      When the chain holds a SAFETY+BLOCKING handler this branch denies
+      (HookResult.deny, "chain: not judged in time") -- fail-closed, not
+      open. Only when NO SAFETY+BLOCKING handler is registered does it
+      degrade to HookResult.allow() with a context note, which is the actual
+      fail-open half of this branch.
+
+  - surface: src/claude_code_hooks_daemon/core/chain.py
+    scope: execute
+    construct: "isinstance-dispatch DispatchSaturated"
+    ordinal: 0
+    verdict: fail-open
+    induced_by: >-
+      the bounded-dispatch pool or straggler cap already being saturated
+      when the whole-chain dispatch was attempted (Plan 00466 N34/N40) --
+      BoundedDispatcher.run() returns DispatchSaturated instead of raising.
+      Plan 00466 N40 n2: this is now its OWN isinstance check (an `elif`,
+      sibling to the DispatchTimeout row above) rather than an `assert`
+      inside the DispatchTimeout branch's `else` -- the `assert` was itself
+      the n2 finding (stripped under `-O`), and fixing it split what was
+      one row into two, which is the correct shape: two DIFFERENT
+      conditions inducing the same shared ALLOW/DENY decision below.
+    caller_controlled: true
+    trace: >-
+      Same shared trace as the DispatchTimeout row above: logger.warning
+      inside BoundedDispatcher.run(), plus a chain-level context line, and
+      the same SAFETY+BLOCKING-gated deny-vs-allow decision.
+
+  # ------------------------------------------------------ bounded_dispatch.py
+  - surface: src/claude_code_hooks_daemon/core/bounded_dispatch.py
+    scope: run
+    construct: "except FutureTimeoutError"
+    ordinal: 0
+    verdict: not-fail-open
+    reason: >-
+      This is where BoundedDispatcher.run() DECIDES to give up waiting and
+      return DispatchTimeout -- it is the SOURCE of the fail-open decision
+      point, not itself an instance of one: nothing here judges a tool call
+      or lets one proceed. The actual fail-open branch is in the CALLER
+      (chain.py::execute's isinstance-dispatch row above), which is where a
+      SAFETY+BLOCKING handler still denies and only an unguarded chain
+      allows. This function's own job -- releasing the semaphore permit
+      immediately and recording the straggler (Plan 00466 N40 M2) -- is
+      bookkeeping, not a verdict.
+
+  - surface: src/claude_code_hooks_daemon/core/bounded_dispatch.py
+    scope: _run_and_release
+    construct: "except BaseException"
+    ordinal: 0
+    verdict: not-fail-open
+    reason: >-
+      Captures fn()'s own exception ONTO THE FUTURE (future.set_exception)
+      rather than swallowing it -- Future.result() on the calling thread
+      re-raises it exactly as a direct, synchronous call to fn() would have,
+      so the caller (chain.py) still sees the failure and its own except
+      Exception boundaries (declared above) still apply. BaseException
+      (Plan 00466 N40 m3) only widens WHICH exceptions get this treatment
+      (SystemExit/KeyboardInterrupt now included, so the future is always
+      resolved instead of left pending forever) -- it does not change
+      whether the guarded action proceeds without a verdict.
 
   # ------------------------------------------------------ front_controller.py
   - surface: src/claude_code_hooks_daemon/core/front_controller.py

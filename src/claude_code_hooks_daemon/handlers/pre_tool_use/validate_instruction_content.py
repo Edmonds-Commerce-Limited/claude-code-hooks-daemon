@@ -7,7 +7,7 @@ that should not be committed to permanent instruction files.
 import re
 from typing import Any, ClassVar, Final
 
-from claude_code_hooks_daemon.constants import HookInputField
+from claude_code_hooks_daemon.constants import HandlerTag, HookInputField
 from claude_code_hooks_daemon.constants.handlers import HandlerID
 from claude_code_hooks_daemon.constants.priority import Priority
 from claude_code_hooks_daemon.constants.rule_ids import RuleID
@@ -168,6 +168,14 @@ class ValidateInstructionContentHandler(PreToolUseHandlerBase):
         super().__init__(
             handler_id=HandlerID.VALIDATE_INSTRUCTION_CONTENT,
             priority=Priority.VALIDATE_INSTRUCTION_CONTENT,
+            # Plan 00466 n24 security review, M3: denies unconditionally
+            # whenever a blocked pattern matches, so BLOCKING is the true
+            # rendered behaviour (test_declared_behaviour_matches_source.py
+            # enforces this against the source, not just declared).
+            # Deliberately NOT SAFETY -- a documentation-hygiene content
+            # gate, not a dangerous-action guard, so it stays out of the
+            # SAFETY+BLOCKING structural fail-closed path M3 narrowed to.
+            tags=[HandlerTag.DOCUMENTATION, HandlerTag.VALIDATION, HandlerTag.BLOCKING],
         )
         # One Rule per content category (Decision B: 8 rules), built once from
         # the single source-of-truth _RULE_DEFINITIONS mapping.

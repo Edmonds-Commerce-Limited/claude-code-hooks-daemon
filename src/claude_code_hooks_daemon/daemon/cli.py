@@ -49,7 +49,7 @@ from pydantic import ValidationError as PydanticValidationError
 
 from claude_code_hooks_daemon.config.loader import ConfigLoader
 from claude_code_hooks_daemon.config.models import Config, handler_options
-from claude_code_hooks_daemon.constants import HandlerID, Timeout
+from claude_code_hooks_daemon.constants import DaemonPath, HandlerID, Timeout
 from claude_code_hooks_daemon.constants.modes import DaemonMode
 from claude_code_hooks_daemon.constants.permissions import FileMode
 from claude_code_hooks_daemon.core.event import EventType
@@ -122,7 +122,9 @@ from claude_code_hooks_daemon.utils.markdown_format import format_markdown_text
 from claude_code_hooks_daemon.utils.plugin_hooks import ACKNOWLEDGED_PLUGINS_OPTION, health_lines
 from claude_code_hooks_daemon.utils.report_scrubbing import scrub_report
 from claude_code_hooks_daemon.utils.safe_signal import (
+    DaemonStop,
     RefusedSignalTarget,
+    stop_verified_daemon,
     verified_daemon_process,
 )
 from claude_code_hooks_daemon.utils.secret_redaction import get_active_secret_terms
@@ -204,6 +206,12 @@ def get_project_path(override_path: Path | None = None) -> Path:
             if is_inside_daemon_directory(current):
                 current = current.parent
                 continue
+            # A directory carrying its own config IS the project, so the search
+            # stops here whether or not that config is valid. Walking on past a
+            # broken one ran the daemon on an ENCLOSING repository's config and
+            # reported that file's unrelated errors (Plan 00466 N24 review 2 P2).
+            if (claude_dir / DaemonPath.CONFIG_FILE).is_file():
+                return _validate_installation(current)
             # Validate installation based on config
             try:
                 return _validate_installation(current)
@@ -793,22 +801,21 @@ def cmd_stop(args: argparse.Namespace) -> int:
 
     # Plan 00466 N59: verify_daemon proves only that the pid is SOME daemon. The
     # handle proves it serves THIS project root, and its start-time check keeps
-    # a pid reused during the wait from being mistaken for the daemon.
-    timeout = Timeout.SOCKET_CONNECT
+    # a pid reused during the wait -- including the SIGTERM-to-SIGKILL gap --
+    # from being mistaken for the daemon (closes the same TOCTOU Plan 00466
+    # N24 review 3 mi5 raised against a plain pid, without needing a separate
+    # pidfd: psutil.Process pins the pid's start time and every call re-checks
+    # it). SIGKILL escalation after the SIGTERM grace is Plan 00466 N40 review
+    # 2 MA2 -- a GIL-holding handler cannot even reach Python's signal-handling
+    # bytecode check to act on SIGTERM, and SIGKILL cannot be caught, blocked
+    # or ignored.
     try:
-        daemon = verified_daemon_process(pid, project_root=project_path)
-        daemon.terminate()
-        print(f"Sent SIGTERM to daemon (PID: {pid})")
-        daemon.wait(timeout=timeout)
-    except (ProcessLookupError, psutil.NoSuchProcess):
-        print(f"Process {pid} not found (stale PID file)")
-        cleanup_pid_file(str(pid_path))
-        cleanup_socket(str(socket_path))
-        return 0
-    except psutil.TimeoutExpired:
-        print(f"WARNING: Daemon still running after {timeout}s", file=sys.stderr)
-        print(f"Try: kill -9 {pid}", file=sys.stderr)
-        return 1
+        outcome = stop_verified_daemon(
+            pid,
+            project_root=project_path,
+            grace_seconds=Timeout.SOCKET_CONNECT,
+            kill_grace_seconds=Timeout.DAEMON_SIGKILL_GRACE,
+        )
     except RefusedSignalTarget as refused:
         print(f"ERROR: Not signalling PID {pid}: {refused}", file=sys.stderr)
         return 1
@@ -819,16 +826,34 @@ def cmd_stop(args: argparse.Namespace) -> int:
         print(f"ERROR: {e}", file=sys.stderr)
         return 1
 
+    if outcome is DaemonStop.ALREADY_GONE:
+        print(f"Process {pid} not found (stale PID file)")
+        cleanup_pid_file(str(pid_path))
+        cleanup_socket(str(socket_path))
+        return 0
+    if outcome is DaemonStop.SURVIVED:
+        print(
+            f"WARNING: Daemon still running after SIGKILL "
+            f"({Timeout.DAEMON_SIGKILL_GRACE}s)",
+            file=sys.stderr,
+        )
+        print(f"Try: kill -9 {pid}", file=sys.stderr)
+        return 1
+    if outcome is DaemonStop.KILLED:
+        print(
+            f"WARNING: Daemon still running after {Timeout.SOCKET_CONNECT}s; "
+            "escalated to SIGKILL",
+            file=sys.stderr,
+        )
+
     print("Daemon stopped")
     cleanup_pid_file(str(pid_path))
     cleanup_socket(str(socket_path))
     return 0
 
 
-def _query_daemon_config_degraded(
-    socket_path: Path, pid: int | None
-) -> tuple[bool, list[str]] | None:
-    """Query the live daemon's own config-validation degraded state.
+def _query_daemon_health(socket_path: Path, pid: int | None) -> dict[str, Any] | None:
+    """Query the live daemon's own ``health`` result.
 
     Plan 00304: a real-repo canary found `status` reporting RUNNING and
     `check` byte-identical between a degraded and a healthy daemon -- only a
@@ -842,9 +867,9 @@ def _query_daemon_config_degraded(
         pid: The daemon's PID, or None if not running.
 
     Returns:
-        ``(is_degraded, config_errors)`` if the daemon answered, else
-        ``None`` (daemon not running or unreachable -- callers stay silent
-        rather than report a false degraded/healthy verdict).
+        The health result if the daemon answered, else ``None`` (daemon not
+        running or unreachable -- callers stay silent rather than report a
+        false degraded/healthy verdict).
     """
     if pid is None:
         return None
@@ -853,26 +878,42 @@ def _query_daemon_config_degraded(
     if response is None or "error" in response:
         return None
     result = response.get("result", {})
-    return result.get("status") == "degraded", result.get("config_errors", [])
+    return result if isinstance(result, dict) else None
 
 
-def _print_degraded_config_block(degraded_state: tuple[bool, list[str]] | None) -> None:
-    """Print the degraded-mode block if the daemon reported one.
+def _print_degraded_config_block(health: dict[str, Any] | None) -> None:
+    """Print what the daemon reported as degrading its configuration.
+
+    Only the ``config`` reason disables handlers; the others (stragglers, a
+    chain deadline the client timeout beats -- Plan 00466 N40 review 2 mA4)
+    leave every guard on, so they must not print the block saying enforcement
+    is off. A daemon that names no reasons predates them, and its ``degraded``
+    status meant config.
 
     Args:
-        degraded_state: Result of `_query_daemon_config_degraded`.
+        health: Result of `_query_daemon_health`.
     """
-    if degraded_state is None:
+    if health is None:
         return
-    is_degraded, config_errors = degraded_state
-    if not is_degraded:
-        return
-    print("\n🚨 CONFIGURATION DEGRADED 🚨")
-    print("Daemon is running in DEGRADED MODE — invalid configuration disabled enforcement")
-    print("for handlers that need config (a config-independent safety net still runs).")
-    for error in config_errors:
-        print(f"  - {error}")
-    print("Fix: correct .claude/hooks-daemon.yaml, then restart the daemon.")
+    reasons = health.get("degraded_reasons")
+    config_degraded = health.get("status") == "degraded" if reasons is None else "config" in reasons
+    if config_degraded:
+        print("\n🚨 CONFIGURATION DEGRADED 🚨")
+        print("Daemon is running in DEGRADED MODE — invalid configuration disabled enforcement")
+        print("for handlers that need config (a config-independent safety net still runs).")
+        for error in health.get("config_errors", []):
+            print(f"  - {error}")
+        print("Fix: correct .claude/hooks-daemon.yaml, then restart the daemon.")
+    deadline_problems = health.get("chain_deadline_problems", [])
+    if deadline_problems:
+        print("\nChain deadline cannot beat the client timeout (every guard is still on):")
+        for problem in deadline_problems:
+            print(f"  - {problem}")
+    socket_skips = health.get("event_socket_skips", [])
+    if socket_skips:
+        print("\nPer-event sockets not bound (these events use the bash forwarder, not the relay):")
+        for skip in socket_skips:
+            print(f"  - {skip.get('event')}: {skip.get('reason')}")
 
 
 def _print_install_stamp_line() -> None:
@@ -966,7 +1007,7 @@ def cmd_status(args: argparse.Namespace) -> int:
     # Config-validation degraded mode (Plan 00304). Surfaced for visibility;
     # the exit code stays liveness-based, same rationale as project-handler
     # health below — `health` is the command that returns non-zero on degrade.
-    _print_degraded_config_block(_query_daemon_config_degraded(socket_path, pid))
+    _print_degraded_config_block(_query_daemon_health(socket_path, pid))
 
     # Project-handler protection signal (Plan 00143). Surfaced for visibility;
     # the exit code stays liveness-based so existing "status == RUNNING" checks
@@ -1332,7 +1373,7 @@ def cmd_check(args: argparse.Namespace) -> int:
     # canary caught that. Query the live daemon the same way `health` does.
     socket_path, pid_path, _drift_warning = _resolve_effective_daemon(args, project_path)
     pid = read_pid_file(str(pid_path))
-    _print_degraded_config_block(_query_daemon_config_degraded(socket_path, pid))
+    _print_degraded_config_block(_query_daemon_health(socket_path, pid))
 
     # 1. Claude Code optimal configuration (the verbose report SessionStart hides)
     checks = OptimalConfigCheckerHandler()._run_checks(project_path)
@@ -3075,6 +3116,8 @@ def _build_initialised_controller(
         project_registry=ProjectRegistry.from_config(config, project_path),
         claude_md=config.claude_md,
         chain=config.daemon.chain,
+        chain_deadline_problems=config.daemon.chain_deadline_problems,
+        strict_mode=config.daemon.strict_mode,
         write_claude_md_in_linked_worktree=write_claude_md_in_linked_worktree,
         worktree=config.worktree,
         reference_repos=config.reference_repos,

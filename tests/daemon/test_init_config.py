@@ -35,6 +35,7 @@ def _discover_all_handlers() -> dict[str, list[str]]:
     event_dirs = [
         "pre_tool_use",
         "post_tool_use",
+        "post_tool_use_failure",
         "session_start",
         "session_end",
         "pre_compact",
@@ -111,10 +112,11 @@ class TestConfigTemplate:
         errors = ConfigValidator.validate(config, validate_handler_names=False)
         assert errors == [], f"Generated config should be valid, got errors: {errors}"
 
-        # Check all 11 event types present
+        # Check all 12 event types present
         expected_events = {
             "pre_tool_use",
             "post_tool_use",
+            "post_tool_use_failure",
             "permission_request",
             "notification",
             "user_prompt_submit",
@@ -139,7 +141,7 @@ class TestConfigTemplate:
         assert errors == [], f"Generated config should be valid, got errors: {errors}"
 
         # Should have all event types (default is full)
-        assert len(config["handlers"]) == 11
+        assert len(config["handlers"]) == 12
 
     def test_config_contains_comments(self):
         """Test that generated config contains helpful comments."""
@@ -213,16 +215,17 @@ class TestConfigTemplate:
         assert "plugins" in config["plugins"]
 
     def test_all_event_types_in_full_mode(self):
-        """Test that full mode includes all 11 event types."""
+        """Test that full mode includes all 12 event types."""
         config_yaml = generate_config(mode="full")
         config = yaml.safe_load(config_yaml)
 
         event_types = list(config["handlers"].keys())
-        assert len(event_types) == 11
+        assert len(event_types) == 12
 
         expected = [
             "pre_tool_use",
             "post_tool_use",
+            "post_tool_use_failure",
             "permission_request",
             "notification",
             "user_prompt_submit",

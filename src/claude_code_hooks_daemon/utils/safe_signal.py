@@ -169,17 +169,31 @@ class DaemonStop(Enum):
 
 
 def stop_verified_daemon(
-    pid: object, *, project_root: Path | str, grace_seconds: float
+    pid: object,
+    *,
+    project_root: Path | str,
+    grace_seconds: float,
+    kill_grace_seconds: float | None = None,
 ) -> DaemonStop:
     """SIGTERM this project's daemon at ``pid``, then SIGKILL it after the grace.
 
     The identity is proven once, and the handle's start-time check stops a pid
     reused during the grace from receiving the SIGKILL.
 
+    Args:
+        pid: Candidate daemon pid.
+        project_root: The project this daemon must serve.
+        grace_seconds: How long to wait for SIGTERM before escalating.
+        kill_grace_seconds: How long to wait for the OS to reap the process
+            after SIGKILL, which a process cannot catch, block or ignore, so
+            this budget only needs to cover reaping -- not another chance to
+            exit gracefully. Defaults to ``grace_seconds`` when omitted.
+
     Raises:
         RefusedSignalTarget: See :func:`verified_daemon_process`.
         PermissionError: This process may not signal it.
     """
+    kill_wait = grace_seconds if kill_grace_seconds is None else kill_grace_seconds
     try:
         process = verified_daemon_process(pid, project_root=project_root)
     except ProcessLookupError:
@@ -192,7 +206,7 @@ def stop_verified_daemon(
         except psutil.TimeoutExpired:
             process.kill()
         try:
-            process.wait(timeout=grace_seconds)
+            process.wait(timeout=kill_wait)
             return DaemonStop.KILLED
         except psutil.TimeoutExpired:
             return DaemonStop.SURVIVED
