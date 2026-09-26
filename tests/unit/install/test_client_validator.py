@@ -1,19 +1,27 @@
 """Tests for ClientInstallValidator."""
 
 import json
+import os
+import shutil
+import socket
 import subprocess
 import sys
+import tempfile
+from pathlib import Path
 
 import pytest
 import yaml
 
 from claude_code_hooks_daemon.constants.paths import DaemonPath
 from claude_code_hooks_daemon.constants.timeout import Timeout
+from claude_code_hooks_daemon.daemon import server
+from claude_code_hooks_daemon.daemon.paths import PID_MAX_LIMIT
 from claude_code_hooks_daemon.install import bin_wrapper
 from claude_code_hooks_daemon.install.client_validator import (
     ClientInstallValidator,
     ValidationResult,
 )
+from claude_code_hooks_daemon.utils.safe_signal import DaemonStop
 
 _DAEMON_MODULE = "claude_code_hooks_daemon.daemon.cli"
 #: Above Linux's default pid_max, so no process can have it.
@@ -485,21 +493,20 @@ class TestCleanupStaleRuntimeFiles:
         result = ClientInstallValidator.cleanup_stale_runtime_files(project_root)
         assert result.passed is True
 
-    def test_removes_stale_socket_files(self, tmp_path):
-        """Test cleanup removes stale socket files."""
-        project_root = tmp_path / "project"
-        project_root.mkdir()
-        untracked_dir = project_root / ".claude" / "hooks-daemon" / "untracked"
-        untracked_dir.mkdir(parents=True)
+    def test_removes_stale_socket_files(self, short_untracked):
+        """A socket its daemon bound and left behind when it died is removed.
+        The path is short enough to probe: one too long for AF_UNIX cannot be
+        proven dead, so it stays."""
+        socket_file = short_untracked / "daemon.sock"
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as orphaned:
+            orphaned.bind(str(socket_file))
 
-        # Create stale socket file
-        socket_file = untracked_dir / "daemon.sock"
-        socket_file.write_text("")
-
-        result = ClientInstallValidator.cleanup_stale_runtime_files(project_root)
+        result = ClientInstallValidator.cleanup_stale_runtime_files(
+            short_untracked.parent.parent.parent
+        )
         assert result.passed is True
         assert not socket_file.exists()
-        assert len(result.warnings) > 0
+        assert "Removed stale socket file: daemon.sock" in result.warnings
 
     def test_removes_stale_pid_files(self, tmp_path):
         """Test cleanup removes stale PID files."""
@@ -514,6 +521,94 @@ class TestCleanupStaleRuntimeFiles:
 
         result = ClientInstallValidator.cleanup_stale_runtime_files(project_root)
         assert result.passed is True
+        assert not pid_file.exists()
+
+
+@pytest.fixture
+def short_untracked():
+    """A client install's untracked directory on a path short enough for
+    AF_UNIX, which ``tmp_path`` nests too deep for."""
+    root = Path(tempfile.mkdtemp(prefix="hd-cv-"))
+    untracked = root / ".claude" / "hooks-daemon" / "untracked"
+    untracked.mkdir(parents=True)
+    yield untracked
+    shutil.rmtree(root)
+
+
+class TestRuntimeFilesGoOnlyUnderTheStartLockAndOnlyWhileDead:
+    """Plan 00466 N205: the installer removed PID files and sockets with no
+    start lock and no liveness check, where ``cmd_stop``'s release takes the
+    lock, removes a PID file only while it holds the stopped pid, and never
+    a live socket. A daemon starting meanwhile lost its files."""
+
+    # Parseable, yet above the largest pid pid_max allows, so it names no process.
+    _DEAD_PID = PID_MAX_LIMIT
+
+    @staticmethod
+    def _project(untracked: Path) -> Path:
+        return untracked.parent.parent.parent
+
+    def test_a_live_socket_is_never_removed(self, short_untracked):
+        socket_path = short_untracked / "daemon.sock"
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as listener:
+            listener.bind(str(socket_path))
+            listener.listen()
+            ClientInstallValidator.cleanup_stale_runtime_files(self._project(short_untracked))
+            assert socket_path.exists()
+
+    def test_another_users_live_pid_keeps_its_file(self, short_untracked, monkeypatch):
+        """Tests run as root, so ``kill(pid, 0)`` is made to be refused, as
+        it is for another user's process."""
+        pid_file = short_untracked / "daemon.pid"
+        pid_file.write_text(str(self._DEAD_PID))
+
+        def refused(pid, sig):
+            raise PermissionError(1, "Operation not permitted")
+
+        monkeypatch.setattr(os, "kill", refused)
+        ClientInstallValidator.cleanup_stale_runtime_files(self._project(short_untracked))
+
+        assert pid_file.exists()
+
+    def test_a_start_holding_the_lock_keeps_its_files(self, short_untracked, monkeypatch):
+        pid_file = short_untracked / "daemon.pid"
+        pid_file.write_text(str(self._DEAD_PID))
+        socket_path = short_untracked / "daemon.sock"
+        socket_path.write_text("")
+        monkeypatch.setattr(Timeout, "FILE_LOCK", 0)
+        with server.hold_start_lock(socket_path, Timeout.FILE_LOCK):
+            ClientInstallValidator.cleanup_stale_runtime_files(self._project(short_untracked))
+            ClientInstallValidator._check_running_daemon(self._project(short_untracked))
+
+        assert pid_file.exists()
+        assert socket_path.exists()
+
+    def test_a_successors_pid_file_outlives_the_daemon_that_was_gone(
+        self, short_untracked, monkeypatch
+    ):
+        """The daemon the file named has gone, and a start has written its
+        own pid there before the installer removes the file."""
+        from claude_code_hooks_daemon.install import client_validator as cv_module
+
+        pid_file = short_untracked / "daemon.pid"
+        pid_file.write_text(str(self._DEAD_PID))
+        successor = str(os.getpid())
+
+        def gone_and_succeeded(pid, *, project_root, grace_seconds):
+            pid_file.write_text(successor)
+            return DaemonStop.ALREADY_GONE
+
+        monkeypatch.setattr(cv_module, "stop_verified_daemon", gone_and_succeeded)
+        ClientInstallValidator._check_running_daemon(self._project(short_untracked))
+
+        assert pid_file.read_text() == successor
+
+    def test_a_pid_file_naming_no_process_goes(self, short_untracked):
+        pid_file = short_untracked / "daemon.pid"
+        pid_file.write_text(f"{self._DEAD_PID}\n")
+
+        ClientInstallValidator._check_running_daemon(self._project(short_untracked))
+
         assert not pid_file.exists()
 
 

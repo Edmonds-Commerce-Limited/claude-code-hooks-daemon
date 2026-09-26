@@ -3,6 +3,118 @@
 Newest first. Each entry says how it was found, why it happens, and the
 candidate remedies.
 
+### N206 — ✅ Remedied — A pid reused between psutil's start-time re-check and its `kill` is signalled
+
+**Found by lifecycle review 7 (§2), on main as well.** `stop_verified_daemon`
+signalled through a `psutil.Process`, which re-checks the pid's start time
+and then calls `os.kill`. A pid reused between the two, or inside one
+start-time tick, received the signal. `signal_verified_daemon_via_pidfd`
+existed but had no caller, and opened its pidfd only AFTER the proof, so it
+had the same gap.
+
+**Remedied (lifecycle batch, round 7):** `signal_verified_daemon` and
+`stop_verified_daemon` open a pidfd BEFORE the proof and send every signal
+through it, and wait on it for the exit. A pid reused after the pin can only
+make the send fail. Where the kernel makes no pidfds (`ENOSYS`, `EPERM`,
+`ENODEV`, `EMFILE`, `ENFILE`) the proven psutil handle delivers it. The
+unused `_via_pidfd` function is gone. RED:
+`TestTheSignalGoesThroughAPidfdPinnedBeforeTheProof` (a pin landing on a
+process that has exited, while the proof reads a live daemon at the pid).
+
+### N205 — ✅ Remedied — The installer removes PID files and sockets with no lock or liveness check
+
+**Found by lifecycle review 7 (S-3), on main as well.**
+`client_validator._check_running_daemon` unlinked a PID file on
+`ALREADY_GONE` with no lock and no content check, and
+`cleanup_stale_runtime_files` removed every `daemon*.sock`, live ones
+included, and treated a `PermissionError` from `kill(pid, 0)`, which means
+the process is alive, as an invalid file.
+
+**Remedied (lifecycle batch, round 7):** both go through
+`server.remove_stale_pid_file` (under the start lock, only while the file
+holds what was read and names no live process) and the new
+`server.remove_dead_socket` (under the start lock, only on a DEFINITIVE
+not-live probe). RED: `TestRuntimeFilesGoOnlyUnderTheStartLockAndOnlyWhileDead`.
+
+### N204 — ✅ Remedied — Enforcement removes a stale PID file outside the start lock and takes another user's live pid for dead
+
+**Found by lifecycle review 7 (S-2), on main as well.** Outside a container
+`enforce_single_daemon` removed a PID file whose pid `is_process_running`
+called dead, with no start lock, and `is_process_running` returned False on
+`AccessDenied`, so another user's live daemon lost its file.
+
+**Remedied (lifecycle batch, round 7):** it reads the file and hands it to
+`server.remove_stale_pid_file`, moved there from `cli` so enforcement and the
+installer share it, and leaves it when there is no socket to lock.
+`is_process_running`, whose only caller this was, is gone. RED:
+`TestAStalePidFileGoesOnlyUnderTheStartLock`.
+
+### N203 — ✅ Remedied — The stop proof takes the first `--project-root` where argparse keeps the last
+
+**Found by lifecycle review 7 (S-1), on main as well.** `_root_from_flag`
+returned the first `--project-root`. argparse keeps the last, and
+`bin/hooks-daemon` puts its own root before the caller's, so
+`bin/hooks-daemon --project-root B start` run from A's wrapper started a
+daemon serving B that was attributed to A. A's single-daemon enforcement
+could then stop B's daemon, and B could not stop its own.
+
+**Remedied (lifecycle batch, round 7):** the command line is parsed by
+argparse with `cli.main`'s own global options (`add_global_arguments`, now
+shared), so repeats, `=` forms and abbreviations resolve as the launch
+resolved them. A line its parser refuses, a subcommand with arguments, or a
+relative root proves nothing, and no later source is consulted for it.
+`init.sh`'s narrower proof now also requires exactly six arguments. RED:
+`TestTheFlagIsReadAsTheDaemonsOwnParserReadsIt`, which also checks every
+case against `cli.build_parser()`, and
+`test_a_daemon_launched_for_b_through_as_wrapper_is_never_stopped_by_a`.
+
+### N202 — ✅ Remedied — `restart` reports "failed to start (no PID file)" while the daemon comes up
+
+**Found by lifecycle review 7 (§5), on main as well.** `cmd_start`'s parent
+waited a fixed 5 s for the PID file, which the daemon writes only after
+controller init. Under load that took longer, so the parent printed "failed
+to start (no PID file created)" and exited 1 while the daemon came up.
+
+**Remedied (lifecycle batch, round 7):** the daemon reports through a pipe
+whose write end it holds for life: its pid first, then a byte per startup
+step. The parent waits while the daemon is alive and advancing (a byte, the
+PID file changing, or CPU time spent), and gives up on end of file (exited),
+after `DAEMON_START_STALL_SEC` with no progress, or at
+`DAEMON_START_BUDGET_SEC`. The message says which, and whether a PID file
+was waiting on its proof. RED: `TestTheStartWaitFollowsTheDaemonsProgress`
+and `test_start_waits_on_a_slowly_initialising_daemon.py` (a throwaway
+daemon whose controller init sleeps 7 s).
+
+### N193 — ✅ Remedied — The server's PID-file liveness check parsed pid text its own way
+
+**Found by the lifecycle round-5 D-PATH review (Sh-3).**
+`server._pid_file_points_at_live_process` read the file with its own parse,
+so `0`, `-1`, `1` and padded text were treated as pids. **Remedied (round
+6):** it uses `paths.parse_pid_text`. Detail in
+`subagent-reports/260926-lifecycle-opus-5-5.md`, round 6.
+
+### N192 — ✅ Remedied — A socket that merely accepts a connection counted as this project's daemon
+
+**Found by the lifecycle round-5 D-PATH review (Sh-2).** Under the `/tmp`
+fallback another user can bind the path first. **Remedied (round 6):** the
+daemon answers an `identity` action with its project and pid, and only this
+project's answer counts. Detail in the lifecycle report, round 6.
+
+### N191 — ✅ Remedied — A daemon naming no root was attributed to the project owning its venv
+
+**Found by the lifecycle round-5 D-PATH review (Sh-1), on main as well.** A
+worktree sharing a checkout's venv was attributed to that checkout.
+**Remedied (round 6):** such a daemon is attributed only by the natural
+socket it has bound. Detail in the lifecycle report, round 6.
+
+### N190 — ✅ Remedied — A process's owner was judged by permission to signal it, which root holds over every process
+
+**Found by the lifecycle round-5 reviews (P5-1, Sh-G), on main as well.**
+**Remedied (round 6):** ownership is the process's real and effective uid,
+in bash (`_hooks_daemon_pid_is_this_users`) and Python
+(`is_this_users_process`, and `verified_daemon_process`). Detail in the
+lifecycle report, round 6.
+
 ### N165 — ✅ Remedied — `init.sh`'s daemon helper runs a venv that `HOOKS_DAEMON_ROOT_DIR` alone chose
 
 **Found by the lifecycle batch's round-4 D-PATH review (Sh-F), on main as

@@ -32,16 +32,17 @@ from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.daemon import paths, server
 from claude_code_hooks_daemon.daemon.cli import (
     _await_started_daemon,
+    _StartProgress,
     cmd_config,
     cmd_init_config,
     cmd_status,
     cmd_stop,
     get_project_path,
     pid_is_this_projects_daemon,
-    remove_stale_pid_file,
     send_daemon_request,
 )
 from claude_code_hooks_daemon.daemon.process_verification import RootProof
+from claude_code_hooks_daemon.daemon.server import remove_stale_pid_file
 from claude_code_hooks_daemon.utils import safe_signal
 from claude_code_hooks_daemon.utils.safe_signal import DaemonStop
 
@@ -516,7 +517,7 @@ class TestCmdStopSignalsOnlyThisProjectsDaemon:
         daemon = _daemon_for(children, tmp_path)
         with (
             patch("claude_code_hooks_daemon.daemon.cli.read_pid_file", return_value=daemon.pid),
-            patch.object(psutil.Process, "terminate", side_effect=psutil.NoSuchProcess(daemon.pid)),
+            patch("signal.pidfd_send_signal", side_effect=ProcessLookupError(daemon.pid)),
             patch("claude_code_hooks_daemon.daemon.cli.cleanup_pid_file") as mock_cleanup_pid,
             patch("claude_code_hooks_daemon.daemon.cli.cleanup_socket") as mock_cleanup_sock,
         ):
@@ -568,7 +569,7 @@ class TestCmdStopSignalsOnlyThisProjectsDaemon:
         daemon = _daemon_for(children, tmp_path)
         with (
             patch("claude_code_hooks_daemon.daemon.cli.read_pid_file", return_value=daemon.pid),
-            patch.object(psutil.Process, "terminate", side_effect=psutil.AccessDenied(daemon.pid)),
+            patch("signal.pidfd_send_signal", side_effect=PermissionError(daemon.pid)),
         ):
             assert cmd_stop(args) == 1
         assert daemon.poll() is None
@@ -956,13 +957,22 @@ class TestAwaitStartedDaemonIsBoundedByTheClock:
     def test_a_probe_that_takes_its_whole_timeout_cannot_stretch_the_poll(
         self, short_dir: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.setattr(Timeout, "DAEMON_PID_POLL_BUDGET_SEC", self._BUDGET_SEC, raising=False)
+        monkeypatch.setattr(Timeout, "DAEMON_START_BUDGET_SEC", self._BUDGET_SEC)
         pid_path = short_dir / "daemon.pid"
         pid_path.write_text(f"{os.getpid()}\n")
         socket_path = short_dir / "daemon.sock"
-        with silent_socket(socket_path) as accepted:
-            daemon_pid = _await_started_daemon(pid_path, socket_path, short_dir, None)
-        assert daemon_pid is None
+        # The daemon's end of the start pipe, held open: it is still starting.
+        progress_read, progress_write = os.pipe()
+        try:
+            with silent_socket(socket_path) as accepted:
+                started = _await_started_daemon(
+                    pid_path, socket_path, short_dir, None, _StartProgress(progress_read)
+                )
+        finally:
+            os.close(progress_read)
+            os.close(progress_write)
+        assert started.pid is None
+        assert "still starting" in (started.failure or "")
         # Each probe waits out its timeout, so a clock-bounded poll makes a
         # handful where a tick-counted one made one per tick.
         most = int(self._BUDGET_SEC / Timeout.SOCKET_LIVENESS_PROBE_SEC) + 1

@@ -171,7 +171,13 @@ class Timeout:
 
     # Daemon startup polling (Plan 00100 Task 0.2)
     DAEMON_PID_POLL_INTERVAL_SEC = 0.1  # 100ms between PID-file checks
-    DAEMON_PID_POLL_BUDGET_SEC = 5.0  # wall-clock ceiling, however long a probe takes
+    # A starting daemon is waited on while it is alive and advancing (Plan
+    # 00466 N202): it is given up on once it has made no progress for the
+    # stall window, and in any case at the budget, which is wall-clock time
+    # however long a probe takes. The budget plus init.sh's own 15 s
+    # readiness poll stays inside the PreToolUse hook's 60 s.
+    DAEMON_START_STALL_SEC = 10.0
+    DAEMON_START_BUDGET_SEC = 30.0
     DAEMON_RESTART_VERIFY_TIMEOUT_SEC = 15  # Overall restart verification ceiling
 
     # Live-daemon socket-liveness probe (Plan 00127). Connect-timeout for

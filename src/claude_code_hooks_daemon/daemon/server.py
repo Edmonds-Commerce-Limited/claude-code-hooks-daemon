@@ -37,7 +37,7 @@ from claude_code_hooks_daemon.core.input_schemas import get_input_schema
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.daemon.config import DaemonConfig
 from claude_code_hooks_daemon.daemon.memory_log_handler import MemoryLogHandler
-from claude_code_hooks_daemon.daemon.paths import parse_pid_text
+from claude_code_hooks_daemon.daemon.paths import is_pid_alive, parse_pid_text
 from claude_code_hooks_daemon.daemon.payload_capture import capture_payload, resolve_capture_dir
 from claude_code_hooks_daemon.utils import secret_file_matching as sfm
 from claude_code_hooks_daemon.utils.cli_command import recovery_command
@@ -406,6 +406,65 @@ def hold_start_lock(socket_path: Path, timeout_seconds: float) -> Iterator[None]
             fcntl.flock(lock_fd, fcntl.LOCK_UN)
     finally:
         os.close(lock_fd)
+
+
+def remove_stale_pid_file(pid_path: Path, socket_path: Path, seen: str) -> bool:
+    """Remove a PID file that names no live process, under the start lock.
+
+    ``init.sh``'s ``is_daemon_running`` calls this for a file whose pid it
+    found gone, or whose text is corrupt (Plan 00466 round 4, Sh-A, Sh-B), and
+    single-daemon enforcement for one it read (N204). A daemon start writes
+    its pid while holding the same lock, so under it the file goes only
+    while it still holds exactly ``seen`` and that names no live process.
+    Another user's process is live: ``kill(pid, 0)`` is refused, not failed.
+    A lock that cannot be taken or opened leaves the file.
+
+    Returns:
+        True when the file was removed.
+    """
+    try:
+        with hold_start_lock(socket_path, Timeout.FILE_LOCK):
+            try:
+                current = pid_path.read_text()
+            except FileNotFoundError:
+                return False
+            if current.rstrip("\n") != seen:
+                logger.info("PID file %s changed since it was read; leaving it", pid_path)
+                return False
+            pid = parse_pid_text(seen)
+            if pid is not None and is_pid_alive(pid):
+                return False
+            pid_path.unlink()
+            return True
+    except StartLockTimeout as exc:
+        logger.warning("A daemon start holds %s; leaving the PID file", exc)
+    except (OSError, UnicodeDecodeError) as exc:
+        logger.warning("Cannot remove stale PID file %s under the start lock: %s", pid_path, exc)
+    return False
+
+
+def remove_dead_socket(socket_path: Path) -> bool:
+    """Remove ``socket_path`` only when, under the start lock, it is DEFINITIVELY not live.
+
+    The rule ``cmd_stop``'s release follows (Plan 00466 N205): a start holds
+    the lock across its probe, unlink and bind, and a socket whose liveness
+    is indeterminate may be a busy daemon's.
+
+    Returns:
+        True when the socket was removed.
+    """
+    try:
+        with hold_start_lock(socket_path, Timeout.FILE_LOCK):
+            if _socket_liveness_sync(socket_path) is not _SocketLiveness.NOT_LIVE:
+                logger.info("Socket %s is not provably dead; leaving it", socket_path)
+                return False
+            socket_path.unlink(missing_ok=True)
+            return True
+    except StartLockTimeout as exc:
+        logger.warning("A daemon start holds %s; leaving the socket", exc)
+    except OSError as exc:
+        logger.warning("Cannot remove socket %s under the start lock: %s", socket_path, exc)
+    return False
 
 
 class _SocketLiveness(enum.Enum):

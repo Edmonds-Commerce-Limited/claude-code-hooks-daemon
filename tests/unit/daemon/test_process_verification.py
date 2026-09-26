@@ -10,9 +10,9 @@ import psutil
 from claude_code_hooks_daemon.daemon.paths import prospective_socket_path
 from claude_code_hooks_daemon.daemon.process_verification import (
     PROJECT_ROOT_ENV_VAR,
+    RootProof,
     daemon_process_project_root,
     find_all_daemon_processes,
-    is_process_running,
     is_this_users_process,
 )
 
@@ -524,44 +524,6 @@ class TestDaemonServerMatching:
         assert _DAEMON_LAUNCH_SUBCOMMANDS == ("start", "restart")
 
 
-class TestIsProcessRunning:
-    """Tests for is_process_running()."""
-
-    def test_process_is_running(self) -> None:
-        """Returns True when process exists and is running."""
-        mock_process = MagicMock(spec=psutil.Process)
-        mock_process.is_running.return_value = True
-
-        with patch("psutil.Process", return_value=mock_process):
-            result = is_process_running(pid=12345)
-
-        assert result is True
-
-    def test_process_is_not_running(self) -> None:
-        """Returns False when process exists but is not running."""
-        mock_process = MagicMock(spec=psutil.Process)
-        mock_process.is_running.return_value = False
-
-        with patch("psutil.Process", return_value=mock_process):
-            result = is_process_running(pid=12345)
-
-        assert result is False
-
-    def test_process_does_not_exist(self) -> None:
-        """Returns False when PID does not exist."""
-        with patch("psutil.Process", side_effect=psutil.NoSuchProcess(pid=99999)):
-            result = is_process_running(pid=99999)
-
-        assert result is False
-
-    def test_handles_permission_denied(self) -> None:
-        """Returns False when lacking permission to check process."""
-        with patch("psutil.Process", side_effect=psutil.AccessDenied(pid=12345)):
-            result = is_process_running(pid=12345)
-
-        assert result is False
-
-
 class TestDaemonProcessProjectRoot:
     """Tests for daemon_process_project_root(): the proof ``stop`` needs before it signals."""
 
@@ -712,6 +674,97 @@ class TestDaemonProcessProjectRoot:
 
         assert proof.root == os.path.realpath(_OWN_ROOT)
         assert proof.source == "its --project-root flag"
+
+
+_OTHER_ROOT = "/srv/projects/other"
+
+# Arguments after the cli module that its parser accepts, and the root each
+# names. ``bin/hooks-daemon`` puts its own root first and the caller's after
+# it, and argparse keeps the last (Plan 00466 N203).
+_ACCEPTED_LAUNCHES: list[tuple[list[str], str | None]] = [
+    (["--project-root", _OWN_ROOT, "start"], _OWN_ROOT),
+    (["--project-root", _OWN_ROOT, "--project-root", _OTHER_ROOT, "start"], _OTHER_ROOT),
+    (["--project-root", _OTHER_ROOT, "--project-root", _OWN_ROOT, "restart"], _OWN_ROOT),
+    (["--project-root", _OWN_ROOT, "--project-r", _OTHER_ROOT, "start"], _OTHER_ROOT),
+    (["--project-root", _OWN_ROOT, f"--pr={_OTHER_ROOT}", "start"], _OTHER_ROOT),
+    ([f"--project-root={_OTHER_ROOT}", "--project-root", _OWN_ROOT, "start"], _OWN_ROOT),
+    (
+        ["--pid-file", "/run/d.pid", "--project-root", _OWN_ROOT, "--socket", "/run/d.s", "start"],
+        _OWN_ROOT,
+    ),
+    (["--project-root", _OWN_ROOT, "--socket", _OTHER_ROOT, "start"], _OWN_ROOT),
+    (["--socket", "/run/d.sock", "start"], None),
+]
+
+# Arguments its parser rejects, so no running daemon was launched with them.
+_REJECTED_LAUNCHES: list[list[str]] = [
+    ["--project-root", _OWN_ROOT, "--p", _OTHER_ROOT, "start"],
+    ["--project-root", _OWN_ROOT, "start", "--project-root", _OTHER_ROOT],
+    ["--project-root", _OWN_ROOT, "start", "extra"],
+    ["--project-root", "start"],
+    ["--project-root", _OWN_ROOT, "-h", "start"],
+    ["--project-root", _OWN_ROOT, "--unknown", "start"],
+]
+
+
+class TestTheFlagIsReadAsTheDaemonsOwnParserReadsIt:
+    """Plan 00466 N203: the first ``--project-root`` was taken, where
+    argparse keeps the last, so a daemon launched as ``bin/hooks-daemon
+    --project-root B start`` from A's wrapper serves B and was attributed to
+    A. A's single-daemon enforcement would then have stopped B's daemon."""
+
+    def _proof_for(self, arguments: list[str], environ: dict[str, str] | None = None) -> RootProof:
+        process = MagicMock(spec=psutil.Process)
+        process.cmdline.return_value = ["/usr/bin/python3", "-m", _MODULE, *arguments]
+        process.environ.return_value = environ or {}
+        process.net_connections.return_value = []
+        with patch("psutil.Process", return_value=process):
+            return daemon_process_project_root(_UNREAL_PID)
+
+    def test_a_second_root_is_the_one_the_daemon_serves(self) -> None:
+        proof = self._proof_for(
+            ["--project-root", _OWN_ROOT, "--project-root", _OTHER_ROOT, "start"]
+        )
+
+        assert proof.root == os.path.realpath(_OTHER_ROOT)
+
+    def test_every_accepted_launch_is_attributed_to_the_root_its_parser_kept(self) -> None:
+        for arguments, served in _ACCEPTED_LAUNCHES:
+            proof = self._proof_for(arguments)
+            expected = None if served is None else os.path.realpath(served)
+            assert proof.root == expected, arguments
+
+    def test_a_launch_its_parser_rejects_proves_nothing_however_else_it_is_attributed(
+        self,
+    ) -> None:
+        """Its environment names our root too, so only the refusal keeps it
+        from being attributed to us."""
+        for arguments in _REJECTED_LAUNCHES:
+            proof = self._proof_for(arguments, {PROJECT_ROOT_ENV_VAR: _OWN_ROOT})
+            assert proof.root is None, arguments
+            assert "parser" in (proof.refusal or ""), arguments
+
+    def test_a_relative_root_names_a_directory_the_daemon_has_left(self) -> None:
+        proof = self._proof_for(["--project-root", "projects/ours", "start"])
+
+        assert proof.root is None
+        assert "relative" in (proof.refusal or "")
+
+    def test_the_reading_agrees_with_the_cli_parser_itself(self) -> None:
+        """The same arguments through ``cli``'s own parser keep the same root,
+        or launch no daemon: it rejects them, or reads no subcommand."""
+        from claude_code_hooks_daemon.daemon.cli import build_parser
+
+        for arguments, served in _ACCEPTED_LAUNCHES:
+            kept = build_parser().parse_args(arguments).global_project_root
+            assert (None if kept is None else str(kept)) == served, arguments
+        for arguments in _REJECTED_LAUNCHES:
+            with patch("sys.stdout"), patch("sys.stderr"):
+                try:
+                    command = build_parser().parse_args(arguments).command
+                except SystemExit:
+                    command = None
+            assert command is None, arguments
 
 
 class TestIsThisUsersProcess:

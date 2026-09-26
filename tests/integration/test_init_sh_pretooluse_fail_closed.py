@@ -1848,7 +1848,9 @@ def _launch_lines(project: Path) -> list[tuple[list[str], bool]]:
         # bin/hooks-daemon, and every start or restart naming no root, which
         # cli.main re-runs naming it (round 6, Sh-1)
         ([client_python, "-m", _CLI_MODULE, "--project-root", root, "restart"], True),
-        (["python3", "-m", _CLI_MODULE, "--project-root", root, "restart", "-x"], True),
+        # Neither subcommand takes an argument, so its parser refuses the
+        # launch and no daemon runs with it (N203).
+        (["python3", "-m", _CLI_MODULE, "--project-root", root, "restart", "-x"], False),
         # Naming no root, a daemon serves whatever its working directory
         # found; only its socket can say which (round 6, Sh-1).
         ([client_python, "-m", _CLI_MODULE, "start"], False),
@@ -1913,18 +1915,21 @@ class TestTheHooksCommandLineProofIsSound:
 
     @staticmethod
     def _daemon_proves(cmdline: list[str], project: Path) -> bool:
-        """``process_verification``'s rule for a command line naming a root."""
+        """``process_verification``'s rule for a command line naming a root.
+        A line its parser refuses names none (N203)."""
         from claude_code_hooks_daemon.daemon.process_verification import (
             _is_daemon_server_process,
             _root_from_flag,
+            _UnreadableLaunch,
         )
 
-        root = _root_from_flag(cmdline)
-        return (
-            _is_daemon_server_process(cmdline)
-            and root is not None
-            and os.path.realpath(root) == os.path.realpath(project)
-        )
+        if not _is_daemon_server_process(cmdline):
+            return False
+        try:
+            root = _root_from_flag(cmdline)
+        except _UnreadableLaunch:
+            return False
+        return root is not None and os.path.realpath(root) == os.path.realpath(project)
 
     @staticmethod
     def _init_sh_proves(project: Path, function: str, argument: str) -> bool:
@@ -1992,7 +1997,7 @@ class TestTheHooksCommandLineProofIsSound:
             ("an argument holding the launch across newlines", False),
             ("a launch whose last argument ends in a newline", False),
             ("a launch with no final NUL", True),
-            ("a launch followed by an empty argument", True),
+            ("a launch followed by an empty argument", False),
             ("a root cut in two by a NUL", False),
         ],
     )
@@ -2045,7 +2050,8 @@ class TestTheStartupPollIsBoundedByTheClock:
         fake_python.write_text(
             "#!/bin/bash\n"
             'if [[ "$1" == -m ]]; then echo "ERROR: Daemon crashed: simulated" >&2; exit 1; fi\n'
-            f'if [[ "$2" == *"daemon.cli import"* ]]; then echo run >> "{helper_runs}"; fi\n'
+            f'if [[ "$2" == *"daemon.cli import"* || "$2" == *"daemon.server import"* ]]; then '
+            f'echo run >> "{helper_runs}"; fi\n'
             f'exec "{sys.executable}" "$@"\n'
         )
         fake_python.chmod(0o755)

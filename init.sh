@@ -1319,12 +1319,13 @@ _HOOKS_DAEMON_PROCFS=/proc
 # _hooks_daemon_argv_prove_this_project() - True when the arguments are a
 # daemon server of this project, at the exact positions start_daemon and
 # bin/hooks-daemon launch it with: `<python> -m <cli> --project-root <root>
-# start|restart [more]`, with no other argument naming a root (Plan 00466
-# round 6, P5-3). A start or restart naming no root is re-run naming it
-# (cli._rerun_launch_naming_its_project). A sufficient condition only
-# (round 5, Sh-D): process_verification's rule accepts more, and anything
-# this does not prove goes to the daemon's helper. A test checks that
-# everything this proves is proven there too.
+# start|restart` and nothing more, since neither subcommand takes an
+# argument, with no other argument naming a root (Plan 00466 round 6,
+# P5-3; N203). A start or restart naming no root is re-run naming it
+# (cli._reexec_daemon_launch_with_explicit_project_root). A sufficient
+# condition only (round 5, Sh-D): process_verification's rule accepts more,
+# and anything this does not prove goes to the daemon's helper. A test
+# checks that everything this proves is proven there too.
 _hooks_daemon_argv_prove_this_project() {
     local physical
     if _hooks_daemon_argv_name_root "$PROJECT_PATH" "$@"; then
@@ -1338,11 +1339,12 @@ _hooks_daemon_argv_name_root() {
     local root="$1" index
     shift
     local -a argv=("$@")
-    ((${#argv[@]} >= 6)) || return 1
+    ((${#argv[@]} == 6)) || return 1
     [[ "${argv[1]}" == "-m" && "${argv[2]}" == "claude_code_hooks_daemon.daemon.cli" &&
         "${argv[3]}" == "--project-root" && "${argv[4]}" == "$root" &&
         ("${argv[5]}" == "start" || "${argv[5]}" == "restart") ]] || return 1
-    # process_verification._root_from_flag takes the first flag it meets.
+    # A root named anywhere else, even as the program's own name, proves
+    # nothing here: the daemon's helper reads such a line as argparse does.
     for ((index = 0; index < ${#argv[@]}; index++)); do
         if ((index != 3)) && [[ "${argv[index]}" == "--project-root" ||
             "${argv[index]}" == "--project-root="* ]]; then
@@ -1467,7 +1469,7 @@ is_daemon_running() {
 import sys
 from pathlib import Path
 
-from claude_code_hooks_daemon.daemon.cli import remove_stale_pid_file
+from claude_code_hooks_daemon.daemon.server import remove_stale_pid_file
 
 sys.exit(0 if remove_stale_pid_file(Path(sys.argv[1]), Path(sys.argv[2]), sys.argv[3]) else 1)
 ' "$PID_PATH" "$SOCKET_PATH" "$pid"; then
@@ -1514,7 +1516,8 @@ start_daemon() {
     # Output is CAPTURED, not discarded (Plan 00200 Task 5.5): this parent
     # invocation is the short-lived process that daemonises and returns —
     # cli.py's cmd_start() prints its own diagnostics (e.g. "ERROR: Fork
-    # failed", "ERROR: Daemon failed to start (no PID file created)") on
+    # failed", "ERROR: Daemon not proven started: the daemon exited while
+    # starting (no PID file created)") on
     # THIS fd, before the double-fork detaches the long-lived daemon (which
     # redirects its OWN stdout/stderr to /dev/null internally regardless —
     # see daemon/cli.py's "Second child" branch). The readiness poll below

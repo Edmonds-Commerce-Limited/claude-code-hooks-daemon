@@ -10,13 +10,14 @@ import io
 import os
 import sys
 import time
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
 
+from claude_code_hooks_daemon.constants import Timeout
 from claude_code_hooks_daemon.daemon.cli import cmd_start
 from claude_code_hooks_daemon.daemon.process_verification import RootProof
 from claude_code_hooks_daemon.daemon.server import _SocketLiveness
@@ -48,6 +49,28 @@ def _poll_clock() -> Any:
     clock.monotonic.side_effect = lambda: now[0]
     clock.sleep.side_effect = lambda seconds: now.__setitem__(0, now[0] + seconds)
     return patch("claude_code_hooks_daemon.daemon.cli.time", clock)
+
+
+@contextlib.contextmanager
+def _starting_child() -> Iterator[list[int]]:
+    """Hold the daemon child's end of the start pipe open, as a child that
+    is still running holds it, so the parent reads no end of file.
+
+    Yields the list the held write end lands in once ``cmd_start`` opens
+    the pipe; a test writes the child's progress to it.
+    """
+    held: list[int] = []
+    real_pipe = os.pipe
+
+    def pipe() -> tuple[int, int]:
+        read_fd, write_fd = real_pipe()
+        held.append(os.dup(write_fd))
+        return read_fd, write_fd
+
+    with patch("os.pipe", side_effect=pipe):
+        yield held
+    for fd in held:
+        os.close(fd)
 
 
 class TestCmdStartAlreadyRunning:
@@ -97,7 +120,7 @@ class TestCmdStartReportsTheDaemonItStarted:
             patch("claude_code_hooks_daemon.daemon.cli.get_project_path", return_value=tmp_path),
             patch(
                 "claude_code_hooks_daemon.daemon.cli.read_pid_file",
-                side_effect=[*pid_file_reads, *[pid_file_reads[-1]] * 100],
+                side_effect=[*pid_file_reads, *[pid_file_reads[-1]] * 1000],
             ),
             patch("claude_code_hooks_daemon.daemon.cli.get_socket_path"),
             patch("claude_code_hooks_daemon.daemon.cli.get_pid_path"),
@@ -108,6 +131,7 @@ class TestCmdStartReportsTheDaemonItStarted:
             _proven_to_serve(tmp_path, proven),
             patch("os.fork", return_value=100),
             _poll_clock(),
+            _starting_child(),
             patch.object(sys, "stdout", stdout),
         ):
             result = cmd_start(args)
@@ -131,6 +155,145 @@ class TestCmdStartReportsTheDaemonItStarted:
         result, output = self._start(tmp_path, [None, self._STARTED], proven=False)
         assert result == 1
         assert "started successfully" not in output
+
+
+class TestTheStartWaitFollowsTheDaemonsProgress:
+    """Plan 00466 N202: the parent gave the daemon a fixed 5 s to write its
+    PID file, which comes only after controller init, so a loaded host saw
+    "failed to start (no PID file)" while the daemon came up. The wait now
+    lasts while the child is alive and advancing, and says which of "exited",
+    "no progress" and "still starting" ended it, and whether a PID file was
+    waiting on its proof."""
+
+    _STARTED = 5555
+
+    def _start(
+        self,
+        tmp_path: Path,
+        pid_file: Callable[[int, int | None], int | None],
+        *,
+        child_alive: bool,
+        proven: bool = True,
+    ) -> tuple[int, str, str]:
+        """Run ``cmd_start``'s parent. ``pid_file(tick, progress_fd)`` answers
+        each poll's PID-file read after the first, the pre-fork one."""
+        args = argparse.Namespace(project_root=tmp_path)
+        stdout, stderr = io.StringIO(), io.StringIO()
+        reads = [0]
+        held: list[int] = []
+
+        def read_pid_file(*_args: Any, **_kwargs: Any) -> int | None:
+            reads[0] += 1
+            if reads[0] == 1:
+                return None
+            return pid_file(reads[0] - 1, held[0] if held else None)
+
+        child: contextlib.AbstractContextManager[list[int]] = (
+            _starting_child() if child_alive else contextlib.nullcontext([])
+        )
+        with (
+            patch("claude_code_hooks_daemon.daemon.cli.get_project_path", return_value=tmp_path),
+            patch("claude_code_hooks_daemon.daemon.cli.read_pid_file", side_effect=read_pid_file),
+            patch("claude_code_hooks_daemon.daemon.cli.get_socket_path"),
+            patch("claude_code_hooks_daemon.daemon.cli.get_pid_path"),
+            patch(
+                "claude_code_hooks_daemon.daemon.cli._socket_liveness_sync",
+                return_value=_SocketLiveness.NOT_LIVE,
+            ),
+            _proven_to_serve(tmp_path, proven),
+            patch("os.fork", return_value=100),
+            _poll_clock(),
+            child as held_fds,
+            patch.object(sys, "stdout", stdout),
+            patch.object(sys, "stderr", stderr),
+        ):
+            held = held_fds
+            result = cmd_start(args)
+        return result, stdout.getvalue(), stderr.getvalue()
+
+    @staticmethod
+    def _ticks(seconds: float) -> int:
+        return int(seconds / Timeout.DAEMON_PID_POLL_INTERVAL_SEC)
+
+    @staticmethod
+    def _advance(progress_fd: int | None) -> None:
+        """The child reports progress, once ``cmd_start`` has given it a pipe."""
+        if progress_fd is not None:
+            os.write(progress_fd, b".")
+
+    def test_a_daemon_still_advancing_past_five_seconds_is_reported_started(
+        self, tmp_path: Path
+    ) -> None:
+        """Its PID file appears after 8 s, with progress on every tick."""
+        started_at = self._ticks(8.0)
+
+        def advancing(tick: int, progress_fd: int | None) -> int | None:
+            self._advance(progress_fd)
+            return self._STARTED if tick >= started_at else None
+
+        result, output, _ = self._start(tmp_path, advancing, child_alive=True)
+
+        assert result == 0
+        assert f"Daemon started successfully (PID: {self._STARTED})" in output
+
+    def test_a_daemon_that_exits_is_reported_at_once(self, tmp_path: Path) -> None:
+        polls: list[int] = []
+
+        def never(tick: int, progress_fd: int | None) -> int | None:
+            polls.append(tick)
+            return None
+
+        result, _, errors = self._start(tmp_path, never, child_alive=False)
+
+        assert result == 1
+        assert "exited" in errors
+        assert "no PID file" in errors
+        assert len(polls) == 1
+
+    def test_a_daemon_making_no_progress_is_reported_when_it_stalls(self, tmp_path: Path) -> None:
+        polls: list[int] = []
+
+        def silent(tick: int, progress_fd: int | None) -> int | None:
+            polls.append(tick)
+            return None
+
+        result, _, errors = self._start(tmp_path, silent, child_alive=True)
+
+        assert result == 1
+        assert "no progress" in errors
+        assert "no PID file" in errors
+        assert len(polls) < self._ticks(Timeout.DAEMON_START_BUDGET_SEC)
+
+    def test_a_pid_file_waiting_on_its_proof_is_named_not_called_missing(
+        self, tmp_path: Path
+    ) -> None:
+        def unproven(tick: int, progress_fd: int | None) -> int | None:
+            self._advance(progress_fd)
+            return self._STARTED
+
+        result, _, errors = self._start(tmp_path, unproven, child_alive=True, proven=False)
+
+        assert result == 1
+        assert f"PID {self._STARTED}" in errors
+        assert "pending" in errors
+        assert "no PID file" not in errors
+
+    def test_a_daemon_advancing_for_ever_is_bounded_by_the_outer_budget(
+        self, tmp_path: Path
+    ) -> None:
+        polls: list[int] = []
+
+        def endless(tick: int, progress_fd: int | None) -> int | None:
+            polls.append(tick)
+            self._advance(progress_fd)
+            return None
+
+        result, _, errors = self._start(tmp_path, endless, child_alive=True)
+
+        assert result == 1
+        assert "still starting" in errors
+        assert "no PID file" in errors
+        assert len(polls) <= self._ticks(Timeout.DAEMON_START_BUDGET_SEC) + 1
 
 
 class TestCmdStartParentProcess:

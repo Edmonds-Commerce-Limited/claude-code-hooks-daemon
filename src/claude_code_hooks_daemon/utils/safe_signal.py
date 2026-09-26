@@ -10,11 +10,13 @@ Every nonzero signal this project sends therefore goes through one of two
 proofs, and ``scripts/qa/check_signal_targets.py`` fails QA on one that does
 not:
 
-* :func:`signal_verified_daemon` / :func:`verified_daemon_process` — the pid's
-  command line is a daemon SERVER for THIS project root, not merely any daemon.
-* :func:`signal_verified_daemon_via_pidfd` — the same proof, delivered via
-  ``os.pidfd_open``/``signal.pidfd_send_signal`` instead of ``psutil``, so a
-  pid reused between the proof and the send still cannot receive the signal.
+* :func:`signal_verified_daemon` / :func:`stop_verified_daemon` /
+  :func:`verified_daemon_process` — the pid's command line is a daemon SERVER
+  for THIS project root, not merely any daemon. Where the kernel makes
+  pidfds, one is opened BEFORE the proof and carries every signal, so a pid
+  reused at any point after it was pinned cannot receive one (Plan 00466
+  N206); elsewhere the proven ``psutil`` handle does, which re-checks the
+  pid's start time before it sends.
 * :func:`signal_own_session_child` — a group kill, only to a child this code
   spawned with ``start_new_session=True`` that is still running and still
   leads its own group.
@@ -27,11 +29,15 @@ callers fail closed, so a pid whose identity cannot be read is refused too.
 
 from __future__ import annotations
 
+import contextlib
+import errno
 import os
+import select
 import signal
+from collections.abc import Iterator
 from enum import Enum
 from pathlib import Path
-from typing import Protocol
+from typing import Final, Protocol
 
 import psutil
 
@@ -43,6 +49,16 @@ from claude_code_hooks_daemon.daemon.process_verification import (
 
 #: Init's pid and the group it leads; never a target.
 _INIT_PID = 1
+
+#: ``pidfd_open`` failures that mean this kernel or container makes no pidfds
+#: (not built in, refused by seccomp, no anonymous inode filesystem) or has no
+#: descriptor to spare, rather than anything about the pid. psutil's own wait
+#: falls back on the last three too.
+_NO_PIDFD_ERRNOS: Final = frozenset(
+    {errno.ENOSYS, errno.EPERM, errno.ENODEV, errno.EMFILE, errno.ENFILE}
+)
+
+_MS_PER_SECOND: Final = 1000
 
 
 class RefusedSignalTarget(Exception):
@@ -135,15 +151,47 @@ def verified_daemon_process(pid: object, *, project_root: Path | str) -> psutil.
     return process
 
 
-def signal_verified_daemon(pid: object, sig: int, *, project_root: Path | str) -> None:
-    """Send ``sig`` to ``pid`` only once it is proven to be this project's daemon.
+@contextlib.contextmanager
+def _pinned(pid: object) -> Iterator[int | None]:
+    """A pidfd naming ``pid``'s process, opened before anything proves it.
+
+    The proof then reads whatever process holds the pid, and every signal
+    goes through this fd. A pid reused after the pin only makes the send
+    fail, where psutil's start-time re-check left a gap before its ``kill``
+    (Plan 00466 N206). None where this kernel makes no pidfds.
 
     Raises:
-        RefusedSignalTarget: See :func:`verified_daemon_process`.
+        RefusedSignalTarget: See :func:`_plain_pid` and :func:`_refuse_own_lineage`.
+        ProcessLookupError: No process has this pid.
+    """
+    checked = _plain_pid(pid)
+    _refuse_own_lineage(checked)
+    pidfd: int | None = None
+    if hasattr(os, "pidfd_open"):
+        try:
+            pidfd = os.pidfd_open(checked)
+        except ProcessLookupError:
+            raise
+        except OSError as unavailable:
+            if unavailable.errno not in _NO_PIDFD_ERRNOS:
+                raise
+    try:
+        yield pidfd
+    finally:
+        if pidfd is not None:
+            os.close(pidfd)
+
+
+def _send(process: psutil.Process, pidfd: int | None, sig: int) -> None:
+    """Deliver ``sig`` through the pin, or the proven handle where there is none.
+
+    Raises:
         ProcessLookupError: The process is gone, or its pid was reused.
         PermissionError: This process may not signal it.
     """
-    process = verified_daemon_process(pid, project_root=project_root)
+    if pidfd is not None:
+        signal.pidfd_send_signal(pidfd, sig)
+        return
     try:
         process.send_signal(sig)
     except psutil.NoSuchProcess as gone:
@@ -152,30 +200,34 @@ def signal_verified_daemon(pid: object, sig: int, *, project_root: Path | str) -
         raise PermissionError(f"not permitted to signal daemon pid {process.pid}") from denied
 
 
-def signal_verified_daemon_via_pidfd(pid: object, sig: int, *, project_root: Path | str) -> None:
-    """Send ``sig`` to ``pid`` via a pidfd, only once proven this project's daemon.
+def _exited_within(process: psutil.Process, pidfd: int | None, seconds: float) -> bool:
+    """True once the pinned process exits inside ``seconds``.
 
-    The identity proof is identical to :func:`signal_verified_daemon`; only the
-    delivery syscall differs. A pidfd is immune to pid reuse mid-flight: once
-    opened it is bound to the exact process the proof verified, so a pid
-    reused by something else between the proof and the send still cannot
-    receive this signal -- ``pidfd_send_signal`` reports
-    :class:`ProcessLookupError` instead. Linux-only (``os.pidfd_open``,
-    Python 3.9+); there is no fallback here, so a caller that must run
-    elsewhere should use :func:`signal_verified_daemon`.
+    A pidfd polls readable when its own process exits, so a pid reused
+    meanwhile cannot hold the wait open.
+    """
+    if pidfd is not None:
+        poller = select.poll()
+        poller.register(pidfd, select.POLLIN)
+        return bool(poller.poll(int(seconds * _MS_PER_SECOND)))
+    try:
+        process.wait(timeout=seconds)
+    except psutil.TimeoutExpired:
+        return False
+    return True
+
+
+def signal_verified_daemon(pid: object, sig: int, *, project_root: Path | str) -> None:
+    """Send ``sig`` to ``pid`` only once it is proven to be this project's daemon.
 
     Raises:
         RefusedSignalTarget: See :func:`verified_daemon_process`.
-        ProcessLookupError: The process is gone, or exited between the proof
-            and the send.
+        ProcessLookupError: The process is gone, or its pid was reused.
         PermissionError: This process may not signal it.
     """
-    process = verified_daemon_process(pid, project_root=project_root)
-    pidfd = os.pidfd_open(process.pid)
-    try:
-        signal.pidfd_send_signal(pidfd, sig)
-    finally:
-        os.close(pidfd)
+    with _pinned(pid) as pidfd:
+        process = verified_daemon_process(pid, project_root=project_root)
+        _send(process, pidfd, sig)
 
 
 class DaemonStop(Enum):
@@ -196,8 +248,9 @@ def stop_verified_daemon(
 ) -> DaemonStop:
     """SIGTERM this project's daemon at ``pid``, then SIGKILL it after the grace.
 
-    The identity is proven once, and the handle's start-time check stops a pid
-    reused during the grace from receiving the SIGKILL.
+    The identity is proven once, and the pin taken before it (or, without
+    pidfds, the handle's start-time check) stops a pid reused during the
+    grace from receiving the SIGKILL.
 
     Args:
         pid: Candidate daemon pid.
@@ -214,25 +267,17 @@ def stop_verified_daemon(
     """
     kill_wait = grace_seconds if kill_grace_seconds is None else kill_grace_seconds
     try:
-        process = verified_daemon_process(pid, project_root=project_root)
-    except ProcessLookupError:
-        return DaemonStop.ALREADY_GONE
-    try:
-        process.terminate()
-        try:
-            process.wait(timeout=grace_seconds)
-            return DaemonStop.TERMINATED
-        except psutil.TimeoutExpired:
-            process.kill()
-        try:
-            process.wait(timeout=kill_wait)
-            return DaemonStop.KILLED
-        except psutil.TimeoutExpired:
+        with _pinned(pid) as pidfd:
+            process = verified_daemon_process(pid, project_root=project_root)
+            _send(process, pidfd, signal.SIGTERM)
+            if _exited_within(process, pidfd, grace_seconds):
+                return DaemonStop.TERMINATED
+            _send(process, pidfd, signal.SIGKILL)
+            if _exited_within(process, pidfd, kill_wait):
+                return DaemonStop.KILLED
             return DaemonStop.SURVIVED
-    except psutil.NoSuchProcess:
+    except (ProcessLookupError, psutil.NoSuchProcess):
         return DaemonStop.ALREADY_GONE
-    except psutil.AccessDenied as denied:
-        raise PermissionError(f"not permitted to signal daemon pid {process.pid}") from denied
 
 
 def signal_own_session_child(process: SpawnedChild, sig: int) -> None:

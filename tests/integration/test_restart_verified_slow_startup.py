@@ -47,7 +47,7 @@ def _parent_poll_body() -> str:
     assert parent is not None, "First-fork parent branch not found in cli.py"
     assert "_await_started_daemon(" in parent.group(1), "the parent no longer polls"
     poll = re.search(
-        r"\ndef _await_started_daemon\(.*?\) -> int \| None:\n(.*?)\n(?=\S)", content, re.DOTALL
+        r"\ndef _await_started_daemon\(.*?\) -> _StartWait:\n(.*?)\n(?=\S)", content, re.DOTALL
     )
     assert poll is not None, "_await_started_daemon not found in cli.py"
     return poll.group(1)

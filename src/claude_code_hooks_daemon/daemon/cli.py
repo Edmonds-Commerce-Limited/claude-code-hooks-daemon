@@ -39,6 +39,7 @@ import subprocess  # nosec B404 - subprocess used for daemon management (systemc
 import sys
 import time
 from collections.abc import Iterator, Mapping, Sequence
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Final, Literal, cast
 
@@ -70,7 +71,6 @@ from claude_code_hooks_daemon.daemon.paths import (
     find_uv,
     get_pid_path,
     get_socket_path,
-    is_pid_alive,
     parse_pid_text,
     python_venv_fingerprint,
     read_pid_file,
@@ -86,6 +86,7 @@ from claude_code_hooks_daemon.daemon.permission_audit import (
 from claude_code_hooks_daemon.daemon.process_verification import (
     DAEMON_CLI_MODULE,
     PROJECT_ROOT_ENV_VAR,
+    add_global_arguments,
     daemon_process_project_root,
     is_this_users_process,
 )
@@ -658,31 +659,44 @@ def cmd_start(args: argparse.Namespace) -> int:
     sys.stdout.flush()
     sys.stderr.flush()
 
-    # Daemonise process (fork and detach from terminal)
+    # Daemonise process (fork and detach from terminal). The daemon reports
+    # its progress through this pipe, and holds its write end for its whole
+    # life (Plan 00466 N202).
     displaced = pid
+    progress_read, progress_write = os.pipe()
     try:
         # First fork
         pid = os.fork()
-        if pid > 0:
-            # Parent process - poll for PID file (child startup time is
-            # variable on slow hosts: imports + config load + handler init).
-            # Plan 00100 Task 0.2: replace fixed 0.5s sleep with polling.
-            daemon_pid = _await_started_daemon(
-                Path(pid_path), Path(socket_path), project_path, displaced
-            )
-            if daemon_pid is not None:
-                print(f"Daemon started successfully (PID: {daemon_pid})")
-                print(f"Socket: {socket_path}")
-                print("Logs: in-memory (query with 'logs' command)")
-                return 0
-            else:
-                print("ERROR: Daemon failed to start (no PID file created)", file=sys.stderr)
-                return 1
     except OSError as e:
+        os.close(progress_read)
+        os.close(progress_write)
         print(f"ERROR: Fork failed: {e}", file=sys.stderr)
+        return 1
+    if pid > 0:
+        # Parent process - wait on the daemon's own progress (startup time
+        # is variable on slow hosts: imports + config load + handler init),
+        # never on a fixed budget.
+        os.close(progress_write)
+        try:
+            started = _await_started_daemon(
+                Path(pid_path),
+                Path(socket_path),
+                project_path,
+                displaced,
+                _StartProgress(progress_read),
+            )
+        finally:
+            os.close(progress_read)
+        if started.pid is not None:
+            print(f"Daemon started successfully (PID: {started.pid})")
+            print(f"Socket: {socket_path}")
+            print("Logs: in-memory (query with 'logs' command)")
+            return 0
+        print(f"ERROR: Daemon not proven started: {started.failure}", file=sys.stderr)
         return 1
 
     # First child - decouple from parent environment
+    os.close(progress_read)
     os.chdir("/")
     os.setsid()
     # Plan 00239: NOT the textbook umask(0). Clearing the mask is only safe for a
@@ -702,7 +716,12 @@ def cmd_start(args: argparse.Namespace) -> int:
         print(f"ERROR: Second fork failed: {e}", file=sys.stderr)
         sys.exit(1)
 
-    # Second child - this becomes the daemon process
+    # Second child - this becomes the daemon process. It names itself to the
+    # waiting parent first, and never closes the pipe: its end of file is
+    # the parent's news that the daemon has exited.
+    reporter = _StartReporter(progress_write)
+    reporter.report(f"{os.getpid()}\n".encode())
+
     # Redirect stdin to /dev/null
     sys.stdin.close()
 
@@ -722,11 +741,13 @@ def cmd_start(args: argparse.Namespace) -> int:
 
     # Load configuration
     config = Config.find_and_load(project_path)
+    reporter.report(_START_STEP)
 
     # Create and fully initialise the daemon controller. Initialising also
     # regenerates the CLAUDE.md <hooksdaemon> block (via the injector). Shared
     # single source of truth with cmd_regenerate_docs.
     controller = _build_initialised_controller(config, project_path)
+    reporter.report(_START_STEP)
 
     # Get the daemon config with proper paths
     daemon_config = config.daemon
@@ -820,39 +841,6 @@ def _release_stopped_daemon_files(pid: int, pid_path: Path, socket_path: Path) -
         )
 
 
-def remove_stale_pid_file(pid_path: Path, socket_path: Path, seen: str) -> bool:
-    """Remove a PID file that names no live process, under the start lock.
-
-    ``init.sh``'s ``is_daemon_running`` calls this for a file whose pid it
-    found gone, or whose text is corrupt (Plan 00466 round 4, Sh-A, Sh-B). A
-    daemon start writes its pid while holding the same lock, so under it the
-    file goes only while it still holds exactly ``seen`` and that names no
-    live process. A lock that cannot be taken or opened leaves the file.
-
-    Returns:
-        True when the file was removed.
-    """
-    try:
-        with hold_start_lock(socket_path, Timeout.FILE_LOCK):
-            try:
-                current = pid_path.read_text()
-            except FileNotFoundError:
-                return False
-            if current.rstrip("\n") != seen:
-                logger.info("PID file %s changed since it was read; leaving it", pid_path)
-                return False
-            pid = parse_pid_text(seen)
-            if pid is not None and is_pid_alive(pid):
-                return False
-            pid_path.unlink()
-            return True
-    except StartLockTimeout as exc:
-        logger.warning("A daemon start holds %s; leaving the PID file", exc)
-    except (OSError, UnicodeDecodeError) as exc:
-        logger.warning("Cannot remove stale PID file %s under the start lock: %s", pid_path, exc)
-    return False
-
-
 def _serves_this_project(pid: int, project_root: Path) -> bool:
     """True when ``pid`` is this user's and its command line, or the socket
     it listens on, proves it serves ``project_root``.
@@ -890,10 +878,126 @@ def pid_is_this_projects_daemon(pid: int, socket_path: Path, project_root: Path)
     return _serves_this_project(pid, project_root)
 
 
+#: What a starting daemon writes to the start pipe as it finishes a step.
+_START_STEP: Final = b"."
+
+#: Largest read from the start pipe at once.
+_START_PIPE_READ_BYTES: Final = 4096
+
+
+class _StartReporter:
+    """The starting daemon's end of the start pipe (Plan 00466 N202)."""
+
+    def __init__(self, write_fd: int) -> None:
+        self._fd: int | None = write_fd
+
+    def report(self, message: bytes) -> None:
+        """Tell the waiting parent, while there is one, that startup advanced."""
+        if self._fd is None:
+            return
+        try:
+            os.write(self._fd, message)
+        except BrokenPipeError:
+            # The parent stopped waiting, so nobody reads further progress.
+            os.close(self._fd)
+            self._fd = None
+
+
+class _StartProgress:
+    """What the daemon ``cmd_start`` launched reports through the start pipe.
+
+    The daemon writes its pid, then a byte as it finishes each startup step,
+    and holds the write end for its whole life, so end of file means it has
+    exited. A byte, or CPU time it has spent since the last look, is progress:
+    under load a single step can outlast any fixed budget.
+    """
+
+    def __init__(self, read_fd: int) -> None:
+        os.set_blocking(read_fd, False)
+        self._fd = read_fd
+        self._announcement = b""
+        self._daemon: psutil.Process | None = None
+        self._cpu_seconds = 0.0
+        self.exited = False
+
+    def advanced(self) -> bool:
+        """Read everything reported since the last call; True when startup advanced."""
+        reported = self._drain()
+        return self._spent_cpu() or reported
+
+    def _drain(self) -> bool:
+        reported = False
+        while not self.exited:
+            try:
+                chunk = os.read(self._fd, _START_PIPE_READ_BYTES)
+            except BlockingIOError:
+                break
+            if not chunk:
+                self.exited = True
+                break
+            reported = True
+            if self._daemon is None:
+                self._take_announcement(chunk)
+        return reported
+
+    def _take_announcement(self, chunk: bytes) -> None:
+        """Hold a handle on the pid the daemon named, read only for its CPU time."""
+        self._announcement += chunk
+        line, newline, _ = self._announcement.partition(b"\n")
+        if not newline:
+            return
+        pid = parse_pid_text(line.decode("ascii", errors="replace"))
+        if pid is None:
+            logger.warning("The starting daemon named no pid: %r", line)
+            return
+        try:
+            self._daemon = psutil.Process(pid)
+        except psutil.NoSuchProcess:
+            self.exited = True
+
+    def _spent_cpu(self) -> bool:
+        if self._daemon is None:
+            return False
+        try:
+            times = self._daemon.cpu_times()
+        except psutil.NoSuchProcess:
+            self.exited = True
+            return False
+        except psutil.AccessDenied as exc:
+            logger.debug("Cannot read the starting daemon's CPU time: %s", exc)
+            return False
+        spent = times.user + times.system + times.children_user + times.children_system
+        if spent <= self._cpu_seconds:
+            return False
+        self._cpu_seconds = spent
+        return True
+
+
+@dataclass(frozen=True)
+class _StartWait:
+    """The proven pid of the daemon ``cmd_start`` launched, or why there is none."""
+
+    pid: int | None
+    failure: str | None = None
+
+
+def _pid_file_state(daemon_pid: int | None, displaced: int | None) -> str:
+    """What the PID file showed when the wait ended, for its message."""
+    if daemon_pid is None:
+        return "no PID file created"
+    if daemon_pid == displaced:
+        return f"the PID file still names PID {displaced}, from before this start"
+    return f"the PID file names PID {daemon_pid}; the proof that it serves this project is pending"
+
+
 def _await_started_daemon(
-    pid_path: Path, socket_path: Path, project_path: Path, displaced: int | None
-) -> int | None:
-    """The pid of the daemon ``cmd_start`` launched, once proven, else None.
+    pid_path: Path,
+    socket_path: Path,
+    project_path: Path,
+    displaced: int | None,
+    progress: _StartProgress,
+) -> _StartWait:
+    """The pid of the daemon ``cmd_start`` launched, once proven.
 
     A PID file still naming ``displaced``, the live pid it held before the
     fork, proves nothing about this start (round 5): a stale file of a pid
@@ -901,22 +1005,45 @@ def _await_started_daemon(
     A new pid counts once the socket answers as it, or it is proven to serve
     this project.
 
-    The budget is wall-clock time (round 6, R5-1): a probe can take its whole
-    timeout, and a tick count then ran the PreToolUse deny path near the
-    hook's 60 s timeout. The last probe may overrun it by one probe.
+    It waits while the daemon is alive and advancing (N202): it gives up
+    when the daemon exits, when it has made no progress for the stall
+    window, and in any case at the budget. Both are wall-clock time (round
+    6, R5-1): a probe can take its whole timeout, and a tick count then ran
+    the PreToolUse deny path near the hook's 60 s timeout. The last probe
+    may overrun them by one probe.
     """
-    deadline = time.monotonic() + Timeout.DAEMON_PID_POLL_BUDGET_SEC
-    while time.monotonic() < deadline:
+    started = last_progress = time.monotonic()
+    last_read: int | None = None
+    while True:
         time.sleep(Timeout.DAEMON_PID_POLL_INTERVAL_SEC)
+        advanced = progress.advanced()
         daemon_pid = read_pid_file(str(pid_path))
-        if daemon_pid is None or daemon_pid == displaced:
-            continue
-        identity = _socket_answers_for_project(socket_path, project_path)
-        if (identity is not None and identity.pid == daemon_pid) or _serves_this_project(
-            daemon_pid, project_path
-        ):
-            return daemon_pid
-    return None
+        if daemon_pid != last_read:
+            last_read, advanced = daemon_pid, True
+        if daemon_pid is not None and daemon_pid != displaced:
+            identity = _socket_answers_for_project(socket_path, project_path)
+            if (identity is not None and identity.pid == daemon_pid) or _serves_this_project(
+                daemon_pid, project_path
+            ):
+                return _StartWait(pid=daemon_pid)
+        now = time.monotonic()
+        if advanced:
+            last_progress = now
+        state = _pid_file_state(daemon_pid, displaced)
+        if progress.exited:
+            return _StartWait(pid=None, failure=f"the daemon exited while starting ({state})")
+        if now - last_progress >= Timeout.DAEMON_START_STALL_SEC:
+            return _StartWait(
+                pid=None,
+                failure=f"the daemon made no progress for "
+                f"{Timeout.DAEMON_START_STALL_SEC:g}s ({state})",
+            )
+        if now - started >= Timeout.DAEMON_START_BUDGET_SEC:
+            return _StartWait(
+                pid=None,
+                failure=f"the daemon was still starting after "
+                f"{Timeout.DAEMON_START_BUDGET_SEC:g}s ({state})",
+            )
 
 
 def cmd_stop(args: argparse.Namespace) -> int:
@@ -937,16 +1064,14 @@ def cmd_stop(args: argparse.Namespace) -> int:
         print("Daemon not running")
         return 0
 
-    # Plan 00466 N59: verify_daemon proves only that the pid is SOME daemon. The
-    # handle proves it serves THIS project root, and its start-time check keeps
-    # a pid reused during the wait -- including the SIGTERM-to-SIGKILL gap --
-    # from being mistaken for the daemon (closes the same TOCTOU Plan 00466
-    # N24 review 3 mi5 raised against a plain pid, without needing a separate
-    # pidfd: psutil.Process pins the pid's start time and every call re-checks
-    # it). SIGKILL escalation after the SIGTERM grace is Plan 00466 N40 review
-    # 2 MA2 -- a GIL-holding handler cannot even reach Python's signal-handling
-    # bytecode check to act on SIGTERM, and SIGKILL cannot be caught, blocked
-    # or ignored.
+    # Plan 00466 N59: verify_daemon proves only that the pid is SOME daemon.
+    # stop_verified_daemon proves it serves THIS project root, and the pidfd
+    # it pins before that proof (N206) keeps a pid reused at any point after
+    # -- including the SIGTERM-to-SIGKILL gap -- from receiving a signal (the
+    # TOCTOU Plan 00466 N24 review 3 mi5 raised against a plain pid). SIGKILL
+    # escalation after the SIGTERM grace is Plan 00466 N40 review 2 MA2 -- a
+    # GIL-holding handler cannot even reach Python's signal-handling bytecode
+    # check to act on SIGTERM, and SIGKILL cannot be caught, blocked or ignored.
     try:
         outcome = stop_verified_daemon(
             pid,
@@ -9000,37 +9125,30 @@ def main() -> int:
     Returns:
         Exit code (0 for success, 1 for error)
     """
+    parser = build_parser()
+    args = apply_global_project_root(parser.parse_args())
+
+    # Execute command
+    if not hasattr(args, "func"):
+        parser.print_help()
+        return 1
+
+    _reexec_daemon_launch_with_explicit_project_root(args)
+
+    return cast("int", args.func(args))
+
+
+def build_parser() -> argparse.ArgumentParser:
+    """The CLI's argument parser, every subcommand included."""
     parser = argparse.ArgumentParser(
         description="Claude Code Hooks Daemon - Lifecycle Management\n"
         "Run from project root or any subdirectory.",
         prog="claude-hooks-daemon",
     )
 
-    # Global arguments
-    #
-    # A SEPARATE dest, reconciled after parsing by apply_global_project_root
-    # (Plan 00374). Sharing `project_root` with the twenty-five subparsers that
-    # declare their own silently lost this value: argparse writes a subparser's
-    # defaults into the namespace whether or not the flag was supplied, so the
-    # subparser's None overwrote the anchor `bin/hooks-daemon` passes ahead of
-    # the subcommand — and the CLI fell back to auto-detection, which is the one
-    # behaviour that wrapper exists to refuse.
-    parser.add_argument(
-        "--project-root",
-        dest="global_project_root",
-        type=Path,
-        help="Override project root path (auto-detected by default)",
-    )
-    parser.add_argument(
-        "--pid-file",
-        type=Path,
-        help="Explicit PID file path (overrides auto-discovery)",
-    )
-    parser.add_argument(
-        "--socket",
-        type=Path,
-        help="Explicit socket path (overrides auto-discovery)",
-    )
+    # Global arguments, shared with the proof that reads a daemon's own
+    # command line (Plan 00466 N203).
+    add_global_arguments(parser)
 
     subparsers = parser.add_subparsers(dest="command", help="Command to run")
 
@@ -10813,17 +10931,7 @@ def main() -> int:
     )
     parser_bug_report.set_defaults(func=cmd_bug_report)
 
-    # Parse arguments
-    args = apply_global_project_root(parser.parse_args())
-
-    # Execute command
-    if not hasattr(args, "func"):
-        parser.print_help()
-        return 1
-
-    _reexec_daemon_launch_with_explicit_project_root(args)
-
-    return cast("int", args.func(args))
+    return parser
 
 
 def _reexec_daemon_launch_with_explicit_project_root(args: argparse.Namespace) -> None:
@@ -10836,14 +10944,13 @@ def _reexec_daemon_launch_with_explicit_project_root(args: argparse.Namespace) -
     whatever the process this function launches was given. A caller that
     omits ``--project-root`` (the common case: production start scripts rely
     on cwd instead, see ``scripts/upgrade.sh``/``scripts/install_version.sh``)
-    leaves the daemon provable only via the interpreter-venv-path heuristic in
-    ``process_verification._root_from_interpreter``, which is WRONG whenever
-    the interpreter's own venv lives in a different project than the one it
-    was asked to serve -- one shared venv starting a daemon for an isolated
-    test project root, for instance. Establishing the flag AND the recorded
-    env var here (before any forking) bakes both into the daemon's own
-    cmdline/environ instead, which ``verified_daemon_process`` already trusts
-    first and every existing test already covers.
+    leaves the daemon provable only by the socket it listens on, and not at
+    all while it is still starting or when its socket is not the project's
+    natural one. The interpreter's venv is no proof (Plan 00466 round 6,
+    Sh-1): one shared venv can start a daemon for another project root.
+    Establishing the flag AND the recorded env var here (before any forking)
+    bakes both into the daemon's own cmdline/environ instead, the sources
+    ``verified_daemon_process`` trusts first.
 
     This used to replace the current process image in place (Python's
     ``os`` module offers several calls for that -- POSIX calls it "exec").

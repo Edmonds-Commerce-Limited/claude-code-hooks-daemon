@@ -10,12 +10,9 @@ from pathlib import Path
 
 from claude_code_hooks_daemon.config.models import Config
 from claude_code_hooks_daemon.constants import Timeout
-from claude_code_hooks_daemon.daemon.paths import cleanup_pid_file, read_pid_file
-from claude_code_hooks_daemon.daemon.process_verification import (
-    find_all_daemon_processes,
-    is_process_running,
-)
-from claude_code_hooks_daemon.daemon.server import _socket_is_live
+from claude_code_hooks_daemon.daemon.paths import read_pid_file
+from claude_code_hooks_daemon.daemon.process_verification import find_all_daemon_processes
+from claude_code_hooks_daemon.daemon.server import _socket_is_live, remove_stale_pid_file
 from claude_code_hooks_daemon.utils.container_detection import is_container_environment
 from claude_code_hooks_daemon.utils.safe_signal import (
     DaemonStop,
@@ -127,9 +124,25 @@ def enforce_single_daemon(
     # Outside container: Only clean up stale PID file (conservative)
     elif not in_container:
         logger.debug("Non-container environment: Using conservative cleanup")
+        _remove_stale_pid_file(pid_path, socket_path)
 
-        # Check if PID file exists and points to dead process
-        pid_from_file = read_pid_file(str(pid_path))
-        if pid_from_file is not None and not is_process_running(pid_from_file):
-            logger.info(f"Cleaning up stale PID file: {pid_path} (PID {pid_from_file})")
-            cleanup_pid_file(str(pid_path), pid_from_file)
+
+def _remove_stale_pid_file(pid_path: Path, socket_path: Path | None) -> None:
+    """Remove ``pid_path`` if it names no live process, under the start lock.
+
+    A start writes its pid under that lock, so outside it a successor's file
+    could go (Plan 00466 N204). Without a socket there is no lock to hold,
+    and the file stays; a starting daemon overwrites it.
+    """
+    if socket_path is None:
+        logger.debug("No socket path, so no start lock to hold; leaving %s", pid_path)
+        return
+    try:
+        seen = pid_path.read_text().rstrip("\n")
+    except FileNotFoundError:
+        return
+    except (OSError, UnicodeDecodeError) as exc:
+        logger.warning("Cannot read PID file %s: %s", pid_path, exc)
+        return
+    if remove_stale_pid_file(pid_path, socket_path, seen):
+        logger.info(f"Cleaned up stale PID file: {pid_path} ({seen!r})")

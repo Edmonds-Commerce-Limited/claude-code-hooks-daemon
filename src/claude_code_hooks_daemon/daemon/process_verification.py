@@ -5,11 +5,12 @@ in container environments for single-process enforcement. Signalling a daemon
 it finds is ``utils.safe_signal``'s job, which re-proves the pid first.
 """
 
+import argparse
 import logging
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Final
+from typing import Final, NoReturn
 
 import psutil
 
@@ -48,6 +49,68 @@ PROJECT_ROOT_ENV_VAR = "CLAUDE_HOOKS_DAEMON_PROJECT_ROOT"
 
 # Where a client install keeps the daemon, below the project it serves.
 _CLIENT_DAEMON_DIR = (".claude", "hooks-daemon")
+
+
+def add_global_arguments(parser: argparse.ArgumentParser) -> None:
+    """Add the options ``cli.main`` accepts before its subcommand.
+
+    One definition, so that a daemon's command line is read here exactly as
+    the parser that launched it read it (Plan 00466 N203).
+
+    The root has a SEPARATE dest, reconciled after parsing by
+    ``cli.apply_global_project_root`` (Plan 00374). Sharing ``project_root``
+    with the subparsers that declare their own lost this value: argparse
+    writes a subparser's defaults into the namespace whether or not the flag
+    was supplied, so the subparser's None overwrote the anchor
+    ``bin/hooks-daemon`` passes ahead of the subcommand.
+    """
+    parser.add_argument(
+        _PROJECT_ROOT_FLAG,
+        dest="global_project_root",
+        type=Path,
+        help="Override project root path (auto-detected by default)",
+    )
+    parser.add_argument(
+        "--pid-file",
+        type=Path,
+        help="Explicit PID file path (overrides auto-discovery)",
+    )
+    parser.add_argument(
+        "--socket",
+        type=Path,
+        help="Explicit socket path (overrides auto-discovery)",
+    )
+
+
+class _UnreadableLaunch(Exception):
+    """A daemon's arguments cannot be read as its own parser read them."""
+
+
+class _LaunchParser(argparse.ArgumentParser):
+    """``cli.main``'s global options, raising where argparse would exit."""
+
+    def error(self, message: str) -> NoReturn:
+        raise _UnreadableLaunch(message)
+
+    def exit(self, status: int = 0, message: str | None = None) -> NoReturn:
+        raise _UnreadableLaunch(message or f"its parser would exit with {status}")
+
+
+def _launch_parser() -> _LaunchParser:
+    """A parser that reads a daemon launch as ``cli.main``'s does.
+
+    It carries the same option strings, so it resolves the same repeats,
+    ``=`` forms and abbreviations. ``cli.main``'s help option is declared
+    here as a flag rather than an action that prints; the subcommand and
+    anything after it stand in for its subparsers, and ``start`` and
+    ``restart`` accept no arguments of their own.
+    """
+    parser = _LaunchParser(add_help=False)
+    parser.add_argument("-h", "--help", action="store_true")
+    add_global_arguments(parser)
+    parser.add_argument("command")
+    parser.add_argument("after_command", nargs=argparse.REMAINDER)
+    return parser
 
 
 def find_all_daemon_processes(project_root: str | Path | None = None) -> list[int]:
@@ -137,27 +200,55 @@ def _extract_project_root(proc: psutil.Process) -> str | None:
     except (psutil.NoSuchProcess, psutil.AccessDenied) as exc:
         logger.debug("cmdline unavailable for pid %s (%s): %s", proc.pid, type(exc).__name__, exc)
         cmdline = []
-    attributed = _attributed_root(proc, cmdline)
-    return attributed[0] if attributed is not None else None
+    return _attributed_root(proc, cmdline).root
 
 
-def _attributed_root(proc: psutil.Process, cmdline: list[str]) -> tuple[str, str] | None:
-    """The normalised root ``proc`` serves and where it came from, or None.
+@dataclass(frozen=True)
+class RootProof:
+    """Which project a pid's daemon serves, or why that cannot be proven.
+
+    Exactly one of ``root`` and ``refusal`` is set. ``source`` says where the
+    root came from, so a caller refusing on a mismatch can say how the pid was
+    attributed.
+    """
+
+    root: str | None
+    refusal: str | None
+    source: str | None = None
+
+
+_FLAG_SOURCE: Final = f"its {_PROJECT_ROOT_FLAG} flag"
+_ENV_SOURCE: Final = f"its {PROJECT_ROOT_ENV_VAR} environment variable"
+_SOCKET_SOURCE: Final = "the socket it listens on"
+_NO_SOURCE: Final = "names no project, nor do its environment or a socket it listens on"
+
+
+def _attributed_root(proc: psutil.Process, cmdline: list[str]) -> RootProof:
+    """The normalised root ``proc`` serves and where it came from.
 
     Its interpreter's venv is no source (Plan 00466 round 6, Sh-1): it names
     only the install the daemon runs from, which a worktree can share, while
     a daemon naming no root serves whatever its working directory found.
+
+    A command line its own parser could not have read as it is read here
+    proves nothing, and no later source is consulted for it (N203).
     """
-    flag_root = _root_from_flag(cmdline)
+    try:
+        flag_root = _root_from_flag(cmdline)
+    except _UnreadableLaunch as unreadable:
+        return RootProof(
+            root=None,
+            refusal=f"its command line cannot be read as its own parser read it: {unreadable}",
+        )
     if flag_root is not None:
-        return flag_root, _FLAG_SOURCE
+        return RootProof(root=flag_root, refusal=None, source=_FLAG_SOURCE)
     env_root = _root_from_environ(proc)
     if env_root is not None:
-        return env_root, _ENV_SOURCE
+        return RootProof(root=env_root, refusal=None, source=_ENV_SOURCE)
     socket_root = _root_from_listening_socket(proc)
     if socket_root is not None:
-        return socket_root, _SOCKET_SOURCE
-    return None
+        return RootProof(root=socket_root, refusal=None, source=_SOCKET_SOURCE)
+    return RootProof(root=None, refusal=f"its command line {_NO_SOURCE}")
 
 
 def _root_from_environ(proc: psutil.Process) -> str | None:
@@ -181,14 +272,34 @@ def _root_from_environ(proc: psutil.Process) -> str | None:
 
 
 def _root_from_flag(cmdline: list[str]) -> str | None:
-    """Extract the project root from a ``--project-root`` command-line flag."""
-    for index, token in enumerate(cmdline):
-        if token == _PROJECT_ROOT_FLAG and index + 1 < len(cmdline):
-            return _normalize_root(cmdline[index + 1])
-        prefix = f"{_PROJECT_ROOT_FLAG}="
-        if token.startswith(prefix):
-            return _normalize_root(token[len(prefix) :])
-    return None
+    """The root a daemon's ``--project-root`` names, read as ``cli.main`` read it.
+
+    argparse keeps the LAST of several and accepts ``--project-root=PATH``
+    and any unambiguous abbreviation, and ``bin/hooks-daemon`` relies on the
+    first: it puts its own root ahead of the caller's (Plan 00466 N203).
+
+    Returns:
+        The normalised root, or None when the launch names none.
+
+    Raises:
+        _UnreadableLaunch: The arguments are not a ``start``/``restart`` its
+            parser accepts, or name a relative root, which was resolved
+            against a working directory the daemon has since left.
+    """
+    module_index = _cli_module_index(cmdline)
+    if module_index is None:
+        raise _UnreadableLaunch(f"{DAEMON_CLI_MODULE} is not among its arguments")
+    parsed = _launch_parser().parse_args(cmdline[module_index + 1 :])
+    if parsed.help or parsed.after_command or parsed.command not in _DAEMON_LAUNCH_SUBCOMMANDS:
+        raise _UnreadableLaunch(
+            f"its parser accepts no {parsed.command!r} launch with these arguments"
+        )
+    root: Path | None = parsed.global_project_root
+    if root is None:
+        return None
+    if not root.is_absolute():
+        raise _UnreadableLaunch(f"{_PROJECT_ROOT_FLAG} {str(root)!r} is relative")
+    return _normalize_root(root)
 
 
 def _project_of_socket(path: Path) -> str | None:
@@ -242,25 +353,6 @@ def _root_from_listening_socket(process: psutil.Process) -> str | None:
     return roots.pop()
 
 
-@dataclass(frozen=True)
-class RootProof:
-    """Which project a pid's daemon serves, or why that cannot be proven.
-
-    Exactly one of ``root`` and ``refusal`` is set. ``source`` says where the
-    root came from, so a caller refusing on a mismatch can say how the pid was
-    attributed.
-    """
-
-    root: str | None
-    refusal: str | None
-    source: str | None = None
-
-
-_FLAG_SOURCE: Final = f"its {_PROJECT_ROOT_FLAG} flag"
-_ENV_SOURCE: Final = f"its {PROJECT_ROOT_ENV_VAR} environment variable"
-_SOCKET_SOURCE: Final = "the socket it listens on"
-
-
 def is_this_users_process(pid: int) -> bool:
     """True when ``pid``'s real and effective uids are both this process's
     effective uid.
@@ -311,33 +403,11 @@ def daemon_process_project_root(pid: int) -> RootProof:
     if not _is_daemon_server_process(cmdline):
         return RootProof(root=None, refusal=f"PID {pid} is not a hooks daemon server")
     attributed = _attributed_root(process, cmdline)
-    if attributed is None:
+    if attributed.root is None:
         return RootProof(
-            root=None,
-            refusal=f"PID {pid} is a daemon server whose command line names no project, "
-            "nor do its environment or a socket it listens on",
+            root=None, refusal=f"PID {pid} is a daemon server, but {attributed.refusal}"
         )
-    root, source = attributed
-    return RootProof(root=os.path.realpath(root), refusal=None, source=source)
-
-
-def is_process_running(pid: int) -> bool:
-    """Check if a process is currently running.
-
-    Args:
-        pid: Process ID to check
-
-    Returns:
-        True if process exists and is running, False otherwise.
-
-    Note:
-        Returns False for permission denied errors (conservative approach).
-    """
-    try:
-        process = psutil.Process(pid)
-        return bool(process.is_running())
-    except (psutil.NoSuchProcess, psutil.AccessDenied):
-        return False
+    return RootProof(root=os.path.realpath(attributed.root), refusal=None, source=attributed.source)
 
 
 def _is_daemon_server_process(cmdline: list[str] | None) -> bool:
@@ -368,14 +438,18 @@ def _is_daemon_server_process(cmdline: list[str] | None) -> bool:
     if not cmdline:
         return False
 
-    module_index: int | None = None
-    for index, token in enumerate(cmdline):
-        if DAEMON_CLI_MODULE in token:
-            module_index = index
-            break
+    module_index = _cli_module_index(cmdline)
     if module_index is None:
         return False
 
     # A launch subcommand must appear AFTER the module token (global flags such
     # as ``--project-root PATH`` may sit between the module and the subcommand).
     return any(token in _DAEMON_LAUNCH_SUBCOMMANDS for token in cmdline[module_index + 1 :])
+
+
+def _cli_module_index(cmdline: list[str]) -> int | None:
+    """The index of the first argument naming the cli module, or None."""
+    for index, token in enumerate(cmdline):
+        if DAEMON_CLI_MODULE in token:
+            return index
+    return None

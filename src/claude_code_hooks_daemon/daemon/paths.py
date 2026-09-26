@@ -2036,7 +2036,7 @@ def read_pid_file(pid_path: Path | str, verify_daemon: bool = False) -> int | No
             PID reuse).
 
     A stale or corrupt file is never removed here: removal happens only
-    under the start lock (``cli.remove_stale_pid_file``, and ``cmd_stop``),
+    under the start lock (``server.remove_stale_pid_file``, and ``cmd_stop``),
     and a starting daemon overwrites it.
 
     Returns:

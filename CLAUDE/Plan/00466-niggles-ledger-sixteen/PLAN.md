@@ -148,6 +148,15 @@ Full write-ups are in [NIGGLES.md](NIGGLES.md). One line each here:
 | N163 | A PID file whose pid this user may signal counts as running, whatever process it names                         | Lifecycle round 4 D-PATH review (Sh-D, shared)                  | ✅ Remedied                      |
 | N164 | The start lock's mode and its docstring disagree about a second user                                           | Lifecycle round 4 D-PATH review (Sh-E, shared)                  | ✅ Remedied                      |
 | N165 | `init.sh`'s daemon helper runs a venv that `HOOKS_DAEMON_ROOT_DIR` alone chose                                 | Lifecycle round 4 D-PATH review (Sh-F, shared)                  | ✅ Remedied                      |
+| N190 | A process's owner was judged by permission to signal it, which root holds over every process                   | Lifecycle round 5 reviews (P5-1, Sh-G, shared)                  | ✅ Remedied                      |
+| N191 | A daemon naming no root was attributed to the project owning its venv                                          | Lifecycle round 5 D-PATH review (Sh-1, shared)                  | ✅ Remedied                      |
+| N192 | A socket that merely accepts a connection counted as this project's daemon                                     | Lifecycle round 5 D-PATH review (Sh-2)                          | ✅ Remedied                      |
+| N193 | The server's PID-file liveness check parsed pid text its own way                                               | Lifecycle round 5 D-PATH review (Sh-3)                          | ✅ Remedied                      |
+| N202 | `restart` reports "failed to start (no PID file)" while the daemon comes up                                    | Lifecycle review 7 (§5, shared)                                 | ✅ Remedied                      |
+| N203 | The stop proof takes the first `--project-root` where argparse keeps the last                                  | Lifecycle review 7 (S-1, shared)                                | ✅ Remedied                      |
+| N204 | Enforcement removes a stale PID file outside the start lock and takes another user's live pid for dead         | Lifecycle review 7 (S-2, shared)                                | ✅ Remedied                      |
+| N205 | The installer removes PID files and sockets with no lock or liveness check                                     | Lifecycle review 7 (S-3, shared)                                | ✅ Remedied                      |
+| N206 | A pid reused between psutil's start-time re-check and its `kill` is signalled                                  | Lifecycle review 7 (§2, shared)                                 | ✅ Remedied                      |
 
 ## Tasks
 
