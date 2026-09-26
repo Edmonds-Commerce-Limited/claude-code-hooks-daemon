@@ -553,8 +553,8 @@ work in this same plan:
    not a comma list; "security reviewers" was not a recognised value at
    all. Both narrowed to `**Audience**: operators`, matching this
    directory's other daemon-behaviour notes.
-3. `CLAUDE/UPGRADES/UNRELEASED/post-upgrade-tasks/02-review-new-denials-from-strict-mode-and-safety-guards.md`
-   (also written for N24) existed on disk with no row in its directory's
+3. `CLAUDE/UPGRADES/UNRELEASED/post-upgrade-tasks/05-review-new-denials-from-strict-mode-and-safety-guards.md`
+   (also written for N24; numbered 05 at landing, clear of main's 02) existed on disk with no row in its directory's
    `README.md` task index, failing `test_repo_hygiene_check.py`'s
    post-upgrade-index-drift rule. Added the missing row.
 
