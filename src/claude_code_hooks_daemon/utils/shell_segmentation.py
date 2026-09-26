@@ -44,6 +44,7 @@ from claude_code_hooks_daemon.utils.command_evasion import (
 from claude_code_hooks_daemon.utils.heredoc_operators import (
     COMMENT_PRECEDERS,
     Heredoc,
+    HeredocScan,
     scan_heredocs,
 )
 
@@ -212,7 +213,8 @@ class _WrapperGrammar:
 #: with a reset environment, `env` sets only the variables it names, `nice`
 #: and `nohup` change only scheduling and signals, `timeout` only bounds
 #: its run time, and `command` only bypasses shell functions (so it trusts
-#: a sink name LESS than a bare one, N89).
+#: a sink name LESS than a bare one, N89). `exec` replaces the shell with
+#: the command and `builtin` runs a builtin by name: both only name it.
 #:
 #: Refused, so they resolve to no command: a mode that runs a shell
 #: (`sudo -s`/`-i`, `env -S`); a PATH change; a new root or working
@@ -271,6 +273,8 @@ _WRAPPER_GRAMMARS: dict[str, _WrapperGrammar] = {
     ),
     "nohup": _WrapperGrammar(),
     "command": _WrapperGrammar(flags=frozenset("p")),
+    "exec": _WrapperGrammar(flags=frozenset("cl"), value_flags=frozenset("a")),
+    "builtin": _WrapperGrammar(),
 }
 
 #: An `env` operand that sets a variable rather than naming the command.
@@ -429,6 +433,207 @@ _READ_OPERATORS: frozenset[str] = frozenset({"<", "<<", "<<-", "<<<"})
 _FD_PROCESS_PATTERN = re.compile(r"[<>]\(|\bexec\b|\bcoproc\b")
 #: Characters that, outside quotes, make bash split or glob a word.
 _SPLITTING_CHARACTERS = frozenset("$`*?[")
+
+#: Variables bash sets or reads itself (bash 5.2, "Shell Variables"), and the
+#: ones that point a sink at a helper program. An assignment to one neither
+#: pins its value nor leaves the call inert (Plan 00466 N101 round 12, N214
+#: and N215).
+_SPECIAL_VARIABLES: frozenset[str] = frozenset(
+    {
+        "_",
+        "BASH",
+        "BASHOPTS",
+        "BASHPID",
+        "CDPATH",
+        "CHILD_MAX",
+        "COLUMNS",
+        "COMPREPLY",
+        "COPROC",
+        "DIRSTACK",
+        "EDITOR",
+        "EMACS",
+        "ENV",
+        "EPOCHREALTIME",
+        "EPOCHSECONDS",
+        "EUID",
+        "EXECIGNORE",
+        "FCEDIT",
+        "FIGNORE",
+        "FUNCNAME",
+        "FUNCNEST",
+        "GLOBIGNORE",
+        "GROUPS",
+        "HISTCMD",
+        "HISTCONTROL",
+        "HISTFILE",
+        "HISTFILESIZE",
+        "HISTIGNORE",
+        "HISTSIZE",
+        "HISTTIMEFORMAT",
+        "HOME",
+        "HOSTFILE",
+        "HOSTNAME",
+        "HOSTTYPE",
+        "IFS",
+        "IGNOREEOF",
+        "INPUTRC",
+        "INSIDE_EMACS",
+        "LANG",
+        "LINENO",
+        "LINES",
+        "MACHTYPE",
+        "MAIL",
+        "MAILCHECK",
+        "MAILPATH",
+        "MANPAGER",
+        "MAPFILE",
+        "OLDPWD",
+        "OPTARG",
+        "OPTERR",
+        "OPTIND",
+        "OSTYPE",
+        "PAGER",
+        "PATH",
+        "PIPESTATUS",
+        "POSIXLY_CORRECT",
+        "PPID",
+        "PROMPT_COMMAND",
+        "PROMPT_DIRTRIM",
+        "PS0",
+        "PS1",
+        "PS2",
+        "PS3",
+        "PS4",
+        "PWD",
+        "RANDOM",
+        "READLINE_ARGUMENT",
+        "READLINE_LINE",
+        "READLINE_MARK",
+        "READLINE_POINT",
+        "REPLY",
+        "SECONDS",
+        "SHELL",
+        "SHELLOPTS",
+        "SHLVL",
+        "SRANDOM",
+        "TERM",
+        "TIMEFORMAT",
+        "TMOUT",
+        "TMPDIR",
+        "UID",
+        "VISUAL",
+        "auto_resume",
+        "histchars",
+    }
+)
+_SPECIAL_VARIABLE_PREFIXES: tuple[str, ...] = ("BASH_", "COMP_", "GIT_", "LC_", "LD_", "LESS")
+
+#: Builtins and keywords that may set a variable the text never spells as
+#: ``NAME=value``: while one runs, no variable is known.
+_NAME_WRITERS: frozenset[str] = frozenset(
+    {
+        "read",
+        "mapfile",
+        "readarray",
+        "getopts",
+        "eval",
+        "source",
+        ".",
+        "let",
+        "trap",
+        "alias",
+        "declare",
+        "typeset",
+        "local",
+        "unset",
+        "for",
+        "select",
+    }
+)
+#: Where bash reads a command word, in text with its quote characters
+#: removed: after an operator or a reserved word a command follows, then
+#: any assignments and ``builtin``/``command``/``time`` prefixes.
+_COMMAND_POSITION = (
+    r"(?:^|[;&|(){}`\n]|(?<![\w-])(?:then|else|elif|do|if|while|until|time)(?=\s)"
+    r"|(?<!\S)!(?=\s))\s*(?:[A-Za-z_]\w*(?:\[[^\]]*\])?\+?=\S*\s+)*"
+    r"(?:(?:builtin|command|time)\s+(?:-\S+\s+)*)*"
+)
+_NAME_WRITER_PATTERN = re.compile(
+    _COMMAND_POSITION
+    + "(?:"
+    + "|".join(re.escape(word) for word in sorted(_NAME_WRITERS))
+    + r")(?=[\s;&|()]|$)"
+)
+_PRINTF_TARGET_PATTERN = re.compile(_COMMAND_POSITION + r"printf\s[^;&|\n]*?(?<=\s)-v")
+#: A command word bash computes: a variable, a substitution or a backtick.
+_COMPUTED_COMMAND_PATTERN = re.compile(
+    _COMMAND_POSITION + r"(?:\$(?:\{?(?P<name>[A-Za-z_]\w*)|[^A-Za-z_])|`)"
+)
+_QUOTING_CHARACTERS = re.compile(r"[\\'\"]")
+#: ``$NAME`` or ``${NAME}``.
+_VARIABLE_REFERENCE = re.compile(r"\$(?:\{(?P<braced>[A-Za-z_]\w*)\}|(?P<bare>[A-Za-z_]\w*))")
+#: Characters in a value that bash splits or globs where it is used unquoted.
+_UNPLAIN_VALUE_CHARACTERS = frozenset(" \t\n*?[")
+#: Text that writes a variable through a computed name or an expansion
+#: (arithmetic, ``${!name}``, ``${NAME:=value}``, a ``${ …; }`` substitution),
+#: or changes how an unquoted value splits (``IFS``).
+_COMPUTED_WRITE_PATTERN = re.compile(
+    r"\(\(|\$\[|\$\{!|\$\{[A-Za-z_]\w*(?:\[[^\]]*\])?:?=|\$\{[\s|]|\bIFS\b"
+)
+#: A whole word that assigns a variable: ``NAME=value``.
+_ASSIGNMENT_WORD = re.compile(r"(?P<name>[A-Za-z_][A-Za-z0-9_]*)=(?P<value>.*)\Z", re.DOTALL)
+#: Characters that open a group, a substitution or a compound command.
+_NESTING_CHARACTERS = frozenset("(){}`")
+#: Reserved words: a statement opening with one is compound.
+_RESERVED_WORDS: frozenset[str] = frozenset(
+    {
+        "if",
+        "then",
+        "else",
+        "elif",
+        "fi",
+        "do",
+        "done",
+        "while",
+        "until",
+        "for",
+        "case",
+        "esac",
+        "select",
+        "function",
+        "time",
+        "coproc",
+        "!",
+        "{",
+        "}",
+        "[[",
+        "]]",
+    }
+)
+#: Redirects that write no file: an fd duplicated or closed, or ``/dev/null``.
+_HARMLESS_REDIRECT_PATTERN = re.compile(
+    r"[0-9]*[<>]&(?:[0-9]+|-)(?![\w./-])|(?:[0-9]*|&)>>?\s*/dev/null(?![\w./-])"
+)
+#: Input operators that read a heredoc or here-string, and touch no file.
+_BODY_INPUT_OPERATORS: frozenset[str] = frozenset({"<<", "<<-", "<<<"})
+_INERT_BUILTINS: frozenset[str] = frozenset({"echo", "true", "test", "["})
+#: ``[`` and ``]`` on their own glob nothing: they are the ``test`` brackets.
+_TEST_BRACKETS: frozenset[str] = frozenset({"[", "]"})
+_READ_ONLY_PROGRAMS: frozenset[str] = frozenset({"ls", "cat", "wc", "head", "tail", "stat", "file"})
+_SEARCH_PROGRAMS: frozenset[str] = frozenset({"grep", "rg", "ugrep"})
+#: Search options that run a program or write a file.
+_SEARCH_ACTING_OPTIONS: tuple[str, ...] = ("--pre", "--filter", "--save-config", "--output")
+_GIT_READ_ONLY_SUBCOMMANDS: frozenset[str] = frozenset(
+    {"status", "add", "diff", "log", "show", "rev-parse", "ls-files"}
+)
+#: Git options that write a file or name a program to run.
+_GIT_ACTING_OPTIONS: tuple[str, ...] = ("--output", "--exec-path", "--ext-diff", "--config-env")
+#: ``find`` actions that run a program, delete, or write a file.
+_FIND_ACTIONS: frozenset[str] = frozenset({"-exec", "-execdir", "-ok", "-okdir", "-delete", "-fls"})
+_FIND_WRITING_PREFIX = "-fprint"
+_PRINTF_TARGET_OPTION = "-v"
+_CD = "cd"
+_PRINTF = "printf"
 
 
 class _Word(NamedTuple):
@@ -939,14 +1144,18 @@ def strip_quoted_heredoc_bodies(command: str) -> str:
 
     depth_tracker = _SubstitutionDepthTracker(command)
     newline_tracker = _LastNewlineTracker(command)
+    inert_prefix = _InertPrefix(command)
     fds_may_run = _FD_PROCESS_PATTERN.search(command) is not None
     pieces: list[str] = []
     copied_to = 0
     for heredoc in _quoted_heredocs(command):
-        # Three questions, because each was separately a real hole: who
-        # RECEIVES the body, what it is PIPED ON to, and whether the whole
-        # command sits in a SUBSTITUTION whose output lands in command
-        # position. Any one of them failing keeps the body.
+        # Four questions, because each was separately a real hole: whether
+        # anything EARLIER in the call can change what the receiver runs
+        # (N214), who RECEIVES the body, what it is PIPED ON to, and whether
+        # the whole command sits in a SUBSTITUTION whose output lands in
+        # command position. Any one of them failing keeps the body.
+        if not inert_prefix.allows(heredoc.operator.start):
+            continue
         if not _receiver_is_data_sink(
             command, heredoc, depth_tracker, newline_tracker, fds_may_run
         ):
@@ -1461,50 +1670,316 @@ def heredoc_consumers(command: str, heredocs: Sequence[Heredoc]) -> list[tuple[s
 
     ``heredocs`` must come in opener order, as ``scan_heredocs`` gives them:
     one newline tracker serves the whole call (Plan 00466 N25).
+
+    Round 12 makes the receiving word None in two more cases. After an
+    earlier segment off the inert allowlist (N214,
+    :func:`earlier_segments_are_inert`), the name may not mean the program.
+    And a top-level :data:`DATA_SINKS` stage whose arguments may hand the
+    body on (``cat <<'EOF' > >(bash)``) is no sink.
     """
     newline_tracker = _LastNewlineTracker(command)
+    depth_tracker = _SubstitutionDepthTracker(command)
+    inert_prefix = _InertPrefix(command)
+    known = known_variables(command)
+    fds_may_run = _FD_PROCESS_PATTERN.search(command) is not None
     consumers: list[tuple[str | None, ...]] = []
     for heredoc in heredocs:
-        receiving = _receiving_segment(command, heredoc.operator.start, newline_tracker)
-        pipeline = split_unquoted(_opener_tail(command, heredoc), _PIPELINE_TERMINATORS)[0]
+        opener_start = heredoc.operator.start
+        receiving = _receiving_segment(command, opener_start, newline_tracker)
+        tail = _opener_tail(command, heredoc)
+        pipeline = split_unquoted(tail, _PIPELINE_TERMINATORS)[0]
         downstream = split_unquoted(pipeline, ("|",))[1:]
-        consumers.append(
-            tuple(_consumer_word(stage, command) for stage in (receiving, *downstream))
-        )
+        if not inert_prefix.allows(opener_start):
+            consumers.append((None,))
+            continue
+        words = [_consumer_word(stage, command, known) for stage in (receiving, *downstream)]
+        receiving_stage = receiving + " " + split_unquoted(pipeline, ("|",))[0]
+        if (
+            words[0] in DATA_SINKS
+            and not depth_tracker.inside_substitution_at(opener_start)
+            and not _stage_is_inert_sink(receiving_stage, fds_may_run)
+        ):
+            words[0] = None
+        consumers.append(tuple(words))
     return consumers
 
 
-def _consumer_word(stage: str, command: str) -> str | None:
+def body_may_run(consumers: Sequence[str | None]) -> bool:
+    """Do these :func:`heredoc_consumers` words run the body as shell? A
+    word nothing names is unknown, and so may (round 12, N212)."""
+    return any(word is None or word in SHELL_BODY_RUNNERS for word in consumers)
+
+
+def _consumer_word(stage: str, command: str, known: dict[str, str]) -> str | None:
     """The command ``stage`` runs, or the one its variable is known to name."""
     word = _segment_command_word(stage)
-    return word if word is not None else _variable_command_word(stage, command)
+    return word if word is not None else _variable_command_word(stage, command, known)
 
 
-def _variable_command_word(stage: str, command: str) -> str | None:
+def _variable_command_word(stage: str, command: str, known: dict[str, str]) -> str | None:
     """The command a stage names through a variable, where the text says
-    which (round 11, minor E): a literal basename after the expansion
-    (``"$VENV/bin/python"``), ``$SHELL`` or ``$BASH``, or a literal
-    assignment in the same command (``PY=python3; $PY -``). An assignment
-    naming a shell wins over any other. None when nothing says."""
+    which (round 11, minor E): a literal basename after a quoted expansion
+    (``"$VENV/bin/python"``), ``$SHELL`` or ``$BASH``, or a variable
+    :func:`known_variables` pins to a value that does not split
+    (``PY=python3; $PY -``). Any assignment naming a shell wins. None --
+    unknown, judged fail closed by every caller -- when nothing says
+    (round 12, N212): ``$0``, ``${X:-…}``, ``PY='bash -e'``, ``read PY``."""
     match = _VARIABLE_COMMAND_PATTERN.match(strip_reserved_word_prefix(stage).lstrip("({ \t"))
     if match is None:
         return None
+    name = match.group("braced") or match.group("bare")
+    value = known.get(name)
+    plain = value is not None and not any(char in _UNPLAIN_VALUE_CHARACTERS for char in value)
     tail = match.group("tail")
     if tail:
         basename = tail.rsplit("/", 1)[-1]
-        return basename if "/" in tail and basename else None
-    name = match.group("braced") or match.group("bare")
+        if "/" not in tail or not basename:
+            return None
+        return basename if match.group("quote") or plain else None
     if name in _SHELL_VARIABLES:
         return _SHELL_VARIABLES[name]
     assignment = re.compile(rf"(?:^|[\s;&|(]){re.escape(name)}=([^\s;&|()<>]*)")
-    values = [resolve_shell_word(found.group(1)) for found in assignment.finditer(command)]
-    names = [value.rsplit("/", 1)[-1] for value in values if value]
-    shell = next((word for word in names if word in SHELL_BODY_RUNNERS), None)
-    if shell is not None:
-        return shell
-    if names and len(names) == len(values):
-        return names[-1]
-    return None
+    assigned = [resolve_shell_word(found.group(1)) for found in assignment.finditer(command)]
+    basenames = [literal.rsplit("/", 1)[-1] for literal in assigned if literal]
+    shells = [word for word in basenames if word in SHELL_BODY_RUNNERS]
+    if shells:
+        return shells[0]
+    if value is None or not plain:
+        return None
+    return value.rsplit("/", 1)[-1] or None
+
+
+def known_variables(command: str) -> dict[str, str]:
+    """Each variable ``command`` sets to a literal by a plain top-level
+    statement, with its value (Plan 00466 N101 round 12, N212 and N215).
+
+    Plain means a statement of assignments only, on its own between ``;`` or
+    newlines, before anything opens a group, a substitution or a compound
+    command, so it surely runs in this shell. The name is assigned nowhere
+    else in the call and read nowhere before it, and it is no variable bash
+    sets or a helper program reads. No variable is known at all where the
+    call may write one through a name it does not spell: ``read``,
+    ``mapfile``, ``declare -n``, ``printf -v``, ``eval``, ``source``, a
+    ``for`` loop, arithmetic, ``${NAME:=…}``, ``IFS``, or a command word it
+    computes. A value may still hold blanks: a caller using it unquoted must
+    refuse it.
+    """
+    scan = scan_heredocs(command)
+    if scan.stopped_at is not None:
+        return {}
+    text = _blank_quoted_bodies(command, scan)
+    if _COMPUTED_WRITE_PATTERN.search(text):
+        return {}
+    unquoted = _QUOTING_CHARACTERS.sub("", text)
+    if _NAME_WRITER_PATTERN.search(unquoted) or _PRINTF_TARGET_PATTERN.search(unquoted):
+        return {}
+    known: dict[str, str] = {}
+    for name, (start, value) in _leading_assignments(text).items():
+        if _is_special_variable(name):
+            continue
+        assigned = re.findall(rf"(?<![\w$]){name}(?:\[[^\]]*\])?\+?=", text)
+        if len(assigned) != 1 or re.search(rf"\$\{{?[#!]?{name}\b", text[:start]):
+            continue
+        known[name] = value
+    for match in _COMPUTED_COMMAND_PATTERN.finditer(unquoted):
+        command_value = known.get(match.group("name") or "")
+        if command_value is None or command_value.rsplit("/", 1)[-1] in _NAME_WRITERS:
+            return {}
+    return known
+
+
+def _leading_assignments(text: str) -> dict[str, tuple[int, str]]:
+    """The literal assignments of the statements before the first one that
+    opens a group, a substitution or a compound command: the name, the
+    statement's offset and the value after quote removal."""
+    found: dict[str, tuple[int, str]] = {}
+    for start, end in split_unquoted_spans(text, (";", _NEWLINE)):
+        statement = text[start:end]
+        if not statement.strip():
+            continue
+        words = list(iter_shell_words(statement))
+        if (
+            any(char in _NESTING_CHARACTERS for char in statement)
+            or None in words
+            or words[0] in _RESERVED_WORDS
+        ):
+            break
+        if len(split_unquoted(_blank_harmless_redirects(statement), _RECEIVER_SEPARATORS)) > 1:
+            continue
+        matches = [_ASSIGNMENT_WORD.match(word) for word in words if word is not None]
+        if not all(matches):
+            continue
+        for match in matches:
+            assert match is not None  # all() above
+            value = resolve_shell_word(match.group("value"))
+            if value is not None:
+                found.setdefault(match.group("name"), (start, value))
+    return found
+
+
+def substitute_known_variables(token: str, known: dict[str, str]) -> str | None:
+    """``token`` with each ``$NAME`` or ``${NAME}`` replaced by its value in
+    ``known``, or None when a name is not known, its value would split or
+    glob, or another expansion remains (Plan 00466 N101 round 12, N215)."""
+    parts: list[str] = []
+    copied_to = 0
+    for match in _VARIABLE_REFERENCE.finditer(token):
+        value = known.get(match.group("braced") or match.group("bare"))
+        if value is None or any(char in _UNPLAIN_VALUE_CHARACTERS for char in value):
+            return None
+        parts.extend([token[copied_to : match.start()], value])
+        copied_to = match.end()
+    parts.append(token[copied_to:])
+    if any("$" in literal or _BACKTICK in literal for literal in parts[0::2]):
+        return None
+    return "".join(parts)
+
+
+def _is_special_variable(name: str) -> bool:
+    return name in _SPECIAL_VARIABLES or name.startswith(_SPECIAL_VARIABLE_PREFIXES)
+
+
+def _blank_quoted_bodies(command: str, scan: HeredocScan) -> str:
+    """``command`` with each terminated quoted heredoc's body and closer
+    replaced by blanks, offsets kept: bash reads none of it as shell."""
+    pieces: list[str] = []
+    copied_to = 0
+    bodies = sorted(
+        (h for h in scan.heredocs if h.operator.quoted and h.terminated),
+        key=lambda heredoc: heredoc.body_start,
+    )
+    for heredoc in bodies:
+        if heredoc.body_start < copied_to:
+            continue
+        pieces.append(command[copied_to : heredoc.body_start])
+        pieces.append(" " * (heredoc.closer_end - heredoc.body_start))
+        copied_to = heredoc.closer_end
+    pieces.append(command[copied_to:])
+    return "".join(pieces)
+
+
+def _blank_harmless_redirects(text: str) -> str:
+    """``text`` with each redirect that writes no file blanked, offsets kept."""
+    return _HARMLESS_REDIRECT_PATTERN.sub(lambda match: " " * len(match.group()), text)
+
+
+def earlier_segments_are_inert(command: str, position: int) -> bool:
+    """Is every segment of ``command`` before the one holding ``position``
+    on the inert allowlist (Plan 00466 N101 round 12, N214)?
+
+    A sink's body is data only then: an earlier segment can define a
+    function or an alias that shadows the sink, or set the environment a
+    sink's helper reads (``LESSOPEN``, ``GIT_PAGER``), and an unknown
+    program cannot be proven to write nothing. The closed allowlist: a
+    literal assignment of a name that is not special, a proven ``cd``,
+    ``echo``, ``printf`` without ``-v``, ``true``, ``test``/``[``, and with no
+    redirection on the segment ``git status|add|diff|log|show|rev-parse|
+    ls-files``, ``grep``/``rg``/``ugrep``, ``ls``, ``cat``, ``wc``, ``head``,
+    ``tail``, ``stat``, ``file`` and ``find`` without an acting option.
+    """
+    return _InertPrefix(command).allows(position)
+
+
+class _InertPrefix:
+    """Where the first segment off the inert allowlist ends, found once for
+    a whole command so a caller asking for each heredoc pays one scan."""
+
+    def __init__(self, command: str) -> None:
+        scan = scan_heredocs(command)
+        text = _blank_harmless_redirects(_blank_quoted_bodies(command, scan))
+        self._limit = len(command) if scan.stopped_at is None else scan.stopped_at
+        self._first_off_list_end: int | None = None
+        for start, end in split_unquoted_spans(text, (*_RECEIVER_SEPARATORS, _NEWLINE)):
+            if not _segment_is_inert(text[start:end]):
+                self._first_off_list_end = end
+                break
+
+    def allows(self, position: int) -> bool:
+        """Are the segments before the one holding ``position`` all inert?"""
+        if position > self._limit:
+            return False
+        return self._first_off_list_end is None or position <= self._first_off_list_end
+
+
+def _segment_is_inert(segment: str) -> bool:
+    """Is ``segment`` on :func:`earlier_segments_are_inert`'s allowlist?"""
+    raw_words: list[str] = []
+    for raw in iter_shell_words(segment):
+        if raw is None:
+            return False
+        if raw.startswith("#"):
+            break
+        raw_words.append(raw)
+    words = _words_without_body_inputs(raw_words)
+    if words is None:
+        return False
+    if not words:
+        return True
+    assignments = [_ASSIGNMENT_WORD.match(raw) for raw, _resolved in words]
+    if all(assignments):
+        return not any(
+            match is not None and _is_special_variable(match.group("name")) for match in assignments
+        )
+    name = words[0][1]
+    arguments = [resolved for _raw, resolved in words[1:]]
+    if name in _INERT_BUILTINS or name in _READ_ONLY_PROGRAMS:
+        return True
+    if name == _CD:
+        return len(arguments) <= 1 and not any(arg.startswith("-") for arg in arguments)
+    if name == _PRINTF:
+        return not any(arg.startswith(_PRINTF_TARGET_OPTION) for arg in arguments)
+    if name == "git":
+        return _git_is_read_only(arguments)
+    if name in _SEARCH_PROGRAMS:
+        return not any(arg.startswith(_SEARCH_ACTING_OPTIONS) for arg in arguments)
+    if name == "find":
+        return not any(
+            arg in _FIND_ACTIONS or arg.startswith(_FIND_WRITING_PREFIX) for arg in arguments
+        )
+    return False
+
+
+def _words_without_body_inputs(raw_words: list[str]) -> list[tuple[str, str]] | None:
+    """Each word with its quote-removed text, a heredoc operator and its
+    delimiter and a literal here-string dropped. None for a word bash
+    expands or any other redirection: either may run or write something."""
+    words: list[tuple[str, str]] = []
+    index = 0
+    while index < len(raw_words):
+        raw = raw_words[index]
+        redirect = _REDIRECT_WORD_PATTERN.match(raw)
+        if redirect is not None:
+            operator, operand = redirect.group("op"), redirect.group("rest")
+            if not operand:
+                index += 1
+                operand = raw_words[index] if index < len(raw_words) else ""
+            if operator not in _BODY_INPUT_OPERATORS or resolve_shell_word(operand) is None:
+                return None
+            index += 1
+            continue
+        resolved = raw if raw in _TEST_BRACKETS else resolve_shell_word(raw)
+        if resolved is None:
+            return None
+        words.append((raw, resolved))
+        index += 1
+    return words
+
+
+def _git_is_read_only(arguments: list[str]) -> bool:
+    """Is this a git subcommand on the inert allowlist, reached through no
+    global option that configures or relocates git, and carrying no
+    option that writes a file or names a program?"""
+    index = 0
+    while index < len(arguments) and arguments[index].startswith("-"):
+        if arguments[index] in _GIT_INERT_GLOBAL_FLAGS:
+            index += 1
+        elif arguments[index] == _GIT_DIRECTORY_FLAG and index + 1 < len(arguments):
+            index += 2
+        else:
+            return False
+    if index >= len(arguments) or arguments[index] not in _GIT_READ_ONLY_SUBCOMMANDS:
+        return False
+    return not any(arg.startswith(_GIT_ACTING_OPTIONS) for arg in arguments[index + 1 :])
 
 
 def _heredoc_receiving_segments(command: str) -> list[str]:
@@ -1749,8 +2224,14 @@ def split_unquoted(text: str, separators: Sequence[str]) -> list[str]:
         >>> split_unquoted('grep -E "a;b"', (";",))
         ['grep -E "a;b"']
     """
-    segments: list[str] = []
-    current: list[str] = []
+    return [text[start:end] for start, end in split_unquoted_spans(text, separators)]
+
+
+def split_unquoted_spans(text: str, separators: Sequence[str]) -> list[tuple[int, int]]:
+    """:func:`split_unquoted` as ``(start, end)`` offsets into ``text``, for a
+    caller that must map a segment back to where it sits."""
+    spans: list[tuple[int, int]] = []
+    start = 0
     in_single = False
     in_double = False
     in_comment = False
@@ -1767,34 +2248,26 @@ def split_unquoted(text: str, separators: Sequence[str]) -> list[str]:
             in_comment = char != _NEWLINE
             matched = next((sep for sep in separators if text.startswith(sep, index)), None)
             if matched is not None:
-                segments.append("".join(current))
-                current = []
+                spans.append((start, index))
                 index += len(matched)
+                start = index
                 continue
-            current.append(char)
             index += 1
             continue
 
         # `$$` is the pid; a `$'...'` string ends at its first UNESCAPED quote.
         if unquoted and text.startswith(_PID, index):
-            current.append(_PID)
             index += len(_PID)
             continue
         if unquoted and text.startswith(_ANSI_C_OPEN, index):
             ansi_c = ansi_c_string(text, index + len(_ANSI_C_OPEN))
-            end = len(text) if ansi_c is None else ansi_c[1]
-            current.append(text[index:end])
-            index = end
+            index = len(text) if ansi_c is None else ansi_c[1]
             continue
 
         # Rule 1: inside single quotes a backslash is literal, so escape
         # handling is skipped entirely and only the closing quote matters.
         if char == _ESCAPE_CHAR and not in_single:
-            current.append(char)
-            index += 1
-            if index < len(text):
-                current.append(text[index])
-                index += 1
+            index = min(index + 2, len(text))
             continue
 
         if char == _SINGLE_QUOTE and not in_double:
@@ -1804,16 +2277,15 @@ def split_unquoted(text: str, separators: Sequence[str]) -> list[str]:
         elif not in_single and not in_double:
             matched = next((sep for sep in separators if text.startswith(sep, index)), None)
             if matched is not None:
-                segments.append("".join(current))
-                current = []
+                spans.append((start, index))
                 index += len(matched)
+                start = index
                 continue
 
-        current.append(char)
         index += 1
 
-    segments.append("".join(current))
-    return segments
+    spans.append((start, len(text)))
+    return spans
 
 
 def _starts_comment(text: str, index: int) -> bool:

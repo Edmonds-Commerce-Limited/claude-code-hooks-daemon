@@ -28,7 +28,12 @@ from __future__ import annotations
 
 import pytest
 
+from claude_code_hooks_daemon.utils.heredoc_operators import scan_heredocs
 from claude_code_hooks_daemon.utils.shell_segmentation import (
+    _SubstitutionDepthTracker,
+    earlier_segments_are_inert,
+    heredoc_consumers,
+    known_variables,
     quoted_heredoc_command_words,
     quoted_heredoc_receivers,
     split_unquoted,
@@ -472,10 +477,13 @@ class TestABodyIsOnlyInertIfItsRECEIVERTreatsItAsData:
         """Containment must END with the substitution, or prose stops blanking.
 
         `$(date)` closes before the heredoc opens, so the sink is NOT inside a
-        substitution and an ordinary prose write keeps its exemption.
+        substitution. The body is still kept, for a different reason: `date`
+        is a program off the N214 inert allowlist (Plan 00466 N101 round 12).
         """
         command = "echo $(date) && cat <<'EOF' > notes.md\ngit reset --hard HEAD\nEOF"
-        assert "git reset --hard HEAD" not in strip_quoted_heredoc_bodies(command)
+        tracker = _SubstitutionDepthTracker(command)
+        assert tracker.inside_substitution_at(command.index("<<")) is False
+        assert "git reset --hard HEAD" in strip_quoted_heredoc_bodies(command)
 
     def test_an_apostrophe_in_earlier_double_quoted_text_does_not_confuse_it(
         self,
@@ -891,3 +899,217 @@ class TestTheMessageHeredocIdiomMustBeTheWholeValue:
     )
     def test_the_idiom_alone_cannot_substitute(self, value: str) -> None:
         assert value_can_substitute(value) is False
+
+
+# -- Plan 00466 N101 round 12: N214 and N215 --------------------------------
+
+_SINK = "cat > notes.md <<'EOF'\nprose\nEOF"
+
+
+class TestEarlierSegmentsAreInert:
+    """N214: a sink's body is data only when every earlier segment of the
+    call is on the closed inert allowlist."""
+
+    @pytest.mark.parametrize(
+        "prefix",
+        [
+            "",
+            "OUT=notes.md; ",
+            "A=1 B='two words'; ",
+            "cd /repo && ",
+            "cd 'sub dir'; ",
+            "cd; ",
+            "echo hi; ",
+            "printf '%s\\n' x; ",
+            "true && ",
+            "test -f x && ",
+            "[ -f x ] && ",
+            "git status && ",
+            "git add -A && ",
+            "git diff --stat; ",
+            "git log --oneline -3\n",
+            "git show HEAD; ",
+            "git rev-parse HEAD; ",
+            "git ls-files; ",
+            "git --no-pager log -1; ",
+            "grep -n x f; ",
+            "rg -n x; ",
+            "ugrep x f; ",
+            "ls -la; ",
+            "cat f; ",
+            "wc -l f; ",
+            "head -n 3 f; ",
+            "tail -n 3 f; ",
+            "stat f; ",
+            "file f; ",
+            "find . -name '*.md'; ",
+            "git status | cat; ",
+            "ls 2>/dev/null; ",
+            "ls 2>&1; ",
+            "git log -1 >/dev/null; ",
+        ],
+    )
+    def test_an_inert_prefix_keeps_the_body_data(self, prefix: str) -> None:
+        command = prefix + _SINK
+        assert earlier_segments_are_inert(command, command.rindex("<<")) is True
+        assert "prose" not in strip_quoted_heredoc_bodies(command)
+
+    @pytest.mark.parametrize(
+        "prefix",
+        [
+            "cat(){ bash; }; ",
+            "function cat { bash; }; ",
+            "cat () { bash; }\n",
+            "alias cat=bash\n",
+            "shopt -s expand_aliases; ",
+            "export LESSOPEN='|-bash %s'; ",
+            "export X=1; ",
+            "LESSOPEN='|-bash %s'; ",
+            "PAGER=bash; ",
+            "GIT_PAGER=bash; ",
+            "BASH_ENV=x; ",
+            "PATH=/tmp; ",
+            "IFS=x; ",
+            "X=$(date); ",
+            "X=`date`; ",
+            "X=$Y; ",
+            "X=1 ls; ",
+            "source env.sh; ",
+            ". env.sh; ",
+            "eval x; ",
+            "python3 x.py; ",
+            "set -e; ",
+            "sudo ls; ",
+            "printf -v X y; ",
+            "printf '%s' -v; ",
+            "echo x > cat; ",
+            "ls > out; ",
+            "cat < f; ",
+            "ls &> out; ",
+            "git config alias.x '!bash'; ",
+            "git hook run x; ",
+            "git -c core.pager=bash log; ",
+            "git --exec-path=/x status; ",
+            "git diff --output=/tmp/x; ",
+            "git log --output /tmp/x; ",
+            "git commit -m x; ",
+            "rg --pre bash x; ",
+            "rg --pre=bash x; ",
+            "ugrep --filter=x:bash x f; ",
+            "find . -exec bash {} \\; ; ",
+            "find . -execdir x {} + ; ",
+            "find . -ok x {} \\; ; ",
+            "find . -okdir x {} \\; ; ",
+            "find . -delete; ",
+            "find . -fprint x; ",
+            "find . -fprintf x y; ",
+            "find . -fls x; ",
+            "cd -; ",
+            "cd $D; ",
+            "cd a b; ",
+            "{ ls; }; ",
+            "(ls); ",
+            "if true; then ls; fi; ",
+            "ls $X; ",
+            "echo $(date); ",
+            "cat > a.md <<'A'\nx\nA\n",
+        ],
+    )
+    def test_anything_else_earlier_makes_the_body_commands(self, prefix: str) -> None:
+        command = prefix + _SINK
+        assert earlier_segments_are_inert(command, command.rindex("<<")) is False
+        assert "prose" in strip_quoted_heredoc_bodies(command)
+
+    def test_the_claude_code_commit_idiom_stays_inert(self) -> None:
+        command = "git add -A && git commit -m \"$(cat <<'EOF'\nit's done\nEOF\n)\""
+        assert earlier_segments_are_inert(command, command.index("<<")) is True
+
+    def test_a_later_segment_is_not_judged(self) -> None:
+        command = _SINK + "\npython3 x.py"
+        assert earlier_segments_are_inert(command, command.index("<<")) is True
+
+    def test_an_earlier_heredoc_body_is_not_read_as_segments(self) -> None:
+        command = "cat <<'A'\npython3 x.py; eval y\nA\nls & " + _SINK
+        assert earlier_segments_are_inert(command, command.rindex("<<")) is True
+
+    def test_a_non_inert_prefix_makes_the_consumer_unknown(self) -> None:
+        command = "cat(){ bash; }; " + _SINK
+        assert heredoc_consumers(command, scan_heredocs(command).heredocs) == [(None,)]
+
+
+class TestKnownVariables:
+    """N215 and N212: a variable set to a literal by a plain top-level
+    statement earlier in the call, with the N53 exclusions."""
+
+    @pytest.mark.parametrize(
+        ("command", "expected"),
+        [
+            ('OUT=/opt/o.md; cat > "$OUT"', {"OUT": "/opt/o.md"}),
+            ("OUT='a b'\ncat > \"$OUT\"", {"OUT": "a b"}),
+            ('A=1 B="x"; echo', {"A": "1", "B": "x"}),
+            ('cd /repo && ls; OUT=o.md; cat > "$OUT"', {"OUT": "o.md"}),
+            ("OUT=o.md; cat <<'E' > \"$OUT\"\nread OUT\nE", {"OUT": "o.md"}),
+        ],
+    )
+    def test_a_plain_literal_assignment_is_known(
+        self, command: str, expected: dict[str, str]
+    ) -> None:
+        assert known_variables(command) == expected
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            'OUT=$(date); cat > "$OUT"',
+            'OUT=`date`; cat > "$OUT"',
+            'OUT=$X; cat > "$OUT"',
+            'OUT=*.md; cat > "$OUT"',
+            'OUT+=x; cat > "$OUT"',
+            'OUT=a; OUT=b; cat > "$OUT"',
+            'cat > "$OUT"; OUT=a',
+            'echo "${OUT}"; OUT=a',
+            'true && OUT=a; cat > "$OUT"',
+            'false || OUT=a; cat > "$OUT"',
+            '( OUT=a; ); cat > "$OUT"',
+            '{ OUT=a; }; cat > "$OUT"',
+            'if true; then OUT=a; fi; cat > "$OUT"',
+            'f(){ OUT=/b; }; OUT=a; f; cat > "$OUT"',
+            'OUT=a ls; cat > "$OUT"',
+            'export OUT=a; cat > "$OUT"',
+            'PWD=/x; cat > "$PWD"',
+            'HOME=/x; cat > "$HOME/a"',
+            'BASH_ENV=/x; cat > "$BASH_ENV"',
+        ],
+    )
+    def test_anything_else_is_unknown(self, command: str) -> None:
+        assert "OUT" not in known_variables(command)
+        assert "PWD" not in known_variables(command)
+        assert "HOME" not in known_variables(command)
+        assert "BASH_ENV" not in known_variables(command)
+
+    @pytest.mark.parametrize(
+        "writer",
+        [
+            "read X",
+            "mapfile X",
+            "readarray X",
+            "declare -n X=OUT",
+            "typeset -n X=OUT",
+            "local -n X=OUT",
+            "printf -v OUT x",
+            "eval OUT=x",
+            "source f",
+            ". f",
+            "for OUT in a; do :; done",
+            "select OUT in a; do :; done",
+            "getopts a OUT",
+            "let OUT=1",
+            "((OUT=1))",
+            "echo $((OUT=1))",
+            "echo ${OUT:=x}",
+            "echo ${!R}",
+            "unset OUT",
+            "IFS=/",
+        ],
+    )
+    def test_a_name_writer_anywhere_makes_nothing_known(self, writer: str) -> None:
+        assert known_variables(f'OUT=a; {writer}; cat > "$OUT"') == {}

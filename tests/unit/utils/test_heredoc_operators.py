@@ -359,6 +359,16 @@ _LINE_DIFFERENTIAL_SCRIPTS: list[str] = [
     "cat <<'E' $(true\necho M1 >&2\nE\n)\necho M2\nE",
     "cat <<'E' `true\necho M1 >&2\nE\n`\necho M2\nE",
     "cat <<'E' \"$(true\necho M1 >&2\nE\n)\"\necho M2\nE",
+    # Round 12, review 11 MAJOR 2: `case` is the keyword only where bash
+    # reads a command word; elsewhere it is an argument.
+    ": $(! case a in a) ;; esac; cat <<'E'\nx\nE)\necho M1\nE",
+    ": $(true && case a in a) ;; esac; cat <<'E'\nx\nE)\necho M1\nE",
+    ": $(f() case a in a) ;; esac\nf; cat <<'E'\nx\nE)\necho M1\nE",
+    ": $(function f case a in a) ;; esac\nf; cat <<'E'\nx\nE)\necho M1\nE",
+    ": $(if true; the\\\nn case a in a) ;; esac; fi; cat <<'E'\nx\nE)\necho M1\nE",
+    ": $(echo case; cat <<'E'\nx\nE)\necho M1\nE",
+    ": $(echo esac case a; cat <<'E'\nx\nE)\necho M1\nE",
+    ": $(for c in case; do :; done; cat <<'E'\nx\nE)\necho M1\nE",
 ]
 
 _MARK_LINE = re.compile(r"echo (M\d)")
@@ -452,6 +462,64 @@ class TestTheScanStopsWhereBashIsUncertain:
         assert (scan.heredocs, scan.stopped_at) == ([], None)
         assert scan.breaks == [script.index("\n"), script.rindex("\n")]
 
+    @pytest.mark.parametrize(
+        ("script", "keyword"),
+        [
+            (": $(case a in a) ;; esac)", "case"),
+            (": $(! case a in a) ;; esac)", "case"),
+            (": $(time case a in a) ;; esac)", "case"),
+            (": $(time -p case a in a) ;; esac)", "case"),
+            (": $(a=1 b=2 case a in a) ;; esac)", "case"),
+            (": $(f() case a in a) ;; esac\n)", "case"),
+            (": $(f ( ) case a in a) ;; esac\n)", "case"),
+            (": $(function f case a in a) ;; esac\n)", "case"),
+            (": $(coproc case a in a) ;; esac)", "case"),
+            (": $(if true; then case a in a) ;; esac; fi)", "case"),
+            (": $(if false; then :; else case a in a) ;; esac; fi)", "case"),
+            (": $(if false; then :; elif case a in a) true;; esac; then :; fi)", "case"),
+            (": $(while case a in a) false;; esac; do :; done)", "case"),
+            (": $(until case a in a) true;; esac; do :; done)", "case"),
+            (": $(for i in 1; do case a in a) ;; esac; done)", "case"),
+            (": $({ case a in a) ;; esac; })", "case"),
+            (": $( (case a in a) ;; esac))", "case"),
+            (": $(true;case a in a) ;; esac)", "case"),
+            (": $(true && case a in a) ;; esac)", "case"),
+            (": $(false || case a in a) ;; esac)", "case"),
+            (": $(true | case a in a) ;; esac)", "case"),
+            (": $(true & case a in a) ;; esac)", "case"),
+            (": $(true\ncase a in a) ;; esac)", "case"),
+            (": $(# note\ncase a in a) ;; esac)", "case"),
+            (": $(ca\\\nse a in a) ;; esac)", "ca\\\nse"),
+            (": $(if true; the\\\nn case a in a) ;; esac; fi)", "case"),
+            ("x=`case a in a) ;; esac`", "case"),
+            (": <(case a in a) ;; esac)", "case"),
+        ],
+    )
+    def test_case_stops_where_bash_reads_the_keyword(self, script: str, keyword: str) -> None:
+        """Round 12, review 11 MAJOR 2: a command-word position, after an
+        operator, a reserved word, ``()`` or only assignments."""
+        assert scan_heredocs(script).stopped_at == script.index(keyword)
+
+    @pytest.mark.parametrize(
+        "script",
+        [
+            "n=$(grep -c case README.md)",
+            'echo "$(echo upper case)"',
+            "diff <(echo case) b",
+            "x=`grep -c case f`",
+            "for f in $(git ls-files | grep case); do :; done",
+            ": $(echo a; echo case)",
+            ": $(for x in case; do :; done)",
+            ": $(echo $(date) case)",
+            ": $(echo esac case)",
+            ": $(>/dev/null echo case)",
+            ": $(echo -p case)",
+        ],
+    )
+    def test_case_as_an_argument_is_read_normally(self, script: str) -> None:
+        """Round 12, review 11 MAJOR 2: bash reads these as arguments."""
+        assert scan_heredocs(script).stopped_at is None
+
     def test_the_operators_on_a_fragment_are_all_reported(self) -> None:
         """``find_heredoc_operators`` reads one opener line, which a
         substitution often leaves open."""
@@ -531,11 +599,13 @@ class TestNormalisingKeepsTheStructure:
         joined it, so a pattern split across lines is still seen whole. An
         escaped backslash before a newline is no continuation: joining it
         would escape the next character instead, and leaves a backslash in
-        the word, so no pattern spanning it could match anyway."""
+        the word, so no pattern spanning it could match anyway. Nor is a
+        backslash before a carriage return: bash escapes the ``\\r`` and
+        still ends the line at the newline (round 12, review 11 minor)."""
         script = f"{stopper}git reset --ha\\\nrd\n# c \\\nx\\\r\ny\\\\\nz\\\\\\\nw"
         assert scan_heredocs(script).stopped_at is not None
         assert remove_line_continuations(script) == (
-            f"{stopper}git reset --hard\n# c xy\\\\\nz\\\\w"
+            f"{stopper}git reset --hard\n# c x\\\r\ny\\\\\nz\\\\w"
         )
 
 

@@ -169,10 +169,13 @@ class TestConsumedResults:
     def test_a_mutator_inside_a_quoted_heredoc_body_is_not_executed(
         self, handler: VerificationResultGateHandler
     ) -> None:
-        """A quoted delimiter disables every expansion, so the body is text."""
-        command = "ansible-lint x\ncat > notes.md <<'EOF'\ngit commit -m 'not run'\nEOF"
+        """A quoted delimiter disables every expansion, so the body is text
+        -- after an inert prefix. With ``ansible-lint`` earlier, a program off
+        the N214 allowlist, the body is judged (Plan 00466 N101 round 12)."""
+        body = "cat > notes.md <<'EOF'\ngit commit -m 'not run'\nEOF"
 
-        assert not _fires(handler, command)
+        assert not _fires(handler, f"{body}\nansible-lint x")
+        assert _fires(handler, f"ansible-lint x\n{body}")
 
 
 class TestDoesNotCryWolf:

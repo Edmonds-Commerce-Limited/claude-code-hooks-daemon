@@ -57,25 +57,27 @@ from claude_code_hooks_daemon.core import Decision, GatingResult, get_data_layer
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
-
-# `_UNEXPANDABLE_CHARACTERS` is private, but imported deliberately rather than
-# redefined: it is the exact character set `_resolve_write_target` already
-# declines a target on, and `_resolve_against_cwd` below must decline on the
-# same set rather than risk drifting from it.
 from claude_code_hooks_daemon.core.utils import (
-    _UNEXPANDABLE_CHARACTERS,
     bash_text_for_shlex,
     expand_home,
     get_bash_command,
+    needs_expansion,
     scan_bash_write_targets,
     split_heredocs,
 )
 from claude_code_hooks_daemon.utils.claude_config import claude_config_dir, session_config_dir
 from claude_code_hooks_daemon.utils.command_evasion import strip_reserved_word_prefix
+from claude_code_hooks_daemon.utils.heredoc_operators import scan_heredocs
 from claude_code_hooks_daemon.utils.path_containment import path_relative_to
 from claude_code_hooks_daemon.utils.realpath import has_symlink_loop, realpath
 from claude_code_hooks_daemon.utils.scratch_dir import acceptance_path
-from claude_code_hooks_daemon.utils.shell_segmentation import split_unquoted
+from claude_code_hooks_daemon.utils.shell_segmentation import (
+    body_may_run,
+    heredoc_consumers,
+    known_variables,
+    split_unquoted,
+    substitute_known_variables,
+)
 
 #: Repo-relative home for scratch, shared with `pipe_blocker` so the handler
 #: that DENIES an out-of-repo write and the handler that RECOMMENDS a capture
@@ -213,6 +215,14 @@ _ERROR_RULE = Rule(
 
 #: How much of the unread text a deny message quotes.
 _UNREADABLE_EXCERPT_LENGTH = 200
+
+#: Appended to a write target whose value is unknown until the command runs
+#: (Plan 00466 N101 round 12, N215).
+_UNRESOLVED_NOTE = (
+    "  (its value is unknown until the command runs, so it may be anywhere: "
+    'assign it a literal path earlier in the same call, e.g. OUT=untracked/scratch/o.md; ... "$OUT", '
+    "or write the path out)"
+)
 
 
 class UnreadableCommandError(Exception):
@@ -422,8 +432,8 @@ class ProjectContainmentHandler(PreToolUseHandlerBase):
         rather than propagating — see ``_ERROR_RULE`` for why.
         """
         try:
-            named_targets, unreadable = self._named_targets(hook_input)
-            if not named_targets:
+            named_targets, unreadable, unresolved = self._named_targets(hook_input)
+            if not named_targets and not unresolved:
                 # Nothing to judge. Returning before the root is resolved (Plan
                 # 00466 N90) matters because resolving it can itself fail
                 # (`ProjectContext.project_root()` raises when uninitialised)
@@ -435,6 +445,7 @@ class ProjectContainmentHandler(PreToolUseHandlerBase):
                 return [], None, None
             root = self._resolved_root()
             offending = self._offending_targets(hook_input, root, named_targets)
+            offending.extend(f"{target}{_UNRESOLVED_NOTE}" for target in unresolved)
             if not offending and unreadable is not None:
                 # A named out-of-root target is the more useful answer, so
                 # the unread text denies only when nothing else did.
@@ -466,9 +477,10 @@ class ProjectContainmentHandler(PreToolUseHandlerBase):
             return None
         return candidate
 
-    def _named_targets(self, hook_input: dict[str, Any]) -> tuple[list[str], str | None]:
-        """Paths this tool call plainly names as a write target, and any
-        command text the shared tokeniser could not read (Plan 00466 N120)."""
+    def _named_targets(self, hook_input: dict[str, Any]) -> tuple[list[str], str | None, list[str]]:
+        """Paths this tool call plainly names as a write target, any command
+        text the shared tokeniser could not read (Plan 00466 N120), and each
+        target whose value is unknown until the command runs (N215)."""
         targets: list[str] = []
 
         tool_name = hook_input.get(HookInputField.TOOL_NAME, "")
@@ -479,12 +491,14 @@ class ProjectContainmentHandler(PreToolUseHandlerBase):
                 targets.append(str(named))
 
         # The scan is empty for a non-Bash event, so this is safe to ask
-        # unconditionally. It is conservative by contract: a target needing
-        # shell expansion yields nothing rather than a guess, because a WRONG
-        # path would attribute a write to a file never touched. Text it could
-        # not read is returned beside the paths, never folded into "nothing".
+        # unconditionally. A target needing an expansion no literal
+        # assignment in the call pins is never guessed at: it is returned as
+        # unresolved and denied (Plan 00466 N101 round 12, N215). Text it
+        # could not read is returned beside the paths, never folded into
+        # "nothing".
         scan = scan_bash_write_targets(hook_input)
         targets.extend(scan.paths)
+        unresolved = list(scan.unresolved)
 
         # Shapes that accessor deliberately does not resolve. Its premise is
         # "content this command AUTHORED", which is why Plan 00260 excluded
@@ -507,12 +521,18 @@ class ProjectContainmentHandler(PreToolUseHandlerBase):
         command = get_bash_command(hook_input)
         if command:
             cwd = hook_input.get(HookInputField.CWD)
-            targets.extend(
-                self._resolve_against_cwd(target, cwd)
-                for target in self._destination_targets(command)
-            )
+            known = known_variables(command)
+            for target, runs in self._destination_targets(command):
+                substituted = substitute_known_variables(target, known)
+                if substituted is None or needs_expansion(substituted):
+                    # A token in a body its receiver reads as data names
+                    # nothing the command writes.
+                    if runs and target not in unresolved:
+                        unresolved.append(target)
+                    continue
+                targets.append(self._resolve_against_cwd(substituted, cwd))
 
-        return targets, scan.unreadable
+        return targets, scan.unreadable, unresolved
 
     @staticmethod
     def _resolve_against_cwd(target: str, cwd: Any) -> str:
@@ -527,7 +547,7 @@ class ProjectContainmentHandler(PreToolUseHandlerBase):
         marking trailing slash, which the containment test does not need -- it
         only asks where a path RESOLVES TO, not whether it names an existing
         file. The expansion decline it DOES need, and shares verbatim: a token
-        containing `_UNEXPANDABLE_CHARACTERS` (`$`, `*`, `?`, a backtick) would
+        that `needs_expansion` (`$`, `*`, `?`, a backtick) would
         otherwise be joined into an absolute path that no shell will ever
         actually write to -- fabricating a location rather than declining to
         name one (release review finding C6).
@@ -542,7 +562,7 @@ class ProjectContainmentHandler(PreToolUseHandlerBase):
         can perform exactly, so it must be expanded rather than declined.
         `~otheruser` is still declined, by `expand_home` itself.
         """
-        if any(character in target for character in _UNEXPANDABLE_CHARACTERS):
+        if needs_expansion(target):
             return target
         if target.startswith("~"):
             expanded = expand_home(target)
@@ -553,7 +573,7 @@ class ProjectContainmentHandler(PreToolUseHandlerBase):
             return target
         return str(Path(cwd) / target)
 
-    def _destination_targets(self, command: str, depth: int = 0) -> list[str]:
+    def _destination_targets(self, command: str, depth: int = 0) -> list[tuple[str, bool]]:
         """Paths named as a destination by a flag or a positional argument.
 
         Args:
@@ -561,9 +581,11 @@ class ProjectContainmentHandler(PreToolUseHandlerBase):
             depth: Nested-shell recursion depth, bounded by ``_MAX_NESTED_DEPTH``.
 
         Returns:
-            Every destination path this command plainly names. Conservative in
-            the same direction as the shared accessor: an unrecognised command
-            yields nothing rather than a guess.
+            Every destination path this command plainly names, each with
+            whether the text naming it RUNS: False for a heredoc body its
+            receiver reads as data. Conservative in the same direction as the
+            shared accessor: an unrecognised command yields nothing rather
+            than a guess.
 
         The shell outside heredoc bodies is split where bash splits it: an
         ANSI-C ``$'it\\'s'`` or a comment read raw moves every later boundary,
@@ -573,16 +595,23 @@ class ProjectContainmentHandler(PreToolUseHandlerBase):
         """
         outside, heredocs = split_heredocs(command)
         normalised = bash_text_for_shlex(outside)
-        texts = [outside if normalised is None else normalised]
-        texts.extend(heredoc.body for heredoc in heredocs)
-        targets: list[str] = []
-        for text in texts:
-            targets.extend(self._segment_targets(text, depth))
+        consumers = heredoc_consumers(command, scan_heredocs(command).heredocs)
+        texts = [(outside if normalised is None else normalised, True)]
+        texts.extend(
+            (heredoc.body, body_may_run(words))
+            for heredoc, words in zip(heredocs, consumers, strict=True)
+        )
+        targets: list[tuple[str, bool]] = []
+        for text, runs in texts:
+            targets.extend(
+                (target, runs and nested_runs)
+                for target, nested_runs in self._segment_targets(text, depth)
+            )
         return targets
 
-    def _segment_targets(self, text: str, depth: int) -> list[str]:
+    def _segment_targets(self, text: str, depth: int) -> list[tuple[str, bool]]:
         """:meth:`_destination_targets` for one span of shell text."""
-        targets: list[str] = []
+        targets: list[tuple[str, bool]] = []
 
         for segment in split_unquoted(text, _SEGMENT_SEPARATORS):
             # `then mkdir /opt/x` runs mkdir: the reserved word is not the command.
@@ -592,19 +621,20 @@ class ProjectContainmentHandler(PreToolUseHandlerBase):
 
             name = Path(tokens[0]).name
             arguments = tokens[1:]
+            named: list[str] = []
 
             if name in _OUTPUT_FLAG_COMMANDS:
-                targets.extend(self._flag_targets(arguments, _OUTPUT_FLAG_COMMANDS[name]))
+                named = self._flag_targets(arguments, _OUTPUT_FLAG_COMMANDS[name])
             elif name == _ARCHIVE_COMMAND:
-                targets.extend(self._archive_targets(arguments))
+                named = self._archive_targets(arguments)
             elif name in _ALL_ARG_DEST_COMMANDS:
-                targets.extend(argument for argument in arguments if not argument.startswith("-"))
+                named = [argument for argument in arguments if not argument.startswith("-")]
             elif name in _POSITIONAL_DEST_COMMANDS:
                 positional = [a for a in arguments if not a.startswith("-")]
-                if positional:
-                    targets.append(positional[-1])
+                named = positional[-1:]
             elif name in _NESTED_SHELL_COMMANDS and depth < _MAX_NESTED_DEPTH:
                 targets.extend(self._nested_shell_targets(arguments, depth))
+            targets.extend((target, True) for target in named)
 
         return targets
 
@@ -669,11 +699,13 @@ class ProjectContainmentHandler(PreToolUseHandlerBase):
         """Is ``letter`` set in a bundled short-flag token such as ``-czf``?"""
         return argument.startswith("-") and not argument.startswith("--") and letter in argument[1:]
 
-    def _nested_shell_targets(self, arguments: list[str], depth: int) -> list[str]:
+    def _nested_shell_targets(self, arguments: list[str], depth: int) -> list[tuple[str, bool]]:
         """Re-extract from a shell's ``-c`` command string.
 
         The inner string is a command, not an opaque argument, so it gets both
         the shared accessor (for redirects and cp/mv) and this extractor again.
+        A target the accessor could not resolve is returned as written, so the
+        caller judges it unknown.
         """
         if _NESTED_SHELL_FLAG not in arguments:
             return []
@@ -688,7 +720,7 @@ class ProjectContainmentHandler(PreToolUseHandlerBase):
         )
         if scan.unreadable is not None:
             raise UnreadableCommandError(scan.unreadable)
-        targets = list(scan.paths)
+        targets = [(target, True) for target in (*scan.paths, *scan.unresolved)]
         targets.extend(self._destination_targets(inner, depth + 1))
         return targets
 
@@ -880,8 +912,13 @@ class ProjectContainmentHandler(PreToolUseHandlerBase):
             "**NOT blocked**: reading any path; a temp file a PROGRAM creates for "
             "itself at runtime (pytest's `tmp_path`, a package manager's build dir) — "
             "this rule judges paths your command NAMES, not what a tool does "
-            "internally; and a target the daemon cannot resolve without executing "
-            'the command (`> "$OUT"`), which yields no path rather than a guess.\n\n'
+            "internally.\n\n"
+            '**A variable target is resolved or denied.** `> "$OUT"` is judged at '
+            "the path a plain literal assignment earlier in the same call gives it "
+            '(`OUT=untracked/scratch/o.md; cat > "$OUT"`). With no such assignment '
+            "-- a loop variable, `read`, a substitution, a variable bash sets -- where "
+            "it writes is unknown until the command runs, so it is DENIED. Write the "
+            "path out, or assign it literally first.\n\n"
             "**Claude Code's own state directory is allowed** (`$CLAUDE_CONFIG_DIR`, "
             "else `~/.claude`, and the session's own, read from the transcript path "
             "in the payload). It is not scratch, and it is not ephemeral where it is "

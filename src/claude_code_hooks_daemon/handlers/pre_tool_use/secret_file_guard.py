@@ -98,6 +98,11 @@ _VERBOSE: Final[str] = (
 # separately rather than looking it up there.
 _ERROR_ROUTE: Final[str] = "error"
 
+# The route a command the shell reader cannot read with certainty is filed
+# under (Plan 00466 N101 round 12). That is a property of the command, not a
+# defect in the guard, so it must not ask for a bug report.
+_UNREADABLE_ROUTE: Final[str] = "unreadable"
+
 # The `_ERROR_ROUTE` detail for a path argument carrying a NUL byte: the
 # input, not the guard, is what cannot be evaluated.
 _NUL_PATH_DETAIL: Final[str] = (
@@ -154,6 +159,29 @@ _ERROR_RULE: Final[Rule] = Rule(
         "daemon's global strict_mode). This is a bug in the guard itself: report "
         "it via the hooks-daemon skill (issue-report) rather than retrying -- "
         "retrying the same call will crash the same way."
+    ),
+)
+
+_UNREADABLE_RULE: Final[Rule] = Rule(
+    rule_id=RuleID.SECRET_COMMAND_UNREADABLE,
+    blocked="a Bash command whose structure could not be read with certainty",
+    why=(
+        "A protected path could hide in a part of the command the reader cannot "
+        "place, so an unreadable command is never treated as clean"
+    ),
+    fix=(
+        "Rephrase the command: move a `case` inside `$( )` into an `if`, or put "
+        "the logic in a script file under untracked/scratch/ and run that"
+    ),
+    verbose=(
+        "secret_file_guard could not read this command's structure with "
+        "certainty -- for example a `case` command inside `$( )`, whose "
+        "patterns end in a `)` that closes nothing, or quoting inside `${...}` "
+        "whose extent is ambiguous. This is not a bug in the guard: the "
+        "command itself cannot be read, so it is denied rather than treated as "
+        "mentioning no protected path. Rephrase the command: move a `case` "
+        "inside `$( )` into an `if`, split the command into simpler calls, or "
+        "put the logic in a script file under untracked/scratch/ and run that."
     ),
 )
 
@@ -1304,6 +1332,10 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
         """
         try:
             return self._evaluate(hook_input)
+        except shell_expansion.UnresolvableBraceQuotingError as exc:
+            # A command the reader cannot place is denied as unreadable, not
+            # as a guard defect (N101 round 12, review 11 MAJOR 2).
+            return ("<unreadable>", type(exc).__name__, _UNREADABLE_ROUTE)
         except Exception as exc:
             # Deliberately broad: ANY exception during evaluation must deny,
             # never propagate (Plan 00466 N11) -- see the docstring above.
@@ -1533,8 +1565,8 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
         return self._compute_and_cache_matched(hook_input) is not None
 
     def get_rules(self) -> list[Rule]:
-        """Return the 4 Rule objects backing this handler's blocking behaviour."""
-        return [*_RULES_BY_ROUTE.values(), _ERROR_RULE]
+        """Return the 5 Rule objects backing this handler's blocking behaviour."""
+        return [*_RULES_BY_ROUTE.values(), _ERROR_RULE, _UNREADABLE_RULE]
 
     def handle(self, hook_input: dict[str, Any]) -> GatingResult:
         """Deny with a verbose-first/terse-after explanation.
@@ -1580,19 +1612,11 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
         pattern, token, route = matched
         if route == _ERROR_ROUTE:
             return self._deny_for_evaluation_error(hook_input, token)
-        rule = _RULES_BY_ROUTE[route]
-
-        transcript_path = hook_input.get(HookInputField.TRANSCRIPT_PATH)
-        tracker = get_data_layer().disclosure
-        formatter = RuleFormatter()
-
-        if transcript_path and tracker.was_disclosed(transcript_path, rule.rule_id):
-            message = formatter.terse(rule)
-        else:
-            if transcript_path:
-                tracker.mark_disclosed(transcript_path, rule.rule_id)
-            message = formatter.verbose(rule)
-
+        if route == _UNREADABLE_ROUTE:
+            return GatingResult(
+                decision=Decision.DENY, reason=self._disclosed(hook_input, _UNREADABLE_RULE)
+            )
+        message = self._disclosed(hook_input, _RULES_BY_ROUTE[route])
         message += f"\n\nMatched protected glob: `{pattern}`"
         # Naming the TOKEN turns a bisection hunt into a read (Plan 00356):
         # the glob alone does not say which of a command's -- or a whole
@@ -1616,19 +1640,22 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
         report that fixes the underlying bug does not need to reproduce it
         from scratch.
         """
+        message = self._disclosed(hook_input, _ERROR_RULE)
+        message += f"\n\nInternal error: {detail}"
+        return GatingResult(decision=Decision.DENY, reason=message)
+
+    @staticmethod
+    def _disclosed(hook_input: dict[str, Any], rule: Rule) -> str:
+        """``rule`` in full the first time this transcript meets it, and
+        tersely after that (Plan 00116, Decision G)."""
         transcript_path = hook_input.get(HookInputField.TRANSCRIPT_PATH)
         tracker = get_data_layer().disclosure
         formatter = RuleFormatter()
-
-        if transcript_path and tracker.was_disclosed(transcript_path, _ERROR_RULE.rule_id):
-            message = formatter.terse(_ERROR_RULE)
-        else:
-            if transcript_path:
-                tracker.mark_disclosed(transcript_path, _ERROR_RULE.rule_id)
-            message = formatter.verbose(_ERROR_RULE)
-
-        message += f"\n\nInternal error: {detail}"
-        return GatingResult(decision=Decision.DENY, reason=message)
+        if transcript_path and tracker.was_disclosed(transcript_path, rule.rule_id):
+            return formatter.terse(rule)
+        if transcript_path:
+            tracker.mark_disclosed(transcript_path, rule.rule_id)
+        return formatter.verbose(rule)
 
     def get_default_enabled(self) -> bool:
         return True

@@ -801,12 +801,13 @@ class TestGuidance:
 
 
 class TestGetRules:
-    """get_rules() declares the 4 Rule objects backing this handler (Plan 00116,
-    plus the evaluation-error rule added by Plan 00466 N11)."""
+    """get_rules() declares the 5 Rule objects backing this handler (Plan 00116,
+    plus the evaluation-error rule added by Plan 00466 N11 and the
+    unreadable-command rule added by N101 round 12)."""
 
-    def test_returns_four_rules(self) -> None:
+    def test_returns_five_rules(self) -> None:
         rules = _handler().get_rules()
-        assert len(rules) == 4
+        assert len(rules) == 5
         assert all(isinstance(rule, Rule) for rule in rules)
 
     def test_rule_ids_match_constants(self) -> None:
@@ -815,6 +816,7 @@ class TestGetRules:
             RuleID.SECRET_BASH_MENTION,
             RuleID.SECRET_SCRIPT_AUTHOR,
             RuleID.SECRET_EVALUATION_ERROR,
+            RuleID.SECRET_COMMAND_UNREADABLE,
         }
         actual = {rule.rule_id for rule in _handler().get_rules()}
         assert actual == expected
@@ -1438,9 +1440,10 @@ class TestEncryptedFileGuidance:
         encrypted-at-rest exemption. The evaluation-error rule (Plan 00466
         N11) is a different failure mode entirely -- the guard crashed, it
         never reached a content verdict -- so mentioning an exemption that
-        was never evaluated would mislead, not help."""
+        was never evaluated would mislead, not help. So is the
+        unreadable-command rule (N101 round 12): no path was read at all."""
         for rule in _handler().get_rules():
-            if rule.rule_id == RuleID.SECRET_EVALUATION_ERROR:
+            if rule.rule_id in (RuleID.SECRET_EVALUATION_ERROR, RuleID.SECRET_COMMAND_UNREADABLE):
                 continue
             assert "encrypted" in rule.verbose.lower(), rule.rule_id
 
@@ -2633,8 +2636,10 @@ class TestQuotedBracesAreNotBraceSyntax:
         assert decision == Decision.DENY
 
     def test_quoting_that_cannot_be_resolved_fails_closed(self) -> None:
+        """Denied as an unreadable command, not as a guard defect (N101
+        round 12, review 11 MAJOR 2)."""
         command = 'cat /proj/.vault-{"$(case a in a) echo;; esac)",pass}'
-        assert RuleID.SECRET_EVALUATION_ERROR in _deny_reason(command)
+        assert RuleID.SECRET_COMMAND_UNREADABLE in _deny_reason(command)
 
     def test_a_parameter_expansion_in_a_group_is_read_as_bash_reads_it(self) -> None:
         """Plan 00466 N101 round 7: bash's brace scanner reads `${` by a

@@ -68,7 +68,9 @@ class TestManyQuotedHeredocsAreLinear:
     """The `strip_quoted_heredoc_bodies` half: review 2's 98s repro."""
 
     def test_5000_quoted_delimiter_heredocs_in_one_command(self) -> None:
-        command = "git commit -F - <<'EOF'\nx\nEOF\n" * 5_000
+        """``cat`` reading only its body is on the N214 inert allowlist, so
+        every body stays blankable (Plan 00466 N101 round 12)."""
+        command = "cat <<'EOF'\nx\nEOF\n" * 5_000
         result, elapsed = _timed(strip_quoted_heredoc_bodies, command)
 
         assert elapsed < _MAX_SECONDS, f"took {elapsed:.2f}s, expected well under {_MAX_SECONDS}s"
@@ -78,9 +80,7 @@ class TestManyQuotedHeredocsAreLinear:
     def test_a_protected_string_in_the_last_of_5000_heredoc_bodies_is_still_blanked(
         self,
     ) -> None:
-        command = "git commit -F - <<'EOF'\nx\nEOF\n" * 4_999 + (
-            f"git commit -F - <<'EOF'\n{_FORCE}\nEOF\n"
-        )
+        command = "cat <<'EOF'\nx\nEOF\n" * 4_999 + (f"git commit -F - <<'EOF'\n{_FORCE}\nEOF\n")
         result = strip_quoted_heredoc_bodies(command)
         assert _FORCE not in result
 

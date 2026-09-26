@@ -18,6 +18,7 @@ from unittest.mock import patch
 
 import pytest
 
+from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.core import Decision
 from claude_code_hooks_daemon.core.chain import HandlerChain
@@ -33,6 +34,9 @@ from claude_code_hooks_daemon.handlers.pre_tool_use.markdown_organization import
 from claude_code_hooks_daemon.handlers.pre_tool_use.pipe_blocker import PipeBlockerHandler
 from claude_code_hooks_daemon.handlers.pre_tool_use.project_containment import (
     ProjectContainmentHandler,
+)
+from claude_code_hooks_daemon.handlers.pre_tool_use.secret_file_guard import (
+    SecretFileGuardHandler,
 )
 from claude_code_hooks_daemon.handlers.pre_tool_use.sed_blocker import SedBlockerHandler
 
@@ -275,6 +279,12 @@ _RUN_AFTER_A_HIDING_HEREDOC: list[str] = [
     "cat <<'E' $(true\n{line}\nE\n)\nx\nE",
     "cat <<'E' `true\n{line}\nE\n`\nx\nE",
     "cat <<'E' \"$(true\n{line}\nE\n)\"\nx\nE",
+    # Round 12, MAJOR 2: `case` wherever bash reads the reserved word.
+    ": $(! case a in a) ;; esac; cat <<'E'\nx\nE)\n{line}\nE",
+    ": $(true && case a in a) ;; esac; cat <<'E'\nx\nE)\n{line}\nE",
+    ": $(f() case a in a) ;; esac\nf; cat <<'E'\nx\nE)\n{line}\nE",
+    ": $(if true; then case a in a) ;; esac; fi; cat <<'E'\nx\nE)\n{line}\nE",
+    ": $(a=1\ncase a in a) ;; esac; cat <<'E'\nx\nE)\n{line}\nE",
 ]
 
 
@@ -335,6 +345,13 @@ class TestAContinuationAfterAStopIsJoined:
     )
     def test_every_guard_sees_the_joined_line(self, handler: type[Handler], line: str) -> None:
         assert _decision(handler(), self._STOP + self._split(line)) == Decision.DENY
+
+    def test_a_backslash_before_a_carriage_return_joins_nothing(self, tmp_path: Path) -> None:
+        """Round 12, review 11 minor: bash escapes the ``\\r`` and runs the
+        next line as its own command."""
+        command = f"{self._STOP}echo a\\\r\n{_RESET}"
+        assert _RAN_RESET in _bash_run(command, tmp_path)
+        assert _decision(DestructiveGitHandler(), command) == Decision.DENY
 
 
 class TestAnUnresolvedReceiverIsNoShell:
@@ -514,3 +531,182 @@ class TestAnUnresolvedTargetMayBeAnOpenFd:
         command = f"OUT=o.md; cat > \"$OUT\" <<'EOF'\n{_RESET}\nEOF"
         assert _RAN_RESET not in _isolated_bash_run(command, tmp_path)
         assert _decision(DestructiveGitHandler(), command) == Decision.ALLOW
+
+
+# -- Round 12: review 11 MAJOR 2, `case` as an argument -----------------------
+
+
+def _reason(handler: Handler, command: str) -> str:
+    chain = HandlerChain()
+    chain.add(handler)
+    payload: dict[str, Any] = {
+        "tool_name": "Bash",
+        "tool_input": {"command": command},
+        "cwd": str(_ROOT),
+    }
+    return chain.execute(payload, strict_mode=False).result.reason or ""
+
+
+class TestCaseAsAnArgumentIsRead:
+    """MAJOR 2: bash reads ``case`` as the reserved word only at a command
+    word, so an argument spelled ``case`` leaves the command readable."""
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "n=$(grep -c case README.md)",
+            'echo "$(echo upper case)"',
+            "diff <(echo case) README.md",
+            "x=`grep -c case README.md`",
+            "for f in $(ls | grep case); do :; done",
+        ],
+    )
+    @pytest.mark.parametrize("handler", [ProjectContainmentHandler, SecretFileGuardHandler])
+    def test_it_is_allowed(self, command: str, handler: type[Handler], tmp_path: Path) -> None:
+        (tmp_path / "README.md").write_text("upper case\n")
+        assert "syntax error" not in _bash_run(command, tmp_path)
+        assert _decision(handler(), command) == Decision.ALLOW
+
+    def test_an_unreadable_command_is_named_not_reported_as_a_bug(self) -> None:
+        """A command the scanner cannot read is denied with its own reason and
+        a rephrase, never the evaluation-error rule that asks for a report."""
+        command = "n=$(case a in a) echo {a,b};; esac)"
+        reason = _reason(SecretFileGuardHandler(), command)
+        assert reason.startswith(f"BLOCKED [{RuleID.SECRET_COMMAND_UNREADABLE}]")
+        assert RuleID.SECRET_EVALUATION_ERROR not in reason
+        assert "Rephrase" in reason
+
+
+# -- Round 12: N212, N214 and N215, each run in bash first --------------------
+
+
+class TestAVariableReceiverIsUnknown:
+    """N212: a receiver named by a variable the call does not pin to a
+    literal is unknown, and its body is judged as commands."""
+
+    @pytest.mark.parametrize(
+        "opener",
+        [
+            "declare -n PY=S; S=bash; $PY <<'EOF'",
+            "${X:-bash} <<'EOF'",
+            "V=bash; env $V <<'EOF'",
+            "V=bash; command $V <<'EOF'",
+            "V=bash; exec $V <<'EOF'",
+            "exec bash <<'EOF'",
+            "builtin exec -a x bash <<'EOF'",
+            "$0 <<'EOF'",
+            "SH=bash; PY=$SH; $PY <<'EOF'",
+            "PY='bash -e'; $PY <<'EOF'",
+            "P=ba; $P\"sh\" <<'EOF'",
+            "\"$(command -v bash)\" <<'EOF'",
+            "read PY <<< bash; $PY <<'EOF'",
+            "printf -v PY bash; $PY <<'EOF'",
+            "VENV='bash -s '; $VENV/bin/python <<'EOF'",
+        ],
+    )
+    def test_the_body_is_judged(self, opener: str, tmp_path: Path) -> None:
+        command = f"{opener}\n{_outside(tmp_path)}\nEOF"
+        _bash_run(command, tmp_path)
+        assert (tmp_path / "evil.txt").exists()
+        assert _decision(ProjectContainmentHandler(), command) == Decision.DENY
+
+    def test_a_loop_variable_is_unknown(self, tmp_path: Path) -> None:
+        command = f"for PY in bash; do $PY <<'EOF'\n{_outside(tmp_path)}\nEOF\ndone"
+        _bash_run(command, tmp_path)
+        assert (tmp_path / "evil.txt").exists()
+        assert _decision(ProjectContainmentHandler(), command) == Decision.DENY
+
+    def test_an_unassigned_receiver_is_no_longer_data(self) -> None:
+        """``PY=python3; $PY -`` stays data (minor E); with nothing pinning
+        ``$PY`` the body is read as commands, and prose there is unreadable."""
+        command = "$PY - <<'EOF'\nx = 'don\\'t'\nEOF"
+        assert _decision(ProjectContainmentHandler(), command) == Decision.DENY
+
+
+class TestAnEarlierSegmentCanRunTheBody:
+    """N214: a function, an alias or an environment an earlier segment
+    sets can turn a sink into an executor, so the body is data only after
+    an inert prefix."""
+
+    @pytest.mark.parametrize(
+        "prefix",
+        [
+            "cat(){ bash; }; ",
+            "shopt -s expand_aliases; alias cat=bash\n",
+        ],
+    )
+    def test_the_body_is_judged(self, prefix: str, tmp_path: Path) -> None:
+        """Run isolated: the child shell does not inherit a recorder
+        function, so only a recorder on ``PATH`` keeps git unreachable."""
+        command = f"{prefix}cat <<'EOF'\n{_RESET}\n{_outside(tmp_path)}\nEOF"
+        assert _RAN_RESET in _isolated_bash_run(command, tmp_path)
+        assert _decision(DestructiveGitHandler(), command) == Decision.DENY
+        assert _decision(ProjectContainmentHandler(), command) == Decision.DENY
+
+    def test_an_exported_pager_preprocessor_is_judged(self, tmp_path: Path) -> None:
+        command = f"export LESSOPEN='|-bash %s'; less <<'EOF'\n{_outside(tmp_path)}\nEOF"
+        _bash_run(command, tmp_path)
+        assert (tmp_path / "evil.txt").exists()
+        assert _decision(ProjectContainmentHandler(), command) == Decision.DENY
+
+    @pytest.mark.parametrize(
+        "prefix", ["source env.sh; ", "eval true; ", "export X=1; ", "python3 x.py; "]
+    )
+    def test_anything_off_the_allowlist_keeps_the_body_judged(self, prefix: str) -> None:
+        command = f"{prefix}cat > notes.md <<'EOF'\nnever run {_RESET}\nEOF"
+        assert _decision(DestructiveGitHandler(), command) == Decision.DENY
+
+    @pytest.mark.parametrize(
+        "prefix", ["", "cd /repo && git status && ", "D=notes; echo hi; ", "git diff --stat; "]
+    )
+    def test_an_inert_prefix_keeps_prose_data(self, prefix: str, tmp_path: Path) -> None:
+        command = f"{prefix}cat > notes.md <<'EOF'\nnever run {_RESET}, it's prose\nEOF"
+        assert _decision(DestructiveGitHandler(), command) == Decision.ALLOW
+        assert _decision(ProjectContainmentHandler(), command) == Decision.ALLOW
+
+    def test_the_commit_idiom_stays_allowed(self, tmp_path: Path) -> None:
+        command = (
+            "git add -A && git commit -m \"$(cat <<'EOF'\n"
+            f"it's done; never run {_RESET}\nEOF\n)\""
+        )
+        assert _RAN_RESET not in _bash_run(command, tmp_path)
+        for handler in (DestructiveGitHandler, ProjectContainmentHandler, PipeBlockerHandler):
+            assert _decision(handler(), command) == Decision.ALLOW
+
+
+class TestAVariableWriteTargetIsResolvedOrUnknown:
+    """N215: containment resolves ``"$OUT"`` from a literal assignment
+    earlier in the call, and judges any other variable target unknown."""
+
+    def test_a_known_outside_target_is_denied(self, tmp_path: Path) -> None:
+        target = tmp_path / "o.md"
+        command = f'OUT={target}; cat > "$OUT" <<\\EOF\n{_TAIL}\nEOF'
+        _bash_run(command, tmp_path)
+        assert target.exists()
+        assert _decision(ProjectContainmentHandler(), command) == Decision.DENY
+
+    def test_a_known_inside_target_is_allowed(self) -> None:
+        command = "OUT=untracked/scratch/o.md; cat > \"$OUT\" <<'EOF'\nit's prose\nEOF"
+        assert _decision(ProjectContainmentHandler(), command) == Decision.ALLOW
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "cat > \"$OUT\" <<'EOF'\nx\nEOF",
+            'echo x > "$OUT"; OUT=untracked/o.md',
+            'OUT=a.md; read OUT <<< /opt/x; echo x > "$OUT"',
+            'PWD=/repo; echo x > "$PWD/a"',
+            'echo x > "untracked/$NAME.md"',
+            "OUT='a b'; echo x > $OUT",
+            'for f in a b; do echo x > "$f"; done',
+            'cp a.md "$DEST"',
+        ],
+    )
+    def test_an_unknown_target_is_denied(self, command: str) -> None:
+        assert _decision(ProjectContainmentHandler(), command) == Decision.DENY
+
+    def test_the_read_shape_writes_where_it_reads(self, tmp_path: Path) -> None:
+        target = tmp_path / "x"
+        command = f'OUT=a.md; read OUT <<< {target}; echo x > "$OUT"'
+        _bash_run(command, tmp_path)
+        assert target.exists()

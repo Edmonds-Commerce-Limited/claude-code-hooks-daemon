@@ -48,8 +48,9 @@ unreadable. The uncertain shapes: an unterminated quote or substitution, a
 two-character token (``$\\⏎(``, ``a\\⏎#``), a ``${``/``$[`` in a delimiter
 word, a newline inside an expansion or array while a body is pending, and a
 backtick substitution whose end falls inside a quote, a comment or a body.
-Round 11 adds two: the word ``case`` inside a substitution, whose patterns
-end in a ``)`` that closes nothing, and a newline inside a substitution
+Round 11 adds two: the reserved word ``case`` inside a substitution, whose
+patterns end in a ``)`` that closes nothing (only where bash reads a command
+word, so an argument spelled ``case`` stops nothing), and a newline inside a substitution
 while an operator opened outside it is pending (bash starts that body after
 the substitution).
 """
@@ -72,7 +73,6 @@ _NEWLINE: Final[str] = "\n"
 _TAB: Final[str] = "\t"
 _BACKSLASH: Final[str] = "\\"
 _CONTINUATION: Final[str] = "\\\n"
-_CR_CONTINUATION: Final[str] = "\\\r\n"
 _METACHARACTERS: Final[str] = " \t\n|&;()<>"
 _DOUBLE_QUOTE_ESCAPABLE: Final[str] = '$`"\\\n'
 _SUBSTITUTION_CLOSE: Final[str] = ")"
@@ -104,11 +104,24 @@ _ASSIGNMENT_WORD: Final[re.Pattern[str]] = re.compile(
 #: nothing. Checked in a ``$( )`` span's text with its continuations removed.
 _CASE_WORD: Final[re.Pattern[str]] = re.compile(r"(?:^|[\s;&|()<>`])case(?=[\s;&|()<>]|$)")
 _CASE: Final[str] = "case"
+#: Operators a command word follows.
+_COMMAND_WORD_PRECEDERS: Final[str] = "\n;&|("
+#: Reserved words a command word follows, when each is a command word itself.
+_BEFORE_A_COMMAND_WORD: Final[frozenset[str]] = frozenset(
+    {"!", "{", "then", "else", "elif", "do", "if", "while", "until", "time", "coproc"}
+)
+#: Reserved words whose NAME word a compound command follows.
+_NAMING_KEYWORDS: Final[frozenset[str]] = frozenset({"function", "coproc"})
+_TIME: Final[str] = "time"
+_TIME_POSIX: Final[str] = "-p"
+_ASSIGNMENT_PREFIX: Final[re.Pattern[str]] = re.compile(
+    r"[A-Za-z_][A-Za-z0-9_]*(?:\[[^\]]*\])?\+?="
+)
 _PROCESS_SUBSTITUTION_OPENERS: Final[str] = "<>"
-#: A newline ending a line whose trailing backslash run is odd, with an
-#: optional carriage return before it: the continuation bash removes, and the
-#: one the regex before the scanner removed with it.
-_ODD_CONTINUATION: Final[re.Pattern[str]] = re.compile(r"(?<!\\)(?:\\\\)*(\\\r?\n)")
+#: A newline ending a line whose trailing backslash run is odd: the
+#: continuation bash removes. A backslash before a carriage return escapes
+#: the ``\r`` instead, and bash joins nothing there.
+_ODD_CONTINUATION: Final[re.Pattern[str]] = re.compile(r"(?<!\\)(?:\\\\)*(\\\n)")
 
 _UNQUOTED: Final[str] = "unquoted"
 _DOUBLE: Final[str] = "double"
@@ -239,7 +252,7 @@ def remove_line_continuations(command: str) -> str:
     Two stay, because joining either would undo the stop in the rescan: one a
     quoted body kept to keep its closer, and a glue past the join bound.
     """
-    if _CONTINUATION not in command and _CR_CONTINUATION not in command:
+    if _CONTINUATION not in command:
         return command
     scanner = _Scanner(command, join_glue=True)
     scan = scanner.run()
@@ -544,7 +557,7 @@ class _Scanner:
 
     def _reads_case(self, frame: _Frame) -> bool:
         """Is the word at the cursor the reserved word ``case``, continuations
-        joined? Any word that spells it counts, command position or not."""
+        joined, at a position where bash reads a command word?"""
         text, index = self._text, self._index
         before = self._index_before(index)
         if not (
@@ -562,7 +575,66 @@ class _Scanner:
                 break
             word.append(text[index])
             index += 1
-        return "".join(word) == _CASE
+        return "".join(word) == _CASE and self._at_command_word(frame, self._index)
+
+    def _at_command_word(self, frame: _Frame, index: int) -> bool:
+        """Does bash read the word at ``index`` as a command word (round 12,
+        review 11 MAJOR 2)? It does at the frame's opening, after a command
+        operator or ``f()``, and after a reserved word a command follows,
+        ``time -p``, ``function f``, ``coproc NAME`` or assignments, each of
+        them at a command word in turn. Where bash reads no keyword the
+        extra stop only costs a rephrase."""
+        cursor = index
+        while True:
+            word, start = self._previous_word(frame, cursor)
+            if start is None:
+                return True
+            if not word:
+                return self._operator_starts_a_command(frame, start)
+            if word == _TIME_POSIX:
+                word, start = self._previous_word(frame, start)
+                if word != _TIME or start is None:
+                    return False
+            elif not (word in _BEFORE_A_COMMAND_WORD or _ASSIGNMENT_PREFIX.match(word)):
+                word, start = self._previous_word(frame, start)
+                if word not in _NAMING_KEYWORDS or start is None:
+                    return False
+            cursor = start
+
+    def _operator_starts_a_command(self, frame: _Frame, offset: int) -> bool:
+        """Is the metacharacter at ``offset`` one a command word follows: a
+        list or pipe operator, an opening paren, or the ``)`` of ``f()``?"""
+        char = self._text[offset]
+        if char in _COMMAND_WORD_PRECEDERS:
+            return True
+        if char != _SUBSTITUTION_CLOSE:
+            return False
+        before = self._index_before(offset)
+        while before >= 0 and self._text[before] in _BLANKS:
+            before = self._index_before(before)
+        return before >= 0 and self._text[before] == "("
+
+    def _previous_word(self, frame: _Frame, index: int) -> tuple[str, int | None]:
+        """The word ending before ``index``, past blanks and continuations,
+        with its start. An operator gives ``""`` and its offset, and the
+        text's or the backtick frame's opening gives ``""`` and None."""
+        text = self._text
+        cursor = self._index_before(index)
+        while cursor >= 0 and text[cursor] in _BLANKS:
+            cursor = self._index_before(cursor)
+        if cursor < 0 or (frame.context == _BACKTICK and cursor == frame.start):
+            return "", None
+        if text[cursor] in _METACHARACTERS:
+            return "", cursor
+        chars: list[str] = []
+        start = cursor
+        while cursor >= 0 and text[cursor] not in _METACHARACTERS:
+            if frame.context == _BACKTICK and cursor == frame.start:
+                break
+            chars.append(text[cursor])
+            start = cursor
+            cursor = self._index_before(cursor)
+        return "".join(reversed(chars)), start
 
     def _comment(self, index: int) -> None:
         """Skip a comment: to the newline, or to the backtick closing a

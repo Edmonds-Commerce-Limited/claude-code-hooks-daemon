@@ -290,8 +290,8 @@ _SHELL_WORD_STOP_CHARS: Final[frozenset[str]] = frozenset(" \t\n;|&<>()")
 #: a special parameter.
 _PLAIN_DOLLAR_RE: Final[re.Pattern[str]] = re.compile(r"\$(?:[A-Za-z_][A-Za-z0-9_]*|[0-9@*#?$!-])")
 
-#: A `case` word inside a substitution: its patterns' bare `)` would end the
-#: substitution early for a paren-counting scan.
+#: A `case` word inside a substitution: where it is the reserved word, its
+#: patterns' bare `)` would end the substitution early for a paren count.
 _CASE_WORD_RE: Final[re.Pattern[str]] = re.compile(r"case(?=\s)")
 
 #: The `$` forms a double-quoted span or a parameter expansion nests.
@@ -393,8 +393,9 @@ def _substitution_end(text: str, open_paren: int, substitutions: list[str] | Non
     whose ``(`` is at ``open_paren``, its body read as a command: quotes and
     nested substitutions skipped whole, nested parentheses counted, and a
     comment running to the end of its line. A body holding a ``case`` word
-    or a heredoc, whose ``)`` and lines a paren count cannot place, is not
-    read with certainty. An unterminated body runs to the end of ``text``.
+    or a heredoc, whose ``)`` and lines a paren count cannot place, is read
+    by the shared scanner, and is not read with certainty where that stops.
+    An unterminated body runs to the end of ``text``.
     Only this body is appended to ``substitutions``: the ones nested in it
     are found when it is read in turn.
     """
@@ -408,21 +409,18 @@ def _substitution_end(text: str, open_paren: int, substitutions: list[str] | Non
             newline = text.find("\n", j)
             j = n if newline == -1 else newline
             continue
-        if word_start and _CASE_WORD_RE.match(text, j):
-            raise UnresolvableBraceQuotingError(
-                f"a case command inside {text[open_paren - 1 : open_paren + 80]!r}"
-            )
         if text.startswith(_HERE_STRING_OPERATOR, j):
             j += len(_HERE_STRING_OPERATOR)
             word_start = True
             continue
-        if text.startswith("<<", j):
+        if text.startswith("<<", j) or (word_start and _CASE_WORD_RE.match(text, j)):
             # The shared scanner reads heredoc bodies by bash's grammar
-            # (Plan 00466 N101 round 10, check 2).
+            # (Plan 00466 N101 round 10, check 2), and knows where bash reads
+            # `case` as the reserved word (round 12, review 11 MAJOR 2).
             close = substitution_end(text, open_paren)
             if close is None:
                 raise UnresolvableBraceQuotingError(
-                    f"a heredoc inside {text[open_paren - 1 : open_paren + 80]!r}"
+                    f"a heredoc or case command inside {text[open_paren - 1 : open_paren + 80]!r}"
                 )
             if substitutions is not None:
                 substitutions.append(text[open_paren + 1 : close - 1])

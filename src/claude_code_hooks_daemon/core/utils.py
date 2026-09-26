@@ -20,8 +20,10 @@ from claude_code_hooks_daemon.utils.heredoc_operators import (
 )
 from claude_code_hooks_daemon.utils.shell_segmentation import (
     DATA_SINKS,
-    SHELL_BODY_RUNNERS,
+    body_may_run,
     heredoc_consumers,
+    known_variables,
+    substitute_known_variables,
 )
 
 logger = logging.getLogger(__name__)
@@ -155,10 +157,17 @@ class BashWriteScan(NamedTuple):
 
 
 class BashWriteTargets(NamedTuple):
-    """The resolved counterpart of :class:`BashWriteScan`."""
+    """The resolved counterpart of :class:`BashWriteScan`.
+
+    ``unresolved`` holds each destination that still needs an expansion
+    after the variables :func:`known_variables` pins are substituted: where
+    it writes is unknown, so a guard that denies on a write location must
+    fail closed on it (Plan 00466 N101 round 12, N215).
+    """
 
     paths: list[str]
     unreadable: str | None
+    unresolved: tuple[str, ...] = ()
 
 
 def get_bash_command(hook_input: dict[str, Any]) -> str | None:
@@ -342,14 +351,26 @@ def scan_bash_write_targets(
 
     cwd = hook_input.get(HookInputField.CWD)
     scan = scan_bash_write_destinations(command, include_heredoc_bodies=include_heredoc_bodies)
+    known = known_variables(command)
     found: list[str] = []
+    unresolved: list[str] = []
     for candidate in scan.destinations:
         if authored_only and not candidate.authored:
             continue
-        for resolved in resolve_bash_write_destination(candidate, cwd):
+        destination = substitute_known_variables(candidate.destination, known)
+        if destination is None or needs_expansion(destination):
+            unresolved.append(candidate.destination)
+            continue
+        substituted = candidate._replace(destination=destination)
+        for resolved in resolve_bash_write_destination(substituted, cwd):
             if resolved not in found:
                 found.append(resolved)
-    return BashWriteTargets(found, scan.unreadable)
+    return BashWriteTargets(found, scan.unreadable, tuple(unresolved))
+
+
+def needs_expansion(token: str) -> bool:
+    """Does ``token`` still need an expansion the daemon cannot perform?"""
+    return any(character in token for character in _UNEXPANDABLE_CHARACTERS)
 
 
 def bash_write_destinations(
@@ -397,9 +418,9 @@ def scan_bash_write_destinations(
     A body fed to a SHELL (:data:`SHELL_BODY_RUNNERS`, named directly or by a
     variable the command shows names one) is commands, not data: its writes
     are read like the command's own, and text in it the tokeniser cannot read
-    is ``unreadable`` (Plan 00466 N101 round 10, S3). A body fed to a
-    receiver nothing names (``$PY -``) is data, as on main (round 11,
-    minor E). With
+    is ``unreadable`` (Plan 00466 N101 round 10, S3). So is a body fed to a
+    receiver nothing names (``$PY -`` with no literal ``PY=`` earlier), which
+    is unknown rather than data (round 12, N212). With
     ``include_heredoc_bodies``, so is an unreadable body fed to anything but
     a data sink.
     """
@@ -432,7 +453,7 @@ def _scan_destinations(command: str, include_heredoc_bodies: bool, depth: int) -
     consumers = heredoc_consumers(command, scan.heredocs)
     for heredoc, words in zip(scan.heredocs, consumers, strict=True):
         body = heredoc.body(command)
-        if any(word in SHELL_BODY_RUNNERS for word in words):
+        if body_may_run(words):
             # The shell reads each body line with its newline, and joins its
             # continuations as it reads.
             script = remove_line_continuations(body + "\n")
@@ -894,9 +915,7 @@ def _resolve_write_target(target: str, cwd: Any) -> str | None:
     begins or ends with a quote character -- turning a correct target into a
     wrong one, the exact failure this function exists to avoid.
     """
-    if not target:
-        return None
-    if any(character in target for character in _UNEXPANDABLE_CHARACTERS):
+    if not target or needs_expansion(target):
         return None
     if target.startswith(_DEV_PREFIX):
         return None

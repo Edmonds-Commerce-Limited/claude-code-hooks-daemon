@@ -267,13 +267,18 @@ class TestTheBashSurface:
             "echo hi > /repo/untracked/scratch/out.txt",
             "grep -c pattern /tmp/whatever.log",
             "cat /tmp/whatever.log",
-            'echo hi > "$OUT"',
+            'OUT=/repo/untracked/o.md; echo hi > "$OUT"',
         ],
     )
     def test_these_do_not_match(self, handler: ProjectContainmentHandler, command: str) -> None:
-        """In order: an in-root write, two reads, and a target the daemon
-        cannot resolve without executing the command."""
+        """In order: an in-root write, two reads, and a target a literal
+        assignment earlier in the call pins inside the root."""
         assert handler.matches(_bash(command)) is False
+
+    def test_a_target_nothing_pins_matches(self, handler: ProjectContainmentHandler) -> None:
+        """Plan 00466 N101 round 12, N215: where ``$OUT`` writes is unknown
+        until the command runs, so it is judged fail closed."""
+        assert handler.matches(_bash('echo hi > "$OUT"')) is True
 
 
 class TestDestinationFlagsAndPositionalTargets:
@@ -395,9 +400,14 @@ class TestUnexpandableTokensAreDeclinedNotFabricated:
     def test_an_unexpandable_token_is_declined_not_fabricated(
         self, handler: ProjectContainmentHandler, label: str, command: str
     ) -> None:
-        assert (
-            handler.matches(_bash(command, cwd="/tmp/work")) is False
-        ), f"{label} was fabricated into a path instead of declined"
+        """No path is fabricated, and since round 12 (N215) the token is not
+        allowed either: where it writes is unknown, so it is denied as
+        written, never as a cwd-joined path."""
+        hook_input = _bash(command, cwd="/tmp/work")
+        assert handler.matches(hook_input) is True, label
+        reason = handler.handle(hook_input).reason or ""
+        assert "/tmp/work/" not in reason, f"{label} was fabricated into a path"
+        assert "unknown until the command runs" in reason, label
 
     def test_a_leading_tilde_is_EXPANDED_rather_than_declined(
         self, handler: ProjectContainmentHandler, monkeypatch: pytest.MonkeyPatch
