@@ -133,7 +133,8 @@ Full write-ups are in [NIGGLES.md](NIGGLES.md). One line each here:
 | N100 | A continuation on a heredoc opener line denies a body that is only written                                     | N38 reviews 6-9                                                 | ⬜ Open (after N38)              |
 | N101 | `secret_file_guard` fails closed with `TooManyToEnumerateError` on ordinary `python3 - <<'EOF'` commands       | N38 fix 11                                                      | ⬜ Open                          |
 | N105 | A skill redeploy leaves an untracked, unignored `.claude/hooks-daemon-backups/`                                | Upgrade review 11 (L9)                                          | ⬜ Open                          |
-| N110 | The local full QA gate tests one Python version, so a version-specific defect passes it and fails CI           | N106 fixer                                                      | ⬜ Open                          |
+| N110 | The local full QA gate tests one Python version, so a version-specific defect passes it and fails CI           | N106 fixer                                                      | ✅ Remedied                      |
+| N111 | `setup_worktree.sh` builds a `py311` venv, then `uv sync` swaps its interpreter                                | N110 fixer                                                      | ⬜ Open                          |
 
 ## Tasks
 

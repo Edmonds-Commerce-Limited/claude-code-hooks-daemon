@@ -676,6 +676,36 @@ the gate state which versions it ran and refuse to call itself a merge gate
 when that set is narrower than CI's matrix. Pin it with a test that reads
 the CI workflow's matrix and compares it to what the gate runs.
 
+**✅ Remedied on `worktree-n466-n110`.** `scripts/qa/run_test_matrix.py` is
+now the tests stage for both `llm_qa.py` and `run_all.sh`. It reads CI's
+matrix from `qa.yml` at run time. The checkout's venv still runs
+`run_tests.sh` in full. Every other matrix version gets a uv-provisioned
+venv. Its `tests/unit` run overlaps the primary run, and its other
+directories run afterwards, one version at a time. A version that cannot be
+provisioned fails the stage. `tests/unit/qa/test_run_test_matrix.py` pins
+the gate's version set against the workflow's matrix. The behaviour is
+documented in `CLAUDE/QA.md`, and the report is
+`subagent-reports/260926-n110-opus-5-5.md`.
+
+### N111 — `setup_worktree.sh` builds a `py311` venv, then `uv sync` swaps its interpreter
+
+**Found by the N110 fixer.** `setup_worktree.sh` step 4 builds the
+fingerprint venv with `ensure_venv ... python3` (3.11 here), and its path
+says so (`venv-…-py311-…`). Step 4b then runs `uv sync --frozen --all-extras` into it with no `--python`. uv replaces the interpreter with
+the one it prefers, which is its newest managed Python. Measured here: the
+worktree venvs of `worktree-n466-n101` and `worktree-n466-n105` are both
+named `py311`, but their `pyvenv.cfg` says 3.13.15. Replaying the same steps
+for N110 gave 3.12. So a worktree's gate, and its daemon, run under a
+different Python from main's, and from the one the fingerprint names. The
+Python a worktree tests under depends on what uv happened to have installed.
+N110's matrix stops this from narrowing the tests stage, but the fingerprint
+still does not describe the venv.
+
+**Remedy:** pass `--python "${WT_VENV_PATH}/bin/python"` (or the interpreter
+`ensure_venv` used) to that `uv sync`, with a test that the synced venv's
+`version_info` matches the fingerprint's `pyMM`. Also check `install_deps`
+in `venv-include.bash` for the same missing flag.
+
 ### N105 — A skill redeploy leaves an untracked, unignored `.claude/hooks-daemon-backups/`
 
 **Found by upgrade review 11 (L9), confirmed by upgrade round 16a.**
