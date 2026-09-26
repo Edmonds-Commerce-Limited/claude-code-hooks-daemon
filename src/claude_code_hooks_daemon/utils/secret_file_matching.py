@@ -1879,6 +1879,11 @@ def find_protected_mention_strict(command: str, patterns: tuple[str, ...]) -> st
     return None
 
 
+#: The ``OSError`` numbers that prove a glob expands to nothing, rather than
+#: that its expansion could not be completed (:func:`_expand_glob_token`).
+_PROOF_OF_ABSENCE_ERRNOS: Final[frozenset[int]] = frozenset({errno.ENOENT, errno.ENAMETOOLONG})
+
+
 def _expand_glob_token(
     token: str,
     patterns: tuple[str, ...],
@@ -1989,6 +1994,9 @@ def _expand_glob_token(
         # wrapper (secret_file_guard's N11 net for the Bash-mention route
         # this function backs). `ValueError` (a malformed pattern) is never
         # a proof of absence either way, so it always propagates.
+        # ENAMETOOLONG proves absence too (Plan 00466 N117): no entry can
+        # carry a name past the filesystem's limit, and a shell naming that
+        # path fails the same way, so nothing is read through it.
         try:
             for match in matches_iter:
                 examined += 1
@@ -1998,7 +2006,7 @@ def _expand_glob_token(
                 if max_expansions is not None and examined >= max_expansions:
                     return None
         except OSError as exc:
-            if exc.errno != errno.ENOENT:
+            if exc.errno not in _PROOF_OF_ABSENCE_ERRNOS:
                 raise
             logger.debug(
                 "secret_file_matching: %r under %s does not exist, no match possible: %s",

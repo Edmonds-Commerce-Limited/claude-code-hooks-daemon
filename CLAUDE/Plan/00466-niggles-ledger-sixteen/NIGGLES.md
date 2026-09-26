@@ -688,6 +688,29 @@ interrupt a running handler) and lands with that branch. N40 is taken there too
 taken on the N38 fix branch (the chain's remaining linear per-token cost, which
 waits for the shell-parser consolidation).
 
+### N117 — ✅ Remedied (n101 branch) — A glob under a name too long to exist fails `secret_file_guard` closed with ENAMETOOLONG
+
+**Found by the N101 round-8 fixer**, measuring the 140-program corpus after
+merging main 01827942b. Six programs that round 7 allowed were denied with
+`R-SECRET-EVALUATION-ERROR` (`OSError`). A glob-shaped token sharing two
+characters with a both-edges pattern (`*.secret*`) is expanded on disk by
+`_expand_glob_token`. When the token carries a component longer than the
+filesystem's name limit (a quoted multi-line chunk of a Python heredoc read
+as one word), `os.stat` raises ENAMETOOLONG. Only ENOENT counted as proof of
+absence, so the error propagated and the guard failed closed. Main does the
+same: `ls <300 a's>/*.rest` is denied there, and so was a commit command
+whose heredoc message quoted a brace word.
+
+**Remedied on the n101 branch.** ENAMETOOLONG joins ENOENT as proof that a
+glob expands to nothing: no entry can have that name, and a shell naming the
+path fails the same way. Every other `OSError` still propagates. Tests:
+`test_a_name_too_long_to_exist_allows_n117` (the expander, on a real too-long
+name, no monkeypatch), and through `HandlerChain`
+`test_a_glob_word_with_a_name_too_long_to_exist_is_allowed_n117` and
+`test_a_protected_path_beside_a_name_too_long_to_exist_still_denies_n117`,
+all RED on main 01827942b. The corpus is back to round 7's verdicts: 85
+allowed, 54 `R-SECRET-BASH-MENTION`, 1 `R-SECRET-EVALUATION-ERROR`.
+
 ### N116 — ✅ Remedied (n101 branch) — A here-string's `<<<` is read as a heredoc opener from its second `<`
 
 **Found by the N101 round-7 D-SEC and D-RULE reviews** (shared MAJOR,

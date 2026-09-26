@@ -2778,6 +2778,20 @@ class TestRoundSevenFindingsAreClosed:
         the here-string word as a heredoc delimiter."""
         assert RuleID.SECRET_BASH_MENTION in _deny_reason(command)
 
+    def test_a_glob_word_with_a_name_too_long_to_exist_is_allowed_n117(self) -> None:
+        """N117: a glob sharing text with a both-edges pattern (`*.secret*`)
+        is expanded on disk. Under a directory name longer than the
+        filesystem allows, that raised ENAMETOOLONG and failed the guard
+        closed. The glob is expanded from the daemon's own cwd, which
+        exists."""
+        command = "ls " + "a" * 300 + "/*.rest"
+        decision, reason = _through_chain("Bash", {"command": command})
+        assert decision != Decision.DENY, reason
+
+    def test_a_protected_path_beside_a_name_too_long_to_exist_still_denies_n117(self) -> None:
+        command = "ls " + "a" * 300 + "/*.rest /proj/.vault-{},pass}"
+        assert RuleID.SECRET_BASH_MENTION in _deny_reason(command)
+
     @pytest.mark.parametrize(
         "command",
         [

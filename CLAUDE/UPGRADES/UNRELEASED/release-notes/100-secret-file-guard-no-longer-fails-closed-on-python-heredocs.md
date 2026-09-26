@@ -1,6 +1,6 @@
-# Fix: `secret_file_guard` no longer fails closed on an ordinary `python3 - <<'EOF'` program
+# Callout: `secret_file_guard` no longer fails closed on an ordinary `python3 - <<'EOF'` program
 
-**Plan**: 00466 (N101)
+**Plan**: 00466
 **Audience**: client projects
 
 A Bash command that fed a Python program to `python3` through a
@@ -121,7 +121,12 @@ bash reads them:
   text. The guard read the here-string's word as a heredoc delimiter and
   never looked at it.
 
-The same here-string mistake is fixed in the heredoc exemption shared by
+A glob under a path component longer than the filesystem's name limit no
+longer fails the guard closed with `R-SECRET-EVALUATION-ERROR`. No file can
+have such a name, so the glob expands to nothing, as for a directory that
+does not exist. Any other filesystem error during expansion still denies.
+
+The here-string mistake above is also fixed in the heredoc exemption shared by
 several guards. In `cat <<<'EOF'`, the line after is a command bash runs,
 but the guards read it as a quoted heredoc body and skipped it. So
 `destructive_git`, `pipe_blocker` and the other guards using that exemption

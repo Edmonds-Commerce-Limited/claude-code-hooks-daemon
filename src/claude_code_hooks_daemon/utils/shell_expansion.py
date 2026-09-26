@@ -815,10 +815,11 @@ def _checked_word_end(text: str, start: int, substitutions: list[str] | None) ->
     is left to find. Re-raises when one can."""
     try:
         return _shell_word_end(text, start, substitutions)
-    except UnresolvableBraceQuotingError:
+    except UnresolvableBraceQuotingError as error:
         if _may_hold_a_group(text, start):
             raise
-        return None
+        logger.debug("brace-word scan ends: no group can follow %s", error)
+    return None
 
 
 #: A `{` that could open a brace group: any not opening a `${`.
@@ -1427,13 +1428,19 @@ def python_program_streams(source: str) -> PythonProgramStreams | None:
         literals.extend(_constant_strings(tree))
         literals.extend(_f_string_sources(source, tree))
         literals.extend(_assembled_literals(tree))
-    except (SyntaxError, ValueError, RecursionError, LookupError, tokenize.TokenError):
-        return None
-    return PythonProgramStreams(
-        tuple(dict.fromkeys(literals)),
-        tuple(dict.fromkeys(_code_brace_words(source, found.spans))),
-        tuple(dict.fromkeys(iter_shell_brace_words(source))),
-    )
+    except (SyntaxError, ValueError, RecursionError, LookupError, tokenize.TokenError) as error:
+        logger.warning(
+            "python3 program not readable as Python, so its text is enumerated whole: %s",
+            error,
+        )
+        streams: PythonProgramStreams | None = None
+    else:
+        streams = PythonProgramStreams(
+            tuple(dict.fromkeys(literals)),
+            tuple(dict.fromkeys(_code_brace_words(source, found.spans))),
+            tuple(dict.fromkeys(iter_shell_brace_words(source))),
+        )
+    return streams
 
 
 def _token_type(name: str) -> int | None:
@@ -1582,6 +1589,12 @@ def _opens_a_template(body: str, field_start: int, quote_index: int) -> bool:
     return bool(_TEMPLATE_PREFIX_LETTERS & set(body[index:quote_index]))
 
 
+#: A UTF-8 continuation byte is ``0b10xxxxxx``: a column there splits a
+#: character, so it is not the start of one.
+_UTF8_CONTINUATION_MASK: Final[int] = 0xC0
+_UTF8_CONTINUATION: Final[int] = 0x80
+
+
 def _literal_spans_agree(
     lines: list[str], line_starts: list[int], tree: ast.AST, strings: list[tuple[int, int]]
 ) -> bool:
@@ -1597,10 +1610,10 @@ def _literal_spans_agree(
     def offset(row: int | None, column: int | None) -> int | None:
         if row is None or column is None or not 0 < row <= len(lines):
             return None
-        try:
-            return line_starts[row - 1] + len(encoded[row - 1][:column].decode("utf-8"))
-        except UnicodeDecodeError:
+        raw = encoded[row - 1]
+        if column < len(raw) and raw[column] & _UTF8_CONTINUATION_MASK == _UTF8_CONTINUATION:
             return None
+        return line_starts[row - 1] + len(raw[:column].decode("utf-8"))
 
     nodes: list[tuple[int, int]] = []
     stack: list[ast.AST] = [tree]

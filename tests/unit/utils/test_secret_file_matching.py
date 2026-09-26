@@ -2199,6 +2199,15 @@ class TestExpandGlobTokenErrorHandling:
         )
         assert result is None
 
+    def test_a_name_too_long_to_exist_allows_n117(self, tmp_path: Path) -> None:
+        """Plan 00466 N117: a component longer than the filesystem's name
+        limit raises ENAMETOOLONG. No file can have that name, and a shell
+        naming it fails the same way, so it proves absence as ENOENT does."""
+        result = sfm._expand_glob_token(
+            "a" * 300 + "/*.txt", sfm.DEFAULT_PROTECTED_PATTERNS, None, cwd=str(tmp_path)
+        )
+        assert result is None
+
     def test_permission_denied_directory_in_the_glob_path_denies(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
