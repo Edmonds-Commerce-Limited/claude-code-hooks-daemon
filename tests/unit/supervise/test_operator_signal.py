@@ -20,7 +20,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from claude_code_hooks_daemon.utils import operator_signal
 from tests.unit.supervise._load import load_supervisor_module
@@ -73,18 +73,21 @@ def _decide(
 ) -> SupervisorTickOutcome:
     policy = _mod.CompactPolicy()
     machine = machine or _mod.CompactStateMachine(policy)
-    return _mod.decide_once(
-        machine,
-        sidecar_dir=sidecar_dir,
-        facts=facts or _facts(),
-        dry_run=dry_run,
-        freshness_seconds=policy.freshness_seconds,
+    return cast(
+        "SupervisorTickOutcome",
+        _mod.decide_once(
+            machine,
+            sidecar_dir=sidecar_dir,
+            facts=facts or _facts(),
+            dry_run=dry_run,
+            freshness_seconds=policy.freshness_seconds,
+        ),
     )
 
 
 def _status_payload(tmp_path: Path) -> dict[str, object]:
     path = tmp_path / _mod._LOG_SUBDIRECTORY / _mod._STATUS_MESSAGE_FILENAME
-    return json.loads(path.read_text(encoding="utf-8"))
+    return cast("dict[str, object]", json.loads(path.read_text(encoding="utf-8")))
 
 
 # ── Kind strings pinned to the daemon-side writer ───────────────────────────

@@ -6,6 +6,7 @@ import json
 import os
 import stat
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -161,3 +162,73 @@ class TestRepairSettingsRegistrations:
         settings_path.write_text("[1, 2, 3]", encoding="utf-8")
         result = repair_settings_registrations(settings_path)
         assert result.repaired is False
+
+    def test_concurrent_write_survives_the_repair(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A writer that lands between our read and our replace must not be lost.
+
+        Plan 00468 G7: Claude Code's own plugin CLI (``/plugin``,
+        ``claude plugin install/enable/disable``) is an uncounted, unlocked
+        writer of ``settings.json``. This simulates it landing an
+        ``enabledPlugins`` change right after the repair's first read; the
+        repair must re-read immediately before replacing and fold its own
+        addition onto the concurrent writer's content, never overwrite it.
+        """
+        settings_path = tmp_path / "settings.json"
+        _write(settings_path, {"hooks": {}})
+        original_read_text = Path.read_text
+        read_count = {"n": 0}
+        concurrent_settings = {
+            "hooks": {},
+            "enabledPlugins": {"some-plugin@some-marketplace": True},
+        }
+
+        def _read_text_with_concurrent_write(self: Path, *args: Any, **kwargs: Any) -> str:
+            text: str = original_read_text(self, *args, **kwargs)
+            if self == settings_path:
+                read_count["n"] += 1
+                if read_count["n"] == 1:
+                    # Simulate the plugin CLI writing between our first read
+                    # and the re-read this fix adds right before the replace.
+                    settings_path.write_text(json.dumps(concurrent_settings), encoding="utf-8")
+            return text
+
+        monkeypatch.setattr(Path, "read_text", _read_text_with_concurrent_write)
+
+        result = repair_settings_registrations(settings_path)
+
+        assert result.repaired is True
+        assert read_count["n"] >= 2, "repair must re-read before replacing"
+        on_disk = json.loads(settings_path.read_text())
+        assert on_disk["enabledPlugins"] == {"some-plugin@some-marketplace": True}
+        assert set(on_disk["hooks"].keys()) == set(HOOK_EVENTS_IN_SETTINGS.keys())
+
+    def test_concurrent_corruption_aborts_loudly_without_clobbering(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A concurrent writer that leaves invalid JSON must never be overwritten.
+
+        The repair cannot merge onto content it cannot parse, and clobbering a
+        writer that ran after us would silently discard its change. The only
+        safe response is to abort without writing.
+        """
+        settings_path = tmp_path / "settings.json"
+        _write(settings_path, {"hooks": {}})
+        original_read_text = Path.read_text
+        read_count = {"n": 0}
+
+        def _read_text_with_concurrent_corruption(self: Path, *args: Any, **kwargs: Any) -> str:
+            text: str = original_read_text(self, *args, **kwargs)
+            if self == settings_path:
+                read_count["n"] += 1
+                if read_count["n"] == 1:
+                    settings_path.write_text("{ not json", encoding="utf-8")
+            return text
+
+        monkeypatch.setattr(Path, "read_text", _read_text_with_concurrent_corruption)
+
+        result = repair_settings_registrations(settings_path)
+
+        assert result.repaired is False
+        assert settings_path.read_text() == "{ not json"

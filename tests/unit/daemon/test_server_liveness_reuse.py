@@ -41,7 +41,9 @@ from claude_code_hooks_daemon.daemon.server import (
 class _FakeController:
     """Minimal controller satisfying the Controller protocol."""
 
-    def process_request(self, request_data: dict[str, Any]) -> dict[str, Any]:
+    def process_request(
+        self, request_data: dict[str, Any], *, arrival_time: float | None = None
+    ) -> dict[str, Any]:
         return {"result": {"decision": "allow"}}
 
     def get_health(self) -> dict[str, Any]:

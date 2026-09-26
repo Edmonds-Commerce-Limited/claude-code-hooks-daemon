@@ -31,6 +31,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from claude_code_hooks_daemon.core.project_layout import ProjectLayout
+from claude_code_hooks_daemon.utils.realpath import realpath
 from claude_code_hooks_daemon.utils.vendor_paths import VendorScope
 
 if TYPE_CHECKING:
@@ -88,6 +89,30 @@ class Workspace:
     kind: str
     manifest: Path | None
     bin_dirs: tuple[Path, ...]
+
+
+def _resolve_or_self(file_path: Path) -> Path:
+    """``file_path.resolve()``, or ``file_path`` itself if the OS cannot realpath it.
+
+    Plan 00466 N24 follow-up (guard-defects review 2, m3): a NUL-bearing
+    path -- and, more broadly, anything the platform's own ``realpath``
+    rejects -- raises ``ValueError``/``OSError`` instead of resolving. Both
+    :meth:`ProjectRegistry.for_path` and :meth:`ProjectRegistry.layout_for`
+    are documented "never returns None" / "always a valid answer": the
+    unresolved path is still perfectly usable for the pure string
+    comparisons :meth:`ProjectRegistry._nearest_project` does (no further
+    filesystem access), and since it cannot equal or nest under any real,
+    resolved declared root, resolution falls through to the same
+    root-project/root-layout fallback an ordinary undeclared path gets --
+    never a crash, and never a bypass of anything these two methods decide.
+
+    ``utils.realpath`` gives ``resolve()``'s answer without an ``lstat`` per
+    component of a missing tail (Plan 00466 N40 review 2 nit 4).
+    """
+    try:
+        return Path(realpath(file_path))
+    except (OSError, ValueError):
+        return file_path
 
 
 @dataclass(frozen=True)
@@ -207,7 +232,7 @@ class ProjectRegistry:
             The resolved Workspace. Never None -- the repository root is
             always a valid answer.
         """
-        best = self._nearest_project(file_path.resolve())
+        best = self._nearest_project(_resolve_or_self(file_path))
         if best is not None:
             return best.resolve()
         return DeclaredProject(name="", root=self.project_root).resolve()
@@ -232,7 +257,7 @@ class ProjectRegistry:
             file_path: The file being acted on. May be relative; resolved to
                 an absolute path first.
         """
-        best = self._nearest_project(file_path.resolve())
+        best = self._nearest_project(_resolve_or_self(file_path))
         if best is None:
             return self.root_layout
         return ProjectLayout.for_project(best.layout, self.root_layout)

@@ -217,9 +217,15 @@
   reason: >
     both name the command a segment runs, so a `git commit -m` inside `then`
     keeps its message un-blanked and the message prose is judged as commands.
+    `_segment_binary` (the original function this pair named) was replaced by
+    `_SegmentTracker._resolve` (Plan 00466 N25's amortized-scan performance
+    fix, merged alongside this reserved-word feature at Plan 00466 N40 review
+    2 MA4): the reserved-word strip now happens inside `_resolve`'s own
+    window computation, so that is the function that actually reaches the
+    helper.
   left:
     file: src/claude_code_hooks_daemon/utils/shell_segmentation.py
-    function: _segment_binary
+    function: _resolve
   right:
     file: src/claude_code_hooks_daemon/utils/shell_segmentation.py
     function: _segment_command_word

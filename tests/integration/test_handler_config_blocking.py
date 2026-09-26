@@ -317,10 +317,20 @@ class TestEndToEndBlockingScenarios:
         )
         assert result.terminated_by == "prevent-destructive-git"
 
-    def test_sed_blocker_prevents_inline_edits_e2e(self, tmp_path: Path) -> None:
-        """E2E: Verify sed commands are blocked with proper config."""
+    def test_sed_blocker_prevents_inline_edits_e2e(self, project_context: Path) -> None:
+        """E2E: Verify sed commands are blocked with proper config.
+
+        Needs ProjectContext initialized (via the `project_context` fixture):
+        real daemon startup always initializes it before routing
+        (`daemon/controller.py`), and `project_containment` fails CLOSED
+        (Plan 00466 N11) rather than open when it is not, which would
+        otherwise pre-empt sed_blocker on this command's file argument.
+        ``enforce-project-containment`` is also ``SAFETY``+``BLOCKING``, so
+        N24's fail-closed-on-raise denies the WHOLE chain if it raises, and
+        ``terminated_by`` would name it rather than ``block-sed-command``.
+        """
         # Create config
-        config_file = tmp_path / "config.yaml"
+        config_file = project_context / ".claude" / "hooks-daemon.yaml"
         config_data = {
             "version": "1.0",
             "handlers": {"pre_tool_use": {"sed_blocker": {"enabled": True, "priority": 15}}},
@@ -352,13 +362,19 @@ class TestEndToEndBlockingScenarios:
         assert "sed" in result.result.reason.lower()
         assert result.terminated_by == "block-sed-command"
 
-    def test_disabled_handler_does_not_block_e2e(self, tmp_path: Path) -> None:
+    def test_disabled_handler_does_not_block_e2e(self, project_context: Path) -> None:
         """CRITICAL E2E: Verify disabled handler doesn't interfere.
 
         This simulates the markdown_organization bug scenario.
+
+        Needs ProjectContext initialized (via the `project_context` fixture):
+        real daemon startup always initializes it before routing
+        (`daemon/controller.py`), and `project_containment` fails CLOSED
+        (Plan 00466 N11) rather than open when it is not, which would
+        otherwise pre-empt this command before it reaches destructive_git.
         """
         # Create config with handler disabled
-        config_file = tmp_path / "config.yaml"
+        config_file = project_context / ".claude" / "hooks-daemon.yaml"
         config_data = {
             "version": "1.0",
             "handlers": {"pre_tool_use": {"destructive_git": {"enabled": False}}},  # DISABLED

@@ -1,13 +1,22 @@
 """Tests for DaemonController."""
 
+import threading
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 from unittest.mock import Mock, patch
 
 import pytest
+from tests.dispatch_timeouts import DispatchTestTimeout
 
 from claude_code_hooks_daemon.config.models import ChainConfig, VerdictLogConfig
+from claude_code_hooks_daemon.constants.timeout import Timeout
+from claude_code_hooks_daemon.core.bounded_dispatch import (
+    DispatchTimeout,
+    get_default_dispatcher,
+    reset_default_dispatcher_for_tests,
+)
 from claude_code_hooks_daemon.core.chain import ChainExecutionResult
 from claude_code_hooks_daemon.core.data_layer import reset_data_layer
 from claude_code_hooks_daemon.core.event import EventType, HookEvent
@@ -502,21 +511,30 @@ class TestDaemonController:
 
         assert controller.is_initialised is True
 
-    def test_process_event_handles_handler_exception(
-        self, controller: DaemonController, workspace_root: Path
-    ) -> None:
-        """Process event handles exceptions from handler chain in strict mode."""
+    def test_process_event_handles_handler_exception(self, workspace_root: Path) -> None:
+        """Process event handles exceptions from handler chain in strict mode.
+
+        Regression test for Plan 00466 N24: this used to build the
+        controller as ``DaemonController(config=DaemonConfig(strict_mode=True))``,
+        a construction the real daemon never performs — its constructor
+        `config` parameter is never populated on the real startup path (see
+        the comment in ``DaemonController.__init__``). That let this test
+        pass while ``strict_mode`` stayed inert in every real install. It now
+        goes through ``get_controller()`` (the real daemon's own accessor)
+        plus ``initialise(strict_mode=True)`` — the narrow config-slice DI
+        idiom ``_build_initialised_controller`` (``daemon/cli.py``) actually
+        uses, mirroring ``chain``/``verdict_log``.
+        """
         from typing import Any
 
-        from claude_code_hooks_daemon.config.models import DaemonConfig
         from claude_code_hooks_daemon.constants import HandlerID, Priority
         from claude_code_hooks_daemon.core import Handler, HookResult
+        from claude_code_hooks_daemon.core.event import HookInput
 
-        # Create controller with strict_mode=True
-        config = DaemonConfig(strict_mode=True)
-        controller = DaemonController(config=config)
-
-        # Create a handler that raises an exception
+        # Create a handler that raises an exception. Not tagged
+        # SAFETY+BLOCKING, so a deny here is evidence of strict_mode
+        # specifically (Plan 00466 N24 Part 2 is exercised separately in
+        # tests/unit/core/test_chain.py).
         class ExplodingHandler(Handler):
             def __init__(self) -> None:
                 super().__init__(
@@ -537,44 +555,110 @@ class TestDaemonController:
             def get_acceptance_tests(self) -> list:
                 return []
 
-        # Initialize controller
-        with patch("subprocess.run") as mock_run:
-            mock_run.side_effect = [
-                Mock(returncode=0, stdout=str(workspace_root) + "\n"),
-                Mock(returncode=0, stdout="git@github.com:test/repo.git\n"),
-                Mock(returncode=0, stdout=str(workspace_root) + "\n"),
-            ]
-            controller.initialise(workspace_root=workspace_root)
+        reset_controller()
+        try:
+            controller = get_controller()
 
-        # Register the exploding handler
-        controller._router.register(EventType.PRE_TOOL_USE, ExplodingHandler())
+            with patch("subprocess.run") as mock_run:
+                mock_run.side_effect = [
+                    Mock(returncode=0, stdout=str(workspace_root) + "\n"),
+                    Mock(returncode=0, stdout="git@github.com:test/repo.git\n"),
+                    Mock(returncode=0, stdout=str(workspace_root) + "\n"),
+                ]
+                controller.initialise(workspace_root=workspace_root, strict_mode=True)
 
+            controller._router.register(EventType.PRE_TOOL_USE, ExplodingHandler())
+
+            event = HookEvent(
+                event_type=EventType.PRE_TOOL_USE,
+                hook_input=HookInput(
+                    tool_name="Bash",
+                    tool_input={"command": "ls"},
+                    transcript_path="/tmp/transcript.jsonl",
+                ),
+            )
+
+            # Process event - handler will raise exception
+            result = controller.process_event(event)
+
+            # FAIL FAST: Handler crash should BLOCK operation (fail-closed)
+            # When protection system is down, default to blocking for safety
+            assert result.result.decision.value == "deny"
+            assert result.result.reason is not None
+            assert "SYSTEM ERROR" in result.result.reason
+            assert "crashed" in result.result.reason
+            # Check that RuntimeError appears somewhere in context
+            assert any("RuntimeError" in ctx for ctx in result.result.context)
+
+            # Stats should record error from the handler
+            stats = controller.get_stats()
+            assert stats.errors == 1
+        finally:
+            reset_controller()
+
+    def test_process_event_strict_mode_false_via_initialise_fails_open(
+        self, workspace_root: Path
+    ) -> None:
+        """The negative control: initialise(strict_mode=False) still fails open.
+
+        Pins that the narrow-slice wiring (Plan 00466 N24) actually reaches
+        ``process_event`` in both directions, not only the True case above.
+        """
+        from typing import Any
+
+        from claude_code_hooks_daemon.constants import HandlerID, Priority
+        from claude_code_hooks_daemon.core import Handler, HookResult
         from claude_code_hooks_daemon.core.event import HookInput
 
-        event = HookEvent(
-            event_type=EventType.PRE_TOOL_USE,
-            hook_input=HookInput(
-                tool_name="Bash",
-                tool_input={"command": "ls"},
-                transcript_path="/tmp/transcript.jsonl",
-            ),
-        )
+        class ExplodingHandler(Handler):
+            def __init__(self) -> None:
+                super().__init__(
+                    handler_id=HandlerID.DESTRUCTIVE_GIT,
+                    priority=Priority.DESTRUCTIVE_GIT,
+                    terminal=False,
+                )
 
-        # Process event - handler will raise exception
-        result = controller.process_event(event)
+            def matches(self, hook_input: dict[str, Any]) -> bool:
+                return True
 
-        # FAIL FAST: Handler crash should BLOCK operation (fail-closed)
-        # When protection system is down, default to blocking for safety
-        assert result.result.decision.value == "deny"
-        assert result.result.reason is not None
-        assert "SYSTEM ERROR" in result.result.reason
-        assert "crashed" in result.result.reason
-        # Check that RuntimeError appears somewhere in context
-        assert any("RuntimeError" in ctx for ctx in result.result.context)
+            def handle(self, hook_input: dict[str, Any]) -> HookResult:
+                raise RuntimeError("Handler exploded")
 
-        # Stats should record error from the handler
-        stats = controller.get_stats()
-        assert stats.errors == 1
+            def get_claude_md(self) -> str | None:
+                return None
+
+            def get_acceptance_tests(self) -> list:
+                return []
+
+        reset_controller()
+        try:
+            controller = get_controller()
+
+            with patch("subprocess.run") as mock_run:
+                mock_run.side_effect = [
+                    Mock(returncode=0, stdout=str(workspace_root) + "\n"),
+                    Mock(returncode=0, stdout="git@github.com:test/repo.git\n"),
+                    Mock(returncode=0, stdout=str(workspace_root) + "\n"),
+                ]
+                controller.initialise(workspace_root=workspace_root, strict_mode=False)
+
+            controller._router.register(EventType.PRE_TOOL_USE, ExplodingHandler())
+
+            event = HookEvent(
+                event_type=EventType.PRE_TOOL_USE,
+                hook_input=HookInput(
+                    tool_name="Bash",
+                    tool_input={"command": "ls"},
+                    transcript_path="/tmp/transcript.jsonl",
+                ),
+            )
+
+            result = controller.process_event(event)
+
+            assert result.result.decision.value == "allow"
+            assert any("Handler exception:" in ctx for ctx in result.result.context)
+        finally:
+            reset_controller()
 
 
 class TestControllerPluginLoadingEdgeCases:
@@ -768,7 +852,10 @@ class TestControllerProcessEventErrors:
     def test_process_event_router_exception_returns_error_result(
         self, workspace_root: Path
     ) -> None:
-        """process_event returns error result when router.route raises unexpected Exception."""
+        """process_event returns a DENY error result for PreToolUse when
+        router.route raises an unexpected Exception (Plan 00466 n24 security
+        review, B1: the catch-all was fail-open -- an ALLOW -- which read
+        "no verdict" as "allowed"; PreToolUse now fails CLOSED instead)."""
         from claude_code_hooks_daemon.core.event import HookInput
         from claude_code_hooks_daemon.core.hook_result import Decision
         from claude_code_hooks_daemon.core.router import EventRouter
@@ -788,8 +875,7 @@ class TestControllerProcessEventErrors:
         with patch.object(EventRouter, "route", side_effect=RuntimeError("Router exploded")):
             result = controller.process_event(event)
 
-        # Should return error result (fail-open)
-        assert result.result.decision == Decision.ALLOW
+        assert result.result.decision == Decision.DENY
         context_text = " ".join(result.result.context)
         assert "error" in context_text.lower() or "ERROR" in context_text
         assert controller.get_stats().errors == 1
@@ -915,6 +1001,66 @@ class TestControllerChainConfig:
         denied_by = [d.handler for d in result.decisions if d.decision.value == "deny"]
         assert len(denied_by) >= 2, denied_by
 
+    def test_deadline_seconds_reaches_the_router(self, workspace_root: Path) -> None:
+        """daemon.chain.deadline_seconds reaches EventRouter.route (Plan 00466 N25)."""
+        from claude_code_hooks_daemon.core.hook_result import HookResult
+        from claude_code_hooks_daemon.core.router import EventRouter
+
+        controller = self._initialised_controller(
+            workspace_root, chain=ChainConfig(deadline_seconds=12.5)
+        )
+
+        captured: dict[str, Any] = {}
+
+        def fake_route(
+            self: EventRouter,
+            event_type: EventType,
+            hook_input: dict[str, Any],
+            strict_mode: bool = False,
+            *,
+            collect_all: bool = False,
+            deadline_seconds: float | None = None,
+            max_safety_input_bytes: int | None = None,
+            arrival_time: float | None = None,
+        ) -> ChainExecutionResult:
+            captured["deadline_seconds"] = deadline_seconds
+            return ChainExecutionResult(result=HookResult.allow())
+
+        with patch.object(EventRouter, "route", new=fake_route):
+            controller.process_event(self._bash_event("echo hi"))
+
+        assert captured["deadline_seconds"] == 12.5
+
+    def test_max_safety_input_bytes_reaches_the_router(self, workspace_root: Path) -> None:
+        """daemon.chain.max_safety_input_bytes reaches EventRouter.route (Plan 00466 N34)."""
+        from claude_code_hooks_daemon.core.hook_result import HookResult
+        from claude_code_hooks_daemon.core.router import EventRouter
+
+        controller = self._initialised_controller(
+            workspace_root, chain=ChainConfig(max_safety_input_bytes=999)
+        )
+
+        captured: dict[str, Any] = {}
+
+        def fake_route(
+            self: EventRouter,
+            event_type: EventType,
+            hook_input: dict[str, Any],
+            strict_mode: bool = False,
+            *,
+            collect_all: bool = False,
+            deadline_seconds: float | None = None,
+            max_safety_input_bytes: int | None = None,
+            arrival_time: float | None = None,
+        ) -> ChainExecutionResult:
+            captured["max_safety_input_bytes"] = max_safety_input_bytes
+            return ChainExecutionResult(result=HookResult.allow())
+
+        with patch.object(EventRouter, "route", new=fake_route):
+            controller.process_event(self._bash_event("echo hi"))
+
+        assert captured["max_safety_input_bytes"] == 999
+
     def test_history_records_each_handlers_own_verdict(self, workspace_root: Path) -> None:
         """A handler that ALLOWED must not be recorded as having denied just
         because another handler denied the same call — that is what burnt
@@ -943,6 +1089,299 @@ class TestControllerChainConfig:
         session = "chain-config-session"
         assert history.count_blocks_by_handler("the-blocker", session_id=session) == 1
         assert history.count_blocks_by_handler("the-advisor", session_id=session) == 0
+
+
+class TestControllerHealthStragglers:
+    """Plan 00466 N40 M2: get_health() surfaces the shared dispatcher's
+    straggler state, so a stuck-handler pileup is visible in `status`
+    (and `bin/hooks-daemon status`) BEFORE it denies every PreToolUse call
+    outright, per ``daemon.chain.straggler_unhealthy_count``.
+    """
+
+    def teardown_method(self) -> None:
+        ProjectContext.reset()
+        reset_default_dispatcher_for_tests()
+
+    @pytest.fixture
+    def workspace_root(self, tmp_path: Path) -> Path:
+        workspace = tmp_path / "test-workspace"
+        claude_dir = workspace / ".claude"
+        claude_dir.mkdir(parents=True)
+        (claude_dir / "hooks-daemon.yaml").write_text(
+            "version: '1.0'\n"
+            "daemon:\n"
+            "  idle_timeout_seconds: 600\n"
+            "  log_level: INFO\n"
+            "handlers:\n"
+            "  pre_tool_use: {}\n"
+        )
+        return workspace
+
+    def _initialised_controller(
+        self, workspace_root: Path, chain: ChainConfig | None = None
+    ) -> DaemonController:
+        controller = DaemonController()
+        with patch("subprocess.run") as mock_run:
+            mock_run.side_effect = [
+                Mock(returncode=0, stdout="/tmp/test\n"),
+                Mock(returncode=0, stdout="git@github.com:test/repo.git\n"),
+                Mock(returncode=0, stdout="/tmp/test\n"),
+            ]
+            controller.initialise(
+                workspace_root=workspace_root,
+                verdict_log=VerdictLogConfig(enabled=False),
+                chain=chain,
+            )
+        return controller
+
+    @staticmethod
+    def _make_stragglers(count: int) -> threading.Event:
+        """Dispatch ``count`` calls that time out immediately and are still
+        running when this returns. Caller must ``.set()`` the returned event
+        to let them finish (and MUST, or they leak into later tests)."""
+        release = threading.Event()
+        dispatcher = get_default_dispatcher()
+        for i in range(count):
+            outcome = dispatcher.run(
+                lambda: release.wait(timeout=DispatchTestTimeout.GENEROUS),
+                timeout=DispatchTestTimeout.INSTANT,
+                label=f"stuck-{i}",
+            )
+            assert isinstance(outcome, DispatchTimeout)
+        time.sleep(0.03)  # let each straggler actually register itself
+        return release
+
+    def test_no_stragglers_reports_healthy_with_zero_counts(self) -> None:
+        controller = DaemonController()
+
+        health = controller.get_health()
+
+        assert health["status"] == "healthy"
+        assert health["stragglers"] == {
+            "count": 0,
+            "oldest_age_seconds": 0.0,
+            "restart_after_seconds": Timeout.STRAGGLER_RESTART_AFTER_SECONDS,
+            "at_capacity": False,
+        }
+
+    def test_stragglers_below_the_default_threshold_stay_healthy(self) -> None:
+        controller = DaemonController()
+        release = self._make_stragglers(1)  # default threshold is 4
+
+        try:
+            health = controller.get_health()
+        finally:
+            release.set()
+
+        assert health["status"] == "healthy"
+        assert health["stragglers"]["count"] == 1
+        assert health["stragglers"]["oldest_age_seconds"] > 0.0
+
+    def test_reaching_the_configured_threshold_reports_degraded(self, workspace_root: Path) -> None:
+        controller = self._initialised_controller(
+            workspace_root, chain=ChainConfig(straggler_unhealthy_count=2)
+        )
+        release = self._make_stragglers(2)
+
+        try:
+            health = controller.get_health()
+        finally:
+            release.set()
+
+        assert health["status"] == "degraded"
+        assert health["stragglers"]["count"] == 2
+        assert "stragglers" in health.get("degraded_reasons", [])
+
+    def test_none_threshold_disables_straggler_driven_degraded_status(
+        self, workspace_root: Path
+    ) -> None:
+        controller = self._initialised_controller(
+            workspace_root, chain=ChainConfig(straggler_unhealthy_count=None)
+        )
+        release = self._make_stragglers(10)
+
+        try:
+            health = controller.get_health()
+        finally:
+            release.set()
+
+        assert health["status"] == "healthy"
+        assert health["stragglers"]["count"] == 10
+
+
+class TestControllerHealthChainDeadlineProblems:
+    """Plan 00466 N40 review 2 mA4: a chain deadline that cannot beat the
+    client's timeout is reported in health, not rejected at load -- the
+    daemon still starts, with every guard on, and says what to fix."""
+
+    _PROBLEM = "daemon.chain.deadline_seconds (20s) is not below transport.timeout_seconds"
+
+    def teardown_method(self) -> None:
+        ProjectContext.reset()
+
+    @pytest.fixture
+    def workspace_root(self, tmp_path: Path) -> Path:
+        claude_dir = tmp_path / "test-workspace" / ".claude"
+        claude_dir.mkdir(parents=True)
+        (claude_dir / "hooks-daemon.yaml").write_text(
+            "version: '1.0'\n"
+            "daemon:\n"
+            "  idle_timeout_seconds: 600\n"
+            "  log_level: INFO\n"
+            "handlers:\n"
+            "  pre_tool_use: {}\n"
+        )
+        return claude_dir.parent
+
+    def _initialised(self, workspace_root: Path, problems: list[str] | None) -> DaemonController:
+        controller = DaemonController()
+        with patch("subprocess.run") as mock_run:
+            mock_run.side_effect = [
+                Mock(returncode=0, stdout="/tmp/test\n"),
+                Mock(returncode=0, stdout="git@github.com:test/repo.git\n"),
+                Mock(returncode=0, stdout="/tmp/test\n"),
+            ]
+            controller.initialise(
+                workspace_root=workspace_root,
+                verdict_log=VerdictLogConfig(enabled=False),
+                chain_deadline_problems=problems,
+            )
+        return controller
+
+    def test_a_reported_problem_degrades_health_and_is_named(self, workspace_root: Path) -> None:
+        health = self._initialised(workspace_root, [self._PROBLEM]).get_health()
+
+        assert health["status"] == "degraded"
+        assert "chain_deadline" in health["degraded_reasons"]
+        assert health["chain_deadline_problems"] == [self._PROBLEM]
+
+    def test_no_problem_leaves_health_untouched(self, workspace_root: Path) -> None:
+        health = self._initialised(workspace_root, None).get_health()
+
+        assert health["status"] == "healthy"
+        assert "chain_deadline_problems" not in health
+
+
+class TestProcessEventFailsClosedForPreToolUse:
+    """Plan 00466 n24 security review, B1: an unexpected exception ANYWHERE
+    in ``process_event`` (not only inside the handler chain, which already
+    fails closed on its own -- Plan 00466 N24/N34) must not reach the
+    controller's original catch-all, which was fail-OPEN
+    (``HookResult.error()``, documented "Returns allow decision"). For
+    PreToolUse this is now ``HookResult.error_deny()`` instead; every other
+    event type is unaffected (a review-scoped fix, not a blanket change).
+    """
+
+    def teardown_method(self) -> None:
+        ProjectContext.reset()
+        reset_data_layer()
+
+    @pytest.fixture
+    def workspace_root(self, tmp_path: Path) -> Path:
+        workspace = tmp_path / "test-workspace"
+        claude_dir = workspace / ".claude"
+        claude_dir.mkdir(parents=True)
+        (claude_dir / "hooks-daemon.yaml").write_text(
+            "version: '1.0'\n"
+            "daemon:\n"
+            "  idle_timeout_seconds: 600\n"
+            "  log_level: INFO\n"
+            "handlers:\n"
+            "  pre_tool_use: {}\n"
+        )
+        return workspace
+
+    def _initialised_controller(self, workspace_root: Path) -> DaemonController:
+        controller = DaemonController()
+        with patch("subprocess.run") as mock_run:
+            mock_run.side_effect = [
+                Mock(returncode=0, stdout="/tmp/test\n"),
+                Mock(returncode=0, stdout="git@github.com:test/repo.git\n"),
+                Mock(returncode=0, stdout="/tmp/test\n"),
+            ]
+            controller.initialise(
+                workspace_root=workspace_root,
+                verdict_log=VerdictLogConfig(enabled=False),
+            )
+        return controller
+
+    @staticmethod
+    def _bash_event(command: str = "echo hi") -> HookEvent:
+        from claude_code_hooks_daemon.core.event import HookInput
+
+        return HookEvent(
+            event_type=EventType.PRE_TOOL_USE,
+            hook_input=HookInput(
+                tool_name="Bash",
+                tool_input={"command": command},
+                session_id="fail-closed-session",
+            ),
+        )
+
+    @staticmethod
+    def _session_start_event() -> HookEvent:
+        from claude_code_hooks_daemon.core.event import HookInput
+
+        return HookEvent(
+            event_type=EventType.SESSION_START,
+            hook_input=HookInput(
+                session_id="fail-closed-session",
+            ),
+        )
+
+    def test_an_exception_anywhere_in_process_event_denies_pretooluse(
+        self, workspace_root: Path
+    ) -> None:
+        from claude_code_hooks_daemon.core.router import EventRouter
+
+        controller = self._initialised_controller(workspace_root)
+
+        with patch.object(EventRouter, "route", side_effect=RuntimeError("boom")):
+            result = controller.process_event(self._bash_event())
+
+        assert result.result.decision.value == "deny"
+        assert result.result.reason is not None
+        assert "boom" in result.result.reason or "RuntimeError" in result.result.reason
+        full_text = result.result.reason + "\n" + "\n".join(result.result.context)
+        assert "hooks-daemon" in full_text.lower()
+
+    def test_a_non_pretooluse_event_type_still_fails_open(self, workspace_root: Path) -> None:
+        """Scope check: this fix is PreToolUse-specific, per the review's own
+        direction -- a blanket fail-closed on every event type was not asked
+        for and is not applied.
+        """
+        from claude_code_hooks_daemon.core.router import EventRouter
+
+        controller = self._initialised_controller(workspace_root)
+
+        with patch.object(EventRouter, "route", side_effect=RuntimeError("boom")):
+            result = controller.process_event(self._session_start_event())
+
+        assert result.result.decision.value == "allow"
+
+    def test_an_invalid_request_shaped_as_pretooluse_denies(self, workspace_root: Path) -> None:
+        """The EARLIER catch-all in ``process_request`` (a request that
+        fails ``HookEvent.model_validate`` entirely) is also PreToolUse-
+        scoped, best-effort from the raw request dict's own "event" field.
+        """
+        controller = self._initialised_controller(workspace_root)
+
+        response = controller.process_request({"event": "PreToolUse", "hook_input": "not-a-dict"})
+
+        # This early-exit path (request failed HookEvent.model_validate, so
+        # there is no validated event to call to_json() with) uses
+        # to_response_dict()'s PRD 3.2.2 shape, not to_json()'s
+        # hookSpecificOutput wrapper -- pre-existing, unrelated to this fix.
+        assert response["result"]["decision"] == "deny"
+
+    def test_an_invalid_request_shaped_as_something_else_still_fails_open(
+        self, workspace_root: Path
+    ) -> None:
+        controller = self._initialised_controller(workspace_root)
+
+        response = controller.process_request({"event": "SessionStart", "hook_input": "not-a-dict"})
+
+        assert response["result"]["decision"] != "deny"
 
 
 class TestGlobalController:

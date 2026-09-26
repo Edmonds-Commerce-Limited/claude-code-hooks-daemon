@@ -14,15 +14,20 @@ Two boundaries are load-bearing and are asserted here rather than assumed:
   durable.
 """
 
+import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
 
 import pytest
 
+from claude_code_hooks_daemon.constants import Timeout
 from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.core import Decision
+from claude_code_hooks_daemon.core.chain import HandlerChain
 from claude_code_hooks_daemon.core.data_layer import reset_data_layer
+from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.handlers.pre_tool_use.project_containment import (
     ProjectContainmentHandler,
 )
@@ -32,10 +37,33 @@ _ROOT = Path("/repo")
 
 @pytest.fixture(autouse=True)
 def _project_root() -> Any:
-    """Pin the repository root so the boundary under test is deterministic."""
+    """Pin the repository root so the boundary under test is deterministic.
+
+    A test that needs `ProjectContext.project_root` to behave differently
+    (raise, return something else) MUST reconfigure THIS fixture's own
+    `mock` (e.g. ``mock.side_effect = ...``) rather than layering a second,
+    independent patcher on the same target with `monkeypatch.setattr`
+    (Plan 00466 N39): `monkeypatch`'s finalizer runs AFTER this `with
+    patch(...)` block has already exited and restored the real classmethod,
+    so a second patcher's teardown overwrites it AGAIN -- with whatever it
+    captured as "current" at `setattr()` time, which is THIS fixture's own
+    `MagicMock`. That leaves `ProjectContext.project_root` permanently
+    pointing at a stale mock for the rest of the pytest PROCESS, silently
+    corrupting every later test in the same run that calls it.
+    """
     with patch("claude_code_hooks_daemon.core.project_context.ProjectContext.project_root") as mock:
         mock.return_value = _ROOT
         yield mock
+    # Tripwire (Plan 00466 N39): if some test in this file DID leave a
+    # second patcher's teardown behind, `project_root` is no longer the
+    # plain classmethod this `with patch(...)` block just restored -- catch
+    # it here, at the FIXTURE boundary, rather than as a mystifying failure
+    # in some unrelated, later-running test file.
+    assert isinstance(ProjectContext.__dict__["project_root"], classmethod), (
+        "ProjectContext.project_root leaked past this fixture's teardown "
+        "(Plan 00466 N39) -- a test double-patched it instead of "
+        "reconfiguring this fixture's own mock"
+    )
 
 
 @pytest.fixture(autouse=True)
@@ -76,7 +104,10 @@ class TestHandlerIdentity:
         assert handler.terminal is True
 
     def test_it_exposes_its_rule(self, handler: ProjectContainmentHandler) -> None:
-        assert [rule.rule_id for rule in handler.get_rules()] == [RuleID.WRITE_OUTSIDE_PROJECT_ROOT]
+        assert [rule.rule_id for rule in handler.get_rules()] == [
+            RuleID.WRITE_OUTSIDE_PROJECT_ROOT,
+            RuleID.PROJECT_CONTAINMENT_EVALUATION_ERROR,
+        ]
 
 
 class TestTheWriteEditSurface:
@@ -132,6 +163,87 @@ class TestTheWriteEditSurface:
         }
 
         assert handler.matches(hook_input) is True
+
+
+class TestAnInProjectLinkOutOfTheRoot:
+    """Plan 00466 N24 review 3 B1: a link inside the root that points outside it.
+
+    Spelled with a run of ``/.`` past PATH_MAX, the path resolved to itself
+    rather than through the link, so the Write was allowed.
+    """
+
+    @pytest.fixture()
+    def linked_root(self, tmp_path: Path, _project_root: Any) -> Path:
+        root = tmp_path / "proj"
+        root.mkdir()
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        (root / "l_out").symlink_to(outside)
+        _project_root.return_value = root
+        return root
+
+    @pytest.mark.parametrize("filler", ["", "/." * 2_100, "/" * 4_200])
+    def test_a_write_through_the_link_matches(
+        self, handler: ProjectContainmentHandler, linked_root: Path, filler: str
+    ) -> None:
+        assert handler.matches(_write(f"{linked_root}{filler}/l_out/escape.txt")) is True
+
+    def test_a_write_beside_the_link_does_not_match(
+        self, handler: ProjectContainmentHandler, linked_root: Path
+    ) -> None:
+        assert handler.matches(_write(f"{linked_root}{'/.' * 2_100}/inside.txt")) is False
+
+
+class TestASymlinkLoopFollowedByDotDotOutOfTheRoot:
+    """Plan 00466 N24 review 4 R4-B1: a symlink LOOP, then ``..``, then a link out.
+
+    ``utils.realpath`` used to reimplement ``os.path.realpath``'s walk by
+    hand. Its symlink-loop handling matched CPython 3.11 but diverged from
+    3.13's rewrite of the same algorithm: after hitting the loop, 3.11's own
+    ``os.path.realpath`` gives up and appends the rest of the path
+    unresolved (so ``..`` cancels lexically and the write never reaches
+    ``l_out`` at all), while 3.13 backs out of the loop and keeps resolving,
+    reaching ``l_out`` and following it outside the root. A version-dependent
+    containment answer is not acceptable for a security check -- review 4
+    proved a REAL Write escapes through this shape -- so the handler must
+    DENY on every Python version, not merely agree with whichever answer
+    ``os.path.realpath`` happens to give. ``_is_within`` achieves this by
+    asking ``has_symlink_loop`` directly rather than inferring the loop from
+    ``realpath()``'s resolved string.
+    """
+
+    @pytest.fixture()
+    def looped_root(self, tmp_path: Path, _project_root: Any) -> Path:
+        root = tmp_path / "proj"
+        root.mkdir()
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        (root / "l_loop").symlink_to(root / "l_loop")  # self-referential loop
+        (root / "l_out").symlink_to(outside)
+        _project_root.return_value = root
+        return root
+
+    def test_it_denies_end_to_end(
+        self, handler: ProjectContainmentHandler, looped_root: Path
+    ) -> None:
+        """Hardcoded DENY -- must hold on every Python version this daemon
+        supports, not just whichever one ``os.path.realpath`` currently
+        resolves this shape outside the root on."""
+        target = f"{looped_root}/l_loop/../l_out/escape.txt"
+
+        assert handler.matches(_write(target)) is True
+        assert handler.handle(_write(target)).decision == Decision.DENY
+
+    def test_a_loop_that_never_leaves_the_root_still_denies(
+        self, handler: ProjectContainmentHandler, looped_root: Path
+    ) -> None:
+        """Even when the eventual target stays inside the root, a loop on the
+        path is denied outright -- the point is that its resolution cannot be
+        trusted, not that this particular target happens to be safe."""
+        target = f"{looped_root}/l_loop/../l_loop/inside.txt"
+
+        assert handler.matches(_write(target)) is True
+        assert handler.handle(_write(target)).decision == Decision.DENY
 
 
 class TestTheBashSurface:
@@ -439,6 +551,224 @@ class TestTheDenial:
     def test_a_non_matching_input_is_allowed(self, handler: ProjectContainmentHandler) -> None:
         """Defensive: handle() must not deny what matches() would not select."""
         assert handler.handle(_write("/repo/README.md")).decision == Decision.ALLOW
+
+
+class TestFailsClosedOnEvaluationError:
+    """Plan 00466 N11 (major M4): audited alongside secret_file_guard.
+
+    `_resolved_root()` calls `ProjectContext.project_root()` directly with no
+    try/except -- an uninitialised `ProjectContext` raises `RuntimeError`
+    there, uncaught, which `core/chain.py`'s per-handler catch treats as "did
+    not match" under the daemon's default (non-strict) `strict_mode`,
+    fail-opening this SAFETY+BLOCKING guard for that call. Fixed the same way
+    as `secret_file_guard`: `matches()`/`handle()` never propagate.
+    """
+
+    def test_an_uninitialised_project_root_still_denies(
+        self, handler: ProjectContainmentHandler, _project_root: Any
+    ) -> None:
+        """Reconfigures the class-wide `_project_root` fixture's OWN mock
+        rather than layering a second `monkeypatch.setattr` patcher on the
+        same target (Plan 00466 N39) -- see that fixture's docstring."""
+
+        def _raise() -> Path:
+            raise RuntimeError("ProjectContext not initialized")
+
+        _project_root.side_effect = _raise
+        hook_input = _write("/tmp/notes.md")
+
+        assert handler.matches(hook_input) is True
+        result = handler.handle(hook_input)
+        assert result.decision == Decision.DENY
+        assert result.reason is not None
+        assert "RuntimeError" in result.reason
+
+    def test_an_evaluation_error_denial_uses_its_own_rule_id(
+        self, handler: ProjectContainmentHandler, _project_root: Any
+    ) -> None:
+        """Same fixture-reconfiguration fix as the test above (N39)."""
+
+        def _raise() -> Path:
+            raise RuntimeError("synthetic")
+
+        _project_root.side_effect = _raise
+        result = handler.handle(_write("/tmp/notes.md"))
+
+        assert result.reason is not None
+        assert result.reason.startswith(f"BLOCKED [{RuleID.PROJECT_CONTAINMENT_EVALUATION_ERROR}]")
+
+    def test_get_rules_includes_the_evaluation_error_rule(
+        self, handler: ProjectContainmentHandler
+    ) -> None:
+        rule_ids = {rule.rule_id for rule in handler.get_rules()}
+        assert RuleID.PROJECT_CONTAINMENT_EVALUATION_ERROR in rule_ids
+
+
+class TestDispatchKeyMalformedToolInput:
+    """M-2 (Plan 00466 review 3): a companion pin to
+    secret_file_guard's own -- `_dispatch_key` here already tolerates a
+    malformed `tool_input` (`json.dumps(..., default=str)` handles `None`/a
+    list/a string), so these are expected to pass even before the review 3
+    wrap; they pin that fact rather than reproduce a live bug, and guard
+    against the SAME `_dispatch_key`-outside-the-wrapper shape being
+    reintroduced here later.
+    """
+
+    @pytest.mark.parametrize("bad_tool_input", [None, [], "not-a-dict"])
+    def test_matches_does_not_raise(
+        self, handler: ProjectContainmentHandler, bad_tool_input: object
+    ) -> None:
+        hook_input = {"tool_name": "Write", "tool_input": bad_tool_input}
+
+        # Never raises -- whatever the verdict, it must be reached safely.
+        handler.matches(hook_input)
+
+    @pytest.mark.parametrize("bad_tool_input", [None, [], "not-a-dict"])
+    def test_handle_alone_never_raises(
+        self, handler: ProjectContainmentHandler, bad_tool_input: object
+    ) -> None:
+        hook_input = {"tool_name": "Write", "tool_input": bad_tool_input}
+
+        # No preceding matches() call -- exercises _take_cached's own
+        # unwrapped _dispatch_key call on a cache miss.
+        handler.handle(hook_input)
+
+    def test_dispatch_key_falls_back_to_repr_for_an_unsortable_key(
+        self, handler: ProjectContainmentHandler, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """n-2 (Plan 00466 review 3): the ``repr()`` fallback path
+        (``_dispatch_key``'s own ``except TypeError``) was previously
+        untested -- a dict with MIXED key types makes
+        ``json.dumps(..., sort_keys=True)`` raise ``TypeError`` trying to
+        compare an ``int`` key against a ``str`` one."""
+        hook_input = {"tool_name": "Write", "tool_input": {1: "a", "b": "c"}}
+
+        # Never raises -- the repr() fallback is exercised, not a crash.
+        handler.matches(hook_input)
+        handler.handle(hook_input)
+        assert "falling back to repr()" in caplog.text
+
+
+class TestMatchesAndHandleShareOneEvaluation:
+    """m2 (Plan 00466 guard-defects review 2): ``matches()`` and ``handle()``
+    each independently called ``_offending_targets_or_error`` -- so a
+    TRANSIENT raise seen by ``matches()`` (denied, correctly, via the error
+    route) could be silently overwritten by a clean re-evaluation inside
+    ``handle()``, turning a correct DENY into an ALLOW for a call
+    ``matches()`` itself already flagged.
+    """
+
+    def test_a_transient_raise_seen_by_matches_is_not_erased_by_handle(
+        self, handler: ProjectContainmentHandler
+    ) -> None:
+        calls = {"count": 0}
+
+        def _flaky() -> Path:
+            calls["count"] += 1
+            if calls["count"] == 1:
+                raise RuntimeError("transient failure, first call only")
+            return _ROOT
+
+        with patch.object(ProjectContainmentHandler, "_resolved_root", staticmethod(_flaky)):
+            hook_input = _write("/tmp/notes.md")
+            assert handler.matches(hook_input) is True  # error route
+            result = handler.handle(hook_input)
+        assert result.decision == Decision.DENY
+        assert result.reason is not None
+        assert "RuntimeError" in result.reason
+
+
+class TestChainLevelFailClosedBehaviour:
+    """n4 (Plan 00466 guard-defects review 2): every prior N11/m1/m2 test in
+    this file calls ``matches()``/``handle()`` directly, not through
+    ``HandlerChain.execute(..., strict_mode=False)`` -- the property
+    actually claimed.
+    """
+
+    def test_a_handle_tail_exception_still_denies_through_the_chain(
+        self, handler: ProjectContainmentHandler, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def _raise(self: object, *_args: object, **_kwargs: object) -> None:
+            raise RuntimeError("synthetic chain-level failure")
+
+        monkeypatch.setattr("claude_code_hooks_daemon.core.rule.RuleFormatter.verbose", _raise)
+        chain = HandlerChain()
+        chain.add(handler)
+        hook_input = _write("/tmp/notes.md")
+
+        result = chain.execute(hook_input, strict_mode=False)
+        assert result.result.decision == Decision.DENY
+
+    def test_an_evaluation_exception_still_denies_through_the_chain(
+        self, handler: ProjectContainmentHandler, _project_root: Any
+    ) -> None:
+        """Reconfigures the class-wide `_project_root` fixture's OWN mock
+        rather than layering a second `monkeypatch.setattr` patcher on the
+        same target (Plan 00466 N39) -- see that fixture's docstring."""
+
+        def _raise() -> Path:
+            raise RuntimeError("synthetic chain-level evaluation failure")
+
+        _project_root.side_effect = _raise
+        chain = HandlerChain()
+        chain.add(handler)
+        hook_input = _write("/tmp/notes.md")
+
+        result = chain.execute(hook_input, strict_mode=False)
+        assert result.result.decision == Decision.DENY
+
+
+class TestHandleTailFailsClosed:
+    """m1 (Plan 00466 guard-defects review 2): ``_offending_targets_or_error``
+    only guarantees reaching a VERDICT. Once ``handle()`` has a real match it
+    does further work UNWRAPPED -- the disclosure tracker, ``RuleFormatter``,
+    string building -- and an exception there used to propagate straight out
+    of ``handle()``, which a non-strict chain treats as "no match": ALLOW,
+    for a call that had a genuine out-of-root write target.
+    """
+
+    def test_data_layer_lookup_exception_still_denies(
+        self, handler: ProjectContainmentHandler, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def _raise() -> None:
+            raise RuntimeError("synthetic get_data_layer failure")
+
+        monkeypatch.setattr(
+            "claude_code_hooks_daemon.handlers.pre_tool_use.project_containment.get_data_layer",
+            _raise,
+        )
+        hook_input = _write("/tmp/notes.md")
+
+        assert handler.matches(hook_input) is True
+        result = handler.handle(hook_input)
+        assert result.decision == Decision.DENY
+        assert result.reason is not None
+        assert "RuntimeError" in result.reason
+
+    def test_rule_formatter_exception_still_denies(
+        self, handler: ProjectContainmentHandler, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def _raise(self: object, *_args: object, **_kwargs: object) -> None:
+            raise RuntimeError("synthetic RuleFormatter.verbose failure")
+
+        monkeypatch.setattr("claude_code_hooks_daemon.core.rule.RuleFormatter.verbose", _raise)
+        hook_input = _write("/tmp/notes.md")
+
+        assert handler.matches(hook_input) is True
+        result = handler.handle(hook_input)
+        assert result.decision == Decision.DENY
+        assert result.reason is not None
+        assert "RuntimeError" in result.reason
+
+    def test_unhashable_transcript_path_still_denies(
+        self, handler: ProjectContainmentHandler
+    ) -> None:
+        hook_input = _write("/tmp/notes.md")
+        hook_input["transcript_path"] = ["not", "a", "string"]
+
+        assert handler.matches(hook_input) is True
+        result = handler.handle(hook_input)
+        assert result.decision == Decision.DENY
 
 
 class TestTheAllowlist:
@@ -760,3 +1090,93 @@ class TestATildeIsADestinationLikeAnyOther:
         assert handler.matches(_bash("curl -s https://x/y -o ~/in-repo.txt", cwd="/workspace")) is (
             False
         )
+
+
+class TestAnUnresolvedRootDoesNotLockOutTargetlessCommands:
+    """Plan 00466 N90.
+
+    ``matches()`` used to resolve the project root before checking whether the
+    command names any write target at all. When the root cannot be resolved
+    (three test harnesses route events without initialising ``ProjectContext``
+    to prove this), that made EVERY command deny, ahead of every lower-priority
+    handler -- including one that writes nothing. The fix returns early when
+    ``_named_targets()`` is empty, before the root is ever resolved, and stays
+    fail-closed for a command that does name a target.
+    """
+
+    def test_a_no_target_command_is_allowed_even_when_the_root_is_unresolved(
+        self, handler: ProjectContainmentHandler, _project_root: Any
+    ) -> None:
+        _project_root.side_effect = RuntimeError(
+            "ProjectContext not initialized. "
+            "Call ProjectContext.initialize(config_path) during daemon startup."
+        )
+
+        assert handler.matches(_bash("git status")) is False
+        _project_root.assert_not_called()
+
+    def test_a_targeted_command_still_fails_closed_when_the_root_is_unresolved(
+        self, handler: ProjectContainmentHandler, _project_root: Any
+    ) -> None:
+        _project_root.side_effect = RuntimeError(
+            "ProjectContext not initialized. "
+            "Call ProjectContext.initialize(config_path) during daemon startup."
+        )
+
+        hook_input = _write("/tmp/notes.md")
+
+        assert handler.matches(hook_input) is True
+        result = handler.handle(hook_input)
+        assert result.decision == Decision.DENY
+        assert result.reason is not None
+        assert result.reason.startswith(f"BLOCKED [{RuleID.PROJECT_CONTAINMENT_EVALUATION_ERROR}]")
+
+    def test_a_raise_while_naming_targets_still_denies(
+        self, handler: ProjectContainmentHandler
+    ) -> None:
+        """The early return sits inside the N11 wrapper, so a fault in
+        ``_named_targets`` itself is an evaluation error, never an empty list."""
+
+        def _raise(self: object, _hook_input: object) -> list[str]:
+            raise RuntimeError("synthetic target-naming failure")
+
+        with patch.object(ProjectContainmentHandler, "_named_targets", _raise):
+            hook_input = _bash("git status")
+            assert handler.matches(hook_input) is True
+            result = handler.handle(hook_input)
+        assert result.decision == Decision.DENY
+
+
+class TestProjectRootDoublePatchDoesNotLeakAcrossFiles:
+    """Plan 00466 N39 regression: the polluter/victim PAIR from the
+    bisection, run together in one pytest PROCESS -- the shape the leak
+    actually needs to reproduce (the polluter's `monkeypatch` teardown ran
+    AFTER this file's `_project_root` fixture had already restored the real
+    classmethod, in the SAME process, for a LATER test to inherit). Neither
+    test alone shows the defect; this is why the pair, not either file's
+    own suite, is what pins it.
+    """
+
+    def test_the_polluter_and_a_victim_pass_together_in_one_process(self) -> None:
+        polluter = (
+            "tests/unit/handlers/pre_tool_use/test_project_containment.py"
+            "::TestFailsClosedOnEvaluationError"
+            "::test_an_uninitialised_project_root_still_denies"
+        )
+        victim = (
+            "tests/unit/handlers/test_absolute_path.py"
+            "::TestAbsolutePathHandler"
+            "::test_handle_omits_the_example_rather_than_guessing_a_root"
+        )
+        completed = subprocess.run(
+            [sys.executable, "-m", "pytest", "-p", "no:xdist", "-q", polluter, victim],
+            cwd=Path(__file__).resolve().parents[4],
+            capture_output=True,
+            text=True,
+            timeout=Timeout.REQUEST_LONG,
+        )
+        assert completed.returncode == 0, (
+            "the polluter/victim pair failed together (Plan 00466 N39 "
+            f"regression) -- stdout:\n{completed.stdout}\nstderr:\n{completed.stderr}"
+        )
+        assert "2 passed" in completed.stdout

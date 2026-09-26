@@ -22,26 +22,33 @@ scripts that open the file internally are NOT detectable at command-text
 level — see the plan's RESEARCH-read-routes.md class-(d) rows.
 """
 
+import errno
 import fnmatch
+import itertools
 import logging
 import os
 import re
 import shlex
-from collections.abc import Callable, Iterator
+import time
+import urllib.parse
+from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Final
+from typing import Any, Final, Literal
 
 import yaml
 
+from claude_code_hooks_daemon.utils import shell_expansion
 from claude_code_hooks_daemon.utils.command_evasion import (
     git_subcommand_index,
     strip_transparent_reserved_words,
 )
 from claude_code_hooks_daemon.utils.path_exclusion import (
+    first_matching_glob,
     path_matches_globs,
     resolve_project_root,
 )
+from claude_code_hooks_daemon.utils.realpath import has_symlink_loop, realpath
 
 logger = logging.getLogger(__name__)
 
@@ -257,18 +264,43 @@ def path_is_protected(file_path: str, patterns: tuple[str, ...]) -> bool:
     innocuous while the target is protected, and vice versa — both spellings
     must be guarded or the symlink is a one-call bypass.
     """
+    return protecting_pattern(file_path, patterns) is not None
+
+
+def protecting_pattern(file_path: str, patterns: tuple[str, ...]) -> str | None:
+    """The first of ``patterns``, in order, protecting ``file_path`` or its realpath.
+
+    :func:`path_is_protected` for a caller that must also name the glob. It
+    resolves the realpath ONCE for the whole list: asked one pattern at a
+    time, each call walked every component of the path again, which for a
+    90 KB-deep ``file_path`` cost seconds (Plan 00466 N40 review 2 nit 4).
+    """
     if not file_path or not patterns:
-        return False
+        return None
+    if has_symlink_loop(file_path):
+        # Plan 00466 N24 review 4 (team-lead follow-up on R4-B1): once a
+        # loop is hit, os.path.realpath's own answer for the rest of the
+        # path is version-dependent, so the realpath comparison below cannot
+        # be trusted to catch a protected file reached through one. Treat a
+        # loop as protected by every pattern rather than let a version
+        # difference decide whether a secret is guarded.
+        return patterns[0]
     project_root = resolve_project_root()
-    if path_matches_globs(file_path, patterns, project_root=project_root):
-        return True
+    matches = [first_matching_glob(file_path, patterns, project_root=project_root)]
     try:
-        real = os.path.realpath(file_path)
-    except OSError:
-        return False
+        real = realpath(file_path)
+    except (OSError, ValueError) as exc:
+        # Plan 00466 N24 follow-up: a NUL-bearing path raises ValueError,
+        # not OSError -- the OS itself cannot realpath it, so it cannot BE
+        # a symlink to anything; nothing for this check to discover. The
+        # spelled path is still matched, above. Logged without the path,
+        # which may itself be a protected name.
+        logger.debug("protecting_pattern: no realpath (%s); matched as spelled", type(exc).__name__)
+        real = file_path
     if real != file_path:
-        return path_matches_globs(real, patterns, project_root=project_root)
-    return False
+        matches.append(first_matching_glob(real, patterns, project_root=project_root))
+    found = [pattern for pattern in matches if pattern is not None]
+    return min(found, key=patterns.index) if found else None
 
 
 def _tokenise(command: str) -> list[str]:
@@ -589,6 +621,38 @@ def _has_trailing_wildcard(basename: str) -> bool:
     return any(match.end() == len(basename) for match in _BRACKET_EXPRESSION_RE.finditer(basename))
 
 
+def _has_wildcard_after_leading(basename: str) -> bool:
+    """True when ``basename`` carries a genuine wildcard SOMEWHERE AFTER its
+    own leading one (Plan 00466 review, minor m1).
+
+    The N4 fix's stricter ``stem_basename.endswith(residue)`` requirement in
+    ``_glob_token_overlaps_stem`` is only correct for the simple splat shape
+    it was built for -- a token that is a leading wildcard followed by pure
+    literal text (``*words[position``, ``*wordlist``), where fnmatch has
+    nothing left to expand once the leading ``*`` is consumed. A token that
+    carries ANOTHER wildcard too (``*rd*rd``, project-configured
+    ``*on*.json``) is a different shape entirely: fnmatch expands the
+    INTERNAL wildcard as well, so the token can glob-match a protected name
+    without its residue being anywhere near a literal suffix of the stem
+    (``*rd*rd`` matches ``rd.vault-password`` -- contains ``rd``, then later
+    another ``rd``, with an arbitrary run in between). Applying the splat
+    fix's stricter requirement to this shape silently dropped that
+    detection; this predicate lets the caller skip the requirement instead
+    for any token where it does not apply, restoring the pre-N4 overlap-only
+    behaviour for genuinely multi-wildcard tokens.
+
+    Only ``*``/``?`` after the leading marker count, matching
+    ``_is_glob_shaped``'s own rule that a lone unmatched ``[`` is literal to
+    fnmatch, not a wildcard.
+    """
+    if basename[:1] in ("*", "?"):
+        rest = basename[1:]
+    else:
+        leading_bracket = _BRACKET_EXPRESSION_RE.match(basename)
+        rest = basename[leading_bracket.end() :] if leading_bracket else basename
+    return _is_glob_shaped(rest)
+
+
 def _token_literal_residue(token: str) -> str:
     """The literal text left after removing glob syntax from ``token``.
 
@@ -596,9 +660,20 @@ def _token_literal_residue(token: str) -> str:
     then ``*`` and ``?`` are stripped: ``.vault-p*`` -> ``.vault-p``;
     ``[A-Za-z]*`` -> ``''``. The residue is what the token literally asserts
     about a filename, so it is what must overlap a protected stem.
+
+    Only ``*``/``?`` are stripped here, NOT a bare ``[`` (n466-n24 review 4
+    addendum, M-1 fold-in a): a ``[`` that survives the bracket-expression
+    removal above has no matching ``]`` in this token, and bash -- like
+    ``fnmatch`` -- reads an UNTERMINATED bracket expression as a literal
+    character, never a wildcard. A Python list/slice token such as
+    ``*words[subcommand_index`` genuinely carries that shape (the review's
+    own live finding): dropping its lone ``[`` shortens the residue by one
+    character for no linguistic reason and can accidentally manufacture a
+    longer coincidental overlap with a protected stem than the token's own
+    text actually supports.
     """
     residue = _BRACKET_EXPRESSION_RE.sub("", token)
-    for char in _GLOB_CHARS:
+    for char in ("*", "?"):
         residue = residue.replace(char, "")
     return residue
 
@@ -692,6 +767,8 @@ def _glob_token_overlaps_stem(
     *,
     leading_wildcard: bool,
     trailing_wildcard: bool,
+    pattern_has_trailing_wildcard: bool,
+    token_has_wildcard_after_leading: bool,
 ) -> bool:
     """True when ``residue``'s literal edge could directly join ``stem_basename``.
 
@@ -705,8 +782,33 @@ def _glob_token_overlaps_stem(
 
     - A TRAILING-wildcard token (``dummy.vault-p*``) can be extended on the
       RIGHT, so its residue's SUFFIX must overlap the stem's PREFIX (forward).
+      The TOKEN's own trailing wildcard supplies the flexibility needed to
+      absorb whatever the pattern demands after the overlap, so this holds
+      regardless of the pattern's own trailing shape.
     - A LEADING-wildcard token (``*passXXX``) can be preceded on the LEFT, so
-      the stem's SUFFIX must overlap the residue's PREFIX (reverse).
+      the stem's SUFFIX must overlap the residue's PREFIX (reverse) — but
+      here the token supplies NO trailing flexibility of its own (a leading
+      wildcard AND a trailing wildcard both being open is the BOTH-edges
+      case above, handled first). Whatever follows the overlap in the
+      residue (``position`` in ``*words[position``) can only be absorbed by
+      the PATTERN's own trailing wildcard, if it has one. A pattern anchored
+      at the end (``*.vault-password``, no trailing ``*``) admits no such
+      leftover, so a genuine truncation needs the residue's FULL length to
+      be a literal suffix of the stem — a partial boundary overlap is then
+      coincidence, not truncation (observed live (N4, Plan 00466): the
+      Python unpacking operator ``*words[position + 1 :]`` tokenises to
+      ``*words[position``, whose residue ``wordsposition`` shares only its
+      first 4 characters, ``word``, with the stem's tail ``...pass-word``,
+      leaving ``sposition`` with nowhere to go). The pre-existing
+      substring+fnmatch check above already denies every FULL-suffix case,
+      so this branch is never the sole route to a genuine positive here —
+      only to this false one. This stricter requirement is scoped to a token
+      shaped ``*literal`` with NO further wildcard (m1, Plan 00466 review):
+      a token that ALSO carries an internal wildcard (``*rd*rd``) is not the
+      splat shape at all — fnmatch expands that wildcard too, so the token
+      can still glob-match the stem without a literal-suffix residue — and
+      for that shape the requirement is skipped, restoring the pre-N4
+      overlap-only behaviour (see ``_has_wildcard_after_leading``).
 
     A token whose wildcard sits INTERNALLY (``assert.*x``, ``secret*.py``) has
     neither edge open, so neither direction applies. Gated at
@@ -730,12 +832,394 @@ def _glob_token_overlaps_stem(
     if (
         leading_wildcard
         and _suffix_prefix_overlap_length(stem_basename, residue) >= _MIN_GLOB_OVERLAP_CHARS
+        and (
+            pattern_has_trailing_wildcard
+            or token_has_wildcard_after_leading
+            or stem_basename.endswith(residue)
+        )
     ):
         return True
     return False
 
 
-def find_protected_mention(command: str, patterns: tuple[str, ...]) -> str | None:
+#: B1 (Plan 00466 guard-defects review 2): a run of consecutive ``*`` matches
+#: exactly what a single ``*`` matches (zero or more of anything), so
+#: collapsing one is language-preserving -- and it removes the dominant cost
+#: driver the review measured directly: a 5000-``*`` token turned the DP's
+#: O(len(a) * len(b)) grid into tens of millions of cells for no semantic
+#: gain. Applied to BOTH operands, since either side can carry the run (a
+#: project-configured pattern is just as capable of a long ``*`` run as a
+#: token is).
+_STAR_RUN_RE: Final[re.Pattern[str]] = re.compile(r"\*{2,}")
+
+#: The DP is O(len(a) * len(b)); past this many cells the token is treated
+#: as intersecting WITHOUT running it (fail closed), per the review's fix
+#: direction: "no legitimate path glob is 500 characters of wildcards". A
+#: few 10**4 keeps the worst case comfortably sub-millisecond in pure Python
+#: while leaving every realistic glob (a few dozen characters at most, even
+#: after bracket expansion) untouched -- the star-collapse above already
+#: defeats the specific 5000-``*`` shape long before this cap would matter;
+#: this is the backstop for any OTHER way to build a long operand.
+_DP_MAX_CELLS: Final[int] = 20_000
+
+#: M2b (Plan 00466 guard-defects review 2): the outer `[...]` of a POSIX
+#: named class (`[[:alpha:]]`) matched WHOLE, ahead of the general
+#: `_BRACKET_EXPRESSION_RE` below -- that regex's `[^\]]*\]` stops at the
+#: class's OWN closing `]` (the one in `[:alpha:]`), one character short of
+#: the real outer close, and substituting only that inner span would leave
+#: the final `]` behind as a stray literal character.
+_POSIX_NAMED_CLASS_RE: Final[re.Pattern[str]] = re.compile(r"\[\[:[a-z]+:\]\]")
+
+
+def _globs_can_intersect(a: str, b: str) -> bool:
+    """True when some single string could be matched by BOTH ``a`` and ``b``,
+    each read as a ``*``/``?`` glob (N10, Plan 00466 review).
+
+    A genuine two-glob language-intersection test, not another edge
+    heuristic: the leading/trailing overlap checks above answer "is the
+    wildcard at an EDGE", so a token whose wildcard sits in the MIDDLE
+    (``.vault-pas?word``, ``prod.vault-passw*rd``) has neither edge open and
+    is invisible to every check above it, even though it can glob-expand to
+    a real protected filename. Standard sequence-alignment DP, O(len(a) *
+    len(b)): ``dp[i][j]`` is True when the length-``i`` prefix of ``a`` and
+    the length-``j`` prefix of ``b`` can produce an identical output prefix.
+    A ``*`` matches zero or more characters, so it can either contribute
+    nothing new (fall back to the shorter prefix on its own side) or absorb
+    one more character the OTHER side is currently offering; a ``?`` or a
+    literal must line up one-for-one with the other side's ``?``/matching
+    literal. ``dp[len(a)][len(b)]`` is the answer for the full patterns.
+
+    Callers are responsible for expanding any bracket expression first (see
+    ``_expand_bracket_expressions``) -- this function only understands the
+    two characters above, matching the scope ``fnmatch`` needs once a finite
+    class has already been reduced to its concrete members.
+
+    B1 (Plan 00466 guard-defects review 2): a crafted long operand made this
+    an unbounded-cost call on a PreToolUse hot path, and a slow verdict is a
+    BYPASS here, not just a nuisance -- the client's socket timeout on the
+    30s budget is an ALLOW for the whole chain. ``*`` runs are collapsed
+    first (language-preserving), and the DP itself is never run past
+    ``_DP_MAX_CELLS`` -- past that, the pair is treated as intersecting
+    (fail closed) without paying for the grid.
+    """
+    # M2b (Plan 00466 guard-defects review 2): an unexpanded bracket
+    # expression (negated, a POSIX named class, or an over-cap range) was
+    # read as LITERAL characters below -- so `id_r[!x]a` compared as the
+    # literal text `id_r[!x]a`, never as a match for `id_rsa`, even though
+    # `[!x]` really can expand to any character but `x`. A single `?` is the
+    # narrowest wildcard that is still a SUPERSET of every finite class this
+    # could denote, so substituting it stays fail-closed rather than
+    # fail-open, the same direction `_expand_bracket_expressions` already
+    # commits to for the cases it cannot enumerate. The POSIX form is
+    # substituted FIRST and with its own regex: `_BRACKET_EXPRESSION_RE`'s
+    # `[^\]]*\]` stops at the class's OWN closing `]` (`[:alpha:]`), one
+    # character short of the outer bracket expression's real close, and
+    # would otherwise leave that outer `]` behind as a stray literal.
+    # Cut the constant factor (team-lead's 1 MB timing follow-up to review
+    # 3): a regex `.sub()` call costs real overhead even on a NO-OP match --
+    # for the common case of a short ordinary token, calling all three
+    # substitutions unconditionally was paying that cost six times (three
+    # per operand) for patterns that never contain a POSIX class, a bracket
+    # expression, or a star run at all. A cheap substring/character check
+    # first skips the regex engine entirely when there is nothing for it to
+    # do -- semantically identical, since each `.sub()` is a no-op exactly
+    # when its trigger character(s) are absent.
+    if "[:" in a:
+        a = _POSIX_NAMED_CLASS_RE.sub("?", a)
+    if "[:" in b:
+        b = _POSIX_NAMED_CLASS_RE.sub("?", b)
+    if "[" in a:
+        a = _BRACKET_EXPRESSION_RE.sub("?", a)
+    if "[" in b:
+        b = _BRACKET_EXPRESSION_RE.sub("?", b)
+    if "**" in a:
+        a = _STAR_RUN_RE.sub("*", a)
+    if "**" in b:
+        b = _STAR_RUN_RE.sub("*", b)
+    len_a, len_b = len(a), len(b)
+    if len_a * len_b > _DP_MAX_CELLS:
+        return True
+    # Rolling two-row DP instead of a full (len_a+1) x (len_b+1) grid: the
+    # transition for row `i` only ever reads row `i-1` and the CURRENT
+    # row's own previous cell, so one full grid's worth of list-of-lists
+    # allocation per call (the dominant constant-factor cost at these
+    # problem sizes -- most tokens and patterns here are a few dozen
+    # characters at most) is unnecessary. Semantically identical to the
+    # grid version; `prev`/`curr` alternate which physical list plays which
+    # role instead of copying.
+    prev = [False] * (len_b + 1)
+    curr = [False] * (len_b + 1)
+    prev[0] = True
+    for j in range(1, len_b + 1):
+        prev[j] = b[j - 1] == "*" and prev[j - 1]
+    for i in range(1, len_a + 1):
+        char_a = a[i - 1]
+        curr[0] = char_a == "*" and prev[0]
+        for j in range(1, len_b + 1):
+            char_b = b[j - 1]
+            if char_a == "*":
+                curr[j] = prev[j] or curr[j - 1]
+            elif char_b == "*":
+                curr[j] = curr[j - 1] or prev[j]
+            elif char_a == "?" or char_b == "?" or char_a == char_b:
+                curr[j] = prev[j - 1]
+            else:
+                curr[j] = False
+        prev, curr = curr, prev
+    return prev[len_b]
+
+
+def _glob_intersection_mention(
+    expansions: list[str], stem_pairs: list[tuple[str, str]]
+) -> str | None:
+    """First protected pattern a glob-shaped token could glob-expand to,
+    else ``None`` (N10, Plan 00466 review; M2a extends it past interior-only).
+
+    A wildcard sitting in the MIDDLE of a token (``.vault-pas?word``,
+    ``prod.vault-passw*rd``) has neither edge open, so the leading/trailing
+    overlap check never sees it (that check is gated on an open edge by
+    construction, exactly so it does not re-litigate the N4/m1 false
+    positives) and the substring+fnmatch check needs the residue to already
+    be a literal substring of the stem, which a truncation that drops an
+    INTERIOR character never is. A token whose OWN wildcard sits at an edge
+    (``*.vault-pas?word``) used to be excluded from here too, on the theory
+    that the overlap heuristic already covered edge shapes -- but that
+    heuristic was deliberately NARROWED by the N4/m1 fix and does not, in
+    fact, cover every edge-open shape (M2a review 2 finding). The DP is an
+    EXACT intersection test, so running it here for edge-open tokens as well
+    closes that gap without reopening N4: ``*words[position`` (N4's own
+    false-positive shape) still does not glob-intersect an end-anchored
+    stem, because nothing in either glob can absorb the leftover residue.
+
+    Run over ``expansions``, not gated on the individual form still being
+    glob-shaped: a finite bracket expression (``.vault-pa[sz]word``) resolves
+    to plain literals that no longer carry a wildcard of their own, yet one
+    of those literals can still be exactly this shape of truncation. The
+    caller gates the call itself on ``_is_glob_shaped(raw_form)`` so an
+    ordinary non-glob word never reaches this at all -- once here, a fully
+    literal expansion is simply the degenerate case of the same intersection
+    test (no ``*``/``?`` on either side reduces it to plain equality).
+
+    A pattern with wildcards on BOTH edges (``*.secret*``, ``*vault_pass*``)
+    is INCLUDED here too (m-2, n466-n24 review 4 addendum) -- but only ever
+    reaches a real DP call for a token carrying no ``*`` of its own (a
+    ``?``-only or fully-literal-after-bracket-expansion token); see
+    :func:`_dp_intersection_is_meaningful`'s both-edges branch for why a
+    token WITH its own ``*`` must stay excluded (``report-[0-9]*.txt`` and
+    ``secret*.py`` genuinely do glob-intersect ``*.secret*``, but neither is
+    evidence of a protected file -- Plan 00306/00311's own false-positive
+    class, still avoided). A genuine both-edges truncation/extension that
+    DOES carry the token's own ``*`` is left to the filesystem-truth route
+    (M2c, ``_both_edges_glob_mention``) instead, which can safely accept the
+    wider class because it verifies against a real file rather than judging
+    text alone.
+
+    Each (token, pattern) pair is also gated by
+    :func:`_dp_intersection_is_meaningful` before the DP runs at all -- see
+    its docstring for the degenerate cases that gate exists to skip.
+
+    A form's own residue must also clear ``_MIN_GLOB_OVERLAP_CHARS`` first
+    (own live finding, own RED test): a single-character residue (a bare
+    ``.`` from an HTML-regex-shaped ``.*?`` quantifier token, or one letter
+    out of a ``[A-Za-z]*`` character-class expansion) trivially fnmatches
+    almost anything -- ``i*`` glob-matches the literal ``id_rsa`` outright,
+    with no truncation of any real filename involved at all. This is the
+    identical floor the overlap heuristic above already enforces for the
+    identical reason (see ``_MIN_GLOB_OVERLAP_CHARS``'s own docstring).
+    """
+    # m-2 (n466-n24 review 4 addendum): every pattern is now eligible --
+    # `_dp_intersection_is_meaningful` is what keeps a both-edges pattern
+    # from over-firing, not exclusion from this list.
+    eligible_patterns = [pattern for _stem, pattern in stem_pairs]
+    for form in expansions:
+        basename = form.rsplit("/", maxsplit=1)[-1]
+        if len(_token_literal_residue(basename)) < _MIN_GLOB_OVERLAP_CHARS:
+            continue
+        for pattern in eligible_patterns:
+            if _dp_intersection_is_meaningful(basename, pattern) and _globs_can_intersect(
+                basename, pattern
+            ):
+                return pattern
+    return None
+
+
+def _dp_intersection_is_meaningful(token_basename: str, pattern: str) -> bool:
+    """False when a DP call for this pair is a DEGENERATE always-true case
+    rather than a genuine constraint (M2a follow-up, own live finding: not
+    in the review report, caught by this branch's own RED test for the N4
+    shape reopening against a DIFFERENT shipped pattern).
+
+    A both-edges PATTERN (``*.secret*``, ``*vault_pass*``) is handled FIRST
+    and separately (m-2, n466-n24 review 4 addendum): it is meaningful only
+    when ``token_basename`` carries no ``*`` of its own. A both-edges
+    pattern's own two wildcards can absorb an arbitrary run on EITHER side
+    of its fixed literal, so any token that also has a ``*`` can always
+    satisfy it by inserting the pattern's own literal directly into that
+    token's wildcard gap, wherever it sits -- ``report-[0-9]*.txt`` and
+    ``secret*.py`` genuinely do glob-intersect ``*.secret*`` this way (a
+    real ``report-0.secret.txt``/``secret.secret.py`` would satisfy both),
+    but neither is evidence of a protected file (Plan 00306/00311's own
+    false-positive class). A token using ONLY ``?`` (or nothing) has no such
+    unbounded gap -- it can absorb at most one character per ``?`` -- so a
+    genuine intersection there requires its fixed literal text to actually,
+    closely resemble the stem (``demo.se?ret`` intersecting ``*.secret*``
+    only because it is one character removed from spelling ``demo.secret``
+    outright), which is a real signal worth running the DP for.
+
+    A single-star glob with its open end on ONE side is, in effect, "any
+    prefix, then this literal" (a leading wildcard) or "this literal, then
+    any suffix" (a trailing wildcard). Two such globs intersect
+    UNCONDITIONALLY -- for ANY pair of literals whatsoever -- whenever their
+    open ends face OPPOSITE directions: concatenating the pattern's literal
+    with the token's literal (or vice versa) always satisfies both at once
+    (``"*words[position"`` needs a string ENDING in ``"words[position"``;
+    ``".vault-pass*"`` needs one STARTING with ``".vault-pass"``; simply
+    concatenate them). Since this holds regardless of what the literals
+    actually say, running the DP there would deny essentially every
+    leading-wildcard token in existence against every shipped
+    trailing-wildcard pattern -- for example an ordinary ``*.py`` -- not
+    just a genuine truncation of a protected name. The DP stays a real,
+    literal-dependent test only when both open ends face the SAME
+    direction (requiring the literals to actually share a compatible
+    prefix/suffix), when the token is a BOTH-edges glob compared against a
+    fully literal pattern (a "contains" test against one fixed string,
+    which is meaningful), or whenever either side carries no wildcard at
+    its edges at all (then the DP reduces to an ordinary single-glob
+    match, always well-defined). A both-edges TOKEN against an
+    edge-wildcard pattern is degenerate the same way (``"*L*"`` against
+    ``"*S"``/``"P*"`` is always satisfiable by ``L + S``/``P + L``).
+    """
+    pattern_leading = _has_leading_wildcard(pattern)
+    pattern_trailing = _has_trailing_wildcard(pattern)
+    if pattern_leading and pattern_trailing:
+        return "*" not in token_basename
+    if not (pattern_leading or pattern_trailing):
+        return True  # a fully literal pattern is never degenerate.
+    token_leading = _has_leading_wildcard(token_basename)
+    token_trailing = _has_trailing_wildcard(token_basename)
+    if not (token_leading or token_trailing):
+        return True  # a fully literal token is never degenerate.
+    if token_leading and token_trailing:
+        return False  # both-edges token vs any edge-open pattern: always intersects.
+    return token_leading == pattern_leading
+
+
+#: M2c (Plan 00466 guard-defects review 2): cap on how many filesystem
+#: expansions of one glob-shaped token this route will walk before giving up
+#: -- a PreToolUse hot path must not pay for an unbounded directory listing.
+_MAX_BOTH_EDGES_FS_EXPANSIONS: Final[int] = 200
+
+
+def _shares_min_literal_substring(a: str, b: str, min_len: int) -> bool:
+    """True when some length-``min_len`` (or longer) run of ``a`` is a
+    substring of ``b``, ignoring position entirely.
+
+    Own live finding, own RED test (not in the review report): calling
+    ``_expand_glob_token`` -- real filesystem I/O -- for EVERY glob-shaped
+    token, unconditionally, measurably broke this module's own pre-existing
+    timing budgets (a 60000-``*`` token went from well under 0.1s to 8.45s;
+    twenty short wide-bracket tokens went from comfortably under 0.05s to
+    0.082s) -- B1's own bypass class, reintroduced by M2c's own fix. This is
+    the cheap, no-I/O gate that runs first: a genuine truncation of a
+    protected stem must share SOME literal text with it, so a token whose
+    residue shares nothing with any both-edges stem is skipped before it
+    ever reaches the disk. O(len(a) * len(b)) in the worst case, but both
+    operands here are short (a token's literal residue, a shipped pattern's
+    stem), so this costs microseconds where the route it gates costs a real
+    directory listing.
+    """
+    if len(a) < min_len or len(b) < min_len:
+        return False
+    return any(a[start : start + min_len] in b for start in range(len(a) - min_len + 1))
+
+
+def _both_edges_glob_mention(
+    expansions: list[str],
+    both_edges_patterns: tuple[str, ...],
+    both_edges_stems: tuple[str, ...],
+    project_root: str | None,
+    cwd: str | None,
+    *,
+    deadline: float | None = None,
+) -> str | None:
+    """First both-edges protected pattern a glob-shaped token's filesystem
+    expansion actually matches, else ``None`` (M2c, Plan 00466 review 2).
+
+    A both-edges pattern (``*.secret*``) asserts only "contains this text
+    anywhere", so neither the overlap heuristic nor the DP-intersection
+    check above will fire for it (see ``_glob_intersection_mention``'s own
+    docstring for why not). The filesystem is the one oracle that cannot
+    itself be gamed into a false positive here: a genuine interior/edge
+    truncation of a real protected file expands, on disk, to that file's
+    exact name; an unrelated word does not expand to anything at all. A
+    glob that expands to nothing reads nothing, so there is nothing to deny.
+
+    Gated by :func:`_shares_min_literal_substring` first -- see its
+    docstring for why a real disk call cannot run unconditionally here.
+
+    ``cwd`` is the HOOK's working directory (threaded from the PreToolUse
+    payload), never the daemon process's own -- a Bash tool call resolves a
+    relative glob against where IT ran, not where this long-lived daemon
+    process happens to sit.
+
+    ``deadline`` (M-1, Plan 00466 review 3) is forwarded to
+    :func:`_expand_glob_token`'s own recursive-glob walk -- see that
+    function's docstring for why the whole-scan deadline must be checked
+    INSIDE the filesystem walk, not only between tokens.
+    """
+    if not both_edges_patterns:
+        return None
+    for form in expansions:
+        if not _is_glob_shaped(form):
+            continue
+        basename = form.rsplit("/", maxsplit=1)[-1]
+        residue = _token_literal_residue(basename)
+        if not residue or not any(
+            _shares_min_literal_substring(residue, stem, _MIN_GLOB_OVERLAP_CHARS)
+            for stem in both_edges_stems
+        ):
+            continue
+        match = _expand_glob_token(
+            form,
+            both_edges_patterns,
+            project_root,
+            cwd=cwd,
+            max_expansions=_MAX_BOTH_EDGES_FS_EXPANSIONS,
+            deadline=deadline,
+        )
+        if match is not None:
+            return match
+    return None
+
+
+#: Which surface a mention scan is judging (n466-n24 review 4 addendum,
+#: false-positive fold-in b). ``"bash"`` (the default, and every pre-existing
+#: caller) is a real shell command: the AGGRESSIVE glob-shaped heuristics
+#: (edge-overlap, full DP intersection, the both-edges residue/FS-truth
+#: routes) all apply, because a real shell really does expand a glob-shaped
+#: word. ``"content"`` is Write/Edit CONTENT -- arbitrary source code, not
+#: shell text a shell will ever run -- where an ordinary code token that
+#: merely LOOKS glob-shaped (Python unpacking-plus-subscript:
+#: ``*words[subcommand_index``, from a real list-literal
+#: ``[*words[:subcommand_index], ...]``) is not evidence of anything. Content
+#: is judged on the LITERAL matcher only (an exact/glob-pattern comparison
+#: against the raw token and its bracket-expansions, already unconditional
+#: below): a quoted path string (``open(".vault-password")``) or a script's
+#: own protected-name reference (``cat id_rsa`` in a ``.sh`` file, brace
+#: sequences and quote/escape decoding still applied by the token streams
+#: upstream) still denies through it -- only the HEURISTIC "could this
+#: glob-shaped code token coincidentally expand to a protected name"
+#: reasoning is switched off, because content is never expanded by a shell.
+MentionContext = Literal["bash", "content"]
+
+
+def find_protected_mention(
+    command: str,
+    patterns: tuple[str, ...],
+    *,
+    deadline: float | None = None,
+    context: MentionContext = "bash",
+) -> str | None:
     """First protected glob a token of ``command`` mentions, else ``None``.
 
     A mention is a shell WORD that matches a protected glob (after `~`/`$HOME`
@@ -745,14 +1229,61 @@ def find_protected_mention(command: str, patterns: tuple[str, ...]) -> str | Non
 
     Thin wrapper over :func:`find_protected_mention_detail`, which also
     reports WHICH token matched. Kept as the primary entry point so the
-    callers that only need the glob are unaffected.
+    callers that only need the glob are unaffected. ``deadline`` (Plan 00466
+    review 8 L1) is forwarded straight through -- see
+    :func:`find_protected_mention_detail`'s own docstring. ``context`` -- see
+    :data:`MentionContext` -- defaults to ``"bash"``, so every pre-existing
+    caller keeps its exact prior behaviour unchanged.
     """
-    detail = find_protected_mention_detail(command, patterns)
+    detail = find_protected_mention_detail(command, patterns, deadline=deadline, context=context)
     return None if detail is None else detail[0]
 
 
+#: B1 (Plan 00466 guard-defects review 2): the per-call DP budget bounds a
+#: single token's cost, but not the TOTAL cost of a scan over many ordinary
+#: tokens (the review's 1 MB-of-"a*b"-tokens case: no single token is
+#: pathological, the cost is volume). Comfortably under the client's 30s
+#: PreToolUse budget, with headroom for every other handler sharing it.
+#: Public (no leading underscore): ``secret_file_guard`` supplies this as
+#: its scan deadline, so the value is shared rather than duplicated.
+SCAN_DEADLINE_SECONDS: Final[float] = 5.0
+
+
+def bash_route_word_stream(command: str, *, deadline: float | None = None) -> list[str] | None:
+    """The single decoded word list safe to share between BOTH consumers on
+    the Bash route: the ordinary mention scan (:func:`iter_protected_
+    mentions`) and ``secret_file_guard``'s interpreter one-liner fallback
+    (review 7 follow-up, team-lead's double-scan finding).
+
+    The ordinary scan reads ``command`` with import-module-path stripping
+    applied (:func:`_without_import_module_paths`); the one-liner fallback
+    MUST read raw ``command`` (stripping a `-c "import ...` argument's own
+    module name corrupts that argument's syntax before the one-liner
+    scan's AST-based literal extraction ever runs -- proven RED by a real
+    inline-import one-liner that stopped matching once fed stripped words).
+    Decoding twice is only ACTUALLY necessary when stripping changes the
+    text at all -- true for the overwhelming majority of commands, which
+    contain no `import <module>` positioned where the stripper looks, so
+    the two decodes would be identical anyway.
+
+    Returns the ONE decode (safe for both consumers) when stripping made no
+    difference, or ``None`` when it did -- signalling that each consumer
+    must decode separately for correctness, exactly the pre-existing
+    two-pass behaviour, kept only for this rare case.
+    """
+    if _without_import_module_paths(command) != command:
+        return None
+    return list(shell_expansion.iter_normalised_shell_words(command, deadline=deadline))
+
+
 def find_protected_mention_detail(
-    command: str, patterns: tuple[str, ...]
+    command: str,
+    patterns: tuple[str, ...],
+    *,
+    deadline: float | None = None,
+    cwd: str | None = None,
+    context: MentionContext = "bash",
+    normalised_words: list[str] | None = None,
 ) -> tuple[str, str] | None:
     """``(pattern, token)`` for the first protected mention, else ``None``.
 
@@ -761,26 +1292,317 @@ def find_protected_mention_detail(
     input across repeated denied writes — the glob alone does not say which
     of a file's many words tripped it. Echoing it discloses nothing: it is
     text the caller just supplied, never content read from a protected file.
+
+    ``deadline`` (a ``time.monotonic()`` cutoff) is forwarded to
+    :func:`iter_protected_mentions` -- see its docstring for why exceeding it
+    raises rather than silently truncating the scan. ``cwd`` (M2c, Plan
+    00466 review 2) is the HOOK's working directory, forwarded to the
+    both-edges filesystem-truth route -- a caller with no hook cwd to hand
+    simply omits it. ``context`` -- see :data:`MentionContext` -- defaults to
+    ``"bash"``, unchanged from every pre-existing caller. ``normalised_words``
+    (review 7 follow-up) is forwarded straight through -- see
+    :func:`bash_route_word_stream`.
     """
-    return next(iter_protected_mentions(command, patterns), None)
+    return next(
+        iter_protected_mentions(
+            command,
+            patterns,
+            deadline=deadline,
+            cwd=cwd,
+            context=context,
+            normalised_words=normalised_words,
+        ),
+        None,
+    )
 
 
-def iter_protected_mentions(command: str, patterns: tuple[str, ...]) -> Iterator[tuple[str, str]]:
+def iter_protected_mentions(
+    command: str,
+    patterns: tuple[str, ...],
+    *,
+    deadline: float | None = None,
+    cwd: str | None = None,
+    context: MentionContext = "bash",
+    normalised_words: list[str] | None = None,
+) -> Iterator[tuple[str, str]]:
     """``(pattern, token)`` for EVERY protected mention in ``command``, in order.
 
     One entry per mentioning token, carrying the first glob it trips. The
     encrypted-target exemption (Plan 00459) needs them all: a command is let
     through only when each one is confirmed, and stopping at the first would
     confirm an encrypted file while a plaintext one sat later in the line.
+
+    ``deadline`` (B1, Plan 00466 guard-defects review 2) is an optional
+    ``time.monotonic()`` cutoff, checked once per token -- a whole-scan
+    backstop for the per-token DP budget in :func:`_globs_can_intersect`,
+    which bounds one token's cost but not the total across many ordinary
+    ones. Past the deadline this RAISES ``TimeoutError`` rather than
+    stopping and answering "no mention": a socket timeout on the client's
+    30s budget is an ALLOW for the whole PreToolUse chain, so silently
+    truncating here would silently skip whatever mention sat past the cutoff
+    -- the same bypass shape B1 found, moved one layer up. Raising lets
+    ``secret_file_guard``'s fail-closed wrapper (N11) turn it into a deny;
+    callers that do not pass a deadline are unaffected (default ``None``
+    never checks the clock).
+
+    ``cwd`` (M2c, Plan 00466 review 2) is the HOOK's working directory,
+    forwarded to :func:`_token_mention`'s both-edges filesystem-truth route.
+
+    The token stream is the ordinary tokenisation PLUS every raw brace word
+    (M2d) -- ``_tokenise`` splits on ``,``, which tears a real brace
+    alternation like ``{s,}`` apart before it can be recognised as one word,
+    so brace words are found and expanded straight from the untokenised text
+    instead (see :func:`_brace_expansion_tokens`).
+
+    B1-R3 (Plan 00466 review 3): the brace half of the token stream is now a
+    LAZY generator chained onto the ordinary tokens, not an eagerly-built
+    list -- review 2's own B1 fix passed a ``deadline``, but only checked it
+    once per token in THIS loop, after ``tokens`` had already been fully
+    materialised (including every brace spelling). An exponential
+    ``{a,b}``x22 word built its full expansion before the loop -- and
+    therefore the deadline check -- ever ran once. Chaining lazily means
+    pulling the NEXT token (which may be where an over-cap brace word raises
+    ``TooManyToEnumerateError``, itself fail-closed the same way a deadline
+    breach is) only happens after THIS token has already passed the check
+    below, so construction is now bounded by the very same per-token gate
+    that bounds consumption.
+
+    M-1 (n466-n24 review 4): a THIRD stream, :func:`_normalised_word_tokens`,
+    adds every shell WORD with quotes/escapes/ANSI-C decoded and any
+    statically-unresolvable substitution (``$VAR``, ``$(...)``, a backtick,
+    ``$((...))``) collapsed to a single ``*`` -- ``_tokenise``'s crude
+    delimiter split treats a quote character, `` ` ``, and ``$`` as plain
+    separators, so ``cat id_rs$x`` never produces a token resembling a
+    protected name at all, not even a mangled one, and ``cat id_"rs"a``
+    produces three USELESS fragments instead of the one real word a shell
+    would read. Lazily chained for the identical reason the brace stream is.
+    An ordinary word with nothing to decode normalises back to the exact
+    same text ``_tokenise`` already produced for it, so the per-token dedup
+    below (keyed on token TEXT, not stream) is what keeps that overlap from
+    doubling every ordinary mention.
+
+    ``context`` (n466-n24 review 4 addendum, false-positive fold-in b) is
+    forwarded to :func:`_token_mention` -- see :data:`MentionContext` for
+    why a ``"content"`` scan skips the aggressive glob-shaped heuristics
+    that a ``"bash"`` scan still runs.
+
+    Review 7 follow-up (team-lead's double-scan finding): the normalised-
+    word and ``file:`` URL streams below BOTH need the decoded word list
+    (the second one scans each word's own text for a `file:` URL), and used
+    to call :func:`shell_expansion.iter_normalised_shell_words` separately
+    -- a full second decode pass over the same text. They now share ONE
+    underlying generator via :func:`itertools.tee` when ``normalised_words``
+    is not supplied: still lazy relative to ``_tokenise``/
+    ``_brace_expansion_tokens`` above (the shared generator is never even
+    created if one of those two already answers the call), but each word is
+    decoded once and read by both consumers, not decoded twice.
+
+    ``normalised_words`` (review 7 follow-up): the Bash route in
+    ``secret_file_guard`` can go further still, in the common case where a
+    single decode is provably safe to share with its OWN interpreter
+    one-liner fallback too -- see :func:`bash_route_word_stream` for the
+    safety condition. When given, both streams below read this list
+    directly instead of tee-ing a fresh decode.
     """
     if not command or not patterns:
         return
     project_root = resolve_project_root()
     stem_pairs = _pattern_literal_stems(patterns)
-    for token in _tokenise(_without_import_module_paths(command)):
-        pattern = _token_mention(token, patterns, stem_pairs, project_root)
-        if pattern is not None:
+    both_edges_patterns = tuple(
+        pattern
+        for pattern in patterns
+        if _has_leading_wildcard(pattern) and _has_trailing_wildcard(pattern)
+    )
+    both_edges_stems = tuple(stem for stem, _pattern in _pattern_literal_stems(both_edges_patterns))
+    # The import-module-path exemption is applied ONCE, up front, and every
+    # stream reads the same stripped text -- an import statement's dotted
+    # module path is not a filesystem path regardless of which stream would
+    # otherwise re-discover it (M-1, n466-n24 review 4: the brace and
+    # normalised-word streams read raw `command` before this fix, so an
+    # `import <name>` line naming a protected stem in its own module path
+    # was exempted for `_tokenise` only, and still flagged by the other two).
+    import_stripped = _without_import_module_paths(command)
+    words_for_normalised_stream: Iterable[str]
+    words_for_file_url_stream: Iterable[str]
+    if normalised_words is not None:
+        words_for_normalised_stream = normalised_words
+        words_for_file_url_stream = normalised_words
+    else:
+        words_for_normalised_stream, words_for_file_url_stream = itertools.tee(
+            shell_expansion.iter_normalised_shell_words(import_stripped, deadline=deadline)
+        )
+    tokens = itertools.chain(
+        _tokenise(import_stripped),
+        _brace_expansion_tokens(import_stripped),
+        _normalised_word_tokens(
+            import_stripped, deadline=deadline, words=words_for_normalised_stream
+        ),
+        _file_url_path_tokens(import_stripped, deadline=deadline, words=words_for_file_url_stream),
+    )
+    # Own live finding (team-lead's 1 MB timing follow-up to review 3): real
+    # content is full of REPEATED short tokens (log lines, minified code,
+    # boilerplate) -- every one of `patterns`/`stem_pairs`/`project_root`/
+    # `cwd`/`both_edges_patterns`/`both_edges_stems` is fixed for the WHOLE
+    # call, so the verdict for a given token text can never differ between
+    # two occurrences of it in the same command. Caching by token text turns
+    # a scan that redid the full DP/bracket/filesystem work for every
+    # occurrence into one that pays for each DISTINCT token once.
+    #
+    # M-1 (n466-n24 review 4): the SAME cache doubles as the yield-dedup --
+    # an ordinary word with nothing for `_normalised_word_tokens` to decode
+    # is the identical string `_tokenise` already produced, so without this
+    # every plain mention would be reported twice, once per stream that
+    # happened to find it. `_mention_is_encrypted` (the one caller that
+    # consumes every yielded mention) is a pure function of token text, so
+    # collapsing repeats -- whether from stream overlap or the command
+    # genuinely repeating a word -- changes no verdict it computes.
+    mention_cache: dict[str, str | None] = {}
+    yielded_tokens: set[str] = set()
+    for token in tokens:
+        if deadline is not None and time.monotonic() > deadline:
+            raise TimeoutError("secret_file_guard mention scan exceeded its deadline")
+        if token in mention_cache:
+            pattern = mention_cache[token]
+        else:
+            pattern = _token_mention(
+                token,
+                patterns,
+                stem_pairs,
+                project_root,
+                cwd=cwd,
+                deadline=deadline,
+                both_edges_patterns=both_edges_patterns,
+                both_edges_stems=both_edges_stems,
+                context=context,
+            )
+            mention_cache[token] = pattern
+        if pattern is not None and token not in yielded_tokens:
+            yielded_tokens.add(token)
             yield (pattern, token)
+
+
+def _brace_expansion_tokens(command: str) -> Iterator[str]:
+    """Lazily yield every concrete spelling of every raw brace-expansion word
+    in ``command`` (B1-R3, Plan 00466 review 3).
+
+    One word at a time, via the shared bounded primitives in
+    ``utils/shell_expansion`` -- word discovery (:func:`shell_expansion.
+    iter_brace_words`) is itself bounded and non-backtracking, and each
+    word's own expansion (:func:`shell_expansion.expand_braces`) is capped
+    on total spellings AND recursion depth, raising ``TooManyToEnumerateError``
+    (a plain ``Exception``, caught the same way ``TimeoutError`` already is
+    by ``secret_file_guard``'s fail-closed wrapper) rather than ever
+    materialising an exponential blow-up. Superseded this module's own prior
+    ``_expand_braces``/``_brace_expanded_tokens`` -- see
+    ``iter_protected_mentions``'s docstring for why this must also be LAZY,
+    not just capped.
+
+    Each concrete spelling is then quote/escape-normalised (n466-n24 review
+    4, M-1): a brace ALTERNATIVE can itself carry a quote (``{'a',x}``), so
+    a shell reads ``id_rs{'a',x}`` as EITHER ``id_rsa`` or ``id_rsx`` -- the
+    quote strips only once the alternative is chosen, not from the group
+    template beforehand. Run over the EXPANDED spelling, matching that
+    order.
+    """
+    for word in shell_expansion.iter_brace_words(command):
+        for spelling in shell_expansion.expand_braces(word):
+            yield shell_expansion.normalise_word(spelling)
+
+
+def _normalised_word_tokens(
+    command: str, *, deadline: float | None = None, words: Iterable[str] | None = None
+) -> Iterator[str]:
+    """Lazily yield every shell WORD in ``command``, quote/escape/ANSI-C
+    decoded, with any statically-unresolvable substitution collapsed to a
+    single ``*`` (n466-n24 review 4, M-1).
+
+    A thin pass-through to :func:`shell_expansion.iter_normalised_shell_words`
+    -- the bounded, non-backtracking word scanner lives there so it stays
+    the one place shared with any other caller that needs the same class of
+    normalisation, the same reason brace expansion and the recursive glob
+    walk live there. A resulting word that now carries a ``*`` (from an
+    unresolved ``$VAR``/``$(...)``/backtick/``$((...))``) is not treated
+    specially here -- it reaches :func:`_token_mention` exactly like any
+    other glob-shaped token, where the EXISTING interior-wildcard DP
+    intersection (:func:`_globs_can_intersect`) decides whether it could
+    reach a protected path, denying only when a match is genuinely
+    possible.
+
+    ``deadline`` (review 7 follow-up) is forwarded straight through -- flat
+    word decoding is no longer bounded by a word COUNT (that capped
+    ordinary large content, not just adversarial input), so THIS deadline,
+    the same one ``iter_protected_mentions`` already checks per token, is
+    now the only volume backstop for this stream too.
+
+    ``words`` (review 7 follow-up, team-lead's double-scan finding): when
+    given, yields THIS pre-decoded stream instead of calling
+    :func:`shell_expansion.iter_normalised_shell_words` again --
+    ``iter_protected_mentions`` passes one branch of an
+    :func:`itertools.tee` split shared with :func:`_file_url_path_tokens`,
+    so the underlying decode runs once for both streams.
+    """
+    if words is not None:
+        yield from words
+        return
+    yield from shell_expansion.iter_normalised_shell_words(command, deadline=deadline)
+
+
+#: `file:///path`, `file://localhost/path`, or the rarer single-slash
+#: `file:/path` -- the scheme and an optional empty/`localhost` host are
+#: consumed, leaving the absolute filesystem path as the capture group.
+#: `\b` anchors the scheme so an unrelated word ending in "...file:" (rare,
+#: but cheap to exclude) does not false-trigger. Case-INSENSITIVE (review 7
+#: MAJOR-4): URL schemes are case-insensitive per RFC 3986, and curl itself
+#: accepts `FILE://`/`File://` exactly like `file://` -- the review-6 fix
+#: only matched the lowercase spelling.
+_FILE_URL_RE: Final[re.Pattern[str]] = re.compile(
+    r"\bfile:(?:/{2})?(?:localhost)?(/[^\s'\"<>|;&)]*)", re.IGNORECASE
+)
+
+
+def _file_url_path_tokens(
+    command: str, *, deadline: float | None = None, words: Iterable[str] | None = None
+) -> Iterator[str]:
+    """Lazily yield the percent-decoded filesystem PATH named by every
+    ``file:`` URL in ``command`` (review 7: guard-defects review 6's own
+    probe found `curl -s file:///root/.ssh/id_r%73a` invisible to every
+    other stream -- a real, literal local-file READ route, in a DIFFERENT
+    spelling than a plain bash token, reachable from `curl`, `wget`, a
+    Python ``urllib`` one-liner, ``git clone file://...``, or anything else
+    that accepts a URL argument).
+
+    Percent-decoding (``urllib.parse.unquote``) happens BEFORE the result is
+    handed to :func:`_token_mention`, so ``id_r%73a`` is judged as the
+    literal path ``id_rsa`` it names, exactly like any other path mention --
+    no separate matching logic, just a different way to PRODUCE a candidate
+    token.
+
+    Run over TWO sources (review 7 MAJOR-4): ``command``'s raw text, and
+    every word :func:`shell_expansion.iter_normalised_shell_words` produces
+    after quote removal -- a URL split by shell quoting
+    (``curl 'file:///root/.ssh/id_r'%73a``, ``curl file:///root/.ssh/id_r
+    "%73"a``) never appears as one contiguous ``file:...`` span in the raw
+    text at all; only the DECODED word (quotes stripped, adjacent pieces
+    concatenated into one shell word) reassembles it. The raw-text pass
+    stays first so an ordinary, unquoted URL costs nothing beyond the
+    existing regex scan.
+
+    ``words`` (review 7 follow-up, team-lead's double-scan finding): when
+    given, the second pass reads THIS pre-decoded stream instead of calling
+    :func:`shell_expansion.iter_normalised_shell_words` again --
+    ``iter_protected_mentions`` passes the other branch of the same
+    :func:`itertools.tee` split fed to :func:`_normalised_word_tokens`.
+    """
+    for match in _FILE_URL_RE.finditer(command):
+        yield urllib.parse.unquote(match.group(1))
+    word_stream = (
+        words
+        if words is not None
+        else shell_expansion.iter_normalised_shell_words(command, deadline=deadline)
+    )
+    for word in word_stream:
+        for match in _FILE_URL_RE.finditer(word):
+            yield urllib.parse.unquote(match.group(1))
 
 
 def _token_mention(
@@ -788,8 +1610,41 @@ def _token_mention(
     patterns: tuple[str, ...],
     stem_pairs: list[tuple[str, str]],
     project_root: str | None,
+    *,
+    cwd: str | None = None,
+    deadline: float | None = None,
+    both_edges_patterns: tuple[str, ...] = (),
+    both_edges_stems: tuple[str, ...] = (),
+    context: MentionContext = "bash",
+    realpath_cache: dict[str, str | None] | None = None,
 ) -> str | None:
-    """The first protected glob ``token`` names (or could glob-expand to), else None."""
+    """The first protected glob ``token`` names (or could glob-expand to), else None.
+
+    ``context`` (n466-n24 review 4 addendum, false-positive fold-in b) --
+    see :data:`MentionContext`. The LITERAL check just below (an exact/glob-
+    pattern comparison of the raw token and its bracket-expansions against
+    every configured pattern) runs unconditionally in both contexts; only
+    the AGGRESSIVE glob-shaped heuristics further down -- edge-overlap
+    fnmatch, the full DP intersection, and the both-edges residue/FS-truth
+    routes -- are skipped for ``"content"``. A live example that must stay
+    ALLOWED for content: the Python unpacking-plus-subscript shape
+    ``*words[subcommand_index`` (from a real list literal
+    ``[*words[:subcommand_index], ...]``) is glob-shaped by the crude
+    tokeniser's own delimiter split, but it names no real path and a shell
+    will never expand it -- it is not a Bash word at all.
+
+    ``realpath_cache`` (review 7 follow-up, team-lead's memoisation cut):
+    an optional dict, LOCAL to one caller's scan (never module-level --
+    per-request state on a shared object is exactly what N23 forbids),
+    memoising the ``os.path.realpath`` syscall the symlink-alias check
+    below makes. ``iter_protected_mentions`` already dedups repeated
+    TOKENS before ever reaching this function (its own ``mention_cache``),
+    so this only helps a caller that invokes ``_token_mention`` directly,
+    outside that loop, for a genuinely repeated token (e.g.
+    ``is_grep_pattern_only_mention`` checking several file-target words).
+    ``None`` (the default) skips the cache entirely -- identical behaviour
+    to before this parameter existed.
+    """
     for raw_form in _normalised_token_forms(token):
         # A token whose bracket expressions are all finite denotes exactly
         # the set of its expansions, so that set -- not the bracketed
@@ -797,12 +1652,15 @@ def _token_mention(
         expansions = _expand_bracket_expressions(raw_form)
         # The UNEXPANDED spelling still faces the LITERAL check: a shell
         # passes an unmatched glob through verbatim, so a file literally
-        # named `x[0].secret` is reachable under that exact name.
+        # named `x[0].secret` is reachable under that exact name. This is
+        # the "literal matcher" content scanning relies on exclusively.
         literal_forms = [raw_form] if expansions == [raw_form] else [raw_form, *expansions]
         for form in literal_forms:
-            for pattern in patterns:
-                if path_matches_globs(form, (pattern,), project_root=project_root):
-                    return pattern
+            matched = first_matching_glob(form, patterns, project_root=project_root)
+            if matched is not None:
+                return matched
+        if context != "bash":
+            continue
         for form in expansions:
             if not _is_glob_shaped(form):
                 continue
@@ -886,13 +1744,44 @@ def _token_mention(
                     stem_basename,
                     leading_wildcard=has_leading_wildcard,
                     trailing_wildcard=has_trailing_wildcard,
+                    pattern_has_trailing_wildcard=_has_trailing_wildcard(pattern),
+                    token_has_wildcard_after_leading=_has_wildcard_after_leading(basename),
                 ):
                     return pattern
-    real = _realpath_if_resolvable(token)
-    if real is not None:
-        for pattern in patterns:
-            if path_matches_globs(real, (pattern,), project_root=project_root):
-                return pattern
+        if _is_glob_shaped(raw_form):
+            match = _glob_intersection_mention(expansions, stem_pairs)
+            if match is not None:
+                return match
+            match = _both_edges_glob_mention(
+                expansions,
+                both_edges_patterns,
+                both_edges_stems,
+                project_root,
+                cwd,
+                deadline=deadline,
+            )
+            if match is not None:
+                return match
+    # Own live finding (team-lead's 1 MB timing follow-up to review 3): the
+    # symlink-alias check exists for the `worktree_create` seeding case --
+    # an innocuous LINK name pointing at a protected TARGET -- which is
+    # only a plausible shape for a token that could itself BE a literal
+    # filename. A glob-shaped token (`a*b`, `id[0-9]`) would need a real
+    # on-disk symlink literally named with an unescaped `*`/`?`/bracket
+    # expression to matter here -- legal on most filesystems but not a
+    # shape any genuine alias uses, and skipping the `os.stat` syscall for
+    # it is the single biggest per-token cost this scan pays at volume (a
+    # 1 MB command built of ordinary glob-shaped tokens did one real
+    # syscall per token for no security benefit).
+    if not _is_glob_shaped(token):
+        if realpath_cache is not None and token in realpath_cache:
+            real = realpath_cache[token]
+        else:
+            real = _realpath_if_resolvable(token)
+            if realpath_cache is not None:
+                realpath_cache[token] = real
+        if real is not None:
+            return first_matching_glob(real, patterns, project_root=project_root)
     return None
 
 
@@ -919,34 +1808,60 @@ def find_protected_mention_strict(command: str, patterns: tuple[str, ...]) -> st
     project_root = resolve_project_root()
     for token in _tokenise(command):
         for form in _normalised_token_forms(token):
-            for pattern in patterns:
-                if path_matches_globs(form, (pattern,), project_root=project_root):
-                    return pattern
+            matched = first_matching_glob(form, patterns, project_root=project_root)
+            if matched is not None:
+                return matched
             if _is_glob_shaped(form):
                 match = _expand_glob_token(form, patterns, project_root)
                 if match is not None:
                     return match
         real = _realpath_if_resolvable(token)
         if real is not None:
-            for pattern in patterns:
-                if path_matches_globs(real, (pattern,), project_root=project_root):
-                    return pattern
+            matched = first_matching_glob(real, patterns, project_root=project_root)
+            if matched is not None:
+                return matched
     return None
 
 
 def _expand_glob_token(
-    token: str, patterns: tuple[str, ...], project_root: str | None
+    token: str,
+    patterns: tuple[str, ...],
+    project_root: str | None,
+    *,
+    cwd: str | None = None,
+    max_expansions: int | None = None,
+    deadline: float | None = None,
 ) -> str | None:
     """First protected pattern matched by a file ``token`` actually expands to.
 
-    Tried against each plausible base (the project root, then the process
-    cwd — a Bash tool call runs relative to one of these) so a relative glob
-    like ``docs/*.md`` is resolved the way the shell would resolve it. An
+    Tried against each plausible base (the project root, then ``cwd`` when
+    given, then the process's own cwd — a Bash tool call runs relative to
+    one of these) so a relative glob like ``docs/*.md`` is resolved the way
+    the shell would resolve it. ``cwd`` is the HOOK's working directory
+    (Plan 00466 review 2, M2c) — threading it through lets a caller resolve
+    against where the tool call actually ran rather than only where this
+    long-lived daemon process happens to sit; a caller that has no hook cwd
+    to hand simply omits it and keeps the pre-existing behaviour. An
     absolute token is tried as-is, split into its anchor plus the remaining
     pattern so ``Path.glob`` (which only accepts a RELATIVE pattern) can
     still expand it. A token that expands to nothing, or only to unrelated
     files, returns ``None`` — this is the filesystem-truth check the
     heuristic stem-overlap match in ``find_protected_mention`` does not have.
+
+    ``max_expansions`` bounds how many glob RESULTS are examined across all
+    bases before giving up unmatched (``None`` means unbounded, the
+    pre-existing behaviour) — a PreToolUse hot path must not pay for an
+    unbounded directory listing.
+
+    M-1 (Plan 00466 review 3): a pattern carrying a recursive ``**``
+    component is walked through :func:`shell_expansion.bounded_recursive_glob`
+    instead of ``Path.glob`` — ``Path.glob("**/…")`` only counts YIELDED
+    matches, so a token whose final component matches NOTHING still walks
+    the entire tree before concluding, however large it is. A non-recursive
+    pattern keeps using ``Path.glob`` (a single directory listing bounds
+    its own cost; not the shape review 3 flagged). ``deadline`` is forwarded
+    to the bounded walker so it is checked INSIDE the filesystem walk, not
+    only between tokens.
     """
     token_path = Path(token)
     if token_path.is_absolute():
@@ -955,34 +1870,86 @@ def _expand_glob_token(
         bases: list[Path] = []
         if project_root:
             bases.append(Path(project_root))
-        cwd = Path.cwd()
-        if cwd not in bases:
-            bases.append(cwd)
+        if cwd is not None:
+            try:
+                hook_cwd = Path(cwd)
+            except (OSError, ValueError) as exc:
+                # An unparseable `cwd` string (e.g. embedded NUL) means no
+                # extra base -- the project-root/daemon-cwd bases below
+                # still apply, so this is a narrowing, not a total failure.
+                logger.debug("secret_file_matching: could not parse hook cwd %r: %s", cwd, exc)
+                hook_cwd = None
+            if hook_cwd is not None and hook_cwd.is_absolute() and hook_cwd not in bases:
+                bases.append(hook_cwd)
+        daemon_cwd = Path.cwd()
+        if daemon_cwd not in bases:
+            bases.append(daemon_cwd)
         search_specs = [(base, token) for base in bases]
 
     seen: set[str] = set()
+    examined = 0
     for base, pattern_str in search_specs:
         key = f"{base}:{pattern_str}"
         if key in seen:
             continue
         seen.add(key)
-        # `Path.glob` is a generator function: the call itself never raises.
-        # A pattern it rejects (`a**b`) raises ValueError on the FIRST
-        # ITERATION, and an unreadable directory raises OSError mid-walk, so
-        # the guard must wrap the consumption, not the construction (Plan
-        # 00357 — a guard around the call alone let the exception escape and
-        # fail the calling security handler open). Consumed lazily, still.
+        # Any pattern rooted at the bare filesystem anchor goes through the
+        # bounded walker, whether or not it spells `**` literally -- own
+        # live finding, own RED test: `/*/*/*/*/*/*/*.se?ret-zq9x` (one of
+        # review 3's own probe shapes) carries no `**` at all but still
+        # forces `Path.glob` to expand a full directory listing at every
+        # one of several root-relative levels. `bounded_recursive_glob`
+        # itself decides whether THIS pattern is broad enough to refuse.
+        if "**" in pattern_str or base == Path(base.anchor):
+            # Own walk, own cap on entries VISITED (not just matched) --
+            # TooManyToEnumerateError/TimeoutError deliberately propagate
+            # uncaught here: both are fail-closed signals for the caller's
+            # own wrapper, not "this token expands to nothing".
+            matches_iter: Iterator[Path] = shell_expansion.bounded_recursive_glob(
+                base, pattern_str, deadline=deadline
+            )
+        else:
+            # `Path.glob` is a generator function: the call itself never
+            # raises. A pattern it rejects (`a**b`) raises ValueError on the
+            # FIRST ITERATION, and an unreadable directory raises OSError
+            # mid-walk, so the guard must wrap the consumption, not the
+            # construction (Plan 00357 — a guard around the call alone let
+            # the exception escape and fail the calling security handler
+            # open). Consumed lazily, still.
+            matches_iter = base.glob(pattern_str)
+        # Fail CLOSED (team-lead's review-4 refinement): a blanket
+        # `except (OSError, ValueError): continue` here would mean ANY
+        # expansion failure degrades to "no mention", which is exactly the
+        # class this whole review round has been closing everywhere else --
+        # an exception during evaluation is not a decision this function
+        # actually made. But NOT every OSError means the same thing: ENOENT
+        # is filesystem TRUTH ("this directory prefix does not exist, so
+        # nothing under it can be a mention"), narrow enough to prove a
+        # negative and continue searching other bases. Anything else
+        # (permission denied, an I/O error, ...) means the expansion could
+        # not be COMPLETED -- this function cannot rule out a match hiding
+        # behind whatever raised, so it must NOT be treated as "expands to
+        # nothing"; it propagates uncaught to the caller's own fail-closed
+        # wrapper (secret_file_guard's N11 net for the Bash-mention route
+        # this function backs). `ValueError` (a malformed pattern) is never
+        # a proof of absence either way, so it always propagates.
         try:
-            for match in base.glob(pattern_str):
-                match_str = str(match)
-                for pattern in patterns:
-                    if path_matches_globs(match_str, (pattern,), project_root=project_root):
-                        return pattern
-        except (OSError, ValueError):
-            # A token the filesystem cannot expand names nothing on disk, which
-            # is exactly the "expands to nothing" case: no mention. Registered
-            # in error_hiding_exclusions.json.
-            continue
+            for match in matches_iter:
+                examined += 1
+                matched = first_matching_glob(str(match), patterns, project_root=project_root)
+                if matched is not None:
+                    return matched
+                if max_expansions is not None and examined >= max_expansions:
+                    return None
+        except OSError as exc:
+            if exc.errno != errno.ENOENT:
+                raise
+            logger.debug(
+                "secret_file_matching: %r under %s does not exist, no match possible: %s",
+                pattern_str,
+                base,
+                exc,
+            )
     return None
 
 
@@ -1105,6 +2072,8 @@ def is_exempt_invocation(
     command: str,
     consumers: tuple[ConsumerSpec, ...],
     patterns: tuple[str, ...] = DEFAULT_PROTECTED_PATTERNS,
+    *,
+    deadline: float | None = None,
 ) -> bool:
     """True when ``command`` is one of the two sanctioned path-mention shapes.
 
@@ -1131,6 +2100,9 @@ def is_exempt_invocation(
     changes which command runs or what it reads. ``then``, ``do`` and the
     other compound-only reserved words are NOT, so a fragment of a compound
     command is never judged as the single command this exemption requires.
+
+    ``deadline`` (Plan 00466 review 8 L1) is forwarded to
+    :func:`_paths_only_in_flag_position`'s per-word mention checks.
     """
     stripped = command.strip()
     if not stripped:
@@ -1159,7 +2131,7 @@ def is_exempt_invocation(
             continue
         if _denied_subcommand_used(words, consumer):
             return False
-        return _paths_only_in_flag_position(words, consumer, patterns)
+        return _paths_only_in_flag_position(words, consumer, patterns, deadline=deadline)
     return False
 
 
@@ -1212,7 +2184,11 @@ def _denied_subcommand_used(words: list[str], consumer: ConsumerSpec) -> bool:
 
 
 def _paths_only_in_flag_position(
-    words: list[str], consumer: ConsumerSpec, patterns: tuple[str, ...]
+    words: list[str],
+    consumer: ConsumerSpec,
+    patterns: tuple[str, ...],
+    *,
+    deadline: float | None = None,
 ) -> bool:
     """True when no bare word other than a flag VALUE looks path-mention-risky.
 
@@ -1222,6 +2198,10 @@ def _paths_only_in_flag_position(
     a ``--flag=value`` form). Any other placement voids the exemption — the
     deny rule then applies. ``patterns`` are the caller's EFFECTIVE globs —
     see ``is_exempt_invocation`` for why the defaults must not be used here.
+    ``deadline`` (Plan 00466 review 8 L1) is forwarded to
+    :func:`find_protected_mention` per word -- this loop's own total cost
+    across many words is otherwise unbounded the same way B1 found for
+    :func:`iter_protected_mentions`.
     """
     flag_value_positions: set[int] = set()
     for index, word in enumerate(words):
@@ -1238,7 +2218,7 @@ def _paths_only_in_flag_position(
         bare = word.strip("\"'")
         if bare.startswith("-"):
             continue
-        if find_protected_mention(bare, patterns) is not None:
+        if find_protected_mention(bare, patterns, deadline=deadline) is not None:
             return False
     return True
 
@@ -1299,6 +2279,7 @@ def is_encrypted_target_invocation(
     *,
     cwd: str | None,
     is_encrypted: Callable[[str], bool],
+    deadline: float | None = None,
 ) -> bool:
     """True when ``command`` names only protected files confirmed encrypted,
     in a command that cannot decrypt them (Plan 00459).
@@ -1320,6 +2301,9 @@ def is_encrypted_target_invocation(
 
     A leading ``time`` or ``!`` is looked past before the head is read, as in
     ``is_exempt_invocation``; no other reserved word is.
+
+    ``deadline`` (Plan 00466 review 8 L1) is forwarded to
+    :func:`iter_protected_mentions`.
     """
     if any(char in _EXPANSION_CHARS for char in command):
         return False
@@ -1328,7 +2312,7 @@ def is_encrypted_target_invocation(
         return False
     if not _is_encrypted_target_reader(words):
         return False
-    mentions = list(iter_protected_mentions(command, patterns))
+    mentions = list(iter_protected_mentions(command, patterns, deadline=deadline))
     if not mentions:
         return False
     literal_words = frozenset(words)
@@ -1379,6 +2363,193 @@ def _renders_a_diff(word: str) -> bool:
     if word.startswith("-") and not word.startswith("--"):
         return any(letter in _DIFF_RENDERING_SHORT_FLAGS for letter in word[1:])
     return False
+
+
+#: grep-family binaries: their FIRST positional argument (or an `-e`
+#: flag's value) is a search PATTERN, not a filesystem path.
+_GREP_FAMILY_COMMANDS: Final[frozenset[str]] = frozenset({"grep", "egrep", "fgrep"})
+
+#: Long flag whose VALUE is pattern content, never a file target.
+_GREP_PATTERN_VALUE_LONG_FLAG: Final[str] = "--regexp"
+
+#: Long flags whose VALUE is a FILE that grep itself opens and reads (taken
+#: from GNU grep 3.8's `--help`, not from memory): `--file` reads patterns
+#: from it, `--exclude-from` reads exclusion globs from it. Unlike a search
+#: PATTERN, grep performs a real read of this path, so its value is a
+#: file-target word and must be judged like any other one -- exempting it
+#: would let `grep -f ~/.ssh/id_rsa docs/a.md` print the key.
+_GREP_FILE_VALUE_LONG_FLAGS: Final[frozenset[str]] = frozenset({"--file", "--exclude-from"})
+
+#: Short options that consume the rest of their token (or the next word) as
+#: a value, keyed by what that value IS. GNU grep's getopt clustering means
+#: the first such letter reached inside a `-xyz` cluster claims everything
+#: after it in the token (attached value); letters before it in the same
+#: cluster are plain flags. `e` supplies a PATTERN; `f` supplies a FILE
+#: grep reads; the rest (`m`, `A`, `B`, `C`, `d`, `D`) take a value that is
+#: neither, so it is consumed and dropped rather than left to be
+#: misclassified as a positional file-target word.
+_GREP_SHORT_PATTERN_VALUE_OPT: Final[str] = "e"
+_GREP_SHORT_FILE_VALUE_OPT: Final[str] = "f"
+_GREP_SHORT_OTHER_VALUE_OPTS: Final[frozenset[str]] = frozenset({"m", "A", "B", "C", "d", "D"})
+_GREP_SHORT_VALUE_OPTS: Final[frozenset[str]] = (
+    frozenset({_GREP_SHORT_PATTERN_VALUE_OPT, _GREP_SHORT_FILE_VALUE_OPT})
+    | _GREP_SHORT_OTHER_VALUE_OPTS
+)
+
+
+def is_grep_pattern_only_mention(
+    command: str,
+    patterns: tuple[str, ...] = DEFAULT_PROTECTED_PATTERNS,
+    *,
+    deadline: float | None = None,
+) -> bool:
+    """True when EVERY protected mention in ``command`` sits only in a
+    grep-family command's PATTERN argument, never in a FILE-TARGET argument
+    (Plan 00466 niggle, gd5_fp review probe).
+
+    Searching FOR a protected name's literal text is not reading the file:
+    ``grep 'id_rsa' docs/ssh-setup.md`` was denied outright, blocking an
+    ordinary documentation search that never opens the real key. The
+    protected mention here is the search PATTERN, not a path.
+
+    Scoped the same way :func:`is_encrypted_target_invocation` is (and
+    reusing its exact primitives): no expansion character anywhere in
+    ``command`` (glob, substitution, tilde -- keeping this to the simple,
+    fully-literal case), one parseable simple command (no separator, pipe,
+    or redirection-that-isn't-a-redirect), head is a bare grep/egrep/fgrep.
+
+    Only ``-e``/``--regexp`` supplies a PATTERN. ``-f``/``--file`` and
+    ``--exclude-from`` name a FILE that grep itself opens and reads (GNU
+    grep 3.8's own ``--help`` lists no other file-reading pattern/exclusion
+    flags), so their value is checked exactly like a file-target word, not
+    exempted as a pattern -- this is what stops ``grep -f ~/.ssh/id_rsa
+    docs/a.md`` (main denies it; an earlier version of this exemption
+    wrongly allowed it, Plan 00466 review 8 MAJOR-A) and an attached
+    ``-f<key>``/``--file=<key>``/``--exclude-from=<key>`` value from
+    slipping through, whether the flag stands alone or is clustered with
+    other short options (``-rhf <key>``).
+
+    Every OTHER bare positional word (after the pattern slot -- an
+    ``-e``/``--regexp`` flag's value when present, otherwise the first bare
+    word) is a file-target argument and is checked with the SAME per-token
+    judge (:func:`_token_mention`) the rest of the scan trusts; if ANY of
+    them, or any ``-f``/``--file``/``--exclude-from`` value, is itself a
+    protected mention, the exemption does not apply and the deny rule
+    stands -- this is what stops ``grep foo ~/.ssh/id_rsa``-shaped commands
+    (though the tilde alone already fails closed above) or ``grep id_rsa
+    id_rsa`` (the second, file-target occurrence) from slipping through.
+
+    ``deadline`` (Plan 00466 review 8 L1) is forwarded to
+    :func:`iter_protected_mentions`.
+    """
+    if any(char in _EXPANSION_CHARS for char in command):
+        return False
+    words = _shell_words(strip_transparent_reserved_words(command))
+    if not words or not _is_single_simple_command(words):
+        return False
+    head = words[0]
+    if head not in _GREP_FAMILY_COMMANDS:
+        return False
+
+    saw_explicit_pattern_source = False
+    file_target_values: list[str] = []
+    positional_indices: list[int] = []
+    cursor = 1
+    end_of_options = False
+    while cursor < len(words):
+        word = words[cursor]
+        if not end_of_options and word == "--":
+            end_of_options = True
+            cursor += 1
+            continue
+        if end_of_options or word == "-" or not word.startswith("-"):
+            positional_indices.append(cursor)
+            cursor += 1
+            continue
+        if word.startswith("--"):
+            long_flag, has_eq, attached_value = word.partition("=")
+            if long_flag == _GREP_PATTERN_VALUE_LONG_FLAG:
+                saw_explicit_pattern_source = True
+                # The value is pattern content either way; nothing to check.
+                if not has_eq and cursor + 1 < len(words):
+                    cursor += 1
+                cursor += 1
+                continue
+            if long_flag in _GREP_FILE_VALUE_LONG_FLAGS:
+                if long_flag == "--file":
+                    saw_explicit_pattern_source = True
+                if has_eq:
+                    file_target_values.append(attached_value)
+                elif cursor + 1 < len(words):
+                    file_target_values.append(words[cursor + 1])
+                    cursor += 1
+                cursor += 1
+                continue
+            cursor += 1
+            continue
+        # Short-option cluster: GNU grep's getopt claims the rest of the
+        # token for the FIRST value-taking letter it reaches, attached if
+        # anything follows in the token, otherwise the next word.
+        consumed_next = False
+        for position, letter in enumerate(word[1:], start=1):
+            if letter not in _GREP_SHORT_VALUE_OPTS:
+                continue
+            attached_value = word[position + 1 :]
+            value: str | None
+            if attached_value:
+                value = attached_value
+            elif cursor + 1 < len(words):
+                value = words[cursor + 1]
+                consumed_next = True
+            else:
+                value = None
+            if letter == _GREP_SHORT_PATTERN_VALUE_OPT:
+                saw_explicit_pattern_source = True
+                # Pattern content either way; nothing to check.
+            elif letter == _GREP_SHORT_FILE_VALUE_OPT:
+                saw_explicit_pattern_source = True
+                if value is not None:
+                    file_target_values.append(value)
+            break
+        cursor += 2 if consumed_next else 1
+
+    if not saw_explicit_pattern_source and positional_indices:
+        positional_indices = positional_indices[1:]
+
+    mentions = list(iter_protected_mentions(command, patterns, deadline=deadline))
+    if not mentions:
+        return False
+
+    project_root = resolve_project_root()
+    stem_pairs = _pattern_literal_stems(patterns)
+    both_edges_patterns = tuple(
+        pattern
+        for pattern in patterns
+        if _has_leading_wildcard(pattern) and _has_trailing_wildcard(pattern)
+    )
+    both_edges_stems = tuple(stem for stem, _pattern in _pattern_literal_stems(both_edges_patterns))
+    # Team-lead's memoisation cut: this loop calls `_token_mention` directly,
+    # outside `iter_protected_mentions`'s own per-scan `mention_cache`, so a
+    # file-target word repeated across several positional arguments would
+    # otherwise pay for a fresh `os.path.realpath` syscall every occurrence.
+    # LOCAL to this one call, never module-level (N23).
+    realpath_cache: dict[str, str | None] = {}
+    file_target_words = [words[index] for index in positional_indices] + file_target_values
+    for target_word in file_target_words:
+        if (
+            _token_mention(
+                target_word,
+                patterns,
+                stem_pairs,
+                project_root,
+                both_edges_patterns=both_edges_patterns,
+                both_edges_stems=both_edges_stems,
+                realpath_cache=realpath_cache,
+            )
+            is not None
+        ):
+            return False
+    return True
 
 
 def _mention_is_encrypted(

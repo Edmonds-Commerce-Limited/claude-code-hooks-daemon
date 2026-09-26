@@ -6,8 +6,11 @@ line is submitted — the ordinary single-Enter submit leaves the switch
 incomplete; (2) there was no way to trigger a model switch on demand for
 end-to-end testing. This adds a manual ``<session>.model-switch-intent``
 signal (mirroring the goal-intent signal), consumed at the same injection
-choke point as compact/continue/goal/effort/auto-model, and a CLI helper
+choke point as compact/continue/goal/auto-model, and a CLI helper
 (``--emit-model-switch <family>``) that writes one.
+
+Plan 00466 N47 review 2: the supervisor injects no ``/effort`` of any kind,
+so the audit-trail tests below cover only the ``/model`` family.
 """
 
 from __future__ import annotations
@@ -78,13 +81,14 @@ def _decide(
 ) -> SupervisorTickOutcome:
     policy = _mod.CompactPolicy()
     machine = machine or _mod.CompactStateMachine(policy)
-    return _mod.decide_once(
+    outcome: SupervisorTickOutcome = _mod.decide_once(
         machine,
         sidecar_dir=sidecar_dir,
         facts=facts or _facts(),
         dry_run=dry_run,
         freshness_seconds=policy.freshness_seconds,
     )
+    return outcome
 
 
 # ── load_model_switch_signal ─────────────────────────────────────────────────
@@ -314,10 +318,10 @@ class TestWriteModelSwitchSignal:
 # ── Audit-trail chat message after silent injections ──────────────────────────
 #
 # /compact and /goal injections are self-evidencing (their payload carries
-# visible text), but /model and /effort vanish from the chat without trace —
-# decision.log is the only record, and nobody watching the session can tell
-# anything happened. After a successful silent-injection sequence the
-# supervisor therefore flushes ONE visible, bot-prefixed audit message.
+# visible text), but /model vanishes from the chat without trace — decision.log
+# is the only record, and nobody watching the session can tell anything
+# happened. After a successful silent-injection sequence the supervisor
+# therefore flushes ONE visible, bot-prefixed audit message.
 
 
 class _AuditDriver:
@@ -335,12 +339,10 @@ class _AuditDriver:
             Path(outcome.consume_signal_path).unlink()
         return outcome
 
-    def switch_and_couple(self) -> None:
-        _write_switch(self.sidecar_dir, family="fable")
+    def switch(self) -> None:
+        _write_switch(self.sidecar_dir, family="opus")
         first = self.tick()
         assert first.decision_value == "would-model"
-        second = self.tick()
-        assert second.decision_value == "would-effort"
 
 
 class TestAuditTrailFlush:
@@ -354,20 +356,18 @@ class TestAuditTrailFlush:
         to a single flush that clears the backlog.
         """
         driver = _AuditDriver(tmp_path / "cs")
-        driver.switch_and_couple()
+        driver.switch()
         outcome = driver.tick()
         assert outcome.decision_value == "would-audit"
         assert outcome.payload is None
         assert outcome.noop_reason_log is not None
-        assert "/model fable" in outcome.noop_reason_log
-        assert "/effort low" in outcome.noop_reason_log
+        assert "/model opus" in outcome.noop_reason_log
         # Flushed once: the pending items are cleared and the next tick is a
         # plain NOOP with nothing left to say.
         assert driver.machine.audit_pending == ()
         assert driver.tick().decision_value != "would-audit"
 
     def test_audit_action_glyph_maps_commands(self) -> None:
-        assert _mod._audit_action_glyph("/effort xhigh (floor)") == _mod._AUDIT_ACTION_EFFORT_GLYPH
         assert _mod._audit_action_glyph("/model fable (restore)") == _mod._AUDIT_ACTION_MODEL_GLYPH
         # Unknown action families fall back to the neutral bullet.
         assert _mod._audit_action_glyph("something else") == _mod._AUDIT_ACTION_DEFAULT_GLYPH
@@ -379,7 +379,7 @@ class TestAuditTrailFlush:
         # claim either — a failed flush loses the audit record, it never
         # fabricates one.
         driver = _AuditDriver(tmp_path / "cs")
-        driver.switch_and_couple()
+        driver.switch()
         failed = driver.tick(injected=False)
         assert failed.decision_value == "would-audit"
         assert driver.machine.audit_pending == ()
@@ -393,7 +393,7 @@ class TestAuditTrailFlush:
         so the notice surfaces at once and the backlog clears.
         """
         driver = _AuditDriver(tmp_path / "cs")
-        driver.switch_and_couple()
+        driver.switch()
         outcome = _decide(
             driver.sidecar_dir,
             machine=driver.machine,

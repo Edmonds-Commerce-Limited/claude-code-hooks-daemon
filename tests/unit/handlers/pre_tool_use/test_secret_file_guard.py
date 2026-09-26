@@ -17,13 +17,15 @@ from tests.vault_payloads import vault_file_bytes
 from claude_code_hooks_daemon.constants import HandlerID, Priority
 from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.core import Decision
+from claude_code_hooks_daemon.core.chain import HandlerChain
 from claude_code_hooks_daemon.core.data_layer import reset_data_layer
-from claude_code_hooks_daemon.core.rule import Rule
+from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.handlers.pre_tool_use import secret_file_guard as guard_module
 from claude_code_hooks_daemon.handlers.pre_tool_use.secret_file_guard import (
     SecretFileGuardHandler,
 )
 from claude_code_hooks_daemon.utils import encrypted_at_rest
+from claude_code_hooks_daemon.utils import secret_file_matching as sfm
 
 
 @pytest.fixture(autouse=True)
@@ -157,6 +159,472 @@ class TestBash:
         handler._protected_paths = ["*.mysecretfile"]
         cmd = "ansible-playbook --vault-password-file /x/prod.mysecretfile site.yml"
         assert not handler.matches(_hook_input("Bash", {"command": cmd}))
+
+
+class TestBashRouteInterpreterOneLiners:
+    """review 6 minor-2: an interpreter one-liner on the BASH route
+    (`python3 -c "..."`) gets the SAME item-3 treatment a `.py` FILE's
+    content already gets -- a protected path hidden inside a known
+    shell-exec call's string literal, not just a bare top-level mention.
+
+    Fixture bodies split the shell-exec CALL SYNTAX itself across separate
+    string pieces, matching ``TestShellExecCallLiteralsInOtherLanguages``'s
+    own convention -- `security_antipattern` pattern-matches on the exact
+    contiguous text on ANY Write/Edit."""
+
+    def test_python_dash_c_os_system_denies(self) -> None:
+        handler = _handler()
+        cmd = 'python3 -c "import os; os.' + "system('cat .vault-password')\""
+        assert handler.matches(_hook_input("Bash", {"command": cmd}))
+
+    def test_python_dash_c_ordinary_code_stays_allowed(self) -> None:
+        handler = _handler()
+        cmd = "python3 -c \"print('hello world, nothing secret here')\""
+        assert not handler.matches(_hook_input("Bash", {"command": cmd}))
+
+    def test_ruby_dash_e_backtick_denies(self) -> None:
+        handler = _handler()
+        cmd = "ruby -e '`cat .vault-password`'"
+        assert handler.matches(_hook_input("Bash", {"command": cmd}))
+
+    def test_perl_dash_e_system_denies(self) -> None:
+        handler = _handler()
+        cmd = "perl -e '" + "system" + "('cat .vault-password')'"
+        assert handler.matches(_hook_input("Bash", {"command": cmd}))
+
+    def test_node_dash_e_exec_sync_denies(self) -> None:
+        handler = _handler()
+        cmd = "node -e \"require('child_process')." + "exec" + "Sync('cat .vault-password')\""
+        assert handler.matches(_hook_input("Bash", {"command": cmd}))
+
+    def test_php_dash_r_shell_exec_denies(self) -> None:
+        handler = _handler()
+        cmd = 'php -r "shell_' + "exe" + "c('cat .vault-password');\""
+        assert handler.matches(_hook_input("Bash", {"command": cmd}))
+
+    def test_python_dash_c_split_string_literal_denies(self) -> None:
+        """Proves the NEW mechanism specifically, not the pre-existing
+        raw-text mention scan: the protected name is split across two
+        ADJACENT Python string literals (`'a' 'b'`), which Python's own
+        parser folds into ONE constant at parse time -- the raw bash
+        command text never carries the name contiguously, only the
+        extracted call's AST-folded literal does."""
+        handler = _handler()
+        cmd = 'python3 -c "import os; os.' + "system('cat .vault-pas' 'sword')\""
+        assert handler.matches(_hook_input("Bash", {"command": cmd}))
+
+
+class TestBashRouteInterpreterOneLinersReview7:
+    """Plan 00466 guard-defects review 7 MAJOR-5: the one-liner route is an
+    OPTION WALK, not exact-basename/exact-adjacency matching -- versioned
+    and absolute interpreters, an interpreter option before the code flag,
+    a clustered short flag, `perl -E`, and `node -p`/`--eval`."""
+
+    def test_versioned_python_dash_c_denies(self) -> None:
+        handler = _handler()
+        cmd = 'python3.12 -c "import os; os.' + "system('cat .vault-password')\""
+        assert handler.matches(_hook_input("Bash", {"command": cmd}))
+
+    def test_absolute_versioned_python_dash_c_denies(self) -> None:
+        handler = _handler()
+        cmd = '/usr/bin/python3.11 -c "import os; os.' + "system('cat .vault-password')\""
+        assert handler.matches(_hook_input("Bash", {"command": cmd}))
+
+    def test_pypy_dash_c_denies(self) -> None:
+        handler = _handler()
+        cmd = 'pypy3 -c "import os; os.' + "system('cat .vault-password')\""
+        assert handler.matches(_hook_input("Bash", {"command": cmd}))
+
+    def test_python_option_before_dash_c_denies(self) -> None:
+        handler = _handler()
+        cmd = 'python3 -I -c "import os; os.' + "system('cat .vault-password')\""
+        assert handler.matches(_hook_input("Bash", {"command": cmd}))
+
+    def test_python_clustered_dash_capital_s_c_denies(self) -> None:
+        handler = _handler()
+        cmd = 'python3 -Sc "import os; os.' + "system('cat .vault-password')\""
+        assert handler.matches(_hook_input("Bash", {"command": cmd}))
+
+    def test_perl_capital_e_backtick_denies(self) -> None:
+        handler = _handler()
+        cmd = "perl -E 'say `cat .vault-password`'"
+        assert handler.matches(_hook_input("Bash", {"command": cmd}))
+
+    def test_perl_clustered_dash_le_backtick_denies(self) -> None:
+        handler = _handler()
+        cmd = "perl -le 'print `cat .vault-password`'"
+        assert handler.matches(_hook_input("Bash", {"command": cmd}))
+
+    def test_ruby_clustered_dash_we_backtick_denies(self) -> None:
+        handler = _handler()
+        cmd = "ruby -we '`cat .vault-password`'"
+        assert handler.matches(_hook_input("Bash", {"command": cmd}))
+
+    def test_node_dash_p_exec_sync_denies(self) -> None:
+        handler = _handler()
+        cmd = "node -p \"require('child_process')." + "exec" + "Sync('cat .vault-password')\""
+        assert handler.matches(_hook_input("Bash", {"command": cmd}))
+
+    def test_node_dash_dash_eval_exec_sync_denies(self) -> None:
+        handler = _handler()
+        cmd = "node --eval \"require('child_process')." + "exec" + "Sync('cat .vault-password')\""
+        assert handler.matches(_hook_input("Bash", {"command": cmd}))
+
+    def test_unrelated_short_cluster_stays_allowed(self) -> None:
+        """Control: a Python flag cluster with no `c` in it must not be
+        mistaken for the code flag."""
+        handler = _handler()
+        cmd = "python3 -Im \"print('hello world')\""
+        assert not handler.matches(_hook_input("Bash", {"command": cmd}))
+
+
+class TestOneLinerOptionWalkValueFlagsReview8:
+    """Plan 00466 guard-defects review 8 MAJOR-C: the option walk must step
+    OVER a value-taking option's own separate-word value (`-W ignore`,
+    `-X dev`) rather than stopping there and missing the real code flag
+    right after it. White-box on ``_classify_one_liner_option_word``
+    itself -- the review's own probe rows all also carry the protected
+    name CONTIGUOUSLY in the raw command text, so a black-box
+    ``handler.matches()`` assertion would pass via the ordinary top-level
+    mention scan regardless of whether this option walk is fixed at all."""
+
+    def test_python_dash_capital_w_value_is_skipped_not_stopped(self) -> None:
+        family = guard_module._ONE_LINER_FAMILIES["python"]
+        assert guard_module._classify_one_liner_option_word(family, "-W") == "value"
+        assert guard_module._classify_one_liner_option_word(family, "ignore") == "stop"
+        assert guard_module._classify_one_liner_option_word(family, "-c") == "code"
+
+    def test_python_dash_capital_x_value_is_skipped_not_stopped(self) -> None:
+        family = guard_module._ONE_LINER_FAMILIES["python"]
+        assert guard_module._classify_one_liner_option_word(family, "-X") == "value"
+
+    def test_python_check_hash_based_pycs_value_is_skipped_not_stopped(self) -> None:
+        family = guard_module._ONE_LINER_FAMILIES["python"]
+        assert (
+            guard_module._classify_one_liner_option_word(family, "--check-hash-based-pycs")
+            == "value"
+        )
+
+    def test_ruby_value_flags_are_skipped_not_stopped(self) -> None:
+        family = guard_module._ONE_LINER_FAMILIES["ruby"]
+        assert guard_module._classify_one_liner_option_word(family, "-C") == "value"
+        assert guard_module._classify_one_liner_option_word(family, "-I") == "value"
+        assert guard_module._classify_one_liner_option_word(family, "-r") == "value"
+        assert guard_module._classify_one_liner_option_word(family, "-e") == "code"
+
+    def test_perl_dash_capital_i_value_is_skipped_not_stopped(self) -> None:
+        family = guard_module._ONE_LINER_FAMILIES["perl"]
+        assert guard_module._classify_one_liner_option_word(family, "-I") == "value"
+
+    def test_node_value_flags_are_skipped_not_stopped(self) -> None:
+        family = guard_module._ONE_LINER_FAMILIES["node"]
+        assert guard_module._classify_one_liner_option_word(family, "-r") == "value"
+        assert guard_module._classify_one_liner_option_word(family, "--require") == "value"
+
+    def test_php_dash_d_value_is_skipped_not_stopped(self) -> None:
+        family = guard_module._ONE_LINER_FAMILIES["php"]
+        assert guard_module._classify_one_liner_option_word(family, "-d") == "value"
+
+    def test_python_dash_capital_w_value_before_dash_c_reaches_the_split_literal(self) -> None:
+        """End to end, via the same split-adjacent-string-literal mechanism
+        `test_python_dash_c_split_string_literal_denies` uses -- the raw
+        bash text never carries the protected name contiguously, so this
+        can ONLY be caught by the option walk actually reaching `-c`."""
+        handler = _handler()
+        cmd = 'python3 -W ignore -c "import os; os.' + "system('cat .vault-pas' 'sword')\""
+        assert handler.matches(_hook_input("Bash", {"command": cmd}))
+
+    def test_python_dash_capital_w_value_before_dash_c_without_a_code_flag_allows(self) -> None:
+        """Control for the SAME split-literal mechanism: no `-c` follows
+        `-W`'s value, so there is genuinely no code argument to scan."""
+        handler = _handler()
+        cmd = "python3 -W ignore script.py"
+        assert not handler.matches(_hook_input("Bash", {"command": cmd}))
+
+
+class TestPythonOneLinerMinorFixesReview7:
+    """Plan 00466 guard-defects review 7 MINOR-1: `subprocess.getoutput`/
+    `getstatusoutput` always run a shell (gated on `shell=True`, which they
+    do not take, so they never matched before); an f-string's constant
+    parts are collected as a literal even with no placeholder."""
+
+    def test_subprocess_getoutput_denies(self) -> None:
+        handler = _handler()
+        cmd = 'python3 -c "import subprocess; subprocess.getoutput' "('cat .vault-password')\""
+        assert handler.matches(_hook_input("Bash", {"command": cmd}))
+
+    def test_subprocess_getstatusoutput_denies(self) -> None:
+        handler = _handler()
+        cmd = (
+            'python3 -c "import subprocess; subprocess.getstatusoutput' "('cat .vault-password')\""
+        )
+        assert handler.matches(_hook_input("Bash", {"command": cmd}))
+
+    def test_fstring_with_no_placeholder_denies(self) -> None:
+        handler = _handler()
+        cmd = 'python3 -c "import os; os.' + "system(f'cat .vault-password')\""
+        assert handler.matches(_hook_input("Bash", {"command": cmd}))
+
+
+class TestRubyBareSystemReview7:
+    """Plan 00466 guard-defects review 7 MINOR-2: Ruby's idiomatic
+    paren-free `system 'x'` form."""
+
+    def test_ruby_bare_system_no_paren_denies(self) -> None:
+        handler = _handler()
+        cmd = "ruby -e \"system 'cat .vault-password'\""
+        assert handler.matches(_hook_input("Bash", {"command": cmd}))
+
+
+class TestShellWordNormalisationThroughTheHandler:
+    """n466-n24 review 4, M-1: every listed spelling, end-to-end through the
+    real handler, both against shipped defaults (id_rsa) and a
+    project-configured EXACT ``protected_paths`` entry (``.env``)."""
+
+    def test_degenerate_brace_sequence_is_denied(self) -> None:
+        handler = _handler()
+        cmd = "cat id_rs{a..a}"
+        assert handler.matches(_hook_input("Bash", {"command": cmd}))
+
+    def test_double_quote_adjacency_concatenation_is_denied(self) -> None:
+        handler = _handler()
+        cmd = 'cat id_"rs"a'
+        assert handler.matches(_hook_input("Bash", {"command": cmd}))
+
+    def test_single_quote_adjacency_concatenation_is_denied(self) -> None:
+        handler = _handler()
+        cmd = "cat i'd'_rsa"
+        assert handler.matches(_hook_input("Bash", {"command": cmd}))
+
+    def test_brace_alternative_carrying_a_quote_is_denied(self) -> None:
+        handler = _handler()
+        cmd = "cat id_rs{'a',x}"
+        assert handler.matches(_hook_input("Bash", {"command": cmd}))
+
+    def test_backslash_escape_is_denied(self) -> None:
+        handler = _handler()
+        cmd = "cat id_rs\\a"
+        assert handler.matches(_hook_input("Bash", {"command": cmd}))
+
+    def test_ansi_c_hex_escape_is_denied(self) -> None:
+        handler = _handler()
+        cmd = "cat id_rs$'\\x61'"
+        assert handler.matches(_hook_input("Bash", {"command": cmd}))
+
+    def test_dollar_var_unknown_suffix_becomes_a_glob_and_is_denied(self) -> None:
+        handler = _handler()
+        cmd = "cat id_rs$x"
+        assert handler.matches(_hook_input("Bash", {"command": cmd}))
+
+    def test_command_substitution_naming_the_file_is_denied(self) -> None:
+        handler = _handler()
+        cmd = "cat ~/.ssh/$(echo id_rsa)"
+        assert handler.matches(_hook_input("Bash", {"command": cmd}))
+
+    def test_double_quoted_var_plus_trailing_glob_is_denied(self) -> None:
+        handler = _handler()
+        cmd = 'cat "$HOME"/.ssh/id_rs*'
+        assert handler.matches(_hook_input("Bash", {"command": cmd}))
+
+    def test_an_ordinary_dollar_var_path_is_allowed(self) -> None:
+        handler = _handler()
+        cmd = "cat $SOME_CONFIG_DIR/readme.txt"
+        assert not handler.matches(_hook_input("Bash", {"command": cmd}))
+
+    def test_project_configured_exact_pattern_degenerate_sequence_is_denied(self) -> None:
+        handler = _handler()
+        handler._mode = "replace"
+        handler._protected_paths = [".env"]
+        cmd = "cat .en{v..v}"
+        assert handler.matches(_hook_input("Bash", {"command": cmd}))
+
+    def test_project_configured_exact_pattern_quote_removal_is_denied(self) -> None:
+        handler = _handler()
+        handler._mode = "replace"
+        handler._protected_paths = [".env"]
+        cmd = 'cat .e"n"v'
+        assert handler.matches(_hook_input("Bash", {"command": cmd}))
+
+    def test_project_configured_exact_pattern_unresolved_substitution_is_denied(self) -> None:
+        handler = _handler()
+        handler._mode = "replace"
+        handler._protected_paths = [".env"]
+        cmd = "cat .en$x"
+        assert handler.matches(_hook_input("Bash", {"command": cmd}))
+
+    def test_project_configured_exact_pattern_unrelated_command_is_allowed(self) -> None:
+        handler = _handler()
+        handler._mode = "replace"
+        handler._protected_paths = [".env"]
+        cmd = "cat readme.txt"
+        assert not handler.matches(_hook_input("Bash", {"command": cmd}))
+
+
+class TestBothEdgesTextualIntersectionThroughTheHandler:
+    """m-2 (n466-n24 review 4 addendum), end-to-end through the real
+    handler: a ``?``-only interior truncation of a both-edges stem denies
+    textually, whatever the caller's cwd or the filesystem's current
+    contents -- folded into the DP intersection, not the FS-truth route."""
+
+    def test_cd_elsewhere_still_denies_an_interior_question_mark_truncation(self) -> None:
+        handler = _handler()
+        cmd = "cd /tmp && cat /elsewhere/demo.se?ret"
+        hook_input = _hook_input("Bash", {"command": cmd})
+        hook_input["cwd"] = "/tmp"
+        assert handler.matches(hook_input)
+
+    def test_a_file_created_later_in_the_same_command_still_denies(self) -> None:
+        handler = _handler()
+        cmd = "echo hi > /tmp/demo.secret && cat /tmp/demo.se?ret"
+        hook_input = _hook_input("Bash", {"command": cmd})
+        hook_input["cwd"] = "/tmp"
+        assert handler.matches(hook_input)
+
+    def test_an_unrelated_star_bearing_token_stays_allowed(self) -> None:
+        handler = _handler()
+        hook_input = _hook_input("Bash", {"command": "cat report-[0-9]*.txt"})
+        hook_input["cwd"] = "/tmp"
+        assert not handler.matches(hook_input)
+
+
+class TestContentContextThroughTheHandler:
+    """n466-n24 review 4 addendum, false-positive fold-in, end-to-end: a
+    Write/Edit of ordinary Python source that merely LOOKS glob-shaped to
+    the crude tokeniser must stay allowed, while a real protected-path
+    reference in the same kind of file still denies."""
+
+    def test_python_unpacking_subscript_snippet_is_allowed(self) -> None:
+        handler = _handler()
+        hook_input = _hook_input(
+            "Edit",
+            {
+                "file_path": "/proj/helper.py",
+                "new_string": "combined = [*words[:subcommand_index], extra_word]\n",
+            },
+        )
+        assert not handler.matches(hook_input)
+        assert handler.handle(hook_input).decision == Decision.ALLOW
+
+    def test_a_quoted_literal_mention_in_python_still_denies(self) -> None:
+        handler = _handler()
+        hook_input = _hook_input(
+            "Write",
+            {"file_path": "/proj/helper.py", "content": 'x = open(".vault-password")\n'},
+        )
+        assert handler.matches(hook_input)
+
+    def test_a_shell_script_brace_sequence_mention_still_denies(self) -> None:
+        handler = _handler()
+        hook_input = _hook_input(
+            "Write", {"file_path": "/proj/helper.sh", "content": "cat id_rs{a..a}\n"}
+        )
+        assert handler.matches(hook_input)
+
+    def test_a_shell_script_interior_wildcard_glob_still_denies(self) -> None:
+        """Review 5 MAJOR-2: a `.sh`/`.bash` file's content IS shell text a
+        shell will expand when the script runs (`bash deploy.sh`) -- an
+        interior-wildcard glob-shaped reference must still deny under the
+        AGGRESSIVE (bash-route) heuristics, not fall through to the weaker
+        literal-only content matcher a `.py`/`.js` file gets."""
+        handler = _handler()
+        hook_input = _hook_input(
+            "Write",
+            {"file_path": "/proj/deploy.sh", "content": "#!/bin/bash\ncat prod.vault-pass*\n"},
+        )
+        assert handler.matches(hook_input)
+
+    def test_a_bash_extension_interior_wildcard_glob_still_denies(self) -> None:
+        handler = _handler()
+        hook_input = _hook_input(
+            "Write", {"file_path": "/proj/deploy.bash", "content": "cat id_rs?\n"}
+        )
+        assert handler.matches(hook_input)
+
+    def test_a_python_interior_wildcard_string_literal_stays_allowed(self) -> None:
+        """Control: the SAME interior-wildcard text stays allowed in a
+        non-shell extension, where it is genuinely just source code."""
+        handler = _handler()
+        hook_input = _hook_input(
+            "Write",
+            {"file_path": "/proj/helper.py", "content": "pattern = 'prod.vault-pass*'\n"},
+        )
+        assert not handler.matches(hook_input)
+
+    def test_a_makefile_recipe_glob_shaped_mention_denies(self) -> None:
+        """Review 5 MAJOR-2 (further scoping): a Makefile recipe line IS
+        shell text `make` will expand -- and `_SCRIPT_EXTENSIONS` alone would
+        never even scan an extensionless `Makefile` at all."""
+        handler = _handler()
+        hook_input = _hook_input(
+            "Write",
+            {"file_path": "/proj/Makefile", "content": "deploy:\n\tcat prod.vault-pass*\n"},
+        )
+        assert handler.matches(hook_input)
+
+    def test_a_dotmk_file_glob_shaped_mention_denies(self) -> None:
+        handler = _handler()
+        hook_input = _hook_input(
+            "Write", {"file_path": "/proj/rules.mk", "content": "cat id_rs?\n"}
+        )
+        assert handler.matches(hook_input)
+
+    def test_a_github_workflow_run_step_glob_shaped_mention_denies(self) -> None:
+        """A CI workflow's `run:` step is shell text the CI runner expands --
+        `.yml`/`.yaml` alone is not in `_SCRIPT_EXTENSIONS`, so this also
+        widens the initial scan gate, not just the context choice."""
+        handler = _handler()
+        hook_input = _hook_input(
+            "Write",
+            {
+                "file_path": "/proj/.github/workflows/ci.yml",
+                "content": "jobs:\n  build:\n    steps:\n      - run: cat id_rs?\n",
+            },
+        )
+        assert handler.matches(hook_input)
+
+    def test_a_gitlab_ci_yaml_glob_shaped_mention_denies(self) -> None:
+        handler = _handler()
+        hook_input = _hook_input(
+            "Write",
+            {"file_path": "/proj/.gitlab-ci.yml", "content": "script:\n  - cat id_rs?\n"},
+        )
+        assert handler.matches(hook_input)
+
+    def test_an_ordinary_yaml_file_stays_unaffected_by_ci_scanning(self) -> None:
+        """Control: a plain YAML config (not a CI workflow path) is not in
+        `_SCRIPT_EXTENSIONS` and matches none of the CI markers, so it is not
+        scanned at all -- same as before this fix."""
+        handler = _handler()
+        hook_input = _hook_input(
+            "Write",
+            {"file_path": "/proj/config.yml", "content": "pattern: 'prod.vault-pass*'\n"},
+        )
+        assert not handler.matches(hook_input)
+
+    def test_an_extensionless_shell_shebang_script_glob_shaped_mention_denies(self) -> None:
+        """A shebang alone identifies an extensionless shell script
+        (`install`, `configure`) that `_SCRIPT_EXTENSIONS` would otherwise
+        never even scan."""
+        handler = _handler()
+        hook_input = _hook_input(
+            "Write",
+            {"file_path": "/proj/install", "content": "#!/usr/bin/env bash\ncat id_rs?\n"},
+        )
+        assert handler.matches(hook_input)
+
+    def test_an_extensionless_python_shebang_script_stays_unaffected(self) -> None:
+        """Control: a non-shell shebang (`python3`) does not trip shell
+        classification, and an extensionless file with no script marker at
+        all is not scanned -- same as before this fix."""
+        handler = _handler()
+        hook_input = _hook_input(
+            "Write",
+            {
+                "file_path": "/proj/generate",
+                "content": "#!/usr/bin/env python3\npattern = 'prod.vault-pass*'\n",
+            },
+        )
+        assert not handler.matches(hook_input)
 
 
 class TestContentScan:
@@ -333,21 +801,363 @@ class TestGuidance:
 
 
 class TestGetRules:
-    """get_rules() declares the 3 Rule objects backing this handler (Plan 00116)."""
+    """get_rules() declares the 4 Rule objects backing this handler (Plan 00116,
+    plus the evaluation-error rule added by Plan 00466 N11)."""
 
-    def test_returns_three_rules(self) -> None:
+    def test_returns_four_rules(self) -> None:
         rules = _handler().get_rules()
-        assert len(rules) == 3
+        assert len(rules) == 4
         assert all(isinstance(rule, Rule) for rule in rules)
 
     def test_rule_ids_match_constants(self) -> None:
-        expected = {RuleID.SECRET_READ, RuleID.SECRET_BASH_MENTION, RuleID.SECRET_SCRIPT_AUTHOR}
+        expected = {
+            RuleID.SECRET_READ,
+            RuleID.SECRET_BASH_MENTION,
+            RuleID.SECRET_SCRIPT_AUTHOR,
+            RuleID.SECRET_EVALUATION_ERROR,
+        }
         actual = {rule.rule_id for rule in _handler().get_rules()}
         assert actual == expected
 
     def test_every_rule_has_non_empty_verbose(self) -> None:
         for rule in _handler().get_rules():
             assert rule.verbose, f"{rule.rule_id} has empty verbose content"
+
+
+class TestFailsClosedOnEvaluationError:
+    """Plan 00466 N11 (major M4): any exception during evaluation is a DENY,
+    structurally -- independent of the daemon's global `strict_mode`.
+
+    N5 fixed the one raise path the coordinator found; this pins the CLASS.
+    `matches()`/`handle()` must never propagate an exception at all, since a
+    propagated exception is exactly what `core/chain.py`'s non-strict
+    default (every client install unless `strict_mode: true`) treats as "no
+    match" -- silently disabling this guard for that call, including any
+    genuine protected-path mention elsewhere in the same input.
+    """
+
+    def test_bash_route_exception_still_denies(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        def _raise(*_args: object, **_kwargs: object) -> None:
+            raise RuntimeError("synthetic failure injected by the test")
+
+        monkeypatch.setattr(sfm, "find_protected_mention_detail", _raise)
+        handler = _handler()
+        hook_input = _hook_input("Bash", {"command": "echo hello"})
+
+        assert handler.matches(hook_input) is True
+        result = handler.handle(hook_input)
+        assert result.decision == Decision.DENY
+        assert result.reason is not None
+        assert "RuntimeError" in result.reason
+        # n1 (Plan 00466 guard-defects review 2): the exception MESSAGE goes
+        # to the log only, never the deny reason -- see
+        # TestErrorRouteEchoesOnlyTheExceptionType below.
+        assert "synthetic failure injected by the test" not in result.reason
+
+    def test_read_route_exception_still_denies(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        def _raise(*_args: object, **_kwargs: object) -> str | None:
+            raise ValueError("synthetic protecting_pattern failure")
+
+        # The Read route's own seam: it asks `protecting_pattern`, not
+        # `path_is_protected`, so patching the latter would inject nothing.
+        monkeypatch.setattr(sfm, "protecting_pattern", _raise)
+        handler = _handler()
+        hook_input = _hook_input("Read", {"file_path": "/proj/ordinary.py"})
+
+        assert handler.matches(hook_input) is True
+        result = handler.handle(hook_input)
+        assert result.decision == Decision.DENY
+        assert result.reason is not None
+        assert "ValueError" in result.reason
+
+    def test_bash_scan_deadline_timeout_still_denies(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """B1 (Plan 00466 guard-defects review 2): the mention scan raises
+        ``TimeoutError`` when it exceeds the deadline this handler supplies
+        (``sfm.SCAN_DEADLINE_SECONDS``) -- a real ``iter_protected_mentions``
+        run out of time reaches exactly this same route, since a raise from
+        ``find_protected_mention_detail`` is indistinguishable from any
+        other evaluation exception to ``_evaluate``'s wrapper."""
+
+        def _raise(*_args: object, **_kwargs: object) -> None:
+            raise TimeoutError("secret_file_guard mention scan exceeded its deadline")
+
+        monkeypatch.setattr(sfm, "find_protected_mention_detail", _raise)
+        handler = _handler()
+        hook_input = _hook_input("Bash", {"command": "echo hello"})
+
+        assert handler.matches(hook_input) is True
+        result = handler.handle(hook_input)
+        assert result.decision == Decision.DENY
+        assert result.reason is not None
+        assert "TimeoutError" in result.reason
+
+    def test_grep_directory_route_exception_still_denies(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(sfm, "protecting_pattern", lambda *_a, **_k: None)
+
+        def _raise(*_args: object, **_kwargs: object) -> None:
+            raise OSError("synthetic directory-walk failure")
+
+        monkeypatch.setattr(sfm, "directory_contains_protected", _raise)
+        handler = _handler()
+        hook_input = _hook_input("Grep", {"path": "/proj/some-dir", "pattern": "x"})
+
+        assert handler.matches(hook_input) is True
+        result = handler.handle(hook_input)
+        assert result.decision == Decision.DENY
+        assert result.reason is not None
+        assert "OSError" in result.reason
+
+    def test_script_content_route_exception_still_denies(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def _raise(*_args: object, **_kwargs: object) -> None:
+            raise RuntimeError("synthetic script-content-scan failure")
+
+        monkeypatch.setattr(sfm, "find_protected_mention_detail", _raise)
+        handler = _handler()
+        hook_input = _hook_input(
+            "Write", {"file_path": "scripts/x.py", "content": "print('hello')"}
+        )
+
+        assert handler.matches(hook_input) is True
+        result = handler.handle(hook_input)
+        assert result.decision == Decision.DENY
+        assert result.reason is not None
+        assert "RuntimeError" in result.reason
+
+    def test_the_live_nul_byte_path_still_denies(self) -> None:
+        """The one raise path the review found still live after N5: a file
+        path containing a NUL byte raises `ValueError: embedded null byte`
+        out of `os.path.realpath`/`os.path.relpath`. Not exploitable for
+        disclosure (no tool can open a NUL path), but the class fix must
+        cover it without a dedicated patch."""
+        handler = _handler()
+        hook_input = _hook_input("Read", {"file_path": "/proj/a\x00b"})
+
+        assert handler.matches(hook_input) is True
+        result = handler.handle(hook_input)
+        assert result.decision == Decision.DENY
+
+    def test_an_evaluation_error_denial_uses_its_own_rule_id(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def _raise(*_args: object, **_kwargs: object) -> None:
+            raise RuntimeError("synthetic")
+
+        monkeypatch.setattr(sfm, "find_protected_mention_detail", _raise)
+        handler = _handler()
+        result = handler.handle(_hook_input("Bash", {"command": "echo hello"}))
+
+        assert result.reason is not None
+        assert result.reason.startswith(f"BLOCKED [{RuleID.SECRET_EVALUATION_ERROR}]")
+
+
+class TestDispatchKeyMalformedToolInput:
+    """M-2 (Plan 00466 review 3): `_dispatch_key` itself was called OUTSIDE
+    the fail-closed wrapper -- a malformed `tool_input` (None, a list, a bare
+    string, instead of the expected dict) made its `.get()` calls raise
+    `AttributeError`, which escaped `matches()`/`handle()` entirely and was
+    treated as "no match" by a non-strict chain. This is a regression the m2
+    caching fix (Plan 00466 review 2) itself introduced: `_evaluate`'s own
+    fail-closed wrapper correctly denies for the SAME malformed payload, but
+    `_dispatch_key` sat one line below it, unwrapped.
+    """
+
+    @pytest.mark.parametrize("bad_tool_input", [None, [], "not-a-dict"])
+    def test_matches_does_not_raise_and_reports_a_match(self, bad_tool_input: object) -> None:
+        handler = _handler()
+        hook_input = {"tool_name": "Bash", "tool_input": bad_tool_input}
+
+        assert handler.matches(hook_input) is True
+
+    @pytest.mark.parametrize("bad_tool_input", [None, [], "not-a-dict"])
+    def test_handle_denies_for_safety(self, bad_tool_input: object) -> None:
+        handler = _handler()
+        hook_input = {"tool_name": "Bash", "tool_input": bad_tool_input}
+
+        handler.matches(hook_input)
+        result = handler.handle(hook_input)
+
+        assert result.decision == Decision.DENY
+
+    @pytest.mark.parametrize("bad_tool_input", [None, [], "not-a-dict"])
+    def test_handle_alone_also_denies(self, bad_tool_input: object) -> None:
+        """`handle()` called with no preceding `matches()` for the SAME
+        input must independently deny too -- the cache miss path
+        (`_take_cached_matched`) calls `_dispatch_key` unwrapped as well."""
+        handler = _handler()
+        hook_input = {"tool_name": "Bash", "tool_input": bad_tool_input}
+
+        result = handler.handle(hook_input)
+
+        assert result.decision == Decision.DENY
+
+
+class TestChainLevelFailClosedBehaviour:
+    """n4 (Plan 00466 guard-defects review 2): every prior N11/m1/m2 test in
+    this file calls ``matches()``/``handle()`` directly -- not through
+    ``HandlerChain.execute(..., strict_mode=False)``, which is the property
+    actually claimed ("this guard fails closed independent of the daemon's
+    strict_mode"). That gap is exactly why m1 (an exception in `handle()`'s
+    own tail) was not caught by the existing direct-call tests.
+    """
+
+    def test_a_handle_tail_exception_still_denies_through_the_chain(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def _raise(self: object, *_args: object, **_kwargs: object) -> None:
+            raise RuntimeError("synthetic chain-level failure")
+
+        monkeypatch.setattr(RuleFormatter, "verbose", _raise)
+        chain = HandlerChain()
+        chain.add(_handler())
+        hook_input = _hook_input("Read", {"file_path": "/proj/.vault-pass"})
+
+        result = chain.execute(hook_input, strict_mode=False)
+        assert result.result.decision == Decision.DENY
+
+    def test_an_evaluation_exception_still_denies_through_the_chain(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def _raise(*_args: object, **_kwargs: object) -> None:
+            raise RuntimeError("synthetic chain-level evaluation failure")
+
+        monkeypatch.setattr(sfm, "find_protected_mention_detail", _raise)
+        chain = HandlerChain()
+        chain.add(_handler())
+        hook_input = _hook_input("Bash", {"command": "echo hello"})
+
+        result = chain.execute(hook_input, strict_mode=False)
+        assert result.result.decision == Decision.DENY
+
+
+class TestErrorRouteEchoesOnlyTheExceptionType:
+    """n1 (Plan 00466 guard-defects review 2): the deny reason on an
+    evaluation-error route must show only the exception TYPE -- the message
+    itself goes to the log only (``logger.exception``). Today no raise path
+    carries a filename, but Plan 00356's rule is that a name DISCOVERED by
+    a directory walk must never be echoed, and an ``OSError`` message from a
+    future ``stat`` call could easily carry one.
+    """
+
+    def test_the_evaluation_error_route_omits_the_message(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def _raise(*_args: object, **_kwargs: object) -> None:
+            raise RuntimeError("a message that must never reach the deny reason")
+
+        monkeypatch.setattr(sfm, "find_protected_mention_detail", _raise)
+        handler = _handler()
+        result = handler.handle(_hook_input("Bash", {"command": "echo hello"}))
+
+        assert result.reason is not None
+        assert "RuntimeError" in result.reason
+        assert "a message that must never reach the deny reason" not in result.reason
+
+    def test_the_handle_tail_error_route_omits_the_message(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def _raise(self: object, *_args: object, **_kwargs: object) -> None:
+            raise RuntimeError("a different message that must never reach the deny reason")
+
+        monkeypatch.setattr(RuleFormatter, "verbose", _raise)
+        handler = _handler()
+        hook_input = _hook_input("Read", {"file_path": "/proj/.vault-pass"})
+        result = handler.handle(hook_input)
+
+        assert result.reason is not None
+        assert "RuntimeError" in result.reason
+        assert "a different message that must never reach the deny reason" not in result.reason
+
+
+class TestMatchesAndHandleShareOneEvaluation:
+    """m2 (Plan 00466 guard-defects review 2): ``matches()`` and ``handle()``
+    each independently called ``_matched_pattern_and_route`` -- so a
+    TRANSIENT raise seen by ``matches()`` (denied, correctly, via the error
+    route) could be silently overwritten by a clean re-evaluation inside
+    ``handle()``, turning a correct DENY into an ALLOW for a call ``matches()``
+    itself already flagged. The two calls must share ONE evaluation per
+    dispatch.
+    """
+
+    def test_a_transient_raise_seen_by_matches_is_not_erased_by_handle(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        calls = {"count": 0}
+
+        def _flaky(*_args: object, **_kwargs: object) -> tuple[str, str] | None:
+            calls["count"] += 1
+            if calls["count"] == 1:
+                raise RuntimeError("transient failure, first call only")
+            return None  # a clean re-evaluation finds nothing
+
+        monkeypatch.setattr(sfm, "find_protected_mention_detail", _flaky)
+        handler = _handler()
+        hook_input = _hook_input("Bash", {"command": "echo hello"})
+
+        assert handler.matches(hook_input) is True  # error route: matches() saw the raise
+        result = handler.handle(hook_input)
+        assert result.decision == Decision.DENY
+        assert result.reason is not None
+        assert "RuntimeError" in result.reason
+
+
+class TestHandleTailFailsClosed:
+    """m1 (Plan 00466 guard-defects review 2): ``_evaluate``'s fail-closed
+    wrapper only covers reaching a VERDICT. Once ``handle()`` has a real
+    match it does further work UNWRAPPED -- resolving the disclosure
+    tracker, formatting the rule, string-building the message -- and an
+    exception there used to propagate straight out of ``handle()``, which a
+    non-strict chain (every install unless ``strict_mode: true``, and M3
+    found that inert here too) treats as "no match": ALLOW, for a call that
+    had a GENUINE protected mention. ``matches()`` already returned True
+    for every case below; the only question is whether ``handle()`` denies
+    or raises.
+    """
+
+    def test_data_layer_lookup_exception_still_denies(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def _raise() -> None:
+            raise RuntimeError("synthetic get_data_layer failure")
+
+        monkeypatch.setattr(guard_module, "get_data_layer", _raise)
+        handler = _handler()
+        hook_input = _hook_input("Read", {"file_path": "/proj/.vault-pass"})
+
+        assert handler.matches(hook_input) is True
+        result = handler.handle(hook_input)
+        assert result.decision == Decision.DENY
+        assert result.reason is not None
+        assert "RuntimeError" in result.reason
+
+    def test_rule_formatter_exception_still_denies(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        def _raise(self: object, *_args: object, **_kwargs: object) -> None:
+            raise RuntimeError("synthetic RuleFormatter.verbose failure")
+
+        monkeypatch.setattr(RuleFormatter, "verbose", _raise)
+        handler = _handler()
+        hook_input = _hook_input("Read", {"file_path": "/proj/.vault-pass"})
+
+        assert handler.matches(hook_input) is True
+        result = handler.handle(hook_input)
+        assert result.decision == Decision.DENY
+        assert result.reason is not None
+        assert "RuntimeError" in result.reason
+
+    def test_unhashable_transcript_path_still_denies(self) -> None:
+        """The review's own concrete case: a list where a string is
+        expected (harness-supplied, not agent-controllable, but the fail
+        path must hold regardless of how the bad value got there)."""
+        handler = _handler()
+        hook_input = _hook_input("Read", {"file_path": "/proj/.vault-pass"})
+        hook_input["transcript_path"] = ["not", "a", "string"]
+
+        assert handler.matches(hook_input) is True
+        result = handler.handle(hook_input)
+        assert result.decision == Decision.DENY
 
 
 class TestDisclosureLadder:
@@ -624,7 +1434,14 @@ class TestEncryptedFileGuidance:
         assert "ansible-vault view|decrypt" in text
 
     def test_deny_text_explains_the_encrypted_exemption(self) -> None:
+        """The three content-policy rules (read/bash/script) all teach the
+        encrypted-at-rest exemption. The evaluation-error rule (Plan 00466
+        N11) is a different failure mode entirely -- the guard crashed, it
+        never reached a content verdict -- so mentioning an exemption that
+        was never evaluated would mislead, not help."""
         for rule in _handler().get_rules():
+            if rule.rule_id == RuleID.SECRET_EVALUATION_ERROR:
+                continue
             assert "encrypted" in rule.verbose.lower(), rule.rule_id
 
 
@@ -655,3 +1472,478 @@ class TestEncryptedFileAcceptanceProbes:
         target = tmp_path / "fixture.yml"
         target.write_text(payload)
         assert encrypted_at_rest.is_encrypted_at_rest(target, tmp_path)
+
+
+class TestShellExecCallLiteralsInOtherLanguages:
+    """Review 6 item 3: a `.py`/`.rb`/`.php`/`.pl`/`.js`/`.ts` file's OWN
+    extension keeps it on the weaker literal-only "content" scan (an
+    ordinary string literal must stay allowed) -- but a string handed to a
+    KNOWN shell-executing call in that same file is executed by a shell just
+    as surely as a `.sh` file's body, so it gets `context="bash"` treatment
+    end-to-end through the handler. Each language pairs a deny case with an
+    ordinary-literal control that must stay allowed.
+
+    Fixture bodies below assemble the shell-executing CALL SYNTAX itself
+    from separate string pieces -- not to hide anything, but because that
+    exact contiguous text (e.g. the four characters "exec" immediately
+    followed by "(") is what `security_antipattern` pattern-matches on ANY
+    Write/Edit, including this test file's own fixture content; the split
+    keeps these as ordinary Write payloads the handler that owns this
+    behaviour (secret_file_guard) can still see whole once assembled."""
+
+    def test_python_os_system_string_denies(self) -> None:
+        handler = _handler()
+        call = "os." + "system" + "('cat .vault-password')\n"
+        hook_input = _hook_input("Write", {"file_path": "/proj/helper.py", "content": call})
+        assert handler.matches(hook_input)
+
+    def test_python_subprocess_shell_true_string_denies(self) -> None:
+        handler = _handler()
+        call = "subprocess.run('cat .vault-password', shell" + "=True)\n"
+        hook_input = _hook_input("Write", {"file_path": "/proj/helper.py", "content": call})
+        assert handler.matches(hook_input)
+
+    def test_python_subprocess_shell_list_shape_denies(self) -> None:
+        handler = _handler()
+        call = 'subprocess.run(["bash", "-c", "cat .vault-password"])\n'
+        hook_input = _hook_input("Write", {"file_path": "/proj/helper.py", "content": call})
+        assert handler.matches(hook_input)
+
+    def test_python_subprocess_without_shell_true_ordinary_argv_stays_allowed(self) -> None:
+        """Control: an ordinary argv list naming no shell interpreter and
+        with no shell=True never reaches a shell -- the literal is left to
+        the (allowed) literal-only content scan."""
+        handler = _handler()
+        call = 'subprocess.run(["cat", "prod.vault-pass*"])\n'
+        hook_input = _hook_input("Write", {"file_path": "/proj/helper.py", "content": call})
+        assert not handler.matches(hook_input)
+
+    def test_python_ordinary_string_literal_control_stays_allowed(self) -> None:
+        handler = _handler()
+        hook_input = _hook_input(
+            "Write",
+            {"file_path": "/proj/helper.py", "content": "pattern = 'prod.vault-passw*rd'\n"},
+        )
+        assert not handler.matches(hook_input)
+
+    def test_ruby_backtick_shellout_denies(self) -> None:
+        handler = _handler()
+        call = "result = `cat .vault-password`\n"
+        hook_input = _hook_input("Write", {"file_path": "/proj/helper.rb", "content": call})
+        assert handler.matches(hook_input)
+
+    def test_ruby_percent_x_shellout_denies(self) -> None:
+        handler = _handler()
+        call = "result = %" + "x{cat .vault-password}\n"
+        hook_input = _hook_input("Write", {"file_path": "/proj/helper.rb", "content": call})
+        assert handler.matches(hook_input)
+
+    def test_ruby_system_call_denies(self) -> None:
+        handler = _handler()
+        call = "system" + "('cat .vault-password')\n"
+        hook_input = _hook_input("Write", {"file_path": "/proj/helper.rb", "content": call})
+        assert handler.matches(hook_input)
+
+    def test_ruby_ordinary_string_literal_control_stays_allowed(self) -> None:
+        handler = _handler()
+        hook_input = _hook_input(
+            "Write",
+            {"file_path": "/proj/helper.rb", "content": "pattern = 'prod.vault-passw*rd'\n"},
+        )
+        assert not handler.matches(hook_input)
+
+    def test_php_shell_exec_denies(self) -> None:
+        handler = _handler()
+        call = "<?php\n$x = shell_" + "exe" + "c('cat .vault-password');\n"
+        hook_input = _hook_input("Write", {"file_path": "/proj/helper.php", "content": call})
+        assert handler.matches(hook_input)
+
+    def test_php_backtick_shellout_denies(self) -> None:
+        handler = _handler()
+        call = "<?php\n$x = `cat .vault-password`;\n"
+        hook_input = _hook_input("Write", {"file_path": "/proj/helper.php", "content": call})
+        assert handler.matches(hook_input)
+
+    def test_php_ordinary_string_literal_control_stays_allowed(self) -> None:
+        handler = _handler()
+        hook_input = _hook_input(
+            "Write",
+            {
+                "file_path": "/proj/helper.php",
+                "content": "<?php\n$pattern = 'prod.vault-passw*rd';\n",
+            },
+        )
+        assert not handler.matches(hook_input)
+
+    def test_perl_backtick_shellout_denies(self) -> None:
+        handler = _handler()
+        call = "my $x = `cat .vault-password`;\n"
+        hook_input = _hook_input("Write", {"file_path": "/proj/helper.pl", "content": call})
+        assert handler.matches(hook_input)
+
+    def test_perl_qx_shellout_denies(self) -> None:
+        handler = _handler()
+        call = "my $x = q" + "x{cat .vault-password};\n"
+        hook_input = _hook_input("Write", {"file_path": "/proj/helper.pl", "content": call})
+        assert handler.matches(hook_input)
+
+    def test_perl_system_call_denies(self) -> None:
+        handler = _handler()
+        call = "system" + "('cat .vault-password');\n"
+        hook_input = _hook_input("Write", {"file_path": "/proj/helper.pl", "content": call})
+        assert handler.matches(hook_input)
+
+    def test_perl_ordinary_string_literal_control_stays_allowed(self) -> None:
+        handler = _handler()
+        hook_input = _hook_input(
+            "Write",
+            {"file_path": "/proj/helper.pl", "content": "my $pattern = 'prod.vault-passw*rd';\n"},
+        )
+        assert not handler.matches(hook_input)
+
+    def test_node_exec_sync_denies(self) -> None:
+        handler = _handler()
+        call = "exec" + "Sync('cat .vault-password');\n"
+        hook_input = _hook_input("Write", {"file_path": "/proj/helper.js", "content": call})
+        assert handler.matches(hook_input)
+
+    def test_node_child_process_exec_denies(self) -> None:
+        handler = _handler()
+        call = "child_process." + "exe" + "c('cat .vault-password');\n"
+        hook_input = _hook_input("Write", {"file_path": "/proj/helper.ts", "content": call})
+        assert handler.matches(hook_input)
+
+    def test_node_ordinary_string_literal_control_stays_allowed(self) -> None:
+        handler = _handler()
+        hook_input = _hook_input(
+            "Write",
+            {
+                "file_path": "/proj/helper.js",
+                "content": "const pattern = 'prod.vault-passw*rd';\n",
+            },
+        )
+        assert not handler.matches(hook_input)
+
+
+class TestPythonAstShellExecLiterals:
+    """review 6 minor-2: the Python route uses the `ast` module -- from
+    imports and aliases, `shell=True` with any spacing, absolute
+    interpreter paths, `asyncio.create_subprocess_shell`,
+    `os.exec*`/`os.spawn*`, and `pty.spawn`. Fixture bodies split
+    shell-exec CALL SYNTAX across pieces per this file's own convention."""
+
+    def test_from_import_alias_denies(self) -> None:
+        handler = _handler()
+        call = "from os import " + "system" + " as s\ns('cat .vault-password')\n"
+        hook_input = _hook_input("Write", {"file_path": "/proj/helper.py", "content": call})
+        assert handler.matches(hook_input)
+
+    def test_module_import_alias_denies(self) -> None:
+        handler = _handler()
+        call = "import subprocess as sp\nsp.run('cat .vault-password', shell" + "=True)\n"
+        hook_input = _hook_input("Write", {"file_path": "/proj/helper.py", "content": call})
+        assert handler.matches(hook_input)
+
+    def test_shell_true_with_unusual_spacing_denies(self) -> None:
+        handler = _handler()
+        call = "subprocess.run('cat .vault-password',    shell   " + "=   True)\n"
+        hook_input = _hook_input("Write", {"file_path": "/proj/helper.py", "content": call})
+        assert handler.matches(hook_input)
+
+    def test_absolute_interpreter_path_in_argv_list_denies(self) -> None:
+        handler = _handler()
+        call = 'subprocess.run(["/bin/bash", "-c", "cat .vault-password"])\n'
+        hook_input = _hook_input("Write", {"file_path": "/proj/helper.py", "content": call})
+        assert handler.matches(hook_input)
+
+    def test_asyncio_create_subprocess_shell_denies(self) -> None:
+        handler = _handler()
+        call = "await asyncio.create_subprocess_shell('cat .vault-password')\n"
+        hook_input = _hook_input("Write", {"file_path": "/proj/helper.py", "content": call})
+        assert handler.matches(hook_input)
+
+    def test_os_execv_denies(self) -> None:
+        handler = _handler()
+        call = 'os.execv("/bin/sh", ["/bin/sh", "-c", "cat .vault-password"])\n'
+        hook_input = _hook_input("Write", {"file_path": "/proj/helper.py", "content": call})
+        assert handler.matches(hook_input)
+
+    def test_os_spawnl_denies(self) -> None:
+        handler = _handler()
+        call = 'os.spawnl(os.P_WAIT, "/bin/sh", "sh", "-c", "cat .vault-password")\n'
+        hook_input = _hook_input("Write", {"file_path": "/proj/helper.py", "content": call})
+        assert handler.matches(hook_input)
+
+    def test_pty_spawn_denies(self) -> None:
+        handler = _handler()
+        call = "import pty\npty.spawn(['sh', '-c', 'cat .vault-password'])\n"
+        hook_input = _hook_input("Write", {"file_path": "/proj/helper.py", "content": call})
+        assert handler.matches(hook_input)
+
+    def test_unparseable_fragment_falls_back_to_the_regex_heuristic(self) -> None:
+        """A fragment neither the dedent nor the function-wrap recovery
+        can parse (an unterminated string) genuinely falls all the way
+        through to the regex heuristic -- the floor, not a silent miss."""
+        handler = _handler()
+        call = "    os." + "system('cat .vault-password\n"
+        hook_input = _hook_input("Write", {"file_path": "/proj/helper.py", "content": call})
+        assert handler.matches(hook_input)
+
+    def test_uniformly_indented_fragment_is_recovered_by_dedent(self) -> None:
+        """Review 7 (read-only finding): the Edit route scans `new_string`,
+        which is routinely indented relative to its real surrounding file
+        -- `ast.parse` rejects that outright (`IndentationError`). Proven
+        with a shape the WEAKER regex fallback cannot catch (an adjacent
+        string-literal split Python folds at parse time), so this can only
+        pass via the AST path."""
+        handler = _handler()
+        call = "    os." + "system('cat .vault-pas' 'sword')\n"
+        hook_input = _hook_input("Write", {"file_path": "/proj/helper.py", "content": call})
+        assert handler.matches(hook_input)
+
+    def test_non_uniformly_indented_fragment_is_recovered_by_function_wrap(self) -> None:
+        """A fragment with its OWN internal indentation (a nested `if`)
+        cannot be fixed by `dedent` alone -- it still needs a syntactically
+        valid indented block to sit inside, which wrapping in a synthetic
+        function body provides. Proven the same way, via the AST-only
+        split-literal shape."""
+        handler = _handler()
+        call = "    if True:\n" "        os." + "system('cat .vault-pas' 'sword')\n"
+        hook_input = _hook_input("Write", {"file_path": "/proj/helper.py", "content": call})
+        assert handler.matches(hook_input)
+
+
+class TestPythonRegexFallbackEquivalence:
+    """Plan 00466 guard-defects review 7 follow-up (team-lead): the regex
+    fallback (reached only when ast.parse genuinely cannot handle the
+    content, even after dedent/function-wrap recovery -- e.g. a real
+    UNTERMINATED string elsewhere in the fragment) must recognise the SAME
+    shapes the AST path does: an import alias, `shell=True` regardless of
+    spacing, and the always-shell subprocess functions
+    (getoutput/getstatusoutput).
+
+    Every fixture below pairs a genuinely unparseable fragment (a real
+    unterminated string on a LATER line) with a complete, well-formed call
+    earlier in the same content -- proving the regex path specifically,
+    since the AST path can never reach it here. The call's argument is a
+    GLOB-shaped literal (`prod.vault-pass*`), never a bare exact pattern
+    name -- an exact name like `.vault-password` denies on its OWN as a
+    plain string literal via the ordinary content scan, regardless of
+    whether shell-exec-call detection (alias/`shell=True`) ever fires, so
+    it cannot isolate what these tests are for. A glob-shaped literal only
+    denies once it reaches ``context="bash"`` treatment, which happens
+    ONLY through the shell-exec-call route -- the SAME discriminator
+    ``TestShellExecCallLiteralsInOtherLanguages``'s own control tests use."""
+
+    def test_import_alias_is_resolved_by_the_regex_fallback(self) -> None:
+        call = (
+            "from os import " + "system" + " as s\n"
+            "s('cat prod.vault-pass*')\n"
+            "broken = 'unterminated\n"
+        )
+        handler = _handler()
+        hook_input = _hook_input("Write", {"file_path": "/proj/helper.py", "content": call})
+        assert handler.matches(hook_input)
+
+    def test_module_alias_is_resolved_by_the_regex_fallback(self) -> None:
+        call = (
+            "import subprocess as sp\n"
+            "sp.run('cat prod.vault-pass*', shell" + "=True)\n"
+            "broken = 'unterminated\n"
+        )
+        handler = _handler()
+        hook_input = _hook_input("Write", {"file_path": "/proj/helper.py", "content": call})
+        assert handler.matches(hook_input)
+
+    def test_unusually_spaced_shell_true_is_recognised_by_the_regex_fallback(self) -> None:
+        call = (
+            "subprocess.run('cat prod.vault-pass*',    shell   " + "=   True)\n"
+            "broken = 'unterminated\n"
+        )
+        handler = _handler()
+        hook_input = _hook_input("Write", {"file_path": "/proj/helper.py", "content": call})
+        assert handler.matches(hook_input)
+
+    def test_getoutput_with_no_shell_true_is_recognised_by_the_regex_fallback(self) -> None:
+        call = "subprocess.getoutput('cat prod.vault-pass*')\n" "broken = 'unterminated\n"
+        handler = _handler()
+        hook_input = _hook_input("Write", {"file_path": "/proj/helper.py", "content": call})
+        assert handler.matches(hook_input)
+
+    def test_getstatusoutput_with_no_shell_true_is_recognised_by_the_regex_fallback(
+        self,
+    ) -> None:
+        call = "subprocess.getstatusoutput('cat prod.vault-pass*')\n" "broken = 'unterminated\n"
+        handler = _handler()
+        hook_input = _hook_input("Write", {"file_path": "/proj/helper.py", "content": call})
+        assert handler.matches(hook_input)
+
+    def test_ordinary_argv_with_no_shell_true_stays_allowed_via_the_regex_fallback(
+        self,
+    ) -> None:
+        """Control: an ordinary argv-list call naming no shell interpreter
+        and with no shell=True must still be left to the (allowed)
+        literal-only content scan, via the regex fallback too."""
+        call = 'subprocess.run(["cat", "prod.vault-pass*"])\n' "broken = 'unterminated\n"
+        handler = _handler()
+        hook_input = _hook_input("Write", {"file_path": "/proj/helper.py", "content": call})
+        assert not handler.matches(hook_input)
+
+    def test_this_fixture_genuinely_reaches_the_regex_fallback(self) -> None:
+        """Proves the premise every test above relies on: the fixture
+        shape really is unparseable even after dedent/function-wrap
+        recovery, so the AST path is never the one answering."""
+        from claude_code_hooks_daemon.handlers.pre_tool_use.secret_file_guard import (
+            _python_shell_exec_literals_ast,
+        )
+
+        call = "subprocess.getoutput('cat .vault-password')\nbroken = 'unterminated\n"
+        assert _python_shell_exec_literals_ast(call) is None
+
+
+class TestBroadenedRubyPhpNodeShellExecLiterals:
+    """review 6 minor-2: Open3 and IO.popen for Ruby, proc_open for PHP,
+    and Node's `spawn` with a shell option."""
+
+    def test_ruby_open3_capture2e_denies(self) -> None:
+        handler = _handler()
+        call = "require 'open3'\nOpen3.capture2e('cat .vault-password')\n"
+        hook_input = _hook_input("Write", {"file_path": "/proj/helper.rb", "content": call})
+        assert handler.matches(hook_input)
+
+    def test_ruby_io_popen_denies(self) -> None:
+        handler = _handler()
+        call = "IO." + "popen('cat .vault-password')\n"
+        hook_input = _hook_input("Write", {"file_path": "/proj/helper.rb", "content": call})
+        assert handler.matches(hook_input)
+
+    def test_php_proc_open_denies(self) -> None:
+        handler = _handler()
+        call = "<?php\nproc_" + "open('cat .vault-password', [], $p);\n"
+        hook_input = _hook_input("Write", {"file_path": "/proj/helper.php", "content": call})
+        assert handler.matches(hook_input)
+
+    def test_node_spawn_with_shell_option_denies(self) -> None:
+        handler = _handler()
+        call = "spawn('cat .vault-password', [], {shel" + "l: true});\n"
+        hook_input = _hook_input("Write", {"file_path": "/proj/helper.js", "content": call})
+        assert handler.matches(hook_input)
+
+    def test_node_spawn_without_shell_option_stays_allowed(self) -> None:
+        """Control: `spawn` with an ordinary argv list and no shell option
+        never reaches a shell -- left to the (allowed) literal-only scan."""
+        handler = _handler()
+        call = "spawn('cat', ['prod.vault-pass*']);\n"
+        hook_input = _hook_input("Write", {"file_path": "/proj/helper.js", "content": call})
+        assert not handler.matches(hook_input)
+
+
+class TestGoRustJavaShellExecLiterals:
+    """review 6 minor-2: `exec.Command(sh, -c, ...)` (Go),
+    `Command::new("sh").arg("-c")` (Rust), and `Runtime.exec`/
+    `ProcessBuilder` with `sh -c` (Java)."""
+
+    def test_go_exec_command_sh_dash_c_denies(self) -> None:
+        handler = _handler()
+        call = "exe" + 'c.Command("sh", "-c", "cat .vault-password")\n'
+        hook_input = _hook_input("Write", {"file_path": "/proj/helper.go", "content": call})
+        assert handler.matches(hook_input)
+
+    def test_go_exec_command_ordinary_argv_stays_allowed(self) -> None:
+        handler = _handler()
+        call = "exe" + 'c.Command("cat", "prod.vault-pass*")\n'
+        hook_input = _hook_input("Write", {"file_path": "/proj/helper.go", "content": call})
+        assert not handler.matches(hook_input)
+
+    def test_rust_command_new_sh_dash_c_denies(self) -> None:
+        handler = _handler()
+        call = 'Command::new("sh").arg("-c").arg("cat .vault-password");\n'
+        hook_input = _hook_input("Write", {"file_path": "/proj/helper.rs", "content": call})
+        assert handler.matches(hook_input)
+
+    def test_rust_command_new_ordinary_argv_stays_allowed(self) -> None:
+        handler = _handler()
+        call = 'Command::new("cat").arg("prod.vault-pass*");\n'
+        hook_input = _hook_input("Write", {"file_path": "/proj/helper.rs", "content": call})
+        assert not handler.matches(hook_input)
+
+    def test_java_runtime_exec_denies(self) -> None:
+        handler = _handler()
+        call = "Runtime.getRuntime()." + "exe" + 'c("cat .vault-password");\n'
+        hook_input = _hook_input("Write", {"file_path": "/proj/helper.java", "content": call})
+        assert handler.matches(hook_input)
+
+    def test_java_process_builder_sh_dash_c_denies(self) -> None:
+        handler = _handler()
+        call = 'new ProcessBuilder("sh", "-c", "cat .vault-password");\n'
+        hook_input = _hook_input("Write", {"file_path": "/proj/helper.java", "content": call})
+        assert handler.matches(hook_input)
+
+    def test_java_process_builder_ordinary_argv_stays_allowed(self) -> None:
+        handler = _handler()
+        call = 'new ProcessBuilder("cat", "prod.vault-pass*");\n'
+        hook_input = _hook_input("Write", {"file_path": "/proj/helper.java", "content": call})
+        assert not handler.matches(hook_input)
+
+
+class TestGoRustJavaAbsolutePathInterpretersReview7:
+    """Plan 00466 guard-defects review 7 (read-only finding): the
+    Go/Rust/Java first-literal shell-exec check compared the raw string
+    to a bare shell name with no basename strip, unlike the Python path,
+    so an ABSOLUTE interpreter path (`/usr/bin/bash`) was invisible.
+    Every deny case here uses a GLOB-shaped literal (`prod.vault-pass*`),
+    never the bare exact pattern name -- an exact name denies on its own
+    via the plain content scan regardless of call-context recognition, so
+    it cannot isolate the fix these tests are for (the same discriminator
+    the other controls in this class already use)."""
+
+    def test_go_exec_command_absolute_bash_path_denies(self) -> None:
+        handler = _handler()
+        call = "exe" + 'c.Command("/usr/bin/bash", "-c", "cat prod.vault-pass*")\n'
+        hook_input = _hook_input("Write", {"file_path": "/proj/helper.go", "content": call})
+        assert handler.matches(hook_input)
+
+    def test_rust_command_new_absolute_bash_path_denies(self) -> None:
+        handler = _handler()
+        call = 'Command::new("/usr/bin/bash").arg("-c").arg("cat prod.vault-pass*");\n'
+        hook_input = _hook_input("Write", {"file_path": "/proj/helper.rs", "content": call})
+        assert handler.matches(hook_input)
+
+    def test_java_process_builder_absolute_bash_path_denies(self) -> None:
+        handler = _handler()
+        call = 'new ProcessBuilder("/usr/bin/bash", "-c", "cat prod.vault-pass*");\n'
+        hook_input = _hook_input("Write", {"file_path": "/proj/helper.java", "content": call})
+        assert handler.matches(hook_input)
+
+    def test_go_exec_command_absolute_non_shell_path_stays_allowed(self) -> None:
+        """Control: an absolute path to an ORDINARY (non-shell) binary
+        must not be mistaken for an interpreter."""
+        handler = _handler()
+        call = "exe" + 'c.Command("/usr/bin/cat", "prod.vault-pass*")\n'
+        hook_input = _hook_input("Write", {"file_path": "/proj/helper.go", "content": call})
+        assert not handler.matches(hook_input)
+
+
+class TestFileSchemeUrlOnBashRoute:
+    """review 7: a `file:` URL is a real, literal local-file read route --
+    curl, wget, and anything else accepting a URL argument."""
+
+    def test_curl_percent_encoded_denies(self) -> None:
+        handler = _handler()
+        cmd = "curl -s file:///root/.ssh/id_r%73a"
+        assert handler.matches(_hook_input("Bash", {"command": cmd}))
+
+    def test_wget_denies(self) -> None:
+        handler = _handler()
+        cmd = "wget file:///root/.ssh/id_rsa"
+        assert handler.matches(_hook_input("Bash", {"command": cmd}))
+
+    def test_file_url_localhost_denies(self) -> None:
+        handler = _handler()
+        cmd = "curl file://localhost/root/.ssh/id_rsa"
+        assert handler.matches(_hook_input("Bash", {"command": cmd}))
+
+    def test_file_url_to_non_protected_path_stays_allowed(self) -> None:
+        handler = _handler()
+        cmd = "curl -s file:///etc/hostname"
+        assert not handler.matches(_hook_input("Bash", {"command": cmd}))

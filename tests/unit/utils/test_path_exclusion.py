@@ -15,11 +15,14 @@ from __future__ import annotations
 import dataclasses
 from pathlib import Path
 from typing import Any
+from unittest.mock import patch
 
 import pytest
 
 from claude_code_hooks_daemon.constants.layout import CORE_VENDORED_BUILD_DIR_NAMES
+from claude_code_hooks_daemon.utils import path_exclusion
 from claude_code_hooks_daemon.utils.path_exclusion import (
+    first_matching_glob,
     handler_excludes_path,
     is_path_excluded,
     merge_exclude_patterns,
@@ -30,6 +33,7 @@ from claude_code_hooks_daemon.utils.path_exclusion import (
 )
 from claude_code_hooks_daemon.utils.vendor_paths import VENDOR_DIRS_TOKEN
 from tests.conftest import layout_declaring_vendor_dirs
+from tests.scaling import SIZE_FACTOR, SUPERLINEAR_RATIO, scaling_ratio
 
 
 class TestVendoredExcludeGlobs:
@@ -202,6 +206,32 @@ class TestPathMatchesGlobs:
     def test_matching(self, file_path: str, patterns: list[str] | None, expected: bool) -> None:
         assert path_matches_globs(file_path, patterns) is expected
 
+    @pytest.mark.parametrize(
+        ("file_path", "patterns", "expected"),
+        [
+            pytest.param("a/b.env", ["*.pem", "*.env", "b.*"], "*.env", id="first-in-order"),
+            pytest.param("a/b.py", ["*.pem", "*.env"], None, id="none"),
+            pytest.param("a/b.py", None, None, id="none-patterns"),
+            pytest.param("a/b.py", ["", "a/*.py"], "a/*.py", id="empty-pattern-skipped"),
+        ],
+    )
+    def test_first_matching_glob_names_the_pattern(
+        self, file_path: str, patterns: list[str] | None, expected: str | None
+    ) -> None:
+        """`first_matching_glob` answers WHICH pattern matched, computing the
+        candidate paths once for the whole list (secret_file_guard asks per
+        token, and recomputing them per pattern dominated its cost)."""
+        assert first_matching_glob(file_path, patterns) == expected
+        assert path_matches_globs(file_path, patterns) is (expected is not None)
+
+    def test_first_matching_glob_derives_candidates_once(self) -> None:
+        with patch(
+            "claude_code_hooks_daemon.utils.path_exclusion._candidate_paths",
+            wraps=path_exclusion._candidate_paths,
+        ) as candidates:
+            first_matching_glob("a/b.py", ["*.pem", "*.env", "*.key"], project_root="/p")
+        assert candidates.call_count == 1
+
     def test_is_path_excluded_is_the_same_behaviour(self) -> None:
         """The alias must not drift: same inputs, same answer, both directions."""
         cases: list[tuple[str, list[str]]] = [
@@ -238,6 +268,27 @@ class TestEmptyAndNoMatch:
 
     def test_unrelated_pattern_does_not_match(self) -> None:
         assert is_path_excluded("/proj/src/main.py", ["tests/fixtures/**"]) is False
+
+    def test_empty_file_path_with_a_project_root_does_not_raise(self) -> None:
+        """N5 (Plan 00466): an empty ``file_path`` reaching this matcher WITH a
+        ``project_root`` set used to call ``os.path.relpath("", root)``, which
+        raises ``ValueError: no path specified`` -- ``os.path.relpath`` treats
+        an empty PATH argument (not an empty ``start``) as an error regardless
+        of ``start``. An empty path can never match a real glob, so the
+        defined answer is False, not an exception a caller must guard against
+        before every call."""
+        assert path_matches_globs("", ["some/pattern/**"], project_root="/proj") is False
+        assert is_path_excluded("", ["some/pattern/**"], project_root="/proj") is False
+
+    def test_empty_file_path_does_not_match_a_bare_wildcard(self) -> None:
+        """n1 (Plan 00466 review): the docstring above says an empty
+        ``file_path`` yields "an empty candidate list that matches nothing",
+        but ``_candidate_paths`` returned ``[""]`` -- a list holding ONE
+        empty string, which DOES match ``*``/``**`` (``fnmatch("", "*")`` is
+        True). Not a regression (main behaved the same with no root), but
+        the code should match its own documented contract."""
+        assert path_matches_globs("", ["*"], project_root="/proj") is False
+        assert path_matches_globs("", ["**"], project_root="/proj") is False
 
 
 class TestDirectoryGlobs:
@@ -470,3 +521,67 @@ class TestHandlerExcludesPath:
         assert not handler_excludes_path(
             "/proj/src/x.py", handler_patterns=[], project_patterns=[], defaults=[]
         )
+
+
+class TestGlobstarDoesNotCrossPartialSegments:
+    """`**/` requires a COMPLETE, non-empty path segment before each landing.
+
+    Plan 00466 n24 review B2 direction: an earlier draft of the linear
+    replacement matcher considered treating a mid-pattern `**/` the same as
+    a trailing `**` (unrestricted `.*`) for simplicity. That would wrongly
+    let `**/secret` match a file merely ENDING in "secret" with no preceding
+    slash, e.g. `xsecret` -- silently widening every `**/name/**` exclusion
+    to match unrelated files sharing a suffix. This pins the correct,
+    segment-respecting behaviour permanently.
+    """
+
+    def test_globstar_does_not_match_a_bare_suffix(self) -> None:
+        assert is_path_excluded("xsecret", ["**/secret"]) is False
+
+    def test_globstar_matches_a_real_segment(self) -> None:
+        assert is_path_excluded("a/secret", ["**/secret"]) is True
+
+    def test_globstar_does_not_match_double_slash_as_an_empty_segment(self) -> None:
+        # "a//secret": the second "/" cannot itself be a zero-length segment.
+        assert is_path_excluded("a//secret", ["**/secret"]) is True
+        assert is_path_excluded("a/", ["**/secret"]) is False
+
+
+class TestLinearMatcherPerformance:
+    """Plan 00466 n24 security review, B2: `path_matches_globs` used a
+    backtracking `re.fullmatch` over a glob-derived regex. Against a
+    `file_path` built from many short segments (``"a/" * n``) this went
+    quadratic and held the GIL for the whole call -- no other thread, not
+    even a `BoundedDispatcher` waiter, could run meanwhile (measured: 1.9s
+    at 4000 segments, unbounded growth from there). The replacement matcher
+    is a single-pass reachability sweep per pattern token, so cost is
+    linear in the candidate length regardless of segment count.
+
+    Asserted as GROWTH (cost at N segments against 8N, `tests/scaling.py`),
+    not as a wall-clock bound: review 2 saw the 50ms bound fail on a loaded
+    host with the matcher still linear.
+    """
+
+    @pytest.mark.parametrize(
+        ("build", "patterns"),
+        [
+            pytest.param(
+                lambda size: "a/" * size + "f.py",
+                ["**/node_modules/**", "**/fixtures/**", "*.pyc"],
+                id="many-short-segments",  # the review's own adversarial shape
+            ),
+            pytest.param(
+                lambda size: "src/" + "pkg/" * size + "module.py",  # 90 KB at 8N
+                ["**/node_modules/**", "**/vendor/**", "tests/fixtures/**", "*.pyc"],
+                id="90kb-file-path",
+            ),
+        ],
+    )
+    def test_cost_grows_linearly_with_segment_count(self, build: Any, patterns: list[str]) -> None:
+        segments = 2_812
+        large = build(SIZE_FACTOR * segments)
+        assert is_path_excluded(large, patterns) is False
+
+        ratio = scaling_ratio(lambda size: is_path_excluded(build(size), patterns), segments, large)
+
+        assert ratio <= SUPERLINEAR_RATIO, f"cost grew {ratio:.0f}x for {SIZE_FACTOR}x input"
