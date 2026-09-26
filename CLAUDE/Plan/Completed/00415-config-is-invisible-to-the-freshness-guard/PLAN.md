@@ -1,6 +1,6 @@
 # Plan 00415: config is invisible to the freshness guard
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-09-15
 **Owner**: joseph
 **Priority**: Medium
@@ -28,7 +28,7 @@ dispatch is graded against the config the daemon bound before the edit. The
 failure is the expensive kind — no error, no crash, just a confidently wrong
 verdict that a caller consumes as fact.
 
-Not hypothetical. Ledger [00413](../Completed/00413-niggles-ledger-thirteen/PLAN.md) N14
+Not hypothetical. Ledger [00413](../00413-niggles-ledger-thirteen/PLAN.md) N14
 is the evidence: enabling `mode: unattended` on `ask_user_question_blocker`
 changed the outcome of three live acceptance probes. Had that edit been made
 without a restart, the harness would have certified the run as trustworthy and
@@ -156,14 +156,28 @@ These need settling before implementation, and they are genuinely open:
 
 - [x] ✅ A malformed config still produces a verdict rather than a crash.
 
-- [ ] ⬜ Full QA passes, the daemon is restarted, and CI is green.
+- [x] ✅ Full QA passes, the daemon is restarted, and CI is green. Both
+  plans' commits are ancestors of the B3 integration merge `accd1d87d`,
+  whose full gate was 39/39 at `76097e069`
+  (`untracked/scratch/gate-worktree-integration-b3.out`). Main has since
+  moved to `b85759a8a` through the CI-lsp merge (`ddc04bffe`, 39/39 at
+  `21c933335`) and the Python 3.13 fix; CI on `b85759a8a` is green (run
+  36209100721, all five jobs). The daemon on main was restarted after
+  `b85759a8a` and reports RUNNING.
+
+- [x] ✅ Every release-bound consequence is in the pending-release holding
+  area: `CLAUDE/UPGRADES/UNRELEASED/release-notes/45-check-source-fresh-now-catches-a-config-edited-without-a-restart.md`.
 
 ## Delivery & Milestones
 
-- Graduated from ledger [00413](../Completed/00413-niggles-ledger-thirteen/PLAN.md) N17,
+- Graduated from ledger [00413](../00413-niggles-ledger-thirteen/PLAN.md) N17,
   which was recorded with evidence but deliberately left unfixed: the remedy
   changes a safety mechanism every acceptance test gates on, and that ledger had
   already rewritten enough of that surface in one pass.
+
+- Delivered at `ebe7161e3` and `56a42686a`, reaching `main` via the B3
+  integration merge `accd1d87d` (gate 39/39 at `76097e069`). CI green on
+  `main` at `b85759a8a` (run 36209100721); daemon restarted and RUNNING.
 
 - Prior art, checked before filing: Plan 00371 built the fingerprint and placed
   config-only staleness in its non-goals; Plan 00395 recorded config drift as

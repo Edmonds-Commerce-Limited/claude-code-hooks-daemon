@@ -20,6 +20,8 @@ Plans older than the 30 highest-numbered completed plans (see [../README.md](../
 
 - [00414: absent protected path is silent](00414-absent-protected-path-is-silent/PLAN.md) - Complete at `7632d2652`…`f21ffa55c` + the archiving commit (a configured protected path that does NOT exist produced no advisory, so "your word list is fine" and "that guard has been inert since you cloned" were reported identically — by silence. Graduated from 00413 N3, which was filed with the wrong fix)
 
+- [00415: config is invisible to the freshness guard](00415-config-is-invisible-to-the-freshness-guard/PLAN.md) - Complete at `ebe7161e3`…`56a42686a` + the archiving commit (the source fingerprint hashed `.py` only, exactly as documented, but its consumers gated a LIVE DISPATCH on it — so editing config without restarting yielded FRESH while every dispatch was graded against the old config. Graduated from 00413 N17; deferred in 00371's non-goals and again by 00395)
+
 - [00413: niggles ledger thirteen](00413-niggles-ledger-thirteen/PLAN.md) - Complete at `1861a5ec`…`c2e52bb5` + the archiving commit (seventeen entries, all terminal; opened by a new collaborator's fresh clone, the one environment this project structurally cannot dogfood. N3→00414, N17→00415, N6/N15→00416)
 
 - [00412: jobs, recurring work and security review](00412-jobs-recurring-work-and-security-review/PLAN.md) - Complete at `f1c99abb`…`f48e1349` + the archiving commit (a second work concept beside Plans: a ROUTINE is recurring work that never completes, recorded per RUN with coverage as an INTERVAL so a gap between runs is detectable. First routine is a security review — a full sweep plus a per-release delta — run for real; the unbuilt work carries to 00421)
