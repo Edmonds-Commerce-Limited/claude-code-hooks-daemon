@@ -584,3 +584,218 @@ one of these 11 mutations turned its tests RED:
   with a heredoc rather than `Edit`, against this project's rule. The
   content passed ruff, black, mypy and pyright, but it skipped the
   Write/Edit content guards. Every other change used Edit/Write.
+
+## Round 5: the round-4 confirmation findings
+
+Commits `cba56406e` (the fixes) and `878609b8b` (one more row in the proof
+table). The inputs were D-RULE (NOT READY, R4-1 and R4-2) and D-PATH
+(READY, P4-1 to P4-4, and shared Sh-D, Sh-E and Sh-F). Every finding is
+fixed. All file content went through Edit/Write.
+
+### What changed
+
+- **R4-1 / P4-1 (MAJOR): the startup poll is bounded by the clock.**
+  `start_daemon` sets `deadline=$((SECONDS + 15))` (from
+  `DAEMON_STARTUP_TIMEOUT`, still 150 deciseconds) once `cli start`
+  returns, and polls `while ((SECONDS < deadline))`. The unused
+  `DAEMON_STARTUP_CHECK_INTERVAL` is gone. The timeout message now says
+  "15 seconds" rather than "150/10 seconds".
+
+  - `_hooks_daemon_run_cli_helper` runs at most once per hook.
+    `_HOOKS_DAEMON_HELPER_KEY` records the question it answered
+    (`prove:<pid>` or `remove:<pid text>`), and `_HOOKS_DAEMON_HELPER_STATUS`
+    records the answer. The same question gets the cached answer. Any other
+    question is not proven, which is safe: an unproven live pid is 2 and a
+    start is tried, and a stale file stays.
+  - **Worst case on the deny path:** the first helper run (up to
+    `Timeout.FILE_LOCK`, 10 s, plus about 0.5 s of import), then
+    `validate_venv`, then `cli start` (its own parent poll is at most 5 s),
+    then the 15 s poll, then the diagnoses. That is about 32 s, inside the
+    60 s hook timeout. Main's loop was 15 s after `cli start`, and this
+    keeps that.
+
+- **R4-2: a launcher is a `bin/hooks-daemon`.** `_project_it_manages`
+  returns None for any other path. This is in `init.sh`'s embedded Python,
+  in `cli_command._project_it_manages` (now `Path | None`), and in the
+  relay's `project_it_manages` (now `Option<PathBuf>`). The parity table
+  has a new layout: a root whose `bin/hooks-daemon` links to
+  `<project>/any/file`. It now also asserts which layouts are unknown, so
+  three implementations that were equally wrong would still fail it.
+
+- **P4-2: a command line proves only a pid of this user's.**
+  `pid_is_this_projects_daemon` still accepts the socket answering. The
+  command-line proof now also requires `_is_this_users_process(pid)`,
+  which is `os.kill(pid, 0)` (signal 0, delivered to nothing) on a real
+  `int` greater than 1. On the bash side an EPERM pid never reaches the
+  command-line match; only the helper sees it.
+
+- **P4-3:** `cmd_stop`'s comment no longer says `read_pid_file` clears a
+  stale file.
+
+- **P4-4:** `_write_pid_file` parses the old pid with `parse_pid_text`.
+  Text that is no daemon's pid raises `ValueError` into the existing
+  `except (ValueError, OSError)`, so it is never probed. `0` used to
+  `kill(0, 0)` this daemon's own group and, with the socket live, refuse
+  the start.
+
+- **`cmd_start` reports the daemon it started.** The parent's poll is
+  `_await_started_daemon(pid_path, socket_path, project_path, displaced)`.
+  `displaced` is the live pid the file held at the REUSE gate. A pid equal
+  to it is skipped. A new pid counts only once the socket is LIVE or
+  `daemon_process_project_root` proves it serves this project.
+
+- **N163 (Sh-D): `kill -0` alone is not running.** For a live pid this user
+  may signal, `init.sh` first matches its command line. On Linux that comes
+  from `/proc/<pid>/cmdline`, joined by newlines so the argument boundaries
+  survive; elsewhere from `ps -ww -o args=`, joined by spaces. It matches
+  the launch forms:
+
+  - `-m <cli> --project-root <root> start|restart`, optionally with more
+    arguments after it (from `start_daemon` and `bin/hooks-daemon`);
+  - with no `--project-root` anywhere, an interpreter under
+    `<root>/.claude/hooks-daemon/untracked/venv…` or
+    `<root>/untracked/venv…` (from `daemon_control.sh`).
+
+  `<root>` is `PROJECT_PATH`, or its physical path. If that fails, the
+  helper decides. Unproven is 2.
+
+  - **Cost:** on this worktree, with a live daemon, it is about 4 ms per
+    call (one `awk`) and never runs the helper.
+  - **The bash match is narrower than the daemon's rule, never wider.**
+    `TestTheHooksCommandLineProofIsSound` runs a table of 15 command lines
+    in both joinings. It asserts that bash proves exactly the launch forms,
+    and that everything bash proves, `process_verification` proves too.
+    Whole-line-in-one-argument is also covered, for procfs.
+  - **Known limit of the `ps` path (not Linux):** an argument that holds a
+    whole launch line passes there, because the argument boundaries are
+    lost. Only a process of this same user reaches that path, and it could
+    just as well run the launch line itself.
+
+- **N164 (Sh-E): the lock stays `0600`.** A lock another user can open is
+  one they can hold, and every start would wait on them. The docstring says
+  so. A second user's open is re-raised as `PermissionError` naming the
+  lock's uid and its own, and every caller already fails closed on
+  `OSError`. N162's ledger text and my round-4 bullet said a host and a
+  container "share one lock". That holds only when one of them is root.
+
+- **N165 (Sh-F): the helper checks the root first.**
+  `_hooks_daemon_root_is_this_install` runs `_installs_launcher` (P3-1)
+  with system `python3`. When the root is not an install of this project,
+  nothing is proven.
+
+- **Round-4 residue, fixed:**
+
+  - `is_daemon_running` was exported, but `_hooks_daemon_is_pid_text` and
+    the helper were not, so it broke in a child shell. Everything it calls
+    is exported now, along with `_HOOKS_DAEMON_PID_MAX`.
+  - `test_fallback_pretooluse_recovery_command_stays_fail_open` failed on
+    `f5b2a5b23`. Its sandbox used a daemon root, `proj/root`, that P3-1
+    rightly treats as no install of the project. The sandbox now uses
+    `proj/.claude/hooks-daemon`.
+
+- **Fixtures that faked "running" with the test's own pid.** They were
+  `test_forwarder_jq_free`, `test_relay_guard_fail_open` and the venv
+  self-heal sandbox's stand-in daemon (`sleep 60`).
+
+  - They now name a process launched as the project's daemon is:
+    `tests/daemon_like_process.py`. It waits on its stdin and ends when the
+    stdin is closed; no signal is sent to it.
+  - The relay hand-off helper `_judging_project` no longer writes a pid at
+    all, since `ensure_daemon` returns before reading it.
+  - Two static tests now look for the parent's poll in
+    `_await_started_daemon`: `test_restart_verified_slow_startup` and
+    `test_init_sh_start_daemon_boot_race`.
+
+### RED proof
+
+- **Against `f5b2a5b23`:** I copied the new test files into a
+  `git archive f5b2a5b23` tree (`untracked/scratch/r5-base`) and built its
+  relay. Every new test failed there:
+
+  - the two `TestTheStartupPollIsBoundedByTheClock` cases (the helper ran
+    23 times, not once);
+  - the Sh-D, Sh-F and child-shell cases;
+  - the proof table;
+  - P4-2, P4-4 (six texts) and the three `cmd_start` cases;
+  - the Sh-E refusal;
+  - both R4-2 parity rows.
+
+- **Mutations of HEAD:** `untracked/scratch/r5_red.py` reverts one fix at a
+  time in a `git archive HEAD` copy, rebuilding the relay for the Rust
+  mutation. All 13 turn their pinning tests RED:
+
+  - the helper cache;
+  - a tick-counted poll;
+  - R4-2 in each of the relay, `cli_command` and `init.sh`;
+  - the Sh-F root check;
+  - P4-2;
+  - `kill -0` alone meaning running;
+  - the displaced pid being reported;
+  - the `--project-root` guard in the venv form;
+  - `int()` in `_write_pid_file`;
+  - the named `PermissionError`;
+  - the missing exports.
+
+  The R4-2 relay mutation first came back GREEN because my own mutation
+  was wrong (`false && a || b` still tested `b`). With that corrected it is
+  RED. The venv-form guard also came back GREEN at first, so I added the
+  table row `start --project-root <other>` (`878609b8b`), and it is now
+  RED.
+
+### Verification (round 5)
+
+- 28 files ran in one pass: the init.sh, relay-guard, forwarder, jq-less,
+  self-heal, restart, cmd_start, cli, server, pid, paths, CI-passthrough
+  and transport files. Result: 793 passed, 18 subtests passed.
+- The daemon-backed files that point init.sh at a PID file (the three
+  isolated-daemon probes, plugin integration, socket discovery,
+  `debug_info`): 103 passed.
+- The relay harness, run as a script (`python relay/test_relay.py`):
+  13/13. Under pytest it errors on a missing `binary` fixture, which is how
+  it is written, not a regression.
+- `relay/build.sh` (`-D warnings`) built clean.
+- `shellcheck init.sh`, ruff, black, mypy and pyright are clean on every
+  touched file. `check_fail_open_inventory.py` reports 39/39.
+- `bin/hooks-daemon restart` from the worktree before the fix commit:
+  RUNNING, one daemon.
+- The gate was not queued, per the brief.
+
+### Hooks-daemon guard defect hit (not fixed here)
+
+`secret_file_guard` crashed with `TooManyToEnumerateError` (a fail-closed
+deny, `R-SECRET-EVALUATION-ERROR`) on several `Edit`s to `init.sh`. It
+denied:
+
+- a `while read -d '' …; done < "$file"` loop;
+- `[[ "$args" == "$root/untracked/venv"* ]]`;
+- a word made of two adjacent expansions (`"$sep$piece"`, `"$root$marker"`
+  in some positions).
+
+It seems to normalise each unresolved expansion to `*`, so adjacent ones
+become `**`, and then try to enumerate that recursively. I worked around it
+in the code's shape:
+
+- `awk` reads the procfs file, taking it as an argument;
+- `printf -v` does the joins;
+- prefixes are tested with `${var#…}`.
+
+I did not work around the guard itself. This is worth an issue report
+through the hooks-daemon skill. It cost one `awk` fork per hook on the hot
+path (about 4 ms in total, measured above), where a bash `read` loop would
+cost none.
+
+### For the confirmation reviewer
+
+- **Soundness of the bash match.** Check `_hooks_daemon_args_name_root`
+  against `process_verification._extract_project_root` and
+  `_is_daemon_server_process`. The table is the executable form of that
+  claim.
+- **The helper cache.** A second, different question in the same hook is
+  "not proven". The one place that matters is a start whose new pid bash
+  cannot prove from its command line. That happens only on a non-Linux
+  host whose launch form it does not recognise, and there the poll denies
+  on time rather than hanging.
+- **Sh-E was a choice.** I kept `0600` rather than making the lock shared.
+  If the owner wants host and container to share one lock across users,
+  that is a different design: a group-owned lock with `0660`, which still
+  lets that group block starts.
