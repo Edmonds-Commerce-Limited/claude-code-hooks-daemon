@@ -53,7 +53,82 @@ set +e
 STUB_FUNC_COUNT=$(env | grep -c '^BASH_FUNC_')
 set -e
 echo "STUB_LAYER2_IMPORTED_FUNC_COUNT: $STUB_FUNC_COUNT"
+for name in @REPORTED_NAMES@; do
+    if [ -n "${!name+x}" ]; then
+        echo "STUB_LAYER2_VAR $name=${!name}"
+    else
+        echo "STUB_LAYER2_VAR $name=<unset>"
+    fi
+done
+for name in HOOKS_DAEMON_OLD_DEFAULT_CONFIG HOOKS_DAEMON_OLD_DEFAULT_SETTINGS; do
+    if [ -n "${!name:-}" ] && [ -f "${!name}" ]; then
+        echo "STUB_LAYER2_FILE $name=$(tr '\\n' ' ' < "${!name}")"
+    fi
+done
+# Signal 0 sends nothing: it only asks whether the named process exists.
+if [ -n "${HOOKS_DAEMON_OLD_DEFAULT_PID:-}" ] && kill -0 "$HOOKS_DAEMON_OLD_DEFAULT_PID"; then
+    echo "STUB_LAYER2_BASELINE_OWNER_ALIVE: yes"
+fi
 """
+
+# Layer 1's handover to Layer 2 (review4 BLOCKER 1): Layer 1 exports each of
+# these for Layer 2 itself, so each must survive the `env -i` launch.
+_HANDOVER_NAMES = (
+    "HOOKS_DAEMON_UPGRADE_PREVIOUS_VERSION",
+    "HOOKS_DAEMON_OLD_DEFAULT_CONFIG",
+    "HOOKS_DAEMON_OLD_DEFAULT_PID",
+    "HOOKS_DAEMON_OLD_DEFAULT_SETTINGS",
+)
+
+# Operator settings Layer 2, its libraries or the daemon it restarts read
+# (review4 m2): each is data, not a way to choose what code runs.
+_KEPT_OPERATOR_SETTINGS = {
+    "HOOKS_DAEMON_VENV_PATH": "/opt/venvs/hooks",
+    "HOOKS_DAEMON_VENV_BUILD_TIMEOUT": "900",
+    "HOOKS_DAEMON_VENV_PROBE_TIMEOUT": "30",
+    "HOOKS_DAEMON_VENV_LOCK_TIMEOUT": "120",
+    "HOOKS_DAEMON_VENV_LOCK_STALE_SECONDS": "600",
+    "HOOKS_DAEMON_VENV_LOCK_HEARTBEAT_SECONDS": "15",
+    "HOOKS_DAEMON_VENV_LOCK_BACKEND": "mkdir",
+    "HOOKS_DAEMON_SKIP_VENV_BOOTSTRAP": "0",
+    "HOOKS_DAEMON_ROOT_DIR": "/srv/project",
+    "CI": "false",
+    "VERBOSE": "true",
+    "HOSTNAME": "pinned-host",
+    "XDG_RUNTIME_DIR": "/run/user/4242",
+    "CLAUDE_HOOKS_SOCKET_PATH": "/run/hooks/daemon.sock",
+    "CLAUDE_HOOKS_PID_PATH": "/run/hooks/daemon.pid",
+    "CLAUDE_HOOKS_LOG_PATH": "/run/hooks/daemon.log",
+    "HOOKS_DAEMON_MODE": "default",
+    "HOOKS_DAEMON_EVENTS_DIR": "/run/hooks/events",
+    "HOOKS_DAEMON_LOG_LEVEL": "DEBUG",
+    "HOOKS_DAEMON_INPUT_VALIDATION": "true",
+    "HOOKS_DAEMON_VALIDATION_STRICT": "false",
+    "UV_LINK_MODE": "copy",
+    "UV_CACHE_DIR": "/var/cache/uv",
+}
+
+# Never forwarded: Layer 2's own internal state, test seams, and a family
+# nothing in Layer 2 reads.
+_DROPPED_SETTINGS = {
+    "HOOKS_DAEMON_UPGRADE_SECOND_PASS": "1",
+    "HOOKS_DAEMON_COMPAT_CHECK_DONE": "1",
+    "HOOKS_DAEMON_VENV_LOCK_INHERITED": "flock:9",
+    "HOOKS_DAEMON_DOCKERENV_PATH": "/tmp/fake-dockerenv",
+    "HOOKS_DAEMON_CONTAINERENV_PATH": "/tmp/fake-containerenv",
+    "PIP_INDEX_URL": "https://example.invalid/simple",
+    "PIP_CONFIG_FILE": "/tmp/pip.conf",
+}
+
+_STUB_LAYER2 = _STUB_LAYER2.replace(
+    "@REPORTED_NAMES@",
+    " ".join([*_HANDOVER_NAMES, *_KEPT_OPERATOR_SETTINGS, *_DROPPED_SETTINGS]),
+)
+
+# The example config and settings v1.0.0 shipped, which Layer 1 preserves for
+# Layer 2 before its checkout replaces them.
+_OLD_EXAMPLE_CONFIG = "version: '1.0'\nold_default: true\n"
+_OLD_SETTINGS = '{"old": true}\n'
 
 
 def _git(*args: str, cwd: Path) -> subprocess.CompletedProcess[str]:
@@ -95,6 +170,9 @@ def daemon_remote(tmp_path: Path) -> Path:
     install_dir = scripts / "install"
     install_dir.mkdir()
     shutil.copy(ENV_SANITISE_SH, install_dir / "env_sanitise.sh")
+    (work / ".claude").mkdir()
+    (work / ".claude" / "hooks-daemon.yaml.example").write_text(_OLD_EXAMPLE_CONFIG)
+    (work / ".claude" / "settings.json").write_text(_OLD_SETTINGS)
 
     _commit_all(work, "release v1.0.0")
     _require_ok(_git("tag", "v1.0.0", cwd=work), "tag")
@@ -167,6 +245,74 @@ def _run_layer1(
 def _stub_field(stdout: str, name: str) -> str:
     line = next(line for line in stdout.splitlines() if line.startswith(f"{name}:"))
     return line.split(":", 1)[1].strip()
+
+
+def _stub_var(stdout: str, name: str) -> str:
+    prefix = f"STUB_LAYER2_VAR {name}="
+    line = next(line for line in stdout.splitlines() if line.startswith(prefix))
+    return line[len(prefix) :]
+
+
+def _stub_file(stdout: str, name: str) -> str | None:
+    prefix = f"STUB_LAYER2_FILE {name}="
+    for line in stdout.splitlines():
+        if line.startswith(prefix):
+            return line[len(prefix) :].strip()
+    return None
+
+
+class TestLayer1HandsItsBaselinesToLayer2:
+    """Plan 00376 review4 BLOCKER 1.
+
+    Layer 1 exports the pre-checkout version and copies of the old default
+    config and settings for Layer 2 itself. Launching Layer 2 through `env -i`
+    with an allowlist that left them out made every accepted default read as a
+    customisation, while Layer 1 still logged that it had preserved them.
+    """
+
+    def test_the_previous_version_reaches_layer2(self, client_project: Path) -> None:
+        result = _run_layer1(client_project)
+
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert _stub_var(result.stdout, "HOOKS_DAEMON_UPGRADE_PREVIOUS_VERSION") == "v1.0.0"
+
+    def test_the_old_default_config_baseline_reaches_layer2(self, client_project: Path) -> None:
+        result = _run_layer1(client_project)
+
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert _stub_file(result.stdout, "HOOKS_DAEMON_OLD_DEFAULT_CONFIG") == (
+            _OLD_EXAMPLE_CONFIG.replace("\n", " ").strip()
+        )
+        assert _stub_field(result.stdout, "STUB_LAYER2_BASELINE_OWNER_ALIVE") == "yes"
+
+    def test_the_old_default_settings_baseline_reaches_layer2(self, client_project: Path) -> None:
+        result = _run_layer1(client_project)
+
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert _stub_file(result.stdout, "HOOKS_DAEMON_OLD_DEFAULT_SETTINGS") == _OLD_SETTINGS.strip()
+
+
+class TestLayer2EnvAllowlistIsDecidedPerSetting:
+    """Plan 00376 review4 m2: every setting Layer 2 reads is kept or dropped
+    on purpose, not by omission."""
+
+    @pytest.mark.parametrize(("name", "value"), sorted(_KEPT_OPERATOR_SETTINGS.items()))
+    def test_an_operator_setting_reaches_layer2(
+        self, client_project: Path, name: str, value: str
+    ) -> None:
+        result = _run_layer1(client_project, extra_env={name: value})
+
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert _stub_var(result.stdout, name) == value
+
+    @pytest.mark.parametrize(("name", "value"), sorted(_DROPPED_SETTINGS.items()))
+    def test_internal_state_and_unused_settings_do_not(
+        self, client_project: Path, name: str, value: str
+    ) -> None:
+        result = _run_layer1(client_project, extra_env={name: value})
+
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert _stub_var(result.stdout, name) == "<unset>"
 
 
 class TestLayer2IsLaunchedOnATrustedBash:

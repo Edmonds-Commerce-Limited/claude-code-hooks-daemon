@@ -161,7 +161,8 @@ class TestEverySyncBranchIsCovered:
         sync_lines = [
             line
             for line in body.splitlines()
-            if re.search(r"\buv\s+sync\b", line) and not line.strip().startswith("#")
+            # `_venv_uv` is venv.sh's own uv launcher (it resolves uv by name).
+            if re.search(r"\b(?:_venv_uv|uv)\s+sync\b", line) and not line.strip().startswith("#")
         ]
         assert sync_lines, "no `uv sync` call sites found — has the function been rewritten?"
 

@@ -22,10 +22,33 @@ if [ -z "${OUTPUT_SH_LOADED+x}" ]; then
     source "$INSTALL_LIB_DIR/output.sh"
 fi
 
-# Ensure uv is in PATH (installed in ~/.local/bin by default)
+# Ensure uv is in PATH (installed in ~/.local/bin by default) for the install
+# and worktree scripts that run a bare `uv`. Layer 2 (upgrade_version.sh) puts
+# PATH back to the trusted list after its last source, so this directory never
+# answers for its other tools there; it reaches uv through _venv_uv instead.
 if [ -d "$HOME/.local/bin" ]; then
     export PATH="$HOME/.local/bin:$PATH"
 fi
+
+#
+# _venv_uv() - Run uv with the given arguments.
+#
+# uv from PATH first, else the uv installer's default location, named
+# explicitly, so a caller whose PATH is fixed system locations only still
+# finds it. Returns 127 when neither has one.
+#
+_venv_uv() {
+    local uv_bin=""
+    local installer_uv="${HOME}/.local/bin/uv"
+    if uv_bin="$(command -v uv)"; then
+        "$uv_bin" "$@"
+    elif [ -x "$installer_uv" ]; then
+        "$installer_uv" "$@"
+    else
+        print_error "uv not found on PATH or at $installer_uv"
+        return 127
+    fi
+}
 
 #
 # verify_venv() - Verify venv exists and can import daemon package
@@ -1273,7 +1296,7 @@ create_venv_at_path() {
     # branch applies it inline via a variable (not a hardcoded literal).
     if [ -n "$first_link_mode" ]; then
         if UV_LINK_MODE="$first_link_mode" UV_PROJECT_ENVIRONMENT="$venv_path" \
-                uv sync --frozen --project "$daemon_dir" "${python_args[@]}" \
+                _venv_uv sync --frozen --project "$daemon_dir" "${python_args[@]}" \
                 > "$uv_output" 2>&1; then
             uv_rc=0
         else
@@ -1281,7 +1304,7 @@ create_venv_at_path() {
         fi
     else
         if UV_PROJECT_ENVIRONMENT="$venv_path" \
-                uv sync --frozen --project "$daemon_dir" "${python_args[@]}" \
+                _venv_uv sync --frozen --project "$daemon_dir" "${python_args[@]}" \
                 > "$uv_output" 2>&1; then
             uv_rc=0
         else
@@ -1299,7 +1322,7 @@ create_venv_at_path() {
     if [ -f "$uv_output" ] && grep -q "Failed to hardlink" "$uv_output"; then
         print_warning "uv hardlink failed (likely overlay-fs) — retrying with UV_LINK_MODE=copy. Set UV_LINK_MODE=copy in your environment to skip the hardlink attempt and silence this notice."
         rm -rf "$venv_path"  # clean slate for the retry
-        if UV_LINK_MODE=copy UV_PROJECT_ENVIRONMENT="$venv_path" uv sync --frozen --project "$daemon_dir" "${python_args[@]}" \
+        if UV_LINK_MODE=copy UV_PROJECT_ENVIRONMENT="$venv_path" _venv_uv sync --frozen --project "$daemon_dir" "${python_args[@]}" \
                 > "$uv_output" 2>&1; then
             uv_rc=0
         else
@@ -1388,20 +1411,21 @@ install_package_editable() {
 
     print_info "Installing daemon package in editable mode..."
 
-    # Use uv pip (which works with uv-created venvs)
-    # uv pip install automatically uses the active venv or can be told which one to use
-    local pip_cmd="uv pip install -e $daemon_dir --python $venv_python"
-
+    # Use uv pip (which works with uv-created venvs), told which venv to use.
+    # Quiet keeps uv's output off the terminal on success only: a failure
+    # prints it, so the reason is never lost.
     if [ "$quiet" = "true" ]; then
-        if $pip_cmd > /dev/null 2>&1; then
+        local pip_output=""
+        if pip_output="$(_venv_uv pip install -e "$daemon_dir" --python "$venv_python" 2>&1)"; then
             print_success "Daemon package installed"
             return 0
         else
             print_error "Failed to install daemon package"
+            printf '%s\n' "$pip_output" >&2
             return 1
         fi
     else
-        if $pip_cmd; then
+        if _venv_uv pip install -e "$daemon_dir" --python "$venv_python"; then
             print_success "Daemon package installed"
             return 0
         else

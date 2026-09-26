@@ -755,22 +755,60 @@ if [ -f "$_ENV_SANITISE_SH" ]; then
         # running uv, deploying files) -- never a variable that steers what
         # code runs or which tools answer for it. Only what is explicitly
         # listed here survives `env -i`; everything else, including
-        # BASH_ENV/ENV and any BASH_FUNC_*, does not.
+        # BASH_ENV/ENV and any BASH_FUNC_*, does not. Each group says why it
+        # is kept; the approval guard denies an agent setting the steering
+        # members (HOOKS_DAEMON_PYTHON, HOOKS_DAEMON_VENV_PATH, HOME, TMPDIR,
+        # HOSTNAME, the handover names, UV index/config, proxies, CA bundles)
+        # on the command that runs the upgrade.
         _LAYER2_ENV_ALLOWLIST=(
             "PATH=$(_gate_trusted_path)"
             "HOOKS_DAEMON_UPGRADE_HANDOFF=$HOOKS_DAEMON_UPGRADE_HANDOFF"
             "UPGRADE_FLAGS=$UPGRADE_FLAGS"
         )
-        for _allow_name in HOME LANG LC_ALL LC_CTYPE TMPDIR USER LOGNAME \
-                HTTP_PROXY HTTPS_PROXY NO_PROXY http_proxy https_proxy no_proxy \
-                SSL_CERT_FILE REQUESTS_CA_BUNDLE CURL_CA_BUNDLE XDG_CACHE_HOME \
-                HOOKS_DAEMON_PYTHON HOOKS_DAEMON_UNSAFE_TRACK_REF \
-                HOOKS_DAEMON_UNSAFE_TRACK_REF_BECAUSE; do
+        _LAYER2_KEPT_NAMES=(
+            # The session: where files go, the locale, who is running it.
+            HOME LANG LC_ALL LC_CTYPE TMPDIR USER LOGNAME TERM NO_COLOR
+            # Reaching the package index at all behind a proxy or private CA.
+            HTTP_PROXY HTTPS_PROXY NO_PROXY http_proxy https_proxy no_proxy
+            SSL_CERT_FILE REQUESTS_CA_BUNDLE CURL_CA_BUNDLE XDG_CACHE_HOME
+            # This script's own handover (Steps 3b-3d): the pre-checkout
+            # version and the old default config/settings baselines.
+            HOOKS_DAEMON_UPGRADE_PREVIOUS_VERSION
+            HOOKS_DAEMON_OLD_DEFAULT_CONFIG HOOKS_DAEMON_OLD_DEFAULT_PID
+            HOOKS_DAEMON_OLD_DEFAULT_SETTINGS
+            # Operator overrides for the daemon's interpreter and venv. Layer 2
+            # resolves the INSTALLED version with both unset, so neither feeds
+            # the gate; daemon control keeps honouring them.
+            HOOKS_DAEMON_PYTHON HOOKS_DAEMON_VENV_PATH
+            # The guarded branch install (Plan 00291), re-validated above and
+            # gated with --include-unreleased.
+            HOOKS_DAEMON_UNSAFE_TRACK_REF HOOKS_DAEMON_UNSAFE_TRACK_REF_BECAUSE
+            # venv build and lock tuning, and whether CI builds a venv at all.
+            HOOKS_DAEMON_VENV_BUILD_TIMEOUT HOOKS_DAEMON_VENV_PROBE_TIMEOUT
+            HOOKS_DAEMON_VENV_LOCK_TIMEOUT HOOKS_DAEMON_VENV_LOCK_STALE_SECONDS
+            HOOKS_DAEMON_VENV_LOCK_HEARTBEAT_SECONDS HOOKS_DAEMON_VENV_LOCK_BACKEND
+            HOOKS_DAEMON_SKIP_VENV_BOOTSTRAP CI VERBOSE
+            # The daemon Layer 2 restarts reads these for its socket, PID and
+            # log paths and its logging: without them it listens where the
+            # hooks never look.
+            HOSTNAME XDG_RUNTIME_DIR HOOKS_DAEMON_ROOT_DIR HOOKS_DAEMON_MODE
+            CLAUDE_HOOKS_SOCKET_PATH CLAUDE_HOOKS_PID_PATH CLAUDE_HOOKS_LOG_PATH
+            HOOKS_DAEMON_EVENTS_DIR HOOKS_DAEMON_LOG_LEVEL
+            HOOKS_DAEMON_INPUT_VALIDATION HOOKS_DAEMON_VALIDATION_STRICT
+        )
+        # Dropped on purpose: HOOKS_DAEMON_UPGRADE_SECOND_PASS,
+        # HOOKS_DAEMON_COMPAT_CHECK_DONE and HOOKS_DAEMON_VENV_LOCK_INHERITED
+        # are Layer 2's own internal state, which a caller must never preset;
+        # HOOKS_DAEMON_DOCKERENV_PATH/_CONTAINERENV_PATH are test seams; PIP_*
+        # has no reader (the venv is built by `uv`, which reads UV_* only).
+        for _allow_name in "${_LAYER2_KEPT_NAMES[@]}"; do
             if [ -n "${!_allow_name+x}" ]; then
                 _LAYER2_ENV_ALLOWLIST+=("$_allow_name=${!_allow_name}")
             fi
         done
-        for _allow_name in "${!UV_@}" "${!PIP_@}"; do
+        # uv's own settings (link mode, cache, index for a private mirror).
+        # UV_PYTHON is inert: Layer 2 always passes --python.
+        for _allow_name in "${!UV_@}"; do
             _LAYER2_ENV_ALLOWLIST+=("$_allow_name=${!_allow_name}")
         done
         _LAYER2_LAUNCH=("$_trusted_env" -i "${_LAYER2_ENV_ALLOWLIST[@]}" "$_LAYER2_BASH")

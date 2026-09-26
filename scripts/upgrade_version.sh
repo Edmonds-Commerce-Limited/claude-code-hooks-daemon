@@ -82,6 +82,13 @@ source "$INSTALL_LIB_DIR/branch_install.sh"
 # shellcheck source=lib/python_discovery.sh
 source "$SCRIPT_DIR/lib/python_discovery.sh"
 
+# Plan 00376 review4 MAJOR 2: a library may change PATH when it is sourced
+# (venv.sh prepends $HOME/.local/bin for the install scripts), so the trusted
+# PATH is set again once the last one has loaded. Every step before the gate
+# runs its tools from here; uv is reached by name through _venv_uv.
+PATH="$(_gate_trusted_path)"
+export PATH
+
 # ============================================================
 # Argument parsing
 # ============================================================

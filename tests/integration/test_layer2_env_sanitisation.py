@@ -385,6 +385,131 @@ class TestTheIncludeGuardCannotBeInherited:
         assert result.stdout.strip() in ("/usr/bin/bash", "/bin/bash")
 
 
+_PLANTED_TOOLS = ("git", "cksum", "python3", "uv")
+_ARGUMENT_PARSING_LINE = 'PROJECT_ROOT="${1:-}"'
+
+
+@pytest.fixture
+def layer2_head(tmp_path: Path) -> Path:
+    """The REAL upgrade_version.sh up to its argument parsing -- every library
+    source included -- in a copy of scripts/ so SCRIPT_DIR resolves, followed
+    by a reporter."""
+    scripts = tmp_path / "scripts"
+    shutil.copytree(REPO_ROOT / "scripts" / "install", scripts / "install")
+    shutil.copytree(REPO_ROOT / "scripts" / "lib", scripts / "lib")
+    content = (REPO_ROOT / "scripts" / "upgrade_version.sh").read_text(encoding="utf-8")
+    head = content[: content.index(_ARGUMENT_PARSING_LINE)]
+    reporter = (
+        'echo "L2_PATH=$PATH"\n'
+        'echo "L2_EXPECTED=$(_gate_trusted_path)"\n'
+        + "".join(
+            f'echo "L2_RESOLVES {tool}=$(command -v {tool} || echo none)"\n' for tool in _PLANTED_TOOLS
+        )
+    )
+    script = scripts / "upgrade_version.sh"
+    script.write_text(head + reporter, encoding="utf-8")
+    return script
+
+
+@pytest.fixture
+def planted_home(tmp_path: Path) -> Path:
+    """A HOME whose `.local/bin` -- where the uv installer puts uv, and which
+    `venv.sh` prepends to PATH when sourced -- holds a tool of each name."""
+    home = tmp_path / "home"
+    bin_dir = home / ".local" / "bin"
+    bin_dir.mkdir(parents=True)
+    for tool in _PLANTED_TOOLS:
+        planted = bin_dir / tool
+        planted.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+        planted.chmod(0o755)
+    return home
+
+
+class TestLayer2PathAfterEveryLibrarySource:
+    """Plan 00376 review4 MAJOR 2: `venv.sh` prepends `$HOME/.local/bin` when
+    it is sourced, twelve lines AFTER `_sanitise_layer2_env`, so every step
+    before the gate ran `git`, `cksum` and `python3` from a directory HOME
+    names. Asserted after the LAST source, not after sanitisation."""
+
+    def _report(self, head: Path, home: Path) -> dict[str, str]:
+        result = _run(f'bash "{head}"', _base_env(HOME=str(home)))
+        assert result.returncode == 0, result.stdout + result.stderr
+        return dict(
+            line.removeprefix("L2_").split("=", 1)
+            for line in result.stdout.splitlines()
+            if line.startswith("L2_")
+        )
+
+    def test_path_is_the_trusted_path_after_the_last_source(
+        self, layer2_head: Path, planted_home: Path
+    ) -> None:
+        report = self._report(layer2_head, planted_home)
+
+        assert report["PATH"] == report["EXPECTED"]
+        assert str(planted_home) not in report["PATH"]
+
+    @pytest.mark.parametrize("tool", ["git", "cksum", "python3"])
+    def test_no_tool_resolves_from_home(
+        self, layer2_head: Path, planted_home: Path, tool: str
+    ) -> None:
+        report = self._report(layer2_head, planted_home)
+
+        assert not report[f"RESOLVES {tool}"].startswith(str(planted_home)), report
+
+
+class TestUvIsResolvedByName:
+    """The fix for MAJOR 2 keeps the uv installer's default location usable:
+    `uv` alone is looked up in `$HOME/.local/bin` when PATH has none, rather
+    than that directory answering for every other tool."""
+
+    def _uv(self, home: Path, path: str) -> subprocess.CompletedProcess[str]:
+        harness = (
+            "set -euo pipefail\n"
+            f'source "{REPO_ROOT / "scripts" / "install" / "venv.sh"}"\n'
+            f'PATH="{path}"\n'
+            "_venv_uv --version\n"
+        )
+        return _run(harness, _base_env(HOME=str(home)))
+
+    def test_falls_back_to_the_installer_location(self, tmp_path: Path) -> None:
+        home = tmp_path / "home"
+        bin_dir = home / ".local" / "bin"
+        bin_dir.mkdir(parents=True)
+        (bin_dir / "uv").write_text('#!/bin/sh\necho "home uv $*"\n', encoding="utf-8")
+        (bin_dir / "uv").chmod(0o755)
+        empty = tmp_path / "empty-bin"
+        empty.mkdir()
+
+        result = self._uv(home, str(empty))
+
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.strip() == "home uv --version"
+
+    def test_a_uv_on_path_wins(self, tmp_path: Path) -> None:
+        home = tmp_path / "home"
+        (home / ".local" / "bin").mkdir(parents=True)
+        on_path = tmp_path / "path-bin"
+        on_path.mkdir()
+        (on_path / "uv").write_text('#!/bin/sh\necho "path uv"\n', encoding="utf-8")
+        (on_path / "uv").chmod(0o755)
+
+        result = self._uv(home, str(on_path))
+
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.strip() == "path uv"
+
+    def test_no_uv_anywhere_fails_loudly(self, tmp_path: Path) -> None:
+        home = tmp_path / "home"
+        home.mkdir()
+        empty = tmp_path / "empty-bin"
+        empty.mkdir()
+
+        result = self._uv(home, str(empty))
+
+        assert result.returncode != 0
+        assert "uv" in result.stderr
+
+
 class TestLayer2SourcesItFirst:
     def test_upgrade_version_sh_sanitises_before_sourcing_any_other_library(self) -> None:
         """The library must be sourced, and the function called, before the
