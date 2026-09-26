@@ -408,7 +408,7 @@ def daemon_error(payload: PlaybookBlock) -> str | None:
     probes without the `tool_response` that `POST_TOOL_USE_INPUT_SCHEMA`
     requires, and the ALLOW half reported green.
     """
-    error = payload.get("error")
+    error = payload.get(HookInputField.ERROR)
     if not error:
         return None
     details = payload.get("details") or []

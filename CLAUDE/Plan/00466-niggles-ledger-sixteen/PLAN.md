@@ -76,7 +76,7 @@ Full write-ups are in [NIGGLES.md](NIGGLES.md). One line each here:
 | N43  | Log and payload redaction is inert while the daemon runs degraded on an unloadable config                      | Plan 00421 agent                                                | 🔄 In progress                   |
 | N44  | A PreToolUse handler raises `ValueError: no path specified` on an Edit, and the Edit goes through              | Plan 00464 agent                                                | ✅ Remedied                      |
 | N45  | A NUL byte in a configured word-list path makes the never-raising secret-term lookup raise                     | Plan 00421 agent                                                | 🔄 In progress                   |
-| N46  | `budget_exhaustion_detector` fires on a tool result that merely contains budget wording                        | Guard review 6                                                  | ⬜ Open                          |
+| N46  | `budget_exhaustion_detector` fires on a tool result that merely contains budget wording                        | Guard review 6                                                  | ✅ Remedied                      |
 | N47  | The ccy supervisor and Claude Code's settings.json both own effort, and they fight                             | Owner                                                           | 🔄 In progress                   |
 | N48  | `sed_blocker`'s git-commit exemption reaches across a newline                                                  | N38 review 2                                                    | ⬜ Open                          |
 | N49  | `daemon_location_guard` denies a daemon-directory `cd` that is only text inside a quoted argument              | Coordinator                                                     | ⬜ Open                          |
@@ -114,13 +114,13 @@ Full write-ups are in [NIGGLES.md](NIGGLES.md). One line each here:
 | N81  | `sed_blocker` denies a Bash heredoc that writes markdown, and a strict xfail pins the defect                   | CI run                                                          | ✅ Remedied                      |
 | N82  | A "design test" has been skipped as "implementation pending" since the registry-key work                       | CI run                                                          | ✅ Remedied                      |
 | N83  | A parametrised live-daemon test skips its own `tests` case                                                     | CI run                                                          | ✅ Remedied                      |
-| N84  | The `daemon_process` test fixture never checks that `stop` succeeded, so daemons leak                          | N24 gate fixer                                                  | ⬜ Open                          |
+| N84  | The `daemon_process` test fixture never checks that `stop` succeeded, so daemons leak                          | N24 gate fixer                                                  | ✅ Remedied                      |
 | N85  | `_MESSAGE_BODY_PATTERN` reads `\'` as an escape inside single quotes, hiding a command from every guard        | N38 review 5                                                    | 🔄 In progress (N38 fix 6)       |
 | N86  | A discovery-file miss leaves the forwarders unable to find or start the daemon                                 | Upgrade e2e                                                     | ⬜ Open (after N24)              |
 | N87  | ANSI-C quoting in text handed to a shell is never decoded, so the command it carries is unseen                 | N38 fix 6                                                       | ⬜ Open (after N38)              |
 | N88  | A data sink whose output feeds an executing process substitution hides the body                                | N38 review 6                                                    | ⬜ Open (after N38)              |
 | N89  | A data-sink receiver is trusted after the command redefines it                                                 | N38 review 6                                                    | ⬜ Open (after N38)              |
-| N90  | `project_containment` denies every command, even one that writes nothing, when the project root is unresolved  | GD gate fixer                                                   | ⬜ Open                          |
+| N90  | `project_containment` denies every command, even one that writes nothing, when the project root is unresolved  | GD gate fixer                                                   | ✅ Remedied                      |
 | N91  | A project's extra `protected_paths` can be ignored for the daemon's life by the payload-capture and lint seams | N38 fix 8                                                       | 🔄 In progress (N38)             |
 | N92  | `pipe_blocker` reads a \`                                                                                      | \` inside a double-quoted regex as a pipe                       | N38 review 8                     |
 | N93  | `project_containment` misses writes inside `eval '…'` and nested heredocs                                      | N38 review 8                                                    | ⬜ Open (after N38)              |
@@ -132,8 +132,10 @@ Full write-ups are in [NIGGLES.md](NIGGLES.md). One line each here:
 | N99  | `dev-handlers.md` offers an agent a wrapper command that the daemon denies                                     | Plan 464 gate fixer                                             | ⬜ Open (after 464)              |
 | N100 | A continuation on a heredoc opener line denies a body that is only written                                     | N38 reviews 6-9                                                 | ⬜ Open (after N38)              |
 | N101 | `secret_file_guard` fails closed with `TooManyToEnumerateError` on ordinary `python3 - <<'EOF'` commands       | N38 fix 11                                                      | ⬜ Open                          |
-| N105 | A skill redeploy leaves an untracked, unignored `.claude/hooks-daemon-backups/`                                | Upgrade review 11 (L9)                                          | ⬜ Open                          |
+| N105 | A skill redeploy leaves an untracked, unignored `.claude/hooks-daemon-backups/`                                | Upgrade review 11 (L9)                                          | ✅ Remedied                      |
 | N106 | Path containment is quadratic in path depth on Python 3.12+, so a deep `Write` path stalls PreToolUse          | CI run                                                          | ✅ Remedied                      |
+| N109 | The pending release-notes holding area mis-sorts past 99 callouts                                              | Coordinator                                                     | ✅ Remedied                      |
+| N110 | The local full QA gate tests one Python version, so a version-specific defect passes it and fails CI           | N106 fixer                                                      | ⬜ Open                          |
 
 ## Tasks
 

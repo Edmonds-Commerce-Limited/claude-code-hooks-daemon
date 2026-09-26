@@ -1,4 +1,4 @@
-# Fix: a deep file path no longer stalls PreToolUse
+# Callout: a deep file path no longer stalls PreToolUse
 
 **Plan**: 00466
 **Audience**: operators
