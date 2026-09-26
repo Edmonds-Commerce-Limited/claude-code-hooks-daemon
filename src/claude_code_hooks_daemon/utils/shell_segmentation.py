@@ -178,29 +178,36 @@ class _WrapperGrammar:
 
 
 #: Words that PREFIX a command without being it, so the command word sits
-#: further along: `sudo -E tee f` names tee. Each is parsed with its own
-#: option grammar, because an option's VALUE is not the command:
+#: further along: `sudo -u root tee f` names tee. Each is parsed with its
+#: own option grammar, because an option's VALUE is not the command:
 #: `sudo -p cat bash` runs bash (Plan 00466 N101, D-SEC F2). An option not
-#: in the grammar, a mode that runs a shell (`sudo -s`, `env -S`), or a
-#: PATH change resolves to NO command, which every allowlist caller treats
-#: as unknown. Only consulted by the allowlist callers
-#: (`quoted_heredoc_command_words`, the data-sink exemption);
+#: in the grammar, and each option refused below, resolves to NO command,
+#: which every allowlist caller treats as unknown. Only consulted by the
+#: allowlist callers (`quoted_heredoc_command_words`, the data-sink
+#: exemption, `brace_expansion_view`'s inert heads);
 #: `quoted_heredoc_receivers` must NOT use this: its caller matches against
 #: DANGEROUS names, where reporting only `sudo` would hide the interpreter.
 #:
 #: A deliberate WIDENING of the data-sink exemption (Plan 00466 N101 D-RULE
 #: m1): main skipped only `sudo`, so `env cat <<'EOF'` kept its body. Each
 #: wrapper here is sound to see through because it execs the named command
-#: with the same stdin and adds no execution of its own: `sudo` and `env`
-#: run it under another user or environment, `nice` and `nohup` change only
-#: scheduling and signals, `timeout` only bounds its run time, and
-#: `command` only bypasses shell functions (so it trusts a sink name LESS
-#: than a bare one, N89). The modes that do run a shell or change PATH are
-#: refused by the grammars above.
+#: with the same stdin and adds no execution of its own, and the name it
+#: runs resolves as it would on its own: `sudo` runs it as another user
+#: with a reset environment, `env` sets only the variables it names, `nice`
+#: and `nohup` change only scheduling and signals, `timeout` only bounds
+#: its run time, and `command` only bypasses shell functions (so it trusts
+#: a sink name LESS than a bare one, N89).
+#:
+#: Refused, so they resolve to no command: a mode that runs a shell
+#: (`sudo -s`/`-i`, `env -S`); a PATH change; a new root or working
+#: directory (`sudo -R`/`--chroot`, `sudo -D`/`--chdir`, `env -C`/
+#: `--chdir`), under which the name need not reach the same binary; and
+#: `sudo -E`/`--preserve-env`, which carries the caller's environment
+#: across sudo's reset (N101 round 4, D-RULE minor 1).
 _WRAPPER_GRAMMARS: dict[str, _WrapperGrammar] = {
     "sudo": _WrapperGrammar(
-        flags=frozenset("AbBEHknNPS"),
-        value_flags=frozenset("CDgpRrTtUu"),
+        flags=frozenset("AbBHknNPS"),
+        value_flags=frozenset("CgpTtUu"),
         long_flags=frozenset(
             {
                 "askpass",
@@ -216,24 +223,21 @@ _WRAPPER_GRAMMARS: dict[str, _WrapperGrammar] = {
         long_value_flags=frozenset(
             {
                 "close-from",
-                "chdir",
                 "group",
                 "prompt",
                 "role",
-                "chroot",
                 "type",
                 "command-timeout",
                 "other-user",
                 "user",
             }
         ),
-        long_optional_value_flags=frozenset({"preserve-env"}),
     ),
     "env": _WrapperGrammar(
         flags=frozenset("i0v"),
-        value_flags=frozenset("uC"),
+        value_flags=frozenset("u"),
         long_flags=frozenset({"ignore-environment", "null", "debug"}),
-        long_value_flags=frozenset({"unset", "chdir"}),
+        long_value_flags=frozenset({"unset"}),
         long_optional_value_flags=frozenset({"block-signal", "default-signal", "ignore-signal"}),
         assignments=True,
     ),
@@ -948,9 +952,9 @@ def quoted_heredoc_command_words(command: str) -> list[str]:
     would otherwise fail on ``commit`` and ``jq -r .`` on ``.``.
 
     A wrapper (``sudo``, ``env``, ``nice``, ``nohup``, ``timeout``,
-    ``command``) is skipped with its options, so ``sudo -E tee f`` resolves
-    to ``tee``. That cannot hide anything from an allowlist caller:
-    ``sudo -E bash`` resolves to ``bash``, which no list of data sinks
+    ``command``) is skipped with its options, so ``sudo -u root tee f``
+    resolves to ``tee``. That cannot hide anything from an allowlist caller:
+    ``sudo -u root bash`` resolves to ``bash``, which no list of data sinks
     contains, so the exemption is withheld either way. Skipping the wrappers
     other than ``sudo`` is a deliberate widening; see :data:`_WRAPPER_GRAMMARS`.
 
@@ -970,7 +974,7 @@ def quoted_heredoc_command_words(command: str) -> list[str]:
     Examples:
         >>> quoted_heredoc_command_words("git commit -F - <<'MSG'\\nbody\\nMSG")
         ['git']
-        >>> quoted_heredoc_command_words("sudo -E bash <<'EOF'\\nbody\\nEOF")
+        >>> quoted_heredoc_command_words("sudo -u root bash <<'EOF'\\nbody\\nEOF")
         ['bash']
     """
     resolved_words = (
@@ -1015,7 +1019,18 @@ def _segment_command_word(segment: str) -> str | None:
     could change by expansion, globbing or brace expansion, up to and
     including the command word, names nothing (Plan 00466 N101 round 3).
     """
+    chain = segment_command_chain(segment)
+    return None if chain is None else chain[-1].rsplit("/", 1)[-1]
+
+
+def segment_command_chain(segment: str) -> tuple[str, ...] | None:
+    """The words in command position of ``segment``, after quote removal
+    and NOT reduced to a basename: each wrapper it runs through, then the
+    command itself (``sudo -u root /usr/bin/ls x`` is ``("sudo",
+    "/usr/bin/ls")``). ``None`` on the same terms as
+    :func:`_segment_command_word`, whose command word is the last one."""
     words = _resolved_segment_words(segment)
+    chain: list[str] = []
     index = 0
     while index < len(words):
         word = words[index]
@@ -1024,9 +1039,10 @@ def _segment_command_word(segment: str) -> str | None:
         resolved = word.rsplit("/", 1)[-1]
         if not resolved or resolved.startswith("-"):
             return None
+        chain.append(word)
         grammar = _WRAPPER_GRAMMARS.get(resolved)
         if grammar is None:
-            return resolved
+            return tuple(chain)
         after = _skip_wrapper_arguments(grammar, words, index + 1)
         if after is None:
             return None

@@ -2314,3 +2314,134 @@ class TestRoundTwoFindingsAreClosed:
         )
         assert decision == Decision.DENY
         assert RuleID.SECRET_EVALUATION_ERROR in reason
+
+
+#: Brace halves of `_BRACE_PATH`, for programs that assemble it.
+_BRACE_OPEN_HALF = "cat /proj/.vault-p{a,"
+_BRACE_CLOSE_HALF = "x}ss"
+
+
+class TestRoundThreeFindingsAreClosed:
+    """Plan 00466 N101 round 4: every D-RULE and D-SEC round-3 finding,
+    through the real handler. Each command was allowed at 775864b38."""
+
+    @pytest.mark.parametrize(
+        "sibling",
+        [
+            # D-RULE MAJOR 2: builtins that run their argument as shell
+            "trap 'bash gen.sh' DEBUG",
+            "mapfile -C 'bash gen.sh' -c 1 < gen.sh",
+            "readarray -C 'bash gen.sh' -c 1 < gen.sh",
+            "bind -x '\"\\C-x\": bash gen.sh'",
+            "complete -C 'bash gen.sh' x",
+            "fc -s x",
+            # ...and any head nobody has reviewed, wherever it sits
+            "frobnicate x",
+            'echo "$(frobnicate x)"',
+            "env bash -c x",
+            "set -x",
+            "echo $((x))",
+            "cat <<EOF\n$(frobnicate)\nEOF",
+        ],
+    )
+    def test_a_head_not_known_to_be_inert_withdraws_the_exemption_d_rule_major_2(
+        self, sibling: str
+    ) -> None:
+        reason = _deny_reason(f"{sibling}\n{_CODE_BRACES_HEREDOC}")
+        assert RuleID.SECRET_EVALUATION_ERROR in reason
+
+    @pytest.mark.parametrize(
+        "body",
+        [
+            # D-RULE MAJOR 1: a brace group across an f-string's text and field
+            f"import os\na = x = ''\n{_OS_SYSTEM}(f'cat /proj/.vault-p{{a,x}}ss')",
+            # D-SEC minor 1: a brace group split across literals
+            f"import os\n{_OS_SYSTEM}('{_BRACE_OPEN_HALF}' + '{_BRACE_CLOSE_HALF}')",
+            f"import os\n{_OS_SYSTEM}('{_BRACE_OPEN_HALF}'+'{_BRACE_CLOSE_HALF}')",
+            f"import os\nv = ''\n{_OS_SYSTEM}('{_BRACE_OPEN_HALF}' + v + '{_BRACE_CLOSE_HALF}')",
+            f"import os\n{_OS_SYSTEM}(''.join(['{_BRACE_OPEN_HALF}', '{_BRACE_CLOSE_HALF}']))",
+            "import os, operator\n"
+            "operator.attrgetter('sys' + 'tem')(os)"
+            f"('{_BRACE_OPEN_HALF}' + '{_BRACE_CLOSE_HALF}')",
+            "from os import open as o, pwrite, O_WRONLY, O_CREAT\n"
+            f"pwrite(o('g.sh', O_WRONLY | O_CREAT), b'{_BRACE_OPEN_HALF}' + b'x}}ss', 0)",
+            f"import os\n{_OS_SYSTEM}('{_BRACE_OPEN_HALF}%s' % '{_BRACE_CLOSE_HALF}')",
+        ],
+    )
+    def test_an_assembled_brace_path_denies_d_rule_major_1_d_sec_minor_1(self, body: str) -> None:
+        heredoc = f"python3 - <<'EOF'\n{body}\nEOF\nbash g.sh"
+        assert RuleID.SECRET_BASH_MENTION in _deny_reason(heredoc)
+        dash_c = "python3 -c '" + body.replace("'", '"') + "'"
+        assert RuleID.SECRET_BASH_MENTION in _deny_reason(dash_c)
+
+    @pytest.mark.parametrize(
+        "body",
+        [
+            f"import os\na='{_BRACE_OPEN_HALF}';b=a+'{_BRACE_CLOSE_HALF}';{_OS_SYSTEM}(b)",
+            f"import os\na = '{_BRACE_OPEN_HALF}'\nb = a + '{_BRACE_CLOSE_HALF}'\n{_OS_SYSTEM}(b)",
+        ],
+    )
+    def test_a_brace_path_assembled_across_statements_denies(self, body: str) -> None:
+        """Not a round-3 finding: main's raw-text scan denied these by
+        accident, because a brace group spans whitespace, and 775864b38
+        allowed them."""
+        command = f"python3 - <<'EOF'\n{body}\nEOF"
+        assert RuleID.SECRET_BASH_MENTION in _deny_reason(command)
+
+    def test_braces_spelled_as_f_string_fields_deny_d_sec_minor_1(self) -> None:
+        """`{"{"}` needs both quote kinds before Python 3.12, so it has no
+        single-quoted `-c` form."""
+        body = f'import os\n{_OS_SYSTEM}(f\'cat /proj/.vault-p{{"{{"}}a,x{{"}}"}}ss\')'
+        command = f"python3 - <<'EOF'\n{body}\nEOF"
+        assert RuleID.SECRET_BASH_MENTION in _deny_reason(command)
+
+    @pytest.mark.parametrize(
+        "declaration",
+        [
+            "# -*- coding: latin-1 -*-",
+            "# coding: utf-7",
+            "# vim: set fileencoding=cp1252 :",
+            "\ufeff# plain",
+        ],
+    )
+    def test_a_program_python_decodes_differently_is_not_exempted_d_sec_open_question(
+        self, declaration: str
+    ) -> None:
+        command = f"python3 - <<'EOF'\n{declaration}\n{_MANY_BRACES_PROGRAM}\nEOF"
+        assert RuleID.SECRET_EVALUATION_ERROR in _deny_reason(command)
+
+    def test_a_utf8_declaration_keeps_the_exemption(self) -> None:
+        command = f"python3 - <<'EOF'\n# -*- coding: utf-8 -*-\n{_MANY_BRACES_PROGRAM}\nEOF"
+        decision, reason = _through_chain("Bash", {"command": command})
+        assert decision != Decision.DENY, reason
+
+    @pytest.mark.parametrize(
+        "sibling",
+        [
+            "cd /proj",
+            "set -euo pipefail",
+            "mkdir -p out && ls out",
+            "export FOO=1",
+            "echo start; grep -rn x .",
+            'echo "$(pwd)"',
+        ],
+    )
+    def test_an_inert_sibling_keeps_the_exemption(self, sibling: str) -> None:
+        decision, reason = _through_chain("Bash", {"command": f"{sibling}\n{_CODE_BRACES_HEREDOC}"})
+        assert decision != Decision.DENY, reason
+
+    def test_a_realistic_dict_and_f_string_program_stays_allowed(self) -> None:
+        """The field shape N101 was filed for: building hook inputs as
+        dicts with f-strings, past the 500-word discovery cap."""
+        lines = [
+            "import json",
+            *(
+                f"event_{i} = {{'hook_event_name': 'PreToolUse', 'tool_name': 'Bash', "
+                f"'tool_input': {{'command': f'echo {{json.dumps({i})}}'}}}}\n"
+                f"print(json.dumps({{'n': {i}, 'session_id': f's-{{event_{i}[\"tool_name\"]}}'}}))"
+                for i in range(300)
+            ),
+        ]
+        command = "python3 - <<'EOF'\n" + "\n".join(lines) + "\nEOF"
+        decision, reason = _through_chain("Bash", {"command": command})
+        assert decision != Decision.DENY, reason

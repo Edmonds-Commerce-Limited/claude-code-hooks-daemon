@@ -95,24 +95,35 @@ single-quoted `-c` word or its one quoted-delimiter stdin heredoc. Every
 string literal and comment of that program (found by Python's own
 `tokenize` and `ast`; a program that does not parse is not exempted) is
 enumerated on its own with the normal caps, so a brace-spelled path in any
-literal denies whatever the program does with it. The exemption holds only
-when no shell can read what the program prints: no pipe after it, no
-process substitution, no subshell, group, function definition, compound
-command or wrapper, no `exec`/`eval`/`coproc`, no redefinition of the name
-or what it loads (a function, an alias, `hash`, `enable`, PATH, a
-`PYTHON*` setting, `source` or `.`), and no output file that another
-command in the line could run. Heads and redefinition words are judged
+literal denies whatever the program does with it. So are the full source
+of every f-string, every expression's literals joined in source order, and
+every literal and comment of the program joined with a space, so a brace
+group split across literals, statements, or an f-string's text and field
+is enumerated whole (round 4). A program that declares an
+encoding other than UTF-8, or that Python would decode differently from the
+text the guard parsed, is not exempted. The exemption holds only when no
+shell can read what the program prints: no pipe after it, no process
+substitution, no subshell, group, function definition, compound command,
+arithmetic, non-plain `${…}` or expanding unquoted heredoc, and every
+command anywhere in the line, substitutions included, on an allowlist of
+commands known not to run text as shell (`shell_expansion._INERT_HEADS`,
+round 4; a deny-list missed `trap` and `mapfile -C`). Nothing may redefine
+the name or what it loads (a function, an alias, `hash`, `enable`, PATH, a
+`PYTHON*` setting), and no output file may be one that another command in
+the line could run. Heads and redefinition words are judged
 after quote and backslash removal, and a word that cannot be resolved with
 certainty withdraws the exemption. Ruby, Perl, PHP and Node are judged as
 before, because they brace-expand in their own glob APIs. Argv is judged as
 before. The shell-exec literal scan covers every Python spawn API and
 heredoc programs. Only the Bash tool's own command line gets the view (the
 guard's Bash route and payload capture); an authored script, a command
-segment and Write/Edit content are enumerated as on main. Rounds 2 and 3
+segment and Write/Edit content are enumerated as on main. Rounds 2 to 4
 closed the D-RULE and D-SEC review findings; see
-`subagent-reports/260926-n101-fix2-opus-5-5.md` and
-`260926-n101-fix3-opus-5-5.md`. The quarantine guard enumerates filesystem
-globs, not braces; see N103.
+`subagent-reports/260926-n101-fix2-opus-5-5.md`,
+`260926-n101-fix3-opus-5-5.md` and `260926-n101-fix4-opus-5-5.md`. The
+quarantine guard enumerates filesystem globs, not braces; see N103, which
+also denies a Python program holding `{**d}` because the `**` word is
+walked.
 
 **Deliberate widening of the shared data-sink heredoc exemption** (D-RULE
 m1). The quote-aware command-word resolver in `shell_segmentation` (used by
@@ -124,7 +135,10 @@ sink behind one of these is blanked where main scanned it. Each is sound:
 the wrapper execs the named command with the same stdin and runs nothing
 itself (`command` even bypasses functions), and the modes that do run a
 shell or change PATH (`sudo -s`, `env -S`, `env PATH=`) resolve to no
-command. It is also tightened: a quoted option value is one word
+command, as do those that change the root or working directory
+(`sudo -R`/`--chroot`, `sudo -D`/`--chdir`, `env -C`/`--chdir`) or keep
+the caller's environment across sudo's reset (`sudo -E`/`--preserve-env`,
+round 4; main trusted `sudo -E tee`). It is also tightened: a quoted option value is one word
 (`sudo -p 'x cat' bash` names bash), and a word built by expansion,
 globbing or brace expansion (`$cat`, `` `echo cat` ``) names no command,
 where main resolved `$cat` to `cat`.

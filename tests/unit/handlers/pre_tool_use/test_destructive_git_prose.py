@@ -220,6 +220,35 @@ class TestTheGuardStillGuards:
         )
         assert result.result.decision == Decision.DENY
 
+    @pytest.mark.parametrize(
+        "receiver",
+        [
+            "sudo -R /x tee f",
+            "sudo --chroot=/x tee f",
+            "sudo -D /x tee f",
+            "sudo --chdir /x tee f",
+            "sudo -E tee f",
+            "sudo --preserve-env tee f",
+            "sudo -i tee f",
+            "sudo -s tee f",
+            "env -C /x tee f",
+        ],
+    )
+    def test_a_sudo_option_changing_root_directory_or_environment_hides_no_shell(
+        self, receiver: str
+    ) -> None:
+        """Plan 00466 N101 round 4 (D-RULE minor 1), through the real chain:
+        775864b38 read `-R`/`--chroot`/`-D` as value options and blanked the
+        body as fed to the sink `tee`, yet under a chroot or another
+        directory the name `tee` need not be the sink."""
+        chain = HandlerChain()
+        chain.add(DestructiveGitHandler())
+        command = f"{receiver} <<'EOF'\n{_RESET_HARD} HEAD\nEOF"
+        result = chain.execute(
+            {"tool_name": "Bash", "tool_input": {"command": command}}, strict_mode=False
+        )
+        assert result.result.decision == Decision.DENY
+
     @pytest.mark.parametrize("interpreter", ["bash", "sh", "python3", "ssh host"])
     def test_a_sink_piped_into_an_interpreter_is_still_blocked(
         self, handler: DestructiveGitHandler, interpreter: str

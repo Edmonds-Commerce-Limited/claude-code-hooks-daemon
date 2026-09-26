@@ -607,9 +607,9 @@ class TestQuotedHeredocCommandWords:
 
     def test_sudo_is_skipped_so_the_real_command_is_reported(self) -> None:
         """Skipping `sudo` cannot hide an interpreter from an allowlist
-        caller: `sudo -E bash` resolves to `bash`, which no sink list holds."""
-        assert quoted_heredoc_command_words("sudo -E bash <<'EOF'\nb\nEOF") == ["bash"]
-        assert quoted_heredoc_command_words("sudo -E tee /etc/x <<'EOF'\nb\nEOF") == ["tee"]
+        caller: `sudo -H bash` resolves to `bash`, which no sink list holds."""
+        assert quoted_heredoc_command_words("sudo -H bash <<'EOF'\nb\nEOF") == ["bash"]
+        assert quoted_heredoc_command_words("sudo -H tee /etc/x <<'EOF'\nb\nEOF") == ["tee"]
 
     @pytest.mark.parametrize(
         ("prefix", "command"),
@@ -623,7 +623,7 @@ class TestQuotedHeredocCommandWords:
             ("sudo -u root --", "bash"),
             ("env -u cat", "bash"),
             ("env -i FOO=cat", "bash"),
-            ("env --chdir=/x", "bash"),
+            ("env --unset=x", "bash"),
             ("nice -n cat", "bash"),
             ("nice -10", "bash"),
             ("timeout -s cat 5", "bash"),
@@ -664,14 +664,43 @@ class TestQuotedHeredocCommandWords:
         assert quoted_heredoc_command_words(f"{prefix} cat <<'EOF'\nb\nEOF") == []
 
     @pytest.mark.parametrize(
+        "prefix",
+        [
+            "sudo -R /x",
+            "sudo -R/x",
+            "sudo --chroot /x",
+            "sudo --chroot=/x",
+            "sudo -D /x",
+            "sudo --chdir=/x",
+            "sudo -E",
+            "sudo -HE",
+            "sudo --preserve-env",
+            "sudo --preserve-env=HOME",
+            "sudo -i",
+            "sudo -s",
+            "sudo --login",
+            "env -C /x",
+            "env --chdir=/x",
+        ],
+    )
+    def test_a_wrapper_option_that_changes_root_directory_or_environment_names_no_command(
+        self, prefix: str
+    ) -> None:
+        """Plan 00466 N101 round 4 (D-RULE minor 1): a chroot or a new
+        working directory changes which binary a name resolves to, and
+        `sudo -E` carries the caller's environment across sudo's reset, so
+        the wrapped name no longer means what it means on its own."""
+        assert quoted_heredoc_command_words(f"{prefix} cat <<'EOF'\nb\nEOF") == []
+
+    @pytest.mark.parametrize(
         ("prefix", "command"),
         [
             ("sudo -p 'x cat'", "bash"),
             ('sudo -p "x cat"', "bash"),
             ("sudo --prompt 'x cat'", "bash"),
             ("sudo -p x\\ cat", "bash"),
-            ("env -C 'a cat'", "bash"),
-            ("sudo -D 'a cat'", "bash"),
+            ("env -u 'a cat'", "bash"),
+            ("sudo -g 'a cat'", "bash"),
         ],
     )
     def test_a_quoted_option_value_is_one_word(self, prefix: str, command: str) -> None:

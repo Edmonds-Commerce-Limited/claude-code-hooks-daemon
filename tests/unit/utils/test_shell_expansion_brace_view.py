@@ -21,6 +21,8 @@ import pytest
 
 from claude_code_hooks_daemon.utils.shell_expansion import (
     brace_expansion_view,
+    expand_braces,
+    iter_brace_words,
     python_string_literals,
 )
 
@@ -406,7 +408,8 @@ class TestPythonStringLiterals:
         assert "# p{a,b}" in literals
 
     def test_code_braces_are_not_literals(self) -> None:
-        assert python_string_literals("x = {'a': 1, 'b': {2, 3}}\n") == ("a", "b")
+        literals = python_string_literals("x = {'a': 1, 'b': {2, 3}}\n")
+        assert literals == ("a", "b", "a b", "ab")
 
     @pytest.mark.parametrize("source", ["print('x", "x = = 1\n", "def f(:\n", "x = '\0'\n"])
     def test_text_that_does_not_tokenise_or_parse_is_none(self, source: str) -> None:
@@ -447,3 +450,177 @@ class TestQuoteTrackingDoesNotDesync:
     )
     def test_shell_text_after_tricky_quoting_is_kept(self, command: str) -> None:
         assert f"cat z{_GROUPS}" in brace_expansion_view(command).text
+
+
+class TestOnlyHeadsKnownToBeInertMayShareTheLine:
+    """Plan 00466 N101 round 4 (D-RULE MAJOR 2): `trap` and `mapfile -C`
+    run their argument as shell in the current shell, and a deny-list of
+    such builtins was missing them. Every head anywhere in the line, nested
+    substitutions included, must now be on an allowlist of commands known
+    not to run text as shell; any other head withdraws the exemption."""
+
+    @pytest.mark.parametrize(
+        "sibling",
+        [
+            "trap 'cat gen.sh' DEBUG",
+            "mapfile -C 'cat' -c 1 < gen.sh",
+            "readarray -C 'cat' -c 1 < gen.sh",
+            "bind -x '\"\\C-x\": cat'",
+            "complete -C 'cat' x",
+            "fc -s x",
+            "command_not_found_handle x",
+            "frobnicate x",
+            "'frobnicate' x",
+            'echo "$(frobnicate x)"',
+            "echo $(frobnicate x)",
+            "echo `frobnicate x`",
+            "sudo frobnicate",
+            "env bash -c x",
+            "nohup sh -c x",
+            "command eval x",
+            "/tmp/cat x",
+            "./echo x",
+            "! echo x",
+            "time echo x",
+            "set -x",
+            "set -eux",
+            "set -o xtrace",
+            "export -f f",
+            "export 'a[1]=x'",
+            "test -v 'a[x]'",
+            "printf -v x %s y",
+            "echo $((1 + 1))",
+            'echo "$((x))"',
+            'echo "${a[x]}"',
+            "cat <<EOF\n$(frobnicate)\nEOF",
+            "cat <<EOF\n`frobnicate`\nEOF",
+        ],
+    )
+    def test_a_head_not_known_to_be_inert_withdraws(self, sibling: str) -> None:
+        assert _kept(f"{sibling}\n{_PROGRAM}")
+
+    @pytest.mark.parametrize(
+        "sibling",
+        [
+            "cd /x",
+            "pushd /x",
+            "popd",
+            "pwd",
+            "echo done",
+            "true",
+            "false",
+            ":",
+            "set -e",
+            "set -euo pipefail",
+            "mkdir -p out",
+            "ls -la",
+            "cat README.md",
+            "grep -rn x .",
+            "sleep 1",
+            "export FOO=1",
+            "export FOO BAR=2",
+            "python3 other.py",
+            "/usr/bin/python3 -m pytest",
+            "env FOO=1 cat x",
+            "nice -n 5 ls",
+            "timeout 5 cat x",
+            "nohup sleep 1",
+            "sudo -u root ls",
+            "/bin/echo x",
+            'echo "$(pwd)"',
+            "echo $(ls)",
+            "cat <<'X'\n$(frobnicate)\nX",
+            "cat <<EOF\nplain text\nEOF",
+        ],
+    )
+    def test_a_head_known_to_be_inert_keeps_the_exemption(self, sibling: str) -> None:
+        assert "{a,b}" not in brace_expansion_view(f"{sibling}\n{_PROGRAM}").text
+
+
+class TestSplitAndAssembledLiteralsAreReported:
+    """Plan 00466 N101 round 4 (D-RULE MAJOR 1, D-SEC minor 1): a brace
+    group whose `{` and `}` sit in different literals, or across an
+    f-string's literal text and its field, was enumerated by main's raw
+    scan and not by round 3. The full source of every f-string, and the
+    source-order concatenation of the literals of every expression, are
+    reported as well."""
+
+    @pytest.mark.parametrize(
+        ("source", "expected"),
+        [
+            ("x = f'/p{a,x}ss'\n", "f'/p{a,x}ss'"),
+            ("x = '/p{a,' + 'x}ss'\n", "/p{a,x}ss"),
+            ("x = '/p{a,' + y + 'x}ss'\n", "/p{a,x}ss"),
+            ("print(''.join(['/p{a,', 'x}ss']))\n", "/p{a,x}ss"),
+            ('f(f\'/p{"{"}a,x{"}"}ss\')\n', "/p{a,x}ss"),
+            ("f('/p{a,%s' % 'x}ss')\n", "/p{a,%sx}ss"),
+            ("f('{}'.format('/p{a,') + 'x}ss')\n", "{}/p{a,x}ss"),
+            ("d = {'/p{a,': 'x}ss'}\n", "/p{a,x}ss"),
+            ("f(b'/p{a,' + b'x}ss')\n", "/p{a,x}ss"),
+            ("def g():\n    return '/p{a,' + 'x}ss'\n", "/p{a,x}ss"),
+            ("def g(v='/p{a,' + 'x}ss'):\n    pass\n", "/p{a,x}ss"),
+        ],
+    )
+    def test_an_assembled_literal_is_reported(self, source: str, expected: str) -> None:
+        literals = python_string_literals(source)
+        assert literals is not None
+        assert expected in literals
+
+    @pytest.mark.parametrize(
+        "source",
+        [
+            "a = '/p{a,'\nb = a + 'x}ss'\n",
+            "a='/p{a,';b=a+'x}ss'\n",
+            "a = '/p{a,'  # note\nb = a + 'x}ss'\n",
+        ],
+    )
+    def test_a_group_split_across_statements_is_reported_whole(self, source: str) -> None:
+        """Main's raw-text scan denied these by accident (a brace group
+        spans whitespace); every literal joined with a space keeps that."""
+        literals = python_string_literals(source)
+        assert literals is not None
+        assert any(
+            spelling == "/pass"
+            for literal in literals
+            for word in iter_brace_words(literal)
+            for spelling in expand_braces(word)
+        )
+
+    def test_code_braces_are_still_not_reported(self) -> None:
+        literals = python_string_literals("x = {'k': {1, 2}}\nprint(f'{x}-{1}', {'k': 1})\n")
+        assert literals is not None
+        assert not any("{1, 2}" in literal or "{'k'" in literal for literal in literals)
+
+
+class TestTheSourceMustDecodeAsPythonDecodesIt:
+    """Plan 00466 N101 round 4 (D-SEC, the unexamined question): the view
+    tokenises the program as a `str`, while `python3` decodes its bytes by
+    the PEP 263 declaration. Any other declared encoding, or text whose
+    bytes Python would decode differently, is not exempted."""
+
+    @pytest.mark.parametrize(
+        "source",
+        [
+            "# -*- coding: latin-1 -*-\nx = 1\n",
+            "# coding=cp1252\nx = 1\n",
+            "#!/usr/bin/env python3\n# coding: utf-7\nx = 1\n",
+            "# vim: set fileencoding=utf-16 :\nx = 1\n",
+            "# coding: bogus\nx = 1\n",
+            "\ufeffx = 1\n",
+        ],
+    )
+    def test_a_program_python_decodes_differently_is_not_exempted(self, source: str) -> None:
+        assert python_string_literals(source) is None
+        assert _kept(_python_heredoc(source.rstrip("\n") + f"\nprint({{1}}, '{_GROUPS}')"))
+
+    @pytest.mark.parametrize(
+        "source",
+        [
+            "# -*- coding: utf-8 -*-\nx = 1\n",
+            "# coding: utf8\nx = 1\n",
+            "# vim: set fileencoding=UTF-8 :\nx = 1\n",
+            "x = 'caf\u00e9'\n",
+        ],
+    )
+    def test_a_utf8_program_is_exempted(self, source: str) -> None:
+        assert python_string_literals(source) is not None

@@ -18,19 +18,34 @@ of a standalone `python3` command in a Bash tool call. That is either its
 single-quoted `-c` word or its one quoted-delimiter stdin heredoc
 (`python3 - <<'EOF'` or `python3 <<'EOF'`). Every string literal and comment
 of that program is still enumerated, each on its own and with the usual
-caps. The exemption applies only when no shell can read what the program
-prints:
+caps. So is the full text of every f-string; for every expression, its
+literals joined in source order; and every literal and comment of the
+program joined in order with a space. A brace group split across literals
+(`'…{a,' + 'x}…'`, `''.join([...])`, `f'{"{"}'`) or across statements is
+therefore still seen whole. The
+exemption applies only when no shell can read what the program prints:
 
 - no pipe follows the command, and no process substitution appears in the
   line;
 - the command is not inside `( )`, `{ }`, a loop or `if`, a substitution,
   or a wrapper such as `sudo`, `env`, `xargs` or `ssh`, and the line
   defines no function;
-- the line has no `exec`, `eval` or `coproc`, and does not redefine
-  `python3` or what it loads (a function, alias, `hash`, `enable`, PATH or
-  `PYTHONPATH`-style change, `source` or `.`). These words are recognised
-  however they are quoted or escaped (`'exec'`, `\exec`, `e\xec`), and a
-  command word built by expansion withdraws the exemption;
+- every other command in the line, including inside `$( )` and backticks,
+  is on a short list known not to run text as shell: `cd`, `pushd`,
+  `popd`, `pwd`, `echo`, `true`, `false`, `:`, `set` (without `-x`),
+  `export` (plain names only), `mkdir`, `ls`, `cat`, `grep`, `sleep` and
+  `python3`, named bare or from a system directory, optionally behind
+  `sudo`, `env`, `nice`, `nohup`, `timeout` or `command`. Any other
+  command (`trap`, `mapfile -C`, `eval`, `git`, a script) withdraws the
+  exemption, as do an arithmetic expansion, a `${…}` other than a plain
+  name, and an unquoted heredoc whose body holds `$` or a backtick;
+- nothing redefines `python3` or what it loads (a function, alias, `hash`,
+  `enable`, PATH or `PYTHONPATH`-style change). Command words and these
+  words are recognised however they are quoted or escaped (`'exec'`,
+  `\exec`, `e\xec`), and a command word built by expansion withdraws the
+  exemption;
+- the program declares no source encoding other than UTF-8 and carries no
+  byte-order mark, so Python reads the same text the guard parsed;
 - its output goes to the terminal, `/dev/null`, or a file that no other
   command in the line can run.
 
@@ -68,4 +83,9 @@ trusted as a sink. Options of `sudo`, `env`, `nice`, `timeout`, `nohup` and
 parser does not know withholds the exemption. As a deliberate widening, a
 data sink behind one of those wrappers (`env cat <<'EOF'`) is now trusted:
 each wrapper runs the named command on the same input and runs nothing
-itself.
+itself. An option that changes the root or working directory
+(`sudo -R`/`--chroot`, `sudo -D`/`--chdir`, `env -C`/`--chdir`), runs a
+shell (`sudo -i`/`-s`) or keeps the caller's environment across sudo's
+reset (`sudo -E`/`--preserve-env`) withholds the exemption, so
+`sudo -E tee f <<'EOF'`, which earlier releases trusted, now has its body
+scanned.

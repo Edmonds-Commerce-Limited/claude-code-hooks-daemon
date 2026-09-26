@@ -23,6 +23,7 @@ way ``iter_protected_mentions`` already treats its own ``TimeoutError``.
 from __future__ import annotations
 
 import ast
+import codecs
 import errno
 import fnmatch
 import io
@@ -39,6 +40,7 @@ from typing import Final, NamedTuple
 
 from claude_code_hooks_daemon.utils.shell_segmentation import (
     resolve_shell_word,
+    segment_command_chain,
     segment_command_word,
 )
 
@@ -300,13 +302,21 @@ def iter_brace_words(text: str, *, max_words: int = DEFAULT_MAX_BRACE_WORDS) -> 
 # returned unchanged, and the caller keeps enumerating it and keeps failing
 # closed past the cap.
 
-#: The one interpreter whose program text is exempt, named bare (resolved
-#: through PATH) or from a system directory. Ruby, Perl, PHP and Node expand
-#: braces in their own glob APIs (`Dir.glob`, `glob`, `GLOB_BRACE`,
-#: `fs.glob`), so their text stays shell text. A relative or other absolute
-#: path (`./python3`, `/tmp/python3`) may be a shell under Python's name.
+#: A command named bare (resolved through PATH) or from a system directory.
+#: A relative or other absolute path (`./python3`, `/tmp/cat`) may be a
+#: shell under a trusted name.
+_SYSTEM_DIRECTORY_PREFIX: Final[str] = r"(?:/usr/bin/|/bin/|/usr/local/bin/)?"
+
+#: The one interpreter whose program text is exempt. Ruby, Perl, PHP and
+#: Node expand braces in their own glob APIs (`Dir.glob`, `glob`,
+#: `GLOB_BRACE`, `fs.glob`), so their text stays shell text.
 _PYTHON_INTERPRETER_RE: Final[re.Pattern[str]] = re.compile(
-    r"(?:/usr/bin/|/bin/|/usr/local/bin/)?python(?:\d+(?:\.\d+)*)?"
+    _SYSTEM_DIRECTORY_PREFIX + r"python(?:\d+(?:\.\d+)*)?"
+)
+
+#: A command word naming its command bare or from a system directory.
+_TRUSTED_COMMAND_RE: Final[re.Pattern[str]] = re.compile(
+    _SYSTEM_DIRECTORY_PREFIX + r"(?P<name>[^/]+)"
 )
 
 #: Python options that take no value, and those whose value follows. Any
@@ -327,44 +337,72 @@ _REDIRECT_RE: Final[re.Pattern[str]] = re.compile(
 _HARMLESS_OUTPUT_TARGETS: Final[frozenset[str]] = frozenset({"/dev/null"})
 _HARMLESS_DUP_TARGETS: Final[frozenset[str]] = frozenset({"1", "2", "-"})
 
-#: Heads of a top-level command that withdraw every exemption in the line:
-#: a compound command, whose output is redirected or piped as a whole
-#: (`for ...; done | bash`, `{ ...; } > gen.sh`); a builtin that re-routes
-#: the shell's own stdout or runs text as shell (`exec >gen.sh`, `eval`,
-#: `coproc`, and `builtin`/`command` in front of them); and a builtin that
-#: defines names from a file (`source`, `.`).
-_EXEMPTION_WITHDRAWING_HEADS: Final[frozenset[str]] = frozenset(
+#: The only commands that may run anywhere in a line holding an exempted
+#: program, substitutions included (Plan 00466 N101 round 4, D-RULE MAJOR
+#: 2). An ALLOWLIST: a deny-list of heads that run text as shell missed
+#: `trap` and `mapfile -C`, and `bind -x`, `complete -C`, `fc`, `eval`,
+#: `source`, a compound command and every unreviewed name have the same
+#: shape, so any other head withdraws every exemption. Each named here runs
+#: no text as shell and evaluates no arithmetic (an array subscript in
+#: arithmetic runs `$(...)`):
+#:
+#: - `cd`, `pushd`, `popd`, `pwd`: move or print the working directory;
+#: - `echo`, `true`, `false`, `:`: print or ignore their arguments;
+#: - `set`: shell options, except `-x`/`xtrace`, whose trace expands PS4;
+#: - `export`: plain `NAME` or `NAME=value` operands only -- no option
+#:   (`-f` exports functions) and no subscript (`a[$(x)]=1`);
+#: - `mkdir`, `ls`, `cat`, `grep`, `sleep`: create, list or read files;
+#: - Python (:data:`_PYTHON_INTERPRETER_RE`), which can do nothing the
+#:   exempted program cannot.
+#:
+#: Each is named bare or from a system directory. A wrapper
+#: (`shell_segmentation._WRAPPER_GRAMMARS`: `sudo`, `env`, `nice`, `nohup`,
+#: `timeout`, `command`) is seen through, and what it runs must be on this
+#: list too; `set` and `export` are builtins no wrapper need run.
+_INERT_HEADS: Final[frozenset[str]] = frozenset(
     {
-        "if",
-        "then",
-        "elif",
-        "else",
-        "fi",
-        "for",
-        "while",
-        "until",
-        "do",
-        "done",
-        "case",
-        "esac",
-        "select",
-        "{",
-        "}",
-        "function",
-        "coproc",
-        "exec",
-        "eval",
-        "builtin",
-        "command",
-        "source",
-        ".",
+        "cd",
+        "pushd",
+        "popd",
+        "pwd",
+        "echo",
+        "true",
+        "false",
+        ":",
+        "set",
+        "export",
+        "mkdir",
+        "ls",
+        "cat",
+        "grep",
+        "sleep",
     }
 )
+
+#: Allowlisted builtins whose operands are judged too (:data:`_INERT_HEADS`).
+_SET_BUILTIN: Final[str] = "set"
+_EXPORT_BUILTIN: Final[str] = "export"
+
+#: A `set` operand that turns tracing on.
+_XTRACE_OPERAND_RE: Final[re.Pattern[str]] = re.compile(r"[-+][A-Za-z]*x[A-Za-z]*|xtrace")
+
+#: An `export` operand naming a plain variable, with or without a value.
+_EXPORT_OPERAND_RE: Final[re.Pattern[str]] = re.compile(
+    r"[A-Za-z_][A-Za-z0-9_]*(?:=.*)?", re.DOTALL
+)
+
+#: A `${...}` body the view models: a plain parameter name. Anything else
+#: (`${a[i]}`, `${!x}`, `${x:y}`) may evaluate a value as arithmetic, whose
+#: array subscripts run `$(...)`.
+_PLAIN_PARAMETER_RE: Final[re.Pattern[str]] = re.compile(r"[A-Za-z_][A-Za-z0-9_]*|[0-9]+|[@*#?$!-]")
+
+#: Characters that start an expansion in an unquoted heredoc body.
+_EXPANDING_CHARS: Final[frozenset[str]] = frozenset("$`")
 
 #: Heads that may share a line with a program whose output is redirected
 #: into a file: none of them can execute that file.
 _INERT_SIBLING_HEADS: Final[frozenset[str]] = frozenset(
-    {"set", "cd", "pushd", "popd", "echo", "printf", "pwd", "true", "false", ":", "mkdir"}
+    {"set", "cd", "pushd", "popd", "echo", "pwd", "true", "false", ":", "mkdir"}
 )
 
 #: Separators after which a program's output flows on to another command.
@@ -517,15 +555,17 @@ def brace_expansion_view(command: str) -> BraceExpansionView:
       anywhere in the line;
     - the command is not inside ``( )``, ``{ }``, a compound command, a
       substitution, or under any wrapper (``sudo``, ``eval``, ``xargs``);
-    - no top-level command re-routes the shell's stdout or runs text as
-      shell (``exec``, ``eval``, ``coproc``), and nothing redefines
-      ``python3`` or what it loads (a function, an alias, ``hash``,
-      ``enable``, PATH, a ``PYTHON*`` setting, ``source`` or ``.``). Heads
-      and redefinition words are judged after quote and backslash removal
-      (``'exec'``, ``\\exec`` and ``e\\xec`` are ``exec``), and a head, or an
-      argument of a name-assigning builtin, that cannot be resolved with
-      certainty withdraws the exemption;
-    - no subshell or function definition (a bare ``(``) at the top level;
+    - every command anywhere in the line, substitutions included, is on the
+      allowlist of commands known not to run text as shell
+      (:data:`_INERT_HEADS`, round 4), and nothing redefines ``python3`` or
+      what it loads (a function, an alias, ``hash``, ``enable``, PATH, a
+      ``PYTHON*`` setting). Heads and redefinition words are judged after
+      quote and backslash removal (``'exec'``, ``\\exec`` and ``e\\xec`` are
+      ``exec``), and a head, or an argument of a name-assigning builtin,
+      that cannot be resolved with certainty withdraws the exemption;
+    - no subshell, arithmetic command or function definition (a bare
+      ``(``), no arithmetic expansion, no ``${...}`` but a plain name, and
+      no unquoted heredoc whose body holds an expansion;
     - stdout goes to the terminal, a descriptor dup, ``/dev/null``, or a
       file no other command in the line can execute;
     - every Python option is one the scanner knows, and the program both
@@ -572,24 +612,125 @@ def python_string_literals(source: str) -> tuple[str, ...] | None:
     - every constant the parsed program holds, which adds the concatenated
       value (``'/p{a,' 'x}ss'``), the literal text of an f-string with
       ``{{``/``}}`` unescaped, and strings nested in its fields;
-    - every comment, since a program can read its own command line back.
+    - every comment, since a program can read its own command line back;
+    - the full source of every f-string, where a brace group can straddle
+      its text and a field (``f'/p{a,x}ss'``, D-RULE MAJOR 1);
+    - for every expression, the literals inside it joined in source order,
+      so a group split across literals (``'/p{a,' + x + 'x}ss'``,
+      ``''.join([...])``, ``f'{"{"}'``) is whole again (D-SEC minor 1);
+    - every literal and comment of the program joined in source order with
+      a space, so a group split across statements (``a = '/p{a,'`` then
+      ``b = a + 'x}ss'``) is whole again: a brace group spans whitespace,
+      which is how main's scan of the raw text denied it.
 
     ``None`` makes the caller keep the program's text as shell text: an
-    unparseable program is not exempted.
+    unparseable program is not exempted, and neither is one Python would
+    decode differently from this ``str`` (a PEP 263 declaration of any
+    encoding but UTF-8, or a byte-order mark).
     """
     try:
+        if not _decodes_as_utf8(source):
+            return None
         tokens = list(tokenize.generate_tokens(io.StringIO(source).readline))
         tree = ast.parse(source)
         literals: list[str] = []
+        in_order: list[str] = []
         for token in tokens:
             if token.type == tokenize.COMMENT:
-                literals.append(token.string)
+                in_order.append(token.string)
             elif token.type == tokenize.STRING:
-                literals.extend(_constant_strings(ast.parse(token.string, mode="eval")))
+                in_order.extend(_constant_strings(ast.parse(token.string, mode="eval")))
+            elif token.type == _FSTRING_MIDDLE:
+                in_order.append(token.string)
+        literals.extend(in_order)
+        literals.append(" ".join(in_order))
         literals.extend(_constant_strings(tree))
-    except (SyntaxError, ValueError, RecursionError, tokenize.TokenError):
+        literals.extend(_f_string_sources(source, tree))
+        literals.extend(_assembled_literals(tree))
+    except (SyntaxError, ValueError, RecursionError, LookupError, tokenize.TokenError):
         return None
     return tuple(dict.fromkeys(literals))
+
+
+#: The token for an f-string's literal text, on Pythons that split f-strings
+#: into tokens (3.12+); earlier ones tokenise an f-string as one STRING.
+_FSTRING_MIDDLE: Final[int | None] = getattr(tokenize, "FSTRING_MIDDLE", None)
+
+
+def _decodes_as_utf8(source: str) -> bool:
+    """Whether Python, reading ``source`` as the UTF-8 bytes bash hands it,
+    decodes exactly this text (D-SEC round 3, the unexamined question)."""
+    encoded = source.encode("utf-8")
+    encoding, _ = tokenize.detect_encoding(io.BytesIO(encoded).readline)
+    return codecs.lookup(encoding).name == "utf-8" and encoded.decode(encoding) == source
+
+
+#: One physical line, split where the parser splits (``\r\n``, ``\r``,
+#: ``\n``), its terminator kept.
+_SOURCE_LINE_RE: Final[re.Pattern[str]] = re.compile(r"[^\r\n]*(?:\r\n|\r|\n)?")
+
+
+def _f_string_sources(source: str, tree: ast.AST) -> Iterator[str]:
+    """The source text of every f-string in ``tree``. Positions are UTF-8
+    byte offsets into lines, as :func:`ast.get_source_segment` reads them,
+    with the lines split once rather than once per node."""
+    lines = [match.group(0).encode("utf-8") for match in _SOURCE_LINE_RE.finditer(source)]
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.JoinedStr) or node.end_lineno is None:
+            continue
+        if node.end_col_offset is None:
+            continue
+        first, last = node.lineno - 1, node.end_lineno - 1
+        if first == last:
+            segment = lines[first][node.col_offset : node.end_col_offset]
+        else:
+            segment = b"".join(
+                [
+                    lines[first][node.col_offset :],
+                    *lines[first + 1 : last],
+                    lines[last][: node.end_col_offset],
+                ]
+            )
+        yield segment.decode("utf-8")
+
+
+def _assembled_literals(tree: ast.AST) -> Iterator[str]:
+    """For every outermost expression (one whose parent is not itself an
+    expression: a statement's value, an argument default, a keyword's
+    value), its string and bytes literals joined in source order."""
+    for parent in ast.walk(tree):
+        if isinstance(parent, ast.expr):
+            continue
+        for child in ast.iter_child_nodes(parent):
+            if isinstance(child, ast.expr):
+                joined = "".join(_literals_in_source_order(child))
+                if joined:
+                    yield joined
+
+
+def _literals_in_source_order(root: ast.expr) -> Iterator[str]:
+    """Every ``str`` or ``bytes`` constant under ``root``, in source order."""
+    stack: list[ast.AST] = [root]
+    while stack:
+        node = stack.pop()
+        if isinstance(node, ast.Constant):
+            if isinstance(node.value, str):
+                yield node.value
+            elif isinstance(node.value, bytes):
+                yield node.value.decode("latin-1")
+            continue
+        if isinstance(node, ast.Dict):
+            children: list[ast.AST] = [
+                part
+                for key, value in zip(node.keys, node.values, strict=True)
+                for part in (key, value)
+                if part is not None
+            ]
+        elif isinstance(node, ast.IfExp):
+            children = [node.body, node.test, node.orelse]
+        else:
+            children = list(ast.iter_child_nodes(node))
+        stack.extend(reversed(children))
 
 
 def _constant_strings(tree: ast.AST) -> Iterator[str]:
@@ -616,12 +757,18 @@ class _BraceViewScanner:
         #: Top-level simple commands, heredocs and single-quoted spans
         #: (opening quote index -> closing quote index).
         self.segments: list[_Segment] = []
+        #: Every simple command at any depth, substitutions included.
+        self.all_segments: list[_Segment] = []
         self.top_heredocs: dict[int, _PendingHeredoc] = {}
         self.single_quotes: dict[int, int] = {}
         self.saw_process_substitution = False
-        #: A bare `(` at the top level: a subshell or a function definition
-        #: (`python3() { ...; }`, however its name is spelled).
-        self.saw_top_level_paren = False
+        #: A bare `(` anywhere: a subshell, an arithmetic command `((...))`
+        #: or a function definition (`python3() { ...; }`, however its name
+        #: is spelled).
+        self.saw_bare_paren = False
+        #: An arithmetic expansion (`$((...))`, `$[...]`), whose array
+        #: subscripts run `$(...)`.
+        self.saw_arithmetic = False
 
     def mask(self, start: int, end: int) -> None:
         for index in range(start, end):
@@ -647,9 +794,14 @@ class _BraceViewScanner:
     def exempt_programs(self) -> list[_Program]:
         """Every program whose braces may be neutralised; empty when any
         line-wide condition fails."""
-        if self.saw_process_substitution or self.saw_top_level_paren:
+        if self.saw_process_substitution or self.saw_bare_paren or self.saw_arithmetic:
             return []
         if _NAME_REDEFINITION_RE.search(self.shell_level_text()):
+            return []
+        # An unquoted heredoc body is expanded: its substitutions run.
+        if any(
+            not heredoc.quoted and _EXPANDING_CHARS & set(heredoc.body) for heredoc in self.heredocs
+        ):
             return []
         programs: list[_Program] = []
         for segment in self.segments:
@@ -662,7 +814,9 @@ class _BraceViewScanner:
         # A `-c` program's own word is Python, not a shell word: its text
         # may mention PATH without assigning it.
         program_words = {program.start - 1 for program in programs}
-        if any(self.withdraws_the_exemption(segment, program_words) for segment in self.segments):
+        if any(
+            self.withdraws_the_exemption(segment, program_words) for segment in self.all_segments
+        ):
             return []
         return programs
 
@@ -691,13 +845,15 @@ class _BraceViewScanner:
         return resolve_shell_word(self.word(segment.words[index]))
 
     def withdraws_the_exemption(self, segment: _Segment, program_words: set[int]) -> bool:
-        """Whether ``segment`` can re-route the shell's stdout, run text as
-        shell, or change what ``python3`` names or loads -- judged on every
-        word after quote and backslash removal (D-RULE B1 and M1). Words
-        starting at ``program_words`` are exempted program text."""
-        head = self.head(segment)
-        if head is None or head in _EXEMPTION_WITHDRAWING_HEADS:
+        """Whether ``segment`` runs anything but an inert command
+        (:data:`_INERT_HEADS`), or can change what ``python3`` names or
+        loads -- judged on every word after quote and backslash removal
+        (D-RULE B1 and M1). Words starting at ``program_words`` are exempted
+        program text."""
+        index = self.head_index(segment)
+        if index is not None and not self.runs_an_inert_command(segment, index):
             return True
+        head = self.head(segment)
         for span in segment.words:
             if span[0] in program_words:
                 continue
@@ -713,6 +869,45 @@ class _BraceViewScanner:
                 if variable.group(0) not in _HARMLESS_PYTHON_VARIABLES:
                     return True
         return False
+
+    def runs_an_inert_command(self, segment: _Segment, index: int) -> bool:
+        """Whether the command at word ``index`` of ``segment``, seen
+        through any wrapper, is Python or on :data:`_INERT_HEADS`, each
+        word in command position named bare or from a system directory."""
+        words = segment.words
+        head = resolve_shell_word(self.word(words[index]))
+        chain = segment_command_chain(self.text[words[index][0] : words[-1][1]])
+        if head is None or chain is None or chain[0] != head:
+            return False
+        names: list[str] = []
+        for word in chain:
+            trusted = _TRUSTED_COMMAND_RE.fullmatch(word)
+            if trusted is None:
+                return False
+            names.append(trusted.group("name"))
+        if _PYTHON_INTERPRETER_RE.fullmatch(chain[-1]):
+            return True
+        if names[-1] not in _INERT_HEADS:
+            return False
+        if names[-1] in (_SET_BUILTIN, _EXPORT_BUILTIN):
+            return len(chain) == 1 and self.inert_builtin_operands(names[-1], words[index + 1 :])
+        return True
+
+    def inert_builtin_operands(self, builtin: str, spans: list[tuple[int, int]]) -> bool:
+        """Whether every operand of ``set`` or ``export`` is one that runs
+        nothing: no tracing for ``set``, plain names for ``export``."""
+        for span in spans:
+            raw = self.word(span)
+            if _REDIRECT_RE.fullmatch(raw):
+                continue
+            operand = resolve_shell_word(raw)
+            if operand is None:
+                return False
+            if builtin == _SET_BUILTIN and _XTRACE_OPERAND_RE.fullmatch(operand):
+                return False
+            if builtin == _EXPORT_BUILTIN and not _EXPORT_OPERAND_RE.fullmatch(operand):
+                return False
+        return True
 
     def only_inert_siblings(self, own: _Segment) -> bool:
         return all(
@@ -841,6 +1036,9 @@ class _BraceViewScanner:
             if closer is not None and char == closer:
                 if pending:
                     raise _ViewParseError("heredoc opened but never read")
+                if word_start is not None:
+                    words.append((word_start, index))
+                self.all_segments.append(_Segment(words, closer))
                 return index + 1
             if char in " \t":
                 if word_start is not None:
@@ -860,8 +1058,10 @@ class _BraceViewScanner:
                 if word_start is not None:
                     words.append((word_start, index))
                     word_start = None
+                segment = _Segment(words, separator)
+                self.all_segments.append(segment)
                 if top:
-                    self.segments.append(_Segment(words, separator))
+                    self.segments.append(segment)
                 words = []
                 index += len(separator)
                 if separator == "\n" and pending:
@@ -895,6 +1095,8 @@ class _BraceViewScanner:
                 self.mask(index, end)
                 index = end
                 continue
+            if text.startswith(("$((", "$["), index):
+                self.saw_arithmetic = True
             if text.startswith("$((", index):
                 index = self.skip_arithmetic(index + 3)
                 continue
@@ -912,7 +1114,7 @@ class _BraceViewScanner:
                 index = self.scan(index + 1, closer="`", top=False, depth=depth + 1)
                 continue
             if char == "(":
-                self.saw_top_level_paren = self.saw_top_level_paren or top
+                self.saw_bare_paren = True
                 index = self.scan(index + 1, closer=")", top=False, depth=depth + 1)
                 continue
             if char == ")":
@@ -932,8 +1134,10 @@ class _BraceViewScanner:
             raise _ViewParseError(f"unterminated context awaiting {closer!r}")
         if pending:
             raise _ViewParseError("heredoc opened with no body")
+        segment = _Segment(words, "")
+        self.all_segments.append(segment)
         if top:
-            self.segments.append(_Segment(words, ""))
+            self.segments.append(segment)
         return index
 
     def separator_at(self, index: int) -> str:
@@ -977,6 +1181,8 @@ class _BraceViewScanner:
             if char == "\\":
                 index += 2
                 continue
+            if text.startswith(("$((", "$["), index):
+                self.saw_arithmetic = True
             if text.startswith("$((", index):
                 index = self.skip_arithmetic(index + 3)
                 continue
@@ -1010,17 +1216,14 @@ class _BraceViewScanner:
         raise _ViewParseError("unterminated arithmetic expansion")
 
     def skip_parameter(self, index: int) -> int:
-        """Skip a ``${...}`` body; quotes or substitutions inside are
-        outside the model."""
-        text = self.text
-        while index < len(text):
-            char = text[index]
-            if char in "'\"`$\\{":
-                raise _ViewParseError("nested syntax inside ${...}")
-            if char == "}":
-                return index + 1
-            index += 1
-        raise _ViewParseError("unterminated ${...}")
+        """Skip a ``${...}`` body; anything but a plain parameter name
+        (:data:`_PLAIN_PARAMETER_RE`) is outside the model."""
+        end = self.text.find("}", index)
+        if end == -1:
+            raise _ViewParseError("unterminated ${...}")
+        if not _PLAIN_PARAMETER_RE.fullmatch(self.text, index, end):
+            raise _ViewParseError("${...} other than a plain parameter name")
+        return end + 1
 
     def read_heredoc_opener(
         self,
