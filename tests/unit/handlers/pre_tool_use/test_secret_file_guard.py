@@ -2445,3 +2445,108 @@ class TestRoundThreeFindingsAreClosed:
         command = "python3 - <<'EOF'\n" + "\n".join(lines) + "\nEOF"
         decision, reason = _through_chain("Bash", {"command": command})
         assert decision != Decision.DENY, reason
+
+
+#: A code word: attribute access, then subtraction of a set whose element is
+#: a literal. As a shell word it spells `.vault-{"pass",z}`.
+_CODE_WORD_PROGRAM = 'y = 0 if 1 else x .vault-{"pass",z}'
+#: The same code word with eight more groups: 512 spellings, past the cap.
+_OVER_CAP_CODE_WORD_PROGRAM = _CODE_WORD_PROGRAM + "-{a,b}" * 8
+#: One space-free dict display with nine two-way inner groups: past the cap,
+#: and naming nothing.
+_OVER_CAP_DICT_PROGRAM = "d={" + ",".join(f"'k{i}':{{'a':0,'b':1}}" for i in range(9)) + "}"
+
+
+class TestRoundFourFindingsAreClosed:
+    """Plan 00466 N101 round 5: every D-RULE and D-SEC round-4 finding,
+    through the real handler. The RED ones were allowed at 36b8228b0."""
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            f"python3 - <<'EOF'\n{_CODE_WORD_PROGRAM}\nEOF",
+            f"python3 -c '{_CODE_WORD_PROGRAM}'",
+        ],
+    )
+    def test_a_brace_group_against_code_denies_d_rule_4_major_1(self, command: str) -> None:
+        assert RuleID.SECRET_BASH_MENTION in _deny_reason(command)
+
+    def test_an_over_cap_code_word_that_could_name_a_path_denies(self) -> None:
+        """Past the cap a code word is judged by its wildcard skeleton
+        (`.vault-*-*-*-*-*-*-*-*-*`), which the protected-pattern matcher
+        reaches."""
+        command = f"python3 - <<'EOF'\n{_OVER_CAP_CODE_WORD_PROGRAM}\nEOF"
+        assert RuleID.SECRET_BASH_MENTION in _deny_reason(command)
+
+    def test_an_over_cap_code_word_naming_nothing_stays_allowed(self) -> None:
+        """Failing closed here would be the original N101 false positive."""
+        command = f"python3 - <<'EOF'\n{_OVER_CAP_DICT_PROGRAM}\n{_MANY_BRACES_PROGRAM}\nEOF"
+        decision, reason = _through_chain("Bash", {"command": command})
+        assert decision != Decision.DENY, reason
+
+    @pytest.mark.parametrize("line", ["x = 1\r", "x = 1\r\ny = 2", "x = '\r'"])
+    def test_a_program_holding_a_carriage_return_is_not_exempted_d_sec_4_2a(
+        self, line: str
+    ) -> None:
+        """Python reads `\\r\\n` and a lone `\\r` as `\\n`; the scanner does
+        not model that, so the exemption is withdrawn."""
+        command = f"python3 - <<'EOF'\n{line}\n{_MANY_BRACES_PROGRAM}\nEOF"
+        assert RuleID.SECRET_EVALUATION_ERROR in _deny_reason(command)
+
+    @pytest.mark.parametrize(
+        "field_program",
+        [
+            # Each parses on the daemon's Python 3.11 ...
+            "x = f'''{1 +\n1}'''",
+            "x = f'{f\"{1}\"}'",
+            "x = f'{1:{f\"{2}\"}}'",
+            # ... and each of these parses only on 3.12 and later (PEP 701).
+            "x = f'{'a'}'",
+            "x = f'{\"\\n\"}'",
+            "x = f'{1 # c\n}'",
+            "x = f'{\"#\"}'",
+        ],
+    )
+    def test_an_f_string_field_versions_read_differently_is_not_exempted_d_sec_4_2b(
+        self, field_program: str
+    ) -> None:
+        command = f"python3 - <<'EOF'\n{field_program}\n{_MANY_BRACES_PROGRAM}\nEOF"
+        assert RuleID.SECRET_EVALUATION_ERROR in _deny_reason(command)
+
+    def test_tokenize_and_ast_disagreeing_on_a_literal_withdraws_d_sec_4_2c(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """No CPython from 3.8 to 3.14 is known to disagree, so the parser is
+        made to report a string one column late."""
+        import ast
+
+        real_parse = ast.parse
+
+        def late_strings(source: Any, *args: Any, **kwargs: Any) -> Any:
+            tree = real_parse(source, *args, **kwargs)
+            if isinstance(source, str) and "n101-drift" in source:
+                for node in ast.walk(tree):
+                    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+                        node.col_offset += 1
+            return tree
+
+        monkeypatch.setattr(ast, "parse", late_strings)
+        command = f"python3 - <<'EOF'\nx = 'n101-drift'\n{_MANY_BRACES_PROGRAM}\nEOF"
+        assert RuleID.SECRET_EVALUATION_ERROR in _deny_reason(command)
+
+    @pytest.mark.parametrize(
+        "definition",
+        [
+            "cd() { echo; }; ",
+            "cd() { echo; }\n",
+            "function ls { echo; }; ",
+            "function ls { echo; }\n",
+        ],
+    )
+    def test_an_inert_head_redefined_as_a_function_withdraws(self, definition: str) -> None:
+        """D-RULE-4 observation: an allowlisted head can be a shell function.
+        One defined on the command line withdraws the exemption."""
+        heredoc = f"{definition}{_CODE_BRACES_HEREDOC}"
+        assert RuleID.SECRET_EVALUATION_ERROR in _deny_reason(heredoc)
+        dash_c = definition + "python3 -c '" + _MANY_BRACES_PROGRAM.replace("'", '"') + "'"
+        assert RuleID.SECRET_EVALUATION_ERROR in _deny_reason(dash_c)

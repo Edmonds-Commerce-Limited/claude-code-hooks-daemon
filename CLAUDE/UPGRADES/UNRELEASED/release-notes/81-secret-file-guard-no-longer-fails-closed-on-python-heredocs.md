@@ -22,7 +22,11 @@ caps. So is the full text of every f-string; for every expression, its
 literals joined in source order; and every literal and comment of the
 program joined in order with a space. A brace group split across literals
 (`'…{a,' + 'x}…'`, `''.join([...])`, `f'{"{"}'`) or across statements is
-therefore still seen whole. The
+therefore still seen whole. Every brace word of the program that reaches
+outside a literal (`x .p-{"a",z}`) is enumerated on its own as well. When
+such a word has too many spellings, the guard checks a wildcard form
+instead, with each brace group replaced by `*`. It denies only if that form
+could match a protected path, so a large dict display is still allowed. The
 exemption applies only when no shell can read what the program prints:
 
 - no pipe follows the command, and no process substitution appears in the
@@ -46,6 +50,11 @@ exemption applies only when no shell can read what the program prints:
   exemption;
 - the program declares no source encoding other than UTF-8 and carries no
   byte-order mark, so Python reads the same text the guard parsed;
+- the program holds no carriage return, and no f- or t-string field holds
+  the string's own quote, a backslash, a `#`, a newline or a nested f- or
+  t-string. Python 3.12 reads those fields differently from earlier
+  versions, and the daemon's Python need not be the one that runs the
+  program;
 - its output goes to the terminal, `/dev/null`, or a file that no other
   command in the line can run.
 

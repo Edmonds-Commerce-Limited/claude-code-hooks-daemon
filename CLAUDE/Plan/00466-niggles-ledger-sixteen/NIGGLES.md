@@ -99,9 +99,24 @@ literal denies whatever the program does with it. So are the full source
 of every f-string, every expression's literals joined in source order, and
 every literal and comment of the program joined with a space, so a brace
 group split across literals, statements, or an f-string's text and field
-is enumerated whole (round 4). A program that declares an
-encoding other than UTF-8, or that Python would decode differently from the
-text the guard parsed, is not exempted. The exemption holds only when no
+is enumerated whole (round 4). Every brace word of the raw program text
+that is not wholly inside one literal or comment (a set display against a
+name, `x .p-{"a",z}`) is enumerated on its own too (round 5, D-RULE-4 MAJOR
+1): a program can read its own command line back. Past a cap such a CODE
+word does not fail closed, which would be the original false positive;
+its wildcard skeleton (every group a `*`) is judged by the guard's
+protected-pattern matcher instead, and denies when it could match. A
+literal still fails closed past a cap. The scanner models CPython 3.8 to
+3.14 source grammar, apart from the shapes it withdraws. A program that
+declares an encoding other than UTF-8, or that Python would decode
+differently from the text the guard parsed, is not exempted. Nor is one
+holding a `\r` (Python reads it as a newline), one with an f- or t-string
+field holding the string's own quote, a backslash, a `#`, a newline or a
+nested f- or t-string (PEP 701 reads those differently from 3.11, and the
+daemon's Python need not be the user's), or one where `tokenize` and `ast`
+disagree on any literal's span (round 5, D-SEC-4 unexamined 2). A field
+holding only the other quote kind (`f's-{e["k"]}'`) keeps the exemption:
+every version reads it alike. The exemption holds only when no
 shell can read what the program prints: no pipe after it, no process
 substitution, no subshell, group, function definition, compound command,
 arithmetic, non-plain `${…}` or expanding unquoted heredoc, and every
@@ -117,10 +132,16 @@ before, because they brace-expand in their own glob APIs. Argv is judged as
 before. The shell-exec literal scan covers every Python spawn API and
 heredoc programs. Only the Bash tool's own command line gets the view (the
 guard's Bash route and payload capture); an authored script, a command
-segment and Write/Edit content are enumerated as on main. Rounds 2 to 4
-closed the D-RULE and D-SEC review findings; see
-`subagent-reports/260926-n101-fix2-opus-5-5.md`,
-`260926-n101-fix3-opus-5-5.md` and `260926-n101-fix4-opus-5-5.md`. The
+segment and Write/Edit content are enumerated as on main. An allowlisted
+head redefined as a function on the command line (`cd() { …; }`,
+`function ls { …; }`) withdraws the exemption, as any function definition
+does. Two limits are the same as on main: a function inherited through the
+environment (`BASH_FUNC_cd%%`) or Claude Code's shell snapshot cannot be
+seen from the command text, and the model is bash, not zsh (whose `cd`
+runs `chpwd` hooks). Rounds 2 to 5 closed the D-RULE and D-SEC review
+findings; see `subagent-reports/260926-n101-fix2-opus-5-5.md`,
+`260926-n101-fix3-opus-5-5.md`, `260926-n101-fix4-opus-5-5.md` and
+`260926-n101-fix5-opus-5-5.md`. The
 quarantine guard enumerates filesystem globs, not braces; see N103, which
 also denies a Python program holding `{**d}` because the `**` word is
 walked.

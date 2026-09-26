@@ -23,6 +23,7 @@ way ``iter_protected_mentions`` already treats its own ``TimeoutError``.
 from __future__ import annotations
 
 import ast
+import bisect
 import codecs
 import errno
 import fnmatch
@@ -263,16 +264,22 @@ def iter_brace_words(text: str, *, max_words: int = DEFAULT_MAX_BRACE_WORDS) -> 
     so this raises the identical exception rather than inventing a second
     "give up" signal.
     """
-    count = 0
-    last_end = 0
-    for match in _BRACE_GROUP_RE.finditer(text):
-        if match.start() < last_end:
-            continue  # already inside the span just yielded
+    for count, (start, end) in enumerate(_brace_word_spans(text)):
         if count >= max_words:
             raise TooManyToEnumerateError(
                 f"more than {max_words} brace-carrying words in a single command"
             )
-        count += 1
+        yield text[start:end]
+
+
+def _brace_word_spans(text: str) -> Iterator[tuple[int, int]]:
+    """``(start, end)`` of every word :func:`iter_brace_words` yields, in
+    order and uncapped: a match inside the span just yielded is skipped
+    without a second boundary scan."""
+    last_end = 0
+    for match in _BRACE_GROUP_RE.finditer(text):
+        if match.start() < last_end:
+            continue  # already inside the span just yielded
         start = match.start()
         while start > 0 and not text[start - 1].isspace():
             start -= 1
@@ -280,7 +287,27 @@ def iter_brace_words(text: str, *, max_words: int = DEFAULT_MAX_BRACE_WORDS) -> 
         while end < len(text) and not text[end].isspace():
             end += 1
         last_end = end
-        yield text[start:end]
+        yield start, end
+
+
+def brace_skeleton(word: str) -> str:
+    """``word`` with every brace group, nested ones included, replaced by
+    ``*`` (``x{a,{b,c}}y{d}`` is ``x*y*``): a glob matching every spelling
+    the word's expansion can produce. Linear, so any word may be judged
+    this way when its expansion is past the caps (Plan 00466 N101 round 5).
+    An unmatched brace stays as text."""
+    out: list[str] = []
+    opens: list[int] = []
+    for char in word:
+        if char == "{":
+            opens.append(len(out))
+            out.append(char)
+        elif char == "}" and opens:
+            del out[opens.pop() :]
+            out.append("*")
+        else:
+            out.append(char)
+    return "".join(out)
 
 
 # ── What a shell actually brace-expands (Plan 00466 N101) ───────────────────
@@ -495,11 +522,16 @@ class BraceExpansionView(NamedTuple):
     program text. ``heredocs``: every heredoc read, in order -- empty when
     the command could not be parsed with confidence. ``literals``: every
     string literal and comment of every exempted program, which the caller
-    enumerates each on its own (:func:`python_string_literals`)."""
+    enumerates each on its own (:func:`python_string_literals`).
+    ``code_words``: every brace word of every exempted program that is not
+    wholly inside one literal or comment (:func:`python_program_streams`),
+    which the caller enumerates each on its own and, past the caps, judges
+    by its :func:`brace_skeleton`."""
 
     text: str
     heredocs: tuple[ScannedHeredoc, ...]
     literals: tuple[str, ...] = ()
+    code_words: tuple[str, ...] = ()
 
 
 class _ViewParseError(Exception):
@@ -572,9 +604,14 @@ def brace_expansion_view(command: str) -> BraceExpansionView:
       tokenises and parses.
 
     Every string literal and comment of an exempted program is returned in
-    ``literals`` (Plan 00466 N101 round 3): only CODE braces are exempt, so
-    a brace-spelled path in a literal denies whatever the program does with
-    it. The conditions above keep code braces out of any shell's reach.
+    ``literals`` (Plan 00466 N101 round 3): only CODE braces are exempt from
+    the caps, so a brace-spelled path in a literal denies whatever the
+    program does with it. Every brace word of the program text that is not
+    wholly inside one literal or comment is returned in ``code_words``
+    (round 5, D-RULE-4 MAJOR 1): a program can read its own command line
+    back, so a set display against a name (``x .p-{"a",z}``) still spells a
+    shell word. The conditions above keep code braces out of any shell's
+    reach otherwise.
 
     Deliberately a scanner, not a shell parser: comments, backslash escapes,
     ``$'...'`` escapes, nested substitutions and heredoc bodies are tracked
@@ -589,13 +626,17 @@ def brace_expansion_view(command: str) -> BraceExpansionView:
     except _ViewParseError:
         return BraceExpansionView(command, ())
     literals: list[str] = []
+    code_words: list[str] = []
     for program in scanner.exempt_programs():
-        program_literals = python_string_literals(command[program.start : program.end])
-        if program_literals is None:
+        streams = python_program_streams(command[program.start : program.end])
+        if streams is None:
             continue
         scanner.neutralise(program.start, program.end)
-        literals.extend(program_literals)
-    return BraceExpansionView("".join(scanner.out), tuple(scanner.heredocs), tuple(literals))
+        literals.extend(streams.literals)
+        code_words.extend(streams.code_words)
+    return BraceExpansionView(
+        "".join(scanner.out), tuple(scanner.heredocs), tuple(literals), tuple(code_words)
+    )
 
 
 def python_string_literals(source: str) -> tuple[str, ...] | None:
@@ -623,16 +664,62 @@ def python_string_literals(source: str) -> tuple[str, ...] | None:
       ``b = a + 'x}ss'``) is whole again: a brace group spans whitespace,
       which is how main's scan of the raw text denied it.
 
-    ``None`` makes the caller keep the program's text as shell text: an
-    unparseable program is not exempted, and neither is one Python would
-    decode differently from this ``str`` (a PEP 263 declaration of any
-    encoding but UTF-8, or a byte-order mark).
+    ``None`` makes the caller keep the program's text as shell text, as
+    :func:`python_program_streams` decides.
     """
+    streams = python_program_streams(source)
+    return None if streams is None else streams.literals
+
+
+class PythonProgramStreams(NamedTuple):
+    """What of a Python program the caller enumerates on its own:
+    ``literals`` (:func:`python_string_literals`) and ``code_words``, every
+    brace word of the raw text not wholly inside one literal or comment."""
+
+    literals: tuple[str, ...]
+    code_words: tuple[str, ...]
+
+
+def python_program_streams(source: str) -> PythonProgramStreams | None:
+    """The literals and code words of the Python program ``source``, or
+    ``None`` when the program is not exempted (Plan 00466 N101 rounds 3-5).
+
+    The scanner models CPython 3.8 to 3.14 source grammar, apart from the
+    shapes withdrawn here. ``None`` -- the caller keeps the program's text
+    as shell text -- when:
+
+    - it does not tokenise or parse;
+    - Python would decode its bytes differently from this ``str`` (a PEP
+      263 declaration of any encoding but UTF-8, or a byte-order mark);
+    - it holds a ``\\r``, which Python reads as a newline (alone or before
+      ``\\n``) and the scanner does not model;
+    - an f- or t-string field holds the string's own quote character, a
+      backslash, a ``#``, a newline, or a nested f- or t-string: PEP 701
+      (3.12) reads those differently from earlier versions, and the daemon's
+      Python need not be the one that runs the program;
+    - :mod:`tokenize` and :mod:`ast` disagree on where any literal starts or
+      ends.
+
+    ``code_words`` are the words :func:`iter_brace_words` finds in the raw
+    text, less those wholly inside one string literal or comment, which
+    ``literals`` reports already (D-RULE-4 MAJOR 1).
+    """
+    if "\r" in source:
+        return None
     try:
         if not _decodes_as_utf8(source):
             return None
         tokens = list(tokenize.generate_tokens(io.StringIO(source).readline))
         tree = ast.parse(source)
+        lines = source.split("\n")
+        line_starts = [0]
+        for line in lines:
+            line_starts.append(line_starts[-1] + len(line) + 1)
+        found = _literal_tokens(source, line_starts, tokens)
+        if any(_template_field_may_drift(template) for template in found.templates):
+            return None
+        if not _literal_spans_agree(lines, line_starts, tree, found.strings):
+            return None
         literals: list[str] = []
         in_order: list[str] = []
         for token in tokens:
@@ -640,7 +727,7 @@ def python_string_literals(source: str) -> tuple[str, ...] | None:
                 in_order.append(token.string)
             elif token.type == tokenize.STRING:
                 in_order.extend(_constant_strings(ast.parse(token.string, mode="eval")))
-            elif token.type == _FSTRING_MIDDLE:
+            elif token.type in _TEMPLATE_MIDDLE_TOKENS:
                 in_order.append(token.string)
         literals.extend(in_order)
         literals.append(" ".join(in_order))
@@ -649,12 +736,211 @@ def python_string_literals(source: str) -> tuple[str, ...] | None:
         literals.extend(_assembled_literals(tree))
     except (SyntaxError, ValueError, RecursionError, LookupError, tokenize.TokenError):
         return None
-    return tuple(dict.fromkeys(literals))
+    return PythonProgramStreams(
+        tuple(dict.fromkeys(literals)),
+        tuple(dict.fromkeys(_code_brace_words(source, found.spans))),
+    )
 
 
-#: The token for an f-string's literal text, on Pythons that split f-strings
-#: into tokens (3.12+); earlier ones tokenise an f-string as one STRING.
-_FSTRING_MIDDLE: Final[int | None] = getattr(tokenize, "FSTRING_MIDDLE", None)
+def _token_type(name: str) -> int | None:
+    value = getattr(tokenize, name, None)
+    return value if isinstance(value, int) else None
+
+
+#: f- and t-string tokens, on Pythons that split them into tokens (3.12+
+#: and 3.14+); earlier ones tokenise an f-string as one STRING.
+_TEMPLATE_START_TOKENS: Final[frozenset[int]] = frozenset(
+    token for token in (_token_type("FSTRING_START"), _token_type("TSTRING_START")) if token
+)
+_TEMPLATE_MIDDLE_TOKENS: Final[frozenset[int]] = frozenset(
+    token for token in (_token_type("FSTRING_MIDDLE"), _token_type("TSTRING_MIDDLE")) if token
+)
+_TEMPLATE_END_TOKENS: Final[frozenset[int]] = frozenset(
+    token for token in (_token_type("FSTRING_END"), _token_type("TSTRING_END")) if token
+)
+
+#: A string token's prefix and opening quote.
+_STRING_OPENER_RE: Final[re.Pattern[str]] = re.compile(r"([A-Za-z]*)('''|\"\"\"|'|\")")
+
+#: Characters in an f- or t-string field that PEP 701 reads differently
+#: from earlier versions (the string's own quote is checked separately).
+_DRIFTING_FIELD_CHARS: Final[frozenset[str]] = frozenset("\\#\n")
+
+#: String prefix letters that make a string an f- or t-string.
+_TEMPLATE_PREFIX_LETTERS: Final[frozenset[str]] = frozenset("fFtT")
+
+#: String node types of the parsed program; ``TemplateStr`` is 3.14+.
+_TEMPLATE_NODES: Final[tuple[type[ast.expr], ...]] = tuple(
+    node
+    for node in (ast.JoinedStr, getattr(ast, "TemplateStr", None))
+    if isinstance(node, type) and issubclass(node, ast.expr)
+)
+
+
+class _LiteralTokens(NamedTuple):
+    """``spans``: ``(start, end)`` of every string and comment token, a
+    whole f- or t-string as one, in order. ``strings``: the same without
+    comments. ``templates``: the source of every f- or t-string."""
+
+    spans: list[tuple[int, int]]
+    strings: list[tuple[int, int]]
+    templates: list[str]
+
+
+def _literal_tokens(
+    source: str, line_starts: list[int], tokens: list[tokenize.TokenInfo]
+) -> _LiteralTokens:
+    """Where the literals and comments of ``source`` are, by
+    :mod:`tokenize` (row and character column, ``\\n``-split lines)."""
+
+    def offset(position: tuple[int, int]) -> int:
+        return line_starts[position[0] - 1] + position[1]
+
+    found = _LiteralTokens([], [], [])
+    open_templates: list[int] = []
+    for token in tokens:
+        if token.type in _TEMPLATE_START_TOKENS:
+            open_templates.append(offset(token.start))
+        elif token.type in _TEMPLATE_END_TOKENS:
+            start = open_templates.pop()
+            if not open_templates:
+                span = (start, offset(token.end))
+                found.spans.append(span)
+                found.strings.append(span)
+                found.templates.append(source[span[0] : span[1]])
+        elif open_templates:
+            continue
+        elif token.type in (tokenize.STRING, tokenize.COMMENT):
+            span = (offset(token.start), offset(token.end))
+            found.spans.append(span)
+            if token.type == tokenize.COMMENT:
+                continue
+            found.strings.append(span)
+            opener = _STRING_OPENER_RE.match(token.string)
+            if opener is not None and _TEMPLATE_PREFIX_LETTERS & set(opener.group(1)):
+                found.templates.append(token.string)
+    return found
+
+
+def _template_field_may_drift(template: str) -> bool:
+    """Whether a field of the f- or t-string ``template`` (its full source,
+    prefix and quotes included) holds a shape PEP 701 reads differently:
+    the string's own quote, a backslash, ``#``, a newline, or a nested f-
+    or t-string. Unreadable text counts as drift."""
+    opener = _STRING_OPENER_RE.match(template)
+    if opener is None or not template.endswith(opener.group(2)):
+        return True
+    raw = "r" in opener.group(1).lower()
+    quote = opener.group(2)
+    body = template[opener.end() : len(template) - len(quote)]
+    index = 0
+    while index < len(body):
+        char = body[index]
+        if char == "\\" and not raw:
+            if body.startswith("\\", index + 1):
+                index += 2
+            elif body.startswith("N{", index + 1):
+                close = body.find("}", index + 3)
+                if close < 0:
+                    return True
+                index = close + 1
+            else:
+                index += 1
+        elif char == "{" and body.startswith("{", index + 1):
+            index += 2
+        elif char == "{":
+            end = _field_end(body, index + 1, quote[0])
+            if end is None:
+                return True
+            index = end + 1
+        else:
+            index += 1
+    return False
+
+
+def _field_end(body: str, start: int, quote: str) -> int | None:
+    """Index of the ``}`` closing the field opened just before ``start``,
+    or ``None`` when the field holds a drifting shape or never closes."""
+    depth = 0
+    for index in range(start, len(body)):
+        char = body[index]
+        if char in _DRIFTING_FIELD_CHARS or char == quote:
+            return None
+        if char in "'\"" and _opens_a_template(body, start, index):
+            return None
+        if char in "([{":
+            depth += 1
+        elif char in ")]}":
+            if char == "}" and depth == 0:
+                return index
+            depth -= 1
+    return None
+
+
+def _opens_a_template(body: str, field_start: int, quote_index: int) -> bool:
+    """Whether the quote at ``quote_index`` opens an f- or t-string: the
+    letters just before it, a whole name, hold ``f`` or ``t``."""
+    index = quote_index
+    while index > field_start and body[index - 1].isalpha():
+        index -= 1
+    if index > field_start and (body[index - 1].isalnum() or body[index - 1] == "_"):
+        return False
+    return bool(_TEMPLATE_PREFIX_LETTERS & set(body[index:quote_index]))
+
+
+def _literal_spans_agree(
+    lines: list[str], line_starts: list[int], tree: ast.AST, strings: list[tuple[int, int]]
+) -> bool:
+    """Whether every string node :mod:`ast` reports starts where a string
+    token starts and ends where one ends, and every string token lies
+    inside a string node (D-SEC-4, unexamined 2c). Nodes inside an f- or
+    t-string are not visited: before 3.12 their positions are not the
+    source's. ``ast`` columns are UTF-8 byte offsets."""
+    token_starts = {start for start, _ in strings}
+    token_ends = {end for _, end in strings}
+    encoded = [line.encode("utf-8") for line in lines]
+
+    def offset(row: int | None, column: int | None) -> int | None:
+        if row is None or column is None or not 0 < row <= len(lines):
+            return None
+        try:
+            return line_starts[row - 1] + len(encoded[row - 1][:column].decode("utf-8"))
+        except UnicodeDecodeError:
+            return None
+
+    nodes: list[tuple[int, int]] = []
+    stack: list[ast.AST] = [tree]
+    while stack:
+        node = stack.pop()
+        is_string = isinstance(node, _TEMPLATE_NODES) or (
+            isinstance(node, ast.Constant) and isinstance(node.value, (str, bytes))
+        )
+        if not is_string:
+            stack.extend(ast.iter_child_nodes(node))
+            continue
+        start = offset(getattr(node, "lineno", None), getattr(node, "col_offset", None))
+        end = offset(getattr(node, "end_lineno", None), getattr(node, "end_col_offset", None))
+        if start is None or end is None or start not in token_starts or end not in token_ends:
+            return False
+        nodes.append((start, end))
+    nodes.sort()
+    node_starts = [start for start, _ in nodes]
+    for start, end in strings:
+        index = bisect.bisect_right(node_starts, start) - 1
+        if index < 0 or nodes[index][1] < end:
+            return False
+    return True
+
+
+def _code_brace_words(source: str, spans: list[tuple[int, int]]) -> Iterator[str]:
+    """Every word :func:`iter_brace_words` finds in ``source`` that is not
+    wholly inside one of ``spans`` (sorted, non-overlapping)."""
+    span_starts = [start for start, _ in spans]
+    for start, end in _brace_word_spans(source):
+        index = bisect.bisect_right(span_starts, start) - 1
+        if index >= 0 and end <= spans[index][1]:
+            continue
+        yield source[start:end]
 
 
 def _decodes_as_utf8(source: str) -> bool:
@@ -671,12 +957,12 @@ _SOURCE_LINE_RE: Final[re.Pattern[str]] = re.compile(r"[^\r\n]*(?:\r\n|\r|\n)?")
 
 
 def _f_string_sources(source: str, tree: ast.AST) -> Iterator[str]:
-    """The source text of every f-string in ``tree``. Positions are UTF-8
+    """The source text of every f- or t-string in ``tree``. Positions are UTF-8
     byte offsets into lines, as :func:`ast.get_source_segment` reads them,
     with the lines split once rather than once per node."""
     lines = [match.group(0).encode("utf-8") for match in _SOURCE_LINE_RE.finditer(source)]
     for node in ast.walk(tree):
-        if not isinstance(node, ast.JoinedStr) or node.end_lineno is None:
+        if not isinstance(node, _TEMPLATE_NODES) or node.end_lineno is None:
             continue
         if node.end_col_offset is None:
             continue

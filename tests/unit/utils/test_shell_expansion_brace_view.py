@@ -21,8 +21,10 @@ import pytest
 
 from claude_code_hooks_daemon.utils.shell_expansion import (
     brace_expansion_view,
+    brace_skeleton,
     expand_braces,
     iter_brace_words,
+    python_program_streams,
     python_string_literals,
 )
 
@@ -624,3 +626,117 @@ class TestTheSourceMustDecodeAsPythonDecodesIt:
     )
     def test_a_utf8_program_is_exempted(self, source: str) -> None:
         assert python_string_literals(source) is not None
+
+
+class TestCodeWordsAreReported:
+    """Plan 00466 N101 round 5 (D-RULE-4 MAJOR 1): every brace word of the
+    raw program text not wholly inside one literal or comment."""
+
+    @pytest.mark.parametrize(
+        ("source", "expected"),
+        [
+            ('y = x .p-{"q",z}\n', ('.p-{"q",z}',)),
+            ("d = {'a': 1}\n", ("{'a': 1}",)),
+            ("print('{a,b}')\n", ("print('{a,b}')",)),
+            ("x = f'{y}'.p-{a,b}\n", ("f'{y}'.p-{a,b}",)),
+        ],
+    )
+    def test_a_word_reaching_code_is_a_code_word(
+        self, source: str, expected: tuple[str, ...]
+    ) -> None:
+        streams = python_program_streams(source)
+        assert streams is not None
+        assert streams.code_words == expected
+
+    @pytest.mark.parametrize(
+        "source",
+        [
+            "x = '/p{a,x}ss'\n",
+            "x = 1  # /p{a,x}ss\n",
+            "x = f'/p{a}ss'\n",
+            "x = '''a\n{b,c}\n'''\n",
+        ],
+    )
+    def test_a_word_wholly_inside_a_literal_is_not_a_code_word(self, source: str) -> None:
+        streams = python_program_streams(source)
+        assert streams is not None
+        assert streams.code_words == ()
+
+    def test_the_view_reports_code_words(self) -> None:
+        view = brace_expansion_view(_python_heredoc('y = x .p-{"q",z}'))
+        assert view.code_words == ('.p-{"q",z}',)
+
+    def test_code_words_are_not_capped_in_number(self) -> None:
+        source = "\n".join(f"d{i} = {{'k': {i}}}" for i in range(600))
+        streams = python_program_streams(source)
+        assert streams is not None
+        assert len(streams.code_words) == 600
+
+
+class TestBraceSkeleton:
+    @pytest.mark.parametrize(
+        ("word", "skeleton"),
+        [
+            (".p-{a,b}", ".p-*"),
+            ("x{a,{b,c}}y{d}", "x*y*"),
+            ("{a{b}", "{a*"),
+            ("a}b{", "a}b{"),
+            ("{" * 5000 + "}" * 5000, "*"),
+        ],
+    )
+    def test_every_group_becomes_a_wildcard(self, word: str, skeleton: str) -> None:
+        assert brace_skeleton(word) == skeleton
+
+
+class TestPythonMustReadTheTextAsTheScannerDoes:
+    """Plan 00466 N101 round 5 (D-SEC-4, unexamined 2): shapes the scanner
+    does not model are not exempted."""
+
+    @pytest.mark.parametrize("source", ["x = 1\r\n", "x = 1\ry = 2\n", "x = '\\\r'\n"])
+    def test_a_carriage_return_withdraws(self, source: str) -> None:
+        assert python_program_streams(source) is None
+
+    @pytest.mark.parametrize(
+        "source",
+        [
+            "x = f'''{1 +\n1}'''\n",
+            "x = f'{f\"{1}\"}'\n",
+            "x = f'{1:{rf\"{2}\"}}'\n",
+            "x = f'{1:{Rt\"{2}\"}}'\n",
+            "x = f'{'a'}'\n",
+            "x = f'{\"\\n\"}'\n",
+            "x = f'{1 # c\n}'\n",
+            "x = f'{\"#\"}'\n",
+            "x = 'a' f'{\"#\"}'\n",
+        ],
+    )
+    def test_a_field_versions_read_differently_withdraws(self, source: str) -> None:
+        assert python_program_streams(source) is None
+
+    @pytest.mark.parametrize(
+        "source",
+        [
+            "x = f'{a[\"k\"]}'\n",
+            "x = f'{x:\"^10}'\n",
+            "x = f'{x:{w}}'\n",
+            "x = f'{{#}}\\n{x!r}'\n",
+            "x = f'\\N{BULLET} {x}'\n",
+            "x = f'{ref(\"k\")}'\n",
+            "x = f'''a\n{x}\nb'''\n",
+        ],
+    )
+    def test_a_field_every_version_reads_alike_keeps_the_exemption(self, source: str) -> None:
+        assert python_program_streams(source) is not None
+
+    @pytest.mark.parametrize(
+        "source",
+        [
+            "x = 'a' 'b'\n",
+            "x = ('a'\n     'b')\n",
+            "x = b'\\x00' + '\u00e9' + f'{1}'\n",
+            'def f():\n    """doc"""\n',
+            "match x:\n    case 'a':\n        pass\n",
+        ],
+    )
+    def test_tokenize_and_ast_agree_on_ordinary_literals(self, source: str) -> None:
+        assert python_program_streams(source) is not None
