@@ -40,7 +40,7 @@ Upgrade the Claude Code Hooks Daemon and commit the result atomically.
    Any other non-zero exit is an upgrade failure; report it with the printed
    error (exit 1 before deploying can also mean no Python 3.11+ in a system
    location, which the user installs, or a checkout the stop could not put
-   back; see "The pre-deploy gate" in `CLAUDE/LLM-UPDATE.md`). No metadata
+   back; see "The pre-deploy gate" in the daemon clone's `CLAUDE/LLM-UPDATE.md`). No metadata
    block is emitted on any stop. If the output says `THE UPGRADE DID NOT COMPLETE`, the upgrade stopped even though the command exited 0: an old
    installed upgrade script ran it. Run the command printed below that line.
 

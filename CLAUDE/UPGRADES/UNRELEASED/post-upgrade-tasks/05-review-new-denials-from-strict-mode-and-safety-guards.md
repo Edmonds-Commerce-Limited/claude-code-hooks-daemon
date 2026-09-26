@@ -1,7 +1,7 @@
 # Task: review any new denials after `daemon.strict_mode` starts working
 
 **Type**: workflow-change
-**Severity**: notification
+**Severity**: optional
 **Applies to**: any project with `daemon.strict_mode: true`, or any handler
 tagged both `SAFETY` and `BLOCKING` (Plan 00466 N24)
 **Idempotent**: yes

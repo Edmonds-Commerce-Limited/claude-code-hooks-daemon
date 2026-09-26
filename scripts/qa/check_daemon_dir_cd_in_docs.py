@@ -39,6 +39,12 @@ import sys
 from pathlib import Path
 from typing import Any, Final
 
+from claude_code_hooks_daemon.utils.scan_scope import (
+    relative_parts,
+    vacuous_scan_failure,
+    walk_files,
+)
+
 _PROJECT_ROOT: Final[Path] = Path(__file__).resolve().parents[2]
 _SRC_DIR_NAME: Final[str] = "src"
 _QA_OUTPUT_DIR: Final[Path] = _PROJECT_ROOT / "untracked" / "qa"
@@ -110,26 +116,32 @@ def _daemon_dir_cd_pattern() -> re.Pattern[str]:
     return _CD_INTO_DAEMON_DIR
 
 
-def _candidate_files(root: Path) -> list[Path]:
-    """Every markdown file worth reading.
+def _walk(root: Path) -> tuple[list[Path], int]:
+    """Every markdown file worth reading, and how many markdown files the walk saw.
 
-    Skip-dir membership is checked against the path RELATIVE to ``root``, not
-    the absolute path: this repository is itself routinely checked out under
-    a directory literally named ``untracked/worktrees/<name>/`` (a worktree),
-    so filtering on absolute parts would match every file in the whole tree
-    on that ancestor alone and scan nothing.
+    ``scan_scope.walk_files`` leaves out ``.git`` and nested checkouts, which
+    are not this project's docs. Skip-dir membership is checked against the
+    path RELATIVE to ``root`` (00466 N26): this repository is routinely
+    checked out under ``untracked/worktrees/<name>/``, so filtering on
+    absolute parts would match every file on that ancestor alone and scan
+    nothing.
     """
+    markdown = sorted(path for path in walk_files(root) if path.suffix == ".md")
     found: list[Path] = []
-    for path in sorted(root.rglob("*.md")):
-        relative_parts = path.relative_to(root).parts
-        if any(part in _SKIP_DIRS for part in relative_parts):
+    for path in markdown:
+        if any(part in _SKIP_DIRS for part in relative_parts(path, root)):
             continue
         if path.name in _SKIP_FILES:
             continue
         if not path.is_file() or path.is_symlink():
             continue
         found.append(path)
-    return found
+    return found, len(markdown)
+
+
+def _candidate_files(root: Path) -> list[Path]:
+    """Every markdown file worth reading."""
+    return _walk(root)[0]
 
 
 def _is_exempted(lines: list[str], index: int) -> bool:
@@ -192,7 +204,12 @@ def main() -> int:
     args = parser.parse_args()
 
     root = Path(args.path).resolve()
-    files_scanned = len(_candidate_files(root))
+    candidate_files, files_seen = _walk(root)
+    files_scanned = len(candidate_files)
+    # A missing or empty root is a failure, never a clean tree of 0 files.
+    vacuous = vacuous_scan_failure(
+        examined=files_scanned, candidates=files_seen, noun="markdown files", root=root
+    )
     unreadable: list[str] = []
     violations = find_violations(root, unreadable=unreadable)
 
@@ -203,7 +220,8 @@ def main() -> int:
             json.dumps(
                 {
                     "summary": {
-                        "passed": not violations,
+                        "passed": not violations and vacuous is None,
+                        "vacuous_scan": vacuous,
                         "total_violations": len(violations),
                         "files_scanned": files_scanned,
                         "unreadable_files": len(unreadable),
@@ -221,8 +239,10 @@ def main() -> int:
         print(f"\n{len(violations)} violation(s) ({files_scanned} files scanned)")
         if unreadable:
             print(f"{len(unreadable)} file(s) could not be decoded and were not checked")
+    if vacuous is not None:
+        print(f"FAILED: {vacuous}", file=sys.stderr)
 
-    return 1 if violations else 0
+    return 1 if violations or vacuous is not None else 0
 
 
 if __name__ == "__main__":
