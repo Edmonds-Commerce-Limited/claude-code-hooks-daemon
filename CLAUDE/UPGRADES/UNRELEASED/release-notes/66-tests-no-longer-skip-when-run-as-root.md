@@ -1,7 +1,7 @@
 # Callout: tests no longer skip when run as root
 
-**Plan**: 00466 (N56)
-**Audience**: contributors
+**Plan**: 00466
+**Audience**: handler authors
 
 Every test in this repository now proves its behaviour as root instead of
 skipping. Three tests used to guard a permission-bypass assertion with
