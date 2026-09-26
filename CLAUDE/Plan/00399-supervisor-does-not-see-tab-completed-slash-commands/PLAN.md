@@ -148,7 +148,7 @@ write-up saying otherwise would be a tidy story pointing the wrong way.
   `test_keystrokes_without_the_whole_word_are_not_a_compact`.
 - [x] Full QA passes and CI is green. Landed with integration batch B1
   (2e6483a3); CI green on d23b56f0.
-- [x] Release note: `CLAUDE/UPGRADES/UNRELEASED/release-notes/18-a-tab-completed-compact-is-recognised-from-the-daemon-record.md`.
+- [x] Release note: `CLAUDE/UPGRADES/UNRELEASED/release-notes/018-a-tab-completed-compact-is-recognised-from-the-daemon-record.md`.
 
 ## Delivery & Milestones
 

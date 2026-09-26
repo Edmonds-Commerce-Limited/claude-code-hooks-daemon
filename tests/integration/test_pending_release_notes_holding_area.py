@@ -20,7 +20,7 @@ from claude_code_hooks_daemon.core.release_slate import PENDING_RELEASE_NOTES_DI
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _HOLDING_AREA = _REPO_ROOT / PENDING_RELEASE_NOTES_DIR
-_CALLOUT_NAME = re.compile(r"^\d{2}-[a-z0-9]+(-[a-z0-9]+)*\.md$")
+_CALLOUT_NAME = re.compile(r"^\d{3}-[a-z0-9]+(-[a-z0-9]+)*\.md$")
 _PLAN_LINE = re.compile(r"^\*\*Plan\*\*: \d{5}$", re.MULTILINE)
 _AUDIENCE_LINE = re.compile(
     r"^\*\*Audience\*\*: (operators|handler authors|client projects|everyone)$",
@@ -41,6 +41,19 @@ def test_the_readme_documents_the_schema_the_release_relies_on() -> None:
     assert "# Callout:" in text
     assert "**Plan**" in text
     assert "**Audience**" in text
+
+
+def test_callout_names_sort_in_numeric_arrival_order() -> None:
+    """The fixed three-digit width guarantees a string sort is a numeric sort.
+
+    ``release_slate._pending_release_notes`` and the release fold both sort
+    callouts by filename as strings. A mixed-width scheme (``9-x.md`` next to
+    ``10-x.md``) would put ``10-`` before ``9-`` under a string sort; a fixed
+    width cannot, because every ordinal occupies the same number of digits.
+    """
+    names = [callout.name for callout in _callouts()]
+    ordinals = [int(name.partition("-")[0]) for name in names]
+    assert sorted(names) == [n for _, n in sorted(zip(ordinals, names, strict=True))]
 
 
 @pytest.mark.parametrize("callout", _callouts(), ids=lambda p: p.name)
