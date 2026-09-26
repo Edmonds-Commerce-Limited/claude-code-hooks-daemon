@@ -182,17 +182,25 @@ config_changes:
         only between an opener and a closer, so a setext heading underline is
         not a marker. It reads what the commit records: the index, the working
         tree for `commit -a`, the named paths for a pathspec commit, in the
-        repository `git -C` names. A marker already in history never blocks an
-        unrelated edit, and deleting one is never blocked.
+        repository an earlier `cd` or `git -C` names. A marker already in
+        history never blocks an unrelated edit, and deleting one is never
+        blocked. A commit it cannot check (an expanded directory, `cd -`,
+        `GIT_INDEX_FILE`, `--pathspec-from-file`, `git am <patch>`, a git
+        error) is denied, with a `git -C <literal path>` rephrase. The
+        `exclude_paths` option (unioned with `daemon.exclude_paths`) exempts
+        files that must hold a documented marker example.
       example_yaml: |
         handlers:
           pre_tool_use:
             conflict_marker_commit_gate:
               enabled: true
               priority: 42
+              options:
+                exclude_paths: []
       migration_note: >-
         On by default. No action needed; resolve any conflict it reports and
-        re-stage. Disable with
+        re-stage. A file that documents conflict markers on purpose goes under
+        options.exclude_paths. Disable with
         handlers.pre_tool_use.conflict_marker_commit_gate.enabled: false.
       recommended: true
       dormant: false

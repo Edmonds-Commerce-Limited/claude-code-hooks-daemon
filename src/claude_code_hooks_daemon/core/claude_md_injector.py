@@ -515,13 +515,23 @@ class ClaudeMdInjector:
         # Read once: the marker check and the commit message both judge it.
         # Plan 00466 N211: this commit never passes the PreToolUse
         # conflict_marker_commit_gate, so it refuses a marker itself.
+        # Ledger 00466 N224: text the marker check never saw is never committed.
         try:
             content = claude_md_path.read_text(encoding="utf-8", errors="replace")
+        except FileNotFoundError:
+            logger.info(
+                "ClaudeMdInjector: %s vanished before its auto-commit; not auto-committing",
+                claude_md_path,
+            )
+            return
         except OSError as exc:
-            # Dirty yet unreadable (deleted, or no permission) holds no text to
-            # scan; the commit below records the deletion or reports its error.
-            logger.debug("ClaudeMdInjector: could not read %s for markers: %s", claude_md_path, exc)
-            content = ""
+            logger.warning(
+                "ClaudeMdInjector: %s could not be read, so it was not checked for "
+                "merge-conflict markers; not auto-committing: %s",
+                claude_md_path,
+                exc,
+            )
+            return
         markers = find_conflict_markers_in_text(content)
         if markers:
             logger.warning(
@@ -596,7 +606,7 @@ class ClaudeMdInjector:
         Compares the content OUTSIDE the generated block against the committed
         version. If it differs, the commit carries hand-written changes the
         daemon did not author, and must not describe itself as a regeneration.
-        ``current`` is the working-tree text, empty for a deleted file.
+        ``current`` is the working-tree text the caller has already read.
 
         A file with no committed version yet (first commit, or a rename) has
         nothing to compare against, so it keeps the plain message — there is no

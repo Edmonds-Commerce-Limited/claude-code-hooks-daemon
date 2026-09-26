@@ -201,7 +201,13 @@ class UnresolvedConflictError(ValueError):
         super().__init__(
             "holds unresolved merge-conflict markers, so it was NOT reformatted "
             "(formatting would disguise them as a heading and a blockquote that "
-            f"no check recognises). Resolve these first:\n{describe_markers(markers)}"
+            f"no check recognises). Resolve these first:\n{describe_markers(markers)}\n\n"
+            "Writing a DOCUMENTED example? A marker inside a fenced code block is "
+            "refused too, because a real conflict can land there. Either shorten "
+            "the marker run below seven characters, or keep the example in a file "
+            "covered by "
+            "`handlers.pre_tool_use.conflict_marker_commit_gate.options.exclude_paths` "
+            "and accept that this formatter leaves that file as written."
         )
 
 

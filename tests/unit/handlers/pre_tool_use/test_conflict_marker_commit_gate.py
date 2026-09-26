@@ -12,6 +12,7 @@ this file carries no marker the gate would report against itself.
 
 from __future__ import annotations
 
+import re
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -666,3 +667,145 @@ class TestTheDenyMessage:
         assert result.decision == Decision.DENY
         assert "more" in result.reason
         assert "many.md:60" not in result.reason
+
+
+class TestEveryFormatterDisguiseIsDenied:
+    """Review 1 M2: an opener the formatter folded mid-line reaches the classifier."""
+
+    @pytest.mark.parametrize(
+        "line",
+        [
+            "# Intro text. \\<<\\<<\\<<< HEAD ours",
+            "> \\<<\\<<\\<<< HEAD",
+            "1. # step \\<<\\<<\\<<< HEAD ours",
+            "\\<<\\<<\\<<\\<",
+        ],
+    )
+    def test_a_lone_disguised_opener_is_denied(
+        self, handler: ConflictMarkerCommitGateHandler, repo: Path, line: str
+    ) -> None:
+        _stage(repo, "doc.md", f"# Doc\n\nfirst\n\n{line}\n")
+        result = _verdict(handler, "git commit -m x", repo)
+        assert result.decision == Decision.DENY
+        assert "doc.md:5" in result.reason
+
+    def test_a_deep_email_quote_is_allowed(
+        self, handler: ConflictMarkerCommitGateHandler, repo: Path
+    ) -> None:
+        """Review 1 minor 1."""
+        _stage(repo, "doc.md", f"# Doc\n\nfirst\n\n{QUOTED_CLOSE} > > quoted reply text\n")
+        assert _verdict(handler, "git commit -m x", repo).decision == Decision.ALLOW
+
+
+class TestConflictMarkerSizeAttribute:
+    """Review 1 minor 2: git writes markers of the `conflict-marker-size` length."""
+
+    @pytest.mark.parametrize("size", [3, 9])
+    def test_a_marker_of_the_attributed_size_is_denied(
+        self, handler: ConflictMarkerCommitGateHandler, repo: Path, size: int
+    ) -> None:
+        _stage(repo, ".gitattributes", f"*.txt conflict-marker-size={size}\n")
+        _stage(repo, "a.txt", f"x\n{'>' * size} main\n")
+        result = _verdict(handler, "git commit -m x", repo)
+        assert result.decision == Decision.DENY
+        assert "a.txt:2" in result.reason
+
+    def test_a_default_run_in_a_resized_file_is_not_a_marker(
+        self, handler: ConflictMarkerCommitGateHandler, repo: Path
+    ) -> None:
+        _stage(repo, ".gitattributes", "*.txt conflict-marker-size=9\n")
+        _stage(repo, "a.txt", f"x\n{CLOSE} main\n")
+        assert _verdict(handler, "git commit -m x", repo).decision == Decision.ALLOW
+
+    def test_commit_all_reads_the_working_trees_attributes(
+        self, handler: ConflictMarkerCommitGateHandler, repo: Path
+    ) -> None:
+        _stage(repo, "a.txt", "x\n")
+        _git(repo, "commit", "-q", "-m", "a")
+        (repo / ".gitattributes").write_text("*.txt conflict-marker-size=9\n")
+        _git(repo, "add", ".gitattributes")
+        _git(repo, "commit", "-q", "-m", "attrs")
+        (repo / "a.txt").write_text(f"x\n{'>' * 9} main\n")
+        result = _verdict(handler, "git commit -am x", repo)
+        assert result.decision == Decision.DENY
+        assert "a.txt:2" in result.reason
+
+
+class TestAFileGitCallsBinaryByAttributeIsRead:
+    """Review 1 minor 4: `-diff` hid the added lines, so markers were dropped."""
+
+    @pytest.mark.parametrize("attribute", ["-diff", "binary", "-text"])
+    def test_an_added_marker_is_denied(
+        self, handler: ConflictMarkerCommitGateHandler, repo: Path, attribute: str
+    ) -> None:
+        _stage(repo, ".gitattributes", f"*.lock {attribute}\n")
+        _stage(repo, "deps.lock", "a\n")
+        _git(repo, "commit", "-q", "-m", "lock")
+        _stage(repo, "deps.lock", f"a\n{CLOSE} main\n")
+        result = _verdict(handler, "git commit -m x", repo)
+        assert result.decision == Decision.DENY
+        assert "deps.lock:2" in result.reason
+
+    def test_a_marker_already_there_still_does_not_block(
+        self, handler: ConflictMarkerCommitGateHandler, repo: Path
+    ) -> None:
+        _stage(repo, ".gitattributes", "*.lock -diff\n")
+        _stage(repo, "deps.lock", f"a\n{CLOSE} main\n")
+        _git(repo, "commit", "-q", "-m", "lock")
+        _stage(repo, "deps.lock", f"a\n{CLOSE} main\nb\n")
+        assert _verdict(handler, "git commit -m x", repo).decision == Decision.ALLOW
+
+    def test_a_working_tree_commit_reads_it_too(
+        self, handler: ConflictMarkerCommitGateHandler, repo: Path
+    ) -> None:
+        _stage(repo, ".gitattributes", "*.lock -diff\n")
+        _stage(repo, "deps.lock", "a\n")
+        _git(repo, "commit", "-q", "-m", "lock")
+        (repo / "deps.lock").write_text(f"a\n{CLOSE} main\n")
+        result = _verdict(handler, "git commit -am x", repo)
+        assert result.decision == Decision.DENY
+        assert "deps.lock:2" in result.reason
+
+
+class TestTheAcceptanceTestsCanFail:
+    """Review 1 minor 7: each dispatched acceptance test is run here for real."""
+
+    @staticmethod
+    def _dispatched(handler: ConflictMarkerCommitGateHandler) -> list[Any]:
+        return [
+            test
+            for test in handler.get_acceptance_tests()
+            if test.tool_payload is not None and test.harness_cannot_produce is None
+        ]
+
+    def test_there_is_a_dry_run_and_a_cd_dash_test(
+        self, handler: ConflictMarkerCommitGateHandler
+    ) -> None:
+        commands = [test.command for test in self._dispatched(handler)]
+        assert any("--dry-run" in command for command in commands)
+        assert any(command.startswith("cd - ") for command in commands)
+
+    def test_each_verdict_holds_even_with_a_marker_staged(
+        self, handler: ConflictMarkerCommitGateHandler, repo: Path
+    ) -> None:
+        """A staged marker makes an ALLOW mean the gate truly skipped the command."""
+        _stage(repo, "doc.md", f"# Doc\n\nfirst\n{CLOSE} main\n")
+        for test in self._dispatched(handler):
+            hook_input = _bash(test.command, repo)
+            if not handler.matches(hook_input):
+                assert test.expected_decision == Decision.ALLOW, test.title
+                continue
+            result = handler.handle(hook_input)
+            assert result.decision == test.expected_decision, test.title
+            for pattern in test.expected_message_patterns:
+                assert re.search(pattern, result.reason or ""), (test.title, pattern)
+
+    def test_the_dry_run_command_would_deny_were_dry_run_misjudged(
+        self, handler: ConflictMarkerCommitGateHandler, repo: Path
+    ) -> None:
+        """Strip `--dry-run` and the same command must deny: the ALLOW can fail."""
+        (dry_run,) = [t for t in self._dispatched(handler) if "--dry-run" in t.command]
+        judged = dry_run.command.replace(" --dry-run", "")
+        result = _verdict(handler, judged, repo)
+        assert result.decision == Decision.DENY
+        assert "NOT checked" in (result.reason or "")

@@ -87,6 +87,16 @@ Three are worth naming here:
 The Defence landed RED at `4d0fcead` with an empty inventory and 33 undeclared
 boundaries; the sweep that filled it is the commit that follows.
 
+**The counter-example: `conflict_marker_commit_gate`** (Plan 00466 N211) was
+built fail-closed from the start, so it is not a row. When it cannot state
+the repository or the tree a commit records, it denies with a named reason
+and a `git -C /absolute/path/to/repo commit` rephrase. That covers an
+expanded directory, `cd -`, `GIT_INDEX_FILE`, `--pathspec-from-file`,
+`git am <patch>`, no repository, or a git error. It does not allow. The
+choice is cheap here because the rephrase always exists: a literal `-C` path
+can always be checked. That is why a gate may fail closed where a guard with
+no rephrase could not.
+
 **No instance is fixed.** Converting any of these to fail-closed changes
 behaviour in every installing project — a slow guard would begin blocking, a
 bad config would begin refusing every tool call — so the fix is owner-gated.

@@ -44,9 +44,10 @@ from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.core.utils import get_bash_command
 from claude_code_hooks_daemon.utils import secret_file_matching as sfm
 from claude_code_hooks_daemon.utils.conflict_markers import (
-    GIT_GREP_PREFILTER,
+    DEFAULT_MARKER_SIZE,
     ConflictMarker,
     find_conflict_markers,
+    git_grep_prefilter,
 )
 from claude_code_hooks_daemon.utils.git_commit_parsing import (
     GitInvocation,
@@ -93,8 +94,13 @@ _HEAD: Final[str] = "HEAD"
 # so a renamed file's lines count as added rather than vanishing from ACM.
 _DIFF_FILTER: Final[str] = "--diff-filter=ACM"
 _DIFF_FLAGS: Final[tuple[str, ...]] = ("--no-renames", "--no-ext-diff", "--no-textconv")
-_GREP_FLAGS: Final[tuple[str, ...]] = ("-n", "-z", "-I", "--full-name", "--no-color", "-E")
+_GREP_FLAGS: Final[tuple[str, ...]] = ("-n", "-z", "--full-name", "--no-color", "-E")
 _NUL: Final[str] = "\0"
+# git's own binary sniff: a NUL in the first this-many bytes.
+_BINARY_SNIFF_LENGTH: Final[int] = 8000
+_MARKER_SIZE_ATTR: Final[str] = "conflict-marker-size"
+# Paths per `git check-attr` call, keeping each argv well inside ARG_MAX.
+_ATTR_CHUNK: Final[int] = 256
 _NEWLINE: Final[str] = "\n"
 # `git grep` exits 1 when nothing matched: an answer, not a failure.
 _GREP_NO_MATCH: Final[int] = 1
@@ -115,14 +121,19 @@ _RULE: Final[Rule] = Rule(
     verbose=(
         "git writes a conflict as an opener of seven `<`, an optional base of "
         "seven `|`, a separator of seven `=` and a closer of seven `>`, each at "
-        "column 0. Running the markdown formatter over a conflicted file "
-        "disguises two of them: the opener becomes an escaped heading and the "
-        "closer a seven-deep blockquote (`>` seven times, space-separated). "
-        "Both spellings are checked here.\n\n"
+        "column 0 (another length where a path's `conflict-marker-size` "
+        "attribute sets one). Running the markdown formatter over a conflicted "
+        "file disguises two of them: the opener is escaped (`\\<<\\<<\\<<<`) "
+        "wherever it lands, even mid-heading or in a blockquote, list item or "
+        "table cell, and the closer becomes a seven-deep blockquote (`>` seven "
+        "times, space-separated). Both spellings are checked here.\n\n"
         "Only lines this commit ADDS count, so a marker already in history "
         "never blocks an unrelated edit, and deleting one is never blocked. A "
         "line of seven `=` counts only between an opener and a closer, so a "
-        "setext heading underline is not a marker."
+        "setext heading underline is not a marker. A deep blockquote counts on "
+        "its own only as git writes a closer: exactly seven deep with at most a "
+        "one-word label. Any other deep quote counts only after an opener and a "
+        "separator."
     ),
 )
 
@@ -278,15 +289,67 @@ def _recorded_paths(directory: Path, source: _Source, has_head: bool) -> set[str
     return set(_nul_separated(output))
 
 
-def _candidate_lines(root: Path, source: _Source) -> dict[str, list[tuple[int, str]]]:
-    """Marker-shaped lines by path, from the tree ``source`` records."""
+def _marker_sizes(root: Path, source: _Source, paths: list[str]) -> dict[str, int]:
+    """Each path's ``conflict-marker-size``, from the tree ``source`` records."""
     tree = () if source.working_tree else (_INDEX_TARGET,)
-    result = run_git(root, "grep", *tree, *_GREP_FLAGS, "-e", GIT_GREP_PREFILTER)
+    sizes: dict[str, int] = {}
+    for start in range(0, len(paths), _ATTR_CHUNK):
+        output = _git_or_raise(
+            root,
+            "check-attr",
+            "-z",
+            *tree,
+            _MARKER_SIZE_ATTR,
+            "--",
+            *paths[start : start + _ATTR_CHUNK],
+        )
+        fields = output.split(_NUL)
+        for path, value in zip(fields[0::3], fields[2::3], strict=False):
+            sizes[path] = int(value) if value.isdigit() and int(value) > 0 else DEFAULT_MARKER_SIZE
+    return sizes
+
+
+def _grep(root: Path, source: _Source, prefilter: str, *flags: str) -> str:
+    """``git grep`` over the tree ``source`` records; empty when nothing matched."""
+    tree = () if source.working_tree else (_INDEX_TARGET,)
+    result = run_git(root, "grep", *tree, *flags, *_GREP_FLAGS, "-e", prefilter)
     if result.returncode == _GREP_NO_MATCH:
-        return {}
+        return ""
     if result.returncode != 0:
         raise _UnreadableTree(result.stderr.strip() or f"git grep exited {result.returncode}")
-    return _parse_grep_stream(result.stdout)
+    return result.stdout
+
+
+def _whole_text(root: Path, source: _Source, path: str) -> str:
+    """The content ``source`` records for ``path``."""
+    if not source.working_tree:
+        return _git_or_raise(root, "cat-file", "blob", f":0:{path}")
+    try:
+        return (root / path).read_bytes().decode("utf-8", errors="replace")
+    except OSError as exc:
+        raise _UnreadableTree(f"cannot read {path}: {exc}") from exc
+
+
+def _candidate_lines(
+    root: Path, source: _Source, prefilter: str
+) -> dict[str, list[tuple[int, str]]]:
+    """Marker-shaped lines by path, from the tree ``source`` records.
+
+    ``-I`` skips a file git calls binary, which covers a TEXT file whose
+    attributes say ``-diff`` or ``binary``. A merge writes markers into such a
+    file all the same, so each one the prefilter matches is read whole; only a
+    file whose content really is binary (a NUL in git's first 8000 bytes) is
+    skipped, because git never merges one line by line.
+    """
+    found = _parse_grep_stream(_grep(root, source, prefilter, "-I"))
+    matched = _nul_separated(_grep(root, source, prefilter, "--text", "-l"))
+    for path in matched:
+        if path in found:
+            continue
+        text = _whole_text(root, source, path)
+        if _NUL not in text[:_BINARY_SNIFF_LENGTH]:
+            found[path] = list(enumerate(text.splitlines(), start=1))
+    return found
 
 
 def _parse_grep_stream(stream: str) -> dict[str, list[tuple[int, str]]]:
@@ -326,6 +389,8 @@ def _added_line_numbers(root: Path, source: _Source, path: str, has_head: bool) 
         target,
         "--unified=0",
         "--no-color",
+        # A `-diff` file would otherwise print "Binary files differ" and no hunk.
+        "--text",
         *_DIFF_FLAGS,
         _PATHSPEC_SEPARATOR,
         path,
@@ -356,12 +421,14 @@ def _findings(
         recorded = _recorded_paths(directory, source, has_head)
     if not recorded:
         return []
+    sizes = _marker_sizes(root, source, sorted(recorded))
+    prefilter = git_grep_prefilter(min(sizes.values(), default=DEFAULT_MARKER_SIZE))
     protected_patterns = sfm.resolve_configured_patterns()
     findings: list[_Finding] = []
-    for path, lines in sorted(_candidate_lines(root, source).items()):
+    for path, lines in sorted(_candidate_lines(root, source, prefilter).items()):
         if path not in recorded or excluded(root, path):
             continue
-        markers = find_conflict_markers(lines)
+        markers = find_conflict_markers(lines, sizes.get(path, DEFAULT_MARKER_SIZE))
         if not markers:
             continue
         # A protected file is still checked -- skipping it would let a marker
@@ -394,7 +461,8 @@ def _findings_block(findings: list[_Finding]) -> str:
 _EXAMPLE_ADVICE: Final[str] = (
     "Writing a DOCUMENTED example rather than a leftover conflict? A marker is "
     "judged inside a fenced code block too, because a real conflict can land "
-    "there. Either shorten the marker run below seven characters, or keep the "
+    "there. Either shorten the marker run below the file's marker size (seven "
+    "unless its `conflict-marker-size` attribute says otherwise), or keep the "
     "example in a file covered by "
     "`handlers.pre_tool_use.conflict_marker_commit_gate.options.exclude_paths` "
     "(or the project-wide `daemon.exclude_paths`)."
@@ -510,15 +578,27 @@ class ConflictMarkerCommitGateHandler(PreToolUseHandlerBase):
             "A `git commit` (and `git merge|cherry-pick|revert|rebase --continue`) is "
             "denied when a line it ADDS carries a merge-conflict marker, naming each "
             "`file:line`. Both spellings count: git's raw column-0 markers, and the "
-            "disguise the markdown formatter gives them — the opener as an escaped "
-            "heading, the closer as a seven-deep blockquote (`>` seven times, "
+            "disguise the markdown formatter gives them — the opener escaped "
+            "(`\\<<\\<<\\<<<`) even mid-heading, in a blockquote, list item or table "
+            "cell, and the closer as a seven-deep blockquote (`>` seven times, "
             "space-separated). A line of seven `=` counts only between an opener and a "
-            "closer, so a setext heading underline is fine.\n\n"
+            "closer, so a setext heading underline is fine; a deep email-style quote "
+            "counts only after an opener and a separator. A path's "
+            "`conflict-marker-size` attribute sets the run length.\n\n"
             "It reads what the commit RECORDS: the index, the working tree for "
             "`commit -a`, the named paths for a pathspec commit, in the repository an "
             "earlier `cd` or `git -C` names. A marker already in history never blocks an unrelated "
             "edit, and deleting one is never blocked. **Fix:** resolve the conflict at "
-            "each listed line and re-stage."
+            "each listed line and re-stage.\n\n"
+            "**A commit it cannot check is DENIED, not allowed** — a directory from "
+            "`$VAR`, `cd -` or `popd`; `--git-dir`, `--work-tree`, `GIT_DIR`, "
+            "`GIT_INDEX_FILE`; `--pathspec-from-file`; `git am <patch>`; a directory "
+            "outside any repository; or a git error. Rephrase as "
+            "`git -C /absolute/path/to/repo commit ...`.\n\n"
+            "**A documented example** is judged even inside a fenced code block, "
+            "because a real conflict can land there. Shorten the marker run, or keep "
+            "the file under this handler's `options.exclude_paths` (or the "
+            "project-wide `daemon.exclude_paths`)."
         )
 
     def get_acceptance_tests(self) -> list[Any]:
@@ -555,16 +635,39 @@ class ConflictMarkerCommitGateHandler(PreToolUseHandlerBase):
                 requires_main_thread=True,
             ),
             AcceptanceTest(
-                title="conflict-marker commit gate - a dry-run commit of a clean tree",
-                command="git commit --dry-run",
+                title="conflict-marker commit gate - dry runs record nothing",
+                command="git commit --dry-run && cd - && git commit --dry-run",
                 dispatch_as_bash=True,
                 description=(
-                    "`--dry-run` records nothing, and a tree with no added marker "
-                    "commits normally"
+                    "`--dry-run` records nothing, so neither half is judged. Without "
+                    "`--dry-run` the `cd -` would make this a DENY whatever the tree "
+                    "holds, so an ALLOW here shows the dry runs really were skipped"
                 ),
                 expected_decision=Decision.ALLOW,
                 expected_message_patterns=[],
                 safety_notes="--dry-run never creates a commit or modifies the index.",
+                test_type=TestType.BLOCKING,
+                recommended_model=RecommendedModel.HAIKU,
+                requires_main_thread=False,
+            ),
+            AcceptanceTest(
+                title="conflict-marker commit gate - a commit it cannot place is denied",
+                command="cd - && git commit -m acceptance -- no-such-acceptance-path",
+                dispatch_as_bash=True,
+                description=(
+                    "`cd -` names no directory the daemon can state, so the commit is "
+                    "denied as NOT checked, with the `git -C` rephrase"
+                ),
+                expected_decision=Decision.DENY,
+                expected_message_patterns=[
+                    r"R-CONFLICT-MARKER-COMMIT",
+                    r"NOT checked",
+                    r"git -C /absolute/path/to/repo commit",
+                ],
+                safety_notes=(
+                    "Denied before it runs. Were it to run, the pathspec matches no "
+                    "file, so git refuses and records nothing."
+                ),
                 test_type=TestType.BLOCKING,
                 recommended_model=RecommendedModel.HAIKU,
                 requires_main_thread=False,

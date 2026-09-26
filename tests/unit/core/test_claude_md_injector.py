@@ -1,9 +1,13 @@
 """TDD tests for ClaudeMdInjector."""
 
+import logging
 import re
 import subprocess
 from pathlib import Path
 from typing import Any
+from unittest.mock import patch
+
+import pytest
 
 _OPEN_TAG = "<hooksdaemon>"
 _CLOSE_TAG = "</hooksdaemon>"
@@ -586,22 +590,59 @@ class TestClaudeMdInjectorAutoCommit:
         assert head_after == head_before, "a conflict marker was auto-committed"
         assert f"{close_marker} main" in (tmp_path / "CLAUDE.md").read_text().splitlines()
 
-    def test_a_deleted_claude_md_is_still_committed(self, tmp_path: Path) -> None:
-        """No text means no marker: the marker check must not stop a deletion."""
+    @pytest.mark.parametrize(
+        ("failure", "logged"),
+        [
+            (FileNotFoundError("gone"), "vanished"),
+            (PermissionError("denied"), "could not be read"),
+        ],
+    )
+    def test_a_claude_md_it_cannot_read_is_not_auto_committed(
+        self,
+        tmp_path: Path,
+        caplog: pytest.LogCaptureFixture,
+        failure: OSError,
+        logged: str,
+    ) -> None:
+        """Ledger 00466 N224: no text to check means nothing to commit.
+
+        Main read the file inside `_commit_message`, so a CLAUDE.md deleted
+        mid-inject raised there and `inject()` logged a misleading "check file
+        permissions" warning. Committing unread text instead would record a
+        marker the check never saw, so neither case may commit, and the log
+        says which case it was.
+        """
         from claude_code_hooks_daemon.core.claude_md_injector import ClaudeMdInjector
 
         _init_git_repo(tmp_path)
-        (tmp_path / "CLAUDE.md").unlink()
+        claude_md = tmp_path / "CLAUDE.md"
+        claude_md.write_text("# Project\n\nedited\n")
+        head_before = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=tmp_path, capture_output=True, text=True
+        ).stdout
 
-        ClaudeMdInjector._auto_commit_if_dirty(tmp_path / "CLAUDE.md")
+        real_read_text = Path.read_text
 
-        status = subprocess.run(
-            ["git", "status", "--porcelain", "CLAUDE.md"],
-            cwd=tmp_path,
-            capture_output=True,
-            text=True,
-        )
-        assert status.stdout.strip() == ""
+        def _read_text(path: Path, *args: Any, **kwargs: Any) -> str:
+            if path == claude_md:
+                raise failure
+            return real_read_text(path, *args, **kwargs)
+
+        with (
+            patch.object(Path, "read_text", _read_text),
+            caplog.at_level(
+                logging.INFO, logger="claude_code_hooks_daemon.core.claude_md_injector"
+            ),
+        ):
+            ClaudeMdInjector._auto_commit_if_dirty(claude_md)
+
+        head_after = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=tmp_path, capture_output=True, text=True
+        ).stdout
+        assert head_after == head_before
+        assert logged in caplog.text
+        if isinstance(failure, FileNotFoundError):
+            assert "permission" not in caplog.text.lower()
 
     def test_commit_message_flags_edits_from_outside_the_generated_block(
         self, tmp_path: Path

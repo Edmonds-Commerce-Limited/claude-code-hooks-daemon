@@ -186,3 +186,13 @@ class TestFormatMarkdownDocument:
     def test_a_setext_heading_underline_is_not_a_conflict(self) -> None:
         doc = f"Heading\n{_SEP}\n\nprose\n"
         assert format_markdown_document(doc) == format_markdown_text(doc)
+
+    def test_a_fenced_example_is_still_refused_and_the_ways_through_are_named(self) -> None:
+        """Review 1 M3: a fence can hold a real conflict, so it is not exempt."""
+        fenced = f"# Doc\n\n```text\n{_OPEN} ours\n{_SEP}\n{_CLOSE} theirs\n```\n"
+        with pytest.raises(UnresolvedConflictError) as caught:
+            format_markdown_document(fenced)
+        message = str(caught.value)
+        assert "fenced code block" in message
+        assert "shorten the marker run" in message
+        assert "conflict_marker_commit_gate.options.exclude_paths" in message

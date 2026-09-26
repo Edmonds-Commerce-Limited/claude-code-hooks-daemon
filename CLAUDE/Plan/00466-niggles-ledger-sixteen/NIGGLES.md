@@ -3,6 +3,24 @@
 Newest first. Each entry says how it was found, why it happens, and the
 candidate remedies.
 
+### N224 — ✅ Remedied — the CLAUDE.md injector logs a misleading permissions warning when CLAUDE.md vanishes mid-inject
+
+**Found by N211 review 1 (M5).** On main, `_auto_commit_if_dirty` passes the
+path to `_commit_message`, which reads the file with no guard. If CLAUDE.md
+is deleted between the injector's write and that read, it raises
+`FileNotFoundError`. `inject()` catches it as `OSError` and logs "check file
+permissions", which is the wrong cause, and the auto-commit is skipped. That
+is a misleading warning plus a skipped commit, not a crash. It is reachable
+only as a race, because `_run_inject` has just written the file.
+
+**Remedy (branch `worktree-n466-n211`).** `_auto_commit_if_dirty` reads the
+file once, and both the N211 marker check and `_commit_message` use that
+text. A file that vanished logs that it vanished and is not committed. A
+file that is present but unreadable logs a warning naming the read error and
+is not committed either: text the marker check never saw is never committed.
+The first version of the fix set unread text to `""` and committed anyway.
+Review 1 caught that, and a test now pins both cases.
+
 ### N211 — ✅ Remedied — merge-conflict markers reach tracked text disguised by the markdown formatter
 
 **Found by the coordinator.** This file on main (`44d1b1b3b`) carried two
@@ -38,6 +56,14 @@ staged-lint gate.
   `merge|cherry-pick|revert|rebase --continue`) whose ADDED lines carry a
   marker in either spelling, naming `file:line`. It reads what the commit
   records (index, `-a` working tree, pathspecs, `git -C`).
+- After review 1, the gate:
+  - finds commits with the shared walker, and reads pathspecs without
+    shell syntax (N226);
+  - denies a commit it cannot place, rather than allowing it;
+  - recognises every opener the formatter folds;
+  - honours `conflict-marker-size` and reads `-diff` text files;
+  - leaves an email-style deep quote alone;
+  - takes `exclude_paths`.
 - The three lines are removed from this file. A sweep of every tracked text
   file on main found no other marker in either spelling.
 

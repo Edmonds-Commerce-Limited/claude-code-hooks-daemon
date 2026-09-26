@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 
 from claude_code_hooks_daemon.utils.conflict_markers import (
+    DEFAULT_MARKER_SIZE,
     GIT_GREP_PREFILTER,
     ConflictMarker,
     MarkerKind,
@@ -17,7 +18,9 @@ from claude_code_hooks_daemon.utils.conflict_markers import (
     describe_markers,
     find_conflict_markers,
     find_conflict_markers_in_text,
+    git_grep_prefilter,
 )
+from claude_code_hooks_daemon.utils.markdown_format import format_markdown_text
 
 OPEN = "<" * 7
 BASE = "|" * 7
@@ -27,6 +30,8 @@ QUOTED_CLOSE = " ".join(">" * 7)
 QUOTED_OPEN = " ".join("<" * 7)
 # What mdformat makes of a raw opener: it escapes the first `<` of each pair.
 ESCAPED_OPEN = "\\<<\\<<\\<<<"
+# An unlabelled opener ends in `<`, so the formatter escapes that one too.
+ESCAPED_OPEN_UNLABELLED = "\\<<\\<<\\<<\\<"
 ESCAPED_SEP = "\\" + SEP
 
 
@@ -57,6 +62,12 @@ class TestClassifyMarkerLine:
             (f"{ESCAPED_OPEN} HEAD", MarkerKind.OPEN),
             (f"# {ESCAPED_OPEN} HEAD ours line", MarkerKind.OPEN),
             (f"| {ESCAPED_OPEN} HEAD |     |", MarkerKind.OPEN),
+            # Review 1 M2: the other places the formatter folds an opener.
+            (f"# Intro text. {ESCAPED_OPEN} HEAD ours", MarkerKind.OPEN),
+            (f"> {ESCAPED_OPEN} HEAD", MarkerKind.OPEN),
+            (f"1. # step {ESCAPED_OPEN} HEAD ours", MarkerKind.OPEN),
+            (ESCAPED_OPEN_UNLABELLED, MarkerKind.OPEN),
+            (f"| a | {ESCAPED_OPEN} HEAD |", MarkerKind.OPEN),
             (f"  {ESCAPED_SEP}", MarkerKind.SEPARATOR),
             (f"  {QUOTED_CLOSE} br", MarkerKind.CLOSE),
         ],
@@ -78,10 +89,97 @@ class TestClassifyMarkerLine:
             f"see `{QUOTED_CLOSE}` inline",
             f"text {OPEN} mid-line",
             "|---|---|",
+            f"the escaped opener `{ESCAPED_OPEN}` quoted inline",
+            f"a longer run {ESCAPED_OPEN}< is another size",
+            f"glued{ESCAPED_OPEN} to a word",
         ],
     )
     def test_other_lines_are_not_markers(self, line: str) -> None:
         assert classify_marker_line(line) is None
+
+
+# Review 1 M2: every layout the formatter folds an opener into, run through
+# the REAL formatter so a change in its output fails here, not in a commit.
+_FORMATTER_LAYOUTS = {
+    "a heading swallowing the paragraph above": "Intro text.\n{o} HEAD\nours\n{s}\ntheirs\n",
+    "a blockquote": "> {o} HEAD\n> ours\n",
+    "a list item": "1. step\n   {o} HEAD\n   ours\n   {s}\n",
+    "a bullet item": "- item\n  {o} HEAD\n",
+    "an unlabelled opener": "{o}\nours\n",
+    "an unlabelled opener after a paragraph": "text\n{o}\nours\n",
+    "a table cell": "| a | b |\n|---|---|\n| {o} HEAD | x |\n",
+}
+
+
+class TestTheFormattersOwnDisguisesAreRecognised:
+    @pytest.mark.parametrize("layout", sorted(_FORMATTER_LAYOUTS))
+    @pytest.mark.parametrize("size", [DEFAULT_MARKER_SIZE, 8, 9, 12])
+    def test_the_formatted_opener_is_still_an_opener(self, layout: str, size: int) -> None:
+        source = _FORMATTER_LAYOUTS[layout].format(o="<" * size, s="=" * size)
+        formatted = format_markdown_text(source)
+        assert "<" * size not in formatted, "the formatter no longer disguises this layout"
+        kinds = [m.kind for m in find_conflict_markers_in_text(formatted, size=size)]
+        assert MarkerKind.OPEN in kinds, formatted
+
+
+class TestADeepBlockquoteIsACloserOnlyWhereOneCanBe:
+    """Review 1 minor 1: an email-style deep quote is not a leftover closer."""
+
+    @pytest.mark.parametrize(
+        "line",
+        [
+            f"{QUOTED_CLOSE} some quoted prose",
+            f"{QUOTED_CLOSE} > deeper still",
+            " ".join(">" * 8),
+            f"{QUOTED_CLOSE} abc1234 (a rebased subject)",
+        ],
+    )
+    def test_alone_it_is_prose(self, line: str) -> None:
+        assert find_conflict_markers_in_text(f"intro\n\n{line}\n") == []
+
+    @pytest.mark.parametrize(
+        "line", [f"{QUOTED_CLOSE} some quoted prose", f"{QUOTED_CLOSE} abc1234 (subject)"]
+    )
+    def test_after_an_opener_and_a_separator_it_closes_the_conflict(self, line: str) -> None:
+        text = f"{ESCAPED_OPEN} HEAD\nours\n{SEP}\ntheirs\n{line}\n"
+        kinds = [m.kind for m in find_conflict_markers_in_text(text)]
+        assert kinds == [MarkerKind.OPEN, MarkerKind.SEPARATOR, MarkerKind.CLOSE]
+
+    def test_after_an_opener_without_a_separator_it_is_prose(self) -> None:
+        text = f"{ESCAPED_OPEN} HEAD\nours\n{QUOTED_CLOSE} some quoted prose\n"
+        kinds = [m.kind for m in find_conflict_markers_in_text(text)]
+        assert kinds == [MarkerKind.OPEN]
+
+    @pytest.mark.parametrize("label", ["", " main", " worktree-n466-superlinear"])
+    def test_a_branch_labelled_closer_counts_alone(self, label: str) -> None:
+        """The N211 leftover: exactly the marker size deep, one-word label."""
+        markers = find_conflict_markers_in_text(f"entry\n\n{QUOTED_CLOSE}{label}\n")
+        assert [m.kind for m in markers] == [MarkerKind.CLOSE]
+
+
+class TestConflictMarkerSize:
+    """Review 1 minor 2: git's `conflict-marker-size` attribute sets the run length."""
+
+    @pytest.mark.parametrize("size", [3, 9, 12])
+    def test_markers_of_the_configured_size_are_found(self, size: int) -> None:
+        text = f"{'<' * size} HEAD\nours\n{'=' * size}\ntheirs\n{'>' * size} main\n"
+        kinds = [m.kind for m in find_conflict_markers_in_text(text, size=size)]
+        assert kinds == [MarkerKind.OPEN, MarkerKind.SEPARATOR, MarkerKind.CLOSE]
+
+    def test_a_run_of_another_size_is_not_a_marker(self) -> None:
+        text = f"{OPEN} HEAD\nours\n{SEP}\ntheirs\n{CLOSE} main\n"
+        assert find_conflict_markers_in_text(text, size=9) == []
+
+    @pytest.mark.parametrize("size", [0, -1])
+    def test_a_size_below_one_is_refused(self, size: int) -> None:
+        with pytest.raises(ValueError, match="marker size"):
+            find_conflict_markers_in_text("x\n", size=size)
+
+
+class TestClassifyTakesTheSize:
+    def test_a_run_is_a_marker_only_at_its_own_size(self) -> None:
+        assert classify_marker_line(f"{'>' * 9} main", size=9) == (MarkerKind.CLOSE, False)
+        assert classify_marker_line(f"{'>' * 9} main") is None
 
 
 class TestFindConflictMarkers:
@@ -147,7 +245,60 @@ class TestDescribeMarkers:
 class TestGitGrepPrefilter:
     """The prefilter git runs must never drop a line the classifier accepts."""
 
-    def test_git_grep_returns_every_marker_the_classifier_accepts(self, tmp_path: Path) -> None:
+    def test_the_default_constant_is_the_default_size(self) -> None:
+        assert git_grep_prefilter(DEFAULT_MARKER_SIZE) == GIT_GREP_PREFILTER
+
+    @pytest.mark.parametrize("size", [3, DEFAULT_MARKER_SIZE, 9, 12])
+    def test_git_grep_returns_every_marker_the_classifier_accepts(
+        self, tmp_path: Path, size: int
+    ) -> None:
+        o, b, s, c = "<" * size, "|" * size, "=" * size, ">" * size
+        quoted_close, quoted_open = " ".join(c), " ".join(o)
+        escaped_open = format_markdown_text(f"{o} HEAD\n").strip()
+        escaped_bare = format_markdown_text(f"{o}\n").strip()
+        positives = [
+            f"{o} HEAD",
+            f"{b} base",
+            s,
+            f"{c} main",
+            f"{quoted_close} main",
+            f"{quoted_close} some quoted prose",
+            f"{quoted_open} HEAD",
+            escaped_open,
+            escaped_bare,
+            f"# {escaped_open} ours",
+            f"# Intro text. {escaped_open} ours",
+            f"> {escaped_open}",
+            f"1. # step {escaped_open} ours",
+            f"| {escaped_open} |  |",
+            f"  \\{s}",
+            f"  {quoted_close} br",
+        ]
+        for line in positives:
+            assert classify_marker_line(line, size=size) is not None, line
+        (tmp_path / "doc.md").write_text("\n".join(["prose", *positives, "tail"]) + "\n")
+        subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+        result = subprocess.run(
+            [
+                "git",
+                "-C",
+                str(tmp_path),
+                "grep",
+                "--no-index",
+                "-n",
+                "-E",
+                "-e",
+                git_grep_prefilter(size),
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert result.returncode == 0, result.stderr
+        matched_lines = {int(row.split(":", 2)[1]) for row in result.stdout.splitlines()}
+        assert matched_lines == set(range(2, 2 + len(positives)))
+
+    def test_the_default_prefilter_matches_every_default_marker(self, tmp_path: Path) -> None:
         positives = [
             f"{OPEN} HEAD",
             f"{BASE} base",
