@@ -78,7 +78,7 @@ Usage:
 
 Exit codes:
     0 - No violations found
-    1 - Violations found
+    1 - Violations found, or nothing is tracked
     2 - Operational failure (not a git repository, git unavailable)
 """
 
@@ -99,6 +99,16 @@ from typing import Final
 # green while it saw nothing — the precise failure it exists to prevent.
 from claude_code_hooks_daemon.constants import HandlerID
 from claude_code_hooks_daemon.core.claude_md_injector import handler_names_in_guidance
+from claude_code_hooks_daemon.plan_qa.checks.stats_arithmetic import (
+    CHECK_ID as STATS_ARITHMETIC_CHECK_ID,
+)
+from claude_code_hooks_daemon.plan_qa.checks.stats_arithmetic import (
+    REMEDIATION as STATS_ARITHMETIC_REMEDIATION,
+)
+from claude_code_hooks_daemon.plan_qa.checks.stats_arithmetic import (
+    stats_arithmetic_disagreements,
+)
+from claude_code_hooks_daemon.utils.scan_scope import vacuous_scan_failure, walk_files
 
 _PROJECT_ROOT: Final[Path] = Path(__file__).resolve().parents[2]
 _QA_OUTPUT_DIR_PARTS: Final[tuple[str, str]] = ("untracked", "qa")
@@ -118,7 +128,7 @@ RULE_IGNORED_PLAN_DOC: Final[str] = "ignored-plan-document"
 RULE_ORPHANED_GUIDANCE: Final[str] = "orphaned-handler-guidance"
 RULE_UNRELEASED_MANIFEST_DATE: Final[str] = "unreleased-manifest-date"
 RULE_POST_UPGRADE_INDEX_DRIFT: Final[str] = "post-upgrade-index-drift"
-RULE_PLAN_STATS_ARITHMETIC: Final[str] = "plan-stats-arithmetic"
+RULE_PLAN_STATS_ARITHMETIC: Final[str] = STATS_ARITHMETIC_CHECK_ID
 
 _ALL_RULES: Final[tuple[str, ...]] = (
     RULE_TRACKED_ARTIFACT,
@@ -129,6 +139,7 @@ _ALL_RULES: Final[tuple[str, ...]] = (
     RULE_ORPHANED_GUIDANCE,
     RULE_UNRELEASED_MANIFEST_DATE,
     RULE_POST_UPGRADE_INDEX_DRIFT,
+    RULE_PLAN_STATS_ARITHMETIC,
 )
 
 # ── post-upgrade-index-drift ───────────────────────────────────────────────
@@ -151,40 +162,11 @@ _TASK_SUFFIX: Final[str] = ".md"
 _TASK_ROW_PATTERN: Final[re.Pattern[str]] = re.compile(r"^\|\s*`([^`]+\.md)`\s*\|")
 
 # ── plan-stats-arithmetic ──────────────────────────────────────────────────
-# The plan index's folder-to-number reconciliation bullet states several
-# figures and then self-checks them with a sum carrying a ✅. That tick is an
-# assertion by the author that the figures agree; nothing verified it, and it
-# drifted (Plan 00379 N4): the bullet read "365 distinct ... 378 allocated"
-# and closed with `364 + 13 = 377. ✅`.
-#
-# Note what would NOT have caught it. 364 + 13 really is 377, so a rule that
-# only checks arithmetic validity passes. The defect is that the OPERANDS
-# contradict figures stated inches above them, which is a cross-reference
-# question, not an arithmetic one.
-#
-# This lives in repo hygiene rather than plan_qa deliberately: the bullet is
-# this repository's own index convention, and plan_qa ships to client projects
-# whose plan index has no such section. Every pattern below is optional — an
-# index without the bullet is silent, which is the normal case everywhere else.
+# The plan index's reconciliation bullet must agree with its own closing
+# self-check. The implementation is plan QA's `plan-stats-arithmetic` check
+# (`plan_qa/checks/stats_arithmetic.py`), which also runs in the commit gate;
+# this rule calls it rather than carrying a second copy (Plan 00466 N13).
 _PLAN_INDEX_PATH: Final[str] = "CLAUDE/Plan/README.md"
-#: `16 + 340 + 13 = **369 folders**` — the three category counts and their total.
-_FOLDER_SUM_PATTERN: Final[re.Pattern[str]] = re.compile(
-    r"(\d+)\s*\+\s*(\d+)\s*\+\s*(\d+)\s*=\s*\*\*([\d,]+)\s+folders\*\*"
-)
-#: `**366 distinct plan numbers**`
-_DISTINCT_PATTERN: Final[re.Pattern[str]] = re.compile(r"\*\*([\d,]+)\s+distinct plan numbers\*\*")
-#: `That leaves **13** of the 379 allocated numbers with no folder: 00005, ...`
-_FOLDERLESS_PATTERN: Final[re.Pattern[str]] = re.compile(
-    # Every inter-word gap is \s+, never a literal space: the bullet is wrapped
-    # prose, so any of these gaps can fall on a line break.
-    r"leaves\s+\*\*(\d+)\*\*\s+of\s+the\s+([\d,]+)\s+allocated\s+numbers\s+with\s+no\s+folder:"
-    r"(.*?)(?:—|--|\n\n)",
-    re.DOTALL,
-)
-#: The closing self-check `366 + 13 = 379.` — two operands, unbolded result.
-_CLOSING_SUM_PATTERN: Final[re.Pattern[str]] = re.compile(r"(\d+)\s*\+\s*(\d+)\s*=\s*(\d+)\s*\.")
-#: A zero-padded plan number in the folderless list.
-_PLAN_NUMBER_PATTERN: Final[re.Pattern[str]] = re.compile(r"\b\d{3,5}\b")
 
 # ── unreleased-manifest-date ───────────────────────────────────────────────
 # A config-changes manifest is drafted under UNRELEASED/ during a cycle, where
@@ -417,10 +399,17 @@ class Report:
 
     violations: list[Violation] = field(default_factory=list)
     paths_checked: int = 0
+    root: Path | None = None
+
+    @property
+    def vacuous(self) -> str | None:
+        return vacuous_scan_failure(
+            examined=self.paths_checked, noun="tracked paths", root=self.root
+        )
 
     @property
     def passed(self) -> bool:
-        return not self.violations
+        return not self.violations and self.vacuous is None
 
     def to_dict(self) -> dict[str, object]:
         by_rule = {rule: sum(1 for v in self.violations if v.rule == rule) for rule in _ALL_RULES}
@@ -428,6 +417,7 @@ class Report:
             "tool": _TOOL_NAME,
             "summary": {
                 "passed": self.passed,
+                "vacuous_scan": self.vacuous,
                 "total_violations": len(self.violations),
                 "by_rule": by_rule,
                 "paths_checked": self.paths_checked,
@@ -630,13 +620,7 @@ _REMEDIATION_POST_UPGRADE_INDEX_DRIFT: Final[str] = (
     "to do."
 )
 
-_REMEDIATION_PLAN_STATS_ARITHMETIC: Final[str] = (
-    "Recount from disk and correct the reconciliation bullet in "
-    f"{_PLAN_INDEX_PATH} so every figure in it agrees with the others — do not "
-    "just adjust whichever number the message names. The bullet ends in a "
-    "self-check carrying a tick; that tick claims the figures were verified, so "
-    "leaving it above numbers that disagree is worse than having no check at all."
-)
+_REMEDIATION_PLAN_STATS_ARITHMETIC: Final[str] = STATS_ARITHMETIC_REMEDIATION
 
 
 def post_upgrade_index_drift(root: Path) -> tuple[tuple[str, str], ...]:
@@ -674,18 +658,12 @@ def post_upgrade_index_drift(root: Path) -> tuple[tuple[str, str], ...]:
     return tuple(findings)
 
 
-def _as_int(raw: str) -> int:
-    """``"1,234"`` → ``1234``; the index writes thousands separators."""
-    return int(raw.replace(",", ""))
-
-
 def plan_stats_arithmetic(root: Path) -> tuple[tuple[str, str], ...]:
     """Figures in the reconciliation bullet that disagree with each other.
 
-    Every clause is optional and absence is silence — a plan index without the
-    bullet (every client project) reports nothing. What is checked is only
-    INTERNAL consistency, so the rule needs no access to the tree or the git
-    counter and cannot go stale against them.
+    A thin adapter over plan QA's :func:`stats_arithmetic_disagreements`, the
+    one implementation. An index without the bullet (every client project)
+    reports nothing.
 
     Returns:
         ``(path, message)`` pairs, empty when the bullet is absent or agrees.
@@ -693,77 +671,10 @@ def plan_stats_arithmetic(root: Path) -> tuple[tuple[str, str], ...]:
     index = root / _PLAN_INDEX_PATH
     if not index.is_file():
         return ()
-    text = index.read_text(encoding="utf-8")
-
-    findings: list[tuple[str, str]] = []
-
-    folder_sum = _FOLDER_SUM_PATTERN.search(text)
-    if folder_sum is not None:
-        parts = [_as_int(folder_sum.group(n)) for n in (1, 2, 3)]
-        stated_total = _as_int(folder_sum.group(4))
-        if sum(parts) != stated_total:
-            joined = " + ".join(str(part) for part in parts)
-            findings.append(
-                (
-                    _PLAN_INDEX_PATH,
-                    f"folder sum does not add up: {joined} = {sum(parts)}, "
-                    f"but the bullet states {stated_total}",
-                )
-            )
-
-    distinct_match = _DISTINCT_PATTERN.search(text)
-    folderless_match = _FOLDERLESS_PATTERN.search(text)
-    if folderless_match is not None:
-        stated_folderless = _as_int(folderless_match.group(1))
-        listed = _PLAN_NUMBER_PATTERN.findall(folderless_match.group(3))
-        if len(listed) != stated_folderless:
-            findings.append(
-                (
-                    _PLAN_INDEX_PATH,
-                    f"the bullet states {stated_folderless} folderless numbers "
-                    f"but lists {len(listed)}",
-                )
-            )
-
-    closing = _CLOSING_SUM_PATTERN.search(text)
-    if closing is not None:
-        left, right, total = (_as_int(closing.group(n)) for n in (1, 2, 3))
-        if left + right != total:
-            findings.append(
-                (
-                    _PLAN_INDEX_PATH,
-                    f"the closing self-check does not add up: {left} + {right} "
-                    f"= {left + right}, not {total}",
-                )
-            )
-        if distinct_match is not None and left != _as_int(distinct_match.group(1)):
-            findings.append(
-                (
-                    _PLAN_INDEX_PATH,
-                    f"the closing self-check starts from {left}, but the bullet "
-                    f"states {_as_int(distinct_match.group(1))} distinct plan numbers",
-                )
-            )
-        if folderless_match is not None:
-            stated_folderless = _as_int(folderless_match.group(1))
-            stated_allocated = _as_int(folderless_match.group(2))
-            if right != stated_folderless:
-                findings.append(
-                    (
-                        _PLAN_INDEX_PATH,
-                        f"the closing self-check adds {right}, but the bullet "
-                        f"states {stated_folderless} folderless numbers",
-                    )
-                )
-            if total != stated_allocated:
-                findings.append(
-                    (
-                        _PLAN_INDEX_PATH,
-                        f"the closing self-check totals {total}, but the bullet "
-                        f"states {stated_allocated} allocated numbers",
-                    )
-                )
-    return tuple(findings)
+    return tuple(
+        (_PLAN_INDEX_PATH, disagreement.message)
+        for disagreement in stats_arithmetic_disagreements(index.read_text(encoding="utf-8"))
+    )
 
 
 def orphaned_guidance_handlers(root: Path) -> tuple[str, ...]:
@@ -826,7 +737,7 @@ def _known_handler_identities(root: Path) -> set[str]:
     # one CLAUDE.md guidance would otherwise be flagged for its own handler.
     for handlers_root in (root / _HANDLERS_DIR, root / _PROJECT_HANDLERS_DIR):
         if handlers_root.is_dir():
-            for path in handlers_root.rglob(f"*{_PYTHON_SUFFIX}"):
+            for path in walk_files(handlers_root, f"*{_PYTHON_SUFFIX}"):
                 identities.add(path.stem)
                 # A project handler's `handler_id` follows the built-in
                 # display-name convention (kebab-case, e.g.
@@ -870,7 +781,7 @@ def _unreleased_manifest_date(root: Path, rel_path: str) -> str | None:
 def scan(root: Path) -> Report:
     """Check every tracked path in ``root`` against every rule family."""
     tracked = tracked_files(root)
-    report = Report(paths_checked=len(tracked))
+    report = Report(paths_checked=len(tracked), root=root)
     for rel_path in tracked:
         reason = _is_build_artifact(rel_path)
         if reason is not None:
@@ -999,6 +910,8 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.report_stdout:
         print(json.dumps(payload, indent=2))
+    elif report.vacuous is not None:
+        print(f"FAILED: {report.vacuous}")
     elif report.violations:
         print(f"Found {len(report.violations)} repo-hygiene violation(s):")
         for violation in report.violations:
@@ -1007,7 +920,7 @@ def main(argv: list[str] | None = None) -> int:
     else:
         print(f"No repo-hygiene violations found ({report.paths_checked} paths checked)")
 
-    return 1 if report.violations else 0
+    return 0 if report.passed else 1
 
 
 if __name__ == "__main__":

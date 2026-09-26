@@ -112,6 +112,7 @@ class Timeout:
 
     # Process management timeouts (seconds)
     PROCESS_KILL_WAIT = 2  # 2 seconds (wait for SIGTERM before SIGKILL)
+    PROCESS_DEATH_WAIT = 5  # 5 seconds (wait for a signalled process to exit)
 
     # Daemon startup polling (Plan 00100 Task 0.2)
     DAEMON_PID_POLL_INTERVAL_SEC = 0.1  # 100ms between PID-file checks

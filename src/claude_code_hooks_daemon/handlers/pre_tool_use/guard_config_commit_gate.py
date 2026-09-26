@@ -35,7 +35,13 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any, Final
 
-from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority, ToolName
+from claude_code_hooks_daemon.constants import (
+    HandlerID,
+    HandlerTag,
+    HookInputField,
+    Priority,
+    ToolName,
+)
 from claude_code_hooks_daemon.core import AcceptanceTest, Decision, GatingResult
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.project_context import ProjectContext
@@ -150,7 +156,7 @@ class GuardConfigCommitGateHandler(PreToolUseHandlerBase):
         self.recorded_reader: Callable[[RecordedSource], str | None] = self._read_recorded
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
-        if hook_input.get("tool_name") != ToolName.BASH:
+        if hook_input.get(HookInputField.TOOL_NAME) != ToolName.BASH:
             return False
         command = get_bash_command(hook_input) or ""
         return _commit_subcommand_index(tokenise_command(command)) is not None

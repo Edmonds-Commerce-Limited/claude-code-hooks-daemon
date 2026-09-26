@@ -16,6 +16,7 @@ Equal times PASS. Two entries in the same minute is ordinary — only a time
 EARLIER than one above it is a defect.
 """
 
+from datetime import date
 from typing import Final
 
 from claude_code_hooks_daemon.plan_qa.checks.common import (
@@ -29,6 +30,7 @@ from claude_code_hooks_daemon.plan_qa.model import (
     JOURNAL_CORRECTION_CATEGORY,
     PlanLocation,
     corrected_entry_labels,
+    cross_file_corrected_entries,
     journal_append_command,
     journal_correction_command,
     journal_entry_headings,
@@ -86,12 +88,22 @@ def _remediation(plan_dir: str, plan_number: int | None) -> str:
     )
 
 
-def _rule(context: CheckContext, target: JournalEditTarget, content: str) -> list[Finding]:
+def _rule(
+    context: CheckContext,
+    target: JournalEditTarget,
+    content: str,
+    extra_voided: frozenset[str] = frozenset(),
+) -> list[Finding]:
     headings = journal_entry_headings(content)
     # An entry a correction in this file names has a clock reading the file
     # itself declares wrong, so it sets no high-water mark. It stays where it
-    # is and still counts as an entry (ledger 00422 N3).
-    voided = corrected_entry_labels(headings)
+    # is and still counts as an entry (ledger 00422 N3). ``extra_voided`` adds
+    # labels a correction in a LATER day-file named via a cross-day REF
+    # (``YY-MM-DD/HH:MM``) — collected by the sweep across the whole plan,
+    # because ``mkplan.bash --journal`` can only append to TODAY's file, so a
+    # correction for an earlier one's entry never lands in that entry's own
+    # file.
+    voided = corrected_entry_labels(headings) | extra_voided
     regressions: list[str] = []
     highest, highest_label = -1, ""
     for heading in headings:
@@ -172,7 +184,17 @@ def _live_journal_targets(context: CheckContext) -> list[JournalEditTarget]:
 
 def _run_sweep(context: CheckContext) -> list[Finding]:
     findings: list[Finding] = []
-    for target in _live_journal_targets(context):
+    targets = _live_journal_targets(context)
+
+    # Two passes: a correction can live in a LATER day-file than the entry it
+    # names (``--ref YY-MM-DD/HH:MM``), because ``mkplan.bash --journal`` only
+    # ever appends to TODAY's file. So every target's headings are read once
+    # to build the whole plan's cross-day voids before any target is judged
+    # against them — a target read in isolation cannot see a correction filed
+    # in a day-file that sorts after it.
+    contents: dict[str, str] = {}
+    cross_voided: dict[date, set[str]] = {}
+    for target in targets:
         path = authored_path(context.project_root, target.rel_path)
         try:
             content = path.read_text(encoding="utf-8")
@@ -190,7 +212,19 @@ def _run_sweep(context: CheckContext) -> list[Finding]:
                 )
             )
             continue
-        findings.extend(_rule(context, target, content))
+        contents[target.rel_path] = content
+        for voided_date, label in cross_file_corrected_entries(journal_entry_headings(content)):
+            cross_voided.setdefault(voided_date, set()).add(label)
+
+    for target in targets:
+        target_content = contents.get(target.rel_path)
+        if target_content is None:
+            continue
+        parsed = parse_journal_dayfile_name(target.basename)
+        extra_voided = (
+            frozenset(cross_voided.get(parsed.date, set())) if parsed is not None else frozenset()
+        )
+        findings.extend(_rule(context, target, target_content, extra_voided))
     return findings
 
 

@@ -27,6 +27,7 @@ self-authorised exactly the disclosure this guard exists to prevent (the
 
 from __future__ import annotations
 
+import logging
 import re
 from typing import Any, Final
 
@@ -96,6 +97,8 @@ _CONTENT_REVEALING_PATTERNS: Final[tuple[tuple[str, str], ...]] = (
     ("grep/rg content search", r"\b(?:grep|egrep|fgrep|rg)\b"),
 )
 
+logger = logging.getLogger(__name__)
+
 # Label attached to a project-supplied ``extra_content_revealing_patterns``
 # entry in the deny reason -- these are raw regexes, not named shapes.
 _CUSTOM_SHAPE_LABEL: Final[str] = "custom content-revealing pattern"
@@ -110,13 +113,20 @@ def _compiled_shape_pattern(pattern: str) -> re.Pattern[str] | None:
 
     A pattern that fails to compile is a documented no-match (never crashes
     the handler) — cached as ``None`` so a broken client config is not
-    re-attempted on every event.
+    re-attempted on every event, and logged at WARNING once, when it is
+    cached, because the guard is then narrower than its config says.
     """
     if pattern in _COMPILED_SHAPE_CACHE:
         return _COMPILED_SHAPE_CACHE[pattern]
     try:
         compiled: re.Pattern[str] | None = re.compile(pattern, re.IGNORECASE)
-    except re.error:
+    except re.error as exc:
+        logger.warning(
+            "flaggable_content_channel_guard: pattern %r does not compile (%s) "
+            "and will never match",
+            pattern,
+            exc,
+        )
         compiled = None
     _COMPILED_SHAPE_CACHE[pattern] = compiled
     return compiled

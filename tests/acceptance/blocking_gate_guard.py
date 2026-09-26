@@ -20,20 +20,40 @@ guards nothing — which is why `parse_declared_blocking_gate_files` raises on a
 missing, duplicated or argument-less declaration rather than returning an empty
 set.
 
-The consequence is deliberate: any skip in those files now fails, including an
-environment skip such as "uv not installed". RELEASING.md declares *0 skipped*,
-and a gate that did not run is not a gate. The failure message carries the
-original reason so the fix is obvious.
+The consequence is deliberate wherever it applies: any skip in a declared file
+escalates to a failure, including an environment skip such as "uv not
+installed". RELEASING.md declares *0 skipped*, and a gate that did not run is
+not a gate. The failure message carries the original reason so the fix is
+obvious.
+
+**Escalation also requires ``HOOKS_DAEMON_RELEASE_GATE=1`` (Plan 00466 N39
+widened).** File identity alone used to be sufficient, which made ANY whole-
+suite run that happens to collect these files -- not only RELEASING.md's own
+Step 12.0 invocation and CI's daemon-backed run, both of which mean to be the
+release gate -- hard-ERROR on the ordinary "no daemon running" skip every
+other daemon-dependent test in the suite gets cleanly. The env var is the
+explicit signal that THIS invocation means to be held to *0 skipped*;
+RELEASING.md's own command block and the CI workflow's daemon-start step both
+set it, so neither loses today's coverage. Anything else -- an ad hoc
+``pytest tests/`` with no daemon running -- now gets the ordinary skip.
 """
 
 from __future__ import annotations
 
+import os
 import re
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
 import pytest
+
+#: Set by RELEASING.md Step 12.0's own command block, and by the CI workflow's
+#: daemon-start step -- the explicit signal that THIS pytest invocation means
+#: to be held to the release gate's "0 failed, 0 skipped" expectation. Its
+#: absence is what lets an ordinary ad hoc whole-suite run collect these same
+#: files without hard-erroring on a plain "no daemon running" skip.
+_RELEASE_GATE_ENV_VAR = "HOOKS_DAEMON_RELEASE_GATE"
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 RELEASING_MD = REPO_ROOT / "CLAUDE" / "development" / "RELEASING.md"
@@ -91,6 +111,28 @@ def skip_is_an_abort_condition(test_file: Path | str) -> bool:
     return Path(test_file).name in declared_blocking_gate_files()
 
 
+def release_gate_invocation() -> bool:
+    """True when THIS pytest invocation declares itself the release gate.
+
+    Checked against the EXACT declared value, not any truthy string -- a
+    stray ``true``/``yes`` set for an unrelated purpose must not silently
+    opt a run in to the release gate's stricter contract.
+    """
+    return os.environ.get(_RELEASE_GATE_ENV_VAR) == "1"
+
+
+def should_escalate_skip(test_file: Path | str) -> bool:
+    """Whether a skip of ``test_file`` should become a failure right now.
+
+    Both conditions are required: the file must be one of the declared
+    blocking gates (otherwise every skip anywhere would fail), AND this
+    invocation must have declared itself the release gate (otherwise an
+    ordinary ad hoc run gets the same harmless skip every other
+    daemon-dependent test in the suite gets).
+    """
+    return skip_is_an_abort_condition(test_file) and release_gate_invocation()
+
+
 def _skip_reason(longrepr: Any) -> str:
     """Recover the reason from a skipped report's `(path, lineno, reason)`."""
     reason = str(longrepr[2]) if isinstance(longrepr, tuple) else str(longrepr)
@@ -114,7 +156,7 @@ def blocking_gate_skip_failure_message(test_file: Path | str, skip_reason: str) 
 @pytest.hookimpl(wrapper=True)
 def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo[None]) -> Any:
     report = yield
-    if report.skipped and skip_is_an_abort_condition(item.path):
+    if report.skipped and should_escalate_skip(item.path):
         report.outcome = "failed"
         report.longrepr = blocking_gate_skip_failure_message(
             item.path, _skip_reason(report.longrepr)

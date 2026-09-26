@@ -36,6 +36,11 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 CHECKER = REPO_ROOT / "scripts" / "qa" / "check_british_english.py"
 _TIMEOUT_SECONDS = 120
 
+#: A clean, scanned document: an exemption test needs one, or it scans nothing
+#: and fails as an empty scan (00466 N26) instead of answering its question.
+_CLEAN_DOC = "README.md"
+_CLEAN_TEXT = "# Fixture\n\nNothing to see here.\n"
+
 
 def _load_checker_module() -> ModuleType:
     """Import the checker by path -- ``scripts/`` is not an installed package."""
@@ -139,6 +144,7 @@ def test_does_not_flag_historical_records(tmp_path: Path) -> None:
             "RELEASES/v1.0.0.md": "Changed the behavior.\n",
             "CHANGELOG.md": "Fixed color handling.\n",
             "CLAUDE/UPGRADES/v1/guide.md": "The old behavior was wrong.\n",
+            _CLEAN_DOC: _CLEAN_TEXT,
         },
     )
 
@@ -159,6 +165,7 @@ def test_does_not_flag_deliberate_fixtures(tmp_path: Path) -> None:
         {
             "CLAUDE/AcceptanceTests/fixtures/test-files/sample.md": "- color\n- behavior\n",
             "tests/fixtures/thing.md": "organize this\n",
+            _CLEAN_DOC: _CLEAN_TEXT,
         },
     )
 
@@ -181,12 +188,24 @@ def test_does_not_flag_vendored_upstream_documentation(tmp_path: Path) -> None:
         tmp_path,
         {
             "remote-docs/example.com/docs/caching.md": "Claude Code manages this behavior.\n",
+            _CLEAN_DOC: _CLEAN_TEXT,
         },
     )
 
     exit_code, report = _run_checker(repo)
 
     assert exit_code == 0, f"vendored doc flagged: {report['violations']}"
+
+
+def test_a_repo_with_nothing_to_check_is_not_a_pass(tmp_path: Path) -> None:
+    """00466 N26: a scan that examined no document has verified nothing."""
+    repo = _make_repo(tmp_path, {"CHANGELOG.md": "Fixed color handling.\n"})
+
+    exit_code, report = _run_checker(repo)
+
+    assert exit_code == 1
+    assert report["summary"]["passed"] is False
+    assert "found no tracked documents" in report["summary"]["vacuous_scan"]
 
 
 def test_word_list_is_imported_from_the_handler_not_copied() -> None:

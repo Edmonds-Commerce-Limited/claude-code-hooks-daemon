@@ -57,7 +57,7 @@ Usage:
 
 Exit codes:
     0 -- no unpinned fetch and no disabled protection in scanned code
-    1 -- at least one violation
+    1 -- at least one violation, or no file was checked
 """
 
 from __future__ import annotations
@@ -73,6 +73,8 @@ from pathlib import Path
 from typing import Final
 
 import yaml
+
+from claude_code_hooks_daemon.utils.scan_scope import vacuous_scan_failure, walk_files
 
 _REPO_ROOT: Final[Path] = Path(__file__).resolve().parents[2]
 _QA_OUTPUT_DIR: Final[Path] = _REPO_ROOT / "untracked" / "qa"
@@ -363,7 +365,7 @@ def _expansion_violations(relative: str, lines: list[str]) -> list[Violation]:
 def candidate_files(root: Path) -> list[Path]:
     """Every shipped file this Detector is able to judge."""
     found: list[Path] = []
-    for path in sorted(root.rglob("*")):
+    for path in walk_files(root):
         if not path.is_file():
             continue
         parts = path.relative_to(root).parts
@@ -498,11 +500,13 @@ def main() -> int:
     violations = unrecorded(root, DEFAULT_INVENTORY)
     files_checked = len(candidate_files(root))
     instances_recorded = len(scan(root))
+    vacuous = vacuous_scan_failure(examined=files_checked, noun="files", root=root)
 
     output = {
         "tool": "security_downgrade_flags",
         "summary": {
-            "passed": len(violations) == 0,
+            "passed": len(violations) == 0 and vacuous is None,
+            "vacuous_scan": vacuous,
             "total_violations": len(violations),
             "files_checked": files_checked,
             "instances_recorded": instances_recorded,
@@ -519,7 +523,9 @@ def main() -> int:
         output_file.parent.mkdir(parents=True, exist_ok=True)
         output_file.write_text(json.dumps(output, indent=2))
 
-    if violations:
+    if vacuous is not None:
+        print(f"FAILED: {vacuous}")
+    elif violations:
         print(f"Found {len(violations)} unrecorded finding(s) across {files_checked} files:")
         for violation in violations:
             print(f"  {violation.path} [{violation.rule}]")
@@ -534,7 +540,7 @@ def main() -> int:
             f"{files_checked} files checked)"
         )
 
-    return 1 if violations else 0
+    return 1 if violations or vacuous is not None else 0
 
 
 if __name__ == "__main__":

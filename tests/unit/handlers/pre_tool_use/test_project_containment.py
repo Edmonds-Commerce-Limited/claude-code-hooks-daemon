@@ -532,6 +532,67 @@ class TestTheClaudeHomeDirectoryIsAllowed:
         with patch.dict("os.environ", {"CLAUDE_CONFIG_DIR": str(tmp_path / "claude-home")}):
             assert handler.matches(_write("/tmp/notes.md")) is True
 
+    def test_the_home_comes_from_the_shared_config_dir_resolver(
+        self, handler: ProjectContainmentHandler, tmp_path: Path
+    ) -> None:
+        """Plan 00468 G13: one resolver answers "where is the Claude home?" for
+        every handler, so this one cannot drift from the agent resolver."""
+        claude_home = tmp_path / "resolved-home"
+        with patch(
+            "claude_code_hooks_daemon.handlers.pre_tool_use.project_containment.claude_config_dir",
+            return_value=claude_home,
+        ):
+            assert handler.matches(_write(str(claude_home / "plugins" / "data" / "x"))) is False
+
+
+class TestTheSessionsOwnClaudeHome:
+    """Plan 00468 G10: the daemon's environment is fixed at start, so a
+    session run with a different ``CLAUDE_CONFIG_DIR`` or ``HOME`` has its own
+    Claude home. The payload names that session's transcript, which Claude
+    Code keeps at ``<config dir>/projects/<name>/<session>.jsonl``, so the
+    session's home is read from it, per call."""
+
+    @staticmethod
+    def _in_session(hook_input: dict[str, Any], transcript: Path) -> dict[str, Any]:
+        hook_input["transcript_path"] = str(transcript)
+        return hook_input
+
+    def test_the_session_home_named_by_its_transcript_is_permitted(
+        self, handler: ProjectContainmentHandler, tmp_path: Path
+    ) -> None:
+        session_home = tmp_path / "session-home"
+        transcript = session_home / "projects" / "-repo" / "abc.jsonl"
+        target = session_home / "plugins" / "data" / "p" / "NOTE.md"
+        with patch.dict("os.environ", {"CLAUDE_CONFIG_DIR": str(tmp_path / "daemon-home")}):
+            assert handler.matches(self._in_session(_write(str(target)), transcript)) is False
+
+    def test_a_transcript_of_another_shape_grants_nothing(
+        self, handler: ProjectContainmentHandler, tmp_path: Path
+    ) -> None:
+        """Only the exact ``<home>/projects/<name>/<file>.jsonl`` shape names a
+        home; anything else would turn an arbitrary directory into one."""
+        elsewhere = tmp_path / "elsewhere"
+        transcript = elsewhere / "logs" / "abc.jsonl"
+        target = elsewhere / "NOTE.md"
+        with patch.dict("os.environ", {"CLAUDE_CONFIG_DIR": str(tmp_path / "daemon-home")}):
+            assert handler.matches(self._in_session(_write(str(target)), transcript)) is True
+
+    def test_a_relative_transcript_path_grants_nothing(
+        self, handler: ProjectContainmentHandler, tmp_path: Path
+    ) -> None:
+        transcript = Path("home") / "projects" / "-repo" / "abc.jsonl"
+        with patch.dict("os.environ", {"CLAUDE_CONFIG_DIR": str(tmp_path / "daemon-home")}):
+            assert handler.matches(self._in_session(_write("/tmp/x.md"), transcript)) is True
+
+    def test_refusing_the_claude_home_refuses_the_sessions_too(
+        self, handler: ProjectContainmentHandler, tmp_path: Path
+    ) -> None:
+        handler._allow_claude_home = False
+        session_home = tmp_path / "session-home"
+        transcript = session_home / "projects" / "-repo" / "abc.jsonl"
+        target = session_home / "settings.json"
+        assert handler.matches(self._in_session(_write(str(target)), transcript)) is True
+
 
 _SCRATCHPAD = "/tmp/claude-0/-workspace/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa/scratchpad"
 

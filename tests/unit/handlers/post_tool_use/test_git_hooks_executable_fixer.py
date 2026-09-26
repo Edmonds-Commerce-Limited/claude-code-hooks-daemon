@@ -10,6 +10,7 @@ from pathlib import Path
 
 import pytest
 
+from claude_code_hooks_daemon.constants.priority import Priority
 from claude_code_hooks_daemon.core import Decision, HookResult
 from claude_code_hooks_daemon.handlers.post_tool_use.git_hooks_executable_fixer import (
     GitHooksExecutableFixerHandler,
@@ -58,7 +59,7 @@ class TestGitHooksExecutableFixerHandlerInit:
         assert handler.name == "git-hooks-executable-fixer"
 
     def test_priority(self, handler):
-        assert handler.priority == 27
+        assert handler.priority == Priority.GIT_HOOKS_EXECUTABLE_FIXER
 
     def test_non_terminal(self, handler):
         assert handler.terminal is False

@@ -525,7 +525,7 @@ handlers:
       priority: 38
       options:
         mode: block_once       # advisory | block_once | strict
-        no_lsp_mode: block     # block | advisory | disable
+        no_lsp_mode: advisory  # advisory | block | disable (no enabled plugin serves the file type)
 
     reference_repo_freshness:  # Gates a READ of a stale reference clone (Plan 00401)
       enabled: true            # Cache-only: this handler never touches the network
@@ -549,6 +549,10 @@ handlers:
     agent_isolation_advisor:  # Advises worktree isolation for concurrent agents
       enabled: true
       priority: 46
+
+    installed_plugin_edit_advisor:  # Advises when a write lands in an installed Claude Code plugin (Plan 00468 G16)
+      enabled: true
+      priority: 42
 
     dispatch_declaration:  # Advises a file-handoff declaration on Task dispatch (Plan 00307)
       enabled: true
@@ -657,6 +661,10 @@ handlers:
       enabled: true
       priority: 60
 
+    plan_status_snapshot:  # Dogfood: PreToolUse ground-truth sensor feeding goal_injection (Plan 00466 RV3-n5)
+      enabled: true  # On by default (opt-out) elsewhere too -- RV6-n2: ships enabled: true, not opt-in
+      priority: 30
+
   # PostToolUse handlers (run after tool execution)
   post_tool_use:
     validate_eslint_on_write:  # Runs ESLint after file writes
@@ -712,21 +720,17 @@ handlers:
           - "/untracked/qa/**"
           - "/untracked/worktrees/**"
 
-    markdown_table_formatter:  # Auto-format markdown tables via mdformat + mdformat-gfm
+    git_hooks_executable_fixer:  # Auto-chmod +x git hooks git skipped as non-executable
       enabled: true
       priority: 26
 
-    git_hooks_executable_fixer:  # Auto-chmod +x git hooks git skipped as non-executable
+    background_process_tracker:  # Tracks backgrounded processes; advises harvest-background + watchdog cron (never kills)
       enabled: true
       priority: 27
 
-    background_process_tracker:  # Tracks backgrounded processes; advises harvest-background + watchdog cron (never kills)
-      enabled: true
-      priority: 28
-
     command_hints:  # Generic config-driven advisory reminder after a configured command (Plan 00212)
       enabled: true
-      priority: 29
+      priority: 28
       # options:
       #   mode: additive          # additive (default) | replace
       #   hints:
@@ -738,12 +742,12 @@ handlers:
 
     recovery_cron_advisor:  # Advises on failsafe recovery cron lifecycle (creation, progress, completion)
       enabled: true         # On by default everywhere (opt-out); also the switch for failsafe_cron_session_advisor
-      priority: 30
+      priority: 29
       # progress_cooldown_events: 20  # Events between repeat progress reminders (default: 20)
 
     goal_injection:  # Dogfood: write <session>.goal-intent when a plan flips to In Progress (Plan 00269)
       enabled: true  # Opt-in (false) elsewhere; harmless without an armed supervisor
-      priority: 31
+      priority: 30  # Ledger 00466 RV6-M1: MUST stay below markdown_table_formatter's priority
       # options:
       #   mode: additive                  # additive (default) | replace (fixed header line always kept)
       #   once_per_plan_per_session: true
@@ -752,6 +756,10 @@ handlers:
       #       enabled: true
       #     - id: project-motto
       #       text: "All findings are logged to {plan_path}/REPORTS/."
+
+    markdown_table_formatter:  # Auto-format markdown tables via mdformat + mdformat-gfm
+      enabled: true
+      priority: 31  # Ledger 00466 RV6-M1: MUST stay above goal_injection's priority
 
     budget_exhaustion_detector:  # Dogfood: advisory on budget/quota-exhaustion tool-response messaging (Plan 00315)
       enabled: true  # On by default (opt-out) everywhere; advisory-only, never blocks.
@@ -796,6 +804,13 @@ handlers:
         # backup at settings.json.bak.pre-bash-migration. Set false to
         # opt out (e.g. if your team manages settings.json by hand).
         auto_migrate_settings: true
+
+    plugin_hooks_advisor:  # Names enabled Claude Code plugins that ship hooks (Plan 00468 G1, G2)
+      enabled: true
+      priority: 51
+      options:
+        # Plugin ids (name@marketplace) whose hooks the user has accepted.
+        acknowledged_plugins: []
 
     optimal_config_checker:  # Checks Claude Code env for optimal settings
       enabled: true
@@ -1151,9 +1166,9 @@ handlers:
           default_mode: symlink
           entries:
             # The secret word list. Gitignored, so a worktree lacks it — and
-            # sensitive_content does not fail without it, it goes silently
-            # INERT. Symlinked so an update to the list reaches every worktree
-            # at once; nothing writes to it.
+            # sensitive_content does not fail without it, it goes INERT (the
+            # hygiene advisory reports that once). Symlinked so an update to
+            # the list reaches every worktree at once; nothing writes to it.
             #
             # `optional` because a checkout that never configured a word list
             # legitimately has no such file, and seeding used to treat that as

@@ -222,6 +222,86 @@ class TestJsonOutput:
         assert data["violations"] == []
 
 
+def _scan(scan_dir: Path, output: Path) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [
+            sys.executable,
+            str(AUDIT_SHELL_SCRIPT),
+            "--json",
+            "--scan-dir",
+            str(scan_dir),
+            "--output",
+            str(output),
+        ],
+        capture_output=True,
+        text=True,
+    )
+
+
+class TestScansFromAnyCheckoutLocation:
+    """00466 N26: excluded names are judged below the scan root, never above it.
+
+    Matched against the absolute path, ``untracked`` excluded every script in a
+    checkout under ``untracked/worktrees/``, and the audit passed on nothing.
+    """
+
+    def test_a_scan_root_under_untracked_still_finds_its_scripts(self, tmp_path: Path) -> None:
+        scripts_dir = tmp_path / "untracked" / "worktrees" / "wt" / "scripts"
+        scripts_dir.mkdir(parents=True)
+        (scripts_dir / "violator.sh").write_text("#!/bin/bash\nchmod +x t 2>/dev/null || true\n")
+        output_json = tmp_path / "shell_audit.json"
+
+        result = _scan(scripts_dir, output_json)
+
+        summary = json.loads(output_json.read_text())["summary"]
+        assert result.returncode == 1
+        assert summary["total_violations"] == 1
+        assert summary["files_scanned"] == 1
+
+    def test_an_excluded_directory_below_the_root_is_still_skipped(self, tmp_path: Path) -> None:
+        scripts_dir = tmp_path / "scripts"
+        (scripts_dir / "untracked").mkdir(parents=True)
+        (scripts_dir / "untracked" / "violator.sh").write_text(
+            "#!/bin/bash\nchmod +x t 2>/dev/null || true\n"
+        )
+        (scripts_dir / "clean.sh").write_text("#!/bin/bash\nset -euo pipefail\n")
+        output_json = tmp_path / "shell_audit.json"
+
+        result = _scan(scripts_dir, output_json)
+
+        summary = json.loads(output_json.read_text())["summary"]
+        assert result.returncode == 0, result.stderr
+        assert summary["files_scanned"] == 1
+
+    def test_examining_nothing_where_scripts_exist_fails(self, tmp_path: Path) -> None:
+        scripts_dir = tmp_path / "scripts"
+        (scripts_dir / "untracked").mkdir(parents=True)
+        (scripts_dir / "untracked" / "only.sh").write_text("#!/bin/bash\nset -euo pipefail\n")
+        output_json = tmp_path / "shell_audit.json"
+
+        result = _scan(scripts_dir, output_json)
+
+        summary = json.loads(output_json.read_text())["summary"]
+        assert result.returncode == 1
+        assert summary["passed"] is False
+        assert summary["files_scanned"] == 0
+        assert summary["vacuous_scan"]
+
+    def test_a_scan_of_no_scripts_fails(self, tmp_path: Path) -> None:
+        """00466 N21: an audit of no scripts is no evidence of clean scripts."""
+        scripts_dir = tmp_path / "scripts"
+        scripts_dir.mkdir()
+        output_json = tmp_path / "shell_audit.json"
+
+        result = _scan(scripts_dir, output_json)
+
+        summary = json.loads(output_json.read_text())["summary"]
+        assert result.returncode == 1
+        assert summary["passed"] is False
+        assert summary["files_scanned"] == 0
+        assert summary["vacuous_scan"]
+
+
 class TestRealRepoScan:
     """Self-scan: once markers are added, the repo's own scripts must pass.
 
@@ -300,3 +380,103 @@ class TestDetectsBootstrapReexecDollar0Source:
             "Skill scripts use $0-relative path resolution after a "
             f"self-bootstrap re-exec stanza. Offenders: {offenders}"
         )
+
+
+class TestDetectsHostilePathUnguardedCommand:
+    """Plan 00466 N30 DBF static complement: scripts that must survive a
+    hostile/stripped PATH (`resolve_venv.sh`, `portable_time.sh`,
+    `venv_bootstrap.sh`, `scripts/install/*.sh`) calling `date` or `pgrep`
+    directly, with no ``command -v`` guard anywhere in the enclosing
+    function, is flagged. This is the STATIC complement to the dynamic
+    empty-PATH integration tests (`tests/integration/
+    test_venv_bootstrap_hostile_path_epoch.py` and siblings) -- per the
+    brief, a static rule must not be the ONLY guard, so this narrows to a
+    declared file list rather than trying to judge every external command
+    in every script.
+    """
+
+    def test_flags_unguarded_date_in_a_hostile_path_file(self) -> None:
+        src = (
+            "#!/bin/bash\n"
+            "_x() {\n"
+            '    if [ "$(date +%s)" -ge "$deadline" ]; then\n'
+            "        echo late\n"
+            "    fi\n"
+            "}\n"
+        )
+        violations = audit_text(src, "scripts/lib/resolve_venv.sh")
+        assert "hostile-path-unguarded-command" in _rules(violations)
+
+    def test_flags_unguarded_pgrep_in_a_hostile_path_file(self) -> None:
+        src = '#!/bin/bash\n_x() {\n    pgrep -f "claude_code_hooks_daemon" > /dev/null\n}\n'
+        violations = audit_text(src, "scripts/install/daemon_control.sh")
+        assert "hostile-path-unguarded-command" in _rules(violations)
+
+    def test_allows_date_guarded_by_command_dash_v_in_the_same_function(self) -> None:
+        src = (
+            "#!/bin/bash\n"
+            "_x() {\n"
+            "    if command -v date > /dev/null; then\n"
+            "        date +%s\n"
+            "    fi\n"
+            "}\n"
+        )
+        violations = audit_text(src, "scripts/lib/resolve_venv.sh")
+        assert "hostile-path-unguarded-command" not in _rules(violations)
+
+    def test_allows_pgrep_guarded_by_command_dash_v_in_the_same_function(self) -> None:
+        src = (
+            "#!/bin/bash\n"
+            "_x() {\n"
+            "    if command -v pgrep > /dev/null; then\n"
+            "        pgrep -f pattern > /dev/null\n"
+            "    fi\n"
+            "}\n"
+        )
+        violations = audit_text(src, "scripts/install/daemon_control.sh")
+        assert "hostile-path-unguarded-command" not in _rules(violations)
+
+    def test_ignores_files_outside_the_hostile_path_list(self) -> None:
+        """The same unguarded `date` call outside the declared file list is
+        not this rule's concern -- it is not a script this class applies
+        to."""
+        src = "#!/bin/bash\n_x() {\n    date +%s\n}\n"
+        violations = audit_text(src, "scripts/qa/run_lint.sh")
+        assert "hostile-path-unguarded-command" not in _rules(violations)
+
+    def test_does_not_flag_date_as_a_hyphen_bounded_substring_of_a_word(self) -> None:
+        """ "up-to-date" contains "date" as a hyphen-bounded \\b word --
+        `\\b` alone treats hyphens as boundaries, so a naive word match
+        would misfire on ordinary prose/log text that is not a command
+        invocation at all (the real regression this caught:
+        scripts/install/venv.sh's "venv up-to-date at $venv_path")."""
+        src = '#!/bin/bash\n_x() {\n    print_verbose "venv up-to-date at $venv_path"\n}\n'
+        violations = audit_text(src, "scripts/install/venv.sh")
+        assert "hostile-path-unguarded-command" not in _rules(violations)
+
+    def test_marker_with_reason_suppresses_the_violation(self) -> None:
+        src = (
+            "#!/bin/bash\n"
+            "_x() {\n"
+            "    date +%s  # shell-audit: allow -- diagnostic log line only, not a decision\n"
+            "}\n"
+        )
+        violations = audit_text(src, "scripts/venv_bootstrap.sh")
+        assert "hostile-path-unguarded-command" not in _rules(violations)
+
+    def test_repo_hostile_path_files_are_clean(self) -> None:
+        """Self-scan: the real, fixed files must carry no unguarded date/pgrep."""
+        targets = [
+            REPO_ROOT / "scripts" / "lib" / "resolve_venv.sh",
+            REPO_ROOT / "scripts" / "lib" / "portable_time.sh",
+            REPO_ROOT / "scripts" / "venv_bootstrap.sh",
+            *sorted((REPO_ROOT / "scripts" / "install").glob("*.sh")),
+        ]
+        violations: list[Violation] = []
+        for target in targets:
+            assert target.is_file(), target
+            violations.extend(audit_file(target))
+        offenders = [
+            f"{v.file}:{v.line}" for v in violations if v.rule == "hostile-path-unguarded-command"
+        ]
+        assert offenders == [], f"Unguarded date/pgrep in hostile-PATH scripts: {offenders}"

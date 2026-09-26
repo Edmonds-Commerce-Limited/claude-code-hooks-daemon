@@ -47,6 +47,13 @@ class SkillOpportunityDetectorHandler(SessionStartHandlerBase):
             ],
         )
         self.config: dict[str, Any] = {"enabled": True}
+        # Options, injected by the registry as self._<option>. None means
+        # unset, and SkillScanOptions.from_dict supplies the default.
+        self._check_interval_days: object = None
+        self._transcript_window_days: object = None
+        self._max_prompts: object = None
+        self._extra_exclude_patterns: object = None
+        self._transcript_dir: object = None
 
     def get_default_enabled(self) -> bool:
         """Opt-in: the scan reads this machine's session transcripts."""
@@ -57,8 +64,21 @@ class SkillOpportunityDetectorHandler(SessionStartHandlerBase):
         self.config.update(config)
 
     def _options(self) -> SkillScanOptions:
-        raw = self.config.get("options")
-        return SkillScanOptions.from_dict(raw if isinstance(raw, dict) else {})
+        """The registry-delivered options (Plan 00466 N17).
+
+        These were read from ``self.config["options"]``, which only
+        ``configure()`` fills and production never calls, so a configured
+        cadence was ignored.
+        """
+        return SkillScanOptions.from_dict(
+            {
+                "check_interval_days": self._check_interval_days,
+                "transcript_window_days": self._transcript_window_days,
+                "max_prompts": self._max_prompts,
+                "extra_exclude_patterns": self._extra_exclude_patterns,
+                "transcript_dir": self._transcript_dir,
+            }
+        )
 
     def _state_dir(self) -> Path:
         """The daemon untracked dir holding the TTL state (never /tmp, B108)."""

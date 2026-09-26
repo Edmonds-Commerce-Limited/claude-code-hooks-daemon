@@ -76,11 +76,13 @@ SECONDS_PER_DAY: Final[int] = 86_400
 REPORTS_DIR_NAME: Final[str] = "reports"
 REPORT_FILE_SUFFIX: Final[str] = "-skill-opportunities.md"
 
-#: Claude Code's per-project transcript layout under the user's home.
-CLAUDE_PROJECTS_SUBDIR: Final[tuple[str, str]] = (".claude", "projects")
+#: Transcript files inside Claude Code's per-project directory.
 TRANSCRIPT_GLOB: Final[str] = "*.jsonl"
 
 #: Project skill/command inventory locations (existing-skill suppression).
 SKILLS_SUBDIR: Final[tuple[str, str]] = (".claude", "skills")
 COMMANDS_SUBDIR: Final[tuple[str, str]] = (".claude", "commands")
+#: The same two, relative to the Claude config dir, for personal ones.
+USER_SKILLS_DIRNAME: Final[str] = "skills"
+USER_COMMANDS_DIRNAME: Final[str] = "commands"
 MARKDOWN_SUFFIX: Final[str] = ".md"

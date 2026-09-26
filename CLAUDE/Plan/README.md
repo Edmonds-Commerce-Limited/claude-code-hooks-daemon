@@ -4,6 +4,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
+- [00472: subagent model tier selection](00472-subagent-model-tier-selection/PLAN.md) - In Progress (owner request, not urgent: a top-tier main thread often gives subagents the top tier too, where Sonnet or Opus would do; record each dispatch's model and advise a cheaper tier when it fits, the model-choice twin of 00471 and a neighbour of 00470's orchestrator-model choice)
+
 - [00471: subagent token budget protection](00471-subagent-token-budget-protection/PLAN.md) - In Progress (owner request after a usage-limit burn: subagents compacted only at about 570k tokens, finished agents were resumed with thousands of prior messages, and about nine Opus agents ran at once; the daemon sees every Agent, SendMessage and tool call plus the transcript's usage, so it can measure and bound the spend)
 
 - [00470: persistent session optimisation](00470-persistent-session-optimisation/PLAN.md) - Not Started (owner request: the always-on issue-monitoring server session is the dogfood; cron refresh before expiry, usage-limit and restart recovery from a durable queue, and a measured orchestrator-model choice)
@@ -286,7 +288,7 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 - **Completed**: 407 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 41 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 42 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 
