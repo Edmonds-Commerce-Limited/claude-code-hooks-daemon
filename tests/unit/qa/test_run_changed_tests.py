@@ -517,11 +517,58 @@ class TestDeclaredRules:
             {"glob": "*.md", "tools": ["docs_qa"], "why": "w", "surprise": 1},
             {"glob": "*.md", "path_glob": "docs/*.md", "tools": ["docs_qa"], "why": "w"},
             {"path_glob": "", "tools": ["docs_qa"], "why": "w"},
+            {"path_glob": "CLAUDE/**/*.md", "tools": ["docs_qa"], "why": "w", "path_exclude": "x"},
+            {
+                "path_glob": "CLAUDE/**/*.md",
+                "tools": ["docs_qa"],
+                "why": "w",
+                "path_exclude": [""],
+            },
         ],
     )
     def test_a_malformed_rule_is_reported(self, entry: dict[str, Any]) -> None:
         _, problems = changed_tests.parse_declared_rules({"rules": [entry]})
         assert problems
+
+    def test_path_exclude_stands_a_broad_glob_down_over_the_excluded_paths(self) -> None:
+        """A ledger under an excluded subtree is NOT covered, an ordinary page still is.
+
+        Plan 00463 gate fix 2: `test_documented_hook_probes_are_marked.py`
+        globs `CLAUDE/**/*.md` but then drops `CLAUDE/Plan/` and
+        `CLAUDE/UPGRADES/` itself (its own `_EXCLUDED_PREFIXES`); the declared
+        rule must mirror that or a plan ledger reads as `tested`, not `docs`.
+        """
+        rules = _rules(
+            {
+                "path_glob": "CLAUDE/**/*.md",
+                "path_exclude": ["CLAUDE/Plan/**", "CLAUDE/UPGRADES/**"],
+                "tests": ["tests/integration/test_probes.py"],
+                "why": "it checks every probe example in these documents",
+            }
+        )
+        (rule,) = rules
+        assert rule.matches("CLAUDE/Architecture/StatusLine.md") is True
+        assert rule.matches("CLAUDE/Plan/00466-x/NIGGLES.md") is False
+        assert rule.matches("CLAUDE/Plan/00466-x/JOURNAL/00466-Journal-26-01-01.md") is False
+        assert rule.matches("CLAUDE/UPGRADES/UNRELEASED/release-notes/1-x.md") is False
+
+    def test_a_second_rule_re_includes_a_path_the_first_excludes(self) -> None:
+        """`_INCLUDED_DESPITE_PREFIX` re-includes the upgrade-template guide; two ORed rules do too."""
+        rules = _rules(
+            {
+                "path_glob": "CLAUDE/**/*.md",
+                "path_exclude": ["CLAUDE/UPGRADES/**"],
+                "tests": ["tests/integration/test_probes.py"],
+                "why": "it checks every probe example in these documents",
+            },
+            {
+                "path_glob": "CLAUDE/UPGRADES/upgrade-template/**/*.md",
+                "tests": ["tests/integration/test_probes.py"],
+                "why": "re-included despite the exclusion above",
+            },
+        )
+        path = "CLAUDE/UPGRADES/upgrade-template/PLAN.md"
+        assert any(rule.matches(path) for rule in rules)
 
     @pytest.mark.parametrize(
         ("pattern", "path", "matches"),

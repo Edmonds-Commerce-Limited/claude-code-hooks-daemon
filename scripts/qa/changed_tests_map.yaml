@@ -31,8 +31,15 @@ rules:
     why: the first checks every command in these documents (DOCUMENT_GLOBS);
       the second checks every probe example is marked
   - path_glob: "CLAUDE/**/*.md"
+    path_exclude: ["CLAUDE/Plan/**", "CLAUDE/UPGRADES/**"]
     tests: [tests/integration/test_documented_hook_probes_are_marked.py]
-    why: it checks every probe example in these documents is marked
+    why: it checks every probe example in these documents is marked, but its
+      own _EXCLUDED_PREFIXES drops CLAUDE/Plan/ and CLAUDE/UPGRADES/ (they
+      record what was run, not something to rewrite)
+  - path_glob: "CLAUDE/UPGRADES/upgrade-template/**/*.md"
+    tests: [tests/integration/test_documented_hook_probes_are_marked.py]
+    why: its _INCLUDED_DESPITE_PREFIX re-includes the upgrade-guide template
+      despite the CLAUDE/UPGRADES/ exclusion above
   - path_glob: ".claude/agents/*.md"
     tests: [tests/integration/test_documented_hook_probes_are_marked.py]
     why: it checks every probe example in these documents is marked

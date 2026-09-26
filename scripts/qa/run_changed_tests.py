@@ -135,11 +135,12 @@ REASON_STILL_REFERENCED: Final[str] = "deleted-but-referenced"
 _KEY_RULES: Final[str] = "rules"
 _KEY_GLOB: Final[str] = "glob"
 _KEY_PATH_GLOB: Final[str] = "path_glob"
+_KEY_PATH_EXCLUDE: Final[str] = "path_exclude"
 _KEY_TESTS: Final[str] = "tests"
 _KEY_TOOLS: Final[str] = "tools"
 _KEY_WHY: Final[str] = "why"
 _RULE_KEYS: Final[frozenset[str]] = frozenset(
-    {_KEY_GLOB, _KEY_PATH_GLOB, _KEY_TESTS, _KEY_TOOLS, _KEY_WHY}
+    {_KEY_GLOB, _KEY_PATH_GLOB, _KEY_PATH_EXCLUDE, _KEY_TESTS, _KEY_TOOLS, _KEY_WHY}
 )
 #: A ``path_glob`` segment matching any number of directories, as in ``Path.glob``.
 _ANY_DEPTH: Final[str] = "**"
@@ -166,6 +167,13 @@ class DeclaredRule:
     ``glob`` is fnmatch (``*`` crosses ``/``); with ``path_style`` it is a
     ``Path.glob`` pattern instead, so a rule can name exactly the files a test
     reads by glob (``CLAUDE/*.md`` is one directory, ``docs/**/*.md`` any depth).
+
+    ``excludes`` are ``Path.glob``-style patterns a matching path must not
+    also match: a reader can glob a broad tree and then drop a subtree of its
+    own (``_EXCLUDED_PREFIXES``), and the declared rule has to mirror that
+    drop or a file the reader never touches is wrongly covered. A second rule
+    re-includes a path the first excludes, the same way the reader's own
+    re-inclusion list does (rules OR together).
     """
 
     glob: str
@@ -173,9 +181,12 @@ class DeclaredRule:
     tools: tuple[str, ...]
     why: str
     path_style: bool = False
+    excludes: tuple[str, ...] = ()
 
     def matches(self, relative: str) -> bool:
         """Whether this rule covers ``relative``."""
+        if any(path_glob_matches(relative, pattern) for pattern in self.excludes):
+            return False
         if self.path_style:
             return path_glob_matches(relative, self.glob)
         return fnmatch.fnmatch(relative, self.glob)
@@ -366,6 +377,7 @@ def parse_declared_rules(raw: object) -> tuple[list[DeclaredRule], list[str]]:
         why = entry.get(_KEY_WHY)
         tests = _text_list(entry.get(_KEY_TESTS, []))
         tools = _text_list(entry.get(_KEY_TOOLS, []))
+        excludes = _text_list(entry.get(_KEY_PATH_EXCLUDE, []))
         if unknown:
             problems.append(f"rule {position}: unknown key(s) {', '.join(unknown)}")
         elif path_style and _KEY_GLOB in entry:
@@ -378,8 +390,11 @@ def parse_declared_rules(raw: object) -> tuple[list[DeclaredRule], list[str]]:
             )
         elif not isinstance(why, str) or not why.strip():
             problems.append(f"rule {position}: `{_KEY_WHY}` must say what covers these files")
-        elif tests is None or tools is None:
-            problems.append(f"rule {position}: `{_KEY_TESTS}`/`{_KEY_TOOLS}` must be string lists")
+        elif tests is None or tools is None or excludes is None:
+            problems.append(
+                f"rule {position}: `{_KEY_TESTS}`/`{_KEY_TOOLS}`/`{_KEY_PATH_EXCLUDE}` "
+                "must be string lists"
+            )
         elif bool(tests) == bool(tools):
             problems.append(
                 f"rule {position}: give exactly one of `{_KEY_TESTS}` or `{_KEY_TOOLS}`"
@@ -391,6 +406,7 @@ def parse_declared_rules(raw: object) -> tuple[list[DeclaredRule], list[str]]:
                     tests=tests,
                     tools=tools,
                     why=why.strip(),
+                    excludes=excludes,
                     path_style=path_style,
                 )
             )
