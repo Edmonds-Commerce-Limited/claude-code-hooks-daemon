@@ -31,6 +31,7 @@ from claude_code_hooks_daemon.daemon.synthetic_traffic import (
     PLAYBOOK_PROBE,
     SYNTHETIC_SOURCE_FIELD,
 )
+from claude_code_hooks_daemon.utils.path_containment import path_is_relative_to
 
 #: How long a probe dispatch may take before the harness gives up on the hook.
 #: It must outlast the SLOWEST thing a handler may legitimately do, or the
@@ -194,7 +195,7 @@ def vet_probe_commands(
                 resolved = project_root / resolved
             probe_root = project_root.joinpath(*_PROBE_ROOT)
             try:
-                inside = resolved.resolve().is_relative_to(probe_root.resolve())
+                inside = path_is_relative_to(resolved.resolve(), probe_root.resolve())
             except OSError as exc:
                 # A path the filesystem cannot resolve is its own refusal, not a
                 # quiet vote for "outside": the two have different remedies, and

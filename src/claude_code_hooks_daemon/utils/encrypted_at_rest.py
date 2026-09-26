@@ -40,6 +40,8 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Final
 
+from claude_code_hooks_daemon.utils.path_containment import path_is_relative_to
+
 logger = logging.getLogger(__name__)
 
 #: Largest file inspected. The armour is hex of (mostly) hex, so roughly four
@@ -127,7 +129,7 @@ def _read_bounded(
         return None
     try:
         real = Path(os.path.realpath(path))
-        if not real.is_relative_to(os.path.realpath(project_root)):
+        if not path_is_relative_to(real, os.path.realpath(project_root)):
             return None
         before = os.lstat(real)
         if not stat.S_ISREG(before.st_mode) or before.st_size > MAX_INSPECTED_BYTES:

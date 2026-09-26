@@ -402,6 +402,7 @@ def check_snippet(rel_file: str, start_line: int, source: str) -> list[Violation
 
 def _documents(root: Path) -> list[Path]:
     _ensure_src_on_path()
+    from claude_code_hooks_daemon.utils.path_containment import path_relative_to
     from claude_code_hooks_daemon.utils.scan_scope import walk_files
 
     listed = [path for tree in _SCANNED_TREES for path in walk_files(root / tree, _MARKDOWN_NAME)]
@@ -410,7 +411,7 @@ def _documents(root: Path) -> list[Path]:
     for path in listed:
         if not path.is_file():
             continue
-        if any(part in _EXCLUDED_PARTS for part in path.relative_to(root).parts):
+        if any(part in _EXCLUDED_PARTS for part in path_relative_to(path, root).parts):
             continue
         seen.add(path)
     return sorted(seen)
@@ -418,9 +419,12 @@ def _documents(root: Path) -> list[Path]:
 
 def scan(root: Path) -> list[Violation]:
     """Scan every in-scope document and return all violations."""
+    _ensure_src_on_path()
+    from claude_code_hooks_daemon.utils.path_containment import path_relative_to
+
     violations: list[Violation] = []
     for path in _documents(root):
-        rel = str(path.relative_to(root))
+        rel = str(path_relative_to(path, root))
         text = path.read_text(encoding="utf-8", errors="replace")
         for block in extract_python_blocks(text):
             violations.extend(check_snippet(rel, block.start_line, block.source))

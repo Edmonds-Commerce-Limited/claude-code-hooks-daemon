@@ -112,6 +112,29 @@ class TestSummarizeTestsNamesFailures:
         assert summary.count(_FAILED_SECTION_MARKER) == 1
 
 
+class TestSummarizeTestsNamesAnUnexplainedFailure:
+    """00466 N118: a red run with 0 failed and 0 errored must still say why."""
+
+    def test_a_coverage_threshold_miss_is_shown_as_the_cause(self) -> None:
+        llm_qa = _load_llm_qa()
+        report = _report([], failed=0)
+        report["summary"][
+            "unnamed_failure_reason"
+        ] = "FAIL Required test coverage of 95.0% not reached. Total coverage: 94.99%"
+
+        summary = llm_qa._summarize_tests(report)
+
+        assert "cause:" in summary
+        assert "94.99%" in summary
+
+    def test_a_clean_run_shows_no_cause_line(self) -> None:
+        llm_qa = _load_llm_qa()
+
+        summary = llm_qa._summarize_tests(_report([], failed=0))
+
+        assert "cause:" not in summary
+
+
 class TestProducerAndConsumerAgreeOnTheOutcomeToken:
     """The half that writes the record and the half that reads it must match.
 

@@ -38,6 +38,7 @@ from typing import Final
 
 from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.utils.git_repo import GitRepo, run_git
+from claude_code_hooks_daemon.utils.path_containment import path_is_relative_to, path_relative_to
 
 # name-status codes that carry TWO paths (old NUL new) in -z output.
 _TWO_PATH_STATUS_PREFIXES: Final[tuple[str, ...]] = ("R", "C")
@@ -207,12 +208,12 @@ def project_relative_head_text(file_path: Path, project_root: Path) -> str | Non
     """
     root = project_root.resolve()
     resolved = file_path.resolve()
-    if not resolved.is_relative_to(root):
+    if not path_is_relative_to(resolved, root):
         return None
     repo = GitRepo.resolve_for(resolved)
-    if repo is None or not resolved.is_relative_to(repo.root):
+    if repo is None or not path_is_relative_to(resolved, repo.root):
         return None
-    return GitFactsBase(repo.root).head_file_text(resolved.relative_to(repo.root).as_posix())
+    return GitFactsBase(repo.root).head_file_text(path_relative_to(resolved, repo.root).as_posix())
 
 
 def _parse_name_status_z(output: str) -> tuple[StagedChange, ...]:
