@@ -11,6 +11,7 @@ import os
 import signal
 import subprocess
 import sys
+import time
 from collections.abc import Iterator
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -47,6 +48,28 @@ def _reap(child: subprocess.Popen[bytes]) -> None:
     child.wait(timeout=Timeout.PROCESS_SAMPLE)
 
 
+def _wait_until_execed(pid: int) -> None:
+    """Block until ``pid``'s argv is the interpreter command this test spawned.
+
+    Immediately after ``fork()``, a child's ``/proc/<pid>/cmdline`` can still
+    be empty until ``execve()`` lands -- ``psutil.Process(pid).cmdline()``
+    then returns ``[]``, which reads exactly like "not a daemon server" to
+    ``verified_daemon_process`` (Plan 00466 N194, reproduced under load: `pid
+    N is not a daemon server: []`). Poll for the real argv with a bounded
+    deadline rather than a fixed sleep, so a spawn that is merely slow under
+    load still passes deterministically while one that never execs still
+    fails loudly instead of being silently absorbed by a sleep long enough to
+    paper over it.
+    """
+    deadline = time.monotonic() + Timeout.PROCESS_SAMPLE
+    process = psutil.Process(pid)
+    while time.monotonic() < deadline:
+        if _DAEMON_MODULE in process.cmdline():
+            return
+        time.sleep(0.01)
+    raise AssertionError(f"pid {pid} did not exec within {Timeout.PROCESS_SAMPLE}s")
+
+
 @pytest.fixture
 def children() -> Iterator[list[subprocess.Popen[bytes]]]:
     started: list[subprocess.Popen[bytes]] = []
@@ -67,7 +90,9 @@ def _fake_daemon(
     children: list[subprocess.Popen[bytes]], project_root: Path
 ) -> subprocess.Popen[bytes]:
     """A real process whose command line is a daemon server for ``project_root``."""
-    return _spawn(children, _DAEMON_MODULE, "--project-root", str(project_root), "start")
+    daemon = _spawn(children, _DAEMON_MODULE, "--project-root", str(project_root), "start")
+    _wait_until_execed(daemon.pid)
+    return daemon
 
 
 def _fake_daemon_via_env(
@@ -85,6 +110,7 @@ def _fake_daemon_via_env(
         env=env,
     )
     children.append(child)
+    _wait_until_execed(child.pid)
     return child
 
 

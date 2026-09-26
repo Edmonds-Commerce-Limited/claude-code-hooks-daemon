@@ -3,6 +3,40 @@
 Newest first. Each entry says how it was found, why it happens, and the
 candidate remedies.
 
+### N194 — ✅ Remedied — `test_safe_signal.py`'s daemon-signal tests read a spawned child's cmdline before its exec lands, so a loaded host flakes
+
+**Found:** `tests/unit/utils/test_safe_signal.py`'s daemon-signal tests
+(N59) failed under a loaded full-suite run and passed in isolation.
+Reproduced deliberately: 24 CPU-hog `while true` subshells plus 40-50
+concurrent whole-file `pytest` invocations against this checkout's own
+venv. Under that load 6/40 runs failed, every one with
+
+```
+RefusedSignalTarget: pid <n> is not a daemon server: []
+```
+
+**Why:** `_fake_daemon`/`_fake_daemon_via_env` call `subprocess.Popen(...)`
+then immediately hand the child's pid to `signal_verified_daemon`, which
+calls `psutil.Process(pid).cmdline()`. Immediately after `fork()`, before
+the child's `execve()` lands, `/proc/<pid>/cmdline` can still be empty --
+`cmdline()` then returns `[]`, which `_is_daemon_server_process` correctly
+refuses as "not a daemon server". On an unloaded host the gap is too short
+to observe; contention that delays the child's `execve()` widens it enough
+to hit. `signal_verified_daemon`/`verified_daemon_process` themselves are
+correct -- refusing an ambiguous cmdline is the right call for a security
+gate reading arbitrary processes -- the defect is the test handing over a
+pid before its own fixture is in the state it claims.
+
+**Remedy:** added `_wait_until_execed(pid)`, which polls
+`psutil.Process(pid).cmdline()` for the daemon-module token with a bounded
+deadline (`Timeout.PROCESS_SAMPLE`, 10s) rather than a fixed sleep, and
+calls it from both `_fake_daemon` and `_fake_daemon_via_env` before
+returning the child to the test. Never widens or removes the identity
+check in `safe_signal.py`. Proved RED under the load recipe above (6/40
+failures, all the same `cmdline: []` refusal); proved GREEN with 50/50
+passes under the identical load recipe after the fix, plus a clean
+unloaded run (40 passed).
+
 ### N109 — ✅ Remedied — the pending release-notes holding area mis-sorts past 99 callouts
 
 **Found:** `CLAUDE/UPGRADES/UNRELEASED/release-notes/` named callouts
