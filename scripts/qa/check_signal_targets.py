@@ -69,6 +69,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
 
+from claude_code_hooks_daemon.utils.scan_scope import walk_files
+
 _REPO_ROOT: Final[Path] = Path(__file__).resolve().parents[2]
 _QA_OUTPUT_DIR: Final[Path] = _REPO_ROOT / "untracked" / "qa"
 _OUTPUT_FILE: Final[Path] = _QA_OUTPUT_DIR / "signal_targets.json"
@@ -434,7 +436,7 @@ def scanned_files() -> list[Path]:
     """Every Python file the Detector judges."""
     files: set[Path] = set()
     for tree in _SCAN_TREES:
-        files.update(path for path in tree.rglob("*.py") if not _under_excluded_dir(path))
+        files.update(path for path in walk_files(tree, "*.py") if not _under_excluded_dir(path))
     for directory in _SCAN_FLAT_DIRS:
         files.update(path for path in directory.iterdir() if path.is_file() and _is_python(path))
     return sorted(files)
