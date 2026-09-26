@@ -166,6 +166,8 @@ def daemon_process(daemon_env: dict[str, Any]):
         sys.executable,
         "-m",
         "claude_code_hooks_daemon.daemon.cli",
+        "--project-root",
+        str(project_root),
         "start",
     ]
     with open("/dev/null", "w") as devnull:
@@ -185,7 +187,14 @@ def daemon_process(daemon_env: dict[str, Any]):
     time.sleep(1)
 
     # Get status to verify running
-    status_cmd = [sys.executable, "-m", "claude_code_hooks_daemon.daemon.cli", "status"]
+    status_cmd = [
+        sys.executable,
+        "-m",
+        "claude_code_hooks_daemon.daemon.cli",
+        "--project-root",
+        str(project_root),
+        "status",
+    ]
     status_result = subprocess.run(
         status_cmd,
         cwd=project_root,
@@ -208,7 +217,14 @@ def daemon_process(daemon_env: dict[str, Any]):
     pid_path = daemon_env["pid_path"]
     pid = int(pid_path.read_text().strip()) if pid_path.exists() else None
 
-    stop_cmd = [sys.executable, "-m", "claude_code_hooks_daemon.daemon.cli", "stop"]
+    stop_cmd = [
+        sys.executable,
+        "-m",
+        "claude_code_hooks_daemon.daemon.cli",
+        "--project-root",
+        str(project_root),
+        "stop",
+    ]
     stop_result = subprocess.run(
         stop_cmd,
         cwd=project_root,
@@ -262,7 +278,7 @@ def send_hook_event(
             if b"\n" in chunk:  # Response ends with newline
                 break
 
-        response = json.loads(response_data.decode("utf-8"))
+        response: dict[Any, Any] = json.loads(response_data.decode("utf-8"))
         return response
 
     finally:
@@ -316,7 +332,14 @@ class TestDaemonSmoke:
         test_env = os.environ.copy()
 
         # Start daemon (redirect output to /dev/null - don't capture to avoid waiting for child processes)
-        start_cmd = [sys.executable, "-m", "claude_code_hooks_daemon.daemon.cli", "start"]
+        start_cmd = [
+            sys.executable,
+            "-m",
+            "claude_code_hooks_daemon.daemon.cli",
+            "--project-root",
+            str(project_root),
+            "start",
+        ]
         with open("/dev/null", "w") as devnull:
             start_result = subprocess.run(
                 start_cmd,
@@ -331,7 +354,14 @@ class TestDaemonSmoke:
 
         # Verify running
         time.sleep(1)
-        status_cmd = [sys.executable, "-m", "claude_code_hooks_daemon.daemon.cli", "status"]
+        status_cmd = [
+            sys.executable,
+            "-m",
+            "claude_code_hooks_daemon.daemon.cli",
+            "--project-root",
+            str(project_root),
+            "status",
+        ]
         status_result = subprocess.run(
             status_cmd,
             cwd=project_root,
@@ -344,7 +374,14 @@ class TestDaemonSmoke:
         assert "RUNNING" in status_result.stdout, "Daemon not running after start"
 
         # Stop daemon
-        stop_cmd = [sys.executable, "-m", "claude_code_hooks_daemon.daemon.cli", "stop"]
+        stop_cmd = [
+            sys.executable,
+            "-m",
+            "claude_code_hooks_daemon.daemon.cli",
+            "--project-root",
+            str(project_root),
+            "stop",
+        ]
         stop_result = subprocess.run(
             stop_cmd,
             cwd=project_root,
@@ -494,7 +531,14 @@ class TestDaemonSmoke:
         test_env = os.environ.copy()
 
         # Start daemon (redirect output to /dev/null)
-        start_cmd = [sys.executable, "-m", "claude_code_hooks_daemon.daemon.cli", "start"]
+        start_cmd = [
+            sys.executable,
+            "-m",
+            "claude_code_hooks_daemon.daemon.cli",
+            "--project-root",
+            str(project_root),
+            "start",
+        ]
         with open("/dev/null", "w") as devnull:
             subprocess.run(
                 start_cmd,
@@ -507,7 +551,14 @@ class TestDaemonSmoke:
         time.sleep(1)
 
         # Restart daemon
-        restart_cmd = [sys.executable, "-m", "claude_code_hooks_daemon.daemon.cli", "restart"]
+        restart_cmd = [
+            sys.executable,
+            "-m",
+            "claude_code_hooks_daemon.daemon.cli",
+            "--project-root",
+            str(project_root),
+            "restart",
+        ]
         subprocess.run(
             restart_cmd,
             cwd=project_root,
@@ -520,7 +571,14 @@ class TestDaemonSmoke:
         time.sleep(1)
 
         # Verify running with new PID
-        status_cmd = [sys.executable, "-m", "claude_code_hooks_daemon.daemon.cli", "status"]
+        status_cmd = [
+            sys.executable,
+            "-m",
+            "claude_code_hooks_daemon.daemon.cli",
+            "--project-root",
+            str(project_root),
+            "status",
+        ]
         status_result = subprocess.run(
             status_cmd,
             cwd=project_root,
@@ -533,7 +591,14 @@ class TestDaemonSmoke:
         assert "RUNNING" in status_result.stdout, "Daemon not running after restart"
 
         # Cleanup
-        stop_cmd = [sys.executable, "-m", "claude_code_hooks_daemon.daemon.cli", "stop"]
+        stop_cmd = [
+            sys.executable,
+            "-m",
+            "claude_code_hooks_daemon.daemon.cli",
+            "--project-root",
+            str(project_root),
+            "stop",
+        ]
         subprocess.run(
             stop_cmd,
             cwd=project_root,
@@ -548,7 +613,14 @@ class TestDaemonSmoke:
         test_env = os.environ.copy()
 
         # Try to start again (daemon already running from fixture)
-        start_cmd = [sys.executable, "-m", "claude_code_hooks_daemon.daemon.cli", "start"]
+        start_cmd = [
+            sys.executable,
+            "-m",
+            "claude_code_hooks_daemon.daemon.cli",
+            "--project-root",
+            str(project_root),
+            "start",
+        ]
         result = subprocess.run(
             start_cmd,
             cwd=project_root,
@@ -605,7 +677,14 @@ class TestDaemonConfiguration:
         config_path.write_text("invalid: yaml: content: [")
 
         # Try to start daemon
-        start_cmd = [sys.executable, "-m", "claude_code_hooks_daemon.daemon.cli", "start"]
+        start_cmd = [
+            sys.executable,
+            "-m",
+            "claude_code_hooks_daemon.daemon.cli",
+            "--project-root",
+            str(tmp_path),
+            "start",
+        ]
         result = subprocess.run(
             start_cmd,
             cwd=tmp_path,
@@ -664,7 +743,14 @@ handlers: {}
 """)
 
         # Start daemon (redirect output to /dev/null)
-        start_cmd = [sys.executable, "-m", "claude_code_hooks_daemon.daemon.cli", "start"]
+        start_cmd = [
+            sys.executable,
+            "-m",
+            "claude_code_hooks_daemon.daemon.cli",
+            "--project-root",
+            str(tmp_path),
+            "start",
+        ]
         with open("/dev/null", "w") as devnull:
             result = subprocess.run(
                 start_cmd,
@@ -681,7 +767,14 @@ handlers: {}
 
         # Verify running
         time.sleep(1)
-        status_cmd = [sys.executable, "-m", "claude_code_hooks_daemon.daemon.cli", "status"]
+        status_cmd = [
+            sys.executable,
+            "-m",
+            "claude_code_hooks_daemon.daemon.cli",
+            "--project-root",
+            str(tmp_path),
+            "status",
+        ]
         status_result = subprocess.run(
             status_cmd,
             cwd=tmp_path,
@@ -694,7 +787,14 @@ handlers: {}
         assert "RUNNING" in status_result.stdout
 
         # Cleanup
-        stop_cmd = [sys.executable, "-m", "claude_code_hooks_daemon.daemon.cli", "stop"]
+        stop_cmd = [
+            sys.executable,
+            "-m",
+            "claude_code_hooks_daemon.daemon.cli",
+            "--project-root",
+            str(tmp_path),
+            "stop",
+        ]
         subprocess.run(
             stop_cmd,
             cwd=tmp_path,

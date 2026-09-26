@@ -49,7 +49,7 @@ from pydantic import ValidationError as PydanticValidationError
 
 from claude_code_hooks_daemon.config.loader import ConfigLoader
 from claude_code_hooks_daemon.config.models import Config, handler_options
-from claude_code_hooks_daemon.constants import HandlerID, Timeout
+from claude_code_hooks_daemon.constants import DaemonPath, HandlerID, Timeout
 from claude_code_hooks_daemon.constants.modes import DaemonMode
 from claude_code_hooks_daemon.constants.permissions import FileMode
 from claude_code_hooks_daemon.core.event import EventType
@@ -81,6 +81,7 @@ from claude_code_hooks_daemon.daemon.permission_audit import (
     audit_untracked_permissions,
     tighten_permissions,
 )
+from claude_code_hooks_daemon.daemon.process_verification import daemon_process_project_root
 from claude_code_hooks_daemon.daemon.server import (
     DaemonAlreadyRunningError,
     _socket_liveness_sync,
@@ -196,6 +197,12 @@ def get_project_path(override_path: Path | None = None) -> Path:
             if is_inside_daemon_directory(current):
                 current = current.parent
                 continue
+            # A directory carrying its own config IS the project, so the search
+            # stops here whether or not that config is valid. Walking on past a
+            # broken one ran the daemon on an ENCLOSING repository's config and
+            # reported that file's unrelated errors (Plan 00466 N24 review 2 P2).
+            if (claude_dir / DaemonPath.CONFIG_FILE).is_file():
+                return _validate_installation(current)
             # Validate installation based on config
             try:
                 return _validate_installation(current)
@@ -765,6 +772,59 @@ def cmd_start(args: argparse.Namespace) -> int:
     sys.exit(0)
 
 
+def _open_pidfd(pid: int) -> int | None:
+    """Pin a pidfd to this exact ``pid`` instance, before it is proven.
+
+    Plan 00466 N24 review 3 mi5: opening this BEFORE
+    ``daemon_process_project_root`` closes the microsecond-scale TOCTOU
+    between that proof and the signal ``cmd_stop`` sends on its strength --
+    ``pid`` is just a number the kernel is free to hand to an unrelated new
+    process the instant the proven process exits, so a signal sent by
+    number after the proof can land on that impostor instead. A pidfd
+    names the exact process instance the kernel opened it against:
+    :func:`signal.pidfd_send_signal` through it either reaches that same
+    instance or raises ``ProcessLookupError`` (it has already exited) --
+    never a different process that has since reused the pid number.
+
+    Returns:
+        The pidfd, or ``None`` when ``os.pidfd_open`` is unsupported on this
+        platform (pre-3.9 Python, or non-Linux) or ``pid`` is already gone --
+        callers fall back to signalling by pid number in that case, which
+        only keeps the smaller race this function exists to close, rather
+        than refusing to stop the daemon at all.
+    """
+    try:
+        pidfd: int | None = os.pidfd_open(pid, 0)
+    except AttributeError:
+        logger.warning(
+            "os.pidfd_open unsupported on this platform (pid %d); falling back "
+            "to signalling by pid number",
+            pid,
+        )
+        pidfd = None
+    except OSError as e:
+        logger.warning(
+            "os.pidfd_open(%d) failed (%s); falling back to signalling by pid number",
+            pid,
+            e,
+        )
+        pidfd = None
+    return pidfd
+
+
+def _signal_proven_pid(pid: int, pidfd: int | None, sig: int) -> None:
+    """Signal the process ``pidfd`` was opened against, when available.
+
+    Raises the same exceptions ``os.kill`` would (``ProcessLookupError``,
+    ``PermissionError``, ...), so every caller built around ``os.kill``'s
+    contract -- the whole of ``cmd_stop`` below -- needs no other change.
+    """
+    if pidfd is not None:
+        signal.pidfd_send_signal(pidfd, sig)
+        return
+    os.kill(pid, sig)
+
+
 def cmd_stop(args: argparse.Namespace) -> int:
     """Stop running daemon.
 
@@ -786,55 +846,132 @@ def cmd_stop(args: argparse.Namespace) -> int:
         print("Daemon not running")
         return 0
 
-    # Send SIGTERM
+    # Pin the pidfd to THIS pid instance before proving anything about it
+    # (mi5, see `_open_pidfd`) -- every signal below goes through it.
+    pidfd = _open_pidfd(pid)
     try:
-        os.kill(pid, signal.SIGTERM)
-        print(f"Sent SIGTERM to daemon (PID: {pid})")
-
-        # Wait for process to exit (up to 5 seconds)
-        timeout = Timeout.SOCKET_CONNECT
-        interval = 0.1
-        elapsed = 0.0
-
-        while elapsed < timeout:
-            try:
-                os.kill(pid, 0)  # Check if still alive
-                time.sleep(interval)
-                elapsed += interval
-            except ProcessLookupError:
-                # Process exited
-                break
-
-        # Check if still running
-        try:
-            os.kill(pid, 0)
-            print(f"WARNING: Daemon still running after {timeout}s", file=sys.stderr)
-            print(f"Try: kill -9 {pid}", file=sys.stderr)
+        # verify_daemon proves only that the pid is SOME daemon server. Signal
+        # it only once it is proven to serve THIS project: a stale pid file
+        # whose pid was reused by another project's daemon must not get that
+        # daemon killed.
+        own_root = os.path.realpath(project_path)
+        proof = daemon_process_project_root(pid)
+        if proof.root is None:
+            print(f"ERROR: {proof.refusal}; refusing to signal it", file=sys.stderr)
             return 1
+        if proof.root != own_root:
+            # Refuse, and delete nothing (Plan 00466 N24 review 3 mi1): the PID
+            # file may be stale while this project's own daemon still serves the
+            # socket, or the attribution itself may be wrong, and deleting either
+            # file orphans a live daemon.
+            print(
+                f"ERROR: PID {pid} is attributed by {proof.source} to {proof.root}, not to "
+                f"{own_root}; refusing to signal it or delete its PID file and socket. "
+                f"If that is wrong, stop it by hand.",
+                file=sys.stderr,
+            )
+            return 1
+
+        # Send SIGTERM
+        try:
+            _signal_proven_pid(pid, pidfd, signal.SIGTERM)
+            print(f"Sent SIGTERM to daemon (PID: {pid})")
+
+            # Wait for process to exit (up to 5 seconds)
+            timeout = Timeout.SOCKET_CONNECT
+            interval = 0.1
+            elapsed = 0.0
+
+            while elapsed < timeout:
+                try:
+                    _signal_proven_pid(pid, pidfd, 0)  # Check if still alive
+                    time.sleep(interval)
+                    elapsed += interval
+                except ProcessLookupError:
+                    # Process exited
+                    break
+
+            # Check if still running
+            try:
+                _signal_proven_pid(pid, pidfd, 0)
+            except ProcessLookupError:
+                # Process exited successfully
+                print("Daemon stopped")
+                cleanup_pid_file(str(pid_path))
+                cleanup_socket(str(socket_path))
+                return 0
+
+            # SIGTERM's grace period elapsed and the process is still alive --
+            # escalate to SIGKILL rather than leaving the operator with an
+            # unrecoverable wedged daemon (Plan 00466 N40 review 2 MA2). A
+            # GIL-holding handler cannot even reach Python's signal-handling
+            # bytecode check to act on SIGTERM; SIGKILL is delivered by the
+            # kernel and cannot be caught, blocked or ignored.
+            # Re-prove before SIGKILL: the grace period is long enough for the
+            # pid to have exited and been reused -- and the SIGKILL itself
+            # still goes out through the SAME pidfd pinned above, so even a
+            # reused pid number cannot make it land on the wrong process.
+            if daemon_process_project_root(pid).root != own_root:
+                print(
+                    f"ERROR: PID {pid} no longer proves to be this project's daemon; "
+                    "refusing to escalate to SIGKILL",
+                    file=sys.stderr,
+                )
+                return 1
+            print(
+                f"WARNING: Daemon still running after {timeout}s; escalating to SIGKILL",
+                file=sys.stderr,
+            )
+            try:
+                _signal_proven_pid(pid, pidfd, signal.SIGKILL)
+            except ProcessLookupError:
+                print("Daemon stopped")
+                cleanup_pid_file(str(pid_path))
+                cleanup_socket(str(socket_path))
+                return 0
+
+            kill_timeout = Timeout.DAEMON_SIGKILL_GRACE
+            kill_elapsed = 0.0
+            while kill_elapsed < kill_timeout:
+                try:
+                    _signal_proven_pid(pid, pidfd, 0)
+                    time.sleep(interval)
+                    kill_elapsed += interval
+                except ProcessLookupError:
+                    break
+
+            try:
+                _signal_proven_pid(pid, pidfd, 0)
+                print(
+                    f"WARNING: Daemon still running after SIGKILL ({kill_timeout}s)",
+                    file=sys.stderr,
+                )
+                print(f"Try: kill -9 {pid}", file=sys.stderr)
+                return 1
+            except ProcessLookupError:
+                print("Daemon stopped")
+                cleanup_pid_file(str(pid_path))
+                cleanup_socket(str(socket_path))
+                return 0
+
         except ProcessLookupError:
-            # Process exited successfully
-            print("Daemon stopped")
+            print(f"Process {pid} not found (stale PID file)")
             cleanup_pid_file(str(pid_path))
             cleanup_socket(str(socket_path))
             return 0
-
-    except ProcessLookupError:
-        print(f"Process {pid} not found (stale PID file)")
-        cleanup_pid_file(str(pid_path))
-        cleanup_socket(str(socket_path))
-        return 0
-    except PermissionError:
-        print(f"ERROR: Permission denied to signal PID {pid}", file=sys.stderr)
-        return 1
-    except Exception as e:
-        print(f"ERROR: {e}", file=sys.stderr)
-        return 1
+        except PermissionError:
+            print(f"ERROR: Permission denied to signal PID {pid}", file=sys.stderr)
+            return 1
+        except Exception as e:
+            print(f"ERROR: {e}", file=sys.stderr)
+            return 1
+    finally:
+        if pidfd is not None:
+            os.close(pidfd)
 
 
-def _query_daemon_config_degraded(
-    socket_path: Path, pid: int | None
-) -> tuple[bool, list[str]] | None:
-    """Query the live daemon's own config-validation degraded state.
+def _query_daemon_health(socket_path: Path, pid: int | None) -> dict[str, Any] | None:
+    """Query the live daemon's own ``health`` result.
 
     Plan 00304: a real-repo canary found `status` reporting RUNNING and
     `check` byte-identical between a degraded and a healthy daemon -- only a
@@ -848,9 +985,9 @@ def _query_daemon_config_degraded(
         pid: The daemon's PID, or None if not running.
 
     Returns:
-        ``(is_degraded, config_errors)`` if the daemon answered, else
-        ``None`` (daemon not running or unreachable -- callers stay silent
-        rather than report a false degraded/healthy verdict).
+        The health result if the daemon answered, else ``None`` (daemon not
+        running or unreachable -- callers stay silent rather than report a
+        false degraded/healthy verdict).
     """
     if pid is None:
         return None
@@ -859,26 +996,42 @@ def _query_daemon_config_degraded(
     if response is None or "error" in response:
         return None
     result = response.get("result", {})
-    return result.get("status") == "degraded", result.get("config_errors", [])
+    return result if isinstance(result, dict) else None
 
 
-def _print_degraded_config_block(degraded_state: tuple[bool, list[str]] | None) -> None:
-    """Print the degraded-mode block if the daemon reported one.
+def _print_degraded_config_block(health: dict[str, Any] | None) -> None:
+    """Print what the daemon reported as degrading its configuration.
+
+    Only the ``config`` reason disables handlers; the others (stragglers, a
+    chain deadline the client timeout beats -- Plan 00466 N40 review 2 mA4)
+    leave every guard on, so they must not print the block saying enforcement
+    is off. A daemon that names no reasons predates them, and its ``degraded``
+    status meant config.
 
     Args:
-        degraded_state: Result of `_query_daemon_config_degraded`.
+        health: Result of `_query_daemon_health`.
     """
-    if degraded_state is None:
+    if health is None:
         return
-    is_degraded, config_errors = degraded_state
-    if not is_degraded:
-        return
-    print("\n🚨 CONFIGURATION DEGRADED 🚨")
-    print("Daemon is running in DEGRADED MODE — invalid configuration disabled enforcement")
-    print("for handlers that need config (a config-independent safety net still runs).")
-    for error in config_errors:
-        print(f"  - {error}")
-    print("Fix: correct .claude/hooks-daemon.yaml, then restart the daemon.")
+    reasons = health.get("degraded_reasons")
+    config_degraded = health.get("status") == "degraded" if reasons is None else "config" in reasons
+    if config_degraded:
+        print("\n🚨 CONFIGURATION DEGRADED 🚨")
+        print("Daemon is running in DEGRADED MODE — invalid configuration disabled enforcement")
+        print("for handlers that need config (a config-independent safety net still runs).")
+        for error in health.get("config_errors", []):
+            print(f"  - {error}")
+        print("Fix: correct .claude/hooks-daemon.yaml, then restart the daemon.")
+    deadline_problems = health.get("chain_deadline_problems", [])
+    if deadline_problems:
+        print("\nChain deadline cannot beat the client timeout (every guard is still on):")
+        for problem in deadline_problems:
+            print(f"  - {problem}")
+    socket_skips = health.get("event_socket_skips", [])
+    if socket_skips:
+        print("\nPer-event sockets not bound (these events use the bash forwarder, not the relay):")
+        for skip in socket_skips:
+            print(f"  - {skip.get('event')}: {skip.get('reason')}")
 
 
 def _print_install_stamp_line() -> None:
@@ -972,7 +1125,7 @@ def cmd_status(args: argparse.Namespace) -> int:
     # Config-validation degraded mode (Plan 00304). Surfaced for visibility;
     # the exit code stays liveness-based, same rationale as project-handler
     # health below — `health` is the command that returns non-zero on degrade.
-    _print_degraded_config_block(_query_daemon_config_degraded(socket_path, pid))
+    _print_degraded_config_block(_query_daemon_health(socket_path, pid))
 
     # Project-handler protection signal (Plan 00143). Surfaced for visibility;
     # the exit code stays liveness-based so existing "status == RUNNING" checks
@@ -1338,14 +1491,21 @@ def cmd_check(args: argparse.Namespace) -> int:
     # canary caught that. Query the live daemon the same way `health` does.
     socket_path, pid_path, _drift_warning = _resolve_effective_daemon(args, project_path)
     pid = read_pid_file(str(pid_path))
-    _print_degraded_config_block(_query_daemon_config_degraded(socket_path, pid))
+    _print_degraded_config_block(_query_daemon_health(socket_path, pid))
 
     # 1. Claude Code optimal configuration (the verbose report SessionStart hides)
-    checks = OptimalConfigCheckerHandler()._run_checks()
+    checks = OptimalConfigCheckerHandler()._run_checks(project_path)
     passed = [c for c in checks if c["passed"]]
     print(f"Claude Code configuration: {len(passed)}/{len(checks)} optimal")
     for check in checks:
-        marker = "OK  " if check["passed"] else "MISS"
+        # A failing check flagged `warn` is an override to remove, not a
+        # setting that is missing (e.g. an effort pin, Plan 00466 N47).
+        if check["passed"]:
+            marker = "OK  "
+        elif check.get("warn"):
+            marker = "WARN"
+        else:
+            marker = "MISS"
         print(f"  [{marker}] {check['name']}: {check['current']}")
         if not check["passed"]:
             print(f"         Why:   {check['why']}")
@@ -3074,6 +3234,8 @@ def _build_initialised_controller(
         project_registry=ProjectRegistry.from_config(config, project_path),
         claude_md=config.claude_md,
         chain=config.daemon.chain,
+        chain_deadline_problems=config.daemon.chain_deadline_problems,
+        strict_mode=config.daemon.strict_mode,
         write_claude_md_in_linked_worktree=write_claude_md_in_linked_worktree,
         worktree=config.worktree,
         reference_repos=config.reference_repos,

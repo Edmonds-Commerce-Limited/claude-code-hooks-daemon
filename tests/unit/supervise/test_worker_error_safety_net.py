@@ -17,7 +17,7 @@ import io
 import json
 import subprocess
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from tests.unit.supervise._load import load_supervisor_module
 
@@ -38,7 +38,7 @@ def _tick_line() -> str:
         human_compact_submitted=False,
         work_idle=True,
     )
-    return _mod._facts_to_json(facts) + "\n"
+    return cast("str", _mod._facts_to_json(facts)) + "\n"
 
 
 def _tick_line_with_raw_input(raw: bytes) -> str:
@@ -50,7 +50,7 @@ def _tick_line_with_raw_input(raw: bytes) -> str:
         work_idle=True,
         human_raw_input=base64.b64encode(raw).decode("ascii"),
     )
-    return _mod._facts_to_json(facts) + "\n"
+    return cast("str", _mod._facts_to_json(facts)) + "\n"
 
 
 class _FakeProc:

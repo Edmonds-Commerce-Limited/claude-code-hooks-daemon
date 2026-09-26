@@ -23,14 +23,15 @@ copy that machine's install mounts.
 
 ## Why an edit is not immediately live
 
-Every injection decision (`/compact`, `continue`, `/goal`, `/effort`) runs in a
+Every injection decision (`/compact`, `continue`, `/goal`, `/model`) runs in a
 **`--worker` subprocess**, not in the long-lived PTY host that owns the `claude`
 process (the two-tier design from Plan 00164 Phase 4). The host hot-reloads that
 subprocess — swapping in new code **without a full Claude Code session restart**
-— but only when it notices the file changed.
+— but only when it notices the file changed. (There is no `/effort` family:
+the supervisor injects no effort of any kind — see below.)
 
 **Since Plan 00317 this includes typed-command RECOGNITION, not just the
-decision.** Parsing what the human typed (`/compact`, `/effort <x>`) runs in the
+decision.** Parsing what the human typed (`/compact`) runs in the
 `--worker` subprocess, fed by a bounded raw-input tap the host forwards each
 tick, rather than in the never-reloading host. If you are editing
 `HumanInputLine`, the fix ships live the moment the worker reloads — same rule
@@ -110,6 +111,124 @@ and the worker error log for the dated, fingerprinted
 Then re-run the `ps` check and confirm the pid changed. **Never restart the
 whole ccy session** — which would drop the live `claude` process — merely to
 reload the worker. That is exactly what the two-tier split exists to avoid.
+
+## Effort is not the supervisor's concern at all
+
+Plan 00466 N47 review 2 found the decisive reason the supervisor must never
+type `/effort`, at any level, for any purpose: Claude Code SAVES every
+interactively-typed `/effort <level>` into `modelSettings` in the settings
+file that confirming it with `Enter` targets — almost always the owner's own
+`~/.claude/settings.json` (or `$CLAUDE_CONFIG_DIR/settings.json`) — the same
+single source of truth the owner asked the supervisor to stop fighting. See
+`remote-docs/docs.claude.com/en/docs/claude-code/model-config.md:552-557` and
+`remote-docs/docs.claude.com/en/docs/claude-code/settings-reference.md:900`.
+An unattended process typing `/effort` therefore does not make a session-only
+adjustment — it permanently overwrites what the owner saved for that model.
+
+So the supervisor holds **no effort state and injects no `/effort` command,
+ever** — not on downgrade, not on manual `/model`, not on compaction, not in
+response to a settings change. The two behaviors the supervisor used to
+enforce by injection are now DATA the owner adds to their own `modelSettings`
+— **but this only works while the session's own effort has never been set.**
+
+**The pin (review 3 — this is the part review 2 got wrong).** Claude Code's
+resolution order (`model-config.md:544-548`) puts an **explicit choice**
+above the saved `modelSettings` level: "`CLAUDE_CODE_EFFORT_LEVEL`, launching
+with `--effort`, or `/effort` in the session". The docs never say what an
+explicit choice does across a LATER model change, but they do rank it first
+with no per-model qualifier, and the installed Claude Code 2.1.282 binary
+confirms it plainly: the session tracks one `sessionEffort` value —
+`{kind:"inherit"}` at start, `{kind:"level", value}` after `/effort <level>`
+or an effort pick in the `/model` picker's slider, or `{kind:"default"}`
+after `/effort auto`. The resolver looks the model up in `modelSettings`
+**only** while `sessionEffort` is still `inherit`; `level` and `default` both
+skip the per-model table outright — `level` returns the pinned value no
+matter which model serves the request, and `default` returns the model's
+BUILT-IN default (not its saved level). An automatic refusal fallback (Plan
+00328's downgrade) changes only the model field; it never touches
+`sessionEffort`. Nothing found sets `sessionEffort` back to `inherit` — once
+pinned (by `/effort <level>`, `/effort auto`, an effort pick in the picker,
+`--effort`, or `CLAUDE_CODE_EFFORT_LEVEL`), **no settings.json configuration
+can make different models in that SAME session run at different effort
+levels again.** That is the direct answer if the owner asks "why isn't my
+`modelSettings` entry applying" — check whether anything in the session
+already pinned it.
+
+- **`/effort auto` does not restore per-model resolution.** It sets
+  `sessionEffort` to `{kind:"default"}`, the model's own BUILT-IN default —
+  not a return to `inherit`, and not a re-read of `modelSettings`. It also
+  **writes**: `settings-reference.md:1211` — "Run `/effort auto` to clear
+  your saved level for the model you're using" — clearing that model's
+  `modelSettings` entry in the settings file it applies to. Both facts
+  matter: it does not get the owner back to the two-model-different-levels
+  behaviour below, and it is itself a settings.json write, just like every
+  other confirmed `/effort`.
+- The two-different-levels behaviour (Fable at low, its fallback at xhigh)
+  therefore only holds for a session that **never types `/effort`, never
+  picks an effort level in `/model`, and is never launched with `--effort`
+  or `CLAUDE_CODE_EFFORT_LEVEL`.** If the owner wants it, they must leave
+  effort alone for that session; if they need a specific level HERE and NOW,
+  typing `/effort` is a deliberate, one-time choice that pins the rest of
+  that session, exactly as before this design — the difference N47 makes is
+  that the SUPERVISOR never does this automatically or fights the choice
+  afterward.
+
+### What the owner should add to `modelSettings`
+
+In whichever settings file they want it to apply — most commonly their user
+settings — naming exact model ids per `settings-reference.md:1197`
+("Claude Code writes each entry under the model's canonical name... and
+matches that model's alias, date-suffixed, `[1m]`, and recognized
+provider-specific IDs to the same entry"). This is the canonical copy of
+these entries; post-upgrade task 02 points here:
+
+```json
+{
+  "modelSettings": {
+    "claude-fable-5-1": { "effortLevel": "low" },
+    "claude-opus-5": { "effortLevel": "xhigh" },
+    "claude-opus-4-8": { "effortLevel": "xhigh" }
+  }
+}
+```
+
+- `claude-fable-5-1` (Fable 5.1, the `fable` alias's target) at `low` is the
+  level the old DROP ANCHOR injection typed. This entry does NOT cover Fable 5
+  (`claude-fable-5`, what a gateway resolves `fable` to) or the `mythos` ids
+  the supervisor treats as the same family (`_MODEL_FAMILY_CANONICAL`); add
+  those ids too if the project's gateway can serve them.
+- `claude-opus-5` and `claude-opus-4-8` at `xhigh` are the level the old
+  downgrade compensation typed, for Fable's two automatic-fallback targets
+  (`model-config.md:486` — biology-flagged requests land on Opus 5,
+  cybersecurity-flagged requests land on Opus 4.8). This is BROADER than the
+  old compensation, which fired only for a drop that started at Fable: these
+  two entries set Opus 5 and Opus 4.8 to `xhigh` wherever they serve a
+  request in this session (including an Opus 5.5 → Opus 4.8 cyber fallback,
+  or a manual pick of either), not just in a fable-origin episode.
+- `claude-opus-5-5` gets NO entry: Opus 5.5 stays at its built-in `medium`
+  default (`model-config.md:548`), and a top-level `effortLevel` in the user
+  file does not apply to it either (`model-config.md:550`). A top-level
+  `effortLevel` in the project or local settings file, or
+  `CLAUDE_CODE_EFFORT_LEVEL` (the shell variable, or the same variable set
+  through the project, local or user file's own `env` object), WOULD apply to
+  every model, Opus 5.5 included, and override all three entries above;
+  `hooks-daemon check` reports any of those as `[WARN] Effort Source`. A
+  managed settings file or `--settings` can pin it too, but `check` does not
+  read either: this project vendors no confirmed on-disk path for managed
+  settings, and `--settings` cannot be seen from a running session. Rule
+  those out by hand if `check` passes and effort still looks pinned.
+
+Since none of this is code, **no worker reload applies to it at all** —
+editing `modelSettings` is an ordinary Claude Code settings edit, not a
+`claude-supervise.py` change, and takes effect the next time Claude Code
+resolves effort for the model in question (typically the next request, or
+the next session start for values Claude Code already resolved this
+session) — PROVIDED that session's own effort was never pinned per above.
+The `ps`/reload discipline in this document is about the supervisor's own
+CODE. A code change (such as this fix) still needs a worker reload or a
+full ccy relaunch to take effect — see "How the reload is noticed" above,
+and relaunch ccy after upgrading past this fix specifically, since the old
+host's in-process fallback path still types `/effort` until it does.
 
 ## Client installs: edit source, then redeploy
 
