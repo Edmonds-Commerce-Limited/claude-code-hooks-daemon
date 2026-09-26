@@ -88,20 +88,21 @@ pytest tests/ 2>&1 | bin/echd-capture 20
 
 `sed` is blocked because Claude gets sed syntax wrong and a single error can silently destroy hundreds of files with no recovery possible.
 
-**THE RULE IS DENY-BY-DEFAULT, NOT A LIST OF BAD PATTERNS.** Any Bash command containing the WORD `sed` is blocked unless it matches one of the four narrow exemptions below. This framing matters: an earlier version of this guidance listed specific blocked shapes, which read as though anything unlisted was fine. It is not — `python3 -c "print('sed')"` is blocked, and so is `xargs sed 's/a/b/'` despite having no `-i`, no command-head position and no pipe stage.
+**THE RULE IS DENY-BY-DEFAULT, NOT A LIST OF BAD PATTERNS.** Any Bash command containing the WORD `sed` is blocked unless it matches one of the five narrow exemptions below. This framing matters: an earlier version of this guidance listed specific blocked shapes, which read as though anything unlisted was fine. It is not — `python3 -c "print('sed')"` is blocked, and so is `xargs sed 's/a/b/'` despite having no `-i`, no command-head position and no pipe stage.
 
-**The four exemptions, in the order they are applied**:
+**The five exemptions, in the order they are applied**:
 
 1. **None of them apply if sed is EXECUTED.** sed at a command HEAD (start, or after `;`, `&&`, `||`), any flag cluster containing `i`, `e` or `n`, or sed via `xargs`, is blocked no matter what else is in the command. So `grep x f; sed -i 's/a/b/' f` is still denied — the `grep` does not rescue it. Note `sed -n '1,20p' file` prints to stdout and cannot write, and is blocked anyway — DELIBERATELY, and the deny message says so: `-n` and `-i` differ by one character. `Read` with `offset`/`limit` does the same job, as does `awk 'NR>=1 && NR<=20' file`.
 2. A `git commit` message mentioning sed (sed must follow `git commit` with no command separator between).
 3. A `gh` issue/PR/release body mentioning sed (same separator rule).
 4. The command contains a `grep`, or an `echo` that does not itself carry a `sed 's/…'` substitution.
+5. A heredoc/redirect whose ONLY write target is a `.md` file, and whose sed text is never EXECUTED (`cat > NOTES.md <<'EOF'` mentioning sed in the body is allowed). Checked with the same `get_written_file_paths` accessor `lint_on_edit` uses to find what a Bash command AUTHORS, not a second regex over the raw text — so a command that also writes a non-`.md` target (`tee a.md b.sh`) or genuinely RUNS sed (`$(sed -i …)` in an UNQUOTED heredoc body, or a separate `; sed -i …` after the redirect) is NOT exempted and stays denied, whatever exemption 1 already covers.
 
 **Consequence worth internalising**: exemption 4 is a proxy for 'this looks read-only', and it is the reason two commands that BOTH cannot modify a file get opposite verdicts — `cat f | sed 's/x/y/' | grep z` is allowed while `cat f | sed 's/x/y/' | wc -l` is DENIED. Nothing about writing distinguishes them; only the presence of `grep`.
 
 **Write/Edit tool (a separate branch, different rule)**: a `.sh`/`.bash` file whose content contains sed is blocked; a `.md` file is always allowed; any other path is not examined.
 
-**The `.md` exemption is Write-tool-only, and this catches people out.** The Bash branch judges the COMMAND, not the destination, so `cat > NOTES.md <<'EOF'` whose body mentions sed is DENIED even though `Write` to that same path is allowed. Only exemption 4 can spare a Bash write (so `echo 'avoid sed' > NOTES.md` is fine). **Write markdown about sed with the `Write` tool**, not a heredoc, and this never bites.
+**The `.md` exemptions are NARROWER on the Bash branch.** `Write` allows ANY `.md` path unconditionally. The Bash branch (exemption 5) only allows a heredoc/redirect whose SOLE write target is `.md` and whose sed is never executed — `cat > NOTES.md <<'EOF'` mentioning sed is allowed, but `cat > x.md <<EOF` with `$(sed -i …)` in an UNQUOTED body, `cat <<'EOF' | bash` piping the body to an interpreter instead of writing it, a mixed target (`tee a.md b.sh`), and `> x.md; sed -i …` chaining a separate executed sed are all still denied. Also still allowed the older way: `echo 'avoid sed' > NOTES.md` (exemption 4, the echo has no substitution). **Write markdown about sed with the `Write` tool** when the shape is more than a plain heredoc/redirect, and none of this applies.
 
 **Use instead**:
 
