@@ -16,7 +16,10 @@ from pathlib import Path
 
 from claude_code_hooks_daemon.constants import Timeout
 from claude_code_hooks_daemon.constants.paths import DaemonPath
-from claude_code_hooks_daemon.daemon.paths import resolve_existing_venv_python
+from claude_code_hooks_daemon.daemon.paths import (
+    resolve_existing_venv_python,
+    socket_path_paired_with,
+)
 from claude_code_hooks_daemon.daemon.server import remove_dead_socket, remove_stale_pid_file
 from claude_code_hooks_daemon.install import bin_wrapper
 from claude_code_hooks_daemon.utils.hook_registration import (
@@ -351,7 +354,9 @@ class ClientInstallValidator:
             if outcome is DaemonStop.ALREADY_GONE:
                 # Under the start lock, and only while it still names a pid
                 # that is gone: a start may have written its own (N205).
-                if not remove_stale_pid_file(pid_file, _paired_socket(pid_file), seen):
+                if not remove_stale_pid_file(
+                    pid_file, socket_path_paired_with(project_root, pid_file), seen
+                ):
                     warnings.append(f"Left PID file {pid_file}: not provably stale")
             else:
                 warnings.append(_DAEMON_STOP_OUTCOME[outcome].format(pid=pid))
@@ -666,18 +671,11 @@ class ClientInstallValidator:
             except (OSError, UnicodeDecodeError) as unreadable:
                 warnings.append(f"Left unreadable PID file {pid_file.name}: {unreadable}")
                 continue
-            if remove_stale_pid_file(pid_file, _paired_socket(pid_file), seen):
+            if remove_stale_pid_file(
+                pid_file, socket_path_paired_with(project_root, pid_file), seen
+            ):
                 warnings.append(f"Removed stale PID file: {pid_file.name}")
             else:
                 warnings.append(f"Left PID file {pid_file.name}: its process may be running")
 
         return ValidationResult(passed=True, errors=[], warnings=warnings)
-
-
-def _paired_socket(pid_file: Path) -> Path:
-    """The socket beside ``pid_file``, whose start lock guards both.
-
-    ``paths.get_pid_path`` and ``get_socket_path`` name them ``daemon{suffix}``
-    in the same directory.
-    """
-    return pid_file.with_suffix(".sock")

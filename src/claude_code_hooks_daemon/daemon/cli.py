@@ -758,7 +758,7 @@ def cmd_start(args: argparse.Namespace) -> int:
     if daemon_config.pid_file_path is None:
         daemon_config.pid_file_path = str(daemon_config.get_pid_file_path(project_path))
 
-    daemon = HooksDaemon(daemon_config, controller)
+    daemon = HooksDaemon(daemon_config, controller, start_lock_waiting=reporter.start_lock_waiting)
 
     # Write socket discovery file so bash hook forwarders (init.sh)
     # can find the daemon when the socket path differs from the default
@@ -881,6 +881,10 @@ def pid_is_this_projects_daemon(pid: int, socket_path: Path, project_root: Path)
 #: What a starting daemon writes to the start pipe as it finishes a step.
 _START_STEP: Final = b"."
 
+#: What it writes before it waits on the start lock another start holds;
+#: the next step byte ends the wait (review 8, R8-2).
+_START_LOCK_WAIT: Final = b"w"
+
 #: Largest read from the start pipe at once.
 _START_PIPE_READ_BYTES: Final = 4096
 
@@ -902,6 +906,10 @@ class _StartReporter:
             os.close(self._fd)
             self._fd = None
 
+    def start_lock_waiting(self, waiting: bool) -> None:
+        """Say the daemon waits on another start's lock, or has it now."""
+        self.report(_START_LOCK_WAIT if waiting else _START_STEP)
+
 
 class _StartProgress:
     """What the daemon ``cmd_start`` launched reports through the start pipe.
@@ -909,7 +917,9 @@ class _StartProgress:
     The daemon writes its pid, then a byte as it finishes each startup step,
     and holds the write end for its whole life, so end of file means it has
     exited. A byte, or CPU time it has spent since the last look, is progress:
-    under load a single step can outlast any fixed budget.
+    under load a single step can outlast any fixed budget. A wait on the start
+    lock another start holds spends neither, so the daemon says when it
+    begins one (``waiting_on_lock``).
     """
 
     def __init__(self, read_fd: int) -> None:
@@ -919,6 +929,12 @@ class _StartProgress:
         self._daemon: psutil.Process | None = None
         self._cpu_seconds = 0.0
         self.exited = False
+        self.waiting_on_lock = False
+
+    @property
+    def launched_pid(self) -> int | None:
+        """The pid the daemon named itself by, once it has."""
+        return None if self._daemon is None else self._daemon.pid
 
     def advanced(self) -> bool:
         """Read everything reported since the last call; True when startup advanced."""
@@ -936,9 +952,19 @@ class _StartProgress:
                 self.exited = True
                 break
             reported = True
+            self._note_lock_wait(chunk)
             if self._daemon is None:
                 self._take_announcement(chunk)
         return reported
+
+    def _note_lock_wait(self, chunk: bytes) -> None:
+        """The last step or lock-wait byte says which the daemon is in.
+
+        Neither byte can occur in the pid announcement, which is digits.
+        """
+        last = max(chunk.rfind(_START_STEP), chunk.rfind(_START_LOCK_WAIT))
+        if last >= 0:
+            self.waiting_on_lock = chunk[last : last + 1] == _START_LOCK_WAIT
 
     def _take_announcement(self, chunk: bytes) -> None:
         """Hold a handle on the pid the daemon named, read only for its CPU time."""
@@ -981,12 +1007,37 @@ class _StartWait:
     failure: str | None = None
 
 
-def _pid_file_state(daemon_pid: int | None, displaced: int | None) -> str:
-    """What the PID file showed when the wait ended, for its message."""
+def _recorded_pid(pid_path: Path) -> int | None:
+    """The pid ``pid_path`` names, running or not; None when it names none."""
+    try:
+        return parse_pid_text(pid_path.read_text())
+    except FileNotFoundError:
+        return None
+    except (OSError, UnicodeDecodeError) as exc:
+        logger.debug("Cannot read the PID file %s: %s", pid_path, exc)
+        return None
+
+
+def _pid_file_state(
+    pid_path: Path, daemon_pid: int | None, displaced: int | None, progress: _StartProgress
+) -> str:
+    """What the PID file showed when the wait ended, for its message.
+
+    ``daemon_pid`` is its pid while that runs. One that does not run was
+    still written (review 8, R8-2): a daemon that wrote its PID file and
+    crashed created one. A daemon that has exited has no proof pending.
+    """
     if daemon_pid is None:
-        return "no PID file created"
+        recorded = _recorded_pid(pid_path)
+        if recorded is None:
+            return "no PID file created"
+        return f"the PID file names PID {recorded}, which is not running"
     if daemon_pid == displaced:
         return f"the PID file still names PID {displaced}, from before this start"
+    if progress.exited:
+        if daemon_pid == progress.launched_pid:
+            return f"the PID file names PID {daemon_pid}, the daemon that exited"
+        return f"the PID file names PID {daemon_pid}, not the daemon this start launched"
     return f"the PID file names PID {daemon_pid}; the proof that it serves this project is pending"
 
 
@@ -1008,15 +1059,16 @@ def _await_started_daemon(
     It waits while the daemon is alive and advancing (N202): it gives up
     when the daemon exits, when it has made no progress for the stall
     window, and in any case at the budget. Both are wall-clock time (round
-    6, R5-1): a probe can take its whole timeout, and a tick count then ran
-    the PreToolUse deny path near the hook's 60 s timeout. The last probe
-    may overrun them by one probe.
+    6, R5-1): a probe can take its whole timeout, so a tick count is no
+    bound. The last probe may overrun them by one probe. A wait on another
+    start's lock is no stall: that start is making the progress, and the
+    budget still ends the wait (review 8, R8-2).
     """
     started = last_progress = time.monotonic()
     last_read: int | None = None
     while True:
         time.sleep(Timeout.DAEMON_PID_POLL_INTERVAL_SEC)
-        advanced = progress.advanced()
+        advanced = progress.advanced() or progress.waiting_on_lock
         daemon_pid = read_pid_file(str(pid_path))
         if daemon_pid != last_read:
             last_read, advanced = daemon_pid, True
@@ -1029,16 +1081,20 @@ def _await_started_daemon(
         now = time.monotonic()
         if advanced:
             last_progress = now
-        state = _pid_file_state(daemon_pid, displaced)
         if progress.exited:
+            state = _pid_file_state(pid_path, daemon_pid, displaced, progress)
             return _StartWait(pid=None, failure=f"the daemon exited while starting ({state})")
         if now - last_progress >= Timeout.DAEMON_START_STALL_SEC:
+            state = _pid_file_state(pid_path, daemon_pid, displaced, progress)
             return _StartWait(
                 pid=None,
                 failure=f"the daemon made no progress for "
                 f"{Timeout.DAEMON_START_STALL_SEC:g}s ({state})",
             )
         if now - started >= Timeout.DAEMON_START_BUDGET_SEC:
+            state = _pid_file_state(pid_path, daemon_pid, displaced, progress)
+            if progress.waiting_on_lock:
+                state = f"it is waiting on the start lock another start holds; {state}"
             return _StartWait(
                 pid=None,
                 failure=f"the daemon was still starting after "
@@ -1068,7 +1124,10 @@ def cmd_stop(args: argparse.Namespace) -> int:
     # stop_verified_daemon proves it serves THIS project root, and the pidfd
     # it pins before that proof (N206) keeps a pid reused at any point after
     # -- including the SIGTERM-to-SIGKILL gap -- from receiving a signal (the
-    # TOCTOU Plan 00466 N24 review 3 mi5 raised against a plain pid). SIGKILL
+    # TOCTOU Plan 00466 N24 review 3 mi5 raised against a plain pid). Where
+    # the kernel makes no pidfds, the proven psutil handle signals instead;
+    # its start-time re-check narrows that window but leaves the gap between
+    # the re-check and the kill. SIGKILL
     # escalation after the SIGTERM grace is Plan 00466 N40 review 2 MA2 -- a
     # GIL-holding handler cannot even reach Python's signal-handling bytecode
     # check to act on SIGTERM, and SIGKILL cannot be caught, blocked or ignored.

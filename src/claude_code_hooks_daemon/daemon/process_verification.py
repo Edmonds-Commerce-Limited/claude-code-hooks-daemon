@@ -284,7 +284,12 @@ def _root_from_flag(cmdline: list[str]) -> str | None:
     Raises:
         _UnreadableLaunch: The arguments are not a ``start``/``restart`` its
             parser accepts, or name a relative root, which was resolved
-            against a working directory the daemon has since left.
+            against a working directory the daemon has since left, or a
+            root that is not its own normal form. ``cmd_start`` serves
+            ``Path.resolve()``, which follows a link before it meets ``..``,
+            where ``normpath`` collapses ``..`` first: the daemon launched
+            with ``/var/run/../workspace`` serves ``/workspace``, not
+            ``/var/workspace`` (review 8, S8-1).
     """
     module_index = _cli_module_index(cmdline)
     if module_index is None:
@@ -299,7 +304,9 @@ def _root_from_flag(cmdline: list[str]) -> str | None:
         return None
     if not root.is_absolute():
         raise _UnreadableLaunch(f"{_PROJECT_ROOT_FLAG} {str(root)!r} is relative")
-    return _normalize_root(root)
+    if os.pardir in root.parts or str(root) != _normalize_root(root):
+        raise _UnreadableLaunch(f"{_PROJECT_ROOT_FLAG} {str(root)!r} is not its own normal form")
+    return str(root)
 
 
 def _project_of_socket(path: Path) -> str | None:

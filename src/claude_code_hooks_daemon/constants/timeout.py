@@ -171,13 +171,28 @@ class Timeout:
 
     # Daemon startup polling (Plan 00100 Task 0.2)
     DAEMON_PID_POLL_INTERVAL_SEC = 0.1  # 100ms between PID-file checks
-    # A starting daemon is waited on while it is alive and advancing (Plan
-    # 00466 N202): it is given up on once it has made no progress for the
-    # stall window, and in any case at the budget, which is wall-clock time
-    # however long a probe takes. The budget plus init.sh's own 15 s
-    # readiness poll stays inside the PreToolUse hook's 60 s.
+    # How long `cmd_start` waits on the daemon it launched (Plan 00466 N202):
+    # it is given up on once it has made no progress for the stall window,
+    # and in any case at the budget, which is wall-clock time however long a
+    # probe takes. A hook never waits on this: init.sh launches `start` in
+    # the background and stops at HOOK_START_DEADLINE_SEC below (review 8,
+    # R8-1), because this budget, the start lock waits and the interpreter
+    # together outlast REGISTERED_HOOK_TIMEOUT.
     DAEMON_START_STALL_SEC = 10.0
     DAEMON_START_BUDGET_SEC = 30.0
+    # Headroom a hook that starts the daemon keeps under
+    # REGISTERED_HOOK_TIMEOUT, for the interpreters it runs and writing its
+    # answer (seconds).
+    HOOK_START_MARGIN_SEC = 5
+    # How far into a hook (seconds from its own start) init.sh waits for a
+    # daemon it is starting before it denies "the daemon is starting; retry"
+    # (review 8, R8-1). After it can come the one helper run a hook makes,
+    # which may wait FILE_LOCK for the start lock, and the request the
+    # daemon then answers, then the margin. Twin of init.sh's
+    # _HOOKS_DAEMON_START_DEADLINE.
+    HOOK_START_DEADLINE_SEC = int(
+        REGISTERED_HOOK_TIMEOUT - SOCKET_DISPATCH_ROUNDTRIP - FILE_LOCK - HOOK_START_MARGIN_SEC
+    )
     DAEMON_RESTART_VERIFY_TIMEOUT_SEC = 15  # Overall restart verification ceiling
 
     # Live-daemon socket-liveness probe (Plan 00127). Connect-timeout for

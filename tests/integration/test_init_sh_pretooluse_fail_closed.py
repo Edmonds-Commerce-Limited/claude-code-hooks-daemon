@@ -18,6 +18,7 @@ import contextlib
 import errno
 import json
 import os
+import re
 import shutil
 import socket
 import struct
@@ -878,6 +879,26 @@ def _run_script(
     extra_env: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
     """Run ``script`` in ``project`` with ``hook_input`` on stdin (a string as it is)."""
+    return subprocess.run(
+        [BASH, "-c", script],
+        cwd=project,
+        env=_script_env(socket_path, relay_failure=relay_failure, extra_env=extra_env),
+        input=_stdin_text(hook_input),
+        capture_output=True,
+        text=True,
+        timeout=Timeout.REQUEST_LONG,
+        check=False,
+    )
+
+
+def _script_env(
+    socket_path: Path,
+    *,
+    relay_failure: str | None = None,
+    extra_env: dict[str, str] | None = None,
+) -> dict[str, str]:
+    """The environment a hook script runs in here: no daemon or CI settings
+    of the caller's, and ``socket_path`` as the daemon's socket."""
     env = {
         k: v for k, v in os.environ.items() if not k.startswith(("CLAUDE_HOOKS_", "HOOKS_DAEMON_"))
     }
@@ -890,16 +911,7 @@ def _run_script(
         env["HOOKS_DAEMON_RELAY_FAILED"] = relay_failure
     if extra_env:
         env.update(extra_env)
-    return subprocess.run(
-        [BASH, "-c", script],
-        cwd=project,
-        env=env,
-        input=_stdin_text(hook_input),
-        capture_output=True,
-        text=True,
-        timeout=Timeout.REQUEST_LONG,
-        check=False,
-    )
+    return env
 
 
 def _stdin_text(hook_input: dict[str, Any] | str | None) -> str:
@@ -2111,6 +2123,90 @@ class TestTheStartupPollIsBoundedByTheClock:
         assert _verdict(result) == "deny", result.stderr
         assert helper_runs == 1, result.stderr
         assert 0 < ticks < self._BUDGET, ticks
+
+
+def _init_sh_value(pattern: str) -> str:
+    """The one value ``pattern``'s group captures in ``init.sh``."""
+    found = re.findall(pattern, INIT_SH.read_text(), re.MULTILINE)
+    assert len(found) == 1, (pattern, found)
+    return str(found[0])
+
+
+class TestAStartNeverRunsTheHookPastItsTimeout:
+    """Plan 00466 review 8, R8-1: a PreToolUse hook that reaches its timeout
+    lets the call run unjudged. The hook waited on the launcher, and the
+    launcher's own bounds (its interpreter, the start lock twice, a 30 s
+    start budget) added to the 15 s poll after it came to about 65 s. The
+    hook now bounds its own wait from its own start, and never waits on the
+    launcher."""
+
+    def test_the_bounds_on_the_start_path_sum_below_the_hook_timeout(self) -> None:
+        """From the hook's start: the start deadline, which covers every wait
+        before it, the start lock wait of the one helper run a hook makes,
+        which may begin just before the deadline, and the request the
+        started daemon then answers. The launcher's bounds are not on this
+        path, which the test below proves."""
+        start_deadline = int(_init_sh_value(r"^_HOOKS_DAEMON_START_DEADLINE=(\d+)$"))
+        request = float(
+            _init_sh_value(r"^def _resolve_socket_timeout\(\):\n.*\n.*\n\s+return (\d+\.\d+)$")
+        )
+
+        path = start_deadline + Timeout.FILE_LOCK + request
+
+        assert start_deadline == Timeout.HOOK_START_DEADLINE_SEC
+        assert request == Timeout.SOCKET_DISPATCH_ROUNDTRIP
+        assert Timeout.HOOK_START_MARGIN_SEC > 0
+        assert path + Timeout.HOOK_START_MARGIN_SEC <= Timeout.REGISTERED_HOOK_TIMEOUT
+
+    def test_a_start_still_under_way_at_the_deadline_is_denied_as_starting(
+        self, project: Path, tmp_path: Path
+    ) -> None:
+        """The launcher waits until this test releases it, so the hook can
+        only answer by not waiting on it. The deadline is shortened, as the
+        start poll's budget is above; nothing else is stubbed but the
+        launcher and the venv check."""
+        release = tmp_path / "release"
+        fake_python = tmp_path / "fake-python"
+        fake_python.write_text(
+            "#!/bin/bash\n"
+            'if [[ "$1" == -m ]]; then\n'
+            f'    until [[ -e "{release}" ]]; do sleep 0.1; done\n'
+            "    exit 1\n"
+            "fi\n"
+            f'exec "{sys.executable}" "$@"\n'
+        )
+        fake_python.chmod(0o755)
+        script = (
+            f"source .claude/init.sh\nPYTHON_CMD={fake_python}\n"
+            "validate_venv() { return 0; }\n"
+            "_is_ci_environment() { return 1; }\n_is_ci_enforced() { return 1; }\n"
+            f"_HOOKS_DAEMON_START_DEADLINE=2\n{_FORWARDER_BODY}"
+        )
+        hook = subprocess.Popen(
+            [BASH, "-c", script],
+            cwd=project,
+            env=_script_env(tmp_path / "no-daemon.sock"),
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        try:
+            stdout, stderr = hook.communicate(
+                _stdin_text(_BASH_TOOL_INPUT), timeout=Timeout.REQUEST_LONG
+            )
+        except subprocess.TimeoutExpired:
+            release.touch()
+            hook.communicate()
+            pytest.fail("the hook waited on a launcher that had not finished")
+        finally:
+            release.touch()
+
+        result = subprocess.CompletedProcess(hook.args, hook.returncode, stdout, stderr)
+        assert _verdict(result) == "deny", stderr
+        reason = _reason(json.loads(stdout))
+        assert "starting" in reason, reason
+        assert "retry" in reason.lower(), reason
 
 
 def _kill_failure_message(error: int) -> str:

@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import psutil
+import pytest
 
 from claude_code_hooks_daemon.daemon.paths import prospective_socket_path
 from claude_code_hooks_daemon.daemon.process_verification import (
@@ -749,6 +750,35 @@ class TestTheFlagIsReadAsTheDaemonsOwnParserReadsIt:
 
         assert proof.root is None
         assert "relative" in (proof.refusal or "")
+
+    @pytest.mark.parametrize(
+        "root",
+        ["/var/run/../workspace", f"{_OWN_ROOT}/../ours", f"{_OWN_ROOT}/.."],
+    )
+    def test_a_root_that_is_not_its_own_normal_form_proves_nothing(self, root: str) -> None:
+        """Review 8, S8-1 (N225): ``cmd_start`` serves ``Path.resolve()``,
+        which follows ``/var/run`` to ``/run`` before it meets ``..``, while
+        the proof collapsed ``..`` first. ``/var/run/../workspace`` served
+        ``/workspace`` and was attributed to ``/var/workspace``. Its
+        environment names our root too, so only the refusal keeps it from
+        being attributed."""
+        proof = self._proof_for(
+            ["--project-root", "/wrapperroot", "--project-root", root, "start"],
+            {PROJECT_ROOT_ENV_VAR: _OWN_ROOT},
+        )
+
+        assert proof.root is None
+        assert "normal form" in (proof.refusal or ""), proof.refusal
+
+    @pytest.mark.parametrize(
+        "root", [f"{_OWN_ROOT}/", "/srv//projects/ours", "/srv/./projects/ours"]
+    )
+    def test_a_root_its_parser_normalises_is_attributed_as_parsed(self, root: str) -> None:
+        """Its parser reads the root as a ``Path``, which drops these, so
+        they name the root ``cmd_start`` serves."""
+        proof = self._proof_for(["--project-root", root, "start"])
+
+        assert proof.root == os.path.realpath(_OWN_ROOT)
 
     def test_the_reading_agrees_with_the_cli_parser_itself(self) -> None:
         """The same arguments through ``cli``'s own parser keep the same root,

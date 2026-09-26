@@ -1,5 +1,6 @@
 """Tests for ClientInstallValidator."""
 
+import errno
 import json
 import os
 import shutil
@@ -17,7 +18,12 @@ import yaml
 from claude_code_hooks_daemon.constants.paths import DaemonPath
 from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.daemon import server
-from claude_code_hooks_daemon.daemon.paths import PID_MAX_LIMIT
+from claude_code_hooks_daemon.daemon.paths import (
+    _UNIX_SOCKET_PATH_LIMIT,
+    PID_MAX_LIMIT,
+    get_pid_path,
+    get_socket_path,
+)
 from claude_code_hooks_daemon.install import bin_wrapper
 from claude_code_hooks_daemon.install.client_validator import (
     ClientInstallValidator,
@@ -343,6 +349,32 @@ class TestCheckRunningDaemon:
         assert other.poll() is None, "the installer signalled another project's daemon"
         assert any("Did not signal" in w for w in result.warnings)
 
+    @pytest.mark.parametrize("error", [errno.EINVAL, errno.ENOMEM])
+    def test_a_daemon_that_cannot_be_pinned_is_warned_about_not_signalled(
+        self, tmp_path, spawned, monkeypatch, error
+    ):
+        """Review 8, R8-4: a ``pidfd_open`` error outside the no-pidfd list
+        escaped the installer's check as a bare ``OSError``."""
+        project_root = tmp_path / "project"
+        untracked_dir = project_root / ".claude" / "hooks-daemon" / "untracked"
+        untracked_dir.mkdir(parents=True)
+        daemon = spawned(_DAEMON_MODULE, "--project-root", str(project_root), "start")
+        pid_file = untracked_dir / "daemon-abc.pid"
+        pid_file.write_text(str(daemon.pid))
+
+        def failing(pid, flags=0):
+            raise OSError(error, os.strerror(error))
+
+        monkeypatch.setattr(os, "pidfd_open", failing)
+
+        result = ClientInstallValidator._check_running_daemon(project_root)
+
+        assert daemon.poll() is None, "the installer signalled a daemon it could not pin"
+        assert pid_file.exists()
+        assert any(
+            "Did not signal" in w and os.strerror(error) in w for w in result.warnings
+        ), result.warnings
+
     def test_an_unreadable_pid_file_is_reported_not_ignored(self, tmp_path):
         project_root = tmp_path / "project"
         untracked_dir = project_root / ".claude" / "hooks-daemon" / "untracked"
@@ -642,6 +674,45 @@ class TestRuntimeFilesGoOnlyUnderTheStartLockAndOnlyWhileDead:
 
         ClientInstallValidator._check_running_daemon(self._project(short_untracked))
 
+        assert not pid_file.exists()
+
+    @pytest.fixture
+    def pid_file_at_the_limit(self, monkeypatch):
+        """This host's PID file in a client install, at exactly the AF_UNIX
+        limit, so its socket (one character longer) falls back to a runtime
+        directory of the test's own."""
+        monkeypatch.setenv("HOSTNAME", "cvhost")
+        monkeypatch.delenv("CLAUDE_HOOKS_SOCKET_PATH", raising=False)
+        monkeypatch.delenv("CLAUDE_HOOKS_PID_PATH", raising=False)
+        base = Path(tempfile.mkdtemp(prefix="hd-cv-"))
+        runtime = base / "run"
+        runtime.mkdir()
+        monkeypatch.setenv("XDG_RUNTIME_DIR", str(runtime))
+        tail = "/.claude/hooks-daemon/untracked/daemon-cvhost.pid"
+        padding = _UNIX_SOCKET_PATH_LIMIT - len(f"{base}/{tail}")
+        assert padding > 0
+        project = base / ("p" * padding)
+        (project / ".claude" / "hooks-daemon" / "untracked").mkdir(parents=True)
+        pid_file = get_pid_path(project)
+        assert len(str(pid_file)) == _UNIX_SOCKET_PATH_LIMIT
+        assert get_socket_path(project).parent == runtime
+        pid_file.write_text(str(self._DEAD_PID))
+        yield project, pid_file, get_socket_path(project)
+        shutil.rmtree(base)
+
+    def test_a_pid_file_at_the_limit_goes_under_its_sockets_real_lock(
+        self, pid_file_at_the_limit, monkeypatch
+    ):
+        """Review 8, R8-3: the lock was taken beside the PID file, where no
+        start takes it, while the start held the fallback socket's."""
+        project, pid_file, socket_path = pid_file_at_the_limit
+        monkeypatch.setattr(Timeout, "FILE_LOCK", 0)
+        with server.hold_start_lock(socket_path, Timeout.FILE_LOCK):
+            ClientInstallValidator.cleanup_stale_runtime_files(project)
+            ClientInstallValidator._check_running_daemon(project)
+            assert pid_file.exists()
+
+        ClientInstallValidator.cleanup_stale_runtime_files(project)
         assert not pid_file.exists()
 
 

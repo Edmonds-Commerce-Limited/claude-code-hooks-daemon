@@ -43,6 +43,7 @@ from claude_code_hooks_daemon.daemon.server import (
     _socket_is_live,
     _SocketLiveness,
     daemon_socket_identity,
+    hold_start_lock,
 )
 
 
@@ -653,6 +654,50 @@ async def test_concurrent_starts_yield_single_daemon(tmp_path: Path) -> None:
         for task in (task_a, task_b):
             with contextlib.suppress(Exception):
                 await asyncio.wait_for(task, timeout=Timeout.SOCKET_CONNECT)
+
+
+@pytest.mark.anyio
+async def test_a_start_waiting_on_anothers_lock_says_so_and_when_it_has_it(
+    tmp_path: Path,
+) -> None:
+    """Review 8, R8-2: the wait spends no CPU and finishes no step, so its
+    launcher read it as a stall unless it is told."""
+    sock_path = tmp_path / "held.sock"
+    reports: list[bool] = []
+    daemon = HooksDaemon(
+        config=_make_config(sock_path),
+        controller=_FakeController(),
+        start_lock_waiting=reports.append,
+    )
+    with hold_start_lock(sock_path, Timeout.FILE_LOCK):
+        start_task = asyncio.create_task(daemon.start())
+        while not reports:
+            await asyncio.sleep(0.01)
+        assert reports == [True]
+        assert daemon.server is None
+    try:
+        await asyncio.wait_for(daemon.started_event.wait(), timeout=Timeout.SOCKET_CONNECT)
+        assert reports == [True, False]
+    finally:
+        await daemon.shutdown()
+        await asyncio.wait_for(start_task, timeout=Timeout.SOCKET_CONNECT)
+
+
+@pytest.mark.anyio
+async def test_a_start_that_takes_the_lock_at_once_reports_no_wait(tmp_path: Path) -> None:
+    reports: list[bool] = []
+    daemon = HooksDaemon(
+        config=_make_config(tmp_path / "free.sock"),
+        controller=_FakeController(),
+        start_lock_waiting=reports.append,
+    )
+    start_task = asyncio.create_task(daemon.start())
+    try:
+        await asyncio.wait_for(daemon.started_event.wait(), timeout=Timeout.SOCKET_CONNECT)
+        assert reports == []
+    finally:
+        await daemon.shutdown()
+        await asyncio.wait_for(start_task, timeout=Timeout.SOCKET_CONNECT)
 
 
 def test_start_lock_path_is_sibling_of_socket(tmp_path: Path) -> None:

@@ -1602,13 +1602,30 @@ def get_socket_path(project_dir: Path | str) -> Path:
 
     # Add hostname-based suffix for isolation
     suffix = _get_hostname_suffix()
-    path = untracked_dir / f"daemon{suffix}.sock"
+    return _fitted_socket_path(project_path, untracked_dir / f"daemon{suffix}.sock")
 
-    # Fallback if path exceeds AF_UNIX socket length limit
+
+def _fitted_socket_path(project_path: Path, path: Path) -> Path:
+    """``path``, or the fallback socket when it exceeds the AF_UNIX length limit."""
     if len(str(path)) > _UNIX_SOCKET_PATH_LIMIT:
         return _get_fallback_runtime_dir(project_path, "sock")
-
     return path
+
+
+def socket_path_paired_with(project_dir: Path | str, pid_file: Path) -> Path:
+    """The socket of the daemon whose PID file is ``pid_file``, found as it binds it.
+
+    The start lock guarding both files sits beside the socket, so this is
+    also where that lock is. This host's PID file pairs with
+    :func:`get_socket_path`; another host's (``daemon-{host}.pid``) with the
+    ``.sock`` beside it, through the same length fallback. The socket name
+    is one character longer than the PID file's, so a PID file path of
+    exactly the limit stays put while its socket falls back (review 8, R8-3).
+    """
+    project_path = Path(project_dir).resolve()
+    if pid_file == get_pid_path(project_path):
+        return get_socket_path(project_path)
+    return _fitted_socket_path(project_path, pid_file.with_suffix(".sock"))
 
 
 # Worst-case length of "<event-file-name>.sock" across every wired event

@@ -1,5 +1,6 @@
 """Tests for daemon single-process enforcement logic."""
 
+import errno
 import fcntl
 import os
 from pathlib import Path
@@ -7,6 +8,7 @@ from unittest.mock import MagicMock, call, patch
 
 import psutil
 import pytest
+from tests.daemon_like_process import daemon_like_process
 
 from claude_code_hooks_daemon.constants import Timeout
 from claude_code_hooks_daemon.daemon import server
@@ -362,3 +364,36 @@ class TestEnforceSingleDaemonKillFailure:
 
         mock_logger.error.assert_called_once()
         assert "12345" in str(mock_logger.error.call_args)
+
+    def test_a_peer_that_cannot_be_pinned_logs_error_and_is_not_signalled(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Review 8, R8-4: a ``pidfd_open`` error outside the no-pidfd list
+        escaped ``enforce_single_daemon`` and aborted ``cmd_start``. Only the
+        pin fails here; the stop and the peer are real."""
+
+        def failing(pid: int, flags: int = 0) -> int:
+            raise OSError(errno.EINVAL, os.strerror(errno.EINVAL))
+
+        monkeypatch.setattr(os, "pidfd_open", failing)
+        mock_config = MagicMock()
+        mock_config.daemon.enforce_single_daemon_process = True
+        with daemon_like_process(tmp_path) as peer:
+            with (
+                patch(
+                    "claude_code_hooks_daemon.daemon.enforcement.is_container_environment",
+                    return_value=True,
+                ),
+                patch(
+                    "claude_code_hooks_daemon.daemon.enforcement.find_all_daemon_processes",
+                    return_value=[peer],
+                ),
+                patch("claude_code_hooks_daemon.daemon.enforcement.logger") as mock_logger,
+            ):
+                enforce_single_daemon(
+                    config=mock_config, pid_path=tmp_path / "daemon.pid", project_root=tmp_path
+                )
+
+            assert psutil.Process(peer).status() != psutil.STATUS_ZOMBIE
+        mock_logger.error.assert_called_once()
+        assert os.strerror(errno.EINVAL) in str(mock_logger.error.call_args)

@@ -22,7 +22,7 @@ import signal
 import stat
 import sys
 import time
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
@@ -822,6 +822,7 @@ class HooksDaemon:
         "_is_new_controller",
         "_shutdown_requested",
         "_shutdown_task",
+        "_start_lock_waiting",
         "config",
         "controller",
         "last_activity",
@@ -835,6 +836,7 @@ class HooksDaemon:
         config: DaemonConfig,
         controller: Controller | LegacyController,
         idle_check_interval: int = 60,
+        start_lock_waiting: Callable[[bool], None] | None = None,
     ) -> None:
         """Initialise hooks daemon.
 
@@ -842,9 +844,12 @@ class HooksDaemon:
             config: Daemon configuration
             controller: Controller for request dispatch (new or legacy)
             idle_check_interval: Seconds between idle timeout checks (default 60)
+            start_lock_waiting: Told True before ``start`` waits on the start
+                lock another start holds, and False once it has the lock
         """
         self.config = config
         self.controller = controller
+        self._start_lock_waiting = start_lock_waiting
         self.server: asyncio.Server | None = None
         self._event_servers: dict[str, asyncio.Server] = {}
         # Wire event name -> why its per-event socket was not bound; reported
@@ -1176,7 +1181,15 @@ class HooksDaemon:
             # offloading keeps the loop responsive and avoids a single-loop
             # deadlock where the waiter starves the holder.
             loop = asyncio.get_running_loop()
-            await loop.run_in_executor(None, fcntl.flock, lock_fd, fcntl.LOCK_EX)
+            try:
+                fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                # Another start holds it. The wait spends no CPU and finishes
+                # no step, so it is announced, or the parent reads it as a
+                # stall (review 8, R8-2).
+                self._report_start_lock_wait(True)
+                await loop.run_in_executor(None, fcntl.flock, lock_fd, fcntl.LOCK_EX)
+                self._report_start_lock_wait(False)
             await self._reuse_or_clear_socket(socket_path)
 
             # Write PID file only once we hold the lock and have cleared any
@@ -1194,6 +1207,11 @@ class HooksDaemon:
             with contextlib.suppress(OSError):
                 fcntl.flock(lock_fd, fcntl.LOCK_UN)
             os.close(lock_fd)
+
+    def _report_start_lock_wait(self, waiting: bool) -> None:
+        """Tell whoever launched this start whether it is waiting on the lock."""
+        if self._start_lock_waiting is not None:
+            self._start_lock_waiting(waiting)
 
     async def _reuse_or_clear_socket(self, socket_path: Path) -> None:
         """Probe ``socket_path`` and either reuse a live incumbent or clear a stale one.

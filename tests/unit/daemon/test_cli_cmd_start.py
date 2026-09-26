@@ -19,8 +19,12 @@ import pytest
 
 from claude_code_hooks_daemon.constants import Timeout
 from claude_code_hooks_daemon.daemon.cli import cmd_start
+from claude_code_hooks_daemon.daemon.paths import PID_MAX_LIMIT
 from claude_code_hooks_daemon.daemon.process_verification import RootProof
 from claude_code_hooks_daemon.daemon.server import _SocketLiveness
+
+# Parseable, yet above the largest pid pid_max allows, so it names no process.
+_DEAD_PID = PID_MAX_LIMIT
 
 
 @contextlib.contextmanager
@@ -174,9 +178,12 @@ class TestTheStartWaitFollowsTheDaemonsProgress:
         *,
         child_alive: bool,
         proven: bool = True,
+        pid_path: Path | None = None,
     ) -> tuple[int, str, str]:
         """Run ``cmd_start``'s parent. ``pid_file(tick, progress_fd)`` answers
-        each poll's PID-file read after the first, the pre-fork one."""
+        each poll's PID-file read after the first, the pre-fork one, as
+        ``read_pid_file`` does: a live pid or None. ``pid_path`` is the file
+        itself, for what it records whatever its pid's state."""
         args = argparse.Namespace(project_root=tmp_path)
         stdout, stderr = io.StringIO(), io.StringIO()
         reads = [0]
@@ -195,7 +202,10 @@ class TestTheStartWaitFollowsTheDaemonsProgress:
             patch("claude_code_hooks_daemon.daemon.cli.get_project_path", return_value=tmp_path),
             patch("claude_code_hooks_daemon.daemon.cli.read_pid_file", side_effect=read_pid_file),
             patch("claude_code_hooks_daemon.daemon.cli.get_socket_path"),
-            patch("claude_code_hooks_daemon.daemon.cli.get_pid_path"),
+            patch(
+                "claude_code_hooks_daemon.daemon.cli.get_pid_path",
+                return_value=pid_path or tmp_path / "no-daemon.pid",
+            ),
             patch(
                 "claude_code_hooks_daemon.daemon.cli._socket_liveness_sync",
                 return_value=_SocketLiveness.NOT_LIVE,
@@ -294,6 +304,59 @@ class TestTheStartWaitFollowsTheDaemonsProgress:
         assert "still starting" in errors
         assert "no PID file" in errors
         assert len(polls) <= self._ticks(Timeout.DAEMON_START_BUDGET_SEC) + 1
+
+    def test_a_daemon_that_wrote_its_pid_file_then_crashed_is_not_called_fileless(
+        self, tmp_path: Path
+    ) -> None:
+        """Review 8, R8-2: ``read_pid_file`` answers None for a pid that is
+        not running, so a daemon that wrote its PID file and then crashed was
+        reported to have created none."""
+        pid_path = tmp_path / "daemon.pid"
+
+        def crashed(tick: int, progress_fd: int | None) -> int | None:
+            pid_path.write_text(f"{_DEAD_PID}\n")
+            return None
+
+        result, _, errors = self._start(tmp_path, crashed, child_alive=False, pid_path=pid_path)
+
+        assert result == 1
+        assert "exited" in errors
+        assert f"PID {_DEAD_PID}" in errors
+        assert "no PID file" not in errors
+        assert "pending" not in errors
+
+    def test_a_daemon_that_exited_is_not_called_pending(self, tmp_path: Path) -> None:
+        """Review 8, R8-2: an exit with a live pid in the PID file said the
+        proof was pending, for a daemon that could no longer be proven."""
+        result, _, errors = self._start(
+            tmp_path, lambda tick, progress_fd: self._STARTED, child_alive=False, proven=False
+        )
+
+        assert result == 1
+        assert "exited" in errors
+        assert f"PID {self._STARTED}" in errors
+        assert "pending" not in errors
+
+    def test_a_daemon_waiting_on_another_starts_lock_is_not_called_stalled(
+        self, tmp_path: Path
+    ) -> None:
+        """Review 8, R8-2: a daemon blocked on the start lock another start
+        holds spends no CPU and reports nothing, and was given up on as
+        making no progress. It says it is waiting, once."""
+        polls: list[int] = []
+
+        def waiting(tick: int, progress_fd: int | None) -> int | None:
+            polls.append(tick)
+            if tick == 1 and progress_fd is not None:
+                os.write(progress_fd, b"w")
+            return None
+
+        result, _, errors = self._start(tmp_path, waiting, child_alive=True)
+
+        assert result == 1
+        assert "no progress" not in errors
+        assert "start lock" in errors
+        assert len(polls) >= self._ticks(Timeout.DAEMON_START_BUDGET_SEC)
 
 
 class TestCmdStartParentProcess:

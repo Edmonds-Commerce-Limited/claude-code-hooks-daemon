@@ -62,6 +62,11 @@ _HOOKS_DAEMON_REPO_UNCONFIGURED=false
 _HOOKS_DAEMON_VENV_MISSING=false
 _HOOKS_DAEMON_VENV_MISSING_VERSION=""
 
+# Set by start_daemon when this hook's start deadline came while the daemon
+# it launched was still starting (Plan 00466 review 8, R8-1): nothing is
+# wrong, and the call is denied with a "retry" rather than a diagnosis.
+_HOOKS_DAEMON_STARTING=false
+
 # Set by _venv_self_heal (Plan 00456) when VENV_MISSING found a real clone
 # with a readable version: what the clone's scripts/venv_bootstrap.sh did
 # about it. STATE is one of started|running|failed|refused|disabled|error, or
@@ -635,6 +640,14 @@ $_hd_venv_missing_remedy")
             "$_hd_remedy_1" \
             "$_hd_remedy_2" \
             "Then restart your Claude session for hooks to activate.")
+    elif [[ "${_HOOKS_DAEMON_STARTING:-false}" == "true" ]]; then
+        # Still starting when this hook had to answer (Plan 00466 review 8,
+        # R8-1). Nothing is known to be wrong, so nothing is to be fixed.
+        context_msg=$(printf '%s\n%s\n%s\n%s' \
+            "HOOKS DAEMON: the daemon is starting; retry" \
+            "" \
+            "The daemon was still starting when this hook had to answer, before its timeout." \
+            "Hook safety handlers are inactive for this call only. Nothing needs fixing.")
     else
         # Standard error message
         # NOTE: Language is intentionally measured to avoid triggering investigation loops
@@ -667,7 +680,16 @@ $_hd_venv_missing_remedy")
     # command that is actually allowed, and name the human fallback.
     local _pretooluse_deny_msg=""
     local _hd_advice=""
-    if [[ "$_pretooluse_deny" == "true" ]] \
+    if [[ "$_pretooluse_deny" == "true" && "${_HOOKS_DAEMON_STARTING:-false}" == "true" ]]; then
+        # Plan 00466 review 8, R8-1: the call is denied only because the
+        # daemon has not finished starting. A retry is the whole remedy.
+        _pretooluse_deny_msg=$(printf '%s\n%s\n%s\n%s\n%s' \
+            "HOOKS DAEMON: the daemon is starting; retry this call — denied for safety" \
+            "" \
+            "The daemon was still starting when this hook had to answer, before its" \
+            "timeout, so no guard judged this call. Retry it in a few seconds; nothing" \
+            "needs fixing. If it is still denied after a minute, restart the daemon.")
+    elif [[ "$_pretooluse_deny" == "true" ]] \
         && ! _hd_advice="$(_hooks_daemon_recovery_advice)"; then
         # Plan 00466 round 3 (R2-1): python3 names the recovery command, and
         # under set -e its failure here would end the hook with no answer at
@@ -1170,7 +1192,18 @@ fi
 # 50 deciseconds (5s) produced false `daemon_startup_failed` reports
 # while the daemon was still binding — see Issue 1 in
 # untracked/hooks-daemon-niggles.md (2026-05-14 field report).
+#
+# It is how long the poll runs on once the launcher has finished, and never
+# past _HOOKS_DAEMON_START_DEADLINE.
 DAEMON_STARTUP_TIMEOUT=150
+
+# How far into this hook (bash's SECONDS, which counts from the hook's own
+# start) a daemon start is waited on before the hook denies "the daemon is
+# starting; retry" (Plan 00466 review 8, R8-1). A PreToolUse hook that
+# reaches the 60 s timeout lets the call run unjudged, and after this can
+# come one helper run's start-lock wait and the request the daemon answers.
+# Twin of Timeout.HOOK_START_DEADLINE_SEC.
+_HOOKS_DAEMON_START_DEADLINE=15
 
 # Export paths for use by forwarder scripts
 export HOOKS_DAEMON_ROOT_DIR
@@ -1528,12 +1561,20 @@ start_daemon() {
     # The recovery source is exported only for this hook's own child shells
     # (see _hooks_daemon_recovery_py); the daemon is not one of them. The
     # un-export happens inside the substitution's subshell, not here.
-    local start_output
-    start_output="$(export -fn _hooks_daemon_recovery_py
-    CLAUDE_HOOKS_SOCKET_PATH="$SOCKET_PATH" \
-    CLAUDE_HOOKS_PID_PATH="$PID_PATH" \
-    $PYTHON_CMD -m claude_code_hooks_daemon.daemon.cli \
-        --project-root "$PROJECT_PATH" start 2>&1)"
+    #
+    # The launcher runs beside this hook, which reads its output as it comes
+    # and never waits on it (Plan 00466 review 8, R8-1): its own waits (two
+    # start-lock waits, a 30 s start budget) outlast the hook's 60 s timeout,
+    # and a PreToolUse hook that times out lets the call run unjudged. A
+    # launcher still writing once the hook has answered gets EPIPE, which
+    # only its parent meets, after the fork: the daemon keeps starting. Its
+    # stdin is not the hook's, which carries the call to judge.
+    local launch_fd launch_output="" launch_done=false
+    exec {launch_fd}< <(export -fn _hooks_daemon_recovery_py
+        CLAUDE_HOOKS_SOCKET_PATH="$SOCKET_PATH" \
+            CLAUDE_HOOKS_PID_PATH="$PID_PATH" \
+            $PYTHON_CMD -m claude_code_hooks_daemon.daemon.cli \
+            --project-root "$PROJECT_PATH" start < /dev/null 2>&1)
 
     # Wait for daemon to be ready (using deciseconds for integer arithmetic).
     #
@@ -1544,13 +1585,18 @@ start_daemon() {
     # is_daemon_running (PID alive) to guarantee the daemon we spawned is
     # the one we see.
     #
-    # The budget is wall-clock time (Plan 00466 round 5, R4-1). A tick count
-    # stops being one when a tick's probe can take half a second, and the
-    # whole PreToolUse path must deny well inside the hook's 60 s timeout.
-    local deadline=$((SECONDS + (DAEMON_STARTUP_TIMEOUT + 9) / 10))
+    # The budget is wall-clock time from this hook's own start (Plan 00466
+    # round 5, R4-1; review 8, R8-1), so it covers whatever ran before it. A
+    # launcher that has finished leaves DAEMON_STARTUP_TIMEOUT for its
+    # daemon to answer, and never more than the budget.
+    local deadline=$_HOOKS_DAEMON_START_DEADLINE settle_end=""
     while ((SECONDS < deadline)); do
         if is_daemon_running && [[ -S "$SOCKET_PATH" ]]; then
+            _hooks_daemon_end_launch
             return 0
+        fi
+        if _hooks_daemon_launch_settled; then
+            break
         fi
 
         # Sleep 0.1 seconds (1 decisecond)
@@ -1561,18 +1607,74 @@ start_daemon() {
     # the loop's `elapsed < TIMEOUT` check went false. One more probe
     # before declaring failure closes the boundary race.
     if is_daemon_running && [[ -S "$SOCKET_PATH" ]]; then
+        _hooks_daemon_end_launch
         return 0
+    fi
+    _hooks_daemon_end_launch
+
+    # The launcher is still at work: the daemon is starting, and nothing is
+    # known to be wrong. This hook answers now, before its timeout.
+    if [[ "$launch_done" == false ]]; then
+        _HOOKS_DAEMON_STARTING=true
+        echo "HOOKS DAEMON: the daemon is still starting ${deadline}s into this hook, which answers now rather than run past its timeout" >&2
+        return 1
     fi
 
     # Genuine timeout. NOTE: do NOT unlink PID_PATH — if the daemon is still
     # coming up, the PID slot belongs to it. is_daemon_running() cleans
     # stale PID files on next call when the process is actually dead.
-    echo "ERROR: Daemon startup timeout (daemon not ready after $(((DAEMON_STARTUP_TIMEOUT + 9) / 10)) seconds)" >&2
-    if [[ -n "$start_output" ]]; then
+    echo "ERROR: Daemon startup timeout (daemon not ready $(((DAEMON_STARTUP_TIMEOUT + 9) / 10)) seconds after its launcher finished)" >&2
+    if [[ -n "$launch_output" ]]; then
         echo "Launcher output (may explain the failure):" >&2
-        echo "$start_output" >&2
+        echo "$launch_output" >&2
     fi
     return 1
+}
+
+#
+# _hooks_daemon_drain_launch() - Append what start_daemon's launcher has
+# written since the last call to start_daemon's launch_output, without
+# waiting for more, and set its launch_done at the launcher's end of file.
+# A read that times out keeps the partial line it read.
+_hooks_daemon_drain_launch() {
+    local line rv
+    while [[ "$launch_done" == false ]]; do
+        rv=0
+        IFS= read -r -t 0.01 -u "$launch_fd" line || rv=$?
+        if ((rv == 0)); then
+            launch_output+="$line"$'\n'
+            continue
+        fi
+        launch_output+="$line"
+        if ((rv > 128)); then
+            return 0
+        fi
+        launch_done=true
+    done
+}
+
+#
+# _hooks_daemon_launch_settled() - True once start_daemon's launcher has
+# finished and DAEMON_STARTUP_TIMEOUT has passed since, in which its daemon
+# had to answer. Sets start_daemon's settle_end when it sees the finish.
+_hooks_daemon_launch_settled() {
+    _hooks_daemon_drain_launch
+    if [[ "$launch_done" == false ]]; then
+        return 1
+    fi
+    if [[ -z "$settle_end" ]]; then
+        settle_end=$((SECONDS + (DAEMON_STARTUP_TIMEOUT + 9) / 10))
+    fi
+    ((SECONDS >= settle_end))
+}
+
+#
+# _hooks_daemon_end_launch() - Take what start_daemon's launcher has written
+# so far and close this hook's end of its output. A launcher still running
+# is left to finish on its own.
+_hooks_daemon_end_launch() {
+    _hooks_daemon_drain_launch
+    exec {launch_fd}<&-
 }
 
 #
@@ -1944,6 +2046,12 @@ ensure_daemon() {
     if start_daemon; then
         rm -f "$passthrough_flag" 2>/dev/null
         return 0
+    fi
+
+    # Still starting when this hook had to answer: no diagnosis below
+    # applies, and the answer is "retry" (Plan 00466 review 8, R8-1).
+    if [[ "${_HOOKS_DAEMON_STARTING:-false}" == "true" ]]; then
+        return 1
     fi
 
     # Daemon failed to start — determine response based on environment/config
@@ -2816,6 +2924,9 @@ export -f _hooks_daemon_pid_args_prove_this_project
 export -f _hooks_daemon_pid_is_this_users
 export -f is_daemon_running
 export -f start_daemon
+export -f _hooks_daemon_drain_launch
+export -f _hooks_daemon_launch_settled
+export -f _hooks_daemon_end_launch
 export -f _hooks_daemon_is_down
 export -f ensure_daemon
 export -f send_request_stdin

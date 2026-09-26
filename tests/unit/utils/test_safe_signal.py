@@ -221,6 +221,37 @@ class TestADaemonPidIsSignalledOnlyWhenItIsThisProjectsDaemon:
 
         assert handle.pid == daemon.pid
 
+    def test_a_root_named_through_a_link_is_the_one_the_daemon_serves(
+        self, tmp_path: Path, children: list[subprocess.Popen[bytes]]
+    ) -> None:
+        """Review 8, S8-1 (N225): ``cmd_start`` serves the resolved root, so
+        that is what the named one is compared as."""
+        served = tmp_path / "real" / "project"
+        served.mkdir(parents=True)
+        (tmp_path / "link").symlink_to(tmp_path / "real")
+        daemon = _fake_daemon(children, tmp_path / "link" / "project")
+
+        handle = verified_daemon_process(daemon.pid, project_root=served)
+
+        assert handle.pid == daemon.pid
+
+    def test_a_root_whose_dotdot_follows_a_link_proves_nothing(
+        self, tmp_path: Path, children: list[subprocess.Popen[bytes]]
+    ) -> None:
+        """Review 8, S8-1 (N225): ``a/../project`` with ``a`` a link to
+        ``x/y`` serves ``x/project``, and was proven to serve ``project``,
+        whose enforcement could then have stopped it."""
+        (tmp_path / "x" / "y").mkdir(parents=True)
+        (tmp_path / "x" / "project").mkdir()
+        (tmp_path / "project").mkdir()
+        (tmp_path / "a").symlink_to(tmp_path / "x" / "y")
+        daemon = _fake_daemon(children, Path(f"{tmp_path}/a/../project"))
+
+        for root in (tmp_path / "project", tmp_path / "x" / "project"):
+            with pytest.raises(RefusedSignalTarget, match="normal form"):
+                stop_verified_daemon(daemon.pid, project_root=root, grace_seconds=_GRACE_SECONDS)
+        assert daemon.poll() is None
+
     def test_another_users_daemon_naming_this_project_is_refused(
         self,
         tmp_path: Path,
@@ -472,6 +503,31 @@ class TestTheSignalGoesThroughAPidfdPinnedBeforeTheProof:
         )
 
         assert outcome is DaemonStop.TERMINATED
+
+    @pytest.mark.parametrize("error", [errno.EINVAL, errno.ENOMEM])
+    def test_a_pin_that_fails_otherwise_is_a_refusal_and_nothing_is_signalled(
+        self,
+        tmp_path: Path,
+        children: list[subprocess.Popen[bytes]],
+        monkeypatch: pytest.MonkeyPatch,
+        error: int,
+    ) -> None:
+        """Review 8, R8-4: a ``pidfd_open`` error that does not mean "no
+        pidfds here" escaped as a bare ``OSError`` that callers catching
+        refusals did not expect. Nothing is signalled before the pin, so it
+        is a refusal."""
+        daemon = _fake_daemon(children, tmp_path)
+
+        def failing(pid: int, flags: int = 0) -> int:
+            raise OSError(error, os.strerror(error))
+
+        monkeypatch.setattr(os, "pidfd_open", failing)
+
+        with pytest.raises(RefusedSignalTarget, match=os.strerror(error)):
+            stop_verified_daemon(daemon.pid, project_root=tmp_path, grace_seconds=_GRACE_SECONDS)
+        with pytest.raises(RefusedSignalTarget, match=os.strerror(error)):
+            signal_verified_daemon(daemon.pid, signal.SIGTERM, project_root=tmp_path)
+        assert daemon.poll() is None
 
 
 class TestStoppingADaemonTermsThenKillsOnlyThisProjectsDaemon:

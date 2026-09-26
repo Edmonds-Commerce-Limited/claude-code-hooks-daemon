@@ -42,9 +42,8 @@ from typing import Final, Protocol
 import psutil
 
 from claude_code_hooks_daemon.daemon.process_verification import (
-    _extract_project_root,
+    _attributed_root,
     _is_daemon_server_process,
-    _normalize_root,
 )
 
 #: Init's pid and the group it leads; never a target.
@@ -102,8 +101,13 @@ def verified_daemon_process(pid: object, *, project_root: Path | str) -> psutil.
     """A handle on ``pid``, proven to be the daemon server for ``project_root``.
 
     The returned :class:`psutil.Process` remembers the process's start time and
-    re-checks it before every ``send_signal``/``terminate``/``kill``, so a pid
-    reused after this check is refused rather than signalled.
+    re-checks it before every ``send_signal``/``terminate``/``kill``. That
+    narrows the reuse window but does not close it: a pid reused between the
+    re-check and the ``kill`` is signalled (Plan 00466 N206). Only
+    :func:`signal_verified_daemon` and :func:`stop_verified_daemon` close it,
+    through a pidfd pinned before this proof, and only where the kernel makes
+    pidfds; elsewhere they fall back on this handle and its window. A caller
+    that signals through the handle itself has the window.
 
     A command line is anyone's to write, so it proves nothing about a process
     another user owns (Plan 00466 round 6, P5-1): both its real and effective
@@ -142,8 +146,13 @@ def verified_daemon_process(pid: object, *, project_root: Path | str) -> psutil.
 
     if not _is_daemon_server_process(cmdline):
         raise RefusedSignalTarget(f"pid {checked} is not a daemon server: {cmdline!r}")
-    expected = _normalize_root(Path(project_root).absolute())
-    actual = _extract_project_root(process)
+    # Both sides resolved, as cmd_start resolves the root it serves (review
+    # 8, S8-1): a process this one may signal shares its mount namespace.
+    attributed = _attributed_root(process, cmdline)
+    if attributed.root is None:
+        raise RefusedSignalTarget(f"pid {checked} is a daemon server, but {attributed.refusal}")
+    expected = os.path.realpath(Path(project_root).absolute())
+    actual = os.path.realpath(attributed.root)
     if actual != expected:
         raise RefusedSignalTarget(
             f"pid {checked} is a daemon for project root {actual!r}, not {expected!r}"
@@ -161,7 +170,9 @@ def _pinned(pid: object) -> Iterator[int | None]:
     (Plan 00466 N206). None where this kernel makes no pidfds.
 
     Raises:
-        RefusedSignalTarget: See :func:`_plain_pid` and :func:`_refuse_own_lineage`.
+        RefusedSignalTarget: See :func:`_plain_pid` and :func:`_refuse_own_lineage`;
+            or ``pidfd_open`` failed for a reason other than this kernel
+            making no pidfds, so the pid cannot be pinned (review 8, R8-4).
         ProcessLookupError: No process has this pid.
     """
     checked = _plain_pid(pid)
@@ -174,7 +185,9 @@ def _pinned(pid: object) -> Iterator[int | None]:
             raise
         except OSError as unavailable:
             if unavailable.errno not in _NO_PIDFD_ERRNOS:
-                raise
+                raise RefusedSignalTarget(
+                    f"pid {checked} cannot be pinned: {unavailable.strerror}"
+                ) from unavailable
     try:
         yield pidfd
     finally:
