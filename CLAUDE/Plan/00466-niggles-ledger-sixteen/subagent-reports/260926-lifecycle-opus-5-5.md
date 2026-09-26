@@ -195,3 +195,84 @@ report update.
   exported, but its source variable is not (shellcheck SC2089/SC2090). A
   child shell that has not sourced `init.sh` gets an empty source,
   `python3` exits non-zero, and the call is denied, which fails closed.
+  (Round 2 corrects this: D-PATH m3 showed the transport path raises
+  NameError and writes no JSON, which does not fail closed. Fixed below.)
+
+## Round 2: the D-RULE and D-PATH findings
+
+Brief: `untracked/scratch/briefs/lifecycle-fix-2.md`. Reviews:
+`260926-141113-lifecycle-review-rule-…md` (D-RULE) and
+`260926-141211-lifecycle-review-path-…md` (D-PATH). Every finding is fixed
+with TDD; the RED evidence is against the round-1 code (`0c6db306d`).
+
+| Finding          | Fix                                                                                                                                                       | RED proof                                                                                                                               |
+| ---------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| F1               | `ensure_daemon` returns at once under a hand-off; `emit_hook_error` shadows every state flag and treats an unnamed event as PreToolUse                    | 14 cases of `TestARelayHandOffReachesOnlyTheCarveOut`; each half, removed in a scratch copy, fails its own cases                        |
+| F2 + D-PATH note | Strict std-only `JsonParser`; `is_hand_off_verdict` accepts only a PreToolUse deny with a reason or the context-only answer                               | 20 shapes in `TestTheRelayAcceptsOnlyAVerdictFromTheHandOff`, against a relay built from `0c6db306d`                                    |
+| F3 + m2          | `HANDOFF_TIMEOUT_MS` (10 s) with a bounded read, wait and replay; `transport.timeout_seconds` capped at 45 by a validator that says why                   | The never-exiting forwarder test hung past its bound on the old relay; config tests pin the arithmetic, the Rust twin and the validator |
+| S1 (N127)        | Compare raw, strip only spaces and tabs, reject anything not printable                                                                                    | 13 control-character cases                                                                                                              |
+| `repair`         | Added to `_RECOVERY_SUBCOMMANDS`, same rule                                                                                                               | `TestRepairIsARecoveryCommand`                                                                                                          |
+| m1               | The absolute launcher, shell-quoted as `_recovery_command` prints it, is exempt from any `cwd`; every deny (transport, `emit_hook_error`, relay) names it | `TestTheAbsoluteLauncherIsExemptFromAnyDirectory`, `TestTheRelaysOwnDenyNamesTheAbsoluteLauncher`                                       |
+| m3               | The source is the exported function `_hooks_daemon_recovery_py` (`printf -v`, no fork); `start_daemon` un-exports it in the launch subshell               | `TestExportedFunctionsCarryTheirOwnRecoverySource`; the daemon-env test fails when the un-export is removed                             |
+| S2 (N128)        | `cleanup_pid_file(path, pid)` removes only its own pid; `cmd_stop` removes the socket only on `NOT_LIVE`; `is_daemon_running` re-reads before `rm`        | `TestCmdStopCleansUpOnlyWhatItStillOwns`, `test_paths.py` successor tests, `TestIsDaemonRunningRemovesOnlyItsOwnStalePidFile`           |
+
+### Decisions worth checking
+
+- **F1 has two layers on purpose.** The `ensure_daemon` short-circuit stops
+  a start (which could spend the whole hand-off budget) and the CI
+  passthrough, which replaces `send_request_stdin` and so never reaches
+  `emit_hook_error`. The `emit_hook_error` shadowing covers the source-time
+  guards, which fire before `ensure_daemon` and name no event. The relay
+  only hands over PreToolUse calls, so an unnamed event under a hand-off is
+  that call.
+- **F2's accepted shapes** are exactly what `init.sh` writes under a
+  hand-off: `emit_error_json`'s deny (with `additionalContext`),
+  `emit_hook_error`'s deny, and the carve-out's context-only answer. An
+  explicit `allow` is refused: nothing on the hand-off path writes one, and
+  it would skip Claude Code's permission prompt.
+- **F3's limit** is the 60 s `timeout` the daemon registers for PreToolUse
+  in `settings.json` (`hook_registration`, now reading
+  `Timeout.REGISTERED_HOOK_TIMEOUT`). Claude Code's own default is 600 s,
+  per the vendored `remote-docs/code.claude.com/docs/en/hooks.md`, which
+  also confirms that a timed-out PreToolUse command hook lets the call
+  continue. `install.py` still writes a literal `60`; it is standalone and
+  I did not touch it.
+- **m3: function, not exported variable.** Exporting the variable tripped
+  shellcheck SC2089/SC2090 in a client-owned asset
+  (`test_client_owned_asset_lint.py`), and suppressions are not allowed. A
+  function assigning through `printf -v` avoids both that and a fork per
+  hook. Exported functions all reach the daemon's environment; this one is
+  un-exported for the launch.
+- **m1 quoting:** a project path that needs quoting is exempt only in the
+  exact `shlex.quote` form the deny prints. Unquoted, bash would split it.
+  The relay's `shell_quote` is a twin of `shlex.quote`, and a test compares
+  the two outputs for a path with a space.
+- **S2 residual:** compare-then-unlink is not atomic; the window is now the
+  gap between one read and one unlink, instead of the whole stop sequence.
+  POSIX has no unlink-if-content primitive.
+- **N68** is unchanged. Under it I cited D-PATH S1 (a moved checkout exits
+  127 and the call proceeds) and D-RULE S2 (the fail-open states).
+
+### Hooks-daemon guard defects hit while working (not fixed here)
+
+- `secret_file_guard` denied an `Edit` of `init.sh` whose Python used a
+  list comprehension and indexing inside a single-quoted shell string
+  (`R-SECRET-SCRIPT-AUTHOR`, "matched `.vault-pass*`"). It also crashed
+  with `TooManyToEnumerateError` (`R-SECRET-EVALUATION-ERROR`) on a Bash
+  heredoc and a brace group containing globs. I avoided the shapes rather
+  than work around the guard. Both look like bracket and brace expansion
+  being enumerated over code text; worth an issue.
+
+### Verification (round 2)
+
+- Every test file that references `init.sh` or the relay, plus
+  `tests/unit/daemon/test_cli*`, `test_enforcement.py`,
+  `tests/daemon/test_paths.py`, `test_transport_config.py` and
+  `test_hook_registration.py` (153 files): 2727 passed, 11 skipped, and 3
+  setup errors in `test_wrapper_subprocess_env.py`, which refuses to run
+  against a daemon older than the working tree. After
+  `bin/hooks-daemon restart` (RUNNING; the stop ran the new
+  `_release_stopped_daemon_files`) that file passed 4/4.
+- `relay/test_relay.py`: 13/13. The relay builds with `-D warnings`.
+- `shellcheck -x init.sh`, ruff, black, mypy and pyright: clean on every
+  touched file.
