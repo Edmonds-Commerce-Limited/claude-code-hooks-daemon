@@ -3,6 +3,31 @@
 Newest first. Each entry says how it was found, why it happens, and the
 candidate remedies.
 
+### N126 — The relay's PreToolUse deny has no recovery carve-out, so a wedged daemon denies its own restart
+
+**Found by the lifecycle batch while fixing N67.** `init.sh` exempts the exact
+recovery command from every fail-closed PreToolUse deny, so a wedged daemon
+can be restarted from inside the session. The relay (`relay/hooks_relay.rs`),
+live in this repository's dogfood config, has no such exemption. It never
+parses the payload, and on the `pre-tool-use.sock` socket every mid-exchange
+failure (`mid_exchange_fail`) writes `deny_pre_tool_use_json`. When the
+daemon accepts the connection but never answers (the B2 GIL-hang shape), the
+relay times out and denies `bin/hooks-daemon restart` too. Its own deny text
+tells the agent to run that same command. Only a connect failure falls back
+to the bash rung, where the carve-out lives. The human `!` route still
+works, but an unattended agent loops on the deny.
+
+**Candidate remedies:**
+
+- on a PreToolUse mid-exchange failure, exec the bash rung with the buffered
+  payload instead of denying, so `init.sh`'s one carve-out judges it (the
+  relay would buffer stdin rather than stream it);
+- or have the forwarder's relay guard skip the relay for a payload that
+  could be the recovery command, and leave the judgement to `init.sh`.
+
+Either way, the relay must not grow a second copy of the carve-out, because
+N67 showed that two copies drift.
+
 ### N109 — ✅ Remedied — the pending release-notes holding area mis-sorts past 99 callouts
 
 **Found:** `CLAUDE/UPGRADES/UNRELEASED/release-notes/` named callouts
