@@ -371,12 +371,27 @@ rather than only matching syntax.
     `_sanitise_layer2_env` ever gets a say, and no importing shell can strip
     an exported function by name reliably enough to promise none survives.
     Layer 1 now launches Layer 2 through the same trusted `env` with `-i` and
-    an explicit allowlist (`PATH`, the handoff/flags variables,
-    `HOME`/`LANG`/proxy/`uv` settings, the `UV_*`/`PIP_*` families) instead of
-    a bare inherited environment, so nothing outside that list reaches Layer
-    2 at all. Pinned by `TestLayer2EnvIsIsolatedFromTheCaller`: a planted
-    `BASH_ENV` and an exported `unset() { :; }` both fail to reach the real
-    Layer 2 process.
+    an explicit allowlist instead of a bare inherited environment, so nothing
+    outside that list reaches Layer 2 at all. Pinned by
+    `TestLayer2EnvIsIsolatedFromTheCaller`: a planted `BASH_ENV` and an
+    exported `unset() { :; }` both fail to reach the real Layer 2 process.
+    review4 BLOCKER 1 / m2: the list is named per group in `upgrade.sh`, each
+    kept or dropped with a reason, and includes Layer 1's own handover (the
+    previous version and the old default config/settings baselines) and the
+    runtime settings of the daemon Layer 2 restarts. Pinned by
+    `TestLayer1HandsItsBaselinesToLayer2` and
+    `TestLayer2EnvAllowlistIsDecidedPerSetting`.
+
+    review4 MAJOR 2: Layer 2 sets the trusted `PATH` again after its LAST
+    library source (`venv.sh` prepends `$HOME/.local/bin` when sourced) and
+    reaches `uv` by name through `_venv_uv`. Pinned by
+    `TestLayer2PathAfterEveryLibrarySource`.
+
+    review4 MAJOR 3: Layer 1 keeps the user's git config (dropping it
+    wholesale broke `safe.directory` clones), drops the `GIT_CONFIG_*`
+    environment overrides, requires one origin URL, and refuses a fetch that
+    config rewrites to a different repository. Pinned by
+    `TestLayer1FetchesOnlyFromOrigin` and `TestRemoteIdentity`.
 
     Once that `bash` process starts, Layer 2's OWN first action is
     `_sanitise_layer2_env` (`scripts/install/env_sanitise.sh`), sourced and
@@ -392,9 +407,11 @@ rather than only matching syntax.
     legitimately needs (building a venv, running `uv`, deploying files is
     not something a fixed-tool sandbox can do), not a way to change what
     code runs. review2 MAJOR 1: this is a fixed, named list of variable
-    FAMILIES known to steer execution, not a default-deny `env -i`
-    allowlist -- a variable the list has not anticipated still reaches
-    Layer 2. The approval gate is therefore a procedural control against an
+    FAMILIES known to steer execution, not a default-deny allowlist -- on a
+    direct Layer 2 call, which skips Layer 1's `env -i`, a variable the list
+    has not anticipated still reaches Layer 2, and there the guard (which
+    since review4 MAJOR 1 treats every spelling of a steering assignment as
+    steering) is the only barrier. The approval gate is therefore a procedural control against an
     agent following the documented route, backed by `upgrade_approval_guard`'s
     best-effort recognition of that route's shape -- not a boundary against a
     same-user process determined to install by hand instead, which no
@@ -406,6 +423,21 @@ rather than only matching syntax.
   and `TestAlreadyInstalled` in `tests/unit/install/test_upgrade_gate.py`.
   Assumption: the owner's "no known defects" instruction; the owner can
   reverse this with one message.
+
+  - **Owner decision (open, review4 MAJOR 3)**: a daemon clone fetched
+    through a `url.<mirror>.insteadOf <github-url>` rewrite. Layer 1 now
+    refuses a fetch that config rewrites to a different repository, so a
+    project that reaches a corporate mirror that way stops at Step 5 with the
+    rewrite named and the remedy printed (point origin at the mirror
+    directly). An https-to-ssh rewrite of the same repository still passes.
+    Implemented: option A, the fail-closed one.
+    - A. Refuse any rewrite to another repository; the owner points origin
+      at the mirror (implemented).
+    - B. Allow a rewrite to any host, with a loud warning naming both URLs:
+      never breaks a mirror setup, but a rewrite an agent planted in the
+      user's global config then launches that repository's Layer 2.
+    - C. A config key listing trusted mirror URLs that a rewrite may target:
+      no breakage for listed mirrors, one more setting to document.
 
 ### Phase 4: Fix what the survey exposed
 

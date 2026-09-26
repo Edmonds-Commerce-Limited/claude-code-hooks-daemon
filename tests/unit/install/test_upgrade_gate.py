@@ -504,6 +504,17 @@ class TestUnknownRange:
         report = _gate(daemon_dir, project, untracked, None, "3.65.0")
         assert any("v3.10.0-to-v3.11.0.md" in str(guide) for guide in report.guides), report.guides
 
+    def test_the_header_says_why_every_guide_is_listed(
+        self, daemon_dir: Path, upgrades: Path, project: Path, untracked: Path
+    ) -> None:
+        """review4 n1: "cannot tell which guides" followed by a list of every
+        guide read as a contradiction; the header says the list is complete
+        because the starting version is unknown."""
+        _guide(upgrades, "v3.10.0-to-v3.11.0")
+        text = format_gate_report(_gate(daemon_dir, project, untracked, None, "3.65.0"))
+        assert "so every upgrade guide up to v3.65.0 is listed" in text
+        assert "cannot tell which upgrade guides" not in text
+
 
 class TestUntrustedFrom:
     """Review2 BLOCKER 1: an untrusted FROM at or past the target is unknown.
@@ -938,6 +949,23 @@ class TestMain:
         main(argv)
         err = capsys.readouterr().err
         assert "checked against the gated-install record next" in err
+
+    def test_no_source_is_said_in_words(
+        self,
+        daemon_dir: Path,
+        project: Path,
+        untracked: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """review4 n2: with neither a venv stamp nor HOOKS-DAEMON.md the line
+        read 'Installed version: unknown (from the none)'."""
+        main(self._argv(daemon_dir, project, untracked, "--to", "3.65.0"))
+        err = capsys.readouterr().err
+        assert "from the none" not in err
+        assert (
+            "Installed version: unknown (no venv stamp names it, and "
+            ".claude/HOOKS-DAEMON.md carries no release)" in err
+        )
 
     def test_from_comes_from_the_install_not_the_checkout(
         self, daemon_dir: Path, upgrades: Path, project: Path, untracked: Path

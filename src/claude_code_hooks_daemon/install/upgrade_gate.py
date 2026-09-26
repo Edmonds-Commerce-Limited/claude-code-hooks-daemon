@@ -746,9 +746,9 @@ def _reading_lines(report: GateReport) -> list[str]:
     if not report.range_known:
         lines.extend(
             [
-                "The gate cannot tell which upgrade guides this upgrade crosses. Read the",
-                "guides in CLAUDE/UPGRADES/ newer than the version this project last",
-                "installed, up to the one being installed.",
+                "The gate does not know which version this project last installed,",
+                f"so every upgrade guide up to v{to} is listed. Read the ones newer",
+                "than the version you last installed.",
             ]
         )
     if report.guides:
@@ -930,8 +930,13 @@ def main(argv: list[str] | None = None) -> int:
             and args.installed_stamp == args.target_stamp
         )
         qualifier = ", checked against the gated-install record next" if claims_target else ""
+        origin = (
+            f"no venv stamp names it, and {SOURCE_DOC_MARKER} carries no release"
+            if source == SOURCE_NONE
+            else f"from the {source}{qualifier}"
+        )
         print(
-            f"Installed version: {from_version or UNKNOWN_VERSION} (from the {source}{qualifier})",
+            f"Installed version: {from_version or UNKNOWN_VERSION} ({origin})",
             file=sys.stderr,
         )
     report = evaluate_gate(

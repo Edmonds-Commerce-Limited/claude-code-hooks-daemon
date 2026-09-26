@@ -270,21 +270,41 @@ sourced from the daemon dir Layer 1 has just checked out to the target -- the
 same tree `$LAYER2_SCRIPT` itself is read from), a fixed, root-owned,
 non-group/world-writable system location, never the caller's `PATH`. It then
 launches Layer 2 through the same trusted `env` with `-i` and an explicit
-allowlist (`PATH`, the handoff/flags variables, `HOME`/`LANG`/proxy/`uv`
-settings and the `UV_*`/`PIP_*` families), rather than a bare inherited
-environment -- so nothing outside that list, including `BASH_ENV`, `ENV` or
-any `BASH_FUNC_*`, reaches Layer 2 at all; no in-bash drop loop can promise
-that, because the exact name an exported function lands under is not
-reliably enumerable. A target predating this file (a downgrade below the
-release that introduced it) has no such resolver to fall back on, so the
-caller's `PATH` and environment are used there -- the prior behaviour, not a
-new gap.
+allowlist, rather than a bare inherited environment -- so nothing outside
+that list, including `BASH_ENV`, `ENV` or any `BASH_FUNC_*`, reaches Layer 2
+at all; no in-bash drop loop can promise that, because the exact name an
+exported function lands under is not reliably enumerable. The list is named
+per group in `scripts/upgrade.sh`, each with its reason: the trusted `PATH`,
+the handoff and flags; the session (`HOME`, locale, `TMPDIR`); proxies and CA
+bundles; Layer 1's own handover (the pre-checkout version and the old default
+config and settings baselines the merges diff against); the operator's
+interpreter/venv overrides and venv build and lock tuning; the socket, PID,
+log and hostname settings the daemon Layer 2 restarts needs; and `UV_*`.
+Layer 2's internal pass state, test seams and `PIP_*` (nothing reads it) are
+dropped. A target predating this file (a downgrade below the release that
+introduced it) has no such resolver to fall back on, so the caller's `PATH`
+and environment are used there -- the prior behaviour, not a new gap.
 
-What this does NOT cover: the sanitisation above is a fixed, named list of
-variable FAMILIES known to steer execution, not a default-deny `env -i`
-allowlist: Layer 2 needs an inherited environment to build a venv, run `uv`
-and deploy files, so anything not on that list -- including a variable this
-list has not anticipated -- still reaches it. So the approval gate is a
+Layer 2 sets the trusted `PATH` once more after its last library source,
+because a library may change it when sourced (`venv.sh` prepends
+`$HOME/.local/bin` for the install scripts). Every step before the gate runs
+its tools from the fixed system locations; `uv` alone is looked up by name in
+`$HOME/.local/bin` when `PATH` has none, and runs only after the gate.
+
+Before it fetches, Layer 1 drops `GIT_CONFIG_COUNT`/`KEY_*`/`VALUE_*` and
+`GIT_CONFIG_PARAMETERS`, requires origin to name exactly one URL, and refuses
+the fetch when git configuration (any scope, or an include) rewrites origin to
+a different repository: it runs code from what it fetches. Your own git
+config is otherwise honoured (`safe.directory`, credential helpers, proxies),
+and an https-to-ssh rewrite of the same repository passes. To upgrade from a
+mirror, point origin at the mirror (`git -C .claude/hooks-daemon remote set-url origin <mirror-url>`) rather than rewriting through `insteadOf`.
+
+What this does NOT cover: a direct call of `scripts/upgrade_version.sh` skips
+Layer 1's `env -i`, so there only the in-script sanitisation above applies. It
+is a fixed, named list of variable FAMILIES known to steer execution, not a
+default-deny allowlist, so anything not on it -- including a variable this
+list has not anticipated -- still reaches Layer 2, and `BASH_ENV` has already
+run by the time it gets a say. So the approval gate is a
 procedural control against an agent following the documented upgrade route,
 backed by a best-effort guard (`upgrade_approval_guard`) that recognises that
 route's shape. It is not a boundary against a same-user process determined to
@@ -308,9 +328,19 @@ On such a command, the guard denies setting any of these variables:
 - `HOOKS_DAEMON_PYTHON`, `HOOKS_DAEMON_VENV_PATH`, `UPGRADE_FLAGS` or the
   `HOOKS_DAEMON_UPGRADE_*`/`HOOKS_DAEMON_CLONE_URL` variables;
 - `GIT_*`, `BASH_ENV`, `ENV`, `BASH_FUNC_*`, `SHELLOPTS` or `BASHOPTS`;
-- `LD_*`, `DYLD_*` or `PYTHON*`.
+- `LD_*`, `DYLD_*` or `PYTHON*`;
+- `HOOKS_DAEMON_OLD_DEFAULT_*` (Layer 1's baseline handover);
+- the `uv` index, find-links, config-file and Python variables
+  (`UV_INDEX*`, `UV_DEFAULT_INDEX`, `UV_EXTRA_INDEX_URL`, `UV_FIND_LINKS`,
+  `UV_CONFIG_FILE`, `UV_PYTHON*`), CA bundles and proxies.
 
-It also denies exporting a shell function (`export -f`). If the upgrade
+Any spelling counts, not only `NAME=value`: naming one of those variables
+other than to read it (`read -r NAME`, `printf -v NAME`, `n=NAME`),
+`declare`/`typeset`/`local` with an `x` flag, and `export` with a flag or a
+computed name. On a command recognised as the upgrade, `set -a`, `eval` and
+sourcing another file count too. It also denies exporting a shell function
+(`export -f`), and writing into the clone's `.git/` (its config, hooks or
+refs decide what the next fetch and checkout install). If the upgrade
 genuinely needs one of these (a Python 3.11+ outside the system locations, say),
 ask the user to run it.
 
