@@ -1165,3 +1165,23 @@ cannot make one.
   - shellcheck: clean on `init.sh`.
 - **Daemon**: restarted from the worktree; it reported `Daemon: RUNNING`
   (PID 2632155).
+
+### Round 7 merge of main (`94703d89e`, main `44d1b1b3b`)
+
+Main had moved by N194 alone: waits for exec in `test_safe_signal.py` and
+`test_client_validator.py`.
+
+- **Conflicts**:
+  - `test_client_validator.py`: imports only; both sets are kept.
+  - `PLAN.md`: resolved row by row with `merge_ledger_table.py`, then the
+    N1-row Edit to re-align the table.
+  - `NIGGLES.md`: both sides kept, newest first (N206-N202, N194,
+    N193-N190). This also drops a stray escaped conflict marker
+    (`\<<\<<\<<< HEAD`) above N118, which both sides carried from an
+    earlier merge.
+- **GREEN after the merge**:
+  - the same targeted run: 1955 passed;
+  - the two merged test files: 104 passed;
+  - `check_signal_targets.py`: clean.
+- **Daemon**: restarted. The restart stopped the old daemon through the
+  new pidfd path, and the daemon reported `Daemon: RUNNING` (PID 2666464).
