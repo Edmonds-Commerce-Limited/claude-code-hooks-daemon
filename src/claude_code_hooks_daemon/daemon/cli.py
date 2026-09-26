@@ -147,6 +147,12 @@ if TYPE_CHECKING:
 # before use rather than assumed.
 _PYTEST_MODULE = "pytest"
 
+# The dotted module path ``pyproject.toml``'s ``addopts`` force-loads as a
+# pytest plugin (``-p claude_code_hooks_daemon.qa.full_qa_gate``). Named here,
+# matching that string exactly, so ``cmd_test_project_handlers`` can unload it
+# for its one invocation -- see the comment at that call site.
+_FULL_QA_GATE_PLUGIN = "claude_code_hooks_daemon.qa.full_qa_gate"
+
 # Milliseconds in one second. ``Timeout.BASH_DEFAULT`` is expressed in
 # milliseconds (see constants/timeout.py), but ``subprocess.run(timeout=...)``
 # expects SECONDS. Named here so the conversion is not a magic ``/ 1000``.
@@ -2172,9 +2178,7 @@ def _collect_enforcement_status_lines(project_path: Path) -> list[str]:
     # scope), not from disk, so it is configured by the registry's own injector.
     if full_qa_settings.get(ConfigKey.ENABLED):
         full_qa = SubagentFullQaBlockerHandler()
-        apply_handler_config(
-            full_qa, full_qa_settings, full_qa_settings.get(ConfigKey.OPTIONS) or {}
-        )
+        apply_handler_config(full_qa, full_qa_settings, handler_options(full_qa_settings))
         handlers.append(full_qa)
 
     statuses: list[str] = []
@@ -5394,6 +5398,18 @@ def cmd_test_project_handlers(args: argparse.Namespace) -> int:
         _PYTEST_MODULE,
         str(handlers_path),
         "--import-mode=importlib",
+        # `pyproject.toml`'s `addopts` force-loads the daemon's own whole-suite
+        # refusal plugin (`full_qa_gate.py`) into every pytest invocation that
+        # picks up this config, including this one. That plugin anchors its
+        # test-file count on the conftest.py that imported it; project
+        # handlers have none, so it falls back to the plugin's OWN directory
+        # (which holds zero test files) and refuses the run outright --
+        # zero tests collected, not a suite that ran and passed. This suite is
+        # a small, self-contained tree the daemon does not track for the
+        # whole-suite-lock rule at all, so the plugin is explicitly unloaded
+        # for this one invocation rather than for the project's real tests.
+        "-p",
+        f"no:{_FULL_QA_GATE_PLUGIN}",
     ]
 
     if getattr(args, "verbose", False):

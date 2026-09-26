@@ -25,8 +25,17 @@ rules:
     tests: [tests/integration/test_documented_commands_are_not_self_denied.py]
     why: it checks every command in these documents (DOCUMENT_GLOBS)
   - path_glob: "CLAUDE/*.md"
-    tests: [tests/integration/test_documented_commands_are_not_self_denied.py]
-    why: it checks every command in these documents (DOCUMENT_GLOBS)
+    tests:
+      - tests/integration/test_documented_commands_are_not_self_denied.py
+      - tests/integration/test_documented_hook_probes_are_marked.py
+    why: the first checks every command in these documents (DOCUMENT_GLOBS);
+      the second checks every probe example is marked
+  - path_glob: "CLAUDE/**/*.md"
+    tests: [tests/integration/test_documented_hook_probes_are_marked.py]
+    why: it checks every probe example in these documents is marked
+  - path_glob: ".claude/agents/*.md"
+    tests: [tests/integration/test_documented_hook_probes_are_marked.py]
+    why: it checks every probe example in these documents is marked
   - path_glob: "CLAUDE/development/*.md"
     tests: [tests/integration/test_documented_commands_are_not_self_denied.py]
     why: it checks every command in these documents (DOCUMENT_GLOBS)
@@ -37,7 +46,8 @@ rules:
     tests:
       - tests/integration/test_documented_commands_are_not_self_denied.py
       - tests/unit/scripts/test_branch_install_gate_is_unadvertised.py
-    why: both read every page under docs/ by glob
+      - tests/integration/test_documented_hook_probes_are_marked.py
+    why: all three read every page under docs/ by glob
   - path_glob: "CLAUDE/UPGRADES/UNRELEASED/release-notes/*.md"
     tests: [tests/unit/scripts/test_branch_install_gate_is_unadvertised.py]
     why: it reads every pending release note by glob
@@ -45,7 +55,8 @@ rules:
     tests:
       - tests/integration/test_documented_commands_are_not_self_denied.py
       - tests/unit/scripts/test_skill_scripts_are_referenced.py
-    why: both read the bundled skill tree's markdown by glob
+      - tests/integration/test_documented_hook_probes_are_marked.py
+    why: all three read the bundled skill tree's markdown by glob
   - path_glob: "src/claude_code_hooks_daemon/skills/hooks-daemon/**/*.md"
     tests: [tests/integration/test_skill_surface_coherence.py]
     why: it reads the hooks-daemon skill's markdown by glob
@@ -53,8 +64,10 @@ rules:
     tests: [tests/integration/test_skill_surface_coherence.py]
     why: it reads the hooks-daemon skill's scripts by glob
   - path_glob: ".claude/skills/**/*.md"
-    tests: [tests/unit/scripts/test_skill_scripts_are_referenced.py]
-    why: it reads the deployed skill tree's markdown by glob
+    tests:
+      - tests/unit/scripts/test_skill_scripts_are_referenced.py
+      - tests/integration/test_documented_hook_probes_are_marked.py
+    why: both read the deployed skill tree's markdown by glob
   - path_glob: "tests/fixtures/repo_hygiene/pre_fix_*.md"
     tests: [tests/integration/test_repo_hygiene_check.py]
     why: it reads each pre-fix fixture by glob

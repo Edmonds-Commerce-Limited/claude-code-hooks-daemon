@@ -34,10 +34,11 @@ from __future__ import annotations
 import fcntl
 import logging
 import os
-import subprocess
 from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
+
+from claude_code_hooks_daemon.utils.git_repo import run_git
 
 logger = logging.getLogger(__name__)
 
@@ -52,15 +53,18 @@ def git_common_dir(project_root: Path) -> Path:
     """The directory every worktree of this repository shares.
 
     Raises:
-        subprocess.CalledProcessError: `project_root` is not inside a git
-            worktree -- there is no shared lock location to compute.
+        OSError: `project_root` is not inside a git worktree, or git could
+            not be run at all -- there is no shared lock location to compute.
+            `run_git` never raises; it reports either case as a non-zero
+            `returncode` with the reason in `stderr`, which this wraps into
+            a raise so a caller cannot mistake "not a repo" for a real path.
     """
-    result = subprocess.run(
-        ["git", "-C", str(project_root), "rev-parse", "--path-format=absolute", "--git-common-dir"],
-        capture_output=True,
-        text=True,
-        check=True,
-    )
+    result = run_git(project_root, "rev-parse", "--path-format=absolute", "--git-common-dir")
+    if result.returncode != 0:
+        raise OSError(
+            f"git rev-parse --git-common-dir failed in {project_root} "
+            f"(exit {result.returncode}): {result.stderr.strip()}"
+        )
     return Path(result.stdout.strip())
 
 
@@ -153,7 +157,7 @@ def full_qa_lock_is_held(project_root: Path) -> bool:
     """
     try:
         lock_path = host_lock_path(project_root).resolve()
-    except (OSError, subprocess.CalledProcessError):
+    except OSError:
         return False
 
     fd_dir = Path("/proc/self/fd")

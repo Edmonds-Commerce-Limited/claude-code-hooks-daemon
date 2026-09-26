@@ -86,6 +86,7 @@ from typing import Any, Final
 from claude_code_hooks_daemon.constants import (
     HandlerID,
     HandlerTag,
+    HookInputField,
     Priority,
 )
 from claude_code_hooks_daemon.constants.rule_ids import RuleID
@@ -4955,9 +4956,6 @@ _RULE: Final[Rule] = Rule(
     ),
 )
 
-#: The hook payload field naming the directory the command runs in.
-_CWD_FIELD: Final[str] = "cwd"
-
 _GENERIC_TARGETED_FORM: Final[str] = (
     "  - the same tools scoped to what you changed: named checks rather than the\n"
     "    whole suite, and tests on explicit test files or directories"
@@ -5082,7 +5080,7 @@ class SubagentFullQaBlockerHandler(PreToolUseHandlerBase):
         command = get_bash_command(hook_input)
         if not command:
             return None
-        cwd = hook_input.get(_CWD_FIELD)
+        cwd = hook_input.get(HookInputField.CWD)
         return find_full_qa_invocation(
             command,
             self._patterns(),

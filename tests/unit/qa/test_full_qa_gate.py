@@ -16,6 +16,7 @@ from pathlib import Path
 
 import pytest
 
+from claude_code_hooks_daemon.constants import Timeout
 from claude_code_hooks_daemon.qa.full_qa_gate import (
     WHOLE_SUITE_FRACTION,
     whole_suite_refusal_message,
@@ -71,7 +72,7 @@ def _run_pytest_subprocess(
         capture_output=True,
         text=True,
         pass_fds=extra_fds,
-        timeout=60,
+        timeout=Timeout.REQUEST_LONG,
         check=False,
     )
 
@@ -117,7 +118,7 @@ class TestWholeSuiteSizedRunIsRefusedWithoutTheLock:
             env={**os.environ, "PYTHONPATH": str(SRC_ROOT)},
             capture_output=True,
             text=True,
-            timeout=60,
+            timeout=Timeout.REQUEST_LONG,
             check=False,
         )
         assert result.returncode == 1
@@ -140,7 +141,7 @@ class TestWholeSuiteSizedRunIsRefusedWithoutTheLock:
             env={**os.environ, "PYTHONPATH": str(SRC_ROOT)},
             capture_output=True,
             text=True,
-            timeout=60,
+            timeout=Timeout.REQUEST_LONG,
             check=False,
         )
         assert result.returncode == 1
