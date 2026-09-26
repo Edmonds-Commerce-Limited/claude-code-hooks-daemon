@@ -427,38 +427,193 @@ class TestLayer2EnvIsIsolatedFromTheCaller:
         assert _stub_field(result.stdout, "STUB_LAYER2_TRACK_REF_BECAUSE") == "test"
 
 
-class TestLayer1FetchIgnoresAHostileGlobalGitConfig:
-    """Plan 00376 review3 MINOR m2 (review-2 M2 residual).
+def _remote_identity(url: str) -> str:
+    """Run upgrade.sh's own `_remote_identity` on ``url``."""
+    source = LAYER1_UPGRADE_SH.read_text(encoding="utf-8")
+    start = source.index("_remote_identity() {")
+    end = source.index("\n}\n", start) + len("\n}\n")
+    result = subprocess.run(
+        [REAL_BASH, "-c", source[start:end] + '_remote_identity "$1"', "_", url],
+        capture_output=True,
+        text=True,
+        timeout=_TIMEOUT_SECONDS,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    return result.stdout.strip()
 
-    ``git -C "$DAEMON_DIR" fetch --tags --force`` (Layer 1, ``upgrade.sh``)
-    honoured whatever `~/.gitconfig` the caller happened to have -- so
-    `git config --global url.<evil>.insteadOf <real-remote-prefix>` silently
-    rewrote where the fetch actually went, with no `git -C`/`remote set-url`
-    shape for the approval guard to catch. Layer 1 now runs every git
-    invocation with `GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1`, so a
-    hostile global config is never read at all.
+
+_CANONICAL = "github.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon"
+
+
+class TestRemoteIdentity:
+    """Two spellings of one repository compare equal; another repository does not."""
+
+    @pytest.mark.parametrize(
+        "url",
+        [
+            f"https://{_CANONICAL}.git",
+            f"https://{_CANONICAL}",
+            f"https://{_CANONICAL}/",
+            "git@github.com:Edmonds-Commerce-Limited/claude-code-hooks-daemon.git",
+            "ssh://git@github.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon.git",
+            "ssh://git@GitHub.com:22/Edmonds-Commerce-Limited/claude-code-hooks-daemon",
+        ],
+    )
+    def test_spellings_of_the_daemon_repository_agree(self, url: str) -> None:
+        assert _remote_identity(url) == _CANONICAL
+
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "https://github.com/someone-else/claude-code-hooks-daemon.git",
+            "https://evil.example/Edmonds-Commerce-Limited/claude-code-hooks-daemon.git",
+            "/tmp/claude-code-hooks-daemon.git",
+        ],
+    )
+    def test_another_repository_differs(self, url: str) -> None:
+        assert _remote_identity(url) != _CANONICAL
+
+    def test_a_local_path_and_its_symlink_agree(self, tmp_path: Path) -> None:
+        real = tmp_path / "origin.git"
+        real.mkdir()
+        alias = tmp_path / "alias.git"
+        alias.symlink_to(real)
+
+        assert _remote_identity(str(alias)) == _remote_identity(f"file://{real}")
+
+
+_EVIL_MARKER = "EVIL_LAYER2_RAN"
+
+
+@pytest.fixture
+def evil_remote(tmp_path: Path, daemon_remote: Path) -> Path:
+    """Another repository carrying the same tag, whose Layer 2 announces itself."""
+    remote = tmp_path / "evil-origin.git"
+    work = tmp_path / "evil-work"
+    _require_ok(_git("clone", "-q", "--bare", str(daemon_remote), str(remote), cwd=tmp_path), "evil bare")
+    _require_ok(_git("clone", "-q", str(remote), str(work), cwd=tmp_path), "evil work")
+    _require_ok(_git("config", "user.email", "evil@example.com", cwd=work), "email")
+    _require_ok(_git("config", "user.name", "Evil", cwd=work), "name")
+    _require_ok(_git("checkout", "-q", "main", cwd=work), "main")
+    (work / "scripts" / "upgrade_version.sh").write_text(f"#!/bin/bash\necho {_EVIL_MARKER}\n")
+    _commit_all(work, "evil")
+    _require_ok(_git("tag", "-f", "v1.0.0", cwd=work), "retag")
+    _require_ok(_git("push", "-q", "--force", "origin", "main", "v1.0.0", cwd=work), "push evil")
+    return remote
+
+
+def _home_with_gitconfig(tmp_path: Path, content: str) -> Path:
+    home = tmp_path / "fake-home"
+    home.mkdir()
+    (home / ".gitconfig").write_text(content)
+    return home
+
+
+def _insteadof(new: Path | str, old: Path) -> str:
+    return f'[url "{new}"]\n    insteadOf = {old}\n'
+
+
+class TestLayer1FetchesOnlyFromOrigin:
+    """Plan 00376 review4 MAJOR 3 (review3 m2, review-2 M2 residual).
+
+    A `url.<x>.insteadOf` rewrite -- global, included, or in the clone's own
+    `.git/config` -- or a `GIT_CONFIG_COUNT`/`GIT_CONFIG_PARAMETERS` override
+    silently changes where the fetch goes, and Layer 1 then launches whatever
+    Layer 2 that repository carries. Layer 1 used to drop the caller's global
+    git config wholesale, which closed only the global route and broke setups
+    that need it (`safe.directory`, credential helpers, proxies). It now keeps
+    the user's config, drops the environment overrides, and refuses a fetch
+    that config rewrites to a DIFFERENT repository than origin names.
     """
 
-    def test_a_global_insteadof_rewrite_does_not_redirect_the_fetch(
-        self, tmp_path: Path, client_project: Path, daemon_remote: Path
-    ) -> None:
-        # The decoy is not a git repository at all -- if the redirect were
-        # honoured, `git fetch` would fail to reach it (non-zero exit, `set
-        # -euo pipefail` aborts Layer 1). If the redirect is ignored, the
-        # fetch reaches the REAL remote and the upgrade proceeds normally.
-        # Whether the fetch succeeded is therefore itself the signal.
-        decoy_remote = tmp_path / "decoy-not-a-repo"
-        decoy_remote.mkdir()
+    def test_a_global_safe_directory_is_honoured(self, tmp_path: Path, client_project: Path) -> None:
+        """A bind-mounted clone owned by another uid, trusted by the user's
+        own `safe.directory`, is the usual devcontainer shape."""
+        home = _home_with_gitconfig(tmp_path, "[safe]\n    directory = *\n")
 
-        fake_home = tmp_path / "fake-home"
-        fake_home.mkdir()
-        gitconfig = fake_home / ".gitconfig"
-        gitconfig.write_text(
-            "[url \"" + str(decoy_remote) + "\"]\n"
-            "    insteadOf = " + str(daemon_remote) + "\n"
+        result = _run_layer1(
+            client_project,
+            extra_env={"HOME": str(home), "GIT_TEST_ASSUME_DIFFERENT_OWNER": "1"},
         )
 
-        result = _run_layer1(client_project, extra_env={"HOME": str(fake_home)})
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "STUB_LAYER2_ARGS:" in result.stdout
+
+    def test_a_global_rewrite_to_another_repository_is_refused(
+        self, tmp_path: Path, client_project: Path, daemon_remote: Path, evil_remote: Path
+    ) -> None:
+        home = _home_with_gitconfig(tmp_path, _insteadof(evil_remote, daemon_remote))
+
+        result = _run_layer1(client_project, extra_env={"HOME": str(home)})
+
+        assert result.returncode != 0
+        assert _EVIL_MARKER not in result.stdout
+        assert "STUB_LAYER2_ARGS:" not in result.stdout
+        assert "rewrites origin" in result.stdout + result.stderr
+
+    def test_an_included_rewrite_is_refused(
+        self, tmp_path: Path, client_project: Path, daemon_remote: Path, evil_remote: Path
+    ) -> None:
+        included = tmp_path / "included.gitconfig"
+        included.write_text(_insteadof(evil_remote, daemon_remote))
+        home = _home_with_gitconfig(tmp_path, f"[include]\n    path = {included}\n")
+
+        result = _run_layer1(client_project, extra_env={"HOME": str(home)})
+
+        assert result.returncode != 0
+        assert _EVIL_MARKER not in result.stdout
+
+    def test_a_rewrite_in_the_clones_own_config_is_refused(
+        self, client_project: Path, daemon_remote: Path, evil_remote: Path
+    ) -> None:
+        clone_config = client_project / ".claude" / "hooks-daemon" / ".git" / "config"
+        with clone_config.open("a") as handle:
+            handle.write(_insteadof(evil_remote, daemon_remote))
+
+        result = _run_layer1(client_project)
+
+        assert result.returncode != 0
+        assert _EVIL_MARKER not in result.stdout
+
+    def test_a_second_origin_url_is_refused(
+        self, client_project: Path, evil_remote: Path
+    ) -> None:
+        clone_config = client_project / ".claude" / "hooks-daemon" / ".git" / "config"
+        with clone_config.open("a") as handle:
+            handle.write(f'[remote "origin"]\n    url = {evil_remote}\n')
+
+        result = _run_layer1(client_project)
+
+        assert result.returncode != 0
+        assert _EVIL_MARKER not in result.stdout
+
+    @pytest.mark.parametrize("route", ["count", "parameters"])
+    def test_an_environment_config_override_is_dropped(
+        self, client_project: Path, daemon_remote: Path, evil_remote: Path, route: str
+    ) -> None:
+        key = f"url.{evil_remote}.insteadOf"
+        if route == "count":
+            extra = {"GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": key, "GIT_CONFIG_VALUE_0": str(daemon_remote)}
+        else:
+            extra = {"GIT_CONFIG_PARAMETERS": f"'{key}={daemon_remote}'"}
+
+        result = _run_layer1(client_project, extra_env=extra)
+
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert _EVIL_MARKER not in result.stdout
+        assert "STUB_LAYER2_ARGS:" in result.stdout
+
+    def test_a_rewrite_to_the_same_repository_is_allowed(
+        self, tmp_path: Path, client_project: Path, daemon_remote: Path
+    ) -> None:
+        """An https-to-ssh rewrite of the daemon's own repository is common;
+        here, another spelling (a symlink) of the same repository."""
+        alias = tmp_path / "alias-origin.git"
+        alias.symlink_to(daemon_remote)
+        home = _home_with_gitconfig(tmp_path, _insteadof(alias, daemon_remote))
+
+        result = _run_layer1(client_project, extra_env={"HOME": str(home)})
 
         assert result.returncode == 0, result.stdout + result.stderr
         assert "STUB_LAYER2_ARGS:" in result.stdout

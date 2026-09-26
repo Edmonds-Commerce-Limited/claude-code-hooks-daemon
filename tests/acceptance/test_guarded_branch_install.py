@@ -96,6 +96,25 @@ def _pyproject_version(daemon_dir: Path) -> str:
     raise AssertionError("pyproject.toml has no version line")
 
 
+def _release(version: str) -> tuple[int, ...]:
+    return tuple(int(part) for part in version.split("."))
+
+
+def _previous_release(daemon_dir: Path, version: str) -> str:
+    """The newest release tag in the clone strictly older than ``version``."""
+    tags = subprocess.run(
+        ["git", "-C", str(daemon_dir), "tag", "--list", "v*"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.split()
+    releases = [tag[1:] for tag in tags if re.fullmatch(r"v\d+\.\d+\.\d+", tag)]
+    older = [release for release in releases if _release(release) < _release(version)]
+    if not older:
+        raise AssertionError(f"the clone carries no release tag older than {version}")
+    return max(older, key=_release)
+
+
 @pytest.mark.slow
 def test_guarded_branch_install_is_stamped_and_flagged_everywhere(tmp_path: Path) -> None:
     if shutil.which("uv") is None:
@@ -145,8 +164,11 @@ def test_guarded_branch_install_is_stamped_and_flagged_everywhere(tmp_path: Path
 
     # What the project last deployed, as its committed HOOKS-DAEMON.md records
     # it: with no venv yet, the pre-deploy gate reads the installed version
-    # from here (Plan 00376), and a project with neither needs the owner.
-    installed = _pyproject_version(daemon_dir)
+    # from here (Plan 00376), and a project with neither needs the owner. It
+    # is the release BEFORE the branch: a HOOKS-DAEMON.md that already names
+    # the target is an agent-editable claim that nothing is new, which the
+    # gate refers to the owner.
+    installed = _previous_release(daemon_dir, _pyproject_version(daemon_dir))
     (project_root / ".claude" / "HOOKS-DAEMON.md").write_text(
         f"> Generated on 2026-09-24 (v{installed}) by `generate-docs`\n"
     )

@@ -131,6 +131,49 @@ _version_lt() {
     return 1
 }
 
+#
+# _remote_identity() - The repository a git remote URL names, so that two
+# spellings of one repository compare equal: `host/owner/repo` for a URL or
+# scp-like form (scheme, user and port dropped, host lowercased), the physical
+# path for a local one. A trailing slash or `.git` never counts. Used by Step 5
+# to tell an https-to-ssh rewrite of origin from a rewrite to somewhere else.
+#
+_remote_identity() {
+    local url="${1%/}" rest host path
+    case "$url" in
+        file://*)
+            path="${url#file://}"
+            ;;
+        *://*)
+            rest="${url#*://}"
+            host="${rest%%/*}"
+            host="${host##*@}"
+            host="${host%%:*}"
+            path="${rest#*/}"
+            printf '%s/%s\n' "$(printf '%s' "$host" | tr '[:upper:]' '[:lower:]')" "${path%.git}"
+            return 0
+            ;;
+        /* | ./* | ../*)
+            path="$url"
+            ;;
+        *:*)
+            host="${url%%:*}"
+            host="${host##*@}"
+            path="${url#*:}"
+            path="${path#/}"
+            printf '%s/%s\n' "$(printf '%s' "$host" | tr '[:upper:]' '[:lower:]')" "${path%.git}"
+            return 0
+            ;;
+        *)
+            path="$url"
+            ;;
+    esac
+    if [ -d "$path" ]; then
+        path="$(cd "$path" && pwd -P)"
+    fi
+    printf '%s\n' "${path%.git}"
+}
+
 # ============================================================
 # Python version detection
 # ============================================================
@@ -538,15 +581,35 @@ _stop_running_daemons "$DAEMON_DIR"
 # (Plan 00109), so this line protects the entire installed base as soon as it
 # lands on main — including clients still running much older daemon versions.
 _info "Fetching latest tags..."
-# Plan 00376 review3 m2: a caller's `git config --global url.<evil>.insteadOf
-# <this-remote>` would silently redirect this fetch -- no `git -C`/`remote
-# set-url` shape for the approval guard to catch, since the redirect lives in
-# the CALLER's own global config, never the command line. GIT_CONFIG_GLOBAL
-# points git at an empty, throwaway file instead of the caller's
-# ~/.gitconfig; GIT_CONFIG_NOSYSTEM drops /etc/gitconfig the same way. Every
-# git invocation below this point inherits both.
-export GIT_CONFIG_GLOBAL=/dev/null
-export GIT_CONFIG_NOSYSTEM=1
+# Plan 00376 review3 m2 / review4 MAJOR 3: a `url.<x>.insteadOf` rewrite (in
+# any config scope, directly or through an include) or a config override in
+# the environment silently changes where this fetch goes, and the Layer 2 this
+# script launches comes from whatever it fetched. The config of the person
+# running the upgrade is kept -- safe.directory, credential helpers and
+# proxies live there -- but the environment overrides are dropped, origin must
+# name exactly one URL, and a fetch URL that config rewrites to a DIFFERENT
+# repository is refused. An https-to-ssh rewrite of the same repository passes.
+unset GIT_CONFIG_PARAMETERS GIT_CONFIG_COUNT
+for _git_config_name in "${!GIT_CONFIG_KEY_@}" "${!GIT_CONFIG_VALUE_@}"; do
+    unset "$_git_config_name"
+done
+_ORIGIN_URLS="$(git -C "$DAEMON_DIR" config --get-all remote.origin.url)" \
+    || _fail "The daemon clone has no origin remote: $DAEMON_DIR"
+if [ "$(printf "%s\n" "$_ORIGIN_URLS" | wc -l)" -ne 1 ]; then
+    _fail "Refusing to fetch: origin in $DAEMON_DIR names more than one URL:
+$_ORIGIN_URLS"
+fi
+_FETCH_URL="$(git -C "$DAEMON_DIR" ls-remote --get-url origin)"
+if [ "$(_remote_identity "$_ORIGIN_URLS")" != "$(_remote_identity "$_FETCH_URL")" ]; then
+    _REWRITE_SOURCES=""
+    if _REWRITE_SOURCES="$(git -C "$DAEMON_DIR" config --show-origin --get-regexp "^url\..*\.insteadof$")"; then
+        _REWRITE_SOURCES="
+Rewrites in effect:
+$_REWRITE_SOURCES"
+    fi
+    _fail "Refusing to fetch: git configuration rewrites origin ($_ORIGIN_URLS) to $_FETCH_URL, a different repository. The upgrade runs code from what it fetches, so it only fetches from the repository origin names.$_REWRITE_SOURCES
+If that is a mirror of the daemon repository, the owner can point origin at it directly: git -C \"$DAEMON_DIR\" remote set-url origin <mirror-url>"
+fi
 git -C "$DAEMON_DIR" fetch --tags --force --quiet
 
 # Plan 00291: the guarded branch-install gate. First-party only: BOTH
