@@ -21,8 +21,17 @@ token the value is the FOLLOWING token instead (``-am "msg"`` means message
 
 from __future__ import annotations
 
+import re
 import shlex
+from dataclasses import dataclass
 from typing import Final
+
+from claude_code_hooks_daemon.utils.command_evasion import (
+    SHELL_RESERVED_COMMAND_PREFIXES,
+    git_subcommand_index,
+    normalise_line_continuations,
+)
+from claude_code_hooks_daemon.utils.shell_segmentation import command_word
 
 #: The commit message flags recognised as a WHOLE token (own token). The
 #: `-m` attached-value spelling (`-mFOO`, `-am`) is not listed here -- it is
@@ -248,44 +257,429 @@ def _read_all_cluster(letters: str) -> tuple[bool, bool]:
     return False, False
 
 
-def extract_commit_pathspecs(tokens: list[str]) -> list[str]:
-    """Trailing pathspec arguments to ``git commit`` (paths, not flags/values).
+#: git-commit's long options, from git's own table (``git commit
+#: --git-completion-helper-all``), mapped to whether each takes a REQUIRED
+#: value that may be the following token. ``--gpg-sign`` and
+#: ``--untracked-files`` take an OPTIONAL value, which git only ever reads
+#: attached (``--gpg-sign=KEY``), so the following token stays an operand.
+#: git accepts any unambiguous prefix of these names, so a caller must
+#: resolve an abbreviation against the whole table, not only the value-takers.
+_COMMIT_LONG_OPTIONS: Final[dict[str, bool]] = {
+    "quiet": False,
+    "verbose": False,
+    "file": True,
+    "author": True,
+    "date": True,
+    "message": True,
+    "reedit-message": True,
+    "reuse-message": True,
+    "fixup": True,
+    "squash": True,
+    "reset-author": False,
+    "trailer": True,
+    "signoff": False,
+    "template": True,
+    "edit": False,
+    "cleanup": True,
+    "status": False,
+    "gpg-sign": False,
+    "all": False,
+    "include": False,
+    "interactive": False,
+    "patch": False,
+    "only": False,
+    "no-verify": False,
+    "dry-run": False,
+    "short": False,
+    "branch": False,
+    "ahead-behind": False,
+    "porcelain": False,
+    "long": False,
+    "null": False,
+    "amend": False,
+    "no-post-rewrite": False,
+    "untracked-files": False,
+    "pathspec-from-file": True,
+    "pathspec-file-nul": False,
+    "allow-empty": False,
+    "allow-empty-message": False,
+    "verify": False,
+    "post-rewrite": False,
+}
+_LONG_PREFIX: Final[str] = "--"
+_NEGATION_PREFIX: Final[str] = "no-"
+_ASSIGNMENT_SIGN: Final[str] = "="
+
+#: The shell's operator characters: ``shlex``'s ``punctuation_chars`` set.
+#: A word made only of these is an operator, never an argument.
+_OPERATOR_CHARS: Final[frozenset[str]] = frozenset("();<>|&")
+#: An operator carrying one of these is a REDIRECTION, whose next word is its
+#: target (or, for ``<<``, the heredoc delimiter); every other operator ends
+#: the simple command.
+_REDIRECT_CHARS: Final[frozenset[str]] = frozenset("<>")
+_SUBSHELL_OPEN: Final[str] = "("
+_SUBSHELL_CLOSE: Final[str] = ")"
+_STATEMENT_SEPARATOR: Final[str] = " ; "
+
+#: A heredoc operator and its delimiter, in any of the quoting forms bash
+#: accepts. ``<<<`` (a here-string) is excluded by the lookbehind and lookahead.
+_HEREDOC_OPERATOR: Final[re.Pattern[str]] = re.compile(
+    r"(?<!<)<<(?!<)(-?)[ \t]*(?:'([^'\n]*)'|\"([^\"\n]*)\"|\\?([^\s;&|()<>'\"]+))"
+)
+_HEREDOC_STRIP_TABS: Final[str] = "-"
+#: A file-descriptor prefix on a redirection: ``2>``, ``10>&1``, ``{fd}>``.
+#: Only at the start of a word, which the scanner guarantees.
+_IO_NUMBER: Final[re.Pattern[str]] = re.compile(r"(?:\d+|\{[A-Za-z_]\w*\})(?=[<>])")
+_WORD_BREAK_CHARS: Final[frozenset[str]] = frozenset(" \t;&|()<>")
+_SINGLE_QUOTE: Final[str] = "'"
+_DOUBLE_QUOTE: Final[str] = '"'
+_BACKSLASH: Final[str] = "\\"
+_NEWLINE: Final[str] = "\n"
+
+
+def _skip_heredoc_bodies(command: str, start: int, pending: list[tuple[str, bool]]) -> int:
+    """Index just past the bodies of ``pending`` heredocs, which begin at ``start``."""
+    position = start
+    for delimiter, strip_tabs in pending:
+        while position < len(command):
+            end = command.find(_NEWLINE, position)
+            line = command[position:] if end < 0 else command[position:end]
+            position = len(command) if end < 0 else end + 1
+            if (line.lstrip("\t") if strip_tabs else line) == delimiter:
+                break
+    return position
+
+
+def _lexable_text(command: str) -> str:
+    """``command`` rewritten so a punctuation-aware ``shlex`` reads it as bash does.
+
+    Three things bash knows that ``shlex`` does not are applied first, each
+    outside quotes only: a heredoc BODY is data, so it is removed and the
+    operator is left with its bare delimiter; a file-descriptor number before a
+    redirection belongs to the operator, not the argument list (``2>&1``); and
+    a newline ends a statement, so it becomes ``;``.
+    """
+    text = normalise_line_continuations(command)
+    out: list[str] = []
+    quote: str | None = None
+    pending: list[tuple[str, bool]] = []
+    word_start = True
+    index = 0
+    while index < len(text):
+        char = text[index]
+        if quote is not None:
+            if char == _BACKSLASH and quote == _DOUBLE_QUOTE and index + 1 < len(text):
+                out.append(text[index : index + 2])
+                index += 2
+                continue
+            out.append(char)
+            index += 1
+            if char == quote:
+                quote = None
+            continue
+        if char == _NEWLINE:
+            out.append(_STATEMENT_SEPARATOR)
+            index = _skip_heredoc_bodies(text, index + 1, pending)
+            pending = []
+            word_start = True
+            continue
+        if char == _BACKSLASH and index + 1 < len(text):
+            out.append(text[index : index + 2])
+            index += 2
+            word_start = False
+            continue
+        if word_start:
+            io_number = _IO_NUMBER.match(text, index)
+            if io_number is not None:
+                index = io_number.end()
+                word_start = False
+                continue
+        heredoc = _HEREDOC_OPERATOR.match(text, index)
+        if heredoc is not None:
+            delimiter = next(group for group in heredoc.groups()[1:] if group is not None)
+            pending.append((delimiter, heredoc.group(1) == _HEREDOC_STRIP_TABS))
+            out.append(f" << {shlex.quote(delimiter)} ")
+            index = heredoc.end()
+            word_start = True
+            continue
+        if char in (_SINGLE_QUOTE, _DOUBLE_QUOTE):
+            quote = char
+        out.append(char)
+        word_start = char in _WORD_BREAK_CHARS
+        index += 1
+    return "".join(out)
+
+
+def command_words(command: str) -> list[str]:
+    """``command`` as the words and operators bash reads, or ``[]`` when unparseable.
+
+    The shared lexer for reading a commit line. Unlike :func:`tokenise_command`,
+    an operator is its own word (``2>&1`` is ``>&``, ``1``; ``x;`` is ``x``,
+    ``;``), a heredoc body is gone, and a newline is a ``;`` -- so a redirection
+    or the next command can never be read as a commit's pathspec.
+    """
+    text = _lexable_text(command)
+    try:
+        lexer = shlex.shlex(text, posix=True, punctuation_chars=True)
+        lexer.whitespace_split = True
+        return list(lexer)
+    except ValueError:
+        # Unbalanced quoting: bash would not run it either, but a guard must
+        # still see the words, so they are read on whitespace alone.
+        return text.split()
+
+
+def is_operator(word: str) -> bool:
+    """True when ``word`` is a shell operator rather than an argument."""
+    return bool(word) and all(char in _OPERATOR_CHARS for char in word)
+
+
+def is_redirection(word: str) -> bool:
+    """True for a redirection operator, whose next word is its target."""
+    return is_operator(word) and not _REDIRECT_CHARS.isdisjoint(word)
+
+
+def _long_option_takes_value(option: str) -> bool:
+    """Whether the long ``option`` (no ``=``) consumes the following word.
+
+    git resolves an unambiguous prefix (``--mess``) to its option; an
+    ambiguous one is an error and the commit never runs, so it consumes
+    nothing here.
+    """
+    name = option[len(_LONG_PREFIX) :]
+    if name in _COMMIT_LONG_OPTIONS:
+        return _COMMIT_LONG_OPTIONS[name]
+    candidates = [known for known in _COMMIT_LONG_OPTIONS if known.startswith(name)]
+    if not candidates and name.startswith(_NEGATION_PREFIX):
+        return False
+    return len(candidates) == 1 and _COMMIT_LONG_OPTIONS[candidates[0]]
+
+
+def _short_cluster_consumes_next(letters: str) -> bool:
+    """Whether a short-option cluster's value is the following word.
+
+    git reads a cluster letter by letter and the first value-taking letter
+    ends it: a REQUIRED one with nothing after it takes the next word, an
+    OPTIONAL one (``-S``, ``-u``) never does.
+    """
+    for position, letter in enumerate(letters):
+        if letter in _OPTIONAL_VALUE_LETTERS:
+            return False
+        if letter in _REQUIRED_VALUE_LETTERS:
+            return position == len(letters) - 1
+    return False
+
+
+def commit_option_words(words: list[str], start: int) -> list[str]:
+    """The arguments of one git subcommand, from ``words[start]`` to its end.
+
+    Stops at the operator that ends the simple command and drops every
+    redirection with its target, so ``git commit -m x 2>&1 | tee log`` has the
+    arguments ``-m x`` and nothing else.
+    """
+    arguments: list[str] = []
+    index = start
+    while index < len(words):
+        word = words[index]
+        if is_redirection(word):
+            index += 2
+            continue
+        if is_operator(word):
+            break
+        arguments.append(word)
+        index += 1
+    return arguments
+
+
+def extract_commit_pathspecs(command: str) -> list[str]:
+    """The pathspecs of the first ``git commit`` in ``command``.
 
     A ``git commit <pathspec>...`` form commits the CURRENT WORKING TREE
     content of exactly those paths, regardless of what is (or isn't)
     staged for them — different semantics from a bare ``git commit``, which
     commits the index. Empty when the invocation has no trailing paths (a
     bare commit, or ``-a``).
-    """
-    try:
-        commit_index = tokens.index(_COMMIT_TOKEN)
-    except ValueError:
-        return []
 
+    Read with :func:`command_words`, so a redirection, a heredoc, a trailing
+    ``&`` or the next command is never a pathspec, and with git's own option
+    table, so the value of ``-t``, ``--cleanup`` or ``--author`` is never one
+    either.
+    """
+    words = command_words(command)
+    subcommand = commit_subcommand_index(words)
+    if subcommand is None:
+        return []
+    return commit_pathspecs(commit_option_words(words, subcommand + 1))
+
+
+def commit_pathspecs(options: list[str]) -> list[str]:
+    """The pathspecs among ``options``, the arguments after ``commit``."""
     pathspecs: list[str] = []
-    seen_separator = False
-    index = commit_index + 1
-    while index < len(tokens):
-        token = tokens[index]
-        if not seen_separator and token == _PATHSPEC_SEPARATOR:
-            seen_separator = True
+    index = 0
+    while index < len(options):
+        option = options[index]
+        index += 1
+        if option == _PATHSPEC_SEPARATOR:
+            pathspecs.extend(options[index:])
+            break
+        if not option.startswith("-") or len(option) < 2:
+            pathspecs.append(option)
+            continue
+        if _ASSIGNMENT_SIGN in option:
+            continue
+        if option.startswith(_LONG_PREFIX):
+            if _long_option_takes_value(option):
+                index += 1
+            continue
+        if _short_cluster_consumes_next(option[1:]):
+            index += 1
+    return pathspecs
+
+
+def commit_subcommand_index(words: list[str]) -> int | None:
+    """Index of the first ``commit`` subcommand of a ``git`` word, else None."""
+    for position, word in enumerate(words):
+        if command_word(word) != _GIT_TOKEN:
+            continue
+        index = git_subcommand_index(words, position)
+        if index is not None and words[index] == _COMMIT_TOKEN:
+            return index
+    return None
+
+
+#: Commands that run a string argument as shell: ``eval STRING`` and
+#: ``sh -c STRING`` (any option cluster carrying ``c``).
+_EVAL: Final[str] = "eval"
+_SHELLS: Final[frozenset[str]] = frozenset({"sh", "bash", "dash", "zsh", "ksh"})
+_SHELL_COMMAND_LETTER: Final[str] = "c"
+_DIRECTORY_CHANGERS: Final[frozenset[str]] = frozenset({"cd", "pushd"})
+_DIRECTORY_POPPER: Final[str] = "popd"
+_CD_OPTIONS: Final[frozenset[str]] = frozenset({"-P", "-L", "-e", "-@"})
+_HOME: Final[str] = "~"
+_BUILTIN: Final[str] = "builtin"
+_ASSIGNMENT_WORD: Final[re.Pattern[str]] = re.compile(r"[A-Za-z_][A-Za-z0-9_]*=")
+
+
+@dataclass(frozen=True)
+class GitInvocation:
+    """One ``git`` run found in a command, and where it runs.
+
+    ``directory`` is the chain of ``cd``/``pushd`` targets in effect, oldest
+    first, relative to the command's starting directory. An entry of None is
+    a change this reading cannot state (``cd -``, ``popd``, ``cd a b``).
+    ``assignments`` are the ``NAME=value`` words the simple command carries.
+    """
+
+    subcommand: str
+    global_options: tuple[str, ...]
+    arguments: tuple[str, ...]
+    assignments: tuple[str, ...]
+    directory: tuple[str | None, ...]
+
+
+def git_invocations(command: str) -> list[GitInvocation]:
+    """Every ``git <subcommand>`` ``command`` runs, with its directory.
+
+    ``git`` counts wherever it is a word (``sudo git``, ``command git``,
+    ``xargs git``, ``env -i git``, ``(git``), located with the same
+    :func:`~claude_code_hooks_daemon.utils.command_evasion.git_subcommand_index`
+    the sibling commit gates use. A string run by ``eval`` or ``sh -c`` is
+    read as a command of its own, in the directory in effect. A subshell's
+    ``cd`` ends with the subshell.
+    """
+    return _invocations(command_words(command), ())
+
+
+def _invocations(words: list[str], directory: tuple[str | None, ...]) -> list[GitInvocation]:
+    found: list[GitInvocation] = []
+    stack: list[tuple[str | None, ...]] = []
+    index = 0
+    while index < len(words):
+        if is_operator(words[index]) and not is_redirection(words[index]):
+            # The lexer joins adjacent operators (`);`), so each is read in turn.
+            for char in words[index]:
+                if char == _SUBSHELL_OPEN:
+                    stack.append(directory)
+                elif char == _SUBSHELL_CLOSE:
+                    directory = stack.pop() if stack else directory
             index += 1
             continue
-        if not seen_separator and token.startswith("-"):
-            flag = token.split("=", 1)[0]
-            if flag in VALUE_FLAGS and "=" not in token:
-                index += 2  # skip the flag AND its separate value token
-                continue
-            if "=" not in token:
-                cluster = _short_cluster_value_letter(token)
-                if cluster is not None:
-                    _, attached = cluster
-                    # Attached value stays in this token; an unattached one
-                    # (value is the FOLLOWING token) must be skipped too.
-                    index += 1 if attached is not None else 2
-                    continue
-            index += 1  # boolean flag, or `flag=value` (no separate token)
+        end = index
+        while end < len(words) and not (is_operator(words[end]) and not is_redirection(words[end])):
+            end += 2 if is_redirection(words[end]) else 1
+        segment = [word for word in commit_option_words(words, index) if word]
+        directory = _after_directory_change(segment, directory)
+        found.extend(_segment_invocations(segment, directory))
+        index = end
+    return found
+
+
+def _segment_invocations(
+    segment: list[str], directory: tuple[str | None, ...]
+) -> list[GitInvocation]:
+    """The git runs of one simple command, including an ``eval``/``sh -c`` string."""
+    body = _evaluated_string(segment)
+    if body is not None:
+        return _invocations(command_words(body), directory)
+    for position, word in enumerate(segment):
+        if command_word(word) != _GIT_TOKEN:
             continue
-        pathspecs.append(token)
-        index += 1
-    return pathspecs
+        subcommand = git_subcommand_index(segment, position)
+        if subcommand is None:
+            return []
+        return [
+            GitInvocation(
+                subcommand=segment[subcommand],
+                global_options=tuple(segment[position + 1 : subcommand]),
+                arguments=tuple(segment[subcommand + 1 :]),
+                assignments=tuple(
+                    word for word in segment[:position] if _ASSIGNMENT_WORD.match(word)
+                ),
+                directory=directory,
+            )
+        ]
+    return []
+
+
+def _evaluated_string(segment: list[str]) -> str | None:
+    """The string ``eval``/``sh -c`` runs as shell, or None when there is none."""
+    for position, word in enumerate(segment):
+        name = command_word(word)
+        if name == _EVAL:
+            return " ".join(segment[position + 1 :])
+        if name in _SHELLS:
+            for offset, option in enumerate(segment[position + 1 :], start=position + 1):
+                if not option.startswith("-"):
+                    return None
+                if option.startswith(_LONG_PREFIX):
+                    continue
+                if _SHELL_COMMAND_LETTER in option[1:] and offset + 1 < len(segment):
+                    return segment[offset + 1]
+            return None
+    return None
+
+
+def _after_directory_change(
+    segment: list[str], directory: tuple[str | None, ...]
+) -> tuple[str | None, ...]:
+    """``directory`` after ``segment`` when it is a ``cd``/``pushd``/``popd``."""
+    words = segment
+    while words and (words[0] in SHELL_RESERVED_COMMAND_PREFIXES or words[0] == _BUILTIN):
+        words = words[1:]
+    if not words:
+        return directory
+    name = command_word(words[0])
+    if name == _DIRECTORY_POPPER:
+        return (*directory, None)
+    if name not in _DIRECTORY_CHANGERS:
+        return directory
+    operands = list(words[1:])
+    while operands and operands[0] in _CD_OPTIONS:
+        operands = operands[1:]
+    if operands and operands[0] == _PATHSPEC_SEPARATOR:
+        operands = operands[1:]
+    if not operands:
+        return (*directory, _HOME)
+    if len(operands) > 1 or operands[0].startswith("-") or operands[0].startswith("+"):
+        return (*directory, None)
+    return (*directory, operands[0])

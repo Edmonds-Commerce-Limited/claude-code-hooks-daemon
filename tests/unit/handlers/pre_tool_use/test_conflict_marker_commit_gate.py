@@ -127,6 +127,23 @@ class TestMatches:
             "git cherry-pick --continue",
             "git revert --continue",
             "git rebase --continue",
+            "git am --continue",
+            "git am patch.mbox",
+            # Review 1 M1: each was not recognised as a commit at all.
+            "sudo git commit -m x",
+            "command git commit -m x",
+            "exec git commit -m x",
+            "nice -n 5 git commit -m x",
+            "xargs git commit -m x",
+            "eval 'git commit -m x'",
+            "env -i git commit -m x",
+            "env -u X git commit -m x",
+            "sh -c 'git commit -m x'",
+            "(git commit -m x)",
+            "(cd sub && git commit -m x)",
+            # Main's shared detector calls these commits; so does this gate.
+            "bash <<EOF\ngit commit -m x\nEOF",
+            "echo git commit",
         ],
     )
     def test_matches_a_command_that_records_a_commit(
@@ -142,7 +159,6 @@ class TestMatches:
             "git merge --abort",
             "git commit --dry-run",
             "git diff --cached",
-            "echo git commit",
             "echo 'git commit -m x'",
             "",
         ],
@@ -271,14 +287,15 @@ class TestAllowsWhatIsNotAnAddedMarker:
         result = _verdict(handler, "git commit -m x", repo)
         assert result.decision == Decision.ALLOW
 
-    def test_a_directory_outside_any_repository_is_allowed(
+    def test_a_directory_outside_any_repository_is_denied_as_unchecked(
         self, handler: ConflictMarkerCommitGateHandler, tmp_path: Path
     ) -> None:
+        """Review 1 M4: resolving no repository was a silent allow."""
         outside = tmp_path / "plain"
         outside.mkdir()
-        with patch(f"{_MODULE}.ProjectContext.project_root", return_value=outside):
-            result = _verdict(handler, "git commit -m x", outside)
-        assert result.decision == Decision.ALLOW
+        result = _verdict(handler, "git commit -m x", outside)
+        assert result.decision == Decision.DENY
+        assert "NOT checked" in result.reason
 
 
 class TestWhatTheCommitRecords:
@@ -364,12 +381,13 @@ class TestWhatTheCommitRecords:
         result = _verdict(handler, f"cd {repo.name}; git commit -m x", repo.parent)
         assert result.decision == Decision.DENY
 
-    def test_an_unresolvable_cd_leaves_the_directory_alone(
+    def test_an_unresolvable_cd_is_denied_even_when_the_tree_is_clean(
         self, handler: ConflictMarkerCommitGateHandler, repo: Path
     ) -> None:
-        _stage(repo, "doc.md", f"# Doc\n\nfirst\n{CLOSE} main\n")
+        """Review 1 M1: the old test passed only because the cwd was the repo."""
         result = _verdict(handler, "cd - && git commit -m x", repo)
         assert result.decision == Decision.DENY
+        assert "NOT checked" in result.reason
 
     def test_merge_continue_checks_the_index(
         self, handler: ConflictMarkerCommitGateHandler, repo: Path
@@ -380,16 +398,15 @@ class TestWhatTheCommitRecords:
 
 
 class TestAGitFailureIsReportedNotSilent:
-    def test_an_unreadable_index_allows_with_a_visible_advisory(
+    def test_an_unreadable_index_denies_naming_the_error(
         self, handler: ConflictMarkerCommitGateHandler, repo: Path
     ) -> None:
         failed = subprocess.CompletedProcess(args=["git"], returncode=128, stdout="", stderr="boom")
         with patch(f"{_MODULE}.run_git", return_value=failed):
             result = _verdict(handler, "git commit -m x", repo)
-        assert result.decision == Decision.ALLOW
-        context = "\n".join(result.context)
-        assert "NOT checked" in context
-        assert "boom" in context
+        assert result.decision == Decision.DENY
+        assert "NOT checked" in result.reason
+        assert "boom" in result.reason
 
 
 class TestCommandShapes:
@@ -456,8 +473,156 @@ class TestAGrepFailureIsReported:
 
         with patch(f"{_MODULE}.run_git", side_effect=_grep_fails):
             result = _verdict(handler, "git commit -m x", repo)
+        assert result.decision == Decision.DENY
+        assert "git grep exited 2" in result.reason
+
+
+class TestShellSyntaxNeverHidesTheIndex:
+    """Review 1 B1 / ledger 00466 N226: each shape below allowed a staged marker."""
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "git commit -m x 2>&1",
+            "git commit -m x 2>&1 | bin/echd-capture 20",
+            "git commit -m x > /dev/null",
+            "git commit -F- <<'EOF'\nsubject\nEOF",
+            "git commit -m x &",
+            "git commit -t tmpl -m x",
+            "git commit --cleanup strip -m x",
+            "git commit --author 'A <a@b.c>' -m x",
+        ],
+    )
+    def test_a_staged_marker_is_denied(
+        self, handler: ConflictMarkerCommitGateHandler, repo: Path, command: str
+    ) -> None:
+        _stage(repo, "doc.md", f"# Doc\n\nfirst\n{CLOSE} main\n")
+        result = _verdict(handler, command, repo)
+        assert result.decision == Decision.DENY
+        assert "doc.md:4" in result.reason
+
+    def test_pathspecs_that_match_nothing_judge_the_index(
+        self, handler: ConflictMarkerCommitGateHandler, repo: Path
+    ) -> None:
+        _stage(repo, "doc.md", f"# Doc\n\nfirst\n{CLOSE} main\n")
+        result = _verdict(handler, "git commit -m x no-such-path", repo)
+        assert result.decision == Decision.DENY
+
+
+class TestEveryWrapperIsJudged:
+    """Review 1 M1: none of these was recognised as a commit."""
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "sudo git commit -m x",
+            "command git commit -m x",
+            "nice -n 5 git commit -m x",
+            "eval 'git commit -m x'",
+            "env -i git commit -m x",
+            "sh -c 'git commit -m x'",
+            "(git commit -m x)",
+        ],
+    )
+    def test_a_staged_marker_is_denied(
+        self, handler: ConflictMarkerCommitGateHandler, repo: Path, command: str
+    ) -> None:
+        _stage(repo, "doc.md", f"# Doc\n\nfirst\n{CLOSE} main\n")
+        assert handler.matches(_bash(command, repo)) is True
+        assert _verdict(handler, command, repo).decision == Decision.DENY
+
+    def test_a_subshell_cd_names_the_repository(
+        self, handler: ConflictMarkerCommitGateHandler, repo: Path, tmp_path: Path
+    ) -> None:
+        elsewhere = _init(tmp_path / "elsewhere")
+        _stage(repo, "doc.md", f"# Doc\n\nfirst\n{CLOSE} main\n")
+        result = _verdict(handler, f"(cd {repo} && git commit -m x)", elsewhere)
+        assert result.decision == Decision.DENY
+        assert "doc.md:4" in result.reason
+
+
+class TestAnUncheckableCommitIsDenied:
+    """Review 1 M4: a commit the gate cannot place is denied, with a rephrase."""
+
+    @pytest.mark.parametrize(
+        ("command", "named"),
+        [
+            ('cd "$WT" && git commit -m x', "$WT"),
+            ("git -C $WT commit -m x", "$WT"),
+            ("cd - && git commit -m x", "cd -"),
+            ("popd && git commit -m x", "popd"),
+            ("git --git-dir=/x/.git commit -m x", "--git-dir"),
+            ("git --work-tree /x commit -m x", "--work-tree"),
+            ("GIT_INDEX_FILE=/tmp/i git commit -m x", "GIT_INDEX_FILE"),
+            ("git commit --pathspec-from-file=list.txt -m x", "--pathspec-from-file"),
+            ("git am patch.mbox", "git am"),
+            ("cd no-such-dir && git commit -m x", "no-such-dir"),
+        ],
+    )
+    def test_names_the_reason_and_the_rephrase(
+        self, handler: ConflictMarkerCommitGateHandler, repo: Path, command: str, named: str
+    ) -> None:
+        result = _verdict(handler, command, repo)
+        assert result.decision == Decision.DENY
+        assert "NOT checked" in result.reason
+        assert named in result.reason
+        assert "git -C /absolute/path/to/repo commit" in result.reason
+
+    def test_am_continue_checks_the_index(
+        self, handler: ConflictMarkerCommitGateHandler, repo: Path
+    ) -> None:
+        _stage(repo, "doc.md", f"# Doc\n\nfirst\n{CLOSE} main\n")
+        assert _verdict(handler, "git am --continue", repo).decision == Decision.DENY
+
+
+class TestRoutineIdiomsStillCommit:
+    """Review 1 M4: fail-closed placement must not refuse the everyday shapes."""
+
+    @pytest.mark.parametrize(
+        "template",
+        [
+            "git commit -m x",
+            "git commit -m x 2>&1 | bin/echd-capture 20",
+            "git -C {repo} commit -m x",
+            "cd {repo} && git commit -m x",
+            "cd {repo}; git add doc.md && git commit -m x",
+            "git commit -F- <<'EOF'\nsubject\n\nbody\nEOF",
+        ],
+    )
+    def test_a_clean_commit_is_allowed(
+        self, handler: ConflictMarkerCommitGateHandler, repo: Path, template: str
+    ) -> None:
+        _stage(repo, "doc.md", "# Doc\n\nfirst\nsecond\n")
+        result = _verdict(handler, template.format(repo=repo), repo)
         assert result.decision == Decision.ALLOW
-        assert "git grep exited 2" in "\n".join(result.context)
+
+
+class TestExcludePaths:
+    """Review 1 M3: a documented example has a way through."""
+
+    def test_the_handler_option_exempts_a_path(
+        self, handler: ConflictMarkerCommitGateHandler, repo: Path
+    ) -> None:
+        _stage(repo, "fixtures/conflict.md", f"{OPEN} ours\nx\n{SEP}\ny\n{CLOSE} theirs\n")
+        handler._exclude_paths = ["fixtures/**"]
+        assert _verdict(handler, "git commit -m x", repo).decision == Decision.ALLOW
+
+    def test_the_project_option_exempts_a_path(
+        self, handler: ConflictMarkerCommitGateHandler, repo: Path
+    ) -> None:
+        _stage(repo, "fixtures/conflict.md", f"{OPEN} ours\nx\n{SEP}\ny\n{CLOSE} theirs\n")
+        handler._project_exclude_paths = ["fixtures/**"]
+        assert _verdict(handler, "git commit -m x", repo).decision == Decision.ALLOW
+
+    def test_a_marker_in_a_fence_is_still_denied_and_the_way_through_is_named(
+        self, handler: ConflictMarkerCommitGateHandler, repo: Path
+    ) -> None:
+        _stage(repo, "doc.md", f"# Doc\n\nfirst\n```\n{OPEN} ours\n{SEP}\n{CLOSE} theirs\n```\n")
+        result = _verdict(handler, "git commit -m x", repo)
+        assert result.decision == Decision.DENY
+        assert "conflict_marker_commit_gate.options.exclude_paths" in result.reason
+        assert "daemon.exclude_paths" in result.reason
+        assert "fenced code block" in result.reason
 
 
 class TestAcceptanceTests:

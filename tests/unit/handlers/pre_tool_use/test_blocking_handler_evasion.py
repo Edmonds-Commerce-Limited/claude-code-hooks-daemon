@@ -119,6 +119,25 @@ _EVASION_CASES: dict[str, tuple[str, tuple[str, ...]]] = {
             "git \\\n  commit -m x",
         ),
     ),
+    "ConflictMarkerCommitGateHandler": (
+        "git commit -m x",
+        (
+            f"git -C {_SAFE_PATH} commit -m x",
+            "git --no-pager commit -m x",
+            "git \\\n  commit -m x",
+            "/usr/bin/git commit -m x",
+            "env git commit -m x",
+            "env -i git commit -m x",
+            "sudo git commit -m x",
+            "command git commit -m x",
+            "exec git commit -m x",
+            "nice -n 5 git commit -m x",
+            "xargs git commit -m x",
+            "eval 'git commit -m x'",
+            "sh -c 'git commit -m x'",
+            "(git commit -m x)",
+        ),
+    ),
     "IssueFilingGateHandler": (
         "gh issue create --repo Edmonds-Commerce-Limited/claude-code-hooks-daemon --title x",
         (
@@ -316,6 +335,11 @@ _MUST_NOT_MATCH: dict[str, tuple[str, ...]] = {
         "git status",
         "git diff --cached",
         'gh pr create --title "x" --body "y"',
+    ),
+    "ConflictMarkerCommitGateHandler": (
+        "git status",
+        "git commit --dry-run",
+        "echo 'git commit -m x'",
     ),
     "GithubAutoCloseKeywordsHandler": (
         # The keyword alone is prose; a reference alone is a link, not a
@@ -524,7 +548,6 @@ _COMMAND_ANCHORED_NOT_UNIT_TESTABLE: dict[str, str] = {
     "PlanQaCommitGateHandler": "inspects the staged git tree; needs a real repository",
     "DocsQaCommitGateHandler": "inspects the staged git tree; needs a real repository",
     "RemoteDocsCommitGateHandler": "inspects the staged git tree; needs a real repository",
-    "ConflictMarkerCommitGateHandler": "inspects the staged git tree; needs a real repository",
     "NpmCommandHandler": "needs ProjectContext wiring",
     "PlanNumberHelperHandler": "needs ProjectContext wiring",
     "DaemonLocationGuardHandler": "matches a cd target path, evasion is path spelling",

@@ -24,8 +24,7 @@ from __future__ import annotations
 
 import logging
 import re
-import shlex
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Final
@@ -44,46 +43,48 @@ from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.core.utils import get_bash_command
 from claude_code_hooks_daemon.utils import secret_file_matching as sfm
-from claude_code_hooks_daemon.utils.command_evasion import (
-    GIT_GLOBAL_OPTIONS_TAKING_SEPARATE_VALUE,
-    normalise_line_continuations,
-    strip_reserved_word_prefix,
-)
 from claude_code_hooks_daemon.utils.conflict_markers import (
     GIT_GREP_PREFILTER,
     ConflictMarker,
     find_conflict_markers,
 )
 from claude_code_hooks_daemon.utils.git_commit_parsing import (
+    GitInvocation,
+    commit_pathspecs,
     commits_working_tree,
-    extract_commit_pathspecs,
+    git_invocations,
+    is_git_commit,
+    tokenise_command,
 )
 from claude_code_hooks_daemon.utils.git_repo import GitRepo, run_git
-from claude_code_hooks_daemon.utils.shell_segmentation import split_unquoted
+from claude_code_hooks_daemon.utils.path_exclusion import handler_excludes_path
 
 logger = logging.getLogger(__name__)
 
-# A newline separates commands exactly as `;` does, and `&&`/`||`/`|` each
-# start a new command within a statement.
-_SEGMENT_SEPARATORS: Final[tuple[str, ...]] = ("||", "&&", "|", ";", "\n")
-
-_GIT: Final[str] = "git"
 _COMMIT: Final[str] = "commit"
-_ENV: Final[str] = "env"
+_AM: Final[str] = "am"
 _DASH_C: Final[str] = "-C"
 _CONTINUE: Final[str] = "--continue"
 # A dry run records nothing.
 _DRY_RUN: Final[str] = "--dry-run"
 _PATHSPEC_SEPARATOR: Final[str] = "--"
+_PATHSPEC_FROM_FILE: Final[str] = "--pathspec-from-file"
 _INCLUDE_FLAGS: Final[frozenset[str]] = frozenset({"-i", "--include"})
 # Each of these records the INDEX as a commit once a conflict is resolved.
 _CONTINUING_SUBCOMMANDS: Final[frozenset[str]] = frozenset(
     {"merge", "cherry-pick", "revert", "rebase"}
 )
-_DIRECTORY_CHANGERS: Final[frozenset[str]] = frozenset({"cd", "pushd"})
-_CD_TOKEN_COUNT: Final[int] = 2
-_PREVIOUS_DIRECTORY: Final[str] = "-"
-_ASSIGNMENT: Final[re.Pattern[str]] = re.compile(r"[A-Za-z_][A-Za-z0-9_]*=.*")
+# `git am` resumes from the index with these; any other run applies a patch.
+_AM_RESUMES: Final[frozenset[str]] = frozenset({"--continue", "--resolved", "-r"})
+_RECORDING_SUBCOMMANDS: Final[frozenset[str]] = frozenset({_COMMIT, _AM, *_CONTINUING_SUBCOMMANDS})
+# Each points git at a repository, work tree or index other than the one its
+# directory names, so the gate would read the wrong tree.
+_RELOCATING_VARIABLES: Final[frozenset[str]] = frozenset(
+    {"GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR"}
+)
+_RELOCATING_OPTIONS: Final[frozenset[str]] = frozenset({"--git-dir", "--work-tree"})
+_EXPANSION: Final[re.Pattern[str]] = re.compile(r"[$`*?\[]")
+_HOME_PATH: Final[re.Pattern[str]] = re.compile(r"~(?:/|$)")
 
 # `git diff` targets: the index against HEAD, or the working tree against it.
 _INDEX_TARGET: Final[str] = "--cached"
@@ -151,45 +152,28 @@ class _Finding:
     withheld: bool
 
 
+@dataclass(frozen=True)
+class _Unplaceable:
+    """A commit whose repository or recorded tree this gate cannot state."""
+
+    reason: str
+
+
 class _UnreadableTree(Exception):
     """git could not answer, so this commit could not be checked."""
-
-
-def _shell_tokens(segment: str) -> list[str]:
-    """Shell tokens of one segment; an unbalanced quote falls back to whitespace."""
-    try:
-        return shlex.split(segment)
-    except ValueError:
-        return segment.split()
-
-
-def _git_arguments(segment: str) -> list[str] | None:
-    """The arguments after ``git`` when ``segment`` runs git, else None.
-
-    ``git`` must be the COMMAND, past any reserved word, ``env`` and
-    ``NAME=value`` assignments -- so ``echo git commit`` is not a commit.
-    """
-    tokens = _shell_tokens(strip_reserved_word_prefix(segment))
-    index = 0
-    while index < len(tokens) and (tokens[index] == _ENV or _ASSIGNMENT.fullmatch(tokens[index])):
-        index += 1
-    if index >= len(tokens):
-        return None
-    head = tokens[index]
-    if head != _GIT and not head.endswith(f"/{_GIT}"):
-        return None
-    return tokens[index + 1 :]
 
 
 def _commit_sources(subcommand: str, options: list[str]) -> tuple[_Source, ...] | None:
     """What a git subcommand records as a commit, or None when it records none."""
     if subcommand in _CONTINUING_SUBCOMMANDS:
         return (_Source(working_tree=False),) if _CONTINUE in options else None
+    if subcommand == _AM:
+        return (_Source(working_tree=False),) if _AM_RESUMES.intersection(options) else None
     if subcommand != _COMMIT or _DRY_RUN in options:
         return None
     if commits_working_tree(options):
         return (_Source(working_tree=True),)
-    pathspecs = tuple(extract_commit_pathspecs([_COMMIT, *options]))
+    pathspecs = tuple(commit_pathspecs(options))
     if not pathspecs:
         return (_Source(working_tree=False),)
     named = _Source(working_tree=True, pathspecs=pathspecs)
@@ -200,53 +184,65 @@ def _commit_sources(subcommand: str, options: list[str]) -> tuple[_Source, ...] 
     return (named,)
 
 
-def _parse_commit(segment: str, cwd: Path) -> _Commit | None:
-    """The commit ``segment`` records, resolving each ``git -C`` against ``cwd``."""
-    arguments = _git_arguments(segment)
-    if arguments is None:
-        return None
+def _unplaceable_reason(run: GitInvocation) -> str | None:
+    """Why this commit's repository or recorded tree cannot be stated, else None."""
+    if run.subcommand == _AM and not _AM_RESUMES.intersection(run.arguments):
+        return "`git am` records patch content that is not in any tree yet"
+    if any(option.startswith(_PATHSPEC_FROM_FILE) for option in run.arguments):
+        return "`--pathspec-from-file` names the committed paths in a file"
+    for assignment in run.assignments:
+        name = assignment.split("=", 1)[0]
+        if name in _RELOCATING_VARIABLES:
+            return f"`{name}` moves the repository or index git reads"
+    for option in run.global_options:
+        if option.split("=", 1)[0] in _RELOCATING_OPTIONS:
+            return f"`{option}` moves the repository git reads"
+    for step in (*run.directory, *_dash_c_values(run.global_options)):
+        if step is None:
+            return "a `cd -`, `popd` or multi-operand `cd` names no directory"
+        if _EXPANSION.search(step) or (step.startswith("~") and not _HOME_PATH.match(step)):
+            return f"the directory `{step}` needs an expansion the daemon cannot perform"
+    return None
+
+
+def _dash_c_values(global_options: tuple[str, ...]) -> list[str]:
+    """The ``-C`` directories among git's global options, in order."""
+    return [
+        global_options[index + 1]
+        for index, option in enumerate(global_options[:-1])
+        if option == _DASH_C
+    ]
+
+
+def _directory(run: GitInvocation, cwd: Path) -> Path:
+    """Where ``run`` executes: the start, then each ``cd`` and ``-C`` in turn."""
     directory = cwd
-    index = 0
-    while index < len(arguments) and arguments[index].startswith("-"):
-        option = arguments[index]
-        if option in GIT_GLOBAL_OPTIONS_TAKING_SEPARATE_VALUE:
-            if option == _DASH_C and index + 1 < len(arguments):
-                directory = directory / arguments[index + 1]
-            index += 2
-        else:
-            index += 1
-    if index >= len(arguments):
-        return None
-    sources = _commit_sources(arguments[index], arguments[index + 1 :])
-    if sources is None:
-        return None
-    return _Commit(directory=directory, sources=sources)
+    for step in (*run.directory, *_dash_c_values(run.global_options)):
+        assert step is not None  # _unplaceable_reason refused the None case
+        directory = directory / Path(step).expanduser()
+    return directory
 
 
-def _commits(command: str, cwd: Path) -> Iterator[_Commit]:
-    """Every commit-recording git invocation in ``command``.
+def _commits(command: str, cwd: Path) -> Iterator[_Commit | _Unplaceable]:
+    """Every commit-recording git invocation in ``command``, found by the shared walker.
 
-    A ``cd``/``pushd`` earlier in the command moves the directory the later
-    segments run in, so ``cd repo && git commit`` is judged in ``repo``.
+    A command main's shared detector calls a commit but the walker places
+    nowhere (a script fed to ``bash`` on standard input) is judged in ``cwd``,
+    which is what every sibling commit gate does with it.
     """
-    for segment in split_unquoted(normalise_line_continuations(command), _SEGMENT_SEPARATORS):
-        cwd = _after_directory_change(segment, cwd)
-        commit = _parse_commit(segment, cwd)
-        if commit is not None:
-            yield commit
-
-
-def _after_directory_change(segment: str, cwd: Path) -> Path:
-    """``cwd`` after ``segment`` when it is ``cd <dir>``/``pushd <dir>``, else ``cwd``.
-
-    ``cd -`` names a directory this command never states, so it is left alone.
-    """
-    tokens = _shell_tokens(strip_reserved_word_prefix(segment))
-    if len(tokens) != _CD_TOKEN_COUNT or tokens[0] not in _DIRECTORY_CHANGERS:
-        return cwd
-    if tokens[1] == _PREVIOUS_DIRECTORY:
-        return cwd
-    return cwd / Path(tokens[1]).expanduser()
+    found = False
+    for run in git_invocations(command):
+        found = found or run.subcommand in _RECORDING_SUBCOMMANDS
+        sources = _commit_sources(run.subcommand, list(run.arguments))
+        if sources is None and run.subcommand != _AM:
+            continue
+        reason = _unplaceable_reason(run)
+        if reason is not None:
+            yield _Unplaceable(reason)
+        elif sources is not None:
+            yield _Commit(directory=_directory(run, cwd), sources=sources)
+    if not found and is_git_commit(tokenise_command(command)):
+        yield _Commit(directory=cwd, sources=(_Source(working_tree=False),))
 
 
 def _git_or_raise(root: Path, *args: str) -> str:
@@ -345,16 +341,25 @@ def _added_line_numbers(root: Path, source: _Source, path: str, has_head: bool) 
     return added
 
 
-def _findings(root: Path, directory: Path, source: _Source) -> list[_Finding]:
-    """Markers on lines ``source`` adds, in path and line order."""
+def _findings(
+    root: Path, directory: Path, source: _Source, excluded: Callable[[Path, str], bool]
+) -> list[_Finding]:
+    """Markers on lines ``source`` adds, in path and line order.
+
+    Named pathspecs that match nothing are judged as the index instead: a word
+    misread as a pathspec must never leave the commit unchecked.
+    """
     has_head = _has_head(root)
     recorded = _recorded_paths(directory, source, has_head)
+    if not recorded and source.pathspecs:
+        source = _Source(working_tree=False)
+        recorded = _recorded_paths(directory, source, has_head)
     if not recorded:
         return []
     protected_patterns = sfm.resolve_configured_patterns()
     findings: list[_Finding] = []
     for path, lines in sorted(_candidate_lines(root, source).items()):
-        if path not in recorded:
+        if path not in recorded or excluded(root, path):
             continue
         markers = find_conflict_markers(lines)
         if not markers:
@@ -386,6 +391,32 @@ def _findings_block(findings: list[_Finding]) -> str:
     return "\n".join(rows)
 
 
+_EXAMPLE_ADVICE: Final[str] = (
+    "Writing a DOCUMENTED example rather than a leftover conflict? A marker is "
+    "judged inside a fenced code block too, because a real conflict can land "
+    "there. Either shorten the marker run below seven characters, or keep the "
+    "example in a file covered by "
+    "`handlers.pre_tool_use.conflict_marker_commit_gate.options.exclude_paths` "
+    "(or the project-wide `daemon.exclude_paths`)."
+)
+_REPHRASE: Final[str] = (
+    "Name the repository literally and commit again: "
+    "`git -C /absolute/path/to/repo commit ...`, with no `$`, `cd -`, "
+    "`--git-dir`, `GIT_INDEX_FILE` or `--pathspec-from-file`."
+)
+
+
+def _unchecked(reason: str) -> GatingResult:
+    """Deny a commit this gate could not check: an unchecked commit is not a clean one."""
+    return GatingResult(
+        decision=Decision.DENY,
+        reason=(
+            f"{RuleID.CONFLICT_MARKER_COMMIT}: this commit was NOT checked for "
+            f"merge-conflict markers, because {reason}.\n\n{_REPHRASE}"
+        ),
+    )
+
+
 class ConflictMarkerCommitGateHandler(PreToolUseHandlerBase):
     """Deny a commit that would record a merge-conflict marker."""
 
@@ -401,6 +432,19 @@ class ConflictMarkerCommitGateHandler(PreToolUseHandlerBase):
             ],
         )
         self._formatter = RuleFormatter()
+        # Config option, set via setattr after __init__ like every content handler's.
+        self._exclude_paths: list[str] | None = None
+
+    def _excluded(self, root: Path, path: str) -> bool:
+        """Whether ``exclude_paths`` or ``daemon.exclude_paths`` covers ``path``."""
+        return any(
+            handler_excludes_path(
+                candidate,
+                handler_patterns=self._exclude_paths,
+                project_patterns=self._project_exclude_paths,
+            )
+            for candidate in (path, str(root / path))
+        )
 
     @staticmethod
     def _cwd(hook_input: dict[str, Any]) -> Path:
@@ -424,29 +468,26 @@ class ConflictMarkerCommitGateHandler(PreToolUseHandlerBase):
         command = get_bash_command(hook_input) or ""
         findings: list[_Finding] = []
         for commit in _commits(command, self._cwd(hook_input)):
-            repo = GitRepo.resolve_for(commit.directory)
+            if isinstance(commit, _Unplaceable):
+                return _unchecked(commit.reason)
+            repo = GitRepo.resolve_for(commit.directory) if commit.directory.is_dir() else None
             if repo is None:
-                continue
+                return _unchecked(f"`{commit.directory}` is not a directory inside a repository")
             try:
                 for source in commit.sources:
-                    findings.extend(_findings(repo.root, commit.directory, source))
+                    findings.extend(_findings(repo.root, commit.directory, source, self._excluded))
             except _UnreadableTree as exc:
                 logger.warning(
                     "conflict_marker_commit_gate: %s was NOT checked: %s", repo.root, exc
                 )
-                return GatingResult(
-                    decision=Decision.ALLOW,
-                    context=[
-                        f"conflict-marker-commit-gate: git could not read what this commit "
-                        f"records in {repo.root} ({exc}), so it was NOT checked for "
-                        "merge-conflict markers."
-                    ],
-                )
+                return _unchecked(f"git could not read what it records in {repo.root}: {exc}")
         if not findings:
             return GatingResult(decision=Decision.ALLOW)
         return GatingResult(
             decision=Decision.DENY,
-            reason=f"{self._teaching(hook_input)}\n\n{_findings_block(findings)}",
+            reason=(
+                f"{self._teaching(hook_input)}\n\n{_findings_block(findings)}\n\n{_EXAMPLE_ADVICE}"
+            ),
         )
 
     def _teaching(self, hook_input: dict[str, Any]) -> str:

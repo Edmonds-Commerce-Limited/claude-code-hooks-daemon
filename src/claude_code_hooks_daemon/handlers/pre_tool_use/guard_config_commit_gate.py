@@ -99,7 +99,7 @@ def recorded_config_source(command: str, config_path: str) -> RecordedSource | N
     if commits_working_tree(tokens[subcommand_index + 1 :]):
         return RecordedSource.WORKING_TREE
 
-    pathspecs = extract_commit_pathspecs(tokens)
+    pathspecs = extract_commit_pathspecs(command)
     if not pathspecs:
         return RecordedSource.INDEX
     if any(_pathspec_covers(spec, config_path) for spec in pathspecs):
