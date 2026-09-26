@@ -9,6 +9,22 @@ interrupt a running handler) and lands with that branch. N40 is taken there too
 taken on the N38 fix branch (the chain's remaining linear per-token cost, which
 waits for the shell-parser consolidation).
 
+### N96 — `subagent_full_qa_blocker.py` is one 5,300-line handler
+
+**Found by the coordinator while harvesting the Plan 00463 gate fix.** The
+module grew over ten review rounds, each closing more evasion shapes, to
+5,294 lines. No other handler is close to that size. It holds command
+recognition, interpreter classification, wrapper peeling and the verdict
+in one file, so every future review reads all of it, and a regression in
+one part hides among the rest.
+
+**Remedy:** after Plan 00463 merges, split it along the seams it already
+has. Put the recognisers in `utils` next to `shell_segmentation`, keep the
+verdict and messages in the handler, and move behaviour-free tables to
+constants. It is a pure refactor with the test suite unchanged. Some of
+the recognition probably duplicates the 464 script-walk and wrapper
+machinery, so reuse that rather than moving it.
+
 ### N95 — Test fixtures run setup git commands under a production 5-second budget, so a loaded host flakes the gate
 
 **Found by the N81 to N83 gate fixer.**
