@@ -2472,17 +2472,9 @@ class TestRoundFourFindingsAreClosed:
         assert RuleID.SECRET_BASH_MENTION in _deny_reason(command)
 
     def test_an_over_cap_code_word_that_could_name_a_path_denies(self) -> None:
-        """Past the cap a code word is judged by its wildcard skeleton
-        (`.vault-*-*-*-*-*-*-*-*-*`), which the protected-pattern matcher
-        reaches."""
+        """Past the cap a code word fails closed, as on main (round 6)."""
         command = f"python3 - <<'EOF'\n{_OVER_CAP_CODE_WORD_PROGRAM}\nEOF"
-        assert RuleID.SECRET_BASH_MENTION in _deny_reason(command)
-
-    def test_an_over_cap_code_word_naming_nothing_stays_allowed(self) -> None:
-        """Failing closed here would be the original N101 false positive."""
-        command = f"python3 - <<'EOF'\n{_OVER_CAP_DICT_PROGRAM}\n{_MANY_BRACES_PROGRAM}\nEOF"
-        decision, reason = _through_chain("Bash", {"command": command})
-        assert decision != Decision.DENY, reason
+        assert RuleID.SECRET_EVALUATION_ERROR in _deny_reason(command)
 
     @pytest.mark.parametrize("line", ["x = 1\r", "x = 1\r\ny = 2", "x = '\r'"])
     def test_a_program_holding_a_carriage_return_is_not_exempted_d_sec_4_2a(
@@ -2550,3 +2542,104 @@ class TestRoundFourFindingsAreClosed:
         assert RuleID.SECRET_EVALUATION_ERROR in _deny_reason(heredoc)
         dash_c = definition + "python3 -c '" + _MANY_BRACES_PROGRAM.replace("'", '"') + "'"
         assert RuleID.SECRET_EVALUATION_ERROR in _deny_reason(dash_c)
+
+
+def _quoted_brace_code_word(quote: str) -> str:
+    """D-RULE-5's program: a set display of 302 elements, the first a quoted
+    `{`, against a name. As a shell word bash reads `{` as text and spells
+    `.vault-pass`; it is past the spelling cap."""
+    elements = ["{", "pass", *(f"a{i}" for i in range(300))]
+    return "y = 0 if 1 else x .vault-{" + ",".join(f"{quote}{e}{quote}" for e in elements) + "}"
+
+
+class TestRoundFiveFindingsAreClosed:
+    """Plan 00466 N101 round 6: every D-RULE and D-SEC round-5 finding,
+    through the real handler. None of the 140 corpus programs reached the
+    over-cap wildcard fallback, so it is gone: an over-cap code word fails
+    closed, as on main. Each of these was allowed at 1a11131b7."""
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            f"python3 - <<'EOF'\n{_quoted_brace_code_word(chr(34))}\nEOF",
+            f"python3 - <<'EOF'\n{_quoted_brace_code_word(chr(39))}\nEOF",
+            f"python3 -c '{_quoted_brace_code_word(chr(34))}'",
+            f'python3 -c "{_quoted_brace_code_word(chr(39))}"',
+        ],
+    )
+    def test_an_over_cap_code_word_holding_a_quoted_brace_denies_d_rule_5_major_1(
+        self, command: str
+    ) -> None:
+        assert RuleID.SECRET_EVALUATION_ERROR in _deny_reason(command)
+
+    def test_an_over_cap_code_word_naming_nothing_fails_closed_as_on_main(self) -> None:
+        """This was a round-5 pin that stayed allowed through the fallback."""
+        command = f"python3 - <<'EOF'\n{_OVER_CAP_DICT_PROGRAM}\n{_MANY_BRACES_PROGRAM}\nEOF"
+        assert RuleID.SECRET_EVALUATION_ERROR in _deny_reason(command)
+
+
+class TestQuotedBracesAreNotBraceSyntax:
+    """Plan 00466 N107: bash does not read a quoted or escaped brace or
+    comma as brace syntax, but the guard's brace-group regex did, so a group
+    whose first alternative is a quoted `"}"` hid a brace-spelled path. A
+    group holding quoted whitespace also reached the expander in pieces.
+    Each command reaches `/proj/.vault-pass`; each was allowed at main
+    4f0a205b3."""
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            'cat /proj/.vault-{"}",pass}',
+            "cat /proj/.vault-{'}',pass}",
+            "cat /proj/.vault-{\\},pass}",
+            'cat /proj/.vault-{"{",pass}',
+            'cat /proj/.vault-{"} x",pass}',
+            "cat /proj/.vault-{' {x} ',pass}",
+            'cat /proj/.vault-{"x y{",pass}',
+            "cat <<'EOF'\ndon't\nEOF\ncat /proj/.vault-{\"} x\",pass}",
+            '# don\'t\ncat /proj/.vault-{"} x",pass}',
+            'echo "$(cat /proj/.vault-{"} x",pass})"',
+            'cat <<EOF\n$(cat /proj/.vault-{"} x",pass})\nEOF',
+            "bash -c 'cat /proj/.vault-{\"} x\",pass}'",
+            f"python3 - <<'EOF'\nimport os\n{_OS_SYSTEM}('cat /proj/.vault-{{\"}}\",pass}}')\nEOF",
+            f"python3 - <<'EOF'\n{_OS_SYSTEM}('cat /proj/.vault-{{\"}} x\",pass}}')\nEOF",
+        ],
+    )
+    def test_a_quoted_brace_in_a_group_still_spells_the_path(self, command: str) -> None:
+        assert RuleID.SECRET_BASH_MENTION in _deny_reason(command)
+
+    @pytest.mark.parametrize(
+        "program",
+        ['y = 0 if 1 else x .vault-{"}","pass"}', 'y = 0 if 1 else x .vault-{"} x","pass"}'],
+    )
+    def test_a_quoted_brace_in_a_code_word_still_spells_the_path(self, program: str) -> None:
+        assert RuleID.SECRET_BASH_MENTION in _deny_reason(f"python3 - <<'EOF'\n{program}\nEOF")
+
+    def test_writing_a_script_with_a_quoted_brace_group_denies(self) -> None:
+        tool_input = {"file_path": "/proj/run.sh", "content": 'cat /proj/.vault-{"} x",pass}\n'}
+        decision, _reason = _through_chain("Write", tool_input)
+        assert decision == Decision.DENY
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            'cat /proj/.vault-{"${x:-"}"}",pass}',
+            'cat /proj/.vault-{"$(case a in a) echo;; esac)",pass}',
+        ],
+    )
+    def test_quoting_that_cannot_be_resolved_fails_closed(self, command: str) -> None:
+        assert RuleID.SECRET_EVALUATION_ERROR in _deny_reason(command)
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            'echo "${HOME}"/{a,b}',
+            "jq '{\"a b\": .x}' data.json",
+            'echo "${x:-"a"}" done',
+            "echo \"$(printf '%s' ')')\" {a,b}",
+            "cat <<'EOF'\n{\"} x\",pass}\nEOF",
+        ],
+    )
+    def test_quoting_that_names_nothing_stays_allowed(self, command: str) -> None:
+        decision, reason = _through_chain("Bash", {"command": command})
+        assert decision != Decision.DENY, reason

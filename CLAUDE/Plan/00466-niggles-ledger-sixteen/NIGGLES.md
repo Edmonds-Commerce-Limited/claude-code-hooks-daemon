@@ -9,6 +9,46 @@ interrupt a running handler) and lands with that branch. N40 is taken there too
 taken on the N38 fix branch (the chain's remaining linear per-token cost, which
 waits for the shell-parser consolidation).
 
+### N107 — ✅ Remedied (n101 branch) — `secret_file_guard` reads a quoted brace as brace syntax, so `{"}",pass}` hides a brace-spelled path
+
+**Found by the N101 round-5 D-RULE review** (observation, report
+`subagent-reports/260926-n101-drule5-opus-5-5.md`), and proved on main
+4f0a205b3. `shell_expansion._BRACE_GROUP_RE` pairs braces without regard to
+quotes. In `cat /proj/.vault-{"}",pass}` bash reads the quoted `}` as text,
+so the alternatives are `}` and `pass` and the word spells `.vault-pass`.
+The regex pairs `{"}` instead, and no stream reaches the path, so main
+allows the command. Discovery has the same flaw one level up:
+`iter_brace_words` splits at every whitespace character, quoted or not, so
+a group holding quoted whitespace (`.vault-{"} x",pass}`) reaches the
+expander in pieces. On main every shape below is allowed.
+
+**Remedied on the n101 branch.** Brace syntax is read quote-aware wherever
+the guard enumerates, with main's quote-blind reading kept alongside it:
+
+- `expand_braces` reads a word a second way when it holds a quoting
+  character. A brace or comma inside quotes, after a backslash, or inside
+  `$'…'`, `${…}`, a backtick or `$(…)`/`<(…)`/`>(…)` is text, as bash's
+  brace expansion reads it. Both readings are returned under the same caps.
+  One scanner, `_quoted_span_end`, decides every span.
+- `iter_shell_brace_words` splits text as bash splits it, skipping comments
+  and reading heredoc bodies by their delimiter lines. It finds the words
+  whose groups hold quoted whitespace. It also reads as a command every
+  text a shell may run: substitution bodies, heredoc bodies, each word
+  after quote removal (the code `bash -c` or `ssh` receive) and `eval`'s
+  joined arguments. `shell_word_spellings` expands such a word piece by
+  piece between whitespace outside every group, since a token never spans
+  whitespace.
+- A span the scanner cannot place with certainty (a `${…}` holding quotes,
+  escapes or braces, a `case` or heredoc inside `$(…)`, nesting past the
+  bound) raises `UnresolvableBraceQuotingError`, a `TooManyToEnumerateError`,
+  so the guard fails closed. This happens only when a group could be at
+  stake: a `{` other than a `${` with a `}` after it.
+
+The 140-program false-positive corpus verdicts are unchanged. Tests:
+`TestQuotedBracesAreNotBraceSyntax` in the guard's tests, each RED on main
+4f0a205b3 and on round-5 HEAD 1a11131b7, and the primitive tests in
+`tests/unit/utils/test_shell_expansion.py`.
+
 ### N104 — `Write`/`Edit` of Python source with a long brace-alternation string fails `secret_file_guard` closed
 
 **Found by the N101 fixer**, whose own `Edit` of a scratch `.py` file was
@@ -103,10 +143,12 @@ is enumerated whole (round 4). Every brace word of the raw program text
 that is not wholly inside one literal or comment (a set display against a
 name, `x .p-{"a",z}`) is enumerated on its own too (round 5, D-RULE-4 MAJOR
 1): a program can read its own command line back. Past a cap such a CODE
-word does not fail closed, which would be the original false positive;
-its wildcard skeleton (every group a `*`) is judged by the guard's
-protected-pattern matcher instead, and denies when it could match. A
-literal still fails closed past a cap. The scanner models CPython 3.8 to
+word fails closed, as on main, and so does a literal. Round 5 judged an
+over-cap code word by a wildcard skeleton instead. That skeleton read
+braces without quotes, so a quoted `{` alternative produced a glob that
+could not match the path bash spells (D-RULE-5 MAJOR 1). None of the 140
+false-positive corpus programs reached that fallback, so round 6 deleted
+it. The scanner models CPython 3.8 to
 3.14 source grammar, apart from the shapes it withdraws. A program that
 declares an encoding other than UTF-8, or that Python would decode
 differently from the text the guard parsed, is not exempted. Nor is one
@@ -138,10 +180,11 @@ head redefined as a function on the command line (`cd() { …; }`,
 does. Two limits are the same as on main: a function inherited through the
 environment (`BASH_FUNC_cd%%`) or Claude Code's shell snapshot cannot be
 seen from the command text, and the model is bash, not zsh (whose `cd`
-runs `chpwd` hooks). Rounds 2 to 5 closed the D-RULE and D-SEC review
+runs `chpwd` hooks). Rounds 2 to 6 closed the D-RULE and D-SEC review
 findings; see `subagent-reports/260926-n101-fix2-opus-5-5.md`,
-`260926-n101-fix3-opus-5-5.md`, `260926-n101-fix4-opus-5-5.md` and
-`260926-n101-fix5-opus-5-5.md`. The
+`260926-n101-fix3-opus-5-5.md`, `260926-n101-fix4-opus-5-5.md`,
+`260926-n101-fix5-opus-5-5.md` and `260926-n101-fix6-opus-5-5.md`. Brace
+syntax is read quote-aware on this branch too; see N107. The
 quarantine guard enumerates filesystem globs, not braces; see N103, which
 also denies a Python program holding `{**d}` because the `**` word is
 walked.

@@ -1496,9 +1496,14 @@ def _brace_expansion_tokens(command: str, *, bash_tool_command: bool = False) ->
     shell expands, whose enumeration modelled nothing and failed the guard
     closed on ordinary Python programs. Every string literal and comment of
     that program is enumerated on its own, with the same caps, and so is
-    every brace word not wholly inside one (:func:`_code_word_spellings`),
-    judged by its wildcard skeleton past the caps. Everything
-    else is enumerated exactly as before, caps and fail-closed included.
+    every brace word not wholly inside one. Everything else is enumerated
+    exactly as before, caps and fail-closed included.
+
+    Plan 00466 N107: each source's words are also found by
+    :func:`shell_expansion.iter_shell_brace_words`, which splits them as
+    bash does, so a group holding quoted whitespace reaches the expander
+    whole; and :func:`shell_expansion.expand_braces` reads a quoted or
+    escaped brace or comma as text, as bash does.
 
     Only a caller judging the Bash tool's own, whole command line sets it
     (the guard's Bash route, payload capture): the view's safety argument
@@ -1517,33 +1522,20 @@ def _brace_expansion_tokens(command: str, *, bash_tool_command: bool = False) ->
         view = shell_expansion.brace_expansion_view(command)
         sources: tuple[str, ...] = (_without_import_module_paths(view.text), *view.literals)
         code_words = view.code_words
+        code_shell_words = view.shell_words
     else:
         sources = (_without_import_module_paths(command),)
         code_words = ()
-    for source in sources:
-        for word in shell_expansion.iter_brace_words(source):
-            for spelling in shell_expansion.expand_braces(word):
-                yield shell_expansion.normalise_word(spelling)
-    for word in code_words:
-        yield from _code_word_spellings(word)
-
-
-def _code_word_spellings(word: str) -> Iterator[str]:
-    """Every normalised spelling of one CODE word of an exempted Python
-    program (Plan 00466 N101 round 5, D-RULE-4 MAJOR 1), enumerated on its
-    own with the normal caps.
-
-    Past a cap it does not fail closed -- a large dict or set display is the
-    original N101 false positive -- but yields the word's
-    :func:`shell_expansion.brace_skeleton`, every group a ``*``, which
-    :func:`_token_mention` judges as the glob it is: a skeleton that could
-    match a protected path denies, as every spelling could."""
-    try:
-        spellings = shell_expansion.expand_braces(word)
-    except shell_expansion.TooManyToEnumerateError:
-        spellings = [shell_expansion.brace_skeleton(word)]
-    for spelling in spellings:
-        yield shell_expansion.normalise_word(spelling)
+        code_shell_words = ()
+    for word in itertools.chain(
+        *(shell_expansion.iter_brace_words(source) for source in sources), code_words
+    ):
+        for spelling in shell_expansion.expand_braces(word):
+            yield shell_expansion.normalise_word(spelling)
+    for word in itertools.chain(
+        *(shell_expansion.iter_shell_brace_words(source) for source in sources), code_shell_words
+    ):
+        yield from shell_expansion.shell_word_spellings(word)
 
 
 def _normalised_word_tokens(

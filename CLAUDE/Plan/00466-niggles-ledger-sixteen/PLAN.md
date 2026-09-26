@@ -134,6 +134,7 @@ Full write-ups are in [NIGGLES.md](NIGGLES.md). One line each here:
 | N102 | A grep regex such as `".*real_chain"` in a compound command is denied as a protected-file mention              | N101 fixer                                                      | ⬜ Open                          |
 | N103 | A `**` word the shell never globs walks the whole checkout, and a large tree fails the guard closed            | N101 fixer                                                      | ⬜ Open                          |
 | N104 | `Write`/`Edit` of Python source with a long brace-alternation string fails `secret_file_guard` closed          | N101 fixer                                                      | ⬜ Open                          |
+| N107 | `secret_file_guard` reads a quoted brace as brace syntax, so `{"}",pass}` hides a brace-spelled path           | N101 review 5 (D-RULE)                                          | ✅ Remedied (n101 branch)        |
 
 ## Tasks
 

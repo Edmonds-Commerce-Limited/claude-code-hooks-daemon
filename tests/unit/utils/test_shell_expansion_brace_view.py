@@ -21,7 +21,6 @@ import pytest
 
 from claude_code_hooks_daemon.utils.shell_expansion import (
     brace_expansion_view,
-    brace_skeleton,
     expand_braces,
     iter_brace_words,
     python_program_streams,
@@ -672,20 +671,16 @@ class TestCodeWordsAreReported:
         assert streams is not None
         assert len(streams.code_words) == 600
 
+    def test_a_code_word_holding_quoted_whitespace_is_reported_whole(self) -> None:
+        """Plan 00466 N107: bash splits the text as one word."""
+        streams = python_program_streams('y = x .p-{"} z","q"}\n')
+        assert streams is not None
+        assert streams.shell_words == ('.p-{"} z","q"}',)
 
-class TestBraceSkeleton:
-    @pytest.mark.parametrize(
-        ("word", "skeleton"),
-        [
-            (".p-{a,b}", ".p-*"),
-            ("x{a,{b,c}}y{d}", "x*y*"),
-            ("{a{b}", "{a*"),
-            ("a}b{", "a}b{"),
-            ("{" * 5000 + "}" * 5000, "*"),
-        ],
-    )
-    def test_every_group_becomes_a_wildcard(self, word: str, skeleton: str) -> None:
-        assert brace_skeleton(word) == skeleton
+    def test_a_shell_word_wholly_inside_a_literal_is_not_reported(self) -> None:
+        streams = python_program_streams("x = '.p-{\"} z\",q}'\n")
+        assert streams is not None
+        assert streams.shell_words == ()
 
 
 class TestPythonMustReadTheTextAsTheScannerDoes:

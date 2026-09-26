@@ -23,11 +23,9 @@ literals joined in source order; and every literal and comment of the
 program joined in order with a space. A brace group split across literals
 (`'…{a,' + 'x}…'`, `''.join([...])`, `f'{"{"}'`) or across statements is
 therefore still seen whole. Every brace word of the program that reaches
-outside a literal (`x .p-{"a",z}`) is enumerated on its own as well. When
-such a word has too many spellings, the guard checks a wildcard form
-instead, with each brace group replaced by `*`. It denies only if that form
-could match a protected path, so a large dict display is still allowed. The
-exemption applies only when no shell can read what the program prints:
+outside a literal (`x .p-{"a",z}`) is enumerated on its own as well, and
+fails closed past the cap, as before. The exemption applies only when no
+shell can read what the program prints:
 
 - no pipe follows the command, and no process substitution appears in the
   line;
@@ -82,6 +80,18 @@ What still denies:
 
 If the guard cannot parse a command or its Python program with confidence,
 it enumerates the whole command exactly as before.
+
+Brace groups are now also read the way bash reads them. A quoted or
+backslash-escaped brace or comma is text, not brace syntax, and so is one
+inside `${…}`, `$(…)` or backticks. Earlier releases paired braces without
+regard to quotes, so a word such as `name-{"}",pass}`, whose first
+alternative is a quoted `}`, could spell a protected path (`name-pass`) the
+guard never saw. A group
+holding quoted whitespace is now seen whole, and so is one inside text a
+shell may run (`bash -c '…'`, `eval`, a heredoc body). The earlier reading
+is kept alongside, so nothing that denied before is now allowed. Quoting the
+guard cannot resolve with certainty, such as a `${…}` holding quotes next
+to a brace group, fails closed with `R-SECRET-EVALUATION-ERROR`.
 
 The same change fixes how the heredoc data-sink exemption shared by several
 guards names its receiver. `sudo -p cat bash <<'EOF'` and
