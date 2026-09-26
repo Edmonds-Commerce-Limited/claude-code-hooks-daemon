@@ -42,6 +42,7 @@ from claude_code_hooks_daemon.qa.pytest_text_report import (
     finalize_passed_all,
     parse_pytest_text_output,
 )
+from claude_code_hooks_daemon.utils.path_containment import path_is_relative_to
 
 PROJECT_ROOT: Final[Path] = Path(__file__).resolve().parent.parent.parent
 SCRIPTS_DIR: Final[Path] = PROJECT_ROOT / "scripts" / "qa"
@@ -433,7 +434,11 @@ def provision(version: str) -> Path:
     python = venv / "bin" / "python"
     probe = _checked([str(python), "-c", _VENV_PROBE], f"probing {python}").splitlines()
     package_root = PROJECT_ROOT / "src"
-    if len(probe) != 2 or probe[0] != version or not Path(probe[1]).is_relative_to(package_root):
+    if (
+        len(probe) != 2
+        or probe[0] != version
+        or not path_is_relative_to(Path(probe[1]), package_root)
+    ):
         raise ProvisionError(
             f"{venv} is not a Python {version} venv importing {package_root}: {probe}"
         )

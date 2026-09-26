@@ -30,7 +30,11 @@ from claude_code_hooks_daemon.handlers.utils.plan_numbering import (
     record_plan_allocation,
 )
 from claude_code_hooks_daemon.utils.claude_config import is_in_claude_config_dir
-from claude_code_hooks_daemon.utils.path_predicates import path_is_file
+from claude_code_hooks_daemon.utils.path_containment import (
+    path_is_relative_to,
+    path_relative_to,
+)
+from claude_code_hooks_daemon.utils.path_predicates import path_is_dir, path_is_file
 from claude_code_hooks_daemon.utils.scratch_dir import project_dir_path
 
 logger = logging.getLogger(__name__)
@@ -454,8 +458,8 @@ class MarkdownOrganizationHandler(PreToolUseHandlerBase):
             return None
 
         try:
-            declared_relative_root = workspace.root.relative_to(workspace_root)
-            return str(Path(normalized_path).relative_to(declared_relative_root))
+            declared_relative_root = path_relative_to(workspace.root, workspace_root)
+            return str(path_relative_to(Path(normalized_path), declared_relative_root))
         except ValueError:
             # Declared root does not actually contain this normalized path
             # (e.g. normalize_path already stripped it to a project marker).
@@ -924,7 +928,7 @@ class MarkdownOrganizationHandler(PreToolUseHandlerBase):
             updated = current_content.replace(old_string, new_string, 1)
             plan_file.write_text(updated, encoding="utf-8")
 
-            rel_folder = plan_folder.relative_to(self._workspace_root)
+            rel_folder = path_relative_to(plan_folder, self._workspace_root)
             return GatingResult(
                 decision=Decision.ALLOW,
                 context=[f"Edit synced to: {rel_folder}/PLAN.md"],
@@ -1055,7 +1059,7 @@ class MarkdownOrganizationHandler(PreToolUseHandlerBase):
             project_root = ProjectContext.project_root()
             try:
                 # Check if file_path is under project_root
-                file_path_obj.relative_to(project_root)
+                path_relative_to(file_path_obj, project_root)
             except ValueError:
                 # File is outside project root - allow it (don't match)
                 return False
@@ -1078,7 +1082,7 @@ class MarkdownOrganizationHandler(PreToolUseHandlerBase):
         # We check this BEFORE normalize_path because normalize_path cannot reliably
         # strip arbitrary absolute path prefixes when no project marker is present.
         if Path(file_path).is_absolute():
-            _proj_rel = Path(file_path).resolve().relative_to(ProjectContext.project_root())
+            _proj_rel = path_relative_to(Path(file_path).resolve(), ProjectContext.project_root())
         else:
             _proj_rel = Path(file_path)
         if _proj_rel.parent == Path() and _proj_rel.name.lower() in _STANDARD_ROOT_MARKDOWN_FILES:
@@ -1156,20 +1160,40 @@ class MarkdownOrganizationHandler(PreToolUseHandlerBase):
         The nearest ancestor holding ``.claude-plugin/plugin.json`` or
         ``.claude-plugin/marketplace.json`` is the plugin root; markdown under
         its ``agents/``, ``commands/``, ``skills/`` or ``output-styles/`` is
-        where Claude Code loads it from. The walk stops at the workspace root.
+        where Claude Code loads it from. No directory above the workspace root
+        is considered for a path inside it.
+
+        The walk runs DOWN from the workspace root (or the filesystem root for
+        a path outside it) and stops at the first directory that does not
+        exist: nothing beneath it can hold a manifest. Walking up probed every
+        ancestor of a caller-supplied path, which is quadratic in its depth
+        (Plan 00466 N106).
         """
         candidate = self._candidate_on_disk(file_path)
-        for directory in candidate.parents:
+        start = (
+            self._workspace_root
+            if path_is_relative_to(candidate, self._workspace_root)
+            else Path(candidate.anchor)
+        )
+        below = path_relative_to(candidate, start).parts[:-1]
+        directory = start
+        nearest_root: Path | None = None
+        for depth in range(len(below) + 1):
+            if depth:
+                directory = directory / below[depth - 1]
+            # An unreadable directory holds nothing we can see: stop, as for a missing one.
+            if not path_is_dir(directory, unreadable_means=False):
+                break
             meta = directory / _PLUGIN_META_DIRNAME
             # An unreadable manifest is not a plugin root: the layout rules apply.
             if any(
                 path_is_file(meta / name, unreadable_means=False) for name in _PLUGIN_ROOT_MANIFESTS
             ):
-                parts = candidate.relative_to(directory).parts
-                return len(parts) > 1 and parts[0] in _PLUGIN_MARKDOWN_COMPONENT_DIRS
-            if directory == self._workspace_root:
-                break
-        return False
+                nearest_root = directory
+        if nearest_root is None:
+            return False
+        parts = path_relative_to(candidate, nearest_root).parts
+        return len(parts) > 1 and parts[0] in _PLUGIN_MARKDOWN_COMPONENT_DIRS
 
     def _is_invalid_location(self, normalized: str, *, repo_relative: str | None = None) -> bool:
         """Check if a normalized path is in an invalid markdown location.

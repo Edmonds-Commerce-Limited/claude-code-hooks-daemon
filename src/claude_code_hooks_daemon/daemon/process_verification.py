@@ -1,7 +1,8 @@
 """Process verification utilities for daemon enforcement.
 
-This module provides system-wide daemon process detection and management,
-particularly useful in container environments for single-process enforcement.
+This module provides system-wide daemon process detection, particularly useful
+in container environments for single-process enforcement. Signalling a daemon
+it finds is ``utils.safe_signal``'s job, which re-proves the pid first.
 """
 
 import logging
@@ -12,16 +13,16 @@ from typing import Final
 
 import psutil
 
-from claude_code_hooks_daemon.constants import Timeout
-
 logger = logging.getLogger(__name__)
 
 # The CLI module that, given a launch subcommand, becomes the daemon server.
 # Matching requires this exact module token PLUS a launch subcommand (below) so
 # that transient CLI helpers (status/stop/logs/...) and the per-event hook
 # forwarders (the bash wrappers' python3 socket transport) are never mistaken
-# for a daemon server.
-_DAEMON_CLI_MODULE = "claude_code_hooks_daemon.daemon.cli"
+# for a daemon server. Public (no leading underscore): cli.py's own ``main()``
+# re-execs itself via ``python -m {DAEMON_CLI_MODULE} ...`` (Plan 00466 N59
+# gate fix) and imports this rather than duplicating the literal.
+DAEMON_CLI_MODULE = "claude_code_hooks_daemon.daemon.cli"
 
 # The ONLY subcommands that daemonize. Daemonization (os.fork x2, os.setsid,
 # HooksDaemon(...), asyncio.run(daemon.start())) lives solely in cmd_start,
@@ -35,6 +36,16 @@ _DAEMON_LAUNCH_SUBCOMMANDS = ("start", "restart")
 
 # Command-line flag that explicitly names a daemon's project root.
 _PROJECT_ROOT_FLAG = "--project-root"
+
+# Env var a daemon server records in its OWN environment at startup, naming
+# the project root ``cmd_start`` actually resolved (Plan 00466 N59 gate fix).
+# Needed because a daemon launched without ``--project-root`` (the common
+# case: cmd_start derives its root from cwd instead) leaves the interpreter
+# venv-path fallback below as the only signal, and that fallback is wrong
+# whenever a shared interpreter starts a daemon for a DIFFERENT directory --
+# e.g. one venv used to serve an isolated test project root. Public (no
+# leading underscore): ``cmd_start`` sets it, this module only reads it.
+PROJECT_ROOT_ENV_VAR = "CLAUDE_HOOKS_DAEMON_PROJECT_ROOT"
 
 # Path fragments that mark the start of a daemon's venv directory, ordered from
 # most-specific to least-specific. The text preceding the matched fragment in
@@ -93,7 +104,7 @@ def find_all_daemon_processes(project_root: str | Path | None = None) -> list[in
             # Scope to our own project root when requested. A daemon whose root
             # cannot be determined is left alone — never terminated.
             if target_root is not None:
-                proc_root = _extract_project_root(cmdline)
+                proc_root = _extract_project_root(proc)
                 if proc_root is None or proc_root != target_root:
                     continue
 
@@ -116,26 +127,61 @@ def _normalize_root(root: str | Path) -> str:
     return os.path.normpath(str(root))
 
 
-def _extract_project_root(cmdline: list[str] | None) -> str | None:
-    """Derive a daemon process's project root from its command line.
+def _extract_project_root(proc: psutil.Process) -> str | None:
+    """Derive a daemon process's project root, most authoritative source first.
 
     Resolution order:
-        1. An explicit ``--project-root PATH`` (or ``--project-root=PATH``) flag.
-        2. The project root embedded in the interpreter's venv path
+        1. An explicit ``--project-root PATH`` (or ``--project-root=PATH``) flag
+           on the command line.
+        2. The ``CLAUDE_HOOKS_DAEMON_PROJECT_ROOT`` env var the daemon recorded
+           in its own environment at startup (see ``PROJECT_ROOT_ENV_VAR``).
+        3. The project root embedded in the interpreter's venv path
            (``{root}/untracked/venv...`` or
-           ``{root}/.claude/hooks-daemon/untracked/venv...``).
+           ``{root}/.claude/hooks-daemon/untracked/venv...``) -- a heuristic,
+           used only when neither of the above is available.
 
     Returns:
-        The normalised project root, or ``None`` when it cannot be determined.
+        The normalised project root, or ``None`` when it cannot be determined
+        by any of the above (including a process that has since disappeared).
     """
-    if not cmdline:
+    try:
+        cmdline = proc.cmdline()
+    except (psutil.NoSuchProcess, psutil.AccessDenied) as exc:
+        logger.debug("cmdline unavailable for pid %s (%s): %s", proc.pid, type(exc).__name__, exc)
+        cmdline = None
+
+    if cmdline:
+        flag_root = _root_from_flag(cmdline)
+        if flag_root is not None:
+            return flag_root
+
+    env_root = _root_from_environ(proc)
+    if env_root is not None:
+        return env_root
+
+    if cmdline:
+        return _root_from_interpreter(cmdline[0])
+    return None
+
+
+def _root_from_environ(proc: psutil.Process) -> str | None:
+    """Extract the project root a daemon recorded in its own environment.
+
+    ``proc.environ()`` returns a real ``dict`` for an actual process; anything
+    else (unreadable, or a test double that has not modelled it) is treated as
+    "no answer" rather than misread.
+    """
+    try:
+        env = proc.environ()
+    except (psutil.NoSuchProcess, psutil.AccessDenied, OSError) as exc:
+        logger.debug("environ unavailable for pid %s (%s): %s", proc.pid, type(exc).__name__, exc)
+        env = None
+    if env is None or not isinstance(env, dict):
         return None
-
-    flag_root = _root_from_flag(cmdline)
-    if flag_root is not None:
-        return flag_root
-
-    return _root_from_interpreter(cmdline[0])
+    value = env.get(PROJECT_ROOT_ENV_VAR)
+    if not value:
+        return None
+    return _normalize_root(value)
 
 
 def _root_from_flag(cmdline: list[str]) -> str | None:
@@ -213,59 +259,6 @@ def daemon_process_project_root(pid: int) -> RootProof:
     )
 
 
-def kill_daemon_process(pid: int) -> bool:
-    """Safely terminate a daemon process.
-
-    Uses SIGTERM first, waits 2 seconds, then SIGKILL if needed.
-
-    Args:
-        pid: Process ID to terminate
-
-    Returns:
-        True if process was successfully terminated, False otherwise.
-
-    Note:
-        - Refuses to kill current process (safety check)
-        - Returns False for non-existent PIDs
-        - Returns False for permission denied errors
-    """
-    # Safety check: never kill current process
-    if pid == os.getpid():
-        logger.warning(f"Refusing to kill current process (PID {pid})")
-        return False
-
-    try:
-        process = psutil.Process(pid)
-
-        # Try graceful termination first (SIGTERM)
-        logger.info(f"Terminating daemon process (PID {pid})")
-        process.terminate()
-
-        # Wait up to 2 seconds for process to exit
-        try:
-            process.wait(timeout=Timeout.PROCESS_KILL_WAIT)
-        except psutil.TimeoutExpired:
-            # Process didn't exit, force kill (SIGKILL)
-            logger.warning(f"Process {pid} did not respond to SIGTERM, using SIGKILL")
-            process.kill()
-
-        # Verify termination
-        if not process.is_running():
-            logger.info(f"Successfully killed daemon process (PID {pid})")
-            return True
-
-        logger.error(f"Failed to kill daemon process (PID {pid})")
-        return False
-
-    except psutil.NoSuchProcess:
-        logger.debug(f"Process {pid} does not exist")
-        return False
-
-    except psutil.AccessDenied:
-        logger.error(f"Permission denied to kill process {pid}")
-        return False
-
-
 def is_process_running(pid: int) -> bool:
     """Check if a process is currently running.
 
@@ -315,7 +308,7 @@ def _is_daemon_server_process(cmdline: list[str] | None) -> bool:
 
     module_index: int | None = None
     for index, token in enumerate(cmdline):
-        if _DAEMON_CLI_MODULE in token:
+        if DAEMON_CLI_MODULE in token:
             module_index = index
             break
     if module_index is None:

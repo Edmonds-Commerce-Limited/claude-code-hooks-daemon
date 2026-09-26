@@ -31,6 +31,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from claude_code_hooks_daemon.core.project_layout import ProjectLayout
+from claude_code_hooks_daemon.utils.path_containment import path_is_relative_to
 from claude_code_hooks_daemon.utils.realpath import realpath
 from claude_code_hooks_daemon.utils.vendor_paths import VendorScope
 
@@ -358,7 +359,7 @@ class ProjectRegistry:
         """
         if candidate == root:
             return True
-        return root in candidate.parents
+        return path_is_relative_to(candidate, root)
 
 
 def resolve_workspace(

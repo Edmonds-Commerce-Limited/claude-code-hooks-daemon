@@ -43,6 +43,7 @@ from claude_code_hooks_daemon.utils.command_evasion import (
     git_subcommand_index,
     strip_transparent_reserved_words,
 )
+from claude_code_hooks_daemon.utils.path_containment import path_relative_to
 from claude_code_hooks_daemon.utils.path_exclusion import (
     first_matching_glob,
     path_matches_globs,
@@ -1865,7 +1866,9 @@ def _expand_glob_token(
     """
     token_path = Path(token)
     if token_path.is_absolute():
-        search_specs = [(Path(token_path.anchor), str(token_path.relative_to(token_path.anchor)))]
+        search_specs = [
+            (Path(token_path.anchor), str(path_relative_to(token_path, token_path.anchor)))
+        ]
     else:
         bases: list[Path] = []
         if project_root:

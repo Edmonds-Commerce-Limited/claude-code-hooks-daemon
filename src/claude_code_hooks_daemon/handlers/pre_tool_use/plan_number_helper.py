@@ -44,6 +44,7 @@ from claude_code_hooks_daemon.handlers.utils.plan_numbering import (
 )
 from claude_code_hooks_daemon.install.plan_workflow import MKPLAN_SCRIPT_NAME
 from claude_code_hooks_daemon.utils.command_evasion import remove_word_quoting
+from claude_code_hooks_daemon.utils.path_containment import path_is_relative_to
 from claude_code_hooks_daemon.utils.path_predicates import path_is_dir
 from claude_code_hooks_daemon.utils.quoted_spans import blank_shell_literal_spans
 from claude_code_hooks_daemon.utils.shell_segmentation import strip_inert_spans
@@ -224,7 +225,7 @@ class PlanNumberHelperHandler(PreToolUseHandlerBase):
         # remedy. Purely lexical (no filesystem, no symlink resolution), which
         # is what the containment question actually needs.
         target = Path(os.path.normpath(self._workspace_root / candidate))
-        if not target.is_relative_to(self._workspace_root):
+        if not path_is_relative_to(target, self._workspace_root):
             return None
         # A folder that is already there makes this a `-p` re-create, which is
         # allowed. A folder the daemon cannot STAT is not known to be there, so

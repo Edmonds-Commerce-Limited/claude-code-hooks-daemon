@@ -46,6 +46,7 @@ from claude_code_hooks_daemon.docs_qa.types import (
 from claude_code_hooks_daemon.plan_links import PlanLinkResolver, RelocatedPlanLink
 from claude_code_hooks_daemon.utils.link_resolution import link_resolves_literally
 from claude_code_hooks_daemon.utils.markdown_links import extract_link_targets
+from claude_code_hooks_daemon.utils.path_containment import path_relative_to
 
 CHECK_ID: Final[str] = "pointer-resolves"
 
@@ -198,7 +199,7 @@ def _run_edit(context: CheckContext) -> list[Finding]:
     if not is_in_scope(context.file_path, context.project_root, context.policy):
         return []
 
-    rel_path = str(context.file_path.relative_to(context.project_root))
+    rel_path = str(path_relative_to(context.file_path, context.project_root))
     grandfathered = _matches_allowlist(rel_path, context.policy.qa.grandfather_allowlist)
     old_targets = (
         set(extract_link_targets(context.file_content_before))

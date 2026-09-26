@@ -58,6 +58,7 @@ from claude_code_hooks_daemon.utils.command_evasion import OPTIONAL_PATH, git_su
 from claude_code_hooks_daemon.utils.git_commit_parsing import commits_working_tree
 from claude_code_hooks_daemon.utils.git_repo import GitRepo, run_git
 from claude_code_hooks_daemon.utils.message_files import read_message_files
+from claude_code_hooks_daemon.utils.path_containment import path_relative_to
 from claude_code_hooks_daemon.utils.path_exclusion import (
     handler_excludes_path,
     resolve_project_root,
@@ -1146,7 +1147,7 @@ class SensitiveContentHandler(PreToolUseHandlerBase):
             # scanning the path AS SPELLED rather than skipping it outright.
             return file_path
         try:
-            return str(Path(realpath(file_path)).relative_to(realpath(project_root)))
+            return str(path_relative_to(Path(realpath(file_path)), realpath(project_root)))
         except ValueError:
             # Outside the project root: not ours to judge.
             return ""

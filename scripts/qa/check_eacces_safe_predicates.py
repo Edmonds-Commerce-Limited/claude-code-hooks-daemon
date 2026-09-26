@@ -46,6 +46,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
 
+from claude_code_hooks_daemon.utils.path_containment import path_is_relative_to, path_relative_to
 from claude_code_hooks_daemon.utils.scan_scope import vacuous_scan_failure, walk_files
 
 _REPO_ROOT: Final[Path] = Path(__file__).resolve().parents[2]
@@ -127,9 +128,9 @@ def _family_of(path: Path, scan_root: Path) -> str | None:
     at the top of ``handlers/`` (``registry.py``, ``project_loader.py``) has no
     family and is dispatched for every event, so it is scanned.
     """
-    if not path.is_relative_to(scan_root):
+    if not path_is_relative_to(path, scan_root):
         return None
-    parts = path.relative_to(scan_root).parts
+    parts = path_relative_to(path, scan_root).parts
     if "handlers" not in parts:
         return None
     index = parts.index("handlers")
@@ -173,7 +174,9 @@ def scan_file(path: Path, scan_root: Path) -> list[Violation]:
         if _is_exempt(lines, index):
             continue
         reported = (
-            str(path.relative_to(_REPO_ROOT)) if path.is_relative_to(_REPO_ROOT) else str(path)
+            str(path_relative_to(path, _REPO_ROOT))
+            if path_is_relative_to(path, _REPO_ROOT)
+            else str(path)
         )
         violations.append(Violation(file=reported, line=index + 1, predicate=match.group(1)))
     return violations

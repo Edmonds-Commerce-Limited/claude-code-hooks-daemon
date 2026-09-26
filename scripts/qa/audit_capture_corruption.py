@@ -80,7 +80,24 @@ def _load_scan_scope() -> ModuleType:
     return module
 
 
+def _load_path_containment() -> ModuleType:
+    """The shared ``path_containment`` module, loaded by file path.
+
+    Same reason as ``_load_scan_scope``: this audit runs under a bare
+    ``python3``, and ``path_containment`` is stdlib-only, so it is loaded
+    without importing the daemon package.
+    """
+    location = REPO_ROOT / "src" / "claude_code_hooks_daemon" / "utils" / "path_containment.py"
+    spec = importlib.util.spec_from_file_location("_qa_path_containment", location)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"cannot load the shared path containment helpers from {location}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 _SCAN_SCOPE = _load_scan_scope()
+_PATH_CONTAINMENT = _load_path_containment()
 
 DEFAULT_SCAN_DIRS = (
     REPO_ROOT / "scripts",
@@ -957,7 +974,11 @@ def _is_excluded(path: Path, root: Path) -> bool:
     sanctioned layout) matched on ``untracked`` and yielded an empty file list,
     which the audit then reported as "no violations" (Plan 00364 Task 5.4).
     """
-    relative = path.relative_to(root) if path.is_relative_to(root) else path
+    relative = (
+        _PATH_CONTAINMENT.path_relative_to(path, root)
+        if _PATH_CONTAINMENT.path_is_relative_to(path, root)
+        else path
+    )
     return any(part in _EXCLUDE_DIR_PARTS for part in relative.parts)
 
 

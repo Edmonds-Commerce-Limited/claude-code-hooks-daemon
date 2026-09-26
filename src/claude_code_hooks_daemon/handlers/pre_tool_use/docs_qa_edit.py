@@ -56,6 +56,7 @@ from claude_code_hooks_daemon.docs_qa.report import format_advisory, format_bloc
 from claude_code_hooks_daemon.docs_qa.runner import run_stage
 from claude_code_hooks_daemon.docs_qa.types import CheckStage, Finding, Severity
 from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command_for_docs
+from claude_code_hooks_daemon.utils.path_containment import path_relative_to
 from claude_code_hooks_daemon.utils.path_predicates import path_is_file
 from claude_code_hooks_daemon.utils.realpath import realpath
 
@@ -223,7 +224,7 @@ class DocsQaEditHandler(PreToolUseHandlerBase):
     @staticmethod
     def _rel_path(file_path: Path, project_root: Path) -> str | None:
         try:
-            return str(Path(realpath(file_path)).relative_to(project_root.resolve()))
+            return str(path_relative_to(Path(realpath(file_path)), project_root.resolve()))
         except ValueError:
             return None
 

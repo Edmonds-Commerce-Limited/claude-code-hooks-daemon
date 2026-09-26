@@ -150,6 +150,7 @@ from pathlib import Path
 
 from claude_code_hooks_daemon.qa.pytest_text_report import (
     finalize_passed_all,
+    find_unnamed_failure_reason,
     parse_pytest_text_output,
 )
 
@@ -175,6 +176,19 @@ summary = {
     "errors": report["errors"],
     "passed_all": finalize_passed_all(report["passed_all"], exit_code),
 }
+
+# 00466 N118: name the cause of a red run the failed/errored counts do not
+# explain (a coverage-threshold miss is the known case) so the gate never
+# reports "0 failed" over a run that did not pass.
+unnamed_failure_reason = find_unnamed_failure_reason(
+    content,
+    failed=report["failed"],
+    errors=report["errors"],
+    total=report["total"],
+    exit_code=exit_code,
+)
+if unnamed_failure_reason is not None:
+    summary["unnamed_failure_reason"] = unnamed_failure_reason
 
 # Read coverage
 coverage_file = Path("untracked/qa/coverage.json")

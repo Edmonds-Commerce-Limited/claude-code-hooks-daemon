@@ -61,6 +61,7 @@ WALKERS: dict[str, tuple[str, str]] = {
     "check_repo_hygiene.py": ("repo_hygiene.json", "paths_checked"),
     "check_security_downgrade_flags.py": ("security_downgrade_flags.json", "files_checked"),
     "check_sensitive_content.py": ("sensitive_content.json", "files_scanned"),
+    "check_signal_targets.py": ("signal_targets.json", "files_scanned"),
     "check_skill_references.py": ("skill_references.json", "files_scanned"),
     "check_skip_list_substring.py": ("skip_list_substring.json", "files_scanned"),
     "check_unreachable_handle_branch.py": ("unreachable_handle_branch.json", "files_scanned"),
@@ -265,8 +266,10 @@ def test_a_self_guarded_walker_never_passes_having_collected_nothing(
     ), f"{script} passed with no artefact from {gutted_checkout}: {result.stdout}"
 
 
-#: The option each walker takes to name its scan root. check_magic_values has
-#: none; the gutted checkout above is its missing-root case.
+#: The option each walker takes to name its scan root. check_magic_values and
+#: check_signal_targets have none -- both scan a fixed set of trees relative
+#: to the repo root rather than one overridable root -- and the gutted
+#: checkout above is their missing-root case.
 ROOT_OPTIONS: dict[str, str] = {
     "audit_capture_corruption.py": "--scan-dir",
     "audit_shell.py": "--scan-dir",
@@ -327,7 +330,11 @@ def test_a_walker_enumerates_through_the_shared_walk(script: str) -> None:
 
 def test_every_walker_names_its_root_option() -> None:
     walkers = set(WALKERS) | SELF_GUARDED_WALKERS
-    assert set(ROOT_OPTIONS) == walkers - {"check_magic_values.py", "audit_error_hiding.py"}
+    assert set(ROOT_OPTIONS) == walkers - {
+        "check_magic_values.py",
+        "check_signal_targets.py",
+        "audit_error_hiding.py",
+    }
 
 
 def test_every_check_is_classified() -> None:
