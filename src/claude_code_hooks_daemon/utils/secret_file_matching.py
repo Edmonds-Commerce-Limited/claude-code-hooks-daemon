@@ -1406,7 +1406,7 @@ def iter_protected_mentions(
         )
     tokens = itertools.chain(
         _tokenise(import_stripped),
-        _brace_expansion_tokens(import_stripped, context),
+        _brace_expansion_tokens(command, context),
         _normalised_word_tokens(
             import_stripped, deadline=deadline, words=words_for_normalised_stream
         ),
@@ -1478,18 +1478,30 @@ def _brace_expansion_tokens(command: str, context: MentionContext = "bash") -> I
     order.
 
     Plan 00466 N101: on the ``"bash"`` route the brace words come from
-    :func:`shell_expansion.brace_expansion_view`, which neutralises a quoted
-    heredoc body or single-quoted argument fed to a non-shell interpreter or
-    data sink -- text no shell expands, whose enumeration modelled nothing
-    and failed the guard closed on ordinary Python programs. Text a shell
-    does expand is enumerated exactly as before, caps and fail-closed
-    included. ``"content"`` (a file being authored) is enumerated whole, as
-    before: the view models a COMMAND line, not a source file.
+    :func:`shell_expansion.brace_expansion_view`, which neutralises only the
+    program text of a standalone `python3` command no shell reads the output
+    of -- text no shell expands, whose enumeration modelled nothing and
+    failed the guard closed on ordinary Python programs. The string literals
+    of such a program that can hand its text on (spawn, write a file, load
+    unknown code) are enumerated as well, each on its own. Everything else is
+    enumerated exactly as before, caps and fail-closed included.
+    ``"content"`` (a file being authored) is enumerated whole, as before:
+    the view models a COMMAND line, not a source file.
+
+    ``command`` is the RAW command: the view parses the Python program
+    itself, which deleting import module paths would break (`import `
+    alone does not parse). The deletion is applied to the view's text
+    instead, which neutralising braces never touches.
     """
-    text = command if context == "content" else shell_expansion.brace_expansion_view(command).text
-    for word in shell_expansion.iter_brace_words(text):
-        for spelling in shell_expansion.expand_braces(word):
-            yield shell_expansion.normalise_word(spelling)
+    if context == "content":
+        sources: tuple[str, ...] = (_without_import_module_paths(command),)
+    else:
+        view = shell_expansion.brace_expansion_view(command)
+        sources = (_without_import_module_paths(view.text), *view.literals)
+    for source in sources:
+        for word in shell_expansion.iter_brace_words(source):
+            for spelling in shell_expansion.expand_braces(word):
+                yield shell_expansion.normalise_word(spelling)
 
 
 def _normalised_word_tokens(

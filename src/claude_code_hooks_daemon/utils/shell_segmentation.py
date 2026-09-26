@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Sequence
+from dataclasses import dataclass
 
 from claude_code_hooks_daemon.utils.command_evasion import (
     git_subcommand_index,
@@ -153,14 +154,97 @@ _PIPELINE_TERMINATORS: tuple[str, ...] = ("&&", "||", ";")
 #: name.
 _WORD_GROUPING_PREFIXES = "(){}`\\$"
 
+
+@dataclass(frozen=True)
+class _WrapperGrammar:
+    """The option syntax of a command that runs another command.
+
+    Short letters that take no value, short letters whose value is the rest
+    of the cluster or the next word, long options without and with a value
+    (``--name value`` or ``--name=value``), long options whose value may
+    only be glued (``--name[=value]``), operands before the command
+    (``timeout``'s DURATION), and whether ``NAME=value`` words may precede
+    the command (``env``).
+    """
+
+    flags: frozenset[str] = frozenset()
+    value_flags: frozenset[str] = frozenset()
+    long_flags: frozenset[str] = frozenset()
+    long_value_flags: frozenset[str] = frozenset()
+    long_optional_value_flags: frozenset[str] = frozenset()
+    operand: re.Pattern[str] | None = None
+    assignments: bool = False
+    numeric_flags: bool = False
+
+
 #: Words that PREFIX a command without being it, so the command word sits
-#: further along: `sudo -E tee f` names tee. Only consulted by
-#: `quoted_heredoc_command_words`, whose caller matches against an allowlist
-#: of SAFE names -- skipping sudo cannot hide anything there, because what it
-#: reveals (`sudo -E bash` -> `bash`) is not on such a list either.
+#: further along: `sudo -E tee f` names tee. Each is parsed with its own
+#: option grammar, because an option's VALUE is not the command:
+#: `sudo -p cat bash` runs bash (Plan 00466 N101, D-SEC F2). An option not
+#: in the grammar, a mode that runs a shell (`sudo -s`, `env -S`), or a
+#: PATH change resolves to NO command, which every allowlist caller treats
+#: as unknown. Only consulted by the allowlist callers
+#: (`quoted_heredoc_command_words`, the data-sink exemption);
 #: `quoted_heredoc_receivers` must NOT use this: its caller matches against
 #: DANGEROUS names, where reporting only `sudo` would hide the interpreter.
-_COMMAND_WORD_PREFIXES: frozenset[str] = frozenset({"sudo"})
+_WRAPPER_GRAMMARS: dict[str, _WrapperGrammar] = {
+    "sudo": _WrapperGrammar(
+        flags=frozenset("AbBEHknNPS"),
+        value_flags=frozenset("CDgpRrTtUu"),
+        long_flags=frozenset(
+            {
+                "askpass",
+                "background",
+                "bell",
+                "set-home",
+                "reset-timestamp",
+                "non-interactive",
+                "preserve-groups",
+                "stdin",
+            }
+        ),
+        long_value_flags=frozenset(
+            {
+                "close-from",
+                "chdir",
+                "group",
+                "prompt",
+                "role",
+                "chroot",
+                "type",
+                "command-timeout",
+                "other-user",
+                "user",
+            }
+        ),
+        long_optional_value_flags=frozenset({"preserve-env"}),
+    ),
+    "env": _WrapperGrammar(
+        flags=frozenset("i0v"),
+        value_flags=frozenset("uC"),
+        long_flags=frozenset({"ignore-environment", "null", "debug"}),
+        long_value_flags=frozenset({"unset", "chdir"}),
+        long_optional_value_flags=frozenset({"block-signal", "default-signal", "ignore-signal"}),
+        assignments=True,
+    ),
+    "nice": _WrapperGrammar(
+        value_flags=frozenset("n"),
+        long_value_flags=frozenset({"adjustment"}),
+        numeric_flags=True,
+    ),
+    "timeout": _WrapperGrammar(
+        flags=frozenset("v"),
+        value_flags=frozenset("sk"),
+        long_flags=frozenset({"foreground", "preserve-status", "verbose"}),
+        long_value_flags=frozenset({"signal", "kill-after"}),
+        operand=re.compile(r"(?:\d+(?:\.\d*)?|\.\d+)[smhd]?"),
+    ),
+    "nohup": _WrapperGrammar(),
+    "command": _WrapperGrammar(flags=frozenset("p")),
+}
+
+#: An `env` operand that sets a variable rather than naming the command.
+_ENV_ASSIGNMENT_PATTERN = re.compile(r"(?P<name>[A-Za-z_][A-Za-z0-9_]*)=")
 
 #: Commands that consume a heredoc body as DATA rather than executing it, and
 #: so are the only receivers for which blanking the body is sound.
@@ -775,15 +859,87 @@ def _segment_command_word(segment: str) -> str | None:
     Leading reserved words are skipped the same way (Plan 00422 N25): in
     `do cat <<'EOF'` the receiver is `cat`, and reading `do` withheld the
     exemption from every heredoc in a loop body.
+
+    A wrapper (:data:`_WRAPPER_GRAMMARS`) is skipped together with its
+    options and their values, so `sudo -p cat bash` names bash. A word
+    starting with `-` where a command should be, or a wrapper option the
+    grammar does not know, names nothing (Plan 00466 N101).
     """
-    for word in strip_reserved_word_prefix(segment).split():
-        if not word or word.startswith("-"):
+    words = strip_reserved_word_prefix(segment).split()
+    index = 0
+    while index < len(words):
+        resolved = command_word(words[index])
+        if not resolved:
+            index += 1
             continue
-        resolved = command_word(word)
-        if not resolved or resolved in _COMMAND_WORD_PREFIXES:
-            continue
-        return resolved
+        if resolved.startswith("-"):
+            return None
+        grammar = _WRAPPER_GRAMMARS.get(resolved)
+        if grammar is None:
+            return resolved
+        after = _skip_wrapper_arguments(grammar, words, index + 1)
+        if after is None:
+            return None
+        index = after
     return None
+
+
+def _skip_wrapper_arguments(grammar: _WrapperGrammar, words: list[str], index: int) -> int | None:
+    """Index of the word a wrapper runs, past its options, their values and
+    its operands; ``None`` when any of them cannot be parsed with certainty."""
+    operand_pending = grammar.operand is not None
+    while index < len(words):
+        word = words[index]
+        if word == "--":
+            index += 1
+            break
+        if word.startswith("--"):
+            name, has_value, _ = word[2:].partition("=")
+            if (
+                name in grammar.long_flags and not has_value
+            ) or name in grammar.long_optional_value_flags:
+                index += 1
+            elif name in grammar.long_value_flags:
+                index += 1 if has_value else 2
+            else:
+                return None
+            continue
+        if word.startswith("-") and len(word) > 1:
+            if grammar.numeric_flags and word[1:].isdigit():
+                index += 1
+                continue
+            consumed = _short_option_cluster_width(grammar, word[1:])
+            if consumed is None:
+                return None
+            index += consumed
+            continue
+        if grammar.assignments:
+            assignment = _ENV_ASSIGNMENT_PATTERN.match(word)
+            if assignment is not None:
+                if assignment.group("name") == "PATH":
+                    return None
+                index += 1
+                continue
+        break
+    if operand_pending:
+        if index >= len(words) or grammar.operand is None:
+            return None
+        if not grammar.operand.fullmatch(words[index]):
+            return None
+        index += 1
+    return index if index <= len(words) else None
+
+
+def _short_option_cluster_width(grammar: _WrapperGrammar, letters: str) -> int | None:
+    """Words a short-option cluster takes: 1, or 2 when its last letter's
+    value is the next word; ``None`` for a letter the grammar lacks."""
+    for position, letter in enumerate(letters):
+        if letter in grammar.flags:
+            continue
+        if letter in grammar.value_flags:
+            return 1 if position + 1 < len(letters) else 2
+        return None
+    return 1
 
 
 def split_unquoted(text: str, separators: Sequence[str]) -> list[str]:

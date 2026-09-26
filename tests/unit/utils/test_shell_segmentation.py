@@ -611,6 +611,58 @@ class TestQuotedHeredocCommandWords:
         assert quoted_heredoc_command_words("sudo -E bash <<'EOF'\nb\nEOF") == ["bash"]
         assert quoted_heredoc_command_words("sudo -E tee /etc/x <<'EOF'\nb\nEOF") == ["tee"]
 
+    @pytest.mark.parametrize(
+        ("prefix", "command"),
+        [
+            ("sudo -p cat", "bash"),
+            ("sudo -u cat", "bash"),
+            ("sudo -nu cat", "bash"),
+            ("sudo -ucat", "bash"),
+            ("sudo --prompt cat", "bash"),
+            ("sudo --prompt=cat", "bash"),
+            ("sudo -u root --", "bash"),
+            ("env -u cat", "bash"),
+            ("env -i FOO=cat", "bash"),
+            ("env --chdir=/x", "bash"),
+            ("nice -n cat", "bash"),
+            ("nice -10", "bash"),
+            ("timeout -s cat 5", "bash"),
+            ("timeout --kill-after=cat 5", "bash"),
+            ("nohup", "bash"),
+            ("command -p", "bash"),
+            ("sudo env nice -n 5", "tee"),
+        ],
+    )
+    def test_a_wrapper_options_value_is_not_the_command(self, prefix: str, command: str) -> None:
+        """Plan 00466 N101 D-SEC F2: skipping only `-*` words read
+        `sudo -p cat bash` as `cat`, a data sink, and blanked a body bash
+        runs. Each wrapper's options are parsed with their values."""
+        heredoc = f"{prefix} {command} <<'EOF'\nb\nEOF"
+        assert quoted_heredoc_command_words(heredoc) == [command]
+
+    @pytest.mark.parametrize(
+        "prefix",
+        [
+            "sudo -s",
+            "sudo -i",
+            "sudo -h",
+            "sudo --shell",
+            "sudo -Z",
+            "sudo -u",
+            "env -S x",
+            "env PATH=/tmp",
+            "timeout x",
+            "command -v",
+            "nice --bogus",
+            "-p",
+        ],
+    )
+    def test_an_unparseable_wrapper_names_no_command(self, prefix: str) -> None:
+        """An option the resolver cannot parse with certainty, a mode that
+        runs a shell, or a PATH change resolves to nothing -- which every
+        allowlist caller treats as unknown, withholding the exemption."""
+        assert quoted_heredoc_command_words(f"{prefix} cat <<'EOF'\nb\nEOF") == []
+
     def test_a_path_named_command_is_reduced_to_its_basename(self) -> None:
         assert quoted_heredoc_command_words("/bin/sh <<'EOF'\nb\nEOF") == ["sh"]
 

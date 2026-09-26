@@ -158,7 +158,30 @@ class TestTheGuardStillGuards:
             "git branch -D main",
         ],
     )
-    @pytest.mark.parametrize("receiver", ["bash", "sh", "/bin/sh", "sudo -E bash", "ssh host"])
+    @pytest.mark.parametrize(
+        "receiver",
+        [
+            "bash",
+            "sh",
+            "/bin/sh",
+            "sudo -E bash",
+            "ssh host",
+            # Plan 00466 N101 D-SEC F2: a wrapper option's VALUE is not the
+            # command (`sudo -p cat bash` runs bash, not cat).
+            "sudo -p cat bash",
+            "sudo -u cat bash",
+            "sudo -nu cat bash",
+            "sudo --prompt cat bash",
+            "env -u cat bash",
+            "nice -n cat bash",
+            "timeout -s cat 5 bash",
+            "timeout 5 bash",
+            "nohup bash",
+            "command bash",
+            "sudo -s cat",
+            "env -S cat bash",
+        ],
+    )
     def test_a_heredoc_fed_to_an_interpreter_is_still_blocked(
         self, handler: DestructiveGitHandler, receiver: str, body: str
     ) -> None:

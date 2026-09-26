@@ -9,6 +9,23 @@ interrupt a running handler) and lands with that branch. N40 is taken there too
 taken on the N38 fix branch (the chain's remaining linear per-token cost, which
 waits for the shell-parser consolidation).
 
+### N105 — The data-sink heredoc exemption trusts a sink name that the same command redefines
+
+**Found by the N101 round-2 fixer**, while applying D-RULE F5 to the Python
+exemption. `strip_quoted_heredoc_bodies` blanks the body of
+`cat() { bash; }; cat <<'EOF'`, of `alias cat=bash; cat <<'EOF'` and of
+`source x.sh; cat <<'EOF'`. In each case the name `cat` may run a shell,
+so every consumer of the blanked text (destructive_git, pipe_blocker and
+the others) judges a body that bash executes as prose. The cause is in
+`_receiver_is_data_sink`, which resolves the name but never asks whether
+the command line redefines it. This is on main as well: the N101 branch
+changed only how wrapper options are skipped.
+
+**Remedy:** withhold the exemption from every heredoc in a command whose
+shell-level text defines a function, an alias, `hash`, `enable`, PATH,
+`source` or `.`. That is the rule `brace_expansion_view` applies. Pin it
+through destructive_git with each redefinition form.
+
 ### N104 — `Write`/`Edit` of Python source with a long brace-alternation string fails `secret_file_guard` closed
 
 **Found by the N101 fixer**, whose own `Edit` of a scratch `.py` file was
@@ -19,9 +36,14 @@ N101 deliberately left that alone. A test pins it
 (`test_a_script_brace_sequence_mention_still_denies_as_content`), because a
 string literal can reach a shell through a variable that the shell-exec-call
 extraction cannot follow. The cost is that a long enough brace string in
-ordinary source fails closed. The same literal in a `python3 - <<'EOF'` body
-is now allowed, because N101 judges interpreter code only through its direct
-shell-exec calls.
+ordinary source fails closed. On the Bash route the same literal is allowed
+only in a program that cannot pass its text on (N101 round 2). A program
+that spawns, writes a file or imports unknown code has its literals
+enumerated as the content route does. A `Write` of a `.py` file is always
+the second kind, because the file itself is text a later command can run.
+So the content scan cannot be narrowed without the same reach analysis over
+the whole file, and without accepting that a written module can be imported
+by code the guard never sees.
 
 **Remedy:** choose one rule for non-shell code on both surfaces. Either
 brace spellings of string literals are enumerated, and a Bash-route heredoc
@@ -86,18 +108,24 @@ fresh branch from main.
 **Remedied on the n101 branch.** The cause was one shared stream,
 `secret_file_matching._brace_expansion_tokens`. It ran `iter_brace_words` and
 `expand_braces` over the raw command, so a body's dict literals and f-strings
-tripped either the 500-word discovery cap or the 256-spelling cap. The new
-`shell_expansion.brace_expansion_view` neutralises braces in text no shell
-expands. That means a quoted heredoc body fed to a non-shell interpreter with
-no shell downstream, and a single-quoted argument owned by a non-shell
-interpreter. It returns the command unchanged when it is unsure. A body fed
-to a data sink is kept, because `cat > run.sh <<'EOF'` authors a runnable
-file, and `Write`/`Edit` content is still enumerated whole. An
-interpreter-fed heredoc body now gets the one-liner families' shell-exec
-literal scan, so a brace-spelled path inside a call such as Python's
-os-dot-system still denies. The fix is in the shared stream, so payload
-capture and `flaggable_content_channel_guard` inherit it. The quarantine
-guard enumerates filesystem globs, not braces; see N103.
+tripped either the 500-word discovery cap or the 256-spelling cap.
+`shell_expansion.brace_expansion_view` now neutralises braces in one place
+only: the program text of a top-level `python3` command, either its
+single-quoted `-c` word or its one quoted-delimiter stdin heredoc. It does
+so only when no shell can read what the program prints: no pipe after it,
+no process substitution, no subshell, group, compound command or wrapper,
+no `exec`/`eval`/`coproc`, no redefinition of the name (including `source`
+and `.`), and no output file that another command in the line could run.
+Ruby, Perl, PHP and Node are judged as before, because they brace-expand in
+their own glob APIs. Argv is judged as before. A program that can pass its
+text on (it spawns a process, writes a file, runs code dynamically or
+imports anything outside a stdlib allowlist, see
+`utils/python_program_reach.py`) still has its string literals enumerated.
+The shell-exec literal scan now covers every Python spawn API. Round 2
+closed the D-RULE and D-SEC review findings; see
+`subagent-reports/260926-n101-fix2-opus-5-5.md`. The fix is in the shared
+stream, so payload capture and `flaggable_content_channel_guard` inherit
+it. The quarantine guard enumerates filesystem globs, not braces; see N103.
 
 ### N100 — A continuation on a heredoc opener line (`cat > s.sh \⏎<<'EOF'`) denies a body that is only written
 

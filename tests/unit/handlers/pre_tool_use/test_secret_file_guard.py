@@ -1985,10 +1985,14 @@ class TestTextTheShellNeverExpandsIsNotEnumerated:
         decision, reason = _through_chain("Bash", {"command": command})
         assert decision != Decision.DENY, reason
 
-    def test_python_heredoc_piped_to_a_data_sink_is_allowed(self) -> None:
+    def test_python_heredoc_piped_on_to_any_stage_still_fails_closed(self) -> None:
+        """No pipe stage may follow an exempted program (coordinator ruling
+        on D-RULE F1/F2): even `grep` can feed `tee gen.sh`-style routes, so
+        the over-bound word is enumerated again."""
         command = f"python3 - <<'EOF' 2>&1 | grep -v noise\nprint('{_OVER_BOUND_WORD}')\nEOF"
         decision, reason = _through_chain("Bash", {"command": command})
-        assert decision != Decision.DENY, reason
+        assert decision == Decision.DENY
+        assert RuleID.SECRET_EVALUATION_ERROR in reason
 
     def test_single_quoted_python_code_with_an_over_bound_string_is_allowed(self) -> None:
         command = f"python3 -c 'print(\"{_OVER_BOUND_WORD}\")'"
@@ -2053,3 +2057,145 @@ class TestTextTheShellNeverExpandsIsNotEnumerated:
         decision, reason = _through_chain("Write", tool_input)
         assert decision == Decision.DENY
         assert RuleID.SECRET_EVALUATION_ERROR in reason
+
+
+#: A brace spelling that expands to the protected `/proj/.vault-pass`.
+_BRACE_PATH = "/proj/.vault-p{a,x}ss"
+#: Shell-exec call names, split so this file's text does not read as calls.
+_OS_SYSTEM = "os." + "system"
+_SUBPROCESS_RUN = "subprocess." + "run"
+
+
+def _deny_reason(command: str) -> str:
+    decision, reason = _through_chain("Bash", {"command": command})
+    assert decision == Decision.DENY, f"allowed: {command!r}"
+    return reason
+
+
+class TestTheExemptionIsOnlyPythonProgramTextNoShellReads:
+    """Plan 00466 N101 round 2: every D-RULE and D-SEC finding against the
+    round-1 exemption, through the real handler. Each command reaches a
+    brace-spelled protected path, and each was allowed at 55e16a7c4."""
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            # D-RULE F1: a -c program whose output a shell reads
+            f"python3 -c 'print(\"cat {_BRACE_PATH}\")' | bash",
+            f"python3 -c 'print(\"cat {_BRACE_PATH}\")' | xargs sh -c",
+            f"python3 -c 'print(\"cat {_BRACE_PATH}\")' > >(bash)",
+            f'python3 -c \'print("cat {_BRACE_PATH}")\' | while read l; do bash -c "$l"; done',
+            # D-RULE F2: a heredoc program whose output a shell reads
+            f"( python3 - <<'EOF'\nprint('cat {_BRACE_PATH}')\nEOF\n) | bash",
+            f"{{ python3 - <<'EOF'\nprint('cat {_BRACE_PATH}')\nEOF\n}} | bash",
+            f"python3 - <<'EOF' > >(bash)\nprint('cat {_BRACE_PATH}')\nEOF",
+            f"python3 - <<'EOF' | tee >(bash)\nprint('cat {_BRACE_PATH}')\nEOF",
+            f"python3 - <<'EOF' > gen.sh\nprint('cat {_BRACE_PATH}')\nEOF\nbash gen.sh",
+        ],
+    )
+    def test_a_program_whose_output_a_shell_reads_is_judged(self, command: str) -> None:
+        assert RuleID.SECRET_BASH_MENTION in _deny_reason(command)
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            f"python3 script.py 'cat {_BRACE_PATH}'",
+            f"python3 -c 'import sys' 'cat {_BRACE_PATH}'",
+            f"python3 -m mod 'cat {_BRACE_PATH}'",
+        ],
+    )
+    def test_argv_is_judged_d_rule_f3(self, command: str) -> None:
+        assert RuleID.SECRET_BASH_MENTION in _deny_reason(command)
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            f"ruby -e 'Dir.glob(\"{_BRACE_PATH}\")'",
+            f"perl -e 'print glob(\"{_BRACE_PATH}\")'",
+            f"php -r 'glob(\"{_BRACE_PATH}\", GLOB_BRACE);'",
+            f"node -e 'fs.globSync(\"{_BRACE_PATH}\")'",
+            f"ruby - <<'EOF'\nputs Dir.glob('{_BRACE_PATH}')\nEOF",
+            f"perl - <<'EOF'\nprint glob('{_BRACE_PATH}');\nEOF",
+        ],
+    )
+    def test_other_interpreters_are_judged_d_sec_f1(self, command: str) -> None:
+        assert RuleID.SECRET_BASH_MENTION in _deny_reason(command)
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            f"sudo -p python3 bash -c 'cat {_BRACE_PATH}'",
+            f"sudo -p python3 bash <<'EOF'\ncat {_BRACE_PATH}\nEOF",
+            f"sudo -u python3 bash -c 'cat {_BRACE_PATH}'",
+            f"sudo python3 -c 'print(\"cat {_BRACE_PATH}\")'",
+        ],
+    )
+    def test_a_wrapper_hides_no_shell_d_sec_f2(self, command: str) -> None:
+        assert RuleID.SECRET_BASH_MENTION in _deny_reason(command)
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            f"source defs.sh; python3 -c 'print(\"cat {_BRACE_PATH}\")'",
+            f". ./defs.sh; python3 -c 'print(\"cat {_BRACE_PATH}\")'",
+            f"source defs.sh && python3 - <<'EOF'\nprint('cat {_BRACE_PATH}')\nEOF",
+        ],
+    )
+    def test_a_sourced_redefinition_withdraws_the_exemption_d_rule_f5(self, command: str) -> None:
+        assert RuleID.SECRET_BASH_MENTION in _deny_reason(command)
+
+    @pytest.mark.parametrize(
+        "body",
+        [
+            f"import subprocess\n{_SUBPROCESS_RUN}(['env', 'bash', '-c', 'cat {_BRACE_PATH}'])",
+            f"import os\ncmd = 'cat {_BRACE_PATH}'\n{_OS_SYSTEM}(cmd)",
+            f"import commands\ncommands.getoutput('cat {_BRACE_PATH}')",
+            f"import os\nos.posix_spawn('/bin/sh', ['sh', '-c', 'cat {_BRACE_PATH}'], {{}})",
+            f"import pty\npty.spawn(['bash', '-c', 'cat {_BRACE_PATH}'])",
+            f"import asyncio\nasyncio.create_subprocess_exec('sh', '-c', 'cat {_BRACE_PATH}')",
+            f"import braceexpand\nprint(list(braceexpand.braceexpand('{_BRACE_PATH}')))",
+        ],
+    )
+    def test_a_python_program_that_spawns_or_loads_code_is_judged_d_rule_f4(
+        self, body: str
+    ) -> None:
+        command = f"python3 - <<'EOF'\n{body}\nEOF"
+        assert RuleID.SECRET_BASH_MENTION in _deny_reason(command)
+
+    def test_a_python_program_writing_a_script_a_later_command_runs_is_judged(self) -> None:
+        command = f"python3 - <<'EOF'\nopen('g.sh', 'w').write('cat {_BRACE_PATH}')\nEOF\nbash g.sh"
+        assert RuleID.SECRET_BASH_MENTION in _deny_reason(command)
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "perl -e 'ex" + f'ec("cat {_BRACE_PATH}")\'',
+            f"ruby -e 'spawn(\"cat {_BRACE_PATH}\")'",
+            f"php -r 'passthru(\"cat {_BRACE_PATH}\");'",
+            'node -e \'require("child_process").spawnSync("sh", ' f'["-c", "cat {_BRACE_PATH}"])\'',
+        ],
+    )
+    def test_other_languages_unlisted_spawn_calls_are_judged_d_rule_f4(self, command: str) -> None:
+        assert RuleID.SECRET_BASH_MENTION in _deny_reason(command)
+
+
+class TestRoundOneFalsePositivesStayAllowed:
+    """The N101 false positives: ordinary Python programs whose code braces
+    exceeded the expander's caps. None names a protected path."""
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            f"python3 - <<'EOF'\n{_MANY_BRACES_PROGRAM}\nEOF",
+            f"python3 <<'EOF'\n{_MANY_BRACES_PROGRAM}\nEOF",
+            f"python3 - <<'EOF'\nprint('{_OVER_BOUND_WORD}')\nEOF",
+            f"python3 -c 'print(\"{_OVER_BOUND_WORD}\")'",
+            f"set -euo pipefail\ncd /proj && python3 - <<'EOF'\n{_MANY_BRACES_PROGRAM}\nEOF",
+            f"python3 - <<'EOF' > out.json 2>&1\n{_MANY_BRACES_PROGRAM}\nEOF",
+            f"python3 - <<'EOF'\nimport json\nfrom pathlib import Path\n{_MANY_BRACES_PROGRAM}\n"
+            "print(json.dumps(Path('x').read_text()))\nEOF",
+        ],
+    )
+    def test_ordinary_python_program_is_allowed(self, command: str) -> None:
+        decision, reason = _through_chain("Bash", {"command": command})
+        assert decision != Decision.DENY, reason

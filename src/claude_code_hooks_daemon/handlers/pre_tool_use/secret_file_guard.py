@@ -312,7 +312,7 @@ _PERCENT_LITERAL_DELIMITERS: Final[dict[str, str]] = {
 }
 
 _PYTHON_SHELL_CALL_RE: Final[re.Pattern[str]] = re.compile(
-    r"\b(?:os\.system|os\.popen|subprocess\.\w+)\s*\("
+    r"\b(?:os\.system|os\.popen|subprocess\.\w+|commands\.\w+)\s*\("
 )
 # Review 7 follow-up (team-lead): the regex fallback's alias resolution --
 # a best-effort, line-based scan, not a parser, but reaching the SAME
@@ -451,10 +451,14 @@ def _percent_literal_bodies(content: str, prefix: str, *, limit: int) -> list[st
 #: goes through a shell, since any of them handed a shell interpreter and
 #: `-c` is functionally the same disclosure route).
 _PY_OS_SHELL_ATTRS: Final[frozenset[str]] = frozenset({"system", "popen"})
-_PY_OS_EXEC_SPAWN_PREFIXES: Final[tuple[str, ...]] = ("exec", "spawn")
-_PY_SUBPROCESS_FUNC_NAMES: Final[frozenset[str]] = frozenset(
-    {"run", "call", "check_call", "check_output", "Popen", "getoutput", "getstatusoutput"}
-)
+_PY_OS_EXEC_SPAWN_PREFIXES: Final[tuple[str, ...]] = ("exec", "spawn", "posix_spawn")
+#: Modules every one of whose calls runs its argument through a shell
+#: (Python 2's `commands.getoutput`/`getstatusoutput`).
+_PY_ALWAYS_SHELL_MODULES: Final[frozenset[str]] = frozenset({"commands"})
+#: `asyncio` process entry points: `_shell` always runs a shell, `_exec`
+#: does when its argv names one.
+_PY_ASYNCIO_SHELL_ATTRS: Final[frozenset[str]] = frozenset({"create_subprocess_shell"})
+_PY_ASYNCIO_EXEC_ATTRS: Final[frozenset[str]] = frozenset({"create_subprocess_exec"})
 #: `subprocess.getoutput`/`getstatusoutput` (review 7 MINOR-1) always run
 #: their argument through a shell -- unlike `run`/`call`/`check_call`/
 #: `check_output`/`Popen`, they take no `shell=` keyword at all, so gating
@@ -511,14 +515,16 @@ def _python_call_has_shell_true(call: ast.Call) -> bool:
 
 def _python_call_names_a_shell(call: ast.Call) -> bool:
     """True when an argument literally names a shell interpreter -- a bare
-    string, or the first element of a list/tuple argument -- the
+    string, or ANY element of a list/tuple argument -- the
     ``subprocess.run(["bash", "-c", cmd])`` shape that reaches a shell with
-    no ``shell=True``. An ABSOLUTE interpreter path (``/bin/bash``) is
-    recognised by its basename (review 6 minor-2)."""
+    no ``shell=True``, including behind a wrapper
+    (``["env", "bash", "-c", cmd]``, Plan 00466 N101 D-RULE F4). An
+    ABSOLUTE interpreter path (``/bin/bash``) is recognised by its basename
+    (review 6 minor-2)."""
     for arg in call.args:
         candidates: list[ast.expr] = []
-        if isinstance(arg, (ast.List, ast.Tuple)) and arg.elts:
-            candidates.append(arg.elts[0])
+        if isinstance(arg, (ast.List, ast.Tuple)):
+            candidates.extend(arg.elts)
         elif isinstance(arg, ast.Constant):
             candidates.append(arg)
         for candidate in candidates:
@@ -536,11 +542,15 @@ def _python_call_is_shell_exec(module: str, attr: str, call: ast.Call) -> bool:
         return True
     if module == "pty" and attr == "spawn":
         return True
-    if module == "asyncio" and attr == "create_subprocess_shell":
+    if module in _PY_ALWAYS_SHELL_MODULES:
         return True
+    if module == "asyncio" and attr in _PY_ASYNCIO_SHELL_ATTRS:
+        return True
+    if module == "asyncio" and attr in _PY_ASYNCIO_EXEC_ATTRS:
+        return _python_call_names_a_shell(call)
     if module == "subprocess" and attr in _PY_SUBPROCESS_ALWAYS_SHELL_FUNC_NAMES:
         return True
-    if module == "subprocess" and attr in _PY_SUBPROCESS_FUNC_NAMES:
+    if module == "subprocess":
         return _python_call_has_shell_true(call) or _python_call_names_a_shell(call)
     return False
 
@@ -675,10 +685,12 @@ def _regex_fallback_call_counts(
     ``subprocess.getoutput``/``getstatusoutput`` always count (MINOR-1:
     they take no ``shell=`` keyword at all); any other ``subprocess``
     attribute counts only with ``shell=True`` (any whitespace) or an argv
-    literal naming a shell interpreter.
+    literal naming a shell interpreter; every ``commands`` call counts.
     """
     if module == "os":
         return attr in ("system", "popen")
+    if module in _PY_ALWAYS_SHELL_MODULES:
+        return True
     if module == "subprocess":
         if attr in _PY_SUBPROCESS_ALWAYS_SHELL_FUNC_NAMES:
             return True
@@ -718,7 +730,7 @@ def _python_shell_exec_literals(content: str) -> list[str]:
     candidates: list[tuple[int, str, str]] = []
     for match in _PYTHON_SHELL_CALL_RE.finditer(content):
         text = match.group(0)
-        module = "os" if text.startswith("os.") else "subprocess"
+        module = text.split(".", 1)[0]
         attr = text[len(module) + 1 : -1].strip()
         candidates.append((match.start(), module, attr))
     for alias, real_module in module_aliases.items():
@@ -931,32 +943,32 @@ class _OneLinerFamily:
 
 _ONE_LINER_FAMILIES: Final[dict[str, _OneLinerFamily]] = {
     "python": _OneLinerFamily(
-        shell_expansion.NON_SHELL_INTERPRETERS[".py"],
+        re.compile(r"^(?:python|pypy)\d?(?:\.\d+)*$"),
         ".py",
         frozenset({"c"}),
         value_flags=frozenset({"-W", "-X", "--check-hash-based-pycs"}),
     ),
     "ruby": _OneLinerFamily(
-        shell_expansion.NON_SHELL_INTERPRETERS[".rb"],
+        re.compile(r"^ruby(?:\d+(?:\.\d+)*)?$"),
         ".rb",
         frozenset({"e"}),
         value_flags=frozenset({"-C", "-I", "-r"}),
     ),
     "perl": _OneLinerFamily(
-        shell_expansion.NON_SHELL_INTERPRETERS[".pl"],
+        re.compile(r"^perl(?:\d+(?:\.\d+)*)?$"),
         ".pl",
         frozenset({"e", "E"}),
         value_flags=frozenset({"-I"}),
     ),
     "node": _OneLinerFamily(
-        shell_expansion.NON_SHELL_INTERPRETERS[".js"],
+        re.compile(r"^node(?:\d+(?:\.\d+)*)?$"),
         ".js",
         frozenset({"e", "p"}),
         frozenset({"--eval", "--print"}),
         value_flags=frozenset({"-r", "--require"}),
     ),
     "php": _OneLinerFamily(
-        shell_expansion.NON_SHELL_INTERPRETERS[".php"],
+        re.compile(r"^php(?:\d+(?:\.\d+)*)?$"),
         ".php",
         frozenset({"r"}),
         value_flags=frozenset({"-d"}),
@@ -1074,9 +1086,9 @@ def _bash_interpreter_one_liner_mention(
         if mention is not None:
             return mention
     # Plan 00466 N101: a heredoc fed to an interpreter (`python3 - <<'EOF'`)
-    # is the same program as its `-c` spelling, and its braces are no
-    # longer enumerated as shell words -- so its shell-exec calls get the
-    # identical extraction, or a brace-spelled path inside one would pass.
+    # is the same program as its `-c` spelling, so its shell-exec calls get
+    # the identical extraction -- judged as full shell text (globs,
+    # variables), not only by the brace stream.
     for heredoc in shell_expansion.brace_expansion_view(command).heredocs:
         heredoc_family = (
             None if heredoc.receiver is None else _match_one_liner_family(heredoc.receiver)
