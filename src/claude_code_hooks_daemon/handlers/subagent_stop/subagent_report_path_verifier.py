@@ -35,6 +35,7 @@ from typing import Any, Final
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, HookInputField, Priority
 from claude_code_hooks_daemon.core import BlockingResult, Decision, ProjectContext
 from claude_code_hooks_daemon.core.handler_bases import SubagentStopHandlerBase
+from claude_code_hooks_daemon.utils.path_containment import path_is_relative_to
 
 # Fenced spans are stripped before matching: a fence is something the agent is
 # SHOWING the coordinator (a command to run, a snippet to read), not a claim
@@ -162,7 +163,7 @@ class SubagentReportPathVerifierHandler(SubagentStopHandlerBase):
         cwd = hook_input.get(HookInputField.CWD)
         if isinstance(cwd, str) and cwd:
             candidate = Path(os.path.normpath(cwd))
-            if candidate.is_relative_to(root):
+            if path_is_relative_to(candidate, root):
                 return candidate
         return root
 
@@ -190,7 +191,7 @@ class SubagentReportPathVerifierHandler(SubagentStopHandlerBase):
         claimed = Path(claim)
         target = claimed if claimed.is_absolute() else base / claimed
         normalised = Path(os.path.normpath(str(target)))
-        if not normalised.is_relative_to(root):
+        if not path_is_relative_to(normalised, root):
             return False
         # The claim pattern admits no NUL byte, so this cannot raise ValueError.
         return not normalised.exists()

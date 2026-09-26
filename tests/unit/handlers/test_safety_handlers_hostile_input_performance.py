@@ -487,10 +487,16 @@ def _bash_input(command: str) -> dict:
 _DEEP_PATH_SEGMENTS = 1_000
 
 
-def _deep_write_path(segments: int) -> str:
+#: File suffixes the deep-path sweep writes. Handlers dispatch on the suffix,
+#: so each one reaches different code: a ``.py``-only sweep never reached
+#: ``markdown_organization``'s per-ancestor plugin probe (Plan 00466 N106).
+_DEEP_PATH_SUFFIXES = (".py", ".md", ".sh", ".ts", ".json")
+
+
+def _deep_write_path(segments: int, suffix: str = ".py") -> str:
     """A ``src/`` file under the project root, ``segments`` directories deep:
     the shape of review 1's B2 ``file_path`` (90 KB at 22,500 segments)."""
-    return str(_project_root() / ("src/" + "pkg/" * segments + "module.py"))
+    return str(_project_root() / ("src/" + "pkg/" * segments + "module" + suffix))
 
 
 def _write_input(file_path: str) -> dict:
@@ -522,7 +528,8 @@ class TestGilStarvationAcrossEveryPreToolUseHandler:
             superlinear
         )
 
-    def test_no_handler_grows_superlinearly_on_a_deep_write_path(self) -> None:
+    @pytest.mark.parametrize("suffix", _DEEP_PATH_SUFFIXES)
+    def test_no_handler_grows_superlinearly_on_a_deep_write_path(self, suffix: str) -> None:
         """Review 2 nit 4: a 90 KB-deep Write ``file_path`` still took 9.4s.
 
         Most of it was `tdd_enforcement` building the mirrored test path one
@@ -530,18 +537,18 @@ class TestGilStarvationAcrossEveryPreToolUseHandler:
         it, so quadratic in the depth.
         """
         segments = _DEEP_PATH_SEGMENTS
-        large_path = _deep_write_path(SIZE_FACTOR * segments)
+        large_path = _deep_write_path(SIZE_FACTOR * segments, suffix)
         superlinear: list[str] = []
         for handler in _all_pre_tool_use_handlers():
 
             def work_at(size: int, h: Handler = handler) -> None:
-                _dispatch(h, _write_input(_deep_write_path(size)))
+                _dispatch(h, _write_input(_deep_write_path(size, suffix)))
 
             ratio = scaling_ratio(work_at, segments, large_path)
             if ratio > SUPERLINEAR_RATIO:
                 superlinear.append(
                     f"{type(handler).__name__} cost grew {ratio:.0f}x for "
-                    f"{SIZE_FACTOR}x path depth"
+                    f"{SIZE_FACTOR}x path depth on {suffix}"
                 )
         assert not superlinear, "superlinear PreToolUse handler(s) found:\n" + "\n".join(
             superlinear

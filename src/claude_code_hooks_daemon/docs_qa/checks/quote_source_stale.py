@@ -29,6 +29,7 @@ from claude_code_hooks_daemon.docs_qa.types import (
     Finding,
     Severity,
 )
+from claude_code_hooks_daemon.utils.path_containment import path_relative_to
 
 CHECK_ID: Final[str] = "quote-source-stale"
 
@@ -57,7 +58,7 @@ def _run_edit(context: CheckContext) -> list[Finding]:
     if context.corpus is None:
         return []  # cold-safe: no reverse-index data means "no known quoters"
 
-    rel_path = str(context.file_path.relative_to(context.project_root))
+    rel_path = str(path_relative_to(context.file_path, context.project_root))
     quoted_anchors = sorted(
         {
             ref.anchor

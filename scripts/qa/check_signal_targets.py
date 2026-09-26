@@ -69,6 +69,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
 
+from claude_code_hooks_daemon.utils.path_containment import path_is_relative_to, path_relative_to
 from claude_code_hooks_daemon.utils.scan_scope import walk_files
 
 _REPO_ROOT: Final[Path] = Path(__file__).resolve().parents[2]
@@ -407,12 +408,17 @@ def scan_source(source: str, reported: str) -> list[Violation]:
     return sorted(violations, key=lambda v: (v.file, v.line))
 
 
+def _repo_relative(path: Path) -> Path:
+    """``path`` relative to the repository root, or unchanged when outside it."""
+    return path_relative_to(path, _REPO_ROOT) if path_is_relative_to(path, _REPO_ROOT) else path
+
+
 def scan_file(path: Path) -> list[Violation]:
     """Every unproven signal in one file; none in the verifying helper itself
     or in a file :data:`_SIGNAL_HAZARD_TEST_EXCEPTIONS` names."""
     if path.resolve() == _HELPER.resolve():
         return []
-    reported = str(path.relative_to(_REPO_ROOT)) if path.is_relative_to(_REPO_ROOT) else str(path)
+    reported = str(_repo_relative(path))
     if reported in _SIGNAL_HAZARD_TEST_EXCEPTIONS:
         return []
     return scan_source(path.read_text(encoding="utf-8"), reported)
@@ -428,8 +434,7 @@ def _is_python(path: Path) -> bool:
 
 def _under_excluded_dir(path: Path) -> bool:
     """Whether ``path`` sits inside a fixtures/assets directory (see :data:`_EXCLUDED_DIR_NAMES`)."""
-    relative = path.relative_to(_REPO_ROOT) if path.is_relative_to(_REPO_ROOT) else path
-    return bool(_EXCLUDED_DIR_NAMES & set(relative.parts[:-1]))
+    return bool(_EXCLUDED_DIR_NAMES & set(_repo_relative(path).parts[:-1]))
 
 
 def scanned_files() -> list[Path]:
@@ -930,7 +935,7 @@ def scan_shell_source(text: str, reported: str) -> list[Violation]:
 
 def scan_shell_file(path: Path) -> list[Violation]:
     """Every unproven shell signal in one file."""
-    reported = str(path.relative_to(_REPO_ROOT)) if path.is_relative_to(_REPO_ROOT) else str(path)
+    reported = str(_repo_relative(path))
     return scan_shell_source(path.read_text(encoding="utf-8"), reported)
 
 

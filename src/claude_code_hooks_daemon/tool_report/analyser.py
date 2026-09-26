@@ -23,6 +23,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from claude_code_hooks_daemon.utils.claude_config import claude_project_dir
+from claude_code_hooks_daemon.utils.path_containment import path_relative_to
 
 logger = logging.getLogger(__name__)
 
@@ -79,7 +80,7 @@ def _session_key(transcript: Path, root: Path) -> str:
     ``<uuid>/subagents/`` tree) belongs to the top-level component it sits
     under.
     """
-    relative = transcript.relative_to(root)
+    relative = path_relative_to(transcript, root)
     if len(relative.parts) == 1:
         return transcript.stem
     return relative.parts[0]

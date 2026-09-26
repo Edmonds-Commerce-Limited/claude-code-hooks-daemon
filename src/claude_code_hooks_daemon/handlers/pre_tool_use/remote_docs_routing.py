@@ -39,6 +39,7 @@ from claude_code_hooks_daemon.core import Decision, GatingResult
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.core.rule import Rule
+from claude_code_hooks_daemon.utils.path_containment import path_relative_to
 
 logger = logging.getLogger(__name__)
 
@@ -150,7 +151,7 @@ class RemoteDocsRoutingHandler(PreToolUseHandlerBase):
             return None
         tree = self._tree()
         try:
-            path.resolve().relative_to(tree.resolve())
+            path_relative_to(path.resolve(), tree.resolve())
         except (ValueError, OSError):
             return None
         return path

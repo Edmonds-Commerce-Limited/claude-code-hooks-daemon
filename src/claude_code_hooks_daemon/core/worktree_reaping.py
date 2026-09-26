@@ -46,6 +46,7 @@ from typing import Protocol
 
 from claude_code_hooks_daemon.core.worktree_paths import WORKTREE_DIR_PATTERNS
 from claude_code_hooks_daemon.utils.git_repo import run_git, strip_branch_ref
+from claude_code_hooks_daemon.utils.path_containment import path_is_relative_to
 
 
 class GitResult(Protocol):
@@ -153,9 +154,7 @@ def _live_pids_under(path: Path, process_cwds: ProcessCwds) -> tuple[int, ...]:
     """pids from `process_cwds` whose cwd is `path` itself or inside it."""
     resolved = path.resolve()
     return tuple(
-        sorted(
-            pid for pid, cwd in process_cwds.items() if cwd == resolved or resolved in cwd.parents
-        )
+        sorted(pid for pid, cwd in process_cwds.items() if path_is_relative_to(cwd, resolved))
     )
 
 

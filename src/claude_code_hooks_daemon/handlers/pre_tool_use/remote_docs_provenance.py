@@ -30,6 +30,7 @@ from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.core.rule import Rule
 from claude_code_hooks_daemon.remote_docs.provenance import parse_provenance
+from claude_code_hooks_daemon.utils.path_containment import path_relative_to
 
 _FIELD_FILE_PATH: Final[str] = "file_path"
 _FIELD_CONTENT: Final[str] = "content"
@@ -84,7 +85,7 @@ class RemoteDocsProvenanceHandler(PreToolUseHandlerBase):
         if not path.is_absolute():
             return file_path
         try:
-            return str(path.resolve().relative_to(self._workspace_root))
+            return str(path_relative_to(path.resolve(), self._workspace_root))
         except ValueError:
             return None
 

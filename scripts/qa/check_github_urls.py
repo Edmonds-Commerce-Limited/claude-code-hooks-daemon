@@ -36,6 +36,7 @@ import sys
 from pathlib import Path
 from typing import Any, Final
 
+from claude_code_hooks_daemon.utils.path_containment import path_relative_to
 from claude_code_hooks_daemon.utils.scan_scope import (
     relative_parts,
     vacuous_scan_failure,
@@ -159,7 +160,7 @@ def find_violations(root: Path, *, unreadable: list[str] | None = None) -> list[
     """
     violations: list[dict[str, Any]] = []
     for path in _candidate_files(root):
-        relative = path.relative_to(root).as_posix()
+        relative = path_relative_to(path, root).as_posix()
         try:
             if path.stat().st_size > _MAX_BYTES:
                 continue

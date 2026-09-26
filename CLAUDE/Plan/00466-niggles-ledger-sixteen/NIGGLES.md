@@ -688,6 +688,8 @@ interrupt a running handler) and lands with that branch. N40 is taken there too
 taken on the N38 fix branch (the chain's remaining linear per-token cost, which
 waits for the shell-parser consolidation).
 
+\<<\<<\<<< HEAD
+
 ### N118 — ✅ Remedied — the tests-stage gate reported "0 failed" over a coverage-threshold miss and named nothing
 
 **Found by the N59 gate fixer** (`260926-n59-gatefix4-sonnet-5.md` on
@@ -724,6 +726,46 @@ RED confirmed: `find_unnamed_failure_reason` and the six `safe_signal.py`
 branches did not exist/were not exercised before this fix; every new test
 was run and seen to exercise its target line via `--cov-report=term-missing`
 before the fix, then again after.
+
+### N106 — Path containment is quadratic in path depth on Python 3.12+, so a deep `Write` path stalls PreToolUse
+
+**Found by the coordinator in CI run 36230375505** (main `8ea091652`, QA on
+Python 3.12 and 3.13). `test_no_handler_grows_superlinearly_on_a_deep_write_path`
+measured `ProjectContainmentHandler` 24x, `PlanJournalGuardHandler` 26x and
+`InstalledPluginEditAdvisorHandler` 27x-29x for 8x path depth. The local gate
+passed because its venv is Python 3.11.
+
+The cost is real, not measurement noise. From 3.12, `PurePath.relative_to` and
+`is_relative_to` test containment as `other in self.parents`, and every parent
+visited builds its string from all the segments above it. One check on a path
+d segments deep is O(d^2). On a bare `relative_to` + `is_relative_to` the
+ratio for 8x depth is 5.8x on 3.11 and 52x on 3.12 and 3.13. Each handler
+reached it through a different call site (`project_containment._is_within`,
+`worktree_paths.enclosing_checkout`, `installed_plugin_edit_advisor`), and
+the stdlib forms appeared at 126 sites across `src/` and `scripts/`.
+
+Widening the sweep to other file suffixes found a worse case in the same
+class. `markdown_organization._is_plugin_component` probed every ancestor of
+a `.md` path for a plugin manifest. Every probe past PATH_MAX failed and was
+logged with the whole path, so the cost was quadratic in depth: 122x for 8x,
+and 15s per call at 16 KB. The sweep had only ever written `.py`.
+
+**Remedy:** a linear drop-in, `utils/path_containment.py`
+(`path_is_relative_to`, `path_relative_to`), which reads `parts` once and
+matches the stdlib's answers, result type and error. All 126 sites use it,
+and `scan_scope` (stdlib-only) compares `parts` inline. A new semgrep rule,
+`pathlib-quadratic-containment`, bans `relative_to`, `is_relative_to` and
+`in … .parents` in `src/`, `scripts/` and project handlers. Its fixture
+pins it. `_is_plugin_component` now walks DOWN from the workspace root and
+stops at the first missing directory. The deep-path sweep writes `.py`,
+`.md`, `.sh`, `.ts` and `.json`.
+
+**Remedied on branch `worktree-n466-superlinear`.** RED tests: the helper's
+growth is pinned by counting the segments it reads (8x, where the stdlib
+reads 63x), and `_is_plugin_component` is pinned by counting its probes (the
+same at depth 50 and 400, where main makes 103 and 803).
+
+> > > > > > > worktree-n466-superlinear
 
 ### N110 — The local full QA gate tests one Python version, so a version-specific defect passes it and fails CI
 

@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import Final
 
 from claude_code_hooks_daemon.remote_docs.store import list_documents
+from claude_code_hooks_daemon.utils.path_containment import path_relative_to
 
 INDEX_RELATIVE_PATH: Final[str] = ".claude/REMOTE-DOCS.md"
 
@@ -70,7 +71,7 @@ def render_index(tree_root: Path) -> str:
     rows = []
     for document in documents:
         try:
-            shown = document.path.relative_to(tree_root)
+            shown = path_relative_to(document.path, tree_root)
         except ValueError:
             shown = document.path
         provenance = document.provenance

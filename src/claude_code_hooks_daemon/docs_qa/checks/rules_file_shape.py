@@ -50,6 +50,7 @@ from claude_code_hooks_daemon.docs_qa.types import (
     Finding,
     Severity,
 )
+from claude_code_hooks_daemon.utils.path_containment import path_relative_to
 
 logger = logging.getLogger(__name__)
 
@@ -156,7 +157,7 @@ def _is_rules_file(path: Path, project_root: Path) -> bool:
     if path.suffix.lower() != _MARKDOWN_SUFFIX:
         return False
     try:
-        rel_parts = path.resolve().relative_to(project_root.resolve()).parts
+        rel_parts = path_relative_to(path.resolve(), project_root.resolve()).parts
     except ValueError:
         return False
     return len(rel_parts) == 3 and rel_parts[:2] == _RULES_DIR_PARTS
@@ -238,7 +239,7 @@ def _run_edit(context: CheckContext) -> list[Finding]:
     if not _is_rules_file(context.file_path, context.project_root):
         return []
 
-    rel_path = str(context.file_path.relative_to(context.project_root))
+    rel_path = str(path_relative_to(context.file_path, context.project_root))
     new_metrics = _measure(context.file_content)
     old_metrics = (
         _measure(context.file_content_before)
@@ -254,7 +255,7 @@ def _run_sweep(context: CheckContext) -> list[Finding]:
     for path in sorted(context.project_root.glob("/".join((*_RULES_DIR_PARTS, "*.md")))):
         if not path.is_file():
             continue
-        rel_path = str(path.relative_to(context.project_root))
+        rel_path = str(path_relative_to(path, context.project_root))
         # This SWEEP globs the rules directory itself instead of reading the
         # corpus, so it inherits none of the corpus's exclusions -- the
         # project's configured ones have to be applied here explicitly, or a

@@ -39,6 +39,7 @@ from pathlib import Path
 from typing import Final
 
 from claude_code_hooks_daemon.reference_repos.model import RepoState
+from claude_code_hooks_daemon.utils.path_containment import path_is_relative_to, path_relative_to
 
 _ICON: Final[str] = "📚"
 
@@ -78,8 +79,8 @@ def display_path(path: Path, project_root: Path | None) -> str:
     prevent: a repo called one thing when blocked and another thing when
     reported reads as two separate problems.
     """
-    if project_root is not None and path.is_relative_to(project_root):
-        return str(path.relative_to(project_root))
+    if project_root is not None and path_is_relative_to(path, project_root):
+        return str(path_relative_to(path, project_root))
     return str(path)
 
 

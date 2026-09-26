@@ -26,6 +26,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
 
+from claude_code_hooks_daemon.utils.path_containment import path_relative_to
+
 _PLAN_DOCUMENT: Final[str] = "PLAN.md"
 
 # A plan folder is NNNNN-name. Only the NUMBER is required here, deliberately:
@@ -113,7 +115,7 @@ def find_plans(project_root: Path, plan_dir: str, query: str) -> list[PlanMatch]
         matches.append(
             PlanMatch(
                 number=number,
-                path=str(folder.relative_to(project_root)),
+                path=str(path_relative_to(folder, project_root)),
                 title=title,
                 status=_first_group(_STATUS_LINE, header),
             )

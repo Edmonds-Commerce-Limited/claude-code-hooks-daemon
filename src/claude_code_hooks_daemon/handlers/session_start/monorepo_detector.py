@@ -20,6 +20,7 @@ from claude_code_hooks_daemon.core.handler import WorkspaceScope
 from claude_code_hooks_daemon.core.handler_bases import SessionStartHandlerBase
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.core.workspace import _manifest_in
+from claude_code_hooks_daemon.utils.path_containment import path_relative_to
 from claude_code_hooks_daemon.utils.session_helpers import is_resume_session
 
 logger = logging.getLogger(__name__)
@@ -157,7 +158,7 @@ class MonorepoDetectorHandler(SessionStartHandlerBase):
         entries = []
         used_names: set[str] = set()
         for directory, _ in found:
-            rel = directory.relative_to(project_root).as_posix()
+            rel = path_relative_to(directory, project_root).as_posix()
             name = directory.name
             if name in used_names:
                 # Basename collides with an already-used name (e.g.
@@ -181,7 +182,7 @@ class MonorepoDetectorHandler(SessionStartHandlerBase):
             "Workspaces found:",
         ]
         for directory, kind in found:
-            rel = directory.relative_to(project_root).as_posix()
+            rel = path_relative_to(directory, project_root).as_posix()
             context.append(f"  - {rel} ({kind})")
         context += [
             "",

@@ -31,6 +31,7 @@ from claude_code_hooks_daemon.plan_qa.model import (
     parse_journal_dayfile_name,
 )
 from claude_code_hooks_daemon.plan_qa.types import DEFAULT_JOURNAL_DIR_NAME, CheckContext
+from claude_code_hooks_daemon.utils.path_containment import path_is_relative_to, path_relative_to
 
 _MARKDOWN_SUFFIX: Final[str] = ".md"
 _PLAN_INDEX_FILENAME: Final[str] = "README.md"
@@ -134,7 +135,7 @@ def _plan_number_from_folder(folder_name: str) -> int | None:
 
 def _outside(path: Path, context: CheckContext) -> PlanFile:
     try:
-        rel_path = str(path.relative_to(context.project_root))
+        rel_path = str(path_relative_to(path, context.project_root))
     except ValueError:
         # Outside the project entirely — keep the absolute path for messages.
         rel_path = str(path)
@@ -160,12 +161,12 @@ def classify(path: Path, context: CheckContext) -> PlanFile:
     3. Only then are plan documents, the plan index and supporting docs
        distinguished.
     """
-    if not path.is_relative_to(context.plan_dir):
+    if not path_is_relative_to(path, context.plan_dir):
         return _outside(path, context)
     if path.suffix != _MARKDOWN_SUFFIX:
         return _outside(path, context)
 
-    relative = path.relative_to(context.plan_dir)
+    relative = path_relative_to(path, context.plan_dir)
     parts = relative.parts
     archive_dirs = _archive_dir_names(context)
     in_archive = len(parts) > 0 and parts[0] in archive_dirs
@@ -189,13 +190,13 @@ def classify(path: Path, context: CheckContext) -> PlanFile:
         return PlanFile(
             kind=PlanFileKind.JOURNAL_DAYFILE if is_dayfile else PlanFileKind.JOURNAL_OTHER,
             path=path,
-            rel_path=str(path.relative_to(context.project_root)),
+            rel_path=str(path_relative_to(path, context.project_root)),
             plan_folder=plan_folder,
             plan_number=_plan_number_from_folder(plan_folder) if plan_folder else None,
             in_archive=in_archive,
         )
 
-    rel_path = str(path.relative_to(context.project_root))
+    rel_path = str(path_relative_to(path, context.project_root))
     plan_number = _plan_number_from_folder(plan_folder) if plan_folder else None
 
     # (3) The index lives at the plan-directory root; inside a plan folder a

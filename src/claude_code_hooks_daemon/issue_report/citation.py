@@ -31,6 +31,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
 
+from claude_code_hooks_daemon.utils.path_containment import path_is_relative_to
+
 #: Citations must name the daemon's own source tree. Reading your own code is
 #: not reading the daemon's, and the report is about the daemon.
 _SOURCE_PREFIX: Final[str] = "src/claude_code_hooks_daemon/"
@@ -99,7 +101,7 @@ def check_source_citation(citation: str, *, daemon_root: Path) -> CitationVerdic
     # check.
     root = daemon_root.resolve()
     target = (root / relative).resolve()
-    if not target.is_relative_to(root / "src" / "claude_code_hooks_daemon"):
+    if not path_is_relative_to(target, root / "src" / "claude_code_hooks_daemon"):
         return _refuse(f"{relative!r} resolves outside the daemon's source tree. {_SHAPE_HINT}")
 
     try:

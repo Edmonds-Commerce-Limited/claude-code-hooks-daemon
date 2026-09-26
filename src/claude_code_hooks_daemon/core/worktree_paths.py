@@ -17,6 +17,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from claude_code_hooks_daemon.utils.path_containment import (
+    path_is_relative_to,
+    path_relative_to,
+)
 from claude_code_hooks_daemon.utils.realpath import realpath
 
 # Single source of truth for worktree subtree locations. The
@@ -62,10 +66,10 @@ def enclosing_checkout(abs_path: str, project_root: Path) -> tuple[Path, Path] |
     """
     absolute = Path(realpath(abs_path))
     root = project_root.resolve()
-    if not absolute.is_relative_to(root):
+    if not path_is_relative_to(absolute, root):
         # Path is outside the project entirely — not a classification target.
         return None
-    relative = absolute.relative_to(root)
+    relative = path_relative_to(absolute, root)
 
     parts = relative.parts
     subpath_start = _worktree_subpath_start(parts)

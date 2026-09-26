@@ -74,6 +74,7 @@ from typing import Final
 
 import yaml
 
+from claude_code_hooks_daemon.utils.path_containment import path_relative_to
 from claude_code_hooks_daemon.utils.scan_scope import vacuous_scan_failure, walk_files
 
 _REPO_ROOT: Final[Path] = Path(__file__).resolve().parents[2]
@@ -368,7 +369,7 @@ def candidate_files(root: Path) -> list[Path]:
     for path in walk_files(root):
         if not path.is_file():
             continue
-        parts = path.relative_to(root).parts
+        parts = path_relative_to(path, root).parts
         if any(part in _EXCLUDED_DIRS for part in parts):
             continue
         executes_as_ci = path.suffix in _CI_SUFFIXES and any(part in _CI_ROOTS for part in parts)
@@ -386,14 +387,14 @@ def scan(root: Path) -> list[Violation]:
         except (OSError, UnicodeDecodeError) as error:
             violations.append(
                 Violation(
-                    str(path.relative_to(root)),
+                    str(path_relative_to(path, root)),
                     0,
                     RULE_DOWNGRADE_FLAG,
                     f"could not be read, so it was NOT checked: {error}",
                 )
             )
             continue
-        relative = str(path.relative_to(root))
+        relative = str(path_relative_to(path, root))
         lines = code_lines(path, text)
         violations.extend(_line_violations(relative, lines))
         violations.extend(_expansion_violations(relative, lines))
