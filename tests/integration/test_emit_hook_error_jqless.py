@@ -84,7 +84,26 @@ def _sandbox_project(tmp_path: Path) -> Path:
     (claude_dir / "hooks-daemon.env").write_text(
         'export HOOKS_DAEMON_ROOT_DIR="$PROJECT_PATH/root"\n'
     )
+    _write_launcher(proj)
     return proj
+
+
+def _write_launcher(directory: Path) -> None:
+    """Write a ``bin/hooks-daemon`` launcher under ``directory``."""
+    launcher = directory / "bin" / "hooks-daemon"
+    launcher.parent.mkdir(parents=True)
+    launcher.write_text("#!/bin/bash\n")
+
+
+def _recovery_hook_input(cwd: Path) -> str:
+    """The exact recovery command, run by a Bash tool standing in ``cwd``."""
+    return json.dumps(
+        {
+            "tool_name": "Bash",
+            "tool_input": {"command": "bin/hooks-daemon restart"},
+            "cwd": str(cwd),
+        }
+    )
 
 
 def _emit(
@@ -180,11 +199,12 @@ def test_fallback_pretooluse_deny_text_is_honest_and_names_no_denied_tool(
 
 def test_fallback_pretooluse_recovery_command_stays_fail_open(tmp_path: Path) -> None:
     """The exact recovery command must never be blocked by this deny."""
-    recovery_hook_input = json.dumps(
-        {"tool_name": "Bash", "tool_input": {"command": "bin/hooks-daemon restart"}}
-    )
     result = _emit(
-        tmp_path, "PreToolUse", "daemon_startup_failed", "boom", stdin=recovery_hook_input
+        tmp_path,
+        "PreToolUse",
+        "daemon_startup_failed",
+        "boom",
+        stdin=_recovery_hook_input(tmp_path / "proj"),
     )
 
     assert result.returncode == 0, result.stderr
@@ -192,6 +212,26 @@ def test_fallback_pretooluse_recovery_command_stays_fail_open(tmp_path: Path) ->
     hso = parsed["hookSpecificOutput"]
     assert "permissionDecision" not in hso
     assert hso["hookEventName"] == "PreToolUse"
+
+
+def test_fallback_pretooluse_recovery_text_run_from_a_planted_launcher_denies(
+    tmp_path: Path,
+) -> None:
+    """Plan 00466 N67: the exact text is exempt only when it runs the
+    project's own launcher, not an impostor in the Bash tool's cwd."""
+    elsewhere = tmp_path / "elsewhere"
+    _write_launcher(elsewhere)
+    result = _emit(
+        tmp_path,
+        "PreToolUse",
+        "daemon_startup_failed",
+        "boom",
+        stdin=_recovery_hook_input(elsewhere),
+    )
+
+    assert result.returncode == 0, result.stderr
+    parsed = json.loads(result.stdout)
+    assert parsed["hookSpecificOutput"]["permissionDecision"] == "deny"
 
 
 @pytest.mark.parametrize("event", ["Stop", "SubagentStop"])

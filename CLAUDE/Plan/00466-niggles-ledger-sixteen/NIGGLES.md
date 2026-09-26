@@ -1212,7 +1212,7 @@ install yet.
   removed denies;
 - or an install-command carve-out instead of the fail-open.
 
-### N67 — The daemon-down repair carve-out trusts the command text, not the binary it runs
+### N67 — ✅ Remedied — The daemon-down repair carve-out trusts the command text, not the binary it runs
 
 **Found by N24 review 4 (mi-A).** While the daemon is unreachable, PreToolUse
 allows a sole `bin/hooks-daemon <read-only|restart>` command. The check reads
@@ -1223,6 +1223,23 @@ that fail-closed mode exists to guard.
 **Remedy:** require `realpath(cwd/bin/hooks-daemon)` to equal the project's
 own launcher, or the cwd to be the project root. RED test: a planted launcher
 in a subdirectory is denied while the daemon is down.
+
+**Remedied (lifecycle batch):** the carve-out now resolves the spelled
+launcher against the hook input's `cwd` and exempts the call only when that is
+the same existing file the spelling names from the project root
+(`realpath(cwd/<launcher>) == realpath(<project>/<launcher>)`). A missing,
+relative or non-string `cwd`, a project with no launcher, a directory in the
+launcher's place, or a path that cannot be resolved all deny. A symlink to the
+real launcher is exempt, because the launcher anchors itself to its own real
+location. Both copies of the check (`emit_hook_error`'s and
+`send_request_stdin`'s) now run one shared source, `_HOOKS_DAEMON_RECOVERY_PY`
+in `init.sh`, so they cannot drift. The deny texts now say to run the command
+from the project root. RED, proven against `HEAD`'s `init.sh` in a
+`git archive` copy: 12 cases in
+`TestRecoveryCarveOutJudgesTheResolvedLauncher`
+(`test_init_sh_pretooluse_fail_closed.py`), plus a planted-launcher test on
+the `emit_hook_error` path in `test_emit_hook_error_jqless.py` and in
+`test_ci_passthrough.py`. Release note 150.
 
 ### N66 — Two singleton race tests depend on `time.sleep(0.02)`, so they can pass without the race happening
 

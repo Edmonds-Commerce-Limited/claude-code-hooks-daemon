@@ -137,6 +137,22 @@ def _create_installed_stub(project_path: Path) -> None:
     stub.chmod(0o755)
 
 
+def _write_launcher(directory: Path) -> None:
+    """Write a ``bin/hooks-daemon`` launcher under ``directory``."""
+    launcher = directory / "bin" / "hooks-daemon"
+    launcher.parent.mkdir(parents=True)
+    launcher.write_text("#!/bin/bash\n")
+
+
+def _recovery_input(cwd: Path) -> dict[str, Any]:
+    """The exact recovery command, run by a Bash tool standing in ``cwd``."""
+    return {
+        "tool_name": "Bash",
+        "tool_input": {"command": "bin/hooks-daemon restart"},
+        "cwd": str(cwd),
+    }
+
+
 def _run_hook_via_forwarder(
     hook_name: str,
     hook_input: dict[str, Any],
@@ -279,17 +295,31 @@ class TestNonCIDaemonFailure:
         """The exact recovery command must never be blocked by the deny above."""
         project = _create_project_structure(tmp_path, ci_enabled=None)
         _create_installed_stub(project)
-        recovery_input = {
-            "tool_name": "Bash",
-            "tool_input": {"command": "bin/hooks-daemon restart"},
-        }
-        result = _run_hook_via_forwarder("pre-tool-use", recovery_input, project)
+        _write_launcher(project)
+        result = _run_hook_via_forwarder("pre-tool-use", _recovery_input(project), project)
 
         assert result.returncode == 0
         parsed = json.loads(result.stdout.strip())
         hso = parsed["hookSpecificOutput"]
         assert "permissionDecision" not in hso
         assert "Not currently running" in hso["additionalContext"]
+
+    def test_non_ci_installed_but_not_running_planted_launcher_is_denied(
+        self, tmp_path: Path
+    ) -> None:
+        """Plan 00466 N67: the carve-out judges the launcher the command would
+        run, so the exact recovery text run from a directory holding an
+        impostor ``bin/hooks-daemon`` is denied like any other call."""
+        project = _create_project_structure(tmp_path, ci_enabled=None)
+        _create_installed_stub(project)
+        _write_launcher(project)
+        elsewhere = tmp_path / "elsewhere"
+        _write_launcher(elsewhere)
+        result = _run_hook_via_forwarder("pre-tool-use", _recovery_input(elsewhere), project)
+
+        assert result.returncode == 0
+        parsed = json.loads(result.stdout.strip())
+        assert parsed["hookSpecificOutput"]["permissionDecision"] == "deny"
 
     def test_non_ci_stop_event_blocked(self, tmp_path: Path) -> None:
         """Non-CI daemon failure returns decision: block for Stop events."""

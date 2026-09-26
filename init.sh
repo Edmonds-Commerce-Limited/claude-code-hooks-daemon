@@ -76,46 +76,78 @@ _HOOKS_DAEMON_BOOTSTRAP_PID=""
 _HOOKS_DAEMON_BOOTSTRAP_ELAPSED=""
 
 #
-# _hooks_daemon_stdin_is_recovery_command() - True when stdin is the EXACT
-# daemon recovery command (Plan 00466 N24 review 3 MA4).
+# The daemon-recovery carve-out (Plan 00466 N24 review 3 MA4, N67), shared
+# verbatim by both python3 checks that apply it -- emit_hook_error's, via
+# _hooks_daemon_stdin_is_recovery_command below, and send_request_stdin's --
+# so the two can never disagree. Defines
+# _is_daemon_recovery_command(hook_input, project_path).
 #
-# Reads stdin (a PreToolUse hook_input JSON document) to EOF and checks it
-# against the same allowlist send_request_stdin's own
-# _is_daemon_recovery_command applies once the daemon IS reachable: a Bash
-# tool call whose whole command is exactly one recovery binary + one
-# read-only-or-restart subcommand, no compound commands. Any parse failure,
-# wrong tool, or non-matching command returns false (deny-by-default) --
-# this function decides whether a call gets a CARVE-OUT, never whether it
-# gets blocked outright.
-_hooks_daemon_stdin_is_recovery_command() {
-    python3 -c '
-import json
-import sys
+# A call is exempt only when it is a Bash call whose WHOLE command is exactly
+# one launcher spelling plus one read-only-or-restart subcommand, and that
+# spelling, resolved against the Bash tool's working directory (the hook
+# input's cwd), is the SAME file it names from the project root. The text
+# alone is not enough: a relative launcher runs whatever the cwd holds, so a
+# planted bin/hooks-daemon would otherwise run while every guard is down.
+# Anything that cannot be resolved is not exempt. The launcher follows its
+# own symlinks to anchor itself, so a link to the real one is the real one.
+#
+# No single quotes in this block: it is a single-quoted shell string.
+_HOOKS_DAEMON_RECOVERY_PY='
+import os
 
 _RECOVERY_BINARIES = ("bin/hooks-daemon", ".claude/hooks-daemon/bin/hooks-daemon")
 _RECOVERY_SUBCOMMANDS = ("restart", "status", "logs", "stop", "start")
+
+
+def _runs_the_project_launcher(binary, cwd, project_path):
+    if not isinstance(cwd, str) or not os.path.isabs(cwd):
+        return False
+    if not isinstance(project_path, str) or not os.path.isabs(project_path):
+        return False
+    try:
+        will_run = os.path.realpath(os.path.join(cwd, binary))
+        own = os.path.realpath(os.path.join(project_path, binary))
+    except (OSError, ValueError):
+        # An unresolvable path (an embedded NUL, a loop) is never exempt.
+        return False
+    return will_run == own and os.path.isfile(own)
+
+
+def _is_daemon_recovery_command(hi, project_path):
+    if not isinstance(hi, dict) or hi.get("tool_name") != "Bash":
+        return False
+    tool_input = hi.get("tool_input")
+    if not isinstance(tool_input, dict):
+        return False
+    command = tool_input.get("command")
+    if not isinstance(command, str):
+        return False
+    stripped = command.strip()
+    for binary in _RECOVERY_BINARIES:
+        for sub in _RECOVERY_SUBCOMMANDS:
+            if stripped == f"{binary} {sub}":
+                return _runs_the_project_launcher(binary, hi.get("cwd"), project_path)
+    return False
+'
+
+#
+# _hooks_daemon_stdin_is_recovery_command() - True when stdin is an exempt
+# daemon recovery command (see _HOOKS_DAEMON_RECOVERY_PY above).
+#
+# Reads stdin (a PreToolUse hook_input JSON document) to EOF. Any parse
+# failure returns false (deny-by-default) -- this function decides whether a
+# call gets a CARVE-OUT, never whether it gets blocked outright.
+_hooks_daemon_stdin_is_recovery_command() {
+    python3 -c "$_HOOKS_DAEMON_RECOVERY_PY"'
+import json
+import sys
 
 try:
     hi = json.load(sys.stdin)
 except Exception:
     sys.exit(1)
-
-if not isinstance(hi, dict) or hi.get("tool_name") != "Bash":
-    sys.exit(1)
-tool_input = hi.get("tool_input")
-if not isinstance(tool_input, dict):
-    sys.exit(1)
-command = tool_input.get("command")
-if not isinstance(command, str):
-    sys.exit(1)
-stripped = command.strip()
-ok = any(
-    stripped == f"{binary} {sub}"
-    for binary in _RECOVERY_BINARIES
-    for sub in _RECOVERY_SUBCOMMANDS
-)
-sys.exit(0 if ok else 1)
-'
+sys.exit(0 if _is_daemon_recovery_command(hi, sys.argv[1]) else 1)
+' "${PROJECT_PATH:-}"
 }
 
 #
@@ -442,7 +474,7 @@ $_hd_venv_missing_remedy")
             "not because a guard judged it. Hook safety handlers are ACTIVE and" \
             "denying by default until the daemon answers again." \
             "" \
-            "TO FIX: run exactly bin/hooks-daemon restart (or" \
+            "TO FIX: from the project root, run exactly bin/hooks-daemon restart (or" \
             ".claude/hooks-daemon/bin/hooks-daemon restart), which stays allowed" \
             "even while other calls are denied this way. A human can also run it directly (! bin/hooks-daemon restart) since Edit is denied here too.")
     fi
@@ -1699,31 +1731,13 @@ def _socket_timeout_note():
 # invalid_hook_input) -- every reader of this name tolerates that.
 hook_input = None
 
-# The exact daemon recovery commands a PreToolUse deny must never block, so
-# a wedged/slow daemon (the B2 GIL-hang shape: alive but not answering) can
-# still be recovered from inside the same session. EXACT match only, no
-# compound commands (no '&&', ';', extra args, ...) -- anything else is
-# judged like any other command.
-_RECOVERY_BINARIES = ('bin/hooks-daemon', '.claude/hooks-daemon/bin/hooks-daemon')
-_RECOVERY_SUBCOMMANDS = ('restart', 'status', 'logs', 'stop', 'start')
+# The daemon recovery commands a PreToolUse deny must never block, so a
+# wedged/slow daemon (the B2 GIL-hang shape: alive but not answering) can
+# still be recovered from inside the same session. Defines
+# _is_daemon_recovery_command; see _HOOKS_DAEMON_RECOVERY_PY.
+$_HOOKS_DAEMON_RECOVERY_PY
 
-def _is_daemon_recovery_command(hi):
-    '''True when hi is a Bash call whose WHOLE command is exactly one
-    binary + one subcommand from the allowlists above.'''
-    if not isinstance(hi, dict) or hi.get('tool_name') != 'Bash':
-        return False
-    tool_input = hi.get('tool_input')
-    if not isinstance(tool_input, dict):
-        return False
-    command = tool_input.get('command')
-    if not isinstance(command, str):
-        return False
-    stripped = command.strip()
-    return any(
-        stripped == f'{binary} {sub}'
-        for binary in _RECOVERY_BINARIES
-        for sub in _RECOVERY_SUBCOMMANDS
-    )
+project_path = sys.argv[3] if len(sys.argv) > 3 else ''
 
 def _pretooluse_response_looks_valid(text):
     '''True when text parses as one of PreToolUse's two legitimate response
@@ -1794,8 +1808,9 @@ def emit_error_json(event_name, error_type, error_details):
             '',
             'If this is a PreToolUse call being denied for safety because of',
             'this timeout: a genuinely wedged daemon (not just a slow handler)',
-            'is fixed by restarting it -- run exactly bin/hooks-daemon restart',
-            '(or .claude/hooks-daemon/bin/hooks-daemon restart), which stays',
+            'is fixed by restarting it -- from the project root, run exactly',
+            'bin/hooks-daemon restart (or .claude/hooks-daemon/bin/hooks-daemon',
+            'restart), which stays',
             'allowed even while other calls are denied this way.',
         ]
         if timeout_note:
@@ -1817,7 +1832,7 @@ def emit_error_json(event_name, error_type, error_details):
             'because the daemon has stopped accepting new connections (it is',
             'listening but wedged, not down).',
             '',
-            'TO FIX: run exactly bin/hooks-daemon restart (or',
+            'TO FIX: from the project root, run exactly bin/hooks-daemon restart (or',
             '.claude/hooks-daemon/bin/hooks-daemon restart), which stays',
             'allowed even while other calls are denied this way. Then use the',
             'hooks-daemon skill to verify health (args=health).',
@@ -1839,7 +1854,7 @@ def emit_error_json(event_name, error_type, error_details):
             'The daemon was REACHED (the connection succeeded), then the pipe',
             'broke before a response was received.',
             '',
-            'TO FIX: run exactly bin/hooks-daemon restart (or',
+            'TO FIX: from the project root, run exactly bin/hooks-daemon restart (or',
             '.claude/hooks-daemon/bin/hooks-daemon restart), which stays',
             'allowed even while other calls are denied this way. Then use the',
             'hooks-daemon skill to verify health (args=health).',
@@ -1861,7 +1876,7 @@ def emit_error_json(event_name, error_type, error_details):
             'The daemon was REACHED and answered, but the response could not',
             'be parsed as a judged verdict for this call.',
             '',
-            'TO FIX: run exactly bin/hooks-daemon restart (or',
+            'TO FIX: from the project root, run exactly bin/hooks-daemon restart (or',
             '.claude/hooks-daemon/bin/hooks-daemon restart), which stays',
             'allowed even while other calls are denied this way. Then use the',
             'hooks-daemon skill to verify health (args=health).',
@@ -1886,7 +1901,7 @@ def emit_error_json(event_name, error_type, error_details):
             'No daemon answered this socket -- either it is not running, or',
             'the socket itself is gone.',
             '',
-            'TO FIX: run exactly bin/hooks-daemon restart (or',
+            'TO FIX: from the project root, run exactly bin/hooks-daemon restart (or',
             '.claude/hooks-daemon/bin/hooks-daemon restart), which stays',
             'allowed even while other calls are denied this way. Then use the',
             'hooks-daemon skill to verify health (args=health).',
@@ -1942,7 +1957,7 @@ def emit_error_json(event_name, error_type, error_details):
             }
     elif event_name == 'PreToolUse' \
             and error_type != 'invalid_hook_input' \
-            and not _is_daemon_recovery_command(hook_input):
+            and not _is_daemon_recovery_command(hook_input, project_path):
         # Plan 00466 N24 review 4 R4-MA1: deny for EVERY PreToolUse transport
         # failure except invalid_hook_input (a payload that never reached the
         # socket at all, so the daemon state is unrelated and unknown) and the
@@ -2178,7 +2193,7 @@ except (BrokenPipeError, ConnectionResetError) as e:
 
 except Exception as e:
     fail(type(e).__name__, f'{type(e).__name__}: {e}')
-" "$event_name" "$response_mode" <&3
+" "$event_name" "$response_mode" "${PROJECT_PATH:-}" <&3
     local _rv=$?
     exec 3<&-
     if [[ -n "$_nc_replay_payload" ]]; then

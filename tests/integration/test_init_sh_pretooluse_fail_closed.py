@@ -50,7 +50,29 @@ def project(tmp_path: Path) -> Path:
     (root / ".claude" / "hooks-daemon.env").write_text(
         'HOOKS_DAEMON_ROOT_DIR="$PROJECT_PATH/.claude/hooks-daemon"\n'
     )
+    # The project's own launchers, in both spellings the carve-out accepts:
+    # the recovery carve-out only exempts a command that resolves to one.
+    for launcher in _RECOVERY_LAUNCHERS:
+        (root / launcher).parent.mkdir(parents=True, exist_ok=True)
+        (root / launcher).write_text("#!/bin/bash\n")
     return root
+
+
+_RECOVERY_LAUNCHERS = ("bin/hooks-daemon", ".claude/hooks-daemon/bin/hooks-daemon")
+
+
+def _recovery_input(
+    cwd: Path | str | None, command: str = "bin/hooks-daemon restart"
+) -> dict[str, Any]:
+    """A Bash hook_input for ``command`` whose Bash tool runs in ``cwd``.
+
+    ``cwd`` is what Claude Code puts in every hook input, and the directory a
+    relative launcher path resolves against; ``None`` omits the key.
+    """
+    hook_input: dict[str, Any] = {"tool_name": "Bash", "tool_input": {"command": command}}
+    if cwd is not None:
+        hook_input["cwd"] = str(cwd)
+    return hook_input
 
 
 def _fake_server(*, respond: bytes | None, delay: float = 0.0) -> Iterator[Path]:
@@ -240,11 +262,7 @@ class TestSocketTimeoutFailsClosedForPreToolUse:
 
     def test_the_recovery_command_is_not_denied(self, project: Path, hanging_socket: Path) -> None:
         """The exact command that would fix a wedged daemon must stay usable."""
-        recovery_input = {
-            "tool_name": "Bash",
-            "tool_input": {"command": "bin/hooks-daemon restart"},
-        }
-        response = _send(project, hanging_socket, "PreToolUse", recovery_input)
+        response = _send(project, hanging_socket, "PreToolUse", _recovery_input(project))
         hso = response["hookSpecificOutput"]
         assert "permissionDecision" not in hso
 
@@ -252,10 +270,7 @@ class TestSocketTimeoutFailsClosedForPreToolUse:
         self, project: Path, hanging_socket: Path
     ) -> None:
         """No compound commands: this must NOT ride along with the exemption."""
-        compound_input = {
-            "tool_name": "Bash",
-            "tool_input": {"command": "bin/hooks-daemon restart && rm -rf /"},
-        }
+        compound_input = _recovery_input(project, "bin/hooks-daemon restart && rm -rf /")
         response = _send(project, hanging_socket, "PreToolUse", compound_input)
         hso = response["hookSpecificOutput"]
         assert hso["permissionDecision"] == "deny"
@@ -301,10 +316,7 @@ class TestMalformedResponseFailsClosedForPreToolUse:
         assert hso["permissionDecision"] == "deny"
 
     def test_recovery_command_still_not_denied(self, project: Path, malformed_socket: Path) -> None:
-        recovery_input = {
-            "tool_name": "Bash",
-            "tool_input": {"command": ".claude/hooks-daemon/bin/hooks-daemon status"},
-        }
+        recovery_input = _recovery_input(project, ".claude/hooks-daemon/bin/hooks-daemon status")
         response = _send(project, malformed_socket, "PreToolUse", recovery_input)
         hso = response["hookSpecificOutput"]
         assert "permissionDecision" not in hso
@@ -332,11 +344,7 @@ class TestConnectionLostFailsClosedForPreToolUse:
     def test_the_recovery_command_is_not_denied(
         self, project: Path, connection_reset_socket: Path
     ) -> None:
-        recovery_input = {
-            "tool_name": "Bash",
-            "tool_input": {"command": "bin/hooks-daemon restart"},
-        }
-        response = _send(project, connection_reset_socket, "PreToolUse", recovery_input)
+        response = _send(project, connection_reset_socket, "PreToolUse", _recovery_input(project))
         hso = response["hookSpecificOutput"]
         assert "permissionDecision" not in hso
 
@@ -410,11 +418,7 @@ class TestBacklogFullFailsClosedForPreToolUse:
     def test_the_recovery_command_is_not_denied(
         self, project: Path, backlog_full_socket: Path
     ) -> None:
-        recovery_input = {
-            "tool_name": "Bash",
-            "tool_input": {"command": "bin/hooks-daemon restart"},
-        }
-        response = _send(project, backlog_full_socket, "PreToolUse", recovery_input)
+        response = _send(project, backlog_full_socket, "PreToolUse", _recovery_input(project))
         hso = response["hookSpecificOutput"]
         assert "permissionDecision" not in hso
 
@@ -437,6 +441,20 @@ class TestLegitimateResponsesPassThroughUnchanged:
         assert hso["permissionDecisionReason"] == "a real guard denied this"
 
 
+@pytest.fixture
+def nonexistent_socket() -> Iterator[Path]:
+    """A path with no socket at it, short enough that connect() raises a
+    genuine ``FileNotFoundError`` rather than AF_UNIX's ~108-byte
+    ``ENAMETOOLONG`` -- pytest's own ``tmp_path`` nests too deep for
+    that (see the ``_fake_server``/``connection_reset_socket`` fixtures
+    above for the same reasoning)."""
+    short_dir = Path(tempfile.mkdtemp(prefix="hd-"))
+    try:
+        yield short_dir / "does-not-exist.sock"
+    finally:
+        shutil.rmtree(short_dir, ignore_errors=True)
+
+
 class TestDaemonNotReachableFailsClosedForPreToolUse:
     """Plan 00466 N24 review 3 MA4 (owner decision): 'the socket is missing'
     no longer means fail-open for PreToolUse -- it means the daemon could
@@ -445,19 +463,6 @@ class TestDaemonNotReachableFailsClosedForPreToolUse:
     the wedged/crashed/never-started shape, not the fresh-clone-before-
     install one (that stays fail-open, upstream of this transport, via
     emit_hook_error's own NOT_INSTALLED/VENV_MISSING branches)."""
-
-    @pytest.fixture
-    def nonexistent_socket(self) -> Iterator[Path]:
-        """A path with no socket at it, short enough that connect() raises a
-        genuine ``FileNotFoundError`` rather than AF_UNIX's ~108-byte
-        ``ENAMETOOLONG`` -- pytest's own ``tmp_path`` nests too deep for
-        that (see the ``_fake_server``/``connection_reset_socket`` fixtures
-        above for the same reasoning)."""
-        short_dir = Path(tempfile.mkdtemp(prefix="hd-"))
-        try:
-            yield short_dir / "does-not-exist.sock"
-        finally:
-            shutil.rmtree(short_dir, ignore_errors=True)
 
     def test_no_socket_at_all_denies_for_pretooluse(
         self, project: Path, nonexistent_socket: Path
@@ -470,11 +475,7 @@ class TestDaemonNotReachableFailsClosedForPreToolUse:
     def test_the_recovery_command_is_not_denied(
         self, project: Path, nonexistent_socket: Path
     ) -> None:
-        recovery_input = {
-            "tool_name": "Bash",
-            "tool_input": {"command": "bin/hooks-daemon restart"},
-        }
-        response = _send(project, nonexistent_socket, "PreToolUse", recovery_input)
+        response = _send(project, nonexistent_socket, "PreToolUse", _recovery_input(project))
         hso = response["hookSpecificOutput"]
         assert "permissionDecision" not in hso
 
@@ -513,11 +514,7 @@ class TestUnclassifiedConnectErrorsFailClosedForPreToolUse:
     ) -> None:
         blocker = tmp_path / "not-a-dir-2"
         blocker.write_text("x")
-        recovery_input = {
-            "tool_name": "Bash",
-            "tool_input": {"command": "bin/hooks-daemon restart"},
-        }
-        response = _send(project, blocker / "fake.sock", "PreToolUse", recovery_input)
+        response = _send(project, blocker / "fake.sock", "PreToolUse", _recovery_input(project))
         hso = response["hookSpecificOutput"]
         assert "permissionDecision" not in hso
 
@@ -580,11 +577,7 @@ class TestConnectionRefusedFailsClosedForPreToolUse:
         assert "denied for safety" in hso["permissionDecisionReason"]
 
     def test_the_recovery_command_is_not_denied(self, project: Path, refused_socket: Path) -> None:
-        recovery_input = {
-            "tool_name": "Bash",
-            "tool_input": {"command": "bin/hooks-daemon restart"},
-        }
-        response = _send(project, refused_socket, "PreToolUse", recovery_input)
+        response = _send(project, refused_socket, "PreToolUse", _recovery_input(project))
         hso = response["hookSpecificOutput"]
         assert "permissionDecision" not in hso
 
@@ -596,3 +589,100 @@ class TestConnectionRefusedFailsClosedForPreToolUse:
         response = _send(project, refused_socket, "PostToolUse", _BASH_TOOL_INPUT)
         hso = response["hookSpecificOutput"]
         assert "permissionDecision" not in hso
+
+
+def _plant_launcher(directory: Path) -> Path:
+    """Write an impostor ``bin/hooks-daemon`` under ``directory``."""
+    planted = directory / "bin" / "hooks-daemon"
+    planted.parent.mkdir(parents=True)
+    planted.write_text("#!/bin/bash\necho planted\n")
+    return planted
+
+
+def _denied(response: dict[str, Any]) -> bool:
+    return bool(response["hookSpecificOutput"].get("permissionDecision") == "deny")
+
+
+class TestRecoveryCarveOutJudgesTheResolvedLauncher:
+    """Plan 00466 N67: the carve-out exempts the launcher a command will RUN.
+
+    A relative ``bin/hooks-daemon`` resolves against the Bash tool's working
+    directory, the hook input's ``cwd``. Matching the command text alone let
+    a launcher planted in any other directory run while every guard was
+    down. Only a command that resolves to the project's own launcher is
+    exempt, and anything that cannot be resolved is denied.
+    """
+
+    def test_a_launcher_planted_in_a_subdirectory_is_denied(
+        self, project: Path, nonexistent_socket: Path
+    ) -> None:
+        sub = project / "sub"
+        _plant_launcher(sub)
+        response = _send(project, nonexistent_socket, "PreToolUse", _recovery_input(sub))
+        assert _denied(response)
+
+    def test_a_launcher_planted_outside_the_project_is_denied(
+        self, project: Path, tmp_path: Path, nonexistent_socket: Path
+    ) -> None:
+        elsewhere = tmp_path / "elsewhere"
+        _plant_launcher(elsewhere)
+        response = _send(project, nonexistent_socket, "PreToolUse", _recovery_input(elsewhere))
+        assert _denied(response)
+
+    def test_the_long_spelling_planted_in_a_subdirectory_is_denied(
+        self, project: Path, nonexistent_socket: Path
+    ) -> None:
+        sub = project / "sub"
+        _plant_launcher(sub / ".claude" / "hooks-daemon")
+        hook_input = _recovery_input(sub, ".claude/hooks-daemon/bin/hooks-daemon restart")
+        response = _send(project, nonexistent_socket, "PreToolUse", hook_input)
+        assert _denied(response)
+
+    def test_a_missing_cwd_is_denied(self, project: Path, nonexistent_socket: Path) -> None:
+        response = _send(project, nonexistent_socket, "PreToolUse", _recovery_input(None))
+        assert _denied(response)
+
+    @pytest.mark.parametrize("cwd", ["", ".", "sub", 7, None, ["/"]])
+    def test_a_cwd_that_is_not_an_absolute_path_is_denied(
+        self, project: Path, nonexistent_socket: Path, cwd: object
+    ) -> None:
+        hook_input = _recovery_input(None)
+        hook_input["cwd"] = cwd
+        response = _send(project, nonexistent_socket, "PreToolUse", hook_input)
+        assert _denied(response)
+
+    def test_a_project_without_the_launcher_is_denied(
+        self, project: Path, nonexistent_socket: Path
+    ) -> None:
+        """Nothing to resolve to means nothing to exempt."""
+        (project / "bin" / "hooks-daemon").unlink()
+        response = _send(project, nonexistent_socket, "PreToolUse", _recovery_input(project))
+        assert _denied(response)
+
+    def test_a_directory_named_like_the_launcher_is_denied(
+        self, project: Path, nonexistent_socket: Path
+    ) -> None:
+        launcher = project / "bin" / "hooks-daemon"
+        launcher.unlink()
+        launcher.mkdir()
+        response = _send(project, nonexistent_socket, "PreToolUse", _recovery_input(project))
+        assert _denied(response)
+
+    def test_a_symlink_to_the_project_launcher_is_exempt(
+        self, project: Path, nonexistent_socket: Path
+    ) -> None:
+        """What runs is judged, not how it is spelled: a link to the real
+        launcher runs the real launcher, which anchors to its own location."""
+        sub = project / "sub"
+        (sub / "bin").mkdir(parents=True)
+        (sub / "bin" / "hooks-daemon").symlink_to(project / "bin" / "hooks-daemon")
+        response = _send(project, nonexistent_socket, "PreToolUse", _recovery_input(sub))
+        assert not _denied(response)
+
+    def test_a_cwd_that_links_to_the_project_root_is_exempt(
+        self, project: Path, tmp_path: Path, nonexistent_socket: Path
+    ) -> None:
+        link = tmp_path / "link-to-project"
+        link.symlink_to(project)
+        response = _send(project, nonexistent_socket, "PreToolUse", _recovery_input(link))
+        assert not _denied(response)
