@@ -3,6 +3,35 @@
 Newest first. Each entry says how it was found, why it happens, and the
 candidate remedies.
 
+### N109 — ✅ Remedied — the pending release-notes holding area mis-sorts past 99 callouts
+
+**Found:** `CLAUDE/UPGRADES/UNRELEASED/release-notes/` named callouts
+`NN-slug.md`, a two-digit arrival ordinal, and
+`tests/integration/test_pending_release_notes_holding_area.py` enforced
+`^\d{2}-`. Main held 85 notes numbered up to 93, and open branches carried
+about 20 more, so this release cycle passes 99. A mixed two- and three-digit
+scheme would mis-sort, because `release_slate._pending_release_notes` and the
+release fold both sort callouts by filename as a string, which puts `100-`
+before `11-`.
+
+**Remedy:** switched the holding area to a fixed three-digit ordinal,
+`NNN-kebab-slug.md`. RED: the holding-area test's name regex became
+`^\d{3}-`, proven to fail against the (then two-digit) files on disk, plus a
+new test asserting callout names sort in numeric order (a fixed width
+guarantees a string sort is a numeric sort). Every existing `NN-*.md` callout
+was `git mv`'d to zero-padded `0NN-*.md`. Updated every place stating the
+two-digit form: the holding-area README's naming section,
+`CLAUDE/development/RELEASING.md`'s two release-notes move steps,
+`.claude/agents/release-agent.md`, `.claude/skills/release/invoke.sh`, the
+two-digit example filenames in
+`tests/unit/plan_qa/checks/test_release_blocked_plan.py` and
+`.claude/project-handlers/pre_tool_use/test_plan_done_requires_holding_area.py`,
+and the one live-plan link still pointing at a two-digit pending callout
+(`CLAUDE/Plan/00399-.../PLAN.md`). `post-upgrade-tasks/` keeps its own `NN`
+rule unchanged — a different directory. No shipped template or daemon code
+parses the callout prefix with a digit-count regex, so nothing else needed a
+change.
+
 ### N40 — ✅ Blockers/Majors/minors/nits all remedied — adversarial security review of the N24/N25/N34 fix (2 blockers, 3 majors, 6 minors, 4 nits)
 
 **Found by an adversarial, read-only security review**

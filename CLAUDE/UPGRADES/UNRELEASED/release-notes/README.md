@@ -29,11 +29,13 @@ refactors usually do not, and the plan's last Success Criterion then says
 ## File naming
 
 ```
-NN-kebab-case-slug.md
+NNN-kebab-case-slug.md
 ```
 
-`NN` is a two-digit ordinal in arrival order. The slug says what the callout
-is about without opening the file.
+`NNN` is a three-digit ordinal in arrival order, zero-padded (`005`, `042`,
+`107`). The fixed width keeps a plain string sort in numeric order past
+99 — a mixed two- and three-digit scheme would sort `100-` before `11-`.
+The slug says what the callout is about without opening the file.
 
 ## File structure (mandatory schema)
 

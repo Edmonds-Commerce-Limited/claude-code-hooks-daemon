@@ -21,7 +21,7 @@ _TASKS = "## Tasks\n\n- [x] ✅ **Task 1.1**: done\n\n"
 _CRITERIA_WITH = (
     "## Success Criteria\n\n- [x] All QA checks passing\n"
     "- [x] Every release-bound consequence is in the pending-release holding area:\n"
-    "  `UNRELEASED/release-notes/01-example.md`.\n\n## Delivery & Milestones\n\n- x\n"
+    "  `UNRELEASED/release-notes/001-example.md`.\n\n## Delivery & Milestones\n\n- x\n"
 )
 _CRITERIA_NONE = (
     "## Success Criteria\n\n- [x] All QA checks passing\n"
