@@ -27,7 +27,6 @@ Provides:
 import argparse
 import asyncio
 import datetime
-import errno
 import fcntl
 import importlib.util
 import json
@@ -35,7 +34,6 @@ import logging
 import os
 import platform
 import shutil
-import signal
 import socket
 import subprocess  # nosec B404 - subprocess used for daemon management (systemctl) only
 import sys
@@ -46,6 +44,7 @@ from typing import TYPE_CHECKING, Any, Final, Literal, cast
 
 logger = logging.getLogger(__name__)
 
+import psutil
 from pydantic import ValidationError as PydanticValidationError
 
 from claude_code_hooks_daemon.config.loader import ConfigLoader
@@ -86,6 +85,7 @@ from claude_code_hooks_daemon.daemon.permission_audit import (
 )
 from claude_code_hooks_daemon.daemon.process_verification import (
     DAEMON_CLI_MODULE,
+    PROJECT_ROOT_ENV_VAR,
     daemon_process_project_root,
     is_this_users_process,
 )
@@ -127,8 +127,14 @@ from claude_code_hooks_daemon.utils.hook_registration import (
     validate_settings_hooks,
 )
 from claude_code_hooks_daemon.utils.markdown_format import format_markdown_text
+from claude_code_hooks_daemon.utils.path_containment import path_relative_to
 from claude_code_hooks_daemon.utils.plugin_hooks import ACKNOWLEDGED_PLUGINS_OPTION, health_lines
 from claude_code_hooks_daemon.utils.report_scrubbing import scrub_report
+from claude_code_hooks_daemon.utils.safe_signal import (
+    DaemonStop,
+    RefusedSignalTarget,
+    stop_verified_daemon,
+)
 from claude_code_hooks_daemon.utils.secret_redaction import get_active_secret_terms
 from claude_code_hooks_daemon.utils.session_action_items import (
     SessionActionItem,
@@ -781,76 +787,6 @@ def cmd_start(args: argparse.Namespace) -> int:
     sys.exit(0)
 
 
-#: Why ``os.pidfd_open`` can fail that says nothing about the process: the
-#: kernel lacks the syscall, or no descriptor is free. Only these (and a
-#: Python without the function) may fall back to signalling by number.
-_PIDFD_UNAVAILABLE_ERRNOS: Final[frozenset[int]] = frozenset(
-    {errno.ENOSYS, errno.EMFILE, errno.ENFILE}
-)
-
-
-def _open_pidfd(pid: int) -> int | None:
-    """Pin a pidfd to this exact ``pid`` instance, before it is proven.
-
-    Plan 00466 N24 review 3 mi5: opening this BEFORE
-    ``daemon_process_project_root`` closes the microsecond-scale TOCTOU
-    between that proof and the signal ``cmd_stop`` sends on its strength --
-    ``pid`` is just a number the kernel is free to hand to an unrelated new
-    process the instant the proven process exits, so a signal sent by
-    number after the proof can land on that impostor instead. A pidfd
-    names the exact process instance the kernel opened it against:
-    :func:`signal.pidfd_send_signal` through it either reaches that same
-    instance or raises ``ProcessLookupError`` (it has already exited) --
-    never a different process that has since reused the pid number.
-
-    Returns:
-        The pidfd, or ``None`` when no pidfd can be had for a reason that
-        says nothing about the process: ``os.pidfd_open`` is missing
-        (pre-3.9 Python, or non-Linux) or fails with an errno in
-        ``_PIDFD_UNAVAILABLE_ERRNOS``. Callers fall back to signalling by
-        pid number in that case, which only keeps the smaller race this
-        function exists to close, rather than refusing to stop the daemon.
-
-    Raises:
-        ProcessLookupError: ``pid`` is not running (ESRCH). Nothing needs
-            stopping, and a by-number fallback would only reopen the race.
-        OSError: any other failure, which is not proven safe to fall back
-            from -- the caller must refuse to signal.
-    """
-    try:
-        pidfd: int | None = os.pidfd_open(pid, 0)
-    except AttributeError:
-        logger.warning(
-            "os.pidfd_open unsupported on this platform (pid %d); falling back "
-            "to signalling by pid number",
-            pid,
-        )
-        pidfd = None
-    except OSError as e:
-        if e.errno not in _PIDFD_UNAVAILABLE_ERRNOS:
-            raise
-        logger.warning(
-            "os.pidfd_open(%d) failed (%s); falling back to signalling by pid number",
-            pid,
-            e,
-        )
-        pidfd = None
-    return pidfd
-
-
-def _signal_proven_pid(pid: int, pidfd: int | None, sig: int) -> None:
-    """Signal the process ``pidfd`` was opened against, when available.
-
-    Raises the same exceptions ``os.kill`` would (``ProcessLookupError``,
-    ``PermissionError``, ...), so every caller built around ``os.kill``'s
-    contract -- the whole of ``cmd_stop`` below -- needs no other change.
-    """
-    if pidfd is not None:
-        signal.pidfd_send_signal(pidfd, sig)
-        return
-    os.kill(pid, sig)
-
-
 def _release_stopped_daemon_files(pid: int, pid_path: Path, socket_path: Path) -> None:
     """Remove a stopped daemon's PID file and socket, but nothing a successor owns.
 
@@ -996,152 +932,62 @@ def cmd_stop(args: argparse.Namespace) -> int:
     pid_path = _resolve_pid_path(args, project_path)
     socket_path = _resolve_socket_path(args, project_path)
 
-    # Read PID. verify_daemon guards against a stale PID file (after reboot /
-    # PID reuse) pointing at an unrelated live process we would otherwise
-    # SIGTERM.
     pid = read_pid_file(str(pid_path), verify_daemon=True)
     if pid is None:
         print("Daemon not running")
         return 0
 
-    # Pin the pidfd to THIS pid instance before proving anything about it
-    # (mi5, see `_open_pidfd`) -- every signal below goes through it.
+    # Plan 00466 N59: verify_daemon proves only that the pid is SOME daemon. The
+    # handle proves it serves THIS project root, and its start-time check keeps
+    # a pid reused during the wait -- including the SIGTERM-to-SIGKILL gap --
+    # from being mistaken for the daemon (closes the same TOCTOU Plan 00466
+    # N24 review 3 mi5 raised against a plain pid, without needing a separate
+    # pidfd: psutil.Process pins the pid's start time and every call re-checks
+    # it). SIGKILL escalation after the SIGTERM grace is Plan 00466 N40 review
+    # 2 MA2 -- a GIL-holding handler cannot even reach Python's signal-handling
+    # bytecode check to act on SIGTERM, and SIGKILL cannot be caught, blocked
+    # or ignored.
     try:
-        pidfd = _open_pidfd(pid)
-    except ProcessLookupError:
-        # Exited since read_pid_file saw it. Nothing to signal, and its files
-        # are left alone: a successor may already own them. A PID file that
-        # is merely stale never counts as running; init.sh removes it under
-        # the start lock, and the next daemon start overwrites it.
-        print(f"Daemon (PID {pid}) exited before it could be pinned; nothing to stop")
+        outcome = stop_verified_daemon(
+            pid,
+            project_root=project_path,
+            grace_seconds=Timeout.SOCKET_CONNECT,
+            kill_grace_seconds=Timeout.DAEMON_SIGKILL_GRACE,
+        )
+    except RefusedSignalTarget as refused:
+        print(f"ERROR: Not signalling PID {pid}: {refused}", file=sys.stderr)
+        return 1
+    except (PermissionError, psutil.AccessDenied):
+        print(f"ERROR: Permission denied to signal PID {pid}", file=sys.stderr)
+        return 1
+    except Exception as e:
+        print(f"ERROR: {e}", file=sys.stderr)
+        return 1
+
+    if outcome is DaemonStop.ALREADY_GONE:
+        # It exited on its own since read_pid_file saw it, so its PID file
+        # and socket may already be a successor's (Plan 00466 N70): both are
+        # left. A merely stale PID file never counts as running; init.sh
+        # removes it under the start lock, and the next start overwrites it.
+        print(f"Daemon (PID {pid}) exited before it could be stopped; leaving its files alone")
         return 0
-    except OSError as e:
+    if outcome is DaemonStop.SURVIVED:
         print(
-            f"ERROR: cannot pin PID {pid} to a pidfd ({e}); refusing to signal it",
+            f"WARNING: Daemon still running after SIGKILL " f"({Timeout.DAEMON_SIGKILL_GRACE}s)",
             file=sys.stderr,
         )
+        print(f"Try: kill -9 {pid}", file=sys.stderr)
         return 1
-    try:
-        # verify_daemon proves only that the pid is SOME daemon server. Signal
-        # it only once it is proven to serve THIS project: a stale pid file
-        # whose pid was reused by another project's daemon must not get that
-        # daemon killed.
-        own_root = os.path.realpath(project_path)
-        proof = daemon_process_project_root(pid)
-        if proof.root is None:
-            print(f"ERROR: {proof.refusal}; refusing to signal it", file=sys.stderr)
-            return 1
-        if proof.root != own_root:
-            # Refuse, and delete nothing (Plan 00466 N24 review 3 mi1): the PID
-            # file may be stale while this project's own daemon still serves the
-            # socket, or the attribution itself may be wrong, and deleting either
-            # file orphans a live daemon.
-            print(
-                f"ERROR: PID {pid} is attributed by {proof.source} to {proof.root}, not to "
-                f"{own_root}; refusing to signal it or delete its PID file and socket. "
-                f"If that is wrong, stop it by hand.",
-                file=sys.stderr,
-            )
-            return 1
+    if outcome is DaemonStop.KILLED:
+        print(
+            f"WARNING: Daemon still running after {Timeout.SOCKET_CONNECT}s; "
+            "escalated to SIGKILL",
+            file=sys.stderr,
+        )
 
-        # Send SIGTERM
-        try:
-            _signal_proven_pid(pid, pidfd, signal.SIGTERM)
-            print(f"Sent SIGTERM to daemon (PID: {pid})")
-
-            # Wait for process to exit (up to 5 seconds)
-            timeout = Timeout.SOCKET_CONNECT
-            interval = 0.1
-            elapsed = 0.0
-
-            while elapsed < timeout:
-                try:
-                    _signal_proven_pid(pid, pidfd, 0)  # Check if still alive
-                    time.sleep(interval)
-                    elapsed += interval
-                except ProcessLookupError:
-                    # Process exited
-                    break
-
-            # Check if still running
-            try:
-                _signal_proven_pid(pid, pidfd, 0)
-            except ProcessLookupError:
-                # Process exited successfully
-                print("Daemon stopped")
-                _release_stopped_daemon_files(pid, pid_path, socket_path)
-                return 0
-
-            # SIGTERM's grace period elapsed and the process is still alive --
-            # escalate to SIGKILL rather than leaving the operator with an
-            # unrecoverable wedged daemon (Plan 00466 N40 review 2 MA2). A
-            # GIL-holding handler cannot even reach Python's signal-handling
-            # bytecode check to act on SIGTERM; SIGKILL is delivered by the
-            # kernel and cannot be caught, blocked or ignored.
-            # Re-prove before SIGKILL: the grace period is long enough for the
-            # pid to have exited and been reused -- and the SIGKILL itself
-            # still goes out through the SAME pidfd pinned above, so even a
-            # reused pid number cannot make it land on the wrong process.
-            if daemon_process_project_root(pid).root != own_root:
-                print(
-                    f"ERROR: PID {pid} no longer proves to be this project's daemon; "
-                    "refusing to escalate to SIGKILL",
-                    file=sys.stderr,
-                )
-                return 1
-            print(
-                f"WARNING: Daemon still running after {timeout}s; escalating to SIGKILL",
-                file=sys.stderr,
-            )
-            try:
-                _signal_proven_pid(pid, pidfd, signal.SIGKILL)
-            except ProcessLookupError:
-                print("Daemon stopped")
-                _release_stopped_daemon_files(pid, pid_path, socket_path)
-                return 0
-
-            kill_timeout = Timeout.DAEMON_SIGKILL_GRACE
-            kill_elapsed = 0.0
-            while kill_elapsed < kill_timeout:
-                try:
-                    _signal_proven_pid(pid, pidfd, 0)
-                    time.sleep(interval)
-                    kill_elapsed += interval
-                except ProcessLookupError:
-                    break
-
-            try:
-                _signal_proven_pid(pid, pidfd, 0)
-                print(
-                    f"WARNING: Daemon still running after SIGKILL ({kill_timeout}s)",
-                    file=sys.stderr,
-                )
-                print(f"Try: kill -9 {pid}", file=sys.stderr)
-                return 1
-            except ProcessLookupError:
-                print("Daemon stopped")
-                _release_stopped_daemon_files(pid, pid_path, socket_path)
-                return 0
-
-        except ProcessLookupError:
-            # Only the first SIGTERM can land here. The proof above attributed
-            # a live process to this project a moment ago, and it exited on
-            # its own since -- so its PID file and socket may already be a
-            # successor's (Plan 00466 N70). Leave both.
-            print(
-                f"Daemon (PID {pid}) exited before SIGTERM reached it; "
-                "leaving its PID file and socket alone"
-            )
-            return 0
-        except PermissionError:
-            print(f"ERROR: Permission denied to signal PID {pid}", file=sys.stderr)
-            return 1
-        except Exception as e:
-            print(f"ERROR: {e}", file=sys.stderr)
-            return 1
-    finally:
-        if pidfd is not None:
-            os.close(pidfd)
+    print("Daemon stopped")
+    _release_stopped_daemon_files(pid, pid_path, socket_path)
+    return 0
 
 
 def _query_daemon_health(socket_path: Path, pid: int | None) -> dict[str, Any] | None:
@@ -4836,7 +4682,7 @@ def cmd_inject_goal(args: argparse.Namespace) -> int:
     joined = render_goal_line(
         plan_number,
         extract_plan_title(plan_text),
-        str(plan_dir.relative_to(project_path)),
+        str(path_relative_to(plan_dir, project_path)),
         mode=mode,
         raw_lines=raw_lines,
     )
@@ -5849,7 +5695,7 @@ def _iter_markdown_candidates(
             ):
                 continue
             try:
-                candidate_rel = candidate.relative_to(project_root).as_posix()
+                candidate_rel = path_relative_to(candidate, project_root).as_posix()
             except ValueError:
                 # Should not occur (see `_rel_is_git_visible`'s docstring):
                 # fall back to the candidate's own string form so the
@@ -5877,7 +5723,7 @@ def _rel_is_git_visible(path: Path, project_root: Path, visible: frozenset[str])
     both from the same walk) is treated as not visible rather than raising.
     """
     try:
-        rel = path.relative_to(project_root).as_posix()
+        rel = path_relative_to(path, project_root).as_posix()
     except ValueError:
         return False
     return rel in visible
@@ -7011,7 +6857,7 @@ def cmd_docs_qa(args: argparse.Namespace) -> int:
         if not lint_path.is_file():
             print(f"ERROR: Lint target does not exist: {lint_path}", file=sys.stderr)
             return 2
-        lint_rel_path = str(lint_path.relative_to(project_root))
+        lint_rel_path = str(path_relative_to(lint_path, project_root))
         # Same scope union the EDIT-stage handler uses (Plan 00284 Task 3.4):
         # the doc corpus's own scope, OR the generated-docs manifest (which
         # may legitimately name a path outside that scope — the default
@@ -7049,7 +6895,7 @@ def cmd_docs_qa(args: argparse.Namespace) -> int:
             file_content_before=lint_content,
             corpus=corpus,
         )
-        clean_scope = f"{lint_path.relative_to(project_root)} is clean"
+        clean_scope = f"{path_relative_to(lint_path, project_root)} is clean"
         findings = run_stage(CheckStage.EDIT, context)
     else:
         untracked_dir = _daemon_untracked_dir(project_root)
@@ -10975,35 +10821,73 @@ def main() -> int:
         parser.print_help()
         return 1
 
-    _rerun_launch_naming_its_project(args)
+    _reexec_daemon_launch_with_explicit_project_root(args)
+
     return cast("int", args.func(args))
 
 
-def _rerun_launch_naming_its_project(args: argparse.Namespace) -> None:
-    """Re-run a ``start`` or ``restart`` naming no ``--project-root``, naming it.
+def _reexec_daemon_launch_with_explicit_project_root(args: argparse.Namespace) -> None:
+    """Launch ``start``/``restart`` with an explicit ``--project-root`` when
+    none was given (Plan 00466 N59 gate fix).
 
-    Such a daemon serves the project its working directory finds, and leaves
-    that directory at once (``os.chdir("/")``), so its command line said
-    nothing true about which project it serves (Plan 00466 round 6, Sh-1).
-    ``init.sh`` proves a daemon from its command line only in the form
-    ``start_daemon`` launches it with; re-running in that form keeps every
-    daemon provable without the daemon's slower helper. Returns only when
-    nothing needs re-running.
+    Daemonization (``cmd_start``) never replaces its own process image again
+    after this point -- it only ``os.fork()``s, which copies argv/environ
+    unchanged -- so the detached daemon's cmdline and environ are frozen at
+    whatever the process this function launches was given. A caller that
+    omits ``--project-root`` (the common case: production start scripts rely
+    on cwd instead, see ``scripts/upgrade.sh``/``scripts/install_version.sh``)
+    leaves the daemon provable only via the interpreter-venv-path heuristic in
+    ``process_verification._root_from_interpreter``, which is WRONG whenever
+    the interpreter's own venv lives in a different project than the one it
+    was asked to serve -- one shared venv starting a daemon for an isolated
+    test project root, for instance. Establishing the flag AND the recorded
+    env var here (before any forking) bakes both into the daemon's own
+    cmdline/environ instead, which ``verified_daemon_process`` already trusts
+    first and every existing test already covers.
+
+    This used to replace the current process image in place (Python's
+    ``os`` module offers several calls for that -- POSIX calls it "exec").
+    It does not any more: bandit's B606 (``start_process_with_no_shell``)
+    flags every one of those calls unconditionally -- regardless of how
+    fixed or trusted its argv is -- and this project permits neither a
+    suppression comment nor a new bandit skip (every existing ``subprocess``
+    call already carries one; a project with zero exempt findings cannot
+    absorb another). ``os.posix_spawn`` gives the same freshly-established
+    argv/envp guarantee that a process-image replacement did -- unlike a
+    later in-process ``os.environ[...] = ...`` mutation, which does not
+    reliably reach ``/proc/<pid>/environ`` -- and it is outside bandit's
+    B606 function list entirely, so no suppression is needed. The cost is
+    one extra process hop: this process SPAWNS a child carrying the
+    corrected argv/envp instead of replacing itself, then blocks on it and
+    relays its exit status, which is externally indistinguishable (same
+    stdout/stderr, same final exit code) for every caller of this CLI.
+
+    A no-op for every other command, and for ``start``/``restart`` once
+    ``--project-root`` is already present (including in the spawned child,
+    which is what stops the recursion).
     """
-    if args.func not in (cmd_start, cmd_restart) or getattr(args, "project_root", None):
+    if getattr(args, "command", None) not in ("start", "restart"):
         return
-    project_path = get_project_path(None)
-    argv = [
-        sys.executable,
-        "-m",
-        DAEMON_CLI_MODULE,
-        "--project-root",
-        str(project_path),
-        *sys.argv[1:],
-    ]
+    if getattr(args, "project_root", None) is not None:
+        return
+
+    project_path = get_project_path(getattr(args, "global_project_root", None))
+
+    reexec_argv = [sys.executable, "-m", DAEMON_CLI_MODULE, "--project-root", str(project_path)]
+    if getattr(args, "pid_file", None) is not None:
+        reexec_argv += ["--pid-file", str(args.pid_file)]
+    if getattr(args, "socket", None) is not None:
+        reexec_argv += ["--socket", str(args.socket)]
+    reexec_argv.append(args.command)
+
+    reexec_env = dict(os.environ)
+    reexec_env[PROJECT_ROOT_ENV_VAR] = str(project_path)
+
     sys.stdout.flush()
     sys.stderr.flush()
-    os.execv(sys.executable, argv)
+    child_pid = os.posix_spawn(sys.executable, reexec_argv, reexec_env)
+    _, wait_status = os.waitpid(child_pid, 0)
+    sys.exit(os.waitstatus_to_exitcode(wait_status))
 
 
 if __name__ == "__main__":

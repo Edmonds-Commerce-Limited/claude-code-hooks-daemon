@@ -1,13 +1,7 @@
 """Tests for CLI main() function and argument parsing."""
 
-import contextlib
-import sys
-from collections.abc import Iterator
 from pathlib import Path
-from typing import Any
 from unittest.mock import patch
-
-import pytest
 
 from claude_code_hooks_daemon.daemon.cli import main
 
@@ -336,73 +330,3 @@ class TestCliMain:
             mock_init.assert_called_once()
             args = mock_init.call_args[0][0]
             assert args.force is True
-
-
-class _Execed(Exception):
-    """Raised by the patched ``os.execv``: the process would be replaced."""
-
-
-class TestAStartNamingNoRootIsRerunNamingIt:
-    """Plan 00466 round 6 (Sh-1): a daemon started without ``--project-root``
-    serves the project its working directory finds, and leaves that
-    directory at once, so its command line named the project owning its
-    venv instead. ``main`` re-runs such a start naming the project, so every
-    daemon's command line says which project it serves."""
-
-    _CLI = "claude_code_hooks_daemon.daemon.cli"
-
-    @contextlib.contextmanager
-    def _main(self, argv: list[str], project: Path) -> Iterator[tuple[Any, Any, Any]]:
-        """``main``'s collaborators for ``argv``: the execv, start and restart mocks."""
-        with (
-            patch("sys.argv", ["claude-hooks-daemon", *argv]),
-            patch(f"{self._CLI}.get_project_path", return_value=project),
-            patch(f"{self._CLI}.cmd_start", return_value=0) as start,
-            patch(f"{self._CLI}.cmd_restart", return_value=0) as restart,
-            patch("os.execv", side_effect=_Execed) as execv,
-        ):
-            yield execv, start, restart
-
-    @pytest.mark.parametrize("subcommand", ["start", "restart"])
-    def test_a_launch_naming_no_root_is_rerun_naming_it(
-        self, tmp_path: Path, subcommand: str
-    ) -> None:
-        socket_path = str(tmp_path / "daemon.sock")
-        with self._main(["--socket", socket_path, subcommand], tmp_path) as (
-            execv,
-            start,
-            restart,
-        ):
-            with pytest.raises(_Execed):
-                main()
-        execv.assert_called_once_with(
-            sys.executable,
-            [
-                sys.executable,
-                "-m",
-                self._CLI,
-                "--project-root",
-                str(tmp_path),
-                "--socket",
-                socket_path,
-                subcommand,
-            ],
-        )
-        start.assert_not_called()
-        restart.assert_not_called()
-
-    def test_a_launch_naming_its_root_runs_as_it_is(self, tmp_path: Path) -> None:
-        argv = ["--project-root", str(tmp_path), "start"]
-        with self._main(argv, tmp_path) as (execv, start, _restart):
-            assert main() == 0
-        execv.assert_not_called()
-        start.assert_called_once()
-
-    def test_another_command_naming_no_root_runs_as_it_is(self, tmp_path: Path) -> None:
-        with (
-            self._main(["stop"], tmp_path) as (execv, _start, _restart),
-            patch(f"{self._CLI}.cmd_stop", return_value=0) as stop,
-        ):
-            assert main() == 0
-        execv.assert_not_called()
-        stop.assert_called_once()

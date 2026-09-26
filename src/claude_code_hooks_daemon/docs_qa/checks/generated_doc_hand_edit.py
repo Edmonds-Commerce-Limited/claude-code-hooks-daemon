@@ -59,6 +59,7 @@ from claude_code_hooks_daemon.docs_qa.types import (
 )
 from claude_code_hooks_daemon.utils.deployed_version import VERSION_MARKER_RE
 from claude_code_hooks_daemon.utils.git_repo import run_git
+from claude_code_hooks_daemon.utils.path_containment import path_relative_to
 from claude_code_hooks_daemon.version import __version__ as _DAEMON_VERSION
 
 logger = logging.getLogger(__name__)
@@ -113,7 +114,7 @@ def _hand_edit_finding(rel_path: str, entry: GeneratedDocEntry, severity: Severi
 def _run_edit(context: CheckContext) -> list[Finding]:
     if context.file_path is None or context.file_content is None:
         return []
-    rel_path = str(context.file_path.relative_to(context.project_root))
+    rel_path = str(path_relative_to(context.file_path, context.project_root))
     entry = matched_manifest_entry(rel_path, context.policy.qa.generated_docs)
     if entry is None:
         return []
@@ -190,7 +191,7 @@ def _run_sweep(context: CheckContext) -> list[Finding]:
             # An unreadable or undecodable file must not abort the whole
             # SessionStart sweep (Plan 00287 N5) -- skip it, matching the
             # corpus's own UnicodeDecodeError handling.
-            rel_path_for_log = abs_path.relative_to(context.project_root)
+            rel_path_for_log = path_relative_to(abs_path, context.project_root)
             logger.debug(
                 "generated-doc-hand-edit: skipping unreadable %s: %s", rel_path_for_log, exc
             )
@@ -198,7 +199,7 @@ def _run_sweep(context: CheckContext) -> list[Finding]:
         marker_version = _extract_marker_version(content)
         if marker_version is None or marker_version == _DAEMON_VERSION:
             continue
-        rel_path = str(abs_path.relative_to(context.project_root))
+        rel_path = str(path_relative_to(abs_path, context.project_root))
         findings.append(
             _staleness_finding(
                 rel_path,

@@ -9,6 +9,7 @@ from claude_code_hooks_daemon.core import AdvisoryResult, Decision
 from claude_code_hooks_daemon.core.acceptance_test import AcceptanceTest
 from claude_code_hooks_daemon.core.handler_bases import StatusLineHandlerBase
 from claude_code_hooks_daemon.core.segment_explanation import SegmentExplanation
+from claude_code_hooks_daemon.utils.path_containment import path_relative_to
 
 logger = logging.getLogger(__name__)
 
@@ -55,7 +56,7 @@ class WorkingDirectoryHandler(StatusLineHandlerBase):
 
         # Calculate relative path
         try:
-            relative_path = current_path.relative_to(project_path)
+            relative_path = path_relative_to(current_path, project_path)
             # Display path in orange to make it visually distinct
             orange = "\033[38;5;208m"
             reset = "\033[0m"
@@ -74,7 +75,7 @@ class WorkingDirectoryHandler(StatusLineHandlerBase):
             if cwd == project_root:
                 current_value = "Not shown now — the current directory is the project root."
             else:
-                relative = cwd.relative_to(project_root)
+                relative = path_relative_to(cwd, project_root)
                 current_value = f"Currently shows: 📁 {relative}"
         except Exception as e:
             logger.debug("Failed to compare cwd/project_root for explain_segment: %s", e)

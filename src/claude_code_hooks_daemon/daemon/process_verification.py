@@ -1,7 +1,8 @@
 """Process verification utilities for daemon enforcement.
 
-This module provides system-wide daemon process detection and management,
-particularly useful in container environments for single-process enforcement.
+This module provides system-wide daemon process detection, particularly useful
+in container environments for single-process enforcement. Signalling a daemon
+it finds is ``utils.safe_signal``'s job, which re-proves the pid first.
 """
 
 import logging
@@ -12,7 +13,6 @@ from typing import Final
 
 import psutil
 
-from claude_code_hooks_daemon.constants import Timeout
 from claude_code_hooks_daemon.daemon.paths import is_self_install_mode, prospective_socket_path
 
 logger = logging.getLogger(__name__)
@@ -21,7 +21,9 @@ logger = logging.getLogger(__name__)
 # Matching requires this exact module token PLUS a launch subcommand (below) so
 # that transient CLI helpers (status/stop/logs/...) and the per-event hook
 # forwarders (the bash wrappers' python3 socket transport) are never mistaken
-# for a daemon server.
+# for a daemon server. Public (no leading underscore): cli.py's own ``main()``
+# re-execs itself via ``python -m {DAEMON_CLI_MODULE} ...`` (Plan 00466 N59
+# gate fix) and imports this rather than duplicating the literal.
 DAEMON_CLI_MODULE: Final = "claude_code_hooks_daemon.daemon.cli"
 
 # The ONLY subcommands that daemonize. Daemonization (os.fork x2, os.setsid,
@@ -36,6 +38,13 @@ _DAEMON_LAUNCH_SUBCOMMANDS = ("start", "restart")
 
 # Command-line flag that explicitly names a daemon's project root.
 _PROJECT_ROOT_FLAG = "--project-root"
+
+# Env var a daemon server records in its OWN environment at startup, naming
+# the project root ``cmd_start`` actually resolved (Plan 00466 N59 gate fix).
+# ``cli.main`` launches every ``start``/``restart`` naming no root again with
+# the flag and this set. Public (no leading underscore): ``cli.main`` sets
+# it, this module only reads it.
+PROJECT_ROOT_ENV_VAR = "CLAUDE_HOOKS_DAEMON_PROJECT_ROOT"
 
 # Where a client install keeps the daemon, below the project it serves.
 _CLIENT_DAEMON_DIR = (".claude", "hooks-daemon")
@@ -86,7 +95,7 @@ def find_all_daemon_processes(project_root: str | Path | None = None) -> list[in
             # Scope to our own project root when requested. A daemon whose root
             # cannot be determined is left alone — never terminated.
             if target_root is not None:
-                proc_root = _root_from_flag(cmdline) or _root_from_listening_socket(proc)
+                proc_root = _extract_project_root(proc)
                 if proc_root is None or proc_root != target_root:
                     continue
 
@@ -107,6 +116,68 @@ def _normalize_root(root: str | Path) -> str:
     container's ``/workspace``) that do not exist on this side of the boundary.
     """
     return os.path.normpath(str(root))
+
+
+def _extract_project_root(proc: psutil.Process) -> str | None:
+    """Derive a daemon process's project root, most authoritative source first.
+
+    Resolution order (:func:`_attributed_root`):
+        1. An explicit ``--project-root PATH`` (or ``--project-root=PATH``) flag
+           on the command line.
+        2. The ``CLAUDE_HOOKS_DAEMON_PROJECT_ROOT`` env var the daemon recorded
+           in its own environment at startup (see ``PROJECT_ROOT_ENV_VAR``).
+        3. The project whose natural socket it listens on.
+
+    Returns:
+        The normalised project root, or ``None`` when it cannot be determined
+        by any of the above (including a process that has since disappeared).
+    """
+    try:
+        cmdline = proc.cmdline()
+    except (psutil.NoSuchProcess, psutil.AccessDenied) as exc:
+        logger.debug("cmdline unavailable for pid %s (%s): %s", proc.pid, type(exc).__name__, exc)
+        cmdline = []
+    attributed = _attributed_root(proc, cmdline)
+    return attributed[0] if attributed is not None else None
+
+
+def _attributed_root(proc: psutil.Process, cmdline: list[str]) -> tuple[str, str] | None:
+    """The normalised root ``proc`` serves and where it came from, or None.
+
+    Its interpreter's venv is no source (Plan 00466 round 6, Sh-1): it names
+    only the install the daemon runs from, which a worktree can share, while
+    a daemon naming no root serves whatever its working directory found.
+    """
+    flag_root = _root_from_flag(cmdline)
+    if flag_root is not None:
+        return flag_root, _FLAG_SOURCE
+    env_root = _root_from_environ(proc)
+    if env_root is not None:
+        return env_root, _ENV_SOURCE
+    socket_root = _root_from_listening_socket(proc)
+    if socket_root is not None:
+        return socket_root, _SOCKET_SOURCE
+    return None
+
+
+def _root_from_environ(proc: psutil.Process) -> str | None:
+    """Extract the project root a daemon recorded in its own environment.
+
+    ``proc.environ()`` returns a real ``dict`` for an actual process; anything
+    else (unreadable, or a test double that has not modelled it) is treated as
+    "no answer" rather than misread.
+    """
+    try:
+        env = proc.environ()
+    except (psutil.NoSuchProcess, psutil.AccessDenied, OSError) as exc:
+        logger.debug("environ unavailable for pid %s (%s): %s", proc.pid, type(exc).__name__, exc)
+        env = None
+    if env is None or not isinstance(env, dict):
+        return None
+    value = env.get(PROJECT_ROOT_ENV_VAR)
+    if not value:
+        return None
+    return _normalize_root(value)
 
 
 def _root_from_flag(cmdline: list[str]) -> str | None:
@@ -186,6 +257,7 @@ class RootProof:
 
 
 _FLAG_SOURCE: Final = f"its {_PROJECT_ROOT_FLAG} flag"
+_ENV_SOURCE: Final = f"its {PROJECT_ROOT_ENV_VAR} environment variable"
 _SOCKET_SOURCE: Final = "the socket it listens on"
 
 
@@ -238,70 +310,15 @@ def daemon_process_project_root(pid: int) -> RootProof:
         return RootProof(root=None, refusal=f"PID {pid} cannot be inspected ({type(e).__name__})")
     if not _is_daemon_server_process(cmdline):
         return RootProof(root=None, refusal=f"PID {pid} is not a hooks daemon server")
-    flag_root = _root_from_flag(cmdline)
-    if flag_root is not None:
-        return RootProof(root=os.path.realpath(flag_root), refusal=None, source=_FLAG_SOURCE)
-    socket_root = _root_from_listening_socket(process)
-    if socket_root is not None:
-        return RootProof(root=os.path.realpath(socket_root), refusal=None, source=_SOCKET_SOURCE)
-    return RootProof(
-        root=None,
-        refusal=f"PID {pid} is a daemon server whose command line names no project, "
-        "nor does a socket it listens on",
-    )
-
-
-def kill_daemon_process(pid: int) -> bool:
-    """Safely terminate a daemon process.
-
-    Uses SIGTERM first, waits 2 seconds, then SIGKILL if needed.
-
-    Args:
-        pid: Process ID to terminate
-
-    Returns:
-        True if process was successfully terminated, False otherwise.
-
-    Note:
-        - Refuses to kill current process (safety check)
-        - Returns False for non-existent PIDs
-        - Returns False for permission denied errors
-    """
-    # Safety check: never kill current process
-    if pid == os.getpid():
-        logger.warning(f"Refusing to kill current process (PID {pid})")
-        return False
-
-    try:
-        process = psutil.Process(pid)
-
-        # Try graceful termination first (SIGTERM)
-        logger.info(f"Terminating daemon process (PID {pid})")
-        process.terminate()
-
-        # Wait up to 2 seconds for process to exit
-        try:
-            process.wait(timeout=Timeout.PROCESS_KILL_WAIT)
-        except psutil.TimeoutExpired:
-            # Process didn't exit, force kill (SIGKILL)
-            logger.warning(f"Process {pid} did not respond to SIGTERM, using SIGKILL")
-            process.kill()
-
-        # Verify termination
-        if not process.is_running():
-            logger.info(f"Successfully killed daemon process (PID {pid})")
-            return True
-
-        logger.error(f"Failed to kill daemon process (PID {pid})")
-        return False
-
-    except psutil.NoSuchProcess:
-        logger.debug(f"Process {pid} does not exist")
-        return False
-
-    except psutil.AccessDenied:
-        logger.error(f"Permission denied to kill process {pid}")
-        return False
+    attributed = _attributed_root(process, cmdline)
+    if attributed is None:
+        return RootProof(
+            root=None,
+            refusal=f"PID {pid} is a daemon server whose command line names no project, "
+            "nor do its environment or a socket it listens on",
+        )
+    root, source = attributed
+    return RootProof(root=os.path.realpath(root), refusal=None, source=source)
 
 
 def is_process_running(pid: int) -> bool:

@@ -49,6 +49,7 @@ from typing import Any, Final
 
 from claude_code_hooks_daemon.utils.claude_config import claude_config_dir
 from claude_code_hooks_daemon.utils.markdown_format import parse_frontmatter_lenient
+from claude_code_hooks_daemon.utils.path_containment import path_is_relative_to, path_relative_to
 
 logger = logging.getLogger(__name__)
 
@@ -516,7 +517,7 @@ class _ComponentCollector:
             self.problems.append(f"{key}: ignored a non-path value {raw!r}")
             return None
         candidate = (self.root / raw).resolve()
-        if not candidate.is_relative_to(self.root.resolve()):
+        if not path_is_relative_to(candidate, self.root.resolve()):
             self.problems.append(f"{key}: ignored {raw!r}, which leaves the plugin root")
             return None
         return candidate
@@ -543,7 +544,7 @@ class _ComponentCollector:
         if not agents_dir.is_dir():
             return ()
         return self._dedupe_agents(
-            self._agent(f, f.relative_to(agents_dir).parent.parts)
+            self._agent(f, path_relative_to(f, agents_dir).parent.parts)
             for f in sorted(agents_dir.rglob(_MARKDOWN_GLOB))
         )
 
