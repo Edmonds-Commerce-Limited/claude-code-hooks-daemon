@@ -290,6 +290,11 @@ def _drive_executable_probe(probe: ExecutableProbe, instance: Any, *, source: st
             "tool_name": probe.tool_name,
             "tool_input": probe.tool_input,
             "cwd": str(probe.project_root),
+            # A declared precondition (`AcceptanceTest.extra_hook_input`),
+            # e.g. `transcript_path` pointing at a fixture Claude config --
+            # merged the same way `playbook_harness.build_event` merges it,
+            # so both harnesses see one probe's declaration the same way.
+            **probe.extra_hook_input,
         }
 
         if not instance.matches(hook_input):

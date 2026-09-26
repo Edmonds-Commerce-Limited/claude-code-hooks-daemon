@@ -46,7 +46,9 @@ from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.core.relevance import Relevance, RelevanceContext
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.core.utils import get_bash_command
+from claude_code_hooks_daemon.utils.claude_config import session_config_dir
 from claude_code_hooks_daemon.utils.claude_plugins import resolve_enabled_plugins
+from claude_code_hooks_daemon.utils.scratch_dir import acceptance_path
 
 logger = logging.getLogger(__name__)
 
@@ -253,6 +255,81 @@ _LSP_OP_DEFINITION = "goToDefinition"
 _LSP_OP_REFERENCES = "findReferences"
 _LSP_OP_WORKSPACE_SYMBOL = "workspaceSymbol"
 
+# --- Acceptance-test plugin fixtures (hermeticity: CI has no Claude Code
+# plugin enabled at all; a dev container may have one enabled for its own
+# work. Two of this handler's own probes must DENY only because THEY declare
+# an LSP plugin, never because the container answering them happens to have
+# one -- so each carries its own fixture Claude config, pointed at through
+# `transcript_path` (`AcceptanceTest.extra_hook_input`), the same seam
+# `LspEnforcementHandler._hook_config_dir` reads via `session_config_dir`.
+
+_LSP_FIXTURE_ROOT: Final[str] = "acceptance-test-lsp-enforcement"
+_LSP_FIXTURE_WITH_PLUGIN: Final[str] = f"{_LSP_FIXTURE_ROOT}/with-plugin"
+_LSP_FIXTURE_WITHOUT_PLUGIN: Final[str] = f"{_LSP_FIXTURE_ROOT}/without-plugin"
+_LSP_FIXTURE_CLEANUP: Final[list[str]] = [f"rm -rf untracked/acceptance/{_LSP_FIXTURE_ROOT}"]
+
+#: A minimal plugin manifest declaring an LSP server INLINE (no separate
+#: `.lsp.json`): `command`/`extensionToLanguage` are read straight off it by
+#: `claude_plugins._ComponentCollector.lsp_servers`.
+_LSP_FIXTURE_MANIFEST_JSON: Final[str] = (
+    '{"name": "lsptest", "lspServers": {"pyright": '
+    '{"command": "pyright-langserver", "extensionToLanguage": {".py": "python"}}}}'
+)
+_LSP_FIXTURE_SETTINGS_JSON: Final[str] = '{"enabledPlugins": {"lsptest@lsptest-mkt": true}}'
+
+
+def _lsp_fixture_installed_plugins_json(install_path: str) -> str:
+    """`installed_plugins.json` content for one `scope: user` install record.
+
+    `scope: user` (not `project`/`local`) so `claude_plugins._choose_install`
+    takes the record unconditionally -- it never has to match a `projectPath`
+    against whichever checkout is running the probe.
+    """
+    return (
+        '{"plugins": {"lsptest@lsptest-mkt": [{"scope": "user", "installPath": "'
+        + install_path
+        + '", "version": "1.0.0"}]}}'
+    )
+
+
+def _lsp_fixture_with_plugin() -> tuple[list[str], str]:
+    """Setup commands and `transcript_path` for a fixture WITH an LSP plugin."""
+    base = f"untracked/acceptance/{_LSP_FIXTURE_WITH_PLUGIN}"
+    install_path = acceptance_path(_LSP_FIXTURE_WITH_PLUGIN, "plugins", "lsptest")
+    setup = [
+        f"mkdir -p {base}/plugins/lsptest/.claude-plugin",
+        f"printf '{_LSP_FIXTURE_SETTINGS_JSON}' > {base}/settings.json",
+        (
+            f"printf '{_lsp_fixture_installed_plugins_json(install_path)}' > "
+            f"{base}/plugins/installed_plugins.json"
+        ),
+        (
+            f"printf '{_LSP_FIXTURE_MANIFEST_JSON}' > "
+            f"{base}/plugins/lsptest/.claude-plugin/plugin.json"
+        ),
+    ]
+    transcript_path = acceptance_path(
+        _LSP_FIXTURE_WITH_PLUGIN, "projects", "lspfixture", "lspsession.jsonl"
+    )
+    return setup, transcript_path
+
+
+def _lsp_fixture_without_plugin() -> tuple[list[str], str]:
+    """Setup commands and `transcript_path` for a fixture with NO LSP plugin.
+
+    An empty, otherwise-untouched config dir: `resolve_enabled_plugins` reads
+    an absent `settings.json`/`installed_plugins.json` as "nothing enabled"
+    (`claude_plugins._read_json_object` returns None for a missing file), so
+    no plugin files are needed here, only the directory itself.
+    """
+    base = f"untracked/acceptance/{_LSP_FIXTURE_WITHOUT_PLUGIN}"
+    setup = [f"mkdir -p {base}"]
+    transcript_path = acceptance_path(
+        _LSP_FIXTURE_WITHOUT_PLUGIN, "projects", "lspfixture", "lspsession.jsonl"
+    )
+    return setup, transcript_path
+
+
 # Single rule: block_once/advisory/strict is a VERBOSITY/CADENCE knob on the
 # same concept, "use LSP instead of grep for a symbol lookup" -- not a
 # different violation per mode.
@@ -311,7 +388,7 @@ class LspEnforcementHandler(PreToolUseHandlerBase):
 
     def get_relevance(self, context: RelevanceContext) -> Relevance:
         """Relevant only where an enabled plugin declares a language server."""
-        available = bool(self._served_suffixes(context.project_root))
+        available = bool(self._served_suffixes(context.project_root, None))
         return Relevance.when(
             available,
             present="an enabled Claude Code plugin provides a language server",
@@ -331,10 +408,34 @@ class LspEnforcementHandler(PreToolUseHandlerBase):
             logger.debug("lsp_enforcement: no project context, using cwd: %s", exc)
             return Path.cwd()
 
-    def _served_suffixes(self, project_root: Path) -> frozenset[str]:
+    def _hook_config_dir(self, hook_input: dict[str, Any] | None) -> Path | None:
+        """The Claude config dir to resolve plugins from for this request.
+
+        ``self._config_dir`` is the pure test seam (set by a unit test); when
+        it is unset, the calling SESSION's own config dir -- read from the
+        hook payload's ``transcript_path`` (Plan 00468 G10) -- takes
+        precedence over the DAEMON's ambient one. That is what makes
+        ``get_acceptance_tests``' probes hermetic: a probe declares its own
+        fixture config via ``transcript_path`` (``AcceptanceTest.
+        extra_hook_input``), so the answer no longer depends on whatever
+        plugin the CONTAINER this daemon happens to run in has enabled.
+        ``None`` (no hook_input, or no resolvable session) falls through to
+        :func:`resolve_enabled_plugins`'s own default.
+        """
+        if self._config_dir is not None:
+            return self._config_dir
+        if hook_input is None:
+            return None
+        return session_config_dir(hook_input.get(HookInputField.TRANSCRIPT_PATH))
+
+    def _served_suffixes(
+        self, project_root: Path, hook_input: dict[str, Any] | None
+    ) -> frozenset[str]:
         """Every file suffix an enabled plugin's language server declares."""
         inventory = resolve_enabled_plugins(
-            project_root, config_dir=self._config_dir, managed_dir=self._managed_dir
+            project_root,
+            config_dir=self._hook_config_dir(hook_input),
+            managed_dir=self._managed_dir,
         )
         return frozenset(
             suffix.lower() for server in inventory.lsp_servers() for suffix in server.extensions
@@ -363,7 +464,7 @@ class LspEnforcementHandler(PreToolUseHandlerBase):
         A search that names no file type is covered by any enabled server.
         """
         searched = self._searched_suffixes(hook_input)
-        served = self._served_suffixes(self._project_root())
+        served = self._served_suffixes(self._project_root(), hook_input)
         covered = bool(searched & served) if searched else bool(served)
         return covered, searched
 
@@ -650,6 +751,8 @@ class LspEnforcementHandler(PreToolUseHandlerBase):
             tool_name=ToolName.GREP,
             tool_input={"pattern": "log.*Error"},
         )
+        with_plugin_setup, with_plugin_transcript = _lsp_fixture_with_plugin()
+        without_plugin_setup, without_plugin_transcript = _lsp_fixture_without_plugin()
 
         return [
             AcceptanceTest(
@@ -659,7 +762,10 @@ class LspEnforcementHandler(PreToolUseHandlerBase):
                 description=(
                     "When using Grep to search for a class definition like "
                     "'class FrontController', the handler should block and suggest "
-                    "using LSP goToDefinition or workspaceSymbol instead."
+                    "using LSP goToDefinition or workspaceSymbol instead. Declares "
+                    "its own fixture plugin (via transcript_path) so the DENY holds "
+                    "regardless of whether this container's own Claude config "
+                    "enables an LSP plugin."
                 ),
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[
@@ -675,6 +781,36 @@ class LspEnforcementHandler(PreToolUseHandlerBase):
                     "records a valid SKIP rather than attempting this test."
                 ),
                 test_type=TestType.BLOCKING,
+                setup_commands=with_plugin_setup,
+                cleanup_commands=_LSP_FIXTURE_CLEANUP,
+                extra_hook_input={HookInputField.TRANSCRIPT_PATH: with_plugin_transcript},
+                recommended_model=RecommendedModel.SONNET,
+                requires_main_thread=True,
+            ),
+            AcceptanceTest(
+                title="Advisory Grep for class definition with no LSP plugin enabled",
+                command=class_lookup_probe.as_instruction(),
+                tool_payload=class_lookup_probe,
+                description=(
+                    "The mirror of 'Block Grep for class definition': the identical "
+                    "symbol-like pattern, but its fixture Claude config enables no "
+                    "plugin at all, so no_lsp_mode's default (advisory) must allow "
+                    "it instead of denying."
+                ),
+                expected_decision=Decision.ALLOW,
+                expected_message_patterns=[],
+                safety_notes=(
+                    "Uses Grep tool - safe, read-only operation. A project denying "
+                    'Grep at source (`permissions.deny: ["Grep"]` in '
+                    "`.claude/settings.json` -- the same generic mechanism "
+                    "artifact_publish_blocker documents for Artifact/enableArtifact) "
+                    "removes the tool entirely; a runner without it available "
+                    "records a valid SKIP rather than attempting this test."
+                ),
+                test_type=TestType.ADVISORY,
+                setup_commands=without_plugin_setup,
+                cleanup_commands=_LSP_FIXTURE_CLEANUP,
+                extra_hook_input={HookInputField.TRANSCRIPT_PATH: without_plugin_transcript},
                 recommended_model=RecommendedModel.SONNET,
                 requires_main_thread=True,
             ),
@@ -707,7 +843,10 @@ class LspEnforcementHandler(PreToolUseHandlerBase):
                 dispatch_as_bash=True,
                 description=(
                     "When using Bash to run rg searching for a function definition, "
-                    "the handler should block and suggest LSP tools instead."
+                    "the handler should block and suggest LSP tools instead. Declares "
+                    "its own fixture plugin (via transcript_path) so the DENY holds "
+                    "regardless of whether this container's own Claude config "
+                    "enables an LSP plugin."
                 ),
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[
@@ -716,6 +855,29 @@ class LspEnforcementHandler(PreToolUseHandlerBase):
                 ],
                 safety_notes="Uses rg - safe, read-only operation",
                 test_type=TestType.BLOCKING,
+                setup_commands=with_plugin_setup,
+                cleanup_commands=_LSP_FIXTURE_CLEANUP,
+                extra_hook_input={HookInputField.TRANSCRIPT_PATH: with_plugin_transcript},
+                recommended_model=RecommendedModel.SONNET,
+                requires_main_thread=True,
+            ),
+            AcceptanceTest(
+                title="Advisory Bash rg for function definition with no LSP plugin enabled",
+                command='rg "def get_bash_command" src/',
+                dispatch_as_bash=True,
+                description=(
+                    "The mirror of 'Block Bash rg for function definition': the "
+                    "identical symbol-like rg command, but its fixture Claude config "
+                    "enables no plugin at all, so no_lsp_mode's default (advisory) "
+                    "must allow it instead of denying."
+                ),
+                expected_decision=Decision.ALLOW,
+                expected_message_patterns=[],
+                safety_notes="Uses rg - safe, read-only operation",
+                test_type=TestType.ADVISORY,
+                setup_commands=without_plugin_setup,
+                cleanup_commands=_LSP_FIXTURE_CLEANUP,
+                extra_hook_input={HookInputField.TRANSCRIPT_PATH: without_plugin_transcript},
                 recommended_model=RecommendedModel.SONNET,
                 requires_main_thread=True,
             ),

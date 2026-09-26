@@ -13,6 +13,7 @@ handlers call into it (``GoalInjectionHandler`` keeps its own
 delegating wrappers for compatibility).
 """
 
+import errno
 import logging
 import re
 import threading
@@ -109,12 +110,22 @@ def is_inside_project(file_path: str) -> bool:
         logger.warning("plan_trigger: project-root check skipped: %s", e)
         return True
     try:
-        # RV4-n7: a symlink-loop PLAN.md makes resolve() raise RuntimeError
-        # (Python's own maximum-recursion / ELOOP detection), not OSError --
-        # caught here alongside (ValueError, OSError) so it reads as "not
-        # inside" rather than escaping raw.
-        Path(file_path).resolve().relative_to(root)
-    except (ValueError, OSError, RuntimeError):
+        # RV4-n7: a symlink-loop PLAN.md reads as "not inside". Python 3.11
+        # and 3.12 raise RuntimeError from resolve() on a loop; 3.13 returns
+        # the looping path unchanged, so the loop is detected explicitly with
+        # stat(), whose ELOOP is the same on every version.
+        resolved = Path(file_path).resolve()
+        resolved.relative_to(root)
+        resolved.stat()
+    except FileNotFoundError:
+        return True
+    except OSError as exc:
+        if exc.errno == errno.ELOOP:
+            logger.warning("plan_trigger: symlink loop at %s is not a plan file", file_path)
+            return False
+        logger.warning("plan_trigger: cannot stat %s, keeping the trigger: %s", file_path, exc)
+        return True
+    except (ValueError, RuntimeError):
         return False
     return True
 
