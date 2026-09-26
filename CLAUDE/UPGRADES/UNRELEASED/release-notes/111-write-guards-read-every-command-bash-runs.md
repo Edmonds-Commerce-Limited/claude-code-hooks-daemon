@@ -39,18 +39,29 @@ a command on its opener line, is judged.
 
 A `<<` counts as a heredoc only where bash reads one. Inside `${…}`,
 `$[…]`, `$((…))`, `((…))`, an array or a comment after a backtick it is
-text, and the lines after it are judged as commands. Where the guards cannot
-be sure how bash splits a command from a heredoc body (an unclosed `$(`, a
-`$((` bash re-reads as subshells, a backslash-newline gluing `$` to `(`), they
+text, and the lines after it are judged as commands. A heredoc inside
+`<(…)` or `>(…)` closes at `EOF)`, as one inside `$(…)` does. Where the
+guards cannot be sure how bash splits a command from a heredoc body, they
 stop reading bodies there: the command guards judge the rest as commands,
-and the write guards deny it as unreadable. A backslash at the end of a line
-inside a quoted heredoc no longer joins the closing line to it, because bash
-does not join it either.
+and the write guards deny it as unreadable. The uncertain shapes are an
+unclosed `$(`, a `$((` bash re-reads as subshells, the word `case` inside a
+substitution (its patterns end in a `)` that closes nothing), and a new line
+inside a substitution while a heredoc opened before it is waiting for its
+body. So `x=$(case "$1" in a) …;; esac)` is now denied by
+`project_containment` as unreadable; set the value with an `if`, or run the
+`case` outside the substitution. A backslash at the end of a line inside a
+quoted heredoc no longer joins the closing line to it, because bash does not
+join it either. Every other backslash-newline is joined as bash joins it, so
+`git reset --ha\` followed by `rd` is still judged as `git reset --hard`.
 
 A quoted heredoc body is blanked as data only when the command reading it
 takes nothing that could run it. `tee >(bash)`, `cat > >(bash)`,
 `git -c alias.x='!sh' x`, `sort --compress-program=…`, a redirect to a FIFO
-or to an fd other than 1 or 2, and a target the guard cannot resolve
-(`> "$OUT"`) all keep the body judged as commands. `ftp`, `mail`, `mailx`,
-`sendmail` and `patch` are no longer treated as data sinks. A body fed to
-`bash` or another shell is now read for writes by `project_containment`.
+or to an fd other than 1 or 2 keep the body judged as commands. A file
+target, `git -C` directory or option value the guard cannot resolve
+(`cat > "$OUT"`, `git -C "$WT" commit -F -`) does not. `ftp`, `mail`,
+`mailx`, `sendmail` and `patch` are no longer treated as data sinks. A body
+fed to `bash` or another shell is now read for writes by
+`project_containment`, and so is one fed to a variable the command sets to
+a shell (`SH=bash; $SH <<'EOF'`), or to `$SHELL` or `$BASH`. A body fed to
+any other variable (`$PY - <<'EOF'`) is data, as before.

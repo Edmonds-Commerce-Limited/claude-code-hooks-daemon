@@ -151,6 +151,8 @@ Full write-ups are in [NIGGLES.md](NIGGLES.md). One line each here:
 | N145 | A data-sink receiver whose own arguments feed the body to an executor                                          | N101 review 9 (D-RULE)                                          | ✅ Remedied (n101 branch)        |
 | N146 | A `<<` bash does not read as an operator hides the lines after it                                              | N101 review 9 (D-RULE)                                          | ✅ Remedied (n101 branch)        |
 | N147 | A heredoc body a shell runs is never read for writes                                                           | N101 review 9 (D-RULE)                                          | ✅ Remedied (n101 branch)        |
+| N181 | A heredoc inside `<(…)` or `>(…)` is not closed at `EOF)`, so lines bash runs are read as its body             | N101 review 10 (D-RULE)                                         | ✅ Remedied (n101 branch)        |
+| N182 | A pending heredoc's body is read from a newline inside a later `$( )` or backtick substitution                 | N101 review 10 (D-RULE)                                         | ✅ Remedied (n101 branch)        |
 
 ## Tasks
 

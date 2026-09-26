@@ -795,6 +795,38 @@ commands, nested bodies included, and text in it the tokeniser cannot read
 is `unreadable`. With bodies included, an unreadable body fed to anything but
 a data sink is `unreadable` too.
 
+**Narrowed in round 11 (review 10 minor E).** A receiver whose name cannot
+be resolved is a shell only when the command shows it names one: a literal
+assignment (`SH=bash; $SH`), a literal basename after the expansion
+(`$D/bash`), or `$SHELL`/`$BASH`. Any other (`$PY - <<'EOF'`) is data, as on
+main, so a Python body with a `>` in it is no evaluation error.
+
+### N181 — ✅ Remedied (n101 branch) — A heredoc inside `<(…)` or `>(…)` is not closed at `EOF)`
+
+**Found by N101 review 10 (shared S-a); main has it too.** The heredoc
+scanner pushed no frame for a process substitution, so a body inside one
+needed a bare closer line. In `cat <(cat <<'E'` / `x` / `E)` /
+`echo x > /opt/evil.txt` / `E`, bash closes the body at `E)` and writes
+`/opt/evil.txt`; `project_containment` read that line as body and allowed it
+on both trees.
+
+**Remedy:** `<(` and `>(` open a substitution frame, read like `$(`. RED
+tests: `TestTheBashDifferential` (both forms, every guard) and the line
+differential in `test_heredoc_operators.py`.
+
+### N182 — ✅ Remedied (n101 branch) — A pending heredoc's body is read from a newline inside a later substitution
+
+**Found by N101 review 10 (shared S-b); main has it too.** In
+`cat <<'E' $(true` / `echo x > /opt/evil.txt` / `E` / `)` / `x` / `E`, bash
+runs line 2 inside the substitution and starts the body after `)`. The
+scanner started the body at the first newline, inside the substitution, so
+the write was read as body.
+
+**Remedy:** a newline inside a substitution while an operator opened
+outside it is pending stops the scan, and the rest is unreadable to the
+write guards. RED tests: `$( )`, backtick and `"$( )"` forms in
+`TestTheBashDifferential` and the line differential.
+
 ### N120 — ✅ Remedied (n101 branch) — A shell parse failure on a later line hides every write target before it
 
 **Found by N101 review 8 (MAJOR 2 and shared MAJOR 3); main has it too.**
