@@ -2033,8 +2033,11 @@ def read_pid_file(pid_path: Path | str, verify_daemon: bool = False) -> int | No
         verify_daemon: When True, additionally require that the live PID's
             command line identifies a daemon SERVER process (guards against a
             stale PID file pointing at an unrelated process after reboot /
-            PID reuse). That file is left in place: its pid is alive, and a
-            starting daemon overwrites it under the start lock.
+            PID reuse).
+
+    A stale or corrupt file is never removed here: removal happens only
+    under the start lock (``cli.remove_stale_pid_file``, and ``cmd_stop``),
+    and a starting daemon overwrites it.
 
     Returns:
         PID if file exists and process is alive (and, when ``verify_daemon`` is
@@ -2052,8 +2055,9 @@ def read_pid_file(pid_path: Path | str, verify_daemon: bool = False) -> int | No
             return None
 
         if not is_pid_alive(pid):
-            # Stale PID file, clean it up
-            cleanup_pid_file(pid_path, pid)
+            # Stale, and left in place (round 4, N160): only a holder of the
+            # start lock may remove it, since a start writes its pid under
+            # that lock. A starting daemon overwrites it.
             return None
 
         if verify_daemon and not is_daemon_pid(pid):

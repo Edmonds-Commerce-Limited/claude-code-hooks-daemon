@@ -59,9 +59,13 @@ removes the file only while it still holds exactly the text bash read, and
 that text names no live process. A lock that is held for the whole wait, or
 cannot be opened, leaves the file; so does a missing venv. A stale file left
 behind is harmless: it never counts as running, and a starting daemon
-overwrites it under the lock. RED:
-`test_a_stale_pid_file_is_removed_only_through_the_start_lock` and
-`TestRemoveStalePidFile`. Release note 157.
+overwrites it under the lock. Python's `read_pid_file` had the same unlocked
+compare-then-remove for a dead pid (found while fixing this); it no longer
+removes anything, so the start lock's holders are the only removers. RED:
+`test_a_stale_pid_file_is_removed_only_through_the_start_lock`,
+`TestRemoveStalePidFile` and
+`test_read_pid_file_returns_none_for_dead_process_and_leaves_the_file`.
+Release note 157.
 
 ### N140 — ✅ Remedied — PreToolUse input the forwarder cannot parse is answered without a deny
 

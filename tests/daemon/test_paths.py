@@ -364,8 +364,9 @@ class TestPIDFileOperations(unittest.TestCase):
 
             self.assertEqual(result, current_pid)
 
-    def test_read_pid_file_returns_none_for_dead_process(self):
-        """Test read_pid_file returns None for dead process and cleans up."""
+    def test_read_pid_file_returns_none_for_dead_process_and_leaves_the_file(self):
+        """Plan 00466 round 4 (N160): a start writes its pid under the start
+        lock, so only a holder of that lock removes a stale file."""
         with tempfile.TemporaryDirectory() as tmpdir:
             pid_path = Path(tmpdir) / "test.pid"
             dead_pid = 999999  # Almost certainly not running
@@ -375,8 +376,7 @@ class TestPIDFileOperations(unittest.TestCase):
             result = read_pid_file(pid_path)
 
             self.assertIsNone(result)
-            # Stale PID file should be cleaned up
-            self.assertFalse(pid_path.exists())
+            self.assertEqual(pid_path.read_text(), str(dead_pid))
 
     def test_read_pid_file_keeps_a_successors_pid_file(self):
         """Plan 00466 round 2 (S2): the stale pid is found dead, and a

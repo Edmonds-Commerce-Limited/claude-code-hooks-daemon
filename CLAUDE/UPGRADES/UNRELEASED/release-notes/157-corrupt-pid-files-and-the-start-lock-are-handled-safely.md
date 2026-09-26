@@ -11,7 +11,8 @@
 - The hooks remove a stale or corrupt PID file only while holding the lock
   a starting daemon holds when it writes its own PID file, and only if the
   file still holds what was read. A daemon starting at that moment keeps
-  its file.
+  its file. The daemon's own CLI commands no longer remove a stale PID file
+  as a side effect of reading it; a starting daemon overwrites it.
 - The start lock (`<socket>.start.lock`) is no longer opened through a
   symlink, and must be a regular file. If it cannot be opened, `stop`
   leaves the PID file and socket where they are rather than removing them
