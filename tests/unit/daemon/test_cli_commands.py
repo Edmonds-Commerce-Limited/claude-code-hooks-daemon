@@ -9,6 +9,7 @@ Focused tests covering critical CLI paths including:
 """
 
 import argparse
+import errno
 import json
 import os
 import signal
@@ -81,16 +82,17 @@ def _reject_unproven_real_signals() -> Iterator[None]:
     reached the real kernel call whenever the test's pid happened to be live.
     This fixture is the outermost patch of these four signalling primitives
     for the duration of the test: `_UNREAL_PID` is accepted (and made to
-    behave like a pid that has already exited, exactly as `os.pidfd_open`
-    would report it in real life), and everything else fails the test rather
-    than reach a real signal. A test's own inner `with patch(...)` block
-    still shadows this for whichever primitive it explicitly controls.
+    behave as on a platform without pidfd, so `cmd_stop` takes the
+    by-number path each test drives through its own `os.kill` patch), and
+    everything else fails the test rather than reach a real signal. A test's
+    own inner `with patch(...)` block still shadows this for whichever
+    primitive it explicitly controls.
     """
 
     def guard_pidfd_open(pid: int, flags: int = 0) -> int:
         if pid != _UNREAL_PID:
             pytest.fail(f"os.pidfd_open reached with unproven real pid {pid}")
-        raise ProcessLookupError("test guard: _UNREAL_PID never names a live process")
+        raise AttributeError("test guard: pidfd unsupported, so os.kill's patch decides")
 
     def guard_pidfd_send_signal(pidfd: int, sig: int) -> None:
         pytest.fail(
@@ -471,7 +473,12 @@ class TestCmdStop:
             mock_cleanup_sock.assert_called_once()
 
     def test_stop_process_not_found(self, tmp_path: Path) -> None:
-        """cmd_stop handles stale PID file."""
+        """A proven daemon gone by SIGTERM time keeps its files (Plan 00466 N70).
+
+        The proof attributed a live process to this project a moment ago, so
+        the PID file and socket may already be a successor's. A PID file that
+        is merely stale never reaches here: ``read_pid_file`` clears it.
+        """
         claude_dir = tmp_path / ".claude"
         claude_dir.mkdir()
         hooks_daemon_dir = claude_dir / "hooks-daemon"
@@ -491,8 +498,8 @@ class TestCmdStop:
         ):
             result = cmd_stop(args)
             assert result == 0
-            mock_cleanup_pid.assert_called_once()
-            mock_cleanup_sock.assert_called_once()
+            mock_cleanup_pid.assert_not_called()
+            mock_cleanup_sock.assert_not_called()
 
     def test_stop_permission_denied(self, tmp_path: Path) -> None:
         """cmd_stop handles permission denied."""
@@ -609,6 +616,7 @@ class TestCmdStopGenericException:
 _OTHER_PROJECT_ROOT = "/srv/projects/someone-else"
 
 
+@pytest.mark.usefixtures("_reject_unproven_real_signals")
 class TestCmdStopSignalsOnlyThisProjectsDaemon:
     """``stop`` signals a pid only once it is proven to be THIS project's daemon.
 
@@ -812,13 +820,17 @@ class TestCmdStopSignalsThroughPidfdWhenAvailable:
         assert signal.SIGKILL in pidfd_signals
         mock_close.assert_called_once_with(_SENTINEL_FD)
 
-    def test_open_pidfd_falls_back_to_none_when_the_pid_is_already_gone(self) -> None:
-        """`_open_pidfd` degrades to the bare-pid-number fallback rather than
-        raising, when the pid no longer names a live process."""
+    def test_open_pidfd_reports_a_gone_pid_instead_of_falling_back(self) -> None:
+        """Plan 00466 N70: ESRCH means the process is not running, which
+        needs no signal at all -- falling back to signalling by number would
+        only reopen the race the pidfd exists to close."""
         from claude_code_hooks_daemon.daemon.cli import _open_pidfd
 
-        with patch("os.pidfd_open", side_effect=ProcessLookupError("no such process")):
-            assert _open_pidfd(_UNREAL_PID) is None
+        with (
+            patch("os.pidfd_open", side_effect=ProcessLookupError(errno.ESRCH, "gone")),
+            pytest.raises(ProcessLookupError),
+        ):
+            _open_pidfd(_UNREAL_PID)
 
     def test_open_pidfd_falls_back_to_none_when_unsupported_by_the_platform(self) -> None:
         """`_open_pidfd` degrades gracefully on a platform without pidfd_open
@@ -827,6 +839,27 @@ class TestCmdStopSignalsThroughPidfdWhenAvailable:
 
         with patch("os.pidfd_open", side_effect=AttributeError("no pidfd_open")):
             assert _open_pidfd(_UNREAL_PID) is None
+
+    @pytest.mark.parametrize("err", [errno.ENOSYS, errno.EMFILE, errno.ENFILE])
+    def test_open_pidfd_falls_back_to_none_when_no_pidfd_can_be_had(self, err: int) -> None:
+        """A kernel without the syscall, or no free descriptor, says nothing
+        about the process, so the by-number fallback is the only way left."""
+        from claude_code_hooks_daemon.daemon.cli import _open_pidfd
+
+        with patch("os.pidfd_open", side_effect=OSError(err, os.strerror(err))):
+            assert _open_pidfd(_UNREAL_PID) is None
+
+    @pytest.mark.parametrize("err", [errno.EINVAL, errno.EPERM, errno.EIO])
+    def test_open_pidfd_raises_any_other_failure(self, err: int) -> None:
+        """Any other failure is not proven safe to fall back from."""
+        from claude_code_hooks_daemon.daemon.cli import _open_pidfd
+
+        with (
+            patch("os.pidfd_open", side_effect=OSError(err, os.strerror(err))),
+            pytest.raises(OSError) as raised,
+        ):
+            _open_pidfd(_UNREAL_PID)
+        assert raised.value.errno == err
 
     def test_pidfd_send_signal_reports_a_dead_target_as_process_lookup_error(self) -> None:
         """End-to-end with a REAL process: once the pidfd's target has exited,
@@ -844,6 +877,103 @@ class TestCmdStopSignalsThroughPidfdWhenAvailable:
                 _signal_proven_pid(proc.pid, pidfd, 0)
         finally:
             os.close(pidfd)
+
+
+@pytest.mark.usefixtures("_reject_unproven_real_signals")
+class TestCmdStopFallsBackAndCleansUpOnlyWhenProvenSafe:
+    """Plan 00466 N70: the stop path signals by number only when a pidfd
+    cannot be had for a reason unrelated to the process, and deletes the PID
+    file and socket only after a stop it caused."""
+
+    def _args(self, tmp_path: Path) -> argparse.Namespace:
+        claude_dir = tmp_path / ".claude"
+        (claude_dir / "hooks-daemon").mkdir(parents=True)
+        (claude_dir / "hooks-daemon.yaml").write_text("version: '1.0'\n")
+        return argparse.Namespace(project_root=tmp_path)
+
+    def test_a_pid_gone_before_it_is_pinned_is_never_signalled(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        proof = Mock()
+        with (
+            patch("claude_code_hooks_daemon.daemon.cli.read_pid_file", return_value=_UNREAL_PID),
+            patch("os.pidfd_open", side_effect=ProcessLookupError(errno.ESRCH, "gone")),
+            patch("claude_code_hooks_daemon.daemon.cli.daemon_process_project_root", proof),
+            patch("claude_code_hooks_daemon.daemon.cli.cleanup_pid_file") as cleanup_pid,
+            patch("claude_code_hooks_daemon.daemon.cli.cleanup_socket") as cleanup_sock,
+        ):
+            result = cmd_stop(self._args(tmp_path))
+
+        assert result == 0
+        proof.assert_not_called()
+        cleanup_pid.assert_not_called()
+        cleanup_sock.assert_not_called()
+        assert "exited before it could be pinned" in capsys.readouterr().out
+
+    def test_an_unexplained_pidfd_failure_refuses_to_signal(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        with (
+            patch("claude_code_hooks_daemon.daemon.cli.read_pid_file", return_value=_UNREAL_PID),
+            patch("os.pidfd_open", side_effect=OSError(errno.EINVAL, "Invalid argument")),
+            patch("claude_code_hooks_daemon.daemon.cli.cleanup_pid_file") as cleanup_pid,
+            patch("claude_code_hooks_daemon.daemon.cli.cleanup_socket") as cleanup_sock,
+        ):
+            result = cmd_stop(self._args(tmp_path))
+
+        assert result == 1
+        cleanup_pid.assert_not_called()
+        cleanup_sock.assert_not_called()
+        assert "refusing to signal it" in capsys.readouterr().err
+
+    def test_out_of_descriptors_falls_back_to_the_proven_pid_number(self, tmp_path: Path) -> None:
+        sent: list[tuple[int, int]] = []
+
+        def record(pid: int, sig: int) -> None:
+            sent.append((pid, sig))
+            if sig == 0:
+                raise ProcessLookupError()
+
+        with (
+            patch("claude_code_hooks_daemon.daemon.cli.read_pid_file", return_value=_UNREAL_PID),
+            patch("os.pidfd_open", side_effect=OSError(errno.EMFILE, "Too many open files")),
+            patch(
+                "claude_code_hooks_daemon.daemon.cli.daemon_process_project_root",
+                return_value=RootProof(root=os.path.realpath(tmp_path), refusal=None),
+            ),
+            patch("os.kill", side_effect=record),
+            patch("claude_code_hooks_daemon.daemon.cli.cleanup_pid_file"),
+            patch("claude_code_hooks_daemon.daemon.cli.cleanup_socket"),
+        ):
+            result = cmd_stop(self._args(tmp_path))
+
+        assert result == 0
+        assert (_UNREAL_PID, signal.SIGTERM) in sent
+
+    def test_a_proven_daemon_that_exits_before_sigterm_keeps_its_files(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """The pinned process dies between the proof and SIGTERM. The proof
+        attributed a live process to this project a moment ago, so the PID
+        file and socket may already be a successor's: leave both."""
+        with (
+            patch("claude_code_hooks_daemon.daemon.cli.read_pid_file", return_value=_UNREAL_PID),
+            patch("os.pidfd_open", return_value=4321),
+            patch("os.close"),
+            patch("signal.pidfd_send_signal", side_effect=ProcessLookupError()),
+            patch(
+                "claude_code_hooks_daemon.daemon.cli.daemon_process_project_root",
+                return_value=RootProof(root=os.path.realpath(tmp_path), refusal=None),
+            ),
+            patch("claude_code_hooks_daemon.daemon.cli.cleanup_pid_file") as cleanup_pid,
+            patch("claude_code_hooks_daemon.daemon.cli.cleanup_socket") as cleanup_sock,
+        ):
+            result = cmd_stop(self._args(tmp_path))
+
+        assert result == 0
+        cleanup_pid.assert_not_called()
+        cleanup_sock.assert_not_called()
+        assert "exited before SIGTERM reached it" in capsys.readouterr().out
 
 
 class TestCmdConfig:

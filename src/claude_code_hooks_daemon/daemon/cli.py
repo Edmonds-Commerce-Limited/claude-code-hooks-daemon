@@ -27,6 +27,7 @@ Provides:
 import argparse
 import asyncio
 import datetime
+import errno
 import fcntl
 import importlib.util
 import json
@@ -772,6 +773,14 @@ def cmd_start(args: argparse.Namespace) -> int:
     sys.exit(0)
 
 
+#: Why ``os.pidfd_open`` can fail that says nothing about the process: the
+#: kernel lacks the syscall, or no descriptor is free. Only these (and a
+#: Python without the function) may fall back to signalling by number.
+_PIDFD_UNAVAILABLE_ERRNOS: Final[frozenset[int]] = frozenset(
+    {errno.ENOSYS, errno.EMFILE, errno.ENFILE}
+)
+
+
 def _open_pidfd(pid: int) -> int | None:
     """Pin a pidfd to this exact ``pid`` instance, before it is proven.
 
@@ -787,11 +796,18 @@ def _open_pidfd(pid: int) -> int | None:
     never a different process that has since reused the pid number.
 
     Returns:
-        The pidfd, or ``None`` when ``os.pidfd_open`` is unsupported on this
-        platform (pre-3.9 Python, or non-Linux) or ``pid`` is already gone --
-        callers fall back to signalling by pid number in that case, which
-        only keeps the smaller race this function exists to close, rather
-        than refusing to stop the daemon at all.
+        The pidfd, or ``None`` when no pidfd can be had for a reason that
+        says nothing about the process: ``os.pidfd_open`` is missing
+        (pre-3.9 Python, or non-Linux) or fails with an errno in
+        ``_PIDFD_UNAVAILABLE_ERRNOS``. Callers fall back to signalling by
+        pid number in that case, which only keeps the smaller race this
+        function exists to close, rather than refusing to stop the daemon.
+
+    Raises:
+        ProcessLookupError: ``pid`` is not running (ESRCH). Nothing needs
+            stopping, and a by-number fallback would only reopen the race.
+        OSError: any other failure, which is not proven safe to fall back
+            from -- the caller must refuse to signal.
     """
     try:
         pidfd: int | None = os.pidfd_open(pid, 0)
@@ -803,6 +819,8 @@ def _open_pidfd(pid: int) -> int | None:
         )
         pidfd = None
     except OSError as e:
+        if e.errno not in _PIDFD_UNAVAILABLE_ERRNOS:
+            raise
         logger.warning(
             "os.pidfd_open(%d) failed (%s); falling back to signalling by pid number",
             pid,
@@ -848,7 +866,20 @@ def cmd_stop(args: argparse.Namespace) -> int:
 
     # Pin the pidfd to THIS pid instance before proving anything about it
     # (mi5, see `_open_pidfd`) -- every signal below goes through it.
-    pidfd = _open_pidfd(pid)
+    try:
+        pidfd = _open_pidfd(pid)
+    except ProcessLookupError:
+        # Exited since read_pid_file saw it. Nothing to signal, and its files
+        # are left alone: a successor may already own them, and a PID file
+        # that is merely stale is cleared by the next read_pid_file.
+        print(f"Daemon (PID {pid}) exited before it could be pinned; nothing to stop")
+        return 0
+    except OSError as e:
+        print(
+            f"ERROR: cannot pin PID {pid} to a pidfd ({e}); refusing to signal it",
+            file=sys.stderr,
+        )
+        return 1
     try:
         # verify_daemon proves only that the pid is SOME daemon server. Signal
         # it only once it is proven to serve THIS project: a stale pid file
@@ -955,9 +986,14 @@ def cmd_stop(args: argparse.Namespace) -> int:
                 return 0
 
         except ProcessLookupError:
-            print(f"Process {pid} not found (stale PID file)")
-            cleanup_pid_file(str(pid_path))
-            cleanup_socket(str(socket_path))
+            # Only the first SIGTERM can land here. The proof above attributed
+            # a live process to this project a moment ago, and it exited on
+            # its own since -- so its PID file and socket may already be a
+            # successor's (Plan 00466 N70). Leave both.
+            print(
+                f"Daemon (PID {pid}) exited before SIGTERM reached it; "
+                "leaving its PID file and socket alone"
+            )
             return 0
         except PermissionError:
             print(f"ERROR: Permission denied to signal PID {pid}", file=sys.stderr)

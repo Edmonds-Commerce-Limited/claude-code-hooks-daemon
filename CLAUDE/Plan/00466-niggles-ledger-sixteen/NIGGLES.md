@@ -1173,7 +1173,7 @@ was. Neither `Worktree.core.md` nor `HANDLER_REFERENCE.md` says so.
 **Remedy:** document the boundary in both, and name the git-level sink
 (the Plan 00464 pre-commit owner referral) as what would close it.
 
-### N70 — The pidfd stop path falls back and cleans up too eagerly
+### N70 — ✅ Remedied — The pidfd stop path falls back and cleans up too eagerly
 
 **Found by N24 review 4 (two NITs).**
 
@@ -1186,6 +1186,24 @@ was. Neither `Worktree.core.md` nor `HANDLER_REFERENCE.md` says so.
 
 **Remedy:** fall back only for EMFILE and an unsupported platform, and leave
 the files alone in the race. A RED test for each.
+
+**Remedied (lifecycle batch):** `_open_pidfd` returns `None` (the by-number
+fallback) only when `os.pidfd_open` is missing or fails with an errno in
+`_PIDFD_UNAVAILABLE_ERRNOS` (ENOSYS, EMFILE, ENFILE). ESRCH is re-raised as
+`ProcessLookupError`, and `cmd_stop` reports "nothing to stop" with no signal,
+no proof and no file deletion. Any other errno is re-raised, and `cmd_stop`
+refuses to signal (exit 1). When the first SIGTERM finds the proven process
+gone, `cmd_stop` returns 0 and leaves the PID file and socket alone; a PID
+file that is merely stale never reaches that point, because `read_pid_file`
+clears it. The `_reject_unproven_real_signals` fixture now presents
+`_UNREAL_PID` as an unsupported platform, so the by-number tests still drive
+`os.kill`'s patch. It is also applied to
+`TestCmdStopSignalsOnlyThisProjectsDaemon`, which had no guard. RED against
+`HEAD`'s `cli.py` in a `git archive` copy: 7 tests in `test_cli_commands.py`,
+including the new `TestCmdStopFallsBackAndCleansUpOnlyWhenProvenSafe`. Every
+test signal goes to `_UNREAL_PID` through a patched `os.kill` or
+`signal.pidfd_send_signal`, or to the test's own spawned child. Release
+note 152.
 
 ### N69 — ✅ Remedied — Two fail-closed deny messages misname what happened
 
