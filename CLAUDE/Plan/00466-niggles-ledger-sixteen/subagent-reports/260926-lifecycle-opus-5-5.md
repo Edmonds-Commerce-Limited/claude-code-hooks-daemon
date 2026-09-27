@@ -1753,3 +1753,102 @@ Remaining steps:
      agent-rules.
 5. Queue the gate:
    `setsid -f bash /workspace/untracked/scratch/gate.sh /workspace/untracked/worktrees/worktree-n466-lifecycle > /workspace/untracked/scratch/gate-lifecycle-launch.txt 2>&1`.
+
+## Round 10b: the error-hiding sites, the main merge, then the gate
+
+Code commit `b6ee4ef0c`. The merge of main `84afc8804` is `322840fed`.
+
+### The 13 audit findings
+
+Every site now handles its error. No exclusion or suppression was added.
+Each caught error still means "not proven", as before.
+
+- **A typed PID file read.** `paths.read_pid_file_text` returns
+  `PidFileText`. That holds the text, or None. For a file that exists but
+  cannot be read, `unreadable` also holds the error. Three callers use it:
+  - `cli._pid_file_state` replaces `_recorded_pid`. An unreadable file is
+    now reported as "the PID file cannot be read (…)", where before it
+    read as "no PID file created".
+  - `enforcement._remove_stale_pid_file` logs a warning and leaves an
+    unreadable file.
+  - `client_validator.cleanup_stale_runtime_files` warns about an
+    unreadable file and leaves it.
+- **A typed identity.** `daemon_socket_identity`, `_probe_daemon_identity`
+  and `_parse_identity` return `NoDaemonIdentity(reason)` instead of None.
+  This covers four cases: no connection, no answer, an answer that is not
+  an identity, and a running event loop. `_socket_answers_for_project`
+  logs the reason and still proves nothing. A daemon asked for its
+  identity with no project to name now logs a warning, and still answers
+  with an error.
+- **The launch lock's holder.** `_lock_holder` raises
+  `_LockHolderUnknown` when there is no lock table, or not exactly one
+  holder. `start_under_way` logs it and records `holder=None`, as before.
+- **`remove_stale_pid_file` and `remove_dead_socket`** return False inside
+  each handler, where before they fell through to a trailing `return False`. Behaviour is unchanged.
+- **`_release_stopped_daemon_files`.** When a start holds the lock, this
+  now prints a WARNING on stderr that names both files. Before, it only
+  logged. Both files are still left in place.
+- **`_StartProgress`.** A daemon that names a pid which has already
+  exited is logged at info. It still sets `exited`.
+- **`recovery_command`** checks `ProjectContext.is_initialized()` instead
+  of catching `RuntimeError`, and still gives None when it is not
+  initialised.
+
+Tests. I ran them against the unfixed tree before the fix:
+
+- The three behaviour tests in
+  `test_cli_commands.py::TestAnErrorIsReportedAndStillProvesNothing`
+  failed: the release warning, the log for a pid that had already exited,
+  and the unreadable PID file message.
+- `test_paths_pid_record.py` and `test_server_liveness_reuse.py` could not
+  be imported, because `PidFileText` and `NoDaemonIdentity` did not exist
+  yet.
+
+Guards that pass on both commits:
+
+- in `test_enforcement.py`, the unreadable-file and no-file tests;
+- the existing lock-held and lock-unopenable tests for both remove
+  functions;
+- `test_uninitialised_is_unknown`;
+- the lock-table test, which now also asserts the log.
+
+`audit_error_hiding.py` is clean.
+
+### Merge of main
+
+- `/workspace/untracked/scratch/merge_ledger_table.py` does not exist, so
+  I wrote an equivalent resolver: `untracked/scratch/resolve_ledger_10b.py`
+  in the worktree.
+  - It reads the base, ours and theirs index stages and merges them three
+    ways, row by row, by ID. Cells are compared with their padding
+    stripped, so main's realignment alone does not count as a change.
+  - A row that both sides changed differently stops it; there were none.
+  - It replaced the one conflict hunk with main's header and every row.
+- The result has 131 rows, sorted by number. Of these, 23 rows exist only
+  on this branch: N126 to N245. Main's N194, N196, N197, N211 and N222
+  are kept.
+- The table formatter realigned the table on a later `Edit`.
+- The marker grep from agent-rules prints nothing for `PLAN.md`.
+- NIGGLES.md merged cleanly and keeps both sides' entries.
+- No release note numbers collide.
+- The merge adds no `relative_to`, `is_relative_to` or `.parents` call.
+
+### Checks (after the merge)
+
+- Targeted suites: 1996 passed. That is 127 files: init.sh, upgrade.sh,
+  the relay, every `test_cli*`, enforcement, `server_liveness_reuse`,
+  `process_verification`, client_validator, safe_signal, `cli_command`,
+  `paths_pid_record`, the symlinked-project file and the signal-target
+  checker.
+- The relay is unchanged. It compiles with `-D warnings` using
+  `--emit=metadata`.
+- semgrep: no violations.
+- `check_signal_targets.py`: clean (2082 files).
+- `run_shell_check.sh`: passed.
+- `audit_error_hiding.py`: clean.
+- mypy `src/`: clean.
+- pyright: 0 errors.
+- ruff and black: clean over `src`, `tests` and `scripts`.
+- The daemon was restarted from the worktree after each commit that
+  touched `src/`: `Daemon: RUNNING`.
+- The gate is queued after this report commit.
