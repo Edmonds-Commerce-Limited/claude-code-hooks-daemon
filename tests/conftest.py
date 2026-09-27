@@ -41,6 +41,13 @@ from tests.source_tree_guard import assert_package_is_this_checkout
 
 __all__ = ["pytest_collection_modifyitems", "pytest_runtest_makereport"]
 
+# Loaded here, not with `-p`: a `-p` plugin is imported while pytest parses its
+# arguments, before pytest-cov starts, so the package it imports goes
+# unmeasured (00466 N110 round 3). It records only when --first-error-lines is
+# given. Named as a string, not imported, so pytest imports it and rewrites its
+# asserts; tests/unit/qa/test_run_test_matrix.py checks the name resolves.
+pytest_plugins = ["claude_code_hooks_daemon.qa.first_error_lines"]
+
 
 @pytest.fixture(autouse=True, scope="session")
 def signal_safety_net() -> Generator[None, None, None]:

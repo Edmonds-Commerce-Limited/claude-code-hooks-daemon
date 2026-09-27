@@ -85,7 +85,7 @@ class TestTheRegistryDeclaresEveryLiveDaemonConsumer:
         )
 
     def test_tests_is_excluded_because_its_script_carries_no_live_daemon_marker(self) -> None:
-        """``tests`` runs ``run_tests.sh``, whose own text is pytest plumbing — none
+        """``tests`` runs ``run_test_matrix.py``, whose own text is pytest plumbing — none
         of the ``_LIVE_DAEMON_MARKERS`` appear in it. It reaches the daemon only
         indirectly, through the fixtures under ``tests/acceptance``, which the
         generic per-script marker scan above cannot see. That gap, not a missing

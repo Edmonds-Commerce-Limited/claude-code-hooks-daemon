@@ -303,19 +303,41 @@ WT_LINK_MODE="${UV_LINK_MODE:-}"
 if [[ -z "${WT_LINK_MODE}" ]] && _uv_in_container; then
     WT_LINK_MODE="copy"
 fi
+# --python pins the venv's own interpreter (00466 N114): without it uv may
+# rebuild the venv on the Python it prefers rather than the one it was made on.
+WT_VENV_PYTHON="${WT_VENV_PATH}/bin/python"
 if [[ -n "${WT_LINK_MODE}" ]]; then
     UV_LINK_MODE="${WT_LINK_MODE}" UV_PROJECT_ENVIRONMENT="${WT_VENV_PATH}" \
-        uv sync --frozen --all-extras --project "${WORKTREE_DIR}" --quiet
+        uv sync --frozen --all-extras --python "${WT_VENV_PYTHON}" --project "${WORKTREE_DIR}" --quiet
 else
     UV_PROJECT_ENVIRONMENT="${WT_VENV_PATH}" \
-        uv sync --frozen --all-extras --project "${WORKTREE_DIR}" --quiet
+        uv sync --frozen --all-extras --python "${WT_VENV_PYTHON}" --project "${WORKTREE_DIR}" --quiet
 fi
-if ! "${WT_VENV_PATH}/bin/python" -c "import pytest"; then
+if ! "${WT_VENV_PYTHON}" -c "import pytest"; then
     echo -e "${RED}✗${NC} Dev extras did not install: 'import pytest' fails in ${WT_VENV_PATH}"
-    echo "  QA cannot run in this worktree. Fix: UV_PROJECT_ENVIRONMENT=${WT_VENV_PATH} uv sync --frozen --all-extras --project ${WORKTREE_DIR}"
+    echo "  QA cannot run in this worktree. Fix: UV_PROJECT_ENVIRONMENT=${WT_VENV_PATH} uv sync --frozen --all-extras --python ${WT_VENV_PYTHON} --project ${WORKTREE_DIR}"
     exit 1
 fi
 echo -e "${GREEN}✓${NC} Dev extras installed (the test runner imports)"
+
+# The venv's name declares its Python (`-py311-` is 3.11). A venv running any
+# other Python makes the daemon and every QA run in this worktree lie about the
+# interpreter they test, so refuse it (00466 N114).
+# The name is venv-{slug}-py{MM}-{hash}; read py{MM} from the right, since the
+# slug is a path and can contain anything.
+WT_VENV_NAME="$(basename "${WT_VENV_PATH}")"
+WT_VENV_NAME="${WT_VENV_NAME%-*}"
+WT_DECLARED_PY="${WT_VENV_NAME##*-py}"
+if [[ ! "${WT_DECLARED_PY}" =~ ^[0-9]+$ ]]; then
+    WT_DECLARED_PY=""
+fi
+WT_ACTUAL_PY="$("${WT_VENV_PYTHON}" -c 'import sys; print("%d%d" % sys.version_info[:2])')"
+if [[ -z "${WT_DECLARED_PY}" ]] || [[ "${WT_DECLARED_PY}" != "${WT_ACTUAL_PY}" ]]; then
+    echo -e "${RED}✗${NC} ${WT_VENV_PATH} runs Python ${WT_ACTUAL_PY}, but its name declares py${WT_DECLARED_PY:-(none)}."
+    echo "  uv did not build it on the interpreter it was fingerprinted from. Remove it and re-run."
+    exit 1
+fi
+echo -e "${GREEN}✓${NC} Venv Python matches its fingerprint (py${WT_ACTUAL_PY})"
 
 # Step 5: Verify editable install points to correct source.
 # uv sync already installed the package editable via pyproject; just verify.

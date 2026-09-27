@@ -7,13 +7,13 @@ verbose run_all.sh directly.
 
 import fnmatch
 import re
-import shlex
 from collections.abc import Iterator
 from typing import Any, Final
 
 from claude_code_hooks_daemon.core import AcceptanceTest, Handler, HookResult, TestType
 from claude_code_hooks_daemon.core.hook_result import Decision
 from claude_code_hooks_daemon.utils import shell_expansion
+from claude_code_hooks_daemon.utils.linear_shlex import LinearShlex
 from claude_code_hooks_daemon.utils.shell_segmentation import (
     split_unquoted,
     strip_quoted_heredoc_bodies,
@@ -163,10 +163,12 @@ def _tokenise(segment: str) -> list[str] | None:
     (``shlex.split`` wrapped in try/except) rather than hand-rolling a new
     tokeniser — this project already has one way to do this — extended with
     ``punctuation_chars`` so ``(``/``{``/``!`` split off even glued to the
-    next word (Plan 00466 review M1).
+    next word (Plan 00466 review M1). ``LinearShlex`` yields the stdlib's
+    tokens at a cost linear in a word's length, where the stdlib's is
+    quadratic (00466 N196).
     """
     try:
-        lexer = shlex.shlex(segment, posix=True, punctuation_chars=_PUNCTUATION_CHARS)
+        lexer = LinearShlex(segment, posix=True, punctuation_chars=_PUNCTUATION_CHARS)
         lexer.whitespace_split = True
         return list(lexer)
     except ValueError:

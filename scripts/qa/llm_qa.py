@@ -484,8 +484,10 @@ TOOL_REGISTRY: dict[str, ToolConfig] = {
     # look wrong. Asserted by test_llm_qa_count_implies_detail.py.
     # A live consumer through tests/acceptance: its daemon fixtures skip with
     # no socket, and a skip in a RELEASING.md Step 12.0 gate is a failure.
+    # run_test_matrix.py runs run_tests.sh AND the suite under every other
+    # Python in CI's matrix (00466 N110), so the gate is not narrower than CI.
     "tests": ToolConfig(
-        command=_bash("run_tests.sh"),
+        command=_python("run_test_matrix.py"),
         json_file="tests.json",
         jq_hint="jq '.tests[] | select(.outcome == \"failed\") | .name'",
         live_daemon=True,
@@ -759,6 +761,28 @@ def _summarize_pyright(data: QaReport) -> str:
 _MAX_NAMED_FAILURES = 15
 
 
+def _interpreter_lines(data: QaReport) -> str:
+    """One line per interpreter run, so the versions tested are stated, not implied.
+
+    run_test_matrix.py (00466 N110) records every run it owed in
+    ``interpreters``; a run that never happened carries its ``error``.
+    """
+    lines = []
+    for entry in data.get("interpreters", []):
+        head = f"py{entry.get('version', '?')} {entry.get('scope', '?')}"
+        if entry.get("error"):
+            lines.append(f"{head}: NOT RUN - {entry['error']}")
+            continue
+        verdict = "ok" if entry.get("passed_all") else "FAILED"
+        lines.append(
+            f"{head}: {verdict}, {entry.get('passed', 0)} passed, {entry.get('failed', 0)} "
+            f"failed, {entry.get('errors', 0)} errored in {entry.get('duration_seconds', 0)}s"
+        )
+    if not lines:
+        return ""
+    return "\n   " + "\n   ".join(lines)
+
+
 def _summarize_tests(data: QaReport) -> str:
     s = data.get("summary", {})
     passed = s.get("passed", 0)
@@ -772,6 +796,8 @@ def _summarize_tests(data: QaReport) -> str:
     cov = data.get("coverage", {}).get("percent_covered", 0)
     error_part = f", {errors} errored" if errors else ""
     line = f"{passed} passed, {failed} failed{error_part}, {skipped} skipped | coverage: {cov:.1f}%"
+    line += _interpreter_lines(data)
+
     # Name a red run the failed/errored counts alone do not explain — a
     # coverage-threshold miss exits non-zero over "0 failed" and a coverage
     # percentage that rounds to looking fine (94.99% displays as "95.0%")
@@ -788,10 +814,12 @@ def _named_failures(data: QaReport, json_file: str) -> str:
     Named rather than counted (Plan 00226). A count alone forces a full re-run
     to find out what broke, and a re-run may not reproduce an order-dependent
     failure — during Plan 00224 one of two real failures was never
-    identified. Bounded so a mass breakage cannot flood the artifact.
+    identified. Bounded so a mass breakage cannot flood the artifact. Each
+    carries its first error line when one was recorded (00466 N196): ten
+    errored tests named with no cause sent the reader to a raw shard log.
     """
-    names = [t.get("name", "") for t in data.get("tests", []) if t.get("outcome") == "failed"]
-    names = [name for name in names if name]
+    failed = [t for t in data.get("tests", []) if t.get("outcome") == "failed" and t.get("name")]
+    names = [f"{t['name']} - {t['reason']}" if t.get("reason") else t["name"] for t in failed]
     if not names:
         return ""
 

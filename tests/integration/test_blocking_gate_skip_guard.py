@@ -117,6 +117,16 @@ class TestTheFailureMessageIsActionable:
         assert "Step 12.0" in message
         assert "uv not installed" in message
 
+    def test_the_first_line_names_the_file_and_the_reason(self) -> None:
+        """00466 N196: the gate's summary shows a failure's FIRST line only;
+        a first line without the skip reason named ten errors and no cause."""
+        message = blocking_gate_skip_failure_message(
+            ACCEPTANCE_DIR / "test_playbook_harness.py", "Daemon not running"
+        )
+        first_line = message.splitlines()[0]
+        assert "test_playbook_harness.py" in first_line
+        assert "Daemon not running" in first_line
+
 
 class TestASkipInADeclaredGateBecomesAFailure:
     """The conversion actually fires — proven by a real nested pytest run.

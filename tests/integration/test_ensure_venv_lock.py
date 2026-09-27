@@ -32,6 +32,7 @@ import shutil
 import subprocess
 import sys
 import textwrap
+import threading
 import time
 from pathlib import Path
 from typing import Final
@@ -52,6 +53,11 @@ LOCK_FILE_NAME: Final[str] = ".venv-bootstrap.lock"
 WAITING_FRAGMENT: Final[str] = "waiting up to"
 TIMEOUT_FRAGMENT: Final[str] = "gave up waiting for the venv lock"
 STALE_FRAGMENT: Final[str] = "stale venv lock"
+#: Printed by ``_ensure_venv_build`` (venv.sh) the moment it starts the slow
+#: path, which is only reached AFTER ``acquire_venv_lock`` returns holding
+#: the lock. 00466 N122: used as a barrier so the second starter is started
+#: only once the first genuinely holds the lock, never on a guessed delay.
+_BUILDING_FRAGMENT: Final[str] = "creating venv at"
 
 _TIMEOUT_SECONDS = 60
 
@@ -71,8 +77,9 @@ def _write_stub_uv(tmp_path: Path, uv_log: Path, sleep_seconds: float) -> Path:
         sleep {sleep_seconds}
         if [ -n "${{UV_PROJECT_ENVIRONMENT:-}}" ]; then
             mkdir -p "$UV_PROJECT_ENVIRONMENT/bin"
-            : > "$UV_PROJECT_ENVIRONMENT/bin/python"
-            chmod +x "$UV_PROJECT_ENVIRONMENT/bin/python"
+            # A correct build: the venv runs the interpreter ensure_venv
+            # asked for, which create_venv_at_path checks (00466 N114).
+            ln -sf "{sys.executable}" "$UV_PROJECT_ENVIRONMENT/bin/python"
         fi
         exit 0
         """))
@@ -123,6 +130,54 @@ def _finish(proc: subprocess.Popen[str]) -> tuple[int, str, str]:
     return proc.returncode, out, err
 
 
+class _StderrWatcher:
+    """Collects a process's stderr on a background thread and signals a marker.
+
+    00466 N122: a fixed ``time.sleep`` between starting two racing processes
+    assumed the first would always reach ``acquire_venv_lock`` before the
+    sleep elapsed. Under CPU contention (e.g. inside a large parallel test
+    run) that assumption can be wrong in either direction, so the second
+    starter sometimes won the lock uncontended and the test flaked. This
+    watches the FIRST starter's own stderr for the exact line
+    (``_BUILDING_FRAGMENT``) that ``venv.sh`` prints only after it holds the
+    lock, so the second starter is never released before that is true.
+    """
+
+    def __init__(self, proc: subprocess.Popen[str], marker: str) -> None:
+        assert proc.stderr is not None
+        self._proc = proc
+        self._marker = marker
+        self._lines: list[str] = []
+        self.seen = threading.Event()
+        self._thread = threading.Thread(target=self._read, daemon=True)
+        self._thread.start()
+
+    def _read(self) -> None:
+        stderr = self._proc.stderr
+        assert stderr is not None
+        for line in stderr:
+            self._lines.append(line)
+            if self._marker in line:
+                self.seen.set()
+        # EOF: release a waiter even if the marker never appeared, so a
+        # process that errored out before building does not hang the test.
+        self.seen.set()
+
+    def wait_for_marker(self, timeout: float) -> None:
+        if not self.seen.wait(timeout):
+            raise TimeoutError(
+                f"{self._marker!r} did not appear in the first starter's stderr "
+                f"within {timeout}s; so far: {''.join(self._lines)!r}"
+            )
+
+    def finish(self, timeout: float) -> tuple[int, str, str]:
+        assert self._proc.stdout is not None
+        out = self._proc.stdout.read()
+        rc = self._proc.wait(timeout=timeout)
+        self._thread.join(timeout=timeout)
+        return rc, out, "".join(self._lines)
+
+
 def _uv_calls(uv_log: Path) -> list[str]:
     if not uv_log.exists():
         return []
@@ -157,16 +212,18 @@ def _hold_lock(lock_file: Path, seconds: int) -> subprocess.Popen[str]:
 def _run_two_starters(
     tmp_path: Path, extra_env: dict[str, str] | None = None
 ) -> tuple[tuple[int, str, str], tuple[int, str, str], list[str], Path]:
-    """Start two ``ensure_venv`` calls 0.3s apart against one daemon_dir."""
+    """Start two ``ensure_venv`` calls, the second only once the first holds
+    the lock (00466 N122: a barrier on a real event, not a guessed delay)."""
     daemon_dir = _daemon_dir(tmp_path)
     uv_log = tmp_path / "uv_calls.log"
     stub_dir = _write_stub_uv(tmp_path, uv_log, sleep_seconds=1.5)
     env = _env(stub_dir, extra_env)
 
     first = _start(daemon_dir, env)
-    time.sleep(0.3)
+    first_watch = _StderrWatcher(first, _BUILDING_FRAGMENT)
+    first_watch.wait_for_marker(_TIMEOUT_SECONDS)
     second = _start(daemon_dir, env)
-    return _finish(first), _finish(second), _uv_calls(uv_log), daemon_dir
+    return first_watch.finish(_TIMEOUT_SECONDS), _finish(second), _uv_calls(uv_log), daemon_dir
 
 
 class TestConcurrentStartersBuildOnce:
