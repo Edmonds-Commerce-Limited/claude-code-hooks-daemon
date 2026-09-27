@@ -10,6 +10,8 @@ NOTE: Handler config keys do NOT include _handler suffix.
 Class DestructiveGitHandler -> config key "destructive_git"
 """
 
+from typing import Any
+
 import pytest
 
 from claude_code_hooks_daemon.config.validator import ConfigValidator, ValidationError
@@ -260,10 +262,28 @@ class TestHandlerNameValidation:
 class TestHandlerNameValidationPerformance:
     """Test that handler name validation doesn't impact performance."""
 
-    def test_validation_completes_quickly_with_many_handlers(self) -> None:
-        """Test that validation is fast even with many handlers configured."""
-        import time
+    def test_validation_completes_quickly_with_many_handlers(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Validation stays cheap however many handlers are configured: the
+        handlers package is walked once per event type, and never again.
 
+        Counted, not timed (00466 N222): a 100 ms wall-clock bound failed
+        on a loaded host, and passed or failed depending on whether an
+        earlier test had already warmed the discovery cache."""
+        import pkgutil
+
+        from claude_code_hooks_daemon.config import validator as validator_module
+
+        walks: list[str] = []
+        real_walk_packages = pkgutil.walk_packages
+
+        def counting_walk_packages(path: Any, prefix: str = "", onerror: Any = None) -> Any:
+            walks.append(prefix)
+            return real_walk_packages(path, prefix, onerror)
+
+        monkeypatch.setattr(ConfigValidator, "_handler_cache", {})
+        monkeypatch.setattr(validator_module.pkgutil, "walk_packages", counting_walk_packages)
         config = {
             "version": "1.0",
             "daemon": {"idle_timeout_seconds": 600, "log_level": "INFO"},
@@ -278,12 +298,10 @@ class TestHandlerNameValidationPerformance:
             },
         }
 
-        start = time.perf_counter()
-        ConfigValidator.validate_and_raise(config)
-        elapsed = time.perf_counter() - start
+        for _ in range(3):
+            ConfigValidator.validate_and_raise(config)
 
-        # Should complete in under 100ms
-        assert elapsed < 0.1, f"Validation took {elapsed:.3f}s, expected < 0.1s"
+        assert walks == ["claude_code_hooks_daemon.handlers.pre_tool_use."], walks
 
 
 class TestHandlerDiscoveryForValidation:
