@@ -1742,6 +1742,14 @@ Remaining steps:
    `bound_socket_paths` now does. No new exclusions.
 2. Re-run `audit_error_hiding.py`.
 3. Commit.
-4. Merge main if it has moved.
+4. Merge main. It has moved to `84afc8804`, 15 commits ahead. I tried the
+   merge and aborted it, because it conflicts only in this plan's
+   `PLAN.md` ledger table:
+   - main realigned the whole table;
+   - this branch changed the status of existing rows and added rows from
+     N126 to N245.
+     Resolve it by taking main's table and applying this branch's row
+     changes by ID. Do it in one `Write`, then run the marker grep from
+     agent-rules.
 5. Queue the gate:
    `setsid -f bash /workspace/untracked/scratch/gate.sh /workspace/untracked/worktrees/worktree-n466-lifecycle > /workspace/untracked/scratch/gate-lifecycle-launch.txt 2>&1`.
