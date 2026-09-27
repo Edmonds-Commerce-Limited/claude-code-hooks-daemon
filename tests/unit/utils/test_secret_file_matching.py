@@ -3110,7 +3110,11 @@ class TestBraceStreamReadsOnlyShellExpandedText:
     capture). A script's text, a segment of a command and authored content
     are enumerated whole, as on main (round 3, D-RULE B2)."""
 
-    _CODE_BRACES = "x = 1\n" + "\n".join(f"print(f'{{x}}', {{'k': {i}}})" for i in range(600))
+    #: Each set display (``{0,1}``) is a brace group to bash, which does not
+    #: expand a quoted or comma-less brace (ledger 00466 N238).
+    _CODE_BRACES = "x = 1\n" + "\n".join(
+        f"print(f'{{x}}', {{'k': {i}}}, {{{i},{i + 1}}})" for i in range(600)
+    )
 
     def test_python_heredoc_code_braces_are_not_enumerated(self) -> None:
         command = f"python3 - <<'EOF'\n{self._CODE_BRACES}\nEOF"

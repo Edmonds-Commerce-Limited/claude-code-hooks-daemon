@@ -1958,9 +1958,11 @@ class TestFileSchemeUrlOnBashRoute:
 _OVER_BOUND_WORD = "".join(
     "{" + a + "," + b + "}" for a, b in zip("acegikmoq", "bdfhjlnpr", strict=True)
 )
-#: A Python program with more brace groups than the 500-word discovery cap.
+#: A Python program with more brace groups than the 500-word discovery cap:
+#: each set display (``{0,1}``) is CODE to Python and a brace group to bash,
+#: which does not expand a quoted or comma-less brace (ledger 00466 N238).
 _MANY_BRACES_PROGRAM = "x = 1\n" + "\n".join(
-    f"print(f'{{x}}-{i}', {{'k': {i}}})" for i in range(600)
+    f"print(f'{{x}}-{i}', {{'k': {i}}}, {{{i},{i + 1}}})" for i in range(600)
 )
 
 
@@ -2910,7 +2912,76 @@ class TestAWriteOfSourceIsNotACommand:
         assert RuleID.SECRET_SCRIPT_AUTHOR in reason
 
     def test_a_shell_script_is_still_enumerated_whole_and_named_past_the_cap(self) -> None:
-        tool_input = {"file_path": "/proj/gen.sh", "content": _LONG_OPTION_TABLE}
+        """A ``{`` followed by a newline is not brace syntax to bash, so the
+        table itself is text; a real group past the cap is named."""
+        wide_group = "echo x{" + ",".join(f"cmd{index}" for index in range(300)) + "}\n"
+        tool_input = {"file_path": "/proj/gen.sh", "content": _LONG_OPTION_TABLE + wide_group}
         decision, reason = _through_chain("Write", tool_input)
         assert decision == Decision.DENY
         assert _could_not_finish(reason), reason
+
+
+#: Prose quoting more brace words than the 500-word discovery cap.
+_QUOTE_HEAVY_PROSE = "\n".join(
+    f"- it's \"{index}\" and '{{a,b}}' or \"{{c,d}}\" -- don't 'x' \"y\"" for index in range(400)
+)
+
+
+class TestAQuotedBraceWordIsNotCounted:
+    """Ledger 00466 N238 (ix): a quote-heavy heredoc raised
+    TooManyToEnumerateError, reported as a bug in the guard. A word in
+    which bash reads no brace as syntax is a literal, and is neither
+    enumerated nor counted against the cap."""
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            f"cat > notes.md <<'EOF'\n{_QUOTE_HEAVY_PROSE}\nEOF",
+            f"cat > notes.md <<EOF\n{_QUOTE_HEAVY_PROSE}\nEOF",
+            f"git commit -q -F - <<'EOF'\n{_QUOTE_HEAVY_PROSE}\nEOF",
+            "echo " + " ".join(f"'w{index}{{a,b}}'" for index in range(600)),
+            "echo " + " ".join(f"w{index}\\{{a,b}}" for index in range(600)),
+        ],
+    )
+    def test_quoted_brace_words_are_allowed(self, command: str) -> None:
+        decision, reason = _through_chain("Bash", {"command": command})
+        assert decision != Decision.DENY, reason
+
+    def test_a_brace_path_quoted_from_outside_its_word_still_denies(self) -> None:
+        """Split on whitespace, ``'/proj/.vault-p{a,x}ss'`` looks quoted, but
+        bash closes the quote before it; the quote-aware splitter reads the
+        whole word."""
+        command = f"cat 'x '{_BRACE_PATH}' y'"
+        reason = _deny_reason(command)
+        assert RuleID.SECRET_BASH_MENTION in reason
+
+    def test_unquoted_brace_words_past_the_cap_are_a_named_deny(self) -> None:
+        command = "echo " + " ".join(f"w{index}{{a,b}}" for index in range(600))
+        assert _could_not_finish(_deny_reason(command))
+
+
+class TestAGlobListPastTheBudgetIsANamedDeny:
+    """Ledger 00466 N238 (viii): ``ls`` listing several globs raised
+    TooManyToEnumerateError, reported as a bug in the guard. Bash does
+    expand them, so past the budget the answer is the named deny."""
+
+    @pytest.mark.parametrize(
+        "command",
+        ["ls n238/*/test_*.py", "ls n238/d1/test_*.py n238/*/test_1*.py"],
+    )
+    def test_the_glob_list_is_a_named_deny(self, command: str, tmp_path: Path) -> None:
+        for directory in range(20):
+            sub = tmp_path / "n238" / f"d{directory}"
+            sub.mkdir(parents=True)
+            for index in range(20):
+                (sub / f"test_{index}.py").touch()
+        decision, reason = _through_chain_at("Bash", {"command": command}, tmp_path)
+        assert decision == Decision.DENY
+        assert _could_not_finish(reason), reason
+
+    def test_a_glob_list_within_the_budget_is_allowed(self, tmp_path: Path) -> None:
+        (tmp_path / "n238" / "d1").mkdir(parents=True)
+        (tmp_path / "n238" / "d1" / "test_1.py").touch()
+        command = "ls n238/*/test_*.py n238/d1/test_*.py"
+        decision, reason = _through_chain_at("Bash", {"command": command}, tmp_path)
+        assert decision != Decision.DENY, reason

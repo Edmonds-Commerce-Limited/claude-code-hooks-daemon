@@ -1899,8 +1899,8 @@ class _RebindingPrefix:
             for heredoc in scan.heredocs
             if heredoc.terminated
             and not heredoc.operator.quoted
-            and _ASSIGNING_EXPANSION_PATTERN.search(
-                command, heredoc.body_start, heredoc.closer_start
+            and _expansions_may_rebind(
+                command[heredoc.body_start : heredoc.closer_start], commands=False
             )
         ]
         text = _blank_bodies(command, scan.heredocs)
@@ -1928,35 +1928,187 @@ def segment_may_rebind_commands(segment: str) -> bool:
 
     - a head that is not plain literal text (``$X``, ``"cat"``, ``\\cat``,
       ``$'cat'``, ``~/x``);
-    - a head from :data:`_REBINDING_HEADS`;
+    - a head from :data:`_REBINDING_HEADS`, or ``command`` other than the
+      ``command -v``/``-V`` lookup;
+    - a name-binding builtin (:data:`_NAME_BINDING_HEADS`, ``unset``
+      among them) binding a special name, or a name or value that is not
+      literal, or declaring a nameref or an integer;
     - ``set`` with an option off :data:`_SET_INERT_LETTERS`/
-      :data:`_SET_INERT_NAMES`, ``printf -v``, or a test that may assign in
-      arithmetic;
+      :data:`_SET_INERT_NAMES`, or ``printf -v``;
     - an assignment to a name bash or a helper program reads
       (:func:`_is_special_variable`), or through an evaluated subscript,
-      including the loop name of ``for``/``select``.
+      including the loop name of ``for``/``select``. ``PATH`` bound only
+      to literal system directories picks the programs it always did, and
+      does not count;
+    - arithmetic that may assign such a name (:func:`_arithmetic_may_rebind`),
+      and ``${X:=…}``/``${X=…}`` for a special ``X``.
     """
-    if _ASSIGNING_EXPANSION_PATTERN.search(mask_quoted(segment, keep_double=True)):
+    if _expansions_may_rebind(mask_quoted(segment, keep_double=True)):
         return True
-    unquoted = mask_quoted(segment, keep_double=False)
-    if _ARITHMETIC_COMMAND_PATTERN.search(unquoted):
-        return True
-    if _FUNCTION_DEFINITION_PATTERN.search(unquoted):
+    if _FUNCTION_DEFINITION_PATTERN.search(mask_quoted(segment, keep_double=False)):
         return True
     return any(_command_may_rebind(piece) for piece in _nested_commands(segment))
 
 
+def _expansions_may_rebind(text: str, commands: bool = True) -> bool:
+    """May an expansion or arithmetic command in ``text`` (quoted text
+    already blanked) assign a special name? ``commands`` is False for a
+    heredoc body, where only a ``$`` expands and ``((`` is text."""
+    index = 0
+    next_close = -1
+    next_open = -1
+    while index < len(text):
+        arithmetic_command = commands and text.startswith("((", index)
+        if arithmetic_command or text.startswith(("$((", "$["), index):
+            closer = "]" if text.startswith("$[", index) else "))"
+            start = text.index("[" if closer == "]" else "((", index) + len(closer)
+            end = _arithmetic_end(text, start, closer)
+            if end is None or _arithmetic_may_rebind(text[start:end]):
+                return True
+            # Inert arithmetic holds no `$`, so nothing inside needs a look.
+            index = end + len(closer)
+        elif text.startswith("${", index):
+            # Each nested `${` is judged too: `${X:-${PATH:=/tmp}}`.
+            if next_close < index:
+                next_close = text.find("}", index)
+            if next_open <= index:
+                found = text.find("${", index + 2)
+                next_open = len(text) if found < 0 else found
+            if next_close < 0:
+                return True
+            nested = next_open < next_close
+            if _parameter_may_rebind(text[index + 2 : min(next_close, next_open)], nested):
+                return True
+            index += 2
+        else:
+            index += 1
+    return False
+
+
+def _arithmetic_end(text: str, start: int, closer: str) -> int | None:
+    """Where the arithmetic opened just before ``start`` closes with
+    ``closer``, counting nested parentheses or brackets; None if never."""
+    opener = "[" if closer == "]" else "("
+    depth = 0
+    for index in range(start, len(text)):
+        char = text[index]
+        if char == opener:
+            depth += 1
+        elif depth and char == closer[0]:
+            depth -= 1
+        elif text.startswith(closer, index):
+            return index
+    return None
+
+
+def _parameter_may_rebind(body: str, nested: bool) -> bool:
+    """May the ``${…}`` expansion whose inside is ``body`` assign a special
+    name: ``${X:=v}``/``${X=v}``, an evaluated subscript or ``${X:offset}``
+    whose arithmetic may? ``nested``: ``body`` stops at a nested ``${``,
+    whose value an unfinished subscript or offset would evaluate."""
+    match = _PARAMETER_BODY_PATTERN.match(body)
+    if match is None:
+        return True
+    name, subscript, rest = match.group("name"), match.group("subscript"), match.group("rest")
+    if nested and (
+        rest.startswith("[") or (rest.startswith(":") and not rest.startswith(_WORD_OPERATORS))
+    ):
+        return True
+    if subscript is not None and _PLAIN_SUBSCRIPT.fullmatch(subscript) is None:
+        if _arithmetic_may_rebind(subscript[1:-1]):
+            return True
+    if rest.startswith((":=", "=")):
+        return _is_special_variable(name)
+    if rest.startswith(":") and not rest.startswith(_WORD_OPERATORS):
+        return any(_arithmetic_may_rebind(part) for part in rest[1:].split(":"))
+    return False
+
+
+#: ``${X:-w}``, ``${X:?w}``, ``${X:+w}``, ``${X:=w}``: a word, not an offset.
+_WORD_OPERATORS: tuple[str, ...] = (":-", ":?", ":+", ":=")
+#: The start of a ``${…}`` body: an optional ``#``/``!``, the name (or a
+#: special parameter), an optional subscript, and what follows.
+_PARAMETER_BODY_PATTERN = re.compile(
+    r"[#!]?(?P<name>[A-Za-z_]\w*|[0-9@*#?$!-])(?P<subscript>\[[^\]]*\])?(?P<rest>.*)\Z",
+    re.DOTALL,
+)
+#: An arithmetic operator that assigns its left operand.
+_ARITHMETIC_ASSIGNMENT = re.compile(r"\+\+|--|<<=|>>=|[-+*/%&^|]=|(?<![=!<>])=(?!=)")
+#: A name in arithmetic: not the digits of a number, nor its base or hex part.
+_ARITHMETIC_NAME = re.compile(r"(?<![\w#.])[A-Za-z_]\w*")
+#: ``NAME = expression``, the one assignment whose target is not read first.
+_ARITHMETIC_PLAIN_ASSIGNMENT = re.compile(
+    r"\s*(?P<name>[A-Za-z_]\w*)\s*=(?!=)(?P<value>.*)\Z", re.DOTALL
+)
+
+
+def _arithmetic_may_rebind(expression: str) -> bool:
+    """May evaluating the arithmetic ``expression`` assign a special name?
+
+    Plain numbers and operators assign nothing (``$((1+2))``). ``NAME =
+    numbers`` assigns only ``NAME``. Anything that reads a name may assign
+    any: bash evaluates a referenced variable's value as arithmetic in turn,
+    so ``x='PATH=0'; : $((x))`` assigns ``PATH`` (checked in bash). An
+    expansion inside may expand to anything.
+    """
+    if "$" in expression or _BACKTICK in expression:
+        return True
+    for part in expression.split(","):
+        if _ARITHMETIC_NAME.search(part) is None:
+            continue
+        assignment = _ARITHMETIC_PLAIN_ASSIGNMENT.match(part)
+        if (
+            assignment is None
+            or _is_special_variable(assignment.group("name"))
+            or _ARITHMETIC_NAME.search(assignment.group("value"))
+            or _ARITHMETIC_ASSIGNMENT.search(assignment.group("value"))
+        ):
+            return True
+    return False
+
+
 #: Heads that rebind a name, a builtin or the directory a relative ``PATH``
-#: entry means, or run text that may (the round 13 ruling's list, with
-#: ``let``, which assigns in arithmetic). ``for`` and ``select`` are judged
-#: as the assignment of their loop name they are (:data:`_LOOP_HEADS`).
+#: entry means, or run text that may (the round 13 ruling's list). The
+#: ruling's name-binding builtins are judged by the names they bind
+#: (:data:`_NAME_BINDING_HEADS`), ``for``/``select`` by their loop name
+#: (:data:`_LOOP_HEADS`), ``let`` by its arithmetic and ``command`` by
+#: whether it is a lookup.
 _REBINDING_HEADS: frozenset[str] = frozenset(
-    {"alias", "unalias", "hash", "enable", "builtin", "command", "eval", "source", "."}
-    | {"exec", "export", "declare", "typeset", "local", "readonly", "unset", "shopt"}
-    | {"trap", "read", "mapfile", "readarray", "getopts", "cd", "pushd", "popd"}
-    | {"coproc", "function", "let"}
+    {"alias", "unalias", "hash", "enable", "builtin", "eval", "source", "."}
+    | {"exec", "shopt", "trap", "cd", "pushd", "popd", "coproc", "function"}
 )
 _LOOP_HEADS: frozenset[str] = frozenset({"for", "select"})
+#: Builtins whose operands are the names they bind (``NAME`` or
+#: ``NAME=value``). ``getopts``' first operand is its option string.
+_NAME_BINDING_HEADS: frozenset[str] = frozenset(
+    {"export", "declare", "typeset", "local", "readonly", "unset", "read"}
+    | {"mapfile", "readarray", "getopts"}
+)
+#: Options that rebind whatever the operands are: a declaration's ``-n``
+#: (a nameref) and ``-i`` (arithmetic on assignment), ``unset -f`` (removes
+#: a function) and ``mapfile -C`` (runs a callback).
+_DECLARATION_LETTERS: frozenset[str] = frozenset("ni")
+_REBINDING_OPTION_LETTERS: dict[str, frozenset[str]] = {
+    "export": _DECLARATION_LETTERS,
+    "declare": _DECLARATION_LETTERS,
+    "typeset": _DECLARATION_LETTERS,
+    "local": _DECLARATION_LETTERS,
+    "readonly": _DECLARATION_LETTERS,
+    "unset": frozenset("f"),
+    "mapfile": frozenset("C"),
+    "readarray": frozenset("C"),
+}
+_GETOPTS = "getopts"
+_LET = "let"
+_COMMAND = "command"
+#: ``command -v``/``-V`` (with ``-p``) only look a name up.
+_LOOKUP_LETTERS: frozenset[str] = frozenset("pvV")
+#: The directories a system installs its programs in: a ``PATH`` of only
+#: these picks the programs a name means everywhere else.
+_SYSTEM_PROGRAM_DIRECTORIES: frozenset[str] = frozenset(
+    {"/usr/local/sbin", "/usr/local/bin", "/usr/sbin", "/usr/bin", "/sbin", "/bin"}
+)
+_PATH = "PATH"
 _SHELL_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 #: ``set`` options that only make the shell stop sooner or say more, in
 #: either sign: ``-e``, ``-u``, ``-x`` and their ``-o`` names, and pipefail.
@@ -1978,14 +2130,6 @@ _PLAIN_HEAD_PATTERN = re.compile(r"[A-Za-z0-9_./+@%:,-]+|\[\[?")
 #: An assignment word: the name, and a subscript bash may evaluate.
 _ASSIGNMENT_PREFIX = re.compile(r"(?P<name>[A-Za-z_]\w*)(?P<subscript>\[[^\]]*\])?\+?=")
 _PLAIN_SUBSCRIPT = re.compile(r"\[(?:\d+|[@*])\]")
-#: An expansion that assigns (``${X:=v}``, ``${X=v}``) or evaluates
-#: arithmetic, which assigns whatever it spells: ``$((…))``, ``$[…]``, a
-#: subscript that is not a plain index, and ``${X:offset}``.
-_ASSIGNING_EXPANSION_PATTERN = re.compile(
-    r"\$\(\(|\$\[|\$\{[#!]?[A-Za-z_]\w*(?:\[(?![@*]\]|\d+\])|:?=|:(?![-?+=]))"
-)
-#: An arithmetic command, ``((…))``.
-_ARITHMETIC_COMMAND_PATTERN = re.compile(r"\(\(")
 #: ``NAME()`` at a command position, or ``function NAME``.
 _FUNCTION_DEFINITION_PATTERN = re.compile(
     r"(?:^|[\s;&|(){}])(?:function\s|[^\s;&|<>(){}=$\"']+\s*\(\s*\))"
@@ -2036,7 +2180,7 @@ def _nested_commands(segment: str) -> list[str]:
     argument. A ``)`` that closes nothing ends a ``case`` pattern, and a
     command follows it. A comment ends the segment."""
     pieces: list[str] = []
-    frames: list[tuple[list[str], str, bool]] = []
+    frames: list[tuple[list[str], str, bool, bool]] = []
     buffer: list[str] = []
     index = 0
     in_double = False
@@ -2058,14 +2202,16 @@ def _nested_commands(segment: str) -> list[str]:
             or (char == ")" and not in_double and frames[-1][1] == ")")
         ):
             pieces.append("".join(buffer))
-            buffer, _closer, in_double = frames.pop()
-            buffer.append(_NESTED_BODY_PLACEHOLDER)
+            buffer, _closer, in_double, substitutes = frames.pop()
+            buffer.append(_SUBSTITUTION_PLACEHOLDER if substitutes else _NESTED_BODY_PLACEHOLDER)
             index = end
             continue
         elif (
             char == _BACKTICK or segment.startswith("$(", index) or (not in_double and char == "(")
         ):
-            frames.append((buffer, _BACKTICK if char == _BACKTICK else ")", in_double))
+            substitutes = char in (_BACKTICK, "$")
+            closer = _BACKTICK if char == _BACKTICK else ")"
+            frames.append((buffer, closer, in_double, substitutes))
             buffer = []
             in_double = False
             index = index + 2 if char == "$" else end
@@ -2085,6 +2231,8 @@ def _nested_commands(segment: str) -> list[str]:
 
 
 _NESTED_BODY_PLACEHOLDER = "_"
+#: A substitution's output is not literal, so its placeholder is not either.
+_SUBSTITUTION_PLACEHOLDER = "$_"
 
 
 def _command_may_rebind(piece: str) -> bool:
@@ -2095,7 +2243,9 @@ def _command_may_rebind(piece: str) -> bool:
         words = words[1:]
     while words and (assignment := _ASSIGNMENT_PREFIX.match(words[0])) is not None:
         subscript = assignment.group("subscript")
-        if _is_special_variable(assignment.group("name")):
+        appends = assignment.group().endswith("+=")
+        value = None if appends else resolve_shell_word(words[0][assignment.end() :])
+        if _binding_picks_programs(assignment.group("name"), value):
             return True
         if subscript is not None and _PLAIN_SUBSCRIPT.fullmatch(subscript) is None:
             return True
@@ -2105,6 +2255,15 @@ def _command_may_rebind(piece: str) -> bool:
     head, arguments = words[0], words[1:]
     if _PLAIN_HEAD_PATTERN.fullmatch(head) is None or head in _REBINDING_HEADS:
         return True
+    if head in _NAME_BINDING_HEADS:
+        return _names_may_rebind(head, arguments)
+    if head == _COMMAND:
+        return not _is_lookup(arguments)
+    if head == _LET:
+        return any(
+            text is None or _arithmetic_may_rebind(text)
+            for text in (resolve_shell_word(word) for word in arguments)
+        )
     if head in _LOOP_HEADS:
         # `for NAME in WORDS` assigns NAME once per word, and nothing else.
         return not arguments or not (
@@ -2117,6 +2276,60 @@ def _command_may_rebind(piece: str) -> bool:
     if head in _SINGLE_BRACKET_TESTS:
         return _single_bracket_may_assign(arguments)
     return _arithmetic_test_may_assign(words)
+
+
+def _binding_picks_programs(name: str, value: str | None) -> bool:
+    """May binding ``name`` to ``value`` (None when not literal) change what a
+    later name runs? Any special name may, but a ``PATH`` of only literal
+    system program directories picks what a name means everywhere else."""
+    if not _is_special_variable(name):
+        return False
+    if name != _PATH or value is None or not value:
+        return True
+    return not set(value.split(":")) <= _SYSTEM_PROGRAM_DIRECTORIES
+
+
+def _names_may_rebind(head: str, arguments: list[str]) -> bool:
+    """May the name-binding builtin ``head`` rebind? Only when it binds a
+    special name, when a name, value or option is not literal, or when an
+    option in :data:`_REBINDING_OPTION_LETTERS` is given. An option's value
+    is judged as a name, which can only refuse more."""
+    rebinding_letters = _REBINDING_OPTION_LETTERS.get(head, frozenset())
+    operands: list[str] = []
+    options_end = False
+    for word in _without_redirections(arguments):
+        text = resolve_shell_word(word)
+        if text is None:
+            return True
+        if not options_end and not operands and text == _END_OF_OPTIONS:
+            options_end = True
+        elif not options_end and not operands and text.startswith(("-", "+")):
+            if rebinding_letters & set(text[1:]):
+                return True
+        else:
+            operands.append(text)
+    if head == _GETOPTS:
+        operands = operands[1:2]
+    for text in operands:
+        name, has_value, value = text.partition("=")
+        if _SHELL_NAME.fullmatch(name) is None:
+            return True
+        if _binding_picks_programs(name, value if has_value else None):
+            return True
+    return False
+
+
+def _is_lookup(arguments: list[str]) -> bool:
+    """Is ``command`` given ``-v`` or ``-V``, which only look a name up?"""
+    for word in arguments:
+        text = resolve_shell_word(word)
+        if text is None or not text.startswith("-") or text == _END_OF_OPTIONS:
+            return False
+        if not set(text[1:]) <= _LOOKUP_LETTERS:
+            return False
+        if set(text[1:]) & {"v", "V"}:
+            return True
+    return False
 
 
 def _without_redirections(words: list[str]) -> list[str]:
@@ -2187,10 +2400,10 @@ def _arithmetic_test_may_assign(words: list[str]) -> bool:
         return True
     if not _ARITHMETIC_TEST_OPERATORS & {text for text in texts if text is not None}:
         return False
-    return not all(
-        text is not None and (text.lstrip("+-").isdigit() or text in _TEST_WORDS)
+    return any(
+        text is None or _arithmetic_may_rebind(text)
         for text in texts
-        if text not in _ARITHMETIC_TEST_OPERATORS
+        if text not in _ARITHMETIC_TEST_OPERATORS and text not in _TEST_WORDS
     )
 
 

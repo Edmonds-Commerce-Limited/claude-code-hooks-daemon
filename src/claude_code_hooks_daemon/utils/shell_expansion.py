@@ -946,13 +946,36 @@ def iter_brace_words(text: str, *, max_words: int = DEFAULT_MAX_BRACE_WORDS) -> 
     ``TooManyToEnumerateError`` from :func:`expand_braces` as fail-closed,
     so this raises the identical exception rather than inventing a second
     "give up" signal.
+
+    A word in which bash reads no brace as syntax (``'{a,b}'``, ``\\{a,b}``)
+    is neither yielded nor counted (ledger 00466 N238): prose quoting
+    hundreds of such words hit the cap, which is a quoted literal being
+    enumerated. Where the word is a fragment of a longer shell word whose
+    quoting began before it (``'x '{a,b}' y'``), the quote-aware splitter
+    (:func:`iter_shell_brace_words`) reads the whole word as bash does.
     """
-    for count, (start, end) in enumerate(_brace_word_spans(text)):
+    count = 0
+    for start, end in _brace_word_spans(text):
+        word = text[start:end]
+        if not _holds_brace_syntax(word):
+            continue
         if count >= max_words:
             raise TooManyToEnumerateError(
                 f"more than {max_words} brace-carrying words in a single command"
             )
-        yield text[start:end]
+        count += 1
+        yield word
+
+
+def _holds_brace_syntax(word: str) -> bool:
+    """Does bash, reading ``word`` alone, expand a brace group in it? A word
+    whose quoting cannot be read with certainty, or past the scan budget,
+    counts as one that does."""
+    try:
+        braces = _BashBraces(word, max_depth=DEFAULT_MAX_BRACE_DEPTH)
+        return next(braces.top_level_groups(), None) is not None
+    except TooManyToEnumerateError:
+        return True
 
 
 def _brace_word_spans(text: str) -> Iterator[tuple[int, int]]:

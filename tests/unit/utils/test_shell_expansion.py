@@ -398,6 +398,19 @@ class TestIterBraceWords:
         with pytest.raises(TooManyToEnumerateError):
             list(iter_brace_words(command, max_words=10))
 
+    @pytest.mark.parametrize(
+        "word",
+        ["'{a,b}'", '"{a,b}"', "\\{a,b}", "{a\\,b}", "{'a,b'}", "{ab}", "{\n a, b}"],
+    )
+    def test_a_word_bash_reads_no_group_in_is_neither_yielded_nor_counted(self, word: str) -> None:
+        """Ledger 00466 N238 (ix): prose quoting brace words hit the cap."""
+        assert list(iter_brace_words(" ".join([word] * 600), max_words=10)) == []
+
+    @pytest.mark.parametrize("word", ["x'y'{a,b}", "{a,'b'}", "{a,b}'x'", "$'x'{a,b}"])
+    def test_a_word_with_one_unquoted_group_is_counted(self, word: str) -> None:
+        with pytest.raises(TooManyToEnumerateError):
+            list(iter_brace_words(" ".join([word] * 11), max_words=10))
+
     def test_adversarial_no_brace_input_is_fast(self) -> None:
         """B1-R3 / M-3 (Plan 00466 review): the 94 KB / 200 KB reproducer --
         a huge run of non-whitespace text carrying no brace at all -- must

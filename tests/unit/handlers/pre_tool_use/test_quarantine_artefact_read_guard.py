@@ -11,14 +11,13 @@ out of the box with no config.
 from __future__ import annotations
 
 import re
-import shutil
-import subprocess
 from pathlib import Path
 from typing import Any
 
 import pytest
+from tests.bash_sandbox import run_sandboxed_bash
 
-from claude_code_hooks_daemon.constants import HandlerID, Priority, Timeout
+from claude_code_hooks_daemon.constants import HandlerID, Priority
 from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.core import Decision
 from claude_code_hooks_daemon.core.chain import HandlerChain
@@ -673,18 +672,7 @@ def _tree_past_the_walk_cap(root: Path) -> None:
 
 def _bash_words(command: str, cwd: Path) -> list[str]:
     """The words bash passes to a program for ``command``'s arguments."""
-    bash = shutil.which("bash")
-    assert bash is not None
-    result = subprocess.run(
-        [bash, "--norc", "--noprofile", "-c", f"printf '%s\\n' {command}"],
-        cwd=cwd,
-        env={"LC_ALL": "C", "PATH": "/usr/bin:/bin"},
-        capture_output=True,
-        text=True,
-        check=True,
-        timeout=Timeout.QA_TEST_TIMEOUT,
-    )
-    return result.stdout.splitlines()
+    return run_sandboxed_bash(f"printf '%s\\n' {command}", cwd, "/usr/bin:/bin").splitlines()
 
 
 class TestAQuotedGlobIsNeverEnumerated:
@@ -726,17 +714,74 @@ class TestAQuotedGlobIsNeverEnumerated:
         payload = _hook_input("Bash", {"command": "cat 'docs/topic-opus-security-DETAIL.md'"})
         assert handler.matches(payload) is True
 
+    @pytest.mark.parametrize(
+        "command",
+        [
+            # (v) a quoted regex holding `**`, with a two-wildcard path.
+            "awk '/**Round**/,0' d*/*f1*",
+            "awk '/x/,0' d*/*f1*",
+            # (vi) a plain grep with a regex.
+            "grep -n '/**Status**/' d1/f1.md",
+            "grep -rn 'x.*y' .",
+            'grep -n "^#.*d1" d1/f1.md',
+            "grep -nE '^d[0-9]+/.*:.*#' d1/f1.md",
+            # (vii) a grep with several -e patterns.
+            "grep -n -e '/**a**/' -e '/b/**' -e 'c.*' d1/f1.md",
+            "grep -rn -e 'a.*b' -e 'c.*d' -e '^x' -e 'y$' -e '[0-9]*' .",
+            # (ix) a quote-heavy heredoc.
+            "cat > q.md <<'EOF'\n"
+            + "\n".join(f"- it's \"{i}\" and '{{a,b}}' or \"*.md\" 'd*/f*'" for i in range(600))
+            + "\nEOF",
+        ],
+    )
+    def test_a_regex_or_quoted_prose_is_allowed(
+        self,
+        handler: QuarantineArtefactReadGuardHandler,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        command: str,
+    ) -> None:
+        _tree_past_the_walk_cap(tmp_path)
+        monkeypatch.chdir(tmp_path)
+        hook_input = _hook_input("Bash", {"command": command})
+        assert handler.matches(hook_input) is False
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "cat **/*.md",
+            "awk '/x/,0' **/f1*.md",
+            # (viii) several globs listed.
+            "head -n 1 d1/*.md **/f2*.md",
+        ],
+    )
     def test_an_unquoted_glob_past_the_budget_is_a_named_deny(
         self,
         handler: QuarantineArtefactReadGuardHandler,
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
+        command: str,
     ) -> None:
+        """Bash does expand these, and the walk past its budget cannot say
+        whether an artefact is among them."""
         _tree_past_the_walk_cap(tmp_path)
-        assert len(_bash_words("**/*.md", tmp_path)) > 1
+        assert len(_bash_words(command.split()[-1], tmp_path)) > 1
         monkeypatch.chdir(tmp_path)
-        result = handler.handle(_hook_input("Bash", {"command": "cat **/*.md"}))
+        result = handler.handle(_hook_input("Bash", {"command": command}))
         assert result.decision == Decision.DENY
         assert result.reason is not None
         assert sfm.SCAN_COULD_NOT_FINISH in result.reason
         assert RuleID.QUARANTINE_ARTEFACT_READ_EVALUATION_ERROR not in result.reason
+
+    def test_a_two_wildcard_glob_within_the_budget_is_allowed(
+        self,
+        handler: QuarantineArtefactReadGuardHandler,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        for directory in range(3):
+            (tmp_path / f"d{directory}").mkdir()
+            (tmp_path / f"d{directory}" / "f-p421.md").touch()
+        monkeypatch.chdir(tmp_path)
+        hook_input = _hook_input("Bash", {"command": "awk '/x/,0' d*/*p421*"})
+        assert handler.matches(hook_input) is False

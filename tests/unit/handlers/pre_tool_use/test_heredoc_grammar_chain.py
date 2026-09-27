@@ -10,16 +10,15 @@ from __future__ import annotations
 
 import os
 import shutil
-import subprocess
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
 
 import pytest
+from tests.bash_sandbox import run_sandboxed_bash
 
 from claude_code_hooks_daemon.constants.rule_ids import RuleID
-from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.core import Decision
 from claude_code_hooks_daemon.core.chain import HandlerChain
 from claude_code_hooks_daemon.core.data_layer import reset_data_layer
@@ -240,20 +239,10 @@ _RAN_RESET = "GIT reset " + "--hard"
 
 def _bash_run(script: str, cwd: Path) -> str:
     """What bash reported running, with ``git``, ``pytest``, ``tail`` and
-    ``curl`` replaced by recorders. Nothing is read from stdin."""
-    bash = shutil.which("bash")
-    assert bash is not None
-    result = subprocess.run(
-        [bash, "--norc", "--noprofile", "-c", _RECORDERS + script],
-        cwd=cwd,
-        env={"LC_ALL": "C", "PATH": "/usr/bin:/bin"},
-        stdin=subprocess.DEVNULL,
-        capture_output=True,
-        text=True,
-        check=False,
-        timeout=Timeout.QA_TEST_TIMEOUT,
-    )
-    return result.stdout + result.stderr
+    ``curl`` replaced by recorders, in the git sandbox ``cwd`` (a git the
+    functions do not catch reaches only the sandbox). Nothing is read from
+    stdin."""
+    return run_sandboxed_bash(_RECORDERS + script, cwd, "/usr/bin:/bin")
 
 
 def _outside(tmp_path: Path) -> str:
@@ -447,19 +436,9 @@ def _isolated_bash_run(script: str, tmp_path: Path) -> str:
         found = shutil.which(program)
         assert found is not None
         (recorders / program).symlink_to(found)
-    work = tmp_path / "work"
-    work.mkdir()
-    result = subprocess.run(
-        [str(recorders / "bash"), "--norc", "--noprofile", "-c", script],
-        cwd=work,
-        env={"LC_ALL": "C", "PATH": str(recorders)},
-        stdin=subprocess.DEVNULL,
-        capture_output=True,
-        text=True,
-        check=False,
-        timeout=Timeout.QA_TEST_TIMEOUT,
+    return run_sandboxed_bash(
+        script, tmp_path / "work", str(recorders), bash=str(recorders / "bash")
     )
-    return result.stdout + result.stderr
 
 
 #: Enough lines that ``sort -S 4K`` spills to a temporary file, and so runs
@@ -668,21 +647,27 @@ class TestAnEarlierSegmentCanRunTheBody:
             "unalias ls; ",
             "enable -n echo; ",
             "builtin echo x; ",
-            "command -v x; ",
+            "command ls; ",
             ". env.sh; ",
             "exec 3>&1; ",
-            "export X=1; ",
-            "declare -f x; ",
-            "typeset x; ",
-            "local x; ",
-            "readonly x; ",
-            "unset x; ",
+            "export PATH=/tmp; ",
+            "export X=$Y; ",
+            "declare -n x=PATH; ",
+            "declare -i x; ",
+            "typeset -n x=IFS; ",
+            "local -i x; ",
+            "readonly PAGER=bash; ",
+            "unset PATH; ",
+            "unset -f cat; ",
             "trap 'x' EXIT; ",
-            "read x; ",
-            "mapfile x < f; ",
-            "readarray x < f; ",
+            "read PATH; ",
+            "mapfile -C cb x < f; ",
+            "readarray PATH < f; ",
             "printf -v X y; ",
-            "getopts ab x; ",
+            "getopts ab PATH; ",
+            "let PATH=1; ",
+            ": $((PATH=1)); ",
+            ": $((i+1)); ",
             "cd /repo && ",
             "pushd d; ",
             "popd; ",
@@ -693,6 +678,7 @@ class TestAnEarlierSegmentCanRunTheBody:
             "set -f; ",
             "set -o posix; ",
             "PATH=/tmp; ",
+            "PATH=/usr/bin:/tmp; ",
             "BASH_ENV=x; ",
             "ENV=x; ",
             "IFS=x; ",
@@ -723,6 +709,22 @@ class TestAnEarlierSegmentCanRunTheBody:
             "git status && ",
             "D=notes; echo hi; ",
             "python3 x.py; ",
+            "export X=1; ",
+            "declare -f x; ",
+            "typeset x; ",
+            "local x; ",
+            "readonly x; ",
+            "unset X; ",
+            "read x; ",
+            "mapfile x < f; ",
+            "readarray x < f; ",
+            "getopts ab x; ",
+            "let x=1; ",
+            "command -v x; ",
+            "command -v cat && ",
+            "echo $((1+2)); ",
+            ": $((x=1)); ",
+            "((x=1)); ",
         ],
     )
     def test_a_prefix_that_cannot_rebind_keeps_prose_data(
@@ -731,6 +733,17 @@ class TestAnEarlierSegmentCanRunTheBody:
         """Run isolated first: none of these runs the body."""
         command = f"{prefix}cat > notes.md <<'EOF'\nnever run {_RESET}, it's prose\nEOF"
         assert _RAN_RESET not in _isolated_bash_run(command, tmp_path)
+        assert _decision(DestructiveGitHandler(), command) == Decision.ALLOW
+        assert _decision(ProjectContainmentHandler(), command) == Decision.ALLOW
+
+    @pytest.mark.parametrize(
+        "prefix",
+        ["PATH=/usr/bin:/bin; ", "export PATH=/usr/local/bin:/usr/bin:/bin; "],
+    )
+    def test_a_system_path_keeps_prose_data(self, prefix: str) -> None:
+        """Not run: a system ``PATH`` would reach the real git, which only
+        the sandbox's ``GIT_DIR`` would then contain."""
+        command = f"{prefix}cat > notes.md <<'EOF'\nnever run {_RESET}, it's prose\nEOF"
         assert _decision(DestructiveGitHandler(), command) == Decision.ALLOW
         assert _decision(ProjectContainmentHandler(), command) == Decision.ALLOW
 
