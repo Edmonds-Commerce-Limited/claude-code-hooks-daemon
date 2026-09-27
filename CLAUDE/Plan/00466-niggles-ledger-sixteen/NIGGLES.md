@@ -811,8 +811,6 @@ growth is pinned by counting the segments it reads (8x, where the stdlib
 reads 63x), and `_is_plugin_component` is pinned by counting its probes (the
 same at depth 50 and 400, where main makes 103 and 803).
 
-> > > > > > > worktree-n466-superlinear
-
 ### N110 — The local full QA gate tests one Python version, so a version-specific defect passes it and fails CI
 
 **Found by the N106 fixer.** N24 passed the full local gate and went red on
@@ -829,6 +827,257 @@ each interpreter `uv` can provide, keeping the other stages on one. Or have
 the gate state which versions it ran and refuse to call itself a merge gate
 when that set is narrower than CI's matrix. Pin it with a test that reads
 the CI workflow's matrix and compares it to what the gate runs.
+
+**✅ Remedied on `worktree-n466-n110`.** `scripts/qa/run_test_matrix.py` is
+now the tests stage for both `llm_qa.py` and `run_all.sh`. It reads CI's
+matrix from `qa.yml` at run time. The checkout's venv still runs
+`run_tests.sh` in full. Every other matrix version gets a uv-provisioned
+venv. Its `tests/unit` run overlaps the primary run, and its other
+directories run afterwards, one version at a time. A version that cannot be
+provisioned fails the stage. `tests/unit/qa/test_run_test_matrix.py` pins
+the gate's version set against the workflow's matrix. The behaviour is
+documented in `CLAUDE/QA.md`, and the report is
+`subagent-reports/260926-n110-opus-5-5.md`.
+
+**Round 3: the gate reported 92.61% coverage with every test passing.**
+The gate at `c9c38145c` ran 30,551 primary tests, the usual count, and
+coverage failed `fail_under=95`. The cause was N196's own fix, so main does
+not share it. `run_tests.sh` loaded the `first_error_lines` plugin with
+`-p claude_code_hooks_daemon.qa.first_error_lines`. pytest imports a `-p`
+plugin while it parses its arguments, before pytest-cov starts. That import
+runs the package `__init__`, which imports `core`, `constants`, `qa.runner`
+and more, so none of their module-level lines were measured.
+
+- Evidence: against `p408-inert-heads` (95.09%, 53,395 statements) the gate
+  had 1,713 more missing lines, and the largest gaps were import-only
+  modules: `constants/handlers.py` (164 of 165 missing), `constants/priority.py`
+  (160 of 160) and `core/__init__.py` (19 of 19).
+- Controlled measurement: the same 228 tests in `tests/unit/constants`, run
+  with and without the `-p` flag, gave `constants/priority.py` 160 missing
+  lines and 0 missing lines.
+- The shared-data-file and `--cov`-config candidates were ruled out. The
+  extra runs take no `--cov`, and the primary's coverage flags are unchanged
+  from main.
+
+**✅ Remedied on `worktree-n466-n110`.** `tests/conftest.py` loads the plugin
+through `pytest_plugins`, which runs after coverage has started. Neither
+`run_tests.sh` nor `run_test_matrix.py` passes `-p` any more.
+`TestThePluginLoadsAfterCoverageStarts` in
+`tests/unit/qa/test_run_test_matrix.py` evaluates `run_tests.sh`'s own
+`FIRST_ERROR_ARGS` in bash, and runs an extra run's argv, under `--cov` over
+one small test file. It asserts that the import-only `core/__init__.py` and
+`qa/__init__.py` have no missing lines. It was RED on `c9c38145c`.
+
+### N114 — A `py311` fingerprint venv is built on whatever Python uv prefers
+
+**Found by the N110 fixer.** `ensure_venv ... python3` computes the venv's
+name from PATH's `python3` (3.11 here, so `venv-…-py311-…`). It then builds
+the venv with `HOOKS_DAEMON_PYTHON=python3`, and `create_venv_at_path` passed
+that bare name straight to `uv sync --python python3`. uv reads a bare
+`python3` as a VERSION request ("any 3.x"), not as the executable on PATH,
+so it builds on its own preferred interpreter. Measured here:
+
+- the worktree venvs of `worktree-n466-n101` and `worktree-n466-n105` are
+  named `py311` but run 3.13.15;
+- replaying the steps for N110 gave 3.12;
+- `uv sync --python python3` on a toy project built 3.12, and the same sync
+  with the resolved `/usr/bin/python3` built 3.11.
+
+So every worktree built by `setup_worktree.sh`, and any client install whose
+uv prefers a managed Python, ran its daemon and QA on a Python its venv's
+name denied. It was first blamed on `setup_worktree.sh`'s dev-extras sync,
+but that sync into an existing venv was measured NOT to swap. The swap
+happens when the venv is created.
+
+**✅ Remedied on `worktree-n466-n110`.**
+
+- `create_venv_at_path` resolves `HOOKS_DAEMON_PYTHON` with `command -v`,
+  hands uv the path, and fails before uv runs if the interpreter is missing.
+- After the sync it compares the built venv's X.Y with the requested
+  interpreter's. On a mismatch it fails loudly and removes the venv, so the
+  resolver's `venv-*` glob cannot pick it up.
+- `setup_worktree.sh` pins its dev-extras sync with `--python` for the venv's
+  own interpreter, and refuses a venv whose Python differs from the `pyMM`
+  in its name.
+- Pinned by `tests/integration/test_venv_sh_builds_on_the_fingerprinted_python.py`
+  (4 RED on main) and two new checks in
+  `tests/integration/test_worktree_daemon_env_provisioning.py` (RED on main).
+- Existing mislabelled worktree venvs are not rewritten. Rebuild one by
+  removing it and re-running the setup steps.
+
+### N122 — `test_second_starter_waits_then_reuses_the_finished_venv` flakes under CPU contention: a fixed 0.3s sleep, not a real event, ordered the two starters
+
+**Found by the N110 landing gate.** The full local QA run (29,711 tests) hit
+one failure:
+`tests/integration/test_ensure_venv_lock.py::TestConcurrentStartersBuildOnce::test_second_starter_waits_then_reuses_the_finished_venv`,
+asserting `WAITING_FRAGMENT not in err2` — the second starter built the venv
+uncontended instead of waiting on the first. It passed every time run alone.
+
+**Root cause: the test, not the lock.** `_run_two_starters` began the second
+`ensure_venv` subprocess a fixed `time.sleep(0.3)` after the first, assuming
+the first would always reach `acquire_venv_lock` inside that window. Under
+real CPU contention (30 copies of this test spawned in parallel, 8 cores)
+that assumption can be wrong: the first bash subprocess's own scheduling —
+not the code under test — can take longer than 0.3s to reach the lock,
+so the second's non-blocking `flock -n` wins uncontended.
+
+**Measured (30 pytest processes running this one test concurrently, 8
+cores):**
+
+- This branch, before the fix: 5/60 failed (~8%) across two 30-way batches.
+- `git archive` of main (`fe14348e7`), same test, same harness: 0/60 failed
+  across two 30-way batches.
+- After the fix (below), this branch: 0/60 failed.
+
+**✅ Remedied on `worktree-n466-n110`, in the test only** — this is a test
+ordering defect, not a lock defect; `acquire_venv_lock` and its
+`WAITING_FRAGMENT`/`TIMEOUT_FRAGMENT` messages are unchanged.
+`tests/integration/test_ensure_venv_lock.py` replaces the fixed sleep with a
+real barrier: a `_StderrWatcher` reads the first starter's stderr on a
+background thread and only releases the second starter once it has seen
+`"creating venv at"` — the line `_ensure_venv_build` (venv.sh) prints
+immediately after `acquire_venv_lock` returns holding the lock, so the
+ordering is guaranteed by the production code's own event, not a guess at
+its timing. No sleep-based ordering and no widened timeout remain in this
+test; `_TIMEOUT_SECONDS` (60s) bounds the wait as it already bounded
+`_finish`.
+
+### N196 — The multi-version gate lets the daemon idle out between its serial runs, times two guards by wall clock, and names errors with no cause
+
+**Found by N110 gate fix 2** (report `subagent-reports/260926-n110-opus-5-5.md`,
+section "Gate fix 2"). The N110 gate (head `2fa17dc73`) went red in three
+groups. Two are defects on this branch, and a third is a cost the timing
+tests hid:
+
+- **py3.13 rest ERRORED on 10 acceptance tests.** `run_test_matrix.py`
+  started the daemon once, before the first serial run. py3.12 rest's last
+  daemon traffic was at 18:47, and that run ended at 18:58:38. The daemon's
+  `idle_timeout_seconds: 600` stopped it at about 18:57, so py3.13 rest found
+  no daemon. The three declared release-gate files turned their skips into
+  errors. Fourteen more acceptance tests skipped quietly (31 skips, where
+  py3.12 had 17).
+- **The gate's summary named those 10 errors with no cause.** It printed node
+  ids only. The cause was in the shard's raw log, and pytest's short summary
+  cut each message to 80 columns before it reached the skip reason.
+- **`project_handlers`: 2 failures in `test_enforce_llm_qa.py`.** These tests
+  used wall-clock `< 1.0s` asserts. The stage runs alone, after the tests
+  stage, so the matrix did not starve them. Host load did (a load average
+  of 33 on 8 cores). Measured by growth, the handler was also QUADRATIC in a
+  word's length: 0.25 s at 100 KB, 0.82 s at 200 KB, 3.3 s at 400 KB. The
+  stdlib `shlex.read_token` grows its token with `self.token += c`, and
+  CPython only appends in place to a local. So the 200 KB case sat at 0.82 s
+  of CPU, just under the old bound.
+
+**✅ Remedied on `worktree-n466-n110`.**
+
+- `run_matrix` ensures the daemon before EVERY serial run.
+- A new pytest plugin, `claude_code_hooks_daemon.qa.first_error_lines`,
+  records each failed or errored test's first error line. Both the primary
+  and the extra runs load it. `tests.json` carries the line as `reason`, and
+  `llm_qa.py` prints it after the node id.
+- The blocking-gate guard now puts the skip reason on its message's first
+  line.
+- `utils/linear_shlex.LinearShlex` is the stdlib state machine with a list
+  accumulator. It is differentially tested against `shlex.shlex` over a
+  corpus and 12,000 random strings in four configurations. It is 52 to 70x
+  per 8x on stdlib and at most 24x on this class.
+- `enforce_llm_qa` tokenises with it, and its three timing tests now assert
+  `tests/scaling.py` growth ratios.
+
+### N197 — Fourteen `src/` modules still tokenise untrusted commands with the stdlib's quadratic `shlex`
+
+**Found by N110 gate fix 2 (N196).** `shlex.shlex.read_token` costs time
+quadratic in a token's length on 3.11 to 3.13 (measured 52 to 70x for 8x
+input). `project_containment`, `lsp_enforcement`, `sensitive_content`,
+`root_recursion_guard`, `merge_to_main_approval`, `markdown_organization`,
+`reference_repo_freshness`, `lint_on_edit`, `bash_file_writes`,
+`secret_file_matching`, `git_commit_parsing`, `process_probe`, `core/utils`
+and `kotlin_strategy` all use `shlex` on hook input or tool output. Not every
+one is on a hot path, and none has been measured here. Any of them that
+splits a Bash command can be made slow with one long word.
+
+**Remedy:** measure each site's growth on a long word with
+`tests/scaling.py`. Move every superlinear one to
+`claude_code_hooks_daemon.utils.linear_shlex.LinearShlex` (or
+`shlex.split`'s equivalent built on it). Then add a semgrep rule that bans
+`shlex.shlex`/`shlex.split` in `src/` and project handlers, as
+`pathlib-quadratic-containment` does for N106.
+
+### N211 — Merge-conflict markers reach the ledger on main, disguised as blockquotes
+
+**Found by N110 gate fix 2.** `NIGGLES.md` on main (`fd4956813`) carries two
+`> > > > > > > <branch>` lines: after N106 and after N100. They are the
+closing `>>>>>>>` markers of resolved merge conflicts. The markdown
+formatter rewrote them as nested blockquotes, and after that no check
+reads them as conflict markers. Neither plan QA nor docs QA flags them, and
+the staged-lint gate does not either.
+
+**Remedy:** find the merge step that commits an unresolved marker. Then add
+a staged-tree check for both spellings, raw and blockquoted, in tracked
+text. Both lines are removed on `worktree-n466-n110`, but that fixes the
+symptom only.
+
+### N222 — Tests assert absolute wall-clock bounds, so a loaded host fails them while they pass alone
+
+**Found by N110 gate fix 2, from N196 and team-lead's sweep request.** The
+two `test_enforce_llm_qa.py` failures (N196) were one case of a wider
+pattern. Main `fd4956813` fails `TestInteriorWildcardDpIsBounded` at load
+91 (n53-fix-7c), and the N101 branch saw 17 such unit failures at load 40,
+all of which pass alone. An absolute bound fails under load and says nothing
+about growth, which is what most of these tests exist to pin.
+
+**✅ Remedied on `worktree-n466-n110` for the performance-shaped tests.**
+Each now pins growth (thread CPU time at N against 8N, `tests/scaling.py`)
+or counts work. No bound was loosened.
+
+- `test_secret_file_matching.py`:
+  - Two wide-range tests count the code points `chr` builds (0).
+  - Three DP tests and the star-run test pin growth.
+  - The deadline test uses a fake clock, one tick per reading, and must
+    raise at the first reading past the deadline.
+  - The five brace and filesystem-walk tests pin growth, or count
+    directory reads (0 for a root-rooted glob), with a new
+    `tests/support/directory_reads.py`.
+  - The volume class measures thread CPU time instead of wall time.
+- `test_shell_segmentation_performance.py` (3) and
+  `test_shell_expansion.py` (4 growth tests, 2 directory-read counts).
+- `test_plan_number_helper.py` and `test_lsp_enforcement.py`: the
+  regex-linearity tests pin growth.
+- `test_goal_injection.py`: the owner-refresh test now counts live-plan
+  scans and renders (one each). As written it measured a path that renders
+  nothing: with no second live plan, a retirement only clears signals.
+- `test_handler_name_validation.py`: it counts package walks (one per event
+  type across three validations).
+- `test_venv_lock.py`: "released" is a non-blocking `flock` that succeeds,
+  not a timed second acquisition.
+
+RED on a mutated `git archive` copy of each file: a range that is built, a
+deadline never checked, a root glob that is walked, and a render per owner.
+Each one fails.
+
+**Still open: the remaining tests check that a timeout is honoured, or
+have no size to scale.**
+
+- A per-call budget: `tests/unit/core/test_input_schemas.py:586` (under 5
+  ms). `validate_input` builds a `Draft7Validator` on every call. Cache it
+  and count constructions.
+- Concurrency: `tests/daemon/test_server.py:390`. Replace the timing with a
+  `threading.Barrier` handler that only passes when all three requests are
+  in flight at once.
+- Bound honoured (wall time against a timeout): `test_init_sh_venv_self_heal.py:66`,
+  `test_relay_guard_fail_open.py:476`, `test_ensure_venv_lock.py:296`,
+  `test_resolve_venv_runnability_probe.py:149,278`,
+  `test_venv_bootstrap_driver.py:256,273,804`,
+  `test_venv_bootstrap_hostile_path_epoch.py:119,172`,
+  `test_paths_resolve_venv_diagnostics.py:1020` and
+  `test_venv_lock.py:203,241`. Their margins are wide, 3x to 20x the bound.
+  The deterministic form is an injected clock or an ordering check: the
+  hook returned while the build was still running.
+
+**Only on the N101 branch** (routed to team-lead): 13
+`test_secret_file_guard.py` tests hit the guard's own wall-clock scan
+deadline under load and fail closed. So a verdict that should be an allow
+depends on host load. That is a production concern, not only a test one.
 
 ### N105 — A skill redeploy leaves an untracked, unignored `.claude/hooks-daemon-backups/`
 
@@ -876,6 +1125,13 @@ shell words. Keep fail-closed where the shell does expand the text. Pin both
 cases. It touches the guard that guard-defects just changed, so it goes on a
 fresh branch from main.
 
+**Second shape (N110 gate fix 2):** a plain shell glob,
+`ls -d untracked/venv-*/lib/python*/site-packages/_pytest`, is denied the
+same way. The shell does expand this one, so failing closed is right. But
+the deny reason calls it "a bug in the guard itself" and says to file an
+issue. A deliberate cap should be a named verdict that says how to narrow
+the glob.
+
 ### N100 — A continuation on a heredoc opener line (`cat > s.sh \⏎<<'EOF'`) denies a body that is only written
 
 **Found by N38 reviews 6 to 9 (candidate 4), unchanged on main.** When the
@@ -889,8 +1145,6 @@ send people.
 the N38 lexer, and pin that the continued and single-line forms get the
 same verdict. It goes on the executed-body branch with N87 to N89 and N93,
 after N38.
-
-> > > > > > > main
 
 ### N99 — `dev-handlers.md` offers an agent a wrapper command that the daemon denies
 

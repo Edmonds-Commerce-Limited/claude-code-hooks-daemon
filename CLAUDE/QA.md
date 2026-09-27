@@ -96,6 +96,48 @@ while the runner ran considerably more.
   `_KNOWN_RESIDUALS["try_except_permission_pass"]` in the detector's own
   test file, asserted to stay uncaught so a future fix flips that assertion
   red instead of drifting unnoticed.
+- **Tests run under every Python in CI's matrix** (`run_test_matrix.py`,
+  ledger 00466 N110). CI's QA job runs the suite once per version in
+  `.github/workflows/qa.yml` (`jobs.qa.strategy.matrix.python-version`). A
+  gate that ran one interpreter passed defects that exist only on another,
+  so the tests stage reads that matrix at run time. Adding a version to CI
+  widens the gate with no second edit, and an unreadable matrix fails the
+  stage. How it runs:
+  - The **primary** is the checkout's venv. It runs `run_tests.sh` as
+    before: all of `tests/`, with coverage.
+  - Every other matrix version is an **extra**. Each gets a venv at
+    `untracked/qa-interpreters/py<X.Y>/`, synced from `uv.lock` by `uv`.
+    These venvs sit outside the `untracked/venv-*` glob that the daemon's
+    venv resolver scans, so one can never become the daemon's venv.
+  - **Phase 1** runs the primary and each extra's `tests/unit` at the same
+    time.
+  - **Phase 2** then runs each extra's other directories, one version at a
+    time. Those tests drive the checkout's single live daemon, so two
+    versions at once would contend. The daemon is started before EACH of
+    these runs if it has stopped: it exits after `idle_timeout_seconds`
+    without traffic, and one run's later directories can outlast that
+    (ledger 00466 N196).
+  - If `uv` cannot find or install a version (for example, with no network),
+    the stage **fails**. That version gets a `NOT RUN` line with the reason.
+    The stage never passes on fewer versions than CI runs.
+  - Lint, format, type checks and every other stage stay on the primary,
+    because they do not depend on the interpreter version.
+  - **Boundary:** a subprocess that a test spawns (`bin/hooks-daemon`, the
+    live daemon) still resolves the checkout's primary venv. Only in-process
+    code runs under the extra interpreter.
+  - `tests.json` has an `interpreters` array with one entry per run: version,
+    scope, counts, duration and error. Each extra's console log is at
+    `untracked/qa/tests-py<X.Y>-<scope>.log`.
+  - Every run, primary and extra, loads the
+    `claude_code_hooks_daemon.qa.first_error_lines` pytest plugin. Each
+    failed or errored test's record in `tests.json` carries the first line
+    of its error as `reason`, and the gate's summary prints it after the
+    node id (ledger 00466 N196).
+  - `tests/conftest.py` loads that plugin, not a `-p` flag. A `-p` plugin
+    is imported before pytest-cov starts, so the package code it imports is
+    never measured: coverage fell to 92.61% with no test missing (N110).
+  - To run the whole stage alone, use `./scripts/qa/llm_qa.py tests`.
+    `run_tests.sh` alone runs only the primary.
 - **Security** (Bandit) — zero HIGH/MEDIUM/LOW issues; only B101 is filtered
 - **Dependencies** (Deptry) — missing (DEP001) and misplaced (DEP004)
 - **Plan QA** / **Docs QA** (`run_corpus_qa.py`) — the `plan-qa --sweep` and
@@ -670,7 +712,8 @@ grep -r "dogfooding" src/claude_code_hooks_daemon/handlers/
 ./scripts/qa/run_lint.sh
 ./scripts/qa/run_type_check.sh
 ./scripts/qa/run_pyright_check.py --json
-./scripts/qa/run_tests.sh
+./scripts/qa/llm_qa.py tests    # tests under every Python in CI's matrix
+./scripts/qa/run_tests.sh       # tests under this checkout's venv only
 ./scripts/qa/run_security_check.sh
 ./scripts/qa/run_dependency_check.sh
 

@@ -67,7 +67,8 @@ We use several tools to maintain code quality:
 ./scripts/qa/run_lint.sh      # Ruff linting
 ./scripts/qa/run_type_check.sh # MyPy type checking
 ./scripts/qa/run_format_check.sh # Black formatting
-./scripts/qa/run_tests.sh     # Pytest with coverage
+./scripts/qa/run_tests.sh     # Pytest with coverage, this venv's Python only
+./scripts/qa/llm_qa.py tests  # Pytest under every Python in CI's matrix
 ```
 
 #### Pre-commit Hooks

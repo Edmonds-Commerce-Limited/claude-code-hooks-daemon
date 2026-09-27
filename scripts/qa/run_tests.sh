@@ -13,6 +13,14 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 OUTPUT_FILE="${PROJECT_ROOT}/untracked/qa/tests.json"
 COVERAGE_FILE="${PROJECT_ROOT}/untracked/qa/coverage.json"
+FIRST_ERROR_LINES_FILE="${PROJECT_ROOT}/untracked/qa/first-error-lines.jsonl"
+
+# Each failed or errored test's first error line, put on its tests.json record
+# as "reason" so the gate's summary says why it failed, not only which (00466
+# N196). The plugin appends, so a previous run's file is removed first.
+# tests/conftest.py loads the plugin; `-p` would import the package before
+# coverage starts and leave its import-time code unmeasured (N110).
+FIRST_ERROR_ARGS=(--first-error-lines="${FIRST_ERROR_LINES_FILE}")
 
 # Source venv management
 # shellcheck source=../venv-include.bash
@@ -37,6 +45,7 @@ fi
 
 # Ensure output directory exists
 mkdir -p "$(dirname "${OUTPUT_FILE}")"
+rm -f "${FIRST_ERROR_LINES_FILE}"
 
 echo "Running pytest with coverage..."
 
@@ -46,6 +55,7 @@ echo "Running pytest with coverage..."
 if "${VENV_PYTHON}" -c "import pytest_json_report" 2>/dev/null; then
     # Use pytest-json-report if available
     if venv_tool pytest --json-report --json-report-file="${OUTPUT_FILE}.raw" \
+              "${FIRST_ERROR_ARGS[@]}" \
               --cov=src/claude_code_hooks_daemon \
               --cov=.claude/ccy \
               --cov-branch \
@@ -72,6 +82,7 @@ import os
 import sys
 from pathlib import Path
 
+from claude_code_hooks_daemon.qa.first_error_lines import attach_first_error_lines
 from claude_code_hooks_daemon.qa.pytest_text_report import build_json_report_summary
 
 raw_file = Path("untracked/qa/tests.json.raw")
@@ -92,6 +103,7 @@ if pytest_data is not None:
             "outcome": test.get("outcome", ""),
             "duration": test.get("call", {}).get("duration", 0),
         })
+attach_first_error_lines(tests, Path("untracked/qa/first-error-lines.jsonl"))
 
 # Read coverage data
 coverage_file = Path("untracked/qa/coverage.json")
@@ -117,7 +129,8 @@ print()
 EOF
 else
     # Fallback: Parse standard pytest output
-    if venv_tool pytest --cov=src/claude_code_hooks_daemon \
+    if venv_tool pytest "${FIRST_ERROR_ARGS[@]}" \
+              --cov=src/claude_code_hooks_daemon \
               --cov=.claude/ccy \
               --cov-branch \
               --cov-report=term-missing:skip-covered \
@@ -148,6 +161,7 @@ import os
 import sys
 from pathlib import Path
 
+from claude_code_hooks_daemon.qa.first_error_lines import attach_first_error_lines
 from claude_code_hooks_daemon.qa.pytest_text_report import (
     finalize_passed_all,
     find_unnamed_failure_reason,
@@ -164,6 +178,7 @@ exit_code = int(os.environ["PYTEST_RUN_EXIT_CODE"])
 # have to know which path produced the file. Only failures are listed: the text
 # output names those and is silent about every passing test.
 tests = [{"name": node_id, "outcome": "failed"} for node_id in report["failed_tests"]]
+attach_first_error_lines(tests, Path("untracked/qa/first-error-lines.jsonl"))
 
 summary = {
     "total": report["total"],
