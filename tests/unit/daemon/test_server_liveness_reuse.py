@@ -19,6 +19,7 @@ These tests cover the server.py layer:
 import asyncio
 import contextlib
 import fcntl
+import logging
 import os
 import shutil
 import socket as socket_module
@@ -43,6 +44,7 @@ from claude_code_hooks_daemon.daemon.server import (
     DaemonIdentity,
     HooksDaemon,
     LaunchLock,
+    NoDaemonIdentity,
     StartLockTimeout,
     StartUnderWay,
     _pid_file_points_at_live_process,
@@ -901,13 +903,17 @@ class TestTheLaunchLocksHolderBeforeItNamesADaemon:
         with self._held(path, _HAND_THE_LOCK_ON):
             assert start_under_way(path) == StartUnderWay(pid=None, holder=None, written_at=ANY)
 
-    def test_no_lock_table_names_no_holder(self, tmp_path: Path) -> None:
+    def test_no_lock_table_names_no_holder(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
         path = launch_lock_path(tmp_path)
         with (
+            caplog.at_level(logging.INFO, logger="claude_code_hooks_daemon.daemon.server"),
             self._held(path, _HOLD_THE_LOCK),
             patch("claude_code_hooks_daemon.daemon.server._PROC_LOCKS", tmp_path / "no-lock-table"),
         ):
             assert start_under_way(path) == StartUnderWay(pid=None, holder=None, written_at=ANY)
+        assert any("no-lock-table" in record.getMessage() for record in caplog.records)
 
     def test_a_table_line_for_another_file_names_no_holder(self, tmp_path: Path) -> None:
         """A candidate that does not hold this very file open is not its holder,
@@ -976,12 +982,19 @@ def test_the_daemon_answers_which_project_it_serves(tmp_path: Path, short_socket
 def test_a_daemon_that_does_not_know_its_project_gives_no_identity(
     short_socket: Path,
 ) -> None:
+    """The daemon's own log says why it named nothing, as its answer does."""
     daemon = _make_daemon(short_socket)
     with (
+        patch("claude_code_hooks_daemon.daemon.server.logger") as server_log,
         patch.object(ProjectContext, "project_root", side_effect=RuntimeError("uninitialised")),
         _serving_daemon(daemon, short_socket),
     ):
-        assert daemon_socket_identity(short_socket) is None
+        identity = daemon_socket_identity(short_socket)
+    assert isinstance(identity, NoDaemonIdentity)
+    assert "no project to name" in identity.reason
+    assert any(
+        "uninitialised" in str(warned.args[-1]) for warned in server_log.warning.call_args_list
+    )
 
 
 @pytest.mark.parametrize(
@@ -1004,11 +1017,24 @@ def test_a_listener_that_does_not_answer_as_a_daemon_gives_no_identity(
     replier = threading.Thread(target=reply, daemon=True)
     replier.start()
     try:
-        assert daemon_socket_identity(short_socket) is None
+        identity = daemon_socket_identity(short_socket)
     finally:
         replier.join(timeout=Timeout.REQUEST_LONG)
         listener.close()
+    assert isinstance(identity, NoDaemonIdentity)
+    assert identity.reason
 
 
 def test_no_socket_gives_no_identity(short_socket: Path) -> None:
-    assert daemon_socket_identity(short_socket) is None
+    identity = daemon_socket_identity(short_socket)
+    assert isinstance(identity, NoDaemonIdentity)
+    assert "cannot connect" in identity.reason
+
+
+def test_inside_a_running_loop_there_is_no_identity() -> None:
+    async def probe() -> DaemonIdentity | NoDaemonIdentity:
+        return daemon_socket_identity(Path("/nonexistent/daemon.sock"))
+
+    identity = asyncio.run(probe())
+    assert isinstance(identity, NoDaemonIdentity)
+    assert "event loop" in identity.reason

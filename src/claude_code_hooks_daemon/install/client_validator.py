@@ -17,6 +17,7 @@ from pathlib import Path
 from claude_code_hooks_daemon.constants import Timeout
 from claude_code_hooks_daemon.constants.paths import DaemonPath
 from claude_code_hooks_daemon.daemon.paths import (
+    read_pid_file_text,
     resolve_existing_venv_python,
     socket_path_paired_with,
 )
@@ -670,13 +671,13 @@ class ClientInstallValidator:
                 warnings.append(f"Left socket file {socket_file.name}: not provably dead")
 
         for pid_file in untracked_dir.glob("daemon*.pid"):
-            try:
-                seen = pid_file.read_text(encoding="utf-8").rstrip("\n")
-            except FileNotFoundError:
+            read = read_pid_file_text(pid_file)
+            if read.unreadable is not None:
+                warnings.append(f"Left unreadable PID file {pid_file.name}: {read.unreadable}")
                 continue
-            except (OSError, UnicodeDecodeError) as unreadable:
-                warnings.append(f"Left unreadable PID file {pid_file.name}: {unreadable}")
+            if read.text is None:
                 continue
+            seen = read.text.rstrip("\n")
             if remove_stale_pid_file(
                 pid_file, socket_path_paired_with(project_root, pid_file), seen
             ):

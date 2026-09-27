@@ -10,7 +10,7 @@ from pathlib import Path
 
 from claude_code_hooks_daemon.config.models import Config
 from claude_code_hooks_daemon.constants import Timeout
-from claude_code_hooks_daemon.daemon.paths import read_pid_file
+from claude_code_hooks_daemon.daemon.paths import read_pid_file, read_pid_file_text
 from claude_code_hooks_daemon.daemon.process_verification import (
     bound_socket_paths,
     find_all_daemon_processes,
@@ -181,12 +181,12 @@ def _remove_stale_pid_file(pid_path: Path, socket_path: Path | None) -> None:
     if socket_path is None:
         logger.debug("No socket path, so no start lock to hold; leaving %s", pid_path)
         return
-    try:
-        seen = pid_path.read_text().rstrip("\n")
-    except FileNotFoundError:
+    read = read_pid_file_text(pid_path)
+    if read.unreadable is not None:
+        logger.warning("Cannot read PID file %s: %s", pid_path, read.unreadable)
         return
-    except (OSError, UnicodeDecodeError) as exc:
-        logger.warning("Cannot read PID file %s: %s", pid_path, exc)
+    if read.text is None:
         return
+    seen = read.text.rstrip("\n")
     if remove_stale_pid_file(pid_path, socket_path, seen):
         logger.info(f"Cleaned up stale PID file: {pid_path} ({seen!r})")

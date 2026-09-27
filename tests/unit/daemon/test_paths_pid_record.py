@@ -12,7 +12,13 @@ import os
 from pathlib import Path
 from unittest.mock import patch
 
-from claude_code_hooks_daemon.daemon.paths import PidRecord, read_pid_file, read_pid_record
+from claude_code_hooks_daemon.daemon.paths import (
+    PidFileText,
+    PidRecord,
+    read_pid_file,
+    read_pid_file_text,
+    read_pid_record,
+)
 
 _PATHS = "claude_code_hooks_daemon.daemon.paths"
 #: Above Linux's default pid_max, so no process can have it.
@@ -49,3 +55,29 @@ def test_a_live_pid_that_is_no_daemon_has_no_verified_record(tmp_path: Path) -> 
 
     with patch(f"{_PATHS}.is_daemon_pid", return_value=False):
         assert read_pid_record(pid_path, verify_daemon=True) is None
+
+
+class TestReadPidFileText:
+    """A PID file's text, or why there is none: absent is not unreadable."""
+
+    def test_a_file_gives_its_text(self, tmp_path: Path) -> None:
+        pid_path = tmp_path / "daemon.pid"
+        pid_path.write_text("123\n")
+        assert read_pid_file_text(pid_path) == PidFileText(text="123\n")
+
+    def test_an_absent_file_gives_no_text_and_no_error(self, tmp_path: Path) -> None:
+        assert read_pid_file_text(tmp_path / "daemon.pid") == PidFileText(text=None)
+
+    def test_an_unreadable_file_says_why(self, tmp_path: Path) -> None:
+        pid_path = tmp_path / "daemon.pid"
+        pid_path.mkdir()
+        read = read_pid_file_text(pid_path)
+        assert read.text is None
+        assert read.unreadable is not None and "Is a directory" in read.unreadable
+
+    def test_undecodable_bytes_are_unreadable(self, tmp_path: Path) -> None:
+        pid_path = tmp_path / "daemon.pid"
+        pid_path.write_bytes(b"\xff\xfe")
+        read = read_pid_file_text(pid_path)
+        assert read.text is None
+        assert read.unreadable is not None

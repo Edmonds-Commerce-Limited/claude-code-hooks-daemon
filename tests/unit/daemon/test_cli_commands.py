@@ -13,6 +13,7 @@ import contextlib
 import errno
 import fcntl
 import json
+import logging
 import os
 import shutil
 import socket
@@ -34,6 +35,8 @@ from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.daemon import paths, server
 from claude_code_hooks_daemon.daemon.cli import (
     _await_started_daemon,
+    _pid_file_state,
+    _release_stopped_daemon_files,
     _StartProgress,
     cmd_config,
     cmd_init_config,
@@ -1188,6 +1191,61 @@ class TestAwaitStartedDaemonIsBoundedByTheClock:
         # handful where a tick-counted one made one per tick.
         most = int(self._BUDGET_SEC / Timeout.SOCKET_LIVENESS_PROBE_SEC) + 1
         assert 1 <= len(accepted) <= most, len(accepted)
+
+
+class TestAnErrorIsReportedAndStillProvesNothing:
+    """Each error these helpers catch is reported, and never counts as proof."""
+
+    def test_a_release_blocked_by_a_start_says_so_and_keeps_both_files(
+        self,
+        short_dir: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        pid_path = short_dir / "daemon.pid"
+        pid_path.write_text(f"{_UNREAL_PID}\n")
+        socket_path = short_dir / "daemon.sock"
+        socket_path.write_text("")
+        monkeypatch.setattr(Timeout, "FILE_LOCK", 0)
+        with server.hold_start_lock(socket_path, Timeout.FILE_LOCK):
+            _release_stopped_daemon_files(_UNREAL_PID, pid_path, socket_path)
+
+        assert pid_path.exists()
+        assert socket_path.exists()
+        err = capsys.readouterr().err
+        assert "WARNING" in err and str(pid_path) in err and str(socket_path) in err
+
+    def test_a_daemon_gone_before_it_is_watched_has_exited_and_is_reported(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        gone = paths.PID_MAX_LIMIT - 1
+        progress_read, progress_write = os.pipe()
+        try:
+            os.write(progress_write, f"{gone}\n".encode())
+            progress = _StartProgress(progress_read)
+            with (
+                caplog.at_level(logging.INFO, logger=_CLI),
+                patch(f"{_CLI}.psutil.Process", side_effect=psutil.NoSuchProcess(gone)),
+            ):
+                progress.advanced()
+        finally:
+            os.close(progress_read)
+            os.close(progress_write)
+        assert progress.exited
+        assert progress.launched_pid is None
+        assert any(str(gone) in record.getMessage() for record in caplog.records)
+
+    def test_an_unreadable_pid_file_is_named_as_such(self, short_dir: Path) -> None:
+        pid_path = short_dir / "daemon.pid"
+        pid_path.mkdir()
+        state = _pid_file_state(pid_path, None, None, Mock(exited=True))
+        assert state.startswith("the PID file cannot be read")
+
+    def test_an_absent_or_corrupt_pid_file_created_none(self, short_dir: Path) -> None:
+        pid_path = short_dir / "daemon.pid"
+        assert _pid_file_state(pid_path, None, None, Mock(exited=True)) == "no PID file created"
+        pid_path.write_text("not a pid\n")
+        assert _pid_file_state(pid_path, None, None, Mock(exited=True)) == "no PID file created"
 
 
 class TestCmdConfig:

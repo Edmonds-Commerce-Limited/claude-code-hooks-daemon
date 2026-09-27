@@ -2053,6 +2053,29 @@ class PidRecord:
     written_at: float
 
 
+@dataclass(frozen=True)
+class PidFileText:
+    """A PID file's text, or why there is none.
+
+    ``text`` is None both for a file that is absent and for one that cannot
+    be read; ``unreadable`` holds the error only for the second, which is
+    never proof the file names no process.
+    """
+
+    text: str | None
+    unreadable: str | None = None
+
+
+def read_pid_file_text(pid_path: Path) -> PidFileText:
+    """The text of ``pid_path``, as :class:`PidFileText`."""
+    try:
+        return PidFileText(text=pid_path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return PidFileText(text=None)
+    except (OSError, UnicodeDecodeError) as exc:
+        return PidFileText(text=None, unreadable=str(exc))
+
+
 def read_pid_file(pid_path: Path | str, verify_daemon: bool = False) -> int | None:
     """
     Read PID from file and verify process is alive.

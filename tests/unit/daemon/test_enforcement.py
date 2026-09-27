@@ -2,6 +2,7 @@
 
 import errno
 import fcntl
+import logging
 import os
 import tempfile
 from pathlib import Path
@@ -369,6 +370,30 @@ class TestAStalePidFileGoesOnlyUnderTheStartLock:
         self._enforce(pid_path, None)
 
         assert pid_path.exists()
+
+    def test_an_unreadable_file_stays_and_is_reported(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """An error reading the file is no proof it names no process."""
+        pid_path = tmp_path / "daemon.pid"
+        pid_path.write_bytes(b"\xff\xfe")
+        with caplog.at_level(logging.WARNING, logger="claude_code_hooks_daemon.daemon.enforcement"):
+            self._enforce(pid_path, tmp_path / "daemon.sock")
+
+        assert pid_path.read_bytes() == b"\xff\xfe"
+        assert any(
+            "Cannot read PID file" in record.getMessage() and str(pid_path) in record.getMessage()
+            for record in caplog.records
+        )
+
+    def test_no_file_is_nothing_to_remove(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        with caplog.at_level(logging.WARNING, logger="claude_code_hooks_daemon.daemon.enforcement"):
+            self._enforce(tmp_path / "daemon.pid", tmp_path / "daemon.sock")
+
+        assert not (tmp_path / "daemon.pid").exists()
+        assert not caplog.records
 
 
 class TestEnforceSingleDaemonKillFailure:

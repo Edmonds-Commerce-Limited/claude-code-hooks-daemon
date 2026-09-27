@@ -270,10 +270,9 @@ def recovery_command(subcommand: str) -> str | None:
     None when :class:`ProjectContext` is not initialised, as well as when the
     install is unknown: either way no command is known to be exempt.
     """
-    try:
-        return install_recovery_command(ProjectContext.project_root(), daemon_root(), subcommand)
-    except RuntimeError:
+    if not ProjectContext.is_initialized():
         return None
+    return install_recovery_command(ProjectContext.project_root(), daemon_root(), subcommand)
 
 
 def daemon_cli_command_for_docs(*args: str) -> str:

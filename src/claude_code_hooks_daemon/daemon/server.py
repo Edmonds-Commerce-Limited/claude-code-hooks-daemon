@@ -541,14 +541,23 @@ def start_under_way(path: Path) -> StartUnderWay | None:
             named = parse_pid_text(text)
             if named is not None:
                 return StartUnderWay(pid=named, written_at=written_at)
-            return StartUnderWay(pid=None, written_at=written_at, holder=_lock_holder(fd))
+            try:
+                holder: int | None = _lock_holder(fd)
+            except _LockHolderUnknown as unknown:
+                logger.info("The launch lock's holder is unknown: %s", unknown)
+                holder = None
+            return StartUnderWay(pid=None, written_at=written_at, holder=holder)
         fcntl.flock(fd, fcntl.LOCK_UN)
         return None
     finally:
         os.close(fd)
 
 
-def _lock_holder(fd: int) -> int | None:
+class _LockHolderUnknown(Exception):
+    """The lock table names no one process holding the launch lock."""
+
+
+def _lock_holder(fd: int) -> int:
     """The one process the kernel's lock table shows holding ``fd``'s file.
 
     ``/proc/locks`` names an flock by the pid that took it and its file by
@@ -559,14 +568,16 @@ def _lock_holder(fd: int) -> int | None:
     in another pid namespace, names no holder here.
 
     Returns:
-        The holder's pid, or None where there is no lock table or not
-        exactly one such process.
+        The holder's pid.
+
+    Raises:
+        _LockHolderUnknown: there is no lock table, or not exactly one such
+            process.
     """
     try:
         table = _PROC_LOCKS.read_text(encoding="ascii", errors="replace")
     except OSError as exc:
-        logger.info("Cannot read %s (%s); the launch lock's holder is unknown", _PROC_LOCKS, exc)
-        return None
+        raise _LockHolderUnknown(f"cannot read {_PROC_LOCKS} ({exc})") from exc
     target = os.fstat(fd)
     candidates: set[int] = set()
     for line in table.splitlines():
@@ -580,8 +591,7 @@ def _lock_holder(fd: int) -> int | None:
             candidates.add(pid)
     holders = {pid for pid in candidates if _holds_open(pid, target)}
     if len(holders) != 1:
-        logger.info("The launch lock's holder is unknown: candidates %s", sorted(candidates))
-        return None
+        raise _LockHolderUnknown(f"candidates {sorted(candidates)}")
     return holders.pop()
 
 
@@ -634,9 +644,10 @@ def remove_stale_pid_file(pid_path: Path, socket_path: Path, seen: str) -> bool:
             return True
     except StartLockTimeout as exc:
         logger.warning("A daemon start holds %s; leaving the PID file", exc)
+        return False
     except (OSError, UnicodeDecodeError) as exc:
         logger.warning("Cannot remove stale PID file %s under the start lock: %s", pid_path, exc)
-    return False
+        return False
 
 
 def remove_dead_socket(socket_path: Path) -> bool:
@@ -658,9 +669,10 @@ def remove_dead_socket(socket_path: Path) -> bool:
             return True
     except StartLockTimeout as exc:
         logger.warning("A daemon start holds %s; leaving the socket", exc)
+        return False
     except OSError as exc:
         logger.warning("Cannot remove socket %s under the start lock: %s", socket_path, exc)
-    return False
+        return False
 
 
 class _SocketLiveness(enum.Enum):
@@ -794,22 +806,30 @@ class DaemonIdentity:
     pid: int
 
 
-def _parse_identity(line: bytes) -> DaemonIdentity | None:
-    """The identity a daemon's answer line carries, or None for anything else."""
+@dataclass(frozen=True)
+class NoDaemonIdentity:
+    """Why a socket proved no daemon identity: nothing it answered names one."""
+
+    reason: str
+
+
+def _parse_identity(line: bytes) -> DaemonIdentity | NoDaemonIdentity:
+    """The identity a daemon's answer line carries, or why it carries none."""
     try:
         answer = json.loads(line)
-    except ValueError:
-        return None
+    except ValueError as exc:
+        return NoDaemonIdentity(f"the answer is not JSON ({exc}): {line[:80]!r}")
     result = answer.get("result") if isinstance(answer, dict) else None
     if not isinstance(result, dict):
-        return None
+        error = answer.get("error") if isinstance(answer, dict) else None
+        return NoDaemonIdentity(f"the answer has no result: {error or line[:80]!r}")
     project_root, pid = result.get("project_root"), result.get("pid")
     if not isinstance(project_root, str) or type(pid) is not int:
-        return None
+        return NoDaemonIdentity(f"the answer names no project and pid: {result!r}")
     return DaemonIdentity(project_root=project_root, pid=pid)
 
 
-async def _probe_daemon_identity(path: Path) -> DaemonIdentity | None:
+async def _probe_daemon_identity(path: Path) -> DaemonIdentity | NoDaemonIdentity:
     """Ask the daemon on ``path`` who it is (Plan 00466 round 6, Sh-2).
 
     A listener accepting the connection proves only that something bound the
@@ -823,15 +843,14 @@ async def _probe_daemon_identity(path: Path) -> DaemonIdentity | None:
             asyncio.open_unix_connection(path=str(path)),
             timeout=Timeout.SOCKET_LIVENESS_PROBE_SEC,
         )
-    except (TimeoutError, OSError):
-        return None
+    except (TimeoutError, OSError) as exc:
+        return NoDaemonIdentity(f"cannot connect to {path}: {exc!r}")
     try:
         writer.write(json.dumps(request).encode() + b"\n")
         await writer.drain()
         line = await asyncio.wait_for(reader.readline(), timeout=Timeout.SOCKET_LIVENESS_PROBE_SEC)
     except (TimeoutError, OSError, ValueError) as exc:
-        logger.debug("No identity answer on %s: %s", path, exc)
-        return None
+        return NoDaemonIdentity(f"no answer on {path}: {exc!r}")
     finally:
         writer.close()
         with contextlib.suppress(OSError):
@@ -839,14 +858,14 @@ async def _probe_daemon_identity(path: Path) -> DaemonIdentity | None:
     return _parse_identity(line)
 
 
-def daemon_socket_identity(path: Path) -> DaemonIdentity | None:
+def daemon_socket_identity(path: Path) -> DaemonIdentity | NoDaemonIdentity:
     """Synchronous :func:`_probe_daemon_identity`, for callers outside the
-    event loop. Inside one there is no answer to wait for: None."""
+    event loop. Inside one there is no answer to wait for."""
     try:
         asyncio.get_running_loop()
     except RuntimeError:
         return asyncio.run(_probe_daemon_identity(path))
-    return None
+    return NoDaemonIdentity("an event loop is running here, so no answer can be awaited")
 
 
 def _pid_file_points_at_live_process(pid_file_path: Path | None) -> bool:
@@ -2332,6 +2351,7 @@ class HooksDaemon:
             try:
                 project_root = str(ProjectContext.project_root())
             except RuntimeError as exc:
+                logger.warning("Asked for this daemon's identity, with no project to name: %s", exc)
                 response = {"error": f"no project to name: {exc}"}
             else:
                 response = {"result": {"project_root": project_root, "pid": os.getpid()}}

@@ -74,6 +74,7 @@ from claude_code_hooks_daemon.daemon.paths import (
     parse_pid_text,
     python_venv_fingerprint,
     read_pid_file,
+    read_pid_file_text,
     read_pid_record,
     read_socket_discovery_file,
     resolve_existing_venv_python,
@@ -97,6 +98,7 @@ from claude_code_hooks_daemon.daemon.server import (
     DaemonAlreadyRunningError,
     DaemonIdentity,
     LaunchLock,
+    NoDaemonIdentity,
     StartLockTimeout,
     StartUnderWay,
     _socket_liveness_sync,
@@ -932,7 +934,11 @@ def _release_stopped_daemon_files(pid: int, pid_path: Path, socket_path: Path) -
             else:
                 logger.info("Socket %s is not provably dead; leaving it", socket_path)
     except StartLockTimeout as exc:
-        logger.warning("A daemon start holds %s; leaving its PID file and socket", exc)
+        print(
+            f"WARNING: a daemon start holds {exc}; leaving the PID file {pid_path} "
+            f"and socket {socket_path} in place",
+            file=sys.stderr,
+        )
     except OSError as exc:
         # Fail closed (round 4, Sh-C): without the lock, a start may be
         # part-way through these paths, so neither is touched.
@@ -961,9 +967,10 @@ def _socket_answers_for_project(socket_path: Path, project_root: Path) -> Daemon
     """The identity the daemon on ``socket_path`` answers with, when it
     serves ``project_root``; else None (round 6, Sh-2)."""
     identity = daemon_socket_identity(socket_path)
-    if identity is None or os.path.realpath(identity.project_root) != os.path.realpath(
-        project_root
-    ):
+    if isinstance(identity, NoDaemonIdentity):
+        logger.debug("No daemon identity on %s: %s", socket_path, identity.reason)
+        return None
+    if os.path.realpath(identity.project_root) != os.path.realpath(project_root):
         return None
     return identity
 
@@ -1081,6 +1088,7 @@ class _StartProgress:
         try:
             self._daemon = psutil.Process(pid)
         except psutil.NoSuchProcess:
+            logger.info("The starting daemon named PID %d, which has already exited", pid)
             self.exited = True
 
     def _spent_cpu(self) -> bool:
@@ -1109,17 +1117,6 @@ class _StartWait:
     failure: str | None = None
 
 
-def _recorded_pid(pid_path: Path) -> int | None:
-    """The pid ``pid_path`` names, running or not; None when it names none."""
-    try:
-        return parse_pid_text(pid_path.read_text())
-    except FileNotFoundError:
-        return None
-    except (OSError, UnicodeDecodeError) as exc:
-        logger.debug("Cannot read the PID file %s: %s", pid_path, exc)
-        return None
-
-
 def _pid_file_state(
     pid_path: Path, daemon_pid: int | None, displaced: int | None, progress: _StartProgress
 ) -> str:
@@ -1130,7 +1127,10 @@ def _pid_file_state(
     crashed created one. A daemon that has exited has no proof pending.
     """
     if daemon_pid is None:
-        recorded = _recorded_pid(pid_path)
+        read = read_pid_file_text(pid_path)
+        if read.unreadable is not None:
+            return f"the PID file cannot be read ({read.unreadable})"
+        recorded = None if read.text is None else parse_pid_text(read.text)
         if recorded is None:
             return "no PID file created"
         return f"the PID file names PID {recorded}, which is not running"
