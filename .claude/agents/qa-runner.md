@@ -58,8 +58,8 @@ LINT_EXIT=$?
 ./scripts/qa/run_type_check.sh > "$QA_LOG_DIR/type_check.log" 2>&1
 MYPY_EXIT=$?
 
-# Tests (Pytest)
-./scripts/qa/run_tests.sh > "$QA_LOG_DIR/tests.log" 2>&1
+# Tests (Pytest), under every Python in CI's matrix (see CLAUDE/QA.md)
+./scripts/qa/llm_qa.py tests > "$QA_LOG_DIR/tests.log" 2>&1
 TEST_EXIT=$?
 
 # Security check (Bandit)
