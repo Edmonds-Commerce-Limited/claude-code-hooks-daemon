@@ -11,12 +11,14 @@ out of the box with no config.
 from __future__ import annotations
 
 import re
+import shutil
+import subprocess
 from pathlib import Path
 from typing import Any
 
 import pytest
 
-from claude_code_hooks_daemon.constants import HandlerID, Priority
+from claude_code_hooks_daemon.constants import HandlerID, Priority, Timeout
 from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.core import Decision
 from claude_code_hooks_daemon.core.chain import HandlerChain
@@ -25,6 +27,7 @@ from claude_code_hooks_daemon.core.rule import Rule
 from claude_code_hooks_daemon.handlers.pre_tool_use.quarantine_artefact_read_guard import (
     QuarantineArtefactReadGuardHandler,
 )
+from claude_code_hooks_daemon.utils import secret_file_matching as sfm
 
 
 @pytest.fixture(autouse=True)
@@ -656,3 +659,84 @@ class TestQuarantineArtefactReadGuardDisclosureLadder:
 
         assert result.reason is not None
         assert "SUMMARY" in result.reason
+
+
+def _tree_past_the_walk_cap(root: Path) -> None:
+    """More entries than the recursive glob walk may visit, holding one
+    ordinary markdown file per directory and no artefact."""
+    for directory in range(60):
+        sub = root / f"d{directory}"
+        sub.mkdir()
+        for index in range(40):
+            (sub / f"f{index}.md").touch()
+
+
+def _bash_words(command: str, cwd: Path) -> list[str]:
+    """The words bash passes to a program for ``command``'s arguments."""
+    bash = shutil.which("bash")
+    assert bash is not None
+    result = subprocess.run(
+        [bash, "--norc", "--noprofile", "-c", f"printf '%s\\n' {command}"],
+        cwd=cwd,
+        env={"LC_ALL": "C", "PATH": "/usr/bin:/bin"},
+        capture_output=True,
+        text=True,
+        check=True,
+        timeout=Timeout.QA_TEST_TIMEOUT,
+    )
+    return result.stdout.splitlines()
+
+
+class TestAQuotedGlobIsNeverEnumerated:
+    """Ledger 00466 N238: a quoted word is a literal, which bash hands on as
+    written, so it must not reach the enumerator; one bash does expand and
+    that cannot be listed within the budget is a named deny, never a guard
+    bug. Each shape is run through bash first."""
+
+    @pytest.mark.parametrize(
+        ("command", "argument"),
+        [
+            ("rg -g '**/*.md' x", "'**/*.md'"),
+            ("grep -rn x --include='**/*.md' .", "--include='**/*.md'"),
+            ("jq '.files[\"d1/*.md\"]' r.json", "'.files[\"d1/*.md\"]'"),
+            ('echo "**/*.md"', '"**/*.md"'),
+            ("ls \\*\\*/\\*.md", "\\*\\*/\\*.md"),
+        ],
+    )
+    def test_a_quoted_glob_is_not_enumerated(
+        self,
+        handler: QuarantineArtefactReadGuardHandler,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        command: str,
+        argument: str,
+    ) -> None:
+        _tree_past_the_walk_cap(tmp_path)
+        assert len(_bash_words(argument, tmp_path)) == 1
+        monkeypatch.chdir(tmp_path)
+        assert handler.matches(_hook_input("Bash", {"command": command})) is False
+
+    def test_a_quoted_artefact_name_is_still_a_mention(
+        self,
+        handler: QuarantineArtefactReadGuardHandler,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.chdir(tmp_path)
+        payload = _hook_input("Bash", {"command": "cat 'docs/topic-opus-security-DETAIL.md'"})
+        assert handler.matches(payload) is True
+
+    def test_an_unquoted_glob_past_the_budget_is_a_named_deny(
+        self,
+        handler: QuarantineArtefactReadGuardHandler,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        _tree_past_the_walk_cap(tmp_path)
+        assert len(_bash_words("**/*.md", tmp_path)) > 1
+        monkeypatch.chdir(tmp_path)
+        result = handler.handle(_hook_input("Bash", {"command": "cat **/*.md"}))
+        assert result.decision == Decision.DENY
+        assert result.reason is not None
+        assert sfm.SCAN_COULD_NOT_FINISH in result.reason
+        assert RuleID.QUARANTINE_ARTEFACT_READ_EVALUATION_ERROR not in result.reason

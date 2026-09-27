@@ -70,19 +70,31 @@ target in a command that opens an fd on a process (`exec 3> >(bash)`),
 because it may be `/dev/fd/3`. `ftp`, `mail`, `mailx`, `sendmail` and
 `patch` are no longer treated as data sinks.
 
-A body is data only when every command before it in the same call is on a
-short list that cannot change what the reader runs: a literal assignment
-(not to `PATH`, `IFS`, a `GIT_*`/`LESS*` name or another variable bash or a
-pager reads), a `cd` to a literal directory, `echo`, `printf` without
-`-v`, `true`, `test`/`[`, and with no redirection
-`git status|add|diff|log|show|rev-parse|ls-files`, `grep`/`rg`/`ugrep`,
-`ls`, `cat`, `wc`, `head`, `tail`, `stat`, `file`, and `find` without
-`-exec`, `-ok`, `-delete` or `-fprint`. Anything else earlier -- a function
-or alias, `export`, `source`, `eval`, `set`, `mkdir`, or any other program
--- keeps the body judged, because `cat(){ bash; }; cat <<'EOF'` runs it. The
-usual `git add -A && git commit -m "$(cat <<'EOF' … EOF)"` is unaffected.
-Put the heredoc first, or in its own Bash call, when a command before it is
-not on the list.
+A body is data unless a command before it in the same call may change what
+a command name means to this shell, because `cat(){ bash; }; cat <<'EOF'`
+runs it. That is a function or alias definition; `hash`, `enable`,
+`builtin`, `command`, `eval`, `source`/`.`, `exec`, `export`, `declare`,
+`typeset`, `local`, `readonly`, `unset`, `shopt`, `trap`, `read`,
+`mapfile`, `getopts`, `printf -v`, `let`, `cd`, `pushd`, `popd` or
+`coproc`; `set` with anything but `-e`, `-u`, `-x` and `-o pipefail`; an
+assignment, or a `for`/`select` loop name, that is `PATH`, `IFS`,
+`BASH_ENV`, a `GIT_*` or `LESS*` name or another variable bash or a pager
+reads; an assigning
+`${X:=…}` or arithmetic; a command name written with a quote, an escape or
+an expansion; or any of these inside `{ }`, `( )` or a substitution. Any
+other program is a child process and cannot, so `set -euo pipefail`,
+`mkdir -p d &&`, `pytest -q;` and an earlier `cat > a.md <<'EOF'` leave a
+later prose heredoc as data. Put the heredoc first, or in its own Bash
+call, after a command that may rebind.
+
+`secret_file_guard` and `quarantine_artefact_read_guard` no longer treat a
+glob as a bug in the guard. A quoted or escaped glob (`rg -g '**/*.md'`,
+`jq '.files["a"]'`) is passed on as written and is not expanded. An
+unquoted glob that cannot be listed within the budget, or a scan past its
+deadline, is denied with "this command could not be verified … name the
+files, or narrow the glob or directory". A `Write` of Python source is no
+longer brace-expanded as if it were a command: only its string literals and
+comments are, so a long option table is allowed.
 
 A body fed to `bash` or another shell is read for writes by
 `project_containment`, and so is one fed to a variable the call sets to a

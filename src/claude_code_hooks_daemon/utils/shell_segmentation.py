@@ -39,6 +39,7 @@ from typing import NamedTuple
 
 from claude_code_hooks_daemon.utils.ansi_c import ansi_c_string
 from claude_code_hooks_daemon.utils.command_evasion import (
+    SHELL_RESERVED_COMMAND_PREFIXES,
     git_subcommand_index,
     strip_reserved_word_prefix,
 )
@@ -437,8 +438,8 @@ _SPLITTING_CHARACTERS = frozenset("$`*?[")
 
 #: Variables bash sets or reads itself (bash 5.2, "Shell Variables"), and the
 #: ones that point a sink at a helper program. An assignment to one neither
-#: pins its value nor leaves the call inert (Plan 00466 N101 round 12, N214
-#: and N215).
+#: pins its value nor leaves a later sink's name meaning the sink (Plan 00466
+#: N101 rounds 12 and 13, N214 and N215).
 _SPECIAL_VARIABLES: frozenset[str] = frozenset(
     {
         "_",
@@ -620,26 +621,6 @@ _RESERVED_WORDS: frozenset[str] = frozenset(
 _HARMLESS_REDIRECT_PATTERN = re.compile(
     r"[0-9]*[<>]&(?:[0-9]+|-)(?![\w./-])|(?:[0-9]*|&)>>?\s*/dev/null(?![\w./-])"
 )
-#: Input operators that read a heredoc or here-string, and touch no file.
-_BODY_INPUT_OPERATORS: frozenset[str] = frozenset({"<<", "<<-", "<<<"})
-_INERT_BUILTINS: frozenset[str] = frozenset({"echo", "true", "test", "["})
-#: ``[`` and ``]`` on their own glob nothing: they are the ``test`` brackets.
-_TEST_BRACKETS: frozenset[str] = frozenset({"[", "]"})
-_READ_ONLY_PROGRAMS: frozenset[str] = frozenset({"ls", "cat", "wc", "head", "tail", "stat", "file"})
-_SEARCH_PROGRAMS: frozenset[str] = frozenset({"grep", "rg", "ugrep"})
-#: Search options that run a program or write a file.
-_SEARCH_ACTING_OPTIONS: tuple[str, ...] = ("--pre", "--filter", "--save-config", "--output")
-_GIT_READ_ONLY_SUBCOMMANDS: frozenset[str] = frozenset(
-    {"status", "add", "diff", "log", "show", "rev-parse", "ls-files"}
-)
-#: Git options that write a file or name a program to run.
-_GIT_ACTING_OPTIONS: tuple[str, ...] = ("--output", "--exec-path", "--ext-diff", "--config-env")
-#: ``find`` actions that run a program, delete, or write a file.
-_FIND_ACTIONS: frozenset[str] = frozenset({"-exec", "-execdir", "-ok", "-okdir", "-delete", "-fls"})
-_FIND_WRITING_PREFIX = "-fprint"
-_PRINTF_TARGET_OPTION = "-v"
-_CD = "cd"
-_PRINTF = "printf"
 
 
 class _Word(NamedTuple):
@@ -1150,7 +1131,7 @@ def strip_quoted_heredoc_bodies(command: str) -> str:
 
     depth_tracker = _SubstitutionDepthTracker(command)
     newline_tracker = _LastNewlineTracker(command)
-    inert_prefix = _InertPrefix(command)
+    rebinding_prefix = _RebindingPrefix(command)
     fds_may_run = _FD_PROCESS_PATTERN.search(command) is not None
     pieces: list[str] = []
     copied_to = 0
@@ -1160,7 +1141,7 @@ def strip_quoted_heredoc_bodies(command: str) -> str:
         # (N214), who RECEIVES the body, what it is PIPED ON to, and whether
         # the whole command sits in a SUBSTITUTION whose output lands in
         # command position. Any one of them failing keeps the body.
-        if not inert_prefix.allows(heredoc.operator.start):
+        if not rebinding_prefix.allows(heredoc.operator.start):
             continue
         if not _receiver_is_data_sink(
             command, heredoc, depth_tracker, newline_tracker, fds_may_run
@@ -1678,14 +1659,14 @@ def heredoc_consumers(command: str, heredocs: Sequence[Heredoc]) -> list[tuple[s
     one newline tracker serves the whole call (Plan 00466 N25).
 
     Round 12 makes the receiving word None in two more cases. After an
-    earlier segment off the inert allowlist (N214,
-    :func:`earlier_segments_are_inert`), the name may not mean the program.
+    earlier segment that may rebind a command name (N214,
+    :func:`no_earlier_segment_may_rebind`), the name may not mean the program.
     And a top-level :data:`DATA_SINKS` stage whose arguments may hand the
     body on (``cat <<'EOF' > >(bash)``) is no sink.
     """
     newline_tracker = _LastNewlineTracker(command)
     depth_tracker = _SubstitutionDepthTracker(command)
-    inert_prefix = _InertPrefix(command)
+    rebinding_prefix = _RebindingPrefix(command)
     known = known_variables(command)
     fds_may_run = _FD_PROCESS_PATTERN.search(command) is not None
     consumers: list[tuple[str | None, ...]] = []
@@ -1700,7 +1681,7 @@ def heredoc_consumers(command: str, heredocs: Sequence[Heredoc]) -> list[tuple[s
         tail = _opener_tail(command, heredoc)
         pipeline = split_unquoted(tail, _PIPELINE_TERMINATORS)[0]
         downstream = split_unquoted(pipeline, ("|",))[1:]
-        if not inert_prefix.allows(opener_start):
+        if not rebinding_prefix.allows(opener_start):
             consumers.append((None,))
             continue
         words = [_consumer_word(stage, known) for stage in (receiving, *downstream)]
@@ -1775,7 +1756,7 @@ def known_variables(command: str) -> dict[str, str]:
     text = _blank_quoted_bodies(command, scan)
     if _COMPUTED_WRITE_PATTERN.search(text):
         return {}
-    unquoted = _QUOTING_CHARACTERS.sub("", text)
+    unquoted = _collapse_blank_runs(_QUOTING_CHARACTERS.sub("", text))
     if _NAME_WRITER_PATTERN.search(unquoted) or _PRINTF_TARGET_PATTERN.search(unquoted):
         return {}
     assignments = Counter(match.group(1) for match in _ASSIGNED_NAME.finditer(text))
@@ -1794,6 +1775,17 @@ def known_variables(command: str) -> dict[str, str]:
         if command_value is None or command_value.rsplit("/", 1)[-1] in _NAME_WRITERS:
             return {}
     return known
+
+
+def _collapse_blank_runs(text: str) -> str:
+    """``text`` with each run of blanks reduced to one: a newline where the
+    run holds one, else a space. :data:`_COMMAND_POSITION` opens with a
+    separator and then ``\\s*``, so on a long run every newline started a
+    scan to its end (Plan 00466 N101 round 13: 32,000 newlines took 30 s)."""
+    return _BLANK_RUN.sub(lambda match: _NEWLINE if _NEWLINE in match.group() else " ", text)
+
+
+_BLANK_RUN = re.compile(r"\s+")
 
 
 def _leading_assignments(text: str) -> dict[str, tuple[int, str]]:
@@ -1850,10 +1842,16 @@ def _is_special_variable(name: str) -> bool:
 def _blank_quoted_bodies(command: str, scan: HeredocScan) -> str:
     """``command`` with each terminated quoted heredoc's body and closer
     replaced by blanks, offsets kept: bash reads none of it as shell."""
+    return _blank_bodies(command, [h for h in scan.heredocs if h.operator.quoted])
+
+
+def _blank_bodies(command: str, heredocs: Sequence[Heredoc]) -> str:
+    """``command`` with the body and closer of each terminated heredoc of
+    ``heredocs`` replaced by blanks, offsets kept."""
     pieces: list[str] = []
     copied_to = 0
     bodies = sorted(
-        (h for h in scan.heredocs if h.operator.quoted and h.terminated),
+        (h for h in heredocs if h.terminated),
         key=lambda heredoc: heredoc.body_start,
     )
     for heredoc in bodies:
@@ -1871,123 +1869,329 @@ def _blank_harmless_redirects(text: str) -> str:
     return _HARMLESS_REDIRECT_PATTERN.sub(lambda match: " " * len(match.group()), text)
 
 
-def earlier_segments_are_inert(command: str, position: int) -> bool:
-    """Is every segment of ``command`` before the one holding ``position``
-    on the inert allowlist (Plan 00466 N101 round 12, N214)?
+def no_earlier_segment_may_rebind(command: str, position: int) -> bool:
+    """Can no segment of ``command`` before the one holding ``position``
+    change what a later command name means to this shell (Plan 00466 N101
+    round 13 ruling on N214)?
 
     A sink's body is data only then: an earlier segment can define a
-    function or an alias that shadows the sink, or set the environment a
-    sink's helper reads (``LESSOPEN``, ``GIT_PAGER``), and an unknown
-    program cannot be proven to write nothing. The closed allowlist: a
-    literal assignment of a name that is not special, a proven ``cd``,
-    ``echo``, ``printf`` without ``-v``, ``true``, ``test``/``[``, and with no
-    redirection on the segment ``git status|add|diff|log|show|rev-parse|
-    ls-files``, ``grep``/``rg``/``ugrep``, ``ls``, ``cat``, ``wc``, ``head``,
-    ``tail``, ``stat``, ``file`` and ``find`` without an acting option.
+    function or an alias that shadows the sink, or point ``PATH`` elsewhere.
+    A child process can do neither, so a literal-headed external command
+    (``mkdir``, ``pytest``, a heredoc into ``cat``) never counts, whatever it
+    does to files: a later name a file it plants could shadow is the limit
+    ``FailOpenBoundaries.md`` records. What may rebind is
+    :func:`segment_may_rebind_commands`; an unquoted heredoc body may too,
+    through an expansion that assigns.
     """
-    return _InertPrefix(command).allows(position)
+    return _RebindingPrefix(command).allows(position)
 
 
-class _InertPrefix:
-    """Where the first segment off the inert allowlist ends, found once for
-    a whole command so a caller asking for each heredoc pays one scan."""
+class _RebindingPrefix:
+    """Where the first segment that may rebind a command name ends, found
+    once for a whole command so a caller asking for each heredoc pays one
+    scan."""
 
     def __init__(self, command: str) -> None:
         scan = scan_heredocs(command)
-        text = _blank_harmless_redirects(_blank_quoted_bodies(command, scan))
         self._limit = len(command) if scan.stopped_at is None else scan.stopped_at
-        self._first_off_list_end: int | None = None
+        ends = [
+            heredoc.closer_start
+            for heredoc in scan.heredocs
+            if heredoc.terminated
+            and not heredoc.operator.quoted
+            and _ASSIGNING_EXPANSION_PATTERN.search(
+                command, heredoc.body_start, heredoc.closer_start
+            )
+        ]
+        text = _blank_bodies(command, scan.heredocs)
         for start, end in split_unquoted_spans(text, (*_RECEIVER_SEPARATORS, _NEWLINE)):
-            if not _segment_is_inert(text[start:end]):
-                self._first_off_list_end = end
+            if segment_may_rebind_commands(text[start:end]):
+                ends.append(end)
                 break
+        self._first_rebinding_end = min(ends, default=None)
 
     def allows(self, position: int) -> bool:
-        """Are the segments before the one holding ``position`` all inert?"""
+        """Can no segment before the one holding ``position`` rebind?"""
         if position > self._limit:
             return False
-        return self._first_off_list_end is None or position <= self._first_off_list_end
+        return self._first_rebinding_end is None or position <= self._first_rebinding_end
 
 
-def _segment_is_inert(segment: str) -> bool:
-    """Is ``segment`` on :func:`earlier_segments_are_inert`'s allowlist?"""
-    raw_words: list[str] = []
-    for raw in iter_shell_words(segment):
-        if raw is None:
-            return False
-        if raw.startswith("#"):
+def segment_may_rebind_commands(segment: str) -> bool:
+    """True when the simple command ``segment`` may change which program a
+    LATER command name runs in this shell (Plan 00466 N101 round 13).
+
+    The small-a branch has a predicate of this name for the same question;
+    the landing merge keeps one. It may when the text can assign through an
+    expansion or arithmetic, defines a function, or when it, or a group,
+    subshell or substitution body in it, has:
+
+    - a head that is not plain literal text (``$X``, ``"cat"``, ``\\cat``,
+      ``$'cat'``, ``~/x``);
+    - a head from :data:`_REBINDING_HEADS`;
+    - ``set`` with an option off :data:`_SET_INERT_LETTERS`/
+      :data:`_SET_INERT_NAMES`, ``printf -v``, or a test that may assign in
+      arithmetic;
+    - an assignment to a name bash or a helper program reads
+      (:func:`_is_special_variable`), or through an evaluated subscript,
+      including the loop name of ``for``/``select``.
+    """
+    if _ASSIGNING_EXPANSION_PATTERN.search(mask_quoted(segment, keep_double=True)):
+        return True
+    unquoted = mask_quoted(segment, keep_double=False)
+    if _ARITHMETIC_COMMAND_PATTERN.search(unquoted):
+        return True
+    if _FUNCTION_DEFINITION_PATTERN.search(unquoted):
+        return True
+    return any(_command_may_rebind(piece) for piece in _nested_commands(segment))
+
+
+#: Heads that rebind a name, a builtin or the directory a relative ``PATH``
+#: entry means, or run text that may (the round 13 ruling's list, with
+#: ``let``, which assigns in arithmetic). ``for`` and ``select`` are judged
+#: as the assignment of their loop name they are (:data:`_LOOP_HEADS`).
+_REBINDING_HEADS: frozenset[str] = frozenset(
+    {"alias", "unalias", "hash", "enable", "builtin", "command", "eval", "source", "."}
+    | {"exec", "export", "declare", "typeset", "local", "readonly", "unset", "shopt"}
+    | {"trap", "read", "mapfile", "readarray", "getopts", "cd", "pushd", "popd"}
+    | {"coproc", "function", "let"}
+)
+_LOOP_HEADS: frozenset[str] = frozenset({"for", "select"})
+_SHELL_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+#: ``set`` options that only make the shell stop sooner or say more, in
+#: either sign: ``-e``, ``-u``, ``-x`` and their ``-o`` names, and pipefail.
+_SET_INERT_LETTERS: frozenset[str] = frozenset("eux")
+_SET_INERT_NAMES: frozenset[str] = frozenset({"pipefail", "errexit", "nounset", "xtrace"})
+_SET_LONG_OPTION = "o"
+_SET = "set"
+_PRINTF = "printf"
+_PRINTF_TARGET_OPTION = "-v"
+_END_OF_OPTIONS = "--"
+#: ``test`` and ``[`` compare numbers without evaluating them; ``[[`` does.
+_SINGLE_BRACKET_TESTS: frozenset[str] = frozenset({"test", "["})
+_ARITHMETIC_TEST_OPERATORS: frozenset[str] = frozenset({"-eq", "-ne", "-lt", "-le", "-gt", "-ge"})
+_TEST_WORDS: frozenset[str] = frozenset({"[[", "]]", "!", "(", ")"})
+#: Words that only close a compound command, or open a clause of one.
+_CLOSING_WORDS: frozenset[str] = frozenset({"}", ")", "fi", "done", "esac", ";;"})
+#: A head bash runs as written: no quote, escape, expansion, glob or brace.
+_PLAIN_HEAD_PATTERN = re.compile(r"[A-Za-z0-9_./+@%:,-]+|\[\[?")
+#: An assignment word: the name, and a subscript bash may evaluate.
+_ASSIGNMENT_PREFIX = re.compile(r"(?P<name>[A-Za-z_]\w*)(?P<subscript>\[[^\]]*\])?\+?=")
+_PLAIN_SUBSCRIPT = re.compile(r"\[(?:\d+|[@*])\]")
+#: An expansion that assigns (``${X:=v}``, ``${X=v}``) or evaluates
+#: arithmetic, which assigns whatever it spells: ``$((…))``, ``$[…]``, a
+#: subscript that is not a plain index, and ``${X:offset}``.
+_ASSIGNING_EXPANSION_PATTERN = re.compile(
+    r"\$\(\(|\$\[|\$\{[#!]?[A-Za-z_]\w*(?:\[(?![@*]\]|\d+\])|:?=|:(?![-?+=]))"
+)
+#: An arithmetic command, ``((…))``.
+_ARITHMETIC_COMMAND_PATTERN = re.compile(r"\(\(")
+#: ``NAME()`` at a command position, or ``function NAME``.
+_FUNCTION_DEFINITION_PATTERN = re.compile(
+    r"(?:^|[\s;&|(){}])(?:function\s|[^\s;&|<>(){}=$\"']+\s*\(\s*\))"
+)
+_WORD_BLANKS: tuple[str, ...] = (" ", "\t", "\n")
+
+
+def mask_quoted(text: str, keep_double: bool) -> str:
+    """``text`` with what quoting makes literal blanked, offsets kept: the
+    inside of ``'…'`` and ``$'…'`` and an escaped character, and the inside
+    of ``"…"`` too unless ``keep_double`` (bash expands parameters there,
+    but never globs)."""
+    out = list(text)
+    index = 0
+    in_double = False
+    while index < len(text):
+        char = text[index]
+        if char == _ESCAPE_CHAR:
+            end = min(index + 2, len(text))
+            out[index:end] = " " * (end - index)
+            index = end
+            continue
+        if char == _DOUBLE_QUOTE:
+            in_double = not in_double
+        elif in_double:
+            if not keep_double:
+                out[index] = " "
+        elif text.startswith(_ANSI_C_OPEN, index):
+            ansi_c = ansi_c_string(text, index + len(_ANSI_C_OPEN))
+            end = len(text) if ansi_c is None else ansi_c[1]
+            out[index + len(_ANSI_C_OPEN) : end] = " " * (end - index - len(_ANSI_C_OPEN))
+            index = end
+            continue
+        elif char == _SINGLE_QUOTE:
+            close = text.find(_SINGLE_QUOTE, index + 1)
+            end = len(text) if close < 0 else close
+            out[index + 1 : end] = " " * (end - index - 1)
+            index = end + 1
+            continue
+        index += 1
+    return "".join(out)
+
+
+def _nested_commands(segment: str) -> list[str]:
+    """The commands ``segment`` holds: each body a ``(``, ``$(``, ``<(``,
+    ``>(`` or backtick opens, and the text around them with each body
+    replaced by one placeholder character, so an argument stays an
+    argument. A ``)`` that closes nothing ends a ``case`` pattern, and a
+    command follows it. A comment ends the segment."""
+    pieces: list[str] = []
+    frames: list[tuple[list[str], str, bool]] = []
+    buffer: list[str] = []
+    index = 0
+    in_double = False
+    while index < len(segment):
+        char = segment[index]
+        end = index + 1
+        if char == _ESCAPE_CHAR:
+            end = index + 2
+        elif not in_double and segment.startswith(_ANSI_C_OPEN, index):
+            ansi_c = ansi_c_string(segment, index + len(_ANSI_C_OPEN))
+            end = len(segment) if ansi_c is None else ansi_c[1]
+        elif not in_double and char == _SINGLE_QUOTE:
+            close = segment.find(_SINGLE_QUOTE, index + 1)
+            end = len(segment) if close < 0 else close + 1
+        elif not in_double and _starts_comment(segment, index):
             break
-        raw_words.append(raw)
-    words = _words_without_body_inputs(raw_words)
-    if words is None:
-        return False
+        elif frames and (
+            (char == _BACKTICK and frames[-1][1] == _BACKTICK)
+            or (char == ")" and not in_double and frames[-1][1] == ")")
+        ):
+            pieces.append("".join(buffer))
+            buffer, _closer, in_double = frames.pop()
+            buffer.append(_NESTED_BODY_PLACEHOLDER)
+            index = end
+            continue
+        elif (
+            char == _BACKTICK or segment.startswith("$(", index) or (not in_double and char == "(")
+        ):
+            frames.append((buffer, _BACKTICK if char == _BACKTICK else ")", in_double))
+            buffer = []
+            in_double = False
+            index = index + 2 if char == "$" else end
+            continue
+        elif char == ")" and not in_double:
+            pieces.append("".join(buffer))
+            buffer = []
+            index = end
+            continue
+        elif char == _DOUBLE_QUOTE:
+            in_double = not in_double
+        buffer.append(segment[index:end])
+        index = end
+    pieces.append("".join(buffer))
+    pieces.extend("".join(frame[0]) for frame in reversed(frames))
+    return pieces
+
+
+_NESTED_BODY_PLACEHOLDER = "_"
+
+
+def _command_may_rebind(piece: str) -> bool:
+    """:func:`segment_may_rebind_commands` for one command, its nested
+    bodies already cut away."""
+    words = _without_redirections([word for word in split_unquoted(piece, _WORD_BLANKS) if word])
+    while words and (words[0] in _CLOSING_WORDS or words[0] in SHELL_RESERVED_COMMAND_PREFIXES):
+        words = words[1:]
+    while words and (assignment := _ASSIGNMENT_PREFIX.match(words[0])) is not None:
+        subscript = assignment.group("subscript")
+        if _is_special_variable(assignment.group("name")):
+            return True
+        if subscript is not None and _PLAIN_SUBSCRIPT.fullmatch(subscript) is None:
+            return True
+        words = words[1:]
     if not words:
+        return False
+    head, arguments = words[0], words[1:]
+    if _PLAIN_HEAD_PATTERN.fullmatch(head) is None or head in _REBINDING_HEADS:
         return True
-    assignments = [_ASSIGNMENT_WORD.match(raw) for raw, _resolved in words]
-    if all(assignments):
-        return not any(
-            match is not None and _is_special_variable(match.group("name")) for match in assignments
+    if head in _LOOP_HEADS:
+        # `for NAME in WORDS` assigns NAME once per word, and nothing else.
+        return not arguments or not (
+            _SHELL_NAME.fullmatch(arguments[0]) and not _is_special_variable(arguments[0])
         )
-    name = words[0][1]
-    arguments = [resolved for _raw, resolved in words[1:]]
-    if name in _INERT_BUILTINS or name in _READ_ONLY_PROGRAMS:
-        return True
-    if name == _CD:
-        return len(arguments) <= 1 and not any(arg.startswith("-") for arg in arguments)
-    if name == _PRINTF:
-        return not any(arg.startswith(_PRINTF_TARGET_OPTION) for arg in arguments)
-    if name == "git":
-        return _git_is_read_only(arguments)
-    if name in _SEARCH_PROGRAMS:
-        return not any(arg.startswith(_SEARCH_ACTING_OPTIONS) for arg in arguments)
-    if name == "find":
-        return not any(
-            arg in _FIND_ACTIONS or arg.startswith(_FIND_WRITING_PREFIX) for arg in arguments
-        )
+    if head == _SET:
+        return not _set_is_inert(arguments)
+    if head == _PRINTF:
+        return _printf_may_bind(arguments)
+    if head in _SINGLE_BRACKET_TESTS:
+        return _single_bracket_may_assign(arguments)
+    return _arithmetic_test_may_assign(words)
+
+
+def _without_redirections(words: list[str]) -> list[str]:
+    """``words`` less each redirection and the target it takes as its own
+    word. What a redirection writes is a file, which rebinds nothing."""
+    kept: list[str] = []
+    index = 0
+    while index < len(words):
+        redirect = _REDIRECT_WORD_PATTERN.fullmatch(words[index])
+        if redirect is None:
+            kept.append(words[index])
+        elif not redirect.group("rest"):
+            index += 1
+        index += 1
+    return kept
+
+
+def _set_is_inert(arguments: list[str]) -> bool:
+    """Is ``set`` given only ``-e``, ``-u``, ``-x`` and ``-o`` with an
+    inert name, in either sign? A bare ``set`` only prints."""
+    index = 0
+    while index < len(arguments):
+        word = arguments[index]
+        letters = word[1:]
+        if len(word) < 2 or word[0] not in "-+" or letters.count(_SET_LONG_OPTION) > 1:
+            return False
+        if not set(letters) <= _SET_INERT_LETTERS | {_SET_LONG_OPTION}:
+            return False
+        if _SET_LONG_OPTION in letters:
+            index += 1
+            if index >= len(arguments) or arguments[index] not in _SET_INERT_NAMES:
+                return False
+        index += 1
+    return True
+
+
+def _printf_may_bind(arguments: list[str]) -> bool:
+    """May ``printf`` be given ``-v``? It reads options up to its format;
+    a word the text cannot read may be ``-v``."""
+    for word in arguments:
+        text = resolve_shell_word(word)
+        if text is None:
+            return True
+        if text == _END_OF_OPTIONS or not text.startswith("-"):
+            return False
+        if text.startswith(_PRINTF_TARGET_OPTION):
+            return True
     return False
 
 
-def _words_without_body_inputs(raw_words: list[str]) -> list[tuple[str, str]] | None:
-    """Each word with its quote-removed text, a heredoc operator and its
-    delimiter and a literal here-string dropped. None for a word bash
-    expands or any other redirection: either may run or write something."""
-    words: list[tuple[str, str]] = []
-    index = 0
-    while index < len(raw_words):
-        raw = raw_words[index]
-        redirect = _REDIRECT_WORD_PATTERN.match(raw)
-        if redirect is not None:
-            operator, operand = redirect.group("op"), redirect.group("rest")
-            if not operand:
-                index += 1
-                operand = raw_words[index] if index < len(raw_words) else ""
-            if operator not in _BODY_INPUT_OPERATORS or resolve_shell_word(operand) is None:
-                return None
-            index += 1
-            continue
-        resolved = raw if raw in _TEST_BRACKETS else resolve_shell_word(raw)
-        if resolved is None:
-            return None
-        words.append((raw, resolved))
-        index += 1
-    return words
+def _single_bracket_may_assign(arguments: list[str]) -> bool:
+    """May ``test``/``[`` assign? Only ``-v`` evaluates, in a subscript, and
+    an unquoted expansion may split into ``-v``."""
+    for word in arguments:
+        unquoted = mask_quoted(word, keep_double=False)
+        if "$" in unquoted or _BACKTICK in unquoted:
+            return True
+        if resolve_shell_word(word) == _PRINTF_TARGET_OPTION:
+            return True
+    return False
 
 
-def _git_is_read_only(arguments: list[str]) -> bool:
-    """Is this a git subcommand on the inert allowlist, reached through no
-    global option that configures or relocates git, and carrying no
-    option that writes a file or names a program?"""
-    index = 0
-    while index < len(arguments) and arguments[index].startswith("-"):
-        if arguments[index] in _GIT_INERT_GLOBAL_FLAGS:
-            index += 1
-        elif arguments[index] == _GIT_DIRECTORY_FLAG and index + 1 < len(arguments):
-            index += 2
-        else:
-            return False
-    if index >= len(arguments) or arguments[index] not in _GIT_READ_ONLY_SUBCOMMANDS:
+def _arithmetic_test_may_assign(words: list[str]) -> bool:
+    """May words holding a ``[[`` arithmetic comparison or ``-v`` assign?
+    Each operand is evaluated, which assigns unless it is a plain number."""
+    texts = [word if word in _TEST_WORDS else resolve_shell_word(word) for word in words]
+    if _PRINTF_TARGET_OPTION in texts and words[0] == "[[":
+        return True
+    if not _ARITHMETIC_TEST_OPERATORS & {text for text in texts if text is not None}:
         return False
-    return not any(arg.startswith(_GIT_ACTING_OPTIONS) for arg in arguments[index + 1 :])
+    return not all(
+        text is not None and (text.lstrip("+-").isdigit() or text in _TEST_WORDS)
+        for text in texts
+        if text not in _ARITHMETIC_TEST_OPERATORS
+    )
 
 
 def _heredoc_receiving_segments(command: str) -> list[str]:

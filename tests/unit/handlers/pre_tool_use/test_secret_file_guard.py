@@ -6,6 +6,7 @@ are DENIED — except the ``secret-meta`` helper and allowlisted consumers with
 the path in flag position. No escape hatch (Decision 3).
 """
 
+import time
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
@@ -2010,7 +2011,7 @@ class TestTextTheShellNeverExpandsIsNotEnumerated:
         exempt."""
         decision, reason = _through_chain("Bash", {"command": command})
         assert decision == Decision.DENY
-        assert RuleID.SECRET_EVALUATION_ERROR in reason
+        assert _could_not_finish(reason), reason
 
     def test_python_heredoc_piped_on_to_any_stage_still_fails_closed(self) -> None:
         """No pipe stage may follow an exempted program (coordinator ruling
@@ -2019,7 +2020,7 @@ class TestTextTheShellNeverExpandsIsNotEnumerated:
         command = f"python3 - <<'EOF' 2>&1 | grep -v noise\n{_MANY_BRACES_PROGRAM}\nEOF"
         decision, reason = _through_chain("Bash", {"command": command})
         assert decision == Decision.DENY
-        assert RuleID.SECRET_EVALUATION_ERROR in reason
+        assert _could_not_finish(reason), reason
 
     def test_literal_protected_name_in_a_python_heredoc_still_denies(self) -> None:
         command = (
@@ -2060,25 +2061,25 @@ class TestTextTheShellNeverExpandsIsNotEnumerated:
     def test_over_bound_shell_words_still_fail_closed(self) -> None:
         decision, reason = _through_chain("Bash", {"command": "echo " + "{a,b}" * 20})
         assert decision == Decision.DENY
-        assert RuleID.SECRET_EVALUATION_ERROR in reason
+        assert _could_not_finish(reason), reason
 
     def test_over_bound_executed_bash_heredoc_still_fails_closed(self) -> None:
         command = f"bash <<'EOF'\necho {_OVER_BOUND_WORD}\nEOF"
         decision, reason = _through_chain("Bash", {"command": command})
         assert decision == Decision.DENY
-        assert RuleID.SECRET_EVALUATION_ERROR in reason
+        assert _could_not_finish(reason), reason
 
     def test_over_bound_python_heredoc_piped_to_a_shell_still_fails_closed(self) -> None:
         command = f"python3 - <<'EOF' | bash\nprint('echo {_OVER_BOUND_WORD}')\nEOF"
         decision, reason = _through_chain("Bash", {"command": command})
         assert decision == Decision.DENY
-        assert RuleID.SECRET_EVALUATION_ERROR in reason
+        assert _could_not_finish(reason), reason
 
     def test_writing_shell_source_with_an_over_bound_word_still_fails_closed(self) -> None:
         tool_input = {"file_path": "/proj/gen.sh", "content": f"echo {_OVER_BOUND_WORD}\n"}
         decision, reason = _through_chain("Write", tool_input)
         assert decision == Decision.DENY
-        assert RuleID.SECRET_EVALUATION_ERROR in reason
+        assert _could_not_finish(reason), reason
 
 
 #: A brace spelling that expands to the protected `/proj/.vault-pass`.
@@ -2092,6 +2093,12 @@ def _deny_reason(command: str) -> str:
     decision, reason = _through_chain("Bash", {"command": command})
     assert decision == Decision.DENY, f"allowed: {command!r}"
     return reason
+
+
+def _could_not_finish(reason: str) -> bool:
+    """Is ``reason`` the named deny for a scan past its cap, and not the
+    guard-bug route (ledger 00466 N238)?"""
+    return sfm.SCAN_COULD_NOT_FINISH in reason and RuleID.SECRET_EVALUATION_ERROR not in reason
 
 
 class TestTheExemptionIsOnlyPythonProgramTextNoShellReads:
@@ -2299,7 +2306,7 @@ class TestRoundTwoFindingsAreClosed:
         literal_route = f"{prefix}; python3 -c 'print(\"cat {_BRACE_PATH}\")'; bash gen.sh"
         assert RuleID.SECRET_BASH_MENTION in _deny_reason(literal_route)
         code_route = f"{prefix}; {_CODE_BRACES_HEREDOC}\nbash gen.sh"
-        assert RuleID.SECRET_EVALUATION_ERROR in _deny_reason(code_route)
+        assert _could_not_finish(_deny_reason(code_route))
 
     @pytest.mark.parametrize(
         "content",
@@ -2328,7 +2335,7 @@ class TestRoundTwoFindingsAreClosed:
             "Write", {"file_path": "/proj/gen.sh", "content": content}
         )
         assert decision == Decision.DENY
-        assert RuleID.SECRET_EVALUATION_ERROR in reason
+        assert _could_not_finish(reason), reason
 
 
 #: Brace halves of `_BRACE_PATH`, for programs that assemble it.
@@ -2363,7 +2370,7 @@ class TestRoundThreeFindingsAreClosed:
         self, sibling: str
     ) -> None:
         reason = _deny_reason(f"{sibling}\n{_CODE_BRACES_HEREDOC}")
-        assert RuleID.SECRET_EVALUATION_ERROR in reason
+        assert _could_not_finish(reason), reason
 
     @pytest.mark.parametrize(
         "body",
@@ -2423,7 +2430,7 @@ class TestRoundThreeFindingsAreClosed:
         self, declaration: str
     ) -> None:
         command = f"python3 - <<'EOF'\n{declaration}\n{_MANY_BRACES_PROGRAM}\nEOF"
-        assert RuleID.SECRET_EVALUATION_ERROR in _deny_reason(command)
+        assert _could_not_finish(_deny_reason(command))
 
     def test_a_utf8_declaration_keeps_the_exemption(self) -> None:
         command = f"python3 - <<'EOF'\n# -*- coding: utf-8 -*-\n{_MANY_BRACES_PROGRAM}\nEOF"
@@ -2445,9 +2452,17 @@ class TestRoundThreeFindingsAreClosed:
         decision, reason = _through_chain("Bash", {"command": f"{sibling}\n{_CODE_BRACES_HEREDOC}"})
         assert decision != Decision.DENY, reason
 
-    def test_a_realistic_dict_and_f_string_program_stays_allowed(self) -> None:
+    def test_a_realistic_dict_and_f_string_program_stays_allowed(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """The field shape N101 was filed for: building hook inputs as
-        dicts with f-strings, past the 500-word discovery cap."""
+        dicts with f-strings, past the 500-word discovery cap.
+
+        The scan's deadline is read on this process's CPU clock here, so a
+        loaded host cannot turn the verdict into a deny (Plan 00466 N101
+        round 13). The bound itself is unchanged: a scan that really costs
+        more than the deadline in CPU still fails."""
+        monkeypatch.setattr(time, "monotonic", time.process_time)
         lines = [
             "import json",
             *(
@@ -2489,7 +2504,7 @@ class TestRoundFourFindingsAreClosed:
     def test_an_over_cap_code_word_that_could_name_a_path_denies(self) -> None:
         """Past the cap a code word fails closed, as on main (round 6)."""
         command = f"python3 - <<'EOF'\n{_OVER_CAP_CODE_WORD_PROGRAM}\nEOF"
-        assert RuleID.SECRET_EVALUATION_ERROR in _deny_reason(command)
+        assert _could_not_finish(_deny_reason(command))
 
     @pytest.mark.parametrize("line", ["x = 1\r", "x = 1\r\ny = 2", "x = '\r'"])
     def test_a_program_holding_a_carriage_return_is_not_exempted_d_sec_4_2a(
@@ -2498,7 +2513,7 @@ class TestRoundFourFindingsAreClosed:
         """Python reads `\\r\\n` and a lone `\\r` as `\\n`; the scanner does
         not model that, so the exemption is withdrawn."""
         command = f"python3 - <<'EOF'\n{line}\n{_MANY_BRACES_PROGRAM}\nEOF"
-        assert RuleID.SECRET_EVALUATION_ERROR in _deny_reason(command)
+        assert _could_not_finish(_deny_reason(command))
 
     @pytest.mark.parametrize(
         "field_program",
@@ -2518,7 +2533,7 @@ class TestRoundFourFindingsAreClosed:
         self, field_program: str
     ) -> None:
         command = f"python3 - <<'EOF'\n{field_program}\n{_MANY_BRACES_PROGRAM}\nEOF"
-        assert RuleID.SECRET_EVALUATION_ERROR in _deny_reason(command)
+        assert _could_not_finish(_deny_reason(command))
 
     def test_tokenize_and_ast_disagreeing_on_a_literal_withdraws_d_sec_4_2c(
         self, monkeypatch: pytest.MonkeyPatch
@@ -2539,7 +2554,7 @@ class TestRoundFourFindingsAreClosed:
 
         monkeypatch.setattr(ast, "parse", late_strings)
         command = f"python3 - <<'EOF'\nx = 'n101-drift'\n{_MANY_BRACES_PROGRAM}\nEOF"
-        assert RuleID.SECRET_EVALUATION_ERROR in _deny_reason(command)
+        assert _could_not_finish(_deny_reason(command))
 
     @pytest.mark.parametrize(
         "definition",
@@ -2554,9 +2569,9 @@ class TestRoundFourFindingsAreClosed:
         """D-RULE-4 observation: an allowlisted head can be a shell function.
         One defined on the command line withdraws the exemption."""
         heredoc = f"{definition}{_CODE_BRACES_HEREDOC}"
-        assert RuleID.SECRET_EVALUATION_ERROR in _deny_reason(heredoc)
+        assert _could_not_finish(_deny_reason(heredoc))
         dash_c = definition + "python3 -c '" + _MANY_BRACES_PROGRAM.replace("'", '"') + "'"
-        assert RuleID.SECRET_EVALUATION_ERROR in _deny_reason(dash_c)
+        assert _could_not_finish(_deny_reason(dash_c))
 
 
 def _quoted_brace_code_word(quote: str) -> str:
@@ -2585,12 +2600,12 @@ class TestRoundFiveFindingsAreClosed:
     def test_an_over_cap_code_word_holding_a_quoted_brace_denies_d_rule_5_major_1(
         self, command: str
     ) -> None:
-        assert RuleID.SECRET_EVALUATION_ERROR in _deny_reason(command)
+        assert _could_not_finish(_deny_reason(command))
 
     def test_an_over_cap_code_word_naming_nothing_fails_closed_as_on_main(self) -> None:
         """This was a round-5 pin that stayed allowed through the fallback."""
         command = f"python3 - <<'EOF'\n{_OVER_CAP_DICT_PROGRAM}\n{_MANY_BRACES_PROGRAM}\nEOF"
-        assert RuleID.SECRET_EVALUATION_ERROR in _deny_reason(command)
+        assert _could_not_finish(_deny_reason(command))
 
 
 class TestQuotedBracesAreNotBraceSyntax:
@@ -2850,3 +2865,52 @@ class TestRoundSevenFindingsAreClosed:
         substitution's extent is resolved rather than failed closed."""
         decision, reason = _through_chain("Bash", {"command": command})
         assert decision != Decision.DENY, reason
+
+
+#: A Python option table past the 256-spelling brace cap, the shape of a
+#: long command-wrapper registry (ledger 00466 N238 (iv)).
+_LONG_OPTION_TABLE = (
+    "WRAPPERS = {\n" + "".join(f'    "cmd{index}": Wrapper(),\n' for index in range(300)) + "}\n"
+)
+
+
+class TestAWriteOfSourceIsNotACommand:
+    """Ledger 00466 N238: a Write of Python source enumerated its CODE
+    braces as shell brace groups, and an option table past the cap was
+    reported as a bug in the guard. No shell reads that text; only its
+    string literals and comments can be handed to one."""
+
+    def test_a_long_option_table_is_allowed(self) -> None:
+        tool_input = {"file_path": "/proj/src/wrappers.py", "content": _LONG_OPTION_TABLE}
+        decision, reason = _through_chain("Write", tool_input)
+        assert decision != Decision.DENY, reason
+
+    def test_a_brace_spelled_path_in_a_string_literal_still_denies(self) -> None:
+        content = _LONG_OPTION_TABLE + f"CMD = 'cat {_BRACE_PATH}'\n"
+        decision, reason = _through_chain(
+            "Write", {"file_path": "/proj/src/wrappers.py", "content": content}
+        )
+        assert decision == Decision.DENY
+        assert RuleID.SECRET_SCRIPT_AUTHOR in reason
+
+    def test_an_over_cap_string_literal_is_a_named_deny(self) -> None:
+        content = _LONG_OPTION_TABLE + f"CMD = 'echo {_OVER_BOUND_WORD}'\n"
+        decision, reason = _through_chain(
+            "Write", {"file_path": "/proj/src/wrappers.py", "content": content}
+        )
+        assert decision == Decision.DENY
+        assert _could_not_finish(reason), reason
+
+    def test_source_that_does_not_parse_is_enumerated_whole(self) -> None:
+        content = f"cat {_BRACE_PATH}\n"
+        decision, reason = _through_chain(
+            "Write", {"file_path": "/proj/src/broken.py", "content": content}
+        )
+        assert decision == Decision.DENY
+        assert RuleID.SECRET_SCRIPT_AUTHOR in reason
+
+    def test_a_shell_script_is_still_enumerated_whole_and_named_past_the_cap(self) -> None:
+        tool_input = {"file_path": "/proj/gen.sh", "content": _LONG_OPTION_TABLE}
+        decision, reason = _through_chain("Write", tool_input)
+        assert decision == Decision.DENY
+        assert _could_not_finish(reason), reason

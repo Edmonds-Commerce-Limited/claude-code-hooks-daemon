@@ -27,9 +27,9 @@ import pytest
 
 from claude_code_hooks_daemon.utils.heredoc_operators import scan_heredocs
 from claude_code_hooks_daemon.utils.shell_segmentation import (
-    earlier_segments_are_inert,
     heredoc_consumers,
     known_variables,
+    no_earlier_segment_may_rebind,
     strip_inert_spans,
     strip_message_bodies,
     strip_quoted_heredoc_bodies,
@@ -75,8 +75,8 @@ class TestManyQuotedHeredocsAreLinear:
     """The `strip_quoted_heredoc_bodies` half: review 2's 98s repro."""
 
     def test_5000_quoted_delimiter_heredocs_in_one_command(self) -> None:
-        """``cat`` reading only its body is on the N214 inert allowlist, so
-        every body stays blankable (Plan 00466 N101 round 12)."""
+        """No ``cat`` can rebind a command name (N214), so every body stays
+        blankable (Plan 00466 N101 round 13)."""
         command = "cat <<'EOF'\nx\nEOF\n" * 5_000
         result, elapsed = _timed(strip_quoted_heredoc_bodies, command)
 
@@ -137,17 +137,35 @@ class TestRoundTwelveHelpersAreLinear:
             lambda n: "echo x; " * n,
             lambda n: "cat <<'EOF'\nx\nEOF\n" * n,
             lambda n: "$PY <<'EOF'\nx\nEOF\n" * n,
+            lambda n: "echo $(date) \"$(x `y`)\" 'q'; " * n,
+            lambda n: "echo " + "$(x " * n + ")" * n,
+            lambda n: "cat <<E\n$HOME\nE\n" * n,
+            lambda n: "true" + "\n" * (8 * n),
+            lambda n: "true;" + " \t" * (8 * n) + "x",
+            lambda n: "echo " + "'" * (8 * n),
         ],
-        ids=["assignments", "distinct-names", "commands", "heredocs", "variable-receivers"],
+        ids=[
+            "assignments",
+            "distinct-names",
+            "commands",
+            "heredocs",
+            "variable-receivers",
+            "substitutions",
+            "nested-substitutions",
+            "unquoted-heredocs",
+            "newline-run",
+            "blank-run",
+            "quote-run",
+        ],
     )
     @pytest.mark.parametrize(
         "fn",
         [
             known_variables,
-            lambda command: earlier_segments_are_inert(command, len(command)),
+            lambda command: no_earlier_segment_may_rebind(command, len(command)),
             lambda command: heredoc_consumers(command, scan_heredocs(command).heredocs),
         ],
-        ids=["known_variables", "earlier_segments_are_inert", "heredoc_consumers"],
+        ids=["known_variables", "no_earlier_segment_may_rebind", "heredoc_consumers"],
     )
     def test_the_cost_grows_linearly(
         self, fn: Callable[[str], object], build: Callable[[int], str]

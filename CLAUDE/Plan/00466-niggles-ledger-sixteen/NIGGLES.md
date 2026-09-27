@@ -3,6 +3,52 @@
 Newest first. Each entry says how it was found, why it happens, and the
 candidate remedies.
 
+### N238 — ✅ Remedied (n101 branch) — an enumeration past its budget is reported as a bug in the guard
+
+**Found live (shared with small-a).** `secret_file_guard` and
+`quarantine_artefact_read_guard` denied ordinary calls with their
+`EVALUATION-ERROR` rule, whose text calls the deny a bug in the guard:
+(i) a Bash command expanding `"${array[@]}"` with a `$var` inside a path,
+(ii) a jq filter holding `.files["…"]`, (iii) any word holding `**/`, and
+(iv) a single large `Write` of a long option table (`command_wrappers.py`
+on the p422 branch).
+
+**Main's verdicts (44d1b1b3b), from `untracked/scratch/n101r13/probe_n238.py`
+run with cwd `/workspace`:** the quarantine guard denied
+`rg -g '**/*.py' foo` and `grep -rn x --include='**/*.py' .` as an
+evaluation error, because a single-quoted glob reached the recursive walk
+and passed its 2,000-entry cap. `secret_file_guard` denied the
+`command_wrappers.py` Write as an evaluation error, because the
+`"content"` scan brace-enumerated the file's CODE and its option-table dict
+passed the 256-spelling cap. The shapes I wrote for (i) and (ii) were
+allowed by both guards on main and on this branch; each fails the same way
+only when it reaches the same enumerator, which the two rules below close.
+
+**Remedy:**
+
+- A quoted or escaped glob is a literal bash hands on as written, so
+  `find_protected_mention_strict` expands only a token with a glob
+  character outside quotes. A quoted artefact name is still a literal
+  mention.
+- A `Write` of source in a non-shell language is not a command: where it
+  parses as Python, only its string literals and comments are
+  brace-enumerated (`shell_expansion.python_string_literals`), since they
+  are all a shell can be handed from it. A shell script is still
+  enumerated whole.
+- An enumeration that is really needed and passes its cap, or the scan
+  deadline, is a named deny in both guards:
+  `secret_file_matching.SCAN_COULD_NOT_FINISH` ("could not be verified …
+  name the files, or narrow the glob or directory"). It never reaches the
+  evaluation-error route. This is small-a's N134 wording and catch, ported
+  verbatim so the landing merge keeps one copy; small-a's minor-E
+  "cannot be listed" constant (`DIRECTORY_CANNOT_BE_LISTED`) covers an
+  unlistable directory, which this branch does not reach.
+
+RED tests: `TestAWriteOfSourceIsNotACommand` (`test_secret_file_guard.py`),
+`TestAQuotedGlobIsNeverEnumerated` (`test_quarantine_artefact_read_guard.py`,
+each shape run through bash first), and the over-cap tests that now assert
+the named deny.
+
 ### N194 — ✅ Remedied — daemon-signal tests read a spawned child's cmdline before its exec lands, so a loaded host flakes
 
 **Found:** `tests/unit/utils/test_safe_signal.py`'s daemon-signal tests
@@ -906,15 +952,25 @@ unresolved sink target was treated as a file.
 `export LESSOPEN='|-bash %s'; less <<'EOF'` all run the body; the sink test
 read only the command name.
 
-**Remedy (coordinator ruling: a closed list):** a sink's body is data only
-when every earlier segment is on the inert allowlist in
-`shell_segmentation.earlier_segments_are_inert`: a literal assignment of a
-name that is not special, a proven `cd`, `echo`, `printf` without `-v`,
-`true`, `test`/`[`, and with no redirection
-`git status|add|diff|log|show|rev-parse|ls-files`, `grep`/`rg`/`ugrep`,
-`ls`, `cat`, `wc`, `head`, `tail`, `stat`, `file`, `find` without an acting
-option. Anything else earlier keeps the body judged. RED tests:
-`TestAnEarlierSegmentCanRunTheBody` and `TestEarlierSegmentsAreInert`.
+**Remedy (round 13 coordinator ruling, replacing round 12's closed
+allowlist):** the threat is IN-SHELL rebinding, which a child process
+cannot do. A sink's body is data unless an earlier segment MAY REBIND a
+command name: `shell_segmentation.no_earlier_segment_may_rebind`, over
+`segment_may_rebind_commands` (the name small-a's branch uses). A segment
+may rebind when it has a head that is not plain literal, a rebinding
+builtin or keyword (`alias`, `hash`, `eval`, `source`, `exec`, `export`,
+`declare`, `read`, `cd`, `function`, and the rest of the ruling's list,
+plus `let`), `set` with a flag outside `-e`/`-u`/`-x`/`-o pipefail` and
+their `-o` names, `printf -v`, an assignment to a special name (a
+`for`/`select` loop name counts as one: the ruling lists both keywords,
+and this branch narrows them to the one name they bind), a function
+definition, an assigning expansion or arithmetic, or any of these
+inside a group, subshell or substitution body. An unquoted heredoc body
+with an assigning expansion counts too. `set -euo pipefail`, `mkdir -p`,
+`pytest` and an earlier file-writing heredoc no longer make a later prose
+heredoc unreadable. A later name a planted file could shadow is the limit
+`CLAUDE/Security/FailOpenBoundaries.md` records. RED tests:
+`TestAnEarlierSegmentCanRunTheBody` and `TestNoEarlierSegmentMayRebind`.
 
 ### N215 — ✅ Remedied (n101 branch) — Containment could not see a same-call variable target
 

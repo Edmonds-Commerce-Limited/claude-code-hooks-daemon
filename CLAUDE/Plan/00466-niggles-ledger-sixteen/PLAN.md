@@ -158,6 +158,7 @@ Full write-ups are in [NIGGLES.md](NIGGLES.md). One line each here:
 | N213 | An unresolved write target may be `/dev/fd/N` for an fd a process substitution opened, so the body may run                                        | N101 review 11 (D-RULE)                                         | ✅ Remedied (n101 branch)        |
 | N214 | A function, alias or environment an earlier segment sets can turn a sink into an executor                                                         | N101 review 11 (D-RULE)                                         | ✅ Remedied (n101 branch)        |
 | N215 | Containment could not see a same-call assignment to a variable write target (`OUT=/opt/o.md; cat > "$OUT"`)                                       | N101 review 11 (D-RULE)                                         | ✅ Remedied (n101 branch)        |
+| N238 | An enumeration past its budget (a quoted `**/` glob, a Write of a long option table) is reported as a bug in the guard                            | Coordinator (shared with small-a)                               | ✅ Remedied (n101 branch)        |
 
 ## Tasks
 

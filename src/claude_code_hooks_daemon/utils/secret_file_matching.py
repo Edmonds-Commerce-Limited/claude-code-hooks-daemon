@@ -49,6 +49,7 @@ from claude_code_hooks_daemon.utils.path_exclusion import (
     resolve_project_root,
 )
 from claude_code_hooks_daemon.utils.realpath import has_symlink_loop, realpath
+from claude_code_hooks_daemon.utils.shell_segmentation import mask_quoted
 
 logger = logging.getLogger(__name__)
 
@@ -312,8 +313,19 @@ def _tokenise(command: str) -> list[str]:
     surface. False positives are acceptable (deny-by-default); false
     negatives are the enumerated class-(c)/(d) limits.
     """
-    pattern = "[" + re.escape(_TOKEN_DELIMITERS.replace("\n", "")) + "\\n]+"
-    return [token for token in re.split(pattern, command) if token]
+    return [token for token, _start in _tokenise_with_offsets(command)]
+
+
+def _tokenise_with_offsets(command: str) -> list[tuple[str, int]]:
+    """:func:`_tokenise`'s tokens, each with its offset in ``command``."""
+    return [(match.group(), match.start()) for match in _TOKEN_PATTERN.finditer(command)]
+
+
+_TOKEN_PATTERN: Final[re.Pattern[str]] = re.compile(
+    "[^" + re.escape(_TOKEN_DELIMITERS.replace("\n", "")) + "\\n]+"
+)
+#: The characters bash expands a word's pathname by.
+_GLOB_CHARACTERS: Final[frozenset[str]] = frozenset("*?[")
 
 
 #: A Python import statement's dotted MODULE path. Anchored per line, and the
@@ -1257,6 +1269,16 @@ def find_protected_mention(
 SCAN_DEADLINE_SECONDS: Final[float] = 5.0
 
 
+#: What a guard reports, in place of a matched glob, when its scan of a
+#: command could not finish: a glob past its expansion cap, or the scan
+#: deadline. Unverifiable is denied, but it is not a guard bug (ledger 00466
+#: N134), so it is not sent down the internal-error route.
+SCAN_COULD_NOT_FINISH: Final[str] = (
+    "<this command could not be verified: a glob or scan in it did not finish within its "
+    "entry cap or deadline: name the files, or narrow the glob or directory>"
+)
+
+
 def bash_route_word_stream(command: str, *, deadline: float | None = None) -> list[str] | None:
     """The single decoded word list safe to share between BOTH consumers on
     the Bash route: the ordinary mention scan (:func:`iter_protected_
@@ -1445,7 +1467,9 @@ def iter_protected_mentions(
         )
     tokens = itertools.chain(
         _tokenise(import_stripped),
-        _brace_expansion_tokens(command, bash_tool_command=bash_tool_command),
+        _brace_expansion_tokens(
+            command, bash_tool_command=bash_tool_command, source_code=context == "content"
+        ),
         _normalised_word_tokens(
             import_stripped, deadline=deadline, words=words_for_normalised_stream
         ),
@@ -1493,7 +1517,9 @@ def iter_protected_mentions(
             yield (pattern, token)
 
 
-def _brace_expansion_tokens(command: str, *, bash_tool_command: bool = False) -> Iterator[str]:
+def _brace_expansion_tokens(
+    command: str, *, bash_tool_command: bool = False, source_code: bool = False
+) -> Iterator[str]:
     """Lazily yield every concrete spelling of every raw brace-expansion word
     in ``command`` (B1-R3, Plan 00466 review 3).
 
@@ -1544,12 +1570,25 @@ def _brace_expansion_tokens(command: str, *, bash_tool_command: bool = False) ->
     itself, which deleting import module paths would break (`import `
     alone does not parse). The deletion is applied to the view's text
     instead, which neutralising braces never touches.
+
+    ``source_code`` marks authored source in a non-shell language (the
+    ``"content"`` scan, ledger 00466 N238). No shell reads that text, so
+    where it parses as Python only its string literals and comments are
+    enumerated (:func:`shell_expansion.python_string_literals`), which is
+    all a shell can be handed from it: a dict or set display in code is not
+    a brace group, however many commas it holds. Text that does not parse
+    as Python is enumerated whole.
     """
+    literals = shell_expansion.python_string_literals(command) if source_code else None
     if bash_tool_command:
         view = shell_expansion.brace_expansion_view(command)
         sources: tuple[str, ...] = (_without_import_module_paths(view.text), *view.literals)
         code_words = view.code_words
         code_shell_words = view.shell_words
+    elif literals is not None:
+        sources = literals
+        code_words = ()
+        code_shell_words = ()
     else:
         sources = (_without_import_module_paths(command),)
         code_words = ()
@@ -1858,16 +1897,22 @@ def find_protected_mention_strict(command: str, patterns: tuple[str, ...]) -> st
     literal-token matching identical, but for a GLOB-shaped token it expands
     the glob against the filesystem (project root, then cwd) and only counts
     it as a mention when at least one resulting path is itself protected.
+
+    Only a token with a glob character bash would expand is expanded (ledger
+    00466 N238): one inside quotes or escaped is a literal, which bash
+    hands on as written (``jq '.files["a"]'``, ``rg -g '**/*.md'``).
     """
     if not command or not patterns:
         return None
     project_root = resolve_project_root()
-    for token in _tokenise(command):
+    unquoted = mask_quoted(command, keep_double=False)
+    for token, start in _tokenise_with_offsets(command):
+        globbed = any(char in _GLOB_CHARACTERS for char in unquoted[start : start + len(token)])
         for form in _normalised_token_forms(token):
             matched = first_matching_glob(form, patterns, project_root=project_root)
             if matched is not None:
                 return matched
-            if _is_glob_shaped(form):
+            if globbed and _is_glob_shaped(form):
                 match = _expand_glob_token(form, patterns, project_root)
                 if match is not None:
                     return match

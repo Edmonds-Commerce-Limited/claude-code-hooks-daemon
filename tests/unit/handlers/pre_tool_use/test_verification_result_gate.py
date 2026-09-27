@@ -170,12 +170,14 @@ class TestConsumedResults:
         self, handler: VerificationResultGateHandler
     ) -> None:
         """A quoted delimiter disables every expansion, so the body is text
-        -- after an inert prefix. With ``ansible-lint`` earlier, a program off
-        the N214 allowlist, the body is judged (Plan 00466 N101 round 12)."""
+        -- unless an earlier segment may rebind ``cat`` in this shell (N214,
+        Plan 00466 N101 round 13). ``ansible-lint`` is a child process and
+        cannot; a function definition can."""
         body = "cat > notes.md <<'EOF'\ngit commit -m 'not run'\nEOF"
 
         assert not _fires(handler, f"{body}\nansible-lint x")
-        assert _fires(handler, f"ansible-lint x\n{body}")
+        assert not _fires(handler, f"ansible-lint x\n{body}")
+        assert _fires(handler, f"ansible-lint x\ncat(){{ bash; }}\n{body}")
 
 
 class TestDoesNotCryWolf:

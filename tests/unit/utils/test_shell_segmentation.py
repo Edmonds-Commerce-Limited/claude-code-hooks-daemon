@@ -31,9 +31,9 @@ import pytest
 from claude_code_hooks_daemon.utils.heredoc_operators import scan_heredocs
 from claude_code_hooks_daemon.utils.shell_segmentation import (
     _SubstitutionDepthTracker,
-    earlier_segments_are_inert,
     heredoc_consumers,
     known_variables,
+    no_earlier_segment_may_rebind,
     quoted_heredoc_command_words,
     quoted_heredoc_receivers,
     split_unquoted,
@@ -477,13 +477,13 @@ class TestABodyIsOnlyInertIfItsRECEIVERTreatsItAsData:
         """Containment must END with the substitution, or prose stops blanking.
 
         `$(date)` closes before the heredoc opens, so the sink is NOT inside a
-        substitution. The body is still kept, for a different reason: `date`
-        is a program off the N214 inert allowlist (Plan 00466 N101 round 12).
+        substitution, and ``date`` runs in a child that cannot rebind ``cat``
+        (N214 round 13).
         """
         command = "echo $(date) && cat <<'EOF' > notes.md\ngit reset --hard HEAD\nEOF"
         tracker = _SubstitutionDepthTracker(command)
         assert tracker.inside_substitution_at(command.index("<<")) is False
-        assert "git reset --hard HEAD" in strip_quoted_heredoc_bodies(command)
+        assert "git reset --hard HEAD" not in strip_quoted_heredoc_bodies(command)
 
     def test_an_apostrophe_in_earlier_double_quoted_text_does_not_confuse_it(
         self,
@@ -906,9 +906,10 @@ class TestTheMessageHeredocIdiomMustBeTheWholeValue:
 _SINK = "cat > notes.md <<'EOF'\nprose\nEOF"
 
 
-class TestEarlierSegmentsAreInert:
-    """N214: a sink's body is data only when every earlier segment of the
-    call is on the closed inert allowlist."""
+class TestNoEarlierSegmentMayRebind:
+    """N214, as the round 13 ruling reads it: a sink's body is data unless
+    an earlier segment of the call MAY REBIND a command name in this shell.
+    A child process cannot, whatever it does to files."""
 
     @pytest.mark.parametrize(
         "prefix",
@@ -916,9 +917,58 @@ class TestEarlierSegmentsAreInert:
             "",
             "OUT=notes.md; ",
             "A=1 B='two words'; ",
-            "cd /repo && ",
-            "cd 'sub dir'; ",
-            "cd; ",
+            "set -euo pipefail; ",
+            "set -euo pipefail\n",
+            "set -e; ",
+            "set +x; ",
+            "set -o errexit -o nounset; ",
+            "set +o pipefail; ",
+            "set; ",
+            "mkdir -p d && ",
+            "set -euo pipefail; mkdir -p d && ",
+            "pytest -q; ",
+            "python3 x.py; ",
+            "make -j4 && ",
+            "sudo ls; ",
+            "/usr/bin/env ls; ",
+            "cat > a.md <<'A'\nit's\nA\n",
+            "cat > a.md <<A\nit's $HOME and $(date)\nA\n",
+            "echo x > cat; ",
+            "ls > out; ",
+            "cat < f; ",
+            "ls &> out; ",
+            "git commit -m x; ",
+            "git commit -m 'fix (for real)'; ",
+            "git config alias.x '!bash'; ",
+            "git -c core.pager=bash log; ",
+            "rg --pre bash x; ",
+            "find . -exec bash {} \\; ; ",
+            "find . -delete; ",
+            "X=$(date); ",
+            "X=`date`; ",
+            "X=$Y; ",
+            "X=1 ls; ",
+            "a=(); ",
+            "ls $X; ",
+            "echo $(date); ",
+            'echo "$(date)"; ',
+            'cp "${files[@]}" d; ',
+            'echo "${x:-d}" "${#x}" "${a[1]}"; ',
+            "{ ls; }; ",
+            "(ls); ",
+            "if true; then ls; fi; ",
+            "while false; do ls; done; ",
+            "for x in a b; do ls; done; ",
+            "select x in a; do ls; done; ",
+            "case $x in a) ls;; esac; ",
+            "# alias cat=bash\n",
+            "echo 'alias cat=bash; x=$((1))'; ",
+            'echo "f() (x)"; ',
+            '[ -f "$x" ] && ',
+            "[[ $x == y ]] && ",
+            "[[ 1 -eq 1 ]] && ",
+            "printf '%s' -v; ",
+            "printf -- -v; ",
             "echo hi; ",
             "printf '%s\\n' x; ",
             "true && ",
@@ -949,90 +999,134 @@ class TestEarlierSegmentsAreInert:
             "git log -1 >/dev/null; ",
         ],
     )
-    def test_an_inert_prefix_keeps_the_body_data(self, prefix: str) -> None:
+    def test_a_prefix_that_cannot_rebind_keeps_the_body_data(self, prefix: str) -> None:
         command = prefix + _SINK
-        assert earlier_segments_are_inert(command, command.rindex("<<")) is True
+        assert no_earlier_segment_may_rebind(command, command.rindex("<<")) is True
         assert "prose" not in strip_quoted_heredoc_bodies(command)
 
     @pytest.mark.parametrize(
         "prefix",
         [
+            # A function or an alias.
             "cat(){ bash; }; ",
             "function cat { bash; }; ",
             "cat () { bash; }\n",
             "alias cat=bash\n",
-            "shopt -s expand_aliases; ",
-            "export LESSOPEN='|-bash %s'; ",
+            # Each rebinding builtin or keyword of the ruling.
+            "unalias ls; ",
+            "hash -p /bin/bash cat; ",
+            "enable -n echo; ",
+            "builtin echo x; ",
+            "command -v x; ",
+            "eval x; ",
+            "source env.sh; ",
+            ". env.sh; ",
+            "exec 3>&1; ",
             "export X=1; ",
+            "export LESSOPEN='|-bash %s'; ",
+            "declare -f x; ",
+            "typeset x; ",
+            "local x; ",
+            "readonly x; ",
+            "unset x; ",
+            "shopt -s expand_aliases; ",
+            "trap 'x' EXIT; ",
+            "read x; ",
+            "mapfile x < f; ",
+            "readarray x < f; ",
+            "printf -v X y; ",
+            "printf '-v' X y; ",
+            "printf $F y; ",
+            "getopts ab x; ",
+            "cd /repo && ",
+            "cd; ",
+            "pushd d; ",
+            "popd; ",
+            "coproc x; ",
+            "for PATH in /tmp; do ls; done; ",
+            "select IFS in a; do ls; done; ",
+            "for 'x' in a; do ls; done; ",
+            "for; do ls; done; ",
+            "let x=1; ",
+            # `set` off its inert options.
+            "set -f; ",
+            "set +h; ",
+            "set -a; ",
+            "set -v; ",
+            "set -o posix; ",
+            "set -eo posix; ",
+            "set -- a; ",
+            "set x; ",
+            # An assignment a helper or bash reads.
+            "PATH=/tmp; ",
+            "PATH=/tmp ls; ",
+            "BASH_ENV=x; ",
+            "ENV=x; ",
+            "IFS=x; ",
+            "CDPATH=x; ",
+            "GLOBIGNORE=x; ",
+            "EXECIGNORE=x; ",
+            "BASHOPTS=x; ",
+            "SHELLOPTS=x; ",
+            "BASH_CMDS[cat]=/bin/bash; ",
+            "BASH_ALIASES[cat]=bash; ",
             "LESSOPEN='|-bash %s'; ",
             "PAGER=bash; ",
             "GIT_PAGER=bash; ",
-            "BASH_ENV=x; ",
-            "PATH=/tmp; ",
-            "IFS=x; ",
-            "X=$(date); ",
-            "X=`date`; ",
-            "X=$Y; ",
-            "X=1 ls; ",
-            "source env.sh; ",
-            ". env.sh; ",
-            "eval x; ",
-            "python3 x.py; ",
-            "set -e; ",
-            "sudo ls; ",
-            "printf -v X y; ",
-            "printf '%s' -v; ",
-            "echo x > cat; ",
-            "ls > out; ",
-            "cat < f; ",
-            "ls &> out; ",
-            "git config alias.x '!bash'; ",
-            "git hook run x; ",
-            "git -c core.pager=bash log; ",
-            "git --exec-path=/x status; ",
-            "git diff --output=/tmp/x; ",
-            "git log --output /tmp/x; ",
-            "git commit -m x; ",
-            "rg --pre bash x; ",
-            "rg --pre=bash x; ",
-            "ugrep --filter=x:bash x f; ",
-            "find . -exec bash {} \\; ; ",
-            "find . -execdir x {} + ; ",
-            "find . -ok x {} \\; ; ",
-            "find . -okdir x {} \\; ; ",
-            "find . -delete; ",
-            "find . -fprint x; ",
-            "find . -fprintf x y; ",
-            "find . -fls x; ",
-            "cd -; ",
-            "cd $D; ",
-            "cd a b; ",
-            "{ ls; }; ",
-            "(ls); ",
-            "if true; then ls; fi; ",
-            "ls $X; ",
-            "echo $(date); ",
-            "cat > a.md <<'A'\nx\nA\n",
+            "a[$(date)]=1; ",
+            "a[i]=1; ",
+            # A head that is not plain literal.
+            "$X; ",
+            '"$X" a; ',
+            "$'cat' a; ",
+            "\\cat a; ",
+            "'cat' a; ",
+            'c"a"t a; ',
+            "~/bin/x; ",
+            "{cat,x} a; ",
+            # Inside a group, subshell or substitution.
+            "{ alias cat=bash; }; ",
+            "(alias cat=bash); ",
+            "echo $(alias cat=bash); ",
+            'echo "$(alias cat=bash)"; ',
+            "echo `alias cat=bash`; ",
+            "x=$(date) alias cat=bash; ",
+            "if true; then alias cat=bash; fi; ",
+            "case $x in a) alias cat=bash;; esac; ",
+            # An expansion or arithmetic that assigns.
+            ": ${PATH:=/tmp}; ",
+            ": ${PATH=/tmp}; ",
+            ": $((x=1)); ",
+            ": $[x=1]; ",
+            ': "${a[x=1]}"; ',
+            ": ${x:x=1}; ",
+            "((x=1)); ",
+            "cat > a.md <<A\n${PATH:=/tmp}\nA\n",
+            "[[ PATH=1 -eq 1 ]] && ",
+            "[[ $x -eq 1 ]] && ",
+            "[[ -v a[x] ]] && ",
+            "test -v 'a[x]' && ",
+            "[ $op ] && ",
         ],
     )
-    def test_anything_else_earlier_makes_the_body_commands(self, prefix: str) -> None:
+    def test_a_prefix_that_may_rebind_makes_the_body_commands(self, prefix: str) -> None:
         command = prefix + _SINK
-        assert earlier_segments_are_inert(command, command.rindex("<<")) is False
+        assert no_earlier_segment_may_rebind(command, command.rindex("<<")) is False
         assert "prose" in strip_quoted_heredoc_bodies(command)
 
-    def test_the_claude_code_commit_idiom_stays_inert(self) -> None:
+    def test_the_claude_code_commit_idiom_stays_data(self) -> None:
         command = "git add -A && git commit -m \"$(cat <<'EOF'\nit's done\nEOF\n)\""
-        assert earlier_segments_are_inert(command, command.index("<<")) is True
+        assert no_earlier_segment_may_rebind(command, command.index("<<")) is True
 
     def test_a_later_segment_is_not_judged(self) -> None:
-        command = _SINK + "\npython3 x.py"
-        assert earlier_segments_are_inert(command, command.index("<<")) is True
+        command = _SINK + "\nalias cat=bash"
+        assert no_earlier_segment_may_rebind(command, command.index("<<")) is True
 
     def test_an_earlier_heredoc_body_is_not_read_as_segments(self) -> None:
-        command = "cat <<'A'\npython3 x.py; eval y\nA\nls & " + _SINK
-        assert earlier_segments_are_inert(command, command.rindex("<<")) is True
+        command = "cat <<'A'\nalias cat=bash; eval y\nA\nls & " + _SINK
+        assert no_earlier_segment_may_rebind(command, command.rindex("<<")) is True
 
-    def test_a_non_inert_prefix_makes_the_consumer_unknown(self) -> None:
+    def test_a_rebinding_prefix_makes_the_consumer_unknown(self) -> None:
         command = "cat(){ bash; }; " + _SINK
         assert heredoc_consumers(command, scan_heredocs(command).heredocs) == [(None,)]
 

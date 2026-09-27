@@ -1336,6 +1336,12 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
             # A command the reader cannot place is denied as unreadable, not
             # as a guard defect (N101 round 12, review 11 MAJOR 2).
             return ("<unreadable>", type(exc).__name__, _UNREADABLE_ROUTE)
+        except (shell_expansion.TooManyToEnumerateError, TimeoutError) as exc:
+            # Ledger 00466 N134: a cap or the deadline means "could not
+            # verify", which the caller can act on -- still a deny, but not
+            # the internal-error route, whose text calls it a guard bug.
+            logger.info("secret_file_guard: scan did not finish (%s); denying", type(exc).__name__)
+            return (f"{sfm.SCAN_COULD_NOT_FINISH} ({type(exc).__name__})", "", "read")
         except Exception as exc:
             # Deliberately broad: ANY exception during evaluation must deny,
             # never propagate (Plan 00466 N11) -- see the docstring above.

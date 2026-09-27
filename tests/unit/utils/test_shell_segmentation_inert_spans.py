@@ -80,8 +80,7 @@ class TestStripMessageBodies:
 
 class TestStripInertSpans:
     def test_it_blanks_both_a_message_and_a_quoted_heredoc(self) -> None:
-        """The heredoc comes first: a ``git commit`` before it is off the N214
-        inert allowlist (Plan 00466 N101 round 12)."""
+        """One call carrying both spans; each is blanked on its own terms."""
         command = (
             "cat <<'EOF' > notes.md\n"
             f"the body also names {_FORCE}\n"

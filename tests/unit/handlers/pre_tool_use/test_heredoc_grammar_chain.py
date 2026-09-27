@@ -431,7 +431,7 @@ class TestAnUnresolvedSinkArgumentIsNoExecutor:
 # -- Round 12: review 11 MAJOR 1 and N213, run in bash first ------------------
 
 #: Programs the isolated run may use besides the recording ``git``.
-_ISOLATED_PROGRAMS = ("bash", "cat", "sort", "tee", "sleep")
+_ISOLATED_PROGRAMS = ("bash", "cat", "sort", "tee", "sleep", "mkdir", "ln")
 
 
 def _isolated_bash_run(script: str, tmp_path: Path) -> str:
@@ -625,14 +625,22 @@ class TestAVariableReceiverIsUnknown:
 
 class TestAnEarlierSegmentCanRunTheBody:
     """N214: a function, an alias or an environment an earlier segment
-    sets can turn a sink into an executor, so the body is data only after
-    an inert prefix."""
+    sets can turn a sink into an executor, so the body is data only when no
+    earlier segment may rebind a command name (round 13 ruling)."""
 
     @pytest.mark.parametrize(
         "prefix",
         [
             "cat(){ bash; }; ",
             "shopt -s expand_aliases; alias cat=bash\n",
+            'hash -p "$(command -v bash)" cat; ',
+            "BASH_CMDS[cat]=$(command -v bash); ",
+            "eval 'cat(){ bash; }'; ",
+            "echo 'cat(){ bash; }' > f; source f; ",
+            "{ cat(){ bash; }; }; ",
+            "if true; then cat(){ bash; }; fi; ",
+            'mkdir b && ln -s "$(command -v bash)" b/cat && PATH=$PWD/b:$PATH; ',
+            'mkdir b && ln -s "$(command -v bash)" b/cat && PATH=b:$PATH; ',
         ],
     )
     def test_the_body_is_judged(self, prefix: str, tmp_path: Path) -> None:
@@ -650,17 +658,79 @@ class TestAnEarlierSegmentCanRunTheBody:
         assert _decision(ProjectContainmentHandler(), command) == Decision.DENY
 
     @pytest.mark.parametrize(
-        "prefix", ["source env.sh; ", "eval true; ", "export X=1; ", "python3 x.py; "]
+        "prefix",
+        [
+            "$X; ",
+            '"$X" a; ',
+            "$'cat' a; ",
+            "\\cat a; ",
+            "'cat' a; ",
+            "unalias ls; ",
+            "enable -n echo; ",
+            "builtin echo x; ",
+            "command -v x; ",
+            ". env.sh; ",
+            "exec 3>&1; ",
+            "export X=1; ",
+            "declare -f x; ",
+            "typeset x; ",
+            "local x; ",
+            "readonly x; ",
+            "unset x; ",
+            "trap 'x' EXIT; ",
+            "read x; ",
+            "mapfile x < f; ",
+            "readarray x < f; ",
+            "printf -v X y; ",
+            "getopts ab x; ",
+            "cd /repo && ",
+            "pushd d; ",
+            "popd; ",
+            "coproc x; ",
+            "select IFS in a; do ls; done; ",
+            "for PATH in /tmp; do ls; done; ",
+            "function cat { bash; }; ",
+            "set -f; ",
+            "set -o posix; ",
+            "PATH=/tmp; ",
+            "BASH_ENV=x; ",
+            "ENV=x; ",
+            "IFS=x; ",
+            "CDPATH=x; ",
+            "GLOBIGNORE=x; ",
+            "EXECIGNORE=x; ",
+            "BASHOPTS=x; ",
+            "SHELLOPTS=x; ",
+            "BASH_ALIASES[cat]=bash; ",
+            "(alias cat=bash); ",
+            "echo $(alias cat=bash); ",
+        ],
     )
-    def test_anything_off_the_allowlist_keeps_the_body_judged(self, prefix: str) -> None:
-        command = f"{prefix}cat > notes.md <<'EOF'\nnever run {_RESET}\nEOF"
+    def test_every_form_that_may_rebind_keeps_the_body_judged(self, prefix: str) -> None:
+        command = f"{prefix}cat > notes.md <<'EOF'\nnever run {_RESET}, it's prose\nEOF"
         assert _decision(DestructiveGitHandler(), command) == Decision.DENY
+        assert _decision(ProjectContainmentHandler(), command) == Decision.DENY
 
     @pytest.mark.parametrize(
-        "prefix", ["", "cd /repo && git status && ", "D=notes; echo hi; ", "git diff --stat; "]
+        "prefix",
+        [
+            "",
+            "set -euo pipefail; ",
+            "mkdir -p d && ",
+            "pytest -q; ",
+            f"cat > a.md <<'A'\nit's a note, never run {_RESET}\nA\n",
+            "set -euo pipefail\nmkdir -p d && ",
+            "git status && ",
+            "D=notes; echo hi; ",
+            "python3 x.py; ",
+        ],
     )
-    def test_an_inert_prefix_keeps_prose_data(self, prefix: str, tmp_path: Path) -> None:
+    def test_a_prefix_that_cannot_rebind_keeps_prose_data(
+        self, prefix: str, tmp_path: Path
+    ) -> None:
+        """Run isolated first: none of these runs the body."""
         command = f"{prefix}cat > notes.md <<'EOF'\nnever run {_RESET}, it's prose\nEOF"
+        assert _RAN_RESET not in _isolated_bash_run(command, tmp_path)
         assert _decision(DestructiveGitHandler(), command) == Decision.ALLOW
         assert _decision(ProjectContainmentHandler(), command) == Decision.ALLOW
 
