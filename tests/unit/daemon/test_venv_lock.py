@@ -67,7 +67,7 @@ class TestFlockBackend:
             assert venv_lock_path(tmp_path).is_file()
         # Released: a NON-BLOCKING exclusive flock on the file now succeeds.
         # Checked directly rather than by timing a second acquisition, which
-        # a loaded host can slow without any lock being held (00466 N199).
+        # a loaded host can slow without any lock being held (00466 N222).
         with venv_lock_path(tmp_path).open("a") as handle:
             fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
             fcntl.flock(handle, fcntl.LOCK_UN)

@@ -1126,7 +1126,7 @@ class TestEchoGlobPatternStaysLinear:
     (blanked to whitespace by ``blank_shell_literal_spans``) measured
     seconds. The cost at 20,000 characters is compared with the cost at
     2,500 (thread CPU time, ``tests/scaling.py``), so host load cannot fail
-    it and a quadratic pattern still does (00466 N199).
+    it and a quadratic pattern still does (00466 N222).
     """
 
     @staticmethod

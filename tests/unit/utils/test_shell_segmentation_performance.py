@@ -18,7 +18,7 @@ was quadratic.
 Each shape is pinned by GROWTH: its CPU cost at the review's size against the
 cost at an eighth of it (``tests/scaling.py``). A wall-clock bound failed
 under host load while passing alone, and said nothing about growth (00466
-N199).
+N222).
 """
 
 from collections.abc import Callable

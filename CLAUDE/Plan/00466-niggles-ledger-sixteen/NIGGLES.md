@@ -1003,7 +1003,7 @@ splits a Bash command can be made slow with one long word.
 `shlex.shlex`/`shlex.split` in `src/` and project handlers, as
 `pathlib-quadratic-containment` does for N106.
 
-### N198 — Merge-conflict markers reach the ledger on main, disguised as blockquotes
+### N211 — Merge-conflict markers reach the ledger on main, disguised as blockquotes
 
 **Found by N110 gate fix 2.** `NIGGLES.md` on main (`fd4956813`) carries two
 `> > > > > > > <branch>` lines: after N106 and after N100. They are the
@@ -1017,7 +1017,7 @@ a staged-tree check for both spellings, raw and blockquoted, in tracked
 text. Both lines are removed on `worktree-n466-n110`, but that fixes the
 symptom only.
 
-### N199 — Tests assert absolute wall-clock bounds, so a loaded host fails them while they pass alone
+### N222 — Tests assert absolute wall-clock bounds, so a loaded host fails them while they pass alone
 
 **Found by N110 gate fix 2, from N196 and team-lead's sweep request.** The
 two `test_enforce_llm_qa.py` failures (N196) were one case of a wider

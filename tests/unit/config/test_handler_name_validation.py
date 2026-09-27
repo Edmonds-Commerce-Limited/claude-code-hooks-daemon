@@ -268,7 +268,7 @@ class TestHandlerNameValidationPerformance:
         """Validation stays cheap however many handlers are configured: the
         handlers package is walked once per event type, and never again.
 
-        Counted, not timed (00466 N199): a 100 ms wall-clock bound failed
+        Counted, not timed (00466 N222): a 100 ms wall-clock bound failed
         on a loaded host, and passed or failed depending on whether an
         earlier test had already warmed the discovery cache."""
         import pkgutil

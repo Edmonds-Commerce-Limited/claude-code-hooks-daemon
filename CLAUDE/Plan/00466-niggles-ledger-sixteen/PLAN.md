@@ -142,8 +142,8 @@ Full write-ups are in [NIGGLES.md](NIGGLES.md). One line each here:
 | N194 | Daemon-signal tests (test_safe_signal.py, test_client_validator.py) read a spawned child's cmdline before its exec lands, so a loaded host flakes | Coordinator                                                     | ✅ Remedied                                                     |
 | N196 | The multi-version gate lets the daemon idle out between serial runs, times guards by wall clock, names no cause                                   | N110 gate fix 2                                                 | ✅ Remedied                                                     |
 | N197 | Fourteen `src/` modules still tokenise untrusted commands with the stdlib's quadratic `shlex`                                                     | N110 gate fix 2                                                 | ⬜ Open                                                         |
-| N198 | Merge-conflict markers reach the ledger on main, disguised as blockquotes                                                                         | N110 gate fix 2                                                 | ⬜ Open                                                         |
-| N199 | Tests assert absolute wall-clock bounds, so a loaded host fails them while they pass alone                                                        | N110 gate fix 2                                                 | 🔄 In Progress (perf tests remedied; bound-honoured tests open) |
+| N211 | Merge-conflict markers reach the ledger on main, disguised as blockquotes                                                                         | N110 gate fix 2                                                 | ⬜ Open                                                         |
+| N222 | Tests assert absolute wall-clock bounds, so a loaded host fails them while they pass alone                                                        | N110 gate fix 2                                                 | 🔄 In Progress (perf tests remedied; bound-honoured tests open) |
 
 ## Tasks
 

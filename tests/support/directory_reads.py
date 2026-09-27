@@ -1,4 +1,4 @@
-"""Count the directories a piece of code lists (00466 N199).
+"""Count the directories a piece of code lists (00466 N222).
 
 A test that a walk is "refused immediately" used to assert on wall time, which
 failed on a loaded host. What it means is that no directory is read at all,

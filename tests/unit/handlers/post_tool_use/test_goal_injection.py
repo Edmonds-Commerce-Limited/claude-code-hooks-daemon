@@ -2523,7 +2523,7 @@ class TestReview3Fixes(_ReassertionFixtures):
         """A5's cost half: refreshing N owners on a terminal write must
         not re-derive the combined text (a full live-plan-dir scan) once
         PER owner -- it should render once and write N times. Counted, not
-        timed: a wall-clock bound here failed under host load (00466 N199)."""
+        timed: a wall-clock bound here failed under host load (00466 N222)."""
         plan = self._plan_path("00296-first")
         plan.write_text(_plan_md("In Progress"), encoding="utf-8")
         handler.handle(

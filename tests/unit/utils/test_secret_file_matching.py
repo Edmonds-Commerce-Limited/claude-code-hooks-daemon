@@ -24,7 +24,7 @@ from tests.support.directory_reads import record_directory_reads
 
 def _assert_scan_grows_linearly(command_at: Callable[[int], str], small_n: int) -> None:
     """``find_protected_mention_detail`` on ``command_at(8 * small_n)`` costs at
-    most linearly more CPU than on ``command_at(small_n)`` (00466 N199).
+    most linearly more CPU than on ``command_at(small_n)`` (00466 N222).
 
     CPU time, not wall time: a wall-clock bound failed under host load while
     saying nothing about growth, which is what these tests exist to pin.
@@ -759,7 +759,7 @@ class TestAWideRangeIsRejectedBeforeItIsBuilt:
     def test_the_widest_possible_range_materialises_nothing(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Counted, not timed (00466 N199): building the range calls ``chr``
+        """Counted, not timed (00466 N222): building the range calls ``chr``
         once per code point, 1,114,112 times for this one."""
         counting_chr = _CountingChr()
         monkeypatch.setattr(sfm, "chr", counting_chr, raising=False)
@@ -1426,7 +1426,7 @@ class TestInteriorWildcardDpIsBounded:
 
     Every case here reproduces a review-measured shape (main: well under a
     second; pre-fix branch: 15-35s) and pins its GROWTH: CPU cost at size N
-    against 8N, which host load cannot inflate (00466 N199). A wall-clock
+    against 8N, which host load cannot inflate (00466 N222). A wall-clock
     bound here failed under load while passing alone.
     """
 
@@ -1461,7 +1461,7 @@ class TestInteriorWildcardDpIsBounded:
         next check rather than run on.
 
         Driven by a fake clock that advances one tick per reading, so the
-        deadline falls mid-scan on every host, however loaded (00466 N199).
+        deadline falls mid-scan on every host, however loaded (00466 N222).
         The scan must raise ``TimeoutError`` at the first reading past the
         deadline, and must have read the clock more than once before it,
         which proves the check sits inside the scan and not only at entry."""
@@ -1589,7 +1589,7 @@ class TestOrdinaryVolumeContentCompletesFast:
     def _timed_scan(command: str) -> tuple[tuple[str, str] | None, float]:
         # This thread's CPU time: other processes on a loaded host do not
         # inflate it, so load arriving between the two scans cannot skew the
-        # ratio (00466 N199).
+        # ratio (00466 N222).
         start = time.thread_time()
         result = sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS)
         return result, time.thread_time() - start
@@ -1663,7 +1663,7 @@ class TestBraceAndFsWalkAreBounded:
     for `{a,b}`xN brace expansion or a `/**/` filesystem walk, which is
     precisely why these shipped unfixed. This class is that pin, on the
     reviewer's own exact shapes. Each pins GROWTH (CPU cost at N against 8N)
-    or a count of directories read, never wall time (00466 N199).
+    or a count of directories read, never wall time (00466 N222).
     """
 
     @pytest.mark.parametrize("repetitions", [20, 22, 40])
@@ -1714,7 +1714,7 @@ class TestBraceAndFsWalkAreBounded:
         OUTRIGHT (fail closed) rather than walked at all, so this raises --
         exactly like the deadline case above, ``secret_file_guard``'s own
         wrapper is what turns the raise into a deny. "Not walked at all" is
-        pinned as a count: not one directory is read (00466 N199)."""
+        pinned as a count: not one directory is read (00466 N222)."""
         directories_read = record_directory_reads(monkeypatch)
         command = "cat /**/*.se?ret-zq9x; cat .vault-password"
         with pytest.raises(TooManyToEnumerateError):

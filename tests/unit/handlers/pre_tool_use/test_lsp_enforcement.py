@@ -1171,7 +1171,7 @@ class TestBashGrepPatternStaysLinear:
     the engine try every split point. Measured: 5k newlines 0.2s, 10k 0.78s,
     20k 2.84s -- quadratic. A 99 KB run froze a live daemon for 73.5s.
     The cost at 20,000 newlines is compared with the cost at 2,500 (thread
-    CPU time, ``tests/scaling.py``), so host load cannot fail it (00466 N199).
+    CPU time, ``tests/scaling.py``), so host load cannot fail it (00466 N222).
     """
 
     def test_long_whitespace_run_does_not_blow_up(self) -> None:

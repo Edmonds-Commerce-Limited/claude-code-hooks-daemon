@@ -37,7 +37,7 @@ def _assert_grows_linearly(
     word_at: Callable[[int], str], expand: Callable[[str], object], small_n: int
 ) -> None:
     """``expand(word_at(8 * small_n))`` costs at most linearly more CPU than
-    ``expand(word_at(small_n))`` (00466 N199: a wall-clock bound failed under
+    ``expand(word_at(small_n))`` (00466 N222: a wall-clock bound failed under
     host load while saying nothing about growth). A raise of
     ``TooManyToEnumerateError`` is the expected fail-closed answer here and
     counts as finishing."""
@@ -129,7 +129,7 @@ class TestExpandBraces:
 
     def test_deeply_nested_group_raise_is_fast(self) -> None:
         """Depth 2000 against depth 250: the raise must not cost more than
-        linearly in the nesting (00466 N199)."""
+        linearly in the nesting (00466 N222)."""
 
         def word_at(depth: int) -> str:
             return "{a," * depth + "a" + "}" * depth
@@ -172,7 +172,7 @@ class TestIterBraceWords:
         a huge run of non-whitespace text carrying no brace at all -- must
         not trigger catastrophic backtracking (the abandoned
         `\\S*\\{[^{}]*\\}\\S*` shape took 15s at 94 KB, >45s at 200 KB).
-        Pinned by growth, 200 KB against 25 KB (00466 N199)."""
+        Pinned by growth, 200 KB against 25 KB (00466 N222)."""
         assert list(iter_brace_words("a" * 200_000)) == []
         _assert_grows_linearly(
             lambda size: "a" * size,
@@ -196,7 +196,7 @@ class TestBoundedRecursiveGlob:
             )
 
     def test_refusal_at_the_root_is_immediate(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Immediate means no directory is read at all (00466 N199: counted,
+        """Immediate means no directory is read at all (00466 N222: counted,
         not timed)."""
         reads = record_directory_reads(monkeypatch)
         with pytest.raises(TooManyToEnumerateError):
