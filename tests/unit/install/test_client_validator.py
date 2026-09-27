@@ -290,7 +290,7 @@ class TestCheckRunningDaemon:
         pid_file = untracked_dir / "daemon.pid"
         pid_file.write_text(str(running_pid))
 
-        def stop_without_permission(pid, *, project_root, grace_seconds):
+        def stop_without_permission(pid, *, project_root, grace_seconds, recorded_at):
             raise PermissionError("operation not permitted")
 
         monkeypatch.setattr(cv_module, "stop_verified_daemon", stop_without_permission)
@@ -374,6 +374,26 @@ class TestCheckRunningDaemon:
         assert any(
             "Did not signal" in w and os.strerror(error) in w for w in result.warnings
         ), result.warnings
+
+    def test_a_daemon_started_after_its_pid_file_was_written_is_never_signalled(
+        self, tmp_path, spawned
+    ):
+        """Review 10, R10-3: a daemon writes its PID file after it has
+        started, so a process that started after the file was written holds
+        a pid reused since. Here the file is made older than the daemon."""
+        project_root = tmp_path / "project"
+        untracked_dir = project_root / ".claude" / "hooks-daemon" / "untracked"
+        untracked_dir.mkdir(parents=True)
+        daemon = spawned(_DAEMON_MODULE, "--project-root", str(project_root), "start")
+        pid_file = untracked_dir / "daemon-abc.pid"
+        pid_file.write_text(str(daemon.pid))
+        written = psutil.Process(daemon.pid).create_time() - 60
+        os.utime(pid_file, (written, written))
+
+        result = ClientInstallValidator._check_running_daemon(project_root)
+
+        assert daemon.poll() is None, "the installer signalled a pid reused after its file"
+        assert any("Did not signal" in w and "started after" in w for w in result.warnings)
 
     def test_an_unreadable_pid_file_is_reported_not_ignored(self, tmp_path):
         project_root = tmp_path / "project"
@@ -659,7 +679,7 @@ class TestRuntimeFilesGoOnlyUnderTheStartLockAndOnlyWhileDead:
         pid_file.write_text(str(self._DEAD_PID))
         successor = str(os.getpid())
 
-        def gone_and_succeeded(pid, *, project_root, grace_seconds):
+        def gone_and_succeeded(pid, *, project_root, grace_seconds, recorded_at):
             pid_file.write_text(successor)
             return DaemonStop.ALREADY_GONE
 

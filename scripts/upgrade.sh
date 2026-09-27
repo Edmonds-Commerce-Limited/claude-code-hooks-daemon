@@ -9,10 +9,9 @@
 #
 # This is a minimal Layer 1 script that:
 # 1. Takes explicit project root (no magic detection)
-# 2. Stops daemon (best-effort)
-# 3. Checks out target version
-# 4. Cleans up nested install artifacts
-# 5. Delegates to Layer 2 (scripts/upgrade_version.sh)
+# 2. Checks out target version (Layer 2 stops the daemon, through the CLI)
+# 3. Cleans up nested install artifacts
+# 4. Delegates to Layer 2 (scripts/upgrade_version.sh)
 #
 # Arguments:
 #   --project-root PATH  - REQUIRED: Project root directory
@@ -462,108 +461,14 @@ if [ -f "$OLD_DEFAULT_SETTINGS_SOURCE" ]; then
     _ok "Preserved pre-upgrade settings baseline for merging"
 fi
 
-# Step 4: Best-effort daemon stop (before checkout)
-# Plan 00100 Task 2.5: PID-kill only. The previous implementation resolved a
-# venv python just to invoke `daemon.cli stop`, reintroducing the very
-# precedence logic the Phase 2 SSOT consolidated. Bootstrap now reads PID
-# files directly so zero venv / Python resolution is needed here.
+# Step 4: The daemon is stopped by Layer 2, through the CLI (ledger 00466 N245)
 #
-#
-# Plan 00466 N59: a PID file survives a container restart, and a restarted
-# container reuses small pids, so the pid in it can name any process -- Claude
-# Code included. Only a pid whose command line is a daemon server for THIS
-# project root is signalled.
-#
-# Contract (pinned by tests/integration/test_upgrade_sh_stop_bootstrap.py):
-#   - SIGTERM every PID in $DAEMON_DIR/untracked/daemon-*.pid that is a daemon
-#     server for $2, the project root; name and leave alone any other pid
-#   - Skip missing/empty/non-numeric/stale PID files
-#   - Skip missing untracked/ directory silently
-#   - Never invoke python, python3, or daemon.cli
-_stop_running_daemons() {
-    local daemon_dir="$1" project_root="$2"
-    local untracked="$daemon_dir/untracked"
-    [ -d "$untracked" ] || return 0
-
-    local pid_file pid out
-    local any_killed=0
-    for pid_file in "$untracked"/daemon-*.pid; do
-        [ -f "$pid_file" ] || continue
-        if ! pid=$(tr -d '[:space:]' < "$pid_file"); then
-            printf 'upgrade: could not read %s; skipped\n' "$pid_file" >&2
-            continue
-        fi
-        # Require a pure positive integer; skip empty / garbage.
-        case "$pid" in
-            '' | *[!0-9]*) continue ;;
-        esac
-        if ! _is_project_daemon_pid "$pid" "$project_root"; then
-            printf 'upgrade: %s names pid %s, which is not this project'"'"'s daemon; not signalling it\n' \
-                "$pid_file" "$pid" >&2
-            continue
-        fi
-        if out="$(kill -TERM "$pid" 2>&1)"; then
-            any_killed=1
-        else
-            printf 'upgrade: daemon pid %s ended before SIGTERM (%s)\n' "$pid" "$out" >&2
-        fi
-    done
-    # Give terminated daemons a moment to shut sockets before checkout runs.
-    [ "$any_killed" -eq 1 ] && sleep 1
-    return 0
-}
-
-# _is_project_daemon_pid PID PROJECT_ROOT - is PID a live daemon server for PROJECT_ROOT?
-#
-# The shell twin of process_verification's _is_daemon_server_process and
-# _extract_project_root (upgrade.sh must run with no venv): the daemon cli
-# module followed by a start/restart subcommand, and a project root taken from
-# --project-root, else from the interpreter's venv path. Fails closed: a pid
-# that is gone, <= 1, this shell, or unattributable is not a daemon of ours.
-_is_project_daemon_pid() {
-    local pid="$1" root="${2%/}" args word prev="" module_seen=0 launch_seen=0
-    local flag_root="" derived=""
-    local -a words
-    [ "$pid" -gt 1 ] && [ "$pid" -ne "$$" ] || return 1
-    if ! args="$(ps -o args= -p "$pid")"; then
-        return 1
-    fi
-    read -r -a words <<< "$args"
-    [ "${#words[@]}" -gt 0 ] || return 1
-    for word in "${words[@]}"; do
-        if [ "$module_seen" -eq 1 ] && { [ "$word" = start ] || [ "$word" = restart ]; }; then
-            launch_seen=1
-        fi
-        case "$word" in
-            *claude_code_hooks_daemon.daemon.cli*) module_seen=1 ;;
-            --project-root=*) flag_root="${word#--project-root=}" ;;
-        esac
-        [ "$prev" = "--project-root" ] && flag_root="$word"
-        prev="$word"
-    done
-    [ "$launch_seen" -eq 1 ] || return 1
-    if [ -n "$flag_root" ]; then
-        derived="$flag_root"
-    else
-        case "${words[0]}" in
-            */.claude/hooks-daemon/untracked/venv*) derived="${words[0]%%/.claude/hooks-daemon/untracked/venv*}" ;;
-            */untracked/venv*) derived="${words[0]%%/untracked/venv*}" ;;
-            *) return 1 ;;
-        esac
-    fi
-    # PROJECT_ROOT is the path the upgrade was run from, links unresolved,
-    # and every current launcher names the root resolved (round 9b). The
-    # daemon's own text is never resolved: a link it named may name another
-    # tree by now.
-    derived="${derived%/}"
-    [ "$derived" = "$root" ] && return 0
-    local physical
-    physical="$(cd -P -- "$root" && pwd -P)" || return 1
-    [ "$derived" = "$physical" ]
-}
-
-_info "Stopping daemon (best-effort, PID-only)..."
-_stop_running_daemons "$DAEMON_DIR" "$PROJECT_ROOT"
+# This script signals no process. Its stop is Layer 2's Step 4, straight after
+# the checkout below: daemon_control.sh's stop_daemon_safe, which runs the
+# CLI's `stop`. That proves the pid before it signals: the owner's uid, a pidfd
+# pin, a start before its PID file was written, and every spelling of the root.
+# Running before the checkout with no venv, this script could only have
+# matched a command line in shell, without any of that.
 
 # Step 5: Fetch tags and determine target version
 #

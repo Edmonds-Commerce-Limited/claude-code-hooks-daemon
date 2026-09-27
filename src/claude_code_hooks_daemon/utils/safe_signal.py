@@ -60,6 +60,11 @@ _NO_PIDFD_ERRNOS: Final = frozenset(
 
 _MS_PER_SECOND: Final = 1000
 
+#: How far a process's start time may read as later than it was. psutil
+#: adds its ticks since boot to the boot time, which the kernel gives in
+#: whole seconds.
+_START_TIME_PRECISION_SECONDS: Final = 1.0
+
 
 class RefusedSignalTarget(Exception):
     """The pid is not provably the intended process, so no signal was sent."""
@@ -98,13 +103,39 @@ def _refuse_own_lineage(pid: int) -> None:
         raise RefusedSignalTarget(f"pid {pid} is an ancestor of this process")
 
 
+def _refuse_started_after(process: psutil.Process, recorded_at: float) -> None:
+    """Refuse ``process`` when it started after the record naming it was written.
+
+    A daemon writes its PID file, and names itself in the launch lock, after
+    it has started, and a launcher takes that lock after it has; so a
+    process that started later holds a pid reused since (review 10, R10-3).
+    """
+    try:
+        started = process.create_time()
+    except psutil.NoSuchProcess as gone:
+        raise ProcessLookupError(f"no process has pid {process.pid}") from gone
+    except psutil.AccessDenied as denied:
+        raise RefusedSignalTarget(f"cannot read the start time of pid {process.pid}") from denied
+    if started > recorded_at + _START_TIME_PRECISION_SECONDS:
+        raise RefusedSignalTarget(
+            f"pid {process.pid} started after the record naming it was written, "
+            "so it holds a pid reused since"
+        )
+
+
 def verified_daemon_process(
-    pid: object, *, project_root: Path | str, logical_root: str | None = None
+    pid: object,
+    *,
+    project_root: Path | str,
+    logical_root: str | None = None,
+    recorded_at: float | None = None,
 ) -> psutil.Process:
     """A handle on ``pid``, proven to be the daemon server for ``project_root``.
 
     ``logical_root`` is the caller's unresolved spelling of that root (see
-    :func:`root_names_project`).
+    :func:`root_names_project`). ``recorded_at`` is when the record the pid
+    was read from (a PID file, the launch lock) was last written, if it was
+    read from one: a process that started after it is refused.
 
     The returned :class:`psutil.Process` remembers the process's start time and
     re-checks it before every ``send_signal``/``terminate``/``kill``. That
@@ -122,8 +153,9 @@ def verified_daemon_process(
 
     Raises:
         RefusedSignalTarget: ``pid`` is not a plain int above 1, is this
-            process or an ancestor, belongs to another user, is not a daemon
-            server, serves another project root, or cannot be inspected.
+            process or an ancestor, belongs to another user, started after
+            ``recorded_at``, is not a daemon server, serves another project
+            root, or cannot be inspected.
         ProcessLookupError: No process has this pid.
     """
     checked = _plain_pid(pid)
@@ -143,6 +175,8 @@ def verified_daemon_process(
         raise RefusedSignalTarget(
             f"pid {checked} belongs to another user (uid {uids.real}), not {euid}"
         )
+    if recorded_at is not None:
+        _refuse_started_after(process, recorded_at)
     try:
         cmdline = process.cmdline()
     except psutil.NoSuchProcess as gone:
@@ -262,6 +296,7 @@ def stop_verified_daemon(
     grace_seconds: float,
     kill_grace_seconds: float | None = None,
     logical_root: str | None = None,
+    recorded_at: float | None = None,
 ) -> DaemonStop:
     """SIGTERM this project's daemon at ``pid``, then SIGKILL it after the grace.
 
@@ -279,6 +314,9 @@ def stop_verified_daemon(
             exit gracefully. Defaults to ``grace_seconds`` when omitted.
         logical_root: The caller's unresolved spelling of ``project_root``,
             see :func:`verified_daemon_process`.
+        recorded_at: When the record ``pid`` was read from was last written,
+            see :func:`verified_daemon_process`. A caller that read the pid
+            from a PID file or the launch lock passes it.
 
     Raises:
         RefusedSignalTarget: See :func:`verified_daemon_process`.
@@ -288,7 +326,10 @@ def stop_verified_daemon(
     try:
         with _pinned(pid) as pidfd:
             process = verified_daemon_process(
-                pid, project_root=project_root, logical_root=logical_root
+                pid,
+                project_root=project_root,
+                logical_root=logical_root,
+                recorded_at=recorded_at,
             )
             _send(process, pidfd, signal.SIGTERM)
             if _exited_within(process, pidfd, grace_seconds):

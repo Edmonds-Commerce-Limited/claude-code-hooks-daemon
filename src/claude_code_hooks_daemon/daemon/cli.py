@@ -74,6 +74,7 @@ from claude_code_hooks_daemon.daemon.paths import (
     parse_pid_text,
     python_venv_fingerprint,
     read_pid_file,
+    read_pid_record,
     read_socket_discovery_file,
     resolve_existing_venv_python,
     resolve_hostname,
@@ -645,15 +646,32 @@ def cmd_start(args: argparse.Namespace) -> int:
         print(f"ERROR: cannot take the launch lock ({exc}); not starting", file=sys.stderr)
         return 1
     try:
-        return _start_under_launch_lock(project_path, socket_path, pid_path, config, launch)
+        return _start_under_launch_lock(
+            project_path,
+            socket_path,
+            pid_path,
+            config,
+            launch,
+            logical_root=getattr(args, "caller_logical_root", None),
+        )
     finally:
         launch.close()
 
 
 def _start_under_launch_lock(
-    project_path: Path, socket_path: Path, pid_path: Path, config: Config, launch: LaunchLock
+    project_path: Path,
+    socket_path: Path,
+    pid_path: Path,
+    config: Config,
+    launch: LaunchLock,
+    *,
+    logical_root: str | None,
 ) -> int:
     """``cmd_start`` once it holds ``launch``, which the daemon it forks inherits.
+
+    ``logical_root`` is the caller's unresolved spelling of ``project_path``,
+    by which single-daemon enforcement finds a daemon an older version
+    started through a link (review 10, R10-2).
 
     Returns:
         0 if daemon started successfully, 1 otherwise
@@ -710,6 +728,7 @@ def _start_under_launch_lock(
         pid_path=pid_path,
         project_root=project_path,
         socket_path=Path(socket_path),
+        logical_root=logical_root,
     )
 
     # Stale-socket cleanup is DELIBERATELY NOT done here (Plan 00127, Finding 3).
@@ -1219,9 +1238,11 @@ def cmd_stop(args: argparse.Namespace) -> int:
     pid_path = _resolve_pid_path(args, project_path)
     socket_path = _resolve_socket_path(args, project_path)
 
-    pid = read_pid_file(str(pid_path), verify_daemon=True)
-    from_a_start = pid is None
-    if pid is None:
+    record = read_pid_record(str(pid_path), verify_daemon=True)
+    from_a_start = record is None
+    if record is not None:
+        pid, recorded_at = record.pid, record.written_at
+    else:
         # A daemon still starting has no PID file yet, and holds every later
         # start of this project off (round 8b), so one that never finishes
         # is stopped here. A lock that cannot be read leaves unknown whether
@@ -1241,7 +1262,7 @@ def cmd_stop(args: argparse.Namespace) -> int:
         starting_pid = _starting_process(starting)
         if starting_pid is None:
             return 1
-        pid = starting_pid
+        pid, recorded_at = starting_pid, starting.written_at
 
     # Plan 00466 N59: verify_daemon proves only that the pid is SOME daemon.
     # stop_verified_daemon proves it serves THIS project root, and the pidfd
@@ -1255,7 +1276,9 @@ def cmd_stop(args: argparse.Namespace) -> int:
     # GIL-holding handler cannot even reach Python's signal-handling bytecode
     # check to act on SIGTERM, and SIGKILL cannot be caught, blocked or ignored.
     # The caller's logical root proves a daemon an older init.sh started
-    # through a link (round 9b); project_path is always resolved.
+    # through a link (round 9b); project_path is always resolved. A process
+    # that started after its PID file or the launch lock was written holds a
+    # pid reused since, and is refused (review 10, R10-3).
     try:
         outcome = stop_verified_daemon(
             pid,
@@ -1263,6 +1286,7 @@ def cmd_stop(args: argparse.Namespace) -> int:
             grace_seconds=Timeout.SOCKET_CONNECT,
             kill_grace_seconds=Timeout.DAEMON_SIGKILL_GRACE,
             logical_root=getattr(args, "caller_logical_root", None),
+            recorded_at=recorded_at,
         )
     except RefusedSignalTarget as refused:
         print(f"ERROR: Not signalling PID {pid}: {refused}", file=sys.stderr)
@@ -1275,7 +1299,7 @@ def cmd_stop(args: argparse.Namespace) -> int:
         return 1
 
     if outcome is DaemonStop.ALREADY_GONE:
-        # It exited on its own since read_pid_file saw it, so its PID file
+        # It exited on its own since read_pid_record saw it, so its PID file
         # and socket may already be a successor's (Plan 00466 N70): both are
         # left. A merely stale PID file never counts as running; init.sh
         # removes it under the start lock, and the next start overwrites it.

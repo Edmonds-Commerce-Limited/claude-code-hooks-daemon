@@ -43,6 +43,7 @@ from claude_code_hooks_daemon.daemon.cli import (
     pid_is_this_projects_daemon,
     send_daemon_request,
 )
+from claude_code_hooks_daemon.daemon.paths import PidRecord
 from claude_code_hooks_daemon.daemon.process_verification import RootProof
 from claude_code_hooks_daemon.daemon.server import (
     LaunchLock,
@@ -86,6 +87,12 @@ _UNREAL_PID = 2**22 + 7
 
 #: The module whose names ``cmd_stop`` calls, for ``patch``.
 _CLI = "claude_code_hooks_daemon.daemon.cli"
+_READ_PID_RECORD = f"{_CLI}.read_pid_record"
+
+
+def _recorded(pid: int) -> PidRecord:
+    """A PID file naming ``pid``, written now: after ``pid`` started."""
+    return PidRecord(pid=pid, written_at=time.time())
 
 
 @pytest.fixture
@@ -400,7 +407,7 @@ class TestCmdStop:
 
         args = argparse.Namespace(project_root=tmp_path)
 
-        with patch("claude_code_hooks_daemon.daemon.cli.read_pid_file", return_value=None):
+        with patch(_READ_PID_RECORD, return_value=None):
             result = cmd_stop(args)
             assert result == 0
 
@@ -480,7 +487,7 @@ class TestCmdStopEndsAStartThatNeverFinishes:
                     "claude_code_hooks_daemon.daemon.cli.get_socket_path",
                     return_value=tmp_path / "d.sock",
                 ),
-                patch("claude_code_hooks_daemon.daemon.cli.read_pid_file", return_value=None),
+                patch(_READ_PID_RECORD, return_value=None),
             ):
                 yield
         finally:
@@ -526,7 +533,7 @@ class TestCmdStopEndsAStartThatNeverFinishes:
         daemon is before it is signalled."""
         args = _stop_project(tmp_path)
         launcher = self._hung_launcher(children, tmp_path)
-        with patch("claude_code_hooks_daemon.daemon.cli.read_pid_file", return_value=None):
+        with patch(_READ_PID_RECORD, return_value=None):
             assert cmd_stop(args) == 0
         assert launcher.wait(timeout=Timeout.PROCESS_DEATH_WAIT) is not None
         assert start_under_way(launch_lock_path(tmp_path)) is None
@@ -538,7 +545,7 @@ class TestCmdStopEndsAStartThatNeverFinishes:
         line names another project is not signalled."""
         args = _stop_project(tmp_path / "mine")
         stranger = self._hung_launcher(children, tmp_path / "theirs", lock_root=tmp_path / "mine")
-        with patch("claude_code_hooks_daemon.daemon.cli.read_pid_file", return_value=None):
+        with patch(_READ_PID_RECORD, return_value=None):
             assert cmd_stop(args) == 1
         assert stranger.poll() is None
 
@@ -548,10 +555,33 @@ class TestCmdStopEndsAStartThatNeverFinishes:
         args = _stop_project(tmp_path)
         daemon = self._hung_launcher(children, tmp_path)
         launch_lock_path(tmp_path).write_text(f"{daemon.pid}\n")
-        with patch("claude_code_hooks_daemon.daemon.cli.read_pid_file", return_value=None):
+        with patch(_READ_PID_RECORD, return_value=None):
             assert cmd_stop(args) == 0
         assert daemon.wait(timeout=Timeout.PROCESS_DEATH_WAIT) is not None
         assert start_under_way(launch_lock_path(tmp_path)) is None
+
+    @pytest.mark.parametrize("named", [False, True], ids=["holder", "named"])
+    def test_a_process_started_after_the_lock_was_written_is_refused(
+        self,
+        tmp_path: Path,
+        children: list[subprocess.Popen[bytes]],
+        capsys: pytest.CaptureFixture[str],
+        named: bool,
+    ) -> None:
+        """Review 10, R10-3: the holder takes the lock, and the daemon names
+        itself, after each started. A process that started after the lock
+        was written holds a pid reused since. Here the lock is made older."""
+        args = _stop_project(tmp_path)
+        launcher = self._hung_launcher(children, tmp_path)
+        lock = launch_lock_path(tmp_path)
+        if named:
+            lock.write_text(f"{launcher.pid}\n")
+        written = psutil.Process(launcher.pid).create_time() - 60
+        os.utime(lock, (written, written))
+        with patch(_READ_PID_RECORD, return_value=None):
+            assert cmd_stop(args) == 1
+        assert launcher.poll() is None
+        assert "started after" in capsys.readouterr().err
 
     def test_a_start_still_under_way_once_its_named_process_stopped_is_reported(
         self,
@@ -602,7 +632,7 @@ class TestCmdStopEndsAStartThatNeverFinishes:
         planted.parent.mkdir(parents=True, exist_ok=True)
         planted.symlink_to(tmp_path / "planted")
         with (
-            patch("claude_code_hooks_daemon.daemon.cli.read_pid_file", return_value=None),
+            patch(_READ_PID_RECORD, return_value=None),
             patch("claude_code_hooks_daemon.daemon.cli.stop_verified_daemon") as stop,
         ):
             assert cmd_stop(args) == 1
@@ -618,7 +648,7 @@ class TestCmdStopEndsAStartThatNeverFinishes:
                 "claude_code_hooks_daemon.daemon.cli.get_socket_path",
                 return_value=tmp_path / "d.sock",
             ),
-            patch("claude_code_hooks_daemon.daemon.cli.read_pid_file", return_value=None),
+            patch(_READ_PID_RECORD, return_value=None),
             patch("claude_code_hooks_daemon.daemon.cli.stop_verified_daemon") as stop,
         ):
             assert cmd_stop(args) == 0
@@ -635,7 +665,7 @@ class TestCmdStopSignalsOnlyThisProjectsDaemon:
         args = _stop_project(tmp_path)
         daemon = _daemon_for(children, tmp_path)
         with (
-            patch("claude_code_hooks_daemon.daemon.cli.read_pid_file", return_value=daemon.pid),
+            patch(_READ_PID_RECORD, return_value=_recorded(daemon.pid)),
             patch("claude_code_hooks_daemon.daemon.cli.cleanup_pid_file") as mock_cleanup_pid,
             patch("claude_code_hooks_daemon.daemon.cli.cleanup_socket") as mock_cleanup_sock,
         ):
@@ -650,7 +680,7 @@ class TestCmdStopSignalsOnlyThisProjectsDaemon:
         args = _stop_project(tmp_path / "mine")
         other = _daemon_for(children, tmp_path / "theirs")
         with (
-            patch("claude_code_hooks_daemon.daemon.cli.read_pid_file", return_value=other.pid),
+            patch(_READ_PID_RECORD, return_value=_recorded(other.pid)),
             patch("claude_code_hooks_daemon.daemon.cli.cleanup_pid_file") as mock_cleanup_pid,
         ):
             assert cmd_stop(args) == 1
@@ -662,24 +692,24 @@ class TestCmdStopSignalsOnlyThisProjectsDaemon:
     ) -> None:
         args = _stop_project(tmp_path)
         bystander = _spawn(children, _SLEEP)
-        with patch("claude_code_hooks_daemon.daemon.cli.read_pid_file", return_value=bystander.pid):
+        with patch(_READ_PID_RECORD, return_value=_recorded(bystander.pid)):
             assert cmd_stop(args) == 1
         assert bystander.poll() is None
 
     def test_refuses_a_mock_pid(self, tmp_path: Path) -> None:
         args = _stop_project(tmp_path)
-        with patch("claude_code_hooks_daemon.daemon.cli.read_pid_file", return_value=Mock().pid):
+        with patch(_READ_PID_RECORD, return_value=_recorded(Mock().pid)):
             assert cmd_stop(args) == 1
 
     def test_a_daemon_gone_before_it_is_proven_keeps_its_files(
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        """Plan 00466 N70: ``read_pid_file`` saw the pid live a moment ago, so
+        """Plan 00466 N70: ``read_pid_record`` saw the pid live a moment ago, so
         the PID file and socket may already be a successor's; both are left.
-        A merely stale PID file never reaches here: ``read_pid_file`` clears it."""
+        A merely stale PID file never reaches here: ``read_pid_record`` clears it."""
         args = _stop_project(tmp_path)
         with (
-            patch("claude_code_hooks_daemon.daemon.cli.read_pid_file", return_value=_UNREAL_PID),
+            patch(_READ_PID_RECORD, return_value=_recorded(_UNREAL_PID)),
             patch("claude_code_hooks_daemon.daemon.cli.cleanup_pid_file") as mock_cleanup_pid,
             patch("claude_code_hooks_daemon.daemon.cli.cleanup_socket") as mock_cleanup_sock,
         ):
@@ -697,7 +727,7 @@ class TestCmdStopSignalsOnlyThisProjectsDaemon:
         args = _stop_project(tmp_path)
         daemon = _daemon_for(children, tmp_path)
         with (
-            patch("claude_code_hooks_daemon.daemon.cli.read_pid_file", return_value=daemon.pid),
+            patch(_READ_PID_RECORD, return_value=_recorded(daemon.pid)),
             patch("signal.pidfd_send_signal", side_effect=ProcessLookupError(daemon.pid)),
             patch("claude_code_hooks_daemon.daemon.cli.cleanup_pid_file") as mock_cleanup_pid,
             patch("claude_code_hooks_daemon.daemon.cli.cleanup_socket") as mock_cleanup_sock,
@@ -727,7 +757,7 @@ class TestCmdStopSignalsOnlyThisProjectsDaemon:
         args = _stop_project(tmp_path)
         daemon = _daemon_for(children, tmp_path, _IGNORE_TERM)
         with (
-            patch("claude_code_hooks_daemon.daemon.cli.read_pid_file", return_value=daemon.pid),
+            patch(_READ_PID_RECORD, return_value=_recorded(daemon.pid)),
             patch.object(Timeout, "SOCKET_CONNECT", 0.2),
             patch("claude_code_hooks_daemon.daemon.cli.cleanup_pid_file") as mock_cleanup_pid,
             patch("claude_code_hooks_daemon.daemon.cli.cleanup_socket") as mock_cleanup_sock,
@@ -749,7 +779,7 @@ class TestCmdStopSignalsOnlyThisProjectsDaemon:
         args = _stop_project(tmp_path)
         daemon = _daemon_for(children, tmp_path)
         with (
-            patch("claude_code_hooks_daemon.daemon.cli.read_pid_file", return_value=daemon.pid),
+            patch(_READ_PID_RECORD, return_value=_recorded(daemon.pid)),
             patch("signal.pidfd_send_signal", side_effect=PermissionError(daemon.pid)),
         ):
             assert cmd_stop(args) == 1
@@ -763,7 +793,7 @@ class TestCmdStopGenericException:
         """cmd_stop returns 1 on unexpected exception."""
         args = _stop_project(tmp_path)
         with (
-            patch("claude_code_hooks_daemon.daemon.cli.read_pid_file", return_value=_UNREAL_PID),
+            patch(_READ_PID_RECORD, return_value=_recorded(_UNREAL_PID)),
             patch(
                 "claude_code_hooks_daemon.daemon.cli.stop_verified_daemon",
                 side_effect=RuntimeError("unexpected"),
@@ -804,7 +834,7 @@ class TestCmdStopCleansUpOnlyWhatItStillOwns:
             return outcome
 
         with (
-            patch(f"{_CLI}.read_pid_file", return_value=self.daemon.pid),
+            patch(_READ_PID_RECORD, return_value=_recorded(self.daemon.pid)),
             patch(f"{_CLI}.stop_verified_daemon", side_effect=stop_then_succeed),
         ):
             result = cmd_stop(args)

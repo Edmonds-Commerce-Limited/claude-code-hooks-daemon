@@ -62,7 +62,10 @@ class TestEnforceSparesLiveSocketOwner:
 
         # Orphan stopped, incumbent spared, current never targeted.
         mock_stop.assert_called_once_with(
-            orphan_pid, project_root=tmp_path, grace_seconds=Timeout.PROCESS_KILL_WAIT
+            orphan_pid,
+            project_root=tmp_path,
+            grace_seconds=Timeout.PROCESS_KILL_WAIT,
+            logical_root=None,
         )
 
     def test_kills_all_peers_when_socket_dead(self, tmp_path: Path) -> None:

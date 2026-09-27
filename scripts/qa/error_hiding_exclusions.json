@@ -238,9 +238,9 @@
     },
     {
       "file": "daemon/paths.py",
-      "function": "read_pid_file",
+      "function": "read_pid_record",
       "rule": "return-none-on-error",
-      "reason": "Returns None when PID file missing or invalid. Callers check for None before using PID. This is the documented contract — a missing PID file means no daemon is running."
+      "reason": "Returns None when PID file missing or invalid. Callers check for None before using PID. This is the documented contract — a missing PID file means no daemon is running. read_pid_file is a thin wrapper over it (review 10, R10-3)."
     },
     {
       "file": "daemon/paths.py",
@@ -852,10 +852,10 @@
     {
       "file": "scripts/upgrade.sh",
       "lines": [
-        638
+        551
       ],
       "rule": "shell-&>/dev/null",
-      "reason": "Plan 00200 Task 5.4: `git rev-parse \"$TARGET_VERSION\" &>/dev/null || _fail \"Version $TARGET_VERSION not found\"` -- explicit failure handling via `_fail`, output suppressed only because git's own \"unknown revision\" noise is not the diagnostic (the _fail message is). Module-level, hence line-based match. Realigned by Plan 00466 N59 (the pid identity check `_is_project_daemon_pid` shifted this line down from 585); previously realigned by Plan 00386 from 531 and by Plan 00291 from 438."
+      "reason": "Plan 00200 Task 5.4: `git rev-parse \"$TARGET_VERSION\" &>/dev/null || _fail \"Version $TARGET_VERSION not found\"` -- explicit failure handling via `_fail`, output suppressed only because git's own \"unknown revision\" noise is not the diagnostic (the _fail message is). Module-level, hence line-based match. Realigned by ledger 00466 N245 (Layer 1's own daemon stop removed, which moved this line up from 646); previously realigned by Plan 00466 N59 from 585, by Plan 00386 from 531 and by Plan 00291 from 438."
     },
     {
       "file": "scripts/upgrade_version.sh",

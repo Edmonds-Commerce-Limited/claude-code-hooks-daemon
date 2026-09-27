@@ -1543,7 +1543,10 @@ start_daemon() {
 
     # The daemon names its root resolved (round 9b): its text is never
     # resolved, so a root named through a link was refused by every caller
-    # that resolves its own, bin/hooks-daemon included.
+    # that resolves its own, bin/hooks-daemon included. The start is also
+    # handed the root as this hook reached it: single-daemon enforcement
+    # needs that spelling to find a daemon an older version started through
+    # a link (review 10, R10-2).
     local physical_root
     if ! physical_root="$(cd -P -- "$PROJECT_PATH" && pwd -P)"; then
         echo "ERROR: cannot resolve the project root $PROJECT_PATH" >&2
@@ -1583,6 +1586,7 @@ start_daemon() {
     exec {launch_fd}< <(export -fn _hooks_daemon_recovery_py
         CLAUDE_HOOKS_SOCKET_PATH="$SOCKET_PATH" \
             CLAUDE_HOOKS_PID_PATH="$PID_PATH" \
+            CLAUDE_HOOKS_DAEMON_CALLER_ROOT="$PROJECT_PATH" \
             $PYTHON_CMD -m claude_code_hooks_daemon.daemon.cli \
             --project-root "$physical_root" start < /dev/null 2>&1)
 

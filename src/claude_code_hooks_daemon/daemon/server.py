@@ -510,9 +510,14 @@ class StartUnderWay:
     which is the launcher before it forks (review 9, DR-5), or None where
     that cannot be told. Neither is proven to be a daemon; ``stop`` proves
     it before it signals.
+
+    ``written_at`` is when the lock was last written. The holder takes it,
+    and the daemon names itself, after each has started, so a process that
+    started later holds a pid reused since (review 10, R10-3).
     """
 
     pid: int | None
+    written_at: float
     holder: int | None = None
 
 
@@ -529,11 +534,14 @@ def start_under_way(path: Path) -> StartUnderWay | None:
         try:
             fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
+            # The time before the text: a pid named in between is judged
+            # against an older time, which only refuses more.
+            written_at = os.fstat(fd).st_mtime
             text = os.pread(fd, _PID_TEXT_MAX_BYTES, 0).decode("ascii", errors="replace")
             named = parse_pid_text(text)
             if named is not None:
-                return StartUnderWay(pid=named)
-            return StartUnderWay(pid=None, holder=_lock_holder(fd))
+                return StartUnderWay(pid=named, written_at=written_at)
+            return StartUnderWay(pid=None, written_at=written_at, holder=_lock_holder(fd))
         fcntl.flock(fd, fcntl.LOCK_UN)
         return None
     finally:

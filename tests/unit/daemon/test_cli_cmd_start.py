@@ -13,7 +13,7 @@ import time
 from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any
-from unittest.mock import MagicMock, patch
+from unittest.mock import ANY, MagicMock, patch
 
 import pytest
 
@@ -1150,4 +1150,7 @@ class TestAStartUnderWayIsWaitedOnNotRepeated:
         ):
             cmd_start(argparse.Namespace(project_root=tmp_path))
         assert exit_info.value.code == 0
-        assert seen == {"starting": StartUnderWay(pid=os.getpid()), "served": None}
+        assert seen == {
+            "starting": StartUnderWay(pid=os.getpid(), written_at=ANY),
+            "served": None,
+        }

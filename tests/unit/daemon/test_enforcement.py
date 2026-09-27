@@ -19,6 +19,7 @@ from claude_code_hooks_daemon.utils.safe_signal import DaemonStop, RefusedSignal
 
 _STOP = "claude_code_hooks_daemon.daemon.enforcement.stop_verified_daemon"
 _SERVES = "claude_code_hooks_daemon.daemon.enforcement._serves_a_socket"
+_BOUND_SOCKETS = "claude_code_hooks_daemon.daemon.enforcement.bound_socket_paths"
 _PROJECT_ROOT = Path("/workspace")
 
 
@@ -91,8 +92,13 @@ class TestEnforceSingleDaemon:
 
         # Each peer is re-proven against THIS project root before it is signalled.
         assert mock_stop.call_args_list == [
-            call(other_pid_1, project_root=_PROJECT_ROOT, grace_seconds=Timeout.PROCESS_KILL_WAIT),
-            call(other_pid_2, project_root=_PROJECT_ROOT, grace_seconds=Timeout.PROCESS_KILL_WAIT),
+            call(
+                pid,
+                project_root=_PROJECT_ROOT,
+                grace_seconds=Timeout.PROCESS_KILL_WAIT,
+                logical_root=None,
+            )
+            for pid in (other_pid_1, other_pid_2)
         ]
 
     def test_enforcement_disabled_in_non_container(self) -> None:
@@ -174,7 +180,44 @@ class TestEnforceSingleDaemonProjectScoping:
                 project_root=_PROJECT_ROOT,
             )
 
-        mock_find.assert_called_once_with(project_root=_PROJECT_ROOT)
+        mock_find.assert_called_once_with(project_root=_PROJECT_ROOT, logical_root=None)
+
+    def test_the_callers_logical_root_finds_and_proves_a_peer(self) -> None:
+        """Review 10, R10-2: a daemon an older version started through a
+        link names the link, so the scan and the stop's proof both take the
+        caller's spelling of its root."""
+        mock_config = MagicMock()
+        mock_config.daemon.enforce_single_daemon_process = True
+        peer = 2**22 + 7
+
+        with (
+            patch(
+                "claude_code_hooks_daemon.daemon.enforcement.is_container_environment",
+                return_value=True,
+            ),
+            patch(
+                "claude_code_hooks_daemon.daemon.enforcement.find_all_daemon_processes",
+                return_value=[peer],
+            ) as mock_find,
+            patch(_SERVES, return_value=True),
+            patch(_STOP, return_value=DaemonStop.TERMINATED) as mock_stop,
+        ):
+            enforce_single_daemon(
+                config=mock_config,
+                pid_path=Path("/tmp/test.pid"),
+                project_root=_PROJECT_ROOT,
+                logical_root="/link/to/workspace",
+            )
+
+        mock_find.assert_called_once_with(
+            project_root=_PROJECT_ROOT, logical_root="/link/to/workspace"
+        )
+        mock_stop.assert_called_once_with(
+            peer,
+            project_root=_PROJECT_ROOT,
+            grace_seconds=Timeout.PROCESS_KILL_WAIT,
+            logical_root="/link/to/workspace",
+        )
 
     def test_no_project_root_signals_nothing(self) -> None:
         """Plan 00466 N59: without a project root no peer can be proven ours."""
@@ -443,11 +486,26 @@ class TestOnlyADaemonThatServesIsStopped:
                 psutil.Process(serving).status() == psutil.STATUS_ZOMBIE
             )
 
+    def test_a_daemon_whose_socket_path_holds_whitespace_is_stopped(self, tmp_path: Path) -> None:
+        """Review 10, R10-1: psutil read such a path as no path, so the
+        daemon was spared as a start under way."""
+        with (
+            tempfile.TemporaryDirectory(prefix="hd-enf-") as short,
+            daemon_like_process(tmp_path, binds=Path(short) / "s p") as serving,
+        ):
+            self._enforce(tmp_path)
+
+            assert not psutil.pid_exists(serving) or (
+                psutil.Process(serving).status() == psutil.STATUS_ZOMBIE
+            )
+
     def test_a_process_whose_sockets_cannot_be_read_is_not_stopped(self, tmp_path: Path) -> None:
+        """Nor is one in another network namespace whose table cannot be
+        read: it is not proven to serve, so it is spared."""
         with (
             tempfile.TemporaryDirectory(prefix="hd-enf-") as short,
             daemon_like_process(tmp_path, binds=Path(short) / "s") as serving,
-            patch.object(psutil.Process, "net_connections", side_effect=psutil.AccessDenied(pid=0)),
+            patch(_BOUND_SOCKETS, side_effect=PermissionError("denied")),
         ):
             self._enforce(tmp_path)
 

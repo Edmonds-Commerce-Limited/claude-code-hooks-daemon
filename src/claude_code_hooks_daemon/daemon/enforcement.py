@@ -8,12 +8,13 @@ import logging
 import os
 from pathlib import Path
 
-import psutil
-
 from claude_code_hooks_daemon.config.models import Config
 from claude_code_hooks_daemon.constants import Timeout
 from claude_code_hooks_daemon.daemon.paths import read_pid_file
-from claude_code_hooks_daemon.daemon.process_verification import find_all_daemon_processes
+from claude_code_hooks_daemon.daemon.process_verification import (
+    bound_socket_paths,
+    find_all_daemon_processes,
+)
 from claude_code_hooks_daemon.daemon.server import _socket_is_live, remove_stale_pid_file
 from claude_code_hooks_daemon.utils.container_detection import is_container_environment
 from claude_code_hooks_daemon.utils.safe_signal import (
@@ -25,7 +26,7 @@ from claude_code_hooks_daemon.utils.safe_signal import (
 logger = logging.getLogger(__name__)
 
 
-def _stop_peer_daemon(pid: int, project_root: Path) -> str | None:
+def _stop_peer_daemon(pid: int, project_root: Path, logical_root: str | None) -> str | None:
     """SIGTERM, then SIGKILL, one peer daemon once it is proven to be ours.
 
     Returns:
@@ -33,7 +34,10 @@ def _stop_peer_daemon(pid: int, project_root: Path) -> str | None:
     """
     try:
         outcome = stop_verified_daemon(
-            pid, project_root=project_root, grace_seconds=Timeout.PROCESS_KILL_WAIT
+            pid,
+            project_root=project_root,
+            grace_seconds=Timeout.PROCESS_KILL_WAIT,
+            logical_root=logical_root,
         )
     except (RefusedSignalTarget, PermissionError) as failure:
         return str(failure)
@@ -45,21 +49,15 @@ def _serves_a_socket(pid: int) -> bool:
 
     A launcher never binds one, and connects only as a client, whose socket
     has no path of its own; a daemon binds its socket once it has started.
-    A process whose sockets cannot be read is not proven to serve.
+    A process whose sockets cannot be read, which includes one in another
+    network namespace whose table this process cannot read, is not proven
+    to serve.
     """
     try:
-        process = psutil.Process(pid)
-        if hasattr(process, "net_connections"):
-            connections = process.net_connections(kind="unix")
-        else:
-            connections = process.connections(kind="unix")
-    except psutil.Error as exc:
+        return bool(bound_socket_paths(pid))
+    except OSError as exc:
         logger.info("Cannot read the sockets of PID %d (%s); it is not proven to serve", pid, exc)
         return False
-    # A unix socket's address is its path, which psutil's stubs type as an
-    # (ip, port) pair.
-    addresses: list[object] = [connection.laddr for connection in connections]
-    return any(isinstance(address, str) and address for address in addresses)
 
 
 def _serving_only(pids: list[int]) -> list[int]:
@@ -82,6 +80,7 @@ def enforce_single_daemon(
     pid_path: Path,
     project_root: Path | None = None,
     socket_path: Path | None = None,
+    logical_root: str | None = None,
 ) -> None:
     """Enforce single daemon process constraint.
 
@@ -109,6 +108,10 @@ def enforce_single_daemon(
         socket_path: This start's socket path. When the socket is live, its
             PID-file owner is spared from termination. ``None`` disables the
             spare (legacy behaviour).
+        logical_root: The caller's unresolved spelling of ``project_root``,
+            which a daemon an older version started through a link names
+            (review 10, R10-2). It finds that daemon, which is proven before
+            it is signalled as any other is.
     """
     # Check if enforcement is enabled
     if not config.daemon.enforce_single_daemon_process:
@@ -123,7 +126,7 @@ def enforce_single_daemon(
 
     # Find daemon processes scoped to our own project root (when known) so we
     # never terminate a daemon belonging to a different project.
-    daemon_pids = find_all_daemon_processes(project_root=project_root)
+    daemon_pids = find_all_daemon_processes(project_root=project_root, logical_root=logical_root)
     current_pid = os.getpid()
 
     # Remove current process from list
@@ -156,7 +159,7 @@ def enforce_single_daemon(
         )
         for pid in other_daemons:
             logger.info(f"Killing daemon process {pid}")
-            failure = _stop_peer_daemon(pid, project_root)
+            failure = _stop_peer_daemon(pid, project_root, logical_root)
             if failure is None:
                 logger.info(f"Successfully killed daemon process {pid}")
             else:

@@ -729,6 +729,74 @@ class TestStoppingADaemonTermsThenKillsOnlyThisProjectsDaemon:
         assert outcome is DaemonStop.ALREADY_GONE
 
 
+class TestAPidReusedAfterItsRecordWasWrittenIsRefused:
+    """Review 10, R10-3: a daemon writes its PID file, and names itself in
+    the launch lock, after it has started. A process that started after the
+    record was written holds a pid reused since, whatever it looks like."""
+
+    def test_a_process_started_after_its_record_is_refused_and_left_running(
+        self, tmp_path: Path, children: list[subprocess.Popen[bytes]]
+    ) -> None:
+        daemon = _fake_daemon(children, tmp_path)
+        started = psutil.Process(daemon.pid).create_time()
+
+        with pytest.raises(RefusedSignalTarget, match="started after"):
+            stop_verified_daemon(
+                daemon.pid,
+                project_root=tmp_path,
+                grace_seconds=_GRACE_SECONDS,
+                recorded_at=started - 10,
+            )
+        assert daemon.poll() is None
+
+    @pytest.mark.parametrize("recorded_after_start", [5.0, 0.0, -0.5])
+    def test_a_process_its_record_names_is_stopped(
+        self,
+        tmp_path: Path,
+        children: list[subprocess.Popen[bytes]],
+        recorded_after_start: float,
+    ) -> None:
+        """A start time is read to within a second, so a record up to a
+        second older than it still names it."""
+        daemon = _fake_daemon(children, tmp_path)
+        started = psutil.Process(daemon.pid).create_time()
+
+        outcome = stop_verified_daemon(
+            daemon.pid,
+            project_root=tmp_path,
+            grace_seconds=_GRACE_SECONDS,
+            recorded_at=started + recorded_after_start,
+        )
+
+        assert outcome is DaemonStop.TERMINATED
+
+    def test_a_start_time_that_cannot_be_read_is_refused(
+        self,
+        tmp_path: Path,
+        children: list[subprocess.Popen[bytes]],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        daemon = _fake_daemon(children, tmp_path)
+        started = psutil.Process(daemon.pid).create_time()
+        create_time = psutil.Process.create_time
+
+        def denied_for_the_daemon(process: psutil.Process) -> float:
+            if process.pid == daemon.pid:
+                raise psutil.AccessDenied(process.pid)
+            return create_time(process)
+
+        monkeypatch.setattr(psutil.Process, "create_time", denied_for_the_daemon)
+
+        with pytest.raises(RefusedSignalTarget, match="start time"):
+            stop_verified_daemon(
+                daemon.pid,
+                project_root=tmp_path,
+                grace_seconds=_GRACE_SECONDS,
+                recorded_at=started + 5,
+            )
+        assert daemon.poll() is None
+
+
 class TestAGroupIsSignalledOnlyWhenOurOwnChildLeadsIt:
     def test_a_child_started_in_its_own_session_is_killed_with_its_group(
         self, children: list[subprocess.Popen[bytes]]

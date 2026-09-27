@@ -30,7 +30,7 @@ import time
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
-from unittest.mock import MagicMock, patch
+from unittest.mock import ANY, MagicMock, patch
 
 import pytest
 
@@ -806,7 +806,21 @@ class TestTheLaunchLock:
         held = LaunchLock.take(path, Timeout.FILE_LOCK)
         try:
             held.name_holder()
-            assert start_under_way(path) == StartUnderWay(pid=os.getpid())
+            assert start_under_way(path) == StartUnderWay(pid=os.getpid(), written_at=ANY)
+        finally:
+            held.release()
+
+    def test_it_says_when_the_lock_was_last_written(self, tmp_path: Path) -> None:
+        """Review 10, R10-3: the holder takes the lock, and the daemon names
+        itself, after each started; ``stop`` refuses a process that started
+        later, whose pid was reused."""
+        path = launch_lock_path(tmp_path)
+        held = LaunchLock.take(path, Timeout.FILE_LOCK)
+        try:
+            held.name_holder()
+            under_way = start_under_way(path)
+            assert under_way is not None
+            assert under_way.written_at == path.stat().st_mtime
         finally:
             held.release()
 
@@ -878,14 +892,14 @@ class TestTheLaunchLocksHolderBeforeItNamesADaemon:
     def test_a_launcher_holding_it_is_named_by_the_lock_table(self, tmp_path: Path) -> None:
         path = launch_lock_path(tmp_path)
         with self._held(path, _HOLD_THE_LOCK) as launcher:
-            assert start_under_way(path) == StartUnderWay(pid=None, holder=launcher)
+            assert start_under_way(path) == StartUnderWay(pid=None, holder=launcher, written_at=ANY)
 
     def test_a_taker_that_has_exited_names_no_holder(self, tmp_path: Path) -> None:
         """The table still names the pid that took the lock; the child now
         holding it is not that pid, so nothing is named."""
         path = launch_lock_path(tmp_path)
         with self._held(path, _HAND_THE_LOCK_ON):
-            assert start_under_way(path) == StartUnderWay(pid=None, holder=None)
+            assert start_under_way(path) == StartUnderWay(pid=None, holder=None, written_at=ANY)
 
     def test_no_lock_table_names_no_holder(self, tmp_path: Path) -> None:
         path = launch_lock_path(tmp_path)
@@ -893,7 +907,7 @@ class TestTheLaunchLocksHolderBeforeItNamesADaemon:
             self._held(path, _HOLD_THE_LOCK),
             patch("claude_code_hooks_daemon.daemon.server._PROC_LOCKS", tmp_path / "no-lock-table"),
         ):
-            assert start_under_way(path) == StartUnderWay(pid=None, holder=None)
+            assert start_under_way(path) == StartUnderWay(pid=None, holder=None, written_at=ANY)
 
     def test_a_table_line_for_another_file_names_no_holder(self, tmp_path: Path) -> None:
         """A candidate that does not hold this very file open is not its holder,
@@ -907,7 +921,7 @@ class TestTheLaunchLocksHolderBeforeItNamesADaemon:
                 f"2: -> FLOCK  ADVISORY  WRITE {launcher} 00:00:{inode} 0 EOF\n"
             )
             with patch("claude_code_hooks_daemon.daemon.server._PROC_LOCKS", table):
-                assert start_under_way(path) == StartUnderWay(pid=None, holder=None)
+                assert start_under_way(path) == StartUnderWay(pid=None, holder=None, written_at=ANY)
 
 
 def test_start_lock_path_is_sibling_of_socket(tmp_path: Path) -> None:

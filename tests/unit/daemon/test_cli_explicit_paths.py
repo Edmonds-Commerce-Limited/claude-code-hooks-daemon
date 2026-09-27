@@ -216,7 +216,7 @@ class TestCmdStopUsesEnvPaths:
 
             from claude_code_hooks_daemon.daemon.cli import cmd_stop
 
-            with patch("claude_code_hooks_daemon.daemon.cli.read_pid_file") as mock_rpf:
+            with patch("claude_code_hooks_daemon.daemon.cli.read_pid_record") as mock_rpf:
                 mock_rpf.return_value = None  # not running
 
                 args = argparse.Namespace(project_root=None)
@@ -442,7 +442,7 @@ class TestCmdStopWithCliFlags:
 
         with patch("claude_code_hooks_daemon.daemon.cli.get_project_path") as mock_gpp:
             mock_gpp.return_value = tmp_path
-            with patch("claude_code_hooks_daemon.daemon.cli.read_pid_file") as mock_rpf:
+            with patch("claude_code_hooks_daemon.daemon.cli.read_pid_record") as mock_rpf:
                 mock_rpf.return_value = None  # Not running
 
                 with patch("builtins.print"):

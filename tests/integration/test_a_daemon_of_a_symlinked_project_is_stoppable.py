@@ -16,6 +16,8 @@ a link.
 
 from __future__ import annotations
 
+import contextlib
+import os
 import shutil
 import subprocess
 import sys
@@ -95,27 +97,46 @@ def _stop_every_daemon(*roots: Path) -> None:
             stop_verified_daemon(pid, project_root=root, grace_seconds=Timeout.PROCESS_DEATH_WAIT)
 
 
-@pytest.fixture
-def tree() -> Iterator[Tree]:
-    """A project at ``r/p`` reached as ``l/p``, ``l`` a link to ``r``, in a
-    directory short enough for AF_UNIX paths. Every daemon naming either
-    spelling is stopped through the verified path afterwards."""
-    base = Path(tempfile.mkdtemp(prefix="hd-link-"))
-    real = base / "r" / "p"
-    _make_project(real)
-    (base / "l").symlink_to(base / "r")
-    env = _script_env(
-        base / "d.sock",
+def _env(base: Path, name: str, **extra: str) -> dict[str, str]:
+    """A hook's environment for a daemon whose socket and PID file are ``base/name.*``."""
+    return _script_env(
+        base / f"{name}.sock",
         extra_env={
-            "CLAUDE_HOOKS_PID_PATH": str(base / "d.pid"),
+            "CLAUDE_HOOKS_PID_PATH": str(base / f"{name}.pid"),
             "CLAUDE_HOOKS_SOCKET_TIMEOUT": str(Timeout.SOCKET_CONNECT),
+            **extra,
         },
     )
+
+
+@contextlib.contextmanager
+def _tree(real_dir: str) -> Iterator[Tree]:
+    """A project at ``{real_dir}/p`` reached as ``l/p``, ``l`` a link to
+    ``real_dir``, in a directory short enough for AF_UNIX paths. Every
+    daemon naming either spelling is stopped through the verified path
+    afterwards."""
+    base = Path(tempfile.mkdtemp(prefix="hd-link-"))
+    real = base / real_dir / "p"
+    _make_project(real)
+    (base / "l").symlink_to(base / real_dir)
     try:
-        yield Tree(base=base, real=real, linked=base / "l" / "p", env=env)
+        yield Tree(base=base, real=real, linked=base / "l" / "p", env=_env(base, "d"))
     finally:
         _stop_every_daemon(real, base / "l" / "p")
         shutil.rmtree(base)
+
+
+@pytest.fixture
+def tree() -> Iterator[Tree]:
+    with _tree("r") as made:
+        yield made
+
+
+@pytest.fixture
+def spaced_tree() -> Iterator[Tree]:
+    """As ``tree``, the project's real root holding a space."""
+    with _tree("r s") as made:
+        yield made
 
 
 def _cmdline(pid: int) -> list[str]:
@@ -140,13 +161,14 @@ def _gone(pid: int) -> bool:
     return False
 
 
-def _running_daemon(tree: Tree) -> int:
-    pid = read_pid_file(str(tree.pid_path))
+def _running_daemon(tree: Tree, env: dict[str, str] | None = None) -> int:
+    pid_path = tree.pid_path if env is None else Path(env["CLAUDE_HOOKS_PID_PATH"])
+    pid = read_pid_file(str(pid_path))
     assert pid is not None, "no daemon is running"
     return pid
 
 
-def _start_with_init_sh(tree: Tree) -> int:
+def _start_with_init_sh(tree: Tree, env: dict[str, str] | None = None) -> int:
     """Start the daemon as a hook does, sourcing ``init.sh`` through the link."""
     script = (
         f"source {tree.linked}/.claude/init.sh\nPYTHON_CMD={sys.executable}\n"
@@ -157,14 +179,14 @@ def _start_with_init_sh(tree: Tree) -> int:
     result = subprocess.run(
         [BASH, "-c", script],
         cwd=tree.linked,
-        env=tree.env,
+        env=tree.env if env is None else env,
         capture_output=True,
         text=True,
         timeout=Timeout.REQUEST_LONG,
         check=False,
     )
     assert result.returncode == 0, result.stdout + result.stderr
-    return _running_daemon(tree)
+    return _running_daemon(tree, env)
 
 
 def _start_naming_the_link(tree: Tree) -> int:
@@ -321,3 +343,47 @@ def test_the_upgrades_restart_replaces_a_daemon_naming_the_link(tree: Tree) -> N
     successor = _running_daemon(tree)
     assert successor != pid
     assert _root_named(successor) == str(tree.real)
+
+
+def test_a_start_in_a_container_stops_a_duplicate_naming_the_link(tree: Tree) -> None:
+    """Review 10, R10-2: a daemon an older version started through a link,
+    on another socket of the project, escaped single-daemon enforcement: a
+    start matched only the root resolved. ``init.sh`` hands the start its
+    spelling through the link, which enforcement matches and proves."""
+    config = tree.real / ".claude" / "hooks-daemon.yaml"
+    config.write_text(
+        _CONFIG.replace("daemon:\n", "daemon:\n  enforce_single_daemon_process: true\n")
+    )
+    duplicate = _start_naming_the_link(tree)
+
+    successor = _start_with_init_sh(tree, _env(tree.base, "e", container="docker"))
+
+    assert _gone(duplicate)
+    assert successor != duplicate
+
+
+def test_a_pid_reused_after_the_pid_file_was_written_is_refused(tree: Tree) -> None:
+    """Review 10, R10-3: a daemon writes its PID file after it has started,
+    so a process that started after the file was written holds a pid
+    reused since. Here the file is made older than the daemon."""
+    pid = _start_with_init_sh(tree)
+    written = psutil.Process(pid).create_time() - 60
+    os.utime(tree.pid_path, (written, written))
+
+    result = _wrapper(tree, "real", "stop")
+
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "started after" in result.stderr
+    assert psutil.Process(pid).is_running()
+
+
+def test_a_daemon_of_a_root_holding_a_space_is_stopped(spaced_tree: Tree) -> None:
+    """Shared minor N245: the upgrade's own stop split such a root at the
+    space. Its stop is now the CLI's, through the upgrade's daemon control."""
+    pid = _start_with_init_sh(spaced_tree)
+    assert _root_named(pid) == str(spaced_tree.real)
+
+    result = _daemon_control(spaced_tree, "stop_daemon_safe")
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert _gone(pid), result.stdout + result.stderr

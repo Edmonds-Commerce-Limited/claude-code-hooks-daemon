@@ -2041,6 +2041,18 @@ def parse_pid_text(text: str) -> int | None:
     return pid
 
 
+@dataclass(frozen=True)
+class PidRecord:
+    """The live pid a PID file names, and when the file was last written.
+
+    A daemon writes its PID file after it has started, so a process that
+    started later holds the pid reused since (review 10, R10-3).
+    """
+
+    pid: int
+    written_at: float
+
+
 def read_pid_file(pid_path: Path | str, verify_daemon: bool = False) -> int | None:
     """
     Read PID from file and verify process is alive.
@@ -2061,9 +2073,20 @@ def read_pid_file(pid_path: Path | str, verify_daemon: bool = False) -> int | No
         set, is a daemon server), None otherwise. A corrupt file
         (:func:`parse_pid_text`) is never running.
     """
+    record = read_pid_record(pid_path, verify_daemon)
+    return None if record is None else record.pid
+
+
+def read_pid_record(pid_path: Path | str, verify_daemon: bool = False) -> PidRecord | None:
+    """As :func:`read_pid_file`, with when the file was last written.
+
+    The time is read from the open file before its text, so a file rewritten
+    in between gives an older time than its pid, which only refuses more.
+    """
     pid_path = Path(pid_path)
     try:
         with pid_path.open() as f:
+            written_at = os.fstat(f.fileno()).st_mtime
             text = f.read()
 
         pid = parse_pid_text(text)
@@ -2083,7 +2106,7 @@ def read_pid_file(pid_path: Path | str, verify_daemon: bool = False) -> int | No
             logger.debug("PID %d in %s is alive but is not a daemon server", pid, pid_path)
             return None
 
-        return pid
+        return PidRecord(pid=pid, written_at=written_at)
     except FileNotFoundError:
         return None
     except UnicodeDecodeError as e:

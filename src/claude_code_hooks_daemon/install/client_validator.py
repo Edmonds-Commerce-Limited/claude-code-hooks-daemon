@@ -326,10 +326,13 @@ class ClientInstallValidator:
         # A PID file survives a container restart, and a restarted container
         # reuses small pids, so the pid in it can name any process — Claude
         # Code included (Plan 00466 N59). Only a pid proven to be THIS
-        # project's daemon is signalled.
+        # project's daemon, and started before its file was written (review
+        # 10, R10-3), is signalled.
         for pid_file in pid_files:
             try:
-                seen = pid_file.read_text(encoding="utf-8").rstrip("\n")
+                with pid_file.open(encoding="utf-8") as opened:
+                    written_at = os.fstat(opened.fileno()).st_mtime
+                    seen = opened.read().rstrip("\n")
                 pid = int(seen.strip())
             except (ValueError, OSError) as unreadable:
                 warnings.append(f"Ignored unreadable PID file {pid_file}: {unreadable}")
@@ -337,7 +340,10 @@ class ClientInstallValidator:
 
             try:
                 outcome = stop_verified_daemon(
-                    pid, project_root=project_root, grace_seconds=Timeout.PROCESS_KILL_WAIT
+                    pid,
+                    project_root=project_root,
+                    grace_seconds=Timeout.PROCESS_KILL_WAIT,
+                    recorded_at=written_at,
                 )
             except RefusedSignalTarget as refused:
                 warnings.append(

@@ -56,6 +56,18 @@ CALLER_ROOT_ENV_VAR = "CLAUDE_HOOKS_DAEMON_CALLER_ROOT"
 # Where a client install keeps the daemon, below the project it serves.
 _CLIENT_DAEMON_DIR = (".claude", "hooks-daemon")
 
+# The kernel's process tables. ``/proc/<pid>/net/unix`` lists the unix
+# sockets of the network namespace ``<pid>`` is in, one per line in fixed
+# columns: Num RefCount Protocol Flags Type St Inode Path. Only the last,
+# the path a socket is bound to, may hold whitespace, and a socket bound to
+# none has no such column.
+_PROC = Path("/proc")
+_UNIX_TABLE_INODE_FIELD = 6
+_UNIX_TABLE_FIELDS_WITH_PATH = 8
+# What a descriptor that is a socket links to: ``socket:[<inode>]``.
+_SOCKET_LINK_PREFIX = "socket:["
+_SOCKET_LINK_SUFFIX = "]"
+
 
 def add_global_arguments(parser: argparse.ArgumentParser) -> None:
     """Add the options ``cli.main`` accepts before its subcommand.
@@ -119,17 +131,22 @@ def _launch_parser() -> _LaunchParser:
     return parser
 
 
-def find_all_daemon_processes(project_root: str | Path | None = None) -> list[int]:
+def find_all_daemon_processes(
+    project_root: str | Path | None = None, *, logical_root: str | None = None
+) -> list[int]:
     """Find daemon processes running on the system.
 
     Searches for processes with 'claude_code_hooks_daemon' in their name or command line.
 
     Args:
         project_root: When provided, the search is scoped to daemons whose own
-            project root matches this path. Daemons serving a different project
-            root — and daemons whose project root cannot be positively
-            determined — are excluded. When ``None`` the search is system-wide
-            (legacy behaviour).
+            project root names this path, as :func:`root_names_project` matches
+            it. Daemons serving a different project root — and daemons whose
+            project root cannot be positively determined — are excluded. When
+            ``None`` the search is system-wide (legacy behaviour).
+        logical_root: The caller's unresolved spelling of ``project_root``,
+            which a daemon an older version started through a link names
+            (review 10, R10-2).
 
     Returns:
         List of PIDs for matching daemon processes (excluding current process).
@@ -143,7 +160,6 @@ def find_all_daemon_processes(project_root: str | Path | None = None) -> list[in
     """
     daemon_pids: list[int] = []
     current_pid = os.getpid()
-    target_root = _normalize_root(project_root) if project_root is not None else None
 
     for proc in psutil.process_iter():
         try:
@@ -163,9 +179,11 @@ def find_all_daemon_processes(project_root: str | Path | None = None) -> list[in
 
             # Scope to our own project root when requested. A daemon whose root
             # cannot be determined is left alone — never terminated.
-            if target_root is not None:
+            if project_root is not None:
                 proc_root = _extract_project_root(proc)
-                if proc_root is None or proc_root != target_root:
+                if proc_root is None or not root_names_project(
+                    proc_root, project_root, logical_root=logical_root
+                ):
                     continue
 
             daemon_pids.append(pid)
@@ -365,6 +383,42 @@ def _project_of_socket(path: Path) -> str | None:
     return _normalize_root(candidate) if natural == path else None
 
 
+def bound_socket_paths(pid: int) -> list[str]:
+    """The paths of the unix sockets ``pid`` holds that are bound to one.
+
+    A server's socket, and each connection it has accepted, carries the
+    path it is bound to; a client's socket, and each end of a socketpair,
+    carries none. Read from the table of ``pid``'s own network namespace by
+    its fixed columns (review 10, R10-1): psutil reads the reader's own
+    namespace's table, and takes a path only from a line of exactly eight
+    fields, so a path holding whitespace read as no path at all.
+
+    Raises:
+        OSError: ``pid``'s descriptors or its namespace's table cannot be
+            read, so which sockets it has bound is unknown.
+    """
+    inodes: set[str] = set()
+    for descriptor in (_PROC / str(pid) / "fd").iterdir():
+        try:
+            link = str(descriptor.readlink())
+        except FileNotFoundError:
+            logger.debug("%s closed since it was listed, so it is no socket held", descriptor)
+            continue
+        if link.startswith(_SOCKET_LINK_PREFIX) and link.endswith(_SOCKET_LINK_SUFFIX):
+            inodes.add(link[len(_SOCKET_LINK_PREFIX) : -len(_SOCKET_LINK_SUFFIX)])
+    table = (_PROC / str(pid) / "net" / "unix").read_text(errors="surrogateescape")
+    paths: list[str] = []
+    for line in table.splitlines()[1:]:
+        fields = line.split(maxsplit=_UNIX_TABLE_FIELDS_WITH_PATH - 1)
+        if (
+            len(fields) == _UNIX_TABLE_FIELDS_WITH_PATH
+            and fields[0].endswith(":")
+            and fields[_UNIX_TABLE_INODE_FIELD] in inodes
+        ):
+            paths.append(fields[-1])
+    return paths
+
+
 def _root_from_listening_socket(process: psutil.Process) -> str | None:
     """The project whose natural socket ``process`` has bound, or None.
 
@@ -377,20 +431,16 @@ def _root_from_listening_socket(process: psutil.Process) -> str | None:
     prove nothing.
     """
     try:
-        if hasattr(process, "net_connections"):
-            connections = process.net_connections(kind="unix")
-        else:
-            connections = process.connections(kind="unix")
-    except psutil.Error as e:
-        logger.debug("Cannot read the sockets of PID %d: %s", process.pid, e)
-        return None
+        paths = bound_socket_paths(process.pid)
+    except OSError as exc:
+        logger.debug(
+            "Cannot read the sockets of PID %s, so none names its root: %s", process.pid, exc
+        )
+        paths = []
     roots: set[str] = set()
-    for connection in connections:
-        # A unix socket's address is its path, which psutil's stubs do not
-        # say: they type every address as an (ip, port) pair.
-        address: object = connection.laddr
-        if isinstance(address, str) and address.startswith("/"):
-            root = _project_of_socket(Path(address))
+    for path in paths:
+        if path.startswith("/"):
+            root = _project_of_socket(Path(path))
             if root is not None:
                 roots.add(root)
     if len(roots) != 1:
