@@ -91,6 +91,28 @@
   directory is refused by a caller that reaches that directory any other
   way. A caller that goes through the re-pointed link matches the
   daemon's text, and the pid it signals is the one its own PID file names.
+  Single-daemon enforcement matches the same spellings: `init.sh` hands
+  each start the root as the hook reached it, so a duplicate daemon an
+  older version started through the link is found, proven and stopped.
+- **A reused pid is refused.** A daemon writes its PID file after it has
+  started, and names itself in the launch lock after it has started. So
+  `stop`, `restart` and the installer refuse a process that started more
+  than a second after the PID file or the launch lock naming it was last
+  written: that process holds a pid reused since. The second covers how
+  precisely the kernel reports a start time.
+- Whether a process serves is read from its own network namespace's
+  socket table, and a socket path holding a space is read whole. Before,
+  a daemon whose socket path held whitespace counted as a start still
+  under way, and single-daemon enforcement left the duplicate running.
+  **Limit:** a daemon whose socket table this process cannot read, for
+  example one in another network namespace that it may not inspect, is
+  not proven to serve. It is left running and never signalled unproven.
+- **The upgrade's first stage signals nothing.** `upgrade.sh` used to stop
+  the daemon itself before the checkout, matching a `ps` line in shell:
+  no owner check, no pin, a root taken from the venv path, and a command
+  line split at every space. The daemon is now stopped by the second
+  stage, straight after the checkout, through the CLI's `stop` and its
+  full proof. A project root holding a space works.
 - `stop`, `restart` and single-daemon enforcement open a pidfd for the
   process before they check its identity, and send every signal through
   it. A process id reused at any point after that can only make the

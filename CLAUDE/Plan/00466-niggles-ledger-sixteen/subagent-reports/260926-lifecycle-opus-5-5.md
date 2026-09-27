@@ -1602,3 +1602,146 @@ the code commit.
     the touched scripts reports only the SC1091 infos already present on
     unchanged `source` lines.
 - **Daemon**: restarted from the worktree; it reports `Daemon: RUNNING`.
+
+## Round 10: review 10's minors (R10-1 to R10-3) and N245
+
+Code commit `e1a10252d` on `102ff3ae0`. The only new ledger number is N245.
+
+### R10-1: a socket path with whitespace, and another network namespace
+
+- `process_verification.bound_socket_paths(pid)` reads the socket inodes
+  from `/proc/<pid>/fd` and the table from `/proc/<pid>/net/unix`. That is
+  the table of the pid's own network namespace. It splits each line at
+  most 7 times, so the Path column is read whole, spaces included.
+- Enforcement's `_serves_a_socket` and the socket attribution
+  `_root_from_listening_socket` both use it. psutil is no longer used for
+  either.
+- If the table cannot be read, the function raises `OSError`. The caller
+  treats that as "not proven to serve" and spares the process; it is
+  never signalled unproven. The release note states this as the limit for
+  a namespace this process may not inspect.
+- I could not test a real second network namespace here: `unshare -n`
+  returns EPERM. A fake `/proc` test proves the function reads the pid's
+  own table and not the reader's.
+
+### R10-2: a link-text daemon from an older version
+
+- `find_all_daemon_processes` gains `logical_root` and matches with
+  `root_names_project`, the proof's own three-candidate match. That covers
+  the logical root, the root as given, and the root resolved.
+- `enforce_single_daemon` passes `logical_root` to the scan and to
+  `stop_verified_daemon`.
+- `cmd_start` passes `args.caller_logical_root`.
+- `init.sh` now launches every start with
+  `CLAUDE_HOOKS_DAEMON_CALLER_ROOT="$PROJECT_PATH"`.
+- Every match is still proven, and pinned, before any signal.
+
+### R10-3: the reviewer's option 1
+
+- `stop_verified_daemon` and `verified_daemon_process` take
+  `recorded_at`. After the pin and the uid check, they refuse a process
+  whose `create_time()` is more than 1 s later. A start time that cannot
+  be read is refused too.
+- `cmd_stop` passes `recorded_at` on both paths:
+  - the PID-file path, through the new `paths.read_pid_record`;
+    `read_pid_file` is now a wrapper over it;
+  - the lock path, through `StartUnderWay.written_at`.
+- The installer's `_check_running_daemon` passes it as well.
+- Each time is read by `fstat` on the same open file, before its text. A
+  file rewritten in between therefore gives an older time, which can only
+  refuse more, never less.
+- Enforcement has no record, so it passes none.
+
+### N245: Layer 1 `upgrade.sh`
+
+- `_stop_running_daemons` and `_is_project_daemon_pid` are removed, and
+  `upgrade.sh` now signals no process.
+- Layer 2's Step 4 runs straight after the checkout and stops the daemon
+  with `daemon_control.sh`'s `stop_daemon_safe`. That is the CLI's `stop`,
+  with its uid check, pin, start-time check and every spelling of the
+  root.
+- All four shared minors therefore go with the shell matcher: no uid check,
+  no pin, trusting the venv path, and splitting a root at a space.
+- What changes in behaviour: the old daemon now runs through the checkout
+  until Layer 2's Step 4, which follows directly. Before, a hook could
+  already start a daemon from the old tree during that window.
+- A downgrade to a version whose Layer 2 is older is stopped by that
+  version's own CLI.
+- The error-hiding exclusion for `upgrade.sh` moves to line 551. It was
+  already stale at `102ff3ae0`, where the line was 646. The `read_pid_file`
+  exclusion moves to `read_pid_record`.
+
+### Tests (RED on a `git archive` of `102ff3ae0` with these tests)
+
+The RED run gave 27 failed, 253 passed and 3 import errors. The import
+errors are the new names `bound_socket_paths`, `PidRecord` and
+`read_pid_record`. The failures that show behaviour:
+
+- `test_enforcement.py::…test_a_daemon_whose_socket_path_holds_whitespace_is_stopped`
+- `test_a_daemon_of_a_symlinked_project_is_stoppable.py`:
+  - `test_a_start_in_a_container_stops_a_duplicate_naming_the_link` is
+    end to end: a real init.sh start in a container, on another socket.
+  - `test_a_pid_reused_after_the_pid_file_was_written_is_refused` goes
+    through the real wrapper.
+- `test_client_validator.py::…test_a_daemon_started_after_its_pid_file_was_written_is_never_signalled`
+- `test_cli_commands.py::…test_a_process_started_after_the_lock_was_written_is_refused[holder|named]`
+  could not be collected on `102ff3ae0`.
+- `test_safe_signal.py::TestAPidReusedAfterItsRecordWasWrittenIsRefused`
+- `test_upgrade_sh_stop_bootstrap.py::test_layer_1_signals_no_process`
+  and `…keeps_no_daemon_matcher_of_its_own`.
+
+Guards that pass on both commits:
+
+- The symlinked-project stop, restart and upgrade stop and restart, in the
+  same file.
+- `test_a_daemon_of_a_root_holding_a_space_is_stopped`, the upgrade's
+  CLI stop on a root holding a space.
+
+### Checks
+
+- Targeted suites: 1829 passed. They cover:
+  - init.sh, upgrade.sh, the relay, `test_cli*`, enforcement,
+    `server_liveness_reuse`, `process_verification`, client_validator,
+    safe_signal and the signal-target checker;
+  - the symlinked-project file.
+- semgrep: clean.
+- `check_signal_targets.py`: clean (2074 files).
+- `run_shell_check.sh`: passed.
+- pyright: 0 errors.
+- mypy `src/`: clean.
+- ruff and black: clean on the touched files.
+- The relay compiles with `-D warnings` using `--emit=metadata`. This
+  container cannot link it: there is no libc `crt1.o`. The relay is
+  unchanged this round.
+- Daemon restarted from the worktree: `Daemon: RUNNING`.
+
+### Open: the gate would fail on error hiding (not queued)
+
+`scripts/qa/audit_error_hiding.py` exits 1 on this branch with 13
+findings.
+
+- None of them are in code I added, and main is clean. The same findings
+  (16 of them) are already present at `102ff3ae0`.
+- This round removed three: `_root_from_listening_socket`, the stale
+  `upgrade.sh` line, and `read_pid_file`.
+- They are in functions that earlier lifecycle rounds added and that have
+  no exclusion:
+  - `cli.py`: `_release_stopped_daemon_files` (log-and-continue), the
+    start-progress reader (silent-fallback), `_recorded_pid`;
+  - `enforcement._remove_stale_pid_file`;
+  - `server.py`: `start_under_way` and `_lock_holder`, 565 to 828, two
+    log-and-continue, and one silent-fallback at 2332;
+  - `client_validator.py:673` (silent-continue);
+  - `utils/cli_command.py:273`.
+- `llm_qa.py all` runs this audit, so the gate would fail on it. Per the
+  brief, the gate was not queued with a known failure pending.
+
+Remaining steps:
+
+1. Fix each site so that it raises, or logs as well as returning, as
+   `bound_socket_paths` now does. No new exclusions.
+2. Re-run `audit_error_hiding.py`.
+3. Commit.
+4. Merge main if it has moved.
+5. Queue the gate:
+   `setsid -f bash /workspace/untracked/scratch/gate.sh /workspace/untracked/worktrees/worktree-n466-lifecycle > /workspace/untracked/scratch/gate-lifecycle-launch.txt 2>&1`.

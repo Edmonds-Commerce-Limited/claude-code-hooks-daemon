@@ -160,6 +160,7 @@ Full write-ups are in [NIGGLES.md](NIGGLES.md). One line each here:
 | N206 | A pid reused between psutil's start-time re-check and its `kill` is signalled                                                                     | Lifecycle review 7 (§2, shared)                                 | ✅ Remedied                      |
 | N225 | A `--project-root` with `..` through a link is attributed to a root its daemon does not serve                                                     | Lifecycle review 8 (S8-1, shared)                               | ✅ Remedied                      |
 | N232 | Two concurrent hook starts: the second's single-daemon enforcement stops the first's daemon while it initialises                                  | Lifecycle review 9 (§5, shared)                                 | ✅ Remedied                      |
+| N245 | Layer 1 `upgrade.sh` stops the daemon with its own shell matcher: no uid check, no pin, a venv-path root, a root split at spaces                  | Lifecycle review 10 (§4, shared)                                | ✅ Remedied                      |
 
 ## Tasks
 

@@ -3,6 +3,28 @@
 Newest first. Each entry says how it was found, why it happens, and the
 candidate remedies.
 
+### N245 — ✅ Remedied — Layer 1 `upgrade.sh` stops the daemon with its own shell matcher
+
+**Found by lifecycle review 10 (§4), shared with main.** Layer 1 runs before
+the checkout with no venv, so it read each `daemon-*.pid`, matched the pid's
+`ps -o args=` line in shell, and sent SIGTERM. The match had four gaps the
+CLI's proof does not:
+
+- no uid check;
+- no pin between the check and the `kill`;
+- a root taken from the interpreter's venv path when no `--project-root`
+  was named, which round 6 (Sh-1) removed from the Python proof;
+- `read -r -a` split the command line at every space, so a root holding
+  one was never matched. That failed closed.
+
+**Remedied (lifecycle round 10):** Layer 1 signals nothing. Layer 2's Step 4
+runs straight after the checkout and stops the daemon through
+`daemon_control.sh`'s `stop_daemon_safe`, which is the CLI's `stop` and its
+full proof. `tests/integration/test_upgrade_sh_stop_bootstrap.py` pins that
+Layer 1 sends no signal and keeps no matcher. The CLI stop on a root holding
+a space is tested end to end in
+`test_a_daemon_of_a_symlinked_project_is_stoppable.py`.
+
 ### N232 — ✅ Remedied — Two concurrent hook starts: the second's single-daemon enforcement stops the first's daemon while it initialises
 
 **Found by lifecycle review 9 (§5), on main (44d1b1b3b).** Two hooks each ran
