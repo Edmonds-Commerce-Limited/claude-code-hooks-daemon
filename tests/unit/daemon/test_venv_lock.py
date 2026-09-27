@@ -21,6 +21,7 @@ because the whole point is exclusion against ``ensure_venv``.
 from __future__ import annotations
 
 import errno
+import fcntl
 import os
 import shutil
 import subprocess
@@ -64,11 +65,12 @@ class TestFlockBackend:
     def test_acquires_and_releases(self, tmp_path: Path) -> None:
         with venv_lock(tmp_path, timeout_seconds=1, backend="flock"):
             assert venv_lock_path(tmp_path).is_file()
-        # Released: a fresh acquisition must not wait.
-        started = time.monotonic()
-        with venv_lock(tmp_path, timeout_seconds=1, backend="flock"):
-            pass
-        assert time.monotonic() - started < 0.5
+        # Released: a NON-BLOCKING exclusive flock on the file now succeeds.
+        # Checked directly rather than by timing a second acquisition, which
+        # a loaded host can slow without any lock being held (00466 N222).
+        with venv_lock_path(tmp_path).open("a") as handle:
+            fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            fcntl.flock(handle, fcntl.LOCK_UN)
 
     def test_excludes_a_bash_flock_holder_and_names_the_lock(self, tmp_path: Path) -> None:
         lock_file = venv_lock_path(tmp_path)

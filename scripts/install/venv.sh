@@ -1209,6 +1209,9 @@ _uv_in_container() {
     return 1
 }
 
+# Prints an interpreter's X.Y version; used to check a built venv's Python.
+_VENV_VERSION_PROBE='import sys; print("%d.%d" % sys.version_info[:2])'
+
 #
 # create_venv_at_path() - Create venv at an explicit path (fingerprint-keyed)
 #
@@ -1222,7 +1225,8 @@ _uv_in_container() {
 #   $3 - quiet (optional, default: false)
 #
 # Returns:
-#   Exit code 0 on success, 1 on failure
+#   Exit code 0 on success, 1 on failure (including a venv whose Python is
+#   not the requested HOOKS_DAEMON_PYTHON's version)
 #
 create_venv_at_path() {
     local daemon_dir="$1"
@@ -1239,9 +1243,22 @@ create_venv_at_path() {
         echo "/untracked/" > "$daemon_dir/untracked/.gitignore"
     fi
 
+    # 00466 N114: uv reads a bare name such as `python3` as a VERSION request
+    # ("any 3.x") and builds on its own preferred interpreter, not the one on
+    # PATH that the venv's fingerprint was computed from. So uv is handed the
+    # resolved path, and the built venv's version is checked against it below.
     local python_args=()
+    local requested_python="" requested_version=""
     if [ -n "${HOOKS_DAEMON_PYTHON:-}" ]; then
-        python_args=(--python "$HOOKS_DAEMON_PYTHON")
+        if ! requested_python="$(command -v "$HOOKS_DAEMON_PYTHON")"; then
+            print_error "create_venv_at_path: interpreter '$HOOKS_DAEMON_PYTHON' was not found, so the venv cannot be built on it"
+            return 1
+        fi
+        if ! requested_version="$("$requested_python" -c "$_VENV_VERSION_PROBE")"; then
+            print_error "create_venv_at_path: could not read the version of $requested_python"
+            return 1
+        fi
+        python_args=(--python "$requested_python")
     fi
 
     # Plan 00100 Task 0.1: hardlink-first with copy fallback.
@@ -1404,6 +1421,19 @@ create_venv_at_path() {
                 ;;
         esac
         sync
+    fi
+
+    if [ -n "$requested_version" ]; then
+        local built_version=""
+        if ! built_version="$("$venv_path/bin/python" -c "$_VENV_VERSION_PROBE")" \
+                || [ "$built_version" != "$requested_version" ]; then
+            print_error "create_venv_at_path: $venv_path was built on Python ${built_version:-(unreadable)}, but it was requested on $requested_python (Python $requested_version). uv did not use the requested interpreter; refusing a venv whose Python differs from its fingerprint."
+            # Removed, not left behind: the resolver's venv-* glob would
+            # otherwise still find it and run the daemon on it.
+            rm -rf "$venv_path"
+            rm -f "$uv_output"
+            return 1
+        fi
     fi
 
     if [ "$quiet" = "true" ]; then

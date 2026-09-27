@@ -291,7 +291,7 @@ After applying fixes:
 # 1. Run the specific check that failed
 ./scripts/qa/run_lint.sh
 ./scripts/qa/run_type_check.sh
-./scripts/qa/run_tests.sh
+./scripts/qa/llm_qa.py tests   # every Python in CI's matrix
 # etc.
 
 # 2. Run full QA suite to ensure no regressions

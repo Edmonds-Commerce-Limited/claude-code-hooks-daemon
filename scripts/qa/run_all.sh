@@ -125,9 +125,9 @@ else
 fi
 echo ""
 
-echo "5. Running Tests with Coverage..."
+echo "5. Running Tests with Coverage (every Python in CI's matrix)..."
 echo "----------------------------------------"
-if ! "${SCRIPT_DIR}/run_tests.sh"; then
+if ! "${VENV_PYTHON}" "${SCRIPT_DIR}/run_test_matrix.py"; then
     OVERALL_EXIT_CODE=1
     echo "❌ Tests FAILED"
 else

@@ -1153,27 +1153,32 @@ class TestEchoGlobPatternStaysLinear:
     engine tries every split point between them before giving up, which is
     quadratic in the length of that run. A 20,000-character single-quote run
     (blanked to whitespace by ``blank_shell_literal_spans``) measured
-    seconds; a linear pattern stays well under a generous bound.
+    seconds. The cost at 20,000 characters is compared with the cost at
+    2,500 (thread CPU time, ``tests/scaling.py``), so host load cannot fail
+    it and a quadratic pattern still does (00466 N222).
     """
 
-    _MAX_SECONDS = 2.0
-
-    @pytest.fixture
-    def handler(self, tmp_path: Path) -> PlanNumberHelperHandler:
+    @staticmethod
+    def _handler(workspace: Path) -> PlanNumberHelperHandler:
         handler = PlanNumberHelperHandler()
-        handler._workspace_root = tmp_path
+        handler._workspace_root = workspace
         handler._track_plans_in_project = "CLAUDE/Plan"
         return handler
 
-    def test_long_quote_run_does_not_blow_up(self, handler: PlanNumberHelperHandler) -> None:
-        import time
+    def test_long_quote_run_does_not_blow_up(self, tmp_path: Path) -> None:
+        from tests.scaling import SIZE_FACTOR, SUPERLINEAR_RATIO, scaling_ratio
 
-        command = "echo " + "'" * 20_000
-        start = time.monotonic()
-        handler.matches(_bash(command))
-        elapsed = time.monotonic() - start
-        assert elapsed < self._MAX_SECONDS, (
-            f"matches() took {elapsed:.2f}s on a 20,000-char quote run "
-            f"(bound {self._MAX_SECONDS}s) -- the echo/printf glob pattern "
-            "is quadratic again"
+        def command_at(size: int) -> str:
+            return "echo " + "'" * size
+
+        # A fresh handler per call, so no answer comes from an earlier call.
+        small_n = 20_000 // SIZE_FACTOR
+        ratio = scaling_ratio(
+            lambda size: self._handler(tmp_path).matches(_bash(command_at(size))),
+            small_n,
+            command_at(SIZE_FACTOR * small_n),
+        )
+        assert ratio <= SUPERLINEAR_RATIO, (
+            f"matches() cost grew {ratio:.0f}x for {SIZE_FACTOR}x the quote run "
+            "-- the echo/printf glob pattern is quadratic again"
         )
