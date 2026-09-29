@@ -46,11 +46,11 @@ from tests.scaling import SIZE_FACTOR, SUPERLINEAR_RATIO, counted_ratio, scaling
 
 from claude_code_hooks_daemon.config.loader import ConfigLoader
 from claude_code_hooks_daemon.config.models import Config
-from claude_code_hooks_daemon.constants import HandlerTag
+from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
 from claude_code_hooks_daemon.core.acceptance_test import AcceptanceTest
 from claude_code_hooks_daemon.core.event import EventType
 from claude_code_hooks_daemon.core.handler import Handler
-from claude_code_hooks_daemon.core.hook_result import HookResult
+from claude_code_hooks_daemon.core.hook_result import Decision, HookResult
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.core.router import EventRouter
 from claude_code_hooks_daemon.daemon.cli import _build_handler_config_mapping
@@ -665,7 +665,10 @@ class TestRegimeIsIndependentOfEarlierWarnings:
 
         class _Prober(Handler):
             def __init__(self) -> None:
-                super().__init__(name="prober", priority=50)
+                super().__init__(
+                    handler_id=HandlerID.DESTRUCTIVE_GIT,
+                    priority=Priority.DESTRUCTIVE_GIT,
+                )
 
             def matches(self, hook_input: dict) -> bool:
                 return True
@@ -673,7 +676,7 @@ class TestRegimeIsIndependentOfEarlierWarnings:
             def handle(self, hook_input: dict) -> HookResult:
                 for _ in range(20):
                     path_exists(unreadable, unreadable_means=False)
-                return HookResult(decision="allow")
+                return HookResult(decision=Decision.ALLOW)
 
             def get_claude_md(self) -> str | None:
                 return None
