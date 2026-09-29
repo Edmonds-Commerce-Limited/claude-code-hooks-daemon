@@ -131,6 +131,10 @@ _FULL_RUNS: list[tuple[str, str]] = [
     ("./scripts/qa/run_all.sh", "run-all"),
     ("bash scripts/qa/run_all.sh", "run-all"),
     ("./scripts/qa/run_tests.sh", "run-tests"),
+    ("python scripts/qa/run_test_matrix.py", "run-test-matrix"),
+    ("./scripts/qa/run_test_matrix.py", "run-test-matrix"),
+    # It parses no arguments, so `--help` runs the whole matrix too.
+    ("python3 scripts/qa/run_test_matrix.py --help", "run-test-matrix"),
     ("./scripts/validate_worktrees.sh", "validate-worktrees"),
     ("pytest", "pytest-whole-suite"),
     ("pytest -x -q", "pytest-whole-suite"),
@@ -1670,6 +1674,7 @@ class TestAScriptRunByItsNameIsRead:
         sorted(
             path.relative_to(_REPO_ROOT).as_posix()
             for path in (_REPO_ROOT / "scripts" / "qa").glob("*.py")
+            if path.name != "run_test_matrix.py"
         ),
     )
     def test_the_qa_scripts_run_as_documented_are_not_full_runs(self, script: str) -> None:
@@ -1677,9 +1682,28 @@ class TestAScriptRunByItsNameIsRead:
 
         Judged at the DECISION level -- see
         ``test_the_repositorys_own_scripts_are_not_full_runs`` above for why.
+        ``run_test_matrix.py`` is left out because it IS the tests stage: see
+        the test below.
         """
         result = _handler().handle(_bash(f"python {script}", cwd=str(_REPO_ROOT)))
         assert result.decision is Decision.ALLOW, (script, result.reason)
+
+    def test_the_ci_matrix_runner_is_a_declared_full_run(self) -> None:
+        """It runs the suite under every CI Python, so a sub-agent is denied it.
+
+        Denied by its declared pattern, not by reading its code: a declared
+        program's pattern decides (see the ``llm_qa.py`` test above).
+        """
+        command = "python scripts/qa/run_test_matrix.py"
+        match = find_full_qa_invocation(command, _patterns(), cwd=_REPO_ROOT)
+        assert match is not None
+        assert match.pattern_id == "run-test-matrix"
+        result = _handler().handle(_bash(command, cwd=str(_REPO_ROOT)))
+        assert result.decision is Decision.DENY, result.reason
+
+    def test_the_ci_matrix_runner_is_left_to_the_main_thread(self) -> None:
+        event = _bash("python scripts/qa/run_test_matrix.py", cwd=str(_REPO_ROOT))
+        assert scope_admits(SubagentFullQaBlockerHandler().scope, event) is False
 
 
 class TestReadingAScriptDoesNotMisreadItsProse:
@@ -2766,6 +2790,23 @@ class TestThePytestOptionGrammar:
         }
         assert takes_value, "the parser exposed no options; this test would prove nothing"
         assert takes_value <= PYTEST_VALUE_OPTIONS, sorted(takes_value - PYTEST_VALUE_OPTIONS)
+
+    @pytest.mark.parametrize(
+        ("command", "full"),
+        [
+            ("pytest --first-error-lines untracked/qa/lines.jsonl", True),
+            ("pytest --first-error-lines tests/unit/qa/x.jsonl tests/", True),
+            ("pytest --first-error-lines tests tests/unit/qa/test_run_test_matrix.py", False),
+            ("pytest --first-error-lines=tests tests/unit/qa/test_run_test_matrix.py", False),
+        ],
+    )
+    def test_the_first_error_lines_value_is_not_a_test_path(self, command: str, full: bool) -> None:
+        """The QA stage's own plugin option (00466 N110) takes the next word as its file."""
+        assert "--first-error-lines" in PYTEST_VALUE_OPTIONS
+        match = find_full_qa_invocation(command, _patterns(), cwd=_REPO_ROOT)
+        assert (match is not None) is full, (command, match)
+        if match is not None:
+            assert match.pattern_id == "pytest-whole-suite"
 
     def test_the_grammar_consumes_a_value_that_looks_like_a_path(self) -> None:
         patterns, _ = parse_full_qa_patterns(

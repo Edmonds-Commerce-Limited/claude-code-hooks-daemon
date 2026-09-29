@@ -471,6 +471,11 @@ handlers:
             command: run_all.sh
           - id: run-tests
             command: run_tests.sh
+          # The QA tests stage's CI-matrix runner: it runs the suite under
+          # every Python in CI's matrix. It takes no arguments, and `--help`
+          # is not one either, so every invocation is a full run.
+          - id: run-test-matrix
+            command: run_test_matrix.py
           - id: validate-worktrees
             command: validate_worktrees.sh
           # The test half of `llm_qa.py changed`, which is targeted above: it

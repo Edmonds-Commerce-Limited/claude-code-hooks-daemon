@@ -191,8 +191,9 @@ def _corpus_rows() -> list[tuple[str, bool]]:
     return [*python_rows, *_LISTED_ROWS]
 
 
-#: The two ``scripts/qa`` entry points that ARE the full suite.
-_FULL_BY_DESIGN: frozenset[str] = frozenset({"run_all.sh", "run_tests.sh"})
+#: The ``scripts/qa`` entry points that ARE the full suite. ``run_test_matrix.py``
+#: is the tests stage under every CI Python, and parses no arguments at all.
+_FULL_BY_DESIGN: frozenset[str] = frozenset({"run_all.sh", "run_tests.sh", "run_test_matrix.py"})
 _HANDLER_TESTS = "tests/unit/handlers/pre_tool_use/test_subagent_full_qa_blocker.py"
 _HANDLER = "src/claude_code_hooks_daemon/handlers/pre_tool_use/subagent_full_qa_blocker.py"
 _LLM_QA = "./scripts/qa/llm_qa.py"
@@ -348,8 +349,9 @@ def _everyday_commands() -> list[str]:
     ]
     qa_scripts = _REPO_ROOT / "scripts" / "qa"
     for script in sorted(qa_scripts.glob("*.py")):
-        commands.append(f"python scripts/qa/{script.name} --help")
-        commands.append(f"python3 scripts/qa/{script.name}")
+        if script.name not in _FULL_BY_DESIGN:
+            commands.append(f"python scripts/qa/{script.name} --help")
+            commands.append(f"python3 scripts/qa/{script.name}")
     for script in sorted(qa_scripts.glob("*.sh")):
         if script.name not in _FULL_BY_DESIGN:
             commands.append(f"./scripts/qa/{script.name}")
@@ -428,6 +430,13 @@ def test_an_everyday_sub_agent_command_is_allowed(command: str) -> None:
     """Never DENIED -- whether this handler's parser sees the command in full,
     or judges it UNSEEN (round 9d: UNSEEN is advisory-only, never a deny)."""
     assert _decision(command) is Decision.ALLOW, command
+
+
+@pytest.mark.parametrize("script", sorted(_FULL_BY_DESIGN))
+def test_a_full_by_design_script_is_denied_to_a_sub_agent(script: str) -> None:
+    """The other side of the exclusions above: each one really is denied."""
+    runner = "python3 " if script.endswith(".py") else "./"
+    assert _decision(f"{runner}scripts/qa/{script}") is Decision.DENY, script
 
 
 class TestUnseenScriptsAreAllowedNotDenied:

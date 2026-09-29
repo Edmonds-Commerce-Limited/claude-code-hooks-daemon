@@ -223,6 +223,8 @@ PYTEST_VALUE_OPTIONS: Final[frozenset[str]] = frozenset(
         "--asyncio-mode",
         "--html",
         "--css",
+        # This daemon's own qa.first_error_lines plugin (the QA tests stage)
+        "--first-error-lines",
     }
 )
 
