@@ -11,6 +11,8 @@ pid(s) on timeout, taken from `run_tests.sh` verbatim.
 
 from __future__ import annotations
 
+import fcntl
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -94,6 +96,80 @@ class TestContendedAcquireGivesUpWithADiagnostic:
             holder.kill()
             holder.wait(timeout=_PROBE_TIMEOUT_SECONDS)
         assert probe.returncode == 1, "the lock must still be held by the original holder"
+
+
+class TestAnInheritedHeldLockIsRecognised:
+    """The matrix runner holds the lock and hands its fd to ``run_tests.sh``.
+
+    A second, fresh ``flock`` on the same file would wait for the very process
+    that launched it, so the library must recognise the inherited descriptor.
+    Recognition is PROVEN by ``flock -n`` on that descriptor, never by the
+    environment variable alone.
+    """
+
+    _SCRIPT = (
+        "set -euo pipefail\n"
+        f'source "{_LOCK_LIB}"\n'
+        "FULL_QA_LOCK_WAIT_SECONDS=1\n"
+        'acquire_full_qa_lock_or_die "$1"\n'
+        "echo ACQUIRED\n"
+    )
+
+    @staticmethod
+    def _open_locked(lock_file: Path) -> int:
+        fd = os.open(lock_file, os.O_RDWR | os.O_CREAT, 0o644)
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        return fd
+
+    def _acquire(
+        self, lock_file: Path, fd: int, hint: str | None
+    ) -> subprocess.CompletedProcess[str]:
+        env = {k: v for k, v in os.environ.items() if k != "FULL_QA_LOCK_INHERITED_FD"}
+        if hint is not None:
+            env["FULL_QA_LOCK_INHERITED_FD"] = hint
+        return subprocess.run(
+            ["bash", "-c", self._SCRIPT, "bash", str(lock_file)],
+            capture_output=True,
+            text=True,
+            timeout=_PROBE_TIMEOUT_SECONDS,
+            check=False,
+            pass_fds=(fd,),
+            env=env,
+        )
+
+    def test_the_inherited_descriptor_that_holds_the_lock_is_accepted(self, tmp_path: Path) -> None:
+        lock_file = tmp_path / "lock"
+        fd = self._open_locked(lock_file)
+        try:
+            result = self._acquire(lock_file, fd, str(fd))
+        finally:
+            os.close(fd)
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "ACQUIRED" in result.stdout
+
+    def test_without_the_hint_a_held_lock_is_still_contended(self, tmp_path: Path) -> None:
+        lock_file = tmp_path / "lock"
+        fd = self._open_locked(lock_file)
+        try:
+            result = self._acquire(lock_file, fd, None)
+        finally:
+            os.close(fd)
+        assert result.returncode == 1
+        assert "ACQUIRED" not in result.stdout
+
+    def test_a_hint_naming_a_descriptor_on_another_file_proves_nothing(
+        self, tmp_path: Path
+    ) -> None:
+        lock_file = tmp_path / "lock"
+        holder = self._open_locked(lock_file)
+        decoy = os.open(tmp_path / "other", os.O_RDWR | os.O_CREAT, 0o644)
+        try:
+            result = self._acquire(lock_file, decoy, str(decoy))
+        finally:
+            os.close(decoy)
+            os.close(holder)
+        assert result.returncode == 1
+        assert "ACQUIRED" not in result.stdout
 
 
 class TestScriptIsExecutableAndShellchecked:

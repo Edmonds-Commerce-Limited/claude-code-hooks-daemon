@@ -13,6 +13,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from claude_code_hooks_daemon.constants.timeout import Timeout
+
 LLM_QA = Path(__file__).resolve().parents[3] / "scripts" / "qa" / "llm_qa.py"
 
 _LOAD_WITHOUT_EXECUTING_MAIN = (
@@ -30,7 +32,7 @@ def test_llm_qa_loads_with_no_site_packages() -> None:
         [sys.executable, "-I", "-S", "-c", _LOAD_WITHOUT_EXECUTING_MAIN, str(LLM_QA)],
         capture_output=True,
         text=True,
-        timeout=60,
+        timeout=Timeout.QA_TEST_TIMEOUT,
         check=False,
     )
 

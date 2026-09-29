@@ -128,10 +128,7 @@ class TestSecondRunIsRefused:
         assert llm_qa.try_acquire_run_lock(str(lock_path)) is True
 
 
-_GRANDCHILD_LIFETIME_SECONDS = 60
-
-
-def _run_that_starts_a_daemon(lock_path: Path, *, leak_the_lock: bool) -> int:
+def _run_that_starts_a_daemon(lock_path: Path, *, leak_the_lock: bool) -> tuple[int, int]:
     """A QA run that takes the lock, starts a long-lived child, and exits.
 
     The child is started the way a daemon restart starts one: its own session,
@@ -139,9 +136,15 @@ def _run_that_starts_a_daemon(lock_path: Path, *, leak_the_lock: bool) -> int:
     inherited. ``leak_the_lock`` marks the lock descriptor inheritable, the
     shape of the defect, so the probe is shown able to see a leak.
 
+    The child lives until the returned write end of a pipe is closed: it
+    blocks reading the pipe, so the test ends it by closing a descriptor it
+    owns rather than by signalling a pid it does not own.
+
     Returns:
-        The pid of the child, still running after the run has exited.
+        The pid of the child, still running after the run has exited, and the
+        write end of the pipe that keeps it alive.
     """
+    read_end, write_end = os.pipe()
     script = (
         "import os, subprocess, sys, importlib.util;"
         f"spec = importlib.util.spec_from_file_location('m', {str(PROJECT_ROOT / 'scripts' / 'qa' / 'llm_qa.py')!r});"
@@ -149,19 +152,26 @@ def _run_that_starts_a_daemon(lock_path: Path, *, leak_the_lock: bool) -> int:
         f"fd = m._open_lock_fd({str(lock_path)!r});"
         "import fcntl; fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB);"
         f"os.set_inheritable(fd, {leak_the_lock!r});"
-        "child = subprocess.Popen(['sleep', "
-        f"'{_GRANDCHILD_LIFETIME_SECONDS}'], close_fds=False, start_new_session=True,"
+        f"child = subprocess.Popen([sys.executable, '-c', 'import os; os.read({read_end}, 1)'],"
+        " close_fds=False, start_new_session=True,"
         " stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL);"
         "print(child.pid)"
     )
-    result = subprocess.run(
-        [sys.executable, "-c", script],
-        capture_output=True,
-        text=True,
-        timeout=Timeout.QA_TEST_TIMEOUT,
-        check=True,
-    )
-    return int(result.stdout.strip())
+    try:
+        result = subprocess.run(
+            [sys.executable, "-c", script],
+            capture_output=True,
+            text=True,
+            timeout=Timeout.QA_TEST_TIMEOUT,
+            check=True,
+            pass_fds=(read_end,),
+        )
+    except BaseException:
+        os.close(write_end)
+        raise
+    finally:
+        os.close(read_end)
+    return int(result.stdout.strip()), write_end
 
 
 class TestADaemonStartedUnderTheRunDoesNotHoldTheLock:
@@ -182,7 +192,7 @@ class TestADaemonStartedUnderTheRunDoesNotHoldTheLock:
         self, tmp_path: Path, leak_the_lock: bool, released: bool
     ) -> None:
         lock_path = tmp_path / "qa.lock"
-        child = _run_that_starts_a_daemon(lock_path, leak_the_lock=leak_the_lock)
+        child, keep_alive = _run_that_starts_a_daemon(lock_path, leak_the_lock=leak_the_lock)
         try:
             os.kill(child, 0)
             probe = subprocess.run(
@@ -199,7 +209,7 @@ class TestADaemonStartedUnderTheRunDoesNotHoldTheLock:
             )
             assert (probe.returncode == 0) is released, probe.stderr
         finally:
-            os.kill(child, 9)
+            os.close(keep_alive)
 
 
 class TestHolderIsIdentified:

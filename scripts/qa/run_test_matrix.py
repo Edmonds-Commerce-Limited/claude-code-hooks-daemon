@@ -29,6 +29,7 @@ over ``tests.json`` with a per-run ``interpreters`` list.
 
 from __future__ import annotations
 
+import functools
 import json
 import os
 import re
@@ -46,6 +47,7 @@ from claude_code_hooks_daemon.qa.first_error_lines import (
     OPTION as FIRST_ERROR_LINES_OPTION,
 )
 from claude_code_hooks_daemon.qa.first_error_lines import read_first_error_lines
+from claude_code_hooks_daemon.qa.full_qa_lock import acquire_full_qa_lock
 from claude_code_hooks_daemon.qa.pytest_text_report import (
     finalize_passed_all,
     parse_pytest_text_output,
@@ -479,11 +481,19 @@ def provision(version: str) -> Path:
 class _PrimaryJob:
     """``run_tests.sh`` under the primary interpreter; its output goes to ours."""
 
-    def __init__(self) -> None:
+    def __init__(self, lock_fd: int) -> None:
         # A previous run's report must not stand in for this run's if
         # run_tests.sh dies before writing one.
         TESTS_JSON.unlink(missing_ok=True)
-        self._process = subprocess.Popen([str(SCRIPTS_DIR / "run_tests.sh")], cwd=str(PROJECT_ROOT))
+        # run_tests.sh recognises the inherited descriptor as the held lock
+        # instead of waiting on a second description of the same file.
+        env = {**os.environ, "FULL_QA_LOCK_INHERITED_FD": str(lock_fd)}
+        self._process = subprocess.Popen(
+            [str(SCRIPTS_DIR / "run_tests.sh")],
+            cwd=str(PROJECT_ROOT),
+            env=env,
+            pass_fds=(lock_fd,),
+        )
 
     def wait(self) -> RunOutcome:
         return outcome_from_primary_report(TESTS_JSON, self._process.wait())
@@ -506,7 +516,7 @@ def extra_pytest_argv(python: Path, run: PlannedRun, lines: Path) -> list[str]:
 class _ExtraJob:
     """pytest over one scope under an extra interpreter, logged to a file."""
 
-    def __init__(self, run: PlannedRun, python: Path) -> None:
+    def __init__(self, run: PlannedRun, python: Path, lock_fd: int) -> None:
         self._log = QA_OUTPUT_DIR / f"tests-py{run.version}-{run.scope}.log"
         self._lines = QA_OUTPUT_DIR / f"first-error-lines-py{run.version}-{run.scope}.jsonl"
         # The plugin appends, so a previous run's lines must not survive.
@@ -526,6 +536,9 @@ class _ExtraJob:
             env=env,
             stdout=self._handle,
             stderr=subprocess.STDOUT,
+            # The whole-suite sink in pytest refuses a run whose ancestry does
+            # not hold the host-wide full-QA lock; the descriptor is the proof.
+            pass_fds=(lock_fd,),
         )
 
     def wait(self) -> RunOutcome:
@@ -534,10 +547,11 @@ class _ExtraJob:
         return outcome_from_log(self._log, exit_code, lines=self._lines)
 
 
-def launch(run: PlannedRun, python: Path) -> Job:
+def launch(run: PlannedRun, python: Path, *, lock_fd: int) -> Job:
+    """Start ``run``; ``lock_fd`` is the held host-wide full-QA lock, handed to the child."""
     if run.primary:
-        return _PrimaryJob()
-    return _ExtraJob(run, python)
+        return _PrimaryJob(lock_fd)
+    return _ExtraJob(run, python, lock_fd)
 
 
 def ensure_daemon() -> str | None:
@@ -601,10 +615,16 @@ def main() -> int:
 
     plan = plan_runs(ci_versions, primary_version)
     print(f"CI matrix {ci_versions}; primary interpreter {primary_version}")
-    deps = MatrixDeps(
-        provision=provision, launch=launch, ensure_daemon=ensure_daemon, clock=time.monotonic
-    )
-    results = run_matrix(plan, Path(sys.executable), deps)
+    # Held for every child run: each is a whole-suite pytest the sink refuses
+    # unless its ancestry holds this lock (Plan 00463).
+    with acquire_full_qa_lock(PROJECT_ROOT) as lock_fd:
+        deps = MatrixDeps(
+            provision=provision,
+            launch=functools.partial(launch, lock_fd=lock_fd),
+            ensure_daemon=ensure_daemon,
+            clock=time.monotonic,
+        )
+        results = run_matrix(plan, Path(sys.executable), deps)
 
     primary_report: dict[str, Any] = {}
     if TESTS_JSON.is_file():

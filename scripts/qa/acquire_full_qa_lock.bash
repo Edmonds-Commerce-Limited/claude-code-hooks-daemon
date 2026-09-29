@@ -48,8 +48,31 @@ _full_qa_lock_holders() {
     printf '%s\n' "${pids[@]}" | sort -un
 }
 
+# Succeeds when FULL_QA_LOCK_INHERITED_FD names an inherited descriptor that
+# resolves to "$1" AND whose open file description holds (or can take) the
+# lock: `flock -n` on that very descriptor. The variable is only a HINT at
+# which descriptor to test; the proof is the flock, so a variable naming an
+# unrelated or unlocked-by-us descriptor proves nothing.
+_full_qa_lock_inherited() {
+    local lock_file="$1" fd="${FULL_QA_LOCK_INHERITED_FD:-}" target
+    if [[ ! "${fd}" =~ ^[0-9]+$ ]]; then
+        return 1
+    fi
+    if ! target="$(readlink -f "/proc/self/fd/${fd}" 2>/dev/null)"; then
+        return 1
+    fi
+    if [ "${target}" != "$(readlink -f "${lock_file}")" ]; then
+        return 1
+    fi
+    flock -n "${fd}" || return 1
+    FULL_QA_LOCK_FD="${fd}"
+}
+
 acquire_full_qa_lock_or_die() {
     local lock_file="$1" holders
+    if _full_qa_lock_inherited "${lock_file}"; then
+        return 0
+    fi
     exec {FULL_QA_LOCK_FD}>>"${lock_file}"
     if flock -w "${FULL_QA_LOCK_WAIT_SECONDS}" "${FULL_QA_LOCK_FD}"; then
         return 0

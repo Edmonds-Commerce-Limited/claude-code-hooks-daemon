@@ -22,7 +22,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
 import pytest
 import yaml
@@ -687,3 +687,55 @@ class TestThePrimaryReport:
 
         assert outcome.summary["passed_all"] is True
         assert outcome.summary["passed"] == 10
+
+
+class _RecordedPopen:
+    """Stands in for ``subprocess.Popen``; records how each child was launched."""
+
+    launches: ClassVar[list[dict[str, Any]]] = []
+
+    def __init__(self, argv: list[str], **kwargs: Any) -> None:
+        self.launches.append({"argv": argv, **kwargs})
+
+
+class TestEveryChildRunCarriesTheFullQaLockProof:
+    """Plan 00463: the extra-interpreter runs died with REFUSED (no lock held).
+
+    The primary run took the host lock inside ``run_tests.sh``; the extra
+    interpreters' whole-suite pytest runs were launched with no descriptor for
+    it, so the sink refused them. The matrix runner now holds the lock itself
+    and hands its descriptor to every child.
+    """
+
+    LOCK_FD = 41
+
+    @pytest.fixture
+    def matrix(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Any:
+        module = _load_matrix()
+        monkeypatch.setattr(module, "QA_OUTPUT_DIR", tmp_path)
+        monkeypatch.setattr(module, "TESTS_JSON", tmp_path / "tests.json")
+        _RecordedPopen.launches = []
+        monkeypatch.setattr(module.subprocess, "Popen", _RecordedPopen)
+        return module
+
+    def test_an_extra_interpreter_run_is_handed_the_lock_descriptor(self, matrix: Any) -> None:
+        run = matrix.PlannedRun("3.12", "unit", 1, False)
+
+        matrix.launch(run, Path("/fake/py3.12/bin/python"), lock_fd=self.LOCK_FD)
+
+        assert _RecordedPopen.launches[0]["pass_fds"] == (self.LOCK_FD,)
+
+    def test_the_primary_run_is_handed_the_descriptor_and_told_which_one(self, matrix: Any) -> None:
+        run = matrix.PlannedRun("3.11", "all", 0, True)
+
+        matrix.launch(run, Path(sys.executable), lock_fd=self.LOCK_FD)
+
+        launch = _RecordedPopen.launches[0]
+        assert launch["pass_fds"] == (self.LOCK_FD,)
+        assert launch["env"]["FULL_QA_LOCK_INHERITED_FD"] == str(self.LOCK_FD)
+
+    def test_the_runner_acquires_the_host_lock_and_passes_it_to_every_launch(self) -> None:
+        text = MATRIX_SCRIPT.read_text(encoding="utf-8")
+
+        assert "acquire_full_qa_lock(PROJECT_ROOT)" in text
+        assert "lock_fd=" in text
