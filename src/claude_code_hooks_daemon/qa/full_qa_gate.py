@@ -117,11 +117,29 @@ def _test_root(config: pytest.Config) -> Path | None:
     return _gate_anchor(config)
 
 
+def _invocation_tests_dir(config: pytest.Config) -> Path | None:
+    """`tests/` under the directory pytest was launched from, if there is one.
+
+    Used when only the force-loaded plugin registered the hook (no conftest.py
+    of the suite was collected, e.g. `pytest .claude/project-handlers`), so
+    the plugin's own source directory holds no test files to count. The
+    launch directory is not moved by `--rootdir`, `-c` or any other pytest
+    flag, so it keeps the count fail-closed.
+    """
+    candidate = Path(config.invocation_params.dir) / "tests"
+    return candidate if candidate.is_dir() else None
+
+
 def _total_test_file_count(config: pytest.Config) -> int | None:
     root = _test_root(config)
     if root is None:
         return None
-    return sum(1 for _ in root.rglob("test_*.py"))
+    count = sum(1 for _ in root.rglob("test_*.py"))
+    if count == 0 and root == _OWN_DIR:
+        fallback = _invocation_tests_dir(config)
+        if fallback is not None:
+            return sum(1 for _ in fallback.rglob("test_*.py"))
+    return count
 
 
 def whole_suite_refusal_message(selected: int, total: int) -> str:
