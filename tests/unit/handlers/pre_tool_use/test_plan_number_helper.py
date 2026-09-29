@@ -9,6 +9,7 @@ from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
+from tests.support.inert_head_shapes import INERT_SHAPES, NOT_INERT_SHAPES, fill
 
 
 @pytest.fixture(autouse=True)
@@ -985,6 +986,34 @@ class TestHandRolledPlanFolderCreation:
         assert not handler.matches(
             _bash("git commit -m 'document mkdir -p CLAUDE/Plan/00250-some-feature'")
         )
+
+    _MKDIR = "mkdir -p CLAUDE/Plan/00250-some-feature"
+
+    def test_an_echo_naming_a_creation_is_not_one(self, handler: PlanNumberHelperHandler) -> None:
+        """Plan 00408 Task 3.3: the same shape as the two sibling guards' report."""
+        assert not handler.matches(_bash(f"echo '{self._MKDIR}'"))
+
+    @pytest.mark.parametrize("template", INERT_SHAPES)
+    def test_no_inert_shape_is_a_creation(
+        self, handler: PlanNumberHelperHandler, template: str
+    ) -> None:
+        assert not handler.matches(_bash(fill(template, self._MKDIR)))
+
+    @pytest.mark.parametrize("template", NOT_INERT_SHAPES)
+    def test_every_other_shape_is_still_a_creation(
+        self, handler: PlanNumberHelperHandler, template: str
+    ) -> None:
+        assert handler.matches(_bash(fill(template, self._MKDIR)))
+
+    def test_the_echo_glob_discovery_rule_is_not_exempted(
+        self, handler: PlanNumberHelperHandler
+    ) -> None:
+        """`echo CLAUDE/Plan/0*` EXPANDS the glob: the echo is the scan itself.
+
+        The inert-head exemption answers "does this text run a mkdir?", so it
+        belongs to the mkdir rule alone and must not reach discovery.
+        """
+        assert handler.matches(_bash("echo CLAUDE/Plan/0*"))
 
 
 class TestGetRules:
