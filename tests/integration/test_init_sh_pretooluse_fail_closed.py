@@ -39,6 +39,7 @@ from tests.daemon_like_process import (
     answering_daemon_socket,
     daemon_like_process,
 )
+from tests.deep_json import TOO_DEEP_FOR_ANY_PYTHON, nested_call
 from tests.dispatch_timeouts import DispatchTestTimeout
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -2272,36 +2273,31 @@ def _kill_failure_message(error: int) -> str:
     return f'printf "bash: kill: (%s) - %s\\n" "$2" "{os.strerror(error)}" >&2;'
 
 
-#: Deeper than CPython's json parser recurses (Plan 00466 N140).
-_TOO_DEEP = 1000
-
-
-def _nested_call(depth: int) -> str:
-    """An MCP-shaped PreToolUse input whose tool_input nests ``depth`` lists."""
-    return (
-        '{"tool_name": "mcp__deep__tool", "tool_input": {"value": '
-        + "[" * depth
-        + "]" * depth
-        + "}}"
-    )
-
+#: Levels either side of the forwarder's nesting limit a sweep covers. On
+#: 3.12 and 3.13 the envelope's ``json.dumps`` fails a few levels before
+#: ``json.loads`` does, and the sweep covers that whole window.
+_LIMIT_MARGIN = 10
 
 _TRANSPORT = "source .claude/init.sh; send_request_stdin PreToolUse"
 
 
 class TestInputThatCannotBeParsedIsDenied:
     """Plan 00466 N140: PreToolUse input the forwarder cannot parse was
-    answered with context only, which allows the call. JSON nested about
-    1000 deep raises RecursionError in ``json.loads``; a little shallower,
-    it parses and the request envelope's ``json.dumps`` raised outside any
-    handler, so the forwarder wrote nothing. Either way no guard judged the
-    call, so it is denied with a reason that says so."""
+    answered with context only, which allows the call. JSON nested past the
+    interpreter's limit raises RecursionError in ``json.loads``; a little
+    shallower, it parses and the request envelope's ``json.dumps`` raised
+    outside any handler, so the forwarder wrote nothing. Either way no guard
+    judged the call, so it is denied with a reason that says so. The limit
+    differs by interpreter (``tests.deep_json``)."""
 
     def test_deep_nesting_is_denied_on_the_plain_forwarder(
         self, project: Path, valid_deny_socket: Path
     ) -> None:
         result = _run_script(
-            project, _TRANSPORT, _nested_call(_TOO_DEEP), socket_path=valid_deny_socket
+            project,
+            _TRANSPORT,
+            nested_call(TOO_DEEP_FOR_ANY_PYTHON),
+            socket_path=valid_deny_socket,
         )
         assert _verdict(result) == "deny"
         reason = json.loads(result.stdout)["hookSpecificOutput"]["permissionDecisionReason"]
@@ -2314,23 +2310,41 @@ class TestInputThatCannotBeParsedIsDenied:
         result = _run_script(
             project,
             _TRANSPORT,
-            _nested_call(_TOO_DEEP),
+            nested_call(TOO_DEEP_FOR_ANY_PYTHON),
             socket_path=valid_empty_socket,
             relay_failure=_RELAY_FAILURE,
         )
         assert _verdict(result) == "deny"
 
+    @staticmethod
+    def _who_denied(project: Path, socket_path: Path, depth: int) -> str:
+        """``"daemon"`` or ``"transport"``: whose deny ``depth`` levels got.
+        Never no answer, and never anything but a deny."""
+        result = _run_script(project, _TRANSPORT, nested_call(depth), socket_path=socket_path)
+        assert result.stdout.strip(), f"depth {depth}: no answer; stderr: {result.stderr}"
+        assert _verdict(result) == "deny", depth
+        reason = json.loads(result.stdout)["hookSpecificOutput"]["permissionDecisionReason"]
+        return "transport" if "invalid_hook_input" in reason else "daemon"
+
     def test_every_depth_near_the_limit_gets_a_verdict(
         self, project: Path, valid_deny_socket: Path
     ) -> None:
         """Parsed and forwarded, the daemon's deny comes back; not parsed or
-        not wrapped, the transport's own. Never no answer at all."""
-        for depth in range(_TOO_DEEP - 20, _TOO_DEEP + 1):
-            result = _run_script(
-                project, _TRANSPORT, _nested_call(depth), socket_path=valid_deny_socket
-            )
-            assert result.stdout.strip(), f"depth {depth}: no answer; stderr: {result.stderr}"
-            assert _verdict(result) == "deny", depth
+        not wrapped, the transport's own. Never no answer at all. The limit
+        is found with the forwarder itself, by bisection, because no probe
+        run elsewhere predicts it: 3.14's moves with the stack a run starts
+        with. Every depth visited, and every depth near the limit, is judged."""
+        parsed, unparsed = 1, TOO_DEEP_FOR_ANY_PYTHON
+        assert self._who_denied(project, valid_deny_socket, parsed) == "daemon"
+        assert self._who_denied(project, valid_deny_socket, unparsed) == "transport"
+        while unparsed - parsed > 1:
+            middle = (parsed + unparsed) // 2
+            if self._who_denied(project, valid_deny_socket, middle) == "daemon":
+                parsed = middle
+            else:
+                unparsed = middle
+        for depth in range(parsed - _LIMIT_MARGIN, unparsed + _LIMIT_MARGIN + 1):
+            self._who_denied(project, valid_deny_socket, depth)
 
     def test_text_that_is_not_json_is_denied(self, project: Path, valid_empty_socket: Path) -> None:
         result = _run_script(project, _TRANSPORT, "{not json", socket_path=valid_empty_socket)
@@ -2346,7 +2360,7 @@ class TestInputThatCannotBeParsedIsDenied:
     def test_another_event_still_fails_open(self, project: Path, valid_empty_socket: Path) -> None:
         script = "source .claude/init.sh; send_request_stdin PostToolUse"
         result = _run_script(
-            project, script, _nested_call(_TOO_DEEP), socket_path=valid_empty_socket
+            project, script, nested_call(TOO_DEEP_FOR_ANY_PYTHON), socket_path=valid_empty_socket
         )
         assert _verdict(result) == "no-decision"
 

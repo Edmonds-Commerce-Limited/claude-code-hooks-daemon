@@ -57,6 +57,7 @@ from claude_code_hooks_daemon.install.forwarder_generator import (
 )
 from claude_code_hooks_daemon.utils.cli_command import install_recovery_command
 from tests.daemon_like_process import daemon_like_process
+from tests.deep_json import TOO_DEEP_FOR_ANY_PYTHON, nested_call
 
 #: A probe sent through a hook forwarder is marked (Plan 00466 N12).
 _MAIN_PROBE = {SYNTHETIC_SOURCE_FIELD: TEST_PROBE, PROBE_AS_FIELD: ProbeThread.MAIN.value}
@@ -388,6 +389,13 @@ def _bash_call(command: str, cwd: Path) -> bytes:
     ).encode()
 
 
+def test_the_deeply_nested_probe_carries_its_markers() -> None:
+    """The live-probe scan cannot read a payload built by ``nested_call``."""
+    parsed = json.loads(nested_call(3, _MAIN_PROBE))
+    assert parsed["tool_input"] == {"value": [[[]]]}
+    assert parsed.items() >= _MAIN_PROBE.items()
+
+
 def _decision(result: subprocess.CompletedProcess[bytes]) -> str | None:
     assert result.returncode == 0, result.stderr.decode()
     hso = json.loads(result.stdout)["hookSpecificOutput"]
@@ -458,13 +466,7 @@ class TestRelayMidExchangeFailureIsJudgedByTheOneCarveOut:
         context only, and the relay accepts that shape as the carve-out's
         allow. It must deny, and say why."""
         forwarder, env = _judging_project(tmp_path)
-        depth = 1000
-        payload = (
-            '{"tool_name": "mcp__deep__tool", "tool_input": {"value": '
-            + "[" * depth
-            + "]" * depth
-            + "}}"
-        ).encode()
+        payload = nested_call(TOO_DEEP_FOR_ANY_PYTHON, _MAIN_PROBE).encode()
         result = _run_relay(
             wedged_pretooluse_socket, payload, "--fallback", str(forwarder), env=env
         )
