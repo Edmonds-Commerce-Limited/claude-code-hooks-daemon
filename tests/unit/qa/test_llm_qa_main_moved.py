@@ -765,7 +765,30 @@ class TestTheGateRunCertifies:
             return 0
 
         monkeypatch.setattr(llm_qa, "run_tool", run_tool)
+        # `DAEMON_CLI` is bound to the real checkout at import, so an unstubbed
+        # live-daemon tool (smoke_test) would start the REAL project's daemon.
+        monkeypatch.setattr(llm_qa, "ensure_live_daemon", lambda tool: None)
         return qa_dir
+
+    def test_a_full_run_never_reaches_the_real_projects_daemon(
+        self, repo: Path, stubbed: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """smoke_test is a live-daemon tool: ``ensure_live_daemon`` shells out to
+        ``bin/hooks-daemon`` of the REAL checkout (``DAEMON_CLI`` is fixed at
+        import), which starts a daemon that rewrites the real ``CLAUDE.md``."""
+        real_run = subprocess.run
+        daemon_argvs: list[list[str]] = []
+
+        def spy(argv: Any, *args: Any, **kwargs: Any) -> Any:
+            if any("hooks-daemon" in str(part) for part in argv):
+                daemon_argvs.append([str(part) for part in argv])
+                return subprocess.CompletedProcess(argv, 0, "", "")
+            return real_run(argv, *args, **kwargs)
+
+        monkeypatch.setattr(subprocess, "run", spy)
+        self._summaries(monkeypatch, failing=None)
+        llm_qa._run_tools(["smoke_test"], read_only=False)
+        assert daemon_argvs == [], f"the real daemon CLI was invoked: {daemon_argvs}"
 
     def _summaries(self, monkeypatch: pytest.MonkeyPatch, failing: str | None) -> None:
         def summarize(name: str, **_: Any) -> tuple[bool, str]:

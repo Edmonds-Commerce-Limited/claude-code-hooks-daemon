@@ -242,5 +242,53 @@ class TestDoubleRegistrationIsANoOp:
         assert "could not establish" not in result.stdout
 
 
+class TestRunCollectedOutsideTheSuiteIsJudgedOnItsOwnSize:
+    """CI's `pytest .claude/project-handlers`: no `tests/conftest.py` is
+    loaded, so only the forced plugin registers the hook and its own source
+    directory holds no test files. The suite size then comes from the
+    invocation directory's `tests/`, which no pytest flag can move."""
+
+    @staticmethod
+    def _write_outside_tests(root: Path, count: int) -> None:
+        outside = root / "handlers"
+        outside.mkdir()
+        for i in range(count):
+            (outside / f"test_h{i}.py").write_text(
+                f"def test_h_{i}() -> None:\n    assert {i} == {i}\n"
+            )
+
+    def test_a_small_run_outside_tests_is_allowed(self, tmp_path: Path) -> None:
+        _write_fixture_suite(tmp_path, file_count=8)
+        self._write_outside_tests(tmp_path, count=1)
+        result = _run_pytest_subprocess(tmp_path, [*_FORCED_PLUGIN_ARGS, "handlers"])
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "REFUSED" not in result.stdout
+
+    def test_a_whole_suite_sized_run_outside_tests_is_still_refused(self, tmp_path: Path) -> None:
+        _write_fixture_suite(tmp_path, file_count=4)
+        self._write_outside_tests(tmp_path, count=4)
+        result = _run_pytest_subprocess(tmp_path, [*_FORCED_PLUGIN_ARGS, "handlers"])
+        assert result.returncode == 1
+        assert "REFUSED" in result.stdout, result.stdout + result.stderr
+
+    def test_with_no_tests_directory_at_all_it_still_refuses(self, tmp_path: Path) -> None:
+        _init_repo(tmp_path)
+        self._write_outside_tests(tmp_path, count=1)
+        result = _run_pytest_subprocess(tmp_path, [*_FORCED_PLUGIN_ARGS, "handlers"])
+        assert result.returncode == 1
+        assert "could not establish" in result.stdout, result.stdout + result.stderr
+
+    def test_rootdir_pointed_away_cannot_shrink_the_suite(self, tmp_path: Path) -> None:
+        _write_fixture_suite(tmp_path, file_count=4)
+        self._write_outside_tests(tmp_path, count=4)
+        empty = tmp_path.parent / f"{tmp_path.name}-empty3"
+        empty.mkdir()
+        result = _run_pytest_subprocess(
+            tmp_path, [*_FORCED_PLUGIN_ARGS, f"--rootdir={empty}", "handlers"]
+        )
+        assert result.returncode == 1
+        assert "REFUSED" in result.stdout, result.stdout + result.stderr
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
