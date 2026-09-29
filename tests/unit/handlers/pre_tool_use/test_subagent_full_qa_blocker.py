@@ -1605,6 +1605,27 @@ class TestCodeTheHandlerCannotReadFailsClosed:
             assert match is not None, command
             assert match.fail_closed
 
+    @pytest.mark.parametrize("error", [PermissionError(13, "denied"), OSError(5, "io error")])
+    def test_a_script_that_cannot_be_opened_is_judged_by_unseen_policy(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, error: OSError
+    ) -> None:
+        """An unreadable script is unseen code, not an exception the chain swallows."""
+        root = _code_tree(tmp_path)
+        real_open = Path.open
+
+        def _open(self: Path, *args: Any, **kwargs: Any) -> Any:
+            if self.name == "full.sh":
+                raise error
+            return real_open(self, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "open", _open)
+        match = find_full_qa_invocation("bash full.sh", _patterns(), cwd=root)
+        assert match is not None
+        assert match.fail_closed
+        event = _bash("bash full.sh", cwd=str(root))
+        assert _handler(unseen_policy="deny").handle(event).decision is Decision.DENY
+        assert _handler().handle(event).decision is Decision.ALLOW
+
 
 class TestAScriptRunByItsNameIsRead:
     """Review 6: a script run by its own name was judged by that name alone.
