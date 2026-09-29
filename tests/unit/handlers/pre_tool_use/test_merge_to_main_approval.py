@@ -16,11 +16,13 @@ from typing import Any
 from unittest.mock import patch
 
 import pytest
+from tests.support.inert_head_shapes import INERT_SHAPES, NOT_INERT_SHAPES, fill
 
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
 from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.core import Decision, TestType
 from claude_code_hooks_daemon.core.data_layer import reset_data_layer
+from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.handlers.pre_tool_use import merge_to_main_approval as module
 from claude_code_hooks_daemon.handlers.pre_tool_use.merge_to_main_approval import (
     MergeToMainApprovalHandler,
@@ -45,7 +47,7 @@ def checkout(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
     monkeypatch.setattr(module, "is_linked_worktree", lambda path: False)
     monkeypatch.setattr(module, "current_branch", lambda path: "main")
     monkeypatch.setattr(module, "default_branch", lambda path: "main")
-    with patch.object(module.ProjectContext, "daemon_untracked_dir", return_value=tmp_path):
+    with patch.object(ProjectContext, "daemon_untracked_dir", return_value=tmp_path):
         yield tmp_path
 
 
@@ -328,18 +330,28 @@ class TestAQuotedStringCanItselfBeAMerge:
 
         assert merge_target(command) == "12"
 
-    def test_an_echo_naming_a_merge_is_matched_and_that_is_the_accepted_cost(
-        self,
-    ) -> None:
-        """Deliberate: `echo` and `bash -c` are structurally identical here.
 
-        Both are a command with a quoted argument; only knowing that `echo`
-        does not EXECUTE its argument separates them, which needs an allowlist
-        of inert commands (Plan 00408). Until then the gate over-denies a
-        harmless `echo` rather than under-denying a real `bash -c`, matching
-        what `destructive_git` has always done.
-        """
-        assert merge_target(f"echo 'git merge {self._BRANCH}'") == self._BRANCH
+class TestAnInertHeadNamingAMergeIsNotAMerge:
+    """Plan 00408 Task 3.3: `echo` does not execute its argument; `bash -c` does.
+
+    The two are structurally identical, so `is_wholly_inert_command` separates
+    them by HEAD, and only for a whole command that is one bare inert head.
+    The matrix below is the other half: every other shape is still a merge,
+    exactly as it was before the exemption.
+    """
+
+    _MERGE = "git merge feature/x"
+
+    def test_the_reported_echo_is_not_a_merge(self) -> None:
+        assert merge_target(f"echo '{self._MERGE}'") is None
+
+    @pytest.mark.parametrize("template", INERT_SHAPES)
+    def test_no_inert_shape_is_a_merge(self, template: str) -> None:
+        assert merge_target(fill(template, self._MERGE)) is None
+
+    @pytest.mark.parametrize("template", NOT_INERT_SHAPES)
+    def test_every_other_shape_is_still_a_merge(self, template: str) -> None:
+        assert merge_target(fill(template, self._MERGE)) is not None
 
 
 class TestTwoMergesThatWereMissed:

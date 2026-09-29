@@ -1690,6 +1690,9 @@ directory.
 with its command-directory resolver (a leading `cd`, and the payload cwd
 only as the base), with tests from both the root and a subdirectory.
 
+**🔄 Graduated to Plan 00464** (owner decision, 2026-09-29): the fix is that
+plan's command-directory resolver, and its PLAN.md names N28 as covered.
+
 ### N27 — a worktree daemon idles out in the middle of a full QA run
 
 **Found by Plan 00461's agent**: a worktree session's hook traffic goes to
@@ -1787,6 +1790,8 @@ deny, from ONE shared predicate, and a test pins the two modes to the same
 verdict for every tool. If the broader "not a coordination tool" count is
 still wanted as telemetry, it gets its own clearly different wording,
 never "would have been denied".
+
+**➡️ Carried to 00466 N259** (owner decision, 2026-09-29).
 
 ### N23 — a worktree commit is judged against the main checkout's staged tree
 

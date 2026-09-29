@@ -113,10 +113,11 @@ first, and the other fixes build on it.
   not built: the daemon cannot see a plugin hook's output, and the tool's
   own PostToolUse input would have to be matched to the judged input by
   `tool_use_id` across events.
-- [ ] 🔄 **Task 4.2**: `settings_repair` re-reads before it replaces, and the
+- [x] ✅ **Task 4.2**: G7 built; G9 graduated to Plan 00473.
+  `settings_repair` re-reads before it replaces, and the
   writer count is corrected (G7). `daemon_sync_after_merge` and
   `merge_qa_report` judge the repository the command ran in, using 00464's
-  resolver once it merges (G9).
+  resolver once it merges (G9, now [Plan 00473](../00473-post-merge-handlers-judge-the-command-repository/PLAN.md)).
   **G7 done**: `repair_settings_registrations` re-reads `settings.json`
   immediately before its atomic replace; unchanged content writes the
   computed merge as before, changed content is re-reconciled against the
@@ -124,8 +125,8 @@ first, and the other fixes build on it.
   `claude plugin install|enable|disable`) is folded in rather than lost, and
   unparseable content aborts the repair without writing. `settings_merge.py`'s
   two "four unlocked writers" docstrings now say five, naming Claude Code's
-  plugin CLI as the corrected count. G9 is unstarted, waiting on Plan 00464's
-  resolver.
+  plugin CLI as the corrected count. G9 is unstarted and lives in Plan 00473,
+  which is blocked on Plan 00464's resolver.
 - [x] ✅ **Task 4.3**: `lsp_enforcement` enforces only when an enabled LSP
   plugin covers the searched language. Its advice names installing a
   code-intelligence plugin (P5). **Decided (unattended, 2026-09-24)**:
@@ -155,12 +156,17 @@ first, and the other fixes build on it.
 
 ## Success Criteria
 
-- [ ] Every P1–P8 and G1–G16 finding is fixed, with a RED-first test where
-  code changed, or corrected with the reasoning recorded.
-- [ ] A fresh install and an upgrade from the last tag deliver no plugin
-  keys.
-- [ ] Every release-bound consequence is in `CLAUDE/UPGRADES/UNRELEASED/`
-  before the status flips.
+- [x] ✅ Every P1–P8 and G1–G16 finding is fixed, with a RED-first test where
+  code changed, or corrected with the reasoning recorded. G9 is the one
+  graduated finding: it is Plan 00473.
+- [x] ✅ A fresh install and an upgrade from the last tag deliver no plugin
+  keys. Pinned by `tests/unit/install/test_shipped_settings_carry_no_dogfood_keys.py`
+  (a fresh shell install, an upgrade merge and the Python generator).
+- [x] ✅ Every release-bound consequence is in `CLAUDE/UPGRADES/UNRELEASED/`
+  before the status flips (release notes 019, 033–038, 041–044 and 085, and
+  `config-changes/v3.67.0.yaml`).
+- [ ] ⬜ Plan 00463 has landed on main, so the P8 fix Task 5.2 relies on is
+  there. The plan archives only after that.
 
 ## Delivery & Milestones
 

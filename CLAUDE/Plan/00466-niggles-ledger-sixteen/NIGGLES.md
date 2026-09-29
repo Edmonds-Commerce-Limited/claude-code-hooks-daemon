@@ -3,6 +3,59 @@
 Newest first. Each entry says how it was found, why it happens, and the
 candidate remedies.
 
+### N260 — the local gate runs project-handler tests differently from CI
+
+**Found**: main CI was red on "Project handler tests" on every Python from
+`84afc8804` on, while the local full-QA gate for that branch passed 40/40.
+`test_enforce_llm_qa.py` imports `tests.scaling`. CI runs the bare `pytest`
+entry point, which does not put the working directory on `sys.path`, so the
+import fails there. The local gate runs `python -m pytest`, which does put it
+on `sys.path`, so the gate cannot see this class of failure.
+
+**Remedy**: the project-handlers `conftest.py` puts the repository root on
+`sys.path` (`257847b51`). **✅ Remedied** for this instance.
+
+The class stays open while the local gate and CI invoke pytest differently.
+Candidate remedy: the local project-handler step runs the exact CI command.
+
+### N252 — a scaling test compared an uncapped size with a capped one
+
+**Found**: `test_shell_expansion.py::test_forty_repetitions_is_also_fast`
+failed on several full-QA gates, and on main CI, with "cost grew 24-28x for
+8x input". The small size (5 brace pairs, 32 spellings) sat below the
+256-spelling cap and the large one (40 pairs) at it, so the ratio measured two
+regimes rather than growth.
+
+**✅ Remedied**: both sizes now sit inside one regime (`581ccadd3`, landed
+with Plan 00408 in `b9e36233c`).
+
+### N259 — orchestrator simulate reports denials its blocking mode would never make
+
+Carried from 00422 N24 (owner decision, 2026-09-29). Nothing is changed from
+the original finding.
+
+**Found**: every main-thread Bash call in a session drew
+`SIMULATED orchestrator-only mode (Plan 00418 — record only, never blocks): main thread would have been denied — Bash: …`.
+The coordinator took that at face value and told Plan 00463's agent that
+going live would deny the coordinator's own `llm_qa.py all` (a deadlock).
+The 00463 code review read the real handler
+(`.claude/project-handlers/pre_tool_use/orchestrator_simulate.py`).
+Simulate mode judges `tool_name not in _COORDINATION_TOOLS` (line 299),
+while blocking mode denies only `_BLOCKED_TOOLS = {Write, Edit, NotebookEdit}`
+(lines 183 and 320). Bash is "would have been denied" in simulate and
+never denied when live.
+
+**Why it matters.** The simulate record exists to preview what enforcement
+would cost before it is switched on. A preview that overstates enforcement
+misleads that decision and anyone reasoning from it, as it did here, and
+cost an agent a round of edits it then had to revert.
+
+**Candidate remedies:** simulate records exactly what blocking would
+deny, from ONE shared predicate, and a test pins the two modes to the same
+verdict for every tool. If the broader "not a coordination tool" count is
+still wanted as telemetry, it gets its own clearly different wording,
+never "would have been denied".
+
 ### N194 — ✅ Remedied — daemon-signal tests read a spawned child's cmdline before its exec lands, so a loaded host flakes
 
 **Found:** `tests/unit/utils/test_safe_signal.py`'s daemon-signal tests

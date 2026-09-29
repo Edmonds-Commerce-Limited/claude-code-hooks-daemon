@@ -625,6 +625,114 @@ def strip_inert_spans(command: str) -> str:
     return strip_quoted_heredoc_bodies(strip_message_bodies(command))
 
 
+#: Command heads that never EXECUTE their arguments, so a guarded command named
+#: in one is text rather than a command (Plan 00408 Task 3.3). `echo 'git merge
+#: x'` and `bash -c 'git merge x'` are structurally identical, so only knowing
+#: the head separates them.
+#:
+#: An ALLOWLIST, for the reason `DATA_SINKS` is one: a missing entry costs a
+#: false positive, a wrong entry costs a guard. `echo -e` and `printf %b` only
+#: decode escapes into OUTPUT, and `:`/`true` discard their arguments; what is
+#: left -- expansion, `printf -v`, where the output goes -- is refused by
+#: :func:`is_wholly_inert_command` rather than by this list.
+INERT_COMMAND_HEADS: frozenset[str] = frozenset({"echo", "printf", ":", "true"})
+
+#: A bare head: bash's blanks (space and tab ONLY, not Python's whitespace),
+#: the literal name, then a blank. Quoting, an escape, a path, a wrapper or an
+#: assignment prefix before the name all fail to match.
+_INERT_HEAD_PATTERN = re.compile(
+    r"[ \t]*(" + "|".join(re.escape(head) for head in sorted(INERT_COMMAND_HEADS)) + r")[ \t]"
+)
+
+_PRINTF_HEAD = "printf"
+_OPTION_PREFIX = "-"
+_WORD_BLANKS = " \t"
+_LINE_BREAKS = "\n\r"
+
+#: Unquoted characters that make a command more than one simple command, or
+#: make an argument something bash computes rather than reads: control
+#: operators, grouping, redirection, every expansion, and history expansion.
+_UNQUOTED_REFUSED = frozenset(";&|()<>{}`$~*?[!")
+
+#: The same inside double quotes, where only these still act.
+_DOUBLE_QUOTED_REFUSED = frozenset("$`!")
+
+
+def is_wholly_inert_command(command: str) -> bool:
+    """Whether ``command`` is ONE bare inert head that nothing can make run.
+
+    True only when every one of these holds:
+
+    * the whole text is a single simple command: no control operator, pipe,
+      `&`, grouping, line break or redirection (so no heredoc) outside quotes,
+      and no line break anywhere;
+    * it opens with spaces or tabs, then an unquoted, unescaped name from
+      :data:`INERT_COMMAND_HEADS`, then a space or tab -- so no assignment
+      prefix, wrapper, path or quoted name;
+    * no argument expands: no `$` or backtick outside single quotes, and no
+      unquoted `~`, `{`, `*`, `?` or `[`; nor `!`, which history expansion
+      reads;
+    * a `printf` takes no option at all, so `-v` in any quoting cannot assign.
+
+    WHOLE-COMMAND on purpose. The per-segment form this replaced was walked
+    past through a LATER segment three ways -- an escaped `#`, `$_`, a `trap`
+    or `BASH_ALIASES` rebinding -- and every bash feature that reaches across
+    segments is another. A command that fails here is judged exactly as it
+    would be with no exemption: a false positive, never a bypass.
+
+    Call it on the RAW command, before any blanking, and only to answer "is
+    there a command here at all?". A rule that asks what an `echo` itself does
+    -- `echo CLAUDE/Plan/0*` expands a glob -- must not use it.
+
+    Args:
+        command: The raw Bash command string.
+
+    Returns:
+        True when the command is inert as a whole, False otherwise.
+    """
+    head = _INERT_HEAD_PATTERN.match(command)
+    if head is None or any(char in command for char in _LINE_BREAKS):
+        return False
+    words: list[str] = []
+    word: list[str] = []
+    quote: str | None = None
+    index = head.end()
+    length = len(command)
+    while index < length:
+        char = command[index]
+        if quote == _SINGLE_QUOTE:
+            if char == _SINGLE_QUOTE:
+                quote = None
+            else:
+                word.append(char)
+        elif char == _ESCAPE_CHAR:
+            word.append(command[index + 1 : index + 2])
+            index += 2
+            continue
+        elif quote == _DOUBLE_QUOTE:
+            if char in _DOUBLE_QUOTED_REFUSED:
+                return False
+            if char == _DOUBLE_QUOTE:
+                quote = None
+            else:
+                word.append(char)
+        elif char in (_SINGLE_QUOTE, _DOUBLE_QUOTE):
+            quote = char
+        elif char in _WORD_BLANKS:
+            words.append("".join(word))
+            word = []
+        elif char in _UNQUOTED_REFUSED:
+            return False
+        else:
+            word.append(char)
+        index += 1
+    words.append("".join(word))
+    arguments = [argument for argument in words if argument]
+    if quote is not None or not arguments:
+        return False
+    return not (head.group(1) == _PRINTF_HEAD and arguments[0].startswith(_OPTION_PREFIX))
+
+
 def strip_quoted_heredoc_bodies(command: str) -> str:
     """Blank the body of every quoted-delimiter heredoc fed to a DATA SINK.
 

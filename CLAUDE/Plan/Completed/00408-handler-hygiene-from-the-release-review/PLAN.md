@@ -1,6 +1,6 @@
 # Plan 00408: handler hygiene from the release review
 
-**Status**: In Progress
+**Status**: Complete (2026-09-29)
 **Created**: 2026-09-14
 **Owner**: joseph
 **Priority**: Low
@@ -144,8 +144,7 @@ gate — were fixed in 00407 and shipped. This plan is the remainder.
 
 ### Phase 3c: An allowlist of commands that do not run their argument
 
-- [ ] ⬜ **Task 3.3**: (Open: it was not assigned in the 2026-09-24
-  unattended pass.) `echo 'git merge x'` and `echo 'cd .claude/hooks-daemon'`
+- [x] ✅ **Task 3.3**: `echo 'git merge x'` and `echo 'cd .claude/hooks-daemon'`
   are matched as real commands by `merge_to_main_approval` and
   `daemon_location_guard`. Graduated from
   [Plan 00407](../Completed/00407-niggles-ledger-twelve/PLAN.md) N12.
@@ -154,7 +153,7 @@ gate — were fixed in 00407 and shipped. This plan is the remainder.
   `echo 'X'` and `bash -c 'X'` are structurally identical — a command with a
   quoted argument — so nothing in the text separates them. Only knowing that
   `echo` does not EXECUTE its argument does, which means an allowlist of inert
-  commands (`echo`, `printf`, `:`, `true`), applied per segment head.
+  commands (`echo`, `printf`, `:`, `true`), applied to the WHOLE command.
 
   Build it as an ALLOWLIST, per N7's rule: the safe error is withholding an
   exemption, because a missing entry costs a false positive while a wrong entry
@@ -162,6 +161,30 @@ gate — were fixed in 00407 and shipped. This plan is the remainder.
   `strip_inert_spans`, so all three guards get it at once rather than one
   growing a private copy — that divergence is what produced N2, N3 and N12 in
   the first place.
+
+  - Done. `is_wholly_inert_command` and `INERT_COMMAND_HEADS` sit beside
+    `strip_inert_spans`. They are adopted by both guards and by
+    `plan_number_helper`'s mkdir rule, which had the same false positive.
+    The echo-glob discovery rule does not adopt them, because
+    `echo CLAUDE/Plan/0*` IS the scan. All four heads were kept, because
+    `echo -e` and `printf %b` only shape output.
+  - The exemption is WHOLE-COMMAND. The raw command must be one simple
+    command: no control operator, pipe, `&`, grouping, line break or
+    redirection (so no heredoc) outside quotes. It must open with spaces or
+    tabs, then the bare, unquoted name, then a space or tab. No argument
+    may expand: no `$` or backtick outside single quotes, and no unquoted
+    `~`, `{`, `*`, `?`, `[` or `!`. A `printf` may take no option. Any other
+    command is judged exactly as it would be with no exemption.
+  - Why whole-command: the first design blanked each inert SEGMENT of a
+    compound command. A review walked past it through a later segment in
+    three ways: an escaped `#` read as a comment, `$_` re-running the echo's
+    argument, and a `trap` or `BASH_ALIASES` rebinding. Every bash feature
+    that reaches across segments is another such bypass, so the per-segment
+    helper was removed rather than patched. A compound that merely contains
+    an `echo` keeps its false positive, which is the cheap error. The shapes
+    live in `tests/support/inert_head_shapes.py` and are proved against the
+    utility and against each guard. They include the review's shapes and
+    its full coverage-gap list.
 
 - [x] ✅ **Task 3.4**: `plan_number_helper` uses literal-blanking as an
   existence filter, the same shape N12 corrected in its two siblings —
@@ -393,9 +416,18 @@ code.
 
 ## Success Criteria
 
-- [ ] ⬜ Every task above is terminal: fixed, or declined with the reason
+- [x] ✅ Every task above is terminal: fixed, or declined with the reason
   recorded in the code or the plan rather than only here.
-- [ ] ⬜ Full QA passes and CI is green.
+- [x] ✅ Full QA passes and CI is green. Gate 39/40 on the landed branch
+  (the one miss was the date-dependent journal-freshness advisory); CI run
+  36582488535 on `7fa5dd77` green on all five jobs.
+- [x] ✅ Every release-bound consequence is in the pending-release holding
+  area: `UNRELEASED/release-notes/058-quoting-a-word-no-longer-hides-a-destructive-git-command.md`,
+  `059-pushd-and-six-cd-spellings-into-the-daemon-directory-are-now-blocked.md`,
+  `060-the-merge-approval-and-issue-filing-gates-close-three-gaps.md`,
+  `061-archiving-a-plan-now-checks-the-links-the-move-breaks.md`,
+  `062-two-skill-documentation-changes-the-last-release-did-not-mention.md` and
+  `230-an-echo-naming-a-guarded-command-is-no-longer-denied.md`.
 
 ## Delivery & Milestones
 

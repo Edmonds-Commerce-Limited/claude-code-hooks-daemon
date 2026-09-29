@@ -4,6 +4,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
+- [00473: post merge handlers judge the command repository](00473-post-merge-handlers-judge-the-command-repository/PLAN.md) - Not Started (graduated from 00468 G9: `daemon_sync_after_merge` and `merge_qa_report` judge the repository the payload `cwd` names, not the one the command ran in; blocked on Plan 00464's command-directory resolver)
+
 - [00472: subagent model tier selection](00472-subagent-model-tier-selection/PLAN.md) - In Progress (owner request, not urgent: a top-tier main thread often gives subagents the top tier too, where Sonnet or Opus would do; record each dispatch's model and advise a cheaper tier when it fits, the model-choice twin of 00471 and a neighbour of 00470's orchestrator-model choice)
 
 - [00471: subagent token budget protection](00471-subagent-token-budget-protection/PLAN.md) - In Progress (owner request after a usage-limit burn: subagents compacted only at about 570k tokens, finished agents were resumed with thousands of prior messages, and about nine Opus agents ran at once; the daemon sees every Agent, SendMessage and tool call plus the transcript's usage, so it can measure and bound the spend)
@@ -36,15 +38,11 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00428: auto compact window audit check](00428-auto-compact-window-audit-check/PLAN.md) - Not Started, BLOCKED ON THE OWNER (from issue #46: a seventh `optimal_config_checker` check for `CLAUDE_CODE_AUTO_COMPACT_WINDOW`; the gap is real but the spec was retracted and replaced by one inferred from a compiled CLI, which triage could not verify)
 
-- [00422: niggles ledger fifteen](00422-niggles-ledger-fifteen/PLAN.md) - In Progress, its six owner questions decided in DECISIONS.md; closed to new entries from N30 (those go to 00466) (four entries inherited from 00419, three of them one class: a guard right about the state it judges and wrong about the moment it judges it)
-
 - [00421: security detectors and ci enforcement](00421-security-detectors-and-ci-enforcement/PLAN.md) - Not Started (`qa.yml` runs no `scripts/qa/check_*.py` at all, so no Detector this project treats as binding has ever been enforced in CI. The single successor to 00412, carrying the four Fable rulings' unbuilt work: pin what makes a Detector binding, make the register state its own gaps, migrate the test-shaped Defences, then build the seven unwatched classes)
 
 - [00420: dangerous command rule modes and config migration](00420-dangerous-command-rule-modes-and-config-migration/PLAN.md) - Not Started (per-rule-ID `block`/`warn`/`off` across the dangerous-command handlers, plus the loud, migrating config upgrade that a moved key requires)
 
 - [00410: gitignore swallows deployed assets](00410-gitignore-swallows-deployed-assets/PLAN.md) - Not Started (an unanchored `hooks-daemon/` ignore pattern matches at every depth, so it hides the deployed `.claude/skills/hooks-daemon/` tree as well as the intended clone; this repo is already anchored, but nothing DETECTS the mistake, and an ignored file cannot drift visibly. Owner-reported from a client project)
-
-- [00408: handler hygiene from the release review](00408-handler-hygiene-from-the-release-review/PLAN.md) - Not Started (the non-user-visible half of the v3.64.0 review: raw hook-field literals where `HookInputField` is the declared SSoT, `merge_qa_report` building the docs corpus on the hook budget while a sibling argues against exactly that, and four sub-bar items carried so they are not lost. Graduated from 00407 N6)
 
 - [00399: supervisor does not see tab completed slash commands](00399-supervisor-does-not-see-tab-completed-slash-commands/PLAN.md) - Blocked (ruled option 2 shipped: the supervisor reads a Tab-completed `/compact` from the daemon's `PreCompact` record, which now carries its origin. Only Task 2.1 remains, and it needs a human: typing `/comp`, Tab, Enter in the real tmux-wrapped session to show whether tmux changes the byte stream)
 
@@ -280,27 +278,27 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 ## Plan Statistics
 
-- **Total Plans Created**: 469 (count = `hooksdaemon.latestPlanNumber` git counter)
+- **Total Plans Created**: 473 (count = `hooksdaemon.latestPlanNumber` git counter)
 
-- **Completed**: 409 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
+- **Completed**: 411 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 40 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 39 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 
 - **Cancelled/Abandoned**: 13 on disk (count = `Cancelled/` folders: 00032/00034/00035 won't do — delegate mode no longer exists, 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102, 00108 superseded by 00117, 00131 residue declined, 00132 superseded by 00284, 00174 superseded by 00175, 00199 superseded by 00213, 00135 superseded by the supervisor workstream)
 
-- **Folder-to-number reconciliation**: 39 + 407 + 13 = **459 folders**, spanning
-  **456 distinct plan numbers** — three numbers carry two folders each, the
+- **Folder-to-number reconciliation**: 39 + 411 + 13 = **463 folders**, spanning
+  **460 distinct plan numbers** — three numbers carry two folders each, the
   historic collisions already held in `collision_allowlist` (00034, 00039,
   00041). Plans 1–3 are on disk under the pre-zero-padding names
   (`001-`, `002-`, `003-`), so they count as present. That leaves **13** of the
-  469 allocated numbers with no folder: 00005, 00015, 00036, 00073, 00074,
+  473 allocated numbers with no folder: 00005, 00015, 00036, 00073, 00074,
   00145, 00191, 00195, 00210, 00258, 00300, 00303, 00325 — abandoned drafts, numbers
   burned by transient probes (00195 during the v3.51.0 acceptance run, 00258
   during the v3.54.0 one), and one withdrawn duplicate (00210, scaffolded by a
   sub-agent that then found Plan 00208 already covered the work).
-  456 + 13 = 469. ✅
+  460 + 13 = 473. ✅
 
   Note on **00191**: it stays folderless deliberately. The number was claimed
   by a branch that renumbered itself and was never merged; Plan 00267

@@ -10,7 +10,7 @@
 ## Overview
 
 The rolling ledger for defects found in passing. Ledger fifteen
-([00422](../00422-niggles-ledger-fifteen/PLAN.md)) stays open for its own
+([00422](../Completed/00422-niggles-ledger-fifteen/PLAN.md)) stays open for its own
 entries: four are waiting on stated owner questions, and several are
 graduated to plans still in flight. But its PLAN.md passed the 25,000-byte
 warning line with N29. So new entries are filed here, and 00422 takes no
@@ -145,6 +145,16 @@ Full write-ups are in [NIGGLES.md](NIGGLES.md). One line each here:
 | N197 | Fourteen `src/` modules still tokenise untrusted commands with the stdlib's quadratic `shlex`                                                     | N110 gate fix 2                                                 | ⬜ Open                                                         |
 | N211 | Merge-conflict markers reach the ledger on main, disguised as blockquotes                                                                         | N110 gate fix 2                                                 | ⬜ Open                                                         |
 | N222 | Tests assert absolute wall-clock bounds, so a loaded host fails them while they pass alone                                                        | N110 gate fix 2                                                 | 🔄 In Progress (perf tests remedied; bound-honoured tests open) |
+| N259 | Orchestrator simulate reports denials its blocking mode would never make                                                                          | Carried from 00422 N24                                          | ⬜ Open                                                         |
+| N252 | A scaling test compared an uncapped size with a capped one                                                                                        | Full-QA gates                                                   | ✅ Remedied, `b9e36233c`                                        |
+| N260 | The local gate runs project-handler tests differently from CI                                                                                     | Main CI red since `84afc8804`                                   | ✅ Instance remedied, `257847b51`; class open                   |
+
+## Parked branches (owner decision, 2026-09-29)
+
+Parked to cut cost. Each branch is pushed, or kept as a local worktree where
+noted. It resumes only by an owner decision. Reviews are capped at 3 rounds
+from now on. The table of 15 branches and the two owner rulings are in
+[PARKED-BRANCHES.md](PARKED-BRANCHES.md).
 
 ## Tasks
 
