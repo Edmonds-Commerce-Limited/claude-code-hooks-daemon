@@ -31,11 +31,13 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Final, NamedTuple, TypeAlias
 
-from claude_code_hooks_daemon.utils.path_containment import path_relative_to
-
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 SCRIPTS_DIR = PROJECT_ROOT / "scripts" / "qa"
-QA_OUTPUT_DIR = PROJECT_ROOT / "untracked" / "qa"
+#: The QA output directory relative to a checkout root. This script runs under
+#: whatever python3 the shebang finds, before any venv, so it must not import
+#: the daemon package to derive this.
+QA_OUTPUT_RELATIVE: Final = Path("untracked") / "qa"
+QA_OUTPUT_DIR = PROJECT_ROOT / QA_OUTPUT_RELATIVE
 
 #: The canonical bash venv resolver, relative to a checkout root. It answers
 #: with the fingerprint-keyed ``untracked/venv-<fingerprint>/bin/python`` that
@@ -1898,7 +1900,7 @@ def main_moved(
         reason = f"{main_ref} is still the batch base"
         return MainMoved(VERDICT_UNMOVED, base, main, [], reason, head)
     verdict, judged, reason = _judge_range(base, main, root, git, select)
-    qa = qa_dir if qa_dir is not None else root / path_relative_to(QA_OUTPUT_DIR, PROJECT_ROOT)
+    qa = qa_dir if qa_dir is not None else root / QA_OUTPUT_RELATIVE
     recheck_passed = contains_main and not _uncertified(verdict, (base, main), root, qa, git)
     return MainMoved(verdict, base, main, judged, reason, head, recheck_passed)
 
@@ -2059,7 +2061,7 @@ def _main_merged_since_certified(
     verdict, judged, reason = _judge_range(base, merged, root, git, select)
     if _work_beside_main(certified, merged, [path.path for path in judged], root, git):
         return None
-    qa = qa_dir if qa_dir is not None else root / path_relative_to(QA_OUTPUT_DIR, PROJECT_ROOT)
+    qa = qa_dir if qa_dir is not None else root / QA_OUTPUT_RELATIVE
     recheck_passed = not _uncertified(verdict, (base, merged), root, qa, git)
     head = _commit_of("HEAD", root, git)
     reason = f"HEAD holds {main_ref} merged in since the certified head, and nothing else: {reason}"
@@ -2115,7 +2117,7 @@ def advance_batch(
         )
     verdict, judged, _ = _judge_range(base, merged, root, git, select)
     _only_main_merged(certified, merged, [path.path for path in judged], root, git)
-    qa = qa_dir if qa_dir is not None else root / path_relative_to(QA_OUTPUT_DIR, PROJECT_ROOT)
+    qa = qa_dir if qa_dir is not None else root / QA_OUTPUT_RELATIVE
     problems = _uncertified(verdict, (base, merged), root, qa, git)
     if problems:
         raise MainMovedError(
