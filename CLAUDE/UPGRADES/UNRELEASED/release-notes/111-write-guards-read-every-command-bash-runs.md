@@ -73,23 +73,32 @@ because it may be `/dev/fd/3`. `ftp`, `mail`, `mailx`, `sendmail` and
 A body is data unless a command before it in the same call may change what
 a command name means to this shell, because `cat(){ bash; }; cat <<'EOF'`
 runs it. That is a function or alias definition; `hash`, `enable`,
-`builtin`, `command`, `eval`, `source`/`.`, `exec`, `export`, `declare`,
-`typeset`, `local`, `readonly`, `unset`, `shopt`, `trap`, `read`,
-`mapfile`, `getopts`, `printf -v`, `let`, `cd`, `pushd`, `popd` or
-`coproc`; `set` with anything but `-e`, `-u`, `-x` and `-o pipefail`; an
-assignment, or a `for`/`select` loop name, that is `PATH`, `IFS`,
-`BASH_ENV`, a `GIT_*` or `LESS*` name or another variable bash or a pager
-reads; an assigning
-`${X:=…}` or arithmetic; a command name written with a quote, an escape or
-an expansion; or any of these inside `{ }`, `( )` or a substitution. Any
-other program is a child process and cannot, so `set -euo pipefail`,
-`mkdir -p d &&`, `pytest -q;` and an earlier `cat > a.md <<'EOF'` leave a
-later prose heredoc as data. Put the heredoc first, or in its own Bash
-call, after a command that may rebind.
+`builtin`, `eval`, `source`/`.`, `exec`, `shopt`, `trap`, `printf -v`,
+`popd` or `coproc`; `command` other than `command -v`/`-V`; `cd` or
+`pushd` other than to one literal target (`/abs`, `./x`, `../x`, `name`,
+`-`) after at most `-L` or `-P`; `set` with anything but `-e`, `-u`, `-x` and `-o pipefail`; an assignment,
+or a `for`/`select` loop name, that is `IFS`, `BASH_ENV`, a `GIT_*` or
+`LESS*` name or another variable bash or a pager reads, or a `PATH` holding
+anything but the literal system directories (`/usr/local/sbin`,
+`/usr/local/bin`, `/usr/sbin`, `/usr/bin`, `/sbin`, `/bin`); `export`,
+`declare`, `typeset`, `local`, `readonly`, `unset`, `read`, `mapfile`,
+`getopts` or `let` binding such a name, or a name or value that is not
+literal, or with `-n`, `-i`, `unset -f` or `mapfile -C`; a `${X:=…}` that
+assigns such a name; arithmetic that names any variable; a `for` or
+`select` loop body that holds any of these; a command name written with a quote, an escape or an expansion; or
+any of these inside `{ }`, `( )` or a substitution. Any other program is a
+child process and cannot, so `set -euo pipefail`, `mkdir -p d &&`,
+`pytest -q;`, `export FOO=1;`, `unset X;`, `command -v rg &&`,
+`PATH=/usr/bin:/bin;`, `cd /repo &&`, `for f in a b; do ls; done;`,
+`echo $((1+2));` and an earlier `cat > a.md <<'EOF'` leave a later prose
+heredoc as data. Put the heredoc first, or in its own Bash call, after a
+command that may rebind.
 
 `secret_file_guard` and `quarantine_artefact_read_guard` no longer treat a
 glob as a bug in the guard. A quoted or escaped glob (`rg -g '**/*.md'`,
-`jq '.files["a"]'`) is passed on as written and is not expanded. An
+`jq '.files["a"]'`, `grep -n '/**Status**/' f`) is passed on as written and
+is not expanded, and neither is a quoted brace word (`'{a,b}'`), so a
+heredoc of prose quoting hundreds of them is allowed. An
 unquoted glob that cannot be listed within the budget, or a scan past its
 deadline, is denied with "this command could not be verified … name the
 files, or narrow the glob or directory". A `Write` of Python source is no

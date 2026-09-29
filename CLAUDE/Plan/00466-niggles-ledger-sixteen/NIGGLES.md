@@ -985,8 +985,12 @@ may rebind when it has:
 - a head that is not plain literal, or the output of a substitution in
   its place;
 - a rebinding builtin or keyword: `alias`, `unalias`, `hash`, `enable`,
-  `builtin`, `eval`, `source`, `.`, `exec`, `shopt`, `trap`, `cd`,
-  `pushd`, `popd`, `coproc`, `function`;
+  `builtin`, `eval`, `source`, `.`, `exec`, `shopt`, `trap`, `popd`,
+  `coproc`, `function`;
+- `cd` or `pushd` other than to ONE literal target (`/abs`, `./x`, `../x`,
+  `name`, `-`, quoted or not) after at most `-L`/`-P` (round 13b ruling).
+  No target, a `~`, an expansion, a glob, a second operand, `--`, a stack
+  rotation (`+1`) or another option rebinds;
 - a name-binding builtin (`export`, `declare`, `typeset`, `local`,
   `readonly`, `unset`, `read`, `mapfile`, `readarray`, `getopts`) that
   binds a special name, whose name, value or option is not literal, or
@@ -1002,16 +1006,17 @@ may rebind when it has:
   `/usr/bin`, `/sbin`, `/bin`) is not one. A `for`/`select` loop name
   counts as an assignment to it;
 - arithmetic (`let`, `((…))`, `$((…))`, `$[…]`, a subscript or
-  `${x:offset}`, a `[[` numeric test) that assigns a special name, or
-  that reads any name at all. Arithmetic with no name (`$((1+2))`) and a
-  plain `x=1` to a non-special name are inert. A name read in arithmetic
+  `${x:offset}`, a `[[` numeric test) that names any variable at all
+  (round 13b ruling). Only arithmetic with no name (`$((1+2))`) is inert;
+  `((x=1))` and `let x=1` rebind. A name read in arithmetic
   counts because bash evaluates its value as arithmetic in turn, and that
   value may assign: `x='PATH=0'; : $((x))` sets `PATH`;
 - a `${…}` that assigns a special name (`${PATH:=/tmp}`, also when nested
   in another expansion's word);
 - a function definition;
-- any of these inside a group, subshell or substitution body, or in an
-  unquoted heredoc body's expansions.
+- any of these inside a group, subshell or substitution body, a loop,
+  `if` or `case` body (`for x in a; do alias cat=bash; done` rebinds), or
+  in an unquoted heredoc body's expansions.
 
 `set -euo pipefail`, `mkdir -p`, `pytest` and an earlier file-writing
 heredoc no longer make a later prose heredoc unreadable. A later name a

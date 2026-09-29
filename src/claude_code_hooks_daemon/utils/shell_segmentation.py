@@ -1928,8 +1928,9 @@ def segment_may_rebind_commands(segment: str) -> bool:
 
     - a head that is not plain literal text (``$X``, ``"cat"``, ``\\cat``,
       ``$'cat'``, ``~/x``);
-    - a head from :data:`_REBINDING_HEADS`, or ``command`` other than the
-      ``command -v``/``-V`` lookup;
+    - a head from :data:`_REBINDING_HEADS`, ``command`` other than the
+      ``command -v``/``-V`` lookup, or ``cd``/``pushd`` other than to one
+      literal target (:func:`_directory_change_may_rebind`);
     - a name-binding builtin (:data:`_NAME_BINDING_HEADS`, ``unset``
       among them) binding a special name, or a name or value that is not
       literal, or declaring a nameref or an integer;
@@ -1940,7 +1941,7 @@ def segment_may_rebind_commands(segment: str) -> bool:
       including the loop name of ``for``/``select``. ``PATH`` bound only
       to literal system directories picks the programs it always did, and
       does not count;
-    - arithmetic that may assign such a name (:func:`_arithmetic_may_rebind`),
+    - arithmetic that names any variable (:func:`_arithmetic_may_rebind`),
       and ``${X:=…}``/``${X=…}`` for a special ``X``.
     """
     if _expansions_may_rebind(mask_quoted(segment, keep_double=True)):
@@ -2032,39 +2033,23 @@ _PARAMETER_BODY_PATTERN = re.compile(
     r"[#!]?(?P<name>[A-Za-z_]\w*|[0-9@*#?$!-])(?P<subscript>\[[^\]]*\])?(?P<rest>.*)\Z",
     re.DOTALL,
 )
-#: An arithmetic operator that assigns its left operand.
-_ARITHMETIC_ASSIGNMENT = re.compile(r"\+\+|--|<<=|>>=|[-+*/%&^|]=|(?<![=!<>])=(?!=)")
 #: A name in arithmetic: not the digits of a number, nor its base or hex part.
 _ARITHMETIC_NAME = re.compile(r"(?<![\w#.])[A-Za-z_]\w*")
-#: ``NAME = expression``, the one assignment whose target is not read first.
-_ARITHMETIC_PLAIN_ASSIGNMENT = re.compile(
-    r"\s*(?P<name>[A-Za-z_]\w*)\s*=(?!=)(?P<value>.*)\Z", re.DOTALL
-)
 
 
 def _arithmetic_may_rebind(expression: str) -> bool:
     """May evaluating the arithmetic ``expression`` assign a special name?
 
-    Plain numbers and operators assign nothing (``$((1+2))``). ``NAME =
-    numbers`` assigns only ``NAME``. Anything that reads a name may assign
-    any: bash evaluates a referenced variable's value as arithmetic in turn,
-    so ``x='PATH=0'; : $((x))`` assigns ``PATH`` (checked in bash). An
-    expansion inside may expand to anything.
+    Only plain numbers and operators are inert (``$((1+2))``), by the round
+    13b ruling. A name read may assign any name: bash evaluates a referenced
+    variable's value as arithmetic in turn, so ``x='PATH=0'; : $((x))``
+    assigns ``PATH`` (checked in bash). A name assigned may carry an
+    attribute this call cannot see. An expansion inside may expand to
+    anything.
     """
     if "$" in expression or _BACKTICK in expression:
         return True
-    for part in expression.split(","):
-        if _ARITHMETIC_NAME.search(part) is None:
-            continue
-        assignment = _ARITHMETIC_PLAIN_ASSIGNMENT.match(part)
-        if (
-            assignment is None
-            or _is_special_variable(assignment.group("name"))
-            or _ARITHMETIC_NAME.search(assignment.group("value"))
-            or _ARITHMETIC_ASSIGNMENT.search(assignment.group("value"))
-        ):
-            return True
-    return False
+    return _ARITHMETIC_NAME.search(expression) is not None
 
 
 #: Heads that rebind a name, a builtin or the directory a relative ``PATH``
@@ -2072,11 +2057,19 @@ def _arithmetic_may_rebind(expression: str) -> bool:
 #: ruling's name-binding builtins are judged by the names they bind
 #: (:data:`_NAME_BINDING_HEADS`), ``for``/``select`` by their loop name
 #: (:data:`_LOOP_HEADS`), ``let`` by its arithmetic and ``command`` by
-#: whether it is a lookup.
+#: whether it is a lookup. ``cd``/``pushd`` by their target
+#: (:func:`_directory_change_may_rebind`).
 _REBINDING_HEADS: frozenset[str] = frozenset(
     {"alias", "unalias", "hash", "enable", "builtin", "eval", "source", "."}
-    | {"exec", "shopt", "trap", "cd", "pushd", "popd", "coproc", "function"}
+    | {"exec", "shopt", "trap", "popd", "coproc", "function"}
 )
+#: Heads that change directory, and so what a relative ``PATH`` entry means.
+_DIRECTORY_CHANGE_HEADS: frozenset[str] = frozenset({"cd", "pushd"})
+#: The only ``cd``/``pushd`` options that leave a literal target literal.
+_DIRECTORY_CHANGE_OPTIONS: frozenset[str] = frozenset({"-L", "-P"})
+#: ``cd -``: back to ``OLDPWD``.
+_PREVIOUS_DIRECTORY = "-"
+_TILDE = "~"
 _LOOP_HEADS: frozenset[str] = frozenset({"for", "select"})
 #: Builtins whose operands are the names they bind (``NAME`` or
 #: ``NAME=value``). ``getopts``' first operand is its option string.
@@ -2259,6 +2252,8 @@ def _command_may_rebind(piece: str) -> bool:
         return _names_may_rebind(head, arguments)
     if head == _COMMAND:
         return not _is_lookup(arguments)
+    if head in _DIRECTORY_CHANGE_HEADS:
+        return _directory_change_may_rebind(arguments)
     if head == _LET:
         return any(
             text is None or _arithmetic_may_rebind(text)
@@ -2330,6 +2325,23 @@ def _is_lookup(arguments: list[str]) -> bool:
         if set(text[1:]) & {"v", "V"}:
             return True
     return False
+
+
+def _directory_change_may_rebind(arguments: list[str]) -> bool:
+    """May ``cd``/``pushd`` given ``arguments`` rebind? Not with one literal
+    target (``/abs``, ``./x``, ``../x``, ``name``, ``-``), after at most
+    ``-L``/``-P`` (the round 13b ruling). No target, a ``~``, an expansion,
+    a second target, a stack rotation (``+1``) or any other option may."""
+    texts = [resolve_shell_word(word) for word in arguments]
+    if any(text is None for text in texts) or any(word.startswith(_TILDE) for word in arguments):
+        return True
+    words = [text for text in texts if text is not None]
+    while words and words[0] in _DIRECTORY_CHANGE_OPTIONS:
+        words = words[1:]
+    if len(words) != 1:
+        return True
+    target = words[0]
+    return not target or (target != _PREVIOUS_DIRECTORY and target.startswith(("-", "+")))
 
 
 def _without_redirections(words: list[str]) -> list[str]:
