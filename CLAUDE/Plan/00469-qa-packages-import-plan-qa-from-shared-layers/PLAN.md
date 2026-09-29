@@ -6,7 +6,7 @@
 **Priority**: Medium
 **Recommended Executor**: Sonnet
 **Execution Strategy**: Direct
-**Graduated from**: [Plan 00422](../00422-niggles-ledger-fifteen/NIGGLES.md) N14, rows 1 and 2
+**Graduated from**: [Plan 00422](../Completed/00422-niggles-ledger-fifteen/NIGGLES.md) N14, rows 1 and 2
 
 ## Overview
 

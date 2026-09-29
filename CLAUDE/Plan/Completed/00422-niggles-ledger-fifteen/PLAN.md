@@ -1,6 +1,6 @@
 # Plan 00422: niggles ledger fifteen
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-09-16
 **Owner**: joseph
 **Priority**: Medium
@@ -86,11 +86,11 @@ ledger's shape is readable without opening it:
 | N21 | nothing points a journal append at the tool that stamps the time               | the owner's question, after a session of hand-stamped entries       | ✅ Remedied by Plan 00461 — a hand-written Edit/Write/Bash journal entry is now DENIED with the `mkplan.bash --journal` command (merged `e3f03f3e`, CI green at `ce31d6d8`)                                                                                            |
 | N22 | the local "full QA" never runs shellcheck                                      | verifying Plan 00456's final QA before merge                        | ✅ Remedied by "Ledger 00422 N22: wire shellcheck into llm_qa.py so full QA covers it" — `shell_check` is now a `TOOL_REGISTRY` entry wrapping `run_shell_check.sh`; a wiring test pins every `run_all.sh` script against the registry so the next gap fails a test    |
 | N23 | a worktree commit is judged against the main checkout's staged tree            | Plan 00462's agent, denied over a path only main had staged         | 🔄 Graduated to Plan 00464 — a teammate's payload `cwd` is the main checkout, and the commit gates pick their repo from it, so worktree commits are wrongly denied AND their own staged content is never checked                                                       |
-| N24 | orchestrator simulate reports denials its blocking mode would never make       | a Plan 00463 review corrected the coordinator                       | ⬜ Open — simulate judges "not a coordination tool" (so every `Bash` is "would have been denied") while blocking denies only `Write`/`Edit`/`NotebookEdit`; the record meant to preview enforcement overstates it                                                      |
+| N24 | orchestrator simulate reports denials its blocking mode would never make       | a Plan 00463 review corrected the coordinator                       | ➡️ Carried to 00466 N259 — simulate judges "not a coordination tool" (so every `Bash` is "would have been denied") while blocking denies only `Write`/`Edit`/`NotebookEdit`; the record meant to preview enforcement overstates it                                     |
 | N25 | `pipe_blocker` names the loop keyword `do` as a pipe's producer                | a coordinator `for … do grep … \| head`                             | ✅ Remedied — shared `strip_reserved_word_prefix` primitive, 12 other sites fixed with it; `319cdd35`, merged `fb76d640`                                                                                                                                               |
 | N26 | commit gates never see content staged earlier in the same command              | Plan 00464's agent, with a probe                                    | 🔄 Graduated to Plan 00465 — `git add f && git commit` passes every staged-content gate unexamined (the secret-term scan included), and a same-command `git mv` makes plan QA falsely deny                                                                             |
 | N27 | a worktree daemon idles out in the middle of a full QA run                     | Plan 00461's agent                                                  | ✅ Remedied (B1) — `llm_qa` now starts an idled-out daemon before a live consumer such as `smoke_test`, so no keep-alive is needed                                                                                                                                     |
-| N28 | `plan_number_helper` resolves a relative `mkdir` against the workspace root    | Plan 00461's agent                                                  | ⬜ Open — `mkdir mkj/CLAUDE/Plan/00007-probe` run from `untracked/scratch/` was denied as a plan-folder creation; same class as N23, so the fix is 00464's command-directory resolver                                                                                  |
+| N28 | `plan_number_helper` resolves a relative `mkdir` against the workspace root    | Plan 00461's agent                                                  | 🔄 Graduated to Plan 00464 — `mkdir mkj/CLAUDE/Plan/00007-probe` run from `untracked/scratch/` was denied as a plan-folder creation; same class as N23, so the fix is 00464's command-directory resolver                                                               |
 | N29 | `write_clobber_guard` blocks a Write to a file this session created with Write | the coordinator rewriting its own gate script                       | ✅ Remedied — `matches()` fires on every Read/Edit/Write, so every allowed call is recorded; `d2ed30a4`, merged `fb76d640`                                                                                                                                             |
 
 ## Questions waiting on the owner
@@ -197,13 +197,19 @@ changing.
   N7) are Decided (unattended, 2026-09-24) and built — see DECISIONS.md and
   NIGGLES.md.
 
-- [ ] ⬜ **Assessed when this ledger closes, not before**: every entry is
-  terminal by the same test. Open while this is the current ledger, because a
-  rolling ledger exists to keep collecting.
+- [x] ✅ **Assessed when this ledger closes, not before**: every entry is
+  terminal by the same test. Assessed at closure (owner decision, 2026-09-29):
+  N28 graduated to Plan 00464 and N24 carried to 00466 N259, so all 29 entries
+  are terminal.
 
-- [ ] ⬜ Every release-bound consequence is in the pending-release holding area
+- [x] ✅ Every release-bound consequence is in the pending-release holding area
   (`CLAUDE/UPGRADES/UNRELEASED/`) before the status flips, or this criterion
-  says explicitly that the plan has none.
+  says explicitly that the plan has none. The plan has release notes there:
+  004 (nested-install cleanup), 005 (LSP venv symlink), 013 (acceptance probe
+  fixtures), 016 (QA starts an idled-out daemon), 021 (reserved-word command
+  heads), 022 (write clobber guard), 026 (handler priorities), 027 (effort
+  picked from the selector), 028 (subagent reports default to the plan folder)
+  and 031 (a declared cron can be paused). N24 and N28 add none.
 
 ## Delivery & Milestones
 

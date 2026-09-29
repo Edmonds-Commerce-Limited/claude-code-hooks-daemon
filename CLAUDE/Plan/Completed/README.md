@@ -10,6 +10,8 @@ Plans older than the 30 highest-numbered completed plans (see [../README.md](../
 
 - [00423: per handler scope main sub](00423-per-handler-scope-main-sub/PLAN.md) - Complete at `93f2a1c0`…`48733f1b` + the archiving commit (from issues #40/#41: handlers declare `scope: ALL|MAIN|SUB`, keyed on `agent_id` presence because `agent_type` was measured empty in 4 of 5 subagent stops; #41's three destructive controls are scoped but deliberately not built)
 
+- [00422: niggles ledger fifteen](00422-niggles-ledger-fifteen/PLAN.md) - Complete at the archiving commit (owner decision: closed with all 29 entries terminal; N28 graduated to 00464, N24 carried to 00466 N259; four entries inherited from 00419, three of them one class: a guard right about the state it judges and wrong about the moment it judges it)
+
 - [00419: niggles ledger fourteen](00419-niggles-ledger-fourteen/PLAN.md) - Complete at `6a6f9a43`…`2778206f` + the archiving commit (fifteen entries, eleven terminal; the four that were not are re-filed into 00422 rather than counted as closed, because nothing downstream re-reads a closed plan. N1: `debug_hooks.sh` could not run in the repository that dogfoods it)
 
 - [00418: orchestrator only mode greenfield](00418-orchestrator-only-mode-greenfield/PLAN.md) - Complete at `0f03ef83`…`8011858b` + the archiving commit (restrict the MAIN THREAD to coordination tools; built once and deleted because hooks could not tell which agent fired an event, and `agent_id` now can. Greenfield by ruling, project-level handler, simulate-only before ever blocking. From issue #14)
