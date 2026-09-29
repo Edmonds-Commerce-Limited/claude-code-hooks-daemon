@@ -250,6 +250,30 @@ def _call_detail(hook_input: dict[str, Any]) -> str:
     return f"{tool_name}"
 
 
+def _recorded_verdict(hook_input: dict[str, Any]) -> str:
+    """What the record says about a matched call the blocking policy allows.
+
+    "Never denied" is derived from ``_BLOCKED_TOOLS``, not written as a fact,
+    so a tool that joins the blocked set stops being described that way.
+    """
+    tool_name = hook_input.get("tool_name")
+    if not tool_name:
+        return "recorded, not a would-be denial (the call names no tool)"
+    if tool_name not in _BLOCKED_TOOLS:
+        return f"recorded, not a would-be denial ({tool_name} is never denied by this mode)"
+    return "recorded, not a would-be denial (allowed by the blocking policy)"
+
+
+def _unblocked_bash_sentence() -> str:
+    """The guidance's Bash sentence, said only while Bash is outside the blocked set."""
+    if "Bash" in _BLOCKED_TOOLS:
+        return ""
+    return (
+        "`Bash` is recorded but never a would-be denial, so the coordinator's full "
+        "QA gate is unaffected when blocking is armed. "
+    )
+
+
 class OrchestratorSimulateHandler(PreToolUseHandlerBase):
     """Record what orchestrator-only mode WOULD deny on the main thread; deny nothing."""
 
@@ -299,11 +323,18 @@ class OrchestratorSimulateHandler(PreToolUseHandlerBase):
         return tool_name not in _COORDINATION_TOOLS
 
     def _would_deny(self, hook_input: dict[str, Any]) -> bool:
-        """True when blocking mode should refuse THIS call.
+        """True when blocking mode is on AND its policy refuses THIS call."""
+        return self._blocking and self._policy_denies(hook_input)
+
+    def _policy_denies(self, hook_input: dict[str, Any]) -> bool:
+        """True when the blocking policy refuses this call, whether or not it is armed.
+
+        Simulate mode reports this verdict as its "would have been denied",
+        so the record and the armed gate cannot disagree (ledger 00422 N24: a
+        simulated "would deny" on every Bash call read as a full-QA deadlock).
 
         Every condition is a narrowing, and each one is load-bearing:
 
-        - the switch is on at all;
         - the tool is one of the three that mutate a file;
         - the event is the main thread's, by the scope gate's own rule
           (``acts_as_main_thread``): no ``agent_id``, and not fabricated by a
@@ -319,8 +350,6 @@ class OrchestratorSimulateHandler(PreToolUseHandlerBase):
           real main-thread write;
         - the target is not in the plan tree the coordinator owns.
         """
-        if not self._blocking:
-            return False
         if hook_input.get("tool_name") not in _BLOCKED_TOOLS:
             return False
         if not acts_as_main_thread(hook_input):
@@ -347,13 +376,17 @@ class OrchestratorSimulateHandler(PreToolUseHandlerBase):
 
         command = get_bash_command(hook_input)
         mode = "blocking" if self._blocking else "record only, never blocks"
+        verdict = (
+            "main thread would have been denied"
+            if self._policy_denies(hook_input)
+            else _recorded_verdict(hook_input)
+        )
         return GatingResult(
             decision=Decision.ALLOW,
             rule=classify_bash_command(command) if command is not None else None,
             context=[
                 f"SIMULATED orchestrator-only mode (Plan 00418 — {mode}): "
-                "main thread would have been denied — "
-                f"{_call_detail(hook_input)}",
+                f"{verdict} — {_call_detail(hook_input)}",
             ],
         )
 
@@ -408,10 +441,12 @@ class OrchestratorSimulateHandler(PreToolUseHandlerBase):
             )
         return (
             "## orchestrator-simulate — orchestrator-only mode, SIMULATE ONLY (Plan 00418)\n\n"
-            "Records what a main-thread orchestrator-only policy WOULD have "
-            "denied. Never blocks — every call is allowed regardless of what "
-            "this handler matches. A subagent call (`agent_id` present) is "
-            "always exempt.\n\n"
+            "Records every main-thread call to a non-coordination tool, and says "
+            "which ones the blocking policy WOULD deny: "
+            f"{', '.join(f'`{tool}`' for tool in sorted(_BLOCKED_TOOLS))} outside "
+            f"`CLAUDE/Plan/`. {_unblocked_bash_sentence()}Never blocks — every call "
+            "is allowed regardless of what this handler matches. A subagent call "
+            "(`agent_id` present) is always exempt.\n\n"
             "**Why**: gathering evidence for where the coordination-tool "
             "boundary should sit, before any blocking decision is made.\n\n"
             "**Review the record**: `bin/hooks-daemon verdicts`, filtered to "

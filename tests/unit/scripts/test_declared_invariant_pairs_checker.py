@@ -117,7 +117,7 @@ class TestTheExtractors:
     def test_dict_keys_reads_through_an_annotated_assignment(
         self, checker: ModuleType, tmp_path: Path
     ) -> None:
-        """The real `_WRAPPERS` is annotated `Final[dict[str, _Wrapper]]`."""
+        """The real `COMMAND_WRAPPERS` is annotated `Final[dict[str, CommandWrapper]]`."""
         _module(tmp_path, "b.py", 'WRAPPERS: Final[dict[str, int]] = {"env": 1}\n')
         side = checker.Side(file="b.py", symbol="WRAPPERS", extract="dict_keys")
         assert checker.extract_members(tmp_path, side) == frozenset({"env"})

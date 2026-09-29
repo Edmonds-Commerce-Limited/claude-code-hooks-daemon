@@ -932,6 +932,15 @@ class HandlerID:
         config_key="subagent_cron_delete_blocker",
         display_name="subagent-cron-delete-blocker",
     )
+    # Subagent full-QA blocker (PreToolUse handler) -- Plan 00463: the full QA
+    # gate is the coordinator's, run once per delivery, so a sub-agent's
+    # full-suite run is denied and pointed at the targeted form. scope=SUB,
+    # opt-in, inert until the project declares its full_qa_patterns.
+    SUBAGENT_FULL_QA_BLOCKER = HandlerIDMeta(
+        class_name="SubagentFullQaBlockerHandler",
+        config_key="subagent_full_qa_blocker",
+        display_name="subagent-full-qa-blocker",
+    )
     # Teammate reap advisor (Stop handler) -- Plan 00419 N5: Claude Code's own
     # /goal evaluator defers its judgement while any background work is
     # registered, and an in-process teammate that has finished and gone IDLE is

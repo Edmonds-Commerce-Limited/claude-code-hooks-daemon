@@ -473,6 +473,91 @@ class TestBashIsNeverDenied:
         result = self.handler.handle(bash_hook_input("git status && git diff"))
         assert result.rule == "git status+git diff"
 
+    def test_the_coordinators_full_qa_gate_is_never_denied(self, bash_hook_input: Any) -> None:
+        """Plan 00463 depends on this: full QA is a MAIN-THREAD gate.
+
+        `subagent_full_qa_blocker` denies a sub-agent's full-suite run, so the
+        coordinator is the only role left that can run it. If this mode ever
+        denied main-thread Bash, the two would deadlock and nobody could run
+        full QA. This is the handler alone; the whole armed chain is driven by
+        `tests/integration/test_full_qa_gate_is_never_deadlocked.py`. Do not
+        delete either test.
+        """
+        result = self.handler.handle(bash_hook_input("./scripts/qa/llm_qa.py all"))
+        assert result.decision == Decision.ALLOW
+
+
+class TestTheSimulatedRecordTellsTheTruth:
+    """Ledger 00422 N24: the simulate context must say what blocking WOULD do.
+
+    It once said "main thread would have been denied" on every main-thread
+    call, Bash included, while the blocking policy never denies Bash. A
+    coordinator reading that on its own `llm_qa.py all` concluded that arming
+    the mode would deadlock the full QA gate. The record is evidence for a
+    boundary decision, so a false "would deny" is a defect, not wording.
+    """
+
+    _WOULD_DENY = "would have been denied"
+
+    _SURFACE: tuple[tuple[str, dict[str, Any]], ...] = (
+        ("Bash", {"command": "./scripts/qa/llm_qa.py all"}),
+        ("Bash", {"command": "rm -rf /tmp/scratch"}),
+        ("Write", {"file_path": "/workspace/src/thing.py", "content": "x"}),
+        ("Write", {"file_path": "/workspace/CLAUDE/Plan/00463-x/PLAN.md", "content": "x"}),
+        ("Edit", {"file_path": "/workspace/src/thing.py", "new_string": "x"}),
+        ("NotebookEdit", {"notebook_path": "/workspace/nb.ipynb"}),
+        ("SomeFutureTool", {}),
+    )
+
+    def _context(self, hook_input: dict[str, Any]) -> str:
+        return " ".join(OrchestratorSimulateHandler(blocking=False).handle(hook_input).context)
+
+    def test_a_simulated_bash_call_is_not_reported_as_a_would_be_denial(
+        self, bash_hook_input: Any
+    ) -> None:
+        context = self._context(bash_hook_input("./scripts/qa/llm_qa.py all"))
+        assert self._WOULD_DENY not in context
+        assert "never denied" in context
+
+    def test_a_simulated_implementation_write_is_reported_as_a_would_be_denial(
+        self, write_hook_input: Any
+    ) -> None:
+        context = self._context(write_hook_input("/workspace/src/thing.py", "x"))
+        assert self._WOULD_DENY in context
+
+    def test_never_denied_is_said_only_of_a_tool_outside_the_blocked_set(
+        self, monkeypatch: Any
+    ) -> None:
+        """Delta review N9: the phrase was a literal, true only while Bash stays unblocked."""
+        import orchestrator_simulate
+
+        assert "never denied" in orchestrator_simulate._recorded_verdict({"tool_name": "Bash"})
+        monkeypatch.setattr(
+            orchestrator_simulate,
+            "_BLOCKED_TOOLS",
+            orchestrator_simulate._BLOCKED_TOOLS | {"Bash"},
+        )
+        assert "never denied" not in orchestrator_simulate._recorded_verdict({"tool_name": "Bash"})
+        guidance = OrchestratorSimulateHandler(blocking=False).get_claude_md() or ""
+        assert "`Bash` is recorded but never" not in guidance
+
+    def test_a_call_with_no_tool_name_is_not_named_none(self) -> None:
+        """Review 3 R13: it read "None is never denied by this mode"."""
+        import orchestrator_simulate
+
+        verdict = orchestrator_simulate._recorded_verdict({})
+        assert "None" not in verdict
+        assert "never denied" not in verdict
+
+    def test_the_simulated_claim_agrees_with_the_armed_verdict_across_the_surface(self) -> None:
+        """ "would have been denied" appears exactly when blocking mode DENIES."""
+        armed = OrchestratorSimulateHandler(blocking=True)
+        for tool_name, tool_input in self._SURFACE:
+            hook_input = {"tool_name": tool_name, "tool_input": tool_input}
+            claims_deny = self._WOULD_DENY in self._context(hook_input)
+            denies = armed.handle(hook_input).decision == Decision.DENY
+            assert claims_deny is denies, (tool_name, tool_input)
+
 
 class TestThePlanDirectoryIsExempt:
     """The lead owns its own plan folder, by this project's directory roles.

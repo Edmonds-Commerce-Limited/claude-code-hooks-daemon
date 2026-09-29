@@ -1,4 +1,4 @@
-# Drafted by Plan 00461. The VERSION in the filename and the `version:` key are
+# Drafted by Plans 00461 and 00463. The VERSION in the filename and the `version:` key are
 # a target, not a decision — releases are human-gated in this project, and the
 # release agent confirms or renames this file. Only the content is asserted here.
 version: "3.67.0"
@@ -8,6 +8,45 @@ breaking: false
 
 config_changes:
   added:
+    - key: handlers.pre_tool_use.subagent_full_qa_blocker
+      description: >-
+        Denies a sub-agent's full-suite QA run, so the full gate stays with the
+        coordinator. Measured in this project: five whole-suite runs at once,
+        one per worktree, each re-run after every fix round and run again by
+        the coordinator before merging. With this handler, a sub-agent runs
+        targeted QA and hands over a commit, and the coordinator runs the full
+        gate once over every ready branch merged together. `scope: SUB`, so the main
+        thread's own run draws nothing. Commands are parsed and resolved to the
+        program they run, through wrappers, interpreters and `bash -c`, so a
+        commit message, `grep` or `echo` that mentions a full-QA command is
+        never denied. The deny lists the project's declared targeted commands.
+      example_yaml: |
+        pre_tool_use:
+          subagent_full_qa_blocker:
+            enabled: true
+            priority: 32
+            options:
+              full_qa_patterns:
+                - id: pytest-whole-suite
+                  command: pytest
+                  full_args: [tests, .]
+                  bare_is_full: true
+                  option_grammar: pytest
+                  read_only_flags: [--collect-only]
+              targeted_qa_commands:
+                - "pytest <explicit test files or directories>"
+      migration_note: >-
+        Opt-in, and inert until you declare `full_qa_patterns`: a project's
+        full-suite commands cannot be known in advance, so nothing ships by
+        default. Enabled with no usable patterns, `hooks-daemon check` reports
+        it as unable to fire. Worth enabling where several agents share one
+        host. Declare every command that runs your whole suite, including
+        wrapper scripts. Have the coordinator merge every ready branch into one
+        integration worktree and run the full gate once there, before the main
+        branch moves. Keep `scope` at its default, SUB: any other scope
+        denies the coordinator's own run, and `check` reports it.
+      recommended: false
+      dormant: true
     - key: handlers.pre_tool_use.plan_journal_guard
       description: >-
         Denies a plan journal entry written by hand. `mkplan.bash --journal

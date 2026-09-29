@@ -102,6 +102,36 @@ RED under the load recipe above for both files (test_safe_signal.py:
 identical load recipe after the fix, plus a clean unloaded run (40 and 55
 passed respectively).
 
+### N123 — ✅ Remedied — a DP-cost regression test asserted on wall-clock time, which flakes under a loaded gate
+
+**Found:** Plan 00463's `TestInteriorWildcardDpIsBounded::test_a_lone_long_star_run_collapses_to_near_zero_cost`
+(the star-run-collapse cost guard, B1/Plan 00466 review 2) started as a fixed
+0.1s wall-clock budget. It failed once in a 37/39 gate run under heavy
+concurrent load (many worktrees' gates running at once), passed 10/10 in
+isolation on the branch and on `main`, but main itself measured 0.09s against
+the same 0.1s budget — a close margin, confirming the bound was
+environment-sensitive rather than genuinely tight. A first fix replaced the
+absolute budget with a scaling-ratio assertion (min of several timed trials,
+long token vs. a short baseline) — still a wall-clock measurement with its
+own absolute-second floor to absorb constant-factor noise, so it remained
+exposed to the identical flake, just with a wider margin.
+
+**Remedy:** stopped measuring time at all. Added a test-only instrumentation
+seam to `secret_file_matching.py`: a `contextvars.ContextVar` counter
+(`_dp_cell_counter`) and a `dp_cell_counter()` context manager that counts
+the DP grid cells `_globs_can_intersect` actually visits during the block. A
+`ContextVar` rather than a module-level counter, per the standing "no
+per-request state on a shared module" rule — no per-request state leaks
+across concurrent calls, and production pays nothing beyond a `None` check
+when no test has opened the counter. The test now asserts the 60,000-`*`
+token's DP cell count EQUALS a literal `a*a` baseline's count: after the
+star-run collapse, the two are the identical 3-character string, so the
+grids are identical in size, deterministically, on every host — not a
+tolerance band, an equality. RED: proved via a `git archive` scratch copy
+with the star-collapse substitutions short-circuited (`if False and "**" in a: ...`), which dropped the long token's cell count to 0 (the length cap
+fires and skips the DP entirely) against the baseline's 9, failing the
+assertion as expected.
+
 ### N109 — ✅ Remedied — the pending release-notes holding area mis-sorts past 99 callouts
 
 **Found:** `CLAUDE/UPGRADES/UNRELEASED/release-notes/` named callouts
@@ -5076,6 +5106,32 @@ integration gate. The "Run QA" hint and Step 7 name `llm_qa.py`. A test
 checks that the script names no denied QA entry point.
 
 **Graduated to Plan 00463**, which owns the sub-agent QA policy.
+
+**Remedied by Plan 00463** (commit 480740cc), as the candidate remedy says.
+Step 7 checks that `scripts/qa/llm_qa.py` is executable. The "Run QA" hint
+prints `./scripts/qa/llm_qa.py changed`. The agent prompt template tells the
+agent to run targeted QA (`llm_qa.py changed`, named `llm_qa.py` tools, and
+pytest on the test files it touched), and says full QA is the coordinator's
+batched integration gate. `tests/unit/scripts/test_setup_worktree_qa_guidance.py`
+was RED first. It checks that the script never names `run_all.sh`, and that no
+full run under this repo's live `full_qa_patterns` is printed, judged by
+`subagent_full_qa_blocker`'s own matcher.
+
+**Correction (Plan 00463 review 3, R3).** The first version of that test
+judged only the printed lines that were shaped like a command. So a full run
+inside prose (`then run ./scripts/qa/llm_qa.py all`), after a label
+(`QA: ...`), in a `printf`, or in single quotes passed it, and the earlier
+claim here that no printed command was a full run was not something the test
+proved. The rewritten test reads every `echo`/`printf` text the script prints
+and judges a candidate command at every place one can start in each line:
+the line start, after `run`, `&&`, `||`, `;`, `|` or a word ending in `:`, and
+at every word that starts like a path or an expansion. Each row of the
+review's table is an injected RED case. The row above stays Remedied: the
+script itself prints no full run, and the test now proves it. Review 4 (N7)
+widened the scan again: a candidate also starts at any word naming a declared
+program, whatever verb precedes it, and `cat` heredoc bodies and `$NAME`
+assignments are read as printed text. Three printed lines that mentioned
+pytest bare were reworded to name a path.
 
 ### N1 — ✅ Remedied — `resolve_venv_python`'s fallback accepts a venv interpreter that cannot run on this host
 

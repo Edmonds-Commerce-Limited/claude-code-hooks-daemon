@@ -46,9 +46,11 @@ from tests.scaling import SIZE_FACTOR, SUPERLINEAR_RATIO, counted_ratio, scaling
 
 from claude_code_hooks_daemon.config.loader import ConfigLoader
 from claude_code_hooks_daemon.config.models import Config
-from claude_code_hooks_daemon.constants import HandlerTag
+from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
+from claude_code_hooks_daemon.core.acceptance_test import AcceptanceTest
 from claude_code_hooks_daemon.core.event import EventType
 from claude_code_hooks_daemon.core.handler import Handler
+from claude_code_hooks_daemon.core.hook_result import Decision, HookResult
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.core.router import EventRouter
 from claude_code_hooks_daemon.daemon.cli import _build_handler_config_mapping
@@ -58,6 +60,10 @@ from claude_code_hooks_daemon.handlers.pre_tool_use.secret_file_guard import (
 from claude_code_hooks_daemon.handlers.registry import (
     HandlerRegistry,
     iter_builtin_handler_classes,
+)
+from claude_code_hooks_daemon.utils.path_predicates import (
+    _reset_unreadable_warning_burst,
+    path_exists,
 )
 
 # Large enough to make an O(n^2) handler's blowup obvious (Task 2's repros
@@ -188,6 +194,11 @@ def _regime(handler: Handler, hook_input: dict) -> tuple[bool, str | None, bool]
     """The path ``handler`` takes on ``hook_input``: whether it matched, what
     it decided, and whether it logged a warning or worse on the way (a cap it
     gave up at, a path the OS refused)."""
+    # The unreadable-path warning is rate-limited per calling site, so whether
+    # it fires depends on how many earlier calls used up the burst -- on call
+    # order and on how many probes the checkout root length makes fail. Each
+    # regime is measured from a fresh burst so it reflects only ``hook_input``.
+    _reset_unreadable_warning_burst()
     recorder = _WarningRecorder()
     root = logging.getLogger()
     root.addHandler(recorder)
@@ -644,6 +655,39 @@ class TestGilStarvationAcrossEveryPreToolUseHandler:
         finding = _growth_finding(guard, input_at, 2, _deep_eval_nesting_body(16))
         assert finding is not None
         assert finding.startswith("takes another path at 16 than at 2")
+
+
+class TestRegimeIsIndependentOfEarlierWarnings:
+    """The warning component of a regime must not depend on call order."""
+
+    def test_a_rate_limited_warning_is_still_seen_after_an_earlier_burst(self) -> None:
+        unreadable = "x" * (os.pathconf("/", "PC_NAME_MAX") + 1)
+
+        class _Prober(Handler):
+            def __init__(self) -> None:
+                super().__init__(
+                    handler_id=HandlerID.DESTRUCTIVE_GIT,
+                    priority=Priority.DESTRUCTIVE_GIT,
+                )
+
+            def matches(self, hook_input: dict) -> bool:
+                return True
+
+            def handle(self, hook_input: dict) -> HookResult:
+                for _ in range(20):
+                    path_exists(unreadable, unreadable_means=False)
+                return HookResult(decision=Decision.ALLOW)
+
+            def get_claude_md(self) -> str | None:
+                return None
+
+            def get_acceptance_tests(self) -> list[AcceptanceTest]:
+                return []
+
+        handler = _Prober()
+        first = _regime(handler, {})
+        second = _regime(handler, {})
+        assert first == second == (True, "allow", True)
 
 
 class TestCombinatorialSmallInputShapesStayLinear:

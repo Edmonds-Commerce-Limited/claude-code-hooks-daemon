@@ -126,6 +126,26 @@ class TestEnforceLlmQaHandler:
         assert "llm_qa.py" in result.reason
         assert "run_all.sh" in result.reason
 
+    def test_the_main_thread_is_pointed_at_the_full_gate(
+        self, handler: EnforceLlmQaHandler, bash_hook_input: Any
+    ) -> None:
+        result = handler.handle(bash_hook_input("./scripts/qa/run_all.sh"))
+        assert "./scripts/qa/llm_qa.py all" in (result.reason or "")
+
+    def test_a_subagent_is_pointed_at_targeted_qa_not_the_full_gate(
+        self, handler: EnforceLlmQaHandler, bash_hook_input: Any
+    ) -> None:
+        """Plan 00463 review finding 8: `llm_qa.py all` is denied to a sub-agent.
+
+        Advice that leads straight into the next deny costs the agent a turn.
+        """
+        hook_input = bash_hook_input("./scripts/qa/run_all.sh")
+        hook_input["agent_id"] = "aplan463-impl-84165102c3e9edf0"
+        reason = handler.handle(hook_input).reason or ""
+        assert "./scripts/qa/llm_qa.py changed" in reason
+        assert "llm_qa.py all" not in reason
+        assert "coordinator" in reason
+
     # ── matches() — invocation vs mention (Plan 00200, dogfooding false positive) ──
 
     def test_does_not_match_cat_of_run_all_sh(

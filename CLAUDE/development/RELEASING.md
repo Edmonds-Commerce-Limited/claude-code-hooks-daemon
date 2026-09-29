@@ -273,7 +273,7 @@ prints and the exit becomes `0`, so the decision is in the invocation record.
 `--accept` does NOT rescue exit `1` — acknowledging WIP is not acknowledging
 blindness.
 
-**1b. Agent validation.** Agent verifies: clean git state, all QA passes, version consistency across files (pyproject.toml, version.py, README.md), no existing tag, gh CLI authenticated. (`CLAUDE.md` carries no version string — it is a daemon-regenerated doc, not a version-bump target.)
+**1b. Full QA on this HEAD, then agent validation.** The release agent is a sub-agent, and the full suite is the main thread's gate (Plan 00463), so main Claude runs `./scripts/qa/llm_qa.py all` on the clean HEAD first. Then the agent verifies: clean git state, all QA passes (`llm_qa.py --read-only all`, which fails any result recorded for a tree other than this HEAD as `STALE`), version consistency across files (pyproject.toml, version.py, README.md), no existing tag, gh CLI authenticated. (`CLAUDE.md` carries no version string — it is a daemon-regenerated doc, not a version-bump target.)
 
 **ANY failure = IMMEDIATE ABORT. NO auto-fixing.**
 

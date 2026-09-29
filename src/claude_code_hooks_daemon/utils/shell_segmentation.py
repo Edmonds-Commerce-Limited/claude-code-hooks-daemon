@@ -30,6 +30,8 @@ from __future__ import annotations
 
 import re
 from collections.abc import Sequence
+from dataclasses import dataclass
+from typing import Final
 
 from claude_code_hooks_daemon.utils.command_evasion import (
     git_subcommand_index,
@@ -92,8 +94,10 @@ _QUOTED_HEREDOC_PATTERN = re.compile(
 # and `'END.MD'` are ordinary and legal, and an unmatched delimiter exposes the
 # whole body. The closer then needs the lookahead: without it `EOF` is closed
 # by a body line reading `EOFDATA`, ending the body early and scanning the rest.
+# The lookbehind keeps a here-string (`<<<'X'`) from reading as an opener: bash
+# runs the lines after it, so blanking them would hide real commands.
 _QUOTED_HEREDOC_BODY_PATTERN = re.compile(
-    r"(?P<opener><<-?\s*(?P<quote>['\"])(?P<delim>[\w.\-]+)(?P=quote))"
+    r"(?P<opener>(?<!<)<<-?\s*(?P<quote>['\"])(?P<delim>[^'\"\n]+)(?P=quote))"
     r"(?P<opener_tail>[^\n]*)\n.*?\n"
     r"(?P<closer>[ \t]*(?P=delim)(?![\w.\-]))",
     re.DOTALL,
@@ -400,6 +404,124 @@ def command_word(word: str) -> str:
     """
     unquoted = word.replace('"', "").replace("'", "")
     return unquoted.lstrip(_WORD_GROUPING_PREFIXES).rsplit("/", 1)[-1]
+
+
+@dataclass(frozen=True, slots=True)
+class CommandWrapper:
+    """A command that RUNS another command, and what to skip to reach it.
+
+    Attributes:
+        value_flags: Flags whose following word is a value, not the command.
+        positional_operands: Positional words consumed before the wrapped
+            command starts. ``timeout``'s DURATION is the only one shipped.
+            Option parsing stops at the last of them, so the word after it is
+            the command whatever it looks like.
+        lone_dash_is_flag: ``env -`` is ``env -i``, so a lone ``-`` is a flag.
+    """
+
+    value_flags: frozenset[str]
+    positional_operands: int = 0
+    lone_dash_is_flag: bool = False
+
+
+#: Wrappers whose job is to run the command after them. One table, because two
+#: guards reading two copies came to disagree about ``env``: one peeled it, the
+#: other whitelisted it, and the same command was judged under two names. The
+#: pipe whitelist must stay disjoint from these keys, which
+#: ``scripts/qa/declared-invariant-pairs.yaml`` enforces.
+COMMAND_WRAPPERS: Final[dict[str, CommandWrapper]] = {
+    "watch": CommandWrapper(value_flags=frozenset({"-n", "--interval"})),
+    "timeout": CommandWrapper(
+        value_flags=frozenset({"-s", "--signal", "-k", "--kill-after"}),
+        positional_operands=1,
+    ),
+    "nohup": CommandWrapper(value_flags=frozenset()),
+    "sudo": CommandWrapper(value_flags=frozenset({"-u", "-g", "-p"})),
+    "env": CommandWrapper(
+        value_flags=frozenset({"-u", "--unset", "-C", "--chdir"}), lone_dash_is_flag=True
+    ),
+    "nice": CommandWrapper(value_flags=frozenset({"-n", "--adjustment"})),
+    "stdbuf": CommandWrapper(value_flags=frozenset({"-i", "-o", "-e"})),
+    "command": CommandWrapper(value_flags=frozenset()),
+}
+
+#: A flag starts with this, except the two spellings below that are operands.
+FLAG_PREFIX: Final[str] = "-"
+LONE_DASH: Final[str] = "-"
+END_OF_OPTIONS: Final[str] = "--"
+
+
+def peel_command_wrappers(argv: Sequence[str]) -> tuple[tuple[str, ...], int]:
+    """Skip the wrappers at the front of ``argv`` to reach the command they run.
+
+    ``timeout -s KILL 60 nice -n 5 pytest`` runs ``pytest``. A guard that judged
+    the first word would judge ``timeout``, and a guard that judged every word
+    would mistake ``KILL`` for a command. Peeling uses each wrapper's own flag
+    grammar, so a value flag takes its value with it and a positional operand
+    is consumed exactly as the wrapper consumes it.
+
+    Args:
+        argv: The words of ONE command, already split. Environment assignments
+            are the caller's concern, because whether ``FOO=1`` is an
+            assignment or an operand depends on where it sits.
+
+    Returns:
+        ``(names, start)``: the wrapper names peeled, in order, and the index of
+        the wrapped command's first word. ``start == len(argv)`` means the
+        wrappers wrapped nothing.
+    """
+    names: list[str] = []
+    index = 0
+    while index < len(argv):
+        name = command_word(argv[index])
+        wrapper = COMMAND_WRAPPERS.get(name)
+        if wrapper is None:
+            break
+        names.append(name)
+        index += 1
+        positionals = wrapper.positional_operands
+        options_ended = False
+        while index < len(argv):
+            argument = argv[index]
+            if argument == END_OF_OPTIONS and not options_ended:
+                # ``env -- pytest`` runs pytest: ``--`` ends the wrapper's
+                # options and is never the wrapped command.
+                options_ended = True
+                index += 1
+                continue
+            is_flag = not options_ended and (
+                (argument.startswith(FLAG_PREFIX) and argument != LONE_DASH)
+                or (argument == LONE_DASH and wrapper.lone_dash_is_flag)
+            )
+            if is_flag:
+                index += 1
+                if _takes_next_word(argument, wrapper.value_flags) and index < len(argv):
+                    index += 1
+                continue
+            if positionals > 0:
+                index += 1
+                positionals -= 1
+                if positionals == 0:
+                    break
+                continue
+            break
+    return tuple(names), index
+
+
+def _takes_next_word(flag: str, value_flags: frozenset[str]) -> bool:
+    """Whether a wrapper flag consumes the next word: a value flag, or a cluster ending in one.
+
+    ``env -iu HOME`` is ``-i -u HOME``. A value flag with its value attached
+    (``-n5``, ``-iCdir``) takes nothing more.
+    """
+    if flag in value_flags:
+        return True
+    if flag.startswith(END_OF_OPTIONS) or len(flag) <= len(FLAG_PREFIX) + 1:
+        return False
+    for position, letter in enumerate(flag[1:], start=1):
+        if FLAG_PREFIX + letter in value_flags:
+            return position == len(flag) - 1
+    return False
 
 
 def value_can_substitute(value: str) -> bool:
