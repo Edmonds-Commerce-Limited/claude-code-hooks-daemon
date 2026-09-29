@@ -3,6 +3,28 @@
 Newest first. Each entry says how it was found, why it happens, and the
 candidate remedies.
 
+### N261 — Plan 00463 landed green on the local gate and red on CI
+
+**Found**: CI run 36619680779 on the 00463 merge `83e75879` failed on all three
+Pythons, although the branch's local full-QA gate had passed every test.
+
+- **Project handler tests:** the full-QA gate plugin refused CI's bare
+  `pytest .claude/project-handlers`. That run never loads `tests/conftest.py`,
+  so the plugin had no suite to count against and failed closed. This is
+  N260's class again: the local gate starts those tests another way.
+- **One teardown error:** `TestTheGateRunCertifies` reached `llm_qa.py`'s
+  live-daemon step un-mocked. On a CI runner that started the real project
+  daemon, and it rewrote `CLAUDE.md`. Locally a daemon was already running, so
+  the step did nothing.
+
+**✅ Remedied** in `5ff020c7`, merged as `fd78edce`. The plugin counts a run
+outside `tests/` against the launch directory's `tests/`, and the test stubs
+the daemon step. Each fix has a test that was RED first.
+
+The class stays open with N260. A second environment difference slipped
+through: whether a daemon is already running. Candidate remedy: the local gate
+runs the CI commands, from a state with no daemon running.
+
 ### N260 — the local gate runs project-handler tests differently from CI
 
 **Found**: main CI was red on "Project handler tests" on every Python from
