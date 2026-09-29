@@ -4865,8 +4865,10 @@ def _read_new(target: str, event: _Event) -> _CodeContent:
     reported size, which ``/proc`` gives as 0, and a read never takes more
     than one byte past what is left. Whether the text is then parsed or
     scanned is decided when it runs, by its kind's parse cap. Any other
-    ``OSError`` propagates, which the daemon turns into a deny: the code may
-    be a run, and it could not be seen.
+    ``OSError`` (unreadable, an I/O error) is unseen, so the handler's
+    ``unseen_policy`` decides: the code may be a run, and it could not be
+    seen. It is not raised, since the chain lets a crashing handler of this
+    kind fail open.
     """
     try:
         status = Path(target).stat()
@@ -4874,7 +4876,7 @@ def _read_new(target: str, event: _Event) -> _CodeContent:
         return _ABSENT_CODE
     except OSError as error:
         if error.errno != errno.ENAMETOOLONG:
-            raise
+            return _UNSEEN_CODE
         return _ABSENT_CODE
     if stat.S_ISDIR(status.st_mode):
         return _ABSENT_CODE
@@ -4883,8 +4885,11 @@ def _read_new(target: str, event: _Event) -> _CodeContent:
     left = event.read_budget
     if status.st_size > left:
         return _UNSEEN_CODE
-    with Path(target).open("rb") as handle:
-        data = handle.read(left + 1)
+    try:
+        with Path(target).open("rb") as handle:
+            data = handle.read(left + 1)
+    except OSError:
+        return _UNSEEN_CODE
     event.read_budget = max(0, left - len(data))
     if len(data) > left:
         # More than its reported size, and more than is left: /proc, or growing.

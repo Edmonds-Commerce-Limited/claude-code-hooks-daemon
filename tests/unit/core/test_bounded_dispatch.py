@@ -16,6 +16,9 @@ from __future__ import annotations
 import contextlib
 import threading
 import time
+from concurrent.futures import Future
+from concurrent.futures import TimeoutError as FutureTimeoutError
+from unittest.mock import patch
 
 from claude_code_hooks_daemon.core.bounded_dispatch import (
     BoundedDispatcher,
@@ -208,6 +211,43 @@ class TestBoundedDispatcherReleasesAbandonedSlot:
 
         assert first == "a"
         assert second == "b"
+
+
+class TestBoundedDispatcherWorkerFinishingAtItsDeadline:
+    """A worker that finishes after the caller's timeout fires but before the
+    caller records it must not leave a straggler entry for a dead thread."""
+
+    def test_no_straggler_entry_when_the_worker_finishes_before_it_is_recorded(self) -> None:
+        dispatcher: BoundedDispatcher[str] = BoundedDispatcher(max_inflight=2, max_stragglers=4)
+        release = threading.Event()
+        worker: list[threading.Thread] = []
+
+        def _fn() -> str:
+            worker.append(threading.current_thread())
+            release.wait(timeout=DispatchTestTimeout.GENEROUS)
+            return "late"
+
+        original_result = Future.result
+
+        def _result(self: Future[str], timeout: float | None = None) -> str:
+            try:
+                return original_result(self, timeout)
+            except FutureTimeoutError:
+                # The timeout fired; now let the worker finish COMPLETELY (its
+                # `finally` included) before the caller records the straggler.
+                release.set()
+                worker[0].join(timeout=DispatchTestTimeout.NORMAL)
+                raise
+
+        try:
+            with patch.object(Future, "result", _result):
+                outcome = dispatcher.run(_fn, timeout=DispatchTestTimeout.SHORT, label="edge")
+        finally:
+            release.set()
+            dispatcher.shutdown(wait=True)
+
+        assert isinstance(outcome, DispatchTimeout)
+        assert dispatcher.straggler_health().count == 0
 
 
 class TestBoundedDispatcherStragglerHealth:
