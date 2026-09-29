@@ -1990,6 +1990,10 @@ class TestTheHooksCommandLineProofIsSound:
                 assert proven == (launched and provable), cmdline
                 assert not proven or self._daemon_proves(cmdline, project), cmdline
 
+    def test_ps_printing_no_arguments_proves_nothing(self, tmp_path: Path) -> None:
+        project = _make_project(tmp_path / "proj")
+        assert not self._init_sh_proves(project, "_hooks_daemon_ps_args_prove_this_project", "")
+
     def test_a_symlinked_project_is_proven_by_its_real_path(self, tmp_path: Path) -> None:
         project = _make_project(tmp_path / "real")
         (tmp_path / "link").symlink_to(project)
@@ -2011,6 +2015,7 @@ class TestTheHooksCommandLineProofIsSound:
             ("a launch with no final NUL", True),
             ("a launch followed by an empty argument", False),
             ("a root cut in two by a NUL", False),
+            ("an empty command line", False),
         ],
     )
     def test_procfs_bytes_are_read_as_the_daemon_reads_them(
@@ -2033,6 +2038,7 @@ class TestTheHooksCommandLineProofIsSound:
             "a root cut in two by a NUL": b"\0".join(
                 [*launch[:4], root[:4] + b"\0" + root[4:], b"start"]
             ),
+            "an empty command line": b"",
         }[case]
         proven = self._procfs_proves(project, data)
         assert proven == launched

@@ -1390,11 +1390,18 @@ _hooks_daemon_argv_name_root() {
 # _hooks_daemon_cmdline_proves_this_project() - The procfs cmdline file $1
 # proves this project's daemon. Its arguments are read split at their NULs
 # (Plan 00466 round 6, R5-2), as psutil reads them: joined by newlines, one
-# argument holding a newline-separated launch read as that launch.
+# argument holding a newline-separated launch read as that launch. A read
+# loop, not mapfile, which bash 3.2 lacks; a last argument with no final NUL
+# is still an argument. An empty file (a zombie, a kernel thread) proves
+# nothing, and bash before 4.4 cannot expand an empty array under set -u.
 _hooks_daemon_cmdline_proves_this_project() {
-    local -a argv
+    local -a argv=()
+    local arg
     [[ -r "$1" ]] || return 1
-    mapfile -t -d '' argv < "$1" || return 1
+    while IFS= read -r -d '' arg || [[ -n "$arg" ]]; do
+        argv+=("$arg")
+    done < "$1" || return 1
+    ((${#argv[@]})) || return 1
     _hooks_daemon_argv_prove_this_project "${argv[@]}"
 }
 
@@ -1405,8 +1412,9 @@ _hooks_daemon_cmdline_proves_this_project() {
 # helper, and one argument holding a whole launch line passes. Only a
 # process this user owns gets here, and it could as well run that line.
 _hooks_daemon_ps_args_prove_this_project() {
-    local -a argv
+    local -a argv=()
     read -r -a argv <<< "$1"
+    ((${#argv[@]})) || return 1
     _hooks_daemon_argv_prove_this_project "${argv[@]}"
 }
 
