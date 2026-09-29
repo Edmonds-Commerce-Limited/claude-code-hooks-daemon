@@ -146,6 +146,13 @@ Full write-ups are in [NIGGLES.md](NIGGLES.md). One line each here:
 | N222 | Tests assert absolute wall-clock bounds, so a loaded host fails them while they pass alone                                                        | N110 gate fix 2                                                 | 🔄 In Progress (perf tests remedied; bound-honoured tests open) |
 | N259 | Orchestrator simulate reports denials its blocking mode would never make                                                                          | Carried from 00422 N24                                          | ⬜ Open                                                         |
 
+## Parked branches (owner decision, 2026-09-29)
+
+Parked to cut cost. Each branch is pushed, or kept as a local worktree where
+noted. It resumes only by an owner decision. Reviews are capped at 3 rounds
+from now on. The table of 15 branches and the two owner rulings are in
+[PARKED-BRANCHES.md](PARKED-BRANCHES.md).
+
 ## Tasks
 
 ### Phase 1: Resolve entries
