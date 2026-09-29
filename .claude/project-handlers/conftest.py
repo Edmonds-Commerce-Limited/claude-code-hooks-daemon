@@ -13,6 +13,13 @@ for _subdir in _handlers_root.iterdir():
     if _subdir.is_dir() and not _subdir.name.startswith("_"):
         sys.path.insert(0, str(_subdir))
 
+# The repository root, so a test can share the main suite's helpers
+# (`tests.scaling`). CI runs the bare `pytest` entry point, which does not put
+# the working directory on sys.path the way `python -m pytest` does.
+_repository_root = _handlers_root.parent.parent
+if str(_repository_root) not in sys.path:
+    sys.path.insert(0, str(_repository_root))
+
 
 @pytest.fixture
 def bash_hook_input():
