@@ -158,9 +158,10 @@ if TYPE_CHECKING:
 _PYTEST_MODULE = "pytest"
 
 # The dotted module path ``pyproject.toml``'s ``addopts`` force-loads as a
-# pytest plugin (``-p claude_code_hooks_daemon.qa.full_qa_gate``). Named here,
-# matching that string exactly, so ``cmd_test_project_handlers`` can unload it
-# for its one invocation -- see the comment at that call site.
+# pytest plugin (through ``-p claude_code_hooks_daemon_full_qa_gate_loader``,
+# which registers it under this exact name). Named here so
+# ``cmd_test_project_handlers`` can block it for its one invocation -- see the
+# comment at that call site.
 _FULL_QA_GATE_PLUGIN = "claude_code_hooks_daemon.qa.full_qa_gate"
 
 # Milliseconds in one second. ``Timeout.BASH_DEFAULT`` is expressed in

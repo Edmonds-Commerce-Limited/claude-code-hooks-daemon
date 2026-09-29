@@ -28,6 +28,7 @@ import pytest
 import yaml
 
 from claude_code_hooks_daemon.qa.first_error_lines import OPTION, PLUGIN
+from claude_code_hooks_daemon_full_qa_gate_loader import GATE_PLUGIN as FULL_QA_GATE
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 SCRIPTS_DIR = PROJECT_ROOT / "scripts" / "qa"
@@ -548,6 +549,12 @@ class TestThePluginLoadsAfterCoverageStarts:
     every module-level line of those modules went unmeasured: the primary run
     reported 92.61% over tests that cover 95%. The suite's conftest loads the
     plugin instead, after coverage has started.
+
+    Both measurements run under this project's own ``addopts``, so they also
+    cover the full-QA sink that ``addopts`` force-loads (Plan 00463): naming
+    ``claude_code_hooks_daemon.qa.full_qa_gate`` there imports ``qa/__init__``
+    before coverage starts, which is why ``addopts`` names a loader outside
+    the package instead.
     """
 
     def test_the_primary_runs_plugin_arguments_leave_import_time_code_measured(
@@ -576,6 +583,14 @@ class TestThePluginLoadsAfterCoverageStarts:
 
     def test_the_suites_conftest_registers_the_plugin(self, pytestconfig: pytest.Config) -> None:
         assert pytestconfig.pluginmanager.get_plugin(PLUGIN) is not None
+
+    def test_the_measurements_run_with_the_full_qa_sink_force_loaded(
+        self, pytestconfig: pytest.Config
+    ) -> None:
+        """The two runs above inherit ``addopts``; this pins what it loads."""
+        addopts: list[str] = pytestconfig.getini("addopts")
+        assert "claude_code_hooks_daemon_full_qa_gate_loader" in addopts
+        assert pytestconfig.pluginmanager.get_plugin(FULL_QA_GATE) is not None
 
 
 class TestPytestLogParsing:

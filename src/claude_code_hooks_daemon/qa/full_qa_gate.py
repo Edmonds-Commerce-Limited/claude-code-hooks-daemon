@@ -55,8 +55,8 @@ def _is_xdist_worker(config: pytest.Config) -> bool:
 
 
 #: This module's own directory (`src/claude_code_hooks_daemon/qa/`). Round
-#: 10 M1: `addopts` now force-loads this module itself as a plugin via
-#: `-p claude_code_hooks_daemon.qa.full_qa_gate`, so that `--noconftest`
+#: 10 M1: `addopts` force-loads this module itself as a plugin (through
+#: `claude_code_hooks_daemon_full_qa_gate_loader`), so that `--noconftest`
 #: (which drops the conftest-import route entirely) cannot silently remove
 #: the sink. When a project's own conftest.py ALSO imports and re-exports
 #: `pytest_collection_modifyitems` (the normal, non---noconftest case), BOTH

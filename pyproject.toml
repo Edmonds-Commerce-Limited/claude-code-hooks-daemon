@@ -83,6 +83,8 @@ Issues = "https://github.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon/i
 
 [tool.setuptools]
 package-dir = {"" = "src"}
+# addopts' `-p` target; it lives outside the package (see its docstring).
+py-modules = ["claude_code_hooks_daemon_full_qa_gate_loader"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
@@ -111,8 +113,11 @@ addopts = [
     # Plan 00463 round 10 M1: force-load the full-QA sink plugin so
     # `--noconftest` cannot drop it -- see full_qa_gate.py's module
     # docstring and `_gate_anchor`'s handling of the resulting double
-    # registration when a project's own conftest.py also imports it.
-    "-p", "claude_code_hooks_daemon.qa.full_qa_gate",
+    # registration when a project's own conftest.py also imports it. The
+    # loader sits outside the package: a `-p` module is imported before
+    # pytest-cov starts, and the package's own import-time lines must be
+    # measured (00466 N110 round 3).
+    "-p", "claude_code_hooks_daemon_full_qa_gate_loader",
 ]
 # Coverage flags are NOT in addopts so that running a single test file
 # (e.g. pytest tests/unit/core/test_foo.py) doesn't trigger coverage on

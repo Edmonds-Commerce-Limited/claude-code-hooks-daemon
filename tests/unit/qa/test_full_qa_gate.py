@@ -188,11 +188,11 @@ class TestWholeSuiteSizedRunSucceedsWithTheLock:
         assert "REFUSED" not in result.stdout
 
 
-_FORCED_PLUGIN_ARGS: list[str] = ["-p", "claude_code_hooks_daemon.qa.full_qa_gate"]
+_FORCED_PLUGIN_ARGS: list[str] = ["-p", "claude_code_hooks_daemon_full_qa_gate_loader"]
 
 
 class TestNoconftestNoLongerDropsTheSink:
-    """Round 10 M1: `-p claude_code_hooks_daemon.qa.full_qa_gate` in this
+    """Round 10 M1: `-p claude_code_hooks_daemon_full_qa_gate_loader` in this
     project's own `addopts` is the production shape being proven here --
     the fixture suite has no `pyproject.toml` of its own, so it is passed
     explicitly on the command line, exactly as `addopts` would inject it."""
@@ -225,6 +225,9 @@ class TestDoubleRegistrationIsANoOp:
         result = _run_pytest_subprocess(tmp_path, [*_FORCED_PLUGIN_ARGS, "tests/test_f0.py"])
         assert result.returncode == 0, result.stdout + result.stderr
         assert "REFUSED" not in result.stdout
+        # The conftest imported the sink first; the loader must not then ask
+        # pytest to rewrite an already-imported module.
+        assert "PytestAssertRewriteWarning" not in result.stdout + result.stderr
 
     def test_whole_suite_selection_is_refused_with_the_real_percentage(
         self, tmp_path: Path
