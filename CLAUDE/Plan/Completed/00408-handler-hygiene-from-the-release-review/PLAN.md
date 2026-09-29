@@ -1,6 +1,6 @@
 # Plan 00408: handler hygiene from the release review
 
-**Status**: In Progress
+**Status**: Complete (2026-09-29)
 **Created**: 2026-09-14
 **Owner**: joseph
 **Priority**: Low
@@ -416,9 +416,18 @@ code.
 
 ## Success Criteria
 
-- [ ] ⬜ Every task above is terminal: fixed, or declined with the reason
+- [x] ✅ Every task above is terminal: fixed, or declined with the reason
   recorded in the code or the plan rather than only here.
-- [ ] ⬜ Full QA passes and CI is green.
+- [x] ✅ Full QA passes and CI is green. Gate 39/40 on the landed branch
+  (the one miss was the date-dependent journal-freshness advisory); CI run
+  36582488535 on `7fa5dd77` green on all five jobs.
+- [x] ✅ Every release-bound consequence is in the pending-release holding
+  area: `UNRELEASED/release-notes/058-quoting-a-word-no-longer-hides-a-destructive-git-command.md`,
+  `059-pushd-and-six-cd-spellings-into-the-daemon-directory-are-now-blocked.md`,
+  `060-the-merge-approval-and-issue-filing-gates-close-three-gaps.md`,
+  `061-archiving-a-plan-now-checks-the-links-the-move-breaks.md`,
+  `062-two-skill-documentation-changes-the-last-release-did-not-mention.md` and
+  `230-an-echo-naming-a-guarded-command-is-no-longer-denied.md`.
 
 ## Delivery & Milestones
 
