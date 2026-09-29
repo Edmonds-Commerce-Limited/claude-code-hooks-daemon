@@ -12,8 +12,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00470: persistent session optimisation](00470-persistent-session-optimisation/PLAN.md) - Not Started (owner request: the always-on issue-monitoring server session is the dogfood; cron refresh before expiry, usage-limit and restart recovery from a durable queue, and a measured orchestrator-model choice)
 
-- [00468: claude code plugins are supported properly](00468-claude-code-plugins-are-supported-properly/PLAN.md) - In Progress (from the 00467 plugin audit: 8 defects, 3 release-blocking, and 16 gaps, most resting on one missing resolver for the Claude config dir and its enabled plugins)
-
 - [00467: recommend the defence before fix plugin to client projects](00467-recommend-the-defence-before-fix-plugin-to-client-projects/PLAN.md) - Blocked (owner request: dogfood the DBF plugin, then recommend it to clients. Phase 1 is done, with shortfalls filed upstream as #4-#6 and recommendation no-go for now. Waiting on the owner's go/no-go, and on one logged-in auto-trigger probe)
 
 - [00466: niggles ledger sixteen](00466-niggles-ledger-sixteen/PLAN.md) - In Progress, the OPEN ledger for new niggles (00422 passed its size warning with N29 and keeps only its own entries; opens with N1: the venv fallback accepts an interpreter that cannot run on this host)
@@ -21,8 +19,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 - [00465: commit gates see the index after same command staging](00465-commit-gates-see-the-index-after-same-command-staging/PLAN.md) - Not Started (from 00422 N26: gates read the index before the command runs, so `git add f && git commit` passes the secret-term scan and every other staged-content gate unexamined; starts after 00464, same gates)
 
 - [00464: commit gates judge the checkout the command runs in](00464-commit-gates-judge-the-checkout-the-command-runs-in/PLAN.md) - Not Started (from 00422 N23: commit gates pick their repo from the payload `cwd`, which for a teammate is the main checkout, so a worktree commit is judged on main's staged tree — false denies, and its own content, secret terms included, never checked)
-
-- [00463: full qa is a main thread gate](00463-full-qa-is-a-main-thread-gate/PLAN.md) - In Progress (owner request after five worktree agents ran the ~18-minute full suite at once: a `scope: SUB` guard denies configured full-QA commands in sub-agents and names the targeted forms; the coordinator runs the full gate once per batch of ready branches merged into one integration worktree, and `llm_qa.py main-moved` decides whether a move on main needs it again)
 
 - [00453: supervisor modal overlay](00453-supervisor-modal-overlay/PLAN.md) - Not Started (the status-line banner from Plan 00173/00318 is a one-line TTL notification and structurally cannot hold history; this adds a hotkey-summoned inspection surface costing no model turn, no transcript entry and no status-line space — gated on the owner choosing a hotkey, F12 and F3 already rejected)
 
@@ -167,6 +163,10 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Completed Plans
 
+- [00468: claude code plugins are supported properly](Completed/00468-claude-code-plugins-are-supported-properly/PLAN.md) - Complete at `83e75879` + the archiving commit (from the 00467 plugin audit: 8 defects, 3 release-blocking, and 16 gaps, most resting on one missing resolver for the Claude config dir and its enabled plugins; the last criterion waited on 00463's simulate-record fix, now on main)
+
+- [00463: full qa is a main thread gate](Completed/00463-full-qa-is-a-main-thread-gate/PLAN.md) - Complete at `5156a81f`, merged as `83e75879`, CI fix `fd78edce` + the archiving commit (owner request after five worktree agents ran the ~18-minute full suite at once: a guard denies configured full-QA commands in sub-agents, and a pytest sink plus a host-wide lock refuse a whole-suite run not made under the coordinator's gate; live dogfood Task 2.2 carried)
+
 - [00461: journal entries only through the stamping tool](Completed/00461-journal-entries-only-through-the-stamping-tool/PLAN.md) - Complete at `e3f03f3e` + the archiving commit (owner directive after a session of hand-stamped entries, one 40 minutes in the future: an Edit/Write/Bash append to a plan `JOURNAL/` day-file, in the main checkout or a worktree, is DENIED and pointed at `mkplan.bash --journal`; remedies 00422 N21)
 
 - [00460: report size blocker gives read only agents a way out](Completed/00460-report-size-blocker-gives-read-only-agents-a-way-out/PLAN.md) - Complete at `ca2b1ba5` + the archiving commit (owner report: the size blocker told every agent to write its report to a file, which a read-only type cannot do; the daemon now saves every stopping sub-agent's reply to a pruned file and the blocker points at it)
@@ -223,10 +223,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00429: format markdown crosses repo boundaries](Completed/00429-format-markdown-crosses-repo-boundaries/PLAN.md) - Complete at `50c27581`…`cd15122c` + the archiving commit (from issue #47: the walk applied no exclusion at all, so `format-markdown .` rewrote markdown inside vendored nested checkouts; review caught the config being read from the WALK root, which made every exclusion match nothing below it)
 
-- [00427: journal timestamps agent authored and timezone naive](Completed/00427-journal-timestamps-agent-authored-and-timezone-naive/PLAN.md) - Complete at `c631d4dc`…`a208959e` + the archiving commit (from issue #45: a correct writer was not enough — `--journal` stamps UTC, but the future-dated check still read a naive LOCAL clock, so a correct entry looked 239 minutes ahead on `America/New_York`)
-
-- [00426: shipped plugins examples do not validate](Completed/00426-shipped-plugins-examples-do-not-validate/PLAN.md) - Complete at `904d63ed`…`fd414e5e` + the archiving commit (from issue #44, which asked which of two documented `plugins:` schemas is real: neither, because the required `event_type` appears in no example — and both YAML copies are commented out, so no config-loading test could ever have seen them)
-
 Older completed plans (below the retention window of the 30 highest-numbered) are archived verbatim in [Completed/README.md](Completed/README.md).
 
 ## Blocked / On Hold Plans
@@ -280,15 +276,15 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 - **Total Plans Created**: 473 (count = `hooksdaemon.latestPlanNumber` git counter)
 
-- **Completed**: 411 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
+- **Completed**: 413 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 39 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 37 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 
 - **Cancelled/Abandoned**: 13 on disk (count = `Cancelled/` folders: 00032/00034/00035 won't do — delegate mode no longer exists, 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102, 00108 superseded by 00117, 00131 residue declined, 00132 superseded by 00284, 00174 superseded by 00175, 00199 superseded by 00213, 00135 superseded by the supervisor workstream)
 
-- **Folder-to-number reconciliation**: 39 + 411 + 13 = **463 folders**, spanning
+- **Folder-to-number reconciliation**: 37 + 413 + 13 = **463 folders**, spanning
   **460 distinct plan numbers** — three numbers carry two folders each, the
   historic collisions already held in `collision_allowlist` (00034, 00039,
   00041). Plans 1–3 are on disk under the pre-zero-padding names

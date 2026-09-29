@@ -1,6 +1,6 @@
 # Plan 00463: full qa is a main thread gate
 
-**Status**: In Progress
+**Status**: Complete (2026-09-29)
 **Created**: 2026-09-24
 **Owner**: dev
 **Priority**: High
@@ -166,7 +166,9 @@ enumerates every launcher. The guarantee therefore moves to the SINK -- the
 one place every route ends up, whatever launched it: pytest itself.
 
 - `claude_code_hooks_daemon.qa.full_qa_gate` (a pytest plugin, wired from
-  `tests/conftest.py`) refuses a whole-suite-sized collected selection
+  `tests/conftest.py` AND force-loaded by `pyproject.toml`'s `addopts` through
+  `-p claude_code_hooks_daemon_full_qa_gate_loader`, a small module in
+  `src/` that registers it in `pytest_configure`) refuses a whole-suite-sized collected selection
   (over 25% of the suite's test files) unless the host-wide full-QA lock
   (`claude_code_hooks_daemon.qa.full_qa_lock`) is held, proven by an
   INHERITED file descriptor on the lock file (never an env var).
@@ -305,8 +307,8 @@ one place every route ends up, whatever launched it: pytest itself.
   `-p no:<the gate plugin>`, `PYTEST_DISABLE_PLUGIN_AUTOLOAD` (with the gate
   not force-loaded), `-c`/`--config-file`, or `-o addopts=`/
   `--override-ini addopts` -- these are SEEN text, not the UNSEEN policy.
-  Registering the plugin as an installed `pytest11` entry point AND `-p <module>` in `addopts` (so `--noconftest` alone cannot drop it) is
-  follow-up work, tracked as an owner referral below, not accepted as a
+  Force-loading the plugin from `addopts` (so `--noconftest` alone cannot drop it) was
+  follow-up work at this point; round 10 M1 below closed it. No `pytest11` entry point exists. Not accepted as a
   residual.
 - **m2 fixed.** `pytest_collection_modifyitems` runs `@pytest.hookimpl(trylast=True)`
   so the file count is taken AFTER other plugins' deselection (`-k`), not
@@ -383,8 +385,11 @@ one place every route ends up, whatever launched it: pytest itself.
 
 ### Round 10 M1 (fix round 10b): the two referrals closed
 
-- **The `--noconftest` referral closed.** `-p claude_code_hooks_daemon.qa.full_qa_gate`
-  is now in `pyproject.toml`'s `addopts`, so the sink plugin loads even when
+- **The `--noconftest` referral closed.** `-p claude_code_hooks_daemon_full_qa_gate_loader`
+  (a module outside the package, `src/claude_code_hooks_daemon_full_qa_gate_loader.py`,
+  which registers `claude_code_hooks_daemon.qa.full_qa_gate` in `pytest_configure`
+  so the package import is measured by coverage) is now in `pyproject.toml`'s
+  `addopts`, so the sink plugin loads even when
   `--noconftest` drops the conftest-import route. `_gate_anchor` (the sink,
   `full_qa_gate.py`) now handles the resulting double registration (both the
   forced `-p` route and a project's own conftest import active at once): the
@@ -430,26 +435,37 @@ decision, not left silent.
 
 ### Phase 2: Deliver
 
-- [ ] ⬜ **Task 2.1**: The batched integration gate: the coordinator merges
+- [x] ✅ **Task 2.1**: The batched integration gate: the coordinator merges
   this branch `--no-ff` with the other ready branches into an integration
   branch holding current `main`, runs `llm_qa.py main-moved --start` and full
   QA once there, and on green loops `llm_qa.py main-moved` (recheck, then
   `--advance`) until `unmoved`, then fast-forwards. It restarts the daemon
   before the push, runs `main-moved --finish` after it, then verifies ancestry
   and CI.
-- [ ] ⬜ **Task 2.2**: Live dogfood check: a sub-agent's `llm_qa.py all`
+- [x] ✅ **Task 2.2**: Live dogfood check: a sub-agent's `llm_qa.py all`
   in the main checkout is denied with the targeted forms named, and the
-  coordinator's same command runs.
+  coordinator's same command runs. Checked against the live daemon after the
+  merge with `hooks-daemon probe PreToolUse --as sub|main`, which judges the
+  call without running it: as a sub-agent, `deny` with `R-SUBAGENT-FULL-QA`
+  naming targeted QA; as the main thread, `allow`. The coordinator's own
+  gate runs on the branch are the main-thread half run for real.
 
 ## Success Criteria
 
-- [ ] An Agent-tool sub-agent or in-process teammate cannot start a full
+- [x] ✅ An Agent-tool sub-agent or in-process teammate cannot start a full
   QA run, and the deny tells it exactly what to run instead. A
   Workflow-tool agent is unmeasured, so it is not claimed.
-- [ ] The main thread's full QA and every targeted form are unaffected.
-- [ ] The coordinator workflow docs describe the new split, and the next
+- [x] ✅ The main thread's full QA and every targeted form are unaffected.
+- [x] ✅ The coordinator workflow docs describe the new split, and the next
   dispatch after merge follows it.
-- [ ] Full QA passes (run by the coordinator) and CI is green.
+- [x] ✅ Full QA passes (run by the coordinator) and CI is green. Last full
+  gate 38/40 at `408f2f56`; the two misses were three magic values in a test
+  (fixed at `5156a81f`, verified) and the date-dependent plan_qa
+  journal-freshness advisory. CI went red on the merge `83e75879` in two
+  ways the local gate could not see, both fixed test-first at `fd78edce`
+  (ledger 00466 N261). CI green on `fd78edce`.
+- [x] ✅ Every release-bound consequence is in `CLAUDE/UPGRADES/UNRELEASED/`
+  before the status flips (release notes 131, 133 and 231).
 
 ## Delivery & Milestones
 
@@ -457,4 +473,8 @@ decision, not left silent.
      "when" — do not add dates). The blow-by-blow activity log lives in
      JOURNAL/00463-Journal-YY-MM-DD.md — see CLAUDE/PlanJournalling.md. -->
 
-- Not yet delivered.
+- Landed on main in merge `83e75879` (branch `worktree-plan-463-full-qa-gate`,
+  tip `5156a81f`). Gate fixes found on the way: `9768bfad` (`llm_qa.py` imported
+  the daemon package before any venv), `d9ee6fc9` (extra-interpreter runs carry
+  the full-QA lock proof), `408f2f56` (a scaling test's warning rate-limiter
+  leaked between sizes), `5156a81f` (magic values in a test).

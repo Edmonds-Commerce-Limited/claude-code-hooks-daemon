@@ -1,6 +1,6 @@
 # Plan 00468: claude code plugins are supported properly
 
-**Status**: In Progress
+**Status**: Complete (2026-09-29)
 **Created**: 2026-09-24
 **Owner**: dev
 **Priority**: High
@@ -165,8 +165,9 @@ first, and the other fixes build on it.
 - [x] ✅ Every release-bound consequence is in `CLAUDE/UPGRADES/UNRELEASED/`
   before the status flips (release notes 019, 033–038, 041–044 and 085, and
   `config-changes/v3.67.0.yaml`).
-- [ ] ⬜ Plan 00463 has landed on main, so the P8 fix Task 5.2 relies on is
-  there. The plan archives only after that.
+- [x] ✅ Plan 00463 has landed on main, so the P8 fix Task 5.2 relies on is
+  there (merge `83e75879`, carrying 00463's `e467a5cc`, "restore the
+  simulate-record fix as the ledger 00422 N24 remedy").
 
 ## Delivery & Milestones
 

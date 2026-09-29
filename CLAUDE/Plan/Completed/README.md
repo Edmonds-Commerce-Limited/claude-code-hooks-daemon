@@ -4,6 +4,10 @@ Plans older than the 30 highest-numbered completed plans (see [../README.md](../
 
 ## Completed Plans (Archive)
 
+- [00427: journal timestamps agent authored and timezone naive](00427-journal-timestamps-agent-authored-and-timezone-naive/PLAN.md) - Complete at `c631d4dc`…`a208959e` + the archiving commit (from issue #45: a correct writer was not enough — `--journal` stamps UTC, but the future-dated check still read a naive LOCAL clock, so a correct entry looked 239 minutes ahead on `America/New_York`)
+
+- [00426: shipped plugins examples do not validate](00426-shipped-plugins-examples-do-not-validate/PLAN.md) - Complete at `904d63ed`…`fd414e5e` + the archiving commit (from issue #44, which asked which of two documented `plugins:` schemas is real: neither, because the required `event_type` appears in no example — and both YAML copies are commented out, so no config-loading test could ever have seen them)
+
 - [00425: remote docs index goes stale on delete](00425-remote-docs-index-goes-stale-on-delete/PLAN.md) - Complete at `edd91533`…`9282c9ea` + the archiving commit (from issue #43: `rm` is the one tree mutation that runs no daemon command, so `check` called the corpus fresh while the index named a deleted file. `check` now detects and reports; the network-free `remote-docs index` repairs)
 
 - [00424: remote docs add overwrites existing capture](00424-remote-docs-add-overwrites-existing-capture/PLAN.md) - Complete at `ad8e79b3`…`08f8b9c9` + the archiving commit (from issue #42: a second `add` of one URL silently replaced the first capture. The catch the report could not see is that `check` PRINTS plain `add` as the licence-drift remedy, so the refusal and that remedy moved together, welded by a test — nothing pinned that line before, in either direction)
