@@ -169,10 +169,12 @@ N8, N9 and N10 were each remedied by their own numbered plan (00431, 00433,
 it reported as red is green, and the revised verdict is that nothing needs
 changing.
 
-- [ ] ⬜ **Task 4.1**: N11 — remedy (1) only, and it is owner-gated: may the
-  acceptance fixtures move out of the human scratch directory into a dedicated
-  `untracked/acceptance/` root? Remedy (2) already exists as
-  `test_acceptance_contract.py`, so there is nothing to build for it.
+- [x] ✅ **Task 4.1**: N11 — remedy (1): the acceptance fixtures live in their
+  own `untracked/acceptance/` root (`ProjectPath.ACCEPTANCE_DIR`, built by
+  `scratch_dir.acceptance_path()`), and no acceptance command names
+  `untracked/scratch/`. The owner confirmed the root on 2026-09-29, and
+  `untracked/scratch/` is kept for real scratch files only. Remedy (2) already
+  exists as `test_acceptance_contract.py`.
 
 - [x] ✅ **Task 4.2**: N13 — remedied by Plan 00434. `mkplan.bash` states the
   root plan-folder count for the dispatch to carry, the guidance says to
