@@ -145,6 +145,8 @@ Full write-ups are in [NIGGLES.md](NIGGLES.md). One line each here:
 | N211 | Merge-conflict markers reach the ledger on main, disguised as blockquotes                                                                         | N110 gate fix 2                                                 | ⬜ Open                                                         |
 | N222 | Tests assert absolute wall-clock bounds, so a loaded host fails them while they pass alone                                                        | N110 gate fix 2                                                 | 🔄 In Progress (perf tests remedied; bound-honoured tests open) |
 | N259 | Orchestrator simulate reports denials its blocking mode would never make                                                                          | Carried from 00422 N24                                          | ⬜ Open                                                         |
+| N252 | A scaling test compared an uncapped size with a capped one                                                                                        | Full-QA gates                                                   | ✅ Remedied, `b9e36233c`                                        |
+| N260 | The local gate runs project-handler tests differently from CI                                                                                     | Main CI red since `84afc8804`                                   | ✅ Instance remedied, `257847b51`; class open                   |
 
 ## Parked branches (owner decision, 2026-09-29)
 

@@ -3,6 +3,32 @@
 Newest first. Each entry says how it was found, why it happens, and the
 candidate remedies.
 
+### N260 — the local gate runs project-handler tests differently from CI
+
+**Found**: main CI was red on "Project handler tests" on every Python from
+`84afc8804` on, while the local full-QA gate for that branch passed 40/40.
+`test_enforce_llm_qa.py` imports `tests.scaling`. CI runs the bare `pytest`
+entry point, which does not put the working directory on `sys.path`, so the
+import fails there. The local gate runs `python -m pytest`, which does put it
+on `sys.path`, so the gate cannot see this class of failure.
+
+**Remedy**: the project-handlers `conftest.py` puts the repository root on
+`sys.path` (`257847b51`). **✅ Remedied** for this instance.
+
+The class stays open while the local gate and CI invoke pytest differently.
+Candidate remedy: the local project-handler step runs the exact CI command.
+
+### N252 — a scaling test compared an uncapped size with a capped one
+
+**Found**: `test_shell_expansion.py::test_forty_repetitions_is_also_fast`
+failed on several full-QA gates, and on main CI, with "cost grew 24-28x for
+8x input". The small size (5 brace pairs, 32 spellings) sat below the
+256-spelling cap and the large one (40 pairs) at it, so the ratio measured two
+regimes rather than growth.
+
+**✅ Remedied**: both sizes now sit inside one regime (`581ccadd3`, landed
+with Plan 00408 in `b9e36233c`).
+
 ### N259 — orchestrator simulate reports denials its blocking mode would never make
 
 Carried from 00422 N24 (owner decision, 2026-09-29). Nothing is changed from
