@@ -2472,18 +2472,61 @@ class TestRoundThreeFindingsAreClosed:
         production deadline is untouched and the assertion is unchanged."""
         monkeypatch.setattr(time, "monotonic", time.process_time)
         monkeypatch.setattr(sfm, "SCAN_DEADLINE_SECONDS", _HOST_INDEPENDENT_DEADLINE_SECONDS)
-        lines = [
-            "import json",
-            *(
-                f"event_{i} = {{'hook_event_name': 'PreToolUse', 'tool_name': 'Bash', "
-                f"'tool_input': {{'command': f'echo {{json.dumps({i})}}'}}}}\n"
-                f"print(json.dumps({{'n': {i}, 'session_id': f's-{{event_{i}[\"tool_name\"]}}'}}))"
-                for i in range(300)
-            ),
-        ]
-        command = "python3 - <<'EOF'\n" + "\n".join(lines) + "\nEOF"
+        command = _realistic_program_command(300)
         decision, reason = _through_chain("Bash", {"command": command})
         assert decision != Decision.DENY, reason
+
+
+def _realistic_program_command(events: int) -> str:
+    """A `python3 -` heredoc building `events` hook inputs as dicts with
+    f-strings: the N101 field shape, with bracketed f-string subscripts."""
+    lines = [
+        "import json",
+        *(
+            f"event_{i} = {{'hook_event_name': 'PreToolUse', 'tool_name': 'Bash', "
+            f"'tool_input': {{'command': f'echo {{json.dumps({i})}}'}}}}\n"
+            f"print(json.dumps({{'n': {i}, 'session_id': f's-{{event_{i}[\"tool_name\"]}}'}}))"
+            for i in range(events)
+        ),
+    ]
+    return "python3 - <<'EOF'\n" + "\n".join(lines) + "\nEOF"
+
+
+class TestScanCostIsBoundedByInputSize:
+    """Ledger 00474 N265: the scan spent about 2.2s of CPU on the realistic
+    program above, because every bracket-expanded spelling of every token was
+    run through the glob-intersection DP against every protected pattern.
+
+    The budgets are counts of work done, measured in this process, never
+    seconds (the N222/N123 lesson: a wall-clock bound flakes on a loaded
+    host)."""
+
+    #: DP grid cells tolerated per command character. A token with no
+    #: wildcard of its own needs no grid at all; the wildcarded shapes the
+    #: realistic program does not contain keep the full DP.
+    _CELLS_PER_CHARACTER = 2
+
+    @pytest.fixture(autouse=True)
+    def _cpu_clock_and_generous_deadline(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Count work, not time: the verdict must not depend on host load."""
+        monkeypatch.setattr(time, "monotonic", time.process_time)
+        monkeypatch.setattr(sfm, "SCAN_DEADLINE_SECONDS", _HOST_INDEPENDENT_DEADLINE_SECONDS)
+
+    def _cells(self, command: str) -> int:
+        with sfm.dp_cell_counter() as cells:
+            decision, reason = _through_chain("Bash", {"command": command})
+        assert decision != Decision.DENY, reason
+        return cells[0]
+
+    def test_a_realistic_program_visits_few_dp_cells_per_character(self) -> None:
+        command = _realistic_program_command(60)
+        assert self._cells(command) <= self._CELLS_PER_CHARACTER * len(command)
+
+    def test_dp_cells_grow_linearly_with_the_program(self) -> None:
+        small = self._cells(_realistic_program_command(30))
+        large = self._cells(_realistic_program_command(120))
+        # Four times the program: linear growth is 4x, allow 5x for the fixed part.
+        assert large <= 5 * max(small, 1)
 
 
 #: A code word: attribute access, then subtraction of a set whose element is

@@ -1651,13 +1651,16 @@ def _literal_spans_agree(
 def _code_brace_words(source: str, spans: list[tuple[int, int]]) -> Iterator[str]:
     """Every word :func:`iter_brace_words` finds in ``source`` that is not
     wholly inside one of ``spans`` (sorted, non-overlapping)."""
+    span_starts = [span_start for span_start, _ in spans]
     for start, end in _brace_word_spans(source):
-        if _outside_every_span(spans, start, end):
+        if _outside_every_span(spans, span_starts, start, end):
             yield source[start:end]
 
 
-def _outside_every_span(spans: list[tuple[int, int]], start: int, end: int) -> bool:
-    index = bisect.bisect_right([span_start for span_start, _ in spans], start) - 1
+def _outside_every_span(
+    spans: list[tuple[int, int]], span_starts: list[int], start: int, end: int
+) -> bool:
+    index = bisect.bisect_right(span_starts, start) - 1
     return index < 0 or end > spans[index][1]
 
 

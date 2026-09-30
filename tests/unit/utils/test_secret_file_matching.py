@@ -8,6 +8,7 @@ position).
 """
 
 import errno
+import itertools
 import os
 import time
 from collections.abc import Callable, Iterator
@@ -3211,3 +3212,47 @@ class TestBraceStreamReadsOnlyShellExpandedText:
     def test_a_literal_name_in_a_python_heredoc_still_matches(self) -> None:
         command = f"python3 - <<'EOF'\nprint('{_OVER_BOUND_WORD}')\nopen('/r/.ssh/id_rsa')\nEOF"
         assert sfm.find_protected_mention(command, sfm.DEFAULT_PROTECTED_PATTERNS) is not None
+
+
+def _reference_globs_intersect(a: str, b: str) -> bool:
+    """Independent recursive reference for ``_globs_can_intersect`` over the
+    ``*``/``?``/literal dialect: some string is matched by both globs."""
+    seen: dict[tuple[int, int], bool] = {}
+
+    def walk(i: int, j: int) -> bool:
+        if (i, j) in seen:
+            return seen[i, j]
+        if i == len(a) and j == len(b):
+            result = True
+        elif i < len(a) and a[i] == "*":
+            result = walk(i + 1, j) or (j < len(b) and walk(i, j + 1))
+        elif j < len(b) and b[j] == "*":
+            result = walk(i, j + 1) or (i < len(a) and walk(i + 1, j))
+        elif i < len(a) and j < len(b):
+            result = (a[i] == "?" or b[j] == "?" or a[i] == b[j]) and walk(i + 1, j + 1)
+        else:
+            result = False
+        seen[i, j] = result
+        return result
+
+    return walk(0, 0)
+
+
+class TestGlobIntersectionAgreesWithReference:
+    """N265: a side with no wildcard is answered by a regex match instead of
+    the DP grid; every verdict must stay the one the two-glob language
+    intersection gives."""
+
+    def test_every_short_glob_pair_matches_the_reference(self) -> None:
+        globs = [
+            "".join(chars)
+            for length in range(5)
+            for chars in itertools.product("ab*?", repeat=length)
+        ]
+        for a, b in itertools.product(globs, repeat=2):
+            assert sfm._globs_can_intersect(a, b) == _reference_globs_intersect(a, b), (a, b)
+
+    def test_regex_metacharacters_in_a_literal_side_stay_literal(self) -> None:
+        assert sfm._globs_can_intersect("a.b(c)+", "a.b(c)+")
+        assert not sfm._globs_can_intersect("axb", "a.b")
+        assert sfm._globs_can_intersect("a.b", "?.b*")
