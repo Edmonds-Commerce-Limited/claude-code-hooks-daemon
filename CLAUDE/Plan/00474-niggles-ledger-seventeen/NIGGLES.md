@@ -26,6 +26,24 @@ other ledgers' numbering (00422 for `p422-close`, 00421's plan for `d-00421`).
 
 **Status**: ⬜ Open (all 55).
 
+### N267 — dropping a stale branch always needs a human, even when nothing can be lost
+
+**Found**: the ledger 00466 cleanup dropped 18 unmerged branches. Their ledger
+entries were carried to `main`, WIP was committed and pushed, and every remote
+copy was deleted by the agent. But the local `git branch -D` is denied for every
+branch by `destructive_git` (R-GIT-BRANCH-FORCE-DELETE, "ask the user for -D"), so
+the owner had to run it by hand. **Owner ruling**: clearing up worktree branches
+must not require human intervention; this is a defect.
+
+**Why the rule exists**: `-D` deletes a branch without checking it is merged, so an
+unpushed branch's commits become reachable only from the reflog.
+
+**Remedy**: allow `git branch -D <name>` when every named branch's tip is reachable
+from a remote-tracking ref (its commits survive on the remote), and keep denying it
+otherwise, naming the branch that is not pushed and saying to push it first.
+
+**Status**: 🔄 In progress.
+
 ### N266 — `flaggable_content_channel_guard` denies greps that never touch a flagged path
 
 **Found**: twice in one session, a content search was denied as

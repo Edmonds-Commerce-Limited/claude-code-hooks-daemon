@@ -38,6 +38,7 @@ Full write-ups are in [NIGGLES.md](NIGGLES.md). One line each here:
 
 | #          | Verdict                                                                                                          | Origin              | Status                  |
 | ---------- | ---------------------------------------------------------------------------------------------------------------- | ------------------- | ----------------------- |
+| N267       | Dropping a stale branch always needs a human, even when nothing can be lost                                      | Owner               | 🔄 In progress          |
 | 65 entries | Still open in the archived ledger 00466 ([index](../Completed/00466-niggles-ledger-sixteen/PLAN.md))             | 00466 close-out     | ⬜ Open                 |
 | N222 work  | Unfinished `tests/scaling.py` change saved from a merged branch's worktree ([saved](UNFINISHED-N252-SCALING.md)) | 00466 cleanup       | ⬜ Open                 |
 | 22 entries | Carried from the dropped `worktree-n466-small-a` branch ([list](CARRIED-REFIX-BRANCHES.md))                      | 00466 cleanup       | ⬜ Open                 |
