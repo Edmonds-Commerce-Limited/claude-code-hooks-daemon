@@ -157,6 +157,50 @@ class TestADeclaredCronAbsentFromSessionCronsBlocks:
         assert _JOB.id in result.reason
         assert "CronCreate" in result.reason
 
+    def test_the_deny_reason_always_names_the_pause_escape(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A session that must not create the job needs a way out in the deny."""
+        handler = _handler(monkeypatch, _config(_JOB))
+        result = handler.handle({"session_crons": []})
+
+        assert result.reason is not None
+        assert f"hooks-daemon cron-pause {_JOB.id}" in result.reason
+        assert "--reason" in result.reason
+
+
+class TestAReEnteredStopIsNotDeniedForever:
+    """A stop that merely re-enters after one deny is bounded, like every
+    other one-shot Stop/SubagentStop block (subagent_report_size_blocker)."""
+
+    @pytest.mark.parametrize("flag", ["stop_hook_active", "stopHookActive"])
+    def test_a_missing_job_on_re_entry_allows(
+        self, monkeypatch: pytest.MonkeyPatch, flag: str
+    ) -> None:
+        handler = _handler(monkeypatch, _config(_JOB))
+
+        result = handler.handle({"session_crons": [], flag: True})
+
+        assert result.decision is Decision.ALLOW
+
+    def test_the_first_stop_is_still_denied(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        handler = _handler(monkeypatch, _config(_JOB))
+
+        result = handler.handle({"session_crons": [], "stop_hook_active": False})
+
+        assert result.decision is Decision.DENY
+
+    def test_the_re_entry_allow_is_logged_loudly_naming_job_and_pause(
+        self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        handler = _handler(monkeypatch, _config(_JOB))
+
+        with caplog.at_level("WARNING"):
+            handler.handle({"session_crons": [], "stop_hook_active": True})
+
+        assert _JOB.id in caplog.text
+        assert "cron-pause" in caplog.text
+
 
 class TestAPresentButEmptySessionCronsIsRealInformation:
     """A present empty list is a genuine report of 'nothing running', not the
