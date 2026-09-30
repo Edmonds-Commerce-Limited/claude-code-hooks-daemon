@@ -230,7 +230,7 @@ in the strategy.
 6. **Update registry tests**
    (`tests/unit/strategies/tdd/test_tdd_strategy_registry.py`): expected
    language list + extension lookup case
-7. **Full QA**: `./scripts/qa/llm_qa.py all`
+7. **Targeted QA**: `./scripts/qa/llm_qa.py changed` (tiers: [QA.md](../QA.md))
 8. **Restart the daemon and verify RUNNING**: `./bin/hooks-daemon restart`
    then `./bin/hooks-daemon status`
 

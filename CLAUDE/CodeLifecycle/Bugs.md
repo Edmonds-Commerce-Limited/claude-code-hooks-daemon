@@ -171,26 +171,28 @@ from claude_code_hooks_daemon.core import Decision
 
 **CRITICAL**: Ensure fix doesn't break existing functionality.
 
-### Run ALL Tests
+### Run the Tests the Fix Reaches
 
 ```bash
-# Run complete test suite
-pytest tests/ -v
+# The tests for the files you changed, by path (this one is an example)
+pytest tests/unit/handlers/pre_tool_use/ -v
 
 # Expected: ALL PASS (including new regression test)
 ```
 
-### Run Full QA
+The whole suite is not part of this step: CI runs it in the tier the change
+needs, and release preparation runs it in full ([QA.md](../QA.md), "QA Tiers").
+
+### Run Targeted QA
 
 ```bash
-./scripts/qa/llm_qa.py all
+./scripts/qa/llm_qa.py changed
 
 # Expected: ALL CHECKS PASSED
 ```
 
-The full suite is the main thread's gate. A sub-agent runs
-`./scripts/qa/llm_qa.py changed` and hands over a commit; see
-[QA.md](../QA.md), "Full QA Is the Coordinator's Gate".
+This is the Targeted tier, for the main thread and sub-agents alike. The full
+suite is a release step; see [QA.md](../QA.md), "QA Tiers".
 
 **If ANY test fails**: You introduced a regression. Fix it before proceeding.
 
@@ -276,13 +278,13 @@ A bug fix is DONE when ALL of the following are verified:
 
 ### 4. Regression Testing
 
-- [ ] All existing tests still pass
+- [ ] The tests the fix reaches still pass
 - [ ] No new test failures introduced
-- [ ] Run: `pytest tests/ -v` (ALL PASS)
+- [ ] Run: `pytest <the touched tests, by path> -v` (ALL PASS)
 
-### 5. Full QA
+### 5. Targeted QA
 
-- [ ] Run: `./scripts/qa/llm_qa.py all` (main thread; a sub-agent runs `changed`)
+- [ ] Run: `./scripts/qa/llm_qa.py changed` (the full suite is a release step, see [QA.md](../QA.md), "QA Tiers")
 - [ ] Expected: "ALL CHECKS PASSED"
 
 ### 5b. Client-Mode Verification (if paths/interpreters/wrappers/assets changed)
@@ -316,9 +318,8 @@ If bug is found during acceptance testing:
 1. Stop acceptance testing immediately
 2. Create failing test for bug (unit/integration)
 3. Fix bug using TDD
-4. Run QA: main Claude runs FULL QA, ./scripts/qa/llm_qa.py all; a
-   sub-agent runs ./scripts/qa/llm_qa.py changed, and the coordinator runs
-   the full gate (see CLAUDE/QA.md, "Full QA Is the Coordinator's Gate")
+4. Run QA: ./scripts/qa/llm_qa.py changed (targeted; inside a release
+   preparation the main thread runs the Full tier, see CLAUDE/QA.md, "QA Tiers")
 5. Restart daemon successfully
 6. RESTART acceptance testing FROM TEST 1.1
 7. Continue until ALL tests pass with ZERO code changes
@@ -408,7 +409,7 @@ pytest tests/integration/test_bug_daemon_loads.py -v
 1. **Reproduce first** - Can't fix what you can't see
 2. **Write failing test** - Proves bug exists
 3. **Fix minimally** - Don't refactor while fixing
-4. **Test comprehensively** - Unit, integration, full QA
+4. **Test comprehensively** - Unit, integration, targeted QA
 5. **Restart daemon** - Catches import errors
 6. **Verify in real usage** - Ensure bug is actually fixed
 

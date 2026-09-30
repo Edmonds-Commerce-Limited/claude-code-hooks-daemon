@@ -124,12 +124,12 @@ instead of competing. Today `untracked/qa/.llm_qa.lock` is per checkout, and
 
 ### Phase 3: Rules
 
-- [ ] ⬜ **Task 3.1**: Rewrite `CLAUDE/QA.md` as the single home for the tiers.
+- [x] ✅ **Task 3.1**: Rewrite `CLAUDE/QA.md` as the single home for the tiers.
   Point `PlanWorkflow.md`, `CodeLifecycle/*`, `AgentTeam.md`, `Worktree.md` and
   `development/IssueSdlc.md` at it instead of requiring `all`.
-- [ ] ⬜ **Task 3.2**: Write the small-batches rules (WIP limit, finish before
-  start, dropping) into `Worktree.md` and `AgentTeam.md`.
-- [ ] ⬜ **Task 3.3**: Keep the release documents (`RELEASING.md`, the release
+- [x] ✅ **Task 3.2**: Write the small-batches rules (WIP limit, finish before
+  start, dropping) into `Worktree.md` and `AgentTeam.md`. Delivered in 1a5214069.
+- [x] ✅ **Task 3.3**: Keep the release documents (`RELEASING.md`, the release
   skill and agent) as the one place the full gate is required.
 
 ### Phase 3b: CI tiers (owner request)

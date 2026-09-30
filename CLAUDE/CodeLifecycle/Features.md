@@ -209,17 +209,17 @@ pytest tests/integration/test_dogfooding_hook_scripts.py -v
 - Ensure priority is set correctly
 - Ensure event type section exists
 
-## Phase 6: Full QA Suite
+## Phase 6: Targeted QA
 
-Run ALL quality checks before committing:
+Run the targeted checks before committing:
 
 ```bash
-./scripts/qa/llm_qa.py all
+./scripts/qa/llm_qa.py changed
 ```
 
-This is the main thread's gate. A sub-agent runs `./scripts/qa/llm_qa.py changed`
-instead and hands over a commit; see [QA.md](../QA.md), "Full QA Is the
-Coordinator's Gate".
+This is the Targeted tier, for the main thread and sub-agents alike. The full
+suite (`llm_qa.py all`) is a release step and is not part of this lifecycle; see
+[QA.md](../QA.md), "QA Tiers".
 
 **Expected output**: one `✅` line per check, then a summary line whose two
 numbers are equal — e.g. `QA: 18/18 PASSED`.
@@ -229,7 +229,7 @@ Do not reproduce the list here: an earlier version of this section hardcoded six
 checks and went stale as the suite grew, so a reader could see a full pass and
 still believe checks were missing.
 
-**If ANY check fails**: Fix issues and re-run full suite.
+**If ANY check fails**: Fix issues and re-run the failed tool, then `changed`.
 
 ## Phase 7: Acceptance Testing (Pre-Release)
 
@@ -281,7 +281,7 @@ Execute tests in a real Claude Code session. See `CLAUDE/AcceptanceTests/GENERAT
 **FAIL-FAST Cycle**:
 
 ```
-Test fails → Fix with TDD → Full QA → Daemon restart → RESTART ALL TESTS FROM BEGINNING
+Test fails → Fix with TDD → Targeted QA → Daemon restart → RESTART ALL TESTS FROM BEGINNING
 ```
 
 ## Phase 8: Live Testing
@@ -328,11 +328,11 @@ A feature is DONE when ALL of the following are verified:
 - [ ] `test_dogfooding_hook_scripts.py` passes (scripts match)
 - [ ] Run: `pytest tests/integration/test_dogfooding*.py -v`
 
-### 5. Full QA Suite
+### 5. Targeted QA
 
-- [ ] EVERY check the runner runs passes, with ZERO failures
-- [ ] Run: `./scripts/qa/llm_qa.py all` (the same suite as `run_all.sh`, LLM-optimised; main thread only, a sub-agent runs `changed`)
-- [ ] Expected output: "ALL CHECKS PASSED" / an `N/N PASSED` line
+- [ ] EVERY check `changed` runs passes, with ZERO failures
+- [ ] Run: `./scripts/qa/llm_qa.py changed` (the full suite is a release step, see [QA.md](../QA.md), "QA Tiers")
+- [ ] Expected output: an `N/N PASSED` line, and no unmapped file left without a reason
 
 ### 5b. Client-Mode Verification (if paths/interpreters/wrappers/assets changed)
 
@@ -394,7 +394,7 @@ Complete testing pyramid:
 2. Integration tests (component interactions)
 3. **Daemon load** (catches import errors) ← **CRITICAL**
 4. Dogfooding (config completeness)
-5. Full QA (comprehensive checks)
+5. Targeted QA (every static check, plus the tests the change maps to)
 6. Acceptance tests (real-world scenarios)
 7. Live testing (actual usage)
 

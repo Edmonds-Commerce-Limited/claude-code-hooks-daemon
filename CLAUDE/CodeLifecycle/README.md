@@ -73,6 +73,6 @@ This project has comprehensive testing already:
 - **Integration Tests**: `tests/integration/` (component interactions)
 - **Acceptance Tests**: Generated from code (see `CLAUDE/AcceptanceTests/GENERATING.md`)
 - **Dogfooding Tests**: `tests/integration/test_dogfooding*.py` (auto-verification)
-- **QA Suite**: `./scripts/qa/llm_qa.py all` (LLM-optimised; `./scripts/qa/run_all.sh` is the same suite, verbose, for a human at a terminal — the runner is the single source of truth for which checks exist, do not hardcode a count)
+- **QA**: `./scripts/qa/llm_qa.py changed` for everyday work (the Targeted tier); the full suite, `llm_qa.py all`, is a release step. The tiers are in [QA.md](../QA.md), "QA Tiers". The runner (`scripts/qa/run_all.sh`) is the single source of truth for which checks exist, do not hardcode a count
 
 Each lifecycle document (Features.md, Bugs.md, General.md) includes its own Definition of Done checklist.

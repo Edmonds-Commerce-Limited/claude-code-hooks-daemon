@@ -648,7 +648,7 @@ their API documentation is the docstrings in
 3. Write failing tests (TDD red phase)
 4. Implement handler (TDD green phase)
 5. Refactor
-6. Run full QA: `./scripts/qa/llm_qa.py all`
+6. Run targeted QA: `./scripts/qa/llm_qa.py changed` (tiers: `/workspace/CLAUDE/QA.md`)
 7. Debug again to verify handler intercepts correctly
 
 See `/workspace/CLAUDE/DEBUGGING_HOOKS.md` for the complete introspection guide and `/workspace/CLAUDE/HANDLER_DEVELOPMENT.md` for the full handler creation guide.

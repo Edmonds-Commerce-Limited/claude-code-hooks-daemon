@@ -246,11 +246,14 @@ Edit files in `/workspace/src/claude_code_hooks_daemon/`
 # Format and lint (auto-fixes)
 ./scripts/qa/run_autofix.sh
 
-# Full QA suite (agent entry point; run_all.sh is the human-verbose variant)
-./scripts/qa/llm_qa.py all
+# Targeted QA: the everyday entry point for agents (tiers: CLAUDE/QA.md)
+./scripts/qa/llm_qa.py changed
+
+# The full suite is a release step (main thread only):
+# ./scripts/qa/llm_qa.py all   (run_all.sh is the human-verbose variant)
 
 # Individual checks
-./scripts/qa/run_tests.sh         # Pytest with 95% coverage
+./scripts/qa/run_tests.sh         # The WHOLE suite with 95% coverage: release step
 ./scripts/qa/run_type_check.sh    # MyPy strict mode
 ./scripts/qa/run_lint.sh           # Ruff linter
 ./scripts/qa/run_format_check.sh  # Black formatter

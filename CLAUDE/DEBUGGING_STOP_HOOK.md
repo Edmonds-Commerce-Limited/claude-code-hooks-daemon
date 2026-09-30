@@ -379,10 +379,10 @@ After any code change to the stop hook chain:
    "$PY" -m pytest tests/unit/handlers/stop/ -v
    ```
 
-4. Run full QA:
+4. Run targeted QA (the tiers are in [QA.md](QA.md)):
 
    ```bash
-   ./scripts/qa/llm_qa.py all
+   ./scripts/qa/llm_qa.py changed
    ```
 
 5. In a live Claude Code session, verify that Claude auto-blocks when stopping without `STOPPING BECAUSE:`.

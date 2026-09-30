@@ -1,6 +1,7 @@
 """The documented ``main-moved`` branching still branches under ``set -euo pipefail``.
 
-Plan 00463 review 4 N3. ``CLAUDE/AgentTeam.md`` branched on ``case $? in``
+Plan 00463 review 4 N3. ``CLAUDE/AgentTeam.md`` (now ``CLAUDE/QA.md``, the one
+home of the full-gate batch mechanism) branched on ``case $? in``
 straight after ``llm_qa.py main-moved``. The daemon's
 ``R-BASH-SAFE-MODE-PRELUDE-MISSING`` advisory asks for ``set -euo pipefail``,
 and under ``errexit`` any verdict but ``unmoved`` killed the script before the
@@ -22,13 +23,13 @@ from pathlib import Path
 import pytest
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
-_AGENT_TEAM = _REPO_ROOT / "CLAUDE" / "AgentTeam.md"
+_QA_GUIDE = _REPO_ROOT / "CLAUDE" / "QA.md"
 
 #: A snippet runs from the line ``rc=0`` to the ``esac`` that closes its case.
 _SNIPPET = re.compile(r"^rc=0\n.*?^esac$", re.MULTILINE | re.DOTALL)
 
-#: STEP 5 of "Parent → Main", and Phase 5 of the worked example.
-_DOCUMENTED_SNIPPETS = 2
+#: Step 5 of "The Batched Integration Gate" in QA.md.
+_DOCUMENTED_SNIPPETS = 1
 
 #: Every exit ``main-moved`` has: unmoved, no verdict, full-gate, docs-only,
 #: targeted and head-moved.
@@ -51,7 +52,7 @@ _BRANCH_MESSAGES = {
 
 
 def _snippets() -> list[str]:
-    return _SNIPPET.findall(_AGENT_TEAM.read_text(encoding="utf-8"))
+    return _SNIPPET.findall(_QA_GUIDE.read_text(encoding="utf-8"))
 
 
 def _executable(path: Path, body: str) -> None:
@@ -89,7 +90,7 @@ def _run(
     return completed, git_log
 
 
-def test_the_agent_team_guide_documents_each_branching_snippet() -> None:
+def test_the_qa_guide_documents_each_branching_snippet() -> None:
     assert len(_snippets()) == _DOCUMENTED_SNIPPETS
 
 

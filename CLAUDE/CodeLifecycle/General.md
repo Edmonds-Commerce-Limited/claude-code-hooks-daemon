@@ -34,9 +34,8 @@ Standard process for any code modification that isn't a new feature or bug fix.
 # 2. Auto-fix formatting and linting
 ./scripts/qa/run_autofix.sh
 
-# 3. Run QA: the full suite on the main thread, targeted QA in a sub-agent
-./scripts/qa/llm_qa.py all       # main thread / coordinator
-./scripts/qa/llm_qa.py changed   # sub-agent (the full suite is denied there)
+# 3. Run targeted QA (main thread and sub-agents alike; see CLAUDE/QA.md)
+./scripts/qa/llm_qa.py changed
 
 # 4. Verify daemon loads (MANDATORY)
 ./bin/hooks-daemon restart
@@ -86,15 +85,14 @@ pytest tests/unit/path/to/test_module.py --cov=src/path/to/module.py --cov-repor
 # - ruff check --fix src/ tests/ (auto-fixes lint issues)
 ```
 
-### Step 4: Run Full QA Suite
+### Step 4: Run Targeted QA
 
 ```bash
-./scripts/qa/llm_qa.py all
+./scripts/qa/llm_qa.py changed
 ```
 
-The full suite is the main thread's gate. A sub-agent runs
-`./scripts/qa/llm_qa.py changed` and hands over a commit; see
-[QA.md](../QA.md), "Full QA Is the Coordinator's Gate".
+This is the Targeted tier, for the main thread and sub-agents alike. The full
+suite is a release step; see [QA.md](../QA.md), "QA Tiers".
 
 **Expected output**: one `✅ PASSED` line per check, then the overall verdict.
 The runner enumerates its own checks — do not hardcode the list or the count
@@ -173,8 +171,8 @@ A general code change is DONE when ALL of the following are verified:
 ### 2. Tests
 
 - [ ] Relevant tests added/updated
-- [ ] 95%+ coverage maintained
-- [ ] All tests pass: `pytest tests/ -v`
+- [ ] 95%+ coverage maintained (measured by CI's full matrix and the release's full gate)
+- [ ] The tests you touched pass: `pytest <the touched tests, by path> -v`
 
 ### 3. Daemon Load (MANDATORY)
 
@@ -183,9 +181,9 @@ A general code change is DONE when ALL of the following are verified:
 - [ ] Run: `./bin/hooks-daemon restart`
 - [ ] Verify: `./bin/hooks-daemon status` (RUNNING)
 
-### 4. Full QA
+### 4. Targeted QA
 
-- [ ] Run: `./scripts/qa/llm_qa.py all` (main thread; a sub-agent runs `changed`)
+- [ ] Run: `./scripts/qa/llm_qa.py changed` (the full suite is a release step, see [QA.md](../QA.md), "QA Tiers")
 - [ ] Expected: "ALL CHECKS PASSED"
 
 ### 5. Client-Mode Verification (if paths/interpreters/wrappers/assets changed)
@@ -284,7 +282,7 @@ def handler_b():
 - [ ] Update all callers
 - [ ] Maintain test coverage
 - [ ] Verify behaviour unchanged
-- [ ] Run full QA
+- [ ] Run targeted QA
 
 ### Documentation Updates
 
@@ -336,7 +334,7 @@ def handler_b():
 - [ ] Coverage increased
 - [ ] No test regressions
 - [ ] Test isolation maintained
-- [ ] Run full test suite
+- [ ] Run the tests that read the touched files, by path
 
 ## Individual QA Commands
 
@@ -352,7 +350,7 @@ If you need to run checks individually:
 # Type checking (strict mode)
 ./scripts/qa/run_type_check.sh
 
-# Unit tests with coverage (95%+ required)
+# The WHOLE suite with coverage (95%+ required): release preparation, main thread only
 ./scripts/qa/run_tests.sh
 
 # Security scanning (Bandit)
@@ -361,7 +359,10 @@ If you need to run checks individually:
 # Magic value detection (no magic strings/numbers)
 ./scripts/qa/run_magic_value_check.sh
 
-# Run all checks
+# Targeted checks for the change
+./scripts/qa/llm_qa.py changed
+
+# Every check: the release's Full tier, main thread only (CLAUDE/QA.md)
 ./scripts/qa/llm_qa.py all
 ```
 
