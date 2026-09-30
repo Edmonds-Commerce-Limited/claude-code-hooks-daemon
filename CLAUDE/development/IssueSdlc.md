@@ -428,6 +428,15 @@ A tick that stops with a recorded reason is a **successful** tick. A tick that
 guesses in order to look productive is the failure this runbook exists to
 prevent.
 
+## Ticks while the session awaits the owner
+
+A stop that declares `[awaiting-human]` normally drops every declared job's tick
+(`R-DECLARED-CRON-SUPPRESSED`). The `issue-sdlc` job sets
+`runs_while_awaiting_human: true` in `persistent_crons`, so its tick is still
+delivered: its work is independent of the pending question. `failsafe-recovery`
+does not set it and stays suppressed, because resuming interrupted work is what
+waits on the human. The option defaults to false for any job that omits it.
+
 ## Pausing the hourly cron for one session
 
 When the owner says to stop the `issue-sdlc` cron for now, pause it rather
