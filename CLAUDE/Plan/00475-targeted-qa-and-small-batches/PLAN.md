@@ -105,8 +105,13 @@ instead of competing. Today `untracked/qa/.llm_qa.lock` is per checkout, and
 
 ### Phase 1: Measure
 
-- [ ] ⬜ **Task 1.1**: Measure each of the 40 `llm_qa.py` checks on this host.
-  Record which are cheap enough for the targeted tier.
+- [ ] 🔄 **Task 1.1**: Measure each of the 40 `llm_qa.py` checks on this host.
+  Record which are cheap enough for the targeted tier. First measurement: 27
+  checks together (every check except `tests`, `smoke_test`, `semgrep`,
+  `dependencies`, `github_urls`, `python_var_guidance`, `skip_list_substring`,
+  `dangerous_invocation_corpus`, `security_downgrade_flags`, `capture_corruption`,
+  `sensitive_content`, `git_history` and `british_english`) took 394 seconds
+  wall-clock. The remaining non-test checks still need timing.
 
 ### Phase 2: Targeted QA
 
