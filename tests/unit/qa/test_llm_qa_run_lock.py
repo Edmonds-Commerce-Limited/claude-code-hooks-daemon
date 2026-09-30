@@ -1,32 +1,15 @@
-"""A second QA run must not silently race a first (Plan 00262 Phase 1).
+"""The QA run lock must not outlive its run (Plan 00262 Phase 1, Plan 00463).
 
-Nothing stopped a second `llm_qa.py` starting while one was already in flight.
-Both drive the same `tests/` tree and both write `untracked/qa/coverage.json`,
-so the two contend and NEITHER verdict can be trusted -- a contended run can
-fail a check that is fine, and pass one that is not.
+The lock is now the host-wide one in the common git dir (Plan 00475 Task 2.3;
+see ``test_llm_qa_host_lock.py`` for the queueing, timeout and worktree tests).
+What stays pinned here is a property of the descriptor itself:
 
-That matters because this is a GATING signal: `CLAUDE.md` and `RELEASING.md`
-both make a green QA run a precondition for committing and for releasing. A
-guard whose verdict is unreliable under a condition nobody detects converts a
-blocking gate into a coin flip without saying so.
-
-Found by causing it: two suites raced for ~7 minutes during Plan 00261, and
-earlier in that same session a `test_install_sh_end_to_end` failure from the
-same cause was dismissed as a one-off. That is the real damage -- a contended
-run teaches you to discount failures.
-
-TWO DESIGN POINTS PINNED HERE:
-
-`--read-only` must stay unlocked. It never runs tools (the executing loop in
-`main()` is guarded by `if not read_only`), so it cannot contend -- and it is
-exactly the command someone would reach for to inspect a run already in
-progress. Locking it would block the diagnostic during the only situation where
-the diagnostic is wanted.
-
-The lock must not survive its holder. `fcntl.flock` is used rather than a
+The lock must not survive its holder. ``fcntl.flock`` is used rather than a
 PID-file convention precisely because the kernel drops it when the process
 dies -- including SIGKILL, which a PID file cannot handle. That removes the
-entire stale-lock class rather than adding cleanup logic for it.
+entire stale-lock class rather than adding cleanup logic for it. And the run's
+descriptor is opened non-inheritable, so a daemon a tool starts during the run
+cannot keep the lock after the run exits.
 """
 
 from __future__ import annotations
@@ -60,74 +43,6 @@ def _load_llm_qa() -> Any:
 llm_qa = _load_llm_qa()
 
 
-class TestRunLockExists:
-    """The lock primitive itself."""
-
-    def test_module_exposes_a_run_lock(self) -> None:
-        assert hasattr(llm_qa, "run_lock"), "llm_qa must expose a run_lock context manager"
-
-    def test_lock_path_is_not_in_tmp(self, tmp_path: Path) -> None:
-        """Security standard B108: never `/tmp` for runtime files.
-
-        The daemon's own rule is that runtime state lives under the project's
-        untracked dir, not a world-writable shared directory.
-        """
-        lock_path = llm_qa.run_lock_path()
-        assert not str(lock_path).startswith("/tmp/"), f"lock must not live in /tmp: {lock_path}"
-        assert "untracked" in str(lock_path), f"lock should live under untracked/: {lock_path}"
-
-
-class TestSecondRunIsRefused:
-    """The behaviour that matters: two runs cannot execute tools concurrently."""
-
-    def test_second_acquisition_is_refused_while_first_is_held(self, tmp_path: Path) -> None:
-        """The core guarantee. Held in-process, contended from a child.
-
-        A same-process second acquire would prove nothing: `flock` is advisory
-        per open-file-description, so the honest test needs a real second
-        process -- which is also the shape of the real failure.
-        """
-        lock_path = tmp_path / "qa.lock"
-
-        probe = (
-            "import sys;"
-            f"sys.path.insert(0, {str(PROJECT_ROOT / 'scripts' / 'qa')!r});"
-            "import importlib.util;"
-            f"spec = importlib.util.spec_from_file_location('m', {str(PROJECT_ROOT / 'scripts' / 'qa' / 'llm_qa.py')!r});"
-            "m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m);"
-            f"acquired = m.try_acquire_run_lock({str(lock_path)!r});"
-            "print('ACQUIRED' if acquired else 'REFUSED')"
-        )
-
-        with llm_qa.run_lock(lock_path):
-            result = subprocess.run(
-                [sys.executable, "-c", probe],
-                capture_output=True,
-                text=True,
-                timeout=Timeout.QA_TEST_TIMEOUT,
-                check=False,
-            )
-
-        assert "REFUSED" in result.stdout, (
-            "a second process must be refused while the lock is held. "
-            f"stdout={result.stdout!r} stderr={result.stderr!r}"
-        )
-
-    def test_lock_is_released_when_holder_exits(self, tmp_path: Path) -> None:
-        """After the holder releases, the next run must proceed.
-
-        A guard that permanently wedges the suite would be worse than the race
-        it prevents -- an agent would learn to delete the lock file, which
-        reintroduces the race AND removes the signal.
-        """
-        lock_path = tmp_path / "qa.lock"
-
-        with llm_qa.run_lock(lock_path):
-            pass
-
-        assert llm_qa.try_acquire_run_lock(str(lock_path)) is True
-
-
 def _run_that_starts_a_daemon(lock_path: Path, *, leak_the_lock: bool) -> tuple[int, int]:
     """A QA run that takes the lock, starts a long-lived child, and exits.
 
@@ -149,8 +64,7 @@ def _run_that_starts_a_daemon(lock_path: Path, *, leak_the_lock: bool) -> tuple[
         "import os, subprocess, sys, importlib.util;"
         f"spec = importlib.util.spec_from_file_location('m', {str(PROJECT_ROOT / 'scripts' / 'qa' / 'llm_qa.py')!r});"
         "m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m);"
-        f"fd = m._open_lock_fd({str(lock_path)!r});"
-        "import fcntl; fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB);"
+        f"fd = m.acquire_host_lock({str(lock_path)!r}, wait_seconds=0, announce=print);"
         f"os.set_inheritable(fd, {leak_the_lock!r});"
         f"child = subprocess.Popen([sys.executable, '-c', 'import os; os.read({read_end}, 1)'],"
         " close_fds=False, start_new_session=True,"
@@ -212,59 +126,33 @@ class TestADaemonStartedUnderTheRunDoesNotHoldTheLock:
             os.close(keep_alive)
 
 
-class TestHolderIsIdentified:
-    """A refusal must be actionable, not merely a refusal."""
+class TestHolderStampIsTheContractTheDaemonReads:
+    """``hooks-daemon restart`` warns from this stamp; the two must agree on its keys."""
 
-    def test_lock_file_records_the_holder_pid(self, tmp_path: Path) -> None:
-        """'Already running' with no detail invites deleting the lock file.
-
-        Naming the PID lets the reader check whether it is alive, and decide
-        between waiting and investigating.
-        """
+    def test_stamp_records_the_holder_pid_and_checkout(self, tmp_path: Path) -> None:
         lock_path = tmp_path / "qa.lock"
+        fd = os.open(lock_path, os.O_RDWR | os.O_CREAT)
+        try:
+            llm_qa._stamp_holder(fd, Path("/some/checkout"))
+        finally:
+            os.close(fd)
 
-        with llm_qa.run_lock(lock_path):
-            recorded = lock_path.read_text()
+        assert lock_path.read_text().splitlines() == [
+            f"pid={os.getpid()}",
+            "checkout=/some/checkout",
+        ]
 
-        assert (
-            str(os.getpid()) in recorded
-        ), f"lock file must record the holder pid, got {recorded!r}"
+    def test_daemon_reads_the_stamp_the_runner_writes(self, tmp_path: Path) -> None:
+        from claude_code_hooks_daemon.daemon.cli import _recorded_qa_lock_holder
 
-    def test_refusal_message_names_the_pid_and_what_to_do(self, tmp_path: Path) -> None:
         lock_path = tmp_path / "qa.lock"
+        fd = os.open(lock_path, os.O_RDWR | os.O_CREAT)
+        try:
+            llm_qa._stamp_holder(fd, tmp_path)
+        finally:
+            os.close(fd)
 
-        with llm_qa.run_lock(lock_path):
-            message = llm_qa.busy_message(str(lock_path))
-
-        assert str(os.getpid()) in message, "refusal must name the live run's pid"
-        assert "--read-only" in message, "refusal should point at the read-only inspection route"
-
-
-class TestReadOnlyIsNotLocked:
-    """`--read-only` runs no tools, so it must never be blocked."""
-
-    def test_read_only_run_succeeds_while_lock_is_held(self, tmp_path: Path) -> None:
-        """The diagnostic must work during the only situation it is wanted in."""
-        lock_path = tmp_path / "qa.lock"
-
-        with llm_qa.run_lock(lock_path):
-            result = subprocess.run(
-                [
-                    sys.executable,
-                    str(PROJECT_ROOT / "scripts" / "qa" / "llm_qa.py"),
-                    "--read-only",
-                    "format",
-                ],
-                capture_output=True,
-                text=True,
-                timeout=Timeout.QA_TEST_TIMEOUT,
-                check=False,
-                cwd=str(PROJECT_ROOT),
-            )
-
-        assert (
-            "already running" not in result.stdout.lower()
-        ), f"--read-only must not be refused by the run lock. stdout={result.stdout!r}"
+        assert _recorded_qa_lock_holder(lock_path, tmp_path) == str(os.getpid())
 
 
 if __name__ == "__main__":

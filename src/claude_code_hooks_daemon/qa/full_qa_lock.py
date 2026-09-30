@@ -86,7 +86,9 @@ def open_lock_fd(project_root: Path) -> int:
 
 
 @contextmanager
-def acquire_full_qa_lock(project_root: Path, *, blocking: bool = True) -> Generator[int]:
+def acquire_full_qa_lock(
+    project_root: Path, *, blocking: bool = True, reuse_inherited: bool = False
+) -> Generator[int]:
     """Hold the host-wide full-QA lock for the block's duration.
 
     The descriptor is yielded so a caller that launches Python subprocesses
@@ -107,10 +109,21 @@ def acquire_full_qa_lock(project_root: Path, *, blocking: bool = True) -> Genera
         project_root: any checkout (main or worktree) of this repository.
         blocking: wait for the lock (the default) or raise `BlockingIOError`
             immediately when another holder has it.
+        reuse_inherited: when an ancestor (`llm_qa.py`) already holds the lock
+            through an inherited descriptor, yield THAT descriptor instead of
+            opening a second one, which would wait on its own parent for ever.
+            The inherited descriptor is not this call's to close, so it is
+            left open. Off by default: a plain acquire must keep refusing a
+            second holder, including one in this same process.
 
     Raises:
         BlockingIOError: `blocking=False` and the lock is already held.
     """
+    if reuse_inherited:
+        inherited = find_inherited_lock_fd(project_root)
+        if inherited is not None:
+            yield inherited
+            return
     fd = open_lock_fd(project_root)
     try:
         flags = fcntl.LOCK_EX if blocking else fcntl.LOCK_EX | fcntl.LOCK_NB
@@ -122,6 +135,20 @@ def acquire_full_qa_lock(project_root: Path, *, blocking: bool = True) -> Genera
 
 def full_qa_lock_is_held(project_root: Path) -> bool:
     """Whether THIS process can prove an ancestor holds the host-wide lock.
+
+    See :func:`find_inherited_lock_fd` for the proof. Anything it cannot
+    establish -- not a git worktree, `/proc` unavailable -- is read as NOT
+    held. This is a security caller: a missing answer must never be mistaken
+    for a granted one.
+    """
+    try:
+        return find_inherited_lock_fd(project_root) is not None
+    except OSError:
+        return False
+
+
+def find_inherited_lock_fd(project_root: Path) -> int | None:
+    """The inherited descriptor that PROVES an ancestor holds the host-wide lock.
 
     Review 10 B2: checking "is an inherited fd open on the lock path" and
     then, separately, "does a FRESH probe find the file locked" proves only
@@ -151,20 +178,16 @@ def full_qa_lock_is_held(project_root: Path) -> bool:
       raises `BlockingIOError` -- this descriptor is not the one holding it,
       so this candidate proves nothing, no matter who else does hold it.
 
-    Anything this cannot establish -- `/proc` unavailable, no candidate
-    fd resolves to the lock path -- is read as NOT held. This is a security
-    caller: a missing answer must never be mistaken for a granted one.
-    """
-    try:
-        lock_path = host_lock_path(project_root).resolve()
-    except OSError:
-        return False
+    Returns:
+        The proving descriptor, or None when no candidate fd resolves to the
+        lock path and holds it.
 
-    fd_dir = Path("/proc/self/fd")
-    try:
-        candidates = list(fd_dir.iterdir())
-    except OSError:
-        return False
+    Raises:
+        OSError: `project_root` is not inside a git worktree, or `/proc` is
+            unreadable, so nothing can be established either way.
+    """
+    lock_path = host_lock_path(project_root).resolve()
+    candidates = list(Path("/proc/self/fd").iterdir())
 
     skipped_unresolvable = 0
     skipped_not_the_holder = 0
@@ -205,13 +228,13 @@ def full_qa_lock_is_held(project_root: Path) -> bool:
             # still needs the ordinary, non-CLOEXEC inheritance across
             # fork/exec to have carried the fd this far.
             fcntl.fcntl(fd, fcntl.F_SETFD, fcntl.fcntl(fd, fcntl.F_GETFD) | fcntl.FD_CLOEXEC)
-            return True
+            return fd
     if skipped_unresolvable or skipped_not_the_holder:
         logger.debug(
-            "full_qa_lock_is_held(%s): no inherited fd proved possession "
+            "find_inherited_lock_fd(%s): no inherited fd proved possession "
             "(%d unresolvable, %d resolved but not the holder)",
             lock_path,
             skipped_unresolvable,
             skipped_not_the_holder,
         )
-    return False
+    return None

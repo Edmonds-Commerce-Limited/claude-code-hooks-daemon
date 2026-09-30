@@ -760,7 +760,7 @@ class TestTheGateRunCertifies:
         monkeypatch.setattr(llm_qa, "PROJECT_ROOT", repo)
         monkeypatch.setattr(llm_qa, "QA_OUTPUT_DIR", qa_dir)
 
-        def run_tool(name: str, extra_args: Any = ()) -> int:
+        def run_tool(name: str, extra_args: Any = (), lock_fd: int | None = None) -> int:
             (qa_dir / llm_qa.TOOL_REGISTRY[name].json_file).write_text("{}", encoding="utf-8")
             return 0
 

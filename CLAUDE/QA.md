@@ -57,8 +57,8 @@ split below applies to every kind of sub-agent all the same.
 **Why.** When the rule was made, five full runs were executing at once, one
 per worktree, each about 25,700 tests over 15-20 minutes on eight cores. Each
 agent re-ran the suite after every fix round, and the coordinator ran it again
-before merging. The per-checkout run lock (Plan 00262) cannot help across
-worktrees. A coordinator gate that still ran once per branch, one at a time,
+before merging. The old per-checkout run lock (Plan 00262) could not help
+across worktrees; the host-wide lock below replaces it. A coordinator gate that still ran once per branch, one at a time,
 only moved the queue: N ready branches cost N full runs, N pushes and N CI runs.
 
 **Why the gate stays BEFORE `main` moves.** Cross-cutting checks break from
@@ -103,17 +103,50 @@ The coordinator, never a sub-agent:
    the evidence.
 6. **Red:** see "A red batch" below.
 
-**The coordinator's `llm_qa.py all` (step 4) is the only run holding the
-host-wide full-QA lock.** A sub-agent's `subagent_full_qa_blocker` handler is
-the friendly first line, but a Bash-text denylist can never enumerate every
-way to start a whole-suite run. So `tests/conftest.py`
-(`claude_code_hooks_daemon.qa.full_qa_gate`) refuses a whole-suite-sized
-pytest COLLECTION outright unless it holds that lock, proven by an inherited
-file descriptor on the lock file -- the sink every route ends up at,
-regardless of what launched it. `scripts/qa/run_tests.sh` and CI both acquire
-it before their own whole-suite pytest run; see
-`src/claude_code_hooks_daemon/qa/full_qa_lock.py` and Plan
-00463's "Round 9" note for the design.
+**One QA process at a time on the host.** Every `llm_qa.py` run that executes
+tools (`all`, `changed`, or named tools) takes ONE host-wide lock,
+`<git-common-dir>/hooksdaemon-full-qa.lock`, before its first tool starts.
+The common git dir is shared by every worktree, so a run in one worktree
+queues behind a run in another. The wait is bounded and queues instead of
+refusing:
+
+- While the lock is held elsewhere the run prints to stderr, at once and then
+  every minute, `llm_qa: waiting for the host-wide QA lock ... held by pid N in <checkout>`. The pid and checkout come from a stamp the holding
+  `llm_qa.py` writes into the lock file and are shown only while that pid is
+  alive. A holder that is not `llm_qa.py` (a bare `run_tests.sh`) stamps
+  nothing and is reported as unknown.
+- The wait is `FULL_QA_LOCK_WAIT_SECONDS`, default 600, the same variable
+  `run_tests.sh` uses. A value that is not a non-negative number is an error,
+  exit 1.
+- **Exit 4 (`EXIT_LOCK_TIMEOUT`)**: the lock was still held when the wait ran
+  out and NO tool ran. It is distinct from 1 (a check failed) and from 3
+  (the retired "busy" refusal of the per-checkout lock, never reused). The
+  message names the holder and says not to delete the lock file: `flock`
+  drops the lock when its holder exits, so a stale file is not a held lock.
+  A live orphan that inherited the descriptor is what can hold it.
+- Not locked, because they run no tools: `--read-only`, `--help`, and
+  `main-moved`. `--read-only` is how you inspect the run you are queued
+  behind.
+- `hooks-daemon restart` warns when a run holds this lock and the stamp names
+  this checkout (or names nobody).
+
+**The lock is one lock, and a whole-suite run inside it does not wait on
+itself.** `llm_qa.py` passes its locked descriptor to every tool it starts
+(`pass_fds`, plus `FULL_QA_LOCK_INHERITED_FD` as a hint for the shell side).
+`tests/conftest.py` (`claude_code_hooks_daemon.qa.full_qa_gate`) refuses a
+whole-suite-sized pytest COLLECTION outright unless it holds that lock,
+proven by an inherited file descriptor on the lock file and `flock` on that
+very descriptor -- never by the variable. That is the sink every route ends up
+at, regardless of what launched it, and it is why a sub-agent's
+`subagent_full_qa_blocker` handler, a friendly first line that cannot
+enumerate every launcher, is not the guarantee. `scripts/qa/run_tests.sh`
+recognises the inherited descriptor and does not re-acquire, and
+`run_test_matrix.py` does the same (`acquire_full_qa_lock(..., reuse_inherited=True)`). A bare `run_tests.sh`, and CI, acquire it themselves.
+`llm_qa.py` runs under the system `python3` before any venv and cannot import
+the daemon package, so it opens the same file with its own stdlib code;
+`tests/unit/qa/test_llm_qa_host_lock.py` pins that the two agree. See
+`src/claude_code_hooks_daemon/qa/full_qa_lock.py` and Plan 00463's "Round 9"
+note for the design.
 
 **While a batch is in flight, `main` is frozen for code.** The coordinator's
 own doc commits (ledger rows, journal entries, archival) either wait for the
@@ -281,7 +314,8 @@ something the run started is still alive. A daemon restarted under the gate
 inherits every inheritable descriptor, so a shell `flock` on fd 9 must close it
 for the long-lived children: `hooks-daemon restart 9>&-`, and `exec 9>&-` before
 a keepalive. Otherwise the daemon holds the lock and the next gate waits for
-ever. `llm_qa.py`'s own run lock is opened non-inheritable, and
+ever. `llm_qa.py`'s own lock descriptor is opened non-inheritable and passed only
+to the tool it is running, and
 `tests/unit/qa/test_llm_qa_run_lock.py` pins that a daemon started during a run
 does not keep it.
 

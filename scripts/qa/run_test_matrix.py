@@ -617,7 +617,9 @@ def main() -> int:
     print(f"CI matrix {ci_versions}; primary interpreter {primary_version}")
     # Held for every child run: each is a whole-suite pytest the sink refuses
     # unless its ancestry holds this lock (Plan 00463).
-    with acquire_full_qa_lock(PROJECT_ROOT) as lock_fd:
+    # Under `llm_qa.py` the parent already holds this lock and passes it down;
+    # a second, fresh acquire would wait on its own parent for ever.
+    with acquire_full_qa_lock(PROJECT_ROOT, reuse_inherited=True) as lock_fd:
         deps = MatrixDeps(
             provision=provision,
             launch=functools.partial(launch, lock_fd=lock_fd),

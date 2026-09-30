@@ -737,5 +737,5 @@ class TestEveryChildRunCarriesTheFullQaLockProof:
     def test_the_runner_acquires_the_host_lock_and_passes_it_to_every_launch(self) -> None:
         text = MATRIX_SCRIPT.read_text(encoding="utf-8")
 
-        assert "acquire_full_qa_lock(PROJECT_ROOT)" in text
+        assert "acquire_full_qa_lock(PROJECT_ROOT, reuse_inherited=True)" in text
         assert "lock_fd=" in text

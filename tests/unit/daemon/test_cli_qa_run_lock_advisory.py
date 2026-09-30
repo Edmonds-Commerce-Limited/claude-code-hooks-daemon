@@ -20,24 +20,37 @@ at WARNING so it is not mistaken for "no run in progress".
 from __future__ import annotations
 
 import logging
+import subprocess
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
-from claude_code_hooks_daemon.daemon.cli import _QA_RUN_LOCK_RELPATH, _qa_run_lock_holder
+from claude_code_hooks_daemon.constants.timeout import Timeout
+from claude_code_hooks_daemon.daemon.cli import _qa_run_lock_holder
+from claude_code_hooks_daemon.qa.full_qa_lock import host_lock_path
 
 
-def _lock_file(root: Path) -> Path:
-    lock = root / _QA_RUN_LOCK_RELPATH
-    lock.parent.mkdir(parents=True, exist_ok=True)
-    lock.write_text("pid=4242\n", encoding="utf-8")
+def _lock_file(root: Path, body: str = "pid=4242\n") -> Path:
+    """The host-wide QA lock file of a real repository rooted at ``root``."""
+    subprocess.run(["git", "init", "-q", str(root)], check=True, timeout=Timeout.QA_TEST_TIMEOUT)
+    lock = host_lock_path(root)
+    lock.write_text(body, encoding="utf-8")
     return lock
 
 
 class TestNothingHoldsTheLock:
     def test_an_absent_lock_file_is_not_a_held_lock(self, tmp_path: Path) -> None:
+        _lock_file(tmp_path).unlink()
+
         assert _qa_run_lock_holder(tmp_path) is None
+
+    def test_a_directory_that_is_no_repository_has_no_lock_to_hold(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        with caplog.at_level(logging.WARNING):
+            assert _qa_run_lock_holder(tmp_path) is None
+        assert "Could not tell whether a QA run is in progress" in caplog.text
 
     def test_a_lock_file_nobody_holds_is_not_a_held_lock(self, tmp_path: Path) -> None:
         """A lock FILE on disk says nothing about whether a lock is HELD."""
@@ -142,3 +155,26 @@ class TestAHeldLockIsStillReported:
 
         with patch("claude_code_hooks_daemon.daemon.cli.fcntl.flock", side_effect=BlockingIOError):
             assert _qa_run_lock_holder(tmp_path) == "4242"
+
+
+class TestTheHostWideLockIsSharedAcrossCheckouts:
+    """Plan 00475 Task 2.3: the lock now spans worktrees, so the advisory must not cry wolf."""
+
+    def test_a_holder_stamped_with_another_checkout_is_not_reported(self, tmp_path: Path) -> None:
+        _lock_file(tmp_path, f"pid=4242\ncheckout={tmp_path / 'elsewhere'}\n")
+
+        with patch("claude_code_hooks_daemon.daemon.cli.fcntl.flock", side_effect=BlockingIOError):
+            assert _qa_run_lock_holder(tmp_path) is None
+
+    def test_a_holder_stamped_with_this_checkout_is_reported(self, tmp_path: Path) -> None:
+        _lock_file(tmp_path, f"pid=4242\ncheckout={tmp_path}\n")
+
+        with patch("claude_code_hooks_daemon.daemon.cli.fcntl.flock", side_effect=BlockingIOError):
+            assert _qa_run_lock_holder(tmp_path) == "4242"
+
+    def test_an_unstamped_holder_is_reported_as_unknown(self, tmp_path: Path) -> None:
+        """A bare whole-suite run stamps nothing, and could be using this daemon."""
+        _lock_file(tmp_path, "")
+
+        with patch("claude_code_hooks_daemon.daemon.cli.fcntl.flock", side_effect=BlockingIOError):
+            assert _qa_run_lock_holder(tmp_path) == "unknown"
