@@ -38,6 +38,7 @@ Full write-ups are in [NIGGLES.md](NIGGLES.md). One line each here:
 
 | #          | Verdict                                                                                                          | Origin              | Status                  |
 | ---------- | ---------------------------------------------------------------------------------------------------------------- | ------------------- | ----------------------- |
+| N279       | `changed_tests` once selected 50 test files, ran 0 tests and still passed                                        | p477 agent          | ⬜ Open                 |
 | N278       | A branch merged with its targeted QA never run; main took three static-check failures                            | Coordinator         | ⬜ Open                 |
 | N277       | `_resolve_python_cmd` in `init.sh` returns 0 after a failed resolve, with `PYTHON_CMD` empty                     | p477 agent          | ⬜ Open                 |
 | N276       | The SessionStart chain overruns its 20 s budget under load, so declared crons are never asked for                | Coordinator         | ✅ Fixed (aa557cc12)    |

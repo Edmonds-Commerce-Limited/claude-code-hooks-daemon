@@ -26,6 +26,25 @@ other ledgers' numbering (00422 for `p422-close`, 00421's plan for `d-00421`).
 
 **Status**: ⬜ Open (all 55).
 
+### N279 — `changed_tests` once selected 50 test files, ran 0 tests and did not fail
+
+**Found**: by the Plan 00477 provision agent. One `llm_qa.py changed --base main --allow-unmapped` run reported `changed_tests` as 0 passed, 0 failed, 0 skipped
+over 50 selected files, and the check did not fail. That run had waited more
+than 300 s for the host-wide QA lock. The same selection collected 1343 tests
+with `--collect-only`. A run with no wait ran 1298, and a later run that waited
+1143 s ran 1343. The zero run's `changed_tests.json` was overwritten before
+anyone read it.
+
+**Why it matters**: a check that runs nothing and passes reads exactly like a
+green run. Plan 00475's tiers lean on this check.
+
+**Candidate remedy**: `changed_tests` fails when it selected files but executed
+zero tests, naming the pytest exit code and the tail of its output. Then find the
+cause: the lock wait preceding the pytest step is the lead. The full-QA gate
+plugin refusing the run, or a timeout budget spent while waiting, would both fit.
+
+**Status**: ⬜ Open.
+
 ### N278 — a branch merged with its targeted QA never run, and main took three static-check failures
 
 **Found**: the hostname-cron branch (Plan 00470 Tasks 6.1, 6.2) was merged
