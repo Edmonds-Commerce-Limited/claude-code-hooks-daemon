@@ -106,6 +106,25 @@ waited on one bandit decision.
     history rewrites, and anything the guards say to ask the user for.
   - Decide with the owner how the stop hook makes sure the one-off cron is created.
 
+### Phase 6: Where declared crons run (owner ruling, issues #60 and #62)
+
+- [ ] ⬜ **Task 6.1**: Each `persistent_crons` job is global (the default) or
+  carries `hosts:`, a list of exact hostnames or globs. A job with `hosts:` is
+  declared only where the effective hostname matches. The effective hostname is
+  `HOOKS_DAEMON_HOSTNAME` when it is set, otherwise the system hostname. A session
+  can so take a role, such as `cchd-sdlc-runner`, without a real hostname
+  entering the tracked, public config.
+- [ ] ⬜ **Task 6.2**: This project's `issue-sdlc` job gets
+  `hosts: [cchd-sdlc-runner]`. An SDLC runner is started anywhere by exporting
+  `HOOKS_DAEMON_HOSTNAME=cchd-sdlc-runner` before launching the session.
+- [ ] ⬜ **Task 6.3**: Probe, by dogfooding, how extra agent threads opened in one
+  Claude Code session (left arrow, then a new thread) appear in hook payloads:
+  their `session_id`, transcript and `session_crons`. Record the results in
+  RESEARCH.md before any design.
+- [ ] ⬜ **Task 6.4**: From the probe: by default only the initial thread of a
+  session is required to hold the declared crons. Threads opened later hold none
+  unless explicitly instructed.
+
 ## Success Criteria
 
 - [ ] An issue-sdlc tick fires while a failsafe tick is suppressed by a live
