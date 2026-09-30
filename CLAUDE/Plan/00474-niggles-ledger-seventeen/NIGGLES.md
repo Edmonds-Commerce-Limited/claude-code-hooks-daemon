@@ -26,6 +26,22 @@ other ledgers' numbering (00422 for `p422-close`, 00421's plan for `d-00421`).
 
 **Status**: ⬜ Open (all 55).
 
+### N273 — a stalled CI job holds main's queue for up to six hours
+
+**Found**: main run 36729884166 (`ae37690a3`). Its Shell job, normally a
+minute or two, stayed `in_progress` from 14:50 to past 17:40 UTC, with no log
+available (the log API answers BlobNotFound). Because the workflow's
+concurrency group keeps one run queued, the run carrying the main-red fix waited
+behind it the whole time, and was only released when the coordinator cancelled
+the stale run. No job in `.github/workflows/qa.yml` sets `timeout-minutes`, so
+GitHub's six-hour default applies.
+
+**Candidate remedy**: set `timeout-minutes` on every job, sized a margin above
+its measured duration (the full-tier pytest jobs run about an hour; Shell, Daemon
+load and Classify take minutes).
+
+**Status**: ⬜ Open.
+
 ### N272 — one `llm_qa changed` run reported `project_handlers` as 0 tests collected
 
 **Found**: the targeted run over the p475-t23 merge (`8f2cd8bc8`) failed only
