@@ -57,6 +57,10 @@ from claude_code_hooks_daemon.utils.git_commit_parsing import (
     is_git_commit,
     tokenise_command,
 )
+from claude_code_hooks_daemon.utils.git_invocation_directory import (
+    invocation_directory,
+    placement_problem,
+)
 from claude_code_hooks_daemon.utils.git_repo import GitRepo, run_git
 from claude_code_hooks_daemon.utils.path_exclusion import handler_excludes_path
 from claude_code_hooks_daemon.utils.path_predicates import path_is_dir
@@ -65,7 +69,6 @@ logger = logging.getLogger(__name__)
 
 _COMMIT: Final[str] = "commit"
 _AM: Final[str] = "am"
-_DASH_C: Final[str] = "-C"
 _CONTINUE: Final[str] = "--continue"
 # A dry run records nothing.
 _DRY_RUN: Final[str] = "--dry-run"
@@ -79,14 +82,6 @@ _CONTINUING_SUBCOMMANDS: Final[frozenset[str]] = frozenset(
 # `git am` resumes from the index with these; any other run applies a patch.
 _AM_RESUMES: Final[frozenset[str]] = frozenset({"--continue", "--resolved", "-r"})
 _RECORDING_SUBCOMMANDS: Final[frozenset[str]] = frozenset({_COMMIT, _AM, *_CONTINUING_SUBCOMMANDS})
-# Each points git at a repository, work tree or index other than the one its
-# directory names, so the gate would read the wrong tree.
-_RELOCATING_VARIABLES: Final[frozenset[str]] = frozenset(
-    {"GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR"}
-)
-_RELOCATING_OPTIONS: Final[frozenset[str]] = frozenset({"--git-dir", "--work-tree"})
-_EXPANSION: Final[re.Pattern[str]] = re.compile(r"[$`*?\[]")
-_HOME_PATH: Final[re.Pattern[str]] = re.compile(r"~(?:/|$)")
 
 # `git diff` targets: the index against HEAD, or the working tree against it.
 _INDEX_TARGET: Final[str] = "--cached"
@@ -202,37 +197,7 @@ def _unplaceable_reason(run: GitInvocation) -> str | None:
         return "`git am` records patch content that is not in any tree yet"
     if any(option.startswith(_PATHSPEC_FROM_FILE) for option in run.arguments):
         return "`--pathspec-from-file` names the committed paths in a file"
-    for assignment in run.assignments:
-        name = assignment.split("=", 1)[0]
-        if name in _RELOCATING_VARIABLES:
-            return f"`{name}` moves the repository or index git reads"
-    for option in run.global_options:
-        if option.split("=", 1)[0] in _RELOCATING_OPTIONS:
-            return f"`{option}` moves the repository git reads"
-    for step in (*run.directory, *_dash_c_values(run.global_options)):
-        if step is None:
-            return "a `cd -`, `popd` or multi-operand `cd` names no directory"
-        if _EXPANSION.search(step) or (step.startswith("~") and not _HOME_PATH.match(step)):
-            return f"the directory `{step}` needs an expansion the daemon cannot perform"
-    return None
-
-
-def _dash_c_values(global_options: tuple[str, ...]) -> list[str]:
-    """The ``-C`` directories among git's global options, in order."""
-    return [
-        global_options[index + 1]
-        for index, option in enumerate(global_options[:-1])
-        if option == _DASH_C
-    ]
-
-
-def _directory(run: GitInvocation, cwd: Path) -> Path:
-    """Where ``run`` executes: the start, then each ``cd`` and ``-C`` in turn."""
-    directory = cwd
-    for step in (*run.directory, *_dash_c_values(run.global_options)):
-        assert step is not None  # _unplaceable_reason refused the None case
-        directory = directory / Path(step).expanduser()
-    return directory
+    return placement_problem(run)
 
 
 def _commits(command: str, cwd: Path) -> Iterator[_Commit | _Unplaceable]:
@@ -252,7 +217,7 @@ def _commits(command: str, cwd: Path) -> Iterator[_Commit | _Unplaceable]:
         if reason is not None:
             yield _Unplaceable(reason)
         elif sources is not None:
-            yield _Commit(directory=_directory(run, cwd), sources=sources)
+            yield _Commit(directory=invocation_directory(run, cwd), sources=sources)
     if not found and is_git_commit(tokenise_command(command)):
         yield _Commit(directory=cwd, sources=(_Source(working_tree=False),))
 

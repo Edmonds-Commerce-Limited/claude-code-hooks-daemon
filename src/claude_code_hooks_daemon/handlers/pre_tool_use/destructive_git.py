@@ -1,12 +1,16 @@
 """DestructiveGitHandler - blocks destructive git commands that permanently destroy data."""
 
+import logging
 import re
-from typing import Any
+from pathlib import Path
+from typing import Any, Final
 
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, HookInputField, Priority
 from claude_code_hooks_daemon.constants.rule_ids import RuleID
+from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.core import Decision, GatingResult, get_data_layer
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
+from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.core.utils import get_bash_command
 from claude_code_hooks_daemon.utils.command_evasion import (
@@ -14,7 +18,16 @@ from claude_code_hooks_daemon.utils.command_evasion import (
     SUBCOMMAND_SEPARATOR_CHARS,
     remove_word_quoting,
 )
+from claude_code_hooks_daemon.utils.git_commit_parsing import GitInvocation, git_invocations
+from claude_code_hooks_daemon.utils.git_invocation_directory import (
+    invocation_directory,
+    placement_problem,
+)
+from claude_code_hooks_daemon.utils.git_repo import HEADS_PREFIX, branch_ref, run_git
+from claude_code_hooks_daemon.utils.path_predicates import path_is_dir
 from claude_code_hooks_daemon.utils.shell_segmentation import strip_inert_spans
+
+logger = logging.getLogger(__name__)
 
 # Generic reason used when a destructive pattern matches but warrants no
 # command-specific explanation (e.g. bare `git checkout .`).
@@ -155,6 +168,17 @@ _DESTRUCTIVE_PATTERN_REASONS: tuple[tuple[str, str], ...] = (
         "git update-ref -d refs/heads/<name> force-deletes a branch ref with no "
         "merge check — the plumbing equivalent of git branch -D",
     ),
+    # `git branch -d --force` / `--delete --force` / `-fd` are `-D` spelled as two
+    # options, in either order: the same force delete with no merge check. Each
+    # lookahead needs a whole token, so a branch NAME ending in `-f` or `-d`
+    # never counts, and the class stops at a command separator.
+    (
+        rf"{_GIT_INVOCATION}branch(?=[ \t])"
+        rf"(?=[^{_SUBCOMMAND_SEPARATOR_CHARS}]*(?<!\S)(?:--delete|-[A-Za-z]*d[A-Za-z]*)(?!\S))"
+        rf"(?=[^{_SUBCOMMAND_SEPARATOR_CHARS}]*(?<!\S)(?:--force|-[A-Za-z]*f[A-Za-z]*)(?!\S))",
+        "git branch -d --force force-deletes a branch without checking if it has been "
+        "merged — the same delete as git branch -D",
+    ),
     (
         rf"{_GIT_INVOCATION}commit\s+.*--amend\b",
         "git commit --amend rewrites the previous commit, creating messy history "
@@ -224,6 +248,7 @@ _PATTERN_RULE_IDS: tuple[str, ...] = (
     RuleID.GIT_PUSH_FORCE,
     RuleID.GIT_BRANCH_FORCE_DELETE,
     RuleID.GIT_BRANCH_FORCE_DELETE,  # git update-ref -d refs/heads/<name> (Plan 00205)
+    RuleID.GIT_BRANCH_FORCE_DELETE,  # git branch -d --force, the two-option spelling of -D
     RuleID.GIT_COMMIT_AMEND,
     RuleID.GIT_CHECKOUT_FORCE,
     RuleID.GIT_SWITCH_FORCE,
@@ -250,6 +275,166 @@ _SAFE_ALTERNATIVES_BLOCK = (
 def _verbose_content(why: str) -> str:
     """Build the full first-fire teaching content for a rule from its "why"."""
     return f"{why}.\n\n{_SAFE_ALTERNATIVES_BLOCK}"
+
+
+# A forced branch delete cannot lose a commit a remote-tracking ref already
+# reaches, so clearing up such a branch needs no human. The teaching for that
+# rule therefore says how to get there, not that the LLM may not.
+_BRANCH_DELETE_VERBOSE: Final[str] = (
+    "A forced branch delete skips git's merge check, so a branch whose tip is on no remote "
+    "would lose its commits with no recovery.\n\n"
+    "It is ALLOWED when every named branch's tip is reachable from a remote-tracking ref "
+    "(`git for-each-ref --contains <tip> refs/remotes/` is non-empty), judged in the "
+    "repository the command runs in (`git -C <dir>` and a `cd` in the same command are "
+    "honoured). Anything the check cannot establish is denied.\n\n"
+    "To proceed: push each branch named below (`git push -u origin <name>`), then retry. "
+    "`git branch -d` (lowercase) remains the merge-checked delete."
+)
+_VERBOSE_OVERRIDES: Final[dict[str, str]] = {RuleID.GIT_BRANCH_FORCE_DELETE: _BRANCH_DELETE_VERBOSE}
+
+
+class _Unverifiable(Exception):
+    """A forced branch delete whose target this handler cannot establish."""
+
+
+_BRANCH: Final[str] = "branch"
+_UPDATE_REF: Final[str] = "update-ref"
+_OPTIONS_END: Final[str] = "--"
+# `git branch` flags a forced delete may carry. Anything else (`-r` deletes a
+# remote-tracking ref, for one) changes what is deleted, so it is unverifiable.
+_BRANCH_FLAG_LETTERS: Final[frozenset[str]] = frozenset("dDfq")
+_BRANCH_LONG_FLAGS: Final[frozenset[str]] = frozenset({"--delete", "--force", "--quiet"})
+# A branch name that is safe to hand to git as one argument: no expansion,
+# quoting or option-looking characters survive it.
+_LITERAL_BRANCH_NAME: Final[re.Pattern[str]] = re.compile(r"[A-Za-z0-9._/+@-]+")
+# Command and process substitution can run a git command this reading never sees.
+_SUBSTITUTION: Final[re.Pattern[str]] = re.compile(r"\$\(|`|[<>]\(")
+_UNVERIFIED_ADVICE: Final[str] = (
+    "Name each branch literally, push it first (`git push -u origin <name>`), then retry."
+)
+
+
+def _forced_branch_names(run: GitInvocation) -> list[str] | None:
+    """The branches ``git branch`` force-deletes, or None when ``run`` does not."""
+    delete = force = False
+    unknown: list[str] = []
+    names: list[str] = []
+    options_ended = False
+    for argument in run.arguments:
+        if options_ended or not argument.startswith("-"):
+            names.append(argument)
+        elif argument == _OPTIONS_END:
+            options_ended = True
+        elif argument.startswith("--"):
+            delete = delete or argument == "--delete"
+            force = force or argument == "--force"
+            if argument not in _BRANCH_LONG_FLAGS:
+                unknown.append(argument)
+        else:
+            letters = set(argument[1:])
+            delete = delete or bool(letters & {"d", "D"})
+            force = force or bool(letters & {"f", "D"})
+            if not letters <= _BRANCH_FLAG_LETTERS:
+                unknown.append(argument)
+    if not (delete and force):
+        return None
+    if unknown:
+        raise _Unverifiable(f"`{unknown[0]}` changes what `git branch` deletes")
+    return names
+
+
+def _update_ref_branch_names(run: GitInvocation) -> list[str] | None:
+    """The branches ``git update-ref -d`` deletes, or None when ``run`` deletes none."""
+    if "-d" not in run.arguments:
+        return None
+    if "--stdin" in run.arguments:
+        raise _Unverifiable("`--stdin` names its refs where this handler cannot read them")
+    return [
+        argument.removeprefix(HEADS_PREFIX)
+        for argument in run.arguments
+        if argument.startswith(HEADS_PREFIX)
+    ] or None
+
+
+def _deleted_branches(command: str) -> list[tuple[GitInvocation, list[str]]]:
+    """Every forced branch deletion in ``command``, with the invocation that makes it."""
+    deletions: list[tuple[GitInvocation, list[str]]] = []
+    for run in git_invocations(command):
+        if run.subcommand == _BRANCH:
+            names = _forced_branch_names(run)
+        elif run.subcommand == _UPDATE_REF:
+            names = _update_ref_branch_names(run)
+        else:
+            continue
+        if names is not None:
+            deletions.append((run, names))
+    return deletions
+
+
+def _not_on_a_remote(directory: Path, name: str) -> bool:
+    """True unless a remote-tracking ref in ``directory`` reaches branch ``name``'s tip.
+
+    Fails closed: a missing branch, a failing git and a timeout all answer True.
+    """
+    tip = run_git(
+        directory,
+        "rev-parse",
+        "--verify",
+        "--quiet",
+        f"{branch_ref(name)}^{{commit}}",
+        timeout=Timeout.GIT_CONTEXT,
+    )
+    if tip.returncode != 0 or not tip.stdout.strip():
+        return True
+    holders = run_git(
+        directory,
+        "for-each-ref",
+        "--contains",
+        tip.stdout.strip(),
+        "--count=1",
+        "--format=%(refname)",
+        "refs/remotes/",
+        timeout=Timeout.GIT_CONTEXT,
+    )
+    return holders.returncode != 0 or not holders.stdout.strip()
+
+
+def _unverified(reason: str) -> str:
+    return f"This delete could not be verified as safe: {reason}. {_UNVERIFIED_ADVICE}"
+
+
+def _branch_delete_note(command: str, cwd: Path) -> str | None:
+    """None when every forced deletion names only branches a remote holds, else why not."""
+    if _SUBSTITUTION.search(command):
+        return _unverified("a command or process substitution can run a delete this reading misses")
+    try:
+        deletions = _deleted_branches(command)
+    except _Unverifiable as exc:
+        return _unverified(str(exc))
+    if not deletions:
+        return _unverified("no `git branch -D` / `git update-ref -d` invocation could be read")
+    stranded: list[str] = []
+    for run, names in deletions:
+        problem = placement_problem(run)
+        if problem is not None:
+            return _unverified(problem)
+        directory = invocation_directory(run, cwd)
+        if not names:
+            return _unverified("it names no branch")
+        if not path_is_dir(directory, unreadable_means=False):
+            return _unverified(f"`{directory}` is not a directory")
+        for name in names:
+            if not _LITERAL_BRANCH_NAME.fullmatch(name):
+                return _unverified(f"`{name}` is not a literal branch name")
+            if _not_on_a_remote(directory, name):
+                where = "" if directory == cwd else f"-C {directory} "
+                stranded.append(f"`{name}` (push it: `git {where}push -u origin {name}`)")
+    if not stranded:
+        return None
+    return (
+        "Not deleted: these branches are not on any remote (or could not be checked), so the "
+        "delete could lose commits: " + "; ".join(stranded) + ". Push each one first, then retry."
+    )
 
 
 # SINGLE SOURCE OF TRUTH for get_rules(): (rule_id, blocked, why, fix). One
@@ -299,9 +484,10 @@ _RULE_DEFINITIONS: tuple[tuple[str, str, str, str], ...] = (
     ),
     (
         RuleID.GIT_BRANCH_FORCE_DELETE,
-        "`git branch -D` / `git update-ref -d refs/heads/<name>`",
-        "Force-deletes a branch without checking if it has been merged",
-        "Use `git branch -d` first (refuses unmerged branches); ask the user for -D",
+        "`git branch -D` / `git update-ref -d refs/heads/<name>` of a branch no remote holds",
+        "Force-deletes a branch without a merge check; a tip on no remote loses its commits",
+        "Push the branch (`git push -u origin <name>`) and retry; a branch a remote holds "
+        "is deleted freely",
     ),
     (
         RuleID.GIT_COMMIT_AMEND,
@@ -371,7 +557,7 @@ class DestructiveGitHandler(PreToolUseHandlerBase):
                 blocked=blocked,
                 why=why,
                 fix=fix,
-                verbose=_verbose_content(why),
+                verbose=_VERBOSE_OVERRIDES.get(rule_id) or _verbose_content(why),
             )
             for rule_id, blocked, why, fix in _RULE_DEFINITIONS
         )
@@ -440,6 +626,24 @@ class DestructiveGitHandler(PreToolUseHandlerBase):
                 return rule_id
         return None
 
+    def _match_rule_ids(self, command: str) -> list[str]:
+        """Every distinct RuleID whose pattern matches, in pattern order."""
+        target = self._scan_target(command)
+        matched = (rule_id for pattern, rule_id in self._pattern_rule_ids if pattern.search(target))
+        return list(dict.fromkeys(matched))
+
+    @staticmethod
+    def _cwd(hook_input: dict[str, Any]) -> Path:
+        """The directory the command starts in.
+
+        Raises:
+            RuntimeError: When the event carries none and no project is initialised.
+        """
+        cwd = hook_input.get(HookInputField.CWD)
+        if isinstance(cwd, str) and cwd:
+            return Path(cwd)
+        return ProjectContext.project_root()
+
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """Check if this is a destructive git command."""
         command = get_bash_command(hook_input)
@@ -475,7 +679,13 @@ class DestructiveGitHandler(PreToolUseHandlerBase):
 
         # Both matches() and handle() consume the same ordered mapping, so they
         # can never drift on which pattern matched first.
-        rule_id = self._match_rule_id(command)
+        rule_ids = self._match_rule_ids(command)
+        # A forced branch delete is the ONLY destructive rule with a safe case: when
+        # every named tip is on a remote nothing can be lost. It is judged only when
+        # no other rule matched too, so a compound command cannot ride the allowance,
+        # and the denial then names the rule that actually blocks it.
+        others = [matched for matched in rule_ids if matched != RuleID.GIT_BRANCH_FORCE_DELETE]
+        rule_id = others[0] if others else (rule_ids[0] if rule_ids else None)
         if rule_id is None:
             # Defensive only: handle() is normally invoked exclusively after
             # matches() returned True, so this path is unreachable via the
@@ -487,6 +697,16 @@ class DestructiveGitHandler(PreToolUseHandlerBase):
             )
         rule = self._rules_by_id[rule_id]
 
+        note: str | None = None
+        if not others:
+            try:
+                note = _branch_delete_note(command, self._cwd(hook_input))
+            except RuntimeError as exc:
+                logger.warning("destructive_git: branch delete not verified: %s", exc)
+                note = _unverified("the directory the command runs in is unknown")
+            if note is None:
+                return GatingResult(decision=Decision.ALLOW)
+
         transcript_path = hook_input.get(HookInputField.TRANSCRIPT_PATH)
         tracker = get_data_layer().disclosure
 
@@ -497,6 +717,9 @@ class DestructiveGitHandler(PreToolUseHandlerBase):
                 tracker.mark_disclosed(transcript_path, rule_id)
             message = self._formatter.verbose(rule)
 
+        if note is not None:
+            message = f"{message}\n\n{note}"
+
         return GatingResult(
             decision=Decision.DENY,
             reason=message,
@@ -505,7 +728,8 @@ class DestructiveGitHandler(PreToolUseHandlerBase):
     def get_claude_md(self) -> str | None:
         return (
             "## destructive_git — blocked git commands\n\n"
-            "The following git commands are permanently blocked and will always be denied:\n\n"
+            "The following git commands are blocked (a forced branch delete has one "
+            "exception, in its row):\n\n"
             "| Command | Reason |\n"
             "|---------|--------|\n"
             "| `git reset --hard` | Permanently destroys all uncommitted changes |\n"
@@ -517,7 +741,10 @@ class DestructiveGitHandler(PreToolUseHandlerBase):
             "| `git push --force` / `git push <remote> +<refspec>` "
             "| Can overwrite remote history and destroy teammates' work |\n"
             "| `git branch -D` / `git update-ref -d refs/heads/<name>` "
-            "| Force-deletes branch without checking if merged (lowercase `-d` is safe) |\n"
+            "| ALLOWED when every named branch's tip is reachable from a remote-tracking "
+            "ref, judged in the repository the command runs in (`git -C`, `cd`); otherwise "
+            "denied, naming each branch to push first (`git push -u origin <name>`). Any "
+            "check failure denies. Lowercase `-d` is the merge-checked delete |\n"
             "| `git commit --amend` | Rewrites the previous commit — create a new commit instead |\n"
             "| `git checkout -f` / `git switch -f` / `git switch --discard-changes` "
             "| Discards every uncommitted change, naming no file |\n"
@@ -716,11 +943,14 @@ class DestructiveGitHandler(PreToolUseHandlerBase):
                 title="git branch -D",
                 command='echo "git branch -D NONEXISTENT_SAFE_TEST_BRANCH"',
                 dispatch_as_bash=True,
-                description="Blocks git branch -D (force-deletes branch without merge check)",
+                description=(
+                    "Blocks git branch -D unless every named branch is on a remote; "
+                    "the denial says to push first"
+                ),
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[
-                    r"[Ff]orce-deletes.*branch",
-                    r"merged",
+                    r"remote",
+                    r"git push -u origin",
                 ],
                 safety_notes="Uses non-existent branch - would fail harmlessly if executed",
                 test_type=TestType.BLOCKING,
@@ -799,12 +1029,12 @@ class DestructiveGitHandler(PreToolUseHandlerBase):
                 dispatch_as_bash=True,
                 description=(
                     "Blocks git update-ref -d refs/heads/<name> (Plan 00205) — the "
-                    "plumbing equivalent of git branch -D"
+                    "plumbing equivalent of git branch -D — unless a remote holds the tip"
                 ),
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[
-                    r"[Ff]orce-deletes.*branch",
-                    r"merged",
+                    r"remote",
+                    r"git push -u origin",
                 ],
                 safety_notes="Uses non-existent branch - would fail harmlessly if executed",
                 test_type=TestType.BLOCKING,
