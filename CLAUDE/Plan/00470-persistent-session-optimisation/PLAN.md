@@ -108,7 +108,7 @@ waited on one bandit decision.
 
 ### Phase 6: Where declared crons run (owner ruling, issues #60 and #62)
 
-- [ ] ⬜ **Task 6.1**: Each `persistent_crons` job is global (the default) or
+- [x] ✅ **Task 6.1**: Each `persistent_crons` job is global (the default) or
   carries `hosts:`, a list of exact hostnames or globs. A job with `hosts:` is
   declared only where the effective hostname matches. The effective hostname is
   the first set of: `HOOKS_DAEMON_HOSTNAME`, then `CCY_HOST_HOSTNAME` (ccy sets it
@@ -116,7 +116,7 @@ waited on one bandit decision.
   then the system hostname. A session
   can so take a role, such as `cchd-sdlc-runner`, without a real hostname
   entering the tracked, public config.
-- [ ] ⬜ **Task 6.2**: This project's `issue-sdlc` job gets
+- [x] ✅ **Task 6.2**: This project's `issue-sdlc` job gets
   `hosts: [cchd-sdlc-runner]`. An SDLC runner is started anywhere by exporting
   `HOOKS_DAEMON_HOSTNAME=cchd-sdlc-runner` before launching the session.
 - [ ] ⬜ **Task 6.3**: Probe, by dogfooding, how extra agent threads opened in one
