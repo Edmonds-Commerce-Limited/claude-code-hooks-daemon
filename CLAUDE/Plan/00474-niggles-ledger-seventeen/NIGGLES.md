@@ -20,3 +20,10 @@ committed `RELEASES/v3.67.0.md` is unchanged. Every callout is also a **Changes*
 **Candidate remedy**: the release agent writes the GitHub body itself, with the same
 substitution once the notes pass the cap, and a test pins the body under 125,000
 characters before Step 14 runs.
+
+**Status**: ✅ Remedied in `ea8dcd542`. `scripts/release/build_github_release_body.py`
+writes the body (notes unchanged when they fit, Highlights replaced by a link when they
+do not, exit 1 if still over 125,000). RELEASING.md Step 14 and the Manual Release
+block, the release skill's `invoke.sh` and the release agent run it BEFORE the tag and
+give `gh release create` its output. Pinned by
+`tests/integration/test_build_github_release_body.py`.
