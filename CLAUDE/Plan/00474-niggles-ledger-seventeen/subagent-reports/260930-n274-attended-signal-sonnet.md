@@ -27,7 +27,8 @@ reuses the second, which is the superset.
   field is present (observed kinds in real transcripts: `human`,
   `task-notification`, `peer`, `auto-continuation`); absent means markers only.
 - Handler: under `mode: unattended`, a human prompt within
-  `human_presence_minutes` (default 30, `0` disables) returns ALLOW. The deny
+  `human_presence_minutes` (default 30, `0` disables) is judged by strict
+  mode's rules (prefix required), not waved through (review round 1). The deny
   now appends "Judged: mode is unattended, and there is no genuine human prompt
   in this session in the last N minutes ...".
 - Window: 30 minutes rides out a meeting without treating an owner who left for

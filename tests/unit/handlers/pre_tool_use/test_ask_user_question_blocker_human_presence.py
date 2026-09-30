@@ -56,10 +56,12 @@ def _transcript(tmp_path: Path, *lines: str) -> Path:
     return path
 
 
-def _ask(transcript: Path | None, session: str | None = SESSION) -> dict[str, Any]:
+def _ask(
+    transcript: Path | None, session: str | None = SESSION, question: str = "Which one?"
+) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "tool_name": "AskUserQuestion",
-        "tool_input": {"questions": [{"question": "Which one?", "options": []}]},
+        "tool_input": {"questions": [{"question": question, "options": []}]},
     }
     if transcript is not None:
         payload["transcript_path"] = str(transcript)
@@ -82,10 +84,21 @@ def _handler(mode: str, minutes: float | None = None) -> AskUserQuestionBlockerH
 
 
 class TestUnattendedWithHumanPresence:
-    def test_recent_human_prompt_allows_the_question(self, tmp_path: Path) -> None:
+    def test_recent_human_prompt_allows_a_prefixed_question(self, tmp_path: Path) -> None:
         path = _transcript(tmp_path, _user("human here - take me through decisions", 30))
-        result = _handler("unattended").handle(_ask(path))
+        result = _handler("unattended").handle(_ask(path, question="ASKING BECAUSE: A or B?"))
         assert result.decision == Decision.ALLOW
+
+    def test_recent_human_prompt_gets_the_attended_rules_for_an_unprefixed_question(
+        self, tmp_path: Path
+    ) -> None:
+        path = _transcript(tmp_path, _user("human here", 30))
+        present = _handler("unattended").handle(_ask(path))
+        strict = _handler("strict").handle(_ask(path))
+        assert present.decision == strict.decision == Decision.DENY
+        # The attended verdict, not the unattended one: the prefix is the remedy.
+        assert "ASKING BECAUSE:" in (present.reason or "")
+        assert "UNATTENDED" not in (present.reason or "")
 
     def test_old_human_prompt_still_denies(self, tmp_path: Path) -> None:
         path = _transcript(tmp_path, _user("hello", 31 * 60))
@@ -135,11 +148,19 @@ class TestUnattendedWithHumanPresence:
     def test_window_is_configurable(self, tmp_path: Path) -> None:
         path = _transcript(tmp_path, _user("hello", 10 * 60))
         assert _handler("unattended", 5.0).handle(_ask(path)).decision == Decision.DENY
-        assert _handler("unattended", 15.0).handle(_ask(path)).decision == Decision.ALLOW
+        prefixed = _ask(path, question="ASKING BECAUSE: A or B?")
+        assert _handler("unattended", 5.0).handle(prefixed).decision == Decision.DENY
+        assert _handler("unattended", 15.0).handle(prefixed).decision == Decision.ALLOW
 
     def test_zero_window_disables_the_override(self, tmp_path: Path) -> None:
         path = _transcript(tmp_path, _user("hello", 1))
-        assert _handler("unattended", 0.0).handle(_ask(path)).decision == Decision.DENY
+        prefixed = _ask(path, question="ASKING BECAUSE: A or B?")
+        assert _handler("unattended", 0.0).handle(prefixed).decision == Decision.DENY
+
+    def test_claude_md_says_attended_rules_apply(self) -> None:
+        text = _handler("unattended").get_claude_md() or ""
+        assert "ask freely" not in text
+        assert "attended" in text
 
 
 class TestOtherModesUnchanged:

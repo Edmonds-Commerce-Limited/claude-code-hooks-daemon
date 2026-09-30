@@ -30,8 +30,8 @@ unattended one.
 
 The declaration describes the project, not the moment. A genuine human prompt
 received in this session within ``human_presence_minutes`` (default 30; 0
-disables) proves a human is present, so the question is allowed through for that
-window. Cron ticks, supervisor lines, teammate messages and task notifications
+disables) proves a human is present, so the session is attended for that window
+and a question is judged by the strict-mode rules (``ASKING BECAUSE:`` prefix). Cron ticks, supervisor lines, teammate messages and task notifications
 are not human prompts (see ``utils.human_presence``).
 
 Claude Code's own launcher flags (``--permission-prompts none``,
@@ -243,12 +243,13 @@ class AskUserQuestionBlockerHandler(PreToolUseHandlerBase):
 
         # Checked BEFORE the justification test, because unattended the
         # justification does not change the verdict — there is no reader.
+        # A human who has just typed makes the session attended for the
+        # window, so it is judged by strict mode's rules below, not waved
+        # through: the prefix policy is about the question, not the reader.
+        window_minutes = getattr(self, "_human_presence_minutes", DEFAULT_HUMAN_PRESENCE_MINUTES)
+        if mode == MODE_UNATTENDED and self._human_recently_present(hook_input, window_minutes):
+            mode = MODE_STRICT
         if mode == MODE_UNATTENDED:
-            window_minutes = getattr(
-                self, "_human_presence_minutes", DEFAULT_HUMAN_PRESENCE_MINUTES
-            )
-            if self._human_recently_present(hook_input, window_minutes):
-                return GatingResult(decision=Decision.ALLOW)
             judged = _UNATTENDED_JUDGED.format(minutes=f"{window_minutes:g}")
             return GatingResult(
                 decision=Decision.DENY,
@@ -346,9 +347,11 @@ class AskUserQuestionBlockerHandler(PreToolUseHandlerBase):
                 "This project runs unattended, so **every** `AskUserQuestion` "
                 "is denied — including a properly justified one — unless a "
                 "genuine human prompt arrived in this session within the last "
-                "30 minutes (`human_presence_minutes`); a cron tick, "
-                "supervisor line, teammate message or task notification does "
-                "not count, and once a human has just typed, ask freely. "
+                "30 minutes (`human_presence_minutes`), in which case the "
+                "session is attended for that window and the ordinary "
+                f"attended rules apply (every question prefixed `{prefix}`). "
+                "A cron tick, supervisor line, teammate message or task "
+                "notification does not count as a human prompt. "
                 "Otherwise nobody is "
                 "reading the session; a question waits for an answer that "
                 "never arrives, and the run hangs.\n\n"
