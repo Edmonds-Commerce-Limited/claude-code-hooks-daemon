@@ -1215,7 +1215,7 @@ predates the fix. RED test:
 `tests/claude_code_hooks_daemon/install/test_skills.py`, covering both a
 client-install layout and this dogfood repository's layout.
 
-### N101 — `secret_file_guard` fails closed with `TooManyToEnumerateError` on ordinary `python3 - <<'EOF'` commands
+### N101 — ✅ Remedied (n101 branch) — `secret_file_guard` fails closed with `TooManyToEnumerateError` on ordinary `python3 - <<'EOF'` commands
 
 **Found by N38 fix round 11** (report `260926-n38-fix11-opus-5-5.md` on the
 N38 branch). The live daemon on main twice denied an ordinary Bash command

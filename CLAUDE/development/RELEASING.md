@@ -344,20 +344,23 @@ ls CLAUDE/UPGRADES/UNRELEASED/post-upgrade-tasks/
 
 Target: `CLAUDE/UPGRADES/v{MAJOR}/v{PREV}-to-v{NEW}/post-upgrade-tasks/`.
 
+Each command names the target path in full (substitute the versions), so
+each one can run as its own Bash call: `project_containment` denies a write
+target held in a variable nothing in the same call assigns.
+
 ```bash
-TARGET="CLAUDE/UPGRADES/v{MAJOR}/v{PREV}-to-v{NEW}/post-upgrade-tasks"
-mkdir -p "$TARGET"
+mkdir -p "CLAUDE/UPGRADES/v{MAJOR}/v{PREV}-to-v{NEW}/post-upgrade-tasks"
 
 # Copy the per-release index README (if not already present)
-cp CLAUDE/UPGRADES/upgrade-template/post-upgrade-tasks/README.md "$TARGET/README.md"
+cp CLAUDE/UPGRADES/upgrade-template/post-upgrade-tasks/README.md "CLAUDE/UPGRADES/v{MAJOR}/v{PREV}-to-v{NEW}/post-upgrade-tasks/README.md"
 
 # Move each task file — use git mv so history follows
-git mv CLAUDE/UPGRADES/UNRELEASED/post-upgrade-tasks/NN-*.md "$TARGET/"
+git mv CLAUDE/UPGRADES/UNRELEASED/post-upgrade-tasks/NN-*.md "CLAUDE/UPGRADES/v{MAJOR}/v{PREV}-to-v{NEW}/post-upgrade-tasks/"
 ```
 
 ### Populate the per-release task index
 
-Edit `$TARGET/README.md`:
+Edit `CLAUDE/UPGRADES/v{MAJOR}/v{PREV}-to-v{NEW}/post-upgrade-tasks/README.md`:
 
 1. Update the heading: `# Post-Upgrade Tasks — vPREV → vNEW`
 2. Replace the placeholder task-index table with one row per moved task, ordered by filename. Each row: `| file | type | severity | applies-to | one-line summary |`.
@@ -404,9 +407,8 @@ in Step 5. Move the files beside the post-upgrade tasks in the versioned
 upgrade guide so the provenance of each sentence survives:
 
 ```bash
-TARGET="CLAUDE/UPGRADES/v{MAJOR}/v{PREV}-to-v{NEW}/release-notes"
-mkdir -p "$TARGET"
-git mv CLAUDE/UPGRADES/UNRELEASED/release-notes/[0-9][0-9][0-9]-*.md "$TARGET/"
+mkdir -p "CLAUDE/UPGRADES/v{MAJOR}/v{PREV}-to-v{NEW}/release-notes"
+git mv CLAUDE/UPGRADES/UNRELEASED/release-notes/[0-9][0-9][0-9]-*.md "CLAUDE/UPGRADES/v{MAJOR}/v{PREV}-to-v{NEW}/release-notes/"
 ls CLAUDE/UPGRADES/UNRELEASED/release-notes/
 # Expected: README.md  (nothing else)
 ```
@@ -953,8 +955,7 @@ BASE="https://github.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon/relea
 mkdir -p untracked/scratch
 curl -fsSL -o untracked/scratch/_check.txt "$BASE/bootstrap-checksums.txt"
 for script in upgrade.sh daemon-cli.sh health-check.sh init-handlers.sh; do
-    curl -fsSL -o "untracked/scratch/_check_$script" "$BASE/$script"
-    PUBLISHED_SHA="$(sha256sum "untracked/scratch/_check_$script" | awk '{print $1}')"
+    PUBLISHED_SHA="$(curl -fsSL "$BASE/$script" | sha256sum | awk '{print $1}')"
     MANIFEST_SHA="$(awk -v name="$script" '$2 == name {print $1; exit}' untracked/scratch/_check.txt)"
     if [ -z "$MANIFEST_SHA" ]; then
         echo "ABORT: manifest has no entry for $script"; exit 1

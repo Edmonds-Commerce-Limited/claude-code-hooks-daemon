@@ -80,10 +80,11 @@ class TestStripMessageBodies:
 
 class TestStripInertSpans:
     def test_it_blanks_both_a_message_and_a_quoted_heredoc(self) -> None:
+        """One call carrying both spans; each is blanked on its own terms."""
         command = (
-            f"git commit -m 'names {_FORCE}' && cat <<'EOF' > notes.md\n"
+            "cat <<'EOF' > notes.md\n"
             f"the body also names {_FORCE}\n"
-            "EOF"
+            f"EOF\ngit commit -m 'names {_FORCE}'"
         )
         assert _FORCE not in strip_inert_spans(command)
 

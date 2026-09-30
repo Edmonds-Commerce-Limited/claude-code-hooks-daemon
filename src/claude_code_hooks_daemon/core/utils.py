@@ -9,7 +9,22 @@ from typing import Any, Final, NamedTuple, cast
 
 from claude_code_hooks_daemon.constants import HookInputField, ToolName
 from claude_code_hooks_daemon.core.project_context import ProjectContext
+from claude_code_hooks_daemon.utils.ansi_c import ansi_c_string
 from claude_code_hooks_daemon.utils.command_evasion import normalise_line_continuations
+from claude_code_hooks_daemon.utils.heredoc_operators import (
+    COMMENT_PRECEDERS,
+    HeredocScan,
+    find_heredoc_operators,
+    remove_line_continuations,
+    scan_heredocs,
+)
+from claude_code_hooks_daemon.utils.shell_segmentation import (
+    DATA_SINKS,
+    body_may_run,
+    heredoc_consumers,
+    known_variables,
+    substitute_known_variables,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -47,9 +62,10 @@ _DD_OUTPUT_PREFIX: Final[str] = "of="
 
 #: Stop consuming operands here, so a later command is never absorbed into an
 #: earlier one's target list.
-_OPERAND_TERMINATORS: Final[frozenset[str]] = frozenset(
-    {"|", "&&", "||", ";", "&", "<", ">", ">>", ">|", "&>", "&>>"}
-)
+_OPERAND_TERMINATORS: Final[frozenset[str]] = frozenset({"|", "&&", "||", ";", "&"})
+
+#: Redirects that read: their word is no operand of the command.
+_INPUT_REDIRECT_OPERATORS: Final[frozenset[str]] = frozenset({"<", "<<", "<<-", "<<<"})
 
 _FLAG_PREFIX: Final[str] = "-"
 
@@ -83,15 +99,14 @@ _HOME_VARIABLE: Final[str] = "HOME"
 #: Device nodes are not files a handler should judge.
 _DEV_PREFIX: Final[str] = "/dev/"
 
-#: `<<EOF` / `<<-'EOF'` / `<<"EOF"`. Group 2 is the delimiter word.
-_HEREDOC_RE: Final[re.Pattern[str]] = re.compile(r"<<-?\s*(['\"]?)(\w+)\1")
-_HEREDOC_DELIMITER_GROUP: Final[int] = 2
-
 #: Cheap "could this text name a write target at all?" test, run over a heredoc
 #: body before deciding to tokenise it. Every operator and verb recognised by
 #: `_write_target_tokens` appears here, so a body this misses provably has no
 #: target to find -- it is an optimisation, never a coverage decision.
 _WRITE_INDICATOR_RE: Final[re.Pattern[str]] = re.compile(r">|of=|\b(?:tee|cp|mv|install|dd)\b")
+
+#: Shell bodies nested in shell bodies followed before the rest is unreadable.
+_MAX_SHELL_BODY_DEPTH: Final[int] = 4
 
 
 class BashWriteDestination(NamedTuple):
@@ -125,6 +140,35 @@ class BashWriteDestination(NamedTuple):
     sources: tuple[str, ...] = ()
     directory_only: bool = False
     authored: bool = True
+
+
+class BashWriteScan(NamedTuple):
+    """Every destination a command names, and the text that could not be read.
+
+    ``unreadable`` is the command text from the first complete command the
+    tokeniser could not read to the end of the command, or ``None`` when every
+    command was read. Bash runs each complete command before an unreadable
+    one, so ``destinations`` still holds theirs. What the unreadable text
+    writes is UNKNOWN, not nothing: a guard that denies on a write location
+    must fail closed on it (Plan 00466 N120).
+    """
+
+    destinations: list[BashWriteDestination]
+    unreadable: str | None
+
+
+class BashWriteTargets(NamedTuple):
+    """The resolved counterpart of :class:`BashWriteScan`.
+
+    ``unresolved`` holds each destination that still needs an expansion
+    after the variables :func:`known_variables` pins are substituted: where
+    it writes is unknown, so a guard that denies on a write location must
+    fail closed on it (Plan 00466 N101 round 12, N215).
+    """
+
+    paths: list[str]
+    unreadable: str | None
+    unresolved: tuple[str, ...] = ()
 
 
 def get_bash_command(hook_input: dict[str, Any]) -> str | None:
@@ -276,30 +320,77 @@ def get_bash_write_targets(
             broken, so the write is the messenger. That matters here precisely
             because the handlers this serves DENY.
 
+    **A command the tokeniser cannot read to the end yields only the targets of
+    the commands before that point.** That is right for a content or advisory
+    caller, and WRONG for one that denies on a write location: the unread text
+    may write anywhere. Such a caller must use :func:`scan_bash_write_targets`
+    and fail closed on its ``unreadable`` text (Plan 00466 N120).
+
     Returns:
         Absolute paths, in command order, de-duplicated. Empty when the command
         writes nothing this function can name with confidence.
     """
+    return scan_bash_write_targets(
+        hook_input, include_heredoc_bodies=include_heredoc_bodies, authored_only=authored_only
+    ).paths
+
+
+def scan_bash_write_targets(
+    hook_input: dict[str, Any],
+    *,
+    include_heredoc_bodies: bool = False,
+    authored_only: bool = False,
+) -> BashWriteTargets:
+    """:func:`get_bash_write_targets`, plus the command text it could not read.
+
+    The accessor for a guard that DENIES on a write location. The options mean
+    what they mean on :func:`get_bash_write_targets`.
+    """
     command = get_bash_command(hook_input)
     if not command:
-        return []
+        return BashWriteTargets([], None)
 
     cwd = hook_input.get(HookInputField.CWD)
+    scan = scan_bash_write_destinations(command, include_heredoc_bodies=include_heredoc_bodies)
+    known = known_variables(command)
     found: list[str] = []
-    for candidate in bash_write_destinations(
-        command, include_heredoc_bodies=include_heredoc_bodies
-    ):
+    unresolved: list[str] = []
+    for candidate in scan.destinations:
         if authored_only and not candidate.authored:
             continue
-        for resolved in resolve_bash_write_destination(candidate, cwd):
+        destination = substitute_known_variables(candidate.destination, known)
+        if destination is None or needs_expansion(destination):
+            unresolved.append(candidate.destination)
+            continue
+        substituted = candidate._replace(destination=destination)
+        for resolved in resolve_bash_write_destination(substituted, cwd):
             if resolved not in found:
                 found.append(resolved)
-    return found
+    return BashWriteTargets(found, scan.unreadable, tuple(unresolved))
+
+
+def needs_expansion(token: str) -> bool:
+    """Does ``token`` still need an expansion the daemon cannot perform?"""
+    return any(character in token for character in _UNEXPANDABLE_CHARACTERS)
 
 
 def bash_write_destinations(
     command: str, *, include_heredoc_bodies: bool = False
 ) -> list[BashWriteDestination]:
+    """The destinations of :func:`scan_bash_write_destinations`, without the rest.
+
+    Every destination ``command`` names as written, UNRESOLVED. A caller that
+    DENIES must use the scan instead, which also reports text it could not
+    read.
+    """
+    return scan_bash_write_destinations(
+        command, include_heredoc_bodies=include_heredoc_bodies
+    ).destinations
+
+
+def scan_bash_write_destinations(
+    command: str, *, include_heredoc_bodies: bool = False
+) -> BashWriteScan:
     """Every destination ``command`` names as written, UNRESOLVED.
 
     The raw half of :func:`get_bash_write_targets`, from the same parser. That
@@ -312,20 +403,110 @@ def bash_write_destinations(
 
     ``include_heredoc_bodies`` has the meaning, and the caveats, documented on
     :func:`get_bash_write_targets`.
+
+    The text outside heredoc bodies is read one complete command at a time --
+    split at the newlines that end a command, never at one inside a quoted
+    argument or a substitution. The first command the tokeniser cannot read
+    stops the reading, and it and everything after it are ``unreadable``.
+    A body is data, so a body shlex cannot read costs that body only and is
+    never reported as unreadable. A body whose closing line never comes is
+    not known to be data -- a delimiter read differently from bash looks
+    exactly like that, and bash then ran every line after its own closer --
+    so its text is ``unreadable`` too (Plan 00466 N120). So is every command
+    from the one where the scan STOPPED: past that point the scanner cannot
+    tell a body from a command (Plan 00466 N101 round 10).
+
+    A body fed to a SHELL (:data:`SHELL_BODY_RUNNERS`, named directly or by a
+    variable the command shows names one) is commands, not data: its writes
+    are read like the command's own, and text in it the tokeniser cannot read
+    is ``unreadable`` (Plan 00466 N101 round 10, S3). So is a body fed to a
+    receiver nothing names (``$PY -`` with no literal ``PY=`` earlier), which
+    is unknown rather than data (round 12, N212). With
+    ``include_heredoc_bodies``, so is an unreadable body fed to anything but
+    a data sink.
     """
-    outside_bodies, heredocs = split_heredocs(command)
-    segments = [outside_bodies]
-    if include_heredoc_bodies:
-        # A body with no redirect and no write verb cannot name a target, so it
-        # is never tokenised. Purely an optimisation, and a load-bearing one:
-        # tokenising is per-character Python, a 40 KB prose body measured ~25 ms,
-        # and a dispatched event pays it twice.
-        segments.extend(
-            heredoc.body for heredoc in heredocs if _WRITE_INDICATOR_RE.search(heredoc.body)
-        )
+    return _scan_destinations(command, include_heredoc_bodies, depth=0)
+
+
+def _scan_destinations(command: str, include_heredoc_bodies: bool, depth: int) -> BashWriteScan:
+    """:func:`scan_bash_write_destinations`, ``depth`` shell bodies deep."""
+    if depth > _MAX_SHELL_BODY_DEPTH:
+        return BashWriteScan([], command)
+    scan = scan_heredocs(command)
+    destinations: list[BashWriteDestination] = []
+    unreadable: str | None = None
+    readable_end = len(command)
+    if scan.stopped_at is not None:
+        readable_end = max((b for b in scan.breaks if b < scan.stopped_at), default=-1) + 1
+    commands = _complete_commands(command, scan, readable_end)
+    unscanned = [command[readable_end:]] if readable_end < len(command) else []
+    for position, text in enumerate(commands):
+        tokens = _tokenise(text)
+        if tokens is None:
+            unreadable = "\n".join([*commands[position:], *unscanned])
+            break
+        destinations.extend(_write_target_tokens(tokens))
+    if unreadable is None and unscanned:
+        unreadable = unscanned[0]
+    if unreadable is None:
+        unclosed = [h.body(command) for h in scan.heredocs if not h.terminated]
+        unreadable = next((body for body in unclosed if body.strip()), None)
+    consumers = heredoc_consumers(command, scan.heredocs)
+    for heredoc, words in zip(scan.heredocs, consumers, strict=True):
+        body = heredoc.body(command)
+        if body_may_run(words):
+            # The shell reads each body line with its newline, and joins its
+            # continuations as it reads.
+            script = remove_line_continuations(body + "\n")
+            nested = _scan_destinations(script, include_heredoc_bodies, depth + 1)
+            destinations.extend(nested.destinations)
+            unreadable = unreadable if unreadable is not None else nested.unreadable
+        # A body with no redirect and no write verb cannot name a target, so
+        # it is never tokenised. Purely an optimisation, and a load-bearing
+        # one: tokenising is per-character Python, a 40 KB prose body
+        # measured ~25 ms, and a dispatched event pays it twice.
+        elif include_heredoc_bodies and _WRITE_INDICATOR_RE.search(body):
+            tokens = _tokenise(body)
+            if tokens is None and not all(word in DATA_SINKS for word in words):
+                unreadable = unreadable if unreadable is not None else body
+            destinations.extend(_write_target_tokens(tokens or []))
+    return BashWriteScan(destinations, unreadable)
+
+
+def _complete_commands(command: str, scan: HeredocScan, readable_end: int) -> list[str]:
+    """The text before ``readable_end`` outside heredoc bodies, one complete
+    command per entry."""
+    removed = _body_spans(command, scan)
+    commands: list[str] = []
+    start = 0
+    for end in [*(b for b in scan.breaks if b < readable_end), readable_end]:
+        text = _without_spans(command, start, end, removed)
+        if text.strip():
+            commands.append(text)
+        start = end + 1
+    return commands
+
+
+def _body_spans(command: str, scan: HeredocScan) -> list[tuple[int, int]]:
+    """Each body and its closing line, with the newline that introduces it."""
     return [
-        candidate for segment in segments for candidate in _write_target_tokens(_tokenise(segment))
+        (heredoc.body_start - 1, heredoc.closer_end)
+        for heredoc in scan.heredocs
+        if heredoc.body_start < len(command)
     ]
+
+
+def _without_spans(command: str, start: int, end: int, removed: list[tuple[int, int]]) -> str:
+    """``command[start:end]`` with every removed span that falls inside it cut out."""
+    parts: list[str] = []
+    cursor = start
+    for span_start, span_end in removed:
+        if span_end <= cursor or span_start >= end:
+            continue
+        parts.append(command[cursor : max(cursor, span_start)])
+        cursor = max(cursor, span_end)
+    parts.append(command[cursor:end] if cursor < end else "")
+    return "".join(parts)
 
 
 def get_written_file_paths(hook_input: dict[str, Any]) -> list[str]:
@@ -352,6 +533,12 @@ def get_written_file_paths(hook_input: dict[str, Any]) -> list[str]:
     Heredoc BODIES are excluded for the same reason. That flag yields a
     superset containing occasional phantoms from prose, and a handler that
     DENIES must never act on a path the command did not write.
+
+    Command text the tokeniser cannot read names no path here, deliberately:
+    a content guard judges a file it can name, and one it cannot name has
+    nothing to lint. Its silence claims nothing. A LOCATION guard is the
+    opposite case and must use :func:`scan_bash_write_targets` (Plan 00466
+    N120).
 
     Returns:
         Absolute paths, in command order, de-duplicated. Empty when this event
@@ -425,14 +612,14 @@ def resolve_bash_write_destination(candidate: BashWriteDestination, cwd: Any) ->
     return [] if directory_only else [destination]
 
 
-def _tokenise(text: str) -> list[str]:
-    """Shell tokens, or an empty list when the text cannot be parsed.
+def _tokenise(text: str) -> list[str] | None:
+    """Shell tokens, or ``None`` when the text cannot be parsed.
 
-    Returning empty rather than raising is what makes the per-segment split
-    matter: an unbalanced quote in one heredoc body costs that body only. When
-    the whole command was parsed as a single string, a stray `"` in ordinary
-    prose discarded the genuine target on the introducing line too — silently
-    un-enforcing any policy keyed on that path.
+    ``None`` is not "no tokens": the caller decides what an unreadable span
+    costs. For a heredoc body it costs that body only. For command text it
+    marks the scan ``unreadable`` (Plan 00466 N120), because bash runs every
+    complete command before the one it cannot parse -- and an unreadable
+    command may write anywhere.
 
     **``posix=True`` is load-bearing, not a default (Plan 00263).** Non-POSIX
     mode does not process backslash escapes, so a ``\\"`` inside a double-quoted
@@ -455,17 +642,84 @@ def _tokenise(text: str) -> list[str]:
     Tokens arrive UNQUOTED as a result, which is why callers must not re-strip
     quote characters; see :func:`_resolve_write_target`.
 
-    The one behaviour traded away is that POSIX mode also rejects a trailing
-    lone backslash ("No escaped character") where non-POSIX tolerated it. That
-    is the fail-safe direction — a segment yields no targets rather than a wrong
-    one — and such a command is unterminated to bash as well.
+    The text is first put through :func:`bash_text_for_shlex`, because shlex
+    and bash disagree in two places where shlex does NOT raise, and silently
+    reads the rest of the line wrong (Plan 00466 N120): shlex starts a comment
+    at a ``#`` inside a word, and does not know ANSI-C ``$'...'``. On main,
+    ``echo a#b > /opt/o.md`` and ``echo $'it\\'s' > /opt/x \\'`` both named no
+    target while bash wrote one. That function also returns ``None`` for the
+    only two texts POSIX shlex raises on -- a quote that never closes and a
+    trailing lone backslash -- so shlex is never handed one.
     """
-    try:
-        lexer = shlex.shlex(text, posix=True, punctuation_chars=True)
-        lexer.whitespace_split = True
-        return list(lexer)
-    except ValueError:
-        return []
+    normalised = bash_text_for_shlex(text)
+    if normalised is None:
+        return None
+    lexer = shlex.shlex(normalised, posix=True, punctuation_chars=True)
+    lexer.whitespace_split = True
+    lexer.commenters = ""
+    return list(lexer)
+
+
+def bash_text_for_shlex(text: str) -> str | None:
+    """``text`` rewritten so shlex splits it where bash does; None if a quote
+    never closes or the text ends in a lone backslash, the two things POSIX
+    shlex raises on.
+
+    Bash's comments are removed (a ``#`` starting a word, outside quotes, up to
+    the newline), so shlex can run with no comment character of its own: shlex
+    would also start one INSIDE a word, where bash does not. Each ANSI-C
+    ``$'...'`` string is decoded and re-quoted as a plain single-quoted word;
+    shlex reads ``$'it\\'s'`` as a quote closed at the escaped one. ``$$`` is
+    the shell's pid, so the quote after it is a plain one.
+    Everything else is kept byte for byte.
+    """
+    out: list[str] = []
+    index = 0
+    length = len(text)
+    while index < length:
+        char = text[index]
+        if char == "\\" and index + 1 == length:
+            return None
+        if char == "\\" or text.startswith("$$", index):
+            out.append(text[index : index + 2])
+            index += 2
+        elif char == "'":
+            end = text.find("'", index + 1)
+            if end < 0:
+                return None
+            out.append(text[index : end + 1])
+            index = end + 1
+        elif char == '"':
+            end = _double_quote_end(text, index + 1)
+            if end < 0:
+                return None
+            out.append(text[index : end + 1])
+            index = end + 1
+        elif text.startswith("$'", index):
+            decoded = ansi_c_string(text, index + 2)
+            if decoded is None:
+                return None
+            value, index = decoded
+            out.append("'" + value.replace("'", "'\"'\"'") + "'")
+        elif char == "#" and (index == 0 or text[index - 1] in COMMENT_PRECEDERS):
+            line_end = text.find("\n", index)
+            index = length if line_end < 0 else line_end
+        else:
+            out.append(char)
+            index += 1
+    return "".join(out)
+
+
+def _double_quote_end(text: str, index: int) -> int:
+    """Index of the ``"`` closing a double-quoted span begun before ``index``, or -1."""
+    while index < len(text):
+        if text[index] == "\\":
+            index += 2
+        elif text[index] == '"':
+            return index
+        else:
+            index += 1
+    return -1
 
 
 class HeredocBody(NamedTuple):
@@ -474,11 +728,16 @@ class HeredocBody(NamedTuple):
     ``opener_line`` is where the RECEIVER is named (``python3 - <<'PY'``), so a
     caller can tell a body that is data (fed to ``cat``) from one that is a
     program (fed to an interpreter).
+
+    ``ordinal`` counts the operators on ``opener_line`` naming the same
+    delimiter before this one, so ``cat <<'EOF'; bash <<'EOF'`` tells the
+    second body's receiver from the first's.
     """
 
     opener_line: str
     body: str
     delimiter: str
+    ordinal: int = 0
 
 
 def split_heredocs(command: str) -> tuple[str, list[HeredocBody]]:
@@ -491,23 +750,27 @@ def split_heredocs(command: str) -> tuple[str, list[HeredocBody]]:
     They are returned apart rather than as one string so each can be tokenised
     on its own — see :func:`_tokenise` for why that matters, and
     :func:`get_bash_write_targets` for the cost it avoids.
+
+    Where a heredoc starts and what closes it is bash's grammar, shared with
+    every other heredoc site through
+    :func:`~claude_code_hooks_daemon.utils.heredoc_operators.scan_heredocs`
+    (Plan 00466 N120): any delimiter word, quoted or not.
     """
-    lines = command.split("\n")
-    kept: list[str] = []
+    scan = scan_heredocs(command)
     heredocs: list[HeredocBody] = []
-    index = 0
-    while index < len(lines):
-        line = lines[index]
-        kept.append(line)
-        delimiters = [match.group(_HEREDOC_DELIMITER_GROUP) for match in _HEREDOC_RE.finditer(line)]
-        index += 1
-        for delimiter in delimiters:
-            start = index
-            while index < len(lines) and lines[index].strip() != delimiter:
-                index += 1
-            heredocs.append(HeredocBody(line, "\n".join(lines[start:index]), delimiter))
-            index += 1  # step past the closing delimiter itself
-    return "\n".join(kept), heredocs
+    for heredoc in scan.heredocs:
+        line_start = command.rfind("\n", 0, heredoc.operator.start) + 1
+        line_end = command.find("\n", heredoc.operator.start)
+        opener_line = command[line_start : len(command) if line_end < 0 else line_end]
+        delimiter = heredoc.operator.delimiter
+        column = heredoc.operator.start - line_start
+        ordinal = sum(
+            1
+            for operator in find_heredoc_operators(opener_line)
+            if operator.delimiter == delimiter and operator.start < column
+        )
+        heredocs.append(HeredocBody(opener_line, heredoc.body(command), delimiter, ordinal))
+    return _without_spans(command, 0, len(command), _body_spans(command, scan)), heredocs
 
 
 def _write_target_tokens(tokens: list[str]) -> list[BashWriteDestination]:
@@ -570,6 +833,13 @@ def _collect_trailing_operands(
     expects_directory_value = False
     while index < len(tokens) and tokens[index] not in _OPERAND_TERMINATORS:
         token = tokens[index]
+        if token in _REDIRECT_OPERATORS or token in _INPUT_REDIRECT_OPERATORS:
+            # A redirect's word is no operand, and the operands after it are
+            # still the command's (Plan 00466 N101 round 12).
+            if token in _REDIRECT_OPERATORS and index + 1 < len(tokens):
+                targets.append(BashWriteDestination(tokens[index + 1]))
+            index += 2
+            continue
         if expects_directory_value:
             target_directory = token
             expects_directory_value = False
@@ -653,9 +923,7 @@ def _resolve_write_target(target: str, cwd: Any) -> str | None:
     begins or ends with a quote character -- turning a correct target into a
     wrong one, the exact failure this function exists to avoid.
     """
-    if not target:
-        return None
-    if any(character in target for character in _UNEXPANDABLE_CHARACTERS):
+    if not target or needs_expansion(target):
         return None
     if target.startswith(_DEV_PREFIX):
         return None

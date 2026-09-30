@@ -239,7 +239,7 @@ Test in real environment:
 
 Commit message should explain the bug and fix:
 
-```
+```text
 Fix: HandlerName fails to match pattern with [condition]
 
 Bug: Handler didn't recognize [pattern] due to [root cause].

@@ -28,8 +28,13 @@ from __future__ import annotations
 
 import pytest
 
+from claude_code_hooks_daemon.utils.heredoc_operators import scan_heredocs
 from claude_code_hooks_daemon.utils.shell_segmentation import (
     COMMAND_WRAPPERS,
+    _SubstitutionDepthTracker,
+    heredoc_consumers,
+    known_variables,
+    no_earlier_segment_may_rebind,
     peel_command_wrappers,
     quoted_heredoc_command_words,
     quoted_heredoc_receivers,
@@ -94,6 +99,48 @@ class TestEscapeRules:
     def test_escaped_backslash_does_not_escape_the_next_character(self) -> None:
         r"""``\\`` is a literal backslash; the ``;`` after it still separates."""
         assert split_unquoted(r"echo a\\ ; ls", (";",)) == [r"echo a\\ ", " ls"]
+
+
+class TestAnsiCStringsAndComments:
+    """Plan 00466 N120 (round 9d). Bash reads ``$'it\\'s'`` as one word and a
+    quote inside a comment as a character. Read as plain quotes, both left the
+    splitter "inside a string" across every later separator, so the next
+    command was judged as part of a whitelisted ``echo``."""
+
+    @pytest.mark.parametrize(
+        ("text", "expected"),
+        [
+            ("echo $'it\\'s' && pytest", ["echo $'it\\'s' ", " pytest"]),
+            ("echo $'a;b' ; ls", ["echo $'a;b' ", " ls"]),
+            ("echo $'\\\\' ; ls", ["echo $'\\\\' ", " ls"]),
+            ("echo hi # it's\npytest", ["echo hi # it's", "pytest"]),
+            ('ls # say "hi\ngit status', ['ls # say "hi', "git status"]),
+            ("echo x;# it's\nls", ["echo x", "# it's", "ls"]),
+        ],
+    )
+    def test_the_next_command_is_its_own_segment(self, text: str, expected: list[str]) -> None:
+        assert split_unquoted(text, CHAIN) == expected
+
+    @pytest.mark.parametrize(
+        ("text", "expected"),
+        [
+            ("echo $$'a;b' ; ls", ["echo $$'a;b' ", " ls"]),
+            ('echo "$\'" ; ls', ['echo "$\'" ', " ls"]),
+            ("echo a#'b;c' ; ls", ["echo a#'b;c' ", " ls"]),
+            ("echo \\#'b;c' ; ls", ["echo \\#'b;c' ", " ls"]),
+        ],
+    )
+    def test_what_bash_does_not_read_as_ansi_c_or_a_comment(
+        self, text: str, expected: list[str]
+    ) -> None:
+        assert split_unquoted(text, CHAIN) == expected
+
+    def test_a_separator_in_a_comment_still_splits(self) -> None:
+        """Judging comment text as commands is the conservative reading."""
+        assert split_unquoted("ls # a; git reset --hard", CHAIN) == ["ls # a", " git reset --hard"]
+
+    def test_an_unterminated_ansi_c_string_runs_to_the_end(self) -> None:
+        assert split_unquoted("echo $'it ; ls", CHAIN) == ["echo $'it ; ls"]
 
 
 class TestBothOriginalBypassesAreClosed:
@@ -211,6 +258,13 @@ class TestStripQuotedHeredocBodies:
     def test_dash_form_delimiter_is_handled(self) -> None:
         command = "git commit -F - <<-'EOF'\n\tprose mentioning run_all.sh\n\tEOF"
         assert "run_all.sh" not in strip_quoted_heredoc_bodies(command)
+
+    def test_a_here_string_is_not_a_heredoc_n116(self) -> None:
+        """Plan 00466 N116: `<<<'EOF'` is a here-string, so the next line is
+        a command bash runs. Searched from its second `<`, the opener read
+        as `<<'EOF'` and the line was blanked."""
+        command = "cat <<<'EOF'\nrun_all.sh\nEOF"
+        assert "run_all.sh" in strip_quoted_heredoc_bodies(command)
 
     def test_unquoted_delimiter_body_is_left_alone(self) -> None:
         """`<<EOF` DOES expand, so its body can genuinely run something."""
@@ -448,9 +502,12 @@ class TestABodyIsOnlyInertIfItsRECEIVERTreatsItAsData:
         """Containment must END with the substitution, or prose stops blanking.
 
         `$(date)` closes before the heredoc opens, so the sink is NOT inside a
-        substitution and an ordinary prose write keeps its exemption.
+        substitution, and ``date`` runs in a child that cannot rebind ``cat``
+        (N214 round 13).
         """
         command = "echo $(date) && cat <<'EOF' > notes.md\ngit reset --hard HEAD\nEOF"
+        tracker = _SubstitutionDepthTracker(command)
+        assert tracker.inside_substitution_at(command.index("<<")) is False
         assert "git reset --hard HEAD" not in strip_quoted_heredoc_bodies(command)
 
     def test_an_apostrophe_in_earlier_double_quoted_text_does_not_confuse_it(
@@ -632,9 +689,138 @@ class TestQuotedHeredocCommandWords:
 
     def test_sudo_is_skipped_so_the_real_command_is_reported(self) -> None:
         """Skipping `sudo` cannot hide an interpreter from an allowlist
-        caller: `sudo -E bash` resolves to `bash`, which no sink list holds."""
-        assert quoted_heredoc_command_words("sudo -E bash <<'EOF'\nb\nEOF") == ["bash"]
-        assert quoted_heredoc_command_words("sudo -E tee /etc/x <<'EOF'\nb\nEOF") == ["tee"]
+        caller: `sudo -H bash` resolves to `bash`, which no sink list holds."""
+        assert quoted_heredoc_command_words("sudo -H bash <<'EOF'\nb\nEOF") == ["bash"]
+        assert quoted_heredoc_command_words("sudo -H tee /etc/x <<'EOF'\nb\nEOF") == ["tee"]
+
+    @pytest.mark.parametrize(
+        ("prefix", "command"),
+        [
+            ("sudo -p cat", "bash"),
+            ("sudo -u cat", "bash"),
+            ("sudo -nu cat", "bash"),
+            ("sudo -ucat", "bash"),
+            ("sudo --prompt cat", "bash"),
+            ("sudo --prompt=cat", "bash"),
+            ("sudo -u root --", "bash"),
+            ("env -u cat", "bash"),
+            ("env -i FOO=cat", "bash"),
+            ("env --unset=x", "bash"),
+            ("nice -n cat", "bash"),
+            ("nice -10", "bash"),
+            ("timeout -s cat 5", "bash"),
+            ("timeout --kill-after=cat 5", "bash"),
+            ("nohup", "bash"),
+            ("command -p", "bash"),
+            ("sudo env nice -n 5", "tee"),
+        ],
+    )
+    def test_a_wrapper_options_value_is_not_the_command(self, prefix: str, command: str) -> None:
+        """Plan 00466 N101 D-SEC F2: skipping only `-*` words read
+        `sudo -p cat bash` as `cat`, a data sink, and blanked a body bash
+        runs. Each wrapper's options are parsed with their values."""
+        heredoc = f"{prefix} {command} <<'EOF'\nb\nEOF"
+        assert quoted_heredoc_command_words(heredoc) == [command]
+
+    @pytest.mark.parametrize(
+        "prefix",
+        [
+            "sudo -s",
+            "sudo -i",
+            "sudo -h",
+            "sudo --shell",
+            "sudo -Z",
+            "sudo -u",
+            "env -S x",
+            "env PATH=/tmp",
+            "timeout x",
+            "command -v",
+            "nice --bogus",
+            "-p",
+        ],
+    )
+    def test_an_unparseable_wrapper_names_no_command(self, prefix: str) -> None:
+        """An option the resolver cannot parse with certainty, a mode that
+        runs a shell, or a PATH change resolves to nothing -- which every
+        allowlist caller treats as unknown, withholding the exemption."""
+        assert quoted_heredoc_command_words(f"{prefix} cat <<'EOF'\nb\nEOF") == []
+
+    @pytest.mark.parametrize(
+        "prefix",
+        [
+            "sudo -R /x",
+            "sudo -R/x",
+            "sudo --chroot /x",
+            "sudo --chroot=/x",
+            "sudo -D /x",
+            "sudo --chdir=/x",
+            "sudo -E",
+            "sudo -HE",
+            "sudo --preserve-env",
+            "sudo --preserve-env=HOME",
+            "sudo -i",
+            "sudo -s",
+            "sudo --login",
+            "env -C /x",
+            "env --chdir=/x",
+        ],
+    )
+    def test_a_wrapper_option_that_changes_root_directory_or_environment_names_no_command(
+        self, prefix: str
+    ) -> None:
+        """Plan 00466 N101 round 4 (D-RULE minor 1): a chroot or a new
+        working directory changes which binary a name resolves to, and
+        `sudo -E` carries the caller's environment across sudo's reset, so
+        the wrapped name no longer means what it means on its own."""
+        assert quoted_heredoc_command_words(f"{prefix} cat <<'EOF'\nb\nEOF") == []
+
+    @pytest.mark.parametrize(
+        ("prefix", "command"),
+        [
+            ("sudo -p 'x cat'", "bash"),
+            ('sudo -p "x cat"', "bash"),
+            ("sudo --prompt 'x cat'", "bash"),
+            ("sudo -p x\\ cat", "bash"),
+            ("env -u 'a cat'", "bash"),
+            ("sudo -g 'a cat'", "bash"),
+        ],
+    )
+    def test_a_quoted_option_value_is_one_word(self, prefix: str, command: str) -> None:
+        """Plan 00466 N101 round 3 (D-SEC minor 3): splitting on whitespace
+        without quotes let `-p` consume `'x` and read `cat'` as the command,
+        a data sink, while sudo runs bash."""
+        assert quoted_heredoc_command_words(f"{prefix} {command} <<'EOF'\nb\nEOF") == [command]
+
+    @pytest.mark.parametrize(
+        "prefix",
+        [
+            "$c",
+            "${c}",
+            "$(echo cat)",
+            "`echo cat`",
+            "ca?",
+            "c*",
+            "{cat,bash}",
+            "$'cat'",
+            '"$c"',
+            "sudo -u $u cat",
+            "sudo $w",
+            "env $v cat",
+        ],
+    )
+    def test_a_word_that_cannot_be_resolved_names_no_command(self, prefix: str) -> None:
+        """Plan 00466 N101 round 3: an expansion, glob or brace group can
+        become any command, and an unquoted expansion in a wrapper option can
+        split into more words. Such a word resolves to nothing."""
+        assert quoted_heredoc_command_words(f"{prefix} <<'EOF'\nb\nEOF") == []
+
+    @pytest.mark.parametrize("prefix", ["'cat'", '"cat"', "\\cat", "c\\at", "c'a't", "/bin/cat"])
+    def test_a_quoted_or_escaped_name_resolves_after_quote_removal(self, prefix: str) -> None:
+        assert quoted_heredoc_command_words(f"{prefix} <<'EOF'\nb\nEOF") == ["cat"]
+
+    def test_an_expansion_after_the_command_word_does_not_matter(self) -> None:
+        heredoc = "cat > \"$(pwd)/notes.md\" <<'EOF'\nb\nEOF"
+        assert quoted_heredoc_command_words(heredoc) == ["cat"]
 
     def test_a_path_named_command_is_reduced_to_its_basename(self) -> None:
         assert quoted_heredoc_command_words("/bin/sh <<'EOF'\nb\nEOF") == ["sh"]
@@ -650,18 +836,514 @@ class TestQuotedHeredocCommandWords:
         command = "cat > a <<'A'\nx\nA\nbash <<'B'\ny\nB"
         assert quoted_heredoc_command_words(command) == ["cat", "bash"]
 
-    def test_an_expansion_built_command_word_is_reported_verbatim(self) -> None:
-        """Not resolved -- resolving it would mean running the command. It is
-        reported as-is so an allowlist caller simply fails to match it, which
-        is the safe direction and is why the expansion family needs no
-        normalisation."""
-        assert quoted_heredoc_command_words("$SHELL <<'EOF'\nb\nEOF") == ["SHELL"]
+    def test_an_expansion_built_command_word_names_no_command(self) -> None:
+        """Not resolved -- resolving it would mean running the command. Plan
+        00466 N101 round 3: reporting `$cat` as `cat` let an allowlist caller
+        match it, so an unresolvable word now names nothing and the body it
+        feeds is kept."""
+        assert quoted_heredoc_command_words("$SHELL <<'EOF'\nb\nEOF") == []
+        body = "$cat <<'EOF'\nb\nEOF"
+        assert strip_quoted_heredoc_bodies(body) == body
 
     def test_unquoted_heredoc_is_not_reported(self) -> None:
         assert quoted_heredoc_command_words("bash <<EOF\nbody\nEOF") == []
 
     def test_command_without_a_heredoc_reports_nothing(self) -> None:
         assert quoted_heredoc_command_words("git commit -m 'msg'") == []
+
+
+class TestHeredocsFollowBashGrammar:
+    """Plan 00466 N120: the body blanking uses the shared heredoc scanner.
+
+    Its regex took a quoted ``[\\w.\\-]+`` word, so any other quoted
+    delimiter exposed a prose body as shell, a second heredoc on one opener
+    line kept its body, and a ``<<'EOF'`` inside a COMMENT blanked the real
+    command on the next line.
+    """
+
+    @pytest.mark.parametrize(
+        ("opener", "closer"),
+        [("\\EOF", "EOF"), ('E"O"F', "EOF"), ("'END NOTES'", "END NOTES"), ("'EOF+1'", "EOF+1")],
+    )
+    def test_every_quoted_delimiter_spelling_blanks_the_body(
+        self, opener: str, closer: str
+    ) -> None:
+        command = f"cat > notes.md <<{opener}\nprose mentioning run_all.sh\n{closer}"
+        stripped = strip_quoted_heredoc_bodies(command)
+        assert "run_all.sh" not in stripped
+        assert stripped == f"cat > notes.md <<{opener}\nHEREDOC_BODY\n{closer}"
+
+    def test_a_backslash_delimiter_feeding_an_interpreter_is_reported(self) -> None:
+        assert quoted_heredoc_receivers("bash <<\\EOF\nbody\nEOF") == ["bash"]
+
+    def test_two_heredocs_on_one_line_are_both_blanked(self) -> None:
+        command = "cat <<'A' <<'B'\nfirst run_all.sh\nA\nsecond run_all.sh\nB"
+        stripped = strip_quoted_heredoc_bodies(command)
+        assert "run_all.sh" not in stripped
+        assert quoted_heredoc_command_words(command) == ["cat", "cat"]
+
+    def test_an_opener_in_a_comment_blanks_nothing(self) -> None:
+        command = "cat f # <<'EOF'\nrun_all.sh\nEOF"
+        assert strip_quoted_heredoc_bodies(command) == command
+        assert quoted_heredoc_command_words(command) == []
+
+    def test_an_empty_body_keeps_the_heredoc_shape(self) -> None:
+        assert strip_quoted_heredoc_bodies("cat <<'EOF'\nEOF") == "cat <<'EOF'\nHEREDOC_BODY\nEOF"
+
+    def test_an_unterminated_body_is_left_alone(self) -> None:
+        command = "cat <<'EOF'\nrun_all.sh"
+        assert strip_quoted_heredoc_bodies(command) == command
+
+
+class TestTheMessageHeredocIdiomMustBeTheWholeValue:
+    """Plan 00466 N120: ``"$(cat <<'EOF' ... EOF)"`` cannot substitute
+    anything only when that heredoc is the whole value."""
+
+    @pytest.mark.parametrize(
+        "value",
+        [
+            "\"$(cat <<'EOF'\nmsg\nEOF\n)$(rm -rf /)\"",
+            "\"$(cat <<'EOF' ; rm -rf /\nmsg\nEOF\n)\"",
+            "\"$(cat <<'EOF'\nmsg\nEOF\nrm -rf /\n)\"",
+            "\"$(rm -rf / ; cat <<'EOF'\nmsg\nEOF\n)\"",
+            '"$(cat <<EOF\nmsg\nEOF\n)"',
+            "\"$(cat <<'EOF'\nmsg\n)\"",
+        ],
+    )
+    def test_anything_beside_the_heredoc_can_substitute(self, value: str) -> None:
+        assert value_can_substitute(value) is True
+
+    @pytest.mark.parametrize(
+        "value",
+        [
+            "\"$(cat <<'EOF'\nmsg\nEOF\n)\"",
+            "\"$(cat <<'EOF'\nmsg\nEOF)\"",
+            "\"$(cat <<'EOF-1'\nmsg with $(x)\nEOF-1\n)\"",
+            "\"$( cat <<-'END.MD'\n\tmsg\n\tEND.MD\n )\"",
+        ],
+    )
+    def test_the_idiom_alone_cannot_substitute(self, value: str) -> None:
+        assert value_can_substitute(value) is False
+
+
+# -- Plan 00466 N101 round 12: N214 and N215 --------------------------------
+
+_SINK = "cat > notes.md <<'EOF'\nprose\nEOF"
+
+
+class TestNoEarlierSegmentMayRebind:
+    """N214, as the round 13 ruling reads it: a sink's body is data unless
+    an earlier segment of the call MAY REBIND a command name in this shell.
+    A child process cannot, whatever it does to files."""
+
+    @pytest.mark.parametrize(
+        "prefix",
+        [
+            "",
+            "OUT=notes.md; ",
+            "A=1 B='two words'; ",
+            "set -euo pipefail; ",
+            "set -euo pipefail\n",
+            "set -e; ",
+            "set +x; ",
+            "set -o errexit -o nounset; ",
+            "set +o pipefail; ",
+            "set; ",
+            "mkdir -p d && ",
+            "set -euo pipefail; mkdir -p d && ",
+            "pytest -q; ",
+            "python3 x.py; ",
+            "make -j4 && ",
+            "sudo ls; ",
+            "/usr/bin/env ls; ",
+            "cat > a.md <<'A'\nit's\nA\n",
+            "cat > a.md <<A\nit's $HOME and $(date)\nA\n",
+            "echo x > cat; ",
+            "ls > out; ",
+            "cat < f; ",
+            "ls &> out; ",
+            "git commit -m x; ",
+            "git commit -m 'fix (for real)'; ",
+            "git config alias.x '!bash'; ",
+            "git -c core.pager=bash log; ",
+            "rg --pre bash x; ",
+            "find . -exec bash {} \\; ; ",
+            "find . -delete; ",
+            "X=$(date); ",
+            "X=`date`; ",
+            "X=$Y; ",
+            "X=1 ls; ",
+            "a=(); ",
+            "ls $X; ",
+            "echo $(date); ",
+            'echo "$(date)"; ',
+            'cp "${files[@]}" d; ',
+            'echo "${x:-d}" "${#x}" "${a[1]}"; ',
+            "{ ls; }; ",
+            "(ls); ",
+            "if true; then ls; fi; ",
+            "while false; do ls; done; ",
+            "for x in a b; do ls; done; ",
+            "select x in a; do ls; done; ",
+            "case $x in a) ls;; esac; ",
+            "# alias cat=bash\n",
+            "echo 'alias cat=bash; x=$((1))'; ",
+            'echo "f() (x)"; ',
+            '[ -f "$x" ] && ',
+            "[[ $x == y ]] && ",
+            "[[ 1 -eq 1 ]] && ",
+            "printf '%s' -v; ",
+            "printf -- -v; ",
+            "echo hi; ",
+            "printf '%s\\n' x; ",
+            "true && ",
+            "test -f x && ",
+            "[ -f x ] && ",
+            "git status && ",
+            "git add -A && ",
+            "git diff --stat; ",
+            "git log --oneline -3\n",
+            "git show HEAD; ",
+            "git rev-parse HEAD; ",
+            "git ls-files; ",
+            "git --no-pager log -1; ",
+            "grep -n x f; ",
+            "rg -n x; ",
+            "ugrep x f; ",
+            "ls -la; ",
+            "cat f; ",
+            "wc -l f; ",
+            "head -n 3 f; ",
+            "tail -n 3 f; ",
+            "stat f; ",
+            "file f; ",
+            "find . -name '*.md'; ",
+            "git status | cat; ",
+            "ls 2>/dev/null; ",
+            "ls 2>&1; ",
+            "git log -1 >/dev/null; ",
+            # A name-binding builtin binding a literal non-special name to a
+            # literal value (small-a 9b's refinement of the ruling).
+            "export X=1; ",
+            "export FOO=bar BAZ; ",
+            "export -- X=1; ",
+            "declare -f x; ",
+            "declare -a arr; ",
+            "typeset x; ",
+            "local x; ",
+            "readonly x; ",
+            "unset x; ",
+            "unset X; ",
+            "unset -v X; ",
+            "read x; ",
+            "read -r line; ",
+            "mapfile x < f; ",
+            "mapfile -t x < f; ",
+            "readarray x < f; ",
+            "getopts ab x; ",
+            "let 1+2; ",
+            # `command -v`/`-V` only look a name up.
+            "command -v x; ",
+            "command -v rg && ",
+            "command -V rg; ",
+            "command -pv rg; ",
+            # A PATH of only literal system program directories.
+            "PATH=/usr/bin:/bin; ",
+            "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin; ",
+            "export PATH=/usr/bin:/bin; ",
+            "PATH='/usr/bin' ls; ",
+            # Arithmetic that names no variable.
+            "echo $((1+2)); ",
+            ": $((1<<3)); ",
+            ": $((0x1F + 16#ff)); ",
+            ": ${x:1:2}; ",
+            "((1)); ",
+            "cat > a.md <<A\n$((1+2))\nA\n",
+            # A single literal `cd`/`pushd` target, with at most -L or -P.
+            "cd /repo && ",
+            "cd ./x && ",
+            "cd ../x; ",
+            "cd d; ",
+            "cd -; ",
+            "cd -P /x; ",
+            "cd -L d && ",
+            "cd /repo 2>/dev/null && ",
+            "cd 'my notes' && ",
+            "pushd d; ",
+            "pushd /x > /dev/null; ",
+            # A loop over a non-special name, its body still judged.
+            "for x in a; do ls; done; ",
+        ],
+    )
+    def test_a_prefix_that_cannot_rebind_keeps_the_body_data(self, prefix: str) -> None:
+        command = prefix + _SINK
+        assert no_earlier_segment_may_rebind(command, command.rindex("<<")) is True
+        assert "prose" not in strip_quoted_heredoc_bodies(command)
+
+    @pytest.mark.parametrize(
+        "prefix",
+        [
+            # A function or an alias.
+            "cat(){ bash; }; ",
+            "function cat { bash; }; ",
+            "cat () { bash; }\n",
+            "alias cat=bash\n",
+            # Each rebinding builtin or keyword of the ruling.
+            "unalias ls; ",
+            "hash -p /bin/bash cat; ",
+            "enable -n echo; ",
+            "builtin echo x; ",
+            "command ls; ",
+            "command -p ls; ",
+            "command $X -v ls; ",
+            "eval x; ",
+            "source env.sh; ",
+            ". env.sh; ",
+            "exec 3>&1; ",
+            "shopt -s expand_aliases; ",
+            "trap 'x' EXIT; ",
+            "printf -v X y; ",
+            "printf '-v' X y; ",
+            "printf $F y; ",
+            # A name-binding builtin binding a special name, a name or value
+            # that is not literal, or with an option that rebinds.
+            "export LESSOPEN='|-bash %s'; ",
+            "export PATH=/tmp; ",
+            "export X=$Y; ",
+            "export $N=1; ",
+            "export X=$(date); ",
+            "declare -n x=PATH; ",
+            "declare -i x; ",
+            "typeset -n x=IFS; ",
+            "local -i x; ",
+            "readonly PAGER=bash; ",
+            "unset PATH; ",
+            "unset -f ls; ",
+            "unset $X; ",
+            "read PATH; ",
+            "read -a BASH_ALIASES; ",
+            "mapfile PATH < f; ",
+            "mapfile -C cb x < f; ",
+            "readarray -C cb x < f; ",
+            "getopts ab PATH; ",
+            "getopts ab $X; ",
+            "let PATH=1; ",
+            "let x=$y; ",
+            "let x=i; ",
+            "let x=1; ",
+            # `cd`/`pushd` with no target, a non-literal target, two
+            # targets or another option; `popd` always.
+            "cd; ",
+            "cd $D && ",
+            'cd "$D" && ',
+            "cd ~ && ",
+            "cd ~/x && ",
+            "cd * && ",
+            "cd {a,b} && ",
+            "cd $(pwd) && ",
+            "cd '-e' d && ",
+            "cd -e d && ",
+            "cd -@ d && ",
+            "cd -- d && ",
+            "cd a b && ",
+            "pushd; ",
+            "pushd +1; ",
+            "pushd -n d; ",
+            "pushd $D; ",
+            "popd; ",
+            "popd d; ",
+            "coproc x; ",
+            "for PATH in /tmp; do ls; done; ",
+            "select IFS in a; do ls; done; ",
+            "for x in a; do alias cat=bash; done; ",
+            "select x in a; do cat(){ bash; }; done; ",
+            "for 'x' in a; do ls; done; ",
+            "for; do ls; done; ",
+            # `set` off its inert options.
+            "set -f; ",
+            "set +h; ",
+            "set -a; ",
+            "set -v; ",
+            "set -o posix; ",
+            "set -eo posix; ",
+            "set -- a; ",
+            "set x; ",
+            # An assignment a helper or bash reads.
+            "PATH=/tmp; ",
+            "PATH=/tmp ls; ",
+            "PATH=/usr/bin:/tmp; ",
+            "PATH=/usr/bin:; ",
+            "PATH=; ",
+            "PATH+=:/usr/bin; ",
+            "PATH=$P; ",
+            "PATH=/usr/bin:$HOME/bin; ",
+            "BASH_ENV=x; ",
+            "ENV=x; ",
+            "IFS=x; ",
+            "CDPATH=x; ",
+            "GLOBIGNORE=x; ",
+            "EXECIGNORE=x; ",
+            "BASHOPTS=x; ",
+            "SHELLOPTS=x; ",
+            "BASH_CMDS[cat]=/bin/bash; ",
+            "BASH_ALIASES[cat]=bash; ",
+            "LESSOPEN='|-bash %s'; ",
+            "PAGER=bash; ",
+            "GIT_PAGER=bash; ",
+            "a[$(date)]=1; ",
+            "a[i]=1; ",
+            # A head that is not plain literal.
+            "$X; ",
+            '"$X" a; ',
+            "$'cat' a; ",
+            "\\cat a; ",
+            "'cat' a; ",
+            'c"a"t a; ',
+            "~/bin/x; ",
+            "{cat,x} a; ",
+            # Inside a group, subshell or substitution.
+            "{ alias cat=bash; }; ",
+            "(alias cat=bash); ",
+            "echo $(alias cat=bash); ",
+            'echo "$(alias cat=bash)"; ',
+            "echo `alias cat=bash`; ",
+            "x=$(date) alias cat=bash; ",
+            "if true; then alias cat=bash; fi; ",
+            "case $x in a) alias cat=bash;; esac; ",
+            # An expansion that assigns a special name, or arithmetic that
+            # names any variable.
+            ": ${PATH:=/tmp}; ",
+            ": ${PATH=/tmp}; ",
+            ": ${X:-${PATH:=/tmp}}; ",
+            ": $((PATH=1)); ",
+            ": $[IFS=1]; ",
+            ": $((x=y=1)); ",
+            ": $((x=y)); ",
+            ": $((i+1)); ",
+            ": $((x++)); ",
+            ": $((x+=1)); ",
+            ": $(($x)); ",
+            ": $((x=1)); ",
+            ": $[x=1]; ",
+            "((x=1)); ",
+            ": $((x=1, y=2)); ",
+            ': "${a[x=1]}"; ',
+            ": ${x:x=1}; ",
+            ": ${x:i:1}; ",
+            ': "${a[i]}"; ',
+            ': "${a[PATH=1]}"; ',
+            ": ${x:PATH=1}; ",
+            ": ${x:i}; ",
+            "((PATH=1)); ",
+            "((i++)); ",
+            "cat > a.md <<A\n${PATH:=/tmp}\nA\n",
+            "cat > a.md <<A\n$((PATH=1))\nA\n",
+            "[[ PATH=1 -eq 1 ]] && ",
+            "[[ $x -eq 1 ]] && ",
+            "[[ -v a[x] ]] && ",
+            "test -v 'a[x]' && ",
+            "[ $op ] && ",
+        ],
+    )
+    def test_a_prefix_that_may_rebind_makes_the_body_commands(self, prefix: str) -> None:
+        command = prefix + _SINK
+        assert no_earlier_segment_may_rebind(command, command.rindex("<<")) is False
+        assert "prose" in strip_quoted_heredoc_bodies(command)
+
+    def test_the_claude_code_commit_idiom_stays_data(self) -> None:
+        command = "git add -A && git commit -m \"$(cat <<'EOF'\nit's done\nEOF\n)\""
+        assert no_earlier_segment_may_rebind(command, command.index("<<")) is True
+
+    def test_a_later_segment_is_not_judged(self) -> None:
+        command = _SINK + "\nalias cat=bash"
+        assert no_earlier_segment_may_rebind(command, command.index("<<")) is True
+
+    def test_an_earlier_heredoc_body_is_not_read_as_segments(self) -> None:
+        command = "cat <<'A'\nalias cat=bash; eval y\nA\nls & " + _SINK
+        assert no_earlier_segment_may_rebind(command, command.rindex("<<")) is True
+
+    def test_a_rebinding_prefix_makes_the_consumer_unknown(self) -> None:
+        command = "cat(){ bash; }; " + _SINK
+        assert heredoc_consumers(command, scan_heredocs(command).heredocs) == [(None,)]
+
+
+class TestKnownVariables:
+    """N215 and N212: a variable set to a literal by a plain top-level
+    statement earlier in the call, with the N53 exclusions."""
+
+    @pytest.mark.parametrize(
+        ("command", "expected"),
+        [
+            ('OUT=/opt/o.md; cat > "$OUT"', {"OUT": "/opt/o.md"}),
+            ("OUT='a b'\ncat > \"$OUT\"", {"OUT": "a b"}),
+            ('A=1 B="x"; echo', {"A": "1", "B": "x"}),
+            ('cd /repo && ls; OUT=o.md; cat > "$OUT"', {"OUT": "o.md"}),
+            ('D="v{X}/n (1)"; OUT=o.md; cat > "$OUT"', {"D": "v{X}/n (1)", "OUT": "o.md"}),
+            ("OUT=o.md; cat <<'E' > \"$OUT\"\nread OUT\nE", {"OUT": "o.md"}),
+        ],
+    )
+    def test_a_plain_literal_assignment_is_known(
+        self, command: str, expected: dict[str, str]
+    ) -> None:
+        assert known_variables(command) == expected
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            'OUT=$(date); cat > "$OUT"',
+            'OUT=`date`; cat > "$OUT"',
+            'OUT=$X; cat > "$OUT"',
+            'OUT=*.md; cat > "$OUT"',
+            'OUT+=x; cat > "$OUT"',
+            'OUT=a; OUT=b; cat > "$OUT"',
+            'cat > "$OUT"; OUT=a',
+            'echo "${OUT}"; OUT=a',
+            'true && OUT=a; cat > "$OUT"',
+            'false || OUT=a; cat > "$OUT"',
+            '( OUT=a; ); cat > "$OUT"',
+            '{ OUT=a; }; cat > "$OUT"',
+            'if true; then OUT=a; fi; cat > "$OUT"',
+            'f(){ OUT=/b; }; OUT=a; f; cat > "$OUT"',
+            'OUT=a ls; cat > "$OUT"',
+            'export OUT=a; cat > "$OUT"',
+            'PWD=/x; cat > "$PWD"',
+            'HOME=/x; cat > "$HOME/a"',
+            'BASH_ENV=/x; cat > "$BASH_ENV"',
+        ],
+    )
+    def test_anything_else_is_unknown(self, command: str) -> None:
+        assert "OUT" not in known_variables(command)
+        assert "PWD" not in known_variables(command)
+        assert "HOME" not in known_variables(command)
+        assert "BASH_ENV" not in known_variables(command)
+
+    @pytest.mark.parametrize(
+        "writer",
+        [
+            "read X",
+            "mapfile X",
+            "readarray X",
+            "declare -n X=OUT",
+            "typeset -n X=OUT",
+            "local -n X=OUT",
+            "printf -v OUT x",
+            "eval OUT=x",
+            "source f",
+            ". f",
+            "for OUT in a; do :; done",
+            "select OUT in a; do :; done",
+            "getopts a OUT",
+            "let OUT=1",
+            "((OUT=1))",
+            "echo $((OUT=1))",
+            "echo ${OUT:=x}",
+            "echo ${!R}",
+            "unset OUT",
+            "IFS=/",
+        ],
+    )
+    def test_a_name_writer_anywhere_makes_nothing_known(self, writer: str) -> None:
+        assert known_variables(f'OUT=a; {writer}; cat > "$OUT"') == {}
 
 
 class TestPeelCommandWrappers:

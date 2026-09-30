@@ -28,10 +28,14 @@ from claude_code_hooks_daemon.utils import shell_expansion
 from claude_code_hooks_daemon.utils.shell_expansion import (
     DEFAULT_MAX_BRACE_DEPTH,
     TooManyToEnumerateError,
+    UnresolvableBraceQuotingError,
     bounded_recursive_glob,
     expand_braces,
     iter_brace_words,
     iter_normalised_shell_words,
+    iter_shell_brace_words,
+    normalise_word,
+    shell_word_spellings,
 )
 from tests.scaling import SIZE_FACTOR, SUPERLINEAR_RATIO, counted_ratio, scaling_ratio
 from tests.support.directory_reads import record_directory_reads
@@ -233,6 +237,270 @@ class TestExpandBraces:
         )
 
 
+def _spellings(word: str) -> set[str]:
+    return {normalise_word(spelling) for spelling in expand_braces(word)}
+
+
+class TestQuotedBracesAreNotBraceSyntax:
+    """Plan 00466 N107: bash reads a quoted or escaped brace or comma as
+    text, and skips `${...}` and substitutions. The quote-blind reading is
+    kept too, since a word may be a fragment of a longer one."""
+
+    @pytest.mark.parametrize(
+        "word",
+        [
+            '.p-{"}",q}',
+            ".p-{'}',q}",
+            ".p-{\\},q}",
+            '.p-{"{",q}',
+            ".p-{$'}',q}",
+            '.p-{$"}",q}',
+            '.p-{"$(echo ")")",q}',
+            ".p-{`echo }`,q}",
+        ],
+    )
+    def test_a_quoted_brace_is_text(self, word: str) -> None:
+        assert ".p-q" in _spellings(word)
+
+    def test_a_quoted_comma_does_not_split(self) -> None:
+        assert ".p-a,b" in _spellings('.p-{"a,b",q}')
+
+    def test_a_parameter_expansion_is_not_a_group(self) -> None:
+        assert {"*a", "*b"} <= _spellings("${x}{a,b}")
+
+    def test_a_word_without_quoting_reads_as_before(self) -> None:
+        assert expand_braces("a{b,c}d") == ["abd", "acd"]
+
+    def test_the_quote_blind_reading_is_kept(self) -> None:
+        assert ".p-,q}" in _spellings('.p-{"}",q}')
+
+    def test_the_quote_aware_reading_is_capped(self) -> None:
+        with pytest.raises(TooManyToEnumerateError):
+            expand_braces('"x"' + "{a,b}" * 9)
+
+    @pytest.mark.parametrize(
+        "word",
+        [
+            '.p-{"$(case a in a) echo;; esac)",q}',
+        ],
+    )
+    def test_quoting_that_cannot_be_resolved_raises(self, word: str) -> None:
+        with pytest.raises(UnresolvableBraceQuotingError):
+            expand_braces(word)
+
+    def test_a_heredoc_in_a_substitution_is_read_by_the_shared_scanner(self) -> None:
+        """Plan 00466 N101 round 10, check 2: bash 5.2 prints `.p-) .p-q` for
+        this word, so the substitution holds the whole heredoc and the comma
+        after it splits the group."""
+        word = '.p-{"$(cat <<E\n)\nE\n)",q}'
+        assert expand_braces(word) == ['.p-"$(cat <<E\n)\nE\n)"', ".p-q"]
+
+    @pytest.mark.parametrize(
+        ("word", "spelling"),
+        [
+            ('.p-{"${x:-"}"}",q}', ".p-q"),
+            (".p-{${x:-'}'},q}", ".p-q"),
+            (".p-{a,b}${x", ".p-a*"),
+        ],
+    )
+    def test_a_parameter_expansion_is_read_as_bash_s_brace_scanner_reads_it(
+        self, word: str, spelling: str
+    ) -> None:
+        """Plan 00466 N101 round 7: bash's brace scanner opens a level at an
+        unquoted `${` and skips one inside double quotes, whatever the
+        parameter expansion's own rules; so does this."""
+        assert spelling in _spellings(word)
+
+    @pytest.mark.parametrize(
+        ("word", "spellings"),
+        [
+            ("{a}{b,c}", ["{a}b", "{a}c"]),
+            ("{pass},}", ["pass}", ""]),
+            ("{a{b,c}}", ["{ab}", "{ac}"]),
+            ("x{a,}", ["xa", "x"]),
+            ("{1..2x}{a,b}", ["{1..2x}a", "{1..2x}b"]),
+            ("{}{a,b}", ["{}a", "{}b"]),
+        ],
+    )
+    def test_a_group_is_what_bash_s_brace_scanner_accepts(
+        self, word: str, spellings: list[str]
+    ) -> None:
+        """Plan 00466 N101 round 7: a `}` before any comma is text, and a
+        body with no comma that is not a sequence is text."""
+        assert set(spellings) <= _spellings('""' + word)
+
+    def test_a_scan_past_its_budget_raises(self) -> None:
+        """Bash retries every `{` against the rest of the word, so many
+        unmatched braces cost the square of their number."""
+        with pytest.raises(TooManyToEnumerateError, match="budget"):
+            expand_braces('""' + "{a" * 8000 + ",}")
+
+    def test_no_brace_is_retried_once_no_closing_brace_is_left(self) -> None:
+        word = '""' + "{a" * 8000
+        assert expand_braces(word) == [word]
+
+    def test_unresolvable_quoting_with_no_group_at_stake_reads_as_before(self) -> None:
+        assert '"$x:-"a""' in expand_braces('"${x:-"a"}"')
+
+
+class TestIterShellBraceWords:
+    """Plan 00466 N107: words split as bash splits them, so a group holding
+    quoted whitespace reaches the expander whole."""
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            'cat .p-{"} x",q}',
+            "cat <<'EOF'\ndon't\nEOF\ncat .p-{\"} x\",q}",
+            "cat <<-'EOF'\n\tdon't\n\tEOF\ncat .p-{\"} x\",q}",
+            '# don\'t\ncat .p-{"} x",q}',
+            'echo $(cat .p-{"} x",q})',
+            'echo "$(cat .p-{"} x",q})"',
+            'echo `cat .p-{"} x",q}`',
+            'cat <<EOF\n$(cat .p-{"} x",q})\nEOF',
+            "cat <<< 'x' .p-{\"} x\",q}",
+            'cat .p-{"} x",q} <(true)',
+            'cat <<EOF\ndon\'t $(cat .p-{"} x",q})\nEOF',
+        ],
+    )
+    def test_a_group_holding_quoted_whitespace_is_one_word(self, text: str) -> None:
+        assert '.p-{"} x",q}' in list(iter_shell_brace_words(text))
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "bash -c 'cat .p-{\"} x\",q}'",
+            'bash -c "cat .p-{\\"} x\\",q}"',
+            "bash -c $'cat .p-\\x7b\"} x\",q}'",
+            "eval 'cat .p-{\"}' 'x\",q}'",
+            'bash -c cat\\ .p-{\\"}\\ x\\",q}',
+            "bash <<'EOF'\ncat .p-{\"} x\",q}\nEOF",
+            'bash <<EOF\ncat .p-{"} x",q}\nEOF',
+        ],
+    )
+    def test_text_a_shell_may_run_is_read_as_a_command(self, text: str) -> None:
+        assert '.p-{"} x",q}' in list(iter_shell_brace_words(text))
+
+    @pytest.mark.parametrize(
+        ("text", "expected"),
+        [
+            ("cat {a,b}", ["{a,b}"]),
+            ("echo '{a,b}' x", ["'{a,b}'", "{a,b}"]),
+            ("cat <<'EOF'\nplain {a,b}\nEOF", ["{a,b}"]),
+            ("echo {a,b} '{c,d}' plain", ["{a,b}", "'{c,d}'", "{c,d}"]),
+            ("cat .p-{},q}", [".p-{},q}"]),
+        ],
+    )
+    def test_every_word_holding_a_brace_is_reported_whatever_its_quoting_n115(
+        self, text: str, expected: list[str]
+    ) -> None:
+        """Plan 00466 N115: bash groups a quote-free word differently from
+        the quote-blind reading too."""
+        assert list(iter_shell_brace_words(text)) == expected
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "bash <<< $'cat .p-\\x7bq,r\\x7d'",
+            "bash <<<$'cat .p-\\x7bq,r\\x7d'",
+            "sh -s <<< $'cat .p-\\x7bq,r\\x7d'",
+            "bash 2>/dev/null <<< $'cat .p-\\x7bq,r\\x7d'",
+        ],
+    )
+    def test_a_here_string_word_is_an_ordinary_word_n116(self, text: str) -> None:
+        """Plan 00466 N116: at the second `<` of `<<<`, `<<` was read as a
+        heredoc, and the here-string word became its delimiter."""
+        assert ".p-{q,r}" in list(iter_shell_brace_words(text))
+
+    def test_a_heredoc_after_a_here_string_is_still_a_heredoc(self) -> None:
+        text = "cat <<< x <<'EOF'\ncat .p-{\"} x\",q}\nEOF"
+        assert '.p-{"} x",q}' in list(iter_shell_brace_words(text))
+
+    def test_a_here_string_in_a_substitution_is_not_a_heredoc_n116(self) -> None:
+        text = 'echo "$(cat <<< hi)" .p-{"} x",q}'
+        assert '.p-{"} x",q}' in list(iter_shell_brace_words(text))
+
+    def test_unresolvable_quoting_with_a_group_after_it_raises(self) -> None:
+        with pytest.raises(UnresolvableBraceQuotingError):
+            list(iter_shell_brace_words('echo "${x:-"a"}" .p-{"} x",q}'))
+
+    def test_unresolvable_quoting_with_no_group_after_it_ends_the_scan(self) -> None:
+        assert list(iter_shell_brace_words('echo .p-{"a",b} "${x:-"a"}" done')) == [
+            '.p-{"a",b}',
+            ".p-{a,b}",
+        ]
+
+    def test_nesting_past_the_bound_raises(self) -> None:
+        text = "echo " + "$(echo " * 10 + '.p-{"a",b}' + ")" * 10
+        with pytest.raises(TooManyToEnumerateError):
+            list(iter_shell_brace_words(text))
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "bash -c $'cat .p-\\x7bq,r\\x7d'",
+            "eval $'cat .p-\\x7bq,r\\x7d'",
+            "ssh host $'cat .p-\\173q,r\\175'",
+            "su -c $'cat .p-\\u007bq,r\\u007d' root",
+        ],
+    )
+    def test_braces_decoded_from_ansi_c_quoting_are_read_n112(self, text: str) -> None:
+        """Plan 00466 N112: no quote survives the decoding."""
+        assert ".p-{q,r}" in list(iter_shell_brace_words(text))
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            ": ${x:-'a'} ; bash -c $'cat .p-\\x7b\"\\x7d\",q\\x7d'",
+            ": ${x:-'a'} ; eval $'cat .p-\\x7bq,r\\x7d'",
+            ": ${x:-'a'} ; eval \"cat .p-$(printf x)q,r}\"",
+            ": ${x:-'a'} ; bash -c \"$v\"",
+        ],
+    )
+    def test_a_group_that_may_arrive_after_unresolvable_quoting_raises_n113(
+        self, text: str
+    ) -> None:
+        """Plan 00466 N113: a decoded brace, or an unknown value a shell
+        reads again, after a span that cannot be resolved."""
+        with pytest.raises(UnresolvableBraceQuotingError):
+            list(iter_shell_brace_words(text))
+
+    @pytest.mark.parametrize(
+        "text",
+        [": ${x:-'a'} ; echo \"$HOME\" done", 'echo "${x:-"a"}" $\'tab\\there\''],
+    )
+    def test_nothing_that_may_arrive_after_unresolvable_quoting_ends_the_scan(
+        self, text: str
+    ) -> None:
+        assert list(iter_shell_brace_words(text)) == []
+
+    def test_a_word_quote_removal_leaves_unchanged_is_not_reread(self) -> None:
+        """A lone `$` is a quoting character that quote removal keeps."""
+        assert list(iter_shell_brace_words("x{a,b}$")) == ["x{a,b}$"]
+
+
+class TestShellWordSpellings:
+    """Plan 00466 N107: a word holding quoted whitespace is read as tokens,
+    each piece between whitespace outside every group expanded on its own."""
+
+    def test_a_group_holding_quoted_whitespace_spells_each_alternative(self) -> None:
+        assert {".p-}", "x", ".p-q"} <= set(shell_word_spellings('.p-{"} x",q}'))
+
+    def test_quoted_whitespace_outside_a_group_ends_a_token(self) -> None:
+        assert "dir/.p-q" in set(shell_word_spellings('"my dir/".p-{"}",q}'))
+
+    def test_pieces_are_capped_on_their_own(self) -> None:
+        word = "' x '".join(["a{b,c}"] * 12)
+        assert {"ab", "ac"} <= set(shell_word_spellings(word))
+
+    def test_one_piece_past_the_cap_raises(self) -> None:
+        with pytest.raises(TooManyToEnumerateError):
+            list(shell_word_spellings('"x"' + "{a,b}" * 9))
+
+    def test_a_piece_holding_no_group_adds_nothing(self) -> None:
+        assert list(shell_word_spellings('"a b" plain')) == []
+
+
 class TestIterBraceWords:
     """The bounded brace-word finder shared by every caller -- replaces the
     catastrophically-backtracking ``\\S*\\{[^{}]*\\}\\S*`` regex shape."""
@@ -256,6 +524,19 @@ class TestIterBraceWords:
         command = " ".join(f"{{a{i},b{i}}}" for i in range(50))
         with pytest.raises(TooManyToEnumerateError):
             list(iter_brace_words(command, max_words=10))
+
+    @pytest.mark.parametrize(
+        "word",
+        ["'{a,b}'", '"{a,b}"', "\\{a,b}", "{a\\,b}", "{'a,b'}", "{ab}", "{\n a, b}"],
+    )
+    def test_a_word_bash_reads_no_group_in_is_neither_yielded_nor_counted(self, word: str) -> None:
+        """Ledger 00466 N238 (ix): prose quoting brace words hit the cap."""
+        assert list(iter_brace_words(" ".join([word] * 600), max_words=10)) == []
+
+    @pytest.mark.parametrize("word", ["x'y'{a,b}", "{a,'b'}", "{a,b}'x'", "$'x'{a,b}"])
+    def test_a_word_with_one_unquoted_group_is_counted(self, word: str) -> None:
+        with pytest.raises(TooManyToEnumerateError):
+            list(iter_brace_words(" ".join([word] * 11), max_words=10))
 
     def test_adversarial_no_brace_input_is_fast(self) -> None:
         """B1-R3 / M-3 (Plan 00466 review): the 94 KB / 200 KB reproducer --
@@ -411,6 +692,64 @@ class TestBoundedRecursiveGlob:
         )
         with pytest.raises(PermissionError):
             list(bounded_recursive_glob(tmp_path, "**/*.zzz-marker-9f2c", max_entries_visited=100))
+
+
+class TestGlobErrorsAreCollectedPerBranch:
+    """Plan 00466 N101 round 9 (review 8 BLOCKER 1): one failed lookup must
+    not end the walk. With an ``errors`` list the walker records the error,
+    keeps examining every other branch, and leaves the verdict to the
+    caller."""
+
+    def test_an_unreadable_sibling_does_not_hide_a_later_match(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        (tmp_path / "a").mkdir()
+        (tmp_path / "b").mkdir()
+        (tmp_path / "b" / "f.zzz-marker-9f2c").touch()
+        real_scandir = os.scandir
+
+        def _fake_scandir(path: str | os.PathLike[str]) -> Iterator[os.DirEntry[str]]:
+            if Path(path) == tmp_path / "a":
+                raise PermissionError(errno.EACCES, "Permission denied")
+            return real_scandir(path)
+
+        monkeypatch.setattr(
+            "claude_code_hooks_daemon.utils.shell_expansion.os.scandir", _fake_scandir
+        )
+        errors: list[OSError] = []
+        matches = list(bounded_recursive_glob(tmp_path, "*/*.zzz-marker-9f2c", errors=errors))
+        assert [match.name for match in matches] == ["f.zzz-marker-9f2c"]
+        assert [error.errno for error in errors] == [errno.EACCES]
+
+    def test_a_whole_path_overflow_is_an_error_not_an_absence(self, tmp_path: Path) -> None:
+        """Every component is short; only the joined path is past PATH_MAX."""
+        long_dir = "d" * 200
+        (tmp_path / long_dir).mkdir()
+        pattern = f"{long_dir}/../" * 25 + "*.zzz-marker-9f2c"
+        errors: list[OSError] = []
+        assert list(bounded_recursive_glob(tmp_path, pattern, errors=errors)) == []
+        assert [error.errno for error in errors] == [errno.ENAMETOOLONG]
+        with pytest.raises(OSError) as raised:
+            list(bounded_recursive_glob(tmp_path, pattern))
+        assert raised.value.errno == errno.ENAMETOOLONG
+
+    def test_a_single_name_past_the_name_limit_is_an_absence(self, tmp_path: Path) -> None:
+        """No entry can carry that name, and bash opens the same component."""
+        errors: list[OSError] = []
+        pattern = "a" * 300 + "/*.zzz-marker-9f2c"
+        assert list(bounded_recursive_glob(tmp_path, pattern, errors=errors)) == []
+        assert errors == []
+
+    def test_a_wildcard_component_past_the_name_limit_is_matched_not_opened(
+        self, tmp_path: Path
+    ) -> None:
+        """Bash matches a wildcard component against directory entries; it
+        never opens it, so its length proves nothing."""
+        (tmp_path / "f.zzz-marker-9f2c").touch()
+        pattern = "*" * 300 + ".zzz-marker-9f2c"
+        assert [match.name for match in bounded_recursive_glob(tmp_path, pattern)] == [
+            "f.zzz-marker-9f2c"
+        ]
 
 
 class TestIterNormalisedShellWordsNestedCommands:
