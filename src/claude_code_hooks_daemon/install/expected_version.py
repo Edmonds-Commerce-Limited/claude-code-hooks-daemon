@@ -24,6 +24,7 @@ import sys
 from pathlib import Path
 from typing import Final
 
+from claude_code_hooks_daemon.install.install_stamp import is_branch_install
 from claude_code_hooks_daemon.version import __version__
 
 EXPECTED_VERSION_KEY: Final[str] = "expected_version"
@@ -58,6 +59,19 @@ def _block_end(lines: list[str], header_index: int) -> int:
             break
         last_member = index
     return last_member + 1
+
+
+def _member_indent(lines: list[str], header_index: int, end: int) -> str:
+    """Indent of the block's first direct member; two spaces when it has none.
+
+    A member at any other indent belongs to a nested mapping, so neither the
+    inserted key nor the one replaced may sit there.
+    """
+    for index in range(header_index + 1, end):
+        line = lines[index]
+        if line.strip() and not line.lstrip().startswith("#"):
+            return line[: len(line) - len(line.lstrip(" \t"))]
+    return "  "
 
 
 def record_expected_version(config_path: Path, version: str) -> bool:
@@ -102,13 +116,14 @@ def record_expected_version(config_path: Path, version: str) -> bool:
         lines.extend(["\n", "daemon:\n", _key_line("  ", version)])
     else:
         end = _block_end(lines, header_index)
+        indent = _member_indent(lines, header_index, end)
         for index in range(header_index + 1, end):
             key = _KEY_LINE_RE.match(lines[index])
-            if key is not None:
-                lines[index] = _key_line(key.group("indent"), version)
+            if key is not None and key.group("indent") == indent:
+                lines[index] = _key_line(indent, version)
                 break
         else:
-            lines.insert(end, _key_line("  ", version))
+            lines.insert(end, _key_line(indent, version))
 
     updated = "".join(lines)
     if updated == original:
@@ -127,6 +142,13 @@ def main(argv: list[str] | None = None) -> int:
         help="Version to record (default: the running daemon version)",
     )
     args = parser.parse_args(argv)
+
+    # A branch install runs code that is not the release its base version names,
+    # so recording that version would make provision fetch a different daemon
+    # from the one the tracked assets came from. Any existing key stays as is.
+    if is_branch_install():
+        print("expected_version: branch install, not recorded (the key is left as it is)")
+        return 0
 
     config_path = args.project_root / ".claude" / "hooks-daemon.yaml"
     try:

@@ -107,6 +107,22 @@ class TestResolveExpectedVersion:
 
         assert _resolve(project) == (1, "unknown", "")
 
+    def test_a_nested_key_of_the_same_name_is_not_the_key(self, tmp_path: Path) -> None:
+        project = _project(
+            tmp_path,
+            'daemon:\n  other:\n    expected_version: "9.9.9"\n  log_level: INFO\n',
+            HEADER,
+        )
+
+        assert _resolve(project) == (0, "3.50.0", "tracked-doc")
+
+    def test_reads_a_four_space_daemon_block(self, tmp_path: Path) -> None:
+        project = _project(
+            tmp_path, 'daemon:\n    log_level: INFO\n    expected_version: "3.68.0"\n'
+        )
+
+        assert _resolve(project) == (0, "3.68.0", "config")
+
     def test_a_commented_out_key_is_not_the_key(self, tmp_path: Path) -> None:
         project = _project(tmp_path, 'daemon:\n  # expected_version: "9.9.9"\n', None)
 

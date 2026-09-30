@@ -1920,9 +1920,13 @@ _config_expected_version_raw() {
 
     local value
     value="$(awk '
-        /^daemon:/ { blk = 1; next }
+        /^daemon:/ { blk = 1; indent = ""; next }
         /^[^ \t#]/ { blk = 0 }
-        blk && /^[ \t]+expected_version:/ {
+        blk && indent == "" && /^[ \t]+[^ \t#]/ {
+            indent = $0
+            sub(/[^ \t].*$/, "", indent)
+        }
+        blk && indent != "" && index($0, indent "expected_version:") == 1 {
             v = $0
             sub(/^[ \t]+expected_version:[ \t]*/, "", v)
             sub(/[ \t]+#.*$/, "", v)

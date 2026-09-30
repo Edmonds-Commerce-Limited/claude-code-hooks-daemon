@@ -15,6 +15,7 @@ import yaml
 from pydantic import ValidationError
 
 from claude_code_hooks_daemon.config.models import DaemonConfig
+from claude_code_hooks_daemon.install import expected_version as expected_version_module
 from claude_code_hooks_daemon.install.expected_version import (
     EXPECTED_VERSION_KEY,
     main,
@@ -95,6 +96,55 @@ class TestRecordExpectedVersion:
         assert data["daemon"]["input_validation"] == {"enabled": True}
         assert "expected_version" not in data["handlers"]
 
+    @pytest.mark.parametrize("indent", ["    ", "   ", " "])
+    def test_inserts_at_the_indent_of_the_blocks_own_members(
+        self, tmp_path: Path, indent: str
+    ) -> None:
+        path = _config(
+            tmp_path,
+            f"daemon:\n{indent}log_level: INFO\n{indent}input_validation:\n"
+            f"{indent}{indent}enabled: true\nhandlers: {{}}\n",
+        )
+
+        record_expected_version(path, "3.68.0")
+
+        data = yaml.safe_load(path.read_text())
+        assert data["daemon"][EXPECTED_VERSION_KEY] == "3.68.0"
+        assert data["daemon"]["log_level"] == "INFO"
+        assert data["daemon"]["input_validation"] == {"enabled": True}
+        assert data["handlers"] == {}
+        assert f"\n{indent}{EXPECTED_VERSION_KEY}:" in path.read_text()
+
+    def test_a_comment_first_block_takes_its_indent_from_the_first_member(
+        self, tmp_path: Path
+    ) -> None:
+        path = _config(tmp_path, "daemon:\n      # note\n    log_level: INFO\n")
+
+        record_expected_version(path, "3.68.0")
+
+        assert yaml.safe_load(path.read_text())["daemon"][EXPECTED_VERSION_KEY] == "3.68.0"
+        assert "\n    expected_version:" in path.read_text()
+
+    def test_a_nested_key_of_the_same_name_is_not_the_key(self, tmp_path: Path) -> None:
+        path = _config(
+            tmp_path,
+            'daemon:\n  other:\n    expected_version: "1.0.0"\n  log_level: INFO\n',
+        )
+
+        record_expected_version(path, "3.68.0")
+
+        data = yaml.safe_load(path.read_text())
+        assert data["daemon"]["other"] == {"expected_version": "1.0.0"}
+        assert data["daemon"][EXPECTED_VERSION_KEY] == "3.68.0"
+
+    def test_a_block_with_no_members_uses_two_spaces(self, tmp_path: Path) -> None:
+        path = _config(tmp_path, "daemon:\n# nothing yet\nhandlers: {}\n")
+
+        record_expected_version(path, "3.68.0")
+
+        assert yaml.safe_load(path.read_text())["daemon"][EXPECTED_VERSION_KEY] == "3.68.0"
+        assert "\n  expected_version:" in path.read_text()
+
     def test_a_missing_file_fails_fast(self, tmp_path: Path) -> None:
         with pytest.raises(FileNotFoundError):
             record_expected_version(tmp_path / "absent.yaml", "3.68.0")
@@ -155,6 +205,30 @@ class TestMain:
         assert main(["--project-root", str(tmp_path), "--version", "main"]) == 1
 
         assert "X.Y.Z" in capsys.readouterr().err
+
+    def test_a_branch_install_records_nothing_and_says_why(
+        self,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        text = 'daemon:\n  expected_version: "3.60.0"\n'
+        path = _config(tmp_path, text)
+        monkeypatch.setattr(expected_version_module, "is_branch_install", lambda: True)
+
+        assert main(["--project-root", str(tmp_path)]) == 0
+
+        assert path.read_text() == text
+        out = capsys.readouterr().out
+        assert "branch install" in out and "not recorded" in out
+        assert len(out.strip().splitlines()) == 1
+
+    def test_a_branch_install_does_not_need_a_config_file(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(expected_version_module, "is_branch_install", lambda: True)
+
+        assert main(["--project-root", str(tmp_path)]) == 0
 
     def test_a_missing_config_exits_non_zero(self, tmp_path: Path) -> None:
         assert main(["--project-root", str(tmp_path), "--version", "3.68.0"]) == 1
