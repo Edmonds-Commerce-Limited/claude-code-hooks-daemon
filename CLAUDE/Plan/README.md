@@ -4,7 +4,7 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
-- [00476: release through a pr with ci tagging](00476-release-through-a-pr-with-ci-tagging/PLAN.md) - Not Started (owner proposal: prepare a release on a branch, gate it with the whole QA suite in CI on a pull request, and let only a CI workflow tag and publish on merge; follows 00475's first batch)
+- [00476: release through a pr with ci tagging](00476-release-through-a-pr-with-ci-tagging/PLAN.md) - Not Started (owner direction: a release branch and pull request exist for QA, running the whole suite in CI; acceptance tests, tagging and publishing stay local in `/release`; follows 00475's first batch)
 
 - [00475: targeted qa and small batches](00475-targeted-qa-and-small-batches/PLAN.md) - In Progress (owner request: targeted QA for every change, the full gate only at release preparation, one QA run at a time, and small batches of branches finished before the next start, after ledger 00466 left 21 stale branches)
 

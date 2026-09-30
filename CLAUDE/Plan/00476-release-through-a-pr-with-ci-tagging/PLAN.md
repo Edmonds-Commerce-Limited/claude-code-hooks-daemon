@@ -9,11 +9,11 @@
 
 ## Overview
 
-**Owner proposal (the general idea, adapted to this repository):** a release is
-prepared on a release branch and proposed as a pull request. The pull request
-runs the whole QA gate in CI. The owner reviews the release notes and merges,
-and on merge a CI workflow creates the tag and the GitHub release. Only that
-workflow can create release tags.
+**Owner direction:** a release branch exists for QA. It is proposed as a pull
+request, and the pull request runs the whole QA gate in CI. The actual release
+stays a local process with the daemon live: acceptance testing, tagging and
+publishing run from the session, as `/release` does today, once the release
+branch's CI gate is green.
 
 Why. Today `/release` runs the whole gate locally on the main thread, holding the
 host lock for the entire suite, then tags and publishes from the session. Two
@@ -31,24 +31,21 @@ Starts after Plan 00475's first batch finishes (small-batches rule).
 1. **Prepare (in session, `/release`):** create a release branch from `main`,
    bump the version, assemble the release notes and changelog section from the
    `CLAUDE/UPGRADES/UNRELEASED/release-notes/` callouts and the merges since the
-   last tag, move the UNRELEASED upgrade tasks, run the Opus documentation review
-   and the upgrade-guide gate, and run the acceptance tests. Acceptance tests
-   need real tool calls in a Claude session, so they cannot move to CI. Then
-   push and open the pull request.
-2. **Gate (CI, on the pull request):** run `llm_qa.py all` across the supported
-   Pythons, including the checks that need a live daemon. CI already starts a
-   daemon and fetches full history.
-3. **Human gate:** the owner reviews the notes on the pull request and merges.
-   That merge is the release decision.
-4. **Publish (CI, on merge):** a workflow creates the tag on the merge commit,
-   builds the release assets, builds the release body with
-   `scripts/release/build_github_release_body.py`, and creates the GitHub
-   release.
-5. **Tag protection:** a repository ruleset allows only that workflow to create
-   release tags. The repository has no rulesets today.
-6. **`main` while a release pull request is open:** merges to `main` are frozen
-   until the release merges or is abandoned, so the gated commit is the tagged
-   commit.
+   last tag, move the UNRELEASED upgrade tasks, and run the Opus documentation
+   review and the upgrade-guide gate. Push and open the pull request.
+2. **QA gate (CI, on the pull request):** run `llm_qa.py all` across the
+   supported Pythons, including the checks that need a live daemon. CI already
+   starts a daemon and fetches full history. This replaces the local full gate,
+   so the host never runs the whole suite.
+3. **Release (in session, local daemon):** once the pull request's CI is green,
+   `/release` resumes. It runs the acceptance tests (they need real tool calls
+   in a Claude session, so they cannot move to CI), merges the pull request,
+   tags the merge commit, builds the body with
+   `scripts/release/build_github_release_body.py`, and publishes the GitHub
+   release with its assets. `/release` stays the human gate, as today.
+4. **The tagged commit is the gated commit:** merges to `main` are frozen while
+   a release pull request is open. If `main` moves anyway, the release branch is
+   updated and CI re-runs before tagging.
 
 **Not included:** whole-codebase mutation testing. The repository has no
 mutation-testing tooling, and across the whole suite it would far exceed any
@@ -57,13 +54,15 @@ modules only.
 
 ## Goals
 
-- A release tag is only ever created by CI, on a commit the whole gate passed.
+- A release is only tagged on a commit whose release pull request passed the
+  whole gate in CI.
 - The whole gate runs in CI, not on this host.
-- The owner's pull request merge is the release decision.
+- Acceptance testing, tagging and publishing stay local, in `/release`.
 
 ## Non-Goals
 
 - Mutation testing.
+- Tagging or publishing from CI.
 - Changing the tag naming or version scheme.
 
 ## Tasks
@@ -76,21 +75,19 @@ modules only.
 ### Phase 2: Workflows
 
 - [ ] ⬜ **Task 2.1**: A release pull request workflow that runs the whole gate.
-- [ ] ⬜ **Task 2.2**: A publish-on-merge workflow: tag, assets, body, release.
-- [ ] ⬜ **Task 2.3**: A tag ruleset restricting release tags to that workflow.
 
 ### Phase 3: Procedure
 
 - [ ] ⬜ **Task 3.1**: Rewrite `RELEASING.md`, the release skill and the release
-  agent for prepare, pull request, merge and CI publish.
+  agent: prepare, open the pull request, wait for CI green, then acceptance
+  tests, merge, tag and publish locally.
 - [ ] ⬜ **Task 3.2**: A freeze on merges to `main` while a release pull request
   is open.
 
 ## Success Criteria
 
-- [ ] A test release goes from `/release` to a published GitHub release with no
-  local full gate and no tag created from the session.
-- [ ] A tag pushed from a session is refused by the ruleset.
+- [ ] A release goes from `/release` to a published GitHub release with no
+  local full gate, and its tag is on a commit the pull request's CI passed.
 
 ## Delivery & Milestones
 
