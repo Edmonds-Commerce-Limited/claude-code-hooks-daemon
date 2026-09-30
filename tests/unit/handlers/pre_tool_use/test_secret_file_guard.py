@@ -2237,6 +2237,10 @@ class TestRoundOneFalsePositivesStayAllowed:
 #: construct that withdraws the exemption is seen as a fail-closed deny.
 _CODE_BRACES_HEREDOC = f"python3 - <<'EOF'\n{_MANY_BRACES_PROGRAM}\nEOF"
 
+#: A scan deadline no host is slow enough to cross, for tests whose subject is
+#: the verdict on a large input rather than the deadline itself.
+_HOST_INDEPENDENT_DEADLINE_SECONDS = 120.0
+
 
 class TestRoundTwoFindingsAreClosed:
     """Plan 00466 N101 round 3: every D-RULE and D-SEC round-2 finding,
@@ -2460,11 +2464,14 @@ class TestRoundThreeFindingsAreClosed:
         """The field shape N101 was filed for: building hook inputs as
         dicts with f-strings, past the 500-word discovery cap.
 
-        The scan's deadline is read on this process's CPU clock here, so a
-        loaded host cannot turn the verdict into a deny (Plan 00466 N101
-        round 13). The bound itself is unchanged: a scan that really costs
-        more than the deadline in CPU still fails."""
+        This scan costs about 2.2s of CPU on a development host against the
+        5s production deadline, so a CI runner around twice as slow crossed
+        it and denied (Plan 00466 N101). The deadline is therefore injected
+        generously here, and read on this process's CPU clock, so the verdict
+        depends on what the scan decides and not on host speed. The
+        production deadline is untouched and the assertion is unchanged."""
         monkeypatch.setattr(time, "monotonic", time.process_time)
+        monkeypatch.setattr(sfm, "SCAN_DEADLINE_SECONDS", _HOST_INDEPENDENT_DEADLINE_SECONDS)
         lines = [
             "import json",
             *(
