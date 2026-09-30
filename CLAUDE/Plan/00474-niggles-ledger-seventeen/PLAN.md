@@ -10,7 +10,7 @@
 ## Overview
 
 The rolling ledger for defects found in passing. Ledger sixteen
-([00466](../00466-niggles-ledger-sixteen/PLAN.md)) stays open for its own
+([00466](../Completed/00466-niggles-ledger-sixteen/PLAN.md)) stays open for its own
 entries, whose remaining branches the owner parked. But its PLAN.md reached
 the 35,000-byte hard limit with N261, so its index table cannot take another
 row. New entries are filed here, and 00466 takes no more.
@@ -38,6 +38,7 @@ Full write-ups are in [NIGGLES.md](NIGGLES.md). One line each here:
 
 | #          | Verdict                                                                                                          | Origin              | Status                  |
 | ---------- | ---------------------------------------------------------------------------------------------------------------- | ------------------- | ----------------------- |
+| 65 entries | Still open in the archived ledger 00466 ([index](../Completed/00466-niggles-ledger-sixteen/PLAN.md))             | 00466 close-out     | ⬜ Open                 |
 | N222 work  | Unfinished `tests/scaling.py` change saved from a merged branch's worktree ([saved](UNFINISHED-N252-SCALING.md)) | 00466 cleanup       | ⬜ Open                 |
 | 22 entries | Carried from the dropped `worktree-n466-small-a` branch ([list](CARRIED-REFIX-BRANCHES.md))                      | 00466 cleanup       | ⬜ Open                 |
 | 15 entries | Carried from the dropped `worktree-p422-close` branch ([list](CARRIED-REFIX-BRANCHES.md))                        | 00466 cleanup       | ⬜ Open                 |

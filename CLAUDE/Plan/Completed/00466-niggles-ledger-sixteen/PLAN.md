@@ -1,6 +1,6 @@
 # Plan 00466: niggles ledger sixteen
 
-**Status**: In Progress
+**Status**: Superseded
 **Created**: 2026-09-24
 **Owner**: dev
 **Priority**: Medium
@@ -9,8 +9,13 @@
 
 ## Overview
 
+**Superseded by [00474](../../00474-niggles-ledger-seventeen/PLAN.md).** The
+entries still open in the index below remain open and are tracked from 00474.
+Every branch of this ledger was resolved: landed, or dropped with its
+branch-only entries carried into 00474.
+
 The rolling ledger for defects found in passing. Ledger fifteen
-([00422](../Completed/00422-niggles-ledger-fifteen/PLAN.md)) stays open for its own
+([00422](../00422-niggles-ledger-fifteen/PLAN.md)) stays open for its own
 entries: four are waiting on stated owner questions, and several are
 graduated to plans still in flight. But its PLAN.md passed the 25,000-byte
 warning line with N29. So new entries are filed here, and 00422 takes no
@@ -194,11 +199,11 @@ Full write-ups are in [NIGGLES.md](NIGGLES.md). One line each here:
 | N225 | A `--project-root` with `..` through a link is attributed to a root its daemon does not serve                                                     | Lifecycle review 8 (S8-1, shared)                               | ✅ Remedied                                                     |
 | N232 | Two concurrent hook starts: the second's single-daemon enforcement stops the first's daemon while it initialises                                  | Lifecycle review 9 (§5, shared)                                 | ✅ Remedied                                                     |
 
-## Parked branches (owner decision, 2026-09-29)
+## Branches
 
-Parked to cut cost. Each branch is pushed, or kept as a local worktree where
-noted. It resumes only by an owner decision. Reviews are capped at 3 rounds
-from now on. The table of 15 branches and the two owner rulings are in
+Every branch was landed (n101, n211, lifecycle, d-00376) or dropped, its
+branch-only entries carried into 00474 (n466-small-a, p422-close, d-00421,
+upgrade-scripts, 464, N38); the former parking table is in
 [PARKED-BRANCHES.md](PARKED-BRANCHES.md).
 
 ## Tasks

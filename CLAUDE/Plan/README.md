@@ -20,8 +20,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00467: recommend the defence before fix plugin to client projects](00467-recommend-the-defence-before-fix-plugin-to-client-projects/PLAN.md) - Blocked (owner request: dogfood the DBF plugin, then recommend it to clients. Phase 1 is done, with shortfalls filed upstream as #4-#6 and recommendation no-go for now. Waiting on the owner's go/no-go, and on one logged-in auto-trigger probe)
 
-- [00466: niggles ledger sixteen](00466-niggles-ledger-sixteen/PLAN.md) - In Progress, keeps only its own entries (N1-N261; new niggles go to 00474, and its remaining branches are being landed or dropped in small batches, under Plan 00475's rules). Opened when 00422 passed its size warning with N29, with N1: the venv fallback accepts an interpreter that cannot run on this host)
-
 - [00465: commit gates see the index after same command staging](00465-commit-gates-see-the-index-after-same-command-staging/PLAN.md) - Not Started (from 00422 N26: gates read the index before the command runs, so `git add f && git commit` passes the secret-term scan and every other staged-content gate unexamined; starts after 00464, same gates)
 
 - [00464: commit gates judge the checkout the command runs in](00464-commit-gates-judge-the-checkout-the-command-runs-in/PLAN.md) - Not Started (from 00422 N23: commit gates pick their repo from the payload `cwd`, which for a teammate is the main checkout, so a worktree commit is judged on main's staged tree — false denies, and its own content, secret terms included, never checked)
@@ -169,6 +167,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Completed Plans
 
+- [00466: niggles ledger sixteen](Completed/00466-niggles-ledger-sixteen/PLAN.md) - Superseded by [00474](00474-niggles-ledger-seventeen/PLAN.md) (the ledger for N1-N261; its 65 entries still open in the index are tracked from 00474, and every branch was landed or dropped with its branch-only entries carried into 00474. Opened when 00422 passed its size warning with N29, with N1: the venv fallback accepts an interpreter that cannot run on this host)
+
 - [00468: claude code plugins are supported properly](Completed/00468-claude-code-plugins-are-supported-properly/PLAN.md) - Complete at `83e75879` + the archiving commit (from the 00467 plugin audit: 8 defects, 3 release-blocking, and 16 gaps, most resting on one missing resolver for the Claude config dir and its enabled plugins; the last criterion waited on 00463's simulate-record fix, now on main)
 
 - [00463: full qa is a main thread gate](Completed/00463-full-qa-is-a-main-thread-gate/PLAN.md) - Complete at `5156a81f`, merged as `83e75879`, CI fix `fd78edce` + the archiving commit (owner request after five worktree agents ran the ~18-minute full suite at once: a guard denies configured full-QA commands in sub-agents, and a pytest sink plus a host-wide lock refuse a whole-suite run not made under the coordinator's gate; live dogfood Task 2.2 carried)
@@ -227,8 +227,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00430: block report attributes before project context init](Completed/00430-block-report-attributes-before-project-context-init/PLAN.md) - Complete at `08349246`…`47409996` + the archiving commit (from issue #48: five handlers could not be constructed during rule discovery, so their denies were unattributed; 2185 tracebacks to 0 and 44 unattributed to 31 on an identical corpus — the residual 31 are a different cause)
 
-- [00429: format markdown crosses repo boundaries](Completed/00429-format-markdown-crosses-repo-boundaries/PLAN.md) - Complete at `50c27581`…`cd15122c` + the archiving commit (from issue #47: the walk applied no exclusion at all, so `format-markdown .` rewrote markdown inside vendored nested checkouts; review caught the config being read from the WALK root, which made every exclusion match nothing below it)
-
 Older completed plans (below the retention window of the 30 highest-numbered) are archived verbatim in [Completed/README.md](Completed/README.md).
 
 ## Blocked / On Hold Plans
@@ -282,9 +280,9 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 - **Total Plans Created**: 474 (count = `hooksdaemon.latestPlanNumber` git counter)
 
-- **Completed**: 413 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
+- **Completed**: 414 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 40 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 39 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 

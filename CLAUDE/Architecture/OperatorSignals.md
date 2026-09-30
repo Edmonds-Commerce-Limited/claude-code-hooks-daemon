@@ -148,7 +148,7 @@ alone, so a venv that is *present* but cannot actually run on this host
 reported "resolved" instead of falling through to the venv-free path here
 — surfacing as a raw exec failure rather than this section's clean
 dispatch. Tracked as
-[00466 N1](../Plan/00466-niggles-ledger-sixteen/NIGGLES.md), being fixed on
+[00466 N1](../Plan/Completed/00466-niggles-ledger-sixteen/NIGGLES.md), being fixed on
 another branch; this affects `repair` identically, since both share
 `_run_venv_free_verb`'s reliance on the same resolver.
 
