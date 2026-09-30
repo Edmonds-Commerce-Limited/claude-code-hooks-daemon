@@ -97,6 +97,42 @@ class TestActiveJobs:
         assert section.active_jobs() == []
 
 
+class TestRunsWhileAwaitingHuman:
+    def _section(self, *, enabled: bool = True) -> PersistentCronsConfig:
+        return PersistentCronsConfig(
+            enabled=enabled,
+            jobs=[
+                PersistentCronConfig(
+                    id="opted-in", schedule="7 * * * *", prompt="p", runs_while_awaiting_human=True
+                ),
+                PersistentCronConfig(id="default", schedule="9 * * * *", prompt="q"),
+                PersistentCronConfig(
+                    id="disabled",
+                    schedule="11 * * * *",
+                    prompt="r",
+                    enabled=False,
+                    runs_while_awaiting_human=True,
+                ),
+            ],
+        )
+
+    def test_the_option_defaults_to_false(self) -> None:
+        assert (
+            PersistentCronConfig(id="a", schedule="7 * * * *", prompt="p").runs_while_awaiting_human
+            is False
+        )
+
+    def test_only_an_opted_in_active_job_runs_while_awaiting(self) -> None:
+        section = self._section()
+        assert section.runs_while_awaiting_human("opted-in") is True
+        assert section.runs_while_awaiting_human("default") is False
+        assert section.runs_while_awaiting_human("disabled") is False
+        assert section.runs_while_awaiting_human("undeclared") is False
+
+    def test_nothing_runs_while_the_section_is_off(self) -> None:
+        assert self._section(enabled=False).runs_while_awaiting_human("opted-in") is False
+
+
 class TestUnknownKeysAreRejected:
     def test_a_typo_in_a_job_key_is_not_silently_ignored(self) -> None:
         """Built through ``model_validate`` rather than the constructor: the

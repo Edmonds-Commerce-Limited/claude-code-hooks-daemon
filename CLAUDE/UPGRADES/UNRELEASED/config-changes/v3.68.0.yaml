@@ -56,3 +56,27 @@ config_changes:
         handlers.pre_tool_use.upgrade_approval_guard.enabled: false.
       recommended: true
       dormant: false
+    - key: persistent_crons.jobs[].runs_while_awaiting_human
+      recommended: false
+      dormant: true
+      description: >-
+        NEW per-job boolean (Plan 00470 Task 5.1, default false). A stop that
+        declares `[awaiting-human]` normally drops every declared job's tick
+        (R-DECLARED-CRON-SUPPRESSED) as well as the failsafe's. A job that sets
+        this to true is delivered while the marker is live, because its work
+        does not depend on the pending question. The failsafe and every job
+        without the option are still dropped, so a project that adds nothing
+        sees no change.
+      example_yaml: |
+        persistent_crons:
+          enabled: true
+          jobs:
+            - id: issue-sdlc
+              schedule: "23 * * * *"
+              runs_while_awaiting_human: true
+              prompt: |
+                Invoke the `issue-sdlc` skill and follow it exactly.
+      migration_note: >-
+        Optional. Set `runs_while_awaiting_human: true` on a declared job whose
+        work is independent of a human answer; leave it off for anything that
+        resumes interrupted work.

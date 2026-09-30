@@ -64,7 +64,8 @@ cadence only if it carries no daemon tick sentinel (``utils.cron_tick``). Every
 cron prompt the daemon supplies has one -- the failsafe, the background
 watchdog, every ``persistent_crons`` job -- so in a multi-cron session another
 cron's tick no longer reads as the owner coming back. A declared job's tick is
-dropped under a live marker too; the watchdog's never is. A cron whose prompt
+dropped under a live marker too unless the job sets
+``runs_while_awaiting_human``; the watchdog's never is. A cron whose prompt
 the daemon never wrote still reads as the owner, which fails toward clearing.
 
 **Never terminal.** ``idle_housekeeping_advisory`` and
@@ -81,6 +82,9 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Final
 
+from pydantic import ValidationError
+
+from claude_code_hooks_daemon.config.models import Config
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, HookInputField, Priority
 from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.core import BlockingResult, Decision
@@ -97,6 +101,7 @@ from claude_code_hooks_daemon.utils.blockage_marker import (
     marker_is_valid,
     read_marker,
 )
+from claude_code_hooks_daemon.utils.config_cache import load_config_cached
 from claude_code_hooks_daemon.utils.cron_cadence import (
     CADENCE_FILENAME,
     next_tick_decision,
@@ -161,7 +166,10 @@ _DECLARED_RULE: Final[Rule] = Rule(
         "before reaching the model -- no turn spent (Plan 00388). Only ticks "
         "the daemon supplied the prompt for are recognised; a real user prompt "
         "clears the marker and every cron resumes, and the marker's own expiry "
-        "restores them if the owner stays silent for longer."
+        "restores them if the owner stays silent for longer. A job whose "
+        "declaration sets `runs_while_awaiting_human: true` is exempt and its "
+        "ticks are delivered under a live marker (Plan 00470); the failsafe "
+        "and every job without the option are still dropped."
     ),
 )
 
@@ -200,6 +208,8 @@ class FailsafeCronBlockageSuppressorHandler(UserPromptSubmitHandlerBase):
         self._expiry_hours: float = _DEFAULT_EXPIRY_HOURS
         # Injectable wall clock (tests substitute a fake). Not a config option.
         self._clock: Callable[[], float] = time.time
+        # Injectable config source (tests substitute a fixed Config).
+        self._config_loader: Callable[[], Config] = self._default_config_loader
         # Injected by the registry for planning-tagged handlers. Self-defaulted
         # because the injection block does not run at all when plan_workflow is
         # None -- so a missing tag reads as None rather than raising, which is
@@ -352,16 +362,32 @@ class FailsafeCronBlockageSuppressorHandler(UserPromptSubmitHandlerBase):
         )
         return BlockingResult(decision=Decision.DENY, reason=RuleFormatter().verbose(_RULE))
 
-    @staticmethod
-    def _handle_other_tick(tick: DaemonTick, *, declared: bool, session_id: str) -> BlockingResult:
+    def _default_config_loader(self) -> Config:
+        """The project's daemon config; defaults when it cannot be loaded.
+
+        Defaults declare no job, so an unloadable config leaves every declared
+        job suppressed -- the behaviour before the per-job option existed.
+        """
+        try:
+            config_path = ProjectContext.project_root() / ".claude" / "hooks-daemon.yaml"
+            return load_config_cached(config_path)
+        except (RuntimeError, ValidationError, OSError, ValueError) as exc:
+            logger.debug("failsafe_cron_blockage_suppressor: cannot load config: %s", exc)
+            return Config()
+
+    def _handle_other_tick(
+        self, tick: DaemonTick, *, declared: bool, session_id: str
+    ) -> BlockingResult:
         """Decide a recognised tick from a cron other than the failsafe.
 
         A declared ``persistent_crons`` job stands down with the marker (Task
         2.4, Plan 00392 N1): the session said it is blocked only on the human,
         and the observed case was an ``issue-sdlc`` tick finding every issue
-        parked on one. The watchdog never does -- reaping runaway background
-        processes is not blocked on the human, and an idle wait is exactly the
-        window it was created to cover.
+        parked on one. A job that sets ``runs_while_awaiting_human`` is
+        delivered regardless (Plan 00470 Task 5.1): its work does not depend on
+        the pending question. The watchdog never stands down -- reaping runaway
+        background processes is not blocked on the human, and an idle wait is
+        exactly the window it was created to cover.
 
         Args:
             tick: The recognised tick, never the failsafe.
@@ -372,6 +398,11 @@ class FailsafeCronBlockageSuppressorHandler(UserPromptSubmitHandlerBase):
             DENY for a declared job's tick under a live marker, else ALLOW.
         """
         if tick.kind is not TickKind.DECLARED or not declared:
+            return BlockingResult(decision=Decision.ALLOW)
+        if (
+            tick.job_id is not None
+            and self._config_loader().persistent_crons.runs_while_awaiting_human(tick.job_id)
+        ):
             return BlockingResult(decision=Decision.ALLOW)
         logger.info(
             "failsafe_cron_blockage_suppressor: suppressing declared cron %s for session %s",
@@ -435,7 +466,8 @@ class FailsafeCronBlockageSuppressorHandler(UserPromptSubmitHandlerBase):
             "paste it verbatim and never drop that line. A tick carrying one "
             "is never mistaken for the owner, so it leaves the marker and the "
             "cadence alone. A declared `persistent_crons` job's tick is also "
-            "dropped while the marker is live (`R-DECLARED-CRON-SUPPRESSED`); "
+            "dropped while the marker is live (`R-DECLARED-CRON-SUPPRESSED`) "
+            "unless the job sets `runs_while_awaiting_human: true`; "
             "the watchdog's is always delivered. A cron prompt you composed "
             "yourself carries no sentinel and still reads as the owner.\n\n"
             "**A session that declares nothing is backed off, not left at "

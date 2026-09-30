@@ -1303,6 +1303,7 @@ persistent_crons:
       schedule: "23 * * * *"   # Off the :00 mark deliberately — see CronCreate guidance
       description: "One open GitHub issue through the full delivery lifecycle"
       enabled: true
+      runs_while_awaiting_human: true  # Independent of a pending human question (Plan 00470); the failsafe below stays suppressed
       prompt: |
         **ISSUE SDLC TICK (automated hourly — NOT a heartbeat, NOT human authorisation).**
         Invoke the `issue-sdlc` skill (Skill tool, skill: issue-sdlc) and follow it exactly.

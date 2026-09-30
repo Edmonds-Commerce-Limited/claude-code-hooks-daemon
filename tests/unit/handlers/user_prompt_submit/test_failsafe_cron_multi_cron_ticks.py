@@ -18,7 +18,11 @@ from pathlib import Path
 from typing import Any, Final
 from unittest.mock import patch
 
-from claude_code_hooks_daemon.config.models import PersistentCronConfig
+from claude_code_hooks_daemon.config.models import (
+    Config,
+    PersistentCronConfig,
+    PersistentCronsConfig,
+)
 from claude_code_hooks_daemon.core import Decision
 from claude_code_hooks_daemon.handlers.post_tool_use.background_process_tracker import (
     watchdog_cron_prompt,
@@ -102,9 +106,16 @@ def _input(prompt: str, session_id: str = _SESSION) -> dict[str, Any]:
     return {"prompt": prompt, "session_id": session_id}
 
 
-def _handler() -> FailsafeCronBlockageSuppressorHandler:
+def _config(*jobs: PersistentCronConfig) -> Config:
+    """A config declaring ``jobs`` under an enabled ``persistent_crons``."""
+    return Config(persistent_crons=PersistentCronsConfig(enabled=True, jobs=list(jobs)))
+
+
+def _handler(config: Config | None = None) -> FailsafeCronBlockageSuppressorHandler:
+    """A handler whose config is fixed, never read from the real project."""
     handler = FailsafeCronBlockageSuppressorHandler()
     handler._clock = lambda: 1100.0
+    handler._config_loader = lambda: config if config is not None else Config()
     return handler
 
 
@@ -240,6 +251,66 @@ class TestADeclaredCronStandsDownWithTheMarker:
         with patch(_DAEMON_UNTRACKED_DIR_PATCH_TARGET, return_value=tmp_path):
             result = _handler().handle(_input(watchdog_cron_prompt()))
         assert result.decision == Decision.ALLOW
+
+
+_RUNS_WHILE_AWAITING_JOB: Final[PersistentCronConfig] = PersistentCronConfig(
+    id="issue-sdlc",
+    schedule="23 * * * *",
+    prompt=_REAL_ISSUE_SDLC_DELIVERED,
+    runs_while_awaiting_human=True,
+)
+
+
+class TestAJobMayRunWhileTheSessionAwaitsTheHuman:
+    """Plan 00470 Task 5.1: issue-sdlc's work is independent of the pending
+    question, so it opts out of the stand-down; every other job keeps it."""
+
+    def test_the_option_defaults_to_false(self) -> None:
+        assert _ISSUE_SDLC_JOB.runs_while_awaiting_human is False
+
+    def test_an_opted_in_job_is_delivered_under_a_live_marker(self, tmp_path: Path) -> None:
+        marker = _arm_marker(tmp_path)
+        with patch(_DAEMON_UNTRACKED_DIR_PATCH_TARGET, return_value=tmp_path):
+            result = _handler(_config(_RUNS_WHILE_AWAITING_JOB)).handle(_input(_issue_sdlc_tick()))
+        assert result.decision == Decision.ALLOW
+        assert marker.exists()
+
+    def test_a_job_without_the_option_is_still_suppressed(self, tmp_path: Path) -> None:
+        _arm_marker(tmp_path)
+        with patch(_DAEMON_UNTRACKED_DIR_PATCH_TARGET, return_value=tmp_path):
+            result = _handler(_config(_ISSUE_SDLC_JOB)).handle(_input(_issue_sdlc_tick()))
+        assert result.decision == Decision.DENY
+
+    def test_another_job_stays_suppressed_when_only_one_opts_in(self, tmp_path: Path) -> None:
+        _arm_marker(tmp_path)
+        other = PersistentCronConfig(id="other", schedule="5 * * * *", prompt="do the other thing")
+        tick = declared_tick_prompt(other)
+        with patch(_DAEMON_UNTRACKED_DIR_PATCH_TARGET, return_value=tmp_path):
+            result = _handler(_config(_RUNS_WHILE_AWAITING_JOB, other)).handle(_input(tick))
+        assert result.decision == Decision.DENY
+
+    def test_the_failsafe_is_suppressed_even_beside_an_opted_in_job(self, tmp_path: Path) -> None:
+        _arm_marker(tmp_path)
+        with (
+            patch(_DAEMON_UNTRACKED_DIR_PATCH_TARGET, return_value=tmp_path),
+            patch(_OWED_PATCH_TARGET, return_value=False),
+        ):
+            result = _handler(_config(_RUNS_WHILE_AWAITING_JOB)).handle(
+                _input(CANONICAL_CRON_PROMPT)
+            )
+        assert result.decision == Decision.DENY
+
+    def test_a_disabled_persistent_crons_section_does_not_opt_a_job_in(
+        self, tmp_path: Path
+    ) -> None:
+        """An unloaded declaration is not a declaration: fail toward suppress."""
+        _arm_marker(tmp_path)
+        config = Config(
+            persistent_crons=PersistentCronsConfig(enabled=False, jobs=[_RUNS_WHILE_AWAITING_JOB])
+        )
+        with patch(_DAEMON_UNTRACKED_DIR_PATCH_TARGET, return_value=tmp_path):
+            result = _handler(config).handle(_input(_issue_sdlc_tick()))
+        assert result.decision == Decision.DENY
 
 
 class TestAStoodDownIssueLoopResumesOnTheHuman:

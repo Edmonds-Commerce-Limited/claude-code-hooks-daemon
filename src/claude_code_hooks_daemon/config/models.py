@@ -2128,6 +2128,9 @@ class PersistentCronConfig(BaseModel):
         prompt: The text enqueued when the job fires.
         enabled: Whether this individual job is asserted.
         description: Human-facing note about what the job is for.
+        runs_while_awaiting_human: Whether this job's ticks are still delivered
+            while the session has declared ``[awaiting-human]``. Default false:
+            a declared job stands down with the marker.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -2137,6 +2140,13 @@ class PersistentCronConfig(BaseModel):
     prompt: str = Field(min_length=1, description="Prompt enqueued when the job fires")
     enabled: bool = Field(default=True, description="Whether this job is asserted")
     description: str = Field(default="", description="What this job is for")
+    runs_while_awaiting_human: bool = Field(
+        default=False,
+        description=(
+            "Deliver this job's ticks even while the session is blocked only on human "
+            "input (its work is independent of the pending question)"
+        ),
+    )
 
     @field_validator("id", "prompt")
     @classmethod
@@ -2211,6 +2221,14 @@ class PersistentCronsConfig(BaseModel):
         if not self.enabled:
             return []
         return [job for job in self.jobs if job.enabled]
+
+    def runs_while_awaiting_human(self, job_id: str) -> bool:
+        """Whether the active job ``job_id`` opted out of the awaiting-human stand-down.
+
+        False for an unknown, disabled or undeclared job, so anything the
+        declaration does not positively vouch for stays suppressed.
+        """
+        return any(job.runs_while_awaiting_human for job in self.active_jobs() if job.id == job_id)
 
 
 class PromotionConfig(BaseModel):
