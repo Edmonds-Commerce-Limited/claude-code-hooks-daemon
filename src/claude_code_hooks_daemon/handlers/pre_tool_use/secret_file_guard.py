@@ -1525,14 +1525,15 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
         recipe/``run:`` lines -- see ``_MAKEFILE_BASENAMES`` above for why
         that simplification is the safe direction to err in.
 
-        N275: only a ``.sh``/``.bash`` file or a shebang script is wholly
-        shell. For anything else (a workflow, a Makefile, ``.py``, ...) text
-        the shell reader cannot place is not a command: a CI workflow's
-        GitHub ``${{ ... }}`` expressions are neutralised first, and what is
-        still unreadable is re-scanned literally (``"content"`` context, with
-        ``${`` spaced apart), so a real mention still denies but the file is
-        not denied merely for being unparseable as shell. A genuine shell
-        script keeps failing closed as unreadable.
+        N275: a CI workflow's GitHub ``${{ ... }}`` expressions are
+        neutralised first (the runner substitutes them before any shell).
+        Anything scanned as shell (``.sh``/``.bash``, shebang scripts,
+        Makefiles, CI YAML) that the reader still cannot place fails closed
+        as unreadable: a literal re-scan cannot see a path assembled from
+        variables, and nothing else checks a Makefile recipe. Only a file
+        scanned as ``"content"`` (``.py``, ``.ts``, ...) is re-scanned
+        literally (``${`` spaced apart) instead of denied for being
+        unparseable as shell; a real mention there still denies.
 
         Review 6 item 3: when ``context == "content"`` (a non-shell-script
         language), string-literal arguments to a KNOWN shell-executing call
@@ -1574,10 +1575,11 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
                 context=context,
             )
         except shell_expansion.UnresolvableBraceQuotingError:
-            if is_shell_extension or is_shebang_shell:
+            if context != "content":
                 raise
-            # Not a shell script: text the shell reader cannot place is not
-            # a command, so it is read again literally, never waved through.
+            # Not scanned as shell at all: text the shell reader cannot
+            # place is not a command, so it is read again literally, never
+            # waved through. Anything scanned as shell re-raises above.
             whole_file_mention = sfm.find_protected_mention_detail(
                 content.replace("${", "$ {"),
                 patterns,

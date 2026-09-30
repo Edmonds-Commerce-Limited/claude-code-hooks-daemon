@@ -3043,15 +3043,26 @@ class TestNonShellContentIsNotJudgedAsUnreadableShell:
         hook_input = self._edit("/proj/.github/workflows/qa.yml", content)
         assert handler.matches(hook_input)
 
-    def test_a_makefile_with_unparseable_shell_quoting_is_not_an_unreadable_deny(self) -> None:
+    def _assert_unreadable_deny(self, hook_input: dict[str, Any]) -> None:
         handler = _handler()
-        hook_input = self._edit("/proj/Makefile", "all:\n\techo " + self._UNPARSEABLE_SHELL)
-        assert not handler.matches(hook_input)
+        assert handler.matches(hook_input)
+        result = handler.handle(hook_input)
+        assert result.decision == Decision.DENY
+        assert RuleID.SECRET_COMMAND_UNREADABLE in result.reason
 
-    def test_a_makefile_with_unparseable_quoting_still_denies_a_literal_mention(self) -> None:
-        handler = _handler()
-        content = "all:\n\techo " + self._UNPARSEABLE_SHELL + "\tcat .vault-pass\n"
-        assert handler.matches(self._edit("/proj/Makefile", content))
+    def test_a_makefile_recipe_is_shell_so_unreadable_quoting_fails_closed(self) -> None:
+        """`make` shows the Bash guard nothing: this scan is the only defence,
+        and a literal re-scan cannot see a path assembled from variables."""
+        self._assert_unreadable_deny(
+            self._edit("/proj/Makefile", "all:\n\techo " + self._UNPARSEABLE_SHELL)
+        )
+
+    def test_a_workflow_run_step_unreadable_for_another_reason_fails_closed(self) -> None:
+        """Only `${{ }}` expressions are neutralised; a `run:` step the shell
+        reader cannot place for any other reason still denies."""
+        self._assert_unreadable_deny(
+            self._edit("/proj/.github/workflows/qa.yml", "      - run: echo ${a{b}\n")
+        )
 
     @pytest.mark.parametrize(
         ("path", "denied"),
