@@ -1,5 +1,11 @@
 # N275: Edit of a workflow denied as an unreadable shell command
 
+> **Superseded in part by review round 1 (5244e58a5).** The literal fallback
+> described below applies only to content NOT scanned as shell (`.py`, `.ts`,
+> ...). Everything scanned as shell, Makefiles and CI YAML included (after the
+> `${{ }}` neutralisation), still fails closed as unreadable, because a
+> Makefile recipe runs locally and no other check sees it.
+
 **Route**: `SecretFileGuardHandler._script_content_mention` in
 `src/claude_code_hooks_daemon/handlers/pre_tool_use/secret_file_guard.py`.
 Only the ADDED text is judged (`content` or `new_string`); `old_string` is never

@@ -3048,6 +3048,7 @@ class TestNonShellContentIsNotJudgedAsUnreadableShell:
         assert handler.matches(hook_input)
         result = handler.handle(hook_input)
         assert result.decision == Decision.DENY
+        assert result.reason is not None
         assert RuleID.SECRET_COMMAND_UNREADABLE in result.reason
 
     def test_a_makefile_recipe_is_shell_so_unreadable_quoting_fails_closed(self) -> None:
@@ -3090,6 +3091,7 @@ class TestNonShellContentIsNotJudgedAsUnreadableShell:
         assert handler.matches(hook_input)
         result = handler.handle(hook_input)
         assert result.decision == Decision.DENY
+        assert result.reason is not None
         assert RuleID.SECRET_COMMAND_UNREADABLE in result.reason
 
     def test_an_unparseable_shebang_script_still_fails_closed(self) -> None:

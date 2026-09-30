@@ -43,7 +43,7 @@ Full write-ups are in [NIGGLES.md](NIGGLES.md). One line each here:
 | N278       | A branch merged with its targeted QA never run; main took three static-check failures                            | Coordinator         | ⬜ Open                 |
 | N277       | `_resolve_python_cmd` in `init.sh` returns 0 after a failed resolve, with `PYTHON_CMD` empty                     | p477 agent          | ✅ Fixed (f794ae2d6)    |
 | N276       | The SessionStart chain overruns its 20 s budget under load, so declared crons are never asked for                | Coordinator         | ✅ Fixed (aa557cc12)    |
-| N275       | `secret_file_guard` judges an Edit of a YAML workflow holding `${{ }}` as an unreadable shell command            | Coordinator         | ⬜ Open                 |
+| N275       | `secret_file_guard` judges an Edit of a YAML workflow holding `${{ }}` as an unreadable shell command            | Coordinator         | ✅ Fixed (d66d0ff9b)    |
 | N274       | `AskUserQuestion` is denied as "unattended" right after the owner typed a message                                | Coordinator         | ✅ Fixed (93cc3615d)    |
 | N273       | A stalled CI job holds main's queue for up to six hours; no job sets `timeout-minutes`                           | Main CI             | ✅ Fixed                |
 | N272       | One `llm_qa changed` run reported `project_handlers` as 0 tests collected; it passed 232 alone                   | Coordinator         | ✅ Fixed                |
