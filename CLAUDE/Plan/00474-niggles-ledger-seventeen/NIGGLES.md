@@ -4,6 +4,34 @@ Newest first. Each entry says how it was found, why it happens, and the
 candidate remedies. Numbering continues from
 [ledger sixteen](../00466-niggles-ledger-sixteen/NIGGLES.md).
 
+### N264 — a sub-agent's edits landed, uncommitted, in another branch's worktree
+
+**Found**: dispatching a Sonnet agent to land `worktree-n466-n253`, its clean-tree
+check failed. Three files in that worktree (`secret_file_guard.py`,
+`secret_file_matching.py`, `test_secret_file_guard.py`) held 253 added lines,
+all written in the same second, 08:22:51 UTC on 2026-09-30. The branch's reflog
+had not moved for 20 hours, the shared stash was empty, and only this session's
+`claude` process was running. So the writer was a sub-agent of this session. The
+only one active then was the agent landing `worktree-n466-n101`, which was
+working on the same guard in its own worktree. Which tool call wrote them is not
+established.
+
+**Why it matters**: the edits were the unapproved "warn, don't block" change for
+`secret_file_guard`, with a dated owner-ruling comment. Committed by the next
+landing agent, they would have reached `main` under the wrong branch's name.
+Nothing in the daemon stops a sub-agent writing outside the worktree it was
+given.
+
+**Handled**: the edits are kept as `untracked/briefs/n253-unattributed-warn-dont-block.diff`
+and reverse-applied, so the worktree matched its branch again. The landing brief
+now says to write only inside the agent's own worktree.
+
+**Candidate remedy**: a PreToolUse guard that, for a sub-agent whose working
+directory is a linked worktree, denies a Write/Edit into a DIFFERENT linked
+worktree of the same repository.
+
+**Status**: ⬜ Open.
+
 ### N263 — the release empties UNRELEASED/post-upgrade-tasks/ but not its README's task index
 
 **Found**: CI on the v3.67.0 release commit `e55c2ea28` (run 36662494834) failed
