@@ -38,6 +38,7 @@ Full write-ups are in [NIGGLES.md](NIGGLES.md). One line each here:
 
 | #    | Verdict                                                                     | Origin          | Status                  |
 | ---- | --------------------------------------------------------------------------- | --------------- | ----------------------- |
+| N263 | The release empties UNRELEASED post-upgrade tasks but not the README index  | v3.67.0 CI      | ✅ Remedied             |
 | N262 | The release procedure has no check that the notes fit a GitHub release body | v3.67.0 publish | ✅ Remedied (ea8dcd542) |
 
 ## Tasks

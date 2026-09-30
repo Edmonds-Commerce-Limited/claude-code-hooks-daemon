@@ -4,6 +4,26 @@ Newest first. Each entry says how it was found, why it happens, and the
 candidate remedies. Numbering continues from
 [ledger sixteen](../00466-niggles-ledger-sixteen/NIGGLES.md).
 
+### N263 — the release empties UNRELEASED/post-upgrade-tasks/ but not its README's task index
+
+**Found**: CI on the v3.67.0 release commit `e55c2ea28` (run 36662494834) failed
+on all three Python versions, in two tests in
+`tests/integration/test_repo_hygiene_check.py`, both rule `post-upgrade-index-drift`.
+Step 6 moved the five `NN-*.md` task files out of
+`CLAUDE/UPGRADES/UNRELEASED/post-upgrade-tasks/`, but that directory's
+README kept its five index rows, which now named files that are not there.
+RELEASING.md Step 6 said how to fill the versioned guide's index, but not to empty
+the UNRELEASED one. No QA run between Step 6 and the tag caught it.
+
+**Consequence**: the `v3.67.0` tag carries the stale index. It is a documentation
+row in the repository, not daemon behaviour, and the published assets are
+unaffected. The tag is not moved.
+
+**Status**: ✅ Remedied. The UNRELEASED README's index is back to the
+`_No tasks are queued for the next release._` placeholder, and RELEASING.md Step 6
+now has an "Empty the UNRELEASED task index" step, with the hygiene test added to
+its Verify block. The hygiene test already pins the invariant; the gap was procedural.
+
 ### N262 — the release procedure has no check that the notes fit a GitHub release body
 
 **Found**: publishing v3.67.0, `gh release create --notes-file RELEASES/v3.67.0.md`

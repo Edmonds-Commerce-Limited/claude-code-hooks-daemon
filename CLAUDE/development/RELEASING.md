@@ -363,12 +363,22 @@ Edit `$TARGET/README.md`:
 2. Replace the placeholder task-index table with one row per moved task, ordered by filename. Each row: `| file | type | severity | applies-to | one-line summary |`.
 3. Delete the `00-EXAMPLE-task.md` reference — that file only belongs in the template.
 
+### Empty the UNRELEASED task index
+
+The rows in `UNRELEASED/post-upgrade-tasks/README.md` name the files just moved
+out. Replace that table, between the `BEGIN TASK INDEX` / `END TASK INDEX`
+markers, with the `_No tasks are queued for the next release._` placeholder.
+A row naming a missing file fails `tests/integration/test_repo_hygiene_check.py`
+(rule `post-upgrade-index-drift`).
+
 ### Verify
 
 ```bash
-# UNRELEASED should contain only README.md
+# UNRELEASED should contain only README.md, and its index no rows
 ls CLAUDE/UPGRADES/UNRELEASED/post-upgrade-tasks/
 # Expected: README.md  (nothing else)
+.venv/bin/python -m pytest tests/integration/test_repo_hygiene_check.py -q
+# Expected: passes
 
 # Versioned guide should list every moved task
 cat CLAUDE/UPGRADES/v{MAJOR}/v{PREV}-to-v{NEW}/post-upgrade-tasks/README.md
