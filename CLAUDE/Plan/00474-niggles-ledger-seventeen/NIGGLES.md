@@ -68,7 +68,9 @@ shutdown. The test arrived with the lifecycle merge (ledger 00466 N67-N70).
 exiting (empty command line, zombie) as stopped, while still refusing a live
 process that is not a daemon.
 
-**Status**: ⬜ Open.
+**Status**: ✅ Fixed in 1a61af7d0. A shared `tests/daemon_teardown.py` treats a
+process that is gone, a zombie, or showing an empty command line as stopped, and
+the daemon tests' teardowns use it.
 
 ### N267 — dropping a stale branch always needs a human, even when nothing can be lost
 
