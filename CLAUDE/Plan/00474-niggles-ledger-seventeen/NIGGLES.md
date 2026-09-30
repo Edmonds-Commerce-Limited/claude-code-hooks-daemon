@@ -113,7 +113,19 @@ options are a documented requirement (uv in `~/.local/bin` or a trusted system
 directory), a message naming the fix, or more trusted locations. Widening what
 Layer 2 trusts is a security decision, so it is not made here.
 
-**Status**: ⬜ Open, needs an owner decision.
+**Owner ruling (2026-09-30)**:
+
+- Trust more fixed locations, including Homebrew's prefixes and pipx's bin
+  directory. pipx's default is `~/.local/bin`, already trusted; honour
+  `$PIPX_BIN_DIR` when it is set.
+- Allow the uv path to be passed explicitly when needed, as a per-run upgrade
+  argument (`--uv <path>`).
+- Never a repo-level config key, because a repository cannot carry
+  environment-specific configuration.
+- The owner questioned the threat model. The PATH reset guards against an agent
+  steering an upgrade, not the human, who already controls their own PATH.
+
+**Status**: ⬜ Open, ruling made; implementation queued.
 
 ### N270 — the workspace venv has drifted from `uv.lock`
 

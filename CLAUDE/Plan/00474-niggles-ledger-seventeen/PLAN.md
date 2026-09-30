@@ -42,7 +42,7 @@ Full write-ups are in [NIGGLES.md](NIGGLES.md). One line each here:
 | N274       | `AskUserQuestion` is denied as "unattended" right after the owner typed a message                                | Coordinator         | ⬜ Open                 |
 | N273       | A stalled CI job holds main's queue for up to six hours; no job sets `timeout-minutes`                           | Main CI             | ⬜ Open                 |
 | N272       | One `llm_qa changed` run reported `project_handlers` as 0 tests collected; it passed 232 alone                   | Coordinator         | ✅ Fixed                |
-| N271       | An upgrade fails "uv not found" when the only uv is outside the trusted PATH and `~/.local/bin`                  | Main CI red         | ⬜ Open (owner)         |
+| N271       | An upgrade fails "uv not found" when the only uv is outside the trusted PATH and `~/.local/bin`                  | Main CI red         | ⬜ Open (ruled)         |
 | N270       | The workspace venv has drifted from `uv.lock` (pytest 9.1.1 against 9.0.3)                                       | Coordinator         | ⬜ Open                 |
 | N269       | `secret_file_guard` expands a single-quoted grep regex as a filename glob                                        | Coordinator         | ⬜ Open                 |
 | N268       | A symlinked-project daemon test's teardown refuses a daemon that is exiting                                      | Main CI             | ✅ Fixed (1a61af7d0)    |
