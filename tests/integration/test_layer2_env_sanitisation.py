@@ -462,12 +462,14 @@ class TestLayer2PathAfterEveryLibrarySource:
         assert not report[f"RESOLVES {tool}"].startswith(str(planted_home)), report
 
 
-class TestLayer2ReachesTheUvTheCallerHad:
-    """A uv installed anywhere the caller's PATH names (`pip install uv` into a
-    toolchain's bin directory, a package manager's prefix) must survive Layer
-    2 resetting PATH to the trusted list, or the venv bootstrap cannot run."""
+class TestLayer2NeverRunsAUvOnlyTheCallerPathNames:
+    """The uv that builds the venv is resolved from the trusted PATH or the uv
+    installer's default location, never from a directory only the caller's
+    PATH names: whatever builds the venv decides what code the daemon runs, so
+    the caller must not be able to pick it. CI installs uv with `--user` for
+    this reason, and `pip install uv` into a toolchain bin is not reached."""
 
-    def test_uv_from_the_caller_path_is_reached_after_the_path_reset(
+    def test_a_uv_only_on_the_caller_path_is_not_run(
         self, layer2_head: Path, tmp_path: Path
     ) -> None:
         home = tmp_path / "bare-home"
@@ -482,8 +484,7 @@ class TestLayer2ReachesTheUvTheCallerHad:
 
         result = _run(f'bash "{layer2_head}"', env)
 
-        assert result.returncode == 0, result.stdout + result.stderr
-        assert "caller uv --version" in result.stdout.splitlines()
+        assert "caller uv --version" not in result.stdout.splitlines(), result.stdout
 
 
 class TestUvIsResolvedByName:

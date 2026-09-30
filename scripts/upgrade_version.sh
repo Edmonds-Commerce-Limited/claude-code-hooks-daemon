@@ -30,14 +30,6 @@ while read -r _ _ _imported_function; do
     unset -f "$_imported_function"
 done < <(declare -F)
 
-# The uv the caller's PATH names, recorded before Layer 2 replaces PATH with
-# the trusted list. uv is a build tool that may live in any toolchain's bin
-# directory (`pip install uv`), which that list never contains; _venv_uv uses
-# this when PATH has none.
-if ! _CALLER_UV_BIN="$(command -v uv)"; then
-    _CALLER_UV_BIN=""
-fi
-
 # Resolve script directory for sourcing library modules
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 INSTALL_LIB_DIR="$SCRIPT_DIR/install"
