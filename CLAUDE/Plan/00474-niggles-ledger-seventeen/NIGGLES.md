@@ -26,6 +26,20 @@ other ledgers' numbering (00422 for `p422-close`, 00421's plan for `d-00421`).
 
 **Status**: ⬜ Open (all 55).
 
+### N281 — `secret_file_guard` denies a wildcard command at 12,500 characters but does not match it at 100,000
+
+**Found**: main CI run 36783643933 (head `9df587f09`), Python 3.11 and 3.12;
+3.13 passed. `test_safety_handlers_hostile_input_performance.py` reported
+`SecretFileGuardHandler takes another path at 100000 than at 12500 (matched, decision, logged a warning): (True, 'deny', False) vs (False, None, False) on shape='wildcards'`. The same file passed locally on `a6000e2d4`, which carries
+the N265 speed-up.
+
+**Why it matters**: a guard whose `matches()` stops matching on the larger
+input lets that input through. If the cause is time (the slower runners ran out
+of budget at 100,000 characters) it is a fail-open under load, the direction a
+safety handler must never take.
+
+**Status**: ⬜ Open (under investigation).
+
 ### N280 — something wrote an older `CLAUDE.md` guidance section into the main checkout during a test run
 
 **Found**: by the coordinator. A pytest run of 1743 targeted tests had three
