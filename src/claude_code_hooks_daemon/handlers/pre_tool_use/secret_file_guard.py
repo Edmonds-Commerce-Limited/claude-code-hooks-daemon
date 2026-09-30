@@ -249,6 +249,12 @@ _MAKEFILE_EXTENSION: Final[str] = ".mk"
 _CI_YAML_EXTENSIONS: Final[tuple[str, ...]] = (".yml", ".yaml")
 _CI_YAML_BASENAMES: Final[frozenset[str]] = frozenset({".gitlab-ci.yml", ".gitlab-ci.yaml"})
 _CI_YAML_DIR_MARKER: Final[str] = "/.github/workflows/"
+# N275: a workflow's `${{ ... }}` is a GitHub Actions expression the runner
+# substitutes BEFORE any shell sees the step -- it is not shell `${...}`, and
+# the shell reader cannot place its doubled braces. It is swapped for an
+# inert word so the `run:` text around it is still scanned as shell.
+_GITHUB_EXPRESSION_RE: Final[re.Pattern[str]] = re.compile(r"\$\{\{.*?\}\}", re.DOTALL)
+_GITHUB_EXPRESSION_PLACEHOLDER: Final[str] = "GITHUB_EXPRESSION"
 _SHEBANG_SHELL_RE: Final[re.Pattern[str]] = re.compile(
     r"^#!\s*\S*/(?:env\s+)?(?:sh|bash|zsh|dash|ksh|ash)\b"
 )
@@ -1519,6 +1525,15 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
         recipe/``run:`` lines -- see ``_MAKEFILE_BASENAMES`` above for why
         that simplification is the safe direction to err in.
 
+        N275: only a ``.sh``/``.bash`` file or a shebang script is wholly
+        shell. For anything else (a workflow, a Makefile, ``.py``, ...) text
+        the shell reader cannot place is not a command: a CI workflow's
+        GitHub ``${{ ... }}`` expressions are neutralised first, and what is
+        still unreadable is re-scanned literally (``"content"`` context, with
+        ``${`` spaced apart), so a real mention still denies but the file is
+        not denied merely for being unparseable as shell. A genuine shell
+        script keeps failing closed as unreadable.
+
         Review 6 item 3: when ``context == "content"`` (a non-shell-script
         language), string-literal arguments to a KNOWN shell-executing call
         (``os.system``, backticks, ``child_process.exec``, ...) are ALSO
@@ -1548,13 +1563,28 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
             else "content"
         )
         deadline = time.monotonic() + sfm.SCAN_DEADLINE_SECONDS
-        whole_file_mention = sfm.find_protected_mention_detail(
-            content,
-            patterns,
-            deadline=deadline,
-            cwd=cwd,
-            context=context,
-        )
+        if is_ci_yaml:
+            content = _GITHUB_EXPRESSION_RE.sub(_GITHUB_EXPRESSION_PLACEHOLDER, content)
+        try:
+            whole_file_mention = sfm.find_protected_mention_detail(
+                content,
+                patterns,
+                deadline=deadline,
+                cwd=cwd,
+                context=context,
+            )
+        except shell_expansion.UnresolvableBraceQuotingError:
+            if is_shell_extension or is_shebang_shell:
+                raise
+            # Not a shell script: text the shell reader cannot place is not
+            # a command, so it is read again literally, never waved through.
+            whole_file_mention = sfm.find_protected_mention_detail(
+                content.replace("${", "$ {"),
+                patterns,
+                deadline=deadline,
+                cwd=cwd,
+                context="content",
+            )
         if whole_file_mention is not None:
             return whole_file_mention
         if context != "content":

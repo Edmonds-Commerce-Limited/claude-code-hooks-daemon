@@ -176,7 +176,15 @@ command.
 command reader, and limit it to content that is a shell script (by extension or
 shebang), or treat an unreadable span in non-shell content as text.
 
-**Status**: ⬜ Open.
+**Status**: ✅ Fixed on `worktree-n275-yaml-edit`. The route is the ADDED text
+only: `_script_content_mention` scans `new_string`/`content` (a workflow is
+scanned whole as shell, `context="bash"`); `old_string` is never read. The
+wider defect: even `context="content"` runs the shell brace reader, so any
+non-shell file (`.py`, `.ts`, Makefile) holding `${{` was denied too. Fix: a
+workflow's `${{ ... }}` expressions are neutralised before the scan (so `run:`
+steps stay shell-scanned), and for any file that is not `.sh`/`.bash`/shebang
+shell, an unreadable scan is repeated literally instead of denied. Genuine
+shell keeps failing closed. Release note 196.
 
 ### N274 — `AskUserQuestion` is denied as "unattended" while the owner is at the keyboard
 
