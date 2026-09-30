@@ -119,6 +119,24 @@ instead of competing. Today `untracked/qa/.llm_qa.lock` is per checkout, and
 - [ ] ⬜ **Task 3.3**: Keep the release documents (`RELEASING.md`, the release
   skill and agent) as the one place the full gate is required.
 
+### Phase 3b: CI tiers (owner request)
+
+Measured over the last 60 `qa.yml` runs: every push to `main` ran the full suite
+on three Pythons, a 39-minute median with a 98-minute worst case once queueing is
+included. 34 of 58 were markdown-only commits, yet 9 of those failed, because tests
+read the plan index, ledgers and docs. So markdown is narrowed, not skipped.
+
+- [ ] 🔄 **Task 3b.1**: A tested change classifier (markdown only; code; build or
+  CI config) drives which jobs run. Markdown only runs the doc and plan checks
+  plus the tests that read the changed files, on one Python. Code runs lint,
+  types and `llm_qa.py changed` over the pushed range on one Python, falling back
+  to the full suite on that Python when the mapper cannot map a file. Build or CI
+  config runs the full matrix.
+- [ ] ⬜ **Task 3b.2**: The full three-Python matrix runs nightly on `main`, on
+  manual dispatch, and on the release pull request (Plan 00476). The release
+  slate gate (Plan 00359) accepts a tier's green for everyday work and requires
+  a full-matrix green for a release.
+
 ### Phase 4: Enforcement
 
 - [ ] ⬜ **Task 4.1**: A SessionStart advisory counts open work branches and names
