@@ -395,7 +395,18 @@ work went round it with `Read` or a sub-agent.
 find why a path outside the glob matches (for example a recursive flag treated
 as searching the whole tree).
 
-**Status**: ⬜ Open.
+**Status**: ✅ Fixed on `worktree-n266-flaggable-grep`; the two reported commands could
+not be reproduced. The guard's flaggable-path match is a text match on the command
+(`secret_file_matching.find_protected_mention`), and on current code neither command
+as described is denied, nor is any variant that only names paths off the flagged tree
+or carries a quoted regex. The likely cause is the quoted-regex-as-glob defect N269
+(`e9281dfda`, the same day), which judged a grep pattern's glob-like text as a path;
+that is not proven, because the original patterns were not recorded. Testing found the
+opposite gap: a recursive `grep -r` or `rg` rooted at `.`, at `tests/`, or with no
+path was never denied, because nothing modelled where a search descends. The guard
+now resolves each recursive search's roots (`grep -r`, `rg`, `git grep`) against the
+payload cwd and project root and denies any root that is an ancestor of, or inside,
+a flagged directory, or that cannot be placed; a named path off the flagged tree stays allowed.
 
 ### N265 — `secret_file_guard` spends about 2.2 s of CPU on one realistic Python program
 

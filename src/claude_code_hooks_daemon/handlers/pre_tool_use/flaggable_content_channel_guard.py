@@ -28,7 +28,10 @@ self-authorised exactly the disclosure this guard exists to prevent (the
 from __future__ import annotations
 
 import logging
+import posixpath
 import re
+import shlex
+from pathlib import Path
 from typing import Any, Final
 
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, HookInputField, Priority
@@ -43,7 +46,8 @@ from claude_code_hooks_daemon.handlers.utils.quarantine import quarantine_agent_
 from claude_code_hooks_daemon.utils import secret_file_matching as sfm
 from claude_code_hooks_daemon.utils.bash_flags import SPAN_SEPARATORS, split_statements
 from claude_code_hooks_daemon.utils.command_evasion import GIT_INVOCATION
-from claude_code_hooks_daemon.utils.shell_segmentation import split_unquoted
+from claude_code_hooks_daemon.utils.path_exclusion import resolve_project_root
+from claude_code_hooks_daemon.utils.shell_segmentation import split_unquoted_spans
 
 _RULE = Rule(
     rule_id=RuleID.FLAGGABLE_CONTENT_CHANNEL,
@@ -226,12 +230,17 @@ class FlaggableContentChannelGuardHandler(PreToolUseHandlerBase):
         if not shapes:
             return None
 
-        for segment in _segments(command):
+        raw_cwd = hook_input.get(HookInputField.CWD)
+        cwd = raw_cwd if isinstance(raw_cwd, str) else None
+        for segment, piped_in in _segments(command):
             for label, pattern in shapes:
                 if pattern.search(segment):
                     mention = sfm.find_protected_mention(segment, globs)
                     if mention is not None:
                         return (label, mention)
+            reached = _recursive_search_reaches(segment, globs, cwd=cwd, piped_in=piped_in)
+            if reached is not None:
+                return (_RECURSIVE_SEARCH_LABEL, reached)
         return None
 
     def get_rules(self) -> list[Rule]:
@@ -360,14 +369,210 @@ class FlaggableContentChannelGuardHandler(PreToolUseHandlerBase):
         ]
 
 
-def _segments(command: str) -> list[str]:
+def _segments(command: str) -> list[tuple[str, bool]]:
     """Top-level command segments: statements, then pipe/&&/|| spans within each.
 
     Mirrors ``verification_result_gate``'s decomposition so both handlers
     agree on what one "command" is — quote-aware and heredoc-safe via
-    ``split_statements``/``split_unquoted``.
+    ``split_statements``/``split_unquoted_spans``. Each segment carries
+    whether a pipe feeds it, because a search with no path operand reads that
+    stdin instead of the working directory.
     """
-    segments: list[str] = []
+    segments: list[tuple[str, bool]] = []
     for statement in split_statements(command):
-        segments.extend(split_unquoted(statement, SPAN_SEPARATORS))
-    return [segment.strip() for segment in segments if segment.strip()]
+        for start, end in split_unquoted_spans(statement, SPAN_SEPARATORS):
+            segment = statement[start:end].strip()
+            if not segment:
+                continue
+            before = statement[:start].rstrip()
+            segments.append((segment, before.endswith("|") and not before.endswith("||")))
+    return segments
+
+
+# ── Recursive searches: which directories can they reach? ───────────────────
+#
+# A grep/rg that descends a directory reads every file under it, so naming
+# ``tests/`` (or nothing, meaning the working directory) reaches a flagged
+# directory beneath it without ever mentioning it. Conversely a search whose
+# named paths all lie off the flagged tree cannot reach it.
+
+_RECURSIVE_SEARCH_LABEL: Final[str] = "recursive grep/rg search reaching a flaggable directory"
+_GREP_SHAPE: Final[re.Pattern[str]] = re.compile(r"\b(?:grep|egrep|fgrep|zgrep|rg)\b")
+_GREP_COMMANDS: Final[frozenset[str]] = frozenset({"grep", "egrep", "fgrep", "zgrep"})
+_RG_COMMAND: Final[str] = "rg"
+_GIT_OPTIONS_TAKING_VALUE: Final[frozenset[str]] = frozenset(
+    {"-C", "-c", "--git-dir", "--work-tree", "--namespace", "--exec-path"}
+)
+_PATTERN_OPTIONS: Final[frozenset[str]] = frozenset({"-e", "-f", "--regexp", "--file"})
+# Options whose value is the next word; without this the value would be read
+# as the pattern or as a search root.
+_OPTIONS_TAKING_VALUE: Final[frozenset[str]] = frozenset(
+    {
+        "-A", "-B", "-C", "-m", "-d", "-D", "-g", "-t", "-T", "-j", "-M",
+        "--after-context", "--before-context", "--context", "--max-count",
+        "--directories", "--devices", "--include", "--exclude", "--exclude-dir",
+        "--exclude-from", "--glob", "--type", "--type-not", "--color", "--label",
+    }
+)  # fmt: skip
+_RECURSIVE_LONG_OPTIONS: Final[frozenset[str]] = frozenset(
+    {"--recursive", "--dereference-recursive"}
+)
+_WILDCARD_CHARS: Final[str] = "*?[{"
+_SHELL_EXPANSION_CHARS: Final[str] = "$`"
+
+
+def _has_wildcard(component: str) -> bool:
+    return any(char in component for char in _WILDCARD_CHARS)
+
+
+def _literal_head(path: str) -> str:
+    """``path`` up to, not including, its first wildcard component."""
+    components = path.split("/")
+    cut = next((i for i, part in enumerate(components) if _has_wildcard(part)), len(components))
+    head = "/".join(components[:cut])
+    return head or ("/" if path.startswith("/") else ".")
+
+
+def _root_relative_components(path: str, *, cwd: str | None, root: str | None) -> list[str] | None:
+    """Directory components a search rooted at ``path`` starts from, relative to the project.
+
+    ``[]`` is the project root itself; ``[".."]`` marks a path outside the
+    project. ``None`` means the path cannot be placed, so the caller fails
+    closed: a shell expansion, or a relative path with no working directory.
+    """
+    if any(char in path for char in _SHELL_EXPANSION_CHARS):
+        return None
+    head = str(Path(_literal_head(path)).expanduser())
+    if not posixpath.isabs(head):
+        if cwd is None or not posixpath.isabs(cwd):
+            return None
+        head = posixpath.join(cwd, head)
+    base = root or cwd
+    if base is None:
+        return None
+    relative = posixpath.relpath(posixpath.normpath(head), posixpath.normpath(base))
+    if relative == ".":
+        return []
+    return relative.split("/")
+
+
+def _flagged_components(glob: str) -> list[str]:
+    """Literal leading directory components of a flaggable glob (empty: anywhere)."""
+    components = glob.removeprefix("./").split("/")
+    cut = next((i for i, part in enumerate(components) if _has_wildcard(part)), len(components))
+    return [part for part in components[:cut] if part]
+
+
+def _is_prefix(shorter: list[str], longer: list[str]) -> bool:
+    return longer[: len(shorter)] == shorter
+
+
+def _search_command(words: list[str]) -> tuple[int, bool] | None:
+    """``(index of the first argument, always_recursive)`` of a grep-family call, else None."""
+    for index, word in enumerate(words):
+        name = posixpath.basename(word)
+        if name in _GREP_COMMANDS:
+            return index + 1, False
+        if name == _RG_COMMAND:
+            return index + 1, True
+        if name == "git":
+            position = index + 1
+            while position < len(words) and words[position].startswith("-"):
+                position += 2 if words[position] in _GIT_OPTIONS_TAKING_VALUE else 1
+            if position < len(words) and words[position] == "grep":
+                return position + 1, True
+            return None
+    return None
+
+
+def _parse_search_arguments(
+    arguments: list[str], *, always_recursive: bool
+) -> tuple[bool, list[str]]:
+    """``(recursive, path operands)`` of a grep-family invocation's arguments."""
+    recursive = always_recursive
+    pattern_given = False
+    operands: list[str] = []
+    skip_next = False
+    options_ended = False
+    for word in arguments:
+        if skip_next:
+            skip_next = False
+        elif options_ended or not word.startswith("-") or word == "-":
+            operands.append(word)
+        elif word == "--":
+            options_ended = True
+        elif word.startswith("--"):
+            name, has_value, value = word.partition("=")
+            recursive = (
+                recursive
+                or name in _RECURSIVE_LONG_OPTIONS
+                or (name == "--directories" and value == "recurse")
+            )
+            pattern_given = pattern_given or name in _PATTERN_OPTIONS
+            skip_next = not has_value and (
+                name in _OPTIONS_TAKING_VALUE or name in _PATTERN_OPTIONS
+            )
+        else:
+            cluster = word[1:]
+            recursive = recursive or any(char in "rR" for char in cluster)
+            for offset, char in enumerate(cluster, start=1):
+                if char in "ef":
+                    pattern_given = True
+                if char in "ef" or f"-{char}" in _OPTIONS_TAKING_VALUE:
+                    # The value is the rest of the cluster, or the next word.
+                    skip_next = offset == len(cluster)
+                    break
+    if not pattern_given and operands:
+        operands = operands[1:]
+    return recursive, operands
+
+
+def _recursive_search_reaches(
+    segment: str, globs: tuple[str, ...], *, cwd: str | None, piped_in: bool
+) -> str | None:
+    """The flaggable glob a recursive search in ``segment`` can reach, else None.
+
+    Fails closed: a search whose roots cannot be placed (unparseable quoting,
+    a shell expansion, a relative path with no working directory) is treated
+    as reaching the first glob.
+    """
+    if not _GREP_SHAPE.search(segment):
+        return None
+    try:
+        words = shlex.split(segment)
+    except ValueError:
+        return globs[0]
+    found = _search_command(words)
+    if found is None:
+        return None
+    start, always_recursive = found
+    recursive, operands = _parse_search_arguments(words[start:], always_recursive=always_recursive)
+    if not recursive:
+        return None
+    if not operands:
+        # rg reads a piped stdin instead; grep -r and git grep search the cwd.
+        if posixpath.basename(words[start - 1]) == _RG_COMMAND and piped_in:
+            return None
+        operands = ["."]
+    root = resolve_project_root()
+    for operand in operands:
+        reached = _glob_reached_from(operand, globs, cwd=cwd, root=root)
+        if reached is not None:
+            return reached
+    return None
+
+
+def _glob_reached_from(
+    search_root: str, globs: tuple[str, ...], *, cwd: str | None, root: str | None
+) -> str | None:
+    """The first glob whose flagged directory a search rooted at ``search_root`` can enter."""
+    searched = _root_relative_components(search_root, cwd=cwd, root=root)
+    if searched is None:
+        return globs[0]
+    if searched[:1] == [".."]:
+        return None
+    for glob in globs:
+        flagged = _flagged_components(glob)
+        if _is_prefix(searched, flagged) or _is_prefix(flagged, searched):
+            return glob
+    return None

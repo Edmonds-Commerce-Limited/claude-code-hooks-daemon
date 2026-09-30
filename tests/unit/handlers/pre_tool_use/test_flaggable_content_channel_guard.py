@@ -20,6 +20,9 @@ from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.core import Decision
 from claude_code_hooks_daemon.core.data_layer import reset_data_layer
 from claude_code_hooks_daemon.core.rule import Rule
+from claude_code_hooks_daemon.handlers.pre_tool_use import (
+    flaggable_content_channel_guard as guard_module,
+)
 from claude_code_hooks_daemon.handlers.pre_tool_use.flaggable_content_channel_guard import (
     FlaggableContentChannelGuardHandler,
 )
@@ -349,3 +352,123 @@ class TestFlaggableContentChannelGuardDisclosureLadder:
 
         assert result.reason is not None
         assert "NO escape hatch" in result.reason
+
+
+_ROOT = "/repo"
+_FLAGGED_GLOB = "tests/fixtures/cyber-flag/**"
+
+
+def _bash_in(command: str, cwd: str = _ROOT) -> dict[str, Any]:
+    payload = _bash(command)
+    payload["cwd"] = cwd
+    return payload
+
+
+@pytest.fixture
+def project_root(monkeypatch: pytest.MonkeyPatch) -> str:
+    monkeypatch.setattr(guard_module, "resolve_project_root", lambda: _ROOT)
+    return _ROOT
+
+
+@pytest.fixture
+def flagged_handler(project_root: str) -> FlaggableContentChannelGuardHandler:
+    instance = FlaggableContentChannelGuardHandler()
+    instance._flaggable_path_globs = [_FLAGGED_GLOB]
+    return instance
+
+
+class TestSearchPathsThatCannotReachTheFlaggedDirectory:
+    """Ledger 00474 N266: a named path outside the flagged tree is not a mention of it."""
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "grep -n foo .github/workflows/qa.yml",
+            "grep -rhoE 'a|b' src/claude_code_hooks_daemon/utils/*.py",
+            "grep -rhoE 'a|b' src/claude_code_hooks_daemon/utils/*.py"
+            " && grep -n x untracked/scratch/notes.txt",
+            "grep -rn foo src/ docs/",
+            "rg foo src/",
+            "git grep foo -- src",
+            "cat notes.txt | rg foo",
+            "grep foo notes.txt | grep -r bar src",
+        ],
+    )
+    def test_allowed(
+        self, flagged_handler: FlaggableContentChannelGuardHandler, command: str
+    ) -> None:
+        assert flagged_handler.matches(_bash_in(command)) is False
+
+
+class TestRecursiveSearchesThatCanReachTheFlaggedDirectory:
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "grep -rn foo .",
+            "grep -rn foo",
+            "grep -rn foo ./",
+            "grep -R foo /repo",
+            "grep -rn foo tests",
+            "grep -rn foo tests/",
+            "grep -rn foo tests/fixtures",
+            "grep -rn foo src/../tests",
+            "grep --recursive foo .",
+            "grep -n foo -r .",
+            "grep -rn -e foo .",
+            "egrep -r foo tests/",
+            "rg foo",
+            "rg foo .",
+            "rg foo tests",
+            "git grep foo",
+            "git grep -n foo",
+            "git -C /repo grep foo",
+            "git grep foo -- tests",
+            "grep -rn foo tests/fixtures/cyber-flag/sub",
+            "grep -rn foo $SOME_DIR",
+            "grep -rn foo $(pwd)",
+            "grep -rn foo 'unterminated",
+            "grep -rn foo te*",
+        ],
+    )
+    def test_denied(
+        self, flagged_handler: FlaggableContentChannelGuardHandler, command: str
+    ) -> None:
+        assert flagged_handler.matches(_bash_in(command)) is True
+
+    def test_relative_root_resolves_against_the_payload_cwd(
+        self, flagged_handler: FlaggableContentChannelGuardHandler
+    ) -> None:
+        assert flagged_handler.matches(_bash_in("grep -rn foo fixtures", cwd="/repo/tests")) is True
+        assert flagged_handler.matches(_bash_in("grep -rn foo .", cwd="/repo/src")) is False
+
+    def test_absolute_root_outside_the_project_cannot_reach(
+        self, flagged_handler: FlaggableContentChannelGuardHandler
+    ) -> None:
+        assert flagged_handler.matches(_bash_in("grep -rn foo /var/log")) is False
+
+    def test_relative_root_without_a_cwd_fails_closed(
+        self, flagged_handler: FlaggableContentChannelGuardHandler
+    ) -> None:
+        assert flagged_handler.matches(_bash("grep -rn foo src")) is True
+
+
+class TestNamedPathsInsideTheFlaggedDirectoryStayDenied:
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "grep -n foo tests/fixtures/cyber-flag/a.txt",
+            "grep -n foo /repo/tests/fixtures/cyber-flag/a.txt",
+            "rg foo tests/fixtures/cyber-flag/",
+        ],
+    )
+    def test_denied(
+        self, flagged_handler: FlaggableContentChannelGuardHandler, command: str
+    ) -> None:
+        assert flagged_handler.matches(_bash_in(command)) is True
+
+
+class TestAnchorlessGlobReachesAnyRecursiveSearch:
+    def test_unanchored_glob_denies_a_recursive_search_anywhere(
+        self, handler: FlaggableContentChannelGuardHandler, project_root: str
+    ) -> None:
+        assert handler.matches(_bash_in("grep -rn foo src")) is True
