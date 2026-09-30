@@ -139,7 +139,7 @@ def test_start_daemon_polling_loop_uses_combined_readiness_check() -> None:
 
     # Find the polling loop body (between `while` and matching `done`).
     loop_match = re.search(
-        r"while\s+\[\[\s+\$elapsed\s+-lt\s+\$DAEMON_STARTUP_TIMEOUT\s+\]\];\s*do\s*\n(.*?)^\s*done",
+        r"while\s+\(\(\s*SECONDS\s+<\s+deadline\s*\)\);\s*do\s*\n(.*?)^\s*done",
         body,
         re.DOTALL | re.MULTILINE,
     )

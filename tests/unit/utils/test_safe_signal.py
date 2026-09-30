@@ -7,6 +7,7 @@ refusal is proven by the target surviving, or by the target never existing.
 
 from __future__ import annotations
 
+import errno
 import os
 import signal
 import subprocess
@@ -25,7 +26,6 @@ from claude_code_hooks_daemon.utils.safe_signal import (
     RefusedSignalTarget,
     signal_own_session_child,
     signal_verified_daemon,
-    signal_verified_daemon_via_pidfd,
     stop_verified_daemon,
     verified_daemon_process,
 )
@@ -76,6 +76,19 @@ def children() -> Iterator[list[subprocess.Popen[bytes]]]:
     yield started
     for child in started:
         _reap(child)
+
+
+@pytest.fixture
+def no_pidfd(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A kernel that cannot make pidfds: ``pidfd_open`` fails with ENODEV, as
+    it does without the anonymous inode filesystem, so the proven ``psutil``
+    handle delivers the signal. psutil's own wait opens pidfds too, and falls
+    back on exactly this error."""
+
+    def unavailable(pid: int, flags: int = 0) -> int:
+        raise OSError(errno.ENODEV, os.strerror(errno.ENODEV))
+
+    monkeypatch.setattr(os, "pidfd_open", unavailable)
 
 
 def _spawn(
@@ -208,6 +221,145 @@ class TestADaemonPidIsSignalledOnlyWhenItIsThisProjectsDaemon:
 
         assert handle.pid == daemon.pid
 
+    def test_a_daemon_started_through_a_link_is_stopped_through_the_same_link(
+        self, tmp_path: Path, children: list[subprocess.Popen[bytes]]
+    ) -> None:
+        """Review 9, DR-1: ``init.sh`` names the root as ``pwd`` spells it,
+        link and all, and a ``stop`` from there names it the same way."""
+        (tmp_path / "real" / "project").mkdir(parents=True)
+        (tmp_path / "link").symlink_to(tmp_path / "real")
+        daemon = _fake_daemon(children, tmp_path / "link" / "project")
+
+        handle = verified_daemon_process(daemon.pid, project_root=tmp_path / "link" / "project")
+
+        assert handle.pid == daemon.pid
+
+    def test_a_daemon_naming_the_real_root_is_proven_for_a_caller_naming_a_link(
+        self, tmp_path: Path, children: list[subprocess.Popen[bytes]]
+    ) -> None:
+        """Review 9, DR-1: the caller's own root may be resolved, since it is
+        a path in this process's own namespace."""
+        served = tmp_path / "real" / "project"
+        served.mkdir(parents=True)
+        (tmp_path / "link").symlink_to(tmp_path / "real")
+        daemon = _fake_daemon(children, served)
+
+        handle = verified_daemon_process(daemon.pid, project_root=tmp_path / "link" / "project")
+
+        assert handle.pid == daemon.pid
+
+    def test_a_daemon_named_through_a_link_since_re_pointed_is_refused(
+        self, tmp_path: Path, children: list[subprocess.Popen[bytes]]
+    ) -> None:
+        """Review 9, DR-1: the daemon's own root text is never resolved. It
+        was started for the tree the link named then; once the link names
+        another tree, it is not that tree's daemon. A path in another mount
+        namespace is the same case: only its text is known."""
+        (tmp_path / "old" / "project").mkdir(parents=True)
+        (tmp_path / "new" / "project").mkdir(parents=True)
+        link = tmp_path / "link"
+        link.symlink_to(tmp_path / "old")
+        daemon = _fake_daemon(children, link / "project")
+        link.unlink()
+        link.symlink_to(tmp_path / "new")
+
+        with pytest.raises(RefusedSignalTarget, match="project root"):
+            stop_verified_daemon(
+                daemon.pid, project_root=tmp_path / "new" / "project", grace_seconds=_GRACE_SECONDS
+            )
+        assert daemon.poll() is None
+
+    def test_a_daemon_named_through_a_link_is_stopped_for_the_logical_root_of_its_caller(
+        self, tmp_path: Path, children: list[subprocess.Popen[bytes]]
+    ) -> None:
+        """Round 9b: an older ``init.sh`` named the root through the link,
+        and ``bin/hooks-daemon`` names it resolved, handing over the link it
+        was invoked through as its logical root."""
+        (tmp_path / "real" / "project").mkdir(parents=True)
+        (tmp_path / "link").symlink_to(tmp_path / "real")
+        linked = tmp_path / "link" / "project"
+        daemon = _fake_daemon(children, linked)
+
+        outcome = stop_verified_daemon(
+            daemon.pid,
+            project_root=tmp_path / "real" / "project",
+            logical_root=str(linked),
+            grace_seconds=_GRACE_SECONDS,
+        )
+
+        assert outcome is DaemonStop.TERMINATED
+        assert daemon.wait(timeout=_GRACE_SECONDS) == -signal.SIGTERM
+
+    def test_a_logical_root_of_another_tree_proves_nothing(
+        self, tmp_path: Path, children: list[subprocess.Popen[bytes]]
+    ) -> None:
+        """A logical root that does not resolve to the caller's own tree is
+        no spelling of it, so another project's daemon is refused."""
+        (tmp_path / "project").mkdir()
+        (tmp_path / "other").mkdir()
+        daemon = _fake_daemon(children, tmp_path / "other")
+
+        with pytest.raises(RefusedSignalTarget, match="project root"):
+            stop_verified_daemon(
+                daemon.pid,
+                project_root=tmp_path / "project",
+                logical_root=str(tmp_path / "other"),
+                grace_seconds=_GRACE_SECONDS,
+            )
+        assert daemon.poll() is None
+
+    def test_a_root_whose_dotdot_follows_a_link_proves_nothing(
+        self, tmp_path: Path, children: list[subprocess.Popen[bytes]]
+    ) -> None:
+        """Review 8, S8-1 (N225): ``a/../project`` with ``a`` a link to
+        ``x/y`` serves ``x/project``, and was proven to serve ``project``,
+        whose enforcement could then have stopped it."""
+        (tmp_path / "x" / "y").mkdir(parents=True)
+        (tmp_path / "x" / "project").mkdir()
+        (tmp_path / "project").mkdir()
+        (tmp_path / "a").symlink_to(tmp_path / "x" / "y")
+        daemon = _fake_daemon(children, Path(f"{tmp_path}/a/../project"))
+
+        for root in (tmp_path / "project", tmp_path / "x" / "project"):
+            with pytest.raises(RefusedSignalTarget, match="normal form"):
+                stop_verified_daemon(daemon.pid, project_root=root, grace_seconds=_GRACE_SECONDS)
+        assert daemon.poll() is None
+
+    def test_another_users_daemon_naming_this_project_is_refused(
+        self,
+        tmp_path: Path,
+        children: list[subprocess.Popen[bytes]],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A command line is anyone's to write, so it proves nothing about a
+        process another user owns (Plan 00466 round 6, P5-1). Root may signal
+        every process, so the kernel's refusal is no substitute; this user
+        is faked to be someone else instead."""
+        daemon = _fake_daemon(children, tmp_path)
+        someone_else = os.geteuid() + 1
+        monkeypatch.setattr(os, "geteuid", lambda: someone_else)
+
+        with pytest.raises(RefusedSignalTarget, match="another user"):
+            stop_verified_daemon(daemon.pid, project_root=tmp_path, grace_seconds=_GRACE_SECONDS)
+        assert daemon.poll() is None, "another user's process must not have been signalled"
+
+    def test_a_pid_whose_owner_cannot_be_read_is_refused(
+        self,
+        tmp_path: Path,
+        children: list[subprocess.Popen[bytes]],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        daemon = _fake_daemon(children, tmp_path)
+
+        def denied(self: psutil.Process) -> None:
+            raise psutil.AccessDenied(daemon.pid)
+
+        monkeypatch.setattr(psutil.Process, "uids", denied)
+
+        with pytest.raises(RefusedSignalTarget, match="owner"):
+            signal_verified_daemon(daemon.pid, signal.SIGTERM, project_root=tmp_path)
+        assert daemon.poll() is None
+
     def test_a_pid_whose_command_line_cannot_be_read_is_refused(
         self,
         tmp_path: Path,
@@ -225,6 +377,7 @@ class TestADaemonPidIsSignalledOnlyWhenItIsThisProjectsDaemon:
             signal_verified_daemon(daemon.pid, signal.SIGTERM, project_root=tmp_path)
         assert daemon.poll() is None, "a refused target must not have been signalled"
 
+    @pytest.mark.usefixtures("no_pidfd")
     def test_a_daemon_gone_by_the_time_the_signal_is_sent_is_a_lookup_error(
         self,
         tmp_path: Path,
@@ -244,6 +397,7 @@ class TestADaemonPidIsSignalledOnlyWhenItIsThisProjectsDaemon:
         with pytest.raises(ProcessLookupError):
             signal_verified_daemon(daemon.pid, signal.SIGTERM, project_root=tmp_path)
 
+    @pytest.mark.usefixtures("no_pidfd")
     def test_no_permission_to_send_the_signal_is_a_permission_error(
         self,
         tmp_path: Path,
@@ -289,39 +443,75 @@ class TestADaemonProvenOnlyByItsRecordedEnvironmentIsSignalled:
         assert daemon.poll() is None, "the other project's daemon must still be running"
 
 
-class TestADaemonIsSignalledViaPidfdOnlyWhenItIsThisProjectsDaemon:
-    """`signal_verified_daemon_via_pidfd` -- the pidfd route (Plan 00466 N59
-    extension). The identity proof is identical to `signal_verified_daemon`;
-    only the syscall used to deliver the signal differs, so refusal is
-    exercised once here rather than for every proof shape again."""
+@pytest.fixture
+def pinned_to_a_process_that_has_gone(
+    children: list[subprocess.Popen[bytes]], monkeypatch: pytest.MonkeyPatch
+) -> Iterator[None]:
+    """Every pid pinned from here on is pinned to a process that has since
+    exited: the pid was reused between the pin and the proof, so the proof
+    reads the new process while the pidfd still names the old one."""
+    ghost = _spawn(children)
+    ghost_fd = os.pidfd_open(ghost.pid)
+    ghost.kill()
+    ghost.wait(timeout=Timeout.PROCESS_SAMPLE)
 
-    def test_this_projects_daemon_is_signalled(
+    def pin_the_ghost(pid: int, flags: int = 0) -> int:
+        return os.dup(ghost_fd)
+
+    monkeypatch.setattr(os, "pidfd_open", pin_the_ghost)
+    yield
+    os.close(ghost_fd)
+
+
+class TestTheSignalGoesThroughAPidfdPinnedBeforeTheProof:
+    """Plan 00466 N206: psutil re-checks a pid's start time and then calls
+    ``kill``, so a pid reused between the two was signalled. A pidfd opened
+    BEFORE the proof names one process for good: a pid reused after it was
+    pinned can only make the send fail."""
+
+    def test_this_projects_daemon_is_signalled_through_its_pidfd(
+        self,
+        tmp_path: Path,
+        children: list[subprocess.Popen[bytes]],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        daemon = _fake_daemon(children, tmp_path)
+        sent: list[int] = []
+        real_send = signal.pidfd_send_signal
+
+        def recorded(pidfd: int, sig: int, *args: object) -> None:
+            sent.append(sig)
+            real_send(pidfd, sig)
+
+        monkeypatch.setattr(signal, "pidfd_send_signal", recorded)
+
+        signal_verified_daemon(daemon.pid, signal.SIGTERM, project_root=tmp_path)
+
+        assert daemon.wait(timeout=Timeout.PROCESS_SAMPLE) == -signal.SIGTERM
+        assert sent == [signal.SIGTERM]
+
+    @pytest.mark.usefixtures("pinned_to_a_process_that_has_gone")
+    def test_a_pid_reused_after_it_was_pinned_is_never_signalled(
         self, tmp_path: Path, children: list[subprocess.Popen[bytes]]
     ) -> None:
         daemon = _fake_daemon(children, tmp_path)
 
-        signal_verified_daemon_via_pidfd(daemon.pid, signal.SIGTERM, project_root=tmp_path)
+        with pytest.raises(ProcessLookupError):
+            signal_verified_daemon(daemon.pid, signal.SIGTERM, project_root=tmp_path)
+        assert daemon.poll() is None
 
-        assert daemon.wait(timeout=Timeout.PROCESS_SAMPLE) == -signal.SIGTERM
-
-    def test_a_daemon_of_another_project_root_is_refused(
+    @pytest.mark.usefixtures("pinned_to_a_process_that_has_gone")
+    def test_stopping_a_pid_reused_after_it_was_pinned_signals_nothing(
         self, tmp_path: Path, children: list[subprocess.Popen[bytes]]
     ) -> None:
-        daemon = _fake_daemon(children, tmp_path / "other-project")
+        daemon = _fake_daemon(children, tmp_path)
 
-        with pytest.raises(RefusedSignalTarget, match="project root"):
-            signal_verified_daemon_via_pidfd(daemon.pid, signal.SIGTERM, project_root=tmp_path)
-        assert daemon.poll() is None, "the other project's daemon must still be running"
+        outcome = stop_verified_daemon(
+            daemon.pid, project_root=tmp_path, grace_seconds=_GRACE_SECONDS
+        )
 
-    def test_a_magicmock_pid_is_refused(self, tmp_path: Path) -> None:
-        with pytest.raises(RefusedSignalTarget):
-            signal_verified_daemon_via_pidfd(MagicMock().pid, signal.SIGTERM, project_root=tmp_path)
-
-    def test_a_pid_with_no_process_raises_process_lookup_error(self, tmp_path: Path) -> None:
-        with pytest.raises(ProcessLookupError):
-            signal_verified_daemon_via_pidfd(
-                _NONEXISTENT_PID, signal.SIGTERM, project_root=tmp_path
-            )
+        assert outcome is DaemonStop.ALREADY_GONE
+        assert daemon.poll() is None
 
     def test_an_already_reaped_daemon_pid_is_a_lookup_error(
         self, tmp_path: Path, children: list[subprocess.Popen[bytes]]
@@ -334,7 +524,83 @@ class TestADaemonIsSignalledViaPidfdOnlyWhenItIsThisProjectsDaemon:
         daemon.wait(timeout=Timeout.PROCESS_SAMPLE)
 
         with pytest.raises(ProcessLookupError):
-            signal_verified_daemon_via_pidfd(daemon.pid, signal.SIGTERM, project_root=tmp_path)
+            signal_verified_daemon(daemon.pid, signal.SIGTERM, project_root=tmp_path)
+
+    def test_no_permission_to_send_through_the_pidfd_is_a_permission_error(
+        self,
+        tmp_path: Path,
+        children: list[subprocess.Popen[bytes]],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        # Tests run as root, which may signal anything, so the refusal the
+        # kernel would give an unprivileged caller is raised here instead.
+        daemon = _fake_daemon(children, tmp_path)
+
+        def denied(pidfd: int, sig: int, *args: object) -> None:
+            raise PermissionError(errno.EPERM, os.strerror(errno.EPERM))
+
+        monkeypatch.setattr(signal, "pidfd_send_signal", denied)
+
+        with pytest.raises(PermissionError):
+            stop_verified_daemon(daemon.pid, project_root=tmp_path, grace_seconds=_GRACE_SECONDS)
+        assert daemon.poll() is None
+
+    def test_a_daemon_no_signal_reaches_is_reported_survived(
+        self,
+        tmp_path: Path,
+        children: list[subprocess.Popen[bytes]],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """The waits are on the pidfd itself, so a process that never exits
+        runs both graces out."""
+        daemon = _fake_daemon(children, tmp_path)
+
+        def lost(pidfd: int, sig: int, *args: object) -> None:
+            return None
+
+        monkeypatch.setattr(signal, "pidfd_send_signal", lost)
+
+        outcome = stop_verified_daemon(daemon.pid, project_root=tmp_path, grace_seconds=0.1)
+
+        assert outcome is DaemonStop.SURVIVED
+        assert daemon.poll() is None
+
+    @pytest.mark.usefixtures("no_pidfd")
+    def test_without_pidfds_the_proven_handle_delivers_it(
+        self, tmp_path: Path, children: list[subprocess.Popen[bytes]]
+    ) -> None:
+        daemon = _fake_daemon(children, tmp_path)
+
+        outcome = stop_verified_daemon(
+            daemon.pid, project_root=tmp_path, grace_seconds=_GRACE_SECONDS
+        )
+
+        assert outcome is DaemonStop.TERMINATED
+
+    @pytest.mark.parametrize("error", [errno.EINVAL, errno.ENOMEM])
+    def test_a_pin_that_fails_otherwise_is_a_refusal_and_nothing_is_signalled(
+        self,
+        tmp_path: Path,
+        children: list[subprocess.Popen[bytes]],
+        monkeypatch: pytest.MonkeyPatch,
+        error: int,
+    ) -> None:
+        """Review 8, R8-4: a ``pidfd_open`` error that does not mean "no
+        pidfds here" escaped as a bare ``OSError`` that callers catching
+        refusals did not expect. Nothing is signalled before the pin, so it
+        is a refusal."""
+        daemon = _fake_daemon(children, tmp_path)
+
+        def failing(pid: int, flags: int = 0) -> int:
+            raise OSError(error, os.strerror(error))
+
+        monkeypatch.setattr(os, "pidfd_open", failing)
+
+        with pytest.raises(RefusedSignalTarget, match=os.strerror(error)):
+            stop_verified_daemon(daemon.pid, project_root=tmp_path, grace_seconds=_GRACE_SECONDS)
+        with pytest.raises(RefusedSignalTarget, match=os.strerror(error)):
+            signal_verified_daemon(daemon.pid, signal.SIGTERM, project_root=tmp_path)
+        assert daemon.poll() is None
 
 
 class TestStoppingADaemonTermsThenKillsOnlyThisProjectsDaemon:
@@ -397,6 +663,7 @@ class TestStoppingADaemonTermsThenKillsOnlyThisProjectsDaemon:
                 MagicMock().pid, project_root=tmp_path, grace_seconds=_GRACE_SECONDS
             )
 
+    @pytest.mark.usefixtures("no_pidfd")
     def test_no_permission_to_signal_is_a_permission_error(
         self,
         tmp_path: Path,
@@ -407,15 +674,16 @@ class TestStoppingADaemonTermsThenKillsOnlyThisProjectsDaemon:
         # kernel would give an unprivileged caller is raised here instead.
         daemon = _fake_daemon(children, tmp_path)
 
-        def denied(process: psutil.Process) -> None:
+        def denied(process: psutil.Process, sig: int) -> None:
             raise psutil.AccessDenied(process.pid)
 
-        monkeypatch.setattr(psutil.Process, "terminate", denied)
+        monkeypatch.setattr(psutil.Process, "send_signal", denied)
 
         with pytest.raises(PermissionError):
             stop_verified_daemon(daemon.pid, project_root=tmp_path, grace_seconds=_GRACE_SECONDS)
         assert daemon.poll() is None
 
+    @pytest.mark.usefixtures("no_pidfd")
     def test_a_daemon_that_survives_term_and_kill_is_reported_survived(
         self,
         tmp_path: Path,
@@ -438,6 +706,7 @@ class TestStoppingADaemonTermsThenKillsOnlyThisProjectsDaemon:
 
         assert outcome is DaemonStop.SURVIVED
 
+    @pytest.mark.usefixtures("no_pidfd")
     def test_a_daemon_that_exits_between_verification_and_terminate_is_already_gone(
         self,
         tmp_path: Path,
@@ -445,19 +714,87 @@ class TestStoppingADaemonTermsThenKillsOnlyThisProjectsDaemon:
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """A race distinct from the pid-already-gone case above: identity is
-        proven, then the process exits before ``terminate`` reaches it."""
+        proven, then the process exits before the SIGTERM reaches it."""
         daemon = _fake_daemon(children, tmp_path)
 
-        def gone(self: psutil.Process) -> None:
+        def gone(self: psutil.Process, sig: int) -> None:
             raise psutil.NoSuchProcess(daemon.pid)
 
-        monkeypatch.setattr(psutil.Process, "terminate", gone)
+        monkeypatch.setattr(psutil.Process, "send_signal", gone)
 
         outcome = stop_verified_daemon(
             daemon.pid, project_root=tmp_path, grace_seconds=_GRACE_SECONDS
         )
 
         assert outcome is DaemonStop.ALREADY_GONE
+
+
+class TestAPidReusedAfterItsRecordWasWrittenIsRefused:
+    """Review 10, R10-3: a daemon writes its PID file, and names itself in
+    the launch lock, after it has started. A process that started after the
+    record was written holds a pid reused since, whatever it looks like."""
+
+    def test_a_process_started_after_its_record_is_refused_and_left_running(
+        self, tmp_path: Path, children: list[subprocess.Popen[bytes]]
+    ) -> None:
+        daemon = _fake_daemon(children, tmp_path)
+        started = psutil.Process(daemon.pid).create_time()
+
+        with pytest.raises(RefusedSignalTarget, match="started after"):
+            stop_verified_daemon(
+                daemon.pid,
+                project_root=tmp_path,
+                grace_seconds=_GRACE_SECONDS,
+                recorded_at=started - 10,
+            )
+        assert daemon.poll() is None
+
+    @pytest.mark.parametrize("recorded_after_start", [5.0, 0.0, -0.5])
+    def test_a_process_its_record_names_is_stopped(
+        self,
+        tmp_path: Path,
+        children: list[subprocess.Popen[bytes]],
+        recorded_after_start: float,
+    ) -> None:
+        """A start time is read to within a second, so a record up to a
+        second older than it still names it."""
+        daemon = _fake_daemon(children, tmp_path)
+        started = psutil.Process(daemon.pid).create_time()
+
+        outcome = stop_verified_daemon(
+            daemon.pid,
+            project_root=tmp_path,
+            grace_seconds=_GRACE_SECONDS,
+            recorded_at=started + recorded_after_start,
+        )
+
+        assert outcome is DaemonStop.TERMINATED
+
+    def test_a_start_time_that_cannot_be_read_is_refused(
+        self,
+        tmp_path: Path,
+        children: list[subprocess.Popen[bytes]],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        daemon = _fake_daemon(children, tmp_path)
+        started = psutil.Process(daemon.pid).create_time()
+        create_time = psutil.Process.create_time
+
+        def denied_for_the_daemon(process: psutil.Process) -> float:
+            if process.pid == daemon.pid:
+                raise psutil.AccessDenied(process.pid)
+            return create_time(process)
+
+        monkeypatch.setattr(psutil.Process, "create_time", denied_for_the_daemon)
+
+        with pytest.raises(RefusedSignalTarget, match="start time"):
+            stop_verified_daemon(
+                daemon.pid,
+                project_root=tmp_path,
+                grace_seconds=_GRACE_SECONDS,
+                recorded_at=started + 5,
+            )
+        assert daemon.poll() is None
 
 
 class TestAGroupIsSignalledOnlyWhenOurOwnChildLeadsIt:

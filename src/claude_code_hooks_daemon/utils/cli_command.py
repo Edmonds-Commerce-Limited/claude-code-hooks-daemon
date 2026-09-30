@@ -53,6 +53,7 @@ honest.
 
 from __future__ import annotations
 
+import shlex
 from pathlib import Path
 from typing import Final
 
@@ -207,6 +208,71 @@ def daemon_cli_command(*args: str) -> str:
         wrapper = _fallback_relative_path()
     parts: tuple[str, ...] = (wrapper, *args)
     return _ARG_SEPARATOR.join(parts)
+
+
+#: The launcher spellings a PreToolUse deny may name, in ``init.sh``'s order:
+#: the daemon clone's first, then the project root's.
+_RECOVERY_SPELLINGS: Final[tuple[str, ...]] = (
+    "/".join((*_CLIENT_DAEMON_SEGMENTS, BIN_DIR_NAME, WRAPPER_NAME)),
+    "/".join((BIN_DIR_NAME, WRAPPER_NAME)),
+)
+
+
+def _resolve(path: Path) -> Path:
+    """The real path of the longest part of ``path`` that exists, the rest
+    appended as written: ``init.sh``'s ``_resolve``, which hooks-relay shares."""
+    head, tail = path, []
+    while not head.exists():
+        if head.parent == head:
+            return path
+        tail.append(head.name)
+        head = head.parent
+    return head.resolve().joinpath(*reversed(tail))
+
+
+def _project_it_manages(launcher: Path) -> Path | None:
+    """The project a launcher at this resolved path manages, by the rule the
+    launcher applies to itself (``bin/hooks-daemon``). None when the path is
+    not a ``bin/hooks-daemon`` at all (Plan 00466 round 5, R4-2): any other
+    file two levels below a project manages nothing."""
+    if (launcher.parent.name, launcher.name) != ("bin", "hooks-daemon"):
+        return None
+    daemon_dir = launcher.parent.parent
+    if (daemon_dir.parent.name, daemon_dir.name) == _CLIENT_DAEMON_SEGMENTS:
+        return daemon_dir.parent.parent
+    return daemon_dir
+
+
+def install_recovery_command(project: Path, install_root: Path, subcommand: str) -> str | None:
+    """The exempt recovery command a PreToolUse deny names, or None.
+
+    The same rule ``init.sh``'s ``_recovery_command`` and hooks-relay's
+    ``restart_command`` apply, so every deny names the one launcher the
+    carve-out accepts (Plan 00466 round 4, P3-2): the launcher under
+    ``install_root`` must manage ``project``, or it is unknown (None); then
+    the first spelling that runs it, shell-quoted, or where it belongs.
+    """
+    if not (project.is_absolute() and install_root.is_absolute()):
+        return None
+    belongs = install_root / BIN_DIR_NAME / WRAPPER_NAME
+    launcher = _resolve(belongs)
+    if _project_it_manages(launcher) != _resolve(project):
+        return None
+    for spelling in (*(project / spelling for spelling in _RECOVERY_SPELLINGS), belongs):
+        if launcher.is_file() and _resolve(spelling) == launcher:
+            return f"{shlex.quote(str(spelling))}{_ARG_SEPARATOR}{subcommand}"
+    return f"{shlex.quote(str(belongs))}{_ARG_SEPARATOR}{subcommand}"
+
+
+def recovery_command(subcommand: str) -> str | None:
+    """:func:`install_recovery_command` for this daemon's own project and root.
+
+    None when :class:`ProjectContext` is not initialised, as well as when the
+    install is unknown: either way no command is known to be exempt.
+    """
+    if not ProjectContext.is_initialized():
+        return None
+    return install_recovery_command(ProjectContext.project_root(), daemon_root(), subcommand)
 
 
 def daemon_cli_command_for_docs(*args: str) -> str:

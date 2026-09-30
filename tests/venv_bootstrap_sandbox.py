@@ -170,7 +170,11 @@ class Sandbox:
             if [ "${{1:-}}" = "-m" ] && [ "${{2:-}}" = "claude_code_hooks_daemon.daemon.cli" ] \\
                     && [ "${{!#}}" = "start" ]; then
                 echo "$0" >> "{self.start_log}"
-                sleep 60 < /dev/null > /dev/null 2>&1 &
+                # The stand-in carries the daemon's own arguments: init.sh
+                # counts a live pid as the daemon only when its command line
+                # proves it (Plan 00466 round 5, Sh-D).
+                "{sys.executable}" -c 'import time; time.sleep(60)' "$@" \\
+                    < /dev/null > /dev/null 2>&1 &
                 echo $! > "$CLAUDE_HOOKS_PID_PATH"
                 exec "{sys.executable}" -c \\
                     'import socket, sys; socket.socket(socket.AF_UNIX).bind(sys.argv[1])' \\

@@ -28,6 +28,7 @@ binary itself.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import shutil
@@ -42,6 +43,7 @@ from pathlib import Path
 import pytest
 
 from claude_code_hooks_daemon.config.models import TransportConfig
+from claude_code_hooks_daemon.constants import Timeout
 from claude_code_hooks_daemon.daemon.paths import _get_hostname_suffix
 from claude_code_hooks_daemon.daemon.synthetic_traffic import (
     PROBE_AS_FIELD,
@@ -49,7 +51,13 @@ from claude_code_hooks_daemon.daemon.synthetic_traffic import (
     TEST_PROBE,
     ProbeThread,
 )
-from claude_code_hooks_daemon.install.forwarder_generator import generate_forwarder_content
+from claude_code_hooks_daemon.install.forwarder_generator import (
+    RELAY_DAEMON_ROOT_ENV,
+    generate_forwarder_content,
+)
+from claude_code_hooks_daemon.utils.cli_command import install_recovery_command
+from tests.daemon_like_process import daemon_like_process
+from tests.deep_json import TOO_DEEP_FOR_ANY_PYTHON, nested_call
 
 #: A probe sent through a hook forwarder is marked (Plan 00466 N12).
 _MAIN_PROBE = {SYNTHETIC_SOURCE_FIELD: TEST_PROBE, PROBE_AS_FIELD: ProbeThread.MAIN.value}
@@ -59,6 +67,9 @@ _INIT_SH = _REPO_ROOT / ".claude" / "init.sh"
 _RELAY_BINARY = _REPO_ROOT / "untracked" / "relay-build" / "hooks-relay-x86_64-unknown-linux-musl"
 
 _TIMEOUT_SECONDS = 15
+
+#: The daemon clone's launcher, which ``cli.py`` and a deny name first.
+_CLONE_LAUNCHER = ".claude/hooks-daemon/bin/hooks-daemon"
 
 
 class _RecordingSocketServer:
@@ -186,11 +197,21 @@ def _base_env(sock_path: Path, pid_path: Path) -> dict[str, str]:
     return env
 
 
+@contextlib.contextmanager
+def _live_pid_file(project: Path, directory: Path) -> Iterator[Path]:
+    """A PID file in ``directory`` naming a process launched as the daemon of
+    the checkout ``_write_generated_forwarder`` builds at ``project`` is, so
+    is_daemon_running() proves it running (Plan 00466 round 5, Sh-D)."""
+    pid_path = directory / "daemon.pid"
+    with daemon_like_process(project) as pid:
+        pid_path.write_text(f"{pid}\n")
+        yield pid_path
+
+
 @pytest.fixture
-def live_pid_file(tmp_path: Path) -> Path:
-    pid_path = tmp_path / "daemon.pid"
-    pid_path.write_text(f"{os.getpid()}\n")
-    return pid_path
+def live_pid_file(tmp_path: Path) -> Iterator[Path]:
+    with _live_pid_file(tmp_path, tmp_path) as pid_path:
+        yield pid_path
 
 
 @pytest.fixture
@@ -262,6 +283,539 @@ def test_relay_connect_fail_execs_fallback_with_stdin_intact(tmp_path: Path) -> 
     stdout = result.stdout.decode()
     assert "ARGS:--no-relay" in stdout
     assert '{"payload":"data"}' in stdout
+
+
+@pytest.fixture
+def wedged_pretooluse_socket() -> Iterator[Path]:
+    """A ``pre-tool-use.sock`` whose daemon accepts and never answers: the
+    B2 GIL-hang shape, which runs the relay's budget out mid-exchange."""
+    short_dir = Path(tempfile.mkdtemp(prefix="hd-"))
+    sock = short_dir / "pre-tool-use.sock"
+    server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    server.bind(str(sock))
+    server.listen(8)
+    # A short accept timeout lets the loop see `stop` promptly: closing a
+    # socket from another thread does not wake a blocked accept() on Linux.
+    server.settimeout(0.2)
+    held: list[socket.socket] = []
+    stop = threading.Event()
+
+    def _accept_and_hold() -> None:
+        while not stop.is_set():
+            try:
+                conn, _ = server.accept()
+            except TimeoutError:
+                continue
+            held.append(conn)
+
+    acceptor = threading.Thread(target=_accept_and_hold, daemon=True)
+    acceptor.start()
+    try:
+        yield sock
+    finally:
+        stop.set()
+        acceptor.join(_TIMEOUT_SECONDS)
+        server.close()
+        for conn in held:
+            conn.close()
+        shutil.rmtree(short_dir)
+
+
+def _run_relay(
+    sock: Path, payload: bytes, *extra: str, env: dict[str, str] | None = None
+) -> subprocess.CompletedProcess[bytes]:
+    return subprocess.run(
+        [str(_RELAY_BINARY), str(sock), "--timeout-ms", "500", *extra],
+        input=payload,
+        capture_output=True,
+        env=env,
+        timeout=_TIMEOUT_SECONDS,
+    )
+
+
+@pytest.mark.skipif(not _RELAY_BINARY.exists(), reason="no built relay binary on this machine")
+def test_an_over_cap_timeout_from_an_old_forwarder_is_clamped(tmp_path: Path) -> None:
+    """Plan 00466 round 4: a forwarder deployed before the config clamp still
+    passes its old ``--timeout-ms``; the relay takes the cap instead."""
+    over = (Timeout.RELAY_TIMEOUT_CAP + 1) * Timeout.MILLISECONDS_PER_SECOND
+    result = subprocess.run(
+        [str(_RELAY_BINARY), str(tmp_path / "absent.sock"), "--timeout-ms", str(over)],
+        input=b"{}",
+        capture_output=True,
+        timeout=_TIMEOUT_SECONDS,
+    )
+    cap_ms = Timeout.RELAY_TIMEOUT_CAP * Timeout.MILLISECONDS_PER_SECOND
+    assert f"--timeout-ms {over} is over the cap; using {cap_ms}".encode() in result.stderr
+
+
+@pytest.mark.skipif(not _RELAY_BINARY.exists(), reason="no built relay binary on this machine")
+def test_relay_pretooluse_timeout_deny_names_the_timeout(wedged_pretooluse_socket: Path) -> None:
+    """Plan 00466 N69: a daemon that accepts and never answers runs the
+    relay's budget out, and the deny says so in words. An expired socket
+    timeout surfaces as EAGAIN, which Rust prints as "Resource temporarily
+    unavailable (os error 11)" -- a label that names no cause."""
+    result = _run_relay(wedged_pretooluse_socket, b'{"k":1}')
+
+    assert result.returncode == 0, result.stderr.decode()
+    hso = json.loads(result.stdout)["hookSpecificOutput"]
+    assert hso["permissionDecision"] == "deny"
+    reason = hso["permissionDecisionReason"]
+    assert "timed out" in reason, reason
+    assert "os error" not in reason, reason
+
+
+def _judging_project(tmp_path: Path) -> tuple[Path, dict[str, str]]:
+    """A project whose forwarder the relay can hand a failed exchange to.
+
+    Returns the forwarder and its env. Under a relay hand-off
+    ``ensure_daemon`` returns before it looks at the daemon (N126 round 2,
+    F1), so the only judge left is ``init.sh``'s own recovery carve-out. The
+    PID file names no process, so a start would be tried if that ever
+    regressed. The project has its own ``bin/hooks-daemon``.
+    """
+    untracked_dir = tmp_path / "untracked"
+    forwarder = _write_generated_forwarder(
+        tmp_path, "pre-tool-use", "PreToolUse", TransportConfig(), untracked_dir
+    )
+    launcher = tmp_path / "bin" / "hooks-daemon"
+    launcher.parent.mkdir()
+    launcher.write_text("#!/bin/bash\n")
+    return forwarder, _base_env(tmp_path / "legacy.sock", tmp_path / "no-daemon.pid")
+
+
+def _bash_call(command: str, cwd: Path) -> bytes:
+    return json.dumps(
+        {"tool_name": "Bash", "tool_input": {"command": command}, "cwd": str(cwd), **_MAIN_PROBE}
+    ).encode()
+
+
+def test_the_deeply_nested_probe_carries_its_markers() -> None:
+    """The live-probe scan cannot read a payload built by ``nested_call``."""
+    parsed = json.loads(nested_call(3, _MAIN_PROBE))
+    assert parsed["tool_input"] == {"value": [[[]]]}
+    assert parsed.items() >= _MAIN_PROBE.items()
+
+
+def _decision(result: subprocess.CompletedProcess[bytes]) -> str | None:
+    assert result.returncode == 0, result.stderr.decode()
+    hso = json.loads(result.stdout)["hookSpecificOutput"]
+    decision: str | None = hso.get("permissionDecision")
+    return decision
+
+
+@pytest.mark.skipif(not _RELAY_BINARY.exists(), reason="no built relay binary on this machine")
+class TestRelayMidExchangeFailureIsJudgedByTheOneCarveOut:
+    """Plan 00466 N126: a wedged daemon must not deny its own restart.
+
+    On the PreToolUse socket the relay cannot hand a failed exchange to the
+    daemon, and it must not judge the payload itself (a second copy of the
+    carve-out would drift, as N67's two copies did). It hands the whole
+    request to the bash forwarder, whose ``init.sh`` applies the same judged
+    carve-out as every other transport failure.
+    """
+
+    def test_the_projects_own_restart_is_not_denied(
+        self, tmp_path: Path, wedged_pretooluse_socket: Path
+    ) -> None:
+        forwarder, env = _judging_project(tmp_path)
+        result = _run_relay(
+            wedged_pretooluse_socket,
+            _bash_call("bin/hooks-daemon restart", tmp_path),
+            "--fallback",
+            str(forwarder),
+            env=env,
+        )
+        assert _decision(result) is None
+
+    def test_a_restart_that_runs_a_planted_launcher_is_denied(
+        self, tmp_path: Path, wedged_pretooluse_socket: Path
+    ) -> None:
+        forwarder, env = _judging_project(tmp_path)
+        elsewhere = tmp_path / "elsewhere"
+        (elsewhere / "bin").mkdir(parents=True)
+        (elsewhere / "bin" / "hooks-daemon").write_text("#!/bin/bash\necho planted\n")
+        result = _run_relay(
+            wedged_pretooluse_socket,
+            _bash_call("bin/hooks-daemon restart", elsewhere),
+            "--fallback",
+            str(forwarder),
+            env=env,
+        )
+        assert _decision(result) == "deny"
+
+    def test_any_other_call_is_denied_and_the_reason_names_the_relay_failure(
+        self, tmp_path: Path, wedged_pretooluse_socket: Path
+    ) -> None:
+        forwarder, env = _judging_project(tmp_path)
+        result = _run_relay(
+            wedged_pretooluse_socket,
+            _bash_call("git reset --hard", tmp_path),
+            "--fallback",
+            str(forwarder),
+            env=env,
+        )
+        assert _decision(result) == "deny"
+        reason = json.loads(result.stdout)["hookSpecificOutput"]["permissionDecisionReason"]
+        assert "relay_exchange_failed" in reason, reason
+        assert "Hooks daemon reached" in reason, reason
+
+    def test_input_nested_too_deeply_to_parse_is_denied(
+        self, tmp_path: Path, wedged_pretooluse_socket: Path
+    ) -> None:
+        """Plan 00466 N140: the forwarder answered unparseable input with
+        context only, and the relay accepts that shape as the carve-out's
+        allow. It must deny, and say why."""
+        forwarder, env = _judging_project(tmp_path)
+        payload = nested_call(TOO_DEEP_FOR_ANY_PYTHON, _MAIN_PROBE).encode()
+        result = _run_relay(
+            wedged_pretooluse_socket, payload, "--fallback", str(forwarder), env=env
+        )
+        assert _decision(result) == "deny"
+        reason = json.loads(result.stdout)["hookSpecificOutput"]["permissionDecisionReason"]
+        assert "invalid_hook_input" in reason, reason
+
+    def test_a_fallback_that_answers_nothing_leaves_the_relays_own_deny(
+        self, tmp_path: Path, wedged_pretooluse_socket: Path
+    ) -> None:
+        """The hand-off must fail closed: silence from the forwarder is not
+        an answer, so the relay writes its own deny."""
+        silent = tmp_path / "silent.sh"
+        silent.write_text("#!/bin/bash\ncat > /dev/null\nexit 0\n")
+        silent.chmod(0o755)
+        result = _run_relay(
+            wedged_pretooluse_socket,
+            _bash_call("bin/hooks-daemon restart", tmp_path),
+            "--fallback",
+            str(silent),
+        )
+        assert _decision(result) == "deny"
+
+    def test_a_fallback_that_fails_leaves_the_relays_own_deny(
+        self, tmp_path: Path, wedged_pretooluse_socket: Path
+    ) -> None:
+        failing = tmp_path / "failing.sh"
+        failing.write_text('#!/bin/bash\ncat > /dev/null\necho "{}"\nexit 3\n')
+        failing.chmod(0o755)
+        result = _run_relay(
+            wedged_pretooluse_socket,
+            _bash_call("bin/hooks-daemon restart", tmp_path),
+            "--fallback",
+            str(failing),
+        )
+        assert _decision(result) == "deny"
+
+    def test_the_fallback_receives_the_whole_request(
+        self, tmp_path: Path, wedged_pretooluse_socket: Path
+    ) -> None:
+        """The request is replayed byte for byte, however large."""
+        recorded = tmp_path / "recorded.bin"
+        recorder = tmp_path / "recorder.sh"
+        recorder.write_text(f'#!/bin/bash\ncat > "{recorded}"\necho "{{}}"\n')
+        recorder.chmod(0o755)
+        payload = _bash_call("echo " + "x" * (1024 * 1024), tmp_path)
+        result = _run_relay(wedged_pretooluse_socket, payload, "--fallback", str(recorder))
+        assert result.returncode == 0, result.stderr.decode()
+        assert recorded.read_bytes() == payload
+
+
+def _answering_fallback(tmp_path: Path, answer: bytes) -> Path:
+    """A fallback that drains stdin, writes ``answer`` and exits 0."""
+    answer_file = tmp_path / "answer.bin"
+    answer_file.write_bytes(answer)
+    script = tmp_path / "answering.sh"
+    script.write_text(f'#!/bin/bash\ncat > /dev/null\ncat "{answer_file}"\n')
+    script.chmod(0o755)
+    return script
+
+
+def _relays_own_deny(result: subprocess.CompletedProcess[bytes]) -> bool:
+    assert result.returncode == 0, result.stderr.decode()
+    hso = json.loads(result.stdout)["hookSpecificOutput"]
+    return bool(
+        hso["permissionDecision"] == "deny"
+        and hso["permissionDecisionReason"].startswith("BLOCKED [transport-fail-closed]")
+    )
+
+
+def _hso(**fields: str) -> bytes:
+    return json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse", **fields}}).encode()
+
+
+@pytest.mark.skipif(not _RELAY_BINARY.exists(), reason="no built relay binary on this machine")
+class TestTheRelayAcceptsOnlyAVerdictFromTheHandOff:
+    """Plan 00466 N126 round 2 (F2): the relay took any non-empty exit-0
+    output from the forwarder as the verdict, so ``{}``, truncated JSON or a
+    shape Claude Code ignores became an allow where the relay would have
+    denied. It now accepts only a complete PreToolUse document that is a
+    deny with a reason, or the carve-out's context-only answer; anything
+    else gets the relay's own deny."""
+
+    @pytest.mark.parametrize(
+        "answer",
+        [
+            b"{}",
+            b"{}\n",
+            b'{"hookSpecificOutput": {"hookEventName": "PreToolUse", "additionalCon',
+            b'{"hookSpecificOutput": {"hookEventName": "PreToolUse"}}',
+            b'{"systemMessage": "fail-open advisory"}',
+            b"[]",
+            b"null",
+            b'"deny"',
+            _hso(permissionDecision="allow"),
+            _hso(permissionDecision="ask", permissionDecisionReason="r"),
+            _hso(permissionDecision="deny"),
+            _hso(permissionDecision="deny", permissionDecisionReason="r") + b"{}",
+            _hso(additionalContext="c", permissionDecisionReason="r"),
+            _hso(additionalContext="c", continue_="x"),
+            json.dumps(
+                {"hookSpecificOutput": {"hookEventName": "PostToolUse", "additionalContext": "c"}}
+            ).encode(),
+            json.dumps(
+                {"hookSpecificOutput": {"hookEventName": "PreToolUse"}, "decision": "approve"}
+            ).encode(),
+            b'{"hookSpecificOutput": {"hookEventName": "PreToolUse", "additionalContext": "a",'
+            b' "additionalContext": "b"}}',
+            b'{"hookSpecificOutput": {"hookEventName": "PreToolUse", "additionalContext": "\\ud800"}}',
+            b'{"hookSpecificOutput": {"hookEventName": "PreToolUse", "additionalContext": "\xff"}}',
+            b'{"hookSpecificOutput": {"hookEventName": "PreToolUse", "additionalContext": "a\nb"}}',
+        ],
+    )
+    def test_anything_but_a_verdict_gets_the_relays_own_deny(
+        self, tmp_path: Path, wedged_pretooluse_socket: Path, answer: bytes
+    ) -> None:
+        fallback = _answering_fallback(tmp_path, answer)
+        result = _run_relay(
+            wedged_pretooluse_socket,
+            _bash_call("bin/hooks-daemon restart", tmp_path),
+            "--fallback",
+            str(fallback),
+        )
+        assert _relays_own_deny(result), result.stdout
+
+    @pytest.mark.parametrize(
+        "answer",
+        [
+            _hso(
+                permissionDecision="deny",
+                permissionDecisionReason='judged \N{LATIN SMALL LETTER E WITH ACUTE} \\ "q"',
+            ),
+            _hso(
+                permissionDecision="deny",
+                permissionDecisionReason="judged",
+                additionalContext="context",
+            ),
+            _hso(additionalContext="carve-out: the project's own restart"),
+            b'  {"hookSpecificOutput" : {"additionalContext": "\\u00e9\\ud83d\\ude00",'
+            b' "hookEventName": "PreToolUse"}}\n',
+        ],
+    )
+    def test_a_verdict_passes_through_byte_for_byte(
+        self, tmp_path: Path, wedged_pretooluse_socket: Path, answer: bytes
+    ) -> None:
+        fallback = _answering_fallback(tmp_path, answer)
+        result = _run_relay(
+            wedged_pretooluse_socket,
+            _bash_call("bin/hooks-daemon restart", tmp_path),
+            "--fallback",
+            str(fallback),
+        )
+        assert result.returncode == 0, result.stderr.decode()
+        assert result.stdout == answer
+
+    def test_a_fallback_that_never_finishes_gets_the_relays_own_deny(
+        self, tmp_path: Path, wedged_pretooluse_socket: Path
+    ) -> None:
+        """F3: the hand-off has its own deadline. Without one, a forwarder
+        that hangs holds the hook until Claude Code cancels it, and a
+        cancelled PreToolUse hook lets the call run unjudged."""
+        hanging = tmp_path / "hanging.sh"
+        hanging.write_text("#!/bin/bash\ncat > /dev/null\nexec sleep 3600\n")
+        hanging.chmod(0o755)
+        result = subprocess.run(
+            [
+                str(_RELAY_BINARY),
+                str(wedged_pretooluse_socket),
+                "--timeout-ms",
+                "500",
+                "--fallback",
+                str(hanging),
+            ],
+            input=_bash_call("bin/hooks-daemon restart", tmp_path),
+            capture_output=True,
+            timeout=Timeout.REGISTERED_HOOK_TIMEOUT,
+        )
+        assert _relays_own_deny(result), result.stdout
+
+
+@pytest.mark.skipif(not _RELAY_BINARY.exists(), reason="no built relay binary on this machine")
+class TestTheRelaysOwnDenyNamesTheAbsoluteLauncher:
+    """Plan 00466 round 2 (m1): the relay's own deny names the same exempt
+    command ``init.sh``'s denies do, the project's launcher by absolute path,
+    so it can be run from any directory."""
+
+    def _own_deny_reason(self, project: Path, wedged: Path, daemon_root: Path | None = None) -> str:
+        """The relay's own deny, with ``daemon_root`` handed over as the
+        generated forwarder hands it (none: a forwarder from before that)."""
+        hooks = project / ".claude" / "hooks"
+        hooks.mkdir(parents=True, exist_ok=True)
+        failing = hooks / "pre-tool-use"
+        failing.write_text("#!/bin/bash\ncat > /dev/null\nexit 3\n")
+        failing.chmod(0o755)
+        env = {k: v for k, v in os.environ.items() if not k.startswith("HOOKS_DAEMON_")}
+        if daemon_root is not None:
+            env[RELAY_DAEMON_ROOT_ENV] = str(daemon_root)
+        result = _run_relay(
+            wedged, _bash_call("true", project), "--fallback", str(failing), env=env
+        )
+        assert _relays_own_deny(result), result.stdout
+        reason: str = json.loads(result.stdout)["hookSpecificOutput"]["permissionDecisionReason"]
+        return reason
+
+    def _init_sh_command(self, project: Path, daemon_root: Path) -> str | None:
+        """What init.sh names, or None when it knows no exempt command."""
+        shutil.copy(_INIT_SH, project / ".claude" / "init.sh")
+        env = {k: v for k, v in os.environ.items() if not k.startswith("HOOKS_DAEMON_")}
+        env["HOOKS_DAEMON_ROOT_DIR"] = str(daemon_root)
+        result = subprocess.run(
+            ["bash", "-c", "source .claude/init.sh; _hooks_daemon_recovery_command restart"],
+            cwd=project,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=_TIMEOUT_SECONDS,
+            check=False,
+        )
+        if result.returncode == 3:
+            return None
+        assert result.returncode == 0, result.stderr
+        return result.stdout.strip()
+
+    @staticmethod
+    def _layout(project: Path, layout: str) -> Path:
+        """Build ``layout`` at ``project``; returns its daemon root."""
+
+        def script(path: Path, body: str = "#!/bin/bash\n") -> None:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(body)
+
+        clone = project / _CLONE_LAUNCHER
+        root_launcher = project / "bin" / "hooks-daemon"
+        (project / ".claude").mkdir(parents=True)
+        if layout == "client":
+            script(clone)
+            return project / ".claude" / "hooks-daemon"
+        if layout == "client, own root tool":
+            script(clone)
+            script(root_launcher, "#!/bin/bash\necho the project's own\n")
+            return project / ".claude" / "hooks-daemon"
+        if layout == "client, no clone launcher, own root tool":
+            script(root_launcher, "#!/bin/bash\necho the project's own\n")
+            return project / ".claude" / "hooks-daemon"
+        if layout == "self-install, clone linked":
+            script(root_launcher)
+            clone.parent.mkdir(parents=True)
+            clone.symlink_to(root_launcher)
+            return project
+        if layout == "self-install, real clone file":
+            script(root_launcher)
+            script(clone)
+            return project
+        if layout == "root of another project":
+            other = project.parent / f"{project.name}-other"
+            script(other / _CLONE_LAUNCHER)
+            return other / ".claude" / "hooks-daemon"
+        if layout == "root whose launcher links to another file of the project":
+            script(project / "any" / "file")
+            elsewhere = project.parent / f"{project.name}-elsewhere"
+            (elsewhere / "bin").mkdir(parents=True)
+            (elsewhere / "bin" / "hooks-daemon").symlink_to(project / "any" / "file")
+            return elsewhere
+        raise AssertionError(layout)
+
+    #: Layouts whose daemon root is no install of the project: nothing is exempt.
+    _UNKNOWN_INSTALLS = frozenset(
+        {"root of another project", "root whose launcher links to another file of the project"}
+    )
+
+    @pytest.mark.parametrize(
+        "layout",
+        [
+            "client",
+            "client, own root tool",
+            "client, no clone launcher, own root tool",
+            "self-install, clone linked",
+            "self-install, real clone file",
+            "root of another project",
+            "root whose launcher links to another file of the project",
+        ],
+    )
+    @pytest.mark.parametrize("dirname", ["proj", "with space"])
+    def test_init_sh_the_relay_and_the_daemon_name_one_launcher(
+        self, tmp_path: Path, wedged_pretooluse_socket: Path, layout: str, dirname: str
+    ) -> None:
+        """Plan 00466 round 4 (P3-2): the relay named the first launcher FILE
+        that existed, so a client's own ``bin/hooks-daemon`` or a real file at
+        a self-install's clone path could be named while the carve-out denied
+        it. One rule, over one table, in all three.
+
+        Round 5 (R4-2): a launcher is a ``bin/hooks-daemon``. A root whose
+        launcher links to any other file two levels below the project was
+        taken for this install, and that file then ran as the exempt
+        restart."""
+        project = tmp_path / dirname
+        daemon_root = self._layout(project, layout)
+        from_init_sh = self._init_sh_command(project, daemon_root)
+        from_daemon = install_recovery_command(project, daemon_root, "restart")
+        reason = self._own_deny_reason(project, wedged_pretooluse_socket, daemon_root)
+        assert from_daemon == from_init_sh, (from_daemon, from_init_sh)
+        assert (from_init_sh is None) == (layout in self._UNKNOWN_INSTALLS), from_init_sh
+        if from_init_sh is None:
+            assert "No daemon command is exempt" in reason, reason
+        else:
+            assert reason.endswith(f"run: {from_init_sh}"), reason
+
+    @pytest.mark.parametrize(
+        ("launcher", "daemon_root"),
+        [
+            # The daemon's own repository: the install is the project root.
+            ("bin/hooks-daemon", "."),
+            # A client project: the install is the daemon clone.
+            (_CLONE_LAUNCHER, ".claude/hooks-daemon"),
+        ],
+    )
+    @pytest.mark.parametrize("dirname", ["proj", "with space"])
+    def test_it_names_the_command_init_sh_names(
+        self,
+        tmp_path: Path,
+        wedged_pretooluse_socket: Path,
+        launcher: str,
+        daemon_root: str,
+        dirname: str,
+    ) -> None:
+        project = tmp_path / dirname
+        (project / launcher).parent.mkdir(parents=True)
+        (project / launcher).write_text("#!/bin/bash\n")
+        reason = self._own_deny_reason(project, wedged_pretooluse_socket, project / daemon_root)
+        command = self._init_sh_command(project, project / daemon_root)
+        assert command is not None
+        assert command.endswith(" restart") and str(project) in command, command
+        assert f"run: {command}" in reason, reason
+
+    def test_with_both_launchers_it_names_the_clones_first(
+        self, tmp_path: Path, wedged_pretooluse_socket: Path
+    ) -> None:
+        """Plan 00466 round 3 (m-A): ``cli.py``'s order. A client project's
+        own ``bin/hooks-daemon`` is not the daemon, so it is never named. No
+        daemon root is handed over, as from a forwarder generated before it
+        was: the relay then takes init.sh's default, the daemon clone."""
+        project = tmp_path / "proj"
+        for launcher in (_CLONE_LAUNCHER, "bin/hooks-daemon"):
+            (project / launcher).parent.mkdir(parents=True)
+            (project / launcher).write_text("#!/bin/bash\n")
+        reason = self._own_deny_reason(project, wedged_pretooluse_socket)
+        command = self._init_sh_command(project, project / ".claude" / "hooks-daemon")
+        assert command == f"{project / _CLONE_LAUNCHER} restart", command
+        assert f"run: {command}" in reason, reason
 
 
 # ---------------------------------------------------------------------------
@@ -402,7 +956,7 @@ def test_nc_capability_flag_unset_skips_nc_rung(
     assert request["hook_input"]["tool_input"]["command"] == "true"
 
 
-def test_nc_rung_round_trip_completes_promptly(live_pid_file: Path) -> None:
+def test_nc_rung_round_trip_completes_promptly(tmp_path: Path) -> None:
     """Regression (Plan 00290 Phase 6 measurement): the nc rung's `nc -U -w`
     invocation, missing `-N` (shutdown-on-stdin-EOF), never sent EOF to the
     daemon's EOF-framed per-event socket — the daemon never saw the
@@ -458,18 +1012,19 @@ def test_nc_rung_round_trip_completes_promptly(live_pid_file: Path) -> None:
         payload = json.dumps(
             {"tool_name": "Bash", "tool_input": {"command": "nc-roundtrip"}, **_MAIN_PROBE}
         ).encode()
-        env = _base_env(short_root / "no-such-legacy-daemon.sock", live_pid_file)
-        env["HOOKS_DAEMON_NC_UNIX_CAPABLE"] = "1"
+        with _live_pid_file(short_root, tmp_path) as live_pid_file:
+            env = _base_env(short_root / "no-such-legacy-daemon.sock", live_pid_file)
+            env["HOOKS_DAEMON_NC_UNIX_CAPABLE"] = "1"
 
-        start = time.monotonic()
-        result = subprocess.run(
-            ["bash", str(forwarder)],
-            input=payload,
-            capture_output=True,
-            env=env,
-            timeout=_TIMEOUT_SECONDS,
-        )
-        elapsed = time.monotonic() - start
+            start = time.monotonic()
+            result = subprocess.run(
+                ["bash", str(forwarder)],
+                input=payload,
+                capture_output=True,
+                env=env,
+                timeout=_TIMEOUT_SECONDS,
+            )
+            elapsed = time.monotonic() - start
         server.join()
 
         assert result.returncode == 0, result.stderr.decode()
@@ -485,7 +1040,7 @@ def test_nc_rung_round_trip_completes_promptly(live_pid_file: Path) -> None:
         shutil.rmtree(short_root, ignore_errors=True)
 
 
-def test_nc_rung_honours_events_dir_env_override(live_pid_file: Path) -> None:
+def test_nc_rung_honours_events_dir_env_override(tmp_path: Path) -> None:
     """Task 2.5 (Plan 00295): HOOKS_DAEMON_EVENTS_DIR must outrank the
     natural `$_untracked_dir/events$_hostname_suffix` path the nc rung
     otherwise computes -- matching resolve_events_dir (transport_verify.py)
@@ -524,17 +1079,18 @@ def test_nc_rung_honours_events_dir_env_override(live_pid_file: Path) -> None:
                 **_MAIN_PROBE,
             }
         ).encode()
-        env = _base_env(short_root / "no-such-legacy-daemon.sock", live_pid_file)
-        env["HOOKS_DAEMON_NC_UNIX_CAPABLE"] = "1"
-        env["HOOKS_DAEMON_EVENTS_DIR"] = str(override_events_dir)
+        with _live_pid_file(short_root, tmp_path) as live_pid_file:
+            env = _base_env(short_root / "no-such-legacy-daemon.sock", live_pid_file)
+            env["HOOKS_DAEMON_NC_UNIX_CAPABLE"] = "1"
+            env["HOOKS_DAEMON_EVENTS_DIR"] = str(override_events_dir)
 
-        result = subprocess.run(
-            ["bash", str(forwarder)],
-            input=payload,
-            capture_output=True,
-            env=env,
-            timeout=_TIMEOUT_SECONDS,
-        )
+            result = subprocess.run(
+                ["bash", str(forwarder)],
+                input=payload,
+                capture_output=True,
+                env=env,
+                timeout=_TIMEOUT_SECONDS,
+            )
         server.join()
 
         assert result.returncode == 0, result.stderr.decode()

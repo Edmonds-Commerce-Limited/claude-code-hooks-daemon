@@ -53,7 +53,10 @@ class TestDaemoniseAppliesRestrictiveUmask:
                 "claude_code_hooks_daemon.daemon.cli.read_pid_file",
                 return_value=None,
             ),
-            patch("claude_code_hooks_daemon.daemon.cli.get_socket_path"),
+            patch(
+                "claude_code_hooks_daemon.daemon.cli.get_socket_path",
+                return_value=tmp_path / "d.sock",
+            ),
             patch("claude_code_hooks_daemon.daemon.cli.get_pid_path"),
             patch("claude_code_hooks_daemon.daemon.cli.cleanup_socket"),
             patch(

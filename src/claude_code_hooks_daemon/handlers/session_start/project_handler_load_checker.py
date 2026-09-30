@@ -20,7 +20,7 @@ the remediation the alert asks for. Advisory only — it never blocks.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from typing import Any, Final
 
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
@@ -89,6 +89,9 @@ class ProjectHandlerLoadCheckerHandler(SessionStartVerifiable, SessionStartHandl
         # keyed `<EventType>.<config_key>`. Injected by `register_all` (Plan
         # 00466 N19), which selects this handler by declaring the attribute.
         self._option_failures: Mapping[str, str] = {}
+        # Config values the daemon runs with other than as written, each with
+        # its fix. Injected by `register_all` (Plan 00466 round 3) the same way.
+        self._config_problems: Sequence[str] = ()
 
     @staticmethod
     def _read_state() -> Any:
@@ -130,7 +133,8 @@ class ProjectHandlerLoadCheckerHandler(SessionStartVerifiable, SessionStartHandl
         return bool(self._option_failures) or bool(self._read_state().is_degraded)
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
-        """Only fire when project-handler loading is degraded.
+        """Only fire when project-handler loading is degraded, or a config
+        value is not in force as written.
 
         Fires on every session (new and resumed) while a failure persists — a
         protection regression is important enough that a resumed session must
@@ -140,10 +144,11 @@ class ProjectHandlerLoadCheckerHandler(SessionStartVerifiable, SessionStartHandl
             hook_input: Hook input dictionary (unused — state is on disk)
 
         Returns:
-            True iff a project handler failed to load or a built-in handler
-            is running without its configured options.
+            True iff a project handler failed to load, a built-in handler is
+            running without its configured options, or a config value is not
+            in force as written.
         """
-        return self._is_degraded()
+        return self._is_degraded() or bool(self._config_problems)
 
     def handle(self, hook_input: dict[str, Any]) -> AdvisoryResult:
         """Inject the loud degraded-protection alert.
@@ -155,8 +160,32 @@ class ProjectHandlerLoadCheckerHandler(SessionStartVerifiable, SessionStartHandl
             AdvisoryResult with ALLOW decision and the alert as advisory context.
         """
         # Lean SessionStart: each part says nothing when it is healthy.
-        lines = self._project_handler_lines() + self._option_failure_lines()
+        lines = (
+            self._project_handler_lines()
+            + self._option_failure_lines()
+            + self._config_problem_lines()
+        )
         return AdvisoryResult(decision=Decision.ALLOW, context=lines)
+
+    def _config_problem_lines(self) -> list[str]:
+        """Name each config value the daemon runs with other than as written.
+
+        Not a degraded session: the daemon chose the safe value and every
+        guard is on. The config says something it is not doing, and a
+        warning only in the daemon log goes unseen (Plan 00466 round 3).
+        """
+        if not self._config_problems:
+            return []
+        lines = [
+            f"⚠️ CONFIG VALUE NOT IN FORCE: {len(self._config_problems)} setting(s) in "
+            ".claude/hooks-daemon.yaml are running at a different value than written:",
+        ]
+        lines.extend(f"  - {problem}" for problem in self._config_problems)
+        lines.append(
+            f"Fix the config, then restart the daemon (`{_restart_cmd()}`); "
+            f"`{daemon_cli_command(_HEALTH_SUBCOMMAND)}` lists the same settings."
+        )
+        return lines
 
     def _option_failure_lines(self) -> list[str]:
         """Name each built-in handler running on its defaults (Plan 00466 N19)."""
@@ -233,9 +262,17 @@ class ProjectHandlerLoadCheckerHandler(SessionStartVerifiable, SessionStartHandl
             "options configured for them are not in force. This is a daemon "
             "defect: report it with the traceback from the daemon log.\n"
             "\n"
-            "The handler is silent when every project handler loads and every "
-            "built-in handler has its options, so seeing either alert always "
-            "means real action is required.\n"
+            "### When you see `⚠️ CONFIG VALUE NOT IN FORCE`\n"
+            "\n"
+            "The daemon started, with every guard on, but runs the named setting "
+            "at a safe value instead of the one written in "
+            "`.claude/hooks-daemon.yaml`. Each line says why and what to set; "
+            "change the config and restart the daemon to clear it.\n"
+            "\n"
+            "The handler is silent when every project handler loads, every "
+            "built-in handler has its options and every setting is in force as "
+            "written, so seeing any of these alerts always means real action is "
+            "required.\n"
         )
 
     def get_acceptance_tests(self) -> list[Any]:

@@ -27,6 +27,10 @@ from claude_code_hooks_daemon.daemon.controller import (
     get_controller,
     reset_controller,
 )
+from claude_code_hooks_daemon.daemon.project_handler_health import ProjectHandlerHealthState
+from claude_code_hooks_daemon.handlers.session_start.project_handler_load_checker import (
+    ProjectHandlerLoadCheckerHandler,
+)
 
 
 class TestDaemonStats:
@@ -1260,6 +1264,76 @@ class TestControllerHealthChainDeadlineProblems:
 
         assert health["status"] == "healthy"
         assert "chain_deadline_problems" not in health
+
+
+class TestConfigProblemsReachSessionStart:
+    """Plan 00466 round 3: a config value the daemon did not apply as written
+    (``daemon.transport.timeout_seconds`` over its cap, run at the cap) was
+    only a log line, which nobody reads. It reaches the SessionStart
+    config-problem advisory and ``health``; it is not a degraded state."""
+
+    _CONFIG_PROBLEM = "daemon.transport.timeout_seconds=90 is too long; using 45."
+
+    def teardown_method(self) -> None:
+        ProjectContext.reset()
+
+    @pytest.fixture
+    def workspace_root(self, tmp_path: Path) -> Path:
+        claude_dir = tmp_path / "test-workspace" / ".claude"
+        claude_dir.mkdir(parents=True)
+        (claude_dir / "hooks-daemon.yaml").write_text(
+            "version: '1.0'\n"
+            "daemon:\n"
+            "  idle_timeout_seconds: 600\n"
+            "  log_level: INFO\n"
+            "handlers:\n"
+            "  pre_tool_use: {}\n"
+        )
+        return claude_dir.parent
+
+    def _with_config_problems(
+        self, workspace_root: Path, problems: list[str] | None
+    ) -> DaemonController:
+        controller = DaemonController()
+        with patch("subprocess.run") as mock_run:
+            mock_run.side_effect = [
+                Mock(returncode=0, stdout="/tmp/test\n"),
+                Mock(returncode=0, stdout="git@github.com:test/repo.git\n"),
+                Mock(returncode=0, stdout="/tmp/test\n"),
+            ]
+            controller.initialise(
+                workspace_root=workspace_root,
+                verdict_log=VerdictLogConfig(enabled=False),
+                config_problems=problems,
+            )
+        return controller
+
+    @staticmethod
+    def _checker(controller: DaemonController) -> ProjectHandlerLoadCheckerHandler:
+        for handler in controller.get_router().get_chain(EventType.SESSION_START).handlers:
+            if isinstance(handler, ProjectHandlerLoadCheckerHandler):
+                return handler
+        raise AssertionError("ProjectHandlerLoadCheckerHandler was not registered")
+
+    def test_the_advisory_names_the_problem(self, workspace_root: Path) -> None:
+        controller = self._with_config_problems(workspace_root, [self._CONFIG_PROBLEM])
+        checker = self._checker(controller)
+        with patch.object(checker, "_read_state", return_value=ProjectHandlerHealthState()):
+            assert checker.matches({}) is True
+            text = "\n".join(checker.handle({}).context)
+        assert self._CONFIG_PROBLEM in text
+
+    def test_health_names_it_without_degrading(self, workspace_root: Path) -> None:
+        health = self._with_config_problems(workspace_root, [self._CONFIG_PROBLEM]).get_health()
+        assert health["config_problems"] == [self._CONFIG_PROBLEM]
+        assert health["status"] == "healthy"
+
+    def test_none_leaves_the_advisory_silent(self, workspace_root: Path) -> None:
+        controller = self._with_config_problems(workspace_root, None)
+        checker = self._checker(controller)
+        with patch.object(checker, "_read_state", return_value=ProjectHandlerHealthState()):
+            assert checker.matches({}) is False
+        assert "config_problems" not in controller.get_health()
 
 
 class TestProcessEventFailsClosedForPreToolUse:

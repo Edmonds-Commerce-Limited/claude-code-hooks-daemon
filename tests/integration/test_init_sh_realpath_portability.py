@@ -17,10 +17,29 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+import pytest
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 INIT_SH = REPO_ROOT / "init.sh"
 
-_REALPATH_CALL = re.compile(r"\brealpath\b")
+# The shell BINARY only. The python3 blocks init.sh embeds call
+# os.path.realpath, a stdlib function present on every host python3 runs on,
+# so an attribute access (a preceding "." or identifier character) is not it.
+_REALPATH_CALL = re.compile(r"(?<![\w.])realpath\b")
+
+
+@pytest.mark.parametrize(
+    ("line", "is_call"),
+    [
+        ('_abs=$(realpath "$PROJECT_PATH")', True),
+        ('realpath "$x"', True),
+        ('p=$(realpath -m "$x" || echo "$x")', True),
+        ("        will_run = os.path.realpath(os.path.join(cwd, binary))", False),
+        ("from os.path import realpath_cache", False),
+    ],
+)
+def test_the_detector_matches_the_shell_binary_only(line: str, is_call: bool) -> None:
+    assert bool(_REALPATH_CALL.search(line)) is is_call
 
 
 def test_init_sh_has_no_dead_abs_project_path() -> None:

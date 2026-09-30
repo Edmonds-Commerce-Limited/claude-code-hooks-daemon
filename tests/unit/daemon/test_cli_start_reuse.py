@@ -19,6 +19,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from claude_code_hooks_daemon.daemon.cli import cmd_start
+from claude_code_hooks_daemon.daemon.process_verification import RootProof
 from claude_code_hooks_daemon.daemon.server import DaemonAlreadyRunningError, _SocketLiveness
 
 
@@ -34,7 +35,10 @@ class TestCmdStartReuse:
                 "claude_code_hooks_daemon.daemon.cli.get_project_path",
                 return_value=tmp_path,
             ),
-            patch("claude_code_hooks_daemon.daemon.cli.get_socket_path"),
+            patch(
+                "claude_code_hooks_daemon.daemon.cli.get_socket_path",
+                return_value=tmp_path / "d.sock",
+            ),
             patch("claude_code_hooks_daemon.daemon.cli.get_pid_path"),
             patch(
                 "claude_code_hooks_daemon.daemon.cli.read_pid_file",
@@ -83,7 +87,10 @@ class TestCmdStartReuse:
                 "claude_code_hooks_daemon.daemon.cli.get_project_path",
                 return_value=tmp_path,
             ),
-            patch("claude_code_hooks_daemon.daemon.cli.get_socket_path"),
+            patch(
+                "claude_code_hooks_daemon.daemon.cli.get_socket_path",
+                return_value=tmp_path / "d.sock",
+            ),
             patch("claude_code_hooks_daemon.daemon.cli.get_pid_path"),
             patch(
                 "claude_code_hooks_daemon.daemon.cli.read_pid_file",
@@ -127,7 +134,10 @@ class TestCmdStartReuse:
                 "claude_code_hooks_daemon.daemon.cli.get_project_path",
                 return_value=tmp_path,
             ),
-            patch("claude_code_hooks_daemon.daemon.cli.get_socket_path"),
+            patch(
+                "claude_code_hooks_daemon.daemon.cli.get_socket_path",
+                return_value=tmp_path / "d.sock",
+            ),
             patch("claude_code_hooks_daemon.daemon.cli.get_pid_path"),
             patch(
                 "claude_code_hooks_daemon.daemon.cli.read_pid_file",
@@ -165,7 +175,10 @@ class TestCmdStartStaleSocket:
                 "claude_code_hooks_daemon.daemon.cli.get_project_path",
                 return_value=tmp_path,
             ),
-            patch("claude_code_hooks_daemon.daemon.cli.get_socket_path"),
+            patch(
+                "claude_code_hooks_daemon.daemon.cli.get_socket_path",
+                return_value=tmp_path / "d.sock",
+            ),
             patch("claude_code_hooks_daemon.daemon.cli.get_pid_path"),
             patch(
                 "claude_code_hooks_daemon.daemon.cli.read_pid_file",
@@ -181,6 +194,12 @@ class TestCmdStartStaleSocket:
             patch("claude_code_hooks_daemon.daemon.cli.write_cleanup_status"),
             patch("os.fork", return_value=100),  # parent branch
             patch("time.sleep"),
+            # The daemon that came up, this user's, is proven to serve this project.
+            patch(
+                "claude_code_hooks_daemon.daemon.cli.daemon_process_project_root",
+                return_value=RootProof(root=os.path.realpath(tmp_path), refusal=None),
+            ),
+            patch("claude_code_hooks_daemon.daemon.cli.is_this_users_process", return_value=True),
         ):
             result = cmd_start(args)
 
@@ -200,7 +219,10 @@ class TestCmdStartContendedSocket:
                 "claude_code_hooks_daemon.daemon.cli.get_project_path",
                 return_value=tmp_path,
             ),
-            patch("claude_code_hooks_daemon.daemon.cli.get_socket_path"),
+            patch(
+                "claude_code_hooks_daemon.daemon.cli.get_socket_path",
+                return_value=tmp_path / "d.sock",
+            ),
             patch("claude_code_hooks_daemon.daemon.cli.get_pid_path"),
             patch(
                 "claude_code_hooks_daemon.daemon.cli.read_pid_file",
@@ -260,7 +282,10 @@ class TestCmdStartChildReuseExitZero:
                 "claude_code_hooks_daemon.daemon.cli.get_project_path",
                 return_value=tmp_path,
             ),
-            patch("claude_code_hooks_daemon.daemon.cli.get_socket_path"),
+            patch(
+                "claude_code_hooks_daemon.daemon.cli.get_socket_path",
+                return_value=tmp_path / "d.sock",
+            ),
             patch("claude_code_hooks_daemon.daemon.cli.get_pid_path"),
             patch(
                 "claude_code_hooks_daemon.daemon.cli.read_pid_file",
@@ -351,7 +376,10 @@ class TestCmdStartChildReuseExitZero:
                 "claude_code_hooks_daemon.daemon.cli.get_project_path",
                 return_value=tmp_path,
             ),
-            patch("claude_code_hooks_daemon.daemon.cli.get_socket_path"),
+            patch(
+                "claude_code_hooks_daemon.daemon.cli.get_socket_path",
+                return_value=tmp_path / "d.sock",
+            ),
             patch("claude_code_hooks_daemon.daemon.cli.get_pid_path"),
             patch(
                 "claude_code_hooks_daemon.daemon.cli.read_pid_file",
@@ -446,7 +474,10 @@ class TestCmdStartChildReuseExitZero:
                 "claude_code_hooks_daemon.daemon.cli.get_project_path",
                 return_value=tmp_path,
             ),
-            patch("claude_code_hooks_daemon.daemon.cli.get_socket_path"),
+            patch(
+                "claude_code_hooks_daemon.daemon.cli.get_socket_path",
+                return_value=tmp_path / "d.sock",
+            ),
             patch("claude_code_hooks_daemon.daemon.cli.get_pid_path"),
             patch("claude_code_hooks_daemon.daemon.cli.read_pid_file", return_value=None),
             patch(
@@ -514,7 +545,10 @@ class TestCmdStartIndeterminateLiveness:
                 "claude_code_hooks_daemon.daemon.cli.get_project_path",
                 return_value=tmp_path,
             ),
-            patch("claude_code_hooks_daemon.daemon.cli.get_socket_path"),
+            patch(
+                "claude_code_hooks_daemon.daemon.cli.get_socket_path",
+                return_value=tmp_path / "d.sock",
+            ),
             patch("claude_code_hooks_daemon.daemon.cli.get_pid_path"),
             patch(
                 "claude_code_hooks_daemon.daemon.cli.read_pid_file",
@@ -551,7 +585,10 @@ class TestCmdStartIndeterminateLiveness:
                 "claude_code_hooks_daemon.daemon.cli.get_project_path",
                 return_value=tmp_path,
             ),
-            patch("claude_code_hooks_daemon.daemon.cli.get_socket_path"),
+            patch(
+                "claude_code_hooks_daemon.daemon.cli.get_socket_path",
+                return_value=tmp_path / "d.sock",
+            ),
             patch("claude_code_hooks_daemon.daemon.cli.get_pid_path"),
             patch(
                 "claude_code_hooks_daemon.daemon.cli.read_pid_file",

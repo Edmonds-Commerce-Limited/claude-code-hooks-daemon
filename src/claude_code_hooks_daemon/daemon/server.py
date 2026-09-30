@@ -12,17 +12,21 @@ Logging:
 import asyncio
 import contextlib
 import enum
+import errno
 import fcntl
 import json
 import logging
 import os
 import shutil
 import signal
+import stat
 import sys
 import time
+from collections.abc import Callable, Iterator
+from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
-from typing import Any, Final, Protocol, runtime_checkable
+from typing import Any, Final, Protocol, Self, runtime_checkable
 
 from claude_code_hooks_daemon.constants import Timeout
 from claude_code_hooks_daemon.constants.events import wired_event_metas
@@ -33,8 +37,10 @@ from claude_code_hooks_daemon.core.input_schemas import get_input_schema
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.daemon.config import DaemonConfig
 from claude_code_hooks_daemon.daemon.memory_log_handler import MemoryLogHandler
+from claude_code_hooks_daemon.daemon.paths import get_untracked_dir, is_pid_alive, parse_pid_text
 from claude_code_hooks_daemon.daemon.payload_capture import capture_payload, resolve_capture_dir
 from claude_code_hooks_daemon.utils import secret_file_matching as sfm
+from claude_code_hooks_daemon.utils.cli_command import recovery_command
 from claude_code_hooks_daemon.utils.log_elision import elide_record_arguments
 from claude_code_hooks_daemon.utils.scratch_dir import ensure_scratch_dir
 from claude_code_hooks_daemon.utils.secret_redaction import get_active_secret_terms, redact_text
@@ -121,13 +127,23 @@ _PRE_TOOL_USE_WIRE_KEY: Final[str] = "PreToolUse"
 #: real judged "allow, nothing to add" verdict to whatever reads it next (the
 #: relay, or a direct per-event-socket client). Neither the legacy socket
 #: (m5) nor the python transport (M1/N25) has ever fabricated that ambiguity;
-#: this closes the one remaining rung that did.
+#: this closes the one remaining rung that did. The restart it names follows
+#: in ``_pre_tool_use_transport_deny_response``: this install's launcher by
+#: absolute path, never a project-root ``bin/hooks-daemon`` that in a client
+#: project is the project's own (Plan 00466 round 3, m-A).
 _TRANSPORT_FAIL_CLOSED_REASON: Final[str] = (
     "BLOCKED [transport-fail-closed]: the daemon could not produce a verdict "
     "for this request (payload could not be read, or an internal error "
     "occurred mid-dispatch). Denying out of caution -- this does not mean "
-    "the action itself is unsafe. If the daemon is wedged, run: "
-    "bin/hooks-daemon restart"
+    "the action itself is unsafe. "
+)
+#: Followed by the exempt restart init.sh's carve-out accepts.
+_TRANSPORT_RECOVERY_COMMAND: Final[str] = "If the daemon is wedged, run: "
+#: When no launcher is known to recover this project (Plan 00466 round 4).
+_TRANSPORT_RECOVERY_UNKNOWN: Final[str] = (
+    "No daemon command is exempt from this deny: this daemon's root is not a "
+    "daemon install of its project, so no launcher is known to recover it. A "
+    "human must restart the daemon with the ! prefix."
 )
 
 
@@ -164,11 +180,15 @@ def _pre_tool_use_transport_deny_response() -> dict[str, Any]:
     ``HookResult._format_pre_tool_use_response`` emits for a real judged
     deny -- never the ambiguous ``{}`` a transport failure used to answer.
     """
+    restart = recovery_command("restart")
+    recovery = (
+        _TRANSPORT_RECOVERY_UNKNOWN if restart is None else _TRANSPORT_RECOVERY_COMMAND + restart
+    )
     return {
         "hookSpecificOutput": {
             "hookEventName": _PRE_TOOL_USE_WIRE_KEY,
             "permissionDecision": "deny",
-            "permissionDecisionReason": _TRANSPORT_FAIL_CLOSED_REASON,
+            "permissionDecisionReason": _TRANSPORT_FAIL_CLOSED_REASON + recovery,
         }
     }
 
@@ -296,6 +316,363 @@ _LOG_PROBE_INDETERMINATE = (
 # section atomic so near-simultaneous same-root starts cannot both observe a
 # socket as not-live and race to unlink a freshly-bound peer.
 _START_LOCK_SUFFIX = ".start.lock"
+# How often hold_start_lock retries a lock another process holds (seconds).
+_START_LOCK_POLL_SECONDS = 0.05
+# Name, in a project's untracked directory, of the lock a start holds from its
+# launch until its daemon serves. Outside the stale-file reaper's "daemon-"
+# prefix: an unlinked lock excludes nobody.
+_LAUNCH_LOCK_NAME = "daemon.launch.lock"
+# Most bytes of the launch lock's pid text read; a pid is far shorter.
+_PID_TEXT_MAX_BYTES = 64
+# The kernel's table of file locks (Linux), one lock per line.
+_PROC_LOCKS = Path("/proc/locks")
+# The lock type /proc/locks names an flock by.
+_FLOCK_TYPE = "FLOCK"
+# Field positions in a /proc/locks line: "1: FLOCK ADVISORY WRITE <pid> <maj>:<min>:<ino> 0 EOF".
+# A process waiting on a lock has its own line, with "->" at _LOCK_TYPE_FIELD.
+_LOCK_TYPE_FIELD = 1
+_LOCK_PID_FIELD = 4
+_LOCK_FILE_FIELD = 5
+
+
+class StartLockTimeout(RuntimeError):
+    """The start lock stayed held for the whole wait."""
+
+
+def start_lock_path(socket_path: Path) -> Path:
+    """Sibling lock-file path used to serialise concurrent same-root starts."""
+    return socket_path.with_name(socket_path.name + _START_LOCK_SUFFIX)
+
+
+def _owner_uid(path: Path) -> str:
+    """The uid owning ``path``, or why it cannot be read, for a message."""
+    try:
+        return str(os.lstat(path).st_uid)
+    except OSError as exc:
+        return f"unknown ({exc.strerror})"
+
+
+def _open_start_lock(socket_path: Path) -> int:
+    """Open (creating) the start lock beside ``socket_path``; returns its fd."""
+    return _open_lock_file(start_lock_path(socket_path))
+
+
+def _open_lock_file(lock_path: Path) -> int:
+    """Open (creating) the lock file ``lock_path``; returns its fd.
+
+    Refuses a symlink (Plan 00466 round 4, Sh-C): ``O_CREAT`` through a link
+    planted at the lock path would create or open the file it points at. The
+    lock must also be a regular file, which ``O_NOFOLLOW`` alone does not
+    promise.
+
+    The lock is created ``0600``, so only its owner (and root) can open it
+    (round 5, Sh-E). That is deliberate: a lock another user can open is one
+    another user can hold, and every start would then wait on them. A
+    second user sharing the untracked directory (a host beside a container
+    that is not root) therefore cannot take it; that open fails with a
+    ``PermissionError`` naming both users, and every caller fails closed on
+    it: a start does not run, and nothing is removed.
+
+    Raises:
+        PermissionError: the lock belongs to a user this one cannot open it as.
+        OSError: the lock could not be opened, or is not a regular file.
+    """
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        fd = os.open(str(lock_path), os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600)
+    except PermissionError as exc:
+        raise PermissionError(
+            exc.errno,
+            f"the start lock belongs to uid {_owner_uid(lock_path)}, and uid "
+            f"{os.geteuid()} cannot open it; a daemon of another user shares this "
+            "directory, and only its user (or root) can start or clean up after it",
+            str(lock_path),
+        ) from exc
+    if not stat.S_ISREG(os.fstat(fd).st_mode):
+        os.close(fd)
+        raise OSError(errno.EINVAL, "the start lock is not a regular file", str(lock_path))
+    return fd
+
+
+@contextlib.contextmanager
+def hold_start_lock(socket_path: Path, timeout_seconds: float) -> Iterator[None]:
+    """Hold the start lock a daemon start holds across probe, unlink and bind.
+
+    For a caller outside the daemon that must not judge or remove the socket
+    or PID file while a start is part-way through them (Plan 00466 round 3,
+    m-B). Waits up to ``timeout_seconds`` for a holder to finish.
+
+    Raises:
+        StartLockTimeout: the lock was still held when the wait ran out.
+    """
+    lock_fd = _open_start_lock(socket_path)
+    try:
+        _flock_within(lock_fd, start_lock_path(socket_path), timeout_seconds)
+        try:
+            yield
+        finally:
+            fcntl.flock(lock_fd, fcntl.LOCK_UN)
+    finally:
+        os.close(lock_fd)
+
+
+def _flock_within(lock_fd: int, lock_path: Path, timeout_seconds: float) -> None:
+    """Lock ``lock_fd`` exclusively, waiting up to ``timeout_seconds`` for a holder.
+
+    Raises:
+        StartLockTimeout: the lock was still held when the wait ran out.
+    """
+    deadline = time.monotonic() + timeout_seconds
+    while True:
+        try:
+            fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return
+        except BlockingIOError:
+            if time.monotonic() >= deadline:
+                raise StartLockTimeout(
+                    f"the lock {lock_path} stayed held for {timeout_seconds:g}s"
+                ) from None
+            time.sleep(_START_LOCK_POLL_SECONDS)
+
+
+def launch_lock_path(project_path: Path) -> Path:
+    """The lock every start of ``project_path`` holds from its launch until its daemon serves.
+
+    One per project, whatever socket a start uses (review 9, DR-4):
+    single-daemon enforcement picks the daemons it stops by project root,
+    so a start on any socket must hold off every other start's enforcement.
+    """
+    return get_untracked_dir(project_path) / _LAUNCH_LOCK_NAME
+
+
+class LaunchLock:
+    """The lock a start holds from its launch until its daemon serves.
+
+    Plan 00466 lifecycle round 8b: while a start is under way no other
+    start is launched, and so no single-daemon enforcement runs against the
+    daemon still starting. ``cmd_start`` takes it before it looks for a
+    daemon, and the daemon it forks inherits it and releases it once it
+    serves. The kernel releases it when every holder has exited, so a lock
+    that can be taken proves the start before it has finished or died. The
+    daemon writes its pid into the file, which ``stop`` proves before it
+    ends a start that never finishes.
+    """
+
+    def __init__(self, fd: int, path: Path) -> None:
+        self._fd: int | None = fd
+        self.path = path
+
+    @classmethod
+    def take(cls, path: Path, timeout_seconds: float) -> Self:
+        """Take the launch lock ``path``, waiting on a start under way.
+
+        Raises:
+            StartLockTimeout: a start still held it when the wait ran out.
+            OSError: the lock could not be opened.
+        """
+        fd = _open_lock_file(path)
+        try:
+            _flock_within(fd, path, timeout_seconds)
+            # A pid left by an earlier start names no holder of this one.
+            os.ftruncate(fd, 0)
+        except BaseException:
+            os.close(fd)
+            raise
+        return cls(fd, path)
+
+    def name_holder(self) -> None:
+        """Record this process, the starting daemon, as the holder."""
+        if self._fd is None:
+            return
+        os.ftruncate(self._fd, 0)
+        os.pwrite(self._fd, f"{os.getpid()}\n".encode("ascii"), 0)
+
+    def release(self) -> None:
+        """End the start: unlock for every holder, and close."""
+        if self._fd is None:
+            return
+        fcntl.flock(self._fd, fcntl.LOCK_UN)
+        self.close()
+
+    def close(self) -> None:
+        """Close this process's copy; a forked holder keeps the lock."""
+        if self._fd is not None:
+            os.close(self._fd)
+            self._fd = None
+
+
+@dataclass(frozen=True)
+class StartUnderWay:
+    """A start holds the launch lock.
+
+    ``pid`` is the daemon it named, if any. Before it names one, ``holder``
+    is the one process the kernel's lock table shows holding the lock,
+    which is the launcher before it forks (review 9, DR-5), or None where
+    that cannot be told. Neither is proven to be a daemon; ``stop`` proves
+    it before it signals.
+
+    ``written_at`` is when the lock was last written. The holder takes it,
+    and the daemon names itself, after each has started, so a process that
+    started later holds a pid reused since (review 10, R10-3).
+    """
+
+    pid: int | None
+    written_at: float
+    holder: int | None = None
+
+
+def start_under_way(path: Path) -> StartUnderWay | None:
+    """The start holding the launch lock ``path``, or None when none does.
+
+    Raises:
+        OSError: the lock could not be opened, so nothing is known.
+    """
+    # Read while the lock is held against us: the holder's pid, or nothing
+    # before its daemon names itself. Stop still proves it before a signal.
+    fd = _open_lock_file(path)
+    try:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            # The time before the text: a pid named in between is judged
+            # against an older time, which only refuses more.
+            written_at = os.fstat(fd).st_mtime
+            text = os.pread(fd, _PID_TEXT_MAX_BYTES, 0).decode("ascii", errors="replace")
+            named = parse_pid_text(text)
+            if named is not None:
+                return StartUnderWay(pid=named, written_at=written_at)
+            try:
+                holder: int | None = _lock_holder(fd)
+            except _LockHolderUnknown as unknown:
+                logger.info("The launch lock's holder is unknown: %s", unknown)
+                holder = None
+            return StartUnderWay(pid=None, written_at=written_at, holder=holder)
+        fcntl.flock(fd, fcntl.LOCK_UN)
+        return None
+    finally:
+        os.close(fd)
+
+
+class _LockHolderUnknown(Exception):
+    """The lock table names no one process holding the launch lock."""
+
+
+def _lock_holder(fd: int) -> int:
+    """The one process the kernel's lock table shows holding ``fd``'s file.
+
+    ``/proc/locks`` names an flock by the pid that took it and its file by
+    inode. Its device is the superblock's, which a btrfs subvolume's
+    ``stat`` does not report, so only the inode is matched there; each
+    candidate must then hold this very file open, matched by device and
+    inode through its own fd table. A taker that has exited, or a process
+    in another pid namespace, names no holder here.
+
+    Returns:
+        The holder's pid.
+
+    Raises:
+        _LockHolderUnknown: there is no lock table, or not exactly one such
+            process.
+    """
+    try:
+        table = _PROC_LOCKS.read_text(encoding="ascii", errors="replace")
+    except OSError as exc:
+        raise _LockHolderUnknown(f"cannot read {_PROC_LOCKS} ({exc})") from exc
+    target = os.fstat(fd)
+    candidates: set[int] = set()
+    for line in table.splitlines():
+        fields = line.split()
+        if len(fields) <= _LOCK_FILE_FIELD or fields[_LOCK_TYPE_FIELD] != _FLOCK_TYPE:
+            continue
+        if fields[_LOCK_FILE_FIELD].rpartition(":")[2] != str(target.st_ino):
+            continue
+        pid = parse_pid_text(fields[_LOCK_PID_FIELD])
+        if pid is not None:
+            candidates.add(pid)
+    holders = {pid for pid in candidates if _holds_open(pid, target)}
+    if len(holders) != 1:
+        raise _LockHolderUnknown(f"candidates {sorted(candidates)}")
+    return holders.pop()
+
+
+def _holds_open(pid: int, target: os.stat_result) -> bool:
+    """True when ``pid`` has the file ``target`` describes open."""
+    try:
+        descriptors = list(Path(f"/proc/{pid}/fd").iterdir())
+    except OSError as exc:
+        logger.debug("Cannot list the open files of pid %d: %s", pid, exc)
+        return False
+    for descriptor in descriptors:
+        try:
+            opened = descriptor.stat()
+        except OSError as exc:
+            # Closed since it was listed, or not a file: not this one.
+            logger.debug("Cannot stat %s: %s", descriptor, exc)
+            continue
+        if (opened.st_dev, opened.st_ino) == (target.st_dev, target.st_ino):
+            return True
+    return False
+
+
+def remove_stale_pid_file(pid_path: Path, socket_path: Path, seen: str) -> bool:
+    """Remove a PID file that names no live process, under the start lock.
+
+    ``init.sh``'s ``is_daemon_running`` calls this for a file whose pid it
+    found gone, or whose text is corrupt (Plan 00466 round 4, Sh-A, Sh-B), and
+    single-daemon enforcement for one it read (N204). A daemon start writes
+    its pid while holding the same lock, so under it the file goes only
+    while it still holds exactly ``seen`` and that names no live process.
+    Another user's process is live: ``kill(pid, 0)`` is refused, not failed.
+    A lock that cannot be taken or opened leaves the file.
+
+    Returns:
+        True when the file was removed.
+    """
+    try:
+        with hold_start_lock(socket_path, Timeout.FILE_LOCK):
+            try:
+                current = pid_path.read_text()
+            except FileNotFoundError:
+                return False
+            if current.rstrip("\n") != seen:
+                logger.info("PID file %s changed since it was read; leaving it", pid_path)
+                return False
+            pid = parse_pid_text(seen)
+            if pid is not None and is_pid_alive(pid):
+                return False
+            pid_path.unlink()
+            return True
+    except StartLockTimeout as exc:
+        logger.warning("A daemon start holds %s; leaving the PID file", exc)
+        return False
+    except (OSError, UnicodeDecodeError) as exc:
+        logger.warning("Cannot remove stale PID file %s under the start lock: %s", pid_path, exc)
+        return False
+
+
+def remove_dead_socket(socket_path: Path) -> bool:
+    """Remove ``socket_path`` only when, under the start lock, it is DEFINITIVELY not live.
+
+    The rule ``cmd_stop``'s release follows (Plan 00466 N205): a start holds
+    the lock across its probe, unlink and bind, and a socket whose liveness
+    is indeterminate may be a busy daemon's.
+
+    Returns:
+        True when the socket was removed.
+    """
+    try:
+        with hold_start_lock(socket_path, Timeout.FILE_LOCK):
+            if _socket_liveness_sync(socket_path) is not _SocketLiveness.NOT_LIVE:
+                logger.info("Socket %s is not provably dead; leaving it", socket_path)
+                return False
+            socket_path.unlink(missing_ok=True)
+            return True
+    except StartLockTimeout as exc:
+        logger.warning("A daemon start holds %s; leaving the socket", exc)
+        return False
+    except OSError as exc:
+        logger.warning("Cannot remove socket %s under the start lock: %s", socket_path, exc)
+        return False
 
 
 class _SocketLiveness(enum.Enum):
@@ -417,6 +794,80 @@ def _socket_liveness_sync(path: Path) -> _SocketLiveness:
     return _SocketLiveness.INDETERMINATE
 
 
+#: The system action a daemon answers with the project it serves and its pid.
+IDENTITY_ACTION: Final = "identity"
+
+
+@dataclass(frozen=True)
+class DaemonIdentity:
+    """What a daemon answers it is: the project it serves, and its pid."""
+
+    project_root: str
+    pid: int
+
+
+@dataclass(frozen=True)
+class NoDaemonIdentity:
+    """Why a socket proved no daemon identity: nothing it answered names one."""
+
+    reason: str
+
+
+def _parse_identity(line: bytes) -> DaemonIdentity | NoDaemonIdentity:
+    """The identity a daemon's answer line carries, or why it carries none."""
+    try:
+        answer = json.loads(line)
+    except ValueError as exc:
+        return NoDaemonIdentity(f"the answer is not JSON ({exc}): {line[:80]!r}")
+    result = answer.get("result") if isinstance(answer, dict) else None
+    if not isinstance(result, dict):
+        error = answer.get("error") if isinstance(answer, dict) else None
+        return NoDaemonIdentity(f"the answer has no result: {error or line[:80]!r}")
+    project_root, pid = result.get("project_root"), result.get("pid")
+    if not isinstance(project_root, str) or type(pid) is not int:
+        return NoDaemonIdentity(f"the answer names no project and pid: {result!r}")
+    return DaemonIdentity(project_root=project_root, pid=pid)
+
+
+async def _probe_daemon_identity(path: Path) -> DaemonIdentity | NoDaemonIdentity:
+    """Ask the daemon on ``path`` who it is (Plan 00466 round 6, Sh-2).
+
+    A listener accepting the connection proves only that something bound the
+    path, which under the ``/tmp`` fallback another user can do first. Only
+    the daemon's own answer names the project it serves. The connect and the
+    answer are each bounded by ``SOCKET_LIVENESS_PROBE_SEC``.
+    """
+    request = {"event": "_system", "hook_input": {"action": IDENTITY_ACTION}}
+    try:
+        reader, writer = await asyncio.wait_for(
+            asyncio.open_unix_connection(path=str(path)),
+            timeout=Timeout.SOCKET_LIVENESS_PROBE_SEC,
+        )
+    except (TimeoutError, OSError) as exc:
+        return NoDaemonIdentity(f"cannot connect to {path}: {exc!r}")
+    try:
+        writer.write(json.dumps(request).encode() + b"\n")
+        await writer.drain()
+        line = await asyncio.wait_for(reader.readline(), timeout=Timeout.SOCKET_LIVENESS_PROBE_SEC)
+    except (TimeoutError, OSError, ValueError) as exc:
+        return NoDaemonIdentity(f"no answer on {path}: {exc!r}")
+    finally:
+        writer.close()
+        with contextlib.suppress(OSError):
+            await writer.wait_closed()
+    return _parse_identity(line)
+
+
+def daemon_socket_identity(path: Path) -> DaemonIdentity | NoDaemonIdentity:
+    """Synchronous :func:`_probe_daemon_identity`, for callers outside the
+    event loop. Inside one there is no answer to wait for."""
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(_probe_daemon_identity(path))
+    return NoDaemonIdentity("an event loop is running here, so no answer can be awaited")
+
+
 def _pid_file_points_at_live_process(pid_file_path: Path | None) -> bool:
     """Return True iff ``pid_file_path`` exists and names a live process.
 
@@ -428,8 +879,10 @@ def _pid_file_points_at_live_process(pid_file_path: Path | None) -> bool:
     if pid_file_path is None or not pid_file_path.exists():
         return False
     try:
-        pid = int(pid_file_path.read_text().strip())
-    except (ValueError, OSError):
+        pid = parse_pid_text(pid_file_path.read_text())
+    except (UnicodeDecodeError, OSError):
+        return False
+    if pid is None:
         return False
     try:
         os.kill(pid, 0)  # Signal 0 checks existence without delivering a signal.
@@ -582,8 +1035,10 @@ class HooksDaemon:
         "_idle_check_interval",
         "_input_validators",
         "_is_new_controller",
+        "_serving",
         "_shutdown_requested",
         "_shutdown_task",
+        "_start_lock_waiting",
         "config",
         "controller",
         "last_activity",
@@ -597,6 +1052,8 @@ class HooksDaemon:
         config: DaemonConfig,
         controller: Controller | LegacyController,
         idle_check_interval: int = 60,
+        start_lock_waiting: Callable[[bool], None] | None = None,
+        serving: Callable[[], None] | None = None,
     ) -> None:
         """Initialise hooks daemon.
 
@@ -604,9 +1061,15 @@ class HooksDaemon:
             config: Daemon configuration
             controller: Controller for request dispatch (new or legacy)
             idle_check_interval: Seconds between idle timeout checks (default 60)
+            start_lock_waiting: Told True before ``start`` waits on the start
+                lock another start holds, and False once it has the lock
+            serving: Called once ``start`` has bound and published the
+                daemon, which ends the start
         """
         self.config = config
         self.controller = controller
+        self._start_lock_waiting = start_lock_waiting
+        self._serving = serving
         self.server: asyncio.Server | None = None
         self._event_servers: dict[str, asyncio.Server] = {}
         # Wire event name -> why its per-event socket was not bound; reported
@@ -836,6 +1299,8 @@ class HooksDaemon:
         # caller waiting on `started_event` can now safely assume the
         # legacy socket is live and `_event_servers` holds its final set.
         self.started_event.set()
+        if self._serving is not None:
+            self._serving()
 
         # Setup signal handlers for graceful shutdown
         loop = asyncio.get_running_loop()
@@ -893,7 +1358,7 @@ class HooksDaemon:
     @staticmethod
     def _start_lock_path(socket_path: Path) -> Path:
         """Sibling lock-file path used to serialise concurrent same-root starts."""
-        return socket_path.with_name(socket_path.name + _START_LOCK_SUFFIX)
+        return start_lock_path(socket_path)
 
     async def _acquire_socket_and_bind(self, socket_path: Path | None) -> None:
         """Atomically reuse-or-acquire ``socket_path`` and bind the server.
@@ -920,8 +1385,6 @@ class HooksDaemon:
             await self._bind_unix_server(socket_path)
             return
 
-        lock_path = self._start_lock_path(socket_path)
-        lock_path.parent.mkdir(parents=True, exist_ok=True)
         # Open (create) the lock file; the fd is held for the whole critical
         # section. flock is advisory but every daemon start takes the same lock,
         # so they serialise against each other.
@@ -931,7 +1394,7 @@ class HooksDaemon:
         # the loser fails loudly (OSError -> exit 1) rather than silently
         # orphaning a daemon. The supported shared-untracked deployment is a
         # normal-disk bind mount (ext4) where flock works across PID namespaces.
-        lock_fd = os.open(str(lock_path), os.O_RDWR | os.O_CREAT, 0o600)
+        lock_fd = _open_start_lock(socket_path)
         try:
             # flock(LOCK_EX) is a BLOCKING syscall. Acquire it in a thread so a
             # competing in-process start (and, more importantly, the event loop
@@ -940,7 +1403,15 @@ class HooksDaemon:
             # offloading keeps the loop responsive and avoids a single-loop
             # deadlock where the waiter starves the holder.
             loop = asyncio.get_running_loop()
-            await loop.run_in_executor(None, fcntl.flock, lock_fd, fcntl.LOCK_EX)
+            try:
+                fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                # Another start holds it. The wait spends no CPU and finishes
+                # no step, so it is announced, or the parent reads it as a
+                # stall (review 8, R8-2).
+                self._report_start_lock_wait(True)
+                await loop.run_in_executor(None, fcntl.flock, lock_fd, fcntl.LOCK_EX)
+                self._report_start_lock_wait(False)
             await self._reuse_or_clear_socket(socket_path)
 
             # Write PID file only once we hold the lock and have cleared any
@@ -958,6 +1429,11 @@ class HooksDaemon:
             with contextlib.suppress(OSError):
                 fcntl.flock(lock_fd, fcntl.LOCK_UN)
             os.close(lock_fd)
+
+    def _report_start_lock_wait(self, waiting: bool) -> None:
+        """Tell whoever launched this start whether it is waiting on the lock."""
+        if self._start_lock_waiting is not None:
+            self._start_lock_waiting(waiting)
 
     async def _reuse_or_clear_socket(self, socket_path: Path) -> None:
         """Probe ``socket_path`` and either reuse a live incumbent or clear a stale one.
@@ -1871,6 +2347,15 @@ class HooksDaemon:
                 handlers = {}
             response = {"result": {"handlers": handlers}}
 
+        elif action == IDENTITY_ACTION:
+            try:
+                project_root = str(ProjectContext.project_root())
+            except RuntimeError as exc:
+                logger.warning("Asked for this daemon's identity, with no project to name: %s", exc)
+                response = {"error": f"no project to name: {exc}"}
+            else:
+                response = {"result": {"project_root": project_root, "pid": os.getpid()}}
+
         elif action == ModeConstant.ACTION_GET_MODE:
             if self._is_new_controller and isinstance(self.controller, Controller):
                 mode_result = self.controller.get_mode()
@@ -1957,10 +2442,14 @@ class HooksDaemon:
 
         pid = os.getpid()
 
-        # Check for stale PID file
+        # Check for stale PID file. The shared parser (round 5, P4-4): 0 and
+        # negative numbers are process groups, and kill(0, 0) succeeds
+        # against this daemon's own, so they would read as a live incumbent.
         if pid_file_path.exists():
             try:
-                old_pid = int(pid_file_path.read_text().strip())
+                old_pid = parse_pid_text(pid_file_path.read_text())
+                if old_pid is None:
+                    raise ValueError(f"no pid a daemon could hold in {pid_file_path}")
                 # Check if process exists
                 try:
                     os.kill(old_pid, 0)  # Signal 0 checks existence

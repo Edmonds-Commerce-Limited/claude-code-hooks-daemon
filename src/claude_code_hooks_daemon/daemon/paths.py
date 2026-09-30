@@ -1602,13 +1602,30 @@ def get_socket_path(project_dir: Path | str) -> Path:
 
     # Add hostname-based suffix for isolation
     suffix = _get_hostname_suffix()
-    path = untracked_dir / f"daemon{suffix}.sock"
+    return _fitted_socket_path(project_path, untracked_dir / f"daemon{suffix}.sock")
 
-    # Fallback if path exceeds AF_UNIX socket length limit
+
+def _fitted_socket_path(project_path: Path, path: Path) -> Path:
+    """``path``, or the fallback socket when it exceeds the AF_UNIX length limit."""
     if len(str(path)) > _UNIX_SOCKET_PATH_LIMIT:
         return _get_fallback_runtime_dir(project_path, "sock")
-
     return path
+
+
+def socket_path_paired_with(project_dir: Path | str, pid_file: Path) -> Path:
+    """The socket of the daemon whose PID file is ``pid_file``, found as it binds it.
+
+    The start lock guarding both files sits beside the socket, so this is
+    also where that lock is. This host's PID file pairs with
+    :func:`get_socket_path`; another host's (``daemon-{host}.pid``) with the
+    ``.sock`` beside it, through the same length fallback. The socket name
+    is one character longer than the PID file's, so a PID file path of
+    exactly the limit stays put while its socket falls back (review 8, R8-3).
+    """
+    project_path = Path(project_dir).resolve()
+    if pid_file == get_pid_path(project_path):
+        return get_socket_path(project_path)
+    return _fitted_socket_path(project_path, pid_file.with_suffix(".sock"))
 
 
 # Worst-case length of "<event-file-name>.sock" across every wired event
@@ -1997,6 +2014,68 @@ def is_daemon_pid(pid: int) -> bool:
     return _is_daemon_server_process(cmdline)
 
 
+#: Linux's PID_MAX_LIMIT: ``/proc/sys/kernel/pid_max`` can never exceed it,
+#: so a larger number names no process. Twin of init.sh's
+#: ``_HOOKS_DAEMON_PID_MAX``.
+PID_MAX_LIMIT = 4_194_304
+
+_PID_TEXT = re.compile(r"[1-9][0-9]{0,6}")
+
+
+def parse_pid_text(text: str) -> int | None:
+    """The pid a PID file's text names, or None when the file is CORRUPT.
+
+    Only the digits of one pid a daemon could hold qualify, optionally
+    followed by newlines (Plan 00466 round 4, Sh-B). ``0`` and negative
+    numbers are process GROUPS to ``kill(2)``, so ``kill -0`` on them
+    succeeds against the caller's own group; ``1`` is init; anything else is
+    not a pid. None of these can ever count as a running daemon. Twin of
+    init.sh's ``_hooks_daemon_is_pid_text``.
+    """
+    stripped = text.rstrip("\n")
+    if not _PID_TEXT.fullmatch(stripped):
+        return None
+    pid = int(stripped)
+    if pid <= 1 or pid > PID_MAX_LIMIT:
+        return None
+    return pid
+
+
+@dataclass(frozen=True)
+class PidRecord:
+    """The live pid a PID file names, and when the file was last written.
+
+    A daemon writes its PID file after it has started, so a process that
+    started later holds the pid reused since (review 10, R10-3).
+    """
+
+    pid: int
+    written_at: float
+
+
+@dataclass(frozen=True)
+class PidFileText:
+    """A PID file's text, or why there is none.
+
+    ``text`` is None both for a file that is absent and for one that cannot
+    be read; ``unreadable`` holds the error only for the second, which is
+    never proof the file names no process.
+    """
+
+    text: str | None
+    unreadable: str | None = None
+
+
+def read_pid_file_text(pid_path: Path) -> PidFileText:
+    """The text of ``pid_path``, as :class:`PidFileText`."""
+    try:
+        return PidFileText(text=pid_path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return PidFileText(text=None)
+    except (OSError, UnicodeDecodeError) as exc:
+        return PidFileText(text=None, unreadable=str(exc))
+
+
 def read_pid_file(pid_path: Path | str, verify_daemon: bool = False) -> int | None:
     """
     Read PID from file and verify process is alive.
@@ -2006,36 +2085,55 @@ def read_pid_file(pid_path: Path | str, verify_daemon: bool = False) -> int | No
         verify_daemon: When True, additionally require that the live PID's
             command line identifies a daemon SERVER process (guards against a
             stale PID file pointing at an unrelated process after reboot /
-            PID reuse). The stale PID file is cleaned up in that case too.
+            PID reuse).
+
+    A stale or corrupt file is never removed here: removal happens only
+    under the start lock (``server.remove_stale_pid_file``, and ``cmd_stop``),
+    and a starting daemon overwrites it.
 
     Returns:
         PID if file exists and process is alive (and, when ``verify_daemon`` is
-        set, is a daemon server), None otherwise
+        set, is a daemon server), None otherwise. A corrupt file
+        (:func:`parse_pid_text`) is never running.
+    """
+    record = read_pid_record(pid_path, verify_daemon)
+    return None if record is None else record.pid
+
+
+def read_pid_record(pid_path: Path | str, verify_daemon: bool = False) -> PidRecord | None:
+    """As :func:`read_pid_file`, with when the file was last written.
+
+    The time is read from the open file before its text, so a file rewritten
+    in between gives an older time than its pid, which only refuses more.
     """
     pid_path = Path(pid_path)
     try:
         with pid_path.open() as f:
-            pid = int(f.read().strip())
+            written_at = os.fstat(f.fileno()).st_mtime
+            text = f.read()
+
+        pid = parse_pid_text(text)
+        if pid is None:
+            logger.debug("Corrupt PID file %s: %r", pid_path, text)
+            return None
 
         if not is_pid_alive(pid):
-            # Stale PID file, clean it up
-            with contextlib.suppress(Exception):
-                pid_path.unlink()
+            # Stale, and left in place (round 4, N160): only a holder of the
+            # start lock may remove it, since a start writes its pid under
+            # that lock. A starting daemon overwrites it.
             return None
 
         if verify_daemon and not is_daemon_pid(pid):
-            # Alive but NOT our daemon (PID reuse / stale file): treat as not
-            # running and remove the misleading PID file.
+            # Alive but NOT our daemon (PID reuse / stale file): not running.
+            # The file stays (round 4, N139-A): its pid is alive.
             logger.debug("PID %d in %s is alive but is not a daemon server", pid, pid_path)
-            with contextlib.suppress(Exception):
-                pid_path.unlink()
             return None
 
-        return pid
+        return PidRecord(pid=pid, written_at=written_at)
     except FileNotFoundError:
         return None
-    except ValueError as e:
-        logger.debug("Invalid PID value in %s: %s", pid_path, e)
+    except UnicodeDecodeError as e:
+        logger.debug("Corrupt PID file %s: %s", pid_path, e)
         return None
     except (OSError, PermissionError) as e:
         logger.debug("Failed to read PID file %s: %s", pid_path, e)
@@ -2072,17 +2170,27 @@ def cleanup_socket(socket_path: Path | str) -> None:
         logger.error("Unexpected error cleaning socket %s: %s", socket_path, e, exc_info=True)
 
 
-def cleanup_pid_file(pid_path: Path | str) -> None:
+def cleanup_pid_file(pid_path: Path | str, pid: int) -> None:
     """
-    Remove PID file if it exists.
+    Remove the PID file only while it still holds ``pid``.
+
+    A daemon started after ``pid`` was found gone writes its own pid here,
+    and removing that file would orphan the live successor (Plan 00466
+    round 2, S2). A file that names another pid, or no readable pid, is left.
 
     Args:
         pid_path: Path to PID file (Path object or string)
+        pid: The pid the caller found stopped or stale
     """
     try:
         pid_path = Path(pid_path)
-        if pid_path.exists():
-            pid_path.unlink()
+        if not pid_path.exists():
+            return
+        held = pid_path.read_text().strip()
+        if held != str(pid):
+            logger.debug("PID file %s now holds %r, not %d; leaving it", pid_path, held, pid)
+            return
+        pid_path.unlink()
     except (OSError, PermissionError) as e:
         logger.warning("Failed to cleanup PID file %s: %s", pid_path, e)
     except Exception as e:

@@ -32,3 +32,24 @@ def test_build_initialised_controller_passes_config_fingerprint() -> None:
         _build_initialised_controller(config, Path("/tmp/does-not-need-to-exist"))
 
     assert captured["config_fingerprint"] == compute_config_fingerprint(config)
+
+
+def test_build_initialised_controller_passes_config_problems() -> None:
+    """Plan 00466 round 3: a config value the daemon did not apply as written
+    (an over-cap relay timeout) reaches initialise(), which hands it to the
+    SessionStart advisory."""
+    config = Config.model_validate({"daemon": {"transport": {"timeout_seconds": 90}}})
+    assert config.daemon.config_problems, "fixture must carry a problem"
+
+    captured: dict[str, Any] = {}
+
+    def fake_initialise(self: DaemonController, *args: Any, **kwargs: Any) -> None:
+        captured.update(kwargs)
+
+    with patch(
+        "claude_code_hooks_daemon.daemon.controller.DaemonController.initialise",
+        new=fake_initialise,
+    ):
+        _build_initialised_controller(config, Path("/tmp/does-not-need-to-exist"))
+
+    assert captured["config_problems"] == config.daemon.config_problems

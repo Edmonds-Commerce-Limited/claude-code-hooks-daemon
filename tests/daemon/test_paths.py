@@ -12,6 +12,7 @@ from unittest.mock import MagicMock, patch
 from claude_code_hooks_daemon.daemon.paths import (
     _HOSTNAME_FALLBACK,
     _UNIX_SOCKET_PATH_LIMIT,
+    PID_MAX_LIMIT,
     _resolve_hostname_from_env,
     cleanup_pid_file,
     cleanup_socket,
@@ -23,6 +24,7 @@ from claude_code_hooks_daemon.daemon.paths import (
     get_socket_path,
     is_daemon_pid,
     is_pid_alive,
+    parse_pid_text,
     read_pid_file,
     read_socket_discovery_file,
     resolve_hostname,
@@ -362,8 +364,9 @@ class TestPIDFileOperations(unittest.TestCase):
 
             self.assertEqual(result, current_pid)
 
-    def test_read_pid_file_returns_none_for_dead_process(self):
-        """Test read_pid_file returns None for dead process and cleans up."""
+    def test_read_pid_file_returns_none_for_dead_process_and_leaves_the_file(self):
+        """Plan 00466 round 4 (N160): a start writes its pid under the start
+        lock, so only a holder of that lock removes a stale file."""
         with tempfile.TemporaryDirectory() as tmpdir:
             pid_path = Path(tmpdir) / "test.pid"
             dead_pid = 999999  # Almost certainly not running
@@ -373,8 +376,44 @@ class TestPIDFileOperations(unittest.TestCase):
             result = read_pid_file(pid_path)
 
             self.assertIsNone(result)
-            # Stale PID file should be cleaned up
-            self.assertFalse(pid_path.exists())
+            self.assertEqual(pid_path.read_text(), str(dead_pid))
+
+    def test_read_pid_file_keeps_a_successors_pid_file(self):
+        """Plan 00466 round 2 (S2): the stale pid is found dead, and a
+        successor writes its own pid before the cleanup runs."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pid_path = Path(tmpdir) / "test.pid"
+            write_pid_file(pid_path, 999999)
+            successor = os.getpid()
+
+            def _dead_while_the_successor_writes(pid: int) -> bool:
+                write_pid_file(pid_path, successor)
+                return False
+
+            with patch(
+                "claude_code_hooks_daemon.daemon.paths.is_pid_alive",
+                side_effect=_dead_while_the_successor_writes,
+            ):
+                self.assertIsNone(read_pid_file(pid_path))
+
+            self.assertEqual(pid_path.read_text(), str(successor))
+
+    def test_read_pid_file_verify_daemon_keeps_a_successors_pid_file(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pid_path = Path(tmpdir) / "test.pid"
+            write_pid_file(pid_path, os.getpid())
+
+            def _not_a_daemon_while_the_successor_writes(pid: int) -> bool:
+                write_pid_file(pid_path, 424242)
+                return False
+
+            with patch(
+                "claude_code_hooks_daemon.daemon.paths.is_daemon_pid",
+                side_effect=_not_a_daemon_while_the_successor_writes,
+            ):
+                self.assertIsNone(read_pid_file(pid_path, verify_daemon=True))
+
+            self.assertEqual(pid_path.read_text(), "424242")
 
     def test_read_pid_file_returns_none_for_missing_file(self):
         """Test read_pid_file returns None when file doesn't exist."""
@@ -429,6 +468,42 @@ class TestPIDFileOperations(unittest.TestCase):
                 return_value=False,
             ):
                 self.assertIsNone(read_pid_file(pid_path, verify_daemon=True))
+
+    def test_read_pid_file_verify_daemon_keeps_a_live_non_daemons_file(self):
+        """Plan 00466 round 4 (N139-A): the pid is alive, so its file stays; a
+        starting daemon overwrites it under the start lock."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pid_path = Path(tmpdir) / "test.pid"
+            write_pid_file(pid_path, os.getpid())
+            with patch(
+                "claude_code_hooks_daemon.daemon.paths.is_daemon_pid",
+                return_value=False,
+            ):
+                self.assertIsNone(read_pid_file(pid_path, verify_daemon=True))
+            self.assertEqual(pid_path.read_text(), str(os.getpid()))
+
+    def test_read_pid_file_never_counts_a_corrupt_file_as_running(self):
+        """Plan 00466 round 4 (Sh-B): ``kill(0, 0)`` and ``kill(-1, 0)`` succeed
+        against process groups, and pid 1 is init, so none is a daemon."""
+        for text in ("0", "-1", "1", "", "\n", " 12", "1_2", "+12", "007", "4194305"):
+            with self.subTest(text=text), tempfile.TemporaryDirectory() as tmpdir:
+                pid_path = Path(tmpdir) / "test.pid"
+                pid_path.write_text(text)
+                self.assertIsNone(read_pid_file(pid_path))
+
+    def test_read_pid_file_reads_undecodable_bytes_as_corrupt(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pid_path = Path(tmpdir) / "test.pid"
+            pid_path.write_bytes(b"\xff\xfe")
+            self.assertIsNone(read_pid_file(pid_path))
+
+    def test_parse_pid_text_accepts_only_a_daemons_pid(self):
+        self.assertEqual(parse_pid_text("12345"), 12345)
+        self.assertEqual(parse_pid_text("12345\n"), 12345)
+        self.assertEqual(parse_pid_text(str(PID_MAX_LIMIT)), PID_MAX_LIMIT)
+        for text in ("0", "-5", "1", "", "a", "12 ", "\n12", str(PID_MAX_LIMIT + 1)):
+            with self.subTest(text=text):
+                self.assertIsNone(parse_pid_text(text))
 
     def test_read_pid_file_verify_daemon_accepts_daemon_process(self):
         """read_pid_file(verify_daemon=True) returns the PID when it IS a daemon."""
@@ -508,7 +583,7 @@ class TestPIDFileOperations(unittest.TestCase):
             pid_path = Path(tmpdir) / "test.pid"
             pid_path.write_text("12345")
 
-            cleanup_pid_file(pid_path)
+            cleanup_pid_file(pid_path, 12345)
 
             self.assertFalse(pid_path.exists())
 
@@ -518,7 +593,7 @@ class TestPIDFileOperations(unittest.TestCase):
             pid_path = Path(tmpdir) / "nonexistent.pid"
 
             # Should not raise exception
-            cleanup_pid_file(pid_path)
+            cleanup_pid_file(pid_path, 12345)
 
     def test_cleanup_pid_file_accepts_string_path(self):
         """Test cleanup_pid_file accepts string paths."""
@@ -526,9 +601,29 @@ class TestPIDFileOperations(unittest.TestCase):
             pid_path = Path(tmpdir) / "test.pid"
             pid_path.write_text("12345")
 
-            cleanup_pid_file(str(pid_path))
+            cleanup_pid_file(str(pid_path), 12345)
 
             self.assertFalse(pid_path.exists())
+
+    def test_cleanup_pid_file_keeps_a_file_that_names_another_pid(self):
+        """Plan 00466 round 2 (S2): a successor that wrote its own pid owns
+        the file; removing it would orphan that live daemon."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pid_path = Path(tmpdir) / "test.pid"
+            pid_path.write_text("67890")
+
+            cleanup_pid_file(pid_path, 12345)
+
+            self.assertEqual(pid_path.read_text(), "67890")
+
+    def test_cleanup_pid_file_keeps_a_file_it_cannot_read_as_a_pid(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pid_path = Path(tmpdir) / "test.pid"
+            pid_path.write_text("not-a-pid")
+
+            cleanup_pid_file(pid_path, 12345)
+
+            self.assertEqual(pid_path.read_text(), "not-a-pid")
 
     @patch("pathlib.Path.unlink")
     def test_cleanup_pid_file_handles_exception(self, mock_unlink):
@@ -540,7 +635,7 @@ class TestPIDFileOperations(unittest.TestCase):
             pid_path.write_text("12345")
 
             # Should not raise exception
-            cleanup_pid_file(pid_path)
+            cleanup_pid_file(pid_path, 12345)
 
     @patch("pathlib.Path.unlink")
     def test_cleanup_pid_file_handles_unexpected_exception(self, mock_unlink):
@@ -552,7 +647,7 @@ class TestPIDFileOperations(unittest.TestCase):
             pid_path.write_text("12345")
 
             # Should not raise exception
-            cleanup_pid_file(pid_path)
+            cleanup_pid_file(pid_path, 12345)
 
 
 class TestSocketCleanup(unittest.TestCase):

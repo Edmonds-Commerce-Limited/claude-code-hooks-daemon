@@ -333,6 +333,70 @@ class TestTheAnchorReachesTheCommand:
         assert "plan tree is clean" not in result.stdout.lower()
 
 
+_CALLER_ROOT_STUB: Final[str] = """#!/bin/bash
+printf '%s\\n' "${CLAUDE_HOOKS_DAEMON_CALLER_ROOT-<unset>}"
+"""
+
+
+def _caller_root(wrapper: Path, daemon_dir: Path, cwd: Path) -> str:
+    """The logical root the wrapper hands the CLI, run by ``wrapper``'s path."""
+    stub = daemon_dir / "stub-python"
+    stub.write_text(_CALLER_ROOT_STUB, encoding="utf-8")
+    result = _run_raw(wrapper, cwd, "status")
+    assert result.returncode == 0, result.stderr
+    return result.stdout.strip()
+
+
+class TestTheCallersLogicalRootIsHandedOver:
+    """Round 9b: the CLI is anchored to the resolved root, and is also told
+    the root as the caller reached it, which a daemon an older ``init.sh``
+    started through a link names."""
+
+    def test_a_client_wrapper_reached_through_a_link_hands_over_the_link(
+        self, tmp_path: Path
+    ) -> None:
+        _client_project(tmp_path / "real" / "project")
+        (tmp_path / "link").symlink_to(tmp_path / "real")
+        linked = tmp_path / "link" / "project"
+        daemon_dir = linked / ".claude" / "hooks-daemon"
+
+        caller_root = _caller_root(daemon_dir / "bin" / "hooks-daemon", daemon_dir, tmp_path)
+
+        assert caller_root == str(linked)
+
+    def test_a_relative_invocation_is_spelt_from_the_callers_logical_directory(
+        self, tmp_path: Path
+    ) -> None:
+        _self_install_project(tmp_path / "real" / "project")
+        (tmp_path / "link").symlink_to(tmp_path / "real")
+        linked = tmp_path / "link" / "project"
+        env = {"PATH": "/usr/bin:/bin", "PWD": str(linked)}
+        (linked / "stub-python").write_text(_CALLER_ROOT_STUB, encoding="utf-8")
+
+        result = subprocess.run(
+            ["bash", "-c", 'cd "$PWD" && bin/hooks-daemon status'],
+            cwd=str(linked),
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=_STUB_TIMEOUT_SECONDS,
+            check=False,
+        )
+
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.strip() == str(linked)
+
+    def test_a_wrapper_run_through_a_link_to_itself_hands_over_none(self, tmp_path: Path) -> None:
+        """Its own path says nothing about how the project was reached."""
+        wrapper = _client_project(tmp_path / "project")
+        on_path = tmp_path / "hooks-daemon"
+        on_path.symlink_to(wrapper)
+
+        caller_root = _caller_root(on_path, wrapper.parent.parent, tmp_path)
+
+        assert caller_root == ""
+
+
 class TestBothCopiesStayIdentical:
     """The template and the deployed self-install copy must not drift."""
 

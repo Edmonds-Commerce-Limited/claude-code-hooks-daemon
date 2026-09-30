@@ -1,9 +1,15 @@
 """Tests for ClientInstallValidator."""
 
+import errno
 import json
+import os
+import shutil
+import socket
 import subprocess
 import sys
+import tempfile
 import time
+from pathlib import Path
 
 import psutil
 import pytest
@@ -11,11 +17,19 @@ import yaml
 
 from claude_code_hooks_daemon.constants.paths import DaemonPath
 from claude_code_hooks_daemon.constants.timeout import Timeout
+from claude_code_hooks_daemon.daemon import server
+from claude_code_hooks_daemon.daemon.paths import (
+    _UNIX_SOCKET_PATH_LIMIT,
+    PID_MAX_LIMIT,
+    get_pid_path,
+    get_socket_path,
+)
 from claude_code_hooks_daemon.install import bin_wrapper
 from claude_code_hooks_daemon.install.client_validator import (
     ClientInstallValidator,
     ValidationResult,
 )
+from claude_code_hooks_daemon.utils.safe_signal import DaemonStop
 
 _DAEMON_MODULE = "claude_code_hooks_daemon.daemon.cli"
 #: Above Linux's default pid_max, so no process can have it.
@@ -276,7 +290,7 @@ class TestCheckRunningDaemon:
         pid_file = untracked_dir / "daemon.pid"
         pid_file.write_text(str(running_pid))
 
-        def stop_without_permission(pid, *, project_root, grace_seconds):
+        def stop_without_permission(pid, *, project_root, grace_seconds, recorded_at):
             raise PermissionError("operation not permitted")
 
         monkeypatch.setattr(cv_module, "stop_verified_daemon", stop_without_permission)
@@ -334,6 +348,52 @@ class TestCheckRunningDaemon:
 
         assert other.poll() is None, "the installer signalled another project's daemon"
         assert any("Did not signal" in w for w in result.warnings)
+
+    @pytest.mark.parametrize("error", [errno.EINVAL, errno.ENOMEM])
+    def test_a_daemon_that_cannot_be_pinned_is_warned_about_not_signalled(
+        self, tmp_path, spawned, monkeypatch, error
+    ):
+        """Review 8, R8-4: a ``pidfd_open`` error outside the no-pidfd list
+        escaped the installer's check as a bare ``OSError``."""
+        project_root = tmp_path / "project"
+        untracked_dir = project_root / ".claude" / "hooks-daemon" / "untracked"
+        untracked_dir.mkdir(parents=True)
+        daemon = spawned(_DAEMON_MODULE, "--project-root", str(project_root), "start")
+        pid_file = untracked_dir / "daemon-abc.pid"
+        pid_file.write_text(str(daemon.pid))
+
+        def failing(pid, flags=0):
+            raise OSError(error, os.strerror(error))
+
+        monkeypatch.setattr(os, "pidfd_open", failing)
+
+        result = ClientInstallValidator._check_running_daemon(project_root)
+
+        assert daemon.poll() is None, "the installer signalled a daemon it could not pin"
+        assert pid_file.exists()
+        assert any(
+            "Did not signal" in w and os.strerror(error) in w for w in result.warnings
+        ), result.warnings
+
+    def test_a_daemon_started_after_its_pid_file_was_written_is_never_signalled(
+        self, tmp_path, spawned
+    ):
+        """Review 10, R10-3: a daemon writes its PID file after it has
+        started, so a process that started after the file was written holds
+        a pid reused since. Here the file is made older than the daemon."""
+        project_root = tmp_path / "project"
+        untracked_dir = project_root / ".claude" / "hooks-daemon" / "untracked"
+        untracked_dir.mkdir(parents=True)
+        daemon = spawned(_DAEMON_MODULE, "--project-root", str(project_root), "start")
+        pid_file = untracked_dir / "daemon-abc.pid"
+        pid_file.write_text(str(daemon.pid))
+        written = psutil.Process(daemon.pid).create_time() - 60
+        os.utime(pid_file, (written, written))
+
+        result = ClientInstallValidator._check_running_daemon(project_root)
+
+        assert daemon.poll() is None, "the installer signalled a pid reused after its file"
+        assert any("Did not signal" in w and "started after" in w for w in result.warnings)
 
     def test_an_unreadable_pid_file_is_reported_not_ignored(self, tmp_path):
         project_root = tmp_path / "project"
@@ -518,21 +578,20 @@ class TestCleanupStaleRuntimeFiles:
         result = ClientInstallValidator.cleanup_stale_runtime_files(project_root)
         assert result.passed is True
 
-    def test_removes_stale_socket_files(self, tmp_path):
-        """Test cleanup removes stale socket files."""
-        project_root = tmp_path / "project"
-        project_root.mkdir()
-        untracked_dir = project_root / ".claude" / "hooks-daemon" / "untracked"
-        untracked_dir.mkdir(parents=True)
+    def test_removes_stale_socket_files(self, short_untracked):
+        """A socket its daemon bound and left behind when it died is removed.
+        The path is short enough to probe: one too long for AF_UNIX cannot be
+        proven dead, so it stays."""
+        socket_file = short_untracked / "daemon.sock"
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as orphaned:
+            orphaned.bind(str(socket_file))
 
-        # Create stale socket file
-        socket_file = untracked_dir / "daemon.sock"
-        socket_file.write_text("")
-
-        result = ClientInstallValidator.cleanup_stale_runtime_files(project_root)
+        result = ClientInstallValidator.cleanup_stale_runtime_files(
+            short_untracked.parent.parent.parent
+        )
         assert result.passed is True
         assert not socket_file.exists()
-        assert len(result.warnings) > 0
+        assert "Removed stale socket file: daemon.sock" in result.warnings
 
     def test_removes_stale_pid_files(self, tmp_path):
         """Test cleanup removes stale PID files."""
@@ -547,6 +606,133 @@ class TestCleanupStaleRuntimeFiles:
 
         result = ClientInstallValidator.cleanup_stale_runtime_files(project_root)
         assert result.passed is True
+        assert not pid_file.exists()
+
+
+@pytest.fixture
+def short_untracked():
+    """A client install's untracked directory on a path short enough for
+    AF_UNIX, which ``tmp_path`` nests too deep for."""
+    root = Path(tempfile.mkdtemp(prefix="hd-cv-"))
+    untracked = root / ".claude" / "hooks-daemon" / "untracked"
+    untracked.mkdir(parents=True)
+    yield untracked
+    shutil.rmtree(root)
+
+
+class TestRuntimeFilesGoOnlyUnderTheStartLockAndOnlyWhileDead:
+    """Plan 00466 N205: the installer removed PID files and sockets with no
+    start lock and no liveness check, where ``cmd_stop``'s release takes the
+    lock, removes a PID file only while it holds the stopped pid, and never
+    a live socket. A daemon starting meanwhile lost its files."""
+
+    # Parseable, yet above the largest pid pid_max allows, so it names no process.
+    _DEAD_PID = PID_MAX_LIMIT
+
+    @staticmethod
+    def _project(untracked: Path) -> Path:
+        return untracked.parent.parent.parent
+
+    def test_a_live_socket_is_never_removed(self, short_untracked):
+        socket_path = short_untracked / "daemon.sock"
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as listener:
+            listener.bind(str(socket_path))
+            listener.listen()
+            ClientInstallValidator.cleanup_stale_runtime_files(self._project(short_untracked))
+            assert socket_path.exists()
+
+    def test_another_users_live_pid_keeps_its_file(self, short_untracked, monkeypatch):
+        """Tests run as root, so ``kill(pid, 0)`` is made to be refused, as
+        it is for another user's process."""
+        pid_file = short_untracked / "daemon.pid"
+        pid_file.write_text(str(self._DEAD_PID))
+
+        def refused(pid, sig):
+            raise PermissionError(1, "Operation not permitted")
+
+        monkeypatch.setattr(os, "kill", refused)
+        ClientInstallValidator.cleanup_stale_runtime_files(self._project(short_untracked))
+
+        assert pid_file.exists()
+
+    def test_a_start_holding_the_lock_keeps_its_files(self, short_untracked, monkeypatch):
+        pid_file = short_untracked / "daemon.pid"
+        pid_file.write_text(str(self._DEAD_PID))
+        socket_path = short_untracked / "daemon.sock"
+        socket_path.write_text("")
+        monkeypatch.setattr(Timeout, "FILE_LOCK", 0)
+        with server.hold_start_lock(socket_path, Timeout.FILE_LOCK):
+            ClientInstallValidator.cleanup_stale_runtime_files(self._project(short_untracked))
+            ClientInstallValidator._check_running_daemon(self._project(short_untracked))
+
+        assert pid_file.exists()
+        assert socket_path.exists()
+
+    def test_a_successors_pid_file_outlives_the_daemon_that_was_gone(
+        self, short_untracked, monkeypatch
+    ):
+        """The daemon the file named has gone, and a start has written its
+        own pid there before the installer removes the file."""
+        from claude_code_hooks_daemon.install import client_validator as cv_module
+
+        pid_file = short_untracked / "daemon.pid"
+        pid_file.write_text(str(self._DEAD_PID))
+        successor = str(os.getpid())
+
+        def gone_and_succeeded(pid, *, project_root, grace_seconds, recorded_at):
+            pid_file.write_text(successor)
+            return DaemonStop.ALREADY_GONE
+
+        monkeypatch.setattr(cv_module, "stop_verified_daemon", gone_and_succeeded)
+        ClientInstallValidator._check_running_daemon(self._project(short_untracked))
+
+        assert pid_file.read_text() == successor
+
+    def test_a_pid_file_naming_no_process_goes(self, short_untracked):
+        pid_file = short_untracked / "daemon.pid"
+        pid_file.write_text(f"{self._DEAD_PID}\n")
+
+        ClientInstallValidator._check_running_daemon(self._project(short_untracked))
+
+        assert not pid_file.exists()
+
+    @pytest.fixture
+    def pid_file_at_the_limit(self, monkeypatch):
+        """This host's PID file in a client install, at exactly the AF_UNIX
+        limit, so its socket (one character longer) falls back to a runtime
+        directory of the test's own."""
+        monkeypatch.setenv("HOSTNAME", "cvhost")
+        monkeypatch.delenv("CLAUDE_HOOKS_SOCKET_PATH", raising=False)
+        monkeypatch.delenv("CLAUDE_HOOKS_PID_PATH", raising=False)
+        base = Path(tempfile.mkdtemp(prefix="hd-cv-"))
+        runtime = base / "run"
+        runtime.mkdir()
+        monkeypatch.setenv("XDG_RUNTIME_DIR", str(runtime))
+        tail = "/.claude/hooks-daemon/untracked/daemon-cvhost.pid"
+        padding = _UNIX_SOCKET_PATH_LIMIT - len(f"{base}/{tail}")
+        assert padding > 0
+        project = base / ("p" * padding)
+        (project / ".claude" / "hooks-daemon" / "untracked").mkdir(parents=True)
+        pid_file = get_pid_path(project)
+        assert len(str(pid_file)) == _UNIX_SOCKET_PATH_LIMIT
+        assert get_socket_path(project).parent == runtime
+        pid_file.write_text(str(self._DEAD_PID))
+        yield project, pid_file, get_socket_path(project)
+        shutil.rmtree(base)
+
+    def test_a_pid_file_at_the_limit_goes_under_its_sockets_real_lock(
+        self, pid_file_at_the_limit, monkeypatch
+    ):
+        """Review 8, R8-3: the lock was taken beside the PID file, where no
+        start takes it, while the start held the fallback socket's."""
+        project, pid_file, socket_path = pid_file_at_the_limit
+        monkeypatch.setattr(Timeout, "FILE_LOCK", 0)
+        with server.hold_start_lock(socket_path, Timeout.FILE_LOCK):
+            ClientInstallValidator.cleanup_stale_runtime_files(project)
+            ClientInstallValidator._check_running_daemon(project)
+            assert pid_file.exists()
+
+        ClientInstallValidator.cleanup_stale_runtime_files(project)
         assert not pid_file.exists()
 
 
