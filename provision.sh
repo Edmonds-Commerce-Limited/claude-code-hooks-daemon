@@ -115,9 +115,8 @@ _provision_say "Provisioning the hooks daemon $TAG for this checkout (version fr
 # Step 2: is this a fresh checkout?
 # ------------------------------------------------------------------
 if _daemon_clone_present; then
-    # The resolved interpreter is judged, not the return status of
-    # _resolve_python_cmd: that returns 0 after a failed resolve and leaves
-    # PYTHON_CMD empty.
+    # The resolved interpreter must also exist on disk, so it is judged as well
+    # as the status of _resolve_python_cmd.
     PYTHON_CMD=""
     if ! _resolve_python_cmd; then
         PYTHON_CMD=""

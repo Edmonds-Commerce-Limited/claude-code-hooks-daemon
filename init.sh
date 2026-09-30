@@ -1215,13 +1215,16 @@ _resolve_python_cmd() {
     # shellcheck disable=SC1090  # path is computed at runtime
     source "$lib"
 
-    if PYTHON_CMD="$(resolve_venv_python "$HOOKS_DAEMON_ROOT_DIR")"; then
-        return 0
+    # The status is captured from the assignment itself: after an `if` with no
+    # `else` whose condition failed, $? is 0, which made a failed resolve look
+    # like success with PYTHON_CMD empty.
+    local rv=0
+    PYTHON_CMD="$(resolve_venv_python "$HOOKS_DAEMON_ROOT_DIR")" || rv=$?
+    if [[ "$rv" -ne 0 ]]; then
+        PYTHON_CMD=""
+        return "$rv"
     fi
-
-    local rv=$?
-    PYTHON_CMD=""
-    return "$rv"
+    return 0
 }
 
 #
