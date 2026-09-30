@@ -42,12 +42,14 @@ from typing import Any
 
 import yaml
 
+from claude_code_hooks_daemon.install.core_docs import CORE_DOCS_DIR, CORE_SUFFIX
 from claude_code_hooks_daemon.install.install_stamp import is_branch_install
 from claude_code_hooks_daemon.install.report_offload import (
     SUMMARY_MAX_BYTES,
     bound_summary,
     write_offloaded_report,
 )
+from claude_code_hooks_daemon.install.upgrade_gate import HOOKS_DAEMON_DOC
 from claude_code_hooks_daemon.install.version_parse import parse_version_tuple
 
 # ---------------------------------------------------------------------------
@@ -67,6 +69,7 @@ _FIELD_WAS = "was"
 _FIELD_NOW = "now"
 _FIELD_ID = "id"
 _FIELD_TOPIC = "topic"
+_FIELD_STALE_PHRASES = "stale_phrases"
 
 _FORMAT_TEXT = "text"
 
@@ -86,10 +89,16 @@ _TRAIL_INSTRUCTION = (
     "the releases it lists; those earlier forms are deliberately not shown. Reconcile "
     "any earlier form of that statement in the docs to the same NOW."
 )
+_DAEMON_OWNED_DOCS = (
+    f"{CORE_DOCS_DIR}/*{CORE_SUFFIX}, {HOOKS_DAEMON_DOC.as_posix()}, and the generated "
+    "<hooksdaemon> block in CLAUDE.md"
+)
 _RULES_INSTRUCTION = (
     "For each entry below, scan the PROJECT'S OWN docs (CLAUDE/, docs/, README*, "
     "AGENTS* — never .claude/hooks-daemon/ internals) for the 'was' statement and "
-    "reconcile it. Minimal edits."
+    "reconcile it. Minimal edits. Never edit the daemon-owned docs "
+    f"({_DAEMON_OWNED_DOCS}): the daemon regenerates them on every upgrade, so an "
+    "edit is lost and the daemon's own copy already states the current truth."
 )
 _SEQUENTIAL_CHUNK_INSTRUCTION = (
     f"This chunk is {_LABEL_SEQUENTIAL}: its entries carry no topic, so the documents "
@@ -107,8 +116,9 @@ _DISPATCH_INSTRUCTION = (
     "returns ONLY the files it changed (one line each) — not the entries it read."
 )
 _CHUNKS_HEADING = (
-    "Chunks — dispatch each as its own subagent, in parallel; the documents one "
-    "chunk touches are disjoint from every other chunk's:"
+    "Chunks — dispatch each as its own subagent, in parallel; chunks group truths "
+    "by document area, but each scans the whole docs tree, so a subagent re-reads "
+    "a file just before editing it in case a sibling chunk changed it:"
 )
 
 
@@ -134,12 +144,17 @@ class TruthChange:
             Entries sharing a topic are chunked together for delegation;
             two truths that could edit the same document must share one.
             Never collapses anything. None means "no area declared".
+        stale_phrases: Verbatim phrases the OLD truth had in text this daemon
+            ships (its templates). Not shown to the reconciling agent; a
+            release-time test fails while any is still in a shipped template,
+            because ``was`` is prose and cannot be matched literally.
     """
 
     was: str
     now: str | None
     id: str | None = None
     topic: str | None = None
+    stale_phrases: tuple[str, ...] = ()
 
     @property
     def is_removal(self) -> bool:
@@ -195,9 +210,25 @@ class TruthChangeManifest:
                     now=entry.get(_FIELD_NOW),
                     id=change_id,
                     topic=_parse_entry_slug(entry.get(_FIELD_TOPIC), version, _FIELD_TOPIC),
+                    stale_phrases=_parse_stale_phrases(entry.get(_FIELD_STALE_PHRASES), version),
                 )
             )
         return cls(version=version, changes=changes)
+
+
+def _parse_stale_phrases(raw: Any, version: str) -> tuple[str, ...]:
+    """Return the entry's ``stale_phrases``, or an empty tuple when it declares none.
+
+    Raises:
+        ValueError: If the key is present but is not a list of non-blank strings.
+    """
+    if raw is None:
+        return ()
+    if not isinstance(raw, list) or not all(isinstance(item, str) and item.strip() for item in raw):
+        raise ValueError(
+            f"truth-changes v{version}: {_FIELD_STALE_PHRASES} must be a list of non-blank strings"
+        )
+    return tuple(raw)
 
 
 def _parse_entry_slug(raw: Any, version: str, field: str) -> str | None:

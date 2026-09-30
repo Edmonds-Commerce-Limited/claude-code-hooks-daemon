@@ -225,7 +225,8 @@ CLAUDE/Plan/mkplan.bash --journal <plan-number> <category> untracked/scratch/jou
 ```
 
 `<category>` is one of `action`, `finding`, `decision`, `thought`, `blocker`,
-`handoff`; add `--ref T1.2` for a task reference. The script creates today's
+`handoff`, `correction`; add `--ref T1.2` for a task reference (a `correction`
+requires `--ref` naming the entry it corrects). The script creates today's
 day-file from the template when there is none. Use a new body-file name for
 every entry (a reused one is refused by the clobber guard), your configured
 plan directory if it is not `CLAUDE/Plan/`, and, in a worktree, that
@@ -588,7 +589,8 @@ When new work is identified:
 
 For long, multi-hour plan executions, set up a **non-durable hourly failsafe
 recovery cron** at the start of execution (the `recovery_cron_advisor` handler
-prompts this on plan creation/progress when enabled). It is a safety net that
+prompts this on plan creation/progress when enabled, and
+`failsafe_cron_session_advisor` prompts it at SessionStart of a new session). It is a safety net that
 resumes work stalled by **external** factors — Claude API overload, rate limits,
 usage limits, network failures — by firing only while the REPL is idle.
 

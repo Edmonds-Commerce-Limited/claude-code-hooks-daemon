@@ -40,18 +40,30 @@ truth_changes:
     now: "How a plan is created from this release on."
 ```
 
-Two keys per entry, plus two optional keys:
+Two keys per entry, plus three optional keys:
+
+- **`stale_phrases`** (optional) — a list of exact phrases the OLD truth had in text
+  the daemon itself ships (its templates under `install/templates/`). Matched
+  literally, with whitespace collapsed so a line wrap does not hide a match. Never
+  shown to the reconciling agent. `tests/unit/install/test_truth_changes_template_guard.py`
+  fails while any listed phrase is still in a shipped template, so the daemon cannot
+  ship a document that contradicts its own manifest. Use it when the changed truth
+  was asserted in a template; `was` itself is prose and cannot be matched literally.
+  Pick a phrase that is gone once the template says `now`.
 
 - **`was`** — what the docs used to assert, in plain language. The LLM finds docs
   that assert this and reconciles them. No `detect:` shell probes — the LLM is the
   matcher.
+
 - **`now`** — the replacement truth, **or `~`/empty** to mean "this is no longer
   true; remove all reference to it, there is no replacement."
+
 - **`id`** (optional) — a stable kebab-case slug naming the **truth**, not the
   release. Give an entry the same `id` as an earlier release's entry when it
   revises that same truth again (its `was` is roughly the earlier entry's `now`).
   Omit it for a truth that stands alone. A blank `id`, or the same `id` twice in
   one file, is a load error.
+
 - **`topic`** (expected on every entry) — a kebab-case slug naming the **document
   area** the truth lives in (`plan-workflow`, `daemon-cli`, `git-safety`, …).
   Entries sharing a topic are written to one chunk file for delegation; two truths

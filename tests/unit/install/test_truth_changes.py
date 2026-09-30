@@ -12,8 +12,10 @@ from pathlib import Path
 
 import pytest
 
+from claude_code_hooks_daemon.install.core_docs import CORE_DOCS_DIR, CORE_SUFFIX
 from claude_code_hooks_daemon.install.report_offload import SUMMARY_MAX_BYTES
 from claude_code_hooks_daemon.install.truth_changes import (
+    _CHUNKS_HEADING,
     UNASSIGNED_CHUNK_KEY,
     ReportChunk,
     SurfacedTruthChange,
@@ -29,6 +31,7 @@ from claude_code_hooks_daemon.install.truth_changes import (
     run_check_truth_changes,
     write_truth_changes_report,
 )
+from claude_code_hooks_daemon.install.upgrade_gate import HOOKS_DAEMON_DOC
 
 _REAL_TRUTH_CHANGES_DIR = (
     Path(__file__).resolve().parents[3] / "CLAUDE" / "UPGRADES" / "truth-changes"
@@ -112,6 +115,25 @@ class TestTruthChangeManifestParsing:
     def test_from_dict_missing_version_raises(self) -> None:
         with pytest.raises(KeyError):
             TruthChangeManifest.from_dict({"truth_changes": []})
+
+    def test_from_dict_parses_stale_phrases(self) -> None:
+        manifest = TruthChangeManifest.from_dict(
+            {
+                "version": "3.16.0",
+                "truth_changes": [{"was": "w", "now": "n", "stale_phrases": ["a b", "c"]}],
+            }
+        )
+        assert manifest.changes[0].stale_phrases == ("a b", "c")
+
+    def test_stale_phrases_default_to_none_declared(self) -> None:
+        assert TruthChange(was="w", now="n").stale_phrases == ()
+
+    @pytest.mark.parametrize("bad", ["a string", [""], [3], ["  "]])
+    def test_from_dict_rejects_malformed_stale_phrases(self, bad: object) -> None:
+        with pytest.raises(ValueError, match="stale_phrases"):
+            TruthChangeManifest.from_dict(
+                {"version": "3.16.0", "truth_changes": [{"was": "w", "stale_phrases": bad}]}
+            )
 
     def test_from_dict_missing_was_raises(self) -> None:
         with pytest.raises(KeyError):
@@ -624,6 +646,29 @@ class TestFormatChunkForSubagent:
         assert "Run the CLI via bin/hooks-daemon." not in text
         assert "files you changed" in text
         assert "not the entries" in text
+
+    def test_chunk_text_excludes_every_daemon_owned_deployed_doc(self, topic_dir: Path) -> None:
+        """A client must not edit what an upgrade regenerates (issue #63).
+
+        The paths are read from the modules that own them, so a new core doc is
+        excluded without touching this test or the rule text.
+        """
+        manifests = load_truth_changes_between("3.29.0", "3.31.0", truth_changes_dir=topic_dir)
+        chunks = chunk_by_topic(collapse_superseded(manifests))
+        text = format_chunk_for_subagent(chunks[0], "3.29.0", "3.31.0")
+        assert f"{CORE_DOCS_DIR}/*{CORE_SUFFIX}" in text
+        assert HOOKS_DAEMON_DOC.as_posix() in text
+        assert "<hooksdaemon>" in text
+        assert "regenerate" in text
+
+    def test_full_report_carries_the_same_exclusions(self, truth_dir: Path) -> None:
+        manifests = load_truth_changes_between("3.15.0", "3.17.0", truth_changes_dir=truth_dir)
+        text = format_truth_changes_for_llm(manifests, "3.15.0", "3.17.0")
+        assert f"{CORE_DOCS_DIR}/*{CORE_SUFFIX}" in text
+
+    def test_dispatch_text_does_not_promise_disjoint_documents(self) -> None:
+        """Two chunks scanning one tree cannot be disjoint, so the text must not say so."""
+        assert "disjoint" not in _CHUNKS_HEADING
 
     def test_sequential_chunk_says_why_it_runs_alone(self, topic_dir: Path) -> None:
         manifests = load_truth_changes_between("3.29.0", "3.31.0", truth_changes_dir=topic_dir)
