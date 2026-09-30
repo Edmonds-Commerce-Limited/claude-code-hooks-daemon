@@ -23,14 +23,64 @@ from claude_code_hooks_daemon.core.response_schemas import (
 from claude_code_hooks_daemon.core.workspace import DeclaredProject, ProjectRegistry
 from claude_code_hooks_daemon.daemon.paths import get_pid_path
 
+# Plan 00463 round 9: the sink-side backstop. Every route to a whole-suite-sized
+# pytest run ends up HERE regardless of what launched it, so this is where the
+# host-wide full-QA lock (claude_code_hooks_daemon.qa.full_qa_lock) is
+# actually enforced — the Bash handler (subagent_full_qa_blocker) is the fast,
+# friendly first line, not the guarantee. See qa/full_qa_gate.py's docstring.
+from claude_code_hooks_daemon.qa.full_qa_gate import pytest_collection_modifyitems
+
 # Re-exported so pytest collects it as a hook implementation from this
 # conftest. It sits at `tests/` root rather than in a subdirectory because the
 # relay-dependent gates it covers straddle `acceptance/` and `integration/`.
 # Outside CI it does nothing at all — see the module docstring.
 from tests.relay_gate_guard import pytest_runtest_makereport
+from tests.signal_safety_net import install as install_signal_safety_net
+from tests.signal_safety_net import uninstall as uninstall_signal_safety_net
 from tests.source_tree_guard import assert_package_is_this_checkout
 
-__all__ = ["pytest_runtest_makereport"]
+__all__ = ["pytest_collection_modifyitems", "pytest_runtest_makereport"]
+
+# Loaded here, not with `-p`: a `-p` plugin is imported while pytest parses its
+# arguments, before pytest-cov starts, so the package it imports goes
+# unmeasured (00466 N110 round 3). It records only when --first-error-lines is
+# given. Named as a string, not imported, so pytest imports it and rewrites its
+# asserts; tests/unit/qa/test_run_test_matrix.py checks the name resolves.
+pytest_plugins = ["claude_code_hooks_daemon.qa.first_error_lines"]
+
+
+@pytest.fixture(autouse=True, scope="session")
+def signal_safety_net() -> Generator[None, None, None]:
+    """Plan 00466 N59: no signal from the test run may reach init, us or our callers.
+
+    A ``MagicMock`` pid coerces to 1, and ``killpg(getpgid(1), SIGKILL)`` from a
+    unit test killed the container's init twice. For the whole session
+    ``os.kill`` and ``os.killpg`` refuse, without delivering, a nonzero signal
+    to pid 1, group 1, this process, its group, any ancestor or Claude Code.
+    See ``tests/signal_safety_net.py``.
+    """
+    net = install_signal_safety_net()
+    try:
+        yield
+    finally:
+        uninstall_signal_safety_net(net)
+
+
+@pytest.fixture(autouse=True)
+def no_refused_signal_left_behind(signal_safety_net: None) -> Generator[None, None, None]:
+    """Fail a test whose code swallowed a refused signal instead of surfacing it."""
+    from tests.signal_safety_net import installed_net
+
+    yield
+    net = installed_net()
+    if net is None:
+        raise AssertionError("signal safety net was uninstalled during the test")
+    violations = net.drain_violations()
+    if violations:
+        raise AssertionError(
+            "This test tried to signal a protected process and the refusal was "
+            "caught instead of failing the test:\n" + "\n".join(violations)
+        )
 
 
 def pytest_sessionstart(session: pytest.Session) -> None:

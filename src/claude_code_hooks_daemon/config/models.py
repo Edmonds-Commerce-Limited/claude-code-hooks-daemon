@@ -14,6 +14,7 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    PrivateAttr,
     field_validator,
     model_validator,
 )
@@ -1562,6 +1563,8 @@ class TransportConfig(BaseModel):
         timeout_seconds: Relay ``--timeout-ms`` source (converted at deploy
             time); also the ``nc -w`` budget. Mirrors the python3 transport's
             30s default (``CLAUDE_HOOKS_SOCKET_TIMEOUT`` keeps overriding it).
+            At most ``Timeout.RELAY_TIMEOUT_CAP``, so the relay's wait and
+            its hand-off end before the hook timeout.
         relay_binary: Absolute-path override for the relay binary. ``None``
             means ``{untracked}/bin/hooks-relay``. EXEMPT from the
             repository-relative rule (Plan 00303): like a system binary
@@ -1606,6 +1609,45 @@ class TransportConfig(BaseModel):
             "relay_enabled."
         ),
     )
+
+    # The configured timeout_seconds when it was over the cap; None otherwise.
+    _configured_timeout_seconds: int | None = PrivateAttr(default=None)
+
+    @model_validator(mode="after")
+    def timeout_fits_the_hook_timeout(self) -> Self:
+        """Cap a relay wait that could outlast the hook (Plan 00466 N126 F3).
+
+        A failed PreToolUse exchange is handed to the forwarder after the
+        relay's wait, and Claude Code cancels the hook at its registered
+        timeout, which lets the tool call run unjudged. A larger value is
+        lowered to the cap with a warning rather than refused (round 3): a
+        daemon that will not start denies every PreToolUse call, the Edit
+        that would fix the config included, and a value the previous release
+        accepted must not lock a session out. The cap keeps the invariant
+        either way. The configured value is kept so ``timeout_problem`` can
+        be shown at session start, and the upgrade advisory reports it first.
+        """
+        if self.timeout_seconds > Timeout.RELAY_TIMEOUT_CAP:
+            self._configured_timeout_seconds = self.timeout_seconds
+            self.timeout_seconds = Timeout.RELAY_TIMEOUT_CAP
+            logger.warning("%s", self.timeout_problem)
+        return self
+
+    @property
+    def timeout_problem(self) -> str | None:
+        """Why the configured ``timeout_seconds`` is not the one in force, or None."""
+        if self._configured_timeout_seconds is None:
+            return None
+        return (
+            f"daemon.transport.timeout_seconds={self._configured_timeout_seconds} is too "
+            f"long; using {Timeout.RELAY_TIMEOUT_CAP}. The relay waits this long for the "
+            f"daemon, then may take up to {Timeout.RELAY_HANDOFF_BUDGET}s handing a failed "
+            f"PreToolUse call to the forwarder, and {Timeout.RELAY_HOOK_TIMEOUT_MARGIN}s is "
+            "kept for start-up and the answer. Claude Code cancels the hook at the "
+            f"{Timeout.REGISTERED_HOOK_TIMEOUT}s hook timeout the daemon registers, and a "
+            "cancelled PreToolUse hook lets the call run unjudged. To fix: set it to "
+            f"{Timeout.RELAY_TIMEOUT_CAP} or less in .claude/hooks-daemon.yaml."
+        )
 
     @property
     def per_event_sockets_needed(self) -> bool:
@@ -1912,6 +1954,17 @@ class DaemonConfig(BaseModel):
         else:
             budget_name = "the client's own socket timeout"
         problem = self.chain.deadline_problem(budget, budget_name)
+        return [problem] if problem is not None else []
+
+    @property
+    def config_problems(self) -> list[str]:
+        """Config values the daemon runs with other than as written; empty when none.
+
+        Not validation errors (Plan 00466 round 3): the daemon adjusts each to
+        a safe value and starts, and hands these to the SessionStart
+        config-problem advisory, since a warning only in its log goes unseen.
+        """
+        problem = self.transport.timeout_problem
         return [problem] if problem is not None else []
 
     @property

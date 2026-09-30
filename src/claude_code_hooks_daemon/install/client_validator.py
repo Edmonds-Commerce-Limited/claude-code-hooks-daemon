@@ -10,14 +10,18 @@ confusion that could cause handler_status.py and other tools to malfunction.
 import json
 import logging
 import os
-import signal
 import subprocess  # nosec B404 - subprocess used for daemon verification only (trusted venv python)
 from dataclasses import dataclass
 from pathlib import Path
 
 from claude_code_hooks_daemon.constants import Timeout
 from claude_code_hooks_daemon.constants.paths import DaemonPath
-from claude_code_hooks_daemon.daemon.paths import resolve_existing_venv_python
+from claude_code_hooks_daemon.daemon.paths import (
+    read_pid_file_text,
+    resolve_existing_venv_python,
+    socket_path_paired_with,
+)
+from claude_code_hooks_daemon.daemon.server import remove_dead_socket, remove_stale_pid_file
 from claude_code_hooks_daemon.install import bin_wrapper
 from claude_code_hooks_daemon.utils.hook_registration import (
     detect_duplicate_hooks,
@@ -25,6 +29,11 @@ from claude_code_hooks_daemon.utils.hook_registration import (
     detect_local_hooks_misplacement,
     validate_hook_commands,
     validate_settings_hooks,
+)
+from claude_code_hooks_daemon.utils.safe_signal import (
+    DaemonStop,
+    RefusedSignalTarget,
+    stop_verified_daemon,
 )
 
 logger = logging.getLogger(__name__)
@@ -35,6 +44,20 @@ logger = logging.getLogger(__name__)
 _DAEMON_STOP_PERMISSION_WARNING = (
     "Could not stop daemon PID {pid}: insufficient permission; stop it manually before installing"
 )
+
+# A PID file naming a process that is not provably this project's daemon.
+_DAEMON_STOP_REFUSED_WARNING = (
+    "Did not signal the process named by {pid_file}: {reason}. If a daemon for this "
+    "project is running, stop it manually before installing"
+)
+
+_DAEMON_STOP_OUTCOME = {
+    DaemonStop.TERMINATED: "Gracefully stopped daemon (PID {pid}) before installation",
+    DaemonStop.KILLED: "Forcefully stopped daemon (PID {pid}) before installation",
+    DaemonStop.SURVIVED: (
+        "Daemon PID {pid} survived SIGTERM and SIGKILL; stop it manually before installing"
+    ),
+}
 
 
 class ClientValidationError(Exception):
@@ -301,51 +324,49 @@ class ClientInstallValidator:
         if not pid_files:
             return ValidationResult(passed=True, errors=[], warnings=[])
 
-        # Found PID file(s) - check if process is running
+        # A PID file survives a container restart, and a restarted container
+        # reuses small pids, so the pid in it can name any process — Claude
+        # Code included (Plan 00466 N59). Only a pid proven to be THIS
+        # project's daemon, and started before its file was written (review
+        # 10, R10-3), is signalled.
         for pid_file in pid_files:
             try:
-                with pid_file.open() as f:
-                    pid = int(f.read().strip())
+                with pid_file.open(encoding="utf-8") as opened:
+                    written_at = os.fstat(opened.fileno()).st_mtime
+                    seen = opened.read().rstrip("\n")
+                pid = int(seen.strip())
+            except (ValueError, OSError) as unreadable:
+                warnings.append(f"Ignored unreadable PID file {pid_file}: {unreadable}")
+                continue
 
-                # Check if process is alive
-                try:
-                    os.kill(pid, 0)  # Signal 0 just checks existence
-                    # Process is running - try to stop it
-                    warnings.append(
-                        f"Found running daemon (PID {pid}). Attempting to stop it before installation..."
-                    )
+            try:
+                outcome = stop_verified_daemon(
+                    pid,
+                    project_root=project_root,
+                    grace_seconds=Timeout.PROCESS_KILL_WAIT,
+                    recorded_at=written_at,
+                )
+            except RefusedSignalTarget as refused:
+                warnings.append(
+                    _DAEMON_STOP_REFUSED_WARNING.format(pid_file=pid_file, reason=refused)
+                )
+                continue
+            except PermissionError:
+                # The daemon survived because we lack permission to signal it.
+                # Surface this so the user knows the install is proceeding over
+                # a still-running daemon.
+                warnings.append(_DAEMON_STOP_PERMISSION_WARNING.format(pid=pid))
+                continue
 
-                    try:
-                        # Try graceful shutdown first
-                        os.kill(pid, signal.SIGTERM)
-                        import time
-
-                        time.sleep(1)
-
-                        # Check if still running
-                        try:
-                            os.kill(pid, 0)
-                            # Still running - force kill
-                            os.kill(pid, signal.SIGKILL)
-                            warnings.append(f"Forcefully stopped daemon (PID {pid})")
-                        except ProcessLookupError:
-                            warnings.append(f"Gracefully stopped daemon (PID {pid})")
-
-                    except ProcessLookupError:
-                        # Process already gone between probe and signal — fine.
-                        pass
-                    except PermissionError:
-                        # The daemon survived because we lack permission to
-                        # signal it. Surface this so the user knows the install
-                        # is proceeding over a still-running daemon.
-                        warnings.append(_DAEMON_STOP_PERMISSION_WARNING.format(pid=pid))
-
-                except ProcessLookupError:
-                    # Process not running - clean up stale PID file
-                    pid_file.unlink()
-
-            except (ValueError, FileNotFoundError, PermissionError):
-                pass  # Invalid PID file or can't read it
+            if outcome is DaemonStop.ALREADY_GONE:
+                # Under the start lock, and only while it still names a pid
+                # that is gone: a start may have written its own (N205).
+                if not remove_stale_pid_file(
+                    pid_file, socket_path_paired_with(project_root, pid_file), seen
+                ):
+                    warnings.append(f"Left PID file {pid_file}: not provably stale")
+            else:
+                warnings.append(_DAEMON_STOP_OUTCOME[outcome].format(pid=pid))
 
         return ValidationResult(passed=True, errors=[], warnings=warnings)
 
@@ -639,37 +660,29 @@ class ClientInstallValidator:
         if not untracked_dir.exists():
             return ValidationResult(passed=True, errors=[], warnings=[])
 
-        # Clean up socket files
+        # Each goes only under the start lock a daemon start holds while it
+        # writes its pid and binds its socket, and only while dead: a socket
+        # that is not DEFINITIVELY dead, and a pid that is live (another
+        # user's included), are left (Plan 00466 N205).
         for socket_file in untracked_dir.glob("daemon*.sock"):
-            try:
-                socket_file.unlink()
+            if remove_dead_socket(socket_file):
                 warnings.append(f"Removed stale socket file: {socket_file.name}")
-            except Exception as e:
-                warnings.append(f"Failed to remove socket file {socket_file.name}: {e}")
+            else:
+                warnings.append(f"Left socket file {socket_file.name}: not provably dead")
 
-        # Clean up PID files (only if process not running)
         for pid_file in untracked_dir.glob("daemon*.pid"):
-            try:
-                with pid_file.open() as f:
-                    pid = int(f.read().strip())
-
-                # Check if process is alive
-                try:
-                    os.kill(pid, 0)
-                    warnings.append(
-                        f"Skipped PID file {pid_file.name} (process {pid} still running)"
-                    )
-                except ProcessLookupError:
-                    # Process not running - safe to remove
-                    pid_file.unlink()
-                    warnings.append(f"Removed stale PID file: {pid_file.name}")
-
-            except (ValueError, FileNotFoundError, PermissionError):
-                # Invalid or unreadable PID file - remove it
-                try:
-                    pid_file.unlink()
-                    warnings.append(f"Removed invalid PID file: {pid_file.name}")
-                except Exception as e:
-                    warnings.append(f"Failed to remove PID file {pid_file.name}: {e}")
+            read = read_pid_file_text(pid_file)
+            if read.unreadable is not None:
+                warnings.append(f"Left unreadable PID file {pid_file.name}: {read.unreadable}")
+                continue
+            if read.text is None:
+                continue
+            seen = read.text.rstrip("\n")
+            if remove_stale_pid_file(
+                pid_file, socket_path_paired_with(project_root, pid_file), seen
+            ):
+                warnings.append(f"Removed stale PID file: {pid_file.name}")
+            else:
+                warnings.append(f"Left PID file {pid_file.name}: its process may be running")
 
         return ValidationResult(passed=True, errors=[], warnings=warnings)

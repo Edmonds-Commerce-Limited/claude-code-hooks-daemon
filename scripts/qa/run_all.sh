@@ -125,9 +125,9 @@ else
 fi
 echo ""
 
-echo "5. Running Tests with Coverage..."
+echo "5. Running Tests with Coverage (every Python in CI's matrix)..."
 echo "----------------------------------------"
-if ! "${SCRIPT_DIR}/run_tests.sh"; then
+if ! "${VENV_PYTHON}" "${SCRIPT_DIR}/run_test_matrix.py"; then
     OVERALL_EXIT_CODE=1
     echo "❌ Tests FAILED"
 else
@@ -417,6 +417,18 @@ else
 fi
 echo ""
 
+# Plan 00466 N59: a nonzero signal only to a pid proven to be the intended
+# process. A MagicMock pid coerced to 1 and killpg(1, SIGKILL) killed init.
+echo "33. Running Signal-Targets Check..."
+echo "----------------------------------------"
+if ! "${VENV_PYTHON}" "${SCRIPT_DIR}/check_signal_targets.py" --json; then
+    OVERALL_EXIT_CODE=1
+    echo "❌ Signal-targets check FAILED"
+else
+    echo "✅ Signal-targets check PASSED"
+fi
+echo ""
+
 # Print overall summary
 echo "========================================"
 echo "QA Summary"
@@ -463,6 +475,7 @@ results = {
     "Dangerous Invocation Corpus": "untracked/qa/dangerous_invocation_corpus.json",
     "Security Downgrade Flags": "untracked/qa/security_downgrade_flags.json",
     "Generated Doc Drift": "untracked/qa/generated_doc_drift.json",
+    "Signal Targets": "untracked/qa/signal_targets.json",
 }
 
 all_passed = True

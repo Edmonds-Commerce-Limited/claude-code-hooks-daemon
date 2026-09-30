@@ -43,7 +43,7 @@ If status shows running but hooks are not working, see [Hooks Not Firing](#3-hoo
 
 ## 2. Daemon Won't Start
 
-### Symptom: "Daemon failed to start" or status shows NOT RUNNING
+### Symptom: "Daemon not proven started", "Daemon failed to start" or status shows NOT RUNNING
 
 **Step 1: Check for an existing daemon process**
 

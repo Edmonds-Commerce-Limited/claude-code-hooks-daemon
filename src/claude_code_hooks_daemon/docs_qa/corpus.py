@@ -59,6 +59,7 @@ from claude_code_hooks_daemon.utils.git_repo import (
     project_path_is_protected,
 )
 from claude_code_hooks_daemon.utils.markdown_links import extract_link_targets
+from claude_code_hooks_daemon.utils.path_containment import path_relative_to
 from claude_code_hooks_daemon.utils.path_exclusion import is_path_excluded
 from claude_code_hooks_daemon.utils.vendor_paths import (
     VendorScope,
@@ -335,7 +336,7 @@ def iter_markdown_paths(
     )
     matches: list[str] = []
     for dirpath, dirnames, filenames in os.walk(project_root):
-        rel_dir_parts = Path(dirpath).relative_to(project_root).parts
+        rel_dir_parts = path_relative_to(Path(dirpath), project_root).parts
         dirnames[:] = [
             name
             for name in dirnames
@@ -429,7 +430,7 @@ def is_in_scope(path: Path, project_root: Path, policy: DocumentationPolicy) -> 
     if path.suffix.lower() != _MARKDOWN_SUFFIX:
         return False
     try:
-        rel_parts = path.resolve().relative_to(project_root.resolve()).parts
+        rel_parts = path_relative_to(path.resolve(), project_root.resolve()).parts
     except ValueError:
         return False
     if not rel_parts:
@@ -522,7 +523,7 @@ def iter_corpus_paths(project_root: Path, policy: DocumentationPolicy) -> list[P
     for p in candidates:
         if not is_in_scope(p, project_root, policy):
             continue
-        rel = str(p.relative_to(project_root))
+        rel = str(path_relative_to(p, project_root))
         if git_visible is not None and rel not in git_visible:
             continue
         if project_path_is_protected(rel):
@@ -740,7 +741,7 @@ def refresh_own_record(
     callers should use :func:`load_edit_corpus` rather than sequencing the
     two by hand.
     """
-    rel_path = str(file_path.relative_to(project_root))
+    rel_path = str(path_relative_to(file_path, project_root))
     documents = dict(corpus.documents)
     documents[rel_path] = _derive_record(rel_path, 0, len(content.encode("utf-8")), content)
     return DocCorpus(project_root=corpus.project_root, documents=documents, cold=corpus.cold)
@@ -848,7 +849,7 @@ def build_and_save_corpus(
 
     documents: dict[str, DocRecord] = {}
     for abs_path in iter_corpus_paths(project_root, policy):
-        rel_path = str(abs_path.relative_to(project_root))
+        rel_path = str(path_relative_to(abs_path, project_root))
         stat = abs_path.stat()
         cached = previous_documents.get(rel_path)
         if (

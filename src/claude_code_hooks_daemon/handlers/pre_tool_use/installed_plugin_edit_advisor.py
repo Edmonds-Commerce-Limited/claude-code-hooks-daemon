@@ -30,6 +30,7 @@ from claude_code_hooks_daemon.core import Decision, GatingResult
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.utils import get_bash_write_targets, get_file_path
 from claude_code_hooks_daemon.utils.claude_config import claude_config_dir, session_config_dir
+from claude_code_hooks_daemon.utils.path_containment import path_is_relative_to
 from claude_code_hooks_daemon.utils.scratch_dir import acceptance_path
 
 #: Where Claude Code keeps installed plugin files, under its config dir.
@@ -72,6 +73,9 @@ class InstalledPluginEditAdvisorHandler(PreToolUseHandlerBase):
     @staticmethod
     def _targets(hook_input: dict[str, Any]) -> list[str]:
         if hook_input.get(HookInputField.TOOL_NAME) == ToolName.BASH:
+            # Advisory: text the tokeniser cannot read names no target, so it
+            # draws no advice. Silence claims nothing; only a DENY must fail
+            # closed on it (Plan 00466 N120).
             return get_bash_write_targets(hook_input)
         named = get_file_path(hook_input)
         if named is None and hook_input.get(HookInputField.TOOL_NAME) == ToolName.NOTEBOOK_EDIT:
@@ -90,7 +94,8 @@ class InstalledPluginEditAdvisorHandler(PreToolUseHandlerBase):
                 continue
             resolved = path.resolve()
             if any(
-                path.is_relative_to(directory) or resolved.is_relative_to(directory.resolve())
+                path_is_relative_to(path, directory)
+                or path_is_relative_to(resolved, directory.resolve())
                 for directory in directories
             ):
                 found.append(target)

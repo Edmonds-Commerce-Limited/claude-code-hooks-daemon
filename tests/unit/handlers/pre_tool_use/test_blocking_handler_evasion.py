@@ -45,10 +45,12 @@ import importlib
 import inspect
 import pkgutil
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
 import pytest
 
+from claude_code_hooks_daemon.config.loader import ConfigLoader
 from claude_code_hooks_daemon.core.handler import Handler
 from claude_code_hooks_daemon.handlers import pre_tool_use
 
@@ -117,6 +119,44 @@ _EVASION_CASES: dict[str, tuple[str, tuple[str, ...]]] = {
             f"git -C {_SAFE_PATH} commit -m x",
             "env git commit -m x",
             "git \\\n  commit -m x",
+        ),
+    ),
+    "ConflictMarkerCommitGateHandler": (
+        "git commit -m x",
+        (
+            f"git -C {_SAFE_PATH} commit -m x",
+            "git --no-pager commit -m x",
+            "git \\\n  commit -m x",
+            "/usr/bin/git commit -m x",
+            "env git commit -m x",
+            "env -i git commit -m x",
+            "sudo git commit -m x",
+            "command git commit -m x",
+            "exec git commit -m x",
+            "nice -n 5 git commit -m x",
+            "xargs git commit -m x",
+            "eval 'git commit -m x'",
+            "sh -c 'git commit -m x'",
+            "(git commit -m x)",
+        ),
+    ),
+    "SubagentFullQaBlockerHandler": (
+        "./scripts/qa/llm_qa.py all",
+        (
+            # The command is resolved through wrappers, interpreters and
+            # grouping rather than read off the segment head. Each spelling
+            # below runs the same whole suite.
+            f"{_SAFE_PATH}/scripts/qa/llm_qa.py all",
+            "python3 scripts/qa/llm_qa.py all",
+            "env FOO=1 ./scripts/qa/llm_qa.py all",
+            "timeout 3600 ./scripts/qa/llm_qa.py all",
+            "sudo -E ./scripts/qa/llm_qa.py all",
+            "bash -c './scripts/qa/llm_qa.py all'",
+            "(./scripts/qa/llm_qa.py all)",
+            "echo $(./scripts/qa/llm_qa.py all)",
+            "./scripts/qa/llm_qa.py \\\n  all",
+            "./scripts/qa/llm_qa.\\\npy all",
+            "python -m pytest",
         ),
     ),
     "IssueFilingGateHandler": (
@@ -287,6 +327,18 @@ _EVASION_CASES: dict[str, tuple[str, tuple[str, ...]]] = {
 # ran. Nothing in the evasion table above would have noticed: every "must block"
 # case still passed. Both directions need a guard.
 _MUST_NOT_MATCH: dict[str, tuple[str, ...]] = {
+    "SubagentFullQaBlockerHandler": (
+        # A mention is not a run, and a targeted run is the allowed path the
+        # deny message sends the agent to. Denying either would get the guard
+        # switched off.
+        'grep -rn "llm_qa.py all" CLAUDE/',
+        'git commit -m "the coordinator runs llm_qa.py all"',
+        'echo "./scripts/qa/llm_qa.py all"',
+        "./scripts/qa/llm_qa.py --read-only all",
+        "./scripts/qa/llm_qa.py changed",
+        "pytest tests/unit/handlers/pre_tool_use/test_x.py",
+        "cat scripts/qa/run_all.sh",
+    ),
     "IssueFilingGateHandler": (
         # Every one of these is the SAME widening risk from the other side: a
         # project filing on its own backlog, and a read of ours. The third is
@@ -326,6 +378,11 @@ _MUST_NOT_MATCH: dict[str, tuple[str, ...]] = {
         "git status",
         "git diff --cached",
         'gh pr create --title "x" --body "y"',
+    ),
+    "ConflictMarkerCommitGateHandler": (
+        "git status",
+        "git commit --dry-run",
+        "echo 'git commit -m x'",
     ),
     "GithubAutoCloseKeywordsHandler": (
         # The keyword alone is prose; a reference alone is a link, not a
@@ -584,7 +641,23 @@ _CONFIGURATORS: dict[str, Callable[[Handler], None]] = {
     "FlaggableContentChannelGuardHandler": lambda handler: setattr(
         handler, "_flaggable_path_globs", ["firewall/**"]
     ),
+    # Ships with no patterns (Plan 00463): a client's full-QA commands cannot
+    # be known in advance, so it matches nothing until they are declared. This
+    # repository's real declaration is used rather than a restated copy.
+    "SubagentFullQaBlockerHandler": lambda handler: setattr(
+        handler, "_full_qa_patterns", _dogfood_full_qa_patterns()
+    ),
 }
+
+
+def _dogfood_full_qa_patterns() -> object:
+    """``full_qa_patterns`` exactly as this repository's config declares them."""
+    config = ConfigLoader.load(
+        Path(__file__).resolve().parents[4] / ".claude" / "hooks-daemon.yaml"
+    )
+    return config["handlers"]["pre_tool_use"]["subagent_full_qa_blocker"]["options"][
+        "full_qa_patterns"
+    ]
 
 
 def _discover_handler_classes() -> dict[str, type[Handler]]:

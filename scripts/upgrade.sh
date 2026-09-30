@@ -9,10 +9,9 @@
 #
 # This is a minimal Layer 1 script that:
 # 1. Takes explicit project root (no magic detection)
-# 2. Stops daemon (best-effort)
-# 3. Checks out target version
-# 4. Cleans up nested install artifacts
-# 5. Delegates to Layer 2 (scripts/upgrade_version.sh)
+# 2. Checks out target version (Layer 2 stops the daemon, through the CLI)
+# 3. Cleans up nested install artifacts
+# 4. Delegates to Layer 2 (scripts/upgrade_version.sh)
 #
 # Arguments:
 #   --project-root PATH  - REQUIRED: Project root directory
@@ -523,47 +522,14 @@ if [ -f "$OLD_DEFAULT_SETTINGS_SOURCE" ]; then
     _ok "Preserved pre-upgrade settings baseline for merging"
 fi
 
-# Step 4: Best-effort daemon stop (before checkout)
-# Plan 00100 Task 2.5: PID-kill only. The previous implementation resolved a
-# venv python just to invoke `daemon.cli stop`, reintroducing the very
-# precedence logic the Phase 2 SSOT consolidated. Bootstrap now reads PID
-# files directly so zero venv / Python resolution is needed here.
+# Step 4: The daemon is stopped by Layer 2, through the CLI (ledger 00466 N245)
 #
-# Contract (pinned by tests/integration/test_upgrade_sh_stop_bootstrap.py):
-#   - SIGTERM every PID listed in $DAEMON_DIR/untracked/daemon-*.pid
-#   - Skip missing/empty/non-numeric/stale PID files silently
-#   - Skip missing untracked/ directory silently
-#   - Never invoke python, python3, or daemon.cli
-_stop_running_daemons() {
-    local daemon_dir="$1"
-    local untracked="$daemon_dir/untracked"
-    [ -d "$untracked" ] || return 0
-
-    local pid_file pid_raw pid
-    local any_killed=0
-    for pid_file in "$untracked"/daemon-*.pid; do
-        [ -f "$pid_file" ] || continue
-        if ! pid_raw=$(tr -d '[:space:]' < "$pid_file" 2> /dev/null); then
-            continue
-        fi
-        pid="$pid_raw"
-        # Require a pure positive integer; skip empty / garbage / stale.
-        case "$pid" in
-            '' | *[!0-9]*) continue ;;
-        esac
-        if kill -0 "$pid" 2> /dev/null; then
-            if kill -TERM "$pid" 2> /dev/null; then
-                any_killed=1
-            fi
-        fi
-    done
-    # Give terminated daemons a moment to shut sockets before checkout runs.
-    [ "$any_killed" -eq 1 ] && sleep 1
-    return 0
-}
-
-_info "Stopping daemon (best-effort, PID-only)..."
-_stop_running_daemons "$DAEMON_DIR"
+# This script signals no process. Its stop is Layer 2's Step 4, straight after
+# the checkout below: daemon_control.sh's stop_daemon_safe, which runs the
+# CLI's `stop`. That proves the pid before it signals: the owner's uid, a pidfd
+# pin, a start before its PID file was written, and every spelling of the root.
+# Running before the checkout with no venv, this script could only have
+# matched a command line in shell, without any of that.
 
 # Step 5: Fetch tags and determine target version
 #

@@ -1,10 +1,26 @@
 """Tests for EnforceLlmQaHandler - blocks run_all.sh, requires llm_qa.py."""
 
 import re
+from collections.abc import Callable
 from typing import Any
 
 import pytest
 from enforce_llm_qa import EnforceLlmQaHandler
+from tests.scaling import SIZE_FACTOR, SUPERLINEAR_RATIO, scaling_ratio
+
+
+def _assert_matches_cost_grows_linearly(command_at: Callable[[int], str], small_n: int) -> None:
+    """``matches`` on ``command_at(8 * small_n)`` costs at most linearly more
+    CPU than on ``command_at(small_n)``. A fresh handler per call, so no
+    answer is served from an earlier call's work."""
+
+    def work_at(size: int) -> None:
+        command = command_at(size)
+        EnforceLlmQaHandler().matches({"tool_name": "Bash", "tool_input": {"command": command}})
+
+    large_text = command_at(SIZE_FACTOR * small_n)
+    ratio = scaling_ratio(work_at, small_n, large_text)
+    assert ratio <= SUPERLINEAR_RATIO, f"cost grew {ratio:.0f}x for {SIZE_FACTOR}x input"
 
 
 class TestEnforceLlmQaHandler:
@@ -109,6 +125,26 @@ class TestEnforceLlmQaHandler:
         assert result.reason is not None
         assert "llm_qa.py" in result.reason
         assert "run_all.sh" in result.reason
+
+    def test_the_main_thread_is_pointed_at_the_full_gate(
+        self, handler: EnforceLlmQaHandler, bash_hook_input: Any
+    ) -> None:
+        result = handler.handle(bash_hook_input("./scripts/qa/run_all.sh"))
+        assert "./scripts/qa/llm_qa.py all" in (result.reason or "")
+
+    def test_a_subagent_is_pointed_at_targeted_qa_not_the_full_gate(
+        self, handler: EnforceLlmQaHandler, bash_hook_input: Any
+    ) -> None:
+        """Plan 00463 review finding 8: `llm_qa.py all` is denied to a sub-agent.
+
+        Advice that leads straight into the next deny costs the agent a turn.
+        """
+        hook_input = bash_hook_input("./scripts/qa/run_all.sh")
+        hook_input["agent_id"] = "aplan463-impl-84165102c3e9edf0"
+        reason = handler.handle(hook_input).reason or ""
+        assert "./scripts/qa/llm_qa.py changed" in reason
+        assert "llm_qa.py all" not in reason
+        assert "coordinator" in reason
 
     # ── matches() — invocation vs mention (Plan 00200, dogfooding false positive) ──
 
@@ -550,36 +586,32 @@ class TestEnforceLlmQaHandler:
         command = "git bisect run ./scripts/qa/run_all.sh"
         assert handler.matches(bash_hook_input(command)) is True
 
-    # ── matches() — M-3 timing bounds (Plan 00466 review 3): the SAME ──
+    # ── matches() — M-3 growth bounds (Plan 00466 review 3): the SAME ──
     # catastrophic `\S*\{[^{}]*\}\S*` regex the secret matcher's M2d fix
     # abandoned was still present here, plus an unbounded `_expand_braces`
     # recursion and an unbounded eval-recursion re-parse. Every case here
-    # must both stay under 1s AND end in the correct verdict.
+    # must both grow at most linearly AND end in the correct verdict. Growth
+    # is the handler's CPU cost at size N against 8N (`tests/scaling.py`),
+    # not wall time: a wall-clock bound failed under host load (00466 N196).
 
     def test_a_huge_no_brace_word_does_not_trigger_catastrophic_backtracking(
         self, handler: EnforceLlmQaHandler, bash_hook_input: Any
     ) -> None:
-        """The reviewer's 94 KB / 200 KB reproducer: a huge run of
-        non-whitespace carrying no brace at all, immediately followed by a
-        real invocation."""
-        import time
+        """The reviewer's 200 KB reproducer: a huge run of non-whitespace
+        carrying no brace at all, immediately followed by a real invocation."""
 
-        for size_kb in (94, 200):
-            word = "a" * (size_kb * 1024)
-            command = f"echo {word} run_all.shx"
-            start = time.monotonic()
-            result = handler.matches(bash_hook_input(command))
-            elapsed = time.monotonic() - start
-            assert elapsed < 1.0, f"{size_kb}KB took {elapsed:.2f}s"
-            # `run_all.shx` does not itself name the script and `echo` is
-            # not a real invocation -- ALLOW is the correct verdict here,
-            # timing is the point of this test.
-            assert result is False
+        def command_at(size: int) -> str:
+            return f"echo {'a' * size} run_all.shx"
+
+        # `run_all.shx` does not itself name the script and `echo` is not a
+        # real invocation -- ALLOW is the correct verdict here.
+        assert handler.matches(bash_hook_input(command_at(200 * 1024))) is False
+        _assert_matches_cost_grows_linearly(command_at, 25 * 1024)
 
     def test_a_wide_brace_word_stays_fast(
         self, handler: EnforceLlmQaHandler, bash_hook_input: Any
     ) -> None:
-        """`{a,b}` x 22 in one word: exponential (2**22 spellings) under
+        """`{a,b}` x 24 in one word: exponential (2**24 spellings) under
         naive recursion. Mirrors the reviewer's exact reproducer shape --
         no token in the command literally names the script (`run_all.shx`
         does not), so this can only reach a verdict by actually walking
@@ -588,28 +620,36 @@ class TestEnforceLlmQaHandler:
         spelling cap, so the verdict is DENY (fail closed: "cannot rule
         out" a spelling that names the script), not the specific
         substring-match ALLOW a fully-enumerated check would give."""
-        import time
 
-        command = "bash " + "{a,b}" * 22 + " run_all.shx"
-        start = time.monotonic()
-        result = handler.matches(bash_hook_input(command))
-        elapsed = time.monotonic() - start
-        assert elapsed < 1.0, f"took {elapsed:.2f}s"
-        assert result is True
+        def command_at(pairs: int) -> str:
+            return "bash " + "{a,b}" * pairs + " run_all.shx"
 
+        assert handler.matches(bash_hook_input(command_at(24))) is True
+        _assert_matches_cost_grows_linearly(command_at, 3)
+
+    @pytest.mark.parametrize(
+        ("command_at", "small_n"),
+        [
+            pytest.param(
+                lambda size: "eval " * 100 + "a" * size + " run_all.shx",
+                20 * 1024 // SIZE_FACTOR,
+                id="word length",
+            ),
+            pytest.param(
+                lambda depth: "eval " * depth + "a" * (20 * 1024) + " run_all.shx",
+                100 // SIZE_FACTOR,
+                id="eval depth",
+            ),
+        ],
+    )
     def test_deeply_padded_eval_recursion_stays_fast(
-        self, handler: EnforceLlmQaHandler, bash_hook_input: Any
+        self, command_at: Callable[[int], str], small_n: int
     ) -> None:
-        """The reviewer's `eval `x100 reproducer: each level re-joins and
-        re-parses the whole remaining command, and (before this fix) also
-        re-ran the catastrophic brace regex against it every level."""
-        import time
-
-        command = "eval " * 100 + "a" * (20 * 1024) + " run_all.shx"
-        start = time.monotonic()
-        handler.matches(bash_hook_input(command))
-        elapsed = time.monotonic() - start
-        assert elapsed < 1.0, f"took {elapsed:.2f}s"
+        """The reviewer's `eval `x100 over a 20 KB word: each level re-joins
+        and re-parses the whole remaining command, and (before this fix) also
+        re-ran the catastrophic brace regex against it every level. Neither
+        the word nor the depth may make that grow faster than linearly."""
+        _assert_matches_cost_grows_linearly(command_at, small_n)
 
     def test_still_matches_git_rebase_dash_x_naming_the_script(
         self, handler: EnforceLlmQaHandler, bash_hook_input: Any

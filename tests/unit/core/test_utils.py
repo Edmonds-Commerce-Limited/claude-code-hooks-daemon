@@ -7,7 +7,23 @@ from claude_code_hooks_daemon.core.utils import (
     get_file_content,
     get_file_path,
     get_workspace_root,
+    split_heredocs,
 )
+
+
+class TestSplitHeredocs:
+    """split_heredocs() separates heredoc bodies from the command."""
+
+    def test_a_heredoc_body_is_split_out(self) -> None:
+        _command, heredocs = split_heredocs("cat <<EOF > out.py\nbody\nEOF")
+        assert [heredoc.body for heredoc in heredocs] == ["body"]
+
+    def test_a_here_string_is_not_a_heredoc_n116(self) -> None:
+        """Plan 00466 N116: from its second `<`, `<<<EOF` read as a heredoc
+        opener, and the command on the next line left the command text."""
+        command = "cat <<<EOF\necho hi > out.py\nEOF"
+        assert split_heredocs(command) == (command, [])
+
 
 # get_bash_command() Tests
 

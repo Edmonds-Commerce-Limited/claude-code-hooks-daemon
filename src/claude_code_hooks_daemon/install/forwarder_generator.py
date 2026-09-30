@@ -47,6 +47,10 @@ from claude_code_hooks_daemon.daemon.paths import (
 #: makes generation a pure text transform rather than a bash-shape assumption.
 INIT_SH_ANCHOR: str = 'source "$SCRIPT_DIR/../init.sh"\n'
 
+#: Carries the daemon root to hooks-relay. Twin of ``DAEMON_ROOT_ENV`` in
+#: relay/hooks_relay.rs.
+RELAY_DAEMON_ROOT_ENV: Final[str] = "HOOKS_DAEMON_RELAY_DAEMON_ROOT"
+
 _GUARD_HEADER = "# --- relay hot path (generated; Plan 00290) ---\n"
 _GUARD_FOOTER = "# --- end relay hot path ---\n"
 
@@ -281,7 +285,12 @@ def build_relay_guard_block(
     lines.append(f'    _rl_bin="${{HOOKS_DAEMON_RELAY_BINARY:-{relay_binary}}}"\n')
     lines.append(f'    _rl_sock="$_rl_events_dir/{event_file_name}.sock"\n')
     lines.append('    if [[ -x "$_rl_bin" && -S "$_rl_sock" ]]; then\n')
-    lines.append('        exec "$_rl_bin" "$_rl_sock" --fallback "${BASH_SOURCE[0]}" \\\n')
+    # The daemon root is the untracked dir's parent in both install modes
+    # (paths.get_untracked_dir). The relay names this install's launcher by
+    # it, with the rule init.sh's carve-out applies (Plan 00466 round 4, P3-2).
+    daemon_root = _escape_for_double_quotes(str(untracked_dir.parent))
+    lines.append(f'        {RELAY_DAEMON_ROOT_ENV}="{daemon_root}" \\\n')
+    lines.append('            exec "$_rl_bin" "$_rl_sock" --fallback "${BASH_SOURCE[0]}" \\\n')
     lines.append(f'            --timeout-ms "{timeout_ms}"\n')
     lines.append("    fi\n")
     lines.append("fi\n")

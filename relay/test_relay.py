@@ -244,6 +244,9 @@ def test_timeout_fail_closed_for_pre_tool_use(binary: str, tmp: str) -> None:
     assert proc.returncode == 0, f"exit={proc.returncode} stderr={proc.stderr!r}"
     _assert_pre_tool_use_deny(proc.stdout)
     assert b"hooks-relay: timeout:" in proc.stderr, f"stderr={proc.stderr!r}"
+    # Plan 00466 N69: the reason names the timeout, not EAGAIN's errno text.
+    assert b"timed out" in proc.stdout, f"stdout={proc.stdout!r}"
+    assert b"os error" not in proc.stdout, f"stdout={proc.stdout!r}"
 
 
 def test_mid_exchange_disconnect_fail_closed_for_pre_tool_use(binary: str, tmp: str) -> None:

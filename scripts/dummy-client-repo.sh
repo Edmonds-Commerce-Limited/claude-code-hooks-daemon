@@ -115,13 +115,34 @@ _surviving_dummy_daemons() {
     fi
 }
 
+# _is_dummy_daemon_pid PID — does PID run out of the dummy venv, right now?
+#
+# pgrep's answer is a moment old by the time a survivor is signalled, and its
+# pid may have been reused since, so the command line is read again here,
+# immediately before the signal. A pid with no process fails the check.
+_is_dummy_daemon_pid() {
+    local args
+    if ! args="$(ps -o args= -p "$1")"; then
+        return 1
+    fi
+    case "$args" in
+        *"${DUMMY_DAEMON_DIR}/untracked/venv-"*) return 0 ;;
+    esac
+    return 1
+}
+
 # verify_dummy_daemon_stopped — post-condition for teardown.
 #
 # A stop that TARGETS the wrong project exits 0 while the real daemon lives on,
-# so "stop succeeded" is not evidence the daemon is gone. Reap any survivor by
-# process group rather than deleting its directory out from under it.
+# so "stop succeeded" is not evidence the daemon is gone. Reap any survivor
+# rather than deleting its directory out from under it.
+#
+# Each survivor's pid is proven by its command line, which names the dummy's
+# own venv. Its process GROUP is not: a daemon does not lead its group (the
+# double fork leaves the session leader's id on it), so the group could be
+# init's or ours, and only the proven pid is signalled (Plan 00466 N59).
 verify_dummy_daemon_stopped() {
-    local survivors pid pgid
+    local survivors pid
     survivors="$(_surviving_dummy_daemons)"
     if [ -z "$survivors" ]; then
         return 0
@@ -129,12 +150,12 @@ verify_dummy_daemon_stopped() {
 
     info "WARNING: daemon still alive after stop (pids: $(echo "$survivors" | tr '\n' ' '))"
     for pid in $survivors; do
-        if pgid="$(ps -o pgid= -p "$pid" | tr -d ' ')" && [ -n "$pgid" ]; then
-            if ! kill -- -"$pgid"; then
-                info "WARNING: could not signal process group $pgid"
-            fi
-        else
-            info "WARNING: could not determine process group for pid $pid"
+        if [ "$pid" -le 1 ] || [ "$pid" -eq "$$" ]; then
+            info "WARNING: refusing to signal pid $pid"
+        elif ! _is_dummy_daemon_pid "$pid"; then
+            info "pid $pid no longer runs out of the dummy venv; not signalling it"
+        elif ! kill -TERM "$pid"; then
+            info "WARNING: could not signal pid $pid"
         fi
     done
     sleep 1

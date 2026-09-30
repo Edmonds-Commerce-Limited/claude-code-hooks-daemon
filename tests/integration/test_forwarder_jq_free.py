@@ -44,6 +44,7 @@ from claude_code_hooks_daemon.daemon.synthetic_traffic import (
     TEST_PROBE,
     ProbeThread,
 )
+from tests.daemon_like_process import daemon_like_process
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _HOOKS_DIR = _REPO_ROOT / ".claude" / "hooks"
@@ -176,11 +177,13 @@ def _run_wrapper(
 
 
 @pytest.fixture
-def live_pid_file(tmp_path: Path) -> Path:
-    """A PID file naming a live process so is_daemon_running() returns true."""
+def live_pid_file(tmp_path: Path) -> Iterator[Path]:
+    """A PID file naming a process launched as this repo's daemon is, so
+    is_daemon_running() proves it running (Plan 00466 round 5, Sh-D)."""
     pid_path = tmp_path / "daemon.pid"
-    pid_path.write_text(f"{os.getpid()}\n")
-    return pid_path
+    with daemon_like_process(_REPO_ROOT) as pid:
+        pid_path.write_text(f"{pid}\n")
+        yield pid_path
 
 
 @pytest.fixture

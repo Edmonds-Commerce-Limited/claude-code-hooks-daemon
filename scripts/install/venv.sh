@@ -382,8 +382,10 @@ _VENV_LOCK_BACKEND=""
 _VENV_LOCK_FD=""
 _VENV_LOCK_DIR=""
 _VENV_LOCK_HEARTBEAT_PID=""
+_VENV_LOCK_HEARTBEAT_PARENT=""
 # Set by venv_heartbeat_start.
 VENV_HEARTBEAT_PID=""
+VENV_HEARTBEAT_PARENT=""
 
 #
 # venv_bootstrap_switched_off_by() - Which setting switches venv bootstrap off.
@@ -526,14 +528,54 @@ venv_heartbeat_start() {
         done
     ) < /dev/null > /dev/null 2>> "$errors" &
     VENV_HEARTBEAT_PID="$!"
+    # Recorded while the heartbeat is certainly unreaped, for venv_heartbeat_stop.
+    # A heartbeat that already ended (its path was gone) has no parent to record.
+    if ! VENV_HEARTBEAT_PARENT="$(_venv_parent_of "$VENV_HEARTBEAT_PID")"; then
+        VENV_HEARTBEAT_PARENT=""
+    fi
+}
+
+#
+# _venv_parent_of() - Echo $1's parent pid; fail when $1 is gone.
+#
+# The twin of resolve_venv.sh's _rv_parent_of: each library must stand alone,
+# and tests/integration/test_venv_heartbeat_signal_target.py holds the two to
+# the same answer. Builtins over /proc where it exists; `ps` elsewhere (macOS).
+#
+_venv_parent_of() {
+    local stat rest parent
+    local -a fields
+    if [ -d /proc/self ]; then
+        [ -r "/proc/$1/stat" ] || return 1
+        read -r stat < "/proc/$1/stat" || return 1
+        # comm sits in parentheses and may hold spaces; ppid follows state.
+        rest="${stat##*) }"
+        read -r -a fields <<< "$rest"
+        parent="${fields[1]:-}"
+    else
+        parent="$(ps -o ppid= -p "$1")" || return 1
+        parent="${parent// /}"
+    fi
+    [ -n "$parent" ] || return 1
+    printf '%s\n' "$parent"
 }
 
 #
 # venv_heartbeat_stop() - Stop a heartbeat venv_heartbeat_start returned, and wait for it.
 #
+# Args: $1 its pid, $2 the parent venv_heartbeat_start recorded for it.
+#
+# The heartbeat ends on its own once its path is gone, and its pid is then free
+# for any process to reuse, minutes before this runs. So it is signalled only
+# while that pid still has the parent recorded at start (Plan 00466 N59).
+#
 venv_heartbeat_stop() {
-    local pid="$1" out rc=0
+    local pid="$1" parent="${2:-}" out rc=0
     [ -n "$pid" ] || return 0
+    if [ -z "$parent" ] || [ "$(_venv_parent_of "$pid")" != "$parent" ]; then
+        print_verbose "heartbeat $pid had already stopped"
+        return 0
+    fi
     if ! out="$(kill "$pid" 2>&1)"; then
         print_verbose "heartbeat $pid had already stopped: $out"
         return 0
@@ -553,14 +595,16 @@ _venv_lock_start_heartbeat() {
     local lock_dir="$1"
     venv_heartbeat_start "$lock_dir" "$lock_dir/heartbeat.log"
     _VENV_LOCK_HEARTBEAT_PID="$VENV_HEARTBEAT_PID"
+    _VENV_LOCK_HEARTBEAT_PARENT="$VENV_HEARTBEAT_PARENT"
 }
 
 #
 # _venv_lock_stop_heartbeat() - Stop this process's lock heartbeat, if it runs one.
 #
 _venv_lock_stop_heartbeat() {
-    venv_heartbeat_stop "$_VENV_LOCK_HEARTBEAT_PID"
+    venv_heartbeat_stop "$_VENV_LOCK_HEARTBEAT_PID" "$_VENV_LOCK_HEARTBEAT_PARENT"
     _VENV_LOCK_HEARTBEAT_PID=""
+    _VENV_LOCK_HEARTBEAT_PARENT=""
 }
 
 #
@@ -1188,6 +1232,9 @@ _uv_in_container() {
     return 1
 }
 
+# Prints an interpreter's X.Y version; used to check a built venv's Python.
+_VENV_VERSION_PROBE='import sys; print("%d.%d" % sys.version_info[:2])'
+
 #
 # create_venv_at_path() - Create venv at an explicit path (fingerprint-keyed)
 #
@@ -1201,7 +1248,8 @@ _uv_in_container() {
 #   $3 - quiet (optional, default: false)
 #
 # Returns:
-#   Exit code 0 on success, 1 on failure
+#   Exit code 0 on success, 1 on failure (including a venv whose Python is
+#   not the requested HOOKS_DAEMON_PYTHON's version)
 #
 create_venv_at_path() {
     local daemon_dir="$1"
@@ -1218,9 +1266,22 @@ create_venv_at_path() {
         echo "/untracked/" > "$daemon_dir/untracked/.gitignore"
     fi
 
+    # 00466 N114: uv reads a bare name such as `python3` as a VERSION request
+    # ("any 3.x") and builds on its own preferred interpreter, not the one on
+    # PATH that the venv's fingerprint was computed from. So uv is handed the
+    # resolved path, and the built venv's version is checked against it below.
     local python_args=()
+    local requested_python="" requested_version=""
     if [ -n "${HOOKS_DAEMON_PYTHON:-}" ]; then
-        python_args=(--python "$HOOKS_DAEMON_PYTHON")
+        if ! requested_python="$(command -v "$HOOKS_DAEMON_PYTHON")"; then
+            print_error "create_venv_at_path: interpreter '$HOOKS_DAEMON_PYTHON' was not found, so the venv cannot be built on it"
+            return 1
+        fi
+        if ! requested_version="$("$requested_python" -c "$_VENV_VERSION_PROBE")"; then
+            print_error "create_venv_at_path: could not read the version of $requested_python"
+            return 1
+        fi
+        python_args=(--python "$requested_python")
     fi
 
     # Plan 00100 Task 0.1: hardlink-first with copy fallback.
@@ -1383,6 +1444,19 @@ create_venv_at_path() {
                 ;;
         esac
         sync
+    fi
+
+    if [ -n "$requested_version" ]; then
+        local built_version=""
+        if ! built_version="$("$venv_path/bin/python" -c "$_VENV_VERSION_PROBE")" \
+                || [ "$built_version" != "$requested_version" ]; then
+            print_error "create_venv_at_path: $venv_path was built on Python ${built_version:-(unreadable)}, but it was requested on $requested_python (Python $requested_version). uv did not use the requested interpreter; refusing a venv whose Python differs from its fingerprint."
+            # Removed, not left behind: the resolver's venv-* glob would
+            # otherwise still find it and run the daemon on it.
+            rm -rf "$venv_path"
+            rm -f "$uv_output"
+            return 1
+        fi
     fi
 
     if [ "$quiet" = "true" ]; then

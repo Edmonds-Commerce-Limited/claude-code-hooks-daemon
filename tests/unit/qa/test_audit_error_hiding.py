@@ -163,6 +163,127 @@ class TestSilentFallbackRule:
         assert "silent-fallback" in _rules(visitor.violations)
 
 
+class TestAGeneratorThatYieldsTheFailure:
+    """A bare ``return`` ends a generator; it returns no None to a caller.
+
+    A handler that YIELDS a result naming the failure and then stops has
+    reported it, so it is not ``return-none-on-error``. One that stops without
+    yielding has swallowed it, and still is.
+
+    Review 9 m2: ``_names_the_failure`` is an ALLOWLIST, not a denylist. A
+    yield counts only when it holds the bound exception (``except ... as
+    exc``), a non-empty string/f-string, or a call/container that carries the
+    exception among its own parts. Everything else -- a bare item that is not
+    the exception, an empty container, a call with no exception argument -- is
+    presumed NOT to report it.
+    """
+
+    @staticmethod
+    def _rules_of(handler_body: str, *, bind_exception: bool = True) -> list[str]:
+        except_line = (
+            "    except ValueError as exc:\n" if bind_exception else "    except ValueError:\n"
+        )
+        source = (
+            "def f():\n"
+            "    try:\n"
+            "        words = split()\n"
+            f"{except_line}"
+            f"{handler_body}"
+            "    yield from words\n"
+        )
+        visitor = ErrorHidingVisitor(REPO_ROOT / "scripts" / "qa" / "fake.py")
+        visitor.visit(ast.parse(source))
+        return _rules(visitor.violations)
+
+    def test_yielding_the_bound_exception_then_stopping_is_not_flagged(self) -> None:
+        rules = self._rules_of("        yield exc\n        return\n")
+        assert "return-none-on-error" not in rules
+
+    def test_yielding_from_a_call_that_carries_the_exception_is_not_flagged(self) -> None:
+        rules = self._rules_of("        yield from unparsed(exc)\n        return\n")
+        assert "return-none-on-error" not in rules
+
+    def test_a_bare_item_that_is_not_the_exception_is_flagged(self) -> None:
+        """Review 9 m2: ``yield path``, a normal item, does not name the failure."""
+        rules = self._rules_of("        yield path\n        return\n")
+        assert "return-none-on-error" in rules
+
+    def test_a_call_with_no_exception_argument_is_flagged(self) -> None:
+        """Review 9 m2: ``yield from helper()`` is undecidable -- presumed NOT reported."""
+        rules = self._rules_of("        yield from unparsed()\n        return\n")
+        assert "return-none-on-error" in rules
+
+    def test_stopping_without_yielding_is_still_flagged(self) -> None:
+        rules = self._rules_of("        return\n")
+        assert "return-none-on-error" in rules
+
+    def test_a_return_before_the_yield_is_still_flagged(self) -> None:
+        rules = self._rules_of("        return\n        yield exc\n")
+        assert "return-none-on-error" in rules
+
+    def test_yielding_a_bare_constant_then_stopping_is_still_flagged(self) -> None:
+        """Review 7 n2: ``yield 0`` names nothing about the failure."""
+        rules = self._rules_of("        yield 0\n        return\n")
+        assert "return-none-on-error" in rules
+
+    def test_yielding_none_then_stopping_is_still_flagged(self) -> None:
+        rules = self._rules_of("        yield None\n        return\n")
+        assert "return-none-on-error" in rules
+
+    def test_a_bare_yield_then_stopping_is_still_flagged(self) -> None:
+        rules = self._rules_of("        yield\n        return\n")
+        assert "return-none-on-error" in rules
+
+    def test_yielding_from_an_empty_literal_then_stopping_is_still_flagged(self) -> None:
+        rules = self._rules_of("        yield from ()\n        return\n")
+        assert "return-none-on-error" in rules
+
+    @pytest.mark.parametrize(
+        "empty",
+        ["iter(())", "iter([])", "tuple(())", "list(iter(()))", "reversed([])", "sorted({})"],
+    )
+    def test_yielding_from_an_empty_iterable_built_by_a_builtin_is_still_flagged(
+        self, empty: str
+    ) -> None:
+        """Review 8 n4: wrapping the empty literal in one more call named nothing either."""
+        rules = self._rules_of(f"        yield from {empty}\n        return\n")
+        assert "return-none-on-error" in rules
+
+    def test_yielding_from_a_builtin_over_the_exception_is_not_flagged(self) -> None:
+        rules = self._rules_of("        yield from iter([exc])\n        return\n")
+        assert "return-none-on-error" not in rules
+
+    def test_yielding_a_message_naming_the_failure_is_not_flagged(self) -> None:
+        """Review 8 n4: a constant STRING names the failure, where ``0`` does not."""
+        rules = self._rules_of('        yield "read failed"\n        return\n')
+        assert "return-none-on-error" not in rules
+
+    def test_yielding_an_empty_string_is_still_flagged(self) -> None:
+        rules = self._rules_of('        yield ""\n        return\n')
+        assert "return-none-on-error" in rules
+
+    @pytest.mark.parametrize("shape", ["()", "[]", "{}", "-1", 'f""', "str()"])
+    def test_review_9_m2_the_twelve_trivial_yield_shapes_are_flagged(self, shape: str) -> None:
+        """Review 9 m2: each of these previously PASSED (was presumed to report)."""
+        rules = self._rules_of(f"        yield {shape}\n        return\n")
+        assert "return-none-on-error" in rules
+
+    @pytest.mark.parametrize(
+        "shape",
+        [
+            "range(0)",
+            "(x for x in ())",
+            "map(str, ())",
+            "itertools.chain()",
+            "([] if True else [])",
+        ],
+    )
+    def test_review_9_m2_the_five_trivial_yield_from_shapes_are_flagged(self, shape: str) -> None:
+        """Review 9 m2: each of these previously PASSED (was presumed to report)."""
+        rules = self._rules_of(f"        yield from {shape}\n        return\n")
+        assert "return-none-on-error" in rules
+
+
 def _visit(source: str) -> list[str]:
     visitor = ErrorHidingVisitor(REPO_ROOT / "scripts" / "qa" / "fake.py")
     visitor.visit(ast.parse(source))

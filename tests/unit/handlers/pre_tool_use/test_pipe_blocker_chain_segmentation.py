@@ -31,6 +31,8 @@ from __future__ import annotations
 
 import pytest
 
+from claude_code_hooks_daemon.core import Decision
+from claude_code_hooks_daemon.core.chain import HandlerChain
 from claude_code_hooks_daemon.handlers.pre_tool_use.pipe_blocker import PipeBlockerHandler
 
 
@@ -159,6 +161,35 @@ class TestEscapedQuotesCannotHideAChain:
         quote, it would stay 'in quotes' and miss the `;` before pytest.
         """
         assert _matches(r"grep -E 'a\' bar.py ; pytest tests/ | head -20")
+
+
+class TestAnsiCStringsAndCommentsCannotHideAChain:
+    """Plan 00466 N120 (round 9d), a bypass main shares. Bash reads
+    ``$'it\\'s'`` as one word and an apostrophe in a comment as a character;
+    read as plain quotes, each left the splitter "inside a string" past the
+    separator, so pytest was judged as part of a whitelisted ``echo``."""
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "echo $'it\\'s' && pytest tests/ | tail -3",
+            "echo hi # it's\npytest tests/ | tail -3",
+            'ls # say "hi\npytest tests/ | head -3',
+            "cat $'\\' <<'EOF' '\\'\npytest tests/ | tail -3\nEOF",
+        ],
+    )
+    def test_the_expensive_producer_is_blocked(self, command: str) -> None:
+        chain = HandlerChain()
+        chain.add(PipeBlockerHandler())
+        payload = {"tool_name": "Bash", "tool_input": {"command": command}}
+        assert chain.execute(payload, strict_mode=False).result.decision == Decision.DENY
+
+    @pytest.mark.parametrize(
+        "command",
+        ["echo $'it\\'s' | head -3", "grep -n x f # it's | head -3", "echo $'a;b' | tail -1"],
+    )
+    def test_a_whitelisted_producer_is_still_allowed(self, command: str) -> None:
+        assert not _matches(command)
 
 
 class TestSourceSegmentResolution:

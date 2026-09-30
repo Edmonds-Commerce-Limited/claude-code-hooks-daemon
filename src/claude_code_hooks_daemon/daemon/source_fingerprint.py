@@ -33,6 +33,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Final
 
+from claude_code_hooks_daemon.utils.path_containment import path_relative_to
+
 if TYPE_CHECKING:
     from claude_code_hooks_daemon.config.models import Config
 
@@ -96,7 +98,7 @@ def compute_source_fingerprint(*roots: Path) -> str:
         for py_file in sorted(root.rglob("*.py")):
             if not py_file.is_file():
                 continue
-            hasher.update(str(py_file.relative_to(root)).encode("utf-8"))
+            hasher.update(str(path_relative_to(py_file, root)).encode("utf-8"))
             hasher.update(py_file.read_bytes())
     return hasher.hexdigest()
 

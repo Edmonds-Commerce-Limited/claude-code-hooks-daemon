@@ -9,6 +9,7 @@ from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
+from tests.support.inert_head_shapes import INERT_SHAPES, NOT_INERT_SHAPES, fill
 
 
 @pytest.fixture(autouse=True)
@@ -986,6 +987,34 @@ class TestHandRolledPlanFolderCreation:
             _bash("git commit -m 'document mkdir -p CLAUDE/Plan/00250-some-feature'")
         )
 
+    _MKDIR = "mkdir -p CLAUDE/Plan/00250-some-feature"
+
+    def test_an_echo_naming_a_creation_is_not_one(self, handler: PlanNumberHelperHandler) -> None:
+        """Plan 00408 Task 3.3: the same shape as the two sibling guards' report."""
+        assert not handler.matches(_bash(f"echo '{self._MKDIR}'"))
+
+    @pytest.mark.parametrize("template", INERT_SHAPES)
+    def test_no_inert_shape_is_a_creation(
+        self, handler: PlanNumberHelperHandler, template: str
+    ) -> None:
+        assert not handler.matches(_bash(fill(template, self._MKDIR)))
+
+    @pytest.mark.parametrize("template", NOT_INERT_SHAPES)
+    def test_every_other_shape_is_still_a_creation(
+        self, handler: PlanNumberHelperHandler, template: str
+    ) -> None:
+        assert handler.matches(_bash(fill(template, self._MKDIR)))
+
+    def test_the_echo_glob_discovery_rule_is_not_exempted(
+        self, handler: PlanNumberHelperHandler
+    ) -> None:
+        """`echo CLAUDE/Plan/0*` EXPANDS the glob: the echo is the scan itself.
+
+        The inert-head exemption answers "does this text run a mkdir?", so it
+        belongs to the mkdir rule alone and must not reach discovery.
+        """
+        assert handler.matches(_bash("echo CLAUDE/Plan/0*"))
+
 
 class TestGetRules:
     """get_rules() declares the 2 Rule objects (Decision B)."""
@@ -1124,27 +1153,32 @@ class TestEchoGlobPatternStaysLinear:
     engine tries every split point between them before giving up, which is
     quadratic in the length of that run. A 20,000-character single-quote run
     (blanked to whitespace by ``blank_shell_literal_spans``) measured
-    seconds; a linear pattern stays well under a generous bound.
+    seconds. The cost at 20,000 characters is compared with the cost at
+    2,500 (thread CPU time, ``tests/scaling.py``), so host load cannot fail
+    it and a quadratic pattern still does (00466 N222).
     """
 
-    _MAX_SECONDS = 2.0
-
-    @pytest.fixture
-    def handler(self, tmp_path: Path) -> PlanNumberHelperHandler:
+    @staticmethod
+    def _handler(workspace: Path) -> PlanNumberHelperHandler:
         handler = PlanNumberHelperHandler()
-        handler._workspace_root = tmp_path
+        handler._workspace_root = workspace
         handler._track_plans_in_project = "CLAUDE/Plan"
         return handler
 
-    def test_long_quote_run_does_not_blow_up(self, handler: PlanNumberHelperHandler) -> None:
-        import time
+    def test_long_quote_run_does_not_blow_up(self, tmp_path: Path) -> None:
+        from tests.scaling import SIZE_FACTOR, SUPERLINEAR_RATIO, scaling_ratio
 
-        command = "echo " + "'" * 20_000
-        start = time.monotonic()
-        handler.matches(_bash(command))
-        elapsed = time.monotonic() - start
-        assert elapsed < self._MAX_SECONDS, (
-            f"matches() took {elapsed:.2f}s on a 20,000-char quote run "
-            f"(bound {self._MAX_SECONDS}s) -- the echo/printf glob pattern "
-            "is quadratic again"
+        def command_at(size: int) -> str:
+            return "echo " + "'" * size
+
+        # A fresh handler per call, so no answer comes from an earlier call.
+        small_n = 20_000 // SIZE_FACTOR
+        ratio = scaling_ratio(
+            lambda size: self._handler(tmp_path).matches(_bash(command_at(size))),
+            small_n,
+            command_at(SIZE_FACTOR * small_n),
+        )
+        assert ratio <= SUPERLINEAR_RATIO, (
+            f"matches() cost grew {ratio:.0f}x for {SIZE_FACTOR}x the quote run "
+            "-- the echo/printf glob pattern is quadratic again"
         )

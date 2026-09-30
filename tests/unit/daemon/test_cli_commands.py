@@ -9,30 +9,53 @@ Focused tests covering critical CLI paths including:
 """
 
 import argparse
+import contextlib
+import errno
+import fcntl
 import json
+import logging
 import os
-import signal
+import shutil
 import socket
 import subprocess
 import sys
+import tempfile
+import time
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 from unittest.mock import Mock, patch
 
+import psutil
 import pytest
+from tests.daemon_like_process import answering_daemon_socket, silent_socket
 
 from claude_code_hooks_daemon.constants import Timeout
 from claude_code_hooks_daemon.core.project_context import ProjectContext
+from claude_code_hooks_daemon.daemon import paths, server
 from claude_code_hooks_daemon.daemon.cli import (
+    _await_started_daemon,
+    _pid_file_state,
+    _release_stopped_daemon_files,
+    _StartProgress,
     cmd_config,
     cmd_init_config,
     cmd_status,
     cmd_stop,
     get_project_path,
+    pid_is_this_projects_daemon,
     send_daemon_request,
 )
+from claude_code_hooks_daemon.daemon.paths import PidRecord
 from claude_code_hooks_daemon.daemon.process_verification import RootProof
+from claude_code_hooks_daemon.daemon.server import (
+    LaunchLock,
+    launch_lock_path,
+    remove_stale_pid_file,
+    start_under_way,
+)
+from claude_code_hooks_daemon.utils import safe_signal
+from claude_code_hooks_daemon.utils.safe_signal import DaemonStop
 
 
 @pytest.fixture(autouse=True)
@@ -61,66 +84,26 @@ def reset_project_context() -> None:
     ProjectContext._initialized = False
 
 
-# A pid above the kernel's pid_max ceiling: never a live process, so a signal
-# that escaped every patch below could not reach anything. Every TestCmdStop*
-# test uses this instead of a small hardcoded number (Plan 00466 N24 review 4
-# R4-B2: since the pidfd change, `cmd_stop` signals through `os.pidfd_open` +
-# `signal.pidfd_send_signal`, and a test that patches only `os.kill` no
-# longer intercepts that path -- a hardcoded pid that happened to be live on
-# the host got a REAL SIGTERM and SIGKILL, the N59 crash class).
+#: Above Linux's default pid_max, so no process can have it: a PID file or
+#: probe naming it can never reach a live process (Plan 00466 N59).
 _UNREAL_PID = 2**22 + 7
 
+#: The module whose names ``cmd_stop`` calls, for ``patch``.
+_CLI = "claude_code_hooks_daemon.daemon.cli"
+_READ_PID_RECORD = f"{_CLI}.read_pid_record"
 
-@pytest.fixture
-def _reject_unproven_real_signals() -> Iterator[None]:
-    """Fail the test outright if a signal reaches a pid this test did not prove fake.
 
-    Plan 00466 N24 review 4 R4-B2 guard. `TestCmdStop` and
-    `TestCmdStopGenericException` patch only `os.kill`; nothing intercepted
-    `os.pidfd_open`/`signal.pidfd_send_signal`, so `cmd_stop`'s pidfd path
-    reached the real kernel call whenever the test's pid happened to be live.
-    This fixture is the outermost patch of these four signalling primitives
-    for the duration of the test: `_UNREAL_PID` is accepted (and made to
-    behave like a pid that has already exited, exactly as `os.pidfd_open`
-    would report it in real life), and everything else fails the test rather
-    than reach a real signal. A test's own inner `with patch(...)` block
-    still shadows this for whichever primitive it explicitly controls.
-    """
-
-    def guard_pidfd_open(pid: int, flags: int = 0) -> int:
-        if pid != _UNREAL_PID:
-            pytest.fail(f"os.pidfd_open reached with unproven real pid {pid}")
-        raise ProcessLookupError("test guard: _UNREAL_PID never names a live process")
-
-    def guard_pidfd_send_signal(pidfd: int, sig: int) -> None:
-        pytest.fail(
-            f"signal.pidfd_send_signal reached (pidfd={pidfd}, sig={sig}) -- "
-            "unreachable once os.pidfd_open is guarded to always raise for _UNREAL_PID"
-        )
-
-    def guard_kill(pid: int, sig: int) -> None:
-        pytest.fail(f"os.kill reached the guard with unproven real pid {pid}")
-
-    def guard_killpg(pgid: int, sig: int) -> None:
-        pytest.fail(f"os.killpg reached the guard with unproven real pgid {pgid}")
-
-    with (
-        patch("os.pidfd_open", side_effect=guard_pidfd_open),
-        patch("signal.pidfd_send_signal", side_effect=guard_pidfd_send_signal),
-        patch("os.kill", side_effect=guard_kill),
-        patch("os.killpg", side_effect=guard_killpg),
-    ):
-        yield
+def _recorded(pid: int) -> PidRecord:
+    """A PID file naming ``pid``, written now: after ``pid`` started."""
+    return PidRecord(pid=pid, written_at=time.time())
 
 
 @pytest.fixture
-def pid_proven_ours(tmp_path: Path) -> Iterator[None]:
-    """Attribute the stopped pid to ``tmp_path``'s daemon, as a real one would be."""
-    with patch(
-        "claude_code_hooks_daemon.daemon.cli.daemon_process_project_root",
-        return_value=RootProof(root=os.path.realpath(tmp_path), refusal=None),
-    ):
-        yield
+def short_dir() -> Iterator[Path]:
+    """AF_UNIX paths are capped near 108 bytes; ``tmp_path`` nests deeper."""
+    directory = Path(tempfile.mkdtemp(prefix="hd-stop-"))
+    yield directory
+    shutil.rmtree(directory)
 
 
 class TestGetProjectPath:
@@ -411,7 +394,6 @@ class TestCmdStatus:
             assert result == 1
 
 
-@pytest.mark.usefixtures("pid_proven_ours", "_reject_unproven_real_signals")
 class TestCmdStop:
     """Tests for cmd_stop command."""
 
@@ -428,422 +410,842 @@ class TestCmdStop:
 
         args = argparse.Namespace(project_root=tmp_path)
 
-        with patch("claude_code_hooks_daemon.daemon.cli.read_pid_file", return_value=None):
+        with patch(_READ_PID_RECORD, return_value=None):
             result = cmd_stop(args)
             assert result == 0
 
-    def test_successful_stop(self, tmp_path: Path) -> None:
-        """cmd_stop successfully stops daemon."""
-        claude_dir = tmp_path / ".claude"
-        claude_dir.mkdir()
-        hooks_daemon_dir = claude_dir / "hooks-daemon"
-        hooks_daemon_dir.mkdir()
 
-        # Create valid config
-        config_file = claude_dir / "hooks-daemon.yaml"
-        config_file.write_text("version: '1.0'\ndaemon:\n  log_level: INFO\n")
+def _stop_project(tmp_path: Path) -> argparse.Namespace:
+    """A project root with a valid config, and ``cmd_stop``'s arguments for it."""
+    claude_dir = tmp_path / ".claude"
+    (claude_dir / "hooks-daemon").mkdir(parents=True)
+    (claude_dir / "hooks-daemon.yaml").write_text("version: '1.0'\ndaemon:\n  log_level: INFO\n")
+    return argparse.Namespace(project_root=tmp_path)
 
-        args = argparse.Namespace(project_root=tmp_path)
 
-        # Track kill calls
-        kill_count = [0]
+_SLEEP = "import time; time.sleep(600)"
+_IGNORE_TERM = (
+    "import signal, sys, time; signal.signal(signal.SIGTERM, signal.SIG_IGN); "
+    "print('ready', flush=True); time.sleep(600)"
+)
 
-        def mock_kill_func(pid: int, sig: int) -> None:
-            kill_count[0] += 1
-            if kill_count[0] == 1:
-                # First call (SIGTERM) - succeeds
-                return
-            else:
-                # Second call (check if alive) - process gone
-                raise ProcessLookupError()
 
+@pytest.fixture
+def children() -> Iterator[list[subprocess.Popen[bytes]]]:
+    started: list[subprocess.Popen[bytes]] = []
+    yield started
+    for child in started:
+        if child.poll() is None:
+            child.kill()
+        child.wait(timeout=Timeout.PROCESS_SAMPLE)
+
+
+def _spawn(
+    children: list[subprocess.Popen[bytes]], code: str, *argv: str
+) -> subprocess.Popen[bytes]:
+    child = subprocess.Popen(
+        [sys.executable, "-c", code, *argv], stdout=subprocess.PIPE, start_new_session=True
+    )
+    children.append(child)
+    if code == _IGNORE_TERM:
+        assert child.stdout is not None
+        assert child.stdout.readline() == b"ready\n"
+    return child
+
+
+def _daemon_for(
+    children: list[subprocess.Popen[bytes]], root: Path, code: str = _SLEEP
+) -> subprocess.Popen[bytes]:
+    """A real process whose command line is a daemon server for ``root``.
+
+    Returned once it has exec'd: until then its command line is empty and
+    proves nothing (Plan 00466 N194)."""
+    daemon = _spawn(
+        children, code, "claude_code_hooks_daemon.daemon.cli", "--project-root", str(root), "start"
+    )
+    deadline = time.monotonic() + Timeout.PROCESS_SAMPLE
+    while "claude_code_hooks_daemon.daemon.cli" not in psutil.Process(daemon.pid).cmdline():
+        if time.monotonic() >= deadline:
+            raise AssertionError(f"pid {daemon.pid} did not exec within {Timeout.PROCESS_SAMPLE}s")
+        time.sleep(0.01)
+    return daemon
+
+
+class TestCmdStopEndsAStartThatNeverFinishes:
+    """Plan 00466 lifecycle round 8b: a daemon still starting holds every
+    later start off and has no PID file yet, so ``stop`` finds it through
+    the launch lock, and proves the pid named there as it proves any other."""
+
+    @staticmethod
+    @contextlib.contextmanager
+    def _under_way(tmp_path: Path, named: int | None) -> Iterator[None]:
+        """A start of the project at ``tmp_path`` holding the launch lock,
+        having named ``named``."""
+        held = LaunchLock.take(launch_lock_path(tmp_path), Timeout.FILE_LOCK)
+        if named is not None:
+            launch_lock_path(tmp_path).write_text(f"{named}\n")
+        try:
+            with (
+                patch(
+                    "claude_code_hooks_daemon.daemon.cli.get_socket_path",
+                    return_value=tmp_path / "d.sock",
+                ),
+                patch(_READ_PID_RECORD, return_value=None),
+            ):
+                yield
+        finally:
+            held.release()
+
+    @staticmethod
+    def _hung_launcher(
+        children: list[subprocess.Popen[bytes]], root: Path, lock_root: Path | None = None
+    ) -> subprocess.Popen[bytes]:
+        """A real process whose command line is a launcher of ``root``'s
+        daemon, hung before its fork holding ``lock_root``'s launch lock."""
+        lock = launch_lock_path(lock_root or root)
+        lock.parent.mkdir(parents=True, exist_ok=True)
+        code = (
+            "import fcntl, os, time; "
+            "fd = os.open(os.environ['LAUNCH_LOCK'], os.O_RDWR | os.O_CREAT, 0o600); "
+            "fcntl.flock(fd, fcntl.LOCK_EX); print('ready', flush=True); time.sleep(600)"
+        )
+        launcher = subprocess.Popen(
+            [
+                sys.executable,
+                "-c",
+                code,
+                "claude_code_hooks_daemon.daemon.cli",
+                "--project-root",
+                str(root),
+                "start",
+            ],
+            stdout=subprocess.PIPE,
+            start_new_session=True,
+            env={**os.environ, "LAUNCH_LOCK": str(lock)},
+        )
+        children.append(launcher)
+        assert launcher.stdout is not None
+        assert launcher.stdout.readline() == b"ready\n"
+        return launcher
+
+    def test_a_launcher_hung_before_its_fork_is_stopped(
+        self, tmp_path: Path, children: list[subprocess.Popen[bytes]]
+    ) -> None:
+        """Review 9, DR-5: it holds every later start off and names no
+        daemon; the kernel's lock table names it, and it is proven as a
+        daemon is before it is signalled."""
+        args = _stop_project(tmp_path)
+        launcher = self._hung_launcher(children, tmp_path)
+        with patch(_READ_PID_RECORD, return_value=None):
+            assert cmd_stop(args) == 0
+        assert launcher.wait(timeout=Timeout.PROCESS_DEATH_WAIT) is not None
+        assert start_under_way(launch_lock_path(tmp_path)) is None
+
+    def test_a_lock_holder_that_launches_another_project_is_refused(
+        self, tmp_path: Path, children: list[subprocess.Popen[bytes]]
+    ) -> None:
+        """What holds the lock is proven like any daemon: one whose command
+        line names another project is not signalled."""
+        args = _stop_project(tmp_path / "mine")
+        stranger = self._hung_launcher(children, tmp_path / "theirs", lock_root=tmp_path / "mine")
+        with patch(_READ_PID_RECORD, return_value=None):
+            assert cmd_stop(args) == 1
+        assert stranger.poll() is None
+
+    def test_the_daemon_still_starting_is_stopped(
+        self, tmp_path: Path, children: list[subprocess.Popen[bytes]]
+    ) -> None:
+        args = _stop_project(tmp_path)
+        daemon = self._hung_launcher(children, tmp_path)
+        launch_lock_path(tmp_path).write_text(f"{daemon.pid}\n")
+        with patch(_READ_PID_RECORD, return_value=None):
+            assert cmd_stop(args) == 0
+        assert daemon.wait(timeout=Timeout.PROCESS_DEATH_WAIT) is not None
+        assert start_under_way(launch_lock_path(tmp_path)) is None
+
+    @pytest.mark.parametrize("named", [False, True], ids=["holder", "named"])
+    def test_a_process_started_after_the_lock_was_written_is_refused(
+        self,
+        tmp_path: Path,
+        children: list[subprocess.Popen[bytes]],
+        capsys: pytest.CaptureFixture[str],
+        named: bool,
+    ) -> None:
+        """Review 10, R10-3: the holder takes the lock, and the daemon names
+        itself, after each started. A process that started after the lock
+        was written holds a pid reused since. Here the lock is made older."""
+        args = _stop_project(tmp_path)
+        launcher = self._hung_launcher(children, tmp_path)
+        lock = launch_lock_path(tmp_path)
+        if named:
+            lock.write_text(f"{launcher.pid}\n")
+        written = psutil.Process(launcher.pid).create_time() - 60
+        os.utime(lock, (written, written))
+        with patch(_READ_PID_RECORD, return_value=None):
+            assert cmd_stop(args) == 1
+        assert launcher.poll() is None
+        assert "started after" in capsys.readouterr().err
+
+    def test_a_start_still_under_way_once_its_named_process_stopped_is_reported(
+        self,
+        tmp_path: Path,
+        children: list[subprocess.Popen[bytes]],
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """A launcher stopped after its fork leaves its daemon holding the
+        lock: that start is not over, and ``stop`` does not say it is."""
+        args = _stop_project(tmp_path)
+        stopped = _daemon_for(children, tmp_path)
+        with self._under_way(tmp_path, stopped.pid):
+            assert cmd_stop(args) == 1
+        assert stopped.wait(timeout=Timeout.PROCESS_DEATH_WAIT) is not None
+        assert "still under way" in capsys.readouterr().err
+
+    def test_a_named_pid_that_serves_another_project_is_refused(
+        self, tmp_path: Path, children: list[subprocess.Popen[bytes]]
+    ) -> None:
+        args = _stop_project(tmp_path / "mine")
+        other = _daemon_for(children, tmp_path / "theirs")
+        with self._under_way(tmp_path / "mine", other.pid):
+            assert cmd_stop(args) == 1
+        assert other.poll() is None
+
+    def test_a_start_whose_holder_cannot_be_identified_is_reported_not_signalled(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """No lock table to read: nothing identifies the holder, so nothing
+        is signalled, and ``stop`` says so."""
+        args = _stop_project(tmp_path)
         with (
-            patch("claude_code_hooks_daemon.daemon.cli.read_pid_file", return_value=_UNREAL_PID),
-            patch("os.kill", side_effect=mock_kill_func),
+            self._under_way(tmp_path, None),
+            patch("claude_code_hooks_daemon.daemon.server._PROC_LOCKS", tmp_path / "no-lock-table"),
+            patch("claude_code_hooks_daemon.daemon.cli.stop_verified_daemon") as stop,
+        ):
+            assert cmd_stop(args) == 1
+        stop.assert_not_called()
+        assert "cannot be identified; nothing was signalled" in capsys.readouterr().err
+
+    def test_a_launch_lock_it_cannot_read_is_no_proof_nothing_runs(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Review 9: a lock it cannot open leaves a start under way unseen,
+        which is not "not running"."""
+        args = _stop_project(tmp_path)
+        planted = launch_lock_path(tmp_path)
+        planted.parent.mkdir(parents=True, exist_ok=True)
+        planted.symlink_to(tmp_path / "planted")
+        with (
+            patch(_READ_PID_RECORD, return_value=None),
+            patch("claude_code_hooks_daemon.daemon.cli.stop_verified_daemon") as stop,
+        ):
+            assert cmd_stop(args) == 1
+        stop.assert_not_called()
+        assert "cannot read the launch lock" in capsys.readouterr().err
+
+    def test_no_start_under_way_is_not_running(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        args = _stop_project(tmp_path)
+        with (
+            patch(
+                "claude_code_hooks_daemon.daemon.cli.get_socket_path",
+                return_value=tmp_path / "d.sock",
+            ),
+            patch(_READ_PID_RECORD, return_value=None),
+            patch("claude_code_hooks_daemon.daemon.cli.stop_verified_daemon") as stop,
+        ):
+            assert cmd_stop(args) == 0
+        stop.assert_not_called()
+        assert "Daemon not running" in capsys.readouterr().out
+
+
+class TestCmdStopSignalsOnlyThisProjectsDaemon:
+    """Plan 00466 N59: the PID file names a pid, and nothing but its command line proves it."""
+
+    def test_stops_this_projects_daemon(
+        self, tmp_path: Path, children: list[subprocess.Popen[bytes]]
+    ) -> None:
+        args = _stop_project(tmp_path)
+        daemon = _daemon_for(children, tmp_path)
+        with (
+            patch(_READ_PID_RECORD, return_value=_recorded(daemon.pid)),
             patch("claude_code_hooks_daemon.daemon.cli.cleanup_pid_file") as mock_cleanup_pid,
             patch("claude_code_hooks_daemon.daemon.cli.cleanup_socket") as mock_cleanup_sock,
-            patch("time.sleep"),
         ):
-            result = cmd_stop(args)
-            assert result == 0
-            assert kill_count[0] >= 2
-            mock_cleanup_pid.assert_called_once()
-            mock_cleanup_sock.assert_called_once()
+            assert cmd_stop(args) == 0
+        assert not psutil.pid_exists(daemon.pid) or daemon.poll() is not None
+        mock_cleanup_pid.assert_called_once()
+        mock_cleanup_sock.assert_called_once()
 
-    def test_stop_process_not_found(self, tmp_path: Path) -> None:
-        """cmd_stop handles stale PID file."""
-        claude_dir = tmp_path / ".claude"
-        claude_dir.mkdir()
-        hooks_daemon_dir = claude_dir / "hooks-daemon"
-        hooks_daemon_dir.mkdir()
-
-        # Create valid config
-        config_file = claude_dir / "hooks-daemon.yaml"
-        config_file.write_text("version: '1.0'\ndaemon:\n  log_level: INFO\n")
-
-        args = argparse.Namespace(project_root=tmp_path)
-
+    def test_refuses_another_projects_daemon(
+        self, tmp_path: Path, children: list[subprocess.Popen[bytes]]
+    ) -> None:
+        args = _stop_project(tmp_path / "mine")
+        other = _daemon_for(children, tmp_path / "theirs")
         with (
-            patch("claude_code_hooks_daemon.daemon.cli.read_pid_file", return_value=_UNREAL_PID),
-            patch("os.kill", side_effect=ProcessLookupError()),
+            patch(_READ_PID_RECORD, return_value=_recorded(other.pid)),
+            patch("claude_code_hooks_daemon.daemon.cli.cleanup_pid_file") as mock_cleanup_pid,
+        ):
+            assert cmd_stop(args) == 1
+        assert other.poll() is None
+        mock_cleanup_pid.assert_not_called()
+
+    def test_refuses_a_live_process_that_is_not_a_daemon(
+        self, tmp_path: Path, children: list[subprocess.Popen[bytes]]
+    ) -> None:
+        args = _stop_project(tmp_path)
+        bystander = _spawn(children, _SLEEP)
+        with patch(_READ_PID_RECORD, return_value=_recorded(bystander.pid)):
+            assert cmd_stop(args) == 1
+        assert bystander.poll() is None
+
+    def test_refuses_a_mock_pid(self, tmp_path: Path) -> None:
+        args = _stop_project(tmp_path)
+        with patch(_READ_PID_RECORD, return_value=_recorded(Mock().pid)):
+            assert cmd_stop(args) == 1
+
+    def test_a_daemon_gone_before_it_is_proven_keeps_its_files(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Plan 00466 N70: ``read_pid_record`` saw the pid live a moment ago, so
+        the PID file and socket may already be a successor's; both are left.
+        A merely stale PID file never reaches here: ``read_pid_record`` clears it."""
+        args = _stop_project(tmp_path)
+        with (
+            patch(_READ_PID_RECORD, return_value=_recorded(_UNREAL_PID)),
             patch("claude_code_hooks_daemon.daemon.cli.cleanup_pid_file") as mock_cleanup_pid,
             patch("claude_code_hooks_daemon.daemon.cli.cleanup_socket") as mock_cleanup_sock,
         ):
-            result = cmd_stop(args)
-            assert result == 0
-            mock_cleanup_pid.assert_called_once()
-            mock_cleanup_sock.assert_called_once()
+            assert cmd_stop(args) == 0
+        mock_cleanup_pid.assert_not_called()
+        mock_cleanup_sock.assert_not_called()
+        assert "exited before it could be stopped" in capsys.readouterr().out
 
-    def test_stop_permission_denied(self, tmp_path: Path) -> None:
-        """cmd_stop handles permission denied."""
-        claude_dir = tmp_path / ".claude"
-        claude_dir.mkdir()
-        hooks_daemon_dir = claude_dir / "hooks-daemon"
-        hooks_daemon_dir.mkdir()
-
-        # Create valid config
-        config_file = claude_dir / "hooks-daemon.yaml"
-        config_file.write_text("version: '1.0'\ndaemon:\n  log_level: INFO\n")
-
-        args = argparse.Namespace(project_root=tmp_path)
-
+    def test_a_proven_daemon_that_exits_before_sigterm_keeps_its_files(
+        self, tmp_path: Path, children: list[subprocess.Popen[bytes]]
+    ) -> None:
+        """Plan 00466 N70: the proven daemon dies between the proof and
+        SIGTERM. The proof attributed a live process to this project a moment
+        ago, so the PID file and socket may already be a successor's."""
+        args = _stop_project(tmp_path)
+        daemon = _daemon_for(children, tmp_path)
         with (
-            patch("claude_code_hooks_daemon.daemon.cli.read_pid_file", return_value=_UNREAL_PID),
-            patch("os.kill", side_effect=PermissionError("Permission denied")),
+            patch(_READ_PID_RECORD, return_value=_recorded(daemon.pid)),
+            patch("signal.pidfd_send_signal", side_effect=ProcessLookupError(daemon.pid)),
+            patch("claude_code_hooks_daemon.daemon.cli.cleanup_pid_file") as mock_cleanup_pid,
+            patch("claude_code_hooks_daemon.daemon.cli.cleanup_socket") as mock_cleanup_sock,
         ):
-            result = cmd_stop(args)
-            assert result == 1
+            assert cmd_stop(args) == 0
+        mock_cleanup_pid.assert_not_called()
+        mock_cleanup_sock.assert_not_called()
 
-    def test_stop_timeout(self, tmp_path: Path) -> None:
-        """cmd_stop handles daemon not exiting within timeout."""
-        claude_dir = tmp_path / ".claude"
-        claude_dir.mkdir()
-        hooks_daemon_dir = claude_dir / "hooks-daemon"
-        hooks_daemon_dir.mkdir()
-
-        # Create valid config
-        config_file = claude_dir / "hooks-daemon.yaml"
-        config_file.write_text("version: '1.0'\ndaemon:\n  log_level: INFO\n")
-
-        args = argparse.Namespace(project_root=tmp_path)
-
-        with (
-            patch("claude_code_hooks_daemon.daemon.cli.read_pid_file", return_value=_UNREAL_PID),
-            patch("os.kill", return_value=None),  # Process stays alive
-            patch("time.sleep"),
-        ):
-            result = cmd_stop(args)
-            assert result == 1
-
-    def test_stop_escalates_to_sigkill_after_sigterm_grace_period(self, tmp_path: Path) -> None:
-        """A process that survives SIGTERM's grace period gets SIGKILL'd (Plan 00466 N40 review 2 MA2).
+    def test_a_daemon_that_ignores_sigterm_is_escalated_to_sigkill(
+        self,
+        tmp_path: Path,
+        children: list[subprocess.Popen[bytes]],
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """A process that survives SIGTERM's grace period gets SIGKILL'd
+        (Plan 00466 N40 review 2 MA2).
 
         A wedged daemon that ignores SIGTERM (e.g. holding the GIL in a
         long-running C call) previously left ``stop``/``restart`` unable to
         recover it at all -- exactly the state MA2's GIL-holding-handler
         finding leaves the process in, and exactly the case ``init.sh``'s own
-        advice ("this is fixed by restarting it") assumes works.
+        advice ("this is fixed by restarting it") assumes works. The identity
+        proof is re-checked by the SAME ``psutil.Process`` handle before the
+        SIGKILL goes out (it pins the pid's start time), so a pid recycled
+        during the grace cannot receive it -- no separate re-proof needed.
         """
-        claude_dir = tmp_path / ".claude"
-        claude_dir.mkdir()
-        hooks_daemon_dir = claude_dir / "hooks-daemon"
-        hooks_daemon_dir.mkdir()
-
-        config_file = claude_dir / "hooks-daemon.yaml"
-        config_file.write_text("version: '1.0'\ndaemon:\n  log_level: INFO\n")
-
-        args = argparse.Namespace(project_root=tmp_path)
-
-        signals_sent: list[int] = []
-
-        def mock_kill_func(pid: int, sig: int) -> None:
-            if sig == signal.SIGKILL:
-                signals_sent.append(sig)
-                # The process dies as soon as SIGKILL lands.
-                raise ProcessLookupError()
-            if sig != 0:
-                signals_sent.append(sig)
-            # SIGTERM, and every liveness check (signal 0) before SIGKILL:
-            # the process stays alive.
-            return None
-
+        args = _stop_project(tmp_path)
+        daemon = _daemon_for(children, tmp_path, _IGNORE_TERM)
         with (
-            patch("claude_code_hooks_daemon.daemon.cli.read_pid_file", return_value=_UNREAL_PID),
-            patch("os.kill", side_effect=mock_kill_func),
+            patch(_READ_PID_RECORD, return_value=_recorded(daemon.pid)),
+            patch.object(Timeout, "SOCKET_CONNECT", 0.2),
             patch("claude_code_hooks_daemon.daemon.cli.cleanup_pid_file") as mock_cleanup_pid,
             patch("claude_code_hooks_daemon.daemon.cli.cleanup_socket") as mock_cleanup_sock,
-            patch("time.sleep"),
         ):
-            result = cmd_stop(args)
-            assert result == 0
-            assert signal.SIGTERM in signals_sent
-            assert signal.SIGKILL in signals_sent
-            mock_cleanup_pid.assert_called_once()
-            mock_cleanup_sock.assert_called_once()
+            assert cmd_stop(args) == 0
+        # psutil's own wait() (inside stop_verified_daemon) reaps the child via
+        # waitpid before this test's subprocess.Popen handle can, so a strict
+        # exit-code assertion here would race against psutil for the reap
+        # (the existing pattern in test_stops_this_projects_daemon above) --
+        # only that it is gone, or reports non-None, is available to check.
+        assert not psutil.pid_exists(daemon.pid) or daemon.poll() is not None
+        mock_cleanup_pid.assert_called_once()
+        mock_cleanup_sock.assert_called_once()
+        assert "escalated to SIGKILL" in capsys.readouterr().err
+
+    def test_permission_denied(
+        self, tmp_path: Path, children: list[subprocess.Popen[bytes]]
+    ) -> None:
+        args = _stop_project(tmp_path)
+        daemon = _daemon_for(children, tmp_path)
+        with (
+            patch(_READ_PID_RECORD, return_value=_recorded(daemon.pid)),
+            patch("signal.pidfd_send_signal", side_effect=PermissionError(daemon.pid)),
+        ):
+            assert cmd_stop(args) == 1
+        assert daemon.poll() is None
 
 
-@pytest.mark.usefixtures("pid_proven_ours", "_reject_unproven_real_signals")
 class TestCmdStopGenericException:
-    """Tests for cmd_stop generic exception path (line 373-375)."""
+    """Tests for cmd_stop's generic exception path."""
 
     def test_stop_generic_exception(self, tmp_path: Path) -> None:
         """cmd_stop returns 1 on unexpected exception."""
+        args = _stop_project(tmp_path)
+        with (
+            patch(_READ_PID_RECORD, return_value=_recorded(_UNREAL_PID)),
+            patch(
+                "claude_code_hooks_daemon.daemon.cli.stop_verified_daemon",
+                side_effect=RuntimeError("unexpected"),
+            ),
+        ):
+            assert cmd_stop(args) == 1
+
+
+class TestCmdStopCleansUpOnlyWhatItStillOwns:
+    """Plan 00466 round 2 (S2): after the proven daemon exits, ``cmd_stop``
+    deleted the PID file and socket unconditionally. A successor started in
+    the meantime (a concurrent hook's ``ensure_daemon``) had written its own
+    pid and bound its own socket there, and was orphaned. The PID file goes
+    only while it still holds the stopped pid, and the socket only when a
+    probe finds nothing listening on it."""
+
+    daemon: subprocess.Popen[bytes]
+
+    @pytest.fixture(autouse=True)
+    def _daemon(self, tmp_path: Path, children: list[subprocess.Popen[bytes]]) -> None:
+        """A real process this project's stop proves is its daemon."""
+        self.daemon = _daemon_for(children, tmp_path)
+
+    def _stop(self, tmp_path: Path, pid_path: Path, socket_path: Path, on_exit: Any) -> int:
+        """Run ``cmd_stop`` against the real daemon; ``on_exit`` runs once
+        ``stop_verified_daemon`` has seen it exit, which is where a
+        successor's start lands."""
         claude_dir = tmp_path / ".claude"
-        claude_dir.mkdir()
-        hooks_daemon_dir = claude_dir / "hooks-daemon"
-        hooks_daemon_dir.mkdir()
+        (claude_dir / "hooks-daemon").mkdir(parents=True)
+        (claude_dir / "hooks-daemon.yaml").write_text("version: '1.0'\n")
+        args = argparse.Namespace(
+            project_root=tmp_path, pid_file=str(pid_path), socket=str(socket_path)
+        )
 
-        config_file = claude_dir / "hooks-daemon.yaml"
-        config_file.write_text("version: '1.0'\ndaemon:\n  log_level: INFO\n")
-
-        args = argparse.Namespace(project_root=tmp_path)
+        def stop_then_succeed(pid: object, **kwargs: Any) -> DaemonStop:
+            outcome = safe_signal.stop_verified_daemon(pid, **kwargs)
+            on_exit()
+            return outcome
 
         with (
-            patch("claude_code_hooks_daemon.daemon.cli.read_pid_file", return_value=_UNREAL_PID),
-            patch("os.kill", side_effect=RuntimeError("unexpected")),
+            patch(_READ_PID_RECORD, return_value=_recorded(self.daemon.pid)),
+            patch(f"{_CLI}.stop_verified_daemon", side_effect=stop_then_succeed),
         ):
             result = cmd_stop(args)
-            assert result == 1
+        assert self.daemon.poll() is not None or not psutil.pid_exists(self.daemon.pid)
+        return result
 
+    def test_the_stopped_daemons_files_are_removed(self, tmp_path: Path, short_dir: Path) -> None:
+        pid_path, socket_path = self._stale_files(short_dir)
 
-_OTHER_PROJECT_ROOT = "/srv/projects/someone-else"
+        assert self._stop(tmp_path, pid_path, socket_path, lambda: None) == 0
 
+        assert not pid_path.exists()
+        assert not socket_path.exists()
 
-class TestCmdStopSignalsOnlyThisProjectsDaemon:
-    """``stop`` signals a pid only once it is proven to be THIS project's daemon.
-
-    ``read_pid_file(verify_daemon=True)`` proves only that the pid is SOME
-    daemon server. A stale pid file whose pid was reused by another project's
-    daemon passes that check, and the SIGKILL escalation would then kill a
-    daemon serving someone else (Plan 00466 N40 review 2 MA2, N59's rule).
-    """
-
-    def _args(self, tmp_path: Path) -> argparse.Namespace:
-        claude_dir = tmp_path / ".claude"
-        (claude_dir / "hooks-daemon").mkdir(parents=True)
-        (claude_dir / "hooks-daemon.yaml").write_text("version: '1.0'\n")
-        return argparse.Namespace(project_root=tmp_path)
-
-    def test_another_projects_daemon_is_never_signalled_and_nothing_is_deleted(
-        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    def test_a_successors_pid_file_and_live_socket_are_left_alone(
+        self, tmp_path: Path, short_dir: Path
     ) -> None:
-        """Plan 00466 N24 review 3 mi1: a root mismatch refuses and says why.
+        pid_path = short_dir / "daemon.pid"
+        pid_path.write_text(str(self.daemon.pid))
+        socket_path = short_dir / "daemon.sock"
+        successor = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
 
-        Deleting the PID file and socket on a mismatch removed THIS project's
-        live socket when the PID file named another root, and orphaned a daemon
-        whose root was misattributed through its venv path.
-        """
-        sent: list[int] = []
+        def successor_starts() -> None:
+            if not socket_path.exists():
+                pid_path.write_text(str(os.getpid()))
+                successor.bind(str(socket_path))
+                successor.listen(1)
 
-        def record(pid: int, sig: int) -> None:
-            sent.append(sig)
-
-        with (
-            patch("claude_code_hooks_daemon.daemon.cli.read_pid_file", return_value=_UNREAL_PID),
-            patch(
-                "claude_code_hooks_daemon.daemon.cli.daemon_process_project_root",
-                return_value=RootProof(
-                    root=_OTHER_PROJECT_ROOT, refusal=None, source="its interpreter's venv path"
-                ),
-            ),
-            patch("os.kill", side_effect=record),
-            patch("claude_code_hooks_daemon.daemon.cli.cleanup_pid_file") as cleanup_pid,
-            patch("claude_code_hooks_daemon.daemon.cli.cleanup_socket") as cleanup_sock,
-        ):
-            result = cmd_stop(self._args(tmp_path))
-
-        assert [sig for sig in sent if sig != 0] == []
-        assert result == 1
-        cleanup_pid.assert_not_called()
-        cleanup_sock.assert_not_called()
-        err = capsys.readouterr().err
-        assert _OTHER_PROJECT_ROOT in err
-        assert "its interpreter's venv path" in err
-
-    def test_an_unattributable_daemon_is_never_signalled(
-        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
-    ) -> None:
-        """When the daemon's project cannot be determined, stop refuses and says so."""
-        sent: list[int] = []
-
-        def record(pid: int, sig: int) -> None:
-            sent.append(sig)
-
-        with (
-            patch("claude_code_hooks_daemon.daemon.cli.read_pid_file", return_value=_UNREAL_PID),
-            patch(
-                "claude_code_hooks_daemon.daemon.cli.daemon_process_project_root",
-                return_value=RootProof(
-                    root=None, refusal="PID 7 cannot be inspected (AccessDenied)"
-                ),
-            ),
-            patch("os.kill", side_effect=record),
-            patch("claude_code_hooks_daemon.daemon.cli.cleanup_pid_file") as cleanup_pid,
-        ):
-            result = cmd_stop(self._args(tmp_path))
-
-        assert [sig for sig in sent if sig != 0] == []
-        assert result == 1
-        cleanup_pid.assert_not_called()
-        assert "cannot be inspected (AccessDenied)" in capsys.readouterr().err
-
-    def test_sigkill_is_withheld_when_the_pid_stops_being_ours_during_the_grace(
-        self, tmp_path: Path
-    ) -> None:
-        """The proof is re-taken right before SIGKILL: after SIGTERM's grace the
-        pid may belong to something else, and only a fresh proof may be acted on."""
-        sent: list[int] = []
-        ours = RootProof(root=os.path.realpath(tmp_path), refusal=None)
-        roots = iter([ours, RootProof(root=_OTHER_PROJECT_ROOT, refusal=None)])
-
-        def record(pid: int, sig: int) -> None:
-            sent.append(sig)
-
-        with (
-            patch("claude_code_hooks_daemon.daemon.cli.read_pid_file", return_value=_UNREAL_PID),
-            patch(
-                "claude_code_hooks_daemon.daemon.cli.daemon_process_project_root",
-                side_effect=lambda pid: next(roots),
-            ),
-            patch("os.kill", side_effect=record),
-            patch("time.sleep"),
-        ):
-            result = cmd_stop(self._args(tmp_path))
-
-        assert signal.SIGTERM in sent
-        assert signal.SIGKILL not in sent
-        assert result == 1
-
-
-class TestCmdStopSignalsThroughPidfdWhenAvailable:
-    """Plan 00466 N24 review 3 mi5: closing the TOCTOU between the root proof
-    and the signal that acts on it.
-
-    ``pid`` is a number the kernel is free to recycle the instant the proven
-    process exits; a signal sent by that number after the proof can land on
-    an unrelated process that has since reused it. A pidfd pinned to the
-    exact process instance BEFORE the proof removes that window: every
-    signal below must go out through it, never bare ``os.kill``, whenever
-    one was obtainable.
-    """
-
-    def _args(self, tmp_path: Path) -> argparse.Namespace:
-        claude_dir = tmp_path / ".claude"
-        (claude_dir / "hooks-daemon").mkdir(parents=True)
-        (claude_dir / "hooks-daemon.yaml").write_text("version: '1.0'\n")
-        return argparse.Namespace(project_root=tmp_path)
-
-    def test_sigterm_and_liveness_checks_go_through_the_pidfd_not_os_kill(
-        self, tmp_path: Path
-    ) -> None:
-        """When a pidfd is obtainable, no signal is ever sent by bare pid number."""
-        _SENTINEL_FD = 4321
-        pidfd_signals: list[int] = []
-        bare_kill_calls: list[tuple[int, int]] = []
-
-        def record_pidfd_signal(pidfd: int, sig: int) -> None:
-            assert pidfd == _SENTINEL_FD, "signalled a pidfd other than the one pinned up front"
-            pidfd_signals.append(sig)
-            if sig != 0:
-                return
-            # Liveness check (signal 0): process has already exited by the
-            # first poll, so the loop above can break immediately.
-            raise ProcessLookupError()
-
-        def record_bare_kill(pid: int, sig: int) -> None:
-            bare_kill_calls.append((pid, sig))
-
-        with (
-            patch("claude_code_hooks_daemon.daemon.cli.read_pid_file", return_value=_UNREAL_PID),
-            patch("os.pidfd_open", return_value=_SENTINEL_FD) as mock_pidfd_open,
-            patch("os.close") as mock_close,
-            patch("signal.pidfd_send_signal", side_effect=record_pidfd_signal),
-            patch("os.kill", side_effect=record_bare_kill),
-            patch(
-                "claude_code_hooks_daemon.daemon.cli.daemon_process_project_root",
-                return_value=RootProof(root=os.path.realpath(tmp_path), refusal=None),
-            ),
-            patch("claude_code_hooks_daemon.daemon.cli.cleanup_pid_file") as mock_cleanup_pid,
-            patch("claude_code_hooks_daemon.daemon.cli.cleanup_socket") as mock_cleanup_sock,
-        ):
-            result = cmd_stop(self._args(tmp_path))
-
-        assert result == 0
-        mock_pidfd_open.assert_called_once_with(_UNREAL_PID, 0)
-        assert signal.SIGTERM in pidfd_signals
-        assert bare_kill_calls == [], f"signalled by bare pid number: {bare_kill_calls}"
-        mock_cleanup_pid.assert_called_once()
-        mock_cleanup_sock.assert_called_once()
-        mock_close.assert_called_once_with(_SENTINEL_FD)
-
-    def test_sigkill_escalation_also_goes_through_the_same_pidfd(self, tmp_path: Path) -> None:
-        """The SIGKILL escalation path reuses the SAME pidfd opened up front --
-        it is not re-opened (and so not re-exposed to the race) at escalation time."""
-        _SENTINEL_FD = 8765
-        pidfd_signals: list[int] = []
-
-        def record_pidfd_signal(pidfd: int, sig: int) -> None:
-            assert pidfd == _SENTINEL_FD
-            if sig == signal.SIGKILL:
-                pidfd_signals.append(sig)
-                raise ProcessLookupError()  # dies as soon as SIGKILL lands
-            if sig != 0:
-                pidfd_signals.append(sig)
-            return None  # SIGTERM, and every liveness poll before SIGKILL: stays alive
-
-        with (
-            patch("claude_code_hooks_daemon.daemon.cli.read_pid_file", return_value=_UNREAL_PID),
-            patch("os.pidfd_open", return_value=_SENTINEL_FD),
-            patch("os.close") as mock_close,
-            patch("signal.pidfd_send_signal", side_effect=record_pidfd_signal),
-            patch("os.kill", side_effect=AssertionError("must not signal by bare pid number")),
-            patch(
-                "claude_code_hooks_daemon.daemon.cli.daemon_process_project_root",
-                return_value=RootProof(root=os.path.realpath(tmp_path), refusal=None),
-            ),
-            patch("claude_code_hooks_daemon.daemon.cli.cleanup_pid_file"),
-            patch("claude_code_hooks_daemon.daemon.cli.cleanup_socket"),
-            patch("time.sleep"),
-        ):
-            result = cmd_stop(self._args(tmp_path))
-
-        assert result == 0
-        assert signal.SIGTERM in pidfd_signals
-        assert signal.SIGKILL in pidfd_signals
-        mock_close.assert_called_once_with(_SENTINEL_FD)
-
-    def test_open_pidfd_falls_back_to_none_when_the_pid_is_already_gone(self) -> None:
-        """`_open_pidfd` degrades to the bare-pid-number fallback rather than
-        raising, when the pid no longer names a live process."""
-        from claude_code_hooks_daemon.daemon.cli import _open_pidfd
-
-        with patch("os.pidfd_open", side_effect=ProcessLookupError("no such process")):
-            assert _open_pidfd(_UNREAL_PID) is None
-
-    def test_open_pidfd_falls_back_to_none_when_unsupported_by_the_platform(self) -> None:
-        """`_open_pidfd` degrades gracefully on a platform without pidfd_open
-        (pre-3.9 Python, or non-Linux) instead of crashing `cmd_stop`."""
-        from claude_code_hooks_daemon.daemon.cli import _open_pidfd
-
-        with patch("os.pidfd_open", side_effect=AttributeError("no pidfd_open")):
-            assert _open_pidfd(_UNREAL_PID) is None
-
-    def test_pidfd_send_signal_reports_a_dead_target_as_process_lookup_error(self) -> None:
-        """End-to-end with a REAL process: once the pidfd's target has exited,
-        signalling it raises exactly the exception `os.kill` would -- proving
-        the two are interchangeable from every `except ProcessLookupError`
-        in `cmd_stop`, and that the pidfd never silently redirects to
-        whatever process has since reused the pid number."""
-        from claude_code_hooks_daemon.daemon.cli import _signal_proven_pid
-
-        proc = subprocess.Popen([sys.executable, "-c", "pass"])
-        pidfd = os.pidfd_open(proc.pid, 0)  # opened while still live, like `cmd_stop` does
         try:
-            proc.wait()
-            with pytest.raises(ProcessLookupError):
-                _signal_proven_pid(proc.pid, pidfd, 0)
+            assert self._stop(tmp_path, pid_path, socket_path, successor_starts) == 0
+            assert pid_path.read_text() == str(os.getpid())
+            assert socket_path.exists()
         finally:
-            os.close(pidfd)
+            successor.close()
+
+    def _stale_files(self, short_dir: Path) -> tuple[Path, Path]:
+        """The daemon's PID file and a bound, never-listening socket: what
+        it leaves once stopped."""
+        pid_path = short_dir / "daemon.pid"
+        pid_path.write_text(str(self.daemon.pid))
+        socket_path = short_dir / "daemon.sock"
+        orphan = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        orphan.bind(str(socket_path))
+        orphan.close()
+        return pid_path, socket_path
+
+    @staticmethod
+    def _start_lock(socket_path: Path) -> int:
+        """An fd open on the start lock a daemon start takes (``server.py``)."""
+        return os.open(str(socket_path) + ".start.lock", os.O_RDWR | os.O_CREAT, 0o600)
+
+    def test_the_probe_and_both_removals_hold_the_start_lock(
+        self, tmp_path: Path, short_dir: Path
+    ) -> None:
+        """Plan 00466 round 3 (m-B): a starting daemon holds the start lock
+        across its own probe, unlink and bind. A stop probing between that
+        unlink and bind found no socket, then removed the one just bound."""
+        pid_path, socket_path = self._stale_files(short_dir)
+        seen: dict[str, bool] = {}
+
+        def lock_is_held() -> bool:
+            fd = self._start_lock(socket_path)
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                return True
+            finally:
+                os.close(fd)
+            return False
+
+        def recording(name: str, real: Any) -> Any:
+            def record(*args: Any) -> Any:
+                seen[name] = lock_is_held()
+                return real(*args)
+
+            return record
+
+        with (
+            patch(f"{_CLI}.cleanup_pid_file", recording("pid", paths.cleanup_pid_file)),
+            patch(
+                f"{_CLI}._socket_liveness_sync", recording("probe", server._socket_liveness_sync)
+            ),
+            patch(f"{_CLI}.cleanup_socket", recording("socket", paths.cleanup_socket)),
+        ):
+            assert self._stop(tmp_path, pid_path, socket_path, lambda: None) == 0
+
+        assert seen == {"pid": True, "probe": True, "socket": True}
+        assert not pid_path.exists()
+        assert not socket_path.exists()
+
+    def test_a_start_that_keeps_the_lock_keeps_both_files(
+        self, tmp_path: Path, short_dir: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Whatever a start holding the lock is doing to these paths, it is
+        not provably done, so a stop that cannot take the lock removes
+        neither file."""
+        pid_path, socket_path = self._stale_files(short_dir)
+        monkeypatch.setattr(Timeout, "FILE_LOCK", 0)
+        holder = self._start_lock(socket_path)
+        fcntl.flock(holder, fcntl.LOCK_EX)
+        try:
+            assert self._stop(tmp_path, pid_path, socket_path, lambda: None) == 0
+        finally:
+            os.close(holder)
+        assert pid_path.exists()
+        assert socket_path.exists()
+
+    def test_a_start_lock_that_cannot_be_opened_keeps_both_files(
+        self, tmp_path: Path, short_dir: Path
+    ) -> None:
+        """Plan 00466 round 4 (Sh-C): a symlink planted at the lock path is
+        refused, and without the lock the stop removes neither file."""
+        pid_path, socket_path = self._stale_files(short_dir)
+        target = short_dir / "planted-target"
+        Path(str(socket_path) + ".start.lock").symlink_to(target)
+        assert self._stop(tmp_path, pid_path, socket_path, lambda: None) == 0
+        assert pid_path.exists()
+        assert socket_path.exists()
+        assert not target.exists()
+
+
+class TestTheStartLockRefusesWhatIsNotItsOwnFile:
+    """Plan 00466 round 4 (Sh-C): ``O_CREAT`` through a link planted at the
+    lock path created or opened the file it named."""
+
+    def test_a_symlink_is_refused_and_its_target_never_created(self, short_dir: Path) -> None:
+        socket_path = short_dir / "daemon.sock"
+        target = short_dir / "target"
+        server.start_lock_path(socket_path).symlink_to(target)
+        with (
+            pytest.raises(OSError) as raised,
+            server.hold_start_lock(socket_path, Timeout.FILE_LOCK),
+        ):
+            pytest.fail("the lock was taken through a symlink")
+        assert raised.value.errno == errno.ELOOP
+        assert not target.exists()
+
+    def test_a_lock_that_is_not_a_regular_file_is_refused(self, short_dir: Path) -> None:
+        socket_path = short_dir / "daemon.sock"
+        os.mkfifo(server.start_lock_path(socket_path))
+        with (
+            pytest.raises(OSError) as raised,
+            server.hold_start_lock(socket_path, Timeout.FILE_LOCK),
+        ):
+            pytest.fail("the lock was taken on a FIFO")
+        assert raised.value.errno == errno.EINVAL
+
+    def test_a_regular_lock_file_is_taken(self, short_dir: Path) -> None:
+        socket_path = short_dir / "daemon.sock"
+        with server.hold_start_lock(socket_path, Timeout.FILE_LOCK):
+            assert server.start_lock_path(socket_path).is_file()
+
+    def test_only_its_owner_may_open_the_lock(self, short_dir: Path) -> None:
+        """Round 5 (Sh-E): a lock another user can open is one another user
+        can hold, and every start would wait on them."""
+        socket_path = short_dir / "daemon.sock"
+        with server.hold_start_lock(socket_path, Timeout.FILE_LOCK):
+            mode = server.start_lock_path(socket_path).stat().st_mode
+        assert mode & 0o077 == 0
+
+    def test_another_users_lock_is_refused_by_name(self, short_dir: Path) -> None:
+        """Root opens anything, so the EACCES a second user gets is the
+        probe's. The refusal names both users, and nothing is removed."""
+        socket_path = short_dir / "daemon.sock"
+        lock_path = server.start_lock_path(socket_path)
+        lock_path.touch()
+        pid_path = short_dir / "daemon.pid"
+        pid_path.write_text(str(_UNREAL_PID))
+        real_open = os.open
+
+        def refuse_the_lock(path: str, *args: Any, **kwargs: Any) -> int:
+            if path == str(lock_path):
+                raise PermissionError(errno.EACCES, os.strerror(errno.EACCES), path)
+            return real_open(path, *args, **kwargs)
+
+        with patch("os.open", side_effect=refuse_the_lock):
+            with (
+                pytest.raises(PermissionError) as raised,
+                server.hold_start_lock(socket_path, Timeout.FILE_LOCK),
+            ):
+                pytest.fail("the lock was taken")
+            assert not remove_stale_pid_file(pid_path, socket_path, str(_UNREAL_PID))
+        message = str(raised.value)
+        assert f"uid {lock_path.stat().st_uid}" in message
+        assert f"uid {os.geteuid()} cannot open it" in message
+        assert pid_path.exists()
+
+
+class TestRemoveStalePidFile:
+    """Plan 00466 round 4 (Sh-A, Sh-B): ``init.sh`` removes a stale or
+    corrupt PID file through this, under the start lock a daemon start
+    writes its pid under."""
+
+    @pytest.mark.parametrize("text", [str(_UNREAL_PID), "0", "-1", "1", "", "junk"])
+    def test_a_file_naming_no_live_process_is_removed(self, short_dir: Path, text: str) -> None:
+        pid_path = short_dir / "daemon.pid"
+        pid_path.write_text(text)
+        assert remove_stale_pid_file(pid_path, short_dir / "daemon.sock", text)
+        assert not pid_path.exists()
+
+    def test_a_file_that_changed_since_it_was_read_stays(self, short_dir: Path) -> None:
+        pid_path = short_dir / "daemon.pid"
+        pid_path.write_text(str(os.getpid()))
+        assert not remove_stale_pid_file(pid_path, short_dir / "daemon.sock", str(_UNREAL_PID))
+        assert pid_path.read_text() == str(os.getpid())
+
+    def test_a_file_whose_pid_is_alive_stays(self, short_dir: Path) -> None:
+        pid_path = short_dir / "daemon.pid"
+        pid_path.write_text(str(os.getpid()))
+        assert not remove_stale_pid_file(pid_path, short_dir / "daemon.sock", str(os.getpid()))
+        assert pid_path.exists()
+
+    def test_it_holds_the_start_lock_while_it_removes(self, short_dir: Path) -> None:
+        pid_path = short_dir / "daemon.pid"
+        pid_path.write_text(str(_UNREAL_PID))
+        socket_path = short_dir / "daemon.sock"
+        held: list[bool] = []
+        real_unlink = Path.unlink
+
+        def unlink(path: Path, missing_ok: bool = False) -> None:
+            fd = os.open(server.start_lock_path(socket_path), os.O_RDWR)
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                held.append(False)
+            except BlockingIOError:
+                held.append(True)
+            finally:
+                os.close(fd)
+            real_unlink(path, missing_ok=missing_ok)
+
+        with patch.object(Path, "unlink", unlink):
+            assert remove_stale_pid_file(pid_path, socket_path, str(_UNREAL_PID))
+        assert held == [True]
+
+    def test_a_held_lock_leaves_the_file(
+        self, short_dir: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        pid_path = short_dir / "daemon.pid"
+        pid_path.write_text(str(_UNREAL_PID))
+        socket_path = short_dir / "daemon.sock"
+        monkeypatch.setattr(Timeout, "FILE_LOCK", 0)
+        with server.hold_start_lock(socket_path, Timeout.FILE_LOCK):
+            assert not remove_stale_pid_file(pid_path, socket_path, str(_UNREAL_PID))
+        assert pid_path.exists()
+
+    def test_a_lock_that_cannot_be_opened_leaves_the_file(self, short_dir: Path) -> None:
+        pid_path = short_dir / "daemon.pid"
+        pid_path.write_text(str(_UNREAL_PID))
+        socket_path = short_dir / "daemon.sock"
+        server.start_lock_path(socket_path).symlink_to(short_dir / "target")
+        assert not remove_stale_pid_file(pid_path, socket_path, str(_UNREAL_PID))
+        assert pid_path.exists()
+
+
+class TestPidIsThisProjectsDaemon:
+    """Plan 00466 round 4 (N139-A): EPERM proves a process, not this daemon."""
+
+    def test_a_socket_answering_as_this_projects_daemon_proves_it(self, short_dir: Path) -> None:
+        socket_path = short_dir / "daemon.sock"
+        with answering_daemon_socket(socket_path, short_dir, _UNREAL_PID):
+            assert pid_is_this_projects_daemon(_UNREAL_PID, socket_path, short_dir)
+
+    def test_a_listener_that_does_not_answer_proves_nothing(self, short_dir: Path) -> None:
+        """Round 6 (Sh-2): any listener accepted the probe, and under the /tmp
+        socket fallback another user can bind the path first."""
+        socket_path = short_dir / "daemon.sock"
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as listener:
+            listener.bind(str(socket_path))
+            listener.listen(1)
+            assert not pid_is_this_projects_daemon(_UNREAL_PID, socket_path, short_dir)
+
+    def test_another_projects_daemon_answering_proves_nothing(
+        self, short_dir: Path, tmp_path: Path
+    ) -> None:
+        socket_path = short_dir / "daemon.sock"
+        with answering_daemon_socket(socket_path, tmp_path, _UNREAL_PID):
+            assert not pid_is_this_projects_daemon(_UNREAL_PID, socket_path, short_dir)
+
+    def test_a_command_line_serving_this_project_proves_a_pid_of_this_user(
+        self, short_dir: Path
+    ) -> None:
+        """This test's own pid, whose owner is this user."""
+        proof = RootProof(root=os.path.realpath(short_dir), refusal=None)
+        with patch(f"{_CLI}.daemon_process_project_root", return_value=proof):
+            assert pid_is_this_projects_daemon(os.getpid(), short_dir / "none.sock", short_dir)
+
+    def test_a_command_line_never_proves_another_users_pid(self, short_dir: Path) -> None:
+        """Round 6 (P5-1, Sh-G): the rule asked whether this user may signal
+        the pid, and root may signal every process, so another user's process
+        naming this project in its arguments was proven. The owner decides.
+        Another uid's process is faked by changing the uid it is compared
+        with, not by launching one, which would need root."""
+        proof = RootProof(root=os.path.realpath(short_dir), refusal=None)
+        with (
+            patch(f"{_CLI}.daemon_process_project_root", return_value=proof),
+            patch("os.geteuid", return_value=os.geteuid() + 4242),
+        ):
+            assert not pid_is_this_projects_daemon(os.getpid(), short_dir / "none.sock", short_dir)
+
+    def test_a_gone_pid_is_not_proven_by_a_command_line(self, short_dir: Path) -> None:
+        proof = RootProof(root=os.path.realpath(short_dir), refusal=None)
+        with patch(f"{_CLI}.daemon_process_project_root", return_value=proof):
+            assert not pid_is_this_projects_daemon(_UNREAL_PID, short_dir / "none.sock", short_dir)
+
+    @pytest.mark.parametrize("pid", [0, 1, -1, True])
+    def test_what_is_no_pid_is_never_probed(self, short_dir: Path, pid: int) -> None:
+        """``kill(0, 0)`` succeeds against this process's own group."""
+        with patch("os.kill") as kill:
+            assert not pid_is_this_projects_daemon(pid, short_dir / "none.sock", short_dir)
+        kill.assert_not_called()
+
+    def test_another_projects_daemon_does_not(self, short_dir: Path, tmp_path: Path) -> None:
+        proof = RootProof(root=os.path.realpath(tmp_path), refusal=None)
+        with patch(f"{_CLI}.daemon_process_project_root", return_value=proof):
+            assert not pid_is_this_projects_daemon(os.getpid(), short_dir / "none.sock", short_dir)
+
+    def test_an_unprovable_process_does_not(self, short_dir: Path) -> None:
+        assert not pid_is_this_projects_daemon(_UNREAL_PID, short_dir / "none.sock", short_dir)
+
+
+class TestAwaitStartedDaemonIsBoundedByTheClock:
+    """Round 6 (R5-1, P5-2): ``cmd_start``'s parent counted 50 ticks, and
+    each tick's socket probe can take its whole timeout, so the poll could
+    run six times its budget and take the PreToolUse deny path to the 60 s
+    hook timeout. Nothing is stubbed: the PID file names a live process
+    that is not a daemon (this test's own, read only), and the socket
+    accepts every probe but never answers."""
+
+    _BUDGET_SEC = 1.0
+
+    def test_a_probe_that_takes_its_whole_timeout_cannot_stretch_the_poll(
+        self, short_dir: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(Timeout, "DAEMON_START_BUDGET_SEC", self._BUDGET_SEC)
+        pid_path = short_dir / "daemon.pid"
+        pid_path.write_text(f"{os.getpid()}\n")
+        socket_path = short_dir / "daemon.sock"
+        # The daemon's end of the start pipe, held open: it is still starting.
+        progress_read, progress_write = os.pipe()
+        try:
+            with silent_socket(socket_path) as accepted:
+                started = _await_started_daemon(
+                    pid_path, socket_path, short_dir, None, _StartProgress(progress_read)
+                )
+        finally:
+            os.close(progress_read)
+            os.close(progress_write)
+        assert started.pid is None
+        assert "still starting" in (started.failure or "")
+        # Each probe waits out its timeout, so a clock-bounded poll makes a
+        # handful where a tick-counted one made one per tick.
+        most = int(self._BUDGET_SEC / Timeout.SOCKET_LIVENESS_PROBE_SEC) + 1
+        assert 1 <= len(accepted) <= most, len(accepted)
+
+
+class TestAnErrorIsReportedAndStillProvesNothing:
+    """Each error these helpers catch is reported, and never counts as proof."""
+
+    def test_a_release_blocked_by_a_start_says_so_and_keeps_both_files(
+        self,
+        short_dir: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        pid_path = short_dir / "daemon.pid"
+        pid_path.write_text(f"{_UNREAL_PID}\n")
+        socket_path = short_dir / "daemon.sock"
+        socket_path.write_text("")
+        monkeypatch.setattr(Timeout, "FILE_LOCK", 0)
+        with server.hold_start_lock(socket_path, Timeout.FILE_LOCK):
+            _release_stopped_daemon_files(_UNREAL_PID, pid_path, socket_path)
+
+        assert pid_path.exists()
+        assert socket_path.exists()
+        err = capsys.readouterr().err
+        assert "WARNING" in err and str(pid_path) in err and str(socket_path) in err
+
+    def test_a_daemon_gone_before_it_is_watched_has_exited_and_is_reported(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        gone = paths.PID_MAX_LIMIT - 1
+        progress_read, progress_write = os.pipe()
+        try:
+            os.write(progress_write, f"{gone}\n".encode())
+            progress = _StartProgress(progress_read)
+            with (
+                caplog.at_level(logging.INFO, logger=_CLI),
+                patch(f"{_CLI}.psutil.Process", side_effect=psutil.NoSuchProcess(gone)),
+            ):
+                progress.advanced()
+        finally:
+            os.close(progress_read)
+            os.close(progress_write)
+        assert progress.exited
+        assert progress.launched_pid is None
+        assert any(str(gone) in record.getMessage() for record in caplog.records)
+
+    def test_an_unreadable_pid_file_is_named_as_such(self, short_dir: Path) -> None:
+        pid_path = short_dir / "daemon.pid"
+        pid_path.mkdir()
+        state = _pid_file_state(pid_path, None, None, Mock(exited=True))
+        assert state.startswith("the PID file cannot be read")
+
+    def test_an_absent_or_corrupt_pid_file_created_none(self, short_dir: Path) -> None:
+        pid_path = short_dir / "daemon.pid"
+        assert _pid_file_state(pid_path, None, None, Mock(exited=True)) == "no PID file created"
+        pid_path.write_text("not a pid\n")
+        assert _pid_file_state(pid_path, None, None, Mock(exited=True)) == "no PID file created"
 
 
 class TestCmdConfig:

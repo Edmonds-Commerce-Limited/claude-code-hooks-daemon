@@ -87,11 +87,56 @@ Three are worth naming here:
 The Defence landed RED at `4d0fcead` with an empty inventory and 33 undeclared
 boundaries; the sweep that filled it is the commit that follows.
 
+**The counter-example: `conflict_marker_commit_gate`** (Plan 00466 N211) was
+built fail-closed from the start, so it is not a row. When it cannot state
+the repository or the tree a commit records, it denies with a named reason
+and a `git -C /absolute/path/to/repo commit` rephrase. That covers an
+expanded directory, `cd -`, `GIT_INDEX_FILE`, `--pathspec-from-file`,
+`git am <patch>`, no repository, or a git error. It does not allow. The
+choice is cheap here because the rephrase always exists: a literal `-C` path
+can always be checked. That is why a gate may fail closed where a guard with
+no rephrase could not.
+
 **No instance is fixed.** Converting any of these to fail-closed changes
 behaviour in every installing project — a slow guard would begin blocking, a
 bad config would begin refusing every tool call — so the fix is owner-gated.
 The inventory exists so that the decision is made against a list rather than
 against an impression.
+
+## The CI passthrough does not cover a start under way
+
+`init.sh`'s CI passthrough lets every call through unjudged when the daemon
+is not installed in CI. It applies only to a daemon proven down after a start
+that failed. A start still under way when the hook must answer is not that
+case, so the hook denies the call with "the daemon is starting; retry"
+(Plan 00466 review 9, DR-3). In CI without `ci_enabled: true`, a start that
+keeps hanging therefore denies every call rather than passing them through.
+That is deliberate: it fails closed, and the operator sees why.
+
+With `ci_enabled: true`, a start under way is CI-enforced exactly as a start
+that failed (DR-2). The call is denied with the CI-enforced reason, and no
+recovery command is exempt, since CI enforcement exempts none.
+
+## Limits no reading of the command text closes
+
+A guard that judges a Bash command before it runs sees text, not the disk the
+command will meet. Two limits follow, and both are ALLOWS by design rather
+than boundaries on the inventory:
+
+- **A path built at run time.** `"$(dirname "$0")/x"` or a variable set by a
+  program names a file the text never spells. Where the target decides the
+  verdict, the guard denies it as unknown (containment's unresolved
+  targets); where it does not, the guard cannot see it.
+- **A later command a planted file could shadow** (ledger 00466 N214, round
+  13 ruling). A quoted heredoc's body is data only when no earlier segment
+  may rebind a command name IN THIS SHELL: a function, an alias, `hash`,
+  `PATH` and the other names bash or a helper reads, `cd`, `source`, `eval`
+  and the rest of `shell_segmentation.segment_may_rebind_commands`. An
+  earlier external command (`mkdir`, `pytest`, `make`) is a child process
+  and cannot rebind anything, so it does not count, whatever it writes. It
+  can still plant a file a later name resolves to, for example a program
+  in a directory `PATH` already lists relatively. Judging that would mean
+  denying every multi-step command, the project's required `set -euo pipefail` prelude among them.
 
 ## What the Defence does not catch
 

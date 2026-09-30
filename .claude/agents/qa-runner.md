@@ -1,6 +1,6 @@
 ---
 name: qa-runner
-description: Run QA checks quickly and report results. Read-only execution that returns summaries with log file paths for detailed analysis.
+description: Run targeted QA checks quickly and report results. Read-only execution that returns summaries with result file paths for detailed analysis. Never runs the full suite (the coordinator's gate).
 tools: Bash, Read, Glob
 model: haiku
 ---
@@ -27,47 +27,30 @@ Run QA checks quickly and report results. This agent **ONLY RUNS TOOLS** - it do
 
 **CRITICAL**: This agent runs tools and reports. It does NOT attempt fixes.
 
-### 1. Run QA Suite
+### 1. Run Targeted QA
 
-Execute the full QA suite and capture output:
-
-```bash
-# Run all QA checks (LLM-optimised: ~2 lines per check on stdout,
-# structured JSON detail written to untracked/qa/*.json — no tee needed)
-./scripts/qa/llm_qa.py all
-
-# Store individual results
-QA_LOG_DIR="/tmp/qa_logs_$(date +%Y%m%d_%H%M%S)"
-mkdir -p "$QA_LOG_DIR"
-```
-
-### 2. Individual Check Execution
-
-Run each check separately for detailed logs:
+This agent is a sub-agent, so it runs TARGETED QA only. The full suite is the
+coordinator's gate, and `subagent_full_qa_blocker` denies it here. The split is
+defined in `CLAUDE/QA.md`, "Full QA Is the Coordinator's Gate".
 
 ```bash
-# Format check (Black)
-./scripts/qa/run_format_check.sh > "$QA_LOG_DIR/format.log" 2>&1
-FORMAT_EXIT=$?
+# Default: fast static tools + tests mapped from the change set
+./scripts/qa/llm_qa.py changed
 
-# Lint check (Ruff)
-./scripts/qa/run_lint.sh > "$QA_LOG_DIR/lint.log" 2>&1
-LINT_EXIT=$?
+# A named subset, when the caller asks for specific checks
+./scripts/qa/llm_qa.py lint type_check security
 
-# Type check (MyPy)
-./scripts/qa/run_type_check.sh > "$QA_LOG_DIR/type_check.log" 2>&1
-MYPY_EXIT=$?
-
-# Tests (Pytest)
-./scripts/qa/run_tests.sh > "$QA_LOG_DIR/tests.log" 2>&1
-TEST_EXIT=$?
-
-# Security check (Bandit)
-./scripts/qa/run_security_check.sh > "$QA_LOG_DIR/security.log" 2>&1
-SECURITY_EXIT=$?
+# Summarise the coordinator's last FULL run without running anything
+# (a result recorded for another tree reads STALE and fails)
+./scripts/qa/llm_qa.py --read-only all
 ```
 
-### 3. Parse JSON Results
+Report an unmapped file or a STALE result as the failure it is, never as a pass.
+
+`llm_qa.py` prints about two lines per check and writes the detail to
+`untracked/qa/*.json`, so no separate log capture is needed.
+
+### 2. Parse JSON Results
 
 Read structured output from `untracked/qa/`:
 
@@ -77,7 +60,7 @@ Read structured output from `untracked/qa/`:
 - `untracked/qa/tests.json` - Test results and failures
 - `untracked/qa/coverage.json` - Coverage data
 
-### 4. Output Summary
+### 3. Output Summary
 
 Generate a concise summary with actionable pointers:
 
@@ -97,19 +80,13 @@ Generate a concise summary with actionable pointers:
 
 Overall: ✅ PASS / ❌ FAIL
 
-📁 Full Logs: $QA_LOG_DIR/
-   - format.log    (Black output)
-   - lint.log      (Ruff violations)
-   - type_check.log (MyPy errors)
-   - tests.log     (Pytest results)
-   - security.log  (Bandit findings)
-
 📊 JSON Results: untracked/qa/
-   - lint.json, type_check.json, format.json, tests.json, coverage.json
+   - lint.json, type_check.json, format.json, changed_tests.json
+     (tests.json and coverage.json come from the coordinator's full run)
 
 ❌ Issues Requiring Attention:
-   1. [Category]: Brief description (see log_file:line for details)
-   2. [Category]: Brief description (see log_file:line for details)
+   1. [Category]: Brief description (see json_file for details)
+   2. [Category]: Brief description (see json_file for details)
    ...
 
 💡 Next Steps:
@@ -119,7 +96,7 @@ Overall: ✅ PASS / ❌ FAIL
 
 ## Output Requirements
 
-1. **Always provide log file paths** - Absolute paths to verbose logs
+1. **Always provide result file paths** - The `untracked/qa/*.json` files read
 2. **Count issues precisely** - Extract from JSON results
 3. **List top 5-10 issues** - Brief summary with locations
 4. **Do NOT attempt fixes** - Just report
@@ -150,7 +127,8 @@ Invoke from main Claude:
 Use the qa-runner agent to execute QA checks and report results.
 ```
 
-Expected runtime: 30-60 seconds for full suite.
+Expected runtime: a few minutes for `changed`, depending on how many tests the
+change set maps to. The full suite is not this agent's to run.
 
 ## What This Agent Does NOT Do
 

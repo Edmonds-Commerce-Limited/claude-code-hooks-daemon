@@ -124,3 +124,59 @@ class TestCollectEnforcementStatusLines:
         (tmp_path / ".claude").mkdir()
         statuses = _collect_enforcement_status_lines(tmp_path)
         assert any(expected_substring in s for s in statuses)
+
+
+def _write_full_qa_config(root: Path, body: str) -> None:
+    claude_dir = root / ".claude"
+    claude_dir.mkdir()
+    (claude_dir / "hooks-daemon.yaml").write_text(
+        "handlers:\n  pre_tool_use:\n    subagent_full_qa_blocker:\n" + body,
+        encoding="utf-8",
+    )
+
+
+class TestTheFullQaGuardReportsAnInertDeclaration:
+    """Plan 00463: the guard ships with no patterns, so enabling it without
+    declaring any gives a handler that can never fire and looks exactly like
+    one with nothing to deny. `check` is where that has to show up."""
+
+    def test_enabled_with_no_patterns_is_reported(self, tmp_path: Path) -> None:
+        _write_full_qa_config(tmp_path, "      enabled: true\n")
+        statuses = _collect_enforcement_status_lines(tmp_path)
+        assert any("subagent_full_qa_blocker" in s for s in statuses)
+
+    def test_enabled_with_patterns_is_nominal(self, tmp_path: Path) -> None:
+        _write_full_qa_config(
+            tmp_path,
+            "      enabled: true\n"
+            "      options:\n"
+            "        full_qa_patterns:\n"
+            "          - id: run-all\n"
+            "            command: run_all.sh\n",
+        )
+        statuses = _collect_enforcement_status_lines(tmp_path)
+        assert not any("subagent_full_qa_blocker" in s for s in statuses)
+
+    def test_disabled_is_not_reported(self, tmp_path: Path) -> None:
+        """Off is the shipped default and is not a degraded state."""
+        _write_full_qa_config(tmp_path, "      enabled: false\n")
+        statuses = _collect_enforcement_status_lines(tmp_path)
+        assert not any("subagent_full_qa_blocker" in s for s in statuses)
+
+    def test_a_scope_override_is_reported(self, tmp_path: Path) -> None:
+        """Review finding 7: `scope: ALL` would deny the coordinator's own gate.
+
+        `check` must apply config exactly as dispatch does, scope included,
+        or it reports a guard the daemon is not running.
+        """
+        _write_full_qa_config(
+            tmp_path,
+            "      enabled: true\n"
+            "      scope: ALL\n"
+            "      options:\n"
+            "        full_qa_patterns:\n"
+            "          - id: run-all\n"
+            "            command: run_all.sh\n",
+        )
+        statuses = _collect_enforcement_status_lines(tmp_path)
+        assert any("scope ALL" in s for s in statuses), statuses

@@ -35,11 +35,15 @@ import subprocess
 import time
 from pathlib import Path
 
+import psutil
 import pytest
 
 from claude_code_hooks_daemon.constants.timeout import Timeout
+from claude_code_hooks_daemon.daemon.paths import read_pid_file
+from claude_code_hooks_daemon.daemon.process_verification import find_all_daemon_processes
 from claude_code_hooks_daemon.install.plan_workflow import MKPLAN_SCRIPT_NAME
 from claude_code_hooks_daemon.utils.hook_registration import HOOK_EVENTS_IN_SETTINGS
+from claude_code_hooks_daemon.utils.safe_signal import stop_verified_daemon
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 INSTALL_VERSION_SH = REPO_ROOT / "scripts" / "install_version.sh"
@@ -681,4 +685,128 @@ def test_upgrade_version_sh_end_to_end_produces_running_daemon(tmp_path: Path) -
     finally:
         if venv_python is not None:
             _stop_test_daemon(venv_python, project_root, env)
+        _remove_daemon_clone(daemon_dir)
+
+
+def _run_layer2(
+    script: Path, args: list[str], env: dict[str, str], cwd: Path
+) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [BASH, str(script), *args],
+        capture_output=True,
+        text=True,
+        env=env,
+        check=False,
+        timeout=_INSTALL_TIMEOUT_SECONDS,
+        cwd=cwd,
+    )
+
+
+def _root_named(pid: int) -> str:
+    cmdline = psutil.Process(pid).cmdline()
+    return cmdline[cmdline.index("--project-root") + 1]
+
+
+def test_upgrade_through_a_link_replaces_a_daemon_naming_the_link(tmp_path: Path) -> None:
+    """Plan 00466 lifecycle round 9b: the upgrade hand-off for a project
+    reached through a symlink.
+
+    A daemon an older ``init.sh`` started names its root through the link,
+    and a daemon's root text is never resolved, so the upgrade's stop
+    refused it: ``stop_daemon_safe`` swallowed the refusal, the start found
+    the old daemon serving, and the upgrade reported success with the OLD
+    daemon still running. Installed and upgraded through the link, as a
+    client whose project path is a link runs both.
+    """
+    if not INSTALL_VERSION_SH.is_file() or not UPGRADE_VERSION_SH.is_file():
+        pytest.skip("install_version.sh or upgrade_version.sh missing")
+    if shutil.which("uv") is None:
+        pytest.skip("uv not installed in this environment")
+
+    real = tmp_path / "r" / "proj"
+    (real / ".claude").mkdir(parents=True)
+    (tmp_path / "l").symlink_to(tmp_path / "r")
+    linked = tmp_path / "l" / "proj"
+    subprocess.run(["git", "init", "-q"], cwd=real, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "remote", "add", "origin", "https://example.invalid/fake.git"],
+        cwd=real,
+        check=True,
+        capture_output=True,
+    )
+    daemon_dir = real / ".claude" / "hooks-daemon"
+    _create_daemon_clone(daemon_dir)
+    linked_daemon_dir = linked / ".claude" / "hooks-daemon"
+    venv_python: Path | None = None
+    env = os.environ.copy()
+
+    try:
+        env["HOSTNAME"] = _make_test_hostname()
+        env.pop("CI", None)
+        env.pop("HOOKS_DAEMON_SKIP_VENV_BOOTSTRAP", None)
+        env["NO_COLOR"] = "1"
+        _seed_opt_in_plan_config(real, daemon_dir)
+
+        install = _run_layer2(
+            INSTALL_VERSION_SH, [str(linked), str(linked_daemon_dir)], env, linked
+        )
+        assert install.returncode == 0, install.stdout + install.stderr
+        venv_candidates = sorted((daemon_dir / "untracked").glob("venv-*py3*"))
+        assert venv_candidates, "the install produced no venv"
+        venv_python = venv_candidates[0] / "bin" / "python"
+        running, status = _wait_for_daemon_status(
+            venv_python, real, env, "Daemon: RUNNING", timeout=Timeout.DAEMON_SHUTDOWN
+        )
+        assert running, status
+        pid_path = Path(status.split("PID file: ", 1)[1].splitlines()[0])
+
+        # The old daemon: started as an older init.sh did, naming the link.
+        _stop_test_daemon(venv_python, real, env)
+        started = subprocess.run(
+            [
+                str(venv_python),
+                "-m",
+                "claude_code_hooks_daemon.daemon.cli",
+                "--project-root",
+                str(linked),
+                "start",
+            ],
+            capture_output=True,
+            text=True,
+            env=env,
+            check=False,
+            timeout=Timeout.DAEMON_RESTART_VERIFY_TIMEOUT_SEC * 2,
+            cwd=tmp_path,
+        )
+        assert started.returncode == 0, started.stdout + started.stderr
+        old_pid = read_pid_file(str(pid_path))
+        assert old_pid is not None
+        assert _root_named(old_pid) == str(linked)
+
+        short_sha = subprocess.run(
+            ["git", "-C", str(daemon_dir), "rev-parse", "--short", "HEAD"],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+        upgrade = _run_layer2(
+            UPGRADE_VERSION_SH, [str(linked), str(linked_daemon_dir), short_sha], env, linked
+        )
+        assert upgrade.returncode == 0, upgrade.stdout + upgrade.stderr
+
+        assert not psutil.pid_exists(old_pid) or (
+            psutil.Process(old_pid).status() == psutil.STATUS_ZOMBIE
+        ), f"the upgrade left the old daemon (PID {old_pid}) running"
+        running, last_stdout = _wait_for_daemon_status(
+            venv_python, real, env, "Daemon: RUNNING", timeout=Timeout.DAEMON_SHUTDOWN
+        )
+        assert running, last_stdout
+        new_pid = read_pid_file(str(pid_path))
+        assert new_pid is not None and new_pid != old_pid
+        assert _root_named(new_pid) == str(real)
+    finally:
+        if venv_python is not None:
+            _stop_test_daemon(venv_python, real, env)
+        for pid in find_all_daemon_processes(project_root=linked):
+            stop_verified_daemon(pid, project_root=linked, grace_seconds=Timeout.DAEMON_SHUTDOWN)
         _remove_daemon_clone(daemon_dir)

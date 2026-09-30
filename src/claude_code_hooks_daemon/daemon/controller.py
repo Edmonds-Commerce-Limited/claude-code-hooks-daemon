@@ -143,6 +143,7 @@ class DaemonController:
         "_config",
         "_config_errors",
         "_config_fingerprint",
+        "_config_problems",
         "_degraded",
         "_initialised",
         "_mode_manager",
@@ -184,6 +185,9 @@ class DaemonController:
         # Why the chain deadline cannot beat the deployed client timeout
         # (Plan 00466 N40 review 2 mA4): reported in health, not rejected.
         self._chain_deadline_problems: list[str] = []
+        # Config values the daemon runs with other than as written (Plan
+        # 00466 round 3): named in health and at session start, not degraded.
+        self._config_problems: list[str] = []
         # Project handlers that failed to load this startup (reported in health).
         self._project_handler_load_failures: list[ProjectHandlerLoadFailure] = []
         # Strict-mode flag (Plan 00466 N24): same narrow-slice DI idiom as
@@ -225,6 +229,7 @@ class DaemonController:
         reference_repos: "ReferenceReposConfig | None" = None,
         chain_deadline_problems: list[str] | None = None,
         config_fingerprint: str | None = None,
+        config_problems: list[str] | None = None,
     ) -> None:
         """Initialise the controller with handlers.
 
@@ -272,6 +277,10 @@ class DaemonController:
                 ``get_health`` so a config edit without a restart reads as
                 stale. ``None`` reports no config fingerprint, which the
                 freshness verdict treats as unverifiable.
+            config_problems: ``DaemonConfig.config_problems`` (Plan 00466
+                round 3): values the daemon runs with other than as written.
+                Named in ``get_health()`` and handed to the SessionStart
+                config-problem advisory; not a degraded state.
 
         Raises:
             ValueError: If workspace_root is None (FAIL FAST requirement)
@@ -299,6 +308,7 @@ class DaemonController:
         self._chain_deadline_problems = list(chain_deadline_problems or [])
         for problem in self._chain_deadline_problems:
             logger.warning("Chain deadline: %s", problem)
+        self._config_problems = list(config_problems or [])
 
         # Initialize ProjectContext singleton (single source of truth for project-level constants)
         # May already be initialized from CLI config validation
@@ -323,6 +333,7 @@ class DaemonController:
             project_registry=project_registry,
             worktree=worktree,
             reference_repos=reference_repos,
+            config_problems=self._config_problems,
         )
 
         logger.info("Registered %d built-in handlers", count)
@@ -1268,6 +1279,8 @@ class DaemonController:
             health["config_errors"] = self._config_errors
         if self._chain_deadline_problems:
             health["chain_deadline_problems"] = list(self._chain_deadline_problems)
+        if self._config_problems:
+            health["config_problems"] = list(self._config_problems)
         if self._project_handler_load_failures:
             health["project_handler_load_failures"] = [
                 {"filename": f.filename, "event_dir": f.event_dir, "reason": f.reason}

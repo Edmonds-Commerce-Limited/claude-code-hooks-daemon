@@ -36,6 +36,7 @@ from claude_code_hooks_daemon.docs_qa.types import (
     Severity,
 )
 from claude_code_hooks_daemon.utils.authored_paths import authored_path
+from claude_code_hooks_daemon.utils.path_containment import path_relative_to
 
 CHECK_ID: Final[str] = "unenforced-approval-gate"
 
@@ -170,7 +171,7 @@ def _findings_for(rel_path: str, content: str, severity: Severity) -> list[Findi
 def _run_edit(context: CheckContext) -> list[Finding]:
     if context.file_path is None or context.file_content is None:
         return []
-    rel_path = str(context.file_path.relative_to(context.project_root))
+    rel_path = str(path_relative_to(context.file_path, context.project_root))
     if not _is_core_doc(rel_path, context.policy.trees.agent):
         return []
     return _findings_for(rel_path, context.file_content, Severity.BLOCK)

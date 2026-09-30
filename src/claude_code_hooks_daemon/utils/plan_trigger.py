@@ -26,6 +26,7 @@ from claude_code_hooks_daemon.constants.tools import ToolName
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.core.project_layout import ProjectLayout
 from claude_code_hooks_daemon.core.utils import get_file_path
+from claude_code_hooks_daemon.utils.path_containment import path_relative_to
 
 logger = logging.getLogger(__name__)
 
@@ -115,7 +116,7 @@ def is_inside_project(file_path: str) -> bool:
         # the looping path unchanged, so the loop is detected explicitly with
         # stat(), whose ELOOP is the same on every version.
         resolved = Path(file_path).resolve()
-        resolved.relative_to(root)
+        path_relative_to(resolved, root)
         resolved.stat()
     except FileNotFoundError:
         return True
@@ -185,7 +186,7 @@ def _resolved_folder_capture(
     except (RuntimeError, OSError):
         return unresolved_folder
     try:
-        relative = Path(file_path).resolve().relative_to(root).as_posix()
+        relative = path_relative_to(Path(file_path).resolve(), root).as_posix()
     except (ValueError, OSError, RuntimeError):
         return unresolved_folder
     resolved_match = pattern.search(relative)

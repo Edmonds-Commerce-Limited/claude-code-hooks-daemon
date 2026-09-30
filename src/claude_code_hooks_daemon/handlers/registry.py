@@ -8,7 +8,7 @@ import importlib
 import inspect
 import logging
 import pkgutil
-from collections.abc import Collection, Iterator, Mapping
+from collections.abc import Collection, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, TypeGuard
@@ -293,6 +293,35 @@ def handler_is_enabled(
     )
 
 
+def apply_handler_config(
+    instance: Handler, handler_config: Mapping[str, Any], options: Mapping[str, Any]
+) -> None:
+    """Apply one handler's config the way dispatch does: priority, scope, options.
+
+    The single injector, so a caller that builds a handler outside the
+    registry (``hooks-daemon check``) configures exactly what the daemon runs,
+    rather than a hand-copied subset that drifts when an option is renamed.
+
+    Args:
+        instance: The freshly constructed handler.
+        handler_config: ``handlers.<event>.<key>`` from config.
+        options: The options to inject, already merged with any parent's.
+    """
+    # Falls back to the handler's own default when absent OR None (PyYAML
+    # parses a bare 'priority:' as None -- Plan 00070; a model_dump() None is
+    # Plan 00282). One shared helper across dispatch + both doc generators.
+    instance.priority = resolve_priority(handler_config, instance.priority)
+
+    # Where this handler is active (Plan 00423), same shape as priority: config
+    # overrides the handler's own default, a bare `scope:` (None) keeps it.
+    # resolve_scope raises on an unknown value rather than falling back; the
+    # real refusal happens earlier, at config load, where pydantic's
+    # `HandlerConfig.scope` field (config/models.py) rejects it.
+    instance.scope = resolve_scope(handler_config, instance.scope)
+
+    apply_handler_options(instance, options)
+
+
 def apply_handler_options(instance: object, options: Mapping[str, Any]) -> None:
     """Give ``instance`` its options the way ``register_all`` does: ``self._<key>``.
 
@@ -487,6 +516,7 @@ class HandlerRegistry:
         project_registry: "ProjectRegistry | None" = None,
         worktree: "WorktreeConfig | None" = None,
         reference_repos: "ReferenceReposConfig | None" = None,
+        config_problems: Sequence[str] = (),
     ) -> int:
         """Register all discovered handlers with the router.
 
@@ -513,6 +543,9 @@ class HandlerRegistry:
                 that attribute — attribute-selected rather than tag-selected,
                 because the two handlers that want it already carry the broad
                 ``git`` tag shared by handlers that do not
+            config_problems: ``DaemonConfig.config_problems`` (Plan 00466
+                round 3), injected as ``_config_problems`` onto handlers that
+                DECLARE that attribute, like ``_option_failures``
 
         Returns:
             Number of handlers registered
@@ -639,28 +672,6 @@ class HandlerRegistry:
                                 logger.debug("Handler %s skipped - %s", attr.__name__, tag_skip)
                                 continue
 
-                            # Override priority from config, falling back to the
-                            # handler's own default when absent OR None (PyYAML
-                            # parses a bare 'priority:' as None — Plan 00070; a
-                            # model_dump() None is Plan 00282). One shared helper
-                            # across dispatch + both doc generators.
-                            instance.priority = resolve_priority(handler_config, instance.priority)
-
-                            # Where this handler is active (Plan 00423), same
-                            # shape as priority: config overrides the handler's
-                            # own default, a bare `scope:` (None) keeps it.
-                            # resolve_scope still raises on an unknown value
-                            # rather than falling back, but that raise lands
-                            # inside this method's own `except Exception`
-                            # below, which logs a warning and skips the
-                            # handler — it does not, by itself, stop a typo
-                            # from quietly widening a scope. The real refusal
-                            # happens earlier, at config load: pydantic's
-                            # `HandlerConfig.scope` field (config/models.py)
-                            # rejects an unknown value there, before this
-                            # instantiation loop ever runs.
-                            instance.scope = resolve_scope(handler_config, instance.scope)
-
                             # Apply options inheritance if handler shares options with parent
                             registry_key = f"{event_type.value}.{config_key}"
                             own_options = options_registry.get(registry_key, {})
@@ -674,7 +685,7 @@ class HandlerRegistry:
                             else:
                                 merged_options = own_options
 
-                            apply_handler_options(instance, merged_options)
+                            apply_handler_config(instance, handler_config, merged_options)
 
                             # Inject project-level language filter (via setattr like other options)
                             instance._project_languages = project_languages
@@ -745,6 +756,12 @@ class HandlerRegistry:
                             option_failures_attr_name = "_option_failures"
                             if hasattr(instance, option_failures_attr_name):
                                 setattr(instance, option_failures_attr_name, self.option_failures)
+
+                            # Config values the daemon runs with other than as
+                            # written (Plan 00466 round 3), for the same alert.
+                            config_problems_attr_name = "_config_problems"
+                            if hasattr(instance, config_problems_attr_name):
+                                setattr(instance, config_problems_attr_name, tuple(config_problems))
 
                             # Inject the worktree merge-gate toggle for git-tagged
                             # handlers (Plan 00367 Phase 4) -- same DI idiom as

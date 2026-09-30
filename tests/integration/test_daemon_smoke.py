@@ -25,6 +25,7 @@ from typing import Any
 import pytest
 
 from claude_code_hooks_daemon.constants import Timeout
+from tests.isolated_daemon import DAEMON_CLI_SUBPROCESS_BOUND, isolated_daemon_paths
 
 
 @pytest.fixture
@@ -41,11 +42,7 @@ def daemon_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, Any
         dict with project_root, config_path, socket_path, pid_path, log_path
     """
     # Set unique paths for test daemon to avoid collision with production daemon
-    # Use /tmp directly for socket files to avoid Unix socket path length limits (108 chars)
-    test_id = tmp_path.name[-20:]  # Last 20 chars of test name for uniqueness
-    socket_path = Path(f"/tmp/test-daemon-{test_id}.sock")
-    pid_path = Path(f"/tmp/test-daemon-{test_id}.pid")
-    log_path = Path(f"/tmp/test-daemon-{test_id}.log")
+    socket_path, pid_path, log_path = isolated_daemon_paths(tmp_path, "daemon")
 
     # Override daemon paths via environment variables
     monkeypatch.setenv("CLAUDE_HOOKS_SOCKET_PATH", str(socket_path))
@@ -177,7 +174,7 @@ def daemon_process(daemon_env: dict[str, Any]):
             env=test_env,
             stdout=devnull,
             stderr=devnull,
-            timeout=10,
+            timeout=DAEMON_CLI_SUBPROCESS_BOUND,
         )
 
     if result.returncode != 0:
@@ -201,7 +198,7 @@ def daemon_process(daemon_env: dict[str, Any]):
         env=test_env,
         capture_output=True,
         text=True,
-        timeout=Timeout.SOCKET_CONNECT,
+        timeout=DAEMON_CLI_SUBPROCESS_BOUND,
     )
 
     if "RUNNING" not in status_result.stdout:
@@ -231,7 +228,7 @@ def daemon_process(daemon_env: dict[str, Any]):
         env=test_env,
         capture_output=True,
         text=True,
-        timeout=Timeout.SOCKET_CONNECT,
+        timeout=DAEMON_CLI_SUBPROCESS_BOUND,
     )
 
     # Wait for cleanup
@@ -347,7 +344,7 @@ class TestDaemonSmoke:
                 env=test_env,
                 stdout=devnull,
                 stderr=devnull,
-                timeout=10,
+                timeout=DAEMON_CLI_SUBPROCESS_BOUND,
             )
 
         assert start_result.returncode == 0, f"Start failed (exit code {start_result.returncode})"
@@ -368,7 +365,7 @@ class TestDaemonSmoke:
             env=test_env,
             capture_output=True,
             text=True,
-            timeout=Timeout.SOCKET_CONNECT,
+            timeout=DAEMON_CLI_SUBPROCESS_BOUND,
         )
 
         assert "RUNNING" in status_result.stdout, "Daemon not running after start"
@@ -388,7 +385,7 @@ class TestDaemonSmoke:
             env=test_env,
             capture_output=True,
             text=True,
-            timeout=Timeout.SOCKET_CONNECT,
+            timeout=DAEMON_CLI_SUBPROCESS_BOUND,
         )
 
         assert stop_result.returncode == 0, f"Stop failed: {stop_result.stderr}"
@@ -401,7 +398,7 @@ class TestDaemonSmoke:
             env=test_env,
             capture_output=True,
             text=True,
-            timeout=Timeout.SOCKET_CONNECT,
+            timeout=DAEMON_CLI_SUBPROCESS_BOUND,
         )
 
         assert "NOT RUNNING" in status_result.stdout, "Daemon still running after stop"
@@ -546,7 +543,7 @@ class TestDaemonSmoke:
                 env=test_env,
                 stdout=devnull,
                 stderr=devnull,
-                timeout=10,
+                timeout=DAEMON_CLI_SUBPROCESS_BOUND,
             )
         time.sleep(1)
 
@@ -585,7 +582,7 @@ class TestDaemonSmoke:
             env=test_env,
             capture_output=True,
             text=True,
-            timeout=Timeout.SOCKET_CONNECT,
+            timeout=DAEMON_CLI_SUBPROCESS_BOUND,
         )
 
         assert "RUNNING" in status_result.stdout, "Daemon not running after restart"
@@ -604,7 +601,7 @@ class TestDaemonSmoke:
             cwd=project_root,
             env=test_env,
             capture_output=True,
-            timeout=Timeout.SOCKET_CONNECT,
+            timeout=DAEMON_CLI_SUBPROCESS_BOUND,
         )
 
     def test_daemon_rejects_second_start(self, daemon_process: dict[str, Any]) -> None:
@@ -627,7 +624,7 @@ class TestDaemonSmoke:
             env=test_env,
             capture_output=True,
             text=True,
-            timeout=Timeout.SOCKET_CONNECT,
+            timeout=DAEMON_CLI_SUBPROCESS_BOUND,
         )
 
         # Should succeed with message about already running
@@ -642,11 +639,11 @@ class TestDaemonConfiguration:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Daemon fails to start with invalid configuration (FAIL FAST)."""
-        # Set unique paths for test daemon isolation (use /tmp directly to avoid path length limits)
-        test_id = tmp_path.name[-20:]
-        monkeypatch.setenv("CLAUDE_HOOKS_SOCKET_PATH", f"/tmp/test-{test_id}.sock")
-        monkeypatch.setenv("CLAUDE_HOOKS_PID_PATH", f"/tmp/test-{test_id}.pid")
-        monkeypatch.setenv("CLAUDE_HOOKS_LOG_PATH", f"/tmp/test-{test_id}.log")
+        # Set unique paths for test daemon isolation
+        paths = isolated_daemon_paths(tmp_path, "config")
+        monkeypatch.setenv("CLAUDE_HOOKS_SOCKET_PATH", str(paths.socket))
+        monkeypatch.setenv("CLAUDE_HOOKS_PID_PATH", str(paths.pid))
+        monkeypatch.setenv("CLAUDE_HOOKS_LOG_PATH", str(paths.log))
         test_env = os.environ.copy()
 
         # Create git repo
@@ -702,11 +699,11 @@ class TestDaemonConfiguration:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Daemon starts successfully with minimal valid config."""
-        # Set unique paths for test daemon isolation (use /tmp directly to avoid path length limits)
-        test_id = tmp_path.name[-20:]
-        monkeypatch.setenv("CLAUDE_HOOKS_SOCKET_PATH", f"/tmp/test-{test_id}.sock")
-        monkeypatch.setenv("CLAUDE_HOOKS_PID_PATH", f"/tmp/test-{test_id}.pid")
-        monkeypatch.setenv("CLAUDE_HOOKS_LOG_PATH", f"/tmp/test-{test_id}.log")
+        # Set unique paths for test daemon isolation
+        paths = isolated_daemon_paths(tmp_path, "config")
+        monkeypatch.setenv("CLAUDE_HOOKS_SOCKET_PATH", str(paths.socket))
+        monkeypatch.setenv("CLAUDE_HOOKS_PID_PATH", str(paths.pid))
+        monkeypatch.setenv("CLAUDE_HOOKS_LOG_PATH", str(paths.log))
         test_env = os.environ.copy()
 
         # Create git repo
@@ -758,7 +755,7 @@ handlers: {}
                 env=test_env,
                 stdout=devnull,
                 stderr=devnull,
-                timeout=10,
+                timeout=DAEMON_CLI_SUBPROCESS_BOUND,
             )
 
         assert (
@@ -781,7 +778,7 @@ handlers: {}
             env=test_env,
             capture_output=True,
             text=True,
-            timeout=Timeout.SOCKET_CONNECT,
+            timeout=DAEMON_CLI_SUBPROCESS_BOUND,
         )
 
         assert "RUNNING" in status_result.stdout
@@ -800,5 +797,5 @@ handlers: {}
             cwd=tmp_path,
             env=test_env,
             capture_output=True,
-            timeout=Timeout.SOCKET_CONNECT,
+            timeout=DAEMON_CLI_SUBPROCESS_BOUND,
         )

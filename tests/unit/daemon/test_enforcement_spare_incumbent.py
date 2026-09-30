@@ -9,7 +9,13 @@ import os
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+from claude_code_hooks_daemon.constants import Timeout
 from claude_code_hooks_daemon.daemon.enforcement import enforce_single_daemon
+from claude_code_hooks_daemon.utils.safe_signal import DaemonStop
+
+_STOP = "claude_code_hooks_daemon.daemon.enforcement.stop_verified_daemon"
+# The peers here are pids no process holds; each is taken to serve a socket.
+_SERVES = "claude_code_hooks_daemon.daemon.enforcement._serves_a_socket"
 
 
 class TestEnforceSparesLiveSocketOwner:
@@ -44,7 +50,8 @@ class TestEnforceSparesLiveSocketOwner:
                 "claude_code_hooks_daemon.daemon.enforcement.read_pid_file",
                 return_value=incumbent_pid,
             ),
-            patch("claude_code_hooks_daemon.daemon.enforcement.kill_daemon_process") as mock_kill,
+            patch(_SERVES, return_value=True),
+            patch(_STOP, return_value=DaemonStop.TERMINATED) as mock_stop,
         ):
             enforce_single_daemon(
                 config=mock_config,
@@ -53,8 +60,13 @@ class TestEnforceSparesLiveSocketOwner:
                 socket_path=socket_path,
             )
 
-        # Orphan killed, incumbent spared, current never targeted.
-        mock_kill.assert_called_once_with(orphan_pid)
+        # Orphan stopped, incumbent spared, current never targeted.
+        mock_stop.assert_called_once_with(
+            orphan_pid,
+            project_root=tmp_path,
+            grace_seconds=Timeout.PROCESS_KILL_WAIT,
+            logical_root=None,
+        )
 
     def test_kills_all_peers_when_socket_dead(self, tmp_path: Path) -> None:
         """If the socket is NOT live, no incumbent to spare — all peers killed."""
@@ -84,7 +96,8 @@ class TestEnforceSparesLiveSocketOwner:
                 "claude_code_hooks_daemon.daemon.enforcement.read_pid_file",
                 return_value=None,
             ),
-            patch("claude_code_hooks_daemon.daemon.enforcement.kill_daemon_process") as mock_kill,
+            patch(_SERVES, return_value=True),
+            patch(_STOP, return_value=DaemonStop.TERMINATED) as mock_stop,
         ):
             enforce_single_daemon(
                 config=mock_config,
@@ -93,6 +106,4 @@ class TestEnforceSparesLiveSocketOwner:
                 socket_path=socket_path,
             )
 
-        assert mock_kill.call_count == 2
-        mock_kill.assert_any_call(peer_1)
-        mock_kill.assert_any_call(peer_2)
+        assert [c.args[0] for c in mock_stop.call_args_list] == [peer_1, peer_2]

@@ -11,6 +11,9 @@ from claude_code_hooks_daemon.core import GatingResult
 from claude_code_hooks_daemon.core.data_layer import reset_data_layer
 from claude_code_hooks_daemon.core.rule import Rule
 from claude_code_hooks_daemon.handlers.pre_tool_use.pipe_blocker import PipeBlockerHandler
+from claude_code_hooks_daemon.handlers.pre_tool_use.project_containment import (
+    ProjectContainmentHandler,
+)
 from claude_code_hooks_daemon.strategies.pipe_blocker.registry import PipeBlockerStrategyRegistry
 
 _PROJECT_CONTEXT_PATH = "claude_code_hooks_daemon.core.project_context.ProjectContext"
@@ -678,3 +681,24 @@ class TestPipeBlockerAggregatesItsStrategiesAcceptanceTests:
         for test in handler.get_acceptance_tests():
             assert test.tool_payload is not None, f"{test.title!r} declares no payload"
             assert test.tool_payload.tool_input["command"] == test.command
+
+    def test_no_probe_command_trips_project_containment(self, handler: PipeBlockerHandler) -> None:
+        """A probe must reach the handler it tests, not an earlier one.
+
+        project_containment runs before pipe_blocker and fails closed on a write
+        target it cannot resolve (a `$$` in a path). A probe whose command does
+        that is denied by containment, so the playbook's reason check sees the
+        wrong rule and the probe judges nothing about pipe_blocker.
+        """
+        containment = ProjectContainmentHandler()
+        with patch(f"{_PROJECT_CONTEXT_PATH}.project_root", return_value=Path("/repo")):
+            for test in handler.get_acceptance_tests():
+                assert test.tool_payload is not None
+                hook_input = {
+                    "tool_name": test.tool_payload.tool_name,
+                    "tool_input": test.tool_payload.tool_input,
+                }
+                assert not containment.matches(hook_input), (
+                    f"{test.title!r} is denied by project_containment before "
+                    f"pipe_blocker sees it: {test.command!r}"
+                )

@@ -495,6 +495,14 @@ class HandlerID:
         config_key="contract_staleness",
         display_name="contract-staleness",
     )
+    # Conflict-marker commit gate (PreToolUse handler) — Plan 00466 N211: a
+    # commit whose added lines carry a merge-conflict marker, raw or disguised
+    # by the markdown formatter.
+    CONFLICT_MARKER_COMMIT_GATE = HandlerIDMeta(
+        class_name="ConflictMarkerCommitGateHandler",
+        config_key="conflict_marker_commit_gate",
+        display_name="conflict-marker-commit-gate",
+    )
     # Remote-docs commit gate (PreToolUse handler) — Plan 00326: the backstop
     # for the write-time gate, which keys on Write/Edit and so cannot see a
     # heredoc or redirect into the tree.
@@ -941,6 +949,15 @@ class HandlerID:
         class_name="SubagentCronDeleteBlockerHandler",
         config_key="subagent_cron_delete_blocker",
         display_name="subagent-cron-delete-blocker",
+    )
+    # Subagent full-QA blocker (PreToolUse handler) -- Plan 00463: the full QA
+    # gate is the coordinator's, run once per delivery, so a sub-agent's
+    # full-suite run is denied and pointed at the targeted form. scope=SUB,
+    # opt-in, inert until the project declares its full_qa_patterns.
+    SUBAGENT_FULL_QA_BLOCKER = HandlerIDMeta(
+        class_name="SubagentFullQaBlockerHandler",
+        config_key="subagent_full_qa_blocker",
+        display_name="subagent-full-qa-blocker",
     )
     # Teammate reap advisor (Stop handler) -- Plan 00419 N5: Claude Code's own
     # /goal evaluator defers its judgement while any background work is

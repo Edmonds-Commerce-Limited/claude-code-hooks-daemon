@@ -22,7 +22,8 @@ scripts that open the file internally are NOT detectable at command-text
 level — see the plan's RESEARCH-read-routes.md class-(d) rows.
 """
 
-import errno
+import contextlib
+import contextvars
 import fnmatch
 import itertools
 import logging
@@ -43,12 +44,14 @@ from claude_code_hooks_daemon.utils.command_evasion import (
     git_subcommand_index,
     strip_transparent_reserved_words,
 )
+from claude_code_hooks_daemon.utils.path_containment import path_relative_to
 from claude_code_hooks_daemon.utils.path_exclusion import (
     first_matching_glob,
     path_matches_globs,
     resolve_project_root,
 )
 from claude_code_hooks_daemon.utils.realpath import has_symlink_loop, realpath
+from claude_code_hooks_daemon.utils.shell_segmentation import mask_quoted
 
 logger = logging.getLogger(__name__)
 
@@ -312,8 +315,19 @@ def _tokenise(command: str) -> list[str]:
     surface. False positives are acceptable (deny-by-default); false
     negatives are the enumerated class-(c)/(d) limits.
     """
-    pattern = "[" + re.escape(_TOKEN_DELIMITERS.replace("\n", "")) + "\\n]+"
-    return [token for token in re.split(pattern, command) if token]
+    return [token for token, _start in _tokenise_with_offsets(command)]
+
+
+def _tokenise_with_offsets(command: str) -> list[tuple[str, int]]:
+    """:func:`_tokenise`'s tokens, each with its offset in ``command``."""
+    return [(match.group(), match.start()) for match in _TOKEN_PATTERN.finditer(command)]
+
+
+_TOKEN_PATTERN: Final[re.Pattern[str]] = re.compile(
+    "[^" + re.escape(_TOKEN_DELIMITERS.replace("\n", "")) + "\\n]+"
+)
+#: The characters bash expands a word's pathname by.
+_GLOB_CHARACTERS: Final[frozenset[str]] = frozenset("*?[")
 
 
 #: A Python import statement's dotted MODULE path. Anchored per line, and the
@@ -870,6 +884,33 @@ _DP_MAX_CELLS: Final[int] = 20_000
 #: the final `]` behind as a stray literal character.
 _POSIX_NAMED_CLASS_RE: Final[re.Pattern[str]] = re.compile(r"\[\[:[a-z]+:\]\]")
 
+#: Test seam (N123): counts DP grid cells ``_globs_can_intersect`` actually
+#: visits, so a test can assert on WORK DONE instead of wall-clock time --
+#: a fixed-second budget flakes under host contention (concurrent worktree
+#: gates), independent of whether the cost bound itself holds. A
+#: ``ContextVar`` rather than a module-level counter: no per-request state
+#: leaks across concurrent calls, and production pays nothing beyond a
+#: ``None`` check when no test has opened :func:`dp_cell_counter`.
+_dp_cell_counter: contextvars.ContextVar[list[int] | None] = contextvars.ContextVar(
+    "_dp_cell_counter", default=None
+)
+
+
+@contextlib.contextmanager
+def dp_cell_counter() -> Iterator[list[int]]:
+    """Count DP grid cells ``_globs_can_intersect`` visits during the block.
+
+    Returns a one-element list holding the running total, so it stays
+    visible without a second read of the ``ContextVar``. Test-only seam
+    (N123); production code never calls this.
+    """
+    counts = [0]
+    token = _dp_cell_counter.set(counts)
+    try:
+        yield counts
+    finally:
+        _dp_cell_counter.reset(token)
+
 
 def _globs_can_intersect(a: str, b: str) -> bool:
     """True when some single string could be matched by BOTH ``a`` and ``b``,
@@ -952,9 +993,12 @@ def _globs_can_intersect(a: str, b: str) -> bool:
     prev[0] = True
     for j in range(1, len_b + 1):
         prev[j] = b[j - 1] == "*" and prev[j - 1]
+    cell_counter = _dp_cell_counter.get()
     for i in range(1, len_a + 1):
         char_a = a[i - 1]
         curr[0] = char_a == "*" and prev[0]
+        if cell_counter is not None:
+            cell_counter[0] += len_b
         for j in range(1, len_b + 1):
             char_b = b[j - 1]
             if char_a == "*":
@@ -1219,6 +1263,7 @@ def find_protected_mention(
     *,
     deadline: float | None = None,
     context: MentionContext = "bash",
+    bash_tool_command: bool = False,
 ) -> str | None:
     """First protected glob a token of ``command`` mentions, else ``None``.
 
@@ -1233,9 +1278,16 @@ def find_protected_mention(
     review 8 L1) is forwarded straight through -- see
     :func:`find_protected_mention_detail`'s own docstring. ``context`` -- see
     :data:`MentionContext` -- defaults to ``"bash"``, so every pre-existing
-    caller keeps its exact prior behaviour unchanged.
+    caller keeps its exact prior behaviour unchanged. ``bash_tool_command``
+    -- see :func:`_brace_expansion_tokens`.
     """
-    detail = find_protected_mention_detail(command, patterns, deadline=deadline, context=context)
+    detail = find_protected_mention_detail(
+        command,
+        patterns,
+        deadline=deadline,
+        context=context,
+        bash_tool_command=bash_tool_command,
+    )
     return None if detail is None else detail[0]
 
 
@@ -1247,6 +1299,16 @@ def find_protected_mention(
 #: Public (no leading underscore): ``secret_file_guard`` supplies this as
 #: its scan deadline, so the value is shared rather than duplicated.
 SCAN_DEADLINE_SECONDS: Final[float] = 5.0
+
+
+#: What a guard reports, in place of a matched glob, when its scan of a
+#: command could not finish: a glob past its expansion cap, or the scan
+#: deadline. Unverifiable is denied, but it is not a guard bug (ledger 00466
+#: N134), so it is not sent down the internal-error route.
+SCAN_COULD_NOT_FINISH: Final[str] = (
+    "<this command could not be verified: a glob or scan in it did not finish within its "
+    "entry cap or deadline: name the files, or narrow the glob or directory>"
+)
 
 
 def bash_route_word_stream(command: str, *, deadline: float | None = None) -> list[str] | None:
@@ -1284,6 +1346,7 @@ def find_protected_mention_detail(
     cwd: str | None = None,
     context: MentionContext = "bash",
     normalised_words: list[str] | None = None,
+    bash_tool_command: bool = False,
 ) -> tuple[str, str] | None:
     """``(pattern, token)`` for the first protected mention, else ``None``.
 
@@ -1301,7 +1364,8 @@ def find_protected_mention_detail(
     simply omits it. ``context`` -- see :data:`MentionContext` -- defaults to
     ``"bash"``, unchanged from every pre-existing caller. ``normalised_words``
     (review 7 follow-up) is forwarded straight through -- see
-    :func:`bash_route_word_stream`.
+    :func:`bash_route_word_stream`. ``bash_tool_command`` -- see
+    :func:`_brace_expansion_tokens`.
     """
     return next(
         iter_protected_mentions(
@@ -1311,6 +1375,7 @@ def find_protected_mention_detail(
             cwd=cwd,
             context=context,
             normalised_words=normalised_words,
+            bash_tool_command=bash_tool_command,
         ),
         None,
     )
@@ -1324,6 +1389,7 @@ def iter_protected_mentions(
     cwd: str | None = None,
     context: MentionContext = "bash",
     normalised_words: list[str] | None = None,
+    bash_tool_command: bool = False,
 ) -> Iterator[tuple[str, str]]:
     """``(pattern, token)`` for EVERY protected mention in ``command``, in order.
 
@@ -1433,7 +1499,9 @@ def iter_protected_mentions(
         )
     tokens = itertools.chain(
         _tokenise(import_stripped),
-        _brace_expansion_tokens(import_stripped),
+        _brace_expansion_tokens(
+            command, bash_tool_command=bash_tool_command, source_code=context == "content"
+        ),
         _normalised_word_tokens(
             import_stripped, deadline=deadline, words=words_for_normalised_stream
         ),
@@ -1481,7 +1549,9 @@ def iter_protected_mentions(
             yield (pattern, token)
 
 
-def _brace_expansion_tokens(command: str) -> Iterator[str]:
+def _brace_expansion_tokens(
+    command: str, *, bash_tool_command: bool = False, source_code: bool = False
+) -> Iterator[str]:
     """Lazily yield every concrete spelling of every raw brace-expansion word
     in ``command`` (B1-R3, Plan 00466 review 3).
 
@@ -1503,10 +1573,67 @@ def _brace_expansion_tokens(command: str) -> Iterator[str]:
     quote strips only once the alternative is chosen, not from the group
     template beforehand. Run over the EXPANDED spelling, matching that
     order.
+
+    Plan 00466 N101: when ``bash_tool_command`` is set, the brace words come
+    from :func:`shell_expansion.brace_expansion_view`, which neutralises the
+    CODE braces (dict and set displays, comprehensions, f-string fields) of
+    a standalone `python3` program no shell reads the output of -- text no
+    shell expands, whose enumeration modelled nothing and failed the guard
+    closed on ordinary Python programs. Every string literal and comment of
+    that program is enumerated on its own, with the same caps, and so is
+    every brace word not wholly inside one. Everything else is enumerated
+    exactly as before, caps and fail-closed included.
+
+    Plan 00466 N107: each source's words are also found by
+    :func:`shell_expansion.iter_shell_brace_words`, which splits them as
+    bash does, so a group holding quoted whitespace reaches the expander
+    whole; and :func:`shell_expansion.expand_braces` reads a quoted or
+    escaped brace or comma as text, as bash does.
+
+    Only a caller judging the Bash tool's own, whole command line sets it
+    (the guard's Bash route, payload capture): the view's safety argument
+    is that the line's top-level stdout reaches the model, not a shell. An
+    authored script, Makefile recipe or CI step (``context="bash"`` on the
+    Write/Edit route), a segment of a command, and ``"content"`` are all
+    enumerated whole, as on main (round 3, D-RULE B2): a script's output
+    goes to whoever runs it later.
+
+    ``command`` is the RAW command: the view parses the Python program
+    itself, which deleting import module paths would break (`import `
+    alone does not parse). The deletion is applied to the view's text
+    instead, which neutralising braces never touches.
+
+    ``source_code`` marks authored source in a non-shell language (the
+    ``"content"`` scan, ledger 00466 N238). No shell reads that text, so
+    where it parses as Python only its string literals and comments are
+    enumerated (:func:`shell_expansion.python_string_literals`), which is
+    all a shell can be handed from it: a dict or set display in code is not
+    a brace group, however many commas it holds. Text that does not parse
+    as Python is enumerated whole.
     """
-    for word in shell_expansion.iter_brace_words(command):
+    literals = shell_expansion.python_string_literals(command) if source_code else None
+    if bash_tool_command:
+        view = shell_expansion.brace_expansion_view(command)
+        sources: tuple[str, ...] = (_without_import_module_paths(view.text), *view.literals)
+        code_words = view.code_words
+        code_shell_words = view.shell_words
+    elif literals is not None:
+        sources = literals
+        code_words = ()
+        code_shell_words = ()
+    else:
+        sources = (_without_import_module_paths(command),)
+        code_words = ()
+        code_shell_words = ()
+    for word in itertools.chain(
+        *(shell_expansion.iter_brace_words(source) for source in sources), code_words
+    ):
         for spelling in shell_expansion.expand_braces(word):
             yield shell_expansion.normalise_word(spelling)
+    for word in itertools.chain(
+        *(shell_expansion.iter_shell_brace_words(source) for source in sources), code_shell_words
+    ):
+        yield from shell_expansion.shell_word_spellings(word)
 
 
 def _normalised_word_tokens(
@@ -1802,16 +1929,22 @@ def find_protected_mention_strict(command: str, patterns: tuple[str, ...]) -> st
     literal-token matching identical, but for a GLOB-shaped token it expands
     the glob against the filesystem (project root, then cwd) and only counts
     it as a mention when at least one resulting path is itself protected.
+
+    Only a token with a glob character bash would expand is expanded (ledger
+    00466 N238): one inside quotes or escaped is a literal, which bash
+    hands on as written (``jq '.files["a"]'``, ``rg -g '**/*.md'``).
     """
     if not command or not patterns:
         return None
     project_root = resolve_project_root()
-    for token in _tokenise(command):
+    unquoted = mask_quoted(command, keep_double=False)
+    for token, start in _tokenise_with_offsets(command):
+        globbed = any(char in _GLOB_CHARACTERS for char in unquoted[start : start + len(token)])
         for form in _normalised_token_forms(token):
             matched = first_matching_glob(form, patterns, project_root=project_root)
             if matched is not None:
                 return matched
-            if _is_glob_shaped(form):
+            if globbed and _is_glob_shaped(form):
                 match = _expand_glob_token(form, patterns, project_root)
                 if match is not None:
                     return match
@@ -1849,23 +1982,20 @@ def _expand_glob_token(
     heuristic stem-overlap match in ``find_protected_mention`` does not have.
 
     ``max_expansions`` bounds how many glob RESULTS are examined across all
-    bases before giving up unmatched (``None`` means unbounded, the
-    pre-existing behaviour) — a PreToolUse hot path must not pay for an
-    unbounded directory listing.
+    bases (``None`` means unbounded) — a PreToolUse hot path must not pay
+    for an unbounded directory listing. A result past the bound was never
+    examined, so it raises ``TooManyToEnumerateError`` rather than allowing.
 
-    M-1 (Plan 00466 review 3): a pattern carrying a recursive ``**``
-    component is walked through :func:`shell_expansion.bounded_recursive_glob`
-    instead of ``Path.glob`` — ``Path.glob("**/…")`` only counts YIELDED
-    matches, so a token whose final component matches NOTHING still walks
-    the entire tree before concluding, however large it is. A non-recursive
-    pattern keeps using ``Path.glob`` (a single directory listing bounds
-    its own cost; not the shape review 3 flagged). ``deadline`` is forwarded
-    to the bounded walker so it is checked INSIDE the filesystem walk, not
-    only between tokens.
+    Every pattern is walked by :func:`shell_expansion.bounded_recursive_glob`
+    (M-1, Plan 00466 review 3: a recursive ``**`` walk is capped on entries
+    VISITED, not matches yielded). ``deadline`` is forwarded to it so it is
+    checked INSIDE the filesystem walk, not only between tokens.
     """
     token_path = Path(token)
     if token_path.is_absolute():
-        search_specs = [(Path(token_path.anchor), str(token_path.relative_to(token_path.anchor)))]
+        search_specs = [
+            (Path(token_path.anchor), str(path_relative_to(token_path, token_path.anchor)))
+        ]
     else:
         bases: list[Path] = []
         if project_root:
@@ -1888,68 +2018,35 @@ def _expand_glob_token(
 
     seen: set[str] = set()
     examined = 0
+    # Fail CLOSED (team-lead's review-4 refinement): an expansion that could
+    # not be completed is not a decision this function made. The walker
+    # itself skips a lookup that proves absence (a missing prefix, or a
+    # component longer than any name can be) and collects every other
+    # failure here while it goes on examining the other branches and bases,
+    # so one failure never hides a later match (Plan 00466 N101 round 9).
+    # A protected match anywhere wins; otherwise the first collected
+    # failure propagates to the caller's own fail-closed wrapper.
+    # TooManyToEnumerateError, TimeoutError and ValueError propagate as
+    # they arise.
+    errors: list[OSError] = []
     for base, pattern_str in search_specs:
         key = f"{base}:{pattern_str}"
         if key in seen:
             continue
         seen.add(key)
-        # Any pattern rooted at the bare filesystem anchor goes through the
-        # bounded walker, whether or not it spells `**` literally -- own
-        # live finding, own RED test: `/*/*/*/*/*/*/*.se?ret-zq9x` (one of
-        # review 3's own probe shapes) carries no `**` at all but still
-        # forces `Path.glob` to expand a full directory listing at every
-        # one of several root-relative levels. `bounded_recursive_glob`
-        # itself decides whether THIS pattern is broad enough to refuse.
-        if "**" in pattern_str or base == Path(base.anchor):
-            # Own walk, own cap on entries VISITED (not just matched) --
-            # TooManyToEnumerateError/TimeoutError deliberately propagate
-            # uncaught here: both are fail-closed signals for the caller's
-            # own wrapper, not "this token expands to nothing".
-            matches_iter: Iterator[Path] = shell_expansion.bounded_recursive_glob(
-                base, pattern_str, deadline=deadline
-            )
-        else:
-            # `Path.glob` is a generator function: the call itself never
-            # raises. A pattern it rejects (`a**b`) raises ValueError on the
-            # FIRST ITERATION, and an unreadable directory raises OSError
-            # mid-walk, so the guard must wrap the consumption, not the
-            # construction (Plan 00357 — a guard around the call alone let
-            # the exception escape and fail the calling security handler
-            # open). Consumed lazily, still.
-            matches_iter = base.glob(pattern_str)
-        # Fail CLOSED (team-lead's review-4 refinement): a blanket
-        # `except (OSError, ValueError): continue` here would mean ANY
-        # expansion failure degrades to "no mention", which is exactly the
-        # class this whole review round has been closing everywhere else --
-        # an exception during evaluation is not a decision this function
-        # actually made. But NOT every OSError means the same thing: ENOENT
-        # is filesystem TRUTH ("this directory prefix does not exist, so
-        # nothing under it can be a mention"), narrow enough to prove a
-        # negative and continue searching other bases. Anything else
-        # (permission denied, an I/O error, ...) means the expansion could
-        # not be COMPLETED -- this function cannot rule out a match hiding
-        # behind whatever raised, so it must NOT be treated as "expands to
-        # nothing"; it propagates uncaught to the caller's own fail-closed
-        # wrapper (secret_file_guard's N11 net for the Bash-mention route
-        # this function backs). `ValueError` (a malformed pattern) is never
-        # a proof of absence either way, so it always propagates.
-        try:
-            for match in matches_iter:
-                examined += 1
-                matched = first_matching_glob(str(match), patterns, project_root=project_root)
-                if matched is not None:
-                    return matched
-                if max_expansions is not None and examined >= max_expansions:
-                    return None
-        except OSError as exc:
-            if exc.errno != errno.ENOENT:
-                raise
-            logger.debug(
-                "secret_file_matching: %r under %s does not exist, no match possible: %s",
-                pattern_str,
-                base,
-                exc,
-            )
+        for match in shell_expansion.bounded_recursive_glob(
+            base, pattern_str, deadline=deadline, errors=errors
+        ):
+            examined += 1
+            if max_expansions is not None and examined > max_expansions:
+                raise shell_expansion.TooManyToEnumerateError(
+                    f"glob {token!r} expands past {max_expansions} examined paths"
+                )
+            matched = first_matching_glob(str(match), patterns, project_root=project_root)
+            if matched is not None:
+                return matched
+    if errors:
+        raise errors[0]
     return None
 
 

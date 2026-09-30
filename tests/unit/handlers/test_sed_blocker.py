@@ -1474,3 +1474,25 @@ class TestDeclaredAcceptancePatternsAreProducible:
         )
         for pattern in declared.expected_message_patterns:
             assert re.search(pattern, reason), f"{pattern!r} no longer appears in: {reason}"
+
+
+class TestMarkdownExemptionNeedsTheWholeCommandRead:
+    """Plan 00466 N120: the `.md` exemption holds only when every write the
+    command makes is known. Text the tokeniser could not read may write
+    anything, so it is not provably `.md`."""
+
+    @pytest.fixture
+    def handler(self) -> SedBlockerHandler:
+        return SedBlockerHandler()
+
+    @staticmethod
+    def _bash(command: str) -> dict[str, object]:
+        return {"tool_name": "Bash", "tool_input": {"command": command}}
+
+    def test_an_unreadable_tail_withholds_the_exemption(self, handler: SedBlockerHandler) -> None:
+        command = "cat > notes.md <<<'about sed'\ncat $'it\\'s' > run.sh"
+        assert handler.matches(self._bash(command)) is True
+
+    def test_a_fully_read_markdown_heredoc_keeps_it(self, handler: SedBlockerHandler) -> None:
+        command = "cat > notes.md <<'my-notes'\nit's about sed\nmy-notes"
+        assert handler.matches(self._bash(command)) is False

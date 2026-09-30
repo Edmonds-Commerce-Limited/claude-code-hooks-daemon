@@ -61,13 +61,27 @@ def relative_parts(path: Path, root: Path) -> tuple[str, ...]:
     """
     if not path.is_absolute():
         return path.parts
-    if path.is_relative_to(root):
-        return path.relative_to(root).parts
+    below = _parts_below(path, root)
+    if below is not None:
+        return below
     resolved = path.resolve()
-    resolved_root = root.resolve()
-    if resolved.is_relative_to(resolved_root):
-        return resolved.relative_to(resolved_root).parts
+    below = _parts_below(resolved, root.resolve())
+    if below is not None:
+        return below
     return resolved.parts[1:]
+
+
+def _parts_below(path: Path, root: Path) -> tuple[str, ...] | None:
+    """``path.relative_to(root).parts``, or None when ``path`` is not under ``root``.
+
+    Compares ``parts`` once. From Python 3.12 the stdlib's ``relative_to``
+    walks every parent and costs O(depth^2) (Plan 00466 N106). This module
+    must stay stdlib-only, so it cannot import ``utils.path_containment``.
+    """
+    prefix = root.parts
+    if path.anchor != root.anchor or path.parts[: len(prefix)] != prefix:
+        return None
+    return path.parts[len(prefix) :]
 
 
 def vacuous_scan_failure(

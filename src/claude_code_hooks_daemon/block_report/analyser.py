@@ -35,6 +35,7 @@ from pathlib import Path
 
 from claude_code_hooks_daemon.block_report.fingerprints import attribute_deny
 from claude_code_hooks_daemon.tool_report.analyser import transcripts_root_for
+from claude_code_hooks_daemon.utils.path_containment import path_relative_to
 
 logger = logging.getLogger(__name__)
 
@@ -76,7 +77,7 @@ class BlockSummary:
 
 def _session_key(transcript: Path, root: Path) -> str:
     """Attribute a transcript file to its session (mirrors tool_report)."""
-    relative = transcript.relative_to(root)
+    relative = path_relative_to(transcript, root)
     if len(relative.parts) == 1:
         return transcript.stem
     return relative.parts[0]

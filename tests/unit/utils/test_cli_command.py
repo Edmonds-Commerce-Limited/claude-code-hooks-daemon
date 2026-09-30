@@ -322,3 +322,39 @@ class TestEchdCapturePath:
         assert str(cli_command.echd_capture_path()).endswith(
             cli_command.echd_capture_path_for_docs()
         )
+
+
+class TestInstallRecoveryCommand:
+    """Plan 00466 round 4 (P3-1, P3-2): the exempt command a PreToolUse deny
+    names, by the rule init.sh's carve-out and hooks-relay share. The parity
+    over layouts is pinned by test_relay_guard_fail_open.py."""
+
+    def test_a_client_names_the_clone_launcher(self, tmp_path: Path) -> None:
+        launcher = tmp_path / ".claude" / "hooks-daemon" / "bin" / "hooks-daemon"
+        launcher.parent.mkdir(parents=True)
+        launcher.write_text("#!/bin/bash\n")
+        root = tmp_path / ".claude" / "hooks-daemon"
+        command = cli_command.install_recovery_command(tmp_path, root, "restart")
+        assert command == f"{launcher} restart"
+
+    def test_a_root_whose_launcher_manages_another_project_is_unknown(self, tmp_path: Path) -> None:
+        other = tmp_path / "other" / ".claude" / "hooks-daemon"
+        (other / "bin").mkdir(parents=True)
+        (other / "bin" / "hooks-daemon").write_text("#!/bin/bash\n")
+        project = tmp_path / "proj"
+        project.mkdir()
+        assert cli_command.install_recovery_command(project, other, "restart") is None
+
+    def test_relative_paths_are_unknown(self) -> None:
+        assert cli_command.install_recovery_command(Path("p"), Path("/p"), "restart") is None
+        assert cli_command.install_recovery_command(Path("/p"), Path("p"), "restart") is None
+
+    def test_a_path_that_needs_quoting_is_quoted(self, tmp_path: Path) -> None:
+        project = tmp_path / "with space"
+        command = cli_command.install_recovery_command(project, project, "restart")
+        assert command == f"'{project / 'bin' / 'hooks-daemon'}' restart"
+
+    def test_uninitialised_is_unknown(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(pc.ProjectContext, "_initialized", False, raising=False)
+        monkeypatch.setattr(pc.ProjectContext, "_instance", None, raising=False)
+        assert cli_command.recovery_command("restart") is None

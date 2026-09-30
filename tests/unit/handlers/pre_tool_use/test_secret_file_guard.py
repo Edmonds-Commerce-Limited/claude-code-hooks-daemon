@@ -6,6 +6,7 @@ are DENIED — except the ``secret-meta`` helper and allowlisted consumers with
 the path in flag position. No escape hatch (Decision 3).
 """
 
+import time
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
@@ -801,12 +802,13 @@ class TestGuidance:
 
 
 class TestGetRules:
-    """get_rules() declares the 4 Rule objects backing this handler (Plan 00116,
-    plus the evaluation-error rule added by Plan 00466 N11)."""
+    """get_rules() declares the 5 Rule objects backing this handler (Plan 00116,
+    plus the evaluation-error rule added by Plan 00466 N11 and the
+    unreadable-command rule added by N101 round 12)."""
 
-    def test_returns_four_rules(self) -> None:
+    def test_returns_five_rules(self) -> None:
         rules = _handler().get_rules()
-        assert len(rules) == 4
+        assert len(rules) == 5
         assert all(isinstance(rule, Rule) for rule in rules)
 
     def test_rule_ids_match_constants(self) -> None:
@@ -815,6 +817,7 @@ class TestGetRules:
             RuleID.SECRET_BASH_MENTION,
             RuleID.SECRET_SCRIPT_AUTHOR,
             RuleID.SECRET_EVALUATION_ERROR,
+            RuleID.SECRET_COMMAND_UNREADABLE,
         }
         actual = {rule.rule_id for rule in _handler().get_rules()}
         assert actual == expected
@@ -1438,9 +1441,10 @@ class TestEncryptedFileGuidance:
         encrypted-at-rest exemption. The evaluation-error rule (Plan 00466
         N11) is a different failure mode entirely -- the guard crashed, it
         never reached a content verdict -- so mentioning an exemption that
-        was never evaluated would mislead, not help."""
+        was never evaluated would mislead, not help. So is the
+        unreadable-command rule (N101 round 12): no path was read at all."""
         for rule in _handler().get_rules():
-            if rule.rule_id == RuleID.SECRET_EVALUATION_ERROR:
+            if rule.rule_id in (RuleID.SECRET_EVALUATION_ERROR, RuleID.SECRET_COMMAND_UNREADABLE):
                 continue
             assert "encrypted" in rule.verbose.lower(), rule.rule_id
 
@@ -1947,3 +1951,1044 @@ class TestFileSchemeUrlOnBashRoute:
         handler = _handler()
         cmd = "curl -s file:///etc/hostname"
         assert not handler.matches(_hook_input("Bash", {"command": cmd}))
+
+
+#: One word whose brace expansion has 512 spellings -- past the expander's
+#: 256 cap, so enumerating it raises TooManyToEnumerateError.
+_OVER_BOUND_WORD = "".join(
+    "{" + a + "," + b + "}" for a, b in zip("acegikmoq", "bdfhjlnpr", strict=True)
+)
+#: A Python program with more brace groups than the 500-word discovery cap:
+#: each set display (``{0,1}``) is CODE to Python and a brace group to bash,
+#: which does not expand a quoted or comma-less brace (ledger 00466 N238).
+_MANY_BRACES_PROGRAM = "x = 1\n" + "\n".join(
+    f"print(f'{{x}}-{i}', {{'k': {i}}}, {{{i},{i + 1}}})" for i in range(600)
+)
+
+
+def _through_chain(tool_name: str, tool_input: dict[str, Any]) -> tuple[Decision, str]:
+    chain = HandlerChain()
+    chain.add(_handler())
+    result = chain.execute(_hook_input(tool_name, tool_input), strict_mode=False)
+    return result.result.decision, result.result.reason or ""
+
+
+def _through_chain_at(
+    tool_name: str, tool_input: dict[str, Any], cwd: Path
+) -> tuple[Decision, str]:
+    chain = HandlerChain()
+    chain.add(_handler())
+    hook_input = {**_hook_input(tool_name, tool_input), "cwd": str(cwd)}
+    result = chain.execute(hook_input, strict_mode=False)
+    return result.result.decision, result.result.reason or ""
+
+
+class TestTextTheShellNeverExpandsIsNotEnumerated:
+    """Plan 00466 N101: an ordinary `python3 - <<'EOF'` program failed the
+    guard CLOSED with TooManyToEnumerateError. Its body is handed to python
+    verbatim, so its dict literals and f-strings are not shell brace groups;
+    enumerating their "spellings" hit the expander's caps and denied a
+    command that names no protected path. The same holds for a single-quoted
+    interpreter code argument. Text a shell does expand still fails closed
+    past the cap.
+    """
+
+    def test_python_heredoc_with_many_brace_groups_is_allowed(self) -> None:
+        command = f"python3 - <<'EOF'\n{_MANY_BRACES_PROGRAM}\nEOF"
+        decision, reason = _through_chain("Bash", {"command": command})
+        assert decision != Decision.DENY, reason
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            f"python3 - <<'EOF'\nprint('{_OVER_BOUND_WORD}')\nEOF",
+            f"python3 -c 'print(\"{_OVER_BOUND_WORD}\")'",
+        ],
+    )
+    def test_an_over_bound_brace_string_literal_still_fails_closed(self, command: str) -> None:
+        """Round 3 (coordinator ruling): every string literal of an exempted
+        program is enumerated on its own with the guard's normal caps, so a
+        literal holding a real over-bound brace group fails closed as shell
+        text does. Only CODE braces (dicts, sets, f-string fields) are
+        exempt."""
+        decision, reason = _through_chain("Bash", {"command": command})
+        assert decision == Decision.DENY
+        assert _could_not_finish(reason), reason
+
+    def test_python_heredoc_piped_on_to_any_stage_still_fails_closed(self) -> None:
+        """No pipe stage may follow an exempted program (coordinator ruling
+        on D-RULE F1/F2): even `grep` can feed `tee gen.sh`-style routes, so
+        the program's code braces are enumerated again."""
+        command = f"python3 - <<'EOF' 2>&1 | grep -v noise\n{_MANY_BRACES_PROGRAM}\nEOF"
+        decision, reason = _through_chain("Bash", {"command": command})
+        assert decision == Decision.DENY
+        assert _could_not_finish(reason), reason
+
+    def test_literal_protected_name_in_a_python_heredoc_still_denies(self) -> None:
+        command = (
+            f"python3 - <<'EOF'\n{_MANY_BRACES_PROGRAM}\n"
+            "print(open('/proj/.vault-pass').read())\nEOF"
+        )
+        decision, reason = _through_chain("Bash", {"command": command})
+        assert decision == Decision.DENY
+        assert RuleID.SECRET_BASH_MENTION in reason
+
+    def test_brace_spelled_name_in_a_python_shell_exec_call_still_denies(self) -> None:
+        call = "os." + 'system("cat /proj/.vault-p{a,x}ss")'
+        command = f"python3 - <<'EOF'\nimport os\n{call}\nEOF"
+        decision, reason = _through_chain("Bash", {"command": command})
+        assert decision == Decision.DENY
+        assert RuleID.SECRET_BASH_MENTION in reason
+
+    def test_executed_bash_heredoc_expanding_to_a_protected_name_still_denies(self) -> None:
+        command = "bash <<'EOF'\ncat /proj/.vault-p{a,x}ss\nEOF"
+        decision, reason = _through_chain("Bash", {"command": command})
+        assert decision == Decision.DENY
+        assert RuleID.SECRET_BASH_MENTION in reason
+
+    def test_heredoc_authoring_a_script_that_expands_to_a_protected_name_still_denies(
+        self,
+    ) -> None:
+        command = "cat > run.sh <<'EOF'\ncat /proj/.vault-p{a,x}ss\nEOF"
+        decision, reason = _through_chain("Bash", {"command": command})
+        assert decision == Decision.DENY
+        assert RuleID.SECRET_BASH_MENTION in reason
+
+    def test_single_quoted_bash_c_expanding_to_a_protected_name_still_denies(self) -> None:
+        command = "bash -c 'cat /proj/.vault-p{a,x}ss'"
+        decision, reason = _through_chain("Bash", {"command": command})
+        assert decision == Decision.DENY
+        assert RuleID.SECRET_BASH_MENTION in reason
+
+    def test_over_bound_shell_words_still_fail_closed(self) -> None:
+        decision, reason = _through_chain("Bash", {"command": "echo " + "{a,b}" * 20})
+        assert decision == Decision.DENY
+        assert _could_not_finish(reason), reason
+
+    def test_over_bound_executed_bash_heredoc_still_fails_closed(self) -> None:
+        command = f"bash <<'EOF'\necho {_OVER_BOUND_WORD}\nEOF"
+        decision, reason = _through_chain("Bash", {"command": command})
+        assert decision == Decision.DENY
+        assert _could_not_finish(reason), reason
+
+    def test_over_bound_python_heredoc_piped_to_a_shell_still_fails_closed(self) -> None:
+        command = f"python3 - <<'EOF' | bash\nprint('echo {_OVER_BOUND_WORD}')\nEOF"
+        decision, reason = _through_chain("Bash", {"command": command})
+        assert decision == Decision.DENY
+        assert _could_not_finish(reason), reason
+
+    def test_writing_shell_source_with_an_over_bound_word_still_fails_closed(self) -> None:
+        tool_input = {"file_path": "/proj/gen.sh", "content": f"echo {_OVER_BOUND_WORD}\n"}
+        decision, reason = _through_chain("Write", tool_input)
+        assert decision == Decision.DENY
+        assert _could_not_finish(reason), reason
+
+
+#: A brace spelling that expands to the protected `/proj/.vault-pass`.
+_BRACE_PATH = "/proj/.vault-p{a,x}ss"
+#: Shell-exec call names, split so this file's text does not read as calls.
+_OS_SYSTEM = "os." + "system"
+_SUBPROCESS_RUN = "subprocess." + "run"
+
+
+def _deny_reason(command: str) -> str:
+    decision, reason = _through_chain("Bash", {"command": command})
+    assert decision == Decision.DENY, f"allowed: {command!r}"
+    return reason
+
+
+def _could_not_finish(reason: str) -> bool:
+    """Is ``reason`` the named deny for a scan past its cap, and not the
+    guard-bug route (ledger 00466 N238)?"""
+    return sfm.SCAN_COULD_NOT_FINISH in reason and RuleID.SECRET_EVALUATION_ERROR not in reason
+
+
+class TestTheExemptionIsOnlyPythonProgramTextNoShellReads:
+    """Plan 00466 N101 round 2: every D-RULE and D-SEC finding against the
+    round-1 exemption, through the real handler. Each command reaches a
+    brace-spelled protected path, and each was allowed at 55e16a7c4."""
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            # D-RULE F1: a -c program whose output a shell reads
+            f"python3 -c 'print(\"cat {_BRACE_PATH}\")' | bash",
+            f"python3 -c 'print(\"cat {_BRACE_PATH}\")' | xargs sh -c",
+            f"python3 -c 'print(\"cat {_BRACE_PATH}\")' > >(bash)",
+            f'python3 -c \'print("cat {_BRACE_PATH}")\' | while read l; do bash -c "$l"; done',
+            # D-RULE F2: a heredoc program whose output a shell reads
+            f"( python3 - <<'EOF'\nprint('cat {_BRACE_PATH}')\nEOF\n) | bash",
+            f"{{ python3 - <<'EOF'\nprint('cat {_BRACE_PATH}')\nEOF\n}} | bash",
+            f"python3 - <<'EOF' > >(bash)\nprint('cat {_BRACE_PATH}')\nEOF",
+            f"python3 - <<'EOF' | tee >(bash)\nprint('cat {_BRACE_PATH}')\nEOF",
+            f"python3 - <<'EOF' > gen.sh\nprint('cat {_BRACE_PATH}')\nEOF\nbash gen.sh",
+        ],
+    )
+    def test_a_program_whose_output_a_shell_reads_is_judged(self, command: str) -> None:
+        assert RuleID.SECRET_BASH_MENTION in _deny_reason(command)
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            f"python3 script.py 'cat {_BRACE_PATH}'",
+            f"python3 -c 'import sys' 'cat {_BRACE_PATH}'",
+            f"python3 -m mod 'cat {_BRACE_PATH}'",
+        ],
+    )
+    def test_argv_is_judged_d_rule_f3(self, command: str) -> None:
+        assert RuleID.SECRET_BASH_MENTION in _deny_reason(command)
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            f"ruby -e 'Dir.glob(\"{_BRACE_PATH}\")'",
+            f"perl -e 'print glob(\"{_BRACE_PATH}\")'",
+            f"php -r 'glob(\"{_BRACE_PATH}\", GLOB_BRACE);'",
+            f"node -e 'fs.globSync(\"{_BRACE_PATH}\")'",
+            f"ruby - <<'EOF'\nputs Dir.glob('{_BRACE_PATH}')\nEOF",
+            f"perl - <<'EOF'\nprint glob('{_BRACE_PATH}');\nEOF",
+        ],
+    )
+    def test_other_interpreters_are_judged_d_sec_f1(self, command: str) -> None:
+        assert RuleID.SECRET_BASH_MENTION in _deny_reason(command)
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            f"sudo -p python3 bash -c 'cat {_BRACE_PATH}'",
+            f"sudo -p python3 bash <<'EOF'\ncat {_BRACE_PATH}\nEOF",
+            f"sudo -u python3 bash -c 'cat {_BRACE_PATH}'",
+            f"sudo python3 -c 'print(\"cat {_BRACE_PATH}\")'",
+        ],
+    )
+    def test_a_wrapper_hides_no_shell_d_sec_f2(self, command: str) -> None:
+        assert RuleID.SECRET_BASH_MENTION in _deny_reason(command)
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            f"source defs.sh; python3 -c 'print(\"cat {_BRACE_PATH}\")'",
+            f". ./defs.sh; python3 -c 'print(\"cat {_BRACE_PATH}\")'",
+            f"source defs.sh && python3 - <<'EOF'\nprint('cat {_BRACE_PATH}')\nEOF",
+        ],
+    )
+    def test_a_sourced_redefinition_withdraws_the_exemption_d_rule_f5(self, command: str) -> None:
+        assert RuleID.SECRET_BASH_MENTION in _deny_reason(command)
+
+    @pytest.mark.parametrize(
+        "body",
+        [
+            f"import subprocess\n{_SUBPROCESS_RUN}(['env', 'bash', '-c', 'cat {_BRACE_PATH}'])",
+            f"import os\ncmd = 'cat {_BRACE_PATH}'\n{_OS_SYSTEM}(cmd)",
+            f"import commands\ncommands.getoutput('cat {_BRACE_PATH}')",
+            f"import os\nos.posix_spawn('/bin/sh', ['sh', '-c', 'cat {_BRACE_PATH}'], {{}})",
+            f"import pty\npty.spawn(['bash', '-c', 'cat {_BRACE_PATH}'])",
+            f"import asyncio\nasyncio.create_subprocess_exec('sh', '-c', 'cat {_BRACE_PATH}')",
+            f"import braceexpand\nprint(list(braceexpand.braceexpand('{_BRACE_PATH}')))",
+        ],
+    )
+    def test_a_python_program_that_spawns_or_loads_code_is_judged_d_rule_f4(
+        self, body: str
+    ) -> None:
+        command = f"python3 - <<'EOF'\n{body}\nEOF"
+        assert RuleID.SECRET_BASH_MENTION in _deny_reason(command)
+
+    def test_a_python_program_writing_a_script_a_later_command_runs_is_judged(self) -> None:
+        command = f"python3 - <<'EOF'\nopen('g.sh', 'w').write('cat {_BRACE_PATH}')\nEOF\nbash g.sh"
+        assert RuleID.SECRET_BASH_MENTION in _deny_reason(command)
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "perl -e 'ex" + f'ec("cat {_BRACE_PATH}")\'',
+            f"ruby -e 'spawn(\"cat {_BRACE_PATH}\")'",
+            f"php -r 'passthru(\"cat {_BRACE_PATH}\");'",
+            'node -e \'require("child_process").spawnSync("sh", ' f'["-c", "cat {_BRACE_PATH}"])\'',
+        ],
+    )
+    def test_other_languages_unlisted_spawn_calls_are_judged_d_rule_f4(self, command: str) -> None:
+        assert RuleID.SECRET_BASH_MENTION in _deny_reason(command)
+
+
+class TestRoundOneFalsePositivesStayAllowed:
+    """The N101 false positives: ordinary Python programs whose code braces
+    exceeded the expander's caps. None names a protected path."""
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            f"python3 - <<'EOF'\n{_MANY_BRACES_PROGRAM}\nEOF",
+            f"python3 <<'EOF'\n{_MANY_BRACES_PROGRAM}\nEOF",
+            "python3 -c '" + _MANY_BRACES_PROGRAM.replace("'", '"') + "'",
+            f"python3 - <<'EOF'\nimport subprocess\n{_MANY_BRACES_PROGRAM}\n"
+            "subprocess.run(['ls'], check=True)\nEOF",
+            f"set -euo pipefail\ncd /proj && python3 - <<'EOF'\n{_MANY_BRACES_PROGRAM}\nEOF",
+            f"python3 - <<'EOF' > out.json 2>&1\n{_MANY_BRACES_PROGRAM}\nEOF",
+            f"python3 - <<'EOF'\nimport json\nfrom pathlib import Path\n{_MANY_BRACES_PROGRAM}\n"
+            "print(json.dumps(Path('x').read_text()))\nEOF",
+        ],
+    )
+    def test_ordinary_python_program_is_allowed(self, command: str) -> None:
+        decision, reason = _through_chain("Bash", {"command": command})
+        assert decision != Decision.DENY, reason
+
+
+#: A heredoc program whose only braces are code: exempt on its own, so a
+#: construct that withdraws the exemption is seen as a fail-closed deny.
+_CODE_BRACES_HEREDOC = f"python3 - <<'EOF'\n{_MANY_BRACES_PROGRAM}\nEOF"
+
+#: A scan deadline no host is slow enough to cross, for tests whose subject is
+#: the verdict on a large input rather than the deadline itself.
+_HOST_INDEPENDENT_DEADLINE_SECONDS = 120.0
+
+
+class TestRoundTwoFindingsAreClosed:
+    """Plan 00466 N101 round 3: every D-RULE and D-SEC round-2 finding,
+    through the real handler. Each command was allowed at bc074732b."""
+
+    @pytest.mark.parametrize(
+        "body",
+        [
+            # D-SEC MAJOR 1: a shell call fetched by a name built at runtime
+            "import os, operator\n"
+            "f = operator.attrgetter('sys' + 'tem')(os)\n"
+            f"f('cat {_BRACE_PATH}')",
+            "import os, operator\n"
+            f"operator.methodcaller('sys' + 'tem', 'cat {_BRACE_PATH}')(os)",
+            # D-SEC MAJOR 2: a script written through a renamed os.open
+            "from os import open as o, pwrite, O_WRONLY, O_CREAT\n"
+            f"pwrite(o('g.sh', O_WRONLY | O_CREAT), b'cat {_BRACE_PATH}', 0)",
+            # D-RULE m2: a name computed from dir()
+            "import os, operator\n"
+            "n = [a for a in dir(os) if a.endswith('ystem')][0]\n"
+            f"operator.attrgetter(n)(os)('cat {_BRACE_PATH}')",
+            # A path spelled in a comment the program reads back
+            "import os\n"
+            "src = open('/proc/self/cmdline').read()\n"
+            f"print(src)  # cat {_BRACE_PATH}",
+        ],
+    )
+    def test_a_brace_spelled_literal_denies_whatever_reads_it_d_sec_1_2(self, body: str) -> None:
+        command = f"python3 - <<'EOF'\n{body}\nEOF\nbash g.sh"
+        assert RuleID.SECRET_BASH_MENTION in _deny_reason(command)
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            # D-RULE m3: code loaded before the program runs
+            f"PYTHONPATH=. python3 - <<'EOF'\nimport json\nprint('cat {_BRACE_PATH}')\nEOF",
+            f"python3 -W 'ignore::mod.Cat' - <<'EOF'\nprint('cat {_BRACE_PATH}')\nEOF",
+            f"python3 -c 'print(\"cat {_BRACE_PATH}\")'",
+        ],
+    )
+    def test_a_printing_program_has_its_literals_judged_d_rule_m3(self, command: str) -> None:
+        assert RuleID.SECRET_BASH_MENTION in _deny_reason(command)
+
+    @pytest.mark.parametrize(
+        "prefix",
+        [
+            # D-RULE B1: a quoted or escaped withdrawing head
+            "\\exec >gen.sh",
+            "'exec' >gen.sh",
+            "e\\xec >gen.sh",
+            ">gen.sh exec",
+            "X=1 exec >gen.sh",
+            "'source' defs.sh",
+            '"." ./defs.sh',
+            "\\eval 'exec >gen.sh'",
+            "$e >gen.sh",
+            # D-RULE M1: a quoted or escaped redefinition
+            "'hash' -p /bin/bash python3",
+            "\\hash -p /bin/bash python3",
+            'export "PATH=/opt/x"',
+            "export P\\ATH=/opt/x",
+            "export $v",
+            "export PYTHON\\PATH=.",
+        ],
+    )
+    def test_a_quoted_withdrawing_word_withdraws_the_exemption_d_rule_b1_m1(
+        self, prefix: str
+    ) -> None:
+        literal_route = f"{prefix}; python3 -c 'print(\"cat {_BRACE_PATH}\")'; bash gen.sh"
+        assert RuleID.SECRET_BASH_MENTION in _deny_reason(literal_route)
+        code_route = f"{prefix}; {_CODE_BRACES_HEREDOC}\nbash gen.sh"
+        assert _could_not_finish(_deny_reason(code_route))
+
+    @pytest.mark.parametrize(
+        "content",
+        [
+            f"#!/bin/bash\nset -euo pipefail\npython3 -c 'print(\"cat {_BRACE_PATH}\")'\n",
+            f"#!/bin/bash\npython3 - <<'EOF'\nprint('cat {_BRACE_PATH}')\nEOF\n",
+        ],
+    )
+    def test_writing_a_script_whose_python_prints_a_brace_path_denies_d_rule_b2(
+        self, content: str
+    ) -> None:
+        decision, reason = _through_chain(
+            "Write", {"file_path": "/proj/gen.sh", "content": content}
+        )
+        assert decision == Decision.DENY
+        assert RuleID.SECRET_SCRIPT_AUTHOR in reason
+
+    def test_writing_a_script_with_code_braces_is_enumerated_as_on_main_d_rule_b2(
+        self,
+    ) -> None:
+        """The view models the Bash tool's own command line only; a script's
+        output goes to whoever runs it later, so its text is enumerated whole
+        and over-bound code braces fail closed, as on main."""
+        content = f"#!/bin/bash\n{_CODE_BRACES_HEREDOC}\n"
+        decision, reason = _through_chain(
+            "Write", {"file_path": "/proj/gen.sh", "content": content}
+        )
+        assert decision == Decision.DENY
+        assert _could_not_finish(reason), reason
+
+
+#: Brace halves of `_BRACE_PATH`, for programs that assemble it.
+_BRACE_OPEN_HALF = "cat /proj/.vault-p{a,"
+_BRACE_CLOSE_HALF = "x}ss"
+
+
+class TestRoundThreeFindingsAreClosed:
+    """Plan 00466 N101 round 4: every D-RULE and D-SEC round-3 finding,
+    through the real handler. Each command was allowed at 775864b38."""
+
+    @pytest.mark.parametrize(
+        "sibling",
+        [
+            # D-RULE MAJOR 2: builtins that run their argument as shell
+            "trap 'bash gen.sh' DEBUG",
+            "mapfile -C 'bash gen.sh' -c 1 < gen.sh",
+            "readarray -C 'bash gen.sh' -c 1 < gen.sh",
+            "bind -x '\"\\C-x\": bash gen.sh'",
+            "complete -C 'bash gen.sh' x",
+            "fc -s x",
+            # ...and any head nobody has reviewed, wherever it sits
+            "frobnicate x",
+            'echo "$(frobnicate x)"',
+            "env bash -c x",
+            "set -x",
+            "echo $((x))",
+            "cat <<EOF\n$(frobnicate)\nEOF",
+        ],
+    )
+    def test_a_head_not_known_to_be_inert_withdraws_the_exemption_d_rule_major_2(
+        self, sibling: str
+    ) -> None:
+        reason = _deny_reason(f"{sibling}\n{_CODE_BRACES_HEREDOC}")
+        assert _could_not_finish(reason), reason
+
+    @pytest.mark.parametrize(
+        "body",
+        [
+            # D-RULE MAJOR 1: a brace group across an f-string's text and field
+            f"import os\na = x = ''\n{_OS_SYSTEM}(f'cat /proj/.vault-p{{a,x}}ss')",
+            # D-SEC minor 1: a brace group split across literals
+            f"import os\n{_OS_SYSTEM}('{_BRACE_OPEN_HALF}' + '{_BRACE_CLOSE_HALF}')",
+            f"import os\n{_OS_SYSTEM}('{_BRACE_OPEN_HALF}'+'{_BRACE_CLOSE_HALF}')",
+            f"import os\nv = ''\n{_OS_SYSTEM}('{_BRACE_OPEN_HALF}' + v + '{_BRACE_CLOSE_HALF}')",
+            f"import os\n{_OS_SYSTEM}(''.join(['{_BRACE_OPEN_HALF}', '{_BRACE_CLOSE_HALF}']))",
+            "import os, operator\n"
+            "operator.attrgetter('sys' + 'tem')(os)"
+            f"('{_BRACE_OPEN_HALF}' + '{_BRACE_CLOSE_HALF}')",
+            "from os import open as o, pwrite, O_WRONLY, O_CREAT\n"
+            f"pwrite(o('g.sh', O_WRONLY | O_CREAT), b'{_BRACE_OPEN_HALF}' + b'x}}ss', 0)",
+            f"import os\n{_OS_SYSTEM}('{_BRACE_OPEN_HALF}%s' % '{_BRACE_CLOSE_HALF}')",
+        ],
+    )
+    def test_an_assembled_brace_path_denies_d_rule_major_1_d_sec_minor_1(self, body: str) -> None:
+        heredoc = f"python3 - <<'EOF'\n{body}\nEOF\nbash g.sh"
+        assert RuleID.SECRET_BASH_MENTION in _deny_reason(heredoc)
+        dash_c = "python3 -c '" + body.replace("'", '"') + "'"
+        assert RuleID.SECRET_BASH_MENTION in _deny_reason(dash_c)
+
+    @pytest.mark.parametrize(
+        "body",
+        [
+            f"import os\na='{_BRACE_OPEN_HALF}';b=a+'{_BRACE_CLOSE_HALF}';{_OS_SYSTEM}(b)",
+            f"import os\na = '{_BRACE_OPEN_HALF}'\nb = a + '{_BRACE_CLOSE_HALF}'\n{_OS_SYSTEM}(b)",
+        ],
+    )
+    def test_a_brace_path_assembled_across_statements_denies(self, body: str) -> None:
+        """Not a round-3 finding: main's raw-text scan denied these by
+        accident, because a brace group spans whitespace, and 775864b38
+        allowed them."""
+        command = f"python3 - <<'EOF'\n{body}\nEOF"
+        assert RuleID.SECRET_BASH_MENTION in _deny_reason(command)
+
+    def test_braces_spelled_as_f_string_fields_deny_d_sec_minor_1(self) -> None:
+        """`{"{"}` needs both quote kinds before Python 3.12, so it has no
+        single-quoted `-c` form."""
+        body = f'import os\n{_OS_SYSTEM}(f\'cat /proj/.vault-p{{"{{"}}a,x{{"}}"}}ss\')'
+        command = f"python3 - <<'EOF'\n{body}\nEOF"
+        assert RuleID.SECRET_BASH_MENTION in _deny_reason(command)
+
+    @pytest.mark.parametrize(
+        "declaration",
+        [
+            "# -*- coding: latin-1 -*-",
+            "# coding: utf-7",
+            "# vim: set fileencoding=cp1252 :",
+            "\ufeff# plain",
+        ],
+    )
+    def test_a_program_python_decodes_differently_is_not_exempted_d_sec_open_question(
+        self, declaration: str
+    ) -> None:
+        command = f"python3 - <<'EOF'\n{declaration}\n{_MANY_BRACES_PROGRAM}\nEOF"
+        assert _could_not_finish(_deny_reason(command))
+
+    def test_a_utf8_declaration_keeps_the_exemption(self) -> None:
+        command = f"python3 - <<'EOF'\n# -*- coding: utf-8 -*-\n{_MANY_BRACES_PROGRAM}\nEOF"
+        decision, reason = _through_chain("Bash", {"command": command})
+        assert decision != Decision.DENY, reason
+
+    @pytest.mark.parametrize(
+        "sibling",
+        [
+            "cd /proj",
+            "set -euo pipefail",
+            "mkdir -p out && ls out",
+            "export FOO=1",
+            "echo start; grep -rn x .",
+            'echo "$(pwd)"',
+        ],
+    )
+    def test_an_inert_sibling_keeps_the_exemption(self, sibling: str) -> None:
+        decision, reason = _through_chain("Bash", {"command": f"{sibling}\n{_CODE_BRACES_HEREDOC}"})
+        assert decision != Decision.DENY, reason
+
+    def test_a_realistic_dict_and_f_string_program_stays_allowed(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The field shape N101 was filed for: building hook inputs as
+        dicts with f-strings, past the 500-word discovery cap.
+
+        This scan costs about 2.2s of CPU on a development host against the
+        5s production deadline, so a CI runner around twice as slow crossed
+        it and denied (Plan 00466 N101). The deadline is therefore injected
+        generously here, and read on this process's CPU clock, so the verdict
+        depends on what the scan decides and not on host speed. The
+        production deadline is untouched and the assertion is unchanged."""
+        monkeypatch.setattr(time, "monotonic", time.process_time)
+        monkeypatch.setattr(sfm, "SCAN_DEADLINE_SECONDS", _HOST_INDEPENDENT_DEADLINE_SECONDS)
+        lines = [
+            "import json",
+            *(
+                f"event_{i} = {{'hook_event_name': 'PreToolUse', 'tool_name': 'Bash', "
+                f"'tool_input': {{'command': f'echo {{json.dumps({i})}}'}}}}\n"
+                f"print(json.dumps({{'n': {i}, 'session_id': f's-{{event_{i}[\"tool_name\"]}}'}}))"
+                for i in range(300)
+            ),
+        ]
+        command = "python3 - <<'EOF'\n" + "\n".join(lines) + "\nEOF"
+        decision, reason = _through_chain("Bash", {"command": command})
+        assert decision != Decision.DENY, reason
+
+
+#: A code word: attribute access, then subtraction of a set whose element is
+#: a literal. As a shell word it spells `.vault-{"pass",z}`.
+_CODE_WORD_PROGRAM = 'y = 0 if 1 else x .vault-{"pass",z}'
+#: The same code word with eight more groups: 512 spellings, past the cap.
+_OVER_CAP_CODE_WORD_PROGRAM = _CODE_WORD_PROGRAM + "-{a,b}" * 8
+#: One space-free dict display with nine two-way inner groups: past the cap,
+#: and naming nothing.
+_OVER_CAP_DICT_PROGRAM = "d={" + ",".join(f"'k{i}':{{'a':0,'b':1}}" for i in range(9)) + "}"
+
+
+class TestRoundFourFindingsAreClosed:
+    """Plan 00466 N101 round 5: every D-RULE and D-SEC round-4 finding,
+    through the real handler. The RED ones were allowed at 36b8228b0."""
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            f"python3 - <<'EOF'\n{_CODE_WORD_PROGRAM}\nEOF",
+            f"python3 -c '{_CODE_WORD_PROGRAM}'",
+        ],
+    )
+    def test_a_brace_group_against_code_denies_d_rule_4_major_1(self, command: str) -> None:
+        assert RuleID.SECRET_BASH_MENTION in _deny_reason(command)
+
+    def test_an_over_cap_code_word_that_could_name_a_path_denies(self) -> None:
+        """Past the cap a code word fails closed, as on main (round 6)."""
+        command = f"python3 - <<'EOF'\n{_OVER_CAP_CODE_WORD_PROGRAM}\nEOF"
+        assert _could_not_finish(_deny_reason(command))
+
+    @pytest.mark.parametrize("line", ["x = 1\r", "x = 1\r\ny = 2", "x = '\r'"])
+    def test_a_program_holding_a_carriage_return_is_not_exempted_d_sec_4_2a(
+        self, line: str
+    ) -> None:
+        """Python reads `\\r\\n` and a lone `\\r` as `\\n`; the scanner does
+        not model that, so the exemption is withdrawn."""
+        command = f"python3 - <<'EOF'\n{line}\n{_MANY_BRACES_PROGRAM}\nEOF"
+        assert _could_not_finish(_deny_reason(command))
+
+    @pytest.mark.parametrize(
+        "field_program",
+        [
+            # Each parses on the daemon's Python 3.11 ...
+            "x = f'''{1 +\n1}'''",
+            "x = f'{f\"{1}\"}'",
+            "x = f'{1:{f\"{2}\"}}'",
+            # ... and each of these parses only on 3.12 and later (PEP 701).
+            "x = f'{'a'}'",
+            "x = f'{\"\\n\"}'",
+            "x = f'{1 # c\n}'",
+            "x = f'{\"#\"}'",
+        ],
+    )
+    def test_an_f_string_field_versions_read_differently_is_not_exempted_d_sec_4_2b(
+        self, field_program: str
+    ) -> None:
+        command = f"python3 - <<'EOF'\n{field_program}\n{_MANY_BRACES_PROGRAM}\nEOF"
+        assert _could_not_finish(_deny_reason(command))
+
+    def test_tokenize_and_ast_disagreeing_on_a_literal_withdraws_d_sec_4_2c(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """No CPython from 3.8 to 3.14 is known to disagree, so the parser is
+        made to report a string one column late."""
+        import ast
+
+        real_parse = ast.parse
+
+        def late_strings(source: Any, *args: Any, **kwargs: Any) -> Any:
+            tree = real_parse(source, *args, **kwargs)
+            if isinstance(source, str) and "n101-drift" in source:
+                for node in ast.walk(tree):
+                    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+                        node.col_offset += 1
+            return tree
+
+        monkeypatch.setattr(ast, "parse", late_strings)
+        command = f"python3 - <<'EOF'\nx = 'n101-drift'\n{_MANY_BRACES_PROGRAM}\nEOF"
+        assert _could_not_finish(_deny_reason(command))
+
+    @pytest.mark.parametrize(
+        "definition",
+        [
+            "cd() { echo; }; ",
+            "cd() { echo; }\n",
+            "function ls { echo; }; ",
+            "function ls { echo; }\n",
+        ],
+    )
+    def test_an_inert_head_redefined_as_a_function_withdraws(self, definition: str) -> None:
+        """D-RULE-4 observation: an allowlisted head can be a shell function.
+        One defined on the command line withdraws the exemption."""
+        heredoc = f"{definition}{_CODE_BRACES_HEREDOC}"
+        assert _could_not_finish(_deny_reason(heredoc))
+        dash_c = definition + "python3 -c '" + _MANY_BRACES_PROGRAM.replace("'", '"') + "'"
+        assert _could_not_finish(_deny_reason(dash_c))
+
+
+def _quoted_brace_code_word(quote: str) -> str:
+    """D-RULE-5's program: a set display of 302 elements, the first a quoted
+    `{`, against a name. As a shell word bash reads `{` as text and spells
+    `.vault-pass`; it is past the spelling cap."""
+    elements = ["{", "pass", *(f"a{i}" for i in range(300))]
+    return "y = 0 if 1 else x .vault-{" + ",".join(f"{quote}{e}{quote}" for e in elements) + "}"
+
+
+class TestRoundFiveFindingsAreClosed:
+    """Plan 00466 N101 round 6: every D-RULE and D-SEC round-5 finding,
+    through the real handler. None of the 140 corpus programs reached the
+    over-cap wildcard fallback, so it is gone: an over-cap code word fails
+    closed, as on main. Each of these was allowed at 1a11131b7."""
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            f"python3 - <<'EOF'\n{_quoted_brace_code_word(chr(34))}\nEOF",
+            f"python3 - <<'EOF'\n{_quoted_brace_code_word(chr(39))}\nEOF",
+            f"python3 -c '{_quoted_brace_code_word(chr(34))}'",
+            f'python3 -c "{_quoted_brace_code_word(chr(39))}"',
+        ],
+    )
+    def test_an_over_cap_code_word_holding_a_quoted_brace_denies_d_rule_5_major_1(
+        self, command: str
+    ) -> None:
+        assert _could_not_finish(_deny_reason(command))
+
+    def test_an_over_cap_code_word_naming_nothing_fails_closed_as_on_main(self) -> None:
+        """This was a round-5 pin that stayed allowed through the fallback."""
+        command = f"python3 - <<'EOF'\n{_OVER_CAP_DICT_PROGRAM}\n{_MANY_BRACES_PROGRAM}\nEOF"
+        assert _could_not_finish(_deny_reason(command))
+
+
+class TestQuotedBracesAreNotBraceSyntax:
+    """Plan 00466 N107: bash does not read a quoted or escaped brace or
+    comma as brace syntax, but the guard's brace-group regex did, so a group
+    whose first alternative is a quoted `"}"` hid a brace-spelled path. A
+    group holding quoted whitespace also reached the expander in pieces.
+    Each command reaches `/proj/.vault-pass`; each was allowed at main
+    4f0a205b3."""
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            'cat /proj/.vault-{"}",pass}',
+            "cat /proj/.vault-{'}',pass}",
+            "cat /proj/.vault-{\\},pass}",
+            'cat /proj/.vault-{"{",pass}',
+            'cat /proj/.vault-{"} x",pass}',
+            "cat /proj/.vault-{' {x} ',pass}",
+            'cat /proj/.vault-{"x y{",pass}',
+            "cat <<'EOF'\ndon't\nEOF\ncat /proj/.vault-{\"} x\",pass}",
+            '# don\'t\ncat /proj/.vault-{"} x",pass}',
+            'echo "$(cat /proj/.vault-{"} x",pass})"',
+            'cat <<EOF\n$(cat /proj/.vault-{"} x",pass})\nEOF',
+            "bash -c 'cat /proj/.vault-{\"} x\",pass}'",
+            f"python3 - <<'EOF'\nimport os\n{_OS_SYSTEM}('cat /proj/.vault-{{\"}}\",pass}}')\nEOF",
+            f"python3 - <<'EOF'\n{_OS_SYSTEM}('cat /proj/.vault-{{\"}} x\",pass}}')\nEOF",
+        ],
+    )
+    def test_a_quoted_brace_in_a_group_still_spells_the_path(self, command: str) -> None:
+        assert RuleID.SECRET_BASH_MENTION in _deny_reason(command)
+
+    @pytest.mark.parametrize(
+        "program",
+        ['y = 0 if 1 else x .vault-{"}","pass"}', 'y = 0 if 1 else x .vault-{"} x","pass"}'],
+    )
+    def test_a_quoted_brace_in_a_code_word_still_spells_the_path(self, program: str) -> None:
+        assert RuleID.SECRET_BASH_MENTION in _deny_reason(f"python3 - <<'EOF'\n{program}\nEOF")
+
+    def test_writing_a_script_with_a_quoted_brace_group_denies(self) -> None:
+        tool_input = {"file_path": "/proj/run.sh", "content": 'cat /proj/.vault-{"} x",pass}\n'}
+        decision, _reason = _through_chain("Write", tool_input)
+        assert decision == Decision.DENY
+
+    def test_quoting_that_cannot_be_resolved_fails_closed(self) -> None:
+        """Denied as an unreadable command, not as a guard defect (N101
+        round 12, review 11 MAJOR 2)."""
+        command = 'cat /proj/.vault-{"$(case a in a) echo;; esac)",pass}'
+        assert RuleID.SECRET_COMMAND_UNREADABLE in _deny_reason(command)
+
+    def test_a_parameter_expansion_in_a_group_is_read_as_bash_reads_it(self) -> None:
+        """Plan 00466 N101 round 7: bash's brace scanner reads `${` by a
+        fixed rule, so the group is resolved, not failed closed."""
+        command = 'cat /proj/.vault-{"${x:-"}"}",pass}'
+        assert RuleID.SECRET_BASH_MENTION in _deny_reason(command)
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            'echo "${HOME}"/{a,b}',
+            "jq '{\"a b\": .x}' data.json",
+            'echo "${x:-"a"}" done',
+            "echo \"$(printf '%s' ')')\" {a,b}",
+            "cat <<'EOF'\n{\"} x\",pass}\nEOF",
+        ],
+    )
+    def test_quoting_that_names_nothing_stays_allowed(self, command: str) -> None:
+        decision, reason = _through_chain("Bash", {"command": command})
+        assert decision != Decision.DENY, reason
+
+
+#: Brace words whose Python escapes change the literal's braces, so its
+#: decoded value spells nothing, while bash's reading of the raw text is a
+#: group with `pass` as an alternative. `Q` is the literal's quote.
+_ESCAPED_BRACE_WORDS = (
+    "/proj/.vault-{\\x7b,pass}",
+    "/proj/.vault-{pass,\\x7d}",
+    "/proj/.vault-{\\173,pass}",
+    "/proj/.vault-{pass,Q\\N{LEFT CURLY BRACKET}Q}",
+)
+
+
+def _literal_bash_reads_unquoted(word: str, quote: str) -> str:
+    """A triple-quoted literal holding ``word``. Bash reads the triple
+    quote as an empty string and a one-character one, so ``word`` is an
+    unquoted shell word to bash and inside the literal to Python."""
+    triple = quote * 3
+    return f"s = {triple}a{quote} {word.replace('Q', quote)} {quote}b{triple}"
+
+
+class TestRoundSixFindingsAreClosed:
+    """Plan 00466 N101 round 7: D-RULE-6 MAJOR 1 and the three D-SEC-6
+    findings `main` shares (N111, N112, N113), through the real handler."""
+
+    @pytest.mark.parametrize("word", _ESCAPED_BRACE_WORDS)
+    def test_an_escaped_brace_word_bash_reads_unquoted_denies_in_a_heredoc(self, word: str) -> None:
+        """D-RULE-6 MAJOR 1: the word is wholly inside a Python literal, and
+        only the literal's decoded value was enumerated."""
+        program = _literal_bash_reads_unquoted(word, "'")
+        command = f"python3 - <<'EOF'\n{program}\nEOF"
+        assert RuleID.SECRET_BASH_MENTION in _deny_reason(command)
+
+    @pytest.mark.parametrize("word", _ESCAPED_BRACE_WORDS)
+    def test_an_escaped_brace_word_bash_reads_unquoted_denies_in_dash_c(self, word: str) -> None:
+        program = _literal_bash_reads_unquoted(word, '"')
+        assert RuleID.SECRET_BASH_MENTION in _deny_reason(f"python3 -c '{program}'")
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            'cat $".vault-"pass',
+            'cat $".vault-"{"}",pass}',
+            'cat /proj/.vault-$"pa"ss',
+        ],
+    )
+    def test_locale_quoting_drops_its_dollar_n111(self, command: str) -> None:
+        """N111: bash reads `$"…"` as `"…"`; the guard kept the `$`, so the
+        token began `$.vault-`."""
+        assert RuleID.SECRET_BASH_MENTION in _deny_reason(command)
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            r"bash -c $'cat /proj/.vault-\x7bpass,q\x7d'",
+            r"eval $'cat /proj/.vault-\x7bpass,q\x7d'",
+            r"sh -c $'cat /proj/.vault-\173pass,q\175'",
+            r"su -c $'cat /proj/.vault-\u007bpass,q\u007d' root",
+            r"ssh host $'cat /proj/.vault-\x7bpass,q\x7d'",
+        ],
+    )
+    def test_braces_decoded_from_ansi_c_quoting_reach_a_shell_n112(self, command: str) -> None:
+        """N112: the decoded text holds a group but no surviving quote."""
+        assert RuleID.SECRET_BASH_MENTION in _deny_reason(command)
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            ": ${x:-'a'} ; bash -c $'cat /proj/.vault-\\x7b\"\\x7d\",pass\\x7d'",
+            ": ${x:-'a'} ; eval $'cat /proj/.vault-\\x7bpass,q\\x7d'",
+            ": ${x:-'a'} ; eval \"cat /proj/.vault-$(printf '\\x7b')pass,q}\"",
+        ],
+    )
+    def test_an_unrelated_unresolvable_prefix_does_not_end_the_scan_n113(
+        self, command: str
+    ) -> None:
+        """N113: the early exit looked only for a literal `{`."""
+        decision, _reason = _through_chain("Bash", {"command": command})
+        assert decision == Decision.DENY
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            ": ${x:-'a'} ; echo \"$HOME\" done",
+            'echo "${x:-"a"}" $\'tab\\there\'',
+            "python3 - <<'EOF'\ns = '''It' {a,b} 'x'''\nEOF",
+            "python3 - <<'EOF'\nprint('{\\x7b}'.format(1))\nEOF",
+        ],
+    )
+    def test_shapes_that_name_nothing_stay_allowed(self, command: str) -> None:
+        decision, reason = _through_chain("Bash", {"command": command})
+        assert decision != Decision.DENY, reason
+
+
+class TestRoundSevenFindingsAreClosed:
+    """Plan 00466 N101 round 8: the two findings `main` shares (N115,
+    N116), through the real handler."""
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "cat /proj/.vault-{},pass}",
+            "cat /proj/.vault-{q},pass}",
+            "cat /proj/.vault-{a}b,pass}",
+            "cat /proj/.vault-{..}a,pass}",
+            "cat /proj/.vault-{{}},pass}",
+        ],
+    )
+    def test_a_close_brace_before_the_first_comma_is_text_n115(self, command: str) -> None:
+        """N115: bash reads a `}` before any comma as text; only a word
+        holding a quoting character reached the reader that knows it."""
+        assert RuleID.SECRET_BASH_MENTION in _deny_reason(command)
+
+    def test_writing_a_script_with_a_leading_close_brace_group_denies_n115(self) -> None:
+        tool_input = {"file_path": "/proj/run.sh", "content": "cat /proj/.vault-{},pass}\n"}
+        decision, _reason = _through_chain("Write", tool_input)
+        assert decision == Decision.DENY
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            r"bash <<< $'cat /proj/.vault-\x7bpass,q\x7d'",
+            r"bash <<<$'cat /proj/.vault-\x7bpass,q\x7d'",
+            r"sh -s <<< $'cat /proj/.vault-\x7bpass,q\x7d'",
+            r"xargs -0 bash -c <<< $'cat /proj/.vault-\x7bpass,q\x7d'",
+            r"bash <<< $'cat /proj/.vault-\x7b\x7d,pass\x7d'",
+        ],
+    )
+    def test_a_here_string_word_is_read_as_a_word_n116(self, command: str) -> None:
+        """N116: at the second `<` of `<<<` the scanner saw `<<` and read
+        the here-string word as a heredoc delimiter."""
+        assert RuleID.SECRET_BASH_MENTION in _deny_reason(command)
+
+    def test_a_glob_word_with_a_name_too_long_to_exist_is_allowed_n117(self) -> None:
+        """N117: a glob sharing text with a both-edges pattern (`*.secret*`)
+        is expanded on disk. Under a directory name longer than the
+        filesystem allows, that raised ENAMETOOLONG and failed the guard
+        closed. The glob is expanded from the daemon's own cwd, which
+        exists."""
+        command = "ls " + "a" * 300 + "/*.rest"
+        decision, reason = _through_chain("Bash", {"command": command})
+        assert decision != Decision.DENY, reason
+
+    def test_a_relative_glob_past_path_max_once_joined_denies(self, tmp_path: Path) -> None:
+        """Review 8 BLOCKER 1, the reviewer's shape: `..` repeats through
+        one real long-named directory keep the relative word under
+        PATH_MAX, so bash opens it and reads the file, while the hook-cwd
+        join is over PATH_MAX."""
+        long_dir = "d" * 57
+        (tmp_path / long_dir).mkdir()
+        (tmp_path / "untracked").mkdir()
+        (tmp_path / "untracked" / "x.secret").touch()
+        tail = "untracked/*ecre*"
+        word = f"{long_dir}/../" * ((4095 - len(tail)) // (len(long_dir) + 4)) + tail
+        assert len(word) < 4096 < len(str(tmp_path)) + 1 + len(word)
+        decision, reason = _through_chain_at("Bash", {"command": f"cat {word}"}, tmp_path)
+        assert decision == Decision.DENY, reason
+        assert RuleID.SECRET_EVALUATION_ERROR in reason
+
+    def test_an_absolute_glob_past_path_max_denies(self, tmp_path: Path) -> None:
+        long_dir = "d" * 200
+        (tmp_path / long_dir).mkdir()
+        word = f"{tmp_path}/" + f"{long_dir}/../" * 21 + "*ecre*"
+        assert len(word) > 4096
+        decision, reason = _through_chain_at("Bash", {"command": f"cat {word}"}, tmp_path)
+        assert decision == Decision.DENY, reason
+
+    def test_a_single_name_past_the_name_limit_stays_allowed(self, tmp_path: Path) -> None:
+        word = "n" * 300 + "/*ecre*"
+        decision, reason = _through_chain_at("Bash", {"command": f"cat {word}"}, tmp_path)
+        assert decision != Decision.DENY, reason
+
+    def test_a_protected_path_beside_a_name_too_long_to_exist_still_denies_n117(self) -> None:
+        command = "ls " + "a" * 300 + "/*.rest /proj/.vault-{},pass}"
+        assert RuleID.SECRET_BASH_MENTION in _deny_reason(command)
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            'echo "$(cat <<< hi)" {a,b}',
+            r"bash <<< $'echo \x7ba,b\x7d'",
+            "cat <<< '{a,b}' && echo {c,d}",
+            "cat <<EOF\n{a,b}\nEOF",
+        ],
+    )
+    def test_here_strings_that_name_nothing_stay_allowed_n116(self, command: str) -> None:
+        """A here-string inside a substitution is not a heredoc, so the
+        substitution's extent is resolved rather than failed closed."""
+        decision, reason = _through_chain("Bash", {"command": command})
+        assert decision != Decision.DENY, reason
+
+
+#: A Python option table past the 256-spelling brace cap, the shape of a
+#: long command-wrapper registry (ledger 00466 N238 (iv)).
+_LONG_OPTION_TABLE = (
+    "WRAPPERS = {\n" + "".join(f'    "cmd{index}": Wrapper(),\n' for index in range(300)) + "}\n"
+)
+
+
+class TestAWriteOfSourceIsNotACommand:
+    """Ledger 00466 N238: a Write of Python source enumerated its CODE
+    braces as shell brace groups, and an option table past the cap was
+    reported as a bug in the guard. No shell reads that text; only its
+    string literals and comments can be handed to one."""
+
+    def test_a_long_option_table_is_allowed(self) -> None:
+        tool_input = {"file_path": "/proj/src/wrappers.py", "content": _LONG_OPTION_TABLE}
+        decision, reason = _through_chain("Write", tool_input)
+        assert decision != Decision.DENY, reason
+
+    def test_a_brace_spelled_path_in_a_string_literal_still_denies(self) -> None:
+        content = _LONG_OPTION_TABLE + f"CMD = 'cat {_BRACE_PATH}'\n"
+        decision, reason = _through_chain(
+            "Write", {"file_path": "/proj/src/wrappers.py", "content": content}
+        )
+        assert decision == Decision.DENY
+        assert RuleID.SECRET_SCRIPT_AUTHOR in reason
+
+    def test_an_over_cap_string_literal_is_a_named_deny(self) -> None:
+        content = _LONG_OPTION_TABLE + f"CMD = 'echo {_OVER_BOUND_WORD}'\n"
+        decision, reason = _through_chain(
+            "Write", {"file_path": "/proj/src/wrappers.py", "content": content}
+        )
+        assert decision == Decision.DENY
+        assert _could_not_finish(reason), reason
+
+    def test_source_that_does_not_parse_is_enumerated_whole(self) -> None:
+        content = f"cat {_BRACE_PATH}\n"
+        decision, reason = _through_chain(
+            "Write", {"file_path": "/proj/src/broken.py", "content": content}
+        )
+        assert decision == Decision.DENY
+        assert RuleID.SECRET_SCRIPT_AUTHOR in reason
+
+    def test_a_shell_script_is_still_enumerated_whole_and_named_past_the_cap(self) -> None:
+        """A ``{`` followed by a newline is not brace syntax to bash, so the
+        table itself is text; a real group past the cap is named."""
+        wide_group = "echo x{" + ",".join(f"cmd{index}" for index in range(300)) + "}\n"
+        tool_input = {"file_path": "/proj/gen.sh", "content": _LONG_OPTION_TABLE + wide_group}
+        decision, reason = _through_chain("Write", tool_input)
+        assert decision == Decision.DENY
+        assert _could_not_finish(reason), reason
+
+
+#: Prose quoting more brace words than the 500-word discovery cap.
+_QUOTE_HEAVY_PROSE = "\n".join(
+    f"- it's \"{index}\" and '{{a,b}}' or \"{{c,d}}\" -- don't 'x' \"y\"" for index in range(400)
+)
+
+
+class TestAQuotedBraceWordIsNotCounted:
+    """Ledger 00466 N238 (ix): a quote-heavy heredoc raised
+    TooManyToEnumerateError, reported as a bug in the guard. A word in
+    which bash reads no brace as syntax is a literal, and is neither
+    enumerated nor counted against the cap."""
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            f"cat > notes.md <<'EOF'\n{_QUOTE_HEAVY_PROSE}\nEOF",
+            f"cat > notes.md <<EOF\n{_QUOTE_HEAVY_PROSE}\nEOF",
+            f"git commit -q -F - <<'EOF'\n{_QUOTE_HEAVY_PROSE}\nEOF",
+            "echo " + " ".join(f"'w{index}{{a,b}}'" for index in range(600)),
+            "echo " + " ".join(f"w{index}\\{{a,b}}" for index in range(600)),
+        ],
+    )
+    def test_quoted_brace_words_are_allowed(self, command: str) -> None:
+        decision, reason = _through_chain("Bash", {"command": command})
+        assert decision != Decision.DENY, reason
+
+    def test_a_brace_path_quoted_from_outside_its_word_still_denies(self) -> None:
+        """Split on whitespace, ``'/proj/.vault-p{a,x}ss'`` looks quoted, but
+        bash closes the quote before it; the quote-aware splitter reads the
+        whole word."""
+        command = f"cat 'x '{_BRACE_PATH}' y'"
+        reason = _deny_reason(command)
+        assert RuleID.SECRET_BASH_MENTION in reason
+
+    def test_unquoted_brace_words_past_the_cap_are_a_named_deny(self) -> None:
+        command = "echo " + " ".join(f"w{index}{{a,b}}" for index in range(600))
+        assert _could_not_finish(_deny_reason(command))
+
+
+class TestAGlobListPastTheBudgetIsANamedDeny:
+    """Ledger 00466 N238 (viii): ``ls`` listing several globs raised
+    TooManyToEnumerateError, reported as a bug in the guard. Bash does
+    expand them, so past the budget the answer is the named deny."""
+
+    @pytest.mark.parametrize(
+        "command",
+        ["ls n238/*/test_*.py", "ls n238/d1/test_*.py n238/*/test_1*.py"],
+    )
+    def test_the_glob_list_is_a_named_deny(self, command: str, tmp_path: Path) -> None:
+        for directory in range(20):
+            sub = tmp_path / "n238" / f"d{directory}"
+            sub.mkdir(parents=True)
+            for index in range(20):
+                (sub / f"test_{index}.py").touch()
+        decision, reason = _through_chain_at("Bash", {"command": command}, tmp_path)
+        assert decision == Decision.DENY
+        assert _could_not_finish(reason), reason
+
+    def test_a_glob_list_within_the_budget_is_allowed(self, tmp_path: Path) -> None:
+        (tmp_path / "n238" / "d1").mkdir(parents=True)
+        (tmp_path / "n238" / "d1" / "test_1.py").touch()
+        command = "ls n238/*/test_*.py n238/d1/test_*.py"
+        decision, reason = _through_chain_at("Bash", {"command": command}, tmp_path)
+        assert decision != Decision.DENY, reason

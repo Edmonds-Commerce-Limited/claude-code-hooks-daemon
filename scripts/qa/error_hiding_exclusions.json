@@ -238,9 +238,9 @@
     },
     {
       "file": "daemon/paths.py",
-      "function": "read_pid_file",
+      "function": "read_pid_record",
       "rule": "return-none-on-error",
-      "reason": "Returns None when PID file missing or invalid. Callers check for None before using PID. This is the documented contract — a missing PID file means no daemon is running."
+      "reason": "Returns None when PID file missing or invalid. Callers check for None before using PID. This is the documented contract — a missing PID file means no daemon is running. read_pid_file is a thin wrapper over it (review 10, R10-3)."
     },
     {
       "file": "daemon/paths.py",
@@ -535,12 +535,6 @@
       "function": "_log_stop_event",
       "rule": "log-and-continue",
       "reason": "_log_stop_event(): Non-critical JSONL append — logs at debug level and continues when ProjectContext is not initialised (unit tests) or the log file is unwritable. Stop event logging is purely diagnostic and must not affect the handler decision or raise to callers."
-    },
-    {
-      "file": "install/client_validator.py",
-      "function": "_check_running_daemon",
-      "rule": "silent-pass",
-      "reason": "Process management during installation: nested try/except/pass for OS signal operations (kill, SIGTERM, SIGKILL). Inner exceptions (ProcessLookupError) indicate the process already died — a success condition. Outer try handles unexpected signal failures gracefully."
     },
     {
       "file": "install/transport_probe.py",
@@ -848,6 +842,30 @@
       ],
       "rule": "shell-&>/dev/null",
       "reason": "Plan 00200 Task 5.4: `if ! command -v shellcheck &>/dev/null; then echo \"shellcheck not installed\"` -- exit code explicitly checked, specific error printed on failure. Module-level, hence line-based match."
+    },
+    {
+      "file": "scripts/upgrade.sh",
+      "lines": [
+        551
+      ],
+      "rule": "shell-&>/dev/null",
+      "reason": "Plan 00200 Task 5.4: `git rev-parse \"$TARGET_VERSION\" &>/dev/null || _fail \"Version $TARGET_VERSION not found\"` -- explicit failure handling via `_fail`, output suppressed only because git's own \"unknown revision\" noise is not the diagnostic (the _fail message is). Module-level, hence line-based match. Realigned by ledger 00466 N245 (Layer 1's own daemon stop removed, which moved this line up from 646); previously realigned by Plan 00466 N59 from 585, by Plan 00386 from 531 and by Plan 00291 from 438."
+    },
+    {
+      "file": "scripts/upgrade_version.sh",
+      "lines": [
+        514
+      ],
+      "rule": "shell-|| true",
+      "reason": "Plan 00200 Task 5.4: `run_pre_install_checks ... \"false\" || true`. The function's own documented contract (fail_on_error=false): 'returns non-zero but doesn't exit', and it already prints any warnings found. The trailing `|| true` exists only to stop `set -e` treating that documented non-fatal return as script-terminating -- the function's own visible warnings are the diagnostic, not this line. Realigned by Plan 00455 (the ensure_normal_mode_only argument-fix comment shifted this line down from 511); previously realigned by Plan 00291 from 450."
+    },
+    {
+      "file": "scripts/upgrade_version.sh",
+      "lines": [
+        876
+      ],
+      "rule": "shell-&>/dev/null",
+      "reason": "Plan 00200 Task 5.4: `if ! git ... rev-parse \"$TARGET_VERSION\" &>/dev/null; then fail_fast \"Version $TARGET_VERSION not found...\"` -- exit code explicitly checked, specific error printed on failure. Realigned by Plan 00455 (the ensure_normal_mode_only argument-fix comment shifted this line down from 873); previously realigned by Plan 00291 from 812."
     },
     {
       "file": "scripts/validate_worktrees.sh",

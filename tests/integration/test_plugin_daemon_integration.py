@@ -21,7 +21,7 @@ from typing import Any
 
 import pytest
 
-from claude_code_hooks_daemon.constants import Timeout
+from tests.isolated_daemon import DAEMON_CLI_SUBPROCESS_BOUND, isolated_daemon_paths
 
 
 @pytest.fixture
@@ -48,11 +48,7 @@ def daemon_env_with_plugin(
         dict with project_root, config_path, socket_path, pid_path, log_path, plugin_dir
     """
     # Set unique paths for test daemon to avoid collision with production daemon
-    # Use /tmp directly for socket files to avoid Unix socket path length limits (108 chars)
-    test_id = tmp_path.name[-20:]  # Last 20 chars of test name for uniqueness
-    socket_path = Path(f"/tmp/test-plugin-daemon-{test_id}.sock")
-    pid_path = Path(f"/tmp/test-plugin-daemon-{test_id}.pid")
-    log_path = Path(f"/tmp/test-plugin-daemon-{test_id}.log")
+    socket_path, pid_path, log_path = isolated_daemon_paths(tmp_path, "plugin-daemon")
 
     # Override daemon paths via environment variables
     monkeypatch.setenv("CLAUDE_HOOKS_SOCKET_PATH", str(socket_path))
@@ -158,7 +154,7 @@ def daemon_with_plugin(daemon_env_with_plugin: dict[str, Any]):
             env=test_env,
             stdout=devnull,
             stderr=devnull,
-            timeout=Timeout.SOCKET_CONNECT,
+            timeout=DAEMON_CLI_SUBPROCESS_BOUND,
         )
 
     if result.returncode != 0:
@@ -182,7 +178,7 @@ def daemon_with_plugin(daemon_env_with_plugin: dict[str, Any]):
         env=test_env,
         capture_output=True,
         text=True,
-        timeout=Timeout.SOCKET_CONNECT,
+        timeout=DAEMON_CLI_SUBPROCESS_BOUND,
     )
 
     if "RUNNING" not in status_result.stdout:
@@ -206,7 +202,7 @@ def daemon_with_plugin(daemon_env_with_plugin: dict[str, Any]):
         cwd=project_root,
         env=test_env,
         capture_output=True,
-        timeout=Timeout.SOCKET_CONNECT,
+        timeout=DAEMON_CLI_SUBPROCESS_BOUND,
     )
 
     # Wait for cleanup
@@ -291,7 +287,7 @@ class TestPluginDaemonIntegration:
             env=test_env,
             capture_output=True,
             text=True,
-            timeout=Timeout.SOCKET_CONNECT,
+            timeout=DAEMON_CLI_SUBPROCESS_BOUND,
         )
 
         assert "RUNNING" in status_result.stdout, "Daemon should be running"
@@ -406,7 +402,7 @@ class TestPluginDaemonIntegration:
                 env=test_env,
                 stdout=devnull,
                 stderr=devnull,
-                timeout=Timeout.SOCKET_CONNECT,
+                timeout=DAEMON_CLI_SUBPROCESS_BOUND,
             )
 
         assert result.returncode == 0, "Failed to start daemon"
@@ -440,7 +436,7 @@ class TestPluginDaemonIntegration:
             cwd=project_root,
             env=test_env,
             capture_output=True,
-            timeout=Timeout.SOCKET_CONNECT,
+            timeout=DAEMON_CLI_SUBPROCESS_BOUND,
         )
         time.sleep(1)
 
@@ -459,22 +455,21 @@ class TestPluginDaemonIntegration:
             env=test_env,
             capture_output=True,
             text=True,
-            timeout=Timeout.SOCKET_CONNECT,
+            timeout=DAEMON_CLI_SUBPROCESS_BOUND,
         )
         assert "NOT RUNNING" in status_result.stdout, "Daemon should be stopped"
 
         # Restart daemon
-        with open("/dev/null", "w") as devnull:
-            result = subprocess.run(
-                start_cmd,
-                cwd=project_root,
-                env=test_env,
-                stdout=devnull,
-                stderr=devnull,
-                timeout=Timeout.SOCKET_CONNECT,
-            )
+        restart = subprocess.run(
+            start_cmd,
+            cwd=project_root,
+            env=test_env,
+            capture_output=True,
+            text=True,
+            timeout=DAEMON_CLI_SUBPROCESS_BOUND,
+        )
 
-        assert result.returncode == 0, "Failed to restart daemon"
+        assert restart.returncode == 0, f"Failed to restart daemon: {restart.stderr}"
         time.sleep(1.5)
 
         # Verify running again
@@ -484,7 +479,7 @@ class TestPluginDaemonIntegration:
             env=test_env,
             capture_output=True,
             text=True,
-            timeout=Timeout.SOCKET_CONNECT,
+            timeout=DAEMON_CLI_SUBPROCESS_BOUND,
         )
         assert "RUNNING" in status_result.stdout, "Daemon should be running after restart"
 
@@ -509,7 +504,7 @@ class TestPluginDaemonIntegration:
             cwd=project_root,
             env=test_env,
             capture_output=True,
-            timeout=Timeout.SOCKET_CONNECT,
+            timeout=DAEMON_CLI_SUBPROCESS_BOUND,
         )
 
     def test_plugin_blocks_through_daemon_socket(
@@ -526,10 +521,7 @@ class TestPluginDaemonIntegration:
         This proves plugins work as deployed, not just in unit tests.
         """
         # Setup daemon with blocking handler
-        test_id = tmp_path.name[-20:]
-        socket_path = Path(f"/tmp/test-plugin-e2e-{test_id}.sock")
-        pid_path = Path(f"/tmp/test-plugin-e2e-{test_id}.pid")
-        log_path = Path(f"/tmp/test-plugin-e2e-{test_id}.log")
+        socket_path, pid_path, log_path = isolated_daemon_paths(tmp_path, "plugin-e2e")
 
         monkeypatch.setenv("CLAUDE_HOOKS_SOCKET_PATH", str(socket_path))
         monkeypatch.setenv("CLAUDE_HOOKS_PID_PATH", str(pid_path))
@@ -599,7 +591,7 @@ plugins:
                 env=test_env,
                 stdout=devnull,
                 stderr=devnull,
-                timeout=Timeout.SOCKET_CONNECT,
+                timeout=DAEMON_CLI_SUBPROCESS_BOUND,
             )
 
         if result.returncode != 0:
@@ -630,7 +622,7 @@ plugins:
             env=test_env,
             capture_output=True,
             text=True,
-            timeout=Timeout.SOCKET_CONNECT,
+            timeout=DAEMON_CLI_SUBPROCESS_BOUND,
         )
 
         if "RUNNING" not in status_result.stdout:
@@ -708,7 +700,7 @@ plugins:
                 cwd=tmp_path,
                 env=test_env,
                 capture_output=True,
-                timeout=Timeout.SOCKET_CONNECT,
+                timeout=DAEMON_CLI_SUBPROCESS_BOUND,
             )
             # Clean up test files
             for path in [socket_path, pid_path, log_path]:
@@ -728,10 +720,7 @@ class TestPluginDaemonErrorHandling:
         Users MUST know their protection is down.
         """
         # Set unique paths for test daemon isolation
-        test_id = tmp_path.name[-20:]
-        socket_path = Path(f"/tmp/test-missing-plugin-{test_id}.sock")
-        pid_path = Path(f"/tmp/test-missing-plugin-{test_id}.pid")
-        log_path = Path(f"/tmp/test-missing-plugin-{test_id}.log")
+        socket_path, pid_path, log_path = isolated_daemon_paths(tmp_path, "missing-plugin")
 
         monkeypatch.setenv("CLAUDE_HOOKS_SOCKET_PATH", str(socket_path))
         monkeypatch.setenv("CLAUDE_HOOKS_PID_PATH", str(pid_path))
@@ -791,8 +780,6 @@ plugins:
 """)
 
         # Start daemon - should CRASH with missing plugin (FAIL FAST)
-        # Plan 00100 Task 0.2: cli.py start polls for PID file up to 5s, so
-        # the subprocess timeout must exceed that window plus fork overhead.
         start_cmd = [
             sys.executable,
             "-m",
@@ -806,22 +793,19 @@ plugins:
             cwd=tmp_path,
             env=test_env,
             capture_output=True,
-            timeout=Timeout.REQUEST_DEFAULT,
+            timeout=DAEMON_CLI_SUBPROCESS_BOUND,
         )
 
         # Daemon MUST crash if configured plugin can't be loaded
         assert result.returncode != 0, "Daemon must crash with missing plugin (FAIL FAST)"
 
-        # Verify error message indicates daemon failed to start
         # The parent process reports startup failure on stderr. The grandchild's
         # detailed error (plugin loading) goes to /dev/null as part of proper
-        # daemonization — in-memory logs capture the detail instead.
+        # daemonization. The parent names why no daemon was proven: the start
+        # pipe closed as the daemon exited, before any PID file was written.
         error_output = result.stderr.decode()
-        assert (
-            "Failed to load plugin handler" in error_output
-            or "RuntimeError" in error_output
-            or "failed to start" in error_output.lower()
-        ), "Error message should indicate daemon startup failure"
+        assert "Daemon not proven started" in error_output, error_output
+        assert "the daemon exited while starting" in error_output, error_output
 
         # Verify daemon is NOT running
         status_cmd = [
@@ -838,7 +822,7 @@ plugins:
             env=test_env,
             capture_output=True,
             text=True,
-            timeout=Timeout.SOCKET_CONNECT,
+            timeout=DAEMON_CLI_SUBPROCESS_BOUND,
         )
 
         # Status should indicate daemon is NOT running

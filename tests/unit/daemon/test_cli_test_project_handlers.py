@@ -234,6 +234,41 @@ class TestTestProjectHandlers:
             result = cmd_test_project_handlers(args)
             assert result == 1
 
+    def test_unloads_the_full_qa_gate_plugin(self, tmp_path: Path) -> None:
+        """The daemon's own `addopts` force-loads `full_qa_gate` into every
+        pytest invocation that reads `pyproject.toml` -- including this one.
+        That plugin anchors its test-file count on the conftest.py that
+        imported it; project handlers have none, so it falls back to the
+        plugin's OWN directory (holding zero test files) and refuses the
+        run -- zero tests collected, not a suite that ran. This pins that the
+        invocation explicitly unloads it, rather than relying on project
+        handlers happening to have no conftest.py that would anchor it
+        correctly either.
+        """
+        from claude_code_hooks_daemon.daemon.cli import (
+            _FULL_QA_GATE_PLUGIN,
+            cmd_test_project_handlers,
+        )
+
+        project_path = _setup_project(tmp_path)
+        handlers_dir = project_path / ".claude" / "project-handlers"
+        handlers_dir.mkdir()
+
+        args = argparse.Namespace(project_root=project_path, verbose=False)
+
+        mock_result = MagicMock()
+        mock_result.returncode = 0
+        mock_result.stdout = "1 passed\n"
+        mock_result.stderr = ""
+
+        with patch("subprocess.run", return_value=mock_result) as mock_run:
+            cmd_test_project_handlers(args)
+
+            cmd_list = mock_run.call_args[0][0]
+            assert "-p" in cmd_list
+            plugin_index = cmd_list.index("-p") + 1
+            assert cmd_list[plugin_index] == f"no:{_FULL_QA_GATE_PLUGIN}"
+
     def test_uses_current_python(self, tmp_path: Path) -> None:
         """test-project-handlers uses sys.executable as the Python interpreter."""
         from claude_code_hooks_daemon.daemon.cli import cmd_test_project_handlers

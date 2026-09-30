@@ -193,15 +193,14 @@ class TestTheGuardDoesNotOverreach:
 
         assert result.terminated_by != _GUARD_NAME
 
-    def test_a_command_whose_target_needs_shell_expansion_is_not_denied(
+    def test_a_target_a_literal_assignment_pins_inside_is_not_denied(
         self, full_chain: EventRouter
     ) -> None:
-        """``get_bash_write_targets`` is conservative and yields nothing here.
-
-        A wrong path is worse than no path: it would attribute a write to a
-        file the command never touched. The guard inherits that contract rather
-        than guessing.
-        """
-        result = full_chain.route(EventType.PRE_TOOL_USE, make_bash_input('echo hi > "$OUT"'))
+        """A variable target is judged at the path a plain literal assignment
+        earlier in the call gives it, never at a guessed one (Plan 00466 N101
+        round 12, N215). Nothing pinning it is a denial, not an allow: see
+        ``test_project_containment.py``."""
+        command = 'OUT=untracked/scratch/o.md; echo hi > "$OUT"'
+        result = full_chain.route(EventType.PRE_TOOL_USE, make_bash_input(command))
 
         assert result.terminated_by != _GUARD_NAME

@@ -98,6 +98,11 @@ _VERBOSE: Final[str] = (
 # separately rather than looking it up there.
 _ERROR_ROUTE: Final[str] = "error"
 
+# The route a command the shell reader cannot read with certainty is filed
+# under (Plan 00466 N101 round 12). That is a property of the command, not a
+# defect in the guard, so it must not ask for a bug report.
+_UNREADABLE_ROUTE: Final[str] = "unreadable"
+
 # The `_ERROR_ROUTE` detail for a path argument carrying a NUL byte: the
 # input, not the guard, is what cannot be evaluated.
 _NUL_PATH_DETAIL: Final[str] = (
@@ -154,6 +159,29 @@ _ERROR_RULE: Final[Rule] = Rule(
         "daemon's global strict_mode). This is a bug in the guard itself: report "
         "it via the hooks-daemon skill (issue-report) rather than retrying -- "
         "retrying the same call will crash the same way."
+    ),
+)
+
+_UNREADABLE_RULE: Final[Rule] = Rule(
+    rule_id=RuleID.SECRET_COMMAND_UNREADABLE,
+    blocked="a Bash command whose structure could not be read with certainty",
+    why=(
+        "A protected path could hide in a part of the command the reader cannot "
+        "place, so an unreadable command is never treated as clean"
+    ),
+    fix=(
+        "Rephrase the command: move a `case` inside `$( )` into an `if`, or put "
+        "the logic in a script file under untracked/scratch/ and run that"
+    ),
+    verbose=(
+        "secret_file_guard could not read this command's structure with "
+        "certainty -- for example a `case` command inside `$( )`, whose "
+        "patterns end in a `)` that closes nothing, or quoting inside `${...}` "
+        "whose extent is ambiguous. This is not a bug in the guard: the "
+        "command itself cannot be read, so it is denied rather than treated as "
+        "mentioning no protected path. Rephrase the command: move a `case` "
+        "inside `$( )` into an `if`, split the command into simpler calls, or "
+        "put the logic in a script file under untracked/scratch/ and run that."
     ),
 )
 
@@ -319,7 +347,7 @@ _PERCENT_LITERAL_DELIMITERS: Final[dict[str, str]] = {
 }
 
 _PYTHON_SHELL_CALL_RE: Final[re.Pattern[str]] = re.compile(
-    r"\b(?:os\.system|os\.popen|subprocess\.\w+)\s*\("
+    r"\b(?:os\.system|os\.popen|subprocess\.\w+|commands\.\w+)\s*\("
 )
 # Review 7 follow-up (team-lead): the regex fallback's alias resolution --
 # a best-effort, line-based scan, not a parser, but reaching the SAME
@@ -458,10 +486,14 @@ def _percent_literal_bodies(content: str, prefix: str, *, limit: int) -> list[st
 #: goes through a shell, since any of them handed a shell interpreter and
 #: `-c` is functionally the same disclosure route).
 _PY_OS_SHELL_ATTRS: Final[frozenset[str]] = frozenset({"system", "popen"})
-_PY_OS_EXEC_SPAWN_PREFIXES: Final[tuple[str, ...]] = ("exec", "spawn")
-_PY_SUBPROCESS_FUNC_NAMES: Final[frozenset[str]] = frozenset(
-    {"run", "call", "check_call", "check_output", "Popen", "getoutput", "getstatusoutput"}
-)
+_PY_OS_EXEC_SPAWN_PREFIXES: Final[tuple[str, ...]] = ("exec", "spawn", "posix_spawn")
+#: Modules every one of whose calls runs its argument through a shell
+#: (Python 2's `commands.getoutput`/`getstatusoutput`).
+_PY_ALWAYS_SHELL_MODULES: Final[frozenset[str]] = frozenset({"commands"})
+#: `asyncio` process entry points: `_shell` always runs a shell, `_exec`
+#: does when its argv names one.
+_PY_ASYNCIO_SHELL_ATTRS: Final[frozenset[str]] = frozenset({"create_subprocess_shell"})
+_PY_ASYNCIO_EXEC_ATTRS: Final[frozenset[str]] = frozenset({"create_subprocess_exec"})
 #: `subprocess.getoutput`/`getstatusoutput` (review 7 MINOR-1) always run
 #: their argument through a shell -- unlike `run`/`call`/`check_call`/
 #: `check_output`/`Popen`, they take no `shell=` keyword at all, so gating
@@ -518,14 +550,16 @@ def _python_call_has_shell_true(call: ast.Call) -> bool:
 
 def _python_call_names_a_shell(call: ast.Call) -> bool:
     """True when an argument literally names a shell interpreter -- a bare
-    string, or the first element of a list/tuple argument -- the
+    string, or ANY element of a list/tuple argument -- the
     ``subprocess.run(["bash", "-c", cmd])`` shape that reaches a shell with
-    no ``shell=True``. An ABSOLUTE interpreter path (``/bin/bash``) is
-    recognised by its basename (review 6 minor-2)."""
+    no ``shell=True``, including behind a wrapper
+    (``["env", "bash", "-c", cmd]``, Plan 00466 N101 D-RULE F4). An
+    ABSOLUTE interpreter path (``/bin/bash``) is recognised by its basename
+    (review 6 minor-2)."""
     for arg in call.args:
         candidates: list[ast.expr] = []
-        if isinstance(arg, (ast.List, ast.Tuple)) and arg.elts:
-            candidates.append(arg.elts[0])
+        if isinstance(arg, (ast.List, ast.Tuple)):
+            candidates.extend(arg.elts)
         elif isinstance(arg, ast.Constant):
             candidates.append(arg)
         for candidate in candidates:
@@ -543,11 +577,15 @@ def _python_call_is_shell_exec(module: str, attr: str, call: ast.Call) -> bool:
         return True
     if module == "pty" and attr == "spawn":
         return True
-    if module == "asyncio" and attr == "create_subprocess_shell":
+    if module in _PY_ALWAYS_SHELL_MODULES:
         return True
+    if module == "asyncio" and attr in _PY_ASYNCIO_SHELL_ATTRS:
+        return True
+    if module == "asyncio" and attr in _PY_ASYNCIO_EXEC_ATTRS:
+        return _python_call_names_a_shell(call)
     if module == "subprocess" and attr in _PY_SUBPROCESS_ALWAYS_SHELL_FUNC_NAMES:
         return True
-    if module == "subprocess" and attr in _PY_SUBPROCESS_FUNC_NAMES:
+    if module == "subprocess":
         return _python_call_has_shell_true(call) or _python_call_names_a_shell(call)
     return False
 
@@ -682,10 +720,12 @@ def _regex_fallback_call_counts(
     ``subprocess.getoutput``/``getstatusoutput`` always count (MINOR-1:
     they take no ``shell=`` keyword at all); any other ``subprocess``
     attribute counts only with ``shell=True`` (any whitespace) or an argv
-    literal naming a shell interpreter.
+    literal naming a shell interpreter; every ``commands`` call counts.
     """
     if module == "os":
         return attr in ("system", "popen")
+    if module in _PY_ALWAYS_SHELL_MODULES:
+        return True
     if module == "subprocess":
         if attr in _PY_SUBPROCESS_ALWAYS_SHELL_FUNC_NAMES:
             return True
@@ -725,7 +765,7 @@ def _python_shell_exec_literals(content: str) -> list[str]:
     candidates: list[tuple[int, str, str]] = []
     for match in _PYTHON_SHELL_CALL_RE.finditer(content):
         text = match.group(0)
-        module = "os" if text.startswith("os.") else "subprocess"
+        module = text.split(".", 1)[0]
         attr = text[len(module) + 1 : -1].strip()
         candidates.append((match.start(), module, attr))
     for alias, real_module in module_aliases.items():
@@ -1075,14 +1115,46 @@ def _bash_interpreter_one_liner_mention(
             cursor += 1
         if code_index is None or code_index >= len(resolved_words):
             continue
-        code = resolved_words[code_index]
-        pseudo_path = "one_liner" + family.pseudo_ext
-        for literal in _shell_exec_call_literals(pseudo_path, code):
-            mention = sfm.find_protected_mention_detail(
-                literal, patterns, deadline=deadline, cwd=cwd, context="bash"
-            )
-            if mention is not None:
-                return mention
+        mention = _shell_exec_literal_mention(
+            family, resolved_words[code_index], patterns, deadline=deadline, cwd=cwd
+        )
+        if mention is not None:
+            return mention
+    # Plan 00466 N101: a heredoc fed to an interpreter (`python3 - <<'EOF'`)
+    # is the same program as its `-c` spelling, so its shell-exec calls get
+    # the identical extraction -- judged as full shell text (globs,
+    # variables), not only by the brace stream.
+    for heredoc in shell_expansion.brace_expansion_view(command).heredocs:
+        heredoc_family = (
+            None if heredoc.receiver is None else _match_one_liner_family(heredoc.receiver)
+        )
+        if heredoc_family is None:
+            continue
+        mention = _shell_exec_literal_mention(
+            heredoc_family, heredoc.body, patterns, deadline=deadline, cwd=cwd
+        )
+        if mention is not None:
+            return mention
+    return None
+
+
+def _shell_exec_literal_mention(
+    family: _OneLinerFamily,
+    code: str,
+    patterns: tuple[str, ...],
+    *,
+    deadline: float,
+    cwd: str | None,
+) -> tuple[str, str] | None:
+    """A protected mention in a shell-exec call's literal inside ``code``,
+    a program in ``family``'s language, judged as shell text."""
+    pseudo_path = "one_liner" + family.pseudo_ext
+    for literal in _shell_exec_call_literals(pseudo_path, code):
+        mention = sfm.find_protected_mention_detail(
+            literal, patterns, deadline=deadline, cwd=cwd, context="bash"
+        )
+        if mention is not None:
+            return mention
     return None
 
 
@@ -1260,6 +1332,16 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
         """
         try:
             return self._evaluate(hook_input)
+        except shell_expansion.UnresolvableBraceQuotingError as exc:
+            # A command the reader cannot place is denied as unreadable, not
+            # as a guard defect (N101 round 12, review 11 MAJOR 2).
+            return ("<unreadable>", type(exc).__name__, _UNREADABLE_ROUTE)
+        except (shell_expansion.TooManyToEnumerateError, TimeoutError) as exc:
+            # Ledger 00466 N134: a cap or the deadline means "could not
+            # verify", which the caller can act on -- still a deny, but not
+            # the internal-error route, whose text calls it a guard bug.
+            logger.info("secret_file_guard: scan did not finish (%s); denying", type(exc).__name__)
+            return (f"{sfm.SCAN_COULD_NOT_FINISH} ({type(exc).__name__})", "", "read")
         except Exception as exc:
             # Deliberately broad: ANY exception during evaluation must deny,
             # never propagate (Plan 00466 N11) -- see the docstring above.
@@ -1315,6 +1397,7 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
                 deadline=deadline,
                 cwd=cwd,
                 normalised_words=shared_words,
+                bash_tool_command=True,
             )
             if mention is None:
                 # review 6 minor-2: an interpreter one-liner's own
@@ -1488,8 +1571,8 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
         return self._compute_and_cache_matched(hook_input) is not None
 
     def get_rules(self) -> list[Rule]:
-        """Return the 4 Rule objects backing this handler's blocking behaviour."""
-        return [*_RULES_BY_ROUTE.values(), _ERROR_RULE]
+        """Return the 5 Rule objects backing this handler's blocking behaviour."""
+        return [*_RULES_BY_ROUTE.values(), _ERROR_RULE, _UNREADABLE_RULE]
 
     def handle(self, hook_input: dict[str, Any]) -> GatingResult:
         """Deny with a verbose-first/terse-after explanation.
@@ -1535,19 +1618,11 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
         pattern, token, route = matched
         if route == _ERROR_ROUTE:
             return self._deny_for_evaluation_error(hook_input, token)
-        rule = _RULES_BY_ROUTE[route]
-
-        transcript_path = hook_input.get(HookInputField.TRANSCRIPT_PATH)
-        tracker = get_data_layer().disclosure
-        formatter = RuleFormatter()
-
-        if transcript_path and tracker.was_disclosed(transcript_path, rule.rule_id):
-            message = formatter.terse(rule)
-        else:
-            if transcript_path:
-                tracker.mark_disclosed(transcript_path, rule.rule_id)
-            message = formatter.verbose(rule)
-
+        if route == _UNREADABLE_ROUTE:
+            return GatingResult(
+                decision=Decision.DENY, reason=self._disclosed(hook_input, _UNREADABLE_RULE)
+            )
+        message = self._disclosed(hook_input, _RULES_BY_ROUTE[route])
         message += f"\n\nMatched protected glob: `{pattern}`"
         # Naming the TOKEN turns a bisection hunt into a read (Plan 00356):
         # the glob alone does not say which of a command's -- or a whole
@@ -1571,19 +1646,22 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
         report that fixes the underlying bug does not need to reproduce it
         from scratch.
         """
+        message = self._disclosed(hook_input, _ERROR_RULE)
+        message += f"\n\nInternal error: {detail}"
+        return GatingResult(decision=Decision.DENY, reason=message)
+
+    @staticmethod
+    def _disclosed(hook_input: dict[str, Any], rule: Rule) -> str:
+        """``rule`` in full the first time this transcript meets it, and
+        tersely after that (Plan 00116, Decision G)."""
         transcript_path = hook_input.get(HookInputField.TRANSCRIPT_PATH)
         tracker = get_data_layer().disclosure
         formatter = RuleFormatter()
-
-        if transcript_path and tracker.was_disclosed(transcript_path, _ERROR_RULE.rule_id):
-            message = formatter.terse(_ERROR_RULE)
-        else:
-            if transcript_path:
-                tracker.mark_disclosed(transcript_path, _ERROR_RULE.rule_id)
-            message = formatter.verbose(_ERROR_RULE)
-
-        message += f"\n\nInternal error: {detail}"
-        return GatingResult(decision=Decision.DENY, reason=message)
+        if transcript_path and tracker.was_disclosed(transcript_path, rule.rule_id):
+            return formatter.terse(rule)
+        if transcript_path:
+            tracker.mark_disclosed(transcript_path, rule.rule_id)
+        return formatter.verbose(rule)
 
     def get_default_enabled(self) -> bool:
         return True

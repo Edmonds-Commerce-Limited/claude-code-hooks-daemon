@@ -38,7 +38,10 @@ the choice, and the reasoning behind it, is visible in review at every site.
 
 from __future__ import annotations
 
+import inspect
 import logging
+import threading
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TypeVar
@@ -46,6 +49,49 @@ from typing import TypeVar
 logger = logging.getLogger(__name__)
 
 _Fallback = TypeVar("_Fallback")
+
+#: One caller can hold hundreds of unreadable operands in a single burst
+#: (review 7 n5: 115 over-long operands in one command logged 230 records,
+#: ~200 KB). Full detail for the first few of a burst is enough to diagnose
+#: it; the rest are aggregated into one line so a burst costs one record,
+#: not one per path. Each calling site has its own burst (review 8 m4), so
+#: one handler's burst never silences another module's warnings.
+_WARNING_BURST_LIMIT = 5
+_WARNING_WINDOW_SECONDS = 5.0
+#: Frames from :func:`_calling_site` up to the code that called a public
+#: predicate: itself, ``_answer_or_fallback``, then ``path_exists`` & co.
+_FRAMES_ABOVE_CALLER = 3
+_UNKNOWN_CALLER = "<unknown caller>"
+
+
+@dataclass
+class _Burst:
+    """One calling site's current window: when it opened, and how many it has seen."""
+
+    window_start: float = 0.0
+    seen: int = 0
+
+
+_warning_bursts: dict[str, _Burst] = {}
+_warning_bursts_lock = threading.Lock()
+
+
+def _reset_unreadable_warning_burst() -> None:
+    """Start a fresh burst window for every caller. Test-only: production never needs this."""
+    with _warning_bursts_lock:
+        _warning_bursts.clear()
+
+
+def _calling_site() -> str:
+    """The module and function that called ``path_exists``/``path_is_file``/``path_is_dir``."""
+    frame = inspect.currentframe()
+    for _ in range(_FRAMES_ABOVE_CALLER):
+        if frame is None:
+            return _UNKNOWN_CALLER
+        frame = frame.f_back
+    if frame is None:
+        return _UNKNOWN_CALLER
+    return f"{frame.f_globals.get('__name__', _UNKNOWN_CALLER)}.{frame.f_code.co_qualname}"
 
 
 @dataclass(frozen=True)
@@ -103,7 +149,31 @@ def _answer_or_fallback(
         # Logged, not swallowed. Without a record, "the guard decided no" and
         # "the guard could not look" are indistinguishable to whoever asks why
         # a policy did not fire -- which is the silent-fallback antipattern
-        # this repo's own error-hiding auditor exists to catch.
+        # this repo's own error-hiding auditor exists to catch. Rate-limited
+        # (review 7 n5): a caller can hold hundreds of these in one burst.
+        _log_unreadable(path, predicate_name, exc, fallback, _calling_site())
+        return fallback
+
+
+def _log_unreadable(
+    path: str | Path, predicate_name: str, exc: OSError, fallback: object, caller: str
+) -> None:
+    """Log the substitution, in full for a burst's first few, then aggregated.
+
+    Each ``caller`` has its own window. It resets on the caller's first call
+    after it elapses, so a later, unrelated burst is not silenced by an
+    earlier one; within one window, only the caller's first
+    ``_WARNING_BURST_LIMIT`` calls carry the path and reason.
+    """
+    now = time.monotonic()
+    with _warning_bursts_lock:
+        burst = _warning_bursts.setdefault(caller, _Burst())
+        if now - burst.window_start > _WARNING_WINDOW_SECONDS:
+            burst.window_start = now
+            burst.seen = 0
+        burst.seen += 1
+        seen = burst.seen
+    if seen <= _WARNING_BURST_LIMIT:
         logger.warning(
             "Could not stat %r for %s (%s) -- assuming %r. A guard keyed on "
             "this path is answering from an assumption, not an observation.",
@@ -112,7 +182,14 @@ def _answer_or_fallback(
             exc,
             fallback,
         )
-        return fallback
+    elif seen == _WARNING_BURST_LIMIT + 1:
+        logger.warning(
+            "Further unreadable-path substitutions from %s in this burst (window %ss) "
+            "are not logged individually; the first %d above are representative.",
+            caller,
+            _WARNING_WINDOW_SECONDS,
+            _WARNING_BURST_LIMIT,
+        )
 
 
 def path_exists(path: str | Path, *, unreadable_means: _Fallback) -> bool | _Fallback:

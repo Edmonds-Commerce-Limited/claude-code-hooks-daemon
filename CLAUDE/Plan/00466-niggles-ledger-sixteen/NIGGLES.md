@@ -3,6 +3,161 @@
 Newest first. Each entry says how it was found, why it happens, and the
 candidate remedies.
 
+This ledger takes no new entries: its PLAN.md reached the size limit with N261.
+New entries, from N262 on, are filed in
+[ledger seventeen](../00474-niggles-ledger-seventeen/NIGGLES.md).
+
+### N261 — Plan 00463 landed green on the local gate and red on CI
+
+**Found**: CI run 36619680779 on the 00463 merge `83e75879` failed on all three
+Pythons, although the branch's local full-QA gate had passed every test.
+
+- **Project handler tests:** the full-QA gate plugin refused CI's bare
+  `pytest .claude/project-handlers`. That run never loads `tests/conftest.py`,
+  so the plugin had no suite to count against and failed closed. This is
+  N260's class again: the local gate starts those tests another way.
+- **One teardown error:** `TestTheGateRunCertifies` reached `llm_qa.py`'s
+  live-daemon step un-mocked. On a CI runner that started the real project
+  daemon, and it rewrote `CLAUDE.md`. Locally a daemon was already running, so
+  the step did nothing.
+
+**✅ Remedied** in `5ff020c7`, merged as `fd78edce`. The plugin counts a run
+outside `tests/` against the launch directory's `tests/`, and the test stubs
+the daemon step. Each fix has a test that was RED first.
+
+The class stays open with N260. A second environment difference slipped
+through: whether a daemon is already running. Candidate remedy: the local gate
+runs the CI commands, from a state with no daemon running.
+
+### N260 — the local gate runs project-handler tests differently from CI
+
+**Found**: main CI was red on "Project handler tests" on every Python from
+`84afc8804` on, while the local full-QA gate for that branch passed 40/40.
+`test_enforce_llm_qa.py` imports `tests.scaling`. CI runs the bare `pytest`
+entry point, which does not put the working directory on `sys.path`, so the
+import fails there. The local gate runs `python -m pytest`, which does put it
+on `sys.path`, so the gate cannot see this class of failure.
+
+**Remedy**: the project-handlers `conftest.py` puts the repository root on
+`sys.path` (`257847b51`). **✅ Remedied** for this instance.
+
+The class stays open while the local gate and CI invoke pytest differently.
+Candidate remedy: the local project-handler step runs the exact CI command.
+
+### N252 — a scaling test compared an uncapped size with a capped one
+
+**Found**: `test_shell_expansion.py::test_forty_repetitions_is_also_fast`
+failed on several full-QA gates, and on main CI, with "cost grew 24-28x for
+8x input". The small size (5 brace pairs, 32 spellings) sat below the
+256-spelling cap and the large one (40 pairs) at it, so the ratio measured two
+regimes rather than growth.
+
+**✅ Remedied**: both sizes now sit inside one regime (`581ccadd3`, landed
+with Plan 00408 in `b9e36233c`).
+
+### N259 — orchestrator simulate reports denials its blocking mode would never make
+
+Carried from 00422 N24 (owner decision, 2026-09-29). Nothing is changed from
+the original finding.
+
+**Found**: every main-thread Bash call in a session drew
+`SIMULATED orchestrator-only mode (Plan 00418 — record only, never blocks): main thread would have been denied — Bash: …`.
+The coordinator took that at face value and told Plan 00463's agent that
+going live would deny the coordinator's own `llm_qa.py all` (a deadlock).
+The 00463 code review read the real handler
+(`.claude/project-handlers/pre_tool_use/orchestrator_simulate.py`).
+Simulate mode judges `tool_name not in _COORDINATION_TOOLS` (line 299),
+while blocking mode denies only `_BLOCKED_TOOLS = {Write, Edit, NotebookEdit}`
+(lines 183 and 320). Bash is "would have been denied" in simulate and
+never denied when live.
+
+**Why it matters.** The simulate record exists to preview what enforcement
+would cost before it is switched on. A preview that overstates enforcement
+misleads that decision and anyone reasoning from it, as it did here, and
+cost an agent a round of edits it then had to revert.
+
+**Candidate remedies:** simulate records exactly what blocking would
+deny, from ONE shared predicate, and a test pins the two modes to the same
+verdict for every tool. If the broader "not a coordination tool" count is
+still wanted as telemetry, it gets its own clearly different wording,
+never "would have been denied".
+
+### N194 — ✅ Remedied — daemon-signal tests read a spawned child's cmdline before its exec lands, so a loaded host flakes
+
+**Found:** `tests/unit/utils/test_safe_signal.py`'s daemon-signal tests
+(N59) failed under a loaded full-suite run and passed in isolation.
+Reproduced deliberately: 24 CPU-hog `while true` subshells plus 40-50
+concurrent whole-file `pytest` invocations against this checkout's own
+venv. Under that load 6/40 runs failed, every one with
+
+```
+RefusedSignalTarget: pid <n> is not a daemon server: []
+```
+
+The N110 gate (py3.12 unit shard, under load) separately hit the same
+family in `tests/unit/install/test_client_validator.py`'s
+`TestCheckRunningDaemon::test_this_projects_daemon_is_stopped`
+(`_check_running_daemon` -> `stop_verified_daemon` -> the same
+`verified_daemon_process`/`cmdline()` read). Reproduced with the identical
+load recipe: 1/40 failed with `assert None is not None` (the daemon was
+never actually signalled, so `daemon.poll()` stayed `None`).
+
+**Why:** `_fake_daemon`/`_fake_daemon_via_env` (test_safe_signal.py) and
+`spawned()` (test_client_validator.py) call `subprocess.Popen(...)` then
+immediately hand the child's pid to `signal_verified_daemon` /
+`stop_verified_daemon`, which call `psutil.Process(pid).cmdline()`.
+Immediately after `fork()`, before the child's `execve()` lands,
+`/proc/<pid>/cmdline` can still be empty -- `cmdline()` then returns `[]`,
+which `_is_daemon_server_process` correctly refuses as "not a daemon
+server". On an unloaded host the gap is too short to observe; contention
+that delays the child's `execve()` widens it enough to hit.
+`signal_verified_daemon`/`verified_daemon_process` themselves are correct
+-- refusing an ambiguous cmdline is the right call for a security gate
+reading arbitrary processes -- the defect is the test handing over a pid
+before its own fixture is in the state it claims.
+
+**Remedy:** added `_wait_until_execed(pid)` to both test files, which
+polls `psutil.Process(pid).cmdline()` for the daemon-module token with a
+bounded deadline (`Timeout.PROCESS_SAMPLE`, 10s) rather than a fixed
+sleep, and calls it before returning the spawned child to the test
+(`_fake_daemon`/`_fake_daemon_via_env` in test_safe_signal.py; `spawned()`
+in test_client_validator.py, only when the daemon module is in argv).
+Never widens or removes the identity check in `safe_signal.py`. Proved
+RED under the load recipe above for both files (test_safe_signal.py:
+6/40 failures, all `cmdline: []`; test_client_validator.py: 1/40, `assert None is not None`); proved GREEN with 50/50 passes for each file under the
+identical load recipe after the fix, plus a clean unloaded run (40 and 55
+passed respectively).
+
+### N123 — ✅ Remedied — a DP-cost regression test asserted on wall-clock time, which flakes under a loaded gate
+
+**Found:** Plan 00463's `TestInteriorWildcardDpIsBounded::test_a_lone_long_star_run_collapses_to_near_zero_cost`
+(the star-run-collapse cost guard, B1/Plan 00466 review 2) started as a fixed
+0.1s wall-clock budget. It failed once in a 37/39 gate run under heavy
+concurrent load (many worktrees' gates running at once), passed 10/10 in
+isolation on the branch and on `main`, but main itself measured 0.09s against
+the same 0.1s budget — a close margin, confirming the bound was
+environment-sensitive rather than genuinely tight. A first fix replaced the
+absolute budget with a scaling-ratio assertion (min of several timed trials,
+long token vs. a short baseline) — still a wall-clock measurement with its
+own absolute-second floor to absorb constant-factor noise, so it remained
+exposed to the identical flake, just with a wider margin.
+
+**Remedy:** stopped measuring time at all. Added a test-only instrumentation
+seam to `secret_file_matching.py`: a `contextvars.ContextVar` counter
+(`_dp_cell_counter`) and a `dp_cell_counter()` context manager that counts
+the DP grid cells `_globs_can_intersect` actually visits during the block. A
+`ContextVar` rather than a module-level counter, per the standing "no
+per-request state on a shared module" rule — no per-request state leaks
+across concurrent calls, and production pays nothing beyond a `None` check
+when no test has opened the counter. The test now asserts the 60,000-`*`
+token's DP cell count EQUALS a literal `a*a` baseline's count: after the
+star-run collapse, the two are the identical 3-character string, so the
+grids are identical in size, deterministically, on every host — not a
+tolerance band, an equality. RED: proved via a `git archive` scratch copy
+with the star-collapse substitutions short-circuited (`if False and "**" in a: ...`), which dropped the long token's cell count to 0 (the length cap
+fires and skips the DP entirely) against the baseline's 9, failing the
+assertion as expected.
+
 ### N109 — ✅ Remedied — the pending release-notes holding area mis-sorts past 99 callouts
 
 **Found:** `CLAUDE/UPGRADES/UNRELEASED/release-notes/` named callouts
@@ -688,6 +843,81 @@ interrupt a running handler) and lands with that branch. N40 is taken there too
 taken on the N38 fix branch (the chain's remaining linear per-token cost, which
 waits for the shell-parser consolidation).
 
+### N118 — ✅ Remedied — the tests-stage gate reported "0 failed" over a coverage-threshold miss and named nothing
+
+**Found by the N59 gate fixer** (`260926-n59-gatefix4-sonnet-5.md` on
+`worktree-n466-n59`). The full gate failed with only the `tests` stage red,
+and the gate's own one-line summary read `29642 passed, 0 failed, 20 skipped | coverage: 95.0%` — every count zero for a failure, and the
+coverage figure rounded to exactly the passing threshold. The actual cause,
+buried in `untracked/qa/tests.json.raw`, was pytest-cov's own end-of-run
+line: `FAIL Required test coverage of 95.0% not reached. Total coverage: 94.99%`. `run_tests.sh`'s text-fallback path (the one this project actually
+takes; `pytest-json-report` is not installed) never captured that line, and
+`finalize_passed_all` correctly turned `passed_all` False via the runner's
+own exit code — but nothing downstream said WHY, so a reader had to re-run
+the whole 34-minute suite and grep the raw log by hand.
+
+**Remedy:** `pytest_text_report.py` gained
+`find_unnamed_failure_reason(content, failed=, errors=, total=, exit_code=)`,
+which returns `None` whenever the failed/errored counts already explain a
+red run (or the run is clean, or nothing was collected), and otherwise
+returns pytest-cov's own fail line when present, or a generic
+`"pytest exited {exit_code} but reported no failed or errored tests"`
+fallback. `run_tests.sh`'s fallback branch now records this as
+`summary.unnamed_failure_reason`, and `llm_qa.py`'s `_summarize_tests`
+appends it as a `cause:` line whenever present. The real coverage gap
+itself was also a genuine defect: `safe_signal.py` (Plan 00466 N59) was at
+90.68% — `verified_daemon_process`'s `AccessDenied` branch reading a
+process's command line, `signal_verified_daemon`'s `NoSuchProcess`/
+`AccessDenied` branches around `send_signal`, `stop_verified_daemon`'s
+SURVIVED-after-both-grace-waits-time-out path and its NoSuchProcess race
+during `terminate`, and `signal_own_session_child`'s own-group re-check —
+were all real branches with no test exercising them. Six new tests in
+`tests/unit/utils/test_safe_signal.py` (monkeypatching the psutil calls
+those branches guard, plus one exercising the `os.getpgid` race with a
+faked return sequence) bring the file to 100%, closing the 0.01-point gap.
+RED confirmed: `find_unnamed_failure_reason` and the six `safe_signal.py`
+branches did not exist/were not exercised before this fix; every new test
+was run and seen to exercise its target line via `--cov-report=term-missing`
+before the fix, then again after.
+
+### N106 — Path containment is quadratic in path depth on Python 3.12+, so a deep `Write` path stalls PreToolUse
+
+**Found by the coordinator in CI run 36230375505** (main `8ea091652`, QA on
+Python 3.12 and 3.13). `test_no_handler_grows_superlinearly_on_a_deep_write_path`
+measured `ProjectContainmentHandler` 24x, `PlanJournalGuardHandler` 26x and
+`InstalledPluginEditAdvisorHandler` 27x-29x for 8x path depth. The local gate
+passed because its venv is Python 3.11.
+
+The cost is real, not measurement noise. From 3.12, `PurePath.relative_to` and
+`is_relative_to` test containment as `other in self.parents`, and every parent
+visited builds its string from all the segments above it. One check on a path
+d segments deep is O(d^2). On a bare `relative_to` + `is_relative_to` the
+ratio for 8x depth is 5.8x on 3.11 and 52x on 3.12 and 3.13. Each handler
+reached it through a different call site (`project_containment._is_within`,
+`worktree_paths.enclosing_checkout`, `installed_plugin_edit_advisor`), and
+the stdlib forms appeared at 126 sites across `src/` and `scripts/`.
+
+Widening the sweep to other file suffixes found a worse case in the same
+class. `markdown_organization._is_plugin_component` probed every ancestor of
+a `.md` path for a plugin manifest. Every probe past PATH_MAX failed and was
+logged with the whole path, so the cost was quadratic in depth: 122x for 8x,
+and 15s per call at 16 KB. The sweep had only ever written `.py`.
+
+**Remedy:** a linear drop-in, `utils/path_containment.py`
+(`path_is_relative_to`, `path_relative_to`), which reads `parts` once and
+matches the stdlib's answers, result type and error. All 126 sites use it,
+and `scan_scope` (stdlib-only) compares `parts` inline. A new semgrep rule,
+`pathlib-quadratic-containment`, bans `relative_to`, `is_relative_to` and
+`in … .parents` in `src/`, `scripts/` and project handlers. Its fixture
+pins it. `_is_plugin_component` now walks DOWN from the workspace root and
+stops at the first missing directory. The deep-path sweep writes `.py`,
+`.md`, `.sh`, `.ts` and `.json`.
+
+**Remedied on branch `worktree-n466-superlinear`.** RED tests: the helper's
+growth is pinned by counting the segments it reads (8x, where the stdlib
+reads 63x), and `_is_plugin_component` is pinned by counting its probes (the
+same at depth 50 and 400, where main makes 103 and 803).
+
 ### N110 — The local full QA gate tests one Python version, so a version-specific defect passes it and fails CI
 
 **Found by the N106 fixer.** N24 passed the full local gate and went red on
@@ -704,6 +934,310 @@ each interpreter `uv` can provide, keeping the other stages on one. Or have
 the gate state which versions it ran and refuse to call itself a merge gate
 when that set is narrower than CI's matrix. Pin it with a test that reads
 the CI workflow's matrix and compares it to what the gate runs.
+
+**✅ Remedied on `worktree-n466-n110`.** `scripts/qa/run_test_matrix.py` is
+now the tests stage for both `llm_qa.py` and `run_all.sh`. It reads CI's
+matrix from `qa.yml` at run time. The checkout's venv still runs
+`run_tests.sh` in full. Every other matrix version gets a uv-provisioned
+venv. Its `tests/unit` run overlaps the primary run, and its other
+directories run afterwards, one version at a time. A version that cannot be
+provisioned fails the stage. `tests/unit/qa/test_run_test_matrix.py` pins
+the gate's version set against the workflow's matrix. The behaviour is
+documented in `CLAUDE/QA.md`, and the report is
+`subagent-reports/260926-n110-opus-5-5.md`.
+
+**Round 3: the gate reported 92.61% coverage with every test passing.**
+The gate at `c9c38145c` ran 30,551 primary tests, the usual count, and
+coverage failed `fail_under=95`. The cause was N196's own fix, so main does
+not share it. `run_tests.sh` loaded the `first_error_lines` plugin with
+`-p claude_code_hooks_daemon.qa.first_error_lines`. pytest imports a `-p`
+plugin while it parses its arguments, before pytest-cov starts. That import
+runs the package `__init__`, which imports `core`, `constants`, `qa.runner`
+and more, so none of their module-level lines were measured.
+
+- Evidence: against `p408-inert-heads` (95.09%, 53,395 statements) the gate
+  had 1,713 more missing lines, and the largest gaps were import-only
+  modules: `constants/handlers.py` (164 of 165 missing), `constants/priority.py`
+  (160 of 160) and `core/__init__.py` (19 of 19).
+- Controlled measurement: the same 228 tests in `tests/unit/constants`, run
+  with and without the `-p` flag, gave `constants/priority.py` 160 missing
+  lines and 0 missing lines.
+- The shared-data-file and `--cov`-config candidates were ruled out. The
+  extra runs take no `--cov`, and the primary's coverage flags are unchanged
+  from main.
+
+**✅ Remedied on `worktree-n466-n110`.** `tests/conftest.py` loads the plugin
+through `pytest_plugins`, which runs after coverage has started. Neither
+`run_tests.sh` nor `run_test_matrix.py` passes `-p` any more.
+`TestThePluginLoadsAfterCoverageStarts` in
+`tests/unit/qa/test_run_test_matrix.py` evaluates `run_tests.sh`'s own
+`FIRST_ERROR_ARGS` in bash, and runs an extra run's argv, under `--cov` over
+one small test file. It asserts that the import-only `core/__init__.py` and
+`qa/__init__.py` have no missing lines. It was RED on `c9c38145c`.
+
+### N114 — A `py311` fingerprint venv is built on whatever Python uv prefers
+
+**Found by the N110 fixer.** `ensure_venv ... python3` computes the venv's
+name from PATH's `python3` (3.11 here, so `venv-…-py311-…`). It then builds
+the venv with `HOOKS_DAEMON_PYTHON=python3`, and `create_venv_at_path` passed
+that bare name straight to `uv sync --python python3`. uv reads a bare
+`python3` as a VERSION request ("any 3.x"), not as the executable on PATH,
+so it builds on its own preferred interpreter. Measured here:
+
+- the worktree venvs of `worktree-n466-n101` and `worktree-n466-n105` are
+  named `py311` but run 3.13.15;
+- replaying the steps for N110 gave 3.12;
+- `uv sync --python python3` on a toy project built 3.12, and the same sync
+  with the resolved `/usr/bin/python3` built 3.11.
+
+So every worktree built by `setup_worktree.sh`, and any client install whose
+uv prefers a managed Python, ran its daemon and QA on a Python its venv's
+name denied. It was first blamed on `setup_worktree.sh`'s dev-extras sync,
+but that sync into an existing venv was measured NOT to swap. The swap
+happens when the venv is created.
+
+**✅ Remedied on `worktree-n466-n110`.**
+
+- `create_venv_at_path` resolves `HOOKS_DAEMON_PYTHON` with `command -v`,
+  hands uv the path, and fails before uv runs if the interpreter is missing.
+- After the sync it compares the built venv's X.Y with the requested
+  interpreter's. On a mismatch it fails loudly and removes the venv, so the
+  resolver's `venv-*` glob cannot pick it up.
+- `setup_worktree.sh` pins its dev-extras sync with `--python` for the venv's
+  own interpreter, and refuses a venv whose Python differs from the `pyMM`
+  in its name.
+- Pinned by `tests/integration/test_venv_sh_builds_on_the_fingerprinted_python.py`
+  (4 RED on main) and two new checks in
+  `tests/integration/test_worktree_daemon_env_provisioning.py` (RED on main).
+- Existing mislabelled worktree venvs are not rewritten. Rebuild one by
+  removing it and re-running the setup steps.
+
+### N122 — `test_second_starter_waits_then_reuses_the_finished_venv` flakes under CPU contention: a fixed 0.3s sleep, not a real event, ordered the two starters
+
+**Found by the N110 landing gate.** The full local QA run (29,711 tests) hit
+one failure:
+`tests/integration/test_ensure_venv_lock.py::TestConcurrentStartersBuildOnce::test_second_starter_waits_then_reuses_the_finished_venv`,
+asserting `WAITING_FRAGMENT not in err2` — the second starter built the venv
+uncontended instead of waiting on the first. It passed every time run alone.
+
+**Root cause: the test, not the lock.** `_run_two_starters` began the second
+`ensure_venv` subprocess a fixed `time.sleep(0.3)` after the first, assuming
+the first would always reach `acquire_venv_lock` inside that window. Under
+real CPU contention (30 copies of this test spawned in parallel, 8 cores)
+that assumption can be wrong: the first bash subprocess's own scheduling —
+not the code under test — can take longer than 0.3s to reach the lock,
+so the second's non-blocking `flock -n` wins uncontended.
+
+**Measured (30 pytest processes running this one test concurrently, 8
+cores):**
+
+- This branch, before the fix: 5/60 failed (~8%) across two 30-way batches.
+- `git archive` of main (`fe14348e7`), same test, same harness: 0/60 failed
+  across two 30-way batches.
+- After the fix (below), this branch: 0/60 failed.
+
+**✅ Remedied on `worktree-n466-n110`, in the test only** — this is a test
+ordering defect, not a lock defect; `acquire_venv_lock` and its
+`WAITING_FRAGMENT`/`TIMEOUT_FRAGMENT` messages are unchanged.
+`tests/integration/test_ensure_venv_lock.py` replaces the fixed sleep with a
+real barrier: a `_StderrWatcher` reads the first starter's stderr on a
+background thread and only releases the second starter once it has seen
+`"creating venv at"` — the line `_ensure_venv_build` (venv.sh) prints
+immediately after `acquire_venv_lock` returns holding the lock, so the
+ordering is guaranteed by the production code's own event, not a guess at
+its timing. No sleep-based ordering and no widened timeout remain in this
+test; `_TIMEOUT_SECONDS` (60s) bounds the wait as it already bounded
+`_finish`.
+
+### N196 — The multi-version gate lets the daemon idle out between its serial runs, times two guards by wall clock, and names errors with no cause
+
+**Found by N110 gate fix 2** (report `subagent-reports/260926-n110-opus-5-5.md`,
+section "Gate fix 2"). The N110 gate (head `2fa17dc73`) went red in three
+groups. Two are defects on this branch, and a third is a cost the timing
+tests hid:
+
+- **py3.13 rest ERRORED on 10 acceptance tests.** `run_test_matrix.py`
+  started the daemon once, before the first serial run. py3.12 rest's last
+  daemon traffic was at 18:47, and that run ended at 18:58:38. The daemon's
+  `idle_timeout_seconds: 600` stopped it at about 18:57, so py3.13 rest found
+  no daemon. The three declared release-gate files turned their skips into
+  errors. Fourteen more acceptance tests skipped quietly (31 skips, where
+  py3.12 had 17).
+- **The gate's summary named those 10 errors with no cause.** It printed node
+  ids only. The cause was in the shard's raw log, and pytest's short summary
+  cut each message to 80 columns before it reached the skip reason.
+- **`project_handlers`: 2 failures in `test_enforce_llm_qa.py`.** These tests
+  used wall-clock `< 1.0s` asserts. The stage runs alone, after the tests
+  stage, so the matrix did not starve them. Host load did (a load average
+  of 33 on 8 cores). Measured by growth, the handler was also QUADRATIC in a
+  word's length: 0.25 s at 100 KB, 0.82 s at 200 KB, 3.3 s at 400 KB. The
+  stdlib `shlex.read_token` grows its token with `self.token += c`, and
+  CPython only appends in place to a local. So the 200 KB case sat at 0.82 s
+  of CPU, just under the old bound.
+
+**✅ Remedied on `worktree-n466-n110`.**
+
+- `run_matrix` ensures the daemon before EVERY serial run.
+- A new pytest plugin, `claude_code_hooks_daemon.qa.first_error_lines`,
+  records each failed or errored test's first error line. Both the primary
+  and the extra runs load it. `tests.json` carries the line as `reason`, and
+  `llm_qa.py` prints it after the node id.
+- The blocking-gate guard now puts the skip reason on its message's first
+  line.
+- `utils/linear_shlex.LinearShlex` is the stdlib state machine with a list
+  accumulator. It is differentially tested against `shlex.shlex` over a
+  corpus and 12,000 random strings in four configurations. It is 52 to 70x
+  per 8x on stdlib and at most 24x on this class.
+- `enforce_llm_qa` tokenises with it, and its three timing tests now assert
+  `tests/scaling.py` growth ratios.
+
+### N197 — Fourteen `src/` modules still tokenise untrusted commands with the stdlib's quadratic `shlex`
+
+**Found by N110 gate fix 2 (N196).** `shlex.shlex.read_token` costs time
+quadratic in a token's length on 3.11 to 3.13 (measured 52 to 70x for 8x
+input). `project_containment`, `lsp_enforcement`, `sensitive_content`,
+`root_recursion_guard`, `merge_to_main_approval`, `markdown_organization`,
+`reference_repo_freshness`, `lint_on_edit`, `bash_file_writes`,
+`secret_file_matching`, `git_commit_parsing`, `process_probe`, `core/utils`
+and `kotlin_strategy` all use `shlex` on hook input or tool output. Not every
+one is on a hot path, and none has been measured here. Any of them that
+splits a Bash command can be made slow with one long word.
+
+**Remedy:** measure each site's growth on a long word with
+`tests/scaling.py`. Move every superlinear one to
+`claude_code_hooks_daemon.utils.linear_shlex.LinearShlex` (or
+`shlex.split`'s equivalent built on it). Then add a semgrep rule that bans
+`shlex.shlex`/`shlex.split` in `src/` and project handlers, as
+`pathlib-quadratic-containment` does for N106.
+
+### N224 — ✅ Remedied — the CLAUDE.md injector logs a misleading permissions warning when CLAUDE.md vanishes mid-inject
+
+**Found by N211 review 1 (M5).** On main, `_auto_commit_if_dirty` passes the
+path to `_commit_message`, which reads the file with no guard. If CLAUDE.md
+is deleted between the injector's write and that read, it raises
+`FileNotFoundError`. `inject()` catches it as `OSError` and logs "check file
+permissions", which is the wrong cause, and the auto-commit is skipped. That
+is a misleading warning plus a skipped commit, not a crash. It is reachable
+only as a race, because `_run_inject` has just written the file.
+
+**Remedy (branch `worktree-n466-n211`).** `_auto_commit_if_dirty` reads the
+file once, and both the N211 marker check and `_commit_message` use that
+text. A file that vanished logs that it vanished and is not committed. A
+file that is present but unreadable raises to `inject()`, which logs the
+read error, and is not committed either: text the marker check never saw is
+never committed. The first version of the fix set unread text to `""` and
+committed anyway. Review 1 caught that, and a test now pins both cases. The
+read has no try/except, because the `error_hiding` gate flags both a
+returning and a logging handler in that function.
+
+### N211 — ✅ Remedied — merge-conflict markers reach tracked text disguised by the markdown formatter
+
+**Found by N110 gate fix 2 and the coordinator.** `NIGGLES.md` on main
+(`fd4956813`) carried two seven-deep blockquote lines,
+`> > > > > > > worktree-n466-superlinear` after the N106 entry and
+`> > > > > > > main` after the N100 entry. They are the closing markers of
+merge conflicts. The fixer's sweep found a third: an escaped opener,
+`\<<\<<\<<< HEAD`, standing alone above the N118 entry.
+
+**Route.** `git log -m -S` puts all three in merge commits. The superlinear
+opener and closer arrived together in `fd4956813` (Merge
+worktree-n466-superlinear), with the N118 entry from main between them and
+the N106 entry from the branch. The `main` closer arrived in `b2b5ee290`
+(Merge main into worktree-n466-guard-defects) and reached main through the
+N59 merge `69efecdab`. The mechanism, reproduced: an Edit on the conflicted
+file runs the PostToolUse `markdown_table_formatter` over the WHOLE file
+before the merge is committed. mdformat escapes the opener into
+`\<<\<<\<<< HEAD` (folded into a heading when a line of seven `=` follows
+it), and turns the closer into a seven-deep blockquote. A resolver then
+looks for the raw markers, finds none, and commits. From then on nothing
+reads the disguised lines as markers: not plan QA, docs QA, nor the
+staged-lint gate.
+
+**Remedy (branch `worktree-n466-n211`).**
+
+- `utils/conflict_markers.py` is the one classifier, for both spellings. A
+  line of seven `=` or seven `|` counts only between an opener and a closer,
+  so a setext heading underline is not a marker.
+- `format_markdown_document` refuses a document holding a marker. The
+  formatter handler leaves such a file untouched and names each marker line;
+  `format-markdown` reports it as an error; the CLAUDE.md injector writes the
+  file unformatted.
+- A new PreToolUse `conflict_marker_commit_gate` denies a `git commit` (or
+  `merge|cherry-pick|revert|rebase --continue`) whose ADDED lines carry a
+  marker in either spelling, naming `file:line`. It reads what the commit
+  records (index, `-a` working tree, pathspecs, `git -C`).
+- After review 1, the gate:
+  - finds commits with the shared walker, and reads pathspecs without
+    shell syntax (N226);
+  - denies a commit it cannot place, rather than allowing it;
+  - recognises every opener the formatter folds;
+  - honours `conflict-marker-size` and reads `-diff` text files;
+  - leaves an email-style deep quote alone;
+  - takes `exclude_paths`.
+- The three lines are removed from this file. A sweep of every tracked text
+  file on main found no other marker in either spelling.
+
+### N222 — Tests assert absolute wall-clock bounds, so a loaded host fails them while they pass alone
+
+**Found by N110 gate fix 2, from N196 and team-lead's sweep request.** The
+two `test_enforce_llm_qa.py` failures (N196) were one case of a wider
+pattern. Main `fd4956813` fails `TestInteriorWildcardDpIsBounded` at load
+91 (n53-fix-7c), and the N101 branch saw 17 such unit failures at load 40,
+all of which pass alone. An absolute bound fails under load and says nothing
+about growth, which is what most of these tests exist to pin.
+
+**✅ Remedied on `worktree-n466-n110` for the performance-shaped tests.**
+Each now pins growth (thread CPU time at N against 8N, `tests/scaling.py`)
+or counts work. No bound was loosened.
+
+- `test_secret_file_matching.py`:
+  - Two wide-range tests count the code points `chr` builds (0).
+  - Three DP tests and the star-run test pin growth.
+  - The deadline test uses a fake clock, one tick per reading, and must
+    raise at the first reading past the deadline.
+  - The five brace and filesystem-walk tests pin growth, or count
+    directory reads (0 for a root-rooted glob), with a new
+    `tests/support/directory_reads.py`.
+  - The volume class measures thread CPU time instead of wall time.
+- `test_shell_segmentation_performance.py` (3) and
+  `test_shell_expansion.py` (4 growth tests, 2 directory-read counts).
+- `test_plan_number_helper.py` and `test_lsp_enforcement.py`: the
+  regex-linearity tests pin growth.
+- `test_goal_injection.py`: the owner-refresh test now counts live-plan
+  scans and renders (one each). As written it measured a path that renders
+  nothing: with no second live plan, a retirement only clears signals.
+- `test_handler_name_validation.py`: it counts package walks (one per event
+  type across three validations).
+- `test_venv_lock.py`: "released" is a non-blocking `flock` that succeeds,
+  not a timed second acquisition.
+
+RED on a mutated `git archive` copy of each file: a range that is built, a
+deadline never checked, a root glob that is walked, and a render per owner.
+Each one fails.
+
+**Still open: the remaining tests check that a timeout is honoured, or
+have no size to scale.**
+
+- A per-call budget: `tests/unit/core/test_input_schemas.py:586` (under 5
+  ms). `validate_input` builds a `Draft7Validator` on every call. Cache it
+  and count constructions.
+- Concurrency: `tests/daemon/test_server.py:390`. Replace the timing with a
+  `threading.Barrier` handler that only passes when all three requests are
+  in flight at once.
+- Bound honoured (wall time against a timeout): `test_init_sh_venv_self_heal.py:66`,
+  `test_relay_guard_fail_open.py:476`, `test_ensure_venv_lock.py:296`,
+  `test_resolve_venv_runnability_probe.py:149,278`,
+  `test_venv_bootstrap_driver.py:256,273,804`,
+  `test_venv_bootstrap_hostile_path_epoch.py:119,172`,
+  `test_paths_resolve_venv_diagnostics.py:1020` and
+  `test_venv_lock.py:203,241`. Their margins are wide, 3x to 20x the bound.
+  The deterministic form is an injected clock or an ordering check: the
+  hook returned while the build was still running.
+
+**Only on the N101 branch** (routed to team-lead): 13
+`test_secret_file_guard.py` tests hit the guard's own wall-clock scan
+deadline under load and fail closed. So a verdict that should be an allow
+depends on host load. That is a production concern, not only a test one.
 
 ### N105 — A skill redeploy leaves an untracked, unignored `.claude/hooks-daemon-backups/`
 
@@ -732,7 +1266,7 @@ predates the fix. RED test:
 `tests/claude_code_hooks_daemon/install/test_skills.py`, covering both a
 client-install layout and this dogfood repository's layout.
 
-### N101 — `secret_file_guard` fails closed with `TooManyToEnumerateError` on ordinary `python3 - <<'EOF'` commands
+### N101 — ✅ Remedied (n101 branch) — `secret_file_guard` fails closed with `TooManyToEnumerateError` on ordinary `python3 - <<'EOF'` commands
 
 **Found by N38 fix round 11** (report `260926-n38-fix11-opus-5-5.md` on the
 N38 branch). The live daemon on main twice denied an ordinary Bash command
@@ -750,6 +1284,13 @@ fed to an interpreter, not expanded by the shell, so its bytes are not
 shell words. Keep fail-closed where the shell does expand the text. Pin both
 cases. It touches the guard that guard-defects just changed, so it goes on a
 fresh branch from main.
+
+**Second shape (N110 gate fix 2):** a plain shell glob,
+`ls -d untracked/venv-*/lib/python*/site-packages/_pytest`, is denied the
+same way. The shell does expand this one, so failing closed is right. But
+the deny reason calls it "a bug in the guard itself" and says to file an
+issue. A deliberate cap should be a named verdict that says how to narrow
+the glob.
 
 ### N100 — A continuation on a heredoc opener line (`cat > s.sh \⏎<<'EOF'`) denies a body that is only written
 
@@ -1375,25 +1916,72 @@ coerces to `1` through `__index__`, and `os.getpgid(1)` is `1` here, because
 PID 1 is `tini`, the container's init. So a test that reached the timeout path
 ran `killpg(1, SIGKILL)` and ended the container. Both deaths came about 10 s
 after an N53 fixer ran those tests (11:07:16 and 11:35:54). The daemon restart
-at 11:35:59 is not the cause: `cmd_stop` signals only a pid that
-`read_pid_file(..., verify_daemon=True)` proved is a daemon.
+at 11:35:59 is not the cause: `cmd_stop` signalled only a pid that
+`read_pid_file(..., verify_daemon=True)` proved is a daemon. That proves "a
+daemon", not "this project's daemon", so `cmd_stop` is an instance of the class
+too; see the remedy below.
 
 **The class is wider than N53.** On main, `install/client_validator.py` reads a
 pid from a `daemon*.pid` file and sends SIGTERM, then SIGKILL, with no identity
 check. PID files survive a container restart, and a restarted container reuses
 small PIDs, so a stale file can name `claude` itself.
 
-**Remedy (in progress):**
+**Remedy (landed on `worktree-n466-n59`):** the class is registered in
+[`CLAUDE/Security/UnprovenSignalTarget.md`](../../Security/UnprovenSignalTarget.md).
 
-- a signal with a nonzero number goes only to a pid proven to be the intended
-  process: a verified daemon, or a child this code started in its own session
-  that still leads its group;
-- a detector that fails QA on any `os.kill` or `os.killpg` whose pid is not
-  proven that way;
-- a test-suite safety net that refuses any signal to pid 1, to init's group,
-  or to the test runner's own group or ancestors;
-- a guard on N53's branch in `_kill_process_group`: only a real int pid above
-  1 that leads its own group, and never this process's own group.
+- **One helper sends every nonzero signal.** `utils/safe_signal.py` refuses a
+  pid that is not a plain `int` above 1, as well as this process, the leader
+  of its group and its ancestors. It signals a daemon only when the daemon's command line shows
+  THIS project root (`signal_verified_daemon`, `stop_verified_daemon`). A
+  group gets a signal only when it is led by a still-running child we spawned
+  (`signal_own_session_child`).
+
+- **The Detector.** `scripts/qa/check_signal_targets.py` is `llm_qa`
+  `signal_targets` and `run_all.sh` check 33. It reads Python (rules
+  `raw-signal`, `unproven-process-handle`, `kill-command`) and every tracked
+  shell script outside `tests/` (rule `shell-unproven-kill`).
+
+  - The Python rules were RED on main at `client_validator.py:320,329`,
+    `process_verification.py:184,192` and `cli.py:788`, and on the N53
+    `killpg(getpgid(process.pid))` shape.
+  - The shell rule was RED on main's five shell sites.
+  - It now finds nothing in the 795 files it scans. Every one of the 23 shell
+    `kill` sites it sees was judged by hand; none was a false positive.
+
+- **Python sites fixed.** The installer's `_check_running_daemon` and
+  container enforcement now go through the helper. Enforcement signals
+  nothing when it has no project root. `kill_daemon_process` is removed.
+  `cmd_stop` takes a `verified_daemon_process` handle, which checks the
+  project root, and waits on that handle.
+
+- **Shell sites fixed.** Each now proves identity before it signals:
+
+  - `upgrade.sh` checks for a daemon server of this project root;
+  - `dummy-client-repo.sh` signals the proven pid, never its group, and
+    re-reads its command line immediately before the signal;
+  - the venv bootstrap watchdog checks the build's start time, and the group
+    kill sits beside its job-table check;
+  - the venv lock heartbeat and the resolver probe watchdog check that the
+    pid still has the parent recorded when it was started.
+
+- **Named, not built:** a rule for a `$!` signalled after its job may have
+  ended. The resolver probe watchdog was that shape. It is referred to the
+  owner with the DBF report.
+
+- **The test-suite safety net.** `tests/signal_safety_net.py` is installed by
+  a session-wide autouse fixture in `tests/conftest.py`. It refuses, without
+  delivering, any nonzero `os.kill`/`os.killpg` to:
+
+  - pid 0, 1 or -1, or group 1;
+  - the pytest process, its group or any ancestor;
+  - a Claude Code process.
+
+  It also records each refusal, so a test whose code swallows the error still
+  fails.
+
+- **N53's branch.** Its `_kill_process_group` should call
+  `signal_own_session_child`. The Detector reports the raw `killpg` when that
+  branch rebases.
 
 ### N58 — R-CHMOD-WORLD-WRITABLE denies a safe chmod when a later argument contains digits
 
@@ -2363,6 +2951,19 @@ teardown-guard message — also done here, see item 1.
    both modes (absent/exact-match/wrong-value for the env var; declared vs
    undeclared file under each).
 
+**The original defect, fixed on `worktree-n466-guard-defects`** (review-5
+fix round, since merged). The three tests now reconfigure the fixture's own
+`mock` (`mock.side_effect = ...`) instead of adding a second patcher. The
+fixture gained a post-teardown tripwire assertion, so any future
+double-patch in this file fails at the fixture boundary. A regression test
+(`TestProjectRootDoublePatchDoesNotLeakAcrossFiles`) runs the exact
+polluter/victim pair together in one subprocess pytest invocation and
+asserts both pass. RED-pinned by reverting the polluter test alone: the
+regression test reproduces the original symptom (`Example: /repo/test.py`
+leaking into a reason string). ✅ Remedied. (The two branches had each
+written an N39 section, and both merged; this paragraph replaces the second
+copy.)
+
 ### N38 — The PreToolUse chain takes quadratic time on a command of quoted heredoc openers
 
 **Found by the Plan 00463 sixth review** (its nit n6), measured on `main` and
@@ -2406,40 +3007,6 @@ interpreters, so a cache an older resolver poisoned is ignored too. Layer 2's
 containment check stays as defence in depth. Pinned by
 `tests/integration/test_resolve_venv_override_cache.py` (four tests, all RED
 before the fix).
-
-### N39 — Nine unit tests fail in a whole-suite run and pass when their files run alone
-
-**Found by the guard-defects agent** (its review-4 fix round): a plain
-whole-suite `pytest tests/unit` on this worktree gave 9 failures across
-`test_model_fallback_detector.py` (6), `test_absolute_path.py` (1),
-`rule_explain/test_lookup.py` (1) and
-`test_dangerous_invocation_corpus_checker.py` (1); the same four files run
-alone gave 0 failed. **Diagnosed by a parallel agent** (a companion
-worktree, full write-up cross-referenced from there): `main` does not
-reproduce it; this worktree does. Bisected to
-`test_project_containment.py`'s class-wide `_project_root` autouse fixture
-(`with patch(...) as mock`) being double-patched by three tests
-(`TestFailsClosedOnEvaluationError::test_an_uninitialised_project_root_still_denies`,
-`::test_an_evaluation_error_denial_uses_its_own_rule_id`,
-`TestChainLevelFailClosedBehaviour::test_an_evaluation_exception_still_denies_through_the_chain`)
-that ALSO called `monkeypatch.setattr(..., classmethod(lambda cls: _raise()))` on the exact same target.
-`monkeypatch`'s finalizer runs AFTER the fixture's own `with patch(...)`
-block has already restored the real classmethod, so the second patcher's
-teardown overwrote it AGAIN with the fixture's own stale `MagicMock` --
-permanently, for the rest of the pytest PROCESS. Every later test calling
-`ProjectContext.project_root()` in that process then inherited the fake
-root, explaining all four victim files.
-
-**Fixed** (guard-defects agent, review-5 fix round): the three tests now
-reconfigure the fixture's own `mock` (`mock.side_effect = ...`) instead of
-introducing a second patcher; the fixture gained a post-teardown tripwire
-assertion so any FUTURE double-patch in this file fails immediately, at
-the fixture boundary; a regression test
-(`TestProjectRootDoublePatchDoesNotLeakAcrossFiles`) runs the exact
-polluter/victim pair together in one subprocess pytest invocation and
-asserts both pass. RED-pinned by reverting the polluter test alone: the
-regression test reproduces the identical original symptom
-(`Example: /repo/test.py` leaking into a reason string). ✅ Remedied.
 
 ### N36 — `destructive_git` denies a `grep` whose search pattern is the text of a force branch delete
 
@@ -4624,6 +5191,32 @@ checks that the script names no denied QA entry point.
 
 **Graduated to Plan 00463**, which owns the sub-agent QA policy.
 
+**Remedied by Plan 00463** (commit 480740cc), as the candidate remedy says.
+Step 7 checks that `scripts/qa/llm_qa.py` is executable. The "Run QA" hint
+prints `./scripts/qa/llm_qa.py changed`. The agent prompt template tells the
+agent to run targeted QA (`llm_qa.py changed`, named `llm_qa.py` tools, and
+pytest on the test files it touched), and says full QA is the coordinator's
+batched integration gate. `tests/unit/scripts/test_setup_worktree_qa_guidance.py`
+was RED first. It checks that the script never names `run_all.sh`, and that no
+full run under this repo's live `full_qa_patterns` is printed, judged by
+`subagent_full_qa_blocker`'s own matcher.
+
+**Correction (Plan 00463 review 3, R3).** The first version of that test
+judged only the printed lines that were shaped like a command. So a full run
+inside prose (`then run ./scripts/qa/llm_qa.py all`), after a label
+(`QA: ...`), in a `printf`, or in single quotes passed it, and the earlier
+claim here that no printed command was a full run was not something the test
+proved. The rewritten test reads every `echo`/`printf` text the script prints
+and judges a candidate command at every place one can start in each line:
+the line start, after `run`, `&&`, `||`, `;`, `|` or a word ending in `:`, and
+at every word that starts like a path or an expansion. Each row of the
+review's table is an injected RED case. The row above stays Remedied: the
+script itself prints no full run, and the test now proves it. Review 4 (N7)
+widened the scan again: a candidate also starts at any word naming a declared
+program, whatever verb precedes it, and `cat` heredoc bodies and `$NAME`
+assignments are read as printed text. Three printed lines that mentioned
+pytest bare were reworded to name a path.
+
 ### N1 — ✅ Remedied — `resolve_venv_python`'s fallback accepts a venv interpreter that cannot run on this host
 
 **Found by Plan 00457's agent** (#55; recorded in 00457's JOURNAL as a
@@ -4716,3 +5309,455 @@ only if the full bound elapsed. Two regression tests cover a PATH with no
 bounded.
 
 **✅ Remedied** on main (B1, 2e6483a3).
+
+### N126 — ✅ Remedied — The relay's PreToolUse deny has no recovery carve-out, so a wedged daemon denies its own restart
+
+**Found by the lifecycle batch while fixing N67.** `init.sh` exempts the exact
+recovery command from every fail-closed PreToolUse deny, so a wedged daemon
+can be restarted from inside the session. The relay (`relay/hooks_relay.rs`),
+live in this repository's dogfood config, has no such exemption. It never
+parses the payload, and on the `pre-tool-use.sock` socket every mid-exchange
+failure (`mid_exchange_fail`) writes `deny_pre_tool_use_json`. When the
+daemon accepts the connection but never answers (the B2 GIL-hang shape), the
+relay times out and denies `bin/hooks-daemon restart` too. Its own deny text
+tells the agent to run that same command. Only a connect failure falls back
+to the bash rung, where the carve-out lives. The human `!` route still
+works, but an unattended agent loops on the deny.
+
+**Candidate remedies:**
+
+- on a PreToolUse mid-exchange failure, exec the bash rung with the buffered
+  payload instead of denying, so `init.sh`'s one carve-out judges it (the
+  relay would buffer stdin rather than stream it);
+- or have the forwarder's relay guard skip the relay for a payload that
+  could be the recovery command, and leave the judgement to `init.sh`.
+
+Either way, the relay must not grow a second copy of the carve-out, because
+N67 showed that two copies drift.
+
+**Remedied (lifecycle batch, first remedy):** the relay keeps every request
+byte it reads. On a PreToolUse mid-exchange failure with a `--fallback`, it
+finishes reading stdin and runs the forwarder (`--no-relay`) with the whole
+request replayed on its stdin and `HOOKS_DAEMON_RELAY_FAILED` naming the
+failure (`judge_via_fallback`). `init.sh` captures and unsets that variable at
+source time. `send_request_stdin` then skips the nc rung and the socket and
+fails `relay_exchange_failed` ("reached"), so `emit_error_json` denies through
+the one N67 carve-out without waiting out the wedge again. The relay never
+parses the request. The hand-off fails closed: if stdin cannot be completed,
+or the forwarder cannot run, exits non-zero or writes nothing, the relay
+writes its own deny. Setting the variable by hand can only deny. RED against
+`HEAD` (its `init.sh` and a relay built from its source): 7 tests across
+`TestRelayMidExchangeFailureIsJudgedByTheOneCarveOut` and
+`TestARelayHandOffIsJudgedWithoutAskingTheDaemonAgain`. The two
+fail-closed hand-off tests fail when a scratch relay's answer check is
+mutated away. Release note 153.
+
+**Remedied (lifecycle batch, round 2, from the D-RULE and D-PATH reviews):**
+
+- **F1, the hand-off reached fail-open states.** The relay runs the whole
+  forwarder, and its `ensure_daemon` could diagnose NOT_INSTALLED,
+  VENV_MISSING, VERSION_MISMATCH or CI passthrough, each of which allowed
+  the call the relay had already failed. Under a hand-off, `ensure_daemon`
+  now returns at once (no start, no diagnosis), and `emit_hook_error`
+  shadows every state flag and treats an unnamed event as the PreToolUse
+  call it is. The only outcomes are the carve-out's allow and a deny.
+  `TestARelayHandOffReachesOnlyTheCarveOut` covers seven forced states;
+  14 of its cases fail against the round-1 `init.sh`, and removing either
+  half in a scratch copy fails its own cases.
+- **F2 and the D-PATH note, the relay trusted any exit-0 output.** It now
+  delivers the forwarder's answer only when a strict parser (`JsonParser`,
+  std only) reads one complete document that is a PreToolUse deny with a
+  reason or the carve-out's context-only answer, with no unknown field,
+  duplicate key or invalid UTF-8. `{}`, truncated JSON, an allow and
+  everything else get the relay's own deny. RED: 20 shapes in
+  `TestTheRelayAcceptsOnlyAVerdictFromTheHandOff` against a relay built
+  from the round-1 source.
+- **F3 and m2, no hand-off deadline.** The hand-off has its own 10 s
+  deadline (`HANDOFF_TIMEOUT_MS`), after which the relay stops the forwarder
+  and denies. `transport.timeout_seconds` is capped at 45
+  (`Timeout.RELAY_TIMEOUT_CAP`): the relay wait, the hand-off and a 5 s
+  margin stay under the 60 s PreToolUse hook timeout the daemon registers
+  (`Timeout.REGISTERED_HOOK_TIMEOUT`, now the source of
+  `hook_registration`'s value). The vendored Claude Code hooks docs confirm
+  a timed-out PreToolUse command hook lets the call continue. The validator
+  says why when it rejects a value. Tests pin the arithmetic, the Rust twin
+  constant and the validator; one behavioural test runs a forwarder that
+  never exits (RED: it hung past the subprocess bound on the round-1 relay).
+- The relay's own deny names the project's launcher by absolute path,
+  byte-identical to `init.sh`'s (see N67 round 2).
+
+Release note 153.
+
+### N127 — ✅ Remedied — The recovery exemption strips control characters, not just spaces
+
+**Found by the lifecycle batch's D-RULE review (S1), on main as well.** The
+carve-out compared `command.strip()` with the exempt text. `str.strip()`
+also removes vertical tab, form feed, the file/group/record/unit
+separators, NEL and the Unicode line separators, so `bin/hooks-daemon restart` with `\x1c` appended was exempt while bash handed the launcher the
+argument `restart\x1c`. A leading or trailing newline was exempt too.
+
+**Remedied (lifecycle batch, round 2):** the command is compared raw with
+only spaces and tabs stripped (`_RECOVERY_PADDING`), and anything that is
+not printable after that is rejected. RED:
+`TestRecoveryCommandTextMatchesExactly`, 13 control-character cases against
+the round-1 `init.sh`. Release note 150.
+
+### N128 — ✅ Remedied — Stop and the stale-PID checks delete a successor's PID file and socket
+
+**Found by the lifecycle batch's D-PATH review (S2), on main as well.**
+After an observed exit, `cmd_stop` called `cleanup_pid_file` and
+`cleanup_socket`, which unlinked unconditionally. `read_pid_file` removed a
+PID file whose pid was dead or not a daemon, and `init.sh`'s
+`is_daemon_running` ran `rm -f "$PID_PATH"` whenever `kill -0` failed. A
+successor started in between by a concurrent hook's `ensure_daemon` writes
+its own pid and binds its own socket at the same paths, so each of these
+could orphan a live daemon and let a second one start.
+
+**Remedied (lifecycle batch, round 2):**
+
+- `cleanup_pid_file(path, pid)` now requires the pid and removes the file
+  only while it still holds it; a file naming another pid, or no readable
+  pid, is left. `read_pid_file` and `enforcement` use it.
+- `cmd_stop`'s three cleanups go through `_release_stopped_daemon_files`,
+  which removes the socket only on a definitive `NOT_LIVE` probe
+  (`_socket_liveness_sync`), never on `LIVE` or `INDETERMINATE`.
+- `is_daemon_running` re-reads the PID file and removes it only while it
+  still names the pid it found dead, without a new stderr suppression.
+- Round 3 (D-PATH m-B): `_release_stopped_daemon_files` makes both checks
+  under the start lock (`server.hold_start_lock`), which a start holds
+  across its probe, PID write, unlink and bind, so a probe can no longer land
+  between a successor's unlink and bind. A lock held past `Timeout.FILE_LOCK`
+  leaves both files. RED: `test_the_probe_and_both_removals_hold_the_start_lock`.
+
+RED: `TestCmdStopCleansUpOnlyWhatItStillOwns` (a real successor socket and
+PID file written when the exit is observed), two `read_pid_file` successor
+tests and two `cleanup_pid_file` ownership tests in `test_paths.py`, and
+`TestIsDaemonRunningRemovesOnlyItsOwnStalePidFile` (a successor write inside
+the `kill -0` probe). Release note 152.
+
+### N139 — ✅ Remedied — `is_daemon_running` reads EPERM from `kill -0` as a dead daemon and removes its PID file
+
+**Found by both lifecycle round-2 re-reviews, on main as well.** `kill -0`
+fails with EPERM on another user's live process. `init.sh`'s
+`is_daemon_running` treated any failure as a dead daemon, returned 1 and
+removed the PID file (round 2 made that conditional on the file still naming
+the pid, but it still removed the file of a live process). `ensure_daemon`
+then tried to start a second daemon. The Python side
+(`_pid_file_points_at_live_process`) already treated `PermissionError` as
+alive.
+
+**Remedied (lifecycle batch, round 3):** only ESRCH ("No such process",
+read in the C locale) means the process is gone. EPERM and any other failure
+of a numeric pid return 0 and keep the file. A PID file that holds no number
+is still stale. RED: `test_a_pid_it_may_not_signal_is_alive_and_keeps_its_file`
+(the builtin shadowed with the EPERM failure it reports, since root may
+signal anything). Release note 154.
+
+**Round 4 (N139-A, found by both round-3 re-reviews):** returning 0 on EPERM
+made `ensure_daemon` skip the start whenever a stale PID file named another
+user's process, for example after a reboot, so the daemon stayed down until
+someone ran `restart`. EPERM now answers "unknown" (2) unless the socket
+answers or the pid's command line proves it is this project's daemon
+(`cli.pid_is_this_projects_daemon`). Unknown never skips a start: `cli start`'s REUSE gate decides, and the daemon overwrites the PID file. The
+file of a live pid is never deleted, including by `read_pid_file(..., verify_daemon=True)`. RED: `test_a_pid_it_may_not_signal_is_unknown_and_keeps_its_file`,
+`test_a_pid_it_may_not_signal_does_not_stop_an_auto_start`, and the socket
+and command-line proofs.
+
+### N140 — ✅ Remedied — PreToolUse input the forwarder cannot parse is answered without a deny
+
+**Found by the lifecycle batch's round-2 D-RULE re-review, on main as well.**
+`send_request_stdin` sent a `json.loads` failure to `invalid_hook_input`,
+which `emit_error_json` answered with context only: no `permissionDecision`,
+so the call ran with no guard. JSON nested about 1000 deep raises
+`RecursionError` in the parser, so any tool whose input nests that far (in
+practice an MCP tool) skipped every PreToolUse guard on the plain forwarder.
+During a relay hand-off the relay accepted that context-only answer as the
+carve-out's allow. Two neighbours had the same effect with no JSON at all:
+input a few levels shallower parsed, then the request envelope's
+`json.dumps` raised outside any handler, and stdin that is not UTF-8 raised
+in `sys.stdin.read()` outside the `try`. The daemon's own socket already
+denied such input.
+
+**Remedied (lifecycle batch, round 3):** the read, the parse and the
+envelope encoding are all inside the handler, and for PreToolUse
+`invalid_hook_input` is denied with the reason "Hook input could not be
+parsed, so no guard judged this call". The recovery carve-out cannot apply,
+since it needs the parsed input. Other events keep the fail-open context.
+RED: `TestInputThatCannotBeParsedIsDenied` (1000-deep, every depth from 980
+to 1000, text that is not JSON, bytes that are not UTF-8, and the hand-off)
+and the relay's `test_input_nested_too_deeply_to_parse_is_denied`. Release
+note 155.
+
+### N160 — ✅ Remedied — `init.sh` removes a stale PID file outside the start lock
+
+**Found by the lifecycle batch's round-3 D-PATH re-review (Sh-A), on main as
+well.** `is_daemon_running` re-read the PID file, compared it and ran
+`rm -f`, without the start lock. A daemon start writes its pid while holding
+that lock, so a pid written between the compare and the `rm` was removed and
+the live daemon was orphaned. Round 3 put the Python side of stop under the
+lock; the bash side was left.
+
+**Remedied (lifecycle batch, round 4):** the bash side calls
+`cli.remove_stale_pid_file` in the daemon's venv. Under the start lock it
+removes the file only while it still holds exactly the text bash read, and
+that text names no live process. A lock that is held for the whole wait, or
+cannot be opened, leaves the file; so does a missing venv. A stale file left
+behind is harmless: it never counts as running, and a starting daemon
+overwrites it under the lock. Python's `read_pid_file` had the same unlocked
+compare-then-remove for a dead pid (found while fixing this); it no longer
+removes anything, so the start lock's holders are the only removers. RED:
+`test_a_stale_pid_file_is_removed_only_through_the_start_lock`,
+`TestRemoveStalePidFile` and
+`test_read_pid_file_returns_none_for_dead_process_and_leaves_the_file`.
+Release note 157.
+
+### N161 — ✅ Remedied — A PID file holding `0`, `1` or a negative number counts as a running daemon
+
+**Found by both lifecycle round-3 re-reviews (Sh-B, S-R3-1), on main as
+well.** `kill -0 0` signals the caller's own process group and succeeds, and
+pid 1 is init, which root may signal. `init.sh` accepted any `^[0-9]+$`, so a
+PID file holding `0` or `1` made `is_daemon_running` report a daemon running
+for ever and the hook never started one. Python's `read_pid_file` used
+`int()`, which also takes `-1`, `+12` and `1_2`, and `os.kill(0, 0)` succeeds
+there too. An empty file returned "not running" without being cleared.
+
+**Remedied (lifecycle batch, round 4):** one definition of a PID file's text
+in both languages: the digits of one pid from 2 to Linux's `PID_MAX_LIMIT`
+(4194304), with no leading zero, optionally followed by newlines
+(`paths.parse_pid_text`, `init.sh`'s `_hooks_daemon_is_pid_text`, pinned
+equal by a test). Anything else is corrupt, never counts as running, and
+`is_daemon_running` removes it as stale, under the start lock (N160). RED:
+`test_a_corrupt_pid_file_is_never_running_and_is_removed` and
+`test_read_pid_file_never_counts_a_corrupt_file_as_running`. Release note
+157\.
+
+### N162 — ✅ Remedied — The start lock is opened through a symlink, and an unopenable lock escapes `stop`
+
+**Found by the lifecycle batch's round-3 D-PATH re-review (Sh-C), on main as
+well.** `server._open_start_lock` opened `<socket>.start.lock` with
+`O_RDWR | O_CREAT` and no `O_NOFOLLOW`, so a symlink planted at that path
+was followed, and `O_CREAT` created or opened the file it named. Round 3
+also made `cmd_stop` take the lock, and only `StartLockTimeout` was caught
+there: an `OSError` opening it propagated after the daemon had already
+stopped.
+
+**Remedied (lifecycle batch, round 4):** the lock is opened with
+`O_NOFOLLOW | O_CLOEXEC` and must be a regular file (`fstat`), or `OSError`
+is raised. There is no ownership check: a host and a container sharing the
+untracked directory run as different users and share one lock, and the lock
+is only ever flocked. `_release_stopped_daemon_files` handles `OSError`
+explicitly and fails closed, leaving the PID file and socket. RED:
+`TestTheStartLockRefusesWhatIsNotItsOwnFile` (a symlink, whose target is
+never created, and a FIFO) and
+`test_a_start_lock_that_cannot_be_opened_keeps_both_files`. Release note
+157\.
+
+### N163 — ✅ Remedied — A PID file whose pid this user may signal counts as running, whatever process it names
+
+**Found by the lifecycle batch's round-4 D-PATH review (Sh-D), on main as
+well.** `is_daemon_running` returned 0 as soon as `kill -0` succeeded. After
+a reboot a stale PID file's pid can belong to any process of this user's,
+which then read as the daemon: no start was tried, and every call was denied
+until someone ran the exempt restart. Round 4 fixed only the EPERM half.
+
+**Remedied (lifecycle batch, round 5):** a live pid is running only when it is
+proven. `init.sh` first matches the pid's command line against the forms a
+daemon of this project is launched with (`/proc/<pid>/cmdline` with its
+argument boundaries, or `ps` elsewhere), which costs no venv. Anything else
+goes to the daemon's helper (the socket answering, or
+`process_verification`'s full rule), at most once per hook; unproven is 2,
+unknown, and a start is tried. A test pins that every command line `init.sh`
+proves, the daemon's rule proves too. For another user's pid only the socket
+counts (P4-2). RED: `test_a_live_pid_that_is_not_this_daemon_is_unknown`,
+`TestTheHooksCommandLineProofIsSound`. Release note 159.
+
+### N164 — ✅ Remedied — The start lock's mode and its docstring disagree about a second user
+
+**Found by the lifecycle batch's round-4 D-PATH review (Sh-E), on main as
+well.** `_open_start_lock` creates the lock `0600` and opens it `O_RDWR`, but
+its docstring (and N162 above) said a host and a container running as
+different users share it. They cannot unless one is root: the second user's
+open fails with `EACCES`, and that failure surfaced as a bare `OSError`.
+
+**Remedied (lifecycle batch, round 5):** the mode stays `0600`. A lock another
+user can open is one another user can hold, and every start would then wait
+on them. The docstring now says only the owner (or root) can take it, and
+the second user's `PermissionError` is re-raised naming the lock's uid and
+its own. Every caller already fails closed on `OSError`: a start does not
+run, and `stop` and `remove_stale_pid_file` remove nothing. N162's "share one
+lock" sentence is wrong on this point. RED:
+`test_only_its_owner_may_open_the_lock`,
+`test_another_users_lock_is_refused_by_name`. Release note 159.
+
+### N165 — ✅ Remedied — `init.sh`'s daemon helper runs a venv that `HOOKS_DAEMON_ROOT_DIR` alone chose
+
+**Found by the lifecycle batch's round-4 D-PATH review (Sh-F), on main as
+well for `start_daemon`.** `_hooks_daemon_run_cli_helper` resolved and ran
+the venv under `HOOKS_DAEMON_ROOT_DIR` without the P3-1 check that the root
+is an install of this project. That variable can be inherited from whatever
+started Claude Code, so the helper's answer (is this pid our daemon; may this
+PID file go) could come from another project's code.
+
+**Remedied (lifecycle batch, round 5):** the helper first runs
+`_installs_launcher` (the P3-1 rule, with system `python3`) and proves nothing
+when the root is not this project's. RED:
+`test_the_helper_runs_only_under_this_installs_root` (another project's root,
+with this daemon's socket answering, is still unknown). Release note 159.
+
+### N190 — ✅ Remedied — A process's owner was judged by permission to signal it, which root holds over every process
+
+**Found by the lifecycle round-5 reviews (P5-1, Sh-G), on main as well.**
+**Remedied (round 6):** ownership is the process's real and effective uid,
+in bash (`_hooks_daemon_pid_is_this_users`) and Python
+(`is_this_users_process`, and `verified_daemon_process`). Detail in the
+lifecycle report, round 6.
+
+### N191 — ✅ Remedied — A daemon naming no root was attributed to the project owning its venv
+
+**Found by the lifecycle round-5 D-PATH review (Sh-1), on main as well.** A
+worktree sharing a checkout's venv was attributed to that checkout.
+**Remedied (round 6):** such a daemon is attributed only by the natural
+socket it has bound. Detail in the lifecycle report, round 6.
+
+### N192 — ✅ Remedied — A socket that merely accepts a connection counted as this project's daemon
+
+**Found by the lifecycle round-5 D-PATH review (Sh-2).** Under the `/tmp`
+fallback another user can bind the path first. **Remedied (round 6):** the
+daemon answers an `identity` action with its project and pid, and only this
+project's answer counts. Detail in the lifecycle report, round 6.
+
+### N193 — ✅ Remedied — The server's PID-file liveness check parsed pid text its own way
+
+**Found by the lifecycle round-5 D-PATH review (Sh-3).**
+`server._pid_file_points_at_live_process` read the file with its own parse,
+so `0`, `-1`, `1` and padded text were treated as pids. **Remedied (round
+6):** it uses `paths.parse_pid_text`. Detail in
+`subagent-reports/260926-lifecycle-opus-5-5.md`, round 6.
+
+### N202 — ✅ Remedied — `restart` reports "failed to start (no PID file)" while the daemon comes up
+
+**Found by lifecycle review 7 (§5), on main as well.** `cmd_start`'s parent
+waited a fixed 5 s for the PID file, which the daemon writes only after
+controller init. Under load that took longer, so the parent printed "failed
+to start (no PID file created)" and exited 1 while the daemon came up.
+
+**Remedied (lifecycle batch, round 7):** the daemon reports through a pipe
+whose write end it holds for life: its pid first, then a byte per startup
+step. The parent waits while the daemon is alive and advancing (a byte, the
+PID file changing, or CPU time spent), and gives up on end of file (exited),
+after `DAEMON_START_STALL_SEC` with no progress, or at
+`DAEMON_START_BUDGET_SEC`. The message says which, and whether a PID file
+was waiting on its proof. RED: `TestTheStartWaitFollowsTheDaemonsProgress`
+and `test_start_waits_on_a_slowly_initialising_daemon.py` (a throwaway
+daemon whose controller init sleeps 7 s).
+
+### N203 — ✅ Remedied — The stop proof takes the first `--project-root` where argparse keeps the last
+
+**Found by lifecycle review 7 (S-1), on main as well.** `_root_from_flag`
+returned the first `--project-root`. argparse keeps the last, and
+`bin/hooks-daemon` puts its own root before the caller's, so
+`bin/hooks-daemon --project-root B start` run from A's wrapper started a
+daemon serving B that was attributed to A. A's single-daemon enforcement
+could then stop B's daemon, and B could not stop its own.
+
+**Remedied (lifecycle batch, round 7):** the command line is parsed by
+argparse with `cli.main`'s own global options (`add_global_arguments`, now
+shared), so repeats, `=` forms and abbreviations resolve as the launch
+resolved them. A line its parser refuses, a subcommand with arguments, or a
+relative root proves nothing, and no later source is consulted for it.
+`init.sh`'s narrower proof now also requires exactly six arguments. RED:
+`TestTheFlagIsReadAsTheDaemonsOwnParserReadsIt`, which also checks every
+case against `cli.build_parser()`, and
+`test_a_daemon_launched_for_b_through_as_wrapper_is_never_stopped_by_a`.
+
+### N204 — ✅ Remedied — Enforcement removes a stale PID file outside the start lock and takes another user's live pid for dead
+
+**Found by lifecycle review 7 (S-2), on main as well.** Outside a container
+`enforce_single_daemon` removed a PID file whose pid `is_process_running`
+called dead, with no start lock, and `is_process_running` returned False on
+`AccessDenied`, so another user's live daemon lost its file.
+
+**Remedied (lifecycle batch, round 7):** it reads the file and hands it to
+`server.remove_stale_pid_file`, moved there from `cli` so enforcement and the
+installer share it, and leaves it when there is no socket to lock.
+`is_process_running`, whose only caller this was, is gone. RED:
+`TestAStalePidFileGoesOnlyUnderTheStartLock`.
+
+### N205 — ✅ Remedied — The installer removes PID files and sockets with no lock or liveness check
+
+**Found by lifecycle review 7 (S-3), on main as well.**
+`client_validator._check_running_daemon` unlinked a PID file on
+`ALREADY_GONE` with no lock and no content check, and
+`cleanup_stale_runtime_files` removed every `daemon*.sock`, live ones
+included, and treated a `PermissionError` from `kill(pid, 0)`, which means
+the process is alive, as an invalid file.
+
+**Remedied (lifecycle batch, round 7):** both go through
+`server.remove_stale_pid_file` (under the start lock, only while the file
+holds what was read and names no live process) and the new
+`server.remove_dead_socket` (under the start lock, only on a DEFINITIVE
+not-live probe). RED: `TestRuntimeFilesGoOnlyUnderTheStartLockAndOnlyWhileDead`.
+
+### N206 — ✅ Remedied — A pid reused between psutil's start-time re-check and its `kill` is signalled
+
+**Found by lifecycle review 7 (§2), on main as well.** `stop_verified_daemon`
+signalled through a `psutil.Process`, which re-checks the pid's start time
+and then calls `os.kill`. A pid reused between the two, or inside one
+start-time tick, received the signal. `signal_verified_daemon_via_pidfd`
+existed but had no caller, and opened its pidfd only AFTER the proof, so it
+had the same gap.
+
+**Remedied (lifecycle batch, round 7):** `signal_verified_daemon` and
+`stop_verified_daemon` open a pidfd BEFORE the proof and send every signal
+through it, and wait on it for the exit. A pid reused after the pin can only
+make the send fail. Where the kernel makes no pidfds (`ENOSYS`, `EPERM`,
+`ENODEV`, `EMFILE`, `ENFILE`) the proven psutil handle delivers it. The
+unused `_via_pidfd` function is gone. RED:
+`TestTheSignalGoesThroughAPidfdPinnedBeforeTheProof` (a pin landing on a
+process that has exited, while the proof reads a live daemon at the pid).
+
+### N225 — ✅ Remedied — A `--project-root` with `..` through a link is attributed to a root its daemon does not serve
+
+**Found by lifecycle review 8 (S8-1), on main as well.** The proof read the
+flag and collapsed it with `normpath`, then `realpath`, while `cmd_start`
+serves `Path.resolve()`, which follows a link before it meets `..`. With
+`/var/run` a link to `/run`, a daemon launched with `--project-root /var/run/../workspace` serves `/workspace` and was attributed to
+`/var/workspace`. That project's single-daemon enforcement could stop
+`/workspace`'s daemon, and `/workspace` could not stop its own.
+`verified_daemon_process` also compared `normpath` strings, so a root named
+through a link never matched the resolved root the daemon serves.
+
+**Remedied (lifecycle batch, round 8):** a flag root that holds `..` or is
+not its own `normpath` proves nothing (`_root_from_flag`), and no later
+source is consulted for it. `verified_daemon_process` compares both roots
+resolved. RED: `test_a_root_that_is_not_its_own_normal_form_proves_nothing`
+(`/var/run/../workspace` among them) and, on real processes,
+`test_a_root_whose_dotdot_follows_a_link_proves_nothing` and
+`test_a_root_named_through_a_link_is_the_one_the_daemon_serves`.
+
+### N232 — ✅ Remedied — Two concurrent hook starts: the second's single-daemon enforcement stops the first's daemon while it initialises
+
+**Found by lifecycle review 9 (§5), on main (44d1b1b3b).** Two hooks each ran
+`cli start` at once, and nothing excluded the second launch
+(`init.sh:1057`). The second start's reuse gate saw no PID file and no live
+socket, since a daemon writes its PID file only once its controller is
+initialised (`cli.py:576-620`), so it ran `enforce_single_daemon`
+(`cli.py:623`). In a container, `find_all_daemon_processes` proved the first
+start's daemon by its `--project-root` flag and spared only a live socket's
+owner (`enforcement.py:90-103`), then SIGTERMed it while it was still
+initialising (`enforcement.py:117-125`) and forked a second daemon. The first
+hook got a spurious deny, and with three or more hooks at once it repeated.
+No call ran unjudged. A launcher's command line is also its daemon's (the
+daemon is its fork), so the same enforcement stopped a second launcher that
+was merely waiting: on main the RED run shows both.
+
+**Remedied (lifecycle batch, rounds 8b and 9):** every start of a project
+takes one launch lock (`daemon.launch.lock` in the project's untracked
+directory, whatever socket it uses) before it looks for a daemon, and the
+daemon it forks holds it until it serves. Enforcement runs only under that
+lock, and stops only a process that has bound a socket, which a launcher
+and a daemon still starting have not. RED on main:
+`test_two_concurrent_starts_start_one_daemon[container]` (a variant with
+main's helpers: "Container environment: Killing 1 other daemon process(es)",
+exit codes `[1, -15]`). RED on c5b2befc8: the same test, and
+`TestOnlyADaemonThatServesIsStopped::test_a_start_under_way_is_never_stopped`.

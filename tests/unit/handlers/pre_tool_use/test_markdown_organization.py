@@ -2056,6 +2056,51 @@ class TestClaudeCodePluginSourceLayout:
         target = project / "tools" / "my-plugin" / "agents" / "reviewer.md"
         assert handler.matches(self._write(target)) is True
 
+    def test_the_nearest_plugin_root_decides(
+        self, handler: MarkdownOrganizationHandler, project: Path
+    ) -> None:
+        """Under the inner root the file is in ``notes/``, not a component dir,
+        although relative to the outer root it sits under ``agents/``."""
+        outer = self._plugin_root(project)
+        inner = outer / "agents" / "bundled"
+        (inner / ".claude-plugin").mkdir(parents=True)
+        (inner / ".claude-plugin" / "plugin.json").write_text("{}")
+        assert handler.matches(self._write(inner / "notes" / "idea.md")) is True
+        assert handler.matches(self._write(inner / "agents" / "reviewer.md")) is False
+
+    def test_a_deep_path_probes_only_directories_that_exist(
+        self,
+        handler: MarkdownOrganizationHandler,
+        project: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Plan 00466 N106: probing every ancestor of a caller-supplied path
+        cost 15s per call at 16 KB. Each probe of a path past PATH_MAX fails
+        and is logged with the whole path, so the cost is quadratic in the
+        depth. Levels that do not exist cannot hold a plugin manifest."""
+        from claude_code_hooks_daemon.handlers.pre_tool_use import markdown_organization
+        from claude_code_hooks_daemon.utils import path_predicates
+
+        root = self._plugin_root(project)
+        probes: list[str] = []
+        for name in ("path_is_file", "path_is_dir"):
+            real = getattr(path_predicates, name)
+
+            def counting(path: Path, *, unreadable_means: bool, _real: Any = real) -> Any:
+                probes.append(str(path))
+                return _real(path, unreadable_means=unreadable_means)
+
+            # raising=False: a walk that never imports one of them is counted on the other.
+            monkeypatch.setattr(markdown_organization, name, counting, raising=False)
+
+        def probes_at(depth: int) -> int:
+            probes.clear()
+            target = root / "agents" / Path(*(["deep"] * depth)) / "x.md"
+            handler._is_plugin_component(str(target))
+            return len(probes)
+
+        assert probes_at(50) == probes_at(400) > 0
+
 
 class TestClaudeCodeSyncEnforcement:
     """Tests for _check_claude_code_sync() — Phase 3 of Plan 86.
@@ -2526,6 +2571,23 @@ class TestUntrackedClaudeMemoryPolicy:
         assert result.decision == Decision.DENY
         assert result.reason is not None
         assert "UNTRACKED CLAUDE MEMORY" in result.reason
+
+    def test_policy_blocks_a_memory_path_in_text_the_tokeniser_cannot_read(
+        self, policy_handler: MarkdownOrganizationHandler
+    ) -> None:
+        """Plan 00466 N120: shlex cannot read ``$'it\\'s'``, which bash runs,
+        and the ``cp`` after it writes memory. No raw regex covers ``cp``, so
+        the unreadable text itself must deny when it names a memory path."""
+        command = f"echo $'it\\'s' && cp notes.md {self.MEMORY_PATH}"
+        assert policy_handler.matches(self._bash(command)) is True
+        result = policy_handler.handle(self._bash(command))
+        assert result.decision == Decision.DENY
+        assert "UNTRACKED CLAUDE MEMORY" in (result.reason or "")
+
+    def test_policy_allows_unreadable_text_that_names_no_memory_path(
+        self, policy_handler: MarkdownOrganizationHandler
+    ) -> None:
+        assert policy_handler.matches(self._bash("echo $'it\\'s' && cp a.md b.md")) is False
 
     # --- reads are always allowed ---
 

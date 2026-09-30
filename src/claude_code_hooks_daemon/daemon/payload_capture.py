@@ -68,7 +68,7 @@ def _touches_protected_path(hook_input: dict[str, Any], patterns: tuple[str, ...
             return True
     command = tool_input.get(_COMMAND_KEY)
     if isinstance(command, str) and command:
-        return sfm.find_protected_mention(command, patterns) is not None
+        return sfm.find_protected_mention(command, patterns, bash_tool_command=True) is not None
     return False
 
 

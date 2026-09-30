@@ -5,6 +5,123 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.67.0] - 2026-09-30
+
+_A hardening-and-tooling release. The headline themes: PreToolUse now fails closed (a client timeout, an unreachable daemon, a transport failure or a slow handler denies instead of allowing); `daemon.strict_mode` finally reaches the daemon; the secret-path and containment guards stay fail-closed and share one evaluation between `matches()` and `handle()`; full QA becomes the coordinator's gate, with the new opt-in `subagent_full_qa_blocker`, `llm_qa.py changed` and `llm_qa.py main-moved`; Claude Code plugins are documented and recognised; hand-written plan journal entries are denied; and a long run of smaller correctness fixes across the installer, `gitignore` handling, crons and QA gates. `breaking: false` - no config keys renamed or removed, so no upgrade guide is needed; review the five post-upgrade tasks._
+
+### Added
+
+- The daemon now auto-saves every sub-agent's reply, and the report-size blocker points at it (Plan 00460).
+- Using Claude Code plugins alongside the daemon is now documented (Plan 00468).
+- A journal correction is now its own category (Plan 00422).
+- A declared cron can now be paused for one session (Plan 00422).
+- `tool-report` shows what each enabled plugin costs in every session (Plan 00468).
+- A write into an installed plugin is now advised, and a session's own config dir counts as in bounds (Plan 00468).
+- Claude Code plugins that ship hooks are named at session start and in `health` (Plan 00468).
+- A protected path your config names but lacks is now reported (Plan 00414).
+- Hand-sent hook probes are now marked, and `hooks-daemon probe` sends them (Plan 00466).
+- `health` now reports a handler whose options were not applied (Plan 00466).
+- Plan QA can now list its checks (Plan 00466).
+- Archiving a plan now checks the links the move breaks (Plan 00408).
+- `HooksDaemon` now exposes a deterministic `started_event` (Plan 00466).
+- Full QA is the coordinator's gate, and sub-agents run targeted QA (Plan 00463).
+
+### Changed
+
+- A missing venv now builds itself, and `repair` works without one (Plan 00456).
+- Skip lists now match whole path segments, relative to your project (Plan 00458).
+- Hand-written plan journal entries are now denied (Plan 00461).
+- Acceptance probe fixtures move out of the scratch directory (Plan 00422).
+- A stale `.claude/HOOKS-DAEMON.md` now fails QA (Plan 00402).
+- Subagent reports now default to the plan folder git tracks (Plan 00422).
+- The failsafe recovery cron now covers a session from its start (Plan 00394).
+- A fresh install no longer sets plansDirectory, and never ships a plugin key (Plan 00468).
+- `lsp_enforcement` enforces only where an enabled plugin serves the searched language (Plan 00468).
+- A QA gate whose tool errored or scanned nothing now fails (Plan 00466).
+- A guard that goes inert or narrow now says so at WARNING (Plan 00466).
+- `dispatch_declaration` recognises more report-destination phrasings (Plan 00466).
+- The plan index's statistics self-check is now checked at commit time (Plan 00466).
+- Two `hooks-daemon` skill changes the last release notes left out (Plan 00408).
+- `enforce_llm_qa` narrows its data-consumer exemption to a bare, trusted head (Plan 00466).
+- A client timeout now denies every PreToolUse call instead of allowing it (Plan 00466).
+- A wedged daemon now recovers, on its own and on `stop` (Plan 00466).
+- PreToolUse now denies when the daemon cannot be reached at all (Plan 00466).
+- The relay and per-event sockets now deny PreToolUse on a transport failure too (Plan 00466).
+- The budget-exhaustion advisory is now channel-scoped, and a dead sub-agent surfaces too (Plan 00466).
+- The code file reader parses once per file, and reads scripts by language (Plan 00463).
+- A whole-suite pytest run now needs the host-wide full-QA lock (Plan 00463).
+
+### Fixed
+
+- The "Not installed" message no longer points at rm -rf when a clone shares a mount (Plan 00454).
+- The cache segment shows the session total, and no longer double-counts sub-agents (Plan 00452).
+- Self-install checkouts now expose the conventional CLI path (Plan 00455).
+- The nested-install cleanup now actually fires for clients (Plan 00422).
+- Self-install checkouts now get a stable lsp-venv symlink (Plan 00422).
+- The operator-signal channel now runs without a venv (Plan 00457).
+- Encrypted Ansible Vault files are no longer treated as secrets (Plan 00459).
+- PHP LSP advice no longer tells you to exclude `vendor/` (Plan 00462).
+- A venv that cannot run no longer reports itself "resolved" (Plan 00466).
+- An allowed call no longer opens with the BLOCKED headline (Plan 00466).
+- A long QA run starts an idled-out daemon instead of failing (Plan 00422).
+- A Tab-completed `/compact` is recognised from the daemon's record (Plan 00399).
+- `sensitive_content` no longer flags example values in faithful vendored docs (Plan 00468).
+- Guards now see a command behind `do`, `then` and other shell reserved words (Plan 00422).
+- Rewriting a file you created or edited is no longer denied as a clobber (Plan 00422).
+- Concurrent requests no longer crash ten handlers' bookkeeping (Plan 00449).
+- `docs_qa` and `doc_truth` now respect `.gitignore` (Plan 00466).
+- `format-markdown` and `find-comment-blocks` now respect `.gitignore` (Plan 00468).
+- A fresh config now ships the documented handler priorities (Plan 00422).
+- `[awaiting-human]` now survives your other crons, and stands declared crons down too (Plan 00388).
+- Claude Code plugin agents are now recognised by the read-only dispatch logic (Plan 00468).
+- Agent files that strict YAML rejects are now read, and `isolation: worktree` in an agent file is honoured (Plan 00468).
+- `skill-scan` no longer proposes a skill that a plugin or your personal skills already cover (Plan 00468).
+- CLAUDE_CONFIG_DIR is honoured for your settings and transcripts (Plan 00468).
+- Transcript reports find a project whose path has a dot or an underscore (Plan 00466).
+- QA checks no longer pass by scanning nothing from a worktree (Plan 00466).
+- Markdown in Claude Code's config dir and in a plugin's source tree is no longer blocked (Plan 00468).
+- `check-source-fresh` now catches a config edited without a restart (Plan 00415).
+- More hostile-PATH scripts no longer depend on `date` or `pgrep` (Plan 00466).
+- A configured secret word list path now reaches log and payload redaction (Plan 00466).
+- `remote-docs` now scans captures with your configured sensitive-content options (Plan 00466).
+- Three session-start handlers now honour their configured options (Plan 00466).
+- Quoting a word no longer hides a destructive git command (Plan 00408).
+- `pushd` and six more `cd` spellings into the daemon directory are now blocked (Plan 00408).
+- The merge-approval and issue-filing gates close three gaps (Plan 00408).
+- An empty path candidate no longer crashes the secret-path guards (Plan 00466).
+- `goal_injection` and `recovery_cron_advisor` no longer fire on any edit of an already-In-Progress/Complete plan (Plan 00466).
+- Tests no longer skip when run as root (Plan 00466).
+- `secret_file_guard` no longer flags a Python unpacking splat as a vault-password reference (Plan 00466).
+- `secret_file_guard` no longer fails open on an empty path-mention token (Plan 00466).
+- `enforce_llm_qa` no longer blocks a prose mention of the denied runner (Plan 00466).
+- `secret_file_guard` fails closed on a slow scan instead of timing out open (Plan 00466).
+- `enforce_llm_qa` re-parses a string-executor argument, a glued redirection and a glob/brace spelling of the denied runner (Plan 00466).
+- `secret_file_guard` denies an interior-wildcard, brace or bracket-class spelling of a protected name (Plan 00466).
+- `secret_file_guard` and `project_containment` stay fail-closed past a real match (Plan 00466).
+- `secret_file_guard` and `project_containment` share one evaluation between `matches()` and `handle()` (Plan 00466).
+- `secret_file_guard` error denials no longer echo the exception message (Plan 00466).
+- A slow `secret_file_guard` or `enforce_llm_qa` scan is no longer a fail-open (Plan 00466).
+- `settings_repair` no longer clobbers a concurrent settings.json writer (Plan 00468).
+- `daemon.strict_mode` now actually reaches the daemon (Plan 00466).
+- A slow handler can no longer bypass the rest of the chain on a client timeout (Plan 00466).
+- The chain deadline now bounds a handler's own execution, not just the gap before it (Plan 00466).
+- A no-target command is no longer denied when the project root is unresolved (Plan 00466).
+- A signal now goes only to a process proven to be its target (Plan 00466).
+- The skill-rescue backup directory is now gitignored (Plan 00466).
+- A deep file path no longer stalls PreToolUse (Plan 00466).
+- The daemon's venv is now built on the Python its name declares (Plan 00466).
+- `find -exec` and a merge-base listing are now followed (Plan 00463).
+- Eval of shell setup output runs no QA, and is now allowed (Plan 00463).
+- An `echo` naming a guarded command is no longer denied (Plan 00408).
+
+### Removed
+
+- The ccy supervisor no longer injects any `/effort` command; pin your own level in `modelSettings` (Plan 00466).
+- `budget_exhaustion_detector`'s built-in generic budget/quota keyword family is removed entirely, not renamed: only the WebSearch budget-refusal and Agent-terminated-early texts are matched. Replace it with your own `extra_patterns` entry if you relied on it (Plan 00466).
+- `lsp_enforcement` no longer reads `ENABLE_LSP_TOOL`; it can stay set but has no effect on the handler (Plan 00468).
+
+_Detail for each entry above is in `RELEASES/v3.67.0.md` and, per plan, in `CLAUDE/UPGRADES/v3/v3.66.0-to-v3.67.0/release-notes/`._
+
 ## [3.66.0] - 2026-09-21
 
 _A niggles-ledger release. Plan 00423 gives handlers a `scope: ALL | MAIN | SUB` config key so a Stop-time nudge can be told it only applies to the

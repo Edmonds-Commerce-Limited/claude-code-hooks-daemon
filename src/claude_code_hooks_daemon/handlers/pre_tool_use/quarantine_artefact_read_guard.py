@@ -48,6 +48,7 @@ from claude_code_hooks_daemon.core.relevance import Relevance, RelevanceContext
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.handlers.utils.quarantine import quarantine_agent_relevance
 from claude_code_hooks_daemon.utils import secret_file_matching as sfm
+from claude_code_hooks_daemon.utils import shell_expansion
 from claude_code_hooks_daemon.utils.bash_flags import SPAN_SEPARATORS, split_statements
 from claude_code_hooks_daemon.utils.command_evasion import compile_command_name_pattern
 from claude_code_hooks_daemon.utils.shell_segmentation import split_unquoted
@@ -252,6 +253,11 @@ class QuarantineArtefactReadGuardHandler(PreToolUseHandlerBase):
         """
         try:
             pattern = self._evaluate_matched_pattern(hook_input)
+        except (shell_expansion.TooManyToEnumerateError, TimeoutError) as exc:
+            # Ledger 00466 N134: a cap or the deadline is "could not verify",
+            # still denied, but not reported as a guard bug.
+            logger.info("quarantine_artefact_read_guard: scan did not finish (%s)", exc)
+            pattern = f"{sfm.SCAN_COULD_NOT_FINISH} ({type(exc).__name__})"
         except Exception as exc:
             logger.exception(
                 "quarantine_artefact_read_guard: evaluation raised; denying "

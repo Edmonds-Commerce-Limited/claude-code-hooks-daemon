@@ -36,6 +36,8 @@ own project handlers are real, in-scope code, not a fixture.
 
 from __future__ import annotations
 
+import logging
+import os
 from collections.abc import Callable
 from pathlib import Path
 
@@ -44,15 +46,24 @@ from tests.scaling import SIZE_FACTOR, SUPERLINEAR_RATIO, counted_ratio, scaling
 
 from claude_code_hooks_daemon.config.loader import ConfigLoader
 from claude_code_hooks_daemon.config.models import Config
-from claude_code_hooks_daemon.constants import HandlerTag
+from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
+from claude_code_hooks_daemon.core.acceptance_test import AcceptanceTest
 from claude_code_hooks_daemon.core.event import EventType
 from claude_code_hooks_daemon.core.handler import Handler
+from claude_code_hooks_daemon.core.hook_result import Decision, HookResult
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.core.router import EventRouter
 from claude_code_hooks_daemon.daemon.cli import _build_handler_config_mapping
+from claude_code_hooks_daemon.handlers.pre_tool_use.secret_file_guard import (
+    SecretFileGuardHandler,
+)
 from claude_code_hooks_daemon.handlers.registry import (
     HandlerRegistry,
     iter_builtin_handler_classes,
+)
+from claude_code_hooks_daemon.utils.path_predicates import (
+    _reset_unreadable_warning_burst,
+    path_exists,
 )
 
 # Large enough to make an O(n^2) handler's blowup obvious (Task 2's repros
@@ -168,6 +179,62 @@ def _dispatch(handler: Handler, hook_input: dict) -> None:
         handler.handle(hook_input)
 
 
+class _WarningRecorder(logging.Handler):
+    """Notes whether anything was logged at WARNING or above."""
+
+    def __init__(self) -> None:
+        super().__init__(logging.WARNING)
+        self.seen = False
+
+    def emit(self, record: logging.LogRecord) -> None:
+        self.seen = True
+
+
+def _regime(handler: Handler, hook_input: dict) -> tuple[bool, str | None, bool]:
+    """The path ``handler`` takes on ``hook_input``: whether it matched, what
+    it decided, and whether it logged a warning or worse on the way (a cap it
+    gave up at, a path the OS refused)."""
+    # The unreadable-path warning is rate-limited per calling site, so whether
+    # it fires depends on how many earlier calls used up the burst -- on call
+    # order and on how many probes the checkout root length makes fail. Each
+    # regime is measured from a fresh burst so it reflects only ``hook_input``.
+    _reset_unreadable_warning_burst()
+    recorder = _WarningRecorder()
+    root = logging.getLogger()
+    root.addHandler(recorder)
+    try:
+        matched = handler.matches(hook_input)
+        decision = str(handler.handle(hook_input).decision) if matched else None
+    finally:
+        root.removeHandler(recorder)
+    return matched, decision, recorder.seen
+
+
+def _growth_finding(
+    handler: Handler, input_at: Callable[[int], dict], small_n: int, large_text: str
+) -> str | None:
+    """Why ``handler`` fails the sweep between ``small_n`` and ``SIZE_FACTOR``
+    times it, or ``None``.
+
+    The two sizes must take the same path through the handler before their
+    costs say anything about growth (00466 N252): an input under a cap
+    against one past it compares two code paths, and the gate failed on
+    exactly that.
+    """
+    large_n = SIZE_FACTOR * small_n
+    small_regime = _regime(handler, input_at(small_n))
+    large_regime = _regime(handler, input_at(large_n))
+    if small_regime != large_regime:
+        return (
+            f"takes another path at {large_n} than at {small_n} "
+            f"(matched, decision, logged a warning): {large_regime} vs {small_regime}"
+        )
+    ratio = scaling_ratio(lambda size: _dispatch(handler, input_at(size)), small_n, large_text)
+    if ratio > SUPERLINEAR_RATIO:
+        return f"cost grew {ratio:.0f}x for {SIZE_FACTOR}x input"
+    return None
+
+
 class TestNoVacuousDiscovery:
     """A discovery that finds nothing would make every sweep below pass by omission."""
 
@@ -195,23 +262,13 @@ class TestBashCommandShapesStayLinear:
         large_text = _hostile_bash_command_at(shape, large_size)
         superlinear: list[str] = []
         for handler_cls in _safety_pre_tool_use_handlers():
-            handler = handler_cls()
 
-            def work_at(size: int, h: Handler = handler, s: str = shape) -> None:
-                _dispatch(
-                    h,
-                    {
-                        "tool_name": "Bash",
-                        "tool_input": {"command": _hostile_bash_command_at(s, size)},
-                    },
-                )
+            def input_at(size: int, s: str = shape) -> dict:
+                return _bash_input(_hostile_bash_command_at(s, size))
 
-            ratio = scaling_ratio(work_at, small_n, large_text)
-            if ratio > SUPERLINEAR_RATIO:
-                superlinear.append(
-                    f"{handler_cls.__name__} cost grew {ratio:.0f}x for "
-                    f"{SIZE_FACTOR}x input on shape={shape!r}"
-                )
+            finding = _growth_finding(handler_cls(), input_at, small_n, large_text)
+            if finding is not None:
+                superlinear.append(f"{handler_cls.__name__} {finding} on shape={shape!r}")
         assert not superlinear, "superlinear SAFETY handler(s) found:\n" + "\n".join(superlinear)
 
 
@@ -228,26 +285,19 @@ class TestWriteContentShapesStayLinear:
         large_text = _hostile_write_content_at(shape, large_size)
         superlinear: list[str] = []
         for handler_cls in _safety_pre_tool_use_handlers():
-            handler = handler_cls()
 
-            def work_at(size: int, h: Handler = handler, s: str = shape) -> None:
-                _dispatch(
-                    h,
-                    {
-                        "tool_name": "Write",
-                        "tool_input": {
-                            "file_path": file_path,
-                            "content": _hostile_write_content_at(s, size),
-                        },
+            def input_at(size: int, s: str = shape) -> dict:
+                return {
+                    "tool_name": "Write",
+                    "tool_input": {
+                        "file_path": file_path,
+                        "content": _hostile_write_content_at(s, size),
                     },
-                )
+                }
 
-            ratio = scaling_ratio(work_at, small_n, large_text)
-            if ratio > SUPERLINEAR_RATIO:
-                superlinear.append(
-                    f"{handler_cls.__name__} cost grew {ratio:.0f}x for "
-                    f"{SIZE_FACTOR}x input on shape={shape!r}"
-                )
+            finding = _growth_finding(handler_cls(), input_at, small_n, large_text)
+            if finding is not None:
+                superlinear.append(f"{handler_cls.__name__} {finding} on shape={shape!r}")
         assert not superlinear, "superlinear SAFETY handler(s) found:\n" + "\n".join(superlinear)
 
 
@@ -269,53 +319,70 @@ def _brace_expansion_body(count: int) -> str:
     return "{a,b}" * count
 
 
-def _nested_braces_body(depth: int = 20) -> str:
+def _nested_braces_body(depth: int) -> str:
     """Deeply NESTED (not adjacent) brace groups -- a different combinatorial shape."""
     return "{" * depth + "a" + "}" * depth
 
 
-def _double_star_glob_body(count: int = 30) -> str:
+def _double_star_glob_body(count: int) -> str:
     """Repeated ``/**/`` filesystem-walk tokens."""
     return "/**/" * count
 
 
-def _star_star_slash_star_body(count: int = 30) -> str:
+def _star_star_slash_star_body(count: int) -> str:
     """Repeated ``**/*`` recursive-glob tokens."""
     return "**/*" * count
 
 
-def _bracket_classes_body(count: int = 40) -> str:
+def _bracket_classes_body(count: int) -> str:
     """Repeated bracket character classes -- can feed a catastrophic regex."""
     return "[a-z]" * count
 
 
-def _deep_bash_c_nesting_body(depth: int = 20) -> str:
+def _deep_bash_c_nesting_body(depth: int) -> str:
     """Deeply nested ``bash -c '...'`` -- distinct from ``$(...)`` substitution nesting."""
     return "bash -c '" * depth + "true" + "'" * depth
 
 
-def _deep_eval_nesting_body(depth: int = 20) -> str:
+def _deep_eval_nesting_body(depth: int) -> str:
     """Repeated ``eval`` prefixes."""
     return "eval " * depth + "true"
 
 
-#: Shape name -> (body builder, largest size this shape is driven at). Plan
-#: 00466 N24 review 3 mi4: the builders take a size instead of returning a
-#: fixed BODY text, and the "largest size" is exactly the fixed count/depth
-#: the old absolute-bound version used for that shape -- proven safe (no
-#: ``RecursionError``, no runaway real expansion) at that value already, so
-#: the ratio sweep below never asks for a MORE hostile input than before,
-#: only compares it against a cheaper one at ``large // SIZE_FACTOR``.
+def _letter_sequences_body(count: int) -> str:
+    """Adjacent ``{a..p}`` sequence groups: ``16**count`` spellings."""
+    return "{a..p}" * count
+
+
+def _digit_sequences_body(count: int) -> str:
+    """Adjacent ``{0..9}`` sequence groups: ``10**count`` spellings."""
+    return "{0..9}" * count
+
+
+#: Shape name -> (body builder, SMALL size). Each sweep drives the small size
+#: and ``SIZE_FACTOR`` times it, and both must sit in ONE regime (00466 N252):
+#: a small input under a cap against a large one past it compares two code
+#: paths, not growth. That pairing is what failed the gate: 2 ``eval``s parse,
+#: 16 exceed the nested-shell depth cap (4), and ``secret_file_guard`` answers
+#: the cap with a logged traceback costing ten times its whole parse. So:
+#:
+#: - the sequence shapes start past the 256-spelling cap and stay under the
+#:   64-group depth cap and the 255-byte file name limit; ``brace_pairs``
+#:   cannot do that in an 8x span, so it starts past both;
+#: - ``deep_eval_nesting`` starts past the nested-shell depth cap;
+#: - the rest reach no cap at either size.
+#:
+#: ``_assert_one_regime`` checks each pairing handler by handler.
 _SMALL_COMBINATORIAL_SHAPES: dict[str, tuple[Callable[[int], str], int]] = {
-    "brace_x16": (_brace_expansion_body, 16),
-    "brace_x20": (_brace_expansion_body, 20),
-    "brace_x24": (_brace_expansion_body, 24),
-    "nested_braces": (_nested_braces_body, 20),
-    "double_star_glob": (_double_star_glob_body, 30),
-    "star_star_slash_star": (_star_star_slash_star_body, 30),
-    "bracket_classes": (_bracket_classes_body, 40),
-    "deep_bash_c_nesting": (_deep_bash_c_nesting_body, 20),
-    "deep_eval_nesting": (_deep_eval_nesting_body, 20),
+    "brace_pairs": (_brace_expansion_body, 65),
+    "letter_sequences": (_letter_sequences_body, 3),
+    "digit_sequences": (_digit_sequences_body, 3),
+    "nested_braces": (_nested_braces_body, 2),
+    "double_star_glob": (_double_star_glob_body, 3),
+    "star_star_slash_star": (_star_star_slash_star_body, 3),
+    "bracket_classes": (_bracket_classes_body, 5),
+    "deep_bash_c_nesting": (_deep_bash_c_nesting_body, 2),
+    "deep_eval_nesting": (_deep_eval_nesting_body, 5),
 }
 
 #: Shape name -> command-head prefix needed for the body to parse as a
@@ -323,9 +390,9 @@ _SMALL_COMBINATORIAL_SHAPES: dict[str, tuple[Callable[[int], str], int]] = {
 #: complete invocation (``bash -c '...'`` / ``eval ...``) -- prefixing those
 #: with ``echo`` would stop them nesting at all.
 _SMALL_COMMAND_PREFIX: dict[str, str] = {
-    "brace_x16": "echo ",
-    "brace_x20": "echo ",
-    "brace_x24": "echo ",
+    "brace_pairs": "echo ",
+    "letter_sequences": "echo ",
+    "digit_sequences": "echo ",
     "nested_braces": "echo ",
     "double_star_glob": "ls ",
     "star_star_slash_star": "ls ",
@@ -338,12 +405,12 @@ _SMALL_SHAPE_NAMES = tuple(sorted(_SMALL_COMBINATORIAL_SHAPES))
 
 
 def _hostile_small_bash_command_at(shape_name: str, size: int) -> str:
-    build, _large_size = _SMALL_COMBINATORIAL_SHAPES[shape_name]
+    build, _small_size = _SMALL_COMBINATORIAL_SHAPES[shape_name]
     return _SMALL_COMMAND_PREFIX[shape_name] + build(size)
 
 
 def _hostile_small_write_path_at(shape_name: str, size: int, tmp_path: Path) -> str:
-    build, _large_size = _SMALL_COMBINATORIAL_SHAPES[shape_name]
+    build, _small_size = _SMALL_COMBINATORIAL_SHAPES[shape_name]
     return str(tmp_path / f"hostile-{build(size)}")
 
 
@@ -481,16 +548,24 @@ def _bash_input(command: str) -> dict:
     return {"tool_name": "Bash", "tool_input": {"command": command}}
 
 
-# 8x this is ~32 KB of path, deep enough that a quadratic per-segment cost
-# dominates at N already, and shallow enough that sweeping every handler at
-# 8N stays quick.
-_DEEP_PATH_SEGMENTS = 1_000
+# Past PATH_MAX already at N, so both sizes take one path through every
+# handler: under it a ``stat`` of the path fails ENOENT, past it ENAMETOOLONG,
+# and ``block-unread-overwrite`` allowed one and denied the other (00466
+# N252). Deep enough that a quadratic per-segment cost dominates at N, and
+# 8x (~33 KB) stays quick to sweep.
+_DEEP_PATH_SEGMENTS = os.pathconf("/", "PC_PATH_MAX") // len("pkg/") + 1
 
 
-def _deep_write_path(segments: int) -> str:
+#: File suffixes the deep-path sweep writes. Handlers dispatch on the suffix,
+#: so each one reaches different code: a ``.py``-only sweep never reached
+#: ``markdown_organization``'s per-ancestor plugin probe (Plan 00466 N106).
+_DEEP_PATH_SUFFIXES = (".py", ".md", ".sh", ".ts", ".json")
+
+
+def _deep_write_path(segments: int, suffix: str = ".py") -> str:
     """A ``src/`` file under the project root, ``segments`` directories deep:
     the shape of review 1's B2 ``file_path`` (90 KB at 22,500 segments)."""
-    return str(_project_root() / ("src/" + "pkg/" * segments + "module.py"))
+    return str(_project_root() / ("src/" + "pkg/" * segments + "module" + suffix))
 
 
 def _write_input(file_path: str) -> dict:
@@ -508,21 +583,17 @@ class TestGilStarvationAcrossEveryPreToolUseHandler:
         large_text = build(SIZE_FACTOR * _GIL_SHAPE_SIZE)
         superlinear: list[str] = []
         for handler in _all_pre_tool_use_handlers():
-
-            def work_at(size: int, h: Handler = handler) -> None:
-                _dispatch(h, _bash_input(build(size)))
-
-            ratio = scaling_ratio(work_at, _GIL_SHAPE_SIZE, large_text)
-            if ratio > SUPERLINEAR_RATIO:
-                superlinear.append(
-                    f"{type(handler).__name__} cost grew {ratio:.0f}x for "
-                    f"{SIZE_FACTOR}x input on shape={shape_name!r}"
-                )
+            finding = _growth_finding(
+                handler, lambda size: _bash_input(build(size)), _GIL_SHAPE_SIZE, large_text
+            )
+            if finding is not None:
+                superlinear.append(f"{type(handler).__name__} {finding} on shape={shape_name!r}")
         assert not superlinear, "superlinear PreToolUse handler(s) found:\n" + "\n".join(
             superlinear
         )
 
-    def test_no_handler_grows_superlinearly_on_a_deep_write_path(self) -> None:
+    @pytest.mark.parametrize("suffix", _DEEP_PATH_SUFFIXES)
+    def test_no_handler_grows_superlinearly_on_a_deep_write_path(self, suffix: str) -> None:
         """Review 2 nit 4: a 90 KB-deep Write ``file_path`` still took 9.4s.
 
         Most of it was `tdd_enforcement` building the mirrored test path one
@@ -530,19 +601,17 @@ class TestGilStarvationAcrossEveryPreToolUseHandler:
         it, so quadratic in the depth.
         """
         segments = _DEEP_PATH_SEGMENTS
-        large_path = _deep_write_path(SIZE_FACTOR * segments)
+        large_path = _deep_write_path(SIZE_FACTOR * segments, suffix)
         superlinear: list[str] = []
         for handler in _all_pre_tool_use_handlers():
-
-            def work_at(size: int, h: Handler = handler) -> None:
-                _dispatch(h, _write_input(_deep_write_path(size)))
-
-            ratio = scaling_ratio(work_at, segments, large_path)
-            if ratio > SUPERLINEAR_RATIO:
-                superlinear.append(
-                    f"{type(handler).__name__} cost grew {ratio:.0f}x for "
-                    f"{SIZE_FACTOR}x path depth"
-                )
+            finding = _growth_finding(
+                handler,
+                lambda size: _write_input(_deep_write_path(size, suffix)),
+                segments,
+                large_path,
+            )
+            if finding is not None:
+                superlinear.append(f"{type(handler).__name__} {finding} in path depth on {suffix}")
         assert not superlinear, "superlinear PreToolUse handler(s) found:\n" + "\n".join(
             superlinear
         )
@@ -574,72 +643,101 @@ class TestGilStarvationAcrossEveryPreToolUseHandler:
         assert linear <= SUPERLINEAR_RATIO
         assert counted_ratio(quadratic_ops, _GIL_SHAPE_SIZE) > SUPERLINEAR_RATIO
 
+    def test_sizes_on_either_side_of_a_cap_are_rejected_before_timing(self) -> None:
+        """The pairing that failed the gate (00466 N252): 2 ``eval``s parse,
+        16 exceed the nested-shell depth cap, and the guard answers the cap
+        with a logged deny. The sweep must name that, not time it."""
+        guard = SecretFileGuardHandler()
+
+        def input_at(size: int) -> dict:
+            return _bash_input(_deep_eval_nesting_body(size))
+
+        finding = _growth_finding(guard, input_at, 2, _deep_eval_nesting_body(16))
+        assert finding is not None
+        assert finding.startswith("takes another path at 16 than at 2")
+
+
+class TestRegimeIsIndependentOfEarlierWarnings:
+    """The warning component of a regime must not depend on call order."""
+
+    def test_a_rate_limited_warning_is_still_seen_after_an_earlier_burst(self) -> None:
+        unreadable = "x" * (os.pathconf("/", "PC_NAME_MAX") + 1)
+
+        class _Prober(Handler):
+            def __init__(self) -> None:
+                super().__init__(
+                    handler_id=HandlerID.DESTRUCTIVE_GIT,
+                    priority=Priority.DESTRUCTIVE_GIT,
+                )
+
+            def matches(self, hook_input: dict) -> bool:
+                return True
+
+            def handle(self, hook_input: dict) -> HookResult:
+                for _ in range(20):
+                    path_exists(unreadable, unreadable_means=False)
+                return HookResult(decision=Decision.ALLOW)
+
+            def get_claude_md(self) -> str | None:
+                return None
+
+            def get_acceptance_tests(self) -> list[AcceptanceTest]:
+                return []
+
+        handler = _Prober()
+        first = _regime(handler, {})
+        second = _regime(handler, {})
+        assert first == second == (True, "allow", True)
+
 
 class TestCombinatorialSmallInputShapesStayLinear:
     """Every swept handler, driven with SHORT combinatorial hostile shapes.
 
     Plan 00466 N24 follow-up (guard-defects review 3). Distinct from the
-    classes above: every input stays under 300 bytes, so growth here is
-    ONLY explained by the repetition count or nesting depth, never a
+    classes above: every input is a few hundred bytes to a few KB, so growth
+    here is ONLY explained by the repetition count or nesting depth, never a
     legitimately large-input cost.
 
     Plan 00466 N24 review 3 mi4: growth-ratio measure (N vs ``SIZE_FACTOR``
     x N), like ``TestBashCommandShapesStayLinear`` above, instead of an
-    absolute CPU-time bound -- the ``large`` size per shape is unchanged
-    from what the old fixed-body version drove (see
-    ``_SMALL_COMBINATORIAL_SHAPES``), so no shape is pushed any more
-    hostile than it already was proven safe at.
+    absolute CPU-time bound, with both sizes in one regime (see
+    ``_SMALL_COMBINATORIAL_SHAPES``).
     """
 
     @pytest.mark.parametrize("shape_name", _SMALL_SHAPE_NAMES)
     def test_bash_command(self, shape_name: str) -> None:
-        _build, large_size = _SMALL_COMBINATORIAL_SHAPES[shape_name]
-        small_n = max(1, large_size // SIZE_FACTOR)
-        large_text = _hostile_small_bash_command_at(shape_name, large_size)
+        _build, small_n = _SMALL_COMBINATORIAL_SHAPES[shape_name]
+        large_text = _hostile_small_bash_command_at(shape_name, SIZE_FACTOR * small_n)
         superlinear: list[str] = []
         for handler in _all_swept_handlers():
-
-            def work_at(size: int, h: Handler = handler, s: str = shape_name) -> None:
-                _dispatch(
-                    h,
-                    {
-                        "tool_name": "Bash",
-                        "tool_input": {"command": _hostile_small_bash_command_at(s, size)},
-                    },
-                )
-
-            ratio = scaling_ratio(work_at, small_n, large_text)
-            if ratio > SUPERLINEAR_RATIO:
-                superlinear.append(
-                    f"{handler.name} cost grew {ratio:.0f}x for "
-                    f"{SIZE_FACTOR}x input on shape={shape_name!r}"
-                )
+            finding = _growth_finding(
+                handler,
+                lambda size: _bash_input(_hostile_small_bash_command_at(shape_name, size)),
+                small_n,
+                large_text,
+            )
+            if finding is not None:
+                superlinear.append(f"{handler.name} {finding} on shape={shape_name!r}")
         assert not superlinear, "combinatorial-blowup handler(s) found:\n" + "\n".join(superlinear)
 
     @pytest.mark.parametrize("shape_name", _SMALL_SHAPE_NAMES)
     def test_write_file_path(self, shape_name: str, tmp_path: Path) -> None:
-        _build, large_size = _SMALL_COMBINATORIAL_SHAPES[shape_name]
-        small_n = max(1, large_size // SIZE_FACTOR)
-        large_path = _hostile_small_write_path_at(shape_name, large_size, tmp_path)
+        _build, small_n = _SMALL_COMBINATORIAL_SHAPES[shape_name]
+        large_path = _hostile_small_write_path_at(shape_name, SIZE_FACTOR * small_n, tmp_path)
         superlinear: list[str] = []
         for handler in _all_swept_handlers():
-
-            def work_at(size: int, h: Handler = handler, s: str = shape_name) -> None:
-                _dispatch(
-                    h,
-                    {
-                        "tool_name": "Write",
-                        "tool_input": {
-                            "file_path": _hostile_small_write_path_at(s, size, tmp_path),
-                            "content": "clean body\n",
-                        },
+            finding = _growth_finding(
+                handler,
+                lambda size: {
+                    "tool_name": "Write",
+                    "tool_input": {
+                        "file_path": _hostile_small_write_path_at(shape_name, size, tmp_path),
+                        "content": "clean body\n",
                     },
-                )
-
-            ratio = scaling_ratio(work_at, small_n, large_path)
-            if ratio > SUPERLINEAR_RATIO:
-                superlinear.append(
-                    f"{handler.name} cost grew {ratio:.0f}x for "
-                    f"{SIZE_FACTOR}x input on shape={shape_name!r}"
-                )
+                },
+                small_n,
+                large_path,
+            )
+            if finding is not None:
+                superlinear.append(f"{handler.name} {finding} on shape={shape_name!r}")
         assert not superlinear, "combinatorial-blowup handler(s) found:\n" + "\n".join(superlinear)

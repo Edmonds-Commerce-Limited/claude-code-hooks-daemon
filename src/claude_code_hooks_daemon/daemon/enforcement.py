@@ -9,16 +9,70 @@ import os
 from pathlib import Path
 
 from claude_code_hooks_daemon.config.models import Config
-from claude_code_hooks_daemon.daemon.paths import cleanup_pid_file, read_pid_file
+from claude_code_hooks_daemon.constants import Timeout
+from claude_code_hooks_daemon.daemon.paths import read_pid_file, read_pid_file_text
 from claude_code_hooks_daemon.daemon.process_verification import (
+    bound_socket_paths,
     find_all_daemon_processes,
-    is_process_running,
-    kill_daemon_process,
 )
-from claude_code_hooks_daemon.daemon.server import _socket_is_live
+from claude_code_hooks_daemon.daemon.server import _socket_is_live, remove_stale_pid_file
 from claude_code_hooks_daemon.utils.container_detection import is_container_environment
+from claude_code_hooks_daemon.utils.safe_signal import (
+    DaemonStop,
+    RefusedSignalTarget,
+    stop_verified_daemon,
+)
 
 logger = logging.getLogger(__name__)
+
+
+def _stop_peer_daemon(pid: int, project_root: Path, logical_root: str | None) -> str | None:
+    """SIGTERM, then SIGKILL, one peer daemon once it is proven to be ours.
+
+    Returns:
+        None when the peer is gone, otherwise why it could not be stopped.
+    """
+    try:
+        outcome = stop_verified_daemon(
+            pid,
+            project_root=project_root,
+            grace_seconds=Timeout.PROCESS_KILL_WAIT,
+            logical_root=logical_root,
+        )
+    except (RefusedSignalTarget, PermissionError) as failure:
+        return str(failure)
+    return "it survived SIGKILL" if outcome is DaemonStop.SURVIVED else None
+
+
+def _serves_a_socket(pid: int) -> bool:
+    """True when ``pid`` has bound a unix socket to a path: it serves.
+
+    A launcher never binds one, and connects only as a client, whose socket
+    has no path of its own; a daemon binds its socket once it has started.
+    A process whose sockets cannot be read, which includes one in another
+    network namespace whose table this process cannot read, is not proven
+    to serve.
+    """
+    try:
+        return bool(bound_socket_paths(pid))
+    except OSError as exc:
+        logger.info("Cannot read the sockets of PID %d (%s); it is not proven to serve", pid, exc)
+        return False
+
+
+def _serving_only(pids: list[int]) -> list[int]:
+    """``pids`` less every process that serves no socket.
+
+    Such a process is a launcher, which can be waiting on this start's
+    launch lock, or a daemon still starting: a start under way, never a
+    daemon to stop (ledger 00466 N232, lifecycle round 9). Its command line
+    alone cannot tell it from a daemon, as the daemon is its fork.
+    """
+    serving = [pid for pid in pids if _serves_a_socket(pid)]
+    for pid in pids:
+        if pid not in serving:
+            logger.info(f"Sparing PID {pid}: it serves no socket, so it is a start under way")
+    return serving
 
 
 def enforce_single_daemon(
@@ -26,6 +80,7 @@ def enforce_single_daemon(
     pid_path: Path,
     project_root: Path | None = None,
     socket_path: Path | None = None,
+    logical_root: str | None = None,
 ) -> None:
     """Enforce single daemon process constraint.
 
@@ -53,6 +108,10 @@ def enforce_single_daemon(
         socket_path: This start's socket path. When the socket is live, its
             PID-file owner is spared from termination. ``None`` disables the
             spare (legacy behaviour).
+        logical_root: The caller's unresolved spelling of ``project_root``,
+            which a daemon an older version started through a link names
+            (review 10, R10-2). It finds that daemon, which is proven before
+            it is signalled as any other is.
     """
     # Check if enforcement is enabled
     if not config.daemon.enforce_single_daemon_process:
@@ -67,7 +126,7 @@ def enforce_single_daemon(
 
     # Find daemon processes scoped to our own project root (when known) so we
     # never terminate a daemon belonging to a different project.
-    daemon_pids = find_all_daemon_processes(project_root=project_root)
+    daemon_pids = find_all_daemon_processes(project_root=project_root, logical_root=logical_root)
     current_pid = os.getpid()
 
     # Remove current process from list
@@ -82,26 +141,52 @@ def enforce_single_daemon(
             logger.info(f"Sparing live socket owner (PID {incumbent_pid}) from enforcement")
             other_daemons = [pid for pid in other_daemons if pid != incumbent_pid]
 
+    other_daemons = _serving_only(other_daemons)
+
     logger.debug(f"Found {len(other_daemons)} other daemon process(es)")
 
-    # In container: Kill all other daemons (system-wide enforcement)
-    if in_container and other_daemons:
+    # In container: stop every other daemon of THIS project root. Each pid is
+    # re-proven by stop_verified_daemon, so without a project root nothing can
+    # be proven ours and nothing is signalled (Plan 00466 N59).
+    if in_container and other_daemons and project_root is None:
+        logger.error(
+            f"Container environment: {len(other_daemons)} other daemon process(es) found, "
+            "but no project root to prove they are this project's; signalling none"
+        )
+    elif in_container and other_daemons and project_root is not None:
         logger.warning(
             f"Container environment: Killing {len(other_daemons)} other daemon process(es)"
         )
         for pid in other_daemons:
             logger.info(f"Killing daemon process {pid}")
-            if kill_daemon_process(pid):
+            failure = _stop_peer_daemon(pid, project_root, logical_root)
+            if failure is None:
                 logger.info(f"Successfully killed daemon process {pid}")
             else:
-                logger.error(f"Failed to kill daemon process {pid}")
+                logger.error(f"Failed to kill daemon process {pid}: {failure}")
 
     # Outside container: Only clean up stale PID file (conservative)
     elif not in_container:
         logger.debug("Non-container environment: Using conservative cleanup")
+        _remove_stale_pid_file(pid_path, socket_path)
 
-        # Check if PID file exists and points to dead process
-        pid_from_file = read_pid_file(str(pid_path))
-        if pid_from_file is not None and not is_process_running(pid_from_file):
-            logger.info(f"Cleaning up stale PID file: {pid_path} (PID {pid_from_file})")
-            cleanup_pid_file(str(pid_path))
+
+def _remove_stale_pid_file(pid_path: Path, socket_path: Path | None) -> None:
+    """Remove ``pid_path`` if it names no live process, under the start lock.
+
+    A start writes its pid under that lock, so outside it a successor's file
+    could go (Plan 00466 N204). Without a socket there is no lock to hold,
+    and the file stays; a starting daemon overwrites it.
+    """
+    if socket_path is None:
+        logger.debug("No socket path, so no start lock to hold; leaving %s", pid_path)
+        return
+    read = read_pid_file_text(pid_path)
+    if read.unreadable is not None:
+        logger.warning("Cannot read PID file %s: %s", pid_path, read.unreadable)
+        return
+    if read.text is None:
+        return
+    seen = read.text.rstrip("\n")
+    if remove_stale_pid_file(pid_path, socket_path, seen):
+        logger.info(f"Cleaned up stale PID file: {pid_path} ({seen!r})")

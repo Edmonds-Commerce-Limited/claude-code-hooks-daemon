@@ -1375,7 +1375,7 @@ After the upgrade completes (whether successful or not), create a detailed feedb
 
 ```bash
 # Create feedback file at project root
-cat > upgrade-feedback-$(date +%Y%m%d).md << 'FEEDBACK'
+cat > upgrade-feedback.md << 'FEEDBACK'
 # Upgrade Feedback Report
 
 ## Environment

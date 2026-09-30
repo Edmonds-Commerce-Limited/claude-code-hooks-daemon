@@ -18,23 +18,44 @@ These tests cover the server.py layer:
 
 import asyncio
 import contextlib
+import fcntl
+import logging
+import os
+import shutil
 import socket as socket_module
+import subprocess
+import sys
+import tempfile
+import threading
+import time
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
-from unittest.mock import patch
+from unittest.mock import ANY, MagicMock, patch
 
 import pytest
 
 from claude_code_hooks_daemon.config.models import DaemonConfig, LogLevel
 from claude_code_hooks_daemon.constants import Timeout
+from claude_code_hooks_daemon.core.project_context import ProjectContext
+from claude_code_hooks_daemon.daemon.paths import cleanup_stale_daemon_files
 from claude_code_hooks_daemon.daemon.server import (
     DaemonAlreadyRunningError,
+    DaemonIdentity,
     HooksDaemon,
+    LaunchLock,
+    NoDaemonIdentity,
+    StartLockTimeout,
+    StartUnderWay,
     _pid_file_points_at_live_process,
     _probe_socket_live,
     _probe_socket_liveness,
     _socket_is_live,
     _SocketLiveness,
+    daemon_socket_identity,
+    hold_start_lock,
+    launch_lock_path,
+    start_under_way,
 )
 
 
@@ -278,6 +299,19 @@ def test_pid_file_points_at_live_process_false_for_garbage(tmp_path: Path) -> No
     assert _pid_file_points_at_live_process(pid_path) is False
 
 
+@pytest.mark.parametrize("text", ["0", "-1", "1", "007", " 12 "])
+def test_pid_file_points_at_live_process_false_for_what_names_no_pid(
+    tmp_path: Path, text: str
+) -> None:
+    """Plan 00466 round 6 (Sh-3): ``int()`` read ``0`` and ``-1`` as pids,
+    and signal 0 to either succeeds against this process's own group or
+    every process, so a corrupt PID file read as a live incumbent and the
+    child would not clear a dead socket. Signal 0 only: nothing is sent."""
+    pid_path = tmp_path / "daemon.pid"
+    pid_path.write_text(text)
+    assert _pid_file_points_at_live_process(pid_path) is False
+
+
 def test_socket_is_live_sync_wrapper_false_when_missing(tmp_path: Path) -> None:
     """Sync wrapper usable outside an event loop; missing path => False."""
     assert _socket_is_live(tmp_path / "missing.sock") is False
@@ -421,6 +455,38 @@ async def test_write_pid_file_overwrites_when_old_pid_dead(tmp_path: Path) -> No
     # PID file overwritten with our own PID.
     import os
 
+    assert pid_path.read_text().strip() == str(os.getpid())
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("text", ["0", "-1", "1", "007", "+12", "1_2"])
+async def test_write_pid_file_treats_text_that_is_no_daemons_pid_as_stale(
+    tmp_path: Path, text: str
+) -> None:
+    """Plan 00466 round 5 (P4-4): ``int()`` read ``0`` as a pid, and
+    ``kill(0, 0)`` succeeds against this daemon's own process group, so with
+    the socket live a corrupt file refused the start as a live incumbent.
+    The shared parser never probes it."""
+    import os
+
+    sock_path = tmp_path / "pid_corrupt.sock"
+    pid_path = tmp_path / "daemon.pid"
+    pid_path.write_text(text)
+    daemon = _make_daemon(sock_path, pid_file_path=pid_path)
+
+    async def _live(_path: Path) -> bool:
+        return True
+
+    with (
+        patch("claude_code_hooks_daemon.daemon.server.os.kill") as kill,
+        patch(
+            "claude_code_hooks_daemon.daemon.server._probe_socket_live",
+            side_effect=_live,
+        ),
+    ):
+        await daemon._write_pid_file()
+
+    kill.assert_not_called()
     assert pid_path.read_text().strip() == str(os.getpid())
 
 
@@ -602,6 +668,268 @@ async def test_concurrent_starts_yield_single_daemon(tmp_path: Path) -> None:
                 await asyncio.wait_for(task, timeout=Timeout.SOCKET_CONNECT)
 
 
+@pytest.mark.anyio
+async def test_a_start_waiting_on_anothers_lock_says_so_and_when_it_has_it(
+    tmp_path: Path,
+) -> None:
+    """Review 8, R8-2: the wait spends no CPU and finishes no step, so its
+    launcher read it as a stall unless it is told."""
+    sock_path = tmp_path / "held.sock"
+    reports: list[bool] = []
+    daemon = HooksDaemon(
+        config=_make_config(sock_path),
+        controller=_FakeController(),
+        start_lock_waiting=reports.append,
+    )
+    with hold_start_lock(sock_path, Timeout.FILE_LOCK):
+        start_task = asyncio.create_task(daemon.start())
+        while not reports:
+            await asyncio.sleep(0.01)
+        assert reports == [True]
+        assert daemon.server is None
+    try:
+        await asyncio.wait_for(daemon.started_event.wait(), timeout=Timeout.SOCKET_CONNECT)
+        assert reports == [True, False]
+    finally:
+        await daemon.shutdown()
+        await asyncio.wait_for(start_task, timeout=Timeout.SOCKET_CONNECT)
+
+
+@pytest.mark.anyio
+async def test_a_start_that_takes_the_lock_at_once_reports_no_wait(tmp_path: Path) -> None:
+    reports: list[bool] = []
+    daemon = HooksDaemon(
+        config=_make_config(tmp_path / "free.sock"),
+        controller=_FakeController(),
+        start_lock_waiting=reports.append,
+    )
+    start_task = asyncio.create_task(daemon.start())
+    try:
+        await asyncio.wait_for(daemon.started_event.wait(), timeout=Timeout.SOCKET_CONNECT)
+        assert reports == []
+    finally:
+        await daemon.shutdown()
+        await asyncio.wait_for(start_task, timeout=Timeout.SOCKET_CONNECT)
+
+
+@pytest.mark.anyio
+async def test_a_start_says_when_it_serves_and_not_before(tmp_path: Path) -> None:
+    """Round 8b: the launch lock is released once the daemon serves, so
+    ``serving`` is called only after both binding steps."""
+    served: list[bool] = []
+    daemon = HooksDaemon(
+        config=_make_config(tmp_path / "s.sock"),
+        controller=_FakeController(),
+        serving=lambda: served.append(daemon.started_event.is_set()),
+    )
+    start_task = asyncio.create_task(daemon.start())
+    try:
+        await asyncio.wait_for(daemon.started_event.wait(), timeout=Timeout.SOCKET_CONNECT)
+        assert served == [True]
+    finally:
+        await daemon.shutdown()
+        await asyncio.wait_for(start_task, timeout=Timeout.SOCKET_CONNECT)
+
+
+class TestTheLaunchLock:
+    """Plan 00466 lifecycle round 8b: the lock a start holds from its
+    launch until its daemon serves. flock is per open file, so a second
+    open in this process contends with the first as another process would."""
+
+    @staticmethod
+    def _clock() -> Any:
+        """``server``'s clock, advanced only by its own sleeps."""
+        now = [0.0]
+        clock = MagicMock(wraps=time)
+        clock.monotonic.side_effect = lambda: now[0]
+        clock.sleep.side_effect = lambda seconds: now.__setitem__(0, now[0] + seconds)
+        return patch("claude_code_hooks_daemon.daemon.server.time", clock)
+
+    def test_it_is_the_projects_whatever_socket_a_start_uses(self, tmp_path: Path) -> None:
+        """Review 9, DR-4: enforcement picks its targets by project root, so
+        every start of one project takes one lock, and a start through a
+        link to the project takes the same one."""
+        project = tmp_path / "project"
+        project.mkdir()
+        (tmp_path / "link").symlink_to(project)
+        path = launch_lock_path(project)
+        assert path == launch_lock_path(tmp_path / "link")
+        assert path != launch_lock_path(tmp_path / "other")
+        assert path.name == "daemon.launch.lock"
+
+    def test_the_stale_file_reaper_never_removes_it(self, tmp_path: Path) -> None:
+        """A start reaps before it takes the lock; a lock unlinked under a
+        holder leaves the next start a fresh file, excluding nobody."""
+        path = launch_lock_path(tmp_path)
+        LaunchLock.take(path, Timeout.FILE_LOCK).release()
+        long_ago = time.time() - 365 * 86400
+        os.utime(path, (long_ago, long_ago))
+
+        cleanup_stale_daemon_files(tmp_path, max_age_days=1)
+
+        assert path.exists()
+
+    def test_a_second_start_waits_out_its_budget_on_a_start_under_way(self, tmp_path: Path) -> None:
+        path = launch_lock_path(tmp_path)
+        first = LaunchLock.take(path, Timeout.FILE_LOCK)
+        try:
+            with self._clock(), pytest.raises(StartLockTimeout):
+                LaunchLock.take(path, Timeout.DAEMON_START_BUDGET_SEC)
+        finally:
+            first.release()
+
+    def test_a_start_that_ended_leaves_it_free(self, tmp_path: Path) -> None:
+        path = launch_lock_path(tmp_path)
+        LaunchLock.take(path, Timeout.FILE_LOCK).release()
+        LaunchLock.take(path, Timeout.FILE_LOCK).release()
+
+    def test_a_forked_holder_keeps_it_when_the_launcher_closes_its_copy(
+        self, tmp_path: Path
+    ) -> None:
+        """``close`` is the launcher's, after the fork: the daemon holding
+        the same open file keeps the start under way. A dup stands in for
+        the forked copy."""
+        path = launch_lock_path(tmp_path)
+        path.parent.mkdir(parents=True)
+        fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o600)
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        launcher = LaunchLock(fd, path)
+        daemon = LaunchLock(os.dup(fd), path)
+        launcher.close()
+        try:
+            under_way = start_under_way(path)
+            assert under_way is not None and under_way.pid is None
+        finally:
+            daemon.release()
+        assert start_under_way(path) is None
+
+    def test_the_daemon_it_names_is_the_start_under_way(self, tmp_path: Path) -> None:
+        path = launch_lock_path(tmp_path)
+        held = LaunchLock.take(path, Timeout.FILE_LOCK)
+        try:
+            held.name_holder()
+            assert start_under_way(path) == StartUnderWay(pid=os.getpid(), written_at=ANY)
+        finally:
+            held.release()
+
+    def test_it_says_when_the_lock_was_last_written(self, tmp_path: Path) -> None:
+        """Review 10, R10-3: the holder takes the lock, and the daemon names
+        itself, after each started; ``stop`` refuses a process that started
+        later, whose pid was reused."""
+        path = launch_lock_path(tmp_path)
+        held = LaunchLock.take(path, Timeout.FILE_LOCK)
+        try:
+            held.name_holder()
+            under_way = start_under_way(path)
+            assert under_way is not None
+            assert under_way.written_at == path.stat().st_mtime
+        finally:
+            held.release()
+
+    def test_a_pid_an_earlier_start_left_names_nobody(self, tmp_path: Path) -> None:
+        path = launch_lock_path(tmp_path)
+        earlier = LaunchLock.take(path, Timeout.FILE_LOCK)
+        earlier.name_holder()
+        earlier.release()
+        held = LaunchLock.take(path, Timeout.FILE_LOCK)
+        try:
+            under_way = start_under_way(path)
+            assert under_way is not None and under_way.pid is None
+        finally:
+            held.release()
+
+    def test_no_start_under_way_is_none(self, tmp_path: Path) -> None:
+        assert start_under_way(launch_lock_path(tmp_path)) is None
+
+    def test_a_planted_symlink_is_refused(self, tmp_path: Path) -> None:
+        path = launch_lock_path(tmp_path)
+        path.parent.mkdir(parents=True)
+        path.symlink_to(tmp_path / "planted")
+        with pytest.raises(OSError):
+            LaunchLock.take(path, Timeout.FILE_LOCK)
+        with pytest.raises(OSError):
+            start_under_way(path)
+        assert not (tmp_path / "planted").exists()
+
+
+#: Takes the launch lock named by argv[1], says so, and holds it until stdin closes.
+_HOLD_THE_LOCK = (
+    "import fcntl, os, sys; fd = os.open(sys.argv[1], os.O_RDWR | os.O_CREAT, 0o600); "
+    "fcntl.flock(fd, fcntl.LOCK_EX); print(os.getpid(), flush=True); sys.stdin.read()"
+)
+#: As _HOLD_THE_LOCK, but the taker forks and exits, leaving its child the lock.
+_HAND_THE_LOCK_ON = (
+    "import fcntl, os, sys; fd = os.open(sys.argv[1], os.O_RDWR | os.O_CREAT, 0o600); "
+    "fcntl.flock(fd, fcntl.LOCK_EX)\n"
+    "if os.fork():\n    os._exit(0)\n"
+    "print(os.getpid(), flush=True); sys.stdin.read()"
+)
+
+
+class TestTheLaunchLocksHolderBeforeItNamesADaemon:
+    """Review 9, DR-5: a launcher that hangs before its fork holds the lock
+    and names nothing. The kernel's lock table names it, by the pid that
+    took the lock and the file's inode; it must still hold the file open."""
+
+    @contextlib.contextmanager
+    def _held(self, path: Path, program: str) -> Iterator[int]:
+        """A real process holding ``path`` locked; yields the pid it prints.
+
+        It ends when its stdin closes, so no signal is ever sent to it."""
+        path.parent.mkdir(parents=True, exist_ok=True)
+        holder = subprocess.Popen(
+            [sys.executable, "-c", program, str(path)],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            text=True,
+        )
+        assert holder.stdin is not None and holder.stdout is not None
+        try:
+            yield int(holder.stdout.readline())
+        finally:
+            holder.stdin.close()
+            holder.wait(timeout=Timeout.PROCESS_SAMPLE)
+            holder.stdout.close()
+
+    def test_a_launcher_holding_it_is_named_by_the_lock_table(self, tmp_path: Path) -> None:
+        path = launch_lock_path(tmp_path)
+        with self._held(path, _HOLD_THE_LOCK) as launcher:
+            assert start_under_way(path) == StartUnderWay(pid=None, holder=launcher, written_at=ANY)
+
+    def test_a_taker_that_has_exited_names_no_holder(self, tmp_path: Path) -> None:
+        """The table still names the pid that took the lock; the child now
+        holding it is not that pid, so nothing is named."""
+        path = launch_lock_path(tmp_path)
+        with self._held(path, _HAND_THE_LOCK_ON):
+            assert start_under_way(path) == StartUnderWay(pid=None, holder=None, written_at=ANY)
+
+    def test_no_lock_table_names_no_holder(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        path = launch_lock_path(tmp_path)
+        with (
+            caplog.at_level(logging.INFO, logger="claude_code_hooks_daemon.daemon.server"),
+            self._held(path, _HOLD_THE_LOCK),
+            patch("claude_code_hooks_daemon.daemon.server._PROC_LOCKS", tmp_path / "no-lock-table"),
+        ):
+            assert start_under_way(path) == StartUnderWay(pid=None, holder=None, written_at=ANY)
+        assert any("no-lock-table" in record.getMessage() for record in caplog.records)
+
+    def test_a_table_line_for_another_file_names_no_holder(self, tmp_path: Path) -> None:
+        """A candidate that does not hold this very file open is not its holder,
+        whatever inode the table gives."""
+        path = launch_lock_path(tmp_path)
+        table = tmp_path / "locks"
+        with self._held(path, _HOLD_THE_LOCK) as launcher:
+            inode = path.stat().st_ino
+            table.write_text(
+                f"1: FLOCK  ADVISORY  WRITE {os.getppid()} 00:00:{inode} 0 EOF\n"
+                f"2: -> FLOCK  ADVISORY  WRITE {launcher} 00:00:{inode} 0 EOF\n"
+            )
+            with patch("claude_code_hooks_daemon.daemon.server._PROC_LOCKS", table):
+                assert start_under_way(path) == StartUnderWay(pid=None, holder=None, written_at=ANY)
+
+
 def test_start_lock_path_is_sibling_of_socket(tmp_path: Path) -> None:
     """The start-lock file is a deterministic sibling of the socket path."""
     sock_path = tmp_path / "daemon.sock"
@@ -609,3 +937,104 @@ def test_start_lock_path_is_sibling_of_socket(tmp_path: Path) -> None:
     assert lock_path.parent == sock_path.parent
     assert lock_path.name.startswith(sock_path.name)
     assert lock_path != sock_path
+
+
+# --------------------------------------------------------------------------- #
+# The daemon's identity answer (Plan 00466 round 6, Sh-2)
+# --------------------------------------------------------------------------- #
+
+
+@pytest.fixture
+def short_socket() -> Iterator[Path]:
+    """AF_UNIX paths are capped near 108 bytes; ``tmp_path`` nests deeper."""
+    directory = Path(tempfile.mkdtemp(prefix="hd-identity-"))
+    yield directory / "daemon.sock"
+    shutil.rmtree(directory)
+
+
+@contextlib.contextmanager
+def _serving_daemon(daemon: HooksDaemon, path: Path) -> Iterator[None]:
+    """``daemon``'s own client handler, serving ``path`` from another thread."""
+    loop = asyncio.new_event_loop()
+    server = loop.run_until_complete(asyncio.start_unix_server(daemon._handle_client, str(path)))
+    thread = threading.Thread(target=loop.run_forever, daemon=True)
+    thread.start()
+    try:
+        yield
+    finally:
+        loop.call_soon_threadsafe(loop.stop)
+        thread.join(timeout=Timeout.REQUEST_LONG)
+        server.close()
+        loop.run_until_complete(server.wait_closed())
+        loop.close()
+
+
+def test_the_daemon_answers_which_project_it_serves(tmp_path: Path, short_socket: Path) -> None:
+    daemon = _make_daemon(short_socket)
+    with (
+        patch.object(ProjectContext, "project_root", return_value=tmp_path),
+        _serving_daemon(daemon, short_socket),
+    ):
+        identity = daemon_socket_identity(short_socket)
+    assert identity == DaemonIdentity(project_root=str(tmp_path), pid=os.getpid())
+
+
+def test_a_daemon_that_does_not_know_its_project_gives_no_identity(
+    short_socket: Path,
+) -> None:
+    """The daemon's own log says why it named nothing, as its answer does."""
+    daemon = _make_daemon(short_socket)
+    with (
+        patch("claude_code_hooks_daemon.daemon.server.logger") as server_log,
+        patch.object(ProjectContext, "project_root", side_effect=RuntimeError("uninitialised")),
+        _serving_daemon(daemon, short_socket),
+    ):
+        identity = daemon_socket_identity(short_socket)
+    assert isinstance(identity, NoDaemonIdentity)
+    assert "no project to name" in identity.reason
+    assert any(
+        "uninitialised" in str(warned.args[-1]) for warned in server_log.warning.call_args_list
+    )
+
+
+@pytest.mark.parametrize(
+    "answer",
+    [b"", b"not json\n", b"[]\n", b'{"result": {}}\n', b'{"result": {"project_root": 7}}\n'],
+)
+def test_a_listener_that_does_not_answer_as_a_daemon_gives_no_identity(
+    short_socket: Path, answer: bytes
+) -> None:
+    listener = socket_module.socket(socket_module.AF_UNIX, socket_module.SOCK_STREAM)
+    listener.bind(str(short_socket))
+    listener.listen(1)
+
+    def reply() -> None:
+        connection, _ = listener.accept()
+        with connection:
+            connection.recv(4096)
+            connection.sendall(answer)
+
+    replier = threading.Thread(target=reply, daemon=True)
+    replier.start()
+    try:
+        identity = daemon_socket_identity(short_socket)
+    finally:
+        replier.join(timeout=Timeout.REQUEST_LONG)
+        listener.close()
+    assert isinstance(identity, NoDaemonIdentity)
+    assert identity.reason
+
+
+def test_no_socket_gives_no_identity(short_socket: Path) -> None:
+    identity = daemon_socket_identity(short_socket)
+    assert isinstance(identity, NoDaemonIdentity)
+    assert "cannot connect" in identity.reason
+
+
+def test_inside_a_running_loop_there_is_no_identity() -> None:
+    async def probe() -> DaemonIdentity | NoDaemonIdentity:
+        return daemon_socket_identity(Path("/nonexistent/daemon.sock"))
+
+    identity = asyncio.run(probe())
+    assert isinstance(identity, NoDaemonIdentity)
+    assert "event loop" in identity.reason

@@ -124,7 +124,7 @@ class PlanQaCommitGateHandler(PreToolUseHandlerBase):
                 plan_dir_rel=plan_dir_rel,
                 policy=self._plan_qa,
                 commit_message=_extract_commit_message(tokens),
-                pathspecs=_extract_commit_pathspecs(tokens),
+                pathspecs=_extract_commit_pathspecs(command),
                 exclude_paths=self._project_exclude_paths,
             )
         except FileNotFoundError:
