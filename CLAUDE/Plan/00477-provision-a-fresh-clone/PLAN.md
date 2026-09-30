@@ -1,6 +1,6 @@
 # Plan 00477: provision a fresh clone
 
-**Status**: Not Started
+**Status**: In Progress
 **Created**: 2026-09-30
 **Owner**: dev
 **Priority**: High
@@ -56,24 +56,24 @@ anything themselves: a person or agent runs provision.
 
 ### Phase 1: The expected version lives in config
 
-- [ ] ⬜ **Task 1.1**: Decide the key (for example `daemon.expected_version` in
+- [x] ✅ **Task 1.1**: Decide the key (for example `daemon.expected_version` in
   `.claude/hooks-daemon.yaml`). `install` and `upgrade` write it, config
   validation accepts it, and the config-changes manifest records it.
-- [ ] ⬜ **Task 1.2**: One resolver, in bash (hooks cannot rely on the venv),
+- [x] ✅ **Task 1.2**: One resolver, in bash (hooks cannot rely on the venv),
   reads the key, falls back to the `.claude/HOOKS-DAEMON.md` header for projects
   that predate it, and reports "unknown" rather than guessing.
 
 ### Phase 2: The provision command
 
-- [ ] ⬜ **Task 2.1**: A deployed `.claude/provision.sh` (tracked in the client,
+- [ ] 🔄 **Task 2.1**: A deployed `.claude/provision.sh` (tracked in the client,
   so it exists before the daemon does) and a `hooks-daemon` skill verb
   `provision`. It clones the resolved version's tag, never `main`, builds the
   venv through the existing venv-build lock, and starts the daemon.
-- [ ] ⬜ **Task 2.2**: Provision never writes a tracked file. Verify it against a
+- [ ] 🔄 **Task 2.2**: Provision never writes a tracked file. Verify it against a
   configured fixture project: `git status` is clean afterwards. It refuses, and
   explains, when a clone is already present (pointing at `upgrade`, or at the
   Plan 00454 repair for a missing venv), and when the version is unknown.
-- [ ] ⬜ **Task 2.3**: No session restart is needed after provisioning, because
+- [ ] 🔄 **Task 2.3**: No session restart is needed after provisioning, because
   the hooks are already registered in the tracked `settings.json`. Prove it, and
   say so in the output instead of "restart your session".
 

@@ -73,6 +73,8 @@ source "$INSTALL_LIB_DIR/daemon_control.sh"
 source "$INSTALL_LIB_DIR/rollback.sh"
 # shellcheck source=install/settings_deploy.sh
 source "$INSTALL_LIB_DIR/settings_deploy.sh"
+# shellcheck source=install/expected_version.sh
+source "$INSTALL_LIB_DIR/expected_version.sh"
 # shellcheck source=install/config_preserve.sh
 source "$INSTALL_LIB_DIR/config_preserve.sh"
 # shellcheck source=install/upgrade_transition.sh
@@ -1003,6 +1005,11 @@ FASTPATH_RELAY_PY
         print_warning "Failed to regenerate handler docs (non-fatal; run 'hooks-daemon regenerate-docs')"
     fi
 
+    # Plan 00477: the tracked config names the version a fresh clone provisions.
+    if ! record_expected_version "$VENV_PYTHON" "$PROJECT_ROOT"; then
+        print_warning "Could not record daemon.expected_version (non-fatal; provision falls back to the HOOKS-DAEMON.md header)"
+    fi
+
     consume_used_approval
     print_success "$(upgrade_transition_summary "$INSTALLED_VERSION" "$INSTALL_STAMP")"
     if [ "$BRANCH_INSTALL_STATE" = "armed" ]; then
@@ -1586,6 +1593,11 @@ if "$VENV_PYTHON" -m claude_code_hooks_daemon.daemon.cli generate-docs --project
     print_success "Regenerated .claude/HOOKS-DAEMON.md"
 else
     print_warning "Failed to regenerate handler docs (non-fatal; run 'hooks-daemon regenerate-docs')"
+fi
+
+# Plan 00477: the tracked config names the version a fresh clone provisions.
+if ! record_expected_version "$VENV_PYTHON" "$PROJECT_ROOT"; then
+    print_warning "Could not record daemon.expected_version (non-fatal; provision falls back to the HOOKS-DAEMON.md header)"
 fi
 
 # ============================================================

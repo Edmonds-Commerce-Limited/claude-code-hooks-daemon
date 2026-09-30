@@ -7,6 +7,23 @@ breaking: false
 
 config_changes:
   added:
+    - key: daemon.expected_version
+      recommended: false
+      dormant: false
+      description: >-
+        NEW (Plan 00477). The daemon version this project expects, strictly
+        X.Y.Z. `install` and `upgrade` write it after the deploy, so the
+        tracked config names the version a fresh checkout is provisioned at:
+        `bash .claude/provision.sh` fetches exactly this tag, never `main`.
+        Distinct from the top-level `version`, which is the config SCHEMA
+        version. A project that predates the key falls back to the
+        `.claude/HOOKS-DAEMON.md` header.
+      example_yaml: |
+        daemon:
+          expected_version: "3.68.0"
+      migration_note: >-
+        Nothing to do: the next upgrade records it. Commit the changed
+        `.claude/hooks-daemon.yaml` and the new `.claude/provision.sh`.
     - key: handlers.pre_tool_use.upgrade_approval_guard
       description: >-
         Denies an agent action that grants or bypasses the project owner's

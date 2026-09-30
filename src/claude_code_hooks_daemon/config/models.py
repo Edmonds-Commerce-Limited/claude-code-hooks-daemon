@@ -1860,10 +1860,19 @@ class DaemonConfig(BaseModel):
         self_install_mode: Whether daemon runs from project root (vs .claude/hooks-daemon/)
         strict_mode: Fail-fast on ALL errors (handler exceptions, validation errors, etc.)
         input_validation: Input validation configuration
+        expected_version: Daemon version this project expects (Plan 00477), strictly
+            X.Y.Z. Written by install and upgrade; ``.claude/provision.sh`` installs
+            exactly this version into a fresh checkout. Distinct from the top-level
+            ``version``, which is the config SCHEMA version.
     """
 
     model_config = ConfigDict(extra="allow")
 
+    expected_version: str | None = Field(
+        default=None,
+        pattern=r"^[0-9]+\.[0-9]+\.[0-9]+$",
+        description="Daemon version this project expects (X.Y.Z); provision installs exactly it",
+    )
     idle_timeout_seconds: Annotated[int, Field(ge=1)] = Field(
         default=600,
         description="Idle timeout in seconds",
