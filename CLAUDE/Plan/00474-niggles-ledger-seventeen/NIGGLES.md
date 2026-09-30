@@ -437,7 +437,16 @@ Whether N101's merge made the scan slower is not established.
 expensive step. Add a performance test with a budget relative to a baseline,
 not a wall-clock bound (the N222 lesson).
 
-**Status**: ⬜ Open.
+**Fix**: the hot spot was `_globs_can_intersect` in `secret_file_matching.py`: 48,600
+DP calls (about 807,000 grid cells for a 30-event program) because each token's bracket
+expansions, such as `["tool_name"]` into nine spellings, were each run against all 54
+protected patterns. A spelling with no wildcard is now one cached regex match. Two
+smaller quadratic steps were also removed (`_outside_every_span` rebuilt its start list
+per call; `split_unquoted_spans` scanned every separator at every character). Tests count
+DP cells against command length, not seconds. Report:
+[subagent-reports/260930-n265-guard-cost-sonnet.md](subagent-reports/260930-n265-guard-cost-sonnet.md).
+
+**Status**: ✅ Fixed (branch `worktree-n265-guard-cost`, not yet merged).
 
 ### N135, N176, N177, N189, N244–N246 — carried from the dropped N53 branch
 

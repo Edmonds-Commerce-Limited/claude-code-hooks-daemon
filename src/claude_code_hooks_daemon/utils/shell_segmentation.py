@@ -2923,17 +2923,27 @@ def split_unquoted_spans(text: str, separators: Sequence[str]) -> list[tuple[int
     in_double = False
     in_comment = False
     index = 0
+    # A separator can only start at one of these characters, so the per-
+    # character scan of `separators` is skipped everywhere else (N265). An
+    # empty separator matches anywhere and keeps the full scan.
+    first_chars = frozenset(sep[0] for sep in separators if sep)
+    all_nonempty = all(separators)
 
     while index < len(text):
         char = text[index]
         unquoted = not in_single and not in_double
+        may_separate = char in first_chars or not all_nonempty
 
         # A comment runs to the newline and its quotes are characters, but its
         # separators still split: judging comment text as commands is the
         # conservative reading, and a quote in it must not swallow later lines.
         if in_comment or (unquoted and _starts_comment(text, index)):
             in_comment = char != _NEWLINE
-            matched = next((sep for sep in separators if text.startswith(sep, index)), None)
+            matched = (
+                next((sep for sep in separators if text.startswith(sep, index)), None)
+                if may_separate
+                else None
+            )
             if matched is not None:
                 spans.append((start, index))
                 index += len(matched)
@@ -2961,7 +2971,7 @@ def split_unquoted_spans(text: str, separators: Sequence[str]) -> list[tuple[int
             in_single = not in_single
         elif char == _DOUBLE_QUOTE and not in_single:
             in_double = not in_double
-        elif not in_single and not in_double:
+        elif not in_single and not in_double and may_separate:
             matched = next((sep for sep in separators if text.startswith(sep, index)), None)
             if matched is not None:
                 spans.append((start, index))

@@ -919,6 +919,18 @@ def dp_cell_counter() -> Iterator[list[int]]:
         _dp_cell_counter.reset(token)
 
 
+@functools.lru_cache(maxsize=256)
+def _wildcard_regex(glob: str) -> re.Pattern[str]:
+    """``glob`` as a regex in which only ``*`` (any run) and ``?`` (any one
+    character) are special -- the two wildcards ``_globs_can_intersect``
+    understands. The cache is keyed on the pattern text alone (shipped
+    patterns repeat for every token), so no per-request state is held."""
+    return re.compile(
+        "".join(".*" if ch == "*" else "." if ch == "?" else re.escape(ch) for ch in glob),
+        re.DOTALL,
+    )
+
+
 def _globs_can_intersect(a: str, b: str) -> bool:
     """True when some single string could be matched by BOTH ``a`` and ``b``,
     each read as a ``*``/``?`` glob (N10, Plan 00466 review).
@@ -987,6 +999,11 @@ def _globs_can_intersect(a: str, b: str) -> bool:
     len_a, len_b = len(a), len(b)
     if len_a * len_b > _DP_MAX_CELLS:
         return True
+    # N265: a token with no wildcard of its own (the usual case once its
+    # brackets are expanded) intersects a glob exactly when that glob matches
+    # it, which one compiled-regex match answers without the grid.
+    if "*" not in a and "?" not in a:
+        return _wildcard_regex(b).fullmatch(a) is not None
     # Rolling two-row DP instead of a full (len_a+1) x (len_b+1) grid: the
     # transition for row `i` only ever reads row `i-1` and the CURRENT
     # row's own previous cell, so one full grid's worth of list-of-lists
