@@ -950,6 +950,15 @@ class HandlerID:
         config_key="subagent_cron_delete_blocker",
         display_name="subagent-cron-delete-blocker",
     )
+    # Subagent worktree write guard (PreToolUse handler) -- ledger 00474 N264: a
+    # sub-agent's edits landed, uncommitted, in a SIBLING branch's worktree.
+    # scope=SUB; denies a Write/Edit/NotebookEdit from inside a linked worktree
+    # into any other checkout of the same repository.
+    SUBAGENT_WORKTREE_WRITE_GUARD = HandlerIDMeta(
+        class_name="SubagentWorktreeWriteGuardHandler",
+        config_key="subagent_worktree_write_guard",
+        display_name="subagent-worktree-write-guard",
+    )
     # Subagent full-QA blocker (PreToolUse handler) -- Plan 00463: the full QA
     # gate is the coordinator's, run once per delivery, so a sub-agent's
     # full-suite run is denied and pointed at the targeted form. scope=SUB,

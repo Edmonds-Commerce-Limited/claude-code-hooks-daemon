@@ -168,6 +168,10 @@ class ConfigTemplate:
             # and a subagent cannot know why it exists. SUB-scoped, so the main
             # thread's own CronDelete is untouched.
             "    subagent_cron_delete_blocker: {enabled: true, priority: 14}  # A subagent deletes no session cron\n"
+            # Ledger 00474 N264: a subagent's edits landed in a SIBLING branch's
+            # worktree. SUB-scoped; judges only a subagent whose cwd is a linked
+            # worktree, and only a write into another checkout of that repository.
+            "    subagent_worktree_write_guard: {enabled: true, priority: 14}  # A subagent writes only in its own worktree\n"
             # Plan 00272: protected files (vault passwords, *.secret*, SSH keys)
             # must never have their CONTENTS read into context by any route.
             # Presence/metadata stay available via `hooks-daemon secret-meta`.

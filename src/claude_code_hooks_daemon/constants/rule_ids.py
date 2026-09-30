@@ -544,6 +544,13 @@ class RuleID:
     SUBAGENT_CRON_DELETE: str = "R-SUBAGENT-CRON-DELETE"
 
     # ------------------------------------------------------------------
+    # subagent_worktree_write_guard handler
+    # ------------------------------------------------------------------
+
+    #: A subagent's Write/Edit/NotebookEdit into another checkout of its repository.
+    SUBAGENT_CROSS_WORKTREE_WRITE: str = "R-SUBAGENT-CROSS-WORKTREE-WRITE"
+
+    # ------------------------------------------------------------------
     # subagent_full_qa_blocker handler (ships disabled)
     # ------------------------------------------------------------------
 

@@ -23,7 +23,7 @@ handler" is a description and not a property the code can check:
 - `teammate-reap-advisor` names the unreaped teammates a stop is waiting on.
   Only the coordinator has teammates.
 
-Two handlers ship scoped to SUB, and they are the only ones that gain anything
+Three handlers ship scoped to SUB, and they are the only ones that gain anything
 from it:
 
 - `subagent-cron-delete-blocker` (Plan 00423 Task 3.2) denies `CronDelete`
@@ -33,6 +33,9 @@ from it:
 - `subagent-full-qa-blocker` (Plan 00463) denies a sub-agent's full-suite QA
   run, because the full gate is the coordinator's. Same reason: `PreToolUse`
   fires for both roles, and the coordinator's own full run must draw nothing.
+- `subagent-worktree-write-guard` (ledger 00474 N264) denies a sub-agent's
+  write into another checkout of its repository. The coordinator merges and
+  edits across worktrees legitimately, so it must draw nothing.
 
 Everything else stays ALL, including the other SubagentStop handlers. Scoping
 one of them to SUB would be true but redundant — the event only ever fires for
@@ -74,7 +77,11 @@ _EXPECTED_MAIN: frozenset[str] = frozenset(
 
 #: The handlers that must SHIP scoped to SUB. Exact, for the same reason.
 _EXPECTED_SUB: frozenset[str] = frozenset(
-    {"subagent-cron-delete-blocker", "subagent-full-qa-blocker"}
+    {
+        "subagent-cron-delete-blocker",
+        "subagent-full-qa-blocker",
+        "subagent-worktree-write-guard",
+    }
 )
 
 _EXPECTED_SCOPED: frozenset[str] = _EXPECTED_MAIN | _EXPECTED_SUB

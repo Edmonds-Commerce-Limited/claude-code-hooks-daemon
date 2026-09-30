@@ -81,6 +81,9 @@ _EARNS_GUIDANCE: dict[str, str] = {
     "PlanJournalGuardHandler": "T1 denies a journal entry written by hand",
     "SubagentCronDeleteBlockerHandler": "T1 denies CronDelete inside a subagent",
     "SubagentFullQaBlockerHandler": "T1 denies a full-suite QA run inside a subagent",
+    "SubagentWorktreeWriteGuardHandler": (
+        "T1 denies a subagent's Write/Edit into another checkout of its repository"
+    ),
     "ErrorHidingBlockerHandler": "T1 denies error-suppression patterns",
     "GhIssueCommentsHandler": "T1 denies gh issue view without --comments",
     "GhPrCommentsHandler": "T1 denies gh pr view without --comments",

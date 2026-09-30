@@ -98,6 +98,11 @@ class Priority:
     # from inside the session that lost it, which is precisely how issue #40's
     # incident went unnoticed until the coordinator next stalled.
     SUBAGENT_CRON_DELETE_BLOCKER = 14
+    # Ledger 00474 N264: the same band and the same premise as the cron-delete
+    # blocker above -- what it prevents (another branch's worktree carrying
+    # edits no one there made) is found only when a landing agent commits them
+    # under the wrong branch's name.
+    SUBAGENT_WORKTREE_WRITE_GUARD = 14
 
     ROOT_RECURSION_GUARD = 16
     # Runs after the blocking safety handlers on purpose: a Read they DENY never

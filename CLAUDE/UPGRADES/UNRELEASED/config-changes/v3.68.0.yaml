@@ -92,6 +92,29 @@ config_changes:
         handlers.pre_tool_use.upgrade_approval_guard.enabled: false.
       recommended: true
       dormant: false
+    - key: handlers.pre_tool_use.subagent_worktree_write_guard
+      description: >-
+        Denies a subagent's Write, Edit or NotebookEdit whose target is in a
+        different checkout of the repository than the linked git worktree the
+        subagent works in: a sibling worktree, or the main working tree
+        (ledger 00474 N264, where a sub-agent's edits landed uncommitted in
+        another branch's worktree). Scoped to subagents, so the coordinator is
+        never judged; a subagent whose cwd is the main working tree, a write
+        outside the repository and a write in another repository are not
+        judged either. Worktree membership is read from git's own `.git`
+        markers with no subprocess, and anything unreadable allows.
+      example_yaml: |
+        handlers:
+          pre_tool_use:
+            subagent_worktree_write_guard:
+              enabled: true
+              priority: 14
+      migration_note: >-
+        On by default; no project-side action needed. A subagent that needs a
+        change on another branch reports it to the coordinator. Disable with
+        handlers.pre_tool_use.subagent_worktree_write_guard.enabled: false.
+      recommended: true
+      dormant: false
     - key: persistent_crons.jobs[].runs_while_awaiting_human
       recommended: false
       dormant: true
