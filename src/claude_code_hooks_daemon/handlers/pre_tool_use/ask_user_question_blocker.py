@@ -31,8 +31,9 @@ unattended one.
 The declaration describes the project, not the moment. A genuine human prompt
 received in this session within ``human_presence_minutes`` (default 30; 0
 disables) proves a human is present, so the session is attended for that window
-and a question is judged by the strict-mode rules (``ASKING BECAUSE:`` prefix). Cron ticks, supervisor lines, teammate messages and task notifications
-are not human prompts (see ``utils.human_presence``).
+and a question is judged by the strict-mode rules (``ASKING BECAUSE:`` prefix).
+Cron ticks, supervisor lines, teammate messages and task notifications are not
+human prompts (see ``utils.human_presence``).
 
 Claude Code's own launcher flags (``--permission-prompts none``,
 ``--permission-mode dontAsk``) solve this for a genuinely headless process and
