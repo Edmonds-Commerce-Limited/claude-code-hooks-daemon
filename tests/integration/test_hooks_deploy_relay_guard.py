@@ -47,6 +47,7 @@ def _seed_daemon_dir(daemon_dir: Path) -> None:
     for name in ("pre-tool-use", "post-tool-use", "status-line"):
         (source_hooks / name).write_text((_SOURCE_HOOKS_DIR / name).read_text())
     (daemon_dir / "init.sh").write_text((_REPO_ROOT / "init.sh").read_text())
+    (daemon_dir / "provision.sh").write_text((_REPO_ROOT / "provision.sh").read_text())
 
 
 def test_default_config_deploy_is_byte_identical(tmp_path: Path) -> None:
@@ -125,6 +126,7 @@ def test_self_install_mode_never_regenerates_even_when_relay_enabled(tmp_path: P
     original = (_SOURCE_HOOKS_DIR / "pre-tool-use").read_text()
     (hooks_dir / "pre-tool-use").write_text(original)
     (project_root / "init.sh").write_text("#!/bin/bash\necho init\n")
+    (project_root / "provision.sh").write_text("#!/bin/bash\necho provision\n")
     (project_root / ".claude" / "hooks-daemon.yaml").write_text(
         "daemon:\n  transport:\n    relay_enabled: true\n"
     )
@@ -164,6 +166,7 @@ def _seed_contaminated_daemon_dir(daemon_dir: Path, foreign_untracked_dir: str) 
         contaminated = plain.replace(INIT_SH_ANCHOR, guard + INIT_SH_ANCHOR)
         (source_hooks / name).write_text(contaminated)
     (daemon_dir / "init.sh").write_text((_REPO_ROOT / "init.sh").read_text())
+    (daemon_dir / "provision.sh").write_text((_REPO_ROOT / "provision.sh").read_text())
 
 
 def test_f1_contaminated_source_deploy_strips_foreign_guard_by_default(tmp_path: Path) -> None:

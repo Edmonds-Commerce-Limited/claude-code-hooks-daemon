@@ -180,6 +180,7 @@ class TestDeployAllHooksSetsPermsInSelfInstall:
         init_src = project_root / "init.sh"
         init_src.write_text("#!/bin/bash\n")
         init_src.chmod(0o755)
+        (project_root / "provision.sh").write_text("#!/bin/bash\n")
 
         script = textwrap.dedent(f"""\
             deploy_all_hooks "{project_root}" "{daemon_dir}" "self-install" \
@@ -242,6 +243,7 @@ class TestEnsureEchdCaptureExecutable:
         init_src = project_root / "init.sh"
         init_src.write_text("#!/bin/bash\n")
         init_src.chmod(0o755)
+        (project_root / "provision.sh").write_text("#!/bin/bash\n")
 
         helper = self._seed_helper(daemon_dir, executable=False)
 

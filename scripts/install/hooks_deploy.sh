@@ -267,6 +267,55 @@ deploy_init_script() {
 }
 
 #
+# deploy_provision_script() - Deploy provision.sh to project (Plan 00477)
+#
+# The tracked script a fresh checkout runs to build its own gitignored daemon
+# clone. It is tracked, so it must be deployed beside init.sh (which it
+# sources) and refreshed on every upgrade.
+#
+# Args:
+#   $1 - project_root: Path to project root
+#   $2 - daemon_dir: Path to daemon installation directory
+#   $3 - install_mode: "self-install" or "normal"
+#
+# Returns:
+#   Exit code 0 on success, 1 on failure
+#
+deploy_provision_script() {
+    local project_root="$1"
+    local daemon_dir="$2"
+    local install_mode="$3"
+
+    if [ -z "$project_root" ] || [ -z "$daemon_dir" ]; then
+        print_error "deploy_provision_script: project_root and daemon_dir required"
+        return 1
+    fi
+
+    local source_provision="$daemon_dir/provision.sh"
+    local target_provision="$project_root/.claude/provision.sh"
+
+    # Self-install: .claude/provision.sh is a link to the repository's own file.
+    if [ "$install_mode" = "self-install" ]; then
+        if [ -f "$target_provision" ] && [ "$source_provision" -ef "$target_provision" ]; then
+            print_verbose "Self-install mode: provision.sh already in place, skipping deployment"
+            return 0
+        fi
+    fi
+
+    if [ ! -f "$source_provision" ]; then
+        print_error "Source provision.sh not found: $source_provision"
+        return 1
+    fi
+
+    print_verbose "Deploying provision.sh..."
+    cp "$source_provision" "$target_provision"
+    chmod +x "$target_provision"
+    print_verbose "Copied provision.sh"
+
+    return 0
+}
+
+#
 # set_hook_permissions() - Ensure hook scripts are executable
 #
 # Sets executable permissions on all hook scripts.
@@ -552,6 +601,12 @@ deploy_all_hooks() {
     # Deploy init script
     if ! deploy_init_script "$project_root" "$daemon_dir" "$install_mode"; then
         print_error "Failed to deploy init.sh"
+        return 1
+    fi
+
+    # Plan 00477: the tracked script a fresh checkout provisions itself with
+    if ! deploy_provision_script "$project_root" "$daemon_dir" "$install_mode"; then
+        print_error "Failed to deploy provision.sh"
         return 1
     fi
 

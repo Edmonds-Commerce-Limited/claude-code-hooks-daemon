@@ -1899,6 +1899,92 @@ _tracked_deployed_version() {
 }
 
 #
+# _config_expected_version_raw() - The raw daemon.expected_version line value
+#
+# Plan 00477. A line-oriented read of .claude/hooks-daemon.yaml, because this
+# runs before any venv exists. It accepts exactly the shape
+# install/expected_version.py writes: an indented expected_version key inside
+# the top-level daemon block. A commented-out key, or one in another block,
+# is not the key. \042 and \047 are the double and single quote, spelled as
+# octal escapes so the awk program needs no quote characters of its own.
+#
+# Output:
+#   The value with quotes and a trailing comment removed (possibly empty)
+#
+# Returns:
+#   0 if the key is present, 1 if it is not (or there is no config file)
+#
+_config_expected_version_raw() {
+    local config="$PROJECT_PATH/.claude/hooks-daemon.yaml"
+    [[ -f "$config" ]] || return 1
+
+    local value
+    value="$(awk '
+        /^daemon:/ { blk = 1; indent = ""; next }
+        /^[^ \t#]/ { blk = 0 }
+        blk && indent == "" && /^[ \t]+[^ \t#]/ {
+            indent = $0
+            sub(/[^ \t].*$/, "", indent)
+        }
+        blk && indent != "" && index($0, indent "expected_version:") == 1 {
+            v = $0
+            sub(/^[ \t]+expected_version:[ \t]*/, "", v)
+            sub(/[ \t]+#.*$/, "", v)
+            sub(/[ \t]+$/, "", v)
+            gsub(/^[\042\047]|[\042\047]$/, "", v)
+            print "FOUND:" v
+            exit
+        }
+    ' "$config")"
+    [[ "$value" == FOUND:* ]] || return 1
+
+    printf '%s' "${value#FOUND:}"
+}
+
+#
+# _resolve_expected_version() - Which daemon version does this project expect?
+#
+# Plan 00477. The ONE resolver for the question, in bash, because it is asked
+# before any venv exists (provision.sh, and the unprovisioned diagnosis of the
+# hooks). Order: the daemon.expected_version config key, then the tracked
+# HOOKS-DAEMON.md header for a project that predates the key. It reports
+# unknown rather than guessing, and a key that is PRESENT but not X.Y.Z is
+# reported as invalid rather than overridden by the header: the project said
+# something deliberate, and quietly preferring another answer would install a
+# version nobody asked for.
+#
+# Sets:
+#   _HOOKS_DAEMON_EXPECTED_VERSION         X.Y.Z, or unknown
+#   _HOOKS_DAEMON_EXPECTED_VERSION_SOURCE  config | tracked-doc | config-invalid | empty
+#
+# Returns:
+#   0 if a version was resolved, 1 otherwise
+#
+_resolve_expected_version() {
+    _HOOKS_DAEMON_EXPECTED_VERSION="unknown"
+    _HOOKS_DAEMON_EXPECTED_VERSION_SOURCE=""
+
+    local raw
+    if raw="$(_config_expected_version_raw)"; then
+        if [[ "$raw" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            _HOOKS_DAEMON_EXPECTED_VERSION="$raw"
+            _HOOKS_DAEMON_EXPECTED_VERSION_SOURCE="config"
+            return 0
+        fi
+        _HOOKS_DAEMON_EXPECTED_VERSION_SOURCE="config-invalid"
+        return 1
+    fi
+
+    local tracked
+    if tracked="$(_tracked_deployed_version)"; then
+        _HOOKS_DAEMON_EXPECTED_VERSION="$tracked"
+        _HOOKS_DAEMON_EXPECTED_VERSION_SOURCE="tracked-doc"
+        return 0
+    fi
+    return 1
+}
+
+#
 # _version_lt() - True when $1 sorts strictly before $2
 #
 # Pure bash rather than `sort -V`: this runs on every hook of a broken install,

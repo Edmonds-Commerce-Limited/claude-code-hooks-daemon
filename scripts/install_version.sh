@@ -54,6 +54,8 @@ source "$INSTALL_LIB_DIR/daemon_control.sh"
 source "$INSTALL_LIB_DIR/transport_env.sh"
 # shellcheck source=install/settings_deploy.sh
 source "$INSTALL_LIB_DIR/settings_deploy.sh"
+# shellcheck source=install/expected_version.sh
+source "$INSTALL_LIB_DIR/expected_version.sh"
 
 # ============================================================
 # Helper functions
@@ -640,6 +642,11 @@ if "$VENV_PYTHON" -m claude_code_hooks_daemon.daemon.cli generate-docs --project
     print_success "Generated .claude/HOOKS-DAEMON.md"
 else
     print_warning "Failed to generate handler docs (non-fatal)"
+fi
+
+# Plan 00477: the tracked config names the version a fresh clone provisions.
+if ! record_expected_version "$VENV_PYTHON" "$PROJECT_ROOT"; then
+    print_warning "Could not record daemon.expected_version in $TARGET_CONFIG (non-fatal; provision falls back to the HOOKS-DAEMON.md header)"
 fi
 
 # ============================================================
