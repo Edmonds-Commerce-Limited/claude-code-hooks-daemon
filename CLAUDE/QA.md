@@ -14,7 +14,7 @@
 
 Complete quality assurance for the Claude Code Hooks Daemon consists of **three layers**:
 
-1. **Automated QA** (`./scripts/qa/llm_qa.py all`) - Fast, deterministic checks
+1. **Automated QA** (`./scripts/qa/llm_qa.py`) - Fast, deterministic checks, in the tiers below
 2. **Sub-Agent QA** (via Task tool) - Deep architectural review and value verification
 3. **Acceptance Testing** (Agentic) - Real-world scenario validation performed by AI agents before release
 
@@ -22,25 +22,96 @@ Complete quality assurance for the Claude Code Hooks Daemon consists of **three 
 
 ---
 
-## Automated QA (Layer 1)
+## QA Tiers
 
-### Running Automated QA
+This section is the one home for what QA runs, when, and who runs it. Other
+documents point here; they do not restate it.
+
+| Tier       | When                                   | Who                                        | What runs                                                                                                                    |
+| ---------- | -------------------------------------- | ------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------- |
+| Targeted   | Every change, before its branch merges | The branch's agent; the coordinator checks | `./scripts/qa/llm_qa.py changed`                                                                                             |
+| Post-merge | After a merge to `main`                | CI, off the host                           | The CI tier the pushed change needs (see "CI tiers"); `llm_qa.py changed --range <old>..<new>` runs the same mapping locally |
+| Full       | Release preparation only               | The main thread, never a sub-agent         | `./scripts/qa/llm_qa.py all` on the clean release HEAD                                                                       |
+
+Everyday work (a feature, a bug fix, a plan task, a merge to `main`) needs the
+Targeted tier and nothing more. The Full tier is a release step
+([development/RELEASING.md](development/RELEASING.md), Step 1b and Step 8), not a
+step of any other workflow.
 
 ```bash
-./scripts/qa/llm_qa.py all       # the FULL gate: the coordinator (main thread) runs this
-./scripts/qa/llm_qa.py changed   # TARGETED: what a sub-agent runs before handing over
-./scripts/qa/llm_qa.py main-moved  # the coordinator: what must re-run if main moved
+./scripts/qa/llm_qa.py changed     # TARGETED: static checks plus the tests the change maps to
+./scripts/qa/llm_qa.py all         # FULL: release preparation, main thread only
+./scripts/qa/llm_qa.py main-moved  # with a batch base recorded: what must re-run if main moved
 ```
 
 Agents MUST use `llm_qa.py`, never `run_all.sh`: the `enforce_llm_qa` project
 handler denies a direct `run_all.sh` invocation by an agent. `run_all.sh` remains
 the human-at-a-terminal entry point and runs the same suite with verbose output.
 
+### What the Targeted Tier Certifies
+
+`llm_qa.py changed` certifies two things for the change set since the merge base
+with the base branch (`--base REF`, default the branch `origin/HEAD` names;
+`--range A..B` judges a range instead):
+
+1. Every cheap repo-wide static check passed (listed under "The Automated
+   Checks" below, `CHANGED_TOOL_NAMES` in `llm_qa.py`).
+2. The tests mapped from every changed file passed, where mapped means a
+   declared rule, a mirrored test, a test that refers to the file, or one hop of
+   dependents (details below, and in `scripts/qa/run_changed_tests.py`).
+
+It does NOT certify the rest of the pytest suite, coverage, the tests that run
+under the other Pythons in CI's matrix, or the slower checks `changed` leaves out
+(for example `security` is included but `dependencies` and `smoke_test` are not).
+Those belong to CI and to the Full tier.
+
+### The Unmapped and Too-Broad Fallback
+
+A changed file that maps to no test FAILS `changed` and is named with its reason
+(`uncovered`, `too-broad`, `deleted-but-referenced`; the remedy order is under
+"The Targeted Tier in Detail"). `--allow-unmapped` lets the run pass, and the
+report then records that the file's remaining reach is covered only by a
+whole-suite run. Two things provide one:
+
+- CI: in the docs and code tiers, a changed file the mapper cannot cover sends
+  that one Python to the whole suite (`scripts/ci/full_suite_if_unmapped.bash`).
+- The release's Full tier.
+
+So `--allow-unmapped` is a statement that the change is not fully certified
+locally, never a quiet pass. A branch that needed it says so when it hands over.
+(The tool's own message still says "the coordinator's full gate must cover them";
+that wording predates the tiers and is out of step with this document.)
+
+### Before Merging: the Coordinator's Check
+
+The coordinator merges a branch only with its targeted result in hand: the
+commit hash the agent reports, with a green `llm_qa.py changed` on that commit.
+When that result is missing (the agent was cut off, or reports no run), the
+coordinator does not merge on trust and does not run the full gate. It runs the
+static checks on the touched files, from the project root:
+
+```bash
+ruff check <touched python files>
+black --check --target-version py311 <touched python files>
+mypy <touched source files>
+python3 scripts/qa/run_pyright_check.py --json   # pyright over what pyrightconfig.json scopes
+python3 scripts/qa/audit_error_hiding.py
+python3 scripts/qa/check_input_contract.py
+shellcheck -x <touched shell files>
+pytest <the touched tests, by path>
+```
+
+`run_pyright_check.py`, `audit_error_hiding.py` and `check_input_contract.py`
+scan the whole project, not just the touched files (they take no file list); the
+rest take the touched paths. None of them runs the whole test suite, so a
+sub-agent may run them too. Then `llm_qa.py changed` on the merged head, which is
+the same targeted run the agent owed, as soon as it can be had.
+
 ### Full QA Is the Coordinator's Gate; Sub-Agents Run Targeted QA
 
-The full suite runs **once per batch, on the coordinator's thread**: every
-ready branch is merged into one integration worktree, and one run covers them
-all. A sub-agent never runs it. This is enforced: in a sub-agent,
+The Full tier runs **once, on the main thread, when a release is prepared**
+([development/RELEASING.md](development/RELEASING.md)). A sub-agent never runs
+it. This is enforced: in a sub-agent,
 `subagent_full_qa_blocker` (Plan 00463) denies every command this repository
 declares as full, which is `llm_qa.py all`, `llm_qa.py tests`, `run_all.sh`,
 `run_tests.sh`, `scripts/validate_worktrees.sh`, and a `pytest` with no path
@@ -60,15 +131,27 @@ agent re-ran the suite after every fix round, and the coordinator ran it again
 before merging. The old per-checkout run lock (Plan 00262) could not help
 across worktrees; the host-wide lock below replaces it. A coordinator gate that still ran once per branch, one at a time,
 only moved the queue: N ready branches cost N full runs, N pushes and N CI runs.
+Running it once per release removes the queue.
 
-**Why the gate stays BEFORE `main` moves.** Cross-cutting checks break from
-changes far away: guidance coverage, docs QA, plan QA, the handler reference and
-the acceptance probes. A first full run on `main` would land every such break
-there, and merges queued behind it would build on a red tree. The integration
-worktree is where those breaks surface instead, including the ones that only
-exist when two branches meet.
+**Why the Targeted tier is wide enough to stand alone.** Some checks break from
+changes far away: guidance coverage, docs QA, plan QA, the handler reference,
+generated-doc drift and the acceptance probes. So `changed` runs EVERY cheap
+repo-wide static check whatever changed, and selects the playbook harness
+whenever handler code changes. What the Targeted tier defers is the part of the
+pytest suite no mapped test reaches, and CI runs that on every push to `main`
+in the tier the change needs. A break that only exists when two branches meet
+is caught by running `changed` over the combined head (`--base main` in the
+integration worktree) and by CI. A red CI is a red `main`, handled at once.
 
 ### The Batched Integration Gate
+
+This is the mechanism for running the Full tier on an integration branch and
+moving `main` only to a head that run certified. Use it when a full gate is run
+on a branch that is not `main` itself, for example a release candidate assembled
+from several ready branches. The release steps
+([development/RELEASING.md](development/RELEASING.md)) run the same gate on the
+clean release HEAD. The everyday merge needs none of it: a green targeted run on
+the branch or the combined head is enough.
 
 The coordinator, never a sub-agent:
 
@@ -102,6 +185,34 @@ The coordinator, never a sub-agent:
    tree. A descendant carrying anything more is refused, and the refs stay as
    the evidence.
 6. **Red:** see "A red batch" below.
+
+Step 5 as a script. `|| rc=$?` keeps a non-zero verdict from ending a
+`set -euo pipefail` script before the `case` runs, and each non-zero branch
+exits with the verdict, so nothing after it runs. It fast-forwards to the
+certified sha, never the branch name. Here `my-integration-branch` stands for the
+integration branch and `/workspace` for the main checkout:
+
+```bash
+rc=0
+./scripts/qa/llm_qa.py main-moved || rc=$?
+case $rc in
+  0) # unmoved: fast-forward main to EXACTLY the certified head, by its sha
+     certified=$(git rev-parse refs/integration/certified/my-integration-branch)
+     git -C /workspace merge --ff-only "$certified" ;;
+  7) # head-moved: run the printed steps on a clean tree, then check again
+     echo "head-moved: run the printed steps, then the gate on a clean tree"
+     exit "$rc" ;;
+  4|5|6) # full-gate / docs-only / targeted: run the printed recheck, then --advance
+     echo "main moved: run the printed recheck and --advance"
+     exit "$rc" ;;
+  *) # 1: no verdict (no base, bad ref, git or the mapper failed): stop
+     echo "no verdict: fix the cause before anything lands"
+     exit "$rc" ;;
+esac
+```
+
+`tests/integration/test_main_moved_branching_survives_errexit.py` executes this
+block under `set -euo pipefail` for every exit code `main-moved` has.
 
 **One QA process at a time on the host.** Every `llm_qa.py` run that executes
 tools (`all`, `changed`, or named tools) takes ONE host-wide lock,
@@ -250,15 +361,19 @@ CI runs the tier the pushed change needs (below), and a red CI is a red
 ### CI tiers
 
 `.github/workflows/qa.yml` starts with a `classify` job. It runs
-`scripts/ci/classify_changes.py` over the pushed range (push: `before..sha`;
-pull request: merge base `..` PR tip) and prints `tier=<x>`. The rules live in
-that script's one table, tested in `tests/unit/scripts/test_classify_changes.py`.
+`scripts/ci/classify_changes.py` over the changed range and prints `tier=<x>`.
+`scripts/ci/emit_tier.bash` picks the range: on a push, from the head sha of the
+newest `main` run of this workflow that reached a verdict (not the sha before
+the push, which a cancelled run may have left untested) to the pushed sha; on a
+pull request, from the merge base to the PR tip. The rules live in
+`classify_changes.py`'s one table, tested in
+`tests/unit/scripts/test_classify_changes.py`.
 
-| Tier   | When                                                                                                                                                                                                                     | What runs                                                                                                                                                              |
-| ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `docs` | every changed path is `*.md`                                                                                                                                                                                             | One Python (3.11): `llm_qa.py docs_qa plan_qa changed_tests --range`. The `shell` and `daemon-load` jobs are skipped.                                                  |
-| `code` | anything else                                                                                                                                                                                                            | One Python (3.11): black, ruff, mypy, pyright, `llm_qa.py changed --range`, bandit, deptry, plus `shell` and `daemon-load`.                                            |
-| `full` | `pyproject.toml`, `uv.lock`, anything under `.github/`, `.claude/hooks-daemon.yaml`, `scripts/qa/changed_tests_map.yaml`, any `conftest.py`; an empty change set; an unknown base (all-zero `before`, or not in history) | The three-Python matrix (job `qa`, unchanged), plus `shell` and `daemon-load`. Also every night on `main` (`schedule`) and on `workflow_dispatch`, which have no base. |
+| Tier   | When                                                                                                                                                                                                                          | What runs                                                                                                                                                              |
+| ------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `docs` | every changed path is `*.md`                                                                                                                                                                                                  | One Python (3.11): `llm_qa.py docs_qa plan_qa changed_tests --range`. The `shell` and `daemon-load` jobs are skipped.                                                  |
+| `code` | anything else                                                                                                                                                                                                                 | One Python (3.11): black, ruff, mypy, pyright, `llm_qa.py changed --range`, bandit, deptry, plus `shell` and `daemon-load`.                                            |
+| `full` | `pyproject.toml`, `uv.lock`, anything under `.github/`, `.claude/hooks-daemon.yaml`, `scripts/qa/changed_tests_map.yaml`, any `conftest.py`; an empty change set; an unknown base (no earlier verdict run, or not in history) | The three-Python matrix (job `qa`, unchanged), plus `shell` and `daemon-load`. Also every night on `main` (`schedule`) and on `workflow_dispatch`, which have no base. |
 
 Markdown is narrowed, never skipped: tests read the plan index, ledgers and
 docs, so the docs tier still runs the mapper's tests for the changed files.
@@ -321,10 +436,12 @@ does not keep it.
 
 **The split:**
 
-| Who                  | Runs                                                                                                                                                                                              | Hands over                                                                |
-| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
-| Sub-agent (any kind) | `./scripts/qa/llm_qa.py changed`, plus named tools the change calls for (`llm_qa.py handler_reference docs_qa ...`) and `pytest` on explicit test files or directories narrower than `tests/unit` | A commit hash and the targeted results                                    |
-| Coordinator          | `./scripts/qa/llm_qa.py all` once, in an integration worktree from `main` with every ready branch merged `--no-ff`, before `main` moves                                                           | A fast-forward of `main`, or the failures sent back to the branch's agent |
+| Who                  | Runs                                                                                                                                                                                                                   | Hands over                                                                |
+| -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
+| Sub-agent (any kind) | `./scripts/qa/llm_qa.py changed`, plus named tools the change calls for (`llm_qa.py handler_reference docs_qa ...`) and `pytest` on explicit test files or directories narrower than `tests/unit`                      | A commit hash and the targeted results                                    |
+| Coordinator          | The same `llm_qa.py changed` over the combined head when it merges branches (`--no-ff`), or the static checks under "Before Merging" for a branch with no targeted result. `llm_qa.py all` only at release preparation | A fast-forward of `main`, or the failures sent back to the branch's agent |
+
+### The Targeted Tier in Detail
 
 `llm_qa.py changed` runs EVERY cheap repo-wide static check on every run,
 whatever changed, because a change far away can break any of them
@@ -373,12 +490,12 @@ The remedy is, in order:
 
 1. add the test the file lacks;
 2. add a rule to the map;
-3. pass `--allow-unmapped`, which passes and records that the full gate must
-   cover it.
+3. pass `--allow-unmapped`, which passes and records that a whole-suite run
+   must cover it (see "The Unmapped and Too-Broad Fallback").
 
-A `too-broad` file is the full gate's by definition, so `--allow-unmapped` is
-its honest answer. `--base REF` changes the base, which defaults to the branch
-`origin/HEAD` names. `changed` refuses to run on the base branch itself,
+A `too-broad` file is beyond what mapped tests can certify, so
+`--allow-unmapped` is its honest answer. `--base REF` changes the base, which
+defaults to the branch `origin/HEAD` names. `changed` refuses to run on the base branch itself,
 because there the merge base is HEAD.
 
 **A targeted `pytest` names its paths.** This is a policy. The guard judges a
@@ -410,8 +527,9 @@ those results certify no tree.
 ### The Automated Checks
 
 `scripts/qa/run_all.sh` is the single source of truth for **which** checks exist
-and how many. Run `./scripts/qa/llm_qa.py all` (the same suite, LLM-optimised
-output) to see the current set. The notes below cover the ones with
+and how many. `./scripts/qa/llm_qa.py all` runs the same suite with
+LLM-optimised output, and is the Full tier's command: release preparation, main
+thread only. The Targeted tier runs the `CHANGED_TOOL_NAMES` subset of it. The notes below cover the ones with
 requirements a reader needs to know in advance; they are not the full list, and
 this section deliberately carries no count — an earlier version claimed seven
 while the runner ran considerably more.
@@ -532,8 +650,9 @@ while the runner ran considerably more.
 
 ### Success Criteria
 
-EVERY check the runner runs must pass, with ZERO failures. `scripts/qa/run_all.sh`
-is the single source of truth for which checks exist — this document deliberately
+EVERY check the tier runs must pass, with ZERO failures: the `changed` set for
+the Targeted tier, every check the runner runs for the Full tier.
+`scripts/qa/run_all.sh` is the single source of truth for which checks exist — this document deliberately
 does not restate the list or the count, because a hardcoded number here went stale
 the moment a check was added.
 
@@ -588,11 +707,12 @@ Verify code meets quality standards (format, lint, types, coverage, security).
 WORKFLOW:
 1. cd to target directory
 2. Run TARGETED QA: ./scripts/qa/llm_qa.py changed security
-   (NOT `all`: the full suite is the coordinator's gate and is denied to
-   sub-agents. See CLAUDE/QA.md "Full QA Is the Coordinator's Gate".)
+   (NOT `all`: the full suite is a release step, the main thread's, and is
+   denied to sub-agents. See CLAUDE/QA.md "QA Tiers".)
 3. Verify daemon: ./bin/hooks-daemon restart && status
-4. Coverage is measured by the coordinator's full run. Read it with
-   ./scripts/qa/llm_qa.py --read-only tests once that run exists.
+4. Coverage (95% minimum) is measured by the Full tier and by CI's full
+   matrix, not by a targeted run. Do not report a coverage figure you did not
+   read from one of those.
 5. Verify no security issues (Bandit must pass)
 6. **Check library/plugin separation** (see checklist below)
 7. Report "QA verified" OR "QA failed with details"
@@ -603,7 +723,7 @@ PASS CRITERIA:
 - Daemon restarts successfully
 - No security issues
 - Library/plugin separation maintained (no project-specific handlers in library)
-- The coordinator's full run (every check, coverage ≥ 95%) still gates the merge
+- The release's full run (every check, coverage ≥ 95%) still gates the release
 
 LIBRARY/PLUGIN SEPARATION CHECKLIST:
 8. Library/Plugin Separation:
@@ -856,7 +976,7 @@ rm untracked/scratch/playbook.md
 **ANY bug found during acceptance testing = Complete the full cycle:**
 
 ```
-Acceptance Testing → Find Bug → STOP → Fix with TDD → Run Full QA → Restart Daemon → RESTART FROM TEST 1.1
+Acceptance Testing → Find Bug → STOP → Fix with TDD → Run QA → Restart Daemon → RESTART FROM TEST 1.1
 ```
 
 **Why restart from Test 1.1?**
@@ -868,7 +988,9 @@ Your fix might have affected earlier tests. Full re-run ensures no regressions.
 2. Execute tests sequentially
 3. **If bug found**: STOP immediately
 4. Fix bug using TDD (write failing test, implement fix, verify)
-5. Run FULL QA: `./scripts/qa/llm_qa.py all` (must pass 100%)
+5. Run QA (must pass 100%): `./scripts/qa/llm_qa.py changed`. When the
+   acceptance run is part of a release preparation, the main thread runs the
+   Full tier instead (`./scripts/qa/llm_qa.py all`, RELEASING.md)
 6. Restart daemon: `./bin/hooks-daemon restart`
 7. **Regenerate playbook** (to reflect fix)
 8. **RESTART from Test 1.1** (not from where you left off)
@@ -919,16 +1041,16 @@ All daemon plugin handlers MUST implement `get_acceptance_tests()` - empty array
 
 1. **During development**: Write tests first (TDD); iterate with
    `./scripts/qa/llm_qa.py changed`
-2. **Before committing**: Run `./scripts/qa/llm_qa.py all` (you are the main
-   thread here, so the full gate is yours)
+2. **Before committing**: Run `./scripts/qa/llm_qa.py changed`. Being the main
+   thread does not make the full gate yours to run here: it is a release step
 3. **Fix any issues**: Use `./scripts/qa/run_autofix.sh` for format/lint
 4. **Verify daemon**: `./bin/hooks-daemon restart && status`
 5. **For significant work**: Spawn QA Agent for deep review
 
 ### For Agent Team Work
 
-Follow the 4-gate verification process. Every gate agent runs TARGETED QA; the
-coordinator's full gate is the last step before the merge:
+Follow the 4-gate verification process. Every gate agent runs TARGETED QA, and
+so does the coordinator before the merge:
 
 ```
 Developer Agent
@@ -942,10 +1064,11 @@ Senior Reviewer (GATE 3) - Completeness verified
     ↓
 Honesty Checker (GATE 4) - Value verified
     ↓
-Coordinator - batched integration gate: every ready branch merged --no-ff into
-              one worktree from main, llm_qa.py all once on the combined head
+Coordinator - every ready branch merged --no-ff into one worktree from main,
+              llm_qa.py changed on the combined head (or the static checks
+              under "Before Merging" for a branch with no targeted result)
     ↓
-Fast-forward main (ONLY after all 4 gates AND the integration gate pass)
+Fast-forward main (ONLY after all 4 gates AND the combined targeted run pass)
 ```
 
 **See `CLAUDE/AgentTeam.md` for complete agent team workflow details.**
@@ -1012,10 +1135,11 @@ grep -r "dogfooding" src/claude_code_hooks_daemon/handlers/
 
 ### Always Required
 
-- ✅ **Automated QA**: Before every commit
-- ✅ **Automated QA**: After making code changes
-- ✅ **Automated QA**: Before creating pull requests
-- ✅ **Automated QA**: After merging branches
+- ✅ **Targeted QA** (`llm_qa.py changed`): Before every commit
+- ✅ **Targeted QA**: After making code changes
+- ✅ **Targeted QA**: Before creating pull requests
+- ✅ **Targeted QA**: Before merging branches, over the combined head
+- ✅ **Full QA** (`llm_qa.py all`): Release preparation only, main thread
 
 ### Automated QA Only (Quick Check)
 
@@ -1054,15 +1178,15 @@ grep -r "dogfooding" src/claude_code_hooks_daemon/handlers/
 2. Fix issues
 3. Run `./scripts/qa/run_autofix.sh` (for format/lint)
 4. Re-run the tools that failed (`./scripts/qa/llm_qa.py <tool> ...`), then
-   `changed`. The coordinator re-runs `all` once the fix is handed back.
+   `changed`.
 5. Repeat until all pass
 
-### Coordinator's Full Gate Fails
+### The Full Gate Fails (Release Preparation)
 
 - Send the failing check names and their JSON detail to the agent that owns
   the worktree. The agent fixes them with targeted runs and hands back a new
   commit.
-- Re-run the full gate on the new head. Never merge a head the full gate has
+- Re-run the full gate on the new head. Never release a head the full gate has
   not passed.
 
 ### Sub-Agent QA Fails
@@ -1093,11 +1217,11 @@ grep -r "dogfooding" src/claude_code_hooks_daemon/handlers/
 ### Commands
 
 ```bash
-# Full gate: the coordinator (main thread) only; run_all.sh is the human entry point
-./scripts/qa/llm_qa.py all
-
-# Targeted QA: what a sub-agent runs before handing over a commit
+# Targeted QA: every change, before it merges (sub-agents and the coordinator)
 ./scripts/qa/llm_qa.py changed
+
+# Full gate: release preparation, main thread only; run_all.sh is the human entry point
+./scripts/qa/llm_qa.py all
 
 # Auto-fix format and lint issues
 ./scripts/qa/run_autofix.sh
@@ -1107,8 +1231,8 @@ grep -r "dogfooding" src/claude_code_hooks_daemon/handlers/
 ./scripts/qa/run_lint.sh
 ./scripts/qa/run_type_check.sh
 ./scripts/qa/run_pyright_check.py --json
-./scripts/qa/llm_qa.py tests       # the WHOLE suite, every Python in CI's matrix: coordinator only
-./scripts/qa/run_tests.sh          # the WHOLE suite, this checkout's venv only: coordinator only
+./scripts/qa/llm_qa.py tests       # the WHOLE suite, every Python in CI's matrix: main thread only
+./scripts/qa/run_tests.sh          # the WHOLE suite, this checkout's venv only: main thread only
 ./scripts/qa/run_security_check.sh
 ./scripts/qa/run_dependency_check.sh
 
@@ -1119,8 +1243,8 @@ grep -r "dogfooding" src/claude_code_hooks_daemon/handlers/
 
 ### Success Indicators
 
-✅ All 7 automated checks pass
-✅ Coverage ≥ 95%
+✅ Every check of the tier in use passes
+✅ Coverage ≥ 95% (Full tier and CI's full matrix)
 ✅ Daemon restarts successfully
 ✅ No security issues
 ✅ Library/plugin separation maintained

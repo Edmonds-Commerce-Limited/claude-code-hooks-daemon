@@ -295,7 +295,7 @@ pytest tests/path/to/test_file.py
 # 2. Run targeted QA over the whole change set
 ./scripts/qa/llm_qa.py changed
 
-# 3. If all pass, report success; the coordinator re-runs the full gate
+# 3. If all pass, report success and the commit hash (QA tiers: CLAUDE/QA.md)
 # 4. If new failures, fix those too
 ```
 

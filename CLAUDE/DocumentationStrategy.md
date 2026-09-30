@@ -78,14 +78,15 @@ The semantic half is live: this repo enables the `hooks-daemon-docs-qa` agent
 ## Running the checks
 
 The docs-QA sweep is **not** part of this project's QA suite — run it
-explicitly with the CLI above. The suite itself is:
+explicitly with the CLI above. Everyday QA is the targeted run:
 
 ```bash
-./scripts/qa/llm_qa.py all
+./scripts/qa/llm_qa.py changed
 ```
 
-`scripts/qa/run_all.sh` is the single source of truth for which checks it
-contains; full QA policy is [CLAUDE/QA.md](QA.md).
+`scripts/qa/run_all.sh` is the single source of truth for which checks the full
+suite (`llm_qa.py all`, a release step) contains; QA policy and the tiers are
+[CLAUDE/QA.md](QA.md).
 
 ## This repo implements the ruleset it obeys
 

@@ -26,10 +26,13 @@ The subcommands themselves (`plan-qa`, `logs`, `validate-project-handlers`, etc.
 
 ## QA Integration
 
-**Before completing any task, this project's full QA suite must pass.**
+**Before completing any task, this project's targeted QA must pass.** In this
+project that is the Targeted tier in [CLAUDE/QA.md](QA.md), "QA Tiers", which
+also says what a merge needs and when the full suite runs (release preparation
+only).
 
 ```bash
-./scripts/qa/llm_qa.py all
+./scripts/qa/llm_qa.py changed
 ```
 
 `scripts/qa/run_all.sh` is the single source of truth for which checks exist — do not trust any written enumeration of them. Full QA policy: [CLAUDE/QA.md](QA.md). The `plan_workflow.qa` policy block that the core document's Plan QA section describes is documented in detail in `docs/guides/HANDLER_REFERENCE.md`.
@@ -80,7 +83,7 @@ Applying the core document's handler plan template to a core handler in this rep
 
 - **Priority Range**: pick a band from the Priority Guide: [CLAUDE/HANDLER_DEVELOPMENT.md#priority-guide](HANDLER_DEVELOPMENT.md#priority-guide)
 - **Test file**: co-located under the mirrored unit-test tree, `tests/unit/handlers/{event_type}/test_{handler_name}.py`
-- **Integration phase**: register the handler in its event-type config, run `./scripts/qa/llm_qa.py all`, test in a live Claude Code session, and update documentation
+- **Integration phase**: register the handler in its event-type config, run `./scripts/qa/llm_qa.py changed` (targeted QA, [QA.md](QA.md)), test in a live Claude Code session, and update documentation
 
 ### Development workflow
 
@@ -89,6 +92,6 @@ Applying the core document's handler plan template to a core handler in this rep
 3. Analyse the captured events to determine event type and available data
 4. Write tests first (TDD)
 5. Implement the handler
-6. Run `./scripts/qa/llm_qa.py all`
+6. Run `./scripts/qa/llm_qa.py changed`
 7. Debug again to verify the handler intercepts correctly
 8. Test in a live Claude Code session

@@ -145,8 +145,9 @@ reinstall.
 
 `./scripts/validate_worktrees.sh` runs this project's full QA suite
 sequentially across all (or one named) worktree, checking the venv and
-editable install first. It is a coordinator tool: in a sub-agent it is denied
-along with every other full-suite command.
+editable install first. It is not a step of any everyday workflow: the full
+suite is a release step ([QA.md](QA.md), "QA Tiers"), and in a sub-agent this
+script is denied along with every other full-suite command.
 
 ```bash
 ./scripts/validate_worktrees.sh                     # all worktrees
@@ -156,29 +157,27 @@ along with every other full-suite command.
 ## Running This Project's QA Suite Inside a Worktree
 
 Wherever the core document says "run this project's test/QA suite", the
-concrete command in this repository depends on who is running it:
+concrete command in this repository is the targeted one, for the sub-agent and
+the coordinator alike:
 
 ```bash
-./scripts/qa/llm_qa.py changed   # the sub-agent working in the worktree: targeted QA
-./scripts/qa/llm_qa.py all       # the coordinator, once, in the integration worktree
-./scripts/qa/llm_qa.py main-moved --start  # the coordinator, once the batch is merged
-./scripts/qa/llm_qa.py main-moved  # the coordinator, before the fast-forward
-./scripts/qa/llm_qa.py main-moved --finish  # the coordinator, after the push
+./scripts/qa/llm_qa.py changed   # targeted QA, in the worktree that holds the change
 ```
 
-A sub-agent hands over targeted results and a commit hash. The coordinator then
+A sub-agent hands over targeted results and a commit hash. The coordinator
 merges every ready branch `--no-ff` into ONE integration worktree created from
-current `main`, records the batch base with `main-moved --start` (a git ref, so
-it survives between shell calls), and runs the full gate once there. A green
-run on a clean tree certifies that head. While the batch is in flight `main` is
-frozen for code. `main-moved` then decides the last step. It says `unmoved`,
-which means fast-forward `main` to the certified head's SHA (never the branch
-name), or `head-moved` when the head is not the certified
-one, or it names a recheck (doc tools, the tests of what moved, or the full
-gate). After the recheck, `--advance` moves the base on, and the check repeats
-until `unmoved`. One full run at a time is also what stops the collisions below. The
-whole procedure, including how moved paths are judged and what to do when the
-batch is red, is in [QA.md](QA.md), "The Batched Integration Gate".
+current `main`, runs `llm_qa.py changed` over the combined head, and
+fast-forwards `main` to that head's SHA (never the branch name). If `main`
+moved meanwhile, merge it into the integration branch and run `changed` again.
+A branch with no targeted result of its own gets the static checks in
+[QA.md](QA.md), "Before Merging: the Coordinator's Check", first.
+
+The full suite (`llm_qa.py all`) is not part of this. It runs once, on the main
+thread, when a release is prepared. [QA.md](QA.md), "QA Tiers", is the one home
+of the tiers; "The Batched Integration Gate" there is the mechanism for when the
+full gate is run on an integration branch. The host-wide lock queues every
+`llm_qa.py` run, so runs never overlap, which is also what stops the collisions
+below.
 
 ## Concurrent QA Limitation (Critical)
 

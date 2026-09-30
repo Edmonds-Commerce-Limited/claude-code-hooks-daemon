@@ -24,7 +24,8 @@ rather than a hand-maintained mirror here.
 - One tool failing never stops the others — execution is resilient; a tool
   that crashes is recorded in its result rather than aborting the run.
 - This module is NOT the project's own QA gate: contributors run
-  `./scripts/qa/llm_qa.py all` (see [CLAUDE/QA.md](/CLAUDE/QA.md), the
-  canonical QA policy).
+  `./scripts/qa/llm_qa.py changed` for everyday work and `llm_qa.py all` at
+  release preparation (see [CLAUDE/QA.md](/CLAUDE/QA.md), the canonical QA
+  policy and its tiers).
 
 Tests: `tests/unit/test_qa_runner.py`.

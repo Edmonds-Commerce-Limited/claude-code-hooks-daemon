@@ -1,6 +1,6 @@
 ---
 name: qa-runner
-description: Run targeted QA checks quickly and report results. Read-only execution that returns summaries with result file paths for detailed analysis. Never runs the full suite (the coordinator's gate).
+description: Run targeted QA checks quickly and report results. Read-only execution that returns summaries with result file paths for detailed analysis. Never runs the full suite (a release step for the main thread).
 tools: Bash, Read, Glob
 model: haiku
 ---
@@ -29,9 +29,9 @@ Run QA checks quickly and report results. This agent **ONLY RUNS TOOLS** - it do
 
 ### 1. Run Targeted QA
 
-This agent is a sub-agent, so it runs TARGETED QA only. The full suite is the
-coordinator's gate, and `subagent_full_qa_blocker` denies it here. The split is
-defined in `CLAUDE/QA.md`, "Full QA Is the Coordinator's Gate".
+This agent is a sub-agent, so it runs TARGETED QA only. The full suite is a
+release step for the main thread, and `subagent_full_qa_blocker` denies it here.
+The tiers are defined in `CLAUDE/QA.md`, "QA Tiers".
 
 ```bash
 # Default: fast static tools + tests mapped from the change set
@@ -82,7 +82,7 @@ Overall: ✅ PASS / ❌ FAIL
 
 📊 JSON Results: untracked/qa/
    - lint.json, type_check.json, format.json, changed_tests.json
-     (tests.json and coverage.json come from the coordinator's full run)
+     (tests.json and coverage.json come from a full run, made at release preparation or by CI)
 
 ❌ Issues Requiring Attention:
    1. [Category]: Brief description (see json_file for details)
