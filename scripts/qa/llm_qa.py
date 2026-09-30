@@ -706,9 +706,11 @@ _TARGETED_ONLY_TOOLS: Final[frozenset[str]] = frozenset({"changed_tests"})
 ALL_TOOL_NAMES = [name for name in TOOL_REGISTRY if name not in _TARGETED_ONLY_TOOLS]
 
 #: `changed`: what a sub-agent runs before handing a commit to the coordinator.
-#: The fast static tools, the project handlers' own suite (seconds), the tools
+#: EVERY cheap repo-wide static check, run whatever changed (a change far away
+#: can break any of them), the project handlers' own suite (seconds), the tools
 #: `changed_tests_map.yaml` names as covering non-Python files, and the tests
-#: mapped from the change set. Never `tests`, which is the whole suite.
+#: mapped from the change set. Never `tests` (the whole suite), and never a
+#: tool that needs a live daemon.
 CHANGED_TOOL_NAMES: Final[list[str]] = [
     "magic_values",
     "format",
@@ -716,11 +718,27 @@ CHANGED_TOOL_NAMES: Final[list[str]] = [
     "type_check",
     "pyright",
     "error_hiding",
+    "eacces_safe",
     "project_handlers",
     "docs_qa",
     "plan_qa",
     "shell_check",
+    "shell_audit",
+    "repo_hygiene",
+    "doc_truth",
+    "doc_snippets",
+    "generated_doc_drift",
+    "handler_reference",
+    "hook_contract",
+    "input_contract",
     "declared_invariant_pairs",
+    "skill_refs",
+    "canonical_callers",
+    "authored_path_stat",
+    "signal_targets",
+    "unreachable_handle_branch",
+    "fail_open_inventory",
+    "security",
     "changed_tests",
 ]
 
