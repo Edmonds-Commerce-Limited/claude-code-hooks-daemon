@@ -4,6 +4,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
+- [00475: targeted qa and small batches](00475-targeted-qa-and-small-batches/PLAN.md) - In Progress (owner request: targeted QA for every change, the full gate only at release preparation, one QA run at a time, and small batches of branches finished before the next start, after ledger 00466 left 21 stale branches)
+
 - [00474: niggles ledger seventeen](00474-niggles-ledger-seventeen/PLAN.md) - In Progress, the OPEN ledger for new niggles (00466 reached its PLAN.md size limit with N261; numbering continues, opening with N262: the release procedure has no check that the notes fit a GitHub release body)
 
 - [00473: post merge handlers judge the command repository](00473-post-merge-handlers-judge-the-command-repository/PLAN.md) - Not Started (graduated from 00468 G9: `daemon_sync_after_merge` and `merge_qa_report` judge the repository the payload `cwd` names, not the one the command ran in; blocked on Plan 00464's command-directory resolver)
@@ -16,7 +18,7 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00467: recommend the defence before fix plugin to client projects](00467-recommend-the-defence-before-fix-plugin-to-client-projects/PLAN.md) - Blocked (owner request: dogfood the DBF plugin, then recommend it to clients. Phase 1 is done, with shortfalls filed upstream as #4-#6 and recommendation no-go for now. Waiting on the owner's go/no-go, and on one logged-in auto-trigger probe)
 
-- [00466: niggles ledger sixteen](00466-niggles-ledger-sixteen/PLAN.md) - In Progress, keeps only its own entries (N1-N261; new niggles go to 00474, and its remaining branches are parked by owner decision). Opened when 00422 passed its size warning with N29, with N1: the venv fallback accepts an interpreter that cannot run on this host)
+- [00466: niggles ledger sixteen](00466-niggles-ledger-sixteen/PLAN.md) - In Progress, keeps only its own entries (N1-N261; new niggles go to 00474, and its remaining branches are being landed or dropped in small batches, under Plan 00475's rules). Opened when 00422 passed its size warning with N29, with N1: the venv fallback accepts an interpreter that cannot run on this host)
 
 - [00465: commit gates see the index after same command staging](00465-commit-gates-see-the-index-after-same-command-staging/PLAN.md) - Not Started (from 00422 N26: gates read the index before the command runs, so `git add f && git commit` passes the secret-term scan and every other staged-content gate unexamined; starts after 00464, same gates)
 
