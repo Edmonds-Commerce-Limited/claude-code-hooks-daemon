@@ -487,9 +487,10 @@ Which storage backend should we use?
 
 **Options:**
 
-| Option            | Type  | Default           | Description                                                                                      |
-| ----------------- | ----- | ----------------- | ------------------------------------------------------------------------------------------------ |
-| `required_prefix` | `str` | `ASKING BECAUSE:` | The prefix every question must start with. Matched case-sensitively; leading whitespace is fine. |
+| Option                   | Type    | Default           | Description                                                                                                                                                                                                                                |
+| ------------------------ | ------- | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `required_prefix`        | `str`   | `ASKING BECAUSE:` | The prefix every question must start with. Matched case-sensitively; leading whitespace is fine.                                                                                                                                           |
+| `human_presence_minutes` | `float` | `30`              | Under `mode: unattended` only: a genuine human prompt in this session within this many minutes lets a question through. Cron ticks, supervisor lines, teammate messages and task notifications never count. `0` keeps unattended absolute. |
 
 **Config example:**
 

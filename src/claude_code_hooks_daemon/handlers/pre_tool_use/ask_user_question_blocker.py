@@ -28,6 +28,12 @@ non-interactive signal, so the daemon cannot detect it: ``PreToolUse`` gets
 ``scratchpad_dir``, none of which distinguishes an attended session from an
 unattended one.
 
+The declaration describes the project, not the moment. A genuine human prompt
+received in this session within ``human_presence_minutes`` (default 30; 0
+disables) proves a human is present, so the question is allowed through for that
+window. Cron ticks, supervisor lines, teammate messages and task notifications
+are not human prompts (see ``utils.human_presence``).
+
 Claude Code's own launcher flags (``--permission-prompts none``,
 ``--permission-mode dontAsk``) solve this for a genuinely headless process and
 should be preferred where they apply. They do NOT cover a ``CronCreate`` job,
@@ -51,6 +57,8 @@ workflow that needs every question auto-dismissed::
 
 from __future__ import annotations
 
+import time
+from pathlib import Path
 from typing import Any
 
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, HookInputField, Priority
@@ -59,9 +67,15 @@ from claude_code_hooks_daemon.constants.tools import ToolName
 from claude_code_hooks_daemon.core import Decision, GatingResult, get_data_layer
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
+from claude_code_hooks_daemon.utils.human_presence import (
+    HUMAN_PRESENCE_WINDOW_SECONDS,
+    human_prompt_within,
+)
 
 # Defaults / option keys — no magic strings
 DEFAULT_REQUIRED_PREFIX = "ASKING BECAUSE:"
+SECONDS_PER_MINUTE = 60
+DEFAULT_HUMAN_PRESENCE_MINUTES = HUMAN_PRESENCE_WINDOW_SECONDS / SECONDS_PER_MINUTE
 MODE_STRICT = "strict"
 MODE_ADVISORY = "advisory"
 MODE_UNATTENDED = "unattended"
@@ -75,8 +89,9 @@ MODE_UNATTENDED = "unattended"
 _UNATTENDED_VERBOSE = (
     "This project is running UNATTENDED: no human is reading this session, so "
     "a question waits for an answer that never arrives. Every AskUserQuestion "
-    "is denied here, including a properly justified one -- the justification "
-    "is not in doubt, the ANSWERER is.\n\n"
+    "is denied here while no human prompt has arrived recently, including a "
+    "properly justified one -- the justification is not in doubt, the "
+    "ANSWERER is.\n\n"
     "Do NOT retry with a prefix. There is no prefix that makes a question "
     "answerable when nobody is present.\n\n"
     "WHAT TO DO INSTEAD:\n"
@@ -89,6 +104,15 @@ _UNATTENDED_VERBOSE = (
     "If the decision is genuinely too consequential to assume -- it is "
     "irreversible, or destroys data -- do not guess it. Stop, and say plainly "
     "what you needed decided and why you would not assume it."
+)
+
+# Appended to the unattended deny so the agent (and the owner reading the
+# transcript) can see what was judged, not just the verdict.
+_UNATTENDED_JUDGED = (
+    "Judged: mode is unattended, and there is no genuine human prompt in this "
+    "session in the last {minutes} minutes (a cron tick, supervisor line, "
+    "teammate message or task notification is not a human prompt). If a human "
+    "is in fact here, their next message lifts this for the window."
 )
 
 # Full first-fire teaching content (Plan 00116). The prefix is a runtime
@@ -220,9 +244,15 @@ class AskUserQuestionBlockerHandler(PreToolUseHandlerBase):
         # Checked BEFORE the justification test, because unattended the
         # justification does not change the verdict — there is no reader.
         if mode == MODE_UNATTENDED:
+            window_minutes = getattr(
+                self, "_human_presence_minutes", DEFAULT_HUMAN_PRESENCE_MINUTES
+            )
+            if self._human_recently_present(hook_input, window_minutes):
+                return GatingResult(decision=Decision.ALLOW)
+            judged = _UNATTENDED_JUDGED.format(minutes=f"{window_minutes:g}")
             return GatingResult(
                 decision=Decision.DENY,
-                reason=self._formatter.verbose(self._build_unattended_rule()),
+                reason=f"{self._formatter.verbose(self._build_unattended_rule())}\n\n{judged}",
             )
 
         all_justified = self._all_questions_justified(hook_input, prefix)
@@ -261,6 +291,25 @@ class AskUserQuestionBlockerHandler(PreToolUseHandlerBase):
         )
 
     @staticmethod
+    def _human_recently_present(hook_input: dict[str, Any], window_minutes: float) -> bool:
+        """Whether a genuine human prompt arrived in this session within the window.
+
+        The declared unattended mode describes the project; a human prompt that
+        just arrived describes this moment, and outranks it. A window of zero
+        or less switches the override off.
+        """
+        transcript_path = hook_input.get(HookInputField.TRANSCRIPT_PATH)
+        if window_minutes <= 0 or not isinstance(transcript_path, str) or not transcript_path:
+            return False
+        session_id = hook_input.get(HookInputField.SESSION_ID)
+        return human_prompt_within(
+            Path(transcript_path),
+            session_id if isinstance(session_id, str) and session_id else None,
+            time.time(),
+            window_minutes * SECONDS_PER_MINUTE,
+        )
+
+    @staticmethod
     def _all_questions_justified(hook_input: dict[str, Any], prefix: str) -> bool:
         """Return True iff tool_input.questions is non-empty and every question begins with prefix.
 
@@ -295,7 +344,12 @@ class AskUserQuestionBlockerHandler(PreToolUseHandlerBase):
                 "## ask_user_question_blocker — UNATTENDED: never ask, assume "
                 "and continue\n\n"
                 "This project runs unattended, so **every** `AskUserQuestion` "
-                "is denied — including a properly justified one. Nobody is "
+                "is denied — including a properly justified one — unless a "
+                "genuine human prompt arrived in this session within the last "
+                "30 minutes (`human_presence_minutes`); a cron tick, "
+                "supervisor line, teammate message or task notification does "
+                "not count, and once a human has just typed, ask freely. "
+                "Otherwise nobody is "
                 "reading the session; a question waits for an answer that "
                 "never arrives, and the run hangs.\n\n"
                 f"There is no `{prefix}` escape hatch in this mode. The prefix "
