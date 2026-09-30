@@ -33,15 +33,19 @@ fi
 #
 # _venv_uv() - Run uv with the given arguments.
 #
-# uv from PATH first, else the uv installer's default location, named
-# explicitly, so a caller whose PATH is fixed system locations only still
-# finds it. Returns 127 when neither has one.
+# uv from PATH first, then the uv the caller's PATH named before Layer 2 reset
+# it (_CALLER_UV_BIN, set by upgrade_version.sh), else the uv installer's
+# default location, named explicitly, so a caller whose PATH is fixed system
+# locations only still finds it. Returns 127 when none has one.
 #
 _venv_uv() {
     local uv_bin=""
+    local caller_uv="${_CALLER_UV_BIN:-}"
     local installer_uv="${HOME}/.local/bin/uv"
     if uv_bin="$(command -v uv)"; then
         "$uv_bin" "$@"
+    elif [ -n "$caller_uv" ] && [ -x "$caller_uv" ]; then
+        "$caller_uv" "$@"
     elif [ -x "$installer_uv" ]; then
         "$installer_uv" "$@"
     else

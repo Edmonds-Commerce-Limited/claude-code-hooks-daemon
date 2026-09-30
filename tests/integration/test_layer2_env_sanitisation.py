@@ -462,6 +462,30 @@ class TestLayer2PathAfterEveryLibrarySource:
         assert not report[f"RESOLVES {tool}"].startswith(str(planted_home)), report
 
 
+class TestLayer2ReachesTheUvTheCallerHad:
+    """A uv installed anywhere the caller's PATH names (`pip install uv` into a
+    toolchain's bin directory, a package manager's prefix) must survive Layer
+    2 resetting PATH to the trusted list, or the venv bootstrap cannot run."""
+
+    def test_uv_from_the_caller_path_is_reached_after_the_path_reset(
+        self, layer2_head: Path, tmp_path: Path
+    ) -> None:
+        home = tmp_path / "bare-home"
+        home.mkdir()
+        toolchain_bin = tmp_path / "toolchain" / "bin"
+        toolchain_bin.mkdir(parents=True)
+        (toolchain_bin / "uv").write_text('#!/bin/sh\necho "caller uv $*"\n', encoding="utf-8")
+        (toolchain_bin / "uv").chmod(0o755)
+        script = layer2_head.read_text(encoding="utf-8") + "_venv_uv --version\n"
+        layer2_head.write_text(script, encoding="utf-8")
+        env = _base_env(HOME=str(home), PATH=f"{toolchain_bin}:/usr/bin:/bin")
+
+        result = _run(f'bash "{layer2_head}"', env)
+
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "caller uv --version" in result.stdout.splitlines()
+
+
 class TestUvIsResolvedByName:
     """The fix for MAJOR 2 keeps the uv installer's default location usable:
     `uv` alone is looked up in `$HOME/.local/bin` when PATH has none, rather
