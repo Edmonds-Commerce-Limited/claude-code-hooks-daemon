@@ -58,7 +58,7 @@ Full write-ups are in [NIGGLES.md](NIGGLES.md). One line each here:
 | 15 entries | Carried from the dropped `worktree-p422-close` branch ([list](CARRIED-REFIX-BRANCHES.md))                        | 00466 cleanup       | ⬜ Open                 |
 | 14 entries | Carried from the dropped `worktree-d-00421` branch ([list](CARRIED-REFIX-BRANCHES.md))                           | 00466 cleanup       | ⬜ Open                 |
 | 4 entries  | Carried from the dropped upgrade-scripts, 464 and N38 branches ([list](CARRIED-REFIX-BRANCHES.md))               | 00466 cleanup       | ⬜ Open                 |
-| N266       | `flaggable_content_channel_guard` denies greps that never touch a flagged path                                   | Coordinator         | ⬜ Open                 |
+| N266       | `flaggable_content_channel_guard` denies greps that never touch a flagged path                                   | Coordinator         | ✅ Fixed (ba47e2459)    |
 | N265       | `secret_file_guard` spends about 2.2 s of CPU on one realistic Python program                                    | N101 CI red         | ⬜ Open                 |
 | N264       | A sub-agent's edits landed, uncommitted, in another branch's worktree                                            | 00466 landing       | ⬜ Open                 |
 | N246       | Plan and docs QA judge a same-command `git add` as two partial trees                                             | Carried, N53 branch | ⬜ Open                 |
