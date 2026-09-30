@@ -4,6 +4,19 @@ Newest first. Each entry says how it was found, why it happens, and the
 candidate remedies. Numbering continues from
 [ledger sixteen](../00466-niggles-ledger-sixteen/NIGGLES.md).
 
+### 55 entries carried from the six dropped re-fix branches
+
+Ledger 00466's cleanup judged six branches too tangled to merge
+(`worktree-upgrade-scripts`, `worktree-d-00421`, `worktree-plan-464-commit-gate-repo`,
+`worktree-n466-small-a`, `worktree-p422-close` and the N38 branch
+`agent-aa0e5105724aa123b-b9ce2f39`). Their defects stay open, to be fixed fresh
+on `main` in small batches. 55 entries existed only on those branches. They are
+kept, with verbatim write-ups where the branch had one, in
+[CARRIED-REFIX-BRANCHES.md](CARRIED-REFIX-BRANCHES.md). Some numbers come from
+other ledgers' numbering (00422 for `p422-close`, 00421's plan for `d-00421`).
+
+**Status**: ⬜ Open (all 55).
+
 ### N266 — `flaggable_content_channel_guard` denies greps that never touch a flagged path
 
 **Found**: twice in one session, a content search was denied as
