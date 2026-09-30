@@ -38,15 +38,22 @@ line: the `R-UPGRADE-APPROVAL-ENV-BYPASS` row carries its text from before the
 N271 merge, which added "or passes `--uv <path>`". So the writer ran code older
 than `main`, three separate times.
 
-**Lead**: the Plan 00477 loud-detection worktree, whose code predated N271, was
-removed with `git worktree remove` shortly before the run. If its daemon was
-still alive, and resolves its project root again after its directory is gone, it
-may fall back to the enclosing repository and inject its own guidance there. It
-had exited by the time it was looked for, so this is unconfirmed.
+**Leads**, both unconfirmed:
 
-**Reproduction to try**: start a daemon in a fresh worktree at an older commit,
-remove the worktree, and watch the main checkout's `CLAUDE.md` and that daemon's
-log.
+1. More likely: a test or QA run inside a sub-agent's worktree, on that
+   worktree's older code, resolves "the real repository" through git's common
+   directory (`/workspace/.git`, shared by every worktree) rather than the
+   worktree's own top level, and so injects its guidance into the MAIN
+   checkout. Sub-agents were running `llm_qa.py changed` in worktrees at the
+   time, the host-wide QA lock was held by a process in one of them, and no
+   daemon ran in any worktree (sub-agents' hooks use the coordinator's daemon).
+   The conftest guard only protects the checkout the test run itself belongs to.
+2. Less likely: a daemon from a worktree removed shortly before, whose project
+   root resolves to the enclosing repository once its directory is gone.
+
+**Reproduction to try**: in a worktree at an older commit, run the targeted
+tests while watching the main checkout's `CLAUDE.md` mtime (for example with
+`inotifywait`), and note which test's window it changes in.
 
 **Status**: ⬜ Open.
 
