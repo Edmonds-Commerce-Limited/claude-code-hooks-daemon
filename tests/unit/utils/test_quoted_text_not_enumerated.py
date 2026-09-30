@@ -185,3 +185,67 @@ class TestWhatStillDenies:
         (tmp_path / _PROTECTED).write_text("x")
         decision, _ = _verdict(command, tmp_path)
         assert decision == Decision.DENY
+
+
+_ANSI_C_PROTECTED = "".join(f"\\x{ord(char):02x}" for char in _PROTECTED)
+
+_READS_A_PROTECTED_FILE = {
+    "grep -f pattern file": f"grep -f {_PROTECTED} somefile",
+    "grep --file= pattern file": f"grep --file={_PROTECTED} somefile",
+    "grep --file pattern file": f"grep --file {_PROTECTED} somefile",
+    "rg --pre with a protected operand": f"rg --pre cat x {_PROTECTED}",
+    "rg --pre and --pre-glob with a protected operand": (
+        f"rg --pre cat --pre-glob '*.txt' x {_PROTECTED}"
+    ),
+    "rg --ignore-file": f"rg --ignore-file {_PROTECTED} x .",
+    "grep -e with a protected operand": f'grep -e "pat" {_PROTECTED}',
+    "grep -- with a protected operand": f'grep -- "pat" {_PROTECTED}',
+    "grep quoted pattern then protected operand": f'grep "pat" {_PROTECTED}',
+    "quoted protected prefix with an unquoted glob tail": f"cat '{_PREFIX}'*",
+    "double-quoted protected prefix with an unquoted glob tail": f'cat "{_PREFIX}"*',
+    "grep over a quoted prefix with an unquoted glob tail": f"grep x '{_PREFIX}'*",
+    "echo of a quoted prefix with an unquoted glob tail": f"echo '{_PREFIX}'*",
+    "ANSI-C quoted protected name": f"cat $'{_PROTECTED}'",
+    "ANSI-C hex-escaped protected name": f"cat $'{_ANSI_C_PROTECTED}'",
+    "ANSI-C quoted protected name after a grep pattern": f"grep x $'{_PROTECTED}'",
+    "here-string naming the protected file": f"cat <<< {_PROTECTED}",
+    "here-string over a cat substitution": f'grep x <<< "$(cat {_PROTECTED})"',
+    "env prefix": f"env grep x {_PROTECTED}",
+    "command prefix": f"command cat {_PROTECTED}",
+    "timeout prefix": f"timeout 5 cat {_PROTECTED}",
+    "nice prefix": f"nice cat {_PROTECTED}",
+    "full-path grep": f"/usr/bin/grep x {_PROTECTED}",
+    "full-path cat": f"/bin/cat {_PROTECTED}",
+    "unquoted glob echoed into xargs cat": f"echo {_PREFIX}* | xargs cat",
+    "find -name glob with -exec cat": f"find . -name '{_PREFIX}*' -exec cat {{}} +",
+    "awk -f program file": f"awk -f {_PROTECTED}",
+    "awk getline in its while-loop spelling": (
+        f"awk 'BEGIN {{ while ((getline line < \"{_PROTECTED}\") > 0) print line }}'"
+    ),
+    "awk print with a protected operand": f"awk '{{print}}' {_PROTECTED}",
+    "gh --body-file": f"gh issue comment 1 --body-file {_PROTECTED}",
+    "gh -F": f"gh issue comment 1 -F {_PROTECTED}",
+    "bash heredoc body": f"bash <<'EOF'\ncat {_PROTECTED}\nEOF",
+    "sh heredoc body": f"sh <<'EOF'\ncat {_PROTECTED}\nEOF",
+    "python3 heredoc body opening the file": (
+        f"python3 <<'EOF'\nprint(open('{_PROTECTED}').read())\nEOF"
+    ),
+    "python3 heredoc body globbing a prefix": (
+        f"python3 <<'EOF'\nimport glob\nprint(glob.glob('{_PREFIX}*'))\nEOF"
+    ),
+}
+
+
+class TestEveryFileReadingShapeIsStillDenied:
+    """Each shape a reader might use to reach a protected file, with the file present.
+
+    The relaxation for quoted text operands must not make any of them pass.
+    """
+
+    @pytest.mark.parametrize(
+        "command", list(_READS_A_PROTECTED_FILE.values()), ids=list(_READS_A_PROTECTED_FILE)
+    )
+    def test_is_denied(self, command: str, tmp_path: Path) -> None:
+        (tmp_path / _PROTECTED).write_text("x")
+        decision, _ = _verdict(command, tmp_path)
+        assert decision == Decision.DENY
