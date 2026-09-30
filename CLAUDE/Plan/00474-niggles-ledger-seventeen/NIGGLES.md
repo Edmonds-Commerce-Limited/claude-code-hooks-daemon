@@ -407,6 +407,9 @@ path was never denied, because nothing modelled where a search descends. The gua
 now resolves each recursive search's roots (`grep -r`, `rg`, `git grep`) against the
 payload cwd and project root and denies any root that is an ancestor of, or inside,
 a flagged directory, or that cannot be placed; a named path off the flagged tree stays allowed.
+Review round 1: such a search is allowed when it explicitly excludes the flagged directory
+(`grep --exclude-dir=<name>`, `rg -g '!<path>/**'`, `git grep -- ':!<path>'`), and the deny
+message prints the exact flag for the tool used instead of the quarantine-delegation text.
 
 ### N265 — `secret_file_guard` spends about 2.2 s of CPU on one realistic Python program
 
