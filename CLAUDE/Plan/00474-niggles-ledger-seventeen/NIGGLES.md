@@ -234,7 +234,15 @@ Layer 2 trusts is a security decision, so it is not made here.
 - The owner questioned the threat model. The PATH reset guards against an agent
   steering an upgrade, not the human, who already controls their own PATH.
 
-**Status**: ⬜ Open, ruling made; implementation queued.
+**Handled (ruling implemented)**: Layer 2 searches `$PIPX_BIN_DIR` and the
+Homebrew prefixes after the trusted `PATH` and `~/.local/bin`, each needing root
+or own-user ownership and no group/world write. `upgrade.sh --uv <path>` names a
+uv for one run, passed to Layer 2 as an argument and validated in both. The
+not-found error names both fixes, and `upgrade_approval_guard` denies an agent
+passing `--uv` or setting `PIPX_BIN_DIR` on an upgrade. Release note 191;
+described in `CLAUDE/LLM-UPDATE.md`.
+
+**Status**: ✅ Fixed (branch `worktree-n271-uv-locations`, merge pending).
 
 ### N270 — the workspace venv has drifted from `uv.lock`
 

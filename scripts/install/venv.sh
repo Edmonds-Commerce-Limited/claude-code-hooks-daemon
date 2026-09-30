@@ -30,24 +30,88 @@ if [ -d "$HOME/.local/bin" ]; then
     export PATH="$HOME/.local/bin:$PATH"
 fi
 
+# The uv the human named for this run with `upgrade.sh --uv <path>`. Reset when
+# this file is sourced so an inherited variable of the name never counts; only
+# Layer 2 sets it, from the handoff its parent wrote.
+unset -v VENV_UV_OVERRIDE
+VENV_UV_OVERRIDE=""
+
+#
+# _venv_uv_search_dirs() - Print the fixed directories searched for uv after
+# PATH, one per line: pipx's bin directory ($PIPX_BIN_DIR when it is an
+# absolute path), the uv installer's and pipx's default ~/.local/bin, and the
+# Homebrew prefixes. Never a directory the caller's PATH names.
+#
+_venv_uv_search_dirs() {
+    case "${PIPX_BIN_DIR:-}" in
+        /*) printf '%s\n' "$PIPX_BIN_DIR" ;;
+    esac
+    printf '%s\n' \
+        "${HOME}/.local/bin" \
+        "/opt/homebrew/bin" \
+        "/usr/local/bin" \
+        "/home/linuxbrew/.linuxbrew/bin"
+}
+
+#
+# _venv_uv_dir_is_trusted() - True when $1 is owned by root or the current user
+# and is neither group- nor world-writable, so no other account can plant a uv
+# there. Homebrew's prefixes are user-owned on macOS, so root ownership alone
+# would reject them.
+#
+_venv_uv_dir_is_trusted() {
+    local PATH="/usr/bin:/bin"
+    local dir="$1" owner="" perms=""
+    [ -d "$dir" ] || return 1
+    owner="$(stat -c '%u' "$dir" 2> /dev/null)" || owner="$(stat -f '%u' "$dir" 2> /dev/null)" || return 1
+    [ "$owner" = "0" ] || [ "$owner" = "$(id -u)" ] || return 1
+    perms="$(stat -c '%a' "$dir" 2> /dev/null)" || perms="$(stat -f '%Lp' "$dir" 2> /dev/null)" || return 1
+    case "$perms" in *[!0-7]*) return 1 ;; esac
+    [ $(($((8#$perms)) & 8#022)) -eq 0 ]
+}
+
 #
 # _venv_uv() - Run uv with the given arguments.
 #
-# uv from PATH first, else the uv installer's default location, named
-# explicitly, so a caller whose PATH is fixed system locations only still
-# finds it. Returns 127 when neither has one.
+# The uv named with `--uv` (VENV_UV_OVERRIDE) when there is one, else uv from
+# PATH, else uv from the fixed directories in _venv_uv_search_dirs, each named
+# explicitly so a caller whose PATH is fixed system locations only still finds
+# it. The installer's ~/.local/bin is searched as it always was; the other
+# directories must pass _venv_uv_dir_is_trusted. Returns 127 when none has one.
 #
 _venv_uv() {
     local uv_bin=""
-    local installer_uv="${HOME}/.local/bin/uv"
+    local dir=""
+    if [ -n "${VENV_UV_OVERRIDE:-}" ]; then
+        case "$VENV_UV_OVERRIDE" in
+            /*) ;;
+            *)
+                print_error "--uv $VENV_UV_OVERRIDE is not an absolute path to an executable file"
+                return 127
+                ;;
+        esac
+        if [ ! -f "$VENV_UV_OVERRIDE" ] || [ ! -x "$VENV_UV_OVERRIDE" ]; then
+            print_error "--uv $VENV_UV_OVERRIDE is not an absolute path to an executable file"
+            return 127
+        fi
+        "$VENV_UV_OVERRIDE" "$@"
+        return
+    fi
     if uv_bin="$(command -v uv)"; then
         "$uv_bin" "$@"
-    elif [ -x "$installer_uv" ]; then
-        "$installer_uv" "$@"
-    else
-        print_error "uv not found on PATH or at $installer_uv"
-        return 127
+        return
     fi
+    while IFS= read -r dir; do
+        if [ "$dir" != "${HOME}/.local/bin" ] && ! _venv_uv_dir_is_trusted "$dir"; then
+            continue
+        fi
+        if [ -f "$dir/uv" ] && [ -x "$dir/uv" ]; then
+            "$dir/uv" "$@"
+            return
+        fi
+    done < <(_venv_uv_search_dirs)
+    print_error "uv not found on PATH or in $(_venv_uv_search_dirs | paste -sd' ' -). Install uv into a trusted location (~/.local/bin, a Homebrew prefix, or \$PIPX_BIN_DIR), or pass the path yourself: upgrade.sh --uv <path>"
+    return 127
 }
 
 #

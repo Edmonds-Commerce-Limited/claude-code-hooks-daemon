@@ -36,6 +36,7 @@ TARGET_VERSION=""
 # which already checks it — opts out of the mandatory post-upgrade
 # config-optimisation review reminder.
 UPGRADE_FLAGS=""
+UV_OVERRIDE=""
 
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -56,10 +57,35 @@ while [ $# -gt 0 ]; do
             PROJECT_ROOT="$2"
             shift 2
             ;;
+        --uv|--uv=*)
+            # N271: the uv that builds the venv, for this run only. It decides
+            # what code the daemon runs, so it is the human's to name, here and
+            # nowhere else (no environment variable, no config key); Layer 2
+            # takes it as an argument and checks it again.
+            if [ "$1" = "--uv" ]; then
+                [ -n "${2:-}" ] || { echo "ERR --uv requires a path argument" >&2; exit 1; }
+                UV_OVERRIDE="$2"
+                shift 2
+            else
+                UV_OVERRIDE="${1#--uv=}"
+                shift
+            fi
+            case "$UV_OVERRIDE" in
+                /*) ;;
+                *) echo "ERR --uv $UV_OVERRIDE is not an absolute path to an executable file" >&2; exit 1 ;;
+            esac
+            if [ ! -f "$UV_OVERRIDE" ] || [ ! -x "$UV_OVERRIDE" ]; then
+                echo "ERR --uv $UV_OVERRIDE is not an absolute path to an executable file" >&2
+                exit 1
+            fi
+            ;;
         --help|-h)
-            echo "Usage: upgrade.sh --project-root PATH [--skip-reading-confirmation=DIGEST] [--skip-config-optimisation] [VERSION]"
+            echo "Usage: upgrade.sh --project-root PATH [--skip-reading-confirmation=DIGEST] [--skip-config-optimisation] [--uv PATH] [VERSION]"
             echo ""
             echo "  --project-root PATH        Project root directory (REQUIRED)"
+            echo "  --uv PATH                  Absolute path to the uv that builds the venv, for this run,"
+            echo "                             when uv is not in a trusted location (~/.local/bin, \$PIPX_BIN_DIR,"
+            echo "                             a Homebrew prefix). Run it yourself, not through an agent."
             echo "  --skip-config-optimisation Opt out of the mandatory post-upgrade config-optimisation review"
             echo "  --skip-reading-confirmation=DIGEST"
             echo "                             Confirm you have read what the pre-deploy gate listed;"
@@ -80,7 +106,7 @@ while [ $# -gt 0 ]; do
             ;;
         -*)
             echo "ERR Unknown option: $1" >&2
-            echo "Usage: upgrade.sh --project-root PATH [--skip-reading-confirmation=DIGEST] [--skip-config-optimisation] [VERSION]" >&2
+            echo "Usage: upgrade.sh --project-root PATH [--skip-reading-confirmation=DIGEST] [--skip-config-optimisation] [--uv PATH] [VERSION]" >&2
             exit 1
             ;;
         *)
@@ -800,6 +826,9 @@ if [ -f "$_ENV_SANITISE_SH" ]; then
             # Reaching the package index at all behind a proxy or private CA.
             HTTP_PROXY HTTPS_PROXY NO_PROXY http_proxy https_proxy no_proxy
             SSL_CERT_FILE REQUESTS_CA_BUNDLE CURL_CA_BUNDLE XDG_CACHE_HOME
+            # Where pipx puts uv (default ~/.local/bin), searched by Layer 2's
+            # uv lookup like the other fixed locations.
+            PIPX_BIN_DIR
             # This script's own handover (Steps 3b-3d): the pre-checkout
             # version and the old default config/settings baselines.
             HOOKS_DAEMON_UPGRADE_PREVIOUS_VERSION
@@ -852,7 +881,11 @@ fi
 # with `||`, not inside `if !`, where $? is the negation's status (always 0).
 export UPGRADE_FLAGS
 LAYER2_EXIT=0
-"${_LAYER2_LAUNCH[@]}" "$LAYER2_SCRIPT" "$PROJECT_ROOT" "$DAEMON_DIR" "$TARGET_VERSION" || LAYER2_EXIT=$?
+_LAYER2_ARGS=("$PROJECT_ROOT" "$DAEMON_DIR" "$TARGET_VERSION")
+if [ -n "$UV_OVERRIDE" ]; then
+    _LAYER2_ARGS+=(--uv "$UV_OVERRIDE")
+fi
+"${_LAYER2_LAUNCH[@]}" "$LAYER2_SCRIPT" "${_LAYER2_ARGS[@]}" || LAYER2_EXIT=$?
 if [ "$LAYER2_EXIT" -ne 0 ]; then
     exit "$LAYER2_EXIT"
 fi
