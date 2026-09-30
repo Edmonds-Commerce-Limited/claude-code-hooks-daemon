@@ -26,8 +26,8 @@ import os
 import re
 import subprocess
 import sys
-from collections.abc import Callable, Generator, Mapping, Sequence
-from contextlib import contextmanager
+import time
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any, Final, NamedTuple, TypeAlias
 
@@ -127,130 +127,220 @@ VENV_PYTHON_PLACEHOLDER: Final[str] = "<venv-python>"
 # give the same number two meanings.
 EXIT_SUCCESS = 0
 EXIT_FAILURE = 1
-EXIT_BUSY = 3
+#: The host-wide QA lock stayed held for the whole bounded wait. 3 was the
+#: retired "busy" refusal of the old per-checkout lock and stays unused, so an
+#: old caller's `== 3` can never be misread as this.
+EXIT_LOCK_TIMEOUT = 4
 
-# Run lock (Plan 00262). Concurrent suite runs share one `tests/` tree and one
-# coverage.json, so their verdicts contend and NEITHER can be trusted -- a
-# contended run can fail a check that is fine and pass one that is not. Since a
-# green run gates commits and releases, that turns a blocking gate into a coin
-# flip with no signal that it happened.
+# Host-wide run lock (Plan 00262, widened by Plan 00475 Task 2.3). Concurrent
+# runs share one `tests/` tree and one coverage.json, so their verdicts contend
+# and NEITHER can be trusted -- a contended run can fail a check that is fine
+# and pass one that is not. Since a green run gates commits and releases, that
+# turns a blocking gate into a coin flip with no signal that it happened. More
+# than that, the owner's rule is one QA process at a time on the host.
 #
-# NOT in /tmp: security standard B108 -- runtime files live under the project's
-# untracked dir, never a world-writable shared directory.
-RUN_LOCK_NAME = ".llm_qa.lock"
-_PID_PREFIX = "pid="
-_UNKNOWN_PID = "unknown"
+# ONE lock, not two: the file whole-suite pytest already uses,
+# `<git-common-dir>/hooksdaemon-full-qa.lock`
+# (`claude_code_hooks_daemon.qa.full_qa_lock`, `acquire_full_qa_lock.bash`).
+# It lives in the COMMON git dir, so every worktree contends for the same file,
+# and a tool this run starts recognises it as held (the conftest sink proves
+# possession by an inherited descriptor on that file). This script runs under
+# the system python3 before any venv and cannot import the package, so it opens
+# the same file itself; `tests/unit/qa/test_llm_qa_host_lock.py` pins that the
+# two agree on the path.
+#
+# NOT in /tmp: security standard B108.
+HOST_LOCK_NAME: Final = "hooksdaemon-full-qa.lock"
+#: The bash helper's variable, reused so one setting bounds every waiter.
+WAIT_SECONDS_ENV: Final = "FULL_QA_LOCK_WAIT_SECONDS"
+#: Names the descriptor a child inherits; `acquire_full_qa_lock.bash` reads it.
+INHERITED_FD_ENV: Final = "FULL_QA_LOCK_INHERITED_FD"
+DEFAULT_WAIT_SECONDS: Final = 600
+_POLL_SECONDS: Final = 0.5
+_REANNOUNCE_SECONDS: Final = 60
+_PID_KEY: Final = "pid"
+_CHECKOUT_KEY: Final = "checkout"
+_UNKNOWN_HOLDER = "unknown (a run that predates this lock's stamp, or one that has exited)"
 _LOCK_FILE_MODE = 0o644
+_GIT_COMMON_DIR_TIMEOUT_SECONDS: Final = 60
+
+#: Sink for a message; a print to stderr in `main`, a list append in tests.
+Announcer: TypeAlias = Callable[[str], None]
 
 
-def run_lock_path() -> Path:
-    """Return the canonical run-lock path (never ``/tmp`` -- B108)."""
-    return QA_OUTPUT_DIR / RUN_LOCK_NAME
+class LockTimeout(Exception):
+    """The host-wide QA lock stayed held for the whole bounded wait."""
+
+
+def host_lock_path(root: Path = PROJECT_ROOT) -> Path:
+    """The one lock file shared by every worktree of ``root``'s repository.
+
+    Raises:
+        OSError: ``root`` is not in a git worktree, or git could not be run.
+    """
+    try:
+        completed = subprocess.run(
+            ["git", "-C", str(root), "rev-parse", "--path-format=absolute", "--git-common-dir"],
+            capture_output=True,
+            text=True,
+            timeout=_GIT_COMMON_DIR_TIMEOUT_SECONDS,
+            check=False,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise OSError(f"git rev-parse --git-common-dir timed out in {root}") from exc
+    if completed.returncode != 0:
+        raise OSError(
+            f"git rev-parse --git-common-dir failed in {root} "
+            f"(exit {completed.returncode}): {completed.stderr.strip()}"
+        )
+    return Path(completed.stdout.strip()) / HOST_LOCK_NAME
+
+
+def configured_wait_seconds() -> float:
+    """The bounded wait, from ``FULL_QA_LOCK_WAIT_SECONDS`` (default 600).
+
+    Raises:
+        ValueError: the variable is set to something that is not a
+            non-negative number. A typo must not silently become "wait for
+            ever" or "do not wait".
+    """
+    raw = os.environ.get(WAIT_SECONDS_ENV)
+    if raw is None:
+        return float(DEFAULT_WAIT_SECONDS)
+    message = f"{WAIT_SECONDS_ENV} must be a non-negative number of seconds, got {raw!r}"
+    try:
+        seconds = float(raw)
+    except ValueError as exc:
+        raise ValueError(message) from exc
+    if not seconds >= 0:
+        raise ValueError(message)
+    return seconds
 
 
 def _open_lock_fd(path: Path | str) -> int:
     """Open (creating if needed) the lock file and return a raw descriptor.
 
     A raw descriptor rather than a buffered text handle: a lock is a file
-    DESCRIPTOR, and ``flock`` operates on one. Using ``os.open`` also keeps the
-    "held for the process lifetime" case honest -- there is no stream to leave
-    unclosed, so nothing has to be excused to a linter.
+    DESCRIPTOR, and ``flock`` operates on one. ``os.open`` returns it
+    non-inheritable (PEP 446), so a daemon a tool starts during the run cannot
+    keep the lock; only :func:`run_tool` passes it on, and only to its child.
     """
     lock_path = Path(path)
     lock_path.parent.mkdir(parents=True, exist_ok=True)
     return os.open(lock_path, os.O_RDWR | os.O_CREAT, _LOCK_FILE_MODE)
 
 
-def _stamp_holder(fd: int) -> None:
-    """Record the holder's pid so a refusal can name it.
+def _stamp_holder(fd: int, checkout: Path) -> None:
+    """Record the holder's pid and checkout so a waiter can name them.
 
-    A bare "already running" invites deleting the lock file, which reintroduces
-    the race AND removes the signal. Naming the pid lets the reader check
-    whether it is alive and decide between waiting and investigating.
+    Diagnostic only: the decision is ``flock``'s, never this file's contents.
+    A holder that is not ``llm_qa.py`` (a bare whole-suite run) stamps nothing.
     """
     os.ftruncate(fd, 0)
     os.lseek(fd, 0, os.SEEK_SET)
-    os.write(fd, f"{_PID_PREFIX}{os.getpid()}\n".encode())
+    os.write(fd, f"{_PID_KEY}={os.getpid()}\n{_CHECKOUT_KEY}={checkout}\n".encode())
 
 
-def try_acquire_run_lock(path: str) -> bool:
-    """Attempt a non-blocking acquire; return whether it succeeded.
-
-    Exposed separately from ``run_lock`` so a caller (or a test) can ask the
-    question without taking ownership. On success the descriptor is deliberately
-    left open for the process lifetime: the kernel releases the lock when the
-    process exits, which is the whole point of using ``flock``.
-    """
-    fd = _open_lock_fd(path)
+def _pid_is_alive(pid: int) -> bool:
     try:
-        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except BlockingIOError:
-        # Contention is the EXPECTED answer here, not an error: another run
-        # holds the lock. Only this errno means "held" -- anything else (a bad
-        # path, a full disk) propagates rather than being misreported as a busy
-        # suite, which would silently skip the gate.
-        os.close(fd)
+        os.kill(pid, 0)
+    except ProcessLookupError:
         return False
-    _stamp_holder(fd)
+    except PermissionError:
+        # Alive, owned by someone else.
+        return True
     return True
 
 
-def read_holder_pid(path: str) -> str:
-    """Return the recorded holder pid, or a reason it could not be read.
-
-    Diagnostic only. The refusal itself is decided by ``flock``, never by this
-    file's contents -- so an unreadable lock file degrades the MESSAGE and must
-    never be allowed to change the DECISION.
-    """
-    lock_file = Path(path)
-    if not lock_file.is_file():
-        return _UNKNOWN_PID
+def describe_holder(path: Path | str) -> str:
+    """Who holds the lock, as far as the stamp says and the pid is still alive."""
     try:
-        content = lock_file.read_text(encoding="utf-8")
-    except OSError as exc:
-        return f"{_UNKNOWN_PID} (lock file unreadable: {exc.strerror})"
-    for line in content.splitlines():
-        if line.startswith(_PID_PREFIX):
-            return line.split("=", 1)[1].strip()
-    return _UNKNOWN_PID
+        content = Path(path).read_text(encoding="utf-8")
+    except OSError:
+        return _UNKNOWN_HOLDER
+    fields = dict(line.split("=", 1) for line in content.splitlines() if "=" in line)
+    pid_text = fields.get(_PID_KEY, "")
+    if not pid_text.isdigit() or not _pid_is_alive(int(pid_text)):
+        return _UNKNOWN_HOLDER
+    checkout = fields.get(_CHECKOUT_KEY, "unknown checkout")
+    return f"pid {pid_text} in {checkout}"
 
 
-def busy_message(path: str) -> str:
-    """Explain the refusal well enough that nobody deletes the lock file."""
-    holder = read_holder_pid(path)
+def _waiting_message(path: Path, waited: float, wait_seconds: float) -> str:
     return (
-        f"QA is already running (pid {holder}).\n"
-        "\n"
-        "Two concurrent runs share this tree and one coverage.json, so their\n"
-        "verdicts contend and NEITHER can be trusted -- a contended run can\n"
-        "fail a check that is fine, and pass one that is not. Refusing rather\n"
-        "than producing a verdict you would have to distrust.\n"
-        "\n"
-        "  - Wait for that run to finish, then re-run.\n"
-        "  - Inspect the run in progress with:  llm_qa.py --read-only all\n"
-        f"  - If pid {holder} is genuinely dead, the lock is ALREADY released:\n"
-        f"    flock drops it on process exit, so do NOT delete {path}.\n"
-        "    A lock file on disk does not mean a lock is held.\n"
+        f"llm_qa: waiting for the host-wide QA lock (one QA process at a time), held by "
+        f"{describe_holder(path)}; waited {waited:.0f}s of {wait_seconds:.0f}s. "
+        f"Inspect the run with: llm_qa.py --read-only all"
     )
 
 
-@contextmanager
-def run_lock(path: Path | str) -> Generator[None]:
-    """Hold the run lock for the duration of the block.
+def timeout_message(path: Path, wait_seconds: float) -> str:
+    """Explain the give-up well enough that nobody deletes the lock file."""
+    return (
+        f"QA lock still held after {wait_seconds:.0f}s: {path}\n"
+        f"  Held by {describe_holder(path)}.\n"
+        "\n"
+        "Only one QA process may run on the host at a time, so this run did not start.\n"
+        f"  - Wait for that run to finish, then re-run (or raise {WAIT_SECONDS_ENV}).\n"
+        "  - Inspect the run in progress with:  llm_qa.py --read-only all\n"
+        "  - If that pid is genuinely dead, the lock is ALREADY released: flock drops it\n"
+        f"    on process exit, so do NOT delete {path}. A lock file on disk does not\n"
+        "    mean a lock is held. A live orphan that inherited the descriptor can hold it.\n"
+    )
 
-    ``flock`` rather than a PID-file convention: the kernel drops it when the
-    holder dies, INCLUDING on SIGKILL. That removes the entire stale-lock class
-    instead of adding cleanup logic for it -- and a guard that could wedge the
-    suite permanently would be worse than the race it prevents, because an agent
-    would soon learn to delete the lock file.
+
+def _try_lock(fd: int) -> bool:
+    """One non-blocking lock attempt; whether it succeeded.
+
+    Contention is the EXPECTED answer: another run holds the lock. Only this
+    errno means "held" -- anything else (a bad path, a full disk) propagates
+    rather than being reported as a busy host.
     """
-    fd = _open_lock_fd(path)
     try:
         fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        _stamp_holder(fd)
-        yield
-    finally:
+    except BlockingIOError:
+        return False
+    return True
+
+
+def acquire_host_lock(
+    path: Path | str,
+    *,
+    wait_seconds: float,
+    announce: Announcer,
+    clock: Callable[[], float] = time.monotonic,
+    sleep: Callable[[float], None] = time.sleep,
+) -> int:
+    """Take the host-wide lock, queueing behind a holder for up to ``wait_seconds``.
+
+    ``flock`` has no timeout, so this polls the non-blocking form. Announces
+    once when it starts waiting and again each minute, naming the holder.
+
+    Returns:
+        The locked descriptor. The caller owns it and closes it to release; the
+        kernel also drops the lock when the process dies, SIGKILL included.
+
+    Raises:
+        LockTimeout: the lock was still held after ``wait_seconds``.
+    """
+    lock_path = Path(path)
+    fd = _open_lock_fd(lock_path)
+    started = clock()
+    next_announcement = started
+    try:
+        while True:
+            if _try_lock(fd):
+                return fd
+            now = clock()
+            if now - started >= wait_seconds:
+                raise LockTimeout(timeout_message(lock_path, wait_seconds))
+            if now >= next_announcement:
+                announce(_waiting_message(lock_path, now - started, wait_seconds))
+                next_announcement = now + _REANNOUNCE_SECONDS
+            sleep(min(_POLL_SECONDS, wait_seconds - (now - started)))
+    except BaseException:
         os.close(fd)
+        raise
 
 
 # ── Provenance: which tree a result judged ─────────────────────────
@@ -1249,14 +1339,24 @@ def ensure_live_daemon(tool: str) -> str | None:
     )
 
 
-def run_tool(name: str, extra_args: Sequence[str] = ()) -> int:
-    """Run a QA tool, suppressing its stdout/stderr. Returns exit code."""
+def run_tool(name: str, extra_args: Sequence[str] = (), *, lock_fd: int | None = None) -> int:
+    """Run a QA tool, suppressing its stdout/stderr. Returns exit code.
+
+    ``lock_fd`` is the host-wide lock this run holds. The child inherits that
+    very descriptor (``pass_fds``), which is how a whole-suite pytest under it
+    proves it holds the lock and does not wait on its own parent. The
+    environment variable is only a hint at which descriptor to test, for the
+    bash side; the proof is ``flock`` on the descriptor itself.
+    """
     config = TOOL_REGISTRY[name]
+    env = None if lock_fd is None else {**os.environ, INHERITED_FD_ENV: str(lock_fd)}
     result = subprocess.run(
         [*resolved_command(config), *extra_args],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
         cwd=str(PROJECT_ROOT),
+        env=env,
+        pass_fds=() if lock_fd is None else (lock_fd,),
     )
     return result.returncode
 
@@ -2355,12 +2455,26 @@ def main() -> int:
         print(f"llm_qa: {exc}", file=sys.stderr)
         return EXIT_FAILURE
 
-    lock_file = run_lock_path()
-    if not try_acquire_run_lock(str(lock_file)):
-        print(busy_message(str(lock_file)), file=sys.stderr)
-        return EXIT_BUSY
-
-    return _run_tools(tools, read_only=False, forwarded=forwarded)
+    try:
+        lock_file = host_lock_path(PROJECT_ROOT)
+        wait_seconds = configured_wait_seconds()
+    except (OSError, ValueError) as exc:
+        print(f"llm_qa: {exc}", file=sys.stderr)
+        return EXIT_FAILURE
+    try:
+        lock_fd = acquire_host_lock(
+            lock_file,
+            wait_seconds=wait_seconds,
+            announce=lambda message: print(message, file=sys.stderr, flush=True),
+        )
+    except LockTimeout as exc:
+        print(exc, file=sys.stderr)
+        return EXIT_LOCK_TIMEOUT
+    try:
+        _stamp_holder(lock_fd, PROJECT_ROOT)
+        return _run_tools(tools, read_only=False, forwarded=forwarded, lock_fd=lock_fd)
+    finally:
+        os.close(lock_fd)
 
 
 #: Per tool: the exit code, the live verdict, and the report hash taken on return.
@@ -2402,7 +2516,13 @@ def _certify_gate(judged: dict[str, str] | None) -> None:
             print(f"\nGATE: {head[:_SHORT_SHA]} certified for {MAIN_MOVED_COMMAND}")
 
 
-def _run_tools(tools: list[str], *, read_only: bool, forwarded: Sequence[str] = ()) -> int:
+def _run_tools(
+    tools: list[str],
+    *,
+    read_only: bool,
+    forwarded: Sequence[str] = (),
+    lock_fd: int | None = None,
+) -> int:
     """Run (or merely summarize) each tool and print the overall verdict.
 
     A run records, per tool, the tree it judged (before and after must agree,
@@ -2440,7 +2560,7 @@ def _run_tools(tools: list[str], *, read_only: bool, forwarded: Sequence[str] = 
                 if daemon_note is not None:
                     print(daemon_note)
             extra = forwarded if name == _CHANGED_TESTS_TOOL else ()
-            exit_code = run_tool(name, extra)
+            exit_code = run_tool(name, extra, lock_fd=lock_fd)
             digest = output_digest(output)
 
         # Summarize from JSON, passing exit code for cross-check

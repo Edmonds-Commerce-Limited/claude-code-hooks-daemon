@@ -10,12 +10,14 @@ Covers critical paths in:
 import argparse
 import fcntl
 import os
+import subprocess
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
 
 import pytest
 
+from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.daemon.cli import (
     check_hook_registration_warnings,
@@ -24,6 +26,7 @@ from claude_code_hooks_daemon.daemon.cli import (
     cmd_logs,
     cmd_restart,
 )
+from claude_code_hooks_daemon.qa.full_qa_lock import host_lock_path
 
 
 @pytest.fixture(autouse=True)
@@ -820,8 +823,10 @@ class TestCmdRestart:
         operator may genuinely need to restart regardless.
         """
         root = self._installed_root(tmp_path)
-        lock = root / "untracked" / "qa" / ".llm_qa.lock"
-        lock.parent.mkdir(parents=True)
+        subprocess.run(
+            ["git", "init", "-q", str(root)], check=True, timeout=Timeout.QA_TEST_TIMEOUT
+        )
+        lock = host_lock_path(root)
         lock.write_text("pid=4242\n")
 
         args = argparse.Namespace(project_root=root)
@@ -847,8 +852,10 @@ class TestCmdRestart:
     def test_restart_is_silent_when_the_qa_lock_is_free(self, tmp_path: Path) -> None:
         """A lock FILE on disk is not a lock HELD -- flock decides, not existence."""
         root = self._installed_root(tmp_path)
-        lock = root / "untracked" / "qa" / ".llm_qa.lock"
-        lock.parent.mkdir(parents=True)
+        subprocess.run(
+            ["git", "init", "-q", str(root)], check=True, timeout=Timeout.QA_TEST_TIMEOUT
+        )
+        lock = host_lock_path(root)
         lock.write_text("pid=4242\n")
 
         args = argparse.Namespace(project_root=root)

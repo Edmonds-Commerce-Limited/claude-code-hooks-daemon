@@ -166,7 +166,7 @@ class TestTheRunEnsuresTheDaemonBeforeEachConsumer:
         # must never touch this checkout's real untracked/qa/.
         monkeypatch.setattr(llm_qa, "QA_OUTPUT_DIR", tmp_path)
         monkeypatch.setattr(llm_qa, "ensure_live_daemon", _record)
-        monkeypatch.setattr(llm_qa, "run_tool", lambda name, extra_args=(): 0)
+        monkeypatch.setattr(llm_qa, "run_tool", lambda name, extra_args=(), lock_fd=None: 0)
         monkeypatch.setattr(
             llm_qa, "summarize_tool", lambda name, exit_code=None, stale=None: (True, "")
         )

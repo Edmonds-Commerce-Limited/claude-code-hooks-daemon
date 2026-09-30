@@ -193,7 +193,7 @@ class TestARunCertifiesOnlyWhatItProduced:
         writes: dict[str, Any] | None,
         calls: list[tuple[str, tuple[str, ...]]] | None = None,
     ) -> None:
-        def run_tool(name: str, extra_args: Any = ()) -> int:
+        def run_tool(name: str, extra_args: Any = (), lock_fd: int | None = None) -> int:
             if calls is not None:
                 calls.append((name, tuple(extra_args)))
             if writes is not None:
@@ -252,7 +252,7 @@ class TestARunCertifiesOnlyWhatItProduced:
         """Review 3 R8: the hash was taken after EVERY tool, so a rewrite was certified."""
         first_report = qa_dir / llm_qa.TOOL_REGISTRY[_TOOL].json_file
 
-        def run_tool(name: str, extra_args: Any = ()) -> int:
+        def run_tool(name: str, extra_args: Any = (), lock_fd: int | None = None) -> int:
             if name == _TOOL:
                 first_report.write_text(json.dumps(_GREEN), encoding="utf-8")
             else:

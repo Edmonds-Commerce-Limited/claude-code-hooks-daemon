@@ -119,6 +119,7 @@ from claude_code_hooks_daemon.install.install_stamp import read_install_stamp
 from claude_code_hooks_daemon.install.release_notes import load_release_notes_between
 from claude_code_hooks_daemon.issue_report.build import build_report
 from claude_code_hooks_daemon.issue_report.upstream import filing_command
+from claude_code_hooks_daemon.qa.full_qa_lock import host_lock_path as qa_host_lock_path
 from claude_code_hooks_daemon.utils.claude_config import claude_config_dir, is_in_claude_config_dir
 from claude_code_hooks_daemon.utils.claude_plugins import resolve_enabled_plugins
 from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command
@@ -2240,11 +2241,13 @@ def _print_mode_advisory(pre_mode: dict[str, Any]) -> None:
     print(f"\nTo restore previous mode:\n{restore_cmd}")
 
 
-#: Where the QA runner takes its whole-suite lock, relative to the project root.
-#: Duplicated rather than imported: `scripts/qa/llm_qa.py` is a script, not an
+#: The QA runner (`scripts/qa/llm_qa.py`) stamps the lock it holds with these
+#: two keys. Duplicated rather than imported: that file is a script, not an
 #: importable package, and the daemon must not grow a dependency on the QA
-#: harness to print an advisory.
-_QA_RUN_LOCK_RELPATH: Final[str] = "untracked/qa/.llm_qa.lock"
+#: harness to print an advisory. `tests/unit/qa/test_llm_qa_host_lock.py` pins
+#: that the runner writes them.
+_QA_STAMP_PID_KEY: Final[str] = "pid"
+_QA_STAMP_CHECKOUT_KEY: Final[str] = "checkout"
 #: Reported when a run holds the lock but its pid cannot be read.
 _UNNAMED_HOLDER: Final[str] = "unknown"
 
@@ -2256,6 +2259,11 @@ _QA_LOCK_CANNOT_TELL: Final[str] = (
 def _qa_run_lock_holder(project_root: Path) -> str | None:
     """Return the pid recorded in the QA run lock, or None when nothing holds it.
 
+    The lock is the host-wide one in the repository's common git dir, so a run
+    in ANOTHER worktree also holds it. A holder that stamped a different
+    checkout is not using this checkout's daemon, so it answers None; an
+    unstamped holder cannot be excluded and still counts.
+
     A held lock whose pid cannot be read answers ``"unknown"``. None also
     means "cannot tell", which is logged at WARNING where it happens.
 
@@ -2265,8 +2273,13 @@ def _qa_run_lock_holder(project_root: Path) -> str | None:
     refusal message makes the same point, and inverting it here would warn on
     every restart after any QA run had ever happened.
     """
-    lock_path = project_root / _QA_RUN_LOCK_RELPATH
-    if not lock_path.is_file():
+    lock_path: Path | None
+    try:
+        lock_path = qa_host_lock_path(project_root)
+    except OSError as exc:
+        logger.warning(_QA_LOCK_CANNOT_TELL, f"its lock location is unknown ({exc})")
+        lock_path = None
+    if lock_path is None or not lock_path.is_file():
         return None
 
     # Every other OSError answers "I cannot tell", which for an ADVISORY means
@@ -2298,7 +2311,7 @@ def _qa_run_lock_holder(project_root: Path) -> str | None:
         # explicit LOCK_UN: one sat outside every handler here and could end
         # `restart` with a traceback (Plan 00408 Task 3.10).
         os.close(fd)
-    return _recorded_qa_lock_holder(lock_path) if held else None
+    return _recorded_qa_lock_holder(lock_path, project_root) if held else None
 
 
 def _qa_lock_is_held(fd: int) -> bool:
@@ -2314,19 +2327,24 @@ def _qa_lock_is_held(fd: int) -> bool:
     return False
 
 
-def _recorded_qa_lock_holder(lock_path: Path) -> str:
+def _recorded_qa_lock_holder(lock_path: Path, project_root: Path) -> str | None:
     """The pid a HELD lock records, or ``"unknown"`` when it cannot be read.
 
     Only called once contention has proved the lock is held, so an unreadable
     pid still answers "held": an unnamed holder keeps the restart warning,
-    where "nothing holds it" would drop it for a run that is in progress.
+    where "nothing holds it" would drop it for a run that is in progress. The
+    one exception is a holder that names a DIFFERENT checkout.
     """
     try:
-        recorded = lock_path.read_text(encoding="utf-8").strip()
+        recorded = lock_path.read_text(encoding="utf-8")
     except OSError as exc:
         logger.warning("QA run lock is held but its pid is unreadable (%s)", exc)
-        recorded = ""
-    return recorded.removeprefix("pid=") or _UNNAMED_HOLDER
+        return _UNNAMED_HOLDER
+    fields = dict(line.split("=", 1) for line in recorded.splitlines() if "=" in line)
+    checkout = fields.get(_QA_STAMP_CHECKOUT_KEY)
+    if checkout is not None and Path(checkout).resolve() != project_root.resolve():
+        return None
+    return fields.get(_QA_STAMP_PID_KEY, "").strip() or _UNNAMED_HOLDER
 
 
 def _warn_if_qa_run_in_progress(args: argparse.Namespace) -> None:
