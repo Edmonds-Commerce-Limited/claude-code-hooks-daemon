@@ -1912,7 +1912,9 @@ def _token_mention(
     return None
 
 
-def find_protected_mention_strict(command: str, patterns: tuple[str, ...]) -> str | None:
+def find_protected_mention_strict(
+    command: str, patterns: tuple[str, ...], cwd: str | None = None
+) -> str | None:
     """First protected glob a token of ``command`` mentions, requiring a REAL
     on-disk match for any glob-shaped token, else ``None``.
 
@@ -1927,8 +1929,9 @@ def find_protected_mention_strict(command: str, patterns: tuple[str, ...]) -> st
     the second seed pattern's literal stem regardless of what actually exists
     (canary-php-qa-ci-upgrade-26-08-30.md, Finding 6). This variant keeps
     literal-token matching identical, but for a GLOB-shaped token it expands
-    the glob against the filesystem (project root, then cwd) and only counts
-    it as a mention when at least one resulting path is itself protected.
+    the glob against the filesystem (project root, then the hook's ``cwd``)
+    and only counts it as a mention when at least one resulting path is
+    itself protected.
 
     Only a token with a glob character bash would expand is expanded (ledger
     00466 N238): one inside quotes or escaped is a literal, which bash
@@ -1945,7 +1948,7 @@ def find_protected_mention_strict(command: str, patterns: tuple[str, ...]) -> st
             if matched is not None:
                 return matched
             if globbed and _is_glob_shaped(form):
-                match = _expand_glob_token(form, patterns, project_root)
+                match = _expand_glob_token(form, patterns, project_root, cwd=cwd)
                 if match is not None:
                     return match
         real = _realpath_if_resolvable(token)
@@ -1968,13 +1971,13 @@ def _expand_glob_token(
     """First protected pattern matched by a file ``token`` actually expands to.
 
     Tried against each plausible base (the project root, then ``cwd`` when
-    given, then the process's own cwd — a Bash tool call runs relative to
-    one of these) so a relative glob like ``docs/*.md`` is resolved the way
-    the shell would resolve it. ``cwd`` is the HOOK's working directory
-    (Plan 00466 review 2, M2c) — threading it through lets a caller resolve
-    against where the tool call actually ran rather than only where this
-    long-lived daemon process happens to sit; a caller that has no hook cwd
-    to hand simply omits it and keeps the pre-existing behaviour. An
+    given — a Bash tool call runs relative to one of these) so a relative
+    glob like ``docs/*.md`` is resolved the way the shell would resolve it.
+    ``cwd`` is the HOOK's working directory (Plan 00466 review 2, M2c). The
+    daemon PROCESS's own cwd is never a base: the long-lived daemon sits at
+    ``/``, which no tool call runs in, and a broad glob rooted there is
+    refused outright (issues #64, #66). A caller with neither a project root
+    nor a hook cwd has no relative base to try. An
     absolute token is tried as-is, split into its anchor plus the remaining
     pattern so ``Path.glob`` (which only accepts a RELATIVE pattern) can
     still expand it. A token that expands to nothing, or only to unrelated
@@ -2005,15 +2008,12 @@ def _expand_glob_token(
                 hook_cwd = Path(cwd)
             except (OSError, ValueError) as exc:
                 # An unparseable `cwd` string (e.g. embedded NUL) means no
-                # extra base -- the project-root/daemon-cwd bases below
-                # still apply, so this is a narrowing, not a total failure.
+                # extra base -- the project-root base still applies, so this
+                # is a narrowing, not a total failure.
                 logger.debug("secret_file_matching: could not parse hook cwd %r: %s", cwd, exc)
                 hook_cwd = None
             if hook_cwd is not None and hook_cwd.is_absolute() and hook_cwd not in bases:
                 bases.append(hook_cwd)
-        daemon_cwd = Path.cwd()
-        if daemon_cwd not in bases:
-            bases.append(daemon_cwd)
         search_specs = [(base, token) for base in bases]
 
     seen: set[str] = set()
