@@ -4101,7 +4101,7 @@ def _literal_prefix_exists(base: Path, pattern: str) -> bool:
     if not prefix_parts:
         return True
     try:
-        os.stat(base.joinpath(*prefix_parts))
+        base.joinpath(*prefix_parts).stat()
     except OSError as exc:
         return exc.errno not in _ABSENT_ERRNOS
     return True
