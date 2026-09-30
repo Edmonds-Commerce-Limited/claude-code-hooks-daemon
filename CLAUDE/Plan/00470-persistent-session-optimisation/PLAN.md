@@ -1,6 +1,6 @@
 # Plan 00470: persistent session optimisation
 
-**Status**: Not Started
+**Status**: In Progress
 **Created**: 2026-09-25
 **Owner**: dev
 **Priority**: Medium
@@ -83,8 +83,35 @@ Evidence, with verified facts marked apart from inferences, is in
   - Note for 00452: the declared crons at :23 and :47 already keep gaps under 60 minutes. But the daemon DROPS ticks when the session is blocked on a human or has backed off (R-FAILSAFE-CRON-SUPPRESSED, R-FAILSAFE-CRON-BACKED-OFF), which is exactly when the cache goes cold. So the warming decision must account for suppressed ticks.
 - [ ] ⬜ **Task 4.3**: A/B the orchestrator: Sonnet main loop vs Opus, Opus sub-agents with pinned `model:` and structured verdict files; compare cost per tick, guard denies, and triage/verdict errors. Owner decides from the record.
 
+### Phase 5: A human block must not halt everything (owner request)
+
+An `[awaiting-human]` stop currently silences every declared cron, so one open
+question stops all work. Seen: an issue-sdlc tick was suppressed while the session
+waited on one bandit decision.
+
+- [ ] ⬜ **Task 5.1**: A per-job `persistent_crons` option saying whether a live
+  awaiting-human marker suppresses that job. `issue-sdlc` is not suppressed, because
+  its work is independent of the pending question. `failsafe-recovery` is
+  suppressed, because resuming interrupted work is exactly what waits on the human.
+  TDD, with the default unchanged for undeclared jobs.
+- [ ] ⬜ **Task 5.2**: Timed stand-in. When a stop declares `[awaiting-human]`, the
+  session also schedules a one-off cron about three hours out. If the marker is
+  still live when it fires, a Fable (`claude-fable-5-1`) sub-agent reads the
+  pending question and the options the agent laid out, chooses one, and the
+  session carries on.
+  - The stand-in's choice is recorded in the plan journal as the stand-in's ruling,
+    never as the owner's, and a later real message can overturn it.
+  - It may only choose among engineering options. Decisions this repository
+    reserves for a human stay blocked: releases, force deletes, QA suppressions,
+    history rewrites, and anything the guards say to ask the user for.
+  - Decide with the owner how the stop hook makes sure the one-off cron is created.
+
 ## Success Criteria
 
+- [ ] An issue-sdlc tick fires while a failsafe tick is suppressed by a live
+  awaiting-human marker, proven by test.
+- [ ] A stale awaiting-human block is answered by the stand-in within the window,
+  and a human-reserved decision is never taken by it.
 - [ ] A job older than `refresh_after` is refreshed at a Stop, proven by test.
 - [ ] Total cron expiry is recovered by the supervisor watchdog, proven by test.
 - [ ] After a simulated usage-limit stop, the session re-dispatches queued work from the queue file alone.

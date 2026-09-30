@@ -16,7 +16,7 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00471: subagent token budget protection](00471-subagent-token-budget-protection/PLAN.md) - In Progress (owner request after a usage-limit burn: subagents compacted only at about 570k tokens, finished agents were resumed with thousands of prior messages, and about nine Opus agents ran at once; the daemon sees every Agent, SendMessage and tool call plus the transcript's usage, so it can measure and bound the spend)
 
-- [00470: persistent session optimisation](00470-persistent-session-optimisation/PLAN.md) - Not Started (owner request: the always-on issue-monitoring server session is the dogfood; cron refresh before expiry, usage-limit and restart recovery from a durable queue, and a measured orchestrator-model choice)
+- [00470: persistent session optimisation](00470-persistent-session-optimisation/PLAN.md) - In Progress (Phase 5 added: an awaiting-human block no longer halts issue-sdlc, and a stale block gets a timed Fable stand-in for engineering choices only. Owner request: the always-on issue-monitoring server session is the dogfood; cron refresh before expiry, usage-limit and restart recovery from a durable queue, and a measured orchestrator-model choice)
 
 - [00467: recommend the defence before fix plugin to client projects](00467-recommend-the-defence-before-fix-plugin-to-client-projects/PLAN.md) - Blocked (owner request: dogfood the DBF plugin, then recommend it to clients. Phase 1 is done, with shortfalls filed upstream as #4-#6 and recommendation no-go for now. Waiting on the owner's go/no-go, and on one logged-in auto-trigger probe)
 
