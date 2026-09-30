@@ -205,7 +205,14 @@ enumeration from treating a quoted argument (at least a `grep`/`rg`/`awk`
 pattern operand) as a glob. Related: N256 (quoted heredoc bodies) and N265 (scan
 cost).
 
-**Status**: ⬜ Open.
+**Status**: ✅ Fixed in two steps. Step 1 (b39b8f8fc): glob expansion is based on
+the project root and the payload's cwd, never the daemon's own. Step 2
+(a7ebcae9b): a quoted word that a pure text consumer (`grep`, `rg`, `awk`,
+`echo`, `printf`, a `gh` body or title) receives is judged by the literal check
+only, never by the glob heuristics. The owner's checklist review found all 12
+file-reading shapes (`grep -f`, `rg --pre`, `awk -f`, wrappers, here-strings,
+heredoc bodies and others) still denied, on the branch and on the base. N256 is
+related but separate, and stays open until it is checked on its own.
 
 ### N268 — a symlinked-project daemon test's teardown refuses a daemon that is exiting
 

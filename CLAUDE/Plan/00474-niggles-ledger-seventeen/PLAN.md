@@ -46,7 +46,7 @@ Full write-ups are in [NIGGLES.md](NIGGLES.md). One line each here:
 | N272       | One `llm_qa changed` run reported `project_handlers` as 0 tests collected; it passed 232 alone                   | Coordinator         | ✅ Fixed                |
 | N271       | An upgrade fails "uv not found" when the only uv is outside the trusted PATH and `~/.local/bin`                  | Main CI red         | ⬜ Open (ruled)         |
 | N270       | The workspace venv has drifted from `uv.lock` (pytest 9.1.1 against 9.0.3)                                       | Coordinator         | ⬜ Open                 |
-| N269       | `secret_file_guard` expands a single-quoted grep regex as a filename glob                                        | Coordinator         | ⬜ Open                 |
+| N269       | `secret_file_guard` expands a single-quoted grep regex as a filename glob                                        | Coordinator         | ✅ Fixed (a7ebcae9b)    |
 | N268       | A symlinked-project daemon test's teardown refuses a daemon that is exiting                                      | Main CI             | ✅ Fixed (1a61af7d0)    |
 | N267       | Dropping a stale branch always needs a human, even when nothing can be lost                                      | Owner               | ✅ Fixed (74dbdc970)    |
 | 65 entries | Still open in the archived ledger 00466 ([index](../Completed/00466-niggles-ledger-sixteen/PLAN.md))             | 00466 close-out     | ⬜ Open                 |
