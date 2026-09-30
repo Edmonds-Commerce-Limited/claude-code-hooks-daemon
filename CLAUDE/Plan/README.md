@@ -4,6 +4,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
+- [00476: release through a pr with ci tagging](00476-release-through-a-pr-with-ci-tagging/PLAN.md) - Not Started (owner proposal: prepare a release on a branch, gate it with the whole QA suite in CI on a pull request, and let only a CI workflow tag and publish on merge; follows 00475's first batch)
+
 - [00475: targeted qa and small batches](00475-targeted-qa-and-small-batches/PLAN.md) - In Progress (owner request: targeted QA for every change, the full gate only at release preparation, one QA run at a time, and small batches of branches finished before the next start, after ledger 00466 left 21 stale branches)
 
 - [00474: niggles ledger seventeen](00474-niggles-ledger-seventeen/PLAN.md) - In Progress, the OPEN ledger for new niggles (00466 reached its PLAN.md size limit with N261; numbering continues, opening with N262: the release procedure has no check that the notes fit a GitHub release body)
@@ -282,7 +284,7 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 - **Completed**: 413 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 39 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 40 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 
