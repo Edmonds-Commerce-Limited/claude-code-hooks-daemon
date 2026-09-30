@@ -70,7 +70,10 @@ GitHub's six-hour default applies.
 its measured duration (the full-tier pytest jobs run about an hour; Shell, Daemon
 load and Classify take minutes).
 
-**Status**: ⬜ Open.
+**Status**: ✅ Fixed (merge of `worktree-n273-ci-timeouts`). Timeouts: Classify
+10, the docs/code tier 120, each full-tier Python 150, Shell and Daemon load 15
+minutes. `tests/integration/test_ci_job_timeouts.py` fails a job with no timeout
+or one over 180 minutes.
 
 ### N272 — one `llm_qa changed` run reported `project_handlers` as 0 tests collected
 
