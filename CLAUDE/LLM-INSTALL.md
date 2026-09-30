@@ -1,6 +1,6 @@
 # Claude Code Hooks Daemon - FRESH INSTALLATION Guide
 
-**This document is for FRESH installations only.** Follow the steps below to install the daemon into a project that does not have it yet.
+**This document is for FRESH installations only.** Follow the steps below to install the daemon into a project that does not have it yet. A fresh clone of a project that already uses the daemon is not an install: run `bash .claude/provision.sh` instead (see Step 0).
 
 ## Prerequisites
 
@@ -27,7 +27,7 @@ else
 fi
 ```
 
-**Only use the UPDATE guide if `.claude/hooks-daemon/src/` exists** (the daemon repo is present). If you see config files like `.claude/hooks-daemon.yaml` or `.claude/settings.json` but no `.claude/hooks-daemon/` directory, that means the project uses the daemon but you're on a fresh clone — **this IS an install scenario**, not an update. The config files are checked into git; the daemon repo is gitignored and needs to be installed.
+**Only use the UPDATE guide if `.claude/hooks-daemon/src/` exists** (the daemon repo is present). If you see config files like `.claude/hooks-daemon.yaml` or `.claude/settings.json` but no `.claude/hooks-daemon/` directory, that means the project uses the daemon but you're on a fresh clone. **Do not install; provision.** The config files are checked into git; the daemon clone is gitignored and per-checkout, and `bash .claude/provision.sh` (or `/hooks-daemon provision`) builds it at exactly the version the project names (`daemon.expected_version` in `.claude/hooks-daemon.yaml`), changes no tracked file, and needs no session restart. An install would pick its own version and rewrite tracked files. The hooks say this themselves in a fresh clone ("NEEDS PROVISIONING"); `daemon.unprovisioned_mode: block` makes them deny tool calls until it is done. Use this guide only for a project that does not use the daemon yet.
 
 **Step 1 — Run the installer:**
 

@@ -106,6 +106,10 @@ def _escape_for_double_quotes(value: str) -> str:
     return value
 
 
+#: The variable init.sh sets to name a specific daemon-down state for a display
+#: line; the forwarder falls back to the catalogue's marker when it is unset.
+_STATUS_DOWN_TEXT_VAR = "_HOOKS_DAEMON_STATUS_DOWN_TEXT"
+
 #: The daemon-down stanza every forwarder opens with. Matches the whole
 #: ``if ! ensure_daemon; then ... fi`` block (its body is whatever the source
 #: carries — the legacy ``emit_hook_error ...; exit 0`` stanza, or an earlier
@@ -128,9 +132,14 @@ def _render_raw_stdout_daemon_down_block(event_file_name: str) -> str:
     """
     meta = _METAS_BY_BASH_KEY[event_file_name]
     if meta.daemon_down_stdout:
+        # init.sh may name a more specific outage (a checkout that needs
+        # provisioning, Plan 00477) in _HOOKS_DAEMON_STATUS_DOWN_TEXT; the
+        # catalogue's marker is the default.
+        marker = _escape_for_double_quotes(meta.daemon_down_stdout)
+        expansion = "{" + _STATUS_DOWN_TEXT_VAR + ":-" + marker + "}"
         stdout_lines = (
             "    # This stdout is a DISPLAY line, so the outage stays visible.\n"
-            f'    echo "{_escape_for_double_quotes(meta.daemon_down_stdout)}"\n'
+            f'    echo "${expansion}"\n'
         )
     else:
         stdout_lines = "    # This stdout is parsed as a VALUE, so nothing may be printed.\n"

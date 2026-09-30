@@ -136,6 +136,14 @@ def test_status_line_daemon_down_keeps_the_visible_marker(tmp_path: Path) -> Non
     assert "daemon_startup_failed" in result.stderr
 
 
+def test_status_line_daemon_down_text_can_be_named_by_init_sh() -> None:
+    """Plan 00477: init.sh names a more specific outage; the marker is the default."""
+    generated = (_HOOKS_DIR / "status-line").read_text()
+
+    assert 'echo "${_HOOKS_DAEMON_STATUS_DOWN_TEXT:-⚠️ DAEMON FAILED}"' in generated
+    assert apply_raw_stdout_daemon_down(generated, "status-line") == generated
+
+
 def test_json_decision_forwarder_daemon_down_is_unchanged_control(tmp_path: Path) -> None:
     """The control: a JSON-decision event keeps emitting error JSON + exit 0."""
     result = _run_generated_forwarder(tmp_path, _CONTROL_EVENT)
