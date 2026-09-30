@@ -36,9 +36,9 @@ not-a-defect with the reasoning kept.
 
 Full write-ups are in [NIGGLES.md](NIGGLES.md). One line each here:
 
-| #    | Verdict                                                                     | Origin          | Status                              |
-| ---- | --------------------------------------------------------------------------- | --------------- | ----------------------------------- |
-| N262 | The release procedure has no check that the notes fit a GitHub release body | v3.67.0 publish | ⬜ Open (worked around for v3.67.0) |
+| #    | Verdict                                                                     | Origin          | Status                  |
+| ---- | --------------------------------------------------------------------------- | --------------- | ----------------------- |
+| N262 | The release procedure has no check that the notes fit a GitHub release body | v3.67.0 publish | ✅ Remedied (ea8dcd542) |
 
 ## Tasks
 
