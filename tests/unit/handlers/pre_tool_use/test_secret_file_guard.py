@@ -2992,3 +2992,107 @@ class TestAGlobListPastTheBudgetIsANamedDeny:
         command = "ls n238/*/test_*.py n238/d1/test_*.py"
         decision, reason = _through_chain_at("Bash", {"command": command}, tmp_path)
         assert decision != Decision.DENY, reason
+
+
+class TestNonShellContentIsNotJudgedAsUnreadableShell:
+    """N275: an Edit adding `${{ ... }}` (a GitHub Actions expression) to a
+    workflow was denied R-SECRET-COMMAND-UNREADABLE. The route is the ADDED
+    text (`new_string`) of a Write/Edit, scanned by `_script_content_mention`;
+    `old_string` is never read. Content that is not a shell script must not be
+    denied merely because the shell reader cannot parse it, but a real mention
+    of a protected path must still deny, and a genuine shell script keeps
+    failing closed."""
+
+    _EXPRESSION_LINE = "name: QA (Python${{ matrix.python-version }})\n"
+    _UNPARSEABLE_SHELL = "echo ${{ x }}\n"
+
+    def _edit(self, path: str, new_string: str, old_string: str = "x") -> dict[str, Any]:
+        return _hook_input(
+            "Edit", {"file_path": path, "old_string": old_string, "new_string": new_string}
+        )
+
+    def test_a_workflow_edit_with_an_actions_expression_is_allowed(self) -> None:
+        handler = _handler()
+        hook_input = self._edit("/proj/.github/workflows/qa.yml", self._EXPRESSION_LINE)
+        assert not handler.matches(hook_input)
+
+    def test_an_expression_in_old_string_only_is_never_read(self) -> None:
+        handler = _handler()
+        hook_input = self._edit(
+            "/proj/.github/workflows/qa.yml", "name: QA\n", old_string=self._EXPRESSION_LINE
+        )
+        assert not handler.matches(hook_input)
+
+    def test_a_workflow_write_with_an_actions_expression_is_allowed(self) -> None:
+        handler = _handler()
+        hook_input = _hook_input(
+            "Write",
+            {"file_path": "/proj/.github/workflows/qa.yml", "content": self._EXPRESSION_LINE},
+        )
+        assert not handler.matches(hook_input)
+
+    def test_a_glob_shaped_run_step_still_denies_beside_an_expression(self) -> None:
+        handler = _handler()
+        content = self._EXPRESSION_LINE + "      - run: cat id_rs?\n"
+        hook_input = self._edit("/proj/.github/workflows/qa.yml", content)
+        assert handler.matches(hook_input)
+
+    def test_a_literal_mention_in_an_expression_bearing_workflow_still_denies(self) -> None:
+        handler = _handler()
+        content = self._EXPRESSION_LINE + "      - run: cat .vault-pass\n"
+        hook_input = self._edit("/proj/.github/workflows/qa.yml", content)
+        assert handler.matches(hook_input)
+
+    def _assert_unreadable_deny(self, hook_input: dict[str, Any]) -> None:
+        handler = _handler()
+        assert handler.matches(hook_input)
+        result = handler.handle(hook_input)
+        assert result.decision == Decision.DENY
+        assert RuleID.SECRET_COMMAND_UNREADABLE in result.reason
+
+    def test_a_makefile_recipe_is_shell_so_unreadable_quoting_fails_closed(self) -> None:
+        """`make` shows the Bash guard nothing: this scan is the only defence,
+        and a literal re-scan cannot see a path assembled from variables."""
+        self._assert_unreadable_deny(
+            self._edit("/proj/Makefile", "all:\n\techo " + self._UNPARSEABLE_SHELL)
+        )
+
+    def test_a_workflow_run_step_unreadable_for_another_reason_fails_closed(self) -> None:
+        """Only `${{ }}` expressions are neutralised; a `run:` step the shell
+        reader cannot place for any other reason still denies."""
+        self._assert_unreadable_deny(
+            self._edit("/proj/.github/workflows/qa.yml", "      - run: echo ${a{b}\n")
+        )
+
+    @pytest.mark.parametrize(
+        ("path", "denied"),
+        [
+            ("/proj/notes.md", False),
+            ("/proj/data.yml", False),
+            ("/proj/tool.py", True),
+            ("/proj/.github/workflows/qa.yml", True),
+        ],
+    )
+    def test_non_shell_content_naming_a_protected_path(self, path: str, denied: bool) -> None:
+        """Prose (`.md`) and an ordinary `.yml` are not scanned at all; `.py`
+        and a workflow are, and a real mention there still denies."""
+        handler = _handler()
+        content = "x = '.vault-pass'\n" + self._EXPRESSION_LINE
+        assert handler.matches(self._edit(path, content)) is denied
+
+    def test_python_source_with_doubled_braces_is_not_an_unreadable_deny(self) -> None:
+        handler = _handler()
+        assert not handler.matches(self._edit("/proj/tool.py", "x = 1  # " + self._EXPRESSION_LINE))
+
+    def test_an_unparseable_sh_file_still_fails_closed_as_unreadable(self) -> None:
+        handler = _handler()
+        hook_input = self._edit("/proj/deploy.sh", self._UNPARSEABLE_SHELL)
+        assert handler.matches(hook_input)
+        result = handler.handle(hook_input)
+        assert result.decision == Decision.DENY
+        assert RuleID.SECRET_COMMAND_UNREADABLE in result.reason
+
+    def test_an_unparseable_shebang_script_still_fails_closed(self) -> None:
+        handler = _handler()
+        content = "#!/usr/bin/env bash\n" + self._UNPARSEABLE_SHELL
+        assert handler.matches(self._edit("/proj/install", content))
