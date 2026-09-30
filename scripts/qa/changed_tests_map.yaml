@@ -88,6 +88,11 @@ rules:
   - path_glob: "tests/fixtures/repo_hygiene/pre_fix_*.md"
     tests: [tests/integration/test_repo_hygiene_check.py]
     why: it reads each pre-fix fixture by glob
+  - glob: "src/claude_code_hooks_daemon/handlers/*.py"
+    tests: [tests/acceptance/test_playbook_harness.py]
+    why: a handler's acceptance tests (its declared probes) are dispatched to the
+      real daemon only by the playbook harness; no unit test names the handler
+      code that a probe exercises
   - glob: ".claude/project-handlers/*"
     tools: [project_handlers]
     why: the project handlers' own co-located suite

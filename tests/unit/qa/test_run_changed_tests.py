@@ -604,6 +604,28 @@ class TestDeclaredRules:
         assert selection.selected == ["tests/integration/test_pages.py"]
         assert selection.mapping[0]["tools"] == ["docs_qa"]
 
+    @pytest.mark.parametrize(
+        "changed",
+        [
+            "src/claude_code_hooks_daemon/handlers/pre_tool_use/destructive_git.py",
+            "src/claude_code_hooks_daemon/handlers/stop/auto_continue_stop.py",
+            "src/claude_code_hooks_daemon/handlers/nitpick/hedging_language.py",
+        ],
+    )
+    def test_handler_code_selects_the_playbook_harness(self, changed: str) -> None:
+        """Ledger 00466: a handler change broke acceptance probe #124 and nothing ran it."""
+        rules, problems = changed_tests.load_declared_rules(changed_tests.DEFAULT_RULES_PATH)
+        assert problems == []
+        harness = "tests/acceptance/test_playbook_harness.py"
+        matching = [rule for rule in rules if rule.matches(changed)]
+        assert any(harness in rule.tests for rule in matching), changed
+
+    def test_code_outside_the_handlers_does_not_select_the_playbook_harness(self) -> None:
+        rules, _ = changed_tests.load_declared_rules(changed_tests.DEFAULT_RULES_PATH)
+        harness = "tests/acceptance/test_playbook_harness.py"
+        other = "src/claude_code_hooks_daemon/core/hook_result.py"
+        assert not any(harness in rule.tests for rule in rules if rule.matches(other))
+
     def test_this_repositorys_map_is_valid_and_honest(self) -> None:
         """Every tool it names is one `changed` runs; every test it names exists."""
         rules, problems = changed_tests.load_declared_rules(changed_tests.DEFAULT_RULES_PATH)

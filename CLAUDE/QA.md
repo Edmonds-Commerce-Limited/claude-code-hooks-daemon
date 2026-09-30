@@ -292,10 +292,23 @@ does not keep it.
 | Sub-agent (any kind) | `./scripts/qa/llm_qa.py changed`, plus named tools the change calls for (`llm_qa.py handler_reference docs_qa ...`) and `pytest` on explicit test files or directories narrower than `tests/unit` | A commit hash and the targeted results                                    |
 | Coordinator          | `./scripts/qa/llm_qa.py all` once, in an integration worktree from `main` with every ready branch merged `--no-ff`, before `main` moves                                                           | A fast-forward of `main`, or the failures sent back to the branch's agent |
 
-`llm_qa.py changed` runs the fast static tools, the project handlers' own
-tests, `docs_qa`, `plan_qa`, `shell_check`, `declared_invariant_pairs`, and
-`changed_tests`: pytest on the tests mapped from every file changed since the
-merge base, uncommitted and untracked files included. The runner's docstring
+`llm_qa.py changed` runs EVERY cheap repo-wide static check on every run,
+whatever changed, because a change far away can break any of them
+(`CHANGED_TOOL_NAMES` in `llm_qa.py` is the list; the whole set took about 400 s
+on one host): `magic_values`, `format`, `lint`, `type_check`, `pyright`,
+`error_hiding`, `eacces_safe`, `shell_check`, `shell_audit`, `repo_hygiene`,
+`doc_truth`, `doc_snippets`, `plan_qa`, `docs_qa`, `generated_doc_drift`,
+`handler_reference`, `hook_contract`, `input_contract`, `project_handlers` (the
+project handlers' own tests), `declared_invariant_pairs`, `skill_refs`,
+`canonical_callers`, `authored_path_stat`, `signal_targets`,
+`unreachable_handle_branch`, `fail_open_inventory` and `security`. None needs a
+live daemon. It then runs `changed_tests`: pytest on the tests mapped from every
+file changed since the
+merge base, uncommitted and untracked files included. A change to handler code
+(`src/claude_code_hooks_daemon/handlers/**`) also selects
+`tests/acceptance/test_playbook_harness.py`, through a rule in
+`changed_tests_map.yaml`, because the handlers' acceptance probes are dispatched
+only by that harness. The runner's docstring
 (`scripts/qa/run_changed_tests.py`) owns the mapping. A test file selects
 itself. Any other file's coverage is the UNION of:
 
