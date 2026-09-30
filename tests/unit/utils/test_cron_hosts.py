@@ -17,6 +17,8 @@ import os
 import socket
 import subprocess
 import sys
+from collections.abc import Generator
+from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
@@ -37,6 +39,32 @@ from claude_code_hooks_daemon.utils.cron_hosts import (
 def _clean_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("HOOKS_DAEMON_HOSTNAME", raising=False)
     monkeypatch.delenv("CCY_HOST_HOSTNAME", raising=False)
+
+
+_READY = "ready"
+
+
+@contextmanager
+def _child_after_exec(env: dict[str, str]) -> Generator[int, None, None]:
+    """The pid of a sleeping child whose ``/proc/<pid>/environ`` already holds ``env``.
+
+    Between fork and exec the kernel still reports the PARENT's environment, so
+    a read straight after ``Popen`` can race it. The child prints a line only
+    once it is running, which is after exec.
+    """
+    with subprocess.Popen(
+        [sys.executable, "-c", f"import time; print({_READY!r}, flush=True); time.sleep(30)"],
+        env=env,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        text=True,
+    ) as child:
+        try:
+            assert child.stdout is not None
+            assert child.stdout.readline().strip() == _READY
+            yield child.pid
+        finally:
+            child.kill()
 
 
 class TestResolveFromEnviron:
@@ -126,32 +154,14 @@ class TestProcessEnviron:
 
     def test_reads_the_override_from_another_process(self, tmp_path: Path) -> None:
         env = {**os.environ, ENV_HOSTNAME_OVERRIDE: "cchd-sdlc-runner"}
-        child = subprocess.Popen(
-            [sys.executable, "-c", "import time; time.sleep(30)"],
-            env=env,
-            stdin=subprocess.DEVNULL,
-        )
-        try:
-            assert hostname_override_of_process(child.pid) == PeerHostname(
-                override="cchd-sdlc-runner"
-            )
-        finally:
-            child.kill()
-            child.wait()
+        with _child_after_exec(env) as pid:
+            assert hostname_override_of_process(pid) == PeerHostname(override="cchd-sdlc-runner")
 
     def test_a_process_with_no_override_yields_none(self) -> None:
         env = {k: v for k, v in os.environ.items() if k not in {"HOOKS_DAEMON_HOSTNAME"}}
         env.pop("CCY_HOST_HOSTNAME", None)
-        child = subprocess.Popen(
-            [sys.executable, "-c", "import time; time.sleep(30)"],
-            env=env,
-            stdin=subprocess.DEVNULL,
-        )
-        try:
-            assert hostname_override_of_process(child.pid) == PeerHostname()
-        finally:
-            child.kill()
-            child.wait()
+        with _child_after_exec(env) as pid:
+            assert hostname_override_of_process(pid) == PeerHostname()
 
     def test_an_unreadable_process_says_so_naming_the_pid(self) -> None:
         """Unreadable is not "set neither variable", and the result keeps them apart."""
