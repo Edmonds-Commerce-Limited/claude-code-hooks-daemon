@@ -37,7 +37,8 @@ import sys
 from pathlib import Path
 from typing import Any, Final
 
-from claude_code_hooks_daemon.qa.pytest_text_report import parse_pytest_text_output
+from claude_code_hooks_daemon.constants import Timeout
+from claude_code_hooks_daemon.qa.pytest_text_report import parse_pytest_text_output, strip_ansi
 
 _PROJECT_ROOT: Final[Path] = Path(__file__).resolve().parents[2]
 
@@ -52,9 +53,13 @@ PROJECT_HANDLERS_DIR_PARTS: Final[tuple[str, str]] = (".claude", "project-handle
 _CLI_PARTS: Final[tuple[str, str]] = ("bin", "hooks-daemon")
 _CLI_SUBCOMMAND: Final[str] = "test-project-handlers"
 
-#: The suite runs in seconds; this bound exists so a hung runner fails the gate
-#: rather than hanging the QA run.
-_RUNNER_TIMEOUT_SECONDS: Final[int] = 300
+#: The suite runs in seconds idle but took 70s at host load 27. The CLI bounds
+#: its own pytest child at ``Timeout.QA_LONG_TIMEOUT``; this outer bound sits
+#: above it so the CLI's own timeout message is the one reported, not a race.
+_RUNNER_TIMEOUT_SECONDS: Final[int] = Timeout.QA_LONG_TIMEOUT + 60
+
+#: Lines of runner output kept as the reason a suite did not run.
+REASON_TAIL_LINES: Final[int] = 40
 
 _TOOL_NAME: Final[str] = "project_handlers"
 _OUTCOME_FAILED: Final[str] = "failed"
@@ -103,7 +108,7 @@ def build_report(exit_code: int, output: str) -> dict[str, Any]:
     total = parsed["total"]
     passed = exit_code == 0 and parsed["failed"] == 0 and total > 0
 
-    return {
+    report: dict[str, Any] = {
         "tool": _TOOL_NAME,
         "exit_code": exit_code,
         "summary": {
@@ -117,6 +122,19 @@ def build_report(exit_code: int, output: str) -> dict[str, Any]:
             {"name": node_id, "outcome": _OUTCOME_FAILED} for node_id in parsed["failed_tests"]
         ],
     }
+    if total == 0:
+        report["reason"] = _reason_tail(output)
+    return report
+
+
+def _reason_tail(output: str) -> str:
+    """The last ``REASON_TAIL_LINES`` lines of runner output, ANSI stripped.
+
+    The gate's own errors (timeout, missing wrapper, OSError) ARE the output in
+    that case, so they appear here unabridged.
+    """
+    lines = strip_ansi(output).rstrip().splitlines()
+    return "\n".join(lines[-REASON_TAIL_LINES:])
 
 
 def run_project_handler_tests(root: Path) -> tuple[int, str]:
@@ -185,9 +203,9 @@ def main(argv: list[str] | None = None) -> int:
         if summary["total"] == 0:
             print(
                 "Project handler tests did NOT RUN — zero tests collected. "
-                "This is a gate failure, not a clean result. Runner output:"
+                "This is a gate failure, not a clean result. Reason (runner output tail):"
             )
-            print(output.rstrip())
+            print(report["reason"])
         else:
             print(f"Project handler tests FAILED: {summary['failed']} of {summary['total']}")
             for entry in report["tests"]:

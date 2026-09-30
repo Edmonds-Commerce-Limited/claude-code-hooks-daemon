@@ -234,6 +234,27 @@ class TestTestProjectHandlers:
             result = cmd_test_project_handlers(args)
             assert result == 1
 
+    def test_pytest_child_gets_the_long_qa_timeout(self, tmp_path: Path) -> None:
+        """A loaded host runs this suite ~15x slower than idle (70s vs 4.8s
+        measured at load 27); the short tool-check bound killed it mid-run and
+        left only a stderr line, read downstream as zero tests collected.
+        """
+        from claude_code_hooks_daemon.constants import Timeout
+        from claude_code_hooks_daemon.daemon.cli import cmd_test_project_handlers
+
+        project_path = _setup_project(tmp_path)
+        (project_path / ".claude" / "project-handlers").mkdir()
+        args = argparse.Namespace(project_root=project_path, verbose=False)
+
+        mock_result = MagicMock()
+        mock_result.returncode = 0
+        mock_result.stdout = ""
+        mock_result.stderr = ""
+        with patch("subprocess.run", return_value=mock_result) as mock_run:
+            cmd_test_project_handlers(args)
+
+        assert mock_run.call_args.kwargs["timeout"] == Timeout.QA_LONG_TIMEOUT
+
     def test_unloads_the_full_qa_gate_plugin(self, tmp_path: Path) -> None:
         """The daemon's own `addopts` force-loads `full_qa_gate` into every
         pytest invocation that reads `pyproject.toml` -- including this one.
