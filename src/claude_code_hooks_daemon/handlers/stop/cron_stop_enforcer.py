@@ -254,6 +254,11 @@ class CronStopEnforcerHandler(StopHandlerBase):
             "**Fix**: run `CronCreate` (recurring: true) for every job named in "
             "the block message, using the schedule and prompt given verbatim, "
             "then stop again.\n\n"
+            "**One deny per stop chain.** A stop that re-enters "
+            "(`stop_hook_active`) after the deny is allowed and logged as a "
+            "warning, so a session that cannot create the job is never "
+            "trapped; the next fresh stop is checked again. The deny always "
+            "names the `cron-pause` escape below.\n\n"
             "**Told to cancel a declared cron for now? Pause it, do not fight "
             'the gate.** `hooks-daemon cron-pause <job> --reason "..."` '
             "records a pause for THIS session only, which expires within 24 "

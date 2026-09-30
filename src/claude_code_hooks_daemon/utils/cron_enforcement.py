@@ -41,6 +41,7 @@ delivery PATH are different things to reason about.
 
 from __future__ import annotations
 
+import logging
 import re
 import time
 from collections.abc import Callable
@@ -63,6 +64,9 @@ from claude_code_hooks_daemon.utils.cron_tick import (
     tick_sentinel,
     with_tick_sentinel,
 )
+from claude_code_hooks_daemon.utils.stop_hook_helpers import is_stop_hook_active
+
+logger = logging.getLogger(__name__)
 
 #: The delivered ``prompt`` (and, per the contract, ``description``/
 #: ``command`` on other capped fields) is truncated to this many characters.
@@ -279,6 +283,11 @@ def render_missing_crons_reason(missing: list[PersistentCronConfig]) -> str:
         lines.extend(f"      {line}" for line in declared_tick_prompt(job).splitlines())
     lines.append("")
     lines.append("Once CronCreate has been called for every job above, stopping is safe again.")
+    lines.append(
+        "If the owner said to stop a job, do not create it: run "
+        f'`hooks-daemon cron-pause {missing[0].id} --reason "<the owner\'s words>"` '
+        "(per job id, this session only) instead."
+    )
     return "\n".join(lines)
 
 
@@ -317,6 +326,16 @@ def verdict_for_missing_crons(
     live = load_live_pauses(pauses_path, session_id=session_id, now=when)
     unpaused = [job for job in missing if job.id not in live]
     paused = [live[job.id] for job in missing if job.id in live]
+    if unpaused and is_stop_hook_active(hook_input):
+        # One deny per stop chain, like every other one-shot Stop block: a
+        # session that cannot create the job must not be trapped. Claude Code
+        # drops non-blocking context on re-entry, so the log is the loud part.
+        logger.warning(
+            "declared cron(s) still missing on stop re-entry, allowing the stop: %s "
+            "(`hooks-daemon cron-pause <job> --reason ...` pauses one for this session)",
+            ", ".join(job.id for job in unpaused),
+        )
+        return BlockingResult(decision=Decision.ALLOW)
     if unpaused:
         reason = render_missing_crons_reason(unpaused)
         if paused:

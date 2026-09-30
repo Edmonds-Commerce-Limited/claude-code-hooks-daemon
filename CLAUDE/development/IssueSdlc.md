@@ -445,6 +445,9 @@ is missing, so a bare `CronDelete` leaves the session unable to stop. Run
 `hooks-daemon cron-pause issue-sdlc --reason "<the owner's words>"`, then
 `CronDelete` the job from the main session. The pause belongs to this session
 only. It expires within 24 hours, `hooks-daemon cron-resume issue-sdlc` ends it
-early, and every stop that finds the job missing names the pause. To stop the
+early. The deny for a missing job always names `cron-pause`, and once a pause
+is live every stop that finds the job missing names the pause. A stop that
+re-enters after that deny is allowed (and logged), so a session that cannot
+create the job is never trapped. To stop the
 job in every session, edit `persistent_crons` in `.claude/hooks-daemon.yaml`;
 that is the only permanent switch.
