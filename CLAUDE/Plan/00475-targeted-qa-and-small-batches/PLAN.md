@@ -119,8 +119,8 @@ instead of competing. Today `untracked/qa/.llm_qa.lock` is per checkout, and
   checks Phase 1 identifies (TDD).
 - [ ] ⬜ **Task 2.2**: Turn `qa-runner` into the scope-deciding QA agent. It reads
   the diff, picks the checks, runs them and reports verdict, scope and reasoning.
-- [ ] ⬜ **Task 2.3**: Take the host-wide lock for every `llm_qa.py` run, with a
-  bounded wait (TDD).
+- [x] ✅ **Task 2.3**: Take the host-wide lock for every `llm_qa.py` run, with a
+  bounded wait (TDD). Merged in 8f2cd8bc8.
 
 ### Phase 3: Rules
 
@@ -159,7 +159,9 @@ read the plan index, ledgers and docs. So markdown is narrowed, not skipped.
 ## Success Criteria
 
 - [ ] A small fix goes from branch to `main` with targeted QA only, and CI green.
-- [ ] Two concurrent `llm_qa.py` runs in different worktrees serialise.
+- [x] Two concurrent `llm_qa.py` runs in different worktrees serialise. Seen
+  live: the cron-hosts branch's `llm_qa.py changed` queued behind the provision
+  branch's run.
 - [ ] No doc outside the release documents requires `llm_qa.py all`.
 - [ ] The branch-count advisory fires on a repository with more than 3 open work
   branches.
