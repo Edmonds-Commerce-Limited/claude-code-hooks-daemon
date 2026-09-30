@@ -16,6 +16,7 @@ from pathlib import Path
 
 import pytest
 
+from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.install.expected_version import record_expected_version
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -49,7 +50,7 @@ def _resolve(project: Path) -> tuple[int, str, str]:
         capture_output=True,
         text=True,
         check=False,
-        timeout=30,
+        timeout=Timeout.REQUEST_DEFAULT,
         env={"PATH": "/usr/bin:/bin", "HOME": str(project.parent)},
     )
     assert result.returncode == 0, result.stderr

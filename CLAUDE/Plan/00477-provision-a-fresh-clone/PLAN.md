@@ -65,15 +65,15 @@ anything themselves: a person or agent runs provision.
 
 ### Phase 2: The provision command
 
-- [ ] 🔄 **Task 2.1**: A deployed `.claude/provision.sh` (tracked in the client,
+- [x] ✅ **Task 2.1**: A deployed `.claude/provision.sh` (tracked in the client,
   so it exists before the daemon does) and a `hooks-daemon` skill verb
   `provision`. It clones the resolved version's tag, never `main`, builds the
   venv through the existing venv-build lock, and starts the daemon.
-- [ ] 🔄 **Task 2.2**: Provision never writes a tracked file. Verify it against a
+- [x] ✅ **Task 2.2**: Provision never writes a tracked file. Verify it against a
   configured fixture project: `git status` is clean afterwards. It refuses, and
   explains, when a clone is already present (pointing at `upgrade`, or at the
   Plan 00454 repair for a missing venv), and when the version is unknown.
-- [ ] 🔄 **Task 2.3**: No session restart is needed after provisioning, because
+- [x] ✅ **Task 2.3**: No session restart is needed after provisioning, because
   the hooks are already registered in the tracked `settings.json`. Prove it, and
   say so in the output instead of "restart your session".
 

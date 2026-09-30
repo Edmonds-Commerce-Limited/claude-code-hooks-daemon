@@ -119,7 +119,9 @@ class TestRecordExpectedVersion:
 
 
 class TestMain:
-    def test_records_the_given_version(self, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    def test_records_the_given_version(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
         path = _config(tmp_path, "daemon:\n  log_level: INFO\n")
 
         assert main(["--project-root", str(tmp_path), "--version", "3.68.0"]) == 0

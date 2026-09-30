@@ -133,6 +133,17 @@ CLIENT_OWNED_ASSETS: Final[tuple[ClientOwnedAsset, ...]] = (
         ),
     ),
     ClientOwnedAsset(
+        source="provision.sh",
+        deployed_to=".claude/provision.sh",
+        language=AssetLanguage.SHELL,
+        deployed_by="install.py",
+        why=(
+            "Builds a fresh checkout's gitignored daemon clone, so it must be "
+            "tracked and present before any clone is; it sources init.sh, "
+            "beside which it sits (Plan 00477)."
+        ),
+    ),
+    ClientOwnedAsset(
         source=".claude/hooks/*",
         deployed_to=".claude/hooks/*",
         language=AssetLanguage.SHELL,
