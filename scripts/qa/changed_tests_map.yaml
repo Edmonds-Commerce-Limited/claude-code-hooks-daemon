@@ -107,3 +107,6 @@ rules:
   - glob: "*.sh"
     tools: [shell_check]
     why: shellcheck covers shell scripts
+  - glob: "*.bash"
+    tools: [shell_check]
+    why: shell_check lints .bash scripts as well (run_shell_check.sh)
