@@ -257,7 +257,12 @@ bin/hooks-daemon release-slate-check
 What the report shows, and how each is read:
 
 - **HEAD CI** — the run for the EXACT HEAD sha, not "a recent green run".
-  `in_progress`, `cancelled` and *absent* are all not green.
+  `in_progress`, `cancelled` and *absent* are all not green. CI runs a tier
+  (docs, code or full) per change, and the slate check does not yet tell them
+  apart, so a green here is not the release's full-matrix evidence: dispatch
+  `qa.yml` on the release commit or cite the nightly
+  ([../QA.md](../QA.md), "CI tiers"). The full gate itself, `llm_qa.py all`, is
+  required only here, at Step 1b and Step 8.
 - **In flight** — plans with `**Status**: In Progress`. These block.
 - **Waiting for this release** — In Progress plans whose status line names
   `/release` as what they are waiting on. Shown, never blocking: they are the
