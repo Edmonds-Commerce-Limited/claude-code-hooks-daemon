@@ -279,6 +279,87 @@ class ChainExecutionResult:
     decisions: list[HandlerVerdict] = field(default_factory=list)
 
 
+@dataclass(slots=True)
+class _ChainProgress:
+    """What one chain run has recorded so far, shared with the thread running it.
+
+    The handler loop appends to these lists as each handler returns. When the
+    whole-chain budget expires while a later handler is still running, the
+    caller reads them to keep the output of every handler that had already
+    finished, instead of discarding all of it.
+    """
+
+    accumulated_context: list[str] = field(default_factory=list)
+    handlers_executed: list[str] = field(default_factory=list)
+    handlers_matched: list[str] = field(default_factory=list)
+    decisions: list[HandlerVerdict] = field(default_factory=list)
+    matched_results: list[HookResult] = field(default_factory=list)
+    denials: list[tuple[str, HookResult]] = field(default_factory=list)
+    advisories: list[tuple[str, HookResult]] = field(default_factory=list)
+
+    def snapshot(self) -> "_ChainProgress":
+        """A copy the caller can read while the run's thread keeps appending."""
+        return _ChainProgress(
+            accumulated_context=list(self.accumulated_context),
+            handlers_executed=list(self.handlers_executed),
+            handlers_matched=list(self.handlers_matched),
+            decisions=list(self.decisions),
+            matched_results=list(self.matched_results),
+            denials=list(self.denials),
+            advisories=list(self.advisories),
+        )
+
+    def leading_result(self) -> HookResult | None:
+        """The result the merge rule picks: first restrictive, else first recorded."""
+        for result in self.matched_results:
+            if is_restrictive(result.decision):
+                return result
+        return self.matched_results[0] if self.matched_results else None
+
+
+def _assemble_final_result(
+    final_result: HookResult | None,
+    progress: _ChainProgress,
+    *,
+    collect_all: bool,
+) -> HookResult:
+    """Turn a run's recorded progress into the one merged response.
+
+    Shared by a run that completed and by a run the caller abandoned at its
+    budget, so both merge context, guidance and violations the same way.
+
+    Args:
+        final_result: The winning result the loop settled on, or None.
+        progress: The run's recorded progress.
+        collect_all: See :meth:`HandlerChain.execute`.
+
+    Returns:
+        The merged HookResult.
+    """
+    if final_result is None:
+        final_result = HookResult.allow()
+
+    if collect_all and is_restrictive(final_result.decision) and progress.denials:
+        final_result.reason = merge_violations(
+            final_result.reason, progress.denials, progress.advisories
+        )
+
+    # The merged response carries EVERY matched handler's context, in
+    # chain order — the winning result's own lines are already among them.
+    if final_result.context != progress.accumulated_context:
+        final_result.context = list(progress.accumulated_context)
+
+    # ...and, on the same principle, every matched handler's guidance,
+    # input rewrite and worktree path. The decision stays
+    # most-restrictive-wins; these fields are information, so the winner
+    # only owns the ones it set itself.
+    carry_accumulated_fields(final_result, progress.matched_results)
+
+    for name in progress.handlers_matched:
+        final_result.add_handler(name)
+    return final_result
+
+
 class HandlerChain:
     """Executes handlers in priority order.
 
@@ -397,8 +478,8 @@ class HandlerChain:
                         f"Using alphabetical order for determinism: {' -> '.join(sorted_names)}"
                     )
 
-            # Sort by priority first, then alphabetically by name for determinism
-            self._handlers.sort(key=lambda h: (h.priority, h.name))
+            # Slow sweeps last, then priority, then alphabetically by name for determinism
+            self._handlers.sort(key=lambda h: (HandlerTag.SLOW_SWEEP in h.tags, h.priority, h.name))
             self._sorted = True
         return self._handlers
 
@@ -558,6 +639,7 @@ class HandlerChain:
         # never-cancelled direct-call paths below) so `_execute_handlers`
         # has one uniform binding story regardless of which path called it.
         cancellation = DispatchCancellation()
+        progress = _ChainProgress()
 
         if deadline_seconds is None:
             # No deadline configured: the original, fully synchronous call --
@@ -573,6 +655,7 @@ class HandlerChain:
                 payload_size=payload_size,
                 start_time=start_time,
                 cancellation=cancellation,
+                progress=progress,
             )
 
         # Plan 00466 N40 m1: the WHOLE handler loop is ONE dispatched call,
@@ -607,6 +690,7 @@ class HandlerChain:
                 payload_size=payload_size,
                 start_time=start_time,
                 cancellation=cancellation,
+                progress=progress,
             )
         outcome = active_dispatcher.run(
             lambda: self._execute_handlers(
@@ -619,6 +703,7 @@ class HandlerChain:
                 payload_size=payload_size,
                 start_time=start_time,
                 cancellation=cancellation,
+                progress=progress,
             ),
             timeout=remaining,
             label="chain",
@@ -654,9 +739,28 @@ class HandlerChain:
             denied_result = HookResult.deny(reason=f"chain: not judged in time ({detail})")
             denied_result.context = [f"Chain not judged in time: {detail}"]
             return ChainExecutionResult(result=denied_result, execution_time_ms=execution_time_ms)
-        allowed_result = HookResult.allow()
-        allowed_result.context = [f"Chain skipped: {detail}"]
-        return ChainExecutionResult(result=allowed_result, execution_time_ms=execution_time_ms)
+        # No SAFETY+BLOCKING handler is waiting on a verdict, so a handler that
+        # already returned has judged its part and its output is still good.
+        # Only what was cut off is lost, and the response says so.
+        finished = progress.snapshot()
+        if not finished.handlers_executed and not finished.accumulated_context:
+            allowed_result = HookResult.allow()
+            allowed_result.context = [f"Chain skipped: {detail}"]
+            return ChainExecutionResult(result=allowed_result, execution_time_ms=execution_time_ms)
+        finished.accumulated_context.append(
+            f"Chain cut short: {detail}; the output of the "
+            f"{len(finished.handlers_executed)} handler(s) that finished is kept"
+        )
+        return ChainExecutionResult(
+            result=_assemble_final_result(
+                finished.leading_result(), finished, collect_all=collect_all
+            ),
+            handlers_executed=finished.handlers_executed,
+            handlers_matched=finished.handlers_matched,
+            execution_time_ms=execution_time_ms,
+            decided_by=next((name for name, _ in finished.denials), None),
+            decisions=finished.decisions,
+        )
 
     def _execute_handlers(
         self,
@@ -670,6 +774,7 @@ class HandlerChain:
         payload_size: int,
         start_time: float,
         cancellation: DispatchCancellation,
+        progress: _ChainProgress,
     ) -> ChainExecutionResult:
         """Binds ``cancellation`` (Plan 00466 N40 m2) for the duration of
         :meth:`_execute_handlers_body`'s call, on whichever thread calls
@@ -696,6 +801,7 @@ class HandlerChain:
                 max_safety_input_bytes=max_safety_input_bytes,
                 payload_size=payload_size,
                 start_time=start_time,
+                progress=progress,
             )
         finally:
             reset_event_cwd(cwd_token)
@@ -712,6 +818,7 @@ class HandlerChain:
         max_safety_input_bytes: int | None,
         payload_size: int,
         start_time: float,
+        progress: _ChainProgress,
     ) -> ChainExecutionResult:
         """Runs the WHOLE handler loop on whichever thread calls this (Plan
         00466 N40 m1). ``execute()`` above either calls :meth:`_execute_handlers`
@@ -736,25 +843,28 @@ class HandlerChain:
             start_time: ``execute()``'s own ``time.perf_counter()`` reading,
                 threaded through so ``execution_time_ms`` keeps measuring
                 this call's own duration, not time spent queued before it.
+            progress: Where this run records each handler's outcome as it
+                returns, so ``execute()`` can still read them if it abandons
+                this run at its budget.
 
         Returns:
             ChainExecutionResult with final result and metadata.
         """
-        accumulated_context: list[str] = []
-        handlers_executed: list[str] = []
-        handlers_matched: list[str] = []
+        accumulated_context = progress.accumulated_context
+        handlers_executed = progress.handlers_executed
+        handlers_matched = progress.handlers_matched
         executed_handlers: list[Handler] = []
         final_result: HookResult | None = None
         terminated_by: str | None = None
         decided_by: str | None = None
-        decisions: list[HandlerVerdict] = []
+        decisions = progress.decisions
         # Every matched handler's result, in chain order, so the ALLOW-only
         # information fields can be merged onto the winner afterwards.
-        matched_results: list[HookResult] = []
+        matched_results = progress.matched_results
         # Collect-all bookkeeping: every restrictive result and every
         # advisory (non-restrictive result that carried context), in order.
-        denials: list[tuple[str, HookResult]] = []
-        advisories: list[tuple[str, HookResult]] = []
+        denials = progress.denials
+        advisories = progress.advisories
 
         def _record_unjudged(handler: "Handler", reason: str, note: str) -> bool:
             """Record a "could not be judged" verdict for ``handler``.
@@ -1022,27 +1132,7 @@ class HandlerChain:
                     accumulated_context.append(error_context)
                     # Continue to next handler
 
-        # Build final result
-        if final_result is None:
-            final_result = HookResult.allow()
-
-        if collect_all and is_restrictive(final_result.decision) and denials:
-            final_result.reason = merge_violations(final_result.reason, denials, advisories)
-
-        # The merged response carries EVERY matched handler's context, in
-        # chain order — the winning result's own lines are already among them.
-        if final_result.context != accumulated_context:
-            final_result.context = list(accumulated_context)
-
-        # ...and, on the same principle, every matched handler's guidance,
-        # input rewrite and worktree path. The decision stays
-        # most-restrictive-wins; these fields are information, so the winner
-        # only owns the ones it set itself.
-        carry_accumulated_fields(final_result, matched_results)
-
-        # Record all matched handlers
-        for h in handlers_matched:
-            final_result.add_handler(h)
+        final_result = _assemble_final_result(final_result, progress, collect_all=collect_all)
 
         # Post-decision commit (Plan 00242 Phase 2): every handler that ran
         # hears the merged decision, so a rate limiter can roll back a

@@ -1157,6 +1157,79 @@ class TestHandlerChain:
         assert result.result.decision == Decision.ALLOW
         assert any(ctx.startswith("Chain skipped: exceeded its") for ctx in result.result.context)
 
+    def test_a_handler_that_finished_before_the_budget_keeps_its_output(self) -> None:
+        """N276: the whole-chain budget used to discard EVERY handler's output
+        when one later handler overran it. A handler that already returned has
+        judged its part; its context must survive the overrun.
+        """
+        chain = HandlerChain()
+        fast = MockHandler(
+            "fast",
+            priority=10,
+            tags=[HandlerTag.ADVISORY],
+            result=HookResult.allow(context=["fast handler output"]),
+        )
+        slow = MockHandler("slow", priority=20, tags=[HandlerTag.ADVISORY], sleep_in_handle=5.0)
+        chain.add(fast)
+        chain.add(slow)
+
+        result = chain.execute({"tool_name": "Bash"}, deadline_seconds=0.2)
+
+        assert result.result.decision == Decision.ALLOW
+        assert "fast handler output" in result.result.context
+        assert any("exceeded its" in ctx for ctx in result.result.context)
+        assert result.handlers_executed == ["fast"]
+        # `slow` matched and was running when the budget expired: matched, never finished.
+        assert result.handlers_matched == ["fast", "slow"]
+
+    def test_a_restrictive_verdict_reached_before_the_overrun_is_kept(self) -> None:
+        """A non-fail-closed chain can still hold a restrictive handler; its
+        deny, reached before a later handler overran, is not thrown away."""
+        chain = HandlerChain()
+        denier = MockHandler(
+            "denier",
+            priority=10,
+            result=HookResult.deny(reason="denied early"),
+        )
+        slow = MockHandler("slow", priority=20, sleep_in_handle=5.0)
+        chain.add(denier)
+        chain.add(slow)
+
+        result = chain.execute({"tool_name": "Bash"}, deadline_seconds=0.2, collect_all=True)
+
+        assert result.result.decision == Decision.DENY
+        assert result.result.reason is not None
+        assert "denied early" in result.result.reason
+
+    def test_slow_sweep_handlers_run_after_every_other_handler(self) -> None:
+        """N276: a handler tagged SLOW_SWEEP is ordered after every untagged
+        handler, whatever its priority, so a sweep that eats the budget cannot
+        starve a cheap handler that was configured to run after it."""
+        chain = HandlerChain()
+        sweep = MockHandler("sweep", priority=10, tags=[HandlerTag.SLOW_SWEEP])
+        cheap = MockHandler("cheap", priority=90)
+        other_sweep = MockHandler("other-sweep", priority=5, tags=[HandlerTag.SLOW_SWEEP])
+        chain.add(sweep)
+        chain.add(cheap)
+        chain.add(other_sweep)
+
+        assert [h.name for h in chain.handlers] == ["cheap", "other-sweep", "sweep"]
+
+    def test_a_slow_sweep_cannot_starve_a_cheap_handler_of_the_budget(self) -> None:
+        """End to end: the sweep's priority number is LOWER than the cheap
+        handler's, yet the cheap handler still delivers under a tiny budget."""
+        chain = HandlerChain()
+        sweep = MockHandler("sweep", priority=10, tags=[HandlerTag.SLOW_SWEEP], sleep_in_handle=5.0)
+        cheap = MockHandler(
+            "cheap", priority=70, result=HookResult.allow(context=["cheap handler output"])
+        )
+        chain.add(sweep)
+        chain.add(cheap)
+
+        result = chain.execute({"tool_name": "Bash"}, deadline_seconds=0.2)
+
+        assert "cheap handler output" in result.result.context
+
     def test_deadline_none_leaves_an_oversleeping_safety_handler_unbounded(self) -> None:
         """Plan 00466 N34: ``deadline_seconds=None`` disables the NEW
         per-handler bound too, not only the pre-existing between-handlers

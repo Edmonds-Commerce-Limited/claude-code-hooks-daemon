@@ -187,6 +187,7 @@ class SecretFileHygieneCheckerHandler(SessionStartHandlerBase):
                 HandlerTag.ADVISORY,
                 HandlerTag.SAFETY,
                 HandlerTag.NON_TERMINAL,
+                HandlerTag.SLOW_SWEEP,
                 HandlerTag.ENVIRONMENT,
             ],
         )

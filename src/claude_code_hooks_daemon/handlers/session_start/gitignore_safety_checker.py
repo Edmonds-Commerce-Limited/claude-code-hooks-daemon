@@ -148,6 +148,7 @@ class GitignoreSafetyCheckerHandler(SessionStartHandlerBase):
                 HandlerTag.ADVISORY,
                 HandlerTag.GIT,
                 HandlerTag.NON_TERMINAL,
+                HandlerTag.SLOW_SWEEP,
                 HandlerTag.ENVIRONMENT,
             ],
         )

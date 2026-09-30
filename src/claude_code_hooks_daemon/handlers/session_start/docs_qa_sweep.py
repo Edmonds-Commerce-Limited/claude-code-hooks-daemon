@@ -63,6 +63,7 @@ class DocsQaSweepHandler(SessionStartHandlerBase):
                 HandlerTag.ADVISORY,
                 HandlerTag.DOCUMENTATION,
                 HandlerTag.NON_TERMINAL,
+                HandlerTag.SLOW_SWEEP,
             ],
         )
         # Injected by the registry for DOCUMENTATION-tagged handlers.
