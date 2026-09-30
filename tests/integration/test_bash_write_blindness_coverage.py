@@ -298,6 +298,17 @@ _BASH_BLINDNESS_VERDICT: dict[str, tuple[str, str]] = {
         "verb outside that fixed list, or a wrapper script opening the file "
         "internally, is not (same honest-limits shape as SecretFileGuardHandler)",
     ),
+    "UpgradeApprovalGuardHandler": (
+        _PARTIAL,
+        "Plan 00376: reads handlers/utils/bash_file_writes.py's bash_file_writes "
+        "(redirect, tee, cp/mv/install/dd, ln/rsync, sed -i and interpreter "
+        "one-liners), plus its own touch/mkdir operand scan for the two shapes "
+        "that helper does not cover, so a Bash write reaching upgrade-approvals/ "
+        "or a venv .daemon-version stamp is judged the same as the "
+        "Write/Edit/NotebookEdit route. PARTIAL because a destination built by "
+        "shell expansion ($(...), a variable, a glob) cannot be resolved to a "
+        "literal path and is silently not followed",
+    ),
 }
 
 # Handlers whose resident guidance opened with an unqualified "Writing X is

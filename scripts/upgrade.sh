@@ -20,6 +20,12 @@
 
 set -euo pipefail
 
+# Plan 00376 fresh review BLOCKER 1: a function exported into the environment
+# (BASH_FUNC_*) would shadow the tools the upgrade runs; none is wanted here.
+while read -r _ _ _imported_function; do
+    unset -f "$_imported_function"
+done < <(declare -F)
+
 # ============================================================
 # Argument parsing
 # ============================================================
@@ -37,16 +43,27 @@ while [ $# -gt 0 ]; do
             UPGRADE_FLAGS="$UPGRADE_FLAGS --skip-config-optimisation"
             shift
             ;;
+        --skip-reading-confirmation=*|--skip-reading-confirmation)
+            # Plan 00376: the caller confirms it has read what Layer 2's
+            # pre-deploy gate listed, with the digest the gate's stop
+            # printed; without it, a gate with anything to show stops the
+            # upgrade before deploying. The bare flag matches no listing.
+            UPGRADE_FLAGS="$UPGRADE_FLAGS $1"
+            shift
+            ;;
         --project-root)
             [ -n "${2:-}" ] || { echo "ERR --project-root requires a path argument" >&2; exit 1; }
             PROJECT_ROOT="$2"
             shift 2
             ;;
         --help|-h)
-            echo "Usage: upgrade.sh --project-root PATH [VERSION]"
+            echo "Usage: upgrade.sh --project-root PATH [--skip-reading-confirmation=DIGEST] [--skip-config-optimisation] [VERSION]"
             echo ""
             echo "  --project-root PATH        Project root directory (REQUIRED)"
             echo "  --skip-config-optimisation Opt out of the mandatory post-upgrade config-optimisation review"
+            echo "  --skip-reading-confirmation=DIGEST"
+            echo "                             Confirm you have read what the pre-deploy gate listed;"
+            echo "                             DIGEST is the value its stop printed for that listing"
             echo "  VERSION                    Git tag to upgrade to (default: latest)"
             exit 0
             ;;
@@ -63,7 +80,7 @@ while [ $# -gt 0 ]; do
             ;;
         -*)
             echo "ERR Unknown option: $1" >&2
-            echo "Usage: upgrade.sh --project-root PATH [VERSION]" >&2
+            echo "Usage: upgrade.sh --project-root PATH [--skip-reading-confirmation=DIGEST] [--skip-config-optimisation] [VERSION]" >&2
             exit 1
             ;;
         *)
@@ -113,6 +130,49 @@ _version_lt() {
     return 1
 }
 
+#
+# _remote_identity() - The repository a git remote URL names, so that two
+# spellings of one repository compare equal: `host/owner/repo` for a URL or
+# scp-like form (scheme, user and port dropped, host lowercased), the physical
+# path for a local one. A trailing slash or `.git` never counts. Used by Step 5
+# to tell an https-to-ssh rewrite of origin from a rewrite to somewhere else.
+#
+_remote_identity() {
+    local url="${1%/}" rest host path
+    case "$url" in
+        file://*)
+            path="${url#file://}"
+            ;;
+        *://*)
+            rest="${url#*://}"
+            host="${rest%%/*}"
+            host="${host##*@}"
+            host="${host%%:*}"
+            path="${rest#*/}"
+            printf '%s/%s\n' "$(printf '%s' "$host" | tr '[:upper:]' '[:lower:]')" "${path%.git}"
+            return 0
+            ;;
+        /* | ./* | ../*)
+            path="$url"
+            ;;
+        *:*)
+            host="${url%%:*}"
+            host="${host##*@}"
+            path="${url#*:}"
+            path="${path#/}"
+            printf '%s/%s\n' "$(printf '%s' "$host" | tr '[:upper:]' '[:lower:]')" "${path%.git}"
+            return 0
+            ;;
+        *)
+            path="$url"
+            ;;
+    esac
+    if [ -d "$path" ]; then
+        path="$(cd "$path" && pwd -P)"
+    fi
+    printf '%s\n' "${path%.git}"
+}
+
 # ============================================================
 # Python version detection
 # ============================================================
@@ -133,7 +193,8 @@ _version_lt() {
 # ``requires-python`` lower bound, the helper raises the floor accordingly
 # (the host-a-style cross-check from Plan 00104 Phase 7 Task 7.2).
 #
-# Sets and exports HOOKS_DAEMON_PYTHON so Layer 2 scripts can use it.
+# Sets and exports HOOKS_DAEMON_PYTHON so Layer 2 scripts can build the venv
+# with it. Layer 2's pre-deploy gate never runs on it (Plan 00376).
 #
 # Returns:
 #   0 - compatible Python found (HOOKS_DAEMON_PYTHON exported)
@@ -172,7 +233,9 @@ _PRESERVED_OLD_DEFAULT_TMP=""
 # The settings baseline preserved at Step 3d, tracked for the same reason and
 # on the same terms: only ever a file this script created.
 _PRESERVED_OLD_DEFAULT_SETTINGS_TMP=""
-trap 'rm -f "$_PYTHON_DISCOVERY_FETCHED_TMP" "$_PRESERVED_OLD_DEFAULT_TMP" "$_PRESERVED_OLD_DEFAULT_SETTINGS_TMP"' EXIT
+# The private directory holding the one-shot handoff to Layer 2 (Step 8).
+_HANDOFF_DIR=""
+trap 'rm -f "$_PYTHON_DISCOVERY_FETCHED_TMP" "$_PRESERVED_OLD_DEFAULT_TMP" "$_PRESERVED_OLD_DEFAULT_SETTINGS_TMP"; if [ -n "$_HANDOFF_DIR" ]; then rm -rf -- "$_HANDOFF_DIR"; fi' EXIT
 
 _fetch_python_discovery_lib() {
     local ref base_url url tmp curl_path
@@ -239,11 +302,9 @@ find_compatible_python() {
         # the user hard-stuck guessing the internal escape hatch.
         _fail "Canonical python discovery helper missing: searched ${daemon_dir:+$daemon_dir/scripts/lib/python_discovery.sh and }$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/python_discovery.sh, and the network self-fetch also failed.
 Recovery options:
-  1. Run upgrade.sh from the INSTALLED daemon dir (it ships the helper):
-       bash \"\$PROJECT_ROOT/.claude/hooks-daemon/scripts/upgrade.sh\" --project-root \"\$PROJECT_ROOT\"
-  2. Set HOOKS_DAEMON_PYTHON to an absolute Python 3.11+ path to skip discovery:
-       HOOKS_DAEMON_PYTHON=/path/to/python3 bash $0 --project-root \"\$PROJECT_ROOT\"
-  3. If a stale skill shim re-execs with a legacy flag, bypass its bootstrap:
+  1. Run the target release's own upgrade.sh, with its lib/ beside it, out of the installed clone (VERSION = the tag to install):
+       d=\"\$(mktemp -d)\" && git -C \"\$PROJECT_ROOT/.claude/hooks-daemon\" fetch --tags && git -C \"\$PROJECT_ROOT/.claude/hooks-daemon\" archive VERSION scripts | tar -x -C \"\$d\" && bash \"\$d/scripts/upgrade.sh\" --project-root \"\$PROJECT_ROOT\" VERSION
+  2. If a stale skill shim re-execs with a legacy flag, bypass its bootstrap:
        HOOKS_DAEMON_SKIP_BOOTSTRAP=1 bash \"\$PROJECT_ROOT/.claude/skills/hooks-daemon/scripts/upgrade.sh\""
     fi
     # shellcheck source=lib/python_discovery.sh
@@ -486,6 +547,35 @@ fi
 # (Plan 00109), so this line protects the entire installed base as soon as it
 # lands on main — including clients still running much older daemon versions.
 _info "Fetching latest tags..."
+# Plan 00376 review3 m2 / review4 MAJOR 3: a `url.<x>.insteadOf` rewrite (in
+# any config scope, directly or through an include) or a config override in
+# the environment silently changes where this fetch goes, and the Layer 2 this
+# script launches comes from whatever it fetched. The config of the person
+# running the upgrade is kept -- safe.directory, credential helpers and
+# proxies live there -- but the environment overrides are dropped, origin must
+# name exactly one URL, and a fetch URL that config rewrites to a DIFFERENT
+# repository is refused. An https-to-ssh rewrite of the same repository passes.
+unset GIT_CONFIG_PARAMETERS GIT_CONFIG_COUNT
+for _git_config_name in "${!GIT_CONFIG_KEY_@}" "${!GIT_CONFIG_VALUE_@}"; do
+    unset "$_git_config_name"
+done
+_ORIGIN_URLS="$(git -C "$DAEMON_DIR" config --get-all remote.origin.url)" \
+    || _fail "The daemon clone has no origin remote: $DAEMON_DIR"
+if [ "$(printf "%s\n" "$_ORIGIN_URLS" | wc -l)" -ne 1 ]; then
+    _fail "Refusing to fetch: origin in $DAEMON_DIR names more than one URL:
+$_ORIGIN_URLS"
+fi
+_FETCH_URL="$(git -C "$DAEMON_DIR" ls-remote --get-url origin)"
+if [ "$(_remote_identity "$_ORIGIN_URLS")" != "$(_remote_identity "$_FETCH_URL")" ]; then
+    _REWRITE_SOURCES=""
+    if _REWRITE_SOURCES="$(git -C "$DAEMON_DIR" config --show-origin --get-regexp "^url\..*\.insteadof$")"; then
+        _REWRITE_SOURCES="
+Rewrites in effect:
+$_REWRITE_SOURCES"
+    fi
+    _fail "Refusing to fetch: git configuration rewrites origin ($_ORIGIN_URLS) to $_FETCH_URL, a different repository. The upgrade runs code from what it fetches, so it only fetches from the repository origin names.$_REWRITE_SOURCES
+If that is a mirror of the daemon repository, the owner can point origin at it directly: git -C \"$DAEMON_DIR\" remote set-url origin <mirror-url>"
+fi
 git -C "$DAEMON_DIR" fetch --tags --force --quiet
 
 # Plan 00291: the guarded branch-install gate. First-party only: BOTH
@@ -548,7 +638,9 @@ else
     TARGET_SEMVER="$TARGET_VERSION"
 fi
 
-git -C "$DAEMON_DIR" rev-parse "$TARGET_VERSION" &>/dev/null || \
+# --verify --quiet answers "does this name a commit?" by exit status alone and
+# keeps stderr open for anything else git has to say; stdout is only the sha.
+git -C "$DAEMON_DIR" rev-parse --verify --quiet "${TARGET_VERSION}^{commit}" > /dev/null || \
     _fail "Version $TARGET_VERSION not found"
 if [ "$_BRANCH_INSTALL" = "true" ]; then
     echo ""
@@ -598,6 +690,16 @@ fi
 # Pinned by tests/integration/test_upgrade_sh_forced_checkout.py, which
 # extracts the client invocation from this file and runs it against dirty
 # fixtures -- reverting to a plain checkout fails those tests.
+# Plan 00376 Task 1.2: the commit this checkout moves away from. Layer 2's
+# pre-deploy gate can stop the upgrade before anything is deployed and put
+# the daemon dir back on the INSTALLED version; this ref is its last resort
+# when neither the venv stamp nor HOOKS-DAEMON.md names one. Handed over in
+# the Step 8 handoff file, never in the environment.
+_PREVIOUS_REF=""
+if [ "$SELF_INSTALL" != "true" ]; then
+    _PREVIOUS_REF="$(git -C "$DAEMON_DIR" rev-parse HEAD)"
+fi
+
 _info "Checking out $TARGET_DISPLAY..."
 if [ "$SELF_INSTALL" = "true" ]; then
     git -C "$DAEMON_DIR" checkout "$TARGET_VERSION" --quiet
@@ -640,11 +742,118 @@ Use a fresh install instead: see CLAUDE/LLM-INSTALL.md"
 fi
 
 _info "Delegating to version-specific upgrader..."
-# Invoke Layer 2 inside an `if` so set -e does not abort on its (potentially
-# nonzero) exit. Non-zero = abort without emitting metadata.
+# Plan 00376 review MAJOR 4: the handoff to Layer 2 is a one-shot file in a
+# private directory this run creates, holding this shell's PID and the
+# previous ref, passed by PATH. Layer 2 believes it only when its parent
+# wrote it, and deletes it on reading, so an exported variable naming some
+# other file hands nothing over. Only then does Layer 2 read UPGRADE_FLAGS.
+_HANDOFF_DIR="$(mktemp -d "${TMPDIR:-/tmp}/hooks_daemon_upgrade_handoff_XXXXXX")"
+HOOKS_DAEMON_UPGRADE_HANDOFF="$_HANDOFF_DIR/handoff"
+(umask 077 && printf '%s %s\n' "$$" "$_PREVIOUS_REF" > "$HOOKS_DAEMON_UPGRADE_HANDOFF")
+export HOOKS_DAEMON_UPGRADE_HANDOFF
+# review2 MAJOR 1 (residual): `bash "$LAYER2_SCRIPT"` used to resolve `bash`
+# from the caller's own PATH, so a caller able to plant a fake `bash` ahead
+# of the real one controlled what interpreted Layer 2 before its own
+# `_sanitise_layer2_env` ever got to run. review3 MAJOR 2: PATH was only
+# half of it -- BASH_ENV/ENV run inside Layer 2 before that function gets a
+# say, and no importing shell can strip an exported function (BASH_FUNC_*)
+# from what it hands a child; the name it lands under is not predictable
+# enough to `env -u` it away. `env_sanitise.sh` (sourced from the
+# CHECKED-OUT target -- it is always present by this point, the same tree
+# $LAYER2_SCRIPT itself is read from) resolves both `bash` and `env` from a
+# fixed, root-owned, non-group/world-writable system location, the same
+# trust check the gate subprocess already used; launching through `env -i`
+# with an explicit allowlist means nothing not on that list reaches Layer 2
+# at all. A target predating this file (a downgrade below the release that
+# introduced it) has no such resolver to fall back on, so a bare `bash` from
+# the caller's PATH is used there -- the same behaviour this replaces, not a
+# new gap.
+_LAYER2_BASH="bash"
+_LAYER2_LAUNCH=("$_LAYER2_BASH")
+_ENV_SANITISE_SH="$DAEMON_DIR/scripts/install/env_sanitise.sh"
+if [ -f "$_ENV_SANITISE_SH" ]; then
+    # shellcheck source=install/env_sanitise.sh
+    source "$_ENV_SANITISE_SH"
+    if _trusted_bash="$(_gate_tool bash)"; then
+        _LAYER2_BASH="$_trusted_bash"
+    else
+        _fail "No trusted bash found in a fixed system location (\$GATE_SAFE_PATH). The upgrade never launches Layer 2 on a bash an environment variable or the caller's PATH names; install bash in one of those locations (or link one there)."
+    fi
+    if _trusted_env="$(_gate_tool env)"; then
+        # DATA the rest of the upgrade legitimately needs (building a venv,
+        # running uv, deploying files) -- never a variable that steers what
+        # code runs or which tools answer for it. Only what is explicitly
+        # listed here survives `env -i`; everything else, including
+        # BASH_ENV/ENV and any BASH_FUNC_*, does not. Each group says why it
+        # is kept; the approval guard denies an agent setting the steering
+        # members (HOOKS_DAEMON_PYTHON, HOOKS_DAEMON_VENV_PATH, HOME, TMPDIR,
+        # HOSTNAME, the handover names, UV index/config, proxies, CA bundles)
+        # on the command that runs the upgrade.
+        _LAYER2_ENV_ALLOWLIST=(
+            "PATH=$(_gate_trusted_path)"
+            "HOOKS_DAEMON_UPGRADE_HANDOFF=$HOOKS_DAEMON_UPGRADE_HANDOFF"
+            "UPGRADE_FLAGS=$UPGRADE_FLAGS"
+        )
+        _LAYER2_KEPT_NAMES=(
+            # The session: where files go, the locale, who is running it.
+            HOME LANG LC_ALL LC_CTYPE TMPDIR USER LOGNAME TERM NO_COLOR
+            # Reaching the package index at all behind a proxy or private CA.
+            HTTP_PROXY HTTPS_PROXY NO_PROXY http_proxy https_proxy no_proxy
+            SSL_CERT_FILE REQUESTS_CA_BUNDLE CURL_CA_BUNDLE XDG_CACHE_HOME
+            # This script's own handover (Steps 3b-3d): the pre-checkout
+            # version and the old default config/settings baselines.
+            HOOKS_DAEMON_UPGRADE_PREVIOUS_VERSION
+            HOOKS_DAEMON_OLD_DEFAULT_CONFIG HOOKS_DAEMON_OLD_DEFAULT_PID
+            HOOKS_DAEMON_OLD_DEFAULT_SETTINGS
+            # Operator overrides for the daemon's interpreter and venv. Layer 2
+            # resolves the INSTALLED version with both unset, so neither feeds
+            # the gate; daemon control keeps honouring them.
+            HOOKS_DAEMON_PYTHON HOOKS_DAEMON_VENV_PATH
+            # The guarded branch install (Plan 00291), re-validated above and
+            # gated with --include-unreleased.
+            HOOKS_DAEMON_UNSAFE_TRACK_REF HOOKS_DAEMON_UNSAFE_TRACK_REF_BECAUSE
+            # venv build and lock tuning, and whether CI builds a venv at all.
+            HOOKS_DAEMON_VENV_BUILD_TIMEOUT HOOKS_DAEMON_VENV_PROBE_TIMEOUT
+            HOOKS_DAEMON_VENV_LOCK_TIMEOUT HOOKS_DAEMON_VENV_LOCK_STALE_SECONDS
+            HOOKS_DAEMON_VENV_LOCK_HEARTBEAT_SECONDS HOOKS_DAEMON_VENV_LOCK_BACKEND
+            HOOKS_DAEMON_SKIP_VENV_BOOTSTRAP CI VERBOSE
+            # The daemon Layer 2 restarts reads these for its socket, PID and
+            # log paths and its logging: without them it listens where the
+            # hooks never look.
+            HOSTNAME XDG_RUNTIME_DIR HOOKS_DAEMON_ROOT_DIR HOOKS_DAEMON_MODE
+            CLAUDE_HOOKS_SOCKET_PATH CLAUDE_HOOKS_PID_PATH CLAUDE_HOOKS_LOG_PATH
+            HOOKS_DAEMON_EVENTS_DIR HOOKS_DAEMON_LOG_LEVEL
+            HOOKS_DAEMON_INPUT_VALIDATION HOOKS_DAEMON_VALIDATION_STRICT
+        )
+        # Dropped on purpose: HOOKS_DAEMON_UPGRADE_SECOND_PASS,
+        # HOOKS_DAEMON_COMPAT_CHECK_DONE and HOOKS_DAEMON_VENV_LOCK_INHERITED
+        # are Layer 2's own internal state, which a caller must never preset;
+        # HOOKS_DAEMON_DOCKERENV_PATH/_CONTAINERENV_PATH are test seams; PIP_*
+        # has no reader (the venv is built by `uv`, which reads UV_* only).
+        for _allow_name in "${_LAYER2_KEPT_NAMES[@]}"; do
+            if [ -n "${!_allow_name+x}" ]; then
+                _LAYER2_ENV_ALLOWLIST+=("$_allow_name=${!_allow_name}")
+            fi
+        done
+        # uv's own settings (link mode, cache, index for a private mirror).
+        # UV_PYTHON is inert: Layer 2 always passes --python.
+        for _allow_name in "${!UV_@}"; do
+            _LAYER2_ENV_ALLOWLIST+=("$_allow_name=${!_allow_name}")
+        done
+        _LAYER2_LAUNCH=("$_trusted_env" -i "${_LAYER2_ENV_ALLOWLIST[@]}" "$_LAYER2_BASH")
+    else
+        _fail "No trusted env found in a fixed system location (\$GATE_SAFE_PATH). The upgrade never launches Layer 2 through a caller-named env; install env in one of those locations (or link one there)."
+    fi
+else
+    _LAYER2_LAUNCH=("$_LAYER2_BASH")
+fi
+# Non-zero = abort without emitting metadata, with Layer 2's own exit code:
+# the pre-deploy gate's stop codes tell the caller WHY it stopped. Captured
+# with `||`, not inside `if !`, where $? is the negation's status (always 0).
 export UPGRADE_FLAGS
-if ! bash "$LAYER2_SCRIPT" "$PROJECT_ROOT" "$DAEMON_DIR" "$TARGET_VERSION"; then
-    LAYER2_EXIT=$?
+LAYER2_EXIT=0
+"${_LAYER2_LAUNCH[@]}" "$LAYER2_SCRIPT" "$PROJECT_ROOT" "$DAEMON_DIR" "$TARGET_VERSION" || LAYER2_EXIT=$?
+if [ "$LAYER2_EXIT" -ne 0 ]; then
     exit "$LAYER2_EXIT"
 fi
 
@@ -879,9 +1088,44 @@ if [ -n "$_metadata_venv_python" ] && [ -x "$_metadata_venv_python" ]; then
 fi
 
 # ------------------------------------------------------------
+# Post-upgrade tasks (Plan 00376 Task 4.3)
+# ------------------------------------------------------------
+# A third mirror of the two blocks above, and the post-upgrade tasks' runner
+# (Plan 00376 Task 4.1): acting on the project is the agent's job, so this
+# reports every task the upgrade crossed, with the call sites each task's
+# detection finds, and upgrade.md step 6 carries them out. A branch install's
+# CLI includes the UNRELEASED tasks by itself, from its own install stamp.
+if [ -n "$_metadata_venv_python" ] && [ -x "$_metadata_venv_python" ]; then
+    # Exit 1 means tasks exist (normal!), 0 none, 2 on error or an older
+    # target that has no such command; same idiom as above.
+    _tasks_rc=0
+    if _tasks_out="$("$_metadata_venv_python" -m claude_code_hooks_daemon.daemon.cli \
+        check-post-upgrade-tasks \
+        --from "${FROM_VERSION#v}" \
+        --to "${TARGET_SEMVER#v}" \
+        --project-root "$PROJECT_ROOT" 2>&1)"; then
+        _tasks_rc=0
+    else
+        _tasks_rc=$?
+    fi
+
+    if [ "$_tasks_rc" -eq 1 ]; then
+        echo ""
+        _info "${_BOLD}Post-upgrade tasks to carry out${_NC}"
+        echo "$_tasks_out"
+        _info "Carry out every task per upgrade.md step 6 before reporting the upgrade done."
+        _info "Re-run manually: \"$_metadata_venv_python\" -m claude_code_hooks_daemon.daemon.cli check-post-upgrade-tasks --from ${FROM_VERSION#v} --to ${TARGET_SEMVER#v} --project-root \"$PROJECT_ROOT\""
+    elif [ "$_tasks_rc" -eq 0 ]; then
+        _ok "Post-upgrade tasks: none for this upgrade."
+    else
+        _warn "Post-upgrade task list unavailable (check-post-upgrade-tasks exit $_tasks_rc; older target?)."
+    fi
+fi
+
+# ------------------------------------------------------------
 # Worktree seed config drift (Plan 00267)
 # ------------------------------------------------------------
-# Third mirror of the two blocks above. Unlike them this is NOT version-gated:
+# Another mirror of the blocks above. Unlike them this is NOT version-gated:
 # the daemon's shipped default for seed entries is necessarily empty, so no
 # manifest can tell a project which of ITS git-ignored local files a fresh
 # worktree ought to carry. The answer comes from scanning the repository, which

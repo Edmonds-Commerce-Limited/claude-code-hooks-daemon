@@ -66,8 +66,7 @@ bash CLAUDE/UPGRADES/v2/v2.11-to-v2.12/verification.sh
 ### 4. Restart Daemon
 
 ```bash
-cd .claude/hooks-daemon
-untracked/venv/bin/python -m claude_code_hooks_daemon.daemon.cli restart
+.claude/hooks-daemon/untracked/venv/bin/python -m claude_code_hooks_daemon.daemon.cli restart
 ```
 
 ## What Changed

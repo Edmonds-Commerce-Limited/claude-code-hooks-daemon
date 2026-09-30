@@ -56,11 +56,16 @@ touched the subsystem you are reporting. If something did, the fix may already
 be out, and the report costs you both a round trip — upgrade first:
 
 ```bash
-TARGET="$(git -C .claude/hooks-daemon describe --tags --abbrev=0)"
-bash .claude/hooks-daemon/scripts/upgrade.sh --project-root "$PWD" "$TARGET"
+git -C .claude/hooks-daemon fetch --tags
+TARGET="$(git -C .claude/hooks-daemon describe --tags "$(git -C .claude/hooks-daemon rev-list --tags --max-count=1)")"
+mkdir -p untracked/scratch
+git -C .claude/hooks-daemon show "$TARGET:scripts/upgrade.sh" > untracked/scratch/target-upgrade.sh
+bash untracked/scratch/target-upgrade.sh --project-root "$PWD" "$TARGET"
 ```
 
-Use that entry point rather than `upgrade_version.sh` directly: the inner
+That runs the target release's own `upgrade.sh`, not the installed one, which
+may predate the pre-deploy gate and then reports a stopped upgrade as success.
+Use it rather than `upgrade_version.sh` directly: the inner
 script checks out the target mid-run, so invoking it yourself runs the
 PREVIOUS release's step list and any step the new release added never
 executes.

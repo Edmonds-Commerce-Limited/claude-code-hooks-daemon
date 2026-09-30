@@ -47,10 +47,27 @@ _DOCS_THAT_TEACH_THE_UPGRADE = (
     REPO_ROOT / "CLAUDE" / "LLM-UPDATE.md",
     REPO_ROOT / "CLAUDE" / "UPGRADES" / "README.md",
     REPO_ROOT / "CLAUDE" / "UPGRADES" / "upgrade-template" / "README.md",
+    # The template every future RELEASES/vX.Y.Z.md upgrade block is written from.
+    REPO_ROOT / ".claude" / "agents" / "release-agent.md",
 )
 
 # `bash .../upgrade_version.sh` used as a command the reader is told to run.
 _BARE_LAYER2_INVOCATION = re.compile(r"^\s*bash\s+\S*upgrade_version\.sh\b", re.MULTILINE)
+
+# The installed Layer 1 run as a command, capturing the version it installs.
+_INSTALLED_LAYER1_INVOCATION = re.compile(
+    r"^\s*bash\s+\"?(?:\.claude/hooks-daemon|\$DAEMON_DIR)/scripts/upgrade\.sh\"?"
+    r"\s+--project-root\s+\S+\s+(?P<version>\S+)",
+    re.MULTILINE,
+)
+
+# The versions a rollback or a reinstall names: never newer than the installed one.
+_ROLLBACK_OR_REINSTALL_VERSIONS = frozenset(
+    {"<version-from-manifest>", "vX.Y.Z", "vX.Y", "v{PREV_VERSION}", '"$CURRENT_TAG"'}
+)
+
+# A Layer 1 fetched from a literal, fixed release ref instead of main or the target.
+_PINNED_LAYER1_REF = re.compile(r"HOOKS_DAEMON_UPGRADE_REF=v\d")
 
 
 class TestLayerOneChecksOutBeforeDelegating:
@@ -61,7 +78,11 @@ class TestLayerOneChecksOutBeforeDelegating:
         content = LAYER1.read_text()
 
         checkout = re.search(r'git -C "\$DAEMON_DIR" checkout "\$TARGET_VERSION"', content)
-        delegate = re.search(r'bash "\$LAYER2_SCRIPT"', content)
+        # Plan 00376 review3: the interpreter is no longer the literal word
+        # `bash` -- Layer 2 is launched via `_LAYER2_LAUNCH`, an array built
+        # from `_gate_tool bash`/`_gate_tool env` plus an explicit env
+        # allowlist, never a bare word looked up on the caller's PATH.
+        delegate = re.search(r'"\$\{_LAYER2_LAUNCH\[@\]\}" "\$LAYER2_SCRIPT"', content)
 
         assert checkout is not None, "Layer 1 no longer checks out the target version"
         assert delegate is not None, "Layer 1 no longer delegates to Layer 2"
@@ -106,6 +127,46 @@ class TestTheDocumentedUpgradeCommandUsesLayerOne:
         ]
 
         assert not missing, f"These upgrade documents never name Layer 1: {missing}"
+
+    def test_no_document_upgrades_forward_through_the_installed_layer1(self) -> None:
+        """The INSTALLED Layer 1 may predate the pre-deploy gate (Plan 00376).
+
+        Such a Layer 1 cannot pass the owner's reading confirmation and reports
+        a stopped upgrade as success. A forward upgrade therefore runs main's
+        Layer 1 or the TARGET's own, read out of the clone. The installed one
+        stays correct only for a rollback or a reinstall, where it is newer
+        than, or the same as, the version it installs.
+        """
+        offenders: list[str] = []
+        for doc in _DOCS_THAT_TEACH_THE_UPGRADE:
+            if not doc.exists():
+                continue
+            text = doc.read_text()
+            for match in _INSTALLED_LAYER1_INVOCATION.finditer(text):
+                if match.group("version") in _ROLLBACK_OR_REINSTALL_VERSIONS:
+                    continue
+                line_number = text[: match.start()].count("\n") + 1
+                offenders.append(f"{doc.relative_to(REPO_ROOT)}:{line_number}")
+            for match in _PINNED_LAYER1_REF.finditer(text):
+                line_number = text[: match.start()].count("\n") + 1
+                offenders.append(f"{doc.relative_to(REPO_ROOT)}:{line_number}")
+
+        assert not offenders, (
+            "These documents upgrade forward through a Layer 1 that may predate "
+            "the pre-deploy gate. Run the target's own Layer 1:\n  "
+            'git -C .claude/hooks-daemon show "$TARGET:scripts/upgrade.sh" > "$tmp"'
+            '\n  bash "$tmp" --project-root "$PWD" "$TARGET"\nOffending lines:\n  '
+            + "\n  ".join(offenders)
+        )
+
+    def test_layer1_recovery_text_never_names_the_installed_layer1(self) -> None:
+        """Layer 1's own failure text is a doc too: it must not route through an old copy."""
+        body = LAYER1.read_text()
+
+        assert ".claude/hooks-daemon/scripts/upgrade.sh" not in body, (
+            "scripts/upgrade.sh's recovery text tells the reader to run the "
+            "installed Layer 1, which may predate the pre-deploy gate."
+        )
 
 
 class TestLayerTwoDetectsThatItsOwnFileChanged:

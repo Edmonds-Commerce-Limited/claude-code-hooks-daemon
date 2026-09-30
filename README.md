@@ -326,10 +326,13 @@ Then read untracked/scratch/LLM-UPDATE.md and follow the instructions exactly.
 ```bash
 cp .claude/hooks-daemon.yaml .claude/hooks-daemon.yaml.backup
 git -C .claude/hooks-daemon fetch --tags
-TARGET="$(git -C .claude/hooks-daemon describe --tags --abbrev=0)"
+TARGET="$(git -C .claude/hooks-daemon describe --tags "$(git -C .claude/hooks-daemon rev-list --tags --max-count=1)")"
 
-# Rebuilds the venv and reinstalls the package for the target version.
-bash .claude/hooks-daemon/scripts/upgrade.sh --project-root "$PWD" "$TARGET"
+# Rebuilds the venv and reinstalls the package for the target version. Runs the
+# TARGET's own upgrade script: the installed one may predate the pre-deploy gate.
+mkdir -p untracked/scratch
+git -C .claude/hooks-daemon show "$TARGET:scripts/upgrade.sh" > untracked/scratch/target-upgrade.sh
+bash untracked/scratch/target-upgrade.sh --project-root "$PWD" "$TARGET"
 
 .claude/hooks-daemon/bin/hooks-daemon restart
 ```

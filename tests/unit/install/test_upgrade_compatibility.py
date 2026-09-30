@@ -441,3 +441,82 @@ class TestCompatibilityChecker:
 
         with pytest.raises(ValueError, match="version"):
             checker.suggest_upgrade_guides(daemon_dir)
+
+
+class TestSuggestUpgradeGuidesSeesTheWholeTree:
+    """Plan 00376 Task 4.2: guide material the reading list used to miss.
+
+    A branch install's target tree carries the next release's staged material
+    in ``CLAUDE/UPGRADES/UNRELEASED/`` -- its post-upgrade tasks, its
+    release-notes callouts, any draft migration note. That is the unreleased
+    half of the upgrade guide, and the pre-install reading list must name it.
+    A release tag's tree has an empty holding area, so a release install is
+    unaffected either way.
+    """
+
+    @pytest.fixture
+    def daemon_dir(self, tmp_path: Path) -> Path:
+        daemon = tmp_path / "daemon"
+        upgrades = daemon / "CLAUDE" / "UPGRADES"
+        for name in ("v3.62.1-to-v3.63.0", "v3.63.0-to-v3.64.0"):
+            (upgrades / "v3" / name).mkdir(parents=True)
+            (upgrades / "v3" / name / f"{name}.md").write_text(f"# {name}\n")
+        (upgrades / "v3" / "v2.32-to-v3.0").mkdir(parents=True)
+        (upgrades / "v3" / "v2.32-to-v3.0" / "README.md").write_text("# v3\n")
+        staged = upgrades / "UNRELEASED"
+        (staged / "post-upgrade-tasks").mkdir(parents=True)
+        (staged / "README.md").write_text("holding area\n")
+        (staged / "post-upgrade-tasks" / "README.md").write_text("convention\n")
+        (staged / "post-upgrade-tasks" / "01-migrate-callers.md").write_text("# Task\n")
+        (staged / "breaking-changes").mkdir()
+        (staged / "breaking-changes" / "json-key-rename.md").write_text("# Breaking\n")
+        return daemon
+
+    def _checker(self, changelog: Path, current: str, target: str) -> CompatibilityChecker:
+        return CompatibilityChecker(
+            changelog_path=changelog, current_version=current, target_version=target
+        )
+
+    def test_branch_install_lists_the_unreleased_staged_documents(
+        self, sample_changelog: Path, daemon_dir: Path
+    ) -> None:
+        checker = self._checker(sample_changelog, "3.64.0", "3.64.0")
+        guides = checker.suggest_upgrade_guides(daemon_dir, include_unreleased=True)
+        staged = daemon_dir / "CLAUDE" / "UPGRADES" / "UNRELEASED"
+        assert guides == [
+            staged / "breaking-changes" / "json-key-rename.md",
+            staged / "post-upgrade-tasks" / "01-migrate-callers.md",
+        ]
+
+    def test_release_install_does_not_list_the_holding_area(
+        self, sample_changelog: Path, daemon_dir: Path
+    ) -> None:
+        checker = self._checker(sample_changelog, "3.63.0", "3.64.0")
+        guides = checker.suggest_upgrade_guides(daemon_dir, include_unreleased=False)
+        assert [g.name for g in guides] == ["v3.63.0-to-v3.64.0.md"]
+
+    def test_default_follows_the_install_stamp(
+        self, sample_changelog: Path, daemon_dir: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(
+            "claude_code_hooks_daemon.install.upgrade_compatibility.is_branch_install", lambda: True
+        )
+        checker = self._checker(sample_changelog, "3.64.0", "3.64.0")
+        assert [g.name for g in checker.suggest_upgrade_guides(daemon_dir)] == [
+            "json-key-rename.md",
+            "01-migrate-callers.md",
+        ]
+
+    def test_patch_versioned_guides_are_listed(
+        self, sample_changelog: Path, daemon_dir: Path
+    ) -> None:
+        checker = self._checker(sample_changelog, "3.62.1", "3.64.0")
+        guides = checker.suggest_upgrade_guides(daemon_dir, include_unreleased=False)
+        assert [g.name for g in guides] == ["v3.62.1-to-v3.63.0.md", "v3.63.0-to-v3.64.0.md"]
+
+    def test_a_readme_only_major_guide_is_listed(
+        self, sample_changelog: Path, daemon_dir: Path
+    ) -> None:
+        checker = self._checker(sample_changelog, "2.32.0", "3.1.0")
+        guides = checker.suggest_upgrade_guides(daemon_dir, include_unreleased=False)
+        assert guides == [daemon_dir / "CLAUDE" / "UPGRADES" / "v3" / "v2.32-to-v3.0" / "README.md"]

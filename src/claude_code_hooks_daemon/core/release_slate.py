@@ -38,7 +38,7 @@ _CALLOUT_HEADING: Final[str] = "# Callout:"
 _HOLDING_AREA_README: Final[str] = "README.md"
 _CALLOUT_SUFFIX: Final[str] = ".md"
 # Where this repository's plans leave their callouts, relative to the repo root
-# (`CLAUDE/UPGRADES/UNRELEASED/README.md` names the four holding-area shapes).
+# (`CLAUDE/UPGRADES/UNRELEASED/README.md` names the holding-area shapes).
 PENDING_RELEASE_NOTES_DIR: Final[Path] = Path("CLAUDE/UPGRADES/UNRELEASED/release-notes")
 
 RunGit = Callable[..., "subprocess.CompletedProcess[str]"]

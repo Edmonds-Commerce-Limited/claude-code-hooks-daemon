@@ -4291,6 +4291,55 @@ def cmd_check_truth_changes(args: argparse.Namespace) -> int:
     return 1 if result["has_changes"] else 0
 
 
+def cmd_check_post_upgrade_tasks(args: argparse.Namespace) -> int:
+    """List the post-upgrade tasks of every guide a version range crosses (Plan 00376).
+
+    The command behind the upgrade skill's mandatory post-upgrade-tasks step,
+    and the report the upgrade script prints at its end. Versioned tasks come
+    from each ``v{A}-to-v{B}/post-upgrade-tasks/`` in (from, to]; the
+    UNRELEASED holding area's tasks join exactly for a branch install, or when
+    ``--include-unreleased`` forces them in. A task that declares
+    ``**Detect**:`` is run against the project tree, and the report says
+    whether (and where) it applies.
+
+    Args:
+        args: Parsed CLI arguments with from_version, to_version, format, and
+              optional upgrades_dir, include_unreleased and project_root.
+
+    Returns:
+        0 if no tasks, 1 if tasks to carry out, 2 on error.
+    """
+    from claude_code_hooks_daemon.install.upgrade_tasks import TaskKind, run_check_upgrade_tasks
+
+    upgrades_dir: Path | None = (
+        Path(args.upgrades_dir) if getattr(args, "upgrades_dir", None) else None
+    )
+    # Plan 00291: same switch as check-truth-changes.
+    include_unreleased: bool | None = True if getattr(args, "include_unreleased", False) else None
+    project_root = _find_project_tree_root(getattr(args, "project_root", None))
+
+    try:
+        result = run_check_upgrade_tasks(
+            TaskKind.POST,
+            from_version=args.from_version,
+            to_version=args.to_version,
+            upgrades_dir=upgrades_dir,
+            include_unreleased=include_unreleased,
+            project_root=project_root,
+            output_format=args.format,
+        )
+    except ValueError as e:
+        print(f"ERROR: {e}", file=sys.stderr)
+        return 2
+
+    if args.format == "json":
+        print(json.dumps(result, indent=2))
+    else:
+        print(result["text"])
+
+    return 1 if result["has_tasks"] else 0
+
+
 def _resolve_transcript(args: argparse.Namespace) -> Path | None:
     """The transcript to analyse: the one named, else the project's newest.
 
@@ -4822,6 +4871,58 @@ def cmd_approve_merge(args: argparse.Namespace) -> int:
             "off and nothing will consume this marker until the key is turned on."
         )
     return 0
+
+
+def cmd_approve_upgrade(args: argparse.Namespace) -> int:
+    """The owner's one-shot approval of one upgrade (Plan 00376 Task 3.2).
+
+    The owner's route through the upgrade gate's escalation (a MAJOR bump, a
+    crossed ``breaking: true`` manifest, a ``critical`` pre-upgrade task
+    detected in the project, or an unknown installed version). Delegates to
+    ``upgrade_gate.run_approval``: it needs a terminal on stdin and the typed
+    phrase naming both versions, and writes a marker bound to the from/to
+    versions and this install's paths, which the next upgrade of exactly that
+    range uses and removes once it completes.
+
+    Returns:
+        0 on marker written, 1 on refusal.
+    """
+    from claude_code_hooks_daemon.daemon.install_layout import (
+        get_untracked_dir,
+        is_self_install_mode,
+    )
+    from claude_code_hooks_daemon.install.upgrade_gate import (
+        UNKNOWN_VERSION,
+        approval_key,
+        run_approval,
+    )
+
+    raw = str(args.version).strip()
+    try:
+        approval_key(raw)
+    except ValueError:
+        print(f"ERROR: {raw!r} is not a release version (e.g. 4.0.0 or v4.0.0)", file=sys.stderr)
+        return 1
+
+    if getattr(args, "project_root", None):
+        project_path = Path(args.project_root).resolve()
+    else:
+        project_path = get_project_path(None)
+    daemon_dir = (
+        project_path
+        if is_self_install_mode(project_path)
+        else project_path / ".claude" / "hooks-daemon"
+    )
+    from_version = str(args.from_version).strip()
+    return run_approval(
+        project_root=project_path,
+        daemon_dir=daemon_dir,
+        from_version=None if from_version == UNKNOWN_VERSION else from_version,
+        to_version=raw,
+        untracked_dir=get_untracked_dir(project_path),
+        stdin=sys.stdin,
+        stdout=sys.stdout,
+    )
 
 
 class _CronPauseRefusedError(Exception):
@@ -9970,6 +10071,53 @@ def build_parser() -> argparse.ArgumentParser:
     _add_report_offload_arguments(parser_check_truth, default_subdir=_REPORT_OFFLOAD_TRUTH_SUBDIR)
     parser_check_truth.set_defaults(func=cmd_check_truth_changes)
 
+    # check-post-upgrade-tasks command (Plan 00376)
+    parser_post_upgrade = subparsers.add_parser(
+        "check-post-upgrade-tasks",
+        help="List the post-upgrade tasks to carry out for the versions you just crossed",
+    )
+    parser_post_upgrade.add_argument(
+        "--from",
+        dest="from_version",
+        required=True,
+        metavar="VERSION",
+        help="Version you upgraded from (e.g. 3.62.1)",
+    )
+    parser_post_upgrade.add_argument(
+        "--to",
+        dest="to_version",
+        required=True,
+        metavar="VERSION",
+        help="Version you upgraded to (e.g. 3.66.0)",
+    )
+    parser_post_upgrade.add_argument(
+        "--format",
+        choices=["text", "json"],
+        default="text",
+        help="Output format: text (default) or json",
+    )
+    parser_post_upgrade.add_argument(
+        "--upgrades-dir",
+        dest="upgrades_dir",
+        metavar="PATH",
+        default=None,
+        help="Override the CLAUDE/UPGRADES directory (for testing)",
+    )
+    parser_post_upgrade.add_argument(
+        "--include-unreleased",
+        dest="include_unreleased",
+        action="store_true",
+        help="Also read the UNRELEASED staged tasks (automatic for a non-release install)",
+    )
+    parser_post_upgrade.add_argument(
+        "--project-root",
+        dest="project_root",
+        type=Path,
+        default=None,
+        help="Project tree a task's **Detect** pattern is run against (default: auto-detect)",
+    )
+    parser_post_upgrade.set_defaults(func=cmd_check_post_upgrade_tasks)
+
     # issue-report command (Plan 00403) — a filable upstream issue body
     parser_issue_report = subparsers.add_parser(
         "issue-report",
@@ -10769,6 +10917,35 @@ def build_parser() -> argparse.ArgumentParser:
         help="Project root override (default: auto-detected)",
     )
     parser_approve_merge.set_defaults(func=cmd_approve_merge)
+
+    # approve-upgrade command (Plan 00376 Task 3.2): the owner's one-shot
+    # approval for an upgrade the pre-deploy gate escalated
+    parser_approve_upgrade = subparsers.add_parser(
+        "approve-upgrade",
+        help=(
+            "The project owner's one-shot approval of one upgrade the gate stopped "
+            "(needs a terminal and a typed confirmation phrase)"
+        ),
+    )
+    parser_approve_upgrade.add_argument(
+        "version",
+        metavar="VERSION",
+        help="Target release of the upgrade being approved (e.g. 4.0.0)",
+    )
+    parser_approve_upgrade.add_argument(
+        "--from",
+        dest="from_version",
+        required=True,
+        help="The installed release the gate's stop message named (or 'unknown')",
+    )
+    parser_approve_upgrade.add_argument(
+        "--project-root",
+        dest="project_root",
+        type=Path,
+        default=None,
+        help="Project root override (default: auto-detected)",
+    )
+    parser_approve_upgrade.set_defaults(func=cmd_approve_upgrade)
 
     # cron-pause / cron-resume (ledger 00422 N4): the session-scoped spelling
     # for "cancel this declared cron for now"

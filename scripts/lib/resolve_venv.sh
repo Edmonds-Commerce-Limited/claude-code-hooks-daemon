@@ -320,6 +320,26 @@ _rv_pick_python() {
     return 1
 }
 
+# _rv_is_own_venv_python <daemon_dir> <path>
+#
+# True when <path> is <daemon_dir>/untracked/venv-*/bin/python(3), the only
+# answer the hot-path cache may hold (Plan 00466 N37).
+_rv_is_own_venv_python() {
+    local prefix="${1%/}/untracked/venv-"
+    local path="$2"
+    case "$path" in
+        */../* | */./*) return 1 ;;
+        "$prefix"*/bin/python | "$prefix"*/bin/python3) ;;
+        *) return 1 ;;
+    esac
+    local venv_name="${path#"$prefix"}"
+    venv_name="${venv_name%/bin/python*}"
+    case "$venv_name" in
+        */*) return 1 ;;
+    esac
+    return 0
+}
+
 # _rv_resolve_python_impl <daemon_dir> [--fallback-target]
 #
 # The actual resolution logic, wrapped in a subshell by callers so set
@@ -353,9 +373,20 @@ _rv_resolve_python_impl() {
     # change to untracked/'s directory mtime (a venv added/removed bumps
     # it; modifications inside venv-*/ do not). Skipped for
     # --fallback-target since that's the bootstrap path, not steady-state.
+    #
+    # Plan 00466 N37: the cache holds only the un-overridden answer. A call
+    # with HOOKS_DAEMON_PYTHON or HOOKS_DAEMON_VENV_PATH set neither reads nor
+    # writes it, and an entry is served only when it names one of this
+    # daemon's own untracked/venv-* interpreters, so an override cannot
+    # answer for a later call that sets none.
     local untracked_dir="$daemon_dir/untracked"
     local cache_file="$untracked_dir/.python-cmd-cache"
-    if [ "$fallback_flag" != "--fallback-target" ] \
+    local use_cache=1
+    if [ "$fallback_flag" = "--fallback-target" ] \
+        || [ -n "${HOOKS_DAEMON_PYTHON:-}${HOOKS_DAEMON_VENV_PATH:-}" ]; then
+        use_cache=0
+    fi
+    if [ "$use_cache" = 1 ] \
         && [ -d "$untracked_dir" ] \
         && [ -f "$cache_file" ]; then
         local cached_mtime cached_path current_mtime
@@ -364,6 +395,7 @@ _rv_resolve_python_impl() {
             && [ -n "$cached_mtime" ] \
             && [ "$cached_mtime" = "$current_mtime" ] \
             && [ -n "$cached_path" ] \
+            && _rv_is_own_venv_python "$daemon_dir" "$cached_path" \
             && [ -x "$cached_path" ]; then
             printf '%s\n' "$cached_path"
             return 0
@@ -399,7 +431,8 @@ _rv_resolve_python_impl() {
         # stat the post-truncate mtime, then write the real content.
         # This ensures the recorded mtime equals what readers see on the
         # next call, so the cache hits.
-        if [ "$fallback_flag" != "--fallback-target" ] && [ -d "$untracked_dir" ]; then
+        if [ "$use_cache" = 1 ] && [ -d "$untracked_dir" ] \
+            && _rv_is_own_venv_python "$daemon_dir" "$resolved"; then
             local cache_mtime
             : > "$cache_file"
             cache_mtime="$(_rv_dir_mtime "$untracked_dir")"

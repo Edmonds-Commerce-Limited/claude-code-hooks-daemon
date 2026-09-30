@@ -36,13 +36,11 @@ Before starting the upgrade:
   ```
 - [ ] Verify daemon is stopped
   ```bash
-  cd .claude/hooks-daemon
-  untracked/venv/bin/python -m claude_code_hooks_daemon.daemon.cli stop
+  .claude/hooks-daemon/untracked/venv/bin/python -m claude_code_hooks_daemon.daemon.cli stop
   ```
 - [ ] Check for uncommitted changes
   ```bash
-  cd .claude/hooks-daemon
-  git status
+  git -C .claude/hooks-daemon status
   ```
 
 ## Changes in This Release
@@ -143,8 +141,7 @@ Before starting the upgrade:
 3. **Verify the fix**:
 
    ```bash
-   cd .claude/hooks-daemon
-   untracked/venv/bin/python -m claude_code_hooks_daemon.daemon.cli validate-project-handlers
+   .claude/hooks-daemon/untracked/venv/bin/python -m claude_code_hooks_daemon.daemon.cli validate-project-handlers
    echo $?
    ```
 
@@ -160,13 +157,14 @@ Before starting the upgrade:
 
 **Migration Steps**: Remove the import. There is no replacement — `cleanup_stale_daemon_files()` continues to handle cleanup of daemon runtime files (sockets, PID files, logs) and is unchanged.
 
-**Rollback**: If you cannot complete migration immediately, downgrade to v2.32.0:
+**Rollback**: If you cannot complete migration immediately, downgrade to
+v2.32.0 -- OWNER-ONLY, since `daemon_location_guard` and the upgrade approval
+guard both deny an agent moving `.claude/hooks-daemon` by hand:
 
 ```bash
-cd .claude/hooks-daemon
-git checkout v2.32.0
-untracked/venv/bin/pip install -e .
-untracked/venv/bin/python -m claude_code_hooks_daemon.daemon.cli restart
+git -C .claude/hooks-daemon checkout v2.32.0
+.claude/hooks-daemon/untracked/venv/bin/pip install -e .claude/hooks-daemon
+.claude/hooks-daemon/untracked/venv/bin/python -m claude_code_hooks_daemon.daemon.cli restart
 ```
 
 ## Step-by-Step Upgrade Instructions
@@ -189,24 +187,24 @@ If this prints anything, update those handlers as described in "Breaking Changes
 
 ### 3. Update Daemon Code
 
+OWNER-ONLY, since `daemon_location_guard` and the upgrade approval guard both
+deny an agent moving `.claude/hooks-daemon` by hand:
+
 ```bash
-cd .claude/hooks-daemon
-git fetch --tags
-git checkout v3.0.0
+git -C .claude/hooks-daemon fetch --tags
+git -C .claude/hooks-daemon checkout v3.0.0
 ```
 
 ### 4. Update Dependencies
 
 ```bash
-cd .claude/hooks-daemon
-untracked/venv/bin/pip install -e .
+.claude/hooks-daemon/untracked/venv/bin/pip install -e .claude/hooks-daemon
 ```
 
 ### 5. Restart Daemon
 
 ```bash
-cd .claude/hooks-daemon
-untracked/venv/bin/python -m claude_code_hooks_daemon.daemon.cli restart
+.claude/hooks-daemon/untracked/venv/bin/python -m claude_code_hooks_daemon.daemon.cli restart
 ```
 
 ## Verification Steps
@@ -214,8 +212,7 @@ untracked/venv/bin/python -m claude_code_hooks_daemon.daemon.cli restart
 ### 1. Verify Version Updated
 
 ```bash
-cd .claude/hooks-daemon
-cat src/claude_code_hooks_daemon/version.py
+cat .claude/hooks-daemon/src/claude_code_hooks_daemon/version.py
 ```
 
 **Expected**:
@@ -235,8 +232,7 @@ grep -n "command_redirection" .claude/hooks-daemon.yaml || echo "Clean"
 ### 3. Verify Daemon Starts
 
 ```bash
-cd .claude/hooks-daemon
-untracked/venv/bin/python -m claude_code_hooks_daemon.daemon.cli status
+.claude/hooks-daemon/untracked/venv/bin/python -m claude_code_hooks_daemon.daemon.cli status
 ```
 
 **Expected**: `Daemon: RUNNING`
@@ -244,8 +240,7 @@ untracked/venv/bin/python -m claude_code_hooks_daemon.daemon.cli status
 ### 4. Verify Project Handlers Load
 
 ```bash
-cd .claude/hooks-daemon
-untracked/venv/bin/python -m claude_code_hooks_daemon.daemon.cli validate-project-handlers
+.claude/hooks-daemon/untracked/venv/bin/python -m claude_code_hooks_daemon.daemon.cli validate-project-handlers
 echo $?
 ```
 
@@ -259,11 +254,13 @@ bash CLAUDE/UPGRADES/v3/v2.32-to-v3.0/verification.sh
 
 ## Rollback Instructions
 
+OWNER-ONLY, since `daemon_location_guard` and the upgrade approval guard both
+deny an agent moving `.claude/hooks-daemon` by hand.
+
 ### 1. Stop Daemon
 
 ```bash
-cd .claude/hooks-daemon
-untracked/venv/bin/python -m claude_code_hooks_daemon.daemon.cli stop
+.claude/hooks-daemon/untracked/venv/bin/python -m claude_code_hooks_daemon.daemon.cli stop
 ```
 
 ### 2. Restore Configuration Backup
@@ -275,15 +272,13 @@ cp .claude/hooks-daemon.yaml.backup .claude/hooks-daemon.yaml
 ### 3. Revert Daemon Code
 
 ```bash
-cd .claude/hooks-daemon
-git checkout v2.32.0
+git -C .claude/hooks-daemon checkout v2.32.0
 ```
 
 ### 4. Reinstall Previous Dependencies
 
 ```bash
-cd .claude/hooks-daemon
-untracked/venv/bin/pip install -e .
+.claude/hooks-daemon/untracked/venv/bin/pip install -e .claude/hooks-daemon
 ```
 
 ### 5. Restart Daemon
@@ -303,8 +298,7 @@ If you encounter issues during upgrade:
 1. **Check daemon logs**:
 
    ```bash
-   cd .claude/hooks-daemon
-   untracked/venv/bin/python -m claude_code_hooks_daemon.daemon.cli logs
+   .claude/hooks-daemon/untracked/venv/bin/python -m claude_code_hooks_daemon.daemon.cli logs
    ```
 
 2. **Validate project handlers**:

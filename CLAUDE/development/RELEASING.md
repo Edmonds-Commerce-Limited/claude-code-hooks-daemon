@@ -400,6 +400,26 @@ After upgrading, review `CLAUDE/UPGRADES/v{MAJOR}/v{PREV}-to-v{NEW}/post-upgrade
 
 **ABORT condition**: any `NN-*.md` file remains in `UNRELEASED/post-upgrade-tasks/` when moving to the next step.
 
+### Move UNRELEASED pre-upgrade-tasks
+
+`UNRELEASED/pre-upgrade-tasks/` holds changes a project must hear about BEFORE the release is deployed into it (Plan 00376). The upgrade gate reads them from the versioned guide, runs each task's `**Detect**` pattern over the project, and stops the upgrade on a hit. They move exactly like the post-upgrade tasks, into a sibling directory:
+
+```bash
+mkdir -p CLAUDE/UPGRADES/v{MAJOR}/v{PREV}-to-v{NEW}/pre-upgrade-tasks
+cp CLAUDE/UPGRADES/upgrade-template/pre-upgrade-tasks/README.md CLAUDE/UPGRADES/v{MAJOR}/v{PREV}-to-v{NEW}/pre-upgrade-tasks/README.md
+git mv CLAUDE/UPGRADES/UNRELEASED/pre-upgrade-tasks/[0-9][0-9]-*.md CLAUDE/UPGRADES/v{MAJOR}/v{PREV}-to-v{NEW}/pre-upgrade-tasks/
+ls CLAUDE/UPGRADES/UNRELEASED/pre-upgrade-tasks/
+# Expected: README.md  (nothing else)
+```
+
+Populate `$TARGET/README.md`'s heading and task index (one row per task, with its `Detect` pattern). If only `README.md` was present, there is nothing to move and no `pre-upgrade-tasks/` directory goes into the guide.
+
+**A `critical` pre-upgrade task makes the release breaking for every project it detects**: the gate asks for the owner's approval on those projects. Say so in `RELEASES/vX.Y.Z.md`, in the same section as the breaking changes.
+
+**`breaking: true` in a config-changes manifest halts the fleet.** The gate stops EVERY upgrade that crosses that release with exit `4` until each project's owner approves it, whether or not the project uses the changed keys. Set it only when the release renames, removes or changes a config key in a way that breaks an existing config (so `renamed`, `removed` or `changed` is non-empty); a release that only adds keys is not breaking. Say which upgrades it stops, and that the stop prints the approval command, in `RELEASES/vX.Y.Z.md`.
+
+**ABORT condition**: any `NN-*.md` file remains in `UNRELEASED/pre-upgrade-tasks/` when moving to the next step.
+
 ### Move UNRELEASED release-notes
 
 Every callout in `UNRELEASED/release-notes/` was folded into `RELEASES/vX.Y.Z.md`
@@ -488,6 +508,7 @@ Opus reviews **documentation only** (not code/QA):
 - Upgrade instructions clear
 - `UNRELEASED/post-upgrade-tasks/` contains only `README.md` (all tasks moved in Step 6)
 - Moved tasks have populated the versioned guide's `post-upgrade-tasks/README.md` task index
+- `UNRELEASED/pre-upgrade-tasks/` contains only `README.md`, and any moved pre-upgrade tasks are indexed in the guide's `pre-upgrade-tasks/README.md`
 - Release notes reference post-upgrade tasks if any are `critical` or `recommended`
 - Every callout moved out of `UNRELEASED/release-notes/` in Step 6 appears in the release notes, and that directory contains only `README.md`
 - **Did this release change a documented truth?** (a workflow, command, or convention a project's own docs are likely to assert) — if so, a `truth-changes/v{X.Y.Z}.yaml` entry exists (`was → now`, or `now: ~` to retire it) and `UNRELEASED/truth-changes/` contains only `README.md`
@@ -993,8 +1014,9 @@ gh release view vX.Y.Z --json tagName,isDraft,isPrerelease,url \
 # 1. Edit versions: pyproject.toml, version.py, README.md
 # 2. Update CHANGELOG.md (Keep a Changelog format)
 # 3. Create RELEASES/vX.Y.Z.md
-# 4. Move UNRELEASED/post-upgrade-tasks/NN-*.md into the versioned upgrade guide
-#    and populate its post-upgrade-tasks/README.md task index; fold every
+# 4. Move UNRELEASED/post-upgrade-tasks/NN-*.md and UNRELEASED/pre-upgrade-tasks/NN-*.md
+#    into the versioned upgrade guide and populate each directory's README.md
+#    task index; fold every
 #    UNRELEASED/release-notes/NNN-*.md callout into RELEASES/vX.Y.Z.md and move
 #    the files into the guide's release-notes/
 # 5. Run QA: ./scripts/qa/llm_qa.py all

@@ -445,7 +445,7 @@ handlers:
 
 To inspect daemon source for debugging, use the `Read` tool with an absolute path rather than changing directory into it.
 
-**Example trigger:**
+**Example trigger (BLOCKED-EXAMPLE — this is the denied shape, not an instruction to run it):**
 
 ```bash
 cd .claude/hooks-daemon && ./bin/hooks-daemon status
@@ -1055,6 +1055,31 @@ worktree:
 handlers:
   pre_tool_use:
     merge_to_main_approval:
+      enabled: true
+      priority: 20
+```
+
+---
+
+#### upgrade_approval_guard
+
+| Property       | Value                    |
+| -------------- | ------------------------ |
+| **Config key** | `upgrade_approval_guard` |
+| **Priority**   | 20                       |
+| **Type**       | Blocking                 |
+| **Event**      | PreToolUse               |
+
+**Description:** An agent cannot grant its own upgrade approval (Plan 00376, review finding MAJOR 4). The pre-deploy upgrade gate's escalation is the project OWNER's step -- `hooks-daemon approve-upgrade <version> --from <previous>` needs a TTY and a typed confirmation phrase. This handler denies every other route to the same outcome: running `approve-upgrade` (or the standalone gate's `approve` subcommand) itself; writing/touching the `<version>.approved` marker under `upgrade-approvals/` by any Bash route or with Write/Edit/NotebookEdit; assigning, exporting or `env`-setting `HOOKS_DAEMON_UPGRADE_HANDOFF`, which impersonates the upgrade's Layer 1; on a command that runs the upgrade, setting a variable that picks its interpreter, venv, tools, flags, pass state, git view or code (`HOOKS_DAEMON_PYTHON`, `HOOKS_DAEMON_VENV_PATH`, `PATH`, `HOSTNAME`, `HOME`, `TMPDIR`, `HOOKS_DAEMON_CLONE_URL`, `HOOKS_DAEMON_UPGRADE_BASE_URL`, `HOOKS_DAEMON_UPGRADE_PREVIOUS_VERSION`, `HOOKS_DAEMON_UPGRADE_SECOND_PASS`, `UPGRADE_FLAGS`, `GIT_*`, `BASH_ENV`, `ENV`, `BASH_FUNC_*`, `SHELLOPTS`, `BASHOPTS`, `LD_*`, `DYLD_*`, `PYTHON*`) or exporting a shell function; forging a venv's `.daemon-version` stamp; or moving the `.claude/hooks-daemon` clone to another ref by hand (`checkout`, `switch`, `pull`, `merge`, `rebase`, `reset`, `cherry-pick`, `am`, `revert`). The upgrade is recognised by what the command is, not the file's name: an entry point by name, Layer 1's `--skip-reading-confirmation`, a script carrying `HOOKS_DAEMON_UPGRADE_HANDOFF`, or a script it cannot read (`bash "$tmp"`, stdin) run with `--project-root` or the daemon clone as an argument. The gate itself takes nothing from the caller's environment; see "The pre-deploy gate" in [LLM-UPDATE.md](../../CLAUDE/LLM-UPDATE.md).
+
+**Never denied:** reading (`ls`/`cat`/`stat`/`grep`/`find ... -print`/`test -f`, or merely reading the env var), `fetch`/`show`/`log`/`describe` on the daemon clone, a `git commit` message or non-executing `echo`/`printf` mention, a `grep` search, or a quoted-delimiter heredoc body written to a file.
+
+**Config example:**
+
+```yaml
+handlers:
+  pre_tool_use:
+    upgrade_approval_guard:
       enabled: true
       priority: 20
 ```

@@ -2984,7 +2984,7 @@ make each heredoc scan linear. The likely shape is one that re-scans the rest
 of the command for each opener. Pin it with a test: the 94 KiB fixture takes
 the whole chain under 2 s.
 
-### N37 — `resolve_venv.sh` caches an override's interpreter for later callers that set no override
+### N37 — ✅ Remedied — `resolve_venv.sh` caches an override's interpreter for later callers that set no override
 
 **Found by the Plan 00376 agent** while closing the upgrade gate's
 interpreter bypass. `scripts/lib/resolve_venv.sh` writes
@@ -2998,8 +2998,15 @@ with its own containment check. Every other caller still inherits it.
 **Candidate remedy:** never write the cache from an override-derived answer.
 Also key the cache on the absence of overrides, or skip it whenever an
 override is set. RED test: resolve with `HOOKS_DAEMON_PYTHON=/x`, then with
-no override, and the second call must not return `/x`. Being fixed on
-`worktree-d-00376`.
+no override, and the second call must not return `/x`.
+
+**Remedied on `worktree-d-00376`.** A call with either override set neither
+reads nor writes the cache, and a cache entry is written and served only when
+it names one of the daemon's own `untracked/venv-*/bin/python(3)`
+interpreters, so a cache an older resolver poisoned is ignored too. Layer 2's
+containment check stays as defence in depth. Pinned by
+`tests/integration/test_resolve_venv_override_cache.py` (four tests, all RED
+before the fix).
 
 ### N36 — `destructive_git` denies a `grep` whose search pattern is the text of a force branch delete
 

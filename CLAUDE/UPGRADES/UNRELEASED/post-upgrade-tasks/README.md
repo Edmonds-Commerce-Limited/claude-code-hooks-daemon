@@ -17,7 +17,7 @@ Any situation where a successful upgrade is **not enough on its own** — the us
 
 ## What post-upgrade tasks are NOT
 
-- **Not an automation pipeline.** There is no runner. Nothing executes these tasks automatically. They are prompts/instructions for a capable agent to read and act on.
+- **Not an automation pipeline.** Nothing executes these tasks automatically; acting on a client's repository is the upgrading agent's job, not a script's. They are prompts/instructions for a capable agent to read and act on. The agent reaches them through `hooks-daemon check-post-upgrade-tasks --from <previous> --to <new> --project-root <project>`, which lists every task of every guide the upgrade crossed and runs each task's detection, if it declares one; the upgrade skill (`upgrade.md` step 6), `CLAUDE/LLM-UPDATE.md` ("Post-Update: Carry Out Post-Upgrade Tasks") and the bare upgrade script, which reports them at the end of every upgrade, all run it. A task is reachable only if its file matches `NN-*.md` and sits in a `v{A}-to-v{B}/post-upgrade-tasks/` directory (or here, before release); `tests/integration/test_post_upgrade_tasks_are_reachable.py` fails on any that does not.
 - **Not a place for general release-note content.** Release notes go in `RELEASES/vX.Y.Z.md`. Tasks are only for things that need *post-upgrade action*.
 - **Not a substitute for `verification.sh`.** `verification.sh` confirms the upgrade itself succeeded. Post-upgrade tasks are about work *after* a successful upgrade.
 
@@ -48,6 +48,8 @@ Every task `.md` MUST start with this header block so LLMs can decide whether it
 **Applies to**: [which prior versions trigger this — e.g. "≤v3.2.1", "v3.0.0..v3.2.1", or "all" for config/workflow changes that affect everyone]
 **Idempotent**: yes | no
 ```
+
+A task MAY add the two detection fields a pre-upgrade task must carry, `**Detect**` and `**Detect in**` (see [`../pre-upgrade-tasks/README.md`](../pre-upgrade-tasks/README.md), "The detection contract"). When it does, `check-post-upgrade-tasks` scans the project and says, per task, whether it was detected and where, at `file:line`. This schema is shared with `pre-upgrade-tasks/` and enforced for both by `tests/integration/test_upgrade_task_schema.py`.
 
 Then the following sections in order:
 

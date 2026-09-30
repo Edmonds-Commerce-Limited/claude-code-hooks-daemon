@@ -84,7 +84,8 @@ daemon's own output needs reverting, and no stored data is transformed.
 
 ## Note on timing
 
-This is a POST-upgrade task because that is the channel that exists today. It
-would be better run BEFORE the upgrade lands, so no call site is ever broken —
-building that pre-upgrade surface is Plan 00376's work, which will move this
-task earlier rather than change its substance.
+The same rewrite now also runs BEFORE the upgrade lands, from
+`../pre-upgrade-tasks/01-rewrite-plan-qa-json-level-to-severity.md`: the
+pre-deploy gate names the call sites at `file:line` and needs the owner's
+approval when it finds any (Plan 00376). If that task was carried out, this one
+only confirms it.

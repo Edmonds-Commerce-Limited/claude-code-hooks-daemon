@@ -9,8 +9,8 @@ F4 makes the remaining hard-failure paths self-documenting:
 
   1. Layer 1 ``scripts/upgrade.sh`` python-discovery ``_fail`` (when even the
      F2 self-fetch cannot obtain ``python_discovery.sh``) must name actionable
-     recovery: run from the installed daemon dir, set ``HOOKS_DAEMON_PYTHON``,
-     and the ``HOOKS_DAEMON_SKIP_BOOTSTRAP=1`` escape hatch.
+     recovery: run the target's own Layer 1 out of the installed clone, and
+     the ``HOOKS_DAEMON_SKIP_BOOTSTRAP=1`` escape hatch.
   2. The skill thin-shim ``upgrade.sh`` fetch-failure path must mention the
      ``HOOKS_DAEMON_UPGRADE_REF`` pin and running the installed daemon's
      ``upgrade.sh`` directly.
@@ -74,9 +74,15 @@ def test_layer1_discovery_fail_names_recovery_hints(tmp_path: Path) -> None:
     combined = result.stdout + result.stderr
 
     assert result.returncode != 0, "Expected Layer 1 to fail with no helper available"
-    assert "HOOKS_DAEMON_PYTHON" in combined, (
-        "F4: the discovery-helper failure must mention HOOKS_DAEMON_PYTHON as a "
-        f"recovery.\n--- output ---\n{combined}"
+    # Plan 00376: the recovery is the TARGET's own Layer 1 with its lib/ beside
+    # it. HOOKS_DAEMON_PYTHON is not one: the missing helper is what reads it.
+    assert "archive VERSION scripts" in combined, (
+        "the discovery-helper failure must name the target's own Layer 1, "
+        f"extracted with its lib/.\n--- output ---\n{combined}"
+    )
+    assert "HOOKS_DAEMON_PYTHON" not in combined, (
+        "HOOKS_DAEMON_PYTHON cannot recover a missing discovery helper, which "
+        f"is the code that reads it.\n--- output ---\n{combined}"
     )
     assert "HOOKS_DAEMON_SKIP_BOOTSTRAP=1" in combined, (
         "F4: the discovery-helper failure must surface the "
@@ -84,8 +90,8 @@ def test_layer1_discovery_fail_names_recovery_hints(tmp_path: Path) -> None:
         f"--- output ---\n{combined}"
     )
     assert ".claude/hooks-daemon" in combined, (
-        "F4: the failure should point the user at running from the installed "
-        f"daemon dir.\n--- output ---\n{combined}"
+        "F4: the failure should point the user at the installed clone."
+        f"\n--- output ---\n{combined}"
     )
 
 
@@ -126,3 +132,32 @@ def test_shim_fetch_failure_names_recovery_hints(tmp_path: Path) -> None:
         "F4: the shim fetch failure should point at running the installed "
         f"daemon's upgrade.sh directly.\n--- output ---\n{combined}"
     )
+
+
+def test_shim_fetch_failure_recommends_the_targets_own_layer1(tmp_path: Path) -> None:
+    """Review MAJOR 2: the INSTALLED Layer 1 may predate the pre-deploy gate.
+
+    It then reports a stopped upgrade as success and rejects the confirmation
+    flag, so the recovery runs the target release's own Layer 1 out of the
+    clone instead, and a pinned ref must be no older than the target.
+    """
+    combined = _run_shim_with_unreachable_fetch(tmp_path).stderr
+    assert "show" in combined and ":scripts/upgrade.sh" in combined, combined
+    assert "v3.16.0" not in combined, "an old pinned ref brings back a pre-gate Layer 1"
+
+
+def _help(script: Path, *args: str) -> str:
+    result = subprocess.run(
+        [BASH, str(script), *args],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=_TIMEOUT_SECONDS,
+    )
+    return result.stdout + result.stderr
+
+
+def test_every_usage_line_names_the_confirmation_flag() -> None:
+    """Review NIT 2: the shim's --help and Layer 1's unknown-option usage."""
+    assert "--skip-reading-confirmation=" in _help(SKILL_UPGRADE_SH, "--help")
+    assert "--skip-reading-confirmation=" in _help(LAYER1_UPGRADE_SH, "--no-such-flag")

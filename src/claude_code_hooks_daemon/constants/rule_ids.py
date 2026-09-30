@@ -635,3 +635,17 @@ class RuleID:
     #: A running `pyright-langserver` started before the pyright config was
     #: last written, so it is still analysing the OLD scope.
     LSP_SERVER_STALE: str = "R-LSP-SERVER-STALE"
+
+    # ------------------------------------------------------------------
+    # upgrade_approval_guard handler (Plan 00376, review finding MAJOR 4)
+    # ------------------------------------------------------------------
+
+    #: An agent action that grants or forges the project OWNER's one-shot
+    #: upgrade approval: running `approve-upgrade` (or the standalone gate's
+    #: `approve` subcommand) itself, writing/touching a marker under
+    #: `upgrade-approvals/`, or forging a venv `.daemon-version` stamp.
+    UPGRADE_APPROVAL_AGENT_ACTION: str = "R-UPGRADE-APPROVAL-AGENT"
+
+    #: A Bash command that sets `HOOKS_DAEMON_UPGRADE_HANDOFF`, impersonating
+    #: the upgrade's Layer 1.
+    UPGRADE_APPROVAL_ENV_BYPASS: str = "R-UPGRADE-APPROVAL-ENV-BYPASS"

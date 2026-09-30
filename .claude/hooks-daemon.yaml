@@ -387,6 +387,13 @@ handlers:
       enabled: true          # worktree.merge_to_main_requires_human_approval is true (Plan 00367);
       priority: 20            # inert here since that key is false (default)
 
+    upgrade_approval_guard: # An agent cannot grant its own upgrade approval (Plan 00376)
+      enabled: true          # Denies running `approve-upgrade` itself, forging the marker
+      priority: 20            # under upgrade-approvals/ or a venv .daemon-version stamp, and
+                               # setting HOOKS_DAEMON_UPGRADE_HANDOFF, steering an upgrade
+                               # (recognised by name, flags or content) with PATH or another
+                               # tool/interpreter/venv variable, or moving the daemon clone by hand
+
     lock_file_edit_blocker: # Prevents editing package lock files
       enabled: true
       priority: 20

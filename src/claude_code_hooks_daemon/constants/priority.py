@@ -186,6 +186,13 @@ class Priority:
     # command sets are disjoint.
     MERGE_TO_MAIN_APPROVAL = 20
 
+    # Plan 00376 (review finding MAJOR 4): same band and same premise as
+    # MERGE_TO_MAIN_APPROVAL -- both stop an agent from granting an approval
+    # only a human owner may give. Command sets are disjoint (an upgrade
+    # approval marker vs. a merge to main), so relative order changes no
+    # verdict.
+    UPGRADE_APPROVAL_GUARD = 20
+
     # Plan 00275: safety-band guard on git messages, beside git_message_backtick
     # (20) and the git-workflow opinions at 19-20. Matches a disjoint hazard
     # (auto-closing keyword references), so relative order changes no verdict.

@@ -4,7 +4,8 @@ Anything in this directory is destined for the **next** upgrade guide. It accumu
 
 ## What belongs here
 
-- **`post-upgrade-tasks/`** — instructions for LLMs/humans to follow *after* they have upgraded to the next version. See `post-upgrade-tasks/README.md` for the convention.
+- **`pre-upgrade-tasks/`** — changes a project must hear about *before* the next version is deployed into it, each with a `**Detect**` pattern the upgrade gate runs over the project. See `pre-upgrade-tasks/README.md` for the detection contract.
+- **`post-upgrade-tasks/`** — instructions for LLMs/humans to follow *after* they have upgraded to the next version. See `post-upgrade-tasks/README.md` for the convention and the schema both task shapes share.
 - **`truth-changes/`** — the per-version truth-changes manifest the upgrade flow reconciles. See `truth-changes/README.md`.
 - **`config-changes/`** — config-key changes the upgrade flow previews. See `config-changes/README.md`.
 - **`release-notes/`** — one short callout per plan, in the voice of the release notes, for the release to fold in. See `release-notes/README.md`.
@@ -25,6 +26,7 @@ Any contributor, agent, or release author who identifies something that **users/
 - A bug fix lands that may have silently corrupted user files under prior versions → add a `post-upgrade-tasks/NN-audit-...md` task.
 - A default config value changes and user configs should be reviewed → add a `post-upgrade-tasks/NN-review-config-....md` task.
 - A handler's behaviour changes in a way that existing project workflows should adapt to → add a `post-upgrade-tasks/NN-adopt-....md` task.
+- A public interface a project's own tooling may consume changes shape (a CLI JSON key, a command, a flag) → add a `pre-upgrade-tasks/NN-rewrite-....md` task whose `**Detect**` pattern finds the call sites, so the gate names them before the new version lands.
 
 ## How the release skill handles this directory
 
@@ -33,7 +35,7 @@ At release time, the `/release` skill:
 1. Reads every file under `UNRELEASED/`.
 2. Moves them into the new versioned upgrade directory, e.g. `CLAUDE/UPGRADES/v3/v3.2-to-v3.3/`.
 3. Renumbers task files if the versioned directory already has tasks from earlier drafts.
-4. Links the new upgrade guide's `post-upgrade-tasks/README.md` from `RELEASES/vX.Y.Z.md`, and folds every `release-notes/` callout into those notes before moving the files.
+4. Links the new upgrade guide's `post-upgrade-tasks/README.md` from `RELEASES/vX.Y.Z.md`, names any `critical` pre-upgrade task among the breaking changes, and folds every `release-notes/` callout into those notes before moving the files.
 5. Leaves `UNRELEASED/` empty (except for its own `README.md` and each shape's `README.md` scaffolding), ready for the next release cycle.
 
 See `CLAUDE/development/RELEASING.md` for the authoritative release process.

@@ -23,9 +23,26 @@
 
 set -euo pipefail
 
+# Plan 00376 fresh review BLOCKER 1: a function exported into the environment
+# (BASH_FUNC_*) would shadow the very tools the pre-deploy gate relies on, and
+# this script defines every function it runs itself.
+while read -r _ _ _imported_function; do
+    unset -f "$_imported_function"
+done < <(declare -F)
+
 # Resolve script directory for sourcing library modules
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 INSTALL_LIB_DIR="$SCRIPT_DIR/install"
+
+# Plan 00376 review2 MAJOR 1: sanitise the inherited environment before any
+# other library is sourced. A hostile BASH_ENV/ENV that already ran at THIS
+# shell's own startup cannot be undone, but resetting it here stops it (and
+# every other steering variable) from reaching a single subshell or child
+# process any library sourced below goes on to spawn. See
+# install/env_sanitise.sh for the full rationale per variable family.
+# shellcheck source=install/env_sanitise.sh
+source "$INSTALL_LIB_DIR/env_sanitise.sh"
+_sanitise_layer2_env
 
 # Source all library modules
 # shellcheck source=install/output.sh
@@ -62,6 +79,15 @@ source "$INSTALL_LIB_DIR/config_preserve.sh"
 source "$INSTALL_LIB_DIR/upgrade_transition.sh"
 # shellcheck source=install/branch_install.sh
 source "$INSTALL_LIB_DIR/branch_install.sh"
+# shellcheck source=lib/python_discovery.sh
+source "$SCRIPT_DIR/lib/python_discovery.sh"
+
+# Plan 00376 review4 MAJOR 2: a library may change PATH when it is sourced
+# (venv.sh prepends $HOME/.local/bin for the install scripts), so the trusted
+# PATH is set again once the last one has loaded. Every step before the gate
+# runs its tools from here; uv is reached by name through _venv_uv.
+PATH="$(_gate_trusted_path)"
+export PATH
 
 # ============================================================
 # Argument parsing
@@ -119,6 +145,442 @@ _resolve_install_stamp() {
     print_branch_install_banner "$TRACK_REF" "$TRACK_REASON" "$INSTALL_STAMP"
 }
 
+# Plan 00376 review MAJOR 4: the handoff from Layer 1. Layer 1 writes a
+# one-shot file in a private temp dir it created, holding its own PID and the
+# commit it moved the daemon dir from, and passes the PATH. It counts only if
+# this script's parent wrote it, as this user, and it is deleted on reading:
+# an exported or inherited HOOKS_DAEMON_UPGRADE_HANDOFF names a file some
+# other process wrote, and is ignored. Only a valid handoff makes the flags in
+# UPGRADE_FLAGS and the handed-over ref count.
+UPGRADE_CALLER="direct"
+HANDOFF_PREVIOUS_REF=""
+
+# _read_handoff() - Validate and consume Layer 1's handoff file. Returns 1
+# when there is none or it is not genuine.
+_read_handoff() {
+    local path="${HOOKS_DAEMON_UPGRADE_HANDOFF:-}"
+    unset HOOKS_DAEMON_UPGRADE_HANDOFF
+    if [ -z "$path" ]; then
+        return 1
+    fi
+    if [ -L "$path" ] || [ ! -f "$path" ] || [ ! -O "$path" ] || [ ! -O "$(dirname "$path")" ]; then
+        print_warning "Ignoring the upgrade handoff $path: it is not a file this user created in a directory this user owns."
+        return 1
+    fi
+    local writer_pid="" previous_ref=""
+    if ! read -r writer_pid previous_ref < "$path"; then
+        print_warning "Ignoring the upgrade handoff $path: it could not be read."
+        rm -f -- "$path"
+        return 1
+    fi
+    rm -f -- "$path"
+    if [ "$writer_pid" != "$PPID" ]; then
+        print_warning "Ignoring the upgrade handoff $path: process $writer_pid wrote it, not this script's caller ($PPID)."
+        return 1
+    fi
+    HANDOFF_PREVIOUS_REF="$previous_ref"
+    return 0
+}
+
+if _read_handoff; then
+    UPGRADE_CALLER="layer1"
+elif [ -n "${HOOKS_DAEMON_UPGRADE_PREVIOUS_VERSION:-}" ] && [ -z "${HOOKS_DAEMON_UPGRADE_SECOND_PASS:-}" ]; then
+    # A Layer 1 that hands the previous version over but no handoff file
+    # predates the gate: it cannot pass the acknowledgement, and it reports
+    # success whatever this script exits with (review MAJOR 2).
+    UPGRADE_CALLER="pre-gate-layer1"
+fi
+
+# The caller confirms it has read the gate's listing with
+# --skip-reading-confirmation=<digest>, the digest the stop printed. A bare
+# flag is passed on as an empty acknowledgement, which matches no listing.
+# Nothing else confirms it: there is deliberately no "no terminal, so nobody
+# to ask" inference.
+READING_ACKNOWLEDGED=false
+READING_ACKNOWLEDGEMENT=""
+
+# _take_acknowledgement() - Record the acknowledgement among the given words.
+_take_acknowledgement() {
+    local word
+    for word in "$@"; do
+        case "$word" in
+            --skip-reading-confirmation=*)
+                READING_ACKNOWLEDGED=true
+                READING_ACKNOWLEDGEMENT="${word#*=}"
+                ;;
+            --skip-reading-confirmation)
+                READING_ACKNOWLEDGED=true
+                READING_ACKNOWLEDGEMENT=""
+                ;;
+        esac
+    done
+}
+
+_take_acknowledgement "${@:4}"
+if [ "$UPGRADE_CALLER" = "layer1" ] && [ -n "${UPGRADE_FLAGS:-}" ]; then
+    read -r -a _LAYER1_FLAGS <<< "$UPGRADE_FLAGS"
+    if [ "${#_LAYER1_FLAGS[@]}" -gt 0 ]; then
+        _take_acknowledgement "${_LAYER1_FLAGS[@]}"
+    fi
+fi
+
+# The gate's stop codes (install/upgrade_gate.py GateVerdict.exit_code).
+GATE_NEEDS_ACKNOWLEDGEMENT=3
+GATE_NEEDS_APPROVAL=4
+# A gate that has not decided in this long has hung (a pathological Detect
+# pattern on a long line): the timeout is a crash, so it stops the upgrade.
+GATE_TIMEOUT_SECONDS=300
+GATE_TIMED_OUT=124
+# GATE_SAFE_PATH, _gate_dir_is_trusted(), _gate_trusted_path() and
+# _gate_tool() are defined in install/env_sanitise.sh, sourced before any
+# other library above -- _sanitise_layer2_env() needs the trusted path to
+# reset PATH at entry, and Layer 1 (upgrade.sh) needs _gate_tool to resolve
+# the `bash` it launches Layer 2 with from the same trusted locations, so
+# those four moved there rather than staying here. Every function below that
+# decides or feeds the gate resolves its tools from `_gate_trusted_path`, the
+# entries of GATE_SAFE_PATH that `_gate_dir_is_trusted` accepts, never the
+# raw GATE_SAFE_PATH variable directly.
+
+# The owner's approval the gate accepted; removed once the upgrade completes,
+# so a failure after the gate does not spend it.
+APPROVAL_MARKER_USED=""
+
+# _installed_release_from_docs() - The release .claude/HOOKS-DAEMON.md was
+# generated by, or nothing: the version this project last deployed.
+_installed_release_from_docs() {
+    local PATH
+    PATH="$(_gate_trusted_path)"
+    local doc="$PROJECT_ROOT/.claude/HOOKS-DAEMON.md"
+    if [ ! -f "$doc" ]; then
+        return 0
+    fi
+    awk 'match($0, /Generated on [^(]*\(v[0-9]+\.[0-9]+\.[0-9]+\)/) { s = substr($0, RSTART, RLENGTH); sub(/.*\(v/, "", s); sub(/\)$/, "", s); print s; exit }' "$doc"
+}
+
+# _restore_target() - Print the ref of the version this project has INSTALLED,
+# or nothing when it cannot be told.
+#
+# The venv stamp first (a branch stamp ends in its commit, a release stamp is
+# its tag), then the release HOOKS-DAEMON.md names, then the ref a genuine
+# Layer 1 moved the dir from. Never the checkout's own HEAD: on a fresh clone,
+# a manual checkout or a re-run it already sits on the target.
+_restore_target() {
+    local PATH
+    PATH="$(_gate_trusted_path)"
+    local candidate="" release=""
+    if [[ "$INSTALLED_VERSION" == *+* ]]; then
+        candidate="${INSTALLED_VERSION##*.}"
+    elif [ -n "$INSTALLED_VERSION" ]; then
+        candidate="v${INSTALLED_VERSION#v}"
+    else
+        release="$(_installed_release_from_docs)"
+        if [ -n "$release" ]; then
+            candidate="v$release"
+        fi
+    fi
+    if [ -n "$candidate" ] && git -C "$DAEMON_DIR" rev-parse --verify --quiet "${candidate}^{commit}" > /dev/null; then
+        echo "$candidate"
+        return 0
+    fi
+    if [ -n "$HANDOFF_PREVIOUS_REF" ] && git -C "$DAEMON_DIR" rev-parse --verify --quiet "${HANDOFF_PREVIOUS_REF}^{commit}" > /dev/null; then
+        echo "$HANDOFF_PREVIOUS_REF"
+    fi
+}
+
+# _warn_about_a_pre_gate_layer1() - Say what a pre-gate Layer 1 cannot.
+_warn_about_a_pre_gate_layer1() {
+    if [ "$UPGRADE_CALLER" != "pre-gate-layer1" ]; then
+        return 0
+    fi
+    print_warning "THE UPGRADE DID NOT COMPLETE. The upgrade.sh that called this script predates the pre-deploy gate: it will report success (exit 0) although nothing was deployed, and it cannot pass --skip-reading-confirmation."
+    print_warning "Run $TARGET_VERSION's own upgrade.sh instead (it knows the gate):"
+    echo "  tmp=\"\$(mktemp)\" && git -C \"$DAEMON_DIR\" show \"$TARGET_VERSION:scripts/upgrade.sh\" > \"\$tmp\" && bash \"\$tmp\" --project-root \"$PROJECT_ROOT\" $TARGET_VERSION"
+}
+
+# abort_before_deploy() - Stop the upgrade with nothing deployed (Plan 00376
+# Tasks 1.2 and 3.3). Args: exit code, reason. Always exits non-zero.
+#
+# The daemon dir goes back to the version this project has INSTALLED
+# (_restore_target) rather than staying on the target, on every route, so the
+# next run meets the same gate and the old venv never runs new source. Before
+# the gate nothing else has changed -- it runs before ensure_venv -- so the
+# restore is the whole undo. A direct call's slow path is already covered by
+# the snapshot rollback in the EXIT trap, so there it only has to exit.
+abort_before_deploy() {
+    local PATH
+    PATH="$(_gate_trusted_path)"
+    local exit_code="$1"
+    local reason="$2"
+    if [ "$UPGRADE_STARTED" = true ]; then
+        print_error "Upgrade $reason. Rolling back to the pre-upgrade state; nothing new was deployed."
+        exit "$exit_code"
+    fi
+    local restore_ref
+    restore_ref="$(_restore_target)"
+    if [ -z "$restore_ref" ]; then
+        print_error "Upgrade $reason. Nothing was deployed into $PROJECT_ROOT and the venv was not touched, but the version this project had installed cannot be told (no venv stamp, no version in .claude/HOOKS-DAEMON.md), so the daemon dir is still on $TARGET_VERSION. Put it back on the release you had installed before anything else runs: git -C \"$DAEMON_DIR\" reset --hard <that release's tag>"
+        _warn_about_a_pre_gate_layer1
+        exit "$exit_code"
+    fi
+    if [ "$(git -C "$DAEMON_DIR" rev-parse "${restore_ref}^{commit}")" = "$(git -C "$DAEMON_DIR" rev-parse HEAD)" ]; then
+        print_info "The daemon dir is on the installed version ($restore_ref)."
+    elif git -C "$DAEMON_DIR" reset --hard --quiet "$restore_ref"; then
+        print_success "Daemon dir restored to the installed version ($restore_ref)."
+    else
+        print_error "Upgrade $reason, and the daemon dir could not be restored to $restore_ref (git's error is above). It is still on $TARGET_VERSION with nothing deployed; restore it with: git -C \"$DAEMON_DIR\" reset --hard $restore_ref"
+        _warn_about_a_pre_gate_layer1
+        exit 1
+    fi
+    print_error "Upgrade $reason. Nothing was deployed into $PROJECT_ROOT; the installed daemon starts again on the next hook event."
+    _warn_about_a_pre_gate_layer1
+    exit "$exit_code"
+}
+
+# consume_used_approval() - Remove the owner's approval once the upgrade it
+# let through has completed (one approval, one upgrade).
+consume_used_approval() {
+    if [ -z "$APPROVAL_MARKER_USED" ]; then
+        return 0
+    fi
+    rm -f -- "$APPROVAL_MARKER_USED"
+    print_info "The owner's approval was used by this upgrade and removed ($APPROVAL_MARKER_USED)."
+}
+
+# _target_release() - Print the release the checked-out target carries.
+#
+# The release part of INSTALL_STAMP: the tag, or for a branch install the
+# pyproject version its stamp starts with. A direct call naming a commit no tag
+# describes has a sha for a stamp, so the checkout's own version.py answers
+# instead; "unknown" if even that is unreadable, which the gate treats as a
+# range it cannot read.
+_target_release() {
+    local PATH
+    PATH="$(_gate_trusted_path)"
+    local release="${INSTALL_STAMP%%+*}"
+    if [[ "$release" =~ ^[vV]?[0-9]+(\.[0-9]+)*$ ]]; then
+        echo "$release"
+        return 0
+    fi
+    release="$(awk -F'"' '/^__version__[[:space:]]*=/ { print $2; exit }' \
+        "$DAEMON_DIR/src/claude_code_hooks_daemon/version.py")"
+    echo "${release:-unknown}"
+}
+
+# The oldest Python the standalone gate runs on (datetime.UTC).
+GATE_PYTHON_FLOOR="3.11"
+GATE_PYTHON=""
+
+# _pick_gate_python() - Set GATE_PYTHON to a Python found only in a trusted
+# GATE_SAFE_PATH location (review2 MAJOR 2: root-owned, not group- or
+# world-writable); returns 1 when there is none.
+#
+# Never HOOKS_DAEMON_PYTHON, never the caller's PATH, and never the installed
+# venv: that venv lives in the project, where an agent can write, and a `.pth`
+# in its site-packages runs inside the gate's own process even under -I. The
+# override still chooses the interpreter the target's venv is built with.
+_pick_gate_python() {
+    local PATH
+    PATH="$(_gate_trusted_path)"
+    GATE_PYTHON="$(unset HOOKS_DAEMON_PYTHON HOOKS_DAEMON_VENV_PATH; find_latest_python "$GATE_PYTHON_FLOOR" "$DAEMON_DIR/pyproject.toml")" || GATE_PYTHON=""
+    [ -n "$GATE_PYTHON" ]
+}
+
+# run_pre_deploy_phase() - The pre-deploy gate (Plan 00376 Tasks 1.1, 3.1-3.3).
+#
+# Runs once the daemon dir sits on the target and BEFORE ensure_venv rebuilds
+# the venv for it, on every route: Layer 1 checks the target out before it
+# calls this script, so it arrives on the idempotent path; a direct call
+# arrives after Step 6. Earlier, the pre-checkout tree holds no guide for the
+# version being installed; later, the venv is already the target's and a stop
+# could no longer leave the install as it was.
+#
+# install/upgrade_gate.py prints the reading list, every pre-upgrade task
+# detected in the project, and any reason the change needs the owner; then it
+# decides (see its module docstring). It runs through the stdlib-only
+# standalone entry because the target's venv does not exist yet. A stop goes
+# through abort_before_deploy. A gate that crashes also stops the upgrade: an
+# undecided gate must not wave an upgrade through.
+#
+# The FROM side is what is INSTALLED, never the checkout (review MAJOR 1): the
+# gate reads the venv stamp passed here, else .claude/HOOKS-DAEMON.md, and
+# with neither it treats the range as unknown and sends it to the owner. The
+# TARGET side is the release part of INSTALL_STAMP, which for a branch install
+# is the pyproject version the branch carries. When the venv already carries
+# the target's exact stamp -- a re-run, or a direct call's second pass after
+# the first restamped it -- the gate has nothing new to say and proceeds.
+# There is no environment switch that skips it.
+#
+# Nothing the caller's environment chooses runs it or speaks for it (fresh
+# review BLOCKER 1): it runs under `env -i` with GATE_SAFE_PATH, through the
+# timeout and Python found there, and it writes its verdict, headed by a
+# nonce drawn here, into a directory created here. A zero exit counts only with
+# that file: a stdout line is what any wrapper process can print.
+run_pre_deploy_phase() {
+    local PATH
+    PATH="$(_gate_trusted_path)"
+    local target_semver
+    target_semver="$(_target_release)"
+    local gate_script="$DAEMON_DIR/src/claude_code_hooks_daemon/install/upgrade_gate_standalone.py"
+    local undecided="stopped: the pre-deploy gate could not run, and an undecided gate does not let an upgrade through"
+    if ! _pick_gate_python; then
+        print_error "No Python $GATE_PYTHON_FLOOR+ interpreter for the pre-deploy gate in a system location ($GATE_SAFE_PATH). The gate never runs on an interpreter an environment variable, the caller's PATH or the project's own venv names; the user installs a Python $GATE_PYTHON_FLOOR+ in one of those locations (or links one there)."
+        abort_before_deploy 1 "$undecided"
+    fi
+    local env_bin="" od_bin="" timeout_bin=""
+    if ! env_bin="$(_gate_tool env)" || ! od_bin="$(_gate_tool od)"; then
+        print_error "The pre-deploy gate needs env and od from a system location ($GATE_SAFE_PATH)."
+        abort_before_deploy 1 "$undecided"
+    fi
+    local nonce="" verdict_dir=""
+    nonce="$("$od_bin" -An -N16 -tx1 /dev/urandom)" || nonce=""
+    nonce="${nonce//[[:space:]]/}"
+    # -p /tmp: review2 MINOR 1. A bare `mktemp -d` honours an inherited
+    # TMPDIR, which the upgrade guard denies only on the SAME command as the
+    # upgrade -- an earlier `export TMPDIR=...` is not that. Fixing the
+    # directory here removes the inherited value from this decision.
+    if [ -z "$nonce" ] || ! verdict_dir="$(mktemp -d -p /tmp)"; then
+        print_error "Could not set up the pre-deploy gate's verdict file (no /dev/urandom, or mktemp failed)."
+        abort_before_deploy 1 "$undecided"
+    fi
+    local verdict_file="$verdict_dir/verdict"
+    local -a gate_args=(
+        --daemon-dir "$DAEMON_DIR"
+        --project-root "$PROJECT_ROOT"
+        --installed-stamp "$INSTALLED_VERSION"
+        --to "$target_semver"
+        --target-stamp "$INSTALL_STAMP"
+        --target-ref "$TARGET_VERSION"
+    )
+    if [ "$BRANCH_INSTALL_STATE" = "armed" ]; then
+        gate_args+=(--include-unreleased)
+    fi
+    if [ "$READING_ACKNOWLEDGED" = true ]; then
+        gate_args+=(--acknowledgement "$READING_ACKNOWLEDGEMENT")
+    fi
+
+    gate_args+=(--verdict-file "$verdict_file" --nonce "$nonce")
+
+    # env -i: no caller variable reaches the gate (no PATH, PYTHON*, GIT_*,
+    # LD_* or exported function). -I -S: no site module, so no site-packages
+    # and no `.pth` code; the gate is stdlib-only.
+    local -a runner=("$env_bin" -i "PATH=$GATE_SAFE_PATH" "LANG=C.UTF-8")
+    if [ -n "${HOME:-}" ]; then
+        runner+=("HOME=$HOME")
+    fi
+    if timeout_bin="$(_gate_tool timeout)"; then
+        runner+=("$timeout_bin" "$GATE_TIMEOUT_SECONDS")
+    else
+        print_warning "No timeout command in a system location, so the gate runs without a time limit."
+    fi
+    print_info "Pre-deploy gate: what upgrading to $target_semver changes (run by $GATE_PYTHON)..."
+    local gate_exit=0
+    "${runner[@]}" "$GATE_PYTHON" -I -S "$gate_script" "${gate_args[@]}" || gate_exit=$?
+
+    # A zero exit counts only with the verdict file the gate wrote, headed by
+    # this run's nonce: anything that exits 0 having decided nothing does not
+    # wave the upgrade through.
+    local nonce_line="" line="" verdict=""
+    if [ -f "$verdict_file" ] && [ ! -L "$verdict_file" ] && [ -O "$verdict_file" ]; then
+        {
+            IFS= read -r nonce_line || nonce_line=""
+            while IFS= read -r line; do
+                case "$line" in
+                    verdict=*) verdict="${line#verdict=}" ;;
+                    approval-marker=*) APPROVAL_MARKER_USED="${line#approval-marker=}" ;;
+                esac
+            done
+        } < "$verdict_file"
+    fi
+    rm -rf -- "$verdict_dir"
+    if [ "$gate_exit" -eq 0 ] && { [ "$nonce_line" != "nonce=$nonce" ] || [ "$verdict" != "proceed" ]; }; then
+        print_error "The pre-deploy gate exited 0 without writing this run's verdict; $GATE_PYTHON did not run the gate."
+        APPROVAL_MARKER_USED=""
+        gate_exit=1
+    fi
+    case "$gate_exit" in
+        0) ;;
+        "$GATE_NEEDS_ACKNOWLEDGEMENT" | "$GATE_NEEDS_APPROVAL")
+            abort_before_deploy "$gate_exit" "stopped by the pre-deploy gate (see above)"
+            ;;
+        "$GATE_TIMED_OUT")
+            print_error "The pre-deploy gate did not decide within ${GATE_TIMEOUT_SECONDS}s."
+            abort_before_deploy 1 "stopped: the pre-deploy gate could not decide, and an undecided gate does not let an upgrade through"
+            ;;
+        *)
+            print_error "The pre-deploy gate itself failed (exit $gate_exit) - its error is above."
+            abort_before_deploy 1 "stopped: the pre-deploy gate could not decide, and an undecided gate does not let an upgrade through"
+            ;;
+    esac
+}
+
+# run_config_compatibility_check() - Report whether the project's config names
+# handlers the target removed or renamed (Plan 00376 Task 1.1). Needs the
+# target's venv, so it runs after verify_venv and before the first deploy.
+# Report only: the handler names it flags are fixed in the config afterwards.
+#
+# Every value reaches Python as an ARGV entry, never spliced into its source.
+run_config_compatibility_check() {
+    if [ -n "${HOOKS_DAEMON_COMPAT_CHECK_DONE:-}" ]; then
+        return 0
+    fi
+    if [ "$CURRENT_VERSION" = "unknown" ]; then
+        print_info "Previous version unknown: skipping the config compatibility check"
+        return 0
+    fi
+
+    local target_semver
+    target_semver="$(_target_release)"
+    local compat_exit=0
+    if [ -f "$TARGET_CONFIG" ]; then
+        print_info "Checking config compatibility with target version..."
+        "$VENV_PYTHON" - "$DAEMON_DIR" "$TARGET_CONFIG" "$CURRENT_VERSION" "$target_semver" \
+            <<'COMPAT_CHECK_PY' || compat_exit=$?
+import sys
+from pathlib import Path
+
+import yaml
+
+from claude_code_hooks_daemon.install.upgrade_compatibility import CompatibilityChecker
+
+daemon_dir = Path(sys.argv[1])
+target_config = Path(sys.argv[2])
+current_version = sys.argv[3]
+target_version = sys.argv[4]
+
+changelog_path = daemon_dir / "CHANGELOG.md"
+if not changelog_path.exists():
+    print("WARNING: CHANGELOG.md not found, skipping compatibility check", file=sys.stderr)
+    sys.exit(0)
+
+with target_config.open() as handle:
+    user_config = yaml.safe_load(handle)
+
+checker = CompatibilityChecker(
+    changelog_path=changelog_path,
+    current_version=current_version,
+    target_version=target_version,
+)
+report = checker.check_compatibility(user_config)
+
+if report.is_compatible:
+    print("✓ All handlers compatible with target version", file=sys.stderr)
+else:
+    print(checker.generate_user_friendly_report(report), file=sys.stderr)
+    print(
+        f"Your config references handlers that are incompatible with {target_version}. "
+        "The upgrade continues; fix these in .claude/hooks-daemon.yaml once it completes.",
+        file=sys.stderr,
+    )
+COMPAT_CHECK_PY
+        if [ "$compat_exit" -ne 0 ]; then
+            print_error "Config compatibility check crashed (exit $compat_exit) - traceback above."
+            print_warning "Continuing without a compatibility verdict; review $TARGET_CONFIG after the upgrade."
+        fi
+    fi
+
+    export HOOKS_DAEMON_COMPAT_CHECK_DONE=1
+}
+
 # Derived paths
 # v3.7.0+ venvs are fingerprint-keyed; v3.8.1 added a scan-fallback for the
 # fingerprint-mismatch case (installer used python3.13, resolver's python3
@@ -147,10 +609,40 @@ fi
 # venv stamped v3.38.0" case). Empty when there is no existing stamped venv
 # (fresh install / pre-stamp build) — the transition helpers treat empty as
 # "installing".
+#
+# Plan 00376: that venv is resolved with HOOKS_DAEMON_PYTHON and
+# HOOKS_DAEMON_VENV_PATH unset. Both are operator overrides for which
+# interpreter runs the daemon, but either could name a "venv" whose stamp
+# already says the target, and the pre-deploy gate takes that stamp as the
+# installed version. VENV_PYTHON above keeps honouring them for daemon control.
+# The answer counts only when it is one of THIS daemon dir's own fingerprint
+# venvs (untracked/venv-*), compared as physical paths: defence in depth over
+# the resolver's own cache rule (Plan 00466 N37). Resolved with GATE_SAFE_PATH,
+# like everything else that feeds the gate.
 INSTALLED_VERSION=""
-if [ -n "$VENV_PYTHON" ]; then
-    INSTALLED_VERSION="$(get_venv_version "$(dirname "$(dirname "$VENV_PYTHON")")")"
-fi
+
+# _read_installed_version() - Set INSTALLED_VERSION.
+_read_installed_version() {
+    local PATH
+    PATH="$(_gate_trusted_path)"
+    local venv_python="" venv_real="" venv_dir=""
+    venv_python="$(unset HOOKS_DAEMON_PYTHON HOOKS_DAEMON_VENV_PATH; resolve_existing_venv_python "$DAEMON_DIR")" || venv_python=""
+    if [ -z "$venv_python" ]; then
+        return 0
+    fi
+    venv_dir="$(dirname "$(dirname "$venv_python")")"
+    venv_real="$(cd "$venv_dir" && pwd -P)" || venv_real=""
+    case "$venv_real" in
+        "$(cd "$DAEMON_DIR" && pwd -P)"/untracked/venv-*) ;;
+        *)
+            print_warning "Not reading the installed version from $venv_python: it is not one of $DAEMON_DIR's own venvs."
+            return 0
+            ;;
+    esac
+    INSTALLED_VERSION="$(get_venv_version "$venv_dir")"
+}
+_read_installed_version
+
 EXAMPLE_CONFIG="$DAEMON_DIR/.claude/hooks-daemon.yaml.example"
 SETTINGS_JSON_SOURCE="$DAEMON_DIR/.claude/settings.json"
 TARGET_CONFIG="$PROJECT_ROOT/.claude/hooks-daemon.yaml"
@@ -341,6 +833,11 @@ if [ "$ROLLBACK_REF" = "$TARGET_VERSION" ] || { [ -n "$TARGET_COMMIT" ] && [ "$T
     print_success "$(upgrade_transition_headline "$INSTALLED_VERSION" "$INSTALL_STAMP")"
     print_info "Running idempotent deployment steps to ensure files are current..."
 
+    # Every Layer 1 upgrade arrives here with the target checked out: the gate
+    # runs now, before ensure_venv touches anything, so a stop leaves only the
+    # checkout to restore.
+    run_pre_deploy_phase
+
     # Plan 00099: ensure_venv uses a fingerprint-keyed venv path so concurrent
     # environments (container vs host, different Pythons) don't clobber each
     # other. Handles stale/missing stamps internally (recreate+restamp).
@@ -353,6 +850,10 @@ if [ "$ROLLBACK_REF" = "$TARGET_VERSION" ] || { [ -n "$TARGET_COMMIT" ] && [ "$T
     if ! verify_venv "$VENV_PYTHON" "$DAEMON_DIR"; then
         fail_fast "Virtual environment verification failed"
     fi
+
+    # The target's own compatibility check needs its venv, and runs before the
+    # first deploy.
+    run_config_compatibility_check
 
     # Plan 00099: clean up pre-v3.7.0 legacy venv on idempotent re-runs too.
     # The full upgrade path (Step 7) already does this, but multi-host projects
@@ -502,6 +1003,7 @@ FASTPATH_RELAY_PY
         print_warning "Failed to regenerate handler docs (non-fatal; run 'hooks-daemon regenerate-docs')"
     fi
 
+    consume_used_approval
     print_success "$(upgrade_transition_summary "$INSTALLED_VERSION" "$INSTALL_STAMP")"
     if [ "$BRANCH_INSTALL_STATE" = "armed" ]; then
         print_branch_install_banner "$TRACK_REF" "$TRACK_REASON" "$INSTALL_STAMP"
@@ -511,99 +1013,17 @@ fi
 
 # Run pre-upgrade safety checks if venv exists
 if [ -f "$VENV_PYTHON" ]; then
-    run_pre_install_checks "$PROJECT_ROOT" "$VENV_PYTHON" "$DAEMON_DIR" "false" || true
-fi
-
-# Pre-upgrade compatibility check (validates BEFORE any changes)
-#
-# The checker writes its whole report to stderr, so nothing here captures its
-# output — it streams straight to the operator. The previous shape captured it
-# with `2>&1` into a variable that was only echoed on failure, and under
-# `set -e` a non-zero exit from that command substitution killed the script
-# before the echo ever ran: an incompatible config aborted the upgrade with no
-# explanation at all, and the --force branch below was unreachable.
-#
-# Every value the checker needs arrives as an ARGV entry, never spliced into
-# the generated Python source (a quote in any path or version string produced
-# a SyntaxError, which the blanket `except Exception` then reported as a vague
-# one-line warning).
-#
-# Exit codes from the embedded checker:
-#   0                          - compatible, or nothing to check
-#   COMPAT_INCOMPATIBLE_STATUS - incompatibilities found; honour --force
-#   anything else              - the checker itself crashed. Its traceback is
-#                                already on stderr; warn loudly and continue,
-#                                preserving the long-standing contract that a
-#                                broken check must not block an upgrade.
-COMPAT_INCOMPATIBLE_STATUS=3
-if [ -f "$TARGET_CONFIG" ] && [ -f "$VENV_PYTHON" ]; then
-    print_info "Checking config compatibility with target version..."
-
-    COMPAT_EXIT=0
-    "$VENV_PYTHON" - "$DAEMON_DIR" "$TARGET_CONFIG" "$CURRENT_VERSION" "$TARGET_VERSION" \
-        "$COMPAT_INCOMPATIBLE_STATUS" <<'COMPAT_CHECK_PY' || COMPAT_EXIT=$?
-import sys
-from pathlib import Path
-
-import yaml
-
-from claude_code_hooks_daemon.install.upgrade_compatibility import CompatibilityChecker
-
-daemon_dir = Path(sys.argv[1])
-target_config = Path(sys.argv[2])
-current_version = sys.argv[3]
-target_version = sys.argv[4]
-incompatible_status = int(sys.argv[5])
-
-changelog_path = daemon_dir / "CHANGELOG.md"
-if not changelog_path.exists():
-    print("WARNING: CHANGELOG.md not found, skipping compatibility check", file=sys.stderr)
-    sys.exit(0)
-
-with target_config.open() as handle:
-    user_config = yaml.safe_load(handle)
-
-checker = CompatibilityChecker(
-    changelog_path=changelog_path,
-    current_version=current_version,
-    target_version=target_version,
-)
-
-report = checker.check_compatibility(user_config)
-
-if report.is_compatible:
-    print("✓ All handlers compatible with target version", file=sys.stderr)
-    sys.exit(0)
-
-print(checker.generate_user_friendly_report(report), file=sys.stderr)
-print("", file=sys.stderr)
-print("INCOMPATIBILITIES DETECTED", file=sys.stderr)
-print("", file=sys.stderr)
-print(
-    f"Your config references handlers that are incompatible with {target_version}.",
-    file=sys.stderr,
-)
-print("", file=sys.stderr)
-print("OPTIONS:", file=sys.stderr)
-print("  1. Fix config issues manually and re-run upgrade", file=sys.stderr)
-print("  2. Use --force to proceed anyway (config will be updated automatically)", file=sys.stderr)
-print("", file=sys.stderr)
-sys.exit(incompatible_status)
-COMPAT_CHECK_PY
-
-    if [ "$COMPAT_EXIT" -eq "$COMPAT_INCOMPATIBLE_STATUS" ]; then
-        # --force is accepted from either channel the old code honoured: the
-        # script's own arguments, and the UPGRADE_FLAGS env var Layer 1 sets.
-        if [[ "$*" == *"--force"* ]] || [[ "${UPGRADE_FLAGS:-}" == *"--force"* ]]; then
-            print_warning "Proceeding despite incompatibilities (--force detected)"
-        else
-            fail_fast "Config compatibility check failed. Use --force to proceed anyway."
-        fi
-    elif [ "$COMPAT_EXIT" -ne 0 ]; then
-        print_error "Config compatibility check crashed (exit $COMPAT_EXIT) - traceback above."
-        print_warning "Continuing without a compatibility verdict; review $TARGET_CONFIG after the upgrade."
+    # fail_on_error=false: a non-zero return is the documented "problems were
+    # found and printed" signal, and is non-fatal here by design.
+    if ! run_pre_install_checks "$PROJECT_ROOT" "$VENV_PYTHON" "$DAEMON_DIR" "false"; then
+        print_warning "Pre-install checks reported problems (non-fatal, see above)"
     fi
 fi
+
+# The gate and the config compatibility check are NOT run here: this tree is
+# still the version being replaced on a direct call, so neither the target's
+# guides nor its handlers exist yet. run_pre_deploy_phase and
+# run_config_compatibility_check run once the target is checked out.
 
 # ============================================================
 # Step 3: Create state snapshot
@@ -733,135 +1153,12 @@ BREAKING_CHANGES_PY
 fi
 
 # ============================================================
-# Step 5a: Upgrade guide reading enforcement
+# Step 5a: Upgrade-guide reading list -- see run_pre_deploy_phase
 # ============================================================
 
-# Detect version jump and list required upgrade guides.
-#
-# Nothing is captured here: the checker's report goes to stderr and streams
-# straight to the operator. The previous shape captured stdout+stderr into
-# GUIDE_CHECK purely to grep it for a sentinel string, which meant the
-# "REQUIRED READING" report the user was meant to act on was swallowed by the
-# capture and never printed. The sentinel is now an EXIT CODE, and every value
-# the checker needs is an ARGV entry rather than text spliced into the
-# generated Python source.
-GUIDES_FOUND_STATUS=4
-UPGRADE_GUIDES_LIST="/tmp/upgrade_guides_list.txt"
-if [ "$CURRENT_VERSION" != "unknown" ] && [ -f "$VENV_PYTHON" ]; then
-    print_info "Checking for required upgrade guides..."
-
-    GUIDE_CHECK_EXIT=0
-    "$VENV_PYTHON" - "$DAEMON_DIR" "$CURRENT_VERSION" "$TARGET_VERSION" \
-        "$UPGRADE_GUIDES_LIST" "$GUIDES_FOUND_STATUS" <<'GUIDE_CHECK_PY' || GUIDE_CHECK_EXIT=$?
-import sys
-from pathlib import Path
-
-from claude_code_hooks_daemon.install.upgrade_compatibility import CompatibilityChecker
-
-daemon_dir = Path(sys.argv[1])
-current_version = sys.argv[2]
-target_version = sys.argv[3]
-guides_list_path = Path(sys.argv[4])
-guides_found_status = int(sys.argv[5])
-
-changelog_path = daemon_dir / "CHANGELOG.md"
-if not changelog_path.exists():
-    sys.exit(0)
-
-checker = CompatibilityChecker(
-    changelog_path=changelog_path,
-    current_version=current_version,
-    target_version=target_version,
-)
-
-guides = checker.suggest_upgrade_guides(daemon_dir)
-
-if not guides:
-    sys.exit(0)
-
-print("", file=sys.stderr)
-print("📚 REQUIRED READING: Upgrade Guides", file=sys.stderr)
-print("=" * 70, file=sys.stderr)
-print(f"Upgrading from v{checker.current_version} to v{checker.target_version}", file=sys.stderr)
-print(f"You are skipping {len(guides)} intermediate version(s).", file=sys.stderr)
-print("", file=sys.stderr)
-print("Please review the following upgrade guides:", file=sys.stderr)
-for guide in guides:
-    print(f"  • {guide}", file=sys.stderr)
-print("", file=sys.stderr)
-
-# Hand the guide list to bash, which drives the interactive confirmation.
-with guides_list_path.open("w") as handle:
-    for guide in guides:
-        handle.write(str(guide) + "\n")
-
-sys.exit(guides_found_status)
-GUIDE_CHECK_PY
-
-    if [ "$GUIDE_CHECK_EXIT" -ne 0 ] && [ "$GUIDE_CHECK_EXIT" -ne "$GUIDES_FOUND_STATUS" ]; then
-        print_error "Upgrade-guide check crashed (exit $GUIDE_CHECK_EXIT) - traceback above."
-        print_warning "Continuing without a guide list; review $DAEMON_DIR/CLAUDE/UPGRADES/ manually."
-    fi
-
-    if [ "$GUIDE_CHECK_EXIT" -eq "$GUIDES_FOUND_STATUS" ]; then
-        # Skip interactive prompt when:
-        # - --skip-reading-confirmation flag is set, OR
-        # - stdin is not a terminal (non-interactive mode, e.g. run by CI or Claude Code agent)
-        #   Without this check, `read` hangs forever waiting for input that never arrives
-        if [[ "$*" == *"--skip-reading-confirmation"* ]] || [ ! -t 0 ]; then
-            if [ ! -t 0 ]; then
-                print_info "Non-interactive mode detected, skipping upgrade guide confirmation"
-            else
-                print_info "--skip-reading-confirmation flag detected, skipping guide confirmation"
-            fi
-            print_info "Review upgrade guides after upgrade: $DAEMON_DIR/CLAUDE/UPGRADES/"
-            rm -f "$UPGRADE_GUIDES_LIST"
-        else
-            echo ""
-            echo "Have you read all upgrade guides? (yes/no/show)"
-            read -r -p "> " response
-
-            while true; do
-                case "$response" in
-                    yes|y|Y)
-                        print_success "Proceeding with upgrade..."
-                        break
-                        ;;
-                    show|s|S)
-                        # Display guides using pager
-                        if [ -f "$UPGRADE_GUIDES_LIST" ]; then
-                            while IFS= read -r guide_path; do
-                                if [ -f "$guide_path" ]; then
-                                    echo ""
-                                    echo "========================================="
-                                    echo "Displaying: $guide_path"
-                                    echo "========================================="
-                                    ${PAGER:-less} "$guide_path"
-                                fi
-                            done < "$UPGRADE_GUIDES_LIST"
-                        fi
-                        echo ""
-                        echo "Have you read all upgrade guides? (yes/no/show)"
-                        read -r -p "> " response
-                        ;;
-                    no|n|N)
-                        echo ""
-                        print_warning "Please review upgrade guides before proceeding."
-                        print_info "Guides location: $DAEMON_DIR/CLAUDE/UPGRADES/"
-                        fail_fast "Upgrade aborted - read guides and try again"
-                        ;;
-                    *)
-                        echo "Please answer 'yes', 'no', or 'show'"
-                        read -r -p "> " response
-                        ;;
-                esac
-            done
-
-            # Cleanup temp file
-            rm -f "$UPGRADE_GUIDES_LIST"
-        fi
-    fi
-fi
+# The reading list and its proceed/abort gate run after Step 6, from
+# run_pre_deploy_phase: only the target's tree holds the guide for the version
+# being installed.
 
 # ============================================================
 # Step 6: Checkout target version
@@ -873,7 +1170,7 @@ print_info "Fetching tags..."
 git -C "$DAEMON_DIR" fetch --tags --quiet
 
 # Verify target version exists
-if ! git -C "$DAEMON_DIR" rev-parse "$TARGET_VERSION" &>/dev/null; then
+if ! git -C "$DAEMON_DIR" rev-parse --verify --quiet "${TARGET_VERSION}^{commit}" > /dev/null; then
     fail_fast "Version $TARGET_VERSION not found. Available versions:
 $(git -C "$DAEMON_DIR" tag -l | sort -V | tail -10)"
 fi
@@ -908,6 +1205,10 @@ if [ -n "$LAYER2_SOURCE_FINGERPRINT_BEFORE" ] && [ -f "$LAYER2_TARGET_SCRIPT" ];
     fi
 fi
 
+# The target is checked out and nothing is deployed yet: the gate decides now,
+# before Step 7 rebuilds the venv. A stop exits through the snapshot rollback.
+run_pre_deploy_phase
+
 # ============================================================
 # Step 7: Recreate virtual environment (clean reinstall)
 # ============================================================
@@ -926,6 +1227,10 @@ VENV_PYTHON="$VENV_PATH/bin/python"
 if ! verify_venv "$VENV_PYTHON" "$DAEMON_DIR"; then
     fail_fast "Virtual environment verification failed"
 fi
+
+# The target's venv is verified and nothing has been deployed into the project
+# yet.
+run_config_compatibility_check
 
 # Plan 00099: clean up pre-v3.7.0 legacy venv to avoid confusion. Only remove
 # the legacy path if we successfully provisioned a fingerprint-keyed venv at a
@@ -1305,6 +1610,7 @@ fi
 
 # Disable rollback on success
 UPGRADE_STARTED=false
+consume_used_approval
 
 print_header "Upgrade Complete"
 

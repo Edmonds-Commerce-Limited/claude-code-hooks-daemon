@@ -58,6 +58,16 @@ rules:
   - path_glob: "CLAUDE/UPGRADES/UNRELEASED/release-notes/*.md"
     tests: [tests/unit/scripts/test_branch_install_gate_is_unadvertised.py]
     why: it reads every pending release note by glob
+  - path_glob: "CLAUDE/UPGRADES/**/pre-upgrade-tasks/*.md"
+    tests:
+      - tests/integration/test_upgrade_task_schema.py
+      - tests/integration/test_post_upgrade_tasks_are_reachable.py
+    why: both read every upgrade task file by glob
+  - path_glob: "CLAUDE/UPGRADES/**/post-upgrade-tasks/*.md"
+    tests:
+      - tests/integration/test_upgrade_task_schema.py
+      - tests/integration/test_post_upgrade_tasks_are_reachable.py
+    why: both read every upgrade task file by glob
   - path_glob: "src/claude_code_hooks_daemon/skills/**/*.md"
     tests:
       - tests/integration/test_documented_commands_are_not_self_denied.py

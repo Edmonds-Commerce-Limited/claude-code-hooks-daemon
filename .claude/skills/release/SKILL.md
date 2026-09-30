@@ -340,7 +340,7 @@ secondary confirmation step.
 This skill implements the process defined in the release documentation. For complete details on:
 
 - Pre-release validation steps
-- UNRELEASED post-upgrade-tasks move (Step 6)
+- UNRELEASED post-upgrade-tasks and pre-upgrade-tasks move (Step 6)
 - Breaking changes detection and upgrade guide generation
 - Upgrade guide verification gate
 - Acceptance testing requirements and FAIL-FAST cycle (Step 12)

@@ -135,12 +135,13 @@ handlers:
 
 ### Rollback
 
-If you need to revert to v2.10.1:
+If you need to revert to v2.10.1 -- OWNER-ONLY, since `daemon_location_guard`
+and the upgrade approval guard both deny an agent moving
+`.claude/hooks-daemon` by hand:
 
 ```bash
-cd .claude/hooks-daemon
-git checkout v2.10.1
-untracked/venv/bin/pip install -e .
+git -C .claude/hooks-daemon checkout v2.10.1
+.claude/hooks-daemon/untracked/venv/bin/pip install -e .claude/hooks-daemon
 cp .claude/hooks-daemon.yaml.backup .claude/hooks-daemon.yaml  # if backup exists
 ```
 

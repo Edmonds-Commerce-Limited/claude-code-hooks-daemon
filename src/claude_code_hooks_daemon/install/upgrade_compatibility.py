@@ -28,8 +28,10 @@ from claude_code_hooks_daemon.install.breaking_changes_detector import (
     ChangeType,
     parse_version,
 )
+from claude_code_hooks_daemon.install.install_stamp import is_branch_install
+from claude_code_hooks_daemon.install.upgrade_guides import guide_documents
 
-# Directory layout for upgrade guides: CLAUDE/UPGRADES/v{major}/v{n}-to-v{n+1}/.
+# Directory layout for upgrade guides: CLAUDE/UPGRADES/v{major}/v{A}-to-v{B}/.
 _UPGRADES_DIR_NAME = "UPGRADES"
 _CLAUDE_DIR_NAME = "CLAUDE"
 
@@ -348,43 +350,40 @@ class CompatibilityChecker:
 
         return "\n".join(lines)
 
-    def suggest_upgrade_guides(self, daemon_dir: Path) -> list[Path]:
-        """Suggest relevant upgrade guides for version range.
+    def suggest_upgrade_guides(
+        self, daemon_dir: Path, include_unreleased: bool | None = None
+    ) -> list[Path]:
+        """Suggest the upgrade guide documents the version range crosses.
 
-        Derives the major version from ``target_version`` and looks under
-        ``CLAUDE/UPGRADES/v{major}/`` for the intermediate
-        ``v{major}.{n}-to-v{major}.{n+1}`` guides between the current and target
-        minors. Version strings are validated up front via ``parse_version``,
-        which raises a descriptive ``ValueError`` on a malformed string.
+        Every versioned guide directory in ``(current, target]`` contributes its
+        own document, whatever its name's shape and whichever ``v{major}/`` it
+        sits in (see :mod:`upgrade_guides`). When ``include_unreleased`` holds,
+        the documents staged in ``CLAUDE/UPGRADES/UNRELEASED/`` follow: on a
+        branch install they are the target's unreleased breaking changes, and
+        no other part of the tree describes them. ``None`` asks the install
+        stamp, as the other UNRELEASED-aware loaders do. Version strings are
+        validated up front via ``parse_version``, which raises a descriptive
+        ``ValueError`` on a malformed string.
 
         Args:
-            daemon_dir: Path to daemon installation directory
+            daemon_dir: Path to the daemon checkout holding the target tree
+            include_unreleased: Also list the UNRELEASED staged documents
 
         Returns:
-            List of upgrade guide paths to read
+            List of upgrade guide paths to read, oldest guide first
 
         Raises:
             ValueError: If ``current_version`` or ``target_version`` is not a
                 valid ``MAJOR.MINOR.PATCH`` string.
         """
-        _current_major, current_minor, _current_patch = parse_version(self.current_version)
-        target_major, target_minor, _target_patch = parse_version(self.target_version)
+        parse_version(self.current_version)
+        parse_version(self.target_version)
 
-        upgrades_dir = daemon_dir / _CLAUDE_DIR_NAME / _UPGRADES_DIR_NAME / f"v{target_major}"
-        if not upgrades_dir.exists():
-            return []
-
-        guides: list[Path] = []
-
-        # Find all intermediate upgrade guides within the target major line.
-        for minor in range(current_minor, target_minor + 1):
-            next_minor = minor + 1
-            guide_name = f"v{target_major}.{minor}-to-v{target_major}.{next_minor}"
-            guide_dir = upgrades_dir / guide_name
-            if guide_dir.exists():
-                # Look for main guide file
-                guide_file = guide_dir / f"{guide_name}.md"
-                if guide_file.exists():
-                    guides.append(guide_file)
-
-        return guides
+        if include_unreleased is None:
+            include_unreleased = is_branch_install()
+        return guide_documents(
+            daemon_dir / _CLAUDE_DIR_NAME / _UPGRADES_DIR_NAME,
+            self.current_version,
+            self.target_version,
+            include_unreleased=include_unreleased,
+        )

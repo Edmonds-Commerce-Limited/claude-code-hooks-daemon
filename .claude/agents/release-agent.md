@@ -231,9 +231,11 @@ bash .claude/hooks-daemon/scripts/install_version.sh "$PWD" "$PWD/.claude/hooks-
 cp .claude/hooks-daemon.yaml .claude/hooks-daemon.yaml.backup
 git -C .claude/hooks-daemon fetch --tags
 
-# Rebuilds the venv and reinstalls the package for the target version.
-bash .claude/hooks-daemon/scripts/upgrade_version.sh \
-  "$PWD" "$PWD/.claude/hooks-daemon" "vX.Y.Z"
+# Rebuilds the venv and reinstalls the package for the target version. Runs the
+# target's own upgrade.sh: the installed one may predate the pre-deploy gate.
+tmp="$(mktemp)"
+git -C .claude/hooks-daemon show "vX.Y.Z:scripts/upgrade.sh" > "$tmp"
+bash "$tmp" --project-root "$PWD" "vX.Y.Z"
 
 .claude/hooks-daemon/bin/hooks-daemon restart
 ```

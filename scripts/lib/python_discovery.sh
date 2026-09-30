@@ -270,12 +270,14 @@ EOF
         echo "No python3.NN interpreter found on \$PATH." >&2
         echo "Install Python $floor or newer (e.g. python$floor) and ensure it is on \$PATH," >&2
         echo "or set HOOKS_DAEMON_PYTHON to the absolute path of a Python $floor+ interpreter." >&2
+        echo "An agent running an upgrade does not set it (the upgrade guard denies that): ask the user to run the upgrade with it." >&2
     else
         echo "No interpreter on \$PATH meets the required floor $floor." >&2
         echo "Observed candidates (all below floor):" >&2
         printf "%b" "$observed" >&2
         echo "Install a Python $floor+ interpreter (e.g. python$floor) and ensure it is on \$PATH," >&2
         echo "or set HOOKS_DAEMON_PYTHON to the absolute path of a Python $floor+ interpreter." >&2
+        echo "An agent running an upgrade does not set it (the upgrade guard denies that): ask the user to run the upgrade with it." >&2
     fi
     return 1
 }

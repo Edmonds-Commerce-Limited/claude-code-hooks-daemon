@@ -92,6 +92,7 @@ def test_example_config_safety_handlers_enabled(example_config: dict) -> None:
         "lock_file_edit_blocker",
         "pip_break_system",
         "sudo_pip",
+        "upgrade_approval_guard",
     ]
 
     for handler in safety_handlers:

@@ -111,6 +111,13 @@ _EARNS_GUIDANCE: dict[str, str] = {
         "human's, so the agent reports the branch ready and stops rather "
         "than polls -- same shape as plan_close_approval's reason"
     ),
+    "UpgradeApprovalGuardHandler": (
+        "T1 denies an agent action that grants or bypasses the owner's upgrade "
+        "approval, and the guidance carries what the fire-time deny cannot: the "
+        "full list of guarded routes (approve-upgrade itself, the marker "
+        "directory, the env-var bypass, the venv version stamp) so an agent "
+        "steers around all four rather than retrying the one it just hit"
+    ),
     "PipBreakSystemHandler": "T1 denies --break-system-packages",
     "PipeBlockerHandler": "T1 denies expensive pipes to head/tail",
     "DocsQaEditHandler": "T1 denies documentation writes that break the docs QA rules",
