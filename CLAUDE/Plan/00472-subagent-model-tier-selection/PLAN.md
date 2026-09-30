@@ -107,3 +107,5 @@ message. The decisions are listed side by side in each plan's Task 1.2.
      JOURNAL/00472-Journal-YY-MM-DD.md — see CLAUDE/PlanJournalling.md. -->
 
 - Opened at the owner's request.
+- Scheduling (owner ruling): starts next, once the current queue has landed
+  (hostname-matched crons, the quoted-glob fix, provision Phases 1–2).
