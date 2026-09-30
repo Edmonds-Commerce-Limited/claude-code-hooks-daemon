@@ -39,7 +39,14 @@ is not established.
 `check_project_handler_tests.py` discards. A collection of zero is already
 reported as a failure, correctly, so nothing is hidden meanwhile.
 
-**Status**: ⬜ Open.
+**Status**: ✅ Fixed (merge of `worktree-n272-ph-reason`). It recurred on the #63
+branch's run. The likely cause is nested timeouts: `test-project-handlers` killed
+its pytest child at 120 s, and the gate allowed 300 s, so a killed run printed only
+a timeout line and parsed as zero tests. The suite measured 70 s of pytest time
+(82 s wall) at host load 27, against about 5 s idle. The child now gets 300 s and
+the gate 360 s, and a run that collected nothing reports the last 40 lines of the
+runner output as its reason. The two original runs cannot be confirmed, because
+their output was discarded.
 
 ### N271 — an upgrade fails "uv not found" when the only uv is outside the trusted PATH
 

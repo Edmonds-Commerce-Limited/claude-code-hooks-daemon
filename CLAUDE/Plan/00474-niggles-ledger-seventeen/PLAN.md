@@ -38,7 +38,7 @@ Full write-ups are in [NIGGLES.md](NIGGLES.md). One line each here:
 
 | #          | Verdict                                                                                                          | Origin              | Status                  |
 | ---------- | ---------------------------------------------------------------------------------------------------------------- | ------------------- | ----------------------- |
-| N272       | One `llm_qa changed` run reported `project_handlers` as 0 tests collected; it passed 232 alone                   | Coordinator         | ⬜ Open                 |
+| N272       | One `llm_qa changed` run reported `project_handlers` as 0 tests collected; it passed 232 alone                   | Coordinator         | ✅ Fixed                |
 | N271       | An upgrade fails "uv not found" when the only uv is outside the trusted PATH and `~/.local/bin`                  | Main CI red         | ⬜ Open (owner)         |
 | N270       | The workspace venv has drifted from `uv.lock` (pytest 9.1.1 against 9.0.3)                                       | Coordinator         | ⬜ Open                 |
 | N269       | `secret_file_guard` expands a single-quoted grep regex as a filename glob                                        | Coordinator         | ⬜ Open                 |
