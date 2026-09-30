@@ -590,27 +590,40 @@ class TestClaudeMdInjectorAutoCommit:
         assert head_after == head_before, "a conflict marker was auto-committed"
         assert f"{close_marker} main" in (tmp_path / "CLAUDE.md").read_text().splitlines()
 
-    @pytest.mark.parametrize(
-        ("failure", "logged"),
-        [
-            (FileNotFoundError("gone"), "vanished"),
-            (PermissionError("denied"), "could not be read"),
-        ],
-    )
-    def test_a_claude_md_it_cannot_read_is_not_auto_committed(
-        self,
-        tmp_path: Path,
-        caplog: pytest.LogCaptureFixture,
-        failure: OSError,
-        logged: str,
+    def test_a_vanished_claude_md_is_not_auto_committed(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
     ) -> None:
-        """Ledger 00466 N224: no text to check means nothing to commit.
+        """Ledger 00466 N224: a CLAUDE.md deleted before the read is not committed.
 
-        Main read the file inside `_commit_message`, so a CLAUDE.md deleted
-        mid-inject raised there and `inject()` logged a misleading "check file
-        permissions" warning. Committing unread text instead would record a
-        marker the check never saw, so neither case may commit, and the log
-        says which case it was.
+        Main read the file inside `_commit_message`, so a deletion raised there
+        and `inject()` logged a misleading "check file permissions" warning.
+        Git still reports the deletion as dirty, so the injector must name the
+        real cause and leave HEAD alone.
+        """
+        from claude_code_hooks_daemon.core.claude_md_injector import ClaudeMdInjector
+
+        _init_git_repo(tmp_path)
+        claude_md = tmp_path / "CLAUDE.md"
+        claude_md.unlink()
+        head_before = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=tmp_path, capture_output=True, text=True
+        ).stdout
+
+        with caplog.at_level(logging.INFO, logger="claude_code_hooks_daemon.core.claude_md_injector"):
+            ClaudeMdInjector._auto_commit_if_dirty(claude_md)
+
+        head_after = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=tmp_path, capture_output=True, text=True
+        ).stdout
+        assert head_after == head_before
+        assert "vanished" in caplog.text
+        assert "permission" not in caplog.text.lower()
+
+    def test_an_unreadable_claude_md_is_not_auto_committed(self, tmp_path: Path) -> None:
+        """Ledger 00466 N224: text the marker check never saw is never committed.
+
+        A read error propagates to `inject()`, which logs it; committing
+        unread text would record a marker the check never saw.
         """
         from claude_code_hooks_daemon.core.claude_md_injector import ClaudeMdInjector
 
@@ -625,24 +638,16 @@ class TestClaudeMdInjectorAutoCommit:
 
         def _read_text(path: Path, *args: Any, **kwargs: Any) -> str:
             if path == claude_md:
-                raise failure
+                raise PermissionError("denied")
             return real_read_text(path, *args, **kwargs)
 
-        with (
-            patch.object(Path, "read_text", _read_text),
-            caplog.at_level(
-                logging.INFO, logger="claude_code_hooks_daemon.core.claude_md_injector"
-            ),
-        ):
+        with patch.object(Path, "read_text", _read_text), pytest.raises(PermissionError):
             ClaudeMdInjector._auto_commit_if_dirty(claude_md)
 
         head_after = subprocess.run(
             ["git", "rev-parse", "HEAD"], cwd=tmp_path, capture_output=True, text=True
         ).stdout
         assert head_after == head_before
-        assert logged in caplog.text
-        if isinstance(failure, FileNotFoundError):
-            assert "permission" not in caplog.text.lower()
 
     def test_commit_message_flags_edits_from_outside_the_generated_block(
         self, tmp_path: Path

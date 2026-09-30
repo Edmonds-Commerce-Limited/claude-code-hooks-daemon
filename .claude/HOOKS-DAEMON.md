@@ -4,7 +4,7 @@
 
 ## Active Handlers
 
-### PreToolUse (67 handlers)
+### PreToolUse (68 handlers)
 
 | Priority | Handler | Behaviour | Description |
 |----------|---------|----------|-------------|

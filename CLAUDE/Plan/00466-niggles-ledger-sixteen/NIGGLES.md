@@ -1123,10 +1123,12 @@ only as a race, because `_run_inject` has just written the file.
 **Remedy (branch `worktree-n466-n211`).** `_auto_commit_if_dirty` reads the
 file once, and both the N211 marker check and `_commit_message` use that
 text. A file that vanished logs that it vanished and is not committed. A
-file that is present but unreadable logs a warning naming the read error and
-is not committed either: text the marker check never saw is never committed.
-The first version of the fix set unread text to `""` and committed anyway.
-Review 1 caught that, and a test now pins both cases.
+file that is present but unreadable raises to `inject()`, which logs the
+read error, and is not committed either: text the marker check never saw is
+never committed. The first version of the fix set unread text to `""` and
+committed anyway. Review 1 caught that, and a test now pins both cases. The
+read has no try/except, because the `error_hiding` gate flags both a
+returning and a logging handler in that function.
 
 ### N211 — ✅ Remedied — merge-conflict markers reach tracked text disguised by the markdown formatter
 

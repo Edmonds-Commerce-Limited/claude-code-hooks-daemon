@@ -516,23 +516,15 @@ class ClaudeMdInjector:
         # Plan 00466 N211: this commit never passes the PreToolUse
         # conflict_marker_commit_gate, so it refuses a marker itself.
         # Ledger 00466 N224: text the marker check never saw is never committed.
-        content: str | None = None
-        try:
-            content = claude_md_path.read_text(encoding="utf-8", errors="replace")
-        except FileNotFoundError:
+        # A file that vanished is named as such; any other read error propagates
+        # to inject(), which logs it, and nothing unread is committed.
+        if not claude_md_path.is_file():
             logger.info(
                 "ClaudeMdInjector: %s vanished before its auto-commit; not auto-committing",
                 claude_md_path,
             )
-        except OSError as exc:
-            logger.warning(
-                "ClaudeMdInjector: %s could not be read, so it was not checked for "
-                "merge-conflict markers; not auto-committing: %s",
-                claude_md_path,
-                exc,
-            )
-        if content is None:
             return
+        content = claude_md_path.read_text(encoding="utf-8", errors="replace")
         markers = find_conflict_markers_in_text(content)
         if markers:
             logger.warning(
