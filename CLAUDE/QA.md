@@ -211,8 +211,34 @@ name it, the declared readers (the `path_glob` rules above) and its dependents.
 The checkers that sweep the whole tree (`docs_qa`, `plan_qa`, `doc_truth` and
 the rest of the docs-only list) run in the recheck themselves. So a
 `docs-only` or `targeted` landing relies on nothing CI does.
-CI runs the whole suite on what was pushed, and a red CI is a red `main`,
-handled at once. It is never a reason to skip the gate.
+CI runs the tier the pushed change needs (below), and a red CI is a red
+`main`, handled at once. It is never a reason to skip the gate.
+
+### CI tiers
+
+`.github/workflows/qa.yml` starts with a `classify` job. It runs
+`scripts/ci/classify_changes.py` over the pushed range (push: `before..sha`;
+pull request: merge base `..` PR tip) and prints `tier=<x>`. The rules live in
+that script's one table, tested in `tests/unit/scripts/test_classify_changes.py`.
+
+| Tier   | When                                                                                                                                                                                                                     | What runs                                                                                                                                                              |
+| ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `docs` | every changed path is `*.md`                                                                                                                                                                                             | One Python (3.11): `llm_qa.py docs_qa plan_qa changed_tests --range`. The `shell` and `daemon-load` jobs are skipped.                                                  |
+| `code` | anything else                                                                                                                                                                                                            | One Python (3.11): black, ruff, mypy, pyright, `llm_qa.py changed --range`, bandit, deptry, plus `shell` and `daemon-load`.                                            |
+| `full` | `pyproject.toml`, `uv.lock`, anything under `.github/`, `.claude/hooks-daemon.yaml`, `scripts/qa/changed_tests_map.yaml`, any `conftest.py`; an empty change set; an unknown base (all-zero `before`, or not in history) | The three-Python matrix (job `qa`, unchanged), plus `shell` and `daemon-load`. Also every night on `main` (`schedule`) and on `workflow_dispatch`, which have no base. |
+
+Markdown is narrowed, never skipped: tests read the plan index, ledgers and
+docs, so the docs tier still runs the mapper's tests for the changed files.
+In the `docs` and `code` tiers a changed file the mapper cannot cover
+(unmapped, which includes `too-broad`) sends that one Python to the whole
+suite (`scripts/ci/full_suite_if_unmapped.bash`) rather than passing on tests
+that did not reach it.
+
+**A `docs` or `code` green is NOT release evidence.** Plan 00359's release
+slate gate looks for a green run on HEAD's exact sha and does not yet tell the
+tiers apart. A release needs the full-matrix run: dispatch the workflow
+(`gh workflow run qa.yml`) on the release commit, or use the nightly, and cite
+that run. Making the gate require it is open work (Plan 00475 Task 3b.2).
 
 The path rules are defined once in `llm_qa.py` (`RUNTIME_READ_FILES`,
 `RUNTIME_READ_ROOTS`, `judge_path`), and `tests/unit/qa/test_llm_qa_main_moved.py`

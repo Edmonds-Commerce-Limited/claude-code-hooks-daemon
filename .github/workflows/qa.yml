@@ -6,6 +6,11 @@ on:
   pull_request:
     branches: [main]
   workflow_dispatch:
+  # The full three-Python matrix, every night, on main (Plan 00475 Phase 3b).
+  # Pushes and pull requests run only the tier their change needs, so this is
+  # the run that keeps the whole matrix honest between releases.
+  schedule:
+    - cron: '17 3 * * *'
 
 concurrency:
   group: qa-${{ github.ref }}
@@ -26,8 +31,145 @@ concurrency:
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
+  # Plan 00475 Phase 3b: which tier does this change need? The rules live in
+  # scripts/ci/classify_changes.py (unit-tested), never here.
+  #   docs  markdown only: doc and plan checks + the tests the mapper selects
+  #   code  anything else: static checks + mapped tests, on ONE Python
+  #   full  build or CI config, an unknown base, a nightly or a manual dispatch:
+  #         the three-Python matrix below (job qa)
+  # Markdown is narrowed, never skipped: tests read the plan index, ledgers
+  # and docs, and 9 of 34 markdown-only commits in the last 60 runs failed.
+  classify:
+    name: Classify change
+    runs-on: ubuntu-latest
+    outputs:
+      tier: ${{ steps.classify.outputs.tier }}
+      base: ${{ steps.classify.outputs.base }}
+      head: ${{ steps.classify.outputs.head }}
+    steps:
+      # Full history: the base may be any ancestor, and a base that is not in
+      # history is itself classified as the full tier.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # Values arrive through env, never interpolated into the script text.
+      # push: base is the sha before the push (all zeros on a new ref).
+      # pull_request: base is the merge base with the base branch, head is
+      # the PR tip. Anything else (schedule, dispatch): no base, so full.
+      - name: Classify
+        id: classify
+        env:
+          EVENT: ${{ github.event_name }}
+          PUSH_BEFORE: ${{ github.event.before }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: bash scripts/ci/emit_tier.bash | tee -a "$GITHUB_OUTPUT"
+
+  # The docs and code tiers: one Python, the change's own checks. A full-suite
+  # run on that one Python replaces the mapped tests when the mapper cannot map
+  # a changed file (unmapped or too broad), so a change is never verified by
+  # tests that did not cover it.
+  targeted:
+    name: QA (${{ needs.classify.outputs.tier }} tier)
+    needs: classify
+    if: needs.classify.outputs.tier != 'full'
+    runs-on: ubuntu-latest
+    env:
+      RANGE: ${{ needs.classify.outputs.base }}..${{ needs.classify.outputs.head }}
+      TIER: ${{ needs.classify.outputs.tier }}
+    steps:
+      # fetch-depth 0: the range diff needs both ends, and the acceptance
+      # conftest needs tags (see the qa job for the full reasoning).
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      # Same uv-from-lockfile provisioning as the qa job (Plan 00346); the
+      # rationale is written out there.
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install uv
+          VENV_DIR="$(HOOKS_DAEMON_PYTHON="$(command -v python)" \
+            bash scripts/lib/resolve_venv.sh dir "$PWD" --fallback-target)"
+          UV_PROJECT_ENVIRONMENT="$VENV_DIR" \
+            uv sync --frozen --all-extras --python "$(command -v python)"
+          test "$(bash scripts/lib/resolve_venv.sh python "$PWD")" = "$VENV_DIR/bin/python"
+          echo "$VENV_DIR/bin" >> "$GITHUB_PATH"
+
+      # Same daemon and relay provisioning as the qa job (Plan 00250, 00350):
+      # mapped tests include acceptance and transport gates that skip without
+      # them, and a skipped gate is not a passed one.
+      - name: Start daemon (for the acceptance gates)
+        run: |
+          echo "HOOKS_DAEMON_RELEASE_GATE=1" >> "$GITHUB_ENV"
+          printf 'HOOKS_DAEMON_ROOT_DIR="%s"\n' "$GITHUB_WORKSPACE" \
+            > .claude/hooks-daemon.env
+          ./bin/hooks-daemon restart
+          ./bin/hooks-daemon status
+
+      - name: Build the relay (for the transport gates)
+        run: |
+          rustup target add x86_64-unknown-linux-musl
+          bash relay/build.sh
+          install -D -m 755 \
+            untracked/relay-build/hooks-relay-x86_64-unknown-linux-musl \
+            untracked/bin/hooks-relay
+
+      # Code tier: the same static gates as the qa job.
+      - name: Format (black)
+        if: "!cancelled() && env.TIER == 'code'"
+        run: black --check src/ tests/
+
+      - name: Lint (ruff)
+        if: "!cancelled() && env.TIER == 'code'"
+        run: ruff check src/ tests/
+
+      - name: Types (mypy)
+        if: "!cancelled() && env.TIER == 'code'"
+        run: mypy src/
+
+      - name: Types (pyright)
+        if: "!cancelled() && env.TIER == 'code'"
+        run: python scripts/qa/run_pyright_check.py --json
+
+      # Docs tier: the whole-tree doc and plan checks, then the mapper tests.
+      # Code tier: the tests the mapper selects, plus the fast tools llm_qa
+      # changed carries. --allow-unmapped lets the run finish so the next step
+      # can decide what to do about files the mapper could not cover.
+      - name: Targeted QA (docs tier)
+        if: "!cancelled() && env.TIER == 'docs'"
+        run: ./scripts/qa/llm_qa.py docs_qa plan_qa changed_tests --range "$RANGE" --allow-unmapped
+
+      - name: Targeted QA (code tier)
+        if: "!cancelled() && env.TIER == 'code'"
+        run: ./scripts/qa/llm_qa.py changed --range "$RANGE" --allow-unmapped
+
+      - name: Full suite fallback (only when the mapper cannot cover a file)
+        if: "!cancelled()"
+        run: bash scripts/ci/full_suite_if_unmapped.bash
+
+      - name: Security (bandit)
+        if: "!cancelled() && env.TIER == 'code'"
+        run: bandit -r src/ .claude/ccy/claude-supervise.py -s B101
+
+      - name: Dependencies (deptry)
+        if: "!cancelled() && env.TIER == 'code'"
+        run: deptry src/
+
+  # The full three-Python matrix. Job id qa and the matrix key are read by
+  # scripts/qa/run_test_matrix.py and tests/integration/test_ci_provisions_the_relay.py.
   qa:
-    name: QA (Python ${{ matrix.python-version }})
+    needs: classify
+    if: needs.classify.outputs.tier == 'full'
+    name: QA (Python${{ matrix.python-version }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -345,8 +487,11 @@ jobs:
         if: ${{ !cancelled() }}
         run: deptry src/
 
+  # Cheap, and a docs-only change cannot break them.
   shell:
     name: Shell
+    needs: classify
+    if: needs.classify.outputs.tier != 'docs'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -369,6 +514,8 @@ jobs:
 
   daemon-load:
     name: Daemon load
+    needs: classify
+    if: needs.classify.outputs.tier != 'docs'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
