@@ -1,8 +1,7 @@
 """Unit tests for the SubagentStop-time cron enforcer (Plan 00416 Task 1.1).
 
-The SubagentStop sibling of ``cron_stop_enforcer``: a subagent-only session
-can reach SubagentStop without the main-thread Stop event ever firing, and
-``session_crons`` is conditional here too (``contracts/claude-code-hooks/
+The SubagentStop sibling of ``cron_stop_enforcer``, scoped to the main thread
+(issue #62), where ``session_crons`` is conditional too (``contracts/claude-code-hooks/
 Stop.json`` documents the field for both events). Same three contract
 constraints as the Stop twin -- see that module's test file for the full
 rationale; this file pins the same behaviour on the SubagentStop event.
@@ -12,7 +11,7 @@ from __future__ import annotations
 
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
 import pytest
 
@@ -23,6 +22,8 @@ from claude_code_hooks_daemon.config.models import (
 )
 from claude_code_hooks_daemon.constants.priority import Priority
 from claude_code_hooks_daemon.core import Decision
+from claude_code_hooks_daemon.core.handler_scope import HandlerScope, scope_admits
+from claude_code_hooks_daemon.handlers.stop.cron_stop_enforcer import CronStopEnforcerHandler
 from claude_code_hooks_daemon.handlers.subagent_stop.cron_subagent_stop_enforcer import (
     CronSubagentStopEnforcerHandler,
 )
@@ -233,3 +234,37 @@ class TestHandlerWiring:
         """Deliberately non-terminal -- see the Stop twin's test for the
         full reasoning (a DENY still wins via most-restrictive-wins)."""
         assert CronSubagentStopEnforcerHandler().terminal is False
+
+
+class TestASubagentIsNeverToldToCreateTheCoordinatorsCrons:
+    """Issue #62: session crons belong to the coordinator's session (Plan 00423).
+
+    The chain, not the handler, applies scope, so these tests ask the same
+    question the chain asks before it would dispatch.
+    """
+
+    _SUBAGENT_STOP: ClassVar[dict[str, Any]] = {
+        "hook_event_name": "SubagentStop",
+        "agent_id": "a1b2c3d4e5f6a7b8c",
+        "stop_hook_active": False,
+        "session_crons": [],
+    }
+
+    def test_a_real_subagent_stop_is_not_admitted(self) -> None:
+        handler = CronSubagentStopEnforcerHandler()
+
+        assert scope_admits(handler.scope, self._SUBAGENT_STOP) is False
+
+    def test_the_scope_is_main_like_the_stop_twin(self) -> None:
+        assert CronSubagentStopEnforcerHandler().scope is CronStopEnforcerHandler().scope
+        assert CronSubagentStopEnforcerHandler().scope is HandlerScope.MAIN
+
+    def test_the_main_thread_stop_twin_still_enforces(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        stop = CronStopEnforcerHandler()
+        monkeypatch.setattr(stop, "_load_config", lambda: _config(_JOB))
+        payload = {"hook_event_name": "Stop", "stop_hook_active": False, "session_crons": []}
+
+        assert scope_admits(stop.scope, payload) is True
+        assert stop.handle(payload).decision is Decision.DENY

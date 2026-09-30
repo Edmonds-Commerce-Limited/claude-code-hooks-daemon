@@ -6,8 +6,8 @@ Empty from Plan 00237 until Plan 00307 Task 3.1 dropped in
 appending to a log nothing read and unconditionally advising a command/doc
 that does not exist in this repository. Plan 00416 Task 1.1 adds
 ``CronSubagentStopEnforcerHandler``, the SubagentStop twin of
-``handlers.stop.cron_stop_enforcer`` -- a subagent-only session can reach
-this event without the main-thread Stop event ever firing. Plan 00446 adds
+``handlers.stop.cron_stop_enforcer``, main-thread scoped so a subagent is
+never told to create the coordinator's crons (issue #62). Plan 00446 adds
 ``SubagentReportPathVerifierHandler``, the size blocker's sibling: that one
 catches a report too big to survive the wire, this one catches a report the
 agent said it wrote and did not.

@@ -932,8 +932,8 @@ class HandlerID:
         display_name="cron-stop-enforcer",
     )
     # SubagentStop sibling of CRON_STOP_ENFORCER (Plan 00416 Task 1.1):
-    # session_crons is also conditional here, and a subagent-only session can
-    # reach SubagentStop without ever firing the main-thread Stop event.
+    # session_crons is also conditional here. Scoped to the main thread
+    # (issue #62): a subagent is never told to create the coordinator's crons.
     CRON_SUBAGENT_STOP_ENFORCER = HandlerIDMeta(
         class_name="CronSubagentStopEnforcerHandler",
         config_key="cron_subagent_stop_enforcer",

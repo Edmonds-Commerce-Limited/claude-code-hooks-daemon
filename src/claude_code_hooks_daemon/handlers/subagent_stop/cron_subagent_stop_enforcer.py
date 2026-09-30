@@ -2,10 +2,16 @@
 
 Plan 00416 Task 1.1. ``session_crons`` reaches ``SubagentStop`` exactly as it
 reaches ``Stop`` (``contracts/claude-code-hooks/Stop.json`` documents the
-field for both), and a subagent-only session can end without the main-thread
-Stop event ever firing -- so cron enforcement needs this twin rather than
-relying on ``cron_stop_enforcer`` alone. The comparison logic is identical and
-lives once in ``utils.cron_enforcement``; only the event wiring differs.
+field for both). The comparison logic is identical and lives once in
+``utils.cron_enforcement``; only the event wiring differs.
+
+**Scope is ``MAIN``** (issue #62). A SubagentStop always carries ``agent_id``,
+and session crons belong to the COORDINATOR's session, so a finished subagent
+must never be denied for a missing cron or told to ``CronCreate`` (same
+ownership principle as Plan 00423 and the ``CronDelete`` guard). The chain
+therefore never dispatches a real subagent stop here; the coordinator's own
+``Stop`` is where the gap is enforced. The scope is overridable per project
+with ``scope: ALL`` for anyone who wants the old behaviour.
 
 **Ordering note** -- same reasoning as the Stop twin, both halves: ``Priority.
 CRON_SUBAGENT_STOP_ENFORCER`` (7) sits deliberately BELOW
@@ -32,6 +38,7 @@ from claude_code_hooks_daemon.constants.handlers import HandlerID
 from claude_code_hooks_daemon.constants.priority import Priority
 from claude_code_hooks_daemon.core import BlockingResult, Decision, ProjectContext
 from claude_code_hooks_daemon.core.handler_bases import SubagentStopHandlerBase
+from claude_code_hooks_daemon.core.handler_scope import HandlerScope
 from claude_code_hooks_daemon.handlers.utils.session_advice_counter import (
     SessionAdviceCounter,
 )
@@ -63,6 +70,11 @@ class CronSubagentStopEnforcerHandler(SubagentStopHandlerBase):
             handler_id=HandlerID.CRON_SUBAGENT_STOP_ENFORCER,
             priority=Priority.CRON_SUBAGENT_STOP_ENFORCER,
             terminal=False,
+            # Issue #62: a SubagentStop always carries ``agent_id``, and the
+            # session's crons belong to the COORDINATOR. Telling a finished
+            # subagent to CronCreate is the mistake Plan 00423 scoped the Stop
+            # twin against, so a real subagent stop is never judged here.
+            scope=HandlerScope.MAIN,
             tags=[
                 HandlerTag.WORKFLOW,
                 HandlerTag.SAFETY,
@@ -138,24 +150,26 @@ class CronSubagentStopEnforcerHandler(SubagentStopHandlerBase):
         return [
             AcceptanceTest(
                 title=(
-                    "cron subagent-stop enforcer - blocks when session_crons is present but empty"
+                    "cron subagent-stop enforcer - never blocks a subagent, "
+                    "even on an empty session_crons"
                 ),
                 command="echo 'session_crons: []'",
                 description=(
                     "With persistent_crons.enabled true and at least one declared "
-                    "job, a PRESENT but empty session_crons blocks the "
-                    "SubagentStop, naming CronCreate."
+                    "job, a subagent's SubagentStop with a PRESENT but empty "
+                    "session_crons is allowed: the session's crons belong to "
+                    "the coordinator, so a subagent is never told to CronCreate."
                 ),
-                expected_decision=Decision.DENY,
-                expected_message_patterns=[r"CronCreate"],
+                expected_decision=Decision.ALLOW,
+                expected_message_patterns=[],
                 safety_notes=(
-                    "Blocks only when session_crons is PRESENT and shows a genuine "
-                    "gap -- see the sibling ALLOW test for the absent-field case."
+                    "Scope MAIN keeps a real subagent stop out of this handler "
+                    "(issue #62); the main-thread Stop twin still enforces."
                 ),
                 test_type=TestType.BLOCKING,
                 recommended_model=RecommendedModel.HAIKU,
                 requires_event="SubagentStop",
-                requires_main_thread=True,
+                requires_main_thread=False,
                 hook_input={
                     "hook_event_name": "SubagentStop",
                     "agent_id": "agent-1",
@@ -195,7 +209,8 @@ class CronSubagentStopEnforcerHandler(SubagentStopHandlerBase):
             "`session_crons` semantics, same `cron-pause` session pause, same "
             "priority-7/non-terminal "
             "ordering reasoning as `cron_stop_enforcer` — see its guidance "
-            "above. This twin exists because a subagent-only session can "
-            "reach `SubagentStop` without the main-thread `Stop` event ever "
-            "firing."
+            "above. Scoped to the main thread like `cron_stop_enforcer`: session "
+            "crons belong to the coordinator, so a subagent's own stop is "
+            "never denied for a missing cron and is never told to run "
+            "`CronCreate`."
         )
