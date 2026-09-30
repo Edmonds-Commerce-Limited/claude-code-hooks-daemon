@@ -462,6 +462,31 @@ class TestLayer2PathAfterEveryLibrarySource:
         assert not report[f"RESOLVES {tool}"].startswith(str(planted_home)), report
 
 
+class TestLayer2NeverRunsAUvOnlyTheCallerPathNames:
+    """The uv that builds the venv is resolved from the trusted PATH or the uv
+    installer's default location, never from a directory only the caller's
+    PATH names: whatever builds the venv decides what code the daemon runs, so
+    the caller must not be able to pick it. CI installs uv with `--user` for
+    this reason, and `pip install uv` into a toolchain bin is not reached."""
+
+    def test_a_uv_only_on_the_caller_path_is_not_run(
+        self, layer2_head: Path, tmp_path: Path
+    ) -> None:
+        home = tmp_path / "bare-home"
+        home.mkdir()
+        toolchain_bin = tmp_path / "toolchain" / "bin"
+        toolchain_bin.mkdir(parents=True)
+        (toolchain_bin / "uv").write_text('#!/bin/sh\necho "caller uv $*"\n', encoding="utf-8")
+        (toolchain_bin / "uv").chmod(0o755)
+        script = layer2_head.read_text(encoding="utf-8") + "_venv_uv --version\n"
+        layer2_head.write_text(script, encoding="utf-8")
+        env = _base_env(HOME=str(home), PATH=f"{toolchain_bin}:/usr/bin:/bin")
+
+        result = _run(f'bash "{layer2_head}"', env)
+
+        assert "caller uv --version" not in result.stdout.splitlines(), result.stdout
+
+
 class TestUvIsResolvedByName:
     """The fix for MAJOR 2 keeps the uv installer's default location usable:
     `uv` alone is looked up in `$HOME/.local/bin` when PATH has none, rather

@@ -284,10 +284,37 @@ class TestTrustedDirs:
     """review2 MAJOR 2: only a root-owned, non-group/world-writable directory
     from a fixed tool-path list is trusted to answer for a planted tool."""
 
-    def test_a_root_owned_unwritable_directory_is_trusted(self, tmp_path: Path) -> None:
+    def test_a_root_owned_unwritable_directory_is_trusted(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         safe = tmp_path / "safe"
         safe.mkdir()
         safe.chmod(0o755)
+        real_stat = Path.stat
+
+        def root_owned_stat(path: Path, *, follow_symlinks: bool = True) -> os.stat_result:
+            # A directory this test creates belongs to whoever runs it, and a
+            # non-root runner (CI) cannot chown it to root; report root as its
+            # owner so the permission-bit half of the policy is what is tested.
+            info = real_stat(path, follow_symlinks=follow_symlinks)
+            if path != safe:
+                return info
+            return os.stat_result(
+                (
+                    info.st_mode,
+                    info.st_ino,
+                    info.st_dev,
+                    info.st_nlink,
+                    0,
+                    info.st_gid,
+                    info.st_size,
+                    0,
+                    0,
+                    0,
+                )
+            )
+
+        monkeypatch.setattr(Path, "stat", root_owned_stat)
         assert upgrade_tasks._trusted_dirs([str(safe)]) == [str(safe)]
 
     def test_a_world_writable_directory_is_not_trusted(self, tmp_path: Path) -> None:
