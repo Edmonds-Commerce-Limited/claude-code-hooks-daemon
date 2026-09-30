@@ -109,6 +109,7 @@ from claude_code_hooks_daemon.utils.cron_cadence import (
     reset_cadence,
     write_cadence,
 )
+from claude_code_hooks_daemon.utils.cron_hosts import effective_hostname
 from claude_code_hooks_daemon.utils.cron_tick import DaemonTick, TickKind, classify_tick
 from claude_code_hooks_daemon.utils.goal_ledger import (
     LEDGER_FILENAME,
@@ -325,7 +326,12 @@ class FailsafeCronBlockageSuppressorHandler(UserPromptSubmitHandlerBase):
         if not is_failsafe_tick and tick is not None:
             # Another daemon cron's tick is never the owner, so it touches
             # neither the marker nor the cadence (Plan 00388).
-            return self._handle_other_tick(tick, declared=declared, session_id=session_id)
+            return self._handle_other_tick(
+                tick,
+                declared=declared,
+                session_id=session_id,
+                hostname=effective_hostname(hook_input),
+            )
 
         try:
             owed = self._work_is_owed()
@@ -376,7 +382,7 @@ class FailsafeCronBlockageSuppressorHandler(UserPromptSubmitHandlerBase):
             return Config()
 
     def _handle_other_tick(
-        self, tick: DaemonTick, *, declared: bool, session_id: str
+        self, tick: DaemonTick, *, declared: bool, session_id: str, hostname: str
     ) -> BlockingResult:
         """Decide a recognised tick from a cron other than the failsafe.
 
@@ -393,6 +399,8 @@ class FailsafeCronBlockageSuppressorHandler(UserPromptSubmitHandlerBase):
             tick: The recognised tick, never the failsafe.
             declared: Whether a still-valid marker exists for this session.
             session_id: The current session.
+            hostname: The session's effective hostname; a job declared only for
+                other hosts is not vouched for here (Plan 00470 Task 6.1).
 
         Returns:
             DENY for a declared job's tick under a live marker, else ALLOW.
@@ -401,7 +409,9 @@ class FailsafeCronBlockageSuppressorHandler(UserPromptSubmitHandlerBase):
             return BlockingResult(decision=Decision.ALLOW)
         if (
             tick.job_id is not None
-            and self._config_loader().persistent_crons.runs_while_awaiting_human(tick.job_id)
+            and self._config_loader().persistent_crons.runs_while_awaiting_human(
+                tick.job_id, hostname
+            )
         ):
             return BlockingResult(decision=Decision.ALLOW)
         logger.info(

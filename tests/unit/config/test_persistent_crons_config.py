@@ -140,3 +140,82 @@ class TestUnknownKeysAreRejected:
         rightly reject it as a call-site error otherwise."""
         with pytest.raises(ValidationError):
             PersistentCronConfig.model_validate({"id": "a", "schedual": "7 * * * *", "prompt": "p"})
+
+
+def _job(job_id: str, hosts: list[str] | None = None) -> PersistentCronConfig:
+    return PersistentCronConfig(id=job_id, schedule="7 * * * *", prompt="p", hosts=hosts)
+
+
+class TestHostsField:
+    """Plan 00470 Task 6.1: a job is global, or declared only where its hostname matches."""
+
+    def test_hosts_defaults_to_none_meaning_global(self) -> None:
+        assert _job("a").hosts is None
+
+    def test_a_list_of_names_and_globs_is_accepted(self) -> None:
+        assert _job("a", ["runner", "cchd-*"]).hosts == ["runner", "cchd-*"]
+
+    def test_an_empty_list_is_rejected_and_says_why(self) -> None:
+        with pytest.raises(ValidationError, match="runs nowhere"):
+            _job("a", [])
+
+    @pytest.mark.parametrize("bad", ["", "   "])
+    def test_a_blank_entry_is_rejected(self, bad: str) -> None:
+        with pytest.raises(ValidationError, match="non-empty"):
+            _job("a", ["ok", bad])
+
+    def test_a_non_string_entry_is_rejected(self) -> None:
+        with pytest.raises(ValidationError):
+            PersistentCronConfig.model_validate(
+                {"id": "a", "schedule": "7 * * * *", "prompt": "p", "hosts": [1]}
+            )
+
+    def test_entries_are_stripped(self) -> None:
+        assert _job("a", [" runner "]).hosts == ["runner"]
+
+
+class TestActiveJobsForAHostname:
+    def _section(self) -> PersistentCronsConfig:
+        return PersistentCronsConfig(
+            enabled=True,
+            jobs=[
+                _job("global"),
+                _job("exact", ["cchd-sdlc-runner"]),
+                _job("glob", ["cchd-*"]),
+                _job("elsewhere", ["other-host"]),
+            ],
+        )
+
+    def test_a_matching_hostname_keeps_global_exact_and_glob_jobs(self) -> None:
+        ids = [j.id for j in self._section().active_jobs("cchd-sdlc-runner")]
+        assert ids == ["global", "exact", "glob"]
+
+    def test_a_non_matching_hostname_keeps_only_the_global_job(self) -> None:
+        ids = [j.id for j in self._section().active_jobs("laptop")]
+        assert ids == ["global"]
+
+    def test_a_global_job_is_unaffected_by_the_hostname(self) -> None:
+        section = PersistentCronsConfig(enabled=True, jobs=[_job("global")])
+        assert [j.id for j in section.active_jobs("anything")] == ["global"]
+
+    def test_the_hostname_defaults_to_this_process_environment(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("HOOKS_DAEMON_HOSTNAME", "cchd-sdlc-runner")
+        assert [j.id for j in self._section().active_jobs()] == ["global", "exact", "glob"]
+
+    def test_a_job_awaiting_human_opt_out_follows_the_hostname(self) -> None:
+        section = PersistentCronsConfig(
+            enabled=True,
+            jobs=[
+                PersistentCronConfig(
+                    id="x",
+                    schedule="7 * * * *",
+                    prompt="p",
+                    hosts=["runner"],
+                    runs_while_awaiting_human=True,
+                )
+            ],
+        )
+        assert section.runs_while_awaiting_human("x", "runner") is True
+        assert section.runs_while_awaiting_human("x", "laptop") is False

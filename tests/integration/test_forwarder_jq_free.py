@@ -134,9 +134,16 @@ def _run_wrapper(
     pid_path: Path,
     *,
     strip_jq: bool = False,
+    extra_env: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess[bytes]:
     """Invoke a deployed wrapper against a fake live daemon socket."""
     env = os.environ.copy()
+    # The session hostname override is forwarded when set (Plan 00470 Task 6.1),
+    # so a developer session exporting it must not leak into the exact-payload
+    # assertions below.
+    env.pop("HOOKS_DAEMON_HOSTNAME", None)
+    env.pop("CCY_HOST_HOSTNAME", None)
+    env.update(extra_env or {})
     # ESTABLISH THE PREMISE the wrapper needs, rather than inheriting it.
     #
     # `init.sh` refuses to run inside the hooks-daemon repo unless self-install
@@ -313,6 +320,45 @@ def test_standard_wrapper_wraps_payload(
     request = json.loads(server.received)
     assert request["event"] == event
     assert request["hook_input"] == hook_input
+
+
+@pytest.mark.parametrize(
+    "env_vars,expected",
+    [
+        ({"HOOKS_DAEMON_HOSTNAME": "cchd-sdlc-runner"}, "cchd-sdlc-runner"),
+        ({"CCY_HOST_HOSTNAME": "laptop"}, "laptop"),
+        (
+            {"HOOKS_DAEMON_HOSTNAME": "cchd-sdlc-runner", "CCY_HOST_HOSTNAME": "laptop"},
+            "cchd-sdlc-runner",
+        ),
+    ],
+    ids=["hooks-daemon-hostname", "ccy-host-hostname", "precedence"],
+)
+@pytest.mark.parametrize("wrapper,event", [("stop", "Stop"), ("session-start", "SessionStart")])
+def test_session_hostname_override_is_forwarded(
+    wrapper: str,
+    event: str,
+    env_vars: dict[str, str],
+    expected: str,
+    sock_path: Path,
+    live_pid_file: Path,
+) -> None:
+    """The daemon's own environment is not the session's (Plan 00470 Task 6.1), so the
+    forwarder stamps the session's override on the payload as ``hooks_daemon_hostname``."""
+    server = _RecordingSocketServer(sock_path, b"{}\n")
+    server.start()
+    hook_input = {"hook_event_name": event, **_MAIN_PROBE}
+
+    result = _run_wrapper(
+        wrapper, json.dumps(hook_input).encode(), sock_path, live_pid_file, extra_env=env_vars
+    )
+    server.join()
+
+    assert result.returncode == 0, result.stderr.decode()
+    assert server.received is not None
+    sent = json.loads(server.received)["hook_input"]
+    assert sent["hooks_daemon_hostname"] == expected
+    assert {k: v for k, v in sent.items() if k != "hooks_daemon_hostname"} == hook_input
 
 
 # ---------------------------------------------------------------------------

@@ -293,3 +293,30 @@ class TestTheDeclaredPromptCarriesItsTickSentinel:
         assert "[tick:job:second-job]" in [line.strip() for line in context]
         assert "[tick:job:gh-issue-sdlc]" not in "\n".join(context)
         assert "owner stopped it" in "\n".join(context)
+
+
+class TestHostScopedJobs:
+    """Plan 00470 Task 6.1: only jobs declared for this host are listed to create."""
+
+    _RUNNER = PersistentCronConfig(
+        id="issue-sdlc",
+        schedule="23 * * * *",
+        prompt="Invoke the issue-sdlc skill and follow it exactly.",
+        hosts=["cchd-sdlc-runner"],
+    )
+
+    def test_a_non_matching_host_is_not_advised(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        handler = _handler(monkeypatch, _config(self._RUNNER))
+        assert handler.matches({"hooks_daemon_hostname": "laptop"}) is False
+
+    def test_a_matching_host_lists_the_job(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        handler = _handler(monkeypatch, _config(self._RUNNER))
+        payload: dict[str, Any] = {"hooks_daemon_hostname": "cchd-sdlc-runner"}
+        assert handler.matches(payload) is True
+        assert "issue-sdlc" in "\n".join(handler.handle(payload).context)
+
+    def test_only_the_matching_jobs_are_listed(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        handler = _handler(monkeypatch, _config(_JOB, self._RUNNER))
+        text = "\n".join(handler.handle({"hooks_daemon_hostname": "laptop"}).context)
+        assert "gh-issue-sdlc" in text
+        assert "  • issue-sdlc" not in text

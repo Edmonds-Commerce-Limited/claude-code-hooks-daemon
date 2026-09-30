@@ -436,3 +436,58 @@ class TestHandlerWiring:
         after it. A DENY still wins the final response via
         most-restrictive-wins; dispatch simply always continues."""
         assert CronStopEnforcerHandler().terminal is False
+
+
+_RUNNER_JOB = PersistentCronConfig(
+    id="issue-sdlc",
+    schedule="23 * * * *",
+    prompt="Invoke the issue-sdlc skill and follow it exactly.",
+    hosts=["cchd-sdlc-runner"],
+)
+
+
+def _stop_input(hostname: str | None = None) -> dict[str, Any]:
+    """A Stop payload reporting an empty (present) ``session_crons``; the daemon
+    stamps the session's hostname on it (Plan 00470 Task 6.1)."""
+    payload: dict[str, Any] = {"hook_event_name": "Stop", "session_crons": []}
+    if hostname is not None:
+        payload["hooks_daemon_hostname"] = hostname
+    return payload
+
+
+class TestHostScopedJobs:
+    """Plan 00470 Task 6.1: a job with ``hosts:`` is demanded only where it matches."""
+
+    def test_a_non_matching_host_is_not_demanded_a_job(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        handler = _handler(monkeypatch, _config(_RUNNER_JOB))
+        payload = _stop_input("laptop")
+        assert handler.matches(payload) is False
+        assert handler.handle(payload).decision == Decision.ALLOW
+
+    def test_a_matching_host_is_demanded_the_job(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        handler = _handler(monkeypatch, _config(_RUNNER_JOB))
+        payload = _stop_input("cchd-sdlc-runner")
+        assert handler.matches(payload) is True
+        result = handler.handle(payload)
+        assert result.decision == Decision.DENY
+        assert "issue-sdlc" in (result.reason or "")
+
+    def test_a_global_job_is_still_demanded_on_a_non_matching_host(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        handler = _handler(monkeypatch, _config(_JOB, _RUNNER_JOB))
+        result = handler.handle(_stop_input("laptop"))
+        assert result.decision == Decision.DENY
+        assert "gh-issue-sdlc" in (result.reason or "")
+        assert "issue-sdlc`" not in (result.reason or "").replace("gh-issue-sdlc", "")
+
+    def test_without_a_stamp_the_process_environment_decides(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("HOOKS_DAEMON_HOSTNAME", "cchd-sdlc-runner")
+        handler = _handler(monkeypatch, _config(_RUNNER_JOB))
+        assert handler.handle(_stop_input()).decision == Decision.DENY
+        monkeypatch.setenv("HOOKS_DAEMON_HOSTNAME", "laptop")
+        assert handler.handle(_stop_input()).decision == Decision.ALLOW

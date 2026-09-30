@@ -4975,13 +4975,15 @@ def _resolve_cron_pause_target(args: argparse.Namespace) -> tuple[str, str, Path
         project_path = get_project_path(None)
     config_file = project_path / ".claude" / "hooks-daemon.yaml"
     job_id = str(args.job).strip()
+    # This runs inside the session, so its own environment IS the session's.
     declared = [
         job.id for job in Config.load_or_default(config_file).persistent_crons.active_jobs()
     ]
     if job_id not in declared:
         listed = ", ".join(declared) if declared else "none"
         raise _CronPauseRefusedError(
-            f"'{job_id}' is not an active job under persistent_crons (active: {listed})."
+            f"'{job_id}' is not an active job under persistent_crons for this host "
+            f"(active here: {listed})."
         )
 
     # Same tolerance as approve-merge: an earlier step in this process may have

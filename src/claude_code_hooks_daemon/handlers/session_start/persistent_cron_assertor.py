@@ -39,6 +39,7 @@ from claude_code_hooks_daemon.constants.priority import Priority
 from claude_code_hooks_daemon.core import AdvisoryResult, Decision, ProjectContext
 from claude_code_hooks_daemon.core.handler_bases import SessionStartHandlerBase
 from claude_code_hooks_daemon.utils.cron_enforcement import declared_tick_prompt
+from claude_code_hooks_daemon.utils.cron_hosts import effective_hostname
 from claude_code_hooks_daemon.utils.cron_pause import (
     default_pauses_path,
     load_live_pauses,
@@ -99,12 +100,13 @@ class PersistentCronAssertorHandler(SessionStartHandlerBase):
             logger.debug("persistent_cron_assertor: cannot load %s: %s", config_path, exc)
             return Config()
 
-    def _active_jobs(self) -> list[PersistentCronConfig]:
-        return self._load_config().persistent_crons.active_jobs()
+    def _active_jobs(self, hook_input: dict[str, Any]) -> list[PersistentCronConfig]:
+        """The jobs declared for the session's hostname (``hosts:``, Plan 00470)."""
+        return self._load_config().persistent_crons.active_jobs(effective_hostname(hook_input))
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
-        """Fire only when the project has at least one active declared job."""
-        return bool(self._active_jobs())
+        """Fire only when the project has at least one active job declared for this host."""
+        return bool(self._active_jobs(hook_input))
 
     @staticmethod
     def _render_job(job: PersistentCronConfig) -> list[str]:
@@ -127,7 +129,7 @@ class PersistentCronAssertorHandler(SessionStartHandlerBase):
         same session (resume, clear, compact) must not ask for the job it was
         told to pause. A new session has a new id, so it is asked again.
         """
-        jobs = self._active_jobs()
+        jobs = self._active_jobs(hook_input)
         if not jobs:
             return AdvisoryResult(decision=Decision.ALLOW, context=[])
 
@@ -213,6 +215,10 @@ class PersistentCronAssertorHandler(SessionStartHandlerBase):
             "Inertness is controlled by ONE switch, `persistent_crons.enabled`, which "
             "is off by default and overrides each job's own `enabled` flag. A project "
             "that declares nothing gets nothing.\n\n"
+            "A job with `hosts:` (exact names or globs) is declared ONLY where this "
+            "session's hostname matches, so it is absent from the list elsewhere: "
+            "`HOOKS_DAEMON_HOSTNAME`, then `CCY_HOST_HOSTNAME`, then the system "
+            "hostname, as exported in the session. A job without `hosts:` is global.\n\n"
             "A job paused for this session with `hooks-daemon cron-pause` is left out "
             "of the list and stated as paused instead — do not re-create it. The pause "
             "belongs to one session, so a new session is asked for the job again."

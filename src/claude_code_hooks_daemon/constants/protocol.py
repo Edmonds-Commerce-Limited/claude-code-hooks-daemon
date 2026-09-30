@@ -50,6 +50,12 @@ class HookInputField:
     # directory and tells the agent to use for temporary files. Absent when
     # the harness provisioned none (a background session, an older client).
     SCRATCHPAD_DIR = "scratchpad_dir"
+    # NOT sent by Claude Code: the hostname override (HOOKS_DAEMON_HOSTNAME, then
+    # CCY_HOST_HOSTNAME) the SESSION exported, stamped on the payload by the
+    # init.sh transport or, on the byte-pump relay, by the daemon reading the
+    # connected process's environment. Absent when the session set neither.
+    # Consumed via utils.cron_hosts.effective_hostname (Plan 00470 Task 6.1).
+    SESSION_HOSTNAME = "hooks_daemon_hostname"
 
     # Tool-related fields (PreToolUse, PostToolUse)
     TOOL_NAME = "tool_name"

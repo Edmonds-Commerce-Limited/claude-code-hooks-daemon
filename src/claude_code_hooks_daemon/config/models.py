@@ -25,6 +25,7 @@ from claude_code_hooks_daemon.core.handler_scope import (
     HandlerScope,
     validate_scope_for_event,
 )
+from claude_code_hooks_daemon.utils.cron_hosts import effective_hostname, hostname_matches
 from claude_code_hooks_daemon.utils.repo_relative_path import (
     normalise_repo_relative_path as _normalise_repo_relative_path,
 )
@@ -2131,6 +2132,10 @@ class PersistentCronConfig(BaseModel):
         runs_while_awaiting_human: Whether this job's ticks are still delivered
             while the session has declared ``[awaiting-human]``. Default false:
             a declared job stands down with the marker.
+        hosts: Exact hostnames or fnmatch globs (``*``, ``?``, ``[...]``). A
+            job with ``hosts`` is declared ONLY where the effective hostname
+            matches one; None (the default) declares it everywhere. See
+            ``utils.cron_hosts`` for how the hostname is resolved.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -2147,6 +2152,39 @@ class PersistentCronConfig(BaseModel):
             "input (its work is independent of the pending question)"
         ),
     )
+    hosts: list[str] | None = Field(
+        default=None,
+        description=(
+            "Hostnames or globs this job is declared on; omit to declare it everywhere. "
+            "Matched against HOOKS_DAEMON_HOSTNAME, then CCY_HOST_HOSTNAME, then the "
+            "system hostname"
+        ),
+    )
+
+    @field_validator("hosts")
+    @classmethod
+    def require_usable_hosts(cls, value: list[str] | None) -> list[str] | None:
+        """Reject a ``hosts`` list that names nothing a hostname could match.
+
+        An empty list declares a job that runs nowhere: almost certainly a
+        mistake, and silently inert is the most expensive way to find out. A
+        blank entry is the same mistake one level down.
+        """
+        if value is None:
+            return None
+        if not value:
+            raise ValueError(
+                "hosts must not be empty: a job that runs nowhere is almost certainly a "
+                "mistake. Omit `hosts` to declare the job on every host"
+            )
+        stripped = [entry.strip() for entry in value]
+        if any(not entry for entry in stripped):
+            raise ValueError("hosts entries must be non-empty hostnames or globs")
+        return stripped
+
+    def declared_on(self, hostname: str) -> bool:
+        """Whether this job is declared for ``hostname``: global, or a matching ``hosts``."""
+        return self.hosts is None or hostname_matches(self.hosts, hostname)
 
     @field_validator("id", "prompt")
     @classmethod
@@ -2211,24 +2249,34 @@ class PersistentCronsConfig(BaseModel):
             seen.add(job.id)
         return self
 
-    def active_jobs(self) -> list[PersistentCronConfig]:
-        """The jobs to assert: none while the section switch is off.
+    def active_jobs(self, hostname: str | None = None) -> list[PersistentCronConfig]:
+        """The jobs to assert on ``hostname``: none while the section switch is off.
 
         The section switch deliberately overrides each job's own flag, so
         turning the mechanism off is one reliable action rather than an audit
-        of every declaration.
+        of every declaration. A job carrying ``hosts`` is left out wherever
+        ``hostname`` matches none of them (Plan 00470 Task 6.1).
+
+        Args:
+            hostname: The effective hostname. A caller holding a hook payload
+                passes ``effective_hostname(hook_input)`` so the session's own
+                value is used; None resolves it from this process's environment.
         """
         if not self.enabled:
             return []
-        return [job for job in self.jobs if job.enabled]
+        here = hostname if hostname is not None else effective_hostname()
+        return [job for job in self.jobs if job.enabled and job.declared_on(here)]
 
-    def runs_while_awaiting_human(self, job_id: str) -> bool:
+    def runs_while_awaiting_human(self, job_id: str, hostname: str | None = None) -> bool:
         """Whether the active job ``job_id`` opted out of the awaiting-human stand-down.
 
-        False for an unknown, disabled or undeclared job, so anything the
-        declaration does not positively vouch for stays suppressed.
+        False for an unknown, disabled or undeclared job (including one declared
+        only for other hosts), so anything the declaration does not positively
+        vouch for stays suppressed.
         """
-        return any(job.runs_while_awaiting_human for job in self.active_jobs() if job.id == job_id)
+        return any(
+            job.runs_while_awaiting_human for job in self.active_jobs(hostname) if job.id == job_id
+        )
 
 
 class PromotionConfig(BaseModel):

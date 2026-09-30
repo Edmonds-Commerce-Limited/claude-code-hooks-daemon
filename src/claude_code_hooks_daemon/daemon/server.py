@@ -19,7 +19,9 @@ import logging
 import os
 import shutil
 import signal
+import socket
 import stat
+import struct
 import sys
 import time
 from collections.abc import Callable, Iterator
@@ -41,6 +43,7 @@ from claude_code_hooks_daemon.daemon.paths import get_untracked_dir, is_pid_aliv
 from claude_code_hooks_daemon.daemon.payload_capture import capture_payload, resolve_capture_dir
 from claude_code_hooks_daemon.utils import secret_file_matching as sfm
 from claude_code_hooks_daemon.utils.cli_command import recovery_command
+from claude_code_hooks_daemon.utils.cron_hosts import hostname_override_of_process
 from claude_code_hooks_daemon.utils.log_elision import elide_record_arguments
 from claude_code_hooks_daemon.utils.scratch_dir import ensure_scratch_dir
 from claude_code_hooks_daemon.utils.secret_redaction import get_active_secret_terms, redact_text
@@ -191,6 +194,44 @@ def _pre_tool_use_transport_deny_response() -> dict[str, Any]:
             "permissionDecisionReason": _TRANSPORT_FAIL_CLOSED_REASON + recovery,
         }
     }
+
+
+def _peer_pid(writer: asyncio.StreamWriter) -> int | None:
+    """The pid of the process on the other end of a Unix socket, where the OS says.
+
+    ``SO_PEERCRED`` (Linux). None where it does not exist, or for a peer in
+    another PID namespace, which the kernel reports as 0.
+    """
+    peercred = getattr(socket, "SO_PEERCRED", None)
+    sock = writer.get_extra_info("socket")
+    if peercred is None or sock is None:
+        return None
+    try:
+        raw = sock.getsockopt(socket.SOL_SOCKET, peercred, struct.calcsize("3i"))
+    except OSError as exc:
+        logger.debug("SO_PEERCRED unavailable on this connection: %s", exc)
+        return None
+    pid: int = struct.unpack("3i", raw)[0]
+    return pid if pid > 0 else None
+
+
+def _stamp_session_hostname(hook_input: Any, writer: asyncio.StreamWriter) -> None:
+    """Stamp the session's hostname override on an event-socket payload (Plan 00470 Task 6.1).
+
+    ``persistent_crons`` jobs can carry ``hosts:``, matched against the hostname
+    the SESSION exported. This process's environment is not the session's, and
+    the relay (like ``nc``) copies bytes without parsing them, so the payload
+    carries nothing. The connected process IS the hook, with the session's
+    environment, so its override is read from it. A value already on the payload
+    (the python transport stamps its own) is never overwritten, and a session
+    that set neither variable stamps nothing.
+    """
+    if not isinstance(hook_input, dict) or HookInputField.SESSION_HOSTNAME in hook_input:
+        return
+    pid = _peer_pid(writer)
+    override = hostname_override_of_process(pid) if pid is not None else None
+    if override is not None:
+        hook_input[HookInputField.SESSION_HOSTNAME] = override
 
 
 def redacted_blocking_response(response_json: str) -> str:
@@ -1802,6 +1843,7 @@ class HooksDaemon:
                 writer.write(json.dumps(fail_response).encode())
                 await writer.drain()
             else:
+                _stamp_session_hostname(hook_input, writer)
                 await self._answer_event(
                     event_json_key, hook_input, writer, arrival_time=arrival_time
                 )

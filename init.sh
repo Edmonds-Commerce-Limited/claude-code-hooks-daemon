@@ -2725,6 +2725,19 @@ if event_name == 'Status' and isinstance(hook_input, dict):
         if _v is not None and _v.strip().isdigit():
             hook_input[_dst] = int(_v)
 
+# Forward the session's hostname override (Plan 00470 Task 6.1, issues #60 and
+# #62): a persistent_crons job may carry hosts:, matched against the hostname
+# the SESSION exported, and the daemon is a separate long-running process that
+# never inherits it. First non-empty of HOOKS_DAEMON_HOSTNAME then
+# CCY_HOST_HOSTNAME, as utils/cron_hosts.py resolves it; omitted when neither
+# is set, so the daemon falls back to the system hostname it shares.
+if isinstance(hook_input, dict):
+    for _name in ('HOOKS_DAEMON_HOSTNAME', 'CCY_HOST_HOSTNAME'):
+        _v = os.environ.get(_name, '').strip()
+        if _v:
+            hook_input['hooks_daemon_hostname'] = _v
+            break
+
 # Wrap into the daemon request envelope; newline-terminated as the daemon
 # expects. The envelope is one level deeper than the input, so input that
 # only just parsed can still be too deep to encode.

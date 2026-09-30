@@ -268,3 +268,22 @@ class TestASubagentIsNeverToldToCreateTheCoordinatorsCrons:
 
         assert scope_admits(stop.scope, payload) is True
         assert stop.handle(payload).decision is Decision.DENY
+
+
+class TestHostScopedJobs:
+    """Plan 00470 Task 6.1: the twin applies the same host filter as the Stop enforcer."""
+
+    _JOB_ON_RUNNER = PersistentCronConfig(
+        id="issue-sdlc",
+        schedule="23 * * * *",
+        prompt="Invoke the issue-sdlc skill and follow it exactly.",
+        hosts=["cchd-sdlc-runner"],
+    )
+
+    def test_a_non_matching_host_does_not_match(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        handler = _handler(monkeypatch, _config(self._JOB_ON_RUNNER))
+        assert handler.matches({"hooks_daemon_hostname": "laptop"}) is False
+
+    def test_a_matching_host_matches(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        handler = _handler(monkeypatch, _config(self._JOB_ON_RUNNER))
+        assert handler.matches({"hooks_daemon_hostname": "cchd-sdlc-runner"}) is True
