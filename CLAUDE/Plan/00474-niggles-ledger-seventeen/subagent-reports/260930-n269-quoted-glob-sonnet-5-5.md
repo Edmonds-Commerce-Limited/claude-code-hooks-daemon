@@ -62,7 +62,7 @@ context and the quarantine guard are unchanged.
 
 ## Verification
 
-- New: `tests/unit/utils/test_quoted_text_not_enumerated.py` (38 tests).
+- New: `tests/unit/utils/test_quoted_text_not_enumerated.py` (40 tests).
 - Ran with the neighbours: `test_glob_base_payload_cwd.py`, `test_secret_file_matching.py`,
   `test_shell_segmentation.py`, `test_secret_exemptions_reserved_words.py`,
   `test_secret_file_guard.py`, `test_quarantine_artefact_read_guard.py`: 1580 passed.
@@ -70,7 +70,9 @@ context and the quarantine guard are unchanged.
 
 ## Unverified
 
-- `llm_qa.py changed` result: see the coordinator message; it queued behind another agent's run.
+- `llm_qa.py changed --base main --allow-unmapped`: 28/28 passed on a still tree (3326 tests in 40
+  files; `shell_segmentation.py` is unmapped, so the full gate must cover it). A first run had
+  reformatted two files mid-run and was not recorded; the format was fixed and re-run.
 - The 1 MB timing tests in `test_secret_file_guard.py` passed, but the added tokenisation pass on a
   quoted command with something to mask was not separately measured.
 - `qa-n268`'s first grep (`FAILED|^.{0,40}_{5,}...`) never went red for me.
