@@ -7,27 +7,37 @@ machine-parseable output with pointers to detailed JSON.
 
 Usage:
     ./scripts/qa/llm_qa.py all              # Run every QA check in the suite
-    ./scripts/qa/llm_qa.py tests lint       # Run specific tools
+    ./scripts/qa/llm_qa.py changed          # Targeted: fast static tools + mapped tests
+    ./scripts/qa/llm_qa.py lint type_check  # Run specific tools
     ./scripts/qa/llm_qa.py --read-only all  # Summarize existing JSON only
+    ./scripts/qa/llm_qa.py main-moved BASE  # Batched gate: did main move in code?
+
+``all`` is the coordinator's full gate. A sub-agent runs ``changed`` or named
+tools, and ``subagent_full_qa_blocker`` denies it the full suite (Plan 00463).
 """
 
 from __future__ import annotations
 
 import fcntl
 import functools
+import hashlib
 import json
 import os
 import re
 import subprocess
 import sys
-from collections.abc import Callable, Generator
+from collections.abc import Callable, Generator, Mapping, Sequence
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Final, NamedTuple, TypeAlias
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 SCRIPTS_DIR = PROJECT_ROOT / "scripts" / "qa"
-QA_OUTPUT_DIR = PROJECT_ROOT / "untracked" / "qa"
+#: The QA output directory relative to a checkout root. This script runs under
+#: whatever python3 the shebang finds, before any venv, so it must not import
+#: the daemon package to derive this.
+QA_OUTPUT_RELATIVE: Final = Path("untracked") / "qa"
+QA_OUTPUT_DIR = PROJECT_ROOT / QA_OUTPUT_RELATIVE
 
 #: The canonical bash venv resolver, relative to a checkout root. It answers
 #: with the fingerprint-keyed ``untracked/venv-<fingerprint>/bin/python`` that
@@ -241,6 +251,164 @@ def run_lock(path: Path | str) -> Generator[None]:
         yield
     finally:
         os.close(fd)
+
+
+# ── Provenance: which tree a result judged ─────────────────────────
+# Plan 00463, review finding 3. `--read-only` is how a sub-agent reads the
+# coordinator's full run without running it, and nothing tied the JSON to a
+# commit: a green result from an older commit, or from before later edits,
+# read as a pass. Each run records, per tool, the tree it judged, the live
+# verdict and exit code, and the hash of the report it wrote. A read-only
+# summary FAILS a result recorded for any other tree or a report the run did
+# not write, and re-applies the recorded exit code (delta review N1: a crashed
+# tool's older green report once read as a pass).
+
+#: Per-tool record of the tree each result was produced from.
+PROVENANCE_FILE: Final[str] = "provenance.json"
+
+#: What a run records when the tree changed while it ran: matches no tree.
+_TREE_CHANGED_DURING_RUN: Final[str] = "changed-during-run"
+
+_STATE_HEAD: Final[str] = "head"
+_STATE_DIGEST: Final[str] = "tree_digest"
+_RECORD_PASSED: Final[str] = "passed"
+_RECORD_EXIT_CODE: Final[str] = "exit_code"
+_RECORD_OUTPUT_DIGEST: Final[str] = "output_sha256"
+_DIGEST_ALGORITHM: Final[str] = "sha256"
+_SHORT_SHA: Final[int] = 12
+_GIT_STATE_TIMEOUT_SECONDS: Final[int] = 60
+
+#: One tool's provenance entry, as JSON: the tree (str), the live verdict
+#: (bool), the exit code (int) and its report's hash (str, or None when the
+#: run wrote no report).
+ProvenanceRecord: TypeAlias = dict[str, str | bool | int | None]
+
+#: (exit code, stdout bytes) for one git call; injected in tests.
+GitBytesRunner = Callable[[list[str], Path], tuple[int, bytes]]
+
+
+def _run_git_bytes(args: list[str], root: Path) -> tuple[int, bytes]:
+    """One git call in ``root``; a failure to run is a non-zero result."""
+    try:
+        completed = subprocess.run(
+            ["git", *args],
+            capture_output=True,
+            cwd=str(root),
+            timeout=_GIT_STATE_TIMEOUT_SECONDS,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return 1, str(exc).encode()
+    return completed.returncode, completed.stdout
+
+
+def worktree_state(root: Path, *, git: GitBytesRunner = _run_git_bytes) -> dict[str, str] | None:
+    """HEAD plus a digest of every uncommitted change, or None when unreadable.
+
+    Two results match only when both the commit and the working tree do:
+    tracked edits through ``git diff HEAD``, new files through their names and
+    contents. Ignored files (``untracked/``, where results live) are not part
+    of it.
+    """
+    code, head = git(["rev-parse", "HEAD"], root)
+    if code != 0:
+        return None
+    code, diff = git(["diff", "HEAD", "--binary"], root)
+    if code != 0:
+        return None
+    code, untracked = git(["ls-files", "--others", "--exclude-standard", "-z"], root)
+    if code != 0:
+        return None
+    digest = hashlib.sha256(diff)
+    for name in sorted(entry for entry in untracked.split(b"\0") if entry):
+        digest.update(b"\0" + name + b"\0")
+        try:
+            # Streamed, so a large untracked artefact is never held whole.
+            with open(root / name.decode(), "rb") as handle:
+                digest.update(hashlib.file_digest(handle, _DIGEST_ALGORITHM).digest())
+        except (OSError, UnicodeDecodeError) as exc:
+            # Still part of the digest, as its failure: a file that cannot be
+            # read now and could later must not match its readable self.
+            digest.update(type(exc).__name__.encode())
+    return {_STATE_HEAD: head.decode().strip(), _STATE_DIGEST: digest.hexdigest()}
+
+
+def stale_reason(recorded: ProvenanceRecord | None, current: dict[str, str] | None) -> str | None:
+    """Why a recorded result does not describe the current tree, or None when it does."""
+    if current is None:
+        return "the working tree cannot be read (git failed), so no result can be tied to it"
+    if not recorded:
+        return "no record of which tree this result judged; re-run the tool"
+    recorded_head = str(recorded.get(_STATE_HEAD, ""))
+    current_head = current[_STATE_HEAD]
+    if recorded_head != current_head:
+        return (
+            f"recorded at {recorded_head[:_SHORT_SHA]}, but HEAD is "
+            f"{current_head[:_SHORT_SHA]}; re-run the tool"
+        )
+    if recorded.get(_STATE_DIGEST) != current[_STATE_DIGEST]:
+        return (
+            f"recorded at {current_head[:_SHORT_SHA]} with different uncommitted changes "
+            "(or the tree changed during that run); re-run the tool"
+        )
+    return None
+
+
+def output_reason(recorded: ProvenanceRecord, output: Path) -> str | None:
+    """Why the report on disk is not the one the recorded run wrote, or None when it is.
+
+    A run removes each tool's report before running it, so a tool that
+    crashed leaves nothing behind rather than an older green report.
+    """
+    if _RECORD_EXIT_CODE not in recorded:
+        return "the record carries no verdict for this result; re-run the tool"
+    expected = recorded.get(_RECORD_OUTPUT_DIGEST)
+    if expected is None:
+        return "the recorded run wrote no report; re-run the tool"
+    if output_digest(output) != expected:
+        return "the report on disk is not the one that run wrote; re-run the tool"
+    return None
+
+
+def output_digest(path: Path) -> str | None:
+    """The sha256 of a tool's report, or None when there is none."""
+    if not path.is_file():
+        return None
+    with open(path, "rb") as handle:
+        return hashlib.file_digest(handle, _DIGEST_ALGORITHM).hexdigest()
+
+
+def run_record(
+    state: dict[str, str], *, exit_code: int, passed: bool, output_sha256: str | None
+) -> ProvenanceRecord:
+    """One tool's entry: the tree it judged, its live verdict and its report's hash.
+
+    ``output_sha256`` is taken when the tool returns, not at the end of the
+    run, so a later tool that rewrites this report cannot be certified as it.
+    """
+    return {
+        **state,
+        _RECORD_PASSED: passed,
+        _RECORD_EXIT_CODE: exit_code,
+        _RECORD_OUTPUT_DIGEST: output_sha256,
+    }
+
+
+def read_provenance(qa_dir: Path) -> dict[str, ProvenanceRecord]:
+    """The per-tool record; missing or unreadable reads as no record at all."""
+    try:
+        data = json.loads((qa_dir / PROVENANCE_FILE).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def record_provenance(qa_dir: Path, records: Mapping[str, ProvenanceRecord]) -> None:
+    """Record each tool's entry, keeping the entries of tools not in ``records``."""
+    recorded = read_provenance(qa_dir)
+    recorded.update(records)
+    qa_dir.mkdir(parents=True, exist_ok=True)
+    (qa_dir / PROVENANCE_FILE).write_text(json.dumps(recorded, indent=2), encoding="utf-8")
 
 
 # A QA tool's parsed JSON report. Every tool writes its own schema, so the
@@ -512,6 +680,14 @@ TOOL_REGISTRY: dict[str, ToolConfig] = {
         json_file="input_contract.json",
         jq_hint="jq '.violations[] | {rule, event, subject, message}'",
     ),
+    # Targeted only (Plan 00463): pytest on the tests mapped from what changed
+    # since the merge base. Excluded from `all`, which runs the whole suite
+    # through `tests` and would run these a second time.
+    "changed_tests": ToolConfig(
+        command=_python("run_changed_tests.py", "--json"),
+        json_file="changed_tests.json",
+        jq_hint="jq '.tests[] | select(.outcome == \"failed\") | .name'",
+    ),
     # smoke_test MUST stay last: it probes the live daemon, so it belongs
     # after every static check has had its say. Pinned by
     # test_smoke_test_is_last_in_registry -- three tools were appended below
@@ -524,7 +700,33 @@ TOOL_REGISTRY: dict[str, ToolConfig] = {
     ),
 }
 
-ALL_TOOL_NAMES = list(TOOL_REGISTRY)
+#: Tools that exist for the targeted path only, and never run as part of `all`.
+_TARGETED_ONLY_TOOLS: Final[frozenset[str]] = frozenset({"changed_tests"})
+
+ALL_TOOL_NAMES = [name for name in TOOL_REGISTRY if name not in _TARGETED_ONLY_TOOLS]
+
+#: `changed`: what a sub-agent runs before handing a commit to the coordinator.
+#: The fast static tools, the project handlers' own suite (seconds), the tools
+#: `changed_tests_map.yaml` names as covering non-Python files, and the tests
+#: mapped from the change set. Never `tests`, which is the whole suite.
+CHANGED_TOOL_NAMES: Final[list[str]] = [
+    "magic_values",
+    "format",
+    "lint",
+    "type_check",
+    "pyright",
+    "error_hiding",
+    "project_handlers",
+    "docs_qa",
+    "plan_qa",
+    "shell_check",
+    "declared_invariant_pairs",
+    "changed_tests",
+]
+
+#: Selection words that expand to a tool list rather than naming one tool.
+_SELECTION_ALL: Final[str] = "all"
+_SELECTION_CHANGED: Final[str] = "changed"
 
 
 # ── Summarizers ────────────────────────────────────────────────────
@@ -605,23 +807,75 @@ def _summarize_tests(data: QaReport) -> str:
     unnamed_reason = s.get("unnamed_failure_reason")
     if unnamed_reason:
         line += f"\n   cause: {unnamed_reason}"
+    return line + _named_failures(data, "tests.json")
 
-    # Name the failures (Plan 00226). A count alone forces a full re-run to
-    # find out what broke, and a re-run may not reproduce an order-dependent
-    # failure — during Plan 00224 one of two real failures was never
-    # identified. Bounded so a mass breakage cannot flood the artifact. Each
-    # carries its first error line when one was recorded (00466 N196): ten
-    # errored tests named with no cause sent the reader to a raw shard log.
+
+def _named_failures(data: QaReport, json_file: str) -> str:
+    """The failing test names, one per line, or "" when there are none.
+
+    Named rather than counted (Plan 00226). A count alone forces a full re-run
+    to find out what broke, and a re-run may not reproduce an order-dependent
+    failure — during Plan 00224 one of two real failures was never
+    identified. Bounded so a mass breakage cannot flood the artifact. Each
+    carries its first error line when one was recorded (00466 N196): ten
+    errored tests named with no cause sent the reader to a raw shard log.
+    """
     failed = [t for t in data.get("tests", []) if t.get("outcome") == "failed" and t.get("name")]
     names = [f"{t['name']} - {t['reason']}" if t.get("reason") else t["name"] for t in failed]
     if not names:
-        return line
+        return ""
 
     shown = names[:_MAX_NAMED_FAILURES]
-    line += "\n   failed: " + "\n           ".join(shown)
+    text = "\n   failed: " + "\n           ".join(shown)
     if len(names) > len(shown):
-        line += f"\n           ... and {len(names) - len(shown)} more (see tests.json)"
-    return line
+        text += f"\n           ... and {len(names) - len(shown)} more (see {json_file})"
+    return text
+
+
+def _summarize_changed_tests(data: QaReport) -> str:
+    """The targeted run, saying outright when it ran nothing and what it could not map.
+
+    ``0 failed`` from an empty selection reads as a pass, and a sub-agent
+    handing that to the coordinator as evidence would be overstating it. An
+    unmapped file is NAMED, because a count is what agents skim past.
+    """
+    s = data.get("summary", {})
+    considered = s.get("files_considered", 0)
+    selected = s.get("test_files_selected", 0)
+    unmapped_files = [str(name) for name in data.get("unmapped", [])]
+    unmapped = len(unmapped_files)
+    if selected == 0:
+        line = (
+            f"no tests ran: no test files mapped from {considered} changed files "
+            f"({unmapped} unmapped)"
+        )
+    else:
+        errors = s.get("errors", 0)
+        error_part = f", {errors} errored" if errors else ""
+        line = (
+            f"{s.get('passed', 0)} passed, {s.get('failed', 0)} failed{error_part}, "
+            f"{s.get('skipped', 0)} skipped | {selected} test files from {considered} "
+            f"changed files ({unmapped} unmapped)"
+        )
+    if unmapped_files:
+        verdict = (
+            "allowed, the full gate must cover them"
+            if data.get("unmapped_allowed")
+            else (
+                "each FAILS the run: add a test, a changed_tests_map.yaml rule, "
+                "or pass --allow-unmapped"
+            )
+        )
+        reasons = data.get("unmapped_reasons", {})
+        shown = [
+            f"{name} [{reasons[name].get('reason')}]" if name in reasons else name
+            for name in unmapped_files[:_MAX_NAMED_FAILURES]
+        ]
+        more = unmapped - len(shown)
+        line += f"\n   unmapped ({verdict}): " + ", ".join(shown)
+        if more:
+            line += f" ... and {more} more (see changed_tests.json)"
+    return line + _named_failures(data, "changed_tests.json")
 
 
 def _summarize_security(data: QaReport) -> str:
@@ -803,6 +1057,7 @@ SUMMARIZERS: dict[str, Summarizer] = {
     "british_english": _summarize_violations,
     "semgrep": _summarize_violations,
     "project_handlers": _summarize_project_handlers,
+    "changed_tests": _summarize_changed_tests,
     "hook_contract": _summarize_hook_contract,
     "input_contract": _summarize_hook_contract,
 }
@@ -821,6 +1076,12 @@ _DETAIL_MISSING_WARNING: Final[str] = "⚠️  DETAIL MISSING:"
 
 # Prefix for an explanation the tool itself recorded.
 _REPORT_ERROR_LABEL: Final[str] = "⚠️  TOOL ERROR:"
+
+# Prefix for a `--read-only` result recorded for a different tree (Plan 00463).
+_STALE_LABEL: Final[str] = "⚠️  STALE:"
+
+#: Said by a run whose results cannot be tied to one tree.
+_TREE_WARNING_LABEL: Final[str] = "⚠️  NOT RECORDED FOR THIS TREE:"
 
 # Where a tool may record why it could not run. Two locations because the
 # shipped scripts genuinely use both: run_smoke_test.sh writes a top-level
@@ -970,11 +1231,11 @@ def ensure_live_daemon(tool: str) -> str | None:
     )
 
 
-def run_tool(name: str) -> int:
+def run_tool(name: str, extra_args: Sequence[str] = ()) -> int:
     """Run a QA tool, suppressing its stdout/stderr. Returns exit code."""
     config = TOOL_REGISTRY[name]
     result = subprocess.run(
-        resolved_command(config),
+        [*resolved_command(config), *extra_args],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
         cwd=str(PROJECT_ROOT),
@@ -982,16 +1243,29 @@ def run_tool(name: str) -> int:
     return result.returncode
 
 
-def summarize_tool(name: str, exit_code: int | None = None) -> tuple[bool, str]:
+def summarize_tool(
+    name: str, exit_code: int | None = None, *, stale: str | None = None
+) -> tuple[bool, str]:
     """Read JSON output and produce a 2-line summary.
 
     Args:
         name: Tool name from TOOL_REGISTRY.
         exit_code: Exit code from running the tool. If non-zero, overrides
             JSON pass/fail (catches cases where JSON lies about results).
+        stale: Why the recorded result does not describe the current tree
+            (``--read-only`` only). A stale result FAILS, however green.
 
     Returns (passed, formatted_summary_string).
     """
+    passed, text = _summarize_recorded(name, exit_code)
+    if stale is None:
+        return passed, text
+    marked = text.replace("✅", "❌", 1)
+    return False, f"{marked}   {_STALE_LABEL} {stale}\n"
+
+
+def _summarize_recorded(name: str, exit_code: int | None) -> tuple[bool, str]:
+    """The summary of the JSON on disk, before any provenance judgement."""
     config = TOOL_REGISTRY[name]
     json_path = QA_OUTPUT_DIR / config.json_file
 
@@ -1049,9 +1323,967 @@ def summarize_tool(name: str, exit_code: int | None = None) -> tuple[bool, str]:
 # ── CLI ────────────────────────────────────────────────────────────
 
 
+def resolve_tools(names: list[str]) -> tuple[list[str], list[str]]:
+    """Expand the selection words, keeping order and dropping repeats.
+
+    ``all`` anywhere means the full suite and nothing else: every other name is
+    already in it. ``changed`` expands to its targeted list, and a named tool
+    beside it is added once.
+
+    Returns:
+        ``(tools, unknown)``: the tools to run, and each name that is neither a
+        selection word nor a registered tool.
+    """
+    if _SELECTION_ALL in names:
+        return list(ALL_TOOL_NAMES), []
+    tools: list[str] = []
+    unknown: list[str] = []
+    for name in names:
+        expanded = CHANGED_TOOL_NAMES if name == _SELECTION_CHANGED else [name]
+        for tool in expanded:
+            if tool not in TOOL_REGISTRY:
+                unknown.append(tool)
+            elif tool not in tools:
+                tools.append(tool)
+    return tools, unknown
+
+
+#: Options `changed` forwards to `run_changed_tests.py` (Plan 00463).
+_BASE_OPTION: Final[str] = "--base"
+_RANGE_OPTION: Final[str] = "--range"
+_ALLOW_UNMAPPED_OPTION: Final[str] = "--allow-unmapped"
+_CHANGED_TESTS_TOOL: Final[str] = "changed_tests"
+#: Forwarded options that take a value, spelt ``--opt VALUE`` or ``--opt=VALUE``.
+_CHANGED_VALUE_OPTIONS: Final[tuple[str, ...]] = (_BASE_OPTION, _RANGE_OPTION)
+
+
+def split_changed_options(args: list[str]) -> tuple[list[str], list[str], str | None]:
+    """Take ``--base REF``, ``--range A..B`` and ``--allow-unmapped`` out for ``changed_tests``.
+
+    Returns:
+        ``(remaining, forwarded, error)``. An option given without a tool
+        that uses it is an error rather than a silently ignored flag.
+    """
+    remaining: list[str] = []
+    forwarded: list[str] = []
+    index = 0
+    while index < len(args):
+        argument = args[index]
+        index += 1
+        option, separator, value = argument.partition("=")
+        if argument == _ALLOW_UNMAPPED_OPTION:
+            forwarded.append(argument)
+        elif argument in _CHANGED_VALUE_OPTIONS:
+            if index >= len(args) or args[index].startswith("-"):
+                return args, [], f"{argument} needs a value"
+            forwarded.extend([argument, args[index]])
+            index += 1
+        elif separator and option in _CHANGED_VALUE_OPTIONS:
+            forwarded.extend([option, value])
+        else:
+            remaining.append(argument)
+    if forwarded:
+        tools, _ = resolve_tools(remaining)
+        if _CHANGED_TESTS_TOOL not in tools:
+            return (
+                args,
+                [],
+                (
+                    f"{_BASE_OPTION}, {_RANGE_OPTION} and {_ALLOW_UNMAPPED_OPTION} apply to "
+                    f"`{_SELECTION_CHANGED}` (changed_tests) only"
+                ),
+            )
+    return remaining, forwarded, None
+
+
+# ── main-moved: what must re-run when main moves during a batch ─────
+
+#: The subcommand (CLAUDE/QA.md, "The Batched Integration Gate"). ``main``
+#: moved after the batch base; the verdict names the recheck that makes the
+#: green run cover what would land.
+MAIN_MOVED_COMMAND: Final[str] = "main-moved"
+_START_OPTION: Final[str] = "--start"
+_RESTART_OPTION: Final[str] = "--restart"
+_ADVANCE_OPTION: Final[str] = "--advance"
+_FINISH_OPTION: Final[str] = "--finish"
+#: Every accepted option set; anything else is a usage error.
+_MAIN_MOVED_OPTION_SETS: Final[frozenset[frozenset[str]]] = frozenset(
+    {
+        frozenset(),
+        frozenset({_START_OPTION}),
+        frozenset({_START_OPTION, _RESTART_OPTION}),
+        frozenset({_ADVANCE_OPTION}),
+        frozenset({_FINISH_OPTION}),
+    }
+)
+_MAIN_MOVED_USAGE: Final[str] = (
+    f"Usage: llm_qa.py {MAIN_MOVED_COMMAND} [{_START_OPTION} [{_RESTART_OPTION}] | "
+    f"{_ADVANCE_OPTION} | {_FINISH_OPTION}] [MAIN_REF]  (MAIN_REF defaults to main)"
+)
+_DEFAULT_MAIN_REF: Final[str] = "main"
+
+VERDICT_UNMOVED: Final[str] = "unmoved"
+VERDICT_DOCS_ONLY: Final[str] = "docs-only"
+VERDICT_TARGETED: Final[str] = "targeted"
+VERDICT_FULL_GATE: Final[str] = "full-gate"
+#: The integration head is not the head a gate passed on a clean tree.
+VERDICT_HEAD_MOVED: Final[str] = "head-moved"
+#: Each verdict is an answer, not a failure, so each has its own exit code and
+#: a script can branch on it.
+EXIT_FULL_GATE: Final[int] = 4
+EXIT_DOCS_ONLY: Final[int] = 5
+EXIT_TARGETED: Final[int] = 6
+EXIT_HEAD_MOVED: Final[int] = 7
+_VERDICT_EXIT: Final[Mapping[str, int]] = {
+    VERDICT_UNMOVED: EXIT_SUCCESS,
+    VERDICT_DOCS_ONLY: EXIT_DOCS_ONLY,
+    VERDICT_TARGETED: EXIT_TARGETED,
+    VERDICT_FULL_GATE: EXIT_FULL_GATE,
+    VERDICT_HEAD_MOVED: EXIT_HEAD_MOVED,
+}
+
+#: What a docs-only move re-runs: checks that read documents and change nothing.
+#: The last four read the WHOLE tree, and a test runs each on this repository
+#: (``test_repo_hygiene_check`` and the like) while naming no file, so no
+#: mapping selects that test for a moved page: the checker runs instead.
+#: ``format`` is black, which checks Python and rewrites files, so it is not here.
+DOCS_ONLY_TOOL_NAMES: Final[list[str]] = [
+    "plan_qa",
+    "docs_qa",
+    "british_english",
+    "sensitive_content",
+    "repo_hygiene",
+    "doc_truth",
+    "doc_snippets",
+    "handler_reference",
+]
+
+#: THE runtime-read set, defined here only. Runtime code reads these, so no
+#: test mapping can clear a change to them: the guidance injector and every
+#: session read root ``CLAUDE.md``; the upgrade path reads ``CHANGELOG.md``,
+#: ``RELEASES/`` and ``CLAUDE/UPGRADES/``; Claude Code reads ``.claude/``
+#: (agents, skills, rules, settings, this project's config and handlers).
+RUNTIME_READ_FILES: Final[frozenset[str]] = frozenset({"CLAUDE.md", "CHANGELOG.md"})
+RUNTIME_READ_ROOTS: Final[tuple[str, ...]] = (".claude/", "RELEASES/", "CLAUDE/UPGRADES/")
+_DOCS_SUFFIX: Final[str] = ".md"
+_CODE_ROOTS: Final[tuple[str, ...]] = ("src/", "tests/", "scripts/")
+_SYMLINK_MODE: Final[str] = "120000"
+#: ``run_changed_tests``' reason for a file no test, rule or dependent covers.
+_UNCOVERED: Final[str] = "uncovered"
+
+#: How one moved path is judged.
+PATH_DOCS: Final[str] = "docs"
+PATH_TESTED: Final[str] = "tested"
+PATH_FULL: Final[str] = "full"
+_PATH_KINDS: Final[tuple[str, ...]] = (PATH_FULL, PATH_TESTED, PATH_DOCS)
+
+#: The batch base and the certified head live in git refs, not shell
+#: variables: they must survive between Bash calls, and refs are shared by
+#: every worktree of the checkout. The kind comes BEFORE the branch, so the
+#: refs mirror the branch namespace and cannot collide where branches cannot.
+_BASE_REF_TEMPLATE: Final[str] = "refs/integration/base/{branch}"
+_CERTIFIED_REF_TEMPLATE: Final[str] = "refs/integration/certified/{branch}"
+_SELECT_TIMEOUT_SECONDS: Final[int] = 600
+_RANGE_REPORT_KEY: Final[str] = "range"
+_MERGE_PARENTS: Final[int] = 2
+#: ``git status --porcelain``: "XY path", and X or Y of R/C for a rename/copy.
+_PORCELAIN_PATH_OFFSET: Final[int] = 3
+_PORCELAIN_COPY_OR_RENAME: Final[frozenset[str]] = frozenset({"R", "C"})
+
+
+class MainMovedError(RuntimeError):
+    """No verdict can be given, or the base cannot advance; the message says why."""
+
+
+class MovedPath(NamedTuple):
+    """One path the move changed, and whether either side of it is a symlink."""
+
+    path: str
+    symlink: bool
+
+
+class PathVerdict(NamedTuple):
+    """How one moved path is judged (``PATH_DOCS``/``TESTED``/``FULL``), and why."""
+
+    path: str
+    kind: str
+    why: str
+
+
+class MainMoved(NamedTuple):
+    """The verdict for ``base..main``, each path's judgement, and the reason.
+
+    ``head`` is the certified head, when HEAD is it: the exact commit that
+    lands. ``recheck_passed`` means ``main`` is already merged into it and
+    the recheck the verdict names has already passed on this tree, so only
+    ``--advance`` is left. ``merge_first`` means HEAD lacks the base itself.
+    """
+
+    verdict: str
+    base: str
+    main: str
+    paths: list[PathVerdict]
+    reason: str
+    head: str = ""
+    recheck_passed: bool = False
+    merge_first: bool = False
+
+
+#: ``(root, "A..B")`` to the ``run_changed_tests --select-only`` payload.
+Selector = Callable[[Path, str], Mapping[str, Any]]
+
+
+def is_runtime_read(path: str) -> bool:
+    """Whether runtime code reads ``path``, so only the full gate can clear it."""
+    return path in RUNTIME_READ_FILES or path.startswith(RUNTIME_READ_ROOTS)
+
+
+def _is_document(path: str) -> bool:
+    return path.endswith(_DOCS_SUFFIX) and not path.startswith(_CODE_ROOTS)
+
+
+def _needs_mapping(moved: MovedPath) -> bool:
+    return not moved.symlink and not is_runtime_read(moved.path) and _is_document(moved.path)
+
+
+def judge_path(moved: MovedPath, selection: Mapping[str, Any]) -> PathVerdict:
+    """Judge one moved path; ``selection`` is the mapper's answer for the range.
+
+    Only a document the mapper covers with no test and no tool beyond the doc
+    tools is docs-only. A document tests read is targeted. Everything else,
+    and anything the mapper cannot target or did not report, is the full gate.
+    """
+    path = moved.path
+    if is_runtime_read(path):
+        return PathVerdict(path, PATH_FULL, "read at runtime")
+    if moved.symlink:
+        return PathVerdict(path, PATH_FULL, "a symlink, so judged as what it points at")
+    if not _is_document(path):
+        return PathVerdict(path, PATH_FULL, "not a document outside src/, tests/ and scripts/")
+    reasons: Mapping[str, Any] = selection.get("unmapped_reasons", {})
+    if path in reasons:
+        reason = str(reasons[path].get("reason", ""))
+        if reason == _UNCOVERED:
+            return PathVerdict(path, PATH_DOCS, "no test reads it")
+        return PathVerdict(path, PATH_FULL, f"the mapper cannot target it ({reason})")
+    entry = next((item for item in selection.get("mapping", []) if item.get("file") == path), None)
+    if entry is None:
+        return PathVerdict(path, PATH_FULL, "the mapper did not report it")
+    tests = list(entry.get("tests", []))
+    if tests:
+        return PathVerdict(path, PATH_TESTED, f"{len(tests)} test file(s) read it")
+    other_tools = [tool for tool in entry.get("tools", []) if tool not in DOCS_ONLY_TOOL_NAMES]
+    if other_tools:
+        return PathVerdict(path, PATH_TESTED, f"checked by {', '.join(other_tools)}")
+    return PathVerdict(path, PATH_DOCS, "no test reads it")
+
+
+def combine_verdicts(judged: Sequence[PathVerdict]) -> str:
+    """One full path means the full gate; one tested document means targeted.
+
+    New commits that change no file (a commit and its revert) are docs-only,
+    not unmoved: ``--ff-only`` refuses until ``main`` is merged in.
+    """
+    kinds = {verdict.kind for verdict in judged}
+    if PATH_FULL in kinds:
+        return VERDICT_FULL_GATE
+    if PATH_TESTED in kinds:
+        return VERDICT_TARGETED
+    return VERDICT_DOCS_ONLY
+
+
+def required_tools(verdict: str) -> list[str]:
+    """What must have passed on the merged head before the base may advance."""
+    if verdict == VERDICT_DOCS_ONLY:
+        return list(DOCS_ONLY_TOOL_NAMES)
+    if verdict == VERDICT_TARGETED:
+        extra = [tool for tool in DOCS_ONLY_TOOL_NAMES if tool not in CHANGED_TOOL_NAMES]
+        return [*CHANGED_TOOL_NAMES, *extra]
+    if verdict in (VERDICT_FULL_GATE, VERDICT_HEAD_MOVED):
+        return list(ALL_TOOL_NAMES)
+    return []
+
+
+def _git_text(args: list[str], root: Path, git: GitBytesRunner, failure: str) -> str:
+    code, output = git(args, root)
+    if code != 0:
+        raise MainMovedError(f"{failure} (git {' '.join(args)} exited {code})")
+    return output.decode().strip()
+
+
+def _commit_of(ref: str, root: Path, git: GitBytesRunner) -> str:
+    return _git_text(
+        ["rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}"],
+        root,
+        git,
+        f"`{ref}` does not name a commit",
+    )
+
+
+def integration_branch(root: Path, git: GitBytesRunner = _run_git_bytes) -> str:
+    """The checked-out branch, which the batch base is kept for."""
+    code, output = git(["symbolic-ref", "--quiet", "--short", "HEAD"], root)
+    branch = output.decode().strip()
+    if code != 0 or not branch:
+        raise MainMovedError(
+            "HEAD is detached: the batch base is kept per integration branch, so run "
+            "this on the integration branch"
+        )
+    return branch
+
+
+def batch_base_ref(root: Path, git: GitBytesRunner = _run_git_bytes) -> str:
+    """The ref holding this integration branch's batch base."""
+    return _BASE_REF_TEMPLATE.format(branch=integration_branch(root, git))
+
+
+def certified_ref(root: Path, git: GitBytesRunner = _run_git_bytes) -> str:
+    """The ref holding the head a gate last passed on, for this integration branch."""
+    return _CERTIFIED_REF_TEMPLATE.format(branch=integration_branch(root, git))
+
+
+def _is_ancestor(older: str, newer: str, root: Path, git: GitBytesRunner) -> bool:
+    code, _ = git(["merge-base", "--is-ancestor", older, newer], root)
+    if code not in (0, 1):
+        raise MainMovedError(f"git merge-base --is-ancestor {older} {newer} exited {code}")
+    return code == 0
+
+
+def _ref_commit(ref: str, root: Path, git: GitBytesRunner) -> str | None:
+    """The commit ``ref`` holds, or None when it is not set."""
+    code, output = git(["rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}"], root)
+    return output.decode().strip() if code == 0 else None
+
+
+def _recorded_base(root: Path, git: GitBytesRunner) -> tuple[str, str]:
+    ref = batch_base_ref(root, git)
+    base = _ref_commit(ref, root, git)
+    if base is None:
+        raise MainMovedError(
+            f"no batch base is recorded in {ref}: run `llm_qa.py {MAIN_MOVED_COMMAND} "
+            f"{_START_OPTION}` on the integration branch when the batch is built"
+        )
+    return ref, base
+
+
+def uncommitted_paths(root: Path, git: GitBytesRunner = _run_git_bytes) -> list[str]:
+    """Tracked changes and untracked, not-ignored files: what ``--ff-only`` leaves behind."""
+    code, output = git(["status", "--porcelain", "-z", "--untracked-files=all"], root)
+    if code != 0:
+        raise MainMovedError(f"git status exited {code}, so the tree cannot be judged clean")
+    entries = iter(output.decode("utf-8", "surrogateescape").split("\0"))
+    paths = []
+    for entry in entries:
+        if not entry:
+            continue
+        paths.append(entry[_PORCELAIN_PATH_OFFSET:])
+        if _PORCELAIN_COPY_OR_RENAME & set(entry[:_PORCELAIN_PATH_OFFSET]):
+            # A rename or copy is followed by its source path, which carries no status.
+            next(entries, None)
+    return paths
+
+
+def _refuse_uncommitted(root: Path, git: GitBytesRunner, action: str) -> None:
+    dirty = uncommitted_paths(root, git)
+    if dirty:
+        shown = ", ".join(dirty[:3]) + (", ..." if len(dirty) > 3 else "")
+        raise MainMovedError(
+            f"{action}: the tree has uncommitted changes ({shown}), and --ff-only lands "
+            "only HEAD. Commit them (or remove them), then run the check again"
+        )
+
+
+def _delete_ref(ref: str, root: Path, git: GitBytesRunner) -> None:
+    if _ref_commit(ref, root, git) is not None:
+        _git_text(["update-ref", "-d", ref], root, git, f"could not delete {ref}")
+
+
+def start_batch(
+    root: Path,
+    main_ref: str = _DEFAULT_MAIN_REF,
+    *,
+    restart: bool = False,
+    git: GitBytesRunner = _run_git_bytes,
+) -> str:
+    """Record the newest ``main_ref`` commit this branch contains as the batch base.
+
+    A base already recorded is kept: a second start would move it forward past
+    code ``main`` added since, so that code would never meet the full gate.
+    ``restart`` is for a batch rebuilt from scratch only; it also clears the
+    certified head, so the full gate has to pass again.
+
+    Raises:
+        MainMovedError: a base exists and ``restart`` is not set, or git failed.
+    """
+    ref = batch_base_ref(root, git)
+    existing = _ref_commit(ref, root, git)
+    if existing is not None and not restart:
+        raise MainMovedError(
+            f"a batch base is already recorded in {ref} ({existing[:_SHORT_SHA]}). Another "
+            "start would move it past whatever main added since, and skip the full gate for "
+            f"it. Run {MAIN_MOVED_COMMAND} to judge that movement instead. Only for a batch "
+            f"rebuilt from scratch: {_START_OPTION} {_RESTART_OPTION}, which also clears the "
+            "certified head, so `llm_qa.py all` must pass again"
+        )
+    main = _commit_of(main_ref, root, git)
+    base = _git_text(
+        ["merge-base", "HEAD", main], root, git, f"this branch shares no history with {main_ref}"
+    )
+    _delete_ref(certified_ref(root, git), root, git)
+    _git_text(["update-ref", ref, base], root, git, f"could not record {ref}")
+    return base
+
+
+def certify_head(
+    root: Path, judged: dict[str, str] | None, *, git: GitBytesRunner = _run_git_bytes
+) -> str | None:
+    """Record HEAD as the head the full gate passed on, and return it.
+
+    ``judged`` is the tree the passing run judged; it must still be the tree,
+    and the tree must be clean, because ``--ff-only`` lands only HEAD. Outside
+    a batch (no branch, or no base recorded) nothing is recorded: None.
+
+    Raises:
+        MainMovedError: the tree is dirty or changed since the run judged it.
+    """
+    code, _ = git(["symbolic-ref", "--quiet", "HEAD"], root)
+    if code != 0 or _ref_commit(batch_base_ref(root, git), root, git) is None:
+        return None
+    _refuse_uncommitted(root, git, "the gate cannot certify this head")
+    if judged is None or worktree_state(root, git=git) != judged:
+        raise MainMovedError(
+            "the gate cannot certify this head: the tree changed since the run judged it"
+        )
+    head = _commit_of("HEAD", root, git)
+    ref = certified_ref(root, git)
+    _git_text(["update-ref", ref, head], root, git, f"could not record {ref}")
+    return head
+
+
+def _head_uncertified(root: Path, git: GitBytesRunner) -> str | None:
+    """Why HEAD is not the head a gate passed on a clean tree, or None when it is."""
+    certified = _ref_commit(certified_ref(root, git), root, git)
+    if certified is None:
+        return (
+            "no full gate has passed on this branch since the batch base was recorded: "
+            f"run `llm_qa.py {_SELECTION_ALL}` on a clean tree"
+        )
+    dirty = uncommitted_paths(root, git)
+    if dirty:
+        return (
+            f"the tree has uncommitted changes ({', '.join(dirty[:3])}), which --ff-only "
+            f"would not land: commit or remove them, then run `llm_qa.py {_SELECTION_ALL}`"
+        )
+    head = _commit_of("HEAD", root, git)
+    if head != certified:
+        return (
+            f"HEAD {head[:_SHORT_SHA]} is not the head the gate passed "
+            f"({certified[:_SHORT_SHA]}): something was committed or merged after it. "
+            f"Run `llm_qa.py {_SELECTION_ALL}` on this head"
+        )
+    return None
+
+
+def moved_paths(
+    base: str, tip: str, root: Path, git: GitBytesRunner = _run_git_bytes
+) -> list[MovedPath]:
+    """Every path ``git diff base tip`` changed, a rename as both of its paths."""
+    code, output = git(["diff", "--raw", "--no-renames", "--no-abbrev", "-z", base, tip], root)
+    if code != 0:
+        raise MainMovedError(f"git diff {base} {tip} exited {code}")
+    fields = output.decode("utf-8", "surrogateescape").split("\0")
+    moved: list[MovedPath] = []
+    for header, path in zip(fields[0::2], fields[1::2], strict=False):
+        if not header.startswith(":") or not path:
+            continue
+        modes = header[1:].split()[:2]
+        moved.append(MovedPath(path, _SYMLINK_MODE in modes))
+    return moved
+
+
+def select_range(root: Path, spec: str) -> Mapping[str, Any]:
+    """Ask ``run_changed_tests`` which tests read each file ``spec`` changed."""
+    try:
+        command = [
+            str(venv_python()),
+            str(SCRIPTS_DIR / "run_changed_tests.py"),
+            "--root",
+            str(root),
+            "--range",
+            spec,
+            "--select-only",
+        ]
+        completed = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            cwd=str(root),
+            timeout=_SELECT_TIMEOUT_SECONDS,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired, VenvResolutionError) as exc:
+        raise MainMovedError(f"run_changed_tests --select-only did not run: {exc}") from exc
+    if completed.returncode != 0:
+        raise MainMovedError(
+            f"run_changed_tests --select-only failed: {completed.stderr.strip() or 'no output'}"
+        )
+    try:
+        payload = json.loads(completed.stdout)
+    except ValueError as exc:
+        raise MainMovedError(f"run_changed_tests --select-only printed no JSON: {exc}") from exc
+    if not isinstance(payload, dict):
+        raise MainMovedError("run_changed_tests --select-only printed no selection")
+    return payload
+
+
+def _judge_range(
+    base: str, tip: str, root: Path, git: GitBytesRunner, select: Selector
+) -> tuple[str, list[PathVerdict], str]:
+    if not _is_ancestor(base, tip, root, git):
+        return (
+            VERDICT_FULL_GATE,
+            [],
+            f"the base {base[:_SHORT_SHA]} is not an ancestor of {tip[:_SHORT_SHA]}: main "
+            "was rewritten, so there is no change set to judge",
+        )
+    moved = moved_paths(base, tip, root, git)
+    selection = select(root, f"{base}..{tip}") if any(map(_needs_mapping, moved)) else {}
+    judged = [judge_path(path, selection) for path in moved]
+    if not judged:
+        reason = "new commits that change no file; --ff-only still needs main merged in"
+    else:
+        counts = {kind: sum(1 for j in judged if j.kind == kind) for kind in _PATH_KINDS}
+        reason = (
+            f"{len(judged)} moved path(s): {counts[PATH_FULL]} need the full gate, "
+            f"{counts[PATH_TESTED]} are read by tests, {counts[PATH_DOCS]} are documents only"
+        )
+    return combine_verdicts(judged), judged, reason
+
+
+def main_moved(
+    root: Path,
+    main_ref: str = _DEFAULT_MAIN_REF,
+    *,
+    git: GitBytesRunner = _run_git_bytes,
+    select: Selector = select_range,
+    qa_dir: Path | None = None,
+) -> MainMoved:
+    """The verdict for what would land: this head, plus what ``main_ref`` changed.
+
+    The integration head comes first: unless HEAD is the head a gate passed on
+    a clean tree, the verdict is ``head-moved`` whatever ``main`` did, save
+    when all HEAD adds to that head is ``main`` merged in, which is judged as
+    that movement (review 6 m8). It is also ``head-moved`` when ``main`` is
+    still the base but HEAD does not contain it (review 5 n2): ``--ff-only``
+    would refuse, and running the check again would only say the same thing.
+
+    Raises:
+        MainMovedError: no base is recorded, a ref does not resolve, or git or
+            the mapper cannot answer.
+    """
+    _, base = _recorded_base(root, git)
+    main = _commit_of(main_ref, root, git)
+    head_reason = _head_uncertified(root, git)
+    if head_reason is not None:
+        merged_in = _main_merged_since_certified(root, main_ref, base, main, git, select, qa_dir)
+        return merged_in or MainMoved(VERDICT_HEAD_MOVED, base, main, [], head_reason)
+    head = _commit_of("HEAD", root, git)
+    contains_main = _is_ancestor(main, head, root, git)
+    if main == base and not contains_main:
+        reason = (
+            f"HEAD does not contain {main_ref} {main[:_SHORT_SHA]}, the batch base: its merge "
+            f"was backed out, so --ff-only would refuse. Merge it back in, then run "
+            f"`llm_qa.py {_SELECTION_ALL}` on the merged head"
+        )
+        return MainMoved(VERDICT_HEAD_MOVED, base, main, [], reason, head, merge_first=True)
+    if main == base:
+        reason = f"{main_ref} is still the batch base"
+        return MainMoved(VERDICT_UNMOVED, base, main, [], reason, head)
+    verdict, judged, reason = _judge_range(base, main, root, git, select)
+    qa = qa_dir if qa_dir is not None else root / QA_OUTPUT_RELATIVE
+    recheck_passed = contains_main and not _uncertified(verdict, (base, main), root, qa, git)
+    return MainMoved(verdict, base, main, judged, reason, head, recheck_passed)
+
+
+def certification_reason(
+    record: ProvenanceRecord | None, current: dict[str, str] | None, output: Path
+) -> str | None:
+    """Why a recorded result does not certify a PASS on the current tree, or None."""
+    stale = stale_reason(record, current)
+    if stale is not None or record is None:
+        return stale
+    return output_reason(record, output) or recorded_failure_reason(record)
+
+
+def recorded_failure_reason(record: ProvenanceRecord) -> str | None:
+    """Why the recorded run itself failed, or None when it passed."""
+    if record.get(_RECORD_PASSED) is not True or record.get(_RECORD_EXIT_CODE) != 0:
+        return "the recorded run did not pass; fix it and re-run the tool"
+    return None
+
+
+def _recorded_range(report: Path) -> str | None:
+    """The ``--range`` a ``changed_tests`` report was run over, or None for none."""
+    if not report.is_file():
+        return None
+    try:
+        data = json.loads(report.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise MainMovedError(f"{report} cannot be read as a report: {exc}") from exc
+    value = data.get(_RANGE_REPORT_KEY) if isinstance(data, dict) else None
+    return value if isinstance(value, str) else None
+
+
+def _range_commits(spec: str, root: Path, git: GitBytesRunner) -> tuple[str, str] | None:
+    """Both ends of ``A..B`` as commits, or None when it is not such a range."""
+    older, separator, newer = spec.partition("..")
+    if not separator or not older or not newer or newer.startswith("."):
+        return None
+    ends = [_ref_commit(end, root, git) for end in (older, newer)]
+    if ends[0] is None or ends[1] is None:
+        return None
+    return ends[0], ends[1]
+
+
+def _uncertified(
+    verdict: str, commits: tuple[str, str], root: Path, qa_dir: Path, git: GitBytesRunner
+) -> list[str]:
+    current = worktree_state(root, git=git)
+    records = read_provenance(qa_dir)
+    problems = []
+    for name in required_tools(verdict):
+        output = qa_dir / TOOL_REGISTRY[name].json_file
+        reason = certification_reason(records.get(name), current, output)
+        if reason is not None:
+            problems.append(f"{name}: {reason}")
+    if verdict == VERDICT_TARGETED and not problems:
+        ran = _recorded_range(qa_dir / TOOL_REGISTRY[_CHANGED_TESTS_TOOL].json_file)
+        if ran is None or _range_commits(ran, root, git) != commits:
+            problems.append(
+                f"{_CHANGED_TESTS_TOOL} ran over {ran or 'no range'}; run it with "
+                f"{_RANGE_OPTION} {commits[0]}..{commits[1]}"
+            )
+    return problems
+
+
+def _merge_edits(merge: str, root: Path, git: GitBytesRunner) -> list[str]:
+    """Paths ``merge`` holds that differ from git's own merge of its parents.
+
+    Those are a conflict's resolution, or an edit made inside the merge.
+    """
+    parents = _git_text(
+        ["rev-list", "--parents", "-n", "1", merge], root, git, f"cannot read {merge}"
+    ).split()[1:]
+    if len(parents) != _MERGE_PARENTS:
+        raise MainMovedError(
+            f"{merge[:_SHORT_SHA]} merges {len(parents)} parents; only a two-parent merge "
+            f"of main can be judged. Run `llm_qa.py {_SELECTION_ALL}`"
+        )
+    code, output = git(["merge-tree", "--write-tree", "--no-messages", *parents], root)
+    if code not in (0, 1):
+        raise MainMovedError(f"git merge-tree for {merge[:_SHORT_SHA]} exited {code}")
+    automatic = output.decode().split("\n", 1)[0].strip()
+    names = _git_text(
+        ["diff", "--name-only", "-z", "--no-renames", automatic, merge],
+        root,
+        git,
+        f"cannot compare {merge[:_SHORT_SHA]} with its automatic merge",
+    )
+    return [name for name in names.split("\0") if name]
+
+
+def _work_beside_main(
+    certified: str, merged: str, moved: Sequence[str], root: Path, git: GitBytesRunner
+) -> str | None:
+    """Why HEAD holds something since ``certified`` that is not ``main`` merged in, or None.
+
+    A commit that is not a merge is new work no recheck covers, and so is an
+    edit inside a merge on a path ``main`` did not move: both need the gate.
+    """
+    if not _is_ancestor(certified, "HEAD", root, git):
+        return (
+            f"the certified head {certified[:_SHORT_SHA]} is not in this branch's history: "
+            f"run `llm_qa.py {_SELECTION_ALL}`"
+        )
+    listed = _git_text(
+        ["rev-list", "--parents", f"{certified}..HEAD", "--not", merged],
+        root,
+        git,
+        "cannot list the commits since the certified head",
+    )
+    moved_set = set(moved)
+    for line in filter(None, listed.splitlines()):
+        commit, *parents = line.split()
+        if len(parents) < _MERGE_PARENTS:
+            return (
+                f"HEAD holds {commit[:_SHORT_SHA]}, a commit that is not a merge of main: "
+                f"the gate never judged it. Run `llm_qa.py {_SELECTION_ALL}`"
+            )
+        try:
+            edits = _merge_edits(commit, root, git)
+        except MainMovedError as exc:
+            return str(exc)
+        outside = [path for path in edits if path not in moved_set]
+        if outside:
+            return (
+                f"the merge {commit[:_SHORT_SHA]} changes {', '.join(outside[:3])}, which "
+                f"main did not move, so no recheck covers it. Run `llm_qa.py {_SELECTION_ALL}`"
+            )
+    return None
+
+
+def _main_merged_since_certified(
+    root: Path,
+    main_ref: str,
+    base: str,
+    main: str,
+    git: GitBytesRunner,
+    select: Selector,
+    qa_dir: Path | None,
+) -> MainMoved | None:
+    """The movement of ``main`` when all HEAD holds past the certified head is ``main`` merged.
+
+    The coordinator merges ``main``, passes its recheck, and may check again
+    before ``--advance`` (review 6 m8). HEAD is then past the certified head,
+    but only by what the recheck covers, so the verdict is that movement and
+    its recheck, not ``head-moved`` and a second full gate. None when there
+    is no certified head, the tree is dirty, nothing of ``main`` is merged
+    since the base, or HEAD holds other work.
+    """
+    certified = _ref_commit(certified_ref(root, git), root, git)
+    if certified is None or uncommitted_paths(root, git):
+        return None
+    merged = _git_text(
+        ["merge-base", "HEAD", main], root, git, f"this branch shares no history with {main_ref}"
+    )
+    if merged == base:
+        return None
+    verdict, judged, reason = _judge_range(base, merged, root, git, select)
+    if _work_beside_main(certified, merged, [path.path for path in judged], root, git):
+        return None
+    qa = qa_dir if qa_dir is not None else root / QA_OUTPUT_RELATIVE
+    recheck_passed = not _uncertified(verdict, (base, merged), root, qa, git)
+    head = _commit_of("HEAD", root, git)
+    reason = f"HEAD holds {main_ref} merged in since the certified head, and nothing else: {reason}"
+    return MainMoved(verdict, base, merged, judged, reason, head, recheck_passed)
+
+
+def _only_main_merged(
+    certified: str, merged: str, moved: Sequence[str], root: Path, git: GitBytesRunner
+) -> None:
+    """Refuse when HEAD holds anything since ``certified`` that is not ``main`` merged in."""
+    reason = _work_beside_main(certified, merged, moved, root, git)
+    if reason is not None:
+        raise MainMovedError(reason)
+
+
+def advance_batch(
+    root: Path,
+    main_ref: str = _DEFAULT_MAIN_REF,
+    *,
+    git: GitBytesRunner = _run_git_bytes,
+    select: Selector = select_range,
+    qa_dir: Path | None = None,
+) -> str:
+    """Move the base to the newest ``main_ref`` commit merged in, once its recheck passed.
+
+    The recheck is the one the verdict for ``base..merged`` names, and it must
+    have PASSED on the current tree (the provenance ``--read-only`` trusts).
+    The tree must be clean, and HEAD must hold nothing since the certified
+    head but ``main`` merged in; then HEAD becomes the certified head.
+
+    Raises:
+        MainMovedError: the tree is dirty, nothing new is merged in, HEAD holds
+            work the gate never judged, or the recheck has not passed.
+    """
+    _refuse_uncommitted(root, git, "the base cannot advance")
+    ref, base = _recorded_base(root, git)
+    main = _commit_of(main_ref, root, git)
+    merged = _git_text(
+        ["merge-base", "HEAD", main], root, git, f"this branch shares no history with {main_ref}"
+    )
+    if merged == base:
+        raise MainMovedError(
+            f"nothing to advance: no {main_ref} commit after the base {base[:_SHORT_SHA]} is "
+            f"merged into this branch. Merge it in (git merge --no-edit {main_ref}), run the "
+            "recheck the verdict names, then advance"
+        )
+    certified_name = certified_ref(root, git)
+    certified = _ref_commit(certified_name, root, git)
+    if certified is None:
+        raise MainMovedError(
+            "no full gate has passed on this branch since the batch base was recorded: "
+            f"run `llm_qa.py {_SELECTION_ALL}` on a clean tree first"
+        )
+    verdict, judged, _ = _judge_range(base, merged, root, git, select)
+    _only_main_merged(certified, merged, [path.path for path in judged], root, git)
+    qa = qa_dir if qa_dir is not None else root / QA_OUTPUT_RELATIVE
+    problems = _uncertified(verdict, (base, merged), root, qa, git)
+    if problems:
+        raise MainMovedError(
+            f"the base stays at {base[:_SHORT_SHA]}: the {verdict} recheck has not passed "
+            f"on this tree. " + "; ".join(problems)
+        )
+    head = _commit_of("HEAD", root, git)
+    _git_text(["update-ref", ref, merged, base], root, git, f"could not move {ref}")
+    _git_text(
+        ["update-ref", certified_name, head, certified],
+        root,
+        git,
+        f"could not move {certified_name}",
+    )
+    return merged
+
+
+def finish_batch(
+    root: Path, main_ref: str = _DEFAULT_MAIN_REF, *, git: GitBytesRunner = _run_git_bytes
+) -> None:
+    """Delete the batch refs once ``main_ref`` is exactly the certified head.
+
+    ``main_ref`` must BE the certified head, or a two-parent merge of it into
+    a commit it already contains, whose tree is the certified tree (review 5
+    m5, review 6 n3). A descendant is not enough: a late commit landed with it
+    was never judged, and removing the refs would erase the evidence of that.
+
+    Raises:
+        MainMovedError: there is no certified head, or what landed is not it.
+    """
+    certified_name = certified_ref(root, git)
+    certified = _ref_commit(certified_name, root, git)
+    if certified is None:
+        raise MainMovedError(f"no certified head is recorded in {certified_name}")
+    main = _commit_of(main_ref, root, git)
+    if main != certified and not _merges_exactly(main, certified, root, git):
+        raise MainMovedError(
+            f"{main_ref} is at {main[:_SHORT_SHA]}, which is not the certified head "
+            f"{certified[:_SHORT_SHA]} nor a two-parent merge of it into what it contains, with "
+            "its tree: what landed is not what the gate passed. Land exactly that head "
+            f"(git merge --ff-only {certified}) before finishing"
+        )
+    _delete_ref(batch_base_ref(root, git), root, git)
+    _delete_ref(certified_name, root, git)
+
+
+def _merges_exactly(merge: str, certified: str, root: Path, git: GitBytesRunner) -> bool:
+    """Whether ``merge`` is a merge of ``certified`` that lands exactly it.
+
+    Two parents: ``certified``, and a commit ``certified`` already contains
+    (``main`` as it was, merged with ``--no-ff``); and the certified tree. A
+    same-tree child with one parent, an octopus and a merge with another line
+    of work are not a landing of the certified head (review 6 n3).
+    """
+    parents = _git_text(
+        ["rev-list", "--parents", "-n", "1", merge], root, git, f"cannot read {merge}"
+    ).split()[1:]
+    if len(parents) != _MERGE_PARENTS or certified not in parents:
+        return False
+    other = next(parent for parent in parents if parent != certified)
+    if not _is_ancestor(other, certified, root, git):
+        return False
+    trees = [
+        _git_text(["rev-parse", f"{commit}^{{tree}}"], root, git, f"cannot read {commit}")
+        for commit in (merge, certified)
+    ]
+    return trees[0] == trees[1]
+
+
+def _recheck_command(outcome: MainMoved) -> str:
+    if outcome.verdict == VERDICT_DOCS_ONLY:
+        return f"./scripts/qa/llm_qa.py {' '.join(DOCS_ONLY_TOOL_NAMES)}"
+    if outcome.verdict == VERDICT_TARGETED:
+        extra = [tool for tool in DOCS_ONLY_TOOL_NAMES if tool not in CHANGED_TOOL_NAMES]
+        return (
+            f"./scripts/qa/llm_qa.py {_SELECTION_CHANGED} {' '.join(extra)} "
+            f"{_RANGE_OPTION} {outcome.base}..{outcome.main}"
+        )
+    return f"./scripts/qa/llm_qa.py {_SELECTION_ALL}"
+
+
+def _print_verdict(outcome: MainMoved, main_ref: str, root: Path) -> None:
+    print(f"VERDICT: {outcome.verdict}")
+    print(
+        f"  {outcome.reason} (base {outcome.base[:_SHORT_SHA]}, {main_ref} {outcome.main[:_SHORT_SHA]})"
+    )
+    for judged in outcome.paths:
+        print(f"  [{judged.kind}] {judged.path}: {judged.why}")
+    if outcome.verdict == VERDICT_UNMOVED:
+        print(
+            f"NEXT: from the main checkout, git merge --ff-only {outcome.head} (the certified "
+            f"head of {integration_branch(root)}), then push. If --ff-only refuses, {main_ref} "
+            "moved again: run this command again."
+        )
+    elif outcome.verdict == VERDICT_HEAD_MOVED:
+        print("NEXT, in this integration worktree, on a clean tree:")
+        steps = [
+            *([f"git merge --no-edit {main_ref}"] if outcome.merge_first else []),
+            f"{_recheck_command(outcome)}   (a pass certifies this head)",
+            f"./scripts/qa/llm_qa.py {MAIN_MOVED_COMMAND}   (again)",
+        ]
+        for number, step in enumerate(steps, 1):
+            print(f"  {number}. {step}")
+    elif outcome.recheck_passed:
+        print(
+            f"NEXT, in this integration worktree ({main_ref} is merged in and its recheck "
+            "already passed on this tree):"
+        )
+        print(f"  1. ./scripts/qa/llm_qa.py {MAIN_MOVED_COMMAND} {_ADVANCE_OPTION}")
+        print(f"  2. ./scripts/qa/llm_qa.py {MAIN_MOVED_COMMAND}   (again, until unmoved)")
+    else:
+        print("NEXT, in this integration worktree:")
+        # Merge the exact commit judged (outcome.main), not main_ref: if
+        # main_ref has moved further since, merging it would put HEAD past
+        # what the recheck below covers, wasting the recheck (review 7 m5).
+        print(f"  1. git merge --no-edit {outcome.main}")
+        print(f"  2. {_recheck_command(outcome)}")
+        print(f"  3. ./scripts/qa/llm_qa.py {MAIN_MOVED_COMMAND} {_ADVANCE_OPTION}")
+        print(f"  4. ./scripts/qa/llm_qa.py {MAIN_MOVED_COMMAND}   (again, until unmoved)")
+    print("CI on the pushed head is the second line, not a substitute for this gate.")
+
+
+def main_moved_command(args: Sequence[str], *, root: Path = PROJECT_ROOT) -> int:
+    """``llm_qa.py main-moved [--start [--restart] | --advance | --finish] [MAIN_REF]``."""
+    options = [arg for arg in args if arg.startswith("-")]
+    refs = [arg for arg in args if not arg.startswith("-")]
+    chosen = frozenset(options)
+    if len(chosen) != len(options) or chosen not in _MAIN_MOVED_OPTION_SETS or len(refs) > 1:
+        print(_MAIN_MOVED_USAGE, file=sys.stderr)
+        return EXIT_FAILURE
+    main_ref = refs[0] if refs else _DEFAULT_MAIN_REF
+    try:
+        if _START_OPTION in chosen:
+            base = start_batch(root, main_ref, restart=_RESTART_OPTION in chosen)
+            print(f"BATCH BASE: {base} recorded in {batch_base_ref(root)}")
+            print(f"NEXT: ./scripts/qa/llm_qa.py {_SELECTION_ALL}   (a pass certifies the head)")
+            return EXIT_SUCCESS
+        if _ADVANCE_OPTION in chosen:
+            advanced = advance_batch(root, main_ref)
+            print(
+                f"BATCH BASE: advanced to {advanced}; this head is certified. "
+                f"Run {MAIN_MOVED_COMMAND} again."
+            )
+            return EXIT_SUCCESS
+        if _FINISH_OPTION in chosen:
+            finish_batch(root, main_ref)
+            print(f"BATCH: landed on {main_ref}; the batch refs are removed.")
+            return EXIT_SUCCESS
+        outcome = main_moved(root, main_ref)
+        _print_verdict(outcome, main_ref, root)
+    except MainMovedError as exc:
+        print(f"llm_qa: {MAIN_MOVED_COMMAND}: {exc}", file=sys.stderr)
+        return EXIT_FAILURE
+    return _VERDICT_EXIT[outcome.verdict]
+
+
 def main() -> int:
     """Entry point."""
     args = sys.argv[1:]
+
+    command_args = [arg for arg in args if arg != "--read-only"]
+    if command_args[:1] == [MAIN_MOVED_COMMAND]:
+        return main_moved_command(command_args[1:])
+    if MAIN_MOVED_COMMAND in command_args:
+        print(f"llm_qa: {MAIN_MOVED_COMMAND} runs on its own. {_MAIN_MOVED_USAGE}", file=sys.stderr)
+        return EXIT_FAILURE
 
     read_only = False
     if "--read-only" in args:
@@ -1059,21 +2291,35 @@ def main() -> int:
         args.remove("--read-only")
 
     if not args or "--help" in args or "-h" in args:
-        print("Usage: llm_qa.py [--read-only] <tool|all> [tool ...]")
-        print(f"Tools: {', '.join(ALL_TOOL_NAMES)}")
+        print(
+            "Usage: llm_qa.py [--read-only] <tool|all|changed> [tool ...] "
+            f"[{_BASE_OPTION} REF | {_RANGE_OPTION} A..B] [{_ALLOW_UNMAPPED_OPTION}]"
+        )
+        print(f"  {_SELECTION_ALL}: the full suite (the coordinator's gate)")
+        print(f"  {_SELECTION_CHANGED}: targeted, {', '.join(CHANGED_TOOL_NAMES)}")
+        print(
+            f"  {_BASE_OPTION}, {_RANGE_OPTION}, {_ALLOW_UNMAPPED_OPTION}: passed to changed_tests"
+        )
+        print("  --read-only: summarise; a result recorded for another tree FAILS")
+        print(
+            f"  {MAIN_MOVED_COMMAND} [{_START_OPTION} [{_RESTART_OPTION}] | {_ADVANCE_OPTION} | "
+            f"{_FINISH_OPTION}] [MAIN_REF]: the batched gate's check on what would land "
+            "(runs no tools)"
+        )
+        print(f"Tools: {', '.join(TOOL_REGISTRY)}")
         return EXIT_SUCCESS
 
-    # Resolve tool list
-    if "all" in args:
-        tools = ALL_TOOL_NAMES
-    else:
-        tools = []
-        for name in args:
-            if name not in TOOL_REGISTRY:
-                print(f"Unknown tool: {name}")
-                print(f"Available: {', '.join(ALL_TOOL_NAMES)}")
-                return EXIT_FAILURE
-            tools.append(name)
+    args, forwarded, option_error = split_changed_options(args)
+    if option_error is not None:
+        print(f"llm_qa: {option_error}", file=sys.stderr)
+        return EXIT_FAILURE
+
+    tools, unknown = resolve_tools(args)
+    if unknown:
+        for name in unknown:
+            print(f"Unknown tool: {name}")
+        print(f"Available: {_SELECTION_ALL}, {_SELECTION_CHANGED}, {', '.join(TOOL_REGISTRY)}")
+        return EXIT_FAILURE
 
     # The run lock guards the EXECUTING path only. `--read-only` runs no tools,
     # so it cannot contend -- and it is exactly the command someone reaches for
@@ -1096,30 +2342,106 @@ def main() -> int:
         print(busy_message(str(lock_file)), file=sys.stderr)
         return EXIT_BUSY
 
-    return _run_tools(tools, read_only=False)
+    return _run_tools(tools, read_only=False, forwarded=forwarded)
 
 
-def _run_tools(tools: list[str], *, read_only: bool) -> int:
-    """Run (or merely summarize) each tool and print the overall verdict."""
+#: Per tool: the exit code, the live verdict, and the report hash taken on return.
+RunOutcome: TypeAlias = tuple[int, bool, str | None]
+
+
+def _record_run(run_records: Mapping[str, RunOutcome], before: dict[str, str] | None) -> None:
+    """Record what this run certifies, and say at once when it certifies no tree."""
+    if before is None:
+        print(f"\n{_TREE_WARNING_LABEL} the working tree cannot be read, so nothing was recorded")
+        return
+    after = worktree_state(PROJECT_ROOT)
+    state = before
+    if after != before:
+        state = {**before, _STATE_DIGEST: _TREE_CHANGED_DURING_RUN}
+        print(
+            f"\n{_TREE_WARNING_LABEL} the working tree changed during the run, so these "
+            "results certify no tree: `--read-only` will read them STALE. Re-run on a "
+            "still tree."
+        )
+    record_provenance(
+        QA_OUTPUT_DIR,
+        {
+            name: run_record(state, exit_code=exit_code, passed=passed, output_sha256=digest)
+            for name, (exit_code, passed, digest) in run_records.items()
+        },
+    )
+
+
+def _certify_gate(judged: dict[str, str] | None) -> None:
+    """After a passing full run, record HEAD as the batch's certified head, and say so."""
+    try:
+        head = certify_head(PROJECT_ROOT, judged)
+    except MainMovedError as exc:
+        # The run's own verdict stands; only the certification is refused, and said.
+        print(f"\n{_TREE_WARNING_LABEL} {exc}")
+    else:
+        if head is not None:
+            print(f"\nGATE: {head[:_SHORT_SHA]} certified for {MAIN_MOVED_COMMAND}")
+
+
+def _run_tools(tools: list[str], *, read_only: bool, forwarded: Sequence[str] = ()) -> int:
+    """Run (or merely summarize) each tool and print the overall verdict.
+
+    A run records, per tool, the tree it judged (before and after must agree,
+    or the record matches no tree), the live verdict, the exit code and the
+    hash of the report the tool wrote. A read-only summary fails a result
+    recorded for another tree, a report that is not the one recorded, and
+    re-applies the recorded exit code, so it can never pass what the live run
+    failed.
+    """
     all_passed = True
     tool_results: dict[str, tuple[bool, str]] = {}
+    run_records: dict[str, RunOutcome] = {}
+    before = worktree_state(PROJECT_ROOT)
+    recorded = read_provenance(QA_OUTPUT_DIR) if read_only else {}
 
     for name in tools:
-        # Run the tool (unless read-only)
+        output = QA_OUTPUT_DIR / TOOL_REGISTRY[name].json_file
         exit_code: int | None = None
-        if not read_only:
+        stale: str | None = None
+        digest: str | None = None
+        record: ProvenanceRecord | None = None
+        if read_only:
+            record = recorded.get(name)
+            stale = stale_reason(record, before) or (
+                output_reason(record, output) if record else None
+            )
+            recorded_exit = record.get(_RECORD_EXIT_CODE) if record else None
+            exit_code = recorded_exit if isinstance(recorded_exit, int) else None
+        else:
+            # Removed first, so a tool that writes nothing leaves nothing: an
+            # older green report must never stand in for this run's result.
+            output.unlink(missing_ok=True)
             if TOOL_REGISTRY[name].live_daemon:
                 daemon_note = ensure_live_daemon(name)
                 if daemon_note is not None:
                     print(daemon_note)
-            exit_code = run_tool(name)
+            extra = forwarded if name == _CHANGED_TESTS_TOOL else ()
+            exit_code = run_tool(name, extra)
+            digest = output_digest(output)
 
         # Summarize from JSON, passing exit code for cross-check
-        passed, summary = summarize_tool(name, exit_code=exit_code)
+        passed, summary = summarize_tool(name, exit_code=exit_code, stale=stale)
+        failed_as_recorded = recorded_failure_reason(record) if record and passed else None
+        if failed_as_recorded is not None:
+            passed = False
+            summary = summary.replace("✅", "❌", 1) + f"   {_STALE_LABEL} {failed_as_recorded}\n"
         tool_results[name] = (passed, summary)
+        if exit_code is not None and not read_only:
+            run_records[name] = (exit_code, passed, digest)
         print(summary, end="")
         if not passed:
             all_passed = False
+
+    if not read_only:
+        _record_run(run_records, before)
+        if all_passed and set(ALL_TOOL_NAMES) <= set(tools):
+            _certify_gate(before)
 
     # Overall summary
     total = len(tools)

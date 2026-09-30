@@ -1,0 +1,109 @@
+# Declared coverage for files the name mapping in run_changed_tests.py cannot
+# reach (Plan 00463). `llm_qa.py changed` FAILS on a changed file that maps to
+# nothing, so every file type an agent routinely changes needs a line here or a
+# test named after it.
+#
+# Each rule: `glob` (fnmatch: `*` also crosses `/`) or `path_glob` (Path.glob:
+# `*` stays in one directory, `**` is any depth), exactly one of `tests` (run
+# them) or `tools` (llm_qa.py tools that `changed` runs, which cover the file),
+# and `why`. EVERY matching rule applies, and all of them add to the inferred
+# mapping (the tests that name or import a file). tests/unit/qa/test_run_changed_tests.py
+# checks that every tool named here is one `changed` runs and that every test
+# named here exists.
+#
+# A test that reads documents BY GLOB names no file, so the inferred mapping
+# cannot see it: declare it here with a `path_glob` per pattern it reads.
+# tests/unit/qa/test_glob_readers_are_declared.py fails on an undeclared one.
+rules:
+  - path_glob: "README.md"
+    tests: [tests/integration/test_documented_commands_are_not_self_denied.py]
+    why: it checks every command in these documents (DOCUMENT_GLOBS)
+  - path_glob: "BUG_REPORTING.md"
+    tests: [tests/integration/test_documented_commands_are_not_self_denied.py]
+    why: it checks every command in these documents (DOCUMENT_GLOBS)
+  - path_glob: "CONTRIBUTING.md"
+    tests: [tests/integration/test_documented_commands_are_not_self_denied.py]
+    why: it checks every command in these documents (DOCUMENT_GLOBS)
+  - path_glob: "CLAUDE/*.md"
+    tests:
+      - tests/integration/test_documented_commands_are_not_self_denied.py
+      - tests/integration/test_documented_hook_probes_are_marked.py
+    why: the first checks every command in these documents (DOCUMENT_GLOBS);
+      the second checks every probe example is marked
+  - path_glob: "CLAUDE/**/*.md"
+    path_exclude: ["CLAUDE/Plan/**", "CLAUDE/UPGRADES/**"]
+    tests: [tests/integration/test_documented_hook_probes_are_marked.py]
+    why: it checks every probe example in these documents is marked, but its
+      own _EXCLUDED_PREFIXES drops CLAUDE/Plan/ and CLAUDE/UPGRADES/ (they
+      record what was run, not something to rewrite)
+  - path_glob: "CLAUDE/UPGRADES/upgrade-template/**/*.md"
+    tests: [tests/integration/test_documented_hook_probes_are_marked.py]
+    why: its _INCLUDED_DESPITE_PREFIX re-includes the upgrade-guide template
+      despite the CLAUDE/UPGRADES/ exclusion above
+  - path_glob: ".claude/agents/*.md"
+    tests: [tests/integration/test_documented_hook_probes_are_marked.py]
+    why: it checks every probe example in these documents is marked
+  - path_glob: "CLAUDE/development/*.md"
+    tests: [tests/integration/test_documented_commands_are_not_self_denied.py]
+    why: it checks every command in these documents (DOCUMENT_GLOBS)
+  - path_glob: "CLAUDE/CodeLifecycle/*.md"
+    tests: [tests/integration/test_documented_commands_are_not_self_denied.py]
+    why: it checks every command in these documents (DOCUMENT_GLOBS)
+  - path_glob: "docs/**/*.md"
+    tests:
+      - tests/integration/test_documented_commands_are_not_self_denied.py
+      - tests/unit/scripts/test_branch_install_gate_is_unadvertised.py
+      - tests/integration/test_documented_hook_probes_are_marked.py
+    why: all three read every page under docs/ by glob
+  - path_glob: "CLAUDE/UPGRADES/UNRELEASED/release-notes/*.md"
+    tests: [tests/unit/scripts/test_branch_install_gate_is_unadvertised.py]
+    why: it reads every pending release note by glob
+  - path_glob: "src/claude_code_hooks_daemon/skills/**/*.md"
+    tests:
+      - tests/integration/test_documented_commands_are_not_self_denied.py
+      - tests/unit/scripts/test_skill_scripts_are_referenced.py
+      - tests/integration/test_documented_hook_probes_are_marked.py
+    why: all three read the bundled skill tree's markdown by glob
+  - path_glob: "src/claude_code_hooks_daemon/skills/hooks-daemon/**/*.md"
+    tests: [tests/integration/test_skill_surface_coherence.py]
+    why: it reads the hooks-daemon skill's markdown by glob
+  - path_glob: "src/claude_code_hooks_daemon/skills/hooks-daemon/**/*.sh"
+    tests: [tests/integration/test_skill_surface_coherence.py]
+    why: it reads the hooks-daemon skill's scripts by glob
+  - path_glob: ".claude/skills/**/*.md"
+    tests:
+      - tests/unit/scripts/test_skill_scripts_are_referenced.py
+      - tests/integration/test_documented_hook_probes_are_marked.py
+    why: both read the deployed skill tree's markdown by glob
+  - path_glob: "tests/fixtures/repo_hygiene/pre_fix_*.md"
+    tests: [tests/integration/test_repo_hygiene_check.py]
+    why: it reads each pre-fix fixture by glob
+  - glob: ".claude/project-handlers/*"
+    tools: [project_handlers]
+    why: the project handlers' own co-located suite
+  - glob: ".claude/hooks-daemon.yaml"
+    tests:
+      - tests/integration/test_dogfooding_config.py
+      - tests/integration/test_full_qa_gate_is_never_deadlocked.py
+    why: the dogfood config, loaded through the real registry
+  - glob: ".claude/hooks-daemon.yaml.example"
+    tests: [tests/integration/test_example_config.py]
+    why: the shipped example config
+  - glob: "CLAUDE/UPGRADES/*/config-changes/*.yaml"
+    tests: [tests/integration/test_config_changes_manifest_examples.py]
+    why: config-changes manifests and their example YAML
+  - glob: "CLAUDE/UPGRADES/*/release-notes/*.md"
+    tests: [tests/integration/test_pending_release_notes_holding_area.py]
+    why: the release-notes holding area
+  - glob: "scripts/qa/changed_tests_map.yaml"
+    tests: [tests/unit/qa/test_run_changed_tests.py]
+    why: this file
+  - glob: "scripts/qa/declared-invariant-pairs.yaml"
+    tools: [declared_invariant_pairs]
+    why: the invariant-pairs checker reads exactly this file
+  - glob: "*.md"
+    tools: [docs_qa, plan_qa]
+    why: docs QA and plan QA check markdown; no test imports it
+  - glob: "*.sh"
+    tools: [shell_check]
+    why: shellcheck covers shell scripts

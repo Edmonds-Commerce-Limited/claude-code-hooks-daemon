@@ -28,6 +28,7 @@ import pytest
 
 from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.core import Decision
+from claude_code_hooks_daemon.core.chain import HandlerChain
 from claude_code_hooks_daemon.handlers.pre_tool_use.destructive_git import (
     DestructiveGitHandler,
 )
@@ -103,6 +104,78 @@ class TestProseIsNotACommand:
         assert _matches(handler, f"git commit -F - <<'EOF'\ndescribes {_FORCE}\nEOF") is False
 
 
+class TestAHereStringIsNotAHeredoc:
+    """Plan 00466 N116: `<<<'EOF'` is a here-string, so the line after it
+    is a command bash runs. Searched from its second `<`, it read as a
+    quoted heredoc opener and the command was blanked as prose."""
+
+    def test_a_force_push_after_a_here_string_is_denied(self) -> None:
+        command = f"cat <<<'EOF'\ngit push {_FORCE} origin main\nEOF"
+        chain = HandlerChain()
+        chain.add(DestructiveGitHandler())
+        payload = {"tool_name": "Bash", "tool_input": {"command": command}}
+        result = chain.execute(payload, strict_mode=False)
+        assert result.result.decision == Decision.DENY
+
+
+class TestTheMessageHeredocIdiomIsTheWholeValue:
+    """Plan 00466 N120: ``-m "$(cat <<'EOF' ... EOF)"`` is inert only when
+    that heredoc is ALL the value holds. The idiom was recognised by a regex
+    whose ``.*`` let a second substitution after the closer, or a command on
+    the opener line, ride inside the blanked message; main blanked both."""
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            f"git commit -m \"$(cat <<'EOF'\nmsg\nEOF\n)$({_RESET_HARD})\"",
+            f"git commit -m \"$(cat <<'EOF' ; {_RESET_HARD}\nmsg\nEOF\n)\"",
+        ],
+    )
+    def test_a_command_beside_the_message_heredoc_is_denied(self, command: str) -> None:
+        chain = HandlerChain()
+        chain.add(DestructiveGitHandler())
+        payload = {"tool_name": "Bash", "tool_input": {"command": command}}
+        result = chain.execute(payload, strict_mode=False)
+        assert result.result.decision == Decision.DENY
+
+    @pytest.mark.parametrize("delimiter", ["EOF", "EOF-1", "END.MD"])
+    def test_the_idiom_alone_is_still_prose(self, delimiter: str) -> None:
+        command = f"git commit -m \"$(cat <<'{delimiter}'\nmentions {_RESET_HARD}\n{delimiter}\n)\""
+        chain = HandlerChain()
+        chain.add(DestructiveGitHandler())
+        payload = {"tool_name": "Bash", "tool_input": {"command": command}}
+        result = chain.execute(payload, strict_mode=False)
+        assert result.result.decision == Decision.ALLOW
+
+
+class TestAnAnsiCStringCannotInventAHeredoc:
+    """Plan 00466 N120 (round 9d). Read as a plain quote, ``$'\\'`` closed at
+    its escaped quote, so a ``<<'EOF'`` INSIDE the ANSI-C string looked like a
+    quoted heredoc fed to ``cat`` and the next line was blanked as its body.
+    Bash runs that line. Main and the branch at 79d3104e4 both allowed it."""
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            f"cat $'\\' <<'EOF' '\\'\n{_RESET_HARD}\nEOF",
+            f"cat $'\\' <<\\EOF '\\'\n{_RESET_HARD}\nEOF",
+        ],
+    )
+    def test_the_line_bash_runs_is_judged(self, command: str) -> None:
+        chain = HandlerChain()
+        chain.add(DestructiveGitHandler())
+        payload = {"tool_name": "Bash", "tool_input": {"command": command}}
+        assert chain.execute(payload, strict_mode=False).result.decision == Decision.DENY
+
+    @pytest.mark.parametrize("opener", ["$'EOF'", '$"EOF"'])
+    def test_a_dollar_quoted_delimiter_is_a_quoted_heredoc(self, opener: str) -> None:
+        command = f"cat > notes.md <<{opener}\nmentions {_RESET_HARD}\nEOF"
+        chain = HandlerChain()
+        chain.add(DestructiveGitHandler())
+        payload = {"tool_name": "Bash", "tool_input": {"command": command}}
+        assert chain.execute(payload, strict_mode=False).result.decision == Decision.ALLOW
+
+
 class TestTheGuardStillGuards:
     """Every subtraction above must cost the handler nothing that matters."""
 
@@ -158,7 +231,38 @@ class TestTheGuardStillGuards:
             "git branch -D main",
         ],
     )
-    @pytest.mark.parametrize("receiver", ["bash", "sh", "/bin/sh", "sudo -E bash", "ssh host"])
+    @pytest.mark.parametrize(
+        "receiver",
+        [
+            "bash",
+            "sh",
+            "/bin/sh",
+            "sudo -E bash",
+            "ssh host",
+            # Plan 00466 N101 D-SEC F2: a wrapper option's VALUE is not the
+            # command (`sudo -p cat bash` runs bash, not cat).
+            "sudo -p cat bash",
+            "sudo -u cat bash",
+            "sudo -nu cat bash",
+            "sudo --prompt cat bash",
+            "env -u cat bash",
+            "nice -n cat bash",
+            "timeout -s cat 5 bash",
+            "timeout 5 bash",
+            "nohup bash",
+            "command bash",
+            "sudo -s cat",
+            "env -S cat bash",
+            # Plan 00466 N101 round 3 (D-SEC minor 3): a quoted option value
+            # holding a space is one word, not a value plus a command.
+            "sudo -p 'x cat' bash",
+            "sudo --prompt 'x cat' bash",
+            'env -C "a cat" bash',
+            # ...and a command word bash builds by expansion is not a sink.
+            "$c",
+            "`echo cat`",
+        ],
+    )
     def test_a_heredoc_fed_to_an_interpreter_is_still_blocked(
         self, handler: DestructiveGitHandler, receiver: str, body: str
     ) -> None:
@@ -173,6 +277,49 @@ class TestTheGuardStillGuards:
         the receiver is a recognised SINK instead.
         """
         assert _matches(handler, f"{receiver} <<'EOF'\n{body}\nEOF") is True
+
+    @pytest.mark.parametrize("receiver", ["sudo -p 'x cat' bash", "sudo --prompt 'x cat' bash"])
+    def test_a_quoted_wrapper_option_value_hides_no_shell_through_the_chain(
+        self, receiver: str
+    ) -> None:
+        """Plan 00466 N101 round 3 (D-SEC minor 3), through the real chain:
+        bc074732b read `cat'` as the receiver and blanked the body."""
+        chain = HandlerChain()
+        chain.add(DestructiveGitHandler())
+        command = f"{receiver} <<'EOF'\n{_RESET_HARD} HEAD\nEOF"
+        result = chain.execute(
+            {"tool_name": "Bash", "tool_input": {"command": command}}, strict_mode=False
+        )
+        assert result.result.decision == Decision.DENY
+
+    @pytest.mark.parametrize(
+        "receiver",
+        [
+            "sudo -R /x tee f",
+            "sudo --chroot=/x tee f",
+            "sudo -D /x tee f",
+            "sudo --chdir /x tee f",
+            "sudo -E tee f",
+            "sudo --preserve-env tee f",
+            "sudo -i tee f",
+            "sudo -s tee f",
+            "env -C /x tee f",
+        ],
+    )
+    def test_a_sudo_option_changing_root_directory_or_environment_hides_no_shell(
+        self, receiver: str
+    ) -> None:
+        """Plan 00466 N101 round 4 (D-RULE minor 1), through the real chain:
+        775864b38 read `-R`/`--chroot`/`-D` as value options and blanked the
+        body as fed to the sink `tee`, yet under a chroot or another
+        directory the name `tee` need not be the sink."""
+        chain = HandlerChain()
+        chain.add(DestructiveGitHandler())
+        command = f"{receiver} <<'EOF'\n{_RESET_HARD} HEAD\nEOF"
+        result = chain.execute(
+            {"tool_name": "Bash", "tool_input": {"command": command}}, strict_mode=False
+        )
+        assert result.result.decision == Decision.DENY
 
     @pytest.mark.parametrize("interpreter", ["bash", "sh", "python3", "ssh host"])
     def test_a_sink_piped_into_an_interpreter_is_still_blocked(

@@ -8,6 +8,7 @@ position).
 """
 
 import errno
+import os
 import time
 from collections.abc import Callable, Iterator
 from pathlib import Path
@@ -1488,8 +1489,33 @@ class TestInteriorWildcardDpIsBounded:
     def test_a_lone_long_star_run_collapses_to_near_zero_cost(self) -> None:
         """Collapsing repeated '*' is language-preserving (``a**b`` and
         ``a*b`` match the same set) and removes the dominant cost driver
-        directly, independent of the budget cap."""
-        _assert_scan_grows_linearly(lambda stars: f"cat a{'*' * stars}a", 60_000 // SIZE_FACTOR)
+        directly, independent of the budget cap.
+
+        Counts DP grid CELLS VISITED (``sfm.dp_cell_counter``, N123) rather
+        than wall-clock time: a fixed-second budget flakes under host
+        contention (many worktrees' gates running at once) independent of
+        whether the cost bound itself holds -- main measured 0.09s against
+        a 0.1s budget, and a scaling-ratio version of this same test still
+        carried an absolute-second floor to absorb constant-factor noise,
+        so it was still exposed to the same flake. A cell count has no
+        such noise: after collapsing, the 60,000-``*`` token IS the
+        3-character string ``a*a``, so its DP grid is IDENTICAL in size to
+        a literal ``a*a`` baseline -- not merely small, but exactly equal,
+        deterministically, on every host. If the collapse regressed (the
+        DP ran on the raw 60,002-character operand instead), the long
+        token's cell count would be ~20,000x the baseline's, not a
+        fraction more.
+        """
+        pattern = "pat"
+        with sfm.dp_cell_counter() as baseline_count:
+            sfm._globs_can_intersect("a*a", pattern)
+        long_token = "a" + "*" * 60_000 + "a"
+        with sfm.dp_cell_counter() as long_count:
+            sfm._globs_can_intersect(long_token, pattern)
+        assert (
+            long_count[0] == baseline_count[0]
+        ), f"long={long_count[0]} baseline={baseline_count[0]}"
+        assert baseline_count[0] > 0, "the counter itself must observe some DP work"
 
     def test_scan_deadline_denies_via_the_fail_closed_route(self) -> None:
         """The whole-scan deadline is a backstop: forcing an artificially
@@ -2199,6 +2225,23 @@ class TestBothEdgesFilesystemTruthRoute:
         assert result is None
 
 
+class _SortedListing:
+    """A directory listing in a fixed order, usable as ``os.scandir``'s
+    result both in a ``with`` block and as a plain iterable."""
+
+    def __init__(self, entries: list[os.DirEntry[str]]) -> None:
+        self._entries = entries
+
+    def __enter__(self) -> "_SortedListing":
+        return self
+
+    def __exit__(self, *_: object) -> None:
+        return None
+
+    def __iter__(self) -> Iterator[os.DirEntry[str]]:
+        return iter(self._entries)
+
+
 class TestExpandGlobTokenErrorHandling:
     """n466-n24 review 4: ``_expand_glob_token`` must fail CLOSED (propagate)
     on an expansion failure it cannot prove is a non-match -- except the one
@@ -2224,15 +2267,81 @@ class TestExpandGlobTokenErrorHandling:
         """Forcing an ENOENT (rather than relying on it never firing) pins
         the actual except-branch: it must be swallowed, not propagated."""
 
-        def _raise_enoent(self: Path, pattern: str) -> Iterator[Path]:
+        def _raise_enoent(self: Path) -> os.stat_result:
             raise OSError(errno.ENOENT, "No such file or directory")
-            yield  # pragma: no cover -- makes this a generator function
 
-        monkeypatch.setattr(Path, "glob", _raise_enoent)
+        monkeypatch.setattr(Path, "lstat", _raise_enoent)
         result = sfm._expand_glob_token(
             "somefile.secret", sfm.DEFAULT_PROTECTED_PATTERNS, None, cwd=str(tmp_path)
         )
         assert result is None
+
+    def test_a_name_too_long_to_exist_allows_n117(self, tmp_path: Path) -> None:
+        """Plan 00466 N117: a component longer than the filesystem's name
+        limit raises ENAMETOOLONG. No file can have that name, and a shell
+        naming it fails the same way, so it proves absence as ENOENT does."""
+        result = sfm._expand_glob_token(
+            "a" * 300 + "/*.txt", sfm.DEFAULT_PROTECTED_PATTERNS, None, cwd=str(tmp_path)
+        )
+        assert result is None
+
+    def test_a_relative_glob_whose_joined_path_is_too_long_denies(self, tmp_path: Path) -> None:
+        """Review 8 BLOCKER 1: bash opens the relative path, which is under
+        PATH_MAX, while the base-joined path is over it. The overflow says
+        nothing about the target, so the expansion fails closed."""
+        long_dir = "d" * 200
+        (tmp_path / long_dir).mkdir()
+        (tmp_path / "x.secret").touch()
+        token = f"{long_dir}/../" * 20 + "*ecre*"
+        assert len(token) < 4096 < len(str(tmp_path)) + 1 + len(token)
+        with pytest.raises(OSError) as raised:
+            sfm._expand_glob_token(token, ("*.secret*",), None, cwd=str(tmp_path))
+        assert raised.value.errno == errno.ENAMETOOLONG
+
+    def test_an_error_in_one_branch_does_not_stop_the_others(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Review 8 BLOCKER 1: the first error used to end the whole walk.
+        The protected match in a later branch must still be found."""
+        (tmp_path / "a").mkdir()
+        (tmp_path / "b").mkdir()
+        (tmp_path / "b" / "x.secret").touch()
+        real_scandir = os.scandir
+
+        def _fake_scandir(path: str | os.PathLike[str]) -> _SortedListing:
+            if Path(path) == tmp_path / "a":
+                raise OSError(errno.ENAMETOOLONG, "File name too long", str(path))
+            with real_scandir(path) as listing:
+                return _SortedListing(sorted(listing, key=lambda entry: entry.name))
+
+        monkeypatch.setattr(os, "scandir", _fake_scandir)
+        result = sfm._expand_glob_token("*/*ecre*", ("*.secret*",), None, cwd=str(tmp_path))
+        assert result == "*.secret*"
+
+    def test_a_branch_error_with_no_protected_match_denies(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        (tmp_path / "a").mkdir()
+        (tmp_path / "b").mkdir()
+        real_scandir = os.scandir
+
+        def _fake_scandir(path: str | os.PathLike[str]) -> Iterator[os.DirEntry[str]]:
+            if Path(path) == tmp_path / "a":
+                raise PermissionError(errno.EACCES, "Permission denied")
+            return real_scandir(path)
+
+        monkeypatch.setattr(os, "scandir", _fake_scandir)
+        with pytest.raises(PermissionError):
+            sfm._expand_glob_token("*/*ecre*", ("*.secret*",), None, cwd=str(tmp_path))
+
+    def test_matches_past_the_examination_cap_deny(self, tmp_path: Path) -> None:
+        """A match that was never examined cannot be judged."""
+        for index in range(5):
+            (tmp_path / f"f{index}.txt").touch()
+        with pytest.raises(TooManyToEnumerateError):
+            sfm._expand_glob_token(
+                "*.txt", ("*.secret*",), None, cwd=str(tmp_path), max_expansions=3
+            )
 
     def test_permission_denied_directory_in_the_glob_path_denies(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -2241,11 +2350,10 @@ class TestExpandGlobTokenErrorHandling:
         proof of a non-match -- it must propagate, not degrade to
         "no mention", so the caller's fail-closed wrapper denies."""
 
-        def _raise_eacces(self: Path, pattern: str) -> Iterator[Path]:
+        def _raise_eacces(self: Path) -> os.stat_result:
             raise PermissionError(errno.EACCES, "Permission denied")
-            yield  # pragma: no cover -- makes this a generator function
 
-        monkeypatch.setattr(Path, "glob", _raise_eacces)
+        monkeypatch.setattr(Path, "lstat", _raise_eacces)
         with pytest.raises(PermissionError):
             sfm._expand_glob_token(
                 "somefile.secret", sfm.DEFAULT_PROTECTED_PATTERNS, None, cwd=str(tmp_path)
@@ -2257,11 +2365,11 @@ class TestExpandGlobTokenErrorHandling:
         """A ``ValueError`` (a malformed glob pattern) is never a proof of
         absence -- always propagates, with no ENOENT-style exception."""
 
-        def _raise_value_error(self: Path, pattern: str) -> Iterator[Path]:
+        def _raise_value_error(base: Path, pattern: str, **_: object) -> Iterator[Path]:
             raise ValueError("malformed glob pattern")
             yield  # pragma: no cover -- makes this a generator function
 
-        monkeypatch.setattr(Path, "glob", _raise_value_error)
+        monkeypatch.setattr(sfm.shell_expansion, "bounded_recursive_glob", _raise_value_error)
         with pytest.raises(ValueError):
             sfm._expand_glob_token(
                 "somefile.secret", sfm.DEFAULT_PROTECTED_PATTERNS, None, cwd=str(tmp_path)
@@ -3048,3 +3156,58 @@ class TestFileSchemeUrlMentions:
         assert (
             sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS) is not None
         )
+
+
+_OVER_BOUND_WORD = "".join(
+    "{" + a + "," + b + "}" for a, b in zip("acegikmoq", "bdfhjlnpr", strict=True)
+)
+
+
+class TestBraceStreamReadsOnlyShellExpandedText:
+    """Plan 00466 N101: the brace stream skips the CODE braces of a Python
+    program no shell reads -- but only for a whole Bash tool command
+    (``bash_tool_command=True``: the guard's Bash route and payload
+    capture). A script's text, a segment of a command and authored content
+    are enumerated whole, as on main (round 3, D-RULE B2)."""
+
+    #: Each set display (``{0,1}``) is a brace group to bash, which does not
+    #: expand a quoted or comma-less brace (ledger 00466 N238).
+    _CODE_BRACES = "x = 1\n" + "\n".join(
+        f"print(f'{{x}}', {{'k': {i}}}, {{{i},{i + 1}}})" for i in range(600)
+    )
+
+    def test_python_heredoc_code_braces_are_not_enumerated(self) -> None:
+        command = f"python3 - <<'EOF'\n{self._CODE_BRACES}\nEOF"
+        patterns = sfm.DEFAULT_PROTECTED_PATTERNS
+        assert sfm.find_protected_mention(command, patterns, bash_tool_command=True) is None
+
+    def test_a_python_string_literal_is_enumerated_on_its_own(self) -> None:
+        command = f"python3 - <<'EOF'\n{self._CODE_BRACES}\nprint('cat /r/.ssh/id_{{r,x}}sa')\nEOF"
+        patterns = sfm.DEFAULT_PROTECTED_PATTERNS
+        assert sfm.find_protected_mention(command, patterns, bash_tool_command=True) is not None
+
+    def test_without_the_bash_tool_flag_the_text_is_enumerated_whole(self) -> None:
+        command = f"python3 - <<'EOF'\n{self._CODE_BRACES}\nEOF"
+        with pytest.raises(TooManyToEnumerateError):
+            sfm.find_protected_mention(command, sfm.DEFAULT_PROTECTED_PATTERNS)
+
+    def test_content_context_is_still_enumerated_whole(self) -> None:
+        """The view models a command line, not an authored file: a file's
+        string literal may reach a shell through a variable."""
+        content = "cmd = 'cat /r/.ssh/id_rs{a..a}'\n"
+        assert (
+            sfm.find_protected_mention(content, sfm.DEFAULT_PROTECTED_PATTERNS, context="content")
+            is not None
+        )
+
+    def test_shell_words_are_still_enumerated_and_fail_closed(self) -> None:
+        with pytest.raises(TooManyToEnumerateError):
+            sfm.find_protected_mention(f"echo {_OVER_BOUND_WORD}", sfm.DEFAULT_PROTECTED_PATTERNS)
+
+    def test_a_brace_spelled_name_in_shell_words_still_matches(self) -> None:
+        command = "cat ~/.ssh/id_{r,x}sa"
+        assert sfm.find_protected_mention(command, sfm.DEFAULT_PROTECTED_PATTERNS) is not None
+
+    def test_a_literal_name_in_a_python_heredoc_still_matches(self) -> None:
+        command = f"python3 - <<'EOF'\nprint('{_OVER_BOUND_WORD}')\nopen('/r/.ssh/id_rsa')\nEOF"
+        assert sfm.find_protected_mention(command, sfm.DEFAULT_PROTECTED_PATTERNS) is not None

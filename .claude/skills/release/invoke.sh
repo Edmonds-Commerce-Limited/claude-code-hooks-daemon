@@ -42,7 +42,12 @@ See RELEASING.md Step 1a for what each section of the report means.
 
 ## Stage 1: Release Preparation & Execution
 
-Use the Task tool to spawn the Release Agent (Sonnet 4.5):
+First, YOU (main Claude) run the full QA gate on this clean HEAD:
+\`./scripts/qa/llm_qa.py all\`. The Release Agent is a sub-agent and cannot run
+the full suite; it confirms this run with \`--read-only all\`, which fails a
+result recorded for any other tree (RELEASING.md Step 1b).
+
+Then use the Task tool to spawn the Release Agent (Sonnet 4.5):
 
 **Agent Spec:** .claude/agents/release-agent.md
 **Target Version:** ${VERSION}
@@ -200,7 +205,7 @@ Check the output summary:
   1. Review failed test details from output
   2. Investigate root cause
   3. Fix handler bug using TDD
-  4. Run full QA: \`./scripts/qa/llm_qa.py all\`
+  4. Main Claude runs full QA: \`./scripts/qa/llm_qa.py all\` (a sub-agent fixing the bug runs \`llm_qa.py changed\`)
   5. Restart daemon
   6. **Re-run \`/acceptance-test all\` from scratch**
   7. Repeat until passed=100%, failed=0, errors=0
@@ -304,12 +309,17 @@ git push origin main
 
 2. Create tag and GitHub release:
 \`\`\`bash
+# BEFORE the tag: build the GitHub body. GitHub rejects a release body over
+# 125,000 characters (HTTP 422) AFTER the tag is pushed; this step substitutes
+# the verbatim Highlights when needed and exits non-zero if it still cannot fit.
+scripts/release/build_github_release_body.py vX.Y.Z
+
 git tag -a vX.Y.Z -m "\$(cat RELEASES/vX.Y.Z.md)"
 git push origin vX.Y.Z
 
 gh release create vX.Y.Z \\
   --title "vX.Y.Z - [Title]" \\
-  --notes-file RELEASES/vX.Y.Z.md \\
+  --notes-file untracked/release-artifacts/github-release-body.md \\
   --latest
 
 # REQUIRED: attach the self-bootstrap bundle (bootstrap-checksums.txt plus

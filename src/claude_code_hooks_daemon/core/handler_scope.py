@@ -6,8 +6,11 @@ plan in the coordinator's ledger, none of which was its assignment.
 
 **The discriminator is the ABSENCE of ``agent_id``, and nothing else.** Plan
 00418 established it and Plan 00423 Phase 2 re-measured it against live
-payloads: present (a 17-character string, never empty) in all five subagent
-stops, absent on the main-thread stop.
+payloads: present (a 17-character string, never empty) in all five Agent-tool
+subagent stops, absent on the main-thread stop. Plan 00463 measured an
+in-process teammate's live ``PreToolUse`` payload: present too, as a
+30-character string. The length differs by agent kind, so nothing here may
+depend on it. A Workflow-tool agent's payload is UNMEASURED.
 
 ``agent_type`` is deliberately NOT consulted. It fails in BOTH directions — the
 contract warns a session-wide ``--agent`` sets it on a MAIN-thread stop, and
@@ -124,8 +127,9 @@ def acts_as_subagent(hook_input: Mapping[str, Any]) -> bool:
 def in_subagent(hook_input: Mapping[str, Any]) -> bool:
     """Whether this event fired inside a subagent call.
 
-    Truthiness rather than presence: measured, ``agent_id`` is a 17-character
-    string whenever it appears and never empty, so the two agree — but an empty
+    Truthiness rather than presence: measured, ``agent_id`` is a non-empty
+    string whenever it appears (17 characters from the Agent tool, 30 from an
+    in-process teammate), so the two agree — but an empty
     string is not an agent identity, and reading it as one would classify a
     main-thread event as a subagent.
     """

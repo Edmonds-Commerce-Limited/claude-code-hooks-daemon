@@ -218,6 +218,10 @@ class ConfigTemplate:
             "    qa_suppression: {enabled: true, priority: 30}  # Unified multi-language QA suppression blocker (11 languages)\n"
             "    comment_changelog: {enabled: true, priority: 31}  # Block changelog narrative in code comments (12 languages)\n"
             "    comment_size: {enabled: true, priority: 33}  # Cap comment length; only growing an over-limit comment is blocked\n"
+            # Plan 00463: opt-in, and inert until the project declares its own
+            # full_qa_patterns -- a client's full-QA commands cannot be known here.
+            "    subagent_full_qa_blocker: {enabled: false, priority: 32}  "
+            "# Opt-in: a sub-agent may not run the full QA suite (declare full_qa_patterns)\n"
             "    verification_result_gate: {enabled: true, priority: 34}  # Advise when a verifier's result is never consumed before a mutator\n"
             "    bash_safe_mode: {enabled: false, priority: 36}  # Opt-in: require a set safety prelude on sequenced Bash (warn-first)\n"
             "    plan_number_helper: {enabled: true, priority: 30}  # Provide correct next plan number\n"
@@ -269,6 +273,7 @@ class ConfigTemplate:
             "    gh_issue_comments: {enabled: true, priority: 40}  # Require --comments on gh issue view\n"
             "    gh_pr_comments: {enabled: true, priority: 40}    # Require --comments on gh pr view\n"
             "    plan_time_estimates: {enabled: true, priority: 40}  # Block time estimates in plans\n"
+            "    conflict_marker_commit_gate: {enabled: true, priority: 42, options: {exclude_paths: []}}  # Deny a commit whose added lines carry a merge-conflict marker, raw or formatter-disguised; exclude_paths for documented examples\n"
             "    staged_lint_gate: {enabled: true, priority: 43}  # Cheap syntax-check backstop over staged files on git commit (warn-first)\n"
             "    plan_close_approval: {enabled: true, priority: 43}  # A human closes a plan when plan_workflow.close_requires_human_approval is true\n"
             "    plan_qa_edit: {enabled: true, priority: 44}      # Plan QA lint on PLAN.md writes\n"

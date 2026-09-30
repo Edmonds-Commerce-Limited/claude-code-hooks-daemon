@@ -36,6 +36,7 @@ from typing import Any, Final
 import pytest
 
 from claude_code_hooks_daemon.utils.path_predicates import (
+    _reset_unreadable_warning_burst,
     path_exists,
     path_is_dir,
     path_is_file,
@@ -47,6 +48,22 @@ _PREDICATES: Final[dict[str, tuple[Callable[..., Any], str]]] = {
     "path_is_file": (path_is_file, "is_file"),
     "path_is_dir": (path_is_dir, "is_dir"),
 }
+
+
+def _a_noisy_guard(path: str) -> bool:
+    """One calling site, standing in for a handler that holds many unreadable paths."""
+    return path_exists(path, unreadable_means=False)
+
+
+def _a_quiet_guard(path: str) -> bool:
+    """Another calling site, standing in for an unrelated handler."""
+    return path_exists(path, unreadable_means=False)
+
+
+@pytest.fixture(autouse=True)
+def _fresh_warning_burst() -> None:
+    """Each test gets its own burst windows: the limiter is process-wide, one window per caller."""
+    _reset_unreadable_warning_burst()
 
 
 @pytest.fixture
@@ -188,6 +205,57 @@ class TestTheSubstitutionIsRecorded:
             predicate(tmp_path, unreadable_means=False)
 
         assert not caplog.records
+
+
+class TestABurstOfUnreadablePathsIsRateLimited:
+    """Review 7 n5: one 32 KiB command with 115 over-long operands logged 230
+    records (~200 KB). A burst now costs one record, not one per path."""
+
+    def test_a_small_burst_is_logged_in_full(
+        self, deny_every_stat: None, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        with caplog.at_level(logging.WARNING):
+            for index in range(3):
+                path_exists(f"/root/unreadable/{index}", unreadable_means=False)
+
+        assert len(caplog.records) == 3
+
+    def test_past_the_burst_limit_individual_records_stop(
+        self, deny_every_stat: None, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        with caplog.at_level(logging.WARNING):
+            for index in range(20):
+                path_exists(f"/root/unreadable/{index}", unreadable_means=False)
+
+        paths_logged = sum(1 for r in caplog.records if "/root/unreadable/" in r.getMessage())
+        assert paths_logged < 20
+        assert paths_logged >= 1
+
+    def test_the_aggregate_line_is_logged_exactly_once_per_burst(
+        self, deny_every_stat: None, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        with caplog.at_level(logging.WARNING):
+            for index in range(20):
+                path_exists(f"/root/unreadable/{index}", unreadable_means=False)
+
+        aggregate_lines = [r for r in caplog.records if "not logged individually" in r.getMessage()]
+        assert len(aggregate_lines) == 1
+
+    def test_one_callers_burst_does_not_silence_another_caller(
+        self, deny_every_stat: None, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Review 8 minor m4: the limiter was process-global, so one handler's burst
+        silenced every other module's abstention warnings for the rest of the window."""
+        with caplog.at_level(logging.WARNING):
+            for index in range(20):
+                _a_noisy_guard(f"/root/noisy/{index}")
+            _a_quiet_guard("/root/quiet/0")
+
+        assert any("/root/quiet/0" in record.getMessage() for record in caplog.records)
+        aggregate = [r for r in caplog.records if "not logged individually" in r.getMessage()]
+        assert len(aggregate) == 1
+        # The burst is the calling site's, named as such -- not the predicate's own frame.
+        assert "_a_noisy_guard" in aggregate[0].getMessage()
 
 
 class TestTheCallerCannotAvoidChoosing:

@@ -288,16 +288,14 @@ pytest --cov=src --cov-report=html
 After applying fixes:
 
 ```bash
-# 1. Run the specific check that failed
-./scripts/qa/run_lint.sh
-./scripts/qa/run_type_check.sh
-./scripts/qa/llm_qa.py tests   # every Python in CI's matrix
-# etc.
+# 1. Re-run the specific check that failed
+./scripts/qa/llm_qa.py lint type_check
+pytest tests/path/to/test_file.py
 
-# 2. Run full QA suite to ensure no regressions
-./scripts/qa/llm_qa.py all
+# 2. Run targeted QA over the whole change set
+./scripts/qa/llm_qa.py changed
 
-# 3. If all pass, report success
+# 3. If all pass, report success; the coordinator re-runs the full gate
 # 4. If new failures, fix those too
 ```
 

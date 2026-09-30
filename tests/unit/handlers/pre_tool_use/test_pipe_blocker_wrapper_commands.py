@@ -4,7 +4,7 @@ Found by the `declared-invariant-pairs` Detector's first row, as an instance of
 `asymmetric-sibling-protection`: the correct reading of `env` already existed at
 a sibling site, and this handler disagreed with it.
 
-`utils/process_probe.py`'s `_WRAPPERS` classifies `env` as a wrapper, and the
+`utils/shell_segmentation.py`'s `COMMAND_WRAPPERS` classifies `env` as a wrapper, and the
 evasion suite asserts `env git commit`, `env gh issue create`, `env pgrep` and
 `env cat <DETAIL>` are every one of them judged on the WRAPPED command. The pipe
 whitelist was the single site treating it as a cheap filter whose own output is

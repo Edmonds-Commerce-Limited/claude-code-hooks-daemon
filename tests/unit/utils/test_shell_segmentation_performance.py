@@ -23,7 +23,13 @@ N222).
 
 from collections.abc import Callable
 
+import pytest
+
+from claude_code_hooks_daemon.utils.heredoc_operators import scan_heredocs
 from claude_code_hooks_daemon.utils.shell_segmentation import (
+    heredoc_consumers,
+    known_variables,
+    no_earlier_segment_may_rebind,
     strip_inert_spans,
     strip_message_bodies,
     strip_quoted_heredoc_bodies,
@@ -34,7 +40,7 @@ _FORCE = "--" + "force"
 
 
 def _assert_grows_linearly(
-    strip: Callable[[str], str], command_at: Callable[[int], str], large_n: int
+    strip: Callable[[str], object], command_at: Callable[[int], str], large_n: int
 ) -> None:
     small_n = large_n // SIZE_FACTOR
     ratio = scaling_ratio(
@@ -79,6 +85,8 @@ class TestManyQuotedHeredocsAreLinear:
     """The `strip_quoted_heredoc_bodies` half: review 2's 98s repro."""
 
     def test_5000_quoted_delimiter_heredocs_in_one_command(self) -> None:
+        """No ``git commit`` can rebind a command name (N214), so every body
+        stays blankable (Plan 00466 N101 round 13)."""
         result = strip_quoted_heredoc_bodies(_quoted_heredocs(5_000))
 
         assert result.count("HEREDOC_BODY") == 5_000
@@ -88,9 +96,7 @@ class TestManyQuotedHeredocsAreLinear:
     def test_a_protected_string_in_the_last_of_5000_heredoc_bodies_is_still_blanked(
         self,
     ) -> None:
-        command = "git commit -F - <<'EOF'\nx\nEOF\n" * 4_999 + (
-            f"git commit -F - <<'EOF'\n{_FORCE}\nEOF\n"
-        )
+        command = "cat <<'EOF'\nx\nEOF\n" * 4_999 + (f"git commit -F - <<'EOF'\n{_FORCE}\nEOF\n")
         result = strip_quoted_heredoc_bodies(command)
         assert _FORCE not in result
 
@@ -101,3 +107,52 @@ class TestStripInertSpansCombinedIsLinear:
     def test_200kb_command_mixing_both_shapes(self) -> None:
         assert strip_inert_spans(_both_shapes(2_500))
         _assert_grows_linearly(strip_inert_spans, _both_shapes, 2_500)
+
+
+class TestRoundTwelveHelpersAreLinear:
+    """Plan 00466 N101 round 12: ``known_variables``, the N214 inert prefix
+    and ``heredoc_consumers`` scale linearly. A per-statement regex that ran
+    to the end of the text made 40,000 assignment statements hang."""
+
+    @pytest.mark.parametrize(
+        "build",
+        [
+            lambda n: "a=b; " * n + 'cat > "$a"',
+            lambda n: "".join(f"a{index}=b; " for index in range(n)) + "x",
+            lambda n: "echo x; " * n,
+            lambda n: "cat <<'EOF'\nx\nEOF\n" * n,
+            lambda n: "$PY <<'EOF'\nx\nEOF\n" * n,
+            lambda n: "echo $(date) \"$(x `y`)\" 'q'; " * n,
+            lambda n: "echo " + "$(x " * n + ")" * n,
+            lambda n: "cat <<E\n$HOME\nE\n" * n,
+            lambda n: "true" + "\n" * (8 * n),
+            lambda n: "true;" + " \t" * (8 * n) + "x",
+            lambda n: "echo " + "'" * (8 * n),
+        ],
+        ids=[
+            "assignments",
+            "distinct-names",
+            "commands",
+            "heredocs",
+            "variable-receivers",
+            "substitutions",
+            "nested-substitutions",
+            "unquoted-heredocs",
+            "newline-run",
+            "blank-run",
+            "quote-run",
+        ],
+    )
+    @pytest.mark.parametrize(
+        "fn",
+        [
+            known_variables,
+            lambda command: no_earlier_segment_may_rebind(command, len(command)),
+            lambda command: heredoc_consumers(command, scan_heredocs(command).heredocs),
+        ],
+        ids=["known_variables", "no_earlier_segment_may_rebind", "heredoc_consumers"],
+    )
+    def test_the_cost_grows_linearly(
+        self, fn: Callable[[str], object], build: Callable[[int], str]
+    ) -> None:
+        _assert_grows_linearly(fn, build, 400 * SIZE_FACTOR)

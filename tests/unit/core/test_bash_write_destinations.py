@@ -9,8 +9,13 @@ these tests pin the public raw half, and that the resolved half is built on it.
 
 from __future__ import annotations
 
+import shutil
+import subprocess
 from pathlib import Path
 
+import pytest
+
+from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.core.utils import (
     bash_write_destinations,
     get_bash_write_targets,
@@ -39,6 +44,39 @@ class TestBashWriteDestinations:
     def test_heredoc_bodies_are_not_scanned(self) -> None:
         command = "cat > notes.md <<'EOF'\necho x > phantom.md\nEOF"
         assert [d.destination for d in bash_write_destinations(command)] == ["notes.md"]
+
+
+class TestARedirectAmongOperandsIsNoOperand:
+    """Plan 00466 N101 round 12: a redirect inside ``tee``'s or ``cp``'s
+    operands belongs to the redirect, and the operands after it are still
+    written. Run in bash first."""
+
+    @pytest.mark.parametrize(
+        ("command", "written"),
+        [
+            ("tee a <<'EOF' b\nhi\nEOF", ["a", "b"]),
+            ('tee a <<$"EOF" b\nhi\nEOF', ["a", "b"]),
+            ("tee a <<< hi b", ["a", "b"]),
+            ("tee a < in.txt b", ["a", "b"]),
+            ("tee a > c b <<< hi", ["a", "c", "b"]),
+        ],
+    )
+    def test_the_written_files_are_named(
+        self, command: str, written: list[str], tmp_path: Path
+    ) -> None:
+        (tmp_path / "in.txt").write_text("hi\n")
+        bash = shutil.which("bash")
+        assert bash is not None
+        subprocess.run(
+            [bash, "--norc", "--noprofile", "-c", command],
+            cwd=tmp_path,
+            env={"LC_ALL": "C", "PATH": "/usr/bin:/bin"},
+            capture_output=True,
+            check=True,
+            timeout=Timeout.QA_TEST_TIMEOUT,
+        )
+        assert all((tmp_path / name).is_file() for name in written)
+        assert sorted(d.destination for d in bash_write_destinations(command)) == sorted(written)
 
 
 class TestResolveBashWriteDestination:

@@ -19,8 +19,12 @@ from typing import Any, Protocol, runtime_checkable
 
 from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
+from claude_code_hooks_daemon.utils.conflict_markers import (
+    describe_markers,
+    find_conflict_markers_in_text,
+)
 from claude_code_hooks_daemon.utils.git_repo import is_linked_worktree, run_git
-from claude_code_hooks_daemon.utils.markdown_format import format_markdown_text
+from claude_code_hooks_daemon.utils.markdown_format import format_markdown_document
 
 logger = logging.getLogger(__name__)
 
@@ -467,9 +471,11 @@ class ClaudeMdInjector:
         Fail-safe: if mdformat raises (parser/unicode/IO error), the original
         unformatted content is returned so injection still completes and no
         content is lost. Daemon startup must never fail on a formatting error.
+        Content holding merge-conflict markers raises too, and is written
+        unformatted so the markers stay recognisable (Plan 00466 N211).
         """
         try:
-            return format_markdown_text(content)
+            return format_markdown_document(content)
         except Exception as exc:  # nosec B110 - fail-safe: never crash daemon startup
             logger.warning(
                 "ClaudeMdInjector: markdown formatting failed — writing unformatted "
@@ -506,6 +512,28 @@ class ClaudeMdInjector:
         if not status_line:
             return  # CLAUDE.md is clean — no commit needed
 
+        # Read once: the marker check and the commit message both judge it.
+        # Plan 00466 N211: this commit never passes the PreToolUse
+        # conflict_marker_commit_gate, so it refuses a marker itself.
+        # Ledger 00466 N224: text the marker check never saw is never committed.
+        # A file that vanished is named as such; any other read error propagates
+        # to inject(), which logs it, and nothing unread is committed.
+        if not claude_md_path.is_file():
+            logger.info(
+                "ClaudeMdInjector: %s vanished before its auto-commit; not auto-committing",
+                claude_md_path,
+            )
+            return
+        content = claude_md_path.read_text(encoding="utf-8", errors="replace")
+        markers = find_conflict_markers_in_text(content)
+        if markers:
+            logger.warning(
+                "ClaudeMdInjector: %s holds merge-conflict markers; not auto-committing:\n%s",
+                claude_md_path,
+                describe_markers(markers),
+            )
+            return
+
         # Stage ONLY when git does not know the path yet. `commit --only <path>`
         # scopes the commit to that path by itself, so for a tracked CLAUDE.md
         # staging is a second index lock for nothing — but on an UNTRACKED path
@@ -531,7 +559,7 @@ class ClaudeMdInjector:
             "--only",
             filename,
             "-m",
-            ClaudeMdInjector._commit_message(cwd, filename, claude_md_path),
+            ClaudeMdInjector._commit_message(cwd, filename, content),
             timeout=Timeout.GIT_COMMIT,
         )
         if commit.returncode != 0:
@@ -565,12 +593,13 @@ class ClaudeMdInjector:
         )
 
     @staticmethod
-    def _commit_message(cwd: Path, filename: str, claude_md_path: Path) -> str:
+    def _commit_message(cwd: Path, filename: str, current: str) -> str:
         """Pick the message that is TRUE of what this commit contains.
 
         Compares the content OUTSIDE the generated block against the committed
         version. If it differs, the commit carries hand-written changes the
         daemon did not author, and must not describe itself as a regeneration.
+        ``current`` is the working-tree text the caller has already read.
 
         A file with no committed version yet (first commit, or a rename) has
         nothing to compare against, so it keeps the plain message — there is no
@@ -581,9 +610,7 @@ class ClaudeMdInjector:
             return _COMMIT_MESSAGE_GENERATED
 
         committed_user_content = ClaudeMdInjector._extract_user_content(show.stdout)
-        current_user_content = ClaudeMdInjector._extract_user_content(
-            claude_md_path.read_text(encoding="utf-8", errors="replace")
-        )
+        current_user_content = ClaudeMdInjector._extract_user_content(current)
         if committed_user_content == current_user_content:
             return _COMMIT_MESSAGE_GENERATED
         return _COMMIT_MESSAGE_WITH_USER_EDITS

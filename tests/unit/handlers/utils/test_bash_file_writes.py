@@ -306,6 +306,24 @@ class TestHeredocReceivers:
     def test_a_body_that_does_not_reach_an_interpreter_as_its_program(self, command: str) -> None:
         assert TARGET not in _writes(command)
 
+    def test_a_here_string_is_not_the_receiver_n120(self) -> None:
+        """Plan 00466 N120 minor 4: ``<<<EOF`` is a here-string. Read as a
+        heredoc opener, it made ``cat`` the receiver of the body bash runs."""
+        command = "cat <<<EOF; bash <<'EOF'\necho hi > out.md\nEOF"
+        assert "out.md" in _writes(command)
+
+    @pytest.mark.parametrize("opener", ["'EOF-1'", "\\EOF", 'E"O"F', "'my notes'"])
+    def test_any_delimiter_word_finds_its_receiver_n120(self, opener: str) -> None:
+        delimiter = opener.replace("'", "").replace('"', "").replace("\\", "")
+        command = f"echo start; bash <<{opener}\necho hi > out.md\n{delimiter}"
+        assert "out.md" in _writes(command)
+
+    def test_two_heredocs_sharing_a_delimiter_each_find_their_own_receiver(self) -> None:
+        """The second ``EOF`` body is fed to bash, not to the ``cat`` whose
+        heredoc used the same delimiter earlier on the line."""
+        command = "cat > a.txt <<'EOF'; bash <<'EOF'\nprose\nEOF\necho hi > out.md\nEOF"
+        assert "out.md" in _writes(command)
+
 
 class TestUnparseableText:
     def test_an_unbalanced_quote_names_nothing(self) -> None:

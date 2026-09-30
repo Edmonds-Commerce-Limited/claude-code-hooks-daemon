@@ -72,7 +72,13 @@ from enum import StrEnum
 from typing import Final
 
 from claude_code_hooks_daemon.utils.command_evasion import normalise_line_continuations
-from claude_code_hooks_daemon.utils.shell_segmentation import strip_quoted_heredoc_bodies
+from claude_code_hooks_daemon.utils.shell_segmentation import (
+    END_OF_OPTIONS,
+    FLAG_PREFIX,
+    LONE_DASH,
+    peel_command_wrappers,
+    strip_quoted_heredoc_bodies,
+)
 
 
 class ProbeKind(StrEnum):
@@ -487,43 +493,13 @@ class _Region:
     construct: WaitConstruct
 
 
-@dataclass(frozen=True, slots=True)
-class _Wrapper:
-    """A command that RUNS another command, and what to skip to reach it.
-
-    Attributes:
-        value_flags: Flags whose following token is a value, not the command.
-        positional_operands: Positional tokens consumed before the wrapped
-            command starts — ``timeout``'s DURATION is the only one shipped.
-        construct: The wait construct this wrapper establishes, if any.
-    """
-
-    value_flags: frozenset[str]
-    positional_operands: int = 0
-    construct: WaitConstruct | None = None
-
-
-_WRAPPERS: Final[dict[str, _Wrapper]] = {
-    "watch": _Wrapper(
-        value_flags=frozenset({"-n", "--interval"}),
-        construct=WaitConstruct.WATCH,
-    ),
-    "timeout": _Wrapper(
-        value_flags=frozenset({"-s", "--signal", "-k", "--kill-after"}),
-        positional_operands=1,
-        construct=WaitConstruct.TIMEOUT,
-    ),
-    "nohup": _Wrapper(value_flags=frozenset()),
-    "sudo": _Wrapper(value_flags=frozenset({"-u", "-g", "-p"})),
-    "env": _Wrapper(value_flags=frozenset({"-u", "--unset"})),
-    "nice": _Wrapper(value_flags=frozenset({"-n", "--adjustment"})),
-    "stdbuf": _Wrapper(value_flags=frozenset({"-i", "-o", "-e"})),
-    "command": _Wrapper(value_flags=frozenset()),
-}
-
-#: Wrappers that make the command they run a WAIT rather than a one-shot.
+#: Wrappers that make the command they run a WAIT rather than a one-shot. Which
+#: words ARE wrappers, and how to skip their flags, is the shared
+#: ``shell_segmentation.COMMAND_WRAPPERS`` table; this module adds only the
+#: waiting meaning two of them carry.
 _WAIT_WRAPPERS: Final[dict[str, WaitConstruct]] = {
-    name: wrapper.construct for name, wrapper in _WRAPPERS.items() if wrapper.construct is not None
+    "watch": WaitConstruct.WATCH,
+    "timeout": WaitConstruct.TIMEOUT,
 }
 
 
@@ -768,10 +744,6 @@ _SIGNAL_ZERO: Final = "-0"
 _OWN_PID: Final = "$$"
 
 _SHORT_CLUSTER: Final[re.Pattern[str]] = re.compile(r"^-[A-Za-z0-9]+$")
-_END_OF_OPTIONS: Final = "--"
-_DASH: Final = "-"
-#: A lone dash is an OPERAND meaning stdin, never a flag.
-_LONE_DASH: Final = "-"
 
 
 #: Punctuation bash strips off the front of a command word while deciding what
@@ -839,30 +811,13 @@ def _strip_wrappers(words: list[_Word]) -> tuple[list[_Word], WaitConstruct | No
     establish, so ``watch -n 5 pgrep -f x`` resolves to ``pgrep`` while still
     reporting that it is being watched.
     """
-    remaining = list(words)
-    construct: WaitConstruct | None = None
-
-    while remaining:
-        wrapper = _WRAPPERS.get(_basename(remaining[0].text))
-        if wrapper is None:
-            break
-        construct = wrapper.construct or construct
-        remaining.pop(0)
-        positionals = wrapper.positional_operands
-        while remaining:
-            argument = remaining[0].text
-            if argument.startswith(_DASH) and argument not in (_LONE_DASH, _END_OF_OPTIONS):
-                remaining.pop(0)
-                if argument in wrapper.value_flags and remaining:
-                    remaining.pop(0)
-                continue
-            if positionals > 0:
-                remaining.pop(0)
-                positionals -= 1
-                continue
-            break
-
-    return remaining, construct
+    names, start = peel_command_wrappers([word.text for word in words])
+    # The innermost waiting wrapper names the construct: `timeout 60 watch
+    # pgrep` is a watch, bounded by a timeout.
+    construct = next(
+        (_WAIT_WRAPPERS[name] for name in reversed(names) if name in _WAIT_WRAPPERS), None
+    )
+    return list(words[start:]), construct
 
 
 def _resolve(span: _Span) -> tuple[list[_Word], _Invocation] | None:
@@ -882,10 +837,10 @@ def _resolve(span: _Span) -> tuple[list[_Word], _Invocation] | None:
         if _is_redirect(argument):
             index += 2 if _is_bare_redirect(argument) else 1
             continue
-        if argument == _END_OF_OPTIONS:
+        if argument == END_OF_OPTIONS:
             index += 1
             continue
-        if argument.startswith(_DASH) and argument != _LONE_DASH:
+        if argument.startswith(FLAG_PREFIX) and argument != LONE_DASH:
             flags.append(argument)
             if _takes_a_value(argument):
                 index += 2
@@ -1435,10 +1390,10 @@ def _skip_wrapper_operands(
 
     while index < len(words):
         argument = words[index].text
-        if argument == _END_OF_OPTIONS:
+        if argument == END_OF_OPTIONS:
             index += 1
             continue
-        if argument.startswith(_DASH) and argument != _LONE_DASH:
+        if argument.startswith(FLAG_PREFIX) and argument != LONE_DASH:
             transparent = transparent or argument in spec.transparent_flags
             index += 2 if argument in spec.value_flags else 1
             continue
@@ -1462,7 +1417,7 @@ def _shell_script_head(words: list[_Word], index: int) -> str | None:
     if name not in _INTERPRETERS:
         return None
     for word in words[index + 1 :]:
-        if not word.text.startswith(_DASH):
+        if not word.text.startswith(FLAG_PREFIX):
             return None
         if word.text == _INTERPRETER_SCRIPT_FLAG or (
             _SHORT_CLUSTER.match(word.text) is not None

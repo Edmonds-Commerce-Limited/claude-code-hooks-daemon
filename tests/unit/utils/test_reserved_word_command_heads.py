@@ -167,7 +167,8 @@ class TestGuardsAndAdvisoriesStillFire:
 
     @pytest.mark.parametrize("command", _wrapped("mkdir /opt/n25-probe"))
     def test_project_containment_sees_the_destination(self, command: str) -> None:
-        assert "/opt/n25-probe" in ProjectContainmentHandler()._destination_targets(command)
+        targets = ProjectContainmentHandler()._destination_targets(command)
+        assert "/opt/n25-probe" in [path for path, _runs in targets]
 
     @pytest.mark.parametrize("command", _wrapped("python3 -c \"open('J/x.md','w')\""))
     def test_bash_file_writes_sees_the_program_write(self, command: str) -> None:

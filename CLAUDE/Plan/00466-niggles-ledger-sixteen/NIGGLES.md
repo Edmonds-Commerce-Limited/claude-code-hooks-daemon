@@ -3,155 +3,84 @@
 Newest first. Each entry says how it was found, why it happens, and the
 candidate remedies.
 
-### N245 — ✅ Remedied — Layer 1 `upgrade.sh` stops the daemon with its own shell matcher
+This ledger takes no new entries: its PLAN.md reached the size limit with N261.
+New entries, from N262 on, are filed in
+[ledger seventeen](../00474-niggles-ledger-seventeen/NIGGLES.md).
 
-**Found by lifecycle review 10 (§4), shared with main.** Layer 1 runs before
-the checkout with no venv, so it read each `daemon-*.pid`, matched the pid's
-`ps -o args=` line in shell, and sent SIGTERM. The match had four gaps the
-CLI's proof does not:
+### N261 — Plan 00463 landed green on the local gate and red on CI
 
-- no uid check;
-- no pin between the check and the `kill`;
-- a root taken from the interpreter's venv path when no `--project-root`
-  was named, which round 6 (Sh-1) removed from the Python proof;
-- `read -r -a` split the command line at every space, so a root holding
-  one was never matched. That failed closed.
+**Found**: CI run 36619680779 on the 00463 merge `83e75879` failed on all three
+Pythons, although the branch's local full-QA gate had passed every test.
 
-**Remedied (lifecycle round 10):** Layer 1 signals nothing. Layer 2's Step 4
-runs straight after the checkout and stops the daemon through
-`daemon_control.sh`'s `stop_daemon_safe`, which is the CLI's `stop` and its
-full proof. `tests/integration/test_upgrade_sh_stop_bootstrap.py` pins that
-Layer 1 sends no signal and keeps no matcher. The CLI stop on a root holding
-a space is tested end to end in
-`test_a_daemon_of_a_symlinked_project_is_stoppable.py`.
+- **Project handler tests:** the full-QA gate plugin refused CI's bare
+  `pytest .claude/project-handlers`. That run never loads `tests/conftest.py`,
+  so the plugin had no suite to count against and failed closed. This is
+  N260's class again: the local gate starts those tests another way.
+- **One teardown error:** `TestTheGateRunCertifies` reached `llm_qa.py`'s
+  live-daemon step un-mocked. On a CI runner that started the real project
+  daemon, and it rewrote `CLAUDE.md`. Locally a daemon was already running, so
+  the step did nothing.
 
-### N232 — ✅ Remedied — Two concurrent hook starts: the second's single-daemon enforcement stops the first's daemon while it initialises
+**✅ Remedied** in `5ff020c7`, merged as `fd78edce`. The plugin counts a run
+outside `tests/` against the launch directory's `tests/`, and the test stubs
+the daemon step. Each fix has a test that was RED first.
 
-**Found by lifecycle review 9 (§5), on main (44d1b1b3b).** Two hooks each ran
-`cli start` at once, and nothing excluded the second launch
-(`init.sh:1057`). The second start's reuse gate saw no PID file and no live
-socket, since a daemon writes its PID file only once its controller is
-initialised (`cli.py:576-620`), so it ran `enforce_single_daemon`
-(`cli.py:623`). In a container, `find_all_daemon_processes` proved the first
-start's daemon by its `--project-root` flag and spared only a live socket's
-owner (`enforcement.py:90-103`), then SIGTERMed it while it was still
-initialising (`enforcement.py:117-125`) and forked a second daemon. The first
-hook got a spurious deny, and with three or more hooks at once it repeated.
-No call ran unjudged. A launcher's command line is also its daemon's (the
-daemon is its fork), so the same enforcement stopped a second launcher that
-was merely waiting: on main the RED run shows both.
+The class stays open with N260. A second environment difference slipped
+through: whether a daemon is already running. Candidate remedy: the local gate
+runs the CI commands, from a state with no daemon running.
 
-**Remedied (lifecycle batch, rounds 8b and 9):** every start of a project
-takes one launch lock (`daemon.launch.lock` in the project's untracked
-directory, whatever socket it uses) before it looks for a daemon, and the
-daemon it forks holds it until it serves. Enforcement runs only under that
-lock, and stops only a process that has bound a socket, which a launcher
-and a daemon still starting have not. RED on main:
-`test_two_concurrent_starts_start_one_daemon[container]` (a variant with
-main's helpers: "Container environment: Killing 1 other daemon process(es)",
-exit codes `[1, -15]`). RED on c5b2befc8: the same test, and
-`TestOnlyADaemonThatServesIsStopped::test_a_start_under_way_is_never_stopped`.
+### N260 — the local gate runs project-handler tests differently from CI
 
-### N225 — ✅ Remedied — A `--project-root` with `..` through a link is attributed to a root its daemon does not serve
+**Found**: main CI was red on "Project handler tests" on every Python from
+`84afc8804` on, while the local full-QA gate for that branch passed 40/40.
+`test_enforce_llm_qa.py` imports `tests.scaling`. CI runs the bare `pytest`
+entry point, which does not put the working directory on `sys.path`, so the
+import fails there. The local gate runs `python -m pytest`, which does put it
+on `sys.path`, so the gate cannot see this class of failure.
 
-**Found by lifecycle review 8 (S8-1), on main as well.** The proof read the
-flag and collapsed it with `normpath`, then `realpath`, while `cmd_start`
-serves `Path.resolve()`, which follows a link before it meets `..`. With
-`/var/run` a link to `/run`, a daemon launched with `--project-root /var/run/../workspace` serves `/workspace` and was attributed to
-`/var/workspace`. That project's single-daemon enforcement could stop
-`/workspace`'s daemon, and `/workspace` could not stop its own.
-`verified_daemon_process` also compared `normpath` strings, so a root named
-through a link never matched the resolved root the daemon serves.
+**Remedy**: the project-handlers `conftest.py` puts the repository root on
+`sys.path` (`257847b51`). **✅ Remedied** for this instance.
 
-**Remedied (lifecycle batch, round 8):** a flag root that holds `..` or is
-not its own `normpath` proves nothing (`_root_from_flag`), and no later
-source is consulted for it. `verified_daemon_process` compares both roots
-resolved. RED: `test_a_root_that_is_not_its_own_normal_form_proves_nothing`
-(`/var/run/../workspace` among them) and, on real processes,
-`test_a_root_whose_dotdot_follows_a_link_proves_nothing` and
-`test_a_root_named_through_a_link_is_the_one_the_daemon_serves`.
+The class stays open while the local gate and CI invoke pytest differently.
+Candidate remedy: the local project-handler step runs the exact CI command.
 
-### N206 — ✅ Remedied — A pid reused between psutil's start-time re-check and its `kill` is signalled
+### N252 — a scaling test compared an uncapped size with a capped one
 
-**Found by lifecycle review 7 (§2), on main as well.** `stop_verified_daemon`
-signalled through a `psutil.Process`, which re-checks the pid's start time
-and then calls `os.kill`. A pid reused between the two, or inside one
-start-time tick, received the signal. `signal_verified_daemon_via_pidfd`
-existed but had no caller, and opened its pidfd only AFTER the proof, so it
-had the same gap.
+**Found**: `test_shell_expansion.py::test_forty_repetitions_is_also_fast`
+failed on several full-QA gates, and on main CI, with "cost grew 24-28x for
+8x input". The small size (5 brace pairs, 32 spellings) sat below the
+256-spelling cap and the large one (40 pairs) at it, so the ratio measured two
+regimes rather than growth.
 
-**Remedied (lifecycle batch, round 7):** `signal_verified_daemon` and
-`stop_verified_daemon` open a pidfd BEFORE the proof and send every signal
-through it, and wait on it for the exit. A pid reused after the pin can only
-make the send fail. Where the kernel makes no pidfds (`ENOSYS`, `EPERM`,
-`ENODEV`, `EMFILE`, `ENFILE`) the proven psutil handle delivers it. The
-unused `_via_pidfd` function is gone. RED:
-`TestTheSignalGoesThroughAPidfdPinnedBeforeTheProof` (a pin landing on a
-process that has exited, while the proof reads a live daemon at the pid).
+**✅ Remedied**: both sizes now sit inside one regime (`581ccadd3`, landed
+with Plan 00408 in `b9e36233c`).
 
-### N205 — ✅ Remedied — The installer removes PID files and sockets with no lock or liveness check
+### N259 — orchestrator simulate reports denials its blocking mode would never make
 
-**Found by lifecycle review 7 (S-3), on main as well.**
-`client_validator._check_running_daemon` unlinked a PID file on
-`ALREADY_GONE` with no lock and no content check, and
-`cleanup_stale_runtime_files` removed every `daemon*.sock`, live ones
-included, and treated a `PermissionError` from `kill(pid, 0)`, which means
-the process is alive, as an invalid file.
+Carried from 00422 N24 (owner decision, 2026-09-29). Nothing is changed from
+the original finding.
 
-**Remedied (lifecycle batch, round 7):** both go through
-`server.remove_stale_pid_file` (under the start lock, only while the file
-holds what was read and names no live process) and the new
-`server.remove_dead_socket` (under the start lock, only on a DEFINITIVE
-not-live probe). RED: `TestRuntimeFilesGoOnlyUnderTheStartLockAndOnlyWhileDead`.
+**Found**: every main-thread Bash call in a session drew
+`SIMULATED orchestrator-only mode (Plan 00418 — record only, never blocks): main thread would have been denied — Bash: …`.
+The coordinator took that at face value and told Plan 00463's agent that
+going live would deny the coordinator's own `llm_qa.py all` (a deadlock).
+The 00463 code review read the real handler
+(`.claude/project-handlers/pre_tool_use/orchestrator_simulate.py`).
+Simulate mode judges `tool_name not in _COORDINATION_TOOLS` (line 299),
+while blocking mode denies only `_BLOCKED_TOOLS = {Write, Edit, NotebookEdit}`
+(lines 183 and 320). Bash is "would have been denied" in simulate and
+never denied when live.
 
-### N204 — ✅ Remedied — Enforcement removes a stale PID file outside the start lock and takes another user's live pid for dead
+**Why it matters.** The simulate record exists to preview what enforcement
+would cost before it is switched on. A preview that overstates enforcement
+misleads that decision and anyone reasoning from it, as it did here, and
+cost an agent a round of edits it then had to revert.
 
-**Found by lifecycle review 7 (S-2), on main as well.** Outside a container
-`enforce_single_daemon` removed a PID file whose pid `is_process_running`
-called dead, with no start lock, and `is_process_running` returned False on
-`AccessDenied`, so another user's live daemon lost its file.
-
-**Remedied (lifecycle batch, round 7):** it reads the file and hands it to
-`server.remove_stale_pid_file`, moved there from `cli` so enforcement and the
-installer share it, and leaves it when there is no socket to lock.
-`is_process_running`, whose only caller this was, is gone. RED:
-`TestAStalePidFileGoesOnlyUnderTheStartLock`.
-
-### N203 — ✅ Remedied — The stop proof takes the first `--project-root` where argparse keeps the last
-
-**Found by lifecycle review 7 (S-1), on main as well.** `_root_from_flag`
-returned the first `--project-root`. argparse keeps the last, and
-`bin/hooks-daemon` puts its own root before the caller's, so
-`bin/hooks-daemon --project-root B start` run from A's wrapper started a
-daemon serving B that was attributed to A. A's single-daemon enforcement
-could then stop B's daemon, and B could not stop its own.
-
-**Remedied (lifecycle batch, round 7):** the command line is parsed by
-argparse with `cli.main`'s own global options (`add_global_arguments`, now
-shared), so repeats, `=` forms and abbreviations resolve as the launch
-resolved them. A line its parser refuses, a subcommand with arguments, or a
-relative root proves nothing, and no later source is consulted for it.
-`init.sh`'s narrower proof now also requires exactly six arguments. RED:
-`TestTheFlagIsReadAsTheDaemonsOwnParserReadsIt`, which also checks every
-case against `cli.build_parser()`, and
-`test_a_daemon_launched_for_b_through_as_wrapper_is_never_stopped_by_a`.
-
-### N202 — ✅ Remedied — `restart` reports "failed to start (no PID file)" while the daemon comes up
-
-**Found by lifecycle review 7 (§5), on main as well.** `cmd_start`'s parent
-waited a fixed 5 s for the PID file, which the daemon writes only after
-controller init. Under load that took longer, so the parent printed "failed
-to start (no PID file created)" and exited 1 while the daemon came up.
-
-**Remedied (lifecycle batch, round 7):** the daemon reports through a pipe
-whose write end it holds for life: its pid first, then a byte per startup
-step. The parent waits while the daemon is alive and advancing (a byte, the
-PID file changing, or CPU time spent), and gives up on end of file (exited),
-after `DAEMON_START_STALL_SEC` with no progress, or at
-`DAEMON_START_BUDGET_SEC`. The message says which, and whether a PID file
-was waiting on its proof. RED: `TestTheStartWaitFollowsTheDaemonsProgress`
-and `test_start_waits_on_a_slowly_initialising_daemon.py` (a throwaway
-daemon whose controller init sleeps 7 s).
+**Candidate remedies:** simulate records exactly what blocking would
+deny, from ONE shared predicate, and a test pins the two modes to the same
+verdict for every tool. If the broader "not a coordination tool" count is
+still wanted as telemetry, it gets its own clearly different wording,
+never "would have been denied".
 
 ### N194 — ✅ Remedied — daemon-signal tests read a spawned child's cmdline before its exec lands, so a loaded host flakes
 
@@ -199,329 +128,35 @@ RED under the load recipe above for both files (test_safe_signal.py:
 identical load recipe after the fix, plus a clean unloaded run (40 and 55
 passed respectively).
 
-### N193 — ✅ Remedied — The server's PID-file liveness check parsed pid text its own way
+### N123 — ✅ Remedied — a DP-cost regression test asserted on wall-clock time, which flakes under a loaded gate
 
-**Found by the lifecycle round-5 D-PATH review (Sh-3).**
-`server._pid_file_points_at_live_process` read the file with its own parse,
-so `0`, `-1`, `1` and padded text were treated as pids. **Remedied (round
-6):** it uses `paths.parse_pid_text`. Detail in
-`subagent-reports/260926-lifecycle-opus-5-5.md`, round 6.
+**Found:** Plan 00463's `TestInteriorWildcardDpIsBounded::test_a_lone_long_star_run_collapses_to_near_zero_cost`
+(the star-run-collapse cost guard, B1/Plan 00466 review 2) started as a fixed
+0.1s wall-clock budget. It failed once in a 37/39 gate run under heavy
+concurrent load (many worktrees' gates running at once), passed 10/10 in
+isolation on the branch and on `main`, but main itself measured 0.09s against
+the same 0.1s budget — a close margin, confirming the bound was
+environment-sensitive rather than genuinely tight. A first fix replaced the
+absolute budget with a scaling-ratio assertion (min of several timed trials,
+long token vs. a short baseline) — still a wall-clock measurement with its
+own absolute-second floor to absorb constant-factor noise, so it remained
+exposed to the identical flake, just with a wider margin.
 
-### N192 — ✅ Remedied — A socket that merely accepts a connection counted as this project's daemon
-
-**Found by the lifecycle round-5 D-PATH review (Sh-2).** Under the `/tmp`
-fallback another user can bind the path first. **Remedied (round 6):** the
-daemon answers an `identity` action with its project and pid, and only this
-project's answer counts. Detail in the lifecycle report, round 6.
-
-### N191 — ✅ Remedied — A daemon naming no root was attributed to the project owning its venv
-
-**Found by the lifecycle round-5 D-PATH review (Sh-1), on main as well.** A
-worktree sharing a checkout's venv was attributed to that checkout.
-**Remedied (round 6):** such a daemon is attributed only by the natural
-socket it has bound. Detail in the lifecycle report, round 6.
-
-### N190 — ✅ Remedied — A process's owner was judged by permission to signal it, which root holds over every process
-
-**Found by the lifecycle round-5 reviews (P5-1, Sh-G), on main as well.**
-**Remedied (round 6):** ownership is the process's real and effective uid,
-in bash (`_hooks_daemon_pid_is_this_users`) and Python
-(`is_this_users_process`, and `verified_daemon_process`). Detail in the
-lifecycle report, round 6.
-
-### N165 — ✅ Remedied — `init.sh`'s daemon helper runs a venv that `HOOKS_DAEMON_ROOT_DIR` alone chose
-
-**Found by the lifecycle batch's round-4 D-PATH review (Sh-F), on main as
-well for `start_daemon`.** `_hooks_daemon_run_cli_helper` resolved and ran
-the venv under `HOOKS_DAEMON_ROOT_DIR` without the P3-1 check that the root
-is an install of this project. That variable can be inherited from whatever
-started Claude Code, so the helper's answer (is this pid our daemon; may this
-PID file go) could come from another project's code.
-
-**Remedied (lifecycle batch, round 5):** the helper first runs
-`_installs_launcher` (the P3-1 rule, with system `python3`) and proves nothing
-when the root is not this project's. RED:
-`test_the_helper_runs_only_under_this_installs_root` (another project's root,
-with this daemon's socket answering, is still unknown). Release note 159.
-
-### N164 — ✅ Remedied — The start lock's mode and its docstring disagree about a second user
-
-**Found by the lifecycle batch's round-4 D-PATH review (Sh-E), on main as
-well.** `_open_start_lock` creates the lock `0600` and opens it `O_RDWR`, but
-its docstring (and N162 above) said a host and a container running as
-different users share it. They cannot unless one is root: the second user's
-open fails with `EACCES`, and that failure surfaced as a bare `OSError`.
-
-**Remedied (lifecycle batch, round 5):** the mode stays `0600`. A lock another
-user can open is one another user can hold, and every start would then wait
-on them. The docstring now says only the owner (or root) can take it, and
-the second user's `PermissionError` is re-raised naming the lock's uid and
-its own. Every caller already fails closed on `OSError`: a start does not
-run, and `stop` and `remove_stale_pid_file` remove nothing. N162's "share one
-lock" sentence is wrong on this point. RED:
-`test_only_its_owner_may_open_the_lock`,
-`test_another_users_lock_is_refused_by_name`. Release note 159.
-
-### N163 — ✅ Remedied — A PID file whose pid this user may signal counts as running, whatever process it names
-
-**Found by the lifecycle batch's round-4 D-PATH review (Sh-D), on main as
-well.** `is_daemon_running` returned 0 as soon as `kill -0` succeeded. After
-a reboot a stale PID file's pid can belong to any process of this user's,
-which then read as the daemon: no start was tried, and every call was denied
-until someone ran the exempt restart. Round 4 fixed only the EPERM half.
-
-**Remedied (lifecycle batch, round 5):** a live pid is running only when it is
-proven. `init.sh` first matches the pid's command line against the forms a
-daemon of this project is launched with (`/proc/<pid>/cmdline` with its
-argument boundaries, or `ps` elsewhere), which costs no venv. Anything else
-goes to the daemon's helper (the socket answering, or
-`process_verification`'s full rule), at most once per hook; unproven is 2,
-unknown, and a start is tried. A test pins that every command line `init.sh`
-proves, the daemon's rule proves too. For another user's pid only the socket
-counts (P4-2). RED: `test_a_live_pid_that_is_not_this_daemon_is_unknown`,
-`TestTheHooksCommandLineProofIsSound`. Release note 159.
-
-### N162 — ✅ Remedied — The start lock is opened through a symlink, and an unopenable lock escapes `stop`
-
-**Found by the lifecycle batch's round-3 D-PATH re-review (Sh-C), on main as
-well.** `server._open_start_lock` opened `<socket>.start.lock` with
-`O_RDWR | O_CREAT` and no `O_NOFOLLOW`, so a symlink planted at that path
-was followed, and `O_CREAT` created or opened the file it named. Round 3
-also made `cmd_stop` take the lock, and only `StartLockTimeout` was caught
-there: an `OSError` opening it propagated after the daemon had already
-stopped.
-
-**Remedied (lifecycle batch, round 4):** the lock is opened with
-`O_NOFOLLOW | O_CLOEXEC` and must be a regular file (`fstat`), or `OSError`
-is raised. There is no ownership check: a host and a container sharing the
-untracked directory run as different users and share one lock, and the lock
-is only ever flocked. `_release_stopped_daemon_files` handles `OSError`
-explicitly and fails closed, leaving the PID file and socket. RED:
-`TestTheStartLockRefusesWhatIsNotItsOwnFile` (a symlink, whose target is
-never created, and a FIFO) and
-`test_a_start_lock_that_cannot_be_opened_keeps_both_files`. Release note
-157\.
-
-### N161 — ✅ Remedied — A PID file holding `0`, `1` or a negative number counts as a running daemon
-
-**Found by both lifecycle round-3 re-reviews (Sh-B, S-R3-1), on main as
-well.** `kill -0 0` signals the caller's own process group and succeeds, and
-pid 1 is init, which root may signal. `init.sh` accepted any `^[0-9]+$`, so a
-PID file holding `0` or `1` made `is_daemon_running` report a daemon running
-for ever and the hook never started one. Python's `read_pid_file` used
-`int()`, which also takes `-1`, `+12` and `1_2`, and `os.kill(0, 0)` succeeds
-there too. An empty file returned "not running" without being cleared.
-
-**Remedied (lifecycle batch, round 4):** one definition of a PID file's text
-in both languages: the digits of one pid from 2 to Linux's `PID_MAX_LIMIT`
-(4194304), with no leading zero, optionally followed by newlines
-(`paths.parse_pid_text`, `init.sh`'s `_hooks_daemon_is_pid_text`, pinned
-equal by a test). Anything else is corrupt, never counts as running, and
-`is_daemon_running` removes it as stale, under the start lock (N160). RED:
-`test_a_corrupt_pid_file_is_never_running_and_is_removed` and
-`test_read_pid_file_never_counts_a_corrupt_file_as_running`. Release note
-157\.
-
-### N160 — ✅ Remedied — `init.sh` removes a stale PID file outside the start lock
-
-**Found by the lifecycle batch's round-3 D-PATH re-review (Sh-A), on main as
-well.** `is_daemon_running` re-read the PID file, compared it and ran
-`rm -f`, without the start lock. A daemon start writes its pid while holding
-that lock, so a pid written between the compare and the `rm` was removed and
-the live daemon was orphaned. Round 3 put the Python side of stop under the
-lock; the bash side was left.
-
-**Remedied (lifecycle batch, round 4):** the bash side calls
-`cli.remove_stale_pid_file` in the daemon's venv. Under the start lock it
-removes the file only while it still holds exactly the text bash read, and
-that text names no live process. A lock that is held for the whole wait, or
-cannot be opened, leaves the file; so does a missing venv. A stale file left
-behind is harmless: it never counts as running, and a starting daemon
-overwrites it under the lock. Python's `read_pid_file` had the same unlocked
-compare-then-remove for a dead pid (found while fixing this); it no longer
-removes anything, so the start lock's holders are the only removers. RED:
-`test_a_stale_pid_file_is_removed_only_through_the_start_lock`,
-`TestRemoveStalePidFile` and
-`test_read_pid_file_returns_none_for_dead_process_and_leaves_the_file`.
-Release note 157.
-
-### N140 — ✅ Remedied — PreToolUse input the forwarder cannot parse is answered without a deny
-
-**Found by the lifecycle batch's round-2 D-RULE re-review, on main as well.**
-`send_request_stdin` sent a `json.loads` failure to `invalid_hook_input`,
-which `emit_error_json` answered with context only: no `permissionDecision`,
-so the call ran with no guard. JSON nested about 1000 deep raises
-`RecursionError` in the parser, so any tool whose input nests that far (in
-practice an MCP tool) skipped every PreToolUse guard on the plain forwarder.
-During a relay hand-off the relay accepted that context-only answer as the
-carve-out's allow. Two neighbours had the same effect with no JSON at all:
-input a few levels shallower parsed, then the request envelope's
-`json.dumps` raised outside any handler, and stdin that is not UTF-8 raised
-in `sys.stdin.read()` outside the `try`. The daemon's own socket already
-denied such input.
-
-**Remedied (lifecycle batch, round 3):** the read, the parse and the
-envelope encoding are all inside the handler, and for PreToolUse
-`invalid_hook_input` is denied with the reason "Hook input could not be
-parsed, so no guard judged this call". The recovery carve-out cannot apply,
-since it needs the parsed input. Other events keep the fail-open context.
-RED: `TestInputThatCannotBeParsedIsDenied` (1000-deep, every depth from 980
-to 1000, text that is not JSON, bytes that are not UTF-8, and the hand-off)
-and the relay's `test_input_nested_too_deeply_to_parse_is_denied`. Release
-note 155.
-
-### N139 — ✅ Remedied — `is_daemon_running` reads EPERM from `kill -0` as a dead daemon and removes its PID file
-
-**Found by both lifecycle round-2 re-reviews, on main as well.** `kill -0`
-fails with EPERM on another user's live process. `init.sh`'s
-`is_daemon_running` treated any failure as a dead daemon, returned 1 and
-removed the PID file (round 2 made that conditional on the file still naming
-the pid, but it still removed the file of a live process). `ensure_daemon`
-then tried to start a second daemon. The Python side
-(`_pid_file_points_at_live_process`) already treated `PermissionError` as
-alive.
-
-**Remedied (lifecycle batch, round 3):** only ESRCH ("No such process",
-read in the C locale) means the process is gone. EPERM and any other failure
-of a numeric pid return 0 and keep the file. A PID file that holds no number
-is still stale. RED: `test_a_pid_it_may_not_signal_is_alive_and_keeps_its_file`
-(the builtin shadowed with the EPERM failure it reports, since root may
-signal anything). Release note 154.
-
-**Round 4 (N139-A, found by both round-3 re-reviews):** returning 0 on EPERM
-made `ensure_daemon` skip the start whenever a stale PID file named another
-user's process, for example after a reboot, so the daemon stayed down until
-someone ran `restart`. EPERM now answers "unknown" (2) unless the socket
-answers or the pid's command line proves it is this project's daemon
-(`cli.pid_is_this_projects_daemon`). Unknown never skips a start: `cli start`'s REUSE gate decides, and the daemon overwrites the PID file. The
-file of a live pid is never deleted, including by `read_pid_file(..., verify_daemon=True)`. RED: `test_a_pid_it_may_not_signal_is_unknown_and_keeps_its_file`,
-`test_a_pid_it_may_not_signal_does_not_stop_an_auto_start`, and the socket
-and command-line proofs.
-
-### N128 — ✅ Remedied — Stop and the stale-PID checks delete a successor's PID file and socket
-
-**Found by the lifecycle batch's D-PATH review (S2), on main as well.**
-After an observed exit, `cmd_stop` called `cleanup_pid_file` and
-`cleanup_socket`, which unlinked unconditionally. `read_pid_file` removed a
-PID file whose pid was dead or not a daemon, and `init.sh`'s
-`is_daemon_running` ran `rm -f "$PID_PATH"` whenever `kill -0` failed. A
-successor started in between by a concurrent hook's `ensure_daemon` writes
-its own pid and binds its own socket at the same paths, so each of these
-could orphan a live daemon and let a second one start.
-
-**Remedied (lifecycle batch, round 2):**
-
-- `cleanup_pid_file(path, pid)` now requires the pid and removes the file
-  only while it still holds it; a file naming another pid, or no readable
-  pid, is left. `read_pid_file` and `enforcement` use it.
-- `cmd_stop`'s three cleanups go through `_release_stopped_daemon_files`,
-  which removes the socket only on a definitive `NOT_LIVE` probe
-  (`_socket_liveness_sync`), never on `LIVE` or `INDETERMINATE`.
-- `is_daemon_running` re-reads the PID file and removes it only while it
-  still names the pid it found dead, without a new stderr suppression.
-- Round 3 (D-PATH m-B): `_release_stopped_daemon_files` makes both checks
-  under the start lock (`server.hold_start_lock`), which a start holds
-  across its probe, PID write, unlink and bind, so a probe can no longer land
-  between a successor's unlink and bind. A lock held past `Timeout.FILE_LOCK`
-  leaves both files. RED: `test_the_probe_and_both_removals_hold_the_start_lock`.
-
-RED: `TestCmdStopCleansUpOnlyWhatItStillOwns` (a real successor socket and
-PID file written when the exit is observed), two `read_pid_file` successor
-tests and two `cleanup_pid_file` ownership tests in `test_paths.py`, and
-`TestIsDaemonRunningRemovesOnlyItsOwnStalePidFile` (a successor write inside
-the `kill -0` probe). Release note 152.
-
-### N127 — ✅ Remedied — The recovery exemption strips control characters, not just spaces
-
-**Found by the lifecycle batch's D-RULE review (S1), on main as well.** The
-carve-out compared `command.strip()` with the exempt text. `str.strip()`
-also removes vertical tab, form feed, the file/group/record/unit
-separators, NEL and the Unicode line separators, so `bin/hooks-daemon restart` with `\x1c` appended was exempt while bash handed the launcher the
-argument `restart\x1c`. A leading or trailing newline was exempt too.
-
-**Remedied (lifecycle batch, round 2):** the command is compared raw with
-only spaces and tabs stripped (`_RECOVERY_PADDING`), and anything that is
-not printable after that is rejected. RED:
-`TestRecoveryCommandTextMatchesExactly`, 13 control-character cases against
-the round-1 `init.sh`. Release note 150.
-
-### N126 — ✅ Remedied — The relay's PreToolUse deny has no recovery carve-out, so a wedged daemon denies its own restart
-
-**Found by the lifecycle batch while fixing N67.** `init.sh` exempts the exact
-recovery command from every fail-closed PreToolUse deny, so a wedged daemon
-can be restarted from inside the session. The relay (`relay/hooks_relay.rs`),
-live in this repository's dogfood config, has no such exemption. It never
-parses the payload, and on the `pre-tool-use.sock` socket every mid-exchange
-failure (`mid_exchange_fail`) writes `deny_pre_tool_use_json`. When the
-daemon accepts the connection but never answers (the B2 GIL-hang shape), the
-relay times out and denies `bin/hooks-daemon restart` too. Its own deny text
-tells the agent to run that same command. Only a connect failure falls back
-to the bash rung, where the carve-out lives. The human `!` route still
-works, but an unattended agent loops on the deny.
-
-**Candidate remedies:**
-
-- on a PreToolUse mid-exchange failure, exec the bash rung with the buffered
-  payload instead of denying, so `init.sh`'s one carve-out judges it (the
-  relay would buffer stdin rather than stream it);
-- or have the forwarder's relay guard skip the relay for a payload that
-  could be the recovery command, and leave the judgement to `init.sh`.
-
-Either way, the relay must not grow a second copy of the carve-out, because
-N67 showed that two copies drift.
-
-**Remedied (lifecycle batch, first remedy):** the relay keeps every request
-byte it reads. On a PreToolUse mid-exchange failure with a `--fallback`, it
-finishes reading stdin and runs the forwarder (`--no-relay`) with the whole
-request replayed on its stdin and `HOOKS_DAEMON_RELAY_FAILED` naming the
-failure (`judge_via_fallback`). `init.sh` captures and unsets that variable at
-source time. `send_request_stdin` then skips the nc rung and the socket and
-fails `relay_exchange_failed` ("reached"), so `emit_error_json` denies through
-the one N67 carve-out without waiting out the wedge again. The relay never
-parses the request. The hand-off fails closed: if stdin cannot be completed,
-or the forwarder cannot run, exits non-zero or writes nothing, the relay
-writes its own deny. Setting the variable by hand can only deny. RED against
-`HEAD` (its `init.sh` and a relay built from its source): 7 tests across
-`TestRelayMidExchangeFailureIsJudgedByTheOneCarveOut` and
-`TestARelayHandOffIsJudgedWithoutAskingTheDaemonAgain`. The two
-fail-closed hand-off tests fail when a scratch relay's answer check is
-mutated away. Release note 153.
-
-**Remedied (lifecycle batch, round 2, from the D-RULE and D-PATH reviews):**
-
-- **F1, the hand-off reached fail-open states.** The relay runs the whole
-  forwarder, and its `ensure_daemon` could diagnose NOT_INSTALLED,
-  VENV_MISSING, VERSION_MISMATCH or CI passthrough, each of which allowed
-  the call the relay had already failed. Under a hand-off, `ensure_daemon`
-  now returns at once (no start, no diagnosis), and `emit_hook_error`
-  shadows every state flag and treats an unnamed event as the PreToolUse
-  call it is. The only outcomes are the carve-out's allow and a deny.
-  `TestARelayHandOffReachesOnlyTheCarveOut` covers seven forced states;
-  14 of its cases fail against the round-1 `init.sh`, and removing either
-  half in a scratch copy fails its own cases.
-- **F2 and the D-PATH note, the relay trusted any exit-0 output.** It now
-  delivers the forwarder's answer only when a strict parser (`JsonParser`,
-  std only) reads one complete document that is a PreToolUse deny with a
-  reason or the carve-out's context-only answer, with no unknown field,
-  duplicate key or invalid UTF-8. `{}`, truncated JSON, an allow and
-  everything else get the relay's own deny. RED: 20 shapes in
-  `TestTheRelayAcceptsOnlyAVerdictFromTheHandOff` against a relay built
-  from the round-1 source.
-- **F3 and m2, no hand-off deadline.** The hand-off has its own 10 s
-  deadline (`HANDOFF_TIMEOUT_MS`), after which the relay stops the forwarder
-  and denies. `transport.timeout_seconds` is capped at 45
-  (`Timeout.RELAY_TIMEOUT_CAP`): the relay wait, the hand-off and a 5 s
-  margin stay under the 60 s PreToolUse hook timeout the daemon registers
-  (`Timeout.REGISTERED_HOOK_TIMEOUT`, now the source of
-  `hook_registration`'s value). The vendored Claude Code hooks docs confirm
-  a timed-out PreToolUse command hook lets the call continue. The validator
-  says why when it rejects a value. Tests pin the arithmetic, the Rust twin
-  constant and the validator; one behavioural test runs a forwarder that
-  never exits (RED: it hung past the subprocess bound on the round-1 relay).
-- The relay's own deny names the project's launcher by absolute path,
-  byte-identical to `init.sh`'s (see N67 round 2).
-
-Release note 153.
+**Remedy:** stopped measuring time at all. Added a test-only instrumentation
+seam to `secret_file_matching.py`: a `contextvars.ContextVar` counter
+(`_dp_cell_counter`) and a `dp_cell_counter()` context manager that counts
+the DP grid cells `_globs_can_intersect` actually visits during the block. A
+`ContextVar` rather than a module-level counter, per the standing "no
+per-request state on a shared module" rule — no per-request state leaks
+across concurrent calls, and production pays nothing beyond a `None` check
+when no test has opened the counter. The test now asserts the 60,000-`*`
+token's DP cell count EQUALS a literal `a*a` baseline's count: after the
+star-run collapse, the two are the identical 3-character string, so the
+grids are identical in size, deterministically, on every host — not a
+tolerance band, an equality. RED: proved via a `git archive` scratch copy
+with the star-collapse substitutions short-circuited (`if False and "**" in a: ...`), which dropped the long token's cell count to 0 (the length cap
+fires and skips the DP entirely) against the baseline's 9, failing the
+assertion as expected.
 
 ### N109 — ✅ Remedied — the pending release-notes holding area mis-sorts past 99 callouts
 
@@ -1475,19 +1110,72 @@ splits a Bash command can be made slow with one long word.
 `shlex.shlex`/`shlex.split` in `src/` and project handlers, as
 `pathlib-quadratic-containment` does for N106.
 
-### N211 — Merge-conflict markers reach the ledger on main, disguised as blockquotes
+### N224 — ✅ Remedied — the CLAUDE.md injector logs a misleading permissions warning when CLAUDE.md vanishes mid-inject
 
-**Found by N110 gate fix 2.** `NIGGLES.md` on main (`fd4956813`) carries two
-`> > > > > > > <branch>` lines: after N106 and after N100. They are the
-closing `>>>>>>>` markers of resolved merge conflicts. The markdown
-formatter rewrote them as nested blockquotes, and after that no check
-reads them as conflict markers. Neither plan QA nor docs QA flags them, and
-the staged-lint gate does not either.
+**Found by N211 review 1 (M5).** On main, `_auto_commit_if_dirty` passes the
+path to `_commit_message`, which reads the file with no guard. If CLAUDE.md
+is deleted between the injector's write and that read, it raises
+`FileNotFoundError`. `inject()` catches it as `OSError` and logs "check file
+permissions", which is the wrong cause, and the auto-commit is skipped. That
+is a misleading warning plus a skipped commit, not a crash. It is reachable
+only as a race, because `_run_inject` has just written the file.
 
-**Remedy:** find the merge step that commits an unresolved marker. Then add
-a staged-tree check for both spellings, raw and blockquoted, in tracked
-text. Both lines are removed on `worktree-n466-n110`, but that fixes the
-symptom only.
+**Remedy (branch `worktree-n466-n211`).** `_auto_commit_if_dirty` reads the
+file once, and both the N211 marker check and `_commit_message` use that
+text. A file that vanished logs that it vanished and is not committed. A
+file that is present but unreadable raises to `inject()`, which logs the
+read error, and is not committed either: text the marker check never saw is
+never committed. The first version of the fix set unread text to `""` and
+committed anyway. Review 1 caught that, and a test now pins both cases. The
+read has no try/except, because the `error_hiding` gate flags both a
+returning and a logging handler in that function.
+
+### N211 — ✅ Remedied — merge-conflict markers reach tracked text disguised by the markdown formatter
+
+**Found by N110 gate fix 2 and the coordinator.** `NIGGLES.md` on main
+(`fd4956813`) carried two seven-deep blockquote lines,
+`> > > > > > > worktree-n466-superlinear` after the N106 entry and
+`> > > > > > > main` after the N100 entry. They are the closing markers of
+merge conflicts. The fixer's sweep found a third: an escaped opener,
+`\<<\<<\<<< HEAD`, standing alone above the N118 entry.
+
+**Route.** `git log -m -S` puts all three in merge commits. The superlinear
+opener and closer arrived together in `fd4956813` (Merge
+worktree-n466-superlinear), with the N118 entry from main between them and
+the N106 entry from the branch. The `main` closer arrived in `b2b5ee290`
+(Merge main into worktree-n466-guard-defects) and reached main through the
+N59 merge `69efecdab`. The mechanism, reproduced: an Edit on the conflicted
+file runs the PostToolUse `markdown_table_formatter` over the WHOLE file
+before the merge is committed. mdformat escapes the opener into
+`\<<\<<\<<< HEAD` (folded into a heading when a line of seven `=` follows
+it), and turns the closer into a seven-deep blockquote. A resolver then
+looks for the raw markers, finds none, and commits. From then on nothing
+reads the disguised lines as markers: not plan QA, docs QA, nor the
+staged-lint gate.
+
+**Remedy (branch `worktree-n466-n211`).**
+
+- `utils/conflict_markers.py` is the one classifier, for both spellings. A
+  line of seven `=` or seven `|` counts only between an opener and a closer,
+  so a setext heading underline is not a marker.
+- `format_markdown_document` refuses a document holding a marker. The
+  formatter handler leaves such a file untouched and names each marker line;
+  `format-markdown` reports it as an error; the CLAUDE.md injector writes the
+  file unformatted.
+- A new PreToolUse `conflict_marker_commit_gate` denies a `git commit` (or
+  `merge|cherry-pick|revert|rebase --continue`) whose ADDED lines carry a
+  marker in either spelling, naming `file:line`. It reads what the commit
+  records (index, `-a` working tree, pathspecs, `git -C`).
+- After review 1, the gate:
+  - finds commits with the shared walker, and reads pathspecs without
+    shell syntax (N226);
+  - denies a commit it cannot place, rather than allowing it;
+  - recognises every opener the formatter folds;
+  - honours `conflict-marker-size` and reads `-diff` text files;
+  - leaves an email-style deep quote alone;
+  - takes `exclude_paths`.
+- The three lines are removed from this file. A sweep of every tracked text
+  file on main found no other marker in either spelling.
 
 ### N222 — Tests assert absolute wall-clock bounds, so a loaded host fails them while they pass alone
 
@@ -1578,7 +1266,7 @@ predates the fix. RED test:
 `tests/claude_code_hooks_daemon/install/test_skills.py`, covering both a
 client-install layout and this dogfood repository's layout.
 
-### N101 — `secret_file_guard` fails closed with `TooManyToEnumerateError` on ordinary `python3 - <<'EOF'` commands
+### N101 — ✅ Remedied (n101 branch) — `secret_file_guard` fails closed with `TooManyToEnumerateError` on ordinary `python3 - <<'EOF'` commands
 
 **Found by N38 fix round 11** (report `260926-n38-fix11-opus-5-5.md` on the
 N38 branch). The live daemon on main twice denied an ordinary Bash command
@@ -2026,7 +1714,7 @@ was. Neither `Worktree.core.md` nor `HANDLER_REFERENCE.md` says so.
 **Remedy:** document the boundary in both, and name the git-level sink
 (the Plan 00464 pre-commit owner referral) as what would close it.
 
-### N70 — ✅ Remedied — The pidfd stop path falls back and cleans up too eagerly
+### N70 — The pidfd stop path falls back and cleans up too eagerly
 
 **Found by N24 review 4 (two NITs).**
 
@@ -2040,25 +1728,7 @@ was. Neither `Worktree.core.md` nor `HANDLER_REFERENCE.md` says so.
 **Remedy:** fall back only for EMFILE and an unsupported platform, and leave
 the files alone in the race. A RED test for each.
 
-**Remedied (lifecycle batch):** `_open_pidfd` returns `None` (the by-number
-fallback) only when `os.pidfd_open` is missing or fails with an errno in
-`_PIDFD_UNAVAILABLE_ERRNOS` (ENOSYS, EMFILE, ENFILE). ESRCH is re-raised as
-`ProcessLookupError`, and `cmd_stop` reports "nothing to stop" with no signal,
-no proof and no file deletion. Any other errno is re-raised, and `cmd_stop`
-refuses to signal (exit 1). When the first SIGTERM finds the proven process
-gone, `cmd_stop` returns 0 and leaves the PID file and socket alone; a PID
-file that is merely stale never reaches that point, because `read_pid_file`
-clears it. The `_reject_unproven_real_signals` fixture now presents
-`_UNREAL_PID` as an unsupported platform, so the by-number tests still drive
-`os.kill`'s patch. It is also applied to
-`TestCmdStopSignalsOnlyThisProjectsDaemon`, which had no guard. RED against
-`HEAD`'s `cli.py` in a `git archive` copy: 7 tests in `test_cli_commands.py`,
-including the new `TestCmdStopFallsBackAndCleansUpOnlyWhenProvenSafe`. Every
-test signal goes to `_UNREAL_PID` through a patched `os.kill` or
-`signal.pidfd_send_signal`, or to the test's own spawned child. Release
-note 152.
-
-### N69 — ✅ Remedied — Two fail-closed deny messages misname what happened
+### N69 — Two fail-closed deny messages misname what happened
 
 **Found by N24 reviews 3 and 4.**
 
@@ -2068,21 +1738,6 @@ note 152.
 
 **Remedy:** use the version-aware verb already used by `emit_hook_error`, and
 map EAGAIN to "timed out".
-
-**Remedied (lifecycle batch):** N24 fix8 had already given `emit_error_json`
-a verb, but chose it by `error_type`, so an unclassified error raised AFTER
-`connect()` (an undecodable response) said "unreachable" and a full accept
-backlog, which the kernel refused, said "reached". The verb now comes from a
-`daemon_reached` flag set only once `connect()` returns. An unclassified
-PreToolUse failure also no longer carries the fail-open "safety handlers are
-inactive … Skill tool" context: before `connect()` it gets the "could not
-connect at all" text, after it a "the exchange with the daemon failed" text.
-The repeated restart advice is one `_RESTART_ADVICE` list. The relay's
-`describe()` prints a `WouldBlock`/`TimedOut` error as "timed out". RED:
-`TestDenyReasonNamesWhatHappened` (3 of 6 failed against `HEAD`; the other 3
-pin the fix8 verbs and fail when a `git archive` copy's verb is mutated back to
-"reached") and `test_relay_pretooluse_timeout_deny_names_the_timeout`, with the
-same assertion added to `relay/test_relay.py`. Release note 151.
 
 ### N68 — A moved-away daemon checkout reads as NOT_INSTALLED, which fails open
 
@@ -2098,17 +1753,7 @@ install yet.
   removed denies;
 - or an install-command carve-out instead of the fail-open.
 
-**Further evidence (lifecycle batch reviews, left for this decision):**
-
-- **D-PATH S1:** a moved or missing checkout makes the settings command
-  `bash "$CLAUDE_PROJECT_DIR"/.claude/hooks/pre-tool-use` exit 127. Claude
-  Code treats that as a non-blocking error, so the call proceeds unjudged.
-- **D-RULE S2:** the NOT_INSTALLED, VENV_MISSING, VERSION_MISMATCH and
-  CI-passthrough states fail open for every PreToolUse call. A relay
-  hand-off can no longer reach them (N126 round 2, F1), but every other
-  call in those states still can.
-
-### N67 — ✅ Remedied — The daemon-down repair carve-out trusts the command text, not the binary it runs
+### N67 — The daemon-down repair carve-out trusts the command text, not the binary it runs
 
 **Found by N24 review 4 (mi-A).** While the daemon is unreachable, PreToolUse
 allows a sole `bin/hooks-daemon <read-only|restart>` command. The check reads
@@ -2119,48 +1764,6 @@ that fail-closed mode exists to guard.
 **Remedy:** require `realpath(cwd/bin/hooks-daemon)` to equal the project's
 own launcher, or the cwd to be the project root. RED test: a planted launcher
 in a subdirectory is denied while the daemon is down.
-
-**Remedied (lifecycle batch):** the carve-out now resolves the spelled
-launcher against the hook input's `cwd` and exempts the call only when that is
-the same existing file the spelling names from the project root
-(`realpath(cwd/<launcher>) == realpath(<project>/<launcher>)`). A missing,
-relative or non-string `cwd`, a project with no launcher, a directory in the
-launcher's place, or a path that cannot be resolved all deny. A symlink to the
-real launcher is exempt, because the launcher anchors itself to its own real
-location. Both copies of the check (`emit_hook_error`'s and
-`send_request_stdin`'s) now run one shared source, `_HOOKS_DAEMON_RECOVERY_PY`
-in `init.sh`, so they cannot drift. The deny texts now say to run the command
-from the project root. RED, proven against `HEAD`'s `init.sh` in a
-`git archive` copy: 12 cases in
-`TestRecoveryCarveOutJudgesTheResolvedLauncher`
-(`test_init_sh_pretooluse_fail_closed.py`), plus a planted-launcher test on
-the `emit_hook_error` path in `test_emit_hook_error_jqless.py` and in
-`test_ci_passthrough.py`. Release note 150.
-
-**Round 2 (lifecycle batch, from the D-RULE and D-PATH reviews):**
-
-- **`repair` joins the recovery set** (coordinator ruling, on both
-  reviewers' recommendation), under the same exact-match and launcher rule.
-  It fixes a venv that exists but cannot import the package, which
-  `restart` cannot.
-- **m1, no exempt spelling outside the project root.** The project's own
-  launcher by absolute path, shell-quoted exactly as `_recovery_command`
-  prints it, is exempt from any `cwd`. An unquoted path that bash would
-  split is not. Every deny (the transport's, `emit_hook_error`'s and the
-  relay's own) now names that absolute command, and `repair` beside it.
-- **m3, exported functions read an unexported variable.** The recovery
-  source is now the exported function `_hooks_daemon_recovery_py`, which
-  assigns it to a variable its caller names (no fork on the hot path).
-  `start_daemon` un-exports it inside the launch subshell, so it stays out
-  of the daemon's environment, as does the N126 variable. A child shell
-  that never sourced `init.sh` now applies the carve-out instead of
-  raising NameError and writing no JSON.
-
-RED against the round-1 `init.sh`: `TestRepairIsARecoveryCommand`,
-`TestTheAbsoluteLauncherIsExemptFromAnyDirectory` and
-`TestExportedFunctionsCarryTheirOwnRecoverySource`. The daemon-environment
-test fails when the un-export is removed from a scratch copy. Release
-note 150.
 
 ### N66 — Two singleton race tests depend on `time.sleep(0.02)`, so they can pass without the race happening
 
@@ -5581,6 +5184,32 @@ checks that the script names no denied QA entry point.
 
 **Graduated to Plan 00463**, which owns the sub-agent QA policy.
 
+**Remedied by Plan 00463** (commit 480740cc), as the candidate remedy says.
+Step 7 checks that `scripts/qa/llm_qa.py` is executable. The "Run QA" hint
+prints `./scripts/qa/llm_qa.py changed`. The agent prompt template tells the
+agent to run targeted QA (`llm_qa.py changed`, named `llm_qa.py` tools, and
+pytest on the test files it touched), and says full QA is the coordinator's
+batched integration gate. `tests/unit/scripts/test_setup_worktree_qa_guidance.py`
+was RED first. It checks that the script never names `run_all.sh`, and that no
+full run under this repo's live `full_qa_patterns` is printed, judged by
+`subagent_full_qa_blocker`'s own matcher.
+
+**Correction (Plan 00463 review 3, R3).** The first version of that test
+judged only the printed lines that were shaped like a command. So a full run
+inside prose (`then run ./scripts/qa/llm_qa.py all`), after a label
+(`QA: ...`), in a `printf`, or in single quotes passed it, and the earlier
+claim here that no printed command was a full run was not something the test
+proved. The rewritten test reads every `echo`/`printf` text the script prints
+and judges a candidate command at every place one can start in each line:
+the line start, after `run`, `&&`, `||`, `;`, `|` or a word ending in `:`, and
+at every word that starts like a path or an expansion. Each row of the
+review's table is an injected RED case. The row above stays Remedied: the
+script itself prints no full run, and the test now proves it. Review 4 (N7)
+widened the scan again: a candidate also starts at any word naming a declared
+program, whatever verb precedes it, and `cat` heredoc bodies and `$NAME`
+assignments are read as printed text. Three printed lines that mentioned
+pytest bare were reworded to name a path.
+
 ### N1 — ✅ Remedied — `resolve_venv_python`'s fallback accepts a venv interpreter that cannot run on this host
 
 **Found by Plan 00457's agent** (#55; recorded in 00457's JOURNAL as a
@@ -5673,3 +5302,455 @@ only if the full bound elapsed. Two regression tests cover a PATH with no
 bounded.
 
 **✅ Remedied** on main (B1, 2e6483a3).
+
+### N126 — ✅ Remedied — The relay's PreToolUse deny has no recovery carve-out, so a wedged daemon denies its own restart
+
+**Found by the lifecycle batch while fixing N67.** `init.sh` exempts the exact
+recovery command from every fail-closed PreToolUse deny, so a wedged daemon
+can be restarted from inside the session. The relay (`relay/hooks_relay.rs`),
+live in this repository's dogfood config, has no such exemption. It never
+parses the payload, and on the `pre-tool-use.sock` socket every mid-exchange
+failure (`mid_exchange_fail`) writes `deny_pre_tool_use_json`. When the
+daemon accepts the connection but never answers (the B2 GIL-hang shape), the
+relay times out and denies `bin/hooks-daemon restart` too. Its own deny text
+tells the agent to run that same command. Only a connect failure falls back
+to the bash rung, where the carve-out lives. The human `!` route still
+works, but an unattended agent loops on the deny.
+
+**Candidate remedies:**
+
+- on a PreToolUse mid-exchange failure, exec the bash rung with the buffered
+  payload instead of denying, so `init.sh`'s one carve-out judges it (the
+  relay would buffer stdin rather than stream it);
+- or have the forwarder's relay guard skip the relay for a payload that
+  could be the recovery command, and leave the judgement to `init.sh`.
+
+Either way, the relay must not grow a second copy of the carve-out, because
+N67 showed that two copies drift.
+
+**Remedied (lifecycle batch, first remedy):** the relay keeps every request
+byte it reads. On a PreToolUse mid-exchange failure with a `--fallback`, it
+finishes reading stdin and runs the forwarder (`--no-relay`) with the whole
+request replayed on its stdin and `HOOKS_DAEMON_RELAY_FAILED` naming the
+failure (`judge_via_fallback`). `init.sh` captures and unsets that variable at
+source time. `send_request_stdin` then skips the nc rung and the socket and
+fails `relay_exchange_failed` ("reached"), so `emit_error_json` denies through
+the one N67 carve-out without waiting out the wedge again. The relay never
+parses the request. The hand-off fails closed: if stdin cannot be completed,
+or the forwarder cannot run, exits non-zero or writes nothing, the relay
+writes its own deny. Setting the variable by hand can only deny. RED against
+`HEAD` (its `init.sh` and a relay built from its source): 7 tests across
+`TestRelayMidExchangeFailureIsJudgedByTheOneCarveOut` and
+`TestARelayHandOffIsJudgedWithoutAskingTheDaemonAgain`. The two
+fail-closed hand-off tests fail when a scratch relay's answer check is
+mutated away. Release note 153.
+
+**Remedied (lifecycle batch, round 2, from the D-RULE and D-PATH reviews):**
+
+- **F1, the hand-off reached fail-open states.** The relay runs the whole
+  forwarder, and its `ensure_daemon` could diagnose NOT_INSTALLED,
+  VENV_MISSING, VERSION_MISMATCH or CI passthrough, each of which allowed
+  the call the relay had already failed. Under a hand-off, `ensure_daemon`
+  now returns at once (no start, no diagnosis), and `emit_hook_error`
+  shadows every state flag and treats an unnamed event as the PreToolUse
+  call it is. The only outcomes are the carve-out's allow and a deny.
+  `TestARelayHandOffReachesOnlyTheCarveOut` covers seven forced states;
+  14 of its cases fail against the round-1 `init.sh`, and removing either
+  half in a scratch copy fails its own cases.
+- **F2 and the D-PATH note, the relay trusted any exit-0 output.** It now
+  delivers the forwarder's answer only when a strict parser (`JsonParser`,
+  std only) reads one complete document that is a PreToolUse deny with a
+  reason or the carve-out's context-only answer, with no unknown field,
+  duplicate key or invalid UTF-8. `{}`, truncated JSON, an allow and
+  everything else get the relay's own deny. RED: 20 shapes in
+  `TestTheRelayAcceptsOnlyAVerdictFromTheHandOff` against a relay built
+  from the round-1 source.
+- **F3 and m2, no hand-off deadline.** The hand-off has its own 10 s
+  deadline (`HANDOFF_TIMEOUT_MS`), after which the relay stops the forwarder
+  and denies. `transport.timeout_seconds` is capped at 45
+  (`Timeout.RELAY_TIMEOUT_CAP`): the relay wait, the hand-off and a 5 s
+  margin stay under the 60 s PreToolUse hook timeout the daemon registers
+  (`Timeout.REGISTERED_HOOK_TIMEOUT`, now the source of
+  `hook_registration`'s value). The vendored Claude Code hooks docs confirm
+  a timed-out PreToolUse command hook lets the call continue. The validator
+  says why when it rejects a value. Tests pin the arithmetic, the Rust twin
+  constant and the validator; one behavioural test runs a forwarder that
+  never exits (RED: it hung past the subprocess bound on the round-1 relay).
+- The relay's own deny names the project's launcher by absolute path,
+  byte-identical to `init.sh`'s (see N67 round 2).
+
+Release note 153.
+
+### N127 — ✅ Remedied — The recovery exemption strips control characters, not just spaces
+
+**Found by the lifecycle batch's D-RULE review (S1), on main as well.** The
+carve-out compared `command.strip()` with the exempt text. `str.strip()`
+also removes vertical tab, form feed, the file/group/record/unit
+separators, NEL and the Unicode line separators, so `bin/hooks-daemon restart` with `\x1c` appended was exempt while bash handed the launcher the
+argument `restart\x1c`. A leading or trailing newline was exempt too.
+
+**Remedied (lifecycle batch, round 2):** the command is compared raw with
+only spaces and tabs stripped (`_RECOVERY_PADDING`), and anything that is
+not printable after that is rejected. RED:
+`TestRecoveryCommandTextMatchesExactly`, 13 control-character cases against
+the round-1 `init.sh`. Release note 150.
+
+### N128 — ✅ Remedied — Stop and the stale-PID checks delete a successor's PID file and socket
+
+**Found by the lifecycle batch's D-PATH review (S2), on main as well.**
+After an observed exit, `cmd_stop` called `cleanup_pid_file` and
+`cleanup_socket`, which unlinked unconditionally. `read_pid_file` removed a
+PID file whose pid was dead or not a daemon, and `init.sh`'s
+`is_daemon_running` ran `rm -f "$PID_PATH"` whenever `kill -0` failed. A
+successor started in between by a concurrent hook's `ensure_daemon` writes
+its own pid and binds its own socket at the same paths, so each of these
+could orphan a live daemon and let a second one start.
+
+**Remedied (lifecycle batch, round 2):**
+
+- `cleanup_pid_file(path, pid)` now requires the pid and removes the file
+  only while it still holds it; a file naming another pid, or no readable
+  pid, is left. `read_pid_file` and `enforcement` use it.
+- `cmd_stop`'s three cleanups go through `_release_stopped_daemon_files`,
+  which removes the socket only on a definitive `NOT_LIVE` probe
+  (`_socket_liveness_sync`), never on `LIVE` or `INDETERMINATE`.
+- `is_daemon_running` re-reads the PID file and removes it only while it
+  still names the pid it found dead, without a new stderr suppression.
+- Round 3 (D-PATH m-B): `_release_stopped_daemon_files` makes both checks
+  under the start lock (`server.hold_start_lock`), which a start holds
+  across its probe, PID write, unlink and bind, so a probe can no longer land
+  between a successor's unlink and bind. A lock held past `Timeout.FILE_LOCK`
+  leaves both files. RED: `test_the_probe_and_both_removals_hold_the_start_lock`.
+
+RED: `TestCmdStopCleansUpOnlyWhatItStillOwns` (a real successor socket and
+PID file written when the exit is observed), two `read_pid_file` successor
+tests and two `cleanup_pid_file` ownership tests in `test_paths.py`, and
+`TestIsDaemonRunningRemovesOnlyItsOwnStalePidFile` (a successor write inside
+the `kill -0` probe). Release note 152.
+
+### N139 — ✅ Remedied — `is_daemon_running` reads EPERM from `kill -0` as a dead daemon and removes its PID file
+
+**Found by both lifecycle round-2 re-reviews, on main as well.** `kill -0`
+fails with EPERM on another user's live process. `init.sh`'s
+`is_daemon_running` treated any failure as a dead daemon, returned 1 and
+removed the PID file (round 2 made that conditional on the file still naming
+the pid, but it still removed the file of a live process). `ensure_daemon`
+then tried to start a second daemon. The Python side
+(`_pid_file_points_at_live_process`) already treated `PermissionError` as
+alive.
+
+**Remedied (lifecycle batch, round 3):** only ESRCH ("No such process",
+read in the C locale) means the process is gone. EPERM and any other failure
+of a numeric pid return 0 and keep the file. A PID file that holds no number
+is still stale. RED: `test_a_pid_it_may_not_signal_is_alive_and_keeps_its_file`
+(the builtin shadowed with the EPERM failure it reports, since root may
+signal anything). Release note 154.
+
+**Round 4 (N139-A, found by both round-3 re-reviews):** returning 0 on EPERM
+made `ensure_daemon` skip the start whenever a stale PID file named another
+user's process, for example after a reboot, so the daemon stayed down until
+someone ran `restart`. EPERM now answers "unknown" (2) unless the socket
+answers or the pid's command line proves it is this project's daemon
+(`cli.pid_is_this_projects_daemon`). Unknown never skips a start: `cli start`'s REUSE gate decides, and the daemon overwrites the PID file. The
+file of a live pid is never deleted, including by `read_pid_file(..., verify_daemon=True)`. RED: `test_a_pid_it_may_not_signal_is_unknown_and_keeps_its_file`,
+`test_a_pid_it_may_not_signal_does_not_stop_an_auto_start`, and the socket
+and command-line proofs.
+
+### N140 — ✅ Remedied — PreToolUse input the forwarder cannot parse is answered without a deny
+
+**Found by the lifecycle batch's round-2 D-RULE re-review, on main as well.**
+`send_request_stdin` sent a `json.loads` failure to `invalid_hook_input`,
+which `emit_error_json` answered with context only: no `permissionDecision`,
+so the call ran with no guard. JSON nested about 1000 deep raises
+`RecursionError` in the parser, so any tool whose input nests that far (in
+practice an MCP tool) skipped every PreToolUse guard on the plain forwarder.
+During a relay hand-off the relay accepted that context-only answer as the
+carve-out's allow. Two neighbours had the same effect with no JSON at all:
+input a few levels shallower parsed, then the request envelope's
+`json.dumps` raised outside any handler, and stdin that is not UTF-8 raised
+in `sys.stdin.read()` outside the `try`. The daemon's own socket already
+denied such input.
+
+**Remedied (lifecycle batch, round 3):** the read, the parse and the
+envelope encoding are all inside the handler, and for PreToolUse
+`invalid_hook_input` is denied with the reason "Hook input could not be
+parsed, so no guard judged this call". The recovery carve-out cannot apply,
+since it needs the parsed input. Other events keep the fail-open context.
+RED: `TestInputThatCannotBeParsedIsDenied` (1000-deep, every depth from 980
+to 1000, text that is not JSON, bytes that are not UTF-8, and the hand-off)
+and the relay's `test_input_nested_too_deeply_to_parse_is_denied`. Release
+note 155.
+
+### N160 — ✅ Remedied — `init.sh` removes a stale PID file outside the start lock
+
+**Found by the lifecycle batch's round-3 D-PATH re-review (Sh-A), on main as
+well.** `is_daemon_running` re-read the PID file, compared it and ran
+`rm -f`, without the start lock. A daemon start writes its pid while holding
+that lock, so a pid written between the compare and the `rm` was removed and
+the live daemon was orphaned. Round 3 put the Python side of stop under the
+lock; the bash side was left.
+
+**Remedied (lifecycle batch, round 4):** the bash side calls
+`cli.remove_stale_pid_file` in the daemon's venv. Under the start lock it
+removes the file only while it still holds exactly the text bash read, and
+that text names no live process. A lock that is held for the whole wait, or
+cannot be opened, leaves the file; so does a missing venv. A stale file left
+behind is harmless: it never counts as running, and a starting daemon
+overwrites it under the lock. Python's `read_pid_file` had the same unlocked
+compare-then-remove for a dead pid (found while fixing this); it no longer
+removes anything, so the start lock's holders are the only removers. RED:
+`test_a_stale_pid_file_is_removed_only_through_the_start_lock`,
+`TestRemoveStalePidFile` and
+`test_read_pid_file_returns_none_for_dead_process_and_leaves_the_file`.
+Release note 157.
+
+### N161 — ✅ Remedied — A PID file holding `0`, `1` or a negative number counts as a running daemon
+
+**Found by both lifecycle round-3 re-reviews (Sh-B, S-R3-1), on main as
+well.** `kill -0 0` signals the caller's own process group and succeeds, and
+pid 1 is init, which root may signal. `init.sh` accepted any `^[0-9]+$`, so a
+PID file holding `0` or `1` made `is_daemon_running` report a daemon running
+for ever and the hook never started one. Python's `read_pid_file` used
+`int()`, which also takes `-1`, `+12` and `1_2`, and `os.kill(0, 0)` succeeds
+there too. An empty file returned "not running" without being cleared.
+
+**Remedied (lifecycle batch, round 4):** one definition of a PID file's text
+in both languages: the digits of one pid from 2 to Linux's `PID_MAX_LIMIT`
+(4194304), with no leading zero, optionally followed by newlines
+(`paths.parse_pid_text`, `init.sh`'s `_hooks_daemon_is_pid_text`, pinned
+equal by a test). Anything else is corrupt, never counts as running, and
+`is_daemon_running` removes it as stale, under the start lock (N160). RED:
+`test_a_corrupt_pid_file_is_never_running_and_is_removed` and
+`test_read_pid_file_never_counts_a_corrupt_file_as_running`. Release note
+157\.
+
+### N162 — ✅ Remedied — The start lock is opened through a symlink, and an unopenable lock escapes `stop`
+
+**Found by the lifecycle batch's round-3 D-PATH re-review (Sh-C), on main as
+well.** `server._open_start_lock` opened `<socket>.start.lock` with
+`O_RDWR | O_CREAT` and no `O_NOFOLLOW`, so a symlink planted at that path
+was followed, and `O_CREAT` created or opened the file it named. Round 3
+also made `cmd_stop` take the lock, and only `StartLockTimeout` was caught
+there: an `OSError` opening it propagated after the daemon had already
+stopped.
+
+**Remedied (lifecycle batch, round 4):** the lock is opened with
+`O_NOFOLLOW | O_CLOEXEC` and must be a regular file (`fstat`), or `OSError`
+is raised. There is no ownership check: a host and a container sharing the
+untracked directory run as different users and share one lock, and the lock
+is only ever flocked. `_release_stopped_daemon_files` handles `OSError`
+explicitly and fails closed, leaving the PID file and socket. RED:
+`TestTheStartLockRefusesWhatIsNotItsOwnFile` (a symlink, whose target is
+never created, and a FIFO) and
+`test_a_start_lock_that_cannot_be_opened_keeps_both_files`. Release note
+157\.
+
+### N163 — ✅ Remedied — A PID file whose pid this user may signal counts as running, whatever process it names
+
+**Found by the lifecycle batch's round-4 D-PATH review (Sh-D), on main as
+well.** `is_daemon_running` returned 0 as soon as `kill -0` succeeded. After
+a reboot a stale PID file's pid can belong to any process of this user's,
+which then read as the daemon: no start was tried, and every call was denied
+until someone ran the exempt restart. Round 4 fixed only the EPERM half.
+
+**Remedied (lifecycle batch, round 5):** a live pid is running only when it is
+proven. `init.sh` first matches the pid's command line against the forms a
+daemon of this project is launched with (`/proc/<pid>/cmdline` with its
+argument boundaries, or `ps` elsewhere), which costs no venv. Anything else
+goes to the daemon's helper (the socket answering, or
+`process_verification`'s full rule), at most once per hook; unproven is 2,
+unknown, and a start is tried. A test pins that every command line `init.sh`
+proves, the daemon's rule proves too. For another user's pid only the socket
+counts (P4-2). RED: `test_a_live_pid_that_is_not_this_daemon_is_unknown`,
+`TestTheHooksCommandLineProofIsSound`. Release note 159.
+
+### N164 — ✅ Remedied — The start lock's mode and its docstring disagree about a second user
+
+**Found by the lifecycle batch's round-4 D-PATH review (Sh-E), on main as
+well.** `_open_start_lock` creates the lock `0600` and opens it `O_RDWR`, but
+its docstring (and N162 above) said a host and a container running as
+different users share it. They cannot unless one is root: the second user's
+open fails with `EACCES`, and that failure surfaced as a bare `OSError`.
+
+**Remedied (lifecycle batch, round 5):** the mode stays `0600`. A lock another
+user can open is one another user can hold, and every start would then wait
+on them. The docstring now says only the owner (or root) can take it, and
+the second user's `PermissionError` is re-raised naming the lock's uid and
+its own. Every caller already fails closed on `OSError`: a start does not
+run, and `stop` and `remove_stale_pid_file` remove nothing. N162's "share one
+lock" sentence is wrong on this point. RED:
+`test_only_its_owner_may_open_the_lock`,
+`test_another_users_lock_is_refused_by_name`. Release note 159.
+
+### N165 — ✅ Remedied — `init.sh`'s daemon helper runs a venv that `HOOKS_DAEMON_ROOT_DIR` alone chose
+
+**Found by the lifecycle batch's round-4 D-PATH review (Sh-F), on main as
+well for `start_daemon`.** `_hooks_daemon_run_cli_helper` resolved and ran
+the venv under `HOOKS_DAEMON_ROOT_DIR` without the P3-1 check that the root
+is an install of this project. That variable can be inherited from whatever
+started Claude Code, so the helper's answer (is this pid our daemon; may this
+PID file go) could come from another project's code.
+
+**Remedied (lifecycle batch, round 5):** the helper first runs
+`_installs_launcher` (the P3-1 rule, with system `python3`) and proves nothing
+when the root is not this project's. RED:
+`test_the_helper_runs_only_under_this_installs_root` (another project's root,
+with this daemon's socket answering, is still unknown). Release note 159.
+
+### N190 — ✅ Remedied — A process's owner was judged by permission to signal it, which root holds over every process
+
+**Found by the lifecycle round-5 reviews (P5-1, Sh-G), on main as well.**
+**Remedied (round 6):** ownership is the process's real and effective uid,
+in bash (`_hooks_daemon_pid_is_this_users`) and Python
+(`is_this_users_process`, and `verified_daemon_process`). Detail in the
+lifecycle report, round 6.
+
+### N191 — ✅ Remedied — A daemon naming no root was attributed to the project owning its venv
+
+**Found by the lifecycle round-5 D-PATH review (Sh-1), on main as well.** A
+worktree sharing a checkout's venv was attributed to that checkout.
+**Remedied (round 6):** such a daemon is attributed only by the natural
+socket it has bound. Detail in the lifecycle report, round 6.
+
+### N192 — ✅ Remedied — A socket that merely accepts a connection counted as this project's daemon
+
+**Found by the lifecycle round-5 D-PATH review (Sh-2).** Under the `/tmp`
+fallback another user can bind the path first. **Remedied (round 6):** the
+daemon answers an `identity` action with its project and pid, and only this
+project's answer counts. Detail in the lifecycle report, round 6.
+
+### N193 — ✅ Remedied — The server's PID-file liveness check parsed pid text its own way
+
+**Found by the lifecycle round-5 D-PATH review (Sh-3).**
+`server._pid_file_points_at_live_process` read the file with its own parse,
+so `0`, `-1`, `1` and padded text were treated as pids. **Remedied (round
+6):** it uses `paths.parse_pid_text`. Detail in
+`subagent-reports/260926-lifecycle-opus-5-5.md`, round 6.
+
+### N202 — ✅ Remedied — `restart` reports "failed to start (no PID file)" while the daemon comes up
+
+**Found by lifecycle review 7 (§5), on main as well.** `cmd_start`'s parent
+waited a fixed 5 s for the PID file, which the daemon writes only after
+controller init. Under load that took longer, so the parent printed "failed
+to start (no PID file created)" and exited 1 while the daemon came up.
+
+**Remedied (lifecycle batch, round 7):** the daemon reports through a pipe
+whose write end it holds for life: its pid first, then a byte per startup
+step. The parent waits while the daemon is alive and advancing (a byte, the
+PID file changing, or CPU time spent), and gives up on end of file (exited),
+after `DAEMON_START_STALL_SEC` with no progress, or at
+`DAEMON_START_BUDGET_SEC`. The message says which, and whether a PID file
+was waiting on its proof. RED: `TestTheStartWaitFollowsTheDaemonsProgress`
+and `test_start_waits_on_a_slowly_initialising_daemon.py` (a throwaway
+daemon whose controller init sleeps 7 s).
+
+### N203 — ✅ Remedied — The stop proof takes the first `--project-root` where argparse keeps the last
+
+**Found by lifecycle review 7 (S-1), on main as well.** `_root_from_flag`
+returned the first `--project-root`. argparse keeps the last, and
+`bin/hooks-daemon` puts its own root before the caller's, so
+`bin/hooks-daemon --project-root B start` run from A's wrapper started a
+daemon serving B that was attributed to A. A's single-daemon enforcement
+could then stop B's daemon, and B could not stop its own.
+
+**Remedied (lifecycle batch, round 7):** the command line is parsed by
+argparse with `cli.main`'s own global options (`add_global_arguments`, now
+shared), so repeats, `=` forms and abbreviations resolve as the launch
+resolved them. A line its parser refuses, a subcommand with arguments, or a
+relative root proves nothing, and no later source is consulted for it.
+`init.sh`'s narrower proof now also requires exactly six arguments. RED:
+`TestTheFlagIsReadAsTheDaemonsOwnParserReadsIt`, which also checks every
+case against `cli.build_parser()`, and
+`test_a_daemon_launched_for_b_through_as_wrapper_is_never_stopped_by_a`.
+
+### N204 — ✅ Remedied — Enforcement removes a stale PID file outside the start lock and takes another user's live pid for dead
+
+**Found by lifecycle review 7 (S-2), on main as well.** Outside a container
+`enforce_single_daemon` removed a PID file whose pid `is_process_running`
+called dead, with no start lock, and `is_process_running` returned False on
+`AccessDenied`, so another user's live daemon lost its file.
+
+**Remedied (lifecycle batch, round 7):** it reads the file and hands it to
+`server.remove_stale_pid_file`, moved there from `cli` so enforcement and the
+installer share it, and leaves it when there is no socket to lock.
+`is_process_running`, whose only caller this was, is gone. RED:
+`TestAStalePidFileGoesOnlyUnderTheStartLock`.
+
+### N205 — ✅ Remedied — The installer removes PID files and sockets with no lock or liveness check
+
+**Found by lifecycle review 7 (S-3), on main as well.**
+`client_validator._check_running_daemon` unlinked a PID file on
+`ALREADY_GONE` with no lock and no content check, and
+`cleanup_stale_runtime_files` removed every `daemon*.sock`, live ones
+included, and treated a `PermissionError` from `kill(pid, 0)`, which means
+the process is alive, as an invalid file.
+
+**Remedied (lifecycle batch, round 7):** both go through
+`server.remove_stale_pid_file` (under the start lock, only while the file
+holds what was read and names no live process) and the new
+`server.remove_dead_socket` (under the start lock, only on a DEFINITIVE
+not-live probe). RED: `TestRuntimeFilesGoOnlyUnderTheStartLockAndOnlyWhileDead`.
+
+### N206 — ✅ Remedied — A pid reused between psutil's start-time re-check and its `kill` is signalled
+
+**Found by lifecycle review 7 (§2), on main as well.** `stop_verified_daemon`
+signalled through a `psutil.Process`, which re-checks the pid's start time
+and then calls `os.kill`. A pid reused between the two, or inside one
+start-time tick, received the signal. `signal_verified_daemon_via_pidfd`
+existed but had no caller, and opened its pidfd only AFTER the proof, so it
+had the same gap.
+
+**Remedied (lifecycle batch, round 7):** `signal_verified_daemon` and
+`stop_verified_daemon` open a pidfd BEFORE the proof and send every signal
+through it, and wait on it for the exit. A pid reused after the pin can only
+make the send fail. Where the kernel makes no pidfds (`ENOSYS`, `EPERM`,
+`ENODEV`, `EMFILE`, `ENFILE`) the proven psutil handle delivers it. The
+unused `_via_pidfd` function is gone. RED:
+`TestTheSignalGoesThroughAPidfdPinnedBeforeTheProof` (a pin landing on a
+process that has exited, while the proof reads a live daemon at the pid).
+
+### N225 — ✅ Remedied — A `--project-root` with `..` through a link is attributed to a root its daemon does not serve
+
+**Found by lifecycle review 8 (S8-1), on main as well.** The proof read the
+flag and collapsed it with `normpath`, then `realpath`, while `cmd_start`
+serves `Path.resolve()`, which follows a link before it meets `..`. With
+`/var/run` a link to `/run`, a daemon launched with `--project-root /var/run/../workspace` serves `/workspace` and was attributed to
+`/var/workspace`. That project's single-daemon enforcement could stop
+`/workspace`'s daemon, and `/workspace` could not stop its own.
+`verified_daemon_process` also compared `normpath` strings, so a root named
+through a link never matched the resolved root the daemon serves.
+
+**Remedied (lifecycle batch, round 8):** a flag root that holds `..` or is
+not its own `normpath` proves nothing (`_root_from_flag`), and no later
+source is consulted for it. `verified_daemon_process` compares both roots
+resolved. RED: `test_a_root_that_is_not_its_own_normal_form_proves_nothing`
+(`/var/run/../workspace` among them) and, on real processes,
+`test_a_root_whose_dotdot_follows_a_link_proves_nothing` and
+`test_a_root_named_through_a_link_is_the_one_the_daemon_serves`.
+
+### N232 — ✅ Remedied — Two concurrent hook starts: the second's single-daemon enforcement stops the first's daemon while it initialises
+
+**Found by lifecycle review 9 (§5), on main (44d1b1b3b).** Two hooks each ran
+`cli start` at once, and nothing excluded the second launch
+(`init.sh:1057`). The second start's reuse gate saw no PID file and no live
+socket, since a daemon writes its PID file only once its controller is
+initialised (`cli.py:576-620`), so it ran `enforce_single_daemon`
+(`cli.py:623`). In a container, `find_all_daemon_processes` proved the first
+start's daemon by its `--project-root` flag and spared only a live socket's
+owner (`enforcement.py:90-103`), then SIGTERMed it while it was still
+initialising (`enforcement.py:117-125`) and forked a second daemon. The first
+hook got a spurious deny, and with three or more hooks at once it repeated.
+No call ran unjudged. A launcher's command line is also its daemon's (the
+daemon is its fork), so the same enforcement stopped a second launcher that
+was merely waiting: on main the RED run shows both.
+
+**Remedied (lifecycle batch, rounds 8b and 9):** every start of a project
+takes one launch lock (`daemon.launch.lock` in the project's untracked
+directory, whatever socket it uses) before it looks for a daemon, and the
+daemon it forks holds it until it serves. Enforcement runs only under that
+lock, and stops only a process that has bound a socket, which a launcher
+and a daemon still starting have not. RED on main:
+`test_two_concurrent_starts_start_one_daemon[container]` (a variant with
+main's helpers: "Container environment: Killing 1 other daemon process(es)",
+exit codes `[1, -15]`). RED on c5b2befc8: the same test, and
+`TestOnlyADaemonThatServesIsStopped::test_a_start_under_way_is_never_stopped`.

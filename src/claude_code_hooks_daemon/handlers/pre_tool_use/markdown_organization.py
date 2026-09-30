@@ -20,8 +20,8 @@ from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.core.utils import (
     get_bash_command,
-    get_bash_write_targets,
     get_file_path,
+    scan_bash_write_targets,
 )
 from claude_code_hooks_daemon.core.workspace import resolve_workspace
 from claude_code_hooks_daemon.core.worktree_paths import effective_project_relative_path
@@ -957,7 +957,7 @@ class MarkdownOrganizationHandler(PreToolUseHandlerBase):
         Two sources, deliberately UNIONED rather than one replacing the other
         (Plan 00260 Task 3.4):
 
-        1. :func:`get_bash_write_targets` — a shlex tokeniser that understands
+        1. :func:`scan_bash_write_targets` — a shlex tokeniser that understands
            `>`, `>>`, `>|`, every `tee` operand, `cp`/`mv`/`install`
            destinations, `dd of=`, and quoted paths containing spaces. Six
            shapes the two regexes below miss outright.
@@ -977,10 +977,16 @@ class MarkdownOrganizationHandler(PreToolUseHandlerBase):
         over-blocking is cheap, and the previous raw-string scan already caught
         a heredoc-authored script that would write to a memory path — stripping
         bodies would have been a silent regression.
+
+        Text the tokeniser cannot read may write anywhere, so when it names a
+        memory path it is the target and the call is denied (Plan 00466 N120).
         """
-        for target in get_bash_write_targets(hook_input, include_heredoc_bodies=True):
+        scan = scan_bash_write_targets(hook_input, include_heredoc_bodies=True)
+        for target in scan.paths:
             if self._is_claude_memory_path(target):
                 return target
+        if scan.unreadable is not None and self._is_claude_memory_path(scan.unreadable):
+            return scan.unreadable.strip()
 
         command = get_bash_command(hook_input)
         if not command:

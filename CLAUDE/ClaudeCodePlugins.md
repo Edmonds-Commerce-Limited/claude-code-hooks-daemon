@@ -207,5 +207,7 @@ What uses it:
   its LSP tool section).
   `ENABLE_LSP_TOOL` is not consulted.
 
-Remaining work is tracked in
-[Plan 00468](Plan/00468-claude-code-plugins-are-supported-properly/PLAN.md).
+The support was built in
+[Plan 00468](Plan/Completed/00468-claude-code-plugins-are-supported-properly/PLAN.md);
+its one remaining item is tracked in
+[Plan 00473](Plan/00473-post-merge-handlers-judge-the-command-repository/PLAN.md).

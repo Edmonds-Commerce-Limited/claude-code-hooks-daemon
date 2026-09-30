@@ -164,6 +164,10 @@ _AUDITED_BLOCKING_ONLY_REASONS: dict[str, str] = {
     ),
     "comment_changelog": "Comment-content style gate (changelog narrative does not belong in code).",
     "comment_size": "Comment-length style gate, with its own MUST_EXCEED escape hatch.",
+    "conflict_marker_commit_gate": (
+        "History-integrity QA gate on a commit (a leftover merge-conflict marker), "
+        "not a dangerous-action guard."
+    ),
     "dispatch_declaration": "Workflow gate: a subagent must declare where its report goes.",
     "gh_issue_comments": "Workflow completeness gate: forces --comments on gh issue view.",
     "gh_pr_comments": "Workflow completeness gate: forces --comments on gh pr view.",
@@ -199,6 +203,12 @@ _AUDITED_BLOCKING_ONLY_REASONS: dict[str, str] = {
         "in the 14-handler bucket above; not a dangerous-action guard, "
         "HandlerTag.BLOCKING per the same default-denying-handler requirement "
         "as ask_user_question_blocker."
+    ),
+    "subagent_full_qa_blocker": (
+        "Denies a sub-agent's own declared full-suite QA run so the "
+        "coordinator's batched gate is the only full run. A scheduling/"
+        "resource-contention gate over a QA command, not a dangerous "
+        "action -- the same shape as tdd_enforcement and plan_qa_edit above."
     ),
     "subagent_report_path_verifier": (
         "SubagentStop: catches a claimed report path that does not exist. "

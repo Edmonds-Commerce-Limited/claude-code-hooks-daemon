@@ -311,7 +311,7 @@ class TestHandle:
         }
         with patch(
             "claude_code_hooks_daemon.handlers.post_tool_use."
-            "markdown_table_formatter.format_markdown_text",
+            "markdown_table_formatter.format_markdown_document",
             side_effect=RuntimeError("boom"),
         ):
             result = handler.handle(hook_input)
@@ -537,7 +537,7 @@ class TestConcurrentWriteIsNotDiscarded:
         handler = MarkdownTableFormatterHandler()
         with patch(
             "claude_code_hooks_daemon.handlers.post_tool_use."
-            "markdown_table_formatter.format_markdown_text",
+            "markdown_table_formatter.format_markdown_document",
             side_effect=_format_then_someone_else_writes,
         ):
             result = handler.handle({"tool_name": "Write", "tool_input": {"file_path": str(path)}})
@@ -546,3 +546,51 @@ class TestConcurrentWriteIsNotDiscarded:
             path.read_text(encoding="utf-8") == newer
         ), "the formatter silently reverted a write it did not make"
         assert result.decision == Decision.ALLOW
+
+
+# Built, never typed at the start of a line, so this file carries no marker.
+_OPEN = "<" * 7
+_SEP = "=" * 7
+_CLOSE = ">" * 7
+
+
+class TestAConflictedFileIsNeverReformatted:
+    """Plan 00466 N211: formatting a conflicted file disguises its markers.
+
+    mdformat escapes the opener into a heading and turns the closer into a
+    seven-deep blockquote, and nothing reads either as a marker afterwards.
+    That is how two closers reached ledger 00466's NIGGLES.md: an Edit on the
+    conflicted file ran this handler before the merge was committed.
+    """
+
+    def test_a_raw_conflict_is_left_byte_for_byte_and_reported(self, tmp_path: Path) -> None:
+        path = tmp_path / "NIGGLES.md"
+        conflicted = (
+            "| a | b |\n|---|---|\n| 1 | 2 |\n\n"
+            f"{_OPEN} HEAD\nours\n{_SEP}\ntheirs\n{_CLOSE} main\n"
+        )
+        path.write_text(conflicted, encoding="utf-8")
+
+        result = MarkdownTableFormatterHandler().handle(
+            {"tool_name": "Edit", "tool_input": {"file_path": str(path)}}
+        )
+
+        assert path.read_text(encoding="utf-8") == conflicted
+        assert result.decision == Decision.ALLOW
+        context = "\n".join(result.context)
+        assert "NIGGLES.md" in context
+        assert "conflict" in context.lower()
+        for line_number in (5, 7, 9):
+            assert f"line {line_number}" in context
+
+    def test_an_already_disguised_marker_is_reported_too(self, tmp_path: Path) -> None:
+        path = tmp_path / "doc.md"
+        disguised = "entry\n\n" + " ".join(">" * 7) + " main\n\n| a | b |\n|---|---|\n"
+        path.write_text(disguised, encoding="utf-8")
+
+        result = MarkdownTableFormatterHandler().handle(
+            {"tool_name": "Write", "tool_input": {"file_path": str(path)}}
+        )
+
+        assert path.read_text(encoding="utf-8") == disguised
+        assert "line 3" in "\n".join(result.context)
