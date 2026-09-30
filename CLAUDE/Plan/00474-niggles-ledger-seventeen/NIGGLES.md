@@ -26,6 +26,30 @@ other ledgers' numbering (00422 for `p422-close`, 00421's plan for `d-00421`).
 
 **Status**: ⬜ Open (all 55).
 
+### N280 — something wrote an older `CLAUDE.md` guidance section into the main checkout during a test run
+
+**Found**: by the coordinator. A pytest run of 1743 targeted tests had three
+teardown errors from the conftest guard ("This test rewrote tracked generated
+doc(s): CLAUDE.md"), in three unrelated files, over about four minutes. The pid
+file of this checkout's daemon did not change during the run, and only that one
+daemon was running afterwards. The guard's preserved copy
+(`untracked/rejected-writes/CLAUDE.md.rejected`) differs from `HEAD` in one
+line: the `R-UPGRADE-APPROVAL-ENV-BYPASS` row carries its text from before the
+N271 merge, which added "or passes `--uv <path>`". So the writer ran code older
+than `main`, three separate times.
+
+**Lead**: the Plan 00477 loud-detection worktree, whose code predated N271, was
+removed with `git worktree remove` shortly before the run. If its daemon was
+still alive, and resolves its project root again after its directory is gone, it
+may fall back to the enclosing repository and inject its own guidance there. It
+had exited by the time it was looked for, so this is unconfirmed.
+
+**Reproduction to try**: start a daemon in a fresh worktree at an older commit,
+remove the worktree, and watch the main checkout's `CLAUDE.md` and that daemon's
+log.
+
+**Status**: ⬜ Open.
+
 ### N279 — `changed_tests` once selected 50 test files, ran 0 tests and did not fail
 
 **Found**: by the Plan 00477 provision agent. One `llm_qa.py changed --base main --allow-unmapped` run reported `changed_tests` as 0 passed, 0 failed, 0 skipped

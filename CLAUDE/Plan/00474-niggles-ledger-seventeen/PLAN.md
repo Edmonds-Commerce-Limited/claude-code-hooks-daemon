@@ -38,6 +38,7 @@ Full write-ups are in [NIGGLES.md](NIGGLES.md). One line each here:
 
 | #          | Verdict                                                                                                          | Origin              | Status                  |
 | ---------- | ---------------------------------------------------------------------------------------------------------------- | ------------------- | ----------------------- |
+| N280       | Something with pre-N271 code wrote an older `CLAUDE.md` guidance section into main during a test run             | Coordinator         | ⬜ Open                 |
 | N279       | `changed_tests` once selected 50 test files, ran 0 tests and still passed                                        | p477 agent          | ⬜ Open                 |
 | N278       | A branch merged with its targeted QA never run; main took three static-check failures                            | Coordinator         | ⬜ Open                 |
 | N277       | `_resolve_python_cmd` in `init.sh` returns 0 after a failed resolve, with `PYTHON_CMD` empty                     | p477 agent          | ⬜ Open                 |
