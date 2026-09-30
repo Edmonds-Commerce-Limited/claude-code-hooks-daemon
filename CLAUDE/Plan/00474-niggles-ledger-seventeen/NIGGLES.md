@@ -26,6 +26,32 @@ other ledgers' numbering (00422 for `p422-close`, 00421's plan for `d-00421`).
 
 **Status**: ⬜ Open (all 55).
 
+### N277 — `_resolve_python_cmd` in `init.sh` reports success after a failed resolve
+
+**Found**: by the Plan 00477 provision agent, reading `init.sh`. The function
+ends with:
+
+```bash
+if PYTHON_CMD="$(resolve_venv_python "$HOOKS_DAEMON_ROOT_DIR")"; then
+    return 0
+fi
+local rv=$?
+PYTHON_CMD=""
+return "$rv"
+```
+
+An `if` with no `else` whose condition fails leaves `$?` at 0, so `rv` is always
+0\. A failed resolve returns success with `PYTHON_CMD` empty, and any caller that
+trusts the status goes on to run an empty interpreter. `provision.sh` works
+around it by judging `PYTHON_CMD` instead of the status.
+
+**Candidate remedy**: capture the status in an `else` branch
+(`else local rv=$?`), or from the assignment on its own line. Add a bash test
+that a failing resolver makes the function return non-zero. Then audit its
+callers for any that already depend on the wrong status.
+
+**Status**: ⬜ Open.
+
 ### N276 — the SessionStart chain overruns its 20 s budget, so declared crons are never asked for
 
 **Found**: this session's own SessionStart reply was only "Chain skipped:

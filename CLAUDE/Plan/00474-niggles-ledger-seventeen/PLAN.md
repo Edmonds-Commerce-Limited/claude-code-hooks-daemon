@@ -38,6 +38,7 @@ Full write-ups are in [NIGGLES.md](NIGGLES.md). One line each here:
 
 | #          | Verdict                                                                                                          | Origin              | Status                  |
 | ---------- | ---------------------------------------------------------------------------------------------------------------- | ------------------- | ----------------------- |
+| N277       | `_resolve_python_cmd` in `init.sh` returns 0 after a failed resolve, with `PYTHON_CMD` empty                     | p477 agent          | ⬜ Open                 |
 | N276       | The SessionStart chain overruns its 20 s budget under load, so declared crons are never asked for                | Coordinator         | ⬜ Open                 |
 | N275       | `secret_file_guard` judges an Edit of a YAML workflow holding `${{ }}` as an unreadable shell command            | Coordinator         | ⬜ Open                 |
 | N274       | `AskUserQuestion` is denied as "unattended" right after the owner typed a message                                | Coordinator         | ⬜ Open                 |
