@@ -85,9 +85,11 @@ anything themselves: a person or agent runs provision.
 - [ ] ⬜ **Task 3.2**: The human sees it: a `systemMessage` at SessionStart and on
   every UserPromptSubmit until the checkout is provisioned, and the status line
   shows it.
-- [ ] ⬜ **Task 3.3**: Decide with the owner whether PreToolUse denies while the
-  checkout is unprovisioned (as `ci_enabled: true` already makes it), leaving
-  provision itself allowed.
+- [ ] ⬜ **Task 3.3**: Owner ruling: whether an unprovisioned checkout blocks
+  tool calls is a per-project setting. Most projects want warn, some want
+  block, and the default is warn. One key in `.claude/hooks-daemon.yaml`, read
+  by `init.sh` in bash without a daemon. `provision` itself is always allowed.
+  Projects with `ci_enabled: true` keep today's blocking behaviour.
 
 ### Phase 4: Docs and wording
 
