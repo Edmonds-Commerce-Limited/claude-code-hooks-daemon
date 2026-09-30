@@ -1216,6 +1216,9 @@ git merge main --no-edit
 # If it is RED: the fix lands on the CHILD branch that broke it, never here.
 # Merge the fixed child into the parent again and re-run this step
 # (QA.md, "A red batch").
+# GREEN on a clean tree: record the sha it tested. STEP 5 lands exactly this.
+git status --porcelain | grep -q . && echo "dirty tree: commit, then re-run" && exit 1
+git rev-parse HEAD > untracked/tested-sha
 ./bin/hooks-daemon restart
 ./bin/hooks-daemon status
 # Expected: Status: RUNNING
@@ -1273,11 +1276,14 @@ git status  # MUST show "nothing to commit, working tree clean"
 # STEP 5: MERGE PARENT TO MAIN
 # ===================================================================
 git log worktree-plan-NNNNN --oneline  # Review changes
-# Fast-forward main to EXACTLY the head STEP 1 tested, by its sha, never the
-# branch name: a commit that reached the branch after the run was never tested.
+# Fast-forward main to EXACTLY the head STEP 1 tested, by the sha it recorded,
+# never the branch name or the parent's current HEAD: a commit that reached the
+# branch after the run was never tested, so it stops here instead.
 # If --ff-only REFUSES, main moved after STEP 1: merge main into the parent,
-# run `llm_qa.py changed` again, and repeat this step.
-tested=$(git -C /workspace/untracked/worktrees/worktree-plan-NNNNN rev-parse HEAD)
+# run STEP 1 again, and repeat this step.
+PARENT=/workspace/untracked/worktrees/worktree-plan-NNNNN
+tested=$(cat "$PARENT/untracked/tested-sha")
+[ "$(git -C "$PARENT" rev-parse HEAD)" = "$tested" ] || { echo "parent moved after STEP 1: run STEP 1 again"; exit 1; }
 git merge --ff-only "$tested"
 
 # ===================================================================
@@ -1745,6 +1751,8 @@ git merge main --no-edit
 # RED: the fix lands on the child branch that broke it; merge that child in
 # again and re-run. Never fix it in the parent.
 ./scripts/qa/llm_qa.py changed
+# GREEN on a clean tree: record the sha it tested; Phase 5 lands exactly this
+git rev-parse HEAD > untracked/tested-sha
 ./bin/hooks-daemon restart
 ./bin/hooks-daemon status
 
@@ -1767,8 +1775,11 @@ Task(subagent_type="general-purpose", team_name="plan-00028", name="final-honest
 # With `worktree.merge_to_main_requires_human_approval: true`, the merge
 # below is denied until a human runs `hooks-daemon approve-merge <branch>`.
 
-# Fast-forward main to the head Phase 4 tested, by its sha
-tested=$(git -C /workspace/untracked/worktrees/worktree-plan-00028 rev-parse HEAD)
+# Fast-forward main to the head Phase 4 tested, by the sha it recorded; a
+# parent that moved since then goes back through Phase 4
+PARENT=/workspace/untracked/worktrees/worktree-plan-00028
+tested=$(cat "$PARENT/untracked/tested-sha")
+[ "$(git -C "$PARENT" rev-parse HEAD)" = "$tested" ] || { echo "parent moved after Phase 4"; exit 1; }
 cd /workspace
 git merge --ff-only "$tested"
 # --ff-only refused? main moved after Phase 4: merge main into the parent,
