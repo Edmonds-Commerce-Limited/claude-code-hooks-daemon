@@ -54,6 +54,7 @@ class PlanQaSweepHandler(SessionStartHandlerBase):
                 HandlerTag.ADVISORY,
                 HandlerTag.PLANNING,
                 HandlerTag.NON_TERMINAL,
+                HandlerTag.SLOW_SWEEP,
             ],
         )
         # Injected by the registry for PLANNING-tagged handlers.

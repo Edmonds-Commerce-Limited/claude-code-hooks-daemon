@@ -57,6 +57,9 @@ class HandlerTag:
     BLOCKING = "blocking"
     TERMINAL = "terminal"
     NON_TERMINAL = "non-terminal"
+    # Ordered after every untagged handler in its chain, whatever its priority,
+    # so a sweep that spends the chain's time budget cannot starve a cheap handler.
+    SLOW_SWEEP = "slow-sweep"
 
     # Workflow tags
     WORKFLOW = "workflow"
@@ -119,6 +122,7 @@ TagLiteral = Literal[
     "blocking",
     "terminal",
     "non-terminal",
+    "slow-sweep",
     # Workflow
     "workflow",
     "advisory",
