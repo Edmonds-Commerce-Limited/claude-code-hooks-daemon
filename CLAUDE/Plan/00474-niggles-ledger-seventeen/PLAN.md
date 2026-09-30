@@ -36,11 +36,22 @@ not-a-defect with the reasoning kept.
 
 Full write-ups are in [NIGGLES.md](NIGGLES.md). One line each here:
 
-| #    | Verdict                                                                     | Origin          | Status                  |
-| ---- | --------------------------------------------------------------------------- | --------------- | ----------------------- |
-| N264 | A sub-agent's edits landed, uncommitted, in another branch's worktree       | 00466 landing   | ⬜ Open                 |
-| N263 | The release empties UNRELEASED post-upgrade tasks but not the README index  | v3.67.0 CI      | ✅ Remedied             |
-| N262 | The release procedure has no check that the notes fit a GitHub release body | v3.67.0 publish | ✅ Remedied (ea8dcd542) |
+| #    | Verdict                                                                         | Origin              | Status                  |
+| ---- | ------------------------------------------------------------------------------- | ------------------- | ----------------------- |
+| N264 | A sub-agent's edits landed, uncommitted, in another branch's worktree           | 00466 landing       | ⬜ Open                 |
+| N246 | Plan and docs QA judge a same-command `git add` as two partial trees            | Carried, N53 branch | ⬜ Open                 |
+| N245 | A pathspec commit is judged on the index as well as the named paths             | Carried, N53 branch | ⬜ Open                 |
+| N244 | The QA commit gates judge the disk, not the tree the commit records             | Carried, N53 branch | ⬜ Open                 |
+| N189 | No commit gate sees a commit hidden in text only bash reads (`bash -c "$X"`)    | Carried, N53 branch | ⬜ Open                 |
+| N177 | No commit gate sees a commit after a `case` inside `function f {` in `$( )`     | Carried, N53 branch | ⬜ Open                 |
+| N176 | No commit gate sees a commit inside `$(( $(…) ))` arithmetic                    | Carried, N53 branch | ⬜ Open                 |
+| N135 | No commit gate sees a commit run from text, via an alias, or after `builtin cd` | Carried, N53 branch | ⬜ Open                 |
+| N256 | Quoted heredoc bodies are glob-walked; a hit cap reads as an evaluation error   | Carried from 00466  | ⬜ Open                 |
+| N255 | `git commit -F - <<'EOF'` denied as an evaluation error (ENAMETOOLONG)          | Carried from 00466  | ⬜ Open                 |
+| N254 | Two resolvers disagree on `secret_word_list_path`                               | Carried from 00466  | ⬜ Open                 |
+| N253 | `secret_file_guard` exemptions parse options from open lists                    | Carried from 00466  | ⬜ Open                 |
+| N263 | The release empties UNRELEASED post-upgrade tasks but not the README index      | v3.67.0 CI          | ✅ Remedied             |
+| N262 | The release procedure has no check that the notes fit a GitHub release body     | v3.67.0 publish     | ✅ Remedied (ea8dcd542) |
 
 ## Tasks
 

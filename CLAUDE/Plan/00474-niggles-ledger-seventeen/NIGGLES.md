@@ -4,6 +4,37 @@ Newest first. Each entry says how it was found, why it happens, and the
 candidate remedies. Numbering continues from
 [ledger sixteen](../00466-niggles-ledger-sixteen/NIGGLES.md).
 
+### N135, N176, N177, N189, N244–N246 — carried from the dropped N53 branch
+
+Recorded only on `worktree-n466-n53`, which was dropped. Their write-ups are kept
+verbatim in [CARRIED-N53-BRANCH.md](CARRIED-N53-BRANCH.md). Five were remedied on
+that branch only, so all seven are open on `main`.
+
+**Status**: ⬜ Open (all seven).
+
+### N253–N256 — carried from ledger 00466, their branch dropped
+
+These four were numbered and fixed on `worktree-n466-n253` but never recorded on
+`main`. The branch was dropped under Plan 00475's small-batches rule: merging
+current `main` conflicted in 6 files (18 hunks), because the N101 merge rewrote the
+same heredoc and glob-walk code. The defects stay open, to be fixed fresh on
+`main`. The branch's analysis is kept in
+[subagent-reports/260929-n253-opus-5-5.md](subagent-reports/260929-n253-opus-5-5.md).
+The landing agent judged that N253 and N254 may port cleanly on their own, and
+that N255 and N256 need redoing against the N101 code.
+
+- **N253**: `secret_file_guard` exemptions parse options from open lists, so
+  `grep --rege=. <key>`, ugrep `--and=.` and `git -c core.fsmonitor=…` print the file.
+- **N254**: `sensitive_content` and the redaction sinks resolve
+  `secret_word_list_path` differently (absolute path, `{REPO_ROOT}` token).
+- **N255**: `git commit -F - <<'EOF'` is denied as R-SECRET-EVALUATION-ERROR:
+  ENAMETOOLONG from a glob in apostrophe-quoted prose on Python 3.11.
+- **N256**: `secret_file_guard` glob-walks quoted heredoc bodies fed to text
+  readers, and reports a hit enumeration cap as an evaluation error. Recheck after
+  N101, which changed heredoc handling.
+
+**Status**: ⬜ Open (all four).
+
 ### N264 — a sub-agent's edits landed, uncommitted, in another branch's worktree
 
 **Found**: dispatching a Sonnet agent to land `worktree-n466-n253`, its clean-tree

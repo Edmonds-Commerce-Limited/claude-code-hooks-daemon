@@ -74,6 +74,10 @@ instead of competing. Today `untracked/qa/.llm_qa.lock` is per checkout, and
 - **Review cap stays at 3 rounds.** After that, merge what is sound or drop it.
 - **Dropping is a deletion:** record the reason in the ledger entry, then delete
   the branch and its worktree. No archive branches, no archive tags.
+- **Ledger entries are recorded on `main`, not on a work branch.** Ledger 00466's
+  dropped branches held entries that `main` never had (N135, N176, N177, N189,
+  N244-N246 on the N53 branch, N253-N256 on the N253 branch), and they had to be
+  recovered by hand before deletion. A branch changes an entry's status only.
 
 ## Goals
 
