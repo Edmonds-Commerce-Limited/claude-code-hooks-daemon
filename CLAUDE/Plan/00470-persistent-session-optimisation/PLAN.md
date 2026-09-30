@@ -89,7 +89,7 @@ An `[awaiting-human]` stop currently silences every declared cron, so one open
 question stops all work. Seen: an issue-sdlc tick was suppressed while the session
 waited on one bandit decision.
 
-- [ ] ⬜ **Task 5.1**: A per-job `persistent_crons` option saying whether a live
+- [x] ✅ **Task 5.1**: A per-job `persistent_crons` option saying whether a live
   awaiting-human marker suppresses that job. `issue-sdlc` is not suppressed, because
   its work is independent of the pending question. `failsafe-recovery` is
   suppressed, because resuming interrupted work is exactly what waits on the human.
