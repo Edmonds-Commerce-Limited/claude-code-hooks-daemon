@@ -59,6 +59,7 @@ from claude_code_hooks_daemon.utils.git_commit_parsing import (
 )
 from claude_code_hooks_daemon.utils.git_repo import GitRepo, run_git
 from claude_code_hooks_daemon.utils.path_exclusion import handler_excludes_path
+from claude_code_hooks_daemon.utils.path_predicates import path_is_dir
 
 logger = logging.getLogger(__name__)
 
@@ -538,7 +539,9 @@ class ConflictMarkerCommitGateHandler(PreToolUseHandlerBase):
         for commit in _commits(command, self._cwd(hook_input)):
             if isinstance(commit, _Unplaceable):
                 return _unchecked(commit.reason)
-            repo = GitRepo.resolve_for(commit.directory) if commit.directory.is_dir() else None
+            # An unstattable directory is reported as unchecked below, not raised.
+            is_dir = path_is_dir(commit.directory, unreadable_means=False)
+            repo = GitRepo.resolve_for(commit.directory) if is_dir else None
             if repo is None:
                 return _unchecked(f"`{commit.directory}` is not a directory inside a repository")
             try:

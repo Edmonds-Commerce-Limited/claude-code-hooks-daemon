@@ -569,6 +569,15 @@ class TestAnUncheckableCommitIsDenied:
         assert named in result.reason
         assert "git -C /absolute/path/to/repo commit" in result.reason
 
+    def test_an_unstattable_directory_is_denied_not_raised(
+        self, handler: ConflictMarkerCommitGateHandler, repo: Path
+    ) -> None:
+        """EACCES on the commit's directory is an uncheckable commit, not a crash."""
+        with patch.object(Path, "is_dir", side_effect=PermissionError(13, "denied")):
+            result = _verdict(handler, f"git -C {repo} commit -m x", repo)
+        assert result.decision == Decision.DENY
+        assert "NOT checked" in result.reason
+
     def test_am_continue_checks_the_index(
         self, handler: ConflictMarkerCommitGateHandler, repo: Path
     ) -> None:
