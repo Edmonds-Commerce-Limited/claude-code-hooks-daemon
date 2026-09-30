@@ -833,20 +833,41 @@ $_hd_venv_missing_remedy")
         # clone behind the tracked assets is upgraded, while a clone AHEAD of
         # them means the tracked assets are the stale half and telling the reader
         # to upgrade would be advice that cannot succeed.
-        local _hd_remedy_1 _hd_remedy_2
-        if _version_lt "$_HOOKS_DAEMON_CLONE_VERSION" "$_HOOKS_DAEMON_TRACKED_VERSION"; then
-            _hd_remedy_1="TO FIX — upgrade the clone to the version this repository expects:"
-            _hd_remedy_2="  Use the hooks-daemon skill to upgrade (Skill tool: skill=hooks-daemon, args=upgrade $_HOOKS_DAEMON_TRACKED_VERSION)"
+        #
+        # Plan 00477 Task 5.1: when the EXPECTED version came from the
+        # daemon.expected_version config key (a pull changed it), a clone ahead
+        # of it is a DOWNGRADE the project asked for, not a stale header, and the
+        # message says so; the regenerate remedy stays for the header source.
+        local _hd_remedy_1 _hd_remedy_2 _hd_headline _hd_expected_from
+        local _hd_upgrade_cmd="  Use the hooks-daemon skill to upgrade (Skill tool: skill=hooks-daemon, args=upgrade $_HOOKS_DAEMON_TRACKED_VERSION)"
+        if [[ "${_HOOKS_DAEMON_EXPECTED_VERSION_SOURCE:-}" == "config" ]]; then
+            _hd_headline="HOOKS DAEMON: version drift — installed clone v$_HOOKS_DAEMON_CLONE_VERSION, this project expects v$_HOOKS_DAEMON_TRACKED_VERSION"
+            _hd_expected_from="Expected version: v$_HOOKS_DAEMON_TRACKED_VERSION (daemon.expected_version in .claude/hooks-daemon.yaml)"
+            if _version_lt "$_HOOKS_DAEMON_CLONE_VERSION" "$_HOOKS_DAEMON_TRACKED_VERSION"; then
+                _hd_remedy_1="TO SYNC, this is an UPGRADE — a human runs:"
+            else
+                _hd_remedy_1="TO SYNC, this is a DOWNGRADE — v$_HOOKS_DAEMON_TRACKED_VERSION is OLDER than the installed v$_HOOKS_DAEMON_CLONE_VERSION. Confirm it is intended (the commit may have come from an older checkout; if not, correct daemon.expected_version). A human runs:"
+            fi
+            _hd_remedy_2="  /hooks-daemon upgrade $_HOOKS_DAEMON_TRACKED_VERSION (Skill tool: skill=hooks-daemon, args=upgrade $_HOOKS_DAEMON_TRACKED_VERSION)
+Nothing has been changed: hooks never move the daemon to another version themselves."
         else
-            _hd_remedy_1="TO FIX — the TRACKED assets are the stale half here; regenerate and commit them:"
-            _hd_remedy_2="  Run generate-docs from the installed clone, then commit the resulting diff."
+            _hd_headline="HOOKS DAEMON: version mismatch — installed clone v$_HOOKS_DAEMON_CLONE_VERSION, tracked assets v$_HOOKS_DAEMON_TRACKED_VERSION"
+            _hd_expected_from="Expected version: v$_HOOKS_DAEMON_TRACKED_VERSION (the .claude/HOOKS-DAEMON.md header)"
+            if _version_lt "$_HOOKS_DAEMON_CLONE_VERSION" "$_HOOKS_DAEMON_TRACKED_VERSION"; then
+                _hd_remedy_1="TO FIX — upgrade the clone to the version this repository expects:"
+                _hd_remedy_2="$_hd_upgrade_cmd"
+            else
+                _hd_remedy_1="TO FIX — the TRACKED assets are the stale half here; regenerate and commit them:"
+                _hd_remedy_2="  Run generate-docs from the installed clone, then commit the resulting diff."
+            fi
         fi
 
-        context_msg=$(printf '%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s' \
-            "HOOKS DAEMON: version mismatch — installed clone v$_HOOKS_DAEMON_CLONE_VERSION, tracked assets v$_HOOKS_DAEMON_TRACKED_VERSION" \
+        context_msg=$(printf '%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s' \
+            "$_hd_headline" \
             "" \
             "The daemon under .claude/hooks-daemon/ is gitignored and per-checkout," \
             "so it can fall behind the TRACKED assets this repository has committed." \
+            "$_hd_expected_from" \
             "Checkout: $_hooks_daemon_checkout" \
             "" \
             "ALL safety handlers, code quality checks, and workflow enforcement are INACTIVE." \
@@ -1215,13 +1236,16 @@ _resolve_python_cmd() {
     # shellcheck disable=SC1090  # path is computed at runtime
     source "$lib"
 
-    if PYTHON_CMD="$(resolve_venv_python "$HOOKS_DAEMON_ROOT_DIR")"; then
-        return 0
+    # The status is captured from the assignment itself: after an `if` with no
+    # `else` whose condition failed, $? is 0, which made a failed resolve look
+    # like success with PYTHON_CMD empty.
+    local rv=0
+    PYTHON_CMD="$(resolve_venv_python "$HOOKS_DAEMON_ROOT_DIR")" || rv=$?
+    if [[ "$rv" -ne 0 ]]; then
+        PYTHON_CMD=""
+        return "$rv"
     fi
-
-    local rv=$?
-    PYTHON_CMD=""
-    return "$rv"
+    return 0
 }
 
 #
@@ -2296,24 +2320,47 @@ _version_lt() {
 }
 
 #
-# _detect_stale_clone() - Do the clone and the tracked assets disagree?
+# _detect_stale_clone() - Is the installed clone not the version the project expects?
 #
-# Sets _HOOKS_DAEMON_CLONE_VERSION and _HOOKS_DAEMON_TRACKED_VERSION on a
-# mismatch. Says nothing when either version is unreadable: unknowable is not
-# the same as wrong, and accusing a project on absent evidence is how an
-# advisory earns the habit of being ignored.
+# Plan 00386 compared the clone with the tracked HOOKS-DAEMON.md header. Plan
+# 00477 Task 5.1 compares it with the RESOLVED expected version instead: the
+# daemon.expected_version config key, then the header for a project that
+# predates the key (_resolve_expected_version). The case is a pull that changes
+# the key: the gitignored clone stays where it was, so it and the tracked
+# assets now disagree. An invalid key reports nothing of its own here; the
+# comparison falls back to the header exactly as before the key existed.
+#
+# The daemon's own repository (self-install: the daemon root IS the project)
+# never reports drift: its source is the project, there is no clone to fall
+# behind. Reads are builtins and one grep for the clone's version.py; the
+# config is read without awk unless the key is actually present.
+#
+# Sets _HOOKS_DAEMON_CLONE_VERSION, _HOOKS_DAEMON_TRACKED_VERSION (the EXPECTED
+# version, whichever source named it) and _HOOKS_DAEMON_EXPECTED_VERSION_SOURCE
+# (config | tracked-doc) on a mismatch. Says nothing when either version is
+# unreadable: unknowable is not the same as wrong, and accusing a project on
+# absent evidence is how an advisory earns the habit of being ignored.
 #
 # Returns:
 #   0 if the two versions differ, 1 otherwise
 #
 _detect_stale_clone() {
-    local clone tracked
+    [[ "$HOOKS_DAEMON_ROOT_DIR" == "$PROJECT_PATH" ]] && return 1
+
+    local clone expected source
     clone="$(_clone_version)" || return 1
-    tracked="$(_tracked_deployed_version)" || return 1
-    [[ "$clone" == "$tracked" ]] && return 1
+    if _resolve_expected_version; then
+        expected="$_HOOKS_DAEMON_EXPECTED_VERSION"
+        source="$_HOOKS_DAEMON_EXPECTED_VERSION_SOURCE"
+    else
+        expected="$(_tracked_deployed_version)" || return 1
+        source="tracked-doc"
+    fi
+    [[ "$clone" == "$expected" ]] && return 1
 
     _HOOKS_DAEMON_CLONE_VERSION="$clone"
-    _HOOKS_DAEMON_TRACKED_VERSION="$tracked"
+    _HOOKS_DAEMON_TRACKED_VERSION="$expected"
+    _HOOKS_DAEMON_EXPECTED_VERSION_SOURCE="$source"
     return 0
 }
 

@@ -111,9 +111,13 @@ This is a sync, not an upgrade. The upgrade already ran where it was committed:
 its tracked-file migrations are in the pull. Only the per-checkout parts are
 stale: the clone's checked-out tag, the venv and the running daemon.
 
-- [ ] ⬜ **Task 5.1**: Detect drift: the installed clone's version differs from the
-  resolved expected version. Decide where: at daemon start in `init.sh`, and
-  at SessionStart for a daemon already running.
+- [x] ✅ **Task 5.1**: Detect drift: the installed clone's version differs from the
+  resolved expected version. Decided: in `init.sh` by extending the Plan 00386
+  mismatch path (`_detect_stale_clone` now compares the clone with
+  `_resolve_expected_version`; it runs only after a failed start, so a healthy
+  hook pays nothing), and at SessionStart for a running daemon in the
+  `version_check` handler. Both name the versions, the source, UPGRADE or
+  DOWNGRADE, and the command a human runs; neither moves the daemon.
 - [ ] ⬜ **Task 5.2**: Sync in the background, never inside a hook's time budget:
   fetch exactly the tag from the fixed URL, check that its `version.py` names
   it, rebuild the venv through the clone's own build path, then restart. The

@@ -24,6 +24,8 @@ import sys
 from pathlib import Path
 from typing import Final
 
+import yaml
+
 from claude_code_hooks_daemon.install.install_stamp import is_branch_install
 from claude_code_hooks_daemon.version import __version__
 
@@ -130,6 +132,41 @@ def record_expected_version(config_path: Path, version: str) -> bool:
         return False
     config_path.write_text(updated)
     return True
+
+
+def read_expected_version(config_path: Path) -> str | None:
+    """Read ``daemon.expected_version`` back from the config file, as written.
+
+    The Python twin of the config step of ``_resolve_expected_version`` in
+    ``init.sh``: a missing file, an absent key and a value that is not strictly
+    ``X.Y.Z`` all answer None, so a caller never acts on a guess. An invalid
+    value is reported by config validation, not here.
+
+    Args:
+        config_path: The project's ``.claude/hooks-daemon.yaml``.
+
+    Returns:
+        The recorded ``X.Y.Z``, or None when the file does not usably name one.
+
+    Raises:
+        ValueError: The file exists but is not valid YAML.
+        OSError: The file exists but cannot be read.
+    """
+    if not config_path.is_file():
+        return None
+    try:
+        document = yaml.safe_load(config_path.read_text())
+    except yaml.YAMLError as exc:
+        raise ValueError(f"Invalid YAML in {config_path}: {exc}") from exc
+    if not isinstance(document, dict):
+        return None
+    daemon = document.get("daemon")
+    if not isinstance(daemon, dict):
+        return None
+    value = daemon.get(EXPECTED_VERSION_KEY)
+    if not isinstance(value, str) or not _VERSION_RE.match(value):
+        return None
+    return value
 
 
 def main(argv: list[str] | None = None) -> int:
