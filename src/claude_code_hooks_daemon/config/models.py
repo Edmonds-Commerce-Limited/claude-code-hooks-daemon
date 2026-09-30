@@ -1865,6 +1865,11 @@ class DaemonConfig(BaseModel):
             X.Y.Z. Written by install and upgrade; ``.claude/provision.sh`` installs
             exactly this version into a fresh checkout. Distinct from the top-level
             ``version``, which is the config SCHEMA version.
+        unprovisioned_mode: What the hooks do in a checkout that has the tracked
+            assets but no daemon (Plan 00477): ``warn`` (default) tells the human and
+            the agent loudly and blocks nothing, ``block`` also denies every tool call
+            except the provision command. Read by ``init.sh`` in bash, since no daemon
+            exists to read it; ``ci_enabled: true`` keeps its own blocking behaviour.
     """
 
     model_config = ConfigDict(extra="allow")
@@ -1873,6 +1878,10 @@ class DaemonConfig(BaseModel):
         default=None,
         pattern=r"^[0-9]+\.[0-9]+\.[0-9]+$",
         description="Daemon version this project expects (X.Y.Z); provision installs exactly it",
+    )
+    unprovisioned_mode: Literal["warn", "block"] = Field(
+        default="warn",
+        description="An unprovisioned checkout: warn loudly (default) or block tool calls",
     )
     idle_timeout_seconds: Annotated[int, Field(ge=1)] = Field(
         default=600,

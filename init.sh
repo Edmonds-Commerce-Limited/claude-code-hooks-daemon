@@ -28,6 +28,18 @@ _HOOKS_DAEMON_CI_ENFORCED=false
 # Flag set by ensure_daemon when daemon directory/venv is absent (fresh clone)
 _HOOKS_DAEMON_NOT_INSTALLED=false
 
+# Set by ensure_daemon (Plan 00477) when NOT_INSTALLED holds in a checkout that
+# carries the tracked assets a provision needs: a fresh clone of a client
+# project. The remedy is `bash .claude/provision.sh`, not the install skill.
+# The mode is daemon.unprovisioned_mode (warn|block), read in bash because no
+# daemon exists to read it; the note is non-empty when the configured value was
+# not one of the two. STATUS_DOWN_TEXT is what the status-line forwarder prints
+# in place of its generic marker.
+_HOOKS_DAEMON_NEEDS_PROVISION=false
+_HOOKS_DAEMON_UNPROVISIONED_MODE="warn"
+_HOOKS_DAEMON_UNPROVISIONED_MODE_NOTE=""
+_HOOKS_DAEMON_STATUS_DOWN_TEXT=""
+
 # Set by ensure_daemon when the installed clone and the project's TRACKED
 # deployed assets name different daemon versions (Plan 00386, GitHub issue #38).
 # The two version globals are only meaningful while the flag is true.
@@ -345,6 +357,202 @@ _hooks_daemon_static_deny() {
 }
 
 #
+# _hooks_daemon_stdin_is_provision_command() - True when stdin is a PreToolUse
+# call that runs provision itself (Plan 00477 Task 3.3).
+#
+# The one thing a block-mode unprovisioned checkout still allows, so it is kept
+# as narrow as the daemon recovery carve-out: a Skill call for hooks-daemon with
+# exactly the argument `provision`, or a Bash call whose WHOLE command is
+# `bash .claude/provision.sh` (or that script by absolute path, shell-quoted),
+# padded only by spaces and tabs. Anything that merely mentions it, chains
+# after it, or passes it a flag is not exempt. A relative spelling runs
+# whatever the Bash tool's working directory holds, so it counts only when it
+# resolves to THIS project's script. Any parse failure is "not exempt".
+_hooks_daemon_stdin_is_provision_command() {
+    python3 -c '
+import json
+import os
+import shlex
+import sys
+
+PADDING = " \t"
+
+
+def is_provision_call(hook_input, project_path):
+    if not isinstance(hook_input, dict):
+        return False
+    tool_input = hook_input.get("tool_input")
+    if not isinstance(tool_input, dict):
+        return False
+    tool_name = hook_input.get("tool_name")
+    if tool_name == "Skill":
+        args = tool_input.get("args")
+        return (
+            tool_input.get("skill") == "hooks-daemon"
+            and isinstance(args, str)
+            and args.strip(PADDING) == "provision"
+        )
+    if tool_name != "Bash":
+        return False
+    command = tool_input.get("command")
+    if not isinstance(command, str):
+        return False
+    stripped = command.strip(PADDING)
+    if not stripped.isprintable():
+        return False
+    script = os.path.join(project_path, ".claude", "provision.sh")
+    if not os.path.isfile(script):
+        return False
+    if stripped == "bash " + shlex.quote(script):
+        return True
+    if stripped != "bash .claude/provision.sh":
+        return False
+    cwd = hook_input.get("cwd")
+    if not (isinstance(cwd, str) and os.path.isabs(cwd)):
+        return False
+    return os.path.realpath(os.path.join(cwd, ".claude", "provision.sh")) == os.path.realpath(script)
+
+
+try:
+    hook_input = json.load(sys.stdin)
+except ValueError:
+    sys.exit(1)
+sys.exit(0 if is_provision_call(hook_input, sys.argv[1]) else 1)
+' "${PROJECT_PATH:-}"
+}
+
+#
+# _hooks_daemon_emit_needs_provision() - The answer to EVERY hook event in a
+# checkout that needs provisioning (Plan 00477 Tasks 3.1-3.3).
+#
+# One message, for the human and the agent alike: what is wrong, which version
+# is expected, the exact command, and what the project's mode does about tool
+# calls. Each event's JSON is the shape Claude Code's output contract gives it:
+#
+#   SessionStart, UserPromptSubmit   systemMessage (shown to the human) AND
+#                                    hookSpecificOutput.additionalContext (agent)
+#   PreToolUse                       warn: additionalContext. block: a deny,
+#                                    unless the call is provision itself
+#   Stop, SubagentStop               warn: systemMessage. block: decision=block
+#   every other event                additionalContext
+#
+# With neither jq nor python3 nothing can encode the message, so a constant
+# answer is given: a deny (no command can be recognised as provision) for a
+# blocking PreToolUse, a systemMessage otherwise.
+#
+# Args:
+#   $1 - event name (non-empty)
+_hooks_daemon_emit_needs_provision() {
+    local event_name="$1"
+    local mode="$_HOOKS_DAEMON_UNPROVISIONED_MODE"
+    local checkout="${PROJECT_PATH:-unknown checkout}"
+
+    local version_line
+    case "${_HOOKS_DAEMON_EXPECTED_VERSION_SOURCE:-}" in
+        config) version_line="$_HOOKS_DAEMON_EXPECTED_VERSION (daemon.expected_version in .claude/hooks-daemon.yaml)" ;;
+        tracked-doc) version_line="$_HOOKS_DAEMON_EXPECTED_VERSION (the .claude/HOOKS-DAEMON.md header)" ;;
+        config-invalid) version_line="unknown - daemon.expected_version in .claude/hooks-daemon.yaml is not X.Y.Z, so provision will stop and say so" ;;
+        *) version_line="unknown - neither daemon.expected_version nor the .claude/HOOKS-DAEMON.md header names one, so provision will stop and say so" ;;
+    esac
+
+    local mode_lines
+    if [[ "$mode" == "block" ]]; then
+        mode_lines="This project BLOCKS tool calls until the checkout is provisioned (daemon.unprovisioned_mode: block). Only the provision command is allowed."
+    else
+        mode_lines="Tool calls are NOT blocked (daemon.unprovisioned_mode: warn), but nothing is being checked."
+    fi
+    if [[ -n "$_HOOKS_DAEMON_UNPROVISIONED_MODE_NOTE" ]]; then
+        mode_lines="$mode_lines
+$_HOOKS_DAEMON_UNPROVISIONED_MODE_NOTE"
+    fi
+
+    local message
+    message="$(printf '%s\n' \
+        "HOOKS DAEMON: NEEDS PROVISIONING - this checkout has no daemon" \
+        "" \
+        "This project uses the Claude Code Hooks Daemon, but the daemon lives in the" \
+        "gitignored, per-checkout .claude/hooks-daemon/ and has not been built here." \
+        "Checkout: $checkout" \
+        "Expected daemon version: $version_line" \
+        "" \
+        "ALL safety handlers, code quality checks, and workflow enforcement are INACTIVE." \
+        "" \
+        "TO FIX - provision this checkout, from the project root:" \
+        "  bash .claude/provision.sh" \
+        "or use the hooks-daemon skill to provision (Skill tool: skill=hooks-daemon," \
+        "args=provision). It builds exactly the expected version, changes no tracked" \
+        "file, and needs no session restart." \
+        "" \
+        "$mode_lines")"
+
+    local shape
+    case "$event_name" in
+        SessionStart | UserPromptSubmit) shape="inform" ;;
+        PreToolUse)
+            shape="context"
+            if [[ "$mode" == "block" ]] && ! _hooks_daemon_stdin_is_provision_command; then
+                shape="deny"
+            fi
+            ;;
+        Stop | SubagentStop)
+            shape="system"
+            if [[ "$mode" == "block" ]]; then
+                shape="block"
+            fi
+            ;;
+        *) shape="context" ;;
+    esac
+
+    if command -v jq > /dev/null; then
+        jq -n --arg shape "$shape" --arg event "$event_name" --arg msg "$message" '
+            if $shape == "inform" then
+                {"systemMessage": $msg,
+                 "hookSpecificOutput": {"hookEventName": $event, "additionalContext": $msg}}
+            elif $shape == "deny" then
+                {"hookSpecificOutput": {"hookEventName": $event, "permissionDecision": "deny",
+                                        "permissionDecisionReason": $msg}}
+            elif $shape == "block" then {"decision": "block", "reason": $msg}
+            elif $shape == "system" then {"systemMessage": $msg}
+            else {"hookSpecificOutput": {"hookEventName": $event, "additionalContext": $msg}}
+            end'
+        return 0
+    fi
+    if python3 -c '
+import json
+import sys
+
+shape, event, msg = sys.argv[1:4]
+if shape == "inform":
+    resp = {
+        "systemMessage": msg,
+        "hookSpecificOutput": {"hookEventName": event, "additionalContext": msg},
+    }
+elif shape == "deny":
+    resp = {
+        "hookSpecificOutput": {
+            "hookEventName": event,
+            "permissionDecision": "deny",
+            "permissionDecisionReason": msg,
+        }
+    }
+elif shape == "block":
+    resp = {"decision": "block", "reason": msg}
+elif shape == "system":
+    resp = {"systemMessage": msg}
+else:
+    resp = {"hookSpecificOutput": {"hookEventName": event, "additionalContext": msg}}
+print(json.dumps(resp))
+' "$shape" "$event_name" "$message"; then
+        return 0
+    fi
+    if [[ "$shape" == "deny" ]]; then
+        printf '%s\n' '{"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": "HOOKS DAEMON: NEEDS PROVISIONING - this project blocks tool calls until the checkout is provisioned. Neither jq nor python3 is available, so no command can be recognised as the provision command. A human must run: ! bash .claude/provision.sh"}}'
+    else
+        printf '%s\n' '{"systemMessage": "HOOKS DAEMON: NEEDS PROVISIONING - run: bash .claude/provision.sh (neither jq nor python3 is available, so this message cannot be detailed)"}'
+    fi
+}
+
+#
 # emit_hook_error() - Output a valid hook error response to stdout
 #
 # CRITICAL: This ensures the agent sees errors and can take action.
@@ -391,6 +599,14 @@ emit_hook_error() {
         local _HOOKS_DAEMON_CI_ENFORCED=false _HOOKS_DAEMON_REPO_UNCONFIGURED=false \
             _HOOKS_DAEMON_VENV_MISSING=false _HOOKS_DAEMON_NOT_INSTALLED=false \
             _HOOKS_DAEMON_VERSION_MISMATCH=false
+    fi
+
+    # Plan 00477: a fresh clone that only needs provisioning gets its own
+    # answer for every event. ensure_daemon sets the flag only after the CI,
+    # starting and passthrough diagnoses, so those keep their own answers.
+    if [[ "$_HOOKS_DAEMON_NEEDS_PROVISION" == "true" && -n "$event_name" ]]; then
+        _hooks_daemon_emit_needs_provision "$event_name"
+        return 0
     fi
 
     # Plan 00466 N24 review 3 MA4: for PreToolUse, the STANDARD branch below
@@ -1899,14 +2115,17 @@ _tracked_deployed_version() {
 }
 
 #
-# _config_expected_version_raw() - The raw daemon.expected_version line value
+# _config_daemon_key_raw() - The raw value of a key in the daemon: config block
 #
 # Plan 00477. A line-oriented read of .claude/hooks-daemon.yaml, because this
-# runs before any venv exists. It accepts exactly the shape
-# install/expected_version.py writes: an indented expected_version key inside
-# the top-level daemon block. A commented-out key, or one in another block,
-# is not the key. \042 and \047 are the double and single quote, spelled as
-# octal escapes so the awk program needs no quote characters of its own.
+# runs before any venv exists. It accepts exactly the shape the installer
+# writes: an indented KEY inside the top-level daemon block. A commented-out
+# key, or one in another block, is not the key. \042 and \047 are the double
+# and single quote, spelled as octal escapes so the awk program needs no quote
+# characters of its own.
+#
+# Args:
+#   $1 - the key name (a plain identifier)
 #
 # Output:
 #   The value with quotes and a trailing comment removed (possibly empty)
@@ -1914,21 +2133,27 @@ _tracked_deployed_version() {
 # Returns:
 #   0 if the key is present, 1 if it is not (or there is no config file)
 #
-_config_expected_version_raw() {
+_config_daemon_key_raw() {
     local config="$PROJECT_PATH/.claude/hooks-daemon.yaml"
     [[ -f "$config" ]] || return 1
 
+    # A bash-builtin read and a substring test first: a key the file never
+    # mentions (the usual case for an optional one) costs no process at all.
+    local content=""
+    IFS= read -r -d '' content < "$config" || [[ -n "$content" ]] || return 1
+    [[ "$content" == *"$1:"* ]] || return 1
+
     local value
-    value="$(awk '
+    value="$(awk -v key="$1" '
         /^daemon:/ { blk = 1; indent = ""; next }
         /^[^ \t#]/ { blk = 0 }
         blk && indent == "" && /^[ \t]+[^ \t#]/ {
             indent = $0
             sub(/[^ \t].*$/, "", indent)
         }
-        blk && indent != "" && index($0, indent "expected_version:") == 1 {
-            v = $0
-            sub(/^[ \t]+expected_version:[ \t]*/, "", v)
+        blk && indent != "" && index($0, indent key ":") == 1 {
+            v = substr($0, length(indent key ":") + 1)
+            sub(/^[ \t]+/, "", v)
             sub(/[ \t]+#.*$/, "", v)
             sub(/[ \t]+$/, "", v)
             gsub(/^[\042\047]|[\042\047]$/, "", v)
@@ -1939,6 +2164,68 @@ _config_expected_version_raw() {
     [[ "$value" == FOUND:* ]] || return 1
 
     printf '%s' "${value#FOUND:}"
+}
+
+# _config_expected_version_raw() - The raw daemon.expected_version value
+_config_expected_version_raw() {
+    _config_daemon_key_raw expected_version
+}
+
+#
+# _config_unprovisioned_mode() - daemon.unprovisioned_mode, warn when unset
+#
+# Plan 00477. Whether an unprovisioned checkout BLOCKS tool calls is a
+# per-project setting; the default, and what any unusable value falls back to,
+# is warn. A value that is present but neither warn nor block is named in
+# _HOOKS_DAEMON_UNPROVISIONED_MODE_NOTE so the message says so instead of
+# quietly choosing.
+#
+# Sets:
+#   _HOOKS_DAEMON_UNPROVISIONED_MODE       warn | block
+#   _HOOKS_DAEMON_UNPROVISIONED_MODE_NOTE  empty, or a sentence naming the bad value
+#
+_config_unprovisioned_mode() {
+    _HOOKS_DAEMON_UNPROVISIONED_MODE="warn"
+    _HOOKS_DAEMON_UNPROVISIONED_MODE_NOTE=""
+
+    local raw
+    if ! raw="$(_config_daemon_key_raw unprovisioned_mode)"; then
+        return 0
+    fi
+    case "$raw" in
+        warn | block) _HOOKS_DAEMON_UNPROVISIONED_MODE="$raw" ;;
+        *)
+            _HOOKS_DAEMON_UNPROVISIONED_MODE_NOTE="daemon.unprovisioned_mode '$raw' is not warn or block; treated as warn."
+            ;;
+    esac
+}
+
+#
+# _detect_needs_provision() - Is this a fresh clone that provision can build?
+#
+# Plan 00477. Called only once NOT_INSTALLED is established (no daemon running,
+# no clone, no leftover venv), so the question here is whether the tracked
+# assets a provision needs are present: the project's config and its
+# .claude/provision.sh. A project that predates provision.sh keeps the generic
+# answer, since naming a script it lacks would be a wrong instruction. The
+# daemon's own repository never needs provisioning: it is set up by
+# scripts/bootstrap-self-install.sh.
+#
+# Sets _HOOKS_DAEMON_NEEDS_PROVISION and, when true, the expected version
+# (_resolve_expected_version), the mode and the status-line text.
+#
+_detect_needs_provision() {
+    [[ -f "$PROJECT_PATH/.claude/hooks-daemon.yaml" ]] || return 0
+    [[ -f "$PROJECT_PATH/.claude/provision.sh" ]] || return 0
+    [[ -f "$PROJECT_PATH/src/claude_code_hooks_daemon/version.py" ]] && return 0
+
+    _HOOKS_DAEMON_NEEDS_PROVISION=true
+    if ! _resolve_expected_version; then
+        : # unknown is a reported state, carried in _HOOKS_DAEMON_EXPECTED_VERSION*
+    fi
+    _config_unprovisioned_mode
+    _HOOKS_DAEMON_STATUS_DOWN_TEXT="⚠️ HOOKS DAEMON NOT PROVISIONED - run: bash .claude/provision.sh"
+    return 0
 }
 
 #
@@ -2257,6 +2544,7 @@ ensure_daemon() {
             _HOOKS_DAEMON_VENV_MISSING_VERSION=""
         else
             _HOOKS_DAEMON_NOT_INSTALLED=true
+            _detect_needs_provision
         fi
     fi
     return 1
@@ -3031,6 +3319,11 @@ export -f _hooks_daemon_recovery_py
 export -f _hooks_daemon_stdin_is_recovery_command
 export -f _hooks_daemon_recovery_command
 export -f _hooks_daemon_static_deny
+export -f _hooks_daemon_stdin_is_provision_command
+export -f _hooks_daemon_emit_needs_provision
+export -f _detect_needs_provision
+export -f _config_daemon_key_raw
+export -f _config_unprovisioned_mode
 export -f validate_venv
 # is_daemon_running and everything it calls.
 export _HOOKS_DAEMON_PID_MAX

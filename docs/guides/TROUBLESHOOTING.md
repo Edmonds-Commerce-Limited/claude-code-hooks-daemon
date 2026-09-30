@@ -614,11 +614,23 @@ cd /path/to/your/project
 
 ---
 
+### "HOOKS DAEMON: NEEDS PROVISIONING" (a fresh clone)
+
+**Cause:** You cloned a project that already uses the daemon. The hooks and config are tracked, but the daemon itself lives in the gitignored `.claude/hooks-daemon/`, which a clone does not carry, so no safety handler is running.
+
+**Fix:** Provision the checkout from the project root. It builds exactly the version the project names, changes no tracked file, and needs no session restart:
+
+```bash
+bash .claude/provision.sh
+```
+
+## or `/hooks-daemon provision` in Claude Code. Do not run `install` here: it is for a project that does not use the daemon yet. By default the hooks only warn; set `daemon.unprovisioned_mode: block` in `.claude/hooks-daemon.yaml` to make them deny tool calls (except provision itself) until it is done.
+
 ### "ERROR: hooks-daemon not installed at: /path/to/project"
 
-**Cause:** The `.claude/hooks-daemon/` directory does not exist. The daemon has not been installed for this project.
+**Cause:** The `.claude/hooks-daemon/` directory does not exist. The daemon has not been installed for this project. If the project already uses the daemon (a fresh clone), provision it as above instead of installing.
 
-**Fix:** Install the daemon following the Getting Started guide, or if this is the daemon's own repository, enable self-install mode:
+**Fix:** Provision it (fresh clone), or install the daemon following the Getting Started guide (a project that does not use it yet), or if this is the daemon's own repository, enable self-install mode:
 
 ```yaml
 daemon:

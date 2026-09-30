@@ -24,6 +24,25 @@ config_changes:
       migration_note: >-
         Nothing to do: the next upgrade records it. Commit the changed
         `.claude/hooks-daemon.yaml` and the new `.claude/provision.sh`.
+    - key: daemon.unprovisioned_mode
+      recommended: false
+      dormant: false
+      description: >-
+        NEW (Plan 00477). What the hooks do in a fresh clone that has the
+        tracked assets but no daemon: `warn` (the default) says so loudly to
+        the human (`systemMessage`) and the agent (`additionalContext`) at
+        SessionStart and on every prompt, and on the status line, and blocks
+        nothing; `block` also denies every tool call except the provision
+        command itself (`bash .claude/provision.sh`) and the hooks-daemon
+        provision skill call. Read by `init.sh` in bash, since no daemon
+        exists yet to read it. A project with `ci_enabled: true` keeps its own
+        blocking behaviour whatever this says.
+      example_yaml: |
+        daemon:
+          unprovisioned_mode: block
+      migration_note: >-
+        Nothing to do: the default is `warn`. Set `block` if a fresh checkout
+        must not do any work before it is provisioned.
     - key: handlers.pre_tool_use.upgrade_approval_guard
       description: >-
         Denies an agent action that grants or bypasses the project owner's

@@ -79,13 +79,13 @@ anything themselves: a person or agent runs provision.
 
 ### Phase 3: Loud detection
 
-- [ ] ⬜ **Task 3.1**: `init.sh` names the state `NEEDS_PROVISION`: tracked assets
+- [x] ✅ **Task 3.1**: `init.sh` names the state `NEEDS_PROVISION`: tracked assets
   present, no clone. The message names the expected version and the exact
   command.
-- [ ] ⬜ **Task 3.2**: The human sees it: a `systemMessage` at SessionStart and on
+- [x] ✅ **Task 3.2**: The human sees it: a `systemMessage` at SessionStart and on
   every UserPromptSubmit until the checkout is provisioned, and the status line
   shows it.
-- [ ] ⬜ **Task 3.3**: Owner ruling: whether an unprovisioned checkout blocks
+- [x] ✅ **Task 3.3**: Owner ruling: whether an unprovisioned checkout blocks
   tool calls is a per-project setting. Most projects want warn, some want
   block, and the default is warn. One key in `.claude/hooks-daemon.yaml`, read
   by `init.sh` in bash without a daemon. `provision` itself is always allowed.
@@ -93,7 +93,7 @@ anything themselves: a person or agent runs provision.
 
 ### Phase 4: Docs and wording
 
-- [ ] ⬜ **Task 4.1**: `LLM-INSTALL.md`, the skill's `install.md` and the
+- [x] ✅ **Task 4.1**: `LLM-INSTALL.md`, the skill's `install.md` and the
   troubleshooting guide route a fresh clone to `provision`, and `install.md`
   stops describing itself as the fresh-clone command.
 - [ ] ⬜ **Task 4.2**: A release note and an UNRELEASED post-upgrade task: an
