@@ -21,8 +21,7 @@ from pathlib import Path
 import pytest
 
 from claude_code_hooks_daemon.constants import Timeout
-from claude_code_hooks_daemon.daemon.process_verification import find_all_daemon_processes
-from claude_code_hooks_daemon.utils.safe_signal import stop_verified_daemon
+from tests.daemon_teardown import stop_daemons_of
 from tests.isolated_daemon import DAEMON_CLI_SUBPROCESS_BOUND
 
 _CLI = "claude_code_hooks_daemon.daemon.cli"
@@ -85,10 +84,7 @@ def slow_project() -> Iterator[tuple[Path, dict[str, str]]]:
         # A start that gave up leaves a daemon still initialising, which has
         # no PID file for ``stop`` to find yet; its command line names the
         # project, so it is stopped through the verified path instead.
-        for pid in find_all_daemon_processes(project_root=project):
-            stop_verified_daemon(
-                pid, project_root=project, grace_seconds=Timeout.PROCESS_DEATH_WAIT
-            )
+        stop_daemons_of(project, grace_seconds=Timeout.PROCESS_DEATH_WAIT)
         shutil.rmtree(root)
 
 

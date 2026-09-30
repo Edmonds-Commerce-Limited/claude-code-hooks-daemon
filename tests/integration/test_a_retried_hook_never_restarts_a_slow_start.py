@@ -32,7 +32,7 @@ import pytest
 from claude_code_hooks_daemon.constants import Timeout
 from claude_code_hooks_daemon.daemon.paths import read_pid_file
 from claude_code_hooks_daemon.daemon.process_verification import find_all_daemon_processes
-from claude_code_hooks_daemon.utils.safe_signal import stop_verified_daemon
+from tests.daemon_teardown import stop_daemons_of
 from tests.integration.test_init_sh_pretooluse_fail_closed import (
     _BASH_TOOL_INPUT,
     _FORWARDER_BODY,
@@ -107,10 +107,7 @@ def root() -> Iterator[Path]:
     finally:
         project = base / "p"
         if project.exists():
-            for pid in find_all_daemon_processes(project_root=project):
-                stop_verified_daemon(
-                    pid, project_root=project, grace_seconds=Timeout.PROCESS_DEATH_WAIT
-                )
+            stop_daemons_of(project, grace_seconds=Timeout.PROCESS_DEATH_WAIT)
         shutil.rmtree(base)
 
 
