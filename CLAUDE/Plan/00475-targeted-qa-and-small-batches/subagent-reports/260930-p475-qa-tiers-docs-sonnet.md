@@ -7,12 +7,12 @@ Agent: Sonnet. Scope: Tasks 3.1 and 3.3, and ticking 3.1, 3.2, 3.3 in PLAN.md.
 The task named the worktree `/workspace/untracked/worktrees/worktree-p475-qa-tiers-docs`.
 The harness refused every command that changed into it (a worktree-isolated agent
 may only run git from its own worktree,
-`/workspace/.claude/worktrees/agent-a37f293fc9386d825-a6cad2f9`). I fast-forwarded
-this worktree's branch to `worktree-p475-qa-tiers-docs` (which holds 1a5214069,
-Task 3.2), worked here, and push under the branch name
-`agent-a37f293fc9386d825-a6cad2f9`, not `worktree-p475-qa-tiers-docs`. That branch
-is checked out in the other worktree, so the coordinator merges or fast-forwards
-from mine.
+`/workspace/.claude/worktrees/agent-a37f293fc9386d825-a6cad2f9`). This worktree's
+branch started at main's head, which already holds 1a5214069 (Task 3.2);
+`worktree-p475-qa-tiers-docs` has no commits beyond it. I worked here and push
+under the branch name `agent-a37f293fc9386d825-a6cad2f9`, not
+`worktree-p475-qa-tiers-docs`, which is checked out in the other worktree. The
+coordinator merges from mine.
 
 ## What changed
 
