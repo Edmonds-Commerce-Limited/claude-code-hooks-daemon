@@ -198,6 +198,23 @@ class TestHandleWarnMode:
         assert result.decision == Decision.ALLOW
         assert "same-commit-plan-doc" not in "\n".join(result.context)
 
+    def test_the_capture_idiom_reads_the_index_not_a_redirect(self, repo: Path) -> None:
+        """Ledger 00466 N226: `2>&1` was a pathspec, so an index commit was
+        judged as a working-tree commit of a path that matches nothing."""
+        (repo / "src").mkdir()
+        (repo / "src" / "thing.py").write_text("VALUE = 1\n")
+        _git(repo, "add", "-A")
+        plan_md = repo / _PLAN_DIR_REL / "00001-first/PLAN.md"
+        plan_md.write_text("# Plan 00001: first\n\n**Status**: In Progress\n")
+
+        with _patched_root(repo):
+            result = _handler("warn").handle(
+                _bash_input('git commit -m "Plan 00001: thing" 2>&1 | bin/echd-capture 20')
+            )
+
+        assert result.decision == Decision.ALLOW
+        assert "same-commit-plan-doc" in "\n".join(result.context)
+
     def test_pathspec_commit_excluding_plan_doc_still_advises(self, repo: Path) -> None:
         """Guardrail: a pathspec commit that genuinely omits PLAN.md still warns."""
         (repo / "src").mkdir()

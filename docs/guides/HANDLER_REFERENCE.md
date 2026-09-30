@@ -2604,6 +2604,63 @@ handlers:
 
 ---
 
+#### conflict_marker_commit_gate
+
+| Property       | Value                         |
+| -------------- | ----------------------------- |
+| **Config key** | `conflict_marker_commit_gate` |
+| **Priority**   | 42                            |
+| **Type**       | Blocking                      |
+| **Event**      | PreToolUse                    |
+
+**Description:** Denies a commit when a line it ADDS carries a merge-conflict
+marker, naming each `file:line`. Two spellings count: git's raw column-0
+markers, and the disguise the markdown formatter gives them (the opener
+escaped wherever it lands, even mid-heading or in a blockquote, list item or
+table cell; the closer as a seven-deep blockquote). A line of seven `=` or
+seven `|` counts only between an opener and a closer, so a setext heading
+underline is not a marker. A deep blockquote counts on its own only in the
+shape git writes a closer (exactly seven deep, at most a one-word label), so
+an email-style quote is not a marker. A path's `conflict-marker-size`
+attribute sets the run length, and a text file marked `-diff` or `binary` is
+still read. A marker already in history never blocks an unrelated edit, and
+deleting one is never blocked. The text of a protected file's marker line is
+withheld from the deny.
+
+**Fires when:** a Bash command runs `git commit` (not `--dry-run`), `git am`,
+or `git merge|cherry-pick|revert|rebase --continue`, however it is wrapped
+(`sudo`, `env`, `eval`, `sh -c`, a subshell). It reads what the command
+records: the index, the working tree for `commit -a`, the named paths for a
+pathspec commit (plus the index with `-i`), in the repository an earlier `cd`
+or `git -C` names.
+
+**Fails closed:** a commit it cannot check is DENIED, naming the reason and
+the `git -C /absolute/path/to/repo commit` rephrase. That covers a directory
+built by an expansion, `cd -`, `popd`, `--git-dir`, `--work-tree`,
+`GIT_DIR`, `GIT_INDEX_FILE`, `--pathspec-from-file`, `git am <patch>`, a
+directory outside any repository, and any git error.
+
+**Options:**
+
+| Option          | Type        | Default | Description                                                                                                                                        |
+| --------------- | ----------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `exclude_paths` | `list[str]` | `[]`    | Gitignore-style globs for files that must hold a documented marker example. Unioned with `daemon.exclude_paths`. A fenced example is still judged. |
+
+**Config example:**
+
+```yaml
+handlers:
+  pre_tool_use:
+    conflict_marker_commit_gate:
+      enabled: true
+      priority: 42
+      options:
+        exclude_paths:
+          - "docs/examples/merge-conflict.md"
+```
+
+---
+
 #### staged_lint_gate
 
 | Property       | Value                     |

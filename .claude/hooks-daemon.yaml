@@ -637,6 +637,14 @@ handlers:
       enabled: true
       priority: 42
 
+    conflict_marker_commit_gate:  # Deny a commit adding a merge-conflict marker, raw or disguised (Plan 00466 N211)
+      enabled: true
+      priority: 42
+      options:
+        # Globs for files that must hold a DOCUMENTED marker example; unioned
+        # with daemon.exclude_paths. A fenced example is judged like any line.
+        exclude_paths: []
+
     staged_lint_gate:      # Cheap syntax-check backstop over staged files on git commit (Plan 00268)
       enabled: true
       priority: 43

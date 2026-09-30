@@ -120,7 +120,7 @@ class DocsQaCommitGateHandler(PreToolUseHandlerBase):
             project_root=project_root,
             policy=policy,
             commit_message=_extract_commit_message(tokens),
-            pathspecs=_extract_commit_pathspecs(tokens),
+            pathspecs=_extract_commit_pathspecs(command),
         )
 
         findings = run_stage(CheckStage.STAGED, context)

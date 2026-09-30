@@ -95,19 +95,20 @@ class TestTokeniserHelpers:
         assert _extract_commit_message(["git", "commit"]) is None
 
     def test_extract_commit_pathspecs_no_commit_token_returns_empty(self) -> None:
-        assert _extract_commit_pathspecs(["git", "status"]) == []
+        assert _extract_commit_pathspecs("git status") == []
 
     def test_extract_commit_pathspecs_skips_value_flags(self) -> None:
-        tokens = ["git", "commit", "-m", "msg", "CLAUDE/A.md"]
-        assert _extract_commit_pathspecs(tokens) == ["CLAUDE/A.md"]
+        assert _extract_commit_pathspecs("git commit -m msg CLAUDE/A.md") == ["CLAUDE/A.md"]
 
     def test_extract_commit_pathspecs_after_separator(self) -> None:
-        tokens = ["git", "commit", "--", "CLAUDE/A.md"]
-        assert _extract_commit_pathspecs(tokens) == ["CLAUDE/A.md"]
+        assert _extract_commit_pathspecs("git commit -- CLAUDE/A.md") == ["CLAUDE/A.md"]
 
     def test_extract_commit_pathspecs_boolean_flag_skipped(self) -> None:
-        tokens = ["git", "commit", "--amend", "CLAUDE/A.md"]
-        assert _extract_commit_pathspecs(tokens) == ["CLAUDE/A.md"]
+        assert _extract_commit_pathspecs("git commit --amend CLAUDE/A.md") == ["CLAUDE/A.md"]
+
+    def test_the_capture_idiom_names_no_pathspec(self) -> None:
+        """Ledger 00466 N226: the redirect was a pathspec, so the gate judged nothing."""
+        assert _extract_commit_pathspecs("git commit -m x 2>&1 | bin/echd-capture 20") == []
 
 
 class TestInit:

@@ -167,7 +167,7 @@ class TestCmdFormatMarkdownMdformatErrors:
         args = argparse.Namespace(path=test_file, check=False)
 
         with patch(
-            "claude_code_hooks_daemon.daemon.cli.format_markdown_text",
+            "claude_code_hooks_daemon.daemon.cli.format_markdown_document",
             side_effect=RuntimeError("boom"),
         ):
             result = cmd_format_markdown(args)
@@ -183,7 +183,7 @@ class TestCmdFormatMarkdownMdformatErrors:
         args = argparse.Namespace(path=tmp_path, check=False)
 
         with patch(
-            "claude_code_hooks_daemon.daemon.cli.format_markdown_text",
+            "claude_code_hooks_daemon.daemon.cli.format_markdown_document",
             side_effect=RuntimeError("kaboom"),
         ):
             result = cmd_format_markdown(args)
@@ -191,6 +191,30 @@ class TestCmdFormatMarkdownMdformatErrors:
         assert result == 1
         captured = capsys.readouterr()
         assert "kaboom" in captured.err
+
+
+class TestCmdFormatMarkdownRefusesAConflictedFile:
+    """Plan 00466 N211: formatting would disguise the file's conflict markers."""
+
+    def test_a_conflicted_file_is_not_rewritten_and_its_markers_are_named(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        test_file = tmp_path / "doc.md"
+        open_marker, separator, close_marker = "<" * 7, "=" * 7, ">" * 7
+        conflicted = (
+            f"{_UNALIGNED_TABLE}\n{open_marker} HEAD\nours\n{separator}\ntheirs\n"
+            f"{close_marker} main\n"
+        )
+        test_file.write_text(conflicted)
+        args = argparse.Namespace(path=test_file, check=False)
+
+        result = cmd_format_markdown(args)
+
+        assert result == 1
+        assert test_file.read_text() == conflicted
+        captured = capsys.readouterr()
+        assert "conflict" in captured.err.lower()
+        assert "line 12" in captured.err
 
 
 class TestCmdFormatMarkdownRepositoryBoundary:

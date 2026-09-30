@@ -118,7 +118,7 @@ from claude_code_hooks_daemon.utils.hook_registration import (
     validate_hook_commands,
     validate_settings_hooks,
 )
-from claude_code_hooks_daemon.utils.markdown_format import format_markdown_text
+from claude_code_hooks_daemon.utils.markdown_format import format_markdown_document
 from claude_code_hooks_daemon.utils.path_containment import path_relative_to
 from claude_code_hooks_daemon.utils.plugin_hooks import ACKNOWLEDGED_PLUGINS_OPTION, health_lines
 from claude_code_hooks_daemon.utils.report_scrubbing import scrub_report
@@ -5669,14 +5669,15 @@ def _format_single_markdown_file(path: Path, check: bool) -> tuple[bool, bool]:
     Returns:
         Tuple of (changed, error) booleans. ``changed`` is True when the
         file would be (or was) rewritten. ``error`` is True when mdformat
-        raised an exception.
+        raised an exception, or the file holds merge-conflict markers.
     """
     try:
         before = path.read_text(encoding="utf-8")
-        formatted = format_markdown_text(before)
+        formatted = format_markdown_document(before)
     except Exception as exc:
         # FAIL SAFE: Surface the failure but do not crash the whole run
-        # when processing a directory of many files.
+        # when processing a directory of many files. A file holding conflict
+        # markers lands here too, and is left untouched.
         print(f"ERROR: {path}: {exc}", file=sys.stderr)
         return False, True
 

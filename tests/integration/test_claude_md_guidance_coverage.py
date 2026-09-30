@@ -219,6 +219,11 @@ _EARNS_GUIDANCE: dict[str, str] = {
     "PlanNumberHelperHandler": "T2 fires on the folder scan that should never have run",
     "PlanQaCommitGateHandler": "T2 fires on the commit whose contents are already staged",
     "StagedLintGateHandler": "T2 fires on files whose staleness predates the commit",
+    "ConflictMarkerCommitGateHandler": (
+        "T2 the marker is left while the conflict is resolved, before the commit "
+        "the gate judges; knowing the formatter-disguised spelling is what lets a "
+        "resolver look for it at that point"
+    ),
     "PlanWorkflowHandler": "T2 the document shape is chosen before the write",
     "BashSafeModeHandler": "T2 the prelude must be written before the command runs",
     "VerificationResultGateHandler": "T2 the gating (&&/set -e) must be written before the command runs",

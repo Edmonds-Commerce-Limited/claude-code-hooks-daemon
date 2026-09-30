@@ -1,9 +1,13 @@
 """TDD tests for ClaudeMdInjector."""
 
+import logging
 import re
 import subprocess
 from pathlib import Path
 from typing import Any
+from unittest.mock import patch
+
+import pytest
 
 _OPEN_TAG = "<hooksdaemon>"
 _CLOSE_TAG = "</hooksdaemon>"
@@ -560,6 +564,93 @@ class TestClaudeMdInjectorAutoCommit:
         )
         assert "hooks daemon" in log.stdout.lower()
 
+    def test_a_claude_md_holding_conflict_markers_is_not_auto_committed(
+        self, tmp_path: Path
+    ) -> None:
+        """Plan 00466 N211: the daemon's own commit bypasses the commit gate.
+
+        A PreToolUse gate never sees this commit, so the injector must refuse
+        to record a marker itself; the file stays dirty for a human to resolve.
+        """
+        from claude_code_hooks_daemon.core.claude_md_injector import ClaudeMdInjector
+
+        _init_git_repo(tmp_path)
+        close_marker = ">" * 7
+        (tmp_path / "CLAUDE.md").write_text(f"# Project\n\n{close_marker} main\n")
+        head_before = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=tmp_path, capture_output=True, text=True
+        ).stdout
+
+        handler = _StubHandler("h", "## H\n\nContent.")
+        ClaudeMdInjector(workspace_root=tmp_path, handlers=[handler]).inject()
+
+        head_after = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=tmp_path, capture_output=True, text=True
+        ).stdout
+        assert head_after == head_before, "a conflict marker was auto-committed"
+        assert f"{close_marker} main" in (tmp_path / "CLAUDE.md").read_text().splitlines()
+
+    def test_a_vanished_claude_md_is_not_auto_committed(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Ledger 00466 N224: a CLAUDE.md deleted before the read is not committed.
+
+        Main read the file inside `_commit_message`, so a deletion raised there
+        and `inject()` logged a misleading "check file permissions" warning.
+        Git still reports the deletion as dirty, so the injector must name the
+        real cause and leave HEAD alone.
+        """
+        from claude_code_hooks_daemon.core.claude_md_injector import ClaudeMdInjector
+
+        _init_git_repo(tmp_path)
+        claude_md = tmp_path / "CLAUDE.md"
+        claude_md.unlink()
+        head_before = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=tmp_path, capture_output=True, text=True
+        ).stdout
+
+        with caplog.at_level(
+            logging.INFO, logger="claude_code_hooks_daemon.core.claude_md_injector"
+        ):
+            ClaudeMdInjector._auto_commit_if_dirty(claude_md)
+
+        head_after = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=tmp_path, capture_output=True, text=True
+        ).stdout
+        assert head_after == head_before
+        assert "vanished" in caplog.text
+        assert "permission" not in caplog.text.lower()
+
+    def test_an_unreadable_claude_md_is_not_auto_committed(self, tmp_path: Path) -> None:
+        """Ledger 00466 N224: text the marker check never saw is never committed.
+
+        A read error propagates to `inject()`, which logs it; committing
+        unread text would record a marker the check never saw.
+        """
+        from claude_code_hooks_daemon.core.claude_md_injector import ClaudeMdInjector
+
+        _init_git_repo(tmp_path)
+        claude_md = tmp_path / "CLAUDE.md"
+        claude_md.write_text("# Project\n\nedited\n")
+        head_before = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=tmp_path, capture_output=True, text=True
+        ).stdout
+
+        real_read_text = Path.read_text
+
+        def _read_text(path: Path, *args: Any, **kwargs: Any) -> str:
+            if path == claude_md:
+                raise PermissionError("denied")
+            return real_read_text(path, *args, **kwargs)
+
+        with patch.object(Path, "read_text", _read_text), pytest.raises(PermissionError):
+            ClaudeMdInjector._auto_commit_if_dirty(claude_md)
+
+        head_after = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=tmp_path, capture_output=True, text=True
+        ).stdout
+        assert head_after == head_before
+
     def test_commit_message_flags_edits_from_outside_the_generated_block(
         self, tmp_path: Path
     ) -> None:
@@ -1066,7 +1157,7 @@ class TestClaudeMdInjectorFormatting:
         injector = ClaudeMdInjector(workspace_root=tmp_path, handlers=[handler])
 
         with patch(
-            "claude_code_hooks_daemon.core.claude_md_injector.format_markdown_text",
+            "claude_code_hooks_daemon.core.claude_md_injector.format_markdown_document",
             side_effect=RuntimeError("boom"),
         ):
             injector.inject()  # Must not raise
@@ -1074,6 +1165,30 @@ class TestClaudeMdInjectorFormatting:
         content = claude_md.read_text()
         assert _OPEN_TAG in content  # block still written despite formatting failure
         assert "# My Project" in content  # user content preserved
+
+    def test_conflict_markers_in_claude_md_survive_raw(self, tmp_path: Path) -> None:
+        """Plan 00466 N211: a restart mid-merge must not disguise the markers.
+
+        Formatting turns an opener into an escaped heading and a closer into
+        a seven-deep blockquote; the injector writes the file unformatted
+        instead, so the markers stay recognisable.
+        """
+        from claude_code_hooks_daemon.core.claude_md_injector import ClaudeMdInjector
+
+        open_marker, separator, close_marker = "<" * 7, "=" * 7, ">" * 7
+        claude_md = tmp_path / "CLAUDE.md"
+        claude_md.write_text(
+            f"# My Project\n\n{open_marker} HEAD\nours\n{separator}\ntheirs\n"
+            f"{close_marker} main\n"
+        )
+
+        handler = _StubHandler("h", "## H\n\nGuidance.")
+        ClaudeMdInjector(workspace_root=tmp_path, handlers=[handler]).inject()
+
+        lines = claude_md.read_text().splitlines()
+        assert f"{open_marker} HEAD" in lines
+        assert separator in lines
+        assert f"{close_marker} main" in lines
 
     def test_user_content_outside_block_preserved_through_formatting(self, tmp_path: Path) -> None:
         """Formatting must not lose the user's prose outside the block."""

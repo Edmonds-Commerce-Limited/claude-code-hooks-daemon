@@ -843,8 +843,6 @@ interrupt a running handler) and lands with that branch. N40 is taken there too
 taken on the N38 fix branch (the chain's remaining linear per-token cost, which
 waits for the shell-parser consolidation).
 
-\<<\<<\<<< HEAD
-
 ### N118 — ✅ Remedied — the tests-stage gate reported "0 failed" over a coverage-threshold miss and named nothing
 
 **Found by the N59 gate fixer** (`260926-n59-gatefix4-sonnet-5.md` on
@@ -1112,19 +1110,72 @@ splits a Bash command can be made slow with one long word.
 `shlex.shlex`/`shlex.split` in `src/` and project handlers, as
 `pathlib-quadratic-containment` does for N106.
 
-### N211 — Merge-conflict markers reach the ledger on main, disguised as blockquotes
+### N224 — ✅ Remedied — the CLAUDE.md injector logs a misleading permissions warning when CLAUDE.md vanishes mid-inject
 
-**Found by N110 gate fix 2.** `NIGGLES.md` on main (`fd4956813`) carries two
-`> > > > > > > <branch>` lines: after N106 and after N100. They are the
-closing `>>>>>>>` markers of resolved merge conflicts. The markdown
-formatter rewrote them as nested blockquotes, and after that no check
-reads them as conflict markers. Neither plan QA nor docs QA flags them, and
-the staged-lint gate does not either.
+**Found by N211 review 1 (M5).** On main, `_auto_commit_if_dirty` passes the
+path to `_commit_message`, which reads the file with no guard. If CLAUDE.md
+is deleted between the injector's write and that read, it raises
+`FileNotFoundError`. `inject()` catches it as `OSError` and logs "check file
+permissions", which is the wrong cause, and the auto-commit is skipped. That
+is a misleading warning plus a skipped commit, not a crash. It is reachable
+only as a race, because `_run_inject` has just written the file.
 
-**Remedy:** find the merge step that commits an unresolved marker. Then add
-a staged-tree check for both spellings, raw and blockquoted, in tracked
-text. Both lines are removed on `worktree-n466-n110`, but that fixes the
-symptom only.
+**Remedy (branch `worktree-n466-n211`).** `_auto_commit_if_dirty` reads the
+file once, and both the N211 marker check and `_commit_message` use that
+text. A file that vanished logs that it vanished and is not committed. A
+file that is present but unreadable raises to `inject()`, which logs the
+read error, and is not committed either: text the marker check never saw is
+never committed. The first version of the fix set unread text to `""` and
+committed anyway. Review 1 caught that, and a test now pins both cases. The
+read has no try/except, because the `error_hiding` gate flags both a
+returning and a logging handler in that function.
+
+### N211 — ✅ Remedied — merge-conflict markers reach tracked text disguised by the markdown formatter
+
+**Found by N110 gate fix 2 and the coordinator.** `NIGGLES.md` on main
+(`fd4956813`) carried two seven-deep blockquote lines,
+`> > > > > > > worktree-n466-superlinear` after the N106 entry and
+`> > > > > > > main` after the N100 entry. They are the closing markers of
+merge conflicts. The fixer's sweep found a third: an escaped opener,
+`\<<\<<\<<< HEAD`, standing alone above the N118 entry.
+
+**Route.** `git log -m -S` puts all three in merge commits. The superlinear
+opener and closer arrived together in `fd4956813` (Merge
+worktree-n466-superlinear), with the N118 entry from main between them and
+the N106 entry from the branch. The `main` closer arrived in `b2b5ee290`
+(Merge main into worktree-n466-guard-defects) and reached main through the
+N59 merge `69efecdab`. The mechanism, reproduced: an Edit on the conflicted
+file runs the PostToolUse `markdown_table_formatter` over the WHOLE file
+before the merge is committed. mdformat escapes the opener into
+`\<<\<<\<<< HEAD` (folded into a heading when a line of seven `=` follows
+it), and turns the closer into a seven-deep blockquote. A resolver then
+looks for the raw markers, finds none, and commits. From then on nothing
+reads the disguised lines as markers: not plan QA, docs QA, nor the
+staged-lint gate.
+
+**Remedy (branch `worktree-n466-n211`).**
+
+- `utils/conflict_markers.py` is the one classifier, for both spellings. A
+  line of seven `=` or seven `|` counts only between an opener and a closer,
+  so a setext heading underline is not a marker.
+- `format_markdown_document` refuses a document holding a marker. The
+  formatter handler leaves such a file untouched and names each marker line;
+  `format-markdown` reports it as an error; the CLAUDE.md injector writes the
+  file unformatted.
+- A new PreToolUse `conflict_marker_commit_gate` denies a `git commit` (or
+  `merge|cherry-pick|revert|rebase --continue`) whose ADDED lines carry a
+  marker in either spelling, naming `file:line`. It reads what the commit
+  records (index, `-a` working tree, pathspecs, `git -C`).
+- After review 1, the gate:
+  - finds commits with the shared walker, and reads pathspecs without
+    shell syntax (N226);
+  - denies a commit it cannot place, rather than allowing it;
+  - recognises every opener the formatter folds;
+  - honours `conflict-marker-size` and reads `-diff` text files;
+  - leaves an email-style deep quote alone;
+  - takes `exclude_paths`.
+- The three lines are removed from this file. A sweep of every tracked text
+  file on main found no other marker in either spelling.
 
 ### N222 — Tests assert absolute wall-clock bounds, so a loaded host fails them while they pass alone
 

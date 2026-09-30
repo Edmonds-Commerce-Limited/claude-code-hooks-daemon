@@ -12,10 +12,13 @@ STAGED check silently passes on a commit it never actually examined.
 
 from __future__ import annotations
 
+import pytest
+
 from claude_code_hooks_daemon.utils.git_commit_parsing import (
     commits_working_tree,
     extract_commit_message,
     extract_commit_pathspecs,
+    git_invocations,
     is_git_commit,
     tokenise_command,
 )
@@ -77,38 +80,155 @@ class TestExtractCommitMessage:
 
 class TestExtractCommitPathspecs:
     def test_no_commit_token_returns_empty(self) -> None:
-        assert extract_commit_pathspecs(["git", "status"]) == []
+        assert extract_commit_pathspecs("git status") == []
 
     def test_skips_value_flags(self) -> None:
-        tokens = ["git", "commit", "-m", "msg", "CLAUDE/A.md"]
-        assert extract_commit_pathspecs(tokens) == ["CLAUDE/A.md"]
+        assert extract_commit_pathspecs("git commit -m msg CLAUDE/A.md") == ["CLAUDE/A.md"]
 
     def test_after_separator(self) -> None:
-        tokens = ["git", "commit", "--", "CLAUDE/A.md"]
-        assert extract_commit_pathspecs(tokens) == ["CLAUDE/A.md"]
+        assert extract_commit_pathspecs("git commit -- CLAUDE/A.md") == ["CLAUDE/A.md"]
 
     def test_boolean_flag_skipped(self) -> None:
-        tokens = ["git", "commit", "--amend", "CLAUDE/A.md"]
-        assert extract_commit_pathspecs(tokens) == ["CLAUDE/A.md"]
+        assert extract_commit_pathspecs("git commit --amend CLAUDE/A.md") == ["CLAUDE/A.md"]
 
     def test_dash_a_dash_m_separate_flags_unchanged(self) -> None:
-        tokens = ["git", "commit", "-a", "-m", "wip"]
-        assert extract_commit_pathspecs(tokens) == []
+        assert extract_commit_pathspecs("git commit -a -m wip") == []
 
     def test_combined_short_flag_cluster_dash_am_yields_no_pathspecs(self) -> None:
         """The bug: `-am "wip"` must not read the message as a pathspec."""
-        tokens = ["git", "commit", "-am", "wip"]
-        assert extract_commit_pathspecs(tokens) == []
+        assert extract_commit_pathspecs('git commit -am "wip"') == []
 
     def test_combined_cluster_dash_am_with_trailing_path(self) -> None:
-        tokens = ["git", "commit", "-am", "wip", "CLAUDE/A.md"]
-        assert extract_commit_pathspecs(tokens) == ["CLAUDE/A.md"]
+        assert extract_commit_pathspecs("git commit -am wip CLAUDE/A.md") == ["CLAUDE/A.md"]
 
     def test_cluster_dash_ma_attached_form_only_consumes_own_token(self) -> None:
         """`-ma` carries its value attached ("a"), so the FOLLOWING token is a
         real pathspec, unlike `-am` which consumes it as the message."""
-        tokens = ["git", "commit", "-ma", "path.md"]
-        assert extract_commit_pathspecs(tokens) == ["path.md"]
+        assert extract_commit_pathspecs("git commit -ma path.md") == ["path.md"]
+
+
+class TestNoShellSyntaxIsAPathspec:
+    """Ledger 00466 N226: a redirection, a heredoc, ``&`` or an option's value
+    read as a pathspec made every commit gate judge a path that matches
+    nothing, and so judge nothing at all."""
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "git commit -m x 2>&1",
+            "git commit -m x 2>&1 | bin/echd-capture 20",
+            "git commit -m x > /dev/null",
+            "git commit -m x>/dev/null",
+            "git commit -m x &>log.txt",
+            "git commit -m x 2> err.txt",
+            "git commit -m x {fd}>log",
+            'git commit -m x <<<"body"',
+            "git commit -F- <<'EOF'\nbody line\nEOF",
+            'git commit -F - <<"EOF"\nIt\'s a body\nEOF',
+            "git commit -F- <<-EOF\n\tbody\n\tEOF",
+            "git commit -m x &",
+            "git commit -m x; git status",
+            "git commit -m x && git log",
+            "git commit -m x\ngit status",
+            "(git commit -m x)",
+            "git commit -t tmpl -m x",
+            "git commit --template tmpl -m x",
+            "git commit --cleanup strip -m x",
+            "git commit --trailer 'Co-authored-by: A <a@b>' -m x",
+            "git commit --author 'A <a@b>' -m x",
+            "git commit --auth 'A <a@b>' -m x",
+            "git commit --date now -m x",
+            "git commit -C HEAD",
+            "git commit -c HEAD",
+            "git commit --fixup HEAD",
+            "git commit --squash HEAD",
+            "git commit --reuse-message HEAD",
+            "git commit -S -m x",
+            "git commit -Skey -m x",
+            "git commit --gpg-sign=key -m x",
+        ],
+    )
+    def test_is_not_read_as_a_pathspec(self, command: str) -> None:
+        assert extract_commit_pathspecs(command) == []
+
+    @pytest.mark.parametrize(
+        ("command", "expected"),
+        [
+            ("git commit -m x a.md 2>&1", ["a.md"]),
+            ("git commit -m x a.md > out.log", ["a.md"]),
+            ("git commit -u a.md -m x", ["a.md"]),
+            ("git commit -au -m x a.md", ["a.md"]),
+            ("git commit -t tmpl a.md", ["a.md"]),
+            ("git commit -F- a.md <<'EOF'\nbody\nEOF", ["a.md"]),
+            ("git commit --no-edit a.md", ["a.md"]),
+            ("git commit -m x -- -odd.md", ["-odd.md"]),
+            ("git commit -m 'a;b' a.md; git status", ["a.md"]),
+        ],
+    )
+    def test_a_real_pathspec_is_kept(self, command: str, expected: list[str]) -> None:
+        assert extract_commit_pathspecs(command) == expected
+
+    def test_an_ambiguous_abbreviation_consumes_nothing(self) -> None:
+        """``--re`` is reedit-message, reuse-message or reset-author: git refuses it."""
+        assert extract_commit_pathspecs("git commit --re a.md") == ["a.md"]
+
+
+class TestGitInvocations:
+    """The shared walker: every ``git`` a command runs, and where."""
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "git commit -m x",
+            "sudo git commit -m x",
+            "command git commit -m x",
+            "exec git commit -m x",
+            "nice -n 5 git commit -m x",
+            "xargs git commit -m x",
+            "env -i git commit -m x",
+            "env -u X git commit -m x",
+            "eval 'git commit -m x'",
+            "eval git commit -m x",
+            "sh -c 'git commit -m x'",
+            "bash -lc 'git commit -m x'",
+            "(git commit -m x)",
+            "{ git commit -m x; }",
+            "/usr/bin/git commit -m x",
+            "if true; then git commit -m x; fi",
+        ],
+    )
+    def test_finds_the_commit(self, command: str) -> None:
+        assert [run.subcommand for run in git_invocations(command)] == ["commit"]
+
+    def test_echo_mentioning_a_commit_runs_none(self) -> None:
+        assert git_invocations("echo 'git commit -m x'") == []
+
+    @pytest.mark.parametrize(
+        ("command", "directory"),
+        [
+            ("cd sub && git commit -m x", ("sub",)),
+            ("cd -P sub && git commit -m x", ("sub",)),
+            ("cd -- sub && git commit -m x", ("sub",)),
+            ("cd && git commit -m x", ("~",)),
+            ("cd - && git commit -m x", (None,)),
+            ("cd a b && git commit -m x", (None,)),
+            ("popd && git commit -m x", (None,)),
+            ('cd "$WT" && git commit -m x', ("$WT",)),
+            ("(cd sub && git commit -m x)", ("sub",)),
+            ("(cd sub); git commit -m x", ()),
+            ("sh -c 'cd sub && git commit -m x'", ("sub",)),
+            ("cd a; cd b; git commit -m x", ("a", "b")),
+        ],
+    )
+    def test_records_the_directory(self, command: str, directory: tuple[str | None, ...]) -> None:
+        (run,) = git_invocations(command)
+        assert run.directory == directory
+
+    def test_records_global_options_and_assignments(self) -> None:
+        (run,) = git_invocations("GIT_INDEX_FILE=i git -C wt --no-pager commit -m x 2>&1")
+        assert run.global_options == ("-C", "wt", "--no-pager")
+        assert run.assignments == ("GIT_INDEX_FILE=i",)
+        assert run.arguments == ("-m", "x")
 
 
 class TestCommitsWorkingTree:
