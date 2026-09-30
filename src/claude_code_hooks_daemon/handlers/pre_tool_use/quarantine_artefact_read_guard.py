@@ -283,7 +283,9 @@ class QuarantineArtefactReadGuardHandler(PreToolUseHandlerBase):
 
         if tool_name == ToolName.BASH:
             command = str(tool_input.get(_FIELD_COMMAND, "") or "")
-            return self._bash_mention(command, patterns)
+            raw_cwd = hook_input.get(HookInputField.CWD)
+            cwd = raw_cwd if isinstance(raw_cwd, str) else None
+            return self._bash_mention(command, patterns, cwd)
 
         path_field = _PATH_FIELD_BY_TOOL.get(str(tool_name or ""))
         if path_field is None:
@@ -302,7 +304,9 @@ class QuarantineArtefactReadGuardHandler(PreToolUseHandlerBase):
             return sfm.directory_contains_protected(path, patterns)
         return None
 
-    def _bash_mention(self, command: str, patterns: tuple[str, ...]) -> str | None:
+    def _bash_mention(
+        self, command: str, patterns: tuple[str, ...], cwd: str | None = None
+    ) -> str | None:
         """First quarantine glob mentioned by a content-REVEALING segment, or None."""
         if not command:
             return None
@@ -321,7 +325,7 @@ class QuarantineArtefactReadGuardHandler(PreToolUseHandlerBase):
                 # `secret_file_guard` keeps the heuristic-only variant
                 # deliberately, since a false positive there is far cheaper
                 # than the false negative it guards against.
-                mention = sfm.find_protected_mention_strict(segment, patterns)
+                mention = sfm.find_protected_mention_strict(segment, patterns, cwd=cwd)
                 if mention is not None:
                     return mention
         return None

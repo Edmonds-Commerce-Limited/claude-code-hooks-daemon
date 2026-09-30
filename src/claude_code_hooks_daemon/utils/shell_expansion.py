@@ -4057,6 +4057,10 @@ def bounded_recursive_glob(
     the caller then decides (Plan 00466 N101 round 9).
     """
     is_root = bool(base.anchor) and str(base) == base.anchor
+    if is_root and not _literal_prefix_exists(base, pattern):
+        # The pattern's leading non-wildcard components name a path that is
+        # not there, so nothing can match and there is nothing to walk.
+        return
     if is_root:
         wildcard_segments = sum(
             1 for segment in pattern.split("/") if any(char in segment for char in "*?[")
@@ -4075,6 +4079,32 @@ def bounded_recursive_glob(
     )
     if walk.parts:
         yield from walk.select(base, 0)
+
+
+def _literal_prefix_exists(base: Path, pattern: str) -> bool:
+    """Whether the leading non-wildcard components of ``pattern`` exist under ``base``.
+
+    ``True`` when the pattern has no literal prefix (it starts with a
+    wildcard) or when the prefix is there. Only a lookup that proves absence
+    (``ENOENT``/``ENOTDIR``/``ELOOP``) answers ``False``; any other failure,
+    including a joined path past PATH_MAX that the relative word may not
+    have exceeded, answers ``True`` so the walk itself decides and reports
+    it (fail closed).
+    """
+    prefix_parts: list[str] = []
+    for part in pattern.split("/"):
+        if not part:
+            continue
+        if _is_glob_component(part):
+            break
+        prefix_parts.append(part)
+    if not prefix_parts:
+        return True
+    try:
+        os.stat(base.joinpath(*prefix_parts))
+    except OSError as exc:
+        return exc.errno not in _ABSENT_ERRNOS
+    return True
 
 
 #: ``OSError`` numbers that prove a looked-up path does not exist, so no

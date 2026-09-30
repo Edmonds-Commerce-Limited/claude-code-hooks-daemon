@@ -37,13 +37,18 @@ def _reset_disclosure_tracker():
     reset_data_layer()
 
 
-def _hook_input(tool_name: str, tool_input: dict[str, Any]) -> dict[str, Any]:
-    return {
+def _hook_input(
+    tool_name: str, tool_input: dict[str, Any], cwd: Path | None = None
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {
         "hook_event_name": "PreToolUse",
         "session_id": "s1",
         "tool_name": tool_name,
         "tool_input": tool_input,
     }
+    if cwd is not None:
+        payload["cwd"] = str(cwd)
+    return payload
 
 
 @pytest.fixture
@@ -279,7 +284,7 @@ class TestBashGlobTokenExpansion:
         docs.mkdir()
         (docs / "topic-opus-security-DETAIL.md").write_text("raw")
         monkeypatch.chdir(tmp_path)
-        payload = _hook_input("Bash", {"command": "grep -c pattern docs/*.md"})
+        payload = _hook_input("Bash", {"command": "grep -c pattern docs/*.md"}, cwd=tmp_path)
         assert handler.matches(payload) is True
 
     def test_glob_token_in_a_directory_with_no_files_at_all_is_allowed(
@@ -340,7 +345,8 @@ class TestBashGlobTokenExpansion:
         chain = HandlerChain()
         chain.add(handler)
         result = chain.execute(
-            _hook_input("Bash", {"command": f"grep -c pattern {word}"}), strict_mode=False
+            _hook_input("Bash", {"command": f"grep -c pattern {word}"}, cwd=tmp_path),
+            strict_mode=False,
         )
         assert result.result.decision == Decision.DENY, result.result.reason
 
@@ -767,7 +773,7 @@ class TestAQuotedGlobIsNeverEnumerated:
         _tree_past_the_walk_cap(tmp_path)
         assert len(_bash_words(command.split()[-1], tmp_path)) > 1
         monkeypatch.chdir(tmp_path)
-        result = handler.handle(_hook_input("Bash", {"command": command}))
+        result = handler.handle(_hook_input("Bash", {"command": command}, cwd=tmp_path))
         assert result.decision == Decision.DENY
         assert result.reason is not None
         assert sfm.SCAN_COULD_NOT_FINISH in result.reason
