@@ -866,13 +866,25 @@ require touching this loop and the manifest builder, with no upside
 until the sibling-script thinning plan lands. Once the siblings are
 thinned too, all four artifacts can be dropped together.
 
+GitHub rejects a release body over 125,000 characters (HTTP 422), and only
+when `gh release create` runs, after the tag is pushed. Step 5 folds every
+holding-area callout into `RELEASES/vX.Y.Z.md` verbatim, so a large release
+can exceed it (v3.67.0 was 126,003). `build_github_release_body.py` writes
+the body GitHub receives: the notes unchanged when they fit, otherwise the
+notes with the verbatim `## Highlights` replaced by a link to that section
+at the tag, every other section intact. It exits non-zero if even that is
+over the cap, so it runs BEFORE the tag: a failure there publishes nothing.
+The committed `RELEASES/vX.Y.Z.md` is never modified.
+
 ```bash
+scripts/release/build_github_release_body.py vX.Y.Z
+
 git tag -a vX.Y.Z -m "[Full release notes from RELEASES/vX.Y.Z.md]"
 git push origin vX.Y.Z
 
 gh release create vX.Y.Z \
   --title "vX.Y.Z - [Release Title]" \
-  --notes-file RELEASES/vX.Y.Z.md \
+  --notes-file untracked/release-artifacts/github-release-body.md \
   --latest
 
 # Stage the four skill scripts, build bootstrap-checksums.txt, upload all
@@ -976,9 +988,10 @@ gh release view vX.Y.Z --json tagName,isDraft,isPrerelease,url \
 #    the files into the guide's release-notes/
 # 5. Run QA: ./scripts/qa/llm_qa.py all
 # 6. Commit and push
-# 7. Tag: git tag -a vX.Y.Z -m "Release vX.Y.Z" && git push origin vX.Y.Z
-# 8. gh release create vX.Y.Z --title "vX.Y.Z - [Title]" --notes-file RELEASES/vX.Y.Z.md --latest
-# 9. scripts/release/publish_bootstrap_assets.sh vX.Y.Z   (the release is NOT done until this exits 0)
+# 7. Body: scripts/release/build_github_release_body.py vX.Y.Z   (BEFORE the tag; non-zero = do not tag)
+# 8. Tag: git tag -a vX.Y.Z -m "Release vX.Y.Z" && git push origin vX.Y.Z
+# 9. gh release create vX.Y.Z --title "vX.Y.Z - [Title]" --notes-file untracked/release-artifacts/github-release-body.md --latest
+# 10. scripts/release/publish_bootstrap_assets.sh vX.Y.Z   (the release is NOT done until this exits 0)
 ```
 
 ## Semver Guidelines

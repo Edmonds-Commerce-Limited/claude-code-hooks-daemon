@@ -652,9 +652,12 @@ git push origin main
 2. **Tag & Release:**
 
 ```bash
+# BEFORE the tag: GitHub rejects a release body over 125,000 characters, and
+# only after the tag is pushed. Non-zero exit = do not tag.
+scripts/release/build_github_release_body.py vX.Y.Z
 git tag -a vX.Y.Z -m "$(cat RELEASES/vX.Y.Z.md)"
 git push origin vX.Y.Z
-gh release create vX.Y.Z --title "vX.Y.Z" --notes-file RELEASES/vX.Y.Z.md --latest
+gh release create vX.Y.Z --title "vX.Y.Z" --notes-file untracked/release-artifacts/github-release-body.md --latest
 # REQUIRED: attach bootstrap-checksums.txt + the four skill scripts. Every
 # client skill wrapper fetches the manifest from releases/latest/download/.
 scripts/release/publish_bootstrap_assets.sh vX.Y.Z

@@ -309,12 +309,17 @@ git push origin main
 
 2. Create tag and GitHub release:
 \`\`\`bash
+# BEFORE the tag: build the GitHub body. GitHub rejects a release body over
+# 125,000 characters (HTTP 422) AFTER the tag is pushed; this step substitutes
+# the verbatim Highlights when needed and exits non-zero if it still cannot fit.
+scripts/release/build_github_release_body.py vX.Y.Z
+
 git tag -a vX.Y.Z -m "\$(cat RELEASES/vX.Y.Z.md)"
 git push origin vX.Y.Z
 
 gh release create vX.Y.Z \\
   --title "vX.Y.Z - [Title]" \\
-  --notes-file RELEASES/vX.Y.Z.md \\
+  --notes-file untracked/release-artifacts/github-release-body.md \\
   --latest
 
 # REQUIRED: attach the self-bootstrap bundle (bootstrap-checksums.txt plus
