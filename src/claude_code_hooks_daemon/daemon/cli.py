@@ -6078,7 +6078,7 @@ def cmd_test_project_handlers(args: argparse.Namespace) -> int:
             cwd=str(project_path),
             capture_output=True,
             text=True,
-            timeout=Timeout.QA_TEST_TIMEOUT,
+            timeout=Timeout.QA_LONG_TIMEOUT,
         )
 
         # Print output
@@ -6091,7 +6091,7 @@ def cmd_test_project_handlers(args: argparse.Namespace) -> int:
 
     except subprocess.TimeoutExpired:
         print(
-            f"ERROR: Test execution timed out after {Timeout.QA_TEST_TIMEOUT} seconds",
+            f"ERROR: Test execution timed out after {Timeout.QA_LONG_TIMEOUT} seconds",
             file=sys.stderr,
         )
         return 1

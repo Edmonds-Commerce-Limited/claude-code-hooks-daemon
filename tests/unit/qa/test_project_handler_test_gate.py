@@ -209,6 +209,59 @@ class TestAGateThatRanNothingHasNotPassed:
             assert entry["outcome"] == "failed"
 
 
+class TestAZeroCollectionReportSaysWhy:
+    """Ledger 00474 N272: "0 tests collected" twice, with the cause discarded."""
+
+    def test_a_run_that_collected_nothing_carries_the_runner_output(self) -> None:
+        report = _checker().build_report(1, "ERROR: test-project-handlers exceeded 300s\n")
+
+        assert "exceeded 300s" in report["reason"]
+
+    def test_the_reason_is_a_bounded_ansi_free_tail(self) -> None:
+        checker = _checker()
+        lines = [f"\x1b[31mline {n}\x1b[0m" for n in range(200)]
+
+        report = checker.build_report(1, "\n".join(lines))
+
+        reason_lines = report["reason"].splitlines()
+        assert len(reason_lines) == checker.REASON_TAIL_LINES
+        assert reason_lines[-1] == "line 199"
+        assert "\x1b" not in report["reason"]
+
+    def test_a_suite_that_ran_carries_no_reason(self) -> None:
+        assert "reason" not in _checker().build_report(0, _GREEN_OUTPUT)
+        assert "reason" not in _checker().build_report(1, _RED_OUTPUT)
+
+    def test_the_verdict_contract_is_unchanged_by_the_reason(self) -> None:
+        summary = _checker().build_report(1, _NOTHING_RAN_OUTPUT)["summary"]
+
+        assert summary["passed_all"] is False
+        assert summary["total"] == 0
+
+    def test_the_printed_failure_line_carries_the_reason(self, tmp_path: Path, capsys: Any) -> None:
+        checker = _checker()
+        checker.run_project_handler_tests = lambda root: (2, "ERROR: could not run x: boom\n")
+
+        assert checker.main(["--root", str(tmp_path)]) == 1
+
+        assert "could not run x: boom" in capsys.readouterr().out
+
+
+class TestTheRunnerTimeoutsAreNestedNotRacing:
+    """The CLI bounds its own pytest child; the gate bounds the CLI.
+
+    Measured under host load 27 (other agents' pytest runs), the 232-test suite
+    took 70s against 4.8s idle. The CLI's child bound was 120s, well under the
+    gate's 300s, so a slightly busier host made the CLI kill pytest and print
+    only a stderr line: zero tests collected, cause hidden.
+    """
+
+    def test_the_gate_outlasts_the_cli_child_bound(self) -> None:
+        from claude_code_hooks_daemon.constants import Timeout
+
+        assert _checker()._RUNNER_TIMEOUT_SECONDS > Timeout.QA_LONG_TIMEOUT
+
+
 class TestTheVerdictIsPublishedWhereTheSuitesReadIt:
     """A correct verdict under the wrong key is not a verdict.
 
