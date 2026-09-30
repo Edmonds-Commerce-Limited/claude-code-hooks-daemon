@@ -304,7 +304,16 @@ test a different toolchain from CI.
 **Candidate remedy**: re-sync the venv from the lock (`uv sync --frozen`) when no
 agent is running tests on it, and find what installed the newer pytest.
 
-**Status**: ⬜ Open.
+**Resolution**: the drifted venv was the legacy `.venv` at the repository root,
+which no resolver uses; the fingerprint-keyed `untracked/venv-*` the daemon and
+`llm_qa.py` run on already matched the lock. The drift was wider than pytest: a
+`UV_PROJECT_ENVIRONMENT=.venv uv sync --frozen --all-extras` uninstalled 58
+packages and installed 54. The cited test then passed (7 of 7). What installed
+the off-lock versions was not found; `.venv` predates this ledger. A hand-run
+check that uses `.venv` tests a different toolchain from CI whenever it drifts,
+so prefer the resolved venv (`scripts/lib/resolve_venv.sh python .`).
+
+**Status**: ✅ Fixed (environment re-synced; no code change).
 
 ### N269 — `secret_file_guard` expands a single-quoted grep regex as a filename glob
 
