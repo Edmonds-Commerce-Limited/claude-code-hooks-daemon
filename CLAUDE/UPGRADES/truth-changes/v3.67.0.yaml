@@ -27,6 +27,8 @@ truth_changes:
       `untracked/agent-reports/`, POINT THEM AT THE PLAN FOLDER INSTEAD.
   - topic: plan-journalling
     id: journal-correction-entry
+    stale_phrases:
+      - "`thought`, `blocker`, `handoff`;"
     was: >
       The journal entry grammar has six categories (`action`, `finding`,
       `decision`, `thought`, `blocker`, `handoff`), and `mkplan.bash
