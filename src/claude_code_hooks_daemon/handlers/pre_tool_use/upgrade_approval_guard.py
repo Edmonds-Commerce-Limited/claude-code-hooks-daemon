@@ -182,6 +182,9 @@ _UPGRADE_STEERING_VARS: Final[tuple[str, ...]] = (
     "UV_FIND_LINKS",
     "UV_CONFIG_FILE",
     "UV_PYTHON*",
+    # pipx's bin directory is searched for the uv that builds the venv, and what
+    # builds the venv decides what code the daemon runs.
+    "PIPX_BIN_DIR",
     "SSL_CERT_FILE",
     "SSL_CERT_DIR",
     "REQUESTS_CA_BUNDLE",
@@ -230,6 +233,9 @@ _UPGRADE_ONLY_ARG_RE: Final[re.Pattern[str]] = re.compile(r"(?:^|\s)--skip-readi
 _UPGRADE_SHAPED_ARG_RE: Final[re.Pattern[str]] = re.compile(
     r"(?:^|\s)--project-root\b|\.claude/hooks-daemon/?[\"']?(?:\s|$)"
 )
+#: The per-run argument that names the uv building the venv (`--uv <path>` or
+#: `--uv=<path>`). Only the human passes it: it picks the code the daemon runs.
+_UV_OVERRIDE_ARG_RE: Final[re.Pattern[str]] = re.compile(r"(?:^|\s)--uv(?:=|\s|$)")
 #: This process's own stdin/fd, which is NEVER what a real subprocess would
 #: read from its own redirect -- reading it here answers a different question.
 _UNRESOLVABLE_STDIN_RE: Final[re.Pattern[str]] = re.compile(r"^/dev/(?:stdin|fd/\d+)$")
@@ -594,7 +600,7 @@ def _bash_sets_bypass_env_var(command: str, cwd: str | None) -> bool:
     segments = _live_segments(command)
     if any(_ENV_VAR_ASSIGN_RE.search(segment) for segment in segments):
         return True
-    if any(_segment_steers(segment) for segment in segments):
+    if any(_segment_steers(segment) or _UV_OVERRIDE_ARG_RE.search(segment) for segment in segments):
         return _command_runs_upgrade(command, cwd, steered=True)
     preparing = [segment for segment in segments if _segment_prepares_the_shell(segment)]
     if not preparing:
@@ -836,7 +842,8 @@ class UpgradeApprovalGuardHandler(PreToolUseHandlerBase):
             rule_id=RuleID.UPGRADE_APPROVAL_ENV_BYPASS,
             blocked=(
                 f"a Bash command that sets `{ENV_VAR_UPGRADE_HANDOFF}`, or runs an upgrade "
-                "with a variable that picks its interpreter, venv, flags or code"
+                "with a variable that picks its interpreter, venv, flags or code, or "
+                "passes `--uv <path>`"
             ),
             why="The upgrade and its pre-deploy gate run as shipped, not as an agent steers them",
             fix="Run the upgrade with no such variable set; if it cannot run, tell the user",
@@ -865,9 +872,12 @@ class UpgradeApprovalGuardHandler(PreToolUseHandlerBase):
                 "system locations under a cleared environment and hands its verdict back "
                 "in a file bound to a one-time nonce. This rule keeps an agent from "
                 "steering the rest of the upgrade.\n\n"
+                "The uv that builds the venv is steered the same way: `--uv <path>` on "
+                "the upgrade, and `PIPX_BIN_DIR`, are the human's to set, because what "
+                "builds the venv decides what code the daemon runs.\n\n"
                 "Run the upgrade with none of them set. If it genuinely needs one (a "
-                "Python 3.11+ outside the system locations, say), tell the user, who "
-                "can run it themselves."
+                "Python 3.11+ outside the system locations, or a uv outside the trusted "
+                "locations, say), tell the user, who can run it themselves."
             ),
         )
         self._formatter = RuleFormatter()
@@ -996,7 +1006,8 @@ class UpgradeApprovalGuardHandler(PreToolUseHandlerBase):
             "exporting a shell function. Any spelling counts: naming one of those "
             "variables other than to read it (`read -r NAME`, `printf -v NAME`, "
             "`n=NAME`), `declare`/`typeset`/`local` with an `x` flag, `export` with a "
-            "flag or a computed name, and — on a command that runs the upgrade — "
+            "flag or a computed name, passing `--uv <path>` to the upgrade, and — on a "
+            "command that runs the upgrade — "
             "`set -a`, `eval` or sourcing another file. The upgrade is recognised by "
             "what it is, not its file name: `upgrade.sh`/`upgrade_version.sh`/"
             "`upgrade_gate_standalone.py` by name, `--skip-reading-confirmation`, a "

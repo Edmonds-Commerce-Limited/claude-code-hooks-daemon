@@ -224,6 +224,43 @@ if [ "$UPGRADE_CALLER" = "layer1" ] && [ -n "${UPGRADE_FLAGS:-}" ]; then
     fi
 fi
 
+# The uv that builds the venv, named for this run with `--uv <path>` (or
+# `--uv=<path>`) among the trailing arguments: Layer 1 passes it on as an
+# argument, never in the environment, and the second pass forwards it with the
+# rest of "${@:4}". It must be an absolute path to an executable file. No
+# environment variable or config key names it, so what builds the venv is what
+# the human typed for this run.
+_take_uv_override() {
+    local uv_path=""
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --uv=*)
+                uv_path="${1#*=}"
+                ;;
+            --uv)
+                [ $# -ge 2 ] || fail_fast "--uv requires a path argument"
+                uv_path="$2"
+                shift
+                ;;
+            *)
+                shift
+                continue
+                ;;
+        esac
+        shift
+        case "$uv_path" in
+            /*) ;;
+            *) fail_fast "--uv $uv_path is not an absolute path to an executable file" ;;
+        esac
+        if [ ! -f "$uv_path" ] || [ ! -x "$uv_path" ]; then
+            fail_fast "--uv $uv_path is not an absolute path to an executable file"
+        fi
+        VENV_UV_OVERRIDE="$uv_path"
+    done
+}
+
+_take_uv_override "${@:4}"
+
 # The gate's stop codes (install/upgrade_gate.py GateVerdict.exit_code).
 GATE_NEEDS_ACKNOWLEDGEMENT=3
 GATE_NEEDS_APPROVAL=4

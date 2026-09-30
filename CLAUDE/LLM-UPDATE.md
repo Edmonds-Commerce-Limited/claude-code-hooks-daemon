@@ -288,8 +288,27 @@ and environment are used there -- the prior behaviour, not a new gap.
 Layer 2 sets the trusted `PATH` once more after its last library source,
 because a library may change it when sourced (`venv.sh` prepends
 `$HOME/.local/bin` for the install scripts). Every step before the gate runs
-its tools from the fixed system locations; `uv` alone is looked up by name in
-`$HOME/.local/bin` when `PATH` has none, and runs only after the gate.
+its tools from the fixed system locations; `uv` alone is looked up after the
+gate, and never on the caller's own `PATH`, because what builds the venv
+decides what code the daemon runs. Layer 2 uses the first `uv` it finds in:
+
+1. the path the user gave with `upgrade.sh --uv <path>` (this run only);
+2. the trusted `PATH`;
+3. `$PIPX_BIN_DIR` when it is set to an absolute path (pipx's default bin
+   directory is `~/.local/bin`, which is searched next);
+4. `$HOME/.local/bin` (where the `uv` installer and pipx put it);
+5. `/opt/homebrew/bin`, `/usr/local/bin` and `/home/linuxbrew/.linuxbrew/bin`
+   (Homebrew's prefixes).
+
+Every directory in 3 and 5 must be owned by root or the running user and not
+group- or world-writable, so a user-owned Homebrew prefix counts but a
+shared-writable one does not. `--uv` must be an absolute path to an executable
+file; anything else stops the upgrade with a message saying so. When no `uv` is
+found the error names both fixes: install `uv` into one of those locations, or
+run the upgrade yourself with `--uv <path>`. There is no config key for it: a
+repository cannot carry one user's environment, and what builds the venv is
+the human's to choose per run. `--uv` is the human's to type, so the guard
+denies an agent passing it; if an upgrade needs one, tell the user.
 
 Before it fetches, Layer 1 drops `GIT_CONFIG_COUNT`/`KEY_*`/`VALUE_*` and
 `GIT_CONFIG_PARAMETERS`, requires origin to name exactly one URL, and refuses
@@ -332,7 +351,10 @@ On such a command, the guard denies setting any of these variables:
 - `HOOKS_DAEMON_OLD_DEFAULT_*` (Layer 1's baseline handover);
 - the `uv` index, find-links, config-file and Python variables
   (`UV_INDEX*`, `UV_DEFAULT_INDEX`, `UV_EXTRA_INDEX_URL`, `UV_FIND_LINKS`,
-  `UV_CONFIG_FILE`, `UV_PYTHON*`), CA bundles and proxies.
+  `UV_CONFIG_FILE`, `UV_PYTHON*`), `PIPX_BIN_DIR`, CA bundles and proxies.
+
+It also denies passing `--uv <path>` (or `--uv=<path>`) to the upgrade, for the
+same reason: the `uv` that builds the venv decides what code the daemon runs.
 
 Any spelling counts, not only `NAME=value`: naming one of those variables
 other than to read it (`read -r NAME`, `printf -v NAME`, `n=NAME`),

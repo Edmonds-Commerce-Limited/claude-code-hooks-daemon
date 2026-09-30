@@ -591,6 +591,71 @@ class TestInstallerSteeringVariables:
         assert handler.matches(_bash("UV_INDEX_URL=https://mirror/simple uv sync")) is False
 
 
+class TestUvLocationSteering:
+    """The uv that builds the venv decides what code the daemon runs. The human
+    names it with `--uv <path>` or `PIPX_BIN_DIR`; an agent never does."""
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            f"{_LAYER1_RUN} --uv /tmp/evil/uv",
+            f"{_LAYER1_RUN} --uv=/tmp/evil/uv",
+            "bash scripts/upgrade.sh --uv /tmp/evil/uv --project-root .",
+            "bash scripts/upgrade_version.sh . .claude/hooks-daemon v4.0.0 --uv /tmp/evil/uv",
+            'bash "$tmp" --project-root . --uv /tmp/evil/uv v4.0.0',
+            "bash -c 'bash scripts/upgrade.sh --project-root . --uv /tmp/evil/uv'",
+        ],
+    )
+    def test_denies_uv_argument_on_an_upgrade(
+        self, handler: UpgradeApprovalGuardHandler, command: str
+    ) -> None:
+        hook_input = _bash(command)
+        assert handler.matches(hook_input) is True, command
+        result = handler.handle(hook_input)
+        assert result.reason is not None
+        assert result.reason.startswith(f"BLOCKED [{ENV_RULE_ID}]")
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            f"PIPX_BIN_DIR=/tmp/evil {_LAYER1_RUN}",
+            f"export PIPX_BIN_DIR=/tmp/evil && {_LAYER1_RUN}",
+            f"env PIPX_BIN_DIR=/tmp/evil {_LAYER1_RUN}",
+        ],
+    )
+    def test_denies_pipx_bin_dir_on_an_upgrade(
+        self, handler: UpgradeApprovalGuardHandler, command: str
+    ) -> None:
+        hook_input = _bash(command)
+        assert handler.matches(hook_input) is True, command
+        result = handler.handle(hook_input)
+        assert result.reason is not None
+        assert result.reason.startswith(f"BLOCKED [{ENV_RULE_ID}]")
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "PIPX_BIN_DIR=/tmp/bin pipx install uv",
+            "uv --version",
+            "echo 'bash scripts/upgrade.sh --uv /x'",
+            "grep -- --uv scripts/upgrade.sh",
+            "python3 tool.py --uv /some/path",
+            _LAYER1_RUN,
+        ],
+    )
+    def test_allows_them_elsewhere(
+        self, handler: UpgradeApprovalGuardHandler, command: str
+    ) -> None:
+        assert handler.matches(_bash(command)) is False, command
+
+    def test_deny_message_names_the_uv_steering_inputs(
+        self, handler: UpgradeApprovalGuardHandler
+    ) -> None:
+        result = handler.handle(_bash(f"{_LAYER1_RUN} --uv /tmp/evil/uv"))
+        assert result.reason is not None
+        assert "--uv" in result.reason
+
+
 class TestDaemonCloneGitMetadataWrites:
     """Plan 00376 review4 MAJOR 3 / review3 m2: an agent appending a
     `url.insteadOf` or a second origin URL to the clone's own `.git/config`
