@@ -931,6 +931,37 @@ handlers:
 
 ---
 
+#### subagent_worktree_write_guard
+
+| Property       | Value                           |
+| -------------- | ------------------------------- |
+| **Config key** | `subagent_worktree_write_guard` |
+| **Priority**   | 14                              |
+| **Type**       | Blocking (terminal)             |
+| **Event**      | PreToolUse                      |
+
+**Description:** Blocks a **subagent's** `Write`, `Edit` or `NotebookEdit` whose target is in a different checkout of the repository than the linked git worktree the subagent works in: a sibling worktree, or the main working tree. Such edits surface uncommitted in a branch nobody on the task owns, and the next agent to land that branch commits them under the wrong branch's name.
+
+**What it matches:** the subagent's `cwd` is inside a linked worktree of repository R, and the target file (symlinks resolved, relative paths read against `cwd`) is inside another checkout of R. The role test is the handler's `scope`, not a check it performs itself.
+
+**Always allowed:** the coordinator (main thread), a subagent whose `cwd` is the main working tree, writes in the subagent's own worktree, writes outside the repository (see `project_containment`) and writes in a different repository. A worktree nested inside the main tree (`untracked/worktrees/X`) belongs to itself, not to the main tree.
+
+**How membership is decided:** from git's own markers (the nearest `.git` directory or file above the path, and the `commondir` a linked worktree carries), never from directory-name prefixes. No subprocess runs. Anything unreadable allows, with a debug log.
+
+**Options:** none.
+
+**Config example:**
+
+```yaml
+handlers:
+  pre_tool_use:
+    subagent_worktree_write_guard:
+      enabled: true   # default
+      priority: 14
+```
+
+---
+
 #### git_stash
 
 | Property       | Value                                        |
@@ -4321,52 +4352,53 @@ handlers:
 
 Priorities below are the **shipped defaults** from `constants/priority.py`. Several handlers share a priority; ties run in registration order.
 
-| Config Key                     | Event             | Priority | What It Blocks                                                           |
-| ------------------------------ | ----------------- | -------- | ------------------------------------------------------------------------ |
-| `destructive_git`              | PreToolUse        | 10       | git reset --hard, clean -f, push --force, branch -D, etc.                |
-| `sed_blocker`                  | PreToolUse        | 10       | the word sed in a Bash command, bar four narrow exemptions               |
-| `curl_pipe_shell`              | PreToolUse        | 10       | curl/wget piped to bash/sh                                               |
-| `lock_file_edit_blocker`       | PreToolUse        | 10       | Direct editing of lock files                                             |
-| `pip_break_system`             | PreToolUse        | 10       | pip --break-system-packages                                              |
-| `sudo_pip`                     | PreToolUse        | 10       | sudo pip install                                                         |
-| `ask_user_question_blocker`    | PreToolUse        | 10       | AskUserQuestion without an `ASKING BECAUSE:` prefix                      |
-| `daemon_location_guard`        | PreToolUse        | 11       | cd/pushd into .claude/hooks-daemon/                                      |
-| `absolute_path`                | PreToolUse        | 12       | Relative paths in Read/Write/Edit                                        |
-| `error_hiding_blocker`         | PreToolUse        | 13       | Code that silently swallows errors                                       |
-| `project_containment`          | PreToolUse        | 14       | Writes whose target is named outside the repository root                 |
-| `security_antipattern`         | PreToolUse        | 14       | Dangerous constructs (eval, shell exec, deserialization, XSS, creds)     |
-| `artifact_publish_blocker`     | PreToolUse        | 14       | Publishing an artefact (a claude.ai URL outside the project)             |
-| `issue_filing_gate`            | PreToolUse        | 14       | gh issue create against the daemon's tracker with a hand-written body    |
-| `subagent_cron_delete_blocker` | PreToolUse        | 14       | CronDelete inside a subagent (the coordinator's own is unaffected)       |
-| `write_clobber_guard`          | PreToolUse        | 16       | Write to an existing file not read this session                          |
-| `worktree_file_copy`           | PreToolUse        | 15       | cp/mv/rsync between worktrees                                            |
-| `pipe_blocker`                 | PreToolUse        | 15       | Expensive commands piped to tail/head                                    |
-| `dangerous_permissions`        | PreToolUse        | 15       | chmod 777, chmod a+rwx                                                   |
-| `tdd_enforcement`              | PreToolUse        | 15       | Production code without tests (11 languages)                             |
-| `root_recursion_guard`         | PreToolUse        | 16       | Recursive scans rooted at /, /home, $HOME, ...                           |
-| `self_matching_process_probe`  | PreToolUse        | 17       | A pgrep/pkill/ps-grep probe that matches the calling shell's own argv    |
-| `github_auto_close_keywords`   | PreToolUse        | 18       | GitHub auto-closing keyword refs (Fixes #N) in git/gh pr messages        |
-| `git_stash`                    | PreToolUse        | 20       | git stash creation (deny by default; configurable)                       |
-| `git_message_backtick`         | PreToolUse        | 20       | Backticks in a double-quoted git -m (bash executes them)                 |
-| `ancestry_preserving_merge`    | PreToolUse        | 19       | git merge --squash, gh pr merge --squash/--rebase (severs ancestry)      |
-| `merge_to_main_approval`       | PreToolUse        | 20       | git merge/pull/gh pr merge into main without a human's approval (opt-in) |
-| `qa_suppression`               | PreToolUse        | 30       | noqa, type: ignore, eslint-disable, nolint, ... (all langs)              |
-| `plan_number_helper`           | PreToolUse        | 30       | Broken plan number discovery commands                                    |
-| `plan_status_snapshot`         | PreToolUse        | 30       | Records a PLAN.md's pre-write status for `goal_injection` (never blocks) |
-| `plan_journal_guard`           | PreToolUse        | 31       | A plan journal entry written by hand (use `mkplan.bash --journal`)       |
-| `comment_changelog`            | PreToolUse        | 31       | Changelog narrative in a comment (`Prior <version>:`, dated entries)     |
-| `subagent_full_qa_blocker`     | PreToolUse        | 32       | A declared full-suite QA run inside a sub-agent (opt-in)                 |
-| `comment_size`                 | PreToolUse        | 33       | Over-long comments growing past the size limit                           |
-| `markdown_organization`        | PreToolUse        | 35       | Disorganised markdown; untracked Claude memory writes                    |
-| `lsp_enforcement`              | PreToolUse        | 38       | Grep/rg used for symbol lookups (use LSP)                                |
-| `reference_repo_freshness`     | PreToolUse        | 39       | Reading a governed reference clone that is stale or unverified           |
-| `gh_issue_comments`            | PreToolUse        | 40       | gh issue view without --comments                                         |
-| `gh_pr_comments`               | PreToolUse        | 40       | gh pr view without --comments                                            |
-| `plan_time_estimates`          | PreToolUse        | 40       | Time estimates in plan docs                                              |
-| `npm_command`                  | PreToolUse        | 50       | Non-llm: npm commands                                                    |
-| `validate_instruction_content` | PreToolUse        | 50       | Ephemeral content in CLAUDE.md                                           |
-| `auto_continue_stop`           | Stop              | 15       | Stops after confirmation questions                                       |
-| `auto_approve_reads`           | PermissionRequest | 10       | (Approves) read-only tools in bypassPermissions mode                     |
+| Config Key                      | Event             | Priority | What It Blocks                                                           |
+| ------------------------------- | ----------------- | -------- | ------------------------------------------------------------------------ |
+| `destructive_git`               | PreToolUse        | 10       | git reset --hard, clean -f, push --force, branch -D, etc.                |
+| `sed_blocker`                   | PreToolUse        | 10       | the word sed in a Bash command, bar four narrow exemptions               |
+| `curl_pipe_shell`               | PreToolUse        | 10       | curl/wget piped to bash/sh                                               |
+| `lock_file_edit_blocker`        | PreToolUse        | 10       | Direct editing of lock files                                             |
+| `pip_break_system`              | PreToolUse        | 10       | pip --break-system-packages                                              |
+| `sudo_pip`                      | PreToolUse        | 10       | sudo pip install                                                         |
+| `ask_user_question_blocker`     | PreToolUse        | 10       | AskUserQuestion without an `ASKING BECAUSE:` prefix                      |
+| `daemon_location_guard`         | PreToolUse        | 11       | cd/pushd into .claude/hooks-daemon/                                      |
+| `absolute_path`                 | PreToolUse        | 12       | Relative paths in Read/Write/Edit                                        |
+| `error_hiding_blocker`          | PreToolUse        | 13       | Code that silently swallows errors                                       |
+| `project_containment`           | PreToolUse        | 14       | Writes whose target is named outside the repository root                 |
+| `security_antipattern`          | PreToolUse        | 14       | Dangerous constructs (eval, shell exec, deserialization, XSS, creds)     |
+| `artifact_publish_blocker`      | PreToolUse        | 14       | Publishing an artefact (a claude.ai URL outside the project)             |
+| `issue_filing_gate`             | PreToolUse        | 14       | gh issue create against the daemon's tracker with a hand-written body    |
+| `subagent_cron_delete_blocker`  | PreToolUse        | 14       | CronDelete inside a subagent (the coordinator's own is unaffected)       |
+| `subagent_worktree_write_guard` | PreToolUse        | 14       | A subagent's Write/Edit into another checkout of its repository          |
+| `write_clobber_guard`           | PreToolUse        | 16       | Write to an existing file not read this session                          |
+| `worktree_file_copy`            | PreToolUse        | 15       | cp/mv/rsync between worktrees                                            |
+| `pipe_blocker`                  | PreToolUse        | 15       | Expensive commands piped to tail/head                                    |
+| `dangerous_permissions`         | PreToolUse        | 15       | chmod 777, chmod a+rwx                                                   |
+| `tdd_enforcement`               | PreToolUse        | 15       | Production code without tests (11 languages)                             |
+| `root_recursion_guard`          | PreToolUse        | 16       | Recursive scans rooted at /, /home, $HOME, ...                           |
+| `self_matching_process_probe`   | PreToolUse        | 17       | A pgrep/pkill/ps-grep probe that matches the calling shell's own argv    |
+| `github_auto_close_keywords`    | PreToolUse        | 18       | GitHub auto-closing keyword refs (Fixes #N) in git/gh pr messages        |
+| `git_stash`                     | PreToolUse        | 20       | git stash creation (deny by default; configurable)                       |
+| `git_message_backtick`          | PreToolUse        | 20       | Backticks in a double-quoted git -m (bash executes them)                 |
+| `ancestry_preserving_merge`     | PreToolUse        | 19       | git merge --squash, gh pr merge --squash/--rebase (severs ancestry)      |
+| `merge_to_main_approval`        | PreToolUse        | 20       | git merge/pull/gh pr merge into main without a human's approval (opt-in) |
+| `qa_suppression`                | PreToolUse        | 30       | noqa, type: ignore, eslint-disable, nolint, ... (all langs)              |
+| `plan_number_helper`            | PreToolUse        | 30       | Broken plan number discovery commands                                    |
+| `plan_status_snapshot`          | PreToolUse        | 30       | Records a PLAN.md's pre-write status for `goal_injection` (never blocks) |
+| `plan_journal_guard`            | PreToolUse        | 31       | A plan journal entry written by hand (use `mkplan.bash --journal`)       |
+| `comment_changelog`             | PreToolUse        | 31       | Changelog narrative in a comment (`Prior <version>:`, dated entries)     |
+| `subagent_full_qa_blocker`      | PreToolUse        | 32       | A declared full-suite QA run inside a sub-agent (opt-in)                 |
+| `comment_size`                  | PreToolUse        | 33       | Over-long comments growing past the size limit                           |
+| `markdown_organization`         | PreToolUse        | 35       | Disorganised markdown; untracked Claude memory writes                    |
+| `lsp_enforcement`               | PreToolUse        | 38       | Grep/rg used for symbol lookups (use LSP)                                |
+| `reference_repo_freshness`      | PreToolUse        | 39       | Reading a governed reference clone that is stale or unverified           |
+| `gh_issue_comments`             | PreToolUse        | 40       | gh issue view without --comments                                         |
+| `gh_pr_comments`                | PreToolUse        | 40       | gh pr view without --comments                                            |
+| `plan_time_estimates`           | PreToolUse        | 40       | Time estimates in plan docs                                              |
+| `npm_command`                   | PreToolUse        | 50       | Non-llm: npm commands                                                    |
+| `validate_instruction_content`  | PreToolUse        | 50       | Ephemeral content in CLAUDE.md                                           |
+| `auto_continue_stop`            | Stop              | 15       | Stops after confirmation questions                                       |
+| `auto_approve_reads`            | PermissionRequest | 10       | (Approves) read-only tools in bypassPermissions mode                     |
 
 ### All Advisory Handlers
 

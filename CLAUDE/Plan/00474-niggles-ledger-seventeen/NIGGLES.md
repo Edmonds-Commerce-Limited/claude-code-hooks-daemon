@@ -505,7 +505,19 @@ now says to write only inside the agent's own worktree.
 directory is a linked worktree, denies a Write/Edit into a DIFFERENT linked
 worktree of the same repository.
 
-**Status**: ⬜ Open.
+**Fixed on branch `worktree-n264-cross-worktree-write`** (not yet merged): the
+`subagent_worktree_write_guard` handler (`R-SUBAGENT-CROSS-WORKTREE-WRITE`,
+on by default, scope SUB, priority 14) denies a sub-agent's Write/Edit/
+NotebookEdit from a linked worktree into a different linked worktree or the
+main working tree of the same repository. Worktree membership is read from
+git's own `.git` markers (nearest marker above the resolved path, shared
+`commondir`), so a worktree nested inside the main tree is attributed to
+itself; no subprocess runs. Anything unreadable allows with a debug log. Not
+covered: writes made through Bash (`>`, `tee`, `cp`), which this guard does
+not judge. Report:
+`subagent-reports/260930-n264-cross-worktree-sonnet.md`.
+
+**Status**: ✅ Fixed (branch `worktree-n264-cross-worktree-write`, merge pending).
 
 ### N263 — the release empties UNRELEASED/post-upgrade-tasks/ but not its README's task index
 

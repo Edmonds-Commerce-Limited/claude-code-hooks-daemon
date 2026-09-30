@@ -4,7 +4,7 @@
 
 ## Active Handlers
 
-### PreToolUse (69 handlers)
+### PreToolUse (70 handlers)
 
 | Priority | Handler | Behaviour | Description |
 |----------|---------|----------|-------------|
@@ -22,6 +22,7 @@
 | 14 | security_antipattern | BLOCKING | Block Write/Edit of files containing security antipatterns |
 | 14 | sensitive_content | BLOCKING | Block Write/Edit content matching configured public patterns or a secret word list |
 | 14 | subagent_cron_delete_blocker | BLOCKING | Deny ``CronDelete`` inside a subagent; the coordinator is unaffected |
+| 14 | subagent_worktree_write_guard | BLOCKING | Deny a subagent's write into a checkout other than the one it works in |
 | 15 | root_recursion_guard | BLOCKING | Block recursive scanners (grep -r, find, fd, rg, ...) rooted at ``/``/home/etc |
 | 15 | worktree_file_copy | BLOCKING | Prevent copying files between worktrees and main repo |
 | 16 | curl_pipe_shell | BLOCKING | Block curl/wget piped to shell commands |

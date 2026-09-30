@@ -172,6 +172,15 @@ handlers:
       enabled: true
       priority: 14
 
+    # Ledger 00474 N264: a sub-agent's edits landed, uncommitted, in a SIBLING
+    # branch's worktree and would have been committed under the wrong branch's
+    # name. Denies a subagent's Write/Edit/NotebookEdit from inside a linked
+    # worktree into any other checkout of the same repository. The main thread
+    # is never judged.
+    subagent_worktree_write_guard:
+      enabled: true
+      priority: 14
+
     artifact_publish_blocker:
       enabled: true
       priority: 14

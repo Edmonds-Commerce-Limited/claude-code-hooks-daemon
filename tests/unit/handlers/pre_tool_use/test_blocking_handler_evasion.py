@@ -493,6 +493,15 @@ _NOT_COMMAND_ANCHORED: dict[str, str] = {
         "ordinary one for any per-tool deny - ask the COORDINATOR to delete the "
         "cron - and that is not evasion but the documented remedy"
     ),
+    "SubagentWorktreeWriteGuardHandler": (
+        "matches on the write TARGET's checkout (Write/Edit/NotebookEdit file_path "
+        "or notebook_path), not a command name, so there is no command spelling to "
+        "respell. The path spellings that could hide the target - a relative path, "
+        "a symlink into another worktree, a not-yet-existing file - are resolved "
+        "through os.path.realpath and asserted in test_subagent_worktree_write_guard.py. "
+        "The Bash route is out of scope by design (project_containment's Bash "
+        "target scan is the existing model for it). The role half is scope=SUB"
+    ),
     "ReferenceRepoFreshnessHandler": (
         "matches on a governed reference-repo PATH appearing in a tool's path "
         "field or anywhere in a Bash command's arguments, not on a command name - "
