@@ -97,8 +97,39 @@ anything themselves: a person or agent runs provision.
 - [ ] ⬜ **Task 4.2**: A release note and an UNRELEASED post-upgrade task: an
   upgraded project gains the config key and the tracked `provision.sh`.
 
+### Phase 5: A pulled version change syncs itself (owner request)
+
+The owner's case: someone else upgrades the project and commits, and this
+checkout pulls. `daemon.expected_version` now names a version the local clone is
+not at. The daemon is present and installed, just at the wrong version, so it
+should be brought to the configured version and restarted, automatically where
+possible.
+
+This is a sync, not an upgrade. The upgrade already ran where it was committed:
+its tracked-file migrations are in the pull. Only the per-checkout parts are
+stale: the clone's checked-out tag, the venv and the running daemon.
+
+- [ ] ⬜ **Task 5.1**: Detect drift: the installed clone's version differs from the
+  resolved expected version. Decide where: at daemon start in `init.sh`, and
+  at SessionStart for a daemon already running.
+- [ ] ⬜ **Task 5.2**: Sync in the background, never inside a hook's time budget:
+  fetch exactly the tag from the fixed URL, check that its `version.py` names
+  it, rebuild the venv through the clone's own build path, then restart. The
+  old daemon keeps serving until the new one is ready, and a failed sync leaves
+  it in place and says so loudly.
+- [ ] ⬜ **Task 5.3**: Decide with the owner how this meets the upgrade approval
+  gate and the agent guards. An agent that edits and commits
+  `daemon.expected_version` must not be able to move the daemon to a version of
+  its choosing, including a downgrade to an older release. That is what
+  `R-UPGRADE-APPROVAL-AGENT` forbids by hand.
+- [ ] ⬜ **Task 5.4**: Tests: a pulled newer version syncs and restarts; a sync
+  failure keeps the old daemon; a steered version change is refused per 5.3;
+  the daemon's own repository never syncs.
+
 ## Success Criteria
 
+- [ ] After a pull that changes `daemon.expected_version`, the next session runs
+  the daemon at the new version without a manual step, subject to Task 5.3.
 - [ ] In a fresh clone of a configured fixture project, the first session shows
   the human a message naming `provision` and the expected version.
 - [ ] Running provision brings up the daemon at exactly that version, with no
