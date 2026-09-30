@@ -196,3 +196,46 @@ class TestTheParserSpellsIt:
 
         assert len(seen) == 1
         assert seen[0].job == "issue-sdlc"
+
+
+_HOST_SCOPED_CONFIG = """version: "2.0"
+persistent_crons:
+  enabled: true
+  jobs:
+    - id: issue-sdlc
+      schedule: "23 * * * *"
+      prompt: "Invoke the issue-sdlc skill."
+      hosts: [cchd-sdlc-runner]
+    - id: failsafe-recovery
+      schedule: "7 * * * *"
+      prompt: "r"
+"""
+
+
+class TestHostScopedJobs:
+    """Plan 00470 Task 6.1: this CLI runs in the session's own environment, so
+    the session's effective hostname decides which jobs are declared."""
+
+    @pytest.fixture
+    def host_project(self, project: Path) -> Path:
+        (project / ".claude" / "hooks-daemon.yaml").write_text(
+            _HOST_SCOPED_CONFIG, encoding="utf-8"
+        )
+        return project
+
+    def test_a_job_declared_for_another_host_is_refused(
+        self,
+        host_project: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        monkeypatch.setenv("HOOKS_DAEMON_HOSTNAME", "laptop")
+        assert cli.cmd_cron_pause(_pause_args(host_project, "issue-sdlc", "r")) == 1
+        assert "failsafe-recovery" in capsys.readouterr().err
+        assert _pauses(host_project) == []
+
+    def test_a_job_declared_for_this_host_is_paused(
+        self, host_project: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("HOOKS_DAEMON_HOSTNAME", "cchd-sdlc-runner")
+        assert cli.cmd_cron_pause(_pause_args(host_project, "issue-sdlc", "r")) == 0

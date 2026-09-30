@@ -59,6 +59,7 @@ from claude_code_hooks_daemon.core.side_effect_journal import SideEffectJournal
 from claude_code_hooks_daemon.core.utils import get_bash_command, get_file_path
 from claude_code_hooks_daemon.handlers.utils.bounded_fifo_map import BoundedFifoMap
 from claude_code_hooks_daemon.utils.config_cache import load_config_cached
+from claude_code_hooks_daemon.utils.cron_hosts import effective_hostname
 from claude_code_hooks_daemon.utils.cron_tick import TickKind, classify_tick, tick_sentinel
 from claude_code_hooks_daemon.utils.git_facts import project_relative_head_text
 from claude_code_hooks_daemon.utils.scratch_dir import acceptance_path
@@ -275,14 +276,22 @@ def is_failsafe_prompt(prompt: str) -> bool:
     return CANONICAL_CRON_PROMPT_MARKER in prompt
 
 
-def declares_failsafe_cron(config: Config) -> bool:
+def declares_failsafe_cron(config: Config, hostname: str | None = None) -> bool:
     """Whether ``config`` declares the failsafe cron as an active persistent job.
 
     One predicate for every surface that has to know (Plan 00394): the
     SessionStart advisor leaves a declared failsafe to ``persistent_cron_assertor``,
-    and the completion guidance stops advising its deletion.
+    and the completion guidance stops advising its deletion. A failsafe declared
+    only for other ``hosts`` is not declared here (Plan 00470 Task 6.1).
+
+    Args:
+        config: The project's daemon config.
+        hostname: The session's effective hostname; None resolves it from this
+            process's environment.
     """
-    return any(is_failsafe_prompt(job.prompt) for job in config.persistent_crons.active_jobs())
+    return any(
+        is_failsafe_prompt(job.prompt) for job in config.persistent_crons.active_jobs(hostname)
+    )
 
 
 # ─── Phase detection helper ───────────────────────────────────────────────────
@@ -637,7 +646,7 @@ class RecoveryCronAdvisorHandler(PostToolUseHandlerBase):
             plan_folder = self._resolve_plan_folder(hook_input)
             if not self._should_advise_once(self._completion_seen, plan_folder):
                 return BlockingResult(decision=Decision.ALLOW)
-            if declares_failsafe_cron(self._load_config()):
+            if declares_failsafe_cron(self._load_config(), effective_hostname(hook_input)):
                 return BlockingResult(decision=Decision.ALLOW, context=[_DECLARED_COMPLETION_NOTE])
             return BlockingResult(decision=Decision.ALLOW, context=[_COMPLETION_GUIDANCE])
 

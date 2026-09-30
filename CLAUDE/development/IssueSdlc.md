@@ -437,6 +437,27 @@ delivered: its work is independent of the pending question. `failsafe-recovery`
 does not set it and stays suppressed, because resuming interrupted work is what
 waits on the human. The option defaults to false for any job that omits it.
 
+## Where the hourly cron runs
+
+The `issue-sdlc` job carries `hosts: [cchd-sdlc-runner]` in `persistent_crons`,
+so a session is asked for it (at SessionStart and at Stop) only when its
+hostname matches. `failsafe-recovery` has no `hosts:` and stays global. A
+`hosts:` entry is an exact hostname or an fnmatch glob (`*`, `?`, `[...]`),
+matched case-sensitively; an empty list is a config error.
+
+The hostname is the first non-empty of the `HOOKS_DAEMON_HOSTNAME` and
+`CCY_HOST_HOSTNAME` environment variables (ccy sets the second to the host
+machine's name), then the system hostname. To start an SDLC runner anywhere,
+export `HOOKS_DAEMON_HOSTNAME=cchd-sdlc-runner` before launching the session.
+
+The value that counts is the one exported in the SESSION, not in the daemon's
+own environment, which is whatever started the daemon. The `init.sh` transport
+stamps it on the payload as `hooks_daemon_hostname`. The relay and `nc` copy
+bytes without parsing them, so on those the daemon reads the override from the
+connected hook process (`SO_PEERCRED`, then `/proc/<pid>/environ`, Linux only).
+`hooks-daemon cron-pause` and `cron-resume` run inside the session, so their
+own environment is the session's.
+
 ## Pausing the hourly cron for one session
 
 When the owner says to stop the `issue-sdlc` cron for now, pause it rather

@@ -744,6 +744,14 @@ class TestDeclaresFailsafeCron:
         config = Config(persistent_crons=PersistentCronsConfig(enabled=True, jobs=[job]))
         assert not declares_failsafe_cron(config)
 
+    def test_a_failsafe_declared_for_another_host_does_not_count_here(self) -> None:
+        job = PersistentCronConfig(
+            id="failsafe", schedule="47 * * * *", prompt=CANONICAL_CRON_PROMPT, hosts=["runner"]
+        )
+        config = Config(persistent_crons=PersistentCronsConfig(enabled=True, jobs=[job]))
+        assert declares_failsafe_cron(config, "runner")
+        assert not declares_failsafe_cron(config, "laptop")
+
 
 # ─── Progress-interval logic ───────────────────────────────────────────────────
 

@@ -80,3 +80,28 @@ config_changes:
         Optional. Set `runs_while_awaiting_human: true` on a declared job whose
         work is independent of a human answer; leave it off for anything that
         resumes interrupted work.
+    - key: persistent_crons.jobs[].hosts
+      recommended: false
+      dormant: true
+      description: >-
+        NEW per-job list of strings (Plan 00470 Task 6.1, default unset). A job
+        without it is global, as before. A job with it is declared only where
+        the session's effective hostname matches an entry (exact name or
+        fnmatch glob: `*`, `?`, `[...]`): the first non-empty of the
+        HOOKS_DAEMON_HOSTNAME and CCY_HOST_HOSTNAME environment variables, then
+        the system hostname. Everywhere else the job is neither listed at
+        session start nor demanded at Stop. An empty list is a config error.
+      example_yaml: |
+        persistent_crons:
+          enabled: true
+          jobs:
+            - id: issue-sdlc
+              schedule: "23 * * * *"
+              hosts: [cchd-sdlc-runner]
+              prompt: |
+                Invoke the `issue-sdlc` skill and follow it exactly.
+      migration_note: >-
+        Optional. Add `hosts:` to a job that only one machine or role should
+        run, then export HOOKS_DAEMON_HOSTNAME=<name> before launching the
+        session that should take the role. Leave it off for a job every
+        session needs.

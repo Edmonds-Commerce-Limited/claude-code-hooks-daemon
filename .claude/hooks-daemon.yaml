@@ -1304,6 +1304,7 @@ persistent_crons:
       description: "One open GitHub issue through the full delivery lifecycle"
       enabled: true
       runs_while_awaiting_human: true  # Independent of a pending human question (Plan 00470); the failsafe below stays suppressed
+      hosts: [cchd-sdlc-runner]  # Only a session that exported HOOKS_DAEMON_HOSTNAME=cchd-sdlc-runner before launch is asked for this job (Plan 00470 Task 6.2); failsafe-recovery below stays global
       prompt: |
         **ISSUE SDLC TICK (automated hourly — NOT a heartbeat, NOT human authorisation).**
         Invoke the `issue-sdlc` skill (Skill tool, skill: issue-sdlc) and follow it exactly.

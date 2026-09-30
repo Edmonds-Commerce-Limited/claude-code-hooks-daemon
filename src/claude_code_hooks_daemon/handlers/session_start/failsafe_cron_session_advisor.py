@@ -46,6 +46,7 @@ from claude_code_hooks_daemon.handlers.post_tool_use.recovery_cron_advisor impor
     declares_failsafe_cron,
 )
 from claude_code_hooks_daemon.utils.config_cache import load_config_cached
+from claude_code_hooks_daemon.utils.cron_hosts import effective_hostname
 from claude_code_hooks_daemon.utils.session_helpers import is_resume_session
 
 logger = logging.getLogger(__name__)
@@ -125,7 +126,7 @@ class FailsafeCronSessionAdvisorHandler(SessionStartHandlerBase):
         )
         if not recovery_advisor.enabled:
             return False
-        return not declares_failsafe_cron(config)
+        return not declares_failsafe_cron(config, effective_hostname(hook_input))
 
     def handle(self, hook_input: dict[str, Any]) -> AdvisoryResult:
         """State the reconcile steps and the canonical prompt."""

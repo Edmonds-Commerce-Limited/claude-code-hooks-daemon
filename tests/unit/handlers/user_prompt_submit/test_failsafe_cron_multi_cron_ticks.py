@@ -365,3 +365,30 @@ class TestPromptsTheDaemonNeverWrote:
         with patch(_DAEMON_UNTRACKED_DIR_PATCH_TARGET, return_value=tmp_path):
             _handler().handle(_input("the [tick] box in the issue template is wrong"))
         assert not marker.exists()
+
+
+class TestTheAwaitingHumanOptOutFollowsTheHost:
+    """Plan 00470 Task 6.1: a job declared only for other hosts is not vouched for here."""
+
+    _RUNNER_JOB: Final[PersistentCronConfig] = PersistentCronConfig(
+        id="issue-sdlc",
+        schedule="23 * * * *",
+        prompt=_REAL_ISSUE_SDLC_DELIVERED,
+        runs_while_awaiting_human=True,
+        hosts=["cchd-sdlc-runner"],
+    )
+
+    def _run(self, tmp_path: Path, hostname: str) -> Decision:
+        _arm_marker(tmp_path)
+        payload = {
+            **_input(declared_tick_prompt(self._RUNNER_JOB)),
+            "hooks_daemon_hostname": hostname,
+        }
+        with patch(_DAEMON_UNTRACKED_DIR_PATCH_TARGET, return_value=tmp_path):
+            return _handler(_config(self._RUNNER_JOB)).handle(payload).decision
+
+    def test_a_matching_host_delivers_the_tick(self, tmp_path: Path) -> None:
+        assert self._run(tmp_path, "cchd-sdlc-runner") == Decision.ALLOW
+
+    def test_a_non_matching_host_suppresses_the_tick(self, tmp_path: Path) -> None:
+        assert self._run(tmp_path, "laptop") == Decision.DENY

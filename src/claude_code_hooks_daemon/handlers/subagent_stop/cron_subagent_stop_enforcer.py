@@ -48,6 +48,7 @@ from claude_code_hooks_daemon.utils.cron_enforcement import (
     parse_session_crons,
     verdict_for_missing_crons,
 )
+from claude_code_hooks_daemon.utils.cron_hosts import effective_hostname
 from claude_code_hooks_daemon.utils.cron_pause import PAUSE_ADVISE_INTERVAL, default_pauses_path
 
 logger = logging.getLogger(__name__)
@@ -107,12 +108,13 @@ class CronSubagentStopEnforcerHandler(SubagentStopHandlerBase):
             logger.debug("cron_subagent_stop_enforcer: cannot load %s: %s", config_path, exc)
             return Config()
 
-    def _active_jobs(self) -> list[PersistentCronConfig]:
-        return self._load_config().persistent_crons.active_jobs()
+    def _active_jobs(self, hook_input: dict[str, Any]) -> list[PersistentCronConfig]:
+        """The jobs declared for the session's hostname (``hosts:``, Plan 00470)."""
+        return self._load_config().persistent_crons.active_jobs(effective_hostname(hook_input))
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
-        """Fire only when the project has at least one active declared job."""
-        return bool(self._active_jobs())
+        """Fire only when the project has at least one active job declared for this host."""
+        return bool(self._active_jobs(hook_input))
 
     def handle(self, hook_input: dict[str, Any]) -> BlockingResult:
         """Verify declared jobs against ``session_crons``; block on a gap.
@@ -120,7 +122,7 @@ class CronSubagentStopEnforcerHandler(SubagentStopHandlerBase):
         Identical semantics to ``CronStopEnforcerHandler.handle`` -- see
         that module's docstring for the absent-vs-empty reasoning.
         """
-        jobs = self._active_jobs()
+        jobs = self._active_jobs(hook_input)
         if not jobs:
             return BlockingResult(decision=Decision.ALLOW)
 

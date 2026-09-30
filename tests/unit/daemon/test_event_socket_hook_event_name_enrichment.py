@@ -63,6 +63,17 @@ class _EchoHandler(Handler):
         return []
 
 
+@pytest.fixture(autouse=True)
+def _no_session_hostname_override(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The daemon stamps a session's hostname override on the payload (Plan 00470
+    Task 6.1); these tests assert the payload arrives otherwise unchanged. The client
+    here is this very process, whose ``/proc/<pid>/environ`` is its exec-time
+    environment, which ``monkeypatch.delenv`` cannot change."""
+    monkeypatch.setattr(
+        "claude_code_hooks_daemon.daemon.server.hostname_override_of_process", lambda pid: None
+    )
+
+
 @pytest.fixture
 def isolated_untracked_dir() -> Generator[Path, None, None]:
     with tempfile.TemporaryDirectory() as tmp:

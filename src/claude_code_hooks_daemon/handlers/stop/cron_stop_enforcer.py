@@ -58,6 +58,7 @@ from claude_code_hooks_daemon.utils.cron_enforcement import (
     parse_session_crons,
     verdict_for_missing_crons,
 )
+from claude_code_hooks_daemon.utils.cron_hosts import effective_hostname
 from claude_code_hooks_daemon.utils.cron_pause import PAUSE_ADVISE_INTERVAL, default_pauses_path
 
 logger = logging.getLogger(__name__)
@@ -128,12 +129,13 @@ class CronStopEnforcerHandler(StopHandlerBase):
             logger.debug("cron_stop_enforcer: cannot load %s: %s", config_path, exc)
             return Config()
 
-    def _active_jobs(self) -> list[PersistentCronConfig]:
-        return self._load_config().persistent_crons.active_jobs()
+    def _active_jobs(self, hook_input: dict[str, Any]) -> list[PersistentCronConfig]:
+        """The jobs declared for the session's hostname (``hosts:``, Plan 00470)."""
+        return self._load_config().persistent_crons.active_jobs(effective_hostname(hook_input))
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
-        """Fire only when the project has at least one active declared job."""
-        return bool(self._active_jobs())
+        """Fire only when the project has at least one active job declared for this host."""
+        return bool(self._active_jobs(hook_input))
 
     def handle(self, hook_input: dict[str, Any]) -> BlockingResult:
         """Verify declared jobs against ``session_crons``; block on a gap.
@@ -145,7 +147,7 @@ class CronStopEnforcerHandler(StopHandlerBase):
         job paused for this session (``hooks-daemon cron-pause``) is allowed
         and named -- see ``verdict_for_missing_crons``.
         """
-        jobs = self._active_jobs()
+        jobs = self._active_jobs(hook_input)
         if not jobs:
             return BlockingResult(decision=Decision.ALLOW)
 
@@ -241,6 +243,11 @@ class CronStopEnforcerHandler(StopHandlerBase):
             "`prompt` is capped at 1000 characters with a truncation marker, so "
             "a declared prompt longer than that is compared by its truncated "
             "prefix, never by exact equality.\n\n"
+            "**Only jobs declared for this host are checked.** A job with `hosts:` "
+            "counts only where the session's hostname (`HOOKS_DAEMON_HOSTNAME`, "
+            "then `CCY_HOST_HOSTNAME`, then the system hostname) matches an entry, "
+            "so a session elsewhere is never told to create it. A job without "
+            "`hosts:` is global.\n\n"
             "**An absent `session_crons` field always ALLOWs.** It means no "
             "information was delivered, never that no crons exist — only a "
             "PRESENT list (even an empty one) is treated as a real report of "
