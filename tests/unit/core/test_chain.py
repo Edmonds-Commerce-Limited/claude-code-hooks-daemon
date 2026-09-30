@@ -1182,6 +1182,32 @@ class TestHandlerChain:
         # `slow` matched and was running when the budget expired: matched, never finished.
         assert result.handlers_matched == ["fast", "slow"]
 
+    def test_cut_short_response_is_not_mutated_by_the_abandoned_thread(self) -> None:
+        """The abandoned thread keeps running and, when its loop ends, merges
+        its own results. That must not reach the response already returned."""
+        chain = HandlerChain()
+        fast = MockHandler(
+            "fast", priority=10, result=HookResult.allow(context=["fast handler output"])
+        )
+        slow = MockHandler(
+            "slow",
+            priority=20,
+            result=HookResult.allow(context=["slow handler output"]),
+            sleep_in_handle=0.6,
+        )
+        chain.add(fast)
+        chain.add(slow)
+
+        result = chain.execute({"tool_name": "Bash"}, deadline_seconds=0.2)
+
+        context_as_returned = list(result.result.context)
+        handlers_as_returned = list(result.result.handlers_matched)
+        time.sleep(1.0)  # the abandoned thread finishes and merges its own results
+
+        assert "slow handler output" not in context_as_returned
+        assert result.result.context == context_as_returned
+        assert result.result.handlers_matched == handlers_as_returned
+
     def test_a_restrictive_verdict_reached_before_the_overrun_is_kept(self) -> None:
         """A non-fail-closed chain can still hold a restrictive handler; its
         deny, reached before a later handler overran, is not thrown away."""

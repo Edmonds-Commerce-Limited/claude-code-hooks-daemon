@@ -19,6 +19,7 @@ The merge is most-restrictive-wins (Plan 00144); the FIRST restrictive handler
 owns both the reason shown and the ``To disable:`` attribution (Task 3.3).
 """
 
+import copy
 import json
 import logging
 import time
@@ -298,15 +299,24 @@ class _ChainProgress:
     advisories: list[tuple[str, HookResult]] = field(default_factory=list)
 
     def snapshot(self) -> "_ChainProgress":
-        """A copy the caller can read while the run's thread keeps appending."""
+        """A copy the caller can read and mutate while the run's thread keeps going.
+
+        The results are deep-copied, because the abandoned thread still holds
+        the originals and merges into them when its loop ends. One ``deepcopy``
+        call covers all three result collections, so a result that is in
+        ``matched_results`` and in ``denials`` stays one object in the copy.
+        """
+        matched_results, denials, advisories = copy.deepcopy(
+            (list(self.matched_results), list(self.denials), list(self.advisories))
+        )
         return _ChainProgress(
             accumulated_context=list(self.accumulated_context),
             handlers_executed=list(self.handlers_executed),
             handlers_matched=list(self.handlers_matched),
             decisions=list(self.decisions),
-            matched_results=list(self.matched_results),
-            denials=list(self.denials),
-            advisories=list(self.advisories),
+            matched_results=matched_results,
+            denials=denials,
+            advisories=advisories,
         )
 
     def leading_result(self) -> HookResult | None:
