@@ -351,10 +351,6 @@ _DENY_WITHOUT_RULES_ALLOWLIST: dict[str, str] = {
         "verified missing from session_crons) with no other concept to "
         "distinguish — not a disclosure-ladder table."
     ),
-    "CronSubagentStopEnforcerHandler": (
-        "Plan 00416: SubagentStop twin of cron_stop_enforcer, same single "
-        "DENY branch and same reasoning."
-    ),
 }
 
 
