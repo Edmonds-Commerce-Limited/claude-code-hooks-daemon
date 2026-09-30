@@ -58,6 +58,14 @@ targeted tier runs ALL of them plus the mapped tests. Then the only thing
 deferred is the unmapped part of the pytest suite, which CI runs on every push to
 `main` anyway.
 
+**Evidence from the ledger 00466 cleanup.** Targeted QA missed both breaks the
+first two landings put on `main`: acceptance probe #124 after N101 (the mapper
+does not link handler code to `tests/acceptance/test_playbook_harness.py`), and
+an `eacces_safe` static-check violation after N211 (a repo-wide check that
+`changed` does not run). Neither is expensive. Both belong in the targeted tier:
+the cheap repo-wide static checks always, and the playbook harness whenever
+handler code changes.
+
 ### One QA process at a time
 
 Every `llm_qa.py` run, not only whole-suite pytest, takes the host-wide lock in

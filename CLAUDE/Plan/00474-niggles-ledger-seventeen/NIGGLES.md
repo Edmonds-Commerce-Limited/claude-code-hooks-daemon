@@ -4,6 +4,26 @@ Newest first. Each entry says how it was found, why it happens, and the
 candidate remedies. Numbering continues from
 [ledger sixteen](../00466-niggles-ledger-sixteen/NIGGLES.md).
 
+### N266 — `flaggable_content_channel_guard` denies greps that never touch a flagged path
+
+**Found**: twice in one session, a content search was denied as
+R-FLAGGABLE-CONTENT-CHANNEL with the matched glob `tests/fixtures/cyber-flag/**`,
+though neither command named or reached that directory:
+
+- a `grep -n` over `.github/workflows/qa.yml` alone;
+- a `grep -rhoE` over `src/claude_code_hooks_daemon/utils/*.py` plus a grep of a
+  scratch file.
+
+**Why it matters**: the deny message says to delegate the whole file to the
+quarantine agent, which is the wrong remedy for an ordinary source file, and the
+work went round it with `Read` or a sub-agent.
+
+**Candidate remedy**: reproduce each command with `bin/hooks-daemon probe`, and
+find why a path outside the glob matches (for example a recursive flag treated
+as searching the whole tree).
+
+**Status**: ⬜ Open.
+
 ### N265 — `secret_file_guard` spends about 2.2 s of CPU on one realistic Python program
 
 **Found**: CI on the N101 merge (`5f9600fb2`, run 36689213931) denied
