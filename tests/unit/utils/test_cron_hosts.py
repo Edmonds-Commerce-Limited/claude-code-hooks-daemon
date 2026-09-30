@@ -24,6 +24,7 @@ import pytest
 from claude_code_hooks_daemon.constants.protocol import HookInputField
 from claude_code_hooks_daemon.utils.cron_hosts import (
     ENV_HOSTNAME_OVERRIDE,
+    PeerHostname,
     effective_hostname,
     hostname_matches,
     hostname_override,
@@ -131,7 +132,9 @@ class TestProcessEnviron:
             stdin=subprocess.DEVNULL,
         )
         try:
-            assert hostname_override_of_process(child.pid) == "cchd-sdlc-runner"
+            assert hostname_override_of_process(child.pid) == PeerHostname(
+                override="cchd-sdlc-runner"
+            )
         finally:
             child.kill()
             child.wait()
@@ -145,14 +148,21 @@ class TestProcessEnviron:
             stdin=subprocess.DEVNULL,
         )
         try:
-            assert hostname_override_of_process(child.pid) is None
+            assert hostname_override_of_process(child.pid) == PeerHostname()
         finally:
             child.kill()
             child.wait()
 
-    def test_an_unreadable_process_yields_none(self) -> None:
-        assert hostname_override_of_process(2**22 + 12345) is None
+    def test_an_unreadable_process_says_so_naming_the_pid(self) -> None:
+        """Unreadable is not "set neither variable", and the result keeps them apart."""
+        missing_pid = 2**22 + 12345
+        peer = hostname_override_of_process(missing_pid)
+        assert peer.override is None
+        assert peer.unreadable_because is not None
+        assert str(missing_pid) in peer.unreadable_because
 
-    def test_a_non_positive_pid_yields_none(self) -> None:
-        assert hostname_override_of_process(0) is None
-        assert hostname_override_of_process(-1) is None
+    @pytest.mark.parametrize("pid", [0, -1])
+    def test_a_non_positive_pid_is_unreadable(self, pid: int) -> None:
+        peer = hostname_override_of_process(pid)
+        assert peer.override is None
+        assert peer.unreadable_because is not None

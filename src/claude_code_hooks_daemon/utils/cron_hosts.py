@@ -32,6 +32,7 @@ import logging
 import os
 import socket
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from typing import Any, Final
 
 from claude_code_hooks_daemon.constants.protocol import HookInputField
@@ -90,33 +91,45 @@ def hostname_matches(hosts: Sequence[str], hostname: str) -> bool:
     return any(fnmatch.fnmatchcase(hostname, pattern) for pattern in hosts)
 
 
-def hostname_override_of_process(pid: int) -> str | None:
+@dataclass(frozen=True, slots=True)
+class PeerHostname:
+    """What another process's environment says about its hostname override.
+
+    An unreadable environment is kept apart from one that set no override, so
+    the caller can say why nothing was found.
+
+    Attributes:
+        override: The override the process exported, or None.
+        unreadable_because: Why the environment could not be read, or None
+            when it was read.
+    """
+
+    override: str | None = None
+    unreadable_because: str | None = None
+
+
+def hostname_override_of_process(pid: int) -> PeerHostname:
     """The hostname override exported in another process's environment.
 
     Reads ``/proc/<pid>/environ``, which a process of the same user may read.
     That is the environment the process was EXECUTED with -- for a hook, the
-    session's. Linux only: anywhere else, or for a process that is gone, in
-    another PID namespace or not readable, the answer is None and the caller
-    falls back to its own resolution.
+    session's. Linux only: elsewhere, and for a process that is gone, in
+    another PID namespace or not readable by this user, the result says the
+    environment was unreadable and why.
 
     Args:
-        pid: The process id. Non-positive ids (an unknown peer) yield None.
-
-    Returns:
-        The override, or None when unknown or when the process set neither
-        variable.
+        pid: The process id. A non-positive id (an unknown peer) is unreadable.
     """
     if pid <= 0:
-        return None
+        return PeerHostname(unreadable_because=f"no usable peer pid ({pid})")
     try:
         with open(f"/proc/{pid}/environ", "rb") as handle:
             raw = handle.read()
     except OSError as exc:
-        logger.debug("cron_hosts: cannot read the environment of pid %s: %s", pid, exc)
-        return None
+        return PeerHostname(unreadable_because=f"cannot read the environment of pid {pid}: {exc}")
     environ: dict[str, str] = {}
     for entry in raw.split(b"\0"):
         name, separator, value = entry.partition(b"=")
         if separator:
             environ[name.decode("utf-8", "replace")] = value.decode("utf-8", "replace")
-    return hostname_override(environ)
+    return PeerHostname(override=hostname_override(environ))

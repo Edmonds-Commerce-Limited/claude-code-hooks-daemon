@@ -38,6 +38,7 @@ from claude_code_hooks_daemon.core.handler import Handler
 from claude_code_hooks_daemon.core.hook_result import Decision, HookResult
 from claude_code_hooks_daemon.daemon.paths import get_event_socket_dir_from_untracked
 from claude_code_hooks_daemon.daemon.server import HooksDaemon
+from claude_code_hooks_daemon.utils.cron_hosts import PeerHostname
 
 
 class _EchoHandler(Handler):
@@ -70,7 +71,8 @@ def _no_session_hostname_override(monkeypatch: pytest.MonkeyPatch) -> None:
     here is this very process, whose ``/proc/<pid>/environ`` is its exec-time
     environment, which ``monkeypatch.delenv`` cannot change."""
     monkeypatch.setattr(
-        "claude_code_hooks_daemon.daemon.server.hostname_override_of_process", lambda pid: None
+        "claude_code_hooks_daemon.daemon.server.hostname_override_of_process",
+        lambda pid: PeerHostname(),
     )
 
 

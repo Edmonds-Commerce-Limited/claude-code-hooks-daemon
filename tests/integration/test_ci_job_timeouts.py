@@ -36,4 +36,6 @@ def test_every_timeout_is_below_the_github_default() -> None:
         or not 0 < int(str(job["timeout-minutes"])) <= MAX_TIMEOUT_MINUTES
     }
 
-    assert too_long == {}, f"timeouts missing, non-integer or over {MAX_TIMEOUT_MINUTES}: {too_long}"
+    assert (
+        too_long == {}
+    ), f"timeouts missing, non-integer or over {MAX_TIMEOUT_MINUTES}: {too_long}"

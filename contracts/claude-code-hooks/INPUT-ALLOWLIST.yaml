@@ -26,3 +26,12 @@ entries:
       so no vendored input_example can ever document it; the read is
       deliberate and correct.
     link: "CLAUDE/Plan/00273-hook-input-payload-validation/PLAN.md"
+  - id: "unknown-input-field:(shared):hooks_daemon_hostname"
+    reason: >-
+      Not sent by Claude Code: the daemon's own transport stamps it. init.sh
+      writes the session's HOOKS_DAEMON_HOSTNAME or CCY_HOST_HOSTNAME onto the
+      payload, and on the relay the daemon reads it from the connected hook
+      process's environment (daemon/server.py _stamp_session_hostname). It is
+      read by utils/cron_hosts.effective_hostname to match persistent_crons
+      hosts:. No vendored input_example can document a field the daemon adds.
+    link: "CLAUDE/Plan/00470-persistent-session-optimisation/PLAN.md"

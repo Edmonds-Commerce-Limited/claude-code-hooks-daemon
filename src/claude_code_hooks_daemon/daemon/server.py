@@ -43,7 +43,10 @@ from claude_code_hooks_daemon.daemon.paths import get_untracked_dir, is_pid_aliv
 from claude_code_hooks_daemon.daemon.payload_capture import capture_payload, resolve_capture_dir
 from claude_code_hooks_daemon.utils import secret_file_matching as sfm
 from claude_code_hooks_daemon.utils.cli_command import recovery_command
-from claude_code_hooks_daemon.utils.cron_hosts import hostname_override_of_process
+from claude_code_hooks_daemon.utils.cron_hosts import (
+    PeerHostname,
+    hostname_override_of_process,
+)
 from claude_code_hooks_daemon.utils.log_elision import elide_record_arguments
 from claude_code_hooks_daemon.utils.scratch_dir import ensure_scratch_dir
 from claude_code_hooks_daemon.utils.secret_redaction import get_active_secret_terms, redact_text
@@ -196,23 +199,24 @@ def _pre_tool_use_transport_deny_response() -> dict[str, Any]:
     }
 
 
-def _peer_pid(writer: asyncio.StreamWriter) -> int | None:
-    """The pid of the process on the other end of a Unix socket, where the OS says.
+def _peer_hostname(writer: asyncio.StreamWriter) -> PeerHostname:
+    """The hostname override of the process on the other end of a Unix socket.
 
-    ``SO_PEERCRED`` (Linux). None where it does not exist, or for a peer in
-    another PID namespace, which the kernel reports as 0.
+    The peer's pid comes from ``SO_PEERCRED`` (Linux), then its environment is
+    read. Where the OS has no ``SO_PEERCRED``, the query fails, or the kernel
+    reports pid 0 (a peer in another PID namespace), the result is unreadable
+    and says why.
     """
     peercred = getattr(socket, "SO_PEERCRED", None)
     sock = writer.get_extra_info("socket")
     if peercred is None or sock is None:
-        return None
+        return PeerHostname(unreadable_because="no SO_PEERCRED on this connection")
     try:
         raw = sock.getsockopt(socket.SOL_SOCKET, peercred, struct.calcsize("3i"))
     except OSError as exc:
-        logger.debug("SO_PEERCRED unavailable on this connection: %s", exc)
-        return None
+        return PeerHostname(unreadable_because=f"SO_PEERCRED query failed: {exc}")
     pid: int = struct.unpack("3i", raw)[0]
-    return pid if pid > 0 else None
+    return hostname_override_of_process(pid)
 
 
 def _stamp_session_hostname(hook_input: Any, writer: asyncio.StreamWriter) -> None:
@@ -225,13 +229,19 @@ def _stamp_session_hostname(hook_input: Any, writer: asyncio.StreamWriter) -> No
     environment, so its override is read from it. A value already on the payload
     (the python transport stamps its own) is never overwritten, and a session
     that set neither variable stamps nothing.
+
+    A peer whose credentials or environment cannot be read also stamps nothing,
+    logged at debug: the hostname then resolves from the daemon's own
+    environment, and only a ``hosts:``-scoped job's declaration depends on it.
+    Failing the event over it would cost every other handler its verdict.
     """
     if not isinstance(hook_input, dict) or HookInputField.SESSION_HOSTNAME in hook_input:
         return
-    pid = _peer_pid(writer)
-    override = hostname_override_of_process(pid) if pid is not None else None
-    if override is not None:
-        hook_input[HookInputField.SESSION_HOSTNAME] = override
+    peer = _peer_hostname(writer)
+    if peer.unreadable_because is not None:
+        logger.debug("No session hostname stamped: %s", peer.unreadable_because)
+    if peer.override is not None:
+        hook_input[HookInputField.SESSION_HOSTNAME] = peer.override
 
 
 def redacted_blocking_response(response_json: str) -> str:

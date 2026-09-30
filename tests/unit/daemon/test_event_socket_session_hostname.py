@@ -22,7 +22,7 @@ import sys
 import tempfile
 from collections.abc import Generator
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 from tests.daemon._start_wait import wait_for_daemon_started
@@ -38,8 +38,10 @@ from claude_code_hooks_daemon.constants.protocol import HookInputField
 from claude_code_hooks_daemon.core.front_controller import FrontController
 from claude_code_hooks_daemon.core.handler import Handler
 from claude_code_hooks_daemon.core.hook_result import Decision, HookResult
+from claude_code_hooks_daemon.daemon import server
 from claude_code_hooks_daemon.daemon.paths import get_event_socket_dir_from_untracked
 from claude_code_hooks_daemon.daemon.server import HooksDaemon
+from claude_code_hooks_daemon.utils.cron_hosts import PeerHostname
 
 # A client that behaves like the relay: write the payload, half-close, read to EOF.
 _CLIENT = """
@@ -133,6 +135,23 @@ async def _run(
         await daemon.shutdown()
         await server_task
     return handler.last_hook_input
+
+
+class TestAnUnreadablePeerStampsNothing:
+    """A peer whose environment cannot be read is not a peer that set nothing:
+    the reader says so, and the stamp step alone decides to stamp nothing."""
+
+    def test_the_payload_is_left_without_a_stamp(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(
+            server, "_peer_hostname", lambda writer: PeerHostname(unreadable_because="gone")
+        )
+        payload: dict[str, Any] = {"hook_event_name": "Stop"}
+        # _peer_hostname is replaced above, so the writer is never touched.
+        unused_writer = cast("asyncio.StreamWriter", object())
+
+        server._stamp_session_hostname(payload, unused_writer)
+
+        assert payload == {"hook_event_name": "Stop"}
 
 
 @pytest.mark.skipif(not sys.platform.startswith("linux"), reason="reads /proc/<pid>/environ")
