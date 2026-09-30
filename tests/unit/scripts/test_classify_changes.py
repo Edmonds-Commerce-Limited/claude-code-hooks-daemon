@@ -128,6 +128,26 @@ class TestBaseKnown:
     def test_base_not_in_history_is_full(self, repo: Path) -> None:
         assert classify_changes.classify_range("1" * 40, "HEAD", repo) == "full"
 
+    def test_base_not_an_ancestor_of_head_is_full(self, repo: Path) -> None:
+        """A base on a diverged line cannot anchor the diff: full, never a guess."""
+        first = self._sha(repo, "HEAD~1")
+        head = self._sha(repo, "HEAD")
+        subprocess.run(["git", "checkout", "-q", "-b", "side", first], cwd=repo, check=True)
+        (repo / "side.md").write_text("side\n")
+        subprocess.run(["git", "add", "."], cwd=repo, check=True)
+        subprocess.run(
+            ["git", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "side"],
+            cwd=repo,
+            check=True,
+        )
+        side = self._sha(repo, "HEAD")
+        assert classify_changes.classify_range(side, head, repo) == "full"
+
+    def test_base_equal_to_head_is_full(self, repo: Path) -> None:
+        """An empty change set proves nothing."""
+        head = self._sha(repo, "HEAD")
+        assert classify_changes.classify_range(head, head, repo) == "full"
+
     def test_renamed_config_counts_both_sides(self, repo: Path) -> None:
         """Renaming uv.lock away is a config change, so rename detection is off."""
         (repo / "uv.lock").write_text("lock\n" * 50)

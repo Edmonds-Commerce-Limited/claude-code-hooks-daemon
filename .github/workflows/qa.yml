@@ -12,6 +12,11 @@ on:
   schedule:
     - cron: '17 3 * * *'
 
+# The classify job reads this workflow's earlier runs through the API.
+permissions:
+  contents: read
+  actions: read
+
 concurrency:
   group: qa-${{ github.ref }}
   # Never KILL a running run on the default branch. Plan 00359's release-slate
@@ -54,14 +59,17 @@ jobs:
           fetch-depth: 0
 
       # Values arrive through env, never interpolated into the script text.
-      # push: base is the sha before the push (all zeros on a new ref).
-      # pull_request: base is the merge base with the base branch, head is
-      # the PR tip. Anything else (schedule, dispatch): no base, so full.
+      # push: base is the head sha of the newest main run of this workflow that
+      # reached a verdict, NOT github.event.before: a run superseded while
+      # pending is cancelled and tests nothing, so the previous push may be
+      # untested. pull_request: base is the merge base with the base branch,
+      # head is the PR tip. Anything else (schedule, dispatch): no base, so full.
       - name: Classify
         id: classify
         env:
           EVENT: ${{ github.event_name }}
-          PUSH_BEFORE: ${{ github.event.before }}
+          REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ github.token }}
           PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
           PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: bash scripts/ci/emit_tier.bash | tee -a "$GITHUB_OUTPUT"
@@ -71,7 +79,9 @@ jobs:
   # a changed file (unmapped or too broad), so a change is never verified by
   # tests that did not cover it.
   targeted:
-    name: QA (${{ needs.classify.outputs.tier }} tier)
+    # A name built from a job output does not render while the job is skipped
+    # (it shows the literal expression), so the name is a fixed string.
+    name: QA (docs or code tier)
     needs: classify
     if: needs.classify.outputs.tier != 'full'
     runs-on: ubuntu-latest

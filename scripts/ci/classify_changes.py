@@ -10,7 +10,8 @@ Prints one line, ``tier=<docs|code|full>``, ready to append to
 
 Tiers:
     full  build or CI config changed, the change set is empty, or the base is
-          unknown (all-zero sha on a new ref, empty, or not in history):
+          unknown (all-zero sha on a new ref, empty, not in history, or not an
+          ancestor of the head):
           nothing can be narrowed safely
     docs  every path is markdown
     code  anything else
@@ -88,6 +89,11 @@ def classify_range(base: str, head: str, root: Path = _PROJECT_ROOT) -> str:
     """
     if not _base_is_known(base, root):
         print(f"base {base!r} is unknown: full tier", file=sys.stderr)
+        return TIER_FULL
+    # The base must be an ancestor of head: a diverged base would diff
+    # unrelated lines of history. (An equal base is an empty diff, also full.)
+    if _git(root, "merge-base", "--is-ancestor", base, head).returncode != 0:
+        print(f"base {base!r} is not an ancestor of {head!r}: full tier", file=sys.stderr)
         return TIER_FULL
     # --no-renames lists both sides of a rename, so moving config away counts.
     diff = _git(root, "diff", "--name-only", "--no-renames", base, head)
