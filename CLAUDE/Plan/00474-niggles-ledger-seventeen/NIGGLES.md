@@ -86,7 +86,10 @@ unpushed branch's commits become reachable only from the reflog.
 from a remote-tracking ref (its commits survive on the remote), and keep denying it
 otherwise, naming the branch that is not pushed and saying to push it first.
 
-**Status**: 🔄 In progress.
+**Status**: ✅ Fixed in 74dbdc970. `destructive_git` allows `git branch -D` when a
+remote-tracking ref holds every named tip, and still denies it otherwise, naming
+the unpushed branch. The merged `worktree-n267` branch itself was then removed with
+no human step.
 
 ### N266 — `flaggable_content_channel_guard` denies greps that never touch a flagged path
 
