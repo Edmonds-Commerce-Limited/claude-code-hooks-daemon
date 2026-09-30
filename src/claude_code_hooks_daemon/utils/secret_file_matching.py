@@ -25,6 +25,7 @@ level — see the plan's RESEARCH-read-routes.md class-(d) rows.
 import contextlib
 import contextvars
 import fnmatch
+import functools
 import itertools
 import logging
 import os
@@ -51,7 +52,13 @@ from claude_code_hooks_daemon.utils.path_exclusion import (
     resolve_project_root,
 )
 from claude_code_hooks_daemon.utils.realpath import has_symlink_loop, realpath
-from claude_code_hooks_daemon.utils.shell_segmentation import mask_quoted
+from claude_code_hooks_daemon.utils.shell_segmentation import (
+    mask_quoted,
+    segment_command_word,
+    shell_word_spans,
+    split_unquoted_spans,
+    strip_inert_spans,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -1381,6 +1388,126 @@ def find_protected_mention_detail(
     )
 
 
+#: Command heads whose quoted arguments are text they only READ or PRINT, by
+#: how the text is used. An ALLOWLIST: a missing head costs a false positive, a
+#: wrong one costs the guard. Deliberately absent, because each globs or runs
+#: text of its own: ``find``, ``ls``, ``python``, ``bash``/``sh -c``, ``xargs``.
+_ECHO_HEADS: Final[frozenset[str]] = frozenset({"echo", "printf"})
+_GREP_HEADS: Final[frozenset[str]] = frozenset({"grep", "egrep", "fgrep"})
+_RG_HEAD: Final[str] = "rg"
+_AWK_HEADS: Final[frozenset[str]] = frozenset({"awk", "gawk", "mawk"})
+_GH_HEAD: Final[str] = "gh"
+_TEXT_CONSUMER_HEADS: Final[frozenset[str]] = (
+    _ECHO_HEADS | _GREP_HEADS | _AWK_HEADS | frozenset({_RG_HEAD, _GH_HEAD})
+)
+#: ``gh`` flags whose value is prose published as written.
+_GH_TEXT_FLAGS: Final[frozenset[str]] = frozenset(
+    {"--body", "-b", "--title", "-t", "--notes", "-n"}
+)
+#: An awk program containing one of these can hand its text to a shell or read
+#: a file it names, so it is not merely a pattern.
+_AWK_RUNNING_MARKERS: Final[tuple[str, ...]] = ("system", "getline", "|")
+_TEXT_OPERAND_PLACEHOLDER: Final[str] = "TEXT_OPERAND"
+_SEGMENT_SEPARATORS: Final[tuple[str, ...]] = ("&&", "||", ";", "|", "&", "\n")
+#: Unquoted, any of these makes bash compute the word: a glob, a variable or
+#: substitution, a brace list, a tilde.
+_WORD_EXPANDING_CHARACTERS: Final[frozenset[str]] = frozenset("*?[$`{~")
+
+
+def _is_literal_quoted_word(word: str) -> bool:
+    """True for a word carrying quotes whose every glob character bash reads
+    literally: nothing unquoted expands and no command substitution runs in
+    it. ``mask_quoted`` blanks single quotes, ANSI-C strings and escapes, and
+    with ``keep_double`` False the inside of double quotes too."""
+    if "'" not in word and '"' not in word:
+        return False
+    unquoted = mask_quoted(word, keep_double=False).replace("$'", "'")
+    if any(char in _WORD_EXPANDING_CHARACTERS for char in unquoted):
+        return False
+    substitutable = mask_quoted(word, keep_double=True)
+    return "`" not in substitutable and "$(" not in substitutable
+
+
+def _is_text_operand(word: str, previous: str, head: str) -> bool:
+    """Whether ``word`` is a quoted argument ``head`` uses purely as text."""
+    if not _is_literal_quoted_word(word):
+        return False
+    if head == _GH_HEAD:
+        return previous in _GH_TEXT_FLAGS or word.partition("=")[0] in _GH_TEXT_FLAGS
+    if word.startswith("-"):
+        return False
+    if head in _ECHO_HEADS:
+        return True
+    # A long option's separate value may be a glob the tool applies itself
+    # (`grep --include GLOB`), and `rg -g GLOB` does the same.
+    if previous.startswith("--") and "=" not in previous:
+        return False
+    if head == _RG_HEAD:
+        return not (previous.startswith("-") and previous.endswith("g"))
+    if head in _AWK_HEADS:
+        return not any(marker in word for marker in _AWK_RUNNING_MARKERS)
+    return head in _GREP_HEADS
+
+
+def _without_text_operands(command: str) -> str:
+    """``command`` with every quoted operand of a pure text consumer replaced
+    by a placeholder: a ``grep``/``rg``/``awk`` pattern, ``echo``/``printf``
+    arguments, a ``gh`` body or title, a ``-m`` message and the body of a
+    quoted-delimiter heredoc fed to a data sink. Bash hands each of those on
+    literally, so a glob character in one is not a glob.
+
+    What is left is what bash or a program can still expand. Unquoted words,
+    tool glob options, and any quoted text given to a program that globs or
+    runs it (``python -c``, ``bash -c``, ``find -name``) are untouched.
+    """
+    if "'" not in command and '"' not in command and "<<" not in command:
+        return command
+    text = strip_inert_spans(command)
+    pieces: list[str] = []
+    copied_to = 0
+    for start, end in split_unquoted_spans(text, _SEGMENT_SEPARATORS):
+        segment = text[start:end]
+        head = segment_command_word(segment)
+        if head not in _TEXT_CONSUMER_HEADS:
+            continue
+        spans = shell_word_spans(segment)
+        for index, (word_start, word_end) in enumerate(spans):
+            previous = segment[spans[index - 1][0] : spans[index - 1][1]] if index else ""
+            if _is_text_operand(segment[word_start:word_end], previous, head):
+                pieces.append(text[copied_to : start + word_start])
+                pieces.append(_TEXT_OPERAND_PLACEHOLDER)
+                copied_to = start + word_end
+    pieces.append(text[copied_to:])
+    return "".join(pieces)
+
+
+class _GlobExpansionGate:
+    """Whether a token's text is something bash can glob-expand.
+
+    Built once per scan and queried only for a glob-shaped token. A command
+    with nothing to mask answers True for every token without another pass. Any
+    other command is re-tokenised once with its text operands blanked
+    (:func:`_without_text_operands`); a token is then expandable only if it
+    still occurs there, so text that also appears unquoted elsewhere stays
+    judged.
+    """
+
+    def __init__(self, command: str, tokenise: Callable[[str], Iterable[str]]) -> None:
+        self._command = command
+        self._tokenise = tokenise
+        self._expandable: set[str] | None = None
+        self._resolved = False
+
+    def expands(self, token: str) -> bool:
+        """False only when ``token`` occurs solely inside text operands."""
+        if not self._resolved:
+            view = _without_text_operands(self._command)
+            if view != self._command:
+                self._expandable = set(self._tokenise(view))
+            self._resolved = True
+        return self._expandable is None or token in self._expandable
+
+
 def iter_protected_mentions(
     command: str,
     patterns: tuple[str, ...],
@@ -1480,32 +1607,22 @@ def iter_protected_mentions(
         if _has_leading_wildcard(pattern) and _has_trailing_wildcard(pattern)
     )
     both_edges_stems = tuple(stem for stem, _pattern in _pattern_literal_stems(both_edges_patterns))
-    # The import-module-path exemption is applied ONCE, up front, and every
-    # stream reads the same stripped text -- an import statement's dotted
-    # module path is not a filesystem path regardless of which stream would
-    # otherwise re-discover it (M-1, n466-n24 review 4: the brace and
-    # normalised-word streams read raw `command` before this fix, so an
-    # `import <name>` line naming a protected stem in its own module path
-    # was exempted for `_tokenise` only, and still flagged by the other two).
-    import_stripped = _without_import_module_paths(command)
-    words_for_normalised_stream: Iterable[str]
-    words_for_file_url_stream: Iterable[str]
-    if normalised_words is not None:
-        words_for_normalised_stream = normalised_words
-        words_for_file_url_stream = normalised_words
-    else:
-        words_for_normalised_stream, words_for_file_url_stream = itertools.tee(
-            shell_expansion.iter_normalised_shell_words(import_stripped, deadline=deadline)
-        )
-    tokens = itertools.chain(
-        _tokenise(import_stripped),
-        _brace_expansion_tokens(
-            command, bash_tool_command=bash_tool_command, source_code=context == "content"
+    tokens = _mention_token_stream(
+        command,
+        deadline=deadline,
+        bash_tool_command=bash_tool_command,
+        source_code=context == "content",
+        normalised_words=normalised_words,
+    )
+    glob_gate = _GlobExpansionGate(
+        command,
+        lambda view: _mention_token_stream(
+            view,
+            deadline=deadline,
+            bash_tool_command=bash_tool_command,
+            source_code=False,
+            normalised_words=None,
         ),
-        _normalised_word_tokens(
-            import_stripped, deadline=deadline, words=words_for_normalised_stream
-        ),
-        _file_url_path_tokens(import_stripped, deadline=deadline, words=words_for_file_url_stream),
     )
     # Own live finding (team-lead's 1 MB timing follow-up to review 3): real
     # content is full of REPEATED short tokens (log lines, minified code,
@@ -1542,11 +1659,53 @@ def iter_protected_mentions(
                 both_edges_patterns=both_edges_patterns,
                 both_edges_stems=both_edges_stems,
                 context=context,
+                expands_globs=functools.partial(glob_gate.expands, token),
             )
             mention_cache[token] = pattern
         if pattern is not None and token not in yielded_tokens:
             yielded_tokens.add(token)
             yield (pattern, token)
+
+
+def _mention_token_stream(
+    command: str,
+    *,
+    deadline: float | None,
+    bash_tool_command: bool,
+    source_code: bool,
+    normalised_words: list[str] | None,
+) -> Iterator[str]:
+    """The four lazily chained token streams :func:`iter_protected_mentions`
+    judges: the crude tokenisation, every raw brace word, every decoded shell
+    word, and every ``file:`` URL path. See that function for why each exists
+    and why none is built ahead of the loop that consumes it."""
+    # The import-module-path exemption is applied ONCE, up front, and every
+    # stream reads the same stripped text -- an import statement's dotted
+    # module path is not a filesystem path regardless of which stream would
+    # otherwise re-discover it (M-1, n466-n24 review 4: the brace and
+    # normalised-word streams read raw `command` before this fix, so an
+    # `import <name>` line naming a protected stem in its own module path
+    # was exempted for `_tokenise` only, and still flagged by the other two).
+    import_stripped = _without_import_module_paths(command)
+    words_for_normalised_stream: Iterable[str]
+    words_for_file_url_stream: Iterable[str]
+    if normalised_words is not None:
+        words_for_normalised_stream = normalised_words
+        words_for_file_url_stream = normalised_words
+    else:
+        words_for_normalised_stream, words_for_file_url_stream = itertools.tee(
+            shell_expansion.iter_normalised_shell_words(import_stripped, deadline=deadline)
+        )
+    return itertools.chain(
+        _tokenise(import_stripped),
+        _brace_expansion_tokens(
+            command, bash_tool_command=bash_tool_command, source_code=source_code
+        ),
+        _normalised_word_tokens(
+            import_stripped, deadline=deadline, words=words_for_normalised_stream
+        ),
+        _file_url_path_tokens(import_stripped, deadline=deadline, words=words_for_file_url_stream),
+    )
 
 
 def _brace_expansion_tokens(
@@ -1744,8 +1903,13 @@ def _token_mention(
     both_edges_stems: tuple[str, ...] = (),
     context: MentionContext = "bash",
     realpath_cache: dict[str, str | None] | None = None,
+    expands_globs: Callable[[], bool] = lambda: True,
 ) -> str | None:
     """The first protected glob ``token`` names (or could glob-expand to), else None.
+
+    ``expands_globs`` answers, only when ``token`` is glob-shaped, whether the
+    word can be glob-expanded at all (:class:`_GlobExpansionGate`). ``False``
+    leaves the literal check as the only judge of the token.
 
     ``context`` (n466-n24 review 4 addendum, false-positive fold-in b) --
     see :data:`MentionContext`. The LITERAL check just below (an exact/glob-
@@ -1787,6 +1951,11 @@ def _token_mention(
             if matched is not None:
                 return matched
         if context != "bash":
+            continue
+        # Everything below judges a word bash would glob-expand. Text that a
+        # pure text consumer takes quoted is literal to bash, so it is only
+        # ever matched by the literal check above (ledger 00474 N269).
+        if any(_is_glob_shaped(form) for form in (raw_form, *expansions)) and not expands_globs():
             continue
         for form in expansions:
             if not _is_glob_shaped(form):

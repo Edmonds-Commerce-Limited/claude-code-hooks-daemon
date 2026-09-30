@@ -855,6 +855,30 @@ def iter_shell_words(text: str) -> Iterator[str | None]:
         yield text[start:index]
 
 
+def shell_word_spans(text: str) -> list[tuple[int, int]]:
+    """:func:`iter_shell_words` as ``(start, end)`` offsets into ``text``.
+
+    Ends at the same point that function does: at the first word whose extent
+    a substitution or an unterminated quote hides. Every span returned is
+    exact; nothing after the cut is guessed at.
+    """
+    spans: list[tuple[int, int]] = []
+    index = 0
+    length = len(text)
+    while True:
+        while index < length and text[index] in _WORD_BREAK_CHARS:
+            index += 1
+        if index >= length:
+            return spans
+        start = index
+        while index < length and text[index] not in _WORD_BREAK_CHARS:
+            end = _quoted_span_end(text, index)
+            if end is None:
+                return spans
+            index = end
+        spans.append((start, index))
+
+
 def _quoted_span_end(text: str, index: int) -> int | None:
     """Index past the escape, quoted span or plain character at ``index``;
     ``None`` when its extent cannot be known without running the shell."""
