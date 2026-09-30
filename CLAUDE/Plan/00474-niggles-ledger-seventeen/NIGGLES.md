@@ -96,7 +96,17 @@ find which one spends the budget. Then either make it cheaper, or dispatch the
 assertor (a pure config read) ahead of the slow handlers so a budget overrun
 cannot starve it.
 
-**Status**: ⬜ Open.
+**Status**: ✅ Fixed in aa557cc12. Measured: no single handler overran. The
+serial chain took 33 to 44 s under load, and the repo-walking sweeps (gitignore,
+secret hygiene, docs QA, git upstream, plan QA, reference repos) spent about
+30 s of it, while the assertor needs 0.5 s but sat behind them. A `slow-sweep`
+tag now orders those six after every untagged handler. A chain with no
+SAFETY+BLOCKING handler that overruns keeps the output of the handlers that
+finished, marked "Chain cut short", and that output shares no objects with the
+abandoned thread. SAFETY+BLOCKING chains still fail closed, and the budget is
+unchanged. Proven live at load 22: a real SessionStart names `issue-sdlc`
+exactly when the session presents as `cchd-sdlc-runner`. The sweeps still cost
+about 30 s under load, so their own advisories can still be cut short.
 
 ### N275 — `secret_file_guard` judges an Edit of a YAML file as an unreadable shell command
 
