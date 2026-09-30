@@ -4,6 +4,25 @@ Newest first. Each entry says how it was found, why it happens, and the
 candidate remedies. Numbering continues from
 [ledger sixteen](../00466-niggles-ledger-sixteen/NIGGLES.md).
 
+### N265 — `secret_file_guard` spends about 2.2 s of CPU on one realistic Python program
+
+**Found**: CI on the N101 merge (`5f9600fb2`, run 36689213931) denied
+`test_a_realistic_dict_and_f_string_program_stays_allowed` on all three Pythons: the
+guard's scan did not finish within its 5 s production deadline, so it failed closed.
+The fix agent measured the scan at about 2.2 s of CPU on that input, so a runner
+about twice as slow as this host crosses the deadline. The test now injects a 120 s
+deadline (`d8b240179`), which keeps it honest about the verdict but hides the cost.
+
+**Why it matters**: a guard that runs before every Bash call and takes seconds on
+ordinary input slows every agent, and on a loaded host it denies safe commands.
+Whether N101's merge made the scan slower is not established.
+
+**Candidate remedy**: profile the scan on that input and bound the cost of the
+expensive step. Add a performance test with a budget relative to a baseline,
+not a wall-clock bound (the N222 lesson).
+
+**Status**: ⬜ Open.
+
 ### N135, N176, N177, N189, N244–N246 — carried from the dropped N53 branch
 
 Recorded only on `worktree-n466-n53`, which was dropped. Their write-ups are kept

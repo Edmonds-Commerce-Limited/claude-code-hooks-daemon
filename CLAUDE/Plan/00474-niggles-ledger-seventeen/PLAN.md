@@ -38,6 +38,7 @@ Full write-ups are in [NIGGLES.md](NIGGLES.md). One line each here:
 
 | #    | Verdict                                                                         | Origin              | Status                  |
 | ---- | ------------------------------------------------------------------------------- | ------------------- | ----------------------- |
+| N265 | `secret_file_guard` spends about 2.2 s of CPU on one realistic Python program   | N101 CI red         | ⬜ Open                 |
 | N264 | A sub-agent's edits landed, uncommitted, in another branch's worktree           | 00466 landing       | ⬜ Open                 |
 | N246 | Plan and docs QA judge a same-command `git add` as two partial trees            | Carried, N53 branch | ⬜ Open                 |
 | N245 | A pathspec commit is judged on the index as well as the named paths             | Carried, N53 branch | ⬜ Open                 |
