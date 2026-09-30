@@ -28,7 +28,11 @@ self-authorised exactly the disclosure this guard exists to prevent (the
 from __future__ import annotations
 
 import logging
+import posixpath
 import re
+import shlex
+from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Final
 
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, HookInputField, Priority
@@ -43,7 +47,8 @@ from claude_code_hooks_daemon.handlers.utils.quarantine import quarantine_agent_
 from claude_code_hooks_daemon.utils import secret_file_matching as sfm
 from claude_code_hooks_daemon.utils.bash_flags import SPAN_SEPARATORS, split_statements
 from claude_code_hooks_daemon.utils.command_evasion import GIT_INVOCATION
-from claude_code_hooks_daemon.utils.shell_segmentation import split_unquoted
+from claude_code_hooks_daemon.utils.path_exclusion import resolve_project_root
+from claude_code_hooks_daemon.utils.shell_segmentation import split_unquoted_spans
 
 _RULE = Rule(
     rule_id=RuleID.FLAGGABLE_CONTENT_CHANNEL,
@@ -207,8 +212,12 @@ class FlaggableContentChannelGuardHandler(PreToolUseHandlerBase):
     def matches(self, hook_input: dict[str, Any]) -> bool:
         return self._matched_reason(hook_input) is not None
 
-    def _matched_reason(self, hook_input: dict[str, Any]) -> tuple[str, str] | None:
-        """``(shape_label, matched_glob)`` for the first revealing segment, or None."""
+    def _matched_reason(self, hook_input: dict[str, Any]) -> tuple[str, str, str | None] | None:
+        """``(shape_label, matched_glob, remedy)`` for the first revealing segment, or None.
+
+        ``remedy`` is set only for a recursive search, where the usual advice to
+        delegate to the quarantine agent is wrong: it names the exclusion to add.
+        """
         if not isinstance(hook_input, dict):
             return None
         if hook_input.get(HookInputField.TOOL_NAME) != ToolName.BASH:
@@ -226,12 +235,17 @@ class FlaggableContentChannelGuardHandler(PreToolUseHandlerBase):
         if not shapes:
             return None
 
-        for segment in _segments(command):
+        raw_cwd = hook_input.get(HookInputField.CWD)
+        cwd = raw_cwd if isinstance(raw_cwd, str) else None
+        for segment, piped_in in _segments(command):
             for label, pattern in shapes:
                 if pattern.search(segment):
                     mention = sfm.find_protected_mention(segment, globs)
                     if mention is not None:
-                        return (label, mention)
+                        return (label, mention, None)
+            reached = _recursive_search_reaches(segment, globs, cwd=cwd, piped_in=piped_in)
+            if reached is not None:
+                return (_RECURSIVE_SEARCH_LABEL, reached.glob, reached.remedy)
         return None
 
     def get_rules(self) -> list[Rule]:
@@ -252,7 +266,19 @@ class FlaggableContentChannelGuardHandler(PreToolUseHandlerBase):
         if matched is None:
             return GatingResult(decision=Decision.ALLOW)
 
-        shape_label, glob = matched
+        shape_label, glob, remedy = matched
+
+        if shape_label == _RECURSIVE_SEARCH_LABEL:
+            return GatingResult(
+                decision=Decision.DENY,
+                reason=(
+                    f"BLOCKED [{RuleID.FLAGGABLE_CONTENT_CHANNEL}]: a recursive search can read "
+                    f"the flaggable directory matched by `{glob}`.\n\n"
+                    f"{remedy or _NO_REMEDY}\n\n"
+                    "Do not open the flagged content here; delegate its review to the "
+                    "quarantine subagent (hooks-daemon-opus-security)."
+                ),
+            )
 
         transcript_path = hook_input.get(HookInputField.TRANSCRIPT_PATH)
         tracker = get_data_layer().disclosure
@@ -284,6 +310,13 @@ class FlaggableContentChannelGuardHandler(PreToolUseHandlerBase):
             "matching a configured `flaggable_path_globs` entry. A plain "
             "`git status`, `git log` (no `-p`), or `git add <path>` (no "
             "`-p`) is NOT content-revealing and stays allowed.\n\n"
+            "**Recursive searches** (`grep -r`, `rg`, `git grep`) are denied "
+            "when a root they search (the working directory, if none is "
+            "named) contains a flaggable directory, unless they exclude it: "
+            "`grep -r --exclude-dir=<name>`, `rg -g '!<path>/**'`, or "
+            "`git grep PATTERN -- ':!<path>'` (path relative to the working "
+            "directory). The deny message prints the exact flag. Searches "
+            "whose roots lie off the flagged directory are allowed.\n\n"
             "**Why**: those shapes pull a flaggable file's content into "
             "context inside a routine command's output, with no deliberate "
             "Read at all — the one leak an agent-side convention cannot "
@@ -360,14 +393,390 @@ class FlaggableContentChannelGuardHandler(PreToolUseHandlerBase):
         ]
 
 
-def _segments(command: str) -> list[str]:
+def _segments(command: str) -> list[tuple[str, bool]]:
     """Top-level command segments: statements, then pipe/&&/|| spans within each.
 
     Mirrors ``verification_result_gate``'s decomposition so both handlers
     agree on what one "command" is — quote-aware and heredoc-safe via
-    ``split_statements``/``split_unquoted``.
+    ``split_statements``/``split_unquoted_spans``. Each segment carries
+    whether a pipe feeds it, because a search with no path operand reads that
+    stdin instead of the working directory.
     """
-    segments: list[str] = []
+    segments: list[tuple[str, bool]] = []
     for statement in split_statements(command):
-        segments.extend(split_unquoted(statement, SPAN_SEPARATORS))
-    return [segment.strip() for segment in segments if segment.strip()]
+        for start, end in split_unquoted_spans(statement, SPAN_SEPARATORS):
+            segment = statement[start:end].strip()
+            if not segment:
+                continue
+            before = statement[:start].rstrip()
+            segments.append((segment, before.endswith("|") and not before.endswith("||")))
+    return segments
+
+
+# ── Recursive searches: which directories can they reach? ───────────────────
+#
+# A grep/rg that descends a directory reads every file under it, so naming
+# ``tests/`` (or nothing, meaning the working directory) reaches a flagged
+# directory beneath it without ever mentioning it. Conversely a search whose
+# named paths all lie off the flagged tree, or that explicitly excludes every
+# flagged directory it would reach, cannot read it.
+
+_RECURSIVE_SEARCH_LABEL: Final[str] = "recursive grep/rg search reaching a flaggable directory"
+_NO_REMEDY: Final[str] = (
+    "The search roots could not be placed with certainty (a shell expansion, unparseable "
+    "quoting, a `git -C`, or unknown pathspec magic). Name explicit narrower roots that do "
+    "not contain it."
+)
+_GREP_SHAPE: Final[re.Pattern[str]] = re.compile(r"\b(?:grep|egrep|fgrep|zgrep|rg)\b")
+_GREP_COMMANDS: Final[frozenset[str]] = frozenset({"grep", "egrep", "fgrep", "zgrep"})
+_TOOL_GREP: Final[str] = "grep"
+_TOOL_RG: Final[str] = "rg"
+_TOOL_GIT: Final[str] = "git"
+# Global git options that move the search somewhere the payload cwd does not describe.
+_GIT_RELOCATING_OPTIONS: Final[frozenset[str]] = frozenset({"-C", "--git-dir", "--work-tree"})
+_GIT_OPTIONS_TAKING_VALUE: Final[frozenset[str]] = frozenset(
+    {"-c", "--namespace", "--exec-path"} | _GIT_RELOCATING_OPTIONS
+)
+_PATTERN_OPTIONS: Final[frozenset[str]] = frozenset({"-e", "-f", "--regexp", "--file"})
+# Options whose value is the next word; without this the value would be read
+# as the pattern or as a search root.
+_OPTIONS_TAKING_VALUE: Final[frozenset[str]] = frozenset(
+    {
+        "-A", "-B", "-C", "-m", "-d", "-D", "-g", "-t", "-T", "-j", "-M",
+        "--after-context", "--before-context", "--context", "--max-count",
+        "--directories", "--devices", "--include", "--exclude", "--exclude-dir",
+        "--exclude-from", "--glob", "--iglob", "--type", "--type-not", "--color", "--label",
+    }
+)  # fmt: skip
+_RECURSIVE_LONG_OPTIONS: Final[frozenset[str]] = frozenset(
+    {"--recursive", "--dereference-recursive"}
+)
+_GLOB_OPTIONS: Final[frozenset[str]] = frozenset({"-g", "--glob", "--iglob"})
+_DIRECTORIES_OPTIONS: Final[frozenset[str]] = frozenset({"-d", "--directories"})
+_EXCLUDE_DIR_OPTION: Final[str] = "--exclude-dir"
+_NEGATION: Final[str] = "!"
+_GIT_EXCLUDE_MAGIC: Final[tuple[str, ...]] = (":(exclude)", ":!", ":^")
+_WILDCARD_CHARS: Final[str] = "*?[{"
+_SHELL_EXPANSION_CHARS: Final[str] = "$`"
+
+
+@dataclass
+class _SearchArguments:
+    """What a grep-family invocation's arguments say about where it searches."""
+
+    recursive: bool
+    operands: list[str] = field(default_factory=list)
+    exclude_dirs: list[str] = field(default_factory=list)
+    globs: list[str] = field(default_factory=list)
+    pattern_given: bool = False
+
+    def take_value(self, option: str, value: str) -> None:
+        if option == _EXCLUDE_DIR_OPTION:
+            self.exclude_dirs.append(value)
+        elif option in _GLOB_OPTIONS:
+            self.globs.append(value)
+        elif option in _DIRECTORIES_OPTIONS and value == "recurse":
+            self.recursive = True
+
+
+@dataclass(frozen=True)
+class _Reach:
+    """A flaggable glob a recursive search can read, and the exact way out (if any)."""
+
+    glob: str
+    remedy: str | None
+
+
+def _has_wildcard(component: str) -> bool:
+    return any(char in component for char in _WILDCARD_CHARS)
+
+
+def _literal_head(path: str) -> str:
+    """``path`` up to, not including, its first wildcard component."""
+    components = path.split("/")
+    cut = next((i for i, part in enumerate(components) if _has_wildcard(part)), len(components))
+    head = "/".join(components[:cut])
+    return head or ("/" if path.startswith("/") else ".")
+
+
+def _root_relative_components(path: str, *, cwd: str | None, root: str | None) -> list[str] | None:
+    """Directory components a search rooted at ``path`` starts from, relative to the project.
+
+    ``[]`` is the project root itself; ``[".."]`` marks a path outside the
+    project. ``None`` means the path cannot be placed, so the caller fails
+    closed: a shell expansion, or a relative path with no working directory.
+    """
+    if any(char in path for char in _SHELL_EXPANSION_CHARS):
+        return None
+    head = str(Path(_literal_head(path)).expanduser())
+    if not posixpath.isabs(head):
+        if cwd is None or not posixpath.isabs(cwd):
+            return None
+        head = posixpath.join(cwd, head)
+    base = root or cwd
+    if base is None:
+        return None
+    relative = posixpath.relpath(posixpath.normpath(head), posixpath.normpath(base))
+    if relative == ".":
+        return []
+    return relative.split("/")
+
+
+def _flagged_components(glob: str) -> list[str]:
+    """Literal leading directory components of a flaggable glob (empty: anywhere)."""
+    components = glob.removeprefix("./").split("/")
+    cut = next((i for i, part in enumerate(components) if _has_wildcard(part)), len(components))
+    return [part for part in components[:cut] if part]
+
+
+def _is_prefix(shorter: list[str], longer: list[str]) -> bool:
+    return longer[: len(shorter)] == shorter
+
+
+def _search_command(words: list[str]) -> tuple[str, int, bool] | None:
+    """``(tool, index of the first argument, relocated)`` of a grep-family call, else None.
+
+    ``relocated`` is True for a ``git -C``/``--git-dir``/``--work-tree`` search,
+    whose working directory the payload cwd does not describe.
+    """
+    for index, word in enumerate(words):
+        name = posixpath.basename(word)
+        if name in _GREP_COMMANDS:
+            return _TOOL_GREP, index + 1, False
+        if name == _TOOL_RG:
+            return _TOOL_RG, index + 1, False
+        if name == _TOOL_GIT:
+            position = index + 1
+            relocated = False
+            while position < len(words) and words[position].startswith("-"):
+                option = words[position].partition("=")[0]
+                relocated = relocated or option in _GIT_RELOCATING_OPTIONS
+                position += 2 if words[position] in _GIT_OPTIONS_TAKING_VALUE else 1
+            if position < len(words) and words[position] == "grep":
+                return _TOOL_GIT, position + 1, relocated
+            return None
+    return None
+
+
+def _scan_options(arguments: list[str], *, tool: str) -> _SearchArguments:
+    """Read options and operands of a grep-family invocation's arguments."""
+    scan = _SearchArguments(recursive=tool != _TOOL_GREP)
+    pending: str | None = None
+    options_ended = False
+    for word in arguments:
+        if pending is not None:
+            scan.take_value(pending, word)
+            pending = None
+        elif options_ended or not word.startswith("-") or word == "-":
+            scan.operands.append(word)
+        elif word == "--":
+            options_ended = True
+        elif word.startswith("--"):
+            name, has_value, value = word.partition("=")
+            scan.recursive = scan.recursive or name in _RECURSIVE_LONG_OPTIONS
+            scan.pattern_given = scan.pattern_given or name in _PATTERN_OPTIONS
+            if name in _OPTIONS_TAKING_VALUE or name in _PATTERN_OPTIONS:
+                if has_value:
+                    scan.take_value(name, value)
+                else:
+                    pending = name
+        else:
+            cluster = word[1:]
+            for offset, char in enumerate(cluster):
+                option = f"-{char}"
+                if char in "rR":
+                    scan.recursive = True
+                elif option in _PATTERN_OPTIONS or option in _OPTIONS_TAKING_VALUE:
+                    scan.pattern_given = scan.pattern_given or option in _PATTERN_OPTIONS
+                    attached = cluster[offset + 1 :]
+                    if attached:
+                        scan.take_value(option, attached)
+                    else:
+                        pending = option
+                    break
+    if not scan.pattern_given and scan.operands:
+        scan.operands = scan.operands[1:]
+    return scan
+
+
+def _recursive_search_reaches(
+    segment: str, globs: tuple[str, ...], *, cwd: str | None, piped_in: bool
+) -> _Reach | None:
+    """The flaggable glob a recursive search in ``segment`` can read, else None.
+
+    Fails closed: a search whose roots or exclusions cannot be placed
+    (unparseable quoting, a shell expansion, a relative path with no working
+    directory, a relocated ``git -C``, unknown pathspec magic) is treated as
+    reaching the first glob, with no remedy beyond narrower roots.
+    """
+    if not _GREP_SHAPE.search(segment):
+        return None
+    unplaceable = _Reach(globs[0], None)
+    try:
+        words = shlex.split(segment)
+    except ValueError:
+        return unplaceable
+    found = _search_command(words)
+    if found is None:
+        return None
+    tool, start, relocated = found
+    scan = _scan_options(words[start:], tool=tool)
+    if not scan.recursive:
+        return None
+    if relocated:
+        return unplaceable
+    pathspec_excludes: list[str] = []
+    roots = scan.operands
+    if tool == _TOOL_GIT:
+        roots = []
+        for operand in scan.operands:
+            magic = next((m for m in _GIT_EXCLUDE_MAGIC if operand.startswith(m)), None)
+            if magic is not None:
+                pathspec_excludes.append(operand.removeprefix(magic))
+            elif operand.startswith(":"):
+                return unplaceable
+            else:
+                roots.append(operand)
+    if not roots:
+        # rg reads a piped stdin instead; grep -r and git grep search the cwd.
+        if tool == _TOOL_RG and piped_in:
+            return None
+        roots = ["."]
+    project_root = resolve_project_root()
+    cwd_components = _cwd_components(cwd, project_root)
+    for search_root in roots:
+        searched = _root_relative_components(search_root, cwd=cwd, root=project_root)
+        if searched is None:
+            return unplaceable
+        if searched[:1] == [".."]:
+            continue
+        for glob in globs:
+            flagged = _flagged_components(glob)
+            if not (_is_prefix(searched, flagged) or _is_prefix(flagged, searched)):
+                continue
+            if _excludes_flagged(
+                flagged, searched, cwd_components, scan, tool=tool, pathspecs=pathspec_excludes
+            ):
+                continue
+            return _Reach(glob, _remedy(glob, flagged, searched, cwd_components, tool))
+    return None
+
+
+def _cwd_components(cwd: str | None, root: str | None) -> list[str] | None:
+    """The payload cwd as components below the project root, or None if it is not below it."""
+    if cwd is None:
+        return None
+    placed = _root_relative_components(".", cwd=cwd, root=root)
+    return None if placed is None or placed[:1] == [".."] else placed
+
+
+def _excluded_directory(
+    written: str, flagged: list[str], searched: list[str], cwd_components: list[str] | None
+) -> bool:
+    """Whether the cwd-relative path ``written`` names a flagged directory below the search root.
+
+    Only a literal path counts (no wildcard): ``tests/fixtures`` excludes
+    ``tests/fixtures/cyber-flag`` too, but only when that excluded directory
+    lies strictly below the search root, where the search would otherwise enter it.
+    """
+    components = [part for part in written.removeprefix("./").strip("/").split("/") if part]
+    if (
+        not components
+        or cwd_components is None
+        or any(_has_wildcard(part) or part in (".", "..") for part in components)
+    ):
+        return False
+    depth = len(cwd_components) + len(components)
+    return depth > len(searched) and flagged[:depth] == cwd_components + components
+
+
+def _excluded_name(name: str, flagged: list[str], searched: list[str]) -> bool:
+    """Whether the bare directory ``name`` matches a flagged component below the search root."""
+    return not _has_wildcard(name) and name in flagged[len(searched) :] and name not in (".", "..")
+
+
+def _rg_glob_excludes(
+    body: str, flagged: list[str], searched: list[str], cwd_components: list[str] | None
+) -> bool:
+    """Whether one negated rg glob (without its ``!``) excludes a flagged directory.
+
+    rg globs follow gitignore rules relative to the cwd: a pattern with no
+    slash except a trailing one matches that name at any depth, any other
+    pattern is anchored to the cwd.
+    """
+    body = body.removesuffix("/")
+    if body.startswith("**/"):
+        name = body[3:].removesuffix("/**")
+        return "/" not in name and _excluded_name(name, flagged, searched)
+    anchored = "/" in body
+    body = body.removesuffix("/**")
+    if anchored:
+        return _excluded_directory(body, flagged, searched, cwd_components)
+    return _excluded_name(body, flagged, searched)
+
+
+def _excludes_flagged(
+    flagged: list[str],
+    searched: list[str],
+    cwd_components: list[str] | None,
+    scan: _SearchArguments,
+    *,
+    tool: str,
+    pathspecs: list[str],
+) -> bool:
+    """Whether the search explicitly excludes a flagged directory it would otherwise enter.
+
+    Conservative: a root at or inside the flagged directory, an unanchored
+    glob with no fixed directory, and anything not recognised all answer False.
+    """
+    if not flagged or len(searched) >= len(flagged):
+        return False
+    if tool == _TOOL_GREP:
+        return any(
+            _excluded_name(name.rstrip("/"), flagged, searched) for name in scan.exclude_dirs
+        )
+    if tool == _TOOL_GIT:
+        return any(
+            _excluded_directory(path, flagged, searched, cwd_components) for path in pathspecs
+        )
+    # rg: one un-negated glob could re-include the directory, so none is tolerated.
+    if not scan.globs or not all(glob.startswith(_NEGATION) for glob in scan.globs):
+        return False
+    return any(
+        _rg_glob_excludes(glob.removeprefix(_NEGATION), flagged, searched, cwd_components)
+        for glob in scan.globs
+    )
+
+
+def _remedy(
+    glob: str,
+    flagged: list[str],
+    searched: list[str],
+    cwd_components: list[str] | None,
+    tool: str,
+) -> str:
+    """The exact change that would let this search through."""
+    if not flagged:
+        return (
+            f"The flaggable glob `{glob}` has no fixed directory, so it cannot be excluded. "
+            "Search named files or narrower roots instead."
+        )
+    directory = "/".join(flagged)
+    if len(searched) >= len(flagged):
+        return f"This search root is inside the flagged directory `{directory}`. Search a root outside it."
+    relative = (
+        "/".join(flagged[len(cwd_components) :])
+        if cwd_components is not None and flagged[: len(cwd_components)] == cwd_components
+        else None
+    )
+    if tool == _TOOL_GREP:
+        flag: str | None = f"--exclude-dir={flagged[-1]}"
+    elif tool == _TOOL_RG:
+        flag = f"-g '!{relative}/**'" if relative else f"-g '!{flagged[-1]}'"
+    else:
+        flag = f"':!{relative}'" if relative else None
+    added = f"Add `{flag}` to exclude `{directory}`, or" if flag else "Search"
+    return (
+        f"This recursive search would read the flagged directory `{directory}`. "
+        f"{added} name narrower roots that do not contain it."
+    )
