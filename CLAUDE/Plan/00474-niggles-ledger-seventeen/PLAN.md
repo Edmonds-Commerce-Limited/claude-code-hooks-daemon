@@ -38,6 +38,7 @@ Full write-ups are in [NIGGLES.md](NIGGLES.md). One line each here:
 
 | #          | Verdict                                                                                                          | Origin              | Status                  |
 | ---------- | ---------------------------------------------------------------------------------------------------------------- | ------------------- | ----------------------- |
+| N270       | The workspace venv has drifted from `uv.lock` (pytest 9.1.1 against 9.0.3)                                       | Coordinator         | ⬜ Open                 |
 | N269       | `secret_file_guard` expands a single-quoted grep regex as a filename glob                                        | Coordinator         | ⬜ Open                 |
 | N268       | A symlinked-project daemon test's teardown refuses a daemon that is exiting                                      | Main CI             | ⬜ Open                 |
 | N267       | Dropping a stale branch always needs a human, even when nothing can be lost                                      | Owner               | 🔄 In progress          |

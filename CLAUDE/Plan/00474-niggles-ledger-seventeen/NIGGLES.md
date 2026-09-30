@@ -26,6 +26,18 @@ other ledgers' numbering (00422 for `p422-close`, 00421's plan for `d-00421`).
 
 **Status**: ⬜ Open (all 55).
 
+### N270 — the workspace venv has drifted from `uv.lock`
+
+**Found**: `test_subagent_full_qa_blocker.py::TestThePytestOptionGrammar::test_every_value_option_of_the_running_pytest_is_known`
+fails locally (`['--max-warnings', '--report-chars']` unknown) but passes in CI.
+The workspace venv runs pytest 9.1.1 while `uv.lock` pins 9.0.3, so local runs
+test a different toolchain from CI.
+
+**Candidate remedy**: re-sync the venv from the lock (`uv sync --frozen`) when no
+agent is running tests on it, and find what installed the newer pytest.
+
+**Status**: ⬜ Open.
+
 ### N269 — `secret_file_guard` expands a single-quoted grep regex as a filename glob
 
 **Found**: after the N101 merge, a Bash command whose `grep -E` pattern was a
