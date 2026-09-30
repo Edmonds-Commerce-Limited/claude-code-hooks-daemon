@@ -16,6 +16,10 @@ handler" is a description and not a property the code can check:
   `CronCreate` to run. Session crons belong to the coordinator's session, and
   the incident behind #40 was a subagent DELETING one on its own initiative —
   so instructing a subagent to manage them is the same category of mistake.
+- `cron-subagent-stop-enforcer` is the SubagentStop twin of the above (issue
+  #62): a finished subagent was denied and told to `CronCreate` the
+  coordinator's jobs. Its event only ever fires for subagents, so MAIN leaves it
+  inert by default; `scope: ALL` in a project's config restores it.
 - `teammate-reap-advisor` names the unreaped teammates a stop is waiting on.
   Only the coordinator has teammates.
 
@@ -30,11 +34,10 @@ from it:
   run, because the full gate is the coordinator's. Same reason: `PreToolUse`
   fires for both roles, and the coordinator's own full run must draw nothing.
 
-Everything else stays ALL, including the SubagentStop handlers. Scoping
-`cron-subagent-stop-enforcer` to SUB would be true but redundant — its event
-only ever fires for subagents — and a redundant restriction is a claim to
-maintain for no behaviour gained. That is the line: SUB is for a handler on an
-event BOTH roles reach.
+Everything else stays ALL, including the other SubagentStop handlers. Scoping
+one of them to SUB would be true but redundant — the event only ever fires for
+subagents — and a redundant restriction is a claim to maintain for no behaviour
+gained. That is the line: SUB is for a handler on an event BOTH roles reach.
 
 An INTEGRATION test, not a unit one: the question is what the real registry
 builds from this repository's real config, which is the only place a shipped
@@ -60,7 +63,13 @@ from claude_code_hooks_daemon.handlers.registry import HandlerRegistry
 #: The handlers that must SHIP scoped to MAIN. An exact set, so adding one is a
 #: deliberate edit here with a justification above it.
 _EXPECTED_MAIN: frozenset[str] = frozenset(
-    {"auto-continue-stop", "cron-stop-enforcer", "teammate-reap-advisor"}
+    {
+        "auto-continue-stop",
+        "cron-stop-enforcer",
+        # Issue #62: a subagent never holds the coordinator's crons.
+        "cron-subagent-stop-enforcer",
+        "teammate-reap-advisor",
+    }
 )
 
 #: The handlers that must SHIP scoped to SUB. Exact, for the same reason.

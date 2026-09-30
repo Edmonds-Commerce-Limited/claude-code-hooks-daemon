@@ -69,6 +69,7 @@ from claude_code_hooks_daemon.config.loader import ConfigLoader
 from claude_code_hooks_daemon.config.models import Config
 from claude_code_hooks_daemon.constants.paths import ProjectPath
 from claude_code_hooks_daemon.core.event import EventType
+from claude_code_hooks_daemon.core.handler_scope import scope_admits
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.core.router import EventRouter
 from claude_code_hooks_daemon.daemon.cli import _build_handler_config_mapping
@@ -297,7 +298,8 @@ def _drive_executable_probe(probe: ExecutableProbe, instance: Any, *, source: st
             **probe.extra_hook_input,
         }
 
-        if not instance.matches(hook_input):
+        # Scope first, as the chain applies it (see _drive_hook_input_test).
+        if not scope_admits(instance.scope, hook_input) or not instance.matches(hook_input):
             # The third lesson from tests/unit/daemon/test_playbook_harness.py:
             # a handler that correctly declines to match returns NO verdict at
             # all. That satisfies an ALLOW expectation (nothing was denied) but
@@ -345,7 +347,10 @@ def _drive_hook_input_test(test: dict[str, Any], instance: Any) -> list[str]:
     hook_input = test["hook_input"]
     expected_decision = str(test.get("expected_decision") or "").lower()
 
-    if not instance.matches(hook_input):
+    # The chain applies the handler's scope before it would call matches()
+    # (core/chain.py), so a payload the scope excludes never reaches the
+    # handler: the same "no verdict" outcome as a declined match.
+    if not scope_admits(instance.scope, hook_input) or not instance.matches(hook_input):
         if expected_decision == "deny":
             failures.append(
                 f"{identifier}: expected_decision=DENY but matches() "
