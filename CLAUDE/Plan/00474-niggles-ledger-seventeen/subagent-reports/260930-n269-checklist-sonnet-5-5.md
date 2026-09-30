@@ -45,4 +45,12 @@ Notes:
 - The worktree's venv editable install points at `/workspace/src`, so the tests and probe were run
   with `PYTHONPATH=src` to load this branch's code.
 - Release note renamed from `184-...` to `187-...` (184 is taken on main).
-- Targeted QA: see the commit message / coordinator message for the final result.
+- Targeted QA (`llm_qa.py changed --base main --allow-unmapped`), first run: 27/28 passed,
+  `changed_tests` 3361 passed / 0 failed / 0 skipped. The one failure was `format` (1 file), on a run
+  the tool itself marked "working tree changed during the run" (the post-write formatter touched the
+  test file mid-run). `black` on the test file afterwards reports it unchanged. The run is NOT
+  recorded for this tree.
+- A second, still-tree run queued behind another agent's QA (held by the `p477-provision` worktree)
+  for more than 2600 s of the 3600 s wait and was killed by my own `timeout` wrapper before it got the
+  lock. So no still-tree QA result exists for this commit; the coordinator's full gate must cover it.
+  `shell_segmentation.py` remains unmapped, as in the implementer's report.
