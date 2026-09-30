@@ -26,6 +26,36 @@ other ledgers' numbering (00422 for `p422-close`, 00421's plan for `d-00421`).
 
 **Status**: ⬜ Open (all 55).
 
+### N275 — `secret_file_guard` judges an Edit of a YAML file as an unreadable shell command
+
+**Found**: an `Edit` of `.github/workflows/qa.yml` whose `old_string` held the
+line `name: QA (Python${{ matrix.python-version }})` was denied
+R-SECRET-COMMAND-UNREADABLE ("quoting inside `${...}` whose extent is
+ambiguous"). The same edit anchored on neighbouring lines without `${{` was
+allowed. GitHub Actions expressions are not shell, and a workflow file is not a
+command.
+
+**Candidate remedy**: find which route reads Edit content through the Bash
+command reader, and limit it to content that is a shell script (by extension or
+shebang), or treat an unreadable span in non-shell content as text.
+
+**Status**: ⬜ Open.
+
+### N274 — `AskUserQuestion` is denied as "unattended" while the owner is at the keyboard
+
+**Found**: the owner typed "human here - take me through decisions/blockers one
+at a time". The coordinator's next call, an `AskUserQuestion` offering four
+options, was denied R-ASK-USER-QUESTION-UNJUSTIFIED: "This project is running
+UNATTENDED: no human is reading this session". The question was asked in plain
+text instead. Whatever signal the handler uses to decide the session is
+unattended did not see a real prompt that had just arrived.
+
+**Candidate remedy**: find the handler's unattended signal, and treat a genuine
+user prompt within the current turn (or the last few minutes) as proof a human
+is present.
+
+**Status**: ⬜ Open.
+
 ### N273 — a stalled CI job holds main's queue for up to six hours
 
 **Found**: main run 36729884166 (`ae37690a3`). Its Shell job, normally a

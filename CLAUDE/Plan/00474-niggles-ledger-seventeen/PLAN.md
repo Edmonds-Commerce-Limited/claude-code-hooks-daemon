@@ -38,6 +38,8 @@ Full write-ups are in [NIGGLES.md](NIGGLES.md). One line each here:
 
 | #          | Verdict                                                                                                          | Origin              | Status                  |
 | ---------- | ---------------------------------------------------------------------------------------------------------------- | ------------------- | ----------------------- |
+| N275       | `secret_file_guard` judges an Edit of a YAML workflow holding `${{ }}` as an unreadable shell command            | Coordinator         | ⬜ Open                 |
+| N274       | `AskUserQuestion` is denied as "unattended" right after the owner typed a message                                | Coordinator         | ⬜ Open                 |
 | N273       | A stalled CI job holds main's queue for up to six hours; no job sets `timeout-minutes`                           | Main CI             | ⬜ Open                 |
 | N272       | One `llm_qa changed` run reported `project_handlers` as 0 tests collected; it passed 232 alone                   | Coordinator         | ✅ Fixed                |
 | N271       | An upgrade fails "uv not found" when the only uv is outside the trusted PATH and `~/.local/bin`                  | Main CI red         | ⬜ Open (owner)         |
