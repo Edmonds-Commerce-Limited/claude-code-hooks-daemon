@@ -26,6 +26,42 @@ other ledgers' numbering (00422 for `p422-close`, 00421's plan for `d-00421`).
 
 **Status**: ⬜ Open (all 55).
 
+### N272 — one `llm_qa changed` run reported `project_handlers` as 0 tests collected
+
+**Found**: the targeted run over the p475-t23 merge (`8f2cd8bc8`) failed only
+`project_handlers`, with "0 tests collected - the suite did NOT run" and an empty
+`tests` list. Run on its own straight afterwards, the same check passed 232. The
+run before the merge had also passed 232. A sub-agent was running pytest in
+another worktree at the same time, so contention is the leading suspect, but it
+is not established.
+
+**Candidate remedy**: when it recurs, capture the pytest stderr that
+`check_project_handler_tests.py` discards. A collection of zero is already
+reported as a failure, correctly, so nothing is hidden meanwhile.
+
+**Status**: ⬜ Open.
+
+### N271 — an upgrade fails "uv not found" when the only uv is outside the trusted PATH
+
+**Found**: main CI was red from 2026-09-17, with seven upgrade tests failing on
+all three Pythons. Layer 2 (`scripts/upgrade_version.sh`) resets PATH to trusted
+locations, and `_venv_uv` falls back only to `~/.local/bin/uv`. CI installed uv
+with `pip install uv`, into the setup-python toolchain bin, which neither reads.
+
+**Handled**: a sub-agent's first fix made Layer 2 run the uv the caller's PATH
+named. The coordinator reverted that, because what builds the venv decides what
+code the daemon runs, and the PATH reset exists so the caller cannot pick it. CI
+now installs uv with `--user` into `~/.local/bin`, and a test pins that a uv only
+on the caller's PATH is never run (merge of `worktree-main-red-upgrade`).
+
+**Open for the owner**: a client whose only uv is somewhere else, such as a
+Homebrew prefix or `~/.cargo/bin`, hits the same "uv not found" on upgrade. The
+options are a documented requirement (uv in `~/.local/bin` or a trusted system
+directory), a message naming the fix, or more trusted locations. Widening what
+Layer 2 trusts is a security decision, so it is not made here.
+
+**Status**: ⬜ Open, needs an owner decision.
+
 ### N270 — the workspace venv has drifted from `uv.lock`
 
 **Found**: `test_subagent_full_qa_blocker.py::TestThePytestOptionGrammar::test_every_value_option_of_the_running_pytest_is_known`
