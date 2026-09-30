@@ -26,6 +26,38 @@ other ledgers' numbering (00422 for `p422-close`, 00421's plan for `d-00421`).
 
 **Status**: ⬜ Open (all 55).
 
+### N269 — `secret_file_guard` expands a single-quoted grep regex as a filename glob
+
+**Found**: after the N101 merge, a Bash command whose `grep -E` pattern was a
+single-quoted regex containing `[a-z_/]+\.py` was denied as R-SECRET-READ with
+"a glob or scan in it did not finish within its entry cap or deadline
+(TooManyToEnumerateError)". A single-quoted word is never glob-expanded by bash,
+so there was nothing to enumerate. Worked around by moving the search into a
+Python script file.
+
+**Candidate remedy**: reproduce with `bin/hooks-daemon probe`, then stop the
+enumeration from treating a quoted argument (at least a `grep`/`rg`/`awk`
+pattern operand) as a glob. Related: N256 (quoted heredoc bodies) and N265 (scan
+cost).
+
+**Status**: ⬜ Open.
+
+### N268 — a symlinked-project daemon test's teardown refuses a daemon that is exiting
+
+**Found**: main's full-tier CI run 36706198921 (`bacfb6138`) failed on Python 3.13
+only, with 35,888 passed and one teardown error in
+`tests/integration/test_a_daemon_of_a_symlinked_project_is_stoppable.py`
+(`_stop_every_daemon`, line 97): `stop_verified_daemon` raised
+`RefusedSignalTarget: pid 15809 is not a daemon server: []`. The empty command
+line is a process that is already exiting, so the teardown races the daemon's own
+shutdown. The test arrived with the lifecycle merge (ledger 00466 N67-N70).
+
+**Candidate remedy**: the teardown treats a process that is gone or already
+exiting (empty command line, zombie) as stopped, while still refusing a live
+process that is not a daemon.
+
+**Status**: ⬜ Open.
+
 ### N267 — dropping a stale branch always needs a human, even when nothing can be lost
 
 **Found**: the ledger 00466 cleanup dropped 18 unmerged branches. Their ledger
