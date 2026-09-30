@@ -457,7 +457,7 @@ _hooks_daemon_emit_needs_provision() {
 
     local mode_lines
     if [[ "$mode" == "block" ]]; then
-        mode_lines="This project BLOCKS tool calls until the checkout is provisioned (daemon.unprovisioned_mode: block). Only the provision command is allowed."
+        mode_lines="This project BLOCKS tool calls until the checkout is provisioned (daemon.unprovisioned_mode: block). Only the provision command is allowed: run exactly bash .claude/provision.sh, because the skill's own steps are blocked too."
     else
         mode_lines="Tool calls are NOT blocked (daemon.unprovisioned_mode: warn), but nothing is being checked."
     fi
