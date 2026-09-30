@@ -4,6 +4,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
+- [00474: niggles ledger seventeen](00474-niggles-ledger-seventeen/PLAN.md) - In Progress, the OPEN ledger for new niggles (00466 reached its PLAN.md size limit with N261; numbering continues, opening with N262: the release procedure has no check that the notes fit a GitHub release body)
+
 - [00473: post merge handlers judge the command repository](00473-post-merge-handlers-judge-the-command-repository/PLAN.md) - Not Started (graduated from 00468 G9: `daemon_sync_after_merge` and `merge_qa_report` judge the repository the payload `cwd` names, not the one the command ran in; blocked on Plan 00464's command-directory resolver)
 
 - [00472: subagent model tier selection](00472-subagent-model-tier-selection/PLAN.md) - In Progress (owner request, not urgent: a top-tier main thread often gives subagents the top tier too, where Sonnet or Opus would do; record each dispatch's model and advise a cheaper tier when it fits, the model-choice twin of 00471 and a neighbour of 00470's orchestrator-model choice)
@@ -14,7 +16,7 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00467: recommend the defence before fix plugin to client projects](00467-recommend-the-defence-before-fix-plugin-to-client-projects/PLAN.md) - Blocked (owner request: dogfood the DBF plugin, then recommend it to clients. Phase 1 is done, with shortfalls filed upstream as #4-#6 and recommendation no-go for now. Waiting on the owner's go/no-go, and on one logged-in auto-trigger probe)
 
-- [00466: niggles ledger sixteen](00466-niggles-ledger-sixteen/PLAN.md) - In Progress, the OPEN ledger for new niggles (00422 passed its size warning with N29 and keeps only its own entries; opens with N1: the venv fallback accepts an interpreter that cannot run on this host)
+- [00466: niggles ledger sixteen](00466-niggles-ledger-sixteen/PLAN.md) - In Progress, keeps only its own entries (N1-N261; new niggles go to 00474, and its remaining branches are parked by owner decision). Opened when 00422 passed its size warning with N29, with N1: the venv fallback accepts an interpreter that cannot run on this host)
 
 - [00465: commit gates see the index after same command staging](00465-commit-gates-see-the-index-after-same-command-staging/PLAN.md) - Not Started (from 00422 N26: gates read the index before the command runs, so `git add f && git commit` passes the secret-term scan and every other staged-content gate unexamined; starts after 00464, same gates)
 
@@ -274,27 +276,27 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 ## Plan Statistics
 
-- **Total Plans Created**: 473 (count = `hooksdaemon.latestPlanNumber` git counter)
+- **Total Plans Created**: 474 (count = `hooksdaemon.latestPlanNumber` git counter)
 
 - **Completed**: 413 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 37 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 38 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 
 - **Cancelled/Abandoned**: 13 on disk (count = `Cancelled/` folders: 00032/00034/00035 won't do — delegate mode no longer exists, 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102, 00108 superseded by 00117, 00131 residue declined, 00132 superseded by 00284, 00174 superseded by 00175, 00199 superseded by 00213, 00135 superseded by the supervisor workstream)
 
-- **Folder-to-number reconciliation**: 37 + 413 + 13 = **463 folders**, spanning
-  **460 distinct plan numbers** — three numbers carry two folders each, the
+- **Folder-to-number reconciliation**: 38 + 413 + 13 = **464 folders**, spanning
+  **461 distinct plan numbers** — three numbers carry two folders each, the
   historic collisions already held in `collision_allowlist` (00034, 00039,
   00041). Plans 1–3 are on disk under the pre-zero-padding names
   (`001-`, `002-`, `003-`), so they count as present. That leaves **13** of the
-  473 allocated numbers with no folder: 00005, 00015, 00036, 00073, 00074,
+  474 allocated numbers with no folder: 00005, 00015, 00036, 00073, 00074,
   00145, 00191, 00195, 00210, 00258, 00300, 00303, 00325 — abandoned drafts, numbers
   burned by transient probes (00195 during the v3.51.0 acceptance run, 00258
   during the v3.54.0 one), and one withdrawn duplicate (00210, scaffolded by a
   sub-agent that then found Plan 00208 already covered the work).
-  460 + 13 = 473. ✅
+  461 + 13 = 474. ✅
 
   Note on **00191**: it stays folderless deliberately. The number was claimed
   by a branch that renumbered itself and was never merged; Plan 00267

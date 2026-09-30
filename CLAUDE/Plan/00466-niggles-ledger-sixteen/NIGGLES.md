@@ -3,6 +3,10 @@
 Newest first. Each entry says how it was found, why it happens, and the
 candidate remedies.
 
+This ledger takes no new entries: its PLAN.md reached the size limit with N261.
+New entries, from N262 on, are filed in
+[ledger seventeen](../00474-niggles-ledger-seventeen/NIGGLES.md).
+
 ### N261 — Plan 00463 landed green on the local gate and red on CI
 
 **Found**: CI run 36619680779 on the 00463 merge `83e75879` failed on all three
