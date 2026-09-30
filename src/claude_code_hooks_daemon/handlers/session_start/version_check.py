@@ -20,6 +20,7 @@ from claude_code_hooks_daemon.constants import (
 from claude_code_hooks_daemon.core import AdvisoryResult, ProjectContext
 from claude_code_hooks_daemon.core.handler_bases import SessionStartHandlerBase
 from claude_code_hooks_daemon.core.hook_result import Decision
+from claude_code_hooks_daemon.install.expected_version import read_expected_version
 from claude_code_hooks_daemon.install.install_stamp import InstallStamp, read_install_stamp
 from claude_code_hooks_daemon.utils.git_repo import run_git
 from claude_code_hooks_daemon.utils.session_helpers import is_resume_session
@@ -190,8 +191,13 @@ class VersionCheckHandler(SessionStartHandlerBase):
         if event_name != "SessionStart":
             return False
 
-        # Only run on new sessions (not resume)
-        return not is_resume_session(hook_input)
+        # The update advisory is for new sessions only. Version drift (the tracked
+        # daemon.expected_version names another version than the one running) is
+        # reported on a resumed session too: a pull between sessions is exactly
+        # when it appears, and a resume is how that session comes back.
+        if is_resume_session(hook_input):
+            return bool(self._drift_context())
+        return True
 
     def handle(self, hook_input: dict[str, Any]) -> AdvisoryResult:
         """Check daemon version and advise upgrade if outdated.
@@ -211,6 +217,13 @@ class VersionCheckHandler(SessionStartHandlerBase):
                     reason=None,
                     context=self._branch_install_context(stamp),
                 )
+
+            # Plan 00477 Task 5.1: the project expects another version than the
+            # one running. Local facts only, so it too is answered before the
+            # cache or the network, and says nothing about "latest".
+            drift = self._drift_context()
+            if drift:
+                return AdvisoryResult(decision=Decision.ALLOW, reason=None, context=drift)
 
             cache_file = self._get_cache_file()
 
@@ -263,6 +276,61 @@ class VersionCheckHandler(SessionStartHandlerBase):
         except Exception as e:
             logger.error("Version check failed: %s", e, exc_info=True)
             return AdvisoryResult(decision=Decision.ALLOW, reason=None, context=[])
+
+    def _drift_context(self) -> list[str]:
+        """The notice for a running daemon that is not the version the project expects.
+
+        Empty (silent) when the version matches, when ``daemon.expected_version``
+        is absent or invalid (a branch install never writes it; an invalid value
+        is reported by config validation), in the daemon's own repository, and on
+        a branch install, which has its own advisory. Nothing here moves the
+        daemon: the notice names what a human runs.
+        """
+        stamp = read_install_stamp()
+        if stamp is not None and stamp.is_branch_install:
+            return []
+        try:
+            if ProjectContext.self_install_mode():
+                return []
+            expected = read_expected_version(ProjectContext.config_path())
+        except RuntimeError:
+            # ProjectContext not initialised: nothing to compare against.
+            return []
+        except (OSError, ValueError) as exc:
+            # A config that cannot be read or parsed is reported by config
+            # validation; this advisory must not guess at what it said.
+            logger.warning("Version drift check skipped: %s", exc)
+            return []
+        if expected is None or expected == __version__:
+            return []
+
+        is_upgrade = self._compare_versions(__version__, expected)
+        direction = "UPGRADE" if is_upgrade else "DOWNGRADE"
+        command = f"/hooks-daemon upgrade {expected} (Skill tool: skill=hooks-daemon, args=upgrade {expected})"
+        lines = [
+            f"⚠️  HOOKS DAEMON VERSION DRIFT: running v{__version__}, "
+            f"this project expects v{expected} ({direction})",
+            "",
+            f"Expected version: v{expected} (daemon.expected_version in .claude/hooks-daemon.yaml).",
+            f"Installed and running: v{__version__}. The clone under .claude/hooks-daemon/ is "
+            "gitignored and per-checkout, so a pull that changes the expected version does "
+            "not change it.",
+        ]
+        if not is_upgrade:
+            lines += [
+                "",
+                f"This is a DOWNGRADE: v{expected} is OLDER than the installed v{__version__}. "
+                "Confirm it is intended (the commit may have been made from an older "
+                "checkout) before syncing; if it is not, correct daemon.expected_version.",
+            ]
+        lines += [
+            "",
+            "A restart cannot fix this: it runs the same installed version.",
+            f"TO SYNC, a human runs: {command}",
+            "A breaking upgrade stops at the owner's approval gate. Nothing has been changed: "
+            "this notice never moves the daemon to another version by itself.",
+        ]
+        return lines
 
     @staticmethod
     def _branch_install_context(stamp: InstallStamp) -> list[str]:

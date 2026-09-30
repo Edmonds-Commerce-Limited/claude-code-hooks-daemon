@@ -92,7 +92,12 @@ around it by judging `PYTHON_CMD` instead of the status.
 that a failing resolver makes the function return non-zero. Then audit its
 callers for any that already depend on the wrong status.
 
-**Status**: ⬜ Open.
+**Status**: ✅ Fixed in 9f5426f84 (branch `worktree-p477-drift-detect`). The status is
+captured from the assignment itself; `tests/integration/test_init_sh_resolve_python_cmd_status.py`
+reproduces it with the canonical library present and its resolver failing. The
+audit of callers found none depending on the wrong status: `validate_venv` and
+the CLI-helper runner both already treat a non-zero status as a failure, and
+`provision.sh` judges the interpreter as well, which stays correct.
 
 ### N276 — the SessionStart chain overruns its 20 s budget, so declared crons are never asked for
 
