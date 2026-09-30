@@ -319,7 +319,7 @@ name:
 - Layer 1's `--skip-reading-confirmation`;
 - a script whose content carries `HOOKS_DAEMON_UPGRADE_HANDOFF`, which every
   copy of Layer 1 and Layer 2 does;
-- a script it cannot read (`bash "$tmp"`, or a script on stdin) run with
+- a script it cannot read (`bash untracked/scratch/target-upgrade.sh`, or a script on stdin) run with
   `--project-root`, or with the `.claude/hooks-daemon` clone as an argument.
 
 On such a command, the guard denies setting any of these variables:
@@ -482,10 +482,10 @@ echo "Target version: $TARGET_VERSION"
 #   directly makes it check itself out half way through its own run.
 # The pre-deploy gate runs on this route exactly as on the recommended one:
 # when it stops, read what it lists and re-run with the digest it printed.
-tmp="$(mktemp)"
-git -C .claude/hooks-daemon show "$TARGET_VERSION:scripts/upgrade.sh" > "$tmp"
-bash "$tmp" --project-root "$PWD" "$TARGET_VERSION"
-# after a stop:  bash "$tmp" --project-root "$PWD" --skip-reading-confirmation=<digest> "$TARGET_VERSION"
+mkdir -p untracked/scratch
+git -C .claude/hooks-daemon show "$TARGET_VERSION:scripts/upgrade.sh" > untracked/scratch/target-upgrade.sh
+bash untracked/scratch/target-upgrade.sh --project-root "$PWD" "$TARGET_VERSION"
+# after a stop:  bash untracked/scratch/target-upgrade.sh --project-root "$PWD" --skip-reading-confirmation=<digest> "$TARGET_VERSION"
 
 # Restart daemon
 .claude/hooks-daemon/bin/hooks-daemon restart || \
@@ -942,9 +942,9 @@ tasks staged under `UNRELEASED/` that a branch install is already running.
 ```bash
 git -C .claude/hooks-daemon fetch --tags
 # The target's own Layer 1, as in step 3 above: never the installed one.
-tmp="$(mktemp)"
-git -C .claude/hooks-daemon show "v2.2.1:scripts/upgrade.sh" > "$tmp"
-bash "$tmp" --project-root "$PWD" v2.2.1
+mkdir -p untracked/scratch
+git -C .claude/hooks-daemon show "v2.2.1:scripts/upgrade.sh" > untracked/scratch/target-upgrade.sh
+bash untracked/scratch/target-upgrade.sh --project-root "$PWD" v2.2.1
 .claude/hooks-daemon/bin/hooks-daemon restart
 ```
 

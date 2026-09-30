@@ -330,9 +330,9 @@ TARGET="$(git -C .claude/hooks-daemon describe --tags "$(git -C .claude/hooks-da
 
 # Rebuilds the venv and reinstalls the package for the target version. Runs the
 # TARGET's own upgrade script: the installed one may predate the pre-deploy gate.
-tmp="$(mktemp)"
-git -C .claude/hooks-daemon show "$TARGET:scripts/upgrade.sh" > "$tmp"
-bash "$tmp" --project-root "$PWD" "$TARGET"
+mkdir -p untracked/scratch
+git -C .claude/hooks-daemon show "$TARGET:scripts/upgrade.sh" > untracked/scratch/target-upgrade.sh
+bash untracked/scratch/target-upgrade.sh --project-root "$PWD" "$TARGET"
 
 .claude/hooks-daemon/bin/hooks-daemon restart
 ```

@@ -429,9 +429,7 @@ def test_branch_route_includes_the_staged_unreleased_task(
         # up to the target, review2 BLOCKER 1's unknown range. It needs the
         # owner's approval too, not just the reading confirmed.
         approval_needed = _upgrade(project, env, confirm)
-        _assert_stopped_and_restored(
-            approval_needed, GateVerdict.NEEDS_APPROVAL, project, current
-        )
+        _assert_stopped_and_restored(approval_needed, GateVerdict.NEEDS_APPROVAL, project, current)
         write_approval(
             untracked,
             to_version=current,

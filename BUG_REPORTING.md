@@ -58,9 +58,9 @@ be out, and the report costs you both a round trip — upgrade first:
 ```bash
 git -C .claude/hooks-daemon fetch --tags
 TARGET="$(git -C .claude/hooks-daemon describe --tags "$(git -C .claude/hooks-daemon rev-list --tags --max-count=1)")"
-tmp="$(mktemp)"
-git -C .claude/hooks-daemon show "$TARGET:scripts/upgrade.sh" > "$tmp"
-bash "$tmp" --project-root "$PWD" "$TARGET"
+mkdir -p untracked/scratch
+git -C .claude/hooks-daemon show "$TARGET:scripts/upgrade.sh" > untracked/scratch/target-upgrade.sh
+bash untracked/scratch/target-upgrade.sh --project-root "$PWD" "$TARGET"
 ```
 
 That runs the target release's own `upgrade.sh`, not the installed one, which

@@ -80,56 +80,6 @@ config_changes:
       recommended: true
       dormant: false
 
-    - key: handlers.pre_tool_use.upgrade_approval_guard
-      description: >-
-        Denies an agent action that grants or bypasses the project owner's
-        one-shot upgrade approval (Plan 00376, review finding MAJOR 4). The
-        pre-deploy upgrade gate's escalation path is the owner's step --
-        `hooks-daemon approve-upgrade <version> --from <previous>` needs an
-        interactive TTY and a typed confirmation phrase, run in the owner's
-        own terminal. Denied: running `approve-upgrade` (or the standalone
-        gate's own `approve` subcommand) itself; writing or touching the
-        `<version>.approved` marker under an `upgrade-approvals/` directory by
-        any Bash route or with Write/Edit/NotebookEdit; assigning, exporting
-        or env-setting HOOKS_DAEMON_UPGRADE_HANDOFF, which impersonates the
-        upgrade's Layer 1; on a command that runs the upgrade, setting a
-        variable that picks its interpreter, venv, tools, flags, pass state,
-        git view or code (HOOKS_DAEMON_PYTHON, HOOKS_DAEMON_VENV_PATH, PATH,
-        HOSTNAME, HOME, TMPDIR, HOOKS_DAEMON_CLONE_URL,
-        HOOKS_DAEMON_UPGRADE_BASE_URL, HOOKS_DAEMON_UPGRADE_PREVIOUS_VERSION,
-        HOOKS_DAEMON_UPGRADE_SECOND_PASS, UPGRADE_FLAGS, GIT_*, BASH_ENV, ENV,
-        BASH_FUNC_*, SHELLOPTS, BASHOPTS, LD_*, DYLD_*, PYTHON*,
-        HOOKS_DAEMON_OLD_DEFAULT_*, the uv index/find-links/config/python
-        variables, CA bundles and proxies) by any spelling (NAME=, read or
-        printf -v into it, an indirect name, an x-flagged declare/typeset/local,
-        a computed export; and set -a, eval or sourcing another file) or
-        exporting a shell function -- the upgrade recognised by name, by Layer 1's
-        --skip-reading-confirmation, by a script carrying
-        HOOKS_DAEMON_UPGRADE_HANDOFF, or by an unreadable script (`bash
-        "$tmp"`, stdin) run with --project-root or the daemon clone as an
-        argument; forging a venv's `.daemon-version` stamp; moving the
-        `.claude/hooks-daemon` clone to another ref by hand (checkout, switch,
-        pull, merge, rebase, reset, cherry-pick, am, revert) or writing into
-        its .git/. Never denied: reading (ls/cat/stat/grep/find -print/test -f),
-        merely reading the env var, fetching, showing or logging the daemon
-        clone, a git commit message, non-executing
-        echo/printf prose, a grep search, or a quoted-delimiter heredoc body
-        written to a file.
-      example_yaml: |
-        handlers:
-          pre_tool_use:
-            upgrade_approval_guard:
-              enabled: true
-              priority: 20
-      migration_note: >-
-        On by default; no project-side action needed. If this handler ever
-        blocks a call, report the gate's reasons to the user and stop -- the
-        owner runs `hooks-daemon approve-upgrade <version> --from <previous>`
-        themselves. Disable with
-        handlers.pre_tool_use.upgrade_approval_guard.enabled: false.
-      recommended: true
-      dormant: false
-
     - key: handlers.pre_tool_use.installed_plugin_edit_advisor
       description: >-
         Advises, never blocks, when a Write, Edit, NotebookEdit or plain Bash

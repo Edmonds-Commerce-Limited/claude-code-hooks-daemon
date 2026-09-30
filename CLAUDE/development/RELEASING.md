@@ -405,10 +405,9 @@ After upgrading, review `CLAUDE/UPGRADES/v{MAJOR}/v{PREV}-to-v{NEW}/post-upgrade
 `UNRELEASED/pre-upgrade-tasks/` holds changes a project must hear about BEFORE the release is deployed into it (Plan 00376). The upgrade gate reads them from the versioned guide, runs each task's `**Detect**` pattern over the project, and stops the upgrade on a hit. They move exactly like the post-upgrade tasks, into a sibling directory:
 
 ```bash
-TARGET="CLAUDE/UPGRADES/v{MAJOR}/v{PREV}-to-v{NEW}/pre-upgrade-tasks"
-mkdir -p "$TARGET"
-cp CLAUDE/UPGRADES/upgrade-template/pre-upgrade-tasks/README.md "$TARGET/README.md"
-git mv CLAUDE/UPGRADES/UNRELEASED/pre-upgrade-tasks/[0-9][0-9]-*.md "$TARGET/"
+mkdir -p CLAUDE/UPGRADES/v{MAJOR}/v{PREV}-to-v{NEW}/pre-upgrade-tasks
+cp CLAUDE/UPGRADES/upgrade-template/pre-upgrade-tasks/README.md CLAUDE/UPGRADES/v{MAJOR}/v{PREV}-to-v{NEW}/pre-upgrade-tasks/README.md
+git mv CLAUDE/UPGRADES/UNRELEASED/pre-upgrade-tasks/[0-9][0-9]-*.md CLAUDE/UPGRADES/v{MAJOR}/v{PREV}-to-v{NEW}/pre-upgrade-tasks/
 ls CLAUDE/UPGRADES/UNRELEASED/pre-upgrade-tasks/
 # Expected: README.md  (nothing else)
 ```

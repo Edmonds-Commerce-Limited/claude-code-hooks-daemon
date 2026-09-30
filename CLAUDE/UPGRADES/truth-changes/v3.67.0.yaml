@@ -81,40 +81,6 @@ truth_changes:
 
       IF YOUR PROJECT'S DOCS SAY ENCRYPTED VAULT FILES CANNOT BE STAGED BY AN
       AGENT, OR THAT THEY MUST BE UNTRACKED, THOSE INSTRUCTIONS ARE NOW FALSE.
-  - topic: install-and-upgrade
-    id: upgrade-pre-deploy-gate
-    was: >
-      A hooks-daemon upgrade run by an agent (or any caller without a
-      terminal) runs to completion unattended: the "REQUIRED READING" guide
-      list, where it appears at all, is informational, and nothing stops the
-      upgrade before it deploys.
-    now: >
-      Every upgrade runs a pre-deploy gate once the target is checked out and
-      before anything is deployed (Plan 00376). When it lists something (the
-      crossed upgrade guides, a pre-upgrade task whose Detect pattern found a
-      call site in the project, a breaking change), the upgrade stops,
-      deploys nothing, and exits 3; it puts the daemon checkout back on the
-      installed version when that version can be told (otherwise, or when the
-      reset fails, it prints the command that does). The caller reads the list, carries out the pre-upgrade tasks
-      it names, and re-runs with `--skip-reading-confirmation=<digest>`, the
-      digest the stop printed. A MAJOR version, a crossed `breaking: true`
-      config-changes manifest, a critical pre-upgrade task with hits or an
-      unreadable installed version exits 4 instead, and also needs the
-      project owner's approval, given in their own terminal with a typed
-      phrase; an agent reports and stops. `upgrade_approval_guard` denies the
-      ways it could otherwise force or forge that approval (running
-      `approve-upgrade` itself, touching the marker, steering the upgrade
-      with an environment variable), on a best-effort recognition of the
-      upgrade route's shape, not a boundary against a same-user process
-      installing by hand instead. Checking out, pulling or resetting
-      `.claude/hooks-daemon` by hand no
-      longer counts as an upgrade: an agent is denied it, and a venv stamp
-      that already names the target counts as installed only when the gate
-      itself let that version through.
-
-      IF YOUR PROJECT'S DOCS OR AUTOMATION SAY A DAEMON UPGRADE ALWAYS RUNS
-      TO COMPLETION UNATTENDED, OR TREAT ANY NON-ZERO EXIT OF THE UPGRADE AS
-      A FAILURE TO RETRY BLINDLY, UPDATE THEM.
   - topic: daemon-config
     id: strict-mode-handler-exceptions
     was: >
