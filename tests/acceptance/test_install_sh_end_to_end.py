@@ -40,10 +40,9 @@ import pytest
 
 from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.daemon.paths import read_pid_file
-from claude_code_hooks_daemon.daemon.process_verification import find_all_daemon_processes
 from claude_code_hooks_daemon.install.plan_workflow import MKPLAN_SCRIPT_NAME
 from claude_code_hooks_daemon.utils.hook_registration import HOOK_EVENTS_IN_SETTINGS
-from claude_code_hooks_daemon.utils.safe_signal import stop_verified_daemon
+from tests.daemon_teardown import stop_daemons_of
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 INSTALL_VERSION_SH = REPO_ROOT / "scripts" / "install_version.sh"
@@ -807,6 +806,5 @@ def test_upgrade_through_a_link_replaces_a_daemon_naming_the_link(tmp_path: Path
     finally:
         if venv_python is not None:
             _stop_test_daemon(venv_python, real, env)
-        for pid in find_all_daemon_processes(project_root=linked):
-            stop_verified_daemon(pid, project_root=linked, grace_seconds=Timeout.DAEMON_SHUTDOWN)
+        stop_daemons_of(linked, grace_seconds=Timeout.DAEMON_SHUTDOWN)
         _remove_daemon_clone(daemon_dir)

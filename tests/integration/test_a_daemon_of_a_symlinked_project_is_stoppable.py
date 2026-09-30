@@ -32,9 +32,8 @@ import pytest
 
 from claude_code_hooks_daemon.constants import Timeout
 from claude_code_hooks_daemon.daemon.paths import read_pid_file
-from claude_code_hooks_daemon.daemon.process_verification import find_all_daemon_processes
 from claude_code_hooks_daemon.install import bin_wrapper
-from claude_code_hooks_daemon.utils.safe_signal import stop_verified_daemon
+from tests.daemon_teardown import stop_daemons_of
 from tests.integration.test_init_sh_pretooluse_fail_closed import BASH, INIT_SH, _script_env
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -93,8 +92,7 @@ def _make_project(path: Path) -> None:
 
 def _stop_every_daemon(*roots: Path) -> None:
     for root in roots:
-        for pid in find_all_daemon_processes(project_root=root):
-            stop_verified_daemon(pid, project_root=root, grace_seconds=Timeout.PROCESS_DEATH_WAIT)
+        stop_daemons_of(root, grace_seconds=Timeout.PROCESS_DEATH_WAIT)
 
 
 def _env(base: Path, name: str, **extra: str) -> dict[str, str]:
