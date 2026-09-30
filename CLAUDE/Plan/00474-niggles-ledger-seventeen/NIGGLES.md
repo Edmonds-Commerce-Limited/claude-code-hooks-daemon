@@ -26,6 +26,29 @@ other ledgers' numbering (00422 for `p422-close`, 00421's plan for `d-00421`).
 
 **Status**: ⬜ Open (all 55).
 
+### N276 — the SessionStart chain overruns its 20 s budget, so declared crons are never asked for
+
+**Found**: this session's own SessionStart reply was only "Chain skipped:
+exceeded its 20.00s dispatch budget". Four probes that piped a real SessionStart
+payload through the deployed `.claude/hooks/session-start` got the same reply,
+with any combination of `HOOKS_DAEMON_HOSTNAME` and `CCY_HOST_HOSTNAME`. The
+host's load average was about 33, with three agents' QA running. A skipped chain
+runs none of its handlers, `persistent_cron_assertor` included, so a session
+started under load is never told to create its declared crons. The Stop
+enforcer still names them at the first stop, which is the only reason the jobs
+are not lost.
+
+**Why it matters now**: the owner's dogfood of hostname-matched crons restarts a
+session as `cchd-sdlc-runner` and expects the assertor to ask for `issue-sdlc` at
+start.
+
+**Candidate remedy**: measure each SessionStart handler's time under load, and
+find which one spends the budget. Then either make it cheaper, or dispatch the
+assertor (a pure config read) ahead of the slow handlers so a budget overrun
+cannot starve it.
+
+**Status**: ⬜ Open.
+
 ### N275 — `secret_file_guard` judges an Edit of a YAML file as an unreadable shell command
 
 **Found**: an `Edit` of `.github/workflows/qa.yml` whose `old_string` held the
