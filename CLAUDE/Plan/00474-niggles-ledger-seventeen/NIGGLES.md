@@ -26,6 +26,29 @@ other ledgers' numbering (00422 for `p422-close`, 00421's plan for `d-00421`).
 
 **Status**: ⬜ Open (all 55).
 
+### N278 — a branch merged with its targeted QA never run, and main took three static-check failures
+
+**Found**: the hostname-cron branch (Plan 00470 Tasks 6.1, 6.2) was merged
+while its `llm_qa.py changed` run was still queued behind the host-wide QA lock.
+The coordinator's post-merge check ran only the touched tests with pytest, so
+no static check ran. Main took three failures: `error_hiding` (a `None` return
+from an `except` in two peer readers), `input_contract` (the daemon-stamped
+`hooks_daemon_hostname`) and `format` (from the CI-timeouts merge). The N276
+agent's run found them. Fixed on main in feef4bce1.
+
+**Why**: with three agents queueing on one lock, a targeted run can wait longer
+than the agent's own time budget. Nothing stops a merge that has no recorded
+pass.
+
+**Candidate remedy**: the merge step requires a recorded `llm_qa.py changed`
+pass for the branch head, or runs one itself before merging. Candidates for
+enforcement: a recorded pass per head, read by a merge-time check (Plan 00475
+Phase 4 territory). Until then, the coordinator runs the cheap static checks
+(`format lint type_check error_hiding input_contract`) itself before any merge
+whose targeted run is missing.
+
+**Status**: ⬜ Open (main repaired; the process gap stands).
+
 ### N277 — `_resolve_python_cmd` in `init.sh` reports success after a failed resolve
 
 **Found**: by the Plan 00477 provision agent, reading `init.sh`. The function
