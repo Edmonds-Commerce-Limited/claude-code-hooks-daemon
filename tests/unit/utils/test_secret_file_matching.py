@@ -8,21 +8,50 @@ position).
 """
 
 import errno
+import os
 import time
 from collections.abc import Callable, Iterator
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 from claude_code_hooks_daemon.utils import secret_file_matching as sfm
+from claude_code_hooks_daemon.utils import shell_expansion
 from claude_code_hooks_daemon.utils.shell_expansion import TooManyToEnumerateError
+from tests.scaling import SIZE_FACTOR, SUPERLINEAR_RATIO, scaling_ratio
+from tests.support.directory_reads import record_directory_reads
 
-#: Wall-clock ceiling for the wide-range tests below. The rejected path does
-#: no allocation at all, so it costs microseconds; a range materialised before
-#: the cap saw it cost 650 ms for ONE token and 13.5 s for twenty. Two orders
-#: of magnitude of headroom keeps this from turning into a timing flake while
-#: still failing loudly on a re-materialising regression.
-_WIDE_RANGE_BUDGET_SECONDS = 0.05
+
+def _assert_scan_grows_linearly(command_at: Callable[[int], str], small_n: int) -> None:
+    """``find_protected_mention_detail`` on ``command_at(8 * small_n)`` costs at
+    most linearly more CPU than on ``command_at(small_n)`` (00466 N222).
+
+    CPU time, not wall time: a wall-clock bound failed under host load while
+    saying nothing about growth, which is what these tests exist to pin.
+    """
+
+    def work_at(size: int) -> None:
+        try:
+            sfm.find_protected_mention_detail(command_at(size), sfm.DEFAULT_PROTECTED_PATTERNS)
+        except TooManyToEnumerateError:
+            return
+
+    ratio = scaling_ratio(work_at, small_n, command_at(SIZE_FACTOR * small_n))
+    assert ratio <= SUPERLINEAR_RATIO, f"cost grew {ratio:.0f}x for {SIZE_FACTOR}x input"
+
+
+class _CountingChr:
+    """Stands in for ``chr`` in ``secret_file_matching``'s namespace, so a test
+    can count the code points a range expansion materialises."""
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def __call__(self, point: int) -> str:
+        self.calls += 1
+        return chr(point)
+
 
 #: The whole code-point space as a LITERAL range, the shape the probe in
 #: Plan 00364's review measured. A Python escape sequence would not do: it
@@ -728,16 +757,20 @@ class TestAWideRangeIsRejectedBeforeItIsBuilt:
         token = f"f{_WIDEST_POSSIBLE_RANGE}.txt"
         assert sfm._expand_bracket_expressions(token) == [token]
 
-    def test_the_widest_possible_range_costs_no_time(self) -> None:
+    def test_the_widest_possible_range_materialises_nothing(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Counted, not timed (00466 N222): building the range calls ``chr``
+        once per code point, 1,114,112 times for this one."""
+        counting_chr = _CountingChr()
+        monkeypatch.setattr(sfm, "chr", counting_chr, raising=False)
         token = f"f{_WIDEST_POSSIBLE_RANGE}.txt"
-        start = time.perf_counter()
+
         sfm._expand_bracket_expressions(token)
-        elapsed = time.perf_counter() - start
-        assert elapsed < _WIDE_RANGE_BUDGET_SECONDS, (
-            f"expanding {len(_WIDEST_POSSIBLE_RANGE)} characters of literal "
-            f"range took {elapsed:.3f}s — the range is being materialised "
-            f"before the cap rejects it"
-        )
+
+        assert (
+            counting_chr.calls == 0
+        ), f"{counting_chr.calls} code points of a rejected range were materialised"
 
     def test_the_members_helper_rejects_the_range_itself(self) -> None:
         """The check belongs INSIDE the helper, not at its call site.
@@ -748,19 +781,22 @@ class TestAWideRangeIsRejectedBeforeItIsBuilt:
         """
         assert sfm._bracket_expression_members(_WIDEST_POSSIBLE_RANGE) is None
 
-    def test_many_wide_ranges_in_one_payload_stay_cheap(self) -> None:
-        """The measured 13.5 s case: cost is linear in the token count.
+    def test_many_wide_ranges_in_one_payload_stay_cheap(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The measured 13.5 s case: twenty wide ranges, none materialised.
 
         Driven through the public entry point ``secret_file_guard`` calls, so
         this covers the real hot path rather than the primitive alone.
         """
+        counting_chr = _CountingChr()
+        monkeypatch.setattr(sfm, "chr", counting_chr, raising=False)
         content = " ".join(f"f{index}{_WIDEST_POSSIBLE_RANGE}.txt" for index in range(20))
-        start = time.perf_counter()
+
         assert sfm.find_protected_mention(content, ("*.secret*",)) is None
-        elapsed = time.perf_counter() - start
         assert (
-            elapsed < _WIDE_RANGE_BUDGET_SECONDS
-        ), f"twenty wide-range tokens took {elapsed:.3f}s on the PreToolUse hot path"
+            counting_chr.calls == 0
+        ), f"{counting_chr.calls} code points of rejected ranges were materialised"
 
     def test_edge_predicates_are_left_untouched(self) -> None:
         """The fix deliberately does NOT redefine the edge predicates — the
@@ -1390,77 +1426,96 @@ class TestInteriorWildcardDpIsBounded:
     verdict past the timeout while the real mention sits unscanned.
 
     Every case here reproduces a review-measured shape (main: well under a
-    second; pre-fix branch: 15-35s) and pins it back under a small bound.
+    second; pre-fix branch: 15-35s) and pins its GROWTH: CPU cost at size N
+    against 8N, which host load cannot inflate (00466 N222). A wall-clock
+    bound here failed under load while passing alone.
     """
-
-    _BUDGET_SECONDS = 1.0
 
     def test_the_60kb_bracket_and_star_bypass_shape_denies_fast(self) -> None:
         """The review's own B1 evidence case: a[bc]x6 + 5000 stars + a,
         immediately followed by a genuine mention — pre-fix this took
         31.151s on the branch (0.096s on main)."""
-        token = "a" + "[bc]" * 6 + "*" * 5000 + "a"
-        command = f"cat {token}; cat .vault-pass"
-        start = time.perf_counter()
-        result = sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS)
-        elapsed = time.perf_counter() - start
+
+        def command_at(stars: int) -> str:
+            return f"cat a{'[bc]' * 6}{'*' * stars}a; cat .vault-pass"
+
+        result = sfm.find_protected_mention_detail(command_at(5000), sfm.DEFAULT_PROTECTED_PATTERNS)
         assert result is not None
-        assert (
-            elapsed < self._BUDGET_SECONDS
-        ), f"took {elapsed:.3f}s, budget {self._BUDGET_SECONDS}s"
+        _assert_scan_grows_linearly(command_at, 5000 // SIZE_FACTOR)
 
     def test_two_hundred_bracket_and_star_tokens_denies_fast(self) -> None:
         """The review's second timing case (105 KB): 200 x a[bc]x6<500*>a --
         34.946s pre-fix (0.232s on main). 200 tokens x 64 bracket expansions
-        each is real volume (12800 intersection checks), not a per-token
-        blow-up, so this gets a more generous bound than the single-token
-        60 KB case above -- still a >20x improvement over pre-fix, and the
-        whole-scan deadline below is the backstop for volume like this."""
+        each is real volume (12800 intersection checks), so its cost must
+        grow with the token count and no faster."""
         token = "a" + "[bc]" * 6 + "*" * 500 + "a"
-        command = " ".join([token] * 200)
-        start = time.perf_counter()
-        sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS)
-        elapsed = time.perf_counter() - start
-        assert elapsed < 3.0, f"took {elapsed:.3f}s"
+        _assert_scan_grows_linearly(lambda count: " ".join([token] * count), 200 // SIZE_FACTOR)
 
     def test_ordinary_one_megabyte_write_content_stays_bounded_by_the_deadline(
-        self,
+        self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """The review's non-adversarial case: 1 MB of ordinary 'a*b ' tokens
         (e.g. minified JS) -- 15-17s measured here pre-deadline vs main's own
-        4.564s baseline. Not achievable from the per-token DP budget alone:
-        no single token here is pathological, the cost is volume across
-        250k short tokens. This is exactly what the whole-scan deadline
-        exists for: with one supplied (as ``secret_file_guard`` supplies),
-        the call returns -- either with a real answer or a ``TimeoutError``
-        -- well inside the deadline instead of running past it, whichever
-        outcome it is. (Review 7 follow-up: the normalised-word stream no
-        longer has its own word-count cap, so ``TooManyToEnumerateError``
-        is no longer a possible outcome here -- ``TimeoutError`` or a real
-        answer are the only two.)"""
-        content = "a*b " * 250_000
-        start = time.perf_counter()
-        outcome = "completed"
-        try:
+        4.564s baseline. No single token here is pathological, the cost is
+        volume across 250k short tokens. This is exactly what the whole-scan
+        deadline exists for: once it has passed, the scan must RAISE at its
+        next check rather than run on.
+
+        Driven by a fake clock that advances one tick per reading, so the
+        deadline falls mid-scan on every host, however loaded (00466 N222).
+        The scan must raise ``TimeoutError`` at the first reading past the
+        deadline, and must have read the clock more than once before it,
+        which proves the check sits inside the scan and not only at entry."""
+        readings: list[float] = []
+
+        def fake_monotonic() -> float:
+            readings.append(float(len(readings)))
+            return readings[-1]
+
+        # Each module's own `time` name is replaced, not the `time` module,
+        # so nothing else in the process sees the fake clock.
+        fake_time = SimpleNamespace(monotonic=fake_monotonic)
+        monkeypatch.setattr(sfm, "time", fake_time)
+        monkeypatch.setattr(shell_expansion, "time", fake_time)
+        deadline = 50.0
+
+        with pytest.raises(TimeoutError):
             sfm.find_protected_mention_detail(
-                content, sfm.DEFAULT_PROTECTED_PATTERNS, deadline=time.monotonic() + 2.0
+                "a*b " * 250_000, sfm.DEFAULT_PROTECTED_PATTERNS, deadline=deadline
             )
-        except TimeoutError:
-            outcome = "timed out"
-        except TooManyToEnumerateError:
-            outcome = "too many to enumerate"
-        elapsed = time.perf_counter() - start
-        assert elapsed < 3.0, f"{outcome} in {elapsed:.3f}s, past a 2s deadline"
+
+        assert readings[-1] == deadline + 1, "the scan read the clock again after the deadline"
 
     def test_a_lone_long_star_run_collapses_to_near_zero_cost(self) -> None:
         """Collapsing repeated '*' is language-preserving (``a**b`` and
         ``a*b`` match the same set) and removes the dominant cost driver
-        directly, independent of the budget cap."""
-        token = "a" + "*" * 60_000 + "a"
-        start = time.perf_counter()
-        sfm.find_protected_mention_detail(f"cat {token}", sfm.DEFAULT_PROTECTED_PATTERNS)
-        elapsed = time.perf_counter() - start
-        assert elapsed < 0.1, f"took {elapsed:.3f}s"
+        directly, independent of the budget cap.
+
+        Counts DP grid CELLS VISITED (``sfm.dp_cell_counter``, N123) rather
+        than wall-clock time: a fixed-second budget flakes under host
+        contention (many worktrees' gates running at once) independent of
+        whether the cost bound itself holds -- main measured 0.09s against
+        a 0.1s budget, and a scaling-ratio version of this same test still
+        carried an absolute-second floor to absorb constant-factor noise,
+        so it was still exposed to the same flake. A cell count has no
+        such noise: after collapsing, the 60,000-``*`` token IS the
+        3-character string ``a*a``, so its DP grid is IDENTICAL in size to
+        a literal ``a*a`` baseline -- not merely small, but exactly equal,
+        deterministically, on every host. If the collapse regressed (the
+        DP ran on the raw 60,002-character operand instead), the long
+        token's cell count would be ~20,000x the baseline's, not a
+        fraction more.
+        """
+        pattern = "pat"
+        with sfm.dp_cell_counter() as baseline_count:
+            sfm._globs_can_intersect("a*a", pattern)
+        long_token = "a" + "*" * 60_000 + "a"
+        with sfm.dp_cell_counter() as long_count:
+            sfm._globs_can_intersect(long_token, pattern)
+        assert (
+            long_count[0] == baseline_count[0]
+        ), f"long={long_count[0]} baseline={baseline_count[0]}"
+        assert baseline_count[0] > 0, "the counter itself must observe some DP work"
 
     def test_scan_deadline_denies_via_the_fail_closed_route(self) -> None:
         """The whole-scan deadline is a backstop: forcing an artificially
@@ -1558,9 +1613,12 @@ class TestOrdinaryVolumeContentCompletesFast:
 
     @staticmethod
     def _timed_scan(command: str) -> tuple[tuple[str, str] | None, float]:
-        start = time.perf_counter()
+        # This thread's CPU time: other processes on a loaded host do not
+        # inflate it, so load arriving between the two scans cannot skew the
+        # ratio (00466 N222).
+        start = time.thread_time()
         result = sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS)
-        return result, time.perf_counter() - start
+        return result, time.thread_time() - start
 
     def _assert_scan_cost_scales_linearly(
         self, build: Callable[[int], str]
@@ -1630,26 +1688,26 @@ class TestBraceAndFsWalkAreBounded:
     the timing suite above pinned the DP/star shapes but had NO timing test
     for `{a,b}`xN brace expansion or a `/**/` filesystem walk, which is
     precisely why these shipped unfixed. This class is that pin, on the
-    reviewer's own exact shapes.
+    reviewer's own exact shapes. Each pins GROWTH (CPU cost at N against 8N)
+    or a count of directories read, never wall time (00466 N222).
     """
-
-    _BUDGET_SECONDS = 1.0
 
     @pytest.mark.parametrize("repetitions", [20, 22, 40])
     def test_brace_alternation_with_a_real_mention_denies_fast(self, repetitions: int) -> None:
         """The blocker's exact exploit shape: a genuine `.vault-password`
         mention sits in the SAME command as an exponential brace word --
         pre-fix this took 36.3s at x20 and was killed past 90s at x22."""
-        command = f"cat .vault-password; echo {'{a,b}' * repetitions}"
-        start = time.perf_counter()
+
+        def command_at(count: int) -> str:
+            return f"cat .vault-password; echo {'{a,b}' * count}"
+
         result = sfm.find_protected_mention_detail(
-            command,
+            command_at(repetitions),
             sfm.DEFAULT_PROTECTED_PATTERNS,
             deadline=time.monotonic() + sfm.SCAN_DEADLINE_SECONDS,
         )
-        elapsed = time.perf_counter() - start
-        assert elapsed < self._BUDGET_SECONDS, f"took {elapsed:.3f}s"
         assert result is not None
+        _assert_scan_grows_linearly(command_at, max(1, repetitions // SIZE_FACTOR))
 
     @pytest.mark.parametrize("repetitions", [20, 22, 40])
     def test_brace_alternation_alone_stays_fast_even_past_the_cap(self, repetitions: int) -> None:
@@ -1657,21 +1715,22 @@ class TestBraceAndFsWalkAreBounded:
         spelling cap the scan must still raise (fail closed) fast, not
         silently answer "no mention" after enumerating for tens of
         seconds."""
-        command = "echo " + "{a,b}" * repetitions
-        start = time.perf_counter()
+
+        def command_at(count: int) -> str:
+            return "echo " + "{a,b}" * count
+
         with pytest.raises(TooManyToEnumerateError):
             list(
                 sfm.iter_protected_mentions(
-                    command,
+                    command_at(repetitions),
                     sfm.DEFAULT_PROTECTED_PATTERNS,
                     deadline=time.monotonic() + sfm.SCAN_DEADLINE_SECONDS,
                 )
             )
-        elapsed = time.perf_counter() - start
-        assert elapsed < self._BUDGET_SECONDS, f"took {elapsed:.3f}s"
+        _assert_scan_grows_linearly(command_at, max(1, repetitions // SIZE_FACTOR))
 
     def test_a_recursive_glob_token_rooted_at_the_filesystem_root_denies_fast(
-        self,
+        self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """M-1's own reproducer: `cat /**/*.se?ret-zq9x; cat .vault-password`
         took 9.5s pre-fix on this small container alone -- a real client
@@ -1680,33 +1739,34 @@ class TestBraceAndFsWalkAreBounded:
         `/**/` token rooted at the bare filesystem root is refused
         OUTRIGHT (fail closed) rather than walked at all, so this raises --
         exactly like the deadline case above, ``secret_file_guard``'s own
-        wrapper is what turns the raise into a deny."""
+        wrapper is what turns the raise into a deny. "Not walked at all" is
+        pinned as a count: not one directory is read (00466 N222)."""
+        directories_read = record_directory_reads(monkeypatch)
         command = "cat /**/*.se?ret-zq9x; cat .vault-password"
-        start = time.perf_counter()
         with pytest.raises(TooManyToEnumerateError):
             sfm.find_protected_mention_detail(
                 command,
                 sfm.DEFAULT_PROTECTED_PATTERNS,
                 deadline=time.monotonic() + sfm.SCAN_DEADLINE_SECONDS,
             )
-        elapsed = time.perf_counter() - start
-        assert elapsed < self._BUDGET_SECONDS, f"took {elapsed:.3f}s"
+        assert directories_read == [], f"the root-rooted glob read {directories_read[:5]}"
 
-    def test_ten_root_rooted_recursive_glob_tokens_deny_fast(self) -> None:
+    def test_ten_root_rooted_recursive_glob_tokens_deny_fast(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """M-1's own multi-token reproducer -- 10 x `cat /**/*.se?ret-zq9x`
         tokens, 9.0s pre-fix (the deadline caught it between tokens, but
         the FIRST token alone already ran multiple seconds). The FIRST
-        token alone is refused outright now, so this raises immediately."""
+        token alone is refused outright now, so no directory is read."""
+        directories_read = record_directory_reads(monkeypatch)
         command = " ".join(["cat /**/*.se?ret-zq9x"] * 10) + "; cat .vault-password"
-        start = time.perf_counter()
         with pytest.raises(TooManyToEnumerateError):
             sfm.find_protected_mention_detail(
                 command,
                 sfm.DEFAULT_PROTECTED_PATTERNS,
                 deadline=time.monotonic() + sfm.SCAN_DEADLINE_SECONDS,
             )
-        elapsed = time.perf_counter() - start
-        assert elapsed < self._BUDGET_SECONDS, f"took {elapsed:.3f}s"
+        assert directories_read == [], f"the root-rooted globs read {directories_read[:5]}"
 
     @pytest.mark.parametrize("size_kb", [94, 200])
     def test_huge_no_op_regex_shaped_input_with_a_real_mention_denies_fast(
@@ -1717,17 +1777,18 @@ class TestBraceAndFsWalkAreBounded:
         pre-existing DP/star-collapse cap already bounds this -- this test
         pins it at the sizes review 3 specifically re-measured)."""
         unit = "a" + "[bc]" * 6 + "*" * 500 + "a"
-        n = max(1, (size_kb * 1024) // (len(unit) + 1))
-        command = " ".join([unit] * n) + "; cat .vault-password"
-        start = time.perf_counter()
+
+        def command_at(kilobytes: int) -> str:
+            count = max(1, (kilobytes * 1024) // (len(unit) + 1))
+            return " ".join([unit] * count) + "; cat .vault-password"
+
         result = sfm.find_protected_mention_detail(
-            command,
+            command_at(size_kb),
             sfm.DEFAULT_PROTECTED_PATTERNS,
             deadline=time.monotonic() + sfm.SCAN_DEADLINE_SECONDS,
         )
-        elapsed = time.perf_counter() - start
-        assert elapsed < sfm.SCAN_DEADLINE_SECONDS + self._BUDGET_SECONDS, f"took {elapsed:.3f}s"
         assert result is not None
+        _assert_scan_grows_linearly(command_at, max(1, size_kb // SIZE_FACTOR))
 
 
 class TestEdgeOpenTokensReachTheDpAgainstNonBothEdgesPatterns:
@@ -2164,6 +2225,23 @@ class TestBothEdgesFilesystemTruthRoute:
         assert result is None
 
 
+class _SortedListing:
+    """A directory listing in a fixed order, usable as ``os.scandir``'s
+    result both in a ``with`` block and as a plain iterable."""
+
+    def __init__(self, entries: list[os.DirEntry[str]]) -> None:
+        self._entries = entries
+
+    def __enter__(self) -> "_SortedListing":
+        return self
+
+    def __exit__(self, *_: object) -> None:
+        return None
+
+    def __iter__(self) -> Iterator[os.DirEntry[str]]:
+        return iter(self._entries)
+
+
 class TestExpandGlobTokenErrorHandling:
     """n466-n24 review 4: ``_expand_glob_token`` must fail CLOSED (propagate)
     on an expansion failure it cannot prove is a non-match -- except the one
@@ -2189,15 +2267,81 @@ class TestExpandGlobTokenErrorHandling:
         """Forcing an ENOENT (rather than relying on it never firing) pins
         the actual except-branch: it must be swallowed, not propagated."""
 
-        def _raise_enoent(self: Path, pattern: str) -> Iterator[Path]:
+        def _raise_enoent(self: Path) -> os.stat_result:
             raise OSError(errno.ENOENT, "No such file or directory")
-            yield  # pragma: no cover -- makes this a generator function
 
-        monkeypatch.setattr(Path, "glob", _raise_enoent)
+        monkeypatch.setattr(Path, "lstat", _raise_enoent)
         result = sfm._expand_glob_token(
             "somefile.secret", sfm.DEFAULT_PROTECTED_PATTERNS, None, cwd=str(tmp_path)
         )
         assert result is None
+
+    def test_a_name_too_long_to_exist_allows_n117(self, tmp_path: Path) -> None:
+        """Plan 00466 N117: a component longer than the filesystem's name
+        limit raises ENAMETOOLONG. No file can have that name, and a shell
+        naming it fails the same way, so it proves absence as ENOENT does."""
+        result = sfm._expand_glob_token(
+            "a" * 300 + "/*.txt", sfm.DEFAULT_PROTECTED_PATTERNS, None, cwd=str(tmp_path)
+        )
+        assert result is None
+
+    def test_a_relative_glob_whose_joined_path_is_too_long_denies(self, tmp_path: Path) -> None:
+        """Review 8 BLOCKER 1: bash opens the relative path, which is under
+        PATH_MAX, while the base-joined path is over it. The overflow says
+        nothing about the target, so the expansion fails closed."""
+        long_dir = "d" * 200
+        (tmp_path / long_dir).mkdir()
+        (tmp_path / "x.secret").touch()
+        token = f"{long_dir}/../" * 20 + "*ecre*"
+        assert len(token) < 4096 < len(str(tmp_path)) + 1 + len(token)
+        with pytest.raises(OSError) as raised:
+            sfm._expand_glob_token(token, ("*.secret*",), None, cwd=str(tmp_path))
+        assert raised.value.errno == errno.ENAMETOOLONG
+
+    def test_an_error_in_one_branch_does_not_stop_the_others(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Review 8 BLOCKER 1: the first error used to end the whole walk.
+        The protected match in a later branch must still be found."""
+        (tmp_path / "a").mkdir()
+        (tmp_path / "b").mkdir()
+        (tmp_path / "b" / "x.secret").touch()
+        real_scandir = os.scandir
+
+        def _fake_scandir(path: str | os.PathLike[str]) -> _SortedListing:
+            if Path(path) == tmp_path / "a":
+                raise OSError(errno.ENAMETOOLONG, "File name too long", str(path))
+            with real_scandir(path) as listing:
+                return _SortedListing(sorted(listing, key=lambda entry: entry.name))
+
+        monkeypatch.setattr(os, "scandir", _fake_scandir)
+        result = sfm._expand_glob_token("*/*ecre*", ("*.secret*",), None, cwd=str(tmp_path))
+        assert result == "*.secret*"
+
+    def test_a_branch_error_with_no_protected_match_denies(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        (tmp_path / "a").mkdir()
+        (tmp_path / "b").mkdir()
+        real_scandir = os.scandir
+
+        def _fake_scandir(path: str | os.PathLike[str]) -> Iterator[os.DirEntry[str]]:
+            if Path(path) == tmp_path / "a":
+                raise PermissionError(errno.EACCES, "Permission denied")
+            return real_scandir(path)
+
+        monkeypatch.setattr(os, "scandir", _fake_scandir)
+        with pytest.raises(PermissionError):
+            sfm._expand_glob_token("*/*ecre*", ("*.secret*",), None, cwd=str(tmp_path))
+
+    def test_matches_past_the_examination_cap_deny(self, tmp_path: Path) -> None:
+        """A match that was never examined cannot be judged."""
+        for index in range(5):
+            (tmp_path / f"f{index}.txt").touch()
+        with pytest.raises(TooManyToEnumerateError):
+            sfm._expand_glob_token(
+                "*.txt", ("*.secret*",), None, cwd=str(tmp_path), max_expansions=3
+            )
 
     def test_permission_denied_directory_in_the_glob_path_denies(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -2206,11 +2350,10 @@ class TestExpandGlobTokenErrorHandling:
         proof of a non-match -- it must propagate, not degrade to
         "no mention", so the caller's fail-closed wrapper denies."""
 
-        def _raise_eacces(self: Path, pattern: str) -> Iterator[Path]:
+        def _raise_eacces(self: Path) -> os.stat_result:
             raise PermissionError(errno.EACCES, "Permission denied")
-            yield  # pragma: no cover -- makes this a generator function
 
-        monkeypatch.setattr(Path, "glob", _raise_eacces)
+        monkeypatch.setattr(Path, "lstat", _raise_eacces)
         with pytest.raises(PermissionError):
             sfm._expand_glob_token(
                 "somefile.secret", sfm.DEFAULT_PROTECTED_PATTERNS, None, cwd=str(tmp_path)
@@ -2222,11 +2365,11 @@ class TestExpandGlobTokenErrorHandling:
         """A ``ValueError`` (a malformed glob pattern) is never a proof of
         absence -- always propagates, with no ENOENT-style exception."""
 
-        def _raise_value_error(self: Path, pattern: str) -> Iterator[Path]:
+        def _raise_value_error(base: Path, pattern: str, **_: object) -> Iterator[Path]:
             raise ValueError("malformed glob pattern")
             yield  # pragma: no cover -- makes this a generator function
 
-        monkeypatch.setattr(Path, "glob", _raise_value_error)
+        monkeypatch.setattr(sfm.shell_expansion, "bounded_recursive_glob", _raise_value_error)
         with pytest.raises(ValueError):
             sfm._expand_glob_token(
                 "somefile.secret", sfm.DEFAULT_PROTECTED_PATTERNS, None, cwd=str(tmp_path)
@@ -3013,3 +3156,58 @@ class TestFileSchemeUrlMentions:
         assert (
             sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS) is not None
         )
+
+
+_OVER_BOUND_WORD = "".join(
+    "{" + a + "," + b + "}" for a, b in zip("acegikmoq", "bdfhjlnpr", strict=True)
+)
+
+
+class TestBraceStreamReadsOnlyShellExpandedText:
+    """Plan 00466 N101: the brace stream skips the CODE braces of a Python
+    program no shell reads -- but only for a whole Bash tool command
+    (``bash_tool_command=True``: the guard's Bash route and payload
+    capture). A script's text, a segment of a command and authored content
+    are enumerated whole, as on main (round 3, D-RULE B2)."""
+
+    #: Each set display (``{0,1}``) is a brace group to bash, which does not
+    #: expand a quoted or comma-less brace (ledger 00466 N238).
+    _CODE_BRACES = "x = 1\n" + "\n".join(
+        f"print(f'{{x}}', {{'k': {i}}}, {{{i},{i + 1}}})" for i in range(600)
+    )
+
+    def test_python_heredoc_code_braces_are_not_enumerated(self) -> None:
+        command = f"python3 - <<'EOF'\n{self._CODE_BRACES}\nEOF"
+        patterns = sfm.DEFAULT_PROTECTED_PATTERNS
+        assert sfm.find_protected_mention(command, patterns, bash_tool_command=True) is None
+
+    def test_a_python_string_literal_is_enumerated_on_its_own(self) -> None:
+        command = f"python3 - <<'EOF'\n{self._CODE_BRACES}\nprint('cat /r/.ssh/id_{{r,x}}sa')\nEOF"
+        patterns = sfm.DEFAULT_PROTECTED_PATTERNS
+        assert sfm.find_protected_mention(command, patterns, bash_tool_command=True) is not None
+
+    def test_without_the_bash_tool_flag_the_text_is_enumerated_whole(self) -> None:
+        command = f"python3 - <<'EOF'\n{self._CODE_BRACES}\nEOF"
+        with pytest.raises(TooManyToEnumerateError):
+            sfm.find_protected_mention(command, sfm.DEFAULT_PROTECTED_PATTERNS)
+
+    def test_content_context_is_still_enumerated_whole(self) -> None:
+        """The view models a command line, not an authored file: a file's
+        string literal may reach a shell through a variable."""
+        content = "cmd = 'cat /r/.ssh/id_rs{a..a}'\n"
+        assert (
+            sfm.find_protected_mention(content, sfm.DEFAULT_PROTECTED_PATTERNS, context="content")
+            is not None
+        )
+
+    def test_shell_words_are_still_enumerated_and_fail_closed(self) -> None:
+        with pytest.raises(TooManyToEnumerateError):
+            sfm.find_protected_mention(f"echo {_OVER_BOUND_WORD}", sfm.DEFAULT_PROTECTED_PATTERNS)
+
+    def test_a_brace_spelled_name_in_shell_words_still_matches(self) -> None:
+        command = "cat ~/.ssh/id_{r,x}sa"
+        assert sfm.find_protected_mention(command, sfm.DEFAULT_PROTECTED_PATTERNS) is not None
+
+    def test_a_literal_name_in_a_python_heredoc_still_matches(self) -> None:
+        command = f"python3 - <<'EOF'\nprint('{_OVER_BOUND_WORD}')\nopen('/r/.ssh/id_rsa')\nEOF"
+        assert sfm.find_protected_mention(command, sfm.DEFAULT_PROTECTED_PATTERNS) is not None

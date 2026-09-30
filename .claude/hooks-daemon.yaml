@@ -449,6 +449,70 @@ handlers:
       #   max_comment_block_lines: 40
       #   mode: block               # block | warn
 
+    # Plan 00463: full QA is the coordinator's gate. Measured when the owner
+    # asked: five whole-suite runs at once, one per worktree, each re-run after
+    # every fix round and again by the coordinator before merging. A sub-agent
+    # runs targeted QA and hands over a commit; the coordinator runs the full
+    # gate once over every ready branch merged into one integration worktree
+    # (CLAUDE/QA.md). scope=SUB, so the main thread's own run draws nothing.
+    subagent_full_qa_blocker:
+      enabled: true
+      priority: 32
+      options:
+        full_qa_patterns:
+          # `all` and `tests` are subcommands, not paths: the script finds its
+          # project from its own location, so they are full from anywhere.
+          - id: llm-qa-whole-suite
+            command: llm_qa.py
+            full_words: [all, tests]
+            read_only_flags: [--read-only, --help, -h]
+            value_flags: [--range]
+          - id: run-all
+            command: run_all.sh
+          - id: run-tests
+            command: run_tests.sh
+          # The QA tests stage's CI-matrix runner: it runs the suite under
+          # every Python in CI's matrix. It takes no arguments, and `--help`
+          # is not one either, so every invocation is a full run.
+          - id: run-test-matrix
+            command: run_test_matrix.py
+          - id: validate-worktrees
+            command: validate_worktrees.sh
+          # The test half of `llm_qa.py changed`, which is targeted above: it
+          # runs the tests mapped from what changed, and refuses (unmaps) any
+          # file whose reach passes MAX_IMPORT_SELECTION test files. Declared,
+          # it is judged as that same targeted selection, not by reading code
+          # whose pytest paths exist only at run time.
+          - id: run-changed-tests
+            command: run_changed_tests.py
+            full_words: []
+          # `tests/unit` is 883 of 1,097 test files, so it is the whole suite
+          # here in all but name. A narrower directory is targeted.
+          - id: pytest-whole-suite
+            command: pytest
+            full_args: [tests, tests/unit, .]
+            bare_is_full: true
+            # pytest's complete option set (and common plugins'), so a flag's
+            # value is never read as a path; an unknown plugin flag is read as
+            # taking a value.
+            option_grammar: pytest
+            read_only_flags: [--collect-only, --co, --help, -h, --version]
+        targeted_qa_commands:
+          - "./scripts/qa/llm_qa.py changed"
+          - "./scripts/qa/llm_qa.py <tool> [<tool> ...]   (e.g. lint type_check pyright)"
+          - "pytest <explicit test files or directories narrower than tests/unit>"
+        # Round 10 M1: an accurate, honest description of this project's OWN
+        # backstop -- best-effort, not a guarantee (review 10 B1/B2 found and
+        # fixed real gaps, and `--noconftest` remains an owner-referred
+        # residual; see PLAN.md's "Round 10" section).
+        unseen_sink_description: >-
+          tests/conftest.py loads a pytest plugin (claude_code_hooks_daemon.qa.full_qa_gate)
+          that refuses a whole-suite-sized pytest run collected without the host-wide
+          full-QA lock held (scripts/qa/full_qa_lock.py), whatever launched it -- a
+          best-effort backstop, not a guarantee: it only runs if pytest actually loads
+          this conftest.py (--noconftest and equivalents bypass it, and are the handler's
+          job to catch when SEEN), and it covers pytest only, not llm_qa.py's other steps.
+
     bash_safe_mode:  # Opt-in safe-prelude forcer (Plan 00270); dogfooded here in warn mode
       enabled: true
       priority: 36

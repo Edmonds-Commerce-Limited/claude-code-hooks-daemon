@@ -34,6 +34,10 @@ _CONFIG = _REPO_ROOT / "pyrightconfig.json"
 # the plugins path from wherever the Claude config dir resolves (Plan 00468
 # G11); this tracked file pins the one this repository's dev container uses.
 _CCY_PLUGINS_DIR = ".claude/ccy/plugins"
+# Claude Code's agent worktrees: each is a full repo copy with its own venvs
+# (tens of thousands of .py files in a checkout with two live), enough to
+# push `pyright --project` past the QA step's 600 s timeout.
+_AGENT_WORKTREES_DIR = ".claude/worktrees"
 _REQUIRED_EXCLUDES = frozenset(
     {
         "untracked",
@@ -42,6 +46,7 @@ _REQUIRED_EXCLUDES = frozenset(
         "tests/fixtures",
         "remote-docs",
         _CCY_PLUGINS_DIR,
+        _AGENT_WORKTREES_DIR,
     }
     | {f"**/{name}" for name in CORE_VENDORED_BUILD_DIR_NAMES}
 )

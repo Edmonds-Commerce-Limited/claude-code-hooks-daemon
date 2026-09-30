@@ -828,7 +828,7 @@ outside its control.
 After installation completes (whether successful or not), create a detailed feedback file at the project root:
 
 ```bash
-cat > install-feedback-$(date +%Y%m%d).md << 'EOF'
+cat > install-feedback.md << 'EOF'
 # Installation Feedback Report
 
 ## Environment

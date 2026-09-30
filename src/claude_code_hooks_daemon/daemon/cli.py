@@ -157,6 +157,13 @@ if TYPE_CHECKING:
 # before use rather than assumed.
 _PYTEST_MODULE = "pytest"
 
+# The dotted module path ``pyproject.toml``'s ``addopts`` force-loads as a
+# pytest plugin (through ``-p claude_code_hooks_daemon_full_qa_gate_loader``,
+# which registers it under this exact name). Named here so
+# ``cmd_test_project_handlers`` can block it for its one invocation -- see the
+# comment at that call site.
+_FULL_QA_GATE_PLUGIN = "claude_code_hooks_daemon.qa.full_qa_gate"
+
 # Milliseconds in one second. ``Timeout.BASH_DEFAULT`` is expressed in
 # milliseconds (see constants/timeout.py), but ``subprocess.run(timeout=...)``
 # expects SECONDS. Named here so the conversion is not a magic ``/ 1000``.
@@ -2139,8 +2146,10 @@ def _collect_enforcement_status_lines(project_path: Path) -> list[str]:
     handlers have no such probe (the base default is `[]`), and instantiating
     the full handler set here — bypassing the registry, config filtering and
     daemon lifecycle — would be the wrong tool for a `handlers`-wide sweep.
-    This targets the three handlers the design identified as degrading
-    silently; a fourth would be added the same way.
+    This targets the handlers known to degrade silently: the three whose
+    posture comes from disk, plus ``subagent_full_qa_blocker``, which is inert
+    when enabled with no declared patterns (Plan 00463). Another is added the
+    same way.
 
     Best-effort: config-load failure here must not break `check`, which is
     also used to diagnose a broken config — so any error falls back to
@@ -2150,21 +2159,35 @@ def _collect_enforcement_status_lines(project_path: Path) -> list[str]:
         Advisory lines, or an empty list when every probed handler is nominal
         at every evaluated root.
     """
+    from claude_code_hooks_daemon.constants import EventID, HandlerID
+    from claude_code_hooks_daemon.constants.config import ConfigKey
     from claude_code_hooks_daemon.core.workspace import ProjectRegistry
     from claude_code_hooks_daemon.handlers.post_tool_use.lint_on_edit import LintOnEditHandler
     from claude_code_hooks_daemon.handlers.post_tool_use.validate_eslint_on_write import (
         ValidateEslintOnWriteHandler,
     )
     from claude_code_hooks_daemon.handlers.pre_tool_use.npm_command import NpmCommandHandler
-    from claude_code_hooks_daemon.handlers.registry import apply_handler_options
+    from claude_code_hooks_daemon.handlers.pre_tool_use.subagent_full_qa_blocker import (
+        SubagentFullQaBlockerHandler,
+    )
+    from claude_code_hooks_daemon.handlers.registry import (
+        apply_handler_config,
+        apply_handler_options,
+    )
 
     config_file = project_path / ".claude" / "hooks-daemon.yaml"
     registry: ProjectRegistry
     config: Config | None = None
+    full_qa_settings: dict[str, Any] = {}
     try:
         config_dict = ConfigLoader.load(config_file) if config_file.exists() else {}
         config = Config.model_validate(config_dict)
         registry = ProjectRegistry.from_config(config, project_path)
+        full_qa_settings = (
+            _build_handler_config_mapping(config)
+            .get(EventID.PRE_TOOL_USE.config_key, {})
+            .get(HandlerID.SUBAGENT_FULL_QA_BLOCKER.config_key, {})
+        )
     except (PydanticValidationError, OSError, ValueError):
         registry = ProjectRegistry.single_project(project_path)
 
@@ -2191,6 +2214,14 @@ def _collect_enforcement_status_lines(project_path: Path) -> list[str]:
             event_block = getattr(config.handlers, event_key)
             apply_handler_options(handler, handler_options(event_block.get(handler.config_key)))
             handler._project_languages = config.daemon.languages
+
+    # Asked only when ENABLED: off is its shipped default (Plan 00463), not a
+    # degraded state. Its posture comes from its declaration (patterns AND
+    # scope), not from disk, so it is configured by the registry's own injector.
+    if full_qa_settings.get(ConfigKey.ENABLED):
+        full_qa = SubagentFullQaBlockerHandler()
+        apply_handler_config(full_qa, full_qa_settings, handler_options(full_qa_settings))
+        handlers.append(full_qa)
 
     statuses: list[str] = []
     seen: set[str] = set()
@@ -5411,6 +5442,18 @@ def cmd_test_project_handlers(args: argparse.Namespace) -> int:
         _PYTEST_MODULE,
         str(handlers_path),
         "--import-mode=importlib",
+        # `pyproject.toml`'s `addopts` force-loads the daemon's own whole-suite
+        # refusal plugin (`full_qa_gate.py`) into every pytest invocation that
+        # picks up this config, including this one. That plugin anchors its
+        # test-file count on the conftest.py that imported it; project
+        # handlers have none, so it falls back to the plugin's OWN directory
+        # (which holds zero test files) and refuses the run outright --
+        # zero tests collected, not a suite that ran and passed. This suite is
+        # a small, self-contained tree the daemon does not track for the
+        # whole-suite-lock rule at all, so the plugin is explicitly unloaded
+        # for this one invocation rather than for the project's real tests.
+        "-p",
+        f"no:{_FULL_QA_GATE_PLUGIN}",
     ]
 
     if getattr(args, "verbose", False):

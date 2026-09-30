@@ -15,10 +15,10 @@ from claude_code_hooks_daemon.core import Decision, GatingResult, get_data_layer
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.core.utils import (
-    bash_write_destinations,
     get_bash_command,
     get_file_content,
     get_file_path,
+    scan_bash_write_destinations,
 )
 from claude_code_hooks_daemon.utils.command_evasion import RESERVED_WORD_PREFIX
 from claude_code_hooks_daemon.utils.scratch_dir import acceptance_path
@@ -310,7 +310,7 @@ class SedBlockerHandler(PreToolUseHandlerBase):
         """Is this command a heredoc/redirect that writes ONLY to a `.md` file,
         with the sed text it carries never EXECUTED?
 
-        Reuses the shared redirect-target parser (`bash_write_destinations`,
+        Reuses the shared redirect-target parser (`scan_bash_write_destinations`,
         the same tokeniser `project_containment` uses to find what a Bash
         command names as a destination) rather than a second, weaker regex
         over the raw command text. The RAW (unresolved) destinations are
@@ -333,7 +333,12 @@ class SedBlockerHandler(PreToolUseHandlerBase):
         """
         if self._executes_sed(command):
             return False
-        destinations = [d for d in bash_write_destinations(command) if d.authored]
+        scan = scan_bash_write_destinations(command)
+        if scan.unreadable is not None:
+            # Text the tokeniser could not read may write anything, so the
+            # command is not provably `.md`-only (Plan 00466 N120).
+            return False
+        destinations = [d for d in scan.destinations if d.authored]
         return bool(destinations) and all(d.destination.endswith(".md") for d in destinations)
 
     def _executes_sed(self, command: str) -> bool:

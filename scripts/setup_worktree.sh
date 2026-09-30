@@ -298,24 +298,46 @@ echo -e "${GREEN}✓${NC} Venv created at ${WT_VENV_PATH}"
 # into the same fingerprint venv, so it matches uv.lock exactly. Link mode
 # follows ensure_venv's choice: copy inside a container (uv's cache and the
 # bind-mounted target are cross-device), uv's default elsewhere.
-echo -e "${YELLOW}→${NC} Installing dev extras (pytest, ruff, mypy...) from uv.lock..."
+echo -e "${YELLOW}→${NC} Installing dev extras (the test, lint and type tools) from uv.lock..."
 WT_LINK_MODE="${UV_LINK_MODE:-}"
 if [[ -z "${WT_LINK_MODE}" ]] && _uv_in_container; then
     WT_LINK_MODE="copy"
 fi
+# --python pins the venv's own interpreter (00466 N114): without it uv may
+# rebuild the venv on the Python it prefers rather than the one it was made on.
+WT_VENV_PYTHON="${WT_VENV_PATH}/bin/python"
 if [[ -n "${WT_LINK_MODE}" ]]; then
     UV_LINK_MODE="${WT_LINK_MODE}" UV_PROJECT_ENVIRONMENT="${WT_VENV_PATH}" \
-        uv sync --frozen --all-extras --project "${WORKTREE_DIR}" --quiet
+        uv sync --frozen --all-extras --python "${WT_VENV_PYTHON}" --project "${WORKTREE_DIR}" --quiet
 else
     UV_PROJECT_ENVIRONMENT="${WT_VENV_PATH}" \
-        uv sync --frozen --all-extras --project "${WORKTREE_DIR}" --quiet
+        uv sync --frozen --all-extras --python "${WT_VENV_PYTHON}" --project "${WORKTREE_DIR}" --quiet
 fi
-if ! "${WT_VENV_PATH}/bin/python" -c "import pytest"; then
+if ! "${WT_VENV_PYTHON}" -c "import pytest"; then
     echo -e "${RED}✗${NC} Dev extras did not install: 'import pytest' fails in ${WT_VENV_PATH}"
-    echo "  QA cannot run in this worktree. Fix: UV_PROJECT_ENVIRONMENT=${WT_VENV_PATH} uv sync --frozen --all-extras --project ${WORKTREE_DIR}"
+    echo "  QA cannot run in this worktree. Fix: UV_PROJECT_ENVIRONMENT=${WT_VENV_PATH} uv sync --frozen --all-extras --python ${WT_VENV_PYTHON} --project ${WORKTREE_DIR}"
     exit 1
 fi
-echo -e "${GREEN}✓${NC} Dev extras installed (pytest importable)"
+echo -e "${GREEN}✓${NC} Dev extras installed (the test runner imports)"
+
+# The venv's name declares its Python (`-py311-` is 3.11). A venv running any
+# other Python makes the daemon and every QA run in this worktree lie about the
+# interpreter they test, so refuse it (00466 N114).
+# The name is venv-{slug}-py{MM}-{hash}; read py{MM} from the right, since the
+# slug is a path and can contain anything.
+WT_VENV_NAME="$(basename "${WT_VENV_PATH}")"
+WT_VENV_NAME="${WT_VENV_NAME%-*}"
+WT_DECLARED_PY="${WT_VENV_NAME##*-py}"
+if [[ ! "${WT_DECLARED_PY}" =~ ^[0-9]+$ ]]; then
+    WT_DECLARED_PY=""
+fi
+WT_ACTUAL_PY="$("${WT_VENV_PYTHON}" -c 'import sys; print("%d%d" % sys.version_info[:2])')"
+if [[ -z "${WT_DECLARED_PY}" ]] || [[ "${WT_DECLARED_PY}" != "${WT_ACTUAL_PY}" ]]; then
+    echo -e "${RED}✗${NC} ${WT_VENV_PATH} runs Python ${WT_ACTUAL_PY}, but its name declares py${WT_DECLARED_PY:-(none)}."
+    echo "  uv did not build it on the interpreter it was fingerprinted from. Remove it and re-run."
+    exit 1
+fi
+echo -e "${GREEN}✓${NC} Venv Python matches its fingerprint (py${WT_ACTUAL_PY})"
 
 # Step 5: Verify editable install points to correct source.
 # uv sync already installed the package editable via pyproject; just verify.
@@ -339,8 +361,8 @@ else
     exit 1
 fi
 
-# Step 7: Verify QA scripts are accessible
-if [[ -x "${WORKTREE_DIR}/scripts/qa/run_all.sh" ]]; then
+# Step 7: Verify the QA entry point is accessible
+if [[ -x "${WORKTREE_DIR}/scripts/qa/llm_qa.py" ]]; then
     echo -e "${GREEN}✓${NC} QA scripts accessible"
 else
     echo -e "${YELLOW}⚠${NC}  QA scripts may not be executable (run chmod +x if needed)"
@@ -385,8 +407,8 @@ echo ""
 echo "Quick start:"
 echo "  cd ${WORKTREE_DIR}"
 echo ""
-echo "Run QA:"
-echo "  cd ${WORKTREE_DIR} && ./scripts/qa/run_all.sh"
+echo "Run QA (targeted; full QA is the coordinator's batched integration gate):"
+echo "  cd ${WORKTREE_DIR} && ./scripts/qa/llm_qa.py changed"
 echo ""
 echo "Verify daemon (run from INSIDE the worktree — ./bin/hooks-daemon anchors"
 echo "to its own location, so it resolves this worktree's venv, not the main one):"
@@ -397,4 +419,8 @@ echo "Agent prompt template:"
 echo "  You are working in a git worktree at ${WORKTREE_DIR}/"
 echo "  DO NOT work in /workspace - only work in YOUR worktree directory."
 echo "  Run the daemon CLI as ./bin/hooks-daemon from that worktree."
-echo "  Run ./scripts/qa/run_all.sh before committing."
+echo "  Before committing, run TARGETED QA: ./scripts/qa/llm_qa.py changed, plus"
+echo "  ./scripts/qa/llm_qa.py <tool>, and pytest tests/unit/qa/test_x.py naming"
+echo "  each test file you touched by its path."
+echo "  Do not run full QA: it is the coordinator's batched integration gate,"
+echo "  run once over every ready branch merged together. Hand over a commit hash."

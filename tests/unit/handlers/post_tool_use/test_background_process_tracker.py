@@ -160,6 +160,35 @@ class TestHeredocBodies:
         """``<<<`` takes a single-line word, not a delimited body."""
         assert _command_is_backgrounded('grep x <<< "a & b"') is False
 
+    def test_a_line_after_a_here_string_is_a_command_n116(self):
+        """Plan 00466 N116: from its second `<`, `<<<EOF` read as a heredoc
+        opener, and the command on the next line was masked as its body."""
+        assert _command_is_backgrounded("cat <<<EOF\nsleep 600 &\nEOF") is True
+
+    @pytest.mark.parametrize(
+        ("opener", "closer"),
+        [
+            ("'EOF-1'", "EOF-1"),
+            ("END.MD", "END.MD"),
+            ("\\EOF", "EOF"),
+            ('E"O"F', "EOF"),
+            ("'my-notes'", "my-notes"),
+        ],
+    )
+    def test_every_delimiter_spelling_masks_its_body_n120(self, opener, closer):
+        """Plan 00466 N120: the shared heredoc scanner reads any delimiter word;
+        this handler's own regex took only an identifier, so these bodies
+        were scanned and their prose ``&`` fired the advisory."""
+        command = f"cat >> notes.md <<{opener}\nTom & Jerry\n{closer}"
+        assert _command_is_backgrounded(command) is False
+
+    def test_a_closer_with_trailing_text_does_not_close_the_body_n120(self):
+        """Only a line that IS the delimiter closes a body; ``EOF &`` is body
+        text, and the command after the real closer is still judged."""
+        command = "cat <<'EOF'\nEOF &\nEOF\nsleep 600 &"
+        assert _mask_heredoc_bodies(command).count("&") == 1
+        assert _command_is_backgrounded(command) is True
+
     def test_masking_preserves_length(self):
         assert len(_mask_heredoc_bodies(self.QUOTED_HEREDOC)) == len(self.QUOTED_HEREDOC)
 

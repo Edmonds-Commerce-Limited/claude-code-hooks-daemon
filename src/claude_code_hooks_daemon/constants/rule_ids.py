@@ -420,8 +420,8 @@ class RuleID:
     ESLINT_RUN_FAILURE: str = "R-ESLINT-RUN-FAILURE"
 
     # ------------------------------------------------------------------
-    # secret_file_guard handler — 4 rules (Decision B: per-route granularity,
-    # plus the evaluation-error rule added by Plan 00466 N11)
+    # secret_file_guard handler — 5 rules (Decision B: per-route granularity,
+    # plus the evaluation-error and unreadable-command rules, Plan 00466)
     # ------------------------------------------------------------------
 
     #: Read/Write/Edit/NotebookEdit/Grep targeting a protected path directly.
@@ -436,6 +436,10 @@ class RuleID:
     #: A call this guard could not finish evaluating (Plan 00466 N11): denied
     #: structurally, independent of the daemon's global strict_mode.
     SECRET_EVALUATION_ERROR: str = "R-SECRET-EVALUATION-ERROR"
+
+    #: A Bash command whose structure the shell reader cannot establish with
+    #: certainty (Plan 00466 N101 round 12): denied, with a rephrase.
+    SECRET_COMMAND_UNREADABLE: str = "R-SECRET-COMMAND-UNREADABLE"
 
     # ------------------------------------------------------------------
     # sensitive_content handler — 2 rules (two independent sources)
@@ -538,6 +542,13 @@ class RuleID:
 
     #: CronDelete inside a subagent — a session cron belongs to the coordinator.
     SUBAGENT_CRON_DELETE: str = "R-SUBAGENT-CRON-DELETE"
+
+    # ------------------------------------------------------------------
+    # subagent_full_qa_blocker handler (ships disabled)
+    # ------------------------------------------------------------------
+
+    #: A full-suite QA run inside a subagent — the full gate is the coordinator's.
+    SUBAGENT_FULL_QA: str = "R-SUBAGENT-FULL-QA"
 
     # ------------------------------------------------------------------
     # quarantine_artefact_read_guard handler (ships disabled)

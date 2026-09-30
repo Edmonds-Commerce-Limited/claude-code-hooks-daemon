@@ -217,6 +217,10 @@ Run ALL quality checks before committing:
 ./scripts/qa/llm_qa.py all
 ```
 
+This is the main thread's gate. A sub-agent runs `./scripts/qa/llm_qa.py changed`
+instead and hands over a commit; see [QA.md](../QA.md), "Full QA Is the
+Coordinator's Gate".
+
 **Expected output**: one `✅` line per check, then a summary line whose two
 numbers are equal — e.g. `QA: 18/18 PASSED`.
 
@@ -300,7 +304,7 @@ A feature is DONE when ALL of the following are verified:
 - [ ] Implementation makes tests pass
 - [ ] 95%+ coverage maintained
 - [ ] All edge cases covered
-- [ ] Run: `pytest tests/unit/ -v`
+- [ ] Run: `pytest tests/unit/handlers/{event_type}/ -v` (the whole of `tests/unit/` is the full gate's)
 
 ### 2. Integration Tests
 
@@ -327,7 +331,7 @@ A feature is DONE when ALL of the following are verified:
 ### 5. Full QA Suite
 
 - [ ] EVERY check the runner runs passes, with ZERO failures
-- [ ] Run: `./scripts/qa/llm_qa.py all` (the same suite as `run_all.sh`, LLM-optimised)
+- [ ] Run: `./scripts/qa/llm_qa.py all` (the same suite as `run_all.sh`, LLM-optimised; main thread only, a sub-agent runs `changed`)
 - [ ] Expected output: "ALL CHECKS PASSED" / an `N/N PASSED` line
 
 ### 5b. Client-Mode Verification (if paths/interpreters/wrappers/assets changed)

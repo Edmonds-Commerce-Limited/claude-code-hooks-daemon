@@ -108,6 +108,21 @@ class TestWhatItLeavesAlone:
         hook_input = {"tool_name": "Read", "tool_input": {"file_path": str(target)}}
         assert handler.matches(hook_input) is False
 
+    def test_text_the_tokeniser_cannot_read_draws_no_advice(
+        self, handler: InstalledPluginEditAdvisorHandler, config_dir: Path
+    ) -> None:
+        """Plan 00466 N120: an advisory names only what it can read. The
+        unterminated ANSI-C string leaves the write unnamed, so no advice
+        claims to know where it goes."""
+        target = config_dir / "plugins" / "cache" / "mkt" / "p" / "1.0.0" / "hooks" / "run.sh"
+        assert handler.matches(_bash(f"echo $'it > {target}")) is False
+
+    def test_a_write_after_an_ansi_c_string_is_noticed(
+        self, handler: InstalledPluginEditAdvisorHandler, config_dir: Path
+    ) -> None:
+        target = config_dir / "plugins" / "cache" / "mkt" / "p" / "1.0.0" / "hooks" / "run.sh"
+        assert handler.matches(_bash(f"echo $'it\\'s' > {target}")) is True
+
 
 class TestTheAdvice:
     def test_it_allows_and_names_the_file_and_the_way_out(

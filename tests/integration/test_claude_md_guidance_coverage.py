@@ -80,6 +80,7 @@ _EARNS_GUIDANCE: dict[str, str] = {
     "ProjectContainmentHandler": "T1 denies a write named outside the repo root",
     "PlanJournalGuardHandler": "T1 denies a journal entry written by hand",
     "SubagentCronDeleteBlockerHandler": "T1 denies CronDelete inside a subagent",
+    "SubagentFullQaBlockerHandler": "T1 denies a full-suite QA run inside a subagent",
     "ErrorHidingBlockerHandler": "T1 denies error-suppression patterns",
     "GhIssueCommentsHandler": "T1 denies gh issue view without --comments",
     "GhPrCommentsHandler": "T1 denies gh pr view without --comments",

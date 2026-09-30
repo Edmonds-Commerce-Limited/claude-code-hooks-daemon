@@ -103,6 +103,27 @@ bad config would begin refusing every tool call — so the fix is owner-gated.
 The inventory exists so that the decision is made against a list rather than
 against an impression.
 
+## Limits no reading of the command text closes
+
+A guard that judges a Bash command before it runs sees text, not the disk the
+command will meet. Two limits follow, and both are ALLOWS by design rather
+than boundaries on the inventory:
+
+- **A path built at run time.** `"$(dirname "$0")/x"` or a variable set by a
+  program names a file the text never spells. Where the target decides the
+  verdict, the guard denies it as unknown (containment's unresolved
+  targets); where it does not, the guard cannot see it.
+- **A later command a planted file could shadow** (ledger 00466 N214, round
+  13 ruling). A quoted heredoc's body is data only when no earlier segment
+  may rebind a command name IN THIS SHELL: a function, an alias, `hash`,
+  `PATH` and the other names bash or a helper reads, `cd`, `source`, `eval`
+  and the rest of `shell_segmentation.segment_may_rebind_commands`. An
+  earlier external command (`mkdir`, `pytest`, `make`) is a child process
+  and cannot rebind anything, so it does not count, whatever it writes. It
+  can still plant a file a later name resolves to, for example a program
+  in a directory `PATH` already lists relatively. Judging that would mean
+  denying every multi-step command, the project's required `set -euo pipefail` prelude among them.
+
 ## What the Defence does not catch
 
 - **Anything outside the five surfaces.** D-PUB-3 (`sensitive_content.py`'s

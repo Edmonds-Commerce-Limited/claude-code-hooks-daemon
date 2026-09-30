@@ -17,18 +17,104 @@ from __future__ import annotations
 import errno
 import os
 import time
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from pathlib import Path
+from types import SimpleNamespace
+from typing import NamedTuple
 
 import pytest
 
+from claude_code_hooks_daemon.utils import shell_expansion
 from claude_code_hooks_daemon.utils.shell_expansion import (
+    DEFAULT_MAX_BRACE_DEPTH,
     TooManyToEnumerateError,
+    UnresolvableBraceQuotingError,
     bounded_recursive_glob,
     expand_braces,
     iter_brace_words,
     iter_normalised_shell_words,
+    iter_shell_brace_words,
+    normalise_word,
+    shell_word_spellings,
 )
+from tests.scaling import SIZE_FACTOR, SUPERLINEAR_RATIO, counted_ratio, scaling_ratio
+from tests.support.directory_reads import record_directory_reads
+
+
+def _assert_grows_linearly(
+    text_at: Callable[[int], str], scan: Callable[[str], object], small_n: int
+) -> None:
+    """``scan(text_at(8 * small_n))`` costs at most linearly more CPU than
+    ``scan(text_at(small_n))`` (00466 N222: a wall-clock bound failed under
+    host load while saying nothing about growth)."""
+    ratio = scaling_ratio(lambda size: scan(text_at(size)), small_n, text_at(SIZE_FACTOR * small_n))
+    assert ratio <= SUPERLINEAR_RATIO, f"cost grew {ratio:.0f}x for {SIZE_FACTOR}x input"
+
+
+def _pairs(count: int) -> str:
+    """The reviewer's brace shape: ``count`` adjacent ``{a,b}`` groups."""
+    return "{a,b}" * count
+
+
+class _BraceWork(NamedTuple):
+    """What one ``expand_braces`` call did: its work, and what ended it."""
+
+    characters: int
+    stopped_by: str
+
+
+_EXPANDED = "expanded"
+_SPELLING_CAP = "spelling cap"
+_DEPTH_CAP = "depth cap"
+
+
+def _brace_work(monkeypatch: pytest.MonkeyPatch, word: str, **caps: int) -> _BraceWork:
+    """Count the characters ``expand_braces(word, **caps)`` handles.
+
+    Each recursive step searches the word it is given for the next group and
+    rebuilds it around one alternative, so a step costs the length of its
+    word, and the sum over every step is the expander's work: counted, not
+    timed, so the same on any host under any load (00466 N252).
+
+    ``stopped_by`` names the regime: a word the expander finished, or the cap
+    it gave up at. Growth is only comparable inside one regime: below the
+    spelling cap the spelling count itself doubles per group, and past the
+    depth cap the expander stops after a fixed number of steps.
+    """
+    expand_step = shell_expansion._raw_brace_expansions
+    characters = 0
+
+    def counting_step(step_word: str, *, depth: int, max_depth: int) -> Iterator[str]:
+        nonlocal characters
+        characters += len(step_word)
+        yield from expand_step(step_word, depth=depth, max_depth=max_depth)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(shell_expansion, "_raw_brace_expansions", counting_step)
+        try:
+            expand_braces(word, **caps)
+        except TooManyToEnumerateError as exc:
+            stopped_by = _DEPTH_CAP if _DEPTH_CAP in str(exc) else _SPELLING_CAP
+            return _BraceWork(characters, stopped_by)
+    return _BraceWork(characters, _EXPANDED)
+
+
+def _assert_brace_work_grows_linearly(
+    monkeypatch: pytest.MonkeyPatch,
+    word_at: Callable[[int], str],
+    small_n: int,
+    stopped_by: str,
+    **caps: int,
+) -> None:
+    """Both sizes end in the ``stopped_by`` regime, and the expander's work
+    grows at most linearly between them."""
+    small = _brace_work(monkeypatch, word_at(small_n), **caps)
+    large = _brace_work(monkeypatch, word_at(SIZE_FACTOR * small_n), **caps)
+    assert (small.stopped_by, large.stopped_by) == (stopped_by, stopped_by)
+    ratio = counted_ratio(
+        lambda size: _brace_work(monkeypatch, word_at(size), **caps).characters, small_n
+    )
+    assert ratio <= SUPERLINEAR_RATIO, f"work grew {ratio:.0f}x for {SIZE_FACTOR}x input"
 
 
 class TestExpandBraces:
@@ -71,23 +157,57 @@ class TestExpandBraces:
         with pytest.raises(TooManyToEnumerateError):
             expand_braces(word, max_spellings=256)
 
-    def test_exceeding_the_spelling_cap_is_fast(self) -> None:
+    def test_exceeding_the_spelling_cap_is_fast(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """B1-R3 (Plan 00466 review 3): the reviewer's exact blocker shape --
         `{a,b}` x 22 in one ~115-byte word -- must give up in well under 1s,
-        not the >45s the eager recursive expander took."""
-        word = "{a,b}" * 22
-        start = time.monotonic()
+        not the >45s the eager recursive expander took. Pinned by growth in
+        the group count: 64 pairs against 8, both past a 128-spelling cap and
+        neither past the 64-group depth cap, where eager expansion is 2**56
+        times the work."""
         with pytest.raises(TooManyToEnumerateError):
-            expand_braces(word, max_spellings=256)
-        assert time.monotonic() - start < 1.0
+            expand_braces(_pairs(22), max_spellings=256)
+        _assert_brace_work_grows_linearly(
+            monkeypatch,
+            _pairs,
+            DEFAULT_MAX_BRACE_DEPTH // SIZE_FACTOR,
+            _SPELLING_CAP,
+            max_spellings=128,
+        )
 
-    def test_forty_repetitions_is_also_fast(self) -> None:
-        """The reviewer's third brace shape (x40)."""
-        word = "{a,b}" * 40
-        start = time.monotonic()
+    def test_forty_repetitions_is_also_fast(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """The reviewer's third brace shape (x40), past the default spelling
+        cap. Pinned by growth in the word's length at a fixed 40 groups, so
+        both sizes stop at the same cap after the same number of steps."""
         with pytest.raises(TooManyToEnumerateError):
-            expand_braces(word, max_spellings=256)
-        assert time.monotonic() - start < 1.0
+            expand_braces(_pairs(40), max_spellings=256)
+        _assert_brace_work_grows_linearly(
+            monkeypatch, lambda prefix: "p" * prefix + _pairs(40), 2000, _SPELLING_CAP
+        )
+
+    def test_the_count_sees_the_crossing_into_the_spelling_cap(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Why both sizes must sit in one regime (00466 N252): 5 pairs make
+        all 32 spellings, 40 pairs make 256 spellings 8x longer and give up,
+        so the work grows about 64x for 8x input with nothing superlinear in
+        the expander."""
+        small = _brace_work(monkeypatch, _pairs(5))
+        large = _brace_work(monkeypatch, _pairs(40))
+        assert (small.stopped_by, large.stopped_by) == (_EXPANDED, _SPELLING_CAP)
+        assert large.characters / small.characters > SUPERLINEAR_RATIO
+
+    def test_the_count_sees_an_expander_that_does_not_stop_at_the_cap(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Without this, a count that never moves would pass every growth test
+        above: an eager expander, which makes every spelling before checking
+        the cap, is caught by the same assertion."""
+        eager = SimpleNamespace(islice=lambda spellings, _stop: spellings)
+        monkeypatch.setattr(shell_expansion, "itertools", eager)
+        with pytest.raises(AssertionError, match="work grew"):
+            _assert_brace_work_grows_linearly(
+                monkeypatch, _pairs, 2, _SPELLING_CAP, max_spellings=2
+            )
 
     def test_deeply_nested_group_exceeds_the_depth_cap_and_raises(self) -> None:
         """Own live finding (own RED test, not in the review report): a
@@ -98,12 +218,287 @@ class TestExpandBraces:
         with pytest.raises(TooManyToEnumerateError):
             expand_braces(word, max_spellings=100_000, max_depth=64)
 
-    def test_deeply_nested_group_raise_is_fast(self) -> None:
-        word = "{a," * 2000 + "a" + "}" * 2000
-        start = time.monotonic()
+    def test_deeply_nested_group_raise_is_fast(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Depth 2000 against depth 250, both past the depth cap: the raise
+        must not cost more than linearly in the nesting (00466 N222)."""
+
+        def word_at(depth: int) -> str:
+            return "{a," * depth + "a" + "}" * depth
+
         with pytest.raises(TooManyToEnumerateError):
-            expand_braces(word, max_spellings=100_000, max_depth=64)
-        assert time.monotonic() - start < 1.0
+            expand_braces(word_at(2000), max_spellings=100_000, max_depth=64)
+        _assert_brace_work_grows_linearly(
+            monkeypatch,
+            word_at,
+            2000 // SIZE_FACTOR,
+            _DEPTH_CAP,
+            max_spellings=100_000,
+            max_depth=64,
+        )
+
+
+def _spellings(word: str) -> set[str]:
+    return {normalise_word(spelling) for spelling in expand_braces(word)}
+
+
+class TestQuotedBracesAreNotBraceSyntax:
+    """Plan 00466 N107: bash reads a quoted or escaped brace or comma as
+    text, and skips `${...}` and substitutions. The quote-blind reading is
+    kept too, since a word may be a fragment of a longer one."""
+
+    @pytest.mark.parametrize(
+        "word",
+        [
+            '.p-{"}",q}',
+            ".p-{'}',q}",
+            ".p-{\\},q}",
+            '.p-{"{",q}',
+            ".p-{$'}',q}",
+            '.p-{$"}",q}',
+            '.p-{"$(echo ")")",q}',
+            ".p-{`echo }`,q}",
+        ],
+    )
+    def test_a_quoted_brace_is_text(self, word: str) -> None:
+        assert ".p-q" in _spellings(word)
+
+    def test_a_quoted_comma_does_not_split(self) -> None:
+        assert ".p-a,b" in _spellings('.p-{"a,b",q}')
+
+    def test_a_parameter_expansion_is_not_a_group(self) -> None:
+        assert {"*a", "*b"} <= _spellings("${x}{a,b}")
+
+    def test_a_word_without_quoting_reads_as_before(self) -> None:
+        assert expand_braces("a{b,c}d") == ["abd", "acd"]
+
+    def test_the_quote_blind_reading_is_kept(self) -> None:
+        assert ".p-,q}" in _spellings('.p-{"}",q}')
+
+    def test_the_quote_aware_reading_is_capped(self) -> None:
+        with pytest.raises(TooManyToEnumerateError):
+            expand_braces('"x"' + "{a,b}" * 9)
+
+    @pytest.mark.parametrize(
+        "word",
+        [
+            '.p-{"$(case a in a) echo;; esac)",q}',
+        ],
+    )
+    def test_quoting_that_cannot_be_resolved_raises(self, word: str) -> None:
+        with pytest.raises(UnresolvableBraceQuotingError):
+            expand_braces(word)
+
+    def test_a_heredoc_in_a_substitution_is_read_by_the_shared_scanner(self) -> None:
+        """Plan 00466 N101 round 10, check 2: bash 5.2 prints `.p-) .p-q` for
+        this word, so the substitution holds the whole heredoc and the comma
+        after it splits the group."""
+        word = '.p-{"$(cat <<E\n)\nE\n)",q}'
+        assert expand_braces(word) == ['.p-"$(cat <<E\n)\nE\n)"', ".p-q"]
+
+    @pytest.mark.parametrize(
+        ("word", "spelling"),
+        [
+            ('.p-{"${x:-"}"}",q}', ".p-q"),
+            (".p-{${x:-'}'},q}", ".p-q"),
+            (".p-{a,b}${x", ".p-a*"),
+        ],
+    )
+    def test_a_parameter_expansion_is_read_as_bash_s_brace_scanner_reads_it(
+        self, word: str, spelling: str
+    ) -> None:
+        """Plan 00466 N101 round 7: bash's brace scanner opens a level at an
+        unquoted `${` and skips one inside double quotes, whatever the
+        parameter expansion's own rules; so does this."""
+        assert spelling in _spellings(word)
+
+    @pytest.mark.parametrize(
+        ("word", "spellings"),
+        [
+            ("{a}{b,c}", ["{a}b", "{a}c"]),
+            ("{pass},}", ["pass}", ""]),
+            ("{a{b,c}}", ["{ab}", "{ac}"]),
+            ("x{a,}", ["xa", "x"]),
+            ("{1..2x}{a,b}", ["{1..2x}a", "{1..2x}b"]),
+            ("{}{a,b}", ["{}a", "{}b"]),
+        ],
+    )
+    def test_a_group_is_what_bash_s_brace_scanner_accepts(
+        self, word: str, spellings: list[str]
+    ) -> None:
+        """Plan 00466 N101 round 7: a `}` before any comma is text, and a
+        body with no comma that is not a sequence is text."""
+        assert set(spellings) <= _spellings('""' + word)
+
+    def test_a_scan_past_its_budget_raises(self) -> None:
+        """Bash retries every `{` against the rest of the word, so many
+        unmatched braces cost the square of their number."""
+        with pytest.raises(TooManyToEnumerateError, match="budget"):
+            expand_braces('""' + "{a" * 8000 + ",}")
+
+    def test_no_brace_is_retried_once_no_closing_brace_is_left(self) -> None:
+        word = '""' + "{a" * 8000
+        assert expand_braces(word) == [word]
+
+    def test_unresolvable_quoting_with_no_group_at_stake_reads_as_before(self) -> None:
+        assert '"$x:-"a""' in expand_braces('"${x:-"a"}"')
+
+
+class TestIterShellBraceWords:
+    """Plan 00466 N107: words split as bash splits them, so a group holding
+    quoted whitespace reaches the expander whole."""
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            'cat .p-{"} x",q}',
+            "cat <<'EOF'\ndon't\nEOF\ncat .p-{\"} x\",q}",
+            "cat <<-'EOF'\n\tdon't\n\tEOF\ncat .p-{\"} x\",q}",
+            '# don\'t\ncat .p-{"} x",q}',
+            'echo $(cat .p-{"} x",q})',
+            'echo "$(cat .p-{"} x",q})"',
+            'echo `cat .p-{"} x",q}`',
+            'cat <<EOF\n$(cat .p-{"} x",q})\nEOF',
+            "cat <<< 'x' .p-{\"} x\",q}",
+            'cat .p-{"} x",q} <(true)',
+            'cat <<EOF\ndon\'t $(cat .p-{"} x",q})\nEOF',
+        ],
+    )
+    def test_a_group_holding_quoted_whitespace_is_one_word(self, text: str) -> None:
+        assert '.p-{"} x",q}' in list(iter_shell_brace_words(text))
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "bash -c 'cat .p-{\"} x\",q}'",
+            'bash -c "cat .p-{\\"} x\\",q}"',
+            "bash -c $'cat .p-\\x7b\"} x\",q}'",
+            "eval 'cat .p-{\"}' 'x\",q}'",
+            'bash -c cat\\ .p-{\\"}\\ x\\",q}',
+            "bash <<'EOF'\ncat .p-{\"} x\",q}\nEOF",
+            'bash <<EOF\ncat .p-{"} x",q}\nEOF',
+        ],
+    )
+    def test_text_a_shell_may_run_is_read_as_a_command(self, text: str) -> None:
+        assert '.p-{"} x",q}' in list(iter_shell_brace_words(text))
+
+    @pytest.mark.parametrize(
+        ("text", "expected"),
+        [
+            ("cat {a,b}", ["{a,b}"]),
+            ("echo '{a,b}' x", ["'{a,b}'", "{a,b}"]),
+            ("cat <<'EOF'\nplain {a,b}\nEOF", ["{a,b}"]),
+            ("echo {a,b} '{c,d}' plain", ["{a,b}", "'{c,d}'", "{c,d}"]),
+            ("cat .p-{},q}", [".p-{},q}"]),
+        ],
+    )
+    def test_every_word_holding_a_brace_is_reported_whatever_its_quoting_n115(
+        self, text: str, expected: list[str]
+    ) -> None:
+        """Plan 00466 N115: bash groups a quote-free word differently from
+        the quote-blind reading too."""
+        assert list(iter_shell_brace_words(text)) == expected
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "bash <<< $'cat .p-\\x7bq,r\\x7d'",
+            "bash <<<$'cat .p-\\x7bq,r\\x7d'",
+            "sh -s <<< $'cat .p-\\x7bq,r\\x7d'",
+            "bash 2>/dev/null <<< $'cat .p-\\x7bq,r\\x7d'",
+        ],
+    )
+    def test_a_here_string_word_is_an_ordinary_word_n116(self, text: str) -> None:
+        """Plan 00466 N116: at the second `<` of `<<<`, `<<` was read as a
+        heredoc, and the here-string word became its delimiter."""
+        assert ".p-{q,r}" in list(iter_shell_brace_words(text))
+
+    def test_a_heredoc_after_a_here_string_is_still_a_heredoc(self) -> None:
+        text = "cat <<< x <<'EOF'\ncat .p-{\"} x\",q}\nEOF"
+        assert '.p-{"} x",q}' in list(iter_shell_brace_words(text))
+
+    def test_a_here_string_in_a_substitution_is_not_a_heredoc_n116(self) -> None:
+        text = 'echo "$(cat <<< hi)" .p-{"} x",q}'
+        assert '.p-{"} x",q}' in list(iter_shell_brace_words(text))
+
+    def test_unresolvable_quoting_with_a_group_after_it_raises(self) -> None:
+        with pytest.raises(UnresolvableBraceQuotingError):
+            list(iter_shell_brace_words('echo "${x:-"a"}" .p-{"} x",q}'))
+
+    def test_unresolvable_quoting_with_no_group_after_it_ends_the_scan(self) -> None:
+        assert list(iter_shell_brace_words('echo .p-{"a",b} "${x:-"a"}" done')) == [
+            '.p-{"a",b}',
+            ".p-{a,b}",
+        ]
+
+    def test_nesting_past_the_bound_raises(self) -> None:
+        text = "echo " + "$(echo " * 10 + '.p-{"a",b}' + ")" * 10
+        with pytest.raises(TooManyToEnumerateError):
+            list(iter_shell_brace_words(text))
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "bash -c $'cat .p-\\x7bq,r\\x7d'",
+            "eval $'cat .p-\\x7bq,r\\x7d'",
+            "ssh host $'cat .p-\\173q,r\\175'",
+            "su -c $'cat .p-\\u007bq,r\\u007d' root",
+        ],
+    )
+    def test_braces_decoded_from_ansi_c_quoting_are_read_n112(self, text: str) -> None:
+        """Plan 00466 N112: no quote survives the decoding."""
+        assert ".p-{q,r}" in list(iter_shell_brace_words(text))
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            ": ${x:-'a'} ; bash -c $'cat .p-\\x7b\"\\x7d\",q\\x7d'",
+            ": ${x:-'a'} ; eval $'cat .p-\\x7bq,r\\x7d'",
+            ": ${x:-'a'} ; eval \"cat .p-$(printf x)q,r}\"",
+            ": ${x:-'a'} ; bash -c \"$v\"",
+        ],
+    )
+    def test_a_group_that_may_arrive_after_unresolvable_quoting_raises_n113(
+        self, text: str
+    ) -> None:
+        """Plan 00466 N113: a decoded brace, or an unknown value a shell
+        reads again, after a span that cannot be resolved."""
+        with pytest.raises(UnresolvableBraceQuotingError):
+            list(iter_shell_brace_words(text))
+
+    @pytest.mark.parametrize(
+        "text",
+        [": ${x:-'a'} ; echo \"$HOME\" done", 'echo "${x:-"a"}" $\'tab\\there\''],
+    )
+    def test_nothing_that_may_arrive_after_unresolvable_quoting_ends_the_scan(
+        self, text: str
+    ) -> None:
+        assert list(iter_shell_brace_words(text)) == []
+
+    def test_a_word_quote_removal_leaves_unchanged_is_not_reread(self) -> None:
+        """A lone `$` is a quoting character that quote removal keeps."""
+        assert list(iter_shell_brace_words("x{a,b}$")) == ["x{a,b}$"]
+
+
+class TestShellWordSpellings:
+    """Plan 00466 N107: a word holding quoted whitespace is read as tokens,
+    each piece between whitespace outside every group expanded on its own."""
+
+    def test_a_group_holding_quoted_whitespace_spells_each_alternative(self) -> None:
+        assert {".p-}", "x", ".p-q"} <= set(shell_word_spellings('.p-{"} x",q}'))
+
+    def test_quoted_whitespace_outside_a_group_ends_a_token(self) -> None:
+        assert "dir/.p-q" in set(shell_word_spellings('"my dir/".p-{"}",q}'))
+
+    def test_pieces_are_capped_on_their_own(self) -> None:
+        word = "' x '".join(["a{b,c}"] * 12)
+        assert {"ab", "ac"} <= set(shell_word_spellings(word))
+
+    def test_one_piece_past_the_cap_raises(self) -> None:
+        with pytest.raises(TooManyToEnumerateError):
+            list(shell_word_spellings('"x"' + "{a,b}" * 9))
+
+    def test_a_piece_holding_no_group_adds_nothing(self) -> None:
+        assert list(shell_word_spellings('"a b" plain')) == []
 
 
 class TestIterBraceWords:
@@ -130,15 +525,32 @@ class TestIterBraceWords:
         with pytest.raises(TooManyToEnumerateError):
             list(iter_brace_words(command, max_words=10))
 
+    @pytest.mark.parametrize(
+        "word",
+        ["'{a,b}'", '"{a,b}"', "\\{a,b}", "{a\\,b}", "{'a,b'}", "{ab}", "{\n a, b}"],
+    )
+    def test_a_word_bash_reads_no_group_in_is_neither_yielded_nor_counted(self, word: str) -> None:
+        """Ledger 00466 N238 (ix): prose quoting brace words hit the cap."""
+        assert list(iter_brace_words(" ".join([word] * 600), max_words=10)) == []
+
+    @pytest.mark.parametrize("word", ["x'y'{a,b}", "{a,'b'}", "{a,b}'x'", "$'x'{a,b}"])
+    def test_a_word_with_one_unquoted_group_is_counted(self, word: str) -> None:
+        with pytest.raises(TooManyToEnumerateError):
+            list(iter_brace_words(" ".join([word] * 11), max_words=10))
+
     def test_adversarial_no_brace_input_is_fast(self) -> None:
         """B1-R3 / M-3 (Plan 00466 review): the 94 KB / 200 KB reproducer --
         a huge run of non-whitespace text carrying no brace at all -- must
         not trigger catastrophic backtracking (the abandoned
-        `\\S*\\{[^{}]*\\}\\S*` shape took 15s at 94 KB, >45s at 200 KB)."""
-        text = "a" * 200_000
-        start = time.monotonic()
-        assert list(iter_brace_words(text)) == []
-        assert time.monotonic() - start < 1.0
+        `\\S*\\{[^{}]*\\}\\S*` shape took 15s at 94 KB, >45s at 200 KB).
+        Pinned by growth, 200 KB against 25 KB, neither carrying a group to
+        find (00466 N222)."""
+        assert list(iter_brace_words("a" * 200_000)) == []
+        _assert_grows_linearly(
+            lambda size: "a" * size,
+            lambda text: list(iter_brace_words(text)),
+            200_000 // SIZE_FACTOR,
+        )
 
 
 class TestBoundedRecursiveGlob:
@@ -155,11 +567,13 @@ class TestBoundedRecursiveGlob:
                 )
             )
 
-    def test_refusal_at_the_root_is_immediate(self) -> None:
-        start = time.monotonic()
+    def test_refusal_at_the_root_is_immediate(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Immediate means no directory is read at all (00466 N222: counted,
+        not timed)."""
+        reads = record_directory_reads(monkeypatch)
         with pytest.raises(TooManyToEnumerateError):
             list(bounded_recursive_glob(Path("/"), "**/*.se?ret-zq9x", max_entries_visited=100))
-        assert time.monotonic() - start < 1.0
+        assert reads == [], f"the refused walk read {reads[:5]}"
 
     def test_refuses_a_multi_wildcard_pattern_with_no_recursive_marker(self) -> None:
         """n466-n24 review 4, m-1: two or more wildcarded segments trip the
@@ -173,19 +587,21 @@ class TestBoundedRecursiveGlob:
                 )
             )
 
-    def test_root_refusal_with_recursive_marker_is_not_masked_by_a_huge_cap(self) -> None:
+    def test_root_refusal_with_recursive_marker_is_not_masked_by_a_huge_cap(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """The refusal must fire from the root check itself, not merely
         because `max_entries_visited` happens to be small -- raise the cap
         far past anything a real walk would hit and confirm it still
-        refuses immediately rather than attempting the walk."""
-        start = time.monotonic()
+        refuses without reading a single directory."""
+        reads = record_directory_reads(monkeypatch)
         with pytest.raises(TooManyToEnumerateError):
             list(
                 bounded_recursive_glob(
                     Path("/"), "**/*.se?ret-zq9x", max_entries_visited=10_000_000
                 )
             )
-        assert time.monotonic() - start < 1.0
+        assert reads == [], f"the refused walk read {reads[:5]}"
 
     def test_finds_a_real_match_under_a_small_tree(self, tmp_path: Path) -> None:
         target = tmp_path / "nested" / "dir"
@@ -276,6 +692,64 @@ class TestBoundedRecursiveGlob:
         )
         with pytest.raises(PermissionError):
             list(bounded_recursive_glob(tmp_path, "**/*.zzz-marker-9f2c", max_entries_visited=100))
+
+
+class TestGlobErrorsAreCollectedPerBranch:
+    """Plan 00466 N101 round 9 (review 8 BLOCKER 1): one failed lookup must
+    not end the walk. With an ``errors`` list the walker records the error,
+    keeps examining every other branch, and leaves the verdict to the
+    caller."""
+
+    def test_an_unreadable_sibling_does_not_hide_a_later_match(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        (tmp_path / "a").mkdir()
+        (tmp_path / "b").mkdir()
+        (tmp_path / "b" / "f.zzz-marker-9f2c").touch()
+        real_scandir = os.scandir
+
+        def _fake_scandir(path: str | os.PathLike[str]) -> Iterator[os.DirEntry[str]]:
+            if Path(path) == tmp_path / "a":
+                raise PermissionError(errno.EACCES, "Permission denied")
+            return real_scandir(path)
+
+        monkeypatch.setattr(
+            "claude_code_hooks_daemon.utils.shell_expansion.os.scandir", _fake_scandir
+        )
+        errors: list[OSError] = []
+        matches = list(bounded_recursive_glob(tmp_path, "*/*.zzz-marker-9f2c", errors=errors))
+        assert [match.name for match in matches] == ["f.zzz-marker-9f2c"]
+        assert [error.errno for error in errors] == [errno.EACCES]
+
+    def test_a_whole_path_overflow_is_an_error_not_an_absence(self, tmp_path: Path) -> None:
+        """Every component is short; only the joined path is past PATH_MAX."""
+        long_dir = "d" * 200
+        (tmp_path / long_dir).mkdir()
+        pattern = f"{long_dir}/../" * 25 + "*.zzz-marker-9f2c"
+        errors: list[OSError] = []
+        assert list(bounded_recursive_glob(tmp_path, pattern, errors=errors)) == []
+        assert [error.errno for error in errors] == [errno.ENAMETOOLONG]
+        with pytest.raises(OSError) as raised:
+            list(bounded_recursive_glob(tmp_path, pattern))
+        assert raised.value.errno == errno.ENAMETOOLONG
+
+    def test_a_single_name_past_the_name_limit_is_an_absence(self, tmp_path: Path) -> None:
+        """No entry can carry that name, and bash opens the same component."""
+        errors: list[OSError] = []
+        pattern = "a" * 300 + "/*.zzz-marker-9f2c"
+        assert list(bounded_recursive_glob(tmp_path, pattern, errors=errors)) == []
+        assert errors == []
+
+    def test_a_wildcard_component_past_the_name_limit_is_matched_not_opened(
+        self, tmp_path: Path
+    ) -> None:
+        """Bash matches a wildcard component against directory entries; it
+        never opens it, so its length proves nothing."""
+        (tmp_path / "f.zzz-marker-9f2c").touch()
+        pattern = "*" * 300 + ".zzz-marker-9f2c"
+        assert [match.name for match in bounded_recursive_glob(tmp_path, pattern)] == [
+            "f.zzz-marker-9f2c"
+        ]
 
 
 class TestIterNormalisedShellWordsNestedCommands:

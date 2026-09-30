@@ -41,6 +41,7 @@ from claude_code_hooks_daemon.core.dispatch_cancellation import (
 )
 from claude_code_hooks_daemon.core.handler_scope import scope_admits
 from claude_code_hooks_daemon.core.hook_result import Decision, HookResult
+from claude_code_hooks_daemon.utils.shell_segmentation import bind_event_cwd, reset_event_cwd
 
 if TYPE_CHECKING:
     from claude_code_hooks_daemon.core.handler import Handler
@@ -681,6 +682,10 @@ class HandlerChain:
         the SAME (reused, e.g. asyncio executor) thread.
         """
         ctx_token = bind_dispatch_cancellation(cancellation)
+        # The event's cwd, for a shell reader judging a RELATIVE path
+        # (Plan 00466 N145): the daemon itself runs from `/`.
+        cwd = hook_input.get(HookInputField.CWD)
+        cwd_token = bind_event_cwd(cwd if isinstance(cwd, str) else None)
         try:
             return self._execute_handlers_body(
                 hook_input,
@@ -693,6 +698,7 @@ class HandlerChain:
                 start_time=start_time,
             )
         finally:
+            reset_event_cwd(cwd_token)
             reset_dispatch_cancellation(ctx_token)
 
     def _execute_handlers_body(

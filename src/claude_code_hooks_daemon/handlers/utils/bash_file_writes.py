@@ -37,10 +37,13 @@ from typing import Final
 
 from claude_code_hooks_daemon.core.utils import (
     HeredocBody,
+    bash_text_for_shlex,
     bash_write_destinations,
+    scan_bash_write_destinations,
     split_heredocs,
 )
 from claude_code_hooks_daemon.utils.command_evasion import strip_reserved_word_prefix
+from claude_code_hooks_daemon.utils.heredoc_operators import find_heredoc_operators
 from claude_code_hooks_daemon.utils.path_predicates import TextOrReason
 from claude_code_hooks_daemon.utils.shell_segmentation import (
     command_word,
@@ -56,10 +59,18 @@ ReadText = Callable[[Path], TextOrReason]
 
 @dataclass(frozen=True)
 class BashFileWrites:
-    """What a command writes, and where it changes directory first."""
+    """What a command writes, and where it changes directory first.
+
+    ``unreadable`` holds shell text this analysis could not read: from a
+    command the tokeniser rejects to the end of its command text, and a nested
+    program past the nesting limit. What it writes is UNKNOWN, not nothing, so
+    a caller that denies on a write location must decide it explicitly
+    (Plan 00466 N120).
+    """
 
     destinations: tuple[str, ...]
     directories: tuple[str, ...]
+    unreadable: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -274,13 +285,15 @@ def bash_file_writes(command: str, cwd: str | None, read_text: ReadText) -> Bash
         read_text: Reads a patch file; a failure there names no destination.
 
     Returns:
-        Destinations in command order, de-duplicated; ``cd``/``pushd`` operands.
+        Destinations in command order, de-duplicated; ``cd``/``pushd`` operands;
+        the text that could not be read.
     """
     analysis = _Analysis(cwd, read_text)
     analysis.command(command, depth=0)
     return BashFileWrites(
         destinations=tuple(dict.fromkeys(analysis.destinations)),
         directories=tuple(dict.fromkeys(analysis.directories)),
+        unreadable=tuple(dict.fromkeys(analysis.unreadable)),
     )
 
 
@@ -292,20 +305,29 @@ class _Analysis:
         self._read_text = read_text
         self.destinations: list[str] = []
         self.directories: list[str] = []
+        self.unreadable: list[str] = []
 
     def command(self, command: str, depth: int) -> None:
         """Analyse shell text: its grammar, each stage, each heredoc it feeds."""
         if depth > _MAX_DEPTH:
             logger.debug("bash_file_writes: nesting past %d not followed", _MAX_DEPTH)
+            self.unreadable.append(command)
             return
         # Authored writes over the WHOLE command, a git stage included:
         # `git show HEAD:f > f` is a shell write.
+        scan = scan_bash_write_destinations(command)
         self.destinations.extend(
-            candidate.destination
-            for candidate in bash_write_destinations(command)
-            if candidate.authored
+            candidate.destination for candidate in scan.destinations if candidate.authored
         )
+        if scan.unreadable is not None:
+            self.unreadable.append(scan.unreadable)
         outside, heredocs = split_heredocs(command)
+        # Split where bash splits: an ANSI-C `$'it\'s'` or a comment read raw
+        # moves every later boundary. Unreadable text keeps its raw form; the
+        # scan above has already reported it.
+        normalised = bash_text_for_shlex(outside)
+        if normalised is not None:
+            outside = normalised
         for stage in split_unquoted(strip_message_bodies(outside), _STAGE_SEPARATORS):
             self._stage(stage, depth)
         for heredoc in heredocs:
@@ -350,29 +372,44 @@ class _Analysis:
             self.destinations.extend(_program_writes(language, program))
 
     def _heredoc(self, heredoc: HeredocBody, depth: int) -> None:
-        """Analyse a body fed to an interpreter as a program; skip one fed to data."""
-        marker = re.compile(r"<<-?\s*['\"]?" + re.escape(heredoc.delimiter) + r"\b")
-        for command in split_unquoted(heredoc.opener_line, _COMMAND_SEPARATORS):
-            if not marker.search(command):
-                continue
+        """Analyse a body fed to an interpreter as a program; skip one fed to data.
+
+        The receiving stage is the one holding this heredoc's operator, read by
+        the shared parser (Plan 00466 N120): ``<<<`` opens no heredoc, any
+        delimiter word does, and ``ordinal`` picks among operators on the line
+        that name the same delimiter.
+        """
+        seen = 0
+        opener_line = bash_text_for_shlex(heredoc.opener_line)
+        if opener_line is None:
+            opener_line = heredoc.opener_line
+        for command in split_unquoted(opener_line, _COMMAND_SEPARATORS):
             stages = split_unquoted(command, _PIPE)
-            start = next(
-                (index for index, stage in enumerate(stages) if marker.search(stage)), len(stages)
-            )
-            for stage in stages[start:]:
-                located = _head(_words(stage))
-                if located is None:
+            for position, stage in enumerate(stages):
+                seen += sum(
+                    1
+                    for operator in find_heredoc_operators(stage)
+                    if operator.delimiter == heredoc.delimiter
+                )
+                if seen > heredoc.ordinal:
+                    self._pipeline_from(stages[position:], heredoc.body, depth)
                     return
-                head, args = located
-                language = _language(head)
-                if language is not None:
-                    parsed = _parse(args, _SYNTAX[language])
-                    if _reads_program_from_stdin(language, parsed):
-                        self._program(language, heredoc.body, depth)
-                    return
-                if head != _STDIN_PASSTHROUGH or _parse(args, _NO_FLAG_VALUES).operands:
-                    return
-            return
+
+    def _pipeline_from(self, stages: list[str], body: str, depth: int) -> None:
+        """Follow a body down the pipeline from the stage it is fed to."""
+        for stage in stages:
+            located = _head(_words(stage))
+            if located is None:
+                return
+            head, args = located
+            language = _language(head)
+            if language is not None:
+                parsed = _parse(args, _SYNTAX[language])
+                if _reads_program_from_stdin(language, parsed):
+                    self._program(language, body, depth)
+                return
+            if head != _STDIN_PASSTHROUGH or _parse(args, _NO_FLAG_VALUES).operands:
+                return
 
     def _git(self, args: list[str]) -> None:
         parsed = _parse(args, _SYNTAX[_GIT])
@@ -427,8 +464,8 @@ def _words(stage: str) -> list[str]:
     try:
         words = shlex.split(stage)
     except ValueError as exc:
-        # shlex also rejects text bash accepts (an ANSI-C `$'it\'s'` escape),
-        # so whitespace words keep the command name and any path visible.
+        # Whitespace words keep the command name and any path visible; the
+        # command scan reports the text as unreadable.
         logger.debug("bash_file_writes: shlex could not parse %r (%s)", stage, exc)
         words = stage.split()
     words = [word for word in words if word not in _GROUPING_WORDS]

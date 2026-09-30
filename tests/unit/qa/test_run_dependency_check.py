@@ -38,14 +38,30 @@ exit 0
 """
 
 
+#: `uv lock --check` passes; `uv sync ... --check` reports a drifted venv.
+_FAKE_UV_SYNC_DRIFT = """#!/bin/sh
+case "$1" in
+  lock) exit 0 ;;
+  *) echo "Would install 1 package" >&2; exit 1 ;;
+esac
+"""
+
+
 def _run_gate(
     tmp_path: Path,
     *,
     targets: str,
     deptry_bin: str = "",
     force_no_uv: bool = False,
+    path_prefix: str = "",
 ) -> tuple[subprocess.CompletedProcess[str], dict]:
     """Run the real wrapper with QA_DEPENDENCY_* overrides; return (process, JSON).
+
+    The wrapper's venv-vs-``uv.lock`` comparison is switched off with its own
+    documented opt-out: it measures the HOST's venv, which is not what these
+    tests are about and differs between the checkout's primary venv and the
+    matrix's extra interpreters. ``path_prefix`` puts a stub directory ahead
+    on PATH.
 
     SECURITY: fixed argv, no shell, the repository's own QA wrapper.
     """
@@ -54,7 +70,10 @@ def _run_gate(
         **os.environ,
         "QA_DEPENDENCY_OUTPUT_DIR": str(output_dir),
         "QA_DEPENDENCY_TARGETS": targets,
+        "HOOKS_DAEMON_ALLOW_UNLOCKED_VENV": "1",
     }
+    if path_prefix:
+        env["PATH"] = f"{path_prefix}{os.pathsep}{env['PATH']}"
     if deptry_bin:
         env["QA_DEPENDENCY_DEPTRY_BIN"] = deptry_bin
     if force_no_uv:
@@ -115,6 +134,37 @@ class TestDependencyGateFailsClosed:
         assert completed.returncode != 0, completed.stdout + completed.stderr
         assert output["summary"]["passed"] is False
         assert output["issues"], "count without detail is the defect this fix removes"
+
+    def test_the_deptry_verdict_does_not_depend_on_the_host_venv_sync_state(
+        self, tmp_path: Path
+    ) -> None:
+        """A venv out of step with uv.lock is a different gate's finding, not this one's.
+
+        ``uv sync --check`` is stubbed to report drift. The deptry verdict must
+        still be the one deptry gave: the venv-vs-lock claim has its own test in
+        ``tests/integration/test_qa_venv_matches_lock.py``. Without this the
+        extra-interpreter QA runs failed here whenever the primary venv had
+        drifted, since only the extras are synced from ``uv.lock``.
+        """
+        stub_dir = tmp_path / "bin"
+        stub_dir.mkdir()
+        stub = stub_dir / "uv"
+        stub.write_text(_FAKE_UV_SYNC_DRIFT, encoding="utf-8")
+        stub.chmod(stub.stat().st_mode | stat.S_IEXEC)
+        target = tmp_path / "pkg"
+        target.mkdir()
+        (target / "mod.py").write_text("x = 1\n", encoding="utf-8")
+        fake_bin = _write_fake_deptry(tmp_path, _FAKE_DEPTRY_CLI_ERROR)
+
+        completed, output = _run_gate(
+            tmp_path,
+            targets=str(target),
+            deptry_bin=fake_bin,
+            path_prefix=str(stub_dir),
+        )
+
+        assert completed.returncode != 0
+        assert "2" in output["summary"]["error"], completed.stdout + completed.stderr
 
     def test_the_real_project_scope_still_passes(self, tmp_path: Path) -> None:
         """No false alarm: the real gate, on the real tree, is still green."""

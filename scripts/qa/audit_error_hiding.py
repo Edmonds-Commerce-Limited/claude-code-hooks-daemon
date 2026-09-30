@@ -136,6 +136,109 @@ _PYTHON_HEREDOC_START_RE = re.compile(
 _BASH_FUNCTION_START_RE = re.compile(r"^([A-Za-z_]\w*)\s*\(\)\s*\{?\s*$")
 
 
+#: Builtins whose result holds exactly the items of their first argument, or
+#: none without one: ``iter(())`` is as empty as ``()`` (review 8 n4).
+_ITEM_PRESERVING_BUILTINS: frozenset[str] = frozenset(
+    {"iter", "tuple", "list", "set", "frozenset", "dict", "reversed", "sorted"}
+)
+
+
+def _is_empty_range(args: list[ast.expr]) -> bool:
+    """Whether ``range(*args)`` provably has zero length, from literal int arguments."""
+    values: list[int] = []
+    for arg in args:
+        if not (isinstance(arg, ast.Constant) and isinstance(arg.value, int)):
+            return False
+        values.append(arg.value)
+    try:
+        return len(range(*values)) == 0
+    except (TypeError, ValueError):
+        return False
+
+
+def _call_name(func: ast.expr) -> str | None:
+    """The bare or attribute name a call's ``func`` expression names, or None."""
+    if isinstance(func, ast.Name):
+        return func.id
+    if isinstance(func, ast.Attribute):
+        return func.attr
+    return None
+
+
+def _is_empty_iterable(source: ast.expr) -> bool:
+    """Whether ``yield from source`` provably yields nothing: an empty literal, or a builtin of one."""
+    if isinstance(source, (ast.Tuple, ast.List, ast.Set)):
+        return not source.elts
+    if isinstance(source, ast.Dict):
+        return not source.keys
+    if isinstance(source, ast.Constant):
+        return isinstance(source.value, (str, bytes)) and not source.value
+    if isinstance(source, ast.GeneratorExp):
+        return any(_is_empty_iterable(generator.iter) for generator in source.generators)
+    if isinstance(source, ast.IfExp):
+        return _is_empty_iterable(source.body) and _is_empty_iterable(source.orelse)
+    if isinstance(source, ast.Call):
+        name = _call_name(source.func)
+        if name in _ITEM_PRESERVING_BUILTINS:
+            return not source.args or _is_empty_iterable(source.args[0])
+        if name == "range":
+            return _is_empty_range(source.args)
+        if name == "map":
+            return len(source.args) >= 2 and all(_is_empty_iterable(arg) for arg in source.args[1:])
+        if name == "chain":
+            return not source.keywords and all(_is_empty_iterable(arg) for arg in source.args)
+    return False
+
+
+def _reports_the_exception(expr: ast.expr, exc_name: str | None) -> bool:
+    """Whether ``expr`` provably carries the caught failure -- an ALLOWLIST (review 9 m2).
+
+    Three shapes count: the bound exception itself (``except ... as exc``,
+    then ``exc`` appearing here, directly, inside a container, or passed to a
+    call), and a non-empty string or f-string literal. Anything else -- a
+    bare item that happens not to be the exception, an empty container, a
+    call with no exception argument -- is presumed NOT to report it. The
+    prior denylist presumed the opposite for anything it could not classify,
+    which review 9 found let 12 trivial shapes (``yield ()``, ``yield -1``,
+    ``yield from range(0)``, ...) pass as if they named the failure.
+    """
+    if isinstance(expr, ast.Name):
+        return expr.id == exc_name
+    if isinstance(expr, ast.Constant):
+        return isinstance(expr.value, str) and bool(expr.value)
+    if isinstance(expr, ast.JoinedStr):
+        return any(
+            isinstance(part, ast.Constant) and isinstance(part.value, str) and part.value
+            for part in expr.values
+        ) or any(
+            isinstance(part, ast.FormattedValue) and _reports_the_exception(part.value, exc_name)
+            for part in expr.values
+        )
+    if isinstance(expr, (ast.List, ast.Tuple, ast.Set)):
+        return any(_reports_the_exception(elt, exc_name) for elt in expr.elts)
+    if isinstance(expr, ast.Call):
+        return any(_reports_the_exception(arg, exc_name) for arg in expr.args) or any(
+            _reports_the_exception(kw.value, exc_name) for kw in expr.keywords
+        )
+    return False
+
+
+def _names_the_failure(value: ast.expr, exc_name: str | None) -> bool:
+    """Whether a ``yield``/``yield from`` expression actually reports something (review 7 n2, review 9 m2).
+
+    ``exc_name`` is the ``except ... as NAME`` binding in scope, or None when
+    the handler does not bind one. See :func:`_reports_the_exception` for the
+    allowlist a non-empty ``yield``/``yield from`` value is judged against; a
+    ``yield from`` additionally needs a provably non-empty source
+    (:func:`_is_empty_iterable`).
+    """
+    if isinstance(value, ast.Yield):
+        return value.value is not None and _reports_the_exception(value.value, exc_name)
+    if isinstance(value, ast.YieldFrom):
+        return not _is_empty_iterable(value.value) and _reports_the_exception(value.value, exc_name)
+    return False
+
+
 # Logger methods that report a failure where an operator will see it.
 _SURFACING_LOG_LEVELS: frozenset[str] = frozenset(
     {"warning", "warn", "error", "exception", "critical", "fatal"}
@@ -433,8 +536,18 @@ class ErrorHidingVisitor(ast.NodeVisitor):
         for child in ast.walk(node):
             if isinstance(child, ast.Try):
                 for handler in child.handlers:
+                    # A generator that yields a result naming the failure and
+                    # then stops has reported it, not returned None. A
+                    # constant yield (`yield 0`, `yield None`, a bare
+                    # `yield`) or an empty `yield from ()` names nothing
+                    # about the failure, so it does not count (review 7 n2).
+                    yielded = False
                     for stmt in handler.body:
-                        if isinstance(stmt, ast.Return) and _is_none(stmt.value):
+                        if isinstance(stmt, ast.Expr) and _names_the_failure(
+                            stmt.value, handler.name
+                        ):
+                            yielded = True
+                        if isinstance(stmt, ast.Return) and not yielded and _is_none(stmt.value):
                             self._add_violation(
                                 child,
                                 "return-none-on-error",

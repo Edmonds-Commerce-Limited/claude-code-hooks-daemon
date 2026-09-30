@@ -36,6 +36,7 @@ import pytest
 
 from claude_code_hooks_daemon.core import Decision
 from claude_code_hooks_daemon.core.data_layer import reset_data_layer
+from claude_code_hooks_daemon.core.utils import scan_bash_write_destinations
 from claude_code_hooks_daemon.handlers.pre_tool_use.project_containment import (
     ProjectContainmentHandler,
 )
@@ -83,14 +84,21 @@ _COMMAND_START = re.compile(r"[A-Za-z0-9_./$\"'-]")
 
 
 def _shell_lines(markdown: str) -> list[tuple[int, str]]:
-    """Return ``(line_number, command)`` for every shell line in a fenced block.
+    """Return ``(line_number, command)`` for every shell command in a fenced block.
 
     Line numbers are 1-based so a failure message points straight at the file.
+
+    A command is what bash would read as one: a line that leaves a quote, a
+    trailing backslash or a heredoc open takes the lines after it, up to the
+    end of its fence (Plan 00466 N120). Judged one line at a time, the first
+    line of ``git commit -m "subject`` is text nobody runs, and the guard
+    rightly fails closed on text it cannot read.
     """
     lines = markdown.splitlines()
     collected: list[tuple[int, str]] = []
     language: str | None = None
     open_length = 0
+    pending: tuple[int, list[str]] | None = None
 
     for index, line in enumerate(lines, start=1):
         fence = _FENCE.match(line)
@@ -100,16 +108,25 @@ def _shell_lines(markdown: str) -> list[tuple[int, str]]:
                 language, open_length = info, len(ticks)
                 continue
             if not info and len(ticks) >= open_length:
+                if pending is not None:
+                    collected.append((pending[0], "\n".join(pending[1])))
+                    pending = None
                 language, open_length = None, 0
                 continue
         if language is None or language not in _SHELL_LANGUAGES:
             continue
-        stripped = line.strip()
-        if not stripped or stripped.startswith("#"):
-            continue
-        if not _COMMAND_START.match(stripped):
-            continue
-        collected.append((index, stripped))
+        if pending is not None:
+            pending[1].append(line)
+        else:
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#"):
+                continue
+            if not _COMMAND_START.match(stripped):
+                continue
+            pending = (index, [stripped])
+        if scan_bash_write_destinations("\n".join(pending[1])).unreadable is None:
+            collected.append((pending[0], "\n".join(pending[1])))
+            pending = None
 
     return collected
 

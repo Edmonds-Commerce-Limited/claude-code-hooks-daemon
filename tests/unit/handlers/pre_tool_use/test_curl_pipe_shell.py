@@ -808,7 +808,7 @@ class TestSinkAllowlistFailsClosed:
         assert self._matches(handler, f"sudo -E bash <<'EOF'\n{self._PIPED}\nEOF") is True
 
     def test_sudo_in_front_of_a_sink_still_resolves_to_the_sink(self, handler):
-        command = f"sudo -E tee /etc/motd <<'EOF'\nnever {self._PIPED}\nEOF"
+        command = f"sudo -H tee /etc/motd <<'EOF'\nnever {self._PIPED}\nEOF"
         assert self._matches(handler, command) is False
 
     def test_a_second_heredoc_feeding_an_interpreter_withholds_for_both(self, handler):

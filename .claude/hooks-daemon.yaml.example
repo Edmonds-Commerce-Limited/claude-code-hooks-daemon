@@ -224,6 +224,20 @@ handlers:
       #   max_comment_block_lines: 40
       #   mode: block               # block | warn
 
+    subagent_full_qa_blocker:  # A SUB-AGENT may not start a full-suite QA run; the coordinator runs it
+      enabled: false       # Opt-in, and inert until you declare full_qa_patterns. Main thread unaffected.
+      priority: 32
+      # options:
+      #   full_qa_patterns:             # matched on the PROGRAM a command runs, never as a substring
+      #     - id: pytest-whole-suite
+      #       command: pytest           # basename of the script, binary or `python -m` module
+      #       full_args: [tests, .]     # operands that make it the whole suite (omit: every run is full)
+      #       bare_is_full: true        # a run naming no path is the whole suite too
+      #       option_grammar: pytest    # pytest's full option set: a value is never a path
+      #       read_only_flags: [--collect-only]
+      #   targeted_qa_commands:         # named in the deny as what to run instead
+      #     - pytest <explicit test files>
+
     bash_safe_mode:  # Opt-in: require a `set` safety prelude on sequenced Bash
       enabled: false       # Ships OFF; enabling is a per-project policy act
       priority: 36

@@ -7,13 +7,13 @@ verbose run_all.sh directly.
 
 import fnmatch
 import re
-import shlex
 from collections.abc import Iterator
 from typing import Any, Final
 
 from claude_code_hooks_daemon.core import AcceptanceTest, Handler, HookResult, TestType
 from claude_code_hooks_daemon.core.hook_result import Decision
 from claude_code_hooks_daemon.utils import shell_expansion
+from claude_code_hooks_daemon.utils.linear_shlex import LinearShlex
 from claude_code_hooks_daemon.utils.shell_segmentation import (
     split_unquoted,
     strip_quoted_heredoc_bodies,
@@ -21,6 +21,7 @@ from claude_code_hooks_daemon.utils.shell_segmentation import (
 
 _BLOCKED_SCRIPT = "run_all.sh"
 _LLM_SCRIPT = "./scripts/qa/llm_qa.py all"
+_TARGETED_SCRIPT = "./scripts/qa/llm_qa.py changed"
 
 # Characters that end one command and begin the next AT THE TOP LEVEL of a
 # shell line. A newline is one of them: `a\nb` runs two commands exactly as
@@ -162,10 +163,12 @@ def _tokenise(segment: str) -> list[str] | None:
     (``shlex.split`` wrapped in try/except) rather than hand-rolling a new
     tokeniser — this project already has one way to do this — extended with
     ``punctuation_chars`` so ``(``/``{``/``!`` split off even glued to the
-    next word (Plan 00466 review M1).
+    next word (Plan 00466 review M1). ``LinearShlex`` yields the stdlib's
+    tokens at a cost linear in a word's length, where the stdlib's is
+    quadratic (00466 N196).
     """
     try:
-        lexer = shlex.shlex(segment, posix=True, punctuation_chars=_PUNCTUATION_CHARS)
+        lexer = LinearShlex(segment, posix=True, punctuation_chars=_PUNCTUATION_CHARS)
         lexer.whitespace_split = True
         return list(lexer)
     except ValueError:
@@ -482,7 +485,23 @@ class EnforceLlmQaHandler(Handler):
         return _has_real_invocation(command)
 
     def handle(self, hook_input: dict[str, Any]) -> HookResult:
-        """Block with guidance to use llm_qa.py instead."""
+        """Block with guidance to use llm_qa.py instead, for the role that asked.
+
+        A sub-agent is sent to targeted QA: the full suite is the coordinator's
+        gate (Plan 00463), and `subagent_full_qa_blocker` denies it there, so
+        advice to run it would lead straight into the next deny.
+        """
+        if hook_input.get("agent_id"):
+            return HookResult(
+                decision=Decision.DENY,
+                reason=(
+                    "USE LLM-OPTIMISED, TARGETED QA\n\n"
+                    "run_all.sh is the full suite with 200+ lines of verbose output.\n"
+                    "The full suite is the coordinator's gate, so as a sub-agent run:\n\n"
+                    f"  {_TARGETED_SCRIPT}\n\n"
+                    "then commit and hand the commit hash to the coordinator."
+                ),
+            )
         return HookResult(
             decision=Decision.DENY,
             reason=(
@@ -491,7 +510,7 @@ class EnforceLlmQaHandler(Handler):
                 "Use the LLM-optimised wrapper instead:\n\n"
                 f"  {_LLM_SCRIPT}\n\n"
                 "This produces ~16 lines with structured JSON output.\n"
-                "Individual scripts (run_tests.sh, run_lint.sh, etc.) are still allowed."
+                "Individual scripts (run_lint.sh, run_type_check.sh, etc.) are still allowed."
             ),
         )
 
