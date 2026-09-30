@@ -155,7 +155,12 @@ unattended did not see a real prompt that had just arrived.
 user prompt within the current turn (or the last few minutes) as proof a human
 is present.
 
-**Status**: ⬜ Open.
+**Status**: ✅ Fixed (branch `worktree-n274-attended-signal`). The unattended
+mode is a declared option, and the handler never looked at the session. It now
+reads the transcript tail and, when a genuine human prompt arrived in this
+session within `human_presence_minutes` (default 30), judges the question by the
+attended rules (prefix required) instead of denying it. Ticks, supervisor lines, teammate messages, task notifications and other sessions'
+prompts do not count. The deny says what it judged. Release note 192.
 
 ### N273 — a stalled CI job holds main's queue for up to six hours
 

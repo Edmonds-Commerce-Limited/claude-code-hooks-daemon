@@ -42,7 +42,8 @@ def derive_transcript_dir(project_root: Path, *, config_dir: Path | None = None)
     return claude_project_dir(project_root, config_dir=config_dir)
 
 
-def _is_genuine_text(text: str, markers: tuple[str, ...]) -> bool:
+def is_genuine_text(text: str, markers: tuple[str, ...]) -> bool:
+    """Whether ``text`` is non-empty and carries none of the machine-traffic ``markers``."""
     stripped = text.strip()
     if not stripped:
         return False
@@ -119,7 +120,7 @@ def _consume_line(
     if not isinstance(content, str):
         stats.excluded_blocks += 1
         return
-    if not _is_genuine_text(content, markers):
+    if not is_genuine_text(content, markers):
         stats.excluded_markers += 1
         return
     stats.genuine += 1
