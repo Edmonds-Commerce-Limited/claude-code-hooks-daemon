@@ -47,6 +47,10 @@ jobs:
   classify:
     name: Classify change
     runs-on: ubuntu-latest
+    # Every job carries a timeout a margin above its measured duration, so a
+    # stalled runner fails in minutes instead of holding main's one queued run
+    # behind GitHub's six-hour default (ledger 00474 N273). Classify: ~10 s.
+    timeout-minutes: 10
     outputs:
       tier: ${{ steps.classify.outputs.tier }}
       base: ${{ steps.classify.outputs.base }}
@@ -85,6 +89,9 @@ jobs:
     needs: classify
     if: needs.classify.outputs.tier != 'full'
     runs-on: ubuntu-latest
+    # A code-tier change the mapper cannot map runs the whole suite on one
+    # Python: ~45 min measured.
+    timeout-minutes: 120
     env:
       RANGE: ${{ needs.classify.outputs.base }}..${{ needs.classify.outputs.head }}
       TIER: ${{ needs.classify.outputs.tier }}
@@ -181,6 +188,8 @@ jobs:
     if: needs.classify.outputs.tier == 'full'
     name: QA (Python${{ matrix.python-version }})
     runs-on: ubuntu-latest
+    # The whole suite per Python: 66-76 min measured.
+    timeout-minutes: 150
     strategy:
       fail-fast: false
       matrix:
@@ -510,6 +519,8 @@ jobs:
     needs: classify
     if: needs.classify.outputs.tier != 'docs'
     runs-on: ubuntu-latest
+    # ~30 s measured.
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
 
@@ -534,6 +545,8 @@ jobs:
     needs: classify
     if: needs.classify.outputs.tier != 'docs'
     runs-on: ubuntu-latest
+    # ~20 s measured.
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
 
