@@ -40,7 +40,7 @@ from typing import Any
 import pytest
 
 from claude_code_hooks_daemon.constants import Timeout
-from tests.dispatch_timeouts import DispatchTestTimeout
+from tests.isolated_daemon import DAEMON_CLI_SUBPROCESS_BOUND, isolated_daemon_paths
 
 _DENY = "deny"
 _PROBE_MARKER = "n24-probe"
@@ -98,10 +98,7 @@ def strict_probe_daemon_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> 
     ``daemon.strict_mode: true`` and the probe handler file the tests below
     depend on.
     """
-    test_id = tmp_path.name[-20:]
-    socket_path = Path(f"/tmp/test-n24-probe-{test_id}.sock")
-    pid_path = Path(f"/tmp/test-n24-probe-{test_id}.pid")
-    log_path = Path(f"/tmp/test-n24-probe-{test_id}.log")
+    socket_path, pid_path, log_path = isolated_daemon_paths(tmp_path, "n24-probe")
 
     monkeypatch.setenv("CLAUDE_HOOKS_SOCKET_PATH", str(socket_path))
     monkeypatch.setenv("CLAUDE_HOOKS_PID_PATH", str(pid_path))
@@ -177,7 +174,7 @@ def strict_probe_daemon_process(strict_probe_daemon_env: dict[str, Any]):
             env=test_env,
             stdout=devnull,
             stderr=devnull,
-            timeout=DispatchTestTimeout.OUTER_BOUND,
+            timeout=DAEMON_CLI_SUBPROCESS_BOUND,
         )
     if result.returncode != 0:
         pytest.fail(f"Failed to start daemon (exit code {result.returncode})")
@@ -191,7 +188,7 @@ def strict_probe_daemon_process(strict_probe_daemon_env: dict[str, Any]):
         env=test_env,
         capture_output=True,
         text=True,
-        timeout=Timeout.SOCKET_CONNECT,
+        timeout=DAEMON_CLI_SUBPROCESS_BOUND,
     )
     if "RUNNING" not in status_result.stdout:
         pytest.fail(f"Daemon not running after start:\n{status_result.stdout}")
@@ -204,7 +201,7 @@ def strict_probe_daemon_process(strict_probe_daemon_env: dict[str, Any]):
         cwd=project_root,
         env=test_env,
         capture_output=True,
-        timeout=Timeout.SOCKET_CONNECT,
+        timeout=DAEMON_CLI_SUBPROCESS_BOUND,
     )
     time.sleep(0.5)
 
@@ -236,7 +233,9 @@ def _send_pre_tool_use(sock_path: Path, cwd: Path, *, synthetic_source: str | No
             chunks.append(chunk)
 
     raw = b"".join(chunks).decode("utf-8").strip()
-    return json.loads(raw)
+    response = json.loads(raw)
+    assert isinstance(response, dict), raw
+    return response
 
 
 def _decision(response: dict) -> str:

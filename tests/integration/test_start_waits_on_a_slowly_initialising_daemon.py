@@ -23,6 +23,7 @@ import pytest
 from claude_code_hooks_daemon.constants import Timeout
 from claude_code_hooks_daemon.daemon.process_verification import find_all_daemon_processes
 from claude_code_hooks_daemon.utils.safe_signal import stop_verified_daemon
+from tests.isolated_daemon import DAEMON_CLI_SUBPROCESS_BOUND
 
 _CLI = "claude_code_hooks_daemon.daemon.cli"
 
@@ -30,8 +31,6 @@ _CLI = "claude_code_hooks_daemon.daemon.cli"
 #: daemon may make no progress before the wait gives up on it.
 _INIT_DELAY_SECONDS = 7.0
 
-#: Only stops a hung test: the start bounds itself well inside this.
-_START_OUTER_BOUND = 4 * Timeout.DAEMON_START_BUDGET_SEC
 
 _SLOW_INIT = f"""\
 import time
@@ -107,7 +106,7 @@ def test_start_reports_a_daemon_that_outlasts_the_old_five_second_wait(
         env=slowed,
         capture_output=True,
         text=True,
-        timeout=_START_OUTER_BOUND,
+        timeout=DAEMON_CLI_SUBPROCESS_BOUND,
         check=False,
     )
 
