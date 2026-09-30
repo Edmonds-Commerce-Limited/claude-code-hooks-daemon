@@ -10,7 +10,7 @@
 ## Overview
 
 The rolling ledger for defects found in passing. Ledger fifteen
-([00422](../00422-niggles-ledger-fifteen/PLAN.md)) stays open for its own
+([00422](../Completed/00422-niggles-ledger-fifteen/PLAN.md)) stays open for its own
 entries: four are waiting on stated owner questions, and several are
 graduated to plans still in flight. But its PLAN.md passed the 25,000-byte
 warning line with N29. So new entries are filed here, and 00422 takes no
@@ -37,7 +37,7 @@ Full write-ups are in [NIGGLES.md](NIGGLES.md). One line each here:
 | #    | Verdict                                                                                                                                           | Origin                                                          | Status                                                         |
 | ---- | ------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------- | -------------------------------------------------------------- |
 | N1   | `resolve_venv_python`'s fallback accepts a venv interpreter that cannot run on this host                                                          | Plan 00457's agent                                              | ✅ Remedied                                                     |
-| N2   | `setup_worktree.sh` tells every agent to run the full suite through the denied `run_all.sh`                                                       | Coordinator                                                     | 🔄 Graduated to 00463                                           |
+| N2   | `setup_worktree.sh` tells every agent to run the full suite through the denied `run_all.sh`                                                       | Coordinator                                                     | ✅ Remedied by Plan 00463                                       |
 | N3   | `goal_injection` treats any edit of an In Progress plan as the plan starting, and displaces the live goal                                         | Coordinator                                                     | ✅ Remedied                                                     |
 | N7   | The regenerated CLAUDE.md guidance block is not deterministic, so a restart commits a reorder                                                     | Coordinator                                                     | ✅ Remedied                                                     |
 | N8   | `reference_repo_freshness` says BLOCKED on a call it allows                                                                                       | Coordinator                                                     | ✅ Remedied                                                     |
@@ -155,6 +155,7 @@ Full write-ups are in [NIGGLES.md](NIGGLES.md). One line each here:
 | N181 | A heredoc inside `<(…)` or `>(…)` is not closed at `EOF)`, so lines bash runs are read as its body                                                | N101 review 10 (D-RULE)                                         | ✅ Remedied (n101 branch)                                       |
 | N182 | A pending heredoc's body is read from a newline inside a later `$( )` or backtick substitution                                                    | N101 review 10 (D-RULE)                                         | ✅ Remedied (n101 branch)                                       |
 | N122 | `test_second_starter_waits_then_reuses_the_finished_venv` flakes under CPU contention (sleep-based ordering)                                      | N110 landing gate                                               | ✅ Remedied                                                     |
+| N123 | A DP-cost regression test asserted on wall-clock time, which flakes under a loaded gate                                                           | Plan 00463 gate fixer                                           | ✅ Remedied                                                     |
 | N194 | Daemon-signal tests (test_safe_signal.py, test_client_validator.py) read a spawned child's cmdline before its exec lands, so a loaded host flakes | Coordinator                                                     | ✅ Remedied                                                     |
 | N212 | A heredoc receiver named by a variable nothing pins (`$0`, `${X:-bash}`, `env $V`, `read PY`) was read as data                                    | N101 review 11 (D-RULE)                                         | ✅ Remedied (n101 branch)                                       |
 | N213 | An unresolved write target may be `/dev/fd/N` for an fd a process substitution opened, so the body may run                                        | N101 review 11 (D-RULE)                                         | ✅ Remedied (n101 branch)                                       |
@@ -165,6 +166,17 @@ Full write-ups are in [NIGGLES.md](NIGGLES.md). One line each here:
 | N197 | Fourteen `src/` modules still tokenise untrusted commands with the stdlib's quadratic `shlex`                                                     | N110 gate fix 2                                                 | ⬜ Open                                                         |
 | N211 | Merge-conflict markers reach the ledger on main, disguised as blockquotes                                                                         | N110 gate fix 2                                                 | ⬜ Open                                                         |
 | N222 | Tests assert absolute wall-clock bounds, so a loaded host fails them while they pass alone                                                        | N110 gate fix 2                                                 | 🔄 In Progress (perf tests remedied; bound-honoured tests open) |
+| N259 | Orchestrator simulate reports denials its blocking mode would never make                                                                          | Carried from 00422 N24                                          | ⬜ Open                                                         |
+| N252 | A scaling test compared an uncapped size with a capped one                                                                                        | Full-QA gates                                                   | ✅ Remedied, `b9e36233c`                                        |
+| N260 | The local gate runs project-handler tests differently from CI                                                                                     | Main CI red since `84afc8804`                                   | ✅ Instance remedied, `257847b51`; class open                   |
+| N261 | Plan 00463 landed green on the local gate and red on CI                                                                                           | Main CI red at `83e75879`                                       | ✅ Remedied, `fd78edce`; class open with N260                   |
+
+## Parked branches (owner decision, 2026-09-29)
+
+Parked to cut cost. Each branch is pushed, or kept as a local worktree where
+noted. It resumes only by an owner decision. Reviews are capped at 3 rounds
+from now on. The table of 15 branches and the two owner rulings are in
+[PARKED-BRANCHES.md](PARKED-BRANCHES.md).
 
 ## Tasks
 

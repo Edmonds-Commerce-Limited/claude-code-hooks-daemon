@@ -34,8 +34,9 @@ Standard process for any code modification that isn't a new feature or bug fix.
 # 2. Auto-fix formatting and linting
 ./scripts/qa/run_autofix.sh
 
-# 3. Run full QA suite
-./scripts/qa/llm_qa.py all
+# 3. Run QA: the full suite on the main thread, targeted QA in a sub-agent
+./scripts/qa/llm_qa.py all       # main thread / coordinator
+./scripts/qa/llm_qa.py changed   # sub-agent (the full suite is denied there)
 
 # 4. Verify daemon loads (MANDATORY)
 ./bin/hooks-daemon restart
@@ -90,6 +91,10 @@ pytest tests/unit/path/to/test_module.py --cov=src/path/to/module.py --cov-repor
 ```bash
 ./scripts/qa/llm_qa.py all
 ```
+
+The full suite is the main thread's gate. A sub-agent runs
+`./scripts/qa/llm_qa.py changed` and hands over a commit; see
+[QA.md](../QA.md), "Full QA Is the Coordinator's Gate".
 
 **Expected output**: one `✅ PASSED` line per check, then the overall verdict.
 The runner enumerates its own checks — do not hardcode the list or the count
@@ -180,7 +185,7 @@ A general code change is DONE when ALL of the following are verified:
 
 ### 4. Full QA
 
-- [ ] Run: `./scripts/qa/llm_qa.py all`
+- [ ] Run: `./scripts/qa/llm_qa.py all` (main thread; a sub-agent runs `changed`)
 - [ ] Expected: "ALL CHECKS PASSED"
 
 ### 5. Client-Mode Verification (if paths/interpreters/wrappers/assets changed)

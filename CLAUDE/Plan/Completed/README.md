@@ -4,11 +4,17 @@ Plans older than the 30 highest-numbered completed plans (see [../README.md](../
 
 ## Completed Plans (Archive)
 
+- [00427: journal timestamps agent authored and timezone naive](00427-journal-timestamps-agent-authored-and-timezone-naive/PLAN.md) - Complete at `c631d4dc`…`a208959e` + the archiving commit (from issue #45: a correct writer was not enough — `--journal` stamps UTC, but the future-dated check still read a naive LOCAL clock, so a correct entry looked 239 minutes ahead on `America/New_York`)
+
+- [00426: shipped plugins examples do not validate](00426-shipped-plugins-examples-do-not-validate/PLAN.md) - Complete at `904d63ed`…`fd414e5e` + the archiving commit (from issue #44, which asked which of two documented `plugins:` schemas is real: neither, because the required `event_type` appears in no example — and both YAML copies are commented out, so no config-loading test could ever have seen them)
+
 - [00425: remote docs index goes stale on delete](00425-remote-docs-index-goes-stale-on-delete/PLAN.md) - Complete at `edd91533`…`9282c9ea` + the archiving commit (from issue #43: `rm` is the one tree mutation that runs no daemon command, so `check` called the corpus fresh while the index named a deleted file. `check` now detects and reports; the network-free `remote-docs index` repairs)
 
 - [00424: remote docs add overwrites existing capture](00424-remote-docs-add-overwrites-existing-capture/PLAN.md) - Complete at `ad8e79b3`…`08f8b9c9` + the archiving commit (from issue #42: a second `add` of one URL silently replaced the first capture. The catch the report could not see is that `check` PRINTS plain `add` as the licence-drift remedy, so the refusal and that remedy moved together, welded by a test — nothing pinned that line before, in either direction)
 
 - [00423: per handler scope main sub](00423-per-handler-scope-main-sub/PLAN.md) - Complete at `93f2a1c0`…`48733f1b` + the archiving commit (from issues #40/#41: handlers declare `scope: ALL|MAIN|SUB`, keyed on `agent_id` presence because `agent_type` was measured empty in 4 of 5 subagent stops; #41's three destructive controls are scoped but deliberately not built)
+
+- [00422: niggles ledger fifteen](00422-niggles-ledger-fifteen/PLAN.md) - Complete at the archiving commit (owner decision: closed with all 29 entries terminal; N28 graduated to 00464, N24 carried to 00466 N259; four entries inherited from 00419, three of them one class: a guard right about the state it judges and wrong about the moment it judges it)
 
 - [00419: niggles ledger fourteen](00419-niggles-ledger-fourteen/PLAN.md) - Complete at `6a6f9a43`…`2778206f` + the archiving commit (fifteen entries, eleven terminal; the four that were not are re-filed into 00422 rather than counted as closed, because nothing downstream re-reads a closed plan. N1: `debug_hooks.sh` could not run in the repository that dogfoods it)
 
@@ -29,6 +35,8 @@ Plans older than the 30 highest-numbered completed plans (see [../README.md](../
 - [00411: host hostname in status line](00411-host-hostname-in-status-line/PLAN.md) - Complete at `03aabcee`…`09adbf9b` + the archiving commit (an optional segment naming the machine the session is really on; a container's own hostname is the container ID, and probing proved the host's name is unreadable from inside one — the `/etc/hosts` loopback read is host-distro-dependent, so an explicit export is the mechanism and the read is only a hint)
 
 - [00409: interpreter heredoc defeats the guards](00409-interpreter-heredoc-defeats-the-guards/PLAN.md) - Complete at `60778567` + the archiving commit (a v3.64.0 regression: `bash <<'EOF'` executes its body, so five destructive-git spellings v3.63.0 denied were allowed; the exemption now keys on whether anything can EXECUTE the body, not on the delimiter's quoting)
+
+- [00408: handler hygiene from the release review](00408-handler-hygiene-from-the-release-review/PLAN.md) - Complete at `61f9915d`…`7fa5dd77` + the archiving commit (the non-user-visible half of the v3.64.0 review, graduated from 00407 N6; its last task taught three guards that a bare `echo`/`printf`/`:`/`true` never runs its argument, and landing it surfaced main CI red since `84afc880` because CI runs bare `pytest` where the local gate runs `python -m pytest` — filed as 00466 N260)
 
 - [00407: niggles ledger twelve](00407-niggles-ledger-twelve/PLAN.md) - Complete at `1eefc55b`…`a391132e` + the archiving commit (twelve entries, all terminal; N7 was a release REGRESSION disabling R-GIT-CHECKOUT-DISCARD, and N12 corrected this plan's own N2/N3 fixes, which blanked quoted literals and let `bash -c` walk past two guards)
 

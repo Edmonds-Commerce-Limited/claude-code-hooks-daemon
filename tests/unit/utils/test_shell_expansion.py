@@ -19,10 +19,14 @@ import os
 import time
 from collections.abc import Callable, Iterator
 from pathlib import Path
+from types import SimpleNamespace
+from typing import NamedTuple
 
 import pytest
 
+from claude_code_hooks_daemon.utils import shell_expansion
 from claude_code_hooks_daemon.utils.shell_expansion import (
+    DEFAULT_MAX_BRACE_DEPTH,
     TooManyToEnumerateError,
     UnresolvableBraceQuotingError,
     bounded_recursive_glob,
@@ -33,27 +37,84 @@ from claude_code_hooks_daemon.utils.shell_expansion import (
     normalise_word,
     shell_word_spellings,
 )
-from tests.scaling import SIZE_FACTOR, SUPERLINEAR_RATIO, scaling_ratio
+from tests.scaling import SIZE_FACTOR, SUPERLINEAR_RATIO, counted_ratio, scaling_ratio
 from tests.support.directory_reads import record_directory_reads
 
 
 def _assert_grows_linearly(
-    word_at: Callable[[int], str], expand: Callable[[str], object], small_n: int
+    text_at: Callable[[int], str], scan: Callable[[str], object], small_n: int
 ) -> None:
-    """``expand(word_at(8 * small_n))`` costs at most linearly more CPU than
-    ``expand(word_at(small_n))`` (00466 N222: a wall-clock bound failed under
-    host load while saying nothing about growth). A raise of
-    ``TooManyToEnumerateError`` is the expected fail-closed answer here and
-    counts as finishing."""
-
-    def work_at(size: int) -> None:
-        try:
-            expand(word_at(size))
-        except TooManyToEnumerateError:
-            return
-
-    ratio = scaling_ratio(work_at, small_n, word_at(SIZE_FACTOR * small_n))
+    """``scan(text_at(8 * small_n))`` costs at most linearly more CPU than
+    ``scan(text_at(small_n))`` (00466 N222: a wall-clock bound failed under
+    host load while saying nothing about growth)."""
+    ratio = scaling_ratio(lambda size: scan(text_at(size)), small_n, text_at(SIZE_FACTOR * small_n))
     assert ratio <= SUPERLINEAR_RATIO, f"cost grew {ratio:.0f}x for {SIZE_FACTOR}x input"
+
+
+def _pairs(count: int) -> str:
+    """The reviewer's brace shape: ``count`` adjacent ``{a,b}`` groups."""
+    return "{a,b}" * count
+
+
+class _BraceWork(NamedTuple):
+    """What one ``expand_braces`` call did: its work, and what ended it."""
+
+    characters: int
+    stopped_by: str
+
+
+_EXPANDED = "expanded"
+_SPELLING_CAP = "spelling cap"
+_DEPTH_CAP = "depth cap"
+
+
+def _brace_work(monkeypatch: pytest.MonkeyPatch, word: str, **caps: int) -> _BraceWork:
+    """Count the characters ``expand_braces(word, **caps)`` handles.
+
+    Each recursive step searches the word it is given for the next group and
+    rebuilds it around one alternative, so a step costs the length of its
+    word, and the sum over every step is the expander's work: counted, not
+    timed, so the same on any host under any load (00466 N252).
+
+    ``stopped_by`` names the regime: a word the expander finished, or the cap
+    it gave up at. Growth is only comparable inside one regime: below the
+    spelling cap the spelling count itself doubles per group, and past the
+    depth cap the expander stops after a fixed number of steps.
+    """
+    expand_step = shell_expansion._raw_brace_expansions
+    characters = 0
+
+    def counting_step(step_word: str, *, depth: int, max_depth: int) -> Iterator[str]:
+        nonlocal characters
+        characters += len(step_word)
+        yield from expand_step(step_word, depth=depth, max_depth=max_depth)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(shell_expansion, "_raw_brace_expansions", counting_step)
+        try:
+            expand_braces(word, **caps)
+        except TooManyToEnumerateError as exc:
+            stopped_by = _DEPTH_CAP if _DEPTH_CAP in str(exc) else _SPELLING_CAP
+            return _BraceWork(characters, stopped_by)
+    return _BraceWork(characters, _EXPANDED)
+
+
+def _assert_brace_work_grows_linearly(
+    monkeypatch: pytest.MonkeyPatch,
+    word_at: Callable[[int], str],
+    small_n: int,
+    stopped_by: str,
+    **caps: int,
+) -> None:
+    """Both sizes end in the ``stopped_by`` regime, and the expander's work
+    grows at most linearly between them."""
+    small = _brace_work(monkeypatch, word_at(small_n), **caps)
+    large = _brace_work(monkeypatch, word_at(SIZE_FACTOR * small_n), **caps)
+    assert (small.stopped_by, large.stopped_by) == (stopped_by, stopped_by)
+    ratio = counted_ratio(
+        lambda size: _brace_work(monkeypatch, word_at(size), **caps).characters, small_n
+    )
+    assert ratio <= SUPERLINEAR_RATIO, f"work grew {ratio:.0f}x for {SIZE_FACTOR}x input"
 
 
 class TestExpandBraces:
@@ -96,31 +157,57 @@ class TestExpandBraces:
         with pytest.raises(TooManyToEnumerateError):
             expand_braces(word, max_spellings=256)
 
-    def test_exceeding_the_spelling_cap_is_fast(self) -> None:
+    def test_exceeding_the_spelling_cap_is_fast(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """B1-R3 (Plan 00466 review 3): the reviewer's exact blocker shape --
         `{a,b}` x 22 in one ~115-byte word -- must give up in well under 1s,
-        not the >45s the eager recursive expander took. Pinned by growth:
-        72 pairs against 9, both past the 256-spelling cap, where eager
-        expansion is 2**63 times the work. (Below the cap the spelling count
-        itself legitimately grows 2**n, so the smaller size must already be
-        past it.)"""
+        not the >45s the eager recursive expander took. Pinned by growth in
+        the group count: 64 pairs against 8, both past a 128-spelling cap and
+        neither past the 64-group depth cap, where eager expansion is 2**56
+        times the work."""
         with pytest.raises(TooManyToEnumerateError):
-            expand_braces("{a,b}" * 22, max_spellings=256)
-        _assert_grows_linearly(
-            lambda pairs: "{a,b}" * pairs,
-            lambda word: expand_braces(word, max_spellings=256),
-            9,
+            expand_braces(_pairs(22), max_spellings=256)
+        _assert_brace_work_grows_linearly(
+            monkeypatch,
+            _pairs,
+            DEFAULT_MAX_BRACE_DEPTH // SIZE_FACTOR,
+            _SPELLING_CAP,
+            max_spellings=128,
         )
 
-    def test_forty_repetitions_is_also_fast(self) -> None:
-        """The reviewer's third brace shape (x40): 40 pairs against 5."""
+    def test_forty_repetitions_is_also_fast(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """The reviewer's third brace shape (x40), past the default spelling
+        cap. Pinned by growth in the word's length at a fixed 40 groups, so
+        both sizes stop at the same cap after the same number of steps."""
         with pytest.raises(TooManyToEnumerateError):
-            expand_braces("{a,b}" * 40, max_spellings=256)
-        _assert_grows_linearly(
-            lambda pairs: "{a,b}" * pairs,
-            lambda word: expand_braces(word, max_spellings=256),
-            40 // SIZE_FACTOR,
+            expand_braces(_pairs(40), max_spellings=256)
+        _assert_brace_work_grows_linearly(
+            monkeypatch, lambda prefix: "p" * prefix + _pairs(40), 2000, _SPELLING_CAP
         )
+
+    def test_the_count_sees_the_crossing_into_the_spelling_cap(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Why both sizes must sit in one regime (00466 N252): 5 pairs make
+        all 32 spellings, 40 pairs make 256 spellings 8x longer and give up,
+        so the work grows about 64x for 8x input with nothing superlinear in
+        the expander."""
+        small = _brace_work(monkeypatch, _pairs(5))
+        large = _brace_work(monkeypatch, _pairs(40))
+        assert (small.stopped_by, large.stopped_by) == (_EXPANDED, _SPELLING_CAP)
+        assert large.characters / small.characters > SUPERLINEAR_RATIO
+
+    def test_the_count_sees_an_expander_that_does_not_stop_at_the_cap(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Without this, a count that never moves would pass every growth test
+        above: an eager expander, which makes every spelling before checking
+        the cap, is caught by the same assertion."""
+        eager = SimpleNamespace(islice=lambda spellings, _stop: spellings)
+        monkeypatch.setattr(shell_expansion, "itertools", eager)
+        with pytest.raises(AssertionError, match="work grew"):
+            _assert_brace_work_grows_linearly(
+                monkeypatch, _pairs, 2, _SPELLING_CAP, max_spellings=2
+            )
 
     def test_deeply_nested_group_exceeds_the_depth_cap_and_raises(self) -> None:
         """Own live finding (own RED test, not in the review report): a
@@ -131,19 +218,22 @@ class TestExpandBraces:
         with pytest.raises(TooManyToEnumerateError):
             expand_braces(word, max_spellings=100_000, max_depth=64)
 
-    def test_deeply_nested_group_raise_is_fast(self) -> None:
-        """Depth 2000 against depth 250: the raise must not cost more than
-        linearly in the nesting (00466 N222)."""
+    def test_deeply_nested_group_raise_is_fast(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Depth 2000 against depth 250, both past the depth cap: the raise
+        must not cost more than linearly in the nesting (00466 N222)."""
 
         def word_at(depth: int) -> str:
             return "{a," * depth + "a" + "}" * depth
 
         with pytest.raises(TooManyToEnumerateError):
             expand_braces(word_at(2000), max_spellings=100_000, max_depth=64)
-        _assert_grows_linearly(
+        _assert_brace_work_grows_linearly(
+            monkeypatch,
             word_at,
-            lambda word: expand_braces(word, max_spellings=100_000, max_depth=64),
             2000 // SIZE_FACTOR,
+            _DEPTH_CAP,
+            max_spellings=100_000,
+            max_depth=64,
         )
 
 
@@ -453,7 +543,8 @@ class TestIterBraceWords:
         a huge run of non-whitespace text carrying no brace at all -- must
         not trigger catastrophic backtracking (the abandoned
         `\\S*\\{[^{}]*\\}\\S*` shape took 15s at 94 KB, >45s at 200 KB).
-        Pinned by growth, 200 KB against 25 KB (00466 N222)."""
+        Pinned by growth, 200 KB against 25 KB, neither carrying a group to
+        find (00466 N222)."""
         assert list(iter_brace_words("a" * 200_000)) == []
         _assert_grows_linearly(
             lambda size: "a" * size,

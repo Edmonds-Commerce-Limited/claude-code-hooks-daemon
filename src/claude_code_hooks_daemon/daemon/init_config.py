@@ -218,6 +218,10 @@ class ConfigTemplate:
             "    qa_suppression: {enabled: true, priority: 30}  # Unified multi-language QA suppression blocker (11 languages)\n"
             "    comment_changelog: {enabled: true, priority: 31}  # Block changelog narrative in code comments (12 languages)\n"
             "    comment_size: {enabled: true, priority: 33}  # Cap comment length; only growing an over-limit comment is blocked\n"
+            # Plan 00463: opt-in, and inert until the project declares its own
+            # full_qa_patterns -- a client's full-QA commands cannot be known here.
+            "    subagent_full_qa_blocker: {enabled: false, priority: 32}  "
+            "# Opt-in: a sub-agent may not run the full QA suite (declare full_qa_patterns)\n"
             "    verification_result_gate: {enabled: true, priority: 34}  # Advise when a verifier's result is never consumed before a mutator\n"
             "    bash_safe_mode: {enabled: false, priority: 36}  # Opt-in: require a set safety prelude on sequenced Bash (warn-first)\n"
             "    plan_number_helper: {enabled: true, priority: 30}  # Provide correct next plan number\n"

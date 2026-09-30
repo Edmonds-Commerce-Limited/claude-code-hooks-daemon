@@ -117,9 +117,10 @@ produces the retired pre-v3.7.0 layout, and the fingerprint-aware venv
 resolver refuses it — every `bin/hooks-daemon` call then exits telling you to
 reinstall.
 
-`./scripts/validate_worktrees.sh` runs this project's QA suite sequentially
-across all (or one named) worktree, checking the venv and editable install
-first:
+`./scripts/validate_worktrees.sh` runs this project's full QA suite
+sequentially across all (or one named) worktree, checking the venv and
+editable install first. It is a coordinator tool: in a sub-agent it is denied
+along with every other full-suite command.
 
 ```bash
 ./scripts/validate_worktrees.sh                     # all worktrees
@@ -129,11 +130,29 @@ first:
 ## Running This Project's QA Suite Inside a Worktree
 
 Wherever the core document says "run this project's test/QA suite", the
-concrete command in this repository is:
+concrete command in this repository depends on who is running it:
 
 ```bash
-./scripts/qa/llm_qa.py all
+./scripts/qa/llm_qa.py changed   # the sub-agent working in the worktree: targeted QA
+./scripts/qa/llm_qa.py all       # the coordinator, once, in the integration worktree
+./scripts/qa/llm_qa.py main-moved --start  # the coordinator, once the batch is merged
+./scripts/qa/llm_qa.py main-moved  # the coordinator, before the fast-forward
+./scripts/qa/llm_qa.py main-moved --finish  # the coordinator, after the push
 ```
+
+A sub-agent hands over targeted results and a commit hash. The coordinator then
+merges every ready branch `--no-ff` into ONE integration worktree created from
+current `main`, records the batch base with `main-moved --start` (a git ref, so
+it survives between shell calls), and runs the full gate once there. A green
+run on a clean tree certifies that head. While the batch is in flight `main` is
+frozen for code. `main-moved` then decides the last step. It says `unmoved`,
+which means fast-forward `main` to the certified head's SHA (never the branch
+name), or `head-moved` when the head is not the certified
+one, or it names a recheck (doc tools, the tests of what moved, or the full
+gate). After the recheck, `--advance` moves the base on, and the check repeats
+until `unmoved`. One full run at a time is also what stops the collisions below. The
+whole procedure, including how moved paths are judged and what to do when the
+batch is red, is in [QA.md](QA.md), "The Batched Integration Gate".
 
 ## Concurrent QA Limitation (Critical)
 

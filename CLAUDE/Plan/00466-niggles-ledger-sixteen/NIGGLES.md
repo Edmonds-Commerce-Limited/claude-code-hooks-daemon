@@ -3,74 +3,84 @@
 Newest first. Each entry says how it was found, why it happens, and the
 candidate remedies.
 
-### N238 — ✅ Remedied (n101 branch) — an enumeration past its budget is reported as a bug in the guard
+This ledger takes no new entries: its PLAN.md reached the size limit with N261.
+New entries, from N262 on, are filed in
+[ledger seventeen](../00474-niggles-ledger-seventeen/NIGGLES.md).
 
-**Found live (shared with small-a).** `secret_file_guard` and
-`quarantine_artefact_read_guard` denied ordinary calls with their
-`EVALUATION-ERROR` rule, whose text calls the deny a bug in the guard:
-(i) a Bash command expanding `"${array[@]}"` with a `$var` inside a path,
-(ii) a jq filter holding `.files["…"]`, (iii) any word holding `**/`, and
-(iv) a single large `Write` of a long option table (`command_wrappers.py`
-on the p422 branch).
+### N261 — Plan 00463 landed green on the local gate and red on CI
 
-**Main's verdicts (44d1b1b3b), from `untracked/scratch/n101r13/probe_n238.py`
-run with cwd `/workspace`:** the quarantine guard denied
-`rg -g '**/*.py' foo` and `grep -rn x --include='**/*.py' .` as an
-evaluation error, because a single-quoted glob reached the recursive walk
-and passed its 2,000-entry cap. `secret_file_guard` denied the
-`command_wrappers.py` Write as an evaluation error, because the
-`"content"` scan brace-enumerated the file's CODE and its option-table dict
-passed the 256-spelling cap. The shapes I wrote for (i) and (ii) were
-allowed by both guards on main and on this branch; each fails the same way
-only when it reaches the same enumerator, which the two rules below close.
+**Found**: CI run 36619680779 on the 00463 merge `83e75879` failed on all three
+Pythons, although the branch's local full-QA gate had passed every test.
 
-**Remedy:**
+- **Project handler tests:** the full-QA gate plugin refused CI's bare
+  `pytest .claude/project-handlers`. That run never loads `tests/conftest.py`,
+  so the plugin had no suite to count against and failed closed. This is
+  N260's class again: the local gate starts those tests another way.
+- **One teardown error:** `TestTheGateRunCertifies` reached `llm_qa.py`'s
+  live-daemon step un-mocked. On a CI runner that started the real project
+  daemon, and it rewrote `CLAUDE.md`. Locally a daemon was already running, so
+  the step did nothing.
 
-- A quoted or escaped glob is a literal bash hands on as written, so
-  `find_protected_mention_strict` expands only a token with a glob
-  character outside quotes. A quoted artefact name is still a literal
-  mention.
-- A `Write` of source in a non-shell language is not a command: where it
-  parses as Python, only its string literals and comments are
-  brace-enumerated (`shell_expansion.python_string_literals`), since they
-  are all a shell can be handed from it. A shell script is still
-  enumerated whole.
-- An enumeration that is really needed and passes its cap, or the scan
-  deadline, is a named deny in both guards:
-  `secret_file_matching.SCAN_COULD_NOT_FINISH` ("could not be verified …
-  name the files, or narrow the glob or directory"). It never reaches the
-  evaluation-error route. This is small-a's N134 wording and catch, ported
-  verbatim so the landing merge keeps one copy; small-a's minor-E
-  "cannot be listed" constant (`DIRECTORY_CANNOT_BE_LISTED`) covers an
-  unlistable directory, which this branch does not reach.
+**✅ Remedied** in `5ff020c7`, merged as `fd78edce`. The plugin counts a run
+outside `tests/` against the launch directory's `tests/`, and the test stubs
+the daemon step. Each fix has a test that was RED first.
 
-RED tests: `TestAWriteOfSourceIsNotACommand` (`test_secret_file_guard.py`),
-`TestAQuotedGlobIsNeverEnumerated` (`test_quarantine_artefact_read_guard.py`,
-each shape run through bash first), and the over-cap tests that now assert
-the named deny.
+The class stays open with N260. A second environment difference slipped
+through: whether a daemon is already running. Candidate remedy: the local gate
+runs the CI commands, from a state with no daemon running.
 
-**Five more shapes (v)–(ix), each reproduced on main first:**
+### N260 — the local gate runs project-handler tests differently from CI
 
-- (v)–(vii) in the quarantine guard: a quoted regex holding `**`, as in
-  `awk '/**Round**/,0' …`, `grep -n '/**Status**/' f` or a grep with
-  several `-e` patterns, reached the recursive walk from `/`. The quoted
-  glob rule above closes all three. A bash-expanded `**` past the walk
-  budget (`awk '/x/,0' **/f1*.md`) gets the named deny.
-- (viii) in `secret_file_guard`: an `ls` of several globs
-  (`ls tests/*/test_*.py …`) passes the 200-path cap of the both-edges
-  filesystem check. Bash does expand these globs, so this is the genuine
-  budget case, and it now gets the named deny. small-a keeps the same cap.
-- (ix) in `secret_file_guard`: a heredoc of prose quoting brace words
-  (`'{a,b}'`, `"{c,d}"`) passed the 500-word brace discovery cap.
-  `shell_expansion.iter_brace_words` now neither yields nor counts a word
-  in which bash reads no brace as syntax. Where such a word is a fragment
-  of a longer shell word (`'x '/p/.v-{a,x}ss' y'`), the quote-aware
-  splitter still reads the whole word.
+**Found**: main CI was red on "Project handler tests" on every Python from
+`84afc8804` on, while the local full-QA gate for that branch passed 40/40.
+`test_enforce_llm_qa.py` imports `tests.scaling`. CI runs the bare `pytest`
+entry point, which does not put the working directory on `sys.path`, so the
+import fails there. The local gate runs `python -m pytest`, which does put it
+on `sys.path`, so the gate cannot see this class of failure.
 
-RED tests: `TestAQuotedBraceWordIsNotCounted` and
-`TestAGlobListPastTheBudgetIsANamedDeny` (`test_secret_file_guard.py`), the
-(v)–(viii) cases in `TestAQuotedGlobIsNeverEnumerated`, and the
-`TestIterBraceWords` word cases.
+**Remedy**: the project-handlers `conftest.py` puts the repository root on
+`sys.path` (`257847b51`). **✅ Remedied** for this instance.
+
+The class stays open while the local gate and CI invoke pytest differently.
+Candidate remedy: the local project-handler step runs the exact CI command.
+
+### N252 — a scaling test compared an uncapped size with a capped one
+
+**Found**: `test_shell_expansion.py::test_forty_repetitions_is_also_fast`
+failed on several full-QA gates, and on main CI, with "cost grew 24-28x for
+8x input". The small size (5 brace pairs, 32 spellings) sat below the
+256-spelling cap and the large one (40 pairs) at it, so the ratio measured two
+regimes rather than growth.
+
+**✅ Remedied**: both sizes now sit inside one regime (`581ccadd3`, landed
+with Plan 00408 in `b9e36233c`).
+
+### N259 — orchestrator simulate reports denials its blocking mode would never make
+
+Carried from 00422 N24 (owner decision, 2026-09-29). Nothing is changed from
+the original finding.
+
+**Found**: every main-thread Bash call in a session drew
+`SIMULATED orchestrator-only mode (Plan 00418 — record only, never blocks): main thread would have been denied — Bash: …`.
+The coordinator took that at face value and told Plan 00463's agent that
+going live would deny the coordinator's own `llm_qa.py all` (a deadlock).
+The 00463 code review read the real handler
+(`.claude/project-handlers/pre_tool_use/orchestrator_simulate.py`).
+Simulate mode judges `tool_name not in _COORDINATION_TOOLS` (line 299),
+while blocking mode denies only `_BLOCKED_TOOLS = {Write, Edit, NotebookEdit}`
+(lines 183 and 320). Bash is "would have been denied" in simulate and
+never denied when live.
+
+**Why it matters.** The simulate record exists to preview what enforcement
+would cost before it is switched on. A preview that overstates enforcement
+misleads that decision and anyone reasoning from it, as it did here, and
+cost an agent a round of edits it then had to revert.
+
+**Candidate remedies:** simulate records exactly what blocking would
+deny, from ONE shared predicate, and a test pins the two modes to the same
+verdict for every tool. If the broader "not a coordination tool" count is
+still wanted as telemetry, it gets its own clearly different wording,
+never "would have been denied".
 
 ### N194 — ✅ Remedied — daemon-signal tests read a spawned child's cmdline before its exec lands, so a loaded host flakes
 
@@ -117,6 +127,36 @@ RED under the load recipe above for both files (test_safe_signal.py:
 6/40 failures, all `cmdline: []`; test_client_validator.py: 1/40, `assert None is not None`); proved GREEN with 50/50 passes for each file under the
 identical load recipe after the fix, plus a clean unloaded run (40 and 55
 passed respectively).
+
+### N123 — ✅ Remedied — a DP-cost regression test asserted on wall-clock time, which flakes under a loaded gate
+
+**Found:** Plan 00463's `TestInteriorWildcardDpIsBounded::test_a_lone_long_star_run_collapses_to_near_zero_cost`
+(the star-run-collapse cost guard, B1/Plan 00466 review 2) started as a fixed
+0.1s wall-clock budget. It failed once in a 37/39 gate run under heavy
+concurrent load (many worktrees' gates running at once), passed 10/10 in
+isolation on the branch and on `main`, but main itself measured 0.09s against
+the same 0.1s budget — a close margin, confirming the bound was
+environment-sensitive rather than genuinely tight. A first fix replaced the
+absolute budget with a scaling-ratio assertion (min of several timed trials,
+long token vs. a short baseline) — still a wall-clock measurement with its
+own absolute-second floor to absorb constant-factor noise, so it remained
+exposed to the identical flake, just with a wider margin.
+
+**Remedy:** stopped measuring time at all. Added a test-only instrumentation
+seam to `secret_file_matching.py`: a `contextvars.ContextVar` counter
+(`_dp_cell_counter`) and a `dp_cell_counter()` context manager that counts
+the DP grid cells `_globs_can_intersect` actually visits during the block. A
+`ContextVar` rather than a module-level counter, per the standing "no
+per-request state on a shared module" rule — no per-request state leaks
+across concurrent calls, and production pays nothing beyond a `None` check
+when no test has opened the counter. The test now asserts the 60,000-`*`
+token's DP cell count EQUALS a literal `a*a` baseline's count: after the
+star-run collapse, the two are the identical 3-character string, so the
+grids are identical in size, deterministically, on every host — not a
+tolerance band, an equality. RED: proved via a `git archive` scratch copy
+with the star-collapse substitutions short-circuited (`if False and "**" in a: ...`), which dropped the long token's cell count to 0 (the length cap
+fires and skips the DP entirely) against the baseline's 9, failing the
+assertion as expected.
 
 ### N109 — ✅ Remedied — the pending release-notes holding area mis-sorts past 99 callouts
 
@@ -803,405 +843,6 @@ interrupt a running handler) and lands with that branch. N40 is taken there too
 taken on the N38 fix branch (the chain's remaining linear per-token cost, which
 waits for the shell-parser consolidation).
 
-### N117 — ✅ Remedied (n101 branch) — A glob under a name too long to exist fails `secret_file_guard` closed with ENAMETOOLONG
-
-**Found by the N101 round-8 fixer**, measuring the 140-program corpus after
-merging main 01827942b. Six programs that round 7 allowed were denied with
-`R-SECRET-EVALUATION-ERROR` (`OSError`). A glob-shaped token sharing two
-characters with a both-edges pattern (`*.secret*`) is expanded on disk by
-`_expand_glob_token`. When the token carries a component longer than the
-filesystem's name limit (a quoted multi-line chunk of a Python heredoc read
-as one word), `os.stat` raises ENAMETOOLONG. Only ENOENT counted as proof of
-absence, so the error propagated and the guard failed closed. Main does the
-same: `ls <300 a's>/*.rest` is denied there, and so was a commit command
-whose heredoc message quoted a brace word.
-
-**Remedied on the n101 branch.** ENAMETOOLONG joins ENOENT as proof that a
-glob expands to nothing: no entry can have that name, and a shell naming the
-path fails the same way. Every other `OSError` still propagates. Tests:
-`test_a_name_too_long_to_exist_allows_n117` (the expander, on a real too-long
-name, no monkeypatch), and through `HandlerChain`
-`test_a_glob_word_with_a_name_too_long_to_exist_is_allowed_n117` and
-`test_a_protected_path_beside_a_name_too_long_to_exist_still_denies_n117`,
-all RED on main 01827942b. The corpus is back to round 7's verdicts: 85
-allowed, 54 `R-SECRET-BASH-MENTION`, 1 `R-SECRET-EVALUATION-ERROR`.
-
-**Narrowed in N101 round 9 (review 8 BLOCKER 1).** The kernel raises
-ENAMETOOLONG for two causes, and only one proves absence. The expander joins
-a relative word onto an absolute base, so a word bash opens under PATH_MAX
-(`..` repeats through one real long-named directory) can be over it once
-joined; round 8 read that as "no file" and allowed a real read. Every glob is
-now walked one component at a time (`shell_expansion._GlobWalk`, behind
-`bounded_recursive_glob`). ENAMETOOLONG proves absence only when the literal
-component bash would open is longer than `PC_NAME_MAX` (255 when the
-filesystem cannot be asked). Any other failure is collected while every
-other branch and base is still walked: a protected match anywhere denies on
-the match, and otherwise the first failure propagates and the guard fails
-closed. A result past the examination cap now raises instead of allowing.
-The quarantine guard's strict route uses the same expander. Tests, RED at
-b0a926b4f: `TestGlobErrorsAreCollectedPerBranch`, four new cases in
-`TestExpandGlobTokenErrorHandling`, the reviewer's shape through
-`HandlerChain` in both guards, plus an absolute whole-path overflow; the
-over-long single name stays allowed.
-
-### N145 — ✅ Remedied (n101 branch) — A data-sink receiver whose own arguments feed the body to an executor
-
-**Found by N101 review 9 (shared S1); main has it too.** The data-sink
-exemption that blanks a quoted heredoc body judged only the receiver's
-command WORD, and `git` was allowlisted whole. So `tee >(bash) <<'EOF'`,
-`cat <<'EOF' > >(bash)` and `git -c alias.r='!bash' r <<'EOF'` had their
-bodies blanked, and `destructive_git` and `pipe_blocker` never saw a body
-bash then ran. `ftp` (`!cmd`), `mail`/`mailx` (`~!cmd`), `sendmail` (a
-`|program` recipient) and `patch` (an ed-style diff run by `ed`) were on the
-sink list although each can run commands from the body.
-
-**Remedy:** the exemption is an allowlist in both halves. The receiver and
-every downstream stage must be a listed sink, and each word must be a shape
-that sink takes without executing anything: no process substitution, an fd
-duplicate only onto 1 or 2, a write target that is a regular file, a
-directory, a new file or `/dev/null`/`/dev/stdout`/`/dev/stderr` (a FIFO,
-another device, `/proc` or an unresolvable word withholds it), `git` with
-only `-C`/`--no-pager`/`-P`/`--no-optional-locks` before one of the
-subcommands that read stdin as data, and per-sink option allowlists for
-`sort`, `tee`, `less` and `more`. The five executors left the list.
-
-### N146 — ✅ Remedied (n101 branch) — A `<<` bash does not read as an operator hides the lines after it
-
-**Found by N101 review 9 (shared S2, and BLOCKER A on the branch); main has
-it too.** The heredoc scanner took every `<<` for an operator. Bash reads
-none inside `${…}`, `$[…]`, `$((…))`, a bare `((…))` or `for ((`, an array
-`a=(…)`, an extglob `@(…)` or a comment opened right after a backtick, so
-`cat ${x:-<<'EOF'}` followed by `git reset --hard` and `EOF}` ran the reset
-while every consumer read it as a body. Main's `\w+` closer pattern also
-accepted `EOF}`. On the branch every delimiter spelling opened it, which
-made it a deny→allow regression in six handlers (BLOCKER A).
-
-**Remedy (coordinator ruling, round 10):** the scanner tracks those frames
-and reads `<<` as an operator only where bash reads a command. Where it
-cannot be sure how bash splits operators from bodies, it STOPS: no body is
-reported past that point, every later newline is a command break, and the
-text is `unreadable` to every write-denying caller, which fails closed. The
-uncertain shapes are an unterminated quote or substitution, a `((`/`$((`
-bash re-parses as subshells, a backslash-newline that glues a two-character
-token, a `${`/`$[` in a delimiter word, a newline inside an expansion while
-a body is pending, and a backtick substitution whose end falls inside a
-quote, comment or body (bash ends it at the first unescaped backtick). An
-operator opened inside backticks gets no body outside them.
-
-The same review's MAJOR B is fixed with it: `get_bash_command` joined every
-backslash-newline before the scan, so a quoted body's `foo\` swallowed its
-closer and the lines after it were read as body. The joins now come from the
-scan: none in a comment, none in a quoted body where the join would move the
-closer, none after an escaped backslash, and none for a backslash before
-CR-LF, which bash does not join either.
-
-### N147 — ✅ Remedied (n101 branch) — A heredoc body a shell runs is never read for writes
-
-**Found by N101 review 9 (shared S3); main has it too.** `core/utils.py`
-cut every heredoc body out before reading write targets, whatever its
-receiver, and with bodies included it tokenised a body with
-`_tokenise(body) or []`. So `bash <<'EOF'` running `echo hi > /opt/x` passed
-`project_containment`, and a shell body holding `cp n.md ~/.claude/projects/x/memory/y.md` beside an apostrophe passed
-`markdown_organization`.
-
-**Remedy:** a body fed to a shell (`sh`, `bash`, `zsh`, `dash`, `ksh`,
-`source`, `.`, or a receiver whose name cannot be resolved) is read as
-commands, nested bodies included, and text in it the tokeniser cannot read
-is `unreadable`. With bodies included, an unreadable body fed to anything but
-a data sink is `unreadable` too.
-
-**Narrowed in round 11 (review 10 minor E).** A receiver whose name cannot
-be resolved is a shell only when the command shows it names one: a literal
-assignment (`SH=bash; $SH`), a literal basename after the expansion
-(`$D/bash`), or `$SHELL`/`$BASH`. Any other (`$PY - <<'EOF'`) is data, as on
-main, so a Python body with a `>` in it is no evaluation error.
-
-### N181 — ✅ Remedied (n101 branch) — A heredoc inside `<(…)` or `>(…)` is not closed at `EOF)`
-
-**Found by N101 review 10 (shared S-a); main has it too.** The heredoc
-scanner pushed no frame for a process substitution, so a body inside one
-needed a bare closer line. In `cat <(cat <<'E'` / `x` / `E)` /
-`echo x > /opt/evil.txt` / `E`, bash closes the body at `E)` and writes
-`/opt/evil.txt`; `project_containment` read that line as body and allowed it
-on both trees.
-
-**Remedy:** `<(` and `>(` open a substitution frame, read like `$(`. RED
-tests: `TestTheBashDifferential` (both forms, every guard) and the line
-differential in `test_heredoc_operators.py`.
-
-### N182 — ✅ Remedied (n101 branch) — A pending heredoc's body is read from a newline inside a later substitution
-
-**Found by N101 review 10 (shared S-b); main has it too.** In
-`cat <<'E' $(true` / `echo x > /opt/evil.txt` / `E` / `)` / `x` / `E`, bash
-runs line 2 inside the substitution and starts the body after `)`. The
-scanner started the body at the first newline, inside the substitution, so
-the write was read as body.
-
-**Remedy:** a newline inside a substitution while an operator opened
-outside it is pending stops the scan, and the rest is unreadable to the
-write guards. RED tests: `$( )`, backtick and `"$( )"` forms in
-`TestTheBashDifferential` and the line differential.
-
-### N212 — ✅ Remedied (n101 branch) — A variable receiver nothing pins was read as data
-
-**Found by N101 review 11 (shared MAJOR 1); main has it too.** A heredoc
-fed to a receiver named by a variable (`$0`, `${X:-bash}`, `env $V`,
-`command $V`, `exec $V`, `PY=$SH`, `PY='bash -e'`, `$P"sh"`,
-`"$(command -v bash)"`, `read PY`, `printf -v PY`, `declare -n`,
-`for PY in bash`) had `None` as its consumer, and `core/utils.py` read
-`None` as data. Bash ran each body, and each wrote outside the root.
-
-**Remedy:** `None` is unknown, and the body is read as shell
-(`body_may_run`). A variable receiver is known only through
-`known_variables`: a plain literal assignment earlier in the call, with no
-name writer anywhere in it. `PY=python3; $PY -` stays data; a bare `$PY -`
-is now judged as commands. `exec` and `builtin` are wrappers, so
-`exec bash <<'EOF'` names bash. RED tests: `TestAVariableReceiverIsUnknown`.
-
-### N213 — ✅ Remedied (n101 branch) — An unresolved write target may be an fd a process runs
-
-**Found by N101 review 11 (shared MAJOR 2); main has it too.** After
-`exec 3> >(bash)`, `OUT=/dev/fd/3; cat > "$OUT" <<'EOF'` runs the body. An
-unresolved sink target was treated as a file.
-
-**Remedy:** where the command opens an fd on a process (`>(`, `<(`, `exec`,
-`coproc`), an unresolved target is not inert. RED tests:
-`TestAnUnresolvedTargetMayBeAnOpenFd`.
-
-### N214 — ✅ Remedied (n101 branch) — An earlier segment can turn a sink into an executor
-
-**Found by N101 review 11 (shared MAJOR 3); main has it too.**
-`cat(){ bash; }; cat <<'EOF'`, `alias cat=bash` and
-`export LESSOPEN='|-bash %s'; less <<'EOF'` all run the body; the sink test
-read only the command name.
-
-**Remedy (round 13 coordinator ruling, replacing round 12's closed
-allowlist):** the threat is IN-SHELL rebinding, which a child process
-cannot do. A sink's body is data unless an earlier segment MAY REBIND a
-command name: `shell_segmentation.no_earlier_segment_may_rebind`, over
-`segment_may_rebind_commands` (the name small-a's branch uses). A segment
-may rebind when it has:
-
-- a head that is not plain literal, or the output of a substitution in
-  its place;
-- a rebinding builtin or keyword: `alias`, `unalias`, `hash`, `enable`,
-  `builtin`, `eval`, `source`, `.`, `exec`, `shopt`, `trap`, `popd`,
-  `coproc`, `function`;
-- `cd` or `pushd` other than to ONE literal target (`/abs`, `./x`, `../x`,
-  `name`, `-`, quoted or not) after at most `-L`/`-P` (round 13b ruling).
-  No target, a `~`, an expansion, a glob, a second operand, `--`, a stack
-  rotation (`+1`) or another option rebinds;
-- a name-binding builtin (`export`, `declare`, `typeset`, `local`,
-  `readonly`, `unset`, `read`, `mapfile`, `readarray`, `getopts`) that
-  binds a special name, whose name, value or option is not literal, or
-  that takes an option that rebinds whatever the name (`-n`, `-i`,
-  `unset -f`, `mapfile -C`). So `export FOO=1`, `unset X` and `read x`
-  do not rebind (small-a round 9b and the two rules after it);
-- `command` other than a `-v`/`-V` lookup (`command -v rg` does not
-  rebind);
-- `set` with a flag outside `-e`/`-u`/`-x`/`-o pipefail` and their `-o`
-  names, or `printf -v`;
-- an assignment to a special name. A `PATH` of only literal system
-  program directories (`/usr/local/sbin`, `/usr/local/bin`, `/usr/sbin`,
-  `/usr/bin`, `/sbin`, `/bin`) is not one. A `for`/`select` loop name
-  counts as an assignment to it;
-- arithmetic (`let`, `((…))`, `$((…))`, `$[…]`, a subscript or
-  `${x:offset}`, a `[[` numeric test) that names any variable at all
-  (round 13b ruling). Only arithmetic with no name (`$((1+2))`) is inert;
-  `((x=1))` and `let x=1` rebind. A name read in arithmetic
-  counts because bash evaluates its value as arithmetic in turn, and that
-  value may assign: `x='PATH=0'; : $((x))` sets `PATH`;
-- a `${…}` that assigns a special name (`${PATH:=/tmp}`, also when nested
-  in another expansion's word);
-- a function definition;
-- any of these inside a group, subshell or substitution body, a loop,
-  `if` or `case` body (`for x in a; do alias cat=bash; done` rebinds), or
-  in an unquoted heredoc body's expansions.
-
-`set -euo pipefail`, `mkdir -p`, `pytest` and an earlier file-writing
-heredoc no longer make a later prose heredoc unreadable. A later name a
-planted file could shadow is the limit
-`CLAUDE/Security/FailOpenBoundaries.md` records. RED tests:
-`TestAnEarlierSegmentCanRunTheBody` and `TestNoEarlierSegmentMayRebind`.
-
-### N215 — ✅ Remedied (n101 branch) — Containment could not see a same-call variable target
-
-**Found by N101 review 11 (shared MAJOR 5); main has it too.**
-`OUT=/opt/o.md; cat > "$OUT" <<\EOF` writes outside the root; containment
-dropped any target needing expansion.
-
-**Remedy:** `project_containment` resolves `$NAME` from `known_variables`
-and denies any target that still needs expansion, naming it as written.
-RED tests: `TestAVariableWriteTargetIsResolvedOrUnknown` and the updated
-C6 tests in `test_project_containment.py`.
-
-### N120 — ✅ Remedied (n101 branch) — A shell parse failure on a later line hides every write target before it
-
-**Found by N101 review 8 (MAJOR 2 and shared MAJOR 3); main has it too.**
-`core/utils.py` `_tokenise` returns `[]` when shlex raises, so an unbalanced
-quote on any later line hides every write target, although bash runs every
-complete line before the bad one. `echo x > /opt/o.md` followed by a line
-`x="u` is allowed by `project_containment` on main and on the branch. The
-heredoc delimiter grammar makes it reachable with ordinary prose:
-`_HEREDOC_RE` accepts only `\w+`, so `<<'my-notes'`, `<<'EOF-1'`,
-`<<'END.MD'` and `<<\EOF` are not recognised, and an apostrophe in the body
-reaches shlex. On the branch, N116's `(?<!<)` also exposes
-`cat > /opt/n.md <<<'EOF'` followed by an unbalanced line.
-
-**Remedy (team-lead ruling, round 9):** judge the command line by line or by
-complete command, so every complete command before the unparseable point is
-judged; when any part still cannot be tokenised, return an "unknown targets"
-result that `project_containment` and every other write-denying caller fails
-closed on, and correct the `_tokenise` docstring. One shared delimiter parser
-following bash's grammar (any word, quoted or unquoted, including `EOF-1`,
-`END.MD`, `\EOF`, `'my-notes'`) replaces the delimiter regexes in
-`core/utils.py`, `shell_segmentation.py` and `background_process_tracker.py`,
-and gives `bash_file_writes.py`'s `_heredoc` marker the `<<<` lookbehind it
-lacks (review 8 minor 4).
-
-**Same class, found while fixing it; main has each of these too:**
-
-- **The message-heredoc idiom.** `shell_segmentation`'s idiom regex ended
-  in `.*\)"`, so `git commit -m "$(cat <<'EOF' … EOF\n)$(git reset --hard)"`,
-  or a command on the opener line, was blanked as prose and
-  `destructive_git` allowed it. The value must now be exactly one quoted,
-  terminated heredoc fed to `cat`, as read by the shared scanner.
-- **shlex disagrees with bash without raising.** shlex starts a comment at a
-  `#` inside a word and does not know ANSI-C `$'...'`, so
-  `echo a#b > /opt/o.md`, `curl http://x/#frag > /opt/f` and
-  `echo $'it\'s' > /opt/x \'` named no target. `bash_text_for_shlex`
-  removes bash's real comments and re-quotes each decoded `$'...'` first.
-- **The segment splitter and the heredoc scanner read `$'...'` as a plain
-  quote.** `split_unquoted` stayed "inside a string" past the separator in
-  `echo $'it\'s' && pytest tests | tail -3`, and a quote in a comment
-  (`echo hi # it's\npytest … | tail -3`) did the same, so `pipe_blocker`
-  judged pytest as part of an `echo`. The scanner saw a `<<'EOF'` inside
-  `cat $'\' <<'EOF' '\'` and blanked the next line, which bash runs, from
-  `destructive_git`, `pipe_blocker` and `project_containment`.
-- **Delimiters bash reads differently.** `<<$'EOF'` and `<<$"EOF"` are
-  closed by `EOF`, and `<<$(echo)` and `<<a$(echo x)b` by their literal
-  text; the scanner closed none of them, so every later line was body. On
-  the branch before round 9d this also allowed
-  `cat <<$'EOF'\n…\nEOF\necho hi > /opt/x`, which main denied.
-
-**Remedy, as landed:** the three shell readers share one ANSI-C decoder
-(`utils/ansi_c.py`) and one comment rule (`heredoc_operators.COMMENT_PRECEDERS`);
-`$$` is read as the pid; the delimiter word takes `$'...'`, `$"..."` and a
-verbatim `$( )`/backtick span; a heredoc whose closer never comes is
-reported as unreadable text rather than data, so a delimiter still read
-differently from bash fails closed. Every shape above is pinned through
-`HandlerChain` and was RED at 79d3104e4.
-
-### N116 — ✅ Remedied (n101 branch) — A here-string's `<<<` is read as a heredoc opener from its second `<`
-
-**Found by the N101 round-7 D-SEC and D-RULE reviews** (shared MAJOR,
-reports `subagent-reports/260926-n101-dsec7-opus-5-5.md` and
-`…/260926-n101-drule7-opus-5-5.md`). The brace-word scanner in
-`shell_expansion._shell_brace_words` refused `<<` where `<<<` began, skipped
-the first `<` as a stop character, and then saw `<<` at the second. The
-here-string's word became a heredoc delimiter and was never read, so
-`bash <<< $'cat /proj/.vault-\x7bpass,q\x7d'` was allowed; bash runs the
-decoded text and brace-expands it. The same shape was allowed by main.
-
-**The class is wider than the guard.** Every parser that finds a heredoc
-opener by searching for `<<` makes the same mistake from the second `<`:
-
-- `_command_substitution_end` failed `echo "$(cat <<< hi)" {a,b}` closed as
-  "a heredoc inside".
-- `shell_segmentation._QUOTED_HEREDOC_BODY_PATTERN` blanked the line after
-  `cat <<<'EOF'` as a quoted heredoc body. That line is a command bash runs,
-  so `destructive_git` and `pipe_blocker` allowed it (probed on main
-  01827942b).
-- `core.utils.split_heredocs` took that line out of the command text, and
-  `background_process_tracker` masked it.
-
-**Remedied on the n101 branch.** Both shell-expansion scanners step over the
-whole `<<<`, and the three regexes carry a `(?<!<)` lookbehind. The view
-scanner already consumed `<<<` whole; main's normalised-word scan matches
-`<<<` on accumulated operators and was not affected. Tests, each RED on main
-01827942b: `test_a_here_string_word_is_read_as_a_word_n116` (five shapes,
-including `sh -s`, `xargs -0 bash -c` and the unspaced `<<<$'…'`) through
-`HandlerChain`; `TestAHereStringIsNotAHeredoc` through `HandlerChain` for
-`destructive_git`; and primitive tests for `strip_quoted_heredoc_bodies`,
-`split_heredocs` and `_command_is_backgrounded`.
-
-### N115 — ✅ Remedied (n101 branch) — A `}` before the first comma of a quote-free brace word hides a brace-spelled path
-
-**Found by the N101 round-7 D-SEC review** (shared MAJOR, report
-`subagent-reports/260926-n101-dsec7-opus-5-5.md`). Bash reads a `}` before
-a group's first comma as text, so `cat /proj/.vault-{},pass}` reads
-`/proj/.vault-}` and `/proj/.vault-pass`. The quote-blind reading pairs `{}`
-instead. The bash-accurate reader (`_BashBraces`) ran only on words holding
-a quoting character, in both `expand_braces` and the shell-word scanner, so
-31 of 167 fuzzed quote-free words that spell the path were allowed. Main
-allows them too.
-
-**Remedied on the n101 branch.** `expand_braces` reads every word both
-ways, and `iter_shell_brace_words` reports every word holding a brace,
-whatever its quoting. `iter_every_shell_brace_word` and the `every_word`
-switch are gone, because nothing is left for them to select. A word's value
-after quote removal is re-read as a command whenever it holds a brace. The
-bash differential test now draws a quarter of its words with a `}` or `{}`
-leading the first alternative, and a new run draws from quote-free
-primitives only. Both runs are RED before the fix. Tests:
-`test_a_close_brace_before_the_first_comma_is_text_n115` (five shapes) and
-the Write `.sh` case, through `HandlerChain`, RED on main 01827942b.
-
-### N113 — ✅ Remedied (n101 branch) — An unrelated unresolvable prefix switches off `secret_file_guard`'s N107 coverage
-
-**Found by the N101 round-6 D-SEC review** (minor, report
-`subagent-reports/260926-n101-dsec6-opus-5-5.md`). When the brace-word
-scan meets a span it cannot place (`${x:-'a'}`), it stops early if no group
-can follow. That check looked only for a literal `{`, while the scan itself
-also reads decoded text. So `bash -c $'cat .vault-\x7b"\x7d",pass\x7d'` was
-denied alone and allowed after `: ${x:-'a'} ;`. Main allows both.
-
-**Remedied on the n101 branch.** `shell_expansion._may_hold_a_group` now
-considers every way a brace can arrive: a literal `{` other than `${` with
-a `}` after it, a `$'…'` whose decoded body holds a brace, and an expansion
-whose value is unknown (`$x`, `${…}`, `$(…)`, a backtick) where a word hands
-text to a shell to read again (`eval`, `source`, `.`, `su`, `ssh`, a shell
-by name, an option cluster holding `c`). Where any of them can, the scan
-raises and the guard fails closed. Tests:
-`test_an_unrelated_unresolvable_prefix_does_not_end_the_scan_n113` through
-`HandlerChain` (two shapes RED on main 937a4c772; the `$(printf …)` shape
-was already denied there) and the primitive tests in
-`TestIterShellBraceWords`. `echo "${x:-"a"}" $'tab\there'` and
-`: ${x:-'a'} ; echo "$HOME"` stay allowed.
-
-### N112 — ✅ Remedied (n101 branch) — Braces decoded from `$'\x7b'` and run by `eval` or `bash -c` are never expanded
-
-**Found by the N101 round-6 D-SEC review** (report
-`subagent-reports/260926-n101-dsec6-opus-5-5.md`), and allowed on main
-937a4c772. `bash -c $'cat .vault-\x7bpass,q\x7d'` runs `cat .vault-{pass,q}`. The raw text holds no brace, so the quote-blind stream
-sees none, and the nested reading re-read decoded text only when a quote
-character survived decoding.
-
-**Remedied on the n101 branch.** ANSI-C decoding is the one quote removal
-that makes braces the raw text lacks. Text decoded from a `$'…'` word, or
-`eval`'s arguments when one of them is one, is read as a command whatever
-it holds, and every word of it holding a brace is reported. Tests:
-`test_braces_decoded_from_ansi_c_quoting_reach_a_shell_n112` through
-`HandlerChain` for `bash -c`, `eval`, `sh -c`, `su -c` and `ssh` with
-`\x7b`, `\173` and `{`, each RED on main 937a4c772, and
-`test_braces_decoded_from_ansi_c_quoting_are_read_n112`.
-
-### N111 — ✅ Remedied (n101 branch) — `$"…"` locale quoting keeps its `$` in `secret_file_guard`'s quote removal
-
-**Found by the N101 round-6 D-SEC review** (report
-`subagent-reports/260926-n101-dsec6-opus-5-5.md`), and allowed on main
-937a4c772. Bash reads `$"…"` as `"…"` and drops the `$`.
-`shell_expansion._decode_span` kept it, so `cat $".vault-"pass` became the
-token `$.vault-pass`, which no protected name matches.
-
-**Remedied on the n101 branch.** An unquoted `$"` drops its `$` in
-`_decode_span`, so `normalise_word` and every stream built on it read
-`$"…"` as `"…"`. Inside double quotes `"$"` still keeps its `$`, as bash
-does. Tests: `test_locale_quoting_drops_its_dollar_n111` through
-`HandlerChain` (three shapes, RED on main 937a4c772),
-`test_locale_quoting_reads_as_double_quoting_n111`, and the bash
-differential test, which found it.
-
 \<<\<<\<<< HEAD
 
 ### N118 — ✅ Remedied — the tests-stage gate reported "0 failed" over a coverage-threshold miss and named nothing
@@ -1335,57 +976,6 @@ through `pytest_plugins`, which runs after coverage has started. Neither
 `FIRST_ERROR_ARGS` in bash, and runs an extra run's argv, under `--cov` over
 one small test file. It asserts that the import-only `core/__init__.py` and
 `qa/__init__.py` have no missing lines. It was RED on `c9c38145c`.
-
-### N107 — ✅ Remedied (n101 branch) — `secret_file_guard` reads a quoted brace as brace syntax, so `{"}",pass}` hides a brace-spelled path
-
-**Found by the N101 round-5 D-RULE review** (observation, report
-`subagent-reports/260926-n101-drule5-opus-5-5.md`), and proved on main
-4f0a205b3. `shell_expansion._BRACE_GROUP_RE` pairs braces without regard to
-quotes. In `cat /proj/.vault-{"}",pass}` bash reads the quoted `}` as text,
-so the alternatives are `}` and `pass` and the word spells `.vault-pass`.
-The regex pairs `{"}` instead, and no stream reaches the path, so main
-allows the command. Discovery has the same flaw one level up:
-`iter_brace_words` splits at every whitespace character, quoted or not, so
-a group holding quoted whitespace (`.vault-{"} x",pass}`) reaches the
-expander in pieces. On main every shape below is allowed.
-
-**Remedied on the n101 branch.** Brace syntax is read quote-aware wherever
-the guard enumerates, with main's quote-blind reading kept alongside it:
-
-- `expand_braces` reads a word a second way when it holds a quoting
-  character. A brace or comma inside quotes, after a backslash, or inside
-  `$'…'`, `${…}`, a backtick or `$(…)`/`<(…)`/`>(…)` is text, as bash's
-  brace expansion reads it. Both readings are returned under the same caps.
-  One scanner, `_quoted_span_end`, decides every span.
-- `iter_shell_brace_words` splits text as bash splits it, skipping comments
-  and reading heredoc bodies by their delimiter lines. It finds the words
-  whose groups hold quoted whitespace. It also reads as a command every
-  text a shell may run: substitution bodies, heredoc bodies, each word
-  after quote removal (the code `bash -c` or `ssh` receive) and `eval`'s
-  joined arguments. `shell_word_spellings` expands such a word piece by
-  piece between whitespace outside every group, since a token never spans
-  whitespace.
-- A span the scanner cannot place with certainty (a `${…}` holding quotes,
-  escapes or braces, a `case` or heredoc inside `$(…)`, nesting past the
-  bound) raises `UnresolvableBraceQuotingError`, a `TooManyToEnumerateError`,
-  so the guard fails closed. This happens only when a group could be at
-  stake (see N113 for what that now covers).
-
-**Round 7.** The quote-aware reading is now bash's own brace expansion,
-ported from bash 5.2 `braces.c` (`brace_expand`, `expand_amble`,
-`brace_gobbler`). A `}` before any comma is text, a body with no comma
-that is not a sequence is text, and `${` opens a level as bash's scanner
-opens it, so a group holding `${x:-'}'}` is resolved rather than failed
-closed. `tests/unit/utils/test_shell_expansion_bash_differential.py`
-generates 2,000 words from quoting and brace primitives and requires every
-spelling bash prints with `printf '%s\n' WORD` to be one the guard reads.
-On a 600-word and a 300-program sample it found N111 first (257 misses),
-then the round-6 innermost-first pairing (15 and 20 misses).
-
-The 140-program false-positive corpus verdicts are unchanged. Tests:
-`TestQuotedBracesAreNotBraceSyntax` in the guard's tests, each RED on main
-4f0a205b3 and on round-5 HEAD 1a11131b7, and the primitive tests in
-`tests/unit/utils/test_shell_expansion.py`.
 
 ### N114 — A `py311` fingerprint venv is built on whatever Python uv prefers
 
@@ -1625,63 +1215,6 @@ predates the fix. RED test:
 `tests/claude_code_hooks_daemon/install/test_skills.py`, covering both a
 client-install layout and this dogfood repository's layout.
 
-### N104 — `Write`/`Edit` of Python source with a long brace-alternation string fails `secret_file_guard` closed
-
-**Found by the N101 fixer**, whose own `Edit` of a scratch `.py` file was
-denied with `R-SECRET-EVALUATION-ERROR`. The string literal was
-`'{a,b}{c,d}…'`, with nine groups and 512 spellings. The `"content"` scan
-of non-shell source still enumerates brace spellings of the whole file, and
-N101 deliberately left that alone. A test pins it
-(`test_a_script_brace_sequence_mention_still_denies_as_content`), because a
-string literal can reach a shell through a variable that the shell-exec-call
-extraction cannot follow. The cost is that a long enough brace string in
-ordinary source fails closed. Since N101 round 3 the Bash route follows the
-same rule: every string literal of an exempted `python3` program is
-enumerated on its own with the normal caps, so the same literal fails
-closed there too. Only code braces (dicts, sets, f-string fields) are
-exempt, and only on the Bash tool's own command line.
-
-**Remedy:** decide whether a string literal holding a real over-bound brace
-group should fail closed on both surfaces. If not, the alternative has to
-keep a brace-spelled path in any literal denied, which is what the
-enumeration buys. `"id_" + "rsa"` already defeats the spelling scan inside
-any interpreter, so weigh what the enumeration actually buys against the
-false positive.
-
-### N103 — A `**` word the shell never globs walks the whole checkout, and a large tree fails the guard closed
-
-**Found by the N101 fixer.** The live daemon denied an ordinary
-``` grep ... | grep -v "^./x.py.*``" ``` with `R-SECRET-EVALUATION-ERROR`
-(`TooManyToEnumerateError`), with the hook cwd at the main checkout. The
-empty backtick substitution inside the double quotes collapses to `*`, so the
-word ends in `**`. `_both_edges_glob_mention` then walks it with
-`bounded_recursive_glob`, which gives up past 2,000 entries. The quarantine
-guard's strict scan does the same with `grep -rn x --include='**/*.md' .` from
-a worktree root. Unlike brace expansion, a quoted glob is not always inert:
-`find -name`, `grep --include`, git pathspecs and Python's `glob` all expand
-their own quoted arguments. So "the shell never globs it" does not settle
-the question, and N101's fix deliberately leaves it alone.
-
-**Remedy:** decide what a walk past the cap should mean for a word that no
-receiver on the line expands. One option is to judge it by spelling only
-(the interior-wildcard DP) and walk only when a globbing receiver owns it.
-Pin both guards, with the hook cwd at the main checkout.
-
-### N102 — A grep regex such as `".*real_chain"` in a compound command is denied as a protected-file mention
-
-**Found by the N101 fixer.** `grep -rln "…\|real_chain\|…" tests | awk …; grep -rn "def .*real_chain" tests`
-was denied `R-SECRET-BASH-MENTION` on `.vault-pass*`, matched token
-`.*real_chain\`. So was a `.*protected` grep regex in another compound
-command, and a single-quoted `'^decision: .*\|…'` pattern. Each is a regular
-expression handed to grep, not a path. The grep-pattern exemption
-(`is_grep_pattern_only_mention`) does not reach these shapes, because the
-command is compound or the pattern is one alternative among several.
-
-**Remedy:** extend the grep-pattern exemption to every grep in a compound
-command and to `\|`-alternation patterns, judging each grep by its own
-argument positions. A file operand must still deny. Pin both the compound
-and the single-command forms.
-
 ### N101 — ✅ Remedied (n101 branch) — `secret_file_guard` fails closed with `TooManyToEnumerateError` on ordinary `python3 - <<'EOF'` commands
 
 **Found by N38 fix round 11** (report `260926-n38-fix11-opus-5-5.md` on the
@@ -1700,98 +1233,6 @@ fed to an interpreter, not expanded by the shell, so its bytes are not
 shell words. Keep fail-closed where the shell does expand the text. Pin both
 cases. It touches the guard that guard-defects just changed, so it goes on a
 fresh branch from main.
-
-**Remedied on the n101 branch.** The cause was one shared stream,
-`secret_file_matching._brace_expansion_tokens`. It ran `iter_brace_words` and
-`expand_braces` over the raw command, so a body's dict literals and f-strings
-tripped either the 500-word discovery cap or the 256-spelling cap.
-`shell_expansion.brace_expansion_view` now neutralises CODE braces in one
-place only: the program text of a top-level `python3` command, either its
-single-quoted `-c` word or its one quoted-delimiter stdin heredoc. Every
-string literal and comment of that program (found by Python's own
-`tokenize` and `ast`; a program that does not parse is not exempted) is
-enumerated on its own with the normal caps, so a brace-spelled path in any
-literal denies whatever the program does with it. So are the full source
-of every f-string, every expression's literals joined in source order, and
-every literal and comment of the program joined with a space, so a brace
-group split across literals, statements, or an f-string's text and field
-is enumerated whole (round 4). Every brace word of the raw program text
-that is not wholly inside one literal or comment (a set display against a
-name, `x .p-{"a",z}`) is enumerated on its own too (round 5, D-RULE-4 MAJOR
-1): a program can read its own command line back. Past a cap such a CODE
-word fails closed, as on main, and so does a literal. Round 5 judged an
-over-cap code word by a wildcard skeleton instead. That skeleton read
-braces without quotes, so a quoted `{` alternative produced a glob that
-could not match the path bash spells (D-RULE-5 MAJOR 1). None of the 140
-false-positive corpus programs reached that fallback, so round 6 deleted
-it. Round 7 (D-RULE-6 MAJOR 1) stopped trusting a literal's decoded value
-to stand for the words bash splits from its raw text. In `s = '''a' /p/.v-{\x7b,pass} 'b'''` Python's value is `/p/.v-{{,pass}`, which spells
-nothing, while bash reads the triple quote as `''` `'a'`, so the word is
-unquoted and spells `/p/.v-pass`. Every word bash splits from the raw
-program text that holds a brace is now enumerated as bash reads it,
-inside a literal or not (`iter_every_shell_brace_word`); bash's own
-quoting makes an ordinary literal's braces text, so it expands nothing.
-The quote-blind code words keep the containment rule. No corpus verdict
-moved, so the fallback the brief allowed (containment for literals whose
-raw text equals their value) was not needed. The scanner models CPython 3.8 to
-3.14 source grammar, apart from the shapes it withdraws. A program that
-declares an encoding other than UTF-8, or that Python would decode
-differently from the text the guard parsed, is not exempted. Nor is one
-holding a `\r` (Python reads it as a newline), one with an f- or t-string
-field holding the string's own quote, a backslash, a `#`, a newline or a
-nested f- or t-string (PEP 701 reads those differently from 3.11, and the
-daemon's Python need not be the user's), or one where `tokenize` and `ast`
-disagree on any literal's span (round 5, D-SEC-4 unexamined 2). A field
-holding only the other quote kind (`f's-{e["k"]}'`) keeps the exemption:
-every version reads it alike. The exemption holds only when no
-shell can read what the program prints: no pipe after it, no process
-substitution, no subshell, group, function definition, compound command,
-arithmetic, non-plain `${…}` or expanding unquoted heredoc, and every
-command anywhere in the line, substitutions included, on an allowlist of
-commands known not to run text as shell (`shell_expansion._INERT_HEADS`,
-round 4; a deny-list missed `trap` and `mapfile -C`). Nothing may redefine
-the name or what it loads (a function, an alias, `hash`, `enable`, PATH, a
-`PYTHON*` setting), and no output file may be one that another command in
-the line could run. Heads and redefinition words are judged
-after quote and backslash removal, and a word that cannot be resolved with
-certainty withdraws the exemption. Ruby, Perl, PHP and Node are judged as
-before, because they brace-expand in their own glob APIs. Argv is judged as
-before. The shell-exec literal scan covers every Python spawn API and
-heredoc programs. Only the Bash tool's own command line gets the view (the
-guard's Bash route and payload capture); an authored script, a command
-segment and Write/Edit content are enumerated as on main. An allowlisted
-head redefined as a function on the command line (`cd() { …; }`,
-`function ls { …; }`) withdraws the exemption, as any function definition
-does. Two limits are the same as on main: a function inherited through the
-environment (`BASH_FUNC_cd%%`) or Claude Code's shell snapshot cannot be
-seen from the command text, and the model is bash, not zsh (whose `cd`
-runs `chpwd` hooks). Rounds 2 to 7 closed the D-RULE and D-SEC review
-findings; see `subagent-reports/260926-n101-fix2-opus-5-5.md`,
-`260926-n101-fix3-opus-5-5.md`, `260926-n101-fix4-opus-5-5.md`,
-`260926-n101-fix5-opus-5-5.md`, `260926-n101-fix6-opus-5-5.md` and
-`260926-n101-fix7-opus-5-5.md`. Brace
-syntax is read quote-aware on this branch too; see N107. The
-quarantine guard enumerates filesystem globs, not braces; see N103, which
-also denies a Python program holding `{**d}` because the `**` word is
-walked.
-
-**Deliberate widening of the shared data-sink heredoc exemption** (D-RULE
-m1). The quote-aware command-word resolver in `shell_segmentation` (used by
-destructive_git, pipe_blocker, curl_pipe_shell, merge_to_main_approval,
-reference_repo_freshness, bash_flags and process_probe) now sees through
-`env`, `nice`, `nohup`, `timeout` and `command` as well as `sudo`, and
-resolves an interior backslash (`c\at` is `cat`). A heredoc body fed to a
-sink behind one of these is blanked where main scanned it. Each is sound:
-the wrapper execs the named command with the same stdin and runs nothing
-itself (`command` even bypasses functions), and the modes that do run a
-shell or change PATH (`sudo -s`, `env -S`, `env PATH=`) resolve to no
-command, as do those that change the root or working directory
-(`sudo -R`/`--chroot`, `sudo -D`/`--chdir`, `env -C`/`--chdir`) or keep
-the caller's environment across sudo's reset (`sudo -E`/`--preserve-env`,
-round 4; main trusted `sudo -E tee`). It is also tightened: a quoted option value is one word
-(`sudo -p 'x cat' bash` names bash), and a word built by expansion,
-globbing or brace expansion (`$cat`, `` `echo cat` ``) names no command,
-where main resolved `$cat` to `cat`.
 
 **Second shape (N110 gate fix 2):** a plain shell glob,
 `ls -d untracked/venv-*/lib/python*/site-packages/_pytest`, is denied the
@@ -1977,20 +1418,10 @@ targeted `Write` still raises.
 and `alias cat=bash` both fail open on every tree. The heredoc blanking treats
 `cat` as a data sink, so the body is never judged, but bash runs it.
 
-The N101 round-2 fixer confirmed the same for `source x.sh; cat <<'EOF'`,
-and the class also covers `hash -p`, `enable`, `.` and a PATH change,
-quoted or escaped spellings included. `_receiver_is_data_sink` resolves
-the name but never asks whether the command line redefines it, so every
-consumer of the blanked text (destructive_git, pipe_blocker and the others)
-judges a body that bash executes as prose.
-
 **Remedy:** a receiver name is not trusted as a data sink once the same
-command defines a function or alias of that name, or runs `alias`, `hash`,
-`enable`, `eval`, `source` or `.`, or changes PATH, beforehand, each judged
-after quote removal. In that case the body is judged. That is the rule
-`brace_expansion_view` applies to its own exemption. Pin it through
-destructive_git with each redefinition form. It builds on the N38 lexer, so
-it goes on the executed-body branch with N87 and N88.
+command defines a function or alias of that name, or runs `alias`, `eval` or
+`source` beforehand. In that case the body is judged. It builds on the N38
+lexer, so it goes on the executed-body branch with N87 and N88.
 
 ### N88 — A data sink whose output feeds an executing process substitution hides the body
 
@@ -5701,6 +5132,32 @@ integration gate. The "Run QA" hint and Step 7 name `llm_qa.py`. A test
 checks that the script names no denied QA entry point.
 
 **Graduated to Plan 00463**, which owns the sub-agent QA policy.
+
+**Remedied by Plan 00463** (commit 480740cc), as the candidate remedy says.
+Step 7 checks that `scripts/qa/llm_qa.py` is executable. The "Run QA" hint
+prints `./scripts/qa/llm_qa.py changed`. The agent prompt template tells the
+agent to run targeted QA (`llm_qa.py changed`, named `llm_qa.py` tools, and
+pytest on the test files it touched), and says full QA is the coordinator's
+batched integration gate. `tests/unit/scripts/test_setup_worktree_qa_guidance.py`
+was RED first. It checks that the script never names `run_all.sh`, and that no
+full run under this repo's live `full_qa_patterns` is printed, judged by
+`subagent_full_qa_blocker`'s own matcher.
+
+**Correction (Plan 00463 review 3, R3).** The first version of that test
+judged only the printed lines that were shaped like a command. So a full run
+inside prose (`then run ./scripts/qa/llm_qa.py all`), after a label
+(`QA: ...`), in a `printf`, or in single quotes passed it, and the earlier
+claim here that no printed command was a full run was not something the test
+proved. The rewritten test reads every `echo`/`printf` text the script prints
+and judges a candidate command at every place one can start in each line:
+the line start, after `run`, `&&`, `||`, `;`, `|` or a word ending in `:`, and
+at every word that starts like a path or an expansion. Each row of the
+review's table is an injected RED case. The row above stays Remedied: the
+script itself prints no full run, and the test now proves it. Review 4 (N7)
+widened the scan again: a candidate also starts at any word naming a declared
+program, whatever verb precedes it, and `cat` heredoc bodies and `$NAME`
+assignments are read as printed text. Three printed lines that mentioned
+pytest bare were reworded to name a path.
 
 ### N1 — ✅ Remedied — `resolve_venv_python`'s fallback accepts a venv interpreter that cannot run on this host
 

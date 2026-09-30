@@ -200,6 +200,12 @@ _AUDITED_BLOCKING_ONLY_REASONS: dict[str, str] = {
         "HandlerTag.BLOCKING per the same default-denying-handler requirement "
         "as ask_user_question_blocker."
     ),
+    "subagent_full_qa_blocker": (
+        "Denies a sub-agent's own declared full-suite QA run so the "
+        "coordinator's batched gate is the only full run. A scheduling/"
+        "resource-contention gate over a QA command, not a dangerous "
+        "action -- the same shape as tdd_enforcement and plan_qa_edit above."
+    ),
     "subagent_report_path_verifier": (
         "SubagentStop: catches a claimed report path that does not exist. "
         "Workflow integrity (false-report detection), not a dangerous action."

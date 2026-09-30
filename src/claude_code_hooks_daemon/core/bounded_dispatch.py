@@ -303,8 +303,15 @@ class BoundedDispatcher(Generic[T]):
             # abandoned calls used to deny every future dispatch permanently
             # (Plan 00466 N40 M2).
             permit.release()
+            # Recorded only while the call is still running, under the same
+            # lock the worker's `finally` pops under: a worker that finished
+            # after the timeout fired but before this point has already made
+            # its (then no-op) pop, so an entry added now would name a dead
+            # thread and never be removed. A worker still running here pops
+            # only after this block releases the lock.
             with self._threads_lock:
-                self._stragglers[thread] = _StragglerInfo(label=label, started_at=start)
+                if not future.done():
+                    self._stragglers[thread] = _StragglerInfo(label=label, started_at=start)
             logger.warning(
                 "%s exceeded its %.2fs dispatch budget -- treating as not "
                 "judged in time; it keeps running in the background",

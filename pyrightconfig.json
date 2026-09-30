@@ -9,6 +9,7 @@
     "tests/fixtures",
     "remote-docs",
     ".claude/ccy/plugins",
+    ".claude/worktrees",
     "**/node_modules",
     "**/vendor",
     "**/third_party",

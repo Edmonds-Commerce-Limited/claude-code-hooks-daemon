@@ -27,12 +27,312 @@ Complete quality assurance for the Claude Code Hooks Daemon consists of **three 
 ### Running Automated QA
 
 ```bash
-./scripts/qa/llm_qa.py all
+./scripts/qa/llm_qa.py all       # the FULL gate: the coordinator (main thread) runs this
+./scripts/qa/llm_qa.py changed   # TARGETED: what a sub-agent runs before handing over
+./scripts/qa/llm_qa.py main-moved  # the coordinator: what must re-run if main moved
 ```
 
-Agents MUST use `llm_qa.py all` — the `enforce_llm_qa` project handler denies a
-direct `run_all.sh` invocation by an agent. `run_all.sh` remains the
-human-at-a-terminal entry point and runs the same suite with verbose output.
+Agents MUST use `llm_qa.py`, never `run_all.sh`: the `enforce_llm_qa` project
+handler denies a direct `run_all.sh` invocation by an agent. `run_all.sh` remains
+the human-at-a-terminal entry point and runs the same suite with verbose output.
+
+### Full QA Is the Coordinator's Gate; Sub-Agents Run Targeted QA
+
+The full suite runs **once per batch, on the coordinator's thread**: every
+ready branch is merged into one integration worktree, and one run covers them
+all. A sub-agent never runs it. This is enforced: in a sub-agent,
+`subagent_full_qa_blocker` (Plan 00463) denies every command this repository
+declares as full, which is `llm_qa.py all`, `llm_qa.py tests`, `run_all.sh`,
+`run_tests.sh`, `scripts/validate_worktrees.sh`, and a `pytest` with no path
+(run from the repository root) or with `tests/`, `tests/unit` or the root as
+its path. The deny lists the targeted
+forms. The main thread is never affected.
+
+**Which sub-agents the deny reaches.** The guard recognises a sub-agent by the
+`agent_id` field in its hook payload. That field is proven present for
+Agent-tool sub-agents (Plan 00423) and in-process teammates (Plan 00463). A
+Workflow-tool agent's payload is UNMEASURED, so no deny is promised there. The
+split below applies to every kind of sub-agent all the same.
+
+**Why.** When the rule was made, five full runs were executing at once, one
+per worktree, each about 25,700 tests over 15-20 minutes on eight cores. Each
+agent re-ran the suite after every fix round, and the coordinator ran it again
+before merging. The per-checkout run lock (Plan 00262) cannot help across
+worktrees. A coordinator gate that still ran once per branch, one at a time,
+only moved the queue: N ready branches cost N full runs, N pushes and N CI runs.
+
+**Why the gate stays BEFORE `main` moves.** Cross-cutting checks break from
+changes far away: guidance coverage, docs QA, plan QA, the handler reference and
+the acceptance probes. A first full run on `main` would land every such break
+there, and merges queued behind it would build on a red tree. The integration
+worktree is where those breaks surface instead, including the ones that only
+exist when two branches meet.
+
+### The Batched Integration Gate
+
+The coordinator, never a sub-agent:
+
+1. Creates ONE integration branch and worktree from current `main`. In an
+   agent team the plan's parent branch IS the integration branch, with `main`
+   merged into it ([AgentTeam.md](AgentTeam.md), "Parent → Main").
+2. Merges every ready branch into it, each with `git merge --no-ff`, so each
+   branch lands as one merge commit and `git branch -d` still works.
+3. Records the **batch base** with `./scripts/qa/llm_qa.py main-moved --start`,
+   run on the integration branch. The base is the newest `main` commit the
+   branch contains, kept in the git ref `refs/integration/base/<branch>`, so it
+   survives between shell calls (a shell variable does not). A second `--start`
+   refuses while a base is recorded, because it would move the base past
+   whatever `main` added since. Only a batch rebuilt from scratch takes
+   `--start --restart`, which also clears the certified head below.
+4. Runs `./scripts/qa/llm_qa.py all` once, on the combined head, on a clean
+   tree. A run in which every tool passes records that head as the
+   **certified head**, in `refs/integration/certified/<branch>`. Nothing else
+   writes it except a successful `--advance`. The tree is compared before and
+   after the run, so an edit that is still there fails the certification. A
+   file created and deleted again DURING the run leaves the two equal, and is
+   not caught: that is a limit of comparing states.
+5. **Green:** runs `./scripts/qa/llm_qa.py main-moved` and follows its verdict
+   (below) until it says `unmoved`. Then, from the main checkout,
+   `git merge --ff-only <certified sha>`, restarts the daemon, and pushes. The
+   sha is the one `unmoved` prints, or
+   `$(git rev-parse refs/integration/certified/<branch>)`. Never merge the
+   branch NAME: a commit that reached the branch after the check was never
+   gated. One push, one CI run. Last, `./scripts/qa/llm_qa.py main-moved --finish` in the integration worktree deletes both batch refs. It refuses
+   unless `main` IS the certified head, or a merge of it with the certified
+   tree. A descendant carrying anything more is refused, and the refs stay as
+   the evidence.
+6. **Red:** see "A red batch" below.
+
+**The coordinator's `llm_qa.py all` (step 4) is the only run holding the
+host-wide full-QA lock.** A sub-agent's `subagent_full_qa_blocker` handler is
+the friendly first line, but a Bash-text denylist can never enumerate every
+way to start a whole-suite run. So `tests/conftest.py`
+(`claude_code_hooks_daemon.qa.full_qa_gate`) refuses a whole-suite-sized
+pytest COLLECTION outright unless it holds that lock, proven by an inherited
+file descriptor on the lock file -- the sink every route ends up at,
+regardless of what launched it. `scripts/qa/run_tests.sh` and CI both acquire
+it before their own whole-suite pytest run; see
+`src/claude_code_hooks_daemon/qa/full_qa_lock.py` and Plan
+00463's "Round 9" note for the design.
+
+**While a batch is in flight, `main` is frozen for code.** The coordinator's
+own doc commits (ledger rows, journal entries, archival) either wait for the
+batch to land, or are committed onto the integration branch BEFORE step 4. A
+commit after the certified head makes the verdict `head-moved`, and
+`llm_qa.py all` must pass again.
+
+**If `main` moves anyway, a checked verdict decides, not a judgement.**
+`llm_qa.py main-moved [<main-ref>]` judges every path that
+`git diff --no-renames <base> <main>` changed. A rename counts by both of its
+paths, so a file moved out of `src/` is judged by the path it left.
+
+- **Full gate:** a path runtime code reads (root `CLAUDE.md`, `CHANGELOG.md`,
+  `.claude/**`, `RELEASES/**`, `CLAUDE/UPGRADES/**`), a symlink, anything that
+  is not a `.md` file outside `src/`, `tests/` and `scripts/`, and a document
+  the test mapper cannot target (`too-broad`, as the root `README.md` is).
+- **Tested:** a document the test mapper maps to tests. The mapper is
+  `run_changed_tests.py`, the one `llm_qa.py changed` runs, never a second copy.
+  It finds the tests that name the file, its declared rules and its dependents.
+  A test that finds documents by globbing a directory never names the file, so
+  it is declared in `scripts/qa/changed_tests_map.yaml` with a `path_glob`
+  rule, and `tests/unit/qa/test_glob_readers_are_declared.py` fails while such
+  a test is undeclared, or while a literal glob it writes from the repository
+  root (a `DOCUMENT_GLOBS` entry) matches a path no rule naming it covers. The
+  guard sees `.glob`/`.rglob`, `os.walk`, and, in a test that reads markdown,
+  `.iterdir()`, `os.listdir`/`os.scandir`, `glob.glob` and `git ls-files`. A
+  pattern it cannot place from the root (one built at run time, or relative
+  to a subdirectory) is not compared, so declare such a reader's paths by hand.
+- **Docs:** a document the mapper maps to no test.
+
+The integration head is judged FIRST. Unless `HEAD` is the certified head and
+the tree is clean, the verdict is `head-moved`, whatever `main` did: a commit or
+merge after the gate, or an uncommitted change `--ff-only` would not land, has
+not been through the gate. The exception is a clean `HEAD` that holds nothing
+past the certified head but `main` merged in, by the rule `--advance` applies
+(step 3 below): that is judged as the movement merged, with its recheck, so
+checking again between the merge and `--advance` never asks for a second
+`llm_qa.py all`. It is also `head-moved` when `main` is still the base but
+`HEAD` does not contain it (the merge of `main` was backed out): `--ff-only`
+would refuse, so the printed steps merge `main` back in first.
+
+| Verdict      | Exit | When                                                                        | Recheck, run exactly as printed                                                                           |
+| ------------ | ---- | --------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| `head-moved` | 7    | `HEAD` is not the certified head, the tree is dirty, or `HEAD` lacks `main` | `llm_qa.py all` on a clean tree (after merging `main` when it is missing), then `main-moved` again        |
+| `unmoved`    | 0    | `main` is still the batch base                                              | None: fast-forward                                                                                        |
+| `docs-only`  | 5    | Every path is docs, or new commits change no file                           | `plan_qa docs_qa british_english sensitive_content repo_hygiene doc_truth doc_snippets handler_reference` |
+| `targeted`   | 6    | A tested document, and nothing needing the full gate                        | `llm_qa.py changed` plus the docs-only tools `changed` does not run, with `--range <base>..<main>`        |
+| `full-gate`  | 4    | Any full-gate path, or `main` was rewritten                                 | `llm_qa.py all`                                                                                           |
+
+Exit 1 is no verdict: no base recorded, a bad ref, or git or the mapper failed.
+
+For `docs-only`, `targeted` and `full-gate`, follow the loop the command prints,
+in the integration worktree:
+
+1. `git merge --no-edit main`.
+
+2. The recheck.
+
+3. `./scripts/qa/llm_qa.py main-moved --advance`. This moves the base to the
+   newest `main` commit now merged in, and certifies `HEAD`, but only when all
+   of these hold:
+
+   - the tree is clean;
+   - `HEAD` holds nothing since the certified head but `main` merged in. Every
+     new commit must be a merge, and a merge may change only paths `main`
+     moved. A conflict resolution that edits any other path needs
+     `llm_qa.py all`;
+   - the recheck that range needs PASSED on this exact tree, read from the same
+     provenance `--read-only` trusts. For `targeted`, `changed_tests` must have
+     run over exactly `<base>..<merged>`.
+
+   Otherwise it refuses, says what is missing, and the base stays put.
+
+4. `./scripts/qa/llm_qa.py main-moved` again. The base advanced, so it sees only
+   newer movement.
+
+When `main` is ALREADY merged into the certified head and the recheck already
+passed on this tree, the command prints only steps 3 and 4. That is the path
+after a red batch: `main` was merged before the gate re-ran, so the gate that
+certified the head already covers `main`, and a second `llm_qa.py all` on the
+same head would repeat it.
+
+**If `git merge --ff-only` refuses**, `main` moved after the last check: run
+`main-moved` again and follow the loop from there. It never re-runs anything
+the advanced base, or a gate on the same tree, already covers.
+
+**A `docs-only` or `targeted` landing leaves most tools unrecorded for the new
+head.** Only the recheck's tools carry provenance for it, so a later
+`llm_qa.py --read-only all` reads the rest STALE, and a release still needs its
+own full run (RELEASING.md, step 1b).
+
+**CI on the pushed head is the second line, not a substitute.** The recheck has
+already run every test the mapper selects for a moved document: the tests that
+name it, the declared readers (the `path_glob` rules above) and its dependents.
+The checkers that sweep the whole tree (`docs_qa`, `plan_qa`, `doc_truth` and
+the rest of the docs-only list) run in the recheck themselves. So a
+`docs-only` or `targeted` landing relies on nothing CI does.
+CI runs the whole suite on what was pushed, and a red CI is a red `main`,
+handled at once. It is never a reason to skip the gate.
+
+The path rules are defined once in `llm_qa.py` (`RUNTIME_READ_FILES`,
+`RUNTIME_READ_ROOTS`, `judge_path`), and `tests/unit/qa/test_llm_qa_main_moved.py`
+pins them, including every path the third review of Plan 00463 named.
+
+**A red batch.**
+
+- Find the branch that broke it: bisect the merge commits (`git bisect` over
+  the first-parent chain), or build a trial branch without one branch at a time.
+- A branch is never fixed inside the integration worktree. It goes back to its
+  agent, and the fix lands on that branch.
+- To take the fixed branch, merge it forward into the integration branch and
+  run the gate again. No revert is involved, so nothing is lost.
+- To DROP a branch, build a NEW integration branch from current `main`, merge
+  the other ready branches, then `--start` and run the gate. In an agent team
+  the new branch becomes the plan's parent (`worktree-plan-NNNNN-r2`), and the
+  batch lands through it. Never drop a
+  branch with `git revert -m 1` of its merge: once that lands, git treats the
+  branch's commits as merged, and merging the fixed branch later silently
+  leaves the reverted change out. The old integration branch is left for a
+  human to delete: `git branch -d` refuses an unmerged branch, and `-D` is not
+  an agent's to run.
+
+**After the fast-forward, before the push**, restart the daemon in the main
+checkout and check `bin/hooks-daemon status`. The gate ran under the integration
+worktree's venv, so a dependency the batch added may be missing from the main
+checkout's. If either step fails, **do not push**. The batch is still local, and
+`main` was the batch base when it fast-forwarded, so
+`git reset --keep "$(git rev-parse refs/integration/base/<branch>)"` puts local
+`main` back exactly where it was. `--keep` refuses rather than discard an
+uncommitted change, and it is not the denied `--hard`. Then fix the cause on a
+branch and batch again. After the push, `main-moved --finish` removes the batch
+refs, so run it last. After a push, `main` is never rewritten. Fix forward in
+a new batch, or `git revert -m 1 <merge>` each batch merge. A reverted branch
+can only come back by reverting that revert first, never by merging the branch
+again.
+
+**Any lock held around the gate must be released when the run exits**, even if
+something the run started is still alive. A daemon restarted under the gate
+inherits every inheritable descriptor, so a shell `flock` on fd 9 must close it
+for the long-lived children: `hooks-daemon restart 9>&-`, and `exec 9>&-` before
+a keepalive. Otherwise the daemon holds the lock and the next gate waits for
+ever. `llm_qa.py`'s own run lock is opened non-inheritable, and
+`tests/unit/qa/test_llm_qa_run_lock.py` pins that a daemon started during a run
+does not keep it.
+
+**The split:**
+
+| Who                  | Runs                                                                                                                                                                                              | Hands over                                                                |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
+| Sub-agent (any kind) | `./scripts/qa/llm_qa.py changed`, plus named tools the change calls for (`llm_qa.py handler_reference docs_qa ...`) and `pytest` on explicit test files or directories narrower than `tests/unit` | A commit hash and the targeted results                                    |
+| Coordinator          | `./scripts/qa/llm_qa.py all` once, in an integration worktree from `main` with every ready branch merged `--no-ff`, before `main` moves                                                           | A fast-forward of `main`, or the failures sent back to the branch's agent |
+
+`llm_qa.py changed` runs the fast static tools, the project handlers' own
+tests, `docs_qa`, `plan_qa`, `shell_check`, `declared_invariant_pairs`, and
+`changed_tests`: pytest on the tests mapped from every file changed since the
+merge base, uncommitted and untracked files included. The runner's docstring
+(`scripts/qa/run_changed_tests.py`) owns the mapping. A test file selects
+itself. Any other file's coverage is the UNION of:
+
+- its declared rule in `scripts/qa/changed_tests_map.yaml`;
+- its MIRRORED tests (`src/<pkg>/a/b.py` maps to `tests/unit/a/test_b*.py`);
+- the tests that refer to it: by path, by a path built from its parts, by a
+  basename no other file shares, or by importing it;
+- one hop of DEPENDENTS: each source that refers to it the same way adds its
+  own unit tests.
+
+References are read from the syntax tree, so a comment or docstring that
+mentions a file does not count. A conftest's tests are its whole subtree.
+**A `tools:` rule certifies lint only.** `*.md` mapped to `docs_qa`/`plan_qa`,
+or `*.sh` to `shell_check`, says those checks ran. It says nothing about the
+behaviour of a test that reads the file, and that test is selected through the
+union.
+
+**A changed file that maps to nothing FAILS the run**, and is named in the
+summary with its reason. So does an empty change set. There are three reasons:
+
+- `uncovered`: nothing refers to it.
+- `too-broad`: its reach passes the cap of 40 test files. A hub module, a
+  widely loaded config, and the root `tests/conftest.py` all hit this. Its own
+  tests still run when they fit.
+- `deleted-but-referenced`: it was deleted and a source still refers to it.
+
+The remedy is, in order:
+
+1. add the test the file lacks;
+2. add a rule to the map;
+3. pass `--allow-unmapped`, which passes and records that the full gate must
+   cover it.
+
+A `too-broad` file is the full gate's by definition, so `--allow-unmapped` is
+its honest answer. `--base REF` changes the base, which defaults to the branch
+`origin/HEAD` names. `changed` refuses to run on the base branch itself,
+because there the merge base is HEAD.
+
+**A targeted `pytest` names its paths.** This is a policy. The guard judges a
+bare `pytest` by the directory it runs in, following the hook payload's `cwd`
+and any `cd` in the same command: from the repository root it collects the
+whole suite and is denied, and from `tests/unit/core` it collects only that
+directory. Still write `pytest tests/unit/handlers/` rather than
+`cd tests/unit/handlers && pytest`, so the command says what ran.
+
+`llm_qa.py --read-only all` summarises the recorded results without running
+anything, so a sub-agent may use it to read a result the coordinator produced.
+Each run records per tool, in `untracked/qa/provenance.json`:
+
+- the tree it judged (HEAD plus a digest of the uncommitted changes);
+- the live verdict and exit code;
+- the sha256 of the report the tool wrote.
+
+A run deletes each tool's old report before running it. A read-only summary
+**fails** a result in any of these cases:
+
+- It was recorded for a different tree. This is marked `STALE`.
+- Its report is missing or is not the one the run wrote.
+- Its recorded exit code was non-zero.
+
+So neither an old green run nor a crashed tool's leftover report reads as a
+pass. A tree that changes during a run is said at the end of that run, because
+those results certify no tree.
 
 ### The Automated Checks
 
@@ -214,19 +514,23 @@ Verify code meets quality standards (format, lint, types, coverage, security).
 
 WORKFLOW:
 1. cd to target directory
-2. Run: ./scripts/qa/llm_qa.py all (every check it runs)
+2. Run TARGETED QA: ./scripts/qa/llm_qa.py changed security
+   (NOT `all`: the full suite is the coordinator's gate and is denied to
+   sub-agents. See CLAUDE/QA.md "Full QA Is the Coordinator's Gate".)
 3. Verify daemon: ./bin/hooks-daemon restart && status
-4. Check coverage: MUST be 95%+ (shown in QA output)
+4. Coverage is measured by the coordinator's full run. Read it with
+   ./scripts/qa/llm_qa.py --read-only tests once that run exists.
 5. Verify no security issues (Bandit must pass)
 6. **Check library/plugin separation** (see checklist below)
 7. Report "QA verified" OR "QA failed with details"
 
 PASS CRITERIA:
-- EVERY QA check the runner runs passes (it enumerates them; do not assume a count)
-- Coverage ≥ 95%
+- EVERY targeted check passes, and no changed source file is left unmapped
+  without a reason
 - Daemon restarts successfully
 - No security issues
 - Library/plugin separation maintained (no project-specific handlers in library)
+- The coordinator's full run (every check, coverage ≥ 95%) still gates the merge
 
 LIBRARY/PLUGIN SEPARATION CHECKLIST:
 8. Library/Plugin Separation:
@@ -540,19 +844,22 @@ All daemon plugin handlers MUST implement `get_acceptance_tests()` - empty array
 
 ### For Individual Work (No Agent Teams)
 
-1. **During development**: Write tests first (TDD)
-2. **Before committing**: Run `./scripts/qa/llm_qa.py all` (automated QA)
+1. **During development**: Write tests first (TDD); iterate with
+   `./scripts/qa/llm_qa.py changed`
+2. **Before committing**: Run `./scripts/qa/llm_qa.py all` (you are the main
+   thread here, so the full gate is yours)
 3. **Fix any issues**: Use `./scripts/qa/run_autofix.sh` for format/lint
 4. **Verify daemon**: `./bin/hooks-daemon restart && status`
 5. **For significant work**: Spawn QA Agent for deep review
 
 ### For Agent Team Work
 
-Follow the 4-gate verification process:
+Follow the 4-gate verification process. Every gate agent runs TARGETED QA; the
+coordinator's full gate is the last step before the merge:
 
 ```
 Developer Agent
-    ↓ Reports "ready for testing"
+    ↓ Reports "ready for testing" (targeted QA green, work committed)
     ↓
 Tester Agent (GATE 1) - Tests verified
     ↓
@@ -562,7 +869,10 @@ Senior Reviewer (GATE 3) - Completeness verified
     ↓
 Honesty Checker (GATE 4) - Value verified
     ↓
-Merge (ONLY after all 4 gates pass)
+Coordinator - batched integration gate: every ready branch merged --no-ff into
+              one worktree from main, llm_qa.py all once on the combined head
+    ↓
+Fast-forward main (ONLY after all 4 gates AND the integration gate pass)
 ```
 
 **See `CLAUDE/AgentTeam.md` for complete agent team workflow details.**
@@ -670,15 +980,24 @@ grep -r "dogfooding" src/claude_code_hooks_daemon/handlers/
 1. Read failure details in `/workspace/untracked/qa/*.json`
 2. Fix issues
 3. Run `./scripts/qa/run_autofix.sh` (for format/lint)
-4. Re-run `./scripts/qa/llm_qa.py all`
+4. Re-run the tools that failed (`./scripts/qa/llm_qa.py <tool> ...`), then
+   `changed`. The coordinator re-runs `all` once the fix is handed back.
 5. Repeat until all pass
+
+### Coordinator's Full Gate Fails
+
+- Send the failing check names and their JSON detail to the agent that owns
+  the worktree. The agent fixes them with targeted runs and hands back a new
+  commit.
+- Re-run the full gate on the new head. Never merge a head the full gate has
+  not passed.
 
 ### Sub-Agent QA Fails
 
 **QA Agent (Gate 2) Fails**:
 
 - Developer must fix quality issues
-- Re-run automated QA
+- Re-run targeted QA
 - Restart from Gate 1 (Tester)
 
 **Senior Reviewer (Gate 3) Rejects**:
@@ -701,8 +1020,11 @@ grep -r "dogfooding" src/claude_code_hooks_daemon/handlers/
 ### Commands
 
 ```bash
-# Run all automated QA (agents; run_all.sh is the human entry point)
+# Full gate: the coordinator (main thread) only; run_all.sh is the human entry point
 ./scripts/qa/llm_qa.py all
+
+# Targeted QA: what a sub-agent runs before handing over a commit
+./scripts/qa/llm_qa.py changed
 
 # Auto-fix format and lint issues
 ./scripts/qa/run_autofix.sh
@@ -712,8 +1034,8 @@ grep -r "dogfooding" src/claude_code_hooks_daemon/handlers/
 ./scripts/qa/run_lint.sh
 ./scripts/qa/run_type_check.sh
 ./scripts/qa/run_pyright_check.py --json
-./scripts/qa/llm_qa.py tests    # tests under every Python in CI's matrix
-./scripts/qa/run_tests.sh       # tests under this checkout's venv only
+./scripts/qa/llm_qa.py tests       # the WHOLE suite, every Python in CI's matrix: coordinator only
+./scripts/qa/run_tests.sh          # the WHOLE suite, this checkout's venv only: coordinator only
 ./scripts/qa/run_security_check.sh
 ./scripts/qa/run_dependency_check.sh
 

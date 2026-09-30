@@ -1489,8 +1489,33 @@ class TestInteriorWildcardDpIsBounded:
     def test_a_lone_long_star_run_collapses_to_near_zero_cost(self) -> None:
         """Collapsing repeated '*' is language-preserving (``a**b`` and
         ``a*b`` match the same set) and removes the dominant cost driver
-        directly, independent of the budget cap."""
-        _assert_scan_grows_linearly(lambda stars: f"cat a{'*' * stars}a", 60_000 // SIZE_FACTOR)
+        directly, independent of the budget cap.
+
+        Counts DP grid CELLS VISITED (``sfm.dp_cell_counter``, N123) rather
+        than wall-clock time: a fixed-second budget flakes under host
+        contention (many worktrees' gates running at once) independent of
+        whether the cost bound itself holds -- main measured 0.09s against
+        a 0.1s budget, and a scaling-ratio version of this same test still
+        carried an absolute-second floor to absorb constant-factor noise,
+        so it was still exposed to the same flake. A cell count has no
+        such noise: after collapsing, the 60,000-``*`` token IS the
+        3-character string ``a*a``, so its DP grid is IDENTICAL in size to
+        a literal ``a*a`` baseline -- not merely small, but exactly equal,
+        deterministically, on every host. If the collapse regressed (the
+        DP ran on the raw 60,002-character operand instead), the long
+        token's cell count would be ~20,000x the baseline's, not a
+        fraction more.
+        """
+        pattern = "pat"
+        with sfm.dp_cell_counter() as baseline_count:
+            sfm._globs_can_intersect("a*a", pattern)
+        long_token = "a" + "*" * 60_000 + "a"
+        with sfm.dp_cell_counter() as long_count:
+            sfm._globs_can_intersect(long_token, pattern)
+        assert (
+            long_count[0] == baseline_count[0]
+        ), f"long={long_count[0]} baseline={baseline_count[0]}"
+        assert baseline_count[0] > 0, "the counter itself must observe some DP work"
 
     def test_scan_deadline_denies_via_the_fail_closed_route(self) -> None:
         """The whole-scan deadline is a backstop: forcing an artificially

@@ -39,6 +39,10 @@ commit scan. `remote_docs_commit_gate` and `guard_config_commit_gate` need
 checking. `utils/secret_file_matching.py` already has an effective-cwd
 notion worth reusing.
 
+**Also covered: 00422 N28.** `plan_number_helper` resolved a relative
+`mkdir` against the workspace root, not the command's directory. The fix is
+this plan's command-directory resolver.
+
 ## Goals
 
 - Every commit gate judges the repository the `git commit` actually runs

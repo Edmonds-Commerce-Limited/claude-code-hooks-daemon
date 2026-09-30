@@ -303,6 +303,11 @@ Dispatch an implementation sub-agent into that worktree with:
   say so rather than implement it. This is not a courtesy: on #34 the sub-agent
   rejected the approach in the brief and rejected "all existing tests still
   pass" as unachievable, and was right on both counts;
+- the QA split. The sub-agent runs TARGETED QA (`./scripts/qa/llm_qa.py changed`, plus named tools the change calls for), commits, and reports the
+  commit hash. It does not run the full suite, and
+  `subagent_full_qa_blocker` denies it if it tries: the full gate is Step 5,
+  and it is yours (see [../QA.md](../QA.md), "Full QA Is the Coordinator's
+  Gate");
 - the report destination. Here a plan folder DOES exist, so name it:
   `<plan-folder>/subagent-reports/{yymmdd}-{agent-name}-{model}.md`. Long-form
   output goes to a FILE — a sub-agent's return travels over a bounded channel
@@ -315,7 +320,18 @@ code.
 
 ## Step 5 — QA
 
-Inside the worktree: `./scripts/qa/llm_qa.py all`.
+`./scripts/qa/llm_qa.py all` is the full gate, and it is the coordinator's:
+run it on this thread, never delegated to a sub-agent. The sub-agent has
+already run targeted QA. It runs as the batched integration gate in
+[../QA.md](../QA.md), "The Batched Integration Gate". Create an integration
+branch and worktree from current `main`. Merge the reported head `--no-ff` into
+it, together with any other branch that is ready. Record the batch base there
+with `./scripts/qa/llm_qa.py main-moved --start`. Then run the suite once on the
+combined head. When it is red, find which branch broke it before blaming this
+issue's branch, and follow "A red batch" in QA.md. Until Step 7 lands, commit
+nothing but docs to `main`, and put even those on the integration branch where
+you can, before the suite runs: a commit after the passing run has not been
+through it.
 
 Read the suite's **own** exit line, not the wrapper's. Chaining with `;` gives
 the exit status of the last command in the chain, which has silently reported a
@@ -337,12 +353,35 @@ Red QA ends the tick: report, leave `agent-working` on, do not merge.
 
 ## Step 7 — merge
 
-From the main checkout, on the default branch:
+The branch was already merged `--no-ff` in the integration worktree at Step 5,
+and that head is what passed. First ask, in the integration worktree, whether
+`main` moved since the recorded base:
 
 ```bash
-git merge --no-ff worktree-issue-<N>-<short-name>
-git push
+./scripts/qa/llm_qa.py main-moved
 ```
+
+- `unmoved` (exit 0): from the main checkout, on the default branch,
+  `git merge --ff-only <certified sha>` (the SHA it prints, never the branch
+  name), then `git push`. Then, in the integration worktree,
+  `main-moved --finish` removes the batch refs; it refuses unless `main` is
+  exactly that head.
+- `head-moved` (7): the integration head is not the one the suite passed on,
+  the tree is dirty, or the merge of `main` was backed out. Run the printed
+  steps on a clean tree (merge `main` back in first, when it says so), then
+  `main-moved` again.
+- `docs-only` (5), `targeted` (6) or `full-gate` (4): run the steps it prints.
+  Merge `main` in, run the named recheck exactly as printed, then
+  `main-moved --advance`, then `main-moved` again. When `main` is already
+  merged and the recheck already passed on this tree, it prints only
+  `--advance`. Repeat until `unmoved`.
+- If `--ff-only` refuses, `main` moved after that check: run `main-moved` again.
+  The advanced base means only the newer movement is rechecked.
+
+How each moved path is judged, and why CI on the pushed head is the second
+line and not a substitute, are in [../QA.md](../QA.md), "The Batched
+Integration Gate". So is what to do if the daemon fails in the main checkout
+after the fast-forward: do not push.
 
 Never `--squash`, never `--rebase` — both sever ancestry and are blocked here.
 Never force-push. If `worktree.merge_to_main_requires_human_approval` is ever

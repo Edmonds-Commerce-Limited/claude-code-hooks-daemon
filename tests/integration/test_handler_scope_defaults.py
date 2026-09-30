@@ -19,13 +19,16 @@ handler" is a description and not a property the code can check:
 - `teammate-reap-advisor` names the unreaped teammates a stop is waiting on.
   Only the coordinator has teammates.
 
-One handler ships scoped to SUB, and it is the only one that gains anything
+Two handlers ship scoped to SUB, and they are the only ones that gain anything
 from it:
 
 - `subagent-cron-delete-blocker` (Plan 00423 Task 3.2) denies `CronDelete`
   inside a subagent. `PreToolUse` fires for both roles, so SUB is doing real
   work here — it is the whole role test, which is why that handler never reads
   `agent_id` itself.
+- `subagent-full-qa-blocker` (Plan 00463) denies a sub-agent's full-suite QA
+  run, because the full gate is the coordinator's. Same reason: `PreToolUse`
+  fires for both roles, and the coordinator's own full run must draw nothing.
 
 Everything else stays ALL, including the SubagentStop handlers. Scoping
 `cron-subagent-stop-enforcer` to SUB would be true but redundant — its event
@@ -61,7 +64,9 @@ _EXPECTED_MAIN: frozenset[str] = frozenset(
 )
 
 #: The handlers that must SHIP scoped to SUB. Exact, for the same reason.
-_EXPECTED_SUB: frozenset[str] = frozenset({"subagent-cron-delete-blocker"})
+_EXPECTED_SUB: frozenset[str] = frozenset(
+    {"subagent-cron-delete-blocker", "subagent-full-qa-blocker"}
+)
 
 _EXPECTED_SCOPED: frozenset[str] = _EXPECTED_MAIN | _EXPECTED_SUB
 

@@ -273,7 +273,7 @@ prints and the exit becomes `0`, so the decision is in the invocation record.
 `--accept` does NOT rescue exit `1` — acknowledging WIP is not acknowledging
 blindness.
 
-**1b. Agent validation.** Agent verifies: clean git state, all QA passes, version consistency across files (pyproject.toml, version.py, README.md), no existing tag, gh CLI authenticated. (`CLAUDE.md` carries no version string — it is a daemon-regenerated doc, not a version-bump target.)
+**1b. Full QA on this HEAD, then agent validation.** The release agent is a sub-agent, and the full suite is the main thread's gate (Plan 00463), so main Claude runs `./scripts/qa/llm_qa.py all` on the clean HEAD first. Then the agent verifies: clean git state, all QA passes (`llm_qa.py --read-only all`, which fails any result recorded for a tree other than this HEAD as `STALE`), version consistency across files (pyproject.toml, version.py, README.md), no existing tag, gh CLI authenticated. (`CLAUDE.md` carries no version string — it is a daemon-regenerated doc, not a version-bump target.)
 
 **ANY failure = IMMEDIATE ABORT. NO auto-fixing.**
 
@@ -366,12 +366,22 @@ Edit `CLAUDE/UPGRADES/v{MAJOR}/v{PREV}-to-v{NEW}/post-upgrade-tasks/README.md`:
 2. Replace the placeholder task-index table with one row per moved task, ordered by filename. Each row: `| file | type | severity | applies-to | one-line summary |`.
 3. Delete the `00-EXAMPLE-task.md` reference — that file only belongs in the template.
 
+### Empty the UNRELEASED task index
+
+The rows in `UNRELEASED/post-upgrade-tasks/README.md` name the files just moved
+out. Replace that table, between the `BEGIN TASK INDEX` / `END TASK INDEX`
+markers, with the `_No tasks are queued for the next release._` placeholder.
+A row naming a missing file fails `tests/integration/test_repo_hygiene_check.py`
+(rule `post-upgrade-index-drift`).
+
 ### Verify
 
 ```bash
-# UNRELEASED should contain only README.md
+# UNRELEASED should contain only README.md, and its index no rows
 ls CLAUDE/UPGRADES/UNRELEASED/post-upgrade-tasks/
 # Expected: README.md  (nothing else)
+.venv/bin/python -m pytest tests/integration/test_repo_hygiene_check.py -q
+# Expected: passes
 
 # Versioned guide should list every moved task
 cat CLAUDE/UPGRADES/v{MAJOR}/v{PREV}-to-v{NEW}/post-upgrade-tasks/README.md
@@ -868,13 +878,25 @@ require touching this loop and the manifest builder, with no upside
 until the sibling-script thinning plan lands. Once the siblings are
 thinned too, all four artifacts can be dropped together.
 
+GitHub rejects a release body over 125,000 characters (HTTP 422), and only
+when `gh release create` runs, after the tag is pushed. Step 5 folds every
+holding-area callout into `RELEASES/vX.Y.Z.md` verbatim, so a large release
+can exceed it (v3.67.0 was 126,003). `build_github_release_body.py` writes
+the body GitHub receives: the notes unchanged when they fit, otherwise the
+notes with the verbatim `## Highlights` replaced by a link to that section
+at the tag, every other section intact. It exits non-zero if even that is
+over the cap, so it runs BEFORE the tag: a failure there publishes nothing.
+The committed `RELEASES/vX.Y.Z.md` is never modified.
+
 ```bash
+scripts/release/build_github_release_body.py vX.Y.Z
+
 git tag -a vX.Y.Z -m "[Full release notes from RELEASES/vX.Y.Z.md]"
 git push origin vX.Y.Z
 
 gh release create vX.Y.Z \
   --title "vX.Y.Z - [Release Title]" \
-  --notes-file RELEASES/vX.Y.Z.md \
+  --notes-file untracked/release-artifacts/github-release-body.md \
   --latest
 
 # Stage the four skill scripts, build bootstrap-checksums.txt, upload all
@@ -977,9 +999,10 @@ gh release view vX.Y.Z --json tagName,isDraft,isPrerelease,url \
 #    the files into the guide's release-notes/
 # 5. Run QA: ./scripts/qa/llm_qa.py all
 # 6. Commit and push
-# 7. Tag: git tag -a vX.Y.Z -m "Release vX.Y.Z" && git push origin vX.Y.Z
-# 8. gh release create vX.Y.Z --title "vX.Y.Z - [Title]" --notes-file RELEASES/vX.Y.Z.md --latest
-# 9. scripts/release/publish_bootstrap_assets.sh vX.Y.Z   (the release is NOT done until this exits 0)
+# 7. Body: scripts/release/build_github_release_body.py vX.Y.Z   (BEFORE the tag; non-zero = do not tag)
+# 8. Tag: git tag -a vX.Y.Z -m "Release vX.Y.Z" && git push origin vX.Y.Z
+# 9. gh release create vX.Y.Z --title "vX.Y.Z - [Title]" --notes-file untracked/release-artifacts/github-release-body.md --latest
+# 10. scripts/release/publish_bootstrap_assets.sh vX.Y.Z   (the release is NOT done until this exits 0)
 ```
 
 ## Semver Guidelines

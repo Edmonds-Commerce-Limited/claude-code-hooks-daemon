@@ -35,7 +35,7 @@ from collections import Counter
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import NamedTuple
+from typing import Final, NamedTuple
 
 from claude_code_hooks_daemon.utils.ansi_c import ansi_c_string
 from claude_code_hooks_daemon.utils.command_evasion import (
@@ -952,6 +952,124 @@ def _resolve_double_quoted(word: str, index: int, out: list[str]) -> int | None:
     return None
 
 
+@dataclass(frozen=True, slots=True)
+class CommandWrapper:
+    """A command that RUNS another command, and what to skip to reach it.
+
+    Attributes:
+        value_flags: Flags whose following word is a value, not the command.
+        positional_operands: Positional words consumed before the wrapped
+            command starts. ``timeout``'s DURATION is the only one shipped.
+            Option parsing stops at the last of them, so the word after it is
+            the command whatever it looks like.
+        lone_dash_is_flag: ``env -`` is ``env -i``, so a lone ``-`` is a flag.
+    """
+
+    value_flags: frozenset[str]
+    positional_operands: int = 0
+    lone_dash_is_flag: bool = False
+
+
+#: Wrappers whose job is to run the command after them. One table, because two
+#: guards reading two copies came to disagree about ``env``: one peeled it, the
+#: other whitelisted it, and the same command was judged under two names. The
+#: pipe whitelist must stay disjoint from these keys, which
+#: ``scripts/qa/declared-invariant-pairs.yaml`` enforces.
+COMMAND_WRAPPERS: Final[dict[str, CommandWrapper]] = {
+    "watch": CommandWrapper(value_flags=frozenset({"-n", "--interval"})),
+    "timeout": CommandWrapper(
+        value_flags=frozenset({"-s", "--signal", "-k", "--kill-after"}),
+        positional_operands=1,
+    ),
+    "nohup": CommandWrapper(value_flags=frozenset()),
+    "sudo": CommandWrapper(value_flags=frozenset({"-u", "-g", "-p"})),
+    "env": CommandWrapper(
+        value_flags=frozenset({"-u", "--unset", "-C", "--chdir"}), lone_dash_is_flag=True
+    ),
+    "nice": CommandWrapper(value_flags=frozenset({"-n", "--adjustment"})),
+    "stdbuf": CommandWrapper(value_flags=frozenset({"-i", "-o", "-e"})),
+    "command": CommandWrapper(value_flags=frozenset()),
+}
+
+#: A flag starts with this, except the two spellings below that are operands.
+FLAG_PREFIX: Final[str] = "-"
+LONE_DASH: Final[str] = "-"
+END_OF_OPTIONS: Final[str] = "--"
+
+
+def peel_command_wrappers(argv: Sequence[str]) -> tuple[tuple[str, ...], int]:
+    """Skip the wrappers at the front of ``argv`` to reach the command they run.
+
+    ``timeout -s KILL 60 nice -n 5 pytest`` runs ``pytest``. A guard that judged
+    the first word would judge ``timeout``, and a guard that judged every word
+    would mistake ``KILL`` for a command. Peeling uses each wrapper's own flag
+    grammar, so a value flag takes its value with it and a positional operand
+    is consumed exactly as the wrapper consumes it.
+
+    Args:
+        argv: The words of ONE command, already split. Environment assignments
+            are the caller's concern, because whether ``FOO=1`` is an
+            assignment or an operand depends on where it sits.
+
+    Returns:
+        ``(names, start)``: the wrapper names peeled, in order, and the index of
+        the wrapped command's first word. ``start == len(argv)`` means the
+        wrappers wrapped nothing.
+    """
+    names: list[str] = []
+    index = 0
+    while index < len(argv):
+        name = command_word(argv[index])
+        wrapper = COMMAND_WRAPPERS.get(name)
+        if wrapper is None:
+            break
+        names.append(name)
+        index += 1
+        positionals = wrapper.positional_operands
+        options_ended = False
+        while index < len(argv):
+            argument = argv[index]
+            if argument == END_OF_OPTIONS and not options_ended:
+                # ``env -- pytest`` runs pytest: ``--`` ends the wrapper's
+                # options and is never the wrapped command.
+                options_ended = True
+                index += 1
+                continue
+            is_flag = not options_ended and (
+                (argument.startswith(FLAG_PREFIX) and argument != LONE_DASH)
+                or (argument == LONE_DASH and wrapper.lone_dash_is_flag)
+            )
+            if is_flag:
+                index += 1
+                if _takes_next_word(argument, wrapper.value_flags) and index < len(argv):
+                    index += 1
+                continue
+            if positionals > 0:
+                index += 1
+                positionals -= 1
+                if positionals == 0:
+                    break
+                continue
+            break
+    return tuple(names), index
+
+
+def _takes_next_word(flag: str, value_flags: frozenset[str]) -> bool:
+    """Whether a wrapper flag consumes the next word: a value flag, or a cluster ending in one.
+
+    ``env -iu HOME`` is ``-i -u HOME``. A value flag with its value attached
+    (``-n5``, ``-iCdir``) takes nothing more.
+    """
+    if flag in value_flags:
+        return True
+    if flag.startswith(END_OF_OPTIONS) or len(flag) <= len(FLAG_PREFIX) + 1:
+        return False
+    for position, letter in enumerate(flag[1:], start=1):
+        if FLAG_PREFIX + letter in value_flags:
+            return position == len(flag) - 1
+    return False
+
+
 def value_can_substitute(value: str) -> bool:
     """Whether bash will EXECUTE something inside this quoted argument value.
 
@@ -1076,6 +1194,114 @@ def strip_inert_spans(command: str) -> str:
         bodies blanked.
     """
     return strip_quoted_heredoc_bodies(strip_message_bodies(command))
+
+
+#: Command heads that never EXECUTE their arguments, so a guarded command named
+#: in one is text rather than a command (Plan 00408 Task 3.3). `echo 'git merge
+#: x'` and `bash -c 'git merge x'` are structurally identical, so only knowing
+#: the head separates them.
+#:
+#: An ALLOWLIST, for the reason `DATA_SINKS` is one: a missing entry costs a
+#: false positive, a wrong entry costs a guard. `echo -e` and `printf %b` only
+#: decode escapes into OUTPUT, and `:`/`true` discard their arguments; what is
+#: left -- expansion, `printf -v`, where the output goes -- is refused by
+#: :func:`is_wholly_inert_command` rather than by this list.
+INERT_COMMAND_HEADS: frozenset[str] = frozenset({"echo", "printf", ":", "true"})
+
+#: A bare head: bash's blanks (space and tab ONLY, not Python's whitespace),
+#: the literal name, then a blank. Quoting, an escape, a path, a wrapper or an
+#: assignment prefix before the name all fail to match.
+_INERT_HEAD_PATTERN = re.compile(
+    r"[ \t]*(" + "|".join(re.escape(head) for head in sorted(INERT_COMMAND_HEADS)) + r")[ \t]"
+)
+
+_PRINTF_HEAD = "printf"
+_OPTION_PREFIX = "-"
+_INLINE_BLANKS = " \t"
+_LINE_BREAKS = "\n\r"
+
+#: Unquoted characters that make a command more than one simple command, or
+#: make an argument something bash computes rather than reads: control
+#: operators, grouping, redirection, every expansion, and history expansion.
+_UNQUOTED_REFUSED = frozenset(";&|()<>{}`$~*?[!")
+
+#: The same inside double quotes, where only these still act.
+_DOUBLE_QUOTED_REFUSED = frozenset("$`!")
+
+
+def is_wholly_inert_command(command: str) -> bool:
+    """Whether ``command`` is ONE bare inert head that nothing can make run.
+
+    True only when every one of these holds:
+
+    * the whole text is a single simple command: no control operator, pipe,
+      `&`, grouping, line break or redirection (so no heredoc) outside quotes,
+      and no line break anywhere;
+    * it opens with spaces or tabs, then an unquoted, unescaped name from
+      :data:`INERT_COMMAND_HEADS`, then a space or tab -- so no assignment
+      prefix, wrapper, path or quoted name;
+    * no argument expands: no `$` or backtick outside single quotes, and no
+      unquoted `~`, `{`, `*`, `?` or `[`; nor `!`, which history expansion
+      reads;
+    * a `printf` takes no option at all, so `-v` in any quoting cannot assign.
+
+    WHOLE-COMMAND on purpose. The per-segment form this replaced was walked
+    past through a LATER segment three ways -- an escaped `#`, `$_`, a `trap`
+    or `BASH_ALIASES` rebinding -- and every bash feature that reaches across
+    segments is another. A command that fails here is judged exactly as it
+    would be with no exemption: a false positive, never a bypass.
+
+    Call it on the RAW command, before any blanking, and only to answer "is
+    there a command here at all?". A rule that asks what an `echo` itself does
+    -- `echo CLAUDE/Plan/0*` expands a glob -- must not use it.
+
+    Args:
+        command: The raw Bash command string.
+
+    Returns:
+        True when the command is inert as a whole, False otherwise.
+    """
+    head = _INERT_HEAD_PATTERN.match(command)
+    if head is None or any(char in command for char in _LINE_BREAKS):
+        return False
+    words: list[str] = []
+    word: list[str] = []
+    quote: str | None = None
+    index = head.end()
+    length = len(command)
+    while index < length:
+        char = command[index]
+        if quote == _SINGLE_QUOTE:
+            if char == _SINGLE_QUOTE:
+                quote = None
+            else:
+                word.append(char)
+        elif char == _ESCAPE_CHAR:
+            word.append(command[index + 1 : index + 2])
+            index += 2
+            continue
+        elif quote == _DOUBLE_QUOTE:
+            if char in _DOUBLE_QUOTED_REFUSED:
+                return False
+            if char == _DOUBLE_QUOTE:
+                quote = None
+            else:
+                word.append(char)
+        elif char in (_SINGLE_QUOTE, _DOUBLE_QUOTE):
+            quote = char
+        elif char in _INLINE_BLANKS:
+            words.append("".join(word))
+            word = []
+        elif char in _UNQUOTED_REFUSED:
+            return False
+        else:
+            word.append(char)
+        index += 1
+    words.append("".join(word))
+    arguments = [argument for argument in words if argument]
+    if quote is not None or not arguments:
+        return False
+    return not (head.group(1) == _PRINTF_HEAD and arguments[0].startswith(_OPTION_PREFIX))
 
 
 def strip_quoted_heredoc_bodies(command: str) -> str:
@@ -2529,7 +2755,7 @@ def _segment_command_word(segment: str) -> str | None:
     could change by expansion, globbing or brace expansion, up to and
     including the command word, names nothing (Plan 00466 N101 round 3).
     """
-    chain = segment_command_chain(segment)
+    chain = segment_command_chain(strip_reserved_word_prefix(segment))
     return None if chain is None else chain[-1].rsplit("/", 1)[-1]
 
 

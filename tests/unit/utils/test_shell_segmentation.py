@@ -30,10 +30,12 @@ import pytest
 
 from claude_code_hooks_daemon.utils.heredoc_operators import scan_heredocs
 from claude_code_hooks_daemon.utils.shell_segmentation import (
+    COMMAND_WRAPPERS,
     _SubstitutionDepthTracker,
     heredoc_consumers,
     known_variables,
     no_earlier_segment_may_rebind,
+    peel_command_wrappers,
     quoted_heredoc_command_words,
     quoted_heredoc_receivers,
     split_unquoted,
@@ -247,6 +249,12 @@ class TestStripQuotedHeredocBodies:
         command = 'git commit -F - <<"EOF"\nprose mentioning run_all.sh\nEOF'
         assert "run_all.sh" not in strip_quoted_heredoc_bodies(command)
 
+    @pytest.mark.parametrize("delimiter", [" EOF", "EOF X"])
+    def test_a_quoted_delimiter_holding_a_blank_is_inert(self, delimiter: str) -> None:
+        """Plan 00463 review 4 N10: `<<' EOF'` left the body scanned as commands."""
+        command = f"cat > n.txt <<'{delimiter}'\nprose mentioning run_all.sh\n{delimiter}"
+        assert "run_all.sh" not in strip_quoted_heredoc_bodies(command)
+
     def test_dash_form_delimiter_is_handled(self) -> None:
         command = "git commit -F - <<-'EOF'\n\tprose mentioning run_all.sh\n\tEOF"
         assert "run_all.sh" not in strip_quoted_heredoc_bodies(command)
@@ -357,6 +365,23 @@ class TestDelimitersThatAreNotPlainWords:
         as shell — the exact exposure this helper removes.
         """
         command = "cat > doc.md <<'EOF'\nfirst line\nEOFDATA mentioning run_all.sh\nEOF"
+        assert "run_all.sh" not in strip_quoted_heredoc_bodies(command)
+
+
+class TestAHereStringIsNotAHeredocOpener:
+    """Plan 00463 review 5 m7: the tail of ``<<<'X'`` read as a ``<<'X'`` opener.
+
+    bash RUNS the lines after a here-string; blanking them as a heredoc body
+    hid them from every guard that reads the stripped text.
+    """
+
+    @pytest.mark.parametrize("delimiter", ["X", "EOF", "E F", " EOF"])
+    def test_lines_after_a_here_string_are_not_blanked(self, delimiter: str) -> None:
+        command = f"cat <<<'{delimiter}'\ngit reset --hard HEAD~1\n{delimiter}"
+        assert "git reset --hard" in strip_quoted_heredoc_bodies(command)
+
+    def test_a_real_heredoc_is_still_blanked(self) -> None:
+        command = "cat > n.txt <<'EOF'\nprose mentioning run_all.sh\nEOF"
         assert "run_all.sh" not in strip_quoted_heredoc_bodies(command)
 
 
@@ -1319,3 +1344,106 @@ class TestKnownVariables:
     )
     def test_a_name_writer_anywhere_makes_nothing_known(self, writer: str) -> None:
         assert known_variables(f'OUT=a; {writer}; cat > "$OUT"') == {}
+
+
+class TestPeelCommandWrappers:
+    """Which words at the front of an argv only RUN the command after them.
+
+    One table, shared, because a second copy is how two guards come to
+    disagree about ``env`` (Plan 00463): ``process_probe`` peeled it and
+    ``pipe_blocker`` whitelisted it, so the same command was judged on two
+    different names. The full-QA guard needs the same answer, so it reads
+    the same table rather than growing a third.
+    """
+
+    def test_no_wrapper_starts_at_zero(self) -> None:
+        assert peel_command_wrappers(["pytest", "tests/"]) == ((), 0)
+
+    def test_a_bare_wrapper_is_peeled(self) -> None:
+        assert peel_command_wrappers(["nohup", "pytest"]) == (("nohup",), 1)
+
+    def test_a_positional_operand_is_consumed(self) -> None:
+        """``timeout``'s DURATION is not the command it runs."""
+        assert peel_command_wrappers(["timeout", "3600", "pytest"]) == (("timeout",), 2)
+
+    def test_a_value_flag_consumes_its_value(self) -> None:
+        argv = ["sudo", "-u", "builder", "pytest"]
+        assert peel_command_wrappers(argv) == (("sudo",), 3)
+
+    def test_a_valueless_flag_is_skipped_alone(self) -> None:
+        assert peel_command_wrappers(["sudo", "-E", "pytest"]) == (("sudo",), 2)
+
+    def test_stacked_wrappers_are_all_peeled_in_order(self) -> None:
+        argv = ["timeout", "-s", "KILL", "60", "nice", "-n", "5", "pytest"]
+        assert peel_command_wrappers(argv) == (("timeout", "nice"), 7)
+
+    def test_a_path_qualified_wrapper_is_recognised(self) -> None:
+        assert peel_command_wrappers(["/usr/bin/env", "pytest"]) == (("env",), 1)
+
+    def test_a_lone_wrapper_peels_to_the_end(self) -> None:
+        """Nothing is wrapped, so the command start is past the argv."""
+        assert peel_command_wrappers(["nohup"]) == (("nohup",), 1)
+
+    def test_an_empty_argv_is_nothing_to_peel(self) -> None:
+        assert peel_command_wrappers([]) == ((), 0)
+
+    @pytest.mark.parametrize(
+        ("argv", "expected"),
+        [
+            (["env", "--", "pytest", "tests"], (("env",), 2)),
+            (["nice", "--", "pytest"], (("nice",), 2)),
+            (["timeout", "--", "600", "pytest"], (("timeout",), 3)),
+            (["timeout", "-k", "5", "--", "600", "pytest"], (("timeout",), 5)),
+            (["env", "--", "-x"], (("env",), 2)),
+        ],
+    )
+    def test_end_of_options_is_skipped_and_positionals_still_consumed(
+        self, argv: list[str], expected: tuple[tuple[str, ...], int]
+    ) -> None:
+        """Plan 00463 review 5 m3: ``--`` was returned as the wrapped command."""
+        assert peel_command_wrappers(argv) == expected
+
+    @pytest.mark.parametrize(
+        ("argv", "expected"),
+        [
+            (["env", "-iu", "HOME", "pytest"], (("env",), 3)),
+            (["env", "-iC", "tests", "pytest"], (("env",), 3)),
+            (["env", "-iCtests", "pytest"], (("env",), 2)),
+            (["nice", "-n5", "pytest"], (("nice",), 2)),
+            (["stdbuf", "-oL", "-eL", "pytest"], (("stdbuf",), 3)),
+        ],
+    )
+    def test_a_short_cluster_ending_in_a_value_flag_takes_its_value(
+        self, argv: list[str], expected: tuple[tuple[str, ...], int]
+    ) -> None:
+        """Plan 00463 review 6 m3: ``-iu HOME`` left HOME to be read as the command."""
+        assert peel_command_wrappers(argv) == expected
+
+    @pytest.mark.parametrize(
+        ("argv", "expected"),
+        [(["env", "-", "pytest"], (("env",), 2)), (["env", "-i", "-", "pytest"], (("env",), 3))],
+    )
+    def test_env_reads_a_lone_dash_as_ignore_environment(
+        self, argv: list[str], expected: tuple[tuple[str, ...], int]
+    ) -> None:
+        """Plan 00463 review 6 m3: ``env -`` is ``env -i``, not a command named ``-``."""
+        assert peel_command_wrappers(argv) == expected
+
+    @pytest.mark.parametrize(
+        ("argv", "expected"),
+        [
+            (["timeout", "60", "--", "pgrep"], (("timeout",), 2)),
+            (["timeout", "60", "-v", "pgrep"], (("timeout",), 2)),
+        ],
+    )
+    def test_timeout_stops_reading_options_at_its_duration(
+        self, argv: list[str], expected: tuple[tuple[str, ...], int]
+    ) -> None:
+        """Plan 00463 review 6 n4: after the duration, the next word is the command."""
+        assert peel_command_wrappers(argv) == expected
+
+    def test_the_table_holds_the_wrappers_process_probe_relies_on(self) -> None:
+        """Guard the move: every name the wait classifier peeled is still here."""
+        assert {"watch", "timeout", "nohup", "sudo", "env", "nice", "stdbuf", "command"} <= set(
+            COMMAND_WRAPPERS
+        )

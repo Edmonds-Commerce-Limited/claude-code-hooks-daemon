@@ -537,6 +537,13 @@ class RuleID:
     SUBAGENT_CRON_DELETE: str = "R-SUBAGENT-CRON-DELETE"
 
     # ------------------------------------------------------------------
+    # subagent_full_qa_blocker handler (ships disabled)
+    # ------------------------------------------------------------------
+
+    #: A full-suite QA run inside a subagent — the full gate is the coordinator's.
+    SUBAGENT_FULL_QA: str = "R-SUBAGENT-FULL-QA"
+
+    # ------------------------------------------------------------------
     # quarantine_artefact_read_guard handler (ships disabled)
     # ------------------------------------------------------------------
 

@@ -155,16 +155,21 @@ class TestEnsureLiveDaemon:
 
 class TestTheRunEnsuresTheDaemonBeforeEachConsumer:
     @pytest.fixture
-    def ensured(self, monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    def ensured(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> list[str]:
         calls: list[str] = []
 
         def _record(tool: str) -> str:
             calls.append(tool)
             return f"   note for {tool}"
 
+        # A live run removes each tool's report and records provenance, so it
+        # must never touch this checkout's real untracked/qa/.
+        monkeypatch.setattr(llm_qa, "QA_OUTPUT_DIR", tmp_path)
         monkeypatch.setattr(llm_qa, "ensure_live_daemon", _record)
-        monkeypatch.setattr(llm_qa, "run_tool", lambda name: 0)
-        monkeypatch.setattr(llm_qa, "summarize_tool", lambda name, exit_code=None: (True, ""))
+        monkeypatch.setattr(llm_qa, "run_tool", lambda name, extra_args=(): 0)
+        monkeypatch.setattr(
+            llm_qa, "summarize_tool", lambda name, exit_code=None, stale=None: (True, "")
+        )
         return calls
 
     def test_only_consumers_are_preceded_by_the_ensure(
