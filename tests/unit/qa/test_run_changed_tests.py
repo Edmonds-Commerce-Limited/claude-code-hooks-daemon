@@ -917,6 +917,109 @@ class TestAnExplicitRange:
             self._main(tmp_path, ["--select-only"], _range_git(""), [])
 
 
+class TestSelectedButExecutedNothing:
+    """N279: a run that selected test files and executed none must fail, and say why."""
+
+    _REFUSAL = (
+        "REFUSED: this pytest run selects 300 of 1124 test files (27%), which is "
+        "whole-suite-sized.\n"
+    )
+
+    def _report(self, exit_code: int, output: str) -> dict[str, Any]:
+        selected = [f"tests/unit/test_{n}.py" for n in range(50)]
+        report: dict[str, Any] = changed_tests.build_report(
+            base="main",
+            changed=["src/pkg/a.py"],
+            selection=changed_tests.Selection(selected=selected),
+            exit_code=exit_code,
+            output=output,
+            allow_unmapped=False,
+        )
+        return report
+
+    @pytest.mark.parametrize("exit_code", [0, 1, 4, 5])
+    def test_zero_executed_fails_and_names_the_exit_code(self, exit_code: int) -> None:
+        summary = self._report(exit_code, "")["summary"]
+        assert summary["passed_all"] is False
+        assert f"exit code {exit_code}" in summary["error"]
+        assert "50 test files" in summary["error"]
+
+    def test_the_error_carries_the_tail_of_pytests_output(self) -> None:
+        output = "\n".join(f"line {n}" for n in range(100)) + "\n"
+        error = self._report(0, output)["summary"]["error"]
+        assert "line 99" in error
+        assert "line 0\n" not in error
+
+    def test_the_gate_plugins_refusal_is_named(self) -> None:
+        """Candidate cause: the full-QA gate refuses the run (exit 1, no tests)."""
+        error = self._report(1, self._REFUSAL)["summary"]["error"]
+        assert "REFUSED" in error
+
+    def test_a_pytest_that_did_not_run_is_named(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Candidate cause: the timeout budget is spent (or pytest cannot start)."""
+        import subprocess
+
+        def expired(*args: Any, **kwargs: Any) -> Any:
+            raise subprocess.TimeoutExpired(cmd="pytest", timeout=1)
+
+        monkeypatch.setattr(changed_tests.subprocess, "run", expired)
+        code, output = changed_tests.run_pytest(["tests/unit/test_a.py"], tmp_path)
+        error = self._report(code, output)["summary"]["error"]
+        assert "did not run" in error
+
+    def test_a_green_run_has_no_error(self) -> None:
+        report = self._report(0, "3 passed in 0.10s\n")
+        assert report["summary"]["passed_all"] is True
+        assert "error" not in report["summary"]
+
+    def test_a_failing_run_that_executed_tests_is_not_this_failure(self) -> None:
+        report = self._report(1, "1 failed, 2 passed in 0.10s\n")
+        assert report["summary"]["passed_all"] is False
+        assert "error" not in report["summary"]
+
+    def test_an_empty_selection_is_not_this_failure(self) -> None:
+        report = changed_tests.build_report(
+            base="main",
+            changed=["README.md"],
+            selection=changed_tests.Selection(non_python=["README.md"]),
+            exit_code=None,
+            output="",
+            allow_unmapped=False,
+        )
+        assert report["summary"]["passed_all"] is True
+        assert "error" not in report["summary"]
+
+    def test_llm_qa_shows_a_red_line_with_the_reason(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        report = self._report(1, self._REFUSAL)
+        (tmp_path / "changed_tests.json").write_text(json.dumps(report), encoding="utf-8")
+        monkeypatch.setattr(llm_qa, "QA_OUTPUT_DIR", tmp_path)
+        passed, text = llm_qa.summarize_tool("changed_tests", exit_code=1)
+        assert passed is False
+        assert "❌ changed_tests: 0 passed, 0 failed" in text
+        assert "exit code 1" in text
+        assert "REFUSED" in text
+
+    def test_main_prints_the_reason_and_exits_red(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        _touch(tmp_path, "src/pkg/a.py", "tests/unit/test_a.py")
+        rules_file = tmp_path / "rules.yaml"
+        rules_file.write_text("rules: []\n", encoding="utf-8")
+        code = changed_tests.main(
+            ["--json", "--root", str(tmp_path), "--rules", str(rules_file)],
+            run_git=_git_answering(diff="src/pkg/a.py\n"),
+            run_pytest=lambda paths, root: (0, "collected nothing\n"),
+        )
+        assert code == changed_tests.EXIT_ISSUES
+        err = capsys.readouterr().err
+        assert "exit code 0" in err
+        assert "collected nothing" in err
+
+
 @pytest.mark.parametrize(
     "flag", ["--base", "--root", "--allow-unmapped", "--rules", "--range", "--select-only"]
 )

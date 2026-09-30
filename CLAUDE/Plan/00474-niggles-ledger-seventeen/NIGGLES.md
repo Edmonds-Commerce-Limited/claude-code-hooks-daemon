@@ -74,7 +74,21 @@ zero tests, naming the pytest exit code and the tail of its output. Then find th
 cause: the lock wait preceding the pytest step is the lead. The full-QA gate
 plugin refusing the run, or a timeout budget spent while waiting, would both fit.
 
-**Status**: ⬜ Open.
+**Findings**: `build_report` already failed a run that selected files and
+counted zero tests (`total > 0` is part of `tests_green`), so the verdict was
+not the gap; the gap was the silence. The red line read `0 passed, 0 failed, 0 skipped` with no reason, which is what the zero run looked like. The report
+now carries `summary.error` naming the exit code, the files selected and the
+last 15 lines of pytest's output, and `llm_qa.py` prints it.
+Cause ruled out by test and reading: the pytest timeout (1800 s) starts in
+`run_pytest`, after the lock is taken, so the wait is not spent from it; a
+gate refusal exits 1 with no summary and now fails naming `REFUSED`, and 50
+files is 4% of the suite against the 25% threshold; the lock is taken before
+any tool starts, so the wait cannot change what the child runs. Not found:
+why that one run executed zero tests. Its `changed_tests.json` is gone, so the
+pytest output that would say is gone too. If it recurs the report now holds it.
+
+**Status**: 🟡 Detection fixed, cause not found. The failing run now names why;
+the original zero-test run is not reproduced.
 
 ### N278 — a branch merged with its targeted QA never run, and main took three static-check failures
 

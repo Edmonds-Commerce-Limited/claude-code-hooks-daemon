@@ -155,6 +155,9 @@ _GIT_TIMEOUT_SECONDS: Final[int] = 60
 #: A targeted run is minutes at most. Past this the selection was not targeted.
 _PYTEST_TIMEOUT_SECONDS: Final[int] = 1800
 
+#: How much of pytest's output a zero-executed failure quotes, so the report says why.
+_OUTPUT_TAIL_LINES: Final[int] = 15
+
 #: (exit code, stdout, stderr) and (exit code, combined output): injected in
 #: tests so the selection and verdict logic run without a repository or pytest.
 GitRunner = Callable[[list[str], Path], tuple[int, str, str]]
@@ -891,6 +894,15 @@ def select_tests(
     return selection
 
 
+def _executed_nothing_reason(selected: int, exit_code: int | None, output: str) -> str:
+    """Why a run that selected test files and executed none is a failure (N279)."""
+    tail = "\n".join(_lines(output)[-_OUTPUT_TAIL_LINES:]) or "(pytest printed nothing)"
+    return (
+        f"pytest selected {selected} test files but executed no tests "
+        f"(exit code {exit_code}); the tail of its output:\n{tail}"
+    )
+
+
 def build_report(
     *,
     base: str,
@@ -913,20 +925,23 @@ def build_report(
         and parsed["total"] > 0
     )
     accounted = allow_unmapped or not selection.unmapped
+    summary: dict[str, Any] = {
+        "passed_all": tests_green and accounted,
+        "total": parsed["total"],
+        "passed": parsed["passed"],
+        "failed": parsed["failed"],
+        "skipped": parsed["skipped"],
+        "errors": parsed["errors"],
+        "files_considered": len(changed),
+        "test_files_selected": len(selection.selected),
+        "unmapped": len(selection.unmapped),
+    }
+    if selection.selected and parsed["total"] == 0:
+        summary["error"] = _executed_nothing_reason(len(selection.selected), exit_code, output)
     return {
         "tool": _TOOL_NAME,
         "base": base,
-        "summary": {
-            "passed_all": tests_green and accounted,
-            "total": parsed["total"],
-            "passed": parsed["passed"],
-            "failed": parsed["failed"],
-            "skipped": parsed["skipped"],
-            "errors": parsed["errors"],
-            "files_considered": len(changed),
-            "test_files_selected": len(selection.selected),
-            "unmapped": len(selection.unmapped),
-        },
+        "summary": summary,
         "selected": selection.selected,
         "mapping": selection.mapping,
         "unmapped": selection.unmapped,
