@@ -609,7 +609,9 @@ class TestClaudeMdInjectorAutoCommit:
             ["git", "rev-parse", "HEAD"], cwd=tmp_path, capture_output=True, text=True
         ).stdout
 
-        with caplog.at_level(logging.INFO, logger="claude_code_hooks_daemon.core.claude_md_injector"):
+        with caplog.at_level(
+            logging.INFO, logger="claude_code_hooks_daemon.core.claude_md_injector"
+        ):
             ClaudeMdInjector._auto_commit_if_dirty(claude_md)
 
         head_after = subprocess.run(
