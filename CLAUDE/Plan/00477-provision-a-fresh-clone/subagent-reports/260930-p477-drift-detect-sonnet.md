@@ -56,7 +56,8 @@ The SessionStart handler adds one small YAML read per SessionStart (and per resu
 
 ## Not verified
 
-- The `llm_qa.py changed` run: see the coordinator summary for whether the lock was obtained.
+- The `llm_qa.py changed --base main --allow-unmapped` run did not happen. The first attempt found no fingerprint-keyed venv in this worktree (the isolated worktree has only a `uv sync` `.venv`, on Python 3.14). The second, with `HOOKS_DAEMON_VENV_PATH` pointing at that `.venv`, queued on the host-wide QA lock held by pid 2217140 (another agent's worktree) and gave up after the full 600 s wait. It was not re-queued. The targeted checks listed above stand in for it; the coordinator's own QA run covers the rest.
+- Tests ran on Python 3.14 (the worktree's `uv sync` venv), not the project's 3.11 venv.
 - That `upgrade <older version>` completes end to end for a real downgrade: `scripts/upgrade.sh` and `LLM-UPDATE.md` refer to downgrades, but no downgrade was run.
 - The live SessionStart wire path (daemon to Claude Code) for the new advisory. The unit tests cover the handler, and the SessionStart formatter sends context on both `systemMessage` and `additionalContext`, but no real session was started.
 - The other `provision.sh` or `init.sh` consumers of `_HOOKS_DAEMON_TRACKED_VERSION` were checked by reading only (it now holds the expected version, whatever named it).
