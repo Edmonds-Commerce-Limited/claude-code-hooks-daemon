@@ -45,6 +45,32 @@ What it does:
 7. Writes `.claude/hooks-daemon.env` (see below)
 8. Prints an agent prompt template
 
+## Small Batches: How Many Branches, and for How Long
+
+Work branches are few and short-lived. This section is the one home for these
+rules; other documents point here. Ledger 00466 ended with 21 unmerged branches,
+most of them 139 to 650 commits behind `main`, some through 9 to 20 review
+rounds, and nine that were superseded copies of newer branches. Each rule below
+answers one of those failures.
+
+- **At most 3 open work branches at once.** Starting a fourth waits until one
+  merges or is dropped. Count the `worktree-*` branches that exist; a branch
+  whose worktree is gone still counts until it is deleted.
+- **Finish before starting.** A branch merges or is dropped within its batch.
+  An unmerged branch falls behind `main`, and its merge cost grows with every
+  commit it misses.
+- **The review cap is 3 rounds.** After the third, merge what is sound, or drop
+  the branch. A fourth round is not the fix.
+- **Dropping is a deletion.** Record the reason in the ledger entry the branch
+  was working, then remove its worktree and delete the branch, locally and on
+  the remote. Keep no archive branches and no archive tags. Push the branch
+  first if no remote holds its tip: `git branch -D` is allowed once one does,
+  and a tip no remote holds would lose its commits.
+- **Ledger entries are recorded on `main`, never on a work branch.** A branch
+  changes an existing entry's status only. Entries written only on a branch are
+  lost when the branch is dropped, which is how ledger 00466's N53 and N253
+  branches ended up holding entries `main` never had.
+
 ## The Worktree's Own Daemon Answers Its Own Hooks
 
 Two things have to be true for a worktree's `.claude/hooks/*` to reach the

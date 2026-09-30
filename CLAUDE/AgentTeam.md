@@ -182,6 +182,10 @@ The team lead (operating from `/workspace/`) is responsible for orchestrating th
 
 **Do:**
 
+- Size the batch to the work-in-progress limit first: at most 3 open work
+  branches, each finished (merged or dropped) before the next starts, with a
+  3-round review cap. The rules and why each exists:
+  [Worktree.md, "Small Batches"](Worktree.md#small-batches-how-many-branches-and-for-how-long)
 - Create parent worktree from main branch
 - Create child worktrees from parent branch (one per task)
 - Set up each worktree's own fingerprint-keyed venv via `scripts/setup_worktree.sh` — never `python3 -m venv` by hand (that builds the retired `untracked/venv/` layout, which the wrapper refuses with exit 5; see the "Venv layout" section in [SELF_INSTALL.md](SELF_INSTALL.md))
