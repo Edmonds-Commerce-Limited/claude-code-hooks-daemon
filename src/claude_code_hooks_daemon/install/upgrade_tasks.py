@@ -29,7 +29,7 @@ import os
 import re
 import shutil
 import stat
-import subprocess
+import subprocess  # nosec B404 - used only for a fixed `git ls-files` argv on a trusted PATH (no shell, no user input)
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
@@ -347,7 +347,7 @@ def _git_listed_files(project_root: Path) -> list[str] | None:
         return None
     env = {name: os.environ[name] for name in _GIT_ENV_PASSED if name in os.environ}
     env["PATH"] = trusted_path
-    result = subprocess.run(
+    result = subprocess.run(  # nosec B603 - fixed argv, git resolved on a trusted PATH, restricted env, no shell
         [git, "-C", str(project_root), *_GIT_LIST_ARGS],
         capture_output=True,
         check=False,
