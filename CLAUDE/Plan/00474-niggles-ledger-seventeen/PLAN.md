@@ -59,8 +59,8 @@ Full write-ups are in [NIGGLES.md](NIGGLES.md). One line each here:
 | 14 entries | Carried from the dropped `worktree-d-00421` branch ([list](CARRIED-REFIX-BRANCHES.md))                           | 00466 cleanup       | ⬜ Open                 |
 | 4 entries  | Carried from the dropped upgrade-scripts, 464 and N38 branches ([list](CARRIED-REFIX-BRANCHES.md))               | 00466 cleanup       | ⬜ Open                 |
 | N266       | `flaggable_content_channel_guard` denies greps that never touch a flagged path                                   | Coordinator         | ✅ Fixed (ba47e2459)    |
-| N265       | `secret_file_guard` spends about 2.2 s of CPU on one realistic Python program                                    | N101 CI red         | ⬜ Open                 |
-| N264       | A sub-agent's edits landed, uncommitted, in another branch's worktree                                            | 00466 landing       | ⬜ Open                 |
+| N265       | `secret_file_guard` spends about 2.2 s of CPU on one realistic Python program                                    | N101 CI red         | ✅ Fixed (e39b1f98f)    |
+| N264       | A sub-agent's edits landed, uncommitted, in another branch's worktree                                            | 00466 landing       | ✅ Fixed (7ebef17fb)    |
 | N246       | Plan and docs QA judge a same-command `git add` as two partial trees                                             | Carried, N53 branch | ⬜ Open                 |
 | N245       | A pathspec commit is judged on the index as well as the named paths                                              | Carried, N53 branch | ⬜ Open                 |
 | N244       | The QA commit gates judge the disk, not the tree the commit records                                              | Carried, N53 branch | ⬜ Open                 |
