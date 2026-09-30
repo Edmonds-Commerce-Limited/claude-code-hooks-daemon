@@ -278,7 +278,7 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 ## Plan Statistics
 
-- **Total Plans Created**: 474 (count = `hooksdaemon.latestPlanNumber` git counter)
+- **Total Plans Created**: 476 (count = `hooksdaemon.latestPlanNumber` git counter)
 
 - **Completed**: 414 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
