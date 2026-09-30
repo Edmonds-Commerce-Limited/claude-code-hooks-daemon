@@ -238,9 +238,7 @@ class TestAZeroCollectionReportSaysWhy:
         assert summary["passed_all"] is False
         assert summary["total"] == 0
 
-    def test_the_printed_failure_line_carries_the_reason(
-        self, tmp_path: Path, capsys: Any
-    ) -> None:
+    def test_the_printed_failure_line_carries_the_reason(self, tmp_path: Path, capsys: Any) -> None:
         checker = _checker()
         checker.run_project_handler_tests = lambda root: (2, "ERROR: could not run x: boom\n")
 
