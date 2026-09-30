@@ -111,7 +111,9 @@ waited on one bandit decision.
 - [ ] ⬜ **Task 6.1**: Each `persistent_crons` job is global (the default) or
   carries `hosts:`, a list of exact hostnames or globs. A job with `hosts:` is
   declared only where the effective hostname matches. The effective hostname is
-  `HOOKS_DAEMON_HOSTNAME` when it is set, otherwise the system hostname. A session
+  the first set of: `HOOKS_DAEMON_HOSTNAME`, then `CCY_HOST_HOSTNAME` (ccy sets it
+  to the host machine's name, since a container's own hostname is a random id),
+  then the system hostname. A session
   can so take a role, such as `cchd-sdlc-runner`, without a real hostname
   entering the tracked, public config.
 - [ ] ⬜ **Task 6.2**: This project's `issue-sdlc` job gets
