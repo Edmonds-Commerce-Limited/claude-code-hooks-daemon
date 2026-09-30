@@ -2,7 +2,16 @@
 
 Newest first. Each entry says how it was found, why it happens, and the
 candidate remedies. Numbering continues from
-[ledger sixteen](../00466-niggles-ledger-sixteen/NIGGLES.md).
+[ledger sixteen](../Completed/00466-niggles-ledger-sixteen/NIGGLES.md).
+
+### 65 entries still open in the archived ledger 00466
+
+Ledger 00466 was archived as Superseded by this one. Its PLAN.md index holds 157
+entry rows, 65 of them not in a terminal state. They stay open, are not copied
+here, and are tracked from this ledger by reference to that
+[index](../Completed/00466-niggles-ledger-sixteen/PLAN.md). Its branches are all
+resolved: landed (n101, n211, lifecycle, d-00376) or dropped, their branch-only
+entries carried in the sections below. Nothing is dismissed or deferred.
 
 ### 55 entries carried from the six dropped re-fix branches
 
