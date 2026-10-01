@@ -271,12 +271,17 @@ class RootRecursionGuardHandler(PreToolUseHandlerBase):
             ),
             AcceptanceTest(
                 title="scoped recursive grep allowed",
-                command='false && grep -rl "needle" "$CLAUDE_PROJECT_DIR"',
+                command='false && grep -rl "needle" src',
                 dispatch_as_bash=True,
-                description="Allows a recursive scan scoped to the project root",
+                description="Allows a recursive scan scoped to a project subdirectory",
                 expected_decision=Decision.ALLOW,
                 expected_message_patterns=[],
                 safety_notes=(
+                    "The root is a literal project-relative path, not a shell expansion: "
+                    "flaggable_content_channel_guard fails closed on an expanded root such "
+                    "as the project-dir variable, so that shape would be denied by it in a "
+                    "full-daemon run. The variable root stays covered by this handler's "
+                    "unit tests. "
                     "'false &&' short-circuits so grep never executes even though this "
                     "case is allowed by this handler. Pattern is 'needle' (not a "
                     "class-name-shaped string) so this does not incidentally trip "
