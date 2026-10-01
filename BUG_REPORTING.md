@@ -176,8 +176,9 @@ follow the steps above.
 ## If you have a fix
 
 Write the failing test first, then the fix, then run
-`./scripts/qa/llm_qa.py all`. Open the issue as well as the pull request: the
-issue is where the behaviour is agreed, and the pull request is where the
+`./scripts/qa/llm_qa.py changed` and the tests you touched, by path. CI runs
+the full suite on the pull request. Open the issue as well as the pull request:
+the issue is where the behaviour is agreed, and the pull request is where the
 change is reviewed.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the full contribution workflow.
