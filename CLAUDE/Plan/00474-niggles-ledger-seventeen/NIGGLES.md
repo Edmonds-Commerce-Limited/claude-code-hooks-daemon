@@ -537,6 +537,10 @@ that N255 and N256 need redoing against the N101 code.
 
 - **N253**: `secret_file_guard` exemptions parse options from open lists, so
   `grep --rege=. <key>`, ugrep `--and=.` and `git -c core.fsmonitor=…` print the file.
+  **Fixed** on `worktree-n253-open-option-lists`: the grep, `git rm --cached`,
+  encrypted-target git and consumer exemptions now read options from closed lists
+  (full names only); `git -c`, `--config-env` and unknown options void the exemption.
+  Report: [subagent-reports/261001-n253-option-lists-sonnet.md](subagent-reports/261001-n253-option-lists-sonnet.md).
 - **N254**: `sensitive_content` and the redaction sinks resolve
   `secret_word_list_path` differently (absolute path, `{REPO_ROOT}` token).
   **Fixed** on `worktree-n254-word-list-path`: the handler now calls
