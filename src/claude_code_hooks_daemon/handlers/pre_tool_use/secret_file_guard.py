@@ -48,6 +48,7 @@ from claude_code_hooks_daemon.utils.path_exclusion import (
     handler_excludes_path,
     resolve_project_root,
 )
+from claude_code_hooks_daemon.utils.shell_segmentation import strip_quoted_heredoc_bodies
 
 logger = logging.getLogger(__name__)
 
@@ -1382,7 +1383,14 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
         patterns = self._patterns()
 
         if tool_name == ToolName.BASH:
-            command = str(tool_input.get(_FIELD_COMMAND, ""))
+            # A quoted-delimiter heredoc body fed only to a TEXT reader (a
+            # `git commit -F -` message, `cat > notes.md`) is data: bash
+            # expands none of it and nothing opens its words as paths, so it
+            # is neither judged nor glob-walked (Plan 00474 N256). Only the
+            # body is blanked; the command part of the line is still judged.
+            command = strip_quoted_heredoc_bodies(
+                str(tool_input.get(_FIELD_COMMAND, "")), text_readers_only=True
+            )
             deadline = time.monotonic() + sfm.SCAN_DEADLINE_SECONDS
             # review 7 follow-up (team-lead's double-scan finding): decode
             # ONCE, up front, when it is provably safe to share with BOTH

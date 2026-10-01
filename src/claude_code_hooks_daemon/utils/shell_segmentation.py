@@ -418,6 +418,54 @@ _GIT_DATA_SUBCOMMANDS: frozenset[str] = frozenset(
     }
 )
 
+#: Receivers that only ever read a heredoc body as TEXT to print, count,
+#: filter, write or encode (Plan 00474 N256). Narrower than
+#: :data:`DATA_SINKS`, which answers "does it EXECUTE the body?"; this list
+#: answers "does anything OPEN the words of the body as paths?", and so leaves
+#: out what `DATA_SINKS` keeps:
+#:
+#:   git -- plumbing reads path and object names from stdin (`update-index
+#:     --stdin`, `cat-file --batch`); it qualifies only as a message reader
+#:     (:data:`_GIT_MESSAGE_SUBCOMMANDS`)
+#:   patch -- edits the files a body names; ftp -- runs a body's `get`;
+#:     mail/mailx -- honour tilde escapes
+#:   jq, yq -- can load files by name; md5sum, sha1sum, sha256sum -- `-c`
+#:     opens the files a body names
+#:   less, more, diff -- pagers and a file comparer, no text-only use here
+#:
+#: Every entry is also in :data:`DATA_SINKS`, so a stage must pass that
+#: list's option and redirect checks too.
+TEXT_READING_SINKS: frozenset[str] = frozenset(
+    {
+        "cat",
+        "tee",
+        "sort",
+        "uniq",
+        "tr",
+        "cut",
+        "column",
+        "head",
+        "tail",
+        "wc",
+        "grep",
+        "base64",
+    }
+)
+
+#: `git` subcommands whose `-F -`/`--file=-` reads stdin as a message.
+_GIT_MESSAGE_SUBCOMMANDS: frozenset[str] = frozenset({"commit", "tag"})
+
+#: `-F -` spelled as one word, or as the flag word followed by `-`.
+_GIT_STDIN_MESSAGE_WORDS: frozenset[str] = frozenset({"-F-", "--file=-"})
+_GIT_MESSAGE_FILE_FLAGS: frozenset[str] = frozenset({"-F", "--file"})
+_GIT_PATHSPEC_OPTION_PREFIX = "--pathspec"
+
+_AMPERSAND_REDIRECT = "&>"
+
+#: Text that routes a body or a word somewhere the command word does not
+#: say: a command or process substitution, or a backtick.
+_REROUTING_MARKERS: tuple[str, ...] = ("$(", "<(", ">(", "`")
+
 #: Write targets that are no file an executor could read from.
 _INERT_DEVICES: frozenset[str] = frozenset({"/dev/null", "/dev/stdout", "/dev/stderr"})
 _DEVICE_ROOTS: tuple[str, ...] = ("/dev/", "/proc/")
@@ -1328,7 +1376,7 @@ def is_wholly_inert_command(command: str) -> bool:
     return not (head.group(1) == _PRINTF_HEAD and arguments[0].startswith(_OPTION_PREFIX))
 
 
-def strip_quoted_heredoc_bodies(command: str) -> str:
+def strip_quoted_heredoc_bodies(command: str, *, text_readers_only: bool = False) -> str:
     """Blank the body of every quoted-delimiter heredoc fed to a DATA SINK.
 
     ``<<'EOF'`` and ``<<"EOF"`` disable every expansion, so bash hands the body
@@ -1363,6 +1411,12 @@ def strip_quoted_heredoc_bodies(command: str) -> str:
 
     Args:
         command: The raw Bash command string.
+        text_readers_only: Blank a body only where every command it reaches
+            reads it as TEXT (:data:`TEXT_READING_SINKS`, or a ``git
+            commit``/``git tag`` taking its message from stdin), for a caller
+            whose question is whether anything opens the body's words as
+            paths rather than whether anything runs them. Narrower than the
+            default: it blanks nothing the default keeps.
 
     Returns:
         ``command`` with each sink-fed quoted-delimiter heredoc body replaced by
@@ -1394,10 +1448,12 @@ def strip_quoted_heredoc_bodies(command: str) -> str:
         if not rebinding_prefix.allows(heredoc.operator.start):
             continue
         if not _receiver_is_data_sink(
-            command, heredoc, depth_tracker, newline_tracker, fds_may_run
+            command, heredoc, depth_tracker, newline_tracker, fds_may_run, text_readers_only
         ):
             continue
-        if not _downstream_is_all_data_sinks(_opener_tail(command, heredoc), fds_may_run):
+        if not _downstream_is_all_data_sinks(
+            _opener_tail(command, heredoc), fds_may_run, text_readers_only
+        ):
             continue
         # Only the body lines are replaced. Everything else on the opener
         # line is kept, and that is usually a REDIRECT (`cat <<'EOF' > doc.md`):
@@ -1432,6 +1488,7 @@ def _receiver_is_data_sink(
     depth_tracker: _SubstitutionDepthTracker,
     newline_tracker: _LastNewlineTracker,
     fds_may_run: bool,
+    text_readers_only: bool = False,
 ) -> bool:
     """Does the command feeding ``heredoc`` only READ it?
 
@@ -1465,11 +1522,18 @@ def _receiver_is_data_sink(
     if _SUBSTITUTION_OPENER_PATTERN.match(segment.lstrip()):
         return False
     opener_tail = _opener_tail(command, heredoc)
+    if text_readers_only and _AMPERSAND_REDIRECT in (
+        command[newline_tracker.line_start_before(opener_start) : opener_start] + opener_tail
+    ):
+        # `_receiving_segment` blanks a `&>` as an fd redirect, which leaves
+        # its file target looking like a plain operand: a write that cannot
+        # be told apart from a read, so the body keeps being judged.
+        return False
     receiving_stage = segment + " " + split_unquoted(opener_tail, ("|", *_PIPELINE_TERMINATORS))[0]
-    return _stage_is_inert_sink(receiving_stage, fds_may_run)
+    return _stage_is_inert_sink(receiving_stage, fds_may_run, text_readers_only)
 
 
-def _stage_is_inert_sink(stage: str, fds_may_run: bool) -> bool:
+def _stage_is_inert_sink(stage: str, fds_may_run: bool, text_readers_only: bool = False) -> bool:
     """Does ``stage`` run a :data:`DATA_SINKS` command whose every argument
     only reads the body (Plan 00466 N101 round 10, S1)?
 
@@ -1487,9 +1551,19 @@ def _stage_is_inert_sink(stage: str, fds_may_run: bool) -> bool:
     Unquoted, bash may split it into several words, any of which may be an
     option (MAJOR 1). As a file the sink writes, it may be ``/dev/fd/N`` for
     a process the command opened an fd on, when ``fds_may_run`` (N213).
+
+    ``text_readers_only`` (Plan 00474 N256) narrows the answer to a command
+    that reads the body as TEXT: its word is in :data:`TEXT_READING_SINKS`,
+    or it is a ``git commit``/``git tag`` taking its message from stdin and no
+    pathspec; and the stage carries no substitution at all.
     """
     word = _segment_command_word(stage)
     if word is None or word not in DATA_SINKS:
+        return False
+    if text_readers_only and (
+        (word not in TEXT_READING_SINKS and word != "git")
+        or any(marker in stage for marker in _REROUTING_MARKERS)
+    ):
         return False
     if any(opener in stage for opener in _PROCESS_SUBSTITUTIONS):
         return False
@@ -1502,9 +1576,57 @@ def _stage_is_inert_sink(stage: str, fds_may_run: bool) -> bool:
     remaining = _inert_redirects(arguments, fds_may_run)
     if remaining is None:
         return False
+    if text_readers_only and _stage_writes_a_file(word, words, remaining):
+        return False
     if word == "git":
+        if text_readers_only:
+            return _git_reads_stdin_as_message(remaining)
         return _git_reads_body_as_data(remaining)
     return _sink_arguments_are_inert(word, remaining, fds_may_run)
+
+
+def _stage_writes_a_file(command: str, words: list[_Word], remaining: list[_Word]) -> bool:
+    """Does a text reader's stage write what it reads to a file?
+
+    A body written to a file is not text that dies with the command: it is
+    authored content (``cat > run.sh <<'EOF'``) that a later command runs
+    or opens, so the body keeps being judged. ``/dev/null`` and a duplicated
+    fd write no file. ``words`` is the whole stage, so a redirect before the
+    command word counts; ``remaining`` is the arguments without redirects,
+    where ``tee`` names its files and ``sort`` its ``-o`` output."""
+    index = 0
+    while index < len(words):
+        match = _REDIRECT_WORD_PATTERN.fullmatch(words[index].raw)
+        index += 1
+        if match is None:
+            continue
+        rest = match.group("rest")
+        if rest:
+            target = resolve_shell_word(rest)
+        else:
+            target = words[index].value if index < len(words) else None
+            index += 1
+        operator = match.group("op")
+        if operator in _READ_OPERATORS:
+            continue
+        if operator in _DUPLICATE_OPERATORS and target is not None:
+            if target.isdigit() or target == "-":
+                continue
+        if target not in _INERT_DEVICES:
+            return True
+    arguments = [word.value for word in remaining]
+    if command == "tee":
+        return any(
+            value is None or not value.startswith("-") or value == "-" for value in arguments
+        )
+    if command == "sort":
+        return any(
+            value is None
+            or value.startswith("--output")
+            or (not value.startswith("--") and value.startswith("-") and "o" in value)
+            for value in arguments
+        )
+    return False
 
 
 def _may_split(raw: str) -> bool:
@@ -1667,19 +1789,49 @@ def _git_reads_body_as_data(arguments: list[_Word]) -> bool:
     shell on the body. The ``-C`` directory may be unresolved, but not
     unquoted, where bash may split it into options; the subcommand may
     not."""
+    return _git_data_subcommand_index(arguments) is not None
+
+
+def _git_data_subcommand_index(arguments: list[_Word]) -> int | None:
+    """Index of the subcommand in ``arguments`` when only inert global
+    options precede it and it is one of :data:`_GIT_DATA_SUBCOMMANDS`."""
     index = 0
     while index < len(arguments):
         argument = arguments[index].value
         if argument == _GIT_DIRECTORY_FLAG:
             if index + 1 < len(arguments) and _may_split(arguments[index + 1].raw):
-                return False
+                return None
             index += 2
             continue
         if argument in _GIT_INERT_GLOBAL_FLAGS:
             index += 1
             continue
-        return argument in _GIT_DATA_SUBCOMMANDS
-    return False
+        return index if argument in _GIT_DATA_SUBCOMMANDS else None
+    return None
+
+
+def _git_reads_stdin_as_message(arguments: list[_Word]) -> bool:
+    """``git commit``/``git tag`` taking its message from stdin (``-F -``,
+    ``-F-``, ``--file=-``) and reading no pathspec from it. A word that
+    expansion leaves unresolved could be any option, so it is not a message
+    reader."""
+    subcommand_index = _git_data_subcommand_index(arguments)
+    if (
+        subcommand_index is None
+        or arguments[subcommand_index].value not in _GIT_MESSAGE_SUBCOMMANDS
+    ):
+        return False
+    values = [word.value for word in arguments[subcommand_index + 1 :]]
+    if any(value is None for value in values):
+        return False
+    options = [value for value in values if value is not None]
+    if any(option.startswith(_GIT_PATHSPEC_OPTION_PREFIX) for option in options):
+        return False
+    return any(
+        option in _GIT_STDIN_MESSAGE_WORDS
+        or (option in _GIT_MESSAGE_FILE_FLAGS and following == "-")
+        for option, following in zip(options, [*options[1:], None], strict=True)
+    )
 
 
 def _is_inert_write_target(target: str) -> bool:
@@ -1826,7 +1978,9 @@ class _LastNewlineTracker:
         return self._last_newline + 1
 
 
-def _downstream_is_all_data_sinks(opener_tail: str, fds_may_run: bool) -> bool:
+def _downstream_is_all_data_sinks(
+    opener_tail: str, fds_may_run: bool, text_readers_only: bool = False
+) -> bool:
     """Does every command the body is PIPED ON to also just read it?
 
     ``cat <<'EOF' | bash`` passes :func:`_receiver_is_data_sink` — the receiver
@@ -1850,7 +2004,8 @@ def _downstream_is_all_data_sinks(opener_tail: str, fds_may_run: bool) -> bool:
     """
     pipeline = split_unquoted(opener_tail, _PIPELINE_TERMINATORS)[0]
     return all(
-        _stage_is_inert_sink(stage, fds_may_run) for stage in split_unquoted(pipeline, ("|",))[1:]
+        _stage_is_inert_sink(stage, fds_may_run, text_readers_only)
+        for stage in split_unquoted(pipeline, ("|",))[1:]
     )
 
 

@@ -2320,6 +2320,49 @@ class TestExpandGlobTokenErrorHandling:
         )
         assert result is None
 
+    @pytest.mark.parametrize(
+        "token",
+        [
+            "CLAUDE/core/*.core.md " + "x" * 300,
+            "CLAUDE/core/*.core.md " + "x" * 300 + "/y",
+            "CLAUDE/" + "x" * 300 + "/*.core.md",
+            "CLAUDE/*/" + "x" * 300,
+            "*/" + "x" * 300 + "/*.md",
+            "s CLAUDE/core/*.core.md " + "x" * 300 + " N5",
+        ],
+    )
+    def test_a_glob_behind_an_over_long_component_is_not_an_error_n255(
+        self, tmp_path: Path, token: str
+    ) -> None:
+        """Plan 00474 N255: prose quoted into one word by two apostrophes
+        held a glob behind a component longer than any name, and Python
+        3.11's ``Path.glob`` raised ENAMETOOLONG for it, denying a commit
+        message as a guard defect. The walk now reads each lookup itself, so
+        the over-long name is a proof of absence on every Python."""
+        (tmp_path / "CLAUDE" / "core").mkdir(parents=True)
+        (tmp_path / "CLAUDE" / "core" / "a.core.md").touch()
+        result = sfm._expand_glob_token(
+            token, sfm.DEFAULT_PROTECTED_PATTERNS, str(tmp_path), cwd=str(tmp_path)
+        )
+        assert result is None
+
+    @pytest.mark.parametrize("lookup", ["stat", "lstat"])
+    def test_enametoolong_on_an_over_long_name_allows_whatever_raised_it_n255(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, lookup: str
+    ) -> None:
+        """The same fact with the raise forced, so the test holds on a
+        filesystem or Python that would answer ENOENT instead."""
+        long_name = "x" * 300
+
+        def _raise(self: Path, *args: object, **kwargs: object) -> os.stat_result:
+            raise OSError(errno.ENAMETOOLONG, "File name too long", str(self))
+
+        monkeypatch.setattr(Path, lookup, _raise)
+        result = sfm._expand_glob_token(
+            f"{long_name}/*.core.md", sfm.DEFAULT_PROTECTED_PATTERNS, None, cwd=str(tmp_path)
+        )
+        assert result is None
+
     def test_a_relative_glob_whose_joined_path_is_too_long_denies(self, tmp_path: Path) -> None:
         """Review 8 BLOCKER 1: bash opens the relative path, which is under
         PATH_MAX, while the base-joined path is over it. The overflow says

@@ -615,11 +615,26 @@ that N255 and N256 need redoing against the N101 code.
   default). Report: [261001-n254-word-list-path-sonnet.md](subagent-reports/261001-n254-word-list-path-sonnet.md).
 - **N255**: `git commit -F - <<'EOF'` is denied as R-SECRET-EVALUATION-ERROR:
   ENAMETOOLONG from a glob in apostrophe-quoted prose on Python 3.11.
-- **N256**: `secret_file_guard` glob-walks quoted heredoc bodies fed to text
-  readers, and reports a hit enumeration cap as an evaluation error. Recheck after
-  N101, which changed heredoc handling.
+  **Does not reproduce on current `main`** (rechecked on 3.11.2 on
+  `worktree-n255-n256-heredoc`): N101 replaced `Path.glob` with a walk that reads each
+  lookup itself, and `_GlobWalk._record` treats ENAMETOOLONG on a component past
+  the filesystem's name limit as proof of absence. A joined path past PATH_MAX is
+  still a deliberate deny (review 8). Regression tests added: six token shapes
+  through `_expand_glob_token`, a forced `stat`/`lstat` raise, and the commit-message
+  shape through the handler.
+- **N256** (part 1): `secret_file_guard` glob-walks and judges quoted heredoc bodies
+  fed to text readers. **Fixed** on `worktree-n255-n256-heredoc`:
+  `strip_quoted_heredoc_bodies(text_readers_only=True)` blanks a body whose every
+  receiver reads it as text (`TEXT_READING_SINKS`, or `git commit`/`git tag` with
+  `-F -`/`--file=-` and no `--pathspec*`), and the guard's Bash route scans the
+  blanked command. A prose mention of a protected name in a commit message no longer
+  denies. Executors and path readers (`bash`, `xargs`, `git update-index`, `patch`,
+  `jq`, a substitution, an unquoted delimiter) keep their body. Part 2, the
+  enumeration cap verdict, is NOT done here: it has a separate owner ruling.
+  Report: [subagent-reports/261001-n255-n256-heredoc-sonnet.md](subagent-reports/261001-n255-n256-heredoc-sonnet.md).
 
-**Status**: ⬜ Open (N253, N255, N256); ✅ N254 fixed, awaiting merge.
+**Status**: ⬜ Open (N253, N256 part 2); ✅ N254 fixed, awaiting merge; ✅ N256 part 1
+fixed, awaiting merge; N255 not reproducible, regression-tested.
 
 ### N264 — a sub-agent's edits landed, uncommitted, in another branch's worktree
 
