@@ -38,6 +38,7 @@ Full write-ups are in [NIGGLES.md](NIGGLES.md). One line each here:
 
 | #          | Verdict                                                                                                          | Origin              | Status                  |
 | ---------- | ---------------------------------------------------------------------------------------------------------------- | ------------------- | ----------------------- |
+| N282       | The N264 cross-worktree guard judges an in-process teammate by the coordinator's working directory               | Coordinator         | ⬜ Open                 |
 | N281       | A hostile-input sweep failed on slow runners: the 100,000-character scan timed out and denied (fail-closed)      | Main CI             | ✅ Fixed (test only)    |
 | N280       | Something with pre-N271 code wrote an older `CLAUDE.md` guidance section into main during a test run             | Coordinator         | ⬜ Open                 |
 | N279       | `changed_tests` once selected 50 test files, ran 0 tests and still passed                                        | p477 agent          | ✅ Fixed (ac2306ed4)    |

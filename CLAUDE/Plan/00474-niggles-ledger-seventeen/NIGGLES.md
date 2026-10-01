@@ -26,6 +26,38 @@ other ledgers' numbering (00422 for `p422-close`, 00421's plan for `d-00421`).
 
 **Status**: ⬜ Open (all 55).
 
+### N282 — the N264 cross-worktree guard judges an in-process teammate by the coordinator's working directory
+
+**Found**: the n253 teammate, working in its assigned worktree
+`worktree-n253-open-option-lists`, had its Write/Edit denied by
+R-SUBAGENT-CROSS-WORKTREE-WRITE partway through the task. It reported that the
+harness had switched its primary working directory to the n254 worktree. That
+switch matches the moment the coordinator ran a Bash `cd` into the n254 worktree
+to review it, and the coordinator's own environment notice changed at the same
+time. The teammate's earlier writes into n253 had passed.
+
+**Why**: `subagent_worktree_write_guard._crossing` takes "own checkout" from
+the payload's `cwd`. An in-process teammate seems to share the session's working
+directory with the coordinator. If so, the guard has two failure modes:
+
+- a false deny whenever the coordinator stands in another worktree;
+- no protection at all while the coordinator stands in the main tree, because a
+  main-tree cwd is not judged.
+
+The second is the N264 incident's own shape.
+
+**Not yet established**: whether the payload `cwd` for an in-process teammate
+is always the shared one, or only after a coordinator `cd`. Reproduce with a
+teammate that writes into its own worktree and then into another while the
+coordinator stays in `/workspace`, and log the payload `cwd`.
+
+**Remedies to weigh**: key "own checkout" on something the teammate owns (its
+spawn worktree, recorded at dispatch) rather than the shared cwd. Meanwhile, the
+coordinator reviews worktrees with `git -C`/absolute paths and never `cd`s into
+them.
+
+**Status**: ⬜ Open.
+
 ### N281 — a hostile-input sweep measured host speed: the 100,000-character scan timed out (and denied) on slow runners
 
 The "Found" and "Why it matters" paragraphs below were written before the
