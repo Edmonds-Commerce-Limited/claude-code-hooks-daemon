@@ -10,6 +10,8 @@ prints but the exit is 0.
 from __future__ import annotations
 
 import argparse
+import json
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -138,6 +140,155 @@ class TestJsonOutput:
         assert [p["number"] for p in payload["in_flight_plans"]] == [1]
         assert payload["branches_ahead"][0]["name"] == "agent-x"
         assert payload["pending_release_notes"] == ["the release now checks the slate"]
+
+
+_MATRIX_JOBS = [
+    {"name": "Classify change", "conclusion": "success"},
+    {"name": "QA (Python3.11)", "conclusion": "success"},
+    {"name": "QA (Python3.12)", "conclusion": "success"},
+    {"name": "QA (Python3.13)", "conclusion": "success"},
+]
+_TIER_JOBS = [
+    {"name": "Classify change", "conclusion": "success"},
+    {"name": "QA (docs or code tier)", "conclusion": "success"},
+    {"name": "QA (Python${{ matrix.python-version }})", "conclusion": "skipped"},
+]
+
+
+class _FakeGh:
+    """Stands in for ``gh run list`` and ``gh run view``, recording every argv."""
+
+    def __init__(
+        self,
+        runs: list[dict[str, object]],
+        jobs_by_run: dict[int, list[dict[str, str]]],
+        *,
+        view_fails: bool = False,
+        view_output: str | None = None,
+    ) -> None:
+        self.runs = runs
+        self.jobs_by_run = jobs_by_run
+        self.view_fails = view_fails
+        self.view_output = view_output
+        self.calls: list[list[str]] = []
+
+    def __call__(self, argv: list[str], **_: object) -> subprocess.CompletedProcess[str]:
+        self.calls.append(argv)
+        if argv[2] == "list":
+            return subprocess.CompletedProcess(argv, 0, json.dumps(self.runs), "")
+        if self.view_fails:
+            raise subprocess.CalledProcessError(1, argv)
+        if self.view_output is not None:
+            return subprocess.CompletedProcess(argv, 0, self.view_output, "")
+        run_id = int(argv[3])
+        return subprocess.CompletedProcess(
+            argv, 0, json.dumps({"jobs": self.jobs_by_run[run_id]}), ""
+        )
+
+
+def _run(run_id: int, *, sha: str = _HEAD, conclusion: str = "success") -> dict[str, object]:
+    return {
+        "databaseId": run_id,
+        "headSha": sha,
+        "status": "completed",
+        "conclusion": conclusion,
+    }
+
+
+@pytest.fixture
+def fake_branch(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        cli,
+        "run_git",
+        lambda *a, **k: subprocess.CompletedProcess([], 0, "main\n", ""),
+    )
+
+
+def _install(monkeypatch: pytest.MonkeyPatch, gh: _FakeGh) -> None:
+    monkeypatch.setattr(subprocess, "run", gh)
+
+
+@pytest.mark.usefixtures("fake_branch")
+class TestTheCiLookupRequiresTheFullMatrix:
+    def test_a_run_whose_matrix_jobs_all_succeeded_is_green(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        gh = _FakeGh([_run(1)], {1: _MATRIX_JOBS})
+        _install(monkeypatch, gh)
+        state = cli._gh_ci_lookup(_HEAD)
+        assert state is not None
+        assert state.is_green
+
+    def test_the_run_list_is_limited_to_the_qa_workflow(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        gh = _FakeGh([_run(1)], {1: _MATRIX_JOBS})
+        _install(monkeypatch, gh)
+        cli._gh_ci_lookup(_HEAD)
+        listing = gh.calls[0]
+        assert listing[listing.index("--workflow") + 1] == "qa.yml"
+        assert "databaseId" in listing[listing.index("--json") + 1]
+
+    def test_a_tier_run_is_not_green_and_names_the_remedy(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _install(monkeypatch, _FakeGh([_run(1)], {1: _TIER_JOBS}))
+        state = cli._gh_ci_lookup(_HEAD)
+        assert state is not None
+        assert not state.is_green
+        assert "gh workflow run qa.yml --ref main" in state.describe()
+
+    def test_a_full_matrix_run_beats_a_newer_tier_run_on_the_same_sha(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        gh = _FakeGh([_run(2), _run(1)], {2: _TIER_JOBS, 1: _MATRIX_JOBS})
+        _install(monkeypatch, gh)
+        state = cli._gh_ci_lookup(_HEAD)
+        assert state is not None
+        assert state.is_green
+
+    def test_a_run_for_another_sha_is_ignored(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        _install(monkeypatch, _FakeGh([_run(1, sha="f" * 40)], {1: _MATRIX_JOBS}))
+        assert cli._gh_ci_lookup(_HEAD) is None
+
+    def test_a_failed_run_is_not_asked_for_its_jobs(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        gh = _FakeGh([_run(1, conclusion="failure")], {})
+        _install(monkeypatch, gh)
+        state = cli._gh_ci_lookup(_HEAD)
+        assert state is not None
+        assert not state.is_green
+        assert all(call[2] != "view" for call in gh.calls)
+
+    def test_a_failing_job_listing_raises_so_the_gate_fails_closed(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _install(monkeypatch, _FakeGh([_run(1)], {}, view_fails=True))
+        with pytest.raises(subprocess.SubprocessError):
+            cli._gh_ci_lookup(_HEAD)
+
+    @pytest.mark.parametrize("output", ["not json", "[]", '{"jobs": "x"}'])
+    def test_unparseable_job_output_raises_so_the_gate_fails_closed(
+        self, monkeypatch: pytest.MonkeyPatch, output: str
+    ) -> None:
+        _install(monkeypatch, _FakeGh([_run(1)], {}, view_output=output))
+        with pytest.raises(ValueError):
+            cli._gh_ci_lookup(_HEAD)
+
+    def test_a_job_listing_failure_is_a_problem_never_clean(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from claude_code_hooks_daemon.core.release_slate import collect_slate
+
+        _install(monkeypatch, _FakeGh([_run(1)], {}, view_fails=True))
+        report = collect_slate(
+            repo_root=Path("/nonexistent-repo"),
+            plan_root=Path("/nonexistent-plans"),
+            archive_dir_names=frozenset(),
+            run_fn=lambda *a, **k: subprocess.CompletedProcess([], 0, f"{_HEAD}\n", ""),
+            ci_lookup=cli._gh_ci_lookup,
+        )
+        assert not report.head_ci.is_green
+        assert report.head_ci.problem
 
 
 class TestTheSubcommandIsRegistered:

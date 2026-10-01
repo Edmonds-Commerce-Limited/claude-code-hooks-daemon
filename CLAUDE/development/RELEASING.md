@@ -258,9 +258,13 @@ What the report shows, and how each is read:
 
 - **HEAD CI** — the run for the EXACT HEAD sha, not "a recent green run".
   `in_progress`, `cancelled` and *absent* are all not green. CI runs a tier
-  (docs, code or full) per change, and the slate check does not yet tell them
-  apart, so a green here is not the release's full-matrix evidence: dispatch
-  `qa.yml` on the release commit or cite the nightly
+  (docs, code or full) per change, and a docs or code tier passes without
+  running the three-Python matrix, so a release needs a `qa.yml` run on that
+  exact sha whose matrix jobs (`QA (Python3.x)`) all succeeded; a tier-only
+  green is reported as such and is not green. The check reads the jobs with
+  `gh run view`, and a `gh` failure or unreadable output is exit `1`, never
+  green. Trigger the matrix with `gh workflow run qa.yml --ref main` (a manual
+  dispatch has no base to diff, so it classifies as the full tier) and wait
   ([../QA.md](../QA.md), "CI tiers"). The full gate itself, `llm_qa.py all`, is
   required only here, at Step 1b and Step 8.
 - **In flight** — plans with `**Status**: In Progress`. These block.

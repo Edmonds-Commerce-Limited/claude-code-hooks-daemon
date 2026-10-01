@@ -17,6 +17,7 @@ from claude_code_hooks_daemon.core.release_slate import (
     CiRunState,
     SlateReport,
     collect_slate,
+    full_matrix_green,
 )
 
 _HEAD = "1cdcc2b1deadbeef00000000000000000000abcd"
@@ -407,3 +408,72 @@ class TestPendingReleaseNotesAreInformationOnly:
         )
         assert report.pending_release_notes == ("x",)
         assert report.is_clean is True
+
+
+class TestAReleaseNeedsTheFullMatrixNotATiersGreen:
+    """Plan 00475 Task 3b.2: a docs or code tier run is green but never ran the matrix."""
+
+    def test_a_green_run_without_the_matrix_is_not_green(self) -> None:
+        state = CiRunState(sha=_HEAD, status="completed", conclusion="success", full_matrix=False)
+        assert not state.is_green
+
+    def test_a_green_run_with_the_matrix_is_green(self) -> None:
+        state = CiRunState(sha=_HEAD, status="completed", conclusion="success", full_matrix=True)
+        assert state.is_green
+
+    def test_the_tier_only_description_names_the_remedy(self) -> None:
+        state = CiRunState(sha=_HEAD, status="completed", conclusion="success", full_matrix=False)
+        text = state.describe()
+        assert "tier" in text
+        assert "gh workflow run qa.yml --ref main" in text
+
+    def test_a_tier_only_head_makes_the_slate_not_clean(self, tmp_path: Path) -> None:
+        report = _collect(
+            tmp_path,
+            ci=lambda sha: CiRunState(
+                sha=sha, status="completed", conclusion="success", full_matrix=False
+            ),
+        )
+        assert not report.head_ci.is_green
+        assert "gh workflow run qa.yml --ref main" in report.render()
+
+
+def _job(name: str, conclusion: str | None) -> dict[str, object]:
+    return {"name": name, "conclusion": conclusion}
+
+
+class TestFullMatrixGreenReadsTheJobConclusions:
+    def test_all_matrix_jobs_successful_is_green(self) -> None:
+        jobs = [
+            _job("Classify change", "success"),
+            _job("QA (Python3.11)", "success"),
+            _job("QA (Python3.12)", "success"),
+            _job("QA (Python3.13)", "success"),
+        ]
+        assert full_matrix_green(jobs)
+
+    def test_a_tier_run_has_no_matrix_job_and_is_not_green(self) -> None:
+        jobs = [_job("Classify change", "success"), _job("QA (docs or code tier)", "success")]
+        assert not full_matrix_green(jobs)
+
+    def test_a_skipped_matrix_job_is_not_green(self) -> None:
+        jobs = [
+            _job("Classify change", "success"),
+            _job("QA (Python${{ matrix.python-version }})", "skipped"),
+        ]
+        assert not full_matrix_green(jobs)
+
+    def test_one_failed_matrix_job_is_not_green(self) -> None:
+        jobs = [
+            _job("QA (Python3.11)", "success"),
+            _job("QA (Python3.12)", "failure"),
+            _job("QA (Python3.13)", "success"),
+        ]
+        assert not full_matrix_green(jobs)
+
+    def test_a_matrix_job_still_running_is_not_green(self) -> None:
+        jobs = [_job("QA (Python3.11)", "success"), _job("QA (Python3.12)", None)]
+        assert not full_matrix_green(jobs)
+
+    def test_no_jobs_is_not_green(self) -> None:
+        assert not full_matrix_green([])

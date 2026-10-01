@@ -13,7 +13,7 @@ item matters is scope, and scope is the human's call.
 from __future__ import annotations
 
 import subprocess  # nosec B404 - imported for CompletedProcess/SubprocessError types only; nothing is spawned here
-from collections.abc import Callable
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
@@ -32,6 +32,14 @@ _PLAN_FILENAME: Final[str] = "PLAN.md"
 _MAIN_BRANCH: Final[str] = "main"
 _CI_SUCCESS: Final[str] = "success"
 _CI_COMPLETED: Final[str] = "completed"
+# The full tier's jobs are named after the matrix key (`QA (Python3.11)`); the
+# tier job is `QA (docs or code tier)`, so the prefix tells them apart. A
+# skipped matrix job keeps the literal template name and so matches too, which
+# is right: it is a matrix job that did not succeed.
+_MATRIX_JOB_PREFIX: Final[str] = "QA (Python"
+# workflow_dispatch has no base to diff against, so scripts/ci/classify_changes.py
+# classifies it as the full tier.
+FULL_MATRIX_REMEDY: Final[str] = "gh workflow run qa.yml --ref main"
 # A pending release-notes callout (Plan 00360) opens with this heading; the
 # README that documents the holding area is the one file there that is not one.
 _CALLOUT_HEADING: Final[str] = "# Callout:"
@@ -66,22 +74,44 @@ class CiRunState:
     status: str | None
     conclusion: str | None
     problem: str = ""
+    # Whether the run's three-Python matrix jobs all concluded success. A docs
+    # or code tier run succeeds without ever running the matrix (Plan 00475
+    # Task 3b.2), and a release needs the matrix, so this is part of "green".
+    full_matrix: bool = True
+
+    @property
+    def _succeeded(self) -> bool:
+        return self.status == _CI_COMPLETED and self.conclusion == _CI_SUCCESS
 
     @property
     def is_green(self) -> bool:
-        """Completed AND successful. In-progress, cancelled and absent are not."""
-        return self.status == _CI_COMPLETED and self.conclusion == _CI_SUCCESS
+        """Completed, successful AND full-matrix; in-progress, cancelled, absent, tier-only are not."""
+        return self._succeeded and self.full_matrix
 
     def describe(self) -> str:
         if self.problem:
             return f"could not determine ({self.problem})"
         if self.status is None:
             return "no CI run found for this sha"
+        if self._succeeded and not self.full_matrix:
+            return (
+                "completed, success, but only a tier run: the full matrix did not run on "
+                f"this sha. Trigger it with `{FULL_MATRIX_REMEDY}` and wait for it"
+            )
         # `gh run list` reports a still-running run's conclusion as "" rather
         # than null, so "no conclusion yet" has two spellings.
         if not self.conclusion:
             return self.status
         return f"{self.status}, {self.conclusion}"
+
+
+def full_matrix_green(jobs: Sequence[Mapping[str, object]]) -> bool:
+    """True when the run has matrix jobs and every one concluded success.
+
+    No matrix job at all means a tier run, which is not full-matrix evidence.
+    """
+    matrix = [job for job in jobs if str(job.get("name", "")).startswith(_MATRIX_JOB_PREFIX)]
+    return bool(matrix) and all(job.get("conclusion") == _CI_SUCCESS for job in matrix)
 
 
 @dataclass(frozen=True)
