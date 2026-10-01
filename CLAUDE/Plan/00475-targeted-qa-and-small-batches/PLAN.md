@@ -139,16 +139,18 @@ on three Pythons, a 39-minute median with a 98-minute worst case once queueing i
 included. 34 of 58 were markdown-only commits, yet 9 of those failed, because tests
 read the plan index, ledgers and docs. So markdown is narrowed, not skipped.
 
-- [ ] 🔄 **Task 3b.1**: A tested change classifier (markdown only; code; build or
+- [x] ✅ **Task 3b.1** (merged in 7877b6904, base fix f12a05c66): A tested change classifier (markdown only; code; build or
   CI config) drives which jobs run. Markdown only runs the doc and plan checks
   plus the tests that read the changed files, on one Python. Code runs lint,
   types and `llm_qa.py changed` over the pushed range on one Python, falling back
   to the full suite on that Python when the mapper cannot map a file. Build or CI
   config runs the full matrix.
-- [ ] ⬜ **Task 3b.2**: The full three-Python matrix runs nightly on `main`, on
+- [ ] 🔄 **Task 3b.2**: The full three-Python matrix runs nightly on `main`, on
   manual dispatch, and on the release pull request (Plan 00476). The release
   slate gate (Plan 00359) accepts a tier's green for everyday work and requires
-  a full-matrix green for a release.
+  a full-matrix green for a release. Nightly and manual dispatch are merged
+  (7877b6904). The slate gate's full-matrix requirement is outstanding, and
+  the release pull request is part of Plan 00476.
 
 ### Phase 4: Enforcement
 
