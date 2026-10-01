@@ -160,6 +160,42 @@ class TestBashMentionsProtectedPath:
     def test_cat_of_protected_path_is_matched(self) -> None:
         assert self._match("cat .vault-pass") is not None
 
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "git show HEAD:.vault-pass",
+            "git cat-file -p HEAD:.vault-pass",
+            "git cat-file blob HEAD:.vault-pass",
+            "git show 0123abcd:.vault-pass",
+            "git show main:.vault-pass",
+            "git show HEAD~2:.vault-pass",
+            "git show HEAD^{tree}:.vault-pass",
+            "git show :.vault-pass",
+            "git show :0:.vault-pass",
+            "git show :2:.vault-pass",
+            "git show HEAD:./.vault-pass",
+            "git diff HEAD:a.txt HEAD:.vault-pass",
+            "git archive HEAD:.vault-pass",
+            "scp host:.vault-pass .",
+            "rsync host:id_rsa .",
+            "git show HEAD:config/.vault-pass",
+        ],
+    )
+    def test_rev_path_and_remote_path_forms_are_matched(self, command: str) -> None:
+        """Ledger 00474 N283: the path after a ``prefix:`` is judged too."""
+        assert self._match(command) is not None
+
+    @pytest.mark.parametrize(
+        "command",
+        ["git show HEAD:src/main.py", "git show :0:README.md", "scp host:notes.txt ."],
+    )
+    def test_rev_path_forms_of_ordinary_files_are_allowed(self, command: str) -> None:
+        assert self._match(command) is None
+
+    def test_a_colon_stuffed_token_is_still_judged_at_its_last_colon(self) -> None:
+        """The split count is bounded, but the final colon is always split."""
+        assert self._match("git show " + "x:" * 50 + ".vault-pass") is not None
+
     def test_absolute_spelling_is_matched(self) -> None:
         assert self._match("head -c 100 /proj/.claude/block-words.secret") is not None
 
