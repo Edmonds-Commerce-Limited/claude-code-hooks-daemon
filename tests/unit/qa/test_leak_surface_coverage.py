@@ -76,7 +76,8 @@ def _reset_redaction_caches() -> Generator[None, None, None]:
 
 def _handler(secret_file: Path) -> SensitiveContentHandler:
     handler = SensitiveContentHandler()
-    handler._secret_word_list_path = str(secret_file)
+    handler._secret_word_list_path = secret_file.name
+    handler._project_root_override = secret_file.parent
     return handler
 
 

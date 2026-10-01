@@ -7470,19 +7470,13 @@ def _sensitive_content_guard(project_root: Path) -> Any:
             SensitiveContentHandler,
         )
         from claude_code_hooks_daemon.handlers.registry import apply_handler_options
-        from claude_code_hooks_daemon.utils.secret_redaction import (
-            resolve_secret_word_list_path,
-        )
 
         config = Config.load_or_default(project_root / ".claude" / "hooks-daemon.yaml")
         options = handler_options(
             config.handlers.pre_tool_use.get(HandlerID.SENSITIVE_CONTENT.config_key)
         )
-        word_list = resolve_secret_word_list_path(
-            options.get("secret_word_list_path"), project_root
-        )
         handler = SensitiveContentHandler()
-        apply_handler_options(handler, {**options, "secret_word_list_path": str(word_list)})
+        apply_handler_options(handler, {**options, "project_root_override": project_root})
         return handler.scan_text
     except (ImportError, RuntimeError, OSError, ValueError, yaml.YAMLError) as exc:
         logger.warning("sensitive-content guard unavailable for capture: %s", exc)
