@@ -26,7 +26,11 @@ other ledgers' numbering (00422 for `p422-close`, 00421's plan for `d-00421`).
 
 **Status**: ⬜ Open (all 55).
 
-### N281 — `secret_file_guard` denies a wildcard command at 12,500 characters but does not match it at 100,000
+### N281 — a hostile-input sweep measured host speed: the 100,000-character scan timed out (and denied) on slow runners
+
+The "Found" and "Why it matters" paragraphs below were written before the
+cause was known, and read the message's sizes the wrong way round; the Cause
+paragraph corrects them.
 
 **Found**: main CI run 36783643933 (head `9df587f09`), Python 3.11 and 3.12;
 3.13 passed. `test_safety_handlers_hostile_input_performance.py` reported

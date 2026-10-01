@@ -38,7 +38,7 @@ Full write-ups are in [NIGGLES.md](NIGGLES.md). One line each here:
 
 | #          | Verdict                                                                                                          | Origin              | Status                  |
 | ---------- | ---------------------------------------------------------------------------------------------------------------- | ------------------- | ----------------------- |
-| N281       | `secret_file_guard` denies a wildcard command at 12,500 characters but does not match it at 100,000              | Main CI             | ⬜ Open                 |
+| N281       | A hostile-input sweep failed on slow runners: the 100,000-character scan timed out and denied (fail-closed)      | Main CI             | ✅ Fixed (test only)    |
 | N280       | Something with pre-N271 code wrote an older `CLAUDE.md` guidance section into main during a test run             | Coordinator         | ⬜ Open                 |
 | N279       | `changed_tests` once selected 50 test files, ran 0 tests and still passed                                        | p477 agent          | ✅ Fixed (ac2306ed4)    |
 | N278       | A branch merged with its targeted QA never run; main took three static-check failures                            | Coordinator         | ⬜ Open                 |
