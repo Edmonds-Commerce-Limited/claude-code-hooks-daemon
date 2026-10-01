@@ -66,7 +66,21 @@ segmenter splits on it, and the head match is case-insensitive or ignores the
 
 **Workaround**: spell alternations as `-e A -e B`.
 
-**Status**: ⬜ Open.
+**Outcome**: the segmenter was not at fault. `_pipe_pattern` is a plain regex
+over the raw command: it matched the bar of `\|` and then `HEAD` because the
+pattern was compiled `re.IGNORECASE`. Producer extraction then correctly
+returned the text before that bar, which is how the quoted pattern came to be
+named as the producer. Fixed in `pipe_blocker.py`: the pattern is
+case-sensitive (a Linux command word is), and `_pipe_matches` drops a bar
+preceded by an odd run of backslashes, which is a literal character both in
+double quotes and unquoted. An even run (`\\|`) is still a real pipe. Tests:
+`test_pipe_blocker_literal_pipe_text.py`, incl. the field command and the
+must-stay-blocked list (`$( )` and backticks in double quotes, `pytest|head`).
+Two assertions of case-insensitive matching in
+`test_pipe_blocker_comprehensive.py` were inverted. A bar inside plain quotes
+with no backslash (`"a | head"`) is still judged, as before.
+
+**Status**: ✅ Fixed on worktree-n284-pipe-quoted-alt.
 
 ### N283 — `secret_file_guard` misses a protected name in git's `rev:path` syntax at the repository root
 

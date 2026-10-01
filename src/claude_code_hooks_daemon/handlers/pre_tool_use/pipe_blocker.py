@@ -13,6 +13,7 @@ The handler itself has ZERO language awareness.
 import logging
 import os
 import re
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
@@ -369,9 +370,9 @@ class PipeBlockerHandler(PreToolUseHandlerBase):
         # A bar that is half of `||` is the shell's OR, not a pipe: `cmd ||
         # tail -n 25 file` reads a FILE as a fallback and truncates nothing,
         # so neither bar of `||` may start a match.
-        self._pipe_pattern: re.Pattern[str] = re.compile(
-            r"(?<!\|)\|(?!\|)&?\s*(tail|head)\b", re.IGNORECASE
-        )
+        # Case-sensitive on purpose: a command word is case-sensitive on
+        # Linux, so the `HEAD` of a git revision (`HEAD:path`) is not `head`.
+        self._pipe_pattern: re.Pattern[str] = re.compile(r"(?<!\|)\|(?!\|)&?\s*(tail|head)\b")
         self._tail_follow_pattern: re.Pattern[str] = re.compile(r"\btail\s+-[a-z]*f", re.IGNORECASE)
         self._head_bytes_pattern: re.Pattern[str] = re.compile(r"\bhead\s+-[a-z]*c", re.IGNORECASE)
 
@@ -469,7 +470,7 @@ class PipeBlockerHandler(PreToolUseHandlerBase):
         which pipe is judged first or how (NG2: zero matching-behaviour
         change). ``_find_offending_producer`` now delegates here.
         """
-        for match in self._pipe_pattern.finditer(command):
+        for match in self._pipe_matches(command):
             consumer_segment = self._extract_consumer_segment(command, match.start())
 
             # Following a stream (`tail -f`) and taking bytes (`head -c`) are
@@ -523,12 +524,27 @@ class PipeBlockerHandler(PreToolUseHandlerBase):
         Returns empty string if extraction fails (treated as unknown command).
         """
         try:
-            match = self._pipe_pattern.search(command)
+            match = next(self._pipe_matches(command), None)
         except Exception:  # nosec B110 - fail-safe: locating the pipe must never raise
             return ""
         if not match:
             return ""
         return self._extract_producer(command, match.start())
+
+    def _pipe_matches(self, command: str) -> Iterator[re.Match[str]]:
+        """Every `| tail` / `| head` candidate whose bar is not backslash-escaped.
+
+        An escaped bar is one literal character to bash, never the pipe
+        operator: `grep "a\\|HEAD:b"` hands grep an alternation, and unquoted
+        `cmd \\| head` passes `|` to cmd as an argument. A bar preceded by an
+        EVEN run of backslashes (`\\\\|`) is a real pipe after an escaped
+        backslash, so the run's parity decides.
+        """
+        for match in self._pipe_pattern.finditer(command):
+            before = command[: match.start()]
+            backslashes = len(before) - len(before.rstrip(_BACKSLASH))
+            if backslashes % 2 == 0:
+                yield match
 
     def _extract_producer(self, command: str, pipe_start: int) -> str:
         """Producer feeding the pipe that begins at ``pipe_start``.
