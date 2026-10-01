@@ -138,13 +138,14 @@ class TestPipeBlockerBasicDetection:
         }
         assert handler.matches(hook_input) is False
 
-    def test_matches_case_insensitive_tail(self, handler: PipeBlockerHandler) -> None:
+    def test_uppercase_tail_is_not_the_tail_command(self, handler: PipeBlockerHandler) -> None:
+        """Command words are case-sensitive on Linux (ledger 00474 N284)."""
         hook_input = {"tool_name": "Bash", "tool_input": {"command": "npm test | TAIL -n 10"}}
-        assert handler.matches(hook_input) is True
+        assert handler.matches(hook_input) is False
 
-    def test_matches_case_insensitive_head(self, handler: PipeBlockerHandler) -> None:
+    def test_mixed_case_head_is_not_the_head_command(self, handler: PipeBlockerHandler) -> None:
         hook_input = {"tool_name": "Bash", "tool_input": {"command": "docker ps | Head -n 5"}}
-        assert handler.matches(hook_input) is True
+        assert handler.matches(hook_input) is False
 
     def test_no_match_tail_follow_piped(self, handler: PipeBlockerHandler) -> None:
         hook_input = {
