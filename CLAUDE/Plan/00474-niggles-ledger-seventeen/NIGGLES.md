@@ -38,7 +38,25 @@ input lets that input through. If the cause is time (the slower runners ran out
 of budget at 100,000 characters) it is a fail-open under load, the direction a
 safety handler must never take.
 
-**Status**: ⬜ Open (under investigation).
+**Cause (established, not a fail-open)**: the failing side is the LARGE one
+(the message prints `large vs small`): 100,000 characters returned
+`(True, 'deny')`, 12,500 returned `(False, None)`. The guard's whole-scan
+deadline (`sfm.SCAN_DEADLINE_SECONDS`, 5s) raises `TimeoutError`, which
+`_matched_pattern_and_route` turns into a deny ("could not be verified"), so a
+scan that runs out of time is denied, never allowed. The 100,000-character
+wildcard command scans in about 1.7s on a development host (12,500 in 0.2s,
+linear), so a runner about three times slower crosses the 5s deadline at the
+large size only. With the clock forced past the deadline, both sizes return the
+same could-not-finish deny. The sweep's same-path check therefore measured host
+speed.
+
+**Fix**: the sweep injects a deadline no host crosses
+(`_host_independent_scan_deadline`, the same device
+`test_secret_file_guard.py` already uses for N101/N265), and
+`TestSweepVerdictIsHostIndependent` pins that an expired deadline denies a
+wildcard command at both sizes. Test-only; no behaviour change.
+
+**Status**: ✅ Fixed (test determinism; the guard was already fail-closed).
 
 ### N280 — something wrote an older `CLAUDE.md` guidance section into the main checkout during a test run
 

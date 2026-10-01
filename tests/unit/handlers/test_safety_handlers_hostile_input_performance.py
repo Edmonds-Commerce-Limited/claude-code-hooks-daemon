@@ -61,6 +61,7 @@ from claude_code_hooks_daemon.handlers.registry import (
     HandlerRegistry,
     iter_builtin_handler_classes,
 )
+from claude_code_hooks_daemon.utils import secret_file_matching as sfm
 from claude_code_hooks_daemon.utils.path_predicates import (
     _reset_unreadable_warning_burst,
     path_exists,
@@ -76,6 +77,11 @@ _HOSTILE_SIZE = 100_000
 # ``RecursionError`` long before it would time out -- a real finding, but a
 # different failure mode than the superlinearity this harness targets.
 _NESTING_DEPTH = 5_000
+
+# A scan deadline no host is slow enough to cross: the sweep's subject is how a
+# handler's cost grows, and a deadline that fires at one size and not the other
+# would turn the same-path check into a measurement of host speed (N281).
+_HOST_INDEPENDENT_DEADLINE_SECONDS = 120.0
 
 
 def _many_quotes(size: int) -> str:
@@ -157,6 +163,16 @@ def _project_context() -> None:
     """
     if not ProjectContext.is_initialized():
         ProjectContext.initialize(_project_root() / ".claude" / "hooks-daemon.yaml")
+
+
+@pytest.fixture(autouse=True)
+def _host_independent_scan_deadline(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep the secret guard's scan deadline out of the sweep (N281): crossing
+    it is a fail-closed deny, which is the guard working, but whether a given
+    size crosses depends on host speed. Cost growth is still measured by the
+    ratio checks; the deadline's own verdict is pinned in
+    ``TestSweepVerdictIsHostIndependent``."""
+    monkeypatch.setattr(sfm, "SCAN_DEADLINE_SECONDS", _HOST_INDEPENDENT_DEADLINE_SECONDS)
 
 
 def _safety_pre_tool_use_handlers() -> list[type[Handler]]:
@@ -243,6 +259,41 @@ class TestNoVacuousDiscovery:
         # A floor, not an exhaustive list -- new SAFETY handlers are swept
         # automatically; this just guards against discovery going vacuous.
         assert len(names) >= 15, f"expected >=15 SAFETY pre_tool_use handlers, found: {names}"
+
+
+class TestSweepVerdictIsHostIndependent:
+    """Ledger 00474 N281: the sweep compares the path a handler takes at two
+    sizes, and the secret guard's 5s scan deadline made that path depend on
+    host speed. A wildcard command of 100,000 characters scans in about 1.7s
+    on a development host, so a runner three times slower crossed the deadline
+    and the guard (correctly, fail-closed) denied the large input while
+    allowing the small one."""
+
+    def test_sweep_runs_under_a_deadline_no_host_crosses(self) -> None:
+        assert sfm.SCAN_DEADLINE_SECONDS >= _HOST_INDEPENDENT_DEADLINE_SECONDS
+
+    @pytest.mark.parametrize("size", [12_500, 100_000])
+    def test_an_expired_scan_deadline_denies_a_wildcard_command(
+        self, size: int, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The guard's verdict when time runs out is a deny, at every size --
+        never an allow -- so the divergence N281 saw is the sweep's, not a
+        fail-open in the guard."""
+        monkeypatch.setattr(sfm, "SCAN_DEADLINE_SECONDS", -1.0)
+        matched, decision, _warned = _regime(
+            SecretFileGuardHandler(), _bash_input(_hostile_bash_command_at("wildcards", size))
+        )
+        assert matched is True
+        assert decision == "deny"
+
+    def test_the_could_not_finish_reason_names_the_scan_not_a_guard_bug(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(sfm, "SCAN_DEADLINE_SECONDS", -1.0)
+        handler = SecretFileGuardHandler()
+        result = handler.handle(_bash_input(_hostile_bash_command_at("wildcards", 12_500)))
+        assert result.reason is not None
+        assert sfm.SCAN_COULD_NOT_FINISH in result.reason
 
 
 class TestBashCommandShapesStayLinear:
