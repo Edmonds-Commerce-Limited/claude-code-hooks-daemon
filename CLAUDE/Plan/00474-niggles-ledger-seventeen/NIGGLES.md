@@ -26,6 +26,27 @@ other ledgers' numbering (00422 for `p422-close`, 00421's plan for `d-00421`).
 
 **Status**: ⬜ Open (all 55).
 
+### N285 — a sub-agent reports `PYTHONPATH=… pytest` denied as an upgrade-approval bypass
+
+**Found**: the N283 agent reported that setting `PYTHONPATH` in a test command
+was denied as R-UPGRADE-APPROVAL-ENV-BYPASS. It then ran its tests through a
+scratch runner that edits `sys.path` instead. Its report does not keep the
+exact command.
+
+**Not reproduced**: on the main thread,
+`PYTHONPATH=<worktree>/src <venv>/bin/python -c 'import …'` was allowed (the
+coordinator, `f966b402b`). So the deny is either sub-agent-scoped, or set off by
+something else in the agent's command (pytest, a path naming "upgrade").
+
+**Why it matters**: a worktree's tests import `/workspace/src` through the
+editable venv. So `PYTHONPATH` is the plain way for an agent to test its own
+branch, and denying it pushes agents to write runners around the guard.
+
+**Next**: reproduce from a sub-agent with a logged command, then narrow the rule
+to upgrade invocations.
+
+**Status**: ⬜ Open.
+
 ### N284 — the pipe blocker reads `\|` inside a double-quoted grep pattern as a pipe
 
 **Found**: the coordinator ran a `grep -rn` whose double-quoted pattern held the
