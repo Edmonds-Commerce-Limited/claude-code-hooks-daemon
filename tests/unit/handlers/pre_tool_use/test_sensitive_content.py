@@ -73,8 +73,75 @@ def _handler_with_public_patterns(patterns: list[dict[str, str]]) -> SensitiveCo
 
 def _handler_with_secret_file(secret_file: Path) -> SensitiveContentHandler:
     handler = SensitiveContentHandler()
-    handler._secret_word_list_path = str(secret_file)
+    handler._secret_word_list_path = secret_file.name
+    handler._project_root_override = secret_file.parent
     return handler
+
+
+class TestWordListPathResolvesLikeTheRedactionSinks:
+    """N254: the guard and the redaction sinks must look at the SAME file.
+
+    ``secret_redaction.resolve_secret_word_list_path`` is the one resolver. The
+    documented contract (docs/guides/CONFIGURATION.md, Plan 00303) is that the
+    option is repository-relative, an optional leading ``{REPO_ROOT}`` token is
+    sugar for the same thing, and an absolute value is degraded to the default.
+    The handler used to honour an absolute path and join a ``{REPO_ROOT}`` token
+    literally, so a project configuring either shape had the guard and the
+    redaction reading different files.
+    """
+
+    @pytest.mark.parametrize(
+        "configured",
+        [
+            None,
+            sr.DEFAULT_SECRET_WORD_LIST_PATH,
+            "custom/words.txt",
+            "{REPO_ROOT}/custom/words.txt",
+            "/somewhere/else/words.txt",
+        ],
+        ids=["default", "default-spelled", "relative", "repo-root-token", "absolute"],
+    )
+    def test_handler_and_redaction_resolve_the_same_file(
+        self, tmp_path: Path, configured: str | None
+    ) -> None:
+        handler = SensitiveContentHandler()
+        handler._secret_word_list_path = configured
+        with patch(
+            "claude_code_hooks_daemon.handlers.pre_tool_use.sensitive_content.resolve_project_root",
+            return_value=str(tmp_path),
+        ):
+            resolved = handler._resolved_secret_list_path()
+
+        assert resolved == sr.resolve_secret_word_list_path(configured, tmp_path)
+
+    def test_repo_root_token_path_loads_the_terms_from_that_file(self, tmp_path: Path) -> None:
+        word_list = tmp_path / "custom" / "words.txt"
+        word_list.parent.mkdir()
+        word_list.write_text("alpha-term\n")
+        handler = SensitiveContentHandler()
+        handler._secret_word_list_path = "{REPO_ROOT}/custom/words.txt"
+        with patch(
+            "claude_code_hooks_daemon.handlers.pre_tool_use.sensitive_content.resolve_project_root",
+            return_value=str(tmp_path),
+        ):
+            assert handler._secret_terms() == ("alpha-term",)
+
+    def test_absolute_path_is_not_honoured(self, tmp_path: Path) -> None:
+        """An absolute value is degraded to the default, never read (docs promise)."""
+        elsewhere = tmp_path / "elsewhere"
+        elsewhere.mkdir()
+        word_list = elsewhere / "words.txt"
+        word_list.write_text("alpha-term\n")
+        handler = SensitiveContentHandler()
+        handler._secret_word_list_path = str(word_list)
+        with patch(
+            "claude_code_hooks_daemon.handlers.pre_tool_use.sensitive_content.resolve_project_root",
+            return_value=str(tmp_path),
+        ):
+            assert handler._resolved_secret_list_path() == (
+                tmp_path / sr.DEFAULT_SECRET_WORD_LIST_PATH
+            )
+            assert handler._secret_terms() == ()
 
 
 class TestFilePathIsCheckedNotJustContent:

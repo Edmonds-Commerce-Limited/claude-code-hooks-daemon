@@ -507,13 +507,17 @@ that N255 and N256 need redoing against the N101 code.
   `grep --rege=. <key>`, ugrep `--and=.` and `git -c core.fsmonitor=…` print the file.
 - **N254**: `sensitive_content` and the redaction sinks resolve
   `secret_word_list_path` differently (absolute path, `{REPO_ROOT}` token).
+  **Fixed** on `worktree-n254-word-list-path`: the handler now calls
+  `secret_redaction.resolve_secret_word_list_path` like every other reader
+  (docs semantics: repo-relative, optional `{REPO_ROOT}/`, absolute degrades to the
+  default). Report: [261001-n254-word-list-path-sonnet.md](subagent-reports/261001-n254-word-list-path-sonnet.md).
 - **N255**: `git commit -F - <<'EOF'` is denied as R-SECRET-EVALUATION-ERROR:
   ENAMETOOLONG from a glob in apostrophe-quoted prose on Python 3.11.
 - **N256**: `secret_file_guard` glob-walks quoted heredoc bodies fed to text
   readers, and reports a hit enumeration cap as an evaluation error. Recheck after
   N101, which changed heredoc handling.
 
-**Status**: ⬜ Open (all four).
+**Status**: ⬜ Open (N253, N255, N256); ✅ N254 fixed, awaiting merge.
 
 ### N264 — a sub-agent's edits landed, uncommitted, in another branch's worktree
 

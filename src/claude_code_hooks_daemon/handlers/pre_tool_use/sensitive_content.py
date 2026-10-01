@@ -569,8 +569,11 @@ class SensitiveContentHandler(PreToolUseHandlerBase):
             safe-to-name regexes. Default empty (config is truth; no
             hardcoded patterns ship for client projects).
         secret_word_list_path: path to the gitignored secret word list,
-            relative to the project root unless absolute. Default
-            ``.claude/block-words.secret``. Missing file = feature inert.
+            relative to the project root (a leading ``{REPO_ROOT}`` token is
+            optional sugar). An absolute value is logged and replaced by the
+            default (``secret_redaction.DEFAULT_SECRET_WORD_LIST_PATH``).
+            Missing file = feature inert. Resolved by ``secret_redaction``,
+            shared with every redaction sink.
         exclude_paths: glob patterns exempted from scanning, additive with
             the project-wide ``daemon.exclude_paths``.
     """
@@ -598,6 +601,9 @@ class SensitiveContentHandler(PreToolUseHandlerBase):
         self._public_patterns: list[dict[str, str]] = []
         self._secret_word_list_path: str | None = None
         self._exclude_paths: list[str] | None = None
+        # Anchor for the word list when no ProjectContext is initialised: a CLI
+        # that builds this handler itself (``remote-docs add``) names its root.
+        self._project_root_override: Path | None = None
         # Per-dispatch bridge: matches() and handle() see the same call, so
         # the staged diff costs ONE subprocess and a body file ONE read. Key
         # and value live in a SINGLE attribute so a concurrent dispatch can
@@ -1167,20 +1173,27 @@ class SensitiveContentHandler(PreToolUseHandlerBase):
         return sr.get_active_secret_terms()
 
     def _resolved_secret_list_path(self) -> Path | None:
-        """Absolute path of this handler's configured secret word list, if any.
+        """Absolute path of this handler's secret word list, if one can be located.
 
-        The config value is repo-relative but every tool call carries an
-        absolute ``file_path``, so both sides must be resolved before they can
-        be compared (see ``_is_secret_list_itself``).
+        Resolved by ``secret_redaction.resolve_secret_word_list_path``, the one
+        resolver every reader of the list shares, so the guard and the
+        redaction sinks always look at the same file (N254). Every tool call
+        carries an absolute ``file_path``, so both sides must be resolved
+        before they can be compared (see ``_is_secret_list_itself``).
+
+        With neither an initialised project nor a configured value there is
+        nothing to anchor the default to, so ``None`` is returned and the
+        caller falls back to the daemon-wide resolution.
         """
-        if not self._secret_word_list_path:
+        resolved_root = resolve_project_root()
+        project_root = self._project_root_override or (
+            Path(resolved_root) if resolved_root is not None else None
+        )
+        if project_root is None and not self._secret_word_list_path:
             return None
-        path = Path(self._secret_word_list_path)
-        if not path.is_absolute():
-            project_root = resolve_project_root()
-            if project_root is not None:
-                path = Path(project_root) / path
-        return path
+        return sr.resolve_secret_word_list_path(
+            self._secret_word_list_path, project_root or Path.cwd()
+        )
 
     def _is_secret_list_itself(self, file_path: str) -> bool:
         """True when the write targets the word list that defines the terms.
