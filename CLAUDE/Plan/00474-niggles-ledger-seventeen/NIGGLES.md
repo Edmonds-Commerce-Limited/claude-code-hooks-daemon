@@ -42,6 +42,11 @@ something else in the agent's command (pytest, a path naming "upgrade").
 editable venv. So `PYTHONPATH` is the plain way for an agent to test its own
 branch, and denying it pushes agents to write runners around the guard.
 
+**Corroborated**: the Plan 00475 slate agent, a second sub-agent, also reported
+`PYTHONPATH` blocked by the upgrade-approval guard. It used
+`pytest -o pythonpath="src ."` instead. Two sub-agents and no main-thread
+reproduction point to a sub-agent-scoped rule.
+
 **Next**: reproduce from a sub-agent with a logged command, then narrow the rule
 to upgrade invocations.
 
@@ -632,9 +637,14 @@ that N255 and N256 need redoing against the N101 code.
   `jq`, a substitution, an unquoted delimiter) keep their body. Part 2, the
   enumeration cap verdict, is NOT done here: it has a separate owner ruling.
   Report: [subagent-reports/261001-n255-n256-heredoc-sonnet.md](subagent-reports/261001-n255-n256-heredoc-sonnet.md).
+  Coordinator review note: `wc` has no closed option list, so a body fed to
+  `wc --files0-from=-` is blanked. Real exposure is nil: every heredoc body ends
+  in a newline, so the name `wc` reads matches no real file, and `wc` prints
+  only counts. Close it if `wc` ever gets an option list.
 
-**Status**: ⬜ Open (N253, N256 part 2); ✅ N254 fixed, awaiting merge; ✅ N256 part 1
-fixed, awaiting merge; N255 not reproducible, regression-tested.
+**Status**: ✅ N253 (dbb744f26), N254 (9b589c4fc) and N256 part 1 (efe0ec517)
+merged; N255 not reproducible, regression-tested. N256 part 2, the enumeration
+cap, moves to [Plan 00478](../00478-unknown-guard-verdicts-warn/PLAN.md).
 
 ### N264 — a sub-agent's edits landed, uncommitted, in another branch's worktree
 

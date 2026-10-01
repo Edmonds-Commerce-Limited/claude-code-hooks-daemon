@@ -145,12 +145,12 @@ read the plan index, ledgers and docs. So markdown is narrowed, not skipped.
   types and `llm_qa.py changed` over the pushed range on one Python, falling back
   to the full suite on that Python when the mapper cannot map a file. Build or CI
   config runs the full matrix.
-- [ ] 🔄 **Task 3b.2**: The full three-Python matrix runs nightly on `main`, on
+- [x] ✅ **Task 3b.2**: The full three-Python matrix runs nightly on `main`, on
   manual dispatch, and on the release pull request (Plan 00476). The release
   slate gate (Plan 00359) accepts a tier's green for everyday work and requires
-  a full-matrix green for a release. Nightly and manual dispatch are merged
-  (7877b6904). The slate gate's full-matrix requirement is outstanding, and
-  the release pull request is part of Plan 00476.
+  a full-matrix green for a release. Nightly and manual dispatch merged in
+  7877b6904. The slate gate's full-matrix requirement merged in 40c62a32c. The
+  release pull request belongs to Plan 00476.
 
 ### Phase 4: Enforcement
 

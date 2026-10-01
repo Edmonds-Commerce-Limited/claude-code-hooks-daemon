@@ -73,8 +73,8 @@ Full write-ups are in [NIGGLES.md](NIGGLES.md). One line each here:
 | N177       | No commit gate sees a commit after a `case` inside `function f {` in `$( )`                                      | Carried, N53 branch | ⬜ Open                 |
 | N176       | No commit gate sees a commit inside `$(( $(…) ))` arithmetic                                                     | Carried, N53 branch | ⬜ Open                 |
 | N135       | No commit gate sees a commit run from text, via an alias, or after `builtin cd`                                  | Carried, N53 branch | ⬜ Open                 |
-| N256       | Quoted heredoc bodies are glob-walked; a hit cap reads as an evaluation error                                    | Carried from 00466  | ⬜ Open                 |
-| N255       | `git commit -F - <<'EOF'` denied as an evaluation error (ENAMETOOLONG)                                           | Carried from 00466  | ⬜ Open                 |
+| N256       | Quoted heredoc bodies are glob-walked; a hit cap reads as an evaluation error                                    | Carried from 00466  | 🔄 Part 1 (efe0ec517)   |
+| N255       | `git commit -F - <<'EOF'` denied as an evaluation error (ENAMETOOLONG)                                           | Carried from 00466  | ✅ No repro (efe0ec517) |
 | N254       | Two resolvers disagree on `secret_word_list_path`                                                                | Carried from 00466  | ✅ Fixed (9b589c4fc)    |
 | N253       | `secret_file_guard` exemptions parse options from open lists                                                     | Carried from 00466  | ✅ Fixed (dbb744f26)    |
 | N263       | The release empties UNRELEASED post-upgrade tasks but not the README index                                       | v3.67.0 CI          | ✅ Remedied             |
