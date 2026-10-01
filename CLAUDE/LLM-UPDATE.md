@@ -1145,9 +1145,6 @@ echo '{"tool_name":"Bash","tool_input":{"command":"ls"},"synthetic_source":"manu
 ```bash
 # Run tests (optional - for thorough verification)
 .claude/hooks-daemon/scripts/qa/run_tests.sh
-
-# Check all QA passes
-.claude/hooks-daemon/scripts/qa/llm_qa.py all
 ```
 
 ---

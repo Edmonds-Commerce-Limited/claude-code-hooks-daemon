@@ -24,10 +24,11 @@ From the project root:
 ./scripts/qa/run_all.sh        # the human entry point — verbose, colourised
 ```
 
-AI agents use a different entry point — `./scripts/qa/llm_qa.py all` runs the
-same suite with LLM-optimised output, and a project handler denies agents
-invoking `run_all.sh` directly. If you're a human at a terminal, `run_all.sh`
-is yours.
+AI agents use a different entry point — `./scripts/qa/llm_qa.py` runs the same
+checks with LLM-optimised output (`changed` for everyday work, `all` at release
+preparation; see [the QA tiers](../CLAUDE/QA.md)), and a project handler denies
+agents invoking `run_all.sh` directly. If you're a human at a terminal,
+`run_all.sh` is yours.
 
 Individual checks exist as sibling scripts following the same pattern
 (`scripts/qa/run_lint.sh`, `run_type_check.sh`, `run_tests.sh`, …), and

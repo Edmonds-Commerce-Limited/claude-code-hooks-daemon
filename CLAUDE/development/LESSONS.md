@@ -357,9 +357,12 @@ collection-order-sensitive way. Moving the single import into the body of
 **Apply:** When a `daemon/paths.py` function needs a package-internal helper,
 import it **inside the function**, with a comment pointing at this rule. Treat a
 green `pytest tests/unit/daemon/` as necessary-but-not-sufficient: a
-coverage-only, order-dependent failure is invisible to isolated runs — always
-clear the full `./scripts/qa/llm_qa.py all` gate (which runs under coverage)
-before declaring a paths.py change done.
+coverage-only, order-dependent failure is invisible to isolated runs. Run
+`./scripts/qa/llm_qa.py changed` before declaring a paths.py change done, and
+do not claim whole-suite coverage from it: the whole suite (which runs under
+coverage) is CI's job on push and the Full tier's at release preparation
+([../QA.md](../QA.md), "QA Tiers"), so a red CI on such a change is expected
+to be this class of failure.
 
 ## `git status` is a WRITE — a daemon sharing a working tree must decline optional locks
 

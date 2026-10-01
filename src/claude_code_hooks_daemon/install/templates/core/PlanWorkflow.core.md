@@ -320,7 +320,7 @@ Refer to detailed info in supporting docs as required
 
 - [ ] Criterion 1 that must be met
 - [ ] Criterion 2 that must be met
-- [ ] All QA checks passing
+- [ ] This project's QA gate for the change passes
 - [ ] Every release-bound consequence is in the pending-release holding area
       (or: this plan has no release-bound consequences)
 
@@ -376,15 +376,18 @@ Use these Unicode icons for task status:
 
 ## QA Integration
 
-**Before completing any task, this project's full QA suite must pass.**
+**Before completing any task, the QA gate this project names for that change must pass.**
 
 ### Required QA Verification
 
-Run whatever this project defines as its QA gate — lint, format check, type
-check, tests, and anything else it treats as merge-blocking — before marking
-any task complete. This project's own QA documentation and scripts (wherever
-it keeps them) are the single source of truth for what "QA" means here; treat
-any enumeration in a plan or a stale doc as a hint, not gospel.
+Run whatever this project defines as its QA gate for the change — lint, format
+check, type check, tests, and anything else it treats as merge-blocking —
+before marking any task complete. This project's own QA documentation and
+scripts (wherever it keeps them) are the single source of truth for what "QA"
+means here and for which gate applies when: a project may run a targeted gate
+for everyday work and keep its full suite for a release or another step it
+names. Run the full suite only where that documentation requires it. Treat any
+enumeration in a plan or a stale doc as a hint, not gospel.
 
 ### QA Task Format
 
@@ -498,7 +501,7 @@ follows the Red-Green-Refactor cycle.
 1. **Red**: Write a failing test that defines the expected behaviour
 2. **Green**: Write the minimum code to make the test pass
 3. **Refactor**: Clean up the code while keeping tests green
-4. **Verify**: Run this project's full QA suite
+4. **Verify**: Run this project's QA gate for the change
 
 ### TDD Task Format
 
@@ -510,7 +513,7 @@ follows the Red-Green-Refactor cycle.
   - [ ] ⬜ Implement handling for edge cases
   - [ ] ⬜ Refactor for clarity
   - [ ] ⬜ Verify this project's test coverage requirement is maintained, if it has one
-  - [ ] ⬜ Run this project's full QA suite
+  - [ ] ⬜ Run this project's QA gate for the change
 ```
 
 ### Coverage Requirement
@@ -612,7 +615,7 @@ actually stops you; the cron only matters once something has already gone wrong.
 
 ### Step 6: Complete
 
-1. **Verify all QA checks pass**
+1. **Verify the QA gate for the change passes**
 2. Verify all success criteria met
 3. Mark all tasks as ✅
 4. Mark plan status as Complete
@@ -784,7 +787,7 @@ assumption:
 ### Phase 3: Integration
 
 - [ ] ⬜ Validate: `.claude/hooks-daemon/bin/hooks-daemon validate-project-handlers`
-- [ ] ⬜ Run this project's full QA suite
+- [ ] ⬜ Run this project's QA gate for the change
 - [ ] ⬜ Restart the daemon and confirm it is running:
   `.claude/hooks-daemon/bin/hooks-daemon restart`
 - [ ] ⬜ Test with a live session
@@ -819,7 +822,7 @@ The base and result type are chosen by the event: `PreToolUseHandlerBase`/`Gatin
 - [ ] This project's coverage requirement maintained, if it has one
 - [ ] Live testing successful
 - [ ] Documentation updated
-- [ ] All QA checks pass
+- [ ] This project's QA gate for the change passes
 
 ### Feature Implementation Plan Template
 
@@ -849,7 +852,7 @@ The base and result type are chosen by the event: `PreToolUseHandlerBase`/`Gatin
 
 ### Phase 3: Integration & QA
 - [ ] ⬜ Integrate with existing code
-- [ ] ⬜ Run this project's full QA suite
+- [ ] ⬜ Run this project's QA gate for the change
 - [ ] ⬜ Fix any QA issues
 - [ ] ⬜ Update documentation
 
@@ -857,7 +860,7 @@ The base and result type are chosen by the event: `PreToolUseHandlerBase`/`Gatin
 
 - [ ] Feature works as specified
 - [ ] All tests passing, meeting this project's coverage requirement if it has one
-- [ ] All QA checks pass
+- [ ] This project's QA gate for the change passes
 - [ ] Documentation updated
 ```
 
@@ -881,7 +884,7 @@ The base and result type are chosen by the event: `PreToolUseHandlerBase`/`Gatin
 - [ ] ⬜ Identify root cause
 - [ ] ⬜ Implement fix (make test pass)
 - [ ] ⬜ Add additional regression tests
-- [ ] ⬜ Run this project's full QA suite
+- [ ] ⬜ Run this project's QA gate for the change
 - [ ] ⬜ Verify fix works in live testing
 
 ## Success Criteria
@@ -889,7 +892,7 @@ The base and result type are chosen by the event: `PreToolUseHandlerBase`/`Gatin
 - [ ] Bug no longer reproducible
 - [ ] Failing test now passes
 - [ ] No regression in other tests
-- [ ] All QA checks pass
+- [ ] This project's QA gate for the change passes
 ```
 
 ### Refactoring Plan Template
@@ -930,7 +933,7 @@ Use this template when improving existing code without changing behaviour.
 - [ ] ⬜ Verify no behaviour changes
 
 ### Phase 3: Verification
-- [ ] ⬜ Run this project's full QA suite
+- [ ] ⬜ Run this project's QA gate for the change
 - [ ] ⬜ Compare before/after behaviour
 - [ ] ⬜ Update documentation if needed
 
@@ -939,7 +942,7 @@ Use this template when improving existing code without changing behaviour.
 - [ ] All existing tests pass
 - [ ] Test coverage maintained (or improved) against this project's own requirement, if it has one
 - [ ] No behaviour changes
-- [ ] All QA checks pass
+- [ ] This project's QA gate for the change passes
 - [ ] Code is cleaner/more maintainable
 ```
 
@@ -1012,7 +1015,7 @@ When requirements change mid-plan:
 ### Completion Review
 
 - All success criteria met?
-- All QA checks pass?
+- Does the QA gate for the change pass?
 - Lessons learned documented?
 - Follow-up work identified?
 
@@ -1061,7 +1064,7 @@ plan/00003-search-indexing
 Before committing, always verify:
 
 ```bash
-# Run this project's full QA suite
+# Run this project's QA gate for the change
 <this project's QA command>
 
 # Check git status
@@ -1115,7 +1118,7 @@ When Claude Code (or other AI agents) work on a project with plan tracking enabl
     shape of `hook_input`
 05. **Follow TDD workflow**, where this project practises it - Write failing tests before implementation
 06. **Update task status in real-time** as you work
-07. **Run QA before commits** - this project's full QA suite must pass
+07. **Run QA before commits** - the QA gate this project names for the change must pass
 08. **Document blockers immediately** if you get stuck
 09. **Close a plan when it is fully complete** - every task ticked and every
     success criterion met - in the same commit that archives it. A project
@@ -1143,7 +1146,7 @@ Agent:
    - Run this project's QA suite
 8. Commits with "Plan 00001: Add changelog-reminder project handler"
 9. Ticks the task in PLAN.md and appends the narrative to the plan's JOURNAL/ with `mkplan.bash --journal`
-10. Marks complete when all QA passes
+10. Marks complete when the QA gate for the change passes
 ```
 
 ### Project Handler Development Workflow
@@ -1156,7 +1159,7 @@ Agent:
 3. Determine which event type fires and what data is available in `hook_input`
 4. Write tests first (TDD)
 5. Implement the handler
-6. Run this project's full QA suite
+6. Run this project's QA gate for the change
 7. Validate: `.claude/hooks-daemon/bin/hooks-daemon validate-project-handlers`
 8. Test in a live Claude Code session
 
