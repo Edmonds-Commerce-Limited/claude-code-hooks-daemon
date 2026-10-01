@@ -1,0 +1,8 @@
+# Callout: the secret file guard no longer judges a commit message or a text-filtered heredoc body
+
+**Plan**: 00474
+**Audience**: operators
+
+`secret_file_guard` judged every word of a quoted-delimiter heredoc body, so `git commit -F - <<'EOF'` was denied when the message merely named a protected file in prose (`rotate the key kept in .vault-pass`), and markdown bold such as `**Task**` in a message made the guard walk the directory tree. A body whose every receiver only reads it as text is now data and is not scanned: `git commit` or `git tag` taking the message from stdin (`-F -`, `-F-`, `--file=-`, with no `--pathspec*` option), and `cat`, `tee`, `grep`, `wc`, `sort`, `uniq`, `tr`, `cut`, `column`, `head`, `tail` and `base64`. A body the receiver writes to a file (`cat > run.sh <<'EOF'`, `tee run.sh`, `sort -o`) is authored content that something runs later, so it is still judged. Only the body is skipped: the command part of the line, a redirect target and any later command are still judged. A body is still judged when it is fed to an interpreter (`bash <<'EOF'`), piped on to anything that is not on that list (`cat <<'EOF' | bash`), fed to a command that opens the words it reads (`xargs cat`, `git update-index --stdin`, `git commit --pathspec-from-file=-`, `patch`, `jq`), sits in a command or process substitution (`tee >(bash)`, `-m "$(cat <<'EOF' ...)"`), or uses an unquoted delimiter.
+
+Also recorded: a glob inside prose behind a path component longer than any filename can be (ledger 00474 N255, an `ENAMETOOLONG` denial on Python 3.11) no longer reproduces on current code, because the glob walk reads each lookup itself and treats an over-long name as proof of absence. Regression tests now pin it.
