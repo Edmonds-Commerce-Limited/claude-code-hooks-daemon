@@ -73,7 +73,7 @@ Full write-ups are in [NIGGLES.md](NIGGLES.md). One line each here:
 | N256       | Quoted heredoc bodies are glob-walked; a hit cap reads as an evaluation error                                    | Carried from 00466  | ⬜ Open                 |
 | N255       | `git commit -F - <<'EOF'` denied as an evaluation error (ENAMETOOLONG)                                           | Carried from 00466  | ⬜ Open                 |
 | N254       | Two resolvers disagree on `secret_word_list_path`                                                                | Carried from 00466  | ✅ Fixed (9b589c4fc)    |
-| N253       | `secret_file_guard` exemptions parse options from open lists                                                     | Carried from 00466  | ⬜ Open                 |
+| N253       | `secret_file_guard` exemptions parse options from open lists                                                     | Carried from 00466  | ✅ Fixed (dbb744f26)    |
 | N263       | The release empties UNRELEASED post-upgrade tasks but not the README index                                       | v3.67.0 CI          | ✅ Remedied             |
 | N262       | The release procedure has no check that the notes fit a GitHub release body                                      | v3.67.0 publish     | ✅ Remedied (ea8dcd542) |
 

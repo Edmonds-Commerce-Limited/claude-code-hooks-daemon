@@ -2368,7 +2368,7 @@ class TestExpandGlobTokenErrorHandling:
             raise ValueError("malformed glob pattern")
             yield  # pragma: no cover -- makes this a generator function
 
-        monkeypatch.setattr(sfm.shell_expansion, "bounded_recursive_glob", _raise_value_error)
+        monkeypatch.setattr(shell_expansion, "bounded_recursive_glob", _raise_value_error)
         with pytest.raises(ValueError):
             sfm._expand_glob_token(
                 "somefile.secret", sfm.DEFAULT_PROTECTED_PATTERNS, None, cwd=str(tmp_path)
