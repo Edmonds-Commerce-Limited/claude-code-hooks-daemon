@@ -3141,3 +3141,36 @@ class TestNonShellContentIsNotJudgedAsUnreadableShell:
         handler = _handler()
         content = "#!/usr/bin/env bash\n" + self._UNPARSEABLE_SHELL
         assert handler.matches(self._edit("/proj/install", content))
+
+
+class TestExemptionOptionListsAreClosedThroughTheHandler:
+    """N253: an option the exemption parser does not know must void the exemption."""
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "grep --rege=. .vault-pass",
+            "grep --and=. .vault-pass",
+            "grep --regex=. .vault-pass",
+            "git -c core.fsmonitor=x rm --cached .vault-pass",
+            "git --config-env=core.fsmonitor=X rm --cached .vault-pass",
+            "git rm --cached --pathspec-from=.vault-pass",
+        ],
+    )
+    def test_bypass_shape_is_denied(self, command: str) -> None:
+        handler = _handler()
+        hook_input = _hook_input("Bash", {"command": command})
+        assert handler.matches(hook_input)
+        assert handler.handle(hook_input).decision == Decision.DENY
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "grep -rn --color=auto .vault-pass docs",
+            "grep --regexp=.vault-pass README.md",
+            "git rm --cached .vault-pass",
+            "git -C /repo --no-pager rm -r --cached .vault-pass",
+        ],
+    )
+    def test_documented_exempt_shape_stays_allowed(self, command: str) -> None:
+        assert not _handler().matches(_hook_input("Bash", {"command": command}))

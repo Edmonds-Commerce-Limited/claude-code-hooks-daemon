@@ -33,7 +33,7 @@ import re
 import shlex
 import time
 import urllib.parse
-from collections.abc import Callable, Iterable, Iterator
+from collections.abc import Callable, Iterable, Iterator, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Final, Literal
@@ -41,10 +41,7 @@ from typing import Any, Final, Literal
 import yaml
 
 from claude_code_hooks_daemon.utils import shell_expansion
-from claude_code_hooks_daemon.utils.command_evasion import (
-    git_subcommand_index,
-    strip_transparent_reserved_words,
-)
+from claude_code_hooks_daemon.utils.command_evasion import strip_transparent_reserved_words
 from claude_code_hooks_daemon.utils.path_containment import path_relative_to
 from claude_code_hooks_daemon.utils.path_exclusion import (
     first_matching_glob,
@@ -130,11 +127,8 @@ _GIT_RM_CACHED_FLAG: Final[str] = "--cached"
 # not match any files`), so `git rm --cached --pathspec-from-file=<protected>`
 # discloses the protected file's content through stderr even though the
 # command still "only" untracks -- exactly the shape this guard exists to
-# stop. Voided whenever this flag is present, in either `--flag value` or
-# `--flag=value` form, regardless of what it names: the exemption's
-# guarantee is that the command reads nothing, and this flag makes that
-# false on its own.
-_GIT_RM_PATHSPEC_FROM_FILE_FLAG: Final[str] = "--pathspec-from-file"
+# stop. The flag is not in `_GIT_RM_GRAMMAR`, so it (and every
+# abbreviation git would accept) voids the exemption, whatever it names.
 
 _CONSUMER_KEY_COMMAND: Final[str] = "command"
 _CONSUMER_KEY_PATH_FLAGS: Final[str] = "path_flags"
@@ -2422,48 +2416,133 @@ def _is_git_rm_cached(words: list[str]) -> bool:
     """True when ``words`` is ``git <global options> rm ... --cached ...`` --
     untrack only, with no content-reading flag present.
 
-    The subcommand is located via :func:`git_subcommand_index` (shared with
-    ``sensitive_content``'s identical need to see past git's global options)
-    rather than a single ``-C`` special case (Plan 00311 Task 1.4, replacing
-    the Plan 00311-follow-up ``-C``-only fix): git accepts a whole RUN of
-    global options before its subcommand -- ``-c <key>=<value>``,
-    ``--no-pager``, ``--git-dir=<path>``, and more -- and an agent invoking
-    ``secret_file_hygiene_checker``'s own recommended remedy with any one of
-    them (e.g. ``git -c core.pager=cat rm --cached <path>``, or
-    ``git -C /repo --no-pager rm --cached <path>``) was failing CLOSED
-    exactly the way plain ``git -C <path> rm --cached <path>`` did before
-    that follow-up. ``--cached`` present anywhere after the subcommand. No
-    ``--cached`` (or no ``rm``, or no locatable subcommand at all) means the
+    Both option lists are CLOSED (N253). Before the subcommand only
+    ``_GIT_SAFE_GLOBAL_FLAGS`` and ``-C <dir>`` are looked past; ``-c``,
+    ``--config-env`` and every other global option voids the exemption,
+    because a config key such as ``core.fsmonitor`` runs a command. After
+    ``rm`` only ``_GIT_RM_GRAMMAR`` is accepted, so ``--pathspec-from-file`` (which makes ``rm``
+    READ a file and echo its lines in an error -- Plan 00311 Task 1.3) and
+    every abbreviation git would accept of it or of any other option are
+    refused, not skipped. ``--cached`` must be present: without it the
     command can delete the working-tree file too, so it is not exempt.
-
-    ``--pathspec-from-file`` voids the exemption outright (Plan 00311 Task
-    1.3 second-look finding), whatever else is present: it makes ``rm``
-    itself READ a file's content, breaking the "reads no content" premise
-    the exemption otherwise relies on -- see
-    ``_GIT_RM_PATHSPEC_FROM_FILE_FLAG``'s docstring for the verified
-    disclosure route.
     """
-    if any(
-        word.strip("\"'") == _GIT_RM_PATHSPEC_FROM_FILE_FLAG
-        or word.strip("\"'").startswith(_GIT_RM_PATHSPEC_FROM_FILE_FLAG + "=")
-        for word in words
-    ):
-        return False
-    subcommand_index = git_subcommand_index(words, 0)
+    subcommand_index = _git_closed_global_options_end(words)
     if subcommand_index is None or len(words) < subcommand_index + 2:
         return False
     if words[subcommand_index] != _GIT_RM_SUBCOMMAND:
         return False
-    return any(word.strip("\"'") == _GIT_RM_CACHED_FLAG for word in words[subcommand_index + 1 :])
+    rm_options = _GIT_RM_GRAMMAR.option_names(words[subcommand_index + 1 :])
+    return rm_options is not None and _GIT_RM_CACHED_FLAG in rm_options
+
+
+#: The ONLY git global options the ``rm --cached`` exemption looks past (N253).
+#: ``-c``/``--config-env`` are absent on purpose: they set ``core.fsmonitor``
+#: and friends, which EXECUTE a command; ``--git-dir``/``--work-tree``/
+#: ``--exec-path`` redirect which repository, config or helper git runs.
+_GIT_SAFE_GLOBAL_FLAGS: Final[frozenset[str]] = frozenset(
+    {
+        "--no-pager",
+        "--no-optional-locks",
+        "--literal-pathspecs",
+        "--glob-pathspecs",
+        "--noglob-pathspecs",
+        "--icase-pathspecs",
+        "--no-replace-objects",
+    }
+)
+_GIT_CHDIR_FLAG: Final[str] = "-C"
+
+_END_OF_OPTIONS: Final[str] = "--"
+
+
+@dataclass(frozen=True)
+class _OptionGrammar:
+    """The CLOSED set of options one git subcommand may carry (N253).
+
+    Every option is matched by its FULL name. git's parse-options accepts an
+    unambiguous prefix of a long option, so an abbreviation (``--verb`` for
+    ``--verbose``, ``--pathspec-from`` for ``--pathspec-from-file``) is
+    refused here rather than skipped as unknown: a denylist cannot know every
+    prefix, an allowlist needs no list of them.
+    """
+
+    short_flags: frozenset[str]
+    long_flags: frozenset[str]
+    short_valued: frozenset[str] = frozenset()
+    long_valued: frozenset[str] = frozenset()
+    long_optional_value: frozenset[str] = frozenset()
+
+    def option_names(self, words: Sequence[str]) -> frozenset[str] | None:
+        """The long option names in ``words``, or ``None`` if any option is outside
+        the grammar. A flag takes no value (``--cached=x`` is not ``--cached``);
+        a value-taking option consumes its attached value, or the next word; an
+        optional-value option takes only an attached one. Words after ``--``
+        and non-option words are not examined."""
+        seen: set[str] = set()
+        index = 0
+        while index < len(words):
+            word = words[index].strip("\"'")
+            index += 1
+            if word == _END_OF_OPTIONS:
+                break
+            if not word.startswith("-") or word == "-":
+                continue
+            if word.startswith("--"):
+                name, has_value, _value = word.partition("=")
+                if name in self.long_valued:
+                    index += 0 if has_value else 1
+                elif name in self.long_optional_value:
+                    pass
+                elif name not in self.long_flags or has_value:
+                    return None
+                seen.add(name)
+                continue
+            for position, letter in enumerate(word[1:], start=1):
+                if letter in self.short_valued:
+                    index += 0 if word[position + 1 :] else 1
+                    break
+                if letter not in self.short_flags:
+                    return None
+        return frozenset(seen)
+
+
+_GIT_RM_GRAMMAR: Final[_OptionGrammar] = _OptionGrammar(
+    short_flags=frozenset("rfnq"),
+    long_flags=frozenset(
+        {"--cached", "--force", "--dry-run", "--quiet", "--ignore-unmatch", "--sparse"}
+    ),
+)
+
+
+def _git_closed_global_options_end(words: list[str]) -> int | None:
+    """Index of the subcommand after ``git``, or ``None`` if any global option
+    before it is not on the closed safe list (``-C <dir>`` is the one
+    value-taking member). A leading environment assignment never gets here:
+    the head word is then not ``git``."""
+    index = 1
+    while index < len(words):
+        word = words[index].strip("\"'")
+        if not word.startswith("-"):
+            return index
+        if word in _GIT_SAFE_GLOBAL_FLAGS:
+            index += 1
+        elif word == _GIT_CHDIR_FLAG and index + 1 < len(words):
+            if words[index + 1].startswith("-"):
+                return None
+            index += 2
+        else:
+            return None
+    return None
 
 
 def _denied_subcommand_used(words: list[str], consumer: ConsumerSpec) -> bool:
-    """True when the first non-flag argument is a disclosure subcommand."""
-    for word in words[1:]:
-        if word.startswith("-"):
-            continue
-        return word in consumer.denied_subcommands
-    return False
+    """True when ANY argument is a disclosure subcommand.
+
+    Not just the first non-flag word: an option this module does not know may
+    take a separate value (``ansible-vault --output x view``), which would
+    otherwise be mistaken for the subcommand.
+    """
+    return any(word.strip("\"'") in consumer.denied_subcommands for word in words[1:])
 
 
 def _paths_only_in_flag_position(
@@ -2499,9 +2578,19 @@ def _paths_only_in_flag_position(
         if index in flag_value_positions:
             continue
         bare = word.strip("\"'")
+        # An option word is judged too (N253): `--inventory=<key>` or
+        # `-i<key>` carries a path in a position no recognised path flag owns,
+        # so the value after `=` and the tail of a short option are judged
+        # as words of their own.
+        candidates = [bare]
         if bare.startswith("-"):
-            continue
-        if find_protected_mention(bare, patterns, deadline=deadline) is not None:
+            candidates.append(bare.partition("=")[2])
+            if not bare.startswith("--"):
+                candidates.append(bare[2:])
+        if any(
+            candidate and find_protected_mention(candidate, patterns, deadline=deadline) is not None
+            for candidate in candidates
+        ):
             return False
     return True
 
@@ -2523,21 +2612,92 @@ _ENCRYPTED_TARGET_COMMANDS: Final[frozenset[str]] = frozenset(
     {"cat", "head", "tail", "wc", "ls", "stat", "file", "cp", "mv"}
 )
 
-#: git subcommands that never run a textconv filter. `diff`, `log`, `show`,
-#: `blame` and `grep` all can.
-_ENCRYPTED_TARGET_GIT_SUBCOMMANDS: Final[frozenset[str]] = frozenset(
-    {"add", "commit", "status", "mv", "rm", "ls-files", "check-ignore"}
-)
-
-#: Flags that make an allowed git subcommand render a diff or open an editor.
-#: Short flags are checked letter by letter, so a cluster (`-vm`) is caught.
-_DIFF_RENDERING_LONG_FLAGS: Final[tuple[str, ...]] = (
-    "--patch",
-    "--interactive",
-    "--edit",
-    "--verbose",
-)
-_DIFF_RENDERING_SHORT_FLAGS: Final[frozenset[str]] = frozenset("piev")
+#: git subcommands that never run a textconv filter (`diff`, `log`, `show`,
+#: `blame` and `grep` all can), each with the CLOSED option set it may carry
+#: (N253). Anything outside it -- including an abbreviation git would accept
+#: of a diff-rendering or editor-opening option (`--verb`, `--patc`, `--ed`)
+#: -- is not exempt. The omissions are deliberate: `-v`/`--verbose`,
+#: `-p`/`--patch`, `-i`/`--interactive`, `-e`/`--edit`, `-F`, `-c`/`-C`.
+_ENCRYPTED_TARGET_GIT_GRAMMARS: Final[dict[str, _OptionGrammar]] = {
+    "add": _OptionGrammar(
+        short_flags=frozenset("fnuAN"),
+        long_flags=frozenset(
+            {
+                "--force",
+                "--dry-run",
+                "--update",
+                "--all",
+                "--no-all",
+                "--intent-to-add",
+                "--ignore-errors",
+                "--renormalize",
+                "--sparse",
+                "--ignore-removal",
+                "--no-ignore-removal",
+            }
+        ),
+    ),
+    "commit": _OptionGrammar(
+        short_flags=frozenset("aqsn"),
+        long_flags=frozenset({"--all", "--quiet", "--signoff", "--no-verify", "--allow-empty"}),
+        short_valued=frozenset("m"),
+        long_valued=frozenset({"--message"}),
+    ),
+    "status": _OptionGrammar(
+        short_flags=frozenset("sbz"),
+        long_flags=frozenset(
+            {
+                "--short",
+                "--branch",
+                "--no-renames",
+                "--renames",
+                "--null",
+                "--long",
+                "--show-stash",
+                "--no-column",
+                "--ahead-behind",
+                "--no-ahead-behind",
+            }
+        ),
+        long_optional_value=frozenset(
+            {"--porcelain", "--ignored", "--untracked-files", "--column"}
+        ),
+    ),
+    "mv": _OptionGrammar(
+        short_flags=frozenset("fnkv"),
+        long_flags=frozenset({"--force", "--dry-run", "--verbose", "--sparse"}),
+    ),
+    "rm": _GIT_RM_GRAMMAR,
+    "ls-files": _OptionGrammar(
+        short_flags=frozenset("cdmoiskztvf"),
+        long_flags=frozenset(
+            {
+                "--cached",
+                "--deleted",
+                "--modified",
+                "--others",
+                "--ignored",
+                "--stage",
+                "--killed",
+                "--unmerged",
+                "--exclude-standard",
+                "--full-name",
+                "--error-unmatch",
+                "--directory",
+                "--no-empty-directory",
+                "--eol",
+                "--deduplicate",
+                "--recurse-submodules",
+                "--resolve-undo",
+                "--sparse",
+            }
+        ),
+    ),
+    "check-ignore": _OptionGrammar(
+        short_flags=frozenset("qnz"),
+        long_flags=frozenset({"--quiet", "--non-matching", "--no-index"}),
+    ),
+}
 
 #: Any of these makes the word the shell opens differ from the text written:
 #: parameter/command substitution, escapes, line continuation, globs, braces
@@ -2635,17 +2795,8 @@ def _is_encrypted_target_reader(words: list[str]) -> bool:
         return True
     if head != _GIT_EXECUTABLE or len(words) < 2:
         return False
-    if words[1] not in _ENCRYPTED_TARGET_GIT_SUBCOMMANDS:
-        return False
-    return not any(_renders_a_diff(word) for word in words[2:])
-
-
-def _renders_a_diff(word: str) -> bool:
-    if any(word == flag or word.startswith(flag + "=") for flag in _DIFF_RENDERING_LONG_FLAGS):
-        return True
-    if word.startswith("-") and not word.startswith("--"):
-        return any(letter in _DIFF_RENDERING_SHORT_FLAGS for letter in word[1:])
-    return False
+    grammar = _ENCRYPTED_TARGET_GIT_GRAMMARS.get(words[1])
+    return grammar is not None and grammar.option_names(words[2:]) is not None
 
 
 #: grep-family binaries: their FIRST positional argument (or an `-e`
@@ -2678,6 +2829,78 @@ _GREP_SHORT_VALUE_OPTS: Final[frozenset[str]] = (
     frozenset({_GREP_SHORT_PATTERN_VALUE_OPT, _GREP_SHORT_FILE_VALUE_OPT})
     | _GREP_SHORT_OTHER_VALUE_OPTS
 )
+
+#: The CLOSED option list (N253). An option outside it voids the exemption,
+#: because GNU getopt_long accepts any unambiguous PREFIX of a long option
+#: (`--rege=.` is `--regexp=.`) and ugrep has pattern-supplying options of its
+#: own (`--and`); a parser that skips what it does not know would then treat
+#: the real pattern slot as a file target's neighbour and exempt a command
+#: that prints the file. Long options are matched by their FULL name only.
+#: `--group-separator` is absent: ugrep reads its arity differently.
+_GREP_FLAG_LONG_OPTIONS: Final[frozenset[str]] = frozenset(
+    {
+        "--basic-regexp",
+        "--extended-regexp",
+        "--fixed-strings",
+        "--perl-regexp",
+        "--byte-offset",
+        "--count",
+        "--dereference-recursive",
+        "--files-with-matches",
+        "--files-without-match",
+        "--help",
+        "--ignore-case",
+        "--no-ignore-case",
+        "--initial-tab",
+        "--line-buffered",
+        "--line-number",
+        "--line-regexp",
+        "--no-filename",
+        "--no-group-separator",
+        "--no-messages",
+        "--null",
+        "--null-data",
+        "--only-matching",
+        "--quiet",
+        "--recursive",
+        "--invert-match",
+        "--silent",
+        "--text",
+        "--binary",
+        "--version",
+        "--with-filename",
+        "--word-regexp",
+        "--color",
+        "--colour",
+    }
+)
+
+#: Long options that take a value; the value must be ATTACHED (`--max-count=3`)
+#: because GNU grep and ugrep disagree on whether a separate word is the value.
+#: `--regexp`, `--file` and `--exclude-from` are handled separately.
+_GREP_ATTACHED_VALUE_LONG_OPTIONS: Final[frozenset[str]] = frozenset(
+    {
+        "--after-context",
+        "--before-context",
+        "--binary-files",
+        "--context",
+        "--color",
+        "--colour",
+        "--devices",
+        "--directories",
+        "--label",
+        "--max-count",
+    }
+)
+
+#: Long options whose attached value is a glob matched against file names:
+#: it selects which files print, so it is judged like a file target.
+_GREP_FILE_SELECTOR_LONG_OPTIONS: Final[frozenset[str]] = frozenset(
+    {"--include", "--exclude", "--exclude-dir"}
+)
+
+#: Short options that take no value. Digits (`-2`, context) are also allowed.
+_GREP_SHORT_FLAG_OPTS: Final[frozenset[str]] = frozenset("EFGPiwxzsvVbnHhoqaIrRLlcTZU0123456789")
 
 
 def is_grep_pattern_only_mention(
@@ -2768,6 +2991,13 @@ def is_grep_pattern_only_mention(
                     cursor += 1
                 cursor += 1
                 continue
+            if long_flag in _GREP_FILE_SELECTOR_LONG_OPTIONS and has_eq:
+                file_target_values.append(attached_value)
+            elif not (
+                (long_flag in _GREP_ATTACHED_VALUE_LONG_OPTIONS and has_eq)
+                or (long_flag in _GREP_FLAG_LONG_OPTIONS and not has_eq)
+            ):
+                return False
             cursor += 1
             continue
         # Short-option cluster: GNU grep's getopt claims the rest of the
@@ -2776,6 +3006,8 @@ def is_grep_pattern_only_mention(
         consumed_next = False
         for position, letter in enumerate(word[1:], start=1):
             if letter not in _GREP_SHORT_VALUE_OPTS:
+                if letter not in _GREP_SHORT_FLAG_OPTS:
+                    return False
                 continue
             attached_value = word[position + 1 :]
             value: str | None

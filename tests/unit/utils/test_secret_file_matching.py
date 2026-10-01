@@ -1204,14 +1204,12 @@ class TestExemptions:
         cmd = "git -C /repo rm --cached=x .claude/block-words.secret"
         assert not sfm.is_exempt_invocation(cmd, sfm.DEFAULT_ALLOWED_CONSUMERS)
 
-    def test_git_dash_lowercase_c_config_rm_cached_is_exempt(self) -> None:
-        """Plan 00311 Task 1.4 (R5): the generic leading-global-flag skipper
-        must see past ANY value-taking global option, not just ``-C`` -- a
-        real hygiene-recommended invocation carrying an unrelated ``-c
-        <key>=<value>`` global was failing CLOSED (the same usability gap N4
-        described, one layer out)."""
+    def test_git_dash_lowercase_c_config_rm_cached_is_never_exempt(self) -> None:
+        """N253: ``git -c <key>=<value>`` can set ``core.fsmonitor`` (or any
+        other hook-running key), which EXECUTES a command, so no ``-c`` is
+        exempt whatever key it names."""
         cmd = "git -c core.pager=cat rm --cached .claude/block-words.secret"
-        assert sfm.is_exempt_invocation(cmd, sfm.DEFAULT_ALLOWED_CONSUMERS)
+        assert not sfm.is_exempt_invocation(cmd, sfm.DEFAULT_ALLOWED_CONSUMERS)
 
     def test_git_dash_c_no_pager_rm_cached_is_exempt(self) -> None:
         """Same as above, for a run of TWO leading global options -- one
@@ -3256,3 +3254,200 @@ class TestGlobIntersectionAgreesWithReference:
         assert sfm._globs_can_intersect("a.b(c)+", "a.b(c)+")
         assert not sfm._globs_can_intersect("axb", "a.b")
         assert sfm._globs_can_intersect("a.b", "?.b*")
+
+
+# ── N253: every exemption reads options from a CLOSED list ───────────────────
+
+_GNU_GREP_LONG_OPTIONS = (
+    "basic-regexp extended-regexp fixed-strings perl-regexp after-context before-context "
+    "binary-files byte-offset context color colour count dereference-recursive devices "
+    "directories exclude exclude-from exclude-dir file files-with-matches files-without-match "
+    "group-separator help include ignore-case no-ignore-case initial-tab label line-buffered "
+    "line-number line-regexp max-count no-filename no-group-separator no-messages null "
+    "null-data only-matching quiet recursive regexp invert-match silent text binary version "
+    "with-filename word-regexp"
+).split()
+_DANGEROUS_GREP_LONG_OPTIONS = ("regexp", "file", "exclude-from", "include", "exclude")
+
+
+def _strict_prefixes(name: str) -> list[str]:
+    """Every abbreviation getopt_long would accept: one character up to all but the last."""
+    return [name[:length] for length in range(1, len(name))]
+
+
+class TestGrepOptionsAreClosed:
+    """`grep --rege=. <key>` printed the key while judged exempt: GNU getopt accepts
+    an unambiguous long-option PREFIX, which the old open parser skipped as unknown."""
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "grep --rege=. id_rsa",
+            "grep --reg=. id_rsa",
+            "grep --regex=. id_rsa",
+            "grep --regexp=. id_rsa id_rsa",
+            "grep --and=. id_rsa",
+            "grep --fil=x id_rsa",
+            "grep --exclude-fr=x -r y id_rsa",
+            "grep --incl=docs -r x id_rsa",
+            "grep -y . id_rsa",
+            "grep -X egrep id_rsa file.txt",
+            "grep -Q id_rsa file.txt",
+            "grep --no-such-option id_rsa file.txt",
+            "grep --max-count 1 id_rsa file.txt",
+            "grep --include id_rsa -r x .",
+            "grep --exclude id_rsa -r x .",
+            "grep --exclude-dir=id_rsa -r x .",
+        ],
+    )
+    def test_unknown_or_abbreviated_option_is_not_exempt(self, command: str) -> None:
+        assert not _grep_ok(command)
+
+    @pytest.mark.parametrize("name", _DANGEROUS_GREP_LONG_OPTIONS)
+    def test_every_prefix_of_a_dangerous_long_option_is_not_exempt(self, name: str) -> None:
+        for prefix in _strict_prefixes(name):
+            if prefix in _GNU_GREP_LONG_OPTIONS:
+                continue
+            assert not _grep_ok(f"grep --{prefix}=. id_rsa"), prefix
+            assert not _grep_ok(f"grep --{prefix} . id_rsa"), prefix
+
+    @pytest.mark.parametrize("name", _GNU_GREP_LONG_OPTIONS)
+    def test_no_abbreviation_of_any_long_option_is_exempt(self, name: str) -> None:
+        for prefix in _strict_prefixes(name):
+            if prefix in _GNU_GREP_LONG_OPTIONS:
+                continue
+            assert not _grep_ok(f"grep --{prefix} id_rsa file.txt"), prefix
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "grep --ignore-case --line-number id_rsa file.txt",
+            "grep --color=auto -n id_rsa file.txt",
+            "grep --max-count=3 id_rsa file.txt",
+            "grep --regexp id_rsa file.txt",
+            "grep -rIn --exclude-dir=.git id_rsa .",
+            "grep -rn --include=docs id_rsa .",
+            "grep -nC2 id_rsa file.txt",
+            "grep -2 id_rsa file.txt",
+            "grep -E -w -- id_rsa file.txt",
+            "grep -rHnoq id_rsa .",
+        ],
+    )
+    def test_documented_exempt_shapes_stay_exempt(self, command: str) -> None:
+        assert _grep_ok(command)
+
+
+class TestGitRmCachedOptionsAreClosed:
+    """`git -c core.fsmonitor=<cmd> rm --cached <key>` EXECUTES <cmd>; -c is never exempt."""
+
+    _KEY = ".claude/block-words.secret"
+
+    def _exempt(self, command: str) -> bool:
+        return sfm.is_exempt_invocation(command, sfm.DEFAULT_ALLOWED_CONSUMERS)
+
+    @pytest.mark.parametrize(
+        "prefix",
+        [
+            "git -c core.fsmonitor=x",
+            "git -c core.pager=cat",
+            "git -ccore.fsmonitor=x",
+            "git --config-env=core.fsmonitor=X",
+            "git --config-env core.fsmonitor=X",
+            "git --exec-path=/x",
+            "git --git-dir=/x",
+            "git --work-tree=/x",
+            "git --super-prefix=x",
+            "GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.fsmonitor GIT_CONFIG_VALUE_0=x git",
+            "env GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.fsmonitor GIT_CONFIG_VALUE_0=x git",
+            "git -C /repo -c core.fsmonitor=x",
+        ],
+    )
+    def test_config_or_unknown_global_option_is_not_exempt(self, prefix: str) -> None:
+        assert not self._exempt(f"{prefix} rm --cached {self._KEY}")
+
+    @pytest.mark.parametrize(
+        "options",
+        [
+            "--pathspec-from-fil=x",
+            "--pathspec-from=x",
+            "--pathspec-file-nul",
+            "--ignore-unm --verb",
+            "--cach",
+            "-x",
+        ],
+    )
+    def test_unknown_or_abbreviated_rm_option_is_not_exempt(self, options: str) -> None:
+        assert not self._exempt(f"git rm --cached {options} {self._KEY}")
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "git rm --cached {key}",
+            "git -C /repo rm --cached {key}",
+            "git -C /repo --no-pager rm -r --cached {key}",
+            "git --no-optional-locks rm --cached --dry-run {key}",
+            "git rm -rfq --ignore-unmatch --cached -- {key}",
+        ],
+    )
+    def test_documented_exempt_shapes_stay_exempt(self, command: str) -> None:
+        assert self._exempt(command.format(key=self._KEY))
+
+
+class TestEncryptedTargetGitOptionsAreClosed:
+    """The diff-flag denylist missed getopt abbreviations (`--verb` for `--verbose`)."""
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "git status --verb {enc}",
+            "git status --verbos {enc}",
+            "git status --ver {enc}",
+            "git add --patc {enc}",
+            "git add --ed {enc}",
+            "git add --inter {enc}",
+            "git add --dry-run --verb {enc}",
+            "git commit -am x --verb {enc}",
+            "git commit --ver {enc}",
+            "git commit -e {enc}",
+            "git status --no-such-flag {enc}",
+            "git -c core.fsmonitor=x add {enc}",
+            "GIT_CONFIG_COUNT=1 git add {enc}",
+        ],
+    )
+    def test_unknown_or_abbreviated_option_is_not_exempt(self, command: str) -> None:
+        assert not _encrypted_ok(command.format(enc=_ENC))
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "git add -f {enc}",
+            "git add --dry-run {enc}",
+            "git status --short {enc}",
+            "git status -sb {enc}",
+            "git status --porcelain=v2 --untracked-files=no {enc}",
+            "git commit -am 'x' {enc}",
+            "git commit -m 'x' -- {enc}",
+            "git commit --message=x {enc}",
+            "git rm --cached {enc}",
+            "git mv -f {enc} group_vars/all/renamed.yml",
+        ],
+    )
+    def test_documented_exempt_shapes_stay_exempt(self, command: str) -> None:
+        assert _encrypted_ok(command.format(enc=_ENC))
+
+
+class TestConsumerOptionsAreJudged:
+    def _exempt(self, command: str) -> bool:
+        return sfm.is_exempt_invocation(command, sfm.DEFAULT_ALLOWED_CONSUMERS)
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "ansible-playbook --inventory=.vault-pass site.yml",
+            "ansible-playbook -i.vault-pass site.yml",
+            "ansible-vault --output x view --vault-password-file .vault-pass s.yml",
+            "ansible-vault -o x decrypt --vault-password-file .vault-pass s.yml",
+        ],
+    )
+    def test_option_naming_a_protected_path_or_late_denied_subcommand(self, command: str) -> None:
+        assert not self._exempt(command)
