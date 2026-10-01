@@ -26,6 +26,42 @@ other ledgers' numbering (00422 for `p422-close`, 00421's plan for `d-00421`).
 
 **Status**: ⬜ Open (all 55).
 
+### N284 — the pipe blocker reads `\|` inside a double-quoted grep pattern as a pipe
+
+**Found**: the coordinator ran a `grep -rn` whose double-quoted pattern held the
+alternation `\|`, followed by an alternative beginning `HEAD:`. A real pipe to
+`cut` followed. The command was denied as R-PIPE-TO-HEAD. The blocker named
+the quoted pattern text as the pipe's producer, and the alternative's leading
+word `HEAD` as `head`.
+
+**Why**: inside double quotes, `\|` is two literal characters, not a pipe. The
+segmenter splits on it, and the head match is case-insensitive or ignores the
+`:` that follows.
+
+**Workaround**: spell alternations as `-e A -e B`.
+
+**Status**: ⬜ Open.
+
+### N283 — `secret_file_guard` misses a protected name in git's `rev:path` syntax at the repository root
+
+**Found**: the N253 branch's analysis
+([260929-n253-opus-5-5.md](subagent-reports/260929-n253-opus-5-5.md),
+candidate 1) flagged it as urgent, but it was never ledgered. The coordinator
+re-confirmed it live on `main` (`dafd800ff`, daemon restarted):
+`git show HEAD:.vault-pass-probe-nonexistent` was allowed and reached git.
+The name does not exist, so nothing printed.
+
+**Why**: the token keeps its `HEAD:` prefix, so its basename never matches an
+anchored pattern such as `.vault-pass*`. `HEAD:config/.vault-pass` is denied
+because the basename after the last `/` is clean. The same miss applies to
+`git cat-file -p HEAD:<name>`, and probably to `:<name>` (index) and
+`<rev>:<name>` in other git commands.
+
+**Why it matters**: it prints a committed protected file, which is the
+disclosure this guard exists to stop.
+
+**Status**: ⬜ Open (security).
+
 ### N282 — the N264 cross-worktree guard judges an in-process teammate by the coordinator's working directory
 
 **Found**: the n253 teammate, working in its assigned worktree

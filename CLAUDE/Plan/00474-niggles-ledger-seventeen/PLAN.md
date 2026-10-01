@@ -38,6 +38,8 @@ Full write-ups are in [NIGGLES.md](NIGGLES.md). One line each here:
 
 | #          | Verdict                                                                                                          | Origin              | Status                  |
 | ---------- | ---------------------------------------------------------------------------------------------------------------- | ------------------- | ----------------------- |
+| N284       | The pipe blocker reads `\|` inside a double-quoted grep pattern as a pipe                                        | Coordinator         | ⬜ Open                 |
+| N283       | `secret_file_guard` misses a protected name in git `rev:path` syntax at the repository root (security)           | N253 analysis       | ⬜ Open                 |
 | N282       | The N264 cross-worktree guard judges an in-process teammate by the coordinator's working directory               | Coordinator         | ⬜ Open                 |
 | N281       | A hostile-input sweep failed on slow runners: the 100,000-character scan timed out and denied (fail-closed)      | Main CI             | ✅ Fixed (test only)    |
 | N280       | Something with pre-N271 code wrote an older `CLAUDE.md` guidance section into main during a test run             | Coordinator         | ⬜ Open                 |
