@@ -420,6 +420,40 @@ def _normalised_token_forms(token: str) -> list[str]:
     a Bash command as ordinary as ``cp ~/ /tmp/x``. An empty string also
     never usefully matches a protected glob, so dropping it costs nothing.
     """
+    forms: list[str] = []
+    for candidate in (token, *_colon_path_parts(token)):
+        for form in _home_and_dot_forms(candidate):
+            if form not in forms:
+                forms.append(form)
+    return forms
+
+
+#: How many leading colons a token is split at (the last colon is always
+#: split too). Bounds the work a colon-stuffed token costs: each split yields
+#: one more form to judge, and the real shapes (``:0:p``, ``HEAD:p``,
+#: ``host:p``) carry at most two.
+_MAX_COLON_SPLITS: Final[int] = 8
+
+
+def _colon_path_parts(token: str) -> list[str]:
+    """The path a ``prefix:path`` token names, one entry per split point.
+
+    git's object syntax (``HEAD:p``, ``<sha>:p``, ``HEAD~2:p``, ``:p``,
+    ``:0:p``, ``HEAD:./p``) and a remote path (``host:p``) both put the path
+    after a ``:``. The whole token keeps its prefix, so an anchored pattern
+    such as ``.vault-pass*`` never matches its basename at the repository
+    root (ledger 00474 N283); judging the part after each ``:`` as well
+    closes that. The whole token is still judged by the caller, so nothing it
+    matched before stops matching.
+    """
+    positions = [i for i, char in enumerate(token) if char == ":"]
+    if len(positions) > _MAX_COLON_SPLITS + 1:
+        positions = [*positions[:_MAX_COLON_SPLITS], positions[-1]]
+    return [token[i + 1 :] for i in positions if token[i + 1 :]]
+
+
+def _home_and_dot_forms(token: str) -> list[str]:
+    """``token`` with a leading home prefix or ``./`` stripped, token first."""
     forms = [token]
     for prefix in _HOME_PREFIXES:
         if token.startswith(prefix):

@@ -60,7 +60,16 @@ because the basename after the last `/` is clean. The same miss applies to
 **Why it matters**: it prints a committed protected file, which is the
 disclosure this guard exists to stop.
 
-**Status**: ⬜ Open (security).
+**Fix**: `_normalised_token_forms` in `utils/secret_file_matching.py` now also
+yields the path after each `:` of a token (the first eight colons and the last,
+to bound a colon-stuffed token), each then given the existing home/`./`
+stripping. The whole token is still judged, so nothing denied before is
+allowed. This covers `HEAD:<p>`, `<sha>:<p>`, `HEAD~2:<p>`, `HEAD^{tree}:<p>`,
+`:<p>`, `:0:<p>`, `<rev>:./<p>` and the same token shape in `scp host:<p>` and
+`rsync host:<p>`. Read/Grep take filesystem paths and are untouched. Release
+note 203.
+
+**Status**: ✅ Fixed on worktree-n283-rev-path
 
 ### N282 — the N264 cross-worktree guard judges an in-process teammate by the coordinator's working directory
 

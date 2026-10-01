@@ -144,6 +144,28 @@ class TestBash:
         handler = _handler()
         assert not handler.matches(_hook_input("Bash", {"command": "git status"}))
 
+    @pytest.mark.parametrize(
+        "cmd",
+        [
+            "git show HEAD:.vault-pass",
+            "git cat-file -p HEAD:.vault-pass",
+            "git show :0:.vault-pass",
+            "git show HEAD:./.vault-pass",
+            "git show HEAD~2:.vault-pass",
+            "scp host:.vault-pass .",
+        ],
+    )
+    def test_rev_path_form_at_the_repository_root_is_denied(self, cmd: str) -> None:
+        """Ledger 00474 N283: ``<rev>:<name>`` prints a committed protected file."""
+        handler = _handler()
+        hook_input = _hook_input("Bash", {"command": cmd})
+        assert handler.matches(hook_input)
+        assert handler.handle(hook_input).decision == Decision.DENY
+
+    def test_rev_path_form_of_an_ordinary_file_is_allowed(self) -> None:
+        handler = _handler()
+        assert not handler.matches(_hook_input("Bash", {"command": "git show HEAD:src/main.py"}))
+
     def test_replace_mode_pattern_denies_bare_positional_consumer_arg(self) -> None:
         """Review finding 1 regression (verified bypass): under mode replace
         the project pattern must reach the flag-position check, so a bare
