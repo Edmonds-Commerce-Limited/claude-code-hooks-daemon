@@ -138,7 +138,8 @@ def _run(checker: Path, output: Path, *args: str) -> dict[str, Any]:
         check=False,
     )
     assert output.exists(), f"Expected JSON output at {output}"
-    return json.loads(output.read_text())
+    report: dict[str, Any] = json.loads(output.read_text())
+    return report
 
 
 class TestWriteTimeGuardCoversEverySurface:
