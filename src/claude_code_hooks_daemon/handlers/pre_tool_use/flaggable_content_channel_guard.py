@@ -457,7 +457,7 @@ _EXCLUDE_DIR_OPTION: Final[str] = "--exclude-dir"
 _NEGATION: Final[str] = "!"
 _GIT_EXCLUDE_MAGIC: Final[tuple[str, ...]] = (":(exclude)", ":!", ":^")
 _WILDCARD_CHARS: Final[str] = "*?[{"
-_SHELL_EXPANSION_CHARS: Final[str] = "$`"
+_SHELL_EXPANSION: Final[re.Pattern[str]] = re.compile(r"[$`]")
 
 
 @dataclass
@@ -506,7 +506,7 @@ def _root_relative_components(path: str, *, cwd: str | None, root: str | None) -
     project. ``None`` means the path cannot be placed, so the caller fails
     closed: a shell expansion, or a relative path with no working directory.
     """
-    if any(char in path for char in _SHELL_EXPANSION_CHARS):
+    if _SHELL_EXPANSION.search(path):
         return None
     head = str(Path(_literal_head(path)).expanduser())
     if not posixpath.isabs(head):

@@ -754,3 +754,29 @@ do not, exit 1 if still over 125,000). RELEASING.md Step 14 and the Manual Relea
 block, the release skill's `invoke.sh` and the release agent run it BEFORE the tag and
 give `gh release create` its output. Pinned by
 `tests/integration/test_build_github_release_body.py`.
+
+### N286 — main CI red after N264/N266: three tests
+
+**Found**: main's full CI (run 36797037729, all three Pythons) failed three tests, all
+from the N264 (`subagent_worktree_write_guard`) and N266 (`flaggable_content_channel_guard`
+resolves recursive roots, fails closed on an unplaceable one) merges. **Cause**: both
+merged on targeted QA only; the tests that cross-check every handler (the blindness
+census, the skip-list checker's whole-tree scan, the live playbook) are full-suite tests.
+
+1. `tests/acceptance/test_playbook_harness.py`: the `RootRecursionGuardHandler` probe
+   `false && grep -rl "needle" "$CLAUDE_PROJECT_DIR"` expects ALLOW, but the full daemon
+   now denies it via R-FLAGGABLE-CONTENT-CHANNEL (an expanded root cannot be placed, so the
+   guard fails closed). No field exists for "another handler legitimately denies this
+   probe", so the probe became `false && grep -rl "needle" src`: a project-relative literal
+   root that reaches no flaggable path. The variable root stays pinned by the handler's
+   unit tests.
+2. `tests/integration/test_bash_write_blindness_coverage.py`: the new handler keys on
+   Write/Edit/NotebookEdit and had no verdict. Recorded BLIND (a Bash redirect/tee/heredoc/
+   cp into a sibling worktree produces no event it sees); its resident guidance now names
+   the three tools it judges and says a clean Bash write proves nothing.
+3. `tests/unit/scripts/test_skip_list_substring_checker.py::TestTheCurrentTree`:
+   `any(char in path for char in _SHELL_EXPANSION_CHARS)` matched the checker's
+   list-entry-in-path shape. It is a character-class test, not a skip list; replaced by a
+   compiled `[$`\]`pattern's`.search(path)\`, same behaviour.
+
+**Status**: ✅ Remedied on `worktree-ci-red-n264-n266`.

@@ -298,6 +298,15 @@ _BASH_BLINDNESS_VERDICT: dict[str, tuple[str, str]] = {
         "verb outside that fixed list, or a wrapper script opening the file "
         "internally, is not (same honest-limits shape as SecretFileGuardHandler)",
     ),
+    "SubagentWorktreeWriteGuardHandler": (
+        _BLIND,
+        "Ledger 00474 N264: it reads only the file_path/notebook_path of a "
+        "Write/Edit/NotebookEdit call, so a sub-agent's redirect, tee, heredoc, "
+        "cp or mv into a sibling worktree or the main tree produces no such "
+        "event and lands uncommitted in another branch, which is exactly the "
+        "harm the guard exists for. Its resident guidance names the three "
+        "tools it judges and says a clean Bash write proves nothing",
+    ),
     "UpgradeApprovalGuardHandler": (
         _PARTIAL,
         "Plan 00376: reads handlers/utils/bash_file_writes.py's bash_file_writes "
