@@ -3821,6 +3821,7 @@ RELEASE_SLATE_CLEAN = 0
 RELEASE_SLATE_UNDETERMINED = 1
 RELEASE_SLATE_IN_FLIGHT = 2
 _GH_RUN_LIST_LIMIT = "30"
+_GH_QA_WORKFLOW = "qa.yml"
 
 
 def _gh_ci_lookup(sha: str) -> "CiRunState | None":
@@ -3830,33 +3831,65 @@ def _gh_ci_lookup(sha: str) -> "CiRunState | None":
     filed was green on a sha three commits behind HEAD. Only a run whose
     ``headSha`` IS the given sha counts; absent means None.
     """
-    from claude_code_hooks_daemon.core.release_slate import CiRunState
+    from claude_code_hooks_daemon.core.release_slate import CiRunState, full_matrix_green
 
     branch_result = run_git(Path.cwd(), "rev-parse", "--abbrev-ref", "HEAD")
     if branch_result.returncode != 0:
         raise OSError(f"git rev-parse failed: {branch_result.stderr.strip() or 'no output'}")
     branch = branch_result.stdout.strip()
-    listing = subprocess.run(  # nosec B603 B607 - fixed argv, no shell
-        [
-            "gh",
-            "run",
-            "list",
-            "--branch",
-            branch,
-            "--limit",
-            _GH_RUN_LIST_LIMIT,
-            "--json",
-            "headSha,status,conclusion",
-        ],
+    listing = _gh_stdout(
+        "run",
+        "list",
+        "--workflow",
+        _GH_QA_WORKFLOW,
+        "--branch",
+        branch,
+        "--limit",
+        _GH_RUN_LIST_LIMIT,
+        "--json",
+        "databaseId,headSha,status,conclusion",
+    )
+    runs = json.loads(listing)
+    if not isinstance(runs, list) or not all(isinstance(run, dict) for run in runs):
+        raise ValueError("gh run list returned something other than a list of runs")
+    # Newest first. A run that did not succeed has no matrix to inspect, and the
+    # newest run of the sha stands in for it unless a run proves the full matrix.
+    found: CiRunState | None = None
+    for run in runs:
+        if run.get("headSha") != sha:
+            continue
+        state = CiRunState(sha=sha, status=run.get("status"), conclusion=run.get("conclusion"))
+        if state.is_green:
+            run_id = run.get("databaseId")
+            if not isinstance(run_id, int):
+                raise ValueError(f"gh run list gave run {run!r} no databaseId")
+            if full_matrix_green(_gh_run_jobs(run_id)):
+                return state
+            state = CiRunState(
+                sha=sha, status=state.status, conclusion=state.conclusion, full_matrix=False
+            )
+        found = found or state
+    return found
+
+
+def _gh_stdout(*args: str) -> str:
+    """``gh <args>``'s stdout. A failure or timeout raises, so a release gate cannot read it as green."""
+    return subprocess.run(  # nosec B603 B607 - fixed argv, no shell
+        ["gh", *args],
         capture_output=True,
         text=True,
         check=True,
         timeout=Timeout.GH_API_QUERY,
     ).stdout
-    for run in json.loads(listing):
-        if run.get("headSha") == sha:
-            return CiRunState(sha=sha, status=run.get("status"), conclusion=run.get("conclusion"))
-    return None
+
+
+def _gh_run_jobs(run_id: int) -> list[Mapping[str, object]]:
+    """The jobs of one CI run. Output that is not ``{"jobs": [...]}`` raises ValueError."""
+    payload = json.loads(_gh_stdout("run", "view", str(run_id), "--json", "jobs"))
+    jobs = payload.get("jobs") if isinstance(payload, dict) else None
+    if not isinstance(jobs, list):
+        raise ValueError(f"gh run view {run_id} returned no jobs list")
+    return jobs
 
 
 def _collect_release_slate() -> "SlateReport":
