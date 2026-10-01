@@ -44,8 +44,19 @@ branch, and denying it pushes agents to write runners around the guard.
 
 **Corroborated**: the Plan 00475 slate agent, a second sub-agent, also reported
 `PYTHONPATH` blocked by the upgrade-approval guard. It used
-`pytest -o pythonpath="src ."` instead. Two sub-agents and no main-thread
-reproduction point to a sub-agent-scoped rule.
+`pytest -o pythonpath="src ."` instead.
+
+**Trigger narrowed** by the N284 agent, which kept the deny text: a single
+command with a literal interpreter path and `PYTHONPATH=$PWD/src` was allowed.
+Two other shapes were denied as R-UPGRADE-APPROVAL-ENV-BYPASS:
+
+- `PY=…; PYTHONPATH=$PWD/src $PY/python -m pytest …`;
+- a `;` chain running `PYTHONPATH=$PWD/src $P scripts/qa/audit_error_hiding.py`,
+  where `$P` held the interpreter.
+
+So the rule fires on `PYTHONPATH=` before an interpreter named by a variable,
+whatever that interpreter then runs. It is not specific to sub-agents. None of
+those commands was an upgrade.
 
 **Next**: reproduce from a sub-agent with a logged command, then narrow the rule
 to upgrade invocations.
