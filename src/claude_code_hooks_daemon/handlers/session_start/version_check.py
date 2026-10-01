@@ -306,7 +306,10 @@ class VersionCheckHandler(SessionStartHandlerBase):
 
         is_upgrade = self._compare_versions(__version__, expected)
         direction = "UPGRADE" if is_upgrade else "DOWNGRADE"
-        command = f"/hooks-daemon upgrade {expected} (Skill tool: skill=hooks-daemon, args=upgrade {expected})"
+        command = (
+            "the hooks-daemon skill to upgrade "
+            f"(Skill tool: skill=hooks-daemon, args=upgrade {expected})"
+        )
         lines = [
             f"⚠️  HOOKS DAEMON VERSION DRIFT: running v{__version__}, "
             f"this project expects v{expected} ({direction})",

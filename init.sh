@@ -848,7 +848,7 @@ $_hd_venv_missing_remedy")
             else
                 _hd_remedy_1="TO SYNC, this is a DOWNGRADE — v$_HOOKS_DAEMON_TRACKED_VERSION is OLDER than the installed v$_HOOKS_DAEMON_CLONE_VERSION. Confirm it is intended (the commit may have come from an older checkout; if not, correct daemon.expected_version). A human runs:"
             fi
-            _hd_remedy_2="  /hooks-daemon upgrade $_HOOKS_DAEMON_TRACKED_VERSION (Skill tool: skill=hooks-daemon, args=upgrade $_HOOKS_DAEMON_TRACKED_VERSION)
+            _hd_remedy_2="$_hd_upgrade_cmd
 Nothing has been changed: hooks never move the daemon to another version themselves."
         else
             _hd_headline="HOOKS DAEMON: version mismatch — installed clone v$_HOOKS_DAEMON_CLONE_VERSION, tracked assets v$_HOOKS_DAEMON_TRACKED_VERSION"

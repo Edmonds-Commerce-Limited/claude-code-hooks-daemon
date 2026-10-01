@@ -103,7 +103,8 @@ class TestAnUpgradeIsNamed:
             text = _text(handler.handle(new_session_input))
 
         assert "args=upgrade 3.68.0" in text
-        assert "/hooks-daemon upgrade 3.68.0" in text
+        assert "the hooks-daemon skill to upgrade" in text
+        assert "/hooks-daemon upgrade" not in text
 
     def test_says_it_changes_nothing_itself(
         self, handler: VersionCheckHandler, new_session_input: dict[str, Any], tmp_path: Path

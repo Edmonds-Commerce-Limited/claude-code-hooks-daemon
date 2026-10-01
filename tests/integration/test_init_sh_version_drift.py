@@ -19,7 +19,12 @@ import subprocess  # nosec B404 — runs the trusted system `bash`
 from pathlib import Path
 from typing import Final
 
-from tests.integration.test_init_sh_stale_clone_version import _project, _rc, _run
+from tests.integration.test_init_sh_stale_clone_version import (
+    _TIMEOUT_SECONDS,
+    _project,
+    _rc,
+    _run,
+)
 
 _CLONE: Final[str] = "3.60.0"
 _NEWER: Final[str] = "3.68.0"
@@ -122,7 +127,8 @@ class TestTheMessage:
         assert "UPGRADE" in context
         assert "DOWNGRADE" not in context
         assert f"args=upgrade {_NEWER}" in context
-        assert f"/hooks-daemon upgrade {_NEWER}" in context
+        assert "Use the hooks-daemon skill to upgrade" in context
+        assert "/hooks-daemon upgrade" not in context
 
     def test_a_downgrade_is_named_as_one(self, tmp_path: Path) -> None:
         context = _context(_drifted(tmp_path, clone="3.68.0", expected=_OLDER))
@@ -220,7 +226,7 @@ class TestTheCheckItselfIsCheap:
             ],
             capture_output=True,
             text=True,
-            timeout=30,
+            timeout=_TIMEOUT_SECONDS,
             env={"PATH": "/usr/bin:/bin", "HOME": str(project)},
             check=False,
         )

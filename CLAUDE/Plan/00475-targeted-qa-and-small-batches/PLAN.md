@@ -162,7 +162,8 @@ read the plan index, ledgers and docs. So markdown is narrowed, not skipped.
 - [x] Two concurrent `llm_qa.py` runs in different worktrees serialise. Seen
   live: the cron-hosts branch's `llm_qa.py changed` queued behind the provision
   branch's run.
-- [ ] No doc outside the release documents requires `llm_qa.py all`.
+- [x] No doc outside the release documents requires `llm_qa.py all`. Merged in
+  b4576108a. The deployed core docs now name the project's own QA gate.
 - [ ] The branch-count advisory fires on a repository with more than 3 open work
   branches.
 

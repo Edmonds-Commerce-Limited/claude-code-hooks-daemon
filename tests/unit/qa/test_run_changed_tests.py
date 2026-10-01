@@ -22,6 +22,8 @@ from typing import Any
 
 import pytest
 
+from claude_code_hooks_daemon.constants import Timeout
+
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 
 
@@ -87,7 +89,10 @@ def _git_answering(
 
 
 def _rules(*entries: dict[str, Any]) -> list[Any]:
-    rules, problems = changed_tests.parse_declared_rules({"rules": list(entries)})
+    parsed: tuple[list[Any], list[Any]] = changed_tests.parse_declared_rules(
+        {"rules": list(entries)}
+    )
+    rules, problems = parsed
     assert problems == [], problems
     return rules
 
@@ -863,11 +868,12 @@ class TestAnExplicitRange:
 
         rules_file = tmp_path / "rules.yaml"
         rules_file.write_text("rules: []\n", encoding="utf-8")
-        return changed_tests.main(
+        code: int = changed_tests.main(
             ["--root", str(tmp_path), "--rules", str(rules_file), *argv],
             run_git=git,
             run_pytest=run_pytest,
         )
+        return code
 
     def test_the_range_is_the_change_set_and_is_recorded(self, tmp_path: Path) -> None:
         _touch(tmp_path, "src/pkg/a.py", "tests/unit/test_a.py")
@@ -962,7 +968,7 @@ class TestSelectedButExecutedNothing:
         import subprocess
 
         def expired(*args: Any, **kwargs: Any) -> Any:
-            raise subprocess.TimeoutExpired(cmd="pytest", timeout=1)
+            raise subprocess.TimeoutExpired(cmd="pytest", timeout=Timeout.REQUEST_LONG)
 
         monkeypatch.setattr(changed_tests.subprocess, "run", expired)
         code, output = changed_tests.run_pytest(["tests/unit/test_a.py"], tmp_path)
