@@ -1311,7 +1311,8 @@ call for all the paths.
 **Source**: the Plan 00483 triage agent and the Fable rulings agent each saw it independently.
 
 **Evidence**: `subagent_full_qa_blocker` emits "UNSEEN: unrecognised-interpreter-inline-code"
-on read-only `grep -c`, `awk` and `--help` commands from a subagent. It treats `-c` and `-e` as an
+on read-only `grep -c`, `awk`, `--help` and `bin/hooks-daemon … 2>&1` commands from a subagent
+(seen by three agents now, the third in the Plan 00484 assessment). It treats `-c` and `-e` as an
 interpreter's inline-code flag whatever the command is. It is advisory only, but it fires
 on ordinary reads and teaches agents to ignore it.
 

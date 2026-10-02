@@ -1,6 +1,6 @@
 # Plan 00484: DBF adoption and toolchain conformance
 
-**Status**: Not Started
+**Status**: In Progress
 **Created**: 2026-10-02
 **Owner**: dev
 **Priority**: Medium
@@ -83,11 +83,13 @@ agent.
 
 ### Phase 2: Conformance assessment
 
-- [ ] ⬜ **Task 2.1**: Assess every MUST and SHOULD in TOOLING-SPEC §4–§9, and DETECTOR-SPEC
+- [x] ✅ **Task 2.1**: Assess every MUST and SHOULD in TOOLING-SPEC §4–§9, and DETECTOR-SPEC
   for the detectors the daemon routes. Grade each one met, partly met, or not met, with
   file:line evidence. Write it to `CONFORMANCE.md` in this folder. Check the vendored copy is
-  fresh first (`hooks-daemon remote-docs`).
-- [ ] ⬜ **Task 2.2**: Fable review of the assessment: is any grade generous, and is any claim
+  fresh first (`hooks-daemon remote-docs`). Done in [CONFORMANCE.md](CONFORMANCE.md); the
+  vendored specs match upstream. Neither level conforms yet: 9 MUSTs are not met at
+  project level and 5 at artefact level, giving gaps G1–G14.
+- [ ] 🔄 **Task 2.2**: Fable review of the assessment: is any grade generous, and is any claim
   outside the threat model?
 - [ ] ⬜ **Task 2.3**: Put the gaps to the owner as one batch: close, accept as a known gap, or
   out of scope. Expected questions:
