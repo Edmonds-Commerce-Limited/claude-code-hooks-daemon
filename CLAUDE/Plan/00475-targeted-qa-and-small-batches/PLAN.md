@@ -169,7 +169,8 @@ read the plan index, ledgers and docs. So markdown is narrowed, not skipped.
 
 ## Success Criteria
 
-- [ ] A small fix goes from branch to `main` with targeted QA only, and CI green.
+- [x] A small fix goes from branch to `main` with targeted QA only, and CI green.
+  Ledger 00474 N287 and Task 2.1 merged on targeted QA; CI passed on 85f6b74dd.
 - [x] Two concurrent `llm_qa.py` runs in different worktrees serialise. Seen
   live: the cron-hosts branch's `llm_qa.py changed` queued behind the provision
   branch's run.
