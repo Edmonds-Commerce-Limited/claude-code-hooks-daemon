@@ -89,9 +89,16 @@ other than defeating a parser. Everything else, every ordinary respelling includ
   the 65 entries still open in archived ledger 00466. Each entry is either an in-scope defect,
   dismissed under the threat model with the shape named, or already fixed on main (verified
   by reproduction, not assumed).
-- [ ] ⬜ **Task 2.2**: Classify the 14 `UNCOVERED-open` rows in
+- [x] ✅ **Task 2.2**: Classify the `UNCOVERED-open` rows in
   `scripts/qa/dangerous-invocation-corpus.yaml` the same way. Move dismissals to
-  `UNCOVERED-accepted` with the reason.
+  `UNCOVERED-accepted` with the reason. Done by the coordinator. 9 rows are open, not 14: 5 were
+  closed as COVERED since this task was written (`checkout -f`, `switch -f`, `reflog expire`,
+  `gc --prune=now`, `filter-branch`). None is dismissed. Each is an ordinary command typed in full
+  (`git reset --keep`, `rm -rf`, `truncate -s 0`, `git push --delete`, `git tag -d`,
+  `pip install --index-url`, `gh auth token`, `crontab -r`, `docker run -v /:/host`), so neither
+  limb applies: the text is visible at call time, and each has ordinary uses rather than existing
+  only to defeat a parser. All 9 are in scope and stay `UNCOVERED-open`. The corpus header makes
+  every new deny owner-gated per row, so they go to the owner as one batch.
 - [ ] 🔄 **Task 2.3**: Done for the carried entries (merge 56677e3c6). That added 9
   `UNCOVERED-accepted` corpus rows. N201, N228 and N257 have no row, because main denies the
   representative command anyway. Record every dismissal: in the ledger, mark it
