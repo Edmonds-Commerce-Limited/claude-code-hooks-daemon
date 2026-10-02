@@ -14,6 +14,7 @@ from claude_code_hooks_daemon.plan_qa.context import (
     staged_context,
     sweep_context,
 )
+from claude_code_hooks_daemon.plan_qa.gitfacts import GitFacts
 from claude_code_hooks_daemon.plan_qa.types import Level
 
 
@@ -77,6 +78,22 @@ def _scaffold(tmp_path: Path) -> Path:
         timeout=Timeout.GIT_CONTEXT,
     )
     return root
+
+
+def _commit_scaffold(root: Path) -> None:
+    """Record the scaffold, so the index (what a commit gate reads) holds the plan tree."""
+    for args in (
+        ("config", "user.email", "t@example.com"),
+        ("config", "user.name", "T"),
+        ("add", "-A"),
+        ("commit", "-m", "initial"),
+    ):
+        subprocess.run(
+            ["git", "-C", str(root), *args],
+            capture_output=True,
+            check=True,
+            timeout=Timeout.GIT_CONTEXT,
+        )
 
 
 class TestSweepContext:
@@ -229,6 +246,7 @@ class TestCompletedArchiveMerge:
 class TestStagedContext:
     def test_includes_gitfacts_and_commit_message(self, tmp_path: Path) -> None:
         root = _scaffold(tmp_path)
+        _commit_scaffold(root)
         context = staged_context(
             project_root=root,
             plan_dir_rel="CLAUDE/Plan",
@@ -278,6 +296,7 @@ class TestStagedContext:
 
     def test_no_pathspecs_is_index_based_as_before(self, tmp_path: Path) -> None:
         root = _scaffold(tmp_path)
+        _commit_scaffold(root)
         context = staged_context(
             project_root=root,
             plan_dir_rel="CLAUDE/Plan",
@@ -425,6 +444,7 @@ class TestLayoutThreading:
 
     def test_staged_context_carries_layout(self, tmp_path: Path) -> None:
         root = _scaffold(tmp_path)
+        _commit_scaffold(root)
         layout = self._layout()
         context = staged_context(
             project_root=root,
@@ -473,6 +493,7 @@ class TestProjectExcludePaths:
 
     def test_patterns_are_carried_on_every_surface(self, tmp_path: Path) -> None:
         root = _scaffold(tmp_path)
+        _commit_scaffold(root)
         patterns = ["CLAUDE/Plan/fixtures/**"]
         sweep = sweep_context(
             root, "CLAUDE/Plan", _Policy(), today=date(2026, 1, 1), exclude_paths=patterns
@@ -517,3 +538,161 @@ class TestProjectExcludePaths:
         assert [folder.name for folder in excluded.tree.folders] == ["00001-first", "00002-rogue"]
         assert any("00002-rogue" in (f.path or "") for f in run_stage(Stage.SWEEP, included))
         assert not any("00002-rogue" in (f.path or "") for f in run_stage(Stage.SWEEP, excluded))
+
+
+def _git(root: Path, *args: str) -> None:
+    subprocess.run(
+        ["git", "-C", str(root), *args],
+        capture_output=True,
+        check=True,
+        timeout=Timeout.GIT_CONTEXT,
+    )
+
+
+class TestStagedContextReadsTheCommittedTree:
+    """Ledger 00474 N244: a bare commit records the index, so the gate reads it."""
+
+    def _committed(self, tmp_path: Path) -> Path:
+        root = _scaffold(tmp_path)
+        _commit_scaffold(root)
+        return root
+
+    def test_a_folder_untracked_from_the_index_leaves_the_tree(self, tmp_path: Path) -> None:
+        root = self._committed(tmp_path)
+        _git(root, "rm", "-r", "--cached", "-q", "CLAUDE/Plan/00001-first")
+
+        staged = staged_context(root, "CLAUDE/Plan", _Policy())
+        sweep = sweep_context(root, "CLAUDE/Plan", _Policy(), today=date(2026, 7, 7))
+
+        assert staged.tree is not None and sweep.tree is not None
+        assert staged.tree.folders == ()
+        assert [folder.number for folder in sweep.tree.folders] == [1]
+
+    def test_a_folder_deleted_on_disk_but_still_indexed_stays_in_the_tree(
+        self, tmp_path: Path
+    ) -> None:
+        root = self._committed(tmp_path)
+        (root / "CLAUDE/Plan/00001-first/PLAN.md").unlink()
+        (root / "CLAUDE/Plan/00001-first").rmdir()
+
+        context = staged_context(root, "CLAUDE/Plan", _Policy())
+
+        assert context.tree is not None
+        assert [folder.number for folder in context.tree.folders] == [1]
+        assert context.tree.folders[0].doc is not None
+
+    def test_documents_are_the_staged_text_not_the_working_tree_text(self, tmp_path: Path) -> None:
+        root = self._committed(tmp_path)
+        (root / "CLAUDE/Plan/00001-first/PLAN.md").write_text(
+            "# Plan 00001: first\n\n**Status**: Complete\n"
+        )
+        (root / "CLAUDE/Plan/README.md").write_text(
+            "# Plans Index\n\n## Active Plans\n\n- [00001: first](00001-first/PLAN.md) - x\n"
+        )
+
+        context = staged_context(root, "CLAUDE/Plan", _Policy())
+
+        assert context.tree is not None and context.readme is not None
+        assert context.tree.folders[0].doc is not None
+        assert context.tree.folders[0].doc.status_raw == "In Progress"
+        assert context.readme.rows == ()
+
+    def test_an_archive_directory_kept_empty_is_still_there(self, tmp_path: Path) -> None:
+        root = self._committed(tmp_path)
+
+        context = staged_context(root, "CLAUDE/Plan", _Policy())
+
+        assert context.tree is not None
+        assert context.tree.has_completed_dir
+        assert not context.tree.has_cancelled_dir
+
+    def test_the_archive_index_is_merged_from_the_index(self, tmp_path: Path) -> None:
+        root = _scaffold(tmp_path)
+        (root / "CLAUDE/Plan/Completed/README.md").write_text(
+            "## Completed Plans\n\n- [00009: old](00009-old/PLAN.md) - Complete\n"
+        )
+        _commit_scaffold(root)
+
+        context = staged_context(root, "CLAUDE/Plan", _Policy())
+
+        assert context.readme is not None
+        assert 9 in context.readme.numbers()
+
+    def test_a_pathspec_commit_keeps_reading_the_disk(self, tmp_path: Path) -> None:
+        root = self._committed(tmp_path)
+        _git(root, "rm", "-r", "--cached", "-q", "CLAUDE/Plan/00001-first")
+
+        context = staged_context(
+            root, "CLAUDE/Plan", _Policy(), pathspecs=("CLAUDE/Plan/README.md",)
+        )
+
+        assert context.tree is not None
+        assert [folder.number for folder in context.tree.folders] == [1]
+
+    def test_a_plan_directory_the_commit_does_not_record_is_missing(self, tmp_path: Path) -> None:
+        root = self._committed(tmp_path)
+        _git(root, "rm", "-r", "--cached", "-q", "CLAUDE/Plan")
+
+        with pytest.raises(FileNotFoundError):
+            staged_context(root, "CLAUDE/Plan", _Policy())
+
+    def test_an_unreadable_index_falls_back_to_the_disk(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        root = self._committed(tmp_path)
+        _git(root, "rm", "-r", "--cached", "-q", "CLAUDE/Plan/00001-first")
+        monkeypatch.setattr(GitFacts, "index_listing", lambda self, prefix: None)
+
+        context = staged_context(root, "CLAUDE/Plan", _Policy())
+
+        assert context.tree is not None
+        assert [folder.number for folder in context.tree.folders] == [1]
+
+    def test_unreadable_documents_fall_back_to_the_disk(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        root = self._committed(tmp_path)
+        _git(root, "rm", "-r", "--cached", "-q", "CLAUDE/Plan/00001-first")
+        monkeypatch.setattr(GitFacts, "index_texts", lambda self, listing, paths: None)
+
+        context = staged_context(root, "CLAUDE/Plan", _Policy())
+
+        assert context.tree is not None
+        assert [folder.number for folder in context.tree.folders] == [1]
+
+    def test_the_whole_tree_costs_one_listing_and_one_batch_read(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from claude_code_hooks_daemon.utils.git_repo import read_blobs as real_read_blobs
+        from claude_code_hooks_daemon.utils.git_repo import run_git as real_run_git
+
+        root = _scaffold(tmp_path)
+        for number in range(2, 12):
+            folder = root / "CLAUDE/Plan" / f"{number:05d}-more"
+            folder.mkdir()
+            (folder / "PLAN.md").write_text(
+                f"# Plan {number:05d}: more\n\n**Status**: Not Started\n"
+            )
+        _commit_scaffold(root)
+        listings: list[tuple[str, ...]] = []
+        batches: list[int] = []
+
+        def run_git(
+            cwd: Path, *args: str, timeout: float = Timeout.GIT_CONTEXT
+        ) -> "subprocess.CompletedProcess[str]":
+            if args[0] == "ls-files":
+                listings.append(args)
+            return real_run_git(cwd, *args, timeout=timeout)
+
+        def read_blobs(cwd: Path, shas: "list[str]") -> "dict[str, bytes] | None":
+            batches.append(len(shas))
+            return real_read_blobs(cwd, shas)
+
+        monkeypatch.setattr("claude_code_hooks_daemon.utils.git_facts.run_git", run_git)
+        monkeypatch.setattr("claude_code_hooks_daemon.utils.git_facts.read_blobs", read_blobs)
+
+        context = staged_context(root, "CLAUDE/Plan", _Policy())
+
+        assert context.tree is not None and len(context.tree.folders) == 11
+        assert len(listings) == 1
+        assert len(batches) == 1

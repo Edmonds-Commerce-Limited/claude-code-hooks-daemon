@@ -97,12 +97,14 @@ def _folder_findings(context: CheckContext, folder: PlanFolder) -> list[Finding]
 
 
 def _link_findings(
-    context: CheckContext, row: ReadmeRow, before: ReadmeIndex | None
+    context: CheckContext, tree: PlanTree, row: ReadmeRow, before: ReadmeIndex | None
 ) -> list[Finding]:
     if row.link is None:
         return []
     target_parent = (context.plan_dir / row.link).parent
-    if target_parent.is_dir():
+    # Asked of the tree, not of the disk: on a commit the tree is the INDEX, and
+    # a folder `git rm --cached` left on disk is not one the commit records.
+    if tree.is_dir(target_parent):
         return []
     number = row.numbers[0] if row.numbers else None
     # Two ways this is the commit's doing: it wrote the row, or it moved the
@@ -164,7 +166,7 @@ def _run(context: CheckContext) -> list[Finding]:
         findings.extend(_folder_findings(context, folder))
 
     for row in context.readme.rows:
-        findings.extend(_link_findings(context, row, before))
+        findings.extend(_link_findings(context, context.tree, row, before))
 
     findings.extend(_orphan_row_findings(context, context.tree, context.readme, before))
     return findings

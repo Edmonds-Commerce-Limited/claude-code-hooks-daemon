@@ -13,10 +13,12 @@ untouched — if the public surface moved, it would say so.
 
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 
 import pytest
 
+from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.utils.git_facts import (
     GitFactsBase,
     StagedChange,
@@ -197,3 +199,93 @@ class TestProjectRelativeHeadText:
         plan_md.write_text("**Status**: In Progress\n\nmore\n", encoding="utf-8")
 
         assert project_relative_head_text(plan_md, repo) == "**Status**: In Progress\n"
+
+
+class TestIndexListing:
+    """Ledger 00474 N244: the tree a commit WILL record, read from the index."""
+
+    def test_lists_every_indexed_path_under_the_prefix(self, repo: Path) -> None:
+        (repo / "sub").mkdir()
+        (repo / "sub" / "a.md").write_text("a\n", encoding="utf-8")
+        _git(repo, "add", "-A")
+
+        listing = GitFactsBase(repo).index_listing("sub")
+
+        assert listing is not None
+        assert set(listing) == {"sub/a.md"}
+
+    def test_an_unstaged_deletion_is_still_listed(self, repo: Path) -> None:
+        (repo / "committed.md").unlink()
+
+        listing = GitFactsBase(repo).index_listing(".")
+
+        assert listing is not None
+        assert "committed.md" in listing
+
+    def test_a_cached_removal_is_not_listed_though_the_file_remains(self, repo: Path) -> None:
+        _git(repo, "rm", "--cached", "-q", "committed.md")
+
+        listing = GitFactsBase(repo).index_listing(".")
+
+        assert listing is not None
+        assert "committed.md" not in listing
+        assert (repo / "committed.md").is_file()
+
+    def test_is_read_with_a_single_git_call(
+        self, repo: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from claude_code_hooks_daemon.utils.git_repo import run_git as real
+
+        calls: list[tuple[str, ...]] = []
+
+        def recording(
+            cwd: Path, *args: str, timeout: float = Timeout.GIT_CONTEXT
+        ) -> subprocess.CompletedProcess[str]:
+            calls.append(args)
+            return real(cwd, *args, timeout=timeout)
+
+        monkeypatch.setattr("claude_code_hooks_daemon.utils.git_facts.run_git", recording)
+        facts = GitFactsBase(repo)
+        facts.index_listing(".")
+        facts.index_listing(".")
+
+        assert len(calls) == 1
+
+    def test_not_a_repository_is_unavailable(self, tmp_path: Path) -> None:
+        assert GitFactsBase(tmp_path).index_listing(".") is None
+
+
+class TestIndexTexts:
+    def test_returns_the_staged_content_not_the_working_tree_content(self, repo: Path) -> None:
+        (repo / "added.md").write_text("edited after staging\n", encoding="utf-8")
+        facts = GitFactsBase(repo)
+        listing = facts.index_listing(".")
+        assert listing is not None
+
+        texts = facts.index_texts(listing, ["added.md", "committed.md"])
+
+        assert texts == {"added.md": "new\n", "committed.md": "original\n"}
+
+    def test_a_path_not_in_the_listing_is_omitted(self, repo: Path) -> None:
+        facts = GitFactsBase(repo)
+        listing = facts.index_listing(".")
+        assert listing is not None
+
+        assert facts.index_texts(listing, ["missing.md"]) == {}
+
+    def test_non_utf8_bytes_do_not_shift_later_blobs(self, repo: Path) -> None:
+        (repo / "binary.md").write_bytes(b"\xff\xfe broken\n")
+        (repo / "after.md").write_text("after\n", encoding="utf-8")
+        _git(repo, "add", "-A")
+        facts = GitFactsBase(repo)
+        listing = facts.index_listing(".")
+        assert listing is not None
+
+        texts = facts.index_texts(listing, ["binary.md", "after.md"])
+
+        assert texts is not None
+        assert texts["after.md"] == "after\n"
+        assert "broken" in texts["binary.md"]
+
+    def test_empty_request_spawns_nothing_and_returns_nothing(self, repo: Path) -> None:
+        assert GitFactsBase(repo).index_texts({}, []) == {}

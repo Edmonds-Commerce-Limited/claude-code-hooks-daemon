@@ -437,3 +437,69 @@ class TestProjectExcludePaths:
 
         assert result.decision == Decision.ALLOW
         assert result.context == []
+
+
+_ROW = "- [00001: first](00001-first/PLAN.md) - In Progress\n"
+_README_WITHOUT_ROW = "# Plans Index\n\n## Active Plans\n"
+
+
+class TestJudgesTheCommittedTree:
+    """Ledger 00474 N244: the gate judges the tree the commit WILL record.
+
+    ``git rm -r --cached`` leaves the folder on disk but out of the commit, so
+    a README row still linking to it dangles in the committed tree. A gate that
+    scans the disk sees a folder and a row that resolves, and allows it.
+    """
+
+    def test_row_left_pointing_at_an_untracked_folder_is_denied(self, repo: Path) -> None:
+        _git(repo, "rm", "-r", "--cached", "-q", f"{_PLAN_DIR_REL}/00001-first")
+        assert (repo / _PLAN_DIR_REL / "00001-first" / "PLAN.md").is_file()
+
+        with _patched_root(repo):
+            result = _handler("block").handle(
+                _bash_input('git commit -m "Plan 00001: untrack the plan"')
+            )
+
+        assert result.decision == Decision.DENY
+        assert result.reason is not None
+        assert "row-folder-bijection" in result.reason
+
+    def test_a_disk_only_row_edit_does_not_rescue_the_commit(self, repo: Path) -> None:
+        _git(repo, "rm", "-r", "--cached", "-q", f"{_PLAN_DIR_REL}/00001-first")
+        # The working-tree README loses the row, but that edit is not staged,
+        # so the committed README still carries it.
+        (repo / _PLAN_DIR_REL / "README.md").write_text(_README_WITHOUT_ROW)
+
+        with _patched_root(repo):
+            result = _handler("block").handle(
+                _bash_input('git commit -m "Plan 00001: untrack the plan"')
+            )
+
+        assert result.decision == Decision.DENY
+
+    def test_removing_the_row_in_the_same_commit_is_allowed(self, repo: Path) -> None:
+        readme = repo / _PLAN_DIR_REL / "README.md"
+        readme.write_text(_README_WITHOUT_ROW)
+        _git(repo, "add", f"{_PLAN_DIR_REL}/README.md")
+        _git(repo, "rm", "-r", "--cached", "-q", f"{_PLAN_DIR_REL}/00001-first")
+        # The row is back on disk, unstaged: the committed README has none.
+        readme.write_text(_README_WITHOUT_ROW + "\n" + _ROW)
+
+        with _patched_root(repo):
+            result = _handler("block").handle(
+                _bash_input('git commit -m "Plan 00001: untrack the plan"')
+            )
+
+        assert result.decision == Decision.ALLOW
+        assert result.context == []
+
+    def test_a_folder_deleted_on_disk_but_still_staged_is_not_missing(self, repo: Path) -> None:
+        folder = repo / _PLAN_DIR_REL / "00001-first"
+        (folder / "PLAN.md").unlink()
+        folder.rmdir()
+
+        with _patched_root(repo):
+            result = _handler("block").handle(_bash_input('git commit -m "docs"'))
+
+        assert result.decision == Decision.ALLOW
+        assert result.context == []

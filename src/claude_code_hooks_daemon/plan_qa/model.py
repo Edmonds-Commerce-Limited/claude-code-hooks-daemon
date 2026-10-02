@@ -24,12 +24,13 @@ import calendar
 import re
 from collections import defaultdict
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date
 from enum import StrEnum
 from pathlib import Path
 from typing import Final
 
+from claude_code_hooks_daemon.plan_qa.tree_view import DiskTreeView, TreeView
 from claude_code_hooks_daemon.plan_qa.types import DEFAULT_JOURNAL_DIR_NAME
 from claude_code_hooks_daemon.utils.authored_paths import (
     authored_path,
@@ -287,6 +288,10 @@ _JOURNAL_YEAR_BASE: Final[int] = 2000
 
 _HIDDEN_PREFIX: Final[str] = "."
 
+# The default filesystem a scan reads: the disk. The view is stateless, so one
+# shared instance serves every default argument.
+_DISK_VIEW: Final[DiskTreeView] = DiskTreeView()
+
 # Non-plan files that legitimately live at the plan root; anything else is a
 # stray (sin-adjacent: orphan notes files invisible to the index).
 _EXPECTED_ROOT_FILES: Final[frozenset[str]] = frozenset(
@@ -529,7 +534,9 @@ def parse_journal_dayfile_name(filename: str) -> JournalDayfileName | None:
     )
 
 
-def _scan_journal(plan_folder: Path, journal_dir_name: str) -> tuple[bool, date | None]:
+def _scan_journal(
+    plan_folder: Path, journal_dir_name: str, view: TreeView
+) -> tuple[bool, date | None]:
     """Return ``(has_journal, latest_journal_date)`` for one plan folder.
 
     ``has_journal`` is True when the journal directory exists at all;
@@ -540,11 +547,11 @@ def _scan_journal(plan_folder: Path, journal_dir_name: str) -> tuple[bool, date 
     # "no journal directory" answer is already this function's own None case,
     # so an escaping name falls into a branch that exists rather than a new one.
     journal_dir = contained_authored_path(plan_folder, journal_dir_name)
-    if journal_dir is None or not journal_dir.is_dir():
+    if journal_dir is None or not view.is_dir(journal_dir):
         return False, None
     dates = [
         parsed.date
-        for entry in journal_dir.iterdir()
+        for entry in view.children(journal_dir)
         if (parsed := parse_journal_dayfile_name(entry.name)) is not None and parsed.is_valid_date
     ]
     return True, (max(dates) if dates else None)
@@ -576,6 +583,15 @@ class PlanTree:
     has_readme: bool
     has_completed_dir: bool
     has_cancelled_dir: bool
+    # The filesystem this tree was scanned from, kept so a check that asks
+    # "does this directory exist?" gets the SAME answer the scan did (ledger
+    # 00474 N244). Excluded from equality: two trees with the same content are
+    # the same tree however they were read.
+    view: TreeView = field(default=_DISK_VIEW, compare=False, repr=False)
+
+    def is_dir(self, path: Path) -> bool:
+        """Whether ``path`` is a directory in the tree this scan saw."""
+        return self.view.is_dir(path)
 
     @classmethod
     def scan(
@@ -585,6 +601,7 @@ class PlanTree:
         cancelled_dir: str | None = DEFAULT_CANCELLED_DIR,
         extra_root_files: Sequence[str] = (),
         journal_dir_name: str = DEFAULT_JOURNAL_DIR_NAME,
+        view: TreeView = _DISK_VIEW,
     ) -> "PlanTree":
         """Scan ``root`` for plan folders, archive dirs, and stray files.
 
@@ -597,33 +614,40 @@ class PlanTree:
         now itself a member of :data:`_EXPECTED_ROOT_FILES` (Plan 00213 Phase
         2), so a project no longer needs this allowlist for it specifically.
 
+        ``view`` is where the tree is read from: the disk by default, or the
+        index a commit will record (ledger 00474 N244).
+
         Raises:
             FileNotFoundError: when ``root`` is not a directory (FAIL FAST —
                 a missing plan dir is a structural finding the caller must
                 surface, not silently treat as empty).
         """
-        if not root.is_dir():
+        if not view.is_dir(root):
             raise FileNotFoundError(f"Plan directory does not exist: {root}")
 
         accepted_root_files = _EXPECTED_ROOT_FILES | frozenset(extra_root_files)
         folders: list[PlanFolder] = []
         stray_files: list[Path] = []
 
-        for entry in sorted(root.iterdir()):
+        for entry in view.children(root):
             if entry.name.startswith(_HIDDEN_PREFIX):
                 continue
-            if not entry.is_dir():
+            if not view.is_dir(entry):
                 if entry.name not in accepted_root_files:
                     stray_files.append(entry)
                 continue
             if _PLAN_FOLDER_RE.match(entry.name):
-                folders.append(_load_plan_folder(entry, PlanLocation.ROOT, journal_dir_name))
+                folders.append(_load_plan_folder(entry, PlanLocation.ROOT, journal_dir_name, view))
             elif entry.name == completed_dir:
-                _collect_plan_folders(entry, PlanLocation.COMPLETED, folders, journal_dir_name)
+                _collect_plan_folders(
+                    entry, PlanLocation.COMPLETED, folders, journal_dir_name, view
+                )
             elif cancelled_dir is not None and entry.name == cancelled_dir:
-                _collect_plan_folders(entry, PlanLocation.CANCELLED, folders, journal_dir_name)
+                _collect_plan_folders(
+                    entry, PlanLocation.CANCELLED, folders, journal_dir_name, view
+                )
             else:
-                _collect_plan_folders(entry, PlanLocation.OTHER, folders, journal_dir_name)
+                _collect_plan_folders(entry, PlanLocation.OTHER, folders, journal_dir_name, view)
 
         return cls(
             root=root,
@@ -638,11 +662,12 @@ class PlanTree:
             # applied to the helper's result (not a bare `exists()`) is what
             # tells a README file apart from a directory of the same name, and
             # the archive directory apart from a stray file of the same name.
-            has_readme=authored_path(root, README_FILENAME).is_file(),
-            has_completed_dir=authored_path(root, completed_dir).is_dir(),
+            has_readme=view.is_file(authored_path(root, README_FILENAME)),
+            has_completed_dir=view.is_dir(authored_path(root, completed_dir)),
             has_cancelled_dir=(
-                cancelled_dir is not None and authored_path(root, cancelled_dir).is_dir()
+                cancelled_dir is not None and view.is_dir(authored_path(root, cancelled_dir))
             ),
+            view=view,
         )
 
     def collisions(self) -> dict[int, list[PlanFolder]]:
@@ -657,21 +682,22 @@ def _load_plan_folder(
     path: Path,
     location: PlanLocation,
     journal_dir_name: str = DEFAULT_JOURNAL_DIR_NAME,
+    view: TreeView = _DISK_VIEW,
 ) -> PlanFolder:
     """Build a :class:`PlanFolder`, parsing its PLAN.md when present."""
     match = _PLAN_FOLDER_RE.match(path.name)
     if match is None:  # pragma: no cover - callers pre-filter on the pattern
         raise ValueError(f"Not a plan folder name: {path.name}")
     plan_md = authored_path(path, PLAN_DOC_FILENAME)
-    has_plan_md = plan_md.is_file()
-    has_journal, latest_journal_date = _scan_journal(path, journal_dir_name)
+    has_plan_md = view.is_file(plan_md)
+    has_journal, latest_journal_date = _scan_journal(path, journal_dir_name, view)
     return PlanFolder(
         path=path,
         name=path.name,
         number=int(match.group(1)),
         location=location,
         has_plan_md=has_plan_md,
-        doc=PlanDoc.parse(plan_md.read_text()) if has_plan_md else None,
+        doc=PlanDoc.parse(view.read_text(plan_md)) if has_plan_md else None,
         has_journal=has_journal,
         latest_journal_date=latest_journal_date,
     )
@@ -682,6 +708,7 @@ def _collect_plan_folders(
     location: PlanLocation,
     accumulator: list[PlanFolder],
     journal_dir_name: str = DEFAULT_JOURNAL_DIR_NAME,
+    view: TreeView = _DISK_VIEW,
 ) -> None:
     """Recursively collect plan folders under an organisational directory.
 
@@ -690,10 +717,10 @@ def _collect_plan_folders(
     ``handlers/utils/plan_numbering.py`` so QA and numbering agree on what
     counts as a plan.
     """
-    for entry in sorted(directory.iterdir()):
-        if not entry.is_dir() or entry.name.startswith(_HIDDEN_PREFIX):
+    for entry in view.children(directory):
+        if not view.is_dir(entry) or entry.name.startswith(_HIDDEN_PREFIX):
             continue
         if _PLAN_FOLDER_RE.match(entry.name):
-            accumulator.append(_load_plan_folder(entry, location, journal_dir_name))
+            accumulator.append(_load_plan_folder(entry, location, journal_dir_name, view))
         else:
-            _collect_plan_folders(entry, location, accumulator, journal_dir_name)
+            _collect_plan_folders(entry, location, accumulator, journal_dir_name, view)
