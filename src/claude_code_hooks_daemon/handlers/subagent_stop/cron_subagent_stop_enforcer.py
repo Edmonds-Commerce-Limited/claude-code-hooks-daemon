@@ -43,13 +43,16 @@ from claude_code_hooks_daemon.handlers.utils.session_advice_counter import (
     SessionAdviceCounter,
 )
 from claude_code_hooks_daemon.utils.config_cache import load_config_cached
-from claude_code_hooks_daemon.utils.cron_enforcement import (
-    find_missing_crons,
-    parse_session_crons,
-    verdict_for_missing_crons,
-)
 from claude_code_hooks_daemon.utils.cron_hosts import effective_hostname
 from claude_code_hooks_daemon.utils.cron_pause import PAUSE_ADVISE_INTERVAL, default_pauses_path
+from claude_code_hooks_daemon.utils.cron_records import (
+    DEFAULT_REFRESH_AFTER_DAYS,
+    default_records_path,
+)
+from claude_code_hooks_daemon.utils.cron_refresh import (
+    judge_declared_crons,
+    refresh_days_to_seconds,
+)
 from claude_code_hooks_daemon.utils.usage_pause_gate import hook_is_usage_paused
 
 logger = logging.getLogger(__name__)
@@ -87,6 +90,8 @@ class CronSubagentStopEnforcerHandler(SubagentStopHandlerBase):
         self._pause_advice = SessionAdviceCounter(
             interval=PAUSE_ADVISE_INTERVAL, max_sessions=_MAX_TRACKED_PAUSE_KEYS
         )
+        # Option, injected by the registry (``options.refresh_after_days``).
+        self._refresh_after_days: float = DEFAULT_REFRESH_AFTER_DAYS
 
     def get_default_enabled(self) -> bool:
         """Enabled, but silent until the project declares a job.
@@ -133,24 +138,24 @@ class CronSubagentStopEnforcerHandler(SubagentStopHandlerBase):
         if not jobs:
             return BlockingResult(decision=Decision.ALLOW)
 
-        session_crons = parse_session_crons(hook_input)
-        if session_crons is None:
-            return BlockingResult(decision=Decision.ALLOW)
-
-        missing = find_missing_crons(jobs, session_crons)
-        if not missing:
-            return BlockingResult(decision=Decision.ALLOW)
-
-        return verdict_for_missing_crons(
-            missing,
+        # Also denies a live job past ``refresh_after_days`` (Plan 00470 Task
+        # 2.2), through the same shared judgement as the Stop twin.
+        return judge_declared_crons(
+            jobs,
             hook_input,
             pauses_path=self._pauses_path(),
+            records_path=self._records_path(),
             should_advise=self._pause_advice.should_advise,
+            refresh_after_seconds=refresh_days_to_seconds(self._refresh_after_days),
         )
 
     def _pauses_path(self) -> Path | None:
         """Where ``hooks-daemon cron-pause`` records this project's pauses."""
         return default_pauses_path()
+
+    def _records_path(self) -> Path | None:
+        """Where ``cron_record_keeper`` records when each cron was created."""
+        return default_records_path()
 
     def get_acceptance_tests(self) -> list[Any]:
         """Two cases, mirroring the Stop twin against this repo's real job."""
@@ -215,7 +220,8 @@ class CronSubagentStopEnforcerHandler(SubagentStopHandlerBase):
             "## cron_subagent_stop_enforcer — SubagentStop twin of "
             "`cron_stop_enforcer`\n\n"
             "Same verification, same matching rules, same absent-vs-empty "
-            "`session_crons` semantics, same `cron-pause` session pause, same "
+            "`session_crons` semantics, same refresh of a job older than "
+            "`options.refresh_after_days`, same `cron-pause` session pause, same "
             "priority-7/non-terminal "
             "ordering reasoning as `cron_stop_enforcer` — see its guidance "
             "above. Scoped to the main thread like `cron_stop_enforcer`: session "
