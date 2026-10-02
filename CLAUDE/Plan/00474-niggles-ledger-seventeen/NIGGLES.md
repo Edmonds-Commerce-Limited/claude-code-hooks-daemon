@@ -1415,6 +1415,11 @@ new QA script lands without the pins that every other walker already meets.
 **Status**: ✅ Fixed on worktree-n318-module-length-walker. The script walks through
 `scan_scope.walk_files`, exits 2 when it examined nothing, reports `files_scanned`, uses
 `path_relative_to`, and is classified in `WALKERS` and `ROOT_OPTIONS`. Findings stay report-only.
+A second red test of the same class: merge bf8d40aa9 made `bash_safe_mode` block-by-default and
+gave it a deny acceptance test, so its `_EXEMPT_FROM_DENY_TEST` entry in
+`tests/integration/test_acceptance_test_coverage.py` became obsolete and failed
+`test_an_exemption_is_dropped_once_it_becomes_untrue`. The entry is deleted; the affected suite
+had not been run before that merge.
 
 ### N317 — plan QA says "stages no journal entry" when the same command writes and stages it
 
