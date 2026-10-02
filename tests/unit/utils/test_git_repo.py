@@ -13,6 +13,7 @@ lives, and the session-wide ``hermetic_git_environment`` is what makes a
 missing one fail locally rather than only in CI.
 """
 
+import os
 import subprocess
 from pathlib import Path
 from unittest import mock
@@ -20,7 +21,13 @@ from unittest import mock
 import pytest
 
 from claude_code_hooks_daemon.constants.timeout import Timeout
-from claude_code_hooks_daemon.utils.git_repo import GitRepo, git_visible_paths, read_blobs, run_git
+from claude_code_hooks_daemon.utils.git_repo import (
+    RELOCATING_VARIABLES,
+    GitRepo,
+    git_visible_paths,
+    read_blobs,
+    run_git,
+)
 
 _KEY = "hooksdaemon.testValue"
 
@@ -385,7 +392,7 @@ class TestCallerSuppliedEnvironment:
     def test_a_caller_cannot_re_enable_the_optional_lock(self, tmp_git_repo: Path) -> None:
         """Not theoretical: a caller passing a whole `os.environ` copy would
         otherwise reinstate an inherited value and silently undo the runner's
-        one guarantee. `git_sync._noninteractive_env` does exactly that copy.
+        one guarantee.
         """
         with mock.patch("subprocess.run") as runner:
             runner.return_value = subprocess.CompletedProcess([], 0, "", "")
@@ -395,6 +402,97 @@ class TestCallerSuppliedEnvironment:
             "a caller overrode the declined index lock, so the runner no longer "
             "guarantees the property it exists for"
         )
+
+
+class TestARelocatedRepositoryIsNotInherited:
+    """``-C <cwd>`` must name the repository git answers for (Plan 00483 N154).
+
+    ``GIT_DIR``, ``GIT_WORK_TREE``, ``GIT_INDEX_FILE`` and ``GIT_COMMON_DIR``
+    each override ``-C``, so one inherited from the daemon's own environment, or
+    smuggled in by a caller's whole-``os.environ`` copy, makes every probe answer
+    for a different repository with no error.
+    """
+
+    @pytest.mark.parametrize("name", sorted(RELOCATING_VARIABLES))
+    def test_run_git_drops_an_inherited_relocating_variable(
+        self, tmp_git_repo: Path, name: str
+    ) -> None:
+        with (
+            mock.patch.dict("os.environ", {name: "/elsewhere"}),
+            mock.patch("subprocess.run") as runner,
+        ):
+            runner.return_value = subprocess.CompletedProcess([], 0, "", "")
+            run_git(tmp_git_repo, "status")
+
+        passed = runner.call_args.kwargs["env"]
+        assert name not in passed
+        assert passed["GIT_OPTIONAL_LOCKS"] == "0"
+
+    def test_run_git_honours_a_relocating_variable_a_caller_passes(
+        self, tmp_git_repo: Path
+    ) -> None:
+        """A caller that needs another index passes it explicitly (a simulated add)."""
+        with mock.patch("subprocess.run") as runner:
+            runner.return_value = subprocess.CompletedProcess([], 0, "", "")
+            run_git(tmp_git_repo, "status", env={"GIT_INDEX_FILE": "/elsewhere/index"})
+
+        assert runner.call_args.kwargs["env"]["GIT_INDEX_FILE"] == "/elsewhere/index"
+
+    def test_a_caller_scratch_index_leaves_the_real_index_untouched(
+        self, tmp_git_repo: Path, tmp_path_factory: pytest.TempPathFactory
+    ) -> None:
+        scratch = tmp_path_factory.mktemp("scratch_index") / "index"
+        (tmp_git_repo / "new.txt").write_text("x\n")
+        real_index = tmp_git_repo / ".git" / "index"
+        before = real_index.read_bytes()
+
+        result = run_git(tmp_git_repo, "add", "new.txt", env={"GIT_INDEX_FILE": str(scratch)})
+
+        assert result.returncode == 0
+        assert scratch.exists()
+        assert real_index.read_bytes() == before
+
+    def test_read_blobs_drops_an_inherited_relocating_variable(self, tmp_git_repo: Path) -> None:
+        with (
+            mock.patch.dict("os.environ", {"GIT_DIR": "/elsewhere/.git"}),
+            mock.patch("subprocess.run") as runner,
+        ):
+            runner.return_value = subprocess.CompletedProcess([], 0, b"", b"")
+            read_blobs(tmp_git_repo, ["0" * 40])
+
+        passed = runner.call_args.kwargs["env"]
+        assert "GIT_DIR" not in passed
+        assert passed["GIT_OPTIONAL_LOCKS"] == "0"
+
+    def test_a_real_probe_answers_for_the_directory_it_was_given(
+        self, tmp_git_repo: Path, tmp_path_factory: pytest.TempPathFactory
+    ) -> None:
+        other = tmp_path_factory.mktemp("other_repo")
+        _git_init(other)
+        inherited = {"GIT_DIR": str(other / ".git")}
+
+        with mock.patch.dict("os.environ", inherited):
+            answer = run_git(tmp_git_repo, "rev-parse", "--absolute-git-dir").stdout.strip()
+
+        assert Path(answer).resolve() == (tmp_git_repo / ".git").resolve()
+
+    def test_the_control_shows_bare_git_would_have_been_relocated(
+        self, tmp_git_repo: Path, tmp_path_factory: pytest.TempPathFactory
+    ) -> None:
+        other = tmp_path_factory.mktemp("other_repo")
+        _git_init(other)
+        env = {**os.environ, "GIT_DIR": str(other / ".git")}
+
+        bare = subprocess.run(
+            ["git", "-C", str(tmp_git_repo), "rev-parse", "--git-dir"],
+            capture_output=True,
+            text=True,
+            env=env,
+            check=False,
+            timeout=Timeout.GIT_CONTEXT,
+        )
+
+        assert Path(bare.stdout.strip()).resolve() == (other / ".git").resolve()
 
 
 class TestIsLinkedWorktree:

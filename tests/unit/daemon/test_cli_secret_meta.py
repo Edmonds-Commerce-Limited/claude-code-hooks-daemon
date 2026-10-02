@@ -54,3 +54,50 @@ class TestCmdSecretMeta:
         meta = _run(capsys, tmp_path, secret)
         assert meta["size_bytes"] == 8
         assert "sha256" in meta
+
+
+def _grant_plain_hash(root: Path) -> None:
+    claude_dir = root / ".claude"
+    claude_dir.mkdir(parents=True)
+    (claude_dir / "hooks-daemon.yaml").write_text(
+        "handlers:\n"
+        "  pre_tool_use:\n"
+        "    secret_file_guard:\n"
+        "      enabled: true\n"
+        "      options:\n"
+        "        allow_plain_hash: true\n"
+    )
+
+
+class TestPlainHashIsGrantedOnlyByTheFilesOwnProject:
+    """Plan 00483 N230: a config elsewhere is nobody's decision about this file."""
+
+    def test_a_config_outside_the_files_project_never_grants_the_plain_hash(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        grant_root = tmp_path / "scratch"
+        _grant_plain_hash(grant_root)
+        secret = tmp_path / "fixture.vault-password"
+        secret.write_text("hunter2\n")
+
+        meta = _run(capsys, grant_root, secret)
+
+        assert meta["exists"] is True
+        assert "size_bucket" in meta
+        assert "sha256" not in meta
+        assert "size_bytes" not in meta
+
+    def test_a_symlink_under_the_granting_root_is_placed_where_it_points(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        grant_root = tmp_path / "scratch"
+        _grant_plain_hash(grant_root)
+        secret = tmp_path / "fixture.vault-password"
+        secret.write_text("hunter2\n")
+        link = grant_root / "link.vault-password"
+        link.symlink_to(secret)
+
+        meta = _run(capsys, grant_root, link)
+
+        assert "sha256" not in meta
+        assert "size_bytes" not in meta
