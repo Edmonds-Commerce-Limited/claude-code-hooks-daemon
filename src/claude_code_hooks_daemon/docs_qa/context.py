@@ -16,7 +16,7 @@ Mirrors :mod:`claude_code_hooks_daemon.plan_qa.context`:
   reuses ``plan_qa.types``' tier line-count constants).
 """
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Final
 
@@ -28,7 +28,7 @@ from claude_code_hooks_daemon.docs_qa.corpus import (
 )
 from claude_code_hooks_daemon.docs_qa.policy import DocumentationPolicy
 from claude_code_hooks_daemon.docs_qa.types import CheckContext
-from claude_code_hooks_daemon.utils.git_facts import GitFactsBase
+from claude_code_hooks_daemon.utils.git_facts import GitFactsBase, PathspecScope
 
 if TYPE_CHECKING:
     from claude_code_hooks_daemon.core.project_layout import ProjectLayout
@@ -120,15 +120,17 @@ def staged_context(
     layout: "ProjectLayout | None" = None,
     include: bool = False,
     directory: Path | None = None,
-    extra_directories: Sequence[Path] = (),
+    scopes: Sequence[PathspecScope] = (),
+    union: bool = False,
+    index_env: Mapping[str, str] | None = None,
 ) -> CheckContext:
     """Build the STAGED-stage context: the commit's staged ``.md`` content.
 
     ``directory`` is where the commit's pathspecs are read from (ledger 00474
     N299: ``cd sub && git commit f.txt`` names ``sub/f.txt``); the project root
-    when omitted. ``extra_directories`` are the others the command may have run
-    in (a ``cd`` that may not have taken effect); what the pathspecs name in any
-    of them is judged.
+    when omitted. ``scopes`` replaces both when the command runs several commits
+    (ledger 00474 N307); ``union`` judges the index plus what they name, and
+    ``index_env`` reads the index a same-command ``git add`` leaves (N246).
 
     ``pathspecs`` mirrors :class:`GitFacts`'s own contract: when the
     inspected ``git commit`` invocation names paths directly, the STAGED
@@ -145,7 +147,9 @@ def staged_context(
         pathspecs=pathspecs,
         include=include,
         directory=directory,
-        extra_directories=extra_directories,
+        scopes=scopes,
+        union=union,
+        index_env=index_env,
     )
     staged_documents: dict[str, str] = {}
     for change in gitfacts.staged_changes():

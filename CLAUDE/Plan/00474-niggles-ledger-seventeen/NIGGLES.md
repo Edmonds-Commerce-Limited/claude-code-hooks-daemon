@@ -732,7 +732,12 @@ that branch only, so all seven are open on `main`.
   the 638 touched tests pass on merged main. Round 3's follow-ups are N299–N301. Report:
   [subagent-reports/261002-n245-pathspec-sonnet.md](subagent-reports/261002-n245-pathspec-sonnet.md).
 
-- **N246**: open.
+- **N246**: **Fixed** on branch `worktree-commit-gate-same-command` (not yet merged). A `git add`
+  before the commit in the same command is run against a copy of the index and a scratch object
+  directory (`utils/staging_simulation.py`), and `sensitive_content`, `staged_lint_gate`, docs QA, plan QA and
+  `remote_docs_commit_gate` read that index. An add whose scope cannot be read is applied as `git add -A`.
+  `guard_config_commit_gate` (advisory only) still reads the real index for the add. Report:
+  [subagent-reports/261002-commit-gate-same-cmd-sonnet.md](subagent-reports/261002-commit-gate-same-cmd-sonnet.md).
 
 - **N135, N176, N177, N189: ✅ Dismissed. They are out of scope under the owner's
   threat-model ruling**
@@ -1375,7 +1380,10 @@ other gates.
 both as moves taken. This was already wrong on main. N299 round 2 handles it by treating any
 uncertain move as unknown and judging both directories.
 
-**Status**: ⬜ Open. N299 round 2 did NOT close it. The probe row `cd sub || cd x; git commit -m x f.txt`, with the term in `sub/f.txt`, still records the term on both main and 37b9a8020.
+**Status**: ✅ Fixed on branch `worktree-commit-gate-same-command` (not yet merged). Every directory
+any `cd` in the chain may land in is judged (`landing_directories`), and the hook directory as well. The
+price is a fail-closed false positive the shell would not make: `cd x || cd sub; git commit f.txt`
+also judges `sub/f.txt` when `cd x` succeeds. N299 round 2 did NOT close it. The probe row `cd sub || cd x; git commit -m x f.txt`, with the term in `sub/f.txt`, still records the term on both main and 37b9a8020.
 The uncertain-move union judges the hook directory and the LAST recorded move (`x`), but not
 every candidate directory (`sub`). Remedy: judge every directory any `cd` in the chain could
 land in.
@@ -1459,4 +1467,6 @@ acceptance tests follow the configured mode. Live once the daemon restarts.
 judged. A `git commit -m a x.txt && git commit -m b y.txt` never scans `y.txt` as a pathspec
 commit. This was already wrong on main, and it is an ordinary shape.
 
-**Status**: ⬜ Open.
+**Status**: ✅ Fixed on branch `worktree-commit-gate-same-command` (not yet merged). The reading carries
+every commit (`CommitReading.runs`), each with its own form, moves and `-a`; the gates judge every
+commit's pathspecs from the directory that commit runs in (`commit_scopes`).

@@ -16,14 +16,22 @@ from typing import Any
 import pytest
 
 from claude_code_hooks_daemon.utils import git_facts as git_facts_module
-from claude_code_hooks_daemon.utils.git_commit_parsing import read_commit_form
+from claude_code_hooks_daemon.utils.git_commit_parsing import (
+    CommitForm,
+    CommitReading,
+    read_commit_form,
+)
 from claude_code_hooks_daemon.utils.git_facts import (
     GitFactsBase,
+    PathspecScope,
     commit_directory,
     commit_facts,
-    unmoved_directories,
+    commit_scopes,
+    landing_directories,
+    run_directories,
 )
 from claude_code_hooks_daemon.utils.git_repo import run_git
+from claude_code_hooks_daemon.utils.staging_simulation import simulated_staging
 from tests.support.git_fixtures import run_git as _git
 
 
@@ -205,16 +213,20 @@ class TestAnUncertainMoveJudgesBothDirectories:
         assert "sub/f.txt" in _recorded(facts)
         assert "f.txt" not in _recorded(facts)
 
-    def test_the_hooks_directory_is_the_extra_one(self, twin: Path) -> None:
+    def test_the_hooks_directory_is_read_as_well_as_the_one_moved_to(self, twin: Path) -> None:
         reading = read_commit_form("cd sub & git commit -m x f.txt")
 
-        assert unmoved_directories(reading, twin, twin) == (twin,)
+        directories = [scope.directory for scope in commit_scopes(reading, twin, twin)]
+
+        assert directories == [twin / "sub", twin]
 
     @pytest.mark.parametrize(
         "command", ["cd sub && git commit -m x f.txt", "git commit -m x f.txt"]
     )
-    def test_a_certain_reading_has_no_extra_directory(self, twin: Path, command: str) -> None:
-        assert unmoved_directories(read_commit_form(command), twin, twin) == ()
+    def test_a_certain_reading_has_one_directory(self, twin: Path, command: str) -> None:
+        scopes = commit_scopes(read_commit_form(command), twin, twin)
+
+        assert len(scopes) == 1
 
 
 class TestCommitDirectory:
@@ -319,3 +331,158 @@ class TestEveryPathspecMatchesCostsOneGitCall:
 
         assert facts.union is False
         assert len(git_calls) <= 3
+
+
+class TestEveryDirectoryACdMayLandIn:
+    """Ledger 00474 N306: ``cd a || cd b`` runs one of them, so both are places git may run."""
+
+    def test_no_moves_is_the_start(self, tmp_path: Path) -> None:
+        assert landing_directories((), 0, tmp_path) == (tmp_path,)
+
+    def test_a_certain_chain_lands_in_one_directory(self, tmp_path: Path) -> None:
+        assert landing_directories(("a", "b"), 0, tmp_path) == (tmp_path / "a" / "b",)
+
+    def test_every_subset_of_the_optional_moves_is_a_place(self, tmp_path: Path) -> None:
+        landed = set(landing_directories(("a", "b"), 2, tmp_path))
+
+        assert landed == {tmp_path, tmp_path / "a", tmp_path / "b", tmp_path / "a" / "b"}
+
+    def test_the_whole_chain_comes_first(self, tmp_path: Path) -> None:
+        assert landing_directories(("a",), 1, tmp_path)[0] == tmp_path / "a"
+
+    def test_a_dash_c_operand_always_applies(self, tmp_path: Path) -> None:
+        landed = set(landing_directories(("a", "z"), 1, tmp_path))
+
+        assert landed == {tmp_path / "a" / "z", tmp_path / "z"}
+
+    def test_a_move_that_cannot_be_stated_drops_only_the_combinations_with_it(
+        self, tmp_path: Path
+    ) -> None:
+        landed = set(landing_directories(("a", None), 2, tmp_path))
+
+        assert landed == {tmp_path, tmp_path / "a"}
+
+    def test_a_fixed_move_that_cannot_be_stated_leaves_nothing(self, tmp_path: Path) -> None:
+        assert landing_directories((None,), 0, tmp_path) == ()
+
+    def test_a_long_chain_tries_the_whole_chain_each_move_alone_and_none(
+        self, tmp_path: Path
+    ) -> None:
+        moves = tuple(f"d{number}" for number in range(7))
+
+        landed = set(landing_directories(moves, 7, tmp_path))
+
+        assert landed == {
+            tmp_path,
+            tmp_path.joinpath(*moves),
+            *(tmp_path / move for move in moves),
+        }
+
+    def test_only_directories_inside_the_repository_are_read(self, twin: Path) -> None:
+        directories = run_directories(("sub", "/"), 2, twin, twin)
+
+        assert set(directories) == {twin, twin / "sub"}
+
+    def test_a_chain_that_leaves_the_repository_falls_back_to_the_hooks_directory(
+        self, twin: Path
+    ) -> None:
+        assert run_directories(("/",), 0, twin / "sub", twin) == (twin / "sub",)
+
+    def test_without_a_hooks_directory_the_repository_root_is_read(self, twin: Path) -> None:
+        assert run_directories(("sub",), 0, None, twin) == (twin,)
+
+
+class TestCommitScopes:
+    def test_a_bare_commit_has_no_scope(self, twin: Path) -> None:
+        assert commit_scopes(read_commit_form("git commit -m x"), twin, twin) == ()
+
+    def test_each_commit_is_read_from_where_it_runs(self, twin: Path) -> None:
+        reading = read_commit_form(
+            "cd sub && git commit -m x f.txt; cd .. && git commit -m y f.txt"
+        )
+
+        scopes = commit_scopes(reading, twin, twin)
+
+        assert [(scope.directory, scope.pathspecs) for scope in scopes] == [
+            (twin / "sub", ("f.txt",)),
+            (twin, ("f.txt",)),
+        ]
+
+    def test_a_reading_built_by_hand_is_one_commit(self, twin: Path) -> None:
+        reading = CommitReading(CommitForm(pathspecs=("f.txt",)), certain=True)
+
+        assert commit_scopes(reading, twin, twin) == (PathspecScope(twin, ("f.txt",)),)
+
+    def test_a_hand_built_reading_with_uncertain_moves_reads_both_directories(
+        self, twin: Path
+    ) -> None:
+        reading = CommitReading(
+            CommitForm(pathspecs=("f.txt",)), certain=False, moves=("sub",), moves_certain=False
+        )
+
+        directories = {scope.directory for scope in commit_scopes(reading, twin, twin)}
+
+        assert directories == {twin, twin / "sub"}
+
+
+class TestFactsOfSeveralCommits:
+    def test_the_second_commits_pathspec_is_judged(self, twin: Path) -> None:
+        reading = read_commit_form("git commit -m x sub/f.txt; git commit -m y f.txt")
+
+        facts = commit_facts(reading, twin, twin)
+
+        assert _recorded(facts) == {"f.txt", "sub/f.txt"}
+
+    def test_each_pathspec_is_read_from_its_own_commits_directory(self, twin: Path) -> None:
+        _write(twin, "g.txt", "head\n")
+        _git(twin, "add", "g.txt")
+        _git(twin, "commit", "-m", "g")
+        _write(twin, "g.txt", "edit\n")
+        reading = read_commit_form(
+            "cd sub && git commit -m x f.txt; cd .. && git commit -m y g.txt"
+        )
+
+        facts = commit_facts(reading, twin, twin)
+
+        assert _recorded(facts) == {"sub/f.txt", "g.txt"}
+        assert "f.txt" not in _recorded(facts)
+
+    def test_a_bare_first_commit_adds_the_index_to_the_second_commits_paths(
+        self, twin: Path
+    ) -> None:
+        _git(twin, "add", "f.txt")
+        reading = read_commit_form("git commit -m x; git commit -m y sub/f.txt")
+
+        facts = commit_facts(reading, twin, twin)
+
+        assert _recorded(facts) == {"f.txt", "sub/f.txt"}
+
+    def test_the_scopes_are_the_ones_the_facts_read(self, twin: Path) -> None:
+        reading = read_commit_form("git commit -m x f.txt; git commit -m y sub/f.txt")
+
+        facts = commit_facts(reading, twin, twin)
+
+        assert [scope.pathspecs for scope in facts.scopes] == [("f.txt",), ("sub/f.txt",)]
+        assert facts.pathspecs == ("f.txt", "sub/f.txt")
+        assert facts.union is True
+        assert facts.index_env is None
+
+
+class TestFactsReadThePostAddIndex:
+    def test_an_environment_makes_every_read_see_the_added_file(self, twin: Path) -> None:
+        _write(twin, "new.txt", "new\n")
+        reading = read_commit_form("git add new.txt && git commit -m x")
+
+        with simulated_staging(reading, twin, twin) as env:
+            facts = commit_facts(reading, twin, twin, index_env=env)
+            assert _recorded(facts) == {"new.txt"}
+            assert facts.staged_file_text("new.txt") == "new\n"
+            listing = facts.index_listing(".")
+            assert listing is not None
+            assert facts.index_texts(listing, ["new.txt"]) == {"new.txt": "new\n"}
+            assert facts.index_env == env
+
+    def test_without_one_the_index_is_the_real_one(self, twin: Path) -> None:
+        _write(twin, "new.txt", "new\n")
+
+        assert _recorded(commit_facts(read_commit_form("git commit -m x"), twin, twin)) == set()

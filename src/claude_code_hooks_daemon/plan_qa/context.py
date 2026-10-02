@@ -25,7 +25,7 @@ files themselves rather than asking the tree (``path-existence``,
 the journal day-file lookups in ``checks/common.py``).
 """
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import replace
 from datetime import date
 from pathlib import Path
@@ -37,6 +37,7 @@ from claude_code_hooks_daemon.plan_qa.readme_index import ReadmeIndex
 from claude_code_hooks_daemon.plan_qa.tree_view import DiskTreeView, IndexTreeView, TreeView
 from claude_code_hooks_daemon.plan_qa.types import CheckContext, PlanDocSizeLimits
 from claude_code_hooks_daemon.utils.authored_paths import authored_path
+from claude_code_hooks_daemon.utils.git_facts import PathspecScope
 from claude_code_hooks_daemon.utils.path_containment import path_is_relative_to, path_relative_to
 
 if TYPE_CHECKING:
@@ -330,7 +331,9 @@ def staged_context(
     exclude_paths: Sequence[str] | None = None,
     include: bool = False,
     directory: Path | None = None,
-    extra_directories: Sequence[Path] = (),
+    scopes: Sequence[PathspecScope] = (),
+    union: bool = False,
+    index_env: Mapping[str, str] | None = None,
 ) -> CheckContext:
     """Build the Stage 2 (COMMIT) context: staged git facts + tree views.
 
@@ -338,9 +341,12 @@ def staged_context(
         directory: Where the commit's pathspecs are read from (ledger 00474
             N299: ``cd sub && git commit f.txt`` names ``sub/f.txt``); the
             project root when omitted.
-        extra_directories: The other directories the command may have run in
-            (a ``cd`` that may not have taken effect); what the pathspecs name
-            in any of them is judged.
+        scopes: Replaces ``directory`` and the pathspec scope when the command
+            runs several commits (ledger 00474 N307).
+        union: Judge the index plus what the pathspecs name, as a reading that
+            is not certain is.
+        index_env: Environment that reads the index a same-command ``git add``
+            leaves (ledger 00474 N246).
         pathspecs: The commit's explicit pathspec arguments, when the
             inspected ``git commit`` invocation names paths directly
             (``git commit <pathspec>...``). Threaded straight into
@@ -362,7 +368,9 @@ def staged_context(
         pathspecs=pathspecs,
         include=include,
         directory=directory,
-        extra_directories=extra_directories,
+        scopes=scopes,
+        union=union,
+        index_env=index_env,
     )
     # A bare commit records the INDEX, so the tree is read from it. A
     # `git commit <pathspec>` (or `--include`) records the WORKING-TREE content

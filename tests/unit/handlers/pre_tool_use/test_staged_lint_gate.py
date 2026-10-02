@@ -33,6 +33,7 @@ from claude_code_hooks_daemon.core.rule import Rule
 from claude_code_hooks_daemon.handlers.pre_tool_use.staged_lint_gate import (
     StagedLintGateHandler,
 )
+from claude_code_hooks_daemon.utils.git_repo import run_git
 
 
 @pytest.fixture(autouse=True)
@@ -525,3 +526,99 @@ class TestBlockModeDisclosureLadder:
         assert "CHEAP syntax tier only" in first.reason
         assert second.reason is not None
         assert "CHEAP syntax tier only" in second.reason
+
+
+class TestACommandThatStagesOrCommitsMoreThanOnce:
+    """Ledger 00474 N246 and N307: the files linted are those the whole command records."""
+
+    @pytest.fixture
+    def tracked(self, repo: Path) -> Path:
+        _stage_file(repo, "clean.py", "def clean() -> None:\n    return None\n")
+        _stage_file(repo, "sub/clean.py", "def clean() -> None:\n    return None\n")
+        _git(repo, "commit", "-m", "tracked")
+        return repo
+
+    def _handle(self, handler: StagedLintGateHandler, repo: Path, command: str) -> str:
+        with _patched_root(repo):
+            return " ".join(handler.handle(_bash(command, str(repo))).context)
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "git add broken.py && git commit -m x",
+            "git add -A && git commit -m x",
+            "git add . && git commit -m x",
+            "git add broken.py && git commit -m x broken.py",
+        ],
+    )
+    def test_a_file_the_same_command_adds_is_linted(
+        self, handler: StagedLintGateHandler, tracked: Path, command: str
+    ) -> None:
+        (tracked / "broken.py").write_text("def broken(\n")
+
+        assert "broken.py" in self._handle(handler, tracked, command)
+
+    def test_a_file_the_add_does_not_name_is_not_linted(
+        self, handler: StagedLintGateHandler, tracked: Path
+    ) -> None:
+        (tracked / "broken.py").write_text("def broken(\n")
+
+        assert "broken.py" not in self._handle(
+            handler, tracked, "git add clean.py && git commit -m x"
+        )
+
+    def test_the_second_commits_pathspec_is_linted(
+        self, handler: StagedLintGateHandler, tracked: Path
+    ) -> None:
+        _stage_file(tracked, "later.py", "def later() -> None:\n    return None\n")
+        _git(tracked, "commit", "-m", "later")
+        (tracked / "clean.py").write_text("def clean() -> int:\n    return 1\n")
+        (tracked / "later.py").write_text("def later(\n")
+
+        rendered = self._handle(
+            handler, tracked, "git commit -m a clean.py; git commit -m b later.py"
+        )
+
+        assert "later.py" in rendered
+
+    @pytest.mark.parametrize(("mode", "decision"), [("block", Decision.DENY), ("warn", None)])
+    def test_an_add_that_cannot_be_simulated_is_not_read_as_clean(
+        self, handler: StagedLintGateHandler, tracked: Path, mode: str, decision: Decision | None
+    ) -> None:
+        handler._mode = mode
+        (tracked / "broken.py").write_text("def broken(\n")
+        timed_out = subprocess.CompletedProcess(["git"], 127, "", "timed out after 5s")
+        real = run_git
+
+        def run(directory: Path, *args: str, **kwargs: Any) -> subprocess.CompletedProcess[str]:
+            if "add" in args[:3]:
+                return timed_out
+            return real(directory, *args, **kwargs)
+
+        with _patched_root(tracked), patch(
+            "claude_code_hooks_daemon.utils.staging_simulation.run_git", side_effect=run
+        ):
+            result = handler.handle(_bash("git add broken.py && git commit -m x", str(tracked)))
+
+        if decision is Decision.DENY:
+            assert result.decision == Decision.DENY
+            assert "separate command" in (result.reason or "")
+        else:
+            assert result.decision == Decision.ALLOW
+            assert "separate command" in " ".join(result.context)
+
+    def test_the_real_index_is_untouched(
+        self, handler: StagedLintGateHandler, tracked: Path
+    ) -> None:
+        (tracked / "broken.py").write_text("def broken(\n")
+
+        self._handle(handler, tracked, "git add broken.py && git commit -m x")
+
+        staged = subprocess.run(  # nosec B603 B607 - trusted git binary, fixed argv, test fixture
+            ["git", "-C", str(tracked), "diff", "--cached", "--name-only"],
+            capture_output=True,
+            check=True,
+            text=True,
+            timeout=Timeout.GIT_CONTEXT,
+        )
+        assert staged.stdout == ""

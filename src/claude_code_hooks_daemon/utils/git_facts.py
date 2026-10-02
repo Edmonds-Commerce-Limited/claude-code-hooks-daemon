@@ -33,14 +33,18 @@ project root's repo never tracks.
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date
+from itertools import combinations
 from pathlib import Path
-from typing import Final
+from typing import TYPE_CHECKING, Final
 
 from claude_code_hooks_daemon.constants.timeout import Timeout
-from claude_code_hooks_daemon.utils.git_commit_parsing import CommitReading
+from claude_code_hooks_daemon.utils.git_commit_parsing import CommitReading, CommitRun
 from claude_code_hooks_daemon.utils.git_repo import GitRepo, read_blobs, run_git
 from claude_code_hooks_daemon.utils.path_containment import path_is_relative_to, path_relative_to
 from claude_code_hooks_daemon.utils.path_predicates import read_text_or_reason
+
+if TYPE_CHECKING:
+    import subprocess  # nosec B404 — only the CompletedProcess type is named
 
 # name-status codes that carry TWO paths (old NUL new) in -z output.
 _TWO_PATH_STATUS_PREFIXES: Final[tuple[str, ...]] = ("R", "C")
@@ -65,6 +69,9 @@ _DELETED_STATUS: Final[str] = "D"
 # paths relative to THAT directory.
 NO_RELATIVE: Final[str] = "--no-relative"
 
+# Ends git's options, so a pathspec that starts with a dash is not read as one.
+_END_OF_OPTIONS: Final[str] = "--"
+
 # Prefixes that name the repository's whole tree, where git wants no pathspec.
 _WHOLE_TREE_PREFIXES: Final[frozenset[str]] = frozenset({"", "."})
 
@@ -78,6 +85,14 @@ class StagedChange:
     old_path: str | None
 
 
+@dataclass(frozen=True)
+class PathspecScope:
+    """Pathspecs of one ``git commit``, and the directory they are read from."""
+
+    directory: Path
+    pathspecs: tuple[str, ...]
+
+
 class GitFactsBase:
     """Read-only git facts for one repository root."""
 
@@ -88,7 +103,8 @@ class GitFactsBase:
         include: bool = False,
         directory: Path | None = None,
         union: bool = False,
-        extra_directories: Sequence[Path] = (),
+        scopes: Sequence[PathspecScope] = (),
+        index_env: Mapping[str, str] | None = None,
     ) -> None:
         """Initialise.
 
@@ -111,15 +127,25 @@ class GitFactsBase:
                 :class:`~claude_code_hooks_daemon.utils.git_commit_parsing.CommitReading`),
                 so judge the index PLUS the named paths' working-tree changes,
                 never less than the index alone. Ignored without ``pathspecs``.
-            extra_directories: Further directories the commit may run in (a
-                ``cd`` that may not have taken effect). The pathspecs are read
-                from each, and what any of them names is judged.
+            scopes: The pathspecs of every commit of the command (ledger 00474
+                N307), each with a directory it is read from; what any scope
+                names is judged. When given, ``pathspecs`` and ``directory``
+                are not used, and the first scope is the primary one.
+            index_env: Git environment that points every read at a COPY of the
+                index with a same-command ``git add`` already applied (ledger
+                00474 N246), so the index read is the one the commit records.
         """
         self._repo_root = repo_root
-        self._directory = directory or repo_root
-        self._extra_directories = tuple(extra_directories)
-        self._union = union and bool(pathspecs)
-        self._pathspecs = tuple(pathspecs) if pathspecs else ()
+        self._env = index_env
+        primary = tuple(pathspecs) if pathspecs else ()
+        self._directory = scopes[0].directory if scopes else directory or repo_root
+        self._scopes: tuple[PathspecScope, ...] = tuple(scopes) or (
+            (PathspecScope(self._directory, primary),) if primary else ()
+        )
+        self._pathspecs = tuple(
+            dict.fromkeys(spec for scope in self._scopes for spec in scope.pathspecs)
+        )
+        self._union = union and bool(self._pathspecs)
         self._include = include and bool(self._pathspecs)
         self._staged: tuple[StagedChange, ...] | None = None
         self._index_listings: dict[str, dict[str, str] | None] = {}
@@ -137,14 +163,19 @@ class GitFactsBase:
         return self._directory
 
     @property
-    def directories(self) -> tuple[Path, ...]:
-        """Every directory the commit's pathspecs are read from, the primary one first."""
-        return (self._directory, *self._extra_directories)
+    def scopes(self) -> tuple[PathspecScope, ...]:
+        """Every (directory, pathspecs) the commits' pathspecs are read from, the primary first."""
+        return self._scopes
 
     @property
     def pathspecs(self) -> tuple[str, ...]:
-        """The commit's explicit pathspecs; empty for a bare commit."""
+        """The commits' explicit pathspecs; empty when none names a path."""
         return self._pathspecs
+
+    @property
+    def index_env(self) -> Mapping[str, str] | None:
+        """The environment pointing git at the post-``git add`` index copy, if any."""
+        return self._env
 
     @property
     def union(self) -> bool:
@@ -193,8 +224,6 @@ class GitFactsBase:
                 "-z",
                 "--find-renames",
                 NO_RELATIVE,
-                "--",
-                *self._pathspecs,
             )
             changes = None if outputs is None else self._resurrected(_merged_changes(outputs))
             if self._union:
@@ -326,7 +355,7 @@ class GitFactsBase:
         if self._named is not None:
             return self._named
         changes = self._pathspec_changes()
-        indexed = self._pathspec_outputs("ls-files", "-z", "--full-name", "--", *self._pathspecs)
+        indexed = self._pathspec_outputs("ls-files", "-z", "--full-name")
         if changes is None or indexed is None:
             return None
         self._named = frozenset(changes) | {
@@ -345,8 +374,6 @@ class GitFactsBase:
             "-z",
             "--no-renames",
             NO_RELATIVE,
-            "--",
-            *self._pathspecs,
         )
         if outputs is None:
             return None
@@ -467,9 +494,8 @@ class GitFactsBase:
         disk. ``None`` when git could not answer or such a file cannot be read.
         """
         wanted = {path: listing[path] for path in paths if path in listing}
-        blobs = read_blobs(
-            self._repo_root, sorted({sha for sha in wanted.values() if sha != WORKING_TREE})
-        )
+        shas = sorted({sha for sha in wanted.values() if sha != WORKING_TREE})
+        blobs = read_blobs(self._repo_root, shas, env=self._env)
         if blobs is None:
             return None
         texts: dict[str, str] = {}
@@ -499,19 +525,23 @@ class GitFactsBase:
         return date.fromisoformat(output.strip())
 
     def _pathspec_outputs(self, *args: str) -> list[str] | None:
-        """stdout of a pathspec-carrying git command, once per directory it may run in.
+        """stdout of ``git <args> -- <pathspecs>``, once per scope it may run in.
 
-        With one directory this is :meth:`_git_output` in a list. With several
-        (a ``cd`` that may not have taken effect) a directory git cannot run in
-        (one that does not exist) is skipped, because the commit might never
-        have been there; ``None`` only when no directory could answer.
+        With one scope this is :meth:`_git_output` in a list. With several (a
+        ``cd`` that may not have taken effect, a second commit) a directory git
+        cannot run in (one that does not exist) is skipped, because the commit
+        might never have been there; ``None`` only when no scope could answer.
         """
         outputs: list[str] = []
-        for directory in self.directories:
-            result = run_git(directory, *args, timeout=Timeout.GIT_CONTEXT)
+        for scope in self._scopes:
+            result = self._run(scope.directory, *args, _END_OF_OPTIONS, *scope.pathspecs)
             if result.returncode == 0:
                 outputs.append(result.stdout)
         return outputs or None
+
+    def _run(self, directory: Path, *args: str) -> "subprocess.CompletedProcess[str]":
+        """``git <args>`` in ``directory``, reading the post-``git add`` index when there is one."""
+        return run_git(directory, *args, timeout=Timeout.GIT_CONTEXT, env=self._env)
 
     def _git_output(self, *args: str, in_directory: bool = False) -> str | None:
         """Run a read-only git command; stdout on success, ``None`` on non-zero.
@@ -537,7 +567,7 @@ class GitFactsBase:
         only place its pathspecs mean what the commit takes them to mean.
         """
         root = self._directory if in_directory else self._repo_root
-        result = run_git(root, *args, timeout=Timeout.GIT_CONTEXT)
+        result = self._run(root, *args)
         if result.returncode != 0:
             return None
         return result.stdout
@@ -553,7 +583,10 @@ def _merged_changes(outputs: Sequence[str]) -> tuple[StagedChange, ...]:
 
 
 def commit_facts(
-    reading: CommitReading, repo_root: Path, cwd: str | Path | None = None
+    reading: CommitReading,
+    repo_root: Path,
+    cwd: str | Path | None = None,
+    index_env: Mapping[str, str] | None = None,
 ) -> GitFactsBase:
     """The facts a commit gate should judge ``reading`` by.
 
@@ -562,44 +595,122 @@ def commit_facts(
     the union: the index with the named paths' working-tree changes laid over
     it, so no gate ever reads less of the recorded tree than the index.
 
-    ``cwd`` is where the command runs; the pathspecs are read from there when it
-    lies inside ``repo_root``, and from ``repo_root`` otherwise.
+    ``cwd`` is where the command runs; each commit's pathspecs are read from
+    every directory it may run in (see :func:`commit_scopes`). ``index_env``
+    points every read at the index a same-command ``git add`` leaves (see
+    :func:`~claude_code_hooks_daemon.utils.staging_simulation.simulated_staging`).
     """
-    directory = pathspec_directory(reading, cwd, repo_root)
-    form = reading.form
-    if not form.pathspecs:
-        return GitFactsBase(repo_root)
-    if reading.certain:
+    scopes = commit_scopes(reading, cwd, repo_root)
+    if not scopes:
+        return GitFactsBase(repo_root, index_env=index_env)
+    primary, *others = scopes
+    if reading.certain and not others:
         facts = GitFactsBase(
-            repo_root, pathspecs=form.pathspecs, include=form.include, directory=directory
+            repo_root,
+            pathspecs=primary.pathspecs,
+            include=reading.form.include,
+            directory=primary.directory,
+            index_env=index_env,
         )
         if facts.every_pathspec_matches():
             return facts
-    return GitFactsBase(
-        repo_root,
-        pathspecs=form.pathspecs,
-        union=True,
-        directory=directory,
-        extra_directories=unmoved_directories(reading, cwd, repo_root),
+    return GitFactsBase(repo_root, union=True, scopes=scopes, index_env=index_env)
+
+
+def commit_scopes(
+    reading: CommitReading, cwd: str | Path | None, repo_root: Path
+) -> tuple[PathspecScope, ...]:
+    """Every (directory, pathspecs) the pathspecs of ``reading``'s commits are read from.
+
+    Ledger 00474 N307: each ``git commit`` of the command is judged, not only the
+    first, and each reads its pathspecs where IT runs. A commit with no pathspec
+    adds no scope; the index it records is judged as always. The directories of
+    one commit are those of :func:`run_directories`, the one it moves to first.
+    """
+    scopes: dict[PathspecScope, None] = {}
+    for run in _commit_runs(reading):
+        if not run.form.pathspecs:
+            continue
+        for directory in run_directories(run.moves, run.optional_moves, cwd, repo_root):
+            scopes[PathspecScope(directory, run.form.pathspecs)] = None
+    return tuple(scopes)
+
+
+def _commit_runs(reading: CommitReading) -> tuple[CommitRun, ...]:
+    """The commits of ``reading``; one built from its own fields when it carries none."""
+    if reading.runs:
+        return reading.runs
+    return (
+        CommitRun(
+            form=reading.form,
+            moves=reading.moves,
+            optional_moves=0 if reading.moves_certain else len(reading.moves),
+        ),
     )
 
 
-def unmoved_directories(
-    reading: CommitReading, cwd: str | Path | None, repo_root: Path
-) -> tuple[Path, ...]:
-    """The directory the commit runs in if its ``cd`` did not take effect, when that differs.
+#: Past this many ``cd`` moves that may not have taken effect, only the whole
+#: chain, each move alone and none of them are tried, not every subset.
+_MAX_SUBSET_MOVES: Final[int] = 5
 
-    Ledger 00474 N299 round 2: ``cd nosuch; git commit f.txt`` and ``cd sub &
-    git commit f.txt`` leave git where the hook runs, so the pathspecs mean what
-    they mean THERE. Empty when every move is certain, or when the hook's own
-    directory is already the one :func:`pathspec_directory` reads from.
+
+def run_directories(
+    moves: Sequence[str | None], optional: int, cwd: str | Path | None, repo_root: Path
+) -> tuple[Path, ...]:
+    """Every directory inside ``repo_root`` a command with ``moves`` may run git in.
+
+    The :func:`landing_directories` that lie inside the repository; ``cwd`` (or
+    ``repo_root`` without one) stands in when none does, so there is always a
+    directory to read from.
     """
-    if not cwd or not reading.moves or reading.moves_certain:
-        return ()
-    unmoved = _directory_inside(cwd, repo_root) or repo_root
-    if unmoved == (pathspec_directory(reading, cwd, repo_root) or repo_root):
-        return ()
-    return (unmoved,)
+    if not cwd:
+        return (repo_root,)
+    inside = [
+        found
+        for landed in landing_directories(moves, optional, Path(cwd))
+        if (found := _directory_inside(landed, repo_root)) is not None
+    ]
+    return tuple(dict.fromkeys(inside)) or (_directory_inside(cwd, repo_root) or repo_root,)
+
+
+def landing_directories(
+    moves: Sequence[str | None], optional: int, start: Path
+) -> tuple[Path, ...]:
+    """Every directory a command that starts in ``start`` and makes ``moves`` may run git in.
+
+    ``moves`` is the ``cd``/``pushd`` chain followed by the ``-C`` operands, and
+    ``optional`` is how many leading ones may not have taken effect (ledger 00474
+    N306: ``cd sub || cd x`` runs ONE of them, ``cd nosuch; git ...`` none). Every
+    way those can combine is a place git may run, so each is returned; the
+    ``-C`` operands always apply. The directory every move takes the command to
+    comes first. A move this reading cannot state drops the combinations that
+    contain it.
+    """
+    optional_moves, fixed_moves = tuple(moves[:optional]), tuple(moves[optional:])
+    if len(optional_moves) > _MAX_SUBSET_MOVES:
+        chains: list[tuple[str | None, ...]] = [
+            optional_moves,
+            *((move,) for move in optional_moves),
+            (),
+        ]
+    else:
+        chains = [
+            chain
+            for size in range(len(optional_moves), -1, -1)
+            for chain in combinations(optional_moves, size)
+        ]
+    landed = (_moved(start, (*chain, *fixed_moves)) for chain in chains)
+    return tuple(dict.fromkeys(found for found in landed if found is not None))
+
+
+def _moved(start: Path, moves: Sequence[str | None]) -> Path | None:
+    """``start`` after ``moves``, or ``None`` when one of them cannot be stated."""
+    here = start
+    for move in moves:
+        if move is None:
+            return None
+        here = here / move
+    return here.resolve()
 
 
 def commit_directory(reading: CommitReading, start: str | Path) -> Path | None:
@@ -609,31 +720,7 @@ def commit_directory(reading: CommitReading, start: str | Path) -> Path | None:
     move cannot be stated (``cd -``, a variable, ``--git-dir``): the caller then
     reads the command as it would have without the move.
     """
-    here = Path(start)
-    for move in reading.moves:
-        if move is None:
-            return None
-        here = here / move
-    return here.resolve()
-
-
-def pathspec_directory(
-    reading: CommitReading, cwd: str | Path | None, repo_root: Path
-) -> Path | None:
-    """The directory the commit's pathspecs are read from, when it lies inside ``repo_root``.
-
-    Ledger 00474 N299: ``cd sub && git commit f.txt`` records ``sub/f.txt``, so
-    the pathspec is read from where the command moves to. A move this reading
-    cannot state, or one that leaves the repository, falls back to ``cwd``;
-    ``None`` (the repository root) when that is not inside the repository
-    either.
-    """
-    if cwd and reading.moves:
-        moved = commit_directory(reading, cwd)
-        inside = _directory_inside(moved, repo_root) if moved is not None else None
-        if inside is not None:
-            return inside
-    return _directory_inside(cwd, repo_root)
+    return _moved(Path(start), reading.moves)
 
 
 def _directory_inside(cwd: str | Path | None, repo_root: Path) -> Path | None:

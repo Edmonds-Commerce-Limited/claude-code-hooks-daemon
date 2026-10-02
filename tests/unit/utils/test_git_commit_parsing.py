@@ -22,6 +22,7 @@ from claude_code_hooks_daemon.utils.git_commit_parsing import (
     extract_commit_pathspecs,
     git_invocations,
     is_git_commit,
+    is_shell_resolved,
     read_commit_form,
     tokenise_command,
 )
@@ -450,3 +451,96 @@ class TestReadCommitFormCertainty:
 
     def test_the_form_is_the_first_commits(self) -> None:
         assert read_commit_form("git commit -m x --include a.txt").form.include is True
+
+
+class TestEveryCommitOfACommandIsRead:
+    """Ledger 00474 N307: each ``git commit`` has its own form, moves and ``-a``."""
+
+    def test_each_commit_has_its_own_form(self) -> None:
+        reading = read_commit_form("git commit -m a x.txt; git commit -m b --include y.txt")
+
+        assert [run.form.pathspecs for run in reading.runs] == [("x.txt",), ("y.txt",)]
+        assert [run.form.include for run in reading.runs] == [False, True]
+
+    def test_the_combined_form_names_every_pathspec_once(self) -> None:
+        reading = read_commit_form(
+            "git commit -m a x.txt y.txt; git commit -m b y.txt --pathspec-from-file=list"
+        )
+
+        assert reading.form.pathspecs == ("x.txt", "y.txt")
+        assert reading.form.include is False
+        assert reading.form.pathspec_from_file is True
+        assert reading.certain is False
+
+    def test_a_bare_commit_followed_by_a_pathspec_commit_is_not_certain(self) -> None:
+        reading = read_commit_form("git commit -m a && git commit -m b y.txt")
+
+        assert reading.form.pathspecs == ("y.txt",)
+        assert reading.certain is False
+
+    def test_two_bare_commits_are_certain(self) -> None:
+        assert read_commit_form("git commit -m a; git commit -m b").certain is True
+
+    def test_any_commit_with_a_flag_commits_the_working_tree(self) -> None:
+        assert read_commit_form("git commit -m a x.txt; git commit -a -m b").commits_all is True
+        assert read_commit_form("git commit -m a x.txt; git commit -m b").commits_all is False
+
+    def test_a_commit_carries_the_moves_it_runs_after(self) -> None:
+        reading = read_commit_form(
+            "cd sub && git commit -m a x.txt; cd .. && git commit -m b y.txt"
+        )
+
+        assert [run.moves for run in reading.runs] == [("sub",), ("sub", "..")]
+
+    def test_the_moves_that_may_not_take_effect_are_the_leading_cd_chain(self) -> None:
+        reading = read_commit_form("cd sub || cd x; git -C d commit -m a f.txt")
+
+        (run,) = reading.runs
+        assert run.moves == ("sub", "x", "d")
+        assert run.optional_moves == 2
+
+    def test_a_certain_move_has_no_optional_moves(self) -> None:
+        (run,) = read_commit_form("cd sub && git commit -m a f.txt").runs
+
+        assert run.optional_moves == 0
+
+    def test_a_command_with_no_commit_has_no_runs(self) -> None:
+        assert read_commit_form("git status").runs == ()
+
+
+class TestTheAddsBeforeTheLastCommitAreRead:
+    """Ledger 00474 N246: what an add stages is part of what the commit records."""
+
+    def test_an_add_before_the_commit_is_a_staging(self) -> None:
+        reading = read_commit_form("git add -f leak.txt && git commit -m x")
+
+        (staging,) = reading.stagings
+        assert staging.arguments == ("-f", "leak.txt")
+
+    def test_an_add_after_the_last_commit_is_not(self) -> None:
+        assert read_commit_form("git commit -m x; git add leak.txt").stagings == ()
+
+    def test_an_add_between_two_commits_is(self) -> None:
+        reading = read_commit_form("git commit -m a; git add a.txt; git commit -m b")
+
+        assert [staging.arguments for staging in reading.stagings] == [("a.txt",)]
+
+    def test_an_add_carries_the_moves_it_runs_after(self) -> None:
+        reading = read_commit_form("cd sub; git add leak.txt; git commit -m x")
+
+        (staging,) = reading.stagings
+        assert staging.moves == ("sub",)
+        assert staging.optional_moves == 1
+
+    def test_a_command_with_no_commit_has_no_stagings(self) -> None:
+        assert read_commit_form("git add leak.txt").stagings == ()
+
+
+class TestShellResolvedWords:
+    @pytest.mark.parametrize("word", ["$F", "a$(b)", "`x`", "{a,b}", "~/x"])
+    def test_a_word_the_shell_builds_is_resolved(self, word: str) -> None:
+        assert is_shell_resolved(word) is True
+
+    @pytest.mark.parametrize("word", ["a.txt", "dir/*.py", "-f"])
+    def test_a_literal_word_is_not(self, word: str) -> None:
+        assert is_shell_resolved(word) is False

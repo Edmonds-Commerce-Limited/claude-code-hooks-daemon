@@ -715,6 +715,38 @@ class TestReadBlobs:
 
         assert read_blobs(tmp_git_repo, ["0" * 40, known]) == {known: b"x"}
 
+    def test_a_blob_only_in_the_callers_scratch_object_store_is_read(
+        self, tmp_git_repo: Path, tmp_path: Path
+    ) -> None:
+        scratch = tmp_path / "scratch-objects"
+        scratch.mkdir()
+        scratch_env = {
+            "GIT_OBJECT_DIRECTORY": str(scratch),
+            "GIT_ALTERNATE_OBJECT_DIRECTORIES": str(tmp_git_repo / ".git" / "objects"),
+        }
+        (tmp_git_repo / "only-scratch").write_bytes(b"scratch only\n")
+        written = subprocess.run(
+            ["git", "-C", str(tmp_git_repo), "hash-object", "-w", "only-scratch"],
+            capture_output=True,
+            check=True,
+            text=True,
+            timeout=Timeout.GIT_CONTEXT,
+            env={**os.environ, **scratch_env},
+        )
+        sha = written.stdout.strip()
+
+        assert read_blobs(tmp_git_repo, [sha]) == {}
+        assert read_blobs(tmp_git_repo, [sha], env=scratch_env) == {sha: b"scratch only\n"}
+
+    def test_the_callers_index_file_reaches_git(self, tmp_git_repo: Path) -> None:
+        with mock.patch("subprocess.run") as runner:
+            runner.return_value = subprocess.CompletedProcess([], 0, b"", b"")
+            read_blobs(tmp_git_repo, ["a" * 40], env={"GIT_INDEX_FILE": "/scratch/index"})
+
+        passed = runner.call_args.kwargs["env"]
+        assert passed["GIT_INDEX_FILE"] == "/scratch/index"
+        assert passed["GIT_OPTIONAL_LOCKS"] == "0"
+
     def test_no_shas_spawns_nothing(self, tmp_path: Path) -> None:
         with mock.patch("subprocess.run") as spawn:
             assert read_blobs(tmp_path, []) == {}

@@ -36,7 +36,7 @@ last two part of this ONE guard rather than a sibling):
 import logging
 import re
 import shlex
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from pathlib import Path
 from typing import Any, ClassVar, Final, NamedTuple
 
@@ -72,6 +72,10 @@ from claude_code_hooks_daemon.utils.path_exclusion import (
 from claude_code_hooks_daemon.utils.path_predicates import read_text_or_reason
 from claude_code_hooks_daemon.utils.realpath import has_symlink_loop, realpath
 from claude_code_hooks_daemon.utils.scratch_dir import acceptance_path
+from claude_code_hooks_daemon.utils.staging_simulation import (
+    SimulationIncompleteError,
+    simulated_staging,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -360,13 +364,15 @@ class _ScanPass(NamedTuple):
     asked from ``directory`` because those are relative to the command's own
     directory. ``skip`` leaves out paths another pass answers for: under
     ``--include`` the index pass must not read a named path's staged content,
-    which the commit replaces with the working tree's.
+    which the commit replaces with the working tree's. ``env`` points git at the
+    index a same-command ``git add`` leaves (ledger 00474 N246).
     """
 
     target: str
     pathspecs: tuple[str, ...] = ()
     directory: Path | None = None
     skip: frozenset[str] = frozenset()
+    env: Mapping[str, str] | None = None
 
 
 class _Haystack(NamedTuple):
@@ -745,7 +751,11 @@ class SensitiveContentHandler(PreToolUseHandlerBase):
         if self._nul_byte_file_path_reason(hook_input) is not None:
             return True
 
-        haystacks = self._compute_and_cache(hook_input)
+        try:
+            haystacks = self._compute_and_cache(hook_input)
+        except SimulationIncompleteError:
+            # Nothing can be judged, so nothing may be allowed: handle() denies.
+            return True
         if not haystacks:
             return False
 
@@ -869,12 +879,12 @@ class SensitiveContentHandler(PreToolUseHandlerBase):
             haystacks.extend(self._message_file_haystacks(command, hook_input))
         is_commit, commits_all = _is_git_commit(command)
         if is_commit:
-            reading = (
-                CommitReading(CommitForm(), certain=True)
-                if commits_all
-                else read_commit_form(command)
+            reading = read_commit_form(command)
+            haystacks.extend(
+                self._staged_content_haystacks(
+                    hook_input, commits_all or reading.commits_all, reading
+                )
             )
-            haystacks.extend(self._staged_content_haystacks(hook_input, commits_all, reading))
         return haystacks
 
     def _message_file_haystacks(self, command: str, hook_input: dict[str, Any]) -> list[_Haystack]:
@@ -943,16 +953,17 @@ class SensitiveContentHandler(PreToolUseHandlerBase):
         if repo_root is None:
             return []
         directory = self._commit_directory(hook_input) or repo_root
-        facts = commit_facts(reading, repo_root, directory)
         haystacks: list[_Haystack] = []
-        for scan in self._recorded_passes(directory, commits_all, reading.form, facts):
-            haystacks.extend(
-                self._scan_staged_paths(
-                    repo_root, scan.target, self._select_staged_paths(repo_root, scan)
+        with simulated_staging(reading, directory, repo_root) as env:
+            facts = commit_facts(reading, repo_root, directory, index_env=env)
+            for scan in self._recorded_passes(commits_all, reading.form, facts):
+                haystacks.extend(
+                    self._scan_staged_paths(
+                        repo_root, scan, self._select_staged_paths(repo_root, scan)
+                    )
                 )
-            )
-        if not commits_all:
-            haystacks.extend(self._resurrected_haystacks(repo_root, facts))
+            if not commits_all:
+                haystacks.extend(self._resurrected_haystacks(repo_root, facts))
         return haystacks
 
     def _resurrected_haystacks(self, repo_root: Path, facts: GitFactsBase) -> list[_Haystack]:
@@ -981,7 +992,7 @@ class SensitiveContentHandler(PreToolUseHandlerBase):
 
     @staticmethod
     def _recorded_passes(
-        directory: Path, commits_all: bool, form: CommitForm, facts: GitFactsBase
+        commits_all: bool, form: CommitForm, facts: GitFactsBase
     ) -> list[_ScanPass]:
         """The questions that, together, cover every line the commit records.
 
@@ -999,13 +1010,20 @@ class SensitiveContentHandler(PreToolUseHandlerBase):
         A reading that is not certain (a second commit, a ``cd`` or ``-C``
         before it, a pathspec the shell builds, one that matches nothing, or a
         git that cannot answer) is judged as the index PLUS the named paths'
-        working tree, never less than the index alone.
+        working tree, never less than the index alone; every commit of the
+        command and every directory it may run in is one more scope of that
+        (ledger 00474 N306, N307).
+
+        Every pass reads the index a same-command ``git add`` leaves, when there
+        is one (``facts.index_env``, ledger 00474 N246).
         """
-        index = _ScanPass(target=_INDEX_TARGET)
+        env = facts.index_env
+        index = _ScanPass(target=_INDEX_TARGET, env=env)
+        everything = _ScanPass(target=_WORKING_TREE_TARGET, env=env)
         if commits_all:
-            return [_ScanPass(target=_WORKING_TREE_TARGET)]
+            return [everything]
         if form.pathspec_from_file:
-            return [index, _ScanPass(target=_WORKING_TREE_TARGET)]
+            return [index, everything]
         if not form.pathspecs:
             return [index]
         if facts.union:
@@ -1014,20 +1032,24 @@ class SensitiveContentHandler(PreToolUseHandlerBase):
                 *(
                     _ScanPass(
                         target=_WORKING_TREE_TARGET,
-                        pathspecs=form.pathspecs,
-                        directory=where,
+                        pathspecs=scope.pathspecs,
+                        directory=scope.directory,
+                        env=env,
                     )
-                    for where in facts.directories
+                    for scope in facts.scopes
                 ),
             ]
         named = facts.named_paths()
         if not named:
             return [index]
         recorded = _ScanPass(
-            target=_WORKING_TREE_TARGET, pathspecs=form.pathspecs, directory=directory
+            target=_WORKING_TREE_TARGET,
+            pathspecs=form.pathspecs,
+            directory=facts.scopes[0].directory,
+            env=env,
         )
         if form.include:
-            return [_ScanPass(target=_INDEX_TARGET, skip=named), recorded]
+            return [_ScanPass(target=_INDEX_TARGET, skip=named, env=env), recorded]
         return [recorded]
 
     def _select_staged_paths(self, repo_root: Path, scan: _ScanPass) -> _StagedSelection:
@@ -1056,6 +1078,7 @@ class SensitiveContentHandler(PreToolUseHandlerBase):
             NO_RELATIVE,
             scan.target,
             *pathspec_args,
+            env=scan.env,
         )
         if result.returncode != 0:
             _LOGGER.debug("sensitive_content: staged diff unavailable in %s", repo_root)
@@ -1096,7 +1119,7 @@ class SensitiveContentHandler(PreToolUseHandlerBase):
         return _StagedSelection(paths=paths, stood_down_at=None, narrowable=narrowable)
 
     def _staged_added_lines(
-        self, repo_root: Path, target: str, selection: _StagedSelection
+        self, repo_root: Path, scan: _ScanPass, selection: _StagedSelection
     ) -> Iterator[tuple[str, str]]:
         """Yield ``(path, added lines)`` for the selected paths, chunk by chunk.
 
@@ -1116,11 +1139,11 @@ class SensitiveContentHandler(PreToolUseHandlerBase):
                 _UNIFIED_ZERO_FLAG,
                 f"--diff-filter={_DIFF_FILTER}",
                 NO_RELATIVE,
-                target,
+                scan.target,
             ]
             if chunk:
                 args += [_END_OF_OPTIONS, *chunk]
-            result = run_git(repo_root, *args)
+            result = run_git(repo_root, *args, env=scan.env)
             if result.returncode != 0:
                 _LOGGER.debug("sensitive_content: staged diff unavailable in %s", repo_root)
                 return
@@ -1129,7 +1152,7 @@ class SensitiveContentHandler(PreToolUseHandlerBase):
                     yield relpath, added
 
     def _scan_staged_paths(
-        self, repo_root: Path, target: str, selection: _StagedSelection
+        self, repo_root: Path, scan: _ScanPass, selection: _StagedSelection
     ) -> list[_Haystack]:
         """Measure each fetched file exactly, stopping at the whole-commit bound.
 
@@ -1142,7 +1165,7 @@ class SensitiveContentHandler(PreToolUseHandlerBase):
         haystacks: list[_Haystack] = []
         total = 0
         stood_down_at = selection.stood_down_at
-        for relpath, added in self._staged_added_lines(repo_root, target, selection):
+        for relpath, added in self._staged_added_lines(repo_root, scan, selection):
             size = len(added.encode(_BODY_FILE_ENCODING, errors=_BODY_FILE_DECODE_ERRORS))
             if size > MAX_STAGED_FILE_BYTES:
                 _LOGGER.info(
@@ -1158,9 +1181,7 @@ class SensitiveContentHandler(PreToolUseHandlerBase):
                 _Haystack(
                     subject=f"staged content of {relpath}",
                     text=added,
-                    public_patterns_apply=not self._records_faithful_copy(
-                        repo_root, target, relpath
-                    ),
+                    public_patterns_apply=not self._records_faithful_copy(repo_root, scan, relpath),
                 )
             )
         if stood_down_at is not None:
@@ -1171,7 +1192,7 @@ class SensitiveContentHandler(PreToolUseHandlerBase):
             )
         return haystacks
 
-    def _records_faithful_copy(self, repo_root: Path, target: str, relpath: str) -> bool:
+    def _records_faithful_copy(self, repo_root: Path, scan: _ScanPass, relpath: str) -> bool:
         """Whether the version of ``relpath`` this commit records is a faithful vendored copy.
 
         Judged on the WHOLE recorded file, never the added lines: the hash
@@ -1182,14 +1203,14 @@ class SensitiveContentHandler(PreToolUseHandlerBase):
         remote_tree = self.layout_for(str(repo_root / relpath)).remote_docs_dir
         if not is_remote_tree_document(relpath, remote_tree):
             return False
-        if target == _WORKING_TREE_TARGET:
+        if scan.target == _WORKING_TREE_TARGET:
             try:
                 content = (repo_root / relpath).read_text(encoding=_BODY_FILE_ENCODING)
             except (OSError, UnicodeDecodeError) as error:
                 _LOGGER.debug("sensitive_content: %s could not be read: %s", relpath, error)
                 return False
         else:
-            result = run_git(repo_root, "show", f":{relpath}")
+            result = run_git(repo_root, "show", f":{relpath}", env=scan.env)
             if result.returncode != 0:
                 _LOGGER.debug("sensitive_content: staged %s could not be read", relpath)
                 return False
@@ -1380,7 +1401,10 @@ class SensitiveContentHandler(PreToolUseHandlerBase):
         if nul_byte_reason is not None:
             return GatingResult(decision=Decision.DENY, reason=f"BLOCKED: {nul_byte_reason}")
 
-        haystacks = self._take_cached_haystacks(hook_input)
+        try:
+            haystacks = self._take_cached_haystacks(hook_input)
+        except SimulationIncompleteError as incomplete:
+            return GatingResult(decision=Decision.DENY, reason=f"BLOCKED: {incomplete}")
         transcript_path = hook_input.get(HookInputField.TRANSCRIPT_PATH)
 
         for hay in haystacks:
