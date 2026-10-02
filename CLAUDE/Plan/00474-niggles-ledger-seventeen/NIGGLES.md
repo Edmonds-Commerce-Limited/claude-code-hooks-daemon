@@ -1579,6 +1579,11 @@ A fifth instance followed (N318): `test_every_check_is_classified` and the stale
 missing reds, so on a merge touching core code the coordinator now runs all of
 `tests/integration`.
 
+That practice caught a sixth instance at once. The Plan 00480 Task 4.1 merge added a handler that
+is off by default, and `test_dogfooding_config.py::test_all_production_handlers_are_enabled`
+failed because this repository's own config did not enable it. Fixed in 7da15e4de by enabling it
+in the dogfood config, not by adding an opt-in exemption.
+
 **Status**: ✅ Fixed for all four (2be30049c: all three usage-pause handlers are in the
 template and the priority is 59; the commit that records this entry rewrites the corpus row
 with `&&`, keeping UNCOVERED-accepted, because the plan-folder axis is still open). ⬜ Open as a class. A "too-broad" verdict must not mean that no tests
