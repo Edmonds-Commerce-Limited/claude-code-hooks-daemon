@@ -41,7 +41,7 @@ Evidence, with verified facts marked apart from inferences, is in
 
 ### Phase 1: Probes (owner: orchestrator, main thread)
 
-- [ ] ⬜ **Task 1.1**: Vendor `scheduled-tasks`, `model-config` and `interactive-mode` docs via `hooks-daemon remote-docs add`.
+- [x] ✅ **Task 1.1**: Vendor `scheduled-tasks`, `model-config` and `interactive-mode` docs via `hooks-daemon remote-docs add`. `model-config` and `interactive-mode` were already vendored; `scheduled-tasks` added (`remote-docs/code.claude.com/docs/en/scheduled-tasks.md`). It confirms the 7-day recurring expiry (one final fire, then self-delete) and says `--resume`/`--continue` restore unexpired `CronCreate` tasks, which bears on Task 1.2.
 - [ ] ⬜ **Task 1.2**: Probe the four open questions in RESEARCH.md §4 and record the results in RESEARCH.md.
 
 ### Phase 2: Cron expiry (owner: python-developer sub-agent, TDD)
