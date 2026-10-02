@@ -280,7 +280,7 @@ _READ_OUTSIDE_THE_HANDLER: dict[tuple[str, str], str] = {
 #: Options validated as they are injected (a property setter), which reject an
 #: arbitrary sentinel -- so each gets a VALID value that is not its default.
 _VALID_NON_DEFAULTS: dict[tuple[str, str], object] = {
-    ("bash_safe_mode", "mode"): "block",
+    ("bash_safe_mode", "mode"): "warn",
     ("bash_safe_mode", "exempt_patterns"): [r"^zzqx-exempt\b"],
 }
 

@@ -48,6 +48,10 @@ class TestInitialization:
         assert handler.priority == Priority.BASH_SAFE_MODE
         assert handler.terminal is False
 
+    def test_ships_enabled_and_blocking(self, handler: BashSafeModeHandler) -> None:
+        assert handler.get_default_enabled() is True
+        assert handler._mode == "block"
+
 
 class TestMatchesPositive:
     def test_multi_statement_without_prelude(self, handler: BashSafeModeHandler) -> None:
@@ -147,6 +151,12 @@ class TestModeProperty:
 
 
 class TestHandleWarnMode:
+    @pytest.fixture
+    def handler(self) -> BashSafeModeHandler:
+        warn_handler = BashSafeModeHandler()
+        warn_handler._mode = "warn"
+        return warn_handler
+
     def test_warn_allows_with_guidance(self, handler: BashSafeModeHandler) -> None:
         result = handler.handle(_bash("pytest tests/\ngit commit -m x"))
         assert result.decision == Decision.ALLOW
@@ -266,6 +276,7 @@ class TestFalsePositiveShapesFrom00268:
     def test_warn_mode_never_stops_the_shape(
         self, handler: BashSafeModeHandler, command: str
     ) -> None:
+        handler._mode = "warn"
         result = handler.handle(_bash(command))
         assert result.decision == Decision.ALLOW
 
@@ -288,7 +299,8 @@ class TestResidentGuidance:
     def test_get_claude_md_is_present_and_teaches(self, handler: BashSafeModeHandler) -> None:
         guidance = handler.get_claude_md()
         assert guidance is not None
-        assert "opt-in" in guidance
+        assert "opt out" in guidance
+        assert "set -euo pipefail" in guidance
         assert "errexit" in guidance
         assert "local x=$(fail)" in guidance
 
@@ -307,6 +319,7 @@ class TestAcceptanceTestFixturesMatchThisProjectsRealConfig:
     def test_the_advisory_fixture_still_fires_under_only_with_mutator(
         self, handler: BashSafeModeHandler
     ) -> None:
+        handler._mode = "warn"
         handler._only_with_mutator = True
         tests = handler.get_acceptance_tests()
         fixture = next(t for t in tests if "without a prelude" in t.title)
@@ -320,3 +333,59 @@ class TestAcceptanceTestFixturesMatchThisProjectsRealConfig:
                 f"real only_with_mutator=True config actually produces: "
                 f"{context_text!r}"
             )
+
+
+class TestModeAwareAcceptanceTests:
+    """The acceptance fixtures follow the configured mode (block vs warn)."""
+
+    @staticmethod
+    def _block_handler() -> BashSafeModeHandler:
+        block = BashSafeModeHandler()
+        block._mode = "block"
+        return block
+
+    def test_block_mode_unprefixed_sequence_expects_deny(self) -> None:
+        from claude_code_hooks_daemon.core import TestType
+
+        fixture = next(
+            t
+            for t in self._block_handler().get_acceptance_tests()
+            if "without a prelude" in t.title
+        )
+        assert fixture.expected_decision == Decision.DENY
+        assert fixture.test_type == TestType.BLOCKING
+        assert fixture.expected_message_patterns == [r"errexit", r"pipefail"]
+        assert "only_with_mutator: true" not in fixture.description
+
+    def test_block_mode_unprefixed_fixture_really_denies(self) -> None:
+        block = self._block_handler()
+        fixture = next(t for t in block.get_acceptance_tests() if "without a prelude" in t.title)
+        result = block.handle(_bash(fixture.command))
+        assert result.decision == Decision.DENY
+        assert result.reason is not None
+        for pattern in fixture.expected_message_patterns:
+            assert pattern in result.reason
+
+    def test_default_handler_unprefixed_sequence_expects_deny(
+        self, handler: BashSafeModeHandler
+    ) -> None:
+        fixture = next(t for t in handler.get_acceptance_tests() if "without a prelude" in t.title)
+        assert fixture.expected_decision == Decision.DENY
+
+    def test_warn_mode_unprefixed_sequence_still_expects_allow(
+        self, handler: BashSafeModeHandler
+    ) -> None:
+        handler._mode = "warn"
+        fixture = next(t for t in handler.get_acceptance_tests() if "without a prelude" in t.title)
+        assert fixture.expected_decision == Decision.ALLOW
+
+    @pytest.mark.parametrize("mode", ["warn", "block"])
+    def test_prelude_and_and_chain_fixtures_allow_in_both_modes(self, mode: str) -> None:
+        current = BashSafeModeHandler()
+        current._mode = mode
+        tests = current.get_acceptance_tests()
+        chain = next(t for t in tests if "&&" in t.title)
+        prelude = next(t for t in tests if "prelude is silent" in t.title)
+        for fixture in (chain, prelude):
+            assert fixture.expected_decision == Decision.ALLOW
+            assert not current.matches(_bash(fixture.command))
