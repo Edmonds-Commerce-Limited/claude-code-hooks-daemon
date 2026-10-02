@@ -600,7 +600,8 @@ def _guidance_of(class_name: str) -> str | None:
     handler is a real defect and must fail loudly here.
     """
     handler: Any = _discover_handler_classes()[class_name]()
-    return handler.get_claude_md()
+    guidance: str | None = handler.get_claude_md()
+    return guidance
 
 
 class TestEveryHandlerHasARecordedVerdict:
