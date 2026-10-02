@@ -1341,7 +1341,7 @@ on read-only `grep -c`, `awk`, `--help` and `bin/hooks-daemon … 2>&1` commands
 interpreter's inline-code flag whatever the command is. It is advisory only, but it fires
 on ordinary reads and teaches agents to ignore it.
 
-**Status**: ✅ Fixed on branch worktree-n302-n314. `_runs_inline_code` now skips a named set of
+**Status**: ✅ Fixed (merge 1078e4291). `_runs_inline_code` now skips a named set of
 search and text tools (`grep`, `egrep`, `fgrep`, `rg`, `awk` family, `wc`, `sort`, `head`, `tail`,
 `cut`, `jq`), by exact program name. The alternative, an allowlist of known interpreters, would
 have undone the round-10 decision that an unknown program run with `-e` stays UNSEEN; the exclusion
@@ -1411,7 +1411,8 @@ land in.
 that never flagged the size, and the N302 misclassification sat inside it. Nothing in
 `scripts/qa/` measures module length.
 
-**Status**: ✅ Fixed on branch worktree-n302-n314 (report-only; gate awaits owner).
+**Status**: ✅ Fixed (merge 1078e4291; `scripts/qa/check_module_length.py`, bound 1000 lines,
+report-only; making it a gate awaits an owner decision on the exception list).
 `scripts/qa/check_module_length.py` reports every module under `src/` over 1000 lines (672
 modules: median 170, p90 558, p95 848; 26 over the bound) and always exits 0. A gate would need an
 exception list for today's outliers, which is an allowlist and needs owner approval. It is not
