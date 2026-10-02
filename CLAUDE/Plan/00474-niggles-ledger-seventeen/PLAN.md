@@ -38,6 +38,9 @@ Full write-ups are in [NIGGLES.md](NIGGLES.md). One line each here:
 
 | #          | Verdict                                                                                                          | Origin              | Status                      |
 | ---------- | ---------------------------------------------------------------------------------------------------------------- | ------------------- | --------------------------- |
+| N305       | `staged_lint_gate` judges a `cd other-repo && git commit` as this repository's commit                            | N299 agent          | ⬜ Open                     |
+| N304       | `guard_config_commit_gate` misses `cd .claude && git commit hooks-daemon.yaml`                                   | N299 agent          | ⬜ Open                     |
+| N303       | The pause-gate merge left a PreToolUse handler unclassified; main was red (N278/N297 again)                      | N299 agent          | ✅ Fixed (1c4f8e25f)        |
 | N302       | `subagent_full_qa_blocker` reads `grep -c` / `awk -e` as interpreter inline code (advisory noise)                | P483 triage, Fable  | ⬜ Open                     |
 | N301       | Each commit gate checks every pathspec with two git calls per path, separately                                   | N245 review         | ⬜ Open                     |
 | N300       | `remote_docs_commit_gate` judges a nested worktree's commit against this repository                              | N245 review         | ⬜ Open                     |

@@ -1316,3 +1316,37 @@ interpreter's inline-code flag whatever the command is. It is advisory only, but
 on ordinary reads and teaches agents to ignore it.
 
 **Status**: ⬜ Open. Treat `-c`/`-e` as inline code only after a known interpreter.
+
+### N303 — the pause-gate merge left `UsagePauseToolGateHandler` unclassified; main was red
+
+**Source**: the N299 agent's `llm_qa changed` run, then the coordinator reproduced it on main.
+
+**Evidence**: `test_blocking_handler_evasion.py::TestEveryHandlerIsClassified` failed on main
+from merge 506fd3f5e (Plan 00479 Phase 4) until 1c4f8e25f. The new PreToolUse handler was
+never triaged for command-respelling evasion. This is N278 and N297 again: a merge that adds a
+handler reached main without a green targeted run on the merged head.
+
+**Status**: ✅ Fixed (1c4f8e25f; classified as not command-anchored, verified that the handler
+never reads `tool_input`). The coordinator then ran `llm_qa changed --range 4440d58cf..HEAD`
+over everything merged since. The lasting remedy (a merge that adds a handler cannot land without a
+green run) is Plan 00475 Task 4.2, which waits on the owner.
+
+### N304 — `guard_config_commit_gate` compares pathspecs to the config path as root-relative text
+
+**Source**: N299 agent.
+
+**Evidence**: `_pathspec_covers` compares each pathspec to `.claude/hooks-daemon.yaml` as text from
+the repository root, so `cd .claude && git commit -m x hooks-daemon.yaml` is not seen as covering
+the config, and the gate reads no config change. This is an existing miss, not something N299 caused.
+
+**Status**: ⬜ Open. Resolve the pathspecs with `pathspec_directory`, as N299 did for the
+other gates.
+
+### N305 — `staged_lint_gate._is_foreign_repo` ignores the command's own `cd` / `-C`
+
+**Source**: N299 agent.
+
+**Evidence**: the stand-down looks at the hook's working directory only. A `cd other-repo && git commit` from this checkout is linted as this repository's commit. N300 fixed the same gap in
+`remote_docs_commit_gate`.
+
+**Status**: ⬜ Open. Use the same post-move check as N300.
