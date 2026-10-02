@@ -23,6 +23,7 @@ Re-render the index: `bin/hooks-daemon remote-docs index`
 | `code.claude.com/docs/en/plugins-reference.md` | https://code.claude.com/docs/en/plugins-reference.md | 2026-09-24 | 2026-12-23 |
 | `code.claude.com/docs/en/plugins.md` | https://code.claude.com/docs/en/plugins.md | 2026-09-24 | 2026-12-23 |
 | `code.claude.com/docs/en/prompt-caching.md` | https://code.claude.com/docs/en/prompt-caching.md | 2026-09-22 | 2026-12-21 |
+| `code.claude.com/docs/en/scheduled-tasks.md` | https://code.claude.com/docs/en/scheduled-tasks.md | 2026-10-02 | 2026-12-31 |
 | `code.claude.com/docs/en/sub-agents.md` | https://code.claude.com/docs/en/sub-agents.md | 2026-09-24 | 2026-12-23 |
 | `code.claude.com/docs/en/tools-reference.md` | https://code.claude.com/docs/en/tools-reference.md | 2026-09-24 | 2026-12-23 |
 | `code.claude.com/docs/llms.md` | https://code.claude.com/docs/llms.txt | 2026-09-24 | 2026-12-23 |

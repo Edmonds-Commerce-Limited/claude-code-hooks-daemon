@@ -1402,6 +1402,21 @@ The uncertain-move union judges the hook directory and the LAST recorded move (`
 every candidate directory (`sub`). Remedy: judge every directory any `cd` in the chain could
 land in.
 
+### N315 — the post-commit docs QA report judges a vendored remote-docs page that lint and sweep exclude
+
+**Source**: coordinator, committing Plan 00470 Task 1.1 (81338abb3).
+
+**Evidence**: the commit staged `remote-docs/code.claude.com/docs/en/scheduled-tasks.md`, vendored
+by `remote-docs add`. The PostToolUse "Docs QA drift report" then listed 19 `[block]`
+`pointer-resolves` findings for its site-relative links (`/docs/en/mcp`, `/docs/en/goal`, …). The
+commit itself was not blocked. The same file is out of scope everywhere else:
+`docs-qa --lint <file>` exits 2 with "not a documentation file", and `docs-qa --sweep` reports 0
+findings for the tree. The fidelity rule forbids editing vendored text, so a finding there can never
+be acted on. A `[block]` label the gate did not enforce also misreports what happened.
+
+**Status**: ⬜ Open. Remedy: the post-commit report uses the same corpus scope as lint, sweep and
+the commit gate, so `remote-docs/` is excluded there too.
+
 ### N314 — no QA check bounds a module's size, so a handler reached 5,301 lines unnoticed
 
 **Source**: owner-delegated Fable ruling on 00466 N96
