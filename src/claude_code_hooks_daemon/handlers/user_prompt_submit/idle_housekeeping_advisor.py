@@ -26,6 +26,10 @@ from claude_code_hooks_daemon.core.handler_bases import UserPromptSubmitHandlerB
 from claude_code_hooks_daemon.core.transcript_reader import TranscriptMessage, TranscriptReader
 from claude_code_hooks_daemon.daemon.housekeeping import report_only_steps
 from claude_code_hooks_daemon.handlers.utils.bounded_fifo_map import BoundedFifoMap
+from claude_code_hooks_daemon.utils.stale_checkouts import (
+    DEFAULT_MAX_IDLE_DAYS,
+    collect_stale_report,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +43,7 @@ _RECOVERY_MARKER: Final[str] = "FAILSAFE RECOVERY CHECK"
 _DEFAULT_NOOP_THRESHOLD: Final[int] = 2
 _DEFAULT_MAX_PASSES_PER_SESSION: Final[int] = 1
 _DEFAULT_REPORTS_DIR: Final[str] = "untracked/reports"
+_DEFAULT_BASE_BRANCH: Final[str] = "main"
 
 # Custom project guidance (Plan 00161): a project may point the handler at its own
 # housekeeping doc, either ADDED to the default guidance or REPLACING it entirely.
@@ -113,6 +118,10 @@ class IdleHousekeepingAdvisoryHandler(UserPromptSubmitHandlerBase):
         # Optional project-defined guidance doc + how it combines with the default.
         self._custom_guidance_doc: str = ""
         self._custom_guidance_mode: str = _DEFAULT_CUSTOM_GUIDANCE_MODE
+        # Stale worktree/daemon report (Plan 00470 Task 4.2).
+        self._report_stale_checkouts: bool = True
+        self._base_branch: str = _DEFAULT_BASE_BRANCH
+        self._stale_worktree_days: int = DEFAULT_MAX_IDLE_DAYS
         # Per-session housekeeping-pass counter (in-memory; resets on daemon
         # restart, which is acceptable for a bounded beta safety-net feature).
         # Bounded with atomic FIFO eviction.
@@ -190,12 +199,28 @@ class IdleHousekeepingAdvisoryHandler(UserPromptSubmitHandlerBase):
         default = self._default_guidance()
         custom = self._load_custom_guidance()
         if custom is None:
-            return default
-        if self._custom_guidance_mode == _MODE_REPLACE:
-            return custom
-        return (
-            f"{default}\n\n---\n\nPROJECT-SPECIFIC HOUSEKEEPING GUIDANCE "
-            f"(from {self._custom_guidance_doc}):\n{custom}"
+            guidance = default
+        elif self._custom_guidance_mode == _MODE_REPLACE:
+            guidance = custom
+        else:
+            guidance = (
+                f"{default}\n\n---\n\nPROJECT-SPECIFIC HOUSEKEEPING GUIDANCE "
+                f"(from {self._custom_guidance_doc}):\n{custom}"
+            )
+        stale = self._stale_checkouts_report()
+        return guidance if stale is None else f"{guidance}\n\n{stale}"
+
+    def _stale_checkouts_report(self) -> str | None:
+        """Stale worktrees and daemons found this pass, or None when there are none.
+
+        Report-first (Plan 00470 Task 4.2): the text names what is stale and the
+        exact command that clears it, and nothing here runs one. Quiet when
+        nothing is stale or the option is off.
+        """
+        if not self._report_stale_checkouts:
+            return None
+        return collect_stale_report(
+            ProjectContext.project_root(), self._base_branch, self._stale_worktree_days
         )
 
     def _load_custom_guidance(self) -> str | None:
@@ -268,7 +293,12 @@ class IdleHousekeepingAdvisoryHandler(UserPromptSubmitHandlerBase):
             "`handlers.user_prompt_submit.idle_housekeeping_advisory.enabled: true`. "
             "A project can point it at its own doc via the `custom_guidance_doc` option "
             "(`custom_guidance_mode: additive` appends it to the default, `replace` uses "
-            "only the project doc). See docs/guides/CREATING_REPORTS.md."
+            "only the project doc). The guidance also lists STALE worktrees (branch merged "
+            "into `base_branch`, directory missing, or no commit for `stale_worktree_days`) "
+            "and stale daemons (dead pid file, project root gone) with the exact cleanup "
+            "command for each; it only names them, never runs them, and stays quiet when "
+            "nothing is stale (`report_stale_checkouts: false` turns it off). "
+            "See docs/guides/CREATING_REPORTS.md."
         )
 
     def get_acceptance_tests(self) -> list[Any]:

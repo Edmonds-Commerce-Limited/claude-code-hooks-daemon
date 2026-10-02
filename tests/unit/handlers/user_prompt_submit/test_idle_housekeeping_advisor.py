@@ -7,9 +7,12 @@ specialist housekeeping sub-agents that produce shareable markdown reports.
 Beta: opt-in (off by default), report-only.
 """
 
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any, ClassVar
 from unittest.mock import patch
+
+import pytest
 
 from claude_code_hooks_daemon.constants import HandlerID, Priority
 from claude_code_hooks_daemon.core import Decision
@@ -22,6 +25,18 @@ from claude_code_hooks_daemon.handlers.user_prompt_submit.idle_housekeeping_advi
 )
 
 _TICK = f"{_RECOVERY_MARKER} (automated hourly safety net). Resume if interrupted."
+
+
+@pytest.fixture(autouse=True)
+def _no_real_stale_scan() -> Iterator[None]:
+    """Keep the stale-checkout scan off the host's real git and process table."""
+    module = "claude_code_hooks_daemon.handlers.user_prompt_submit.idle_housekeeping_advisor"
+    with (
+        patch(f"{module}.collect_stale_report", return_value=None),
+        patch(f"{module}.ProjectContext") as project_context,
+    ):
+        project_context.project_root.return_value = Path("/nonexistent-project-root")
+        yield
 
 
 def _user(text: str) -> TranscriptMessage:
@@ -311,3 +326,97 @@ class TestCustomGuidanceDoc:
             mock_pc.project_root.return_value = tmp_path
             blob = self._fire(handler)
         assert "REL PATH GUIDANCE" in blob
+
+
+_HANDLER_MODULE = "claude_code_hooks_daemon.handlers.user_prompt_submit.idle_housekeeping_advisor"
+
+
+class TestStaleCheckoutsReport:
+    """Plan 00470 Task 4.2: the report also lists stale worktrees and daemons."""
+
+    _MESSAGES: ClassVar[list[TranscriptMessage]] = [
+        _user(_TICK),
+        _assistant_text("stop"),
+        _user(_TICK),
+        _assistant_text("stop"),
+    ]
+
+    def _fire(self, handler: IdleHousekeepingAdvisoryHandler) -> str:
+        result = _handle_with_messages(
+            handler,
+            {"prompt": _TICK, "session_id": "s", "transcript_path": "/tmp/t.jsonl"},
+            self._MESSAGES,
+        )
+        assert result.context
+        return " ".join(result.context)
+
+    def test_stale_report_is_appended_to_the_guidance(self, tmp_path: Path) -> None:
+        handler = IdleHousekeepingAdvisoryHandler()
+        with (
+            patch(f"{_HANDLER_MODULE}.ProjectContext") as mock_pc,
+            patch(
+                f"{_HANDLER_MODULE}.collect_stale_report",
+                return_value="STALE CHECKOUTS: git worktree remove /w/a",
+            ) as collect,
+        ):
+            mock_pc.project_root.return_value = tmp_path
+            blob = self._fire(handler)
+
+        assert "HOUSEKEEPING MODE" in blob
+        assert "STALE CHECKOUTS: git worktree remove /w/a" in blob
+        collect.assert_called_once_with(tmp_path, "main", 7)
+
+    def test_quiet_when_nothing_is_stale(self, tmp_path: Path) -> None:
+        handler = IdleHousekeepingAdvisoryHandler()
+        with (
+            patch(f"{_HANDLER_MODULE}.ProjectContext") as mock_pc,
+            patch(f"{_HANDLER_MODULE}.collect_stale_report", return_value=None),
+        ):
+            mock_pc.project_root.return_value = tmp_path
+            blob = self._fire(handler)
+
+        assert "STALE CHECKOUTS" not in blob
+
+    def test_options_reach_the_detector(self, tmp_path: Path) -> None:
+        handler = IdleHousekeepingAdvisoryHandler()
+        handler._base_branch = "develop"
+        handler._stale_worktree_days = 3
+        with (
+            patch(f"{_HANDLER_MODULE}.ProjectContext") as mock_pc,
+            patch(f"{_HANDLER_MODULE}.collect_stale_report", return_value=None) as collect,
+        ):
+            mock_pc.project_root.return_value = tmp_path
+            self._fire(handler)
+
+        collect.assert_called_once_with(tmp_path, "develop", 3)
+
+    def test_can_be_switched_off(self, tmp_path: Path) -> None:
+        handler = IdleHousekeepingAdvisoryHandler()
+        handler._report_stale_checkouts = False
+        with patch(f"{_HANDLER_MODULE}.collect_stale_report") as collect:
+            blob = self._fire(handler)
+
+        collect.assert_not_called()
+        assert "STALE CHECKOUTS" not in blob
+
+    def test_replace_mode_still_carries_the_stale_report(self, tmp_path: Path) -> None:
+        doc = tmp_path / "hk.md"
+        doc.write_text("ONLY THIS")
+        handler = IdleHousekeepingAdvisoryHandler()
+        handler._custom_guidance_doc = str(doc)
+        handler._custom_guidance_mode = "replace"
+        with (
+            patch(f"{_HANDLER_MODULE}.ProjectContext") as mock_pc,
+            patch(f"{_HANDLER_MODULE}.collect_stale_report", return_value="STALE CHECKOUTS: x"),
+        ):
+            mock_pc.project_root.return_value = tmp_path
+            blob = self._fire(handler)
+
+        assert "ONLY THIS" in blob
+        assert "STALE CHECKOUTS: x" in blob
+
+    def test_claude_md_mentions_stale_checkouts(self) -> None:
+        md = IdleHousekeepingAdvisoryHandler().get_claude_md()
+        assert md is not None
+        for option in ("report_stale_checkouts", "base_branch", "stale_worktree_days"):
+            assert option in md

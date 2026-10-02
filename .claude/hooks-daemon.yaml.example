@@ -769,6 +769,13 @@ handlers:
     idle_housekeeping_advisory:  # BETA: report-first idle housekeeping (Plan 00161)
       enabled: false             # Opt-in beta - leave off unless trying it. See docs/guides/CREATING_REPORTS.md
       priority: 56
+      options:
+        # Plan 00470 Task 4.2: the report also names stale worktrees and daemons
+        # with the exact cleanup command for each. It never runs them, and says
+        # nothing when nothing is stale.
+        report_stale_checkouts: true  # false drops the stale worktree/daemon section
+        base_branch: main             # a worktree whose branch is merged into this is stale
+        stale_worktree_days: 7        # a worktree whose branch has no commit for this many days is stale
 
     standing_authorisations:  # Replay a standing request THIS project recorded (Plan 00223)
       # The HANDLER ships on so the options are discoverable; every
