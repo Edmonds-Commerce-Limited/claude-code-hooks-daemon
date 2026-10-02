@@ -312,6 +312,9 @@ _CONFIG_READ_ONLY_FLAGS: Final[frozenset[str]] = frozenset(
 _SEGMENT_SEPARATORS: Final[tuple[str, ...]] = ("&&", "||", ";", "|", "\n")
 #: Spans meaning bash will EXECUTE something inside a quoted argument.
 _SUBSTITUTION_MARKERS: Final[tuple[str, ...]] = ("$(", "`")
+#: A path-named Python interpreter (`/v/bin/python`, `.venv/bin/python3.11`):
+#: judged by what it is given to run, not as a script that must be readable.
+_PYTHON_INTERPRETER_RE: Final[re.Pattern[str]] = re.compile(r"python[0-9.]*")
 #: A `VAR=value` assignment prefix, skipped when resolving a segment's head.
 _ASSIGNMENT_RE: Final[re.Pattern[str]] = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
 #: `grep`/`rg` never execute what they search for, so any occurrence of a
@@ -383,13 +386,29 @@ def _bash_runs_guarded_action(command: str) -> bool:
     return False
 
 
+def _without_grouping(segment: str) -> str:
+    """``segment`` without the subshell parentheses that wrap or cut it.
+
+    `(A=1 prog)` runs `prog` with `A` set exactly as `A=1 prog` does, but its
+    first word reads `(A=1`, which is neither an assignment nor a command
+    (ledger 00474 N311). Each leading `(` goes with one trailing `)`; a `)` left
+    over past that closes a group that opened in an earlier segment
+    (`(cd d && prog)` splits at the `&&`).
+    """
+    text = segment.strip()
+    while text.startswith("("):
+        text = text[1:].strip()
+        if text.endswith(")") and text.count("(") < text.count(")"):
+            text = text[:-1].strip()
+    while text.endswith(")") and text.count("(") < text.count(")"):
+        text = text[:-1].strip()
+    return text
+
+
 def _live_segments(command: str) -> list[str]:
     """The stages of ``command`` that run something rather than mention it."""
-    return [
-        segment
-        for segment in _executable_segments(command)
-        if not _is_inert_mention_segment(segment)
-    ]
+    grouped = (_without_grouping(segment) for segment in _executable_segments(command))
+    return [segment for segment in grouped if not _is_inert_mention_segment(segment)]
 
 
 def _past_wrappers(words: list[str]) -> list[str]:
@@ -532,6 +551,8 @@ def _segment_runs_upgrade(segment: str, cwd: str | None, depth: int, *, steered:
     if words[0].startswith("$"):
         return _variable_program_is_upgrade(words[1:], cwd, steered=steered)
     if "/" in words[0]:
+        if _PYTHON_INTERPRETER_RE.fullmatch(head):
+            return _variable_program_is_upgrade(words[1:], cwd, steered=steered)
         return _script_run_is_upgrade(words[0], words[1:], cwd, steered=steered)
     return False
 

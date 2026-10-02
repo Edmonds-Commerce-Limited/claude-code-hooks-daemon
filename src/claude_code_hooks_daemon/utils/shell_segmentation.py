@@ -2018,8 +2018,53 @@ def is_inert_pipeline_stage(stage: str) -> bool:
     receivers. An unrecognised or unnameable stage is not inert. A process
     substitution anywhere in the stage is refused, and fds are assumed able to
     reach a process, so the answer errs towards "may run".
+
+    An ``awk`` stage also counts when :func:`_awk_stage_only_reads` holds
+    (Plan 00474 N313).
     """
-    return _stage_is_inert_sink(stage, fds_may_run=True)
+    return _stage_is_inert_sink(stage, fds_may_run=True) or _awk_stage_only_reads(stage)
+
+
+#: Program text that lets awk run a command, read a command's output, or write
+#: a file: `system`, `getline`, a pipe (`print | "sh"`, `|&`) and a redirect
+#: (`print > "f"`). `@` opens gawk's `@include`/`@load`.
+_AWK_ESCAPE_MARKERS: tuple[str, ...] = ("system", "getline", "|", ">", "@")
+
+
+def _awk_stage_only_reads(stage: str) -> bool:
+    """Is ``stage`` a bare ``awk`` whose program is ONE single-quoted literal
+    that cannot run a command or write a file?
+
+    Conservative on purpose: no option of any kind (`-f` loads a program file,
+    `-v` and a `name=value` operand assign variables, `--` hides the next
+    word), the program must be the first word and a single-quoted literal with
+    no :data:`_AWK_ESCAPE_MARKERS`, and every other word an ordinary file
+    operand. A stage carrying a substitution is refused, and redirects are
+    judged as for a sink. A refusal costs a false positive, never a bypass.
+    """
+    if _segment_command_word(stage) != "awk":
+        return False
+    if any(marker in stage for marker in (*_REROUTING_MARKERS, *_PROCESS_SUBSTITUTIONS)):
+        return False
+    words = _segment_words(stage)
+    if not words:
+        return False
+    arguments = _arguments_after_command(words, "awk")
+    if arguments is None:
+        return False
+    remaining = _inert_redirects(arguments, fds_may_run=True)
+    if not remaining:
+        return False
+    program, *operands = remaining
+    raw = program.raw
+    if len(raw) < 2 or raw[0] != "'" or raw[-1] != "'" or "'" in raw[1:-1]:
+        return False
+    if any(marker in raw for marker in _AWK_ESCAPE_MARKERS):
+        return False
+    return all(
+        operand.value is not None and not operand.value.startswith("-") and "=" not in operand.value
+        for operand in operands
+    )
 
 
 def quoted_heredoc_receivers(command: str) -> list[str]:
