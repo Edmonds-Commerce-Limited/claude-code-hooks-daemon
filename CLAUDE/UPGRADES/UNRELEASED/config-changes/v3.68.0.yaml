@@ -210,7 +210,7 @@ config_changes:
           pre_tool_use:
             merge_qa_advisor:
               enabled: true
-              priority: 56
+              priority: 59
       migration_note: >-
         On by default; no project-side action needed. A project that does not
         use `scripts/qa/llm_qa.py changed` never has a record, so it is advised
