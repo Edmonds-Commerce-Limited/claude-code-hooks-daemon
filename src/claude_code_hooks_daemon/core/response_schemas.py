@@ -23,6 +23,10 @@ from claude_code_hooks_daemon.constants.events import (
 PRE_TOOL_USE_SCHEMA: Final[dict[str, Any]] = {
     "type": "object",
     "properties": {
+        # Universal output fields (hooks docs, JSON output): a deny that also
+        # halts the turn. Only emitted when a handler sets halt_turn.
+        "continue": {"type": "boolean"},
+        "stopReason": {"type": "string"},
         "hookSpecificOutput": {
             "type": "object",
             "properties": {
@@ -43,7 +47,7 @@ PRE_TOOL_USE_SCHEMA: Final[dict[str, Any]] = {
             },
             "required": ["hookEventName"],
             "additionalProperties": False,
-        }
+        },
     },
     "additionalProperties": False,
 }

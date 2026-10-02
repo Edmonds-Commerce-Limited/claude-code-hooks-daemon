@@ -10,7 +10,7 @@ import unicodedata
 from enum import StrEnum
 from typing import Any, Final, Generic, Self, cast
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from typing_extensions import TypeVar
 
 logger = logging.getLogger(__name__)
@@ -257,6 +257,12 @@ class HookResult(BaseModel, Generic[DecisionT]):
     # input object before execution. Emitted only on PreToolUse, and only for
     # allow/ask/deny — the docs ignore it on defer.
     updated_input: dict[str, Any] | None = Field(default=None)
+    # PreToolUse turn halt (Plan 00479 Task 4.2): a DENY that ALSO stops the
+    # turn, emitted as the universal top-level ``continue: false`` +
+    # ``stopReason``. Honoured by the PreToolUse formatter only. ``stop_reason``
+    # defaults to the raw deny ``reason`` when unset.
+    halt_turn: bool = Field(default=False)
+    stop_reason: str | None = Field(default=None)
     # Optional sub-classification of WHICH internal check/pattern produced this
     # decision (Plan 00209 verdict log). Purely internal metadata consumed by
     # the verdict-log writer — never part of the Claude Code hook response, so
@@ -286,6 +292,15 @@ class HookResult(BaseModel, Generic[DecisionT]):
         if isinstance(v, str):
             return [v] if v else []  # Filter empty strings
         return [item for item in v if item]  # Filter empty items from list
+
+    @model_validator(mode="after")
+    def validate_halt_request(self) -> Self:
+        """Fail fast: a halt is a DENY that stops the turn, nothing else."""
+        if self.halt_turn and self.decision != Decision.DENY:
+            raise ValueError("halt_turn requires decision DENY")
+        if self.stop_reason is not None and not self.halt_turn:
+            raise ValueError("stop_reason requires halt_turn")
+        return self
 
     def __repr__(self) -> str:
         """Return string representation for debugging."""
@@ -676,7 +691,13 @@ class HookResult(BaseModel, Generic[DecisionT]):
         if self.guidance:
             output["guidance"] = self.guidance
 
-        return {"hookSpecificOutput": output} if output else {}
+        response: dict[str, Any] = {"hookSpecificOutput": output}
+        if self.halt_turn:
+            response["continue"] = False
+            stop_reason = self.stop_reason or self.reason
+            if stop_reason:
+                response["stopReason"] = stop_reason
+        return response
 
     def _format_post_tool_use_response(self, event_name: str) -> dict[str, Any]:
         """Format PostToolUse response.
