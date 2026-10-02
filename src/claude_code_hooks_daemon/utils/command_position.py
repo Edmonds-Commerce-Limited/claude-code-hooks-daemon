@@ -31,6 +31,7 @@ read is judged as before: a false positive, never a bypass.
 from __future__ import annotations
 
 import re
+from itertools import pairwise
 
 from claude_code_hooks_daemon.utils.shell_segmentation import (
     is_inert_pipeline_stage,
@@ -62,6 +63,13 @@ _REDIRECT_AMPERSAND = re.compile(r"[<>]&|(?<!&)&>>?")
 
 #: A redirect to a file, as one word: `>`, `>>`, `2>`, or with the path attached.
 _REDIRECT_TARGET = re.compile(r"[0-9]*>>?(?P<path>[^&>].*)?")
+
+#: An unquoted word with no shell syntax: no expansion, glob, escape, comment,
+#: group or redirect character.
+_PLAIN_WORD = re.compile(r"[A-Za-z0-9_./:@=+,%-]+")
+
+#: Characters that stay live inside double quotes, or that bash treats specially there.
+_DOUBLE_QUOTE_ACTIVE: tuple[str, ...] = ('"', "$", "`", "\\", "!", "\n")
 
 #: Commands that run a file's text in the current shell.
 _SOURCE_HEADS: frozenset[str] = frozenset({"source", "."})
@@ -171,6 +179,65 @@ def command_position_view(command: str, _depth: int = 0) -> str:
         previous_end = end
     pieces.append(stripped[previous_end:])
     return "".join(pieces)
+
+
+def is_plain_data_command(command: str) -> bool:
+    """Whether ``command`` is ONE bare `echo`/`printf`/`grep`/`rg` over plain words.
+
+    The words are quoted literals or plain unquoted ones, and the only
+    redirect is a `>`/`>>` to a plain file path. Nothing in such a command can
+    run its text: no second segment, no expansion, no pipe, no `-v` assignment,
+    no `--pre`. It is stricter than the data-head blanking of
+    :func:`command_position_view` on purpose, for the guards that deliberately
+    keep judging every shape this function does not vouch for (an alias, a
+    wrapper before the head, an fd redirect, a glob).
+    """
+    spans = _segment_spans(command)
+    if len(spans) != 1 or command[: spans[0][0]].strip() or command[spans[0][1] :].strip():
+        return False
+    start, end = spans[0]
+    segment = command[start:end]
+    word_spans = shell_word_spans(segment)
+    # The word reader stops at syntax it cannot place (`$(`, an open quote), so
+    # text between or after the words it did return means it did not see it all.
+    gaps = [segment[: word_spans[0][0]] if word_spans else segment]
+    gaps += [segment[a[1] : b[0]] for a, b in pairwise(word_spans)]
+    gaps.append(segment[word_spans[-1][1] :] if word_spans else "")
+    if any(gap.strip(" \t") for gap in gaps):
+        return False
+    raw = [segment[a:b] for a, b in word_spans]
+    if not raw or raw[0] not in DATA_HEADS or (raw[0] == "rg" and _has_rg_preprocessor(segment)):
+        return False
+    is_printf = raw[0] == "printf"
+    index = 1
+    while index < len(raw):
+        word = raw[index]
+        index += 1
+        redirect = _REDIRECT_TARGET.fullmatch(word)
+        if redirect is not None:
+            target = redirect.group("path")
+            if target is None:
+                if index >= len(raw):
+                    return False
+                target, index = raw[index], index + 1
+            if not _PLAIN_WORD.fullmatch(target):
+                return False
+        elif not _is_plain_data_word(word, is_printf):
+            return False
+    return True
+
+
+def _is_plain_data_word(word: str, is_printf: bool) -> bool:
+    """A quoted literal that cannot expand, or an unquoted word with no shell syntax."""
+    if len(word) >= 2 and word[0] == word[-1] == "'":
+        body = word[1:-1]
+        return "'" not in body and "\n" not in body
+    if len(word) >= 2 and word[0] == word[-1] == '"':
+        body = word[1:-1]
+        return not any(char in body for char in _DOUBLE_QUOTE_ACTIVE)
+    if is_printf and word.startswith("-"):
+        return False
+    return _PLAIN_WORD.fullmatch(word) is not None
 
 
 def command_position_segments(command: str) -> list[str]:

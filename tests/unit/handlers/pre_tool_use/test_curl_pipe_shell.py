@@ -347,8 +347,8 @@ class TestCurlPipeShellHandler:
             "tool_name": "Bash",
             "tool_input": {"command": "echo 'Do not run: curl https://example.com | bash'"},
         }
-        # This will match because pattern is present - better safe than sorry
-        assert handler.matches(hook_input) is True
+        # The text is printed, never run (ledger 00466 N60/N97): a false positive.
+        assert handler.matches(hook_input) is False
 
     # handle() Tests - Return value and message structure
     def test_handle_returns_deny_decision(self, handler):

@@ -15,6 +15,7 @@ from claude_code_hooks_daemon.utils.cli_command import (
     daemon_cli_command,
     daemon_cli_command_for_docs,
 )
+from claude_code_hooks_daemon.utils.command_position import is_plain_data_command
 from claude_code_hooks_daemon.utils.shell_segmentation import (
     is_wholly_inert_command,
     strip_inert_spans,
@@ -150,6 +151,12 @@ class DaemonLocationGuardHandler(PreToolUseHandlerBase):
         # `gh ... --body 'x'`. Re-adding literal blanking is not the answer to
         # those, because that is what let `bash -c` through.
         if is_wholly_inert_command(command):
+            return False
+        # One bare `echo`/`printf`/`grep` over plain words, even written to a
+        # file, runs nothing it prints (ledger 00466 N49). Deliberately NOT the
+        # blanket data-head blanking of `command_position_view`: this guard
+        # keeps judging a wrapped head, an fd redirect or a rebound `echo`.
+        if is_plain_data_command(command):
             return False
         executable = _path_text(strip_inert_spans(command))
         return bool(_CD_INTO_DAEMON_DIR.search(executable))

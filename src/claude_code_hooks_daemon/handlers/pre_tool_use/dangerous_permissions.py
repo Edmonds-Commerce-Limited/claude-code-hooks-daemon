@@ -15,6 +15,7 @@ from claude_code_hooks_daemon.core import Decision, GatingResult, get_data_layer
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.core.utils import get_bash_command
+from claude_code_hooks_daemon.utils.command_position import command_position_segments
 
 # Full first-fire teaching content (Plan 00116): reuses the pre-migration
 # handler's rich prose verbatim, minus the invocation-specific `COMMAND:`
@@ -122,7 +123,14 @@ class DangerousPermissionsHandler(PreToolUseHandlerBase):
         if not command:
             return False
 
-        return bool(re.search(_DANGEROUS_PERMISSIONS_PATTERN, command))
+        # One command at a time, in command position only: the pattern's `.*`
+        # otherwise read a mode-shaped number from a LATER command
+        # (`chmod 755 f; echo 1246`), and text an `echo`/`grep` merely prints
+        # is not a chmod at all (ledger 00466 N58).
+        return any(
+            re.search(_DANGEROUS_PERMISSIONS_PATTERN, segment)
+            for segment in command_position_segments(command)
+        )
 
     def get_rules(self) -> list[Rule]:
         """Return the single Rule backing this handler's blocking behaviour."""
@@ -184,7 +192,7 @@ class DangerousPermissionsHandler(PreToolUseHandlerBase):
         return [
             AcceptanceTest(
                 title="chmod 777",
-                command='echo "chmod 777 /tmp/test_file.txt"',
+                command='echo "chmod 777 /tmp/test_file.txt" | bash',
                 dispatch_as_bash=True,
                 description="Blocks chmod 777 (security vulnerability)",
                 expected_decision=Decision.DENY,
@@ -193,14 +201,14 @@ class DangerousPermissionsHandler(PreToolUseHandlerBase):
                     r"security vulnerabilities",
                     r"principle of least privilege",
                 ],
-                safety_notes="Uses echo - safe to test",
+                safety_notes="Only a nonexistent /tmp file is touched if the guard fails",
                 test_type=TestType.BLOCKING,
                 recommended_model=RecommendedModel.HAIKU,
                 requires_main_thread=False,
             ),
             AcceptanceTest(
                 title="chmod a+rwx",
-                command='echo "chmod a+rwx /tmp/test_script.sh"',
+                command='echo "chmod a+rwx /tmp/test_script.sh" | bash',
                 dispatch_as_bash=True,
                 description="Blocks chmod a+rwx (equivalent to 777)",
                 expected_decision=Decision.DENY,
@@ -208,7 +216,7 @@ class DangerousPermissionsHandler(PreToolUseHandlerBase):
                     r"BLOCKED \[R-CHMOD-WORLD-WRITABLE\]",
                     r"anyone to read, write, and execute",
                 ],
-                safety_notes="Uses echo - safe to test",
+                safety_notes="Only a nonexistent /tmp file is touched if the guard fails",
                 test_type=TestType.BLOCKING,
                 recommended_model=RecommendedModel.HAIKU,
                 requires_main_thread=False,

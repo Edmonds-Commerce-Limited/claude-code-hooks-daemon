@@ -7,6 +7,7 @@ import pytest
 from claude_code_hooks_daemon.utils.command_position import (
     command_position_segments,
     command_position_view,
+    is_plain_data_command,
 )
 
 
@@ -75,3 +76,51 @@ class TestSegments:
     def test_a_backslash_does_not_escape_inside_single_quotes(self) -> None:
         segments = command_position_segments("git commit -m 'x\\' ; git reset --hard ; echo 'y'")
         assert any("git reset --hard" in s for s in segments)
+
+
+class TestIsPlainDataCommand:
+    """One bare data head over plain words, optionally written to a plain file (N49)."""
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "echo 'git stash'",
+            "printf 'a note\\n' >> notes.txt",
+            'echo "plain text" > out.txt',
+            "grep -rn 'git stash' docs/",
+            "rg 'x' src",
+            "  echo hi",
+        ],
+    )
+    def test_plain_commands(self, command: str) -> None:
+        assert is_plain_data_command(command) is True
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "",
+            "ls 'x'",
+            "env echo hi",
+            "/bin/echo hi",
+            "echo hi; echo hi",
+            "echo hi | cat",
+            "echo $(date)",
+            'echo "$HOME"',
+            'echo "a!"',
+            "echo `date`",
+            "echo * ",
+            "echo ~",
+            "echo hi 2>&1",
+            "echo hi < f",
+            "echo hi > >(cat)",
+            "echo hi >",
+            "echo 'unbalanced",
+            "echo 'a\nb'",
+            "printf -v x 'y'",
+            "printf -- '%s' x",
+            "rg --pre cmd x",
+            "echo $((1))",
+        ],
+    )
+    def test_everything_else_is_not_vouched_for(self, command: str) -> None:
+        assert is_plain_data_command(command) is False
