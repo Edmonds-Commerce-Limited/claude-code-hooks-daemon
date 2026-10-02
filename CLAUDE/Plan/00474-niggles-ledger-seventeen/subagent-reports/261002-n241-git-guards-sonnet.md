@@ -78,3 +78,15 @@ prose, `test_shell_segmentation*`) gave `1459 passed`.
 
 No handling for variables, `eval` of a variable or ANSI-C quoting (out of scope per
 the ruling). `bash -c` with an expanding double-quoted body is left as written.
+
+## Round 3
+
+Two in-scope regressions against main: a script written by a data head and then run (an echo of the hard-reset text redirected to s.sh, then `bash s.sh`, and the stash twin). The heredoc form (`cat > s.sh` with a quoted delimiter, then `bash s.sh`) also regressed: main scans the raw text, the branch blanked the body.
+
+Fix (`utils/command_position.py`): `_runs_written_script` walks the raw command's segments in order, collecting paths written by `>`, `>>`, `2>` and `tee` operands, and returns True when a LATER segment runs one of them (`bash|sh|zsh|dash|ksh <path>`, `source <path>`, `. <path>`, or the path itself as the command). Paths are compared textually after dropping a leading `./`. When it is True `command_position_view` returns the command untouched (judged as on main), which also covers the heredoc form and `chmod +x s.sh && ./s.sh`. A write that nothing later runs (`> notes.md`, `> s.sh` alone, `bash s.sh` before the write) is still narrowed.
+
+TDD: added `TestWrittenThenRunScriptKeepsItsText` (9 written-then-run templates and 6 never-run templates, each against both guards).
+- Red before the fix: 18 failed, 12 passed (every written-then-run row failed).
+- Green after: test_git_guards_command_position.py 136 passed.
+- Touched tests plus utils/test_command_position, shell_segmentation, git_stash and destructive_git selections: 1484 passed.
+- ruff, black --target-version py311, mypy touched, pyright (0 errors), audit_error_hiding, check_dangerous_invocation_corpus: clean.

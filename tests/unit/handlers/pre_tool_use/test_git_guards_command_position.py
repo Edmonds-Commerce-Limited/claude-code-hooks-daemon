@@ -202,6 +202,48 @@ class TestRedirectOperatorsAreNotSeparators:
         assert handler().matches(_input(f"echo hi & {destructive}")) is True
 
 
+#: A script written by one part of a command and run by a later part keeps its text.
+_WRITTEN_THEN_RUN = [
+    "echo '{c}' > s.sh && bash s.sh",
+    "echo '{c}' > s.sh; sh ./s.sh",
+    "echo '{c}' >> s.sh && source s.sh",
+    "echo '{c}' > s.sh && . ./s.sh",
+    "echo '{c}' > s.sh && chmod +x s.sh && ./s.sh",
+    "echo '{c}' > s.sh && ./s.sh",
+    "printf '%s\\n' '{c}' | tee s.sh && bash s.sh",
+    "cat > s.sh <<'EOF'\n{c}\nEOF\nbash s.sh",
+    "cat > s.sh <<'EOF'\n{c}\nEOF\nchmod +x s.sh && ./s.sh",
+]
+
+#: The same text written to a file that nothing later runs.
+_WRITTEN_NOT_RUN = [
+    "echo '{c}' > notes.md",
+    "echo '{c}' > s.sh",
+    "echo '{c}' > s.sh && bash other.sh",
+    "echo '{c}' > s.sh && cat s.sh",
+    "cat > s.sh <<'EOF'\n{c}\nEOF",
+    "bash s.sh && echo '{c}' > s.sh",
+]
+
+
+class TestWrittenThenRunScriptKeepsItsText:
+    """A data head redirected to a path that a later part runs is a script body."""
+
+    @pytest.mark.parametrize("template", _WRITTEN_THEN_RUN)
+    @pytest.mark.parametrize(("handler", "destructive"), _GUARDS)
+    def test_a_script_written_then_run_is_denied(
+        self, handler: Any, destructive: str, template: str
+    ) -> None:
+        assert handler().matches(_input(template.format(c=destructive))) is True
+
+    @pytest.mark.parametrize("template", _WRITTEN_NOT_RUN)
+    @pytest.mark.parametrize(("handler", "destructive"), _GUARDS)
+    def test_a_file_nothing_runs_is_allowed(
+        self, handler: Any, destructive: str, template: str
+    ) -> None:
+        assert handler().matches(_input(template.format(c=destructive))) is False
+
+
 class TestRgPreRunsItsValue:
     """S1: `rg --pre CMD` runs CMD for each file."""
 

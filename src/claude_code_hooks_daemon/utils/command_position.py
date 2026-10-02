@@ -20,6 +20,10 @@ matcher, so this module removes only text that cannot run:
 * a `gh pr|issue|release` title, body or notes value;
 * and, inside a literal `bash -c '<body>'`, the same rules applied to the body.
 
+A command that writes a file and then runs that same path (`echo '...' > s.sh
+&& bash s.sh`, a heredoc written then sourced) is left untouched whole: the
+text written IS the script.
+
 Everything else is left exactly as written, so a segment this module cannot
 read is judged as before: a false positive, never a bypass.
 """
@@ -56,6 +60,12 @@ _RG_PREPROCESSOR = "--pre"
 #: `2>&1`, `>&2`, `<&3`, `&>f`, `&>>f`.
 _REDIRECT_AMPERSAND = re.compile(r"[<>]&|(?<!&)&>>?")
 
+#: A redirect to a file, as one word: `>`, `>>`, `2>`, or with the path attached.
+_REDIRECT_TARGET = re.compile(r"[0-9]*>>?(?P<path>[^&>].*)?")
+
+#: Commands that run a file's text in the current shell.
+_SOURCE_HEADS: frozenset[str] = frozenset({"source", "."})
+
 #: What replaces the arguments of a data segment.
 _DATA_PLACEHOLDER = "_"
 
@@ -83,8 +93,72 @@ def _segment_spans(text: str) -> list[tuple[int, int]]:
     return split_unquoted_spans(masked, SEGMENT_SEPARATORS)
 
 
+def _normalise_path(path: str) -> str:
+    """``path`` without leading `./`, so `./s.sh` and `s.sh` compare equal."""
+    while path.startswith("./"):
+        path = path[2:]
+    return path
+
+
+def _written_paths(words: list[str | None]) -> set[str]:
+    """Paths one segment writes: `> p`, `>> p`, `>p` and the operands of `tee`."""
+    paths: set[str] = set()
+    for index, word in enumerate(words):
+        if word is None:
+            continue
+        match = _REDIRECT_TARGET.fullmatch(word)
+        if match is None:
+            continue
+        target = match.group("path") or (words[index + 1] if index + 1 < len(words) else None)
+        if target:
+            paths.add(_normalise_path(target))
+    if words and words[0] is not None and words[0].rsplit("/", 1)[-1] == "tee":
+        paths.update(
+            _normalise_path(word) for word in words[1:] if word and not word.startswith("-")
+        )
+    return paths
+
+
+def _executed_path(words: list[str | None], written: set[str]) -> str | None:
+    """The path one segment runs as a script, if it names a written one."""
+    if not words or words[0] is None:
+        return None
+    head = words[0].rsplit("/", 1)[-1]
+    if head in _SHELLS or head in _SOURCE_HEADS:
+        operands = [word for word in words[1:] if word is None or not word.startswith("-")]
+        candidate = operands[0] if operands else None
+    else:
+        candidate = words[0]
+    if candidate is None:
+        return None
+    candidate = _normalise_path(candidate)
+    return candidate if candidate in written else None
+
+
+def _runs_written_script(command: str) -> bool:
+    """Whether a segment runs a path an EARLIER segment of ``command`` wrote.
+
+    `echo 'git stash' > s.sh && bash s.sh` runs the text of the echo, so that
+    text is a command however a data head would otherwise be read. Paths are
+    compared textually, so a path the shell computes is not matched; the caller
+    then judges the whole command exactly as written.
+    """
+    written: set[str] = set()
+    for start, end in _segment_spans(command):
+        words = [
+            resolve_shell_word(command[a + start : b + start])
+            for a, b in shell_word_spans(command[start:end])
+        ]
+        if _executed_path(words, written) is not None:
+            return True
+        written |= _written_paths(words)
+    return False
+
+
 def command_position_view(command: str, _depth: int = 0) -> str:
     """``command`` with every span that cannot run replaced by a placeholder."""
+    if _runs_written_script(command):
+        return command
     stripped = strip_inert_spans(command)
     spans = _segment_spans(stripped)
     segments = [stripped[start:end] for start, end in spans]
