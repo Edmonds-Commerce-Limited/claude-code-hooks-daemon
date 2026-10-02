@@ -376,6 +376,36 @@ class TestACommitInAnotherRepositoryIsNotJudgedAgainstThisOne:
 
         assert result.decision is Decision.ALLOW
 
+    @pytest.mark.parametrize(
+        "form",
+        [
+            "cd {other} & git commit -m x",
+            "cd {other}; git commit -m x",
+            "cd {other} || true; git commit -m x",
+        ],
+    )
+    def test_a_move_that_may_not_take_effect_is_still_judged(
+        self, repos: tuple[Path, Path], form: str
+    ) -> None:
+        """The commit may run in the project, so the project's index is read."""
+        project, other = repos
+        instance = RemoteDocsCommitGateHandler()
+        instance.project_root_reader = lambda: project
+
+        result = instance.handle(self._hook(form.format(other=other), project))
+
+        assert result.decision is Decision.DENY
+
+    def test_a_hook_directory_in_another_repository_stands_down_despite_an_uncertain_move(
+        self, repos: tuple[Path, Path]
+    ) -> None:
+        """Both places the commit could run are another repository."""
+        project, other = repos
+
+        result = self._gate(project).handle(self._hook("cd . & git commit -m x", other))
+
+        assert result.decision is Decision.ALLOW
+
     def test_a_commit_in_the_project_is_still_judged(self, repos: tuple[Path, Path]) -> None:
         project, _other = repos
         instance = RemoteDocsCommitGateHandler()

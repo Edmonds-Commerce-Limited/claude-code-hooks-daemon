@@ -21,6 +21,7 @@ from claude_code_hooks_daemon.utils.git_facts import (
     GitFactsBase,
     commit_directory,
     commit_facts,
+    unmoved_directories,
 )
 from claude_code_hooks_daemon.utils.git_repo import run_git
 from tests.support.git_fixtures import run_git as _git
@@ -60,7 +61,7 @@ class TestPathspecsAreReadFromWhereTheCommandMovesTo:
             "cd sub && git commit -m x f.txt",
             "git -C sub commit -m x f.txt",
             "git -Csub commit -m x f.txt",
-            "(cd sub; git commit -m x f.txt)",
+            "(cd sub && git commit -m x f.txt)",
             "pushd sub && git commit -m x f.txt",
             "cd sub/.. && cd sub && git commit -m x f.txt",
         ],
@@ -127,6 +128,93 @@ class TestPathspecsAreReadFromWhereTheCommandMovesTo:
 
         assert facts.union is True
         assert {"f.txt", "sub/f.txt"} <= _recorded(facts)
+
+
+#: Moves that may fail, be skipped or run in the background: the commit may stay
+#: where the hook runs, so neither reading can be dropped.
+_UNCERTAIN_MOVES = [
+    "cd nosuch; git commit -m x f.txt",
+    "test -d nosuch && cd nosuch; git commit -m x f.txt",
+    "cd sub & git commit -m x f.txt",
+    "cd sub || cd other; git commit -m x f.txt",
+    "false || cd sub && git commit -m x f.txt",
+    "cd sub && echo hi; git commit -m x f.txt",
+    "echo hi | cd sub && git commit -m x f.txt",
+    "(cd sub; git commit -m x f.txt)",
+]
+#: Moves every one of which must succeed for the commit to run at all.
+_CERTAIN_MOVES = [
+    "cd sub && git commit -m x f.txt",
+    "test -d sub && cd sub && git commit -m x f.txt",
+    "cd sub && cd .. && git commit -m x f.txt",
+    "(cd sub && git commit -m x f.txt)",
+    "git -C sub commit -m x f.txt",
+    "git commit -m x f.txt",
+]
+
+
+class TestWhetherTheMovesAreCertain:
+    @pytest.mark.parametrize("command", _UNCERTAIN_MOVES)
+    def test_a_move_that_may_not_take_effect_is_uncertain(self, command: str) -> None:
+        assert read_commit_form(command).moves_certain is False
+
+    @pytest.mark.parametrize("command", _CERTAIN_MOVES)
+    def test_a_move_the_commit_cannot_run_without_is_certain(self, command: str) -> None:
+        assert read_commit_form(command).moves_certain is True
+
+
+class TestAnUncertainMoveJudgesBothDirectories:
+    """Ledger 00474 N299 round 2: a cd that may not have taken effect fails closed."""
+
+    @pytest.mark.parametrize("command", _UNCERTAIN_MOVES)
+    def test_the_paths_named_in_the_hooks_directory_are_judged(
+        self, twin: Path, command: str
+    ) -> None:
+        facts = commit_facts(read_commit_form(command), twin, twin)
+
+        assert "f.txt" in _recorded(facts)
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "cd sub & git commit -m x f.txt",
+            "cd sub; git commit -m x f.txt",
+        ],
+    )
+    def test_the_paths_named_where_it_may_have_moved_to_are_judged_too(
+        self, twin: Path, command: str
+    ) -> None:
+        facts = commit_facts(read_commit_form(command), twin, twin)
+
+        assert {"f.txt", "sub/f.txt"} <= _recorded(facts)
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "cd sub && git commit -m x f.txt",
+            "test -d sub && cd sub && git commit -m x f.txt",
+            "(cd sub && git commit -m x f.txt)",
+            "git -C sub commit -m x f.txt",
+        ],
+    )
+    def test_a_certain_move_still_reads_only_where_it_moved_to(
+        self, twin: Path, command: str
+    ) -> None:
+        facts = commit_facts(read_commit_form(command), twin, twin)
+
+        assert "sub/f.txt" in _recorded(facts)
+        assert "f.txt" not in _recorded(facts)
+
+    def test_the_hooks_directory_is_the_extra_one(self, twin: Path) -> None:
+        reading = read_commit_form("cd sub & git commit -m x f.txt")
+
+        assert unmoved_directories(reading, twin, twin) == (twin,)
+
+    @pytest.mark.parametrize(
+        "command", ["cd sub && git commit -m x f.txt", "git commit -m x f.txt"]
+    )
+    def test_a_certain_reading_has_no_extra_directory(self, twin: Path, command: str) -> None:
+        assert unmoved_directories(read_commit_form(command), twin, twin) == ()
 
 
 class TestCommitDirectory:

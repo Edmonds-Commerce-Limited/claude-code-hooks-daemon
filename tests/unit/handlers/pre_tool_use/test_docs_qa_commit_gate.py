@@ -245,6 +245,32 @@ class TestPathspecsAreReadWhereTheCommandRuns:
 
         assert any("pointer-resolves" in item for item in result.context)
 
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "cd nosuch; git commit -m x CLAUDE/Foo.md",
+            "cd other & git commit -m x CLAUDE/Foo.md",
+            "test -d nosuch && cd nosuch; git commit -m x CLAUDE/Foo.md",
+        ],
+    )
+    def test_a_cd_that_may_not_take_effect_still_judges_the_hooks_directory(
+        self, root: Path, command: str
+    ) -> None:
+        with _patched_root(root):
+            result = _handler().handle(_bash_input(command, cwd=str(root)))
+
+        assert any("pointer-resolves" in item for item in result.context)
+
+    def test_a_cd_that_may_not_take_effect_still_judges_where_it_moves_to(
+        self, root: Path
+    ) -> None:
+        with _patched_root(root):
+            result = _handler().handle(
+                _bash_input("cd CLAUDE & git commit -m x Foo.md", cwd=str(root))
+            )
+
+        assert any("pointer-resolves" in item for item in result.context)
+
 
 class TestClaudeMdAndAcceptanceTests:
     def test_get_claude_md_returns_content(self) -> None:

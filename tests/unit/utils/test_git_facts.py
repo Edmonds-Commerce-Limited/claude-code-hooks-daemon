@@ -532,10 +532,16 @@ class TestCommitFactsNarrowsOnlyWhenCertain:
         self, messy: Path
     ) -> None:
         """Ledger 00474 N299: after ``cd d`` the pathspec ``a.txt`` is ``d/a.txt``."""
-        facts = commit_facts(read_commit_form("cd d && git commit -m x a.txt"), messy)
+        _write(messy, "d/e2.txt", "head\n")
+        _git(messy, "add", "d/e2.txt")
+        _git(messy, "commit", "-q", "-m", "e2", "--only", "d/e2.txt")
+        _write(messy, "d/e2.txt", "unstaged-edit\n")
+
+        facts = commit_facts(read_commit_form("cd d && git commit -m x e2.txt"), messy, messy)
 
         assert facts.union is True
-        assert {"d/a.txt", "d/b.txt", "d/new.txt"} <= self._staged_paths(facts)
+        # e2.txt is modified but NOT staged: only a read from d/ names it.
+        assert {"d/e2.txt", "d/b.txt", "d/new.txt"} <= self._staged_paths(facts)
         assert "c.txt" not in self._staged_paths(facts)
 
     def test_a_bare_commit_is_the_index(self, messy: Path) -> None:

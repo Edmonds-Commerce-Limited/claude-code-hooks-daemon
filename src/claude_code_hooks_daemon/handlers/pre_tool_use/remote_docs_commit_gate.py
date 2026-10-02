@@ -110,13 +110,21 @@ class RemoteDocsCommitGateHandler(PreToolUseHandlerBase):
         Ledger 00474 N300: a nested worktree or another checkout owns its own
         index, as ``staged_lint_gate`` already holds. Where the commit runs is
         the hook's ``cwd`` after any ``cd``/``-C`` move before it; a move this
-        reading cannot state is judged against this project.
+        reading cannot state is judged against this project. A ``cd`` that may
+        not have taken effect leaves two places the commit could run, and it
+        stands down only when BOTH are another repository.
         """
         if not cwd:
             return False
-        directory = commit_directory(reading, cwd)
-        repo = GitRepo.resolve_for(directory if directory is not None else Path(cwd))
-        return repo is not None and repo.root != project_root
+        moved = commit_directory(reading, cwd)
+        places = [moved if moved is not None else Path(cwd)]
+        if not reading.moves_certain:
+            places.append(Path(cwd))
+        for place in places:
+            repo = GitRepo.resolve_for(place)
+            if repo is None or repo.root == project_root:
+                return False
+        return True
 
     def _tree_name(self) -> str:
         layout = self._project_layout

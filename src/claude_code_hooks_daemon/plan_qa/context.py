@@ -330,6 +330,7 @@ def staged_context(
     exclude_paths: Sequence[str] | None = None,
     include: bool = False,
     directory: Path | None = None,
+    extra_directories: Sequence[Path] = (),
 ) -> CheckContext:
     """Build the Stage 2 (COMMIT) context: staged git facts + tree views.
 
@@ -337,6 +338,9 @@ def staged_context(
         directory: Where the commit's pathspecs are read from (ledger 00474
             N299: ``cd sub && git commit f.txt`` names ``sub/f.txt``); the
             project root when omitted.
+        extra_directories: The other directories the command may have run in
+            (a ``cd`` that may not have taken effect); what the pathspecs name
+            in any of them is judged.
         pathspecs: The commit's explicit pathspec arguments, when the
             inspected ``git commit`` invocation names paths directly
             (``git commit <pathspec>...``). Threaded straight into
@@ -353,7 +357,13 @@ def staged_context(
             not HEAD with them replaced. Meaningful only with ``pathspecs``.
     """
     excluded = _normalised_exclude_paths(exclude_paths)
-    gitfacts = GitFacts(project_root, pathspecs=pathspecs, include=include, directory=directory)
+    gitfacts = GitFacts(
+        project_root,
+        pathspecs=pathspecs,
+        include=include,
+        directory=directory,
+        extra_directories=extra_directories,
+    )
     # A bare commit records the INDEX, so the tree is read from it. A
     # `git commit <pathspec>` (or `--include`) records the WORKING-TREE content
     # of the named paths, which no listing of the index describes, so those

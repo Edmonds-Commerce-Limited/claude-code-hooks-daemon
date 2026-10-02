@@ -329,6 +329,59 @@ class TestPlanStatsArithmetic:
         assert "plan-stats-arithmetic" in "\n".join(result.context)
 
 
+class TestPathspecsAreJudgedFromEveryDirectoryTheCommitMayRunIn:
+    """Ledger 00474 N299 round 2: a cd that may not take effect fails closed."""
+
+    _PLAN_MD = f"{_PLAN_DIR_REL}/00001-first/PLAN.md"
+
+    @pytest.fixture
+    def flipped(self, repo: Path) -> Path:
+        """A terminal flip left unstaged, which a pathspec commit records."""
+        (repo / self._PLAN_MD).write_text("# Plan 00001: first\n\n**Status**: Complete\n")
+        return repo
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            'cd nosuch; git commit -m "Plan 00001: done" {plan}',
+            'cd CLAUDE & git commit -m "Plan 00001: done" {plan}',
+            'test -d nosuch && cd nosuch; git commit -m "Plan 00001: done" {plan}',
+        ],
+    )
+    def test_a_cd_that_may_not_take_effect_still_judges_the_hooks_directory(
+        self, flipped: Path, command: str
+    ) -> None:
+        with _patched_root(flipped):
+            result = _handler("block").handle(
+                _bash_input(command.format(plan=self._PLAN_MD), cwd=str(flipped))
+            )
+
+        assert result.decision == Decision.DENY
+        assert (result.reason or "").startswith(f"BLOCKED [{RuleID.PLAN_QA_COMMIT}]")
+
+    def test_a_cd_that_may_not_take_effect_still_judges_where_it_moves_to(
+        self, flipped: Path
+    ) -> None:
+        plan = "Plan/00001-first/PLAN.md"
+        with _patched_root(flipped):
+            result = _handler("block").handle(
+                _bash_input(f'cd CLAUDE & git commit -m "Plan 00001: done" {plan}', cwd=str(flipped))
+            )
+
+        assert result.decision == Decision.DENY
+
+    def test_a_certain_cd_reads_only_where_it_moves_to(self, flipped: Path) -> None:
+        with _patched_root(flipped):
+            result = _handler("block").handle(
+                _bash_input(
+                    f'cd nosuch && git commit -m "Plan 00001: done" {self._PLAN_MD}',
+                    cwd=str(flipped),
+                )
+            )
+
+        assert result.decision == Decision.ALLOW
+
+
 class TestGuardRails:
     def test_noop_when_cwd_in_foreign_repo(self, repo: Path, tmp_path: Path) -> None:
         other = tmp_path / "other-repo"

@@ -120,12 +120,15 @@ def staged_context(
     layout: "ProjectLayout | None" = None,
     include: bool = False,
     directory: Path | None = None,
+    extra_directories: Sequence[Path] = (),
 ) -> CheckContext:
     """Build the STAGED-stage context: the commit's staged ``.md`` content.
 
     ``directory`` is where the commit's pathspecs are read from (ledger 00474
     N299: ``cd sub && git commit f.txt`` names ``sub/f.txt``); the project root
-    when omitted.
+    when omitted. ``extra_directories`` are the others the command may have run
+    in (a ``cd`` that may not have taken effect); what the pathspecs name in any
+    of them is judged.
 
     ``pathspecs`` mirrors :class:`GitFacts`'s own contract: when the
     inspected ``git commit`` invocation names paths directly, the STAGED
@@ -137,7 +140,13 @@ def staged_context(
     no check consults it yet. A staged path under the project-wide
     ``daemon.exclude_paths`` (Plan 00362 Task 2.9) never enters the view.
     """
-    gitfacts = GitFactsBase(project_root, pathspecs=pathspecs, include=include, directory=directory)
+    gitfacts = GitFactsBase(
+        project_root,
+        pathspecs=pathspecs,
+        include=include,
+        directory=directory,
+        extra_directories=extra_directories,
+    )
     staged_documents: dict[str, str] = {}
     for change in gitfacts.staged_changes():
         if change.status == _DELETE_STATUS:

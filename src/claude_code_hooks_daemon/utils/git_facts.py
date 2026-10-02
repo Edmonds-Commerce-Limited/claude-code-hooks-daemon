@@ -88,6 +88,7 @@ class GitFactsBase:
         include: bool = False,
         directory: Path | None = None,
         union: bool = False,
+        extra_directories: Sequence[Path] = (),
     ) -> None:
         """Initialise.
 
@@ -110,9 +111,13 @@ class GitFactsBase:
                 :class:`~claude_code_hooks_daemon.utils.git_commit_parsing.CommitReading`),
                 so judge the index PLUS the named paths' working-tree changes,
                 never less than the index alone. Ignored without ``pathspecs``.
+            extra_directories: Further directories the commit may run in (a
+                ``cd`` that may not have taken effect). The pathspecs are read
+                from each, and what any of them names is judged.
         """
         self._repo_root = repo_root
         self._directory = directory or repo_root
+        self._extra_directories = tuple(extra_directories)
         self._union = union and bool(pathspecs)
         self._pathspecs = tuple(pathspecs) if pathspecs else ()
         self._include = include and bool(self._pathspecs)
@@ -130,6 +135,11 @@ class GitFactsBase:
     def directory(self) -> Path:
         """The directory the commit's pathspecs are read from."""
         return self._directory
+
+    @property
+    def directories(self) -> tuple[Path, ...]:
+        """Every directory the commit's pathspecs are read from, the primary one first."""
+        return (self._directory, *self._extra_directories)
 
     @property
     def pathspecs(self) -> tuple[str, ...]:
@@ -176,7 +186,7 @@ class GitFactsBase:
         if self._staged is not None:
             return self._staged
         if self._pathspecs:
-            output = self._git_output(
+            outputs = self._pathspec_outputs(
                 "diff",
                 "HEAD",
                 "--name-status",
@@ -185,9 +195,8 @@ class GitFactsBase:
                 NO_RELATIVE,
                 "--",
                 *self._pathspecs,
-                in_directory=True,
             )
-            changes = None if output is None else self._resurrected(_parse_name_status_z(output))
+            changes = None if outputs is None else self._resurrected(_merged_changes(outputs))
             if self._union:
                 changes = self._with_all_staged(changes or ())
             elif changes is None:
@@ -317,19 +326,19 @@ class GitFactsBase:
         if self._named is not None:
             return self._named
         changes = self._pathspec_changes()
-        indexed = self._git_output(
-            "ls-files", "-z", "--full-name", "--", *self._pathspecs, in_directory=True
-        )
+        indexed = self._pathspec_outputs("ls-files", "-z", "--full-name", "--", *self._pathspecs)
         if changes is None or indexed is None:
             return None
-        self._named = frozenset(changes) | {path for path in indexed.split(_NUL) if path}
+        self._named = frozenset(changes) | {
+            path for output in indexed for path in output.split(_NUL) if path
+        }
         return self._named
 
     def _pathspec_changes(self) -> dict[str, str] | None:
         """Path -> status letter of what the working tree changes against HEAD, within the pathspecs."""
         if self._named_changes is not None:
             return self._named_changes
-        output = self._git_output(
+        outputs = self._pathspec_outputs(
             "diff",
             "HEAD",
             "--name-status",
@@ -338,12 +347,11 @@ class GitFactsBase:
             NO_RELATIVE,
             "--",
             *self._pathspecs,
-            in_directory=True,
         )
-        if output is None:
+        if outputs is None:
             return None
         self._named_changes = {
-            change.path: change.status[:1] for change in _parse_name_status_z(output)
+            change.path: change.status[:1] for change in _merged_changes(outputs)
         }
         return self._named_changes
 
@@ -490,6 +498,21 @@ class GitFactsBase:
             return None
         return date.fromisoformat(output.strip())
 
+    def _pathspec_outputs(self, *args: str) -> list[str] | None:
+        """stdout of a pathspec-carrying git command, once per directory it may run in.
+
+        With one directory this is :meth:`_git_output` in a list. With several
+        (a ``cd`` that may not have taken effect) a directory git cannot run in
+        (one that does not exist) is skipped, because the commit might never
+        have been there; ``None`` only when no directory could answer.
+        """
+        outputs: list[str] = []
+        for directory in self.directories:
+            result = run_git(directory, *args, timeout=Timeout.GIT_CONTEXT)
+            if result.returncode == 0:
+                outputs.append(result.stdout)
+        return outputs or None
+
     def _git_output(self, *args: str, in_directory: bool = False) -> str | None:
         """Run a read-only git command; stdout on success, ``None`` on non-zero.
 
@@ -520,6 +543,15 @@ class GitFactsBase:
         return result.stdout
 
 
+def _merged_changes(outputs: Sequence[str]) -> tuple[StagedChange, ...]:
+    """The changes of every ``--name-status -z`` output, each path once, first seen first."""
+    merged: dict[str, StagedChange] = {}
+    for output in outputs:
+        for change in _parse_name_status_z(output):
+            merged.setdefault(change.path, change)
+    return tuple(merged.values())
+
+
 def commit_facts(
     reading: CommitReading, repo_root: Path, cwd: str | Path | None = None
 ) -> GitFactsBase:
@@ -543,7 +575,31 @@ def commit_facts(
         )
         if facts.every_pathspec_matches():
             return facts
-    return GitFactsBase(repo_root, pathspecs=form.pathspecs, union=True, directory=directory)
+    return GitFactsBase(
+        repo_root,
+        pathspecs=form.pathspecs,
+        union=True,
+        directory=directory,
+        extra_directories=unmoved_directories(reading, cwd, repo_root),
+    )
+
+
+def unmoved_directories(
+    reading: CommitReading, cwd: str | Path | None, repo_root: Path
+) -> tuple[Path, ...]:
+    """The directory the commit runs in if its ``cd`` did not take effect, when that differs.
+
+    Ledger 00474 N299 round 2: ``cd nosuch; git commit f.txt`` and ``cd sub &
+    git commit f.txt`` leave git where the hook runs, so the pathspecs mean what
+    they mean THERE. Empty when every move is certain, or when the hook's own
+    directory is already the one :func:`pathspec_directory` reads from.
+    """
+    if not cwd or not reading.moves or reading.moves_certain:
+        return ()
+    unmoved = _directory_inside(cwd, repo_root) or repo_root
+    if unmoved == (pathspec_directory(reading, cwd, repo_root) or repo_root):
+        return ()
+    return (unmoved,)
 
 
 def commit_directory(reading: CommitReading, start: str | Path) -> Path | None:

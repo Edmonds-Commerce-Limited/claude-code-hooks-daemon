@@ -41,7 +41,7 @@ from claude_code_hooks_daemon.utils.git_commit_parsing import read_commit_form
 from claude_code_hooks_daemon.utils.git_commit_parsing import (
     tokenise_command as _tokenise,
 )
-from claude_code_hooks_daemon.utils.git_facts import pathspec_directory
+from claude_code_hooks_daemon.utils.git_facts import pathspec_directory, unmoved_directories
 from claude_code_hooks_daemon.utils.git_repo import GitRepo
 
 _MODE_BLOCK: Final[str] = "block"
@@ -117,13 +117,15 @@ class DocsQaCommitGateHandler(PreToolUseHandlerBase):
         tokens = _tokenise(command)
         reading = read_commit_form(command)
         form = reading.form
+        cwd = hook_input.get(HookInputField.CWD)
         context = staged_context(
             project_root=project_root,
             policy=policy,
             commit_message=_extract_commit_message(tokens),
             pathspecs=form.pathspecs,
             include=form.include,
-            directory=pathspec_directory(reading, hook_input.get(HookInputField.CWD), project_root),
+            directory=pathspec_directory(reading, cwd, project_root),
+            extra_directories=unmoved_directories(reading, cwd, project_root),
         )
 
         findings = run_stage(CheckStage.STAGED, context)
