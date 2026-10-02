@@ -112,6 +112,61 @@ Then re-run the `ps` check and confirm the pid changed. **Never restart the
 whole ccy session** — which would drop the live `claude` process — merely to
 reload the worker. That is exactly what the two-tier split exists to avoid.
 
+## The usage pause: one compact, then silence
+
+Plan 00479 Task 4.5. When a session crosses its usage ceiling the daemon pauses
+it rather than ending it: one resume cron replaces every other cron, and the
+session wakes at the window reset. The supervisor's part is the rule below; it
+is the ONE place that rule lives.
+
+**The record.** The daemon records the pause as `<session>.usage-paused` in the
+same `context-sidecar` directory as every other signal (suffix deliberately not
+`.json`). Its fields are `session_id`, `paused_at`, `resume_at` (epoch seconds),
+`window` (`five_hour` or `seven_day`), `used_percentage`, `ceiling` and a short
+`reason`. The writer, reader, clearer and the validity rule are
+`src/claude_code_hooks_daemon/utils/usage_pause.py`; the supervisor cannot import
+that package, so `load_usage_pause` in `.claude/ccy/claude-supervise.py` keeps
+its own copy, and `tests/unit/supervise/test_usage_pause.py` pins the two
+together. A record counts only for an own session, never future-dated, and only
+until `resume_at` plus an hour of grace, so a gate that died without clearing it
+cannot hold a session silent for ever. An unreadable record is no pause.
+
+**The rule**, applied by `_usage_pause_outcome` ahead of the state machine and
+every injection family while a live record exists for an own session:
+
+1. Once the session has stopped (`idle` and `work_idle`, with an empty input
+   box), type exactly ONE `/compact`. Its instruction names the resume time in
+   UTC and tells the session to do nothing further until the resume cron fires.
+   It is not the `continue` compact. The decision is latched per pause
+   (`pause_compacted_for`, keyed by `paused_at`), so a pause compacts once; a
+   later pause compacts again.
+2. Inject nothing else. No `continue` (the compaction signal that the compact
+   itself produces is left to expire), no `/goal` or `/goal clear`, no model
+   restore, flag-cleaning compact, standing-authorisation reminder, session-actions
+   directive or operator-signal line. Any of them would wake a session whose
+   whole purpose is to stay quiet until the cron.
+3. A compaction wait already in flight is dropped (`AWAIT_COMPACTING` to
+   `MONITOR`) and the compact waits a tick, so the host's stale-compact guard
+   cannot swallow the latch.
+4. When the record is cleared or expires, the latch is forgotten and the
+   supervisor behaves normally again. The lift is logged once.
+
+Every decision is written to `decision.log` the usual way: the compact as a
+`would-compact` line naming the pause and resume time, the waiting, the held
+state and the lift as deduped `noop:` lines, and a compact held back by a
+non-empty input box as the usual `injection deferred` line.
+
+**Known limits.** The latch lives in the worker's machine. The PTY host adopts
+the worker's state through `import_state`, and a host that predates this change
+ignores the new key, so a worker that is reloaded or crashes MID-PAUSE forgets
+that it has compacted and types one more compact. A compact that was pasted but
+not submitted is not followed up with the bare Enter that the ordinary compact
+gets, because that follow-up belongs to the machine this rule bypasses. Both
+cost one wasted compact at worst, never a nudge.
+
+Ship it like any other supervisor change: the worker hot-reload below, verified
+by the `ps` check, never a session restart.
+
 ## Effort is not the supervisor's concern at all
 
 Plan 00466 N47 review 2 found the decisive reason the supervisor must never
