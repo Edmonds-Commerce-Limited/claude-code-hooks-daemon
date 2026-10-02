@@ -710,7 +710,7 @@ Recorded only on `worktree-n466-n53`, which was dropped. Their write-ups are kep
 verbatim in [CARRIED-N53-BRANCH.md](CARRIED-N53-BRANCH.md). Five were remedied on
 that branch only, so all seven are open on `main`.
 
-**Status**: N244 and N245 fixed; N135, N176, N177 and N189 dismissed; N246 open. See below.
+**Status**: N244 and N245 fixed (merges 52fd9cd9b, 17b0aa491); N135, N176, N177 and N189 dismissed; N246 open. See below.
 
 - **N244**: **Fixed** (merge 52fd9cd9b). On a bare `git commit`, plan QA now scans
   the INDEX instead of the disk. It uses one `ls-files -s` and one `cat-file --batch`
@@ -721,7 +721,18 @@ that branch only, so all seven are open on `main`.
   and the journal lookups in `checks/common.py`). Report:
   [subagent-reports/261002-n244-committed-tree-sonnet.md](subagent-reports/261002-n244-committed-tree-sonnet.md).
 
-- **N245, N246**: in progress on `worktree-n245-pathspec`.
+- **N245**: **Fixed** (merge 17b0aa491). A pathspec commit (`git commit -m x a.txt`,
+  `--only`, `--include`) is judged on the named paths only, in `sensitive_content`,
+  `staged_lint_gate`, `remote_docs_commit_gate`, `guard_config_commit_gate` and docs QA.
+  Plan QA keeps reading the disk for the pathspec form; round 3 found the index read
+  regressed it, so that part was taken out rather than opening a fourth round. Three Opus
+  review rounds. The branch's `llm_qa changed` run was red on two items, both
+  checked: generated-doc drift that main had already fixed (none after the merge), and
+  four files `changed_tests` calls too broad to map. All 2632 selected tests passed, and
+  the 638 touched tests pass on merged main. Round 3's follow-ups are N299–N301. Report:
+  [subagent-reports/261002-n245-pathspec-sonnet.md](subagent-reports/261002-n245-pathspec-sonnet.md).
+
+- **N246**: open.
 
 - **N135, N176, N177, N189: ✅ Dismissed. They are out of scope under the owner's
   threat-model ruling**
@@ -1262,3 +1273,35 @@ exists to stop a scan that derives the next plan number (`ls | sort | tail`). A 
 or quoted text, is neither.
 
 **Status**: ⬜ Open (Plan 00483 Phase 3: narrow the match to number-discovery shapes).
+
+### N299 — `sensitive_content` resolves a pathspec from the repository root after a `cd`
+
+**Source**: N245 review round 3
+([subagent-reports/261002-n245-review3-opus.md](subagent-reports/261002-n245-review3-opus.md)).
+
+**Evidence**: `cd sub && git commit -m x f.txt` is denied when the ROOT-level `f.txt` holds
+a term, although the commit records `sub/f.txt`. Main allowed it before N245. This is an
+ordinary command shape, so the false positive is in scope.
+
+**Status**: ⬜ Open. Resolve the pathspec from the directory the command `cd`s into.
+
+### N300 — `remote_docs_commit_gate` does not stand down for a commit in a nested worktree
+
+**Source**: N245 review round 3.
+
+**Evidence**: when the commit runs inside a nested worktree (another repository from the
+daemon's point of view), `staged_lint_gate` stands down and `remote_docs_commit_gate`
+judges it against this repository. Main had the same wrong-repository behaviour, so N245
+did not cause it.
+
+**Status**: ⬜ Open.
+
+### N301 — the "every pathspec matches" check costs two git calls per path, in every gate
+
+**Source**: N245 review round 3.
+
+**Evidence**: each commit gate runs its own match check, two git calls per named path. That
+is about 0.25 s per gate for 60 paths on a tiny repository, multiplied by the number of gates.
+
+**Status**: ⬜ Open. Compute the match once per command and share it, or use one `ls-files`
+call for all the paths.
