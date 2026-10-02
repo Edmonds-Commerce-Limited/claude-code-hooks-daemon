@@ -58,7 +58,7 @@ from claude_code_hooks_daemon.utils import secret_redaction as sr
 from claude_code_hooks_daemon.utils.encrypted_at_rest import AtRestFormat, classify_at_rest
 from claude_code_hooks_daemon.utils.git_file_states import (
     GitFileStates,
-    scan_git_file_states,
+    scan_git_file_states_for_event,
     unignore_advice,
 )
 from claude_code_hooks_daemon.utils.path_containment import path_relative_to
@@ -198,7 +198,7 @@ class SecretFileHygieneCheckerHandler(SessionStartHandlerBase):
     def handle(self, hook_input: dict[str, Any]) -> AdvisoryResult:
         project_root = ProjectContext.project_root()
         patterns = sfm.resolve_configured_patterns()
-        scan = scan_git_file_states(project_root)
+        scan = scan_git_file_states_for_event(project_root, hook_input)
         absence = self._absent_to_report(project_root)
 
         if scan is not None:
@@ -390,9 +390,7 @@ class SecretFileHygieneCheckerHandler(SessionStartHandlerBase):
         """
         findings: list[_Finding] = []
         encrypted: list[str] = []
-        for relpath in sorted(scan.all_paths):
-            if not sfm.path_is_protected(str(project_root / relpath), patterns):
-                continue
+        for relpath in scan.protected_relpaths(project_root, patterns):
             at_rest = classify_at_rest(project_root / relpath, project_root)
             if at_rest is AtRestFormat.ANSIBLE_VAULT:
                 recovery = _encrypted_recovery(

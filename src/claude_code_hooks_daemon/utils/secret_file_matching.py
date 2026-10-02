@@ -45,6 +45,7 @@ from claude_code_hooks_daemon.utils.command_evasion import strip_transparent_res
 from claude_code_hooks_daemon.utils.path_containment import path_relative_to
 from claude_code_hooks_daemon.utils.path_exclusion import (
     first_matching_glob,
+    literal_screen,
     path_matches_globs,
     resolve_project_root,
 )
@@ -299,12 +300,128 @@ def protecting_pattern(file_path: str, patterns: tuple[str, ...]) -> str | None:
         # loop as protected by every pattern rather than let a version
         # difference decide whether a secret is guarded.
         return patterns[0]
-    project_root = resolve_project_root()
+    return _pattern_for_spellings(file_path, real, patterns, resolve_project_root())
+
+
+def _pattern_for_spellings(
+    file_path: str, real: str, patterns: tuple[str, ...], project_root: str | None
+) -> str | None:
+    """The first pattern protecting ``file_path`` as spelled or as resolved to ``real``."""
     matches = [first_matching_glob(file_path, patterns, project_root=project_root)]
     if real != file_path:
         matches.append(first_matching_glob(real, patterns, project_root=project_root))
     found = [pattern for pattern in matches if pattern is not None]
     return min(found, key=patterns.index) if found else None
+
+
+def protected_among(paths: Iterable[str], patterns: tuple[str, ...]) -> list[str]:
+    """The members of ``paths`` for which :func:`path_is_protected` is true, in order.
+
+    A repository-wide sweep asks this of every file git knows, and walking each
+    file's whole path through ``realpath`` was the dominant cost of the
+    SessionStart sweeps (N289b). Here each DIRECTORY is resolved and listed
+    once: a file that the listing shows is not a symlink has, as its real path,
+    its resolved parent plus its name, which is what ``realpath`` would
+    return. A path whose spelling and real path both lack every literal run of
+    every pattern (:func:`literal_screen`) cannot be protected, so the glob
+    matcher is not entered for it. Anything these shapes do not cover (a
+    symlink, a missing file or parent, a relative path, a NUL byte) is
+    answered by :func:`protecting_pattern` itself, so the result equals the
+    per-path call on every input.
+    """
+    if not patterns:
+        return []
+    project_root = resolve_project_root()
+    screen = literal_screen(patterns)
+    parents: dict[str, _ListedDirectory | None] = {}
+    protected: list[str] = []
+    for path in paths:
+        real = _resolve_through_parent(path, parents)
+        if real is None:
+            hit = protecting_pattern(path, patterns) is not None
+        elif screen is not None and not screen(path) and (real == path or not screen(real)):
+            hit = False
+        else:
+            hit = _pattern_for_spellings(path, real, patterns, project_root) is not None
+        if hit:
+            protected.append(path)
+    return protected
+
+
+@dataclass(frozen=True, slots=True)
+class _ListedDirectory:
+    """A directory resolved once: its real path and which entries are symlinks."""
+
+    real: str
+    is_symlink: dict[str, bool]
+
+
+#: How many ancestors deep a directory is resolved through its parent's
+#: listing before ``realpath`` is asked instead (bounds the recursion).
+_MAX_LISTING_DEPTH: Final[int] = 64
+
+
+def _list_directory(
+    directory: str, listed: dict[str, _ListedDirectory | None], depth: int = 0
+) -> _ListedDirectory | None:
+    """``directory`` strictly resolved and listed, or ``None`` when it cannot be.
+
+    A directory that its parent's listing shows is not a symlink resolves to
+    the parent's real path plus its name, with no walk of its own; only a
+    root, a symlink, or something deeper than ``_MAX_LISTING_DEPTH`` costs a
+    ``realpath``. ``listed`` memoises every directory seen.
+    """
+    if directory in listed:
+        return listed[directory]
+    real: str | None = None
+    parent, separator, name = directory.rpartition("/")
+    if separator and name and name not in (".", "..") and "//" not in directory:
+        if depth < _MAX_LISTING_DEPTH:
+            above = _list_directory(parent, listed, depth + 1)
+            if above is not None and above.is_symlink.get(name) is False:
+                real = f"{above.real.rstrip('/')}/{name}"
+    result: _ListedDirectory | None = None
+    if real is not None or Path(directory or "/").is_dir():
+        # `is_dir` is true only for a directory that resolves, so the strict
+        # and non-strict `realpath` agree here.
+        result = _scan_directory(real or os.path.realpath(directory or "/"))
+    listed[directory] = result
+    return result
+
+
+def _scan_directory(real: str) -> _ListedDirectory | None:
+    """``real`` listed with each entry's symlink status.
+
+    An unreadable directory comes back with an EMPTY listing, which names no
+    file as plain, so every file in it is judged one by one by the per-path
+    check.
+    """
+    try:
+        with os.scandir(real) as entries:
+            return _ListedDirectory(real, {e.name: e.is_symlink() for e in entries})
+    except OSError as exc:
+        logger.warning(
+            "protected_among: a directory could not be listed (%s); its files are "
+            "judged one by one",
+            type(exc).__name__,
+        )
+        return _ListedDirectory(real, {})
+
+
+def _resolve_through_parent(path: str, parents: dict[str, _ListedDirectory | None]) -> str | None:
+    """``realpath(path)`` for a plain existing file under a listable parent, else ``None``.
+
+    ``parents`` memoises each directory's listing (``None`` records one that
+    cannot be listed). ``None`` is "this shape is not covered here", never an
+    answer about the path.
+    """
+    head, separator, name = path.rpartition("/")
+    if not separator or not name or name in (".", "..") or "//" in path or "\0" in path:
+        return None
+    listed = _list_directory(head, parents)
+    if listed is None or listed.is_symlink.get(name, True):
+        return None
+    return f"{listed.real.rstrip('/')}/{name}"
 
 
 def _tokenise(command: str) -> list[str]:

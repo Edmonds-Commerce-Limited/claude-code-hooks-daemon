@@ -30,7 +30,7 @@ from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.utils.encrypted_at_rest import is_encrypted_at_rest
 from claude_code_hooks_daemon.utils.git_file_states import (
     gitignore_negation,
-    scan_git_file_states,
+    scan_git_file_states_for_event,
     unignore_advice,
 )
 from claude_code_hooks_daemon.utils.secret_file_matching import (
@@ -296,7 +296,7 @@ class GitignoreSafetyCheckerHandler(SessionStartHandlerBase):
         if project_root is None:
             return AdvisoryResult(decision=Decision.ALLOW, context=[])
 
-        ciphertext = self._find_ciphertext(project_root)
+        ciphertext = self._find_ciphertext(project_root, hook_input)
         cache_file = self._get_cache_file()
         current_hash = self._compute_gitignore_hash(project_root)
 
@@ -310,21 +310,21 @@ class GitignoreSafetyCheckerHandler(SessionStartHandlerBase):
         self._write_cache(cache_file, current_hash, missing)
         return self._build_result(missing, ciphertext, project_root)
 
-    def _find_ciphertext(self, project_root: Path) -> list[_Ciphertext]:
+    def _find_ciphertext(self, project_root: Path, hook_input: dict[str, Any]) -> list[_Ciphertext]:
         """Protected files git knows about whose content is a whole-file vault.
 
         Empty outside a git repository: without git there is no ignore state
-        to judge, and the advisory falls back to the caveat line.
+        to judge, and the advisory falls back to the caveat line. The scan and
+        the protection verdicts are shared with the other sweep of this same
+        event (N289b).
         """
-        states = scan_git_file_states(project_root)
+        states = scan_git_file_states_for_event(project_root, hook_input)
         if states is None:
             return []
         patterns = resolve_configured_patterns()
         found: list[_Ciphertext] = []
-        for relpath in sorted(states.all_paths):
+        for relpath in states.protected_relpaths(project_root, patterns):
             absolute = project_root / relpath
-            if not path_is_protected(str(absolute), patterns):
-                continue
             if is_encrypted_at_rest(absolute, project_root):
                 found.append(_Ciphertext(relpath=relpath, ignored=states.is_ignored(relpath)))
         return found
