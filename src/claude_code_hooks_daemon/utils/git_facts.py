@@ -103,7 +103,6 @@ class GitFactsBase:
         include: bool = False,
         directory: Path | None = None,
         union: bool = False,
-        extra_directories: Sequence[Path] = (),
         scopes: Sequence[PathspecScope] = (),
         index_env: Mapping[str, str] | None = None,
     ) -> None:
@@ -128,14 +127,10 @@ class GitFactsBase:
                 :class:`~claude_code_hooks_daemon.utils.git_commit_parsing.CommitReading`),
                 so judge the index PLUS the named paths' working-tree changes,
                 never less than the index alone. Ignored without ``pathspecs``.
-            extra_directories: Further directories the commit may run in (a
-                ``cd`` that may not have taken effect). The pathspecs are read
-                from each, and what any of them names is judged.
             scopes: The pathspecs of every commit of the command (ledger 00474
                 N307), each with a directory it is read from; what any scope
-                names is judged. When given, ``pathspecs``, ``directory`` and
-                ``extra_directories`` are not used, and the first scope is the
-                primary one.
+                names is judged. When given, ``pathspecs`` and ``directory``
+                are not used, and the first scope is the primary one.
             index_env: Git environment that points every read at a COPY of the
                 index with a same-command ``git add`` already applied (ledger
                 00474 N246), so the index read is the one the commit records.
@@ -144,10 +139,8 @@ class GitFactsBase:
         self._env = index_env
         primary = tuple(pathspecs) if pathspecs else ()
         self._directory = scopes[0].directory if scopes else directory or repo_root
-        self._scopes: tuple[PathspecScope, ...] = tuple(scopes) or tuple(
-            PathspecScope(where, primary)
-            for where in (self._directory, *extra_directories)
-            if primary
+        self._scopes: tuple[PathspecScope, ...] = tuple(scopes) or (
+            (PathspecScope(self._directory, primary),) if primary else ()
         )
         self._pathspecs = tuple(
             dict.fromkeys(spec for scope in self._scopes for spec in scope.pathspecs)
@@ -502,11 +495,7 @@ class GitFactsBase:
         """
         wanted = {path: listing[path] for path in paths if path in listing}
         shas = sorted({sha for sha in wanted.values() if sha != WORKING_TREE})
-        blobs = (
-            read_blobs(self._repo_root, shas)
-            if self._env is None
-            else read_blobs(self._repo_root, shas, env=self._env)
-        )
+        blobs = read_blobs(self._repo_root, shas, env=self._env)
         if blobs is None:
             return None
         texts: dict[str, str] = {}
@@ -552,8 +541,6 @@ class GitFactsBase:
 
     def _run(self, directory: Path, *args: str) -> "subprocess.CompletedProcess[str]":
         """``git <args>`` in ``directory``, reading the post-``git add`` index when there is one."""
-        if self._env is None:
-            return run_git(directory, *args, timeout=Timeout.GIT_CONTEXT)
         return run_git(directory, *args, timeout=Timeout.GIT_CONTEXT, env=self._env)
 
     def _git_output(self, *args: str, in_directory: bool = False) -> str | None:

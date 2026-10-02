@@ -1,6 +1,7 @@
 """Tests for plan_qa.context — CheckContext builders for the three surfaces."""
 
 import subprocess
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
@@ -721,15 +722,20 @@ class TestStagedContextReadsTheCommittedTree:
         batches: list[int] = []
 
         def run_git(
-            cwd: Path, *args: str, timeout: float = Timeout.GIT_CONTEXT
+            cwd: Path,
+            *args: str,
+            timeout: float = Timeout.GIT_CONTEXT,
+            env: Mapping[str, str] | None = None,
         ) -> "subprocess.CompletedProcess[str]":
             if args[0] == "ls-files":
                 listings.append(args)
-            return real_run_git(cwd, *args, timeout=timeout)
+            return real_run_git(cwd, *args, timeout=timeout, env=env)
 
-        def read_blobs(cwd: Path, shas: "list[str]") -> "dict[str, bytes] | None":
+        def read_blobs(
+            cwd: Path, shas: "list[str]", env: Mapping[str, str] | None = None
+        ) -> "dict[str, bytes] | None":
             batches.append(len(shas))
-            return real_read_blobs(cwd, shas)
+            return real_read_blobs(cwd, shas, env=env)
 
         monkeypatch.setattr("claude_code_hooks_daemon.utils.git_facts.run_git", run_git)
         monkeypatch.setattr("claude_code_hooks_daemon.utils.git_facts.read_blobs", read_blobs)

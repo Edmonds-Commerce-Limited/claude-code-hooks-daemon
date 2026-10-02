@@ -14,6 +14,7 @@ untouched — if the public surface moved, it would say so.
 from __future__ import annotations
 
 import subprocess
+from collections.abc import Mapping
 from pathlib import Path
 
 import pytest
@@ -241,10 +242,13 @@ class TestIndexListing:
         calls: list[tuple[str, ...]] = []
 
         def recording(
-            cwd: Path, *args: str, timeout: float = Timeout.GIT_CONTEXT
+            cwd: Path,
+            *args: str,
+            timeout: float = Timeout.GIT_CONTEXT,
+            env: Mapping[str, str] | None = None,
         ) -> subprocess.CompletedProcess[str]:
             calls.append(args)
-            return real(cwd, *args, timeout=timeout)
+            return real(cwd, *args, timeout=timeout, env=env)
 
         monkeypatch.setattr("claude_code_hooks_daemon.utils.git_facts.run_git", recording)
         facts = GitFactsBase(repo)

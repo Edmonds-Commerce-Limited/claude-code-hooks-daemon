@@ -33,6 +33,7 @@ from claude_code_hooks_daemon.core.rule import Rule
 from claude_code_hooks_daemon.handlers.pre_tool_use.staged_lint_gate import (
     StagedLintGateHandler,
 )
+from claude_code_hooks_daemon.utils.git_repo import run_git
 
 
 @pytest.fixture(autouse=True)
@@ -579,6 +580,32 @@ class TestACommandThatStagesOrCommitsMoreThanOnce:
         )
 
         assert "later.py" in rendered
+
+    @pytest.mark.parametrize(("mode", "decision"), [("block", Decision.DENY), ("warn", None)])
+    def test_an_add_that_cannot_be_simulated_is_not_read_as_clean(
+        self, handler: StagedLintGateHandler, tracked: Path, mode: str, decision: Decision | None
+    ) -> None:
+        handler._mode = mode
+        (tracked / "broken.py").write_text("def broken(\n")
+        timed_out = subprocess.CompletedProcess(["git"], 127, "", "timed out after 5s")
+        real = run_git
+
+        def run(directory: Path, *args: str, **kwargs: Any) -> subprocess.CompletedProcess[str]:
+            if "add" in args[:3]:
+                return timed_out
+            return real(directory, *args, **kwargs)
+
+        with _patched_root(tracked), patch(
+            "claude_code_hooks_daemon.utils.staging_simulation.run_git", side_effect=run
+        ):
+            result = handler.handle(_bash("git add broken.py && git commit -m x", str(tracked)))
+
+        if decision is Decision.DENY:
+            assert result.decision == Decision.DENY
+            assert "separate command" in (result.reason or "")
+        else:
+            assert result.decision == Decision.ALLOW
+            assert "separate command" in " ".join(result.context)
 
     def test_the_real_index_is_untouched(
         self, handler: StagedLintGateHandler, tracked: Path

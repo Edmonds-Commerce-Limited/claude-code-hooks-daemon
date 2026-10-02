@@ -63,7 +63,10 @@ from claude_code_hooks_daemon.utils.git_facts import commit_facts
 from claude_code_hooks_daemon.utils.git_repo import GitRepo
 from claude_code_hooks_daemon.utils.path_predicates import path_exists
 from claude_code_hooks_daemon.utils.shell_segmentation import split_unquoted
-from claude_code_hooks_daemon.utils.staging_simulation import simulated_staging
+from claude_code_hooks_daemon.utils.staging_simulation import (
+    SimulationIncompleteError,
+    simulated_staging,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -184,13 +187,20 @@ class StagedLintGateHandler(PreToolUseHandlerBase):
         # (ledger 00474 N246), so a file it stages is recorded too.
         reading = read_commit_form(get_bash_command(hook_input) or "")
         cwd = hook_input.get(HookInputField.CWD)
-        with simulated_staging(reading, cwd, project_root) as env:
-            facts = commit_facts(reading, project_root, cwd, index_env=env)
-            recorded = [
-                change.path
-                for change in facts.staged_changes()
-                if change.status[:1] in _RECORDED_STATUSES
-            ]
+        try:
+            with simulated_staging(reading, cwd, project_root) as env:
+                facts = commit_facts(reading, project_root, cwd, index_env=env)
+                recorded = [
+                    change.path
+                    for change in facts.staged_changes()
+                    if change.status[:1] in _RECORDED_STATUSES
+                ]
+        except SimulationIncompleteError as incomplete:
+            if self._mode == _MODE_BLOCK:
+                return GatingResult(decision=Decision.DENY, reason=str(incomplete))
+            return GatingResult(
+                decision=Decision.ALLOW, context=[f"⚠️ staged-lint-gate: {incomplete}"]
+            )
 
         lintable = self._lintable_files(project_root, recorded)
         if not lintable:

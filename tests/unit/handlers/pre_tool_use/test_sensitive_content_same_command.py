@@ -14,6 +14,7 @@ import subprocess
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
+from unittest.mock import patch
 
 import pytest
 
@@ -24,8 +25,10 @@ from claude_code_hooks_daemon.handlers.pre_tool_use.sensitive_content import (
     SensitiveContentHandler,
 )
 from claude_code_hooks_daemon.utils import secret_redaction as sr
+from claude_code_hooks_daemon.utils.git_repo import run_git
 
 _TERM = "alpha-term"
+_STAGING_RUN_GIT = "claude_code_hooks_daemon.utils.staging_simulation.run_git"
 
 
 def _git(repo: Path, *args: str) -> str:
@@ -352,3 +355,46 @@ class TestACdThatMayLandInSeveralDirectories:
         (repo / "f.txt").write_text(f"{_TERM}\n")
 
         assert _decision(handler, repo, "cd sub && git commit -q -m x f.txt") == Decision.ALLOW
+
+
+class TestAStagingThatCannotBeSimulatedIsDenied:
+    """A simulation that did not finish is not a clean index: the gate says so."""
+
+    @staticmethod
+    def _fail_every_add() -> Any:
+        real = run_git
+
+        def run(directory: Path, *args: str, **kwargs: Any) -> "subprocess.CompletedProcess[str]":
+            if "add" in args[:3]:
+                return subprocess.CompletedProcess(["git"], 127, "", "timed out after 5s")
+            return real(directory, *args, **kwargs)
+
+        return run
+
+    def test_handle_denies_and_tells_the_user_to_stage_first(
+        self, repo: Path, handler: SensitiveContentHandler
+    ) -> None:
+        (repo / "leak.txt").write_text(f"{_TERM}\n")
+        hook_input: dict[str, Any] = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "git add leak.txt && git commit -q -m x"},
+            "cwd": str(repo),
+        }
+
+        with patch(_STAGING_RUN_GIT, side_effect=self._fail_every_add()):
+            result = handler.handle(hook_input)
+
+        assert result.decision == Decision.DENY
+        assert "separate command" in (result.reason or "")
+
+    def test_matches_selects_the_command_so_the_chain_reaches_handle(
+        self, repo: Path, handler: SensitiveContentHandler
+    ) -> None:
+        hook_input: dict[str, Any] = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "git add leak.txt && git commit -q -m x"},
+            "cwd": str(repo),
+        }
+
+        with patch(_STAGING_RUN_GIT, side_effect=self._fail_every_add()):
+            assert handler.matches(hook_input) is True

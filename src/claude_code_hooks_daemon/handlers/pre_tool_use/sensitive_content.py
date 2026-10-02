@@ -72,7 +72,10 @@ from claude_code_hooks_daemon.utils.path_exclusion import (
 from claude_code_hooks_daemon.utils.path_predicates import read_text_or_reason
 from claude_code_hooks_daemon.utils.realpath import has_symlink_loop, realpath
 from claude_code_hooks_daemon.utils.scratch_dir import acceptance_path
-from claude_code_hooks_daemon.utils.staging_simulation import simulated_staging
+from claude_code_hooks_daemon.utils.staging_simulation import (
+    SimulationIncompleteError,
+    simulated_staging,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -748,7 +751,11 @@ class SensitiveContentHandler(PreToolUseHandlerBase):
         if self._nul_byte_file_path_reason(hook_input) is not None:
             return True
 
-        haystacks = self._compute_and_cache(hook_input)
+        try:
+            haystacks = self._compute_and_cache(hook_input)
+        except SimulationIncompleteError:
+            # Nothing can be judged, so nothing may be allowed: handle() denies.
+            return True
         if not haystacks:
             return False
 
@@ -1394,7 +1401,10 @@ class SensitiveContentHandler(PreToolUseHandlerBase):
         if nul_byte_reason is not None:
             return GatingResult(decision=Decision.DENY, reason=f"BLOCKED: {nul_byte_reason}")
 
-        haystacks = self._take_cached_haystacks(hook_input)
+        try:
+            haystacks = self._take_cached_haystacks(hook_input)
+        except SimulationIncompleteError as incomplete:
+            return GatingResult(decision=Decision.DENY, reason=f"BLOCKED: {incomplete}")
         transcript_path = hook_input.get(HookInputField.TRANSCRIPT_PATH)
 
         for hay in haystacks:

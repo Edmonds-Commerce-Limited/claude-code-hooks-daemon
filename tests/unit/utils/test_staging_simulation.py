@@ -19,7 +19,10 @@ from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.utils import staging_simulation as staging_module
 from claude_code_hooks_daemon.utils.git_commit_parsing import read_commit_form
 from claude_code_hooks_daemon.utils.git_repo import run_git
-from claude_code_hooks_daemon.utils.staging_simulation import simulated_staging
+from claude_code_hooks_daemon.utils.staging_simulation import (
+    SimulationIncompleteError,
+    simulated_staging,
+)
 
 
 def _git(repo: Path, *args: str) -> str:
@@ -143,6 +146,7 @@ class TestTheAddIsAppliedToACopy:
 
     def test_the_real_repository_is_not_touched(self, repo: Path) -> None:
         index_before = (repo / ".git" / "index").read_bytes()
+        mtime_before = (repo / ".git" / "index").stat().st_mtime_ns
         objects_before = _git(repo, "count-objects", "-v")
         reading = read_commit_form("git add -A && git commit -m x")
 
@@ -150,6 +154,7 @@ class TestTheAddIsAppliedToACopy:
             assert _staged(repo, env) == {"leak.txt"}
 
         assert (repo / ".git" / "index").read_bytes() == index_before
+        assert (repo / ".git" / "index").stat().st_mtime_ns == mtime_before
         assert _git(repo, "count-objects", "-v") == objects_before
         assert _git(repo, "diff", "--cached", "--name-only") == ""
 
@@ -265,21 +270,100 @@ class TestWhenGitCannotAnswer:
             with simulated_staging(reading, repo, repo) as env:
                 assert env is not None
 
-        added = [call.args[1:] for call in spy.call_args_list if call.args[1] == "add"]
-        assert added == [("add", "leak.txt"), ("add", "-A")]
+        added = [call.args[1:] for call in spy.call_args_list if "add" in call.args[1:]]
+        assert [call[call.index("add") :] for call in added] == [
+            ("add", "leak.txt"),
+            ("add", "-A", "--ignore-errors"),
+        ]
+        assert all(call[:2] == ("-c", "core.splitIndex=false") for call in added)
 
-    def test_an_add_everything_that_fails_is_reported_not_raised(
-        self, repo: Path, caplog: pytest.LogCaptureFixture
-    ) -> None:
-        refused = subprocess.CompletedProcess(["git"], 1, "", "fatal: unable to index file")
+
+class TestAnIncompleteSimulationIsNotAnAnswer:
+    """A simulation that did not finish must not be read as a clean index."""
+
+    def test_an_add_everything_that_fails_raises(self, repo: Path) -> None:
+        refused = subprocess.CompletedProcess(["git"], 128, "", "fatal: unable to index file")
         reading = read_commit_form("F=leak.txt; git add $F && git commit -m x")
 
         with patch.object(staging_module, "run_git") as spy:
             spy.side_effect = _fail_every_add(refused)
-            with caplog.at_level("WARNING"), simulated_staging(reading, repo, repo) as env:
-                assert env is not None
+            with pytest.raises(SimulationIncompleteError), simulated_staging(reading, repo, repo):
+                pass
 
-        assert "add -A failed" in caplog.text
+    def test_an_add_that_times_out_raises(self, repo: Path) -> None:
+        timed_out = subprocess.CompletedProcess(["git"], 127, "", "timed out after 5s")
+        reading = read_commit_form("git add leak.txt && git commit -m x")
+
+        with patch.object(staging_module, "run_git") as spy:
+            spy.side_effect = _fail_every_add(timed_out)
+            with pytest.raises(SimulationIncompleteError), simulated_staging(reading, repo, repo):
+                pass
+
+    def test_the_reason_tells_the_user_to_stage_first_and_commit_separately(
+        self, repo: Path
+    ) -> None:
+        timed_out = subprocess.CompletedProcess(["git"], 127, "", "timed out after 5s")
+        reading = read_commit_form("git add leak.txt && git commit -m x")
+
+        with patch.object(staging_module, "run_git") as spy:
+            spy.side_effect = _fail_every_add(timed_out)
+            with pytest.raises(SimulationIncompleteError) as raised:
+                with simulated_staging(reading, repo, repo):
+                    pass
+
+        assert "git add" in str(raised.value)
+        assert "separate" in str(raised.value)
+
+    def test_the_scratch_files_are_removed_when_it_raises(self, repo: Path) -> None:
+        refused = subprocess.CompletedProcess(["git"], 128, "", "fatal")
+        reading = read_commit_form("git add leak.txt && git commit -m x")
+        scratch_roots: list[Path] = []
+        real_environment = staging_module._scratch_environment
+
+        def remember(repo_root: Path, scratch: Path) -> dict[str, str] | None:
+            scratch_roots.append(scratch)
+            return real_environment(repo_root, scratch)
+
+        with (
+            patch.object(staging_module, "_scratch_environment", side_effect=remember),
+            patch.object(staging_module, "run_git") as spy,
+        ):
+            spy.side_effect = _fail_every_add(refused)
+            with pytest.raises(SimulationIncompleteError), simulated_staging(reading, repo, repo):
+                pass
+
+        assert scratch_roots
+        assert not scratch_roots[0].exists()
+
+    def test_an_embedded_repository_does_not_hide_a_file_the_add_can_stage(
+        self, repo: Path
+    ) -> None:
+        embedded = repo / "vendored"
+        embedded.mkdir()
+        _git(embedded, "init", "-q")
+        _write(embedded, "inner.txt", "x\n")
+        reading = read_commit_form("F=leak.txt; git add $F && git commit -m x")
+
+        with simulated_staging(reading, repo, repo) as env:
+            assert "leak.txt" in _staged(repo, env)
+
+
+class TestASplitIndexRepository:
+    def test_the_simulation_writes_no_shared_index_into_the_real_repository(
+        self, repo: Path
+    ) -> None:
+        _git(repo, "config", "core.splitIndex", "true")
+        _git(repo, "update-index", "--split-index")
+        before = sorted(path.name for path in (repo / ".git").glob("sharedindex.*"))
+        _write(repo, "a.txt", "edited\n")
+        reading = read_commit_form("git add -A && git commit -m x")
+
+        with simulated_staging(reading, repo, repo) as env:
+            assert _staged(repo, env) == {"a.txt", "leak.txt"}
+
+        after = sorted(path.name for path in (repo / ".git").glob("sharedindex.*"))
+        assert before
+        assert after == before
 
 
 def _fail_the_first_add(
@@ -288,7 +372,7 @@ def _fail_the_first_add(
     answers = iter([refused, accepted])
 
     def run(directory: Path, *args: str, **kwargs: Any) -> "subprocess.CompletedProcess[str]":
-        if args and args[0] == "add":
+        if "add" in args[:3]:
             return next(answers)
         return run_git(directory, *args, **kwargs)
 
@@ -299,7 +383,7 @@ def _fail_every_add(
     refused: "subprocess.CompletedProcess[str]",
 ) -> Callable[..., "subprocess.CompletedProcess[str]"]:
     def run(directory: Path, *args: str, **kwargs: Any) -> "subprocess.CompletedProcess[str]":
-        if args and args[0] == "add":
+        if "add" in args[:3]:
             return refused
         return run_git(directory, *args, **kwargs)
 

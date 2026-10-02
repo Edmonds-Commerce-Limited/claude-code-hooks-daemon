@@ -10,8 +10,18 @@ will record. The real index, object store and working tree are never written.
 
 An add whose scope cannot be read (a pathspec the shell builds, an interactive
 or file-driven option, a directory the command reaches by a move this reading
-cannot state) is applied as ``git add -A``: every working-tree change, never
-less than the add could stage.
+cannot state) is applied as ``git add -A --ignore-errors``: every working-tree
+change git can stage, never less than the add could stage.
+
+When even that cannot finish (git timed out, or failed outright) the copy is
+NOT the index the commit will record, and a gate must not judge it as if it
+were: :func:`simulated_staging` raises :class:`SimulationIncompleteError`, whose
+message tells the user to run ``git add`` as its own call.
+
+The add runs the repository's own configured clean filters and ``core.fsmonitor``
+hook, as the real add does moments later; that is the owner's own configuration.
+It runs with ``core.splitIndex=false`` so it never writes a ``sharedindex.*``
+file into the real ``.git``.
 """
 
 import logging
@@ -34,7 +44,20 @@ from claude_code_hooks_daemon.utils.git_repo import run_git
 logger = logging.getLogger(__name__)
 
 _ADD: Final[str] = "add"
-_ADD_EVERYTHING: Final[str] = "-A"
+_ADD_EVERYTHING: Final[tuple[str, ...]] = ("-A", "--ignore-errors")
+_NO_SPLIT_INDEX: Final[tuple[str, ...]] = ("-c", "core.splitIndex=false")
+
+#: ``git add --ignore-errors`` stages what it can and exits 1 for what it could
+#: not (an embedded repository with no commit); any other non-zero status means
+#: it did not run to the end.
+_PARTIAL_ADD_EXIT: Final[int] = 1
+
+INCOMPLETE_SIMULATION_REASON: Final[str] = (
+    "The `git add` in this command could not be simulated completely ({why}), so "
+    "the commit gate cannot tell what the commit would record. Run `git add` as "
+    "its own call first, then run `git commit` as a separate command: the gate "
+    "then reads the real index."
+)
 _END_OF_OPTIONS: Final[str] = "--"
 _SCRATCH_PREFIX: Final[str] = "echd-staging-"
 _INDEX_NAME: Final[str] = "index"
@@ -72,6 +95,13 @@ _NOTHING_STAGED_MESSAGES: Final[tuple[str, ...]] = (
 )
 
 
+class SimulationIncompleteError(Exception):
+    """The copy of the index is not what the command's ``git add`` would leave.
+
+    The message is the reason to give the user; a gate denies with it.
+    """
+
+
 @contextmanager
 def simulated_staging(
     reading: CommitReading, cwd: str | Path | None, repo_root: Path
@@ -81,6 +111,10 @@ def simulated_staging(
     ``None`` when no ``git add`` comes before the commit, or git could not set
     the copy up; the caller then reads the real index, as it always did. The
     scratch copy is removed when the block ends.
+
+    Raises:
+        SimulationIncompleteError: If an add could not be applied to the copy,
+            so the copy is not the index the commit will record.
     """
     if not reading.stagings:
         yield None
@@ -162,7 +196,7 @@ def _add(
     directory: Path, arguments: Sequence[str], repo_root: Path, env: Mapping[str, str]
 ) -> None:
     """``git add <arguments>`` in ``directory``; a failure git would share is no staging."""
-    result = run_git(directory, _ADD, *arguments, env=env)
+    result = run_git(directory, *_NO_SPLIT_INDEX, _ADD, *arguments, env=env)
     if result.returncode == 0:
         return
     if any(message in result.stderr for message in _NOTHING_STAGED_MESSAGES):
@@ -172,7 +206,17 @@ def _add(
 
 
 def _add_everything(repo_root: Path, env: Mapping[str, str]) -> None:
-    """Stage every working-tree change into the scratch index."""
-    result = run_git(repo_root, _ADD, _ADD_EVERYTHING, env=env)
-    if result.returncode != 0:
+    """Stage every working-tree change git can into the scratch index.
+
+    Raises:
+        SimulationIncompleteError: If git did not run to the end (timeout, or a
+            failure other than files it had to skip).
+    """
+    result = run_git(repo_root, *_NO_SPLIT_INDEX, _ADD, *_ADD_EVERYTHING, env=env)
+    if result.returncode not in (0, _PARTIAL_ADD_EXIT):
         logger.warning("staging simulation: add -A failed in %s: %s", repo_root, result.stderr)
+        raise SimulationIncompleteError(
+            INCOMPLETE_SIMULATION_REASON.format(
+                why=result.stderr.strip() or f"git exited {result.returncode}"
+            )
+        )

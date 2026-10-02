@@ -331,7 +331,6 @@ def staged_context(
     exclude_paths: Sequence[str] | None = None,
     include: bool = False,
     directory: Path | None = None,
-    extra_directories: Sequence[Path] = (),
     scopes: Sequence[PathspecScope] = (),
     union: bool = False,
     index_env: Mapping[str, str] | None = None,
@@ -342,11 +341,8 @@ def staged_context(
         directory: Where the commit's pathspecs are read from (ledger 00474
             N299: ``cd sub && git commit f.txt`` names ``sub/f.txt``); the
             project root when omitted.
-        extra_directories: The other directories the command may have run in
-            (a ``cd`` that may not have taken effect); what the pathspecs name
-            in any of them is judged.
-        scopes: Replaces ``directory``, ``extra_directories`` and the pathspec
-            scope when the command runs several commits (ledger 00474 N307).
+        scopes: Replaces ``directory`` and the pathspec scope when the command
+            runs several commits (ledger 00474 N307).
         union: Judge the index plus what the pathspecs name, as a reading that
             is not certain is.
         index_env: Environment that reads the index a same-command ``git add``
@@ -372,7 +368,6 @@ def staged_context(
         pathspecs=pathspecs,
         include=include,
         directory=directory,
-        extra_directories=extra_directories,
         scopes=scopes,
         union=union,
         index_env=index_env,
