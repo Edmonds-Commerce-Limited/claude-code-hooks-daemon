@@ -90,12 +90,14 @@ hosts:
 
 ### Phase 3: Host configuration (TDD)
 
-- [ ] ⬜ **Task 3.1**: The top-level `hosts:` model. Keys are labels; `pattern` is an
+- [x] ✅ **Task 3.1** (merged; `HostConfig` and `UsageCeilingConfig` in `src/claude_code_hooks_daemon/config/models.py`): The top-level `hosts:` model. Keys are labels; `pattern` is an
   optional `fnmatch` glob defaulting to the label. Validation, an example config, and a
   `config-changes` manifest entry. Matching reuses Plan 00470's effective hostname reader
   and `hostname_matches`.
-- [ ] ⬜ **Task 3.2**: Resolve the settings for a session: which entries match, and how
-  several matches combine (open question 2).
+- [x] ✅ **Task 3.2** (merged; `utils/host_usage_ceiling.py`,
+  `resolve_host_usage_ceiling()`; lowest matching ceiling wins per window): Resolve the
+  settings for a session: which entries match, and how several matches combine (open
+  question 2).
 
 ### Phase 4: The usage pause (TDD)
 
