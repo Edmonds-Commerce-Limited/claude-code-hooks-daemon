@@ -1576,6 +1576,10 @@ _GH_TEXT_FLAGS: Final[frozenset[str]] = frozenset(
 #: An awk program containing one of these can hand its text to a shell or read
 #: a file it names, so it is not merely a pattern.
 _AWK_RUNNING_MARKERS: Final[tuple[str, ...]] = ("system", "getline", "|")
+#: Heads whose pattern operand is a regular expression, never a path.
+_REGEX_PATTERN_HEADS: Final[frozenset[str]] = _GREP_HEADS | frozenset({_RG_HEAD})
+_REGEXP_LONG_OPTION: Final[str] = "--regexp"
+_REGEX_PATTERN_ATTACHED_PREFIXES: Final[tuple[str, ...]] = (f"{_REGEXP_LONG_OPTION}=", "-e")
 _TEXT_OPERAND_PLACEHOLDER: Final[str] = "TEXT_OPERAND"
 _SEGMENT_SEPARATORS: Final[tuple[str, ...]] = ("&&", "||", ";", "|", "&", "\n")
 #: Unquoted, any of these makes bash compute the word: a glob, a variable or
@@ -1603,6 +1607,13 @@ def _is_text_operand(word: str, previous: str, head: str) -> bool:
         return False
     if head == _GH_HEAD:
         return previous in _GH_TEXT_FLAGS or word.partition("=")[0] in _GH_TEXT_FLAGS
+    if head in _REGEX_PATTERN_HEADS:
+        # The pattern given as an option's value is a regex like the positional
+        # one: `--regexp=PAT`, `-ePAT`, and `--regexp PAT`.
+        if word.startswith(_REGEX_PATTERN_ATTACHED_PREFIXES):
+            return True
+        if previous == _REGEXP_LONG_OPTION:
+            return True
     if word.startswith("-"):
         return False
     if head in _ECHO_HEADS:
