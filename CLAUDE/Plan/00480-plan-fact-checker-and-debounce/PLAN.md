@@ -88,7 +88,9 @@ as principle 1.
 
 ### Phase 3: Debounce as a daemon primitive (TDD)
 
-- [ ] ⬜ **Task 3.1**: Design and build a keyed debouncer in the daemon. Its behaviour:
+- [x] ✅ **Task 3.1** (merged; `core/debouncer.py`, `get_debouncer()`; pending triggers are
+  dropped on shutdown, not persisted; documented in `CLAUDE/HANDLER_DEVELOPMENT.md`): Design
+  and build a keyed debouncer in the daemon. Its behaviour:
 
   - each event for a key resets that key's quiet-period timer;
   - the callback fires once, after the period passes with no further event;
