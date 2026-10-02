@@ -32,7 +32,30 @@ Same defect for backticks, `<( )`, `>( )`, and a substitution inside double quot
   operands, `-f`, `--pre`, `awk -f`, unquoted globs and quoted text for globbing programs
   (find -name, python -c, grep --include, rg -g) are judged unchanged.
 
-## Tests (tests/unit/utils/test_substitution_text_operands.py, 240 cases)
+## Revision after coordinator review of 2a3347f6a (bypass)
+
+The first commit relaxed echo/printf operands inside a substitution. A substitution's
+output becomes words of the outer command and an unquoted result is glob-expanded, so
+`cat $(echo 'PREFIX*')` (and printf, backticks, `x=$(...); cat $x`, quoted substitution)
+was allowed: a bypass. Reproduced red with the coordinator's shapes in all wrappers
+(21 failures), then fixed:
+
+- Inside a substitution only `grep`/`egrep`/`fgrep` operands are relaxed
+  (`_SEARCH_HEADS`). Not echo/printf/gh (operand is the output), not `rg` (`-r` prints
+  its replacement text), not `awk` (a program prints its string literals).
+- An operand is "inside a substitution" when its start lies in any inner span, whichever
+  pass found it. This also closes a hole already on main: `x=$(true; echo 'P*'); cat $x`
+  was allowed because the outer pass split at the `;` inside the substitution.
+- Top-level N269 behaviour is unchanged.
+- Tests: new `TestAnEchoingConsumerIsNotRelaxedInsideASubstitution` (echo, printf,
+  echo -n, rg -r, awk print literal x 7 outer shapes: bare, double-quoted, backticks,
+  assigned, assigned after `;`, `<( )`, nested; all DENIED) plus the top-level
+  forms still ALLOWED. The rg/awk pattern cases moved out of the in-substitution
+  ALLOWED list (conservative false positive, grep is the N291 case).
+- The coordinator's n291_bypass.py now reports deny for all five bypass shapes and
+  allow for the grep regex. Targeted run: 3449 passed.
+
+## Tests (tests/unit/utils/test_substitution_text_operands.py, originally 240 cases)
 
 ALLOWED, each of 6 text-consumer shapes (double/single-quoted grep regex, grep -E
 alternation, rg pattern, awk pattern, echo of a glob) x 8 wrappers (assignment, bare

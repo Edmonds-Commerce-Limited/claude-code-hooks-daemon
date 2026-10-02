@@ -83,10 +83,47 @@ _TEXT_CONSUMERS = {
     "double-quoted grep regex": f'grep "{_REGEX}" untracked/scratch/list.txt',
     "single-quoted grep regex": f"grep '{_REGEX}' untracked/scratch/list.txt",
     "grep -E alternation": 'grep -E "a|^tests/.*py:[0-9]+" untracked/scratch/list.txt',
-    "rg pattern": "rg -n '^src/.*py:[0-9]+' untracked/scratch/list.txt",
-    "awk pattern": "awk '/^tests\\/.*py:[0-9]+/ {print $1}' untracked/scratch/list.txt",
-    "echo of a glob": "echo 'see src/**/x.py and *.py'",
 }
+
+#: A substitution's OUTPUT becomes words of the outer command, and an unquoted
+#: result is glob-expanded, so a consumer that echoes its operand must not be
+#: relaxed inside one. The protected prefix is a truncation that globs to it.
+_ECHOING_CONSUMERS = {
+    "echo": f"echo '{_PREFIX}*'",
+    "printf": f"printf '%s' '{_PREFIX}*'",
+    "echo -n": f"echo -n '{_PREFIX}*'",
+    "rg replacement": f"rg -r '{_PREFIX}*' x f",
+    "awk program literal": f"awk 'BEGIN {{ print \"{_PREFIX}*\" }}'",
+}
+_OUTER_CONSUMERS = {
+    "cat of a bare substitution": "cat $({inner})",
+    "cat of a double-quoted substitution": 'cat "$({inner})"',
+    "cat of backticks": "cat " + _TICK + "{inner}" + _TICK,
+    "cat of an assigned result": "x=$({inner}); cat $x",
+    "cat of a result assigned after a separator": "x=$(true; {inner}); cat $x",
+    "cat of a process substitution": "cat <({inner})",
+    "cat of a nested substitution": "cat $(echo $({inner}))",
+}
+
+
+class TestAnEchoingConsumerIsNotRelaxedInsideASubstitution:
+    @pytest.mark.parametrize("outer", list(_OUTER_CONSUMERS.values()), ids=list(_OUTER_CONSUMERS))
+    @pytest.mark.parametrize(
+        "inner", list(_ECHOING_CONSUMERS.values()), ids=list(_ECHOING_CONSUMERS)
+    )
+    def test_is_denied(self, outer: str, inner: str, tmp_path: Path) -> None:
+        (tmp_path / _PROTECTED).write_text("x")
+        decision, _ = _verdict(outer.format(inner=inner), tmp_path)
+        assert decision == Decision.DENY
+
+    @pytest.mark.parametrize(
+        "inner", list(_ECHOING_CONSUMERS.values()), ids=list(_ECHOING_CONSUMERS)
+    )
+    def test_the_top_level_text_operand_is_still_allowed(self, inner: str, tmp_path: Path) -> None:
+        """N269 on main: the same command outside a substitution prints its text."""
+        (tmp_path / _PROTECTED).write_text("x")
+        decision, reason = _verdict(inner, tmp_path)
+        assert decision != Decision.DENY, reason
 
 
 class TestTextConsumerInsideASubstitutionIsAllowed:
