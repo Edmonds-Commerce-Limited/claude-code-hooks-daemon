@@ -41,7 +41,10 @@ from typing import Any, Final, Literal
 import yaml
 
 from claude_code_hooks_daemon.utils import shell_expansion
-from claude_code_hooks_daemon.utils.command_evasion import strip_transparent_reserved_words
+from claude_code_hooks_daemon.utils.command_evasion import (
+    git_subcommand_index,
+    strip_transparent_reserved_words,
+)
 from claude_code_hooks_daemon.utils.path_containment import path_relative_to
 from claude_code_hooks_daemon.utils.path_exclusion import (
     first_matching_glob,
@@ -1576,6 +1579,18 @@ _GH_TEXT_FLAGS: Final[frozenset[str]] = frozenset(
 #: An awk program containing one of these can hand its text to a shell or read
 #: a file it names, so it is not merely a pattern.
 _AWK_RUNNING_MARKERS: Final[tuple[str, ...]] = ("system", "getline", "|")
+#: Heads whose pattern operand is a regular expression, never a path.
+_REGEX_PATTERN_HEADS: Final[frozenset[str]] = _GREP_HEADS | frozenset({_RG_HEAD})
+_REGEXP_LONG_OPTION: Final[str] = "--regexp"
+_REGEX_PATTERN_ATTACHED_PREFIXES: Final[tuple[str, ...]] = (f"{_REGEXP_LONG_OPTION}=", "-e")
+_GIT_HEAD: Final[str] = "git"
+_GIT_GREP_SUBCOMMAND: Final[str] = "grep"
+#: ``git grep`` options whose separate value is the pattern, and those whose
+#: separate value is something else (a pattern FILE, a count, a depth).
+_GIT_GREP_PATTERN_OPTIONS: Final[frozenset[str]] = frozenset({"-e", _REGEXP_LONG_OPTION})
+_GIT_GREP_VALUE_OPTIONS: Final[frozenset[str]] = frozenset(
+    {"-f", "--file", "-A", "-B", "-C", "-m", "--max-depth", "--threads"}
+)
 _TEXT_OPERAND_PLACEHOLDER: Final[str] = "TEXT_OPERAND"
 _SEGMENT_SEPARATORS: Final[tuple[str, ...]] = ("&&", "||", ";", "|", "&", "\n")
 #: Unquoted, any of these makes bash compute the word: a glob, a variable or
@@ -1603,6 +1618,13 @@ def _is_text_operand(word: str, previous: str, head: str) -> bool:
         return False
     if head == _GH_HEAD:
         return previous in _GH_TEXT_FLAGS or word.partition("=")[0] in _GH_TEXT_FLAGS
+    if head in _REGEX_PATTERN_HEADS:
+        # The pattern given as an option's value is a regex like the positional
+        # one: `--regexp=PAT`, `-ePAT`, and `--regexp PAT`.
+        if word.startswith(_REGEX_PATTERN_ATTACHED_PREFIXES):
+            return True
+        if previous == _REGEXP_LONG_OPTION:
+            return True
     if word.startswith("-"):
         return False
     if head in _ECHO_HEADS:
@@ -1670,11 +1692,61 @@ def _without_text_operands(command: str) -> str:
     return "".join(pieces)
 
 
+def _git_grep_pattern_spans(segment: str) -> list[tuple[int, int]]:
+    """``(start, end)`` within ``segment`` of each regex pattern word of a
+    ``git grep``, or none when the segment is another git command.
+
+    The pattern is the first positional, or the value of ``-e``/``--regexp``
+    (then every positional is a revision or pathspec, which is judged as a
+    path). Everything after ``--`` is a pathspec."""
+    spans = shell_word_spans(segment)
+    words = [segment[start:end] for start, end in spans]
+    git_index = next(
+        (index for index, word in enumerate(words) if word.rsplit("/", 1)[-1] == _GIT_HEAD), None
+    )
+    if git_index is None:
+        return []
+    subcommand = git_subcommand_index(words, git_index)
+    if subcommand is None or words[subcommand] != _GIT_GREP_SUBCOMMAND:
+        return []
+    patterns: list[tuple[int, int]] = []
+    pattern_given = False
+    index = subcommand + 1
+    while index < len(words):
+        word = words[index]
+        if word == "--":
+            break
+        value_index: int | None = None
+        if word in _GIT_GREP_PATTERN_OPTIONS:
+            value_index, pattern_given = index + 1, True
+            index += 2
+        elif word.startswith(_REGEX_PATTERN_ATTACHED_PREFIXES):
+            value_index, pattern_given = index, True
+            index += 1
+        elif word in _GIT_GREP_VALUE_OPTIONS:
+            index += 2
+        elif word.startswith("-"):
+            index += 1
+        elif pattern_given:
+            break
+        else:
+            value_index, pattern_given = index, True
+            index += 1
+        if value_index is not None and value_index < len(words):
+            if _is_literal_quoted_word(words[value_index]):
+                patterns.append(spans[value_index])
+    return patterns
+
+
 def _segment_text_operands(segment: str, offset: int) -> tuple[str, list[tuple[int, int]]]:
     """The segment's command word and the absolute ``(start, end)`` of each
     text operand in it; ``segment`` begins at ``offset`` in the command. No
     operands unless the command word is a pure text consumer."""
     head = segment_command_word(segment) or ""
+    if head == _GIT_HEAD:
+        git_grep_spans = _git_grep_pattern_spans(segment)
+        # git grep prints matched content, like grep, so it is judged as grep.
+        return (_GIT_GREP_SUBCOMMAND, [(offset + s, offset + e) for s, e in git_grep_spans])
     if head not in _TEXT_CONSUMER_HEADS:
         return head, []
     spans = shell_word_spans(segment)

@@ -65,6 +65,28 @@ _TEXT_OPERAND_COMMANDS = {
     "single-quoted grep -rn regex": r"grep -rn -E 'x[a-z_/]+\.py' src",
     "grep -e value": r"grep -e '.*\.py:[0-9]+' log.txt",
     "rg pattern": r"rg -n '^src/.*py:[0-9]+' log.txt",
+    "issue 70 leading dot-star": r"grep '.*ErrorCount' f",
+    "issue 70 leading dot-star version": r"grep '.*v3' f",
+    "issue 70 dot-star then done": r"grep -n '.*v3\.6' CHANGELOG.md && echo done",
+    "issue 70 rg dot-star": r"rg '.*Foo' src",
+    "escaped dot-star with a character class": r"grep '\.\*[A-Za-z]' f",
+    "rg -e escaped dot-star with a character class": r"rg -e '\.\*[A-Za-z]' src",
+    "egrep escaped dot-star with a character class": r"egrep '\.\*[A-Za-z]' f",
+    "grep -E anchored dot-star": r"grep -E '^\..*pass' f",
+    "grep --regexp attached value": r"grep --regexp='\.\*[A-Za-z]' f",
+    "grep --regexp separate value": r"grep --regexp '\.\*[A-Za-z]' f",
+    "rg --regexp attached value": r"rg --regexp='.*Foo' src",
+    "grep -e attached value": r"grep -e'\.\*[A-Za-z]' f",
+    "git grep positional pattern": r"git grep -n '\.\*[A-Za-z]' -- src",
+    "git grep -e pattern with an excluding pathspec": (
+        r"git grep -n -e '\.\*[A-Za-z]' -- src ':!tests/fixtures/cyber-flag'"
+    ),
+    "git grep dot-star": r"git grep '.*ErrorCount' -- src",
+    "git grep --regexp attached": r"git grep --regexp='.*Foo' -- src",
+    "git grep -e attached": r"git grep -e'.*Foo' -- src",
+    "git grep --regexp separate": r"git grep --regexp '.*Foo' -- src",
+    "git grep after global options": r"git -C src -c color.ui=never grep -n '.*Foo' -- .",
+    "git grep after context option value": r"git grep -C 3 '.*Foo' HEAD",
     "awk pattern": r"awk '/^tests\/.*py:[0-9]+/ {print $1}' log.txt",
     "printf with escaped backticks in a double-quoted body": (
         "printf '%s\\n' \"Triage: see (\\`CLAUDE/Plan/00472-model-tier/\\`, "
@@ -165,6 +187,34 @@ class TestWhatStillDenies:
         ],
     )
     def test_a_program_that_globs_its_own_quoted_text_is_still_denied(
+        self, command: str, tmp_path: Path
+    ) -> None:
+        (tmp_path / _PROTECTED).write_text("x")
+        decision, _ = _verdict(command, tmp_path)
+        assert decision == Decision.DENY
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            f"grep x {_PREFIX}*",
+            f"grep '.*x' {_PREFIX}*",
+            f"grep --regexp='.*x' {_PREFIX}*",
+            f"grep -e '\\.\\*[A-Za-z]' {_PREFIX}*",
+            f"rg -e '.*Foo' {_PREFIX}*",
+            f"grep x {_PROTECTED}.txt",
+            f"grep -n '.*x' {_PROTECTED}",
+            f"grep -r x . --include={_PREFIX}*",
+            f"git grep x -- '{_PREFIX}*'",
+            f"git grep x -- {_PREFIX}*",
+            f"git grep x HEAD -- {_PROTECTED}.txt",
+            f"git grep '.*x' -- '{_PREFIX}*'",
+            f"git grep -e '.*x' -- '{_PREFIX}*'",
+            f"git grep -e '.*x' '{_PREFIX}*'",
+            f"git grep -n '.*x' HEAD '{_PREFIX}*'",
+            f"git -C . grep '.*x' -- '{_PREFIX}*'",
+        ],
+    )
+    def test_a_regex_pattern_does_not_excuse_the_file_operand(
         self, command: str, tmp_path: Path
     ) -> None:
         (tmp_path / _PROTECTED).write_text("x")
