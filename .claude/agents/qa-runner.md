@@ -23,8 +23,12 @@ not restate them.
    the merge base with `main` (or `A..B` when the caller gives a range), plus
    `git status --short` for uncommitted and untracked files.
 2. **Decide the scope by CLAUDE/QA.md.**
-   - Every changed path is `*.md` (docs-only): the docs tier QA.md names, with
-     `--range`.
+   - Every changed path is `*.md`: a document a test reads is NOT docs-only. Run
+     the docs-only tool list from the QA.md verdict table (`docs-only` and
+     `targeted` rows) PLUS the tests the mapper selects for those documents:
+     `./scripts/qa/llm_qa.py <docs-only tools> changed_tests --range A..B`.
+     `llm_qa.py changed` is a superset of that (every docs-only tool is in it),
+     so when in doubt run `changed`.
    - Anything else: `./scripts/qa/llm_qa.py changed`, with `--range A..B` for a
      range and `--base REF` to change the base, plus any tools the caller names.
    - **NEVER** run `./scripts/qa/llm_qa.py all`, `run_all.sh` or a bare `pytest`

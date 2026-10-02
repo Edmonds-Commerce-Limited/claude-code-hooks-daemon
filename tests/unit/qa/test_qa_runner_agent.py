@@ -46,6 +46,13 @@ def test_routes_docs_only_and_code_changes(agent_text: str) -> None:
     assert "llm_qa.py changed" in agent_text
 
 
+def test_markdown_change_still_runs_the_mapped_tests(agent_text: str) -> None:
+    """A document tests read is not docs-only: mapped tests run, and `changed` is the fallback."""
+    assert "changed_tests" in agent_text
+    assert "superset" in agent_text
+    assert "when in doubt" in agent_text.lower()
+
+
 def test_never_runs_the_full_suite(agent_text: str) -> None:
     """The full suite stays a release step for the main thread."""
     assert "NEVER" in agent_text
