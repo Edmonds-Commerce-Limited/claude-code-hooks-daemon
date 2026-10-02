@@ -1362,6 +1362,20 @@ uncertain move as unknown and judging both directories.
 
 **Status**: ⬜ Open (folded into N299 round 2).
 
+### N308 — unguarded `;` chaining is only advised against, not blocked
+
+**Source**: owner ruling, verbatim: "we should be blocking ; command chaining — either use set
+-e and/or force && chaining".
+
+**Evidence**: `bash_safe_mode` already implements the rule, but this repository runs it in warn
+mode, scoped to mutator-bearing commands (`only_with_mutator: true`). So `cd nosuch; git commit`
+and any other `;`-sequenced command run with no prelude. The coordinator's own commands drew the
+advisory all session.
+
+**Status**: 🔄 Branch `worktree-safe-mode-block`. It changes this repository's config to
+`mode: block` and `only_with_mutator: false`, and makes the acceptance tests follow the mode.
+The shipped default stays opt-in.
+
 ### N307 — the second commit in one command has its pathspecs left unscanned
 
 **Source**: N299 review.

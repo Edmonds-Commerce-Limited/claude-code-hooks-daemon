@@ -38,6 +38,7 @@ Full write-ups are in [NIGGLES.md](NIGGLES.md). One line each here:
 
 | #          | Verdict                                                                                                          | Origin              | Status                      |
 | ---------- | ---------------------------------------------------------------------------------------------------------------- | ------------------- | --------------------------- |
+| N308       | Owner ruling: block unguarded `;` chaining (`bash_safe_mode` to block mode in this repository)                   | Owner               | 🔄 In progress              |
 | N307       | In a command with two `git commit`s, the second commit's pathspecs are never scanned                             | N299 review         | ⬜ Open                     |
 | N306       | The commit-move reader records both directories of `cd a \|\| cd b`                                              | N299 review         | ⬜ Open (in N299 round 2)   |
 | N305       | `staged_lint_gate` judges a `cd other-repo && git commit` as this repository's commit                            | N299 agent          | ⬜ Open                     |
