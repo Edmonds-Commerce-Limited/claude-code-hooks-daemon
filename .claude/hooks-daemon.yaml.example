@@ -596,6 +596,13 @@ handlers:
         mode: warn         # warn | agent-pull | auto-pull
         auto_fetch: true   # run additive `git fetch --all --no-prune` before checking ahead/behind
 
+    branch_count_advisor:  # Names open worktree-* branches beyond the limit or far behind main (Plan 00475)
+      enabled: true        # New sessions only; advisory, silent when within both limits
+      priority: 56
+      options:
+        max_open_branches: 3         # At most this many open worktree-* branches
+        behind_main_threshold: 50    # Name a work branch more than this many commits behind main
+
     reference_repo_sweep:  # Freshness of reference clones under untracked/repos (Plan 00401)
       enabled: true        # New sessions only; silent when every governed repo is current
       priority: 71         # Last: the only SessionStart handler that fetches for SEVERAL repos

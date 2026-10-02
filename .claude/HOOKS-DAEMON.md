@@ -1,6 +1,6 @@
 # Hooks Daemon - Active Configuration
 
-> Generated on 2026-09-30 (v3.67.0) by `generate-docs`. Regenerate: `bin/hooks-daemon generate-docs`
+> Generated on 2026-10-02 (v3.67.0) by `generate-docs`. Regenerate: `bin/hooks-daemon generate-docs`
 
 ## Active Handlers
 
@@ -96,7 +96,7 @@
 | 34 | merge_qa_report | ADVISORY | Post-hoc plan/docs QA report over what a merge/pull/rebase just introduced |
 | 35 | daemon_sync_after_merge | ADVISORY | Advise a restart when a merge/pull/rebase changed daemon config or handlers |
 
-### SessionStart (30 handlers)
+### SessionStart (31 handlers)
 
 | Priority | Handler | Behaviour | Description |
 |----------|---------|----------|-------------|
@@ -109,6 +109,7 @@
 | 53 | git_filemode_checker | ADVISORY | Warn when git core.fileMode=false is detected |
 | 54 | gitignore_safety_checker | ADVISORY | Warn when required .claude/ paths are absent from .gitignore |
 | 55 | suggest_status_line | ADVISORY | Suggest setting up daemon-based statusline on session start |
+| 56 | branch_count_advisor | ADVISORY | Name open work branches beyond the limit, and any far behind the default branch |
 | 56 | git_upstream_checker | ADVISORY | Full-fetch + configurable pull policy when a branch is behind upstream |
 | 56 | version_check | ADVISORY | Check daemon version against latest GitHub release on new sessions |
 | 57 | plan_qa_sweep | ADVISORY | Advisory SessionStart sweep over the plan tree (silent when clean) |

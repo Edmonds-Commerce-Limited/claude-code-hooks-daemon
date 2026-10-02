@@ -473,6 +473,10 @@ _EXEMPT_FROM_GUIDANCE: dict[str, str] = {
     ),
     "WebSearchYearHandler": "T4 message already carries the year, query and alternatives",
     "GitFilemodeCheckerHandler": "T4 fires once at session start with the full remedy",
+    "BranchCountAdvisorHandler": (
+        "T4 fires once at session start naming each work branch and the limit "
+        "it breaks; nothing to hold across later decisions"
+    ),
     "PluginHooksAdvisorHandler": (
         "T4 fires once at session start naming each plugin, its hook events and "
         "how to acknowledge it; nothing to hold across later decisions"

@@ -343,6 +343,7 @@ class ConfigTemplate:
             "    git_filemode_checker: {enabled: true, priority: 53}  # Warn when git core.fileMode=false\n"
             "    gitignore_safety_checker: {enabled: true, priority: 54}  # Warn when required .claude/ paths are not gitignored\n"
             "    git_upstream_checker: {enabled: true, priority: 56, options: {mode: warn, auto_fetch: true}}  # Full fetch + advise pull when behind upstream\n"
+            "    branch_count_advisor: {enabled: true, priority: 56, options: {max_open_branches: 3, behind_main_threshold: 50}}  # Name open worktree-* branches beyond the limit or far behind main (non-blocking)\n"
             "    reference_repo_sweep: {enabled: true, priority: 71}  # Fetch governed reference clones; silent when all are current\n"
             "    routine_qa_sweep: {enabled: false, priority: 72}  # Report recurring work that has stopped recurring; silent when the Routine tree is clean (opt-in)\n"
             "    session_actions_directive: {enabled: false, priority: 73}  # Write <session>.session-actions so the ccy supervisor types one directive when a SessionStart verifier is failing (opt-in)\n"
