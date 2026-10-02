@@ -63,6 +63,7 @@ from claude_code_hooks_daemon.utils.git_facts import commit_facts
 from claude_code_hooks_daemon.utils.git_repo import GitRepo
 from claude_code_hooks_daemon.utils.path_predicates import path_exists
 from claude_code_hooks_daemon.utils.shell_segmentation import split_unquoted
+from claude_code_hooks_daemon.utils.staging_simulation import simulated_staging
 
 logger = logging.getLogger(__name__)
 
@@ -179,16 +180,17 @@ class StagedLintGateHandler(PreToolUseHandlerBase):
         # for a bare commit, the named paths for a pathspec commit, both for
         # `--include`. A git that cannot answer yields no files, so nothing is
         # linted and the commit goes through, as it always did.
-        facts = commit_facts(
-            read_commit_form(get_bash_command(hook_input) or ""),
-            project_root,
-            hook_input.get(HookInputField.CWD),
-        )
-        recorded = [
-            change.path
-            for change in facts.staged_changes()
-            if change.status[:1] in _RECORDED_STATUSES
-        ]
+        # A same-command `git add` is applied to a copy of the index first
+        # (ledger 00474 N246), so a file it stages is recorded too.
+        reading = read_commit_form(get_bash_command(hook_input) or "")
+        cwd = hook_input.get(HookInputField.CWD)
+        with simulated_staging(reading, cwd, project_root) as env:
+            facts = commit_facts(reading, project_root, cwd, index_env=env)
+            recorded = [
+                change.path
+                for change in facts.staged_changes()
+                if change.status[:1] in _RECORDED_STATUSES
+            ]
 
         lintable = self._lintable_files(project_root, recorded)
         if not lintable:

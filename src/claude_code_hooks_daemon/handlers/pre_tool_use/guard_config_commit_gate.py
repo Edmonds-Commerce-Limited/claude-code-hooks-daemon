@@ -48,8 +48,7 @@ from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.core.utils import get_bash_command
 from claude_code_hooks_daemon.utils.command_evasion import git_subcommand_index
 from claude_code_hooks_daemon.utils.git_commit_parsing import (
-    commits_working_tree,
-    extract_commit_form,
+    read_commit_form,
     tokenise_command,
 )
 from claude_code_hooks_daemon.utils.git_repo import run_git
@@ -90,24 +89,20 @@ def recorded_config_source(command: str, config_path: str) -> RecordedSource | N
       index too, so a config not named is read from the index.
     * anything else records the INDEX.
     """
-    tokens = tokenise_command(command)
-    if not tokens:
-        return None
-    subcommand_index = _commit_subcommand_index(tokens)
-    if subcommand_index is None:
+    runs = read_commit_form(command).runs
+    if not runs:
         return None
 
-    if commits_working_tree(tokens[subcommand_index + 1 :]):
+    if any(run.commits_all for run in runs):
         return RecordedSource.WORKING_TREE
 
-    form = extract_commit_form(command)
-    if not form.pathspecs:
+    if any(_pathspec_covers(spec, config_path) for run in runs for spec in run.form.pathspecs):
+        return RecordedSource.WORKING_TREE
+    # A commit with no pathspec records the index, and so does `--include`
+    # (a config staged earlier lands even though no pathspec names it).
+    if any(not run.form.pathspecs or run.form.include for run in runs):
         return RecordedSource.INDEX
-    if any(_pathspec_covers(spec, config_path) for spec in form.pathspecs):
-        return RecordedSource.WORKING_TREE
-    # `--include` records the index as well, so a config staged earlier lands
-    # even though no pathspec names it.
-    return RecordedSource.INDEX if form.include else None
+    return None
 
 
 def _commit_subcommand_index(tokens: list[str]) -> int | None:

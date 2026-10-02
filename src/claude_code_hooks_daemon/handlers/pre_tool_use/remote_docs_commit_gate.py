@@ -42,6 +42,7 @@ from claude_code_hooks_daemon.utils.git_commit_parsing import (
 )
 from claude_code_hooks_daemon.utils.git_facts import commit_directory, commit_facts
 from claude_code_hooks_daemon.utils.git_repo import GitRepo
+from claude_code_hooks_daemon.utils.staging_simulation import simulated_staging
 
 logger = logging.getLogger(__name__)
 
@@ -96,12 +97,14 @@ class RemoteDocsCommitGateHandler(PreToolUseHandlerBase):
         pathspec commit is not in it, but only when the reading is certain;
         see :func:`~claude_code_hooks_daemon.utils.git_facts.commit_facts`.
         """
-        facts = commit_facts(reading, self.project_root_reader(), cwd)
-        return [
-            change.path
-            for change in facts.staged_changes()
-            if change.status[:1] in _INTRODUCED_STATUSES
-        ]
+        project_root = self.project_root_reader()
+        with simulated_staging(reading, cwd, project_root) as env:
+            facts = commit_facts(reading, project_root, cwd, index_env=env)
+            return [
+                change.path
+                for change in facts.staged_changes()
+                if change.status[:1] in _INTRODUCED_STATUSES
+            ]
 
     @staticmethod
     def _is_foreign_repo(reading: CommitReading, cwd: str | None, project_root: Path) -> bool:

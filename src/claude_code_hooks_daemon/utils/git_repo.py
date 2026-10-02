@@ -147,7 +147,10 @@ def run_git(
 
 
 def read_blobs(
-    cwd: Path, shas: Sequence[str], timeout: float = Timeout.GIT_CONTEXT
+    cwd: Path,
+    shas: Sequence[str],
+    timeout: float = Timeout.GIT_CONTEXT,
+    env: Mapping[str, str] | None = None,
 ) -> dict[str, bytes] | None:
     """Raw content of every blob in ``shas``, from ONE ``git cat-file --batch``.
 
@@ -165,7 +168,7 @@ def read_blobs(
     if not shas:
         return {}
     argv = ["git", "-C", str(cwd), "cat-file", "--batch"]
-    child_env = {**os.environ, _OPTIONAL_LOCKS_VAR: _OPTIONAL_LOCKS_DECLINED}
+    child_env = {**os.environ, **(env or {}), _OPTIONAL_LOCKS_VAR: _OPTIONAL_LOCKS_DECLINED}
     request = "".join(f"{sha}\n" for sha in shas).encode("ascii")
     try:
         result = subprocess.run(  # nosec B603 B607 — fixed argv, no shell, trusted binary

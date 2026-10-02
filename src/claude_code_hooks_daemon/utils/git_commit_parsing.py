@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import re
 import shlex
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Final
 
@@ -75,6 +76,7 @@ _MESSAGE_LETTER: Final[str] = "m"
 _PATHSPEC_SEPARATOR: Final[str] = "--"
 _GIT_TOKEN: Final[str] = "git"
 _COMMIT_TOKEN: Final[str] = "commit"
+_ADD_TOKEN: Final[str] = "add"
 
 #: The ``-a``/``--all`` flag, which makes a commit record the WORKING TREE
 #: rather than the index.
@@ -640,6 +642,13 @@ def extract_commit_form(command: str) -> CommitForm:
 #: a brace expansion and a home directory. A word carrying any of them names a
 #: path this reading cannot state.
 _SHELL_RESOLVED_CHARS: Final[str] = "$`{~"
+
+
+def is_shell_resolved(word: str) -> bool:
+    """Whether ``word`` is one the shell, not git, turns into a path."""
+    return any(char in _SHELL_RESOLVED_CHARS for char in word)
+
+
 #: Global options that point git at a different repository or work tree.
 _REPOSITORY_MOVING_OPTIONS: Final[tuple[str, ...]] = ("-C", "--git-dir", "--work-tree")
 _GIT_ENVIRONMENT_PREFIX: Final[str] = "GIT_"
@@ -666,6 +675,41 @@ class CommitReading:
     #: git commit``, ``cd x & git commit``, ``a || cd x``), so the commit may
     #: run where the hook does. ``-C`` moves are git's own argv and always do.
     moves_certain: bool = True
+    #: Every ``git commit`` the command runs, each with its own form and moves
+    #: (ledger 00474 N307). ``form`` and ``moves`` above describe the first of
+    #: them, or all of them combined when there are several.
+    runs: tuple[CommitRun, ...] = ()
+    #: The ``git add`` runs that come before the last commit (ledger 00474 N246):
+    #: what they stage is part of what that commit records.
+    stagings: tuple[StagingRun, ...] = ()
+
+    @property
+    def commits_all(self) -> bool:
+        """Whether any of the commits carries ``-a``/``--all``."""
+        return any(run.commits_all for run in self.runs)
+
+
+@dataclass(frozen=True)
+class CommitRun:
+    """One ``git commit`` of a command: its form, and where it runs.
+
+    ``optional_moves`` is how many LEADING entries of ``moves`` (the ``cd`` chain,
+    before the ``-C`` operands) may not have taken effect.
+    """
+
+    form: CommitForm
+    moves: tuple[str | None, ...]
+    optional_moves: int
+    commits_all: bool = False
+
+
+@dataclass(frozen=True)
+class StagingRun:
+    """One ``git add`` of a command, and where it runs (``optional_moves`` as in :class:`CommitRun`)."""
+
+    arguments: tuple[str, ...]
+    moves: tuple[str | None, ...]
+    optional_moves: int
 
 
 def _commit_moves(run: GitInvocation) -> tuple[str | None, ...]:
@@ -677,8 +721,7 @@ def _commit_moves(run: GitInvocation) -> tuple[str | None, ...]:
     points git somewhere a directory cannot express.
     """
     moves: list[str | None] = [
-        None if move is None or any(char in _SHELL_RESOLVED_CHARS for char in move) else move
-        for move in run.directory
+        None if move is None or is_shell_resolved(move) else move for move in run.directory
     ]
     options = run.global_options
     for position, option in enumerate(options):
@@ -690,7 +733,7 @@ def _commit_moves(run: GitInvocation) -> tuple[str | None, ...]:
             operand = None
         else:
             continue
-        if operand is not None and any(char in _SHELL_RESOLVED_CHARS for char in operand):
+        if operand is not None and is_shell_resolved(operand):
             operand = None
         moves.append(operand)
     if any(assignment.startswith(_GIT_ENVIRONMENT_PREFIX) for assignment in run.assignments):
@@ -698,28 +741,94 @@ def _commit_moves(run: GitInvocation) -> tuple[str | None, ...]:
     return tuple(moves)
 
 
+def _form_of(run: GitInvocation) -> CommitForm:
+    """The :class:`CommitForm` of the ``git commit`` invocation ``run``."""
+    options = list(run.arguments)
+    return CommitForm(
+        pathspecs=tuple(commit_pathspecs(options)),
+        include=commit_includes_index(options),
+        pathspec_from_file=_names_a_pathspec_file(options),
+    )
+
+
+def _optional_moves(run: GitInvocation) -> int:
+    """How many leading entries of ``_commit_moves(run)`` may not have taken effect."""
+    return 0 if run.moves_certain else len(run.directory)
+
+
+def _commit_run(run: GitInvocation, form: CommitForm) -> CommitRun:
+    """``run``, a ``git commit`` invocation, as a :class:`CommitRun` of ``form``."""
+    return CommitRun(
+        form=form,
+        moves=_commit_moves(run),
+        optional_moves=_optional_moves(run),
+        commits_all=commits_working_tree(list(run.arguments)),
+    )
+
+
+def _combined_form(runs: Sequence[CommitRun]) -> CommitForm:
+    """One form that names every pathspec of ``runs``.
+
+    The commits record different trees, so no ``include`` can be stated for the
+    whole; the reading is judged as the index plus the named paths.
+    """
+    pathspecs: dict[str, None] = {}
+    for run in runs:
+        pathspecs.update(dict.fromkeys(run.form.pathspecs))
+    return CommitForm(
+        pathspecs=tuple(pathspecs),
+        pathspec_from_file=any(run.form.pathspec_from_file for run in runs),
+    )
+
+
+def _staging_runs(invocations: Sequence[GitInvocation]) -> tuple[StagingRun, ...]:
+    """The ``git add`` runs that come before the last ``git commit``."""
+    last_commit = max(
+        (position for position, run in enumerate(invocations) if run.subcommand == _COMMIT_TOKEN),
+        default=-1,
+    )
+    return tuple(
+        StagingRun(
+            arguments=run.arguments, moves=_commit_moves(run), optional_moves=_optional_moves(run)
+        )
+        for run in invocations[:last_commit]
+        if run.subcommand == _ADD_TOKEN
+    )
+
+
 def read_commit_form(command: str) -> CommitReading:
     """The :class:`CommitReading` of ``command``."""
-    form = extract_commit_form(command)
-    commits = [run for run in git_invocations(command) if run.subcommand == _COMMIT_TOKEN]
+    invocations = git_invocations(command)
+    commits = [run for run in invocations if run.subcommand == _COMMIT_TOKEN]
+    first = extract_commit_form(command)
+    runs = tuple(_commit_run(run, first if len(commits) == 1 else _form_of(run)) for run in commits)
+    stagings = _staging_runs(invocations)
+    form = first if len(runs) <= 1 else _combined_form(runs)
     moves = _commit_moves(commits[0]) if len(commits) == 1 else ()
     moves_certain = commits[0].moves_certain if len(commits) == 1 else True
     if not form.pathspecs:
-        return CommitReading(form=form, certain=True, moves=moves, moves_certain=moves_certain)
+        return CommitReading(
+            form=form,
+            certain=True,
+            moves=moves,
+            moves_certain=moves_certain,
+            runs=runs,
+            stagings=stagings,
+        )
     if len(commits) != 1:
-        return CommitReading(form=form, certain=False)
+        return CommitReading(form=form, certain=False, runs=runs, stagings=stagings)
     run = commits[0]
     moves_repository = any(
         option.startswith(_REPOSITORY_MOVING_OPTIONS) for option in run.global_options
     ) or any(assignment.startswith(_GIT_ENVIRONMENT_PREFIX) for assignment in run.assignments)
-    shell_resolved = any(
-        any(char in _SHELL_RESOLVED_CHARS for char in pathspec) for pathspec in form.pathspecs
-    )
+    shell_resolved = any(is_shell_resolved(pathspec) for pathspec in form.pathspecs)
     return CommitReading(
         form=form,
         certain=not (run.directory or moves_repository or shell_resolved),
         moves=moves,
         moves_certain=moves_certain,
+        runs=runs,
+        stagings=stagings,
     )
 
 

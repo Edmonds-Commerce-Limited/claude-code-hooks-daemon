@@ -132,6 +132,27 @@ class TestWhichVersionTheCommitRecords:
     def test_a_non_commit_command_is_not_judged(self) -> None:
         assert recorded_config_source("git status", CONFIG_RELATIVE_PATH) is None
 
+    def test_a_second_commit_that_commits_all_records_the_working_tree(self) -> None:
+        """Ledger 00474 N307: every commit of the command is read, not only the first."""
+        command = "git commit -m a docs/a.md; git commit -am b"
+
+        assert recorded_config_source(command, CONFIG_RELATIVE_PATH) is RecordedSource.WORKING_TREE
+
+    def test_a_second_commit_naming_the_config_records_the_working_tree(self) -> None:
+        command = f"git commit -m a docs/a.md; git commit -m b {CONFIG_RELATIVE_PATH}"
+
+        assert recorded_config_source(command, CONFIG_RELATIVE_PATH) is RecordedSource.WORKING_TREE
+
+    def test_a_second_bare_commit_records_the_index(self) -> None:
+        command = "git commit -m a docs/a.md; git commit -m b"
+
+        assert recorded_config_source(command, CONFIG_RELATIVE_PATH) is RecordedSource.INDEX
+
+    def test_two_commits_that_name_other_paths_record_no_config(self) -> None:
+        command = "git commit -m a docs/a.md; git commit -m b docs/b.md"
+
+        assert recorded_config_source(command, CONFIG_RELATIVE_PATH) is None
+
     def test_a_respelled_git_invocation_is_still_judged(self) -> None:
         """`git -C <path> commit` must not walk past this gate.
 

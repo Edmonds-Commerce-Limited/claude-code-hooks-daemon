@@ -307,6 +307,66 @@ class TestPathspecViewIsUsedOnlyWhenTheReadingIsCertain:
         assert "remote-docs/example.com/p.md" in (result.reason or "")
 
 
+class TestACommandThatStagesOrCommitsMoreThanOnce:
+    """Ledger 00474 N246 and N307: the document judged is one the whole command records."""
+
+    _git = staticmethod(TestEachCommitFormJudgesWhatItRecords._git)
+    _real = staticmethod(TestEachCommitFormJudgesWhatItRecords._real)
+
+    @pytest.fixture
+    def repo(self, tmp_path: Path) -> Path:
+        root = tmp_path / "repo"
+        root.mkdir()
+        self._git(root, "init")
+        self._git(root, "config", "user.email", "t@example.com")
+        self._git(root, "config", "user.name", "T")
+        _write(root, "src/thing.py", "x = 1\n")
+        _write(root, "src/other.py", "y = 1\n")
+        self._git(root, "add", "-A")
+        self._git(root, "commit", "-m", "initial")
+        _write(root, "remote-docs/example.com/bad.md", "# prose, no provenance\n")
+        return root
+
+    def _decision(self, root: Path, command: str) -> Decision:
+        hook_input: dict[str, Any] = {
+            "tool_name": "Bash",
+            "tool_input": {"command": command},
+            "cwd": str(root),
+        }
+        return self._real(root).handle(hook_input).decision
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "git add remote-docs/example.com/bad.md && git commit -m x",
+            "git add -A && git commit -m x",
+            "git add remote-docs && git commit -m x",
+            "git add remote-docs/example.com/bad.md; git commit -m x",
+        ],
+    )
+    def test_a_document_the_same_command_adds_is_judged(self, repo: Path, command: str) -> None:
+        assert self._decision(repo, command) is Decision.DENY
+
+    def test_a_document_the_add_does_not_name_is_not_judged(self, repo: Path) -> None:
+        assert self._decision(repo, "git add src/thing.py && git commit -m x") is Decision.ALLOW
+
+    def test_the_second_commits_pathspec_is_judged(self, repo: Path) -> None:
+        self._git(repo, "add", "remote-docs/example.com/bad.md")
+        _write(repo, "src/other.py", "y = 2\n")
+
+        command = "git commit -m x src/other.py; git commit -m y remote-docs/example.com/bad.md"
+
+        assert self._decision(repo, command) is Decision.DENY
+
+    def test_a_clean_pair_of_commits_is_allowed(self, repo: Path) -> None:
+        _write(repo, "src/thing.py", "x = 2\n")
+        _write(repo, "src/other.py", "y = 2\n")
+
+        command = "git commit -m x src/thing.py; git commit -m y src/other.py"
+
+        assert self._decision(repo, command) is Decision.ALLOW
+
+
 class TestACommitInAnotherRepositoryIsNotJudgedAgainstThisOne:
     """Ledger 00474 N300: a nested worktree or other checkout owns its own index."""
 

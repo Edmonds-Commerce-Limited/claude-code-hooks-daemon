@@ -384,6 +384,62 @@ class TestPathspecsAreJudgedFromEveryDirectoryTheCommitMayRunIn:
         assert result.decision == Decision.ALLOW
 
 
+class TestACommandThatStagesOrCommitsMoreThanOnce:
+    """Ledger 00474 N246 and N307: the plan tree judged is the one the whole command records."""
+
+    _PLAN_MD = f"{_PLAN_DIR_REL}/00001-first/PLAN.md"
+
+    @pytest.fixture
+    def flipped(self, repo: Path) -> Path:
+        """A terminal flip left unstaged: nothing records it unless the command does."""
+        (repo / self._PLAN_MD).write_text("# Plan 00001: first\n\n**Status**: Complete\n")
+        return repo
+
+    def _decision(self, root: Path, command: str) -> Decision:
+        with _patched_root(root):
+            return _handler("block").handle(_bash_input(command, cwd=str(root))).decision
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            'git add {plan} && git commit -m "Plan 00001: done"',
+            'git add -A && git commit -m "Plan 00001: done"',
+            'git add -u && git commit -m "Plan 00001: done"',
+            'git add {plan}; git commit -m "Plan 00001: done"',
+        ],
+    )
+    def test_a_plan_change_the_same_command_adds_is_judged(
+        self, flipped: Path, command: str
+    ) -> None:
+        assert self._decision(flipped, command.format(plan=self._PLAN_MD)) == Decision.DENY
+
+    def test_a_plan_change_the_add_does_not_name_is_not_judged(self, flipped: Path) -> None:
+        (flipped / "notes.txt").write_text("x\n")
+
+        command = 'git add notes.txt && git commit -m "notes"'
+
+        assert self._decision(flipped, command) == Decision.ALLOW
+
+    def test_the_second_commits_pathspec_is_judged(self, flipped: Path) -> None:
+        (flipped / "notes.txt").write_text("x\n")
+        _git(flipped, "add", "notes.txt")
+
+        command = (
+            f'git commit -m "notes" notes.txt; git commit -m "Plan 00001: done" {self._PLAN_MD}'
+        )
+
+        assert self._decision(flipped, command) == Decision.DENY
+
+    def test_a_clean_pair_of_commits_is_allowed(self, flipped: Path) -> None:
+        (flipped / "notes.txt").write_text("x\n")
+        (flipped / "more.txt").write_text("y\n")
+        _git(flipped, "add", "-A", "--", "notes.txt", "more.txt")
+
+        command = 'git commit -m "notes" notes.txt; git commit -m "more" more.txt'
+
+        assert self._decision(flipped, command) == Decision.ALLOW
+
+
 class TestGuardRails:
     def test_noop_when_cwd_in_foreign_repo(self, repo: Path, tmp_path: Path) -> None:
         other = tmp_path / "other-repo"

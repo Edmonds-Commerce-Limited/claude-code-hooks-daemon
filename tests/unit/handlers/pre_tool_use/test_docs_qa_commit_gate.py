@@ -270,6 +270,63 @@ class TestPathspecsAreReadWhereTheCommandRuns:
         assert any("pointer-resolves" in item for item in result.context)
 
 
+class TestACommandThatStagesOrCommitsMoreThanOnce:
+    """Ledger 00474 N246 and N307: the document checked is one the whole command records."""
+
+    @pytest.fixture
+    def root(self, tmp_path: Path) -> Path:
+        root = tmp_path / "repo"
+        _init_repo(root)
+        (root / "CLAUDE").mkdir()
+        (root / "CLAUDE" / "Foo.md").write_text("# clean\n")
+        (root / "CLAUDE" / "Bar.md").write_text("# clean\n")
+        _git(root, "add", "-A")
+        _git(root, "commit", "-m", "initial")
+        return root
+
+    @staticmethod
+    def _advised(root: Path, command: str) -> bool:
+        with _patched_root(root):
+            result = _handler().handle(_bash_input(command, cwd=str(root)))
+        return any("pointer-resolves" in item for item in result.context)
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "git add CLAUDE/New.md && git commit -m x",
+            "git add -A && git commit -m x",
+            "git add CLAUDE && git commit -m x",
+            "cd CLAUDE && git add New.md && git commit -m x",
+        ],
+    )
+    def test_a_document_the_same_command_adds_is_checked(self, root: Path, command: str) -> None:
+        (root / "CLAUDE" / "New.md").write_text("See [missing](Nope.md).\n")
+
+        assert self._advised(root, command)
+
+    def test_a_document_the_add_does_not_name_is_not_checked(self, root: Path) -> None:
+        (root / "CLAUDE" / "New.md").write_text("See [missing](Nope.md).\n")
+
+        assert not self._advised(root, "git add CLAUDE/Foo.md; git commit -m x")
+
+    def test_the_second_commits_pathspec_is_checked(self, root: Path) -> None:
+        (root / "CLAUDE" / "Foo.md").write_text("# edited\n")
+        (root / "CLAUDE" / "Bar.md").write_text("See [missing](Nope.md).\n")
+
+        assert self._advised(root, "git commit -m a CLAUDE/Foo.md; git commit -m b CLAUDE/Bar.md")
+
+    def test_each_commit_reads_its_pathspec_from_its_own_directory(self, root: Path) -> None:
+        (root / "CLAUDE" / "Foo.md").write_text("# edited\n")
+        (root / "Bar.md").write_text("See [missing](Nope.md).\n")
+        _git(root, "add", "Bar.md")
+        _git(root, "commit", "-m", "root bar")
+        (root / "Bar.md").write_text("See [missing](Nope.md) again.\n")
+
+        assert self._advised(
+            root, "cd CLAUDE && git commit -m a Foo.md; cd .. && git commit -m b Bar.md"
+        )
+
+
 class TestClaudeMdAndAcceptanceTests:
     def test_get_claude_md_returns_content(self) -> None:
         content = DocsQaCommitGateHandler().get_claude_md()

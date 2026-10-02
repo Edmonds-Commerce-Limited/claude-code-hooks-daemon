@@ -41,8 +41,9 @@ from claude_code_hooks_daemon.utils.git_commit_parsing import read_commit_form
 from claude_code_hooks_daemon.utils.git_commit_parsing import (
     tokenise_command as _tokenise,
 )
-from claude_code_hooks_daemon.utils.git_facts import pathspec_directory, unmoved_directories
+from claude_code_hooks_daemon.utils.git_facts import commit_scopes
 from claude_code_hooks_daemon.utils.git_repo import GitRepo
+from claude_code_hooks_daemon.utils.staging_simulation import simulated_staging
 
 _MODE_BLOCK: Final[str] = "block"
 
@@ -118,17 +119,18 @@ class DocsQaCommitGateHandler(PreToolUseHandlerBase):
         reading = read_commit_form(command)
         form = reading.form
         cwd = hook_input.get(HookInputField.CWD)
-        context = staged_context(
-            project_root=project_root,
-            policy=policy,
-            commit_message=_extract_commit_message(tokens),
-            pathspecs=form.pathspecs,
-            include=form.include,
-            directory=pathspec_directory(reading, cwd, project_root),
-            extra_directories=unmoved_directories(reading, cwd, project_root),
-        )
-
-        findings = run_stage(CheckStage.STAGED, context)
+        with simulated_staging(reading, cwd, project_root) as env:
+            context = staged_context(
+                project_root=project_root,
+                policy=policy,
+                commit_message=_extract_commit_message(tokens),
+                pathspecs=form.pathspecs,
+                include=form.include,
+                scopes=commit_scopes(reading, cwd, project_root),
+                union=len(reading.runs) > 1,
+                index_env=env,
+            )
+            findings = run_stage(CheckStage.STAGED, context)
         if not findings:
             return GatingResult(decision=Decision.ALLOW, context=[])
 
