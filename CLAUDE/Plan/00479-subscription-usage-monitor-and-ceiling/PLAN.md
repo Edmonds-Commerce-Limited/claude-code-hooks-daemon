@@ -95,22 +95,57 @@ hosts:
 - [ ] ⬜ **Task 3.2**: Resolve the settings for a session: which entries match, and how
   several matches combine (open question 2).
 
-### Phase 4: Ceiling enforcement (TDD)
+### Phase 4: The usage pause (TDD)
 
-- [ ] ⬜ **Task 4.1**: A `UserPromptSubmit` gate. At or above the ceiling it blocks the
-  prompt, cron ticks and supervisor messages included, and names the window, its
-  percentage, the ceiling and the reset time.
-- [ ] ⬜ **Task 4.2**: A `PreToolUse` gate that returns `continue: false` with a
+The owner's rulings set the protocol:
+
+- **Pause**: crossing the ceiling pauses the session; it does not end it.
+- **Crons**: all crons stop, and one new cron resumes the session when the usage is
+  expected to have cleared, that is when the 5-hour or weekly window resets.
+- **Compact**: on stopping, the supervisor issues a compact that explicitly does NOT
+  continue, leaving only the resume cron. Resuming then does not pay the uncached-context
+  penalty of a large conversation.
+
+A hook cannot create or delete crons itself (`CronCreate`/`CronDelete` are model tools), so
+the daemon directs the model and then verifies what it did.
+
+- [ ] ⬜ **Task 4.1**: Pause entry. At or above the ceiling, the `UserPromptSubmit` gate
+  refuses the incoming work, cron ticks and supervisor messages included. It delivers the
+  pause directive instead: delete every cron (the failsafe and declared jobs included),
+  create ONE one-shot resume cron, then stop. The directive names the window, its
+  percentage, the ceiling and the resume time. The resume time is the latest `resets_at`
+  among the windows over the ceiling, plus a small margin.
+- [ ] ⬜ **Task 4.2**: During the pause, the `PreToolUse` gate allows only `CronList`,
+  `CronDelete` and `CronCreate`. Any other tool is denied, with `continue: false` and a
   `stopReason`, so a turn already running halts at its next tool call.
-- [ ] ⬜ **Task 4.3**: Every handler that forces continuation stands down above the ceiling,
-  so the session can actually stop. That covers unattended-mode Stop blocking, stop
-  explanation re-entry, and the cron stop and subagent enforcers.
-- [ ] ⬜ **Task 4.4**: Suppress declared cron ticks while over the ceiling, reusing the
-  awaiting-human marker machinery, so an idle stopped session costs no turns.
-- [ ] ⬜ **Task 4.5**: Data safety. No snapshot, a stale snapshot, or no `rate_limits` at all
-  means no stop, with a debug log line. Being stopped is visible in the status line.
-- [ ] ⬜ **Task 4.6**: Acceptance tests and a live probe with a synthetic snapshot above the
-  ceiling.
+- [ ] ⬜ **Task 4.3**: Pause exit is verified. Stop is allowed once the Stop payload's
+  `session_crons` holds exactly the one resume cron; otherwise the directive is repeated,
+  as `cron_stop_enforcer` already does for declared crons. Every handler that forces
+  continuation stands down during the pause: unattended-mode Stop blocking, stop-explanation
+  re-entry, and the cron and subagent enforcers.
+- [ ] ⬜ **Task 4.4**: Nothing re-arms the crons while paused. `persistent_cron_assertor` and
+  the failsafe-cron advisors stay quiet, including on the compact's SessionStart, and the
+  pause is recorded in a durable marker the daemon reads.
+- [ ] ⬜ **Task 4.5**: The supervisor compact.
+  - **Daemon side**: expose the pause state, with its reason and resume time, where the ccy
+    supervisor can read it. Specify exactly what the supervisor sends: a `/compact` whose
+    instruction is to do nothing until the resume cron fires.
+  - **Supervisor side**: the ccy change lives outside this repository. Track it as an
+    interface spec here and as an issue or request for the supervisor's owner. The live
+    supervisor is not touched.
+- [ ] ⬜ **Task 4.6**: Resume. When the resume cron fires, the gate re-reads usage. A window
+  past its `resets_at` reads as absent, so a snapshot from before the reset cannot keep
+  the session paused. Then:
+  - below the ceiling: lift the pause, re-establish the declared crons, and continue the
+    active work;
+  - still over the ceiling (for example the weekly window): schedule the next resume cron
+    and stop again.
+- [ ] ⬜ **Task 4.7**: Data safety. No snapshot, or no `rate_limits` at all, never pauses a
+  session, and a debug log line records why. A paused session shows `⏸ usage` and its resume
+  time in the status line.
+- [ ] ⬜ **Task 4.8**: Acceptance tests. Run a live probe with a synthetic snapshot above the
+  ceiling through the whole cycle: pause directive, cron set reduced to the resume cron,
+  stop allowed, resume tick lifts the pause.
 
 ### Phase 5: Docs and release
 
@@ -118,10 +153,8 @@ hosts:
 
 ## Open questions for the owner
 
-1. **After the window resets**: should the session resume on its own (the next cron tick
-   below the ceiling simply proceeds), or stay stopped until a human restarts it?
-   Recommended: resume. The 5-hour window resets often, and a pause leaves the headroom
-   without needing a human.
+1. **Resolved (owner)**: pause, then resume through a scheduled cron at the predicted reset,
+   with a supervisor compact before it (Phase 4).
 2. **Several matching entries**: recommended that the lowest ceiling wins, being the safer
    choice. The alternative is first match in file order.
 3. **One threshold or one per window**: `max_used_percent` applies to both windows.
@@ -132,9 +165,16 @@ hosts:
 
 - [ ] The status line shows 5-hour and weekly usage from live payloads, and shows nothing
   for a session without the data.
-- [ ] A session on a host whose entry sets `max_used_percent: 80` refuses a cron tick and
-  halts a running turn once a window reaches 80%. A session on a host with no entry is
-  unaffected.
+
+- [ ] A session on a host whose entry sets `max_used_percent: 80` pauses once a window
+  reaches 80%:
+
+  - it refuses new work and halts the running turn;
+  - it ends with only a resume cron scheduled for the window's reset;
+  - it resumes on that tick.
+
+  A session on a host with no entry is unaffected.
+
 - [ ] Missing or stale usage data never stops a session.
 
 ## Delivery & Milestones
