@@ -1,6 +1,7 @@
 """Tests for the journal-entry-with-progress COMMIT check (Plan 00163 P3)."""
 
 import subprocess
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -159,6 +160,18 @@ class TestFindings:
         context = _context(repo)
         # Task change + a fresh journal entry staged → clean despite the deletion.
         assert CHECK.run(context) == []
+
+    def test_a_journal_entry_the_command_writes_itself_is_clean(self, repo: Path) -> None:
+        (repo / "CLAUDE/Plan/00200-widget/PLAN.md").write_text(_PLAN_TASK_TICKED)
+        _git(repo, "add", "-A")
+        context = replace(_context(repo), command_journal_plans=frozenset({200}))
+        assert CHECK.run(context) == []
+
+    def test_another_plans_command_journal_entry_does_not_excuse(self, repo: Path) -> None:
+        (repo / "CLAUDE/Plan/00200-widget/PLAN.md").write_text(_PLAN_TASK_TICKED)
+        _git(repo, "add", "-A")
+        context = replace(_context(repo), command_journal_plans=frozenset({201}))
+        assert len(CHECK.run(context)) == 1
 
     def test_new_plan_with_tasks_and_no_journal_advises(self, repo: Path) -> None:
         newplan = repo / "CLAUDE/Plan/00201-new"

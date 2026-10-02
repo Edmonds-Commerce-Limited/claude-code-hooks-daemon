@@ -25,6 +25,7 @@ from claude_code_hooks_daemon.core import Decision, GatingResult, get_data_layer
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
+from claude_code_hooks_daemon.plan_qa.command_journal import command_journal_plans
 from claude_code_hooks_daemon.plan_qa.context import staged_context
 from claude_code_hooks_daemon.plan_qa.report import format_advisory, format_block_reason
 from claude_code_hooks_daemon.plan_qa.runner import run_stage
@@ -137,6 +138,13 @@ class PlanQaCommitGateHandler(PreToolUseHandlerBase):
                         scopes=commit_scopes(reading, cwd, project_root),
                         union=len(reading.runs) > 1,
                         index_env=env,
+                        command_journal_plans=command_journal_plans(
+                            command,
+                            cwd,
+                            project_root,
+                            plan_dir_rel,
+                            self._plan_qa.journal.dir_name,
+                        ),
                         exclude_paths=self._project_exclude_paths,
                     )
                 except FileNotFoundError:
