@@ -75,9 +75,9 @@
 | 50 | markdown_organization | BLOCKING | Enforce markdown file organization rules |
 | 50 | validate_instruction_content | BLOCKING | Validates content being written to CLAUDE.md and README.md files |
 | 55 | web_search_year | ADVISORY | Validate WebSearch queries don't use outdated years |
-| 56 | merge_qa_advisor | ADVISORY | Advise the static checks to run before merging a work branch with no recorded green run |
 | 57 | daemon_docs_guard | ADVISORY | Warn when reading from the hooks-daemon internal CLAUDE/ docs directory |
 | 58 | flaggable_work_advisor | ADVISORY | Advise delegating safeguard-flaggable work BEFORE opening the content |
+| 59 | merge_qa_advisor | ADVISORY | Advise the static checks to run before merging a work branch with no recorded green run |
 | 60 | british_english | ADVISORY | Warn about American English spellings in content files (non-blocking) |
 
 ### PostToolUse (12 handlers)
