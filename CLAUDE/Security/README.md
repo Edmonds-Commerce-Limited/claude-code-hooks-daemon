@@ -32,7 +32,9 @@ one Detector that finds every member. A single finding is an instance recorded
 under its category, never a row of its own. That ordering is not tidiness —
 it is the whole method. **Defence Before Fix**: the Defence lands before the
 fix, every time, because a regression test proves one instance was fixed while
-a Detector finds the class and keeps finding it.
+a Detector finds the class and keeps finding it. The method is published at
+<https://defence-before-fix.github.io>; the vendored specification is
+[SPEC.md](../../remote-docs/defence-before-fix.github.io/SPEC.md).
 
 So the first question a finding raises is not "how do I fix this?" but "what is
 the class, and what would find all of it?". This register holds the answers to

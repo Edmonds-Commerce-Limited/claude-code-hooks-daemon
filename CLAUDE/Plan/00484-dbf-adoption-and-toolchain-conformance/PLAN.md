@@ -70,14 +70,17 @@ agent.
 
 ### Phase 1: Adopt and link (#65, #67)
 
-- [ ] ⬜ **Task 1.1**: README: name the method, link it, and say in one paragraph how the
+- [x] ✅ **Task 1.1**: README: name the method, link it, and say in one paragraph how the
   daemon applies it (handlers are defences that run at tool-call time). Place it next to
-  "Guardrails, not armour" and keep it consistent with that section.
-- [ ] ⬜ **Task 1.2**: `explain-rule` (and `explain-handler`) print one line naming DBF with
-  the link, after `RuleFormatter().verbose(rule)` (`cmd_explain_rule`). TDD.
-- [ ] ⬜ **Task 1.3**: The agent tree points to the method from its canonical homes
+  "Guardrails, not armour" and keep it consistent with that section. Done: a "Defence Before
+  Fix" subsection follows "Guardrails, not armour" in the README.
+- [x] ✅ **Task 1.2**: `explain-rule` (and `explain-handler`) print one line naming DBF with
+  the link, after `RuleFormatter().verbose(rule)` (`cmd_explain_rule`). TDD. Done: the line
+  is `DefenceBeforeFix.EXPLAIN_LINE` in `constants/dbf.py`.
+- [x] ✅ **Task 1.3**: The agent tree points to the method from its canonical homes
   (`CLAUDE/Security/README.md`, `CLAUDE/CodeLifecycle/Bugs.md`, `CLAUDE/HANDLER_DEVELOPMENT.md`).
   Each gets one pointer to the vendored spec, not a restatement (DocumentationStrategy.md).
+  Done: Bugs.md already carried the section, so its vendored-copy mention now links the path.
 - [ ] ⬜ **Task 1.4**: Comment on #65 and #67 with the ruling and this plan. Use
   `Addresses #N`, never a closing keyword. Remove `agent-needs-human`.
 
