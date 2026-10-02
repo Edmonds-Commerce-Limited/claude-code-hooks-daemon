@@ -1462,10 +1462,13 @@ about to create does not exist yet. That is the N246 class: the staging simulati
 working tree as it is now, and a file a prior statement creates is invisible to it. Advisory
 only. Following the advisory's own instruction in one command produces the false report.
 
-**Status**: ✅ Fixed on worktree-n317-journal-advisory. `plan_qa/command_journal.py` reads the
-command's statements and counts a plan as journalled when a `mkplan.bash --journal <N>` precedes a
-`git add` covering that plan's `JOURNAL/` (folder, journal dir, `-A` or `.`) before the last commit,
-and `journal-entry-with-progress` skips that plan; it stays advisory.
+**Status**: ✅ Fixed (merge 10dd29758). `plan_qa/command_journal.py` counts a plan as journalled
+when an `&&`-chained `mkplan.bash --journal <N>` precedes a real `git add` covering that plan's
+`JOURNAL/`, judged in the directory each statement runs in (the shared `simple_commands` parse
+tracks `cd` and `-C`), and the commit's pathspecs do not exclude it. The exemption lives in
+`has_staged_journal_entry`, so all three journal checks honour it; it stays advisory. The review
+round's findings (cd ignored, sibling checks, pathspec commits, dry-run adds, `;` sequencing) were
+fixed before merge.
 
 ### N316 — docs QA `pointer-resolves` reads a link shape inside an inline code span
 

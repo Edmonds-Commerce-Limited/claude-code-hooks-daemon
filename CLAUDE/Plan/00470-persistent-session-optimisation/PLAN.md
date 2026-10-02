@@ -87,6 +87,11 @@ Evidence, with verified facts marked apart from inferences, is in
 
 - [ ] ⬜ **Task 4.1**: Measure disk/log growth on the server; add rotation where it is unbounded.
 - [x] ✅ **Task 4.2**: Extend `idle_housekeeping_advisor` to report stale worktrees and daemons (report-first). Detection is `utils/stale_checkouts.py`; the advisory names each finding with its cleanup command and runs none. Options: `report_stale_checkouts`, `base_branch`, `stale_worktree_days`.
+  - Remedies are real and never signal: `rm` of a proven-dead pid file, only this host's pid file, and a daemon with a vanished root gets a read-only `ps` and a human look. Merged 057116873.
+- [ ] ⬜ **Task 4.5**: Stale-scan follow-ups from the Task 4.2 review (`untracked/scratch/merge-review/housekeeping.md` is lost on restart, so the list is here).
+  - A pid file that `get_pid_path` relocates for a long path (the fallback runtime dir) is not scanned.
+  - It parses the worktree listing separately from `worktree_reaping`, so the two can give different verdicts. Share one parser.
+  - Validate `stale_worktree_days` (int ≥ 1); put one deadline across the scan's git calls; pass the CLI path in rather than a literal; revisit the `base_branch` default.
 - [ ] ⬜ **Task 4.4**: Keep the prompt cache warm. The owner's intent is that the cache never expires in an always-on session. The design and the arithmetic belong to [Plan 00452](../00452-prompt-cache-observability-and-invalidation-protection/PLAN.md) Tasks 4.1–4.3. That plan rejected a fixed-interval warming cron, because warming loses when the probability of a next event is low. Its warming work is blocked on Task 2.4, which needs real idle-gap profiles.
   - This task feeds 00452. Collect this always-on session's gap profile, which unblocks 00452 Task 2.4.
   - Note for 00452: the declared crons at :23 and :47 already keep gaps under 60 minutes. But the daemon DROPS ticks when the session is blocked on a human or has backed off (R-FAILSAFE-CRON-SUPPRESSED, R-FAILSAFE-CRON-BACKED-OFF), which is exactly when the cache goes cold. So the warming decision must account for suppressed ticks.
