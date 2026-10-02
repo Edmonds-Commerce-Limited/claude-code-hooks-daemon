@@ -286,6 +286,15 @@ class TestCheckStaged:
 
     def test_clean_stage_exits_zero(self, tmp_path: Path) -> None:
         root = _scaffold(tmp_path)
+        # The staged check judges what a commit would record, which is the
+        # index, so the scaffold has to be in it.
+        for cmd in (
+            ["git", "-C", str(root), "config", "user.email", "t@example.com"],
+            ["git", "-C", str(root), "config", "user.name", "T"],
+            ["git", "-C", str(root), "add", "-A"],
+            ["git", "-C", str(root), "commit", "-m", "initial"],
+        ):
+            subprocess.run(cmd, capture_output=True, check=True, timeout=Timeout.GIT_CONTEXT)
         assert cmd_plan_qa(_args(root, check_staged=True)) == 0
 
 

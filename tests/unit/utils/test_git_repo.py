@@ -20,7 +20,7 @@ from unittest import mock
 import pytest
 
 from claude_code_hooks_daemon.constants.timeout import Timeout
-from claude_code_hooks_daemon.utils.git_repo import GitRepo, git_visible_paths, run_git
+from claude_code_hooks_daemon.utils.git_repo import GitRepo, git_visible_paths, read_blobs, run_git
 
 _KEY = "hooksdaemon.testValue"
 
@@ -579,3 +579,60 @@ class TestGitVisiblePaths:
 
         (tmp_path / ".git").write_text("gitdir: ../.git/modules/sub\n")
         assert is_linked_worktree(tmp_path) is False
+
+
+class TestReadBlobs:
+    """``read_blobs``: many blobs from ONE ``git cat-file --batch`` (ledger 00474 N244)."""
+
+    def _blob(self, repo: Path, name: str, content: bytes) -> str:
+        (repo / name).write_bytes(content)
+        result = subprocess.run(
+            ["git", "-C", str(repo), "hash-object", "-w", name],
+            capture_output=True,
+            check=True,
+            text=True,
+            timeout=Timeout.GIT_CONTEXT,
+        )
+        return result.stdout.strip()
+
+    def test_reads_each_blob_by_sha(self, tmp_git_repo: Path) -> None:
+        first = self._blob(tmp_git_repo, "a", b"one\n")
+        second = self._blob(tmp_git_repo, "b", b"two\ntwo\n")
+
+        assert read_blobs(tmp_git_repo, [first, second]) == {
+            first: b"one\n",
+            second: b"two\ntwo\n",
+        }
+
+    def test_binary_content_does_not_shift_later_blobs(self, tmp_git_repo: Path) -> None:
+        odd = self._blob(tmp_git_repo, "odd", b"\xff\xfe\n\n")
+        after = self._blob(tmp_git_repo, "after", b"after")
+
+        blobs = read_blobs(tmp_git_repo, [odd, after])
+
+        assert blobs == {odd: b"\xff\xfe\n\n", after: b"after"}
+
+    def test_an_unknown_sha_is_left_out(self, tmp_git_repo: Path) -> None:
+        known = self._blob(tmp_git_repo, "a", b"x")
+
+        assert read_blobs(tmp_git_repo, ["0" * 40, known]) == {known: b"x"}
+
+    def test_no_shas_spawns_nothing(self, tmp_path: Path) -> None:
+        with mock.patch("subprocess.run") as spawn:
+            assert read_blobs(tmp_path, []) == {}
+        spawn.assert_not_called()
+
+    def test_git_that_cannot_run_is_unavailable(self, tmp_path: Path) -> None:
+        with mock.patch("subprocess.run", side_effect=FileNotFoundError("no git")):
+            assert read_blobs(tmp_path, ["a" * 40]) is None
+
+    def test_a_failing_git_is_unavailable(self, tmp_path: Path) -> None:
+        assert read_blobs(tmp_path, ["a" * 40]) is None
+
+    @pytest.mark.parametrize(
+        "reply", [b"no newline", b"abc blob\n", b"abc blob x\n", b"abc blob 9\nshort"]
+    )
+    def test_a_reply_that_does_not_parse_is_unavailable(self, tmp_path: Path, reply: bytes) -> None:
+        done = subprocess.CompletedProcess([], 0, reply, b"")
+        with mock.patch("subprocess.run", return_value=done):
+            assert read_blobs(tmp_path, ["a" * 40]) is None
