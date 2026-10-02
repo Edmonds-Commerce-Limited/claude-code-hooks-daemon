@@ -29,6 +29,7 @@ from typing import Final
 
 from claude_code_hooks_daemon.install.install_stamp import is_branch_install
 from claude_code_hooks_daemon.install.version_parse import parse_version_tuple
+from claude_code_hooks_daemon.utils.path_containment import path_relative_to
 
 UPGRADES_SUBPATH: Final[Path] = Path("CLAUDE") / "UPGRADES"
 UNRELEASED_DIRNAME: Final[str] = "UNRELEASED"
@@ -131,7 +132,7 @@ def unreleased_staged_documents(upgrades_dir: Path) -> list[Path]:
             for path in staged_dir.rglob(_MARKDOWN_GLOB)
             if path.is_file() and path.name != _README
         ),
-        key=lambda path: path.relative_to(staged_dir).as_posix(),
+        key=lambda path: path_relative_to(path, staged_dir).as_posix(),
     )
 
 

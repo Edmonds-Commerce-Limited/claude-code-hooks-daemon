@@ -70,6 +70,7 @@ from claude_code_hooks_daemon.install.upgrade_tasks import (
 )
 from claude_code_hooks_daemon.install.version_parse import strip_tag_prefix
 from claude_code_hooks_daemon.utils.one_shot_approval import OneShotApprovalStore
+from claude_code_hooks_daemon.utils.path_containment import path_is_relative_to, path_relative_to
 
 logger = logging.getLogger(__name__)
 
@@ -252,7 +253,9 @@ def breaking_manifests(
 
 
 def _rel(path: Path, root: Path) -> str:
-    return path.relative_to(root).as_posix() if path.is_relative_to(root) else str(path)
+    if path_is_relative_to(path, root):
+        return path_relative_to(path, root).as_posix()
+    return str(path)
 
 
 def _critical_escalations(findings: list[TaskFinding], daemon_dir: Path) -> list[str]:
@@ -294,7 +297,7 @@ def _reading_list(
         for document in guide_documents(
             upgrades_dir, from_version, to_version, include_unreleased=include_unreleased
         )
-        if TaskKind.PRE.value not in document.relative_to(upgrades_dir).parts
+        if TaskKind.PRE.value not in path_relative_to(document, upgrades_dir).parts
     ]
 
 

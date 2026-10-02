@@ -78,6 +78,7 @@ class TestNoThirdPartyImports:
             "install/install_stamp.py",
             "install/version_parse.py",
             "utils/one_shot_approval.py",
+            "utils/path_containment.py",
             "daemon/install_layout.py",
         ],
     )
