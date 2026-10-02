@@ -119,8 +119,9 @@ instead of competing. Today `untracked/qa/.llm_qa.lock` is per checkout, and
 
 ### Phase 2: Targeted QA
 
-- [ ] ⬜ **Task 2.1**: Extend `llm_qa.py changed` with the cheap cross-cutting
-  checks Phase 1 identifies (TDD).
+- [x] ✅ **Task 2.1**: Extend `llm_qa.py changed` with the cheap cross-cutting
+  checks Phase 1 identifies (TDD). Nine added; `dependencies` stays out because it
+  judges the local venv, not the tree. Merged in b2984b70a.
 - [ ] ⬜ **Task 2.2**: Turn `qa-runner` into the scope-deciding QA agent. It reads
   the diff, picks the checks, runs them and reports verdict, scope and reasoning.
 - [x] ✅ **Task 2.3**: Take the host-wide lock for every `llm_qa.py` run, with a

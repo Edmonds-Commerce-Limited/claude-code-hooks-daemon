@@ -866,6 +866,9 @@ says 3.66.0 while the project is 3.67.0.
 runs them, and `all` runs only at release preparation. The violations arrived with Plan
 00376's upgrade work and sat unseen.
 
-**Status**: 🔄 The six findings are being fixed on `worktree-n287-semgrep-containment`.
-The venv needs a re-sync. The gap itself belongs to Plan 00475 Task 2.1, which puts the
-cheap checks, `semgrep` included, into `changed`.
+**Status**: ✅ Fixed. The six sites call `path_relative_to`/`path_is_relative_to`
+(9342fa898, merged a1f96fdc0); `upgrade_gate_standalone.py` loads `path_containment.py`
+before the gate's modules, since the gate now imports it. The venv was re-synced, and
+`semgrep` and `dependencies` both pass on main. The gap is closed for `semgrep`, which
+Plan 00475 Task 2.1 (b2984b70a) puts in `changed`. `dependencies` stays out of `changed`
+because it judges the local venv rather than the tree, so only `all` runs it.

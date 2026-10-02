@@ -445,8 +445,8 @@ does not keep it.
 
 `llm_qa.py changed` runs EVERY cheap repo-wide static check on every run,
 whatever changed, because a change far away can break any of them
-(`CHANGED_TOOL_NAMES` in `llm_qa.py` is the list; the whole set took about 400 s
-on one host): `magic_values`, `format`, `lint`, `type_check`, `pyright`,
+(`CHANGED_TOOL_NAMES` in `llm_qa.py` is the list; on one host the static checks
+took about 460 s before `changed_tests`, per Plan 00475's timings): `magic_values`, `format`, `lint`, `type_check`, `pyright`,
 `error_hiding`, `eacces_safe`, `shell_check`, `shell_audit`, `repo_hygiene`,
 `doc_truth`, `doc_snippets`, `plan_qa`, `docs_qa`, `generated_doc_drift`,
 `handler_reference`, `hook_contract`, `input_contract`, `project_handlers` (the
@@ -458,9 +458,9 @@ project handlers' own tests), `declared_invariant_pairs`, `skill_refs`,
 `github_urls` and `semgrep`. None needs a live daemon. Deliberately absent:
 `security_downgrade_flags` (about 49 s), `smoke_test`, `tests`, and
 `dependencies` (it checks the local venv against `uv.lock` and runs
-`uv lock --check`, so it judges the host rather than the tree). It then runs `changed_tests`: pytest on the tests mapped from every
-file changed since the
-merge base, uncommitted and untracked files included. A change to handler code
+`uv lock --check`, so it judges the host rather than the tree). It then
+runs `changed_tests`: pytest on the tests mapped from every file changed since
+the merge base, uncommitted and untracked files included. A change to handler code
 (`src/claude_code_hooks_daemon/handlers/**`) also selects
 `tests/acceptance/test_playbook_harness.py`, through a rule in
 `changed_tests_map.yaml`, because the handlers' acceptance probes are dispatched
