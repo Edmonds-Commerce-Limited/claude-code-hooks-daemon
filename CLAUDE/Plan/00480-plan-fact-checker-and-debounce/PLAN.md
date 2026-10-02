@@ -101,11 +101,24 @@ as principle 1.
 
 ### Phase 4: Wire into plan QA (TDD)
 
-- [ ] ⬜ **Task 4.1**: A `PostToolUse` handler on writes and edits under the plan directory feeds
+- [x] ✅ **Task 4.1**: A `PostToolUse` handler on writes and edits under the plan directory feeds
   the debouncer, keyed by plan folder (default quiet period 5 s, configurable).
-- [ ] ⬜ **Task 4.2**: When the debouncer fires, compute the diff since the last fact-checked
+  - **Handler**: `PlanFactCheckFeedHandler` (`plan_fact_check_feed`, priority 36), non-terminal,
+    never blocks, ships `default_enabled = False` and is off in the template and in this repo's
+    config. Option `quiet_seconds`.
+  - **Scope**: any tracked markdown document of a plan folder, written by `Write`, `Edit` or a
+    Bash command whose authored paths `get_written_file_paths` can name. `subagent-reports/` and
+    `JOURNAL/` are excluded, so the checker's own reports cannot re-trigger it.
+- [ ] 🔄 **Task 4.2**: When the debouncer fires, compute the diff since the last fact-checked
   content of that plan (record a per-plan checked hash), and deliver the check (open
   question 1).
+  - **Done**: `utils/plan_fact_check.py` keeps per-plan state under the daemon untracked dir
+    (`plan-fact-check/`): the last fact-checked content and hash, and a pending record. The
+    fire computes the diff since that content and stores it as a **pending fact-check**.
+  - **Boundary**: the fire callback does NO dispatch. It logs at info level and stores the
+    pending record. Delivery is owner open question 1.
+  - **Remains**: deliver the pending record, and call `PlanFactCheckState.record_checked` once a
+    check has been delivered (firing never advances the checked content).
 - [ ] ⬜ **Task 4.3**: Deliver the result. REFUTED claims reach the session as work, naming the
   claim, the evidence and the file. Decide whether an unresolved REFUTED claim blocks the
   plan's next commit through `plan_qa_commit_gate` (open question 2).

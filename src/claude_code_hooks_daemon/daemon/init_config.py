@@ -317,6 +317,7 @@ class ConfigTemplate:
             "    model_downgrade_recorder: {enabled: true, priority: 33}  # Publish <session>.model-downgrade so the ccy supervisor can tell a machine downgrade from your own /model (opt-out)\n"
             "    merge_qa_report: {enabled: true, priority: 34}  # Post-hoc plan/docs QA report on what a git merge/pull/rebase introduced (fires only when plan/docs QA sweeps are active)\n"
             "    daemon_sync_after_merge: {enabled: true, priority: 35}  # A merge/pull/rebase that changed daemon config or handler code leaves the running daemon stale -- advises a restart, naming the paths\n"
+            "    plan_fact_check_feed: {enabled: false, priority: 36}  # Debounce plan edits into one pending fact-check record (opt-in; delivery not built yet, Plan 00480)\n"
             "\n"
             "  # PostToolUseFailure - After a tool call fails\n"
             "  post_tool_use_failure:\n"

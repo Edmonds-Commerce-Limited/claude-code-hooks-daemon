@@ -286,6 +286,11 @@ class Priority:
     # daemon's own config and version.
     DAEMON_SYNC_AFTER_MERGE = 35
 
+    # Plan fact-check feed (Priority: 36 - PostToolUse sensor; Plan 00480 Task
+    # 4.1, the next free slot in the PostToolUse band. Silent: it only feeds the
+    # debouncer, so its order against the advisories is not load-bearing)
+    PLAN_FACT_CHECK_FEED = 36
+
     # QA enforcement handlers (Priority: 30-35)
     QA_SUPPRESSION = 30
     PLAN_NUMBER_HELPER = 30

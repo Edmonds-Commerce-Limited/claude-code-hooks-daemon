@@ -516,6 +516,12 @@ handlers:
       #     - id: project-motto
       #       text: "All findings are logged to {plan_path}/REPORTS/."
 
+    plan_fact_check_feed:  # Debounces plan edits into one pending fact-check record (Plan 00480)
+      enabled: false  # Opt-in: the check is recorded but its delivery is not built yet
+      priority: 36
+      # options:
+      #   quiet_seconds: 5.0  # quiet period after the last edit to a plan before it fires
+
     markdown_table_formatter:  # Auto-format markdown tables via mdformat + mdformat-gfm
       enabled: false           # Enable for automatic markdown table alignment
       priority: 31  # Ledger 00466 RV6-M1: MUST stay above goal_injection's priority
