@@ -17,10 +17,15 @@ import os
 import random
 from collections.abc import Callable
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
-from claude_code_hooks_daemon.utils.realpath import has_symlink_loop, realpath
+from claude_code_hooks_daemon.utils.realpath import (
+    has_symlink_loop,
+    realpath,
+    resolve_checking_loop,
+)
 from tests.scaling import SIZE_FACTOR, SUPERLINEAR_RATIO, scaling_ratio
 
 
@@ -225,6 +230,45 @@ def test_cost_grows_linearly_with_depth(tree: Path) -> None:
     segments = 2_812
     ratio = scaling_ratio(lambda size: realpath(deep(size)), segments, deep(SIZE_FACTOR * segments))
     assert ratio <= SUPERLINEAR_RATIO
+
+
+class TestResolveCheckingLoop:
+    """N289: ``protecting_pattern`` asked ``has_symlink_loop`` and then
+    ``realpath`` of the same path, walking it twice per file of a
+    repository-wide sweep. ``resolve_checking_loop`` answers both in one
+    walk and must equal the pair on every shape."""
+
+    @pytest.mark.parametrize("relative", _RELATIVE_SHAPES)
+    def test_equals_the_pair_it_replaces(self, tree: Path, relative: str) -> None:
+        path = str(tree / relative) if relative else str(tree)
+        assert resolve_checking_loop(path) == (realpath(path), has_symlink_loop(path))
+
+    def test_equals_the_pair_on_generated_adversarial_paths(
+        self, adversarial_tree: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.chdir(adversarial_tree)
+        rng = random.Random(_DIFFERENTIAL_SEED)
+        mismatches = []
+        for _ in range(2_000):
+            path = _generated_path(rng, adversarial_tree)
+            expected = (
+                _outcome(realpath, path),
+                _outcome(lambda p: str(has_symlink_loop(p)), path),
+            )
+            actual = _outcome(lambda p: resolve_checking_loop(p)[0], path)
+            loop = _outcome(lambda p: str(resolve_checking_loop(p)[1]), path)
+            if (actual, loop) != expected:
+                mismatches.append(path[:200])
+        assert not mismatches, f"{len(mismatches)} differ, e.g. {mismatches[:3]}"
+
+    def test_an_existing_path_is_walked_once(self, tree: Path) -> None:
+        with patch("os.path.realpath", wraps=os.path.realpath) as walk:
+            resolve_checking_loop(tree / "real" / "inner" / "file.txt")
+        assert walk.call_count == 1
+
+    def test_a_nul_byte_raises_like_realpath(self, tree: Path) -> None:
+        with pytest.raises(ValueError):
+            resolve_checking_loop(f"{tree}/a\0b")
 
 
 class TestHasSymlinkLoop:

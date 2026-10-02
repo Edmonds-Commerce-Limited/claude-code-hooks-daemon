@@ -48,7 +48,7 @@ from claude_code_hooks_daemon.utils.path_exclusion import (
     path_matches_globs,
     resolve_project_root,
 )
-from claude_code_hooks_daemon.utils.realpath import has_symlink_loop, realpath
+from claude_code_hooks_daemon.utils.realpath import resolve_checking_loop
 from claude_code_hooks_daemon.utils.shell_segmentation import (
     mask_quoted,
     segment_command_word,
@@ -281,7 +281,17 @@ def protecting_pattern(file_path: str, patterns: tuple[str, ...]) -> str | None:
     """
     if not file_path or not patterns:
         return None
-    if has_symlink_loop(file_path):
+    try:
+        real, looped = resolve_checking_loop(file_path)
+    except (OSError, ValueError) as exc:
+        # Plan 00466 N24 follow-up: a NUL-bearing path raises ValueError,
+        # not OSError -- the OS itself cannot realpath it, so it cannot BE
+        # a symlink to anything (nor a loop); nothing for this check to
+        # discover. The spelled path is still matched, below. Logged without
+        # the path, which may itself be a protected name.
+        logger.debug("protecting_pattern: no realpath (%s); matched as spelled", type(exc).__name__)
+        real, looped = file_path, False
+    if looped:
         # Plan 00466 N24 review 4 (team-lead follow-up on R4-B1): once a
         # loop is hit, os.path.realpath's own answer for the rest of the
         # path is version-dependent, so the realpath comparison below cannot
@@ -291,16 +301,6 @@ def protecting_pattern(file_path: str, patterns: tuple[str, ...]) -> str | None:
         return patterns[0]
     project_root = resolve_project_root()
     matches = [first_matching_glob(file_path, patterns, project_root=project_root)]
-    try:
-        real = realpath(file_path)
-    except (OSError, ValueError) as exc:
-        # Plan 00466 N24 follow-up: a NUL-bearing path raises ValueError,
-        # not OSError -- the OS itself cannot realpath it, so it cannot BE
-        # a symlink to anything; nothing for this check to discover. The
-        # spelled path is still matched, above. Logged without the path,
-        # which may itself be a protected name.
-        logger.debug("protecting_pattern: no realpath (%s); matched as spelled", type(exc).__name__)
-        real = file_path
     if real != file_path:
         matches.append(first_matching_glob(real, patterns, project_root=project_root))
     found = [pattern for pattern in matches if pattern is not None]

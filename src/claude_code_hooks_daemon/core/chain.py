@@ -297,6 +297,9 @@ class _ChainProgress:
     matched_results: list[HookResult] = field(default_factory=list)
     denials: list[tuple[str, HookResult]] = field(default_factory=list)
     advisories: list[tuple[str, HookResult]] = field(default_factory=list)
+    # How many handlers the loop has begun. The last one begun was still
+    # running when the budget expired; every one after it never started.
+    entered: int = 0
 
     def snapshot(self) -> "_ChainProgress":
         """A copy the caller can read and mutate while the run's thread keeps going.
@@ -317,6 +320,7 @@ class _ChainProgress:
             matched_results=matched_results,
             denials=denials,
             advisories=advisories,
+            entered=self.entered,
         )
 
     def leading_result(self) -> HookResult | None:
@@ -753,13 +757,18 @@ class HandlerChain:
         # already returned has judged its part and its output is still good.
         # Only what was cut off is lost, and the response says so.
         finished = progress.snapshot()
+        # Whatever the abandoned thread produces after this point is discarded
+        # (it is only logged), so the handlers it never completed are named:
+        # their findings reach nobody, and that must not be silent (N289).
+        unfinished = ", ".join(h.name for h in self.handlers[max(finished.entered - 1, 0) :])
+        dropped = f"; did not finish: {unfinished} (their output is dropped)" if unfinished else ""
         if not finished.handlers_executed and not finished.accumulated_context:
             allowed_result = HookResult.allow()
-            allowed_result.context = [f"Chain skipped: {detail}"]
+            allowed_result.context = [f"Chain skipped: {detail}{dropped}"]
             return ChainExecutionResult(result=allowed_result, execution_time_ms=execution_time_ms)
         finished.accumulated_context.append(
             f"Chain cut short: {detail}; the output of the "
-            f"{len(finished.handlers_executed)} handler(s) that finished is kept"
+            f"{len(finished.handlers_executed)} handler(s) that finished is kept{dropped}"
         )
         return ChainExecutionResult(
             result=_assemble_final_result(
@@ -1012,7 +1021,8 @@ class HandlerChain:
             ends_on_allow = self.allow_is_final and not restrictive
             return bool(handler.terminal and (ends_on_restrictive or ends_on_allow))
 
-        for handler in self.handlers:
+        for index, handler in enumerate(self.handlers):
+            progress.entered = index + 1
             if (
                 deadline_seconds is not None
                 and (time.perf_counter() - deadline_clock_start) >= deadline_seconds

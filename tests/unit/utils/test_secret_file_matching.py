@@ -14,6 +14,7 @@ import time
 from collections.abc import Callable, Iterator
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import patch
 
 import pytest
 
@@ -122,6 +123,20 @@ class TestPathIsProtected:
         link = tmp_path / "innocuous-name"
         link.symlink_to(target)
         assert sfm.path_is_protected(str(link), sfm.DEFAULT_PROTECTED_PATTERNS)
+
+    def test_an_existing_file_is_resolved_with_a_single_walk(self, tmp_path: Path) -> None:
+        """N289: a sweep asks this of ~18,000 files; the loop check and the
+        realpath used to be two separate walks of the same path."""
+        target = tmp_path / "plain.txt"
+        target.write_text("x\n")
+        with patch("os.path.realpath", wraps=os.path.realpath) as walk:
+            assert not sfm.path_is_protected(str(target), sfm.DEFAULT_PROTECTED_PATTERNS)
+        assert walk.call_count == 1
+
+    def test_a_symlink_loop_is_still_protected_by_every_pattern(self, tmp_path: Path) -> None:
+        (tmp_path / "a").symlink_to(tmp_path / "b")
+        (tmp_path / "b").symlink_to(tmp_path / "a")
+        assert sfm.path_is_protected(str(tmp_path / "a" / "child"), sfm.DEFAULT_PROTECTED_PATTERNS)
 
     def test_a_symlink_loop_on_the_path_is_treated_as_protected(self, tmp_path: Path) -> None:
         """Plan 00466 N24 review 4 (team-lead follow-up on R4-B1): once a

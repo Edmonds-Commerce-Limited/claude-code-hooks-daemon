@@ -406,6 +406,33 @@ class TestEmptyFilePathNeverReachesRelpath:
         )
 
 
+class TestLiteralPrefilter:
+    """N289: a pattern whose literal run is absent from the path cannot match,
+    so the token sweeps are skipped for it -- a repository-wide sweep asks
+    this of ~18,000 paths against every protected glob."""
+
+    def test_a_pattern_whose_literal_is_absent_runs_no_sweep(self) -> None:
+        with patch.object(path_exclusion, "_apply_prefix") as sweep:
+            assert path_exclusion._glob_fullmatch("**/node_modules/**", "src/app/main.py") is False
+        sweep.assert_not_called()
+
+    def test_a_pattern_whose_literal_is_present_still_matches(self) -> None:
+        assert path_exclusion._glob_fullmatch("**/node_modules/**", "a/node_modules/b.js") is True
+
+    def test_every_literal_run_must_be_present(self) -> None:
+        assert path_exclusion._glob_fullmatch("*needle*", "dir/my_needle.txt") is True
+        assert path_exclusion._glob_fullmatch("a*b", "xay") is False
+
+    def test_answers_agree_with_the_unfiltered_sweep(self) -> None:
+        patterns = ["*.tok*", ".keep*", "exact", "**/node_modules/**", "/src/*.py", "a?c"]
+        texts = ["x.tok", "d/.keep1", "exact", "q/exact", "src/a.py", "abc", "", "a/b"]
+        for pattern in patterns:
+            for text in texts:
+                with patch.object(path_exclusion, "_literals_present", return_value=True):
+                    unfiltered = path_exclusion._glob_fullmatch(pattern, text)
+                assert path_exclusion._glob_fullmatch(pattern, text) is unfiltered
+
+
 class TestMultiplePatterns:
     def test_any_pattern_matches(self) -> None:
         patterns = ["vendor/**", "**/fixtures/**", "samples/**/*.py"]
