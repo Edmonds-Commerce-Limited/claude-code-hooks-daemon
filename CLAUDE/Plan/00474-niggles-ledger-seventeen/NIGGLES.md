@@ -1124,3 +1124,36 @@ now allowed.
 
 **Accepted residual, unchanged**: a bare generic glob (`cat $F/*/*`) is not treated as a mention
 of a protected file (Plan 00272 Decision 12).
+
+### N294 — a status-line client that hangs up still logs an ERROR traceback
+
+**Source**: the coordinator, reading `bin/hooks-daemon logs` after the N244 restart.
+
+**Evidence**: five `[ERROR] asyncio: Task exception was never retrieved ... BrokenPipeError`
+records within 0.5 s, all on Status events. Each one comes straight after the daemon's own
+`Client disconnected before its response was delivered.` debug line. That line shows the
+`except (BrokenPipeError, ConnectionResetError)` branch in `HooksDaemon._handle_client`
+(`daemon/server.py`) already classified the lost peer. The `finally` block then calls
+`await writer.wait_closed()` (line 2181), and that call raises the same `BrokenPipeError`
+outside every handler. The task dies with an unretrieved exception, so the noise the branch was
+written to remove comes back at ERROR level, in the channel the docs point at
+(`logs | grep -i error`).
+
+**Trigger**: the status line re-renders faster than the slow chip in N295 replies, so Claude Code
+drops superseded renders.
+
+**Status**: ⬜ Open.
+
+### N295 — the prompt-cache chip re-reads every sub-agent's sidecar file on every render
+
+**Source**: the coordinator, timing handlers in `bin/hooks-daemon logs`.
+
+**Evidence**: across 18 renders, `status-prompt-cache-indicator` took 84–427 ms (median about
+95 ms). Every other status handler took under 3 ms. The `⑂`/`Σ` chips call
+`read_subagent_cache_totals` (`handlers/subagent_stop/subagent_cache_aggregator.py`), which globs
+and `json.loads` every file in `untracked/cache-sidecar/<session>/`. This session's directory holds
+3,369 files (14 MB), one per sub-agent that ever stopped. The cost grows with every agent the
+session runs and is paid on every render, so a long-lived orchestrator session pays the most. The
+slowness also makes Claude Code abandon renders (N294).
+
+**Status**: ⬜ Open.
