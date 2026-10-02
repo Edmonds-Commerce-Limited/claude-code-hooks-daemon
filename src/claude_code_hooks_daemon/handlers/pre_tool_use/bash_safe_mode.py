@@ -1,15 +1,14 @@
-"""Opt-in bash safe-mode forcer: require a `set` safety prelude (Plan 00270).
+"""Bash safe-mode forcer: require a `set` safety prelude (Plan 00270).
 
-The opt-in counterpart Plan 00268 deferred. That plan REJECTED enforcing
-``set -e`` as a blanket rule — forced errexit changes the semantics of every
-command, and the false-positive shapes (`grep -q p f; echo done`, exit-code
-observers, labelled diagnostic sweeps) would make a blanket handler mostly
-wrong, and a handler that is mostly wrong gets disabled. Each objection maps
-to a mitigation here rather than being ignored: the handler ships
-``enabled: false``, warns first even when enabled, only speaks where
-sequencing exists (``min_statements``), can be scoped to mutator-bearing
-commands (``only_with_mutator``), and carries a ``MUST_SKIP_SAFE_MODE_BECAUSE``
-escape hatch.
+On by default and blocking, by owner ruling: "lets make the bash strict mode on
+by default - it should be harmless and provides a LOT of safety". The false-
+positive shapes Plan 00268 worried about (`grep -q p f; echo done`, exit-code
+observers, labelled diagnostic sweeps) are handled by mitigations rather than
+ignored: the handler only speaks where sequencing exists (``min_statements``;
+a pure `&&` chain is one statement and exempt), can be scoped to
+mutator-bearing commands (``only_with_mutator``), can be downgraded to
+``mode: warn`` or disabled per project, and carries a
+``MUST_SKIP_SAFE_MODE_BECAUSE`` escape hatch.
 
 ``mode: inject`` (auto-prepending the prelude via PreToolUse ``updatedInput``)
 is RESERVED, not implemented: Claude Code documents the field, but this
@@ -91,8 +90,8 @@ _BLIND_SPOTS: Final = (
 class BashSafeModeHandler(PreToolUseHandlerBase):
     """Require a bash safety prelude on multi-statement Bash invocations.
 
-    Ships ``enabled: false``. Configuration options (via config YAML):
-        mode: "warn" (default) or "block". "inject" is reserved and rejected
+    Ships ``enabled: true``. Configuration options (via config YAML):
+        mode: "block" (default) or "warn". "inject" is reserved and rejected
             at config load until the daemon serialises PreToolUse
             ``updatedInput``.
         require: list of flags to demand — any of "errexit", "pipefail",
@@ -108,10 +107,9 @@ class BashSafeModeHandler(PreToolUseHandlerBase):
             handler_id=HandlerID.BASH_SAFE_MODE,
             priority=Priority.BASH_SAFE_MODE,
             terminal=False,
-            # Plan 00466 n24 security review, M3: opt-in, ships disabled by
-            # default, carries its own escape hatch -- an explicit,
-            # deliberate opt-out from structural fail-closed, not an
-            # oversight.
+            # Plan 00466 n24 security review, M3: carries its own escape
+            # hatch and per-project opt-outs -- an explicit, deliberate
+            # opt-out from structural fail-closed, not an oversight.
             tags=[
                 HandlerTag.VALIDATION,
                 HandlerTag.QA_ENFORCEMENT,
@@ -122,7 +120,7 @@ class BashSafeModeHandler(PreToolUseHandlerBase):
         # Config options: applied by blind setattr AFTER __init__. `_mode` is
         # a property so an unsupported value is rejected AT LOAD, inside the
         # registry's instantiation guard, with a message naming why.
-        self._mode = _MODE_WARN
+        self._mode = _MODE_BLOCK
         self._require: Any = list(_DEFAULT_REQUIRE)
         self._min_statements: Any = _DEFAULT_MIN_STATEMENTS
         self._only_with_mutator: Any = False
@@ -191,15 +189,12 @@ class BashSafeModeHandler(PreToolUseHandlerBase):
         self.__mode = str(value)
 
     def get_default_enabled(self) -> bool:
-        """Opt-in handler — off by default, per the feature's own framing.
+        """On by default, per the owner ruling cited in the module docstring.
 
-        Plan 00268's cry-wolf analysis stands: forced errexit changes the
-        semantics of every command, so enabling this is a per-project policy
-        act, never a default. Must stay consistent with the
-        ``enabled: false`` flag in the config template (enforced by
-        ``test_default_enabled_template_consistency``).
+        Must stay consistent with the ``enabled: true`` flag in the config
+        template (enforced by ``test_default_enabled_template_consistency``).
         """
-        return False
+        return True
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """True only when the command is missing a required prelude flag."""
@@ -276,7 +271,7 @@ class BashSafeModeHandler(PreToolUseHandlerBase):
         """The validated `require` list, falling back to the shipped default.
 
         Options arrive by blind setattr from YAML, so the type is not trusted.
-        This handler is opt-in and warn-first; a malformed entry must degrade
+        A malformed entry must degrade
         to the default policy, never take the daemon down.
         """
         value = self._require
@@ -306,8 +301,7 @@ class BashSafeModeHandler(PreToolUseHandlerBase):
             "of failures (a diagnostic sweep, an exit-code observer), declare "
             "it in the command itself:\n"
             f'  {_ESCAPE_HATCH}="explain why"; <command>\n\n'
-            "This handler is opt-in project policy (it ships disabled); its "
-            "sibling `verification_result_gate` already stands down when a "
+            "Its sibling `verification_result_gate` already stands down when a "
             "prelude is present, so the two never double-fire."
         )
 
@@ -332,22 +326,23 @@ class BashSafeModeHandler(PreToolUseHandlerBase):
             "of failures (a diagnostic sweep, an exit-code observer), declare "
             "it in the command itself:\n"
             f'  {_ESCAPE_HATCH}="explain why"; <command>\n\n'
-            "This handler is opt-in project policy (it ships disabled); its "
-            "sibling `verification_result_gate` already stands down when a "
+            "Its sibling `verification_result_gate` already stands down when a "
             "prelude is present, so the two never double-fire."
         )
 
     def get_claude_md(self) -> str | None:
         return (
             "## bash_safe_mode — a safety prelude is required on sequenced Bash\n\n"
-            "This handler is **opt-in project policy** (ships disabled; this "
-            "project has chosen to enable it). A Bash invocation with multiple "
+            "This handler ships on and blocks by default (a project can opt "
+            "out with `enabled: false` or `mode: warn`). A Bash invocation with multiple "
             "sequenced statements (`;` or newline separated) must declare the "
             "required `set` flags — by default `set -e` (errexit) and "
             "`set -o pipefail` (`set -euo pipefail` satisfies both; `nounset` "
             "is only checked where configured). A command already carrying the "
             "prelude, a single statement, and a pure `&&` chain are never "
             "flagged.\n\n"
+            "**Fix when blocked**: put `set -euo pipefail` at the top of the "
+            "command, or chain the statements with `&&`.\n\n"
             f"{_BLIND_SPOTS}\n\n"
             "Because of those blind spots, do NOT drop explicit gating "
             "(`&&`, `|| exit 1`) just because the prelude is present — the "
@@ -364,9 +359,10 @@ class BashSafeModeHandler(PreToolUseHandlerBase):
         )
 
     def get_acceptance_tests(self) -> list[Any]:
-        """Acceptance tests exercising the warn path with read-only commands."""
+        """Acceptance tests exercising the configured mode with read-only commands."""
         from claude_code_hooks_daemon.core import RecommendedModel, TestType
 
+        blocking = self._mode == _MODE_BLOCK
         return [
             AcceptanceTest(
                 title="Bash safe mode - sequenced statements without a prelude",
@@ -374,15 +370,37 @@ class BashSafeModeHandler(PreToolUseHandlerBase):
                 dispatch_as_bash=True,
                 description=(
                     "Two newline-sequenced read-only statements with no `set` "
-                    "prelude. Advisory by default: the command runs and the "
-                    "context names the missing flags. The second statement is "
-                    "shaped like a mutator (`git tag`) so this fixture still "
-                    "fires under this project's own `only_with_mutator: true` "
-                    "configuration -- `--list` keeps it read-only."
+                    "prelude. "
+                    + (
+                        "Block mode: the command is denied and the reason names "
+                        "the missing flags."
+                        if blocking
+                        else "Advisory mode: the command runs and the context "
+                        "names the missing flags."
+                    )
+                    + " The second statement is shaped like a mutator "
+                    "(`git tag`) so this fixture still fires when "
+                    "`only_with_mutator` is enabled -- `--list` keeps it "
+                    "read-only."
                 ),
-                expected_decision=Decision.ALLOW,
+                expected_decision=Decision.DENY if blocking else Decision.ALLOW,
                 expected_message_patterns=[r"errexit", r"pipefail"],
                 safety_notes="Both statements are read-only; --list tags nothing.",
+                test_type=TestType.BLOCKING if blocking else TestType.ADVISORY,
+                recommended_model=RecommendedModel.HAIKU,
+                requires_main_thread=False,
+            ),
+            AcceptanceTest(
+                title="Bash safe mode - a pure && chain is exempt",
+                command="git status --short && git tag --list",
+                dispatch_as_bash=True,
+                description=(
+                    "A pure `&&` chain is one statement, so explicit gating "
+                    "needs no prelude and is silent in both modes."
+                ),
+                expected_decision=Decision.ALLOW,
+                expected_message_patterns=[],
+                safety_notes="Both commands are read-only; --list tags nothing.",
                 test_type=TestType.ADVISORY,
                 recommended_model=RecommendedModel.HAIKU,
                 requires_main_thread=False,

@@ -138,7 +138,7 @@ from claude_code_hooks_daemon.utils.hook_registration import (
     validate_settings_hooks,
 )
 from claude_code_hooks_daemon.utils.markdown_format import format_markdown_document
-from claude_code_hooks_daemon.utils.path_containment import path_relative_to
+from claude_code_hooks_daemon.utils.path_containment import path_is_relative_to, path_relative_to
 from claude_code_hooks_daemon.utils.plugin_hooks import ACKNOWLEDGED_PLUGINS_OPTION, health_lines
 from claude_code_hooks_daemon.utils.report_scrubbing import scrub_report
 from claude_code_hooks_daemon.utils.safe_signal import (
@@ -6542,8 +6542,9 @@ def cmd_secret_meta(args: argparse.Namespace) -> int:
     JSON with existence, bucketed size, mtime, permissions (plus a hygiene
     hint when group/world-readable) and a keyed HMAC digest. Exact size and
     plain sha256 appear only when the ``secret_file_guard`` handler's
-    ``allow_plain_hash`` config option is true — there is no CLI override,
-    so an agent cannot self-grant the plainer disclosure.
+    ``allow_plain_hash`` config option is true IN THE CONFIG OF THE PROJECT
+    THAT CONTAINS THE FILE. A ``--project-root`` elsewhere never grants it:
+    that root's config is not the file owner's decision.
 
     Returns:
         0 always (a missing file is a valid answer: ``exists: false``).
@@ -6564,6 +6565,12 @@ def cmd_secret_meta(args: argparse.Namespace) -> int:
         .get(HandlerID.SECRET_FILE_GUARD.config_key)
     )
     allow_plain_hash = bool(guard_options.get("allow_plain_hash", False))
+    # The grant is the decision of the project that OWNS the file. Both sides are
+    # resolved so a symlink under a granting root is placed where it points.
+    if allow_plain_hash and not path_is_relative_to(
+        Path(args.path).resolve(), project_root.resolve()
+    ):
+        allow_plain_hash = False
 
     key_path = _daemon_untracked_dir(project_root) / KEY_FILE_NAME
     meta = collect_secret_meta(
@@ -11382,7 +11389,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser_secret_meta.add_argument(
         "--project-root",
         type=Path,
-        help="Project root for config + key resolution (trusted as-is; auto-detected by default)",
+        help=(
+            "Project root for config + key resolution (auto-detected by default; "
+            "grants the plain hash only for files inside it)"
+        ),
     )
     parser_secret_meta.set_defaults(func=cmd_secret_meta)
 

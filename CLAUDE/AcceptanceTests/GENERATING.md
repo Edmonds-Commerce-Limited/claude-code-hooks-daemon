@@ -158,10 +158,14 @@ Your fix might have affected earlier tests. Full re-run ensures no regressions.
 
 All acceptance tests use **triple-layer safety**:
 
-### Layer 1: Use `echo` (MANDATORY)
+### Layer 1: Use a wrapper that cannot execute (MANDATORY)
 
-✅ **CORRECT**: `echo "git reset --hard NONEXISTENT_REF"`
+✅ **CORRECT** (command-position guards such as `destructive_git` and `git_stash`): `bash -n -c 'git reset --hard NONEXISTENT_REF'`. `bash -n` parses the body and never runs it, yet the guards judge a literal `-c` body as the command it is, so the test still denies.
+✅ **CORRECT** (handlers that deliberately match text, e.g. `sed_blocker`): `echo "sed -i 's/foo/bar/' /nonexistent/safe/test.txt"`
 ❌ **NEVER DO**: `git reset --hard NONEXISTENT_REF`
+❌ **NEVER DO**: `bash -c 'git reset --hard NONEXISTENT_REF'` (no `-n`: when the guard allows it, the command really runs)
+
+An `echo` body is prose to `destructive_git` and `git_stash` (ledger N241), so an `echo`-wrapped test of those handlers can never deny. Verify a new row in-process: the handler must `matches()` the `bash -n -c` form.
 
 ### Layer 2: Hooks Block Commands
 
@@ -177,11 +181,11 @@ All destructive commands use non-existent refs/paths/files that would fail harml
 
 **Why All Three Layers?**
 
-- Layer 1 (echo): Zero risk even if hooks completely fail
+- Layer 1 (`bash -n -c` / echo): Zero risk even if hooks completely fail, ALLOW rows included
 - Layer 2 (hooks): Tests the actual blocking behaviour
 - Layer 3 (fail-safe args): Defense-in-depth - even catastrophic failure is harmless
 
-**Even with these protections, ALWAYS use echo for destructive commands.**
+**Even with these protections, ALWAYS use a non-executing wrapper (`bash -n -c`, or `echo` for a text-matching handler) for destructive commands.**
 
 ### Where probe fixtures live
 
@@ -348,14 +352,14 @@ def get_acceptance_tests(self) -> list[AcceptanceTest]:
     return [
         AcceptanceTest(
             title="git reset --hard",
-            command='echo "git reset --hard NONEXISTENT_REF"',
+            command="bash -n -c 'git reset --hard NONEXISTENT_REF'",
             description="Blocks destructive git reset",
             expected_decision=Decision.DENY,
             expected_message_patterns=[
                 r"destroys.*uncommitted changes",
                 r"permanently"
             ],
-            safety_notes="Uses non-existent ref - harmless if executed",
+            safety_notes="bash -n -c only parses the command, never executes it",
             test_type=TestType.BLOCKING
         ),
         # ... more tests
@@ -365,7 +369,7 @@ def get_acceptance_tests(self) -> list[AcceptanceTest]:
 ### AcceptanceTest Fields
 
 - **title**: Short test name
-- **command**: Command to execute (use echo for destructive ones)
+- **command**: Command to execute (wrap destructive ones in `bash -n -c '...'`, which parses without running)
 - **description**: What this tests
 - **expected_decision**: DENY, ALLOW, or ASK
 - **expected_message_patterns**: Regex patterns to match in output

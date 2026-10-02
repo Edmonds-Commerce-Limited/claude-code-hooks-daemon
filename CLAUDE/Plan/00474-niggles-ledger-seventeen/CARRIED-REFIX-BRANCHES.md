@@ -53,7 +53,7 @@ In-scope defects, grouped:
   (`debug_info.py` redacts no secret terms and shows no banner), N250 (`remote-docs add`
   captures unscanned when the project config does not parse).
 
-Needs owner: N154 (inherited `GIT_DIR` family), N230 (`secret-meta --project-root`), N240
+Needs owner: N240 (N154 and N230 are Fixed on branch `worktree-p483-n154-n230`, not yet merged)
 (`script` writes an out-of-root log).
 
 Dismissed entries whose subject is a command have a row in
@@ -379,7 +379,7 @@ with it. RED on `59d44d08f`: 15 cases of `TestExemptionsJudgeOptionValues`,
 
 ### N230 — `secret-meta --project-root <dir>` read `allow_plain_hash` from a config the agent could write
 
-**Status on the branch**: ✅ Remedied. **On main**: ⬜ Open: needs owner (`secret-meta --project-root` trusts a config the agent wrote; owner decides whether a self-granting config counts)
+**Status on the branch**: ✅ Remedied. **On main**: ✅ Fixed (branch `worktree-p483-n154-n230`, not yet merged): Fable ruling FIX, `allow_plain_hash` is honoured only when the inspected file, resolved, lies inside the resolved `--project-root`; the "an agent cannot self-grant" claims were corrected
 
 **Found:** Plan 00421 review 5, D-RULE check (finding SH4). Shared with main.
 
@@ -989,7 +989,7 @@ its place. Release note 149.
 
 ### N154 — `run_git` passes an inherited `GIT_DIR`, `GIT_WORK_TREE` or `GIT_INDEX_FILE` through
 
-**Status on the branch**: ✅ Remedied. **On main**: ⬜ Open: needs owner (`run_git` passes an inherited `GIT_DIR`, `GIT_WORK_TREE`, `GIT_INDEX_FILE`; the cause is the daemon's own environment, not an agent-typed shape)
+**Status on the branch**: ✅ Remedied. **On main**: ✅ Fixed (branch `worktree-p483-n154-n230`, not yet merged): Fable ruling FIX; classified as a daemon self-consistency defect, not a threat-model entry. `run_git` and `read_blobs` share one `_child_environment` that drops `GIT_DIR`, `GIT_WORK_TREE`, `GIT_INDEX_FILE` and `GIT_COMMON_DIR`
 
 **Found by the small-a D-PATH and D-RULE re-reviews (shared minor).** A
 caller's environment carrying one of these variables made every git probe
@@ -1508,7 +1508,7 @@ three new linear-cost shapes.
 
 ### N200 — An apostrophe in a comment or heredoc body hides a later quoted git subcommand from `git_stash`/`destructive_git`
 
-**Status on the branch**: ✅ Remedied. **On main**: ⬜ Open: in-scope defect for `git stash list; git stash` (a recovery word lets a real stash through; Plan 00483 triage, see TRIAGE-carried-c.md); ✅ Dismissed (threat model, limb 2) for the apostrophe-comment plus `git 'stash'` and `git "reset" --hard` shapes
+**Status on the branch**: ✅ Remedied. **On main**: ✅ Fixed (merge f3d13077e): `git_stash` now judges each command segment on its own, so a recovery form in one segment no longer exempts a stash in another; ✅ Dismissed (threat model, limb 2) for the apostrophe-comment plus `git 'stash'` and `git "reset" --hard` shapes
 
 **Found by the p422 D-RULE review 6** (review of `637e08e53..cc523578d`,
 report
@@ -1542,11 +1542,17 @@ for every caller, over a corpus of comments, heredocs and ANSI-C spans),
 
 ### N240 — `bash_file_writes` does not report the typescript or the `-I`/`-O`/`-B`/`-T` log files `script` writes
 
-**Status on the branch**: ✅ Remedied. **On main**: ⬜ Open: needs owner (`script -q /tmp/typescript.log -c ls` writes an out-of-root log; owner to say whether that outcome needs a guard)
+**Status on the branch**: ✅ Remedied. **On main**: ✅ No change (not a protected outcome). This is a ruling delegated by the owner to a Fable subagent,
+[RULINGS-owner-delegated-fable.md](../00483-threat-model-conformance-audit/RULINGS-owner-delegated-fable.md).
+A `script` typescript only duplicates what the terminal already showed, and a path passed as a plain
+argument is containment's documented boundary. Both probe shapes are to be pinned as
+`UNCOVERED-accepted` corpus rows.
 
 ### N241 — The git guards deny a message value inside a string another shell runs, and `git_stash` denies git messages and data heredocs mentioning a stash
 
-**Status on the branch**: ✅ Remedied. **On main**: ⬜ Open: in-scope defect (Plan 00483 triage, see TRIAGE-carried-c.md): false positives on text that only mentions `git stash` or `git reset --hard`, and a message ending in a backslash hides a real `git reset --hard`
+**Status on the branch**: ✅ Remedied. **On main**: ✅ Fixed (merge f3d13077e; 3 rounds, Opus review; the coordinator re-ran 156 probe
+commands on main and the branch: every remaining difference is prose or a never-executed file, and
+written-then-run scripts still deny): both guards now judge only command position (new `utils/command_position.py`), so messages, `echo`/`grep` arguments, `gh` bodies and quoted heredocs that name a stash or reset are allowed, and a single-quoted message ends at the next quote so `-m 'x\' ; git reset --hard` is denied
 
 **Found live on main and by p422-fix-8f.** `destructive_git` denied a
 `printf … >> notes.md` whose argument quoted a commit message and named

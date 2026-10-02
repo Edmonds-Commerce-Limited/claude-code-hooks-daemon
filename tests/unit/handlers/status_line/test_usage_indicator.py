@@ -2,9 +2,9 @@
 
 The segment renders the 5-hour and weekly subscription windows, read from the
 daemon's usage snapshot, as compact background-coloured chips after a line
-graph icon (owner ruling: a line graph, not a bar chart). A window below the warning level is its label alone (``📈 5h|7d``); a
-window at or above it adds its percentage and reset countdown
-(``📈 5h 67% 3h 0m|7d``) (owner ruling: green needs no number).
+graph icon (owner ruling: a line graph, not a bar chart). A window below the warning level is
+its label and floored percentage run together (``📈 5h13%|7d3%``); a window at or above it is
+spaced and adds its reset countdown (``📈 5h 67% 3h 0m|7d 81% 6d 22h``).
 """
 
 import re
@@ -86,11 +86,11 @@ class TestVisibility:
 
 
 class TestRendering:
-    def test_both_windows_green_are_labels_only(self) -> None:
+    def test_both_windows_green_are_compact_label_and_percentage(self) -> None:
         _feed("main_thread_integer.json")  # 5h 13, 7d 3: both green
         rendered = _render()
         assert rendered is not None
-        assert _plain(rendered) == "| 📈 5h|7d"
+        assert _plain(rendered) == "| 📈 5h13%|7d3%"
 
     def test_a_warning_window_shows_its_percentage_and_countdown(self) -> None:
         _feed("main_thread_fractional.json")  # 5h 67.4 yellow, 7d 81.9 orange
@@ -104,25 +104,25 @@ class TestRendering:
         get_data_layer().usage.update_from_status_event(payload, now=NOW)
         rendered = _render()
         assert rendered is not None
-        assert _plain(rendered) == "| 📈 5h|7d 75% 6d 22h"
+        assert _plain(rendered) == "| 📈 5h13%|7d 75% 6d 22h"
 
     def test_seven_day_only_has_no_five_hour_part(self) -> None:
         _feed("seven_day_only.json")  # 7d 42: green
         rendered = _render()
         assert rendered is not None
-        assert _plain(rendered) == "| 📈 7d"
+        assert _plain(rendered) == "| 📈 7d42%"
 
     def test_expired_five_hour_is_dropped_and_seven_day_stays(self) -> None:
         _feed("five_hour_expired.json")
         rendered = _render()
         assert rendered is not None
-        assert _plain(rendered) == "| 📈 7d"
+        assert _plain(rendered) == "| 📈 7d3%"
 
     def test_agent_thread_payload_renders_like_the_main_thread(self) -> None:
         _feed("agent_thread.json")
         rendered = _render()
         assert rendered is not None
-        assert _plain(rendered) == "| 📈 5h|7d"
+        assert _plain(rendered) == "| 📈 5h13%|7d3%"
 
     def test_percentage_is_rounded_down(self) -> None:
         payload = load_status_payload("main_thread_integer.json")
@@ -131,6 +131,26 @@ class TestRendering:
         rendered = _render()
         assert rendered is not None
         assert "5h 79% " in _plain(rendered)
+
+    @pytest.mark.parametrize(
+        ("used", "expected"),
+        [(0, "5h0%"), (9.9, "5h9%"), (59.9, "5h59%")],
+    )
+    def test_below_warn_chip_is_compact_and_floored(self, used: float, expected: str) -> None:
+        payload = load_status_payload("main_thread_integer.json")
+        payload["rate_limits"]["five_hour"]["used_percentage"] = used
+        get_data_layer().usage.update_from_status_event(payload, now=NOW)
+        rendered = _render()
+        assert rendered is not None
+        assert f"{_GREEN}{expected}\033[0m" in rendered
+
+    def test_at_warn_chip_is_spaced_with_countdown(self) -> None:
+        payload = load_status_payload("main_thread_integer.json")
+        payload["rate_limits"]["five_hour"]["used_percentage"] = 60
+        get_data_layer().usage.update_from_status_event(payload, now=NOW)
+        rendered = _render()
+        assert rendered is not None
+        assert f"{_YELLOW}5h 60% 3h 0m\033[0m" in rendered
 
 
 class TestColour:
@@ -171,7 +191,7 @@ class TestColour:
         rendered = _render(handler)
         assert rendered is not None
         assert f"{_CRITICAL}5h 13%" in rendered
-        assert f"{_GREEN}7d\033[0m" in rendered
+        assert f"{_GREEN}7d3%\033[0m" in rendered
 
     def test_every_chip_is_reset(self) -> None:
         _feed("main_thread_integer.json")
@@ -305,7 +325,7 @@ class TestCeilingSegment:
         hosts = {self._HOST: HostConfig(usage_ceiling=UsageCeilingConfig(max_used_percent=80))}
         text = self._render_for(hosts)
         assert text is not None
-        assert _plain(text) == "| 📈 5h|7d ⛔ 80%"
+        assert _plain(text) == "| 📈 5h13%|7d3% ⛔ 80%"
 
     def test_hidden_when_no_host_entry_matches(self) -> None:
         _feed("main_thread_integer.json")

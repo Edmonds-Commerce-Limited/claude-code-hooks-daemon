@@ -1,10 +1,10 @@
 """UsageIndicatorHandler - subscription usage in the status line (Plan 00479).
 
 Renders the 5-hour and weekly usage windows as compact background-coloured
-chips after a line-graph icon. A window below the warning level is its label alone
-(``📈 5h|7d``); a window at or above it adds its percentage and reset countdown
-(``📈 5h 67% 3h 20m|7d``). Owner ruling: green needs no number, so the segment
-stays narrow until there is something worth reading.
+chips after a line-graph icon. A window below the warning level is its label and
+percentage run together (``📈 5h10%|7d5%``); a window at or above it is spaced out
+and adds its reset countdown (``📈 5h 67% 3h 20m|7d5%``). Owner ruling: the number
+is always shown, compact while green and roomier once it is worth reading.
 
 The figures come from the daemon's usage snapshot
 (:func:`claude_code_hooks_daemon.core.data_layer.latest_usage`), which the
@@ -119,11 +119,13 @@ class UsageIndicatorHandler(StatusLineHandlerBase):
         return _GREEN
 
     def _chip(self, label: str, window: UsageWindow, now: float) -> str:
-        """One window: the label alone below the warning level, else with % and countdown."""
-        text = label
+        """One window: compact ``5h10%`` below the warning level, else spaced with countdown."""
+        percent = math.floor(window.used_percentage)
         if window.used_percentage >= self._warn_pct:
             countdown = format_countdown(window.seconds_until_reset(now))
-            text = f"{label} {math.floor(window.used_percentage)}% {countdown}"
+            text = f"{label} {percent}% {countdown}"
+        else:
+            text = f"{label}{percent}%"
         return f"{self._colour(window.used_percentage)}{text}{_RESET}"
 
     def _render(self, snapshot: UsageSnapshot, now: float, ceiling: str | None = None) -> str:
@@ -208,11 +210,12 @@ class UsageIndicatorHandler(StatusLineHandlerBase):
                 "is used, read from the `rate_limits` Claude Code ships on each status render."
             ),
             how_to_read=(
-                "`📈 5h|7d` are the 5-hour and weekly windows, each on a background "
+                "`📈 5h10%|7d5%` are the 5-hour and weekly windows, each on a background "
                 f"coloured by its usage: green below {self._warn_pct:g}%, yellow from "
                 f"{self._warn_pct:g}%, orange from {self._high_pct:g}%, red from "
-                f"{self._critical_pct:g}%. A green window shows only its label; from "
-                f"{self._warn_pct:g}% it adds its percentage and reset countdown, e.g. "
+                f"{self._critical_pct:g}%. A green window is its label and percentage "
+                f"run together (`5h10%`); from {self._warn_pct:g}% it is spaced out and "
+                "adds the reset countdown, e.g. "
                 "`5h 67% 3h 20m`. Percentages are rounded down. A window past "
                 "its reset is dropped; nothing is shown when no usage data exists (API-key "
                 "sessions, or before the first response). `⏸ usage 14:35` in red means the "
@@ -235,7 +238,7 @@ class UsageIndicatorHandler(StatusLineHandlerBase):
                 title="usage indicator renders subscription usage",
                 command='echo "test"',
                 description=(
-                    "Verify the status line carries a '📈 5h|7d' usage segment on a "
+                    "Verify the status line carries a '📈 5h10%|7d5%' usage segment on a "
                     "claude.ai subscription session. Absent when Claude Code reports no "
                     "usage data. Confirmed active by the daemon loading without errors."
                 ),

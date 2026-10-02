@@ -253,11 +253,11 @@ handlers:
       #   targeted_qa_commands:         # named in the deny as what to run instead
       #     - pytest <explicit test files>
 
-    bash_safe_mode:  # Opt-in: require a `set` safety prelude on sequenced Bash
-      enabled: false       # Ships OFF; enabling is a per-project policy act
+    bash_safe_mode:  # Require a `set` safety prelude (or && chaining) on sequenced Bash
+      enabled: true        # Ships ON and blocking; opt out with enabled: false or mode: warn
       priority: 36
       # options:
-      #   mode: warn              # warn | block (inject is reserved and rejected at load)
+      #   mode: block             # block (default) | warn (inject is reserved and rejected at load)
       #   require:                # each independently requirable
       #     - errexit             # set -e
       #     - pipefail            # set -o pipefail

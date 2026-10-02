@@ -240,14 +240,20 @@ class TestGitStashHandler:
             hook_input = {"tool_name": "Bash", "tool_input": {"command": cmd}}
             assert handler.matches(hook_input) is False, f"Should allow: {cmd}"
 
-    def test_matches_git_stash_in_echo_quotes(self, handler):
-        """Regression: Should match 'git stash' inside echo quoted string.
+    def test_matches_git_stash_in_a_bash_c_body(self, handler):
+        """A literal `bash -c` body is a command, so the stash in it is denied.
 
-        Bug: Pattern (?:\\s|$) does not match trailing quote after 'git stash'.
-        Fix: Use (?=\\W|$) lookahead to match any non-word char or end-of-string.
+        The old form embedded the command in an `echo` (Plan 00228 Decision 2);
+        the threat-model ruling (ledger N241) makes that prose, so the
+        embedding that still runs the command is `bash -c`.
         """
-        hook_input = {"tool_name": "Bash", "tool_input": {"command": 'echo "git stash"'}}
+        hook_input = {"tool_name": "Bash", "tool_input": {"command": "bash -c 'git stash'"}}
         assert handler.matches(hook_input) is True
+
+    def test_does_not_match_git_stash_in_echo_quotes(self, handler):
+        """`echo` prints its argument; the words are not a command (ledger N241)."""
+        hook_input = {"tool_name": "Bash", "tool_input": {"command": 'echo "git stash"'}}
+        assert handler.matches(hook_input) is False
 
     def test_blocks_all_creation_variants(self, handler):
         """Should block all stash creation variants."""
@@ -260,8 +266,8 @@ class TestGitStashHandler:
             "git stash save 'message'",
             "git stash -- file.txt",
             "git stash push -u",
-            'echo "git stash"',
-            "echo 'git stash push'",
+            "bash -c 'git stash'",
+            'bash -c "git stash push"',
         ]
         for cmd in creation_commands:
             hook_input = {"tool_name": "Bash", "tool_input": {"command": cmd}}

@@ -10,6 +10,7 @@ from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.core.utils import get_bash_command
 from claude_code_hooks_daemon.utils.command_evasion import GIT_INVOCATION, remove_word_quoting
+from claude_code_hooks_daemon.utils.command_position import command_position_segments
 
 # Shared teaching content for the (only) deny path — preserves the deny-mode
 # block message verbatim (Plan 00116, Task 3.2).
@@ -39,6 +40,21 @@ _ESCAPE_HATCH_PATTERN = re.compile(
     r"""MUST_STASH_BECAUSE=["']([^"']+)["']""",
     re.IGNORECASE,
 )
+
+# Recovery/query operations are allowed unconditionally: pop, apply, list, show
+# retrieve stashed work. drop/clear are blocked by DestructiveGitHandler.
+_RECOVERY_PATTERN = re.compile(GIT_INVOCATION + r"stash\s+(?:pop|apply|list|show)", re.IGNORECASE)
+_CREATION_PATTERN = re.compile(
+    GIT_INVOCATION + r"stash(?:\s+(?:push|save))?(?=\W|$)", re.IGNORECASE
+)
+
+
+def _creates_a_stash(segment: str) -> bool:
+    """Whether ONE command segment is a `git stash` that creates a stash."""
+    words = remove_word_quoting(segment)
+    if _RECOVERY_PATTERN.search(words):
+        return False
+    return _CREATION_PATTERN.search(words) is not None
 
 
 class GitStashHandler(PreToolUseHandlerBase):
@@ -81,30 +97,21 @@ class GitStashHandler(PreToolUseHandlerBase):
         if not command:
             return False
 
-        # Matched against the RAW command, INCLUDING quoted literals. That is
-        # deliberate and is asserted by `test_matches_git_stash_in_echo_quotes`:
-        # the acceptance suite verifies blocking handlers by embedding the
-        # command in a string, exactly as CLAUDE.md prescribes. Plan 00228
-        # considered exempting quoted spans here and rejected it — those tests
-        # are the specification, not an accident.
+        # Only text in COMMAND position is judged (ledger N241): a commit
+        # message, a `grep` pattern or an `echo` argument that names `git
+        # stash` is prose, while a literal `bash -c 'git stash'` body is a
+        # command. This supersedes Plan 00228 Decision 2, which kept quoted
+        # text matched so the acceptance suite could embed a command in an
+        # `echo`; the owner's threat-model ruling (CLAUDE/ARCHITECTURE.md)
+        # makes a false positive on ordinary work a defect.
         #
-        # In-word quoting is removed first because bash removes it: `git
+        # Each command segment is judged on its own (ledger N200): a recovery
+        # form in one segment must not exempt a stash in another. In-word
+        # quoting is removed per segment because bash removes it: `git
         # "stash"` stashes, and `git stash 'pop'` recovers (Plan 00408 Task
-        # 3.0's sibling sweep). The escape hatch below reads the raw command,
-        # since its quotes are what delimit the reason.
-        words = remove_word_quoting(command)
-
-        # Allow recovery/query operations unconditionally
-        # pop, apply, list, show — these retrieve stashed work
-        # Note: drop/clear are blocked by DestructiveGitHandler
-        if re.search(GIT_INVOCATION + r"stash\s+(?:pop|apply|list|show)", words, re.IGNORECASE):
-            return False
-
-        # Check if this is a stash creation command
-        is_stash = bool(
-            re.search(GIT_INVOCATION + r"stash(?:\s+(?:push|save))?(?=\W|$)", words, re.IGNORECASE)
-        )
-        if not is_stash:
+        # 3.0's sibling sweep). The escape hatch reads the raw command, since
+        # its quotes are what delimit the reason.
+        if not any(_creates_a_stash(segment) for segment in command_position_segments(command)):
             return False
 
         # Escape hatch: MUST_STASH_BECAUSE="non-empty reason" bypasses block
@@ -177,7 +184,7 @@ class GitStashHandler(PreToolUseHandlerBase):
             return [
                 AcceptanceTest(
                     title="git stash blocked",
-                    command='echo "git stash"',
+                    command="bash -n -c 'git stash'",
                     dispatch_as_bash=True,
                     description="Blocks git stash — use git commit instead",
                     expected_decision=Decision.DENY,
@@ -185,14 +192,14 @@ class GitStashHandler(PreToolUseHandlerBase):
                         r"BLOCKED",
                         r"git commit",
                     ],
-                    safety_notes="Uses echo - safe to test",
+                    safety_notes="Runs under bash -n -c, which only parses the command and never executes it",
                     test_type=TestType.BLOCKING,
                     recommended_model=RecommendedModel.HAIKU,
                     requires_main_thread=False,
                 ),
                 AcceptanceTest(
                     title="git stash push blocked",
-                    command="echo \"git stash push -m 'temp changes'\"",
+                    command='bash -n -c "git stash push -m temp-changes"',
                     dispatch_as_bash=True,
                     description="Blocks git stash push — use git commit instead",
                     expected_decision=Decision.DENY,
@@ -200,7 +207,7 @@ class GitStashHandler(PreToolUseHandlerBase):
                         r"BLOCKED",
                         r"MUST_STASH_BECAUSE",
                     ],
-                    safety_notes="Uses echo - safe to test",
+                    safety_notes="Runs under bash -n -c, which only parses the command and never executes it",
                     test_type=TestType.BLOCKING,
                     recommended_model=RecommendedModel.HAIKU,
                     requires_main_thread=False,
@@ -210,28 +217,28 @@ class GitStashHandler(PreToolUseHandlerBase):
             return [
                 AcceptanceTest(
                     title="git stash (warn mode)",
-                    command='echo "git stash"',
+                    command="bash -n -c 'git stash'",
                     description="Allows git stash with advisory warning",
                     expected_decision=Decision.ALLOW,
                     expected_message_patterns=[
                         r"WARNING",
                         r"git commit",
                     ],
-                    safety_notes="Uses echo - safe to test",
+                    safety_notes="Runs under bash -n -c, which only parses the command and never executes it",
                     test_type=TestType.ADVISORY,
                     recommended_model=RecommendedModel.SONNET,
                     requires_main_thread=False,
                 ),
                 AcceptanceTest(
                     title="git stash push (warn mode)",
-                    command="echo \"git stash push -m 'temp changes'\"",
+                    command='bash -n -c "git stash push -m temp-changes"',
                     description="Allows git stash push with advisory warning",
                     expected_decision=Decision.ALLOW,
                     expected_message_patterns=[
                         r"WARNING",
                         r"git commit",
                     ],
-                    safety_notes="Uses echo - safe to test",
+                    safety_notes="Runs under bash -n -c, which only parses the command and never executes it",
                     test_type=TestType.ADVISORY,
                     recommended_model=RecommendedModel.SONNET,
                     requires_main_thread=False,

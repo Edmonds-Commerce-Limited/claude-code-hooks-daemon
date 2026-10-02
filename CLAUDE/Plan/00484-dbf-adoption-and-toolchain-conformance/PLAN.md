@@ -89,8 +89,18 @@ agent.
   fresh first (`hooks-daemon remote-docs`). Done in [CONFORMANCE.md](CONFORMANCE.md); the
   vendored specs match upstream. Neither level conforms yet: 9 MUSTs are not met at
   project level and 5 at artefact level, giving gaps G1–G14.
-- [ ] 🔄 **Task 2.2**: Fable review of the assessment: is any grade generous, and is any claim
-  outside the threat model?
+- [x] ✅ **Task 2.2**: Fable review of the assessment: is any grade generous, and is any claim
+  outside the threat model? Done in [REVIEW-fable.md](REVIEW-fable.md). It makes 5 grade
+  corrections (4 down, 1 up), adds new gaps G15 and G16, and puts an owner batch. Neither
+  level's verdict changes.
+  - **Coordinator correction to G14.** Both documents say the hooks "fail open when the daemon
+    is not running". The code says otherwise. A hook first starts the daemon (`ensure_daemon`,
+    lazy start). If that fails on an installed project, PreToolUse fails CLOSED and denies
+    every call except the recovery command (`.claude/init.sh`, around lines 612–637, Plan 00466
+    N24 MA4). Stop and SubagentStop block. Fail-open is limited to named setup states: not
+    installed (fresh clone), venv missing, version mismatch, repo unconfigured, and CI. G14
+    is therefore mostly met. The declaration should state exactly those states, not a
+    blanket fail-open.
 - [ ] ⬜ **Task 2.3**: Put the gaps to the owner as one batch: close, accept as a known gap, or
   out of scope. Expected questions:
   - §4.3 against the `MUST_..._BECAUSE` declarations: is an in-command justification a

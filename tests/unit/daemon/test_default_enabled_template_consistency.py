@@ -31,7 +31,6 @@ from claude_code_hooks_daemon.handlers.registry import HandlerRegistry, _get_con
 # (and the corresponding handler override + template entry) when adding a new
 # opt-in handler.
 _EXPECTED_OPT_IN_CONFIG_KEYS = {
-    "bash_safe_mode",
     "lsp_enforcement",
     "context_sidecar",
     "compaction_signal",

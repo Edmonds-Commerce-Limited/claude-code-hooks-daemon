@@ -536,15 +536,16 @@ handlers:
           this conftest.py (--noconftest and equivalents bypass it, and are the handler's
           job to catch when SEEN), and it covers pytest only, not llm_qa.py's other steps.
 
-    bash_safe_mode:  # Opt-in safe-prelude forcer (Plan 00270); dogfooded here in warn mode
+    bash_safe_mode:  # Safe-prelude forcer (Plan 00270); on and blocking by default
       enabled: true
       priority: 36
       options:
-        # Scoped to mutator-bearing commands for the first dogfood cycle:
-        # unscoped, it fires on essentially every multi-statement Bash call
-        # with a large advisory and no rate limiting. Widen to false once the
-        # advisory volume is measured and acceptable.
-        only_with_mutator: true
+        # Owner ruling: "we should be blocking ; command chaining -- either use
+        # set -e and/or force && chaining". Every ;/newline-sequenced Bash
+        # command needs `set -euo pipefail` or `&&` chaining, not just
+        # mutator-bearing ones.
+        mode: block
+        only_with_mutator: false
       #   mode: warn              # warn | block (inject is reserved and rejected at load)
       #   require: [errexit, pipefail]  # nounset available but off-default
       #   min_statements: 2

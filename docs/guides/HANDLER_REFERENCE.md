@@ -802,7 +802,7 @@ handlers:
 
 **Not matched:** `$(...)`. It substitutes identically, but unlike a backtick it has a legitimate deliberate use in a message (`git commit -m "Release $(cat VERSION)"`). Backticks in a message are essentially always markdown that was meant to be single-quoted.
 
-**Scope:** this handler covers the *corruption* half only. A **dangerous** command inside the backticks is already denied by the full-command-string matching in [`destructive_git`](#destructive_git) and its siblings, which run at a lower priority and give the more useful reason.
+**Scope:** this handler covers the *corruption* half only. A **dangerous** command inside the backticks is already denied by command-position matching, substitutions included, in [`destructive_git`](#destructive_git) and its siblings, which run at a lower priority and give the more useful reason.
 
 **Example trigger:**
 
@@ -1969,7 +1969,7 @@ a human narrow the config when that bites.
 | `protected_paths`   | `list[str]`  | `[]`           | Gitignore-style globs, combined with the defaults per `mode`.                                                                                                                                                                                                      |
 | `mode`              | `str`        | `additive`     | `additive` merges `protected_paths` onto the defaults (`*.secret*`, `.vault-pass*`, `*.vault-password`, `*vault_pass*`, `id_rsa`, `id_ed25519`); `replace` uses only the project list. An unknown mode behaves as `additive` (fail closed toward more protection). |
 | `allowed_consumers` | `list[dict]` | Ansible family | Additive entries: `{command, path_flags, denied_subcommands}`.                                                                                                                                                                                                     |
-| `allow_plain_hash`  | `bool`       | `false`        | When true, `secret-meta` also reports exact `size_bytes` and plain `sha256`. Config-only — the CLI has no flag, so an agent cannot self-grant it.                                                                                                                  |
+| `allow_plain_hash`  | `bool`       | `false`        | When true, `secret-meta` also reports exact `size_bytes` and plain `sha256`. Honoured only from the config of the project that contains the file; a `--project-root` elsewhere never grants it.                                                                    |
 | `exclude_paths`     | `list[str]`  | `[]`           | Scopes ONLY the authored-script content scan (a protected path itself is never excludable). Unioned with `daemon.exclude_paths`.                                                                                                                                   |
 
 **Config example:**
