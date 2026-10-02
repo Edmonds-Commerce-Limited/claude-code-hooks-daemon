@@ -17,10 +17,11 @@ R's main working tree.
 
 * The main thread. The coordinator merges and edits across worktrees
   legitimately. The role test is the ``scope=SUB`` gate in the chain; this
-  module never reads ``agent_id`` (a second copy of a safety rule is how it
-  drifts apart).
-* A sub-agent whose cwd is the main working tree -- it was given no worktree to
-  stay inside.
+  module never uses ``agent_id`` for the role test (a second copy of a safety
+  rule is how it drifts apart). It reads ``agent_id`` for exactly one other
+  purpose, below: as the KEY of the worktree binding.
+* A sub-agent whose cwd is the main working tree and which has no binding -- it
+  was given no worktree to stay inside.
 * A target outside R altogether, or in another repository: ``project_containment``
   owns the repository boundary.
 
@@ -32,6 +33,30 @@ above the symlink-resolved path names the innermost checkout, and two checkouts
 are the same repository when they share a common dir. No subprocess runs, and
 therefore there is no worktree list to cache -- the cost is a few ``stat`` calls.
 
+**The first-write binding (ledger 00474 N282).** No payload field names the
+worktree an in-process teammate was assigned, and its ``cwd`` is the session's
+shared directory, so it follows wherever the coordinator last stood. Judging
+by ``cwd`` alone therefore denies a teammate writing in its own worktree while
+the coordinator is in a sibling, and judges nothing while the coordinator is in
+the main tree. So the handler binds each ``agent_id`` to the LINKED worktree of
+its first write and judges later writes against that binding:
+
+* No binding, and the cwd rule above does not deny the write, and the target is
+  in a linked worktree of the cwd's repository: bind ``agent_id`` to it. A
+  first write the cwd rule DENIES binds nothing (a retry from another cwd must
+  not launder a crossing), and a write into the main working tree binds nothing.
+* Bound to W: a write into W is allowed whatever the cwd says; a write into any
+  other checkout of the same repository (another worktree, or the main tree) is
+  denied, even when the cwd is the main tree. A target outside the repository is
+  not this guard's concern.
+* No ``agent_id``, or no binding: the cwd rule, unchanged.
+
+The binding is trust on first use: an agent whose first write is the wrong one is
+bound wrong. It is held in memory on the handler instance, capped at
+:data:`MAX_BINDINGS` least-recently-used entries, behind a lock (handlers may be
+called concurrently). A daemon restart forgets every binding and the guard falls
+back to the cwd rule until each agent writes again.
+
 **Fails open.** Git metadata that cannot be read or parsed means the guard
 cannot tell; it allows and says so in the debug log. A safety guard that
 failed closed on an unreadable ``.git`` would block unrelated calls.
@@ -40,6 +65,8 @@ failed closed on an unreadable ``.git`` would block unrelated calls.
 from __future__ import annotations
 
 import logging
+import threading
+from collections import OrderedDict
 from pathlib import Path
 from typing import Any, Final
 
@@ -62,6 +89,10 @@ from claude_code_hooks_daemon.utils.git_checkouts import (
 )
 
 logger = logging.getLogger(__name__)
+
+#: Most agent_id -> worktree bindings held at once; the least recently used is
+#: evicted, so a long-lived daemon cannot grow the map without bound.
+MAX_BINDINGS: Final[int] = 256
 
 #: Tool -> the tool_input key naming the file it writes.
 _TARGET_KEYS: Final[dict[str, str]] = {
@@ -110,6 +141,8 @@ class SubagentWorktreeWriteGuardHandler(PreToolUseHandlerBase):
     """
 
     def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._bindings: OrderedDict[str, Checkout] = OrderedDict()
         super().__init__(
             handler_id=HandlerID.SUBAGENT_WORKTREE_WRITE_GUARD,
             priority=Priority.SUBAGENT_WORKTREE_WRITE_GUARD,
@@ -138,38 +171,69 @@ class SubagentWorktreeWriteGuardHandler(PreToolUseHandlerBase):
         named = tool_input.get(key)
         return named if isinstance(named, str) and named else None
 
-    @staticmethod
-    def _crossing(hook_input: dict[str, Any]) -> tuple[Checkout, Checkout] | None:
-        """``(own, target)`` when the call writes outside its own linked worktree.
+    def binding_count(self) -> int:
+        """How many agents currently hold a worktree binding."""
+        with self._lock:
+            return len(self._bindings)
 
-        ``None`` when there is no crossing.
+    def _bound(self, agent_id: str) -> Checkout | None:
+        """The worktree ``agent_id`` is bound to, refreshing its recency. Lock held."""
+        home = self._bindings.get(agent_id)
+        if home is not None:
+            self._bindings.move_to_end(agent_id)
+        return home
+
+    def _bind(self, agent_id: str, home: Checkout) -> None:
+        """Bind ``agent_id`` to ``home``, evicting the least recently used. Lock held."""
+        self._bindings[agent_id] = home
+        self._bindings.move_to_end(agent_id)
+        while len(self._bindings) > MAX_BINDINGS:
+            self._bindings.popitem(last=False)
+
+    def _crossing(self, hook_input: dict[str, Any]) -> tuple[Checkout, Checkout, bool] | None:
+        """``(own, target, bound)`` when the call writes outside its own worktree.
+
+        ``bound`` is True when ``own`` came from the agent's first-write binding
+        rather than the payload cwd. ``None`` when there is no crossing.
+
+        Side effect: a call that is not a crossing, from an agent with an
+        ``agent_id`` and no binding yet, whose target is in a linked worktree,
+        binds the agent to that worktree.
 
         Raises:
             CheckoutUndecidableError: A git marker on the cwd or target side
                 cannot be read; the callers allow and log it.
         """
-        target = SubagentWorktreeWriteGuardHandler._target(hook_input)
+        target = self._target(hook_input)
         if target is None:
             return None
         cwd = hook_input.get(HookInputField.CWD)
         if not isinstance(cwd, str) or not cwd:
             logger.debug("subagent_worktree_write_guard: no cwd in hook input; allowing")
             return None
-        own = enclosing_checkout(cwd)
-        if own is None:
-            logger.debug(
-                "subagent_worktree_write_guard: cwd %s is not inside a git checkout; allowing",
-                cwd,
-            )
-            return None
-        if not own.linked:
-            return None
         there = enclosing_checkout(Path(cwd) / target)
-        if there is None:
+        agent_id = hook_input.get(HookInputField.AGENT_ID)
+        key = agent_id if isinstance(agent_id, str) and agent_id else None
+        with self._lock:
+            home = self._bound(key) if key is not None else None
+            if home is not None:
+                if there is None or there.common_dir != home.common_dir or there.root == home.root:
+                    return None
+                return home, there, True
+            own = enclosing_checkout(cwd)
+            if own is None:
+                logger.debug(
+                    "subagent_worktree_write_guard: cwd %s is not inside a git checkout; allowing",
+                    cwd,
+                )
+                return None
+            if there is None or there.common_dir != own.common_dir:
+                return None
+            if own.linked and there.root != own.root:
+                return own, there, False
+            if key is not None and there.linked:
+                self._bind(key, there)
             return None
-        if there.common_dir != own.common_dir or there.root == own.root:
-            return None
-        return own, there
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """True when a subagent's write targets a checkout other than its own.
@@ -200,11 +264,17 @@ class SubagentWorktreeWriteGuardHandler(PreToolUseHandlerBase):
             return GatingResult(decision=Decision.ALLOW)
         if crossing is None:
             return GatingResult(decision=Decision.ALLOW)
-        own, there = crossing
+        own, there, bound = crossing
+        origin = (
+            "\n(Your worktree was bound from your agent's first write in this session.)"
+            if bound
+            else ""
+        )
         message = (
             f"{RuleFormatter().verbose(_RULE)}\n\n"
-            f"YOUR WORKTREE: {_describe(own)}\n"
-            f"WRITE TARGET IN:  {_describe(there)}"
+            f"YOUR WORKTREE: {_describe(own)}{origin}\n"
+            f"WRITE TARGET IN:  {_describe(there)}\n"
+            f"WRITE TARGET: {self._target(hook_input)}"
         )
         return GatingResult.deny(message)
 
@@ -290,8 +360,15 @@ class SubagentWorktreeWriteGuardHandler(PreToolUseHandlerBase):
             "**If you are a subagent**: change files only inside your own worktree. If the "
             "change belongs on another branch or in the main tree, say so in your report to "
             "the coordinator and let it apply it.\n\n"
-            "Not judged: the coordinator (main thread), a subagent whose cwd is the main "
-            "working tree, and paths outside the repository (`project_containment` owns "
-            "that boundary). Worktrees nested inside the main tree are attributed to "
-            "themselves, not to the main tree."
+            "**Your worktree is the one you first write into.** The guard binds your "
+            "`agent_id` to the linked worktree of your first `Write`/`Edit`/`NotebookEdit` "
+            "(the `agent_id` is only a map key for that binding, never a role test) and "
+            "judges every later write against it, whatever the shared working directory "
+            "says. So make your first write inside your own worktree. The binding lives in "
+            "the daemon's memory; a daemon restart forgets it and the working directory "
+            "decides again.\n\n"
+            "Not judged: the coordinator (main thread), a subagent with no binding whose "
+            "cwd is the main working tree, and paths outside the repository "
+            "(`project_containment` owns that boundary). Worktrees nested inside the main "
+            "tree are attributed to themselves, not to the main tree."
         )

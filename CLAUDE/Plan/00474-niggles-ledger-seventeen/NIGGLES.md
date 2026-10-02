@@ -203,8 +203,27 @@ them.
 5. Ask upstream for a per-agent `cwd` or worktree field in the payload; the only
    option that fixes both directions reliably.
 
-**Status**: 🟡 Findings recorded; no reliable signal, so no behaviour change. Needs a
-live payload capture to settle the inferred half, then option 5 or 1.
+**Decision** (the coordinator's ruling, reversible by the owner): option 1, plus
+the process rule of option 4 that the coordinator never `cd`s into a worktree
+(`git -C` and absolute paths instead). Each sub-agent `agent_id` is bound to the
+linked worktree of its first Write/Edit/NotebookEdit; later writes are judged
+against that binding.
+
+**Outcome**: `subagent_worktree_write_guard` holds an in-memory,
+lock-guarded, least-recently-used map (capped at 256) of `agent_id` to linked
+worktree. Bound to W, a write into W is allowed whatever the payload cwd says
+(the false deny is gone) and a write into any other checkout of the repository is
+denied with R-SUBAGENT-CROSS-WORKTREE-WRITE even from a main-tree cwd (the
+fail-open is gone); the deny names the bound worktree and the target and says the
+binding came from the first write. A first write the cwd rule denies, or one into
+the main tree, binds nothing. No `agent_id`, or no binding, keeps the cwd rule.
+`agent_id` is only the map key, never the role test. A daemon restart forgets the
+bindings. Residual: trust on first use, so a wrong first write binds wrong, and
+the remaining unbound window denies a teammate whose first write is made while the
+shared cwd is a sibling worktree. Option 5 (a per-agent payload field) would still
+be the reliable fix.
+
+**Status**: ✅ Fixed on worktree-n282-bind-agent-checkout
 
 ### N281 — a hostile-input sweep measured host speed: the 100,000-character scan timed out (and denied) on slow runners
 

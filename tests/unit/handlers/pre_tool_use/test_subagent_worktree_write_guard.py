@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import logging
 import subprocess
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
@@ -23,6 +24,9 @@ from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.core import Decision
 from claude_code_hooks_daemon.core.chain import HandlerChain
 from claude_code_hooks_daemon.core.handler_scope import HandlerScope
+from claude_code_hooks_daemon.handlers.pre_tool_use import (
+    subagent_worktree_write_guard as guard_module,
+)
 from claude_code_hooks_daemon.handlers.pre_tool_use.subagent_worktree_write_guard import (
     SubagentWorktreeWriteGuardHandler,
 )
@@ -215,8 +219,8 @@ class TestAllows:
     def test_a_subagent_in_the_main_tree_is_not_judged(
         self, handler: SubagentWorktreeWriteGuardHandler, repo: Path, wt_a: Path
     ) -> None:
-        assert handler.matches(_event(wt_a / "src" / "mod.py", cwd=repo)) is False
-        assert handler.matches(_event(repo / "src" / "mod.py", cwd=repo)) is False
+        assert handler.matches(_as("one", _event(wt_a / "src" / "mod.py", cwd=repo))) is False
+        assert handler.matches(_as("two", _event(repo / "src" / "mod.py", cwd=repo))) is False
 
     def test_a_write_outside_the_repository_is_out_of_scope(
         self, handler: SubagentWorktreeWriteGuardHandler, wt_a: Path, tmp_path: Path
@@ -330,41 +334,205 @@ class TestUndecidableAllowsAndSaysSo:
         assert result.decision is Decision.ALLOW
 
 
-class TestOwnCheckoutIsTheCwdAlone:
-    """Ledger 00474 N282: the payload ``cwd`` is the ONLY own-checkout signal.
+def _as(agent_id: str, event: dict[str, Any]) -> dict[str, Any]:
+    return {**event, "agent_id": agent_id}
 
-    A PreToolUse payload from an in-process teammate carries ``agent_id``,
-    ``agent_type``, ``session_id``, ``transcript_path`` and ``cwd``, and none of
-    them names the worktree the teammate was assigned. When ``cwd`` is the
-    session's shared directory, the guard therefore judges the coordinator's
-    location, not the teammate's. These tests pin that behaviour so a fix
-    (which needs a new signal, see NIGGLES.md N282) must change them on purpose.
-    """
 
-    def test_a_teammate_in_its_worktree_is_denied_when_cwd_follows_the_coordinator(
-        self, handler: SubagentWorktreeWriteGuardHandler, wt_a: Path, wt_b: Path
-    ) -> None:
-        """False deny: the teammate's assigned worktree is B, but the shared cwd
-        is A (the coordinator ``cd``ed there), so its write into B reads as a
-        crossing."""
-        assert handler.matches(_event(wt_b / "src" / "mod.py", cwd=wt_a)) is True
+class TestUnboundAgentsFallBackToTheCwd:
+    """Ledger 00474 N282: with no binding, the payload ``cwd`` is the own-checkout
+    signal, exactly as before. Nothing in a payload names the worktree a
+    teammate was assigned, so the guard learns it from the first write."""
 
-    def test_a_teammate_writing_into_a_sibling_is_not_stopped_when_cwd_is_the_main_tree(
+    def test_no_agent_id_is_judged_by_the_cwd_and_binds_nothing(
         self, handler: SubagentWorktreeWriteGuardHandler, repo: Path, wt_a: Path, wt_b: Path
     ) -> None:
-        """Fail-open: the N264 incident's own shape is invisible while the
-        shared cwd is the main working tree, which the guard never judges."""
-        assert handler.matches(_event(wt_b / "src" / "mod.py", cwd=repo)) is False
-        assert wt_a.exists()
+        anonymous = _event(wt_b / "src" / "mod.py", cwd=repo)
+        del anonymous["agent_id"]
+        assert handler.matches(anonymous) is False
+        # still nothing bound: a sibling write from the main tree is not stopped
+        assert handler.matches(_event(wt_a / "src" / "mod.py", cwd=repo)) is False
 
-    def test_agent_identity_fields_do_not_change_the_verdict(
+    def test_an_unknown_agent_is_judged_by_the_cwd(
         self, handler: SubagentWorktreeWriteGuardHandler, wt_a: Path, wt_b: Path
     ) -> None:
-        """The handler reads no agent field beyond the scope gate, by design."""
+        assert handler.matches(_event(wt_b / "src" / "mod.py", cwd=wt_a)) is True
+
+    def test_a_first_write_the_cwd_rule_denies_binds_nothing(
+        self, handler: SubagentWorktreeWriteGuardHandler, repo: Path, wt_a: Path, wt_b: Path
+    ) -> None:
+        """A denied crossing must not become the agent's home: otherwise one
+        retry from a different cwd would launder the crossing."""
+        assert handler.matches(_event(wt_b / "src" / "mod.py", cwd=wt_a)) is True
+        assert handler.matches(_event(wt_b / "src" / "mod.py", cwd=repo)) is False
+        # that second call bound B, so A is now foreign
+        assert handler.matches(_event(wt_a / "src" / "mod.py", cwd=repo)) is True
+
+    def test_other_identity_fields_do_not_change_the_verdict(
+        self, handler: SubagentWorktreeWriteGuardHandler, wt_a: Path, wt_b: Path
+    ) -> None:
+        """Only ``agent_id`` is read, and only as a binding key."""
         event = _event(wt_b / "src" / "mod.py", cwd=wt_a)
         event["agent_type"] = "general-purpose"
         event["transcript_path"] = str(wt_b / "transcript.jsonl")
         assert handler.matches(event) is True
+
+
+class TestFirstWriteBindsTheAgentToItsWorktree:
+    """Ledger 00474 N282: ``agent_id`` is bound to the linked worktree of its
+    first write and later writes are judged against that, not the shared cwd."""
+
+    def test_a_bound_agent_may_write_home_whatever_the_cwd_says(
+        self, handler: SubagentWorktreeWriteGuardHandler, wt_a: Path, wt_b: Path
+    ) -> None:
+        """Fixes the false deny: the coordinator ``cd``ed into A, the agent's
+        worktree is B."""
+        assert handler.matches(_event(wt_b / "src" / "mod.py", cwd=wt_b)) is False
+        assert handler.matches(_event(wt_b / "src" / "mod.py", cwd=wt_a)) is False
+        assert handler.matches(_event(wt_b / "new" / "f.py", cwd=wt_a, tool="Edit")) is False
+
+    def test_a_bound_agent_is_denied_a_sibling_even_from_the_main_tree_cwd(
+        self, handler: SubagentWorktreeWriteGuardHandler, repo: Path, wt_a: Path, wt_b: Path
+    ) -> None:
+        """Fixes the fail-open: the main-tree cwd is never judged, the binding is."""
+        assert handler.matches(_event(wt_b / "src" / "mod.py", cwd=repo)) is False
+        event = _event(wt_a / "src" / "mod.py", cwd=repo)
+        assert handler.matches(event) is True
+        result = handler.handle(event)
+        assert result.decision is Decision.DENY
+        reason = result.reason or ""
+        assert RuleID.SUBAGENT_CROSS_WORKTREE_WRITE in reason
+        assert str(wt_b) in reason
+        assert str(wt_a / "src" / "mod.py") in reason or str(wt_a) in reason
+        assert "first write" in reason
+
+    def test_a_bound_agent_is_denied_the_main_working_tree(
+        self, handler: SubagentWorktreeWriteGuardHandler, repo: Path, wt_a: Path
+    ) -> None:
+        assert handler.matches(_event(wt_a / "src" / "mod.py", cwd=repo)) is False
+        event = _event(repo / "src" / "mod.py", cwd=repo)
+        assert handler.matches(event) is True
+        reason = handler.handle(event).reason or ""
+        assert "main working tree" in reason and str(wt_a) in reason
+
+    def test_a_first_write_into_the_main_tree_binds_nothing(
+        self, handler: SubagentWorktreeWriteGuardHandler, repo: Path, wt_a: Path, wt_b: Path
+    ) -> None:
+        assert handler.matches(_event(repo / "src" / "mod.py", cwd=repo)) is False
+        # still unbound: this write is the one that binds, to A
+        assert handler.matches(_event(wt_a / "src" / "mod.py", cwd=repo)) is False
+        assert handler.matches(_event(wt_b / "src" / "mod.py", cwd=repo)) is True
+
+    def test_two_agents_bind_to_different_worktrees_independently(
+        self, handler: SubagentWorktreeWriteGuardHandler, repo: Path, wt_a: Path, wt_b: Path
+    ) -> None:
+        assert handler.matches(_as("one", _event(wt_a / "f.py", cwd=repo))) is False
+        assert handler.matches(_as("two", _event(wt_b / "f.py", cwd=repo))) is False
+        assert handler.matches(_as("one", _event(wt_a / "g.py", cwd=wt_b))) is False
+        assert handler.matches(_as("two", _event(wt_b / "g.py", cwd=wt_a))) is False
+        assert handler.matches(_as("one", _event(wt_b / "g.py", cwd=repo))) is True
+        assert handler.matches(_as("two", _event(wt_a / "g.py", cwd=repo))) is True
+
+    def test_a_bound_agent_writing_outside_the_repository_is_out_of_scope(
+        self, handler: SubagentWorktreeWriteGuardHandler, repo: Path, wt_a: Path, tmp_path: Path
+    ) -> None:
+        assert handler.matches(_event(wt_a / "f.py", cwd=repo)) is False
+        assert handler.matches(_event(tmp_path / "elsewhere" / "f.txt", cwd=repo)) is False
+
+    def test_a_bound_agent_writing_into_another_repository_is_out_of_scope(
+        self, handler: SubagentWorktreeWriteGuardHandler, repo: Path, wt_a: Path, tmp_path: Path
+    ) -> None:
+        other = tmp_path / "other"
+        other.mkdir()
+        _git(other, "init", "-q", "-b", "main")
+        assert handler.matches(_event(wt_a / "f.py", cwd=repo)) is False
+        assert handler.matches(_event(other / "f.py", cwd=repo)) is False
+
+    def test_an_undecidable_cwd_does_not_stop_a_bound_agent_writing_home(
+        self, handler: SubagentWorktreeWriteGuardHandler, repo: Path, wt_a: Path, tmp_path: Path
+    ) -> None:
+        broken = tmp_path / "broken"
+        broken.mkdir()
+        (broken / ".git").write_text("garbage\n")
+        assert handler.matches(_event(wt_a / "f.py", cwd=repo)) is False
+        assert handler.matches(_event(wt_a / "g.py", cwd=broken)) is False
+
+    def test_an_undecidable_target_still_fails_open_for_a_bound_agent(
+        self,
+        handler: SubagentWorktreeWriteGuardHandler,
+        repo: Path,
+        wt_a: Path,
+        tmp_path: Path,
+    ) -> None:
+        broken = tmp_path / "broken"
+        broken.mkdir()
+        (broken / ".git").write_text("garbage\n")
+        assert handler.matches(_event(wt_a / "f.py", cwd=repo)) is False
+        event = _event(broken / "f.py", cwd=repo)
+        assert handler.matches(event) is False
+        assert handler.handle(event).decision is Decision.ALLOW
+
+
+class TestBindingsAreBounded:
+    def test_the_oldest_binding_is_evicted_past_the_cap(
+        self,
+        handler: SubagentWorktreeWriteGuardHandler,
+        repo: Path,
+        wt_a: Path,
+        wt_b: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setattr(guard_module, "MAX_BINDINGS", 2)
+        assert handler.matches(_as("one", _event(wt_a / "f.py", cwd=repo))) is False
+        assert handler.matches(_as("two", _event(wt_b / "f.py", cwd=repo))) is False
+        assert handler.matches(_as("three", _event(wt_a / "f.py", cwd=repo))) is False
+        # "one" was evicted, so it is unbound again and falls back to the cwd rule
+        assert handler.matches(_as("one", _event(wt_b / "f.py", cwd=repo))) is False
+        # "three" is still bound to A
+        assert handler.matches(_as("three", _event(wt_b / "f.py", cwd=repo))) is True
+
+    def test_a_recently_used_binding_survives_eviction(
+        self,
+        handler: SubagentWorktreeWriteGuardHandler,
+        repo: Path,
+        wt_a: Path,
+        wt_b: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setattr(guard_module, "MAX_BINDINGS", 2)
+        assert handler.matches(_as("one", _event(wt_a / "f.py", cwd=repo))) is False
+        assert handler.matches(_as("two", _event(wt_b / "f.py", cwd=repo))) is False
+        assert handler.matches(_as("one", _event(wt_a / "g.py", cwd=repo))) is False  # refresh
+        assert handler.matches(_as("three", _event(wt_a / "f.py", cwd=repo))) is False
+        assert handler.matches(_as("one", _event(wt_b / "f.py", cwd=repo))) is True
+
+    def test_the_map_never_outgrows_the_cap(
+        self,
+        handler: SubagentWorktreeWriteGuardHandler,
+        repo: Path,
+        wt_a: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setattr(guard_module, "MAX_BINDINGS", 5)
+        for n in range(40):
+            handler.matches(_as(f"agent-{n}", _event(wt_a / "f.py", cwd=repo)))
+        assert handler.binding_count() == 5
+
+
+class TestConcurrentCalls:
+    def test_many_agents_binding_at_once_each_keep_their_own_worktree(
+        self, handler: SubagentWorktreeWriteGuardHandler, repo: Path, wt_a: Path, wt_b: Path
+    ) -> None:
+        homes = {f"agent-{n}": (wt_a, wt_b) if n % 2 else (wt_b, wt_a) for n in range(60)}
+
+        def run(agent_id: str) -> tuple[bool, bool]:
+            home, other = homes[agent_id]
+            first = handler.matches(_as(agent_id, _event(home / "f.py", cwd=repo)))
+            foreign = handler.matches(_as(agent_id, _event(other / "f.py", cwd=repo)))
+            return first, foreign
+
+        with ThreadPoolExecutor(max_workers=16) as pool:
+            results = list(pool.map(run, homes))
+        assert results == [(False, True)] * len(homes)
 
 
 class TestGuidanceAndAcceptance:
@@ -374,6 +542,13 @@ class TestGuidanceAndAcceptance:
         text = handler.get_claude_md() or ""
         assert "subagent_worktree_write_guard" in text
         assert "coordinator" in text.lower()
+
+    def test_the_claude_md_guidance_states_the_first_write_binding(
+        self, handler: SubagentWorktreeWriteGuardHandler
+    ) -> None:
+        text = (handler.get_claude_md() or "").lower()
+        assert "first write" in text
+        assert "agent_id" in text
 
     def test_every_acceptance_test_declares_why_the_harness_cannot_drive_it(
         self, handler: SubagentWorktreeWriteGuardHandler
