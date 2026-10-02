@@ -1240,7 +1240,9 @@ This is the N278 failure again: a branch merged with its targeted QA never run. 
 built to catch that was not loaded yet when it merged.
 
 **Status**: ✅ Fixed. The priority is now 59 (47ae8e2c7) and the handler is classified
-(3dadb3d8c). The advisor is now live and fired on every merge since. The coordinator now runs
+(3dadb3d8c). The priority fix itself then repeated the mistake: it changed the handler set
+without regenerating `.claude/HOOKS-DAEMON.md`, so `generated_doc_drift` failed on main until
+1dc459a7a. The advisor is now live and fired on every merge since. The coordinator now runs
 `llm_qa.py changed` over each merge whose touched code reaches a core or cross-cutting file.
 
 ### N298 — `R-PLAN-NUMBER-DISCOVERY` denies read-only listings of plan files, even inside quoted text
