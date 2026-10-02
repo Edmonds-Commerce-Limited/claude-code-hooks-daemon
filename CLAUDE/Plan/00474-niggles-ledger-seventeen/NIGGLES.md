@@ -1283,7 +1283,10 @@ or quoted text, is neither.
 a term, although the commit records `sub/f.txt`. Main allowed it before N245. This is an
 ordinary command shape, so the false positive is in scope.
 
-**Status**: ⬜ Open. Resolve the pathspec from the directory the command `cd`s into.
+**Status**: ✅ Fixed on branch `worktree-n299-pathspec-followups`: `commit_facts` and the docs/plan QA
+gates read the pathspec from the directory the command's `cd`/`pushd`/`-C` lands in
+(`pathspec_directory`). `guard_config_commit_gate` still compares pathspecs to the root as text
+(see [subagent-reports/261002-n299-followups-sonnet.md](subagent-reports/261002-n299-followups-sonnet.md)).
 
 ### N300 — `remote_docs_commit_gate` does not stand down for a commit in a nested worktree
 
@@ -1294,7 +1297,8 @@ daemon's point of view), `staged_lint_gate` stands down and `remote_docs_commit_
 judges it against this repository. Main had the same wrong-repository behaviour, so N245
 did not cause it.
 
-**Status**: ⬜ Open.
+**Status**: ✅ Fixed on branch `worktree-n299-pathspec-followups`: the gate stands down when the
+hook `cwd`, after any `cd`/`-C` move, is in another repository.
 
 ### N301 — the "every pathspec matches" check costs two git calls per path, in every gate
 
@@ -1303,5 +1307,5 @@ did not cause it.
 **Evidence**: each commit gate runs its own match check, two git calls per named path. That
 is about 0.25 s per gate for 60 paths on a tiny repository, multiplied by the number of gates.
 
-**Status**: ⬜ Open. Compute the match once per command and share it, or use one `ls-files`
-call for all the paths.
+**Status**: ✅ Fixed on branch `worktree-n299-pathspec-followups`: one `ls-files --error-unmatch`
+call answers for every path; each gate still asks once (no cross-gate cache).

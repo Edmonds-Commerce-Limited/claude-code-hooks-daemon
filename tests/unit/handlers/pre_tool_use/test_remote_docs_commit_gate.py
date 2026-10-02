@@ -307,6 +307,107 @@ class TestPathspecViewIsUsedOnlyWhenTheReadingIsCertain:
         assert "remote-docs/example.com/p.md" in (result.reason or "")
 
 
+class TestACommitInAnotherRepositoryIsNotJudgedAgainstThisOne:
+    """Ledger 00474 N300: a nested worktree or other checkout owns its own index."""
+
+    _git = staticmethod(TestEachCommitFormJudgesWhatItRecords._git)
+
+    @pytest.fixture
+    def repos(self, tmp_path: Path) -> tuple[Path, Path]:
+        """The project (with a bad staged document) and another repository."""
+        project = tmp_path / "project"
+        other = tmp_path / "other"
+        for root in (project, other):
+            root.mkdir()
+            self._git(root, "init")
+            self._git(root, "config", "user.email", "t@example.com")
+            self._git(root, "config", "user.name", "T")
+            _write(root, "README.txt", "x\n")
+            self._git(root, "add", "-A")
+            self._git(root, "commit", "-m", "initial")
+        _write(project, "remote-docs/example.com/bad.md", "# prose, no provenance\n")
+        self._git(project, "add", "-A")
+        return project, other
+
+    @staticmethod
+    def _gate(project: Path) -> RemoteDocsCommitGateHandler:
+        instance = RemoteDocsCommitGateHandler()
+        instance.project_root_reader = lambda: project
+
+        def refuse(_reading: CommitReading, _cwd: str | None) -> list[str]:
+            raise AssertionError("the project's index was read for another repository's commit")
+
+        instance.staged_reader = refuse
+        return instance
+
+    @staticmethod
+    def _hook(command: str, cwd: Path) -> dict[str, Any]:
+        return {"tool_name": "Bash", "tool_input": {"command": command}, "cwd": str(cwd)}
+
+    def test_a_hook_directory_in_another_repository_stands_down(
+        self, repos: tuple[Path, Path]
+    ) -> None:
+        project, other = repos
+
+        result = self._gate(project).handle(self._hook("git commit -m x", other))
+
+        assert result.decision is Decision.ALLOW
+
+    def test_a_nested_worktree_inside_the_project_stands_down(
+        self, repos: tuple[Path, Path]
+    ) -> None:
+        project, _other = repos
+        nested = project / "untracked" / "worktrees" / "wt"
+        self._git(project, "worktree", "add", "-q", str(nested), "-b", "wt")
+
+        result = self._gate(project).handle(self._hook("git commit -m x", nested))
+
+        assert result.decision is Decision.ALLOW
+
+    @pytest.mark.parametrize(
+        "form", ["cd {other} && git commit -m x", "git -C {other} commit -m x"]
+    )
+    def test_a_command_that_moves_into_another_repository_stands_down(
+        self, repos: tuple[Path, Path], form: str
+    ) -> None:
+        project, other = repos
+
+        result = self._gate(project).handle(self._hook(form.format(other=other), project))
+
+        assert result.decision is Decision.ALLOW
+
+    def test_a_commit_in_the_project_is_still_judged(self, repos: tuple[Path, Path]) -> None:
+        project, _other = repos
+        instance = RemoteDocsCommitGateHandler()
+        instance.project_root_reader = lambda: project
+
+        result = instance.handle(self._hook("git commit -m x", project))
+
+        assert result.decision is Decision.DENY
+
+    def test_a_move_into_a_subdirectory_of_the_project_is_still_judged(
+        self, repos: tuple[Path, Path]
+    ) -> None:
+        project, _other = repos
+        instance = RemoteDocsCommitGateHandler()
+        instance.project_root_reader = lambda: project
+
+        result = instance.handle(self._hook("cd remote-docs && git commit -m x", project))
+
+        assert result.decision is Decision.DENY
+
+    def test_a_move_this_reading_cannot_state_is_still_judged(
+        self, repos: tuple[Path, Path]
+    ) -> None:
+        project, _other = repos
+        instance = RemoteDocsCommitGateHandler()
+        instance.project_root_reader = lambda: project
+
+        result = instance.handle(self._hook("cd $WHERE && git commit -m x", project))
+
+        assert result.decision is Decision.DENY
+
+
 class TestResilience:
     def test_an_unreadable_git_index_allows_the_commit(
         self, handler: RemoteDocsCommitGateHandler

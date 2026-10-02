@@ -643,6 +643,9 @@ _SHELL_RESOLVED_CHARS: Final[str] = "$`{~"
 #: Global options that point git at a different repository or work tree.
 _REPOSITORY_MOVING_OPTIONS: Final[tuple[str, ...]] = ("-C", "--git-dir", "--work-tree")
 _GIT_ENVIRONMENT_PREFIX: Final[str] = "GIT_"
+_CHANGE_DIRECTORY_OPTION: Final[str] = "-C"
+#: The repository-moving options a directory cannot stand for.
+_UNSTATABLE_REPOSITORY_OPTIONS: Final[tuple[str, ...]] = ("--git-dir", "--work-tree")
 
 
 @dataclass(frozen=True)
@@ -658,14 +661,46 @@ class CommitReading:
 
     form: CommitForm
     certain: bool
+    moves: tuple[str | None, ...] = ()
+
+
+def _commit_moves(run: GitInvocation) -> tuple[str | None, ...]:
+    """Where ``run`` goes from its starting directory, oldest move first.
+
+    The ``cd``/``pushd`` chain, then the ``-C`` operands. An entry of None is a
+    move this reading cannot state: an unreadable ``cd``, a word the shell
+    resolves, or an option (``--git-dir``, ``--work-tree``, ``GIT_*``) that
+    points git somewhere a directory cannot express.
+    """
+    moves: list[str | None] = [
+        None if move is None or any(char in _SHELL_RESOLVED_CHARS for char in move) else move
+        for move in run.directory
+    ]
+    options = run.global_options
+    for position, option in enumerate(options):
+        if option == _CHANGE_DIRECTORY_OPTION:
+            operand = options[position + 1] if position + 1 < len(options) else None
+        elif option.startswith(_CHANGE_DIRECTORY_OPTION):
+            operand = option[len(_CHANGE_DIRECTORY_OPTION) :]
+        elif option.startswith(_UNSTATABLE_REPOSITORY_OPTIONS):
+            operand = None
+        else:
+            continue
+        if operand is not None and any(char in _SHELL_RESOLVED_CHARS for char in operand):
+            operand = None
+        moves.append(operand)
+    if any(assignment.startswith(_GIT_ENVIRONMENT_PREFIX) for assignment in run.assignments):
+        moves.append(None)
+    return tuple(moves)
 
 
 def read_commit_form(command: str) -> CommitReading:
     """The :class:`CommitReading` of ``command``."""
     form = extract_commit_form(command)
-    if not form.pathspecs:
-        return CommitReading(form=form, certain=True)
     commits = [run for run in git_invocations(command) if run.subcommand == _COMMIT_TOKEN]
+    moves = _commit_moves(commits[0]) if len(commits) == 1 else ()
+    if not form.pathspecs:
+        return CommitReading(form=form, certain=True, moves=moves)
     if len(commits) != 1:
         return CommitReading(form=form, certain=False)
     run = commits[0]
@@ -676,7 +711,9 @@ def read_commit_form(command: str) -> CommitReading:
         any(char in _SHELL_RESOLVED_CHARS for char in pathspec) for pathspec in form.pathspecs
     )
     return CommitReading(
-        form=form, certain=not (run.directory or moves_repository or shell_resolved)
+        form=form,
+        certain=not (run.directory or moves_repository or shell_resolved),
+        moves=moves,
     )
 
 

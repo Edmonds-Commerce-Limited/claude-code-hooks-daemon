@@ -40,7 +40,8 @@ from claude_code_hooks_daemon.utils.git_commit_parsing import (
     read_commit_form,
     tokenise_command,
 )
-from claude_code_hooks_daemon.utils.git_facts import commit_facts
+from claude_code_hooks_daemon.utils.git_facts import commit_directory, commit_facts
+from claude_code_hooks_daemon.utils.git_repo import GitRepo
 
 logger = logging.getLogger(__name__)
 
@@ -102,6 +103,21 @@ class RemoteDocsCommitGateHandler(PreToolUseHandlerBase):
             if change.status[:1] in _INTRODUCED_STATUSES
         ]
 
+    @staticmethod
+    def _is_foreign_repo(reading: CommitReading, cwd: str | None, project_root: Path) -> bool:
+        """True when the commit runs in a repository other than the project's.
+
+        Ledger 00474 N300: a nested worktree or another checkout owns its own
+        index, as ``staged_lint_gate`` already holds. Where the commit runs is
+        the hook's ``cwd`` after any ``cd``/``-C`` move before it; a move this
+        reading cannot state is judged against this project.
+        """
+        if not cwd:
+            return False
+        directory = commit_directory(reading, cwd)
+        repo = GitRepo.resolve_for(directory if directory is not None else Path(cwd))
+        return repo is not None and repo.root != project_root
+
     def _tree_name(self) -> str:
         layout = self._project_layout
         return layout.remote_docs_dir if layout is not None else _FALLBACK_REMOTE_DOCS_DIR
@@ -121,11 +137,11 @@ class RemoteDocsCommitGateHandler(PreToolUseHandlerBase):
 
         try:
             cwd = hook_input.get(HookInputField.CWD)
-            staged = self.staged_reader(
-                read_commit_form(get_bash_command(hook_input) or ""),
-                cwd if isinstance(cwd, str) else None,
-            )
+            reading = read_commit_form(get_bash_command(hook_input) or "")
             project_root = self.project_root_reader()
+            if self._is_foreign_repo(reading, cwd if isinstance(cwd, str) else None, project_root):
+                return GatingResult(decision=Decision.ALLOW)
+            staged = self.staged_reader(reading, cwd if isinstance(cwd, str) else None)
         except OSError as exc:
             # A gate that cannot read the index must not block every commit.
             logger.debug("remote-docs commit gate could not read the index: %s", exc)

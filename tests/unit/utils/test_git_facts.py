@@ -516,7 +516,6 @@ class TestCommitFactsNarrowsOnlyWhenCertain:
     @pytest.mark.parametrize(
         "command",
         [
-            "cd d && git commit -m x c.txt",
             "git commit -m x c.txt nosuch.txt",
             "git commit -m x c.txt && git commit -m y",
         ],
@@ -528,6 +527,16 @@ class TestCommitFactsNarrowsOnlyWhenCertain:
 
         assert facts.union is True
         assert {"c.txt", "d/b.txt", "d/new.txt"} <= self._staged_paths(facts)
+
+    def test_a_moved_reading_is_the_index_plus_the_paths_named_where_it_moved_to(
+        self, messy: Path
+    ) -> None:
+        """Ledger 00474 N299: after ``cd d`` the pathspec ``a.txt`` is ``d/a.txt``."""
+        facts = commit_facts(read_commit_form("cd d && git commit -m x a.txt"), messy)
+
+        assert facts.union is True
+        assert {"d/a.txt", "d/b.txt", "d/new.txt"} <= self._staged_paths(facts)
+        assert "c.txt" not in self._staged_paths(facts)
 
     def test_a_bare_commit_is_the_index(self, messy: Path) -> None:
         facts = commit_facts(read_commit_form("git commit -m x"), messy)

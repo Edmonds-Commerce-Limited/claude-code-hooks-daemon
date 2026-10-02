@@ -127,6 +127,11 @@ class GitFactsBase:
         return self._repo_root
 
     @property
+    def directory(self) -> Path:
+        """The directory the commit's pathspecs are read from."""
+        return self._directory
+
+    @property
     def pathspecs(self) -> tuple[str, ...]:
         """The commit's explicit pathspecs; empty for a bare commit."""
         return self._pathspecs
@@ -259,24 +264,30 @@ class GitFactsBase:
         A word that selects nothing is how a misread token shows itself (git
         itself refuses such a commit), so a reading containing one is not
         certain.
+
+        One ``ls-files --error-unmatch`` answers for every pathspec at once. A
+        pathspec it cannot find among the index's paths may still select a path
+        only HEAD has (``git rm --cached``), so only that rarer shape is asked
+        again, one pathspec at a time.
         """
-        for pathspec in self._pathspecs:
-            changed = self._git_output(
-                "diff",
-                "HEAD",
-                "--name-only",
-                "-z",
-                NO_RELATIVE,
-                "--",
-                pathspec,
-                in_directory=True,
-            )
-            indexed = self._git_output(
-                "ls-files", "-z", "--full-name", "--", pathspec, in_directory=True
-            )
-            if changed is None or indexed is None or not (changed or indexed):
-                return False
-        return True
+        if not self._pathspecs:
+            return True
+        everywhere = self._git_output(
+            "ls-files", "-z", "--error-unmatch", "--", *self._pathspecs, in_directory=True
+        )
+        if everywhere is not None:
+            return True
+        return all(self._pathspec_matches_head_or_index(spec) for spec in self._pathspecs)
+
+    def _pathspec_matches_head_or_index(self, pathspec: str) -> bool:
+        """Whether ``pathspec`` selects a path the index holds or HEAD has changed."""
+        changed = self._git_output(
+            "diff", "HEAD", "--name-only", "-z", NO_RELATIVE, "--", pathspec, in_directory=True
+        )
+        indexed = self._git_output(
+            "ls-files", "-z", "--full-name", "--", pathspec, in_directory=True
+        )
+        return changed is not None and indexed is not None and bool(changed or indexed)
 
     def _with_unnamed_staged(
         self, named_changes: tuple[StagedChange, ...]
@@ -522,7 +533,7 @@ def commit_facts(
     ``cwd`` is where the command runs; the pathspecs are read from there when it
     lies inside ``repo_root``, and from ``repo_root`` otherwise.
     """
-    directory = _directory_inside(cwd, repo_root)
+    directory = pathspec_directory(reading, cwd, repo_root)
     form = reading.form
     if not form.pathspecs:
         return GitFactsBase(repo_root)
@@ -532,7 +543,41 @@ def commit_facts(
         )
         if facts.every_pathspec_matches():
             return facts
-    return GitFactsBase(repo_root, pathspecs=form.pathspecs, union=True)
+    return GitFactsBase(repo_root, pathspecs=form.pathspecs, union=True, directory=directory)
+
+
+def commit_directory(reading: CommitReading, start: str | Path) -> Path | None:
+    """The directory the commit runs in, after the ``cd``/``pushd``/``-C`` moves before it.
+
+    ``start`` is where the command begins (the hook's ``cwd``). ``None`` when a
+    move cannot be stated (``cd -``, a variable, ``--git-dir``): the caller then
+    reads the command as it would have without the move.
+    """
+    here = Path(start)
+    for move in reading.moves:
+        if move is None:
+            return None
+        here = here / move
+    return here.resolve()
+
+
+def pathspec_directory(
+    reading: CommitReading, cwd: str | Path | None, repo_root: Path
+) -> Path | None:
+    """The directory the commit's pathspecs are read from, when it lies inside ``repo_root``.
+
+    Ledger 00474 N299: ``cd sub && git commit f.txt`` records ``sub/f.txt``, so
+    the pathspec is read from where the command moves to. A move this reading
+    cannot state, or one that leaves the repository, falls back to ``cwd``;
+    ``None`` (the repository root) when that is not inside the repository
+    either.
+    """
+    if cwd and reading.moves:
+        moved = commit_directory(reading, cwd)
+        inside = _directory_inside(moved, repo_root) if moved is not None else None
+        if inside is not None:
+            return inside
+    return _directory_inside(cwd, repo_root)
 
 
 def _directory_inside(cwd: str | Path | None, repo_root: Path) -> Path | None:

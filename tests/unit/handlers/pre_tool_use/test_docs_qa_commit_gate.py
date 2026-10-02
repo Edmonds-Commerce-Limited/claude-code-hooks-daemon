@@ -215,6 +215,37 @@ class TestHandle:
         assert result.context == []
 
 
+class TestPathspecsAreReadWhereTheCommandRuns:
+    """Ledger 00474 N299: ``cd CLAUDE && git commit Foo.md`` records ``CLAUDE/Foo.md``."""
+
+    @pytest.fixture
+    def root(self, tmp_path: Path) -> Path:
+        root = tmp_path / "repo"
+        _init_repo(root)
+        (root / "CLAUDE").mkdir()
+        (root / "CLAUDE" / "Foo.md").write_text("# clean\n")
+        _git(root, "add", "-A")
+        _git(root, "commit", "-m", "initial")
+        (root / "CLAUDE" / "Foo.md").write_text("See [missing](Nope.md).\n")
+        return root
+
+    @pytest.mark.parametrize(
+        ("command", "cwd"),
+        [
+            ("cd CLAUDE && git commit -m x Foo.md", ""),
+            ("git -C CLAUDE commit -m x Foo.md", ""),
+            ("git commit -m x Foo.md", "CLAUDE"),
+        ],
+    )
+    def test_the_named_document_is_the_one_in_the_directory_the_command_runs_in(
+        self, root: Path, command: str, cwd: str
+    ) -> None:
+        with _patched_root(root):
+            result = _handler().handle(_bash_input(command, cwd=str(root / cwd)))
+
+        assert any("pointer-resolves" in item for item in result.context)
+
+
 class TestClaudeMdAndAcceptanceTests:
     def test_get_claude_md_returns_content(self) -> None:
         content = DocsQaCommitGateHandler().get_claude_md()

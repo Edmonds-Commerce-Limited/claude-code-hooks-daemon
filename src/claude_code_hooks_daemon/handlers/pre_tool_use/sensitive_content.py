@@ -1014,7 +1014,7 @@ class SensitiveContentHandler(PreToolUseHandlerBase):
                 _ScanPass(
                     target=_WORKING_TREE_TARGET,
                     pathspecs=form.pathspecs,
-                    directory=facts.repo_root,
+                    directory=facts.directory,
                 ),
             ]
         named = facts.named_paths()
