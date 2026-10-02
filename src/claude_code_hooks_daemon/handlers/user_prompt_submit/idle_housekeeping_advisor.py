@@ -17,8 +17,9 @@ GitHub issue.
 """
 
 import logging
+from collections.abc import Mapping
 from pathlib import Path
-from typing import Any, Final
+from typing import Any, Final, TypeGuard
 
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, HookInputField, Priority
 from claude_code_hooks_daemon.core import BlockingResult, Decision, ProjectContext
@@ -26,7 +27,6 @@ from claude_code_hooks_daemon.core.handler_bases import UserPromptSubmitHandlerB
 from claude_code_hooks_daemon.core.transcript_reader import TranscriptMessage, TranscriptReader
 from claude_code_hooks_daemon.daemon.housekeeping import report_only_steps
 from claude_code_hooks_daemon.handlers.utils.bounded_fifo_map import BoundedFifoMap
-from claude_code_hooks_daemon.utils.git_sync import default_branch
 from claude_code_hooks_daemon.utils.stale_checkouts import (
     DEFAULT_MAX_IDLE_DAYS,
     collect_stale_report,
@@ -44,9 +44,6 @@ _RECOVERY_MARKER: Final[str] = "FAILSAFE RECOVERY CHECK"
 _DEFAULT_NOOP_THRESHOLD: Final[int] = 2
 _DEFAULT_MAX_PASSES_PER_SESSION: Final[int] = 1
 _DEFAULT_REPORTS_DIR: Final[str] = "untracked/reports"
-# Used only when git cannot name the repository's default branch (no origin/HEAD,
-# no local main/master) and the project set no ``base_branch``.
-_FALLBACK_BASE_BRANCH: Final[str] = "main"
 
 # Custom project guidance (Plan 00161): a project may point the handler at its own
 # housekeeping doc, either ADDED to the default guidance or REPLACING it entirely.
@@ -60,6 +57,25 @@ _MAX_TRACKED_SESSIONS: Final[int] = 256
 _TOOL_USE_BLOCK: Final[str] = "tool_use"
 _ASSISTANT_ROLE: Final[str] = "assistant"
 _USER_ROLES: Final[frozenset[str]] = frozenset({"user", "human"})
+
+
+_STALE_DAYS_OPTION: Final[str] = "stale_worktree_days"
+
+
+def _is_day_count(value: object) -> TypeGuard[int]:
+    """Whether ``value`` is a usable ``stale_worktree_days``.
+
+    ``True`` is an ``int`` to Python but never a day count, and ``0`` would call
+    every branch idle.
+    """
+    return isinstance(value, int) and not isinstance(value, bool) and value >= 1
+
+
+def _stale_worktree_days_problem(value: object) -> str | None:
+    """Why ``value`` is not a usable ``stale_worktree_days``, or None when it is."""
+    if _is_day_count(value):
+        return None
+    return f"stale_worktree_days must be an integer >= 1, got {value!r}"
 
 
 def count_trailing_noop_recovery_ticks(messages: list[TranscriptMessage], marker: str) -> int:
@@ -144,12 +160,23 @@ class IdleHousekeepingAdvisoryHandler(UserPromptSubmitHandlerBase):
         ``True`` is an ``int`` to Python but never a day count, and ``0`` would
         call every branch idle, so both are refused with a message naming why.
         """
-        if isinstance(value, bool) or not isinstance(value, int) or value < 1:
-            raise ValueError(
-                f"idle_housekeeping_advisory stale_worktree_days must be an integer >= 1, "
-                f"got {value!r}."
-            )
+        if not _is_day_count(value):
+            raise ValueError(_stale_worktree_days_problem(value))
         self.__stale_worktree_days = value
+
+    @staticmethod
+    def validate_options(options: Mapping[str, Any]) -> dict[str, str]:
+        """The configured options this handler refuses, keyed by option name.
+
+        Read by ``register_all`` before any value is applied, so a bad one is
+        reported at session start while the handler runs on its default.
+        """
+        problems: dict[str, str] = {}
+        if _STALE_DAYS_OPTION in options:
+            problem = _stale_worktree_days_problem(options[_STALE_DAYS_OPTION])
+            if problem is not None:
+                problems[_STALE_DAYS_OPTION] = problem
+        return problems
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """Match any string prompt (branching happens in handle)."""
@@ -241,9 +268,10 @@ class IdleHousekeepingAdvisoryHandler(UserPromptSubmitHandlerBase):
         """
         if not self._report_stale_checkouts:
             return None
-        root = ProjectContext.project_root()
-        base_branch = self._base_branch or default_branch(root) or _FALLBACK_BASE_BRANCH
-        return collect_stale_report(root, base_branch, self._stale_worktree_days)
+        # An unset base branch is resolved INSIDE the scan, under its time budget.
+        return collect_stale_report(
+            ProjectContext.project_root(), self._base_branch or None, self._stale_worktree_days
+        )
 
     def _load_custom_guidance(self) -> str | None:
         """Read the project's custom guidance doc, or None if unset/absent.

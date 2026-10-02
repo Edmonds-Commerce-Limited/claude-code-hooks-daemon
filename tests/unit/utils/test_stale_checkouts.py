@@ -775,6 +775,30 @@ class TestCollectStaleReportDeadline:
         assert report is not None
         assert "INCOMPLETE" in report
 
+    def test_the_default_branch_lookup_is_inside_the_budget(self, repo: Path) -> None:
+        """Resolving an unset base branch must not run git past the deadline."""
+        report = collect_stale_report(repo, None, processes_fn=_no_daemons, budget_seconds=0.0)
+
+        assert report is not None
+        assert "INCOMPLETE" in report
+
+    def test_an_unset_base_branch_is_the_repos_default_branch(self, tmp_path: Path) -> None:
+        root = tmp_path / "master-repo"
+        root.mkdir()
+        _git(root, "init", "-b", "master")
+        _commit(root, "base.txt")
+        wt = _add_worktree(root, tmp_path, "done")
+        _commit(wt, "new.txt")
+        _git(root, "merge", "--no-ff", "done", "-m", "merge done")
+        # A missing directory reports on merge status without the age gate.
+        shutil.rmtree(wt)
+
+        report = collect_stale_report(root, None, processes_fn=_no_daemons)
+
+        assert report is not None
+        # The fallback would have said `main`; only the lookup finds `master`.
+        assert "fully merged into master" in report
+
     def test_a_generous_budget_is_complete(self, repo: Path) -> None:
         assert (
             collect_stale_report(repo, "main", processes_fn=_no_daemons, budget_seconds=60.0)

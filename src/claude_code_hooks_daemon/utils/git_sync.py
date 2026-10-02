@@ -27,7 +27,9 @@ from __future__ import annotations
 
 import os
 import subprocess  # nosec B404 — CompletedProcess typing only; run_git owns the spawn
+from collections.abc import Callable
 from dataclasses import dataclass
+from functools import partial
 from pathlib import Path
 
 from claude_code_hooks_daemon.constants.timeout import Timeout
@@ -367,34 +369,27 @@ def pull_ff_only(cwd: Path, timeout: float = Timeout.GIT_PULL_SESSION) -> PullRe
     return PullResult(ok=False, detail=detail)
 
 
-def default_branch(cwd: Path) -> str | None:
+def default_branch(
+    cwd: Path, *, run_fn: Callable[..., subprocess.CompletedProcess[str] | None] | None = None
+) -> str | None:
     """Return the repo's default branch name (e.g. ``main``), or ``None``.
 
     Prefers ``origin/HEAD`` (``refs/remotes/origin/HEAD`` → ``origin/main`` →
     ``main``); falls back to a local ``main``/``master`` if present.
+
+    ``run_fn(cwd, *args)`` replaces the git runner, so a caller with its own time
+    budget can bound all (up to three) probes; by default each gets
+    ``Timeout.GIT_CONTEXT``.
     """
-    result = _run_git(
-        cwd,
-        "symbolic-ref",
-        "--quiet",
-        "--short",
-        "refs/remotes/origin/HEAD",
-        timeout=Timeout.GIT_CONTEXT,
-    )
+    runner = run_fn or partial(_run_git, timeout=Timeout.GIT_CONTEXT)
+    result = runner(cwd, "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD")
     if result is not None and result.returncode == 0:
         ref = result.stdout.strip()  # e.g. "origin/main"
         if ref:
             return ref.split("/", 1)[1] if "/" in ref else ref
 
     for candidate in ("main", "master"):
-        probe = _run_git(
-            cwd,
-            "show-ref",
-            "--verify",
-            "--quiet",
-            f"refs/heads/{candidate}",
-            timeout=Timeout.GIT_CONTEXT,
-        )
+        probe = runner(cwd, "show-ref", "--verify", "--quiet", f"refs/heads/{candidate}")
         if probe is not None and probe.returncode == 0:
             return candidate
     return None

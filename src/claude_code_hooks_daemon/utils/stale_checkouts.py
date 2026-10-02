@@ -36,7 +36,6 @@ from typing import Final
 from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.core.worktree_reaping import (
     MINIMUM_AGE_SECONDS,
-    GitResult,
     ProcessCwdsFn,
     RunGit,
     WorktreeAgeFn,
@@ -61,6 +60,7 @@ from claude_code_hooks_daemon.utils.git_repo import (
     parse_worktree_porcelain,
     run_git,
 )
+from claude_code_hooks_daemon.utils.git_sync import default_branch
 from claude_code_hooks_daemon.utils.path_containment import path_is_relative_to
 
 logger = logging.getLogger(__name__)
@@ -73,6 +73,9 @@ _SECONDS_PER_DAY: Final[float] = 86400.0
 #: stall the prompt the advisory rides on. Each git call alone is capped at
 #: ``Timeout.GIT_CONTEXT``; this bounds the sum.
 SCAN_BUDGET_SECONDS: Final[float] = 10.0
+
+#: Used only when git cannot name the repository's default branch.
+FALLBACK_BASE_BRANCH: Final[str] = "main"
 
 #: ``stop`` does NOT clear a stale pid file: it finds no live daemon, prints
 #: "Daemon not running" and leaves the file (``cmd_stop``). No CLI verb removes
@@ -158,7 +161,7 @@ class ScanDeadline:
         self,
         budget_seconds: float,
         *,
-        run_fn: RunGit = run_git,
+        run_fn: Callable[..., subprocess.CompletedProcess[str]] = run_git,
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self._run_fn = run_fn
@@ -166,7 +169,7 @@ class ScanDeadline:
         self._deadline = clock() + budget_seconds
         self.exhausted = False
 
-    def run(self, cwd: Path, *args: str) -> GitResult:
+    def run(self, cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
         """Run git within the remaining budget, or refuse once it is spent."""
         remaining = self._deadline - self._clock()
         if remaining <= 0:
@@ -474,7 +477,7 @@ def render_stale_report(
 
 def collect_stale_report(
     repo_root: Path,
-    base_branch: str,
+    base_branch: str | None,
     max_idle_days: int = DEFAULT_MAX_IDLE_DAYS,
     *,
     processes_fn: DaemonProcessesFn = default_daemon_processes,
@@ -482,12 +485,14 @@ def collect_stale_report(
 ) -> str | None:
     """Detect stale worktrees and daemons for ``repo_root`` and render the report.
 
-    Every git call shares one ``budget_seconds``; when it runs out the report
-    says the scan was incomplete.
+    Every git call shares one ``budget_seconds``, including the lookup of the
+    default branch when ``base_branch`` is None; when it runs out the report says
+    the scan was incomplete.
     """
     deadline = ScanDeadline(budget_seconds)
+    base = base_branch or default_branch(repo_root, run_fn=deadline.run) or FALLBACK_BASE_BRANCH
     worktrees = find_stale_worktrees(
-        repo_root, base_branch, max_idle_days=max_idle_days, run_fn=deadline.run
+        repo_root, base, max_idle_days=max_idle_days, run_fn=deadline.run
     )
     checkouts = registered_checkouts(repo_root, run_fn=deadline.run)
     daemons = find_stale_daemons(checkouts, processes_fn=processes_fn)

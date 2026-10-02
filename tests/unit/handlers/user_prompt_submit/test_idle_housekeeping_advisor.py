@@ -365,33 +365,20 @@ class TestStaleCheckoutsReport:
 
         assert "HOUSEKEEPING MODE" in blob
         assert "STALE CHECKOUTS: git worktree remove /w/a" in blob
-        collect.assert_called_once_with(tmp_path, "main", 7)
+        # No base_branch configured: the scan resolves the default itself, under its budget.
+        collect.assert_called_once_with(tmp_path, None, 7)
 
-    def test_unset_base_branch_is_the_repos_own_default_branch(self, tmp_path: Path) -> None:
+    def test_a_configured_base_branch_is_passed_through(self, tmp_path: Path) -> None:
         handler = IdleHousekeepingAdvisoryHandler()
+        apply_handler_options(handler, {"base_branch": "develop"})
         with (
             patch(f"{_HANDLER_MODULE}.ProjectContext") as mock_pc,
-            patch(f"{_HANDLER_MODULE}.default_branch", return_value="trunk") as default,
             patch(f"{_HANDLER_MODULE}.collect_stale_report", return_value=None) as collect,
         ):
             mock_pc.project_root.return_value = tmp_path
             self._fire(handler)
 
-        default.assert_called_once_with(tmp_path)
-        collect.assert_called_once_with(tmp_path, "trunk", 7)
-
-    def test_a_configured_base_branch_is_not_second_guessed(self, tmp_path: Path) -> None:
-        handler = IdleHousekeepingAdvisoryHandler()
-        apply_handler_options(handler, {"base_branch": "develop"})
-        with (
-            patch(f"{_HANDLER_MODULE}.ProjectContext") as mock_pc,
-            patch(f"{_HANDLER_MODULE}.default_branch") as default,
-            patch(f"{_HANDLER_MODULE}.collect_stale_report", return_value=None),
-        ):
-            mock_pc.project_root.return_value = tmp_path
-            self._fire(handler)
-
-        default.assert_not_called()
+        collect.assert_called_once_with(tmp_path, "develop", 7)
 
     @pytest.mark.parametrize("value", [0, -1, "7", 1.5, True, None])
     def test_stale_worktree_days_must_be_a_positive_int(self, value: object) -> None:
