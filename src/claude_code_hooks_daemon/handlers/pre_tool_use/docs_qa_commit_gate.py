@@ -32,10 +32,10 @@ from claude_code_hooks_daemon.docs_qa.runner import run_stage
 from claude_code_hooks_daemon.docs_qa.types import CheckStage, Finding, Severity
 from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command_for_docs
 from claude_code_hooks_daemon.utils.git_commit_parsing import (
-    extract_commit_message as _extract_commit_message,
+    extract_commit_form as _extract_commit_form,
 )
 from claude_code_hooks_daemon.utils.git_commit_parsing import (
-    extract_commit_pathspecs as _extract_commit_pathspecs,
+    extract_commit_message as _extract_commit_message,
 )
 from claude_code_hooks_daemon.utils.git_commit_parsing import (
     is_git_commit as _is_git_commit,
@@ -116,11 +116,13 @@ class DocsQaCommitGateHandler(PreToolUseHandlerBase):
 
         command = hook_input.get(HookInputField.TOOL_INPUT, {}).get(_FIELD_COMMAND, "")
         tokens = _tokenise(command)
+        form = _extract_commit_form(command)
         context = staged_context(
             project_root=project_root,
             policy=policy,
             commit_message=_extract_commit_message(tokens),
-            pathspecs=_extract_commit_pathspecs(command),
+            pathspecs=form.pathspecs,
+            include=form.include,
         )
 
         findings = run_stage(CheckStage.STAGED, context)

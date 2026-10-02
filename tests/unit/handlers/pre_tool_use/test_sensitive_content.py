@@ -1028,6 +1028,293 @@ class _GitSpy:
         return any(relpath in args for args in self.content_calls)
 
 
+class TestEachCommitFormScansWhatItRecords:
+    """Ledger 00474 N245: the content scanned is the content the commit records.
+
+    A bare commit records the index. ``git commit <pathspec>`` records HEAD with
+    the named paths' WORKING-TREE content, so a term staged in an unnamed file
+    never lands, and a term in a named file's unstaged edit does. ``--include``
+    records the index with that overlay. A term the commit records must be seen
+    in every form.
+    """
+
+    @pytest.fixture()
+    def tracked(self, repo: Path) -> Path:
+        """``a``/``b``/``c`` committed clean; ``sub/f`` committed clean."""
+        for name in ("a.txt", "b.txt", "c.txt", "sub/f.txt"):
+            path = repo / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("clean\n")
+        _git(repo, "add", "-A")
+        _git(repo, "commit", "-q", "-m", "tracked")
+        return repo
+
+    @staticmethod
+    def _stage_then_repair(repo: Path, name: str, text: str) -> None:
+        """Stage ``text``, then put the working tree back to clean."""
+        _stage(repo, name, text)
+        (repo / name).write_text("clean\n")
+
+    @staticmethod
+    def _decision(handler: SensitiveContentHandler, repo: Path, command: str) -> Decision:
+        return handler.handle(_commit_input(repo, command)).decision
+
+    def test_bare_commit_denies_a_staged_term(self, tracked: Path, tmp_path: Path) -> None:
+        handler = _wordlist(tmp_path, "alpha-term")
+        _stage(tracked, "b.txt", "alpha-term\n")
+
+        assert self._decision(handler, tracked, "git commit -m x") == Decision.DENY
+
+    def test_pathspec_commit_does_not_see_a_term_staged_in_a_file_it_does_not_name(
+        self, tracked: Path, tmp_path: Path
+    ) -> None:
+        handler = _wordlist(tmp_path, "alpha-term")
+        _stage(tracked, "b.txt", "alpha-term\n")
+        (tracked / "a.txt").write_text("fine\n")
+
+        assert self._decision(handler, tracked, "git commit -m x a.txt") == Decision.ALLOW
+
+    def test_pathspec_commit_does_not_see_a_staged_term_the_working_tree_has_repaired(
+        self, tracked: Path, tmp_path: Path
+    ) -> None:
+        handler = _wordlist(tmp_path, "alpha-term")
+        self._stage_then_repair(tracked, "a.txt", "alpha-term\n")
+        (tracked / "c.txt").write_text("fine\n")
+
+        assert self._decision(handler, tracked, "git commit -m x a.txt c.txt") == Decision.ALLOW
+
+    def test_pathspec_commit_denies_a_term_in_a_named_files_unstaged_edit(
+        self, tracked: Path, tmp_path: Path
+    ) -> None:
+        """The commit records the working tree, which the index never held."""
+        handler = _wordlist(tmp_path, "alpha-term")
+        (tracked / "c.txt").write_text("alpha-term\n")
+
+        result = handler.handle(_commit_input(tracked, "git commit -m x c.txt"))
+
+        assert result.decision == Decision.DENY
+        assert "c.txt" in (result.reason or "")
+        assert "alpha-term" not in result.model_dump_json()
+
+    def test_pathspec_commit_denies_a_term_staged_new_in_a_named_file(
+        self, tracked: Path, tmp_path: Path
+    ) -> None:
+        handler = _wordlist(tmp_path, "alpha-term")
+        _stage(tracked, "new.txt", "alpha-term\n")
+
+        assert self._decision(handler, tracked, "git commit -m x new.txt") == Decision.DENY
+
+    def test_pathspec_commit_denies_a_public_pattern_in_a_named_file(self, tracked: Path) -> None:
+        handler = _handler_with_public_patterns(
+            [{"name": "vhosts-path", "pattern": "/var/www/vhosts", "description": "d"}]
+        )
+        (tracked / "c.txt").write_text("target /var/www/vhosts/site\n")
+
+        result = handler.handle(_commit_input(tracked, "git commit -m x c.txt"))
+
+        assert result.decision == Decision.DENY
+        assert "vhosts-path" in (result.reason or "")
+
+    def test_a_directory_pathspec_covers_every_file_beneath_it(
+        self, tracked: Path, tmp_path: Path
+    ) -> None:
+        handler = _wordlist(tmp_path, "alpha-term")
+        (tracked / "sub" / "f.txt").write_text("alpha-term\n")
+
+        assert self._decision(handler, tracked, "git commit -m x sub") == Decision.DENY
+
+    def test_a_pathspec_is_read_from_the_commands_directory(
+        self, tracked: Path, tmp_path: Path
+    ) -> None:
+        handler = _wordlist(tmp_path, "alpha-term")
+        (tracked / "sub" / "f.txt").write_text("alpha-term\n")
+        hook_input = _commit_input(tracked / "sub", "git commit -m x f.txt")
+
+        assert handler.handle(hook_input).decision == Decision.DENY
+
+    def test_include_denies_a_term_staged_in_a_file_it_does_not_name(
+        self, tracked: Path, tmp_path: Path
+    ) -> None:
+        handler = _wordlist(tmp_path, "alpha-term")
+        _stage(tracked, "b.txt", "alpha-term\n")
+        (tracked / "a.txt").write_text("fine\n")
+
+        decision = self._decision(handler, tracked, "git commit -m x --include a.txt")
+
+        assert decision == Decision.DENY
+
+    def test_include_does_not_see_a_staged_term_the_working_tree_has_repaired(
+        self, tracked: Path, tmp_path: Path
+    ) -> None:
+        handler = _wordlist(tmp_path, "alpha-term")
+        self._stage_then_repair(tracked, "a.txt", "alpha-term\n")
+        (tracked / "c.txt").write_text("fine\n")
+
+        decision = self._decision(handler, tracked, "git commit -m x -i a.txt c.txt")
+
+        assert decision == Decision.ALLOW
+
+    def test_include_denies_a_term_in_a_named_files_unstaged_edit(
+        self, tracked: Path, tmp_path: Path
+    ) -> None:
+        handler = _wordlist(tmp_path, "alpha-term")
+        _stage(tracked, "b.txt", "fine\n")
+        (tracked / "c.txt").write_text("alpha-term\n")
+
+        decision = self._decision(handler, tracked, "git commit -m x --include c.txt")
+
+        assert decision == Decision.DENY
+
+    def test_a_pathspec_file_is_judged_as_widely_as_any_commit_form_could_record(
+        self, tracked: Path, tmp_path: Path
+    ) -> None:
+        """The named paths are in a file this guard cannot read: scan both trees."""
+        handler = _wordlist(tmp_path, "alpha-term")
+        command = "git commit -m x --pathspec-from-file=paths.txt"
+
+        _stage(tracked, "b.txt", "alpha-term\n")
+        assert self._decision(handler, tracked, command) == Decision.DENY
+
+        _git(tracked, "reset", "-q", "b.txt")
+        (tracked / "b.txt").write_text("clean\n")
+        (tracked / "c.txt").write_text("alpha-term\n")
+        assert self._decision(handler, tracked, command) == Decision.DENY
+
+    def test_a_pathspec_that_matches_nothing_is_judged_as_the_index(
+        self, tracked: Path, tmp_path: Path
+    ) -> None:
+        """A word misread as a pathspec must never leave the commit unscanned."""
+        handler = _wordlist(tmp_path, "alpha-term")
+        _stage(tracked, "b.txt", "alpha-term\n")
+
+        decision = self._decision(handler, tracked, "git commit -m x nonexistent.txt")
+
+        assert decision == Decision.DENY
+
+    def test_commit_all_still_scans_the_working_tree(self, tracked: Path, tmp_path: Path) -> None:
+        handler = _wordlist(tmp_path, "alpha-term")
+        (tracked / "c.txt").write_text("alpha-term\n")
+
+        assert self._decision(handler, tracked, "git commit -a -m x") == Decision.DENY
+
+
+class TestPathspecViewIsUsedOnlyWhenTheReadingIsCertain:
+    """Ledger 00474 N245 round 2: never scan LESS of the recorded tree than the index.
+
+    Each command below is one a careless agent types. Git records the term in a
+    file the pathspec view cannot see (the command runs somewhere else, or runs
+    twice, or names its paths through the shell), so the guard must fall back to
+    the index plus the named paths' working tree rather than narrow.
+    """
+
+    @pytest.fixture()
+    def tracked(self, repo: Path) -> Path:
+        for name in ("a.txt", "b.txt", "f.txt", "sub/f.txt", "p.txt"):
+            path = repo / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("clean\n")
+        _git(repo, "add", "-A")
+        _git(repo, "commit", "-q", "-m", "tracked")
+        return repo
+
+    @staticmethod
+    def _deny(handler: SensitiveContentHandler, cwd: Path, command: str) -> bool:
+        return handler.handle(_commit_input(cwd, command)).decision == Decision.DENY
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "cd sub && git commit -q -m x f.txt",
+            "git -C sub commit -q -m x f.txt",
+            "(cd sub; git commit -q -m x f.txt)",
+            "pushd sub && git commit -q -m x f.txt",
+        ],
+    )
+    def test_a_command_that_runs_elsewhere_is_not_narrowed_to_the_pathspec_view(
+        self, tracked: Path, tmp_path: Path, command: str
+    ) -> None:
+        handler = _wordlist(tmp_path, "alpha-term")
+        (tracked / "f.txt").write_text("fine\n")
+        _stage(tracked, "sub/f.txt", "alpha-term\n")
+
+        assert self._deny(handler, tracked, command)
+
+    def test_a_second_commit_in_the_command_is_judged_as_the_index(
+        self, tracked: Path, tmp_path: Path
+    ) -> None:
+        handler = _wordlist(tmp_path, "alpha-term")
+        (tracked / "a.txt").write_text("fine\n")
+        _stage(tracked, "b.txt", "alpha-term\n")
+
+        command = "git commit -q -m x a.txt && git commit -q -m y"
+
+        assert self._deny(handler, tracked, command)
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "F=b.txt; git commit -q -m x a.txt $F",
+            "git commit -q -m x a.txt $(echo b.txt)",
+            "git commit -q -m x a.txt {b,zz}.txt",
+        ],
+    )
+    def test_a_pathspec_built_by_the_shell_is_not_narrowed(
+        self, tracked: Path, tmp_path: Path, command: str
+    ) -> None:
+        handler = _wordlist(tmp_path, "alpha-term")
+        (tracked / "a.txt").write_text("fine\n")
+        _stage(tracked, "b.txt", "alpha-term\n")
+
+        assert self._deny(handler, tracked, command)
+
+    def test_a_pathspec_that_matches_nothing_among_others_is_not_narrowed(
+        self, tracked: Path, tmp_path: Path
+    ) -> None:
+        handler = _wordlist(tmp_path, "alpha-term")
+        (tracked / "a.txt").write_text("fine\n")
+        _stage(tracked, "b.txt", "alpha-term\n")
+
+        assert self._deny(handler, tracked, "git commit -q -m x a.txt nosuch.txt")
+
+    def test_diff_relative_does_not_misplace_a_named_path_from_a_subdirectory(
+        self, tracked: Path, tmp_path: Path
+    ) -> None:
+        handler = _wordlist(tmp_path, "alpha-term")
+        _git(tracked, "config", "diff.relative", "true")
+        (tracked / "sub" / "f.txt").write_text("alpha-term\n")
+
+        assert self._deny(handler, tracked / "sub", "git commit -q -m x f.txt")
+
+    def test_diff_relative_does_not_misplace_a_staged_named_path(
+        self, tracked: Path, tmp_path: Path
+    ) -> None:
+        handler = _wordlist(tmp_path, "alpha-term")
+        _git(tracked, "config", "diff.relative", "true")
+        _stage(tracked, "sub/f.txt", "alpha-term\n")
+
+        assert self._deny(handler, tracked / "sub", "git commit -q -m x f.txt")
+
+    def test_a_path_removed_from_the_index_but_edited_on_disk_is_recorded_from_disk(
+        self, tracked: Path, tmp_path: Path
+    ) -> None:
+        """``git rm --cached p`` then an edit: ``git commit p`` records the edited file."""
+        handler = _wordlist(tmp_path, "alpha-term")
+        _git(tracked, "rm", "-q", "--cached", "p.txt")
+        (tracked / "p.txt").write_text("clean\nalpha-term\n")
+
+        result = handler.handle(_commit_input(tracked, "git commit -q -m x p.txt"))
+
+        assert result.decision == Decision.DENY
+        assert "p.txt" in (result.reason or "")
+
+    def test_a_certain_reading_still_narrows(self, tracked: Path, tmp_path: Path) -> None:
+        handler = _wordlist(tmp_path, "alpha-term")
+        (tracked / "a.txt").write_text("fine\n")
+        _stage(tracked, "b.txt", "alpha-term\n")
+
+        assert not self._deny(handler, tracked, "git commit -q -m x a.txt")
+
+
 class TestStagedContentIsBoundedBeforeItIsRead:
     """Plan 00364 Task 4.1: the bounds cap what is HELD, not just what is scanned.
 

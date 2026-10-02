@@ -13,12 +13,13 @@ Surface cost profile:
   the README, and construct :class:`GitFacts` — acceptable for commit gates
   and session sweeps, never for per-edit dispatch.
 
-Which tree a surface judges (ledger 00474 N244): the sweep and the edit read
-the DISK; a bare ``git commit`` reads the INDEX, because the commit records the
-index and a gate that read the disk would judge a tree no commit holds. Not
-covered, and read from the disk as before: the pathspec form (it records
-working-tree content over the index), operations the same command performs
-before committing (``git add x && git commit``), and the checks that open
+Which tree a surface judges (ledger 00474 N244, N245): the sweep and the edit
+read the DISK; a bare ``git commit`` reads the INDEX, because the commit
+records the index and a gate that read the disk would judge a tree no commit
+holds. Not covered, and read from the disk as before: the pathspec and
+``--include`` forms (they record working-tree content over the index),
+operations the same command performs before committing
+(``git add x && git commit``), ``git commit -a``, and the checks that open
 files themselves rather than asking the tree (``path-existence``,
 ``plan-doc-size``, ``journal-entry-ordering``, ``same-commit-plan-doc``, and
 the journal day-file lookups in ``checks/common.py``).
@@ -327,6 +328,7 @@ def staged_context(
     pathspecs: Sequence[str] | None = None,
     layout: "ProjectLayout | None" = None,
     exclude_paths: Sequence[str] | None = None,
+    include: bool = False,
 ) -> CheckContext:
     """Build the Stage 2 (COMMIT) context: staged git facts + tree views.
 
@@ -342,13 +344,16 @@ def staged_context(
             on the context; no check consults it yet.
         exclude_paths: The project-wide ``daemon.exclude_paths`` (Plan 00362
             Task 2.9); the runner drops every finding about an excluded path.
+        include: ``git commit --include <pathspec>...``: the commit records
+            the index with the named paths' working-tree content laid over it,
+            not HEAD with them replaced. Meaningful only with ``pathspecs``.
     """
     excluded = _normalised_exclude_paths(exclude_paths)
-    gitfacts = GitFacts(project_root, pathspecs=pathspecs)
+    gitfacts = GitFacts(project_root, pathspecs=pathspecs, include=include)
     # A bare commit records the INDEX, so the tree is read from it. A
-    # `git commit <pathspec>` records the WORKING-TREE content of the named
-    # paths over the index, which no listing of the index describes, so that
-    # form keeps reading the disk (see the module note on what is not covered).
+    # `git commit <pathspec>` (or `--include`) records the WORKING-TREE content
+    # of the named paths, which no listing of the index describes, so those
+    # forms read the disk (see the module note on what is not covered).
     tree, readme = _tree_and_readme(
         project_root, plan_dir_rel, policy, committed_from=None if pathspecs else gitfacts
     )

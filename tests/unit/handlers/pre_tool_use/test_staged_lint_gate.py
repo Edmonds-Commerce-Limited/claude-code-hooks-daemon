@@ -266,6 +266,132 @@ class TestModes:
         assert not result.context
 
 
+class TestEachCommitFormLintsWhatItRecords:
+    """Ledger 00474 N245: the files linted are the files the commit records.
+
+    ``git commit <pathspec>`` records the named paths only, so a broken file
+    that is merely staged is not in it, and a broken named file that is not
+    staged at all is. ``--include`` records the index as well.
+    """
+
+    @pytest.fixture
+    def tracked(self, repo: Path) -> Path:
+        _stage_file(repo, "clean.py", "def clean() -> None:\n    return None\n")
+        _stage_file(repo, "later.py", "def later() -> None:\n    return None\n")
+        _git(repo, "commit", "-m", "tracked")
+        return repo
+
+    def _handle(self, handler: StagedLintGateHandler, repo: Path, command: str) -> str:
+        with _patched_root(repo):
+            return " ".join(handler.handle(_bash(command)).context)
+
+    def test_a_staged_broken_file_the_pathspec_commit_does_not_name_is_not_linted(
+        self, handler: StagedLintGateHandler, tracked: Path
+    ) -> None:
+        _stage_file(tracked, "broken.py", "def broken(\n")
+        (tracked / "clean.py").write_text("def clean() -> int:\n    return 1\n")
+
+        rendered = self._handle(handler, tracked, 'git commit -m "x" clean.py')
+
+        assert "broken.py" not in rendered
+
+    def test_an_unstaged_broken_file_a_pathspec_commit_names_is_linted(
+        self, handler: StagedLintGateHandler, tracked: Path
+    ) -> None:
+        (tracked / "later.py").write_text("def later(\n")
+
+        rendered = self._handle(handler, tracked, 'git commit -m "x" later.py')
+
+        assert "later.py" in rendered
+
+    def test_include_lints_the_index_and_the_named_paths(
+        self, handler: StagedLintGateHandler, tracked: Path
+    ) -> None:
+        _stage_file(tracked, "broken.py", "def broken(\n")
+        (tracked / "later.py").write_text("def later(\n")
+
+        rendered = self._handle(handler, tracked, 'git commit -m "x" --include later.py')
+
+        assert "broken.py" in rendered
+        assert "later.py" in rendered
+
+    def test_a_bare_commit_still_lints_the_index(
+        self, handler: StagedLintGateHandler, tracked: Path
+    ) -> None:
+        _stage_file(tracked, "broken.py", "def broken(\n")
+        (tracked / "later.py").write_text("def later(\n")
+
+        rendered = self._handle(handler, tracked, 'git commit -m "x"')
+
+        assert "broken.py" in rendered
+        assert "later.py" not in rendered
+
+
+class TestPathspecViewIsUsedOnlyWhenTheReadingIsCertain:
+    """Ledger 00474 N245 round 2: never lint LESS of the recorded tree than the index.
+
+    ``sub/broken.py`` is staged and broken. Each command records it by a route
+    the pathspec view cannot follow, so the gate keeps linting the index.
+    """
+
+    @pytest.fixture
+    def tracked(self, repo: Path) -> Path:
+        _stage_file(repo, "clean.py", "def clean() -> None:\n    return None\n")
+        _stage_file(repo, "sub/clean.py", "def clean() -> None:\n    return None\n")
+        _git(repo, "commit", "-m", "tracked")
+        _stage_file(repo, "sub/broken.py", "def broken(\n")
+        (repo / "clean.py").write_text("def clean() -> int:\n    return 1\n")
+        return repo
+
+    def _handle(
+        self, handler: StagedLintGateHandler, repo: Path, command: str, cwd: Path | None = None
+    ) -> str:
+        with _patched_root(repo):
+            return " ".join(handler.handle(_bash(command, str(cwd or repo))).context)
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "cd sub && git commit -m x clean.py",
+            "git -C sub commit -m x clean.py",
+            "(cd sub; git commit -m x clean.py)",
+            "git commit -m x clean.py && git commit -m y",
+            "F=sub/broken.py; git commit -m x clean.py $F",
+            "git commit -m x clean.py nosuch.py",
+            "git commit -m x nosuch.py",
+        ],
+    )
+    def test_an_uncertain_reading_keeps_the_index(
+        self, handler: StagedLintGateHandler, tracked: Path, command: str
+    ) -> None:
+        assert "broken.py" in self._handle(handler, tracked, command)
+
+    def test_diff_relative_does_not_misplace_a_named_file(
+        self, handler: StagedLintGateHandler, tracked: Path
+    ) -> None:
+        _git(tracked, "config", "diff.relative", "true")
+        (tracked / "sub" / "clean.py").write_text("def clean(\n")
+
+        rendered = self._handle(handler, tracked, "git commit -m x clean.py", tracked / "sub")
+
+        assert "clean.py" in rendered
+
+    def test_a_file_removed_from_the_index_then_broken_on_disk_is_linted(
+        self, handler: StagedLintGateHandler, tracked: Path
+    ) -> None:
+        _git(tracked, "rm", "-q", "--cached", "clean.py")
+        (tracked / "clean.py").write_text("def clean(\n")
+
+        rendered = self._handle(handler, tracked, "git commit -m x clean.py")
+
+        assert "clean.py" in rendered
+
+    def test_a_certain_reading_still_narrows(
+        self, handler: StagedLintGateHandler, tracked: Path
+    ) -> None:
+        assert "broken.py" not in self._handle(handler, tracked, "git commit -m x clean.py")
+
+
 class TestMaxFiles:
     def test_standing_down_names_how_many_files_were_skipped(
         self, handler: StagedLintGateHandler, repo: Path

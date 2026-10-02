@@ -175,7 +175,7 @@ class TestStagedLintGate:
 
         handler = StagedLintGateHandler()
 
-        assert handler._lintable_files(tmp_path, "UNREADABLE/src/module.py\n") == []
+        assert handler._lintable_files(tmp_path, ["UNREADABLE/src/module.py"]) == []
 
 
 class TestTddEnforcement:

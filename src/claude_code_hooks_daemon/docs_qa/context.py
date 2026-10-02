@@ -28,7 +28,6 @@ from claude_code_hooks_daemon.docs_qa.corpus import (
 )
 from claude_code_hooks_daemon.docs_qa.policy import DocumentationPolicy
 from claude_code_hooks_daemon.docs_qa.types import CheckContext
-from claude_code_hooks_daemon.utils.authored_paths import authored_path
 from claude_code_hooks_daemon.utils.git_facts import GitFactsBase
 
 if TYPE_CHECKING:
@@ -119,6 +118,7 @@ def staged_context(
     commit_message: str | None = None,
     pathspecs: Sequence[str] | None = None,
     layout: "ProjectLayout | None" = None,
+    include: bool = False,
 ) -> CheckContext:
     """Build the STAGED-stage context: the commit's staged ``.md`` content.
 
@@ -126,11 +126,13 @@ def staged_context(
     inspected ``git commit`` invocation names paths directly, the STAGED
     view is scoped to exactly those paths' working-tree-vs-HEAD content
     (what THIS commit will actually contain), not the whole index.
+    ``include`` (``git commit --include <pathspec>...``, ledger 00474 N245)
+    widens that to the index with the named paths' working tree laid over it.
     ``layout`` (Plan 00288) is optional and made AVAILABLE on the context;
     no check consults it yet. A staged path under the project-wide
     ``daemon.exclude_paths`` (Plan 00362 Task 2.9) never enters the view.
     """
-    gitfacts = GitFactsBase(project_root, pathspecs=pathspecs)
+    gitfacts = GitFactsBase(project_root, pathspecs=pathspecs, include=include)
     staged_documents: dict[str, str] = {}
     for change in gitfacts.staged_changes():
         if change.status == _DELETE_STATUS:
@@ -139,19 +141,10 @@ def staged_context(
             continue
         if is_project_excluded(change.path, policy):
             continue
-        if pathspecs:
-            # A pathspec'd commit ships the CURRENT WORKING TREE content of
-            # that path (see GitFacts.staged_changes' own docstring) --
-            # `git show :path` would read the INDEX instead, which can
-            # disagree with what this commit actually contains.
-            try:
-                content: str | None = authored_path(project_root, change.path).read_text(
-                    encoding="utf-8"
-                )
-            except OSError:
-                content = None
-        else:
-            content = gitfacts.staged_file_text(change.path)
+        # The content this commit records for the path: the working tree for a
+        # named path, the index otherwise (`git show :path` would read the
+        # index for a named path too, which can disagree with the commit).
+        content = gitfacts.recorded_text(change.path)
         if content is not None:
             staged_documents[change.path] = content
     return CheckContext(
