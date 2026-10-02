@@ -70,6 +70,9 @@ hosts:
 
 - [ ] ⬜ **Task 1.1**: Vendor the status line docs page with `hooks-daemon remote-docs add`.
   Record in `CLAUDE/Architecture/StatusLine.md` that `rate_limits` is now read.
+  Blocked: `remote-docs add https://code.claude.com/docs/en/statusline` refuses the page
+  (its content matches the `session-uuid` sensitive-content pattern; nothing written).
+  StatusLine.md records the read and the URL; the vendoring needs an owner decision.
 - [x] ✅ **Task 1.2** (merged ee58adb7c): Capture real Status payloads into test fixtures: a main thread with
   data, before the first response (absent), a subagent or `--agent` thread, and integer and
   fractional percentages. Establish whether subagent threads carry `rate_limits`.
@@ -85,8 +88,10 @@ hosts:
   `5h 67% (3h 19m) · 7d 84% (4d 23h)`): A status-line usage segment, for example `5h 13% (3h 20m) · 7d 3%`, with
   colour thresholds. Hidden when there is no data. Options for the layout and the warning
   level.
-- [ ] ⬜ **Task 2.3**: When a ceiling applies to this host, the segment also shows it (for
-  example `⛔ 80%`), so a session can see the line it is working under.
+- [x] ✅ **Task 2.3**: When a ceiling applies to this host, the segment also shows it (for
+  example `⛔ 80%`), so a session can see the line it is working under. One figure when both
+  windows share a limit, else labelled per window (`⛔ 5h 80% 7d 95%`); plain text, shown
+  only beside usage chips.
 
 ### Phase 3: Host configuration (TDD)
 
@@ -183,7 +188,7 @@ the daemon directs the model and then verifies what it did.
 
 ### Phase 5: Docs and release
 
-- [ ] ⬜ **Task 5.1**: Write the configuration docs, the handler guidance, and a release note.
+- [x] ✅ **Task 5.1**: Write the configuration docs, the handler guidance, and a release note.
 
 ## Open questions for the owner
 

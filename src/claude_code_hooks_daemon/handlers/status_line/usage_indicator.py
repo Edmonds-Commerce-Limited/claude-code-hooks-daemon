@@ -22,15 +22,23 @@ honest to show, and ``0%`` would be a claim rather than an absence.
 green, yellow, orange and red, each window coloured by its own percentage. The
 ``|`` between chips carries no background. Percentages display rounded DOWN,
 so a ceiling of 80 is never displayed as reached while the real figure is 79.9.
+
+**Ceiling.** When a ``hosts:`` entry gives this host a usage ceiling, the
+segment ends with ``⛔ 80%`` (one figure when both windows share the limit,
+else ``⛔ 5h 80% 7d 95%``, each limited window labelled). It is plain text,
+carries no background, and is hidden when no ceiling applies or there is no
+usage data to sit beside.
 """
 
 import logging
 import math
 import re
 import time
+from collections.abc import Callable
 from datetime import datetime
 from typing import Any, Final
 
+from claude_code_hooks_daemon.config.models import Config
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, HookInputField, Priority
 from claude_code_hooks_daemon.core import AdvisoryResult
 from claude_code_hooks_daemon.core.acceptance_test import AcceptanceTest
@@ -38,7 +46,11 @@ from claude_code_hooks_daemon.core.data_layer import latest_usage
 from claude_code_hooks_daemon.core.handler_bases import StatusLineHandlerBase
 from claude_code_hooks_daemon.core.segment_explanation import SegmentExplanation
 from claude_code_hooks_daemon.core.usage_snapshot import UsageSnapshot, UsageWindow
-from claude_code_hooks_daemon.utils.usage_pause_gate import active_usage_pause
+from claude_code_hooks_daemon.utils.usage_pause_gate import (
+    active_usage_pause,
+    load_project_config,
+    session_ceiling,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +68,7 @@ _DEFAULT_CRITICAL_PCT: Final[int] = 90
 
 _ICON: Final[str] = "📈"
 _PAUSE_ICON: Final[str] = "⏸"
+_CEILING_ICON: Final[str] = "⛔"
 _SEPARATOR: Final[str] = "|"
 _SECONDS_PER_MINUTE: Final[int] = 60
 _SECONDS_PER_HOUR: Final[int] = 3600
@@ -89,6 +102,8 @@ class UsageIndicatorHandler(StatusLineHandlerBase):
         self._warn_pct: float = _DEFAULT_WARN_PCT
         self._high_pct: float = _DEFAULT_HIGH_PCT
         self._critical_pct: float = _DEFAULT_CRITICAL_PCT
+        # Injectable seam (tests substitute a fake); not a config option.
+        self._config_loader: Callable[[], Config] = load_project_config
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """Always run for status line events."""
@@ -111,13 +126,31 @@ class UsageIndicatorHandler(StatusLineHandlerBase):
             text = f"{label} {math.floor(window.used_percentage)}% {countdown}"
         return f"{self._colour(window.used_percentage)}{text}{_RESET}"
 
-    def _render(self, snapshot: UsageSnapshot, now: float) -> str:
+    def _render(self, snapshot: UsageSnapshot, now: float, ceiling: str | None = None) -> str:
         chips: list[str] = []
         if snapshot.five_hour is not None:
             chips.append(self._chip("5h", snapshot.five_hour, now))
         if snapshot.seven_day is not None:
             chips.append(self._chip("7d", snapshot.seven_day, now))
-        return f"{_ICON} {_SEPARATOR.join(chips)}"
+        text = f"{_ICON} {_SEPARATOR.join(chips)}"
+        return f"{text} {ceiling}" if ceiling else text
+
+    def _ceiling_text(self, hook_input: dict[str, Any]) -> str | None:
+        """``⛔ 80%`` for the ceiling this host runs under, else None.
+
+        One figure when both windows share a limit, else each limited window
+        labelled (``⛔ 5h 80% 7d 95%``). None when no ``hosts:`` entry matches
+        or the matching entries set no ceiling.
+        """
+        # The default loader degrades an unloadable config to no ceiling itself.
+        ceiling = session_ceiling(self._config_loader(), hook_input)
+        if ceiling.five_hour is None and ceiling.seven_day is None:
+            return None
+        if ceiling.five_hour == ceiling.seven_day:
+            return f"{_CEILING_ICON} {ceiling.five_hour:g}%"
+        limits = (("5h", ceiling.five_hour), ("7d", ceiling.seven_day))
+        shown = " ".join(f"{label} {limit:g}%" for label, limit in limits if limit is not None)
+        return f"{_CEILING_ICON} {shown}"
 
     @staticmethod
     def _pause_chip(hook_input: dict[str, Any], now: float) -> str | None:
@@ -146,9 +179,8 @@ class UsageIndicatorHandler(StatusLineHandlerBase):
         except OSError as exc:
             logger.warning("Skipping usage indicator: %s", exc)
             snapshot = None
-        parts = [
-            part for part in (pause_chip, self._render(snapshot, now) if snapshot else None) if part
-        ]
+        usage = self._render(snapshot, now, self._ceiling_text(hook_input)) if snapshot else None
+        parts = [part for part in (pause_chip, usage) if part]
         if not parts:
             return AdvisoryResult(context=[])
         return AdvisoryResult(context=[f"| {' '.join(parts)}"])
@@ -169,7 +201,7 @@ class UsageIndicatorHandler(StatusLineHandlerBase):
         else:
             current_value = f"Currently shows: {_ANSI.sub('', self._render(snapshot, now))}"
         return SegmentExplanation(
-            glyphs=(_ICON, "5h", "7d", _PAUSE_ICON),
+            glyphs=(_ICON, "5h", "7d", _PAUSE_ICON, _CEILING_ICON),
             name="Subscription Usage",
             what_it_is=(
                 "How much of the claude.ai subscription's 5-hour and weekly usage windows "
@@ -184,7 +216,9 @@ class UsageIndicatorHandler(StatusLineHandlerBase):
                 "`5h 67% 3h 20m`. Percentages are rounded down. A window past "
                 "its reset is dropped; nothing is shown when no usage data exists (API-key "
                 "sessions, or before the first response). `⏸ usage 14:35` in red means the "
-                "session is paused on its host's usage ceiling and resumes at that local time."
+                "session is paused on its host's usage ceiling and resumes at that local time. "
+                "`⛔ 80%` is the ceiling this host runs under (`⛔ 5h 80% 7d 95%` when the "
+                "windows differ); it is absent when no ceiling applies."
             ),
             current_value=current_value,
         )

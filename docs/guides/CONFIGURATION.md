@@ -182,17 +182,20 @@ A session whose host has a ceiling PAUSES when a live usage window reaches it;
 it does not end. Three handlers (`usage_pause_gate`, `usage_pause_tool_gate`,
 `usage_pause_stop_gate`) run it, inert unless a ceiling is set:
 
-- The prompt that trips the ceiling carries a directive to replace every cron
-  with ONE one-shot resume cron at the window's reset plus two minutes, then
-  stop. The cron's schedule is a UTC expression: the Claude Code docs do not say
-  which zone `CronCreate` reads, so the directive says so and asks for no clock
-  check.
-- While paused, other prompts are dropped before the model, every tool but
-  `CronList`/`CronDelete`/`CronCreate`/`ToolSearch` is denied (and halts the
-  turn), and a stop is accepted only once exactly the resume cron remains and
-  its schedule fires before a day after the reset. A session that never submits
-  a prompt is paused by its next main-thread tool call (refused without a halt,
-  carrying the directive) or its next Stop; a subagent never starts a pause.
+- The prompt that trips the ceiling carries a directive to delete every cron
+  and create ONE recurring resume cron on the schedule `*/10 * * * *`, then
+  stop. The schedule names no clock time, so no host time zone can misplace it;
+  a tick before the resume time (the window's reset plus two minutes) is dropped
+  at zero cost. The directive also winds up subagents: start no new ones, let
+  running ones finish.
+- While paused, other prompts are dropped before the model, every main-thread
+  tool but `CronList`/`CronDelete`/`CronCreate`/`ToolSearch`/`SendMessage`/
+  `TaskStop` is denied (a new subagent included, and the turn is halted), and a
+  stop is accepted only once exactly the resume cron remains. A session that
+  never submits a prompt is paused by its next tool call (refused without a
+  halt, carrying the directive) or its next Stop. A subagent over the ceiling
+  starts the pause, but a subagent's own calls are never denied: running ones
+  finish.
 - The owner is never locked out: each held prompt re-checks the ceiling, so a
   pause that no longer applies lifts. `bin/hooks-daemon usage-pause clear`, run
   in a terminal (whether a `!`-prefixed command passes through the hooks is
@@ -203,9 +206,12 @@ it does not end. Three handlers (`usage_pause_gate`, `usage_pause_tool_gate`,
 - The resume cron's prompt starts `[tick:usage-resume]`. When it fires, usage is
   re-read: under the ceiling the pause lifts and the declared crons are
   re-created; still over it, the next resume cron is scheduled.
-- The status line shows `⏸ usage HH:MM` (local resume time).
+- The status line's usage segment (`usage_indicator`) shows the ceiling a host
+  runs under as `⛔ 80%` (`⛔ 5h 80% 7d 95%` when the windows differ), and
+  `⏸ usage HH:MM` (local resume time) while paused.
 
-No ceiling, an unknown hostname or missing usage data never pauses a session.
+No ceiling, an unknown hostname or missing, stale or API-key-only usage data
+never pauses a session; a debug log line says which.
 The pause record is `<session>.usage-paused` in the context sidecar directory,
 which the ccy supervisor also reads
 ([CcySupervisor.md](../../CLAUDE/development/CcySupervisor.md)).

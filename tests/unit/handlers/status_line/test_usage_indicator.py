@@ -16,6 +16,8 @@ from unittest.mock import patch
 import pytest
 from tests.support.status_usage import NOW, load_status_payload
 
+from claude_code_hooks_daemon.config.models import Config, HostConfig, UsageCeilingConfig
+from claude_code_hooks_daemon.constants import HookInputField
 from claude_code_hooks_daemon.core.data_layer import get_data_layer, reset_data_layer
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.handlers.status_line.usage_indicator import (
@@ -280,6 +282,86 @@ class TestPausedSession:
         explanation = UsageIndicatorHandler().explain_segment()
         assert "⏸" in explanation.glyphs
         assert "paused" in explanation.how_to_read.lower()
+
+
+class TestCeilingSegment:
+    """Plan 00479 Task 2.3: a host ceiling shows as ``⛔ <limit>%`` after the chips."""
+
+    _HOST = "sdlc-box"
+
+    @staticmethod
+    def _handler(hosts: dict[str, HostConfig]) -> UsageIndicatorHandler:
+        handler = UsageIndicatorHandler()
+        handler._config_loader = lambda: Config(hosts=hosts)
+        return handler
+
+    def _render_for(self, hosts: dict[str, HostConfig], hostname: str | None = None) -> str | None:
+        hook_input = {HookInputField.SESSION_HOSTNAME: hostname or self._HOST}
+        result = self._handler(hosts).handle(hook_input)
+        return result.context[0] if result.context else None
+
+    def test_shows_the_ceiling_when_one_applies(self) -> None:
+        _feed("main_thread_integer.json")
+        hosts = {self._HOST: HostConfig(usage_ceiling=UsageCeilingConfig(max_used_percent=80))}
+        text = self._render_for(hosts)
+        assert text is not None
+        assert _plain(text) == "| 📈 5h|7d ⛔ 80%"
+
+    def test_hidden_when_no_host_entry_matches(self) -> None:
+        _feed("main_thread_integer.json")
+        hosts = {"other": HostConfig(usage_ceiling=UsageCeilingConfig(max_used_percent=80))}
+        text = self._render_for(hosts)
+        assert text is not None
+        assert "⛔" not in text
+
+    def test_hidden_when_the_matching_entry_sets_no_ceiling(self) -> None:
+        _feed("main_thread_integer.json")
+        text = self._render_for({self._HOST: HostConfig()})
+        assert text is not None
+        assert "⛔" not in text
+
+    def test_glob_pattern_entries_apply(self) -> None:
+        _feed("main_thread_integer.json")
+        hosts = {
+            "sdlc": HostConfig(
+                pattern="sdlc-*", usage_ceiling=UsageCeilingConfig(max_used_percent=70)
+            )
+        }
+        text = self._render_for(hosts)
+        assert text is not None
+        assert _plain(text).endswith("⛔ 70%")
+
+    def test_differing_window_limits_are_labelled(self) -> None:
+        _feed("main_thread_integer.json")
+        ceiling = UsageCeilingConfig(max_used_percent=80, seven_day=95)
+        text = self._render_for({self._HOST: HostConfig(usage_ceiling=ceiling)})
+        assert text is not None
+        assert _plain(text).endswith("⛔ 5h 80% 7d 95%")
+
+    def test_a_single_window_ceiling_is_labelled(self) -> None:
+        _feed("main_thread_integer.json")
+        ceiling = UsageCeilingConfig(seven_day=90)
+        text = self._render_for({self._HOST: HostConfig(usage_ceiling=ceiling)})
+        assert text is not None
+        assert _plain(text).endswith("⛔ 7d 90%")
+
+    def test_fractional_limit_keeps_its_fraction(self) -> None:
+        _feed("main_thread_integer.json")
+        hosts = {self._HOST: HostConfig(usage_ceiling=UsageCeilingConfig(max_used_percent=82.5))}
+        text = self._render_for(hosts)
+        assert text is not None
+        assert _plain(text).endswith("⛔ 82.5%")
+
+    def test_not_shown_without_usage_data(self) -> None:
+        hosts = {self._HOST: HostConfig(usage_ceiling=UsageCeilingConfig(max_used_percent=80))}
+        assert self._render_for(hosts) is None
+
+    def test_a_payload_without_hostname_uses_the_process_hostname(self) -> None:
+        _feed("main_thread_integer.json")
+        handler = UsageIndicatorHandler()
+        handler._config_loader = lambda: Config()
+        text = handler.handle({}).context[0]
+        assert "⛔" not in text
 
 
 class TestHandlerContract:
