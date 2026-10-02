@@ -452,8 +452,13 @@ on one host): `magic_values`, `format`, `lint`, `type_check`, `pyright`,
 `handler_reference`, `hook_contract`, `input_contract`, `project_handlers` (the
 project handlers' own tests), `declared_invariant_pairs`, `skill_refs`,
 `canonical_callers`, `authored_path_stat`, `signal_targets`,
-`unreachable_handle_branch`, `fail_open_inventory` and `security`. None needs a
-live daemon. It then runs `changed_tests`: pytest on the tests mapped from every
+`unreachable_handle_branch`, `fail_open_inventory`, `security`,
+`capture_corruption`, `dangerous_invocation_corpus`, `python_var_guidance`,
+`skip_list_substring`, `sensitive_content`, `british_english`, `git_history`,
+`github_urls` and `semgrep`. None needs a live daemon. Deliberately absent:
+`security_downgrade_flags` (about 49 s), `smoke_test`, `tests`, and
+`dependencies` (it checks the local venv against `uv.lock` and runs
+`uv lock --check`, so it judges the host rather than the tree). It then runs `changed_tests`: pytest on the tests mapped from every
 file changed since the
 merge base, uncommitted and untracked files included. A change to handler code
 (`src/claude_code_hooks_daemon/handlers/**`) also selects

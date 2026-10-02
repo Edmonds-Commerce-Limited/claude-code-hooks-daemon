@@ -800,7 +800,9 @@ ALL_TOOL_NAMES = [name for name in TOOL_REGISTRY if name not in _TARGETED_ONLY_T
 #: can break any of them), the project handlers' own suite (seconds), the tools
 #: `changed_tests_map.yaml` names as covering non-Python files, and the tests
 #: mapped from the change set. Never `tests` (the whole suite), and never a
-#: tool that needs a live daemon.
+#: tool that needs a live daemon. Left out on purpose: `security_downgrade_flags`
+#: (49 s), `smoke_test` (live daemon), and `dependencies` (judges the local venv
+#: against uv.lock and runs `uv lock --check`, so it tests the host, not the tree).
 CHANGED_TOOL_NAMES: Final[list[str]] = [
     "magic_values",
     "format",
@@ -829,6 +831,15 @@ CHANGED_TOOL_NAMES: Final[list[str]] = [
     "unreachable_handle_branch",
     "fail_open_inventory",
     "security",
+    "capture_corruption",
+    "dangerous_invocation_corpus",
+    "python_var_guidance",
+    "skip_list_substring",
+    "sensitive_content",
+    "british_english",
+    "git_history",
+    "github_urls",
+    "semgrep",
     "changed_tests",
 ]
 
