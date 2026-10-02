@@ -1019,5 +1019,28 @@ The payloads are `untracked/scratch/n291_probe_{plain,assign,single_assign}.json
 **Worked around**: by splitting the filter into two literal prefix greps (`"^tests/"`, then
 `"/test_"`).
 
-**Status**: ⬜ Open. Fix with a TDD reproduction (dogfooding rule). Plan 00478's
-warn-don't-block ruling may also bear on it, if the guard cannot place the token.
+**Status**: 🔄 Branch `worktree-n291-subst-operand` in review. Commit 2a3347f6a was
+rejected: it relaxed `echo`/`printf` operands inside a substitution, so
+`cat $(echo '<protected-prefix>*')` went from denied to allowed. The output of an
+unquoted substitution is glob-expanded. Only operands that cannot reach the
+substitution's output (a grep, rg or awk pattern) may be relaxed. Probe:
+`untracked/scratch/n291_bypass.py <src dir>`.
+
+### N292 — `upgrade_approval_guard` denies a plain interpreter run with `PYTHONPATH`
+
+**Found**: by the coordinator while probing N291. This command was denied with
+R-UPGRADE-APPROVAL-ENV-BYPASS:
+
+```
+V=<venv>/bin; PYTHONPATH=/workspace/src $V/python untracked/scratch/n291_bypass.py ...
+```
+
+The script is a scratch probe that imports the secret guard. It runs no upgrade and
+names none of the upgrade scripts. Which recogniser classified it as "runs the upgrade"
+is not yet established. One candidate is the unreadable-script rule, since the interpreter
+path is a variable. Another is a token in the script.
+
+**Worked around**: the script takes the src path as `argv[1]` and inserts it into
+`sys.path`, with no environment variable.
+
+**Status**: ⬜ Open. Reproduce with `bin/hooks-daemon probe`, then fix TDD (dogfooding rule).

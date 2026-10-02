@@ -38,7 +38,8 @@ Full write-ups are in [NIGGLES.md](NIGGLES.md). One line each here:
 
 | #          | Verdict                                                                                                          | Origin              | Status                  |
 | ---------- | ---------------------------------------------------------------------------------------------------------------- | ------------------- | ----------------------- |
-| N291       | `secret_file_guard` denies a double-quoted grep regex (`.*` runs) as a mention of a protected path               | Coordinator         | ⬜ Open                 |
+| N292       | `upgrade_approval_guard` denies `PYTHONPATH=… $V/python script.py`, which runs no upgrade                        | Coordinator         | ⬜ Open                 |
+| N291       | `secret_file_guard` denies a grep regex inside `$( )` as a mention of a protected path                           | Coordinator         | 🔄 Branch in review     |
 | N290       | The coordinator stated a confident, unsearched, false claim ("the supervisor is outside this repository")        | Owner               | 🔄 Plan 00480           |
 | N289       | In this repository the slow SessionStart sweeps appear never to reach a session, unreported                      | Coordinator         | ✅ Fixed (76cf82266)    |
 | N288       | An event-socket test fails wherever the pytest process exports a hostname override                               | Task 4.1 agent      | ✅ Fixed (test only)    |
