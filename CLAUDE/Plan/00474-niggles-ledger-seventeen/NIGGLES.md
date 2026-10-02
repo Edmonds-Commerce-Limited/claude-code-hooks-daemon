@@ -1396,6 +1396,20 @@ The uncertain-move union judges the hook directory and the LAST recorded move (`
 every candidate directory (`sub`). Remedy: judge every directory any `cd` in the chain could
 land in.
 
+### N314 — no QA check bounds a module's size, so a handler reached 5,301 lines unnoticed
+
+**Source**: owner-delegated Fable ruling on 00466 N96
+([RULINGS-owner-delegated-fable.md](../00483-threat-model-conformance-audit/RULINGS-owner-delegated-fable.md#n96--subagent_full_qa_blockerpy-is-one-5301-line-handler)).
+
+**Evidence**: `subagent_full_qa_blocker.py` grew to 5,301 lines (14 classes) through review rounds
+that never flagged the size, and the N302 misclassification sat inside it. Nothing in
+`scripts/qa/` measures module length.
+
+**Status**: ⬜ Open. Remedy: a module-size check in QA with a stated bound. Today's outliers would
+need an exception list, and that is an allowlist, which needs owner approval. Until the owner rules,
+the check can only REPORT modules over the bound, not fail on them. The split of the file itself is a
+separate, sequenced pure-refactor plan.
+
 ### N313 — `git_stash` denies a `grep` naming `git stash` when its output goes into `awk`
 
 **Source**: coordinator, live, while reading a test file.
