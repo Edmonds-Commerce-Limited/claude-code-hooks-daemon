@@ -107,6 +107,20 @@ rest take the touched paths. None of them runs the whole test suite, so a
 sub-agent may run them too. Then `llm_qa.py changed` on the merged head, which is
 the same targeted run the agent owed, as soon as it can be had.
 
+**The daemon checks this at merge time.** A passing `llm_qa.py changed` on a
+clean tree (the whole selection, not a subset) records the commit it judged in
+`refs/integration/changed-green/<branch>`. That is a git ref, not
+`untracked/qa/provenance.json`, because the provenance file is written in the
+checkout the run happened in (the branch's worktree) and the merge happens in
+another; refs are shared by every worktree. A failing run of the whole
+selection drops the record, and a dirty tree or a detached HEAD records
+nothing (the run says so). `merge_qa_advisor` (Plan 00475 Task 4.2) reads it:
+on a Bash `git merge` of a `worktree-*` branch, local or `origin/`, whose head
+the record does not name, it adds an advisory naming the head and the checks
+above. It never blocks, and it is silent when the record matches, for any other
+branch, for `--abort`/`--continue`/`--quit`, and when git cannot answer. Commit
+before the run: an edit after it leaves the record on the older commit.
+
 ### Full QA Is the Coordinator's Gate; Sub-Agents Run Targeted QA
 
 The Full tier runs **once, on the main thread, when a release is prepared**

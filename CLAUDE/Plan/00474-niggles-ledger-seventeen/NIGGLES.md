@@ -366,7 +366,8 @@ whose targeted run is missing.
 
 **Status**: 🔄 Graduated to Plan 00475 Task 4.2, a merge-time advisory for a head with no
 recorded green `changed` run. `main` is repaired. The interim rule is already written down in
-`CLAUDE/QA.md` under "Before Merging: the Coordinator's Check".
+`CLAUDE/QA.md` under "Before Merging: the Coordinator's Check". Built on
+`worktree-p475-merge-qa-advisory` (`merge_qa_advisor`, advisory only), awaiting merge.
 
 ### N277 — `_resolve_python_cmd` in `init.sh` reports success after a failed resolve
 
