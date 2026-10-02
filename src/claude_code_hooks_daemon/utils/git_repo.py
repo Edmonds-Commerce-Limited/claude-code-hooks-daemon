@@ -49,6 +49,13 @@ logger = logging.getLogger(__name__)
 _OPTIONAL_LOCKS_VAR: Final[str] = "GIT_OPTIONAL_LOCKS"
 _OPTIONAL_LOCKS_DECLINED: Final[str] = "0"
 
+#: Each of these points git at a repository, work tree or index other than the
+#: one ``-C <cwd>`` names. Shared with ``git_invocation_directory``, which denies
+#: an agent's git command that sets one.
+RELOCATING_VARIABLES: Final[frozenset[str]] = frozenset(
+    {"GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR"}
+)
+
 #: Reported when git could not be run at all (absent binary, timeout). Mirrors
 #: the shell's "command not found" so callers branching on ``returncode`` need
 #: no special case for it.
@@ -94,6 +101,29 @@ def strip_branch_ref(refname: str) -> str:
     return refname.removeprefix(HEADS_PREFIX)
 
 
+def _child_environment(env: Mapping[str, str] | None) -> dict[str, str]:
+    """The environment every spawned git runs in.
+
+    Callers ADD variables (e.g. a non-interactive fetch disabling credential
+    prompts); they never replace the environment, because dropping PATH would
+    mean git is not found at all.
+
+    Two things are applied AFTER the merge, so a caller that passes a whole
+    ``os.environ`` copy cannot bring either back: the variables in
+    :data:`RELOCATING_VARIABLES` are removed, because ``-C <cwd>`` is the
+    repository the caller asked about and an inherited ``GIT_DIR`` would silently
+    answer for another; and the optional index lock is declined, an inherited
+    ``GIT_OPTIONAL_LOCKS`` would otherwise undo the one property this runner
+    exists to guarantee. A caller that needs a different repository passes
+    ``--git-dir`` as an argument.
+    """
+    merged = {**os.environ, **(env or {})}
+    for name in RELOCATING_VARIABLES:
+        merged.pop(name, None)
+    merged[_OPTIONAL_LOCKS_VAR] = _OPTIONAL_LOCKS_DECLINED
+    return merged
+
+
 def run_git(
     cwd: Path,
     *args: str,
@@ -123,15 +153,7 @@ def run_git(
     character is visible in a log; a daemon that will not start is not.
     """
     argv = ["git", "-C", str(cwd), *args]
-    # Callers ADD variables (e.g. a non-interactive fetch disabling credential
-    # prompts); they never replace the environment, because dropping PATH would
-    # mean git is not found at all.
-    #
-    # The declined lock is applied LAST, so it cannot be shadowed. That is not
-    # theoretical: a caller that passes a whole ``os.environ`` copy would
-    # otherwise reinstate an inherited ``GIT_OPTIONAL_LOCKS`` and silently undo
-    # the one property this runner exists to guarantee.
-    child_env = {**os.environ, **(env or {}), _OPTIONAL_LOCKS_VAR: _OPTIONAL_LOCKS_DECLINED}
+    child_env = _child_environment(env)
     try:
         return subprocess.run(  # nosec B603 B607 — fixed argv, no shell, trusted binary
             argv,
@@ -165,7 +187,7 @@ def read_blobs(
     if not shas:
         return {}
     argv = ["git", "-C", str(cwd), "cat-file", "--batch"]
-    child_env = {**os.environ, _OPTIONAL_LOCKS_VAR: _OPTIONAL_LOCKS_DECLINED}
+    child_env = _child_environment(None)
     request = "".join(f"{sha}\n" for sha in shas).encode("ascii")
     try:
         result = subprocess.run(  # nosec B603 B607 — fixed argv, no shell, trusted binary

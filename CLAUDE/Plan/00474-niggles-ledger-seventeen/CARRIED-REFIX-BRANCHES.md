@@ -53,7 +53,7 @@ In-scope defects, grouped:
   (`debug_info.py` redacts no secret terms and shows no banner), N250 (`remote-docs add`
   captures unscanned when the project config does not parse).
 
-Needs owner: N154 (inherited `GIT_DIR` family), N230 (`secret-meta --project-root`), N240
+Needs owner: N240 (N154 and N230 are Fixed on branch `worktree-p483-n154-n230`, not yet merged)
 (`script` writes an out-of-root log).
 
 Dismissed entries whose subject is a command have a row in
@@ -379,7 +379,7 @@ with it. RED on `59d44d08f`: 15 cases of `TestExemptionsJudgeOptionValues`,
 
 ### N230 — `secret-meta --project-root <dir>` read `allow_plain_hash` from a config the agent could write
 
-**Status on the branch**: ✅ Remedied. **On main**: ⬜ Open: needs owner (`secret-meta --project-root` trusts a config the agent wrote; owner decides whether a self-granting config counts)
+**Status on the branch**: ✅ Remedied. **On main**: ✅ Fixed (branch `worktree-p483-n154-n230`, not yet merged): Fable ruling FIX, `allow_plain_hash` is honoured only when the inspected file, resolved, lies inside the resolved `--project-root`; the "an agent cannot self-grant" claims were corrected
 
 **Found:** Plan 00421 review 5, D-RULE check (finding SH4). Shared with main.
 
@@ -989,7 +989,7 @@ its place. Release note 149.
 
 ### N154 — `run_git` passes an inherited `GIT_DIR`, `GIT_WORK_TREE` or `GIT_INDEX_FILE` through
 
-**Status on the branch**: ✅ Remedied. **On main**: ⬜ Open: needs owner (`run_git` passes an inherited `GIT_DIR`, `GIT_WORK_TREE`, `GIT_INDEX_FILE`; the cause is the daemon's own environment, not an agent-typed shape)
+**Status on the branch**: ✅ Remedied. **On main**: ✅ Fixed (branch `worktree-p483-n154-n230`, not yet merged): Fable ruling FIX; classified as a daemon self-consistency defect, not a threat-model entry. `run_git` and `read_blobs` share one `_child_environment` that drops `GIT_DIR`, `GIT_WORK_TREE`, `GIT_INDEX_FILE` and `GIT_COMMON_DIR`
 
 **Found by the small-a D-PATH and D-RULE re-reviews (shared minor).** A
 caller's environment carrying one of these variables made every git probe

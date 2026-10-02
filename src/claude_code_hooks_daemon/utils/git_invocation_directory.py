@@ -15,13 +15,9 @@ from pathlib import Path
 from typing import Final
 
 from claude_code_hooks_daemon.utils.git_commit_parsing import GitInvocation
+from claude_code_hooks_daemon.utils.git_repo import RELOCATING_VARIABLES
 
 _DASH_C: Final[str] = "-C"
-# Each of these points git at a repository, work tree or index other than the
-# one its directory names.
-_RELOCATING_VARIABLES: Final[frozenset[str]] = frozenset(
-    {"GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR"}
-)
 _RELOCATING_OPTIONS: Final[frozenset[str]] = frozenset({"--git-dir", "--work-tree"})
 _EXPANSION: Final[re.Pattern[str]] = re.compile(r"[$`*?\[]")
 _HOME_PATH: Final[re.Pattern[str]] = re.compile(r"~(?:/|$)")
@@ -40,7 +36,7 @@ def placement_problem(run: GitInvocation) -> str | None:
     """Why the repository ``run`` acts on cannot be stated, else None."""
     for assignment in run.assignments:
         name = assignment.split("=", 1)[0]
-        if name in _RELOCATING_VARIABLES:
+        if name in RELOCATING_VARIABLES:
             return f"`{name}` moves the repository or index git reads"
     for option in run.global_options:
         if option.split("=", 1)[0] in _RELOCATING_OPTIONS:
