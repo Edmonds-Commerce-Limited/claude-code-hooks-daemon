@@ -508,3 +508,18 @@ class TestGitStashQuotedWords:
 
     def test_a_quoted_recovery_verb_is_still_a_recovery(self):
         assert self._matches("git stash 'pop'") is False
+
+
+class TestGitStashPipedIntoAwk:
+    """Ledger 00474 N313: a search for `git stash` read through a literal awk."""
+
+    @staticmethod
+    def _matches(command: str) -> bool:
+        return GitStashHandler().matches({"tool_name": "Bash", "tool_input": {"command": command}})
+
+    def test_a_grep_into_a_literal_awk_is_prose(self):
+        assert self._matches("grep -n 'git stash' f.py | awk 'NR<=50'") is False
+
+    def test_an_awk_that_can_run_text_keeps_the_deny(self):
+        assert self._matches("echo 'git stash' | awk '{system($0)}'") is True
+        assert self._matches("echo 'git stash' | awk -f prog.awk") is True

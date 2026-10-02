@@ -40,6 +40,41 @@ class TestDataHeadsAreBlanked:
         assert "git stash" in command_position_view(f"echo 'git stash' | {receiver}")
 
 
+class TestAwkSink:
+    """A literal-program awk stage only reads its stdin (ledger N313)."""
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "grep -n 'git stash' f | awk 'NR<=50'",
+            "grep -n 'git stash' f | awk '{print $1}' | wc -l",
+            "grep -n 'git stash' f | awk 'NR<=50' 2>/dev/null",
+        ],
+    )
+    def test_data_piped_into_a_literal_awk_vanishes(self, command: str) -> None:
+        assert "git" not in command_position_view(command)
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "grep 'git stash' f | awk '{system($0)}'",
+            "echo 'git stash' | awk '{print | \"sh\"}'",
+            "echo 'git stash' | awk '{system(\"git stash\")}'",
+            "echo 'git stash' | awk '{print > \"f\"}'",
+            "echo 'git stash' | awk '{getline x < \"f\"}'",
+            "echo 'git stash' | awk -f prog.awk",
+            "echo 'git stash' | awk -v x=1 '{print}'",
+            "echo 'git stash' | awk '{print}' x=1",
+            "echo 'git stash' | awk -- '{print}'",
+            "echo 'git stash' | awk \"$p\"",
+            "echo 'git stash' | awk '{print}' | sh",
+            "echo 'git stash' | awk '{print}' > >(sh)",
+        ],
+    )
+    def test_an_awk_that_could_run_text_keeps_the_arguments(self, command: str) -> None:
+        assert "git stash" in command_position_view(command)
+
+
 class TestNestedShellBodies:
     def test_a_literal_c_body_is_judged_as_a_command(self) -> None:
         assert "git stash" in command_position_view("bash -c 'git stash'")

@@ -1421,8 +1421,10 @@ not one (it can `system()`), so the quoted pattern is judged as a command. A `py
 string names `git stash` is denied the same way; that one is defensible, since the interpreter could
 run it.
 
-**Status**: ⬜ Open. Candidate remedy: treat an `awk` stage whose program is a single-quoted literal
-with no `system`, `|` (getline from a command) or `>` as an inert sink.
+**Status**: ✅ Fixed on branch worktree-fp-n311-n313. An `awk` stage is an inert pipeline stage when
+its program is ONE single-quoted literal with no `system`, `getline`, `|`, `>` or `@`, no option of any
+kind (`-f`, `-v`, `--`), no `name=value` operand and no substitution; redirects are judged as for a
+sink. `awk -f`, `awk "$p"`, `print | "sh"` and `system()` stay judged as commands.
 
 ### N312 — `split_statements` counted a heredoc's body and terminator as separate statements
 
@@ -1451,7 +1453,13 @@ unparenthesised forms; the subshell form was missed. The heredoc-fix agent repor
 denied with the same rule: `export PYTHONPATH=<worktree>/src && python -m pytest …` (reported, not
 yet reproduced by the coordinator).
 
-**Status**: ⬜ Open.
+**Status**: ✅ Fixed on branch worktree-fp-n311-n313. Two causes. A subshell `(` made the first word
+`(PYTHONPATH=…`, which the guard read as neither assignment nor command; stage segments now drop their
+grouping parentheses (which also closes a hole: `(PYTHONPATH=x bash -c …)` and `(PYTHONPATH=x ./run.sh)`
+were ALLOWED before and are denied now). And a path-named interpreter (`.venv/bin/python`, missing or
+relative) was judged as a script that must be readable, so the `export` form was denied; it is now
+judged by what it runs, as `$PY` is (N285): a literal non-daemon `-m` module or a readable non-upgrade
+script is allowed, `-c`, stdin, a computed or missing script and the daemon's own CLI keep the deny.
 
 ### N310 — "unmapped [too-broad]" was treated as benign, and main stayed red twice
 

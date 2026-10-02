@@ -584,6 +584,66 @@ class TestVariableInterpreterRunningAKnownProgram:
         assert result.reason.startswith(f"BLOCKED [{ENV_RULE_ID}]")
 
 
+class TestSteeredLiteralInterpreterInAGroupOrAfterAnExport:
+    """Ledger 00474 N311: `(PYTHONPATH=/x/src /v/bin/python -m pytest t.py)` and
+    `export PYTHONPATH=/x/src && .venv/bin/python -m pytest t.py` run no
+    upgrade. A grouping `(` made the head word unreadable, and a relative or
+    missing interpreter path was judged as a SCRIPT that could not be found,
+    which counts as the upgrade once something steers. An interpreter is judged
+    by what its arguments run, as `$PY` is (N285)."""
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "(PYTHONPATH=/x/src /v/bin/python -m pytest tests/x.py -q)",
+            "( PYTHONPATH=/x/src /v/bin/python -m pytest tests/x.py -q )",
+            "((PYTHONPATH=/x/src /v/bin/python3.11 -m pytest tests/x.py))",
+            "export PYTHONPATH=/x/src && /v/bin/python -m pytest tests/x.py",
+            "export PYTHONPATH=/x/src; .venv/bin/python -m pytest tests/x.py -q",
+            "export PYTHONPATH=/x/src && (cd /tmp && /v/bin/python -m pytest t.py)",
+            "PYTHONPATH=/x/src /v/bin/python -m pytest tests/x.py",
+            "(PYTHONPATH=/x/src /v/bin/python -m pytest t.py) 2>&1",
+        ],
+    )
+    def test_a_steered_literal_module_run_is_allowed(
+        self, handler: UpgradeApprovalGuardHandler, command: str
+    ) -> None:
+        assert handler.matches(_bash(command, cwd="/nonexistent")) is False, command
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "(PYTHONPATH=x /v/bin/python -c 'import os')",
+            "(PYTHONPATH=x /v/bin/python -m claude_code_hooks_daemon.daemon.cli upgrade)",
+            "(PYTHONPATH=x /v/bin/python scripts/qa/missing.py)",
+            "(PYTHONPATH=x /v/bin/python -m pytest scripts/upgrade_version.sh)",
+            "(PYTHONPATH=x bash scripts/upgrade.sh --project-root .)",
+            "(PYTHONPATH=x bash .claude/hooks-daemon/scripts/upgrade.sh)",
+            "(PYTHONPATH=x bash -c 'bash scripts/upgrade.sh --project-root .')",
+            '(PYTHONPATH=x bash "$S")',
+            "(PYTHONPATH=x ./run.sh)",
+            '(PYTHONPATH=x /v/bin/python "$S")',
+            '(PYTHONPATH=x /v/bin/python -m "$M")',
+            "export PYTHONPATH=x && /v/bin/python -c 'import os'",
+            "export PYTHONPATH=x && /v/bin/python scripts/qa/missing.py",
+            "export PYTHONPATH=x && bash scripts/upgrade.sh --project-root .",
+            "export PYTHONPATH=x && ./run.sh",
+            "export PYTHONPATH=x && (bash scripts/upgrade.sh --project-root .)",
+            "(export PYTHONPATH=x; bash scripts/upgrade.sh --project-root .)",
+            f"({ENV_VAR_UPGRADE_HANDOFF}=/tmp/h /v/bin/python -m pytest tests/x.py)",
+            f"(export {ENV_VAR_UPGRADE_HANDOFF}=/tmp/h; python -m pytest tests/x.py)",
+        ],
+    )
+    def test_a_group_or_export_around_an_upgrade_or_unknown_program_stays_denied(
+        self, handler: UpgradeApprovalGuardHandler, command: str
+    ) -> None:
+        hook_input = _bash(command, cwd="/nonexistent")
+        assert handler.matches(hook_input) is True, command
+        result = handler.handle(hook_input)
+        assert result.reason is not None
+        assert result.reason.startswith(f"BLOCKED [{ENV_RULE_ID}]")
+
+
 class TestSteeredInterpreterRunAfterALeadingCd:
     """Ledger 00474 N292: `cd /proj && V=...; PYTHONPATH=/proj/src $V/python
     rel/probe.py` ran a readable script that is not the upgrade, and was denied
