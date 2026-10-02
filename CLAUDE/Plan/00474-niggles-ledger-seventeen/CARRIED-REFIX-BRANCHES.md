@@ -1508,7 +1508,7 @@ three new linear-cost shapes.
 
 ### N200 — An apostrophe in a comment or heredoc body hides a later quoted git subcommand from `git_stash`/`destructive_git`
 
-**Status on the branch**: ✅ Remedied. **On main**: ⬜ Open: in-scope defect for `git stash list; git stash` (a recovery word lets a real stash through; Plan 00483 triage, see TRIAGE-carried-c.md); ✅ Dismissed (threat model, limb 2) for the apostrophe-comment plus `git 'stash'` and `git "reset" --hard` shapes
+**Status on the branch**: ✅ Remedied. **On main**: ✅ Fixed (branch `worktree-n241-stash`, not yet merged): `git_stash` now judges each command segment on its own, so a recovery form in one segment no longer exempts a stash in another; ✅ Dismissed (threat model, limb 2) for the apostrophe-comment plus `git 'stash'` and `git "reset" --hard` shapes
 
 **Found by the p422 D-RULE review 6** (review of `637e08e53..cc523578d`,
 report
@@ -1546,7 +1546,7 @@ for every caller, over a corpus of comments, heredocs and ANSI-C spans),
 
 ### N241 — The git guards deny a message value inside a string another shell runs, and `git_stash` denies git messages and data heredocs mentioning a stash
 
-**Status on the branch**: ✅ Remedied. **On main**: ⬜ Open: in-scope defect (Plan 00483 triage, see TRIAGE-carried-c.md): false positives on text that only mentions `git stash` or `git reset --hard`, and a message ending in a backslash hides a real `git reset --hard`
+**Status on the branch**: ✅ Remedied. **On main**: ✅ Fixed (branch `worktree-n241-stash`, not yet merged): both guards now judge only command position (new `utils/command_position.py`), so messages, `echo`/`grep` arguments, `gh` bodies and quoted heredocs that name a stash or reset are allowed, and a single-quoted message ends at the next quote so `-m 'x\' ; git reset --hard` is denied
 
 **Found live on main and by p422-fix-8f.** `destructive_git` denied a
 `printf … >> notes.md` whose argument quoted a commit message and named

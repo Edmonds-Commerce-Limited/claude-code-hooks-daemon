@@ -431,9 +431,9 @@ class TestDestructiveGitHandler:
             "tool_name": "Bash",
             "tool_input": {"command": "echo 'avoid git reset --hard'"},
         }
-        # This will actually match because the pattern exists in the string
-        # This is acceptable behavior - better safe than sorry
-        assert handler.matches(hook_input) is True
+        # `echo` prints its argument, so the words are not a command (ledger
+        # N241). `bash -c '...'` is where a string really runs.
+        assert handler.matches(hook_input) is False
 
     # handle() Tests - Every deny leads with its rule ID (Plan 00116, Task 3.2)
     # A fresh transcript_path is used per test so each fire is a genuine first

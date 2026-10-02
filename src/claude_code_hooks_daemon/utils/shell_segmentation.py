@@ -706,7 +706,9 @@ _DUPLICATE_OPERATORS: frozenset[str] = frozenset({">&", "<&"})
 #:      (leading whitespace before the closing delimiter is tolerated — messages
 #:      are often re-indented). Any delimiter word, quoted or not, as bash
 #:      allows; whether the value is inert is `value_can_substitute`'s call.
-#:   2. A single- or double-quoted string (may span literal newlines).
+#:   2. A single- or double-quoted string (may span literal newlines). Bash
+#:      ends a single-quoted string at the next `'`: a backslash is literal
+#:      there, so `-m 'x\' ; git reset --hard` leaves the reset running.
 #:   3. A bare word (e.g. `-F commit-msg.txt`) as a fallback.
 #:
 #: The bare-word alternative stops at a shell METACHARACTER rather than at the
@@ -723,7 +725,7 @@ _MESSAGE_BODY_PATTERN = re.compile(
     r"(?P<value>"
     r"\"\$\(cat\s+<<-?\s*(?P<dq>['\"]?)(?P<delim>[^\s'\"\\;&|<>()]+)(?P=dq)"
     r"\s*\n.*?\n[ \t]*(?P=delim)[ \t]*\n?\s*\)\""
-    r"|'(?:[^'\\]|\\.)*'"
+    r"|'[^']*'"
     r'|"(?:[^"\\]|\\.)*"'
     r"|[^\s;&|<>()`]+"
     r")",
@@ -2007,6 +2009,17 @@ def _downstream_is_all_data_sinks(
         _stage_is_inert_sink(stage, fds_may_run, text_readers_only)
         for stage in split_unquoted(pipeline, ("|",))[1:]
     )
+
+
+def is_inert_pipeline_stage(stage: str) -> bool:
+    """Is ``stage`` a recognised data sink that only READS its stdin?
+
+    The same allowlist the quoted-heredoc exemption applies to a body's
+    receivers. An unrecognised or unnameable stage is not inert. A process
+    substitution anywhere in the stage is refused, and fds are assumed able to
+    reach a process, so the answer errs towards "may run".
+    """
+    return _stage_is_inert_sink(stage, fds_may_run=True)
 
 
 def quoted_heredoc_receivers(command: str) -> list[str]:
