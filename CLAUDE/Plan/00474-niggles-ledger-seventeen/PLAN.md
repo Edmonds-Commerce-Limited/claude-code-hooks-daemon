@@ -38,6 +38,7 @@ Full write-ups are in [NIGGLES.md](NIGGLES.md). One line each here:
 
 | #          | Verdict                                                                                                          | Origin              | Status                         |
 | ---------- | ---------------------------------------------------------------------------------------------------------------- | ------------------- | ------------------------------ |
+| N311       | `upgrade_approval_guard` denies `(PYTHONPATH=… python -m pytest …)` in a subshell                                | Safe-mode agent     | ⬜ Open                        |
 | N310       | `changed` selects no tests for "too-broad" files, so template/priority invariants broke main unseen              | Coordinator         | 🔄 Instances fixed (2be30049c) |
 | N309       | `remote-docs add` refuses a docs page whose example carries a session-UUID-shaped id                             | P479 agent          | ⬜ Owner decision              |
 | N308       | Owner ruling: block unguarded `;` chaining (`bash_safe_mode` to block mode in this repository)                   | Owner               | 🔄 In progress                 |

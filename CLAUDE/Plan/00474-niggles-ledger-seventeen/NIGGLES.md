@@ -1380,6 +1380,17 @@ The uncertain-move union judges the hook directory and the LAST recorded move (`
 every candidate directory (`sub`). Remedy: judge every directory any `cd` in the chain could
 land in.
 
+### N311 — `upgrade_approval_guard` denies a `PYTHONPATH=` pytest run inside a subshell
+
+**Source**: the strict-mode agent. The coordinator reproduced it with `hooks-daemon probe`.
+
+**Evidence**: `(PYTHONPATH=/tmp/src /workspace/untracked/venv-…/bin/python -m pytest tests/x.py -q)`
+is denied with R-UPGRADE-APPROVAL-ENV-BYPASS. The same command without the parentheses is allowed.
+It runs no upgrade, so this is a false positive on an ordinary shape. N285 and N292 fixed the
+unparenthesised forms; the subshell form was missed.
+
+**Status**: ⬜ Open.
+
 ### N310 — "unmapped [too-broad]" was treated as benign, and main stayed red twice
 
 **Source**: the strict-mode agent's `llm_qa changed`. The coordinator reproduced it on main.
