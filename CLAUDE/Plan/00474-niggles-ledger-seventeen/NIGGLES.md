@@ -1283,7 +1283,10 @@ or quoted text, is neither.
 a term, although the commit records `sub/f.txt`. Main allowed it before N245. This is an
 ordinary command shape, so the false positive is in scope.
 
-**Status**: ✅ Fixed (branch `worktree-n299-pathspec-followups`, not yet merged): `commit_facts` and
+**Status**: ✅ Fixed (merge 37b9a8020; 2 rounds). The coordinator re-ran the round-1 reviewer's
+26-row probe, which checks each verdict against what git actually records. Every commit main
+denies is still denied, and 11 that main allowed now are too. Two still pass on both, and both
+were already wrong on main: N306 (`cd a || cd b`) and N307 (a second commit). `commit_facts` and
 the docs/plan QA gates read the pathspec from the directory the command's `cd`/`pushd`/`-C` lands
 in (`pathspec_directory`). Round 2: a `cd` that may fail, be skipped or be backgrounded
 (`;`, `&`, `||`, a pipeline stage) is judged from both the moved and the hook directory
@@ -1299,7 +1302,7 @@ daemon's point of view), `staged_lint_gate` stands down and `remote_docs_commit_
 judges it against this repository. Main had the same wrong-repository behaviour, so N245
 did not cause it.
 
-**Status**: ✅ Fixed (branch `worktree-n299-pathspec-followups`, not yet merged): the gate stands
+**Status**: ✅ Fixed (merge 37b9a8020): the gate stands
 down when the hook `cwd`, after any `cd`/`-C` move, is in another repository. Round 2: a `cd` that
 may not take effect stands down only if both the hook directory and the moved one are another
 repository.
@@ -1311,7 +1314,7 @@ repository.
 **Evidence**: each commit gate runs its own match check, two git calls per named path. That
 is about 0.25 s per gate for 60 paths on a tiny repository, multiplied by the number of gates.
 
-**Status**: ✅ Fixed (branch `worktree-n299-pathspec-followups`, not yet merged): one
+**Status**: ✅ Fixed (merge 37b9a8020): one
 `ls-files --error-unmatch` call answers for every path; each gate still asks once (no
 cross-gate cache).
 
@@ -1372,7 +1375,10 @@ other gates.
 both as moves taken. This was already wrong on main. N299 round 2 handles it by treating any
 uncertain move as unknown and judging both directories.
 
-**Status**: ⬜ Open (folded into N299 round 2).
+**Status**: ⬜ Open. N299 round 2 did NOT close it. The probe row `cd sub || cd x; git commit -m x f.txt`, with the term in `sub/f.txt`, still records the term on both main and 37b9a8020.
+The uncertain-move union judges the hook directory and the LAST recorded move (`x`), but not
+every candidate directory (`sub`). Remedy: judge every directory any `cd` in the chain could
+land in.
 
 ### N309 — a docs page with an example session UUID cannot be vendored
 
