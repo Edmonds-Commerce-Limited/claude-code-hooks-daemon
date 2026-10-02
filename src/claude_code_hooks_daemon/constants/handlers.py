@@ -762,6 +762,15 @@ class HandlerID:
         display_name="git-upstream-checker",
     )
 
+    # Branch count advisor (SessionStart handler) — Plan 00475 Task 4.1: name
+    # open worktree-* branches beyond the limit and any far behind the default
+    # branch. Advisory only.
+    BRANCH_COUNT_ADVISOR = HandlerIDMeta(
+        class_name="BranchCountAdvisorHandler",
+        config_key="branch_count_advisor",
+        display_name="branch-count-advisor",
+    )
+
     # Reference-repo freshness sweep (SessionStart handler) — Plan 00401: fetch
     # every governed reference clone under the configured roots, fast-forward
     # the ones that are provably safe, cache the readings for the PreToolUse

@@ -115,6 +115,30 @@ config_changes:
         handlers.pre_tool_use.subagent_worktree_write_guard.enabled: false.
       recommended: true
       dormant: false
+    - key: handlers.session_start.branch_count_advisor
+      description: >-
+        At the start of a new session, counts the local `worktree-*` branches
+        (the work branches CLAUDE/Worktree.md limits to 3 at once) and names
+        them when there are more than `max_open_branches`. Also names any work
+        branch more than `behind_main_threshold` commits behind the default
+        branch. Advisory only; silent when within both limits, outside a git
+        repository, or when git fails.
+      example_yaml: |
+        handlers:
+          session_start:
+            branch_count_advisor:
+              enabled: true
+              priority: 56
+              options:
+                max_open_branches: 3
+                behind_main_threshold: 50
+      migration_note: >-
+        On by default and silent unless a repository has more than
+        `max_open_branches` `worktree-*` branches or one far behind main. Raise
+        the options to quieten it; disable with
+        handlers.session_start.branch_count_advisor.enabled: false.
+      recommended: true
+      dormant: false
     - key: persistent_crons.jobs[].runs_while_awaiting_human
       recommended: false
       dormant: true

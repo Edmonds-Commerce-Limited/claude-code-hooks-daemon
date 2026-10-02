@@ -240,6 +240,10 @@ _EARNS_GUIDANCE: dict[str, str] = {
     "WorktreeCreateHandler": "T2 the agent name that becomes the path is already chosen",
     # -- Test 3: standing policy that decays after one delivery ----------
     "BackgroundProcessTrackerHandler": "T3 watchdog protocol outlives the command",
+    "BranchCountAdvisorHandler": (
+        "T3 standing policy: the open-branch limit governs every later decision "
+        "to start a branch, long after the one session-start message"
+    ),
     "BudgetExhaustionDetectorHandler": (
         "T3 standing policy: every future detection must lead with the same "
         "bold banner and never silently retry/degrade -- the fire-time line "

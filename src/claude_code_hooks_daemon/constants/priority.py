@@ -428,6 +428,8 @@ class Priority:
     SUGGEST_STATUSLINE = 55
     VERSION_CHECK = 55
     GIT_UPSTREAM_CHECKER = 56
+    # Same slot as git_upstream_checker: both read the repository's branches.
+    BRANCH_COUNT_ADVISOR = 56
     PLAN_QA_SWEEP = 57
     CCY_SUPERVISOR_INTEGRITY = 58
     PLAN_WORKFLOW_ASSET_CHECKER = 59
