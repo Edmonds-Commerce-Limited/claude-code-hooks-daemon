@@ -24,6 +24,13 @@ live sessions, so liveness is read from the two signals it does have:
    in a session, so a Stop that omits a recorded id proves it was deleted or has
    expired (``forget_missing``).
 
+Neither signal prunes on a process restart: ``--resume``/``--continue`` restore
+unexpired crons (``remote-docs/code.claude.com/docs/en/scheduled-tasks.md``,
+"Limitations"), so a record legitimately outlives its process and keeps its
+creation time. A resumed session that reports a different set in
+``session_crons`` is reconciled by signal 2, and an id the harness did not
+restore is simply forgotten.
+
 A session that ends and is never seen again leaves its records until signal 1
 removes them, at most 7 days later. That is deliberate: there is no
 "session ended" event this module could trust for a killed process, and the
@@ -68,8 +75,11 @@ SECONDS_PER_DAY: Final[float] = float(_SECONDS_PER_DAY)
 #: One day below the expiry, for two reasons that both need slack: the refresh
 #: only lands on a Stop, and in an idle session a Stop is an hourly tick, so
 #: the window must hold many ticks (24 a day) in case some are dropped while
-#: the session waits on a human; and the platform documents the expiry only as
-#: "7 days", without saying how it counts, so the margin absorbs the difference.
+#: the session waits on a human. The expiry is "7 days after creation", after
+#: which the task fires once more and deletes itself (``scheduled-tasks.md``,
+#: "Seven-day expiry"); the doc does not say whether a restored
+#: task keeps its creation time, so a stale-looking record after ``--resume`` is
+#: at worst an early refresh.
 DEFAULT_REFRESH_AFTER_DAYS: Final[float] = 6.0
 
 _KEY_RECORDS: Final[str] = "records"
