@@ -728,6 +728,8 @@ Only the parts reachable from the seven guards were read in depth: command_posit
 
 ### X-1: the rebinding check withholds the heredoc exemption on ordinary prefixes (probe-verified)
 
+Fixed on branch worktree-p483-x1-rebind-heredoc (Task 3.2): `cd`/`pushd`/`popd`, `source`/`.` and `export NAME=<non-literal>` for a non-special NAME no longer count as rebinding; alias, function, PATH and the other special-name bindings still do.
+
 Reproducers (each denied by the named guard; the identical command WITHOUT the prefix is allowed):
 
 - `cd "$(git rev-parse --show-toplevel)" && git commit -F - <<'EOF' <prose with git reset --hard> EOF` -> destructive_git (d-h1; control d-h0 allow).
