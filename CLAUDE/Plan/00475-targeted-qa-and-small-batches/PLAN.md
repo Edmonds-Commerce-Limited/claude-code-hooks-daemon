@@ -169,6 +169,12 @@ read the plan index, ledgers and docs. So markdown is narrowed, not skipped.
   with the owner. The advisory (`branch_count_advisor`) merged in d6caefded and
   fired live on a repository with 5 `worktree-*` branches. Whether it should ever
   block awaits the owner.
+- [ ] ⬜ **Task 4.2**: Ledger 00474 N278. A `git merge` of a work branch whose head has
+  no recorded green `llm_qa.py changed` run gets an advisory. The advisory names the
+  head and the static checks to run, as listed in `CLAUDE/QA.md` under "Before Merging:
+  the Coordinator's Check". It is advisory like Task 4.1, and the owner decides whether
+  it ever blocks. This needs `llm_qa.py` to record which commit each `changed` result
+  was for. Establish whether it already does before adding anything.
 
 ## Success Criteria
 

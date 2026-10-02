@@ -364,7 +364,9 @@ Phase 4 territory). Until then, the coordinator runs the cheap static checks
 (`format lint type_check error_hiding input_contract`) itself before any merge
 whose targeted run is missing.
 
-**Status**: ⬜ Open (main repaired; the process gap stands).
+**Status**: 🔄 Graduated to Plan 00475 Task 4.2, a merge-time advisory for a head with no
+recorded green `changed` run. `main` is repaired. The interim rule is already written down in
+`CLAUDE/QA.md` under "Before Merging: the Coordinator's Check".
 
 ### N277 — `_resolve_python_cmd` in `init.sh` reports success after a failed resolve
 
