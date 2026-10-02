@@ -957,3 +957,35 @@ checkouts.
 **Status**: 🔄 Most of the remaining 8.2 s is spent judging the scratch probe copies.
 Deleting them is the owner's call, since it is a bulk deletion of earlier runs' evidence. A
 live SessionStart probe on the restarted daemon is still to be done.
+
+### N290 — the coordinator stated a confident, unverified, false claim about the codebase
+
+**Found**: by the owner ("supervisor lives outside this repository?? what????"). While
+filing Plan 00479, the coordinator wrote that the ccy supervisor "is outside this
+repository", in the plan's Non-Goals, in Task 4.5 and in its message to the owner. No search
+backed it. The supervisor is `.claude/ccy/claude-supervise.py`, with tests under
+`tests/unit/supervise/` and docs in `CLAUDE/development/CcySupervisor.md`. The guess came from
+a remembered constraint ("never touch the live supervisor") being restated as a fact about
+where the code lives. It changed the design of Task 4.5 until the owner caught it
+(corrected in f1592f146).
+
+**Why nothing caught it**: `nitpick.hedging_language` flags uncertain wording. A confident
+false claim has none, and it is the more dangerous case. The owner reports this as a pattern
+in the current model: confidently stating guesses.
+
+**Candidate remedy**, proposed to the owner: a Stop-time check, and the same check on
+PLAN.md commits.
+
+- **What it flags**: negative-existence and location claims about the codebase, such as "X is
+  outside this repository", "nothing does Y", "there is no Z" and "only W reads it".
+- **When it blocks**: when the turn ran no search (Grep, Glob, LSP, or a search command) that
+  could support the claim.
+- **What it asks for**: verify the claim, or mark it as unverified.
+- **First failing fixture**: this sentence.
+
+Also proposed:
+
+- a verifier-agent pass that tries to disprove each factual claim in a new plan;
+- a guidance rule that a claim about repository structure cites a path or a command.
+
+**Status**: ⬜ Open, awaiting the owner's choice of remedy.
