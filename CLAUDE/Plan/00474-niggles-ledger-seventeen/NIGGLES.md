@@ -1091,4 +1091,24 @@ already narrows the walk to one directory.
 - The `"$x"$F/...` word is relative in bash, under an unknown `$x`. Treating it as `$F/...` judges a
   path the shell would never touch.
 
-**Status**: ⬜ Open, owner priority. Next free slot.
+**Status**: ✅ Fixed (92b9b49e0, merged).
+
+**Fix**: `bounded_recursive_glob` now walks from the longest existing literal prefix. The root
+refusal applies only to a walk that still starts at `/`, including a prefix that resolves back to
+`/` through `..` or a symlink.
+
+**Unreadable sibling**: when a wildcard selects a directory that cannot be searched, a fully named
+path inside it is judged by its name.
+
+**Correction to the issue**: `"$x"$F/...` is NOT unreachable. An empty `$x` reaches `$F/...`, so
+both readings are judged.
+
+**Comment route 1** (script content, daemon cwd) did not reproduce in 48 combinations. Regression
+tests pin it.
+
+**Coordinator safety probe** (`untracked/scratch/gh68_deny.py`): every denied shape with a
+protected file under F has the same verdict on the branch as on main. All the issue's cases are
+now allowed.
+
+**Accepted residual, unchanged**: a bare generic glob (`cat $F/*/*`) is not treated as a mention
+of a protected file (Plan 00272 Decision 12).
