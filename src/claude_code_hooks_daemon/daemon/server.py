@@ -1873,8 +1873,7 @@ class HooksDaemon:
                 await writer.drain()
         finally:
             self._active_requests -= 1
-            writer.close()
-            await writer.wait_closed()
+            await self._close_writer(writer)
 
     def _signal_handler(self, sig: signal.Signals) -> None:
         """Handle shutdown signals.
@@ -2177,8 +2176,28 @@ class HooksDaemon:
 
         finally:
             self._active_requests -= 1
-            writer.close()
+            await self._close_writer(writer)
+
+    @staticmethod
+    async def _close_writer(writer: asyncio.StreamWriter) -> None:
+        """Close a client connection, tolerating a peer that already hung up.
+
+        ``wait_closed()`` re-raises the transport's stored error, so a peer
+        that vanished mid-response made the same BrokenPipeError the handler
+        already classified escape the ``finally`` block as an unretrieved task
+        exception. A hang-up during close is not a daemon fault: it is
+        recorded at DEBUG and the connection is already gone.
+        """
+        writer.close()
+        try:
             await writer.wait_closed()
+        except (BrokenPipeError, ConnectionResetError) as exc:
+            HooksDaemon._record_peer_gone_at_close(exc)
+
+    @staticmethod
+    def _record_peer_gone_at_close(exc: OSError) -> None:
+        """Record, at DEBUG, a client that hung up while its connection closed."""
+        logger.debug("Client already gone while closing its connection: %r", exc)
 
     @staticmethod
     def _log_lost_peer(response: dict[str, Any] | None) -> None:
