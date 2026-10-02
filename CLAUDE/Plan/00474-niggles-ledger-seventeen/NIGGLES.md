@@ -1429,7 +1429,7 @@ That file was older than `relay/hooks_relay.rs`: `grep -a 'is over the cap'` fou
 the source and not in the binary. After `bash relay/build.sh`, the relay suites passed (129).
 Nothing tells a developer the binary is stale, so the failures look like a relay regression.
 
-**Status**: ✅ Fixed on worktree-n319-relay-stale. `relay/build.sh` writes a `<binary>.source-sha256`
+**Status**: ✅ Fixed (merge ae3230744). `relay/build.sh` writes a `<binary>.source-sha256`
 sidecar and the `fresh_relay_build` fixture in `tests/relay_gate_guard.py` fails (never skips) with
 "rebuild with `bash relay/build.sh`" when it is missing or differs from the source hash.
 
