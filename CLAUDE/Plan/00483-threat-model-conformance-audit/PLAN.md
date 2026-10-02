@@ -1,6 +1,6 @@
 # Plan 00483: threat model conformance audit
 
-**Status**: Not Started
+**Status**: In Progress
 **Created**: 2026-10-02
 **Owner**: dev
 **Priority**: High
@@ -75,7 +75,11 @@ other than defeating a parser. Everything else, every ordinary respelling includ
 
 ### Phase 2: Triage the backlog
 
-- [ ] ⬜ **Task 2.1**: Classify every open entry in ledger 00474: its index, its carried lists
+- [ ] 🔄 **Task 2.1**: The 55 carried entries are done: [TRIAGE-carried-a.md](TRIAGE-carried-a.md),
+  [TRIAGE-carried-b.md](TRIAGE-carried-b.md), [TRIAGE-carried-c.md](TRIAGE-carried-c.md). The
+  results: 23 in-scope defects, 14 dismissed, 13 fixed on main, 2 folded, 3 for the owner (N154,
+  N230, N240). Still to classify: the 65 entries open in ledger 00466. Classify every open entry
+  in ledger 00474: its index, its carried lists
   ([CARRIED-REFIX-BRANCHES.md](../00474-niggles-ledger-seventeen/CARRIED-REFIX-BRANCHES.md),
   [CARRIED-N53-BRANCH.md](../00474-niggles-ledger-seventeen/CARRIED-N53-BRANCH.md)), and
   the 65 entries still open in archived ledger 00466. Each entry is either an in-scope defect,
@@ -84,7 +88,9 @@ other than defeating a parser. Everything else, every ordinary respelling includ
 - [ ] ⬜ **Task 2.2**: Classify the 14 `UNCOVERED-open` rows in
   `scripts/qa/dangerous-invocation-corpus.yaml` the same way. Move dismissals to
   `UNCOVERED-accepted` with the reason.
-- [ ] ⬜ **Task 2.3**: Record every dismissal: in the ledger, mark it
+- [ ] 🔄 **Task 2.3**: Done for the carried entries (merge 56677e3c6). That added 9
+  `UNCOVERED-accepted` corpus rows. N201, N228 and N257 have no row, because main denies the
+  representative command anyway. Record every dismissal: in the ledger, mark it
   `Dismissed (threat model)`; for a command, add a corpus row. The coordinator checks each
   batch's classifications against the two-part test before they land.
 
