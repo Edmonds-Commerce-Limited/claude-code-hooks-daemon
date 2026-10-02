@@ -647,6 +647,10 @@ One line each; these fire with their own guidance when relevant. Full text: `bin
 
 - markdown_table_formatter — markdown tables are auto-aligned
 
+<!-- handler: merge-qa-advisor -->
+
+- merge_qa_advisor — merge a work branch with its targeted QA recorded
+
 <!-- handler: merge-qa-report -->
 
 - merge_qa_report — post-hoc plan/docs QA report after a merge
