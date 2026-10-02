@@ -179,8 +179,10 @@ read the plan index, ledgers and docs. So markdown is narrowed, not skipped.
   in, which is the branch's worktree, not the one that merges. A passing run of the
   whole `changed` selection on a clean tree now also records its head in
   `refs/integration/changed-green/<branch>` (refs are shared by every worktree), and
-  the `merge_qa_advisor` handler reads it. Built on `worktree-p475-merge-qa-advisory`,
-  awaiting merge.
+  the `merge_qa_advisor` handler reads it. Merged in 301805f1f. A live probe of
+  `git merge --no-ff origin/worktree-p479-pause-gate` drew the advisory, naming head
+  563b78f2a. A branch the remote does not hold yet drew nothing, as designed. Whether it
+  should ever block awaits the owner, as for Task 4.1.
 
 ## Success Criteria
 
