@@ -1182,6 +1182,40 @@ class TestHandlerChain:
         # `slow` matched and was running when the budget expired: matched, never finished.
         assert result.handlers_matched == ["fast", "slow"]
 
+    def test_the_overrun_note_names_the_handlers_that_did_not_finish(self) -> None:
+        """N289: the cut-off was reported only as a COUNT of finished handlers,
+        so the dropped sweeps were never named. The handler running when the
+        budget expired and every handler behind it are named; one that already
+        finished is not."""
+        chain = HandlerChain()
+        fast = MockHandler(
+            "fast", priority=10, result=HookResult.allow(context=["fast handler output"])
+        )
+        running = MockHandler("running-sweep", priority=20, sleep_in_handle=5.0)
+        behind = MockHandler("unreached-sweep", priority=30)
+        chain.add(fast)
+        chain.add(running)
+        chain.add(behind)
+
+        result = chain.execute({"tool_name": "Bash"}, deadline_seconds=0.2)
+
+        notes = [ctx for ctx in result.result.context if "Chain cut short" in ctx]
+        assert len(notes) == 1
+        assert "did not finish: running-sweep, unreached-sweep" in notes[0]
+        assert "fast" not in notes[0].split("did not finish")[1]
+
+    def test_the_skipped_note_names_the_handlers_that_did_not_finish(self) -> None:
+        """When NOTHING finished the reply is "Chain skipped"; it names them too."""
+        chain = HandlerChain()
+        chain.add(MockHandler("only-sweep", priority=10, sleep_in_handle=5.0))
+
+        result = chain.execute({"tool_name": "Bash"}, deadline_seconds=0.2)
+
+        assert any(
+            ctx.startswith("Chain skipped:") and "did not finish: only-sweep" in ctx
+            for ctx in result.result.context
+        )
+
     def test_cut_short_response_is_not_mutated_by_the_abandoned_thread(self) -> None:
         """The abandoned thread keeps running and, when its loop ends, merges
         its own results. That must not reach the response already returned."""

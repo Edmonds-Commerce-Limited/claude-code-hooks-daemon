@@ -286,6 +286,18 @@ def _apply_segstar(reachable: list[bool], text: str) -> list[bool]:
     return new_reachable
 
 
+def _literals_present(tokens: list[_Token], text: str) -> bool:
+    """Whether every literal run in ``tokens`` occurs somewhere in ``text``.
+
+    A necessary condition for a full match: the sweeps only ever consume a
+    literal run by finding it in ``text``. One C-level substring test per
+    literal rejects the common case (a path that has nothing to do with the
+    pattern) before any ``len(text)``-sized reachability array is built --
+    the dominant cost of a sweep over ~18,000 repository paths (N289).
+    """
+    return all(token.literal in text for token in tokens if token.kind == "LITSTR")
+
+
 def _glob_fullmatch(
     pattern: str, text: str, *, step_cache: dict[tuple[object, ...], list[bool]] | None = None
 ) -> bool:
@@ -308,6 +320,8 @@ def _glob_fullmatch(
     while the cache is live.
     """
     tokens = _tokens_for(pattern)
+    if not _literals_present(tokens, text):
+        return False
     n = len(text)
     reachable = [False] * (n + 1)
     reachable[0] = True

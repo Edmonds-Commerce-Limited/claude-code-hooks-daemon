@@ -28,6 +28,26 @@ def realpath(path: str | os.PathLike[str]) -> str:
     return os.path.realpath(path, strict=False)
 
 
+def resolve_checking_loop(path: str | os.PathLike[str]) -> tuple[str, bool]:
+    """``(realpath(path), has_symlink_loop(path))`` in a single walk when it can.
+
+    A repository-wide sweep asks both questions of every file, and answering
+    them separately walks each path twice. ``strict=True`` resolution answers
+    both for an existing path: when it succeeds it returns the same string the
+    non-strict call would, and no loop was on the way. Only a path that does
+    not resolve strictly falls back to the two separate calls, so the result is
+    identical to the pair on every shape.
+
+    Raises:
+        ValueError: For a path ``os.path.realpath`` itself rejects (a NUL byte),
+            as :func:`realpath` does.
+    """
+    try:
+        return os.path.realpath(path, strict=True), False
+    except OSError:
+        return realpath(path), has_symlink_loop(path)
+
+
 def has_symlink_loop(path: str | os.PathLike[str]) -> bool:
     """True when resolving ``path`` passes through a symlink loop.
 
