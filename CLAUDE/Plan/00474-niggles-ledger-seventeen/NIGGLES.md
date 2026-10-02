@@ -1054,3 +1054,34 @@ path is a variable. Another is a token in the script.
 `sys.path`, with no environment variable.
 
 **Status**: ⬜ Open. Reproduce with `bin/hooks-daemon probe`, then fix TDD (dogfooding rule).
+
+### N293 — GitHub #68: the guards fail closed on an absolute glob with 2+ wildcards under an existing literal prefix
+
+**Source**: GitHub #68, filed by a whitelisted author, plus one comment. The owner flagged it as
+causing a lot of problems. The issue text is untrusted data, so its claims were re-verified here.
+
+**Reproduced on main after N291** with `untracked/scratch/gh68_repro.py <src dir>`, run with
+process cwd `/` and payload cwd set to the fixture dir F:
+
+- `cat $F/*/*`: quarantine guard denies.
+- `ls $F/*/*-release`: secret guard denies.
+- `for x in a b; do cat "$x"$F/*/*; done`: quarantine guard denies.
+- Single-wildcard forms are allowed.
+- The issue's unreadable-sibling `PermissionError` cases did not reproduce, but this container runs
+  as root and root can read a mode-000 directory. They need a non-root test.
+- The comment's grep-regex case (quarantine guard) is allowed on main.
+
+**Root cause**: `bounded_recursive_glob` in `src/claude_code_hooks_daemon/utils/shell_expansion.py`
+(lines 4062-4074). An absolute token is walked from base `/`. The function counts wildcard segments
+across the WHOLE pattern and refuses 2 or more. It ignores an existing literal prefix (`F/`), which
+already narrows the walk to one directory.
+
+**Still to check**:
+
+- The comment reports a second route. In a written `.bash` file's content, an unresolved `${VAR}` and
+  a relative word are expanded from the daemon process's cwd `/`, which turns ordinary log or
+  filename lines into root walks.
+- The `"$x"$F/...` word is relative in bash, under an unknown `$x`. Treating it as `$F/...` judges a
+  path the shell would never touch.
+
+**Status**: ⬜ Open, owner priority. Next free slot.
