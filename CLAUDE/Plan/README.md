@@ -4,6 +4,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
+- [00485: split subagent full qa blocker](00485-split-subagent-full-qa-blocker/PLAN.md) - Not Started (owner-delegated Fable ruling on 00466 N96: pure-refactor split of the 5,300-line handler along its class seams; starts only once no open branch touches the file)
+
 - [00484: DBF adoption and toolchain conformance](00484-dbf-adoption-and-toolchain-conformance/PLAN.md) - In Progress (owner ruling: fully adopt Defence Before Fix and link it, #65 and #67; assess the daemon as a DBF toolchain against TOOLING-SPEC and let DBF tools enumerate its defences)
 
 - [00483: threat model conformance audit](00483-threat-model-conformance-audit/PLAN.md) - In Progress (owner ruling: the daemon is guardrails, not armour; check every guard, open ledger entry and uncovered corpus row against the careless-not-hostile threat model, dismiss the out-of-scope ones on record, fix and narrow the rest)
@@ -296,7 +298,7 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 - **Completed**: 415 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 46 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 47 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 
