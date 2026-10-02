@@ -167,9 +167,20 @@ the daemon directs the model and then verifies what it did.
 - [x] ✅ **Task 4.7** (merged 506fd3f5e): Data safety. No snapshot, or no `rate_limits` at all, never pauses a
   session, and a debug log line records why. A paused session shows `⏸ usage` and its resume
   time in the status line.
-- [ ] ⬜ **Task 4.8**: Acceptance tests. Run a live probe with a synthetic snapshot above the
+- [ ] 🔄 **Task 4.8**: Acceptance tests. Run a live probe with a synthetic snapshot above the
   ceiling through the whole cycle: pause directive, cron set reduced to the resume cron,
   stop allowed, resume tick lifts the pause.
+  - Handler cycle: every step passed in an isolated in-process harness with synthetic
+    sessions
+    ([report](subagent-reports/261002-p479-acceptance-sonnet.md)).
+
+  - Not yet exercised:
+
+    - the daemon chain: the scope filter, priority order, and the response formatter that
+      writes `continue: false` / `stopReason` on the wire;
+    - real `CronDelete`/`CronCreate` calls.
+
+    An integration test through the dispatcher closes the first gap.
 
 ### Phase 5: Docs and release
 
