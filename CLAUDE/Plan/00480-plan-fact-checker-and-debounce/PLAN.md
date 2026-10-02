@@ -71,15 +71,20 @@ as principle 1.
 
 ### Phase 2: The fact checker
 
-- [ ] ⬜ **Task 2.1**: Write the agent definition `.claude/agents/plan-fact-checker.md` (Sonnet,
+- [x] ✅ **Task 2.1** (2fbb24bbd): Write the agent definition `.claude/agents/plan-fact-checker.md` (Sonnet,
   read-only tools), turning the experiment's brief into a reusable contract.
   - **Input**: a plan path and a diff, or a whole document.
   - **Output**: a fixed, machine-readable verdict table written to the plan's
     `subagent-reports/`, plus a one-line summary.
   - **History**: it must not consult git history for the claim under test, so it judges
     against the current tree only.
-- [ ] ⬜ **Task 2.2**: Run it on two or three more real plan diffs from git history, including
+- [x] ✅ **Task 2.2**: Run it on two or three more real plan diffs from git history, including
   one known to be correct, to measure false refutations before wiring it in.
+  - **Blind re-run**: refuted the supervisor claim again.
+  - **Plan 00475**: 2 genuine errors, fixed there, plus 4 stale problem statements; no outright
+    false refutation.
+  - **Recall varies**: 9 claims itemised in one run against 26 in another.
+  - **Lesson**: check the DIFF at edit time (JOURNAL 26-10-02).
 
 ### Phase 3: Debounce as a daemon primitive (TDD)
 
