@@ -75,6 +75,24 @@ class TestMatchesNegative:
     def test_single_statement_never_flagged(self, handler: BashSafeModeHandler) -> None:
         assert handler.matches(_bash("ls -la untracked/")) is False
 
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "cat > notes.md <<'EOF'\nnever run x\nEOF",
+            "cat > notes.md <<EOF\nnever run x\nEOF",
+            "bash <<'EOF'\ncmd1\ncmd2\nEOF",
+        ],
+    )
+    def test_single_heredoc_command_is_one_statement(
+        self, handler: BashSafeModeHandler, command: str
+    ) -> None:
+        assert handler.matches(_bash(command)) is False
+
+    def test_heredoc_followed_by_command_is_two_statements(
+        self, handler: BashSafeModeHandler
+    ) -> None:
+        assert handler.matches(_bash("cat > a <<'EOF'\nbody\nEOF\necho x")) is True
+
     def test_pure_and_chain_is_one_statement(self, handler: BashSafeModeHandler) -> None:
         # `&&`-only chaining IS consumption; split on (";", "\n") yields one
         # statement, below the threshold — BRAINSTORM §4's resolution.

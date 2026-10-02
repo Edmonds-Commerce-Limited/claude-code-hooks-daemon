@@ -333,7 +333,7 @@ class VerificationResultGateHandler(PreToolUseHandlerBase):
         if not command:
             return None
 
-        statements = split_statements(command)
+        statements = split_statements(command, heredoc_bodies_executable=True)
 
         if has_errexit(statements):
             return None

@@ -1396,6 +1396,22 @@ The uncertain-move union judges the hook directory and the LAST recorded move (`
 every candidate directory (`sub`). Remedy: judge every directory any `cd` in the chain could
 land in.
 
+### N312 — `split_statements` counted a heredoc's body and terminator as separate statements
+
+**Source**: coordinator, main red on `tests/integration/test_handlers_do_not_match_prose.py`.
+
+**Evidence**: `split_statements("cat > notes.md <<'EOF'\nnever run x\nEOF")` returned three
+statements (the opener, the `HEREDOC_BODY` placeholder, `EOF`). With `bash_safe_mode` blocking by
+default, every one-command heredoc write was denied for lacking `set -euo pipefail`. Two prose
+cases failed: a literal inside a quoted heredoc, and a quoted heredoc body naming `git stash`.
+
+**Status**: ✅ Fixed on `worktree-bsm-heredoc-statements`. A heredoc (opener line, body,
+terminator) is one statement, quoted or unquoted delimiter, `<<-` included; `bash <<'EOF'` counts as
+one outer statement because the outer `set -e` does not govern the inner shell. `<<<` is not a
+heredoc. The callers that look for a command INSIDE an executed body
+(`verification_result_gate`, `flaggable_content_channel_guard`, `quarantine_artefact_read_guard`)
+pass `heredoc_bodies_executable=True` and keep the previous reading.
+
 ### N311 — `upgrade_approval_guard` denies a `PYTHONPATH=` pytest run inside a subshell
 
 **Source**: the strict-mode agent. The coordinator reproduced it with `hooks-daemon probe`.
