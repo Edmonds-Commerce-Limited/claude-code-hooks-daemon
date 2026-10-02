@@ -853,6 +853,31 @@ _UNSEEN_INTERPRETER_REASON: Final[str] = (
 #: used for its listing-producer recognition).
 _INLINE_CODE_FLAG_EXEMPT_PROGRAMS: Final[frozenset[str]] = frozenset({_GIT})
 
+#: Search and text tools, for which those letters mean count, pattern,
+#: extended, recursive or raw (`grep -c`, `grep -e PATTERN`, `jq -r`, `wc -c`)
+#: -- never code (N302). Matched by exact program name, so an unknown program
+#: that merely resembles one (`grepx`) keeps the generic rule. `awk` is here
+#: because its program is a positional argument that is not judged either, so
+#: flagging `awk -e` protected nothing the bare form does not already allow.
+_INLINE_CODE_FLAG_TEXT_TOOLS: Final[frozenset[str]] = frozenset(
+    {
+        "grep",
+        "egrep",
+        "fgrep",
+        "rg",
+        "awk",
+        "gawk",
+        "mawk",
+        "nawk",
+        "wc",
+        "sort",
+        "head",
+        "tail",
+        "cut",
+        "jq",
+    }
+)
+
 
 def _runs_inline_code(program: str, arguments: Sequence[str]) -> bool:
     """Whether ``arguments`` names one of the flags that hand an interpreter code inline.
@@ -862,6 +887,8 @@ def _runs_inline_code(program: str, arguments: Sequence[str]) -> bool:
     starts with one of these letters (``--effect``).
     """
     if program in _INLINE_CODE_FLAG_EXEMPT_PROGRAMS:
+        return False
+    if program.rsplit("/", 1)[-1] in _INLINE_CODE_FLAG_TEXT_TOOLS:
         return False
     return any(argument in _INLINE_CODE_FLAGS for argument in arguments)
 
