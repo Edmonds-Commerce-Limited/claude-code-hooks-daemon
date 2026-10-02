@@ -96,7 +96,9 @@ full sweep for ever while every record read as healthy.
 4. Record every confirmed finding in the [security register](../../Security/README.md),
    under its category, naming its Defence. A category with no Defence yet is
    written only once the Defence exists — the register must not claim coverage
-   it does not have.
+   it does not have. A candidate that fails the threat model's test (CHECKS.md,
+   "Scope of every check") is not a finding: record it as `Dismissed (threat model)`, add the `UNCOVERED-accepted` corpus row when it is a command, and do
+   not enter it in the register.
 
 5. Fix under **Defence Before Fix**: the Defence lands before the fix, every
    time, and each Defence is a Detector in `scripts/qa/` wired into

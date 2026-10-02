@@ -19,11 +19,15 @@ Read [CLAUDE/Routine/00001-security-review-full/CHECKS.md](../../CLAUDE/Routine/
 and work to the check you were named, not to a general notion of "security".
 The threat model is a careless agent, not a hostile one
 ([CLAUDE/ARCHITECTURE.md § Threat model](../../CLAUDE/ARCHITECTURE.md#threat-model-the-agent-is-careless-not-hostile)).
-Do not report a bypass that only a deliberately obfuscated or evasive command
-reaches. Ask first whether a careless agent would plausibly type it.
+Do not report a bypass that fails its two-part test: the operative text is not
+visible to the daemon at call time, or the shape has no working purpose other
+than defeating a parser. Ordinary respellings and literal bodies are in scope.
+Report an out-of-scope hit only as `Dismissed (threat model)`, naming the shape,
+and never because the agent might have been prompt-injected.
 Read [CLAUDE/Security/README.md](../../CLAUDE/Security/README.md) before
 starting: a class already in the register has a Defence, and what that Defence
-**does not catch** is the most productive place to look.
+**does not catch** is the most productive place to look. Skip residue already
+recorded `UNCOVERED-accepted` in `scripts/qa/dangerous-invocation-corpus.yaml`.
 
 The method is Defence Before Fix, specified at
 <https://defence-before-fix.github.io/> and summarised for this project in
@@ -48,16 +52,19 @@ is. For each finding:
 2. **What it allows** — the concrete wrong outcome, not a category name. "A
    link to a file that exists is reported as dead, and the write is denied"
    beats "path handling issue".
-3. **The class** — what makes a defect belong to it, written so the next
+3. **Threat-model test** — which shape the finding needs and why it is in
+   scope. A finding you cannot place in scope is reported as dismissed, not as
+   a finding.
+4. **The class** — what makes a defect belong to it, written so the next
    person can decide a new case without asking you.
-4. **Why the test suite does not catch it.** The tests pass and the defect is
+5. **Why the test suite does not catch it.** The tests pass and the defect is
    present; say why. If you cannot write this, you may be looking at something
    already covered — check the register again before reporting.
-5. **A Detector hypothesis** — what rule, reading code or docs, would find
+6. **A Detector hypothesis** — what rule, reading code or docs, would find
    every member of the class. Name its likely false positives. A rule that
    fires on far more than it catches will be suppressed, so a rule you believe
    is noisy is worth reporting AS noisy rather than as clean.
-6. **Your confidence, and what would settle it.** A hypothesis you could not
+7. **Your confidence, and what would settle it.** A hypothesis you could not
    confirm is a legitimate report. An unmarked guess is not.
 
 ## The two answers you must never confuse

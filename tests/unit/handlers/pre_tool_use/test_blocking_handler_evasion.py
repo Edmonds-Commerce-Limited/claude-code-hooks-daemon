@@ -35,8 +35,10 @@ substituted. Inside a token they are opposites: bash joins ``re``+``set`` into
 pattern matches. That made every guard built on this helper evadable by
 splitting a word across two lines.
 
-Handlers must fail CLOSED. A false positive here is acceptable and already
-documented as intended; a silent bypass is not.
+Within the ordinary-respelling scope below, handlers must fail CLOSED: a false
+positive is acceptable and already documented as intended; a silent bypass is
+not. Shapes built to defeat a parser are out of scope (CLAUDE/ARCHITECTURE.md,
+"Threat model: the agent is careless, not hostile") and have no row here.
 """
 
 from __future__ import annotations
