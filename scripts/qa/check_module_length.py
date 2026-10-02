@@ -20,7 +20,7 @@ Usage:
 
 Exit codes:
     0 - Report produced (with or without modules over the bound)
-    2 - Operational failure (no ``src/`` directory to measure)
+    2 - Operational failure (no ``src/`` directory, or no module in it, to measure)
 """
 
 from __future__ import annotations
@@ -32,12 +32,16 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
 
+from claude_code_hooks_daemon.utils.path_containment import path_relative_to
+from claude_code_hooks_daemon.utils.scan_scope import vacuous_scan_failure, walk_files
+
 _PROJECT_ROOT: Final[Path] = Path(__file__).resolve().parents[2]
 
 _QA_OUTPUT_DIR_PARTS: Final[tuple[str, str]] = ("untracked", "qa")
 _OUTPUT_FILENAME: Final[str] = "module_length.json"
 _TOOL_NAME: Final[str] = "module_length"
 _SOURCE_DIR: Final[str] = "src"
+_PYTHON_GLOB: Final[str] = "*.py"
 _MODE: Final[str] = "report-only"
 
 MAX_MODULE_LINES: Final[int] = 1000
@@ -82,11 +86,11 @@ def scan(root: Path) -> tuple[list[Finding], int]:
         raise FileNotFoundError(f"no {_SOURCE_DIR}/ directory under {root}")
     findings: list[Finding] = []
     scanned = 0
-    for path in sorted(source.rglob("*.py")):
+    for path in walk_files(source, _PYTHON_GLOB):
         scanned += 1
         lines = len(path.read_text(encoding="utf-8").splitlines())
         if lines > MAX_MODULE_LINES:
-            findings.append(Finding(path.relative_to(root).as_posix(), lines))
+            findings.append(Finding(path_relative_to(path, root).as_posix(), lines))
     findings.sort(key=lambda finding: (-finding.lines, finding.file))
     return findings, scanned
 
@@ -111,6 +115,11 @@ def main(argv: list[str] | None = None) -> int:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 2
 
+    vacuous = vacuous_scan_failure(examined=scanned, noun="modules", root=root / _SOURCE_DIR)
+    if vacuous is not None:
+        print(f"ERROR: {vacuous}", file=sys.stderr)
+        return 2
+
     payload: dict[str, object] = {
         "tool": _TOOL_NAME,
         "summary": {
@@ -118,7 +127,7 @@ def main(argv: list[str] | None = None) -> int:
             # Report-only: findings never fail the run.
             "passed": True,
             "bound": MAX_MODULE_LINES,
-            "modules_scanned": scanned,
+            "files_scanned": scanned,
             "modules_over_bound": len(findings),
         },
         "violations": [finding.to_dict() for finding in findings],
