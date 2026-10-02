@@ -113,27 +113,30 @@ The owner's rulings set the protocol:
 A hook cannot create or delete crons itself (`CronCreate`/`CronDelete` are model tools), so
 the daemon directs the model and then verifies what it did.
 
-- [ ] ⬜ **Task 4.1**: Pause entry. At or above the ceiling, the `UserPromptSubmit` gate
+- [x] ✅ **Task 4.1** (merged 506fd3f5e): Pause entry. At or above the ceiling, the `UserPromptSubmit` gate
   refuses the incoming work, cron ticks and supervisor messages included. It delivers the
   pause directive instead: delete every cron (the failsafe and declared jobs included),
   create ONE recurring `*/10 * * * *` resume cron (it names no clock time, so no host time
   zone can misplace it; ticks before the resume time are dropped at no cost), then stop. The directive names the window, its
   percentage, the ceiling and the resume time. The resume time is the latest `resets_at`
   among the windows over the ceiling, plus a small margin.
-- [ ] ⬜ **Task 4.2**: During the pause, the `PreToolUse` gate allows only `CronList`,
-  `CronDelete` and `CronCreate`. Any other tool is denied, with `continue: false` and a
+- [x] ✅ **Task 4.2** (merged 506fd3f5e). Owner ruling, round 4: subagents are never denied
+  or halted. Running ones finish, the main thread winds them up, and no new ones start
+  (`Agent`/`Task` denied). A subagent over the ceiling still starts the pause. The main thread
+  may also use `ToolSearch`, `SendMessage` and `TaskStop`. During the pause, the `PreToolUse`
+  gate allows only `CronList`, `CronDelete` and `CronCreate`. Any other tool is denied, with `continue: false` and a
   `stopReason`, so a turn already running halts at its next tool call. Prerequisite:
   `PRE_TOOL_USE_SCHEMA` in `core/response_schemas.py` does not allow a top-level `continue`
   or `stopReason` today (`additionalProperties: False`). The schema, the response formatter
   and the vendored hooks contract need extending first (found by the Plan 00480 fact-check
   experiment).
-- [ ] ⬜ **Task 4.3**: Pause exit is verified. Stop is allowed once the Stop payload's
+- [x] ✅ **Task 4.3** (merged 506fd3f5e): Pause exit is verified. Stop is allowed once the Stop payload's
   `session_crons` holds exactly the one resume cron; otherwise the directive is repeated,
   as `cron_stop_enforcer` already does for declared crons. Every handler that forces
   continuation stands down during the pause: `handlers/stop/auto_continue_stop.py`, which does
   both unattended-mode Stop blocking and stop-explanation re-entry, plus
   `cron_stop_enforcer` and `cron_subagent_stop_enforcer`.
-- [ ] ⬜ **Task 4.4**: Start from `utils/cron_pause.py`. It is the existing session-scoped,
+- [x] ✅ **Task 4.4** (merged 506fd3f5e): Start from `utils/cron_pause.py`. It is the existing session-scoped,
   TTL-bounded pause for declared crons, set by the `hooks-daemon cron-pause` CLI and honoured
   by the cron enforcers. Reuse or extend it rather than adding a second pause mechanism.
   Nothing re-arms the crons while paused. `persistent_cron_assertor` and
@@ -154,14 +157,14 @@ the daemon directs the model and then verifies what it did.
     - resume normal behaviour when the pause lifts.
   - **Rollout**: verify the change on a branch, then apply it by the worker hot-reload in
     `CcySupervisor.md`. The running supervisor session is never restarted.
-- [ ] ⬜ **Task 4.6**: Resume. When the resume cron fires, the gate re-reads usage. A window
+- [x] ✅ **Task 4.6** (merged 506fd3f5e): Resume. When the resume cron fires, the gate re-reads usage. A window
   past its `resets_at` reads as absent, so a snapshot from before the reset cannot keep
   the session paused. Then:
   - below the ceiling: lift the pause, re-establish the declared crons, and continue the
     active work;
   - still over the ceiling (for example the weekly window): schedule the next resume cron
     and stop again.
-- [ ] ⬜ **Task 4.7**: Data safety. No snapshot, or no `rate_limits` at all, never pauses a
+- [x] ✅ **Task 4.7** (merged 506fd3f5e): Data safety. No snapshot, or no `rate_limits` at all, never pauses a
   session, and a debug log line records why. A paused session shows `⏸ usage` and its resume
   time in the status line.
 - [ ] ⬜ **Task 4.8**: Acceptance tests. Run a live probe with a synthetic snapshot above the
