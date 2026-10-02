@@ -1011,10 +1011,13 @@ class SensitiveContentHandler(PreToolUseHandlerBase):
         if facts.union:
             return [
                 index,
-                _ScanPass(
-                    target=_WORKING_TREE_TARGET,
-                    pathspecs=form.pathspecs,
-                    directory=facts.repo_root,
+                *(
+                    _ScanPass(
+                        target=_WORKING_TREE_TARGET,
+                        pathspecs=form.pathspecs,
+                        directory=where,
+                    )
+                    for where in facts.directories
                 ),
             ]
         named = facts.named_paths()

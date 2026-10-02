@@ -31,17 +31,16 @@ from claude_code_hooks_daemon.plan_qa.runner import run_stage
 from claude_code_hooks_daemon.plan_qa.types import Level, Stage
 from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command_for_docs
 from claude_code_hooks_daemon.utils.git_commit_parsing import (
-    extract_commit_form as _extract_commit_form,
-)
-from claude_code_hooks_daemon.utils.git_commit_parsing import (
     extract_commit_message as _extract_commit_message,
 )
 from claude_code_hooks_daemon.utils.git_commit_parsing import (
     is_git_commit as _is_git_commit,
 )
+from claude_code_hooks_daemon.utils.git_commit_parsing import read_commit_form
 from claude_code_hooks_daemon.utils.git_commit_parsing import (
     tokenise_command as _tokenise,
 )
+from claude_code_hooks_daemon.utils.git_facts import pathspec_directory, unmoved_directories
 from claude_code_hooks_daemon.utils.git_repo import GitRepo
 
 logger = logging.getLogger(__name__)
@@ -118,7 +117,9 @@ class PlanQaCommitGateHandler(PreToolUseHandlerBase):
 
         command = hook_input.get(HookInputField.TOOL_INPUT, {}).get(_FIELD_COMMAND, "")
         tokens = _tokenise(command)
-        form = _extract_commit_form(command)
+        reading = read_commit_form(command)
+        form = reading.form
+        cwd = hook_input.get(HookInputField.CWD)
         try:
             context = staged_context(
                 project_root=project_root,
@@ -127,6 +128,8 @@ class PlanQaCommitGateHandler(PreToolUseHandlerBase):
                 commit_message=_extract_commit_message(tokens),
                 pathspecs=form.pathspecs,
                 include=form.include,
+                directory=pathspec_directory(reading, cwd, project_root),
+                extra_directories=unmoved_directories(reading, cwd, project_root),
                 exclude_paths=self._project_exclude_paths,
             )
         except FileNotFoundError:

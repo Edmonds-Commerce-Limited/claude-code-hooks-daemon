@@ -1239,6 +1239,70 @@ class TestPathspecViewIsUsedOnlyWhenTheReadingIsCertain:
 
         assert self._deny(handler, tracked, command)
 
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "cd sub && git commit -q -m x f.txt",
+            "git -C sub commit -q -m x f.txt",
+            "(cd sub && git commit -q -m x f.txt)",
+        ],
+    )
+    def test_a_pathspec_is_read_from_the_directory_the_command_moves_to(
+        self, tracked: Path, tmp_path: Path, command: str
+    ) -> None:
+        """Ledger 00474 N299: git records ``sub/f.txt``; the root's ``f.txt`` is not in it."""
+        handler = _wordlist(tmp_path, "alpha-term")
+        (tracked / "f.txt").write_text("alpha-term\n")
+        (tracked / "sub" / "f.txt").write_text("fine\n")
+
+        assert not self._deny(handler, tracked, command)
+
+    @pytest.mark.parametrize(
+        "command",
+        ["cd sub && git commit -q -m x f.txt", "git -C sub commit -q -m x f.txt"],
+    )
+    def test_a_term_in_the_file_the_moved_pathspec_names_is_still_denied(
+        self, tracked: Path, tmp_path: Path, command: str
+    ) -> None:
+        handler = _wordlist(tmp_path, "alpha-term")
+        (tracked / "f.txt").write_text("fine\n")
+        (tracked / "sub" / "f.txt").write_text("alpha-term\n")
+
+        assert self._deny(handler, tracked, command)
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "cd nosuch; git commit -q -m x f.txt",
+            "test -d nosuch && cd nosuch; git commit -q -m x f.txt",
+            "cd sub & git commit -q -m x f.txt",
+            "cd sub || cd nosuch; git commit -q -m x f.txt",
+            "(cd sub; git commit -q -m x f.txt)",
+        ],
+    )
+    def test_a_cd_that_may_not_take_effect_still_judges_the_hooks_directory(
+        self, tracked: Path, tmp_path: Path, command: str
+    ) -> None:
+        """Ledger 00474 N299 round 2: git may record the root's ``f.txt``, so a term in it denies."""
+        handler = _wordlist(tmp_path, "alpha-term")
+        (tracked / "f.txt").write_text("alpha-term\n")
+        (tracked / "sub" / "f.txt").write_text("fine\n")
+
+        assert self._deny(handler, tracked, command)
+
+    @pytest.mark.parametrize(
+        "command",
+        ["cd sub & git commit -q -m x f.txt", "cd sub; git commit -q -m x f.txt"],
+    )
+    def test_a_cd_that_may_not_take_effect_still_judges_where_it_moves_to(
+        self, tracked: Path, tmp_path: Path, command: str
+    ) -> None:
+        handler = _wordlist(tmp_path, "alpha-term")
+        (tracked / "f.txt").write_text("fine\n")
+        (tracked / "sub" / "f.txt").write_text("alpha-term\n")
+
+        assert self._deny(handler, tracked, command)
+
     def test_a_second_commit_in_the_command_is_judged_as_the_index(
         self, tracked: Path, tmp_path: Path
     ) -> None:

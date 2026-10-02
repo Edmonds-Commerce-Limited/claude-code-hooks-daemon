@@ -643,6 +643,9 @@ _SHELL_RESOLVED_CHARS: Final[str] = "$`{~"
 #: Global options that point git at a different repository or work tree.
 _REPOSITORY_MOVING_OPTIONS: Final[tuple[str, ...]] = ("-C", "--git-dir", "--work-tree")
 _GIT_ENVIRONMENT_PREFIX: Final[str] = "GIT_"
+_CHANGE_DIRECTORY_OPTION: Final[str] = "-C"
+#: The repository-moving options a directory cannot stand for.
+_UNSTATABLE_REPOSITORY_OPTIONS: Final[tuple[str, ...]] = ("--git-dir", "--work-tree")
 
 
 @dataclass(frozen=True)
@@ -658,14 +661,51 @@ class CommitReading:
 
     form: CommitForm
     certain: bool
+    moves: tuple[str | None, ...] = ()
+    #: False when a ``cd`` among ``moves`` may not have taken effect (``cd x;
+    #: git commit``, ``cd x & git commit``, ``a || cd x``), so the commit may
+    #: run where the hook does. ``-C`` moves are git's own argv and always do.
+    moves_certain: bool = True
+
+
+def _commit_moves(run: GitInvocation) -> tuple[str | None, ...]:
+    """Where ``run`` goes from its starting directory, oldest move first.
+
+    The ``cd``/``pushd`` chain, then the ``-C`` operands. An entry of None is a
+    move this reading cannot state: an unreadable ``cd``, a word the shell
+    resolves, or an option (``--git-dir``, ``--work-tree``, ``GIT_*``) that
+    points git somewhere a directory cannot express.
+    """
+    moves: list[str | None] = [
+        None if move is None or any(char in _SHELL_RESOLVED_CHARS for char in move) else move
+        for move in run.directory
+    ]
+    options = run.global_options
+    for position, option in enumerate(options):
+        if option == _CHANGE_DIRECTORY_OPTION:
+            operand = options[position + 1] if position + 1 < len(options) else None
+        elif option.startswith(_CHANGE_DIRECTORY_OPTION):
+            operand = option[len(_CHANGE_DIRECTORY_OPTION) :]
+        elif option.startswith(_UNSTATABLE_REPOSITORY_OPTIONS):
+            operand = None
+        else:
+            continue
+        if operand is not None and any(char in _SHELL_RESOLVED_CHARS for char in operand):
+            operand = None
+        moves.append(operand)
+    if any(assignment.startswith(_GIT_ENVIRONMENT_PREFIX) for assignment in run.assignments):
+        moves.append(None)
+    return tuple(moves)
 
 
 def read_commit_form(command: str) -> CommitReading:
     """The :class:`CommitReading` of ``command``."""
     form = extract_commit_form(command)
-    if not form.pathspecs:
-        return CommitReading(form=form, certain=True)
     commits = [run for run in git_invocations(command) if run.subcommand == _COMMIT_TOKEN]
+    moves = _commit_moves(commits[0]) if len(commits) == 1 else ()
+    moves_certain = commits[0].moves_certain if len(commits) == 1 else True
+    if not form.pathspecs:
+        return CommitReading(form=form, certain=True, moves=moves, moves_certain=moves_certain)
     if len(commits) != 1:
         return CommitReading(form=form, certain=False)
     run = commits[0]
@@ -676,7 +716,10 @@ def read_commit_form(command: str) -> CommitReading:
         any(char in _SHELL_RESOLVED_CHARS for char in pathspec) for pathspec in form.pathspecs
     )
     return CommitReading(
-        form=form, certain=not (run.directory or moves_repository or shell_resolved)
+        form=form,
+        certain=not (run.directory or moves_repository or shell_resolved),
+        moves=moves,
+        moves_certain=moves_certain,
     )
 
 
@@ -712,6 +755,8 @@ class GitInvocation:
     first, relative to the command's starting directory. An entry of None is
     a change this reading cannot state (``cd -``, ``popd``, ``cd a b``).
     ``assignments`` are the ``NAME=value`` words the simple command carries.
+    ``moves_certain`` is False when a ``cd`` in ``directory`` may not have taken
+    effect by the time git runs (see :func:`_invocations`).
     """
 
     subcommand: str
@@ -719,6 +764,7 @@ class GitInvocation:
     arguments: tuple[str, ...]
     assignments: tuple[str, ...]
     directory: tuple[str | None, ...]
+    moves_certain: bool = True
 
 
 def git_invocations(command: str) -> list[GitInvocation]:
@@ -734,37 +780,63 @@ def git_invocations(command: str) -> list[GitInvocation]:
     return _invocations(command_words(command), ())
 
 
-def _invocations(words: list[str], directory: tuple[str | None, ...]) -> list[GitInvocation]:
+#: Operators a ``cd`` may not follow: the left side of ``||`` decides whether it
+#: runs, and a pipeline stage runs it in a subshell of its own.
+_MOVE_DOUBTING_PRECEDING_OPERATORS: Final[frozenset[str]] = frozenset({"||", "|", "|&"})
+_AND_OPERATOR: Final[str] = "&&"
+_SUBSHELL_CHARS: Final[str] = "()"
+
+
+def _invocations(
+    words: list[str], directory: tuple[str | None, ...], uncertain: bool = False
+) -> list[GitInvocation]:
+    """The git runs of ``words``.
+
+    A move is CERTAIN only when git cannot run unless it took effect: every
+    operator from the ``cd`` on is ``&&``, and the operator before it neither
+    makes it optional (``||``) nor private (a pipeline stage). Anything else
+    (``cd nosuch; git commit``, ``cd sub & git commit``, ``a || cd sub``) may
+    leave git running where it started, which ``uncertain`` records.
+    """
     found: list[GitInvocation] = []
-    stack: list[tuple[str | None, ...]] = []
+    stack: list[tuple[tuple[str | None, ...], bool]] = []
+    previous_operator = ""
     index = 0
     while index < len(words):
         if is_operator(words[index]) and not is_redirection(words[index]):
             # The lexer joins adjacent operators (`);`), so each is read in turn.
             for char in words[index]:
                 if char == _SUBSHELL_OPEN:
-                    stack.append(directory)
+                    stack.append((directory, uncertain))
                 elif char == _SUBSHELL_CLOSE:
-                    directory = stack.pop() if stack else directory
+                    directory, uncertain = stack.pop() if stack else (directory, uncertain)
+            previous_operator = "".join(
+                char for char in words[index] if char not in _SUBSHELL_CHARS
+            )
+            if directory and previous_operator != _AND_OPERATOR:
+                uncertain = True
             index += 1
             continue
         end = index
         while end < len(words) and not (is_operator(words[end]) and not is_redirection(words[end])):
             end += 2 if is_redirection(words[end]) else 1
         segment = [word for word in commit_option_words(words, index) if word]
-        directory = _after_directory_change(segment, directory)
-        found.extend(_segment_invocations(segment, directory))
+        moved = _after_directory_change(segment, directory)
+        if moved != directory and previous_operator in _MOVE_DOUBTING_PRECEDING_OPERATORS:
+            uncertain = True
+        directory = moved
+        found.extend(_segment_invocations(segment, directory, uncertain))
         index = end
     return found
 
 
 def _segment_invocations(
-    segment: list[str], directory: tuple[str | None, ...]
+    segment: list[str], directory: tuple[str | None, ...], uncertain: bool
 ) -> list[GitInvocation]:
     """The git runs of one simple command, including an ``eval``/``sh -c`` string."""
     body = _evaluated_string(segment)
     if body is not None:
-        return _invocations(command_words(body), directory)
+        return _invocations(command_words(body), directory, uncertain)
     for position, word in enumerate(segment):
         if command_word(word) != _GIT_TOKEN:
             continue
@@ -780,6 +852,7 @@ def _segment_invocations(
                     word for word in segment[:position] if _ASSIGNMENT_WORD.match(word)
                 ),
                 directory=directory,
+                moves_certain=not uncertain,
             )
         ]
     return []
