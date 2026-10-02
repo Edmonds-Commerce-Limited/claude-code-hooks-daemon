@@ -27,15 +27,16 @@ agents working in a project with plan tracking enabled should follow it.
 
 ## Core Principles
 
-1. **Plan Before Execute** - Never start implementation without a documented plan
-2. **Break Down Complexity** - Decompose large work into manageable tasks
-3. **Track Everything** - Every task has a status and owner
-4. **Document Decisions** - Capture rationale for major decisions
-5. **Iterate Rapidly** - Plans are living documents, update as you learn
-6. **Test First (TDD)** - Write failing tests before implementation, where this project practises TDD
-7. **Debug First** - Ground handler design in real hook event data before writing a handler
-8. **Orchestrate Intelligently** - Use sub-agents and teams for parallel execution when possible
-9. **Record Every Defect** - A defect you noticed is recorded in a plan, never only in chat (see "The niggles ledger")
+01. **Always Verify, Never Assume** - Every claim a plan makes about the codebase (what exists, where it lives, what reads or calls what) is checked with a search or a read before it is written, and cites the path that shows it. A remembered fact is not a checked one
+02. **Plan Before Execute** - Never start implementation without a documented plan
+03. **Break Down Complexity** - Decompose large work into manageable tasks
+04. **Track Everything** - Every task has a status and owner
+05. **Document Decisions** - Capture rationale for major decisions
+06. **Iterate Rapidly** - Plans are living documents, update as you learn
+07. **Test First (TDD)** - Write failing tests before implementation, where this project practises TDD
+08. **Debug First** - Ground handler design in real hook event data before writing a handler
+09. **Orchestrate Intelligently** - Use sub-agents and teams for parallel execution when possible
+10. **Record Every Defect** - A defect you noticed is recorded in a plan, never only in chat (see "The niggles ledger")
 
 ---
 
