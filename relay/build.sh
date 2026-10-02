@@ -39,6 +39,10 @@ if readelf -l "$OUT" | grep -q "INTERP"; then
     exit 1
 fi
 
+# Content stamp the relay tests compare against relay/hooks_relay.rs: mtime
+# moves on every git checkout, a hash of the source does not.
+sha256sum "$SRC" | cut -d ' ' -f 1 >"$OUT.source-sha256"
+
 SIZE_BYTES="$(stat -c %s "$OUT")"
 echo "built:         $OUT"
 echo "target:        $TARGET"

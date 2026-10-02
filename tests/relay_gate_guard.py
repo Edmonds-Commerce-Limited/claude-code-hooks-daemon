@@ -37,7 +37,9 @@ collection time everywhere, this one turns a specific relay-provisioning
 
 from __future__ import annotations
 
+import hashlib
 import os
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -94,9 +96,52 @@ def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo[None]) ->
     return report
 
 
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+_RELAY_SOURCE = _REPO_ROOT / "relay" / "hooks_relay.rs"
+_RELAY_BUILD = _REPO_ROOT / "untracked" / "relay-build" / "hooks-relay-x86_64-unknown-linux-musl"
+
+
+def relay_build_stamp_path(binary: Path) -> Path:
+    """The sidecar `relay/build.sh` writes beside a build: the source's sha256."""
+    return binary.with_name(binary.name + ".source-sha256")
+
+
+def relay_build_staleness_message(binary: Path, source: Path) -> str | None:
+    """Explain why a built relay is stale, or None when it is fresh or absent.
+
+    Staleness is a content stamp, not an mtime: mtime moves on every git
+    checkout. A binary with no sidecar predates the stamp and counts as stale.
+    An absent binary is not stale; the consuming tests skip on that already.
+    """
+    if not binary.exists():
+        return None
+    stamp = relay_build_stamp_path(binary)
+    current = hashlib.sha256(source.read_bytes()).hexdigest()
+    if stamp.is_file() and stamp.read_text().strip() == current:
+        return None
+    return (
+        f"the relay build at {binary} is older than relay/hooks_relay.rs; "
+        "rebuild with `bash relay/build.sh`"
+    )
+
+
+@pytest.fixture(scope="session")
+def fresh_relay_build() -> None:
+    """Fail, with one clear message, when the local relay build is stale.
+
+    Not a skip: a skip would hide a real relay regression.
+    """
+    message = relay_build_staleness_message(_RELAY_BUILD, _RELAY_SOURCE)
+    if message is not None:
+        pytest.fail(message, pytrace=False)
+
+
 __all__ = [
     "RELAY_SKIP_MARKERS",
+    "fresh_relay_build",
     "pytest_runtest_makereport",
+    "relay_build_staleness_message",
+    "relay_build_stamp_path",
     "relay_skip_failure_message",
     "running_in_ci",
     "skip_is_a_provisioning_failure",
