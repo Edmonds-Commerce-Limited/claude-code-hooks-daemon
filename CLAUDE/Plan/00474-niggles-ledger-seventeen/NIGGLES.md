@@ -710,7 +710,16 @@ Recorded only on `worktree-n466-n53`, which was dropped. Their write-ups are kep
 verbatim in [CARRIED-N53-BRANCH.md](CARRIED-N53-BRANCH.md). Five were remedied on
 that branch only, so all seven are open on `main`.
 
-**Status**: ⬜ Open (all seven).
+**Status**: ⬜ Open (six of seven). N244 is fixed, see below.
+
+- **N244**: **Fixed** (merge 52fd9cd9b). On a bare `git commit`, plan QA now scans
+  the INDEX instead of the disk. It uses one `ls-files -s` and one `cat-file --batch`
+  per commit. The row-to-folder check asks that same tree. An index git cannot read
+  falls back to the disk. Still read from the disk: the pathspec form (N245), a
+  `git add` in the same command (N246), and the checks that open files themselves
+  (`path-existence`, `plan-doc-size`, `journal-entry-ordering`, `same-commit-plan-doc`,
+  and the journal lookups in `checks/common.py`). Report:
+  [subagent-reports/261002-n244-committed-tree-sonnet.md](subagent-reports/261002-n244-committed-tree-sonnet.md).
 
 ### N253–N256 — carried from ledger 00466, their branch dropped
 

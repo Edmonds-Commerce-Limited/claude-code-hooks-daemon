@@ -76,7 +76,7 @@ Full write-ups are in [NIGGLES.md](NIGGLES.md). One line each here:
 | N264       | A sub-agent's edits landed, uncommitted, in another branch's worktree                                            | 00466 landing       | ✅ Fixed (7ebef17fb)    |
 | N246       | Plan and docs QA judge a same-command `git add` as two partial trees                                             | Carried, N53 branch | ⬜ Open                 |
 | N245       | A pathspec commit is judged on the index as well as the named paths                                              | Carried, N53 branch | ⬜ Open                 |
-| N244       | The QA commit gates judge the disk, not the tree the commit records                                              | Carried, N53 branch | ⬜ Open                 |
+| N244       | The QA commit gates judge the disk, not the tree the commit records                                              | Carried, N53 branch | ✅ Fixed (52fd9cd9b)    |
 | N189       | No commit gate sees a commit hidden in text only bash reads (`bash -c "$X"`)                                     | Carried, N53 branch | ⬜ Open                 |
 | N177       | No commit gate sees a commit after a `case` inside `function f {` in `$( )`                                      | Carried, N53 branch | ⬜ Open                 |
 | N176       | No commit gate sees a commit inside `$(( $(…) ))` arithmetic                                                     | Carried, N53 branch | ⬜ Open                 |
