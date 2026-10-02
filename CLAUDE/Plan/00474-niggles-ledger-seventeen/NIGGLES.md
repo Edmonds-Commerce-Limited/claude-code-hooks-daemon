@@ -721,6 +721,28 @@ that branch only, so all seven are open on `main`.
   and the journal lookups in `checks/common.py`). Report:
   [subagent-reports/261002-n244-committed-tree-sonnet.md](subagent-reports/261002-n244-committed-tree-sonnet.md).
 
+- **N245, N246**: in progress on `worktree-n245-pathspec`.
+
+- **N135, N176, N177, N189: needs an owner decision on approach, so not started.** Main
+  has none of the dropped branch's machinery: there is no `commit_placement` and no
+  `shell_words`. Every commit gate still finds a commit by looking for `git commit` in
+  the command's own words. Two routes:
+
+  - **(A) The dropped branch's route.** Build a shared shell walk that reads `-c`
+    scripts, `eval`, substitutions and arithmetic, and resolves git aliases. Text the
+    walk cannot read is judged at its worst case. It is large, and it never converges
+    with bash: that branch went through 9+ review rounds and was dropped.
+  - **(B) Install a git `pre-commit` hook that runs the commit gates.** No hooks are
+    installed in this repository today (checked: `.git/hooks` holds only samples, and
+    `core.hooksPath` is unset). Git runs the hook for every commit however the shell
+    spells it, at the moment the index is final. So it also judges exactly the
+    recorded tree, which is what N244–N246 work towards. Costs: `--no-verify` skips
+    it, it runs on human commits too, and it needs a daemon round trip from git. The
+    PreToolUse gates stay as early feedback for the plain spelling.
+
+  Recommendation: (B). It removes the class rather than chasing bash's grammar. The
+  scope decision belongs to the owner.
+
 ### N253–N256 — carried from ledger 00466, their branch dropped
 
 These four were numbered and fixed on `worktree-n466-n253` but never recorded on
