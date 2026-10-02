@@ -196,9 +196,10 @@ class TestEntryFromTheToolGate:
             "hooks_daemon_hostname": "runner",
         }
 
-    def test_crossing_the_ceiling_pauses_denies_and_halts_with_the_directive(
+    def test_the_call_that_starts_a_pause_is_denied_without_halting_and_carries_the_directive(
         self, tmp_path: Path
     ) -> None:
+        """Round 2 N2: a halt would end the turn with the directive unread."""
         from claude_code_hooks_daemon.utils.usage_pause import read_usage_pause
 
         handler = UsagePauseToolGateHandler()
@@ -208,11 +209,80 @@ class TestEntryFromTheToolGate:
             result = handler.handle(self._hook())
             assert read_usage_pause(tmp_path, _SESSION, now=_NOW) is not None
         assert result.decision == Decision.DENY
-        assert result.halt_turn is True
+        assert result.halt_turn is False
+        assert "continue" not in result.to_json("PreToolUse")
         reason = result.reason or ""
         assert "USAGE CEILING REACHED" in reason
         assert "CronCreate" in reason
-        assert result.stop_reason
+
+    def test_the_next_non_cron_call_after_the_entry_halts(self, tmp_path: Path) -> None:
+        handler = UsagePauseToolGateHandler()
+        _over_the_ceiling(handler)
+        with patch.object(ProjectContext, "daemon_untracked_dir", return_value=tmp_path):
+            assert handler.matches(self._hook()) is True
+            assert handler.handle(self._hook()).halt_turn is False
+            assert handler.matches(self._hook("Read")) is True
+            second = handler.handle(self._hook("Read"))
+        assert second.halt_turn is True
+
+    def test_a_subagent_never_starts_a_pause(self, tmp_path: Path) -> None:
+        """Round 2 N2: the record is the shared session's; a subagent must not write it."""
+        handler = UsagePauseToolGateHandler()
+        _over_the_ceiling(handler)
+        hook = {**self._hook(), "agent_id": "a1", "agent_type": "general-purpose"}
+        with patch.object(ProjectContext, "daemon_untracked_dir", return_value=tmp_path):
+            assert handler.matches(hook) is False
+            assert list(tmp_path.rglob("*.usage-paused")) == []
+
+    def test_a_subagent_in_a_paused_session_is_denied_plainly_and_told_to_stop(
+        self, tmp_path: Path
+    ) -> None:
+        _record(tmp_path)
+        handler = UsagePauseToolGateHandler()
+        hook = {**self._hook(), "agent_id": "a1", "agent_type": "general-purpose"}
+        with patch.object(ProjectContext, "daemon_untracked_dir", return_value=tmp_path):
+            assert handler.matches(hook) is True
+            result = handler.handle(hook)
+        assert result.decision == Decision.DENY
+        assert result.halt_turn is False
+        reason = result.reason or ""
+        assert "paused" in reason.lower()
+        assert "stop" in reason.lower()
+        assert "CronCreate ONE" not in reason  # a subagent must not touch the session's crons
+
+    def test_a_subagent_may_still_use_the_allowed_tools(self, tmp_path: Path) -> None:
+        _record(tmp_path)
+        handler = UsagePauseToolGateHandler()
+        hook = {**self._hook("ToolSearch"), "agent_id": "a1"}
+        with patch.object(ProjectContext, "daemon_untracked_dir", return_value=tmp_path):
+            assert handler.matches(hook) is False
+
+    def test_a_record_that_cannot_be_read_back_never_denies_anything(self, tmp_path: Path) -> None:
+        """Round 2 N3 (reviewer probe P2b): writable but unreadable must not loop."""
+        real_read = Path.read_text
+
+        def unreadable_record(self: Path, *args: Any, **kwargs: Any) -> str:
+            if self.name.endswith(".usage-paused"):
+                raise PermissionError("denied")
+            return real_read(self, *args, **kwargs)
+
+        handler = UsagePauseToolGateHandler()
+        _over_the_ceiling(handler)
+        with (
+            patch.object(ProjectContext, "daemon_untracked_dir", return_value=tmp_path),
+            patch.object(Path, "read_text", unreadable_record),
+        ):
+            assert handler.matches(self._hook()) is False
+            assert handler.matches(self._hook("Read")) is False
+
+    def test_an_owner_override_stops_the_entry(self, tmp_path: Path) -> None:
+        from claude_code_hooks_daemon.utils.usage_pause import write_usage_override
+
+        handler = UsagePauseToolGateHandler()
+        _over_the_ceiling(handler)
+        write_usage_override(tmp_path, _SESSION, until=_NOW + 3600, now=_NOW)
+        with patch.object(ProjectContext, "daemon_untracked_dir", return_value=tmp_path):
+            assert handler.matches(self._hook()) is False
 
     def test_a_cron_tool_does_not_trigger_the_entry(self, tmp_path: Path) -> None:
         handler = UsagePauseToolGateHandler()

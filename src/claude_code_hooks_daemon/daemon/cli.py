@@ -5112,8 +5112,12 @@ def cmd_usage_pause(args: argparse.Namespace) -> int:
 
     ``clear`` is the owner's escape: while a session is paused every prompt is
     held, so the pause cannot be lifted from inside the session when the ceiling
-    is still reached. Run it from a ``!`` command (a shell run, not a prompt).
-    The session is ``--session`` or ``CLAUDE_CODE_SESSION_ID``.
+    is still reached. It removes the pause record AND records an override valid
+    until the latest reset among the windows over the ceiling (capped at 8 days);
+    while it is valid no gate starts a pause for the session. Without the
+    override the next prompt would simply pause the session again. Run it in a
+    terminal: whether a ``!``-prefixed command passes through the hooks is
+    unverified. The session is ``--session`` or ``CLAUDE_CODE_SESSION_ID``.
 
     Returns:
         0 on success (including "nothing to clear"), 1 on refusal/failure.
@@ -5122,8 +5126,15 @@ def cmd_usage_pause(args: argparse.Namespace) -> int:
     from claude_code_hooks_daemon.utils.usage_pause import (
         clear_usage_pause,
         read_usage_pause,
+        usage_override_active,
+        write_usage_override,
     )
-    from claude_code_hooks_daemon.utils.usage_pause_gate import resume_schedule
+    from claude_code_hooks_daemon.utils.usage_pause_gate import (
+        RESUME_MARGIN_SECONDS,
+        PauseEnvironment,
+        current_breaches,
+        resume_schedule,
+    )
 
     session_id = (
         str(getattr(args, "session", None) or "").strip()
@@ -5153,26 +5164,62 @@ def cmd_usage_pause(args: argparse.Namespace) -> int:
         print(f"ERROR: no untracked directory to find the pause in: {e}", file=sys.stderr)
         return 1
 
+    now = time.time()
     if args.action == "status":
-        pause = read_usage_pause(untracked_dir, session_id, now=time.time())
+        pause = read_usage_pause(untracked_dir, session_id, now=now)
+        if usage_override_active(untracked_dir, session_id, now=now):
+            print(f"An owner override is active for session {session_id}: no pause is started.")
         if pause is None:
             print(f"Session {session_id} is not paused on its usage ceiling.")
             return 0
         print(f"Session {session_id} is PAUSED: {pause.reason}")
         print(f"Resumes at {resume_schedule(pause.resume_at).local_text}.")
-        print("Lift it now with: bin/hooks-daemon usage-pause clear")
+        print("Override it with: bin/hooks-daemon usage-pause clear")
         return 0
 
+    # The override runs to the latest reset among the windows over the ceiling: the pause
+    # record's own deciding reset, and any window over the ceiling right now.
+    record = read_usage_pause(untracked_dir, session_id, now=now)
+    resets: list[float] = []
+    if record is not None:
+        resets.append(record.resume_at - RESUME_MARGIN_SECONDS)
+    try:
+        resets += [
+            float(breach.resets_at)
+            for breach in current_breaches({"session_id": session_id}, PauseEnvironment())
+        ]
+    except (OSError, ValueError, RuntimeError) as e:
+        print(f"WARNING: could not read current usage: {e}", file=sys.stderr)
+    until = max(resets, default=0.0)
+    override_note = ""
+    if until > now:
+        try:
+            until = write_usage_override(untracked_dir, session_id, until=until, now=now)
+        except (OSError, ValueError) as e:
+            print(
+                f"ERROR: override not recorded for session {session_id}, so the pause was "
+                f"left in place (clearing alone is undone by the next prompt): {e}",
+                file=sys.stderr,
+            )
+            return 1
+        override_note = (
+            f"Until {resume_schedule(until).utc_text} (the latest reset among the windows over "
+            "the ceiling, at most 8 days) no pause will be started for this session, even "
+            "if usage is still over the ceiling."
+        )
     try:
         removed = clear_usage_pause(untracked_dir, session_id)
     except OSError as e:
         print(f"ERROR: pause not cleared for session {session_id}: {e}", file=sys.stderr)
         return 1
-    if not removed:
+    if not removed and not override_note:
         print(f"Session {session_id} is not paused; nothing to clear.")
         return 0
-    print(f"Usage pause cleared for session {session_id}.")
-    print("Send a message; the session then works again (its crons may need re-creating).")
+    if removed:
+        print(f"Usage pause cleared for session {session_id}.")
+    if override_note:
+        print(override_note)
+    print("The session's crons were replaced by the pause; it may need them re-created.")
     return 0
 
 

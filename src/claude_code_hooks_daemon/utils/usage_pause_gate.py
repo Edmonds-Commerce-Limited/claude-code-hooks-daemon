@@ -37,7 +37,7 @@ import logging
 import math
 import time
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime, tzinfo
 from pathlib import Path
 from typing import Any, Final
@@ -67,6 +67,7 @@ from claude_code_hooks_daemon.utils.usage_pause import (
     UsagePause,
     clear_usage_pause,
     read_usage_pause,
+    usage_override_active,
     write_usage_pause,
 )
 
@@ -76,12 +77,6 @@ logger = logging.getLogger(__name__)
 #: actually rolled over, not on the boundary where the snapshot may still read
 #: the old window.
 RESUME_MARGIN_SECONDS: Final[float] = 120.0
-
-#: A pause is only worth entering when the resume time is at least this far
-#: away. The model needs a few turns (CronList, one CronDelete per cron,
-#: CronCreate, a Stop round) and the cron is pinned to a calendar minute: one
-#: that has already passed next matches a year later.
-MIN_RESUME_LEAD_SECONDS: Final[float] = 600.0
 
 #: How long after the resume time the single remaining cron may fire and still be
 #: accepted by the Stop gate. Anything later is a cron that will not wake the session.
@@ -123,9 +118,10 @@ class UsageBreach:
 class ResumeSchedule:
     """The resume instant, as the cron to create and as text for a human.
 
-    ``cron`` is the 5-field one-shot expression in LOCAL time (the zone
-    ``CronCreate`` interprets expressions in); ``local_text`` and ``utc_text``
-    name the same instant so the model can check what ``CronCreate`` reports.
+    ``cron`` is the 5-field one-shot expression in the zone ``zone_text`` names
+    (UTC unless a caller passes another: the vendored Claude Code docs do not say
+    which zone ``CronCreate`` reads); ``local_text`` and ``utc_text`` name the same
+    instant so the model can check what ``CronCreate`` reports.
     """
 
     cron: str
@@ -196,7 +192,9 @@ def build_pause(session_id: str, breaches: Sequence[UsageBreach], *, now: float)
     return UsagePause(
         session_id=session_id,
         paused_at=now,
-        resume_at=resume_at_for(breaches),
+        # Never in the past: a reset seconds away resumes a margin from now, so the
+        # pinned cron minute is still ahead when the model creates it.
+        resume_at=max(resume_at_for(breaches), now + RESUME_MARGIN_SECONDS),
         window=deciding.window,
         used_percentage=deciding.used_percentage,
         ceiling=deciding.ceiling,
@@ -204,17 +202,31 @@ def build_pause(session_id: str, breaches: Sequence[UsageBreach], *, now: float)
     )
 
 
-def resume_schedule(resume_at: float, *, tz: tzinfo | None = None) -> ResumeSchedule:
+def refresh_resume(pause: UsagePause, *, now: float) -> UsagePause:
+    """``pause`` with a resume time at least a margin from ``now``; ``pause`` itself if already so.
+
+    A pause whose resume time has come or gone (the model was slow, or a resume
+    tick found usage still over) would have its cron pinned to a minute that has
+    passed, which next matches a year later.
+    """
+    floor = now + RESUME_MARGIN_SECONDS
+    if pause.resume_at >= floor:
+        return pause
+    return replace(pause, resume_at=floor)
+
+
+def resume_schedule(resume_at: float, *, tz: tzinfo = UTC) -> ResumeSchedule:
     """The one-shot cron for ``resume_at``, rounded UP to a whole minute.
 
     Args:
         resume_at: Epoch seconds.
-        tz: Zone the cron is expressed in; None is the machine's local zone,
-            which is what ``CronCreate`` reads.
+        tz: Zone the cron is expressed in. UTC by default: nothing the project
+            vendors says which zone ``CronCreate`` reads, so no machine zone is
+            assumed.
     """
     minute = math.ceil(resume_at / _SECONDS_PER_MINUTE) * _SECONDS_PER_MINUTE
     utc = datetime.fromtimestamp(minute, UTC)
-    local = utc.astimezone(tz)  # tz None: the machine's local zone
+    local = utc.astimezone(tz)
     zone_name = local.tzname() or "local"
     offset = f"{local:%z}"  # +HHMM
     return ResumeSchedule(
@@ -226,16 +238,7 @@ def resume_schedule(resume_at: float, *, tz: tzinfo | None = None) -> ResumeSche
     )
 
 
-def resume_is_far_enough(resume_at: float, *, now: float) -> bool:
-    """Whether ``resume_at`` is at least :data:`MIN_RESUME_LEAD_SECONDS` away.
-
-    A pause whose resume time is already past, or about to be, cannot be served
-    by a calendar-pinned one-shot cron, so it is not entered.
-    """
-    return resume_at - now >= MIN_RESUME_LEAD_SECONDS
-
-
-def _pinned_fire_time(cron: str, *, now: float, tz: tzinfo | None) -> float | None:
+def _pinned_fire_time(cron: str, *, now: float, tz: tzinfo) -> float | None:
     """The next instant after ``now`` a pinned ``m h dom mon *`` cron fires, or None.
 
     Only the one-shot shape :func:`resume_schedule` builds is understood: four
@@ -255,16 +258,13 @@ def _pinned_fire_time(cron: str, *, now: float, tz: tzinfo | None) -> float | No
             wall = datetime(year, month, day, hour, minute)
         except ValueError:
             return None
-        # A naive wall time is read as the machine's local zone by astimezone().
-        candidate = wall.astimezone() if tz is None else wall.replace(tzinfo=tz)
-        if candidate.timestamp() > now:
-            return candidate.timestamp()
+        candidate = wall.replace(tzinfo=tz).timestamp()
+        if candidate > now:
+            return candidate
     return None
 
 
-def schedule_fires_in_window(
-    cron: str, *, now: float, resume_at: float, tz: tzinfo | None = None
-) -> bool:
+def schedule_fires_in_window(cron: str, *, now: float, resume_at: float, tz: tzinfo = UTC) -> bool:
     """Whether ``cron`` next fires in ``(now, resume_at + MAX_FIRE_AFTER_RESUME_SECONDS]``.
 
     The Stop gate's check that the one remaining cron will actually wake the
@@ -340,16 +340,15 @@ def _steps(schedule: ResumeSchedule) -> list[str]:
         "  2. CronDelete EVERY cron listed: the failsafe recovery cron, every "
         "persistent_crons job, the watchdog, anything else. They are re-established "
         "when the pause lifts, so deleting them is correct.",
-        f"  3. CronCreate ONE cron: schedule `{schedule.cron}` (local time; "
-        f"{schedule.local_text}, which is {schedule.utc_text}), recurring: false, "
+        f"  3. CronCreate ONE cron: schedule `{schedule.cron}`, recurring: false, "
         "durable: false, with this exact prompt, first line included:",
         *(f"       {line}" for line in USAGE_RESUME_PROMPT.splitlines()),
-        f"     That expression is in the time zone of the hooks daemon ({schedule.zone_text}), "
-        "which is assumed to be this session's. Run `date` first: if this session's UTC "
-        f"offset differs, convert {schedule.utc_text} to this session's local time and use "
-        "that instead. The cron is pinned to one calendar minute, so one that is already "
-        "past next fires a YEAR later; the stop is refused if it will not fire in time.",
-        f"     Check that CronCreate reports a next run of {schedule.local_text}.",
+        f"     That expression is in {schedule.zone_text} and means {schedule.local_text}. "
+        "The Claude Code documentation does not say which time zone CronCreate reads an "
+        "expression in, so use it exactly as written; do not convert it and do not run any "
+        "other tool to check the clock (every tool but the cron tools is denied). The "
+        "cron is pinned to one calendar minute: the stop is refused if it will not fire "
+        "within a day after the resume time.",
         f"  4. Stop with `STOPPING BECAUSE: usage paused until {schedule.hhmm}`. The "
         "stop is accepted once exactly that one cron remains.",
     ]
@@ -362,7 +361,7 @@ def _describe(pause: UsagePause) -> str:
     )
 
 
-def render_pause_directive(pause: UsagePause, *, tz: tzinfo | None = None) -> str:
+def render_pause_directive(pause: UsagePause, *, tz: tzinfo = UTC) -> str:
     """The directive delivered when a session first crosses its ceiling."""
     schedule = resume_schedule(pause.resume_at, tz=tz)
     lines = [
@@ -384,7 +383,7 @@ def render_pause_directive(pause: UsagePause, *, tz: tzinfo | None = None) -> st
 
 
 def render_stop_directive(
-    pause: UsagePause, *, found: int, tz: tzinfo | None = None, problem: str | None = None
+    pause: UsagePause, *, found: int, tz: tzinfo = UTC, problem: str | None = None
 ) -> str:
     """The Stop-block reason while the session's crons are not yet exactly the resume cron.
 
@@ -410,7 +409,7 @@ def render_stop_directive(
     return "\n".join(lines)
 
 
-def render_still_over_directive(pause: UsagePause, *, tz: tzinfo | None = None) -> str:
+def render_still_over_directive(pause: UsagePause, *, tz: tzinfo = UTC) -> str:
     """The directive when the resume cron fired but usage is STILL over the ceiling."""
     schedule = resume_schedule(pause.resume_at, tz=tz)
     lines = [
@@ -429,16 +428,29 @@ def render_resume_lifted_directive(
     *,
     jobs: Sequence[PersistentCronConfig] = (),
     failsafe_prompt: str | None = None,
+    verified_under_ceiling: bool = True,
 ) -> str:
-    """The directive when usage is back under the ceiling: re-establish crons, continue.
+    """The directive when the pause ends: re-establish crons, continue.
 
     Args:
         jobs: The ``persistent_crons`` jobs declared for this host.
         failsafe_prompt: The canonical failsafe cron prompt when this session
             should have a failsafe cron that no declared job already supplies.
+        verified_under_ceiling: Whether a fresh usage read showed every window under
+            the ceiling. False when the pause ended for another reason (the owner's
+            override, a pause that could not be kept): the text then says usage was
+            NOT confirmed, since claiming it is back under would be a statement
+            nothing checked.
     """
+    headline = (
+        "USAGE PAUSE LIFTED - usage is back under the ceiling and the session may work again."
+        if verified_under_ceiling
+        else "USAGE PAUSE ENDED - usage was NOT confirmed back under the ceiling (the owner "
+        "overrode the pause, or it could not be renewed). Work again, but expect to be "
+        "paused again if usage is still over it."
+    )
     lines = [
-        "USAGE PAUSE LIFTED - usage is back under the ceiling and the session may work again.",
+        headline,
         "",
         "1. CronList (load it with ToolSearch if its schema is not loaded). The one-shot "
         "resume cron has fired; CronDelete it if it is still listed.",
@@ -466,7 +478,7 @@ def render_resume_lifted_directive(
     return "\n".join(lines)
 
 
-def render_lift_not_recorded_note(*, expires_at: float, tz: tzinfo | None = None) -> str:
+def render_lift_not_recorded_note(*, expires_at: float, tz: tzinfo = UTC) -> str:
     """Told instead of "lifted" when the record could not be removed.
 
     The tool and stop gates still read the record, so claiming a lift would send
@@ -502,13 +514,14 @@ def default_usage_loader(now: float) -> UsageSnapshot | None:
 class PauseEnvironment:
     """The seams a gate reads the world through; tests substitute fakes.
 
-    ``tz`` None is the machine's local zone, which is what ``CronCreate`` reads.
+    ``tz`` is the zone the resume cron's expression is written in: UTC, because the
+    vendored Claude Code docs do not say which zone ``CronCreate`` reads.
     """
 
     clock: Callable[[], float] = time.time
     config_loader: Callable[[], Config] = load_project_config
     usage_loader: Callable[[float], UsageSnapshot | None] = default_usage_loader
-    tz: tzinfo | None = None
+    tz: tzinfo = UTC
 
 
 def current_breaches(hook_input: Mapping[str, Any], env: PauseEnvironment) -> list[UsageBreach]:
@@ -542,19 +555,20 @@ def start_pause(
 ) -> UsagePause | None:
     """Record a pause for ``breaches``; None (no pause) when it must not or cannot be.
 
-    Not entered for an empty session id, a resume time inside
-    :data:`MIN_RESUME_LEAD_SECONDS`, no project context, or a record that cannot be
-    written: the other gates read this record, so a directive without one could not
-    be enforced.
+    Not entered for an empty session id, the owner's override
+    (``usage-pause clear``), no project context, or a record that cannot be written
+    AND read back identically: every other gate reads this record, so a directive
+    without one could not be enforced, and a record this process can write but not
+    read would be re-entered on every call (a deny/stop loop).
     """
     if not session_id or not breaches:
         return None
     now = env.clock()
-    if not resume_is_far_enough(resume_at_for(breaches), now=now):
-        logger.debug("usage_pause_gate: the window resets within the lead time, not pausing")
-        return None
     directory = untracked_dir()
     if directory is None:
+        return None
+    if usage_override_active(directory, session_id, now=now):
+        logger.info("usage_pause_gate: the owner's override is active, not pausing")
         return None
     pause = build_pause(session_id, breaches, now=now)
     try:
@@ -562,8 +576,37 @@ def start_pause(
     except (OSError, ValueError) as exc:
         logger.warning("usage_pause_gate: pause record not written, not pausing: %s", exc)
         return None
+    if read_usage_pause(directory, session_id, now=now) != pause:
+        logger.warning(
+            "usage_pause_gate: the pause record could not be read back as written, not pausing"
+        )
+        try:
+            clear_usage_pause(directory, session_id)
+        except OSError as exc:
+            logger.warning("usage_pause_gate: could not remove the unreadable record: %s", exc)
+        return None
     logger.warning("usage_pause_gate: pausing session %s: %s", session_id, pause.reason)
     return pause
+
+
+def renew_pause(pause: UsagePause, env: PauseEnvironment) -> UsagePause:
+    """``pause`` with a resume time still ahead, persisted; unchanged if it already is.
+
+    A record that cannot be rewritten keeps its old resume time (a warning says so):
+    the gates then judge against the record that is actually on disk.
+    """
+    fresh = refresh_resume(pause, now=env.clock())
+    if fresh is pause:
+        return pause
+    directory = untracked_dir()
+    if directory is None:
+        return pause
+    try:
+        write_usage_pause(directory, fresh)
+    except (OSError, ValueError) as exc:
+        logger.warning("usage_pause_gate: could not move the resume time forward: %s", exc)
+        return pause
+    return fresh
 
 
 def try_start_pause(hook_input: Mapping[str, Any], env: PauseEnvironment) -> UsagePause | None:
@@ -573,7 +616,9 @@ def try_start_pause(hook_input: Mapping[str, Any], env: PauseEnvironment) -> Usa
         return None
     try:
         return start_pause(session_id, current_breaches(hook_input, env), env)
-    except (OSError, ValueError, RuntimeError) as exc:
+    except Exception as exc:
+        # Deliberately broad: this runs inside a SAFETY handler on every tool call, and
+        # the chain turns any exception from one into a DENY of the call.
         logger.warning("usage_pause_gate: cannot evaluate the ceiling, not pausing: %s", exc)
         return None
 

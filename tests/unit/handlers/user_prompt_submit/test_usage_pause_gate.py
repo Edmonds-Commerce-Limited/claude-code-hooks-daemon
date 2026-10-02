@@ -43,6 +43,7 @@ from claude_code_hooks_daemon.utils.usage_pause import (
     WINDOW_FIVE_HOUR,
     UsagePause,
     read_usage_pause,
+    write_usage_override,
     write_usage_pause,
 )
 
@@ -355,15 +356,51 @@ class TestResume:
         assert "LIFTED" not in text
         assert "NOT lifted" in text
 
-    def test_a_window_resetting_inside_the_lead_lifts_instead_of_pausing_again(
+    def test_a_window_resetting_in_seconds_still_over_stays_paused_with_a_future_cron(
         self, tmp_path: Path
     ) -> None:
+        """Round 2 N5: never say usage is back under unless a fresh read shows it."""
         _record(tmp_path)
         near = UsageSnapshot(five_hour=UsageWindow(95.0, int(_NOW + 30), _NOW), seven_day=None)
         handler = _handler(tmp_path, snapshot=near)
         result = _run(handler, tmp_path, _input(gate.USAGE_RESUME_PROMPT))
-        assert "PAUSE LIFTED" in "\n".join(result.context)
+        text = "\n".join(result.context)
+        assert "STILL OVER" in text
+        assert "usage is back under" not in text
+        pause = read_usage_pause(tmp_path, _SESSION, now=_NOW)
+        assert pause is not None
+        assert pause.resume_at >= _NOW + gate.RESUME_MARGIN_SECONDS
+
+    def test_the_verified_lift_says_usage_is_back_under(self, tmp_path: Path) -> None:
+        _record(tmp_path)
+        handler = _handler(tmp_path, snapshot=_snapshot(five=10.0))
+        result = _run(handler, tmp_path, _input(gate.USAGE_RESUME_PROMPT))
+        assert "back under the ceiling" in "\n".join(result.context)
+
+    def test_an_override_that_ends_the_pause_does_not_claim_usage_is_under(
+        self, tmp_path: Path
+    ) -> None:
+        _record(tmp_path)
+        write_usage_override(tmp_path, _SESSION, until=_NOW + 3600, now=_NOW)
+        handler = _handler(tmp_path, snapshot=_snapshot(five=95.0))
+        result = _run(handler, tmp_path, _input(gate.USAGE_RESUME_PROMPT))
+        text = "\n".join(result.context)
+        assert "NOT confirmed" in text
+        assert "usage is back under" not in text
         assert read_usage_pause(tmp_path, _SESSION, now=_NOW) is None
+
+    def test_a_pause_that_cannot_be_renewed_does_not_claim_usage_is_under(
+        self, tmp_path: Path
+    ) -> None:
+        _record(tmp_path)
+        handler = _handler(tmp_path, snapshot=_snapshot(five=95.0))
+        with patch(
+            "claude_code_hooks_daemon.utils.usage_pause_gate.write_usage_pause",
+            side_effect=OSError("full"),
+        ):
+            result = _run(handler, tmp_path, _input(gate.USAGE_RESUME_PROMPT))
+        text = "\n".join(result.context)
+        assert "usage is back under" not in text
 
 
 class TestHeldPromptReResolvesTheCeiling:
@@ -432,22 +469,60 @@ class TestNoSessionId:
 
 
 class TestEntryNearReset:
-    def test_a_reset_inside_the_lead_is_not_worth_pausing_for(self, tmp_path: Path) -> None:
+    """Round 2 N5/N6: there is no "too close to pause" shortcut."""
+
+    def test_a_reset_seconds_away_still_pauses_with_a_future_resume_cron(
+        self, tmp_path: Path
+    ) -> None:
         near = UsageSnapshot(five_hour=UsageWindow(95.0, int(_NOW + 30), _NOW), seven_day=None)
         handler = _handler(tmp_path, snapshot=near)
         result = _run(handler, tmp_path, _input())
         assert result.decision == Decision.ALLOW
+        assert "USAGE CEILING REACHED" in "\n".join(result.context)
+        pause = read_usage_pause(tmp_path, _SESSION, now=_NOW)
+        assert pause is not None
+        assert pause.resume_at >= _NOW + gate.RESUME_MARGIN_SECONDS
+
+
+class TestOwnerOverride:
+    """Round 2 N4: after ``usage-pause clear`` no gate starts a pause until the window resets."""
+
+    def test_the_next_prompt_is_not_re_paused_while_the_override_is_valid(
+        self, tmp_path: Path
+    ) -> None:
+        write_usage_override(tmp_path, _SESSION, until=_NOW + 3600, now=_NOW)
+        handler = _handler(tmp_path, snapshot=_snapshot(five=95.0))
+        result = _run(handler, tmp_path, _input("owner: I cleared it, do the thing"))
+        assert result.decision == Decision.ALLOW
         assert not result.context
         assert read_usage_pause(tmp_path, _SESSION, now=_NOW) is None
 
+    def test_the_override_ends_with_its_window(self, tmp_path: Path) -> None:
+        write_usage_override(tmp_path, _SESSION, until=_NOW + 10, now=_NOW)
+        handler = _handler(tmp_path, snapshot=_snapshot(five=95.0))
+        handler._clock = lambda: _NOW + 11
+        result = _run(handler, tmp_path, _input("later"))
+        assert "USAGE CEILING REACHED" in "\n".join(result.context)
+
 
 class TestOwnerEscapeIsDocumented:
-    """Plan 00479 C2(c): the rule says what actually lifts a pause."""
+    """Plan 00479 C2(c) and round 2 N4: the rule says exactly what the escape does."""
 
     def test_the_rule_names_the_cli_and_not_a_config_edit(self) -> None:
         rule = UsagePauseGateHandler().get_rules()[0]
         assert "usage-pause clear" in rule.verbose
         assert "restart the daemon" not in rule.verbose
+
+    def test_the_rule_describes_the_override_exactly(self) -> None:
+        verbose = " ".join(UsagePauseGateHandler().get_rules()[0].verbose.split())
+        assert "latest reset" in verbose
+        assert "no pause is started" in verbose
+        assert "at once" not in verbose  # clear is not instant relief while usage is over
+
+    def test_the_rule_says_bang_commands_are_unverified(self) -> None:
+        verbose = " ".join(UsagePauseGateHandler().get_rules()[0].verbose.split())
+        assert "may or may not" in verbose
+        assert "terminal" in verbose
 
     def test_the_hold_reason_names_the_cli(self, tmp_path: Path) -> None:
         _record(tmp_path)

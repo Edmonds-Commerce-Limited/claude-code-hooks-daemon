@@ -184,17 +184,22 @@ it does not end. Three handlers (`usage_pause_gate`, `usage_pause_tool_gate`,
 
 - The prompt that trips the ceiling carries a directive to replace every cron
   with ONE one-shot resume cron at the window's reset plus two minutes, then
-  stop. The cron's schedule is a local-time expression, with the UTC time stated
-  beside it.
+  stop. The cron's schedule is a UTC expression: the Claude Code docs do not say
+  which zone `CronCreate` reads, so the directive says so and asks for no clock
+  check.
 - While paused, other prompts are dropped before the model, every tool but
   `CronList`/`CronDelete`/`CronCreate`/`ToolSearch` is denied (and halts the
   turn), and a stop is accepted only once exactly the resume cron remains and
   its schedule fires before a day after the reset. A session that never submits
-  a prompt is paused by its next tool call or Stop. The cron is read in the
-  machine's local time zone, which the directive states.
-- The owner is never locked out: each held prompt re-checks the ceiling, and
-  `! bin/hooks-daemon usage-pause clear` (or `usage-pause status`) lifts or
-  shows the pause at once. A record is honoured for at most 8 days.
+  a prompt is paused by its next main-thread tool call (refused without a halt,
+  carrying the directive) or its next Stop; a subagent never starts a pause.
+- The owner is never locked out: each held prompt re-checks the ceiling, so a
+  pause that no longer applies lifts. `bin/hooks-daemon usage-pause clear`, run
+  in a terminal (whether a `!`-prefixed command passes through the hooks is
+  unverified), removes the pause and records an override until the latest reset
+  among the windows over the ceiling (at most 8 days): no pause is started for
+  that session meanwhile, even with usage still over. `usage-pause status`
+  shows the state. A pause record is honoured for at most 8 days.
 - The resume cron's prompt starts `[tick:usage-resume]`. When it fires, usage is
   re-read: under the ceiling the pause lifts and the declared crons are
   re-created; still over it, the next resume cron is scheduled.

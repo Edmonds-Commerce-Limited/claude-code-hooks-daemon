@@ -23,11 +23,13 @@ allows.
 
 **The cron must work (Plan 00479 M2).** One resume-tagged cron is not enough: its
 pinned schedule must fire in ``(now, resume_at + 1 day]``
-(``schedule_fires_in_window``, read in the daemon's local zone, which is the zone
-``CronCreate`` reads). A pinned minute that has passed next matches a year later
-and would never wake the session, so that is refused with the reason and the
-directive. If the window is about to reset (inside the lead time) a cron cannot
-be pinned usefully, so the pause is lifted instead of looping.
+(``schedule_fires_in_window``, read in UTC: the vendored Claude Code docs do not
+say which zone ``CronCreate`` reads, so the day of tolerance absorbs the
+difference). A pinned minute that has passed next matches a year later and would
+never wake the session, so that is refused with the reason and the directive. A
+resume time that has come or gone is first moved a margin ahead
+(``renew_pause``) so the directive's expression is in the future; the pause is
+NEVER cleared here, which would leave the session with no resume cron.
 
 **Entry (M3).** A session that crosses the ceiling without a new prompt or tool
 call can still reach a Stop, so this gate also enters the pause
@@ -56,10 +58,9 @@ from claude_code_hooks_daemon.utils.usage_pause import UsagePause
 from claude_code_hooks_daemon.utils.usage_pause_gate import (
     PauseEnvironment,
     active_usage_pause,
-    clear_pause,
     render_pause_directive,
     render_stop_directive,
-    resume_is_far_enough,
+    renew_pause,
     schedule_fires_in_window,
     try_start_pause,
 )
@@ -145,18 +146,12 @@ class UsagePauseStopGateHandler(StopHandlerBase):
         crons = parse_session_crons(hook_input)
         if crons is None:
             return BlockingResult(decision=Decision.ALLOW)
+        # A resume time that has come or gone (the model was slow) would pin the cron to a
+        # minute that has passed: move it ahead and give the model the new expression. The
+        # pause is never cleared here, which would leave the session with no resume cron.
+        pause = renew_pause(pause, env)
         problem = self._problem(pause, crons)
         if problem is None:
-            return BlockingResult(decision=Decision.ALLOW)
-        if not resume_is_far_enough(pause.resume_at, now=env.clock()):
-            # The pinned minute is gone and the window resets within minutes: a cron cannot
-            # be pinned that close, so repeating the directive would only loop.
-            logger.warning(
-                "usage pause: resume is imminent and the resume cron is not usable; "
-                "lifting the pause for session %s",
-                session_id,
-            )
-            clear_pause(session_id)
             return BlockingResult(decision=Decision.ALLOW)
         if is_stop_hook_active(hook_input):
             logger.warning(
@@ -179,10 +174,9 @@ class UsagePauseStopGateHandler(StopHandlerBase):
         ):
             return None
         return (
-            f"Its schedule `{crons[0].schedule}` does not fire between now and the resume "
-            "time (a pinned minute that has passed next fires a YEAR later, and the cron is "
-            "read in the machine's local time zone). CronDelete it and create it again "
-            "with the expression given below."
+            f"Its schedule `{crons[0].schedule}` does not fire between now and a day after "
+            "the resume time (a pinned minute that has passed next fires a YEAR later). "
+            "CronDelete it and create it again with the expression given below, which is in UTC."
         )
 
     def get_rules(self) -> list[Rule]:

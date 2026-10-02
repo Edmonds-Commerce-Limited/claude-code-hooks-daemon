@@ -26,6 +26,7 @@ from claude_code_hooks_daemon.utils.usage_pause import (
     WINDOW_SEVEN_DAY,
     UsagePause,
     read_usage_pause,
+    write_usage_override,
     write_usage_pause,
 )
 
@@ -334,15 +335,63 @@ class TestAnyReadErrorFailsOpen:
             assert gate.is_usage_paused(_SESSION, now=_NOW) is False
 
 
-class TestResumeLead:
-    def test_a_resume_time_far_enough_away_is_worth_pausing_for(self) -> None:
-        assert gate.resume_is_far_enough(_NOW + gate.MIN_RESUME_LEAD_SECONDS, now=_NOW) is True
+class TestResumeFloor:
+    """Plan 00479 round 2 N5/N6: there is no "too close to pause" shortcut.
 
-    def test_a_resume_time_inside_the_lead_is_not(self) -> None:
-        assert gate.resume_is_far_enough(_NOW + gate.MIN_RESUME_LEAD_SECONDS - 1, now=_NOW) is False
+    A reset a few seconds away still pauses; the resume cron is simply scheduled for the
+    next minute after the resume time, never in the past.
+    """
 
-    def test_a_resume_time_already_past_is_not(self) -> None:
-        assert gate.resume_is_far_enough(_NOW - 5, now=_NOW) is False
+    def _breach_resetting_in(self, seconds: float) -> list[gate.UsageBreach]:
+        window = _window(95.0, int(_NOW + seconds))
+        return gate.find_breaches(UsageSnapshot(five_hour=window, seven_day=None), _ceiling())
+
+    def test_a_reset_seconds_away_still_builds_a_pause_with_a_future_resume(self) -> None:
+        pause = gate.build_pause(_SESSION, self._breach_resetting_in(5), now=_NOW)
+        assert pause.resume_at >= _NOW + gate.RESUME_MARGIN_SECONDS
+
+    def test_a_distant_reset_is_not_moved(self) -> None:
+        pause = gate.build_pause(_SESSION, self._breach_resetting_in(3 * 3600), now=_NOW)
+        assert pause.resume_at == _FIVE_RESET + gate.RESUME_MARGIN_SECONDS
+
+    def test_the_cron_for_a_floored_resume_time_fires_after_now(self) -> None:
+        pause = gate.build_pause(_SESSION, self._breach_resetting_in(5), now=_NOW)
+        cron = gate.resume_schedule(pause.resume_at, tz=UTC).cron
+        assert gate.schedule_fires_in_window(cron, now=_NOW, resume_at=pause.resume_at, tz=UTC)
+
+    def test_refresh_moves_a_past_resume_time_forward_and_keeps_the_rest(self) -> None:
+        old = UsagePause(
+            session_id=_SESSION,
+            paused_at=_NOW - 600,
+            resume_at=_NOW - 30,
+            window=WINDOW_FIVE_HOUR,
+            used_percentage=91.0,
+            ceiling=80.0,
+            reason="r",
+        )
+        fresh = gate.refresh_resume(old, now=_NOW)
+        assert fresh.resume_at == _NOW + gate.RESUME_MARGIN_SECONDS
+        assert (fresh.paused_at, fresh.window, fresh.reason) == (
+            old.paused_at,
+            old.window,
+            old.reason,
+        )
+
+    def test_refresh_leaves_a_comfortable_resume_time_alone(self) -> None:
+        old = UsagePause(
+            session_id=_SESSION,
+            paused_at=_NOW - 60,
+            resume_at=_NOW + 3600,
+            window=WINDOW_FIVE_HOUR,
+            used_percentage=91.0,
+            ceiling=80.0,
+            reason="r",
+        )
+        assert gate.refresh_resume(old, now=_NOW) is old
+
+    def test_the_ten_minute_shortcut_is_gone(self) -> None:
+        assert not hasattr(gate, "MIN_RESUME_LEAD_SECONDS")
+        assert not hasattr(gate, "resume_is_far_enough")
 
 
 class TestScheduleVerification:
@@ -393,22 +442,82 @@ class TestScheduleVerification:
         )
 
 
+def _a_pause() -> UsagePause:
+    return UsagePause(
+        session_id=_SESSION,
+        paused_at=_NOW,
+        resume_at=float(_FIVE_RESET + 120),
+        window=WINDOW_FIVE_HOUR,
+        used_percentage=91.0,
+        ceiling=90.0,
+        reason="r",
+    )
+
+
 class TestTimeZoneIsStatedInTheDirective:
-    def test_the_directive_names_the_zone_and_offset(self) -> None:
+    """Round 2 N1: no ``date`` step; the expression is in UTC and says so.
+
+    The vendored Claude Code docs (``remote-docs/``) do not say which time zone
+    ``CronCreate`` reads an expression in, so the directive neither assumes the
+    machine's zone nor asks the model to inspect a clock (a Bash call that the tool
+    gate would halt). It gives UTC and says the docs are silent.
+    """
+
+    def test_the_default_zone_is_utc(self) -> None:
+        assert gate.PauseEnvironment().tz is UTC
+        assert gate.resume_schedule(_NOW).zone_text.startswith("UTC")
+
+    def test_the_directive_states_the_expression_is_in_utc(self) -> None:
+        text = gate.render_pause_directive(_a_pause())
+        assert gate.resume_schedule(_a_pause().resume_at).cron in text
+        assert "in UTC" in text
+        assert "does not say" in text  # the docs are silent on CronCreate's zone
+
+    def test_the_directive_never_asks_for_a_clock_check(self) -> None:
+        for text in (
+            gate.render_pause_directive(_a_pause()),
+            gate.render_stop_directive(_a_pause(), found=0),
+            gate.render_still_over_directive(_a_pause()),
+        ):
+            assert "`date`" not in text
+            assert "date first" not in text.lower()
+
+    def test_an_explicit_zone_is_still_named(self) -> None:
         zone = timezone(timedelta(hours=10), "AEST")
-        pause = UsagePause(
-            session_id=_SESSION,
-            paused_at=_NOW,
-            resume_at=float(_FIVE_RESET + 120),
-            window=WINDOW_FIVE_HOUR,
-            used_percentage=91.0,
-            ceiling=90.0,
-            reason="r",
-        )
-        text = gate.render_pause_directive(pause, tz=zone)
+        text = gate.render_pause_directive(_a_pause(), tz=zone)
         assert "AEST" in text
         assert "+10:00" in text
-        assert "date" in text  # tells the model to cross-check the session's own clock
+
+
+class TestEveryToolTheDirectiveNamesIsAllowedWhilePaused:
+    """Round 2 N1: a step the tool gate would halt strands the session with no cron."""
+
+    def _tool_names_in(self, text: str) -> set[str]:
+        import re
+
+        from claude_code_hooks_daemon.constants.tools import ToolName
+
+        names = {
+            value
+            for key, value in vars(ToolName).items()
+            if not key.startswith("_") and isinstance(value, str)
+        }
+        words = set(re.findall(r"[A-Za-z]+", text))
+        return names & words
+
+    @pytest.mark.parametrize(
+        "render",
+        [
+            lambda: gate.render_pause_directive(_a_pause()),
+            lambda: gate.render_stop_directive(_a_pause(), found=2, problem="p"),
+            lambda: gate.render_still_over_directive(_a_pause()),
+        ],
+        ids=["entry", "stop", "still-over"],
+    )
+    def test_only_allowed_tools_are_named(self, render: Any) -> None:
+        named = self._tool_names_in(render())
+        assert named, "the directive should name the cron tools"
+        assert named <= gate.PAUSE_ALLOWED_TOOLS, named - gate.PAUSE_ALLOWED_TOOLS
 
 
 class TestSharedFailsafeSchedule:
@@ -456,11 +565,71 @@ class TestStartPause:
         with patch.object(ProjectContext, "daemon_untracked_dir", return_value=tmp_path):
             assert gate.try_start_pause(self._input(), self._env(_snapshot(five=10.0))) is None
 
-    def test_a_reset_inside_the_lead_never_pauses(self, tmp_path: Path) -> None:
+    def test_a_reset_seconds_away_still_pauses_with_a_future_resume(self, tmp_path: Path) -> None:
         near = UsageSnapshot(five_hour=_window(95.0, int(_NOW + 30)), seven_day=None)
         with patch.object(ProjectContext, "daemon_untracked_dir", return_value=tmp_path):
-            assert gate.try_start_pause(self._input(), self._env(near)) is None
+            pause = gate.try_start_pause(self._input(), self._env(near))
+        assert pause is not None
+        assert pause.resume_at >= _NOW + gate.RESUME_MARGIN_SECONDS
+
+    def test_a_record_that_cannot_be_read_back_is_no_pause(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Round 2 N3: written but unreadable must not become a stop/deny loop."""
+        real_read = Path.read_text
+
+        def unreadable_record(self: Path, *args: Any, **kwargs: Any) -> str:
+            if self.name.endswith(".usage-paused"):
+                raise PermissionError("denied")
+            return real_read(self, *args, **kwargs)
+
+        with (
+            patch.object(ProjectContext, "daemon_untracked_dir", return_value=tmp_path),
+            patch.object(Path, "read_text", unreadable_record),
+            caplog.at_level("WARNING"),
+        ):
+            assert gate.try_start_pause(self._input(), self._env(_snapshot(five=95.0))) is None
+        assert "read back" in caplog.text
+        assert list(tmp_path.rglob("*.usage-paused")) == []  # the unreadable record is removed
+
+    def test_a_record_that_reads_back_different_is_no_pause(self, tmp_path: Path) -> None:
+        other = UsagePause(
+            session_id=_SESSION,
+            paused_at=_NOW - 5,
+            resume_at=_NOW + 99_999,
+            window=WINDOW_FIVE_HOUR,
+            used_percentage=1.0,
+            ceiling=80.0,
+            reason="someone else",
+        )
+        with (
+            patch.object(ProjectContext, "daemon_untracked_dir", return_value=tmp_path),
+            patch.object(gate, "read_usage_pause", return_value=other),
+        ):
+            assert gate.try_start_pause(self._input(), self._env(_snapshot(five=95.0))) is None
+
+    def test_an_owner_override_stops_any_pause_starting(self, tmp_path: Path) -> None:
+        with patch.object(ProjectContext, "daemon_untracked_dir", return_value=tmp_path):
+            write_usage_override(tmp_path, _SESSION, until=_NOW + 3600, now=_NOW)
+            assert gate.try_start_pause(self._input(), self._env(_snapshot(five=95.0))) is None
             assert list(tmp_path.rglob("*.usage-paused")) == []
+
+    def test_an_expired_override_no_longer_applies(self, tmp_path: Path) -> None:
+        with patch.object(ProjectContext, "daemon_untracked_dir", return_value=tmp_path):
+            write_usage_override(tmp_path, _SESSION, until=_NOW + 10, now=_NOW)
+            later = self._env(_snapshot(five=95.0), now=_NOW + 11)
+            assert gate.try_start_pause(self._input(), later) is not None
+
+    def test_another_sessions_override_does_not_apply(self, tmp_path: Path) -> None:
+        with patch.object(ProjectContext, "daemon_untracked_dir", return_value=tmp_path):
+            write_usage_override(tmp_path, "someone-else", until=_NOW + 3600, now=_NOW)
+            assert gate.try_start_pause(self._input(), self._env(_snapshot(five=95.0))) is not None
+
+    def test_an_unreadable_override_fails_toward_not_pausing(self, tmp_path: Path) -> None:
+        with patch.object(ProjectContext, "daemon_untracked_dir", return_value=tmp_path):
+            write_usage_override(tmp_path, _SESSION, until=_NOW + 3600, now=_NOW)
+            with patch.object(Path, "read_text", side_effect=PermissionError("denied")):
+                assert gate.try_start_pause(self._input(), self._env(_snapshot(five=95.0))) is None
 
     def test_a_usage_loader_that_raises_oserror_fails_open(self, tmp_path: Path) -> None:
         def boom(_now: float) -> UsageSnapshot | None:

@@ -19,8 +19,12 @@ schemas load only through it (``constants/tools.py``).
 **Entry (Plan 00479 M3).** A session kept going by Stop continuations or one long
 turn never submits a prompt, so ``usage_pause_gate`` never sees it. This handler
 therefore also ENTERS the pause (``try_start_pause``, the same entry the prompt
-gate uses) when the host ceiling is reached, and denies-and-halts that call with
-the directive. The Stop gate then re-delivers the directive. The ceiling check
+gate uses) when the host ceiling is reached. The call that starts it is a plain deny
+carrying the directive, NOT a halt: ``continue: false`` ends the turn and its
+``stopReason`` is not shown to the model (``CLAUDE/Code/HooksSystem.md``), so a halt
+would leave the directive unread. Only the main thread starts a pause (a subagent
+cannot ``CronDelete``, ``R-SUBAGENT-CRON-DELETE``); a subagent's call in a paused
+session is a plain deny telling it to stop. Later main-thread calls halt. The ceiling check
 reads the in-memory usage snapshot and is skipped altogether for a host with no
 ceiling, so the cost on every tool call is one config-cache lookup and one stat.
 
@@ -36,6 +40,7 @@ from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, HookInputF
 from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.core import Decision, GatingResult
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
+from claude_code_hooks_daemon.core.handler_scope import in_subagent
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.utils.usage_pause_gate import (
     PAUSE_ALLOWED_TOOLS,
@@ -51,6 +56,12 @@ _ALLOWED_TEXT: Final[str] = ", ".join(sorted(PAUSE_ALLOWED_TOOLS))
 _STOP_REASON: Final[str] = (
     "Session paused on its usage ceiling: only the cron tools are allowed until the "
     "resume cron fires."
+)
+
+_SUBAGENT_REASON: Final[str] = (
+    "This session is PAUSED on its usage ceiling (Plan 00479), so this call is refused. "
+    "Stop now and report to the coordinator that you were interrupted by the pause; do not "
+    "retry, and do not touch the session's crons (the coordinator replaces them)."
 )
 
 _RULE: Final[Rule] = Rule(
@@ -69,7 +80,9 @@ _RULE: Final[Rule] = Rule(
         "  2. CronCreate ONE one-shot resume cron, exactly as the pause directive\n"
         "     gave it (its prompt starts [tick:usage-resume]).\n"
         "  3. Stop. The session resumes by itself at the window reset.\n\n"
-        "A human can lift the pause at once with `! bin/hooks-daemon usage-pause clear`."
+        "A human can run `bin/hooks-daemon usage-pause clear` (in a terminal): it removes the\n"
+        "pause and no pause is started for this session again until the latest reset among\n"
+        "the windows over the ceiling (at most 8 days)."
     ),
 )
 
@@ -86,6 +99,8 @@ class UsagePauseToolGateHandler(PreToolUseHandlerBase):
         )
         # The seams entry reads the world through; tests substitute fakes.
         self._env = PauseEnvironment()
+        # Sessions whose pause THIS call just started (set by ``matches``, read by ``handle``).
+        self._entered: set[str] = set()
 
     def get_default_enabled(self) -> bool:
         """On by default; inert unless a usage pause is recorded or the ceiling is reached."""
@@ -105,22 +120,35 @@ class UsagePauseToolGateHandler(PreToolUseHandlerBase):
             return False
         if active_usage_pause(session_id, now=self._env.clock()) is not None:
             return True
-        return try_start_pause(hook_input, self._env) is not None
+        if in_subagent(hook_input):
+            # The record belongs to the shared session: only the main thread, which can
+            # act on the directive (a subagent cannot CronDelete), starts a pause.
+            return False
+        if try_start_pause(hook_input, self._env) is None:
+            return False
+        self._entered.add(session_id)
+        return True
 
     def handle(self, hook_input: dict[str, Any]) -> GatingResult:
-        """Deny the call and halt the turn, carrying the pause directive.
+        """Deny the call; halt the turn only once the model has been told what to do.
 
-        The directive is in the deny reason on every call: the model that reads it
-        (the halt may still show it) learns what to do, and a user sees it in the
-        stop reason's companion text. Re-reading the record rather than keeping
-        state between ``matches`` and ``handle`` keeps the handler stateless.
+        * The call that STARTS a pause is a plain deny carrying the full directive:
+          ``continue: false`` ends the turn and ``stopReason`` is not shown to the model,
+          so a halt here would leave the directive unread.
+        * A subagent's call in a paused session is a plain deny telling it to stop; it must
+          not touch the session's crons.
+        * Every later main-thread call is denied and halts the turn.
         """
+        session_id = str(hook_input.get(HookInputField.SESSION_ID) or "")
+        if in_subagent(hook_input):
+            return GatingResult.deny(_SUBAGENT_REASON)
         reason = RuleFormatter().verbose(_RULE)
-        pause = active_usage_pause(
-            str(hook_input.get(HookInputField.SESSION_ID) or ""), now=self._env.clock()
-        )
+        pause = active_usage_pause(session_id, now=self._env.clock())
         if pause is not None:
             reason = f"{reason}\n\n{render_pause_directive(pause, tz=self._env.tz)}"
+        if session_id in self._entered:
+            self._entered.discard(session_id)
+            return GatingResult.deny(reason)
         return GatingResult.deny_and_halt(reason, stop_reason=_STOP_REASON)
 
     def get_rules(self) -> list[Rule]:
@@ -135,7 +163,9 @@ class UsagePauseToolGateHandler(PreToolUseHandlerBase):
             "every tool except `CronList`, `CronDelete`, `CronCreate` and `ToolSearch` "
             "(the cron tools are deferred; it loads them) is denied, and the deny halts "
             "the turn (`continue: false`). A session that crosses the ceiling mid-turn is "
-            "paused by its next tool call. Replace the session's crons with the one resume "
+            "paused by its next MAIN-thread tool call, which is refused WITHOUT a halt and "
+            "carries the full directive so you can act on it. A subagent never starts a "
+            "pause; its calls in a paused session are refused and it should stop. Replace the session's crons with the one resume "
             "cron the pause directive describes, then stop. The session resumes by itself "
             "at the window reset."
         )

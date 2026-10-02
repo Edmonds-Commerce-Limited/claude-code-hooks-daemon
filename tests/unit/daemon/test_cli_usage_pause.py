@@ -1,8 +1,9 @@
 """Tests for ``hooks-daemon usage-pause clear|status`` (Plan 00479 review C2b).
 
 The owner's escape from a usage pause: a held prompt can never lift it by itself
-when the ceiling is still reached, so a human runs ``! bin/hooks-daemon usage-pause
-clear`` (a ``!`` command is a shell run, not a prompt, so no gate sees it).
+when the ceiling is still reached, so a human runs ``bin/hooks-daemon usage-pause
+clear`` in a terminal. Whether a ``!``-prefixed command passes through the hooks is
+unverified, so the docs name the terminal.
 """
 
 from __future__ import annotations
@@ -20,8 +21,10 @@ from claude_code_hooks_daemon.utils.usage_pause import (
     WINDOW_FIVE_HOUR,
     UsagePause,
     read_usage_pause,
+    usage_override_active,
     write_usage_pause,
 )
+from claude_code_hooks_daemon.utils.usage_pause_gate import RESUME_MARGIN_SECONDS
 
 _SESSION = "cli-usage-session"
 
@@ -112,7 +115,90 @@ class TestClear:
         assert _live(project)
 
 
+class TestClearRecordsAnOverride:
+    """Round 2 N4: clearing alone is undone by the next prompt while usage is still over.
+
+    So ``clear`` also records an override valid until the latest reset among the windows
+    over the ceiling (capped at 8 days); while it is valid no gate starts a pause.
+    """
+
+    def _override_active(self, project_root: Path, at: float) -> bool:
+        return usage_override_active(project_root / "untracked", _SESSION, now=at)
+
+    def test_the_override_runs_to_the_pause_records_reset(self, project: Path) -> None:
+        _record(project)
+        before = time.time()
+        assert cli.cmd_usage_pause(_args(project, "clear")) == 0
+        reset = before + 3600 - RESUME_MARGIN_SECONDS  # the record's resume_at less the margin
+        assert self._override_active(project, reset - 5)
+        assert not self._override_active(project, reset + 5)
+
+    def test_it_is_extended_to_a_later_window_that_is_over_the_ceiling(self, project: Path) -> None:
+        from claude_code_hooks_daemon.utils.usage_pause_gate import UsageBreach
+
+        _record(project)
+        later = time.time() + 3 * 86400
+        breach = UsageBreach("seven_day", 90.0, 80.0, int(later))
+        with patch(
+            "claude_code_hooks_daemon.utils.usage_pause_gate.current_breaches",
+            return_value=[breach],
+        ):
+            assert cli.cmd_usage_pause(_args(project, "clear")) == 0
+        assert self._override_active(project, later - 5)
+        assert not self._override_active(project, later + 5)
+
+    def test_the_next_prompt_is_not_re_paused(self, project: Path) -> None:
+        from claude_code_hooks_daemon.utils.usage_pause_gate import (
+            PauseEnvironment,
+            UsageBreach,
+            start_pause,
+        )
+
+        _record(project)
+        assert cli.cmd_usage_pause(_args(project, "clear")) == 0
+        breach = UsageBreach("five_hour", 95.0, 80.0, int(time.time() + 3600))
+        assert start_pause(_SESSION, [breach], PauseEnvironment()) is None
+        assert not _live(project)
+
+    def test_the_message_states_exactly_what_it_did(
+        self, project: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        _record(project)
+        assert cli.cmd_usage_pause(_args(project, "clear")) == 0
+        out = capsys.readouterr().out
+        assert "no pause will be started" in out
+        assert "UTC" in out
+        assert "works again" not in out  # the old, untrue promise
+
+    def test_no_pause_and_no_breach_records_no_override(
+        self, project: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        assert cli.cmd_usage_pause(_args(project, "clear")) == 0
+        assert not self._override_active(project, time.time())
+
+    def test_a_failed_override_write_leaves_the_pause_in_place(
+        self, project: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Clearing without the override would just be undone, so neither happens."""
+        _record(project)
+        with patch(
+            "claude_code_hooks_daemon.utils.usage_pause.write_usage_override",
+            side_effect=OSError("full"),
+        ):
+            assert cli.cmd_usage_pause(_args(project, "clear")) == 1
+        assert _live(project)
+        assert "override" in capsys.readouterr().err.lower()
+
+
 class TestStatus:
+    def test_reports_an_override(self, project: Path, capsys: pytest.CaptureFixture[str]) -> None:
+        _record(project)
+        cli.cmd_usage_pause(_args(project, "clear"))
+        capsys.readouterr()
+        assert cli.cmd_usage_pause(_args(project, "status")) == 0
+        out = capsys.readouterr().out
+        assert "override" in out.lower()
+
     def test_reports_a_live_pause(self, project: Path, capsys: pytest.CaptureFixture[str]) -> None:
         _record(project)
         assert cli.cmd_usage_pause(_args(project, "status")) == 0

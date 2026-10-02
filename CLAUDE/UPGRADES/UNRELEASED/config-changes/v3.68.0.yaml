@@ -21,6 +21,10 @@ config_changes:
         below the ceiling the declared crons are re-established and work
         continues, still over it the next resume cron is scheduled. No
         ceiling, no usage data or an unknown host never pauses a session.
+        `hooks-daemon usage-pause clear` (run in a terminal) removes a pause
+        and records an override until the latest reset among the windows over
+        the ceiling (at most 8 days), during which no pause is started for
+        that session.
       example_yaml: |
         handlers:
           user_prompt_submit:
@@ -40,8 +44,9 @@ config_changes:
         tools) are allowed; any other tool is denied with `continue: false`
         and a `stopReason`, so a turn already running halts at its next tool
         call. A session over its ceiling that has not yet been paused is
-        paused by its next tool call. Inert unless a pause is recorded or a
-        ceiling is reached.
+        paused by its next main-thread tool call, which is refused without a
+        halt and carries the full directive; a subagent never starts a pause.
+        Inert unless a pause is recorded or a ceiling is reached.
       example_yaml: |
         handlers:
           pre_tool_use:

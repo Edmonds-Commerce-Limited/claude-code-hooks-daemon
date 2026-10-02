@@ -207,12 +207,37 @@ class TestResumeCronScheduleIsVerified:
         cron = {**_resume_cron(pause), "schedule": "*/5 * * * *"}
         assert _decide(tmp_path, _stop([cron], active=True)).decision == Decision.ALLOW
 
-    def test_a_resume_that_is_now_imminent_lifts_instead_of_repeating(self, tmp_path: Path) -> None:
-        """The cron minute has passed and the window is about to reset: no pointless loop."""
-        _record(tmp_path, resume_in=120.0)
+    def test_an_imminent_resume_is_refreshed_not_lifted(self, tmp_path: Path) -> None:
+        """Round 2 N6: never clear the pause at Stop and leave the session without a cron.
+
+        The resume time is a few seconds away, so the pinned minute is about to pass. The
+        record's resume time moves a margin ahead and the directive gives the new cron.
+        """
+        _record(tmp_path, resume_in=20.0)
         result = _decide(tmp_path, _stop([]))
-        assert result.decision == Decision.ALLOW
-        assert read_usage_pause(tmp_path, _SESSION, now=_NOW) is None
+        assert result.decision == Decision.DENY
+        pause = read_usage_pause(tmp_path, _SESSION, now=_NOW)
+        assert pause is not None
+        assert pause.resume_at >= _NOW + 120.0
+        assert resume_schedule(pause.resume_at, tz=UTC).cron in result.reason
+
+    def test_a_correct_cron_for_the_refreshed_time_is_accepted(self, tmp_path: Path) -> None:
+        _record(tmp_path, resume_in=20.0)
+        refreshed = _decide(tmp_path, _stop([]))
+        assert refreshed.decision == Decision.DENY
+        pause = read_usage_pause(tmp_path, _SESSION, now=_NOW)
+        assert pause is not None
+        again = _decide(tmp_path, _stop([_resume_cron(pause)]))
+        assert again.decision == Decision.ALLOW
+        assert read_usage_pause(tmp_path, _SESSION, now=_NOW) is not None  # still paused
+
+    def test_a_past_resume_time_is_refreshed_too(self, tmp_path: Path) -> None:
+        _record(tmp_path, resume_in=-30.0)
+        result = _decide(tmp_path, _stop([]))
+        assert result.decision == Decision.DENY
+        pause = read_usage_pause(tmp_path, _SESSION, now=_NOW)
+        assert pause is not None
+        assert pause.resume_at >= _NOW + 120.0
 
 
 class TestEntryFromTheStopGate:
@@ -254,6 +279,43 @@ class TestEntryFromTheStopGate:
         hook = _stop([])
         hook["session_id"] = ""
         assert _decide(tmp_path, hook, _env(snapshot=snapshot, config=config)) is None
+
+
+class TestAFaultNeverTrapsTheSession:
+    """Round 2 N3 (reviewer probe P2b): a record that is writable but not readable."""
+
+    def _over(self) -> tuple[Config, UsageSnapshot]:
+        config = Config(
+            hosts={"runner": HostConfig(usage_ceiling=UsageCeilingConfig(max_used_percent=80))}
+        )
+        return config, UsageSnapshot(
+            five_hour=UsageWindow(95.0, int(_NOW + 3 * 3600), _NOW), seven_day=None
+        )
+
+    def test_neither_a_first_nor_a_re_entered_stop_is_denied(self, tmp_path: Path) -> None:
+        real_read = Path.read_text
+
+        def unreadable_record(self: Path, *args: Any, **kwargs: Any) -> str:
+            if self.name.endswith(".usage-paused"):
+                raise PermissionError("denied")
+            return real_read(self, *args, **kwargs)
+
+        config, snapshot = self._over()
+        handler = UsagePauseStopGateHandler()
+        handler._env = _env(snapshot=snapshot, config=config)
+        with (
+            patch.object(ProjectContext, "daemon_untracked_dir", return_value=tmp_path),
+            patch.object(Path, "read_text", unreadable_record),
+        ):
+            for active in (False, True, True):
+                assert handler.matches(_stop([], active=active)) is False
+
+    def test_an_owner_override_stops_the_entry_from_a_stop(self, tmp_path: Path) -> None:
+        from claude_code_hooks_daemon.utils.usage_pause import write_usage_override
+
+        config, snapshot = self._over()
+        write_usage_override(tmp_path, _SESSION, until=_NOW + 3600, now=_NOW)
+        assert _decide(tmp_path, _stop([]), _env(snapshot=snapshot, config=config)) is None
 
 
 class TestReadsTheRecordOncePerStop:

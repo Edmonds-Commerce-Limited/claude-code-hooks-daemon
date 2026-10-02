@@ -28,6 +28,7 @@ import logging
 import math
 import re
 import time
+from datetime import UTC, datetime
 from typing import Any, Final
 
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, HookInputField, Priority
@@ -127,7 +128,9 @@ class UsageIndicatorHandler(StatusLineHandlerBase):
         pause = active_usage_pause(str(hook_input.get(HookInputField.SESSION_ID) or ""), now=now)
         if pause is None:
             return None
-        hhmm = resume_schedule(pause.resume_at).hhmm
+        # A human reads this, so it is the machine's local time (the resume cron's own
+        # expression is in UTC; see ``resume_schedule``).
+        hhmm = resume_schedule(pause.resume_at, tz=datetime.now().astimezone().tzinfo or UTC).hhmm
         return f"{_CRITICAL}{_PAUSE_ICON} usage {hhmm}{_RESET}"
 
     def handle(self, hook_input: dict[str, Any]) -> AdvisoryResult:

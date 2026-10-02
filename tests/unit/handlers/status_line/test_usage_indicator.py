@@ -9,6 +9,7 @@ window at or above it adds its percentage and reset countdown
 
 import re
 from collections.abc import Iterator
+from datetime import datetime
 from pathlib import Path
 from unittest.mock import patch
 
@@ -244,7 +245,9 @@ class TestPausedSession:
         resume_at = self._pause(tmp_path)
         text = self._render_paused(tmp_path)
         assert text is not None
-        assert f"⏸ usage {resume_schedule(resume_at).hhmm}" in _plain(text)
+        local = datetime.now().astimezone().tzinfo
+        assert local is not None
+        assert f"⏸ usage {resume_schedule(resume_at, tz=local).hhmm}" in _plain(text)
 
     def test_keeps_the_usage_chips_when_there_is_a_snapshot(self, tmp_path: Path) -> None:
         self._pause(tmp_path)

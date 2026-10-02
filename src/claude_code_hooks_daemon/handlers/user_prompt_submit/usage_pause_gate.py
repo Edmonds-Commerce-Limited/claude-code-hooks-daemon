@@ -41,7 +41,7 @@ from __future__ import annotations
 import logging
 import time
 from collections.abc import Callable
-from datetime import tzinfo
+from datetime import UTC, tzinfo
 from typing import Any, Final
 
 from claude_code_hooks_daemon.config.models import Config
@@ -85,7 +85,7 @@ _RULE: Final[Rule] = Rule(
     rule_id=RuleID.USAGE_PAUSE_PROMPT,
     blocked="A prompt, cron tick or supervisor message while the session is paused on its usage ceiling",
     why="The session stopped taking on work to keep the account under its usage ceiling, and each prompt would cost a full model turn",
-    fix=f"Nothing to do -- the session resumes by itself at the window reset; a human can lift it now with `! {CLEAR_COMMAND}`",
+    fix=f"Nothing to do -- the session resumes by itself at the window reset; a human can override it with `{CLEAR_COMMAND}` (run in a terminal)",
     verbose=(
         "This session is PAUSED (Plan 00479): a usage window reached the ceiling\n"
         "configured for this host. The prompt was dropped before reaching the model,\n"
@@ -95,10 +95,16 @@ _RULE: Final[Rule] = Rule(
         "The ceiling is re-checked on every prompt, so the pause lifts by itself as\n"
         "soon as this host has no ceiling (edit `hosts:` in .claude/hooks-daemon.yaml;\n"
         "the daemon reads it on its next config load) or every window is back under\n"
-        "it or past its reset. A human can lift it at once by typing, in the session:\n\n"
-        f"    ! {CLEAR_COMMAND}\n\n"
-        "(`usage-pause status` shows the record.) The record also expires on its own\n"
-        "an hour after the resume time."
+        "it or past its reset.\n\n"
+        "A human can also run:\n\n"
+        f"    {CLEAR_COMMAND}\n\n"
+        "It removes the pause record AND records an override that lasts until the\n"
+        "latest reset among the windows over the ceiling (at most 8 days): while the\n"
+        "override is valid no pause is started for this session, even though usage is\n"
+        "still over the ceiling. It then ends by itself and the ceiling applies again.\n"
+        "Run it in a terminal; typing it in the session as `! <command>` may or may\n"
+        "not pass through the hooks (unverified). `usage-pause status` shows the\n"
+        "record. The record also expires on its own an hour after the resume time."
     ),
 )
 
@@ -122,7 +128,7 @@ class UsagePauseGateHandler(UserPromptSubmitHandlerBase):
         self._clock: Callable[[], float] = time.time
         self._config_loader: Callable[[], Config] = load_project_config
         self._usage_loader: Callable[[float], UsageSnapshot | None] = default_usage_loader
-        self._tz: tzinfo | None = None  # None: the machine's local zone, which CronCreate reads
+        self._tz: tzinfo = UTC  # the resume cron's zone: the docs do not say which CronCreate reads
 
     def get_default_enabled(self) -> bool:
         """On by default; inert for a host with no usage ceiling."""
@@ -164,7 +170,7 @@ class UsagePauseGateHandler(UserPromptSubmitHandlerBase):
         """Re-resolve the ceiling for a held prompt: lift if it no longer applies."""
         if not current_breaches(hook_input, env):
             logger.warning("usage_pause_gate: the ceiling no longer applies, lifting the pause")
-            return self._lift(hook_input, session_id, held, env)
+            return self._lift(hook_input, session_id, held, env, verified_under_ceiling=True)
         schedule = resume_schedule(held.resume_at, tz=env.tz)
         reason = (
             f"{RuleFormatter().verbose(_RULE)}\n\n"
@@ -179,6 +185,9 @@ class UsagePauseGateHandler(UserPromptSubmitHandlerBase):
     ) -> BlockingResult:
         """The resume cron fired: pause again if still over the ceiling, else lift."""
         breaches = current_breaches(hook_input, env)
+        record = active_usage_pause(session_id, now=env.clock())
+        if not breaches:
+            return self._lift(hook_input, session_id, record, env, verified_under_ceiling=True)
         pause = start_pause(session_id, breaches, env)
         if pause is not None:
             logger.warning("usage_pause_gate: still over the ceiling: %s", pause.reason)
@@ -186,8 +195,10 @@ class UsagePauseGateHandler(UserPromptSubmitHandlerBase):
                 decision=Decision.ALLOW,
                 context=[render_still_over_directive(pause, tz=env.tz)],
             )
-        record = active_usage_pause(session_id, now=env.clock())
-        return self._lift(hook_input, session_id, record, env)
+        # Still over, but no new pause could be kept (the owner's override, or the record
+        # could not be written and read back): the pause ends without a fresh reading
+        # showing usage under the ceiling, and the text must not say it does.
+        return self._lift(hook_input, session_id, record, env, verified_under_ceiling=False)
 
     def _lift(
         self,
@@ -195,6 +206,8 @@ class UsagePauseGateHandler(UserPromptSubmitHandlerBase):
         session_id: str,
         record: UsagePause | None,
         env: PauseEnvironment,
+        *,
+        verified_under_ceiling: bool,
     ) -> BlockingResult:
         """Clear the record and tell the model; never claim a lift that was not recorded."""
         if not clear_pause(session_id):
@@ -203,9 +216,12 @@ class UsagePauseGateHandler(UserPromptSubmitHandlerBase):
                 decision=Decision.ALLOW,
                 context=[render_lift_not_recorded_note(expires_at=expires, tz=env.tz)],
             )
-        return BlockingResult(decision=Decision.ALLOW, context=[self._lifted_directive(hook_input)])
+        return BlockingResult(
+            decision=Decision.ALLOW,
+            context=[self._lifted_directive(hook_input, verified_under_ceiling)],
+        )
 
-    def _lifted_directive(self, hook_input: dict[str, Any]) -> str:
+    def _lifted_directive(self, hook_input: dict[str, Any], verified_under_ceiling: bool) -> str:
         """The lift directive naming the crons this host declares."""
         config = self._config_loader()
         hostname = effective_hostname(hook_input)
@@ -218,7 +234,9 @@ class UsagePauseGateHandler(UserPromptSubmitHandlerBase):
             if recovery_on and not declares_failsafe_cron(config, hostname)
             else None
         )
-        return render_resume_lifted_directive(jobs=jobs, failsafe_prompt=failsafe)
+        return render_resume_lifted_directive(
+            jobs=jobs, failsafe_prompt=failsafe, verified_under_ceiling=verified_under_ceiling
+        )
 
     def get_rules(self) -> list[Rule]:
         """The Rule backing the held-prompt block."""
@@ -237,15 +255,18 @@ class UsagePauseGateHandler(UserPromptSubmitHandlerBase):
             "While paused every other prompt is dropped before it reaches you "
             "(`R-USAGE-PAUSE-PROMPT`, no turn spent), every tool except `CronList`, "
             "`CronDelete`, `CronCreate` and `ToolSearch` is denied and halts the turn "
-            "(`usage_pause_tool_gate`), and a stop is accepted only once exactly the one "
+            "(`usage_pause_tool_gate`; the one call that starts a pause is only refused, "
+            "not halted, so you can act on the directive), and a stop is accepted only once exactly the one "
             "resume cron remains, scheduled to fire in time (`usage_pause_stop_gate`).\n\n"
             "The resume cron's prompt starts `[tick:usage-resume]`; paste it verbatim. "
             "When it fires usage is re-read: below the ceiling you are told to "
             "re-establish the declared crons and continue; still over, to schedule the "
             "next resume cron and stop again.\n\n"
             "The ceiling is re-checked on every held prompt, so the pause lifts by itself "
-            "when it no longer applies; a human can lift it at once with "
-            f"`! {CLEAR_COMMAND}`. "
+            "when it no longer applies. A human can run "
+            f"`{CLEAR_COMMAND}` in a terminal: it removes the record and records an "
+            "override until the latest reset among the windows over the ceiling (at most "
+            "8 days), during which no pause is started for the session. "
             "No ceiling, no usage data or an unknown host never pauses anything."
         )
 
