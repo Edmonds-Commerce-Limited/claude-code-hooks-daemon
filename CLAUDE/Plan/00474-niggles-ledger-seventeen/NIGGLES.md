@@ -890,3 +890,21 @@ this container sees an extra key in the exact-equality assertion. Deleting the v
 exported no override. The stamp itself keeps its own coverage in
 `test_event_socket_session_hostname.py`, whose client is a separate process with a
 controlled environment.
+
+### N289 — in this repository the slow SessionStart sweeps appear never to reach a session
+
+**Found**: by the coordinator while live-probing Plan 00475 Task 4.1 on main at d6caefded.
+Load average was about 1.4. Every `bin/hooks-daemon probe SessionStart` (source `startup`)
+took 20.4 s and ended "Chain cut short: exceeded its 20.00s dispatch budget; the output of
+the 21 handler(s) that finished is kept". The log shows `bounded_dispatch` warning that the
+chain "keeps running in the background".
+
+**Why it matters**: N276 (aa557cc12) made the slow sweeps run last and kept the cheap
+handlers' output when the chain overruns. Those sweeps are tagged slow: `git_upstream_checker`,
+`docs_qa_sweep`, `plan_qa_sweep`, `reference_repo_sweep`, `gitignore_safety_checker` and
+`secret_file_hygiene_checker`. If the chain always overruns here, their findings may never
+reach a session, and none of their output appears in this session's SessionStart context.
+Nothing reports that they were dropped. Not yet established: each sweep's own time, and
+whether a sweep that finishes in the background is delivered later.
+
+**Status**: 🔄 Under investigation (worktree agent).

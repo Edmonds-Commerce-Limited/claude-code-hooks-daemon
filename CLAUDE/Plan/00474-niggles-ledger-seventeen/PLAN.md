@@ -38,6 +38,7 @@ Full write-ups are in [NIGGLES.md](NIGGLES.md). One line each here:
 
 | #          | Verdict                                                                                                          | Origin              | Status                  |
 | ---------- | ---------------------------------------------------------------------------------------------------------------- | ------------------- | ----------------------- |
+| N289       | In this repository the slow SessionStart sweeps appear never to reach a session, unreported                      | Coordinator         | 🔄 In progress          |
 | N288       | An event-socket test fails wherever the pytest process exports a hostname override                               | Task 4.1 agent      | ✅ Fixed (test only)    |
 | N287       | `semgrep` and `dependencies` fail on main; neither runs in CI or in `changed`                                    | Plan 00475 timing   | ✅ Fixed (9342fa898)    |
 | N286       | Main full CI went red after N264/N266: a playbook probe, a blindness verdict and a skip-list finding             | Main CI             | ✅ Fixed (1bbf676a0)    |
