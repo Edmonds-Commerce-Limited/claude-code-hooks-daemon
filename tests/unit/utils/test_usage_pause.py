@@ -143,6 +143,66 @@ class TestRead:
         assert usage_pause.read_usage_pause(tmp_path, _SESSION, now=_NOW - 5) is None
 
 
+class TestFailsOpenOnAnyReadError:
+    """Plan 00479 M1: a record that cannot be read is never a pause and never raises."""
+
+    def test_the_read_never_asks_exists_which_raises_on_eacces(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        pause = _pause()
+        usage_pause.write_usage_pause(tmp_path, pause)
+
+        def deny(self: Path, *args: Any, **kwargs: Any) -> bool:
+            raise PermissionError("EACCES")
+
+        monkeypatch.setattr(Path, "exists", deny)
+        assert usage_pause.read_usage_pause(tmp_path, _SESSION, now=_NOW + 1) == pause
+
+    def test_read_text_raising_permission_error(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        usage_pause.write_usage_pause(tmp_path, _pause())
+
+        def deny(self: Path, *args: Any, **kwargs: Any) -> str:
+            raise PermissionError("EACCES")
+
+        monkeypatch.setattr(Path, "read_text", deny)
+        with caplog.at_level("WARNING"):
+            assert usage_pause.read_usage_pause(tmp_path, _SESSION, now=_NOW + 1) is None
+        assert "usage_pause" in caplog.text
+
+    def test_a_missing_record_is_silent(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        with caplog.at_level("WARNING"):
+            assert usage_pause.read_usage_pause(tmp_path, _SESSION, now=_NOW) is None
+        assert caplog.text == ""
+
+
+class TestSpanCap:
+    """Plan 00479 M4: a record cannot pause a session for longer than the cap."""
+
+    def test_the_cap_is_eight_days(self) -> None:
+        assert usage_pause.MAX_PAUSE_SPAN_SECONDS == 8 * 86400.0
+
+    def test_refuses_to_write_a_record_beyond_the_cap(self, tmp_path: Path) -> None:
+        too_far = _pause(resume_at=_NOW + usage_pause.MAX_PAUSE_SPAN_SECONDS + 1)
+        with pytest.raises(ValueError):
+            usage_pause.write_usage_pause(tmp_path, too_far)
+
+    def test_a_record_at_the_cap_is_written(self, tmp_path: Path) -> None:
+        at_cap = _pause(resume_at=_NOW + usage_pause.MAX_PAUSE_SPAN_SECONDS)
+        usage_pause.write_usage_pause(tmp_path, at_cap)
+        assert usage_pause.read_usage_pause(tmp_path, _SESSION, now=_NOW + 1) == at_cap
+
+    def test_a_hand_edited_record_beyond_the_cap_reads_as_no_pause(self, tmp_path: Path) -> None:
+        path = usage_pause.write_usage_pause(tmp_path, _pause())
+        data = json.loads(path.read_text(encoding="utf-8"))
+        data["resume_at"] = _NOW + 10 * 365 * 86400.0
+        path.write_text(json.dumps(data), encoding="utf-8")
+        assert usage_pause.read_usage_pause(tmp_path, _SESSION, now=_NOW + 1) is None
+
+
 class TestLiveness:
     def test_live_until_resume_plus_grace(self) -> None:
         pause = _pause()

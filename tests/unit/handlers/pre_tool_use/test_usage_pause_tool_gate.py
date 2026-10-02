@@ -138,3 +138,111 @@ class TestMetadata:
         text = UsagePauseToolGateHandler().get_claude_md()
         assert text is not None
         assert "usage_pause_tool_gate" in text
+
+
+class TestToolSearchIsAllowed:
+    """Plan 00479 C1: the cron tools are deferred, so ToolSearch must pass while paused."""
+
+    def test_tool_search_is_left_alone(self, tmp_path: Path) -> None:
+        _record(tmp_path)
+        assert _decide(tmp_path, _input("ToolSearch")) is None
+
+
+class TestFailsOpenOnAReadError:
+    """Plan 00479 M1: a broken record must never deny a tool."""
+
+    @pytest.mark.parametrize("error", [PermissionError("EACCES"), OSError("x"), ValueError("y")])
+    def test_matches_does_not_raise_and_does_not_match(self, error: Exception) -> None:
+        handler = UsagePauseToolGateHandler()
+        with (
+            patch.object(ProjectContext, "daemon_untracked_dir", return_value=Path("/nonexistent")),
+            patch(
+                "claude_code_hooks_daemon.utils.usage_pause_gate.read_usage_pause",
+                side_effect=error,
+            ),
+        ):
+            assert handler.matches(_input("Bash")) is False
+
+
+_NOW = 1_790_000_000.0
+
+
+def _over_the_ceiling(handler: UsagePauseToolGateHandler, *, five: float = 95.0) -> None:
+    from datetime import UTC
+
+    from claude_code_hooks_daemon.config.models import Config, HostConfig, UsageCeilingConfig
+    from claude_code_hooks_daemon.core.usage_snapshot import UsageSnapshot, UsageWindow
+    from claude_code_hooks_daemon.utils.usage_pause_gate import PauseEnvironment
+
+    config = Config(
+        hosts={"runner": HostConfig(usage_ceiling=UsageCeilingConfig(max_used_percent=80))}
+    )
+    snapshot = UsageSnapshot(
+        five_hour=UsageWindow(five, int(_NOW + 3 * 3600), _NOW), seven_day=None
+    )
+    handler._env = PauseEnvironment(
+        clock=lambda: _NOW, config_loader=lambda: config, usage_loader=lambda _n: snapshot, tz=UTC
+    )
+
+
+class TestEntryFromTheToolGate:
+    """Plan 00479 M3: a session kept going by Stop continuations never sees a new prompt."""
+
+    def _hook(self, tool: str = "Bash") -> dict[str, Any]:
+        return {
+            "tool_name": tool,
+            "tool_input": {},
+            "session_id": _SESSION,
+            "hooks_daemon_hostname": "runner",
+        }
+
+    def test_crossing_the_ceiling_pauses_denies_and_halts_with_the_directive(
+        self, tmp_path: Path
+    ) -> None:
+        from claude_code_hooks_daemon.utils.usage_pause import read_usage_pause
+
+        handler = UsagePauseToolGateHandler()
+        _over_the_ceiling(handler)
+        with patch.object(ProjectContext, "daemon_untracked_dir", return_value=tmp_path):
+            assert handler.matches(self._hook()) is True
+            result = handler.handle(self._hook())
+            assert read_usage_pause(tmp_path, _SESSION, now=_NOW) is not None
+        assert result.decision == Decision.DENY
+        assert result.halt_turn is True
+        reason = result.reason or ""
+        assert "USAGE CEILING REACHED" in reason
+        assert "CronCreate" in reason
+        assert result.stop_reason
+
+    def test_a_cron_tool_does_not_trigger_the_entry(self, tmp_path: Path) -> None:
+        handler = UsagePauseToolGateHandler()
+        _over_the_ceiling(handler)
+        with patch.object(ProjectContext, "daemon_untracked_dir", return_value=tmp_path):
+            assert handler.matches(self._hook("CronList")) is False
+            assert list(tmp_path.rglob("*.usage-paused")) == []
+
+    def test_below_the_ceiling_nothing_happens(self, tmp_path: Path) -> None:
+        handler = UsagePauseToolGateHandler()
+        _over_the_ceiling(handler, five=10.0)
+        with patch.object(ProjectContext, "daemon_untracked_dir", return_value=tmp_path):
+            assert handler.matches(self._hook()) is False
+
+    def test_no_session_id_never_pauses(self, tmp_path: Path) -> None:
+        handler = UsagePauseToolGateHandler()
+        _over_the_ceiling(handler)
+        hook = self._hook()
+        del hook["session_id"]
+        with patch.object(ProjectContext, "daemon_untracked_dir", return_value=tmp_path):
+            assert handler.matches(hook) is False
+            assert list(tmp_path.rglob("*.usage-paused")) == []
+
+    def test_a_config_that_cannot_be_evaluated_fails_open(self, tmp_path: Path) -> None:
+        from claude_code_hooks_daemon.utils.usage_pause_gate import PauseEnvironment
+
+        def boom() -> Any:
+            raise OSError("config unreadable")
+
+        handler = UsagePauseToolGateHandler()
+        handler._env = PauseEnvironment(config_loader=boom)
+        with patch.object(ProjectContext, "daemon_untracked_dir", return_value=tmp_path):
+            assert handler.matches(self._hook()) is False

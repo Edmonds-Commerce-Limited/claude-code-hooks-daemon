@@ -36,18 +36,25 @@ from __future__ import annotations
 import logging
 import math
 import time
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, tzinfo
 from pathlib import Path
 from typing import Any, Final
 
+from pydantic import ValidationError
+
 from claude_code_hooks_daemon.config.models import Config, PersistentCronConfig
 from claude_code_hooks_daemon.constants.protocol import HookInputField
 from claude_code_hooks_daemon.constants.tools import ToolName
+from claude_code_hooks_daemon.core.data_layer import latest_usage
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.core.usage_snapshot import UsageSnapshot, UsageWindow
-from claude_code_hooks_daemon.utils.cron_enforcement import declared_tick_prompt
+from claude_code_hooks_daemon.utils.config_cache import load_config_cached
+from claude_code_hooks_daemon.utils.cron_enforcement import (
+    FAILSAFE_CRON_SCHEDULE_HINT,
+    declared_tick_prompt,
+)
 from claude_code_hooks_daemon.utils.cron_hosts import effective_hostname
 from claude_code_hooks_daemon.utils.cron_tick import TickKind, classify_tick, tick_sentinel
 from claude_code_hooks_daemon.utils.host_usage_ceiling import (
@@ -58,7 +65,9 @@ from claude_code_hooks_daemon.utils.usage_pause import (
     WINDOW_FIVE_HOUR,
     WINDOW_SEVEN_DAY,
     UsagePause,
+    clear_usage_pause,
     read_usage_pause,
+    write_usage_pause,
 )
 
 logger = logging.getLogger(__name__)
@@ -68,9 +77,21 @@ logger = logging.getLogger(__name__)
 #: the old window.
 RESUME_MARGIN_SECONDS: Final[float] = 120.0
 
+#: A pause is only worth entering when the resume time is at least this far
+#: away. The model needs a few turns (CronList, one CronDelete per cron,
+#: CronCreate, a Stop round) and the cron is pinned to a calendar minute: one
+#: that has already passed next matches a year later.
+MIN_RESUME_LEAD_SECONDS: Final[float] = 600.0
+
+#: How long after the resume time the single remaining cron may fire and still be
+#: accepted by the Stop gate. Anything later is a cron that will not wake the session.
+MAX_FIRE_AFTER_RESUME_SECONDS: Final[float] = 86400.0
+
 #: The only tools a paused session may use: just enough to replace its crons.
+#: ToolSearch is among them because the cron tools are deferred (their schemas
+#: load only through it, ``constants/tools.py``).
 PAUSE_ALLOWED_TOOLS: Final[frozenset[str]] = frozenset(
-    {ToolName.CRON_LIST, ToolName.CRON_DELETE, ToolName.CRON_CREATE}
+    {ToolName.CRON_LIST, ToolName.CRON_DELETE, ToolName.CRON_CREATE, ToolName.TOOL_SEARCH}
 )
 
 _SECONDS_PER_MINUTE: Final[int] = 60
@@ -84,7 +105,8 @@ USAGE_RESUME_PROMPT: Final[str] = (
     "or to schedule another resume cron."
 )
 
-_FAILSAFE_SCHEDULE_HINT: Final[str] = "47 * * * *"
+_PINNED_CRON_FIELDS: Final[int] = 5
+_SECONDS_PER_DAY: Final[float] = 86400.0
 
 
 @dataclass(frozen=True)
@@ -110,6 +132,7 @@ class ResumeSchedule:
     local_text: str
     utc_text: str
     hhmm: str
+    zone_text: str
 
 
 def find_breaches(snapshot: UsageSnapshot | None, ceiling: HostUsageCeiling) -> list[UsageBreach]:
@@ -193,12 +216,63 @@ def resume_schedule(resume_at: float, *, tz: tzinfo | None = None) -> ResumeSche
     utc = datetime.fromtimestamp(minute, UTC)
     local = utc.astimezone(tz)  # tz None: the machine's local zone
     zone_name = local.tzname() or "local"
+    offset = f"{local:%z}"  # +HHMM
     return ResumeSchedule(
         cron=f"{local.minute} {local.hour} {local.day} {local.month} *",
         local_text=f"{local:%Y-%m-%d %H:%M} {zone_name}",
         utc_text=f"{utc:%Y-%m-%d %H:%M} UTC",
         hhmm=f"{local:%H:%M}",
+        zone_text=f"{zone_name}, UTC{offset[:3]}:{offset[3:]}",
     )
+
+
+def resume_is_far_enough(resume_at: float, *, now: float) -> bool:
+    """Whether ``resume_at`` is at least :data:`MIN_RESUME_LEAD_SECONDS` away.
+
+    A pause whose resume time is already past, or about to be, cannot be served
+    by a calendar-pinned one-shot cron, so it is not entered.
+    """
+    return resume_at - now >= MIN_RESUME_LEAD_SECONDS
+
+
+def _pinned_fire_time(cron: str, *, now: float, tz: tzinfo | None) -> float | None:
+    """The next instant after ``now`` a pinned ``m h dom mon *`` cron fires, or None.
+
+    Only the one-shot shape :func:`resume_schedule` builds is understood: four
+    integers and a ``*`` for the weekday. Anything else, and any impossible date,
+    is None, which the caller treats as "cannot be verified".
+    """
+    fields = cron.split()
+    if len(fields) != _PINNED_CRON_FIELDS or fields[4] != "*":
+        return None
+    try:
+        minute, hour, day, month = (int(field) for field in fields[:4])
+    except ValueError:
+        return None
+    current = datetime.fromtimestamp(now, UTC).astimezone(tz)
+    for year in (current.year, current.year + 1):
+        try:
+            wall = datetime(year, month, day, hour, minute)
+        except ValueError:
+            return None
+        # A naive wall time is read as the machine's local zone by astimezone().
+        candidate = wall.astimezone() if tz is None else wall.replace(tzinfo=tz)
+        if candidate.timestamp() > now:
+            return candidate.timestamp()
+    return None
+
+
+def schedule_fires_in_window(
+    cron: str, *, now: float, resume_at: float, tz: tzinfo | None = None
+) -> bool:
+    """Whether ``cron`` next fires in ``(now, resume_at + MAX_FIRE_AFTER_RESUME_SECONDS]``.
+
+    The Stop gate's check that the one remaining cron will actually wake the
+    session: a pinned minute that has passed next matches a year later, and a
+    time-zone mismatch lands it hours away.
+    """
+    fire = _pinned_fire_time(cron, now=now, tz=tz)
+    return fire is not None and now < fire <= resume_at + MAX_FIRE_AFTER_RESUME_SECONDS
 
 
 def is_resume_tick(hook_input: Mapping[str, Any]) -> bool:
@@ -222,13 +296,25 @@ def untracked_dir() -> Path | None:
 
 
 def active_usage_pause(session_id: str, *, now: float | None = None) -> UsagePause | None:
-    """The live usage pause for ``session_id``, or None. Fails open."""
+    """The live usage pause for ``session_id``, or None.
+
+    TOTAL: any ``OSError``/``ValueError``/``RuntimeError`` reading the record is "not
+    paused", with a warning. A pause only ever restricts, so a broken record must
+    never deny a tool, trap a Stop or silence a safety handler (the chain turns an
+    exception from a SAFETY handler into a DENY).
+    """
     if not session_id:
         return None
-    directory = untracked_dir()
-    if directory is None:
+    try:
+        directory = untracked_dir()
+        if directory is None:
+            return None
+        return read_usage_pause(directory, session_id, now=time.time() if now is None else now)
+    except (OSError, ValueError, RuntimeError) as exc:
+        logger.warning(
+            "usage_pause_gate: cannot read the pause record, treating as no pause: %s", exc
+        )
         return None
-    return read_usage_pause(directory, session_id, now=time.time() if now is None else now)
 
 
 def is_usage_paused(session_id: str, *, now: float | None = None) -> bool:
@@ -248,6 +334,8 @@ def hook_is_usage_paused(hook_input: Mapping[str, Any], *, now: float | None = N
 def _steps(schedule: ResumeSchedule) -> list[str]:
     """The cron steps every pause directive ends with."""
     return [
+        "  0. The cron tools are deferred: if their schemas are not loaded, load them "
+        "with ToolSearch (query `select:CronList,CronDelete,CronCreate`) first.",
         "  1. CronList - list every cron in this session.",
         "  2. CronDelete EVERY cron listed: the failsafe recovery cron, every "
         "persistent_crons job, the watchdog, anything else. They are re-established "
@@ -256,6 +344,11 @@ def _steps(schedule: ResumeSchedule) -> list[str]:
         f"{schedule.local_text}, which is {schedule.utc_text}), recurring: false, "
         "durable: false, with this exact prompt, first line included:",
         *(f"       {line}" for line in USAGE_RESUME_PROMPT.splitlines()),
+        f"     That expression is in the time zone of the hooks daemon ({schedule.zone_text}), "
+        "which is assumed to be this session's. Run `date` first: if this session's UTC "
+        f"offset differs, convert {schedule.utc_text} to this session's local time and use "
+        "that instead. The cron is pinned to one calendar minute, so one that is already "
+        "past next fires a YEAR later; the stop is refused if it will not fire in time.",
         f"     Check that CronCreate reports a next run of {schedule.local_text}.",
         f"  4. Stop with `STOPPING BECAUSE: usage paused until {schedule.hhmm}`. The "
         "stop is accepted once exactly that one cron remains.",
@@ -282,21 +375,31 @@ def render_pause_directive(pause: UsagePause, *, tz: tzinfo | None = None) -> st
         "",
         "Do NOT act on the request that arrived with this message (a prompt, a cron "
         "tick or a supervisor message): it is refused for now. Every tool except "
-        "CronList, CronDelete and CronCreate is denied until the pause ends. Do "
-        "exactly this and nothing else:",
+        "CronList, CronDelete, CronCreate and ToolSearch is denied until the pause ends. "
+        "Do exactly this and nothing else:",
         "",
         *_steps(schedule),
     ]
     return "\n".join(lines)
 
 
-def render_stop_directive(pause: UsagePause, *, found: int, tz: tzinfo | None = None) -> str:
-    """The Stop-block reason while the session's crons are not yet exactly the resume cron."""
+def render_stop_directive(
+    pause: UsagePause, *, found: int, tz: tzinfo | None = None, problem: str | None = None
+) -> str:
+    """The Stop-block reason while the session's crons are not yet exactly the resume cron.
+
+    Args:
+        pause: The live pause.
+        found: How many crons ``session_crons`` holds.
+        tz: Zone the cron is expressed in.
+        problem: Why a single resume cron was still refused (its schedule), if so.
+    """
     schedule = resume_schedule(pause.resume_at, tz=tz)
     noun = "cron" if found == 1 else "crons"
     lines = [
         f"USAGE PAUSE NOT COMPLETE - session_crons holds {found} {noun}, and a paused "
         "session may stop only when exactly ONE cron remains: the resume cron.",
+        *([problem] if problem else []),
         "",
         f"Paused on: {_describe(pause)}, until {schedule.local_text} ({schedule.utc_text}).",
         "",
@@ -314,8 +417,8 @@ def render_still_over_directive(pause: UsagePause, *, tz: tzinfo | None = None) 
         f"USAGE STILL OVER THE CEILING - {_describe(pause)}. The session stays PAUSED, "
         f"until {schedule.local_text} ({schedule.utc_text}).",
         "",
-        "Do NOT resume work. Every tool except CronList, CronDelete and CronCreate is "
-        "denied. Do exactly this and nothing else:",
+        "Do NOT resume work. Every tool except CronList, CronDelete, CronCreate and "
+        "ToolSearch is denied. Do exactly this and nothing else:",
         "",
         *_steps(schedule),
     ]
@@ -335,16 +438,17 @@ def render_resume_lifted_directive(
             should have a failsafe cron that no declared job already supplies.
     """
     lines = [
-        "USAGE PAUSE LIFTED - usage is back under the ceiling and the session may " "work again.",
+        "USAGE PAUSE LIFTED - usage is back under the ceiling and the session may work again.",
         "",
-        "1. CronList. The one-shot resume cron has fired; CronDelete it if it is " "still listed.",
+        "1. CronList (load it with ToolSearch if its schema is not loaded). The one-shot "
+        "resume cron has fired; CronDelete it if it is still listed.",
         "2. Re-establish this session's crons, creating only those not already "
         "listed (a duplicate fires twice):",
     ]
     if failsafe_prompt is not None:
         lines += [
             f"   - failsafe recovery cron: CronCreate recurring: true, durable: false, "
-            f"on an off-:00 minute (e.g. `{_FAILSAFE_SCHEDULE_HINT}`), prompt verbatim, "
+            f"on an off-:00 minute (e.g. `{FAILSAFE_CRON_SCHEDULE_HINT}`), prompt verbatim, "
             "first line included:",
             *(f"       {line}" for line in failsafe_prompt.splitlines()),
         ]
@@ -360,3 +464,128 @@ def render_resume_lifted_directive(
         "3. Then continue the active work where it stopped; the pause is over.",
     ]
     return "\n".join(lines)
+
+
+def render_lift_not_recorded_note(*, expires_at: float, tz: tzinfo | None = None) -> str:
+    """Told instead of "lifted" when the record could not be removed.
+
+    The tool and stop gates still read the record, so claiming a lift would send
+    the model into tools that are about to be denied.
+    """
+    until = resume_schedule(expires_at, tz=tz).local_text
+    return (
+        "USAGE PAUSE: usage is back under the ceiling, but the pause record could NOT be "
+        "removed, so the pause is NOT lifted yet: tools other than CronList, CronDelete, "
+        f"CronCreate and ToolSearch stay denied until it expires ({until}) or a human runs "
+        "`! bin/hooks-daemon usage-pause clear`. Do not start new work."
+    )
+
+
+# --- Entry: shared by the prompt, tool and stop gates ---------------------------------
+
+
+def load_project_config() -> Config:
+    """The project's daemon config; defaults (so no ceiling) when it cannot be loaded."""
+    try:
+        return load_config_cached(ProjectContext.project_root() / ".claude" / "hooks-daemon.yaml")
+    except (RuntimeError, ValidationError, OSError, ValueError) as exc:
+        logger.debug("usage_pause_gate: cannot load config, so no ceiling: %s", exc)
+        return Config()
+
+
+def default_usage_loader(now: float) -> UsageSnapshot | None:
+    """The daemon's latest usage snapshot (in memory; the file only before any Status event)."""
+    return latest_usage(now=now)
+
+
+@dataclass
+class PauseEnvironment:
+    """The seams a gate reads the world through; tests substitute fakes.
+
+    ``tz`` None is the machine's local zone, which is what ``CronCreate`` reads.
+    """
+
+    clock: Callable[[], float] = time.time
+    config_loader: Callable[[], Config] = load_project_config
+    usage_loader: Callable[[float], UsageSnapshot | None] = default_usage_loader
+    tz: tzinfo | None = None
+
+
+def current_breaches(hook_input: Mapping[str, Any], env: PauseEnvironment) -> list[UsageBreach]:
+    """The windows over this session's host ceiling right now, logging why when none.
+
+    Every "no" is a debug line naming the reason (Task 4.7): no ceiling for the host,
+    no snapshot, or below the ceiling. An ``OSError`` reading the snapshot is "no data".
+    """
+    now = env.clock()
+    hostname = effective_hostname(hook_input)
+    ceiling = session_ceiling(env.config_loader(), hook_input)
+    if ceiling.five_hour is None and ceiling.seven_day is None:
+        logger.debug("usage_pause_gate: no usage ceiling for host %r, not pausing", hostname)
+        return []
+    try:
+        snapshot = env.usage_loader(now)
+    except OSError as exc:
+        logger.warning("usage_pause_gate: cannot read the usage snapshot, not pausing: %s", exc)
+        return []
+    if snapshot is None:
+        logger.debug("usage_pause_gate: no usage snapshot (no rate_limits seen), not pausing")
+        return []
+    breaches = find_breaches(snapshot, ceiling)
+    if not breaches:
+        logger.debug("usage_pause_gate: usage below the ceiling for host %r", hostname)
+    return breaches
+
+
+def start_pause(
+    session_id: str, breaches: Sequence[UsageBreach], env: PauseEnvironment
+) -> UsagePause | None:
+    """Record a pause for ``breaches``; None (no pause) when it must not or cannot be.
+
+    Not entered for an empty session id, a resume time inside
+    :data:`MIN_RESUME_LEAD_SECONDS`, no project context, or a record that cannot be
+    written: the other gates read this record, so a directive without one could not
+    be enforced.
+    """
+    if not session_id or not breaches:
+        return None
+    now = env.clock()
+    if not resume_is_far_enough(resume_at_for(breaches), now=now):
+        logger.debug("usage_pause_gate: the window resets within the lead time, not pausing")
+        return None
+    directory = untracked_dir()
+    if directory is None:
+        return None
+    pause = build_pause(session_id, breaches, now=now)
+    try:
+        write_usage_pause(directory, pause)
+    except (OSError, ValueError) as exc:
+        logger.warning("usage_pause_gate: pause record not written, not pausing: %s", exc)
+        return None
+    logger.warning("usage_pause_gate: pausing session %s: %s", session_id, pause.reason)
+    return pause
+
+
+def try_start_pause(hook_input: Mapping[str, Any], env: PauseEnvironment) -> UsagePause | None:
+    """Enter the pause if this session's host ceiling is reached; total, fails open."""
+    session_id = str(hook_input.get(HookInputField.SESSION_ID) or "")
+    if not session_id:
+        return None
+    try:
+        return start_pause(session_id, current_breaches(hook_input, env), env)
+    except (OSError, ValueError, RuntimeError) as exc:
+        logger.warning("usage_pause_gate: cannot evaluate the ceiling, not pausing: %s", exc)
+        return None
+
+
+def clear_pause(session_id: str) -> bool:
+    """Remove the session's pause record; False when a record could not be removed."""
+    directory = untracked_dir()
+    if directory is None:
+        return True
+    try:
+        clear_usage_pause(directory, session_id)
+    except OSError as exc:
+        logger.warning("usage_pause_gate: could not clear the pause record: %s", exc)
+        return False
+    return True

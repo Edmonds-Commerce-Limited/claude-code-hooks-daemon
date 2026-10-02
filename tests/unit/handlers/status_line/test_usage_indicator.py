@@ -261,6 +261,11 @@ class TestPausedSession:
         assert text is not None
         assert "📈" not in text
 
+    def test_an_unreadable_record_shows_no_pause_and_does_not_raise(self, tmp_path: Path) -> None:
+        self._pause(tmp_path)
+        with patch.object(Path, "read_text", side_effect=PermissionError("denied")):
+            assert self._render_paused(tmp_path) is None
+
     def test_another_session_shows_no_pause(self, tmp_path: Path) -> None:
         self._pause(tmp_path, session="someone-else")
         assert self._render_paused(tmp_path) is None

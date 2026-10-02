@@ -5,12 +5,12 @@ only tell one of its crons' ticks from the owner by text it wrote into the
 tick's prompt. Every cron prompt the daemon hands an agent to paste into
 ``CronCreate`` therefore starts with one sentinel line:
 
-=====================  =====================================================
-``[tick:failsafe]``    the failsafe recovery cron (``recovery_cron_advisor``)
-``[tick:watchdog]``    the background-process watchdog
+======================  =====================================================
+``[tick:failsafe]``     the failsafe recovery cron (``recovery_cron_advisor``)
+``[tick:watchdog]``     the background-process watchdog
 ``[tick:usage-resume]`` the one-shot resume cron of a usage pause (Plan 00479)
-``[tick:job:<id>]``    a job declared under ``persistent_crons``
-=====================  =====================================================
+``[tick:job:<id>]``     a job declared under ``persistent_crons``
+======================  =====================================================
 
 **Recognition is positive evidence only.** A prompt with no well-formed
 sentinel is the human. That keeps the failure direction where Plan 00388

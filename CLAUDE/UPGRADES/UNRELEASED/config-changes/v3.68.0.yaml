@@ -36,9 +36,12 @@ config_changes:
       dormant: true
       description: >-
         NEW (Plan 00479). While a session is usage-paused, only CronList,
-        CronDelete and CronCreate are allowed; any other tool is denied with
-        `continue: false` and a `stopReason`, so a turn already running halts
-        at its next tool call. Inert unless a pause is recorded.
+        CronDelete, CronCreate and ToolSearch (which loads the deferred cron
+        tools) are allowed; any other tool is denied with `continue: false`
+        and a `stopReason`, so a turn already running halts at its next tool
+        call. A session over its ceiling that has not yet been paused is
+        paused by its next tool call. Inert unless a pause is recorded or a
+        ceiling is reached.
       example_yaml: |
         handlers:
           pre_tool_use:

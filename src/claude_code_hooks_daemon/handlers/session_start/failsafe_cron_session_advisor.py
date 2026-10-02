@@ -46,6 +46,7 @@ from claude_code_hooks_daemon.handlers.post_tool_use.recovery_cron_advisor impor
     declares_failsafe_cron,
 )
 from claude_code_hooks_daemon.utils.config_cache import load_config_cached
+from claude_code_hooks_daemon.utils.cron_enforcement import FAILSAFE_CRON_SCHEDULE_HINT
 from claude_code_hooks_daemon.utils.cron_hosts import effective_hostname
 from claude_code_hooks_daemon.utils.session_helpers import is_resume_session
 from claude_code_hooks_daemon.utils.usage_pause_gate import hook_is_usage_paused
@@ -69,7 +70,7 @@ _GUIDANCE: Final[tuple[str, ...]] = (
     "[tick:failsafe] or FAILSAFE RECOVERY CHECK): REUSE it and create nothing. "
     "If more than one is listed, CronDelete the extras so one remains.",
     "  3. ONLY IF none is listed, create it: CronCreate with recurring:true and "
-    "durable:false, on an off-:00 minute (e.g. 47 * * * *).",
+    f"durable:false, on an off-:00 minute (e.g. {FAILSAFE_CRON_SCHEDULE_HINT}).",
     "  4. Do NOT wait for it to fire — keep working at full speed.",
     "",
     "This is a FAILSAFE RECOVERY cron, NOT a heartbeat: never pace work to it. "

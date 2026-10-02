@@ -907,7 +907,7 @@ handlers:
 | **Type**       | Blocking (terminal)     |
 | **Event**      | PreToolUse              |
 
-**Description:** While a session is usage-paused (see `usage_pause_gate`), only `CronList`, `CronDelete` and `CronCreate` are allowed. Any other tool is denied AND the turn is halted (`continue: false` with a `stopReason`), so a turn already running stops at its next tool call (`R-USAGE-PAUSE-TOOL`). Inert unless a pause record is live for the session; fails open.
+**Description:** While a session is usage-paused (see `usage_pause_gate`), only `CronList`, `CronDelete`, `CronCreate` and `ToolSearch` (the cron tools are deferred; it loads them) are allowed. Any other tool is denied AND the turn is halted (`continue: false` with a `stopReason`), so a turn already running stops at its next tool call (`R-USAGE-PAUSE-TOOL`). A session that crosses its ceiling without a new prompt is paused here too, by its next tool call. Inert unless a pause record is live or a ceiling is reached; fails open on any read error.
 
 **Options:** none.
 
@@ -4004,7 +4004,7 @@ These handlers run when Claude stops generating a response.
 | **Type**       | Blocking                |
 | **Event**      | Stop                    |
 
-**Description:** While a session is usage-paused (see `usage_pause_gate`), a stop is accepted only once `session_crons` holds exactly ONE cron, the usage-resume cron (prompt starting `[tick:usage-resume]`). Otherwise the pause directive is repeated (`R-USAGE-PAUSE-STOP`). A stop that re-enters after the block is allowed and logged, so the session is never trapped; an absent `session_crons` allows. While paused, `auto_continue_stop`, `cron_stop_enforcer` and `cron_subagent_stop_enforcer` stand down on the same predicate. Main thread only; never terminal; inert unless a pause is recorded.
+**Description:** While a session is usage-paused (see `usage_pause_gate`), a stop is accepted only once `session_crons` holds exactly ONE cron, the usage-resume cron (prompt starting `[tick:usage-resume]`) whose pinned schedule fires between now and a day after the resume time. Otherwise the pause directive is repeated (`R-USAGE-PAUSE-STOP`). A session that reaches a Stop over its ceiling is paused here too. A stop that re-enters after the block is allowed and logged, so the session is never trapped; an absent `session_crons` allows. While paused, `auto_continue_stop`, `cron_stop_enforcer` and `cron_subagent_stop_enforcer` stand down on the same predicate. Main thread only; never terminal; inert unless a pause is recorded.
 
 **Options:** none.
 
@@ -4134,7 +4134,7 @@ These handlers run when the user submits a prompt.
 | **Type**       | Blocking           |
 | **Event**      | UserPromptSubmit   |
 
-**Description:** Pauses a session at its host usage ceiling (Plan 00479). When `hosts:` gives the host a `usage_ceiling` and a live usage window reaches it, the pause is recorded (`<session>.usage-paused`, also read by the ccy supervisor) and the model is told to `CronList`, `CronDelete` every cron, `CronCreate` ONE one-shot resume cron at the window's reset plus two minutes, then stop. The directive travels as context on the prompt that trips the ceiling, because a UserPromptSubmit `block` reason reaches the user and never the model. While the record is live every other prompt (cron tick, supervisor message, human) is blocked before the model (`R-USAGE-PAUSE-PROMPT`). The resume cron's prompt starts `[tick:usage-resume]`: when it fires, usage is re-read, and under the ceiling the record is cleared and the model is told to re-create the failsafe and declared crons and continue; still over it, the record is refreshed and the next resume cron is scheduled.
+**Description:** Pauses a session at its host usage ceiling (Plan 00479). When `hosts:` gives the host a `usage_ceiling` and a live usage window reaches it, the pause is recorded (`<session>.usage-paused`, also read by the ccy supervisor) and the model is told to `CronList`, `CronDelete` every cron, `CronCreate` ONE one-shot resume cron at the window's reset plus two minutes, then stop. The directive travels as context on the prompt that trips the ceiling, because a UserPromptSubmit `block` reason reaches the user and never the model. While the record is live every other prompt (cron tick, supervisor message, human) is blocked before the model (`R-USAGE-PAUSE-PROMPT`), but each held prompt first re-checks the ceiling and lifts a pause that no longer applies. The owner can always lift it with `! bin/hooks-daemon usage-pause clear` (`usage-pause status` shows it). No session id, an unreadable record, or a reset within ten minutes never pauses. The resume cron's prompt starts `[tick:usage-resume]`: when it fires, usage is re-read, and under the ceiling the record is cleared and the model is told to re-create the failsafe and declared crons and continue; still over it, the record is refreshed and the next resume cron is scheduled.
 
 **Fails open:** no ceiling for the host, an unknown hostname, no usage snapshot, no project context, or a record that cannot be written never pauses a session (a debug line says which). Never terminal.
 

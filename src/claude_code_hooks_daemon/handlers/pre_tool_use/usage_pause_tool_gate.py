@@ -13,9 +13,19 @@ reached stops at its next tool call instead of continuing to spend usage.
 Terminal, first on the event: its deny is the final word on the call, and it
 must not be pre-empted by a later handler's own (non-halting) deny.
 
-Reads the same single predicate every usage-pause gate does
-(``utils.usage_pause_gate.hook_is_usage_paused``) and fails open: no project
-context, no record, another session -- nothing is paused.
+``ToolSearch`` is allowed too: the cron tools are deferred built-ins whose
+schemas load only through it (``constants/tools.py``).
+
+**Entry (Plan 00479 M3).** A session kept going by Stop continuations or one long
+turn never submits a prompt, so ``usage_pause_gate`` never sees it. This handler
+therefore also ENTERS the pause (``try_start_pause``, the same entry the prompt
+gate uses) when the host ceiling is reached, and denies-and-halts that call with
+the directive. The Stop gate then re-delivers the directive. The ceiling check
+reads the in-memory usage snapshot and is skipped altogether for a host with no
+ceiling, so the cost on every tool call is one config-cache lookup and one stat.
+
+Reads the same record every usage-pause gate does and fails open: no project
+context, no record, another session, a read error -- nothing is paused.
 """
 
 from __future__ import annotations
@@ -29,8 +39,11 @@ from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.utils.usage_pause_gate import (
     PAUSE_ALLOWED_TOOLS,
-    hook_is_usage_paused,
+    PauseEnvironment,
+    active_usage_pause,
+    render_pause_directive,
     tool_allowed_while_paused,
+    try_start_pause,
 )
 
 _ALLOWED_TEXT: Final[str] = ", ".join(sorted(PAUSE_ALLOWED_TOOLS))
@@ -51,10 +64,12 @@ _RULE: Final[Rule] = Rule(
         "configured for this host. Until it resumes, the only tools allowed are\n"
         f"{_ALLOWED_TEXT}. The turn is halted so it cannot keep spending usage.\n\n"
         "DO INSTEAD:\n"
+        "  0. The cron tools are deferred: load them with ToolSearch if needed.\n"
         "  1. CronList, then CronDelete every cron listed.\n"
         "  2. CronCreate ONE one-shot resume cron, exactly as the pause directive\n"
         "     gave it (its prompt starts [tick:usage-resume]).\n"
-        "  3. Stop. The session resumes by itself at the window reset."
+        "  3. Stop. The session resumes by itself at the window reset.\n\n"
+        "A human can lift the pause at once with `! bin/hooks-daemon usage-pause clear`."
     ),
 )
 
@@ -69,20 +84,44 @@ class UsagePauseToolGateHandler(PreToolUseHandlerBase):
             terminal=True,
             tags=[HandlerTag.SAFETY, HandlerTag.BLOCKING, HandlerTag.WORKFLOW],
         )
+        # The seams entry reads the world through; tests substitute fakes.
+        self._env = PauseEnvironment()
 
     def get_default_enabled(self) -> bool:
-        """On by default; inert unless a usage pause is recorded for the session."""
+        """On by default; inert unless a usage pause is recorded or the ceiling is reached."""
         return True
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
-        """A tool outside the allowed set, in a session whose pause record is live."""
+        """A tool outside the allowed set, in a paused session or one that just crossed.
+
+        Entry from here (Plan 00479 M3) covers a session kept going by Stop
+        continuations and long turns, which never submit a new prompt. Total:
+        any failure reading the record or the ceiling is "not paused".
+        """
         if tool_allowed_while_paused(hook_input.get(HookInputField.TOOL_NAME)):
             return False
-        return hook_is_usage_paused(hook_input)
+        session_id = str(hook_input.get(HookInputField.SESSION_ID) or "")
+        if not session_id:
+            return False
+        if active_usage_pause(session_id, now=self._env.clock()) is not None:
+            return True
+        return try_start_pause(hook_input, self._env) is not None
 
     def handle(self, hook_input: dict[str, Any]) -> GatingResult:
-        """Deny the call and halt the turn."""
-        return GatingResult.deny_and_halt(RuleFormatter().verbose(_RULE), stop_reason=_STOP_REASON)
+        """Deny the call and halt the turn, carrying the pause directive.
+
+        The directive is in the deny reason on every call: the model that reads it
+        (the halt may still show it) learns what to do, and a user sees it in the
+        stop reason's companion text. Re-reading the record rather than keeping
+        state between ``matches`` and ``handle`` keeps the handler stateless.
+        """
+        reason = RuleFormatter().verbose(_RULE)
+        pause = active_usage_pause(
+            str(hook_input.get(HookInputField.SESSION_ID) or ""), now=self._env.clock()
+        )
+        if pause is not None:
+            reason = f"{reason}\n\n{render_pause_directive(pause, tz=self._env.tz)}"
+        return GatingResult.deny_and_halt(reason, stop_reason=_STOP_REASON)
 
     def get_rules(self) -> list[Rule]:
         """The single Rule backing this handler's deny."""
@@ -93,10 +132,12 @@ class UsagePauseToolGateHandler(PreToolUseHandlerBase):
         return (
             "## usage_pause_tool_gate — a usage-paused session uses only the cron tools\n\n"
             "While a session is paused on its host usage ceiling (see `usage_pause_gate`) "
-            "every tool except `CronList`, `CronDelete` and `CronCreate` is denied, and "
-            "the deny halts the turn (`continue: false`). Replace the session's crons "
-            "with the one resume cron the pause directive describes, then stop. The "
-            "session resumes by itself at the window reset."
+            "every tool except `CronList`, `CronDelete`, `CronCreate` and `ToolSearch` "
+            "(the cron tools are deferred; it loads them) is denied, and the deny halts "
+            "the turn (`continue: false`). A session that crosses the ceiling mid-turn is "
+            "paused by its next tool call. Replace the session's crons with the one resume "
+            "cron the pause directive describes, then stop. The session resumes by itself "
+            "at the window reset."
         )
 
     def get_acceptance_tests(self) -> list[Any]:

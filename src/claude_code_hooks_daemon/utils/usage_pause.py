@@ -69,6 +69,12 @@ WINDOWS: Final[frozenset[str]] = frozenset({WINDOW_FIVE_HOUR, WINDOW_SEVEN_DAY})
 #: late tick, and its end is the backstop for a gate that never got to clear.
 PAUSE_GRACE_SECONDS: Final[float] = 3600.0
 
+#: The longest a record may pause a session: ``resume_at - paused_at``. The
+#: longest real wait is the 7-day window plus the resume margin, so a record
+#: asking for more is corrupt or hand-edited and reads as no pause rather than
+#: silencing a session (and the supervisor) for years.
+MAX_PAUSE_SPAN_SECONDS: Final[float] = 8 * 86400.0
+
 
 @dataclass(frozen=True)
 class UsagePause:
@@ -140,6 +146,8 @@ def _validation_error(pause: UsagePause) -> str | None:
             return f"{name} must be a finite number, got {value!r}"
     if pause.resume_at <= pause.paused_at:
         return "resume_at must be after paused_at"
+    if pause.resume_at - pause.paused_at > MAX_PAUSE_SPAN_SECONDS:
+        return f"resume_at must be within {MAX_PAUSE_SPAN_SECONDS:g} s of paused_at"
     if not pause.reason.strip():
         return "a usage pause needs a reason"
     return None
@@ -222,10 +230,10 @@ def _read_records(path: Path) -> list[UsagePause]:
     A missing file is normal and silent. One that is present but unreadable or
     malformed is logged, since that is a fault someone should hear about.
     """
-    if not path.exists():
-        return []
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return []
     except (OSError, ValueError) as exc:
         logger.warning("usage_pause: unreadable record %s: %s", path, exc)
         return []

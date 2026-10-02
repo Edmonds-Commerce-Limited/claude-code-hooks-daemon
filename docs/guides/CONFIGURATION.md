@@ -187,8 +187,14 @@ it does not end. Three handlers (`usage_pause_gate`, `usage_pause_tool_gate`,
   stop. The cron's schedule is a local-time expression, with the UTC time stated
   beside it.
 - While paused, other prompts are dropped before the model, every tool but
-  `CronList`/`CronDelete`/`CronCreate` is denied (and halts the turn), and a stop
-  is accepted only once exactly the resume cron remains.
+  `CronList`/`CronDelete`/`CronCreate`/`ToolSearch` is denied (and halts the
+  turn), and a stop is accepted only once exactly the resume cron remains and
+  its schedule fires before a day after the reset. A session that never submits
+  a prompt is paused by its next tool call or Stop. The cron is read in the
+  machine's local time zone, which the directive states.
+- The owner is never locked out: each held prompt re-checks the ceiling, and
+  `! bin/hooks-daemon usage-pause clear` (or `usage-pause status`) lifts or
+  shows the pause at once. A record is honoured for at most 8 days.
 - The resume cron's prompt starts `[tick:usage-resume]`. When it fires, usage is
   re-read: under the ceiling the pause lifts and the declared crons are
   re-created; still over it, the next resume cron is scheduled.

@@ -123,8 +123,10 @@ class TestInit:
         assert handler.name == HandlerID.USAGE_PAUSE_GATE.display_name
         assert handler.priority == Priority.USAGE_PAUSE_GATE
 
-    def test_not_terminal_so_other_prompt_handlers_still_run(self) -> None:
-        assert UsagePauseGateHandler().terminal is False
+    def test_terminal_so_a_held_prompt_reaches_no_later_handler(self) -> None:
+        """Only a DENY ends the chain (an ALLOW never does, core/chain.py), so the
+        entry and lift directives, which ride on ALLOWs, are unaffected."""
+        assert UsagePauseGateHandler().terminal is True
 
 
 class TestDataSafety:
@@ -183,8 +185,7 @@ class TestDataSafety:
     def test_a_failed_record_write_fails_open(self, tmp_path: Path) -> None:
         handler = _handler(tmp_path, snapshot=_snapshot(five=99.0))
         with patch(
-            "claude_code_hooks_daemon.handlers.user_prompt_submit.usage_pause_gate."
-            "write_usage_pause",
+            "claude_code_hooks_daemon.utils.usage_pause_gate.write_usage_pause",
             side_effect=OSError("disk full"),
         ):
             result = _run(handler, tmp_path, _input())
@@ -341,17 +342,119 @@ class TestResume:
         result = _run(handler, tmp_path, _input(gate.USAGE_RESUME_PROMPT))
         assert "[tick:failsafe]" in "\n".join(result.context)
 
-    def test_a_failed_clear_still_lifts_in_words(self, tmp_path: Path) -> None:
+    def test_a_failed_clear_does_not_claim_a_lift(self, tmp_path: Path) -> None:
         _record(tmp_path)
         handler = _handler(tmp_path, snapshot=_snapshot(five=10.0))
         with patch(
-            "claude_code_hooks_daemon.handlers.user_prompt_submit.usage_pause_gate."
-            "clear_usage_pause",
+            "claude_code_hooks_daemon.utils.usage_pause_gate.clear_usage_pause",
             side_effect=OSError("denied"),
         ):
             result = _run(handler, tmp_path, _input(gate.USAGE_RESUME_PROMPT))
         assert result.decision == Decision.ALLOW
+        text = "\n".join(result.context)
+        assert "LIFTED" not in text
+        assert "NOT lifted" in text
+
+    def test_a_window_resetting_inside_the_lead_lifts_instead_of_pausing_again(
+        self, tmp_path: Path
+    ) -> None:
+        _record(tmp_path)
+        near = UsageSnapshot(five_hour=UsageWindow(95.0, int(_NOW + 30), _NOW), seven_day=None)
+        handler = _handler(tmp_path, snapshot=near)
+        result = _run(handler, tmp_path, _input(gate.USAGE_RESUME_PROMPT))
         assert "PAUSE LIFTED" in "\n".join(result.context)
+        assert read_usage_pause(tmp_path, _SESSION, now=_NOW) is None
+
+
+class TestHeldPromptReResolvesTheCeiling:
+    """Plan 00479 C2(a): a held prompt re-checks the ceiling, so the owner is never
+    locked out by a stale record."""
+
+    def test_a_host_that_no_longer_has_a_ceiling_lifts_the_pause(self, tmp_path: Path) -> None:
+        _record(tmp_path)
+        handler = _handler(tmp_path, config=_config(None), snapshot=_snapshot(five=99.0))
+        result = _run(handler, tmp_path, _input("an owner prompt"))
+        assert result.decision == Decision.ALLOW
+        assert "PAUSE LIFTED" in "\n".join(result.context)
+        assert read_usage_pause(tmp_path, _SESSION, now=_NOW) is None
+
+    def test_usage_below_the_ceiling_lifts_the_pause(self, tmp_path: Path) -> None:
+        _record(tmp_path)
+        handler = _handler(tmp_path, snapshot=_snapshot(five=5.0))
+        result = _run(handler, tmp_path, _input("an owner prompt"))
+        assert result.decision == Decision.ALLOW
+        assert read_usage_pause(tmp_path, _SESSION, now=_NOW) is None
+
+    def test_a_window_past_its_reset_reads_absent_and_lifts_the_pause(self, tmp_path: Path) -> None:
+        _record(tmp_path)
+        handler = _handler(tmp_path, snapshot=None)
+        result = _run(handler, tmp_path, _input("an owner prompt"))
+        assert result.decision == Decision.ALLOW
+        assert read_usage_pause(tmp_path, _SESSION, now=_NOW) is None
+
+    def test_still_over_holds_the_prompt(self, tmp_path: Path) -> None:
+        _record(tmp_path)
+        handler = _handler(tmp_path, snapshot=_snapshot(five=91.0))
+        assert _run(handler, tmp_path, _input("an owner prompt")).decision == Decision.DENY
+        assert read_usage_pause(tmp_path, _SESSION, now=_NOW) is not None
+
+    def test_a_failed_clear_on_the_hold_path_does_not_claim_a_lift(self, tmp_path: Path) -> None:
+        _record(tmp_path)
+        handler = _handler(tmp_path, config=_config(None), snapshot=None)
+        with patch(
+            "claude_code_hooks_daemon.utils.usage_pause_gate.clear_usage_pause",
+            side_effect=OSError("denied"),
+        ):
+            result = _run(handler, tmp_path, _input("an owner prompt"))
+        text = "\n".join(result.context)
+        assert "LIFTED" not in text
+        assert "NOT lifted" in text
+
+
+class TestNoSessionId:
+    """Plan 00479 minor 1: no session id never pauses and never holds."""
+
+    def test_never_pauses(self, tmp_path: Path) -> None:
+        handler = _handler(tmp_path, snapshot=_snapshot(five=99.0))
+        hook_input = _input()
+        del hook_input["session_id"]
+        result = _run(handler, tmp_path, hook_input)
+        assert result.decision == Decision.ALLOW
+        assert not result.context
+        assert list(tmp_path.rglob("*.usage-paused")) == []
+
+    def test_never_holds(self, tmp_path: Path) -> None:
+        _record(tmp_path, session="unknown")
+        handler = _handler(tmp_path, snapshot=_snapshot(five=99.0))
+        hook_input = _input()
+        del hook_input["session_id"]
+        assert _run(handler, tmp_path, hook_input).decision == Decision.ALLOW
+
+
+class TestEntryNearReset:
+    def test_a_reset_inside_the_lead_is_not_worth_pausing_for(self, tmp_path: Path) -> None:
+        near = UsageSnapshot(five_hour=UsageWindow(95.0, int(_NOW + 30), _NOW), seven_day=None)
+        handler = _handler(tmp_path, snapshot=near)
+        result = _run(handler, tmp_path, _input())
+        assert result.decision == Decision.ALLOW
+        assert not result.context
+        assert read_usage_pause(tmp_path, _SESSION, now=_NOW) is None
+
+
+class TestOwnerEscapeIsDocumented:
+    """Plan 00479 C2(c): the rule says what actually lifts a pause."""
+
+    def test_the_rule_names_the_cli_and_not_a_config_edit(self) -> None:
+        rule = UsagePauseGateHandler().get_rules()[0]
+        assert "usage-pause clear" in rule.verbose
+        assert "restart the daemon" not in rule.verbose
+
+    def test_the_hold_reason_names_the_cli(self, tmp_path: Path) -> None:
+        _record(tmp_path)
+        handler = _handler(tmp_path, snapshot=_snapshot(five=91.0))
+        result = _run(handler, tmp_path, _input("an owner prompt"))
+        assert result.reason is not None
+        assert "usage-pause clear" in result.reason
 
 
 class TestRules:

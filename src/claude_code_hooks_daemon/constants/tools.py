@@ -93,6 +93,11 @@ class ToolName:
     CRON_LIST = "CronList"
     CRON_CREATE = "CronCreate"
 
+    # The three cron tools are DEFERRED built-ins whose schema loads only via
+    # ToolSearch (CLAUDE/Plan/Completed/00293-tool-inventory-disable-and-token-savings/
+    # RESEARCH-context-fat.md:382), so a session confined to them needs this too.
+    TOOL_SEARCH = "ToolSearch"
+
 
 # Type alias for valid tool names (for type checking)
 ToolNameLiteral = Literal[
@@ -122,6 +127,7 @@ ToolNameLiteral = Literal[
     "CronDelete",
     "CronList",
     "CronCreate",
+    "ToolSearch",
 ]
 
 

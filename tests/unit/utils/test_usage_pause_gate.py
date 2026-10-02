@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
+from typing import Any
 from unittest.mock import patch
 
 import pytest
@@ -284,3 +285,214 @@ class TestOnlyCronToolsAreAllowedWhilePaused:
     @pytest.mark.parametrize("tool", ["Bash", "Read", "Write", "Task", "ScheduleWakeup", "", None])
     def test_everything_else_is_refused(self, tool: str | None) -> None:
         assert gate.tool_allowed_while_paused(tool) is False
+
+
+class TestToolSearchIsAllowed:
+    """Plan 00479 C1: CronCreate/CronDelete/CronList are DEFERRED tools.
+
+    ``CLAUDE/Plan/Completed/00293-tool-inventory-disable-and-token-savings/
+    RESEARCH-context-fat.md:382`` lists them among the deferred built-ins whose schema
+    loads only via ToolSearch, so a paused session that cannot call ToolSearch cannot
+    call them either.
+    """
+
+    def test_tool_search_passes(self) -> None:
+        assert gate.tool_allowed_while_paused("ToolSearch") is True
+
+    def test_the_directives_tell_the_model_to_load_the_cron_tools(self) -> None:
+        pause = UsagePause(
+            session_id=_SESSION,
+            paused_at=_NOW,
+            resume_at=float(_FIVE_RESET + 120),
+            window=WINDOW_FIVE_HOUR,
+            used_percentage=91.0,
+            ceiling=90.0,
+            reason="r",
+        )
+        assert "ToolSearch" in gate.render_pause_directive(pause, tz=UTC)
+        assert "ToolSearch" in gate.render_stop_directive(pause, found=0, tz=UTC)
+
+
+class TestAnyReadErrorFailsOpen:
+    """Plan 00479 M1."""
+
+    @pytest.mark.parametrize("error", [PermissionError("x"), OSError("y"), ValueError("z")])
+    def test_a_read_that_raises_is_not_a_pause(
+        self, error: Exception, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        with (
+            patch.object(ProjectContext, "daemon_untracked_dir", return_value=tmp_path),
+            patch.object(gate, "read_usage_pause", side_effect=error),
+            caplog.at_level("WARNING"),
+        ):
+            assert gate.is_usage_paused(_SESSION, now=_NOW) is False
+            assert gate.hook_is_usage_paused({"session_id": _SESSION}, now=_NOW) is False
+        assert "usage_pause_gate" in caplog.text
+
+    def test_a_runtime_error_resolving_the_directory_is_not_a_pause(self) -> None:
+        with patch.object(ProjectContext, "daemon_untracked_dir", side_effect=RuntimeError("x")):
+            assert gate.is_usage_paused(_SESSION, now=_NOW) is False
+
+
+class TestResumeLead:
+    def test_a_resume_time_far_enough_away_is_worth_pausing_for(self) -> None:
+        assert gate.resume_is_far_enough(_NOW + gate.MIN_RESUME_LEAD_SECONDS, now=_NOW) is True
+
+    def test_a_resume_time_inside_the_lead_is_not(self) -> None:
+        assert gate.resume_is_far_enough(_NOW + gate.MIN_RESUME_LEAD_SECONDS - 1, now=_NOW) is False
+
+    def test_a_resume_time_already_past_is_not(self) -> None:
+        assert gate.resume_is_far_enough(_NOW - 5, now=_NOW) is False
+
+
+class TestScheduleVerification:
+    """Plan 00479 M2: a pinned minute that has passed next matches a year later."""
+
+    _RESUME = datetime(2026, 10, 2, 15, 2, 0, tzinfo=UTC).timestamp()
+    _BEFORE = datetime(2026, 10, 2, 12, 0, 0, tzinfo=UTC).timestamp()
+
+    def test_the_cron_built_for_the_resume_time_verifies(self) -> None:
+        cron = gate.resume_schedule(self._RESUME, tz=UTC).cron
+        assert gate.schedule_fires_in_window(cron, now=self._BEFORE, resume_at=self._RESUME, tz=UTC)
+
+    def test_a_minute_that_has_passed_fires_next_year_and_fails(self) -> None:
+        cron = gate.resume_schedule(self._RESUME, tz=UTC).cron
+        late = self._RESUME + 60
+        assert not gate.schedule_fires_in_window(cron, now=late, resume_at=self._RESUME, tz=UTC)
+
+    def test_a_recurring_expression_is_not_the_pinned_one_shot(self) -> None:
+        assert not gate.schedule_fires_in_window(
+            "*/5 * * * *", now=self._BEFORE, resume_at=self._RESUME, tz=UTC
+        )
+
+    @pytest.mark.parametrize("cron", ["", "garbage", "1 2 3 4", "99 25 40 13 *", "2 15 30 2 *"])
+    def test_unparseable_or_impossible_expressions_fail(self, cron: str) -> None:
+        assert not gate.schedule_fires_in_window(
+            cron, now=self._BEFORE, resume_at=self._RESUME, tz=UTC
+        )
+
+    def test_a_fire_up_to_a_day_after_the_resume_time_is_accepted(self) -> None:
+        cron = gate.resume_schedule(self._RESUME + 86400, tz=UTC).cron
+        assert gate.schedule_fires_in_window(cron, now=self._BEFORE, resume_at=self._RESUME, tz=UTC)
+
+    def test_a_fire_more_than_a_day_after_the_resume_time_fails(self) -> None:
+        cron = gate.resume_schedule(self._RESUME + 86400 + 120, tz=UTC).cron
+        assert not gate.schedule_fires_in_window(
+            cron, now=self._BEFORE, resume_at=self._RESUME, tz=UTC
+        )
+
+    def test_the_zone_is_part_of_the_check(self) -> None:
+        # 05:02 on the 2nd in UTC-10 is already past in UTC, so UTC reads it a year on.
+        zone = timezone(timedelta(hours=-10), "HST")
+        cron = gate.resume_schedule(self._RESUME, tz=zone).cron
+        assert gate.schedule_fires_in_window(
+            cron, now=self._BEFORE, resume_at=self._RESUME, tz=zone
+        )
+        assert not gate.schedule_fires_in_window(
+            cron, now=self._BEFORE, resume_at=self._RESUME, tz=UTC
+        )
+
+
+class TestTimeZoneIsStatedInTheDirective:
+    def test_the_directive_names_the_zone_and_offset(self) -> None:
+        zone = timezone(timedelta(hours=10), "AEST")
+        pause = UsagePause(
+            session_id=_SESSION,
+            paused_at=_NOW,
+            resume_at=float(_FIVE_RESET + 120),
+            window=WINDOW_FIVE_HOUR,
+            used_percentage=91.0,
+            ceiling=90.0,
+            reason="r",
+        )
+        text = gate.render_pause_directive(pause, tz=zone)
+        assert "AEST" in text
+        assert "+10:00" in text
+        assert "date" in text  # tells the model to cross-check the session's own clock
+
+
+class TestSharedFailsafeSchedule:
+    def test_one_constant_serves_both_advisories(self) -> None:
+        from claude_code_hooks_daemon.handlers.session_start import failsafe_cron_session_advisor
+        from claude_code_hooks_daemon.utils.cron_enforcement import FAILSAFE_CRON_SCHEDULE_HINT
+
+        assert FAILSAFE_CRON_SCHEDULE_HINT in "\n".join(failsafe_cron_session_advisor._GUIDANCE)
+        assert FAILSAFE_CRON_SCHEDULE_HINT in gate.render_resume_lifted_directive(
+            failsafe_prompt="[tick:failsafe]\nx"
+        )
+
+
+class TestStartPause:
+    """The shared entry used by the prompt, tool and stop gates."""
+
+    def _config(self) -> Config:
+        return Config(
+            hosts={"runner": HostConfig(usage_ceiling=UsageCeilingConfig(max_used_percent=80))}
+        )
+
+    def _env(self, snapshot: UsageSnapshot | None, now: float = _NOW) -> gate.PauseEnvironment:
+        return gate.PauseEnvironment(
+            clock=lambda: now,
+            config_loader=self._config,
+            usage_loader=lambda _now: snapshot,
+            tz=UTC,
+        )
+
+    def _input(self, session: str = _SESSION) -> dict[str, Any]:
+        return {"session_id": session, "hooks_daemon_hostname": "runner"}
+
+    def test_enters_and_records(self, tmp_path: Path) -> None:
+        with patch.object(ProjectContext, "daemon_untracked_dir", return_value=tmp_path):
+            pause = gate.try_start_pause(self._input(), self._env(_snapshot(five=95.0)))
+            assert pause is not None
+            assert read_usage_pause(tmp_path, _SESSION, now=_NOW) == pause
+
+    def test_no_session_id_never_pauses(self, tmp_path: Path) -> None:
+        with patch.object(ProjectContext, "daemon_untracked_dir", return_value=tmp_path):
+            assert gate.try_start_pause(self._input(""), self._env(_snapshot(five=95.0))) is None
+            assert list(tmp_path.rglob("*.usage-paused")) == []
+
+    def test_below_the_ceiling_never_pauses(self, tmp_path: Path) -> None:
+        with patch.object(ProjectContext, "daemon_untracked_dir", return_value=tmp_path):
+            assert gate.try_start_pause(self._input(), self._env(_snapshot(five=10.0))) is None
+
+    def test_a_reset_inside_the_lead_never_pauses(self, tmp_path: Path) -> None:
+        near = UsageSnapshot(five_hour=_window(95.0, int(_NOW + 30)), seven_day=None)
+        with patch.object(ProjectContext, "daemon_untracked_dir", return_value=tmp_path):
+            assert gate.try_start_pause(self._input(), self._env(near)) is None
+            assert list(tmp_path.rglob("*.usage-paused")) == []
+
+    def test_a_usage_loader_that_raises_oserror_fails_open(self, tmp_path: Path) -> None:
+        def boom(_now: float) -> UsageSnapshot | None:
+            raise OSError("disk")
+
+        env = gate.PauseEnvironment(
+            clock=lambda: _NOW, config_loader=self._config, usage_loader=boom, tz=UTC
+        )
+        with patch.object(ProjectContext, "daemon_untracked_dir", return_value=tmp_path):
+            assert gate.try_start_pause(self._input(), env) is None
+
+    def test_a_failed_write_fails_open(self, tmp_path: Path) -> None:
+        with (
+            patch.object(ProjectContext, "daemon_untracked_dir", return_value=tmp_path),
+            patch.object(gate, "write_usage_pause", side_effect=OSError("full")),
+        ):
+            assert gate.try_start_pause(self._input(), self._env(_snapshot(five=95.0))) is None
+
+
+class TestClearPause:
+    def test_reports_success(self, tmp_path: Path) -> None:
+        with patch.object(ProjectContext, "daemon_untracked_dir", return_value=tmp_path):
+            assert gate.clear_pause(_SESSION) is True
+
+    def test_reports_a_failed_removal(self, tmp_path: Path) -> None:
+        with (
+            patch.object(ProjectContext, "daemon_untracked_dir", return_value=tmp_path),
+            patch.object(gate, "clear_usage_pause", side_effect=OSError("denied")),
+        ):
+            assert gate.clear_pause(_SESSION) is False
+
+    def test_the_unrecorded_lift_note_does_not_claim_a_lift(self) -> None:
+        text = gate.render_lift_not_recorded_note(expires_at=_NOW + 3600, tz=UTC)
+        assert "NOT" in text
+        assert "LIFTED" not in text

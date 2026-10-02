@@ -165,6 +165,28 @@ class TestStandsDownWhilePaused:
             assert handler.matches(dict(payload)) is True, label
 
 
+@pytest.mark.parametrize(("label", "factory", "payload"), _CASES, ids=[c[0] for c in _CASES])
+class TestAReadErrorFailsOpen:
+    """Plan 00479 M1: an unreadable record is "not paused", never a crash.
+
+    A SAFETY+BLOCKING handler that raises is turned into a DENY by the chain, so the
+    pause record being unreadable must not take a handler down with it.
+    """
+
+    def test_behaves_as_if_not_paused(
+        self,
+        label: str,
+        factory: Callable[[pytest.MonkeyPatch], Any],
+        payload: dict[str, Any],
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        _record(tmp_path)
+        handler = factory(monkeypatch)
+        with _context(tmp_path), patch.object(Path, "read_text", side_effect=PermissionError("x")):
+            assert handler.matches(dict(payload)) is True, label
+
+
 class TestRecoveryCronAdvisor:
     """A PostToolUse plan write is unreachable while paused (the tool gate), but the
     advisor also stands down itself, so a project with the tool gate off is still quiet."""

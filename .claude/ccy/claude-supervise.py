@@ -2383,6 +2383,9 @@ _USAGE_PAUSE_WINDOWS = frozenset({"five_hour", "seven_day"})
 # How long past `resume_at` a record still counts: the daemon clears it when the
 # resume cron fires, and this is the backstop for a daemon that never did.
 _USAGE_PAUSE_GRACE_SECONDS = 3600.0
+# The longest a record may pause: resume_at - paused_at. A record asking for more
+# is corrupt or hand-edited and reads as no pause (daemon copy: MAX_PAUSE_SPAN_SECONDS).
+_USAGE_PAUSE_MAX_SPAN_SECONDS = 8 * 86400.0
 _USAGE_PAUSE_TIME_FORMAT = "%Y-%m-%d %H:%M UTC"
 
 
@@ -2429,7 +2432,7 @@ def _parse_usage_pause(data: object) -> UsagePauseRecord | None:
         return None
     if paused_at is None or resume_at is None or used is None or ceiling is None:
         return None
-    if resume_at <= paused_at:
+    if resume_at <= paused_at or resume_at - paused_at > _USAGE_PAUSE_MAX_SPAN_SECONDS:
         return None
     return UsagePauseRecord(session_id, paused_at, resume_at, window, used, ceiling, reason)
 
