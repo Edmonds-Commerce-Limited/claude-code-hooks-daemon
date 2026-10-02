@@ -320,3 +320,52 @@ class TestAcceptanceTestFixturesMatchThisProjectsRealConfig:
                 f"real only_with_mutator=True config actually produces: "
                 f"{context_text!r}"
             )
+
+
+class TestModeAwareAcceptanceTests:
+    """The acceptance fixtures follow the configured mode (block vs warn)."""
+
+    @staticmethod
+    def _block_handler() -> BashSafeModeHandler:
+        block = BashSafeModeHandler()
+        block._mode = "block"
+        return block
+
+    def test_block_mode_unprefixed_sequence_expects_deny(self) -> None:
+        from claude_code_hooks_daemon.core import TestType
+
+        fixture = next(
+            t
+            for t in self._block_handler().get_acceptance_tests()
+            if "without a prelude" in t.title
+        )
+        assert fixture.expected_decision == Decision.DENY
+        assert fixture.test_type == TestType.BLOCKING
+        assert fixture.expected_message_patterns == [r"errexit", r"pipefail"]
+        assert "only_with_mutator: true" not in fixture.description
+
+    def test_block_mode_unprefixed_fixture_really_denies(self) -> None:
+        block = self._block_handler()
+        fixture = next(t for t in block.get_acceptance_tests() if "without a prelude" in t.title)
+        result = block.handle(_bash(fixture.command))
+        assert result.decision == Decision.DENY
+        assert result.reason is not None
+        for pattern in fixture.expected_message_patterns:
+            assert pattern in result.reason
+
+    def test_warn_mode_unprefixed_sequence_still_expects_allow(
+        self, handler: BashSafeModeHandler
+    ) -> None:
+        fixture = next(t for t in handler.get_acceptance_tests() if "without a prelude" in t.title)
+        assert fixture.expected_decision == Decision.ALLOW
+
+    @pytest.mark.parametrize("mode", ["warn", "block"])
+    def test_prelude_and_and_chain_fixtures_allow_in_both_modes(self, mode: str) -> None:
+        current = BashSafeModeHandler()
+        current._mode = mode
+        tests = current.get_acceptance_tests()
+        chain = next(t for t in tests if "&&" in t.title)
+        prelude = next(t for t in tests if "prelude is silent" in t.title)
+        for fixture in (chain, prelude):
+            assert fixture.expected_decision == Decision.ALLOW
+            assert not current.matches(_bash(fixture.command))

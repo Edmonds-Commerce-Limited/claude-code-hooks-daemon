@@ -348,6 +348,8 @@ class BashSafeModeHandler(PreToolUseHandlerBase):
             "is only checked where configured). A command already carrying the "
             "prelude, a single statement, and a pure `&&` chain are never "
             "flagged.\n\n"
+            "**Fix when blocked**: put `set -euo pipefail` at the top of the "
+            "command, or chain the statements with `&&`.\n\n"
             f"{_BLIND_SPOTS}\n\n"
             "Because of those blind spots, do NOT drop explicit gating "
             "(`&&`, `|| exit 1`) just because the prelude is present — the "
@@ -364,9 +366,10 @@ class BashSafeModeHandler(PreToolUseHandlerBase):
         )
 
     def get_acceptance_tests(self) -> list[Any]:
-        """Acceptance tests exercising the warn path with read-only commands."""
+        """Acceptance tests exercising the configured mode with read-only commands."""
         from claude_code_hooks_daemon.core import RecommendedModel, TestType
 
+        blocking = self._mode == _MODE_BLOCK
         return [
             AcceptanceTest(
                 title="Bash safe mode - sequenced statements without a prelude",
@@ -374,15 +377,37 @@ class BashSafeModeHandler(PreToolUseHandlerBase):
                 dispatch_as_bash=True,
                 description=(
                     "Two newline-sequenced read-only statements with no `set` "
-                    "prelude. Advisory by default: the command runs and the "
-                    "context names the missing flags. The second statement is "
-                    "shaped like a mutator (`git tag`) so this fixture still "
-                    "fires under this project's own `only_with_mutator: true` "
-                    "configuration -- `--list` keeps it read-only."
+                    "prelude. "
+                    + (
+                        "Block mode: the command is denied and the reason names "
+                        "the missing flags."
+                        if blocking
+                        else "Advisory mode: the command runs and the context "
+                        "names the missing flags."
+                    )
+                    + " The second statement is shaped like a mutator "
+                    "(`git tag`) so this fixture still fires when "
+                    "`only_with_mutator` is enabled -- `--list` keeps it "
+                    "read-only."
                 ),
-                expected_decision=Decision.ALLOW,
+                expected_decision=Decision.DENY if blocking else Decision.ALLOW,
                 expected_message_patterns=[r"errexit", r"pipefail"],
                 safety_notes="Both statements are read-only; --list tags nothing.",
+                test_type=TestType.BLOCKING if blocking else TestType.ADVISORY,
+                recommended_model=RecommendedModel.HAIKU,
+                requires_main_thread=False,
+            ),
+            AcceptanceTest(
+                title="Bash safe mode - a pure && chain is exempt",
+                command="git status --short && git tag --list",
+                dispatch_as_bash=True,
+                description=(
+                    "A pure `&&` chain is one statement, so explicit gating "
+                    "needs no prelude and is silent in both modes."
+                ),
+                expected_decision=Decision.ALLOW,
+                expected_message_patterns=[],
+                safety_notes="Both commands are read-only; --list tags nothing.",
                 test_type=TestType.ADVISORY,
                 recommended_model=RecommendedModel.HAIKU,
                 requires_main_thread=False,
