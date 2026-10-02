@@ -656,6 +656,15 @@ class HandlerID:
         config_key="daemon_sync_after_merge",
         display_name="daemon-sync-after-merge",
     )
+    # Cron record keeper (PostToolUse) -- Plan 00470 Task 2.1: writes down when
+    # each CronCreate happened and forgets each CronDelete, because
+    # session_crons carries no creation time and the stop enforcers need an age
+    # to refresh a job before the 7-day expiry kills it.
+    CRON_RECORD_KEEPER = HandlerIDMeta(
+        class_name="CronRecordKeeperHandler",
+        config_key="cron_record_keeper",
+        display_name="cron-record-keeper",
+    )
 
     # Advisory handlers (Priority: 55-60)
     CRITICAL_THINKING_ADVISORY = HandlerIDMeta(

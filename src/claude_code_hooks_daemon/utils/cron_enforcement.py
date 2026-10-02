@@ -105,6 +105,15 @@ def _normalise_whitespace(prompt: str) -> str:
     return "\n".join(line.strip() for line in prompt.splitlines() if line.strip())
 
 
+def normalise_prompt(prompt: str) -> str:
+    """The prompt's WORDS: tick sentinel and every layout difference removed.
+
+    The one spelling of "the same job's prompt" for matching and for the
+    fingerprint ``cron_records`` stores.
+    """
+    return _normalise_whitespace(strip_tick_sentinels(prompt))
+
+
 @dataclass(frozen=True)
 class SessionCron:
     """One entry from the Stop/SubagentStop ``session_crons`` field.
@@ -184,8 +193,8 @@ def _prompts_match(declared: str, delivered: str) -> bool:
     # The tick sentinel is stripped from both sides (Plan 00388): a cron
     # created from today's advisory carries it and one created before it
     # existed does not, and both are the same declared job.
-    delivered_norm = _normalise_whitespace(strip_tick_sentinels(without_marker))
-    declared_norm = _normalise_whitespace(strip_tick_sentinels(declared))
+    delivered_norm = normalise_prompt(without_marker)
+    declared_norm = normalise_prompt(declared)
     if _was_truncated(delivered, without_marker):
         # An EMPTY prefix is not a short prefix, it is no evidence at all:
         # every declaration starts with it, so a delivery of nothing but a
@@ -199,8 +208,10 @@ def _prompts_match(declared: str, delivered: str) -> bool:
     return declared_norm == delivered_norm
 
 
-def cron_is_asserted(declared: PersistentCronConfig, session_crons: list[SessionCron]) -> bool:
-    """Whether ``declared`` has a matching entry among ``session_crons``.
+def matching_session_crons(
+    declared: PersistentCronConfig, session_crons: list[SessionCron]
+) -> list[SessionCron]:
+    """The ``session_crons`` entries that are ``declared``'s job.
 
     Args:
         declared: One of this project's ``persistent_crons`` jobs.
@@ -208,7 +219,7 @@ def cron_is_asserted(declared: PersistentCronConfig, session_crons: list[Session
             the conditional-absence case with ``parse_session_crons`` first).
 
     Returns:
-        True if some entry shares ``declared``'s schedule and its prompt is
+        Every entry that shares ``declared``'s schedule and whose prompt is
         the same job once truncation (constraint 2) and layout are both
         normalised away -- never by ``id``, which the contract does not
         guarantee round-trips (constraint 3).
@@ -219,10 +230,19 @@ def cron_is_asserted(declared: PersistentCronConfig, session_crons: list[Session
         is a real difference. Only the prompt makes the round trip through a
         rendering that re-flows it.
     """
-    return any(
-        actual.schedule == declared.schedule and _prompts_match(declared.prompt, actual.prompt)
+    return [
+        actual
         for actual in session_crons
-    )
+        if actual.schedule == declared.schedule and _prompts_match(declared.prompt, actual.prompt)
+    ]
+
+
+def cron_is_asserted(declared: PersistentCronConfig, session_crons: list[SessionCron]) -> bool:
+    """Whether ``declared`` has a matching entry among ``session_crons``.
+
+    See ``matching_session_crons`` for what counts as a match.
+    """
+    return bool(matching_session_crons(declared, session_crons))
 
 
 def find_missing_crons(

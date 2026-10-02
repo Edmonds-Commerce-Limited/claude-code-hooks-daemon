@@ -470,6 +470,12 @@ _EXEMPT_FROM_GUIDANCE: dict[str, str] = {
     "UpgradeNotifierHandler": "status-line renderer, no agent-facing action",
     "WorkingDirectoryHandler": "status-line renderer, no agent-facing action",
     "CompactionSignalHandler": "writes a signal file for the supervisor, not the agent",
+    "CronRecordKeeperHandler": (
+        "silent state-file writer, never denies and never speaks (T1 no, T3 no); "
+        "the one thing an agent must do about the record, refresh through "
+        "CronDelete + CronCreate, is in cron_stop_enforcer's guidance and in its "
+        "deny reason, so a section here would only repeat them"
+    ),
     "MonorepoDetectorHandler": (
         "never denies (T1 no); one-shot correction delivered fully at fire-time "
         "(paste-ready projects: block), not a standing policy to hold across "

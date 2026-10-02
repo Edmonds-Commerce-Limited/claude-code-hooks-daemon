@@ -286,6 +286,12 @@ class Priority:
     # daemon's own config and version.
     DAEMON_SYNC_AFTER_MERGE = 35
 
+    # Cron record keeper (Priority: 36 - PostToolUse sensor; Plan 00470 Task
+    # 2.1, the next free PostToolUse slot. A silent writer of a per-project
+    # state file, like model_downgrade_recorder (33), so order among the
+    # PostToolUse advisories is not load-bearing.)
+    CRON_RECORD_KEEPER = 36
+
     # QA enforcement handlers (Priority: 30-35)
     QA_SUPPRESSION = 30
     PLAN_NUMBER_HELPER = 30

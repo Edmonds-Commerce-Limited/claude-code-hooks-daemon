@@ -394,6 +394,55 @@ config_changes:
         a `producer | head` exits 141 (SIGPIPE) and `set -e` then aborts the
         command, so do not append `|| true`; read the file directly with
         `head -n N <file>` or capture with `bin/echd-capture N` instead.
+    - key: handlers.post_tool_use.cron_record_keeper
+      recommended: true
+      dormant: false
+      description: >-
+        NEW (Plan 00470 Task 2.1). A silent PostToolUse recorder: every
+        `CronCreate` is written to `cron-records.json` in the daemon's untracked
+        directory (session id, cron id, schedule, a hash of the prompt, creation
+        time; never the prompt text) and every `CronDelete` is forgotten.
+        Recurring crons expire 7 days after creation and the Stop payload carries
+        no creation time, so this is what lets `cron_stop_enforcer` know a job's
+        age. Records older than 7 days, and a session's records its own
+        `session_crons` no longer lists, are pruned. Never blocks, never speaks,
+        and fails open.
+      example_yaml: |
+        handlers:
+          post_tool_use:
+            cron_record_keeper:
+              enabled: true
+              priority: 36
+      migration_note: >-
+        On by default; no project-side action needed. Add the entry to a project
+        config that lists its PostToolUse handlers explicitly. Without it
+        `cron_stop_enforcer` stamps every live job as first seen at its next Stop
+        instead of at creation, so a refresh comes up to `refresh_after_days`
+        late.
+    - key: handlers.stop.cron_stop_enforcer.options.refresh_after_days
+      recommended: false
+      dormant: true
+      description: >-
+        NEW option (Plan 00470 Task 2.2, default 6; also read by
+        `cron_subagent_stop_enforcer`). A live declared job older than this many
+        days is denied a stop until it is refreshed: the reason names the
+        `CronDelete <id>` and the `CronCreate` (schedule and prompt) to run, ahead
+        of the 7-day expiry that would silently end every tick. A job with no
+        record is stamped, never denied; a job paused with `hooks-daemon
+        cron-pause` is not refreshed; a usage-paused session is not judged. A
+        value that is not above 0 and below 7 is replaced by the default with a
+        warning.
+      example_yaml: |
+        handlers:
+          stop:
+            cron_stop_enforcer:
+              enabled: true
+              priority: 7
+              options:
+                refresh_after_days: 6
+      migration_note: >-
+        Optional. The default applies when the option is absent. Lower it to
+        refresh sooner; it cannot be raised to 7 or more.
   changed:
     # Plan 00483 N55 (owner-delegated ruling): an opt-in handler with NO block
     # under `handlers.<event>` no longer runs. Documentation-only entries (no

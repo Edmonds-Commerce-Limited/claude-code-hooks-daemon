@@ -53,13 +53,16 @@ from claude_code_hooks_daemon.handlers.utils.session_advice_counter import (
     SessionAdviceCounter,
 )
 from claude_code_hooks_daemon.utils.config_cache import load_config_cached
-from claude_code_hooks_daemon.utils.cron_enforcement import (
-    find_missing_crons,
-    parse_session_crons,
-    verdict_for_missing_crons,
-)
 from claude_code_hooks_daemon.utils.cron_hosts import effective_hostname
 from claude_code_hooks_daemon.utils.cron_pause import PAUSE_ADVISE_INTERVAL, default_pauses_path
+from claude_code_hooks_daemon.utils.cron_records import (
+    DEFAULT_REFRESH_AFTER_DAYS,
+    default_records_path,
+)
+from claude_code_hooks_daemon.utils.cron_refresh import (
+    judge_declared_crons,
+    refresh_days_to_seconds,
+)
 from claude_code_hooks_daemon.utils.usage_pause_gate import hook_is_usage_paused
 
 logger = logging.getLogger(__name__)
@@ -102,6 +105,8 @@ class CronStopEnforcerHandler(StopHandlerBase):
         self._pause_advice = SessionAdviceCounter(
             interval=PAUSE_ADVISE_INTERVAL, max_sessions=_MAX_TRACKED_PAUSE_KEYS
         )
+        # Option, injected by the registry (``options.refresh_after_days``).
+        self._refresh_after_days: float = DEFAULT_REFRESH_AFTER_DAYS
 
     def get_default_enabled(self) -> bool:
         """Enabled, but silent until the project declares a job.
@@ -159,24 +164,24 @@ class CronStopEnforcerHandler(StopHandlerBase):
         if not jobs:
             return BlockingResult(decision=Decision.ALLOW)
 
-        session_crons = parse_session_crons(hook_input)
-        if session_crons is None:
-            return BlockingResult(decision=Decision.ALLOW)
-
-        missing = find_missing_crons(jobs, session_crons)
-        if not missing:
-            return BlockingResult(decision=Decision.ALLOW)
-
-        return verdict_for_missing_crons(
-            missing,
+        # A live job older than ``refresh_after_days`` is denied too (Plan 00470
+        # Task 2.2): see ``utils.cron_refresh``.
+        return judge_declared_crons(
+            jobs,
             hook_input,
             pauses_path=self._pauses_path(),
+            records_path=self._records_path(),
             should_advise=self._pause_advice.should_advise,
+            refresh_after_seconds=refresh_days_to_seconds(self._refresh_after_days),
         )
 
     def _pauses_path(self) -> Path | None:
         """Where ``hooks-daemon cron-pause`` records this project's pauses."""
         return default_pauses_path()
+
+    def _records_path(self) -> Path | None:
+        """Where ``cron_record_keeper`` records when each cron was created."""
+        return default_records_path()
 
     def get_acceptance_tests(self) -> list[Any]:
         """Two cases, driven against this repo's own real declared job.
@@ -269,6 +274,14 @@ class CronStopEnforcerHandler(StopHandlerBase):
             "**Fix**: run `CronCreate` (recurring: true) for every job named in "
             "the block message, using the schedule and prompt given verbatim, "
             "then stop again.\n\n"
+            "**A live job is also refreshed before it expires.** Recurring crons die "
+            "7 days after creation and an expired cron fires no more ticks, so an idle "
+            "session would never be woken. `cron_record_keeper` records each "
+            "`CronCreate`; once a live declared job is older than "
+            "`options.refresh_after_days` (default 6, valid above 0 and below 7) the stop "
+            "is blocked, naming the `CronDelete <id>` and `CronCreate` that refresh it. "
+            "A job with no record is stamped, never blocked; a job paused with "
+            "`cron-pause` is not refreshed.\n\n"
             "**One deny per stop chain.** A stop that re-enters "
             "(`stop_hook_active`) after the deny is allowed and logged as a "
             "warning, so a session that cannot create the job is never "
