@@ -38,8 +38,9 @@ Full write-ups are in [NIGGLES.md](NIGGLES.md). One line each here:
 
 | #          | Verdict                                                                                                          | Origin              | Status                  |
 | ---------- | ---------------------------------------------------------------------------------------------------------------- | ------------------- | ----------------------- |
-| N290       | The coordinator stated a confident, unsearched, false claim ("the supervisor is outside this repository")        | Owner               | ⬜ Open                 |
-| N289       | In this repository the slow SessionStart sweeps appear never to reach a session, unreported                      | Coordinator         | 🔄 In progress          |
+| N291       | `secret_file_guard` denies a double-quoted grep regex (`.*` runs) as a mention of a protected path               | Coordinator         | ⬜ Open                 |
+| N290       | The coordinator stated a confident, unsearched, false claim ("the supervisor is outside this repository")        | Owner               | 🔄 Plan 00480           |
+| N289       | In this repository the slow SessionStart sweeps appear never to reach a session, unreported                      | Coordinator         | ✅ Fixed (76cf82266)    |
 | N288       | An event-socket test fails wherever the pytest process exports a hostname override                               | Task 4.1 agent      | ✅ Fixed (test only)    |
 | N287       | `semgrep` and `dependencies` fail on main; neither runs in CI or in `changed`                                    | Plan 00475 timing   | ✅ Fixed (9342fa898)    |
 | N286       | Main full CI went red after N264/N266: a playbook probe, a blindness verdict and a skip-list finding             | Main CI             | ✅ Fixed (1bbf676a0)    |

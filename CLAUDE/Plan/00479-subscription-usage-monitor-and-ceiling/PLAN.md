@@ -1,6 +1,6 @@
 # Plan 00479: subscription usage monitor and ceiling
 
-**Status**: Not Started
+**Status**: In Progress
 **Created**: 2026-10-02
 **Owner**: dev
 **Priority**: Medium
@@ -70,17 +70,19 @@ hosts:
 
 - [ ] ⬜ **Task 1.1**: Vendor the status line docs page with `hooks-daemon remote-docs add`.
   Record in `CLAUDE/Architecture/StatusLine.md` that `rate_limits` is now read.
-- [ ] ⬜ **Task 1.2**: Capture real Status payloads into test fixtures: a main thread with
+- [x] ✅ **Task 1.2** (merged ee58adb7c): Capture real Status payloads into test fixtures: a main thread with
   data, before the first response (absent), a subagent or `--agent` thread, and integer and
   fractional percentages. Establish whether subagent threads carry `rate_limits`.
 
 ### Phase 2: Usage snapshot and status line segment (TDD)
 
-- [ ] ⬜ **Task 2.1**: Keep the latest snapshot from each Status event: window, percentage,
+- [x] ✅ **Task 2.1** (ee58adb7c; `core.data_layer.latest_usage()`, mirrored to
+  `usage-snapshot.json` in the daemon's untracked dir): Keep the latest snapshot from each Status event: window, percentage,
   `resets_at` and when it was seen. Hold it per session in daemon state and persist it
   host-wide, so a fresh daemon or a session that has not yet rendered can read it. Treat a
   window past its `resets_at` as absent.
-- [ ] ⬜ **Task 2.2**: A status-line usage segment, for example `5h 13% (3h 20m) · 7d 3%`, with
+- [x] ✅ **Task 2.2** (ee58adb7c; `usage_indicator`, seen live as
+  `5h 67% (3h 19m) · 7d 84% (4d 23h)`): A status-line usage segment, for example `5h 13% (3h 20m) · 7d 3%`, with
   colour thresholds. Hidden when there is no data. Options for the layout and the warning
   level.
 - [ ] ⬜ **Task 2.3**: When a ceiling applies to this host, the segment also shows it (for

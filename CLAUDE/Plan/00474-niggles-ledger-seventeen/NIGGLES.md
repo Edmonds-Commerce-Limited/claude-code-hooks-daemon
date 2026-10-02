@@ -954,9 +954,13 @@ checkouts.
   event.
 - **Result**: the two sweeps together went from about 71 s to 8.2 s on main.
 
-**Status**: 🔄 Most of the remaining 8.2 s is spent judging the scratch probe copies.
-Deleting them is the owner's call, since it is a bulk deletion of earlier runs' evidence. A
-live SessionStart probe on the restarted daemon is still to be done.
+**Live result**: after the daemon restart at ee58adb7c, a `SessionStart` probe (source
+`startup`) completed in 14.0 s with no cut-off. Before part 1 it took 20.4 s and was cut
+off.
+
+**Status**: ✅ Fixed. Most of the remaining sweep cost is the scratch probe copies under
+`untracked/scratch` (13 GB). Deleting them is the owner's call, since that is a bulk deletion
+of earlier runs' evidence.
 
 ### N290 — the coordinator stated a confident, unverified, false claim about the codebase
 
@@ -988,4 +992,26 @@ Also proposed:
 - a verifier-agent pass that tries to disprove each factual claim in a new plan;
 - a guidance rule that a claim about repository structure cites a path or a command.
 
-**Status**: ⬜ Open, awaiting the owner's choice of remedy.
+**Status**: 🔄 Graduated to Plan 00480. The owner chose the verifier-agent remedy ("anything
+else is really hit and miss"): a Sonnet fact itemiser and verifier wired into plan QA through
+a first-class debounce. The plan workflow core doc gained principle 1, "Always Verify, Never
+Assume" (51d3ad812).
+
+### N291 — `secret_file_guard` reads a double-quoted grep regex as a protected-path mention
+
+**Found**: by the coordinator while merging Plan 00479's status line work. A Bash command
+that filtered a scratch list of file names was denied with R-SECRET-BASH-MENTION. The
+command was `grep "^tests/.*test_.*\.py$" untracked/scratch/p479-py.txt`, assigned to a
+variable. The guard reported "Matched protected glob: `.vault-pass*`", "Matched on this
+token: `^tests/.*test_.*\.py`". The token is a regular expression applied to a file's
+CONTENT, and names no path. Its `.*` runs make it match any glob, so the guard reads it as
+possibly naming a protected file.
+
+**Related**: N269 fixed the single-quoted form, where a grep regex was expanded as a
+filename glob. This is the double-quoted form, inside a `$( )` assignment.
+
+**Worked around**: by splitting the filter into two literal prefix greps (`"^tests/"`, then
+`"/test_"`).
+
+**Status**: ⬜ Open. Fix with a TDD reproduction (dogfooding rule). Plan 00478's
+warn-don't-block ruling may also bear on it, if the guard cannot place the token.
