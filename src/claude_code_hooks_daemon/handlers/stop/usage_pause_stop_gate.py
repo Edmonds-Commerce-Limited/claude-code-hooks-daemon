@@ -1,7 +1,7 @@
 """UsagePauseStopGateHandler - a paused session stops only on the resume cron.
 
 Plan 00479 Task 4.3. A hook cannot create or delete a cron, so the usage pause
-(``usage_pause_gate``) DIRECTS the model to replace every cron with one one-shot
+(``usage_pause_gate``) DIRECTS the model to replace every cron with one recurring
 resume cron, and this handler VERIFIES it on ``Stop``: ``session_crons`` must
 hold exactly ONE entry, the usage-resume cron (recognised by its
 ``[tick:usage-resume]`` sentinel). Anything else repeats the directive, the
@@ -21,15 +21,11 @@ fix its crons must still be able to stop. The next fresh stop is checked again.
 An ABSENT ``session_crons`` is "no information", never "no crons exist", and
 allows.
 
-**The cron must work (Plan 00479 M2).** One resume-tagged cron is not enough: its
-pinned schedule must fire in ``(now, resume_at + 1 day]``
-(``schedule_fires_in_window``, read in UTC: the vendored Claude Code docs do not
-say which zone ``CronCreate`` reads, so the day of tolerance absorbs the
-difference). A pinned minute that has passed next matches a year later and would
-never wake the session, so that is refused with the reason and the directive. A
-resume time that has come or gone is first moved a margin ahead
-(``renew_pause``) so the directive's expression is in the future; the pause is
-NEVER cleared here, which would leave the session with no resume cron.
+**The cron must work (Plan 00479 M2, round 4).** One resume-tagged cron is not enough:
+its schedule must be ``RESUME_CRON_SCHEDULE`` (``*/10 * * * *``), which names no clock
+time, so no host time zone can misplace it and no resume time can have passed. Any
+other schedule is refused with the reason and the directive. The pause is NEVER
+cleared here, which would leave the session with no resume cron.
 
 **Entry (M3).** A session that crosses the ceiling without a new prompt or tool
 call can still reach a Stop, so this gate also enters the pause
@@ -56,12 +52,12 @@ from claude_code_hooks_daemon.utils.cron_tick import TickKind, classify_tick
 from claude_code_hooks_daemon.utils.stop_hook_helpers import is_stop_hook_active
 from claude_code_hooks_daemon.utils.usage_pause import UsagePause
 from claude_code_hooks_daemon.utils.usage_pause_gate import (
+    RESUME_CRON_SCHEDULE,
     PauseEnvironment,
     active_usage_pause,
+    is_resume_schedule,
     render_pause_directive,
     render_stop_directive,
-    renew_pause,
-    schedule_fires_in_window,
     try_start_pause,
 )
 
@@ -138,19 +134,14 @@ class UsagePauseStopGateHandler(StopHandlerBase):
         if found is None:
             return BlockingResult(decision=Decision.ALLOW)
         pause, fresh = found
-        env = self._env
         if fresh:
             # Entered on this very Stop: the model has not seen the directive, so it is
             # delivered whatever ``stop_hook_active`` says; the next Stop reads a live record.
-            return BlockingResult.deny(render_pause_directive(pause, tz=env.tz))
+            return BlockingResult.deny(render_pause_directive(pause))
         crons = parse_session_crons(hook_input)
         if crons is None:
             return BlockingResult(decision=Decision.ALLOW)
-        # A resume time that has come or gone (the model was slow) would pin the cron to a
-        # minute that has passed: move it ahead and give the model the new expression. The
-        # pause is never cleared here, which would leave the session with no resume cron.
-        pause = renew_pause(pause, env)
-        problem = self._problem(pause, crons)
+        problem = self._problem(crons)
         if problem is None:
             return BlockingResult(decision=Decision.ALLOW)
         if is_stop_hook_active(hook_input):
@@ -161,22 +152,20 @@ class UsagePauseStopGateHandler(StopHandlerBase):
             )
             return BlockingResult(decision=Decision.ALLOW)
         return BlockingResult.deny(
-            render_stop_directive(pause, found=len(crons), tz=env.tz, problem=problem or None)
+            render_stop_directive(pause, found=len(crons), problem=problem or None)
         )
 
-    def _problem(self, pause: UsagePause, crons: list[SessionCron]) -> str | None:
-        """None when ``crons`` is exactly one usable resume cron; else why not ("" if obvious)."""
+    @staticmethod
+    def _problem(crons: list[SessionCron]) -> str | None:
+        """None when ``crons`` is exactly the resume cron; else why not ("" if obvious)."""
         if len(crons) != 1 or not _is_resume_cron(crons[0]):
             return ""
-        env = self._env
-        if schedule_fires_in_window(
-            crons[0].schedule, now=env.clock(), resume_at=pause.resume_at, tz=env.tz
-        ):
+        if is_resume_schedule(crons[0].schedule):
             return None
         return (
-            f"Its schedule `{crons[0].schedule}` does not fire between now and a day after "
-            "the resume time (a pinned minute that has passed next fires a YEAR later). "
-            "CronDelete it and create it again with the expression given below, which is in UTC."
+            f"Its schedule `{crons[0].schedule}` is not `{RESUME_CRON_SCHEDULE}`, so it would "
+            "not wake the session at the right time. CronDelete it and create it again with "
+            "the schedule given below."
         )
 
     def get_rules(self) -> list[Rule]:
@@ -189,8 +178,8 @@ class UsagePauseStopGateHandler(StopHandlerBase):
             "## usage_pause_stop_gate — a paused session stops only on its resume cron\n\n"
             "While a session is paused on its host usage ceiling (`usage_pause_gate`), a "
             "stop is accepted only once `session_crons` holds exactly ONE cron: the "
-            "usage-resume cron (prompt starting `[tick:usage-resume]`) whose pinned schedule "
-            "really fires before a day after the resume time. Otherwise the "
+            "usage-resume cron (prompt starting `[tick:usage-resume]`) on the schedule "
+            f"`{RESUME_CRON_SCHEDULE}`. Otherwise the "
             "block repeats the directive: `CronList`, `CronDelete` every cron, "
             "`CronCreate` the one resume cron, stop again (the cron tools are deferred; "
             "`ToolSearch` loads them). A session that reaches a Stop over its ceiling "

@@ -14,7 +14,6 @@ snapshot, so nothing here touches a live daemon's snapshot or a real session.
 from __future__ import annotations
 
 import logging
-from datetime import UTC
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
@@ -85,7 +84,6 @@ def _handler(
     handler._clock = lambda: _NOW
     handler._config_loader = lambda: config if config is not None else _config()
     handler._usage_loader = lambda now: snapshot
-    handler._tz = UTC
     return handler
 
 
@@ -236,6 +234,11 @@ class TestEntry:
         assert "CronCreate" in "\n".join(result.context)
 
 
+def _record_due(tmp_path: Path, *, session: str = _SESSION) -> None:
+    """A record whose resume time has come: the recurring resume cron's tick now counts."""
+    _record(tmp_path, session=session, resume_at=_NOW - 30)
+
+
 class TestWhilePaused:
     def test_an_ordinary_prompt_is_blocked_before_the_model(self, tmp_path: Path) -> None:
         _record(tmp_path)
@@ -259,9 +262,8 @@ class TestWhilePaused:
         _record(tmp_path, resume_at=_NOW + 3600)
         handler = _handler(tmp_path, snapshot=_snapshot(five=91.0))
         result = _run(handler, tmp_path, _input())
-        schedule = gate.resume_schedule(_NOW + 3600, tz=UTC)
         assert result.reason is not None
-        assert schedule.hhmm in result.reason
+        assert gate.resume_time_text(_NOW + 3600) in result.reason
 
     def test_another_session_is_not_blocked(self, tmp_path: Path) -> None:
         _record(tmp_path, session="someone-else")
@@ -278,7 +280,7 @@ class TestResume:
     """Task 4.6: the resume cron's tick re-reads usage."""
 
     def test_below_the_ceiling_lifts_the_pause(self, tmp_path: Path) -> None:
-        _record(tmp_path)
+        _record_due(tmp_path)
         handler = _handler(tmp_path, snapshot=_snapshot(five=10.0))
         result = _run(handler, tmp_path, _input(gate.USAGE_RESUME_PROMPT))
         assert result.decision == Decision.ALLOW
@@ -291,7 +293,7 @@ class TestResume:
     def test_a_window_past_its_reset_reads_as_absent_so_the_pause_lifts(
         self, tmp_path: Path
     ) -> None:
-        _record(tmp_path)
+        _record_due(tmp_path)
         handler = _handler(tmp_path, snapshot=None)
         result = _run(handler, tmp_path, _input(gate.USAGE_RESUME_PROMPT))
         assert result.decision == Decision.ALLOW
@@ -301,7 +303,7 @@ class TestResume:
     def test_still_over_refreshes_the_pause_and_asks_for_the_next_resume_cron(
         self, tmp_path: Path
     ) -> None:
-        _record(tmp_path, resume_at=_NOW + 10)
+        _record_due(tmp_path)
         handler = _handler(tmp_path, snapshot=_snapshot(five=30.0, seven=85.0))
         result = _run(handler, tmp_path, _input(gate.USAGE_RESUME_PROMPT))
         assert result.decision == Decision.ALLOW
@@ -310,7 +312,50 @@ class TestResume:
         assert pause.resume_at == _SEVEN_RESET + gate.RESUME_MARGIN_SECONDS
         text = "\n".join(result.context)
         assert "STILL OVER" in text
-        assert "[tick:usage-resume]" in text
+        assert "Do NOT create another" in text  # the recurring resume cron is already in place
+
+    def test_an_early_resume_tick_is_dropped_at_zero_cost_and_the_pause_holds(
+        self, tmp_path: Path
+    ) -> None:
+        """Round 4 R3-2: the cron fires every ten minutes, so ticks before resume_at are noise."""
+        _record(tmp_path, resume_at=_NOW + 3600)
+        handler = _handler(tmp_path, snapshot=_snapshot(five=10.0))  # even under the ceiling
+        result = _run(handler, tmp_path, _input(gate.USAGE_RESUME_PROMPT))
+        assert result.decision == Decision.DENY
+        assert not result.context
+        assert read_usage_pause(tmp_path, _SESSION, now=_NOW) is not None
+
+    def test_an_early_tick_reads_no_usage(self, tmp_path: Path) -> None:
+        _record(tmp_path, resume_at=_NOW + 3600)
+        handler = _handler(tmp_path, snapshot=_snapshot(five=10.0))
+
+        def boom(_now: float) -> UsageSnapshot | None:
+            raise AssertionError("an early tick must not read usage")
+
+        handler._usage_loader = boom
+        assert _run(handler, tmp_path, _input(gate.USAGE_RESUME_PROMPT)).decision == Decision.DENY
+
+    def test_the_first_tick_at_the_resume_time_lifts_the_pause(self, tmp_path: Path) -> None:
+        _record(tmp_path, resume_at=_NOW)
+        handler = _handler(tmp_path, snapshot=_snapshot(five=10.0))
+        result = _run(handler, tmp_path, _input(gate.USAGE_RESUME_PROMPT))
+        assert result.decision == Decision.ALLOW
+        assert read_usage_pause(tmp_path, _SESSION, now=_NOW) is None
+        assert "PAUSE LIFTED" in "\n".join(result.context)
+
+    def test_a_tick_one_second_early_is_dropped(self, tmp_path: Path) -> None:
+        _record(tmp_path, resume_at=_NOW + 1)
+        handler = _handler(tmp_path, snapshot=_snapshot(five=10.0))
+        assert _run(handler, tmp_path, _input(gate.USAGE_RESUME_PROMPT)).decision == Decision.DENY
+
+    def test_the_lift_tells_the_model_to_delete_the_recurring_resume_cron(
+        self, tmp_path: Path
+    ) -> None:
+        _record_due(tmp_path)
+        handler = _handler(tmp_path, snapshot=_snapshot(five=10.0))
+        text = "\n".join(_run(handler, tmp_path, _input(gate.USAGE_RESUME_PROMPT)).context)
+        assert text.index("[tick:usage-resume]") < text.index("Re-establish")
+        assert "CronDelete" in text
 
     def test_a_resume_tick_with_no_record_still_lifts_when_under(self, tmp_path: Path) -> None:
         handler = _handler(tmp_path, snapshot=_snapshot(five=10.0))
@@ -319,7 +364,7 @@ class TestResume:
         assert "PAUSE LIFTED" in "\n".join(result.context)
 
     def test_a_resume_tick_with_no_ceiling_configured_lifts(self, tmp_path: Path) -> None:
-        _record(tmp_path)
+        _record_due(tmp_path)
         handler = _handler(tmp_path, config=_config(None), snapshot=_snapshot(five=99.0))
         result = _run(handler, tmp_path, _input(gate.USAGE_RESUME_PROMPT))
         assert "PAUSE LIFTED" in "\n".join(result.context)
@@ -344,7 +389,7 @@ class TestResume:
         assert "[tick:failsafe]" in "\n".join(result.context)
 
     def test_a_failed_clear_does_not_claim_a_lift(self, tmp_path: Path) -> None:
-        _record(tmp_path)
+        _record_due(tmp_path)
         handler = _handler(tmp_path, snapshot=_snapshot(five=10.0))
         with patch(
             "claude_code_hooks_daemon.utils.usage_pause_gate.clear_usage_pause",
@@ -360,7 +405,7 @@ class TestResume:
         self, tmp_path: Path
     ) -> None:
         """Round 2 N5: never say usage is back under unless a fresh read shows it."""
-        _record(tmp_path)
+        _record_due(tmp_path)
         near = UsageSnapshot(five_hour=UsageWindow(95.0, int(_NOW + 30), _NOW), seven_day=None)
         handler = _handler(tmp_path, snapshot=near)
         result = _run(handler, tmp_path, _input(gate.USAGE_RESUME_PROMPT))
@@ -372,7 +417,7 @@ class TestResume:
         assert pause.resume_at >= _NOW + gate.RESUME_MARGIN_SECONDS
 
     def test_the_verified_lift_says_usage_is_back_under(self, tmp_path: Path) -> None:
-        _record(tmp_path)
+        _record_due(tmp_path)
         handler = _handler(tmp_path, snapshot=_snapshot(five=10.0))
         result = _run(handler, tmp_path, _input(gate.USAGE_RESUME_PROMPT))
         assert "back under the ceiling" in "\n".join(result.context)
@@ -380,7 +425,7 @@ class TestResume:
     def test_an_override_that_ends_the_pause_does_not_claim_usage_is_under(
         self, tmp_path: Path
     ) -> None:
-        _record(tmp_path)
+        _record_due(tmp_path)
         write_usage_override(tmp_path, _SESSION, until=_NOW + 3600, now=_NOW)
         handler = _handler(tmp_path, snapshot=_snapshot(five=95.0))
         result = _run(handler, tmp_path, _input(gate.USAGE_RESUME_PROMPT))
@@ -392,7 +437,7 @@ class TestResume:
     def test_a_pause_that_cannot_be_renewed_does_not_claim_usage_is_under(
         self, tmp_path: Path
     ) -> None:
-        _record(tmp_path)
+        _record_due(tmp_path)
         handler = _handler(tmp_path, snapshot=_snapshot(five=95.0))
         with patch(
             "claude_code_hooks_daemon.utils.usage_pause_gate.write_usage_pause",

@@ -116,7 +116,8 @@ the daemon directs the model and then verifies what it did.
 - [ ] ⬜ **Task 4.1**: Pause entry. At or above the ceiling, the `UserPromptSubmit` gate
   refuses the incoming work, cron ticks and supervisor messages included. It delivers the
   pause directive instead: delete every cron (the failsafe and declared jobs included),
-  create ONE one-shot resume cron, then stop. The directive names the window, its
+  create ONE recurring `*/10 * * * *` resume cron (it names no clock time, so no host time
+  zone can misplace it; ticks before the resume time are dropped at no cost), then stop. The directive names the window, its
   percentage, the ceiling and the resume time. The resume time is the latest `resets_at`
   among the windows over the ceiling, plus a small margin.
 - [ ] ⬜ **Task 4.2**: During the pause, the `PreToolUse` gate allows only `CronList`,

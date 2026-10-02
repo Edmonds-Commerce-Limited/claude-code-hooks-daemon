@@ -5,7 +5,7 @@ The entry, hold and exit of the usage pause, on ``UserPromptSubmit``:
 **Entry (Task 4.1).** When a live usage window is at or above the ceiling the
 session's host sets, the pause is recorded (``utils.usage_pause``, read by the
 ccy supervisor and by every other gate) and the model is directed to replace
-all of its crons with ONE one-shot resume cron at the window's reset, then
+all of its crons with ONE recurring resume cron (every ten minutes), then
 stop. ``decision: "block"`` reaches the USER only and is never added to the
 model's context, so the directive travels as ``additionalContext`` on an
 ALLOWED prompt: the one prompt that trips the ceiling is the only one that can
@@ -22,12 +22,14 @@ gates keep the turn itself quiet: the PreToolUse gate refuses every tool but the
 cron tools, and the Stop gate accepts a stop only once exactly the resume cron
 remains. The one exception here is the resume cron's own tick.
 
-**Exit (Task 4.6).** The resume tick re-reads usage. A window past its
+**Exit (Task 4.6).** The resume cron fires every ten minutes whatever the pause's
+resume time (no clock time, so no host time zone can misplace it). A tick before
+``resume_at`` is dropped at zero cost; the first one at or after it re-reads usage. A window past its
 ``resets_at`` is absent from the snapshot, so a reading from before the reset
 cannot keep the session paused. Below the ceiling the record is cleared and the
 model is told to re-establish its declared crons and continue; still over (the
-weekly window, say) the record is refreshed and the model is told to schedule
-the next resume cron and stop again. A record that cannot be cleared is never
+weekly window, say) the record is refreshed and the model is told to stop again with
+the same cron in place. A record that cannot be cleared is never
 reported as lifted.
 
 **Fail open (Task 4.7).** No ceiling for the host, an unknown hostname, no
@@ -41,7 +43,6 @@ from __future__ import annotations
 import logging
 import time
 from collections.abc import Callable
-from datetime import UTC, tzinfo
 from typing import Any, Final
 
 from claude_code_hooks_daemon.config.models import Config
@@ -69,7 +70,8 @@ from claude_code_hooks_daemon.utils.usage_pause_gate import (
     render_pause_directive,
     render_resume_lifted_directive,
     render_still_over_directive,
-    resume_schedule,
+    resume_is_due,
+    resume_time_text,
     start_pause,
     try_start_pause,
 )
@@ -128,14 +130,13 @@ class UsagePauseGateHandler(UserPromptSubmitHandlerBase):
         self._clock: Callable[[], float] = time.time
         self._config_loader: Callable[[], Config] = load_project_config
         self._usage_loader: Callable[[float], UsageSnapshot | None] = default_usage_loader
-        self._tz: tzinfo = UTC  # the resume cron's zone: the docs do not say which CronCreate reads
 
     def get_default_enabled(self) -> bool:
         """On by default; inert for a host with no usage ceiling."""
         return True
 
     def _env(self) -> PauseEnvironment:
-        return PauseEnvironment(self._clock, self._config_loader, self._usage_loader, self._tz)
+        return PauseEnvironment(self._clock, self._config_loader, self._usage_loader)
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """Every prompt: the ceiling check is cheap and each skip logs its reason."""
@@ -160,9 +161,7 @@ class UsagePauseGateHandler(UserPromptSubmitHandlerBase):
         pause = try_start_pause(hook_input, env)
         if pause is None:
             return BlockingResult(decision=Decision.ALLOW)
-        return BlockingResult(
-            decision=Decision.ALLOW, context=[render_pause_directive(pause, tz=env.tz)]
-        )
+        return BlockingResult(decision=Decision.ALLOW, context=[render_pause_directive(pause)])
 
     def _hold_or_lift(
         self, hook_input: dict[str, Any], session_id: str, held: UsagePause, env: PauseEnvironment
@@ -171,21 +170,30 @@ class UsagePauseGateHandler(UserPromptSubmitHandlerBase):
         if not current_breaches(hook_input, env):
             logger.warning("usage_pause_gate: the ceiling no longer applies, lifting the pause")
             return self._lift(hook_input, session_id, held, env, verified_under_ceiling=True)
-        schedule = resume_schedule(held.resume_at, tz=env.tz)
+        until = resume_time_text(held.resume_at)
         reason = (
-            f"{RuleFormatter().verbose(_RULE)}\n\n"
-            f"Paused on: {held.reason}. Resumes about {schedule.hhmm} "
-            f"({schedule.local_text})."
+            f"{RuleFormatter().verbose(_RULE)}\n\nPaused on: {held.reason}. Resumes about {until}."
         )
-        logger.info("usage_pause_gate: dropping a prompt while paused until %s", schedule.hhmm)
+        logger.info("usage_pause_gate: dropping a prompt while paused until %s", until)
         return BlockingResult(decision=Decision.DENY, reason=reason)
 
     def _resume(
         self, hook_input: dict[str, Any], session_id: str, env: PauseEnvironment
     ) -> BlockingResult:
-        """The resume cron fired: pause again if still over the ceiling, else lift."""
-        breaches = current_breaches(hook_input, env)
+        """The resume cron fired: drop it if early, else pause again if still over, else lift.
+
+        The cron fires every ten minutes whatever the pause's resume time, so a tick before
+        ``resume_at`` is dropped here without reading usage (it costs the model no turn).
+        """
         record = active_usage_pause(session_id, now=env.clock())
+        if record is not None and not resume_is_due(record, now=env.clock()):
+            until = resume_time_text(record.resume_at)
+            logger.info("usage_pause_gate: dropping an early resume tick, paused until %s", until)
+            return BlockingResult(
+                decision=Decision.DENY,
+                reason=f"Usage pause: the resume cron fired before {until}; the pause holds.",
+            )
+        breaches = current_breaches(hook_input, env)
         if not breaches:
             return self._lift(hook_input, session_id, record, env, verified_under_ceiling=True)
         pause = start_pause(session_id, breaches, env)
@@ -193,7 +201,7 @@ class UsagePauseGateHandler(UserPromptSubmitHandlerBase):
             logger.warning("usage_pause_gate: still over the ceiling: %s", pause.reason)
             return BlockingResult(
                 decision=Decision.ALLOW,
-                context=[render_still_over_directive(pause, tz=env.tz)],
+                context=[render_still_over_directive(pause)],
             )
         # Still over, but no new pause could be kept (the owner's override, or the record
         # could not be written and read back): the pause ends without a fresh reading
@@ -214,7 +222,7 @@ class UsagePauseGateHandler(UserPromptSubmitHandlerBase):
             expires = record.expires_at if record is not None else env.clock()
             return BlockingResult(
                 decision=Decision.ALLOW,
-                context=[render_lift_not_recorded_note(expires_at=expires, tz=env.tz)],
+                context=[render_lift_not_recorded_note(expires_at=expires)],
             )
         return BlockingResult(
             decision=Decision.ALLOW,
@@ -249,19 +257,21 @@ class UsagePauseGateHandler(UserPromptSubmitHandlerBase):
             "When `hosts:` gives this host a `usage_ceiling` and a live usage window "
             "reaches it, the session PAUSES (it does not end). The prompt that trips it "
             "carries a directive: `CronList`, `CronDelete` every cron, `CronCreate` ONE "
-            "one-shot resume cron at the window reset (the exact expression is given), "
+            "recurring resume cron (the exact expression is given; it names no clock time), "
             "then stop. **Do not act on that prompt's request.** The cron tools are "
             "deferred: load them with `ToolSearch` if their schemas are not loaded.\n\n"
             "While paused every other prompt is dropped before it reaches you "
             "(`R-USAGE-PAUSE-PROMPT`, no turn spent), every tool except `CronList`, "
-            "`CronDelete`, `CronCreate` and `ToolSearch` is denied and halts the turn "
+            "`CronDelete`, `CronCreate`, `ToolSearch`, `SendMessage` and `TaskStop` is "
+            "denied and halts the turn (running subagents are never denied: they finish) "
             "(`usage_pause_tool_gate`; the one call that starts a pause is only refused, "
             "not halted, so you can act on the directive), and a stop is accepted only once exactly the one "
-            "resume cron remains, scheduled to fire in time (`usage_pause_stop_gate`).\n\n"
+            "resume cron remains, on its schedule (`usage_pause_stop_gate`).\n\n"
             "The resume cron's prompt starts `[tick:usage-resume]`; paste it verbatim. "
             "When it fires usage is re-read: below the ceiling you are told to "
-            "re-establish the declared crons and continue; still over, to schedule the "
-            "next resume cron and stop again.\n\n"
+            "re-establish the declared crons (and `CronDelete` the resume cron) and continue; "
+            "still over, to stay paused and stop again (the resume cron stays in place). "
+            "A tick before the resume time is dropped at no cost.\n\n"
             "The ceiling is re-checked on every held prompt, so the pause lifts by itself "
             "when it no longer applies. A human can run "
             f"`{CLEAR_COMMAND}` in a terminal: it removes the record and records an "

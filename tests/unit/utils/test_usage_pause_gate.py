@@ -8,7 +8,7 @@ cannot disagree.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
@@ -16,6 +16,7 @@ from unittest.mock import patch
 import pytest
 
 from claude_code_hooks_daemon.config.models import Config, HostConfig, UsageCeilingConfig
+from claude_code_hooks_daemon.constants.tools import SUBAGENT_DISPATCH_TOOL_NAMES
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.core.usage_snapshot import UsageSnapshot, UsageWindow
 from claude_code_hooks_daemon.utils import usage_pause_gate as gate
@@ -131,30 +132,53 @@ class TestBuildPause:
             gate.build_pause(_SESSION, [], now=_NOW)
 
 
-class TestResumeSchedule:
-    def test_one_shot_cron_pinned_to_the_minute_in_the_given_zone(self) -> None:
-        resume = datetime(2026, 10, 2, 15, 2, 0, tzinfo=UTC).timestamp()
-        schedule = gate.resume_schedule(resume, tz=UTC)
-        assert schedule.cron == "2 15 2 10 *"
-        assert schedule.local_text == "2026-10-02 15:02 UTC"
-        assert schedule.utc_text == "2026-10-02 15:02 UTC"
+class TestResumeCron:
+    """Round 4 R3-2: the resume cron names no clock time, so no time zone can misplace it."""
 
-    def test_a_partial_minute_rounds_up_so_it_never_fires_early(self) -> None:
-        resume = datetime(2026, 10, 2, 15, 2, 1, tzinfo=UTC).timestamp()
-        assert gate.resume_schedule(resume, tz=UTC).cron == "3 15 2 10 *"
+    def test_the_schedule_is_every_ten_minutes(self) -> None:
+        assert gate.RESUME_CRON_SCHEDULE == "*/10 * * * *"
 
-    def test_the_cron_is_expressed_in_local_time_and_utc_is_stated_beside_it(self) -> None:
-        zone = timezone(timedelta(hours=10), "AEST")
+    def test_the_schedule_pins_no_hour_day_or_month(self) -> None:
+        minute, hour, day, month, weekday = gate.RESUME_CRON_SCHEDULE.split()
+        assert (hour, day, month, weekday) == ("*", "*", "*", "*")
+        assert minute.startswith("*/")
+
+    def test_zone_dependent_schedule_maths_is_gone(self) -> None:
+        for name in ("resume_schedule", "schedule_fires_in_window", "ResumeSchedule"):
+            assert not hasattr(gate, name), name
+        assert not hasattr(gate.PauseEnvironment(), "tz")
+
+    def test_resume_time_text_is_utc_whatever_the_host_zone(self) -> None:
         resume = datetime(2026, 10, 2, 23, 30, 0, tzinfo=UTC).timestamp()
-        schedule = gate.resume_schedule(resume, tz=zone)
-        assert schedule.cron == "30 9 3 10 *"  # 09:30 on 3 October, local
-        assert schedule.local_text == "2026-10-03 09:30 AEST"
-        assert schedule.utc_text == "2026-10-02 23:30 UTC"
+        assert gate.resume_time_text(resume) == "2026-10-02 23:30 UTC"
 
-    def test_the_hhmm_for_the_status_line(self) -> None:
-        zone = timezone(timedelta(hours=10), "AEST")
-        resume = datetime(2026, 10, 2, 23, 30, 0, tzinfo=UTC).timestamp()
-        assert gate.resume_schedule(resume, tz=zone).hhmm == "09:30"
+    @pytest.mark.parametrize(
+        ("schedule", "expected"),
+        [
+            ("*/10 * * * *", True),
+            ("  */10  *  * * *  ", True),
+            ("*/5 * * * *", False),
+            ("2 15 2 10 *", False),
+            ("", False),
+        ],
+    )
+    def test_only_the_resume_schedule_is_the_resume_schedule(
+        self, schedule: str, expected: bool
+    ) -> None:
+        assert gate.is_resume_schedule(schedule) is expected
+
+    @pytest.mark.parametrize(("now", "due"), [(_NOW - 1, False), (_NOW, True), (_NOW + 600, True)])
+    def test_a_resume_tick_is_due_at_and_after_the_resume_time(self, now: float, due: bool) -> None:
+        pause = UsagePause(
+            session_id=_SESSION,
+            paused_at=_NOW - 60,
+            resume_at=_NOW,
+            window=WINDOW_FIVE_HOUR,
+            used_percentage=91.0,
+            ceiling=80.0,
+            reason="r",
+        )
+        assert gate.resume_is_due(pause, now=now) is due
 
 
 class TestResumePrompt:
@@ -239,29 +263,30 @@ class TestDirectives:
         )
 
     def test_entry_directive_names_window_percentage_ceiling_and_resume_time(self) -> None:
-        text = gate.render_pause_directive(self._pause(), tz=UTC)
+        text = gate.render_pause_directive(self._pause())
         assert "five_hour" in text
         assert "91%" in text  # rounded DOWN, as the status line does
         assert "90%" in text
-        assert "UTC" in text
+        assert gate.resume_time_text(self._pause().resume_at) in text
 
     def test_entry_directive_orders_the_cron_steps(self) -> None:
-        text = gate.render_pause_directive(self._pause(), tz=UTC)
+        text = gate.render_pause_directive(self._pause())
         assert text.index("CronList") < text.index("CronDelete") < text.index("CronCreate")
-        assert "recurring: false" in text
+        assert "recurring: true" in text
+        assert "recurring: false" not in text
         assert "[tick:usage-resume]" in text
         assert "STOPPING BECAUSE" in text
 
     def test_entry_directive_refuses_the_triggering_request(self) -> None:
-        assert "Do NOT act on" in gate.render_pause_directive(self._pause(), tz=UTC)
+        assert "Do NOT act on" in gate.render_pause_directive(self._pause())
 
-    def test_entry_directive_embeds_the_exact_cron_expression(self) -> None:
-        pause = self._pause()
-        schedule = gate.resume_schedule(pause.resume_at, tz=UTC)
-        assert schedule.cron in gate.render_pause_directive(pause, tz=UTC)
+    def test_entry_directive_embeds_the_zone_free_cron_expression(self) -> None:
+        text = gate.render_pause_directive(self._pause())
+        assert f"`{gate.RESUME_CRON_SCHEDULE}`" in text
+        assert "does not say" not in text  # no hedging about which zone CronCreate reads
 
     def test_repeat_directive_states_what_is_wrong(self) -> None:
-        text = gate.render_stop_directive(self._pause(), found=3, tz=UTC)
+        text = gate.render_stop_directive(self._pause(), found=3)
         assert "3 crons" in text
         assert "exactly ONE" in text
 
@@ -271,11 +296,21 @@ class TestDirectives:
         assert "persistent_cron" in text or "declared" in text
         assert "continue" in text.lower()
 
-    def test_still_over_directive_schedules_the_next_resume(self) -> None:
-        text = gate.render_still_over_directive(self._pause(), tz=UTC)
-        assert "still" in text.lower()
-        assert "CronCreate" in text
+    def test_lift_directive_deletes_the_recurring_resume_cron_first(self) -> None:
+        """Round 4 R3-2: it fires every ten minutes, so it must not outlive the pause."""
+        text = gate.render_resume_lifted_directive()
         assert "[tick:usage-resume]" in text
+        assert "CronDelete" in text
+        assert "one-shot" not in text
+        assert text.index("CronDelete") < text.index("Re-establish")
+
+    def test_still_over_directive_keeps_the_resume_cron_and_names_the_new_time(self) -> None:
+        text = gate.render_still_over_directive(self._pause())
+        assert "still" in text.lower()
+        assert gate.resume_time_text(self._pause().resume_at) in text
+        # The recurring resume cron is already in place: a second one would fire twice.
+        assert "Do NOT create another" in text
+        assert "[tick:usage-resume]" not in text  # no prompt to paste: nothing to create
 
 
 class TestOnlyCronToolsAreAllowedWhilePaused:
@@ -283,9 +318,59 @@ class TestOnlyCronToolsAreAllowedWhilePaused:
     def test_cron_tools_pass(self, tool: str) -> None:
         assert gate.tool_allowed_while_paused(tool) is True
 
-    @pytest.mark.parametrize("tool", ["Bash", "Read", "Write", "Task", "ScheduleWakeup", "", None])
+    @pytest.mark.parametrize("tool", ["Bash", "Read", "Write", "ScheduleWakeup", "", None])
     def test_everything_else_is_refused(self, tool: str | None) -> None:
         assert gate.tool_allowed_while_paused(tool) is False
+
+
+class TestNewSubagentsAreRefusedWhilePaused:
+    """Round 4 R3-1: running subagents finish, but none may START while paused."""
+
+    @pytest.mark.parametrize("tool", sorted(SUBAGENT_DISPATCH_TOOL_NAMES))
+    def test_every_dispatch_tool_name_is_off_the_allow_list(self, tool: str) -> None:
+        assert tool not in gate.PAUSE_ALLOWED_TOOLS
+        assert gate.tool_allowed_while_paused(tool) is False
+
+    @pytest.mark.parametrize("tool", ["SendMessage", "TaskStop"])
+    def test_winding_up_running_subagents_is_allowed(self, tool: str) -> None:
+        assert tool in gate.PAUSE_ALLOWED_TOOLS
+        assert gate.tool_allowed_while_paused(tool) is True
+
+
+class TestPauseDirectiveWindsUpSubagents:
+    """Round 4 R3-1: the main agent winds subagents up; it does not rug-pull working ones."""
+
+    def _text(self) -> str:
+        return gate.render_pause_directive(_a_pause_for_directives())
+
+    def test_no_new_subagents(self) -> None:
+        assert "do not start new subagents" in self._text().lower()
+
+    def test_running_ones_finish_and_may_be_asked_to_wrap_up(self) -> None:
+        text = self._text()
+        assert "let running subagents finish" in text.lower()
+        assert "SendMessage" in text
+
+    def test_idle_or_finished_teammates_are_stopped_but_working_ones_are_not_killed(self) -> None:
+        text = self._text()
+        assert "TaskStop" in text
+        assert "idle or finished" in text
+        assert "do not stop one that is still working" in text.lower()
+
+    def test_the_still_over_directive_does_not_repeat_it(self) -> None:
+        assert "Subagents:" not in gate.render_still_over_directive(_a_pause_for_directives())
+
+
+def _a_pause_for_directives() -> UsagePause:
+    return UsagePause(
+        session_id=_SESSION,
+        paused_at=_NOW,
+        resume_at=float(_FIVE_RESET + 120),
+        window=WINDOW_FIVE_HOUR,
+        used_percentage=91.4,
+        ceiling=90.0,
+        reason="five_hour window at 91% (ceiling 90%)",
+    )
 
 
 class TestToolSearchIsAllowed:
@@ -310,8 +395,8 @@ class TestToolSearchIsAllowed:
             ceiling=90.0,
             reason="r",
         )
-        assert "ToolSearch" in gate.render_pause_directive(pause, tz=UTC)
-        assert "ToolSearch" in gate.render_stop_directive(pause, found=0, tz=UTC)
+        assert "ToolSearch" in gate.render_pause_directive(pause)
+        assert "ToolSearch" in gate.render_stop_directive(pause, found=0)
 
 
 class TestAnyReadErrorFailsOpen:
@@ -335,111 +420,24 @@ class TestAnyReadErrorFailsOpen:
             assert gate.is_usage_paused(_SESSION, now=_NOW) is False
 
 
-class TestResumeFloor:
-    """Plan 00479 round 2 N5/N6: there is no "too close to pause" shortcut.
-
-    A reset a few seconds away still pauses; the resume cron is simply scheduled for the
-    next minute after the resume time, never in the past.
-    """
+class TestResumeTime:
+    """Round 4 R3-5: no floor, no renewal. Ticks before ``resume_at`` are dropped for free."""
 
     def _breach_resetting_in(self, seconds: float) -> list[gate.UsageBreach]:
         window = _window(95.0, int(_NOW + seconds))
         return gate.find_breaches(UsageSnapshot(five_hour=window, seven_day=None), _ceiling())
 
-    def test_a_reset_seconds_away_still_builds_a_pause_with_a_future_resume(self) -> None:
+    def test_a_reset_seconds_away_still_builds_a_pause_a_margin_ahead(self) -> None:
         pause = gate.build_pause(_SESSION, self._breach_resetting_in(5), now=_NOW)
-        assert pause.resume_at >= _NOW + gate.RESUME_MARGIN_SECONDS
+        assert pause.resume_at == _NOW + 5 + gate.RESUME_MARGIN_SECONDS
 
     def test_a_distant_reset_is_not_moved(self) -> None:
         pause = gate.build_pause(_SESSION, self._breach_resetting_in(3 * 3600), now=_NOW)
         assert pause.resume_at == _FIVE_RESET + gate.RESUME_MARGIN_SECONDS
 
-    def test_the_cron_for_a_floored_resume_time_fires_after_now(self) -> None:
-        pause = gate.build_pause(_SESSION, self._breach_resetting_in(5), now=_NOW)
-        cron = gate.resume_schedule(pause.resume_at, tz=UTC).cron
-        assert gate.schedule_fires_in_window(cron, now=_NOW, resume_at=pause.resume_at, tz=UTC)
-
-    def test_refresh_moves_a_past_resume_time_forward_and_keeps_the_rest(self) -> None:
-        old = UsagePause(
-            session_id=_SESSION,
-            paused_at=_NOW - 600,
-            resume_at=_NOW - 30,
-            window=WINDOW_FIVE_HOUR,
-            used_percentage=91.0,
-            ceiling=80.0,
-            reason="r",
-        )
-        fresh = gate.refresh_resume(old, now=_NOW)
-        assert fresh.resume_at == _NOW + gate.RESUME_MARGIN_SECONDS
-        assert (fresh.paused_at, fresh.window, fresh.reason) == (
-            old.paused_at,
-            old.window,
-            old.reason,
-        )
-
-    def test_refresh_leaves_a_comfortable_resume_time_alone(self) -> None:
-        old = UsagePause(
-            session_id=_SESSION,
-            paused_at=_NOW - 60,
-            resume_at=_NOW + 3600,
-            window=WINDOW_FIVE_HOUR,
-            used_percentage=91.0,
-            ceiling=80.0,
-            reason="r",
-        )
-        assert gate.refresh_resume(old, now=_NOW) is old
-
-    def test_the_ten_minute_shortcut_is_gone(self) -> None:
-        assert not hasattr(gate, "MIN_RESUME_LEAD_SECONDS")
-        assert not hasattr(gate, "resume_is_far_enough")
-
-
-class TestScheduleVerification:
-    """Plan 00479 M2: a pinned minute that has passed next matches a year later."""
-
-    _RESUME = datetime(2026, 10, 2, 15, 2, 0, tzinfo=UTC).timestamp()
-    _BEFORE = datetime(2026, 10, 2, 12, 0, 0, tzinfo=UTC).timestamp()
-
-    def test_the_cron_built_for_the_resume_time_verifies(self) -> None:
-        cron = gate.resume_schedule(self._RESUME, tz=UTC).cron
-        assert gate.schedule_fires_in_window(cron, now=self._BEFORE, resume_at=self._RESUME, tz=UTC)
-
-    def test_a_minute_that_has_passed_fires_next_year_and_fails(self) -> None:
-        cron = gate.resume_schedule(self._RESUME, tz=UTC).cron
-        late = self._RESUME + 60
-        assert not gate.schedule_fires_in_window(cron, now=late, resume_at=self._RESUME, tz=UTC)
-
-    def test_a_recurring_expression_is_not_the_pinned_one_shot(self) -> None:
-        assert not gate.schedule_fires_in_window(
-            "*/5 * * * *", now=self._BEFORE, resume_at=self._RESUME, tz=UTC
-        )
-
-    @pytest.mark.parametrize("cron", ["", "garbage", "1 2 3 4", "99 25 40 13 *", "2 15 30 2 *"])
-    def test_unparseable_or_impossible_expressions_fail(self, cron: str) -> None:
-        assert not gate.schedule_fires_in_window(
-            cron, now=self._BEFORE, resume_at=self._RESUME, tz=UTC
-        )
-
-    def test_a_fire_up_to_a_day_after_the_resume_time_is_accepted(self) -> None:
-        cron = gate.resume_schedule(self._RESUME + 86400, tz=UTC).cron
-        assert gate.schedule_fires_in_window(cron, now=self._BEFORE, resume_at=self._RESUME, tz=UTC)
-
-    def test_a_fire_more_than_a_day_after_the_resume_time_fails(self) -> None:
-        cron = gate.resume_schedule(self._RESUME + 86400 + 120, tz=UTC).cron
-        assert not gate.schedule_fires_in_window(
-            cron, now=self._BEFORE, resume_at=self._RESUME, tz=UTC
-        )
-
-    def test_the_zone_is_part_of_the_check(self) -> None:
-        # 05:02 on the 2nd in UTC-10 is already past in UTC, so UTC reads it a year on.
-        zone = timezone(timedelta(hours=-10), "HST")
-        cron = gate.resume_schedule(self._RESUME, tz=zone).cron
-        assert gate.schedule_fires_in_window(
-            cron, now=self._BEFORE, resume_at=self._RESUME, tz=zone
-        )
-        assert not gate.schedule_fires_in_window(
-            cron, now=self._BEFORE, resume_at=self._RESUME, tz=UTC
-        )
+    def test_the_floor_and_renewal_are_gone(self) -> None:
+        for name in ("refresh_resume", "renew_pause", "MAX_FIRE_AFTER_RESUME_SECONDS"):
+            assert not hasattr(gate, name), name
 
 
 def _a_pause() -> UsagePause:
@@ -452,41 +450,6 @@ def _a_pause() -> UsagePause:
         ceiling=90.0,
         reason="r",
     )
-
-
-class TestTimeZoneIsStatedInTheDirective:
-    """Round 2 N1: no ``date`` step; the expression is in UTC and says so.
-
-    The vendored Claude Code docs (``remote-docs/``) do not say which time zone
-    ``CronCreate`` reads an expression in, so the directive neither assumes the
-    machine's zone nor asks the model to inspect a clock (a Bash call that the tool
-    gate would halt). It gives UTC and says the docs are silent.
-    """
-
-    def test_the_default_zone_is_utc(self) -> None:
-        assert gate.PauseEnvironment().tz is UTC
-        assert gate.resume_schedule(_NOW).zone_text.startswith("UTC")
-
-    def test_the_directive_states_the_expression_is_in_utc(self) -> None:
-        text = gate.render_pause_directive(_a_pause())
-        assert gate.resume_schedule(_a_pause().resume_at).cron in text
-        assert "in UTC" in text
-        assert "does not say" in text  # the docs are silent on CronCreate's zone
-
-    def test_the_directive_never_asks_for_a_clock_check(self) -> None:
-        for text in (
-            gate.render_pause_directive(_a_pause()),
-            gate.render_stop_directive(_a_pause(), found=0),
-            gate.render_still_over_directive(_a_pause()),
-        ):
-            assert "`date`" not in text
-            assert "date first" not in text.lower()
-
-    def test_an_explicit_zone_is_still_named(self) -> None:
-        zone = timezone(timedelta(hours=10), "AEST")
-        text = gate.render_pause_directive(_a_pause(), tz=zone)
-        assert "AEST" in text
-        assert "+10:00" in text
 
 
 class TestEveryToolTheDirectiveNamesIsAllowedWhilePaused:
@@ -544,7 +507,6 @@ class TestStartPause:
             clock=lambda: now,
             config_loader=self._config,
             usage_loader=lambda _now: snapshot,
-            tz=UTC,
         )
 
     def _input(self, session: str = _SESSION) -> dict[str, Any]:
@@ -636,7 +598,7 @@ class TestStartPause:
             raise OSError("disk")
 
         env = gate.PauseEnvironment(
-            clock=lambda: _NOW, config_loader=self._config, usage_loader=boom, tz=UTC
+            clock=lambda: _NOW, config_loader=self._config, usage_loader=boom
         )
         with patch.object(ProjectContext, "daemon_untracked_dir", return_value=tmp_path):
             assert gate.try_start_pause(self._input(), env) is None
@@ -662,6 +624,6 @@ class TestClearPause:
             assert gate.clear_pause(_SESSION) is False
 
     def test_the_unrecorded_lift_note_does_not_claim_a_lift(self) -> None:
-        text = gate.render_lift_not_recorded_note(expires_at=_NOW + 3600, tz=UTC)
+        text = gate.render_lift_not_recorded_note(expires_at=_NOW + 3600)
         assert "NOT" in text
         assert "LIFTED" not in text

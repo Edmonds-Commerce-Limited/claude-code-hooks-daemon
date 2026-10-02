@@ -1220,12 +1220,6 @@
     },
     {
       "file": "utils/usage_pause_gate.py",
-      "function": "_pinned_fire_time",
-      "rule": "return-none-on-error",
-      "reason": "Plan 00479: parsing the one-shot cron expression the Stop gate verifies. An expression that is not the pinned `m h dom mon *` shape, or an impossible date, is 'cannot be verified', which the caller turns into a repeated directive, so it is a verdict and not a swallowed fault. Covered by TestScheduleVerification."
-    },
-    {
-      "file": "utils/usage_pause_gate.py",
       "function": "untracked_dir",
       "rule": "return-none-on-error",
       "reason": "Plan 00479 review M1: a pause only ever restricts, so no project context means 'no pause'. Raising would propagate out of a SAFETY+BLOCKING handler, which the chain turns into a DENY of every tool. Logged at debug. Covered by the no-project-context tests of each gate."

@@ -5136,7 +5136,7 @@ def cmd_usage_pause(args: argparse.Namespace) -> int:
         RESUME_MARGIN_SECONDS,
         PauseEnvironment,
         current_breaches,
-        resume_schedule,
+        resume_time_text,
     )
 
     session_id = (
@@ -5176,7 +5176,7 @@ def cmd_usage_pause(args: argparse.Namespace) -> int:
             print(f"Session {session_id} is not paused on its usage ceiling.")
             return 0
         print(f"Session {session_id} is PAUSED: {pause.reason}")
-        print(f"Resumes at {resume_schedule(pause.resume_at).local_text}.")
+        print(f"Resumes at {resume_time_text(pause.resume_at)}.")
         print("Override it with: bin/hooks-daemon usage-pause clear")
         return 0
 
@@ -5206,7 +5206,7 @@ def cmd_usage_pause(args: argparse.Namespace) -> int:
             )
             return 1
         override_note = (
-            f"Until {resume_schedule(until).utc_text} (the latest reset among the windows over "
+            f"Until {resume_time_text(until)} (the latest reset among the windows over "
             "the ceiling, at most 8 days) no pause will be started for this session, even "
             "if usage is still over the ceiling."
         )

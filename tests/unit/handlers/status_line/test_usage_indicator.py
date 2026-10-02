@@ -27,7 +27,6 @@ from claude_code_hooks_daemon.utils.usage_pause import (
     UsagePause,
     write_usage_pause,
 )
-from claude_code_hooks_daemon.utils.usage_pause_gate import resume_schedule
 
 _ANSI = re.compile(r"\033\[[0-9;]*m")
 
@@ -245,9 +244,7 @@ class TestPausedSession:
         resume_at = self._pause(tmp_path)
         text = self._render_paused(tmp_path)
         assert text is not None
-        local = datetime.now().astimezone().tzinfo
-        assert local is not None
-        assert f"⏸ usage {resume_schedule(resume_at, tz=local).hhmm}" in _plain(text)
+        assert f"⏸ usage {datetime.fromtimestamp(resume_at):%H:%M}" in _plain(text)
 
     def test_keeps_the_usage_chips_when_there_is_a_snapshot(self, tmp_path: Path) -> None:
         self._pause(tmp_path)

@@ -69,8 +69,10 @@ class TestInit:
 
 
 class TestWhilePaused:
-    @pytest.mark.parametrize("tool", ["CronList", "CronDelete", "CronCreate"])
-    def test_cron_tools_are_left_alone(self, tmp_path: Path, tool: str) -> None:
+    @pytest.mark.parametrize(
+        "tool", ["CronList", "CronDelete", "CronCreate", "SendMessage", "TaskStop"]
+    )
+    def test_cron_and_wind_up_tools_are_left_alone(self, tmp_path: Path, tool: str) -> None:
         _record(tmp_path)
         assert _decide(tmp_path, _input(tool)) is None
 
@@ -168,8 +170,6 @@ _NOW = 1_790_000_000.0
 
 
 def _over_the_ceiling(handler: UsagePauseToolGateHandler, *, five: float = 95.0) -> None:
-    from datetime import UTC
-
     from claude_code_hooks_daemon.config.models import Config, HostConfig, UsageCeilingConfig
     from claude_code_hooks_daemon.core.usage_snapshot import UsageSnapshot, UsageWindow
     from claude_code_hooks_daemon.utils.usage_pause_gate import PauseEnvironment
@@ -181,7 +181,7 @@ def _over_the_ceiling(handler: UsagePauseToolGateHandler, *, five: float = 95.0)
         five_hour=UsageWindow(five, int(_NOW + 3 * 3600), _NOW), seven_day=None
     )
     handler._env = PauseEnvironment(
-        clock=lambda: _NOW, config_loader=lambda: config, usage_loader=lambda _n: snapshot, tz=UTC
+        clock=lambda: _NOW, config_loader=lambda: config, usage_loader=lambda _n: snapshot
     )
 
 
@@ -225,30 +225,71 @@ class TestEntryFromTheToolGate:
             second = handler.handle(self._hook("Read"))
         assert second.halt_turn is True
 
-    def test_a_subagent_never_starts_a_pause(self, tmp_path: Path) -> None:
-        """Round 2 N2: the record is the shared session's; a subagent must not write it."""
-        handler = UsagePauseToolGateHandler()
-        _over_the_ceiling(handler)
-        hook = {**self._hook(), "agent_id": "a1", "agent_type": "general-purpose"}
-        with patch.object(ProjectContext, "daemon_untracked_dir", return_value=tmp_path):
-            assert handler.matches(hook) is False
-            assert list(tmp_path.rglob("*.usage-paused")) == []
+    def _subagent_hook(self, tool: str = "Bash") -> dict[str, Any]:
+        return {**self._hook(tool), "agent_id": "a1", "agent_type": "general-purpose"}
 
-    def test_a_subagent_in_a_paused_session_is_denied_plainly_and_told_to_stop(
+    def test_a_subagent_over_the_ceiling_starts_the_pause_but_its_call_is_not_denied(
         self, tmp_path: Path
     ) -> None:
+        """Round 4 R3-1: subagent activity must not keep the session from pausing, and
+        in-flight subagents are never rug-pulled."""
+        from claude_code_hooks_daemon.utils.usage_pause import read_usage_pause
+
+        handler = UsagePauseToolGateHandler()
+        _over_the_ceiling(handler)
+        with patch.object(ProjectContext, "daemon_untracked_dir", return_value=tmp_path):
+            assert handler.matches(self._subagent_hook()) is False
+            record = read_usage_pause(tmp_path, _SESSION, now=_NOW)
+        assert record is not None
+        assert record.session_id == _SESSION
+
+    def test_every_call_of_a_subagent_over_the_ceiling_is_allowed(self, tmp_path: Path) -> None:
+        handler = UsagePauseToolGateHandler()
+        _over_the_ceiling(handler)
+        with patch.object(ProjectContext, "daemon_untracked_dir", return_value=tmp_path):
+            decisions = [handler.matches(self._subagent_hook(t)) for t in ("Bash", "Read", "Edit")]
+        assert decisions == [False, False, False]
+
+    def test_a_subagent_below_the_ceiling_writes_no_record(self, tmp_path: Path) -> None:
+        handler = UsagePauseToolGateHandler()
+        _over_the_ceiling(handler, five=10.0)
+        with patch.object(ProjectContext, "daemon_untracked_dir", return_value=tmp_path):
+            assert handler.matches(self._subagent_hook()) is False
+            assert list(tmp_path.rglob("*.usage-paused")) == []
+
+    def test_an_owner_override_stops_a_subagent_starting_the_pause(self, tmp_path: Path) -> None:
+        from claude_code_hooks_daemon.utils.usage_pause import write_usage_override
+
+        handler = UsagePauseToolGateHandler()
+        _over_the_ceiling(handler)
+        write_usage_override(tmp_path, _SESSION, until=_NOW + 3600, now=_NOW)
+        with patch.object(ProjectContext, "daemon_untracked_dir", return_value=tmp_path):
+            assert handler.matches(self._subagent_hook()) is False
+            assert list(tmp_path.rglob("*.usage-paused")) == []
+
+    def test_the_main_threads_next_call_after_a_subagent_started_the_pause_gets_the_directive(
+        self, tmp_path: Path
+    ) -> None:
+        """The main thread never saw the directive: a plain deny carrying it, no halt."""
+        handler = UsagePauseToolGateHandler()
+        _over_the_ceiling(handler)
+        with patch.object(ProjectContext, "daemon_untracked_dir", return_value=tmp_path):
+            assert handler.matches(self._subagent_hook()) is False
+            assert handler.matches(self._hook("Read")) is True
+            first = handler.handle(self._hook("Read"))
+            assert handler.matches(self._hook("Read")) is True
+            second = handler.handle(self._hook("Read"))
+        assert first.decision == Decision.DENY
+        assert first.halt_turn is False
+        assert "USAGE CEILING REACHED" in (first.reason or "")
+        assert second.halt_turn is True
+
+    def test_a_subagent_in_a_paused_session_is_not_denied_either(self, tmp_path: Path) -> None:
+        """Round 4 R3-1 (owner ruling): in-flight subagents finish; the main thread winds them up."""
         _record(tmp_path)
         handler = UsagePauseToolGateHandler()
-        hook = {**self._hook(), "agent_id": "a1", "agent_type": "general-purpose"}
         with patch.object(ProjectContext, "daemon_untracked_dir", return_value=tmp_path):
-            assert handler.matches(hook) is True
-            result = handler.handle(hook)
-        assert result.decision == Decision.DENY
-        assert result.halt_turn is False
-        reason = result.reason or ""
-        assert "paused" in reason.lower()
-        assert "stop" in reason.lower()
-        assert "CronCreate ONE" not in reason  # a subagent must not touch the session's crons
+            assert handler.matches(self._subagent_hook()) is False
 
     def test_a_subagent_may_still_use_the_allowed_tools(self, tmp_path: Path) -> None:
         _record(tmp_path)

@@ -9,7 +9,6 @@ once per Stop (review minor 6).
 
 from __future__ import annotations
 
-from datetime import UTC
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
@@ -29,9 +28,9 @@ from claude_code_hooks_daemon.utils.usage_pause import (
     write_usage_pause,
 )
 from claude_code_hooks_daemon.utils.usage_pause_gate import (
+    RESUME_CRON_SCHEDULE,
     USAGE_RESUME_PROMPT,
     PauseEnvironment,
-    resume_schedule,
 )
 
 _SESSION = "sess-1"
@@ -45,7 +44,6 @@ def _env(
         clock=lambda: _NOW,
         config_loader=lambda: config if config is not None else Config(),
         usage_loader=lambda _now: snapshot,
-        tz=UTC,
     )
 
 
@@ -66,8 +64,8 @@ def _record(tmp_path: Path, *, session: str = _SESSION, resume_in: float = 3600.
 def _resume_cron(pause: UsagePause, prompt: str = USAGE_RESUME_PROMPT) -> dict[str, Any]:
     return {
         "id": "c1",
-        "schedule": resume_schedule(pause.resume_at, tz=UTC).cron,
-        "recurring": False,
+        "schedule": RESUME_CRON_SCHEDULE,
+        "recurring": True,
         "prompt": prompt,
     }
 
@@ -168,76 +166,47 @@ class TestPaused:
     def test_the_deny_names_the_resume_cron_expression(self, tmp_path: Path) -> None:
         _record(tmp_path)
         result = _decide(tmp_path, _stop([]))
-        assert "recurring: false" in result.reason
+        assert "recurring: true" in result.reason
+        assert RESUME_CRON_SCHEDULE in result.reason
         assert "[tick:usage-resume]" in result.reason
 
 
 class TestResumeCronScheduleIsVerified:
-    """Review M2: the one cron left must actually fire in (now, resume_at + 1 day]."""
+    """Round 4 R3-2: the one cron left must be the zone-free recurring resume cron."""
 
-    def test_a_stale_pinned_minute_is_refused_and_says_why(self, tmp_path: Path) -> None:
+    def test_a_pinned_one_shot_minute_is_refused_and_says_why(self, tmp_path: Path) -> None:
         pause = _record(tmp_path)
-        stale = resume_schedule(_NOW - 7200, tz=UTC).cron  # that minute fires next year
-        cron = {**_resume_cron(pause), "schedule": stale}
+        cron = {**_resume_cron(pause), "schedule": "2 15 2 10 *"}
         result = _decide(tmp_path, _stop([cron]))
         assert result.decision == Decision.DENY
         assert "schedule" in result.reason.lower()
+        assert RESUME_CRON_SCHEDULE in result.reason
         assert "1 cron," in result.reason
 
-    def test_a_recurring_expression_is_refused(self, tmp_path: Path) -> None:
+    def test_a_different_recurrence_is_refused(self, tmp_path: Path) -> None:
         pause = _record(tmp_path)
         cron = {**_resume_cron(pause), "schedule": "*/5 * * * *"}
         assert _decide(tmp_path, _stop([cron])).decision == Decision.DENY
 
-    def test_a_cron_far_after_the_resume_is_refused(self, tmp_path: Path) -> None:
-        pause = _record(tmp_path)
-        cron = {**_resume_cron(pause), "schedule": resume_schedule(_NOW + 3 * 86400, tz=UTC).cron}
-        assert _decide(tmp_path, _stop([cron])).decision == Decision.DENY
-
-    def test_a_zone_mismatch_is_refused(self, tmp_path: Path) -> None:
-        from datetime import timedelta, timezone
-
-        pause = _record(tmp_path)
-        wrong_zone = resume_schedule(pause.resume_at, tz=timezone(timedelta(hours=-10))).cron
-        cron = {**_resume_cron(pause), "schedule": wrong_zone}
-        assert _decide(tmp_path, _stop([cron])).decision == Decision.DENY
+    def test_the_schedule_is_accepted_whatever_the_resume_time(self, tmp_path: Path) -> None:
+        for resume_in in (-30.0, 20.0, 3 * 86400.0):
+            pause = _record(tmp_path, resume_in=resume_in)
+            result = _decide(tmp_path, _stop([_resume_cron(pause)]))
+            assert result.decision == Decision.ALLOW, resume_in
 
     def test_the_repeat_does_not_trap_on_re_entry(self, tmp_path: Path) -> None:
         pause = _record(tmp_path)
         cron = {**_resume_cron(pause), "schedule": "*/5 * * * *"}
         assert _decide(tmp_path, _stop([cron], active=True)).decision == Decision.ALLOW
 
-    def test_an_imminent_resume_is_refreshed_not_lifted(self, tmp_path: Path) -> None:
-        """Round 2 N6: never clear the pause at Stop and leave the session without a cron.
-
-        The resume time is a few seconds away, so the pinned minute is about to pass. The
-        record's resume time moves a margin ahead and the directive gives the new cron.
-        """
-        _record(tmp_path, resume_in=20.0)
+    def test_the_resume_time_is_never_renewed_or_the_pause_cleared_at_stop(
+        self, tmp_path: Path
+    ) -> None:
+        """Round 4 R3-5: the 2-minute floor is gone with the pinned minute."""
+        pause = _record(tmp_path, resume_in=20.0)
         result = _decide(tmp_path, _stop([]))
         assert result.decision == Decision.DENY
-        pause = read_usage_pause(tmp_path, _SESSION, now=_NOW)
-        assert pause is not None
-        assert pause.resume_at >= _NOW + 120.0
-        assert resume_schedule(pause.resume_at, tz=UTC).cron in result.reason
-
-    def test_a_correct_cron_for_the_refreshed_time_is_accepted(self, tmp_path: Path) -> None:
-        _record(tmp_path, resume_in=20.0)
-        refreshed = _decide(tmp_path, _stop([]))
-        assert refreshed.decision == Decision.DENY
-        pause = read_usage_pause(tmp_path, _SESSION, now=_NOW)
-        assert pause is not None
-        again = _decide(tmp_path, _stop([_resume_cron(pause)]))
-        assert again.decision == Decision.ALLOW
-        assert read_usage_pause(tmp_path, _SESSION, now=_NOW) is not None  # still paused
-
-    def test_a_past_resume_time_is_refreshed_too(self, tmp_path: Path) -> None:
-        _record(tmp_path, resume_in=-30.0)
-        result = _decide(tmp_path, _stop([]))
-        assert result.decision == Decision.DENY
-        pause = read_usage_pause(tmp_path, _SESSION, now=_NOW)
-        assert pause is not None
-        assert pause.resume_at >= _NOW + 120.0
+        assert read_usage_pause(tmp_path, _SESSION, now=_NOW) == pause
 
 
 class TestEntryFromTheStopGate:

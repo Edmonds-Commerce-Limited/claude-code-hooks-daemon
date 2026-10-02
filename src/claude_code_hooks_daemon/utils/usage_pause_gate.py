@@ -1,17 +1,21 @@
 """Shared logic of the usage pause (Plan 00479 Phase 4).
 
 A session on a host with a usage ceiling PAUSES when a usage window reaches it:
-every cron is replaced by ONE one-shot resume cron at the window's reset, the
-session stops, and nothing wakes it until that cron fires. A hook cannot create
-or delete a cron (``CronCreate``/``CronDelete`` are model tools), so the daemon
-DIRECTS the model and then verifies what it did.
+every cron is replaced by ONE recurring resume cron (``RESUME_CRON_SCHEDULE``), the
+session stops, and nothing wakes it but that cron. A hook cannot create or delete a
+cron (``CronCreate``/``CronDelete`` are model tools), so the daemon DIRECTS the
+model and then verifies what it did.
+
+**The resume cron names no clock time**, so no host time zone can misplace it:
+it fires every ten minutes, a tick before the pause's ``resume_at`` is dropped at
+zero cost, and the first tick at or after it re-reads usage and lifts the pause.
 
 Every part of that protocol reads the same few facts, so they live here once:
 
 - which windows are over the ceiling and when the pause ends
   (:func:`find_breaches`, :func:`build_pause`, :func:`resume_at_for`);
-- the exact one-shot cron expression for that instant
-  (:func:`resume_schedule`);
+- whether a resume tick is due (:func:`resume_is_due`) and whether a cron is the
+  resume cron (:func:`is_resume_schedule`);
 - whether a session is paused (:func:`is_usage_paused`) -- the ONE predicate
   every continuation-forcing or cron-re-arming handler stands down on;
 - the directive text each stage delivers.
@@ -37,8 +41,8 @@ import logging
 import math
 import time
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass, replace
-from datetime import UTC, datetime, tzinfo
+from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Final
 
@@ -78,30 +82,32 @@ logger = logging.getLogger(__name__)
 #: the old window.
 RESUME_MARGIN_SECONDS: Final[float] = 120.0
 
-#: How long after the resume time the single remaining cron may fire and still be
-#: accepted by the Stop gate. Anything later is a cron that will not wake the session.
-MAX_FIRE_AFTER_RESUME_SECONDS: Final[float] = 86400.0
+#: The resume cron's schedule: every ten minutes, the same expression in every time zone.
+RESUME_CRON_SCHEDULE: Final[str] = "*/10 * * * *"
 
-#: The only tools a paused session may use: just enough to replace its crons.
-#: ToolSearch is among them because the cron tools are deferred (their schemas
-#: load only through it, ``constants/tools.py``).
+#: The only tools a paused session may use: just enough to replace its crons and to
+#: wind up its subagents. ToolSearch is among them because the cron tools are deferred
+#: (their schemas load only through it, ``constants/tools.py``). Neither dispatch tool
+#: (``SUBAGENT_DISPATCH_TOOL_NAMES``) is: no new subagent starts while paused.
 PAUSE_ALLOWED_TOOLS: Final[frozenset[str]] = frozenset(
-    {ToolName.CRON_LIST, ToolName.CRON_DELETE, ToolName.CRON_CREATE, ToolName.TOOL_SEARCH}
+    {
+        ToolName.CRON_LIST,
+        ToolName.CRON_DELETE,
+        ToolName.CRON_CREATE,
+        ToolName.TOOL_SEARCH,
+        ToolName.SEND_MESSAGE,
+        ToolName.TASK_STOP,
+    }
 )
 
-_SECONDS_PER_MINUTE: Final[int] = 60
-
-#: The one-shot resume cron's prompt. Its first line is the daemon tick
+#: The resume cron's prompt. Its first line is the daemon tick
 #: sentinel, which is how the gate tells this tick from the owner.
 USAGE_RESUME_PROMPT: Final[str] = (
     f"{tick_sentinel(TickKind.USAGE_RESUME)}\n"
     "USAGE PAUSE RESUME CHECK: the subscription usage window this session paused on "
     "should have reset. The daemon re-reads usage and tells you whether to resume "
-    "or to schedule another resume cron."
+    "or to stay paused."
 )
-
-_PINNED_CRON_FIELDS: Final[int] = 5
-_SECONDS_PER_DAY: Final[float] = 86400.0
 
 
 @dataclass(frozen=True)
@@ -112,23 +118,6 @@ class UsageBreach:
     used_percentage: float
     ceiling: float
     resets_at: int
-
-
-@dataclass(frozen=True)
-class ResumeSchedule:
-    """The resume instant, as the cron to create and as text for a human.
-
-    ``cron`` is the 5-field one-shot expression in the zone ``zone_text`` names
-    (UTC unless a caller passes another: the vendored Claude Code docs do not say
-    which zone ``CronCreate`` reads); ``local_text`` and ``utc_text`` name the same
-    instant so the model can check what ``CronCreate`` reports.
-    """
-
-    cron: str
-    local_text: str
-    utc_text: str
-    hhmm: str
-    zone_text: str
 
 
 def find_breaches(snapshot: UsageSnapshot | None, ceiling: HostUsageCeiling) -> list[UsageBreach]:
@@ -192,9 +181,7 @@ def build_pause(session_id: str, breaches: Sequence[UsageBreach], *, now: float)
     return UsagePause(
         session_id=session_id,
         paused_at=now,
-        # Never in the past: a reset seconds away resumes a margin from now, so the
-        # pinned cron minute is still ahead when the model creates it.
-        resume_at=max(resume_at_for(breaches), now + RESUME_MARGIN_SECONDS),
+        resume_at=resume_at_for(breaches),
         window=deciding.window,
         used_percentage=deciding.used_percentage,
         ceiling=deciding.ceiling,
@@ -202,77 +189,19 @@ def build_pause(session_id: str, breaches: Sequence[UsageBreach], *, now: float)
     )
 
 
-def refresh_resume(pause: UsagePause, *, now: float) -> UsagePause:
-    """``pause`` with a resume time at least a margin from ``now``; ``pause`` itself if already so.
-
-    A pause whose resume time has come or gone (the model was slow, or a resume
-    tick found usage still over) would have its cron pinned to a minute that has
-    passed, which next matches a year later.
-    """
-    floor = now + RESUME_MARGIN_SECONDS
-    if pause.resume_at >= floor:
-        return pause
-    return replace(pause, resume_at=floor)
+def resume_time_text(resume_at: float) -> str:
+    """``resume_at`` as ``YYYY-MM-DD HH:MM UTC``, whatever the host's time zone."""
+    return f"{datetime.fromtimestamp(resume_at, UTC):%Y-%m-%d %H:%M} UTC"
 
 
-def resume_schedule(resume_at: float, *, tz: tzinfo = UTC) -> ResumeSchedule:
-    """The one-shot cron for ``resume_at``, rounded UP to a whole minute.
-
-    Args:
-        resume_at: Epoch seconds.
-        tz: Zone the cron is expressed in. UTC by default: nothing the project
-            vendors says which zone ``CronCreate`` reads, so no machine zone is
-            assumed.
-    """
-    minute = math.ceil(resume_at / _SECONDS_PER_MINUTE) * _SECONDS_PER_MINUTE
-    utc = datetime.fromtimestamp(minute, UTC)
-    local = utc.astimezone(tz)
-    zone_name = local.tzname() or "local"
-    offset = f"{local:%z}"  # +HHMM
-    return ResumeSchedule(
-        cron=f"{local.minute} {local.hour} {local.day} {local.month} *",
-        local_text=f"{local:%Y-%m-%d %H:%M} {zone_name}",
-        utc_text=f"{utc:%Y-%m-%d %H:%M} UTC",
-        hhmm=f"{local:%H:%M}",
-        zone_text=f"{zone_name}, UTC{offset[:3]}:{offset[3:]}",
-    )
+def is_resume_schedule(schedule: str) -> bool:
+    """Whether ``schedule`` is :data:`RESUME_CRON_SCHEDULE` (whitespace aside)."""
+    return schedule.split() == RESUME_CRON_SCHEDULE.split()
 
 
-def _pinned_fire_time(cron: str, *, now: float, tz: tzinfo) -> float | None:
-    """The next instant after ``now`` a pinned ``m h dom mon *`` cron fires, or None.
-
-    Only the one-shot shape :func:`resume_schedule` builds is understood: four
-    integers and a ``*`` for the weekday. Anything else, and any impossible date,
-    is None, which the caller treats as "cannot be verified".
-    """
-    fields = cron.split()
-    if len(fields) != _PINNED_CRON_FIELDS or fields[4] != "*":
-        return None
-    try:
-        minute, hour, day, month = (int(field) for field in fields[:4])
-    except ValueError:
-        return None
-    current = datetime.fromtimestamp(now, UTC).astimezone(tz)
-    for year in (current.year, current.year + 1):
-        try:
-            wall = datetime(year, month, day, hour, minute)
-        except ValueError:
-            return None
-        candidate = wall.replace(tzinfo=tz).timestamp()
-        if candidate > now:
-            return candidate
-    return None
-
-
-def schedule_fires_in_window(cron: str, *, now: float, resume_at: float, tz: tzinfo = UTC) -> bool:
-    """Whether ``cron`` next fires in ``(now, resume_at + MAX_FIRE_AFTER_RESUME_SECONDS]``.
-
-    The Stop gate's check that the one remaining cron will actually wake the
-    session: a pinned minute that has passed next matches a year later, and a
-    time-zone mismatch lands it hours away.
-    """
-    fire = _pinned_fire_time(cron, now=now, tz=tz)
-    return fire is not None and now < fire <= resume_at + MAX_FIRE_AFTER_RESUME_SECONDS
+def resume_is_due(pause: UsagePause, *, now: float) -> bool:
+    """Whether a resume tick at ``now`` may end (or re-check) the pause."""
+    return now >= pause.resume_at
 
 
 def is_resume_tick(hook_input: Mapping[str, Any]) -> bool:
@@ -331,27 +260,40 @@ def hook_is_usage_paused(hook_input: Mapping[str, Any], *, now: float | None = N
     return is_usage_paused(str(hook_input.get(HookInputField.SESSION_ID) or ""), now=now)
 
 
-def _steps(schedule: ResumeSchedule) -> list[str]:
-    """The cron steps every pause directive ends with."""
-    return [
-        "  0. The cron tools are deferred: if their schemas are not loaded, load them "
+_ALLOWED_TOOLS_TEXT: Final[str] = (
+    "CronList, CronDelete, CronCreate, ToolSearch, SendMessage and TaskStop"
+)
+
+_WIND_UP_STEP: Final[str] = (
+    "Subagents: do not start new subagents (starting one is refused). Let running "
+    "subagents finish; you may SendMessage them to wrap up and report. Stop idle or "
+    "finished teammates with TaskStop; do not stop one that is still working."
+)
+
+
+def _steps(pause: UsagePause, *, wind_up_subagents: bool = False) -> list[str]:
+    """The numbered steps every pause directive ends with."""
+    until = resume_time_text(pause.resume_at)
+    steps = [
+        "The cron tools are deferred: if their schemas are not loaded, load them "
         "with ToolSearch (query `select:CronList,CronDelete,CronCreate`) first.",
-        "  1. CronList - list every cron in this session.",
-        "  2. CronDelete EVERY cron listed: the failsafe recovery cron, every "
+        "CronList - list every cron in this session.",
+        "CronDelete EVERY cron listed: the failsafe recovery cron, every "
         "persistent_crons job, the watchdog, anything else. They are re-established "
         "when the pause lifts, so deleting them is correct.",
-        f"  3. CronCreate ONE cron: schedule `{schedule.cron}`, recurring: false, "
-        "durable: false, with this exact prompt, first line included:",
-        *(f"       {line}" for line in USAGE_RESUME_PROMPT.splitlines()),
-        f"     That expression is in {schedule.zone_text} and means {schedule.local_text}. "
-        "The Claude Code documentation does not say which time zone CronCreate reads an "
-        "expression in, so use it exactly as written; do not convert it and do not run any "
-        "other tool to check the clock (every tool but the cron tools is denied). The "
-        "cron is pinned to one calendar minute: the stop is refused if it will not fire "
-        "within a day after the resume time.",
-        f"  4. Stop with `STOPPING BECAUSE: usage paused until {schedule.hhmm}`. The "
-        "stop is accepted once exactly that one cron remains.",
+        f"CronCreate ONE cron: schedule `{RESUME_CRON_SCHEDULE}`, recurring: true, "
+        "durable: false, with this exact prompt, first line included:\n"
+        + "\n".join(f"       {line}" for line in USAGE_RESUME_PROMPT.splitlines())
+        + "\n     It fires every ten minutes whatever the time zone; the daemon drops its "
+        f"ticks until {until} at no cost, then re-reads usage and lifts the pause.",
     ]
+    if wind_up_subagents:
+        steps.append(_WIND_UP_STEP)
+    steps.append(
+        f"Stop with `STOPPING BECAUSE: usage paused until {until}`. "
+        "The stop is accepted once exactly that one cron remains."
+    )
+    return [f"  {number}. {step}" for number, step in enumerate(steps)]
 
 
 def _describe(pause: UsagePause) -> str:
@@ -361,12 +303,11 @@ def _describe(pause: UsagePause) -> str:
     )
 
 
-def render_pause_directive(pause: UsagePause, *, tz: tzinfo = UTC) -> str:
+def render_pause_directive(pause: UsagePause) -> str:
     """The directive delivered when a session first crosses its ceiling."""
-    schedule = resume_schedule(pause.resume_at, tz=tz)
     lines = [
-        f"USAGE CEILING REACHED - this session is PAUSED until {schedule.local_text} "
-        f"({schedule.utc_text}).",
+        f"USAGE CEILING REACHED - this session is PAUSED until "
+        f"{resume_time_text(pause.resume_at)}.",
         "",
         f"Usage: {pause.reason}. This host stops taking on work at its ceiling so the "
         "account is not driven into its hard limit; the window resets, and a single "
@@ -374,52 +315,49 @@ def render_pause_directive(pause: UsagePause, *, tz: tzinfo = UTC) -> str:
         "",
         "Do NOT act on the request that arrived with this message (a prompt, a cron "
         "tick or a supervisor message): it is refused for now. Every tool except "
-        "CronList, CronDelete, CronCreate and ToolSearch is denied until the pause ends. "
+        f"{_ALLOWED_TOOLS_TEXT} is denied until the pause ends. "
         "Do exactly this and nothing else:",
         "",
-        *_steps(schedule),
+        *_steps(pause, wind_up_subagents=True),
     ]
     return "\n".join(lines)
 
 
-def render_stop_directive(
-    pause: UsagePause, *, found: int, tz: tzinfo = UTC, problem: str | None = None
-) -> str:
+def render_stop_directive(pause: UsagePause, *, found: int, problem: str | None = None) -> str:
     """The Stop-block reason while the session's crons are not yet exactly the resume cron.
 
     Args:
         pause: The live pause.
         found: How many crons ``session_crons`` holds.
-        tz: Zone the cron is expressed in.
         problem: Why a single resume cron was still refused (its schedule), if so.
     """
-    schedule = resume_schedule(pause.resume_at, tz=tz)
     noun = "cron" if found == 1 else "crons"
     lines = [
         f"USAGE PAUSE NOT COMPLETE - session_crons holds {found} {noun}, and a paused "
         "session may stop only when exactly ONE cron remains: the resume cron.",
         *([problem] if problem else []),
         "",
-        f"Paused on: {_describe(pause)}, until {schedule.local_text} ({schedule.utc_text}).",
+        f"Paused on: {_describe(pause)}, until {resume_time_text(pause.resume_at)}.",
         "",
         "Do exactly this and nothing else:",
         "",
-        *_steps(schedule),
+        *_steps(pause),
     ]
     return "\n".join(lines)
 
 
-def render_still_over_directive(pause: UsagePause, *, tz: tzinfo = UTC) -> str:
+def render_still_over_directive(pause: UsagePause) -> str:
     """The directive when the resume cron fired but usage is STILL over the ceiling."""
-    schedule = resume_schedule(pause.resume_at, tz=tz)
+    until = resume_time_text(pause.resume_at)
     lines = [
         f"USAGE STILL OVER THE CEILING - {_describe(pause)}. The session stays PAUSED, "
-        f"until {schedule.local_text} ({schedule.utc_text}).",
+        f"until {until}.",
         "",
-        "Do NOT resume work. Every tool except CronList, CronDelete, CronCreate and "
-        "ToolSearch is denied. Do exactly this and nothing else:",
-        "",
-        *_steps(schedule),
+        "Do NOT resume work. Do NOT create another cron: the recurring resume cron "
+        f"(`{RESUME_CRON_SCHEDULE}`) is already in place, and the daemon drops its ticks "
+        f"until {until} at no cost. Every tool except {_ALLOWED_TOOLS_TEXT} is denied. "
+        f"Stop with `STOPPING BECAUSE: usage paused until {until}`; the stop is accepted "
+        "while exactly that one cron remains.",
     ]
     return "\n".join(lines)
 
@@ -452,8 +390,9 @@ def render_resume_lifted_directive(
     lines = [
         headline,
         "",
-        "1. CronList (load it with ToolSearch if its schema is not loaded). The one-shot "
-        "resume cron has fired; CronDelete it if it is still listed.",
+        "1. CronList (load it with ToolSearch if its schema is not loaded). The recurring "
+        "resume cron (its prompt starts `[tick:usage-resume]`) still fires every ten "
+        "minutes: CronDelete it now so it does not outlive the pause.",
         "2. Re-establish this session's crons, creating only those not already "
         "listed (a duplicate fires twice):",
     ]
@@ -478,17 +417,17 @@ def render_resume_lifted_directive(
     return "\n".join(lines)
 
 
-def render_lift_not_recorded_note(*, expires_at: float, tz: tzinfo = UTC) -> str:
+def render_lift_not_recorded_note(*, expires_at: float) -> str:
     """Told instead of "lifted" when the record could not be removed.
 
     The tool and stop gates still read the record, so claiming a lift would send
     the model into tools that are about to be denied.
     """
-    until = resume_schedule(expires_at, tz=tz).local_text
+    until = resume_time_text(expires_at)
     return (
         "USAGE PAUSE: usage is back under the ceiling, but the pause record could NOT be "
-        "removed, so the pause is NOT lifted yet: tools other than CronList, CronDelete, "
-        f"CronCreate and ToolSearch stay denied until it expires ({until}) or a human runs "
+        f"removed, so the pause is NOT lifted yet: tools other than {_ALLOWED_TOOLS_TEXT} "
+        f"stay denied until it expires ({until}) or a human runs "
         "`! bin/hooks-daemon usage-pause clear`. Do not start new work."
     )
 
@@ -512,16 +451,11 @@ def default_usage_loader(now: float) -> UsageSnapshot | None:
 
 @dataclass
 class PauseEnvironment:
-    """The seams a gate reads the world through; tests substitute fakes.
-
-    ``tz`` is the zone the resume cron's expression is written in: UTC, because the
-    vendored Claude Code docs do not say which zone ``CronCreate`` reads.
-    """
+    """The seams a gate reads the world through; tests substitute fakes."""
 
     clock: Callable[[], float] = time.time
     config_loader: Callable[[], Config] = load_project_config
     usage_loader: Callable[[float], UsageSnapshot | None] = default_usage_loader
-    tz: tzinfo = UTC
 
 
 def current_breaches(hook_input: Mapping[str, Any], env: PauseEnvironment) -> list[UsageBreach]:
@@ -587,26 +521,6 @@ def start_pause(
         return None
     logger.warning("usage_pause_gate: pausing session %s: %s", session_id, pause.reason)
     return pause
-
-
-def renew_pause(pause: UsagePause, env: PauseEnvironment) -> UsagePause:
-    """``pause`` with a resume time still ahead, persisted; unchanged if it already is.
-
-    A record that cannot be rewritten keeps its old resume time (a warning says so):
-    the gates then judge against the record that is actually on disk.
-    """
-    fresh = refresh_resume(pause, now=env.clock())
-    if fresh is pause:
-        return pause
-    directory = untracked_dir()
-    if directory is None:
-        return pause
-    try:
-        write_usage_pause(directory, fresh)
-    except (OSError, ValueError) as exc:
-        logger.warning("usage_pause_gate: could not move the resume time forward: %s", exc)
-        return pause
-    return fresh
 
 
 def try_start_pause(hook_input: Mapping[str, Any], env: PauseEnvironment) -> UsagePause | None:

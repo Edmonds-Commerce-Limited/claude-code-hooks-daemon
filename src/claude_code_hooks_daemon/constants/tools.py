@@ -65,6 +65,7 @@ class ToolName:
     TASK_LIST = "TaskList"
     TASK_OUTPUT = "TaskOutput"
     TASK_STOP = "TaskStop"
+    SEND_MESSAGE = "SendMessage"
 
     # Skills
     SKILL = "Skill"
@@ -117,6 +118,7 @@ ToolNameLiteral = Literal[
     "TaskList",
     "TaskOutput",
     "TaskStop",
+    "SendMessage",
     "Skill",
     "EnterPlanMode",
     "ExitPlanMode",
