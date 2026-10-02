@@ -925,4 +925,21 @@ reach a session, and none of their output appears in this session's SessionStart
 Nothing reports that they were dropped. Not yet established: each sweep's own time, and
 whether a sweep that finishes in the background is delivered later.
 
-**Status**: 🔄 Under investigation (worktree agent).
+**Part 1** (06f04f7de, merged 7c5dfe294; report
+`subagent-reports/261002-n289-sessionstart-sweeps-sonnet.md`):
+
+- **Late output is discarded.** `BoundedDispatcher` only logs it.
+- **The cut-off note now names the handlers that did not finish**, so the drop is no longer
+  silent.
+- **Two speed-ups.** The three path-protection sweeps resolve each path once, and a glob whose
+  literal parts are absent from a path is skipped before the full match.
+- **The live overrun remains.** The agent measured on a fresh worktree, where the sweeps took
+  about 1.6 s each.
+
+**Real cost**: in the main checkout, `gitignore-safety-checker` and
+`secret-file-hygiene-checker` each take about 35 s, and the chain totals 76 s run in-process.
+They walk the gitignored `untracked/` tree, which holds the venvs and the nested worktree
+checkouts.
+
+**Status**: 🔄 Part 2 (scope the two sweeps) is with the worktree agent on
+`worktree-n289b-sweep-scope`.
