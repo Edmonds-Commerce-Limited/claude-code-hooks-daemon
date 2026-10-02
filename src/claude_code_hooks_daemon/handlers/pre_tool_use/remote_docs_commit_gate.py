@@ -40,8 +40,7 @@ from claude_code_hooks_daemon.utils.git_commit_parsing import (
     read_commit_form,
     tokenise_command,
 )
-from claude_code_hooks_daemon.utils.git_facts import commit_directory, commit_facts
-from claude_code_hooks_daemon.utils.git_repo import GitRepo
+from claude_code_hooks_daemon.utils.git_facts import commit_facts, commit_runs_in_foreign_repo
 from claude_code_hooks_daemon.utils.staging_simulation import (
     SimulationIncompleteError,
     simulated_staging,
@@ -109,29 +108,6 @@ class RemoteDocsCommitGateHandler(PreToolUseHandlerBase):
                 if change.status[:1] in _INTRODUCED_STATUSES
             ]
 
-    @staticmethod
-    def _is_foreign_repo(reading: CommitReading, cwd: str | None, project_root: Path) -> bool:
-        """True when the commit runs in a repository other than the project's.
-
-        Ledger 00474 N300: a nested worktree or another checkout owns its own
-        index, as ``staged_lint_gate`` already holds. Where the commit runs is
-        the hook's ``cwd`` after any ``cd``/``-C`` move before it; a move this
-        reading cannot state is judged against this project. A ``cd`` that may
-        not have taken effect leaves two places the commit could run, and it
-        stands down only when BOTH are another repository.
-        """
-        if not cwd:
-            return False
-        moved = commit_directory(reading, cwd)
-        places = [moved if moved is not None else Path(cwd)]
-        if not reading.moves_certain:
-            places.append(Path(cwd))
-        for place in places:
-            repo = GitRepo.resolve_for(place)
-            if repo is None or repo.root == project_root:
-                return False
-        return True
-
     def _tree_name(self) -> str:
         layout = self._project_layout
         return layout.remote_docs_dir if layout is not None else _FALLBACK_REMOTE_DOCS_DIR
@@ -153,7 +129,9 @@ class RemoteDocsCommitGateHandler(PreToolUseHandlerBase):
             cwd = hook_input.get(HookInputField.CWD)
             reading = read_commit_form(get_bash_command(hook_input) or "")
             project_root = self.project_root_reader()
-            if self._is_foreign_repo(reading, cwd if isinstance(cwd, str) else None, project_root):
+            if commit_runs_in_foreign_repo(
+                reading, cwd if isinstance(cwd, str) else None, project_root
+            ):
                 return GatingResult(decision=Decision.ALLOW)
             staged = self.staged_reader(reading, cwd if isinstance(cwd, str) else None)
         except SimulationIncompleteError as incomplete:

@@ -59,8 +59,7 @@ from claude_code_hooks_daemon.utils.command_evasion import (
     normalise_line_continuations,
 )
 from claude_code_hooks_daemon.utils.git_commit_parsing import read_commit_form
-from claude_code_hooks_daemon.utils.git_facts import commit_facts
-from claude_code_hooks_daemon.utils.git_repo import GitRepo
+from claude_code_hooks_daemon.utils.git_facts import commit_facts, commit_runs_in_foreign_repo
 from claude_code_hooks_daemon.utils.path_predicates import path_exists
 from claude_code_hooks_daemon.utils.shell_segmentation import split_unquoted
 from claude_code_hooks_daemon.utils.staging_simulation import (
@@ -176,7 +175,12 @@ class StagedLintGateHandler(PreToolUseHandlerBase):
     def handle(self, hook_input: dict[str, Any]) -> GatingResult:
         project_root = ProjectContext.project_root()
 
-        if self._is_foreign_repo(hook_input, project_root):
+        reading = read_commit_form(get_bash_command(hook_input) or "")
+        cwd = hook_input.get(HookInputField.CWD)
+        # Where the commit runs, after any `cd`/`-C` move (ledger 00474 N305).
+        if commit_runs_in_foreign_repo(
+            reading, cwd if isinstance(cwd, str) else None, project_root
+        ):
             return GatingResult(decision=Decision.ALLOW, context=[])
 
         # What the commit RECORDS, by its form (ledger 00474 N245): the index
@@ -185,8 +189,6 @@ class StagedLintGateHandler(PreToolUseHandlerBase):
         # linted and the commit goes through, as it always did.
         # A same-command `git add` is applied to a copy of the index first
         # (ledger 00474 N246), so a file it stages is recorded too.
-        reading = read_commit_form(get_bash_command(hook_input) or "")
-        cwd = hook_input.get(HookInputField.CWD)
         try:
             with simulated_staging(reading, cwd, project_root) as env:
                 facts = commit_facts(reading, project_root, cwd, index_env=env)
@@ -378,19 +380,6 @@ class StagedLintGateHandler(PreToolUseHandlerBase):
         if candidate.is_file():
             return str(candidate)
         return shutil.which(executable)
-
-    @staticmethod
-    def _is_foreign_repo(hook_input: dict[str, Any], project_root: Path) -> bool:
-        """True when the command runs inside a repo other than the project's.
-
-        Mirrors `PlanQaCommitGateHandler._is_foreign_repo`: nested/vendor
-        repos and other worktrees own their own staged tree.
-        """
-        cwd_raw = hook_input.get(HookInputField.CWD)
-        if not cwd_raw:
-            return False
-        repo = GitRepo.resolve_for(Path(cwd_raw))
-        return repo is not None and repo.root != project_root
 
     @staticmethod
     def _message(failures: list[tuple[str, str]]) -> str:
