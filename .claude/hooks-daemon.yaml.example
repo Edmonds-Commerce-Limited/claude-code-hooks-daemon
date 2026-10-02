@@ -1014,6 +1014,18 @@ pseudo_events:
 #   workflow_docs: "CLAUDE/PlanWorkflow.md"
 #   enforce_claude_code_sync: false
 
+# Per-host settings (Plan 00479). A key is a label; `pattern` is an optional
+# case-sensitive fnmatch glob against the effective session hostname
+# (HOOKS_DAEMON_HOSTNAME, then CCY_HOST_HOSTNAME, then the system hostname);
+# without it the label is the exact hostname. Several matches: lowest limit wins.
+# hosts:
+#   sdlc-runner:
+#     pattern: "cchd-sdlc-*"
+#     usage_ceiling:
+#       max_used_percent: 80   # 0 < x <= 100, applies to both windows
+#       five_hour: 85          # optional per-window override
+#       seven_day: 70          # optional per-window override
+
 # Documentation SSoT enforcement (Plan 00284): one canonical home per fact,
 # everything else points. OPT-IN: disabled by default. Enabling this feeds
 # policy to docs_qa_edit/docs_qa_sweep above (both already registered, but
