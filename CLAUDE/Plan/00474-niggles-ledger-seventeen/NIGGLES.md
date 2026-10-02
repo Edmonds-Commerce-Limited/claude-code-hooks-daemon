@@ -290,7 +290,25 @@ than `main`, three separate times.
 tests while watching the main checkout's `CLAUDE.md` mtime (for example with
 `inotifywait`), and note which test's window it changes in.
 
-**Status**: ⬜ Open.
+**Investigation** (report `subagent-reports/261002-n280-claude-md-writer-sonnet.md`, merged
+c55cb56e0):
+
+- **Lead 1 ruled out.** The only writer of the guidance block is `ClaudeMdInjector`, run by
+  `DaemonController.initialise()` with an explicit `workspace_root`, and it already skips a
+  linked worktree. No writer resolves its root through `--git-common-dir`.
+- **No reproduction.** Three test runs from a worktree (2,673, 781 and a writer-adjacent
+  re-run) left main's `CLAUDE.md` mtime and content unchanged.
+- **Lead 2 neither confirmed nor excluded.**
+- **New candidate, unproven.** The `no_test_writes_tracked_generated_docs` fixture in
+  `tests/conftest.py` restores each protected file to its per-test START baseline. A
+  legitimate regeneration that lands mid-test, such as a daemon restart or a merge, would be
+  reverted to older bytes. That fits "older than main, repeated, pid unchanged". It does not
+  clearly fit the preserved copy holding the old text.
+
+**Status**: ⬜ Open, cause not found. The working rule "never restart the daemon while a test
+run is in progress" already prevents the candidate sequence. Changing the fixture to skip the
+restore when the post-test bytes equal `HEAD` would weaken a guard, so it is left as a
+proposal rather than made.
 
 ### N279 — `changed_tests` once selected 50 test files, ran 0 tests and did not fail
 
