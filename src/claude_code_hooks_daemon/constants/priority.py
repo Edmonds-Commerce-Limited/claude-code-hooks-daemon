@@ -292,6 +292,12 @@ class Priority:
     # PostToolUse advisories is not load-bearing.)
     CRON_RECORD_KEEPER = 36
 
+    # Plan fact-check feed (Priority: 37 - PostToolUse sensor; Plan 00480 Task
+    # 4.1, the next free slot in the PostToolUse band after CRON_RECORD_KEEPER.
+    # Silent: it only feeds the debouncer, so its order against the advisories
+    # is not load-bearing)
+    PLAN_FACT_CHECK_FEED = 37
+
     # QA enforcement handlers (Priority: 30-35)
     QA_SUPPRESSION = 30
     PLAN_NUMBER_HELPER = 30

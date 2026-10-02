@@ -470,6 +470,7 @@ _EXEMPT_FROM_GUIDANCE: dict[str, str] = {
     "UpgradeNotifierHandler": "status-line renderer, no agent-facing action",
     "WorkingDirectoryHandler": "status-line renderer, no agent-facing action",
     "CompactionSignalHandler": "writes a signal file for the supervisor, not the agent",
+    "PlanFactCheckFeedHandler": "silent sensor: stores a pending record in daemon state, no agent-facing action",
     "CronRecordKeeperHandler": (
         "silent state-file writer, never denies and never speaks (T1 no, T3 no); "
         "the one thing an agent must do about the record, refresh through "

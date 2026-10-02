@@ -55,6 +55,9 @@ _EXPECTED_OPT_IN_CONFIG_KEYS = {
     # Plan 00463: a project's full-QA commands cannot be known in advance, so
     # the handler ships off and inert until it declares `full_qa_patterns`.
     "subagent_full_qa_blocker",
+    # Plan 00480 Task 4.1: feeds the debouncer, but delivery of the fact check
+    # is not built yet, so it ships off until Task 4.3 lands.
+    "plan_fact_check_feed",
 }
 
 

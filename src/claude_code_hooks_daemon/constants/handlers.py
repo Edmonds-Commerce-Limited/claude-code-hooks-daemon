@@ -607,6 +607,13 @@ class HandlerID:
         config_key="goal_injection",
         display_name="goal-injection",
     )
+    # Plan fact-check feed (PostToolUse) -- Plan 00480 Task 4.1: feeds plan
+    # edits to the debouncer so a burst yields one pending fact-check.
+    PLAN_FACT_CHECK_FEED = HandlerIDMeta(
+        class_name="PlanFactCheckFeedHandler",
+        config_key="plan_fact_check_feed",
+        display_name="plan-fact-check-feed",
+    )
     # Budget-exhaustion detector (PostToolUse) -- Plan 00315 Task 2.1: a
     # generic advisory that catches budget/quota-exhaustion messaging in a
     # completed tool call's response and tells the agent to surface it to
