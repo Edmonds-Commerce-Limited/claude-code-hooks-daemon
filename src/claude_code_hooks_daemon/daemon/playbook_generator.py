@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from claude_code_hooks_daemon.config.models import handler_options
-from claude_code_hooks_daemon.constants.config import ConfigKey, resolve_priority
+from claude_code_hooks_daemon.constants.config import resolve_priority
 from claude_code_hooks_daemon.core import AcceptanceTest
 from claude_code_hooks_daemon.core.cli_acceptance_test import CliAcceptanceTest
 from claude_code_hooks_daemon.handlers.registry import (
@@ -290,12 +290,25 @@ class PlaybookGenerator:
                 if not event_dir_name_matches_module(event_dir_name, handler_class.__module__):
                     continue
 
-                from claude_code_hooks_daemon.handlers.registry import _to_snake_case
+                from claude_code_hooks_daemon.handlers.registry import (
+                    _to_snake_case,
+                    config_skip_reason,
+                )
 
                 config_key = _to_snake_case(handler_class_name)
                 handler_config = event_config.get(config_key, {})
 
-                is_enabled = handler_config.get(ConfigKey.ENABLED, True)
+                # An absent block defers to the handler's declared default,
+                # as `register_all` does (Plan 00483 N55).
+                is_enabled = (
+                    config_skip_reason(
+                        handler_config,
+                        registry_disabled=False,
+                        default_enabled=handler_class.default_enabled,
+                        present=config_key in event_config,
+                    )
+                    is None
+                )
 
                 if not is_enabled and not include_disabled:
                     logger.debug("Skipping disabled handler: %s", handler_class_name)

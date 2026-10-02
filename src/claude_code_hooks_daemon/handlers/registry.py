@@ -214,7 +214,11 @@ def iter_builtin_handler_classes() -> Iterator[BuiltinHandlerRef]:
 
 
 def config_skip_reason(
-    handler_config: Mapping[str, Any] | None, *, registry_disabled: bool
+    handler_config: Mapping[str, Any] | None,
+    *,
+    registry_disabled: bool,
+    default_enabled: bool = True,
+    present: bool = True,
 ) -> str | None:
     """Why the pre-construction gates exclude a handler, or None if they do not.
 
@@ -222,17 +226,27 @@ def config_skip_reason(
     gates. They are decided BEFORE the handler is built, because a handler
     that is off must never have its constructor run.
 
+    A PRESENT block (a mapping, or ``None`` from a bare ``key:``) is enabled
+    unless it says ``enabled: false`` — naming the handler is opting in. An
+    ABSENT block defers to the handler's declared ``default_enabled``.
+
     Args:
-        handler_config: The ``handlers.<event>.<key>`` block. Absent means
-            ENABLED — registration defaults ``enabled`` to True — and so does
-            ``None``, which is what a bare ``key:`` parses to in YAML.
+        handler_config: The ``handlers.<event>.<key>`` block, ``None`` for a
+            bare ``key:``.
         registry_disabled: :meth:`HandlerRegistry.is_disabled` for this
             handler class. Runtime state rather than config, which is why a
             caller that has no registry passes False.
+        default_enabled: The handler class's ``default_enabled``; read off the
+            class, since the constructor must not run before this gate.
+        present: Whether the block exists under ``handlers.<event>`` at all.
+            ``handler_config`` alone cannot say: absent and a bare ``key:``
+            are both ``None``.
 
     Returns:
         A short reason naming the gate, or None when neither excludes it.
     """
+    if not present and not default_enabled:
+        return "off by default and not configured"
     block = handler_config if isinstance(handler_config, Mapping) else {}
     if not block.get(ConfigKey.ENABLED, True):
         return "disabled by config"
@@ -278,6 +292,7 @@ def handler_is_enabled(
     tags: Collection[str],
     *,
     registry_disabled: bool = False,
+    default_enabled: bool = True,
 ) -> bool:
     """Whether ``register_all`` would register this handler for this config.
 
@@ -285,10 +300,20 @@ def handler_is_enabled(
     tags — the config-optimisation checklist, which must report exactly what
     the daemon runs. Registration itself applies the two halves separately
     because it decides the first pair before constructing the handler.
+
+    ``default_enabled`` is the handler's declared default, which decides a
+    block that is absent from ``event_config``. Every caller passes it, so the
+    answer cannot differ from dispatch.
     """
     block = event_config if isinstance(event_config, Mapping) else {}
     return (
-        config_skip_reason(block.get(config_key), registry_disabled=registry_disabled) is None
+        config_skip_reason(
+            block.get(config_key),
+            registry_disabled=registry_disabled,
+            default_enabled=default_enabled,
+            present=config_key in block,
+        )
+        is None
         and tag_skip_reason(block, tags) is None
     )
 
@@ -341,9 +366,9 @@ def build_handler_config_mapping(config: "Config") -> dict[str, dict[str, Any]]:
     hand-maintained list inlined here, so any event type the model declares —
     ``status_line`` included, whose omission from the old inline list was the
     original bug — is covered automatically. A missing event type here makes
-    ``register_all`` fall back to ``enabled=True`` for every handler in that
-    group, which is exactly what made ``handlers.status_line.<name>.enabled:
-    false`` inert.
+    ``register_all`` treat every handler in that group as having no block, so
+    each runs on its declared default, which is exactly what made
+    ``handlers.status_line.<name>.enabled: false`` inert.
 
     ``HandlersConfig`` declares one field per WIRED event and refuses to
     import otherwise (``_check_wired_event_field_coverage``), so iterating its
@@ -589,7 +614,10 @@ class HandlerRegistry:
                     attr = getattr(module, attr_name)
                     if is_discoverable_handler(attr):
                         config_key = _get_config_key(attr.__name__)
-                        handler_config = event_config.get(config_key, {})
+                        # `or {}`: a bare `key:` parses to None. An absent block
+                        # has no options to collect, so the default needs no
+                        # separate check here.
+                        handler_config = event_config.get(config_key) or {}
                         if handler_config.get(ConfigKey.ENABLED, True):
                             registry_key = f"{event_type.value}.{config_key}"
                             # handler_options reads every block shape without
@@ -646,6 +674,9 @@ class HandlerRegistry:
                     if is_discoverable_handler(attr):
                         # Check handler-specific config (use config key from HandlerID constant)
                         config_key = _get_config_key(attr.__name__)
+                        # Read presence BEFORE the `or {}`: an absent block and a
+                        # bare `key:` (None) are different facts.
+                        present = config_key in event_config
                         # `or {}`: a bare `key:` in YAML parses to None, and the
                         # options/priority reads below need a mapping either way.
                         handler_config = event_config.get(config_key) or {}
@@ -654,7 +685,10 @@ class HandlerRegistry:
                         # config-optimisation checklist reports with, so the
                         # report can never disagree with what runs here.
                         skip = config_skip_reason(
-                            handler_config, registry_disabled=self.is_disabled(attr.__name__)
+                            handler_config,
+                            registry_disabled=self.is_disabled(attr.__name__),
+                            default_enabled=attr.default_enabled,
+                            present=present,
                         )
                         if skip is not None:
                             logger.debug("Handler %s skipped - %s", attr.__name__, skip)

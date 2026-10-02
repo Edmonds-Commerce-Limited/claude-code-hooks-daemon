@@ -192,6 +192,7 @@ def build_checklist(
                     ref.config_key,
                     probe.tags,
                     registry_disabled=ref.handler_cls.__name__ in disabled_handlers,
+                    default_enabled=ref.handler_cls.default_enabled,
                 ),
                 default_enabled=probe.default_enabled,
                 relevance=probe.relevance,

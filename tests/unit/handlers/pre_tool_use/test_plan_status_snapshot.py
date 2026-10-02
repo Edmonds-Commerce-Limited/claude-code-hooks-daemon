@@ -289,22 +289,20 @@ class TestGoalInjectionGate:
             "tool_use_id": tool_use_id,
         }
 
-    def test_matches_true_when_goal_injection_has_no_config_block(
+    def test_matches_false_when_goal_injection_has_no_config_block(
         self, handler: PlanStatusSnapshotHandler, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """RV7-m1: an ABSENT `goal_injection` block resolves to TRUE --
-        matching `register_all`'s own `config_skip_reason` convention
-        ("absent means enabled"), which is what the daemon actually
-        registers. `GoalInjectionHandler.get_default_enabled() -> False`
-        (its own opt-in default) is NOT consulted at registration, so a
-        gate that read it instead would disagree with the running daemon."""
+        """Plan 00483 N55: an ABSENT `goal_injection` block resolves to FALSE --
+        `register_all` defers an absent block to the handler's `default_enabled`,
+        and `GoalInjectionHandler` is opt-in, so the daemon does not register it
+        and the gate must agree."""
         monkeypatch.setattr(
             PlanStatusSnapshotHandler,
             "_load_config",
             lambda self: _config_declaring_goal_injection(enabled=None),
         )
         plan = self._write_plan("Not Started")
-        assert handler.matches(self._hook_input(plan)) is True
+        assert handler.matches(self._hook_input(plan)) is False
 
     def test_matches_false_when_goal_injection_explicitly_disabled(
         self, handler: PlanStatusSnapshotHandler, monkeypatch: pytest.MonkeyPatch
@@ -334,12 +332,12 @@ class TestGoalInjectionGate:
         """RV7-m1 item 4: a genuinely unparseable config on disk -- not a
         monkeypatched `_load_config` that never exercises the `except`
         branch -- degrades to bare defaults, which resolve like an absent
-        `goal_injection` block (TRUE, per the registry's own convention)."""
+        `goal_injection` block (FALSE: the handler is opt-in, Plan 00483 N55)."""
         config_path = self._project / ".claude" / "hooks-daemon.yaml"
         config_path.parent.mkdir(parents=True, exist_ok=True)
         config_path.write_text("handlers: [unterminated\n", encoding="utf-8")
         plan = self._write_plan("Not Started")
-        assert handler.matches(self._hook_input(plan)) is True
+        assert handler.matches(self._hook_input(plan)) is False
 
     def test_matches_returns_false_for_a_non_plan_write_even_with_goal_injection_on(
         self, handler: PlanStatusSnapshotHandler, monkeypatch: pytest.MonkeyPatch

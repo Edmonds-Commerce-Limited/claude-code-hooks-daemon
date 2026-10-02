@@ -66,6 +66,9 @@ _ICON_INFERRED = "@~"
 class HostHostnameHandler(StatusLineHandlerBase):
     """Show ``@machine-name`` for the host this session is really running on."""
 
+    # Opt-in: only useful when you work across more than one machine.
+    default_enabled = False
+
     def __init__(self) -> None:
         super().__init__(
             handler_id=HandlerID.HOST_HOSTNAME,
@@ -84,10 +87,6 @@ class HostHostnameHandler(StatusLineHandlerBase):
         # is cached too rather than re-probed on every render forever.
         self._resolved: HostName | None = None
         self._has_resolved: bool = False
-
-    def get_default_enabled(self) -> bool:
-        """Opt-in: only useful when you work across more than one machine."""
-        return False
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """Always run for status line events."""

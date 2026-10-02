@@ -35,6 +35,9 @@ class SkillOpportunityDetectorHandler(SessionStartHandlerBase):
     session start under any failure mode.
     """
 
+    # Opt-in: the scan reads this machine's session transcripts.
+    default_enabled = False
+
     def __init__(self) -> None:
         super().__init__(
             handler_id=HandlerID.SKILL_OPPORTUNITY_DETECTOR,
@@ -54,10 +57,6 @@ class SkillOpportunityDetectorHandler(SessionStartHandlerBase):
         self._max_prompts: object = None
         self._extra_exclude_patterns: object = None
         self._transcript_dir: object = None
-
-    def get_default_enabled(self) -> bool:
-        """Opt-in: the scan reads this machine's session transcripts."""
-        return False
 
     def configure(self, config: dict[str, Any]) -> None:
         """Apply configuration."""

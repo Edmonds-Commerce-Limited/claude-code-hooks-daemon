@@ -168,19 +168,18 @@ class PlanStatusSnapshotHandler(PreToolUseHandlerBase):
 
         `handlers.registry.handler_is_enabled` is the checklist's own
         predicate for "would `register_all` register this handler" -- it
-        reads `config_skip_reason` (absent block means ENABLED, the
-        registration default) and `tag_skip_reason` (`enable_tags`/
+        reads `config_skip_reason` (an absent block defers to the handler's
+        `default_enabled`; a present block is enabled unless it says
+        `enabled: false`) and `tag_skip_reason` (`enable_tags`/
         `disable_tags`) together, over the same per-event mapping
         `handlers.registry.build_handler_config_mapping` builds for
         `register_all` itself (RV8-m2: moved out of `daemon.cli`, which a
         handler importing from ran the module layering backwards).
         `GoalInjectionHandler.TAGS` (RV8-m2: a class constant, so this no
-        longer constructs a throwaway instance just to read its tags) is
-        NOT `get_default_enabled() -> False` (opt-in) -- that default is NOT
-        consulted here, deliberately: `register_all` never consults it
-        either (RV7-m1) -- an absent block is registered exactly like an
-        explicit `enabled: true` -- so a gate that honoured the opt-in
-        default would disagree with the daemon it is meant to mirror.
+        longer constructs a throwaway instance just to read its tags) and
+        `GoalInjectionHandler.default_enabled` (opt-in, so an absent block
+        is off) are both class constants, read the way `register_all` reads
+        them (Plan 00483 N55).
         """
         config = self._load_config()
         cached = self._goal_injection_verdict_cache
@@ -198,7 +197,10 @@ class PlanStatusSnapshotHandler(PreToolUseHandlerBase):
         mapping = build_handler_config_mapping(config)
         event_config = mapping.get("post_tool_use", {})
         verdict = handler_is_enabled(
-            event_config, HandlerID.GOAL_INJECTION.config_key, GoalInjectionHandler.TAGS
+            event_config,
+            HandlerID.GOAL_INJECTION.config_key,
+            GoalInjectionHandler.TAGS,
+            default_enabled=GoalInjectionHandler.default_enabled,
         )
         self._goal_injection_verdict_cache = (config, verdict)
         return verdict

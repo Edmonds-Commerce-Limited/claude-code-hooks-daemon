@@ -30,6 +30,11 @@ logger = logging.getLogger(__name__)
 class DaemonStatsHandler(StatusLineHandlerBase):
     """Show daemon health: uptime, memory, last error, log level."""
 
+    # Opt-in: the daemon health line (uptime, memory, last error, log level) is
+    # developer-facing diagnostics. The daemon-upgrade notifier
+    # (`version_check`) is a SEPARATE handler and stays on by default.
+    default_enabled = False
+
     def __init__(self) -> None:
         super().__init__(
             handler_id=HandlerID.DAEMON_STATS,
@@ -37,16 +42,6 @@ class DaemonStatsHandler(StatusLineHandlerBase):
             terminal=False,
             tags=[HandlerTag.STATUS, HandlerTag.DAEMON, HandlerTag.HEALTH, HandlerTag.NON_TERMINAL],
         )
-
-    def get_default_enabled(self) -> bool:
-        """Opt-in: off by default.
-
-        The daemon health line (uptime, memory, last error, log level) is
-        developer-facing diagnostics that are not useful to normal users, so it
-        ships disabled and is enabled only by explicit config. The daemon-upgrade
-        notifier (``version_check``) is a SEPARATE handler and stays on by default.
-        """
-        return False
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """Always run for status events."""

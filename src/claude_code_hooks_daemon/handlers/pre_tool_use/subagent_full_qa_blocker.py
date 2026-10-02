@@ -5010,6 +5010,9 @@ class SubagentFullQaBlockerHandler(PreToolUseHandlerBase):
             ``None``, which states plainly that none is declared.
     """
 
+    # Opt-in: a client's full-QA commands cannot be known from here.
+    default_enabled = False
+
     def __init__(self) -> None:
         super().__init__(
             handler_id=HandlerID.SUBAGENT_FULL_QA_BLOCKER,
@@ -5032,10 +5035,6 @@ class SubagentFullQaBlockerHandler(PreToolUseHandlerBase):
         self._unseen_policy: object = None
         self._unseen_sink_description: object = None
         self._reported_problems: frozenset[str] = frozenset()
-
-    def get_default_enabled(self) -> bool:
-        """Opt-IN: a client's full-QA commands cannot be known from here."""
-        return False
 
     def _patterns(self) -> list[FullQaPattern]:
         """The valid declaration, logging each NEW problem once."""

@@ -681,6 +681,9 @@ class GoalInjectionHandler(PostToolUseHandlerBase):
         HandlerTag.NON_TERMINAL,
     )
 
+    # Opt-in: only useful when a PTY supervisor is watching.
+    default_enabled = False
+
     def __init__(self) -> None:
         super().__init__(
             handler_id=HandlerID.GOAL_INJECTION,
@@ -709,10 +712,6 @@ class GoalInjectionHandler(PostToolUseHandlerBase):
         self._reasserted: BoundedFifoMap[tuple[str, str], bool] = BoundedFifoMap(
             max_entries=_MAX_TRACKED_LATCHES
         )
-
-    def get_default_enabled(self) -> bool:
-        """Opt-in: only useful when a PTY supervisor is watching."""
-        return False
 
     def get_relevance(self, context: RelevanceContext) -> Relevance:
         """Relevant only under an armed ccy supervisor (Plan 00330)."""

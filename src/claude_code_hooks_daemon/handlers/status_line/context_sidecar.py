@@ -78,6 +78,9 @@ _UNSAFE_SESSION_CHARS = re.compile(r"[^A-Za-z0-9_.-]")
 class ContextSidecarHandler(StatusLineHandlerBase):
     """Write an observe-only context-state sidecar for the PTY supervisor."""
 
+    # Opt-in: dormant unless a supervisor is watching the sidecar.
+    default_enabled = False
+
     def __init__(self) -> None:
         super().__init__(
             handler_id=HandlerID.CONTEXT_SIDECAR,
@@ -99,10 +102,6 @@ class ContextSidecarHandler(StatusLineHandlerBase):
         # restarts (new writer_pid); readers pair it with writer_pid + ts to
         # detect a fresh writer rather than treating a reset as staleness.
         self._seq: int = 0
-
-    def get_default_enabled(self) -> bool:
-        """Opt-in: dormant unless a supervisor is watching the sidecar."""
-        return False
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """Run on every status event (writing is cheap and idempotent)."""

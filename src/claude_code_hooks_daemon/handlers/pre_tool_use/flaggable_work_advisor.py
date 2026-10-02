@@ -99,6 +99,9 @@ class FlaggableWorkAdvisorHandler(PreToolUseHandlerBase):
     decision must be made, never a block.
     """
 
+    # Opt-in: the flaggable boundary is project-specific (Plan 00278).
+    default_enabled = False
+
     def __init__(self) -> None:
         super().__init__(
             handler_id=HandlerID.FLAGGABLE_WORK_ADVISOR,
@@ -121,10 +124,6 @@ class FlaggableWorkAdvisorHandler(PreToolUseHandlerBase):
         self._advised: BoundedFifoMap[tuple[str, str], None] = BoundedFifoMap(
             max_entries=_MAX_ADVISED_KEYS
         )
-
-    def get_default_enabled(self) -> bool:
-        """Opt-in: the flaggable boundary is project-specific (Plan 00278)."""
-        return False
 
     def get_relevance(self, context: RelevanceContext) -> Relevance:
         """Relevant only where the quarantine agent is deployed (Plan 00330)."""

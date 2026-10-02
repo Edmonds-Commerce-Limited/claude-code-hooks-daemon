@@ -85,6 +85,11 @@ class Handler(ABC):
     #: DOES resolve per-project state must override this to PROJECT.
     workspace_scope: ClassVar[WorkspaceScope] = WorkspaceScope.REPO
 
+    #: Whether the handler runs when its config block is ABSENT (Plan 00483
+    #: N55). A class attribute so the registry can read it before it builds
+    #: the handler. ``False`` marks an opt-in handler.
+    default_enabled: ClassVar[bool] = True
+
     __slots__ = (
         "_project_exclude_paths",
         "_project_languages",
@@ -396,15 +401,17 @@ class Handler(ABC):
         ``True``  = opt-out  (on unless the client explicitly disables it).
         ``False`` = opt-in   (off unless the client explicitly enables it).
 
-        Concrete (NOT abstract) with a sensible universal default: the vast
-        majority of handlers are opt-out. Opt-in handlers override this to
-        return ``False``. Keeping it concrete means existing built-in handlers
-        and project-level handlers are never forced to implement it.
+        Reads the :attr:`default_enabled` class attribute, which is what
+        ``HandlerRegistry.register_all`` consults for a handler with NO config
+        block (a present block is enabled unless it says ``enabled: false``).
+        Opt-in handlers set ``default_enabled = False`` at class level. Concrete
+        (NOT abstract), so built-in and project-level handlers are never forced
+        to implement it.
 
         Returns:
             ``True`` if the handler should be enabled by default, else ``False``.
         """
-        return True
+        return type(self).default_enabled
 
     def get_relevance(self, context: RelevanceContext) -> Relevance:
         """Whether this handler is a fit for the project under review.

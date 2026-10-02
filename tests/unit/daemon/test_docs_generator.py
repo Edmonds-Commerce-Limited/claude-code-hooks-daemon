@@ -926,6 +926,7 @@ class TestDocsGeneratorInspectionExceptions:
 
             __module__ = "claude_code_hooks_daemon.handlers.pre_tool_use.broken"
             __name__ = "BrokenHandler"
+            default_enabled = True
 
             def __init__(self) -> None:
                 raise RuntimeError("instantiation failed")
