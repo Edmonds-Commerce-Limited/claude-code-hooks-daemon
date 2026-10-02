@@ -1,10 +1,13 @@
 # Artefact: Plan 00479 as filed at c77a23ffd
 
-This is Plan 00479's PLAN.md as it stood at commit c77a23ffd, kept verbatim below the rule
-as a test input for the plan fact checker. It is not a live plan.
+This is Plan 00479's PLAN.md as it stood at commit c77a23ffd, kept verbatim in the fence
+below as a test input for the plan fact checker. It is not a live plan.
 
----
+The snapshot is fenced so documentation QA reads it as one quoted block. A frozen copy is
+meant to differ from the live plan, so its lists must not be checked as duplicates of the
+live plan's.
 
+````markdown
 ## Plan 00479: subscription usage monitor and ceiling
 
 **Status**: Not Started
@@ -183,3 +186,4 @@ the daemon directs the model and then verifies what it did.
   A session on a host with no entry is unaffected.
 
 - Missing or stale usage data never stops a session.
+````
