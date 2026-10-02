@@ -116,12 +116,16 @@ other than defeating a parser. Everything else, every ordinary respelling includ
 
 ### Phase 4: Keep it applied
 
-- [ ] ⬜ **Task 4.1**: Check that the review routines apply the test: Routine 00001's check
+- [x] ✅ **Task 4.1**: Check that the review routines apply the test: Routine 00001's check
   inventory, the delta routine, the `security-reviewer` and `code-reviewer` agents, and the
-  evasion test table. Fix any that still ask for adversarial coverage.
-- [ ] ⬜ **Task 4.2**: Check that the user-facing docs say "guardrails, not armour" where a
+  evasion test table. Fix any that still ask for adversarial coverage. Done: CHECKS.md scope
+  note carries both clauses and the dismissal record; F-BYPS, F-GAP, D-SEC bounded; both
+  routines and both agents point at the test; evasion docstring bounded. Review:
+  [subagent-reports/261002-phase4-review-sonnet.md](subagent-reports/261002-phase4-review-sonnet.md).
+- [x] ✅ **Task 4.2**: Check that the user-facing docs say "guardrails, not armour" where a
   client would look before filing an obfuscated bypass upstream (the README, troubleshooting,
-  bug reporting).
+  bug reporting). Done: BUG_REPORTING.md first check, 1-defect.yml intro and optional
+  checkbox, TROUBLESHOOTING.md section 5 subsection. config.yml skipped by instruction.
 
 ## Open questions for the owner
 

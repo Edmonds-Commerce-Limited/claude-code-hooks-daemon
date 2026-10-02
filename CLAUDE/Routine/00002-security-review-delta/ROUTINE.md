@@ -28,6 +28,9 @@ a CVE, an exemption list that only became too broad on its ninth entry — so
 attempting them would produce a confident "nothing found" from a method
 structurally incapable of finding anything.
 
+Every check is judged by the threat model stated in CHECKS.md: a finding that
+needs an out-of-scope shape is recorded as `Dismissed (threat model)`, not raised.
+
 **This routine has no clock, deliberately.** It is prompted by a release, and
 its backstop is Routine 00001 rather than an overdue date: a delta run that
 never happened simply widens the next full run's interval (D5). Giving it a

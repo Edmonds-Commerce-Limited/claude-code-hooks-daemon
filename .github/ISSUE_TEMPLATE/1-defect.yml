@@ -25,6 +25,14 @@ body:
         config value, name the option and give the value only if it is not
         specific to you.
 
+        ## Is it in scope?
+
+        The daemon is a guardrail for a careless agent, not armour against one
+        trying to defeat it. A bypass that needs text the daemon cannot see at
+        call time, or a shape whose only purpose is defeating a parser, is a
+        known limit rather than a defect; see
+        [Guardrails, not armour](https://github.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon/blob/main/README.md#guardrails-not-armour).
+
         ## If you have the daemon installed, let it do this for you
 
         ```bash
@@ -180,3 +188,7 @@ body:
             I have checked this is not the handler doing what its configuration
             asks, and said above which options I ruled out.
           required: true
+        - label: >-
+            If this is a bypass, I have checked that a careless agent would type
+            the command, not only an obfuscated or variable-built one.
+          required: false

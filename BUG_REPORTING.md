@@ -29,8 +29,17 @@ value, name the option and give the value only if it is not specific to you.
 ## Step 1 — check it is really a defect
 
 A defect is a gap between the daemon's BEHAVIOUR and a promise its
-documentation makes. Three checks, in the order that eliminates the most
+documentation makes. Four checks, in the order that eliminates the most
 reports soonest:
+
+**Is it in scope?** The daemon is a guardrail for a careless agent, not armour
+against one trying to defeat it, and it makes no claim to stop prompt injection.
+A bypass that needs text the daemon cannot see at call time (`eval`,
+`bash -c "$VAR"`, `source`) or a shape whose only purpose is defeating a parser
+is a known limit, not a defect. A bypass through an ordinary respelling a
+careless agent types (`git -C`, quoting, a literal `bash -c '…'`) is a defect.
+See [Guardrails, not armour](README.md#guardrails-not-armour) and the
+[threat model](CLAUDE/ARCHITECTURE.md#threat-model-the-agent-is-careless-not-hostile).
 
 **Is it configuration?** Most reported bugs are a handler doing exactly what
 its configuration asks. `bin/hooks-daemon explain-handler <name>` prints what
