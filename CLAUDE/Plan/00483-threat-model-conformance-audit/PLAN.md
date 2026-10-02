@@ -115,8 +115,12 @@ other than defeating a parser. Everything else, every ordinary respelling includ
 
 - [ ] ⬜ **Task 3.1**: Fix the in-scope defects through the ledger, at most 3 branches open at
   once (Plan 00475).
-- [ ] ⬜ **Task 3.2**: Narrow each guard that causes an in-scope false positive while catching
-  an out-of-scope shape (TDD: the false positive is the red test).
+- [ ] 🔄 **Task 3.2**: Narrow each guard that causes an in-scope false positive while catching
+  an out-of-scope shape (TDD: the false positive is the red test). X-1 fixed on branch
+  worktree-p483-x1-rebind-heredoc: the shared rebinding check no longer withholds the heredoc
+  exemption for `cd`/`pushd`/`popd`, `source`/`.` or a non-special `export X=$Y`; alias,
+  function and PATH bindings still do. Report:
+  [subagent-reports/261002-x1-sonnet.md](subagent-reports/261002-x1-sonnet.md).
 - [ ] ⬜ **Task 3.3**: Bring the owner's removal decisions on out-of-scope-only code into
   effect, if any were taken.
 
