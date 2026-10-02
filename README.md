@@ -11,7 +11,7 @@
 
 Maintained by [Edmonds Commerce](https://github.com/Edmonds-Commerce-Limited).
 
-**Deterministic guardrails for coding agents — containment, policy enforcement and quality gates, evaluated on every tool call before it runs.**
+**Deterministic guardrails for coding agents — policy enforcement and quality gates, evaluated on every tool call before it runs.**
 
 A long-running Python daemon that Claude Code's hook events are forwarded to
 over a Unix socket. Instead of one script per hook, you register one thin
@@ -70,6 +70,11 @@ a `cat` of a secrets file, or a credential in a commit. They do not chase
 commands built to evade them, such as a commit assembled from text and run
 through `eval`. A guard that denies ordinary work to catch an obfuscated trick
 would fail the agents it exists to help.
+
+It makes no claim to defend against prompt injection. An agent following
+instructions planted in an issue, a web page or a cloned file is caught only
+where those instructions produce the same ordinary commands a careless agent
+would type.
 
 The daemon is one safety layer, not a sandbox. For an untrusted agent, use
 real isolation as well: a container, a VM, or a restricted user. The full

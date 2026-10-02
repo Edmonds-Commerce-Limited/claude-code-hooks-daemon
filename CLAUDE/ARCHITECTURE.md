@@ -790,6 +790,15 @@ whether it survives an out-of-scope shape. It is still judged on every ordinary 
 as a global option, quoting, or a path with `git` in it, because a careless agent produces those
 without trying.
 
+**Prompt injection is not defended against.** This is also an owner ruling. The daemon makes
+no claim to protect an agent that is following instructions planted in untrusted content, such
+as an issue body, a fetched page or a file in a cloned repository. It judges commands, never
+motive. So such an agent is caught exactly as far as its instructions produce in-scope shapes.
+Beyond that, the defence lies upstream: the permission mode, the human, and OS isolation. A
+finding is never raised as in scope because the agent "might have been injected". A
+prompt-injection defence would be its own project, possibly a future major version, and is
+not part of this model.
+
 What is protected is the outcome: uncommitted work, protected file contents, what reaches
 GitHub, repository history, the system Python. The test below decides whether a route to one
 of those is the daemon's job.

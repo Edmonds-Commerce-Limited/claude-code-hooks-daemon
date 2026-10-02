@@ -53,8 +53,7 @@ other than defeating a parser. Everything else, every ordinary respelling includ
   - protection of a protected file against ordinary reads.
 - Removing existing guard code on a reviewer's say-so. Removal is an owner decision, taken
   from the Phase 1 list.
-- Defending against prompt injection beyond what the shape test already covers, unless the
-  owner rules otherwise (open question 1).
+- Defending against prompt injection. The owner ruled the daemon makes no such claim.
 
 ## Tasks
 
@@ -109,14 +108,9 @@ other than defeating a parser. Everything else, every ordinary respelling includ
 
 ## Open questions for the owner
 
-1. **Prompt injection.** An agent following instructions injected through an issue body, a
-   fetched page or a cloned file is well-meaning, but its instructions may come from an
-   adversary. Two options from the Fable review:
-   - **(A) Judge the command, never the motive** (recommended). An injected agent is covered
-     exactly as far as its instructions produce in-scope shapes. Past that, it is the hostile
-     case, and the defence is upstream: the permission mode, the human, OS permissions.
-   - **(B) Name injection as a third actor.** Chase obfuscated shapes, but only where the sink
-     is exfiltration: protected reads, `gh` bodies, network egress.
+1. **Prompt injection: resolved (owner).** The daemon makes no claim to defend against it.
+   The threat model and the README say so. A prompt-injection defence may become a future
+   major version, as a separate project.
 2. **Code serving only out-of-scope shapes**: keep it while it costs nothing, which is the
    current text; or remove it to cut maintenance. Decide per item from the Phase 1 list.
 
