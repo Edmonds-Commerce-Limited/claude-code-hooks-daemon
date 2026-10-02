@@ -29,7 +29,12 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
+import threading
+import time
+from collections import OrderedDict
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Final
 
@@ -84,37 +89,162 @@ def _sidecar_dir(session_id: str, root: Path | None = None) -> Path:
     return base / _SIDECAR_SUBDIR / _safe_name(session_id)
 
 
+#: A timestamp younger than this is "racy": a second change can land inside the
+#: same filesystem timestamp tick and leave the stamp unchanged. Git's index
+#: solves the same problem the same way. Far above any local-filesystem tick.
+_SETTLE_NS: Final[int] = 2_000_000_000
+
+#: Sessions whose scan is memoised; the least recently read is dropped first.
+_MAX_MEMOISED_SESSIONS: Final[int] = 16
+
+
+@dataclass(frozen=True)
+class _FileSignature:
+    """What identifies one sidecar file's current bytes without reading them.
+
+    The inode is part of it because every write is a tmp-file ``replace``: a
+    rewrite of an agent's file is always a NEW inode, even when size and mtime
+    happen to repeat.
+    """
+
+    inode: int
+    mtime_ns: int
+    size: int
+
+
+@dataclass(frozen=True)
+class _SessionScan:
+    """One session directory's totals, and the evidence they are still current."""
+
+    dir_mtime_ns: int
+    #: True when the directory stamp was old enough that nothing can have
+    #: changed inside it unobserved; only then may a read skip the rescan.
+    settled: bool
+    files: dict[str, tuple[_FileSignature, dict[str, int]]]
+    totals: dict[str, int]
+
+
+_scans: OrderedDict[Path, _SessionScan] = OrderedDict()
+_scans_lock = threading.Lock()
+
+
+def _parse_agent_file(path: Path) -> dict[str, int]:
+    """One agent's counters; empty when the file is unreadable or foreign.
+
+    An empty dict means "not an agent record" and is never counted, whereas a
+    real record always carries every counter key.
+    """
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        # One unreadable file must not hide the agents that recorded fine.
+        logger.debug("Skipping unreadable sub-agent cache file %s: %s", path, exc)
+        return {}
+    if not isinstance(payload, dict):
+        return {}
+    return {key: _as_int(payload.get(key)) for key in _EMPTY_TOTALS}
+
+
+def _scan_session(
+    directory: Path, dir_mtime_ns: int, previous: _SessionScan | None
+) -> _SessionScan:
+    """Rescan ``directory``, re-parsing only files that differ from ``previous``.
+
+    ``dir_mtime_ns`` must have been read BEFORE this call, so a write landing
+    mid-scan leaves a newer stamp behind and the next read rescans rather than
+    trusting this result. Raises OSError when the directory cannot be listed.
+    """
+    scan_started_ns = time.time_ns()
+    listing = [e for e in os.scandir(directory) if e.name.endswith(".json")]
+
+    known = previous.files if previous is not None else {}
+    files: dict[str, tuple[_FileSignature, dict[str, int]]] = {}
+    for entry in sorted(listing, key=lambda e: e.name):
+        try:
+            stat = entry.stat()
+        except OSError as exc:
+            logger.debug("Sub-agent cache file vanished mid-scan %s: %s", entry.path, exc)
+            continue
+        signature = _FileSignature(stat.st_ino, stat.st_mtime_ns, stat.st_size)
+        cached = known.get(entry.name)
+        if cached is not None and cached[0] == signature:
+            files[entry.name] = cached
+            continue
+        counters = _parse_agent_file(Path(entry.path))
+        if scan_started_ns - stat.st_mtime_ns >= _SETTLE_NS:
+            files[entry.name] = (signature, counters)
+        else:
+            # A racy file is parsed every scan: an in-place edit within the
+            # same timestamp tick would not change its signature.
+            files[entry.name] = (_FileSignature(-1, -1, -1), counters)
+
+    totals = dict(_EMPTY_TOTALS)
+    totals["agents_seen"] = 0
+    for _, counters in files.values():
+        if not counters:
+            continue
+        totals["agents_seen"] += 1
+        for key in _EMPTY_TOTALS:
+            totals[key] += counters[key]
+
+    return _SessionScan(
+        dir_mtime_ns=dir_mtime_ns,
+        settled=scan_started_ns - dir_mtime_ns >= _SETTLE_NS,
+        files=files,
+        totals=totals,
+    )
+
+
 def read_subagent_cache_totals(session_id: str, root: Path | None = None) -> dict[str, int]:
     """Sum every recorded sub-agent's totals for one session.
 
     Reads fail-silent by design — this is consumed by the status line, and a
     half-written or hand-mangled file must cost one agent's figures, never the
     whole render. An unknown session reads back as zeroes rather than raising.
+
+    **A render costs one ``stat``, not one parse per agent** (N295: 3,369
+    agents made every render 84-427 ms). Every write is a tmp-file ``replace``
+    into the session directory, which moves the directory's mtime, so an
+    unchanged stamp means no agent was added, rewritten or removed. A stamp
+    younger than ``_SETTLE_NS`` is not trusted (a same-tick second write would
+    leave it unchanged) and that read rescans; a rescan re-parses only the
+    files whose signature moved. A cold memo (daemon restart) pays one full
+    scan.
     """
-    combined = dict(_EMPTY_TOTALS)
-    combined["agents_seen"] = 0
+    empty = dict(_EMPTY_TOTALS)
+    empty["agents_seen"] = 0
 
     try:
         directory = _sidecar_dir(session_id, root)
-        entries = sorted(directory.glob("*.json"))
-    except (OSError, RuntimeError) as exc:
+    except RuntimeError as exc:
         logger.debug("No sub-agent cache sidecar to read: %s", exc)
-        return combined
+        return empty
+    try:
+        dir_mtime_ns = directory.stat().st_mtime_ns
+    except OSError as exc:
+        logger.debug("No sub-agent cache sidecar to read: %s", exc)
+        with _scans_lock:
+            _scans.pop(directory, None)
+        return empty
 
-    for entry in entries:
-        try:
-            payload = json.loads(entry.read_text(encoding="utf-8"))
-        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
-            # One unreadable file must not hide the agents that recorded fine.
-            logger.debug("Skipping unreadable sub-agent cache file %s: %s", entry, exc)
-            continue
-        if not isinstance(payload, dict):
-            continue
-        combined["agents_seen"] += 1
-        for key in _EMPTY_TOTALS:
-            combined[key] += _as_int(payload.get(key))
+    with _scans_lock:
+        memo = _scans.get(directory)
+        if memo is not None:
+            _scans.move_to_end(directory)
+    if memo is not None and memo.settled and memo.dir_mtime_ns == dir_mtime_ns:
+        return dict(memo.totals)
 
-    return combined
+    try:
+        scan = _scan_session(directory, dir_mtime_ns, memo)
+    except OSError as exc:
+        logger.debug("No sub-agent cache sidecar to read: %s", exc)
+        return empty
+    with _scans_lock:
+        _scans[directory] = scan
+        _scans.move_to_end(directory)
+        while len(_scans) > _MAX_MEMOISED_SESSIONS:
+            _scans.popitem(last=False)
+    return dict(scan.totals)
 
 
 class SubagentCacheAggregatorHandler(SubagentStopHandlerBase):

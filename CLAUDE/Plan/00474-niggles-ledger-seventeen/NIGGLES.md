@@ -1156,4 +1156,13 @@ and `json.loads` every file in `untracked/cache-sidecar/<session>/`. This sessio
 session runs and is paid on every render, so a long-lived orchestrator session pays the most. The
 slowness also makes Claude Code abandon renders (N294).
 
-**Status**: ⬜ Open.
+**Status**: ✅ Fixed (branch `worktree-n295-cache-sidecar`, not yet merged). The reader now
+remembers each session's totals in memory and checks one thing per render: the session directory's
+modification time. Every sub-agent write is a rename into that directory, which changes it, so an
+unchanged time means no agent was added, rewritten or removed. A time younger than two seconds is
+not trusted (a second write in the same timestamp tick would leave it unchanged), so a fresh write
+always triggers a rescan; a rescan re-parses only files whose inode, mtime or size moved, so a
+rewritten agent file replaces its old figures rather than adding to them. Measured on a copy of the
+real 3,371-file directory: before, 92 ms median per render (134 ms worst); after, 0.010 ms median
+(0.07 ms worst), with identical totals. The first read after a daemon restart still pays one full
+scan (about 150-220 ms), once.
