@@ -489,6 +489,42 @@ OWNING project (toolchains, manifests, source/test/config roles)? Set
 Full taxonomy, worked examples and the aggregate-vs-per-file distinction:
 [Code/WorkspaceResolution.md](Code/WorkspaceResolution.md#repo-level-vs-project-level-handlers).
 
+### Acting once a burst of events goes quiet (the debouncer)
+
+A handler that should react to a *burst* once, after it settles (five plan edits
+in ten seconds, one fact check), uses the daemon-wide keyed debouncer in
+`core/debouncer.py`. Do not start your own timer or thread.
+
+```python
+from claude_code_hooks_daemon.core.debouncer import DebounceFire, get_debouncer
+
+def _on_quiet(fire: DebounceFire) -> None:
+    ...  # runs on a background thread, never on the hook-response path
+
+# in handle():
+get_debouncer().trigger(plan_dir, quiet_seconds=5.0, callback=_on_quiet, payload=path)
+```
+
+- **Semantics**: every `trigger` for a key restarts that key's quiet period; the
+  callback fires once, after the period passes with no further trigger. The
+  latest trigger's callback, period and payload win. `DebounceFire` reports
+  `key`, `payload`, `trigger_count`, `first_trigger_at`, `last_trigger_at` and
+  `forced`.
+- **Never delays a response**: `trigger` takes a short lock and returns. One
+  scheduler thread watches the deadlines and starts each callback on its own
+  daemon thread, so a slow callback delays no other key. The asyncio loop is
+  not involved.
+- **A raising callback** is logged with its key and never stops the debouncer.
+- **Bounded**: at most 256 distinct pending keys. A new key arriving at the cap
+  fires the soonest-deadline key early (`forced=True`) instead of dropping it,
+  so no pending work is lost silently.
+- **Shutdown drops, does not flush**: pending state is in memory only and does
+  not survive a restart; the next event for that key re-triggers it. `trigger`
+  returns `False` after shutdown. A callback already running is left to finish.
+- **Introspection**: `pending()` (seconds remaining per key) and `cancel(key)`.
+- **Tests**: construct `Debouncer(clock=fake, runner=inline, start_scheduler=False)`
+  and drive it with `run_due()`; no sleeps. See `tests/unit/core/test_debouncer.py`.
+
 ## Priority Guide
 
 <!-- ssot-anchor: priority-guide -->
