@@ -109,6 +109,7 @@ class TestApproveUpgradeCommand:
         assert handler.matches(hook_input) is True
         result = handler.handle(hook_input)
         assert result.decision == "deny"
+        assert result.reason is not None
         assert result.reason.startswith(f"BLOCKED [{AGENT_RULE_ID}]")
 
     def test_denies_when_chained_after_another_command(
@@ -183,6 +184,7 @@ class TestApprovalMarkerWrites:
         assert handler.matches(hook_input) is True
         result = handler.handle(hook_input)
         assert result.decision == "deny"
+        assert result.reason is not None
         assert result.reason.startswith(f"BLOCKED [{AGENT_RULE_ID}]")
 
     @pytest.mark.parametrize(
@@ -213,6 +215,7 @@ class TestApprovalMarkerFileTool:
         assert handler.matches(hook_input) is True
         result = handler.handle(hook_input)
         assert result.decision == "deny"
+        assert result.reason is not None
         assert result.reason.startswith(f"BLOCKED [{AGENT_RULE_ID}]")
 
     def test_denies_edit(self, handler: UpgradeApprovalGuardHandler) -> None:
@@ -247,6 +250,7 @@ class TestEnvVarBypass:
         assert handler.matches(hook_input) is True
         result = handler.handle(hook_input)
         assert result.decision == "deny"
+        assert result.reason is not None
         assert result.reason.startswith(f"BLOCKED [{ENV_RULE_ID}]")
 
     @pytest.mark.parametrize(
@@ -888,6 +892,7 @@ class TestVenvVersionStampForgery:
         assert handler.matches(hook_input) is True
         result = handler.handle(hook_input)
         assert result.decision == "deny"
+        assert result.reason is not None
         assert result.reason.startswith(f"BLOCKED [{AGENT_RULE_ID}]")
 
     def test_denies_write_tool(self, handler: UpgradeApprovalGuardHandler) -> None:

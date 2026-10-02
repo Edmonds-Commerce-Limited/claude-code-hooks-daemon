@@ -39,7 +39,7 @@ Full write-ups are in [NIGGLES.md](NIGGLES.md). One line each here:
 | #          | Verdict                                                                                                          | Origin              | Status                  |
 | ---------- | ---------------------------------------------------------------------------------------------------------------- | ------------------- | ----------------------- |
 | N286       | Main full CI went red after N264/N266: a playbook probe, a blindness verdict and a skip-list finding             | Main CI             | ✅ Fixed (1bbf676a0)    |
-| N285       | `PYTHONPATH=` before an interpreter held in a variable is denied as an upgrade-approval bypass                   | N283 agent          | ⬜ Open                 |
+| N285       | `PYTHONPATH=` before an interpreter held in a variable is denied as an upgrade-approval bypass                   | N283 agent          | ✅ Fixed (a9d6d9aa0)    |
 | N284       | The pipe blocker reads `\|` inside a double-quoted grep pattern as a pipe                                        | Coordinator         | ✅ Fixed (72e9018e3)    |
 | N283       | `secret_file_guard` misses a protected name in git `rev:path` syntax at the repository root (security)           | N253 analysis       | ✅ Fixed (caa8ff966)    |
 | N282       | The N264 cross-worktree guard judges an in-process teammate by the coordinator's working directory               | Coordinator         | ⬜ Open                 |
