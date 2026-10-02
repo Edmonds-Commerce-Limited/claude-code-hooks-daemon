@@ -503,3 +503,49 @@ class TestJudgesTheCommittedTree:
 
         assert result.decision == Decision.ALLOW
         assert result.context == []
+
+
+class TestPathspecCommitJudgesWhatItRecords:
+    """Ledger 00474 N245: ``git commit <pathspec>`` records HEAD plus the named paths.
+
+    An unindexed plan folder on the disk is not in that commit, so it is not a
+    defect of it. The same folder staged IS in a ``--include`` commit.
+    """
+
+    _UNINDEXED = "00002-second"
+
+    def _stage_unindexed_folder(self, repo: Path) -> None:
+        folder = repo / _PLAN_DIR_REL / self._UNINDEXED
+        folder.mkdir()
+        (folder / "PLAN.md").write_text(
+            "# Plan 00002: second\n\n**Status**: In Progress\n\n- [ ] ⬜ **Task 1.1**: x\n"
+        )
+        (repo / "src").mkdir()
+        (repo / "src" / "thing.py").write_text("VALUE = 1\n")
+        _git(repo, "add", "src/thing.py")
+
+    def test_an_unindexed_folder_the_commit_does_not_record_is_not_denied(self, repo: Path) -> None:
+        self._stage_unindexed_folder(repo)
+        _git(repo, "add", f"{_PLAN_DIR_REL}/{self._UNINDEXED}")
+
+        with _patched_root(repo):
+            result = _handler("block").handle(
+                _bash_input('git commit -m "Plan 00001: thing" src/thing.py')
+            )
+
+        assert result.decision == Decision.ALLOW
+
+    def test_include_records_the_staged_folder_so_the_unindexed_row_is_denied(
+        self, repo: Path
+    ) -> None:
+        self._stage_unindexed_folder(repo)
+        _git(repo, "add", f"{_PLAN_DIR_REL}/{self._UNINDEXED}")
+
+        with _patched_root(repo):
+            result = _handler("block").handle(
+                _bash_input('git commit -m "Plan 00001: thing" --include src/thing.py')
+            )
+
+        assert result.decision == Decision.DENY
+        assert result.reason is not None
+        assert "row-folder-bijection" in result.reason

@@ -710,7 +710,7 @@ Recorded only on `worktree-n466-n53`, which was dropped. Their write-ups are kep
 verbatim in [CARRIED-N53-BRANCH.md](CARRIED-N53-BRANCH.md). Five were remedied on
 that branch only, so all seven are open on `main`.
 
-**Status**: ⬜ Open (six of seven). N244 is fixed, see below.
+**Status**: ⬜ Open (five of seven). N244 and N245 are fixed, see below.
 
 - **N244**: **Fixed** (merge 52fd9cd9b). On a bare `git commit`, plan QA now scans
   the INDEX instead of the disk. It uses one `ls-files -s` and one `cat-file --batch`
@@ -720,6 +720,20 @@ that branch only, so all seven are open on `main`.
   (`path-existence`, `plan-doc-size`, `journal-entry-ordering`, `same-commit-plan-doc`,
   and the journal lookups in `checks/common.py`). Report:
   [subagent-reports/261002-n244-committed-tree-sonnet.md](subagent-reports/261002-n244-committed-tree-sonnet.md).
+- **N245**: **Fixed** (branch `worktree-n245-pathspec`, not yet merged). Every commit
+  gate now judges the tree the commit records, by its form. `git commit <paths>` records
+  HEAD plus the named paths' working-tree content. `--include` records the index plus
+  that overlay. Before, `staged_lint_gate`, `remote_docs_commit_gate`, plan QA and docs QA
+  read the whole index, so a staged break the disk had repaired was denied. Worse,
+  `sensitive_content` read only the index, so a term in a named file's unstaged edit
+  reached the commit unseen. `GitFactsBase` takes `include=` and lists the recorded tree
+  (a listing value of `working-tree` means "read the disk"); the gates build on it.
+  `guard_config_commit_gate` now reads the index for `--include`. A pathspec held in a
+  file (`--pathspec-from-file`) is scanned as the index and the working tree together.
+  Still not covered: `-a` in plan and docs QA, an unborn HEAD with a pathspec, a bare
+  commit's file content in `remote_docs_commit_gate` (it reads the disk), and N246.
+  Report:
+  [subagent-reports/261002-n245-pathspec-sonnet.md](subagent-reports/261002-n245-pathspec-sonnet.md).
 
 ### N253–N256 — carried from ledger 00466, their branch dropped
 

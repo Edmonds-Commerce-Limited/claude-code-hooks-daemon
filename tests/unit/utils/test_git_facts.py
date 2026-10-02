@@ -289,3 +289,210 @@ class TestIndexTexts:
 
     def test_empty_request_spawns_nothing_and_returns_nothing(self, repo: Path) -> None:
         assert GitFactsBase(repo).index_texts({}, []) == {}
+
+
+def _write(root: Path, name: str, text: str) -> None:
+    path = root / name
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+
+
+@pytest.fixture
+def messy(tmp_path: Path) -> Path:
+    """A repository whose index, working tree and HEAD all disagree.
+
+    a: staged edit, then a different working-tree edit (named by the commits)
+    b: staged edit only                                     (never named)
+    new: staged addition                                    (never named)
+    c: unstaged edit                                        (named)
+    e: deleted on disk, unstaged                            (named)
+    f: staged edit, working tree put back to HEAD           (named)
+    g: staged deletion                                      (never named)
+    """
+    root = tmp_path / "messy"
+    root.mkdir()
+    _git(root, "init")
+    _git(root, "config", "user.email", "t@example.com")
+    _git(root, "config", "user.name", "T")
+    for name in ("d/a.txt", "d/b.txt", "c.txt", "e.txt", "f.txt", "g.txt"):
+        _write(root, name, "head\n")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-m", "initial")
+    _write(root, "d/a.txt", "staged-a\n")
+    _write(root, "d/b.txt", "staged-b\n")
+    _write(root, "d/new.txt", "staged-new\n")
+    _write(root, "f.txt", "staged-f\n")
+    _git(root, "add", "-A")
+    _git(root, "rm", "-q", "g.txt")
+    _write(root, "d/a.txt", "worktree-a\n")
+    _write(root, "c.txt", "worktree-c\n")
+    (root / "e.txt").unlink()
+    _write(root, "f.txt", "head\n")
+    return root
+
+
+def _tree_after_a_real_commit(root: Path, *commit_args: str) -> dict[str, str]:
+    """Make the real commit and read what it recorded: path -> text."""
+    _git(root, "commit", "-q", "-m", "x", *commit_args)
+    names = subprocess.run(  # nosec B603 B607 - trusted system tool, list form
+        ["git", "-C", str(root), "ls-tree", "-r", "--name-only", "-z", "HEAD"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.split("\0")
+    return {
+        name: subprocess.run(  # nosec B603 B607 - trusted system tool, list form
+            ["git", "-C", str(root), "show", f"HEAD:{name}"],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout
+        for name in names
+        if name
+    }
+
+
+def _predicted_tree(facts: GitFactsBase) -> dict[str, str]:
+    listing = facts.index_listing(".")
+    assert listing is not None
+    texts = facts.index_texts(listing, list(listing))
+    assert texts is not None
+    return texts
+
+
+_NAMED = ["d/a.txt", "c.txt", "e.txt", "f.txt"]
+
+
+class TestTheRecordedTreeOfEachCommitForm:
+    """Ledger 00474 N245: a pathspec commit records a tree the index does not hold.
+
+    Every case here makes the REAL commit and compares what git recorded with
+    what the facts predicted beforehand, so the semantics are git's own and not
+    this module's reading of them.
+    """
+
+    def test_bare_commit_is_the_index(self, messy: Path) -> None:
+        predicted = _predicted_tree(GitFactsBase(messy))
+
+        assert predicted == _tree_after_a_real_commit(messy)
+
+    @pytest.mark.parametrize("pathspecs", [_NAMED, ["d", "c.txt", "e.txt", "f.txt"]])
+    def test_pathspec_commit_is_head_with_the_named_working_tree_content(
+        self, messy: Path, pathspecs: list[str]
+    ) -> None:
+        predicted = _predicted_tree(GitFactsBase(messy, pathspecs=pathspecs))
+
+        recorded = _tree_after_a_real_commit(messy, *pathspecs)
+        assert predicted == recorded
+        # The cases that tell it from the index, spelled out.
+        assert recorded["d/a.txt"] == "worktree-a\n"
+        assert recorded["d/b.txt"] == ("staged-b\n" if "d" in pathspecs else "head\n")
+        assert recorded["f.txt"] == "head\n"
+        assert "e.txt" not in recorded
+        assert recorded["g.txt"] == "head\n"
+
+    @pytest.mark.parametrize("pathspecs", [_NAMED, ["d/a.txt", "c.txt", "e.txt", "f.txt", "d"]])
+    def test_include_commit_is_the_index_with_the_named_working_tree_content(
+        self, messy: Path, pathspecs: list[str]
+    ) -> None:
+        predicted = _predicted_tree(GitFactsBase(messy, pathspecs=pathspecs, include=True))
+
+        recorded = _tree_after_a_real_commit(messy, "--include", *pathspecs)
+        assert predicted == recorded
+        assert recorded["d/b.txt"] == "staged-b\n"
+        assert recorded["d/new.txt"] == "staged-new\n"
+        assert "g.txt" not in recorded
+
+    def test_include_leaves_an_unnamed_staged_change_at_its_index_content(
+        self, messy: Path
+    ) -> None:
+        pathspecs = ["c.txt"]
+
+        predicted = _predicted_tree(GitFactsBase(messy, pathspecs=pathspecs, include=True))
+
+        recorded = _tree_after_a_real_commit(messy, "-i", *pathspecs)
+        assert predicted == recorded
+        assert recorded["d/a.txt"] == "staged-a\n"
+        assert recorded["f.txt"] == "staged-f\n"
+        assert recorded["c.txt"] == "worktree-c\n"
+
+    def test_a_working_tree_listing_entry_is_read_from_the_disk(self, messy: Path) -> None:
+        facts = GitFactsBase(messy, pathspecs=["d/a.txt"])
+        listing = facts.index_listing(".")
+        assert listing is not None
+
+        assert facts.index_texts(listing, ["d/a.txt"]) == {"d/a.txt": "worktree-a\n"}
+
+    @pytest.mark.parametrize(
+        ("pathspecs", "include"), [(_NAMED, False), (_NAMED, True), (["c.txt"], True)]
+    )
+    def test_staged_changes_are_the_paths_the_commit_changes(
+        self, messy: Path, pathspecs: list[str], include: bool
+    ) -> None:
+        facts = GitFactsBase(messy, pathspecs=pathspecs, include=include)
+        predicted = {change.path for change in facts.staged_changes()}
+
+        _git(messy, "commit", "-q", "-m", "x", *(["-i"] if include else []), *pathspecs)
+        changed = subprocess.run(  # nosec B603 B607 - trusted system tool, list form
+            ["git", "-C", str(messy), "diff", "--name-only", "-z", "HEAD~1", "HEAD"],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.split("\0")
+        assert predicted == {name for name in changed if name}
+
+    def test_recorded_text_follows_where_the_commit_takes_each_path_from(self, messy: Path) -> None:
+        include = GitFactsBase(messy, pathspecs=["d/a.txt"], include=True)
+        only = GitFactsBase(messy, pathspecs=["d/a.txt"])
+        bare = GitFactsBase(messy)
+
+        assert include.recorded_text("d/a.txt") == "worktree-a\n"
+        assert include.recorded_text("d/b.txt") == "staged-b\n"
+        assert only.recorded_text("d/a.txt") == "worktree-a\n"
+        assert bare.recorded_text("d/a.txt") == "staged-a\n"
+
+    def test_named_paths_are_what_the_pathspecs_select(self, messy: Path) -> None:
+        facts = GitFactsBase(messy, pathspecs=["d", "c.txt"], include=True)
+
+        assert facts.named_paths() == frozenset({"d/a.txt", "d/b.txt", "d/new.txt", "c.txt"})
+
+    @pytest.mark.parametrize("include", [False, True])
+    def test_a_listing_is_limited_to_its_prefix(self, messy: Path, include: bool) -> None:
+        facts = GitFactsBase(messy, pathspecs=["d/a.txt", "c.txt"], include=include)
+
+        listing = facts.index_listing("d")
+
+        assert listing is not None
+        assert set(listing) <= {"d/a.txt", "d/b.txt", "d/new.txt"}
+        assert listing["d/a.txt"] == "working-tree"
+        assert ("d/new.txt" in listing) is include
+
+    def test_the_unnamed_staged_changes_join_the_named_ones_under_include(
+        self, messy: Path
+    ) -> None:
+        facts = GitFactsBase(messy, pathspecs=["c.txt"], include=True)
+
+        assert {change.path: change.status for change in facts.staged_changes()} == {
+            "c.txt": "M",
+            "d/a.txt": "M",
+            "d/b.txt": "M",
+            "d/new.txt": "A",
+            "f.txt": "M",
+            "g.txt": "D",
+        }
+
+    def test_an_unreadable_repository_is_unavailable_not_empty(self, tmp_path: Path) -> None:
+        facts = GitFactsBase(tmp_path, pathspecs=["x"])
+
+        assert facts.index_listing(".") is None
+        assert facts.named_paths() is None
+
+    def test_a_working_tree_file_that_cannot_be_read_makes_the_texts_unavailable(
+        self, messy: Path
+    ) -> None:
+        facts = GitFactsBase(messy, pathspecs=["d/a.txt"])
+        listing = facts.index_listing(".")
+        assert listing is not None
+        (messy / "d" / "a.txt").unlink()
+
+        assert facts.index_texts(listing, ["d/a.txt"]) is None

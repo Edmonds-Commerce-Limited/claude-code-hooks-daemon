@@ -34,14 +34,20 @@ from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.core.rule import Rule
 from claude_code_hooks_daemon.core.utils import get_bash_command
-from claude_code_hooks_daemon.utils.git_commit_parsing import is_git_commit, tokenise_command
+from claude_code_hooks_daemon.utils.git_commit_parsing import (
+    CommitForm,
+    extract_commit_form,
+    is_git_commit,
+    tokenise_command,
+)
+from claude_code_hooks_daemon.utils.git_facts import GitFactsBase
 
 logger = logging.getLogger(__name__)
 
 _MARKDOWN_SUFFIX: Final[str] = ".md"
 _FALLBACK_REMOTE_DOCS_DIR: Final[str] = "remote-docs"
 # Added, Copied, Modified: a Deleted path is not a document being introduced.
-_DIFF_FILTER: Final[str] = "ACM"
+_INTRODUCED_STATUSES: Final[str] = "ACM"
 
 _RULE_STAGED_PROVENANCE: Final[Rule] = Rule(
     rule_id=RuleID.REMOTE_DOCS_STAGED_PROVENANCE,
@@ -78,22 +84,24 @@ class RemoteDocsCommitGateHandler(PreToolUseHandlerBase):
         )
         # Injection points for tests; production reads the real index.
         self.project_root_reader: Callable[[], Path] = ProjectContext.project_root
-        self.staged_reader: Callable[[], list[str]] = self._read_staged
+        self.staged_reader: Callable[[CommitForm], list[str]] = self._read_staged
 
-    def _read_staged(self) -> list[str]:
-        """Repository-relative paths added/copied/modified in the index."""
-        from claude_code_hooks_daemon.utils.git_repo import run_git
+    def _read_staged(self, form: CommitForm) -> list[str]:
+        """Repository-relative paths the commit adds, copies or modifies.
 
-        result = run_git(
-            self.project_root_reader(),
-            "diff",
-            "--cached",
-            "--name-only",
-            f"--diff-filter={_DIFF_FILTER}",
+        What the commit RECORDS, by its form (ledger 00474 N245): the index for
+        a bare commit, the named paths' change against HEAD for a pathspec
+        commit, and both for ``--include``. A path staged but not named by a
+        pathspec commit is not in it.
+        """
+        facts = GitFactsBase(
+            self.project_root_reader(), pathspecs=form.pathspecs, include=form.include
         )
-        if result.returncode != 0:
-            return []
-        return [line.strip() for line in result.stdout.splitlines() if line.strip()]
+        return [
+            change.path
+            for change in facts.staged_changes()
+            if change.status[:1] in _INTRODUCED_STATUSES
+        ]
 
     def _tree_name(self) -> str:
         layout = self._project_layout
@@ -113,7 +121,7 @@ class RemoteDocsCommitGateHandler(PreToolUseHandlerBase):
         from claude_code_hooks_daemon.remote_docs.provenance import parse_provenance
 
         try:
-            staged = self.staged_reader()
+            staged = self.staged_reader(extract_commit_form(get_bash_command(hook_input) or ""))
             project_root = self.project_root_reader()
         except OSError as exc:
             # A gate that cannot read the index must not block every commit.

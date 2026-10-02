@@ -536,6 +536,105 @@ def commit_pathspecs(options: list[str]) -> list[str]:
     return pathspecs
 
 
+#: ``--include`` and ``--pathspec-from-file`` as git accepts them: any
+#: unambiguous prefix. ``--in`` is also ``--interactive`` and ``--pathspec-f``
+#: is also ``--pathspec-file-nul``, so each has a shortest accepted spelling.
+_INCLUDE_LONG_NAME: Final[str] = "include"
+_INCLUDE_MIN_PREFIX: Final[int] = len("inc")
+_INCLUDE_SHORT_LETTER: Final[str] = "i"
+_PATHSPEC_FILE_LONG_NAME: Final[str] = "pathspec-from-file"
+_PATHSPEC_FILE_MIN_PREFIX: Final[int] = len("pathspec-fr")
+
+
+@dataclass(frozen=True)
+class CommitForm:
+    """The part of a ``git commit`` command line that decides which tree it records.
+
+    * no ``pathspecs``: the index (``-a`` is read separately, by
+      :func:`commits_working_tree`);
+    * ``pathspecs``: HEAD's tree with those paths' WORKING-TREE content (the
+      default ``--only``), the index ignored for them and every other staged
+      change left out of the commit;
+    * ``pathspecs`` with ``include``: the index, with those paths' working-tree
+      content laid over it.
+
+    ``pathspec_from_file`` means the named paths are in a file the command line
+    does not carry, so the recorded tree cannot be stated from it.
+    """
+
+    pathspecs: tuple[str, ...] = ()
+    include: bool = False
+    pathspec_from_file: bool = False
+
+
+def _long_option_is(option: str, name: str, minimum_prefix: int) -> bool:
+    """Whether the long ``option`` (``--name`` or ``--name=value``) spells ``name``."""
+    spelled = option[len(_LONG_PREFIX) :].partition(_ASSIGNMENT_SIGN)[0]
+    return len(spelled) >= minimum_prefix and name.startswith(spelled)
+
+
+def commit_includes_index(options: list[str]) -> bool:
+    """True when this ``git commit`` option run carries ``-i``/``--include``.
+
+    Walked like :func:`commits_working_tree`: an option's value, and anything
+    after ``--``, is an operand, so ``-m 'about -i'`` and a file called ``-i``
+    after the separator are not the flag.
+    """
+    index = 0
+    while index < len(options):
+        option = options[index]
+        index += 1
+        if option == _PATHSPEC_SEPARATOR:
+            return False
+        if not option.startswith("-") or len(option) < 2:
+            continue
+        if option.startswith(_LONG_PREFIX):
+            if _long_option_is(option, _INCLUDE_LONG_NAME, _INCLUDE_MIN_PREFIX):
+                return True
+            if _ASSIGNMENT_SIGN not in option and _long_option_takes_value(option):
+                index += 1
+            continue
+        letters = option[1:]
+        for position, letter in enumerate(letters):
+            if letter == _INCLUDE_SHORT_LETTER:
+                return True
+            if letter in _OPTIONAL_VALUE_LETTERS or letter in _REQUIRED_VALUE_LETTERS:
+                if letter in _REQUIRED_VALUE_LETTERS and position == len(letters) - 1:
+                    index += 1
+                break
+    return False
+
+
+def _names_a_pathspec_file(options: list[str]) -> bool:
+    """Whether an option before ``--`` is ``--pathspec-from-file``."""
+    for option in options:
+        if option == _PATHSPEC_SEPARATOR:
+            return False
+        if option.startswith(_LONG_PREFIX) and _long_option_is(
+            option, _PATHSPEC_FILE_LONG_NAME, _PATHSPEC_FILE_MIN_PREFIX
+        ):
+            return True
+    return False
+
+
+def extract_commit_form(command: str) -> CommitForm:
+    """The :class:`CommitForm` of the first ``git commit`` in ``command``.
+
+    The bare form (what a commit with no path named records) when the command
+    holds no commit or cannot be read.
+    """
+    words = command_words(command)
+    subcommand = commit_subcommand_index(words)
+    if subcommand is None:
+        return CommitForm()
+    options = commit_option_words(words, subcommand + 1)
+    return CommitForm(
+        pathspecs=tuple(commit_pathspecs(options)),
+        include=commit_includes_index(options),
+        pathspec_from_file=_names_a_pathspec_file(options),
+    )
+
+
 def commit_subcommand_index(words: list[str]) -> int | None:
     """Index of the first ``commit`` subcommand of a ``git`` word, else None."""
     for position, word in enumerate(words):

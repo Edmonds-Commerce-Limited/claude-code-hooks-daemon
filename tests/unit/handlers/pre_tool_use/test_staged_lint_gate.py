@@ -266,6 +266,67 @@ class TestModes:
         assert not result.context
 
 
+class TestEachCommitFormLintsWhatItRecords:
+    """Ledger 00474 N245: the files linted are the files the commit records.
+
+    ``git commit <pathspec>`` records the named paths only, so a broken file
+    that is merely staged is not in it, and a broken named file that is not
+    staged at all is. ``--include`` records the index as well.
+    """
+
+    @pytest.fixture
+    def tracked(self, repo: Path) -> Path:
+        _stage_file(repo, "clean.py", "def clean() -> None:\n    return None\n")
+        _stage_file(repo, "later.py", "def later() -> None:\n    return None\n")
+        _git(repo, "commit", "-m", "tracked")
+        return repo
+
+    def _handle(self, handler: StagedLintGateHandler, repo: Path, command: str) -> str:
+        with _patched_root(repo):
+            return " ".join(handler.handle(_bash(command)).context)
+
+    def test_a_staged_broken_file_the_pathspec_commit_does_not_name_is_not_linted(
+        self, handler: StagedLintGateHandler, tracked: Path
+    ) -> None:
+        _stage_file(tracked, "broken.py", "def broken(\n")
+        (tracked / "clean.py").write_text("def clean() -> int:\n    return 1\n")
+
+        rendered = self._handle(handler, tracked, 'git commit -m "x" clean.py')
+
+        assert "broken.py" not in rendered
+
+    def test_an_unstaged_broken_file_a_pathspec_commit_names_is_linted(
+        self, handler: StagedLintGateHandler, tracked: Path
+    ) -> None:
+        (tracked / "later.py").write_text("def later(\n")
+
+        rendered = self._handle(handler, tracked, 'git commit -m "x" later.py')
+
+        assert "later.py" in rendered
+
+    def test_include_lints_the_index_and_the_named_paths(
+        self, handler: StagedLintGateHandler, tracked: Path
+    ) -> None:
+        _stage_file(tracked, "broken.py", "def broken(\n")
+        (tracked / "later.py").write_text("def later(\n")
+
+        rendered = self._handle(handler, tracked, 'git commit -m "x" --include later.py')
+
+        assert "broken.py" in rendered
+        assert "later.py" in rendered
+
+    def test_a_bare_commit_still_lints_the_index(
+        self, handler: StagedLintGateHandler, tracked: Path
+    ) -> None:
+        _stage_file(tracked, "broken.py", "def broken(\n")
+        (tracked / "later.py").write_text("def later(\n")
+
+        rendered = self._handle(handler, tracked, 'git commit -m "x"')
+
+        assert "broken.py" in rendered
+        assert "later.py" not in rendered
+
+
 class TestMaxFiles:
     def test_standing_down_names_how_many_files_were_skipped(
         self, handler: StagedLintGateHandler, repo: Path

@@ -89,6 +89,17 @@ class TestWhichVersionTheCommitRecords:
         """The commit cannot carry a config change, so there is nothing to say."""
         assert recorded_config_source("git commit -m msg docs/a.md", CONFIG_RELATIVE_PATH) is None
 
+    def test_include_with_a_pathspec_not_naming_the_config_still_records_the_index(self) -> None:
+        """Ledger 00474 N245: `--include` records the index, config and all."""
+        assert recorded_config_source(
+            "git commit -m msg --include docs/a.md", CONFIG_RELATIVE_PATH
+        ) is (RecordedSource.INDEX)
+
+    def test_include_naming_the_config_records_its_working_tree(self) -> None:
+        assert recorded_config_source(
+            "git commit -m msg -i .claude/hooks-daemon.yaml", CONFIG_RELATIVE_PATH
+        ) is (RecordedSource.WORKING_TREE)
+
     def test_a_directory_pathspec_containing_the_config_counts(self) -> None:
         assert recorded_config_source("git commit -m msg .claude", CONFIG_RELATIVE_PATH) is (
             RecordedSource.WORKING_TREE

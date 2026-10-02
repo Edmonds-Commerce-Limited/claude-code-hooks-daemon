@@ -31,10 +31,10 @@ from claude_code_hooks_daemon.plan_qa.runner import run_stage
 from claude_code_hooks_daemon.plan_qa.types import Level, Stage
 from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command_for_docs
 from claude_code_hooks_daemon.utils.git_commit_parsing import (
-    extract_commit_message as _extract_commit_message,
+    extract_commit_form as _extract_commit_form,
 )
 from claude_code_hooks_daemon.utils.git_commit_parsing import (
-    extract_commit_pathspecs as _extract_commit_pathspecs,
+    extract_commit_message as _extract_commit_message,
 )
 from claude_code_hooks_daemon.utils.git_commit_parsing import (
     is_git_commit as _is_git_commit,
@@ -118,13 +118,15 @@ class PlanQaCommitGateHandler(PreToolUseHandlerBase):
 
         command = hook_input.get(HookInputField.TOOL_INPUT, {}).get(_FIELD_COMMAND, "")
         tokens = _tokenise(command)
+        form = _extract_commit_form(command)
         try:
             context = staged_context(
                 project_root=project_root,
                 plan_dir_rel=plan_dir_rel,
                 policy=self._plan_qa,
                 commit_message=_extract_commit_message(tokens),
-                pathspecs=_extract_commit_pathspecs(command),
+                pathspecs=form.pathspecs,
+                include=form.include,
                 exclude_paths=self._project_exclude_paths,
             )
         except FileNotFoundError:
