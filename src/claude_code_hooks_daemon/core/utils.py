@@ -96,8 +96,24 @@ _HOME_PREFIX: Final[str] = "~"
 _HOME_RELATIVE_PREFIX: Final[str] = "~/"
 _HOME_VARIABLE: Final[str] = "HOME"
 
-#: Device nodes are not files a handler should judge.
-_DEV_PREFIX: Final[str] = "/dev/"
+#: Device nodes are not files a handler should judge. Only real nodes: `/dev/shm`
+#: and `/dev/mqueue` are tmpfs directories, so a write there is an ordinary
+#: write outside the project.
+_DEVICE_NODES: Final[frozenset[str]] = frozenset(
+    {
+        "/dev/null",
+        "/dev/zero",
+        "/dev/full",
+        "/dev/random",
+        "/dev/urandom",
+        "/dev/stdin",
+        "/dev/stdout",
+        "/dev/stderr",
+        "/dev/tty",
+        "/dev/console",
+    }
+)
+_DEVICE_NODE_RE: Final[re.Pattern[str]] = re.compile(r"/dev/(?:tty[A-Za-z0-9]+|(?:pts|fd)/[0-9]+)")
 
 #: Cheap "could this text name a write target at all?" test, run over a heredoc
 #: body before deciding to tokenise it. Every operator and verb recognised by
@@ -422,8 +438,12 @@ def substitute_cwd_expansions(token: str, command: str, cwd: Any) -> str:
 
 def is_device_path(target: str) -> bool:
     """Is ``target`` a device node (``/dev/null``), which no handler judges
-    as a file written?"""
-    return target.startswith(_DEV_PREFIX)
+    as a file written?
+
+    The path is normalised first, so ``/dev/../tmp/x`` is judged as ``/tmp/x``.
+    """
+    normalised = os.path.normpath(target)
+    return normalised in _DEVICE_NODES or _DEVICE_NODE_RE.fullmatch(normalised) is not None
 
 
 def needs_expansion(token: str) -> bool:
@@ -985,8 +1005,6 @@ def _resolve_write_target(target: str, cwd: Any) -> str | None:
     if is_device_path(target):
         return None
 
-    # Must run AFTER the checks above: they key on the token as written (a
-    # bare "/dev/" only starts with `_DEV_PREFIX` while its slash is intact).
     target = target.rstrip("/") or "/"
 
     if target.startswith(_HOME_PREFIX):

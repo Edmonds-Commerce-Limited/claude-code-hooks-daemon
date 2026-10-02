@@ -477,6 +477,47 @@ class TestTheNullDeviceIsNotAWriteOutsideTheProject:
     ) -> None:
         assert handler.matches(_bash(command, cwd="/repo")) is True
 
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "echo x > /dev/shm/out.txt",
+            "curl -o /dev/shm/out.txt https://example.com",
+            "cp report.md /dev/shm/report.md",
+            "tee /dev/shm/x.log < f",
+            "echo x > /dev/mqueue/q",
+            "echo x > /dev/../tmp/x",
+            "cp a /dev/../tmp/x",
+            "curl -o /dev/../tmp/x https://example.com",
+            "tee /dev/../tmp/x < f",
+        ],
+    )
+    def test_a_real_directory_under_dev_is_an_outside_write(
+        self, handler: ProjectContainmentHandler, command: str
+    ) -> None:
+        """`/dev/shm` is a tmpfs outside the repository, and `/dev/../tmp/x` is
+        `/tmp/x` once normalised."""
+        assert handler.matches(_bash(command, cwd="/repo")) is True
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "echo x > /dev/null",
+            "echo x >/dev/stderr",
+            "echo x > /dev/stdout",
+            "echo x 2>/dev/null",
+            "echo x > /dev/tty",
+            "echo x > /dev/pts/3",
+            "echo x > /dev/fd/2",
+            "echo x > /dev/zero",
+            "echo x >&2",
+            "curl -o /dev/null https://example.com",
+        ],
+    )
+    def test_a_device_node_is_allowed(
+        self, handler: ProjectContainmentHandler, command: str
+    ) -> None:
+        assert handler.matches(_bash(command, cwd="/repo")) is False
+
 
 class TestTheWorkingDirectoryExpansionsAreResolved:
     """Plan 00483 Task 3.2 (FP-B, in-scope part): `$PWD`, `$(pwd)` and
