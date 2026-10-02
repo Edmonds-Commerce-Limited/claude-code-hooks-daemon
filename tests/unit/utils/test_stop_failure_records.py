@@ -119,6 +119,18 @@ class TestNonFiniteTimestamps:
         )
         assert read_records(path) == []
 
+    @pytest.mark.parametrize("literal", ["1e300", "-1e300", "1" + "0" * 400, "-1"])
+    def test_a_time_datetime_cannot_represent_reads_as_no_record(
+        self, tmp_path: Path, literal: str
+    ) -> None:
+        path = tmp_path / "records.json"
+        path.write_text(
+            '{"records": [{"session_id": "s1", "error": "rate_limit", '
+            f'"recorded_at": {literal}, "resolved_at": null}}]}}',
+            encoding="utf-8",
+        )
+        assert read_records(path) == []
+
 
 class TestResolving:
     def test_a_resolved_failure_is_no_longer_unresolved(self, tmp_path: Path) -> None:

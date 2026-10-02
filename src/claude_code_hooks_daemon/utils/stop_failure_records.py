@@ -29,7 +29,6 @@ from __future__ import annotations
 
 import json
 import logging
-import math
 import threading
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -57,6 +56,11 @@ _FIELD_ERROR: Final[str] = "error"
 _FIELD_RECORDED_AT: Final[str] = "recorded_at"
 _FIELD_RESOLVED_AT: Final[str] = "resolved_at"
 
+#: The epoch-seconds range a record time must fall in: 1970 up to the last
+#: second of year 9999, the largest time ``datetime`` can represent.
+_MIN_EPOCH_SECONDS: Final[int] = 0
+_MAX_EPOCH_SECONDS: Final[int] = 253_402_300_799
+
 #: Hook events dispatch on concurrent threads of the one daemon process, and a
 #: record is a read-modify-write of one file.
 _WRITE_LOCK: Final[threading.Lock] = threading.Lock()
@@ -81,17 +85,18 @@ def default_records_path() -> Path | None:
 
 
 def _number(value: object) -> float | None:
-    """``value`` as a float when it is a finite real number (a bool is not one), else None.
+    """``value`` as a float when it is a representable epoch time, else None.
 
-    ``json.loads`` accepts ``NaN`` and ``Infinity``; neither is a time.
+    A bool is not a number here. ``json.loads`` accepts ``NaN``, ``Infinity`` and
+    integers too large for a float; the range test rejects all three before any
+    conversion (every comparison with NaN is false), so ``datetime.fromtimestamp``
+    is never handed a value it cannot represent.
     """
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         return None
-    try:
-        number = float(value)
-    except OverflowError:
+    if not _MIN_EPOCH_SECONDS <= value <= _MAX_EPOCH_SECONDS:
         return None
-    return number if math.isfinite(number) else None
+    return float(value)
 
 
 def _parse_entry(entry: object) -> StopFailureRecord | None:
