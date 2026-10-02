@@ -10,15 +10,23 @@ window at or above it adds its percentage and reset countdown
 import re
 from collections.abc import Iterator
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 from tests.support.status_usage import NOW, load_status_payload
 
 from claude_code_hooks_daemon.core.data_layer import get_data_layer, reset_data_layer
+from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.handlers.status_line.usage_indicator import (
     UsageIndicatorHandler,
     format_countdown,
 )
+from claude_code_hooks_daemon.utils.usage_pause import (
+    WINDOW_FIVE_HOUR,
+    UsagePause,
+    write_usage_pause,
+)
+from claude_code_hooks_daemon.utils.usage_pause_gate import resume_schedule
 
 _ANSI = re.compile(r"\033\[[0-9;]*m")
 
@@ -204,6 +212,69 @@ class TestFailSilent:
             "claude_code_hooks_daemon.handlers.status_line.usage_indicator.latest_usage", boom
         )
         assert _render() is None
+
+
+class TestPausedSession:
+    """Plan 00479 Task 4.7: a usage-paused session shows ``⏸ usage <resume HH:MM>``."""
+
+    _SESSION = "sess-1"
+
+    def _pause(self, tmp_path: Path, *, session: str = "sess-1") -> float:
+        resume_at = NOW + 3 * 3600
+        write_usage_pause(
+            tmp_path,
+            UsagePause(
+                session_id=session,
+                paused_at=NOW - 60,
+                resume_at=resume_at,
+                window=WINDOW_FIVE_HOUR,
+                used_percentage=91.0,
+                ceiling=80.0,
+                reason="five_hour window at 91% (ceiling 80%)",
+            ),
+        )
+        return resume_at
+
+    def _render_paused(self, tmp_path: Path, session: str = "sess-1") -> str | None:
+        with patch.object(ProjectContext, "daemon_untracked_dir", return_value=tmp_path):
+            result = UsageIndicatorHandler().handle({"session_id": session})
+        return result.context[0] if result.context else None
+
+    def test_shows_the_pause_and_resume_time(self, tmp_path: Path) -> None:
+        resume_at = self._pause(tmp_path)
+        text = self._render_paused(tmp_path)
+        assert text is not None
+        assert f"⏸ usage {resume_schedule(resume_at).hhmm}" in _plain(text)
+
+    def test_keeps_the_usage_chips_when_there_is_a_snapshot(self, tmp_path: Path) -> None:
+        self._pause(tmp_path)
+        _feed("main_thread_fractional.json")
+        text = self._render_paused(tmp_path)
+        assert text is not None
+        plain = _plain(text)
+        assert "⏸ usage" in plain
+        assert "5h 67%" in plain
+
+    def test_shows_the_pause_even_with_no_usage_data(self, tmp_path: Path) -> None:
+        self._pause(tmp_path)
+        text = self._render_paused(tmp_path)
+        assert text is not None
+        assert "📈" not in text
+
+    def test_another_session_shows_no_pause(self, tmp_path: Path) -> None:
+        self._pause(tmp_path, session="someone-else")
+        assert self._render_paused(tmp_path) is None
+
+    def test_a_payload_without_a_session_shows_no_pause(self, tmp_path: Path) -> None:
+        self._pause(tmp_path)
+        with patch.object(ProjectContext, "daemon_untracked_dir", return_value=tmp_path):
+            result = UsageIndicatorHandler().handle({})
+        assert result.context == []
+
+    def test_explanation_mentions_the_pause_glyph(self) -> None:
+        explanation = UsageIndicatorHandler().explain_segment()
+        assert "⏸" in explanation.glyphs
+        assert "paused" in explanation.how_to_read.lower()
 
 
 class TestHandlerContract:
