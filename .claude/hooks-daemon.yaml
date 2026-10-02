@@ -1255,6 +1255,16 @@ handlers:
       enabled: true
       priority: 15
 
+    usage_indicator:   # Subscription usage: 5h and 7d windows with reset countdown (Plan 00479)
+      # Hidden when Claude Code reports no usage data (API-key sessions, before the first response).
+      enabled: true
+      priority: 16
+      options:
+        warn_pct: 60                   # yellow from here
+        high_pct: 80                   # orange from here
+        critical_pct: 90               # bold red from here
+        seven_day_countdown_pct: 80    # 7d shows its reset countdown from here
+
   worktree_create:  # WorktreeCreate event (isolation:worktree agents / --worktree sessions)
     worktree_create:  # Creates the git worktree at a semantic path and echoes it
       enabled: true

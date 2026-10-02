@@ -530,6 +530,9 @@ class Priority:
     # this prefix is being re-read cheaply), so it renders in the same cluster
     # rather than out by the working directory.
     PROMPT_CACHE_INDICATOR = 15
+    # Plan 00479: subscription usage sits with the other account-level segments,
+    # straight after the cache figure, ahead of the working directory.
+    USAGE_INDICATOR = 16
     WORKING_DIRECTORY = 25
     STARTUP_CLEANUP = 28  # Between working_directory (25) and daemon_stats (30)
 

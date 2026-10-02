@@ -194,6 +194,11 @@ class HandlerID:
         config_key="prompt_cache_indicator",
         display_name="status-prompt-cache-indicator",
     )
+    USAGE_INDICATOR = HandlerIDMeta(
+        class_name="UsageIndicatorHandler",
+        config_key="usage_indicator",
+        display_name="status-usage-indicator",
+    )
     SUBAGENT_CACHE_AGGREGATOR = HandlerIDMeta(
         class_name="SubagentCacheAggregatorHandler",
         config_key="subagent_cache_aggregator",

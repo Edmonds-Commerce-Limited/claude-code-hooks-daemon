@@ -180,9 +180,20 @@ When Claude Code forwards the real terminal width, the joined line wraps onto mu
 
 Claude Code sends a JSON payload on every status-line call. The daemon accepts unknown keys (`additionalProperties: True`), so any field is reachable from a handler even before the schema names it.
 
-**Currently READ by handlers**: `model.{id,display_name}`, `context_window.*`, `workspace.{current_dir,project_dir}`, `cost`, `effort.level`, `session_id`, `session_name`, `agent_type`, plus the forwarded `terminal_columns` / `terminal_lines` (see wrapping, above).
+**Currently READ by handlers**: `model.{id,display_name}`, `context_window.*`, `workspace.{current_dir,project_dir}`, `cost`, `effort.level`, `session_id`, `session_name`, `agent_type`, `rate_limits.{five_hour,seven_day}.{used_percentage,resets_at}` (see below), plus the forwarded `terminal_columns` / `terminal_lines` (see wrapping, above).
 
-**Documented but currently UNUSED** (available opportunistically): top-level `version`, `cwd`, `output_style`, `exceeds_200k_tokens`, `rate_limits.*`, `prompt_id`, and nested `agent.*`, `pr.*`, `worktree.*`, `vim.*`. The highest-value unused fields are `rate_limits` (a natural home for a usage indicator built from live payload data — the old `usage_tracking` handler was REMOVED in Plan 00237, so this would be new work, not a re-enable) and `version`.
+**Documented but currently UNUSED** (available opportunistically): top-level `version`, `cwd`, `output_style`, `exceeds_200k_tokens`, `prompt_id`, `rate_limits.spend_limit`, and nested `agent.*`, `pr.*`, `worktree.*`, `vim.*`.
+
+### `rate_limits` is READ: the usage snapshot and the usage segment
+
+`rate_limits.five_hour` and `rate_limits.seven_day` (each `used_percentage`, 0 to 100 and possibly fractional, and `resets_at`, epoch seconds) arrive only for claude.ai Pro and Max sessions, only after the session's first response, and each window can be absent on its own. No other hook event carries usage, so the controller folds every Status event into one snapshot (`core/usage_snapshot.py`, held by the data layer):
+
+- **One snapshot, not per session**: usage is account-wide. It lives in memory on `get_data_layer().usage` and is mirrored atomically to `{daemon_untracked_dir}/usage-snapshot.json` (written when the reading changes or every 60 s), so a restarted daemon still has the last reading. A failed write is logged and ignored.
+- **An event without usage changes nothing**, and a payload carrying one window updates only that window.
+- **A window past its `resets_at` reads as absent.** Expiry is applied when reading, against the caller's clock.
+- **Accessor for other handlers**: `from claude_code_hooks_daemon.core.data_layer import latest_usage`; `latest_usage(now=None) -> UsageSnapshot | None`, a frozen dataclass with `five_hour` / `seven_day` (`UsageWindow(used_percentage, resets_at, observed_at)` or `None`), `highest_used_percentage()` and `UsageWindow.seconds_until_reset(now)`.
+- **Segment**: `usage_indicator` (priority 16) renders `5h 13% (3h 20m) · 7d 3%`. The 5h countdown always shows; the 7d countdown shows from `seven_day_countdown_pct` (default 80). Colours follow the `model_context` bands, per window: green, yellow from `warn_pct` (60), orange from `high_pct` (80), bold red from `critical_pct` (90). Percentages round down. Hidden when there is no live window.
+- **Fixtures**: synthetic payloads in `tests/fixtures/status_usage/`, loaded by `tests/support/status_usage.py`. Whether a subagent (`agent`) payload carries `rate_limits` is not established; the snapshot reads it from any payload that does, and ignores one that does not.
 
 > `COLUMNS` / `LINES` are NOT in this JSON — they are environment variables the `init.sh` transport forwards explicitly as `terminal_columns` / `terminal_lines`.
 

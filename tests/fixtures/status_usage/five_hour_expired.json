@@ -1,0 +1,9 @@
+{
+  "session_id": "synthetic-main",
+  "hook_event_name": "Status",
+  "model": {"id": "claude-sonnet-5-5", "display_name": "Sonnet 5.5"},
+  "rate_limits": {
+    "five_hour": {"used_percentage": 90, "resets_at": 1799900000},
+    "seven_day": {"used_percentage": 3, "resets_at": 1800600000}
+  }
+}
