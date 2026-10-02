@@ -94,6 +94,7 @@ from claude_code_hooks_daemon.install.install_stamp import STAMP_FILENAME
 from claude_code_hooks_daemon.install.upgrade_gate import APPROVAL_SUBDIR
 from claude_code_hooks_daemon.utils.path_predicates import (
     TextOrReason,
+    path_is_dir,
     path_is_file,
     read_text_or_reason,
 )
@@ -224,6 +225,13 @@ _LITERAL_EXPORT_OPERAND_RE: Final[re.Pattern[str]] = re.compile(
 )
 #: The characters a variable name built from expansions can hold.
 _COMPUTED_NAME_RE: Final[re.Pattern[str]] = re.compile(r"[\w${}`]+")
+#: Separators of the unconditional chain a leading `cd` may sit in. `||` and `|`
+#: are deliberately absent: a `cd` beside them is conditional or in a subshell.
+_CD_CHAIN_SEPARATORS: Final[tuple[str, ...]] = ("&&", ";", "\n")
+#: Characters that make a `cd` target something other than a literal directory.
+_CD_UNLITERAL_MARKERS: Final[tuple[str, ...]] = ("$", "`", "*", "?", "[", "{", "(", "\\")
+#: A directory-changing command anywhere in text, as a word of its own.
+_CD_WORD_RE: Final[re.Pattern[str]] = re.compile(r"(?<![\w./-])(?:cd|pushd|popd)(?![\w-])")
 #: Commands that run shell code this handler cannot see (`eval`, sourcing).
 _OPAQUE_CODE_HEADS: Final[frozenset[str]] = frozenset({"eval", "source", "."})
 #: The upgrade's entry points by name: Layer 1 (and the skill shim of the same
@@ -631,8 +639,61 @@ def _segment_prepares_the_shell(segment: str) -> bool:
     return head in _OPAQUE_CODE_HEADS
 
 
+def _literal_cd_target(chunk: str) -> str | None:
+    """The directory a chunk that is exactly `cd <literal-dir>` moves to, else None.
+
+    A target that is computed, home-relative, a glob, the previous directory or
+    climbs with `..` is not literal: where it lands is not known statically.
+    """
+    words = _shell_words(chunk.strip())
+    if len(words) != 2 or words[0] != "cd":
+        return None
+    target = words[1]
+    if not target or target == "-" or target.startswith("~"):
+        return None
+    if any(marker in target for marker in _CD_UNLITERAL_MARKERS):
+        return None
+    if ".." in Path(target).parts:
+        return None
+    return target
+
+
+def _leading_cd_cwd(command: str, cwd: str | None) -> str | None:
+    """The directory ``command``'s relative paths resolve against (ledger 00474 N292).
+
+    A command that begins `cd <dir> && ...` runs everything after it in
+    ``<dir>``, so a relative script path must be judged there, not in the
+    hook's own cwd (where it would look missing, which counts as the upgrade
+    once something steers). Only an unconditional leading chain of `cd <literal
+    existing dir>` joined by `&&`/`;`/newline is followed, and only when no
+    other `cd`/`pushd`/`popd` appears later: a missing target leaves the shell
+    where it was under `;`, and a subshell, pipe, `||` or later move makes the
+    directory unknowable. Every such case returns ``cwd`` unchanged.
+    """
+    chunks = split_unquoted(command, _CD_CHAIN_SEPARATORS)
+    base = cwd
+    consumed = 0
+    for chunk in chunks:
+        target = _literal_cd_target(chunk)
+        if target is None:
+            break
+        path = Path(target)
+        if not path.is_absolute():
+            if base is None:
+                return cwd
+            path = Path(base) / path
+        if not path_is_dir(path, unreadable_means=False):
+            return cwd
+        base = str(path)
+        consumed += 1
+    if consumed == 0 or any(_CD_WORD_RE.search(chunk) for chunk in chunks[consumed:]):
+        return cwd
+    return base
+
+
 def _bash_sets_bypass_env_var(command: str, cwd: str | None) -> bool:
     """Whether ``command`` sets the handoff variable, or steers an upgrade it runs."""
+    cwd = _leading_cd_cwd(command, cwd)
     segments = _live_segments(command)
     if any(_ENV_VAR_ASSIGN_RE.search(segment) for segment in segments):
         return True
