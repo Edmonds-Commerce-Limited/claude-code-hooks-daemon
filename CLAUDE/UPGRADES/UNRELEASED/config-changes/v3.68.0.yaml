@@ -32,6 +32,35 @@ config_changes:
         On by default; no project-side action needed. Add the entry to a
         project config that lists its status-line handlers explicitly, or
         disable with handlers.status_line.usage_indicator.enabled: false.
+    - key: handlers.status_line.prompt_cache_indicator.options
+      recommended: false
+      dormant: false
+      description: >-
+        NEW options (Plan 00452) for the prompt-cache status-line segment,
+        which is redesigned as compact background-coloured chips:
+        `⚡ main|⑂|Σ` (main thread, sub-agents, whole session; the last two
+        only once a sub-agent has run). Each chip is coloured by its hit
+        ratio: green at or above `healthy_pct` (default 90), yellow from
+        `warn_pct` (75), orange from `critical_pct` (50), red below it. A
+        high ratio is good, so the direction is the opposite of
+        `usage_indicator`'s thresholds. A green chip is its label alone; any
+        other adds its figures, e.g. `main 82% 1h`. The main chip is also
+        raised by state: COLD is a red `❄ 509k`, EXPIRING is at least yellow
+        with `⏳4m`, a recent miss is at least yellow with `↻ <cause>`.
+      example_yaml: |
+        handlers:
+          status_line:
+            prompt_cache_indicator:
+              enabled: true
+              priority: 15
+              options:
+                healthy_pct: 90
+                warn_pct: 75
+                critical_pct: 50
+      migration_note: >-
+        Optional; the defaults apply when the options are absent. The old
+        `⚡ 99% 1h ⚠EXPIRING 4m sub 87% 5m total 97%` text rendering is
+        replaced, so a script matching it needs updating.
     - key: daemon.expected_version
       recommended: false
       dormant: false
