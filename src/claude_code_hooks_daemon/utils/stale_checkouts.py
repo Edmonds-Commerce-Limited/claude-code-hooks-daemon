@@ -30,8 +30,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
 
-import psutil
-
 from claude_code_hooks_daemon.core.worktree_reaping import (
     MINIMUM_AGE_SECONDS,
     ProcessCwdsFn,
@@ -44,11 +42,14 @@ from claude_code_hooks_daemon.daemon.paths import (
     get_untracked_dir,
     is_pid_alive,
     parse_pid_text,
+    pid_file_name,
     read_pid_file_text,
 )
 from claude_code_hooks_daemon.daemon.process_verification import (
-    _extract_project_root,
+    RootProof,
+    daemon_process_project_root,
     find_all_daemon_processes,
+    is_this_users_process,
 )
 from claude_code_hooks_daemon.utils.git_repo import branch_ref, run_git
 from claude_code_hooks_daemon.utils.path_containment import path_is_relative_to
@@ -62,13 +63,14 @@ _BRANCH_PREFIX: Final[str] = "branch refs/heads/"
 _LOCKED_MARKER: Final[str] = "locked"
 _PRUNABLE_MARKER: Final[str] = "prunable"
 
-#: Every daemon pid file in an untracked dir: ``daemon.pid`` or the per-host
-#: ``daemon-<host>.pid`` (``daemon.paths.get_pid_path``).
-_PID_FILE_GLOB: Final[str] = "daemon*.pid"
+#: ``stop`` does NOT clear a stale pid file: it finds no live daemon, prints
+#: "Daemon not running" and leaves the file (``cmd_stop``). No CLI verb removes
+#: one, and the next ``start`` overwrites it. So the remedy is removing exactly
+#: the file this report proved names no running process.
+_REMOVE_PID_FILE_COMMAND: Final[str] = "rm -- {path}"
 
-#: ``stop`` removes a stale pid file under the daemon's start lock, which is the
-#: only place that removal is allowed (``daemon.paths.read_pid_file``).
-_STOP_COMMAND: Final[str] = "bin/hooks-daemon --project-root {root} stop"
+#: Read-only inspection offered for a daemon this report cannot prove stale.
+_INSPECT_COMMAND: Final[str] = "ps -p {pid} -o lstart,args"
 
 
 @dataclass(frozen=True)
@@ -112,10 +114,14 @@ class DaemonProcess:
         pid: The daemon's pid.
         root: The project root the daemon was started for, or None when it
             cannot be attributed. Such a daemon is never reported.
+        root_exists: Whether ``root`` exists in the DAEMON's own mount namespace
+            (a container's ``/workspace`` does not exist on this side). None when
+            that cannot be read, which is never reported.
     """
 
     pid: int
     root: str | None
+    root_exists: bool | None
 
 
 DaemonProcessesFn = Callable[[], tuple[DaemonProcess, ...]]
@@ -303,45 +309,72 @@ def find_stale_worktrees(
     return tuple(found)
 
 
-def default_daemon_processes() -> tuple[DaemonProcess, ...]:
-    """Every running daemon server on this host, with the root it serves.
+def _root_exists_in_namespace(pid: int, root: str, proc_dir: Path) -> bool | None:
+    """Whether ``root`` exists as a directory in ``pid``'s own mount namespace.
+
+    Reads through ``<proc>/<pid>/root``, so a container's ``/workspace`` is judged
+    where it lives. None when that view cannot be read: absence is only proven
+    when the namespace root itself is reachable.
+    """
+    namespace_root = proc_dir / str(pid) / "root"
+    try:
+        namespace_root.stat()
+    except OSError:
+        return None
+    try:
+        return (namespace_root / root.lstrip("/")).is_dir()
+    except OSError:
+        return None
+
+
+def default_daemon_processes(
+    *,
+    find_fn: Callable[[], list[int]] = find_all_daemon_processes,
+    root_fn: Callable[[int], RootProof] = daemon_process_project_root,
+    owner_fn: Callable[[int], bool] = is_this_users_process,
+    proc_dir: Path = Path("/proc"),
+) -> tuple[DaemonProcess, ...]:
+    """Every daemon server of THIS user on this host, with the root it serves.
 
     The calling process is excluded by ``find_all_daemon_processes``, so the
-    daemon that hosts the advisory never reports itself.
+    daemon that hosts the advisory never reports itself. Another user's daemon
+    is skipped: it is not this user's to judge.
     """
     processes: list[DaemonProcess] = []
-    for pid in find_all_daemon_processes():
-        try:
-            root = _extract_project_root(psutil.Process(pid))
-        except (psutil.NoSuchProcess, psutil.AccessDenied):
+    for pid in find_fn():
+        if not owner_fn(pid):
             continue
-        processes.append(DaemonProcess(pid=pid, root=root))
+        root = root_fn(pid).root
+        exists = None if root is None else _root_exists_in_namespace(pid, root, proc_dir)
+        processes.append(DaemonProcess(pid=pid, root=root, root_exists=exists))
     return tuple(processes)
 
 
-def _stale_pid_files(root: Path, untracked: Path, pid_alive_fn: PidAliveFn) -> list[StaleDaemon]:
-    """Pid files in ``untracked`` that name no running process."""
-    found: list[StaleDaemon] = []
-    for pid_file in sorted(untracked.glob(_PID_FILE_GLOB)):
-        content = read_pid_file_text(pid_file)
-        if content.text is None:
-            # Absent or unreadable: neither is proof the file names no process.
-            continue
-        pid = parse_pid_text(content.text)
-        if pid is None:
-            reason = "its pid file is corrupt"
-        elif not pid_alive_fn(pid):
-            reason = f"pid {pid} is not running"
-        else:
-            continue
-        found.append(
-            StaleDaemon(
-                subject=str(pid_file),
-                reason=reason,
-                commands=(_STOP_COMMAND.format(root=shlex.quote(str(root))),),
-            )
+def _stale_pid_files(untracked: Path, pid_alive_fn: PidAliveFn) -> list[StaleDaemon]:
+    """This host's pid file in ``untracked``, when it names no running process.
+
+    Another host's ``daemon-<host>.pid`` is never read: its pid lives in a pid
+    namespace this host cannot probe.
+    """
+    pid_file = untracked / pid_file_name()
+    content = read_pid_file_text(pid_file)
+    if content.text is None:
+        # Absent or unreadable: neither is proof the file names no process.
+        return []
+    pid = parse_pid_text(content.text)
+    if pid is None:
+        reason = "its pid file is corrupt"
+    elif not pid_alive_fn(pid):
+        reason = f"pid {pid} is not running"
+    else:
+        return []
+    return [
+        StaleDaemon(
+            subject=str(pid_file),
+            reason=reason,
+            commands=(_REMOVE_PID_FILE_COMMAND.format(path=shlex.quote(str(pid_file))),),
         )
-    return found
+    ]
 
 
 def find_stale_daemons(
@@ -365,16 +398,19 @@ def find_stale_daemons(
     for root in checkout_roots:
         untracked = untracked_dir_fn(root)
         if untracked.is_dir():
-            found.extend(_stale_pid_files(root, untracked, pid_alive_fn))
+            found.extend(_stale_pid_files(untracked, pid_alive_fn))
 
     for process in processes_fn():
-        if process.root is None or Path(process.root).is_dir():
+        if process.root is None or process.root_exists is not False:
             continue
         found.append(
             StaleDaemon(
                 subject=f"daemon pid {process.pid}",
-                reason=f"its project root {process.root} no longer exists",
-                commands=(f"kill {process.pid}",),
+                reason=(
+                    f"its project root {process.root} no longer exists; needs a human "
+                    "look before anything signals it"
+                ),
+                commands=(_INSPECT_COMMAND.format(pid=process.pid),),
             )
         )
     return tuple(found)
@@ -408,9 +444,13 @@ def render_stale_report(
 
 
 def collect_stale_report(
-    repo_root: Path, base_branch: str, max_idle_days: int = DEFAULT_MAX_IDLE_DAYS
+    repo_root: Path,
+    base_branch: str,
+    max_idle_days: int = DEFAULT_MAX_IDLE_DAYS,
+    *,
+    processes_fn: DaemonProcessesFn = default_daemon_processes,
 ) -> str | None:
     """Detect stale worktrees and daemons for ``repo_root`` and render the report."""
     worktrees = find_stale_worktrees(repo_root, base_branch, max_idle_days=max_idle_days)
-    daemons = find_stale_daemons(registered_checkouts(repo_root))
+    daemons = find_stale_daemons(registered_checkouts(repo_root), processes_fn=processes_fn)
     return render_stale_report(worktrees, daemons)

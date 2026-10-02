@@ -1783,6 +1783,16 @@ def get_event_socket_path(project_dir: Path | str, event_file_name: str) -> Path
     return get_event_socket_path_in_dir(events_dir, event_file_name)
 
 
+def pid_file_name() -> str:
+    """File name of THIS host's daemon pid file (``daemon-<host>.pid``).
+
+    The one place the name is built, so a reader that must find the file
+    without ``get_pid_path``'s ``mkdir`` side effect cannot drift from the
+    daemon that writes it.
+    """
+    return f"daemon{_get_hostname_suffix()}.pid"
+
+
 def get_pid_path(project_dir: Path | str) -> Path:
     """
     Generate PID file path for project-specific daemon.
@@ -1817,8 +1827,7 @@ def get_pid_path(project_dir: Path | str) -> Path:
     untracked_dir.mkdir(parents=True, exist_ok=True)
 
     # Add hostname-based suffix for isolation
-    suffix = _get_hostname_suffix()
-    path = untracked_dir / f"daemon{suffix}.pid"
+    path = untracked_dir / pid_file_name()
 
     # Fallback if path exceeds AF_UNIX socket length limit (consistency with socket)
     if len(str(path)) > _UNIX_SOCKET_PATH_LIMIT:

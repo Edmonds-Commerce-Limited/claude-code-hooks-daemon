@@ -5,18 +5,24 @@ driven by fake process tables and a fake liveness probe, so nothing here looks
 at the host's real processes.
 """
 
+import shlex
 import shutil
 import subprocess
+import tempfile
 import time
 from pathlib import Path
 
 import pytest
 
 from claude_code_hooks_daemon.core.worktree_reaping import MINIMUM_AGE_SECONDS
+from claude_code_hooks_daemon.daemon.paths import get_pid_path, pid_file_name
+from claude_code_hooks_daemon.daemon.process_verification import RootProof
 from claude_code_hooks_daemon.utils.stale_checkouts import (
     DaemonProcess,
     StaleDaemon,
     StaleWorktree,
+    collect_stale_report,
+    default_daemon_processes,
     find_stale_daemons,
     find_stale_worktrees,
     registered_checkouts,
@@ -170,6 +176,60 @@ class TestFindStaleWorktrees:
         assert any("directory is missing" in reason for reason in found[0].reasons)
         assert found[0].commands == ("git worktree prune",)
 
+    def test_missing_directory_with_merged_branch_also_offers_branch_delete(
+        self, repo: Path, tmp_path: Path
+    ) -> None:
+        wt = _add_worktree(repo, tmp_path, "gone-merged")
+        _commit(wt, "x.txt")
+        _git(repo, "merge", "--no-ff", "gone-merged", "-m", "merge")
+        shutil.rmtree(wt)
+
+        found = find_stale_worktrees(
+            repo, "main", now=time.time(), age_fn=_old, process_cwds_fn=_no_processes
+        )
+
+        assert len(found) == 1
+        assert any("merged into main" in reason for reason in found[0].reasons)
+        assert found[0].commands == ("git worktree prune", "git branch -d gone-merged")
+
+    def test_detached_worktree_is_never_reported_while_its_directory_exists(
+        self, repo: Path, tmp_path: Path
+    ) -> None:
+        path = tmp_path / "wt-detached"
+        _git(repo, "worktree", "add", "--detach", str(path))
+
+        found = find_stale_worktrees(
+            repo, "main", now=time.time(), age_fn=_very_old, process_cwds_fn=_no_processes
+        )
+
+        assert found == ()
+
+    def test_detached_worktree_with_missing_directory_is_prunable_without_branch_delete(
+        self, repo: Path, tmp_path: Path
+    ) -> None:
+        path = tmp_path / "wt-detached"
+        _git(repo, "worktree", "add", "--detach", str(path))
+        shutil.rmtree(path)
+
+        found = find_stale_worktrees(
+            repo, "main", now=time.time(), age_fn=_old, process_cwds_fn=_no_processes
+        )
+
+        assert len(found) == 1
+        assert found[0].branch is None
+        assert found[0].commands == ("git worktree prune",)
+
+    def test_worktree_on_the_base_branch_is_never_reported(
+        self, repo: Path, tmp_path: Path
+    ) -> None:
+        _add_worktree(repo, tmp_path, "trunk")
+
+        found = find_stale_worktrees(
+            repo, "trunk", now=time.time(), age_fn=_very_old, process_cwds_fn=_no_processes
+        )
+
+        assert found == ()
+
     def test_idle_branch_is_stale_after_the_configured_days(
         self, repo: Path, tmp_path: Path
     ) -> None:
@@ -263,9 +323,9 @@ class TestRegisteredCheckouts:
         assert registered_checkouts(tmp_path) == ()
 
 
-def _pid_file(directory: Path, text: str, name: str = "daemon.pid") -> Path:
+def _pid_file(directory: Path, text: str, name: str | None = None) -> Path:
     directory.mkdir(parents=True, exist_ok=True)
-    path = directory / name
+    path = directory / (pid_file_name() if name is None else name)
     path.write_text(text)
     return path
 
@@ -293,7 +353,7 @@ class TestFindStaleDaemons:
 
         found = find_stale_daemons(
             (root,),
-            processes_fn=lambda: (DaemonProcess(pid=4242, root=str(root)),),
+            processes_fn=lambda: (DaemonProcess(pid=4242, root=str(root), root_exists=True),),
             pid_alive_fn=_alive,
             untracked_dir_fn=_untracked,
         )
@@ -314,7 +374,25 @@ class TestFindStaleDaemons:
         assert len(found) == 1
         assert found[0].subject == str(pid_file)
         assert "pid 4242 is not running" in found[0].reason
-        assert found[0].commands == (f"bin/hooks-daemon --project-root {root} stop",)
+        # `stop` leaves a stale pid file in place (it prints "not running"), so
+        # the only remedy that clears it is removing exactly this file.
+        assert [shlex.split(command) for command in found[0].commands] == [
+            ["rm", "--", str(pid_file)]
+        ]
+        assert not any("stop" in command for command in found[0].commands)
+
+    def test_remedy_names_a_path_with_spaces_as_one_argument(self, tmp_path: Path) -> None:
+        root = tmp_path / "my proj"
+        pid_file = _pid_file(_untracked(root), "4242\n", name=pid_file_name())
+
+        found = find_stale_daemons(
+            (root,),
+            processes_fn=_no_daemons,
+            pid_alive_fn=_dead,
+            untracked_dir_fn=_untracked,
+        )
+
+        assert shlex.split(found[0].commands[0]) == ["rm", "--", str(pid_file)]
 
     def test_corrupt_pid_file_is_stale(self, tmp_path: Path) -> None:
         root = tmp_path / "proj"
@@ -330,9 +408,10 @@ class TestFindStaleDaemons:
         assert len(found) == 1
         assert "corrupt" in found[0].reason
 
-    def test_host_suffixed_pid_files_are_read_too(self, tmp_path: Path) -> None:
+    def test_another_hosts_pid_file_is_never_read(self, tmp_path: Path) -> None:
+        """Another host's pid names a process in a pid namespace this host cannot probe."""
         root = tmp_path / "proj"
-        _pid_file(_untracked(root), "4242\n", name="daemon-box.pid")
+        _pid_file(_untracked(root), "4242\n", name="daemon-some-other-host.pid")
 
         found = find_stale_daemons(
             (root,),
@@ -341,7 +420,15 @@ class TestFindStaleDaemons:
             untracked_dir_fn=_untracked,
         )
 
-        assert len(found) == 1
+        assert found == ()
+
+    def test_this_hosts_pid_file_name_is_the_one_the_daemon_writes(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("CLAUDE_HOOKS_PID_PATH", raising=False)
+        # A short root: a long one makes get_pid_path fall back to another directory.
+        with tempfile.TemporaryDirectory(dir="/tmp", prefix="hk") as short_root:
+            assert get_pid_path(Path(short_root)).name == pid_file_name()
 
     def test_checkout_without_untracked_dir_is_skipped(self, tmp_path: Path) -> None:
         root = tmp_path / "proj"
@@ -356,41 +443,155 @@ class TestFindStaleDaemons:
 
         assert found == ()
 
-    def test_daemon_process_whose_root_no_longer_exists_is_stale(self, tmp_path: Path) -> None:
-        gone = tmp_path / "deleted-worktree"
-
+    def test_daemon_whose_root_is_gone_needs_a_human_look_and_no_signal(self) -> None:
         found = find_stale_daemons(
             (),
-            processes_fn=lambda: (DaemonProcess(pid=777, root=str(gone)),),
+            processes_fn=lambda: (DaemonProcess(pid=777, root="/gone", root_exists=False),),
             pid_alive_fn=_alive,
             untracked_dir_fn=_untracked,
         )
 
         assert len(found) == 1
         assert found[0].subject == "daemon pid 777"
-        assert str(gone) in found[0].reason
-        assert found[0].commands == ("kill 777",)
+        assert "/gone" in found[0].reason
+        assert "human" in found[0].reason
+        # Never an unproven signal: only read-only inspection is offered.
+        assert found[0].commands == ("ps -p 777 -o lstart,args",)
+        assert not any("kill" in command for command in found[0].commands)
 
     def test_daemon_process_with_unknown_root_is_left_alone(self) -> None:
         """A daemon this check cannot attribute is never reported."""
         found = find_stale_daemons(
             (),
-            processes_fn=lambda: (DaemonProcess(pid=777, root=None),),
+            processes_fn=lambda: (DaemonProcess(pid=777, root=None, root_exists=None),),
             pid_alive_fn=_alive,
             untracked_dir_fn=_untracked,
         )
 
         assert found == ()
 
-    def test_daemon_process_with_existing_root_is_not_stale(self, tmp_path: Path) -> None:
+    def test_daemon_whose_root_cannot_be_checked_is_not_stale(self) -> None:
         found = find_stale_daemons(
             (),
-            processes_fn=lambda: (DaemonProcess(pid=777, root=str(tmp_path)),),
+            processes_fn=lambda: (DaemonProcess(pid=777, root="/x", root_exists=None),),
             pid_alive_fn=_alive,
             untracked_dir_fn=_untracked,
         )
 
         assert found == ()
+
+    def test_daemon_process_with_existing_root_is_not_stale(self) -> None:
+        found = find_stale_daemons(
+            (),
+            processes_fn=lambda: (DaemonProcess(pid=777, root="/x", root_exists=True),),
+            pid_alive_fn=_alive,
+            untracked_dir_fn=_untracked,
+        )
+
+        assert found == ()
+
+
+def _fake_proc(tmp_path: Path, pid: int, *, root_contains: str | None) -> Path:
+    """A fake /proc whose ``<pid>/root`` holds ``root_contains`` (None: no such pid)."""
+    proc = tmp_path / "proc"
+    proc.mkdir(exist_ok=True)
+    if root_contains is not None:
+        (proc / str(pid) / "root" / root_contains.lstrip("/")).mkdir(parents=True)
+    return proc
+
+
+class TestDefaultDaemonProcesses:
+    @staticmethod
+    def _proof(root: str | None) -> RootProof:
+        return RootProof(root=root, refusal=None if root else "no root")
+
+    def test_root_is_judged_in_the_daemons_own_namespace(self, tmp_path: Path) -> None:
+        """A root present for the daemon but absent here is NOT stale."""
+        proc = _fake_proc(tmp_path, 10, root_contains="/container/workspace")
+
+        found = default_daemon_processes(
+            find_fn=lambda: [10],
+            root_fn=lambda _pid: self._proof("/container/workspace"),
+            owner_fn=lambda _pid: True,
+            proc_dir=proc,
+        )
+
+        assert found == (DaemonProcess(pid=10, root="/container/workspace", root_exists=True),)
+        assert not Path("/container/workspace").exists()
+
+    def test_root_missing_in_the_daemons_namespace_is_reported_absent(self, tmp_path: Path) -> None:
+        proc = _fake_proc(tmp_path, 10, root_contains="/other")
+
+        found = default_daemon_processes(
+            find_fn=lambda: [10],
+            root_fn=lambda _pid: self._proof("/deleted"),
+            owner_fn=lambda _pid: True,
+            proc_dir=proc,
+        )
+
+        assert found == (DaemonProcess(pid=10, root="/deleted", root_exists=False),)
+
+    def test_unreadable_namespace_is_unknown_not_absent(self, tmp_path: Path) -> None:
+        proc = _fake_proc(tmp_path, 10, root_contains=None)
+
+        found = default_daemon_processes(
+            find_fn=lambda: [10],
+            root_fn=lambda _pid: self._proof("/anything"),
+            owner_fn=lambda _pid: True,
+            proc_dir=proc,
+        )
+
+        assert found == (DaemonProcess(pid=10, root="/anything", root_exists=None),)
+
+    def test_another_users_daemon_is_skipped(self, tmp_path: Path) -> None:
+        proc = _fake_proc(tmp_path, 10, root_contains="/x")
+
+        found = default_daemon_processes(
+            find_fn=lambda: [10],
+            root_fn=lambda _pid: self._proof("/gone"),
+            owner_fn=lambda _pid: False,
+            proc_dir=proc,
+        )
+
+        assert found == ()
+
+    def test_unattributable_daemon_has_no_root(self, tmp_path: Path) -> None:
+        found = default_daemon_processes(
+            find_fn=lambda: [10],
+            root_fn=lambda _pid: self._proof(None),
+            owner_fn=lambda _pid: True,
+            proc_dir=tmp_path,
+        )
+
+        assert found == (DaemonProcess(pid=10, root=None, root_exists=None),)
+
+    def test_no_daemons_running(self) -> None:
+        assert default_daemon_processes(find_fn=list) == ()
+
+
+class TestCollectStaleReport:
+    def test_quiet_for_a_repo_with_nothing_stale(self, repo: Path) -> None:
+        assert collect_stale_report(repo, "main", processes_fn=_no_daemons) is None
+
+    def test_reports_a_missing_worktree(self, repo: Path, tmp_path: Path) -> None:
+        wt = _add_worktree(repo, tmp_path, "gone")
+        shutil.rmtree(wt)
+
+        report = collect_stale_report(repo, "main", processes_fn=_no_daemons)
+
+        assert report is not None
+        assert "STALE CHECKOUTS" in report
+        assert "git worktree prune" in report
+
+    def test_reports_a_daemon_whose_root_is_gone(self, repo: Path) -> None:
+        report = collect_stale_report(
+            repo,
+            "main",
+            processes_fn=lambda: (DaemonProcess(pid=5, root="/gone", root_exists=False),),
+        )
+
+        assert report is not None
+        assert "daemon pid 5" in report
 
 
 class TestRenderStaleReport:
@@ -407,7 +608,7 @@ class TestRenderStaleReport:
         daemon = StaleDaemon(
             subject="daemon pid 9",
             reason="project root /gone no longer exists",
-            commands=("kill 9",),
+            commands=("ps -p 9 -o lstart,args",),
         )
 
         report = render_stale_report((worktree,), (daemon,))
@@ -418,11 +619,11 @@ class TestRenderStaleReport:
         assert "git worktree remove /w/a" in report
         assert "git branch -d a" in report
         assert "daemon pid 9" in report
-        assert "kill 9" in report
+        assert "ps -p 9 -o lstart,args" in report
         assert "does not run" in report
 
     def test_worktree_heading_absent_when_only_daemons_are_stale(self) -> None:
-        daemon = StaleDaemon(subject="s", reason="r", commands=("kill 1",))
+        daemon = StaleDaemon(subject="s", reason="r", commands=("true",))
 
         report = render_stale_report((), (daemon,))
 

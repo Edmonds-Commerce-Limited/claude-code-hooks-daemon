@@ -418,4 +418,5 @@ class TestStaleCheckoutsReport:
     def test_claude_md_mentions_stale_checkouts(self) -> None:
         md = IdleHousekeepingAdvisoryHandler().get_claude_md()
         assert md is not None
-        assert "stale" in md.lower()
+        for option in ("report_stale_checkouts", "base_branch", "stale_worktree_days"):
+            assert option in md
