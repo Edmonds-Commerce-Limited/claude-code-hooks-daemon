@@ -19,10 +19,7 @@ from claude_code_hooks_daemon.core.hook_result import HookResult
 from claude_code_hooks_daemon.core.router import inject_config_key_footer
 from claude_code_hooks_daemon.core.utils import get_workspace_root
 from claude_code_hooks_daemon.utils.retention import prune_directory
-from claude_code_hooks_daemon.utils.secret_redaction import (
-    get_active_secret_terms,
-    redact_structure,
-)
+from claude_code_hooks_daemon.utils.secret_redaction import redact_structure_active
 
 # hook-errors.log rotates to a timestamped backup when it exceeds this size.
 _HOOK_ERROR_LOG_MAX_BYTES = 1_000_000
@@ -289,10 +286,10 @@ def log_error_to_file(
             # Plan 00201: redacted BEFORE serialisation — a handler crashing
             # while processing a secret-laden payload must not leak that
             # secret into this persistent, gitignored-but-locally-readable log.
-            secret_terms = get_active_secret_terms()
-            logged_input = (
-                redact_structure(hook_input, secret_terms) if secret_terms else hook_input
-            )
+            # An unreadable word list withholds the payload (the exception
+            # line above is still written): no terms means nothing can be
+            # redacted.
+            logged_input = redact_structure_active(hook_input)
             f.write(f"\nHook Input:\n{json.dumps(logged_input, indent=2)}\n")
             f.write("\nStack Trace:\n")
             f.write(traceback.format_exc())

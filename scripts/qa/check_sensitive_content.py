@@ -170,9 +170,17 @@ def resolve_secret_terms(config_path: Path, repo_root: Path) -> tuple[str, ...]:
     path = resolve_secret_word_list_file(config_path, repo_root)
     if path is None:
         return ()
-    from claude_code_hooks_daemon.utils.secret_redaction import load_secret_terms
+    from claude_code_hooks_daemon.utils.secret_redaction import (
+        SecretWordListUnreadableError,
+        load_secret_terms,
+    )
 
-    return load_secret_terms(path)
+    try:
+        return load_secret_terms(path)
+    except SecretWordListUnreadableError as exc:
+        # A list the project opted into but that cannot be read must fail the
+        # run: scanning with no terms would report a clean tree unchecked.
+        raise ConfigError(str(exc)) from exc
 
 
 def filter_excluded_files(

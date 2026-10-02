@@ -568,7 +568,16 @@ class ModelFallbackDetectorHandler(SessionStartHandlerBase):
         """
         notes: list[str] = []
         directory = self._resolve_snapshot_dir()
-        terms = get_active_secret_terms()
+        try:
+            terms = get_active_secret_terms()
+        except secret_redaction.SecretWordListUnreadableError as exc:
+            # No terms to redact with: write no snapshot rather than an unredacted one.
+            logger.warning("model_fallback_detector: snapshot withheld: %s", exc)
+            return [
+                "NOTE: the diagnostic snapshot was withheld because the secret word list "
+                f"cannot be read ({exc}); the advisory above is the only record of this "
+                "detection."
+            ]
         stamp = datetime.now().strftime(_SNAPSHOT_TIMESTAMP_FORMAT)
         for index, record in enumerate(records, start=1):
             target = directory / f"{_SNAPSHOT_FILE_PREFIX}-{stamp}-{index}.md"
