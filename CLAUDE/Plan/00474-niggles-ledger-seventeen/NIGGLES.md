@@ -1402,6 +1402,22 @@ The uncertain-move union judges the hook directory and the LAST recorded move (`
 every candidate directory (`sub`). Remedy: judge every directory any `cd` in the chain could
 land in.
 
+### N320 — `D=path && cmd > $D/f` is denied as a write outside the project; the `;` form is allowed
+
+**Source**: coordinator, a live deny while probing after the Plan 00483 batch 2 merge.
+
+**Evidence**: `project_containment` on merged main (9d182f299), project root `/repo`:
+`D=untracked/scratch/q; python p.py > $D/a.json` is allowed, but the same command with `&&`
+after the assignment is denied, quoted or not. `known_variables` resolves an assignment followed by
+`;` but not one followed by `&&`. Strict mode (`bash_safe_mode`, block by default) tells agents to
+chain with `&&` or add `set -euo pipefail`, so the rule's own advice leads into this deny. The deny
+message itself suggests `OUT=…; … "$OUT"`. In scope: a literal assignment, visible at call time,
+written the way the strict-mode guidance asks.
+
+**Status**: ⬜ Open. Remedy: treat a literal assignment as known for the statements after it
+when it is joined by `&&` (it cannot fail) as well as by `;` or a newline. A `||` join does not
+qualify. `D=/tmp && echo x > $D/a` must still deny.
+
 ### N319 — a stale local relay build fails 29 relay tests instead of being rebuilt or skipped
 
 **Source**: coordinator, the full `tests/integration` run on main after the N310 lesson.
