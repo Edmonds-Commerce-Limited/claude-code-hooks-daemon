@@ -15,7 +15,8 @@ from claude_code_hooks_daemon.plan_qa.context import (
     sweep_context,
 )
 from claude_code_hooks_daemon.plan_qa.gitfacts import GitFacts
-from claude_code_hooks_daemon.plan_qa.types import Level
+from claude_code_hooks_daemon.plan_qa.types import CheckContext, Level
+from claude_code_hooks_daemon.utils.git_commit_parsing import extract_commit_pathspecs
 
 
 @dataclass(frozen=True)
@@ -618,14 +619,7 @@ class TestStagedContextReadsTheCommittedTree:
         assert context.readme is not None
         assert 9 in context.readme.numbers()
 
-    def _new_folder(self, root: Path, name: str = "00002-second") -> None:
-        folder = root / "CLAUDE/Plan" / name
-        folder.mkdir()
-        (folder / "PLAN.md").write_text("# Plan 00002: second\n\n**Status**: Not Started\n")
-
-    def test_a_pathspec_commit_records_head_so_an_uncommitted_removal_is_not_in_it(
-        self, tmp_path: Path
-    ) -> None:
+    def test_a_pathspec_commit_keeps_reading_the_disk(self, tmp_path: Path) -> None:
         root = self._committed(tmp_path)
         _git(root, "rm", "-r", "--cached", "-q", "CLAUDE/Plan/00001-first")
 
@@ -636,96 +630,47 @@ class TestStagedContextReadsTheCommittedTree:
         assert context.tree is not None
         assert [folder.number for folder in context.tree.folders] == [1]
 
-    def test_a_pathspec_commit_does_not_see_an_untracked_folder_it_does_not_name(
-        self, tmp_path: Path
-    ) -> None:
+    @staticmethod
+    def _statuses(context: CheckContext) -> list[str | None]:
+        assert context.tree is not None
+        return [f.doc.status_raw if f.doc else None for f in context.tree.folders]
+
+    def test_a_pathspec_relative_to_a_cd_still_reads_the_disk(self, tmp_path: Path) -> None:
         root = self._committed(tmp_path)
-        self._new_folder(root)
+        plan = root / "CLAUDE/Plan/00001-first/PLAN.md"
+        plan.write_text("# Plan 00001: first\n\n**Status**: Blocked\n")
+        command = "cd CLAUDE/Plan && git commit -m x 00001-first/PLAN.md"
 
         context = staged_context(
-            root, "CLAUDE/Plan", _Policy(), pathspecs=("CLAUDE/Plan/README.md",)
+            root, "CLAUDE/Plan", _Policy(), pathspecs=extract_commit_pathspecs(command)
         )
 
-        assert context.tree is not None
-        assert [folder.number for folder in context.tree.folders] == [1]
+        assert self._statuses(context) == ["Blocked"]
 
-    def test_a_pathspec_commit_does_not_see_a_staged_folder_it_does_not_name(
-        self, tmp_path: Path
-    ) -> None:
+    def test_a_pathspec_under_git_dash_c_still_reads_the_disk(self, tmp_path: Path) -> None:
         root = self._committed(tmp_path)
-        self._new_folder(root)
-        _git(root, "add", "CLAUDE/Plan/00002-second")
-        (root / "CLAUDE/Plan/README.md").write_text("# Plans Index\n\n## Active Plans\n\nedit\n")
+        plan = root / "CLAUDE/Plan/00001-first/PLAN.md"
+        plan.write_text("# Plan 00001: first\n\n**Status**: Blocked\n")
+        command = "git -C CLAUDE/Plan commit -m x 00001-first/PLAN.md"
 
         context = staged_context(
-            root, "CLAUDE/Plan", _Policy(), pathspecs=("CLAUDE/Plan/README.md",)
+            root, "CLAUDE/Plan", _Policy(), pathspecs=extract_commit_pathspecs(command)
         )
 
-        assert context.tree is not None
-        assert [folder.number for folder in context.tree.folders] == [1]
+        assert self._statuses(context) == ["Blocked"]
 
-    def test_include_sees_the_staged_folder_a_plain_pathspec_does_not(self, tmp_path: Path) -> None:
-        root = self._committed(tmp_path)
-        self._new_folder(root)
-        _git(root, "add", "CLAUDE/Plan/00002-second")
-        (root / "CLAUDE/Plan/README.md").write_text("# Plans Index\n\n## Active Plans\n\nedit\n")
-
-        context = staged_context(
-            root,
-            "CLAUDE/Plan",
-            _Policy(),
-            pathspecs=("CLAUDE/Plan/README.md",),
-            include=True,
-        )
-
-        assert context.tree is not None
-        assert [folder.number for folder in context.tree.folders] == [1, 2]
-
-    def test_a_named_document_is_its_working_tree_text_not_its_staged_text(
-        self, tmp_path: Path
-    ) -> None:
+    def test_a_pathspec_commit_followed_by_a_bare_one_reads_the_disk(self, tmp_path: Path) -> None:
         root = self._committed(tmp_path)
         plan = root / "CLAUDE/Plan/00001-first/PLAN.md"
         plan.write_text("# Plan 00001: first\n\n**Status**: Blocked\n")
         _git(root, "add", str(plan))
-        plan.write_text("# Plan 00001: first\n\n**Status**: Complete\n")
+        command = "git commit -m x CLAUDE/Plan/README.md && git commit -m y"
 
         context = staged_context(
-            root, "CLAUDE/Plan", _Policy(), pathspecs=("CLAUDE/Plan/00001-first/PLAN.md",)
+            root, "CLAUDE/Plan", _Policy(), pathspecs=extract_commit_pathspecs(command)
         )
 
-        assert context.tree is not None
-        assert context.tree.folders[0].doc is not None
-        assert context.tree.folders[0].doc.status_raw == "Complete"
-
-    def test_an_unnamed_document_is_head_text_under_a_pathspec_commit(self, tmp_path: Path) -> None:
-        root = self._committed(tmp_path)
-        plan = root / "CLAUDE/Plan/00001-first/PLAN.md"
-        plan.write_text("# Plan 00001: first\n\n**Status**: Complete\n")
-        _git(root, "add", str(plan))
-        (root / "CLAUDE/Plan/README.md").write_text("# Plans Index\n\n## Active Plans\n\nedit\n")
-
-        context = staged_context(
-            root, "CLAUDE/Plan", _Policy(), pathspecs=("CLAUDE/Plan/README.md",)
-        )
-
-        assert context.tree is not None
-        assert context.tree.folders[0].doc is not None
-        assert context.tree.folders[0].doc.status_raw == "In Progress"
-
-    def test_a_pathspec_commit_whose_listing_is_unreadable_falls_back_to_the_disk(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        root = self._committed(tmp_path)
-        self._new_folder(root)
-        monkeypatch.setattr(GitFacts, "index_listing", lambda self, prefix: None)
-
-        context = staged_context(
-            root, "CLAUDE/Plan", _Policy(), pathspecs=("CLAUDE/Plan/README.md",)
-        )
-
-        assert context.tree is not None
-        assert [folder.number for folder in context.tree.folders] == [1, 2]
+        assert self._statuses(context) == ["Blocked"]
 
     def test_a_plan_directory_the_commit_does_not_record_is_missing(self, tmp_path: Path) -> None:
         root = self._committed(tmp_path)

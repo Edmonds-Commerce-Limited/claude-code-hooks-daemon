@@ -14,12 +14,11 @@ Surface cost profile:
   and session sweeps, never for per-edit dispatch.
 
 Which tree a surface judges (ledger 00474 N244, N245): the sweep and the edit
-read the DISK; a commit gate reads the tree the commit records, because a gate
-that read the disk would judge a tree no commit holds. A bare ``git commit``
-records the index; ``git commit <pathspec>`` records HEAD with the named paths'
-working-tree content, and ``--include`` the index with the same overlay (see
-:meth:`GitFactsBase.index_listing`). Not covered, and read from the disk as
-before: operations the same command performs before committing
+read the DISK; a bare ``git commit`` reads the INDEX, because the commit
+records the index and a gate that read the disk would judge a tree no commit
+holds. Not covered, and read from the disk as before: the pathspec and
+``--include`` forms (they record working-tree content over the index),
+operations the same command performs before committing
 (``git add x && git commit``), ``git commit -a``, and the checks that open
 files themselves rather than asking the tree (``path-existence``,
 ``plan-doc-size``, ``journal-entry-ordering``, ``same-commit-plan-doc``, and
@@ -351,10 +350,13 @@ def staged_context(
     """
     excluded = _normalised_exclude_paths(exclude_paths)
     gitfacts = GitFacts(project_root, pathspecs=pathspecs, include=include)
-    # `gitfacts` lists the tree this commit form records (the index, HEAD with
-    # the named paths' working-tree content, or the index with the same
-    # overlay), so one reading serves every form.
-    tree, readme = _tree_and_readme(project_root, plan_dir_rel, policy, committed_from=gitfacts)
+    # A bare commit records the INDEX, so the tree is read from it. A
+    # `git commit <pathspec>` (or `--include`) records the WORKING-TREE content
+    # of the named paths, which no listing of the index describes, so those
+    # forms read the disk (see the module note on what is not covered).
+    tree, readme = _tree_and_readme(
+        project_root, plan_dir_rel, policy, committed_from=None if pathspecs else gitfacts
+    )
     return _with_journal(
         CheckContext(
             project_root=project_root,

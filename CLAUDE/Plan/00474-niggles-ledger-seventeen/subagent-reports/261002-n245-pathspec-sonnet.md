@@ -218,3 +218,24 @@ resurrection only when the diff shows a `D`).
 The docs_qa, plan_qa and guard_config gates still read `extract_commit_form`
 directly, so they keep round 1's narrowing on the uncertain shapes; they were
 outside this round's three-gate scope.
+
+## Round 3 outcome
+
+plan_qa is reverted to main's behaviour for pathspec commits: `staged_context`
+reads the disk whenever `pathspecs` is non-empty (`committed_from=None if
+pathspecs else gitfacts`), and the module note says the pathspec and
+`--include` forms read the disk.
+
+Why: the round-3 review found the HEAD-plus-named-paths reading was applied to
+every form with no certainty check, so `cd CLAUDE/Plan && git commit -m x
+00001-first/PLAN.md`, `git -C CLAUDE/Plan commit -m x 00001-first/PLAN.md` and
+`git commit -m x CLAUDE/Plan/README.md && git commit -m y` (PLAN.md change
+staged) judged HEAD and missed a `Status: Blocked` PLAN.md the real commit
+records.
+
+Tests: the tests pinning the HEAD-plus-named-paths listing for pathspec and
+`--include` commits were removed from `tests/unit/plan_qa/test_context.py` and
+`test_plan_qa_commit_gate.py` (main's versions restored). Three real-git
+regression tests in `test_context.py` cover the three commands above; they
+failed on c5d04262f (3 failed) and pass now. The `include` plumbing into
+GitFacts is kept; other gates are untouched.
