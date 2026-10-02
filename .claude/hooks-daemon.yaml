@@ -1255,7 +1255,7 @@ handlers:
       enabled: true
       priority: 15
 
-    usage_indicator:   # Subscription usage: 📊 5h|7d chips, detail from warn_pct (Plan 00479)
+    usage_indicator:   # Subscription usage: 📈 5h|7d chips, detail from warn_pct (Plan 00479)
       # Hidden when Claude Code reports no usage data (API-key sessions, before the first response).
       enabled: true
       priority: 16

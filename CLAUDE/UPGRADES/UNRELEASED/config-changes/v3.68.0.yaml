@@ -12,7 +12,7 @@ config_changes:
       dormant: false
       description: >-
         NEW (Plan 00479). A status-line segment showing subscription usage,
-        for example `📊 5h|7d`, read from the `rate_limits` Claude Code sends
+        for example `📈 5h|7d`, read from the `rate_limits` Claude Code sends
         on every status render. Each window is a chip whose background is
         coloured by its own percentage (green, yellow from `warn_pct`, orange
         from `high_pct`, red from `critical_pct`). A green window shows only

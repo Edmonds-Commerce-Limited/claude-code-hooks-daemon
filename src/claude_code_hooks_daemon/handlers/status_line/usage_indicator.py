@@ -1,9 +1,9 @@
 """UsageIndicatorHandler - subscription usage in the status line (Plan 00479).
 
 Renders the 5-hour and weekly usage windows as compact background-coloured
-chips after a graph icon. A window below the warning level is its label alone
-(``📊 5h|7d``); a window at or above it adds its percentage and reset countdown
-(``📊 5h 67% 3h 20m|7d``). Owner ruling: green needs no number, so the segment
+chips after a line-graph icon. A window below the warning level is its label alone
+(``📈 5h|7d``); a window at or above it adds its percentage and reset countdown
+(``📈 5h 67% 3h 20m|7d``). Owner ruling: green needs no number, so the segment
 stays narrow until there is something worth reading.
 
 The figures come from the daemon's usage snapshot
@@ -52,7 +52,7 @@ _DEFAULT_WARN_PCT: Final[int] = 60
 _DEFAULT_HIGH_PCT: Final[int] = 80
 _DEFAULT_CRITICAL_PCT: Final[int] = 90
 
-_ICON: Final[str] = "📊"
+_ICON: Final[str] = "📈"
 _SEPARATOR: Final[str] = "|"
 _SECONDS_PER_MINUTE: Final[int] = 60
 _SECONDS_PER_HOUR: Final[int] = 3600
@@ -151,7 +151,7 @@ class UsageIndicatorHandler(StatusLineHandlerBase):
                 "is used, read from the `rate_limits` Claude Code ships on each status render."
             ),
             how_to_read=(
-                "`📊 5h|7d` are the 5-hour and weekly windows, each on a background "
+                "`📈 5h|7d` are the 5-hour and weekly windows, each on a background "
                 f"coloured by its usage: green below {self._warn_pct:g}%, yellow from "
                 f"{self._warn_pct:g}%, orange from {self._high_pct:g}%, red from "
                 f"{self._critical_pct:g}%. A green window shows only its label; from "
@@ -175,7 +175,7 @@ class UsageIndicatorHandler(StatusLineHandlerBase):
                 title="usage indicator renders subscription usage",
                 command='echo "test"',
                 description=(
-                    "Verify the status line carries a '📊 5h|7d' usage segment on a "
+                    "Verify the status line carries a '📈 5h|7d' usage segment on a "
                     "claude.ai subscription session. Absent when Claude Code reports no "
                     "usage data. Confirmed active by the daemon loading without errors."
                 ),

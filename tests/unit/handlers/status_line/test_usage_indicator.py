@@ -1,10 +1,10 @@
 """Tests for UsageIndicatorHandler (Plan 00479 Task 2.2).
 
 The segment renders the 5-hour and weekly subscription windows, read from the
-daemon's usage snapshot, as compact background-coloured chips after a graph
-icon. A window below the warning level is its label alone (``📊 5h|7d``); a
+daemon's usage snapshot, as compact background-coloured chips after a line
+graph icon (owner ruling: a line graph, not a bar chart). A window below the warning level is its label alone (``📈 5h|7d``); a
 window at or above it adds its percentage and reset countdown
-(``📊 5h 67% 3h 0m|7d``) (owner ruling: green needs no number).
+(``📈 5h 67% 3h 0m|7d``) (owner ruling: green needs no number).
 """
 
 import re
@@ -80,13 +80,13 @@ class TestRendering:
         _feed("main_thread_integer.json")  # 5h 13, 7d 3: both green
         rendered = _render()
         assert rendered is not None
-        assert _plain(rendered) == "| 📊 5h|7d"
+        assert _plain(rendered) == "| 📈 5h|7d"
 
     def test_a_warning_window_shows_its_percentage_and_countdown(self) -> None:
         _feed("main_thread_fractional.json")  # 5h 67.4 yellow, 7d 81.9 orange
         rendered = _render()
         assert rendered is not None
-        assert _plain(rendered) == "| 📊 5h 67% 3h 0m|7d 81% 6d 22h"
+        assert _plain(rendered) == "| 📈 5h 67% 3h 0m|7d 81% 6d 22h"
 
     def test_only_the_window_over_the_warning_level_gets_detail(self) -> None:
         payload = load_status_payload("main_thread_integer.json")
@@ -94,25 +94,25 @@ class TestRendering:
         get_data_layer().usage.update_from_status_event(payload, now=NOW)
         rendered = _render()
         assert rendered is not None
-        assert _plain(rendered) == "| 📊 5h|7d 75% 6d 22h"
+        assert _plain(rendered) == "| 📈 5h|7d 75% 6d 22h"
 
     def test_seven_day_only_has_no_five_hour_part(self) -> None:
         _feed("seven_day_only.json")  # 7d 42: green
         rendered = _render()
         assert rendered is not None
-        assert _plain(rendered) == "| 📊 7d"
+        assert _plain(rendered) == "| 📈 7d"
 
     def test_expired_five_hour_is_dropped_and_seven_day_stays(self) -> None:
         _feed("five_hour_expired.json")
         rendered = _render()
         assert rendered is not None
-        assert _plain(rendered) == "| 📊 7d"
+        assert _plain(rendered) == "| 📈 7d"
 
     def test_agent_thread_payload_renders_like_the_main_thread(self) -> None:
         _feed("agent_thread.json")
         rendered = _render()
         assert rendered is not None
-        assert _plain(rendered) == "| 📊 5h|7d"
+        assert _plain(rendered) == "| 📈 5h|7d"
 
     def test_percentage_is_rounded_down(self) -> None:
         payload = load_status_payload("main_thread_integer.json")
@@ -218,7 +218,7 @@ class TestHandlerContract:
     def test_explanation_names_its_glyphs_and_thresholds(self) -> None:
         explanation = UsageIndicatorHandler().explain_segment()
         assert explanation.name == "Subscription Usage"
-        assert "📊" in explanation.glyphs
+        assert "📈" in explanation.glyphs
         assert "5h" in explanation.glyphs and "7d" in explanation.glyphs
         assert "60" in explanation.how_to_read and "90" in explanation.how_to_read
 
