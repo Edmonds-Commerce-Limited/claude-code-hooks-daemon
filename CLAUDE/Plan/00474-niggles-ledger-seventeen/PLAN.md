@@ -42,7 +42,7 @@ Full write-ups are in [NIGGLES.md](NIGGLES.md). One line each here:
 | N285       | `PYTHONPATH=` before an interpreter held in a variable is denied as an upgrade-approval bypass                   | N283 agent          | ✅ Fixed (a9d6d9aa0)    |
 | N284       | The pipe blocker reads `\|` inside a double-quoted grep pattern as a pipe                                        | Coordinator         | ✅ Fixed (72e9018e3)    |
 | N283       | `secret_file_guard` misses a protected name in git `rev:path` syntax at the repository root (security)           | N253 analysis       | ✅ Fixed (caa8ff966)    |
-| N282       | The N264 cross-worktree guard judges an in-process teammate by the coordinator's working directory               | Coordinator         | ⬜ Open                 |
+| N282       | The N264 cross-worktree guard judges an in-process teammate by the coordinator's working directory               | Coordinator         | ✅ Fixed (8eeead3e5)    |
 | N281       | A hostile-input sweep failed on slow runners: the 100,000-character scan timed out and denied (fail-closed)      | Main CI             | ✅ Fixed (test only)    |
 | N280       | Something with pre-N271 code wrote an older `CLAUDE.md` guidance section into main during a test run             | Coordinator         | ⬜ Open                 |
 | N279       | `changed_tests` once selected 50 test files, ran 0 tests and still passed                                        | p477 agent          | ✅ Fixed (ac2306ed4)    |
