@@ -193,6 +193,31 @@ config_changes:
         handlers.session_start.branch_count_advisor.enabled: false.
       recommended: true
       dormant: false
+    - key: handlers.pre_tool_use.merge_qa_advisor
+      description: >-
+        Advises, before a Bash `git merge` of a work branch (`worktree-*`,
+        local or `origin/worktree-*`) whose head has no recorded green
+        `llm_qa.py changed` run (Plan 00475 Task 4.2, ledger 00474 N278). The
+        advisory names the head and the static checks CLAUDE/QA.md lists for the
+        coordinator's check. `llm_qa.py changed` records the commit a passing
+        run of the whole selection judged, on a clean tree, in
+        `refs/integration/changed-green/<branch>`, a ref every worktree shares.
+        Advisory only; silent when the record names the head, for any other
+        branch, for `--abort`, `--continue` and `--quit`, and whenever git
+        cannot answer.
+      example_yaml: |
+        handlers:
+          pre_tool_use:
+            merge_qa_advisor:
+              enabled: true
+              priority: 56
+      migration_note: >-
+        On by default; no project-side action needed. A project that does not
+        use `scripts/qa/llm_qa.py changed` never has a record, so it is advised
+        on every merge of a `worktree-*` branch; disable with
+        handlers.pre_tool_use.merge_qa_advisor.enabled: false.
+      recommended: true
+      dormant: false
     - key: persistent_crons.jobs[].runs_while_awaiting_human
       recommended: false
       dormant: true
