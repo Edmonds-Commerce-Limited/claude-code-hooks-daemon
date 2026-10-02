@@ -1282,7 +1282,10 @@ Under the threat model these are ordinary commands and a false positive is in sc
 exists to stop a scan that derives the next plan number (`ls | sort | tail`). A plain listing,
 or quoted text, is neither.
 
-**Status**: ⬜ Open (Plan 00483 Phase 3: narrow the match to number-discovery shapes).
+**Status**: ✅ Fixed (merge of worktree-quoted-text-fps). `plan_number_helper` judges
+the `ls`, `find` and `grep` rules on the command-position view, and the `ls` glob rule per command:
+a glob naming a specific plan, or one followed by a path (`*/PLAN.md`), is a lookup unless the
+command also keeps only the last entry.
 
 ### N299 — `sensitive_content` resolves a pathspec from the repository root after a `cd`
 

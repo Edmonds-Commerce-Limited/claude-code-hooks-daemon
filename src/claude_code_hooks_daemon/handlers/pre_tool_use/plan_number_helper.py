@@ -44,6 +44,10 @@ from claude_code_hooks_daemon.handlers.utils.plan_numbering import (
 )
 from claude_code_hooks_daemon.install.plan_workflow import MKPLAN_SCRIPT_NAME
 from claude_code_hooks_daemon.utils.command_evasion import remove_word_quoting
+from claude_code_hooks_daemon.utils.command_position import (
+    command_position_segments,
+    command_position_view,
+)
 from claude_code_hooks_daemon.utils.path_containment import path_is_relative_to
 from claude_code_hooks_daemon.utils.path_predicates import path_is_dir
 from claude_code_hooks_daemon.utils.quoted_spans import blank_shell_literal_spans
@@ -281,6 +285,34 @@ class PlanNumberHelperHandler(PreToolUseHandlerBase):
         return bool(re.search(r"tail\s+(-n\s*)?-?\d+", command))
 
     @staticmethod
+    def _ls_globs_plan_folders(segment: str, plan_dir: str, extracts_latest: bool) -> bool:
+        """True when an ``ls`` segment lists the plan FOLDERS by a number-agnostic glob.
+
+        ``ls CLAUDE/Plan/*``, ``ls CLAUDE/Plan/0*`` and ``ls CLAUDE/Plan/[0-9]*``
+        print the folder names, which is how a next number gets read off. Two
+        shapes of the same glob do not:
+
+        * a glob naming a specific plan (``*464*``, ``00464-*``) is a lookup;
+        * a glob followed by a path (``*/PLAN.md``) lists files INSIDE the
+          plans, unless the command also reduces its output to the last entry.
+        """
+        ls_at = re.search(r"\bls\s", segment)
+        if ls_at is None:
+            return False
+        for match in re.finditer(
+            rf"{re.escape(plan_dir)}/([^\s/]*)(/\S*)?", segment[ls_at.end() :]
+        ):
+            glob, rest = match.group(1), match.group(2) or ""
+            if not re.match(r"\*|0\*|\[0-9\]", glob):
+                continue
+            if re.search(r"\d{2,}", re.sub(r"\[[^\]]*\]", "", glob)):
+                continue
+            if rest.strip("/") and not extracts_latest:
+                continue
+            return True
+        return False
+
+    @staticmethod
     def _sweeps_the_plan_directory(command: str, plan_dir: str) -> bool:
         """True when the command references the plan dir as a DIRECTORY TO LIST.
 
@@ -421,7 +453,15 @@ class PlanNumberHelperHandler(PreToolUseHandlerBase):
         # a targeted find from a sweep. Blanking those blinds rules that are
         # working correctly, so the exemption is placed where a misread costs a
         # false positive and withheld where a literal IS the signal.
-        executable_text = blank_shell_literal_spans(command)
+        #
+        # A quoted heredoc body is written, not run, so it is dropped first.
+        executable_text = blank_shell_literal_spans(strip_inert_spans(command))
+        # What the shell would run as COMMANDS: the arguments of a data head
+        # (`echo`, `printf`, `grep`) are blanked unless its output feeds an
+        # executor or an expansion could run it. Used by the `ls`/`find`/`grep`
+        # rules; the `echo`/`printf` glob rule needs the arguments, so it reads
+        # `executable_text` instead.
+        position_text = command_position_view(command)
 
         # Get the plan directory path (relative to workspace)
         plan_dir = self._track_plans_in_project
@@ -479,15 +519,12 @@ class PlanNumberHelperHandler(PreToolUseHandlerBase):
         # Pattern detection: Commands trying to discover plan numbers
         # These patterns indicate Claude is trying to find the latest plan
 
-        # 1. ls with glob patterns on plan directory
-        ls_patterns = [
-            rf"ls\s+.*{re.escape(plan_dir)}/\*",  # ls CLAUDE/Plan/*
-            rf"ls\s+.*{re.escape(plan_dir)}/0\*",  # ls CLAUDE/Plan/0*
-            rf"ls\s+.*{re.escape(plan_dir)}/\[0-9\]",  # ls CLAUDE/Plan/[0-9]*
-        ]
-
-        for pattern in ls_patterns:
-            if re.search(pattern, command):
+        # 1. ls with glob patterns on plan directory, judged one command at a
+        # time in command position (ledger 00466 N65, 00474 N298): a listing of
+        # one named plan, or of files INSIDE every plan, derives no number, and
+        # quoted text an `echo`/`printf` merely prints runs no `ls` at all.
+        for segment in command_position_segments(command):
+            if self._ls_globs_plan_folders(segment, plan_dir, self._extracts_latest(command)):
                 return True
 
         # 2. find commands on the plan directory ITSELF (discovery), NOT a find scoped to a
@@ -500,7 +537,7 @@ class PlanNumberHelperHandler(PreToolUseHandlerBase):
         ]
 
         for pattern in find_patterns:
-            if re.search(pattern, command):
+            if re.search(pattern, position_text):
                 return True
 
         # 3. Glob expansion (echo, printf with plan directory globs)
@@ -553,7 +590,7 @@ class PlanNumberHelperHandler(PreToolUseHandlerBase):
 
         # 5. ls on plan directory piped to grep with number patterns
         # This catches: ls CLAUDE/Plan/ | grep -E '^[0-9]+' or similar
-        if re.search(rf"ls\s+.*{re.escape(plan_dir)}", command) and "grep" in command:
+        if re.search(rf"ls\s+.*{re.escape(plan_dir)}", position_text) and "grep" in position_text:
             # Check if grep is filtering for numbers (common pattern)
             if re.search(r"grep.*['\"]?\^?\[?0-9\]?", command):
                 return True
