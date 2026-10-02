@@ -39,6 +39,9 @@ import pytest
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _RELAY_BINARY = _REPO_ROOT / "untracked" / "relay-build" / "hooks-relay-x86_64-unknown-linux-musl"
+
+# A build older than relay/hooks_relay.rs fails with one "rebuild" message (N319).
+pytestmark = pytest.mark.usefixtures("fresh_relay_build")
 _TIMEOUT_MS = 500
 _SUBPROCESS_TIMEOUT_SECONDS = 15
 

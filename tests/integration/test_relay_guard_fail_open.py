@@ -66,6 +66,9 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 _INIT_SH = _REPO_ROOT / ".claude" / "init.sh"
 _RELAY_BINARY = _REPO_ROOT / "untracked" / "relay-build" / "hooks-relay-x86_64-unknown-linux-musl"
 
+# A build older than relay/hooks_relay.rs fails with one "rebuild" message (N319).
+pytestmark = pytest.mark.usefixtures("fresh_relay_build")
+
 _TIMEOUT_SECONDS = 15
 
 #: The daemon clone's launcher, which ``cli.py`` and a deny name first.
