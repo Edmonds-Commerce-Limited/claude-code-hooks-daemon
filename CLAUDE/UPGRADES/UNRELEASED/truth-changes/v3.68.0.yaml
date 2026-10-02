@@ -36,3 +36,24 @@ truth_changes:
       IF YOUR PROJECT'S DOCS OR AUTOMATION SAY A DAEMON UPGRADE ALWAYS RUNS
       TO COMPLETION UNATTENDED, OR TREAT ANY NON-ZERO EXIT OF THE UPGRADE AS
       A FAILURE TO RETRY BLINDLY, UPDATE THEM.
+  - topic: daemon-config
+    id: absent-handler-block-default
+    was: >
+      A handler with no block under `handlers.<event>` in
+      `.claude/hooks-daemon.yaml` is enabled, so a minimal config (`init
+      minimal`, which lists no handlers) runs every handler, opt-in ones
+      included.
+    now: >
+      A handler with no block runs only if it is on by default. The sixteen
+      opt-in handlers (`lsp_enforcement`, `flaggable_content_channel_guard`,
+      `flaggable_work_advisor`, `quarantine_artefact_read_guard`,
+      `subagent_full_qa_blocker`, `goal_injection`, `compaction_signal`,
+      `model_fallback_detector`, `routine_qa_sweep`,
+      `session_actions_directive`, `skill_opportunity_detector`,
+      `tool_disable_advisor`, `context_sidecar`, `daemon_stats`,
+      `host_hostname`, `idle_housekeeping_advisory`) stay off until the config
+      names them. A block that is present, even a bare `key:`, is enabled
+      unless it says `enabled: false`.
+
+      IF YOUR PROJECT'S DOCS SAY A HANDLER WITH NO CONFIG BLOCK IS ENABLED, OR
+      THAT AN OPT-IN HANDLER RUNS ON A MINIMAL CONFIG, UPDATE THEM.

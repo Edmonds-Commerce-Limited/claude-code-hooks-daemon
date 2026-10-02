@@ -94,6 +94,11 @@ class IdleHousekeepingAdvisoryHandler(UserPromptSubmitHandlerBase):
     """After N consecutive no-op recovery ticks, advise a report-first
     housekeeping pass dispatched to specialist sub-agents (beta, opt-in)."""
 
+    # Opt-in (beta): it changes how idle time is spent, so it waits for field
+    # time. Enable with
+    # `handlers.user_prompt_submit.idle_housekeeping_advisory.enabled: true`.
+    default_enabled = False
+
     def __init__(self) -> None:
         super().__init__(
             handler_id=HandlerID.IDLE_HOUSEKEEPING_ADVISORY,
@@ -114,15 +119,6 @@ class IdleHousekeepingAdvisoryHandler(UserPromptSubmitHandlerBase):
         self._passes_by_session: BoundedFifoMap[str, int] = BoundedFifoMap(
             max_entries=_MAX_TRACKED_SESSIONS
         )
-
-    def get_default_enabled(self) -> bool:
-        """Opt-in: ships OFF by default (beta).
-
-        This is a new, exploratory behaviour that changes how idle time is
-        spent, so it is opt-in until it has field time. Enable it explicitly via
-        ``handlers.user_prompt_submit.idle_housekeeping_advisory.enabled: true``.
-        """
-        return False
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """Match any string prompt (branching happens in handle)."""

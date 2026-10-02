@@ -155,6 +155,10 @@ class ModelFallbackDetectorHandler(SessionStartHandlerBase):
     left for a project (like this daemon's own dev estate) to opt into.
     """
 
+    # Opt-in: a SessionStart scan is a stale, noisy signal for most projects;
+    # the `downgrade_indicator` status line covers the live one (Plan 00278).
+    default_enabled = False
+
     def __init__(self) -> None:
         super().__init__(
             handler_id=HandlerID.MODEL_FALLBACK_DETECTOR,
@@ -185,12 +189,6 @@ class ModelFallbackDetectorHandler(SessionStartHandlerBase):
         )
         # Bare record identities already snapshotted — once ever.
         self._snapshotted: BoundedFifoMap[str, None] = BoundedFifoMap(max_entries=_MAX_ADVISED_KEYS)
-
-    def get_default_enabled(self) -> bool:
-        """Opt-in: a SessionStart scan is a stale, noisy signal for most
-        projects; the ``downgrade_indicator`` status line covers the live one
-        (Plan 00278)."""
-        return False
 
     def get_relevance(self, context: RelevanceContext) -> Relevance:
         """Relevant only under an armed ccy supervisor (Plan 00330)."""

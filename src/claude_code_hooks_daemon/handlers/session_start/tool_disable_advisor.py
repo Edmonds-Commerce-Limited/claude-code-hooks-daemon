@@ -43,6 +43,9 @@ _ENABLE_ARTIFACT_KEY = "enableArtifact"
 class ToolDisableAdvisorHandler(SessionStartHandlerBase):
     """Advise when a declared never-want tool is not disabled at source."""
 
+    # Opt-in: the advisory is off until the project turns it on.
+    default_enabled = False
+
     def __init__(self) -> None:
         """Initialise as a non-terminal, ships-disabled advisory."""
         super().__init__(
@@ -50,10 +53,6 @@ class ToolDisableAdvisorHandler(SessionStartHandlerBase):
             priority=Priority.TOOL_DISABLE_ADVISOR,
             terminal=False,
         )
-
-    def get_default_enabled(self) -> bool:
-        """Opt-in: the advisory is off until the project turns it on."""
-        return False
 
     def get_relevance(self, context: RelevanceContext) -> Relevance:
         """Relevant only under an armed ccy supervisor (Plan 00330)."""

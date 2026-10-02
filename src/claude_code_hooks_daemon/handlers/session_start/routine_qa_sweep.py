@@ -42,6 +42,10 @@ logger = logging.getLogger(__name__)
 class RoutineQaSweepHandler(SessionStartHandlerBase):
     """Advisory SessionStart sweep over the Routine tree (silent when clean)."""
 
+    # Opt-in: most projects have no Routine tree, and a handler learned as
+    # noise on day one is not read later when it has something to say.
+    default_enabled = False
+
     def __init__(self) -> None:
         super().__init__(
             handler_id=HandlerID.ROUTINE_QA_SWEEP,
@@ -53,16 +57,6 @@ class RoutineQaSweepHandler(SessionStartHandlerBase):
                 HandlerTag.NON_TERMINAL,
             ],
         )
-
-    def get_default_enabled(self) -> bool:
-        """Opt-in: most projects have no Routine tree.
-
-        Returns:
-            False. Firing for a project that declares no routines would be
-            noise on day one, and a handler learned as noise is not read later
-            when it has something to say.
-        """
-        return False
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """Fire on a new session for a project that declares routines.

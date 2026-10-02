@@ -394,3 +394,84 @@ config_changes:
         a `producer | head` exits 141 (SIGPIPE) and `set -e` then aborts the
         command, so do not append `|| true`; read the file directly with
         `head -n N <file>` or capture with `bin/echd-capture N` instead.
+  changed:
+    # Plan 00483 N55 (owner-delegated ruling): an opt-in handler with NO block
+    # under `handlers.<event>` no longer runs. Documentation-only entries (no
+    # `recommended_value`): promoting every one would tell every project to
+    # enable all sixteen. A project that relied on the old behaviour names the
+    # handler; naming it, even as a bare key, enables it.
+    - key: handlers.pre_tool_use.lsp_enforcement
+      description: &opt_in_description >-
+        Opt-in handlers are no longer registered when their block is absent
+        (Plan 00483 N55). A handler is opt-in when the class declares
+        `default_enabled = False`; a block that is present, even a bare
+        `key:`, enables it unless it says `enabled: false`. `init full`
+        configs already carry `enabled: false` for each, so are unaffected.
+      example_yaml: &opt_in_example |
+        handlers:
+          pre_tool_use:
+            lsp_enforcement:
+              enabled: true
+      migration_note: &opt_in_note >-
+        Only a config that omits the handler AND relied on it running is
+        affected: add the handler's block (`enabled: true`) to keep it.
+    - key: handlers.pre_tool_use.flaggable_content_channel_guard
+      description: *opt_in_description
+      example_yaml: *opt_in_example
+      migration_note: *opt_in_note
+    - key: handlers.pre_tool_use.flaggable_work_advisor
+      description: *opt_in_description
+      example_yaml: *opt_in_example
+      migration_note: *opt_in_note
+    - key: handlers.pre_tool_use.quarantine_artefact_read_guard
+      description: *opt_in_description
+      example_yaml: *opt_in_example
+      migration_note: *opt_in_note
+    - key: handlers.pre_tool_use.subagent_full_qa_blocker
+      description: *opt_in_description
+      example_yaml: *opt_in_example
+      migration_note: *opt_in_note
+    - key: handlers.post_tool_use.goal_injection
+      description: *opt_in_description
+      example_yaml: *opt_in_example
+      migration_note: *opt_in_note
+    - key: handlers.pre_compact.compaction_signal
+      description: *opt_in_description
+      example_yaml: *opt_in_example
+      migration_note: *opt_in_note
+    - key: handlers.session_start.model_fallback_detector
+      description: *opt_in_description
+      example_yaml: *opt_in_example
+      migration_note: *opt_in_note
+    - key: handlers.session_start.routine_qa_sweep
+      description: *opt_in_description
+      example_yaml: *opt_in_example
+      migration_note: *opt_in_note
+    - key: handlers.session_start.session_actions_directive
+      description: *opt_in_description
+      example_yaml: *opt_in_example
+      migration_note: *opt_in_note
+    - key: handlers.session_start.skill_opportunity_detector
+      description: *opt_in_description
+      example_yaml: *opt_in_example
+      migration_note: *opt_in_note
+    - key: handlers.session_start.tool_disable_advisor
+      description: *opt_in_description
+      example_yaml: *opt_in_example
+      migration_note: *opt_in_note
+    - key: handlers.status_line.context_sidecar
+      description: *opt_in_description
+      example_yaml: *opt_in_example
+      migration_note: *opt_in_note
+    - key: handlers.status_line.daemon_stats
+      description: *opt_in_description
+      example_yaml: *opt_in_example
+      migration_note: *opt_in_note
+    - key: handlers.status_line.host_hostname
+      description: *opt_in_description
+      example_yaml: *opt_in_example
+      migration_note: *opt_in_note
+    - key: handlers.user_prompt_submit.idle_housekeeping_advisory
+      description: *opt_in_description
+      example_yaml: *opt_in_example
+      migration_note: *opt_in_note

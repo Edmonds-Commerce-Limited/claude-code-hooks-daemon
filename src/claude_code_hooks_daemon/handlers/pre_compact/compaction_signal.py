@@ -74,6 +74,9 @@ _KEY_ORIGIN = "origin"
 class CompactionSignalHandler(PreCompactHandlerBase):
     """Write a ``<session>.compacting`` signal on PreCompact for the supervisor."""
 
+    # Opt-in: only useful when a PTY supervisor is watching.
+    default_enabled = False
+
     def __init__(self) -> None:
         super().__init__(
             handler_id=HandlerID.COMPACTION_SIGNAL,
@@ -81,10 +84,6 @@ class CompactionSignalHandler(PreCompactHandlerBase):
             terminal=False,
             tags=[HandlerTag.WORKFLOW, HandlerTag.NON_TERMINAL],
         )
-
-    def get_default_enabled(self) -> bool:
-        """Opt-in: only useful when a PTY supervisor is watching."""
-        return False
 
     def get_relevance(self, context: RelevanceContext) -> Relevance:
         """Relevant only under an armed ccy supervisor (Plan 00330)."""

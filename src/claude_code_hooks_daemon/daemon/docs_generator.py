@@ -12,7 +12,7 @@ import logging
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
-from claude_code_hooks_daemon.constants.config import ConfigKey, resolve_priority
+from claude_code_hooks_daemon.constants.config import resolve_priority
 from claude_code_hooks_daemon.handlers.registry import (
     EVENT_TYPE_MAPPING,
     event_dir_name_matches_module,
@@ -299,7 +299,7 @@ class DocsGenerator:
             handlers_by_event: Dict to populate, keyed by event directory name
             include_disabled: Include disabled handlers
         """
-        from claude_code_hooks_daemon.handlers.registry import _to_snake_case
+        from claude_code_hooks_daemon.handlers.registry import _to_snake_case, config_skip_reason
 
         for event_dir_name in EVENT_TYPE_MAPPING:
             event_config = self._config.get(event_dir_name, {})
@@ -323,7 +323,17 @@ class DocsGenerator:
 
                 config_key = _to_snake_case(handler_class_name)
                 handler_config = event_config.get(config_key, {})
-                is_enabled = handler_config.get(ConfigKey.ENABLED, True)
+                # An absent block defers to the handler's declared default,
+                # as `register_all` does (Plan 00483 N55).
+                is_enabled = (
+                    config_skip_reason(
+                        handler_config,
+                        registry_disabled=False,
+                        default_enabled=handler_class.default_enabled,
+                        present=config_key in event_config,
+                    )
+                    is None
+                )
 
                 if not is_enabled and not include_disabled:
                     continue

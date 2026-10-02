@@ -78,7 +78,8 @@ _ABSTRACT_METHOD_VERSIONS: dict[str, str] = {
 # NOTE: `get_default_enabled()` was added to the Handler base in v3.24.0
 # (Plan 00133) as a CONCRETE method (default True), deliberately NOT abstract —
 # so it does not appear above. Project handlers need not implement it; they
-# inherit the opt-out default and override only to declare themselves opt-in.
+# inherit the opt-out default and set `default_enabled = False` only to declare
+# themselves opt-in.
 
 
 #: Path from the daemon root to the versioned upgrade-guide tree.

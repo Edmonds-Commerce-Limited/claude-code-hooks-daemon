@@ -1197,7 +1197,10 @@ def get_relevance(self, context: RelevanceContext) -> Relevance:
   disagree about it.
 - The optimal state of a **relevant** handler is enabled, *whatever its
   default*. `get_default_enabled()` answers "safe without knowing the
-  project"; `get_relevance()` answers "worth it, knowing the project". A
+  project"; `get_relevance()` answers "worth it, knowing the project".
+  `get_default_enabled()` returns the class attribute `default_enabled`
+  (`False` makes a handler opt-in): an absent config block defers to this
+  default; a present block is enabled unless it says `enabled: false`. A
   default-off handler whose precondition holds is recommended; one whose
   precondition is missing is reported as "not applicable here", never as a
   shortfall.

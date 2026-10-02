@@ -194,6 +194,9 @@ class QuarantineArtefactReadGuardHandler(PreToolUseHandlerBase):
     enabling it needs no configuration (Plan 00278 Phase 3d.2).
     """
 
+    # Opt-in: matches the estate's other Plan 00278 delegation surfaces.
+    default_enabled = False
+
     def __init__(self) -> None:
         super().__init__(
             handler_id=HandlerID.QUARANTINE_ARTEFACT_READ_GUARD,
@@ -210,10 +213,6 @@ class QuarantineArtefactReadGuardHandler(PreToolUseHandlerBase):
         # here so mypy sees real attributes (command_hints convention).
         self._mode: str = _DEFAULT_MODE
         self._quarantine_artefact_globs: list[str] = []
-
-    def get_default_enabled(self) -> bool:
-        """Opt-in: matches the estate's other Plan 00278 delegation surfaces."""
-        return False
 
     def get_relevance(self, context: RelevanceContext) -> Relevance:
         """Relevant only where the quarantine agent is deployed (Plan 00330)."""

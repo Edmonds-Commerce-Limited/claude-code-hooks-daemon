@@ -144,6 +144,9 @@ class FlaggableContentChannelGuardHandler(PreToolUseHandlerBase):
     configuring ``flaggable_path_globs`` (Plan 00278 Phase 3d.1).
     """
 
+    # Opt-in: the flaggable boundary is project-specific (Plan 00278).
+    default_enabled = False
+
     def __init__(self) -> None:
         super().__init__(
             handler_id=HandlerID.FLAGGABLE_CONTENT_CHANNEL_GUARD,
@@ -161,10 +164,6 @@ class FlaggableContentChannelGuardHandler(PreToolUseHandlerBase):
         self._mode: str = _DEFAULT_MODE
         self._flaggable_path_globs: list[str] = []
         self._extra_content_revealing_patterns: list[str] = []
-
-    def get_default_enabled(self) -> bool:
-        """Opt-in: the flaggable boundary is project-specific (Plan 00278)."""
-        return False
 
     def get_relevance(self, context: RelevanceContext) -> Relevance:
         """Relevant only where the quarantine agent is deployed (Plan 00330)."""

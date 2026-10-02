@@ -8759,7 +8759,9 @@ def _collect_status_line_segment_entries(
             entries.append(entry)
             continue
 
-        enabled = handler_is_enabled(event_config, config_key, instance.tags)
+        enabled = handler_is_enabled(
+            event_config, config_key, instance.tags, default_enabled=handler_class.default_enabled
+        )
         priority = resolve_priority(handler_config, instance.priority)
         entry = _StatusLineSegmentEntry(
             config_key=config_key,

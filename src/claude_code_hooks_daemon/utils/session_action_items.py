@@ -120,7 +120,9 @@ def collect_session_action_items(project_root: Path | None) -> list[SessionActio
             logger.exception("Failed to instantiate %s for session-actions", handler_class_name)
             continue
 
-        if not handler_is_enabled(event_config, config_key, instance.tags):
+        if not handler_is_enabled(
+            event_config, config_key, instance.tags, default_enabled=handler_class.default_enabled
+        ):
             continue
 
         if compute_tier(instance) is not SessionTier.ACTION_REQUIRED:

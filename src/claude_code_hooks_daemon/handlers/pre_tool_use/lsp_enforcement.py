@@ -366,6 +366,11 @@ class LspEnforcementHandler(PreToolUseHandlerBase):
     and snake_case identifiers in Grep tool and Bash grep/rg commands.
     """
 
+    # Opt-in: many projects have no LSP configured (Plan 00133). Must stay
+    # consistent with the template's `enabled: false`
+    # (test_default_enabled_template_consistency).
+    default_enabled = False
+
     def __init__(self) -> None:
         super().__init__(
             handler_id=HandlerID.LSP_ENFORCEMENT,
@@ -377,16 +382,6 @@ class LspEnforcementHandler(PreToolUseHandlerBase):
         # resolver's defaults (test seams).
         self._config_dir: Path | None = None
         self._managed_dir: Path | None = None
-
-    def get_default_enabled(self) -> bool:
-        """Opt-in handler — off by default (Plan 00133).
-
-        LSP enforcement steers agents toward LSP tools instead of Grep, but
-        many projects have no LSP configured, so it ships disabled and clients
-        opt in. Must stay consistent with the ``enabled: false`` flag in the
-        config template (enforced by ``test_default_enabled_template_consistency``).
-        """
-        return False
 
     def _get_mode(self) -> str:
         """Get configured mode (set by registry via setattr)."""

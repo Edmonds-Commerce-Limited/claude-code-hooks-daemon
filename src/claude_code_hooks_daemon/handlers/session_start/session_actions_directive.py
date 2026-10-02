@@ -67,6 +67,9 @@ class SessionActionsDirectiveHandler(SessionStartHandlerBase):
     session-start output.
     """
 
+    # Opt-in: it types into a human's terminal, so a project chooses it.
+    default_enabled = False
+
     def __init__(self) -> None:
         """Initialise the session-actions directive handler."""
         super().__init__(
@@ -94,10 +97,6 @@ class SessionActionsDirectiveHandler(SessionStartHandlerBase):
     def _untracked_dir() -> Path:
         """The daemon's untracked directory, where the signal lives."""
         return ProjectContext.daemon_untracked_dir()
-
-    def get_default_enabled(self) -> bool:
-        """Opt-in: it types into a human's terminal, so a project chooses it."""
-        return False
 
     def get_relevance(self, context: RelevanceContext) -> Relevance:
         """Relevant only under an armed ccy supervisor (Plan 00330)."""
