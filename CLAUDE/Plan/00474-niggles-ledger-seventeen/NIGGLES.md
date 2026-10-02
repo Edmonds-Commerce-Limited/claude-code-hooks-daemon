@@ -1142,7 +1142,13 @@ written to remove comes back at ERROR level, in the channel the docs point at
 **Trigger**: the status line re-renders faster than the slow chip in N295 replies, so Claude Code
 drops superseded renders.
 
-**Status**: ⬜ Open.
+**Status**: ✅ Fixed (branch `worktree-n294-wait-closed`, not yet merged).
+
+Both client handlers now close through one helper, `HooksDaemon._close_writer`. It closes the
+writer, then awaits `wait_closed()`. A `BrokenPipeError` or `ConnectionResetError` from that wait
+is recorded at DEBUG and goes no further. Any other error still surfaces. The request counter is
+decremented before the close, so it always runs. The per-event handler had the same pattern and
+uses the same helper. Tests are in `tests/unit/daemon/test_server_dead_peer_logging.py`.
 
 ### N295 — the prompt-cache chip re-reads every sub-agent's sidecar file on every render
 
