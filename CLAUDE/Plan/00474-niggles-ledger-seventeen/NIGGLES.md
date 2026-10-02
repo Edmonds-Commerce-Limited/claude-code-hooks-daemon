@@ -1053,7 +1053,14 @@ path is a variable. Another is a token in the script.
 **Worked around**: the script takes the src path as `argv[1]` and inserts it into
 `sys.path`, with no environment variable.
 
-**Status**: ⬜ Open. Reproduce with `bin/hooks-daemon probe`, then fix TDD (dogfooding rule).
+**Status**: ✅ Fixed (15fe504c1, merged).
+
+- **Cause**: `_script_run_is_upgrade` resolved the relative script against the hook cwd and ignored
+  the command's leading `cd /workspace &&`. The script therefore looked missing. A missing script
+  counts as the upgrade once `PYTHON*` steers.
+- **Fix**: the guard now follows a leading chain of `cd <literal existing dir>`. Every uncertain
+  shape keeps the strict hook-cwd behaviour.
+- **Tests**: 242 guard tests pass, every pre-existing denial included.
 
 ### N293 — GitHub #68: the guards fail closed on an absolute glob with 2+ wildcards under an existing literal prefix
 

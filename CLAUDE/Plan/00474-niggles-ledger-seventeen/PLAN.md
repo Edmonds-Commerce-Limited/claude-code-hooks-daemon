@@ -39,7 +39,7 @@ Full write-ups are in [NIGGLES.md](NIGGLES.md). One line each here:
 | #          | Verdict                                                                                                          | Origin              | Status                   |
 | ---------- | ---------------------------------------------------------------------------------------------------------------- | ------------------- | ------------------------ |
 | N293       | #68: secret/quarantine guards fail closed on an absolute glob with 2+ wildcards under an existing literal prefix | GitHub #68          | ⬜ Open (owner priority) |
-| N292       | `upgrade_approval_guard` denies `PYTHONPATH=… $V/python script.py`, which runs no upgrade                        | Coordinator         | ⬜ Open                  |
+| N292       | `upgrade_approval_guard` denies `PYTHONPATH=… $V/python script.py`, which runs no upgrade                        | Coordinator         | ✅ Fixed (15fe504c1)     |
 | N291       | `secret_file_guard` denies a grep regex inside `$( )` as a mention of a protected path                           | Coordinator         | ✅ Fixed (4a30b9248)     |
 | N290       | The coordinator stated a confident, unsearched, false claim ("the supervisor is outside this repository")        | Owner               | 🔄 Plan 00480            |
 | N289       | In this repository the slow SessionStart sweeps appear never to reach a session, unreported                      | Coordinator         | ✅ Fixed (76cf82266)     |
