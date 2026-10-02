@@ -240,6 +240,10 @@ _EARNS_GUIDANCE: dict[str, str] = {
     "WorktreeCreateHandler": "T2 the agent name that becomes the path is already chosen",
     # -- Test 3: standing policy that decays after one delivery ----------
     "BackgroundProcessTrackerHandler": "T3 watchdog protocol outlives the command",
+    "BranchCountAdvisorHandler": (
+        "T3 standing policy: the open-branch limit governs every later decision "
+        "to start a branch, long after the one session-start message"
+    ),
     "BudgetExhaustionDetectorHandler": (
         "T3 standing policy: every future detection must lead with the same "
         "bold banner and never silently retry/degrade -- the fire-time line "
@@ -473,10 +477,6 @@ _EXEMPT_FROM_GUIDANCE: dict[str, str] = {
     ),
     "WebSearchYearHandler": "T4 message already carries the year, query and alternatives",
     "GitFilemodeCheckerHandler": "T4 fires once at session start with the full remedy",
-    "BranchCountAdvisorHandler": (
-        "T4 fires once at session start naming each work branch and the limit "
-        "it breaks; nothing to hold across later decisions"
-    ),
     "PluginHooksAdvisorHandler": (
         "T4 fires once at session start naming each plugin, its hook events and "
         "how to acknowledge it; nothing to hold across later decisions"

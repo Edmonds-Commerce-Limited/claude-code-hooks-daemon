@@ -40,6 +40,10 @@ WORK_BRANCH_PREFIX = "worktree-"
 # 139 to 650 commits behind); half of the smallest of those is the warning line.
 DEFAULT_BEHIND_MAIN_THRESHOLD = 50
 
+# SessionStart has a time budget (ledger 00474 N276) and each behind check is one
+# git call, so only this many branches are measured; the rest are reported unchecked.
+MAX_BEHIND_CHECKS = 20
+
 _ICON = "🌿"
 
 
@@ -113,8 +117,11 @@ class BranchCountAdvisorHandler(SessionStartHandlerBase):
 
         base = git_sync.default_branch(root)
         stale: list[tuple[str, int]] = []
+        unchecked = 0
         if base is not None:
-            for branch in branches:
+            checked = branches[:MAX_BEHIND_CHECKS]
+            unchecked = len(branches) - len(checked)
+            for branch in checked:
                 try:
                     behind = self._behind(root, base, branch)
                 except ValueError as exc:
@@ -130,6 +137,13 @@ class BranchCountAdvisorHandler(SessionStartHandlerBase):
             if context:
                 context.append("")
             context.extend(self._stale_lines(stale, base))
+        if unchecked:
+            if context:
+                context.append("")
+            context.append(
+                f"{_ICON}  GIT: {unchecked} more work branch(es) not checked for how far "
+                f"behind they are (only the first {MAX_BEHIND_CHECKS} are)."
+            )
         return AdvisoryResult(decision=Decision.ALLOW, context=context)
 
     def _count_lines(self, branches: list[str]) -> list[str]:
@@ -152,8 +166,15 @@ class BranchCountAdvisorHandler(SessionStartHandlerBase):
         return lines
 
     def get_claude_md(self) -> str | None:
-        """No standing guidance: the session-start message is the whole of it."""
-        return None
+        """The branch limit is a standing policy, not a one-shot correction."""
+        return (
+            "## branch_count_advisor — keep open work branches few\n\n"
+            "At most `options.max_open_branches` (default 3) `worktree-*` branches may be "
+            "open at once. Finish (merge or drop) one before starting another. A branch "
+            "whose worktree is gone still counts until it is deleted. A branch more than "
+            "`options.behind_main_threshold` (default 50) commits behind the default "
+            "branch should be merged or dropped. Advisory only."
+        )
 
     def get_acceptance_tests(self) -> list[Any]:
         """Acceptance test: the advisory is silent or names branches, never blocks."""

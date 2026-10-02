@@ -16,6 +16,7 @@ from claude_code_hooks_daemon.core import Decision
 from claude_code_hooks_daemon.handlers.session_start.branch_count_advisor import (
     DEFAULT_BEHIND_MAIN_THRESHOLD,
     DEFAULT_MAX_OPEN_BRANCHES,
+    MAX_BEHIND_CHECKS,
     BranchCountAdvisorHandler,
 )
 
@@ -164,6 +165,18 @@ class TestBehindMain:
         assert "4 open work branches" in text
         assert "5 commits behind" in text
 
+    def test_behind_checks_are_capped_and_the_rest_reported(self, repo: Path) -> None:
+        total = MAX_BEHIND_CHECKS + 2
+        for n in range(total):
+            _git(repo, "branch", f"worktree-b{n:02d}")
+        _commit(repo, "m1")
+        handler = _make(max_open=total, behind=0)
+        with patch.object(handler, "_behind", wraps=handler._behind) as spy:
+            text = "\n".join(_run(repo, handler))
+        assert spy.call_count == MAX_BEHIND_CHECKS
+        assert "2 more work branch(es) not checked" in text
+        assert f"worktree-b{MAX_BEHIND_CHECKS:02d}" not in text
+
     def test_branch_at_threshold_is_silent(self, repo: Path) -> None:
         self._far_behind(repo, 3)
         assert _run(repo, _make(behind=3)) == []
@@ -205,8 +218,11 @@ class TestFailOpen:
 
 
 class TestGuidance:
-    def test_claude_md_is_none(self) -> None:
-        assert BranchCountAdvisorHandler().get_claude_md() is None
+    def test_claude_md_names_config_keys(self) -> None:
+        text = BranchCountAdvisorHandler().get_claude_md()
+        assert text is not None
+        assert "max_open_branches" in text
+        assert "behind_main_threshold" in text
 
     def test_acceptance_tests(self) -> None:
         tests = BranchCountAdvisorHandler().get_acceptance_tests()
