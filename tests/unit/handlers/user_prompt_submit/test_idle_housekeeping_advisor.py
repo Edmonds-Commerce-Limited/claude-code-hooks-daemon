@@ -18,6 +18,7 @@ from claude_code_hooks_daemon.constants import HandlerID, Priority
 from claude_code_hooks_daemon.core import Decision
 from claude_code_hooks_daemon.core.transcript_reader import ContentBlock, TranscriptMessage
 from claude_code_hooks_daemon.daemon.housekeeping import report_only_steps
+from claude_code_hooks_daemon.handlers.registry import apply_handler_options
 from claude_code_hooks_daemon.handlers.user_prompt_submit.idle_housekeeping_advisor import (
     _RECOVERY_MARKER,
     IdleHousekeepingAdvisoryHandler,
@@ -365,6 +366,46 @@ class TestStaleCheckoutsReport:
         assert "HOUSEKEEPING MODE" in blob
         assert "STALE CHECKOUTS: git worktree remove /w/a" in blob
         collect.assert_called_once_with(tmp_path, "main", 7)
+
+    def test_unset_base_branch_is_the_repos_own_default_branch(self, tmp_path: Path) -> None:
+        handler = IdleHousekeepingAdvisoryHandler()
+        with (
+            patch(f"{_HANDLER_MODULE}.ProjectContext") as mock_pc,
+            patch(f"{_HANDLER_MODULE}.default_branch", return_value="trunk") as default,
+            patch(f"{_HANDLER_MODULE}.collect_stale_report", return_value=None) as collect,
+        ):
+            mock_pc.project_root.return_value = tmp_path
+            self._fire(handler)
+
+        default.assert_called_once_with(tmp_path)
+        collect.assert_called_once_with(tmp_path, "trunk", 7)
+
+    def test_a_configured_base_branch_is_not_second_guessed(self, tmp_path: Path) -> None:
+        handler = IdleHousekeepingAdvisoryHandler()
+        apply_handler_options(handler, {"base_branch": "develop"})
+        with (
+            patch(f"{_HANDLER_MODULE}.ProjectContext") as mock_pc,
+            patch(f"{_HANDLER_MODULE}.default_branch") as default,
+            patch(f"{_HANDLER_MODULE}.collect_stale_report", return_value=None),
+        ):
+            mock_pc.project_root.return_value = tmp_path
+            self._fire(handler)
+
+        default.assert_not_called()
+
+    @pytest.mark.parametrize("value", [0, -1, "7", 1.5, True, None])
+    def test_stale_worktree_days_must_be_a_positive_int(self, value: object) -> None:
+        handler = IdleHousekeepingAdvisoryHandler()
+
+        with pytest.raises(ValueError, match="stale_worktree_days"):
+            apply_handler_options(handler, {"stale_worktree_days": value})
+
+    def test_a_valid_stale_worktree_days_is_kept(self) -> None:
+        handler = IdleHousekeepingAdvisoryHandler()
+
+        apply_handler_options(handler, {"stale_worktree_days": 1})
+
+        assert handler._stale_worktree_days == 1
 
     def test_quiet_when_nothing_is_stale(self, tmp_path: Path) -> None:
         handler = IdleHousekeepingAdvisoryHandler()

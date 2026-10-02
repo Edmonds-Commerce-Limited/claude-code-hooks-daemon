@@ -26,6 +26,7 @@ from claude_code_hooks_daemon.core.handler_bases import UserPromptSubmitHandlerB
 from claude_code_hooks_daemon.core.transcript_reader import TranscriptMessage, TranscriptReader
 from claude_code_hooks_daemon.daemon.housekeeping import report_only_steps
 from claude_code_hooks_daemon.handlers.utils.bounded_fifo_map import BoundedFifoMap
+from claude_code_hooks_daemon.utils.git_sync import default_branch
 from claude_code_hooks_daemon.utils.stale_checkouts import (
     DEFAULT_MAX_IDLE_DAYS,
     collect_stale_report,
@@ -43,7 +44,9 @@ _RECOVERY_MARKER: Final[str] = "FAILSAFE RECOVERY CHECK"
 _DEFAULT_NOOP_THRESHOLD: Final[int] = 2
 _DEFAULT_MAX_PASSES_PER_SESSION: Final[int] = 1
 _DEFAULT_REPORTS_DIR: Final[str] = "untracked/reports"
-_DEFAULT_BASE_BRANCH: Final[str] = "main"
+# Used only when git cannot name the repository's default branch (no origin/HEAD,
+# no local main/master) and the project set no ``base_branch``.
+_FALLBACK_BASE_BRANCH: Final[str] = "main"
 
 # Custom project guidance (Plan 00161): a project may point the handler at its own
 # housekeeping doc, either ADDED to the default guidance or REPLACING it entirely.
@@ -120,14 +123,33 @@ class IdleHousekeepingAdvisoryHandler(UserPromptSubmitHandlerBase):
         self._custom_guidance_mode: str = _DEFAULT_CUSTOM_GUIDANCE_MODE
         # Stale worktree/daemon report (Plan 00470 Task 4.2).
         self._report_stale_checkouts: bool = True
-        self._base_branch: str = _DEFAULT_BASE_BRANCH
-        self._stale_worktree_days: int = DEFAULT_MAX_IDLE_DAYS
+        # Empty means "the repository's own default branch".
+        self._base_branch: str = ""
+        self._stale_worktree_days = DEFAULT_MAX_IDLE_DAYS
         # Per-session housekeeping-pass counter (in-memory; resets on daemon
         # restart, which is acceptable for a bounded beta safety-net feature).
         # Bounded with atomic FIFO eviction.
         self._passes_by_session: BoundedFifoMap[str, int] = BoundedFifoMap(
             max_entries=_MAX_TRACKED_SESSIONS
         )
+
+    @property
+    def _stale_worktree_days(self) -> int:
+        return self.__stale_worktree_days
+
+    @_stale_worktree_days.setter
+    def _stale_worktree_days(self, value: object) -> None:
+        """Accept only a whole number of days >= 1, rejecting bad config AT LOAD.
+
+        ``True`` is an ``int`` to Python but never a day count, and ``0`` would
+        call every branch idle, so both are refused with a message naming why.
+        """
+        if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+            raise ValueError(
+                f"idle_housekeeping_advisory stale_worktree_days must be an integer >= 1, "
+                f"got {value!r}."
+            )
+        self.__stale_worktree_days = value
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """Match any string prompt (branching happens in handle)."""
@@ -219,9 +241,9 @@ class IdleHousekeepingAdvisoryHandler(UserPromptSubmitHandlerBase):
         """
         if not self._report_stale_checkouts:
             return None
-        return collect_stale_report(
-            ProjectContext.project_root(), self._base_branch, self._stale_worktree_days
-        )
+        root = ProjectContext.project_root()
+        base_branch = self._base_branch or default_branch(root) or _FALLBACK_BASE_BRANCH
+        return collect_stale_report(root, base_branch, self._stale_worktree_days)
 
     def _load_custom_guidance(self) -> str | None:
         """Read the project's custom guidance doc, or None if unset/absent.

@@ -40,12 +40,16 @@ from __future__ import annotations
 import os
 import time
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
 from claude_code_hooks_daemon.core.worktree_paths import WORKTREE_DIR_PATTERNS
-from claude_code_hooks_daemon.utils.git_repo import run_git, strip_branch_ref
+from claude_code_hooks_daemon.utils.git_repo import (
+    parse_worktree_porcelain,
+    run_git,
+    strip_branch_ref,
+)
 from claude_code_hooks_daemon.utils.path_containment import path_is_relative_to
 
 
@@ -79,12 +83,6 @@ _STATUS_PREFIX_WIDTH = 3
 #: tracked-and-modified inside the worktree, so allowing any other code would
 #: let a real modification to an ignorable path be discarded silently.
 _UNTRACKED_STATUS_CODE = "??"
-
-#: The two `git worktree list --porcelain` lines this module reads. Each record
-#: opens with `worktree <path>` and, unless the worktree is detached, carries a
-#: `branch refs/heads/<name>` line naming what it has checked out.
-_WORKTREE_LINE_PREFIX = "worktree "
-_BRANCH_LINE_PREFIX = "branch refs/heads/"
 
 RunGit = Callable[..., GitResult]
 
@@ -304,21 +302,12 @@ def _worktree_entries(listing: str, repo_root: Path) -> list[_WorktreeEntry]:
     worktree's).
     """
     entries: list[_WorktreeEntry] = []
-    # Every line after a `worktree` line belongs to THAT record, so a branch
-    # line must be ignored entirely while the record it describes is one this
-    # collector skipped — otherwise the main checkout's `refs/heads/main` would
-    # attach itself to whichever agent worktree happened to precede it.
-    collecting = False
-    for line in listing.splitlines():
-        if line.startswith(_WORKTREE_LINE_PREFIX):
-            candidate = line[len(_WORKTREE_LINE_PREFIX) :].strip()
-            relative = candidate[len(str(repo_root)) :].lstrip("/")
-            collecting = any(relative.startswith(pattern) for pattern in WORKTREE_DIR_PATTERNS)
-            if collecting:
-                entries.append(_WorktreeEntry(path=Path(candidate), branch=None))
-        elif collecting and line.startswith(_BRANCH_LINE_PREFIX):
-            branch = line[len(_BRANCH_LINE_PREFIX) :].strip()
-            entries[-1] = replace(entries[-1], branch=branch)
+    # The shared parser attaches each branch line to ITS record, so the main
+    # checkout's `refs/heads/main` cannot land on a neighbouring agent worktree.
+    for record in parse_worktree_porcelain(listing):
+        relative = str(record.path)[len(str(repo_root)) :].lstrip("/")
+        if any(relative.startswith(pattern) for pattern in WORKTREE_DIR_PATTERNS):
+            entries.append(_WorktreeEntry(path=record.path, branch=record.branch))
     return entries
 
 
@@ -577,9 +566,7 @@ def _branch_names(result: GitResult) -> list[str] | None:
 def _attached_branches(listing: str) -> set[str]:
     """Branches that `git worktree list --porcelain` reports a worktree for."""
     return {
-        line[len(_BRANCH_LINE_PREFIX) :].strip()
-        for line in listing.splitlines()
-        if line.startswith(_BRANCH_LINE_PREFIX)
+        record.branch for record in parse_worktree_porcelain(listing) if record.branch is not None
     }
 
 

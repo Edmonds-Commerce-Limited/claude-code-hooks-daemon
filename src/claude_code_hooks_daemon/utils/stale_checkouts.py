@@ -26,14 +26,17 @@ from __future__ import annotations
 import logging
 import os
 import shlex
+import subprocess  # nosec B404 — CompletedProcess typing only; run_git owns the spawn
 import time
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
 
+from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.core.worktree_reaping import (
     MINIMUM_AGE_SECONDS,
+    GitResult,
     ProcessCwdsFn,
     RunGit,
     WorktreeAgeFn,
@@ -41,10 +44,9 @@ from claude_code_hooks_daemon.core.worktree_reaping import (
     default_worktree_age,
 )
 from claude_code_hooks_daemon.daemon.paths import (
-    get_untracked_dir,
     is_pid_alive,
     parse_pid_text,
-    pid_file_name,
+    pid_path_for,
     read_pid_file_text,
 )
 from claude_code_hooks_daemon.daemon.process_verification import (
@@ -53,7 +55,12 @@ from claude_code_hooks_daemon.daemon.process_verification import (
     find_all_daemon_processes,
     is_this_users_process,
 )
-from claude_code_hooks_daemon.utils.git_repo import branch_ref, run_git
+from claude_code_hooks_daemon.utils.git_repo import (
+    WorktreeRecord,
+    branch_ref,
+    parse_worktree_porcelain,
+    run_git,
+)
 from claude_code_hooks_daemon.utils.path_containment import path_is_relative_to
 
 logger = logging.getLogger(__name__)
@@ -62,10 +69,10 @@ DEFAULT_MAX_IDLE_DAYS: Final[int] = 7
 
 _SECONDS_PER_DAY: Final[float] = 86400.0
 
-_WORKTREE_PREFIX: Final[str] = "worktree "
-_BRANCH_PREFIX: Final[str] = "branch refs/heads/"
-_LOCKED_MARKER: Final[str] = "locked"
-_PRUNABLE_MARKER: Final[str] = "prunable"
+#: One overall budget for every git call of a scan, so a slow repository cannot
+#: stall the prompt the advisory rides on. Each git call alone is capped at
+#: ``Timeout.GIT_CONTEXT``; this bounds the sum.
+SCAN_BUDGET_SECONDS: Final[float] = 10.0
 
 #: ``stop`` does NOT clear a stale pid file: it finds no live daemon, prints
 #: "Daemon not running" and leaves the file (``cmd_stop``). No CLI verb removes
@@ -130,47 +137,55 @@ class DaemonProcess:
 
 DaemonProcessesFn = Callable[[], tuple[DaemonProcess, ...]]
 PidAliveFn = Callable[[int], bool]
-UntrackedDirFn = Callable[[Path], Path]
+PidPathFn = Callable[[Path], Path]
 
 
-@dataclass(frozen=True)
-class _Record:
-    """One ``git worktree list --porcelain`` record, as far as this module reads it."""
-
-    path: Path
-    branch: str | None
-    locked: bool
-    prunable: bool
+#: Return code of a git call this scan refused to make because its budget was spent.
+_DEADLINE_RETURNCODE: Final[int] = 124
 
 
-def _parse_records(listing: str) -> tuple[_Record, ...]:
-    """Parse ``git worktree list --porcelain``; records are blank-line separated."""
-    records: list[_Record] = []
-    for block in listing.split("\n\n"):
-        path: Path | None = None
-        branch: str | None = None
-        locked = False
-        prunable = False
-        for line in block.splitlines():
-            if line.startswith(_WORKTREE_PREFIX):
-                path = Path(line[len(_WORKTREE_PREFIX) :].strip())
-            elif line.startswith(_BRANCH_PREFIX):
-                branch = line[len(_BRANCH_PREFIX) :].strip()
-            elif line.split(" ", 1)[0] == _LOCKED_MARKER:
-                locked = True
-            elif line.split(" ", 1)[0] == _PRUNABLE_MARKER:
-                prunable = True
-        if path is not None:
-            records.append(_Record(path=path, branch=branch, locked=locked, prunable=prunable))
-    return tuple(records)
+class ScanDeadline:
+    """One overall time budget shared by every git call of a scan.
+
+    A slow repository must not stall the prompt this scan runs inside. Each call
+    gets only what is left of the budget; once it is spent, calls are refused
+    with a non-zero result, which every reader here already treats as "git could
+    not say" (so nothing is reported on a guess), and :attr:`exhausted` records
+    that the scan is incomplete so the report can say so.
+    """
+
+    def __init__(
+        self,
+        budget_seconds: float,
+        *,
+        run_fn: RunGit = run_git,
+        clock: Callable[[], float] = time.monotonic,
+    ) -> None:
+        self._run_fn = run_fn
+        self._clock = clock
+        self._deadline = clock() + budget_seconds
+        self.exhausted = False
+
+    def run(self, cwd: Path, *args: str) -> GitResult:
+        """Run git within the remaining budget, or refuse once it is spent."""
+        remaining = self._deadline - self._clock()
+        if remaining <= 0:
+            self.exhausted = True
+            return subprocess.CompletedProcess(
+                args, _DEADLINE_RETURNCODE, "", "stale scan budget spent"
+            )
+        result = self._run_fn(cwd, *args, timeout=min(remaining, Timeout.GIT_CONTEXT))
+        if result.returncode != 0 and self._clock() >= self._deadline:
+            self.exhausted = True
+        return result
 
 
-def _list_records(repo_root: Path, run_fn: RunGit) -> tuple[_Record, ...]:
+def _list_records(repo_root: Path, run_fn: RunGit) -> tuple[WorktreeRecord, ...]:
     """Every registered worktree, the main checkout first; empty when git cannot say."""
     listing = run_fn(repo_root, "worktree", "list", "--porcelain")
     if listing.returncode != 0:
         return ()
-    return _parse_records(listing.stdout)
+    return parse_worktree_porcelain(listing.stdout)
 
 
 def registered_checkouts(repo_root: Path, *, run_fn: RunGit = run_git) -> tuple[Path, ...]:
@@ -204,7 +219,7 @@ def _last_commit_time(repo_root: Path, branch: str, run_fn: RunGit) -> float | N
 
 
 def _worktree_reasons(
-    record: _Record,
+    record: WorktreeRecord,
     *,
     repo_root: Path,
     base_branch: str,
@@ -249,7 +264,7 @@ def _worktree_reasons(
     return tuple(reasons), merged
 
 
-def _cleanup_commands(record: _Record, *, merged: bool) -> tuple[str, ...]:
+def _cleanup_commands(record: WorktreeRecord, *, merged: bool) -> tuple[str, ...]:
     """The commands a human may run to clear a stale worktree, in order."""
     if not record.path.is_dir() or record.prunable:
         commands = ["git worktree prune"]
@@ -354,13 +369,12 @@ def default_daemon_processes(
     return tuple(processes)
 
 
-def _stale_pid_files(untracked: Path, pid_alive_fn: PidAliveFn) -> list[StaleDaemon]:
-    """This host's pid file in ``untracked``, when it names no running process.
+def _stale_pid_file(pid_file: Path, pid_alive_fn: PidAliveFn) -> list[StaleDaemon]:
+    """``pid_file``, when it names no running process.
 
-    Another host's ``daemon-<host>.pid`` is never read: its pid lives in a pid
-    namespace this host cannot probe.
+    ``pid_file`` is this host's own (``daemon-<host>.pid``): another host's is
+    never read, because its pid lives in a pid namespace this host cannot probe.
     """
-    pid_file = untracked / pid_file_name()
     content = read_pid_file_text(pid_file)
     if content.text is None:
         # Absent or unreadable: neither is proof the file names no process.
@@ -386,23 +400,22 @@ def find_stale_daemons(
     *,
     processes_fn: DaemonProcessesFn = default_daemon_processes,
     pid_alive_fn: PidAliveFn = is_pid_alive,
-    untracked_dir_fn: UntrackedDirFn = get_untracked_dir,
+    pid_path_fn: PidPathFn = pid_path_for,
 ) -> tuple[StaleDaemon, ...]:
     """Daemon pid files with no live process, and daemons whose root is gone. Read-only.
 
     Args:
-        checkout_roots: The checkouts whose pid files are read: each root's own
-            untracked directory, where its daemon records itself.
+        checkout_roots: The checkouts whose pid files are read.
         processes_fn: Lists running daemon servers. Injectable so a test uses a
             fake process table.
         pid_alive_fn: Liveness probe for a pid.
-        untracked_dir_fn: Maps a checkout root to its daemon runtime directory.
+        pid_path_fn: Maps a checkout root to the pid file its daemon writes,
+            including the relocation a long project path forces. A file that does
+            not exist reads as "no proof", so nothing is reported for it.
     """
     found: list[StaleDaemon] = []
     for root in checkout_roots:
-        untracked = untracked_dir_fn(root)
-        if untracked.is_dir():
-            found.extend(_stale_pid_files(untracked, pid_alive_fn))
+        found.extend(_stale_pid_file(pid_path_fn(root), pid_alive_fn))
 
     for process in processes_fn():
         if process.root is None or process.root_exists is not False:
@@ -421,18 +434,30 @@ def find_stale_daemons(
 
 
 def render_stale_report(
-    worktrees: Iterable[StaleWorktree], daemons: Iterable[StaleDaemon]
+    worktrees: Iterable[StaleWorktree],
+    daemons: Iterable[StaleDaemon],
+    *,
+    incomplete: bool = False,
 ) -> str | None:
-    """The report text, or None when nothing is stale (quiet by default)."""
+    """The report text, or None when nothing is stale (quiet by default).
+
+    An ``incomplete`` scan is never quiet: a short list from a scan that ran out
+    of time is not the same statement as a short list from one that finished.
+    """
     stale_worktrees = tuple(worktrees)
     stale_daemons = tuple(daemons)
-    if not stale_worktrees and not stale_daemons:
+    if not stale_worktrees and not stale_daemons and not incomplete:
         return None
 
     lines = [
         "STALE CHECKOUTS (report only; this advisory does not run any of these - "
         "inspect, then choose):"
     ]
+    if incomplete:
+        lines.append(
+            "SCAN INCOMPLETE: the time budget ran out before every git check finished, "
+            "so checkouts may be missing from this list."
+        )
     if stale_worktrees:
         lines.append("Stale worktrees:")
         for worktree in stale_worktrees:
@@ -453,8 +478,17 @@ def collect_stale_report(
     max_idle_days: int = DEFAULT_MAX_IDLE_DAYS,
     *,
     processes_fn: DaemonProcessesFn = default_daemon_processes,
+    budget_seconds: float = SCAN_BUDGET_SECONDS,
 ) -> str | None:
-    """Detect stale worktrees and daemons for ``repo_root`` and render the report."""
-    worktrees = find_stale_worktrees(repo_root, base_branch, max_idle_days=max_idle_days)
-    daemons = find_stale_daemons(registered_checkouts(repo_root), processes_fn=processes_fn)
-    return render_stale_report(worktrees, daemons)
+    """Detect stale worktrees and daemons for ``repo_root`` and render the report.
+
+    Every git call shares one ``budget_seconds``; when it runs out the report
+    says the scan was incomplete.
+    """
+    deadline = ScanDeadline(budget_seconds)
+    worktrees = find_stale_worktrees(
+        repo_root, base_branch, max_idle_days=max_idle_days, run_fn=deadline.run
+    )
+    checkouts = registered_checkouts(repo_root, run_fn=deadline.run)
+    daemons = find_stale_daemons(checkouts, processes_fn=processes_fn)
+    return render_stale_report(worktrees, daemons, incomplete=deadline.exhausted)
