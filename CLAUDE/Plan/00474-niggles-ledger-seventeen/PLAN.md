@@ -38,6 +38,8 @@ Full write-ups are in [NIGGLES.md](NIGGLES.md). One line each here:
 
 | #          | Verdict                                                                                                          | Origin              | Status                      |
 | ---------- | ---------------------------------------------------------------------------------------------------------------- | ------------------- | --------------------------- |
+| N307       | In a command with two `git commit`s, the second commit's pathspecs are never scanned                             | N299 review         | ⬜ Open                     |
+| N306       | The commit-move reader records both directories of `cd a \|\| cd b`                                              | N299 review         | ⬜ Open (in N299 round 2)   |
 | N305       | `staged_lint_gate` judges a `cd other-repo && git commit` as this repository's commit                            | N299 agent          | ⬜ Open                     |
 | N304       | `guard_config_commit_gate` misses `cd .claude && git commit hooks-daemon.yaml`                                   | N299 agent          | ⬜ Open                     |
 | N303       | The pause-gate merge left a PreToolUse handler unclassified; main was red (N278/N297 again)                      | N299 agent          | ✅ Fixed (1c4f8e25f)        |

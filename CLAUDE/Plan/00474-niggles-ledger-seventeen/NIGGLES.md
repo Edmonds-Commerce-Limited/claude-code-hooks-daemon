@@ -1350,3 +1350,24 @@ other gates.
 `remote_docs_commit_gate`.
 
 **Status**: ⬜ Open. Use the same post-move check as N300.
+
+### N306 — the commit-move reader records both directories of `cd a || cd b`
+
+**Source**: N299 review
+([subagent-reports/261002-n299-review-opus.md](subagent-reports/261002-n299-review-opus.md)).
+
+**Evidence**: with `cd a || cd b && git commit …`, only one `cd` runs, but the reading records
+both as moves taken. This was already wrong on main. N299 round 2 handles it by treating any
+uncertain move as unknown and judging both directories.
+
+**Status**: ⬜ Open (folded into N299 round 2).
+
+### N307 — the second commit in one command has its pathspecs left unscanned
+
+**Source**: N299 review.
+
+**Evidence**: when one Bash command runs two `git commit`s, only the first commit's pathspecs are
+judged. A `git commit -m a x.txt && git commit -m b y.txt` never scans `y.txt` as a pathspec
+commit. This was already wrong on main, and it is an ordinary shape.
+
+**Status**: ⬜ Open.
