@@ -61,9 +61,11 @@ from claude_code_hooks_daemon.core.utils import (
     bash_text_for_shlex,
     expand_home,
     get_bash_command,
+    is_device_path,
     needs_expansion,
     scan_bash_write_targets,
     split_heredocs,
+    substitute_cwd_expansions,
 )
 from claude_code_hooks_daemon.utils.claude_config import claude_config_dir, session_config_dir
 from claude_code_hooks_daemon.utils.command_evasion import strip_reserved_word_prefix
@@ -523,7 +525,11 @@ class ProjectContainmentHandler(PreToolUseHandlerBase):
             cwd = hook_input.get(HookInputField.CWD)
             known = known_variables(command)
             for target, runs in self._destination_targets(command):
-                substituted = substitute_known_variables(target, known)
+                if is_device_path(target):
+                    continue
+                substituted = substitute_known_variables(
+                    substitute_cwd_expansions(target, command, cwd), known
+                )
                 if substituted is None or needs_expansion(substituted):
                     # A token in a body its receiver reads as data names
                     # nothing the command writes.

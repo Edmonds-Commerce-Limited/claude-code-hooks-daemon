@@ -290,6 +290,10 @@ _SHELL_WORD_STOP_CHARS: Final[frozenset[str]] = frozenset(" \t\n;|&<>()")
 #: a special parameter.
 _PLAIN_DOLLAR_RE: Final[re.Pattern[str]] = re.compile(r"\$(?:[A-Za-z_][A-Za-z0-9_]*|[0-9@*#?$!-])")
 
+#: The opening of a parameter expansion whose operator takes a word that
+#: quoting reads as it reads any word: `${name:-`, `=`, `+` or `?`.
+_DEFAULT_WORD_OPENER_RE: Final[re.Pattern[str]] = re.compile(r"\$\{[A-Za-z_][A-Za-z0-9_]*:?[-=+?]")
+
 #: A `case` word inside a substitution: where it is the reserved word, its
 #: patterns' bare `)` would end the substitution early for a paren count.
 _CASE_WORD_RE: Final[re.Pattern[str]] = re.compile(r"case(?=\s)")
@@ -353,6 +357,9 @@ def _double_quote_end(text: str, start: int, substitutions: list[str] | None) ->
         if ch == "\\":
             j += 2
             continue
+        if text.startswith("${", j):
+            j = _parameter_end(text, j, substitutions, in_double=True)
+            continue
         if ch == "`" or text.startswith(_NESTED_DOLLAR_OPENERS, j):
             j = _quoted_span_end(text, j, substitutions) or j + 1
             continue
@@ -360,13 +367,20 @@ def _double_quote_end(text: str, start: int, substitutions: list[str] | None) ->
     return n
 
 
-def _parameter_end(text: str, start: int, substitutions: list[str] | None) -> int:
+def _parameter_end(
+    text: str, start: int, substitutions: list[str] | None, *, in_double: bool = False
+) -> int:
     """Just past the ``}`` closing the ``${`` at ``start``.
 
     Bash reads quotes, escapes and braces inside a parameter expansion by
     rules that depend on its operator (``${x:-'}'}``). A body holding any
     of them, other than a nested substitution or plain ``$name``, cannot be
-    read with certainty, and neither can an unterminated one."""
+    read with certainty, and neither can an unterminated one. The exception
+    is the word of a ``-``, ``=``, ``+`` or ``?`` operator after a plain
+    name (:data:`_DEFAULT_WORD_OPENER_RE`), read by :func:`_default_word_end`;
+    ``in_double`` says the expansion sits inside double quotes."""
+    if _DEFAULT_WORD_OPENER_RE.match(text, start) is not None:
+        return _default_word_end(text, start, substitutions, in_double)
     n = len(text)
     j = start + 2
     while j < n:
@@ -386,6 +400,48 @@ def _parameter_end(text: str, start: int, substitutions: list[str] | None) -> in
             )
         j += 1
     raise UnresolvableBraceQuotingError(f"unterminated ${{...}} in {text[start : start + 80]!r}")
+
+
+def _default_word_end(
+    text: str, start: int, substitutions: list[str] | None, in_double: bool
+) -> int:
+    """Just past the ``}`` closing ``${name<op>word}`` at ``start``. In the
+    word a backslash escapes, ``'...'`` quotes (literal inside double
+    quotes), ``"..."`` quotes, and substitutions and expansions nest; a
+    bare ``{`` or an unterminated quote is not read with certainty."""
+    n = len(text)
+    opener = _DEFAULT_WORD_OPENER_RE.match(text, start)
+    if opener is None:
+        raise ValueError(f"not a parameter expansion with a word: {text[start : start + 80]!r}")
+    j = opener.end()
+    while j < n:
+        ch = text[j]
+        if ch == "}":
+            return j + 1
+        if ch == "\\":
+            j += 2
+            continue
+        if ch == "'" and not in_double:
+            close = text.find("'", j + 1)
+            if close == -1:
+                break
+            j = close + 1
+            continue
+        if ch == '"':
+            j = _double_quote_end(text, j + 1, substitutions)
+            continue
+        if text.startswith("${", j):
+            j = _parameter_end(text, j, substitutions, in_double=in_double)
+            continue
+        if ch == "`" or text.startswith("$(", j):
+            j = _quoted_span_end(text, j, substitutions) or j + 1
+            continue
+        if ch == "{":
+            break
+        j += 1
+    raise UnresolvableBraceQuotingError(
+        f"quoting inside ${{...}} in {text[start : start + 80]!r} cannot be resolved"
+    )
 
 
 def _substitution_end(text: str, open_paren: int, substitutions: list[str] | None) -> int:

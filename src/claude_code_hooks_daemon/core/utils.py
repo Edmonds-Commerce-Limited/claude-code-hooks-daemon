@@ -358,7 +358,9 @@ def scan_bash_write_targets(
     for candidate in scan.destinations:
         if authored_only and not candidate.authored:
             continue
-        destination = substitute_known_variables(candidate.destination, known)
+        destination = substitute_known_variables(
+            substitute_cwd_expansions(candidate.destination, command, cwd), known
+        )
         if destination is None or needs_expansion(destination):
             unresolved.append(candidate.destination)
             continue
@@ -367,6 +369,61 @@ def scan_bash_write_targets(
             if resolved not in found:
                 found.append(resolved)
     return BashWriteTargets(found, scan.unreadable, tuple(unresolved))
+
+
+#: The working-directory expansions read as the hook cwd, spelled exactly:
+#: ``$PWD`` and ``${PWD}`` (not ``$PWDX``) and ``$(pwd)``.
+_PWD_EXPANSION_RE: Final[re.Pattern[str]] = re.compile(
+    r"\$\{PWD\}|\$PWD(?![A-Za-z0-9_])|\$\(\s*pwd\s*\)"
+)
+
+#: The repository root, spelled exactly as ``git rev-parse --show-toplevel``.
+_TOPLEVEL_EXPANSION_RE: Final[re.Pattern[str]] = re.compile(
+    r"\$\(\s*git\s+rev-parse\s+--show-toplevel\s*\)"
+)
+
+#: A command that may change its own directory or assign ``PWD``, after which
+#: the hook cwd is no longer what ``$PWD`` means. A mention inside a string
+#: matches too, which only leaves the expansion unresolved (and so denied).
+_CHANGES_DIRECTORY_RE: Final[re.Pattern[str]] = re.compile(r"\b(?:cd|pushd|popd)\b|\bPWD=")
+
+
+def _repository_root(cwd: str) -> str | None:
+    """The nearest directory at or above ``cwd`` holding a ``.git`` entry (a
+    directory, or the file a worktree has), which is where
+    ``git rev-parse --show-toplevel`` answers; ``None`` when there is none."""
+    for directory in (Path(cwd), *Path(cwd).parents):
+        if (directory / ".git").exists():
+            return str(directory)
+    return None
+
+
+def substitute_cwd_expansions(token: str, command: str, cwd: Any) -> str:
+    """``token`` with ``$PWD``, ``${PWD}``, ``$(pwd)`` read as the hook cwd and
+    ``$(git rev-parse --show-toplevel)`` as that cwd's repository root.
+
+    Only these literal spellings, one level deep. Returned unchanged when
+    ``cwd`` is not an absolute path, when ``command`` changes directory or
+    assigns ``PWD`` (the cwd is then not what the shell sees), or, for the
+    repository root, when no repository encloses ``cwd``: what remains is
+    still an expansion, and the caller declines it as it always did.
+    """
+    if not isinstance(cwd, str) or not Path(cwd).is_absolute():
+        return token
+    if _CHANGES_DIRECTORY_RE.search(command):
+        return token
+    token = _PWD_EXPANSION_RE.sub(lambda _match: cwd, token)
+    if _TOPLEVEL_EXPANSION_RE.search(token):
+        root = _repository_root(cwd)
+        if root is not None:
+            token = _TOPLEVEL_EXPANSION_RE.sub(lambda _match: root, token)
+    return token
+
+
+def is_device_path(target: str) -> bool:
+    """Is ``target`` a device node (``/dev/null``), which no handler judges
+    as a file written?"""
+    return target.startswith(_DEV_PREFIX)
 
 
 def needs_expansion(token: str) -> bool:
@@ -925,7 +982,7 @@ def _resolve_write_target(target: str, cwd: Any) -> str | None:
     """
     if not target or needs_expansion(target):
         return None
-    if target.startswith(_DEV_PREFIX):
+    if is_device_path(target):
         return None
 
     # Must run AFTER the checks above: they key on the token as written (a

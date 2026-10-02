@@ -2750,6 +2750,35 @@ class TestQuotedBracesAreNotBraceSyntax:
         decision, reason = _through_chain("Bash", {"command": command})
         assert decision != Decision.DENY, reason
 
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "set -euo pipefail; x=${P:-\"/usr\"}; awk '{print $1}' /dev/null",
+            "x=${P:-'a'}; awk '{print $1}' /dev/null",
+            'echo "${X:-"/a b"}"; awk \'{print $1}\' /dev/null',
+            'echo "${X:+"$Y"}"; awk \'{print $1}\' /dev/null',
+            "echo ${X:-'a'} ; echo {a,b}",
+        ],
+    )
+    def test_a_quoted_parameter_default_is_read_not_failed_closed(self, command: str) -> None:
+        """Plan 00483 Task 3.2: a quoted default in `${x:-...}`, with an
+        unrelated `{` later, is ordinary bash."""
+        decision, reason = _through_chain("Bash", {"command": command})
+        assert decision != Decision.DENY, reason
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "echo ${x#'a'} ; cat /proj/.vault-{\"} x\",pass}",
+            'echo ${x:-\'a} ; cat /proj/.vault-{"} x",pass}',
+            'echo ${x:-{a} ; cat /proj/.vault-{"} x",pass}',
+        ],
+    )
+    def test_a_parameter_expansion_that_cannot_be_read_still_fails_closed(
+        self, command: str
+    ) -> None:
+        assert RuleID.SECRET_COMMAND_UNREADABLE in _deny_reason(command)
+
 
 #: Brace words whose Python escapes change the literal's braces, so its
 #: decoded value spells nothing, while bash's reading of the raw text is a
@@ -2817,9 +2846,9 @@ class TestRoundSixFindingsAreClosed:
     @pytest.mark.parametrize(
         "command",
         [
-            ": ${x:-'a'} ; bash -c $'cat /proj/.vault-\\x7b\"\\x7d\",pass\\x7d'",
-            ": ${x:-'a'} ; eval $'cat /proj/.vault-\\x7bpass,q\\x7d'",
-            ": ${x:-'a'} ; eval \"cat /proj/.vault-$(printf '\\x7b')pass,q}\"",
+            ": ${x#'a'} ; bash -c $'cat /proj/.vault-\\x7b\"\\x7d\",pass\\x7d'",
+            ": ${x#'a'} ; eval $'cat /proj/.vault-\\x7bpass,q\\x7d'",
+            ": ${x#'a'} ; eval \"cat /proj/.vault-$(printf '\\x7b')pass,q}\"",
         ],
     )
     def test_an_unrelated_unresolvable_prefix_does_not_end_the_scan_n113(
@@ -2832,8 +2861,8 @@ class TestRoundSixFindingsAreClosed:
     @pytest.mark.parametrize(
         "command",
         [
-            ": ${x:-'a'} ; echo \"$HOME\" done",
-            'echo "${x:-"a"}" $\'tab\\there\'',
+            ": ${x#'a'} ; echo \"$HOME\" done",
+            'echo "${x#"a"}" $\'tab\\there\'',
             "python3 - <<'EOF'\ns = '''It' {a,b} 'x'''\nEOF",
             "python3 - <<'EOF'\nprint('{\\x7b}'.format(1))\nEOF",
         ],
