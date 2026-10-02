@@ -571,6 +571,10 @@ One line each; these fire with their own guidance when relevant. Full text: `bin
 
 - background_process_tracker — backgrounded processes are tracked
 
+<!-- handler: branch-count-advisor -->
+
+- branch_count_advisor — keep open work branches few
+
 <!-- handler: budget-exhaustion-detector -->
 
 - budget_exhaustion_detector — hidden agent budgets are surfaced
