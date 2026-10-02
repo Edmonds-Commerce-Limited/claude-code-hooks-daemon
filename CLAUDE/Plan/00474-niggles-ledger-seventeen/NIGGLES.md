@@ -1019,8 +1019,18 @@ The payloads are `untracked/scratch/n291_probe_{plain,assign,single_assign}.json
 **Worked around**: by splitting the filter into two literal prefix greps (`"^tests/"`, then
 `"/test_"`).
 
-**Status**: 🔄 Branch `worktree-n291-subst-operand` in review. Commit 2a3347f6a was
-rejected: it relaxed `echo`/`printf` operands inside a substitution, so
+**Status**: ✅ Fixed (merge 4a30b9248, rework c8232ca80).
+
+- **Allowed**: inside a substitution, only `grep`/`egrep`/`fgrep` operands are relaxed.
+- **Still judged**: `echo`, `printf`, `rg -r` and awk print literals. Their operands reach the
+  output, so they stay judged.
+- **Also closed**: the merge closes `x=$(true; echo 'P*'); cat $x`, which main allowed before it.
+- **Now allowed**: a quoted glob given to grep as a FILE operand, such as
+  `$(grep -l x '<prefix>*')`. This is harmless: grep opens that literal name, which matches
+  no protected file.
+- **Live**: probed after a restart, both reproductions are allowed.
+
+The first attempt, commit 2a3347f6a, was rejected: it relaxed `echo`/`printf` operands inside a substitution, so
 `cat $(echo '<protected-prefix>*')` went from denied to allowed. The output of an
 unquoted substitution is glob-expanded. Only operands that cannot reach the
 substitution's output (a grep, rg or awk pattern) may be relaxed. Probe:
