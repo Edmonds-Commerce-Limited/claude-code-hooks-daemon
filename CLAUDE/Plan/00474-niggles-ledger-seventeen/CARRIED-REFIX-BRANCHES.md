@@ -1508,7 +1508,7 @@ three new linear-cost shapes.
 
 ### N200 — An apostrophe in a comment or heredoc body hides a later quoted git subcommand from `git_stash`/`destructive_git`
 
-**Status on the branch**: ✅ Remedied. **On main**: ✅ Fixed (branch `worktree-n241-stash`, not yet merged): `git_stash` now judges each command segment on its own, so a recovery form in one segment no longer exempts a stash in another; ✅ Dismissed (threat model, limb 2) for the apostrophe-comment plus `git 'stash'` and `git "reset" --hard` shapes
+**Status on the branch**: ✅ Remedied. **On main**: ✅ Fixed (merge f3d13077e): `git_stash` now judges each command segment on its own, so a recovery form in one segment no longer exempts a stash in another; ✅ Dismissed (threat model, limb 2) for the apostrophe-comment plus `git 'stash'` and `git "reset" --hard` shapes
 
 **Found by the p422 D-RULE review 6** (review of `637e08e53..cc523578d`,
 report
@@ -1542,11 +1542,17 @@ for every caller, over a corpus of comments, heredocs and ANSI-C spans),
 
 ### N240 — `bash_file_writes` does not report the typescript or the `-I`/`-O`/`-B`/`-T` log files `script` writes
 
-**Status on the branch**: ✅ Remedied. **On main**: ⬜ Open: needs owner (`script -q /tmp/typescript.log -c ls` writes an out-of-root log; owner to say whether that outcome needs a guard)
+**Status on the branch**: ✅ Remedied. **On main**: ✅ No change (not a protected outcome). This is a ruling delegated by the owner to a Fable subagent,
+[RULINGS-owner-delegated-fable.md](../00483-threat-model-conformance-audit/RULINGS-owner-delegated-fable.md).
+A `script` typescript only duplicates what the terminal already showed, and a path passed as a plain
+argument is containment's documented boundary. Both probe shapes are to be pinned as
+`UNCOVERED-accepted` corpus rows.
 
 ### N241 — The git guards deny a message value inside a string another shell runs, and `git_stash` denies git messages and data heredocs mentioning a stash
 
-**Status on the branch**: ✅ Remedied. **On main**: ✅ Fixed (branch `worktree-n241-stash`, not yet merged): both guards now judge only command position (new `utils/command_position.py`), so messages, `echo`/`grep` arguments, `gh` bodies and quoted heredocs that name a stash or reset are allowed, and a single-quoted message ends at the next quote so `-m 'x\' ; git reset --hard` is denied
+**Status on the branch**: ✅ Remedied. **On main**: ✅ Fixed (merge f3d13077e; 3 rounds, Opus review; the coordinator re-ran 156 probe
+commands on main and the branch: every remaining difference is prose or a never-executed file, and
+written-then-run scripts still deny): both guards now judge only command position (new `utils/command_position.py`), so messages, `echo`/`grep` arguments, `gh` bodies and quoted heredocs that name a stash or reset are allowed, and a single-quoted message ends at the next quote so `-m 'x\' ; git reset --hard` is denied
 
 **Found live on main and by p422-fix-8f.** `destructive_git` denied a
 `printf … >> notes.md` whose argument quoted a commit message and named
