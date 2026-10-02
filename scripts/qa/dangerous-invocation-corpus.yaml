@@ -201,13 +201,15 @@ rows:
   # time (a command word or folder name built by expansion, a script body in a
   # file). Limb 2: no working purpose except defeating a parser.
   - id: dismissed-n178-variable-command-word
-    command: "m=mkdir; $m CLAUDE/Plan/00999-x"
+    command: "m=mkdir && $m CLAUDE/Plan/00999-x"
     axis: plan-number-collision
     verdict: UNCOVERED-accepted
     note: >-
       ACCEPTED, threat-model limb 1 (ledger N178). The command word comes from
       a variable, so the text `mkdir` is never visible at the call. The literal
-      `mkdir CLAUDE/Plan/00999-x` is denied (R-PLAN-FOLDER-MKDIR).
+      `mkdir CLAUDE/Plan/00999-x` is denied (R-PLAN-FOLDER-MKDIR). Written with
+      `&&`: the `;` spelling is now denied by bash-safe-mode for its missing
+      prelude, which says nothing about this plan-folder axis.
 
   - id: dismissed-n180-variable-word-after-wrapper
     command: "sudo $m CLAUDE/Plan/00999-x"

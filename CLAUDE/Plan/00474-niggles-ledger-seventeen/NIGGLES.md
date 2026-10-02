@@ -1408,8 +1408,14 @@ selected. Every merge since was accepted with "too-broad is the expected non-def
 covers it". No full gate runs between releases, so main can stay red until release prep. N303 was
 the same mechanism.
 
-**Status**: ✅ Fixed for these two (2be30049c: all three usage-pause handlers are in the template
-and the priority is 59). ⬜ Open as a class. A "too-broad" verdict must not mean that no tests
+A third instance followed. The strict-mode merge (bf8d40aa9) turned the corpus row
+`dismissed-n178-variable-command-word` stale, because bash-safe-mode now denies its `;` spelling.
+The coordinator had not run `check_dangerous_invocation_corpus.py` on that merge, and a
+sub-agent's `changed` run caught it.
+
+**Status**: ✅ Fixed for these three (2be30049c: all three usage-pause handlers are in the
+template and the priority is 59; the commit that records this entry rewrites the corpus row
+with `&&`, keeping UNCOVERED-accepted, because the plan-folder axis is still open). ⬜ Open as a class. A "too-broad" verdict must not mean that no tests
 run. When the unmapped set touches constants, handler registration or templates, `changed`
 should also run the invariant suites that guard them: template/handler-set, priority,
 guidance-coverage and evasion classification. The coordinator runs those by hand on such merges
