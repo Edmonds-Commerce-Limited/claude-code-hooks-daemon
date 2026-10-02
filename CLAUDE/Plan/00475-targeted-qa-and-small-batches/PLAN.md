@@ -99,7 +99,9 @@ instead of competing. Today `untracked/qa/.llm_qa.lock` is per checkout, and
 ## Non-Goals
 
 - Letting sub-agents run the full suite (Plan 00463 stands).
-- Changing CI, which already runs the full pytest suite on every push to `main`.
+- Changing CI beyond Phase 3b's tiers, which the owner added to this plan. A push to `main`
+  runs the tier its change needs; the full three-Python matrix runs nightly and on manual
+  dispatch (`.github/workflows/qa.yml`).
 
 ## Tasks
 
@@ -113,7 +115,8 @@ instead of competing. Today `untracked/qa/.llm_qa.lock` is per checkout, and
   `python_var_guidance` 1.6 s, `skip_list_substring` 2 s, `sensitive_content`
   4.3 s, `dependencies` 5.3 s, `british_english` 5.9 s, `git_history` 6.1 s,
   `github_urls` 14 s, `semgrep` 32 s, `security_downgrade_flags` 49 s. All but
-  `security_downgrade_flags` are cheap enough for the targeted tier. `semgrep`
+  `security_downgrade_flags` are cheap enough for the targeted tier. `dependencies` is cheap
+  but stays out for another reason (Task 2.1). `semgrep`
   and `dependencies` were failing on main when measured, since neither runs in
   CI or in `changed` (ledger 00474 N287).
 
