@@ -595,8 +595,9 @@ class TestACommandThatStagesOrCommitsMoreThanOnce:
                 return timed_out
             return real(directory, *args, **kwargs)
 
-        with _patched_root(tracked), patch(
-            "claude_code_hooks_daemon.utils.staging_simulation.run_git", side_effect=run
+        with (
+            _patched_root(tracked),
+            patch("claude_code_hooks_daemon.utils.staging_simulation.run_git", side_effect=run),
         ):
             result = handler.handle(_bash("git add broken.py && git commit -m x", str(tracked)))
 
