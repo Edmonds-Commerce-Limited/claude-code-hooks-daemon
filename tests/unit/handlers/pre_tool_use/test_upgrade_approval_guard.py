@@ -584,6 +584,152 @@ class TestVariableInterpreterRunningAKnownProgram:
         assert result.reason.startswith(f"BLOCKED [{ENV_RULE_ID}]")
 
 
+class TestSteeredInterpreterRunAfterALeadingCd:
+    """Ledger 00474 N292: `cd /proj && V=...; PYTHONPATH=/proj/src $V/python
+    rel/probe.py` ran a readable script that is not the upgrade, and was denied
+    because the script's relative path was resolved against the HOOK's cwd, not
+    the directory the command's own leading `cd` moved to -- so it looked
+    missing, and a missing script is "cannot tell", which counts as the upgrade
+    once something steers. Only a leading `cd <literal existing dir>` chain is
+    followed; anything less certain keeps the hook's cwd and the deny."""
+
+    @pytest.fixture
+    def project(self, tmp_path: Path) -> Path:
+        project = tmp_path / "proj"
+        (project / "scratch").mkdir(parents=True)
+        (project / "scratch" / "probe.py").write_text("print('probe')\n")
+        return project
+
+    @pytest.fixture
+    def elsewhere(self, tmp_path: Path) -> Path:
+        other = tmp_path / "elsewhere"
+        other.mkdir()
+        return other
+
+    def test_the_n292_command_is_allowed(
+        self, handler: UpgradeApprovalGuardHandler, project: Path, elsewhere: Path
+    ) -> None:
+        command = (
+            f'cd {project} && V=/v/bin; echo "== main"; '
+            f"PYTHONPATH={project}/src $V/python scratch/probe.py 2>&1 "
+            '| grep -v "^\\s*$"; echo "== branch"; '
+            f"PYTHONPATH={project}/other/src $V/python scratch/probe.py 2>&1 "
+            '| grep -v "^\\s*$"'
+        )
+        assert handler.matches(_bash(command, cwd=str(elsewhere))) is False
+
+    def test_the_minimal_shape_with_the_script_under_the_hook_cwd_is_allowed(
+        self, handler: UpgradeApprovalGuardHandler, project: Path
+    ) -> None:
+        command = "PYTHONPATH=/p/src $V/python scratch/probe.py"
+        assert handler.matches(_bash(command, cwd=str(project))) is False
+
+    def test_a_relative_cd_is_followed_from_the_hook_cwd(
+        self, handler: UpgradeApprovalGuardHandler, project: Path, tmp_path: Path
+    ) -> None:
+        command = "cd proj; PYTHONPATH=/p/src $V/python scratch/probe.py"
+        assert handler.matches(_bash(command, cwd=str(tmp_path))) is False
+
+    def test_a_chain_of_leading_cds_is_followed(
+        self, handler: UpgradeApprovalGuardHandler, project: Path, tmp_path: Path
+    ) -> None:
+        command = f"cd {tmp_path} && cd proj && PYTHONPATH=/p/src $V/python scratch/probe.py"
+        assert handler.matches(_bash(command, cwd="/")) is False
+
+    def test_a_leading_cd_into_a_dir_whose_script_carries_the_upgrade_is_denied(
+        self, handler: UpgradeApprovalGuardHandler, project: Path, elsewhere: Path
+    ) -> None:
+        (project / "scratch" / "copy.py").write_text(f"# {ENV_VAR_UPGRADE_HANDOFF}\n")
+        command = f"cd {project} && PYTHONPATH=/p/src $V/python scratch/copy.py"
+        hook_input = _bash(command, cwd=str(elsewhere))
+        assert handler.matches(hook_input) is True
+        result = handler.handle(hook_input)
+        assert result.reason is not None
+        assert result.reason.startswith(f"BLOCKED [{ENV_RULE_ID}]")
+
+    @pytest.mark.parametrize(
+        "command_template",
+        [
+            # A cd that does not exist leaves the shell where it was under `;`.
+            "cd {missing}; PYTHONPATH=/p/src $V/python scratch/probe.py",
+            "cd {missing} && PYTHONPATH=/p/src $V/python scratch/probe.py",
+            # A computed, home-relative or previous-dir target is never followed.
+            'cd "$D" && PYTHONPATH=/p/src $V/python scratch/probe.py',
+            "cd ~/x && PYTHONPATH=/p/src $V/python scratch/probe.py",
+            "cd - && PYTHONPATH=/p/src $V/python scratch/probe.py",
+            # A cd that may run in a subshell, in a pipe or be skipped.
+            "(cd {project}) ; PYTHONPATH=/p/src $V/python scratch/probe.py",
+            "cd {project} || true; PYTHONPATH=/p/src $V/python scratch/probe.py",
+            "cd {project} | cat; PYTHONPATH=/p/src $V/python scratch/probe.py",
+            # Any later cd/pushd/popd makes the directory unknowable.
+            "cd {project} && cd .. && PYTHONPATH=/p/src $V/python scratch/probe.py",
+            "cd {project} && PYTHONPATH=/p/src $V/python scratch/probe.py; popd",
+            "PYTHONPATH=/p/src $V/python scratch/probe.py; cd {project}",
+        ],
+    )
+    def test_an_uncertain_cd_keeps_the_deny(
+        self,
+        handler: UpgradeApprovalGuardHandler,
+        project: Path,
+        elsewhere: Path,
+        tmp_path: Path,
+        command_template: str,
+    ) -> None:
+        command = command_template.format(project=project, missing=tmp_path / "missing")
+        assert handler.matches(_bash(command, cwd=str(elsewhere))) is True, command
+
+
+class TestSteeredUpgradesStayDeniedWhateverTheInterpreter:
+    """Ledger 00474 N292: pins every way the upgrade is still recognised on a
+    command that sets PYTHONPATH, so allowing the plain probe above cannot
+    weaken any of them."""
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "PYTHONPATH=/p/src bash scripts/upgrade.sh --project-root .",
+            "PYTHONPATH=/p/src scripts/upgrade_version.sh /p /p/.claude/hooks-daemon v4.0.0",
+            "PYTHONPATH=/p/src bash scripts/upgrade_version.sh /p /c v4.0.0",
+            "PYTHONPATH=/p/src $V/python scripts/upgrade_gate_standalone.py check",
+            "PYTHONPATH=/p/src $V/python /c/scripts/upgrade_gate_standalone.py",
+            "cd /p && PYTHONPATH=/p/src $V/python scripts/upgrade_gate_standalone.py",
+        ],
+    )
+    def test_the_upgrade_by_name(self, handler: UpgradeApprovalGuardHandler, command: str) -> None:
+        hook_input = _bash(command, cwd="/")
+        assert handler.matches(hook_input) is True, command
+        result = handler.handle(hook_input)
+        assert result.reason is not None
+        assert result.reason.startswith(f"BLOCKED [{ENV_RULE_ID}]")
+
+    def test_a_script_whose_content_carries_the_handoff_variable(
+        self, handler: UpgradeApprovalGuardHandler, tmp_path: Path
+    ) -> None:
+        script = tmp_path / "renamed.sh"
+        script.write_text(f"#!/bin/bash\n# {ENV_VAR_UPGRADE_HANDOFF}\n")
+        for command in (
+            f"PYTHONPATH=/p/src bash {script}",
+            f"PYTHONPATH=/p/src $V/python {script}",
+            f"cd {tmp_path} && PYTHONPATH=/p/src bash renamed.sh",
+        ):
+            assert handler.matches(_bash(command, cwd="/")) is True, command
+
+    def test_an_unreadable_script_run_with_upgrade_arguments(
+        self, handler: UpgradeApprovalGuardHandler, tmp_path: Path
+    ) -> None:
+        for command in (
+            'tmp=$(mktemp); PYTHONPATH=/p/src bash "$tmp" --project-root .',
+            'PYTHONPATH=/p/src bash "$tmp" --project-root .',
+            'PYTHONPATH=/p/src bash "$tmp" /p /p/.claude/hooks-daemon v4.0.0',
+            f"PYTHONPATH=/p/src bash {tmp_path / 'gone.sh'} --project-root .",
+        ):
+            assert handler.matches(_bash(command, cwd=str(tmp_path))) is True, command
+
+    def test_the_skip_reading_confirmation_flag(self, handler: UpgradeApprovalGuardHandler) -> None:
+        command = "PYTHONPATH=/p/src $V/python x.py --skip-reading-confirmation"
+        assert handler.matches(_bash(command, cwd="/")) is True
+
+
 class TestEverySpellingOfSteeringIsSteering:
     """Plan 00376 review4 MAJOR 1: the steering check matched `NAME=`,
     `export NAME` and `declare -x NAME`, and a direct Layer 2 call then ran
