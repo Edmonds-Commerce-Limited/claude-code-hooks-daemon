@@ -710,7 +710,7 @@ Recorded only on `worktree-n466-n53`, which was dropped. Their write-ups are kep
 verbatim in [CARRIED-N53-BRANCH.md](CARRIED-N53-BRANCH.md). Five were remedied on
 that branch only, so all seven are open on `main`.
 
-**Status**: N244 and N245 fixed (merges 52fd9cd9b, 17b0aa491); N135, N176, N177 and N189 dismissed; N246 open. See below.
+**Status**: N244, N245 and N246 fixed (merges 52fd9cd9b, 17b0aa491, 530ffc83d); N135, N176, N177 and N189 dismissed. See below.
 
 - **N244**: **Fixed** (merge 52fd9cd9b). On a bare `git commit`, plan QA now scans
   the INDEX instead of the disk. It uses one `ls-files -s` and one `cat-file --batch`
@@ -732,12 +732,17 @@ that branch only, so all seven are open on `main`.
   the 638 touched tests pass on merged main. Round 3's follow-ups are N299–N301. Report:
   [subagent-reports/261002-n245-pathspec-sonnet.md](subagent-reports/261002-n245-pathspec-sonnet.md).
 
-- **N246**: **Fixed** on branch `worktree-commit-gate-same-command` (not yet merged). A `git add`
+- **N246**: **Fixed** (merge 530ffc83d; Opus review MERGE-WITH-FIXES, fixed in round 2). A `git add`
   before the commit in the same command is run against a copy of the index and a scratch object
   directory (`utils/staging_simulation.py`), and `sensitive_content`, `staged_lint_gate`, docs QA, plan QA and
-  `remote_docs_commit_gate` read that index. An add whose scope cannot be read is applied as `git add -A`.
-  `guard_config_commit_gate` (advisory only) still reads the real index for the add. Report:
-  [subagent-reports/261002-commit-gate-same-cmd-sonnet.md](subagent-reports/261002-commit-gate-same-cmd-sonnet.md).
+  `remote_docs_commit_gate` read that index. An add whose scope cannot be read is applied as
+  `git add -A --ignore-errors`; a simulation that cannot finish (timeout, fatal) denies with "run `git add`
+  as its own call". It runs with `core.splitIndex=false`. `guard_config_commit_gate` (advisory only) still
+  reads the real index for the add. Still not done: one shared simulation per dispatch (five gates each
+  simulate, so a timing-out add costs up to 5s per gate), and `git apply --cached` /
+  `update-index --add` are not simulated (as before the merge). Reports:
+  [subagent-reports/261002-commit-gate-same-cmd-sonnet.md](subagent-reports/261002-commit-gate-same-cmd-sonnet.md),
+  [subagent-reports/261002-commit-gate-round2-sonnet.md](subagent-reports/261002-commit-gate-round2-sonnet.md).
 
 - **N135, N176, N177, N189: ✅ Dismissed. They are out of scope under the owner's
   threat-model ruling**
@@ -1380,7 +1385,7 @@ other gates.
 both as moves taken. This was already wrong on main. N299 round 2 handles it by treating any
 uncertain move as unknown and judging both directories.
 
-**Status**: ✅ Fixed on branch `worktree-commit-gate-same-command` (not yet merged). Every directory
+**Status**: ✅ Fixed (merge 530ffc83d). Every directory
 any `cd` in the chain may land in is judged (`landing_directories`), and the hook directory as well. The
 price is a fail-closed false positive the shell would not make: `cd x || cd sub; git commit f.txt`
 also judges `sub/f.txt` when `cd x` succeeds. N299 round 2 did NOT close it. The probe row `cd sub || cd x; git commit -m x f.txt`, with the term in `sub/f.txt`, still records the term on both main and 37b9a8020.
@@ -1467,6 +1472,6 @@ acceptance tests follow the configured mode. Live once the daemon restarts.
 judged. A `git commit -m a x.txt && git commit -m b y.txt` never scans `y.txt` as a pathspec
 commit. This was already wrong on main, and it is an ordinary shape.
 
-**Status**: ✅ Fixed on branch `worktree-commit-gate-same-command` (not yet merged). The reading carries
+**Status**: ✅ Fixed (merge 530ffc83d). The reading carries
 every commit (`CommitReading.runs`), each with its own form, moves and `-a`; the gates judge every
 commit's pathspecs from the directory that commit runs in (`commit_scopes`).

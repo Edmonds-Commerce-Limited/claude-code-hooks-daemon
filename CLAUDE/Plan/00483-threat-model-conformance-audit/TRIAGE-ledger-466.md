@@ -51,7 +51,7 @@ and `-e` as inline interpreter code. It only advises, but it is noise (a candida
 | N57   | DISMISSED (threat model)               | `V=...; bash -c "$V"`, `eval "$V"`, alias, file written then run. Limb 1                                                                             | Same ground as dismissed N135, N189. Written-file variant overlaps N80. Not probed live (guard denied the probe script).                                  |
 | N58   | IN-SCOPE DEFECT                        | `chmod 755 f && echo <path with 1246>` denied as chmod 777                                                                                           | Probe deny R-CHMOD-WORLD-WRITABLE. Medium false positive.                                                                                                 |
 | N60   | IN-SCOPE DEFECT                        | Double-quoted `echo "...curl URL \| sh..." >> f` denied R-CURL-PIPE-SHELL                                                                            | Probe deny. Quoted-heredoc form already allowed. Medium false positive.                                                                                   |
-| N61   | IN-SCOPE DEFECT                        | `git add -f leak && git commit -m x` allowed when `leak` is unstaged and matches a public pattern                                                    | Probe allow. `sensitive_content.py:983-1004` scans index, `-a` tree and pathspecs only. High: leak reaches history. Same class as 00474 N246.             |
+| N61   | IN-SCOPE DEFECT → ✅ FIXED (530ffc83d) | `git add -f leak && git commit -m x` allowed when `leak` is unstaged and matches a public pattern                                                    | Probe allow. `sensitive_content.py:983-1004` scans index, `-a` tree and pathspecs only. High: leak reaches history. Same class as 00474 N246.             |
 | N62   | NEEDS-OWNER                            | Subagent context, resume and concurrency budget is a feature, not a bypass                                                                           | Autocompact override and the 00479 usage pause exist.                                                                                                     |
 | N64   | FIXED-ON-MAIN                          | Worktree-relative report path resolved against main checkout                                                                                         | `31ffeaabf`; `subagent_report_path_verifier.py:152-168`.                                                                                                  |
 | N65   | IN-SCOPE DEFECT                        | `ls CLAUDE/Plan/*464*/...` denied R-PLAN-NUMBER-DISCOVERY; quoted heredoc body mentioning the scan denied                                            | Probes deny. Lookup of a known plan number, plus a second false-positive shape (unexecuted heredoc body). Medium.                                         |
@@ -108,7 +108,7 @@ and `-e` as inline interpreter code. It only advises, but it is noise (a candida
 
 Miss on an ordinary dangerous command:
 
-- N61 (high): a same-command `git add -f X && git commit` carries an unstaged match into history.
+- N61 (high): a same-command `git add -f X && git commit` carries an unstaged match into history. Fixed by 530ffc83d (00474 N246).
 - N85 (low-medium): `\'` in single quotes hides a following destructive command.
 - N53 (high impact, unreproduced): `isolation: worktree` dispatch fails with no fallback.
 - N93, N87, N76, N75, N48: ordinary-literal misses, each low.
