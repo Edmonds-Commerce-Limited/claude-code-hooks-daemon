@@ -85,17 +85,22 @@ _NON_EXECUTING_TEXT: dict[str, str] = {
     "prose describing a stash policy": (
         'echo "this project blocks git stash because stashes get forgotten"'
     ),
+    # Ledger N241: the owner's threat-model ruling supersedes Plan 00228
+    # Decision 2 for git_stash and destructive_git. Each of these was denied on
+    # main, and none runs a stash, a reset or an amend.
+    "a commit message naming the stash guard": "git commit -m 'document the git stash guard'",
+    "a grep pattern naming git stash": "grep -n 'git stash' CLAUDE/ARCHITECTURE.md",
+    "a quoted heredoc body naming git stash": ("cat > notes.md <<'EOF'\nnever run git stash\nEOF"),
+    "an echo naming a hard reset": "echo 'do not run git reset --hard'",
+    "a gh body naming both guards": (
+        "gh pr create --title x --body 'we ban git stash and git reset --hard'"
+    ),
+    "a nested commit message naming --amend": "bash -c 'git commit -m \"document --amend\"'",
 }
 
 # Handlers that match text DELIBERATELY. Each entry states why, because an
 # exemption without a reason is indistinguishable from an unnoticed bug.
 _DELIBERATE_TEXT_MATCHERS: dict[str, str] = {
-    "DestructiveGitHandler": (
-        "CLAUDE.md mandates full-command-string matching and forbids 'fixing' it: "
-        "the acceptance suite verifies blocking handlers by embedding a dangerous "
-        "command inside a string. Over-blocking costs one retry; under-blocking "
-        "costs unrecoverable data."
-    ),
     "SedBlockerHandler": (
         "Same rationale as destructive_git — a sed invocation quoted inside a "
         "shell script is still a sed invocation once that script runs."
@@ -107,15 +112,6 @@ _DELIBERATE_TEXT_MATCHERS: dict[str, str] = {
     "SensitiveContentHandler": (
         "Plan 00225 Decision 2: a secret inside quotation marks is still a secret "
         "being written to disk."
-    ),
-    "GitStashHandler": (
-        "Surfaced by this guard and investigated, NOT assumed: "
-        "tests/unit/handlers/test_git_stash.py::test_matches_git_stash_in_echo_quotes "
-        'asserts `echo "git stash"` must be blocked, and test_blocks_all_creation_'
-        "variants repeats it. That is the CLAUDE.md-prescribed way the acceptance "
-        "suite verifies a blocking handler — embed the command in a string. The "
-        "existing tests are the specification, so exempting quoted spans here would "
-        "have broken acceptance testing rather than fixed a false positive."
     ),
 }
 
@@ -329,7 +325,7 @@ class TestTheGuardHasTeeth:
         """
         handlers = _discover_handler_classes()
         destructive_git = handlers["DestructiveGitHandler"]()
-        embedded = _bash_input('echo "git reset --hard HEAD~1"')
+        embedded = _bash_input("bash -c 'git reset --hard HEAD~1'")
 
         assert _denies(destructive_git, embedded) is True
 

@@ -18,6 +18,7 @@ from claude_code_hooks_daemon.utils.command_evasion import (
     SUBCOMMAND_SEPARATOR_CHARS,
     remove_word_quoting,
 )
+from claude_code_hooks_daemon.utils.command_position import command_position_view
 from claude_code_hooks_daemon.utils.git_commit_parsing import GitInvocation, git_invocations
 from claude_code_hooks_daemon.utils.git_invocation_directory import (
     invocation_directory,
@@ -25,7 +26,6 @@ from claude_code_hooks_daemon.utils.git_invocation_directory import (
 )
 from claude_code_hooks_daemon.utils.git_repo import HEADS_PREFIX, branch_ref, run_git
 from claude_code_hooks_daemon.utils.path_predicates import path_is_dir
-from claude_code_hooks_daemon.utils.shell_segmentation import strip_inert_spans
 
 logger = logging.getLogger(__name__)
 
@@ -591,6 +591,13 @@ class DestructiveGitHandler(PreToolUseHandlerBase):
         `.*`, which stays on one line but still matches inside a `-m` value, so
         `git commit -m 'document --amend'` was denied too.
 
+        `command_position_view` goes further (ledger N241): the arguments of a
+        command that only prints or searches them (`echo`, `grep`), a `gh`
+        title/body and a literal `bash -c` body are read as the commands they
+        are, so `echo 'do not run git reset --hard'` is prose and
+        `bash -c 'git reset --hard'` is not. A single-quoted message ends at
+        the next quote, backslash or not.
+
         Both halves of `strip_inert_spans` are therefore required; blanking
         only the heredoc leaves that second route open. Nothing a shell can
         RUN is blanked — a substituting value (`-m "$(...)"`) and an UNQUOTED
@@ -603,7 +610,7 @@ class DestructiveGitHandler(PreToolUseHandlerBase):
         3.0). Blanking runs FIRST so a message value is gone before unquoting
         could expose anything inside it.
         """
-        return remove_word_quoting(strip_inert_spans(command))
+        return remove_word_quoting(command_position_view(command))
 
     def _match_reason(self, command: str) -> str | None:
         """Return the reason for the first matching destructive pattern, or None."""
@@ -853,7 +860,7 @@ class DestructiveGitHandler(PreToolUseHandlerBase):
         return [
             AcceptanceTest(
                 title="git reset --hard",
-                command='echo "git reset --hard NONEXISTENT_REF_SAFE_TEST"',
+                command="bash -c 'git reset --hard NONEXISTENT_REF_SAFE_TEST'",
                 dispatch_as_bash=True,
                 description="Blocks git reset --hard (destroys uncommitted changes)",
                 expected_decision=Decision.DENY,
@@ -867,7 +874,7 @@ class DestructiveGitHandler(PreToolUseHandlerBase):
             ),
             AcceptanceTest(
                 title="git clean -f",
-                command='echo "git clean -fd /nonexistent/safe/test/path"',
+                command="bash -c 'git clean -fd /nonexistent/safe/test/path'",
                 dispatch_as_bash=True,
                 description="Blocks git clean -f (permanently deletes untracked files)",
                 expected_decision=Decision.DENY,
@@ -881,7 +888,7 @@ class DestructiveGitHandler(PreToolUseHandlerBase):
             ),
             AcceptanceTest(
                 title="git push --force",
-                command='echo "git push --force NONEXISTENT_REMOTE NONEXISTENT_BRANCH"',
+                command="bash -c 'git push --force NONEXISTENT_REMOTE NONEXISTENT_BRANCH'",
                 dispatch_as_bash=True,
                 description="Blocks git push --force (overwrites remote history)",
                 expected_decision=Decision.DENY,
@@ -896,7 +903,7 @@ class DestructiveGitHandler(PreToolUseHandlerBase):
             ),
             AcceptanceTest(
                 title="git stash drop",
-                command='echo "git stash drop stash@{999}"',
+                command="bash -c 'git stash drop stash@{999}'",
                 dispatch_as_bash=True,
                 description="Blocks git stash drop (permanent deletion)",
                 expected_decision=Decision.DENY,
@@ -911,7 +918,7 @@ class DestructiveGitHandler(PreToolUseHandlerBase):
             ),
             AcceptanceTest(
                 title="git checkout --",
-                command='echo "git checkout -- /nonexistent/safe/test/file.py"',
+                command="bash -c 'git checkout -- /nonexistent/safe/test/file.py'",
                 dispatch_as_bash=True,
                 description="Blocks git checkout -- (discards changes)",
                 expected_decision=Decision.DENY,
@@ -926,7 +933,7 @@ class DestructiveGitHandler(PreToolUseHandlerBase):
             ),
             AcceptanceTest(
                 title="git restore",
-                command='echo "git restore /nonexistent/safe/test/file.py"',
+                command="bash -c 'git restore /nonexistent/safe/test/file.py'",
                 dispatch_as_bash=True,
                 description="Blocks git restore (discards working tree changes)",
                 expected_decision=Decision.DENY,
@@ -941,7 +948,7 @@ class DestructiveGitHandler(PreToolUseHandlerBase):
             ),
             AcceptanceTest(
                 title="git branch -D",
-                command='echo "git branch -D NONEXISTENT_SAFE_TEST_BRANCH"',
+                command="bash -c 'git branch -D NONEXISTENT_SAFE_TEST_BRANCH'",
                 dispatch_as_bash=True,
                 description=(
                     "Blocks git branch -D unless every named branch is on a remote; "
@@ -959,7 +966,7 @@ class DestructiveGitHandler(PreToolUseHandlerBase):
             ),
             AcceptanceTest(
                 title="git stash clear",
-                command='echo "git stash clear"',
+                command="bash -c 'git stash clear'",
                 dispatch_as_bash=True,
                 description="Blocks git stash clear (destroys all stashes)",
                 expected_decision=Decision.DENY,
@@ -974,7 +981,7 @@ class DestructiveGitHandler(PreToolUseHandlerBase):
             ),
             AcceptanceTest(
                 title="git commit --amend",
-                command='echo "git commit --amend"',
+                command="bash -c 'git commit --amend'",
                 dispatch_as_bash=True,
                 description="Blocks git commit --amend (rewrites previous commit)",
                 expected_decision=Decision.DENY,
@@ -982,14 +989,14 @@ class DestructiveGitHandler(PreToolUseHandlerBase):
                     r"[Rr]ewrites the previous commit",
                     r"messy history",
                 ],
-                safety_notes="Uses echo - command is not actually executed",
+                safety_notes="Runs inside bash -c on nonexistent refs; the guard denies it before it executes",
                 test_type=TestType.BLOCKING,
                 recommended_model=RecommendedModel.HAIKU,
                 requires_main_thread=False,
             ),
             AcceptanceTest(
                 title="git push +refspec (plumbing force push)",
-                command='echo "git push origin +NONEXISTENT_SAFE_TEST_BRANCH:NONEXISTENT_SAFE_TEST_BRANCH"',
+                command="bash -c 'git push origin +NONEXISTENT_SAFE_TEST_BRANCH:NONEXISTENT_SAFE_TEST_BRANCH'",
                 dispatch_as_bash=True,
                 description=(
                     "Blocks a `+`-prefixed refspec push (Plan 00205) — the plumbing "
@@ -1007,7 +1014,7 @@ class DestructiveGitHandler(PreToolUseHandlerBase):
             ),
             AcceptanceTest(
                 title="git push -uf (grouped short force flag)",
-                command='echo "git push -uf origin NONEXISTENT_SAFE_TEST_BRANCH"',
+                command="bash -c 'git push -uf origin NONEXISTENT_SAFE_TEST_BRANCH'",
                 dispatch_as_bash=True,
                 description=(
                     "Blocks a force push spelled as a GROUPED short flag (issue #37). "
@@ -1025,7 +1032,7 @@ class DestructiveGitHandler(PreToolUseHandlerBase):
             ),
             AcceptanceTest(
                 title="git update-ref -d refs/heads (plumbing branch delete)",
-                command='echo "git update-ref -d refs/heads/NONEXISTENT_SAFE_TEST_BRANCH"',
+                command="bash -c 'git update-ref -d refs/heads/NONEXISTENT_SAFE_TEST_BRANCH'",
                 dispatch_as_bash=True,
                 description=(
                     "Blocks git update-ref -d refs/heads/<name> (Plan 00205) — the "
@@ -1083,7 +1090,7 @@ class DestructiveGitHandler(PreToolUseHandlerBase):
             ),
             AcceptanceTest(
                 title="git tag -f is not a force push",
-                command='echo "git tag -f v1.0.0-test-safe NONEXISTENT_SAFE_TEST_SHA"',
+                command="bash -c 'git tag -f v1.0.0-test-safe NONEXISTENT_SAFE_TEST_SHA'",
                 dispatch_as_bash=True,
                 description=(
                     "git tag -f force-moves a tag; it has nothing to do with "
@@ -1093,7 +1100,7 @@ class DestructiveGitHandler(PreToolUseHandlerBase):
                 ),
                 expected_decision=Decision.ALLOW,
                 expected_message_patterns=[],
-                safety_notes="Uses echo - command is not actually executed",
+                safety_notes="Runs inside bash -c on nonexistent refs; the guard denies it before it executes",
                 test_type=TestType.BLOCKING,
                 recommended_model=RecommendedModel.HAIKU,
                 requires_main_thread=False,
