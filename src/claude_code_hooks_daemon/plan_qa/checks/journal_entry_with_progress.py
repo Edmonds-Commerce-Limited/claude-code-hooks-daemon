@@ -82,8 +82,6 @@ def _run(context: CheckContext) -> list[Finding]:
             continue
         if has_staged_journal_entry(context, folder):
             continue
-        if plan_number in context.command_journal_plans:
-            continue
         findings.append(
             Finding(
                 check_id=CHECK_ID,

@@ -2611,7 +2611,11 @@ surfaces (no new handler): `journal-dayfile-naming` + `journal-append-only`
 stage, ADVISE), `journal-entry-with-progress` + `journal-completion-entry`
 (commit stage, ADVISE), and `journal-dayfile-is-today` (edit stage, **BLOCK by
 default** — Plan 00197). `journal-entry-with-progress` advises when a commit
-changes a plan's PLAN.md tasks but stages no journal entry;
+changes a plan's PLAN.md tasks but stages no journal entry (an entry the same
+command writes counts: `mkplan.bash --journal N ... && git add <plan> && git commit`,
+all joined by `&&`, with the `git add` covering the plan's journal directory
+where it runs and the commit not naming paths that leave it out; the
+`plan-shrink-without-journal` and `journal-completion-entry` checks honour it too);
 `journal-completion-entry` advises when a commit flips a plan to a terminal
 status without a closing journal entry — the latter is OPT-IN, firing only
 when `enforce_on_completion: true`.

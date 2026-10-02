@@ -413,7 +413,13 @@ def has_staged_journal_entry(context: CheckContext, folder: str) -> bool:
     counterpart counts — which is why a bare
     :meth:`GitFacts.staged_paths_under` membership test is insufficient for the
     completion coupling (the moved files always match the prefix).
+
+    An entry the commit's own command writes and stages before committing
+    (``mkplan.bash --journal N ... && git add ... && git commit``, ledger 00474
+    N317) counts too: the gate runs before the command, so it is not yet staged.
     """
+    if plan_number_for_folder(folder) in context.command_journal_plans:
+        return True
     gitfacts = context.gitfacts
     if gitfacts is None:
         return False

@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from claude_code_hooks_daemon.plan_qa.command_journal import command_journal_plans
+from claude_code_hooks_daemon.utils.git_commit_parsing import read_commit_form
 
 _PLAN_DIR_REL = "CLAUDE/Plan"
 _JOURNAL = "JOURNAL"
@@ -20,7 +21,9 @@ def root(tmp_path: Path) -> Path:
 
 
 def _plans(command: str, root: Path, cwd: Path | None = None) -> frozenset[int]:
-    return command_journal_plans(command, cwd or root, root, _PLAN_DIR_REL, _JOURNAL)
+    return command_journal_plans(
+        command, read_commit_form(command), cwd or root, root, _PLAN_DIR_REL, _JOURNAL
+    )
 
 
 _LIVE = (
@@ -58,9 +61,6 @@ class TestTheLiveShape:
             "./mkplan.bash --journal 470 finding b.md && git add 00470-widget && git commit -m x"
         )
         assert _plans(command, root, root / "CLAUDE/Plan") == {470}
-
-    def test_semicolon_sequencing(self, root: Path) -> None:
-        assert _plans(_LIVE.replace(" && ", "; "), root) == {470}
 
 
 class TestWhatDoesNotCount:
@@ -123,3 +123,64 @@ class TestWhatDoesNotCount:
     def test_a_script_naming_the_plan_dir_text_in_a_message_only(self, root: Path) -> None:
         command = "git commit -m 'mkplan.bash --journal 470 x'"
         assert _plans(command, root) == frozenset()
+
+
+class TestDirectoryTracking:
+    def test_a_cd_before_the_add_moves_it_away_from_the_journal(self, root: Path) -> None:
+        (root / "src").mkdir()
+        command = _LIVE.replace("&& git add CLAUDE/Plan/00470-widget", "&& cd src && git add .")
+        assert _plans(command, root) == frozenset()
+
+    def test_a_cd_into_the_plan_directory_before_the_script(self, root: Path) -> None:
+        command = (
+            "cd CLAUDE/Plan && ./mkplan.bash --journal 470 finding b.md "
+            "&& git add 00470-widget && git commit -m x"
+        )
+        assert _plans(command, root) == {470}
+
+    def test_a_cd_that_lands_the_add_on_the_journal(self, root: Path) -> None:
+        command = (
+            "CLAUDE/Plan/mkplan.bash --journal 470 finding b.md "
+            "&& cd CLAUDE/Plan && git add 00470-widget && git commit -m x"
+        )
+        assert _plans(command, root) == {470}
+
+    def test_git_dash_c_moves_the_add(self, root: Path) -> None:
+        command = _LIVE.replace("git add", "git -C src add")
+        assert _plans(command, root) == frozenset()
+
+    def test_a_cd_that_may_not_take_effect_is_not_trusted(self, root: Path) -> None:
+        command = _LIVE.replace("&& git add CLAUDE/Plan/00470-widget", "; cd src; git add .")
+        assert _plans(command, root) == frozenset()
+
+
+class TestTheCommitOwnForm:
+    def test_a_commit_pathspec_that_leaves_the_journal_out(self, root: Path) -> None:
+        command = _LIVE.replace("git commit", "git commit CLAUDE/Plan/00470-widget/PLAN.md")
+        assert _plans(command, root) == frozenset()
+
+    def test_a_commit_pathspec_that_covers_the_journal(self, root: Path) -> None:
+        command = _LIVE.replace("git commit", "git commit CLAUDE/Plan/00470-widget")
+        assert _plans(command, root) == {470}
+
+    def test_an_include_commit_keeps_the_index(self, root: Path) -> None:
+        command = _LIVE.replace("git commit", "git commit -i CLAUDE/Plan/00470-widget/PLAN.md")
+        assert _plans(command, root) == {470}
+
+
+class TestStagingFlagsAndSequencing:
+    @pytest.mark.parametrize("flag", ["-n", "--dry-run", "-p", "--patch", "-i", "--interactive"])
+    def test_an_add_that_stages_nothing(self, root: Path, flag: str) -> None:
+        assert _plans(_LIVE.replace("git add", f"git add {flag}"), root) == frozenset()
+
+    def test_semicolon_after_the_script_does_not_count(self, root: Path) -> None:
+        assert _plans(_LIVE.replace(" && git add", "; git add", 1), root) == frozenset()
+
+    def test_semicolon_between_the_add_and_the_commit_does_not_count(self, root: Path) -> None:
+        assert _plans(_LIVE.replace(" && git commit", "; git commit"), root) == frozenset()
+
+    def test_a_dotted_spelling_of_the_add_path(self, root: Path) -> None:
+        command = _LIVE.replace(
+            "git add CLAUDE/Plan/00470-widget", "git add ./CLAUDE/x/../Plan/00470-widget"
+        )
+        assert _plans(command, root) == {470}

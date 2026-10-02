@@ -140,6 +140,7 @@ class PlanQaCommitGateHandler(PreToolUseHandlerBase):
                         index_env=env,
                         command_journal_plans=command_journal_plans(
                             command,
+                            reading,
                             cwd,
                             project_root,
                             plan_dir_rel,

@@ -1,6 +1,7 @@
 """Tests for the journal-completion-entry COMMIT check (Plan 00163 P3)."""
 
 import subprocess
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -122,6 +123,11 @@ class TestFindings:
         assert findings[0].check_id == "journal-completion-entry"
         assert findings[0].level == Level.ADVISE
         assert "00200" in findings[0].message
+
+    def test_a_closing_entry_the_command_writes_itself_is_clean(self, repo: Path) -> None:
+        _complete_via_move(repo)
+        context = replace(_context(repo), command_journal_plans=frozenset({200}))
+        assert CHECK.run(context) == []
 
     def test_completion_with_new_dayfile_entry_is_clean(self, repo: Path) -> None:
         _git(repo, "mv", "CLAUDE/Plan/00200-widget", "CLAUDE/Plan/Completed/00200-widget")

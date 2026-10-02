@@ -3,10 +3,18 @@
 Ledger 00474 N317: ``mkplan.bash --journal 470 ... && git add <plan> && git commit``
 records the day-file, but the commit gate runs BEFORE the command, so the
 day-file does not exist yet and the staging simulation cannot see it.
-:func:`command_journal_plans` reads the command itself: a plan counts when an
-earlier statement appends a journal entry to it through the deployed
-``mkplan.bash`` and a later statement, still before the last commit, is a
-``git add`` that covers the plan's journal directory.
+:func:`command_journal_plans` reads the command itself: a plan counts when a
+simple command appends a journal entry to it through the deployed
+``mkplan.bash``, every command from there to the last ``git commit`` is joined
+by ``&&`` (a failing ``mkplan.bash`` then stops the commit), a ``git add`` that
+covers the plan's journal directory runs in between, and the commit does not
+name paths that leave the journal out.
+
+Directories are tracked by ``simple_commands`` and the ``git add`` runs come
+from the commit reading's ``stagings``, so a ``cd`` or ``git -C`` is honoured as
+it is for the staging simulation. Only a plan folder directly under the plan
+directory is found: one already moved into an archive subdirectory is never
+exempted, which fails safe (the advisory fires).
 """
 
 import os
@@ -15,27 +23,41 @@ from pathlib import Path
 
 from claude_code_hooks_daemon.plan_qa.checks.common import plan_number_for_folder
 from claude_code_hooks_daemon.plan_qa.model import MKPLAN_SCRIPT_NAME
-from claude_code_hooks_daemon.utils.bash_flags import split_statements
 from claude_code_hooks_daemon.utils.git_commit_parsing import (
-    command_words,
-    git_invocations,
+    CommitReading,
+    SimpleCommand,
+    StagingRun,
     is_shell_resolved,
+    simple_commands,
 )
-from claude_code_hooks_daemon.utils.shell_segmentation import split_unquoted
 
 _JOURNAL_FLAG = "--journal"
 _COMMIT = "commit"
-_ADD = "add"
+_AND = "&&"
 _END_OF_OPTIONS = "--"
 _INTERPRETERS = frozenset({"bash", "sh"})
-_LIST_OPERATORS = ("&&", "||")
 _ADD_ALL_FLAGS = frozenset({"-A", "--all"})
-#: ``git add -u`` stages only files git already tracks, never a new day-file.
-_UPDATE_FLAGS = frozenset({"-u", "--update"})
+#: ``git add`` options after which nothing new is staged: tracked files only,
+#: a dry run, or an interactive/patch selection.
+_NON_STAGING_FLAGS = frozenset(
+    {"-u", "--update", "-n", "--dry-run", "-p", "--patch", "-i", "--interactive"}
+)
 
 
-def _journal_plan_number(words: Sequence[str], script: Path, cwd: Path) -> int | None:
-    """The plan ``words`` appends a journal entry to through ``script``, else None."""
+def _resolve(start: Path, moves: Sequence[str | None], optional_moves: int) -> Path | None:
+    """The directory a run ends in after ``moves`` from ``start``, or None when not statable."""
+    if optional_moves or any(move is None or is_shell_resolved(move) for move in moves):
+        return None
+    where = start
+    for move in moves:
+        if move is not None:
+            where = Path(os.path.normpath(where / move))
+    return where
+
+
+def _journal_plan_number(step: SimpleCommand, script: Path, start: Path) -> int | None:
+    """The plan ``step`` appends a journal entry to through ``script``, else None."""
+    words = step.words
     position = 0
     while position < len(words) and "=" in words[position] and not words[position].startswith("-"):
         position += 1
@@ -47,86 +69,108 @@ def _journal_plan_number(words: Sequence[str], script: Path, cwd: Path) -> int |
     # A bare name is looked up on PATH, never in the working directory.
     if "/" not in named or is_shell_resolved(named) or not number.isdigit():
         return None
-    if (cwd / named).resolve() != script.resolve():
+    where = _resolve(start, step.directory, 0 if step.moves_certain else len(step.directory))
+    if where is None or Path(os.path.normpath(where / named)) != script:
         return None
     return int(number)
 
 
-def _is_commit(statement: str) -> bool:
-    return any(run.subcommand == _COMMIT for run in git_invocations(statement))
+def _covers(target: Path, journal_dir: Path) -> bool:
+    return journal_dir == target or target in journal_dir.parents
 
 
-def _add_covers(statement: str, journal_dir: Path, cwd: Path) -> bool:
-    """Whether ``statement`` is a plain ``git add`` that stages ``journal_dir``'s new files."""
-    for run in git_invocations(statement):
-        if run.subcommand != _ADD or run.directory or run.global_options or run.assignments:
+def _names(where: Path, pathspecs: Sequence[str], journal_dir: Path) -> bool:
+    """Whether any literal pathspec, taken from ``where``, is ``journal_dir`` or above it."""
+    return any(
+        not is_shell_resolved(pathspec)
+        and _covers(Path(os.path.normpath(where / pathspec)), journal_dir)
+        for pathspec in pathspecs
+    )
+
+
+def _add_covers(run: StagingRun, journal_dir: Path, start: Path) -> bool:
+    """Whether the ``git add`` ``run`` stages ``journal_dir``'s new files."""
+    where = _resolve(start, run.moves, run.optional_moves)
+    if where is None:
+        return False
+    pathspecs: list[str] = []
+    add_all = False
+    options_ended = False
+    for word in run.arguments:
+        if not options_ended and word == _END_OF_OPTIONS:
+            options_ended = True
+        elif not options_ended and word.startswith("-"):
+            if word in _NON_STAGING_FLAGS:
+                return False
+            add_all = add_all or word in _ADD_ALL_FLAGS
+        else:
+            pathspecs.append(word)
+    if not pathspecs:
+        return add_all
+    return _names(where, pathspecs, journal_dir)
+
+
+def _commits_journal(reading: CommitReading, journal_dir: Path, start: Path) -> bool:
+    """Whether every commit that names paths (without ``-i``) names the journal directory."""
+    for run in reading.runs:
+        if not run.form.pathspecs or run.form.include:
             continue
-        pathspecs: list[str] = []
-        add_all = False
-        update_only = False
-        options_ended = False
-        for word in run.arguments:
-            if not options_ended and word == _END_OF_OPTIONS:
-                options_ended = True
-            elif not options_ended and word.startswith("-"):
-                add_all = add_all or word in _ADD_ALL_FLAGS
-                update_only = update_only or word in _UPDATE_FLAGS
-            else:
-                pathspecs.append(word)
-        if update_only:
-            continue
-        if not pathspecs and add_all:
-            return True
-        for pathspec in pathspecs:
-            if is_shell_resolved(pathspec):
-                continue
-            target = Path(os.path.normpath(cwd / pathspec))
-            if journal_dir == target or target in journal_dir.parents:
-                return True
-    return False
+        where = _resolve(start, run.moves, run.optional_moves)
+        if where is None or not _names(where, run.form.pathspecs, journal_dir):
+            return False
+    return True
 
 
-def _plan_folder(plan_dir: Path, plan_number: int) -> Path | None:
-    """The folder of plan ``plan_number`` directly under ``plan_dir``, else None."""
-    if not plan_dir.is_dir():
-        return None
-    for entry in sorted(plan_dir.iterdir()):
-        if entry.is_dir() and plan_number_for_folder(entry.name) == plan_number:
-            return entry
-    return None
+def _plan_folders(plan_dir: Path) -> dict[int, Path]:
+    """The plan folders directly under ``plan_dir``, by plan number."""
+    folders: dict[int, Path] = {}
+    if plan_dir.is_dir():
+        for entry in sorted(plan_dir.iterdir()):
+            number = plan_number_for_folder(entry.name) if entry.is_dir() else None
+            if number is not None:
+                folders.setdefault(number, entry)
+    return folders
 
 
 def command_journal_plans(
     command: str,
+    reading: CommitReading,
     cwd: str | Path | None,
     project_root: Path,
     plan_dir_rel: str,
     journal_dir_name: str,
 ) -> frozenset[int]:
     """Plan numbers ``command`` journals and stages before its last ``git commit``."""
-    statements = [
-        part.strip()
-        for statement in split_statements(command)
-        for part in split_unquoted(statement, _LIST_OPERATORS)
-        if part.strip()
-    ]
+    steps = simple_commands(command)
     last_commit = max(
-        (position for position, text in enumerate(statements) if _is_commit(text)), default=-1
+        (step.position for step in steps if step.git and step.git.subcommand == _COMMIT),
+        default=-1,
     )
+    if last_commit < 0 or any(run.form.pathspec_from_file for run in reading.runs):
+        return frozenset()
     start = Path(cwd) if cwd else project_root
     plan_dir = project_root / plan_dir_rel
-    script = plan_dir / MKPLAN_SCRIPT_NAME
+    script = Path(os.path.normpath(plan_dir / MKPLAN_SCRIPT_NAME))
     journalled: dict[int, int] = {}
+    for step in steps[:last_commit]:
+        number = _journal_plan_number(step, script, start)
+        chained = all(
+            later.operator == _AND for later in steps[step.position + 1 : last_commit + 1]
+        )
+        if number is not None and chained:
+            journalled.setdefault(number, step.position)
+    if not journalled:
+        return frozenset()
+    folders = _plan_folders(plan_dir)
     covered: set[int] = set()
-    for position, text in enumerate(statements[:last_commit]):
-        plan_number = _journal_plan_number(command_words(text), script, start)
-        if plan_number is not None:
-            journalled.setdefault(plan_number, position)
+    for number, written_at in journalled.items():
+        folder = folders.get(number)
+        if folder is None:
             continue
-        for number, written_at in journalled.items():
-            folder = _plan_folder(plan_dir, number)
-            if folder is None or written_at >= position:
-                continue
-            if _add_covers(text, Path(os.path.normpath(folder / journal_dir_name)), start):
-                covered.add(number)
+        journal_dir = Path(os.path.normpath(folder / journal_dir_name))
+        if _commits_journal(reading, journal_dir, start) and any(
+            staging.position > written_at and _add_covers(staging, journal_dir, start)
+            for staging in reading.stagings
+        ):
+            covered.add(number)
     return frozenset(covered)
