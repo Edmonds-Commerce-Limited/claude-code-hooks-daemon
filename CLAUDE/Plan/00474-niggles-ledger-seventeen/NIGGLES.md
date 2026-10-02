@@ -1328,7 +1328,9 @@ handler reached main without a green targeted run on the merged head.
 
 **Status**: ✅ Fixed (1c4f8e25f; classified as not command-anchored, verified that the handler
 never reads `tool_input`). The coordinator then ran `llm_qa changed --range 4440d58cf..HEAD`
-over everything merged since. The lasting remedy (a merge that adds a handler cannot land without a
+over everything merged since. Result: 36/37 checks green, 9867 tests passed, 0 failed. The
+one red check is the 15 core files `changed_tests` calls too broad to map (left to the release
+gate by design). Nothing else broke. The lasting remedy (a merge that adds a handler cannot land without a
 green run) is Plan 00475 Task 4.2, which waits on the owner.
 
 ### N304 — `guard_config_commit_gate` compares pathspecs to the config path as root-relative text
