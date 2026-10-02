@@ -734,6 +734,25 @@ return GatingResult(
 )
 ```
 
+#### Deny and halt the turn — gating tier (PreToolUse) only
+
+A deny that also stops the turn: the response carries the universal top-level
+`continue: false` and a `stopReason` shown to the user, so a turn already running
+halts at the denied call. Only the PreToolUse formatter emits it.
+
+```python
+return GatingResult.deny_and_halt(
+    "Tool denied while paused",
+    stop_reason="Paused until the resume cron fires",  # defaults to the deny reason
+)
+```
+
+`HookResult.halt_turn` / `stop_reason` are the underlying fields; `halt_turn`
+requires a DENY (fail-fast `ValueError` otherwise). When results combine, the
+request survives: any matched result with `halt_turn` makes the merged result halt,
+and a halting deny outranks an earlier ask/defer. A plain deny's response is
+unchanged.
+
 ### 5. Ask (request approval) — gating tier only
 
 ```python

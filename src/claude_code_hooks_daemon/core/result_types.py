@@ -121,6 +121,35 @@ class GatingResult(
         return cls(decision=Decision.DENY, reason=reason, context=context or [])
 
     @classmethod
+    def deny_and_halt(
+        cls,
+        reason: str,
+        *,
+        stop_reason: str | None = None,
+        context: list[str] | None = None,
+    ) -> Self:
+        """Create a deny that ALSO halts the turn (``continue: false``).
+
+        The tool call is denied and Claude Code stops processing, showing
+        ``stop_reason`` to the user.
+
+        Args:
+            reason: Reason for denial (required)
+            stop_reason: Message shown on the halt; defaults to ``reason``
+            context: Optional context lines
+
+        Returns:
+            A result of the calling class, with the deny decision and halt set.
+        """
+        return cls(
+            decision=Decision.DENY,
+            reason=reason,
+            context=context or [],
+            halt_turn=True,
+            stop_reason=stop_reason,
+        )
+
+    @classmethod
     def ask(cls, reason: str, *, context: list[str] | None = None) -> Self:
         """Create an ask result of THIS tier — the only tier that can.
 

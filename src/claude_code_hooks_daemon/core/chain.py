@@ -106,6 +106,27 @@ def _safety_payload_size(hook_input: dict[str, Any]) -> int:
 _ACCUMULATED_RESULT_FIELDS: tuple[str, ...] = ("guidance", "updated_input", "worktree_path")
 
 
+def _carry_halt_request(winner: HookResult, results: Sequence[HookResult]) -> None:
+    """Make a handler's turn-halt request survive the merge (Plan 00479 Task 4.2).
+
+    A halt is a refusal's property, not information, so it cannot ride the
+    first-set-wins rule above: it must reach the response whichever restrictive
+    result won the decision. The first halting result's stop reason is used.
+    When the winner is a laxer refusal (ask/defer) the halting deny outranks it
+    and takes over the decision and reason; a deny winner keeps its own reason.
+    """
+    if winner.halt_turn:
+        return
+    halting = next((result for result in results if result.halt_turn), None)
+    if halting is None:
+        return
+    if winner.decision != Decision.DENY:
+        winner.decision = Decision.DENY
+        winner.reason = halting.reason
+    winner.halt_turn = True
+    winner.stop_reason = halting.stop_reason or halting.reason
+
+
 def carry_accumulated_fields(winner: HookResult, results: Sequence[HookResult]) -> None:
     """Merge every matched result's information fields onto the winning result.
 
@@ -133,6 +154,8 @@ def carry_accumulated_fields(winner: HookResult, results: Sequence[HookResult]) 
             if value is not None:
                 setattr(winner, field_name, value)
                 break
+
+    _carry_halt_request(winner, results)
 
     if winner.rule is None:
         winner_restrictive = is_restrictive(winner.decision)
