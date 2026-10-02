@@ -489,11 +489,16 @@ class VerificationResultGateHandler(PreToolUseHandlerBase):
         return [
             AcceptanceTest(
                 title="Verification result gate - newline-separated verifier then mutator",
-                command="yamllint --version\ngit tag --list",
+                command=(
+                    'MUST_SKIP_SAFE_MODE_BECAUSE="acceptance probe"; '
+                    "yamllint --version\ngit tag --list"
+                ),
                 dispatch_as_bash=True,
                 description=(
                     "The motivating shape, with a newline as the separator. Advisory "
-                    "by default: the command runs and the context names the pair."
+                    "by default: the command runs and the context names the pair. "
+                    "bash_safe_mode (strict by default) denies an unguarded sequence "
+                    "before this gate speaks, so the probe declares the skip."
                 ),
                 expected_decision=Decision.ALLOW,
                 expected_message_patterns=[r"yamllint", r"git tag"],

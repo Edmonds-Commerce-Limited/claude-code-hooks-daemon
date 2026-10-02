@@ -654,7 +654,7 @@ class SelfMatchingProcessProbeHandler(PreToolUseHandlerBase):
             ),
             AcceptanceTest(
                 title="Waiting on a timeout wrapper's $! is advisory",
-                command="false && timeout 600 ./probe-demo-job.bash & wait $!",
+                command="set -euo pipefail; false && timeout 600 ./probe-demo-job.bash & wait $!",
                 dispatch_as_bash=True,
                 description=(
                     "`timeout` stays alive beside the job, so the pid is the "
@@ -673,7 +673,7 @@ class SelfMatchingProcessProbeHandler(PreToolUseHandlerBase):
             ),
             AcceptanceTest(
                 title="Waiting on an unwrapped job's $! is allowed",
-                command="false && ./probe-demo-job.bash & wait $!",
+                command="set -euo pipefail; false && ./probe-demo-job.bash & wait $!",
                 dispatch_as_bash=True,
                 description=(
                     "The near-miss ALLOW: same wait, no wrapper, so `$!` "
@@ -690,7 +690,9 @@ class SelfMatchingProcessProbeHandler(PreToolUseHandlerBase):
             ),
             AcceptanceTest(
                 title="An uncapped wait on a real pid is advisory",
-                command='false && until ! kill -0 "$pid" 2>/dev/null; do sleep 5; done',
+                command=(
+                    'set -euo pipefail; false && until ! kill -0 "$pid" 2>/dev/null; do sleep 5; done'
+                ),
                 dispatch_as_bash=True,
                 description=(
                     "The pid probe is honest, so nothing is denied — but the loop "
@@ -735,6 +737,7 @@ class SelfMatchingProcessProbeHandler(PreToolUseHandlerBase):
             AcceptanceTest(
                 title="A bracket-tricked pattern is allowed inside a loop",
                 command=(
+                    "set -euo pipefail; "
                     'false && until ! pgrep -f "[p]robe-demo-job" >/dev/null; do sleep 1; done'
                 ),
                 dispatch_as_bash=True,
@@ -795,7 +798,7 @@ class SelfMatchingProcessProbeHandler(PreToolUseHandlerBase):
             ),
             AcceptanceTest(
                 title="Waiting on a log marker is allowed",
-                command='false && until grep -q "PLAY RECAP" run.log; do sleep 10; done',
+                command='set -euo pipefail; false && until grep -q "PLAY RECAP" run.log; do sleep 10; done',
                 dispatch_as_bash=True,
                 description=(
                     "The recommended shape: a log marker cannot match the waiter, "
