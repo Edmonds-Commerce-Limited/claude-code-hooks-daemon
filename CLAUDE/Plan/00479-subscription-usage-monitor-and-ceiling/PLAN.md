@@ -204,8 +204,8 @@ the daemon directs the model and then verifies what it did.
 
 ## Success Criteria
 
-- [ ] The status line shows 5-hour and weekly usage from live payloads, and shows nothing
-  for a session without the data.
+- [x] The status line shows 5-hour and weekly usage from live payloads, and shows nothing
+  for a session without the data. Seen live (Task 2.2); the no-data case is tested.
 
 - [ ] A session on a host whose entry sets `max_used_percent: 80` pauses once a window
   reaches 80%:
@@ -216,7 +216,14 @@ the daemon directs the model and then verifies what it did.
 
   A session on a host with no entry is unaffected.
 
-- [ ] Missing or stale usage data never stops a session.
+  Verified through the daemon chain with a synthetic host
+  (`tests/integration/test_usage_pause_daemon_chain.py`, Task 4.8). Still unobserved: a real
+  session on a configured host making real `CronDelete`/`CronCreate` calls. That needs a
+  `hosts:` ceiling on a host the owner chooses; it is never added to this repository's own
+  config.
+
+- [x] Missing or stale usage data never stops a session (Task 4.7; acceptance step 6 and the
+  chain test).
 
 ## Delivery & Milestones
 

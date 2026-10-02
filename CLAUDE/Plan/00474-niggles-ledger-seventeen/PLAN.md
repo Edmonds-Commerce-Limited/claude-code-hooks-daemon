@@ -38,6 +38,7 @@ Full write-ups are in [NIGGLES.md](NIGGLES.md). One line each here:
 
 | #          | Verdict                                                                                                          | Origin              | Status                      |
 | ---------- | ---------------------------------------------------------------------------------------------------------------- | ------------------- | --------------------------- |
+| N309       | `remote-docs add` refuses a docs page whose example carries a session-UUID-shaped id                             | P479 agent          | ⬜ Owner decision           |
 | N308       | Owner ruling: block unguarded `;` chaining (`bash_safe_mode` to block mode in this repository)                   | Owner               | 🔄 In progress              |
 | N307       | In a command with two `git commit`s, the second commit's pathspecs are never scanned                             | N299 review         | ⬜ Open                     |
 | N306       | The commit-move reader records both directories of `cd a \|\| cd b`                                              | N299 review         | ⬜ Open (in N299 round 2)   |

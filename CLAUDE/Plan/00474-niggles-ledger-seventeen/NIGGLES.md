@@ -1364,6 +1364,20 @@ uncertain move as unknown and judging both directories.
 
 **Status**: ⬜ Open (folded into N299 round 2).
 
+### N309 — a docs page with an example session UUID cannot be vendored
+
+**Source**: Plan 00479 Task 1.1 agent.
+
+**Evidence**: `bin/hooks-daemon remote-docs add https://code.claude.com/docs/en/statusline`
+exits 1: "the fetched content matches the sensitive-content pattern `session-uuid`. Nothing was
+written." The page's example payload carries a UUID-shaped `session_id`, which the pattern cannot
+tell from a real one. The remote-docs fidelity rule forbids changing vendored text, so the
+two rules conflict, and neither can be bent by an agent.
+
+**Status**: ⬜ Owner decision. Options: (a) allow `remote-docs add` to store a documented
+placeholder for pattern matches and record the substitution in the provenance frontmatter; (b)
+exempt the remote-docs tree from that one public pattern; (c) leave such pages unvendored.
+
 ### N308 — unguarded `;` chaining is only advised against, not blocked
 
 **Source**: owner ruling, verbatim: "we should be blocking ; command chaining — either use set
