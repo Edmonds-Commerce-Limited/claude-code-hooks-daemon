@@ -15,6 +15,7 @@ from pydantic import (
     ConfigDict,
     Field,
     PrivateAttr,
+    ValidationInfo,
     field_validator,
     model_validator,
 )
@@ -2297,6 +2298,110 @@ class PersistentCronsConfig(BaseModel):
         )
 
 
+class UsageCeilingConfig(BaseModel):
+    """Subscription-usage ceiling for one host (Plan 00479).
+
+    A session on the host stops taking on new work once a window's used
+    percentage reaches that window's limit.
+
+    Attributes:
+        max_used_percent: Limit applied to BOTH windows unless overridden.
+        five_hour: Overrides ``max_used_percent`` for the 5-hour window.
+        seven_day: Overrides ``max_used_percent`` for the 7-day window.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    max_used_percent: float | None = Field(
+        default=None, description="Used-percent limit for both windows"
+    )
+    five_hour: float | None = Field(
+        default=None, description="Used-percent limit for the 5-hour window (overrides max)"
+    )
+    seven_day: float | None = Field(
+        default=None, description="Used-percent limit for the 7-day window (overrides max)"
+    )
+
+    @field_validator("max_used_percent", "five_hour", "seven_day", mode="before")
+    @classmethod
+    def require_percent_in_range(cls, value: Any, info: ValidationInfo) -> Any:
+        """Accept only a real number with ``0 < value <= 100``.
+
+        Checked before coercion so a bool or a numeric string cannot slip in as a
+        limit, and so the message names the field and the allowed range.
+        """
+        if value is None:
+            return None
+        if isinstance(value, bool) or not isinstance(value, int | float):
+            raise ValueError(
+                f"{info.field_name} must be a number greater than 0 and at most 100 "
+                f"(got {value!r})"
+            )
+        if not 0 < value <= 100:
+            raise ValueError(
+                f"{info.field_name} must be greater than 0 and at most 100 (got {value!r})"
+            )
+        return value
+
+    @model_validator(mode="after")
+    def require_a_limit(self) -> Self:
+        """A ceiling that names no limit is inert: almost certainly a mistake."""
+        if self.max_used_percent is None and self.five_hour is None and self.seven_day is None:
+            raise ValueError(
+                "usage_ceiling needs at least one of max_used_percent, five_hour, seven_day"
+            )
+        return self
+
+    @property
+    def effective_five_hour(self) -> float | None:
+        """The 5-hour limit: its override, else ``max_used_percent``."""
+        return self.five_hour if self.five_hour is not None else self.max_used_percent
+
+    @property
+    def effective_seven_day(self) -> float | None:
+        """The 7-day limit: its override, else ``max_used_percent``."""
+        return self.seven_day if self.seven_day is not None else self.max_used_percent
+
+
+class HostConfig(BaseModel):
+    """Settings for the hosts one ``hosts:`` entry matches (Plan 00479).
+
+    The entry's key is its label. Per-host settings are members of this model:
+    ``usage_ceiling`` is the first.
+
+    Attributes:
+        pattern: Case-sensitive fnmatch glob matched against the effective
+            hostname (``utils.cron_hosts``). None: the label is the exact hostname.
+        usage_ceiling: Subscription-usage ceiling, or None for none.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    pattern: str | None = Field(
+        default=None, description="fnmatch glob for the hostname; omit to match the label exactly"
+    )
+    usage_ceiling: UsageCeilingConfig | None = Field(
+        default=None, description="Subscription-usage ceiling for matching hosts"
+    )
+
+    @field_validator("pattern")
+    @classmethod
+    def require_usable_pattern(cls, value: str | None) -> str | None:
+        """A blank pattern matches nothing a hostname could be: reject it."""
+        if value is None:
+            return None
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("pattern must be a non-empty glob; omit it to match the label")
+        return stripped
+
+    def matches(self, label: str, hostname: str) -> bool:
+        """Whether this entry (keyed ``label``) applies to ``hostname``."""
+        if self.pattern is None:
+            return label == hostname
+        return hostname_matches([self.pattern], hostname)
+
+
 class PromotionConfig(BaseModel):
     """Data-driven handler promotion policy (Plan 00116 Decision I).
 
@@ -2436,6 +2541,8 @@ class Config(BaseModel):
         layout: Project directory-layout truths with no other config home
             (Plan 00288); composed with other homes by the ``ProjectLayout``
             facade (``core/project_layout.py``)
+        hosts: Per-host settings keyed by label, matched against the effective
+            session hostname (Plan 00479)
         claude_md: Injected ``<hooksdaemon>`` block configuration, currently
             the handler-promotion policy (Plan 00116 Decision I)
     """
@@ -2461,6 +2568,10 @@ class Config(BaseModel):
     tool_policy: ToolPolicyConfig = Field(default_factory=ToolPolicyConfig)
     persistent_crons: PersistentCronsConfig = Field(default_factory=PersistentCronsConfig)
     claude_md: ClaudeMdConfig = Field(default_factory=ClaudeMdConfig)
+    hosts: dict[str, HostConfig] = Field(
+        default_factory=dict,
+        description="Per-host settings keyed by label (Plan 00479)",
+    )
     pseudo_events: dict[str, dict[str, Any]] = Field(
         default_factory=dict,
         description="Pseudo-event configurations keyed by pseudo-event name",
@@ -2468,6 +2579,15 @@ class Config(BaseModel):
 
     # Legacy field mapping
     settings: dict[str, Any] | None = Field(default=None, exclude=True)
+
+    @field_validator("hosts")
+    @classmethod
+    def require_usable_host_labels(cls, value: dict[str, HostConfig]) -> dict[str, HostConfig]:
+        """A blank label is no hostname and no name to report a match by."""
+        for label in value:
+            if not label.strip():
+                raise ValueError("hosts label must be non-empty")
+        return value
 
     @model_validator(mode="after")
     def validate_projects_are_distinct(self) -> Self:

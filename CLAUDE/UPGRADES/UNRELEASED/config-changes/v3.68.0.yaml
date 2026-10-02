@@ -188,3 +188,29 @@ config_changes:
         run, then export HOOKS_DAEMON_HOSTNAME=<name> before launching the
         session that should take the role. Leave it off for a job every
         session needs.
+    - key: hosts
+      recommended: false
+      dormant: true
+      description: >-
+        NEW optional top-level mapping (Plan 00479, default empty). Each key is
+        a label; an optional `pattern` is a case-sensitive fnmatch glob matched
+        against the session's effective hostname (HOOKS_DAEMON_HOSTNAME, then
+        CCY_HOST_HOSTNAME, then the system hostname), and without one the label
+        is the exact hostname. The first per-host setting is `usage_ceiling`:
+        `max_used_percent` (greater than 0, at most 100) applies to both the
+        5-hour and 7-day windows, with optional `five_hour` and `seven_day`
+        overrides. When several entries match, the lowest limit wins per
+        window. Unknown keys and out-of-range percentages are config errors.
+        This release adds the model and resolver only; nothing enforces a
+        ceiling yet.
+      example_yaml: |
+        hosts:
+          sdlc-runner:
+            pattern: "cchd-sdlc-*"
+            usage_ceiling:
+              max_used_percent: 80
+              five_hour: 85
+              seven_day: 70
+      migration_note: >-
+        Optional and inert on its own. Declare a host only when a later release's
+        usage-pause handlers are wanted on it.

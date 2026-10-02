@@ -143,6 +143,41 @@ are in [`merge_to_main_approval`](HANDLER_REFERENCE.md#merge_to_main_approval).
 
 ---
 
+## Hosts (per-host settings)
+
+The top-level `hosts:` block holds settings that differ by machine or session
+role (Plan 00479). Each key is a label. An entry applies to a session when its
+`pattern` (a case-sensitive `fnmatch` glob: `*`, `?`, `[...]`) matches the
+session's effective hostname; with no `pattern`, the label itself is the exact
+hostname. The effective hostname is the first non-empty of
+`HOOKS_DAEMON_HOSTNAME`, `CCY_HOST_HOSTNAME`, then the system hostname.
+
+```yaml
+hosts:
+  sdlc-runner:                  # a label
+    pattern: "cchd-sdlc-*"      # optional glob; omitted = the label is the hostname
+    usage_ceiling:
+      max_used_percent: 80      # 0 < x <= 100, applies to both windows
+      five_hour: 85             # optional override for the 5-hour window
+      seven_day: 70             # optional override for the 7-day window
+  dev-laptop:
+    usage_ceiling:
+      max_used_percent: 95
+```
+
+| Key                                   | Meaning                                                                           |
+| ------------------------------------- | --------------------------------------------------------------------------------- |
+| `pattern`                             | Optional glob against the effective hostname. A blank value is an error.          |
+| `usage_ceiling.max_used_percent`      | Used-percent limit for both windows, greater than 0 and at most 100.              |
+| `usage_ceiling.five_hour`/`seven_day` | Per-window limit that overrides `max_used_percent`. At least one limit is needed. |
+
+When several entries match, the lowest limit wins per window. No matching
+entry, or no ceiling on the matches, means no ceiling. Unknown keys are
+rejected at config load. The resolver is
+`utils.host_usage_ceiling.resolve_host_usage_ceiling`.
+
+---
+
 ## Projects (monorepo boundaries)
 
 The top-level `projects:` block declares a monorepo's sub-trees so
