@@ -22,6 +22,9 @@ handler" is a description and not a property the code can check:
   inert by default; `scope: ALL` in a project's config restores it.
 - `teammate-reap-advisor` names the unreaped teammates a stop is waiting on.
   Only the coordinator has teammates.
+- `usage-pause-stop-gate` (Plan 00479) verifies that a usage-paused session's
+  crons are exactly the one resume cron. Session crons belong to the
+  coordinator's session, for the same reason as `cron-stop-enforcer`.
 
 Three handlers ship scoped to SUB, and they are the only ones that gain anything
 from it:
@@ -72,6 +75,8 @@ _EXPECTED_MAIN: frozenset[str] = frozenset(
         # Issue #62: a subagent never holds the coordinator's crons.
         "cron-subagent-stop-enforcer",
         "teammate-reap-advisor",
+        # Plan 00479: verifies the session's crons, which are the coordinator's.
+        "usage-pause-stop-gate",
     }
 )
 

@@ -67,6 +67,7 @@ from claude_code_hooks_daemon.utils.stop_hook_helpers import (
     has_recent_stop_hook_block,
     is_stop_hook_active,
 )
+from claude_code_hooks_daemon.utils.usage_pause_gate import hook_is_usage_paused
 
 logger = logging.getLogger(__name__)
 
@@ -622,8 +623,16 @@ class AutoContinueStopHandler(StopHandlerBase):
             hook_input: Hook input with transcript_path and stop_hook_active
 
         Returns:
-            False only for re-entry or AskUserQuestion; True for everything else
+            False for re-entry, AskUserQuestion, or a session paused on its usage
+            ceiling (Plan 00479); True for everything else
         """
+        # A usage-paused session must be ALLOWED to stop: continuing would spend
+        # the usage the pause exists to protect, and the pause's own Stop gate
+        # (usage_pause_stop_gate) is the only handler with a say on that stop.
+        if hook_is_usage_paused(hook_input):
+            logger.debug("auto_continue_stop: session is usage-paused, standing down")
+            return False
+
         # Discriminate genuine re-entry from silent-stop bug:
         # - Genuine re-entry: stop_hook_active=True AND a prior Stop block marker
         #   exists in the transcript tail (Claude Code re-fired Stop after we

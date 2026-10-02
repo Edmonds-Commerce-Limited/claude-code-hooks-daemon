@@ -88,6 +88,20 @@ class TestClassification:
         assert classify_tick("[tick:job:]\nbody") is None
 
 
+class TestUsageResumeTick:
+    """Plan 00479 Task 4.6: the one-shot resume cron has its own recognisable tick."""
+
+    def test_the_sentinel_spelling(self) -> None:
+        assert tick_sentinel(TickKind.USAGE_RESUME) == "[tick:usage-resume]"
+
+    def test_it_classifies_as_usage_resume(self) -> None:
+        assert classify_tick("[tick:usage-resume]\nbody") == DaemonTick(TickKind.USAGE_RESUME)
+
+    def test_a_usage_resume_tick_takes_no_job_id(self) -> None:
+        with pytest.raises(ValueError):
+            tick_sentinel(TickKind.USAGE_RESUME, "x")
+
+
 class TestAddingAndRemovingTheSentinel:
     def test_the_sentinel_is_prepended_as_its_own_line(self) -> None:
         assert with_tick_sentinel("body", "[tick:watchdog]") == "[tick:watchdog]\nbody"

@@ -7,6 +7,75 @@ breaking: false
 
 config_changes:
   added:
+    - key: handlers.user_prompt_submit.usage_pause_gate
+      recommended: true
+      dormant: true
+      description: >-
+        NEW (Plan 00479). Pauses a session at its host usage ceiling. When
+        `hosts:` gives the host a `usage_ceiling` and a live usage window
+        reaches it, the pause is recorded and the model is told to replace
+        every cron with ONE one-shot resume cron at the window reset, then
+        stop. While paused every later prompt (cron tick, supervisor message,
+        human) is dropped before it reaches the model. The resume cron's
+        prompt starts `[tick:usage-resume]`; when it fires, usage is re-read:
+        below the ceiling the declared crons are re-established and work
+        continues, still over it the next resume cron is scheduled. No
+        ceiling, no usage data or an unknown host never pauses a session.
+        `hooks-daemon usage-pause clear` (run in a terminal) removes a pause
+        and records an override until the latest reset among the windows over
+        the ceiling (at most 8 days), during which no pause is started for
+        that session.
+      example_yaml: |
+        handlers:
+          user_prompt_submit:
+            usage_pause_gate:
+              enabled: true
+              priority: 9
+      migration_note: >-
+        On by default and inert until a `hosts:` entry sets a `usage_ceiling`.
+        Add the entry to a project config that lists its UserPromptSubmit
+        handlers explicitly.
+    - key: handlers.pre_tool_use.usage_pause_tool_gate
+      recommended: true
+      dormant: true
+      description: >-
+        NEW (Plan 00479). While a session is usage-paused, only CronList,
+        CronDelete, CronCreate and ToolSearch (which loads the deferred cron
+        tools) are allowed; any other tool is denied with `continue: false`
+        and a `stopReason`, so a turn already running halts at its next tool
+        call. A session over its ceiling that has not yet been paused is
+        paused by its next main-thread tool call, which is refused without a
+        halt and carries the full directive; a subagent never starts a pause.
+        Inert unless a pause is recorded or a ceiling is reached.
+      example_yaml: |
+        handlers:
+          pre_tool_use:
+            usage_pause_tool_gate:
+              enabled: true
+              priority: 9
+      migration_note: >-
+        On by default and inert until a usage pause is recorded. Add the entry
+        to a project config that lists its PreToolUse handlers explicitly.
+    - key: handlers.stop.usage_pause_stop_gate
+      recommended: true
+      dormant: true
+      description: >-
+        NEW (Plan 00479). A usage-paused session may stop only once its
+        `session_crons` holds exactly the one usage-resume cron; otherwise the
+        pause directive is repeated. While paused, `auto_continue_stop`,
+        `cron_stop_enforcer`, `cron_subagent_stop_enforcer`,
+        `persistent_cron_assertor`, `failsafe_cron_session_advisor` and
+        `recovery_cron_advisor` stand down, so nothing forces the session on
+        or re-arms a cron.
+      example_yaml: |
+        handlers:
+          stop:
+            usage_pause_stop_gate:
+              enabled: true
+              priority: 6
+      migration_note: >-
+        On by default and inert until a usage pause is recorded. Add the entry
+        to a project config that lists its Stop handlers explicitly.
     - key: handlers.status_line.usage_indicator
       recommended: true
       dormant: false

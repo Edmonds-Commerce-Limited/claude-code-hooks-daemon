@@ -50,6 +50,7 @@ from claude_code_hooks_daemon.utils.cron_enforcement import (
 )
 from claude_code_hooks_daemon.utils.cron_hosts import effective_hostname
 from claude_code_hooks_daemon.utils.cron_pause import PAUSE_ADVISE_INTERVAL, default_pauses_path
+from claude_code_hooks_daemon.utils.usage_pause_gate import hook_is_usage_paused
 
 logger = logging.getLogger(__name__)
 
@@ -113,7 +114,13 @@ class CronSubagentStopEnforcerHandler(SubagentStopHandlerBase):
         return self._load_config().persistent_crons.active_jobs(effective_hostname(hook_input))
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
-        """Fire only when the project has at least one active job declared for this host."""
+        """Fire only when the project has at least one active job declared for this host.
+
+        Never while the session is paused on its usage ceiling (Plan 00479); see
+        ``CronStopEnforcerHandler.matches``.
+        """
+        if hook_is_usage_paused(hook_input):
+            return False
         return bool(self._active_jobs(hook_input))
 
     def handle(self, hook_input: dict[str, Any]) -> BlockingResult:

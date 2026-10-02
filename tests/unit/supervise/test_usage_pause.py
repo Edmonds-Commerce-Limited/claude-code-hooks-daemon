@@ -134,6 +134,9 @@ class TestPinnedToTheDaemonRecord:
     def test_grace(self) -> None:
         assert _mod._USAGE_PAUSE_GRACE_SECONDS == usage_pause.PAUSE_GRACE_SECONDS
 
+    def test_max_span(self) -> None:
+        assert _mod._USAGE_PAUSE_MAX_SPAN_SECONDS == usage_pause.MAX_PAUSE_SPAN_SECONDS
+
 
 class TestLoadUsagePause:
     def test_reads_a_daemon_written_record(self, sidecar_dir: Path) -> None:
@@ -188,6 +191,20 @@ class TestLoadUsagePause:
         data.update(mutation)
         path.write_text(json.dumps(data), encoding="utf-8")
         assert _mod.load_usage_pause(sidecar_dir, now=_NOW, own_sessions=None) is None
+
+    def test_a_record_pausing_for_longer_than_the_cap_is_no_pause(self, sidecar_dir: Path) -> None:
+        path = _write_pause_path(sidecar_dir)
+        data = json.loads(path.read_text(encoding="utf-8"))
+        data["resume_at"] = data["paused_at"] + usage_pause.MAX_PAUSE_SPAN_SECONDS + 1
+        path.write_text(json.dumps(data), encoding="utf-8")
+        assert _mod.load_usage_pause(sidecar_dir, now=_NOW, own_sessions=None) is None
+
+    def test_a_record_at_the_cap_still_counts(self, sidecar_dir: Path) -> None:
+        path = _write_pause_path(sidecar_dir)
+        data = json.loads(path.read_text(encoding="utf-8"))
+        data["resume_at"] = data["paused_at"] + usage_pause.MAX_PAUSE_SPAN_SECONDS
+        path.write_text(json.dumps(data), encoding="utf-8")
+        assert _mod.load_usage_pause(sidecar_dir, now=_NOW, own_sessions=None) is not None
 
     def test_resume_not_after_pause_is_no_pause(self, sidecar_dir: Path) -> None:
         path = _write_pause_path(sidecar_dir)

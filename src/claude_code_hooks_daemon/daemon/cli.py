@@ -5110,6 +5110,122 @@ def cmd_cron_resume(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_usage_pause(args: argparse.Namespace) -> int:
+    """Show or lift a session's usage pause (Plan 00479).
+
+    ``clear`` is the owner's escape: while a session is paused every prompt is
+    held, so the pause cannot be lifted from inside the session when the ceiling
+    is still reached. It removes the pause record AND records an override valid
+    until the latest reset among the windows over the ceiling (capped at 8 days);
+    while it is valid no gate starts a pause for the session. Without the
+    override the next prompt would simply pause the session again. Run it in a
+    terminal: whether a ``!``-prefixed command passes through the hooks is
+    unverified. The session is ``--session`` or ``CLAUDE_CODE_SESSION_ID``.
+
+    Returns:
+        0 on success (including "nothing to clear"), 1 on refusal/failure.
+    """
+    from claude_code_hooks_daemon.core.project_context import ProjectContext
+    from claude_code_hooks_daemon.utils.usage_pause import (
+        clear_usage_pause,
+        read_usage_pause,
+        usage_override_active,
+        write_usage_override,
+    )
+    from claude_code_hooks_daemon.utils.usage_pause_gate import (
+        RESUME_MARGIN_SECONDS,
+        PauseEnvironment,
+        current_breaches,
+        resume_time_text,
+    )
+
+    session_id = (
+        str(getattr(args, "session", None) or "").strip()
+        or os.environ.get("CLAUDE_CODE_SESSION_ID", "").strip()
+    )
+    if not session_id:
+        print(
+            "ERROR: no session. Pass --session ID, or run this inside the Claude Code "
+            "session (CLAUDE_CODE_SESSION_ID is not set).",
+            file=sys.stderr,
+        )
+        return 1
+
+    if getattr(args, "project_root", None):
+        project_path = Path(args.project_root).resolve()
+    else:
+        project_path = get_project_path(None)
+    config_file = project_path / ".claude" / "hooks-daemon.yaml"
+    if not ProjectContext.is_initialized():
+        try:
+            ProjectContext.initialize(config_file)
+        except ValueError as e:
+            print(f"WARNING: could not initialise project context: {e}", file=sys.stderr)
+    try:
+        untracked_dir = ProjectContext.daemon_untracked_dir()
+    except RuntimeError as e:
+        print(f"ERROR: no untracked directory to find the pause in: {e}", file=sys.stderr)
+        return 1
+
+    now = time.time()
+    if args.action == "status":
+        pause = read_usage_pause(untracked_dir, session_id, now=now)
+        if usage_override_active(untracked_dir, session_id, now=now):
+            print(f"An owner override is active for session {session_id}: no pause is started.")
+        if pause is None:
+            print(f"Session {session_id} is not paused on its usage ceiling.")
+            return 0
+        print(f"Session {session_id} is PAUSED: {pause.reason}")
+        print(f"Resumes at {resume_time_text(pause.resume_at)}.")
+        print("Override it with: bin/hooks-daemon usage-pause clear")
+        return 0
+
+    # The override runs to the latest reset among the windows over the ceiling: the pause
+    # record's own deciding reset, and any window over the ceiling right now.
+    record = read_usage_pause(untracked_dir, session_id, now=now)
+    resets: list[float] = []
+    if record is not None:
+        resets.append(record.resume_at - RESUME_MARGIN_SECONDS)
+    try:
+        resets += [
+            float(breach.resets_at)
+            for breach in current_breaches({"session_id": session_id}, PauseEnvironment())
+        ]
+    except (OSError, ValueError, RuntimeError) as e:
+        print(f"WARNING: could not read current usage: {e}", file=sys.stderr)
+    until = max(resets, default=0.0)
+    override_note = ""
+    if until > now:
+        try:
+            until = write_usage_override(untracked_dir, session_id, until=until, now=now)
+        except (OSError, ValueError) as e:
+            print(
+                f"ERROR: override not recorded for session {session_id}, so the pause was "
+                f"left in place (clearing alone is undone by the next prompt): {e}",
+                file=sys.stderr,
+            )
+            return 1
+        override_note = (
+            f"Until {resume_time_text(until)} (the latest reset among the windows over "
+            "the ceiling, at most 8 days) no pause will be started for this session, even "
+            "if usage is still over the ceiling."
+        )
+    try:
+        removed = clear_usage_pause(untracked_dir, session_id)
+    except OSError as e:
+        print(f"ERROR: pause not cleared for session {session_id}: {e}", file=sys.stderr)
+        return 1
+    if not removed and not override_note:
+        print(f"Session {session_id} is not paused; nothing to clear.")
+        return 0
+    if removed:
+        print(f"Usage pause cleared for session {session_id}.")
+    if override_note:
+        print(override_note)
+    print("The session's crons were replaced by the pause; it may need them re-created.")
+    return 0
+
+
 def cmd_inject_goal(args: argparse.Namespace) -> int:
     """Write a ``<session>.goal-intent`` signal on demand (Plan 00269 Task 2.3).
 
@@ -11041,6 +11157,31 @@ def build_parser() -> argparse.ArgumentParser:
         help="Project root override (default: auto-detected)",
     )
     parser_cron_resume.set_defaults(func=cmd_cron_resume)
+
+    # usage-pause (Plan 00479): the owner's escape from a usage pause
+    parser_usage_pause = subparsers.add_parser(
+        "usage-pause",
+        help=(
+            "Show or lift a session's usage-ceiling pause "
+            "(run `! bin/hooks-daemon usage-pause clear` to lift it at once)"
+        ),
+    )
+    parser_usage_pause.add_argument(
+        "action", choices=["clear", "status"], help="clear: lift the pause; status: show it"
+    )
+    parser_usage_pause.add_argument(
+        "--session",
+        default=None,
+        help="Session id (default: CLAUDE_CODE_SESSION_ID)",
+    )
+    parser_usage_pause.add_argument(
+        "--project-root",
+        dest="project_root",
+        type=Path,
+        default=None,
+        help="Project root override (default: auto-detected)",
+    )
+    parser_usage_pause.set_defaults(func=cmd_usage_pause)
 
     # verdicts command (Plan 00209): report on the handler decision log
     parser_verdicts = subparsers.add_parser(

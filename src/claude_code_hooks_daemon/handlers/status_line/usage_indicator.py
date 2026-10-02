@@ -28,15 +28,17 @@ import logging
 import math
 import re
 import time
+from datetime import datetime
 from typing import Any, Final
 
-from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
+from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, HookInputField, Priority
 from claude_code_hooks_daemon.core import AdvisoryResult
 from claude_code_hooks_daemon.core.acceptance_test import AcceptanceTest
 from claude_code_hooks_daemon.core.data_layer import latest_usage
 from claude_code_hooks_daemon.core.handler_bases import StatusLineHandlerBase
 from claude_code_hooks_daemon.core.segment_explanation import SegmentExplanation
 from claude_code_hooks_daemon.core.usage_snapshot import UsageSnapshot, UsageWindow
+from claude_code_hooks_daemon.utils.usage_pause_gate import active_usage_pause
 
 logger = logging.getLogger(__name__)
 
@@ -53,6 +55,7 @@ _DEFAULT_HIGH_PCT: Final[int] = 80
 _DEFAULT_CRITICAL_PCT: Final[int] = 90
 
 _ICON: Final[str] = "📈"
+_PAUSE_ICON: Final[str] = "⏸"
 _SEPARATOR: Final[str] = "|"
 _SECONDS_PER_MINUTE: Final[int] = 60
 _SECONDS_PER_HOUR: Final[int] = 3600
@@ -116,17 +119,39 @@ class UsageIndicatorHandler(StatusLineHandlerBase):
             chips.append(self._chip("7d", snapshot.seven_day, now))
         return f"{_ICON} {_SEPARATOR.join(chips)}"
 
+    @staticmethod
+    def _pause_chip(hook_input: dict[str, Any], now: float) -> str | None:
+        """``⏸ usage HH:MM`` while the session is paused on its usage ceiling, else None.
+
+        HH:MM is the resume time in the machine's local zone (Plan 00479 Task 4.7).
+        """
+        pause = active_usage_pause(str(hook_input.get(HookInputField.SESSION_ID) or ""), now=now)
+        if pause is None:
+            return None
+        # A human reads this, so it is the machine's local time (the resume cron itself
+        # names no clock time).
+        hhmm = f"{datetime.fromtimestamp(pause.resume_at):%H:%M}"
+        return f"{_CRITICAL}{_PAUSE_ICON} usage {hhmm}{_RESET}"
+
     def handle(self, hook_input: dict[str, Any]) -> AdvisoryResult:
-        """Return the usage segment, or no segment when there is no live usage data."""
+        """Return the usage segment, or no segment when there is no live usage data.
+
+        A session paused on its usage ceiling leads with ``⏸ usage HH:MM``, and
+        shows it even when there is no usage snapshot.
+        """
         now = time.time()
+        pause_chip = self._pause_chip(hook_input, now)
         try:
             snapshot = latest_usage(now=now)
         except OSError as exc:
             logger.warning("Skipping usage indicator: %s", exc)
+            snapshot = None
+        parts = [
+            part for part in (pause_chip, self._render(snapshot, now) if snapshot else None) if part
+        ]
+        if not parts:
             return AdvisoryResult(context=[])
-        if snapshot is None:
-            return AdvisoryResult(context=[])
-        return AdvisoryResult(context=[f"| {self._render(snapshot, now)}"])
+        return AdvisoryResult(context=[f"| {' '.join(parts)}"])
 
     def explain_segment(self) -> SegmentExplanation:
         """Describe this segment; the current value is read from the usage snapshot."""
@@ -144,7 +169,7 @@ class UsageIndicatorHandler(StatusLineHandlerBase):
         else:
             current_value = f"Currently shows: {_ANSI.sub('', self._render(snapshot, now))}"
         return SegmentExplanation(
-            glyphs=(_ICON, "5h", "7d"),
+            glyphs=(_ICON, "5h", "7d", _PAUSE_ICON),
             name="Subscription Usage",
             what_it_is=(
                 "How much of the claude.ai subscription's 5-hour and weekly usage windows "
@@ -158,7 +183,8 @@ class UsageIndicatorHandler(StatusLineHandlerBase):
                 f"{self._warn_pct:g}% it adds its percentage and reset countdown, e.g. "
                 "`5h 67% 3h 20m`. Percentages are rounded down. A window past "
                 "its reset is dropped; nothing is shown when no usage data exists (API-key "
-                "sessions, or before the first response)."
+                "sessions, or before the first response). `⏸ usage 14:35` in red means the "
+                "session is paused on its host's usage ceiling and resumes at that local time."
             ),
             current_value=current_value,
         )
