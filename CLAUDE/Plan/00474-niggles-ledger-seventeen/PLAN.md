@@ -38,6 +38,7 @@ Full write-ups are in [NIGGLES.md](NIGGLES.md). One line each here:
 
 | #          | Verdict                                                                                                          | Origin              | Status                      |
 | ---------- | ---------------------------------------------------------------------------------------------------------------- | ------------------- | --------------------------- |
+| N302       | `subagent_full_qa_blocker` reads `grep -c` / `awk -e` as interpreter inline code (advisory noise)                | P483 triage, Fable  | ⬜ Open                     |
 | N301       | Each commit gate checks every pathspec with two git calls per path, separately                                   | N245 review         | ⬜ Open                     |
 | N300       | `remote_docs_commit_gate` judges a nested worktree's commit against this repository                              | N245 review         | ⬜ Open                     |
 | N299       | After `cd sub`, `sensitive_content` resolves `git commit -m x f.txt` from the repo root                          | N245 review         | ⬜ Open                     |

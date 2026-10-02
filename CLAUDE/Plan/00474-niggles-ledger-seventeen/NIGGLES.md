@@ -1305,3 +1305,14 @@ is about 0.25 s per gate for 60 paths on a tiny repository, multiplied by the nu
 
 **Status**: ⬜ Open. Compute the match once per command and share it, or use one `ls-files`
 call for all the paths.
+
+### N302 — the full-QA advisory reads `grep -c` and `awk -e` as inline interpreter code
+
+**Source**: the Plan 00483 triage agent and the Fable rulings agent each saw it independently.
+
+**Evidence**: `subagent_full_qa_blocker` emits "UNSEEN: unrecognised-interpreter-inline-code"
+on read-only `grep -c`, `awk` and `--help` commands from a subagent. It treats `-c` and `-e` as an
+interpreter's inline-code flag whatever the command is. It is advisory only, but it fires
+on ordinary reads and teaches agents to ignore it.
+
+**Status**: ⬜ Open. Treat `-c`/`-e` as inline code only after a known interpreter.
