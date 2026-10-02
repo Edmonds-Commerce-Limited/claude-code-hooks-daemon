@@ -88,6 +88,13 @@ class TestMain:
         assert check_module_length.main(["--root", str(tmp_path)]) == 2
         assert "ERROR" in capsys.readouterr().err
 
+    def test_an_empty_src_is_an_operational_failure(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        (tmp_path / "src").mkdir()
+        assert check_module_length.main(["--root", str(tmp_path)]) == 2
+        assert "found no modules" in capsys.readouterr().err
+
     def test_json_artifact_is_written(self, tmp_path: Path) -> None:
         _module(tmp_path, "big.py", check_module_length.MAX_MODULE_LINES + 1)
         assert check_module_length.main(["--root", str(tmp_path), "--json"]) == 0
@@ -97,6 +104,7 @@ class TestMain:
         assert payload["tool"] == "module_length"
         assert payload["summary"]["mode"] == "report-only"
         assert payload["summary"]["modules_over_bound"] == 1
+        assert payload["summary"]["files_scanned"] == 1
         assert payload["summary"]["bound"] == check_module_length.MAX_MODULE_LINES
         assert payload["violations"][0]["file"] == "src/big.py"
 
@@ -105,4 +113,4 @@ class TestMain:
     ) -> None:
         _module(tmp_path, "small.py", 3)
         assert check_module_length.main(["--root", str(tmp_path), "--report-stdout"]) == 0
-        assert json.loads(capsys.readouterr().out)["summary"]["modules_scanned"] == 1
+        assert json.loads(capsys.readouterr().out)["summary"]["files_scanned"] == 1
