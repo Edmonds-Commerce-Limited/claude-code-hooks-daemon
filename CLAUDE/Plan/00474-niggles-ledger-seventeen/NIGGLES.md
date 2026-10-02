@@ -941,5 +941,19 @@ whether a sweep that finishes in the background is delivered later.
 They walk the gitignored `untracked/` tree, which holds the venvs and the nested worktree
 checkouts.
 
-**Status**: 🔄 Part 2 (scope the two sweeps) is with the worktree agent on
-`worktree-n289b-sweep-scope`.
+**Part 2** (a9de781ff, merged 76cf82266; report
+`subagent-reports/261002-n289b-sweep-scope-sonnet.md`):
+
+- **What git lists**: `git ls-files` lists 532,000 paths in the main checkout, of which
+  527,748 are ignored. About 456,000 sit under `untracked/scratch`, mostly whole-repository
+  probe copies left by earlier review runs (13 GB), and about 70,000 are in virtualenvs.
+  Nested worktrees cost nothing, because git lists each as one entry.
+- **Pruning**: ignored untracked files under a `pyvenv.cfg` directory or `node_modules` are
+  no longer judged; tracked files there still are.
+- **Shared scan**: the two sweeps share one scan and one set of protection verdicts per
+  event.
+- **Result**: the two sweeps together went from about 71 s to 8.2 s on main.
+
+**Status**: 🔄 Most of the remaining 8.2 s is spent judging the scratch probe copies.
+Deleting them is the owner's call, since it is a bulk deletion of earlier runs' evidence. A
+live SessionStart probe on the restarted daemon is still to be done.
