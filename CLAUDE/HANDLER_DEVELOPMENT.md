@@ -2,6 +2,11 @@
 
 Guide for creating new handlers for claude-code-hooks-daemon.
 
+A handler is a defence in the Defence Before Fix sense: it exists for a class
+of defect, not one instance. The method is specified in
+[SPEC.md](../remote-docs/defence-before-fix.github.io/SPEC.md); the bug
+lifecycle applies it in [Bugs.md](CodeLifecycle/Bugs.md).
+
 > **Run every command below from the PROJECT ROOT.** Paths like
 > `./bin/hooks-daemon` and `./scripts/qa/...` are relative to it, and resolve to
 > nothing from anywhere else (`exit 127`).

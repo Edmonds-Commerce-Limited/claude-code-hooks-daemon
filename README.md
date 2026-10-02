@@ -81,6 +81,16 @@ real isolation as well: a container, a VM, or a restricted user. The full
 statement is in
 [ARCHITECTURE.md § Threat model](CLAUDE/ARCHITECTURE.md#threat-model-the-agent-is-careless-not-hostile).
 
+### Defence Before Fix
+
+The method behind the handlers is [Defence Before Fix](https://defence-before-fix.github.io):
+a defect is evidence of a class, and the class gets an automated defence before
+the instance gets a fix. Each handler here is such a defence, running at
+tool-call time against the ordinary mistakes described above, and
+`hooks-daemon explain-rule <ID>` names the method for any rule. It is a method
+for catching careless mistakes, not a claim to stop a hostile agent or prompt
+injection.
+
 ---
 
 ## Where this came from

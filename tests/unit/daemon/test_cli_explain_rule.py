@@ -15,6 +15,7 @@ from typing import Any
 
 import pytest
 
+from claude_code_hooks_daemon.constants.dbf import DefenceBeforeFix
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.daemon.cli import cmd_explain_handler, cmd_explain_rule
 
@@ -48,6 +49,22 @@ class TestCmdExplainRule:
 
     def test_case_insensitive_and_prefix_tolerant(self) -> None:
         assert cmd_explain_rule(_rule_args(rule_id="git-reset-hard")) == 0
+
+    def test_known_id_names_defence_before_fix_once_after_verbose_text(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        assert cmd_explain_rule(_rule_args(rule_id="R-GIT-RESET-HARD")) == 0
+        lines = capsys.readouterr().out.rstrip("\n").splitlines()
+        assert lines.count(DefenceBeforeFix.EXPLAIN_LINE) == 1
+        assert lines[-1] == DefenceBeforeFix.EXPLAIN_LINE
+        assert "https://defence-before-fix.github.io" in DefenceBeforeFix.EXPLAIN_LINE
+
+    def test_unknown_id_does_not_print_defence_before_fix_line(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        assert cmd_explain_rule(_rule_args(rule_id="R-TOTALLY-MADE-UP-ZZZZ")) == 1
+        captured = capsys.readouterr()
+        assert DefenceBeforeFix.EXPLAIN_LINE not in captured.out + captured.err
 
     def test_unknown_id_lists_near_matches_and_exits_1(
         self, capsys: pytest.CaptureFixture[str]
@@ -90,6 +107,13 @@ class TestCmdExplainHandler:
         out = capsys.readouterr().out
         assert "R-GIT-RESET-HARD" in out
         assert "destructive_git" in out
+
+    def test_known_handler_names_defence_before_fix_once(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        assert cmd_explain_handler(_handler_args(name="destructive_git")) == 0
+        lines = capsys.readouterr().out.splitlines()
+        assert lines.count(DefenceBeforeFix.EXPLAIN_LINE) == 1
 
     def test_case_insensitive_class_name_match(self) -> None:
         assert cmd_explain_handler(_handler_args(name="DestructiveGitHandler")) == 0
