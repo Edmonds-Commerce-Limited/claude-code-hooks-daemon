@@ -117,13 +117,21 @@ the daemon directs the model and then verifies what it did.
   among the windows over the ceiling, plus a small margin.
 - [ ] ⬜ **Task 4.2**: During the pause, the `PreToolUse` gate allows only `CronList`,
   `CronDelete` and `CronCreate`. Any other tool is denied, with `continue: false` and a
-  `stopReason`, so a turn already running halts at its next tool call.
+  `stopReason`, so a turn already running halts at its next tool call. Prerequisite:
+  `PRE_TOOL_USE_SCHEMA` in `core/response_schemas.py` does not allow a top-level `continue`
+  or `stopReason` today (`additionalProperties: False`). The schema, the response formatter
+  and the vendored hooks contract need extending first (found by the Plan 00480 fact-check
+  experiment).
 - [ ] ⬜ **Task 4.3**: Pause exit is verified. Stop is allowed once the Stop payload's
   `session_crons` holds exactly the one resume cron; otherwise the directive is repeated,
   as `cron_stop_enforcer` already does for declared crons. Every handler that forces
-  continuation stands down during the pause: unattended-mode Stop blocking, stop-explanation
-  re-entry, and the cron and subagent enforcers.
-- [ ] ⬜ **Task 4.4**: Nothing re-arms the crons while paused. `persistent_cron_assertor` and
+  continuation stands down during the pause: `handlers/stop/auto_continue_stop.py`, which does
+  both unattended-mode Stop blocking and stop-explanation re-entry, plus
+  `cron_stop_enforcer` and `cron_subagent_stop_enforcer`.
+- [ ] ⬜ **Task 4.4**: Start from `utils/cron_pause.py`. It is the existing session-scoped,
+  TTL-bounded pause for declared crons, set by the `hooks-daemon cron-pause` CLI and honoured
+  by the cron enforcers. Reuse or extend it rather than adding a second pause mechanism.
+  Nothing re-arms the crons while paused. `persistent_cron_assertor` and
   the failsafe-cron advisors stay quiet, including on the compact's SessionStart, and the
   pause is recorded in a durable marker the daemon reads.
 - [ ] ⬜ **Task 4.5**: The supervisor compact, in this repository. The supervisor is
@@ -161,10 +169,12 @@ the daemon directs the model and then verifies what it did.
 
 1. **Resolved (owner)**: pause, then resume through a scheduled cron at the predicted reset,
    with a supervisor compact before it (Phase 4).
-2. **Several matching entries**: recommended that the lowest ceiling wins, being the safer
-   choice. The alternative is first match in file order.
-3. **One threshold or one per window**: `max_used_percent` applies to both windows.
-   Recommended: also allow optional `five_hour` and `seven_day` overrides.
+2. **Several matching entries**: being built with the recommended default, the lowest
+   ceiling wins, as the safer choice. The owner can overrule it with first match in file
+   order.
+3. **One threshold or one per window**: being built with the recommended default.
+   `max_used_percent` applies to both windows, with optional `five_hour` and `seven_day`
+   overrides.
 4. **Folding `persistent_crons` host selection** into the `hosts:` block later.
 
 ## Success Criteria

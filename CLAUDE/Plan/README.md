@@ -4,6 +4,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
+- [00480: plan fact checker and debounce](00480-plan-fact-checker-and-debounce/PLAN.md) - In Progress (owner ruling after ledger 00474 N290: a Sonnet fact itemiser/verifier wired into plan QA through a first-class debounce; the experiment caught the planted false claim)
+
 - [00479: subscription usage monitor and ceiling](00479-subscription-usage-monitor-and-ceiling/PLAN.md) - Not Started (owner request: a status-line 5-hour/weekly usage segment, plus a per-host usage ceiling in a host-first `hosts:` block so unattended sessions stop before exhausting the subscription)
 
 - [00478: unknown guard verdicts warn](00478-unknown-guard-verdicts-warn/PLAN.md) - Not Started (owner ruling "warn dont block": a safety guard that cannot decide allows with an advisory; a positive match still denies)
@@ -282,11 +284,11 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 ## Plan Statistics
 
-- **Total Plans Created**: 479 (count = `hooksdaemon.latestPlanNumber` git counter)
+- **Total Plans Created**: 480 (count = `hooksdaemon.latestPlanNumber` git counter)
 
 - **Completed**: 415 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 41 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 42 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 
