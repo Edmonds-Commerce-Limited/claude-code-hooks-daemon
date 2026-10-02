@@ -1269,6 +1269,17 @@ class TestNoEarlierSegmentMayRebind:
         assert heredoc_consumers(command, scan_heredocs(command).heredocs) == [(None,)]
 
 
+class TestHeredocConsumerNamedByAnAndJoinedAssignment:
+    """N320: the consumer word a variable names is read after `&&` as after `;`."""
+
+    @pytest.mark.parametrize(
+        ("join", "word"), [(";", "python3"), (" &&", "python3"), (" ||", None)]
+    )
+    def test_the_variable_command_word(self, join: str, word: str | None) -> None:
+        command = f"C=python3{join} $C <<'EOF'\nprose\nEOF"
+        assert heredoc_consumers(command, scan_heredocs(command).heredocs) == [(word,)]
+
+
 class TestKnownVariables:
     """N215 and N212: a variable set to a literal by a plain top-level
     statement earlier in the call, with the N53 exclusions."""
@@ -1288,6 +1299,40 @@ class TestKnownVariables:
         self, command: str, expected: dict[str, str]
     ) -> None:
         assert known_variables(command) == expected
+
+    @pytest.mark.parametrize(
+        ("command", "expected"),
+        [
+            ('OUT=o.md && cat > "$OUT"', {"OUT": "o.md"}),
+            ("OUT=o.md && cat > $OUT", {"OUT": "o.md"}),
+            ('A=1 && B=2 && cat > "$B"', {"A": "1", "B": "2"}),
+            ('set -euo pipefail; OUT=o.md && cat > "$OUT"', {"OUT": "o.md"}),
+            ('OUT=o.md && cat > "$OUT"; ls', {"OUT": "o.md"}),
+        ],
+    )
+    def test_a_literal_assignment_joined_by_and_is_known(
+        self, command: str, expected: dict[str, str]
+    ) -> None:
+        """N320: an assignment of a literal cannot fail, so `&&` after it is `;`."""
+        assert known_variables(command) == expected
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            'OUT=a || cat > "$OUT"',
+            'cd x && OUT=a && cat > "$OUT"',
+            'ls && OUT=a; cat > "$OUT"',
+            'X=1 && ls && OUT=a; cat > "$OUT"',
+            'OUT=$(date) && cat > "$OUT"',
+            'OUT=a && OUT=b && cat > "$OUT"',
+            'OUT=a && { cat > "$OUT"; }',
+            'OUT=a && ( cat > "$OUT" )',
+        ],
+    )
+    def test_the_and_join_does_not_widen_the_other_rules(self, command: str) -> None:
+        known = known_variables(command)
+        assert "OUT" not in known
+        assert "OUT2" not in known
 
     @pytest.mark.parametrize(
         "command",

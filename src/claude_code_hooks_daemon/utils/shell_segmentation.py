@@ -2203,7 +2203,8 @@ def known_variables(command: str) -> dict[str, str]:
     statement, with its value (Plan 00466 N101 round 12, N212 and N215).
 
     Plain means a statement of assignments only, on its own between ``;`` or
-    newlines, before anything opens a group, a substitution or a compound
+    newlines (or leading an ``&&`` chain: an assignment of a literal cannot
+    fail, N320), before anything opens a group, a substitution or a compound
     command, so it surely runs in this shell. The name is assigned nowhere
     else in the call and read nowhere before it, and it is no variable bash
     sets or a helper program reads. No variable is known at all where the
@@ -2267,16 +2268,24 @@ def _leading_assignments(text: str) -> dict[str, tuple[int, str]]:
             or words[0] in _RESERVED_WORDS
         ):
             break
-        if len(split_unquoted(_blank_harmless_redirects(statement), _RECEIVER_SEPARATORS)) > 1:
-            continue
-        matches = [_ASSIGNMENT_WORD.match(word) for word in words if word is not None]
-        if not all(matches):
-            continue
-        for match in matches:
-            assert match is not None  # all() above
-            value = resolve_shell_word(match.group("value"))
-            if value is not None:
-                found.setdefault(match.group("name"), (start, value))
+        # A literal assignment cannot fail, so `A=1 && B=2 && cmd` runs every
+        # part as `;` would. Only the assignments that LEAD the chain count: a
+        # part after a command runs only if that command succeeded. `||` is no
+        # `&&`, so it stays inside one part and the part is skipped (N320).
+        for part_start, part_end in split_unquoted_spans(statement, ("&&",)):
+            part = statement[part_start:part_end]
+            if len(split_unquoted(_blank_harmless_redirects(part), _RECEIVER_SEPARATORS)) > 1:
+                break
+            matches = [
+                _ASSIGNMENT_WORD.match(word) for word in iter_shell_words(part) if word is not None
+            ]
+            if not matches or not all(matches):
+                break
+            for match in matches:
+                assert match is not None  # all() above
+                value = resolve_shell_word(match.group("value"))
+                if value is not None:
+                    found.setdefault(match.group("name"), (start + part_start, value))
     return found
 
 

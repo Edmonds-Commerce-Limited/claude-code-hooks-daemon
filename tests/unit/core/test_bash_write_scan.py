@@ -66,6 +66,21 @@ class TestEveryCompleteCommandIsJudged:
         ]
 
 
+class TestAssignmentJoinedByAndResolvesTheTarget:
+    """N320: `D=x && cmd > $D/f` resolves as `D=x; cmd > $D/f` does."""
+
+    @pytest.mark.parametrize("join", [";", " &&"])
+    def test_a_literal_assignment_resolves_the_target(self, join: str) -> None:
+        targets = scan_bash_write_targets(_bash(f"D=/opt/q{join} python p.py > $D/a.json"))
+        assert targets.paths == ["/opt/q/a.json"]
+        assert targets.unresolved == ()
+
+    def test_an_or_join_leaves_the_target_unresolved(self) -> None:
+        targets = scan_bash_write_targets(_bash("D=/opt/q || python p.py > $D/a.json"))
+        assert targets.paths == []
+        assert targets.unresolved == ("$D/a.json",)
+
+
 class TestDelimiterSpellingsKeepProseOutOfTheTokeniser:
     @pytest.mark.parametrize(("opener", "closer"), _DELIMITERS)
     def test_the_introducing_line_is_still_read(self, opener: str, closer: str) -> None:
