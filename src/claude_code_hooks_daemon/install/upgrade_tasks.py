@@ -43,6 +43,7 @@ from claude_code_hooks_daemon.install.upgrade_guides import (
     default_upgrades_dir,
 )
 from claude_code_hooks_daemon.install.version_parse import strip_tag_prefix
+from claude_code_hooks_daemon.utils.path_containment import path_relative_to
 
 logger = logging.getLogger(__name__)
 
@@ -365,7 +366,7 @@ def _walked_files(project_root: Path) -> list[str]:
     found: list[str] = []
     for dirpath, dirnames, filenames in os.walk(project_root):
         current = Path(dirpath)
-        rel_dir = current.relative_to(project_root).as_posix()
+        rel_dir = path_relative_to(current, project_root).as_posix()
         prefix = "" if rel_dir == "." else f"{rel_dir}/"
         dirnames[:] = sorted(name for name in dirnames if not _is_skipped(f"{prefix}{name}"))
         found.extend(f"{prefix}{name}" for name in sorted(filenames))
