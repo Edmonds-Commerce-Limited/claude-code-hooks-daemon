@@ -1396,6 +1396,20 @@ The uncertain-move union judges the hook directory and the LAST recorded move (`
 every candidate directory (`sub`). Remedy: judge every directory any `cd` in the chain could
 land in.
 
+### N313 — `git_stash` denies a `grep` naming `git stash` when its output goes into `awk`
+
+**Source**: coordinator, live, while reading a test file.
+
+**Evidence**: `grep -n -B2 -A8 'a quoted heredoc body naming git stash\|…' tests/….py | awk 'NR<=50'`
+was denied with R-GIT-STASH-PUSH. The same grep with no pipe is allowed. The command-position view
+(N241) keeps a data head's arguments unless every downstream stage is an inert sink, and `awk` is
+not one (it can `system()`), so the quoted pattern is judged as a command. A `python -c` script whose
+string names `git stash` is denied the same way; that one is defensible, since the interpreter could
+run it.
+
+**Status**: ⬜ Open. Candidate remedy: treat an `awk` stage whose program is a single-quoted literal
+with no `system`, `|` (getline from a command) or `>` as an inert sink.
+
 ### N312 — `split_statements` counted a heredoc's body and terminator as separate statements
 
 **Source**: coordinator, main red on `tests/integration/test_handlers_do_not_match_prose.py`.
@@ -1405,7 +1419,7 @@ statements (the opener, the `HEREDOC_BODY` placeholder, `EOF`). With `bash_safe_
 default, every one-command heredoc write was denied for lacking `set -euo pipefail`. Two prose
 cases failed: a literal inside a quoted heredoc, and a quoted heredoc body naming `git stash`.
 
-**Status**: ✅ Fixed on `worktree-bsm-heredoc-statements`. A heredoc (opener line, body,
+**Status**: ✅ Fixed (merge d719ccac0; verified live after restart). A heredoc (opener line, body,
 terminator) is one statement, quoted or unquoted delimiter, `<<-` included; `bash <<'EOF'` counts as
 one outer statement because the outer `set -e` does not govern the inner shell. `<<<` is not a
 heredoc. The callers that look for a command INSIDE an executed body
@@ -1419,7 +1433,9 @@ pass `heredoc_bodies_executable=True` and keep the previous reading.
 **Evidence**: `(PYTHONPATH=/tmp/src /workspace/untracked/venv-…/bin/python -m pytest tests/x.py -q)`
 is denied with R-UPGRADE-APPROVAL-ENV-BYPASS. The same command without the parentheses is allowed.
 It runs no upgrade, so this is a false positive on an ordinary shape. N285 and N292 fixed the
-unparenthesised forms; the subshell form was missed.
+unparenthesised forms; the subshell form was missed. The heredoc-fix agent reports a second shape
+denied with the same rule: `export PYTHONPATH=<worktree>/src && python -m pytest …` (reported, not
+yet reproduced by the coordinator).
 
 **Status**: ⬜ Open.
 
@@ -1445,7 +1461,11 @@ A third instance followed. The strict-mode merge (bf8d40aa9) turned the corpus r
 The coordinator had not run `check_dangerous_invocation_corpus.py` on that merge, and a
 sub-agent's `changed` run caught it.
 
-**Status**: ✅ Fixed for these three (2be30049c: all three usage-pause handlers are in the
+A fourth instance came from the same merge: `tests/integration/test_handlers_do_not_match_prose.py`
+failed two cases because bash-safe-mode counted heredoc lines as statements (N312, fixed by
+d719ccac0). That suite is now on the coordinator's by-hand list too.
+
+**Status**: ✅ Fixed for all four (2be30049c: all three usage-pause handlers are in the
 template and the priority is 59; the commit that records this entry rewrites the corpus row
 with `&&`, keeping UNCOVERED-accepted, because the plan-folder axis is still open). ⬜ Open as a class. A "too-broad" verdict must not mean that no tests
 run. When the unmapped set touches constants, handler registration or templates, `changed`
