@@ -4,14 +4,66 @@ These ledger entries existed only on branches of ledger 00466's cleanup that wer
 judged too tangled to merge (assessment:
 `CLAUDE/Plan/00466-niggles-ledger-sixteen/subagent-reports/260930-large-branch-assessment-sonnet.md`).
 The branches are dropped, so a "Remedied" status below means remedied on that
-branch only. Every entry here is OPEN on `main`. Write-ups are verbatim from the
+branch only. Each entry's "On main" line records its status on `main` after the Plan 00483 triage (below). Write-ups are verbatim from the
 branch's NIGGLES.md where one existed.
+
+## Triage under the threat model (Plan 00483)
+
+Every entry below was checked against current `main` under the two-part test in
+[ARCHITECTURE.md](../../ARCHITECTURE.md#threat-model-the-agent-is-careless-not-hostile).
+The "On main" line of each entry now carries its verdict; the entry text is unchanged.
+Reproductions and evidence are in the three triage files:
+[TRIAGE-carried-a.md](../00483-threat-model-conformance-audit/TRIAGE-carried-a.md)
+(`worktree-upgrade-scripts`, `worktree-d-00421`, the 464 and N38 branches),
+[TRIAGE-carried-b.md](../00483-threat-model-conformance-audit/TRIAGE-carried-b.md)
+(`worktree-n466-small-a`) and
+[TRIAGE-carried-c.md](../00483-threat-model-conformance-audit/TRIAGE-carried-c.md)
+(`worktree-p422-close`).
+
+| Branch                               | Entries | Fixed on main | Dismissed | Folded | In-scope defect | Needs owner | Still open |
+| ------------------------------------ | ------- | ------------- | --------- | ------ | --------------- | ----------- | ---------- |
+| `worktree-upgrade-scripts`, 464, N38 | 4       | 4             | 0         | 0      | 0               | 0           | 0          |
+| `worktree-d-00421`                   | 14      | 2             | 4         | 0      | 7               | 1           | 8          |
+| `worktree-n466-small-a`              | 22      | 6             | 2         | 2      | 11              | 1           | 12         |
+| `worktree-p422-close`                | 15      | 1             | 8         | 0      | 5               | 1           | 6          |
+| Total                                | 55      | 13            | 14        | 2      | 23              | 3           | 26         |
+
+Entries with a split verdict count under the part that keeps them open (N141, N186, N200,
+N124, N130, N152, N249, N242, N131 and N228 name both parts on their line). N134 appears under
+two branches and is counted once under each. "Still open" is in-scope defects plus needs-owner.
+
+In-scope defects, grouped:
+
+- **Bash recursive reads over a tree holding a protected file** (D1, TRIAGE-carried-b.md):
+  N143, N144, N152 (literal wrapper only), N153, with N220 as the glob twin. N150 and N151
+  are folded into N144 as design notes for the fix.
+- **Grep directory scan fails open past 5000 files** (D2): N130.
+- **Directory and absolute-path patterns matched on spelling only** (D3): N184, N221.
+- **Double-quoted interpreter one-liner with escaped inner quotes**: N249.
+- **False positives on text that names a protected path or guarded command**: N124 (regex
+  text), N136 and N242 (a dotted `python -m` module name), N241 (git guards on messages and
+  data) and the message-ending-in-a-backslash gap that hides a real `git reset --hard`.
+- **Protected path hidden by an `@` or an attached option value**: N229.
+- **Exemptions that admit a second command**: N170 (`secret-meta` and `git rm --cached`
+  with `&`, `$( )` or backticks).
+- **Plan-folder `mkdir` guard**: N141, N179, N186 (brace form).
+- **`git stash` after a recovery form**: N200.
+- **Fail-open on an ordinary condition**: N171 (`walk_files` skips a directory it cannot
+  list), N172 (term rule off under an interpreter without the daemon package), N248
+  (`debug_info.py` redacts no secret terms and shows no banner), N250 (`remote-docs add`
+  captures unscanned when the project config does not parse).
+
+Needs owner: N154 (inherited `GIT_DIR` family), N230 (`secret-meta --project-root`), N240
+(`script` writes an out-of-root log).
+
+Dismissed entries whose subject is a command have a row in
+`scripts/qa/dangerous-invocation-corpus.yaml` with verdict `UNCOVERED-accepted`.
 
 ## Branch `worktree-upgrade-scripts`
 
 ### N108 — `destructive_git` denies a git call split across lines between its options and its subcommand
 
-**Status on the branch**: ⬜ Open. **On main**: open.
+**Status on the branch**: ⬜ Open. **On main**: ✅ Fixed on main (Plan 00483 triage)
 
 **Found by upgrade-scripts round 16b** (`260926-upgrade-scripts16b-opus-5-5.md`
 in Plan 00464, "Still open" item 7b). A git call written with a line
@@ -34,7 +86,7 @@ destructive call.
 
 ### N121 — `secret_file_guard` and `flaggable_content_channel_guard` deny ordinary review commands that name nothing protected
 
-**Status on the branch**: ⬜ Open. **On main**: open.
+**Status on the branch**: ⬜ Open. **On main**: ✅ Fixed on main (Plan 00483 triage)
 
 **Found by upgrade review 12** (`260926-upgrade-review12-opus-5-5.md` in
 Plan 00464, L-R12-8, and its L13 row). It is main's code, in the same class
@@ -71,7 +123,7 @@ test, alongside N101's.
 
 ### N170 — `secret_file_guard`'s secret-meta and `git rm --cached` exemptions let a second command read a protected file
 
-**Status on the branch**: ✅ Remedied. **On main**: open.
+**Status on the branch**: ✅ Remedied. **On main**: ⬜ Open: in-scope defect (Plan 00483 triage, see TRIAGE-carried-a.md)
 
 **Found:** Plan 00421 review 4, D-RULE check (finding SH1, graded BLOCKER),
 reproduced in memory against main's source. All of these were ALLOWED while
@@ -102,7 +154,7 @@ forms, including `cd /proj && …`, `git -C /repo rm --cached` and `time`.
 
 ### N171 — `scan_scope.walk_files` skipped a directory it could not list, so every pinned walker reported it clean
 
-**Status on the branch**: ✅ Remedied. **On main**: open.
+**Status on the branch**: ✅ Remedied. **On main**: ⬜ Open: in-scope defect (Plan 00483 triage, see TRIAGE-carried-a.md)
 
 **Found:** Plan 00421 review 4, shared finding S-a.
 
@@ -118,7 +170,7 @@ because a chmod-based test proves nothing when tests run as root. RED on
 
 ### N172 — An `ImportError` of the shared secret-term rule switched the term rule off in the batch checks
 
-**Status on the branch**: ✅ Remedied. **On main**: open.
+**Status on the branch**: ✅ Remedied. **On main**: ⬜ Open: in-scope defect (Plan 00483 triage, see TRIAGE-carried-a.md)
 
 **Found:** Plan 00421 review 4, shared finding S-b.
 
@@ -137,7 +189,7 @@ list through `secret_redaction.resolve_secret_word_list_paths`. RED on
 
 ### N173 — A direct write to `.git/config` could erase the last-known-good loaded-before marker
 
-**Status on the branch**: ✅ Remedied. **On main**: open.
+**Status on the branch**: ✅ Remedied. **On main**: ✅ Fixed on main (Plan 00483 triage): code absent on main, the defect cannot occur
 
 **Found:** Plan 00421 fix round 5, while closing review-4 D1r. The marker
 that tells a degraded daemon "a config loaded here once" apart from "none
@@ -170,7 +222,7 @@ and `test_a_write_or_edit_of_the_marker_is_denied` failed, and
 
 ### N174 — A path built from a name escaped the directory it was joined onto
 
-**Status on the branch**: ✅ Remedied. **On main**: open.
+**Status on the branch**: ✅ Remedied. **On main**: ✅ Dismissed (threat model, limb 2): a name of `..` or leading `-` joined onto a directory; URL capture and approval key already refuse traversal, the one live case is a harness-supplied session id
 
 **Found:** Plan 00421 fix round 5d. `check_authored_path_containment` began
 deriving write helpers from the package, and found twelve CLI commands whose
@@ -212,7 +264,7 @@ utilities. Under M1, 40 tests fail, among them every per-helper name test.
 
 ### N175 — A YAML option named after a handler's internal attribute overwrote it, safety guards included
 
-**Status on the branch**: ✅ Remedied. **On main**: open.
+**Status on the branch**: ✅ Remedied. **On main**: ✅ Dismissed (threat model, limb 2): a project-config option key named after an internal attribute; editing config to disable a guard is the same act as `enabled: false`
 
 **Found:** Plan 00421 fix round 5f, deciding review-4's step 7 entry on the
 `_NOT_OPTIONS` table in `test_last_known_good.py`. That table named the
@@ -260,7 +312,7 @@ stops recording undeclared keys, and 5 tests fail.
 
 ### N228 — The secret-meta, `git rm --cached` and consumer exemptions read the command with `str.split()`
 
-**Status on the branch**: ✅ Remedied. **On main**: open.
+**Status on the branch**: ✅ Remedied. **On main**: ✅ Fixed on main (Plan 00483 triage) for the `git rm --cached` and plain `ansible-vault view` shapes; ✅ Dismissed (threat model, limb 2) for the residual quote or backslash split inside a word (`vi''ew`, `de\crypt`)
 
 **Found:** Plan 00421 review 5, D-RULE check (finding SH2, graded BLOCKER).
 Shared with main.
@@ -299,7 +351,7 @@ Six of them failed only because `_literal_shell_words` did not exist yet.
 
 ### N229 — The consumer exemption skipped every word starting with `-`, so a path inside an option value was never judged
 
-**Status on the branch**: ✅ Remedied. **On main**: open.
+**Status on the branch**: ✅ Remedied. **On main**: ⬜ Open: in-scope defect (Plan 00483 triage, see TRIAGE-carried-a.md)
 
 **Found:** Plan 00421 review 5, D-RULE check: SH3 (shared with main) and B1
 (this branch's snapshot floor).
@@ -327,7 +379,7 @@ with it. RED on `59d44d08f`: 15 cases of `TestExemptionsJudgeOptionValues`,
 
 ### N230 — `secret-meta --project-root <dir>` read `allow_plain_hash` from a config the agent could write
 
-**Status on the branch**: ✅ Remedied. **On main**: open.
+**Status on the branch**: ✅ Remedied. **On main**: ⬜ Open: needs owner (`secret-meta --project-root` trusts a config the agent wrote; owner decides whether a self-granting config counts)
 
 **Found:** Plan 00421 review 5, D-RULE check (finding SH4). Shared with main.
 
@@ -345,7 +397,7 @@ default. RED on `59d44d08f`:
 
 ### N231 — A secret word list that exists but cannot be read gave no terms, so a scan through it passed
 
-**Status on the branch**: ✅ Remedied. **On main**: ✅ Fixed (branch `worktree-n231-wordlist`, not yet merged)
+**Status on the branch**: ✅ Remedied. **On main**: ✅ Fixed on main (Plan 00483 triage)
 
 **Remedy on main:** A word list that exists but cannot be read (a directory in
 its place, a dangling symlink, or a read error) now raises
@@ -400,7 +452,7 @@ on a healthy daemon, and for a config that cannot load.
 
 ### N242 — A quoted grep pattern starting with `.*`, and a `python -m` module name, were denied as path mentions
 
-**Status on the branch**: ✅ Remedied. **On main**: open.
+**Status on the branch**: ✅ Remedied. **On main**: ✅ Fixed on main (Plan 00483 triage) for the quoted-grep half; ⬜ Open: in-scope defect for the `python -m` dotted module name (see TRIAGE-carried-a.md)
 
 **Found:** Plan 00421 review 6 (shared, minor), and hit repeatedly in
 ordinary work. Shared with main.
@@ -435,7 +487,7 @@ file named `pkg.secret_mod`. RED on `0e0098de2`: six cases in
 
 ### N243 — A consumer exemption matched the head's basename, so a self-written `./ansible-playbook` received the protected path
 
-**Status on the branch**: ✅ Remedied. **On main**: open.
+**Status on the branch**: ✅ Remedied. **On main**: ✅ Dismissed (threat model, limb 1): a self-written executable named `./ansible-playbook`; the script body is a file, not visible at the call
 
 **Found:** Plan 00421 review 6, both roles. Shared with main: main compared
 `head_base` with `consumer.command` too.
@@ -459,7 +511,7 @@ recording script at every place bash could go:
 
 ### N248 — `scripts/debug_info.py` never initialised `ProjectContext`, so it never applied the project's word lists
 
-**Status on the branch**: ✅ Remedied. **On main**: open.
+**Status on the branch**: ✅ Remedied. **On main**: ⬜ Open: in-scope defect (Plan 00483 triage, see TRIAGE-carried-a.md)
 
 **Found:** Plan 00421 fix round 7a, while routing the scrubs through one
 resolution. Shared with main: main's `debug_info.py` has the same lookup.
@@ -484,7 +536,7 @@ RED on `0e0098de2`: `test_an_additional_only_term_is_redacted` and
 
 ### N250 — `remote-docs` captured a page UNSCANNED when the sensitive-content scanner could not load
 
-**Status on the branch**: ✅ Remedied. **On main**: open.
+**Status on the branch**: ✅ Remedied. **On main**: ⬜ Open: in-scope defect (Plan 00483 triage, see TRIAGE-carried-a.md)
 
 **Found:** Plan 00421 round 7c, while routing the word lists through one
 resolution (N246). Shared with main: main `84afc8804` has the same code.
@@ -517,7 +569,7 @@ error-hiding exclusion is removed. RED on `9adcd9db6`: six cases in
 
 ### N119 — The walk re-walks every `eval` text three times, so an `eval` chain costs 3^depth walks
 
-**Status on the branch**: ✅ Remedied. **On main**: open.
+**Status on the branch**: ✅ Remedied. **On main**: ✅ Fixed on main (Plan 00483 triage): code absent on main; a 20-deep literal `eval` chain is denied in 0.49 s
 
 **Found by the Plan 00464 landing merge.** Main's
 `test_safety_handlers_hostile_input_performance.py::TestCombinatorialSmallInputShapesStayLinear::test_bash_command[deep_eval_nesting]`
@@ -549,7 +601,7 @@ matches it exactly. Tests: `test_git_command_target_eval_walks.py`
 
 ### N124 — `secret_file_guard` reads a grep/rg regex argument as a path and denies it
 
-**Status on the branch**: ✅ Remedied. **On main**: open.
+**Status on the branch**: ✅ Remedied. **On main**: ✅ Fixed on main (Plan 00483 triage) for the three shapes in the entry; ⬜ Open: in-scope defect for the residual false positive on an escaped-dot or alternation grep pattern and other regex-text tools (see TRIAGE-carried-b.md)
 
 **Found by the small-a fixer.** `grep -n "def .*repair\|uv" f`,
 `grep -v '^tests/.*:.*#'` and `grep "^tests/.*test_.*\.py$"` were each denied
@@ -585,7 +637,7 @@ with `shlex` and checks the argv shape is unchanged. Release note 148.
 
 ### N125 — `quarantine_artefact_read_guard` refuses a plain `grep -l` over subagent transcripts as too many to enumerate
 
-**Status on the branch**: ✅ Remedied. **On main**: open.
+**Status on the branch**: ✅ Remedied. **On main**: ✅ Fixed on main (Plan 00483 triage)
 
 **Found by the small-a fixer.** `grep -l x ~/.claude/projects/-workspace/*/subagents/*.jsonl`
 (and the `rg -l` form) was denied with `TooManyToEnumerateError`, as was
@@ -618,7 +670,7 @@ prefix (2 fail), every pattern reachable (4 fail). Release note 143.
 
 ### N129 — An abbreviated grep long option hid the file operand from the secret guard
 
-**Status on the branch**: ✅ Remedied. **On main**: open.
+**Status on the branch**: ✅ Remedied. **On main**: ✅ Fixed on main (Plan 00483 triage)
 
 **Found by the small-a D-RULE review (S2), shared with main.** GNU
 `getopt_long` accepts any unambiguous abbreviation, so `--fil=/dev/null` is
@@ -635,7 +687,7 @@ handler cases and 7 module cases. Release note 142.
 
 ### N130 — Glob and directory walks answered "nothing here" when they could not finish
 
-**Status on the branch**: ✅ Remedied. **On main**: open.
+**Status on the branch**: ✅ Remedied. **On main**: ⬜ Open: in-scope defect (Plan 00483 triage, see TRIAGE-carried-b.md, D2: Grep directory scan fails open past 5000 files); the other three halves are fixed on main
 
 **Found by the small-a D-PATH (BLOCKER 2, MAJOR 3) and D-RULE (F4) reviews,
 shared with main.** Four defects, each of which made the walk fail open:
@@ -669,7 +721,7 @@ cases, and the quarantine ENOENT, cap, deadline and root cases. Release notes
 
 ### N131 — The strict glob scan did not read a word the way the shell does
 
-**Status on the branch**: ✅ Remedied. **On main**: open.
+**Status on the branch**: ✅ Remedied. **On main**: ✅ Fixed on main (Plan 00483 triage); ✅ Dismissed (threat model, limb 2) for the remainder: copy a quarantined tree and glob the copy in one command
 
 **Found by the small-a D-PATH (S1, S2) and D-RULE (S3, S4) reviews, shared
 with main.** `find_protected_mention_strict`, the quarantine guard's scan, had
@@ -697,7 +749,7 @@ a glob that could name an artefact is denied without a walk. RED: the
 
 ### N132 — A report claim found only in the main checkout verified a worktree agent's report
 
-**Status on the branch**: ✅ Remedied. **On main**: open.
+**Status on the branch**: ✅ Remedied. **On main**: ✅ Fixed on main (Plan 00483 triage)
 
 **Found by the small-a D-PATH review (S4), shared with main.**
 `subagent_report_path_verifier` looked for a relative claim under a union of
@@ -715,7 +767,7 @@ out-of-root cases. Release note 140.
 
 ### N134 — Guards crash on read-only commands that name no protected path
 
-**Status on the branch**: ✅ Remedied (heredoc half: N101). **On main**: open.
+**Status on the branch**: ✅ Remedied (heredoc half: N101). **On main**: ✅ Fixed on main (Plan 00483 triage)
 
 **Found by the p422 D-RULE and n53 D-RULE reviews.** The live main daemon
 denied read-only commands with `Internal error: TooManyToEnumerateError`:
@@ -745,7 +797,7 @@ and is not fixed here.
 
 ### N136 — A dotted Python module name is read as a protected path
 
-**Status on the branch**: ✅ Remedied. **On main**: open.
+**Status on the branch**: ✅ Remedied. **On main**: ⬜ Open: in-scope defect (Plan 00483 triage, see TRIAGE-carried-b.md)
 
 **Found by n23-land-1.** `secret_file_guard` denied
 `.venv/bin/python -c "import sys; sys.path.insert(0,'src'); import claude_code_hooks_daemon.utils.secret_file_matching as s; ..."`:
@@ -770,7 +822,7 @@ name answers `UNRESOLVABLE_IMPORT` and is denied. Release notes 146 and 148.
 
 ### N143 — A search fed its files by another command checks no tree
 
-**Status on the branch**: ✅ Remedied. **On main**: open.
+**Status on the branch**: ✅ Remedied. **On main**: ⬜ Open: in-scope defect (Plan 00483 triage, see TRIAGE-carried-b.md)
 
 **Found by small-a round 3.** In `find . | xargs rg x`, the guard saw an
 `rg` after a pipe with no path and treated it as reading stdin data. A
@@ -791,7 +843,7 @@ action and no redirect. RED: `TestFilesFedByAnotherCommand`,
 
 ### N144 — The quarantine guard has no Bash recursive-search check
 
-**Status on the branch**: ✅ Remedied. **On main**: open.
+**Status on the branch**: ✅ Remedied. **On main**: ⬜ Open: in-scope defect (Plan 00483 triage, see TRIAGE-carried-b.md)
 
 **Found by small-a round 3.** `quarantine_artefact_read_guard` walked a tree
 only for the Grep tool. A `grep -r x <dir holding a DETAIL artefact>` was
@@ -808,7 +860,7 @@ note 147.
 
 ### N150 — Search roots and N64 report claims are resolved by text
 
-**Status on the branch**: ✅ Remedied. **On main**: open.
+**Status on the branch**: ✅ Remedied. **On main**: ✅ Folded into N144 (Plan 00483 triage): a flaw of the dropped branch's recursive-search check; design note for the Bash recursive-read fix (D1)
 
 **Found by the small-a D-PATH re-review (BLOCKER 1, MAJOR 2).** Roots were
 normalised with `normpath`, so `/root/.claude/../..` through a symlink
@@ -825,7 +877,7 @@ and the verifier. Release note 148.
 
 ### N151 — Git's view is trusted without checking rg reads no more than it
 
-**Status on the branch**: ✅ Remedied. **On main**: open.
+**Status on the branch**: ✅ Remedied. **On main**: ✅ Folded into N144 (Plan 00483 triage): moot if the Bash recursive-read fix (D1) is a plain bounded walk instead of a git view
 
 **Found by the small-a D-PATH and D-RULE re-reviews (M3).** A `.ignore` or
 `.rgignore` with `!build/`, a wider `core.excludesFile`, or
@@ -843,7 +895,7 @@ differential `rg --files` check. Release note 148.
 
 ### N152 — A command the lexer cannot segment is read as holding no search
 
-**Status on the branch**: ✅ Remedied. **On main**: open.
+**Status on the branch**: ✅ Remedied. **On main**: ⬜ Open: in-scope defect for the literal wrapper (`bash -c 'grep -r x .'`, `sh -c`, `eval`; Plan 00483 triage, see TRIAGE-carried-b.md); ✅ Dismissed (threat model, limbs 1 and 2) for `g\rep`, `"grep"`, `$G`; the fail-closed deny on an unclosed quote stays
 
 **Found by the small-a D-PATH and D-RULE re-reviews (M4).** When
 `recursive_searches` could not segment a command (a stray apostrophe in a
@@ -906,7 +958,7 @@ the new cases in `TestAVariableWhoseValueIsKnownIsRead`,
 
 ### N153 — `git grep`, `ugrep`, `ag` and `ack` search a tree unchecked
 
-**Status on the branch**: ✅ Remedied. **On main**: open.
+**Status on the branch**: ✅ Remedied. **On main**: ⬜ Open: in-scope defect (Plan 00483 triage, see TRIAGE-carried-b.md)
 
 **Found by the small-a D-PATH re-review.** The recursive-search check knew
 only grep and rg, so these read a protected file under the cwd without
@@ -937,7 +989,7 @@ its place. Release note 149.
 
 ### N154 — `run_git` passes an inherited `GIT_DIR`, `GIT_WORK_TREE` or `GIT_INDEX_FILE` through
 
-**Status on the branch**: ✅ Remedied. **On main**: open.
+**Status on the branch**: ✅ Remedied. **On main**: ⬜ Open: needs owner (`run_git` passes an inherited `GIT_DIR`, `GIT_WORK_TREE`, `GIT_INDEX_FILE`; the cause is the daemon's own environment, not an agent-typed shape)
 
 **Found by the small-a D-PATH and D-RULE re-reviews (shared minor).** A
 caller's environment carrying one of these variables made every git probe
@@ -950,7 +1002,7 @@ bring them back. RED: a real-repository test and a mocked one in
 
 ### N183 — Main's secret guard crashes on `$VAR/…` globs and brace groups
 
-**Status on the branch**: ✅ Remedied. **On main**: open.
+**Status on the branch**: ✅ Remedied. **On main**: ✅ Fixed on main (Plan 00483 triage)
 
 **Found live in this session.** Main's daemon denied read-only commands
 with `R-SECRET-EVALUATION-ERROR: TooManyToEnumerateError`: a `W=/workspace; ls $W/src/*/…` heredoc, `grep -rln … $W/tests`, and scripts whose text
@@ -977,7 +1029,7 @@ clean tree, which main allows; it is now a budget of 100k entries or
 
 ### N184 — A Bash read through `<link>/..` misses an absolute-path pattern
 
-**Status on the branch**: ✅ Remedied. **On main**: open.
+**Status on the branch**: ✅ Remedied. **On main**: ⬜ Open: in-scope defect (Plan 00483 triage, see TRIAGE-carried-b.md)
 
 **Found by the small-a D-PATH re-review 3 (shared minor; main has it too).**
 The Bash mention scan matched a word as spelled, and resolved it only when
@@ -994,7 +1046,7 @@ Release note 149.
 
 ### N201 — `POSIXLY_CORRECT` stops GNU grep permuting, so a word after the first operand is a file
 
-**Status on the branch**: ✅ Remedied. **On main**: open.
+**Status on the branch**: ✅ Remedied. **On main**: ✅ Dismissed (threat model, limb 2): `POSIXLY_CORRECT` plus option-after-operand grep; no working purpose beyond changing how a parser reads argv, and main denies the command anyway when the variable is named
 
 **Found by the small-a D-RULE re-review 4 (shared; main has it too).** With
 `POSIXLY_CORRECT` set, GNU grep takes every word after its first operand as
@@ -1016,7 +1068,7 @@ grep). Release note 150.
 
 ### N220 — A glob whose last component is a bare `*` is never expanded, so `cat dir/*` reads a protected file
 
-**Status on the branch**: ✅ Remedied. **On main**: open.
+**Status on the branch**: ✅ Remedied. **On main**: ⬜ Open: in-scope defect (Plan 00483 triage, see TRIAGE-carried-b.md)
 
 **Found by the small-a D-PATH re-review 5 (shared MAJOR; main has it
 too).** `_token_mention` skipped a glob whose last component has no
@@ -1036,7 +1088,7 @@ tests `TestAGlobWithABareStarIsExpanded` and the `bare_star*` cases of
 
 ### N221 — A path in an interpreter one-liner after a `cd` is judged from the hook's cwd
 
-**Status on the branch**: ✅ Remedied. **On main**: open.
+**Status on the branch**: ✅ Remedied. **On main**: ⬜ Open: in-scope defect (Plan 00483 triage, see TRIAGE-carried-b.md)
 
 **Found by the small-a D-PATH re-review 5 (shared minor; main has it too).**
 With a protected pattern that names a directory, `cd CLAUDE && python3 -c 'print(open("Plan/…/r.md").read())'` was allowed on main and on the
@@ -1054,7 +1106,7 @@ An unreadable `cd` target stays unverifiable. RED:
 
 ### N249 — An interpreter one-liner's path is missed when the code is double-quoted with escaped inner quotes
 
-**Status on the branch**: ⬜ Open. **On main**: open.
+**Status on the branch**: ⬜ Open. **On main**: ⬜ Open: in-scope defect for the double-quoted one-liner with escaped inner quotes (Plan 00483 triage, see TRIAGE-carried-b.md); ✅ Dismissed (threat model, limb 2) for `$'...'`
 
 **Found by small-a round 9b ("Found, not fixed", main-proven; S-D).**
 `python3 -c "print(open(\"w1-key\").read())"` is allowed on main
@@ -1073,7 +1125,7 @@ branch.
 
 ### N257 — A read through `/proc/self/cwd`, `/proc/<pid>` or `/dev/fd` is not judged, and main has the same bypass
 
-**Status on the branch**: ⬜ Open. **On main**: open.
+**Status on the branch**: ⬜ Open. **On main**: ✅ Dismissed (threat model, limb 2): reads through `/proc/self/cwd`, `/proc/<pid>`, `/dev/fd`; the ruling names `/proc/self/fd` explicitly. The fail-closed deny on the crash row stays
 
 **Found by small-a round 10b (item 09, S-C; main has the same bypass).**
 The per-process magic paths reach a protected file without naming it.
@@ -1131,7 +1183,7 @@ strictly better than main); to be fixed on its own small branch.
 
 ### N134 — Guards crash on read-only commands that name no protected path
 
-**Status on the branch**: ⬜ Open (small-a). **On main**: open.
+**Status on the branch**: ⬜ Open (small-a). **On main**: ✅ Fixed on main (Plan 00483 triage)
 
 **Found by the p422 D-RULE review** (Plan 00422, review of
 `fe14348e7..f89edf854`, report
@@ -1166,7 +1218,7 @@ read-only shapes with RED tests.
 
 ### N141 — The plan-folder `mkdir` guard is waved past by exemptions, quoted spaces, `CDPATH` and same-command links
 
-**Status on the branch**: ✅ Remedied. **On main**: open.
+**Status on the branch**: ✅ Remedied. **On main**: ⬜ Open: in-scope defect for the `mkdir -p` with an archive path, a later `| wc`, a trailing comment and the `cd ... && mkdir` form (Plan 00483 triage, see TRIAGE-carried-c.md); ✅ Dismissed (threat model, limb 2) for the quoted-space spelling and `ln -s` then `mkdir`
 
 **Found by the p422 D-RULE re-review** (review of `fe14348e7..3f7fafeaf`,
 report
@@ -1228,7 +1280,7 @@ Cross-reference: 00422 N28, whose branch these fixes ride on.
 
 ### N178 — A `mkdir` whose command word is built by expansion is never seen
 
-**Status on the branch**: ✅ Remedied. **On main**: open.
+**Status on the branch**: ✅ Remedied. **On main**: ✅ Dismissed (threat model, limb 1): `m=mkdir; $m CLAUDE/Plan/00999-x`: command word from a variable
 
 **Found by the p422 D-RULE final re-review** (review of `fe14348e7..3e0b67d6b`,
 report
@@ -1258,7 +1310,7 @@ remedy; team-lead ruled that it must be denied too, which N188 does.
 
 ### N179 — The `&` or \`\\
 
-**Status on the branch**: p422 D-RULE review 4. **On main**: open.
+**Status on the branch**: p422 D-RULE review 4. **On main**: ⬜ Open: in-scope defect (Plan 00483 triage, see TRIAGE-carried-c.md)
 
 **Found by the p422 D-RULE review 4** (same report, finding SH-1). Main and
 the round-4 branch both allow `mkdir 2>&1 CLAUDE/Plan/00999-x`, and the same
@@ -1276,7 +1328,7 @@ shared tokeniser reads `2>&1` as one word. Tests:
 
 ### N180 — The plan-folder guard misses an expanded command word after a wrapper, and quoting inside a folder number
 
-**Status on the branch**: ✅ Remedied. **On main**: open.
+**Status on the branch**: ✅ Remedied. **On main**: ✅ Dismissed (threat model, limb 1): `sudo $m CLAUDE/Plan/00999-x`: variable command word after a wrapper; the `00999''-x` quoting spelling is limb 2
 
 **Found by the p422 D-RULE review 4** (review of `fe14348e7..5d741fde4`,
 report
@@ -1299,7 +1351,7 @@ the hyphen. Tests:
 
 ### N185 — The shared wrapper table lacks `setsid`, `doas` and other standard exec-wrappers
 
-**Status on the branch**: ✅ Remedied. **On main**: open.
+**Status on the branch**: ✅ Remedied. **On main**: ✅ Dismissed (threat model, limb 1): `setsid $m CLAUDE/Plan/00999-x`: variable command word; the literal `setsid mkdir` is denied on main
 
 **Found by the p422 D-RULE review 5** (same report, finding SH-A). Main and
 the round-5 branch both allow `setsid $m CLAUDE/Plan/00999-x`, and the same
@@ -1322,7 +1374,7 @@ The bare-duration skip is now `timeout`'s one positional word. Tests:
 
 ### N186 — After an expanded command word, a folder name in `$'…'` quoting or braces is not decoded
 
-**Status on the branch**: ✅ Remedied. **On main**: open.
+**Status on the branch**: ✅ Remedied. **On main**: ⬜ Open: in-scope defect for the brace form `mkdir CLAUDE/Plan/0{0999,1000}-x` (Plan 00483 triage, see TRIAGE-carried-c.md); ✅ Dismissed (threat model, limbs 1 and 2) for the `$'...'`, `$"..."` and `$m` forms
 
 **Found by the p422 D-RULE review 5** (same report, finding SH-B). Main and
 the round-5 branch both allow `$m CLAUDE/Plan/$'00999-x'`, `$"…"` and
@@ -1346,7 +1398,7 @@ brace between the digit and the hyphen, and any `$'`. Tests:
 
 ### N187 — An expanded command word inside a string run by `eval` or `bash -c` is not read as a command
 
-**Status on the branch**: ✅ Remedied. **On main**: open.
+**Status on the branch**: ✅ Remedied. **On main**: ✅ Dismissed (threat model, limb 1): `eval "$m CLAUDE/Plan/00999-x"`, `bash -c "$m ..."`: command word from a variable inside a string
 
 **Found by the p422 D-RULE review 5** (review of `5d741fde4..637e08e53`,
 report
@@ -1375,7 +1427,7 @@ nested `eval`s hid the command word again. Tests:
 
 ### N188 — After an expanded command word, a folder name under the plan dir that the shell expands is not judged
 
-**Status on the branch**: ✅ Remedied. **On main**: open.
+**Status on the branch**: ✅ Remedied. **On main**: ✅ Dismissed (threat model, limb 1): `$m CLAUDE/Plan/$N`: command word and folder name both from variables
 
 **Found by the p422 D-RULE review 5** (review of `5d741fde4..637e08e53`,
 report
@@ -1404,7 +1456,7 @@ shapes, all RED on 637e08e53 and on b2639c600) and
 
 ### N198 — The shared wrapper table lacks `chronic`, `coproc`, `strace`, `sg` and `env -S`
 
-**Status on the branch**: ✅ Remedied. **On main**: open.
+**Status on the branch**: ✅ Remedied. **On main**: ✅ Dismissed (threat model, limb 1): `chronic $m ...`, `coproc $m ...`, `strace -f $m ...`, `env -S '$m ...'`: variable command word
 
 **Found by the p422 D-RULE review 6** (same report, finding SH-1). Main and
 the branch both allow `chronic $m …`, `coproc $m …`, `strace -f $m …`,
@@ -1422,7 +1474,7 @@ getopt reads it (`env -iS`, `sudo -Eu root`, `strace -fo log`). Tests: the
 
 ### N199 — The plan-folder guard misses `<pd>//$N`, `<pd>$N`, `cd <pd> && $m $N` and command words built other ways
 
-**Status on the branch**: ✅ Remedied. **On main**: open.
+**Status on the branch**: ✅ Remedied. **On main**: ✅ Dismissed (threat model, limbs 1 and 2): `$m CLAUDE/Plan//$N`, `$m CLAUDE/Plan$N`, `/bin/mkdi?`, `{mkdir,<pd>/00999-x}`, `mk$d`; the literal `cd ... && mkdir ...` part is filed under N141
 
 **Found by the p422 D-RULE review 6** (same report, finding SH-2). Main and
 the branch both allow `$m CLAUDE/Plan//$N`, `$m CLAUDE/Plan/./$N`,
@@ -1456,7 +1508,7 @@ three new linear-cost shapes.
 
 ### N200 — An apostrophe in a comment or heredoc body hides a later quoted git subcommand from `git_stash`/`destructive_git`
 
-**Status on the branch**: ✅ Remedied. **On main**: open.
+**Status on the branch**: ✅ Remedied. **On main**: ⬜ Open: in-scope defect for `git stash list; git stash` (a recovery word lets a real stash through; Plan 00483 triage, see TRIAGE-carried-c.md); ✅ Dismissed (threat model, limb 2) for the apostrophe-comment plus `git 'stash'` and `git "reset" --hard` shapes
 
 **Found by the p422 D-RULE review 6** (review of `637e08e53..cc523578d`,
 report
@@ -1486,15 +1538,15 @@ for every caller, over a corpus of comments, heredocs and ANSI-C spans),
 
 ### N239 — An ANSI-C quote inside a string another shell runs (`bash -c "git \$'stash'"`) is decoded by no reading of either git guard
 
-**Status on the branch**: ✅ Remedied. **On main**: open.
+**Status on the branch**: ✅ Remedied. **On main**: ✅ Dismissed (threat model, limb 2): `bash -c "git \$'stash'"`: ANSI-C quoting of a git subcommand, no working purpose except defeating a parser
 
 ### N240 — `bash_file_writes` does not report the typescript or the `-I`/`-O`/`-B`/`-T` log files `script` writes
 
-**Status on the branch**: ✅ Remedied. **On main**: open.
+**Status on the branch**: ✅ Remedied. **On main**: ⬜ Open: needs owner (`script -q /tmp/typescript.log -c ls` writes an out-of-root log; owner to say whether that outcome needs a guard)
 
 ### N241 — The git guards deny a message value inside a string another shell runs, and `git_stash` denies git messages and data heredocs mentioning a stash
 
-**Status on the branch**: ✅ Remedied. **On main**: open.
+**Status on the branch**: ✅ Remedied. **On main**: ⬜ Open: in-scope defect (Plan 00483 triage, see TRIAGE-carried-c.md): false positives on text that only mentions `git stash` or `git reset --hard`, and a message ending in a backslash hides a real `git reset --hard`
 
 **Found live on main and by p422-fix-8f.** `destructive_git` denied a
 `printf … >> notes.md` whose argument quoted a commit message and named
@@ -1529,7 +1581,7 @@ decision for the coordinator.
 
 ### N41 — The fixed chain still spends several linear seconds on a heredoc-opener-heavy command, spread widely
 
-**Status on the branch**: ⬜ Open. **On main**: open.
+**Status on the branch**: ⬜ Open. **On main**: ✅ Fixed on main (Plan 00483 triage)
 
 **Found while remedying N38** (below), profiling the FIXED chain on the same
 94 KiB never-closing `cat <<'E'` fixture. With the quadratic heredoc scan

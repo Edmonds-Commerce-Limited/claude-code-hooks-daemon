@@ -54,8 +54,12 @@ it is also a small instance of this very class seen from the other side.
 
 ## Instances
 
-**20 rows: 14 `UNCOVERED-open`, 3 `UNCOVERED-accepted`, 3 controls.** The full
-table is the corpus file. The ones worth naming here:
+**29 rows: 8 `COVERED` (5 closed gaps, 3 controls), 9 `UNCOVERED-open`, 12
+`UNCOVERED-accepted`.** Nine of the accepted rows are command-shaped entries the
+Plan 00483 triage dismissed under the threat model (a command word or folder
+name built by expansion, a self-written consumer script, ANSI-C quoting of a
+subcommand); each names its limb and ledger entry. The full table is the
+corpus file. The ones worth naming here:
 
 - **`rm -rf`** — the worst single row, for the documentation reason above.
 - **`git reflog expire --expire=now --all`** + **`git gc --prune=now`** —
@@ -72,8 +76,8 @@ table is the corpus file. The ones worth naming here:
 **Nothing is fixed.** Every fix is owner-gated per row, because every new deny
 is a new refusal surface in every installing project.
 
-Three rows are `UNCOVERED-accepted` rather than open, and the distinction is
-the point: `git rebase` and a broad `npm install` deny are reported as too
+Three of the accepted rows are accepted as too noisy rather than as outside the
+threat model, and the distinction is the point: `git rebase` and a broad `npm install` deny are reported as too
 noisy to ship — *"it would be suppressed within a release"* — and `printenv`
 misfires. A rule that gets switched off protects nothing. Recording a decision
 not to act keeps it visible instead of leaving it looking like an oversight.
