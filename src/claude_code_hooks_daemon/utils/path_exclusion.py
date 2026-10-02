@@ -24,7 +24,8 @@ may pass either an absolute or a relative ``file_path``.
 from __future__ import annotations
 
 import os
-from collections.abc import Iterable, Sequence
+import re
+from collections.abc import Callable, Iterable, Sequence
 from pathlib import Path
 from typing import NamedTuple, Protocol
 
@@ -296,6 +297,49 @@ def _literals_present(tokens: list[_Token], text: str) -> bool:
     the dominant cost of a sweep over ~18,000 repository paths (N289).
     """
     return all(token.literal in text for token in tokens if token.kind == "LITSTR")
+
+
+def literal_screen(patterns: Sequence[str]) -> Callable[[str], bool] | None:
+    """A cheap test that rules out EVERY pattern for a path at once, or ``None``.
+
+    The returned callable answers False only when no pattern in ``patterns``
+    can match the text, because each pattern needs all of its literal runs
+    present (see :func:`_literals_present`). A True answer promises nothing:
+    the real matcher still decides. ``None`` means the screen cannot be built
+    soundly: a pattern with no literal run (``*``, ``**``) can match a text
+    containing none of them, and :data:`VENDOR_DIRS_TOKEN` is a predicate, not
+    a glob.
+
+    For a sweep that asks this of every file in a repository, almost every
+    path is ruled out here, and the per-pattern matcher is never entered
+    (N289b).
+    """
+    requirements: list[tuple[str, ...]] = []
+    for pattern in patterns:
+        if not pattern:
+            continue
+        if pattern == VENDOR_DIRS_TOKEN:
+            return None
+        literals = tuple(t.literal for t in _tokens_for(pattern) if t.kind == "LITSTR")
+        if not literals:
+            return None
+        requirements.append(literals)
+
+    # One regex pass over the text finds whether ANY pattern's longest literal
+    # is present -- necessary for that pattern, so a miss rules out them all.
+    # Only a text that passes it pays for the full all-literals test.
+    anchors = sorted({max(needed, key=len) for needed in requirements}, key=len, reverse=True)
+    any_anchor = re.compile("|".join(re.escape(anchor) for anchor in anchors)) if anchors else None
+
+    def screen(text: str) -> bool:
+        if "\\" in text:
+            # The matcher compares the path with its backslashes as slashes.
+            text = text.replace("\\", "/")
+        if any_anchor is None or any_anchor.search(text) is None:
+            return False
+        return any(all(literal in text for literal in needed) for needed in requirements)
+
+    return screen
 
 
 def _glob_fullmatch(

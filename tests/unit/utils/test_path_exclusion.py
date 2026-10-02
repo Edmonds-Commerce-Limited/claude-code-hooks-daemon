@@ -13,8 +13,9 @@ they share, so grep for its callers rather than trusting a number in prose.
 from __future__ import annotations
 
 import dataclasses
+import itertools
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 from unittest.mock import patch
 
 import pytest
@@ -431,6 +432,52 @@ class TestLiteralPrefilter:
                 with patch.object(path_exclusion, "_literals_present", return_value=True):
                     unfiltered = path_exclusion._glob_fullmatch(pattern, text)
                 assert path_exclusion._glob_fullmatch(pattern, text) is unfiltered
+
+
+class TestLiteralScreen:
+    """N289b: one cheap test per path that rules out EVERY pattern at once."""
+
+    PATTERNS: ClassVar[list[str]] = [
+        "*.tok*",
+        ".keep*",
+        "exact",
+        "**/node_modules/**",
+        "/src/*.py",
+        "a?c",
+    ]
+
+    def test_a_path_with_none_of_the_literals_is_screened_out(self) -> None:
+        screen = path_exclusion.literal_screen(self.PATTERNS)
+        assert screen is not None
+        assert screen("plain/dir/file.txt") is False
+
+    def test_a_path_with_a_pattern_literals_passes(self) -> None:
+        screen = path_exclusion.literal_screen(self.PATTERNS)
+        assert screen is not None
+        assert screen("dir/x.tok") is True
+        assert screen("dir/node_modules/q") is True
+
+    def test_a_pattern_with_no_literal_disables_the_screen(self) -> None:
+        assert path_exclusion.literal_screen(["*", "exact"]) is None
+        assert path_exclusion.literal_screen(["**"]) is None
+
+    def test_a_vendor_token_disables_the_screen(self) -> None:
+        assert path_exclusion.literal_screen([VENDOR_DIRS_TOKEN, "exact"]) is None
+
+    def test_no_patterns_screens_everything_out(self) -> None:
+        screen = path_exclusion.literal_screen([])
+        assert screen is not None
+        assert screen("anything") is False
+
+    def test_a_screened_out_path_never_matches_any_pattern(self) -> None:
+        screen = path_exclusion.literal_screen(self.PATTERNS)
+        assert screen is not None
+        alphabet = ["a", "b", "c", ".", "/", "t", "o", "k", "x", "e", "src", ".keep", "py"]
+        for length in range(0, 5):
+            for parts in itertools.product(alphabet, repeat=length):
+                text = "".join(parts)
+                if not screen(text):
+                    assert not path_matches_globs(text, self.PATTERNS), text
 
 
 class TestMultiplePatterns:

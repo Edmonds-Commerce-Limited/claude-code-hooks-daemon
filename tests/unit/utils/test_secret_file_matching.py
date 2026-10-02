@@ -100,6 +100,83 @@ class TestResolveProtectedPatterns:
         assert list(patterns).count("*.secret*") == 1
 
 
+class TestProtectedAmong:
+    """N289b: ``protected_among`` answers ``path_is_protected`` for many paths,
+    resolving each DIRECTORY once instead of each file's whole path. The answer
+    must equal the per-path call on every shape."""
+
+    PATTERNS = (*sfm.DEFAULT_PROTECTED_PATTERNS, "vault/**")
+
+    @pytest.fixture
+    def tree(self, tmp_path: Path) -> list[str]:
+        (tmp_path / "vault").mkdir()
+        (tmp_path / "vault" / "inner.txt").write_text("x")
+        (tmp_path / "plain").mkdir()
+        (tmp_path / "plain" / "a.txt").write_text("x")
+        (tmp_path / "plain" / "b.secret.yaml").write_text("x")
+        (tmp_path / "plain" / "link_to_secret").symlink_to(tmp_path / "plain" / "b.secret.yaml")
+        (tmp_path / "plain" / "link_to_plain").symlink_to(tmp_path / "plain" / "a.txt")
+        (tmp_path / "plain" / "dangling").symlink_to(tmp_path / "nowhere")
+        (tmp_path / "vault" / "nested" / "deep").mkdir(parents=True)
+        (tmp_path / "vault" / "nested" / "deep" / "f.txt").write_text("x")
+        (tmp_path / "plain" / "nested" / "deep").mkdir(parents=True)
+        (tmp_path / "plain" / "nested" / "deep" / "f.txt").write_text("x")
+        (tmp_path / "dirlink").symlink_to(tmp_path / "vault")
+        (tmp_path / "dirlink_plain").symlink_to(tmp_path / "plain")
+        (tmp_path / "loop_a").symlink_to(tmp_path / "loop_b")
+        (tmp_path / "loop_b").symlink_to(tmp_path / "loop_a")
+        names = [
+            "vault/inner.txt",
+            "plain/a.txt",
+            "plain/b.secret.yaml",
+            "plain/link_to_secret",
+            "plain/link_to_plain",
+            "plain/dangling",
+            "plain/missing.txt",
+            "dirlink/inner.txt",
+            "dirlink_plain/a.txt",
+            "dirlink_plain/link_to_secret",
+            "dirlink/nested/deep/f.txt",
+            "dirlink_plain/nested/deep/f.txt",
+            "plain/nested/deep/f.txt",
+            "vault/nested/deep/f.txt",
+            "loop_a/child",
+            "nodir/at/all.txt",
+        ]
+        return [str(tmp_path / name) for name in names]
+
+    def test_equals_the_per_path_answer_on_every_shape(self, tree: list[str]) -> None:
+        expected = [p for p in tree if sfm.path_is_protected(p, self.PATTERNS)]
+        assert sfm.protected_among(tree, self.PATTERNS) == expected
+        assert expected, "the fixture must contain protected paths"
+        assert len(expected) < len(tree), "and unprotected ones"
+
+    def test_a_link_to_a_protected_file_is_protected(self, tree: list[str]) -> None:
+        assert any(
+            p.endswith("plain/link_to_secret") for p in sfm.protected_among(tree, self.PATTERNS)
+        )
+
+    def test_no_patterns_protects_nothing(self, tree: list[str]) -> None:
+        assert sfm.protected_among(tree, ()) == []
+
+    def test_a_nul_byte_path_is_matched_as_spelled(self, tmp_path: Path) -> None:
+        paths = [f"{tmp_path}/a\0.secret", f"{tmp_path}/b\0.txt"]
+        assert sfm.protected_among(paths, self.PATTERNS) == [
+            p for p in paths if sfm.path_is_protected(p, self.PATTERNS)
+        ]
+
+    def test_each_directory_is_resolved_once(self, tmp_path: Path) -> None:
+        directory = tmp_path / "many"
+        directory.mkdir()
+        paths = []
+        for index in range(40):
+            (directory / f"f{index}.txt").write_text("x")
+            paths.append(str(directory / f"f{index}.txt"))
+        with patch("os.path.realpath", wraps=os.path.realpath) as walk:
+            sfm.protected_among(paths, self.PATTERNS)
+        assert walk.call_count <= 2
+
+
 class TestPathIsProtected:
     def test_block_words_secret_matches_default(self) -> None:
         assert sfm.path_is_protected(

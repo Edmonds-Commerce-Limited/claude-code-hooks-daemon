@@ -12,11 +12,13 @@ will when the file is added, which a hand-rolled gitignore matcher would not.
 """
 
 import re
-from dataclasses import dataclass
+import threading
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Final
 
 from claude_code_hooks_daemon.utils.git_repo import run_git
+from claude_code_hooks_daemon.utils.secret_file_matching import protected_among
 
 
 @dataclass(frozen=True)
@@ -33,10 +35,31 @@ class GitFileStates:
     ignored_untracked: frozenset[str]
     ignored_tracked: frozenset[str]
     all_paths: frozenset[str]
+    # Verdicts already reached, keyed by project root and pattern set (N289b).
+    _protected: dict[tuple[str, tuple[str, ...]], list[str]] = field(
+        default_factory=dict, init=False, repr=False, compare=False
+    )
 
     def is_ignored(self, relpath: str) -> bool:
         """True when an ignore rule matches ``relpath``, tracked or not."""
         return relpath in self.ignored_untracked or relpath in self.ignored_tracked
+
+    def protected_relpaths(self, project_root: Path, patterns: tuple[str, ...]) -> list[str]:
+        """The sorted relative paths here that a protected glob covers.
+
+        Judging every path is the expensive part of a sweep, and the two
+        SessionStart sweeps each need the same answer for the same scan, so the
+        verdict is kept on the scan and computed once per pattern set.
+        """
+        key = (str(project_root), patterns)
+        cached = self._protected.get(key)
+        if cached is None:
+            relpaths = sorted(self.all_paths)
+            absolutes = [str(project_root / relpath) for relpath in relpaths]
+            hits = set(protected_among(absolutes, patterns))
+            cached = [r for r, a in zip(relpaths, absolutes, strict=True) if a in hits]
+            self._protected[key] = cached
+        return list(cached)
 
 
 def scan_git_file_states(project_root: Path) -> GitFileStates | None:
@@ -54,6 +77,7 @@ def scan_git_file_states(project_root: Path) -> GitFileStates | None:
     ignored_untracked = _git_paths(project_root, "--others", "--ignored", "--exclude-standard")
     if ignored_untracked is None:
         return None
+    ignored_untracked = _without_foreign_trees(ignored_untracked)
     ignored_tracked = _git_paths(project_root, "--cached", "--ignored", "--exclude-standard")
     if ignored_tracked is None:
         return None
@@ -63,6 +87,77 @@ def scan_git_file_states(project_root: Path) -> GitFileStates | None:
         ignored_tracked=ignored_tracked,
         all_paths=tracked | visible | ignored_untracked,
     )
+
+
+_event_scan: tuple[object, str, GitFileStates | None] | None = None
+_event_scan_lock = threading.Lock()
+
+
+def scan_git_file_states_for_event(project_root: Path, event: object) -> GitFileStates | None:
+    """:func:`scan_git_file_states`, shared by every handler of ONE event dispatch.
+
+    The chain hands the same ``event`` object to each handler it runs, so two
+    handlers asking with that object get one scan between them instead of
+    scanning the repository twice (N289b). A different ``event`` -- the next
+    dispatch -- or another ``project_root`` always rescans, so a result is never
+    older than the dispatch that asked for it. Only the most recent scan is
+    kept.
+    """
+    global _event_scan
+    key = str(project_root)
+    with _event_scan_lock:
+        held = _event_scan
+        if held is not None and held[0] is event and held[1] == key:
+            return held[2]
+    scan = scan_git_file_states(project_root)
+    with _event_scan_lock:
+        _event_scan = (event, key, scan)
+    return scan
+
+
+#: A file whose presence marks its directory as a virtualenv.
+_VENV_MARKER_FILE: Final[str] = "pyvenv.cfg"
+#: A path component that is a package manager's install tree.
+_PACKAGE_TREE_COMPONENT: Final[str] = "node_modules"
+
+
+def _without_foreign_trees(ignored_untracked: frozenset[str]) -> frozenset[str]:
+    """``ignored_untracked`` minus the files of trees that are not this project's.
+
+    A gitignored virtualenv (a directory holding ``pyvenv.cfg``), a package
+    manager's ``node_modules`` are other people's files, and in a working copy
+    that keeps several of them they outnumber the project's own by orders of
+    magnitude -- judging each one is what made the SessionStart sweeps overrun
+    their budget (N289b). Recognised by structure, so a client project's own
+    layout is covered. A nested git checkout needs no rule here: git itself
+    reports it as ONE directory entry and never lists its files. Only UNTRACKED
+    ignored files are dropped: a file git tracks is the project's own whatever
+    directory it sits in, and an ignored directory with none of these markers is
+    still judged in full.
+    """
+    foreign_roots: set[str] = set()
+    for path in ignored_untracked:
+        directory, _, name = path.rpartition("/")
+        if name == _VENV_MARKER_FILE and directory:
+            foreign_roots.add(directory)
+        parts = path.split("/")
+        for depth, component in enumerate(parts[:-1]):
+            if component == _PACKAGE_TREE_COMPONENT:
+                foreign_roots.add("/".join(parts[: depth + 1]))
+                break
+    if not foreign_roots:
+        return ignored_untracked
+    return frozenset(path for path in ignored_untracked if not _under_any(path, foreign_roots))
+
+
+def _under_any(path: str, roots: set[str]) -> bool:
+    """Whether ``path`` is one of ``roots`` or inside one."""
+    candidate = path
+    while candidate:
+        if candidate in roots:
+            return True
+        candidate = candidate.rpartition("/")[0]
+    return False
 
 
 #: Characters gitignore reads as pattern syntax inside a name.
