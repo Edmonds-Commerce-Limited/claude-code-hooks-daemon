@@ -19,6 +19,24 @@ transcript is tens of megabytes, the status line re-renders constantly, and
 every figure wanted was already present and pre-computed. Reading the payload
 is both cheaper and closer to the source of truth.
 
+**Compact chips, styled like the usage segment.** After a `⚡` icon the segment
+is up to three background-coloured chips joined by an uncoloured `|`: `main`,
+then `⑂` (sub-agents) and `Σ` (the whole session) once a sub-agent has run. A
+green chip is its label alone; a chip that is not green adds the figures worth
+reading (`main 82% 1h`, `⑂ 62% 5m`, `Σ 70%`). The colours are the
+``model_context`` chip bands.
+
+**The direction is the opposite of the usage segment.** Usage gets worse as the
+percentage rises; a hit ratio gets worse as it FALLS. So a ratio at or above
+`healthy_pct` is green, at or above `warn_pct` yellow, at or above
+`critical_pct` orange, and below `critical_pct` red.
+
+**State beats ratio, and the worst of the two wins.** The main chip also
+reflects the cache's state, which a good ratio can hide: COLD is a red
+`❄ <rebuild tokens>` chip; EXPIRING is at least yellow with a `⏳` countdown;
+a recent miss is at least yellow with `↻ <cause>`. A state never makes a chip
+greener than its ratio.
+
 **Two deliberate choices about what NOT to show.**
 
 Absence renders nothing rather than zero. A Claude Code that does not send
@@ -35,8 +53,9 @@ peak — so the state alone does not tell an operator whether to care.
 `recache_tokens_if_cold` is that magnitude, already computed.
 """
 
+import math
 import time
-from typing import Any
+from typing import Any, Final
 
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, HookInputField, Priority
 from claude_code_hooks_daemon.core import AdvisoryResult
@@ -60,6 +79,33 @@ _TOKENS_PER_K = 1000
 
 #: Below this many seconds remaining, the countdown renders in seconds.
 _SECONDS_PER_MINUTE = 60
+
+_RESET: Final[str] = "\033[0m"
+# The same background chips model_context and usage_indicator use, indexed by severity.
+_GREEN: Final[str] = "\033[42m\033[30m"
+_YELLOW: Final[str] = "\033[43m\033[30m"
+_ORANGE: Final[str] = "\033[48;5;208m\033[30m"
+_RED: Final[str] = "\033[41m\033[97m"
+_SEVERITY_COLOURS: Final[tuple[str, ...]] = (_GREEN, _YELLOW, _ORANGE, _RED)
+_SEV_GREEN: Final[int] = 0
+_SEV_YELLOW: Final[int] = 1
+_SEV_ORANGE: Final[int] = 2
+_SEV_RED: Final[int] = 3
+
+_DEFAULT_HEALTHY_PCT: Final[int] = 90
+_DEFAULT_WARN_PCT: Final[int] = 75
+_DEFAULT_CRITICAL_PCT: Final[int] = 50
+
+_ICON: Final[str] = "⚡"
+_MAIN_LABEL: Final[str] = "main"
+_SUB_LABEL: Final[str] = "⑂"
+_TOTAL_LABEL: Final[str] = "Σ"
+_COLD_GLYPH: Final[str] = "❄"
+_EXPIRING_GLYPH: Final[str] = "⏳"
+_MISS_GLYPH: Final[str] = "↻"
+_SEPARATOR: Final[str] = "|"
+
+_PERCENT_PRECISION: Final[int] = 6
 
 
 def _as_ratio(raw: object) -> float | None:
@@ -92,6 +138,16 @@ def _compact_duration(seconds: int) -> str:
     if remaining >= _SECONDS_PER_MINUTE:
         return f"{remaining // _SECONDS_PER_MINUTE}m"
     return f"{remaining}s"
+
+
+def _percent(ratio: float) -> float:
+    """A 0-1 ratio as a percentage, with float noise (0.29 * 100) removed."""
+    return round(ratio * 100, _PERCENT_PRECISION)
+
+
+def _shown_percent(ratio: float) -> str:
+    """A ratio as `NN%`, rounded DOWN so 89.6% never reads as the 90% green line."""
+    return f"{math.floor(_percent(ratio))}%"
 
 
 def _sub_ttl(totals: dict[str, int]) -> str:
@@ -128,31 +184,8 @@ def _main_read_and_written(cache: object, hit_ratio: float | None) -> tuple[floa
     return (hit_ratio * written / (1.0 - hit_ratio), written)
 
 
-def _tier_warning(state: PromptCacheState) -> str:
-    """The COLD or EXPIRING marker, or empty when the cache is healthy.
-
-    COLD reports what the rebuild costs, not just that it is cold: the
-    seriousness of an invalidation scales with the prefix — measured in this
-    project, the same event cost 130k tokens early in a session and 509k at
-    its peak — so the state alone does not tell an operator whether to care.
-    The marker is emitted whether or not that magnitude is available, because
-    the warning matters more than the number.
-
-    EXPIRING reports the time left instead, because that is the band where
-    acting is still cheap and the only question is how long there is to act.
-    """
-    if state.tier is PromptCacheTier.COLD:
-        rebuild = _compact_tokens(state.rebuild_tokens)
-        return f"⚠COLD {rebuild}" if rebuild else "⚠COLD"
-    if state.tier is PromptCacheTier.EXPIRING:
-        if state.seconds_remaining is None:
-            return "⚠EXPIRING"
-        return f"⚠EXPIRING {_compact_duration(state.seconds_remaining)}"
-    return ""
-
-
 class PromptCacheIndicatorHandler(StatusLineHandlerBase):
-    """Render prompt-cache hit ratio, TTL, and a warning when the cache is cold."""
+    """Render prompt-cache health as `main`, `⑂` and `Σ` background-coloured chips."""
 
     def __init__(self) -> None:
         super().__init__(
@@ -161,13 +194,79 @@ class PromptCacheIndicatorHandler(StatusLineHandlerBase):
             terminal=False,
             tags=[HandlerTag.STATUSLINE, HandlerTag.DISPLAY, HandlerTag.NON_TERMINAL],
         )
+        # Overridable via handler options of the same names. A hit ratio below
+        # a threshold is WORSE, the opposite direction from usage_indicator.
+        self._healthy_pct: float = _DEFAULT_HEALTHY_PCT
+        self._warn_pct: float = _DEFAULT_WARN_PCT
+        self._critical_pct: float = _DEFAULT_CRITICAL_PCT
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """Always run; `handle` decides whether there is anything worth showing."""
         return True
 
+    def _ratio_severity(self, ratio: float | None) -> int:
+        """Green at or above `healthy_pct`, then yellow, orange, red as it falls.
+
+        A missing ratio is green: absence is not evidence of a problem.
+        """
+        if ratio is None:
+            return _SEV_GREEN
+        pct = _percent(ratio)
+        if pct >= self._healthy_pct:
+            return _SEV_GREEN
+        if pct >= self._warn_pct:
+            return _SEV_YELLOW
+        if pct >= self._critical_pct:
+            return _SEV_ORANGE
+        return _SEV_RED
+
+    @staticmethod
+    def _chip(severity: int, text: str) -> str:
+        return f"{_SEVERITY_COLOURS[severity]}{text}{_RESET}"
+
+    def _ratio_chip(self, label: str, ratio: float, ttl: str) -> str:
+        """A sub or total chip: the label alone while green, else with ratio and TTL."""
+        severity = self._ratio_severity(ratio)
+        text = label
+        if severity != _SEV_GREEN:
+            text = " ".join(part for part in (label, _shown_percent(ratio), ttl) if part)
+        return self._chip(severity, text)
+
+    def _main_chip(self, state: PromptCacheState, ttl: object) -> str:
+        """The main chip: its ratio band, raised by COLD, EXPIRING or a recent miss.
+
+        COLD replaces the figures with what the rebuild costs and is always
+        red. The other states raise the chip to at least yellow and add their
+        own detail; they never make it greener than its ratio.
+        """
+        if state.tier is PromptCacheTier.COLD:
+            rebuild = _compact_tokens(state.rebuild_tokens)
+            return self._chip(_SEV_RED, f"{_COLD_GLYPH} {rebuild}" if rebuild else _COLD_GLYPH)
+
+        severity = self._ratio_severity(state.hit_ratio)
+        details: list[str] = []
+        if state.tier is PromptCacheTier.EXPIRING:
+            severity = max(severity, _SEV_YELLOW)
+            if state.seconds_remaining is not None:
+                details.append(f"{_EXPIRING_GLYPH}{_compact_duration(state.seconds_remaining)}")
+        if state.recent_miss:
+            severity = max(severity, _SEV_YELLOW)
+            details.append(
+                f"{_MISS_GLYPH} {state.recent_miss_cause}"
+                if state.recent_miss_cause
+                else _MISS_GLYPH
+            )
+
+        if severity == _SEV_GREEN:
+            return self._chip(severity, _MAIN_LABEL)
+        if not details and isinstance(ttl, str) and ttl:
+            details.append(ttl)
+        ratio_text = _shown_percent(state.hit_ratio) if state.hit_ratio is not None else ""
+        text = " ".join(part for part in (_MAIN_LABEL, ratio_text, *details) if part)
+        return self._chip(severity, text)
+
     def handle(self, hook_input: dict[str, Any]) -> AdvisoryResult:
-        """Render the cache segment, or nothing when the payload cannot support it."""
+        """Render the cache chips, or nothing when the payload cannot support it."""
         cache = hook_input.get(_PROMPT_CACHE_KEY)
         state = classify_prompt_cache(cache, now=time.time())
 
@@ -177,39 +276,15 @@ class PromptCacheIndicatorHandler(StatusLineHandlerBase):
         if state.tier is PromptCacheTier.UNKNOWN:
             return AdvisoryResult(context=[])
 
-        parts: list[str] = []
-
-        if state.hit_ratio is not None:
-            parts.append(f"{round(state.hit_ratio * 100)}%")
-
         ttl = cache.get("ttl") if isinstance(cache, dict) else None
-        if isinstance(ttl, str) and ttl:
-            parts.append(ttl)
+        chips = [self._main_chip(state, ttl)]
+        chips.extend(self._sub_agent_chips(hook_input, cache, state.hit_ratio))
+        return AdvisoryResult(context=[f"| {_ICON} {_SEPARATOR.join(chips)}"])
 
-        warning = _tier_warning(state)
-        if warning:
-            parts.append(warning)
-
-        # Shown even while WARM: the cache being warm NOW says nothing about
-        # the rebuild having just been paid for, and that rebuild is the
-        # expensive event worth seeing. This is the visual invalidation warning.
-        if state.recent_miss:
-            flag = "⚠INVALIDATED"
-            if state.recent_miss_cause:
-                flag = f"{flag} {state.recent_miss_cause}"
-            parts.append(flag)
-
-        parts.extend(self._sub_agent_parts(hook_input, cache, state.hit_ratio))
-
-        if not parts:
-            return AdvisoryResult(context=[])
-
-        return AdvisoryResult(context=[f"| ⚡ {' '.join(parts)}"])
-
-    def _sub_agent_parts(
+    def _sub_agent_chips(
         self, hook_input: dict[str, Any], cache: object, main_ratio: float | None
     ) -> list[str]:
-        """`sub NN% <ttl>` and `total NN%`, or nothing when no agent has run.
+        """The `⑂` and `Σ` chips, or nothing when no agent has run.
 
         `prompt_cache` describes the MAIN thread only, and sub-agents get no
         status line of their own — so without this the bar would report the
@@ -221,10 +296,10 @@ class PromptCacheIndicatorHandler(StatusLineHandlerBase):
         one of them.
 
         Nothing is rendered when no agent has run. A session that spawned none
-        has no sub-agent ratio, and `sub 0%` would read as a catastrophe rather
+        has no sub-agent ratio, and `0%` would read as a catastrophe rather
         than an absence. Its total would just repeat the main figure.
 
-        Fails silent: the MAIN figure is the load-bearing one and must survive
+        Fails silent: the MAIN chip is the load-bearing one and must survive
         anything the sub-agent sidecar does.
         """
         try:
@@ -241,42 +316,42 @@ class PromptCacheIndicatorHandler(StatusLineHandlerBase):
         if sub_read + sub_written <= 0:
             return []
 
-        sub = f"sub {round(sub_read / (sub_read + sub_written) * 100)}%"
-        sub_ttl = _sub_ttl(totals)
-        if sub_ttl:
-            sub = f"{sub} {sub_ttl}"
-        parts = [sub]
+        chips = [
+            self._ratio_chip(_SUB_LABEL, sub_read / (sub_read + sub_written), _sub_ttl(totals))
+        ]
 
         main_tokens = _main_read_and_written(cache, main_ratio)
         if main_tokens is not None:
             read = main_tokens[0] + sub_read
             written = main_tokens[1] + sub_written
-            parts.append(f"total {round(read / (read + written) * 100)}%")
-        return parts
+            chips.append(self._ratio_chip(_TOTAL_LABEL, read / (read + written), ""))
+        return chips
 
     def explain_segment(self) -> SegmentExplanation:
         """Describe this segment (read-only, no I/O)."""
         return SegmentExplanation(
-            glyphs=("⚡",),
+            glyphs=(_ICON, _SUB_LABEL, _TOTAL_LABEL, _COLD_GLYPH, _EXPIRING_GLYPH, _MISS_GLYPH),
             name="Prompt Cache",
             what_it_is=(
-                "The session's prompt-cache hit ratio and the TTL in force, read from the "
+                "How well the session reuses its cached prompt prefix, read from the "
                 "`prompt_cache` object Claude Code ships on every status-line render."
             ),
             how_to_read=(
-                "`⚡ 99% 1h` is a healthy session reusing its cached prefix at about a tenth "
-                "of the input price. `⚠COLD` means the prefix is gone, and the token figure "
-                "beside it is what the next request will pay to rebuild it. `⚠EXPIRING 4m` "
-                "means it is still alive but inside the tail of its TTL — the band where "
-                "acting is still cheap. `⚠INVALIDATED <cause>` means something rebuilt the "
-                "cache within the last few minutes, and names what Claude Code attributed it "
-                "to; it is shown even while the cache is warm again, because the rebuild has "
-                "already been paid for. `sub NN% 5m` is the sub-agent half, which has no status "
-                "line of its own, with the TTL its agents actually wrote under. `total NN%` "
-                "is the whole session weighted by tokens, not an average of the two figures. "
-                "Both appear only once a sub-agent has run. Nothing is shown when Claude Code does not report cache "
-                "state, or before any caching has been observed — no ratio is honest there, "
-                "and 0% would not be."
+                "`⚡ main|⑂|Σ` are the main thread, the sub-agents and the whole session, each "
+                "on a background coloured by its cache hit ratio. A HIGH ratio is good, the "
+                f"opposite of the usage segment: green at {self._healthy_pct:g}% or more, "
+                f"yellow from {self._warn_pct:g}%, orange from {self._critical_pct:g}%, red "
+                f"below {self._critical_pct:g}%. A green chip shows only its label; any other "
+                "adds its figures, e.g. `main 82% 1h`, `⑂ 62% 5m`, `Σ 70%` (the TTL is the one "
+                "in force; `Σ` is weighted by tokens, not an average). `⑂` and `Σ` appear only "
+                "once a sub-agent has run. The main chip also reflects state, and the worst "
+                "of ratio and state wins: `❄ 509k` (red) means the prefix is gone and the "
+                "figure is what the next request pays to rebuild it; `⏳4m` means it is alive "
+                "but inside the tail of its TTL, the band where acting is still cheap; "
+                "`↻ <cause>` means something rebuilt the cache within the last few minutes "
+                "and names what Claude Code blamed. Nothing is shown when Claude Code does "
+                "not report cache state, or before any caching has been observed — no ratio "
+                "is honest there, and 0% would not be."
             ),
             current_value=(
                 "Rendered per session from the live payload; there is no value outside a "
@@ -293,11 +368,13 @@ class PromptCacheIndicatorHandler(StatusLineHandlerBase):
 
         return [
             AcceptanceTest(
-                title="prompt cache indicator renders cache state",
+                title="prompt cache indicator renders cache chips",
                 command='echo "test"',
                 description=(
-                    "Verify the status line carries a '⚡' segment showing the prompt-cache "
-                    "hit ratio and TTL. Absent when Claude Code reports no cache state."
+                    "Verify the status line carries a '⚡ main' chip segment, background "
+                    "coloured by the prompt-cache hit ratio (green label only when healthy), "
+                    "with '⑂' and 'Σ' chips once a sub-agent has run. Absent when Claude Code "
+                    "reports no cache state."
                 ),
                 expected_decision=Decision.ALLOW,
                 expected_message_patterns=[r".*"],

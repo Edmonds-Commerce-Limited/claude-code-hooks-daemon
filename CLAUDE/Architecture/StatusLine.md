@@ -180,7 +180,7 @@ When Claude Code forwards the real terminal width, the joined line wraps onto mu
 
 Claude Code sends a JSON payload on every status-line call. The daemon accepts unknown keys (`additionalProperties: True`), so any field is reachable from a handler even before the schema names it.
 
-**Currently READ by handlers**: `model.{id,display_name}`, `context_window.*`, `workspace.{current_dir,project_dir}`, `cost`, `effort.level`, `session_id`, `session_name`, `agent_type`, `rate_limits.{five_hour,seven_day}.{used_percentage,resets_at}` (see below), plus the forwarded `terminal_columns` / `terminal_lines` (see wrapping, above).
+**Currently READ by handlers**: `model.{id,display_name}`, `context_window.*`, `workspace.{current_dir,project_dir}`, `cost`, `effort.level`, `session_id`, `session_name`, `agent_type`, `rate_limits.{five_hour,seven_day}.{used_percentage,resets_at}` and `prompt_cache.*` (see below), plus the forwarded `terminal_columns` / `terminal_lines` (see wrapping, above).
 
 **Documented but currently UNUSED** (available opportunistically): top-level `version`, `cwd`, `output_style`, `exceeds_200k_tokens`, `prompt_id`, `rate_limits.spend_limit`, and nested `agent.*`, `pr.*`, `worktree.*`, `vim.*`.
 
@@ -194,6 +194,16 @@ Claude Code sends a JSON payload on every status-line call. The daemon accepts u
 - **Accessor for other handlers**: `from claude_code_hooks_daemon.core.data_layer import latest_usage`; `latest_usage(now=None) -> UsageSnapshot | None`, a frozen dataclass with `five_hour` / `seven_day` (`UsageWindow(used_percentage, resets_at, observed_at)` or `None`), `highest_used_percentage()` and `UsageWindow.seconds_until_reset(now)`.
 - **Segment**: `usage_indicator` (priority 16) renders `📈 5h|7d`: one background-coloured chip per window, using the `model_context` chip bands per window: green, yellow from `warn_pct` (60), orange from `high_pct` (80), red from `critical_pct` (90). A green window is its label alone; from `warn_pct` it adds its percentage and reset countdown (`📈 5h 67% 3h 20m|7d`). The `|` between chips has no background. Percentages round down. Hidden when there is no live window.
 - **Fixtures**: synthetic payloads in `tests/fixtures/status_usage/`, loaded by `tests/support/status_usage.py`. Whether a subagent (`agent`) payload carries `rate_limits` is not established; the snapshot reads it from any payload that does, and ignores one that does not.
+
+### `prompt_cache` is READ: the prompt-cache chips (Plan 00452)
+
+Claude Code ships a pre-computed `prompt_cache` object on every Status payload (`warm`, `caching_observed`, `ttl`, `expires_at`, `hit_ratio`, `cache_write_tokens`, `last_miss_at`, `last_miss_cause`, `recache_tokens_if_cold`). Nothing is parsed from a transcript. `prompt_cache_tiers.classify_prompt_cache` decides the state (UNKNOWN, WARM, EXPIRING, COLD, plus a recent-miss flag) and `prompt_cache_indicator` (priority 15) renders it after a `⚡` icon as background-coloured chips, in the style of the usage segment:
+
+- **Chips**: `main`, then `⑂` (sub-agents) and `Σ` (whole session, token-weighted rather than averaged), joined by an uncoloured `|`. `⑂` and `Σ` appear only once a sub-agent has run; the sub chip's TTL is the one the sub-agents actually wrote under (`5m`, `1h` or `5m+1h`). All healthy is `⚡ main|⑂|Σ`; a main-only session is `⚡ main`.
+- **Colour by hit ratio, per chip**: green at or above `healthy_pct` (90), yellow from `warn_pct` (75), orange from `critical_pct` (50), red below it. A hit ratio is worse as it FALLS, the opposite direction from the usage thresholds. Colours are the `model_context` chip bands.
+- **Detail only when not green**: `main 82% 1h`, `⑂ 62% 5m`, `Σ 70%`. Percentages round down, so 89.6% is never shown as the 90% green line.
+- **Main-chip state overrides** (the worst of ratio and state wins; a state never makes a chip greener than its ratio): COLD is a red `❄ 509k` (rebuild tokens, or a bare `❄` when unknown); EXPIRING is at least yellow with `⏳4m` (`main 99% ⏳4m`); a recent miss is at least yellow with `↻ <cause>` (`main 99% ↻ messages_rewritten`, the cause omitted when absent).
+- **Absence**: nothing is rendered while the state is UNKNOWN (no `prompt_cache`, or no caching observed yet), never a `0%`. A failing sub-agent sidecar read drops only the `⑂` and `Σ` chips.
 
 > `COLUMNS` / `LINES` are NOT in this JSON — they are environment variables the `init.sh` transport forwards explicitly as `terminal_columns` / `terminal_lines`.
 

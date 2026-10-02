@@ -1251,9 +1251,14 @@ handlers:
       enabled: true
       priority: 14
 
-    prompt_cache_indicator:   # Prompt-cache hit ratio, TTL, and a cold-cache warning
+    prompt_cache_indicator:   # Prompt-cache chips: ⚡ main|⑂|Σ, coloured by hit ratio (Plan 00452)
+      # A HIGH ratio is good, the opposite direction from usage_indicator.
       enabled: true
       priority: 15
+      options:
+        healthy_pct: 90                # green (label only) at or above this hit ratio; below it a chip shows detail
+        warn_pct: 75                   # yellow from here
+        critical_pct: 50               # orange from here, red below it
 
     usage_indicator:   # Subscription usage: 📈 5h|7d chips, detail from warn_pct (Plan 00479)
       # Hidden when Claude Code reports no usage data (API-key sessions, before the first response).
