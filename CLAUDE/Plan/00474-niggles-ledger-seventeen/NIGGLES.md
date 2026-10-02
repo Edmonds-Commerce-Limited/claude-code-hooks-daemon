@@ -1414,7 +1414,7 @@ chain with `&&` or add `set -euo pipefail`, so the rule's own advice leads into 
 message itself suggests `OUT=…; … "$OUT"`. In scope: a literal assignment, visible at call time,
 written the way the strict-mode guidance asks.
 
-**Status**: ✅ Fixed on worktree-n320-and-assignment. `known_variables` now reads the literal assignments that lead an `&&` chain as known (`||` and an assignment after a command in the chain stay unknown), so `D=untracked/scratch/q && cmd > $D/a` allows and `D=/tmp && echo x > $D/a` still denies; `cd /repo && D=… && cmd` stays unresolved.
+**Status**: ✅ Fixed (merge of worktree-n320-and-assignment, verified on main with the probe). `known_variables` now reads the literal assignments that lead an `&&` chain as known (`||` and an assignment after a command in the chain stay unknown), so `D=untracked/scratch/q && cmd > $D/a` allows and `D=/tmp && echo x > $D/a` still denies; `cd /repo && D=… && cmd` stays unresolved. That is deliberate: after a `cd`, the guard cannot place a relative path, so it fails closed.
 
 ### N319 — a stale local relay build fails 29 relay tests instead of being rebuilt or skipped
 
