@@ -39,7 +39,7 @@ Full write-ups are in [NIGGLES.md](NIGGLES.md). One line each here:
 | #          | Verdict                                                                                                          | Origin              | Status                  |
 | ---------- | ---------------------------------------------------------------------------------------------------------------- | ------------------- | ----------------------- |
 | N296       | `audit_error_hiding.py` sees log-and-continue only as a direct `logger.<level>()`; a helper call evades it       | N294 review         | ⬜ Open                 |
-| N295       | The prompt-cache chip parses every sub-agent sidecar (3,369 files) on every render: 84–427 ms                    | Coordinator         | ✅ Fixed (merged)       |
+| N295       | The prompt-cache chip parses every sub-agent sidecar (3,369 files) on every render: 84–427 ms                    | Coordinator         | ✅ Fixed (b44e395a5)    |
 | N294       | A status-line client that hangs up still logs an ERROR: `writer.wait_closed()` raises in `finally`               | Coordinator         | ✅ Fixed (fc6782bf1)    |
 | N293       | #68: secret/quarantine guards fail closed on an absolute glob with 2+ wildcards under an existing literal prefix | GitHub #68          | ✅ Fixed (92b9b49e0)    |
 | N292       | `upgrade_approval_guard` denies `PYTHONPATH=… $V/python script.py`, which runs no upgrade                        | Coordinator         | ✅ Fixed (15fe504c1)    |

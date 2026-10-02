@@ -1162,7 +1162,8 @@ and `json.loads` every file in `untracked/cache-sidecar/<session>/`. This sessio
 session runs and is paid on every render, so a long-lived orchestrator session pays the most. The
 slowness also makes Claude Code abandon renders (N294).
 
-**Status**: ✅ Fixed (merge of `worktree-n295-cache-sidecar`). The reader now
+**Status**: ✅ Fixed (merge b44e395a5). Live after the restart: 17 renders took 0–3 ms each,
+against 84–427 ms before, and the logs held no unretrieved task exception (N294). The reader now
 remembers each session's totals in memory and checks one thing per render: the session directory's
 modification time. Every sub-agent write is a rename into that directory, which changes it, so an
 unchanged time means no agent was added, rewritten or removed. A time younger than two seconds is
