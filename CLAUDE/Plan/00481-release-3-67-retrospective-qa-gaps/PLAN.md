@@ -71,6 +71,10 @@ a deny on shapes this common, and closes those gaps with gates that would have c
     is planted.
   - Seed it from #68 and the N269, N291 and N293 cases, and from this repository's own denied-command
     history if one exists.
+  - Also seed it from #70: a quoted grep/rg pattern operand of the shape `'.*WORD'` (five variants
+    measured: denied at v3.67.0, allowed on main with no test pinning them), and the sibling shape
+    still denied on main, an escaped regex with a character class such as `'\.\*[A-Za-z]'`. The
+    class fix is guard false-positive work under Plan 00483 Task 3.2.
 - [ ] ⬜ **Task 2.2**: Make the corpus a QA gate that runs on every change to the guard or
   shell-expansion code.
   - Prove it fails on the parent of the #68 fix.
