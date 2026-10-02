@@ -23,6 +23,7 @@ from typing import TYPE_CHECKING, Final
 from claude_code_hooks_daemon.docs_qa.corpus import (
     DocCorpus,
     dir_matches_scope_exclude,
+    is_lintable_path,
     is_project_excluded,
     iter_markdown_paths,
 )
@@ -157,7 +158,7 @@ def staged_context(
             continue
         if not change.path.endswith(_MARKDOWN_SUFFIX):
             continue
-        if is_project_excluded(change.path, policy):
+        if not is_lintable_path(change.path, project_root / change.path, project_root, policy):
             continue
         # The content this commit records for the path: the working tree for a
         # named path, the index otherwise (`git show :path` would read the
