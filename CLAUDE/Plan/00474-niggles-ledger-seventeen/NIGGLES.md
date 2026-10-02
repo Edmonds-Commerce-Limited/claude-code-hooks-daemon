@@ -1213,6 +1213,13 @@ was flagged. In N294 the handling is correct: a peer that has hung up leaves not
 the pre-existing `_log_lost_peer` branch uses the same shape. But the detector cannot tell a
 deliberate, justified case from one that hides a real failure behind a helper.
 
+The gap is wider than helpers. The rule fires only when the body is exactly ONE statement, so
+a log call followed by `continue`, `return {}` or any other statement also passes. The N295
+agent reported reworking three flags this way. Its merged reader logs at DEBUG, then skips one
+unreadable file or returns empty totals. That is the documented fail-silent contract for
+status-line reads, so the handling is correct there. But the audit can neither confirm nor
+reject it.
+
 **Open question**: what should a justified log-and-continue look like? Two options: one
 recognised, reviewable marker, or a named helper that the audit allowlists. A helper that
 merely moves the call out of sight is neither. Changing the audit, or adding allowlist
