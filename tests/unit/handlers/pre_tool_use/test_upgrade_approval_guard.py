@@ -33,6 +33,7 @@ from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.core.data_layer import reset_data_layer
 from claude_code_hooks_daemon.core.rule import Rule
 from claude_code_hooks_daemon.handlers.pre_tool_use.upgrade_approval_guard import (
+    ENV_VAR_UPGRADE_HANDOFF,
     UpgradeApprovalGuardHandler,
 )
 
@@ -497,6 +498,86 @@ _LAYER2_RUN = (
     "bash /c/.claude/hooks-daemon/scripts/upgrade_version.sh /p /c/.claude/hooks-daemon v4.0.0"
 )
 _LAYER1_RUN = "bash scripts/upgrade.sh --project-root ."
+
+
+class TestVariableInterpreterRunningAKnownProgram:
+    """Ledger 00474 N285: an interpreter held in a variable is not itself an
+    upgrade. `PYTHONPATH=$PWD/src $PY/python -m pytest ...` ran a literal
+    module and was denied only because the HEAD word started with `$`. What it
+    runs is judged; only a program that stays unresolved keeps the deny."""
+
+    @pytest.fixture
+    def qa_script(self, tmp_path: Path) -> Path:
+        script = tmp_path / "scripts" / "qa" / "audit_error_hiding.py"
+        script.parent.mkdir(parents=True)
+        script.write_text("print('audit')\n")
+        return script
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "PY=/x/venv/bin; PYTHONPATH=$PWD/src $PY/python -m pytest -q tests/unit/foo.py",
+            "PYTHONPATH=$PWD/src $PY/python -m pytest -q tests/unit/foo.py",
+            "P=/x/venv/bin/python; PYTHONPATH=$PWD/src $P -m pytest -q tests/unit/foo.py",
+            'P=/x/python; PYTHONPATH="$PWD/src" "$P" -u -m pytest tests/unit/foo.py',
+        ],
+    )
+    def test_a_literal_module_is_allowed(
+        self, handler: UpgradeApprovalGuardHandler, command: str
+    ) -> None:
+        assert handler.matches(_bash(command)) is False, command
+
+    def test_a_literal_script_that_is_not_the_upgrade_is_allowed(
+        self, handler: UpgradeApprovalGuardHandler, qa_script: Path, tmp_path: Path
+    ) -> None:
+        command = (
+            "P=/x/venv/bin/python; cd /y; "
+            "PYTHONPATH=$PWD/src $P scripts/qa/audit_error_hiding.py --all"
+        )
+        assert handler.matches(_bash(command, cwd=str(tmp_path))) is False
+
+    def test_a_literal_script_that_carries_the_upgrade_is_denied(
+        self, handler: UpgradeApprovalGuardHandler, tmp_path: Path
+    ) -> None:
+        script = tmp_path / "copy.py"
+        script.write_text(f"# {ENV_VAR_UPGRADE_HANDOFF}\n")
+        command = f"PYTHONPATH=x $PY {script}"
+        assert handler.matches(_bash(command)) is True
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            # The program itself is unresolved.
+            'PYTHONPATH=x $P "$SCRIPT"',
+            "PYTHONPATH=x $P $SCRIPT",
+            'PYTHONPATH=x $PY -c "$CODE"',
+            "PYTHONPATH=x $PY -c 'import os'",
+            'PYTHONPATH=x $PY -m "$MOD"',
+            "PYTHONPATH=x $PY -m $MOD",
+            "PYTHONPATH=x $PY",
+            "PYTHONPATH=x $PY -",
+            'PYTHONPATH=x bash -c "$X"',
+            # A script that cannot be found cannot be judged.
+            "PYTHONPATH=x $PY scripts/qa/missing.py",
+            # The daemon's own CLI may carry the upgrade subcommand.
+            "PYTHONPATH=x $PY -m claude_code_hooks_daemon.daemon.cli upgrade",
+            "PYTHONPATH=x $PY/python -m claude_code_hooks_daemon.daemon.cli upgrade",
+            # The upgrade by name, whatever runs it.
+            "PYTHONPATH=x bash .claude/hooks-daemon/scripts/upgrade.sh --project-root .",
+            "PYTHONPATH=x $PY scripts/upgrade.sh --project-root .",
+            "PYTHONPATH=x $PY -m pytest scripts/upgrade_version.sh",
+            "PYTHONPATH=x $PY --uv /tmp/uv scripts/upgrade.sh",
+            f"{ENV_VAR_UPGRADE_HANDOFF}=/tmp/h $PY -m pytest tests/unit/foo.py",
+        ],
+    )
+    def test_an_unresolved_program_or_an_upgrade_stays_denied(
+        self, handler: UpgradeApprovalGuardHandler, command: str
+    ) -> None:
+        hook_input = _bash(command)
+        assert handler.matches(hook_input) is True, command
+        result = handler.handle(hook_input)
+        assert result.reason is not None
+        assert result.reason.startswith(f"BLOCKED [{ENV_RULE_ID}]")
 
 
 class TestEverySpellingOfSteeringIsSteering:

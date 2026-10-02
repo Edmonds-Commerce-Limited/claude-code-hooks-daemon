@@ -34,6 +34,9 @@ answering it:
    carries the handoff variable (every copy of Layer 1 and Layer 2 does), or
    a script that cannot be read (``bash "$tmp"``) run with the upgrade's
    arguments (``--project-root``, or the daemon clone as Layer 2's operand).
+   A program held in a variable (``$PY -m pytest``, ``$PY scripts/x.py``) is
+   judged by the module or script it is given; only an unresolved one
+   (``$PY -c``, ``$PY "$SCRIPT"``, the daemon's own package) counts.
 4. **Forging the installer's own version stamp** — writing a venv's
    ``.daemon-version`` file (under ``untracked/venv*/``) by any of the same
    routes as (2), which would make the gate believe the target is already
@@ -111,6 +114,8 @@ _DECODE_REPLACE: Final[str] = "replace"
 #: negative lookahead stops `hooks-daemon.yaml`/`hooks-daemon-anything` from
 #: reading as the CLI binary.
 _HOOKS_DAEMON_BIN_RE: Final[str] = r"(?:\S*/)?hooks-daemon(?![\w.-])"
+#: The daemon's own package; a module under it may carry an upgrade subcommand.
+_DAEMON_PACKAGE: Final[str] = "claude_code_hooks_daemon"
 #: `python3 -m` plus the dotted `claude_code_hooks_daemon.daemon.cli` module
 #: path — the module-invocation spelling of the same CLI.
 _HOOKS_DAEMON_MODULE_RE: Final[str] = (
@@ -516,9 +521,40 @@ def _segment_runs_upgrade(segment: str, cwd: str | None, depth: int, *, steered:
     head = command_word(words[0])
     if head in _SHELL_HEADS:
         return _shell_run_is_upgrade(words[1:], cwd, depth, steered=steered)
-    if "/" in words[0] or words[0].startswith("$"):
+    if words[0].startswith("$"):
+        return _variable_program_is_upgrade(words[1:], cwd, steered=steered)
+    if "/" in words[0]:
         return _script_run_is_upgrade(words[0], words[1:], cwd, steered=steered)
     return False
+
+
+def _variable_program_is_upgrade(arguments: list[str], cwd: str | None, *, steered: bool) -> bool:
+    """Whether a command whose program is a variable (`$PY`, `$PY/python`)
+    runs the upgrade, judged by what its ARGUMENTS name (ledger 00474 N285).
+
+    The variable is never expanded, so the program itself is unknown; what it
+    is given to run can still be literal. `-m <module>` and a script path with
+    no `$` are judged like any other run (a script by its content, a module by
+    not being the daemon's own CLI). `-c`, no operand, stdin, a computed
+    module or script, and the daemon's own `-m claude_code_hooks_daemon...`
+    stay "cannot tell", which counts as the upgrade once something steers.
+    """
+    index = 0
+    while index < len(arguments) and arguments[index].startswith("-"):
+        flag = arguments[index]
+        if flag in ("-", "--") or ("c" in flag[1:] and not flag.startswith("--")):
+            return _cannot_tell_script(arguments, steered=steered)
+        if flag == "-m":
+            module = arguments[index + 1] if index + 1 < len(arguments) else ""
+            if not module or "$" in module or "`" in module:
+                return _cannot_tell_script(arguments, steered=steered)
+            if module.startswith(_DAEMON_PACKAGE):
+                return _cannot_tell_script(arguments, steered=steered)
+            return False
+        index += 1
+    if index >= len(arguments):
+        return _cannot_tell_script(arguments, steered=steered)
+    return _script_run_is_upgrade(arguments[index], arguments[index + 1 :], cwd, steered=steered)
 
 
 def _command_runs_upgrade(

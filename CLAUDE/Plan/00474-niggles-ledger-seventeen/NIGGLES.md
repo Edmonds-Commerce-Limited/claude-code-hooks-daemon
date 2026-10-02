@@ -58,10 +58,24 @@ So the rule fires on `PYTHONPATH=` before an interpreter named by a variable,
 whatever that interpreter then runs. It is not specific to sub-agents. None of
 those commands was an upgrade.
 
-**Next**: reproduce from a sub-agent with a logged command, then narrow the rule
-to upgrade invocations.
+**Cause**: `_segment_runs_upgrade` sent any segment whose head word began with
+`$` to `_script_run_is_upgrade`, which cannot read a `$`-path and so answers
+"cannot tell". Once `PYTHONPATH` (matched by `PYTHON*`) steered the command,
+"cannot tell" counted as the upgrade, whatever the arguments named.
 
-**Status**: ⬜ Open.
+**Fix**: a variable program is judged by its arguments
+(`_variable_program_is_upgrade`). A literal `-m <module>` outside the daemon's
+own package is allowed; a literal script path is read and judged by content
+like any other script. `-c`, stdin, no operand, a computed module or script, a
+script that cannot be found, and `-m claude_code_hooks_daemon...` keep the
+deny. Upgrade entry points by name, `--uv` and the handoff variable are caught
+before this and unchanged.
+
+**Not changed**: `PYTHONPATH=x eval "$X"` was already allowed (eval is only
+suspect beside a command that runs the upgrade); a literal interpreter running
+`-m claude_code_hooks_daemon...` is also still allowed.
+
+**Status**: ✅ Fixed on worktree-n285-env-bypass-scope.
 
 ### N284 — the pipe blocker reads `\|` inside a double-quoted grep pattern as a pipe
 
