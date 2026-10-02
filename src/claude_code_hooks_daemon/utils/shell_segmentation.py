@@ -3140,6 +3140,120 @@ def split_unquoted_spans(text: str, separators: Sequence[str]) -> list[tuple[int
     return spans
 
 
+#: How deep substitutions may nest before the text is declared unplaceable.
+_MAX_SUBSTITUTION_DEPTH: Final[int] = 32
+_OPEN_PAREN = "("
+_CLOSE_PAREN = ")"
+_BACKTICK = "`"
+#: Openers are built from parts: this module's own text is read by the secret
+#: guard, which cannot place an unbalanced substitution opener spelled whole.
+_COMMAND_SUBSTITUTION_OPEN: Final[str] = "$" + _OPEN_PAREN
+_PROCESS_SUBSTITUTION_OPENS: Final[tuple[str, ...]] = ("<" + _OPEN_PAREN, ">" + _OPEN_PAREN)
+_OPENER_WIDTH: Final[int] = 2
+
+
+class UnplaceableSubstitutionError(Exception):
+    """A substitution's extent cannot be known without running the shell."""
+
+
+def substitution_inner_spans(text: str) -> list[tuple[int, int]]:
+    """``(start, end)`` offsets of the command text inside every substitution.
+
+    One span per command substitution, backtick pair and process substitution
+    that bash would run, nested ones included, each excluding its delimiters.
+    An opener inside single quotes or after a backslash, or a process
+    substitution inside double quotes, is literal text and yields no span.
+    Quotes inside a span are tracked afresh, so a close paren in a quoted word
+    does not end it.
+
+    Raises:
+        UnplaceableSubstitutionError: a span cannot be placed with certainty
+            (an unterminated quote or substitution, nesting beyond
+            :data:`_MAX_SUBSTITUTION_DEPTH`). A caller relaxing anything on the
+            strength of these spans must then relax nothing.
+    """
+    spans: list[tuple[int, int]] = []
+    _scan_command_text(text, 0, None, 0, spans)
+    return spans
+
+
+def _scan_command_text(
+    text: str, index: int, closer: str | None, depth: int, spans: list[tuple[int, int]]
+) -> int:
+    """Scan command text from ``index`` to the unquoted ``closer`` (a close
+    paren or a backtick) and return its offset; ``closer=None`` scans to the
+    end of ``text`` and returns its length. Spans of every substitution met on
+    the way are appended to ``spans``."""
+    if depth > _MAX_SUBSTITUTION_DEPTH:
+        raise UnplaceableSubstitutionError
+    length = len(text)
+    groups = 0
+    while index < length:
+        char = text[index]
+        if char == _ESCAPE_CHAR:
+            index += 2
+        elif char == _SINGLE_QUOTE:
+            end = text.find(_SINGLE_QUOTE, index + 1)
+            if end == -1:
+                raise UnplaceableSubstitutionError
+            index = end + 1
+        elif text.startswith(_ANSI_C_OPEN, index):
+            ansi_c = ansi_c_string(text, index + len(_ANSI_C_OPEN))
+            if ansi_c is None:
+                raise UnplaceableSubstitutionError
+            index = ansi_c[1]
+        elif char == _DOUBLE_QUOTE:
+            index = _scan_double_quoted(text, index, depth, spans)
+        elif char == _BACKTICK:
+            if closer == _BACKTICK:
+                return index
+            index = _record_span(text, index + 1, _BACKTICK, depth, spans)
+        elif text.startswith((_COMMAND_SUBSTITUTION_OPEN, *_PROCESS_SUBSTITUTION_OPENS), index):
+            index = _record_span(text, index + _OPENER_WIDTH, _CLOSE_PAREN, depth, spans)
+        elif closer == _CLOSE_PAREN and char == _OPEN_PAREN:
+            groups += 1
+            index += 1
+        elif closer == _CLOSE_PAREN and char == _CLOSE_PAREN:
+            if groups == 0:
+                return index
+            groups -= 1
+            index += 1
+        else:
+            index += 1
+    if closer is not None:
+        raise UnplaceableSubstitutionError
+    return length
+
+
+def _record_span(
+    text: str, start: int, closer: str, depth: int, spans: list[tuple[int, int]]
+) -> int:
+    """Scan one substitution body from ``start``, record its span, and return
+    the offset past its closer."""
+    end = _scan_command_text(text, start, closer, depth + 1, spans)
+    spans.append((start, end))
+    return end + 1
+
+
+def _scan_double_quoted(text: str, index: int, depth: int, spans: list[tuple[int, int]]) -> int:
+    """Offset past the double-quoted string opening at ``index``; a command or
+    backtick substitution inside it is live and recorded."""
+    cursor = index + 1
+    while cursor < len(text):
+        char = text[cursor]
+        if char == _ESCAPE_CHAR:
+            cursor += 2
+        elif char == _DOUBLE_QUOTE:
+            return cursor + 1
+        elif char == _BACKTICK:
+            cursor = _record_span(text, cursor + 1, _BACKTICK, depth, spans)
+        elif text.startswith(_COMMAND_SUBSTITUTION_OPEN, cursor):
+            cursor = _record_span(text, cursor + _OPENER_WIDTH, _CLOSE_PAREN, depth, spans)
+        else:
+            cursor += 1
+    raise UnplaceableSubstitutionError
+
+
 def _starts_comment(text: str, index: int) -> bool:
     """Is the unquoted character at ``index`` a ``#`` that starts a word?"""
     return text[index] == "#" and (index == 0 or text[index - 1] in COMMENT_PRECEDERS)
