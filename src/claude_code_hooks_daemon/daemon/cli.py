@@ -146,7 +146,10 @@ from claude_code_hooks_daemon.utils.safe_signal import (
     RefusedSignalTarget,
     stop_verified_daemon,
 )
-from claude_code_hooks_daemon.utils.secret_redaction import get_active_secret_terms
+from claude_code_hooks_daemon.utils.secret_redaction import (
+    SecretWordListUnreadableError,
+    get_active_secret_terms,
+)
 from claude_code_hooks_daemon.utils.session_action_items import (
     SessionActionItem,
     collect_session_action_items,
@@ -9556,7 +9559,14 @@ def main() -> int:
 
     _reexec_daemon_launch_with_explicit_project_root(args)
 
-    return cast("int", args.func(args))
+    try:
+        return cast("int", args.func(args))
+    except SecretWordListUnreadableError as exc:
+        # Skill scan, bug report and issue report all scrub their output with
+        # the word list; without readable terms they would emit unscrubbed
+        # text, so they stop here and name the path (never a term).
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
 
 
 def build_parser() -> argparse.ArgumentParser:

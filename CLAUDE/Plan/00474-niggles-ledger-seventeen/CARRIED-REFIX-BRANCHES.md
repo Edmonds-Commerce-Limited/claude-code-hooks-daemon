@@ -10,6 +10,7 @@ branch's NIGGLES.md where one existed.
 ## Branch `worktree-upgrade-scripts`
 
 ### N108 — `destructive_git` denies a git call split across lines between its options and its subcommand
+
 **Status on the branch**: ⬜ Open. **On main**: open.
 
 **Found by upgrade-scripts round 16b** (`260926-upgrade-scripts16b-opus-5-5.md`
@@ -32,6 +33,7 @@ subcommand each, so the fix cannot turn the denial into an allow for a
 destructive call.
 
 ### N121 — `secret_file_guard` and `flaggable_content_channel_guard` deny ordinary review commands that name nothing protected
+
 **Status on the branch**: ⬜ Open. **On main**: open.
 
 **Found by upgrade review 12** (`260926-upgrade-review12-opus-5-5.md` in
@@ -68,6 +70,7 @@ test, alongside N101's.
 ## Branch `worktree-d-00421`
 
 ### N170 — `secret_file_guard`'s secret-meta and `git rm --cached` exemptions let a second command read a protected file
+
 **Status on the branch**: ✅ Remedied. **On main**: open.
 
 **Found:** Plan 00421 review 4, D-RULE check (finding SH1, graded BLOCKER),
@@ -98,6 +101,7 @@ check). `test_a_whole_exempt_invocation_is_still_allowed` pins the plain
 forms, including `cd /proj && …`, `git -C /repo rm --cached` and `time`.
 
 ### N171 — `scan_scope.walk_files` skipped a directory it could not list, so every pinned walker reported it clean
+
 **Status on the branch**: ✅ Remedied. **On main**: open.
 
 **Found:** Plan 00421 review 4, shared finding S-a.
@@ -113,6 +117,7 @@ because a chmod-based test proves nothing when tests run as root. RED on
 `7d0e63075`: `test_an_unreadable_subdirectory_fails_the_walk`.
 
 ### N172 — An `ImportError` of the shared secret-term rule switched the term rule off in the batch checks
+
 **Status on the branch**: ✅ Remedied. **On main**: open.
 
 **Found:** Plan 00421 review 4, shared finding S-b.
@@ -131,6 +136,7 @@ list through `secret_redaction.resolve_secret_word_list_paths`. RED on
 `test_an_unimportable_term_rule_fails_the_run`.
 
 ### N173 — A direct write to `.git/config` could erase the last-known-good loaded-before marker
+
 **Status on the branch**: ✅ Remedied. **On main**: open.
 
 **Found:** Plan 00421 fix round 5, while closing review-4 D1r. The marker
@@ -163,6 +169,7 @@ and `test_a_write_or_edit_of_the_marker_is_denied` failed, and
 `test_last_known_good.py` could not import `marker_path`.
 
 ### N174 — A path built from a name escaped the directory it was joined onto
+
 **Status on the branch**: ✅ Remedied. **On main**: open.
 
 **Found:** Plan 00421 fix round 5d. `check_authored_path_containment` began
@@ -204,6 +211,7 @@ module. Mutant M1 accepts every name and every output target in the two new
 utilities. Under M1, 40 tests fail, among them every per-helper name test.
 
 ### N175 — A YAML option named after a handler's internal attribute overwrote it, safety guards included
+
 **Status on the branch**: ✅ Remedied. **On main**: open.
 
 **Found:** Plan 00421 fix round 5f, deciding review-4's step 7 entry on the
@@ -251,6 +259,7 @@ drops `test_locations` from `tdd_enforcement`, and 3 tests fail. Mutant M3
 stops recording undeclared keys, and 5 tests fail.
 
 ### N228 — The secret-meta, `git rm --cached` and consumer exemptions read the command with `str.split()`
+
 **Status on the branch**: ✅ Remedied. **On main**: open.
 
 **Found:** Plan 00421 review 5, D-RULE check (finding SH2, graded BLOCKER).
@@ -289,6 +298,7 @@ reading. RED on `59d44d08f`: 33 cases of `TestExemptionsReadTheShellsWords`.
 Six of them failed only because `_literal_shell_words` did not exist yet.
 
 ### N229 — The consumer exemption skipped every word starting with `-`, so a path inside an option value was never judged
+
 **Status on the branch**: ✅ Remedied. **On main**: open.
 
 **Found:** Plan 00421 review 5, D-RULE check: SH3 (shared with main) and B1
@@ -316,6 +326,7 @@ with it. RED on `59d44d08f`: 15 cases of `TestExemptionsJudgeOptionValues`,
 `test_a_consumer_option_value_naming_the_snapshot_is_not_exempt`.
 
 ### N230 — `secret-meta --project-root <dir>` read `allow_plain_hash` from a config the agent could write
+
 **Status on the branch**: ✅ Remedied. **On main**: open.
 
 **Found:** Plan 00421 review 5, D-RULE check (finding SH4). Shared with main.
@@ -333,7 +344,21 @@ default. RED on `59d44d08f`:
 `test_a_different_project_root_never_grants_the_plain_hash`.
 
 ### N231 — A secret word list that exists but cannot be read gave no terms, so a scan through it passed
-**Status on the branch**: ✅ Remedied. **On main**: open.
+
+**Status on the branch**: ✅ Remedied. **On main**: ✅ Fixed (branch `worktree-n231-wordlist`, not yet merged)
+
+**Remedy on main:** A word list that exists but cannot be read (a directory in
+its place, a dangling symlink, or a read error) now raises
+`SecretWordListUnreadableError` instead of giving no terms, and is never
+cached as empty; an absent list is still inert. `sensitive_content` denies
+the write with a reason that names the problem and no term. The two batch
+checks that scan with the terms (`check_sensitive_content`,
+`check_git_history`) fail the run with a config error. The router, front
+controller and blocking-response logs write a withheld placeholder, payload
+capture is skipped, the model-fallback snapshot is not written, and the
+`hooks-daemon` commands that scrub output stop with exit 1. There is no
+`check_git_blobs` or `require_active_secret_terms` on main; the details below
+describe the dropped branch.
 
 **Found:** Plan 00421 review 5, CODE check (finding M2). Shared with main:
 main's `secret_redaction.load_secret_terms` also returns `()` on any
@@ -374,6 +399,7 @@ refuse. Round 7c (N246) made the same hold for an unreadable ADDITIONAL list
 on a healthy daemon, and for a config that cannot load.
 
 ### N242 — A quoted grep pattern starting with `.*`, and a `python -m` module name, were denied as path mentions
+
 **Status on the branch**: ✅ Remedied. **On main**: open.
 
 **Found:** Plan 00421 review 6 (shared, minor), and hit repeatedly in
@@ -408,6 +434,7 @@ file named `pkg.secret_mod`. RED on `0e0098de2`: six cases in
 (`tests/unit/utils/test_secret_file_matching.py`).
 
 ### N243 — A consumer exemption matched the head's basename, so a self-written `./ansible-playbook` received the protected path
+
 **Status on the branch**: ✅ Remedied. **On main**: open.
 
 **Found:** Plan 00421 review 6, both roles. Shared with main: main compared
@@ -431,6 +458,7 @@ recording script at every place bash could go:
 (`dot-slash-head`, `relative-path-head`).
 
 ### N248 — `scripts/debug_info.py` never initialised `ProjectContext`, so it never applied the project's word lists
+
 **Status on the branch**: ✅ Remedied. **On main**: open.
 
 **Found:** Plan 00421 fix round 7a, while routing the scrubs through one
@@ -455,6 +483,7 @@ RED on `0e0098de2`: `test_an_additional_only_term_is_redacted` and
 `tests/unit/test_debug_info.py`.
 
 ### N250 — `remote-docs` captured a page UNSCANNED when the sensitive-content scanner could not load
+
 **Status on the branch**: ✅ Remedied. **On main**: open.
 
 **Found:** Plan 00421 round 7c, while routing the word lists through one
@@ -487,6 +516,7 @@ error-hiding exclusion is removed. RED on `9adcd9db6`: six cases in
 ## Branch `worktree-plan-464-commit-gate-repo`
 
 ### N119 — The walk re-walks every `eval` text three times, so an `eval` chain costs 3^depth walks
+
 **Status on the branch**: ✅ Remedied. **On main**: open.
 
 **Found by the Plan 00464 landing merge.** Main's
@@ -518,6 +548,7 @@ matches it exactly. Tests: `test_git_command_target_eval_walks.py`
 ## Branch `worktree-n466-small-a`
 
 ### N124 — `secret_file_guard` reads a grep/rg regex argument as a path and denies it
+
 **Status on the branch**: ✅ Remedied. **On main**: open.
 
 **Found by the small-a fixer.** `grep -n "def .*repair\|uv" f`,
@@ -553,6 +584,7 @@ fails). Release note 142.
 with `shlex` and checks the argv shape is unchanged. Release note 148.
 
 ### N125 — `quarantine_artefact_read_guard` refuses a plain `grep -l` over subagent transcripts as too many to enumerate
+
 **Status on the branch**: ✅ Remedied. **On main**: open.
 
 **Found by the small-a fixer.** `grep -l x ~/.claude/projects/-workspace/*/subagents/*.jsonl`
@@ -585,6 +617,7 @@ still denied). RED: 2 of the four handler cases in `TestBashGlobTokenExpansion`;
 prefix (2 fail), every pattern reachable (4 fail). Release note 143.
 
 ### N129 — An abbreviated grep long option hid the file operand from the secret guard
+
 **Status on the branch**: ✅ Remedied. **On main**: open.
 
 **Found by the small-a D-RULE review (S2), shared with main.** GNU
@@ -601,6 +634,7 @@ unclassified, so the deny stands. There is no abbreviation table. RED: 4
 handler cases and 7 module cases. Release note 142.
 
 ### N130 — Glob and directory walks answered "nothing here" when they could not finish
+
 **Status on the branch**: ✅ Remedied. **On main**: open.
 
 **Found by the small-a D-PATH (BLOCKER 2, MAJOR 3) and D-RULE (F4) reviews,
@@ -634,6 +668,7 @@ cases, and the quarantine ENOENT, cap, deadline and root cases. Release notes
 143 and 144.
 
 ### N131 — The strict glob scan did not read a word the way the shell does
+
 **Status on the branch**: ✅ Remedied. **On main**: open.
 
 **Found by the small-a D-PATH (S1, S2) and D-RULE (S3, S4) reviews, shared
@@ -661,6 +696,7 @@ a glob that could name an artefact is denied without a walk. RED: the
 `TestN125GlobsAreJudgedAsTheShellExpandsThem` cases. Release note 143.
 
 ### N132 — A report claim found only in the main checkout verified a worktree agent's report
+
 **Status on the branch**: ✅ Remedied. **On main**: open.
 
 **Found by the small-a D-PATH review (S4), shared with main.**
@@ -678,6 +714,7 @@ closed with the absolute-path request. RED:
 out-of-root cases. Release note 140.
 
 ### N134 — Guards crash on read-only commands that name no protected path
+
 **Status on the branch**: ✅ Remedied (heredoc half: N101). **On main**: open.
 
 **Found by the p422 D-RULE and n53 D-RULE reviews.** The live main daemon
@@ -707,6 +744,7 @@ Release note 145.
 and is not fixed here.
 
 ### N136 — A dotted Python module name is read as a protected path
+
 **Status on the branch**: ✅ Remedied. **On main**: open.
 
 **Found by n23-land-1.** `secret_file_guard` denied
@@ -731,6 +769,7 @@ the same way `-m` is. A dynamic import whose argument is not one literal
 name answers `UNRESOLVABLE_IMPORT` and is denied. Release notes 146 and 148.
 
 ### N143 — A search fed its files by another command checks no tree
+
 **Status on the branch**: ✅ Remedied. **On main**: open.
 
 **Found by small-a round 3.** In `find . | xargs rg x`, the guard saw an
@@ -751,6 +790,7 @@ action and no redirect. RED: `TestFilesFedByAnotherCommand`,
 `find` rows of `TestMayChangeTheTreeOrCwd`. Release note 147.
 
 ### N144 — The quarantine guard has no Bash recursive-search check
+
 **Status on the branch**: ✅ Remedied. **On main**: open.
 
 **Found by small-a round 3.** `quarantine_artefact_read_guard` walked a tree
@@ -767,6 +807,7 @@ fail-closed walk, with the same leading-`cd` and glob-root handling. RED:
 note 147.
 
 ### N150 — Search roots and N64 report claims are resolved by text
+
 **Status on the branch**: ✅ Remedied. **On main**: open.
 
 **Found by the small-a D-PATH re-review (BLOCKER 1, MAJOR 2).** Roots were
@@ -783,6 +824,7 @@ physically. RED: `TestASearchRootThroughASymlinkAndDotDot` in both guards
 and the verifier. Release note 148.
 
 ### N151 — Git's view is trusted without checking rg reads no more than it
+
 **Status on the branch**: ✅ Remedied. **On main**: open.
 
 **Found by the small-a D-PATH and D-RULE re-reviews (M3).** A `.ignore` or
@@ -800,6 +842,7 @@ repository with `.gitignore: build/` and `.ignore: !build/`, plus a
 differential `rg --files` check. Release note 148.
 
 ### N152 — A command the lexer cannot segment is read as holding no search
+
 **Status on the branch**: ✅ Remedied. **On main**: open.
 
 **Found by the small-a D-PATH and D-RULE re-reviews (M4).** When
@@ -862,6 +905,7 @@ the new cases in `TestAVariableWhoseValueIsKnownIsRead`,
 `TestAnOperandHeldInAVariable` and the secret guard. Release note 148.
 
 ### N153 — `git grep`, `ugrep`, `ag` and `ack` search a tree unchecked
+
 **Status on the branch**: ✅ Remedied. **On main**: open.
 
 **Found by the small-a D-PATH re-review.** The recursive-search check knew
@@ -892,6 +936,7 @@ resolves, so a `core.worktree` elsewhere is unverifiable, never walked in
 its place. Release note 149.
 
 ### N154 — `run_git` passes an inherited `GIT_DIR`, `GIT_WORK_TREE` or `GIT_INDEX_FILE` through
+
 **Status on the branch**: ✅ Remedied. **On main**: open.
 
 **Found by the small-a D-PATH and D-RULE re-reviews (shared minor).** A
@@ -904,6 +949,7 @@ bring them back. RED: a real-repository test and a mocked one in
 `test_git_repo.py`. Release note 148.
 
 ### N183 — Main's secret guard crashes on `$VAR/…` globs and brace groups
+
 **Status on the branch**: ✅ Remedied. **On main**: open.
 
 **Found live in this session.** Main's daemon denied read-only commands
@@ -930,6 +976,7 @@ clean tree, which main allows; it is now a budget of 100k entries or
 `TestTheDaemonsOwnCwdIsNoGlobBase`. Release note 150.
 
 ### N184 — A Bash read through `<link>/..` misses an absolute-path pattern
+
 **Status on the branch**: ✅ Remedied. **On main**: open.
 
 **Found by the small-a D-PATH re-review 3 (shared minor; main has it too).**
@@ -946,6 +993,7 @@ found nothing at `80d079be7`); test `TestABashReadThroughALinkAndDotDot`.
 Release note 149.
 
 ### N201 — `POSIXLY_CORRECT` stops GNU grep permuting, so a word after the first operand is a file
+
 **Status on the branch**: ✅ Remedied. **On main**: open.
 
 **Found by the small-a D-RULE re-review 4 (shared; main has it too).** With
@@ -967,6 +1015,7 @@ recursive reading walks; main's pattern-only exemption stands down. RED:
 grep). Release note 150.
 
 ### N220 — A glob whose last component is a bare `*` is never expanded, so `cat dir/*` reads a protected file
+
 **Status on the branch**: ✅ Remedied. **On main**: open.
 
 **Found by the small-a D-PATH re-review 5 (shared MAJOR; main has it
@@ -986,6 +1035,7 @@ tests `TestAGlobWithABareStarIsExpanded` and the `bare_star*` cases of
 `TestRoundSevenReviewerShapesAreDenied`. Release note 151.
 
 ### N221 — A path in an interpreter one-liner after a `cd` is judged from the hook's cwd
+
 **Status on the branch**: ✅ Remedied. **On main**: open.
 
 **Found by the small-a D-PATH re-review 5 (shared minor; main has it too).**
@@ -1003,6 +1053,7 @@ An unreadable `cd` target stays unverifiable. RED:
 `TestAPathInAnInterpreterOneLinerAfterACd`. Release note 151.
 
 ### N249 — An interpreter one-liner's path is missed when the code is double-quoted with escaped inner quotes
+
 **Status on the branch**: ⬜ Open. **On main**: open.
 
 **Found by small-a round 9b ("Found, not fixed", main-proven; S-D).**
@@ -1021,6 +1072,7 @@ Deferred from small-a by the owner's ruling; to be fixed on its own small
 branch.
 
 ### N257 — A read through `/proc/self/cwd`, `/proc/<pid>` or `/dev/fd` is not judged, and main has the same bypass
+
 **Status on the branch**: ⬜ Open. **On main**: open.
 
 **Found by small-a round 10b (item 09, S-C; main has the same bypass).**
@@ -1078,6 +1130,7 @@ strictly better than main); to be fixed on its own small branch.
 ## Branch `worktree-p422-close`
 
 ### N134 — Guards crash on read-only commands that name no protected path
+
 **Status on the branch**: ⬜ Open (small-a). **On main**: open.
 
 **Found by the p422 D-RULE review** (Plan 00422, review of
@@ -1112,6 +1165,7 @@ verify `<glob>`" reason instead of the internal-error route. Pin the
 read-only shapes with RED tests.
 
 ### N141 — The plan-folder `mkdir` guard is waved past by exemptions, quoted spaces, `CDPATH` and same-command links
+
 **Status on the branch**: ✅ Remedied. **On main**: open.
 
 **Found by the p422 D-RULE re-review** (review of `fe14348e7..3f7fafeaf`,
@@ -1173,6 +1227,7 @@ Cross-reference: 00422 N28, whose branch these fixes ride on.
   00422 N28, round 4.
 
 ### N178 — A `mkdir` whose command word is built by expansion is never seen
+
 **Status on the branch**: ✅ Remedied. **On main**: open.
 
 **Found by the p422 D-RULE final re-review** (review of `fe14348e7..3e0b67d6b`,
@@ -1201,7 +1256,8 @@ every later path, because its flags cannot be read.
 A folder name held in a variable (`$m CLAUDE/Plan/$N`) was left out of this
 remedy; team-lead ruled that it must be denied too, which N188 does.
 
-### N179 — The `&` or `\
+### N179 — The `&` or \`\\
+
 **Status on the branch**: p422 D-RULE review 4. **On main**: open.
 
 **Found by the p422 D-RULE review 4** (same report, finding SH-1). Main and
@@ -1219,6 +1275,7 @@ shared tokeniser reads `2>&1` as one word. Tests:
 `test_a_real_separator_still_ends_the_words`.
 
 ### N180 — The plan-folder guard misses an expanded command word after a wrapper, and quoting inside a folder number
+
 **Status on the branch**: ✅ Remedied. **On main**: open.
 
 **Found by the p422 D-RULE review 4** (review of `fe14348e7..5d741fde4`,
@@ -1241,6 +1298,7 @@ the hyphen. Tests:
 `test_an_expansion_that_is_not_the_command_word_stays_allowed`.
 
 ### N185 — The shared wrapper table lacks `setsid`, `doas` and other standard exec-wrappers
+
 **Status on the branch**: ✅ Remedied. **On main**: open.
 
 **Found by the p422 D-RULE review 5** (same report, finding SH-A). Main and
@@ -1263,6 +1321,7 @@ The bare-duration skip is now `timeout`'s one positional word. Tests:
 `test_command_head_index_skips_assignments_flags_and_wrappers`.
 
 ### N186 — After an expanded command word, a folder name in `$'…'` quoting or braces is not decoded
+
 **Status on the branch**: ✅ Remedied. **On main**: open.
 
 **Found by the p422 D-RULE review 5** (same report, finding SH-B). Main and
@@ -1286,6 +1345,7 @@ brace between the digit and the hyphen, and any `$'`. Tests:
 `TestRemoveWordQuoting` cases.
 
 ### N187 — An expanded command word inside a string run by `eval` or `bash -c` is not read as a command
+
 **Status on the branch**: ✅ Remedied. **On main**: open.
 
 **Found by the p422 D-RULE review 5** (review of `5d741fde4..637e08e53`,
@@ -1314,6 +1374,7 @@ nested `eval`s hid the command word again. Tests:
 `test_command_string_is_the_text_a_shell_runs`.
 
 ### N188 — After an expanded command word, a folder name under the plan dir that the shell expands is not judged
+
 **Status on the branch**: ✅ Remedied. **On main**: open.
 
 **Found by the p422 D-RULE review 5** (review of `5d741fde4..637e08e53`,
@@ -1342,6 +1403,7 @@ shapes, all RED on 637e08e53 and on b2639c600) and
 `test_a_literal_or_elsewhere_name_after_an_expanded_command_word_stays_allowed`.
 
 ### N198 — The shared wrapper table lacks `chronic`, `coproc`, `strace`, `sg` and `env -S`
+
 **Status on the branch**: ✅ Remedied. **On main**: open.
 
 **Found by the p422 D-RULE review 6** (same report, finding SH-1). Main and
@@ -1359,6 +1421,7 @@ getopt reads it (`env -iS`, `sudo -Eu root`, `strace -fo log`). Tests: the
 `TestWrappers` cases in `test_bash_file_writes.py`.
 
 ### N199 — The plan-folder guard misses `<pd>//$N`, `<pd>$N`, `cd <pd> && $m $N` and command words built other ways
+
 **Status on the branch**: ✅ Remedied. **On main**: open.
 
 **Found by the p422 D-RULE review 6** (same report, finding SH-2). Main and
@@ -1392,6 +1455,7 @@ rephrase (`vi …`, `git add …`). Tests:
 three new linear-cost shapes.
 
 ### N200 — An apostrophe in a comment or heredoc body hides a later quoted git subcommand from `git_stash`/`destructive_git`
+
 **Status on the branch**: ✅ Remedied. **On main**: open.
 
 **Found by the p422 D-RULE review 6** (review of `637e08e53..cc523578d`,
@@ -1421,12 +1485,15 @@ for every caller, over a corpus of comments, heredocs and ANSI-C spans),
 `TestRemoveExecutedWordQuoting` and `TestWordQuotingReadings`.
 
 ### N239 — An ANSI-C quote inside a string another shell runs (`bash -c "git \$'stash'"`) is decoded by no reading of either git guard
+
 **Status on the branch**: ✅ Remedied. **On main**: open.
 
 ### N240 — `bash_file_writes` does not report the typescript or the `-I`/`-O`/`-B`/`-T` log files `script` writes
+
 **Status on the branch**: ✅ Remedied. **On main**: open.
 
 ### N241 — The git guards deny a message value inside a string another shell runs, and `git_stash` denies git messages and data heredocs mentioning a stash
+
 **Status on the branch**: ✅ Remedied. **On main**: open.
 
 **Found live on main and by p422-fix-8f.** `destructive_git` denied a
@@ -1461,6 +1528,7 @@ decision for the coordinator.
 ## Branch `agent-aa0e5105724aa123b-b9ce2f39`
 
 ### N41 — The fixed chain still spends several linear seconds on a heredoc-opener-heavy command, spread widely
+
 **Status on the branch**: ⬜ Open. **On main**: open.
 
 **Found while remedying N38** (below), profiling the FIXED chain on the same

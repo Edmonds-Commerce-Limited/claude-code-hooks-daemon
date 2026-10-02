@@ -600,11 +600,11 @@ class TestSecretRedactionInDebugLog:
     def test_secret_term_absent_from_debug_log(self, caplog: pytest.LogCaptureFixture) -> None:
         import logging
 
-        from claude_code_hooks_daemon.core import router as router_module
+        from claude_code_hooks_daemon.utils import secret_redaction
 
         router = EventRouter()
         with patch.object(
-            router_module, "get_active_secret_terms", return_value=("zzqx-nonsense-term",)
+            secret_redaction, "get_active_secret_terms", return_value=("zzqx-nonsense-term",)
         ):
             with caplog.at_level(logging.DEBUG, logger="claude_code_hooks_daemon.core.router"):
                 hook_input = {
@@ -621,10 +621,10 @@ class TestSecretRedactionInDebugLog:
         """No secret list configured -> logging is unaffected (backward compatible)."""
         import logging
 
-        from claude_code_hooks_daemon.core import router as router_module
+        from claude_code_hooks_daemon.utils import secret_redaction
 
         router = EventRouter()
-        with patch.object(router_module, "get_active_secret_terms", return_value=()):
+        with patch.object(secret_redaction, "get_active_secret_terms", return_value=()):
             with caplog.at_level(logging.DEBUG, logger="claude_code_hooks_daemon.core.router"):
                 hook_input = {"tool_name": "Write", "tool_input": {"content": "plain content"}}
                 router.route(EventType.PRE_TOOL_USE, hook_input)

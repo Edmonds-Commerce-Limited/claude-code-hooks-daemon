@@ -50,7 +50,12 @@ from claude_code_hooks_daemon.utils.cron_hosts import (
 )
 from claude_code_hooks_daemon.utils.log_elision import elide_record_arguments
 from claude_code_hooks_daemon.utils.scratch_dir import ensure_scratch_dir
-from claude_code_hooks_daemon.utils.secret_redaction import get_active_secret_terms, redact_text
+from claude_code_hooks_daemon.utils.secret_redaction import (
+    WITHHELD_PLACEHOLDER,
+    SecretWordListUnreadableError,
+    get_active_secret_terms,
+    redact_text,
+)
 from claude_code_hooks_daemon.utils.strict_mode import handle_tier2_error
 
 # Global memory log handler - accessible for log queries
@@ -263,7 +268,12 @@ def redacted_blocking_response(response_json: str) -> str:
     the window would let a term straddling the boundary leave its head behind,
     and half a credential in a log is still a credential in a log.
     """
-    terms = get_active_secret_terms()
+    try:
+        terms = get_active_secret_terms()
+    except SecretWordListUnreadableError as exc:
+        # No terms to redact with, so none of the response may be logged.
+        logger.warning("Withholding a blocking response from the log: %s", exc)
+        return WITHHELD_PLACEHOLDER
     if not terms:
         return response_json[:BLOCKING_RESPONSE_LOG_CHARS]
 
