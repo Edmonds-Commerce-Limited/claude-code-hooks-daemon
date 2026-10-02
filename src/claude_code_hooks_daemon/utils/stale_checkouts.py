@@ -23,6 +23,8 @@ old as the idle window, and a live process whose cwd is inside it vetoes both.
 
 from __future__ import annotations
 
+import logging
+import os
 import shlex
 import time
 from collections.abc import Callable, Iterable, Mapping
@@ -53,6 +55,8 @@ from claude_code_hooks_daemon.daemon.process_verification import (
 )
 from claude_code_hooks_daemon.utils.git_repo import branch_ref, run_git
 from claude_code_hooks_daemon.utils.path_containment import path_is_relative_to
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_MAX_IDLE_DAYS: Final[int] = 7
 
@@ -191,10 +195,12 @@ def _last_commit_time(repo_root: Path, branch: str, run_fn: RunGit) -> float | N
     result = run_fn(repo_root, "log", "-1", "--format=%ct", branch_ref(branch))
     if result.returncode != 0:
         return None
-    try:
-        return float(result.stdout.strip())
-    except ValueError:
+    text = result.stdout.strip()
+    # %ct is whole epoch seconds; anything else is git not supplying one.
+    if not text.isascii() or not text.isdigit():
+        logger.debug("No commit time for %s: git printed %r", branch, text)
         return None
+    return float(text)
 
 
 def _worktree_reasons(
@@ -314,17 +320,15 @@ def _root_exists_in_namespace(pid: int, root: str, proc_dir: Path) -> bool | Non
 
     Reads through ``<proc>/<pid>/root``, so a container's ``/workspace`` is judged
     where it lives. None when that view cannot be read: absence is only proven
-    when the namespace root itself is reachable.
+    when the namespace root itself is reachable. A permission error past that
+    point is a genuine failure and propagates to the daemon's per-handler
+    fail-open rather than being read as an answer.
     """
     namespace_root = proc_dir / str(pid) / "root"
-    try:
-        namespace_root.stat()
-    except OSError:
+    if not os.access(namespace_root, os.R_OK | os.X_OK):
+        logger.debug("Cannot read pid %s's mount namespace at %s", pid, namespace_root)
         return None
-    try:
-        return (namespace_root / root.lstrip("/")).is_dir()
-    except OSError:
-        return None
+    return (namespace_root / root.lstrip("/")).is_dir()
 
 
 def default_daemon_processes(

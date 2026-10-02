@@ -21,6 +21,7 @@ from claude_code_hooks_daemon.utils.stale_checkouts import (
     DaemonProcess,
     StaleDaemon,
     StaleWorktree,
+    _last_commit_time,
     collect_stale_report,
     default_daemon_processes,
     find_stale_daemons,
@@ -344,6 +345,21 @@ def _dead(_pid: int) -> bool:
 
 def _no_daemons() -> tuple[DaemonProcess, ...]:
     return ()
+
+
+class TestLastCommitTime:
+    @pytest.mark.parametrize("printed", ["", "not-a-time", "1.5", "-3", "١٢٣"])
+    def test_output_that_is_not_whole_epoch_seconds_is_no_time(self, printed: str) -> None:
+        def run_fn(cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
+            return subprocess.CompletedProcess(args, 0, stdout=f"{printed}\n", stderr="")
+
+        assert _last_commit_time(Path("/repo"), "b", run_fn) is None
+
+    def test_whole_epoch_seconds_is_the_time(self) -> None:
+        def run_fn(cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
+            return subprocess.CompletedProcess(args, 0, stdout="1700000000\n", stderr="")
+
+        assert _last_commit_time(Path("/repo"), "b", run_fn) == 1700000000.0
 
 
 class TestFindStaleDaemons:
