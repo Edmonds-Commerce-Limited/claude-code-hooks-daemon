@@ -49,7 +49,7 @@ from claude_code_hooks_daemon.core.utils import get_bash_command
 from claude_code_hooks_daemon.utils.command_evasion import git_subcommand_index
 from claude_code_hooks_daemon.utils.git_commit_parsing import (
     commits_working_tree,
-    extract_commit_pathspecs,
+    extract_commit_form,
     tokenise_command,
 )
 from claude_code_hooks_daemon.utils.git_repo import run_git
@@ -86,7 +86,8 @@ def recorded_config_source(command: str, config_path: str) -> RecordedSource | N
       with ``-a`` -- and a gate reading only the index sees nothing.
     * ``git commit <pathspec>`` records the WORKING TREE of those paths only.
       When the config is not among them the commit cannot carry a config
-      change at all, and None says so.
+      change at all, and None says so. With ``--include`` it records the
+      index too, so a config not named is read from the index.
     * anything else records the INDEX.
     """
     tokens = tokenise_command(command)
@@ -99,12 +100,14 @@ def recorded_config_source(command: str, config_path: str) -> RecordedSource | N
     if commits_working_tree(tokens[subcommand_index + 1 :]):
         return RecordedSource.WORKING_TREE
 
-    pathspecs = extract_commit_pathspecs(command)
-    if not pathspecs:
+    form = extract_commit_form(command)
+    if not form.pathspecs:
         return RecordedSource.INDEX
-    if any(_pathspec_covers(spec, config_path) for spec in pathspecs):
+    if any(_pathspec_covers(spec, config_path) for spec in form.pathspecs):
         return RecordedSource.WORKING_TREE
-    return None
+    # `--include` records the index as well, so a config staged earlier lands
+    # even though no pathspec names it.
+    return RecordedSource.INDEX if form.include else None
 
 
 def _commit_subcommand_index(tokens: list[str]) -> int | None:

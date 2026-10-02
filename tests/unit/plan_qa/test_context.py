@@ -15,7 +15,8 @@ from claude_code_hooks_daemon.plan_qa.context import (
     sweep_context,
 )
 from claude_code_hooks_daemon.plan_qa.gitfacts import GitFacts
-from claude_code_hooks_daemon.plan_qa.types import Level
+from claude_code_hooks_daemon.plan_qa.types import CheckContext, Level
+from claude_code_hooks_daemon.utils.git_commit_parsing import extract_commit_pathspecs
 
 
 @dataclass(frozen=True)
@@ -628,6 +629,48 @@ class TestStagedContextReadsTheCommittedTree:
 
         assert context.tree is not None
         assert [folder.number for folder in context.tree.folders] == [1]
+
+    @staticmethod
+    def _statuses(context: CheckContext) -> list[str | None]:
+        assert context.tree is not None
+        return [f.doc.status_raw if f.doc else None for f in context.tree.folders]
+
+    def test_a_pathspec_relative_to_a_cd_still_reads_the_disk(self, tmp_path: Path) -> None:
+        root = self._committed(tmp_path)
+        plan = root / "CLAUDE/Plan/00001-first/PLAN.md"
+        plan.write_text("# Plan 00001: first\n\n**Status**: Blocked\n")
+        command = "cd CLAUDE/Plan && git commit -m x 00001-first/PLAN.md"
+
+        context = staged_context(
+            root, "CLAUDE/Plan", _Policy(), pathspecs=extract_commit_pathspecs(command)
+        )
+
+        assert self._statuses(context) == ["Blocked"]
+
+    def test_a_pathspec_under_git_dash_c_still_reads_the_disk(self, tmp_path: Path) -> None:
+        root = self._committed(tmp_path)
+        plan = root / "CLAUDE/Plan/00001-first/PLAN.md"
+        plan.write_text("# Plan 00001: first\n\n**Status**: Blocked\n")
+        command = "git -C CLAUDE/Plan commit -m x 00001-first/PLAN.md"
+
+        context = staged_context(
+            root, "CLAUDE/Plan", _Policy(), pathspecs=extract_commit_pathspecs(command)
+        )
+
+        assert self._statuses(context) == ["Blocked"]
+
+    def test_a_pathspec_commit_followed_by_a_bare_one_reads_the_disk(self, tmp_path: Path) -> None:
+        root = self._committed(tmp_path)
+        plan = root / "CLAUDE/Plan/00001-first/PLAN.md"
+        plan.write_text("# Plan 00001: first\n\n**Status**: Blocked\n")
+        _git(root, "add", str(plan))
+        command = "git commit -m x CLAUDE/Plan/README.md && git commit -m y"
+
+        context = staged_context(
+            root, "CLAUDE/Plan", _Policy(), pathspecs=extract_commit_pathspecs(command)
+        )
+
+        assert self._statuses(context) == ["Blocked"]
 
     def test_a_plan_directory_the_commit_does_not_record_is_missing(self, tmp_path: Path) -> None:
         root = self._committed(tmp_path)

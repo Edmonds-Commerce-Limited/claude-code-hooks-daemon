@@ -931,12 +931,6 @@
       "reason": "Plan 00284: ValueError from Path.relative_to means the edited file sits outside project_root -- a normal, expected 'not in documentation scope' outcome (e.g. a symlinked or otherwise foreign path), not an error condition. None is matches()'s existing signal to skip the handler, mirroring how docs_qa.corpus.is_in_scope treats the identical ValueError."
     },
     {
-      "file": "docs_qa/context.py",
-      "function": "staged_context",
-      "rule": "silent-fallback",
-      "reason": "Plan 00284 Task 3.1e: a pathspec'd git-commit path that cannot be read (deleted between git-diff and the read, permission error, race) has no content to check -- OSError maps to None, the same 'nothing to check' outcome the surrounding loop already gives a path with no staged content. The commit itself is not affected; this only decides whether THIS check has something to verify, and the caller (docs_qa_commit_gate) has its own fail-open contract for the whole gate."
-    },
-    {
       "file": "handlers/pre_tool_use/artifact_publish_blocker.py",
       "function": "_ensure_source_disable",
       "rule": "return-none-on-error",
@@ -1217,6 +1211,36 @@
       "function": "write_new_file_never_overwrite",
       "rule": "log-and-continue",
       "reason": "Plan 00460 review finding m3: after O_CREAT|O_EXCL already created the file on disk, an OSError from the content write must not leave a truncated/empty file behind for find_persisted_report to later cite as though it were a complete reply -- so the write-failure branch (already covered by the return-none-on-error entry above) additionally attempts candidate.unlink(missing_ok=True). If even THAT fails (a second, independent filesystem error), logging and continuing to the same None return is correct: the outer branch is already returning None and logging the original write failure, and a cleanup failure on top of an already-fail-open path must not escalate to raising. Covered by test_removes_a_partial_file_when_the_content_write_fails."
+    },
+    {
+      "file": "utils/usage_pause_gate.py",
+      "function": "untracked_dir",
+      "rule": "return-none-on-error",
+      "reason": "Plan 00479 review M1: a pause only ever restricts, so no project context means 'no pause'. Raising would propagate out of a SAFETY+BLOCKING handler, which the chain turns into a DENY of every tool. Logged at debug. Covered by the no-project-context tests of each gate."
+    },
+    {
+      "file": "utils/usage_pause_gate.py",
+      "function": "active_usage_pause",
+      "rule": "return-none-on-error",
+      "reason": "Plan 00479 review M1: every read of the pause record fails OPEN (not paused) with a warning on OSError/ValueError/RuntimeError, because the chain turns an exception from a SAFETY+BLOCKING handler into a DENY and a broken record would then lock the session out. Covered by TestAnyReadErrorFailsOpen and each gate's read-error test."
+    },
+    {
+      "file": "utils/usage_pause_gate.py",
+      "function": "start_pause",
+      "rule": "return-none-on-error",
+      "reason": "Plan 00479: a record that cannot be written means no pause is entered (warned), because the other gates read that record and a directive without one could not be enforced. Fail open by design; covered by TestStartPause."
+    },
+    {
+      "file": "utils/usage_pause_gate.py",
+      "function": "start_pause",
+      "rule": "log-and-continue",
+      "reason": "Plan 00479 round 2 N3: after a record is written but cannot be read back, start_pause removes it best-effort so no unreadable record lingers. If that removal also fails (a second, independent filesystem error) logging and continuing to the same None return is correct: the pause is already refused and the original failure is already logged, so raising would turn a fault into a chain DENY of the call. Covered by test_a_record_that_cannot_be_read_back_is_no_pause."
+    },
+    {
+      "file": "utils/usage_pause_gate.py",
+      "function": "try_start_pause",
+      "rule": "return-none-on-error",
+      "reason": "Plan 00479 review M1: entry runs inside a SAFETY+BLOCKING handler's matches(); any failure evaluating the ceiling means 'not pausing' (warned), never an exception the chain would turn into a DENY. Covered by TestStartPause."
     },
     {
       "file": "handlers/subagent_stop/subagent_report_size_blocker.py",

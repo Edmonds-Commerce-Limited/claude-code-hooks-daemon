@@ -63,6 +63,7 @@ from claude_code_hooks_daemon.utils.cron_hosts import effective_hostname
 from claude_code_hooks_daemon.utils.cron_tick import TickKind, classify_tick, tick_sentinel
 from claude_code_hooks_daemon.utils.git_facts import project_relative_head_text
 from claude_code_hooks_daemon.utils.scratch_dir import acceptance_path
+from claude_code_hooks_daemon.utils.usage_pause_gate import hook_is_usage_paused
 
 logger = logging.getLogger(__name__)
 
@@ -555,7 +556,13 @@ class RecoveryCronAdvisorHandler(PostToolUseHandlerBase):
         Matches when _detect_lifecycle_phase returns a non-None phase.  The
         detected phase is cached on the instance and reused by handle() for the
         same event, so detection runs once per event rather than twice.
+
+        Never while the session is paused on its usage ceiling (Plan 00479): the
+        advice is to establish the failsafe cron the pause just removed.
         """
+        if hook_is_usage_paused(hook_input):
+            self._cached_phase = None
+            return False
         self._cached_phase = _detect_lifecycle_phase(hook_input, self._plan_dir())
         return self._cached_phase is not None
 

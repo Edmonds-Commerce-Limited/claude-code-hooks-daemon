@@ -38,6 +38,15 @@ Full write-ups are in [NIGGLES.md](NIGGLES.md). One line each here:
 
 | #          | Verdict                                                                                                          | Origin              | Status                      |
 | ---------- | ---------------------------------------------------------------------------------------------------------------- | ------------------- | --------------------------- |
+| N307       | In a command with two `git commit`s, the second commit's pathspecs are never scanned                             | N299 review         | ⬜ Open                     |
+| N306       | The commit-move reader records both directories of `cd a \|\| cd b`                                              | N299 review         | ⬜ Open (in N299 round 2)   |
+| N305       | `staged_lint_gate` judges a `cd other-repo && git commit` as this repository's commit                            | N299 agent          | ⬜ Open                     |
+| N304       | `guard_config_commit_gate` misses `cd .claude && git commit hooks-daemon.yaml`                                   | N299 agent          | ⬜ Open                     |
+| N303       | The pause-gate merge left a PreToolUse handler unclassified; main was red (N278/N297 again)                      | N299 agent          | ✅ Fixed (1c4f8e25f)        |
+| N302       | `subagent_full_qa_blocker` reads `grep -c` / `awk -e` as interpreter inline code (advisory noise)                | P483 triage, Fable  | ⬜ Open                     |
+| N301       | Each commit gate checks every pathspec with two git calls per path, separately                                   | N245 review         | ⬜ Open                     |
+| N300       | `remote_docs_commit_gate` judges a nested worktree's commit against this repository                              | N245 review         | ⬜ Open                     |
+| N299       | After `cd sub`, `sensitive_content` resolves `git commit -m x f.txt` from the repo root                          | N245 review         | ⬜ Open                     |
 | N298       | `R-PLAN-NUMBER-DISCOVERY` denies a read-only `ls CLAUDE/Plan/*/PLAN.md`, even as quoted text                     | P483 triage         | ⬜ Open                     |
 | N297       | The coordinator merged `merge_qa_advisor` without a targeted run; main failed two tests (N278 again)             | Coordinator         | ✅ Fixed (3dadb3d8c)        |
 | N296       | `audit_error_hiding.py` sees log-and-continue only as a direct `logger.<level>()`; a helper call evades it       | N294 review         | ⬜ Open                     |
@@ -80,7 +89,7 @@ Full write-ups are in [NIGGLES.md](NIGGLES.md). One line each here:
 | N265       | `secret_file_guard` spends about 2.2 s of CPU on one realistic Python program                                    | N101 CI red         | ✅ Fixed (e39b1f98f)        |
 | N264       | A sub-agent's edits landed, uncommitted, in another branch's worktree                                            | 00466 landing       | ✅ Fixed (7ebef17fb)        |
 | N246       | Plan and docs QA judge a same-command `git add` as two partial trees                                             | Carried, N53 branch | ⬜ Open                     |
-| N245       | A pathspec commit is judged on the index as well as the named paths                                              | Carried, N53 branch | ⬜ Open                     |
+| N245       | A pathspec commit is judged on the index as well as the named paths                                              | Carried, N53 branch | ✅ Fixed (17b0aa491)        |
 | N244       | The QA commit gates judge the disk, not the tree the commit records                                              | Carried, N53 branch | ✅ Fixed (52fd9cd9b)        |
 | N189       | No commit gate sees a commit hidden in text only bash reads (`bash -c "$X"`)                                     | Carried, N53 branch | ✅ Dismissed (threat model) |
 | N177       | No commit gate sees a commit after a `case` inside `function f {` in `$( )`                                      | Carried, N53 branch | ✅ Dismissed (threat model) |

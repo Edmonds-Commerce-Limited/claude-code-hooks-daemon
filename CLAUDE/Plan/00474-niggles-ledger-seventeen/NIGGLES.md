@@ -710,7 +710,7 @@ Recorded only on `worktree-n466-n53`, which was dropped. Their write-ups are kep
 verbatim in [CARRIED-N53-BRANCH.md](CARRIED-N53-BRANCH.md). Five were remedied on
 that branch only, so all seven are open on `main`.
 
-**Status**: N244 and N245 fixed; N135, N176, N177 and N189 dismissed; N246 open. See below.
+**Status**: N244 and N245 fixed (merges 52fd9cd9b, 17b0aa491); N135, N176, N177 and N189 dismissed; N246 open. See below.
 
 - **N244**: **Fixed** (merge 52fd9cd9b). On a bare `git commit`, plan QA now scans
   the INDEX instead of the disk. It uses one `ls-files -s` and one `cat-file --batch`
@@ -721,7 +721,18 @@ that branch only, so all seven are open on `main`.
   and the journal lookups in `checks/common.py`). Report:
   [subagent-reports/261002-n244-committed-tree-sonnet.md](subagent-reports/261002-n244-committed-tree-sonnet.md).
 
-- **N245, N246**: in progress on `worktree-n245-pathspec`.
+- **N245**: **Fixed** (merge 17b0aa491). A pathspec commit (`git commit -m x a.txt`,
+  `--only`, `--include`) is judged on the named paths only, in `sensitive_content`,
+  `staged_lint_gate`, `remote_docs_commit_gate`, `guard_config_commit_gate` and docs QA.
+  Plan QA keeps reading the disk for the pathspec form; round 3 found the index read
+  regressed it, so that part was taken out rather than opening a fourth round. Three Opus
+  review rounds. The branch's `llm_qa changed` run was red on two items, both
+  checked: generated-doc drift that main had already fixed (none after the merge), and
+  four files `changed_tests` calls too broad to map. All 2632 selected tests passed, and
+  the 638 touched tests pass on merged main. Round 3's follow-ups are N299–N301. Report:
+  [subagent-reports/261002-n245-pathspec-sonnet.md](subagent-reports/261002-n245-pathspec-sonnet.md).
+
+- **N246**: open.
 
 - **N135, N176, N177, N189: ✅ Dismissed. They are out of scope under the owner's
   threat-model ruling**
@@ -1240,7 +1251,9 @@ This is the N278 failure again: a branch merged with its targeted QA never run. 
 built to catch that was not loaded yet when it merged.
 
 **Status**: ✅ Fixed. The priority is now 59 (47ae8e2c7) and the handler is classified
-(3dadb3d8c). The advisor is now live and fired on every merge since. The coordinator now runs
+(3dadb3d8c). The priority fix itself then repeated the mistake: it changed the handler set
+without regenerating `.claude/HOOKS-DAEMON.md`, so `generated_doc_drift` failed on main until
+1dc459a7a. The advisor is now live and fired on every merge since. The coordinator now runs
 `llm_qa.py changed` over each merge whose touched code reaches a core or cross-cutting file.
 
 ### N298 — `R-PLAN-NUMBER-DISCOVERY` denies read-only listings of plan files, even inside quoted text
@@ -1260,3 +1273,101 @@ exists to stop a scan that derives the next plan number (`ls | sort | tail`). A 
 or quoted text, is neither.
 
 **Status**: ⬜ Open (Plan 00483 Phase 3: narrow the match to number-discovery shapes).
+
+### N299 — `sensitive_content` resolves a pathspec from the repository root after a `cd`
+
+**Source**: N245 review round 3
+([subagent-reports/261002-n245-review3-opus.md](subagent-reports/261002-n245-review3-opus.md)).
+
+**Evidence**: `cd sub && git commit -m x f.txt` is denied when the ROOT-level `f.txt` holds
+a term, although the commit records `sub/f.txt`. Main allowed it before N245. This is an
+ordinary command shape, so the false positive is in scope.
+
+**Status**: ⬜ Open. Resolve the pathspec from the directory the command `cd`s into.
+
+### N300 — `remote_docs_commit_gate` does not stand down for a commit in a nested worktree
+
+**Source**: N245 review round 3.
+
+**Evidence**: when the commit runs inside a nested worktree (another repository from the
+daemon's point of view), `staged_lint_gate` stands down and `remote_docs_commit_gate`
+judges it against this repository. Main had the same wrong-repository behaviour, so N245
+did not cause it.
+
+**Status**: ⬜ Open.
+
+### N301 — the "every pathspec matches" check costs two git calls per path, in every gate
+
+**Source**: N245 review round 3.
+
+**Evidence**: each commit gate runs its own match check, two git calls per named path. That
+is about 0.25 s per gate for 60 paths on a tiny repository, multiplied by the number of gates.
+
+**Status**: ⬜ Open. Compute the match once per command and share it, or use one `ls-files`
+call for all the paths.
+
+### N302 — the full-QA advisory reads `grep -c` and `awk -e` as inline interpreter code
+
+**Source**: the Plan 00483 triage agent and the Fable rulings agent each saw it independently.
+
+**Evidence**: `subagent_full_qa_blocker` emits "UNSEEN: unrecognised-interpreter-inline-code"
+on read-only `grep -c`, `awk` and `--help` commands from a subagent. It treats `-c` and `-e` as an
+interpreter's inline-code flag whatever the command is. It is advisory only, but it fires
+on ordinary reads and teaches agents to ignore it.
+
+**Status**: ⬜ Open. Treat `-c`/`-e` as inline code only after a known interpreter.
+
+### N303 — the pause-gate merge left `UsagePauseToolGateHandler` unclassified; main was red
+
+**Source**: the N299 agent's `llm_qa changed` run, then the coordinator reproduced it on main.
+
+**Evidence**: `test_blocking_handler_evasion.py::TestEveryHandlerIsClassified` failed on main
+from merge 506fd3f5e (Plan 00479 Phase 4) until 1c4f8e25f. The new PreToolUse handler was
+never triaged for command-respelling evasion. This is N278 and N297 again: a merge that adds a
+handler reached main without a green targeted run on the merged head.
+
+**Status**: ✅ Fixed (1c4f8e25f; classified as not command-anchored, verified that the handler
+never reads `tool_input`). The coordinator then ran `llm_qa changed --range 4440d58cf..HEAD`
+over everything merged since. The lasting remedy (a merge that adds a handler cannot land without a
+green run) is Plan 00475 Task 4.2, which waits on the owner.
+
+### N304 — `guard_config_commit_gate` compares pathspecs to the config path as root-relative text
+
+**Source**: N299 agent.
+
+**Evidence**: `_pathspec_covers` compares each pathspec to `.claude/hooks-daemon.yaml` as text from
+the repository root, so `cd .claude && git commit -m x hooks-daemon.yaml` is not seen as covering
+the config, and the gate reads no config change. This is an existing miss, not something N299 caused.
+
+**Status**: ⬜ Open. Resolve the pathspecs with `pathspec_directory`, as N299 did for the
+other gates.
+
+### N305 — `staged_lint_gate._is_foreign_repo` ignores the command's own `cd` / `-C`
+
+**Source**: N299 agent.
+
+**Evidence**: the stand-down looks at the hook's working directory only. A `cd other-repo && git commit` from this checkout is linted as this repository's commit. N300 fixed the same gap in
+`remote_docs_commit_gate`.
+
+**Status**: ⬜ Open. Use the same post-move check as N300.
+
+### N306 — the commit-move reader records both directories of `cd a || cd b`
+
+**Source**: N299 review
+([subagent-reports/261002-n299-review-opus.md](subagent-reports/261002-n299-review-opus.md)).
+
+**Evidence**: with `cd a || cd b && git commit …`, only one `cd` runs, but the reading records
+both as moves taken. This was already wrong on main. N299 round 2 handles it by treating any
+uncertain move as unknown and judging both directories.
+
+**Status**: ⬜ Open (folded into N299 round 2).
+
+### N307 — the second commit in one command has its pathspecs left unscanned
+
+**Source**: N299 review.
+
+**Evidence**: when one Bash command runs two `git commit`s, only the first commit's pathspecs are
+judged. A `git commit -m a x.txt && git commit -m b y.txt` never scans `y.txt` as a pathspec
+commit. This was already wrong on main, and it is an ordinary shape.
+
+**Status**: ⬜ Open.

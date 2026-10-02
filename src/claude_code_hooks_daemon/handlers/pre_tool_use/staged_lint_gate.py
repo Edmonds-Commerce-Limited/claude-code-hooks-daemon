@@ -58,7 +58,9 @@ from claude_code_hooks_daemon.utils.command_evasion import (
     GIT_INVOCATION,
     normalise_line_continuations,
 )
-from claude_code_hooks_daemon.utils.git_repo import GitRepo, run_git
+from claude_code_hooks_daemon.utils.git_commit_parsing import read_commit_form
+from claude_code_hooks_daemon.utils.git_facts import commit_facts
+from claude_code_hooks_daemon.utils.git_repo import GitRepo
 from claude_code_hooks_daemon.utils.path_predicates import path_exists
 from claude_code_hooks_daemon.utils.shell_segmentation import split_unquoted
 
@@ -85,9 +87,9 @@ _GIT_COMMIT_PATTERN: Final[re.Pattern[str]] = re.compile(
     rf"{COMMAND_POSITION}{GIT_INVOCATION}commit(?=\s|$)"
 )
 
-# `git diff --cached --diff-filter=ACM` letters: Added, Copied, Modified. A
-# Deleted or Renamed-away path has nothing left on disk to check.
-_DIFF_FILTER: Final[str] = "ACM"
+# `git diff --name-status` letters: Added, Copied, Modified. A Deleted or
+# Renamed-away path has nothing left on disk to check.
+_RECORDED_STATUSES: Final[str] = "ACM"
 
 # Directory holding the console scripts of the environment running the
 # daemon, mirroring `lint_on_edit`'s resolution order: the project venv
@@ -173,13 +175,22 @@ class StagedLintGateHandler(PreToolUseHandlerBase):
         if self._is_foreign_repo(hook_input, project_root):
             return GatingResult(decision=Decision.ALLOW, context=[])
 
-        diff = run_git(
-            project_root, "diff", "--cached", "--name-only", f"--diff-filter={_DIFF_FILTER}"
+        # What the commit RECORDS, by its form (ledger 00474 N245): the index
+        # for a bare commit, the named paths for a pathspec commit, both for
+        # `--include`. A git that cannot answer yields no files, so nothing is
+        # linted and the commit goes through, as it always did.
+        facts = commit_facts(
+            read_commit_form(get_bash_command(hook_input) or ""),
+            project_root,
+            hook_input.get(HookInputField.CWD),
         )
-        if diff.returncode != 0:
-            return GatingResult(decision=Decision.ALLOW, context=[])
+        recorded = [
+            change.path
+            for change in facts.staged_changes()
+            if change.status[:1] in _RECORDED_STATUSES
+        ]
 
-        lintable = self._lintable_files(project_root, diff.stdout)
+        lintable = self._lintable_files(project_root, recorded)
         if not lintable:
             return GatingResult(decision=Decision.ALLOW, context=[])
 
@@ -236,14 +247,11 @@ class StagedLintGateHandler(PreToolUseHandlerBase):
         return "\n".join(lines)
 
     def _lintable_files(
-        self, project_root: Path, staged_stdout: str
+        self, project_root: Path, recorded: list[str]
     ) -> list[tuple[str, LintStrategy]]:
-        """Staged Added/Copied/Modified files a registered strategy handles."""
+        """Recorded Added/Copied/Modified files a registered strategy handles."""
         found: list[tuple[str, LintStrategy]] = []
-        for relpath in staged_stdout.splitlines():
-            relpath = relpath.strip()
-            if not relpath:
-                continue
+        for relpath in recorded:
             abs_path = project_root / relpath
             # A staged file the daemon cannot stat is one the linter cannot
             # read either, so linting it would report a syntax error against

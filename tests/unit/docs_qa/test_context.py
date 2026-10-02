@@ -238,6 +238,52 @@ class TestStagedContext:
         )
         assert context.staged_documents == {"CLAUDE/A.md": "# A v2 unstaged\n"}
 
+    def test_include_adds_the_named_working_tree_to_the_whole_index(self, tmp_path: Path) -> None:
+        """Ledger 00474 N245: ``--include`` records the index plus the named paths' disk."""
+        root = tmp_path / "repo"
+        _init_repo(root)
+        (root / "CLAUDE").mkdir()
+        (root / "CLAUDE" / "A.md").write_text("# A\n")
+        (root / "CLAUDE" / "B.md").write_text("# B\n")
+        _git(root, "add", "-A")
+        _git(root, "commit", "-m", "initial")
+        (root / "CLAUDE" / "A.md").write_text("# A staged\n")
+        (root / "CLAUDE" / "B.md").write_text("# B staged\n")
+        _git(root, "add", "-A")
+        (root / "CLAUDE" / "A.md").write_text("# A on disk\n")
+
+        context = staged_context(
+            project_root=root,
+            policy=DocumentationPolicy(),
+            pathspecs=["CLAUDE/A.md"],
+            include=True,
+        )
+
+        assert context.staged_documents == {
+            "CLAUDE/A.md": "# A on disk\n",
+            "CLAUDE/B.md": "# B staged\n",
+        }
+
+    def test_a_pathspec_commit_leaves_out_a_staged_change_to_an_unnamed_document(
+        self, tmp_path: Path
+    ) -> None:
+        root = tmp_path / "repo"
+        _init_repo(root)
+        (root / "CLAUDE").mkdir()
+        (root / "CLAUDE" / "A.md").write_text("# A\n")
+        (root / "CLAUDE" / "B.md").write_text("# B\n")
+        _git(root, "add", "-A")
+        _git(root, "commit", "-m", "initial")
+        (root / "CLAUDE" / "A.md").write_text("# A on disk\n")
+        (root / "CLAUDE" / "B.md").write_text("# B staged\n")
+        _git(root, "add", "CLAUDE/B.md")
+
+        context = staged_context(
+            project_root=root, policy=DocumentationPolicy(), pathspecs=["CLAUDE/A.md"]
+        )
+
+        assert context.staged_documents == {"CLAUDE/A.md": "# A on disk\n"}
+
     def test_pathspecs_mode_unreadable_file_is_skipped(self, tmp_path: Path) -> None:
         from unittest.mock import patch
 

@@ -8,7 +8,8 @@ boundaries; documented in CLAUDE/HANDLER_DEVELOPMENT.md#priority-guide):
 - 0-9: Test fixtures (``Priority.TEST_HANDLER``), plus the Stop-family handlers
   that must run before a terminal Stop catch-all: ``cron_stop_enforcer``,
   ``cron_subagent_stop_enforcer``, ``teammate_reap_advisor``,
-  ``subagent_report_path_verifier``
+  ``subagent_report_path_verifier``, and the usage pause gates
+  (``usage_pause_gate``, ``usage_pause_tool_gate``, ``usage_pause_stop_gate``)
 - 10-20: Safety and critical handlers (destructive operations, auto-approval)
 - 25-35: Code quality and QA enforcement
 - 36-55: Workflow and process enforcement
@@ -132,6 +133,17 @@ class Priority:
     # (most-restrictive-wins) while every handler behind it still runs too.
     CRON_STOP_ENFORCER = 7
     CRON_SUBAGENT_STOP_ENFORCER = 7
+
+    # Plan 00479 Phase 4: the usage pause gates run FIRST on their events, for
+    # the same reason as the cron enforcers above -- a paused session must be
+    # judged before anything else gets a say. 9 on UserPromptSubmit and
+    # PreToolUse (a deny there must beat every side-effecting handler, and the
+    # halting deny must not be pre-empted by a terminal deny later in the
+    # band), 6 on Stop (below the cron enforcers and auto_continue_stop, all of
+    # which stand down while paused).
+    USAGE_PAUSE_GATE = 9
+    USAGE_PAUSE_TOOL_GATE = 9
+    USAGE_PAUSE_STOP_GATE = 6
 
     # Plan 00419 Task 1.7: the last free slot BELOW AUTO_CONTINUE_STOP's 10 in
     # this project's config, for the same shadowing reason as the pair above.

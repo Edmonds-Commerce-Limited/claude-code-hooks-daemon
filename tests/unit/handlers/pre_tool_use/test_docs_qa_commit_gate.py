@@ -23,8 +23,10 @@ from claude_code_hooks_daemon.docs_qa.policy import DocumentationPolicy, Documen
 from claude_code_hooks_daemon.handlers.pre_tool_use.docs_qa_commit_gate import (
     DocsQaCommitGateHandler,
     _extract_commit_message,
-    _extract_commit_pathspecs,
     _tokenise,
+)
+from claude_code_hooks_daemon.utils.git_commit_parsing import (
+    extract_commit_pathspecs as _extract_commit_pathspecs,
 )
 
 

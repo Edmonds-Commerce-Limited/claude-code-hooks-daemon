@@ -37,7 +37,7 @@ class ToolName:
         - Plan mode: EnterPlanMode, ExitPlanMode
         - Questions: AskUserQuestion
         - Notebook: NotebookEdit
-        - Session crons: CronDelete
+        - Session crons: CronDelete, CronList, CronCreate
     """
 
     # Command execution
@@ -65,6 +65,7 @@ class ToolName:
     TASK_LIST = "TaskList"
     TASK_OUTPUT = "TaskOutput"
     TASK_STOP = "TaskStop"
+    SEND_MESSAGE = "SendMessage"
 
     # Skills
     SKILL = "Skill"
@@ -85,10 +86,18 @@ class ToolName:
     # Publishing (renders a local file to a page hosted outside the project)
     ARTIFACT = "Artifact"
 
-    # Session crons. Only the DELETE name is carried here: it is the one a
-    # handler gates on, and it was confirmed to reach PreToolUse in this
-    # project's own verdict log rather than assumed from the tool's existence.
+    # Session crons. CronDelete was confirmed to reach PreToolUse in this
+    # project's own verdict log rather than assumed from the tool's existence;
+    # CronList and CronCreate are the other two the usage pause leaves open
+    # (Plan 00479 Task 4.2).
     CRON_DELETE = "CronDelete"
+    CRON_LIST = "CronList"
+    CRON_CREATE = "CronCreate"
+
+    # The three cron tools are DEFERRED built-ins whose schema loads only via
+    # ToolSearch (CLAUDE/Plan/Completed/00293-tool-inventory-disable-and-token-savings/
+    # RESEARCH-context-fat.md:382), so a session confined to them needs this too.
+    TOOL_SEARCH = "ToolSearch"
 
 
 # Type alias for valid tool names (for type checking)
@@ -109,6 +118,7 @@ ToolNameLiteral = Literal[
     "TaskList",
     "TaskOutput",
     "TaskStop",
+    "SendMessage",
     "Skill",
     "EnterPlanMode",
     "ExitPlanMode",
@@ -117,6 +127,9 @@ ToolNameLiteral = Literal[
     "LSP",
     "Artifact",
     "CronDelete",
+    "CronList",
+    "CronCreate",
+    "ToolSearch",
 ]
 
 

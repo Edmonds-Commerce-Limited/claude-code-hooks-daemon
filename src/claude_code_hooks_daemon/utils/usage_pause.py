@@ -69,6 +69,12 @@ WINDOWS: Final[frozenset[str]] = frozenset({WINDOW_FIVE_HOUR, WINDOW_SEVEN_DAY})
 #: late tick, and its end is the backstop for a gate that never got to clear.
 PAUSE_GRACE_SECONDS: Final[float] = 3600.0
 
+#: The longest a record may pause a session: ``resume_at - paused_at``. The
+#: longest real wait is the 7-day window plus the resume margin, so a record
+#: asking for more is corrupt or hand-edited and reads as no pause rather than
+#: silencing a session (and the supervisor) for years.
+MAX_PAUSE_SPAN_SECONDS: Final[float] = 8 * 86400.0
+
 
 @dataclass(frozen=True)
 class UsagePause:
@@ -140,6 +146,8 @@ def _validation_error(pause: UsagePause) -> str | None:
             return f"{name} must be a finite number, got {value!r}"
     if pause.resume_at <= pause.paused_at:
         return "resume_at must be after paused_at"
+    if pause.resume_at - pause.paused_at > MAX_PAUSE_SPAN_SECONDS:
+        return f"resume_at must be within {MAX_PAUSE_SPAN_SECONDS:g} s of paused_at"
     if not pause.reason.strip():
         return "a usage pause needs a reason"
     return None
@@ -222,10 +230,10 @@ def _read_records(path: Path) -> list[UsagePause]:
     A missing file is normal and silent. One that is present but unreadable or
     malformed is logged, since that is a fault someone should hear about.
     """
-    if not path.exists():
-        return []
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return []
     except (OSError, ValueError) as exc:
         logger.warning("usage_pause: unreadable record %s: %s", path, exc)
         return []
@@ -234,6 +242,76 @@ def _read_records(path: Path) -> list[UsagePause]:
         logger.warning("usage_pause: malformed record %s ignored", path)
         return []
     return [pause]
+
+
+#: The owner's override marker (``hooks-daemon usage-pause clear``): while it is valid no gate
+#: starts a pause for the session. Its own suffix, so the supervisor's reader of
+#: :data:`SIGNAL_SUFFIX` files never sees it.
+OVERRIDE_SUFFIX: Final[str] = ".usage-override"
+FIELD_UNTIL: Final[str] = "until"
+
+
+def override_path(daemon_untracked_dir: Path, session_id: str) -> Path:
+    """The override marker's path for ``session_id``."""
+    return daemon_untracked_dir / SIGNAL_SUBDIR / f"{_session_stem(session_id)}{OVERRIDE_SUFFIX}"
+
+
+def write_usage_override(
+    daemon_untracked_dir: Path, session_id: str, *, until: float, now: float
+) -> float:
+    """Record that the owner overrode the pause for ``session_id`` until ``until``.
+
+    ``until`` is capped at ``now + MAX_PAUSE_SPAN_SECONDS``, like a pause.
+
+    Returns:
+        The end time actually recorded.
+
+    Raises:
+        ValueError: no session id, a non-finite time, or ``until`` not after ``now``.
+        OSError: the write failed.
+    """
+    if not session_id.strip():
+        raise ValueError("a usage override needs a session id")
+    if _as_number(until) is None or _as_number(now) is None or until <= now:
+        raise ValueError(f"an override must end after now ({now!r}), got {until!r}")
+    capped = min(until, now + MAX_PAUSE_SPAN_SECONDS)
+    final_path = override_path(daemon_untracked_dir, session_id)
+    final_path.parent.mkdir(parents=True, exist_ok=True)
+    payload: dict[str, object] = {FIELD_SESSION_ID: session_id, FIELD_UNTIL: capped}
+    tmp_path = unique_temp_path(final_path)
+    try:
+        tmp_path.write_text(json.dumps(payload), encoding="utf-8")
+        tmp_path.replace(final_path)
+    except OSError:
+        tmp_path.unlink(missing_ok=True)
+        raise
+    return capped
+
+
+def usage_override_active(daemon_untracked_dir: Path, session_id: str, *, now: float) -> bool:
+    """Whether the owner's override covers ``session_id`` at ``now``.
+
+    Fails toward NOT pausing: a marker that exists but cannot be read counts as an
+    override (a warning says so), because the alternative is pausing a session the
+    owner just released. A malformed marker is ignored.
+    """
+    if not session_id:
+        return False
+    path = override_path(daemon_untracked_dir, session_id)
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return False
+    except OSError as exc:
+        logger.warning("usage_pause: unreadable override %s, treating it as active: %s", path, exc)
+        return True
+    except ValueError as exc:
+        logger.warning("usage_pause: malformed override %s ignored: %s", path, exc)
+        return False
+    if not isinstance(raw, dict) or raw.get(FIELD_SESSION_ID) != session_id:
+        return False
+    until = _as_number(raw.get(FIELD_UNTIL))
+    return until is not None and now < until
 
 
 def clear_usage_pause(daemon_untracked_dir: Path, session_id: str) -> bool:

@@ -55,7 +55,13 @@ from claude_code_hooks_daemon.remote_docs.provenance import (
 from claude_code_hooks_daemon.utils import secret_file_matching as sfm
 from claude_code_hooks_daemon.utils import secret_redaction as sr
 from claude_code_hooks_daemon.utils.command_evasion import OPTIONAL_PATH, git_subcommand_index
-from claude_code_hooks_daemon.utils.git_commit_parsing import commits_working_tree
+from claude_code_hooks_daemon.utils.git_commit_parsing import (
+    CommitForm,
+    CommitReading,
+    commits_working_tree,
+    read_commit_form,
+)
+from claude_code_hooks_daemon.utils.git_facts import NO_RELATIVE, GitFactsBase, commit_facts
 from claude_code_hooks_daemon.utils.git_repo import GitRepo, run_git
 from claude_code_hooks_daemon.utils.message_files import read_message_files
 from claude_code_hooks_daemon.utils.path_containment import path_relative_to
@@ -63,6 +69,7 @@ from claude_code_hooks_daemon.utils.path_exclusion import (
     handler_excludes_path,
     resolve_project_root,
 )
+from claude_code_hooks_daemon.utils.path_predicates import read_text_or_reason
 from claude_code_hooks_daemon.utils.realpath import has_symlink_loop, realpath
 from claude_code_hooks_daemon.utils.scratch_dir import acceptance_path
 
@@ -345,6 +352,23 @@ class _StagedSelection(NamedTuple):
     narrowable: bool
 
 
+class _ScanPass(NamedTuple):
+    """One question put to git about what a commit records.
+
+    ``target`` is the ``git diff`` target the added lines are taken against.
+    ``pathspecs`` restrict the question to the paths a pathspec commit names,
+    asked from ``directory`` because those are relative to the command's own
+    directory. ``skip`` leaves out paths another pass answers for: under
+    ``--include`` the index pass must not read a named path's staged content,
+    which the commit replaces with the working tree's.
+    """
+
+    target: str
+    pathspecs: tuple[str, ...] = ()
+    directory: Path | None = None
+    skip: frozenset[str] = frozenset()
+
+
 class _Haystack(NamedTuple):
     """One piece of text a tool call would introduce, and what to call it.
 
@@ -380,8 +404,8 @@ def _shell_tokens(command: str) -> list[str]:
         return command.split()
 
 
-def _is_git_commit(command: str) -> tuple[bool, bool]:
-    """``(is a git commit, commits the working tree via -a/--all)``.
+def _commit_options(command: str) -> list[str] | None:
+    """The arguments after ``commit`` of the first ``git commit`` in ``command``, else None.
 
     Locates the subcommand exactly as
     :meth:`SensitiveContentHandler._writes_git_metadata` does, but over SHELL
@@ -399,8 +423,16 @@ def _is_git_commit(command: str) -> tuple[bool, bool]:
         subcommand_index = git_subcommand_index(tokens, position)
         if subcommand_index is None or tokens[subcommand_index] != _GIT_COMMIT_SUBCOMMAND:
             continue
-        return True, commits_working_tree(tokens[subcommand_index + 1 :])
-    return False, False
+        return tokens[subcommand_index + 1 :]
+    return None
+
+
+def _is_git_commit(command: str) -> tuple[bool, bool]:
+    """``(is a git commit, commits the working tree via -a/--all)``."""
+    options = _commit_options(command)
+    if options is None:
+        return False, False
+    return True, commits_working_tree(options)
 
 
 def _is_octal_escape(text: str) -> bool:
@@ -837,7 +869,12 @@ class SensitiveContentHandler(PreToolUseHandlerBase):
             haystacks.extend(self._message_file_haystacks(command, hook_input))
         is_commit, commits_all = _is_git_commit(command)
         if is_commit:
-            haystacks.extend(self._staged_content_haystacks(hook_input, commits_all))
+            reading = (
+                CommitReading(CommitForm(), certain=True)
+                if commits_all
+                else read_commit_form(command)
+            )
+            haystacks.extend(self._staged_content_haystacks(hook_input, commits_all, reading))
         return haystacks
 
     def _message_file_haystacks(self, command: str, hook_input: dict[str, Any]) -> list[_Haystack]:
@@ -886,7 +923,7 @@ class SensitiveContentHandler(PreToolUseHandlerBase):
         return raw.decode(_BODY_FILE_ENCODING, errors=_BODY_FILE_DECODE_ERRORS)
 
     def _staged_content_haystacks(
-        self, hook_input: dict[str, Any], commits_all: bool
+        self, hook_input: dict[str, Any], commits_all: bool, reading: CommitReading
     ) -> list[_Haystack]:
         """The ADDED lines of every file this commit would record.
 
@@ -895,8 +932,8 @@ class SensitiveContentHandler(PreToolUseHandlerBase):
         No repository, or a git failure, means nothing to judge -- git owns
         that failure.
 
-        Two questions, cheapest first. ``--numstat`` returns one line count
-        per path and no content whatever, which is enough to drop a binary
+        Two questions per pass, cheapest first. ``--numstat`` returns one line
+        count per path and no content whatever, which is enough to drop a binary
         blob, an excluded path and anything the bounds already exclude BEFORE
         git is asked for a byte of it. The patch call then names only the
         survivors, so ``MAX_STAGED_FILE_BYTES``/``MAX_STAGED_TOTAL_BYTES``
@@ -905,12 +942,92 @@ class SensitiveContentHandler(PreToolUseHandlerBase):
         repo_root = self._commit_repo_root(hook_input)
         if repo_root is None:
             return []
-        target = _WORKING_TREE_TARGET if commits_all else _INDEX_TARGET
-        return self._scan_staged_paths(
-            repo_root, target, self._select_staged_paths(repo_root, target)
-        )
+        directory = self._commit_directory(hook_input) or repo_root
+        facts = commit_facts(reading, repo_root, directory)
+        haystacks: list[_Haystack] = []
+        for scan in self._recorded_passes(directory, commits_all, reading.form, facts):
+            haystacks.extend(
+                self._scan_staged_paths(
+                    repo_root, scan.target, self._select_staged_paths(repo_root, scan)
+                )
+            )
+        if not commits_all:
+            haystacks.extend(self._resurrected_haystacks(repo_root, facts))
+        return haystacks
 
-    def _select_staged_paths(self, repo_root: Path, target: str) -> _StagedSelection:
+    def _resurrected_haystacks(self, repo_root: Path, facts: GitFactsBase) -> list[_Haystack]:
+        """The whole file of each named path the index lacks but the disk has.
+
+        ``git rm --cached p`` then an edit: ``git commit p`` records the working
+        tree's ``p``, which a diff against HEAD can only call deleted, so the
+        passes above see no added line in it. The same exclusions and per-file
+        bound apply as to any other recorded path.
+        """
+        haystacks: list[_Haystack] = []
+        protected_patterns = sfm.resolve_configured_patterns()
+        for relpath in sorted(facts.resurrected_paths() or ()):
+            abs_path = str(repo_root / relpath)
+            if (
+                self._is_excluded(abs_path)
+                or self._is_secret_list_itself(abs_path)
+                or sfm.path_is_protected(abs_path, protected_patterns)
+            ):
+                continue
+            text = read_text_or_reason(abs_path, errors=_BODY_FILE_DECODE_ERRORS).text
+            if not text or len(text.encode(_BODY_FILE_ENCODING)) > MAX_STAGED_FILE_BYTES:
+                continue
+            haystacks.append(_Haystack(subject=f"staged content of {relpath}", text=text))
+        return haystacks
+
+    @staticmethod
+    def _recorded_passes(
+        directory: Path, commits_all: bool, form: CommitForm, facts: GitFactsBase
+    ) -> list[_ScanPass]:
+        """The questions that, together, cover every line the commit records.
+
+        * ``-a``: the working tree against HEAD.
+        * bare: the index against HEAD.
+        * ``git commit <pathspec>``: HEAD with the named paths' working-tree
+          content, so only the named paths' working tree against HEAD. A term
+          staged in a path it does not name never lands, and one in a named
+          path's unstaged edit does (ledger 00474 N245).
+        * ``--include``: the same, plus the index for every path NOT named.
+        * a pathspec held in a file, which this guard cannot read: the index
+          and the working tree both, each over everything, a superset of any
+          form the file could select.
+
+        A reading that is not certain (a second commit, a ``cd`` or ``-C``
+        before it, a pathspec the shell builds, one that matches nothing, or a
+        git that cannot answer) is judged as the index PLUS the named paths'
+        working tree, never less than the index alone.
+        """
+        index = _ScanPass(target=_INDEX_TARGET)
+        if commits_all:
+            return [_ScanPass(target=_WORKING_TREE_TARGET)]
+        if form.pathspec_from_file:
+            return [index, _ScanPass(target=_WORKING_TREE_TARGET)]
+        if not form.pathspecs:
+            return [index]
+        if facts.union:
+            return [
+                index,
+                _ScanPass(
+                    target=_WORKING_TREE_TARGET,
+                    pathspecs=form.pathspecs,
+                    directory=facts.repo_root,
+                ),
+            ]
+        named = facts.named_paths()
+        if not named:
+            return [index]
+        recorded = _ScanPass(
+            target=_WORKING_TREE_TARGET, pathspecs=form.pathspecs, directory=directory
+        )
+        if form.include:
+            return [_ScanPass(target=_INDEX_TARGET, skip=named), recorded]
+        return [recorded]
+
+    def _select_staged_paths(self, repo_root: Path, scan: _ScanPass) -> _StagedSelection:
         """The staged paths worth fetching, from ``--numstat`` line counts.
 
         An added line costs at least the newline that ends it, so a line COUNT
@@ -919,15 +1036,23 @@ class SensitiveContentHandler(PreToolUseHandlerBase):
         so everything surviving here is still measured exactly in
         :meth:`_scan_staged_paths` once its text is in hand -- this pass can
         drop a file early, never admit one the bounds exclude.
+
+        A pathspec pass asks from the command's own directory, where its
+        pathspecs mean what the commit takes them to mean; ``--numstat`` names
+        paths from the repository root either way, so the rest of the scan,
+        which names them back to git literally, runs from ``repo_root``.
         """
+        pathspec_args = (_END_OF_OPTIONS, *scan.pathspecs) if scan.pathspecs else ()
         result = run_git(
-            repo_root,
+            scan.directory or repo_root,
             "diff",
             "--no-color",
             _NUMSTAT_FLAG,
             _NUL_TERMINATED_FLAG,
             f"--diff-filter={_DIFF_FILTER}",
-            target,
+            NO_RELATIVE,
+            scan.target,
+            *pathspec_args,
         )
         if result.returncode != 0:
             _LOGGER.debug("sensitive_content: staged diff unavailable in %s", repo_root)
@@ -940,7 +1065,7 @@ class SensitiveContentHandler(PreToolUseHandlerBase):
         # pattern set is the same for every file in one commit.
         protected_patterns = sfm.resolve_configured_patterns()
         for relpath, lines in _numstat_added_lines(result.stdout).items():
-            if lines <= 0:
+            if lines <= 0 or relpath in scan.skip:
                 continue
             abs_path = str(repo_root / relpath)
             if self._is_excluded(abs_path) or self._is_secret_list_itself(abs_path):
@@ -987,6 +1112,7 @@ class SensitiveContentHandler(PreToolUseHandlerBase):
                 "--no-color",
                 _UNIFIED_ZERO_FLAG,
                 f"--diff-filter={_DIFF_FILTER}",
+                NO_RELATIVE,
                 target,
             ]
             if chunk:
@@ -1068,14 +1194,19 @@ class SensitiveContentHandler(PreToolUseHandlerBase):
         return is_faithful_vendored_copy(relpath, content, remote_tree)
 
     @staticmethod
-    def _commit_repo_root(hook_input: dict[str, Any]) -> Path | None:
+    def _commit_directory(hook_input: dict[str, Any]) -> Path | None:
+        """The directory the command runs in: the hook's ``cwd``, else the project root."""
         cwd = hook_input.get(HookInputField.CWD)
-        start = Path(cwd) if isinstance(cwd, str) and cwd else None
+        if isinstance(cwd, str) and cwd:
+            return Path(cwd)
+        project_root = resolve_project_root()
+        return Path(project_root) if project_root is not None else None
+
+    @classmethod
+    def _commit_repo_root(cls, hook_input: dict[str, Any]) -> Path | None:
+        start = cls._commit_directory(hook_input)
         if start is None:
-            project_root = resolve_project_root()
-            if project_root is None:
-                return None
-            start = Path(project_root)
+            return None
         repo = GitRepo.resolve_for(start)
         return repo.root if repo is not None else None
 

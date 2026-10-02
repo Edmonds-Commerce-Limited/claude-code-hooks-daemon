@@ -4,10 +4,11 @@
 
 ## Active Handlers
 
-### PreToolUse (71 handlers)
+### PreToolUse (72 handlers)
 
 | Priority | Handler | Behaviour | Description |
 |----------|---------|----------|-------------|
+| 9 | usage_pause_tool_gate | BLOCKING | Deny and halt the main thread's tools outside the pause allow-list while paused |
 | 10 | destructive_git | BLOCKING | Block destructive git commands that permanently destroy data |
 | 11 | daemon_location_guard | BLOCKING | Prevent agents from cd-ing into .claude/hooks-daemon and running commands |
 | 11 | sed_blocker | BLOCKING | Block sed used for file modification - Claude gets sed wrong and causes file destruction |
@@ -75,9 +76,9 @@
 | 50 | markdown_organization | BLOCKING | Enforce markdown file organization rules |
 | 50 | validate_instruction_content | BLOCKING | Validates content being written to CLAUDE.md and README.md files |
 | 55 | web_search_year | ADVISORY | Validate WebSearch queries don't use outdated years |
-| 56 | merge_qa_advisor | ADVISORY | Advise the static checks to run before merging a work branch with no recorded green run |
 | 57 | daemon_docs_guard | ADVISORY | Warn when reading from the hooks-daemon internal CLAUDE/ docs directory |
 | 58 | flaggable_work_advisor | ADVISORY | Advise delegating safeguard-flaggable work BEFORE opening the content |
+| 59 | merge_qa_advisor | ADVISORY | Advise the static checks to run before merging a work branch with no recorded green run |
 | 60 | british_english | ADVISORY | Warn about American English spellings in content files (non-blocking) |
 
 ### PostToolUse (12 handlers)
@@ -140,10 +141,11 @@
 | 15 | disclosure_reset_pre_compact | NON-TERMINAL | Reset DisclosureTracker state for the firing agent on PreCompact |
 | 20 | compaction_signal | NON-TERMINAL | Write a ``<session>.compacting`` signal on PreCompact for the supervisor |
 
-### UserPromptSubmit (6 handlers)
+### UserPromptSubmit (7 handlers)
 
 | Priority | Handler | Behaviour | Description |
 |----------|---------|----------|-------------|
+| 9 | usage_pause_gate | BLOCKING | Record and enforce the usage pause on UserPromptSubmit |
 | 10 | git_context_injector | CONTEXT | Inject current git status as context when user submits a prompt |
 | 37 | failsafe_cron_blockage_suppressor | BLOCKING | Suppress a delivered failsafe-cron tick while the session is stably |
 | 55 | critical_thinking_advisory | ADVISORY | Periodically inject advisory context encouraging critical evaluation |
@@ -157,10 +159,11 @@
 |----------|---------|----------|-------------|
 | 10 | auto_approve_reads | TERMINAL | Auto-approve read-only tool permission requests |
 
-### Stop (3 handlers)
+### Stop (4 handlers)
 
 | Priority | Handler | Behaviour | Description |
 |----------|---------|----------|-------------|
+| 6 | usage_pause_stop_gate | BLOCKING | Allow a paused session's stop only when its crons are exactly the resume cron |
 | 7 | cron_stop_enforcer | BLOCKING | Block a Stop while a declared persistent cron was never created |
 | 9 | teammate_reap_advisor | ADVISORY | Report the Stop payload's ``background_tasks`` count and name ``TaskStop`` |
 | 10 | auto_continue_stop | TERMINAL | Intercept Stop events and enforce explicit stop reasons or auto-continue |

@@ -72,6 +72,9 @@ logger = logging.getLogger(__name__)
 #: ``command`` on other capped fields) is truncated to this many characters.
 PROMPT_DELIVERY_CAP: Final[int] = 1000
 
+#: The off-:00 schedule every surface suggests for the failsafe recovery cron.
+FAILSAFE_CRON_SCHEDULE_HINT: Final[str] = "47 * * * *"
+
 #: Strips the in-string truncation marker Claude Code appends to a capped
 #: field -- e.g. ``"... [+1200 chars]"``. Matches both a plain ASCII ellipsis
 #: and a Unicode one (the contract's own prose renders it both ways across

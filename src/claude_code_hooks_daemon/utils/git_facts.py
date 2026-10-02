@@ -37,8 +37,10 @@ from pathlib import Path
 from typing import Final
 
 from claude_code_hooks_daemon.constants.timeout import Timeout
+from claude_code_hooks_daemon.utils.git_commit_parsing import CommitReading
 from claude_code_hooks_daemon.utils.git_repo import GitRepo, read_blobs, run_git
 from claude_code_hooks_daemon.utils.path_containment import path_is_relative_to, path_relative_to
+from claude_code_hooks_daemon.utils.path_predicates import read_text_or_reason
 
 # name-status codes that carry TWO paths (old NUL new) in -z output.
 _TWO_PATH_STATUS_PREFIXES: Final[tuple[str, ...]] = ("R", "C")
@@ -47,6 +49,24 @@ _NUL: Final[str] = "\0"
 
 # ``ls-files -s`` mode of a submodule entry: a commit pointer, not a file.
 _GITLINK_MODE: Final[str] = "160000"
+
+# ``ls-tree`` object type of a submodule entry.
+_GITLINK_TYPE: Final[str] = "commit"
+
+# A listing value that is not a blob sha: the commit takes this path's content
+# from the WORKING TREE (``git commit <pathspec>``), where no blob exists yet.
+WORKING_TREE: Final[str] = "working-tree"
+
+# ``git diff --name-status`` letter of a path the commit removes.
+_DELETED_STATUS: Final[str] = "D"
+
+# Appended to every ``git diff`` whose paths are joined to the repository root:
+# with ``diff.relative`` set, a diff run from a subdirectory otherwise names
+# paths relative to THAT directory.
+NO_RELATIVE: Final[str] = "--no-relative"
+
+# Prefixes that name the repository's whole tree, where git wants no pathspec.
+_WHOLE_TREE_PREFIXES: Final[frozenset[str]] = frozenset({"", "."})
 
 
 @dataclass(frozen=True)
@@ -61,7 +81,14 @@ class StagedChange:
 class GitFactsBase:
     """Read-only git facts for one repository root."""
 
-    def __init__(self, repo_root: Path, pathspecs: Sequence[str] | None = None) -> None:
+    def __init__(
+        self,
+        repo_root: Path,
+        pathspecs: Sequence[str] | None = None,
+        include: bool = False,
+        directory: Path | None = None,
+        union: bool = False,
+    ) -> None:
         """Initialise.
 
         Args:
@@ -71,11 +98,43 @@ class GitFactsBase:
                 (``git commit <pathspec>...``). ``None``/empty means a bare
                 commit (or ``-a``), which commits the INDEX — the original,
                 unscoped behaviour. See :meth:`staged_changes`.
+            include: ``git commit --include <pathspec>...``: the commit records
+                the INDEX with the named paths' working-tree content laid over
+                it, rather than HEAD with the named paths replaced. Ignored
+                without ``pathspecs``.
+            directory: The directory the commit command runs in, which its
+                pathspecs are relative to. Only a call that carries the
+                pathspecs runs there; every other call, and every file read,
+                is rooted at ``repo_root``. Defaults to ``repo_root``.
+            union: The commit's reading is not certain (see
+                :class:`~claude_code_hooks_daemon.utils.git_commit_parsing.CommitReading`),
+                so judge the index PLUS the named paths' working-tree changes,
+                never less than the index alone. Ignored without ``pathspecs``.
         """
         self._repo_root = repo_root
+        self._directory = directory or repo_root
+        self._union = union and bool(pathspecs)
         self._pathspecs = tuple(pathspecs) if pathspecs else ()
+        self._include = include and bool(self._pathspecs)
         self._staged: tuple[StagedChange, ...] | None = None
         self._index_listings: dict[str, dict[str, str] | None] = {}
+        self._named_changes: dict[str, str] | None = None
+        self._named: frozenset[str] | None = None
+
+    @property
+    def repo_root(self) -> Path:
+        """The repository root this instance reads files from."""
+        return self._repo_root
+
+    @property
+    def pathspecs(self) -> tuple[str, ...]:
+        """The commit's explicit pathspecs; empty for a bare commit."""
+        return self._pathspecs
+
+    @property
+    def union(self) -> bool:
+        """Whether the commit is judged as the index plus the named paths."""
+        return self._union
 
     def staged_changes(self) -> tuple[StagedChange, ...]:
         """Changes THIS commit will actually contain.
@@ -101,6 +160,13 @@ class GitFactsBase:
         working-tree-vs-HEAD diff (not ``--cached``) scoped to those paths,
         so a modified-but-unstaged path named on the commit line is still
         seen, and a staged-but-unnamed path is correctly excluded.
+
+        ``git commit --include <pathspec>...`` records the index with the named
+        paths' working-tree content laid over it (ledger 00474 N245): the
+        staged changes to every UNNAMED path, plus the named paths' own
+        working-tree-vs-HEAD changes. A staged change to a named path that the
+        working tree has since repaired is not among them, because the commit
+        does not record it.
         """
         if self._staged is not None:
             return self._staged
@@ -111,16 +177,175 @@ class GitFactsBase:
                 "--name-status",
                 "-z",
                 "--find-renames",
+                NO_RELATIVE,
                 "--",
                 *self._pathspecs,
+                in_directory=True,
             )
+            changes = None if output is None else self._resurrected(_parse_name_status_z(output))
+            if self._union:
+                changes = self._with_all_staged(changes or ())
+            elif changes is None:
+                # HEAD cannot be diffed (a fresh repository has none): judge the
+                # index rather than nothing.
+                changes = self._index_changes()
+            elif self._include:
+                changes = self._with_unnamed_staged(changes)
         else:
-            output = self._git_output("diff", "--cached", "--name-status", "-z", "--find-renames")
+            changes = self._index_changes()
         # An unavailable answer is cached too: a wedged or absent git will not
         # recover mid-decision, so re-asking it once per plan folder only
         # multiplies the timeout that made it unavailable.
-        self._staged = () if output is None else _parse_name_status_z(output)
+        self._staged = () if changes is None else changes
         return self._staged
+
+    def _index_changes(self) -> tuple[StagedChange, ...] | None:
+        """The index against HEAD, or ``None`` when git could not say."""
+        output = self._git_output(
+            "diff", "--cached", "--name-status", "-z", "--find-renames", NO_RELATIVE
+        )
+        return None if output is None else _parse_name_status_z(output)
+
+    def _with_all_staged(self, named_changes: tuple[StagedChange, ...]) -> tuple[StagedChange, ...]:
+        """``named_changes`` plus every staged change not already among them.
+
+        The union a commit whose reading is not certain is judged as: whatever
+        the pathspecs resolve to, the index is covered.
+        """
+        seen = {change.path for change in named_changes}
+        staged = self._index_changes() or ()
+        return named_changes + tuple(change for change in staged if change.path not in seen)
+
+    def _resurrected(self, changes: tuple[StagedChange, ...]) -> tuple[StagedChange, ...]:
+        """``changes`` with a named deletion that is still on disk read as a modification.
+
+        ``git rm --cached p`` then an edit: HEAD has ``p``, the index does not,
+        and ``git commit p`` records the working tree's ``p``. Diffed against
+        HEAD that reads as a deletion of a path the commit in fact keeps.
+        """
+        if not any(change.status == _DELETED_STATUS for change in changes):
+            return changes
+        revived = self.resurrected_paths() or frozenset()
+        return tuple(
+            (
+                StagedChange(status="M", path=change.path, old_path=None)
+                if change.path in revived and change.status == _DELETED_STATUS
+                else change
+            )
+            for change in changes
+        )
+
+    def resurrected_paths(self) -> frozenset[str] | None:
+        """Named paths HEAD has and the index lacks, whose file is on disk.
+
+        The commit records each from the working tree, which is the one place
+        a diff against HEAD shows them as deleted. ``None`` when git could not
+        answer.
+        """
+        if not self._pathspecs:
+            return frozenset()
+        changes = self._pathspec_changes()
+        if changes is None:
+            return None
+        return frozenset(
+            path
+            for path, status in changes.items()
+            if status == _DELETED_STATUS and (self._repo_root / path).is_file()
+        )
+
+    def every_pathspec_matches(self) -> bool:
+        """Whether each pathspec selects at least one path; ``False`` when git cannot say.
+
+        A word that selects nothing is how a misread token shows itself (git
+        itself refuses such a commit), so a reading containing one is not
+        certain.
+        """
+        for pathspec in self._pathspecs:
+            changed = self._git_output(
+                "diff",
+                "HEAD",
+                "--name-only",
+                "-z",
+                NO_RELATIVE,
+                "--",
+                pathspec,
+                in_directory=True,
+            )
+            indexed = self._git_output(
+                "ls-files", "-z", "--full-name", "--", pathspec, in_directory=True
+            )
+            if changed is None or indexed is None or not (changed or indexed):
+                return False
+        return True
+
+    def _with_unnamed_staged(
+        self, named_changes: tuple[StagedChange, ...]
+    ) -> tuple[StagedChange, ...] | None:
+        """``named_changes`` plus the staged changes to paths the commit does not name.
+
+        ``None`` when git could not say which paths are named or what is staged.
+        """
+        named = self.named_paths()
+        staged = self._index_changes()
+        if named is None or staged is None:
+            return None
+        unnamed = tuple(
+            change for change in staged if change.path not in named and change.old_path not in named
+        )
+        return named_changes + unnamed
+
+    def named_paths(self) -> frozenset[str] | None:
+        """Every path the commit's pathspecs select, repository-relative.
+
+        The paths whose recorded content is the WORKING TREE's: those the index
+        holds and those that differ from HEAD there (a staged change the working
+        tree has put back is still named). Empty when the pathspecs match
+        nothing, which is how a word misread as a pathspec shows itself.
+        ``None`` when git could not answer.
+        """
+        if self._named is not None:
+            return self._named
+        changes = self._pathspec_changes()
+        indexed = self._git_output(
+            "ls-files", "-z", "--full-name", "--", *self._pathspecs, in_directory=True
+        )
+        if changes is None or indexed is None:
+            return None
+        self._named = frozenset(changes) | {path for path in indexed.split(_NUL) if path}
+        return self._named
+
+    def _pathspec_changes(self) -> dict[str, str] | None:
+        """Path -> status letter of what the working tree changes against HEAD, within the pathspecs."""
+        if self._named_changes is not None:
+            return self._named_changes
+        output = self._git_output(
+            "diff",
+            "HEAD",
+            "--name-status",
+            "-z",
+            "--no-renames",
+            NO_RELATIVE,
+            "--",
+            *self._pathspecs,
+            in_directory=True,
+        )
+        if output is None:
+            return None
+        self._named_changes = {
+            change.path: change.status[:1] for change in _parse_name_status_z(output)
+        }
+        return self._named_changes
+
+    def recorded_text(self, path: str) -> str | None:
+        """Content of ``path`` as the commit will record it, or ``None`` if unreadable.
+
+        A bare commit records the index. A pathspec commit records the WORKING
+        TREE for a named path (``git show :path`` would read the index, which
+        can disagree), and under ``--include`` still the index for the rest.
+        """
+        if self._pathspecs and (not self._include or path in (self.named_paths() or ())):
+            return self._working_tree_text(path)
+        return self.staged_file_text(path)
 
     def staged_paths_under(self, prefix: str) -> tuple[str, ...]:
         """New-side staged paths under ``prefix`` (repo-relative, sorted)."""
@@ -151,35 +376,97 @@ class GitFactsBase:
         repository root this instance targets. Submodule entries (mode 160000)
         are not files and are left out.
 
+        Ledger 00474 N245: for a ``git commit <pathspec>`` the commit records
+        HEAD's tree with the named paths' WORKING-TREE content, and for
+        ``--include`` the index with the same overlay. A path whose content
+        the commit takes from the working tree is mapped to
+        :data:`WORKING_TREE` instead of a sha, because no blob holds it yet;
+        :meth:`index_texts` reads it from the disk.
+
         ``None`` means git could not answer, so the caller can fall back to
         what it did before rather than treat an unreadable index as an empty
         tree.
         """
         if prefix in self._index_listings:
             return self._index_listings[prefix]
-        output = self._git_output("ls-files", "-s", "-z", "--", prefix)
-        listing = None if output is None else _parse_index_listing(output)
+        listing = self._recorded_listing(prefix) if self._pathspecs else self._indexed(prefix)
         self._index_listings[prefix] = listing
+        return listing
+
+    def _indexed(self, prefix: str) -> dict[str, str] | None:
+        """The index under ``prefix``: path -> blob sha."""
+        output = self._git_output("ls-files", "-s", "-z", "--", prefix)
+        return None if output is None else _parse_index_listing(output)
+
+    def _head_listing(self, prefix: str) -> dict[str, str] | None:
+        """HEAD's tree under ``prefix``: path -> blob sha."""
+        scope = () if prefix in _WHOLE_TREE_PREFIXES else ("--", prefix)
+        output = self._git_output("ls-tree", "-r", "-z", "HEAD", *scope)
+        return None if output is None else _parse_tree_listing(output)
+
+    def _recorded_listing(self, prefix: str) -> dict[str, str] | None:
+        """The tree a pathspec commit records under ``prefix``.
+
+        Starts from what the commit does NOT take from the working tree (HEAD's
+        tree, or the index under ``--include``), then lays each named path's
+        working-tree state over it: removed when the working tree deletes it,
+        read from the disk when it differs from HEAD, and HEAD's own content
+        when the working tree has put it back.
+        """
+        changes = self._pathspec_changes()
+        named = self.named_paths()
+        revived = self.resurrected_paths()
+        head = self._head_listing(prefix)
+        base = self._indexed(prefix) if self._include else head
+        if changes is None or named is None or revived is None or head is None or base is None:
+            return None
+        listing = dict(base)
+        for path in named:
+            if not _is_under(path, prefix):
+                continue
+            status = changes.get(path)
+            if status is None:
+                restored = head.get(path)
+                if restored is None:
+                    listing.pop(path, None)
+                else:
+                    listing[path] = restored
+            elif status == _DELETED_STATUS and path not in revived:
+                listing.pop(path, None)
+            else:
+                listing[path] = WORKING_TREE
         return listing
 
     def index_texts(
         self, listing: Mapping[str, str], paths: Sequence[str]
     ) -> dict[str, str] | None:
-        """Staged text of each of ``paths`` found in ``listing``, from one batch.
+        """Recorded text of each of ``paths`` found in ``listing``, from one batch.
 
         A path absent from ``listing`` is absent from the result. Decoding is
         lossy (a mangled character is visible; a gate that cannot read a file
-        is not). ``None`` when git could not answer.
+        is not). A path the listing marks :data:`WORKING_TREE` is read from the
+        disk. ``None`` when git could not answer or such a file cannot be read.
         """
         wanted = {path: listing[path] for path in paths if path in listing}
-        blobs = read_blobs(self._repo_root, sorted(set(wanted.values())))
+        blobs = read_blobs(
+            self._repo_root, sorted({sha for sha in wanted.values() if sha != WORKING_TREE})
+        )
         if blobs is None:
             return None
-        return {
-            path: blobs[sha].decode("utf-8", errors="replace")
-            for path, sha in wanted.items()
-            if sha in blobs
-        }
+        texts: dict[str, str] = {}
+        for path, sha in wanted.items():
+            if sha == WORKING_TREE:
+                text = self._working_tree_text(path)
+                if text is None:
+                    return None
+                texts[path] = text
+            elif sha in blobs:
+                texts[path] = blobs[sha].decode("utf-8", errors="replace")
+        return texts
+
+    def _working_tree_text(self, path: str) -> str | None:
+        """Content of ``path`` on disk, or ``None`` when it cannot be read."""
+        return read_text_or_reason(self._repo_root / path, errors="replace").text
 
     def head_file_text(self, path: str) -> str | None:
         """Content of ``path`` at HEAD, or ``None`` when not present."""
@@ -192,7 +479,7 @@ class GitFactsBase:
             return None
         return date.fromisoformat(output.strip())
 
-    def _git_output(self, *args: str) -> str | None:
+    def _git_output(self, *args: str, in_directory: bool = False) -> str | None:
         """Run a read-only git command; stdout on success, ``None`` on non-zero.
 
         A non-zero exit here is a documented "fact not available" signal
@@ -211,11 +498,49 @@ class GitFactsBase:
         ``run_git`` also never raises, so a wedged git yields ``None``
         (the "fact not available" answer this method already documents) instead
         of a ``TimeoutExpired`` escaping into hook dispatch.
+
+        ``in_directory`` runs it where the commit command runs, which is the
+        only place its pathspecs mean what the commit takes them to mean.
         """
-        result = run_git(self._repo_root, *args, timeout=Timeout.GIT_CONTEXT)
+        root = self._directory if in_directory else self._repo_root
+        result = run_git(root, *args, timeout=Timeout.GIT_CONTEXT)
         if result.returncode != 0:
             return None
         return result.stdout
+
+
+def commit_facts(
+    reading: CommitReading, repo_root: Path, cwd: str | Path | None = None
+) -> GitFactsBase:
+    """The facts a commit gate should judge ``reading`` by.
+
+    The pathspec view (only the named paths' working tree) is used ONLY when the
+    reading is certain and every pathspec selects something. Any other shape is
+    the union: the index with the named paths' working-tree changes laid over
+    it, so no gate ever reads less of the recorded tree than the index.
+
+    ``cwd`` is where the command runs; the pathspecs are read from there when it
+    lies inside ``repo_root``, and from ``repo_root`` otherwise.
+    """
+    directory = _directory_inside(cwd, repo_root)
+    form = reading.form
+    if not form.pathspecs:
+        return GitFactsBase(repo_root)
+    if reading.certain:
+        facts = GitFactsBase(
+            repo_root, pathspecs=form.pathspecs, include=form.include, directory=directory
+        )
+        if facts.every_pathspec_matches():
+            return facts
+    return GitFactsBase(repo_root, pathspecs=form.pathspecs, union=True)
+
+
+def _directory_inside(cwd: str | Path | None, repo_root: Path) -> Path | None:
+    """``cwd`` as a path when it lies inside ``repo_root``, else ``None``."""
+    if not cwd:
+        return None
+    candidate = Path(cwd).resolve()
+    return candidate if path_is_relative_to(candidate, repo_root.resolve()) else None
 
 
 def project_relative_head_text(file_path: Path, project_root: Path) -> str | None:
@@ -276,6 +601,28 @@ def _parse_index_listing(output: str) -> dict[str, str]:
             continue
         listing[path] = sha
     return listing
+
+
+def _parse_tree_listing(output: str) -> dict[str, str]:
+    """Parse ``ls-tree -r -z`` (``<mode> <type> <sha>\\t<path>``) into path -> sha."""
+    listing: dict[str, str] = {}
+    for record in output.split(_NUL):
+        if not record:
+            continue
+        meta, _, path = record.partition("\t")
+        _mode, kind, sha = meta.split(" ")
+        if kind == _GITLINK_TYPE:
+            continue
+        listing[path] = sha
+    return listing
+
+
+def _is_under(path: str, prefix: str) -> bool:
+    """Whether the repository-relative ``path`` is ``prefix`` or lies beneath it."""
+    if prefix in _WHOLE_TREE_PREFIXES:
+        return True
+    directory = prefix.rstrip("/")
+    return path == directory or path.startswith(f"{directory}/")
 
 
 def _parse_name_status_z(output: str) -> tuple[StagedChange, ...]:

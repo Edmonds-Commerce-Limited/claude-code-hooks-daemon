@@ -77,6 +77,10 @@ handlers:
       enabled: true         # Wider than "the failsafe cron" on purpose: `session_crons` reaches
       priority: 14          # Stop, not PreToolUse, so the id here is opaque. Coordinator unaffected.
 
+    usage_pause_tool_gate:  # A usage-paused session may use only CronList/CronDelete/CronCreate (Plan 00479)
+      enabled: true         # Inert unless a usage pause is recorded for the session. The deny halts the turn.
+      priority: 9
+
     subagent_worktree_write_guard:  # A SUBAGENT working in a linked worktree writes only in it (N264)
       enabled: true         # Denies Write/Edit/NotebookEdit into a sibling worktree or the main tree.
       priority: 14          # The coordinator (main thread) and a subagent in the main tree are never judged.
@@ -732,6 +736,10 @@ handlers:
 
   # UserPromptSubmit handlers (run when user submits prompt)
   user_prompt_submit:
+    usage_pause_gate:  # Pauses the session at its host usage ceiling, holds the pause, resumes it (Plan 00479)
+      enabled: true    # Inert unless `hosts:` gives this host a usage_ceiling; never terminal
+      priority: 9
+
     git_context_injector:  # Injects git context into user prompts
       enabled: true
       priority: 10
@@ -788,6 +796,10 @@ handlers:
   # auto_continue_stop in turn. See
   # tests/integration/test_stop_chain_terminal_shadowing.py.
   stop:
+    usage_pause_stop_gate:  # A usage-paused session stops only once its crons are exactly the one resume cron (Plan 00479)
+      enabled: true         # Inert unless a usage pause is recorded for the session; never terminal
+      priority: 6
+
     cron_stop_enforcer:  # Blocks a stop while a declared persistent_crons job is verified missing (Plan 00416)
       enabled: true       # Silent unless persistent_crons.enabled AND a job is declared
       priority: 7
