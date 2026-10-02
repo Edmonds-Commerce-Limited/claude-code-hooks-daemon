@@ -121,6 +121,12 @@ other than defeating a parser. Everything else, every ordinary respelling includ
   exemption for `cd`/`pushd`/`popd`, `source`/`.` or a non-special `export X=$Y`; alias,
   function and PATH bindings still do. Report:
   [subagent-reports/261002-x1-sonnet.md](subagent-reports/261002-x1-sonnet.md).
+  FP batch 2 fixed on branch worktree-p483-fp-batch2: the brace reader reads a quoted
+  `${name:-word}` default (and `=`, `+`, `?`) instead of failing closed; `curl -o /dev/null`
+  and `wget -O /dev/null` are no longer outside writes; `$PWD`, `${PWD}`, `$(pwd)` and
+  `$(git rev-parse --show-toplevel)` resolve to the hook cwd and its repository root, judged
+  as any path. Loop variables, `$DEST`, `$TMPDIR` and `$HOME` are untouched. Report:
+  [subagent-reports/261002-fp-batch2-sonnet.md](subagent-reports/261002-fp-batch2-sonnet.md).
 - [ ] ⬜ **Task 3.3**: Bring the owner's removal decisions on out-of-scope-only code into
   effect, if any were taken.
 

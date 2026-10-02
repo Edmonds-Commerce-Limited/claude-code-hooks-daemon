@@ -340,7 +340,7 @@ class TestQuotedBracesAreNotBraceSyntax:
         assert expand_braces(word) == [word]
 
     def test_unresolvable_quoting_with_no_group_at_stake_reads_as_before(self) -> None:
-        assert '"$x:-"a""' in expand_braces('"${x:-"a"}"')
+        assert '"$x#"a""' in expand_braces('"${x#"a"}"')
 
 
 class TestIterShellBraceWords:
@@ -422,10 +422,10 @@ class TestIterShellBraceWords:
 
     def test_unresolvable_quoting_with_a_group_after_it_raises(self) -> None:
         with pytest.raises(UnresolvableBraceQuotingError):
-            list(iter_shell_brace_words('echo "${x:-"a"}" .p-{"} x",q}'))
+            list(iter_shell_brace_words('echo "${x#"a"}" .p-{"} x",q}'))
 
     def test_unresolvable_quoting_with_no_group_after_it_ends_the_scan(self) -> None:
-        assert list(iter_shell_brace_words('echo .p-{"a",b} "${x:-"a"}" done')) == [
+        assert list(iter_shell_brace_words('echo .p-{"a",b} "${x#"a"}" done')) == [
             '.p-{"a",b}',
             ".p-{a,b}",
         ]
@@ -451,10 +451,10 @@ class TestIterShellBraceWords:
     @pytest.mark.parametrize(
         "text",
         [
-            ": ${x:-'a'} ; bash -c $'cat .p-\\x7b\"\\x7d\",q\\x7d'",
-            ": ${x:-'a'} ; eval $'cat .p-\\x7bq,r\\x7d'",
-            ": ${x:-'a'} ; eval \"cat .p-$(printf x)q,r}\"",
-            ": ${x:-'a'} ; bash -c \"$v\"",
+            ": ${x#'a'} ; bash -c $'cat .p-\\x7b\"\\x7d\",q\\x7d'",
+            ": ${x#'a'} ; eval $'cat .p-\\x7bq,r\\x7d'",
+            ": ${x#'a'} ; eval \"cat .p-$(printf x)q,r}\"",
+            ": ${x#'a'} ; bash -c \"$v\"",
         ],
     )
     def test_a_group_that_may_arrive_after_unresolvable_quoting_raises_n113(
@@ -467,7 +467,7 @@ class TestIterShellBraceWords:
 
     @pytest.mark.parametrize(
         "text",
-        [": ${x:-'a'} ; echo \"$HOME\" done", 'echo "${x:-"a"}" $\'tab\\there\''],
+        [": ${x#'a'} ; echo \"$HOME\" done", 'echo "${x#"a"}" $\'tab\\there\''],
     )
     def test_nothing_that_may_arrive_after_unresolvable_quoting_ends_the_scan(
         self, text: str

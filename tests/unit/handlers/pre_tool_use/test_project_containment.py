@@ -446,6 +446,147 @@ class TestUnexpandableTokensAreDeclinedNotFabricated:
         )
 
 
+class TestTheNullDeviceIsNotAWriteOutsideTheProject:
+    """Plan 00483 Task 3.2 (FP-A): `curl -o /dev/null` writes no file; the
+    redirect spelling `> /dev/null` was always allowed."""
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "curl -s -o /dev/null -w '%{http_code}' https://example.com",
+            "wget -q -O /dev/null https://example.com",
+            "curl --output=/dev/null https://example.com",
+            "curl --output /dev/null https://example.com",
+        ],
+    )
+    def test_the_null_device_destination_is_allowed(
+        self, handler: ProjectContainmentHandler, command: str
+    ) -> None:
+        assert handler.matches(_bash(command, cwd="/repo")) is False
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "curl -o /tmp/x https://example.com",
+            "wget -O /tmp/x https://example.com",
+            "curl -o /devious/x https://example.com",
+        ],
+    )
+    def test_a_real_outside_destination_still_denies(
+        self, handler: ProjectContainmentHandler, command: str
+    ) -> None:
+        assert handler.matches(_bash(command, cwd="/repo")) is True
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "echo x > /dev/shm/out.txt",
+            "curl -o /dev/shm/out.txt https://example.com",
+            "cp report.md /dev/shm/report.md",
+            "tee /dev/shm/x.log < f",
+            "echo x > /dev/mqueue/q",
+            "echo x > /dev/../tmp/x",
+            "cp a /dev/../tmp/x",
+            "curl -o /dev/../tmp/x https://example.com",
+            "tee /dev/../tmp/x < f",
+        ],
+    )
+    def test_a_real_directory_under_dev_is_an_outside_write(
+        self, handler: ProjectContainmentHandler, command: str
+    ) -> None:
+        """`/dev/shm` is a tmpfs outside the repository, and `/dev/../tmp/x` is
+        `/tmp/x` once normalised."""
+        assert handler.matches(_bash(command, cwd="/repo")) is True
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "echo x > /dev/null",
+            "echo x >/dev/stderr",
+            "echo x > /dev/stdout",
+            "echo x 2>/dev/null",
+            "echo x > /dev/tty",
+            "echo x > /dev/pts/3",
+            "echo x > /dev/fd/2",
+            "echo x > /dev/zero",
+            "echo x >&2",
+            "curl -o /dev/null https://example.com",
+        ],
+    )
+    def test_a_device_node_is_allowed(
+        self, handler: ProjectContainmentHandler, command: str
+    ) -> None:
+        assert handler.matches(_bash(command, cwd="/repo")) is False
+
+
+class TestTheWorkingDirectoryExpansionsAreResolved:
+    """Plan 00483 Task 3.2 (FP-B, in-scope part): `$PWD`, `$(pwd)` and
+    `$(git rev-parse --show-toplevel)` are the hook cwd and its repository
+    root, so the resolved path is judged like any other."""
+
+    @pytest.fixture()
+    def repo(self, tmp_path: Path, _project_root: Any) -> Path:
+        root = tmp_path / "repo"
+        (root / "sub").mkdir(parents=True)
+        (root / ".git").mkdir()
+        _project_root.return_value = root
+        return root
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            'echo x > "$PWD/untracked/scratch/x.txt"',
+            'echo x > "${PWD}/untracked/scratch/x.txt"',
+            'mkdir -p "$(pwd)/untracked/scratch/x"',
+            'echo x > "$(git rev-parse --show-toplevel)/untracked/scratch/o.md"',
+            'mkdir -p "$(git rev-parse --show-toplevel)/untracked/scratch/x"',
+            'curl -o "$PWD/untracked/scratch/x" https://example.com',
+        ],
+    )
+    def test_an_in_project_expansion_is_allowed(
+        self, handler: ProjectContainmentHandler, repo: Path, command: str
+    ) -> None:
+        assert handler.matches(_bash(command, cwd=str(repo / "sub"))) is False
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            'echo x > "$PWD/../../outside"',
+            'echo x > "$(pwd)/../../outside"',
+            'echo x > "$(git rev-parse --show-toplevel)/../outside"',
+            'curl -o "$PWD/../../outside" https://example.com',
+            'mkdir -p "$(git rev-parse --show-toplevel)/../outside"',
+        ],
+    )
+    def test_an_expansion_that_leaves_the_project_denies(
+        self, handler: ProjectContainmentHandler, repo: Path, command: str
+    ) -> None:
+        assert handler.matches(_bash(command, cwd=str(repo / "sub"))) is True
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            'cd /tmp && echo x > "$PWD/x"',
+            'pushd /tmp; echo x > "$(pwd)/x"',
+            'PWD=/tmp; echo x > "$PWD/x"',
+            'echo x > "$PWDX/x"',
+            'echo x > "$TMPDIR/x"',
+            'echo x > "$(git rev-parse --git-dir)/x"',
+        ],
+    )
+    def test_anything_else_stays_unknown_and_denies(
+        self, handler: ProjectContainmentHandler, repo: Path, command: str
+    ) -> None:
+        assert handler.matches(_bash(command, cwd=str(repo / "sub"))) is True
+
+    def test_no_repository_above_the_cwd_leaves_the_toplevel_unresolved(
+        self, handler: ProjectContainmentHandler, tmp_path: Path, _project_root: Any
+    ) -> None:
+        _project_root.return_value = tmp_path
+        command = 'echo x > "$(git rev-parse --show-toplevel)/x"'
+        assert handler.matches(_bash(command, cwd=str(tmp_path))) is True
+
+
 class TestATrailingSlashCopyDestination:
     """Finding I2: `cp report.md /tmp/` is the most natural spelling of the
     thing this handler exists to stop, and it used to vanish entirely."""
