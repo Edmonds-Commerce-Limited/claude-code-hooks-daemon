@@ -167,9 +167,19 @@ the daemon directs the model and then verifies what it did.
 - [x] ✅ **Task 4.7** (merged 506fd3f5e): Data safety. No snapshot, or no `rate_limits` at all, never pauses a
   session, and a debug log line records why. A paused session shows `⏸ usage` and its resume
   time in the status line.
-- [ ] ⬜ **Task 4.8**: Acceptance tests. Run a live probe with a synthetic snapshot above the
+- [x] ✅ **Task 4.8**: Acceptance tests. Run a live probe with a synthetic snapshot above the
   ceiling through the whole cycle: pause directive, cron set reduced to the resume cron,
   stop allowed, resume tick lifts the pause.
+  - Handler cycle: every step passed in an isolated in-process harness with synthetic
+    sessions
+    ([report](subagent-reports/261002-p479-acceptance-sonnet.md)).
+  - Daemon chain: `tests/integration/test_usage_pause_daemon_chain.py` (merged; 17 tests)
+    runs the whole cycle through `controller.process_request`. The responses validate
+    against the schemas, and the halting deny carries `continue: false` and `stopReason`.
+    Other deny handlers do not drop the halt.
+  - Residual: real `CronDelete`/`CronCreate` calls are verified only through the Stop gate's
+    reading of `session_crons`. The first real pause on a host with a `hosts:` ceiling
+    exercises them.
 
 ### Phase 5: Docs and release
 

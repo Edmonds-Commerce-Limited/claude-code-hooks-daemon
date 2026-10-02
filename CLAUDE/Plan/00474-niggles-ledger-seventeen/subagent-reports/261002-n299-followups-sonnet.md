@@ -55,3 +55,46 @@ red could not be shown: running it against main's source trips `tests/source_tre
 - `staged_lint_gate._is_foreign_repo` still looks at the hook cwd only, not a `cd`/`-C` move into another
   repository (remote_docs now does).
 - The single-call fast path does not use `--literal-pathspecs`, same as the per-path check it replaces.
+
+## Round 2 (Opus review fixes)
+
+Review: [261002-n299-review-opus.md](261002-n299-review-opus.md), verdict MERGE-WITH-FIXES.
+
+### Fail-open regression (review item 1)
+
+`commit_directory` / `pathspec_directory` trusted every recorded `cd`. Fix, fail closed:
+
+- The parser (`git_commit_parsing._invocations`) now records whether each move is CERTAIN
+  (`GitInvocation.moves_certain`, `CommitReading.moves_certain`). A move is certain only when every
+  operator from the `cd` on is `&&` and the operator before it is not `||`, `|` or `|&`. `;`, `&`,
+  newline, a trailing `||`, and a `cd` in a pipeline are uncertain. A subshell restores the flag with
+  the directory. `-C` moves are git's own argv and stay certain.
+- `unmoved_directories(reading, cwd, repo_root)` names the hook's own directory as a second place
+  the commit may run. `GitFactsBase(extra_directories=...)` reads the pathspecs from every
+  directory (a directory git cannot run in is skipped, `None` only when none answers) and merges
+  the changes and named paths. `commit_facts` passes it on the union reading.
+- Every gate uses it: `sensitive_content` (one working-tree pass per directory), `docs_qa` and
+  `plan_qa` (`staged_context(extra_directories=...)`), and `remote_docs` (`_is_foreign_repo` stands
+  down only when BOTH the hook directory and the moved one are another repository).
+- Behaviour change worth knowing: `(cd sub; git commit f.txt)` is now uncertain (the `;` does not
+  guarantee the `cd` worked), so both `f.txt` and `sub/f.txt` are judged. The `&&` form stays exact.
+
+### Vacuous test (review item 2)
+
+`test_a_moved_reading_is_the_index_plus_the_paths_named_where_it_moved_to` now passes `cwd=messy`
+and names `d/e2.txt`, a path committed then edited and left unstaged, so only a read from `d/`
+names it. Verified: with `pathspec_directory` replaced by main's logic (moves ignored, run through
+`untracked/scratch/run_main_logic.py`, not committed) it FAILS; with the fix it passes.
+
+### Red to green
+
+Before the fix: 15 failed (new rows across sensitive_content, docs_qa, plan_qa, remote_docs, and
+the strengthened moved-reading test) plus an import error for the new `unmoved_directories` rows.
+After: all green. plan_qa is proven by a test, not by reading: `cd nosuch; git commit ... PLAN.md`
+with an unstaged terminal flip is denied (`BLOCKED [R-PLAN-QA-COMMIT]`), as is `cd CLAUDE & git
+commit ... Plan/00001-first/PLAN.md`, which only the moved directory names.
+
+### Not done here
+
+Review items 3 and 4 (a second commit's pathspecs, and judging a same-project worktree against its
+own index) are filed as N306 and N307 on main.

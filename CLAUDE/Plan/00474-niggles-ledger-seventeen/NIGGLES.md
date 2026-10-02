@@ -1283,9 +1283,11 @@ or quoted text, is neither.
 a term, although the commit records `sub/f.txt`. Main allowed it before N245. This is an
 ordinary command shape, so the false positive is in scope.
 
-**Status**: ✅ Fixed on branch `worktree-n299-pathspec-followups`: `commit_facts` and the docs/plan QA
-gates read the pathspec from the directory the command's `cd`/`pushd`/`-C` lands in
-(`pathspec_directory`). `guard_config_commit_gate` still compares pathspecs to the root as text
+**Status**: ✅ Fixed (branch `worktree-n299-pathspec-followups`, not yet merged): `commit_facts` and
+the docs/plan QA gates read the pathspec from the directory the command's `cd`/`pushd`/`-C` lands
+in (`pathspec_directory`). Round 2: a `cd` that may fail, be skipped or be backgrounded
+(`;`, `&`, `||`, a pipeline stage) is judged from both the moved and the hook directory
+(`unmoved_directories`), in every gate. `guard_config_commit_gate` still compares pathspecs to the root as text
 (see [subagent-reports/261002-n299-followups-sonnet.md](subagent-reports/261002-n299-followups-sonnet.md)).
 
 ### N300 — `remote_docs_commit_gate` does not stand down for a commit in a nested worktree
@@ -1297,8 +1299,10 @@ daemon's point of view), `staged_lint_gate` stands down and `remote_docs_commit_
 judges it against this repository. Main had the same wrong-repository behaviour, so N245
 did not cause it.
 
-**Status**: ✅ Fixed on branch `worktree-n299-pathspec-followups`: the gate stands down when the
-hook `cwd`, after any `cd`/`-C` move, is in another repository.
+**Status**: ✅ Fixed (branch `worktree-n299-pathspec-followups`, not yet merged): the gate stands
+down when the hook `cwd`, after any `cd`/`-C` move, is in another repository. Round 2: a `cd` that
+may not take effect stands down only if both the hook directory and the moved one are another
+repository.
 
 ### N301 — the "every pathspec matches" check costs two git calls per path, in every gate
 
@@ -1307,5 +1311,86 @@ hook `cwd`, after any `cd`/`-C` move, is in another repository.
 **Evidence**: each commit gate runs its own match check, two git calls per named path. That
 is about 0.25 s per gate for 60 paths on a tiny repository, multiplied by the number of gates.
 
-**Status**: ✅ Fixed on branch `worktree-n299-pathspec-followups`: one `ls-files --error-unmatch`
-call answers for every path; each gate still asks once (no cross-gate cache).
+**Status**: ✅ Fixed (branch `worktree-n299-pathspec-followups`, not yet merged): one
+`ls-files --error-unmatch` call answers for every path; each gate still asks once (no
+cross-gate cache).
+
+### N302 — the full-QA advisory reads `grep -c` and `awk -e` as inline interpreter code
+
+**Source**: the Plan 00483 triage agent and the Fable rulings agent each saw it independently.
+
+**Evidence**: `subagent_full_qa_blocker` emits "UNSEEN: unrecognised-interpreter-inline-code"
+on read-only `grep -c`, `awk` and `--help` commands from a subagent. It treats `-c` and `-e` as an
+interpreter's inline-code flag whatever the command is. It is advisory only, but it fires
+on ordinary reads and teaches agents to ignore it.
+
+**Status**: ⬜ Open. Treat `-c`/`-e` as inline code only after a known interpreter.
+
+### N303 — the pause-gate merge left `UsagePauseToolGateHandler` unclassified; main was red
+
+**Source**: the N299 agent's `llm_qa changed` run, then the coordinator reproduced it on main.
+
+**Evidence**: `test_blocking_handler_evasion.py::TestEveryHandlerIsClassified` failed on main
+from merge 506fd3f5e (Plan 00479 Phase 4) until 1c4f8e25f. The new PreToolUse handler was
+never triaged for command-respelling evasion. This is N278 and N297 again: a merge that adds a
+handler reached main without a green targeted run on the merged head.
+
+**Status**: ✅ Fixed (1c4f8e25f; classified as not command-anchored, verified that the handler
+never reads `tool_input`). The coordinator then ran `llm_qa changed --range 4440d58cf..HEAD`
+over everything merged since. The lasting remedy (a merge that adds a handler cannot land without a
+green run) is Plan 00475 Task 4.2, which waits on the owner.
+
+### N304 — `guard_config_commit_gate` compares pathspecs to the config path as root-relative text
+
+**Source**: N299 agent.
+
+**Evidence**: `_pathspec_covers` compares each pathspec to `.claude/hooks-daemon.yaml` as text from
+the repository root, so `cd .claude && git commit -m x hooks-daemon.yaml` is not seen as covering
+the config, and the gate reads no config change. This is an existing miss, not something N299 caused.
+
+**Status**: ⬜ Open. Resolve the pathspecs with `pathspec_directory`, as N299 did for the
+other gates.
+
+### N305 — `staged_lint_gate._is_foreign_repo` ignores the command's own `cd` / `-C`
+
+**Source**: N299 agent.
+
+**Evidence**: the stand-down looks at the hook's working directory only. A `cd other-repo && git commit` from this checkout is linted as this repository's commit. N300 fixed the same gap in
+`remote_docs_commit_gate`.
+
+**Status**: ⬜ Open. Use the same post-move check as N300.
+
+### N306 — the commit-move reader records both directories of `cd a || cd b`
+
+**Source**: N299 review
+([subagent-reports/261002-n299-review-opus.md](subagent-reports/261002-n299-review-opus.md)).
+
+**Evidence**: with `cd a || cd b && git commit …`, only one `cd` runs, but the reading records
+both as moves taken. This was already wrong on main. N299 round 2 handles it by treating any
+uncertain move as unknown and judging both directories.
+
+**Status**: ⬜ Open (folded into N299 round 2).
+
+### N308 — unguarded `;` chaining is only advised against, not blocked
+
+**Source**: owner ruling, verbatim: "we should be blocking ; command chaining — either use set
+-e and/or force && chaining".
+
+**Evidence**: `bash_safe_mode` already implements the rule, but this repository runs it in warn
+mode, scoped to mutator-bearing commands (`only_with_mutator: true`). So `cd nosuch; git commit`
+and any other `;`-sequenced command run with no prelude. The coordinator's own commands drew the
+advisory all session.
+
+**Status**: 🔄 Branch `worktree-safe-mode-block`. It changes this repository's config to
+`mode: block` and `only_with_mutator: false`, and makes the acceptance tests follow the mode.
+The shipped default stays opt-in.
+
+### N307 — the second commit in one command has its pathspecs left unscanned
+
+**Source**: N299 review.
+
+**Evidence**: when one Bash command runs two `git commit`s, only the first commit's pathspecs are
+judged. A `git commit -m a x.txt && git commit -m b y.txt` never scans `y.txt` as a pathspec
+commit. This was already wrong on main, and it is an ordinary shape.
+
+**Status**: ⬜ Open.

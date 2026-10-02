@@ -509,6 +509,12 @@ _MUST_NOT_MATCH: dict[str, tuple[str, ...]] = {
 # assumption that let the git bypasses survive.
 _NOT_COMMAND_ANCHORED: dict[str, str] = {
     "AbsolutePathHandler": "matches on the file_path parameter, not a command",
+    "UsagePauseToolGateHandler": (
+        "matches on session state (a live usage pause or a host ceiling crossed) and "
+        "on tool_name against a fixed allow-list of Claude Code TOOLS; it never reads "
+        "a command string, so there is nothing to respell. While paused every main-"
+        "thread tool outside the list is denied, Bash included, whatever it runs"
+    ),
     "SubagentCronDeleteBlockerHandler": (
         "matches on tool_name == 'CronDelete', a Claude Code TOOL rather than a "
         "shell command - there is no command string to respell, and `CronDelete` "

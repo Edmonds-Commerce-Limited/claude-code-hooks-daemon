@@ -365,7 +365,9 @@ class TestPathspecsAreJudgedFromEveryDirectoryTheCommitMayRunIn:
         plan = "Plan/00001-first/PLAN.md"
         with _patched_root(flipped):
             result = _handler("block").handle(
-                _bash_input(f'cd CLAUDE & git commit -m "Plan 00001: done" {plan}', cwd=str(flipped))
+                _bash_input(
+                    f'cd CLAUDE & git commit -m "Plan 00001: done" {plan}', cwd=str(flipped)
+                )
             )
 
         assert result.decision == Decision.DENY

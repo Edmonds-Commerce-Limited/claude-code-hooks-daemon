@@ -75,10 +75,14 @@ other than defeating a parser. Everything else, every ordinary respelling includ
 
 ### Phase 2: Triage the backlog
 
-- [ ] 🔄 **Task 2.1**: The 55 carried entries are done: [TRIAGE-carried-a.md](TRIAGE-carried-a.md),
+- [x] ✅ **Task 2.1**: The 55 carried entries are done: [TRIAGE-carried-a.md](TRIAGE-carried-a.md),
   [TRIAGE-carried-b.md](TRIAGE-carried-b.md), [TRIAGE-carried-c.md](TRIAGE-carried-c.md). The
   results: 23 in-scope defects, 14 dismissed, 13 fixed on main, 2 folded, 3 for the owner (N154,
-  N230, N240). Still to classify: the 65 entries open in ledger 00466. Classify every open entry
+  N230, N240). The 67 entries open in ledger 00466 are done in
+  [TRIAGE-ledger-466.md](TRIAGE-ledger-466.md): 29 in-scope defects, 22 fixed on main, 8
+  dismissed, 4 folded and 4 for the owner (N55, N62, N74, N96). The coordinator reproduced
+  N85 with `hooks-daemon probe` (allowed). The owner delegated the decisions on N154, N230 and
+  N240 to a Fable subagent; see `RULINGS-owner-delegated-fable.md`. Classify every open entry
   in ledger 00474: its index, its carried lists
   ([CARRIED-REFIX-BRANCHES.md](../00474-niggles-ledger-seventeen/CARRIED-REFIX-BRANCHES.md),
   [CARRIED-N53-BRANCH.md](../00474-niggles-ledger-seventeen/CARRIED-N53-BRANCH.md)), and
