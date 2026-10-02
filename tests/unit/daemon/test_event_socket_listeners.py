@@ -24,11 +24,13 @@ from claude_code_hooks_daemon.constants.events import wired_event_metas
 from claude_code_hooks_daemon.core.front_controller import FrontController
 from claude_code_hooks_daemon.core.handler import Handler
 from claude_code_hooks_daemon.core.hook_result import Decision, HookResult
+from claude_code_hooks_daemon.daemon import server
 from claude_code_hooks_daemon.daemon.paths import (
     _UNIX_SOCKET_PATH_LIMIT,
     get_event_socket_dir_from_untracked,
 )
 from claude_code_hooks_daemon.daemon.server import HooksDaemon
+from claude_code_hooks_daemon.utils.cron_hosts import PeerHostname
 
 
 class _EchoHandler(Handler):
@@ -233,7 +235,13 @@ class TestEofFraming:
         isolated_untracked_dir: Path,
         front_controller: FrontController,
         echo_handler: _EchoHandler,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
+        # The client here is this test process, so the daemon would stamp
+        # whatever hostname override the process running pytest exported
+        # (Plan 00470 Task 6.1). That stamp has its own coverage in
+        # test_event_socket_session_hostname.py; here the peer exported none.
+        monkeypatch.setattr(server, "_peer_hostname", lambda writer: PeerHostname())
         config = _make_config(isolated_untracked_dir, relay_enabled=True)
         daemon = HooksDaemon(config=config, controller=front_controller)
         server_task = asyncio.create_task(daemon.start())

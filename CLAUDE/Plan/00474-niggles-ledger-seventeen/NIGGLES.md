@@ -872,3 +872,21 @@ before the gate's modules, since the gate now imports it. The venv was re-synced
 `semgrep` and `dependencies` both pass on main. The gap is closed for `semgrep`, which
 Plan 00475 Task 2.1 (b2984b70a) puts in `changed`. `dependencies` stays out of `changed`
 because it judges the local venv rather than the tree, so only `all` runs it.
+
+### N288 — an event-socket test fails wherever the pytest process exports a hostname override
+
+**Found**: by the Plan 00475 Task 4.1 agent, then reproduced on main.
+`tests/unit/daemon/test_event_socket_listeners.py::TestEofFraming::test_event_socket_dispatches_through_same_controller`
+fails in this container and passes in CI.
+
+**Cause**: Plan 00470 Task 6.1 stamps `hooks_daemon_hostname` on each payload, read from the
+environment of the process at the other end of the socket. This test's client is the pytest
+process itself. The container exports `CCY_HOST_HOSTNAME` and CI exports nothing, so only
+this container sees an extra key in the exact-equality assertion. Deleting the variable with
+`monkeypatch.delenv` would not help, because the daemon reads the peer's
+`/proc/<pid>/environ`, which still holds the environment the process started with.
+
+**Status**: ✅ Fixed on main. The test replaces `server._peer_hostname` with a peer that
+exported no override. The stamp itself keeps its own coverage in
+`test_event_socket_session_hostname.py`, whose client is a separate process with a
+controlled environment.
