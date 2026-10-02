@@ -168,3 +168,21 @@ deliberately. Decide from a measured A/B (Phase 4), not from this reasoning.
 3. Does `autoContinueAtUsageLimit` re-dispatch in-flight sub-agents? (expected no)
 4. Does a teammate's STOPPING BECAUSE write the lead's `[awaiting-human]` marker?
 5. Vendor `scheduled-tasks.md`, `model-config.md`, `interactive-mode.md`.
+
+### Probe results (Task 1.2)
+
+1. **Verified.** The structured CronCreate result is a mapping that carries the id:
+   `{"id": "819c608b", "humanSchedule": "17 3 1 1 *", "recurring": false, "durable": false}`
+   (from the session transcript's `toolUseResult`). The text form reads
+   `Scheduled recurring job 7a7a4035 (…)`, which has no `id:` label. Live, after the daemon
+   restart, a recurring CronCreate wrote one record to `untracked/cron-records.json`
+   (session, id, schedule, prompt hash, created_at), and its CronDelete emptied the file. A
+   one-shot CronCreate is not recorded, by design.
+2. **Verified.** Crons survive compaction: after a `/compact`, CronList still listed both crons
+   created before it, and the failsafe tick fired after the compaction.
+3. **Not probed directly**: it needs a real usage-limit stop. The 2026-09-25 evidence in Task 3.3
+   points to "no": after a usage-limit restart the new session had no teammates, and each agent
+   was re-briefed by hand. Task 3.3's queue does not depend on the answer.
+4. **Answered by Task 3.4**: no. Only `auto_continue_stop` writes the marker, and it is scoped to
+   the main thread.
+5. **Done by Task 1.1.**
