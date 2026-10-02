@@ -362,3 +362,35 @@ config_changes:
       migration_note: >-
         Optional and inert on its own. Declare a host only when a later release's
         usage-pause handlers are wanted on it.
+    - key: handlers.pre_tool_use.bash_safe_mode
+      recommended: true
+      dormant: false
+      description: >-
+        DEFAULT CHANGED (owner ruling). `bash_safe_mode` now ships
+        `enabled: true` and defaults to `mode: block` (it shipped
+        `enabled: false` and warned first). A Bash command with two or more
+        `;`- or newline-sequenced statements and no `set` safety prelude
+        (errexit and pipefail by default) is now DENIED. A command that
+        begins `set -euo pipefail` (or declares `set -e` and `set -o
+        pipefail`), a single statement and a pure `&&` chain are never
+        flagged. `only_with_mutator` stays false and `require` stays
+        `[errexit, pipefail]`.
+      example_yaml: |
+        handlers:
+          pre_tool_use:
+            bash_safe_mode:
+              enabled: true
+              priority: 36
+              options:
+                mode: block
+      migration_note: >-
+        On by default. Two remedies for a denied command: put `set -euo
+        pipefail` at the top, or chain the statements with `&&` only. A
+        command that must run every statement regardless of failures (a
+        diagnostic sweep, an exit-code observer) declares
+        `MUST_SKIP_SAFE_MODE_BECAUSE="reason"; <command>`. To opt out, set
+        handlers.pre_tool_use.bash_safe_mode.enabled: false, or keep the
+        handler advisory with options.mode: warn. Gotcha: under `pipefail`
+        a `producer | head` exits 141 (SIGPIPE) and `set -e` then aborts the
+        command, so do not append `|| true`; read the file directly with
+        `head -n N <file>` or capture with `bin/echd-capture N` instead.
