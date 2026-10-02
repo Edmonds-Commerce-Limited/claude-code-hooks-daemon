@@ -1402,6 +1402,20 @@ The uncertain-move union judges the hook directory and the LAST recorded move (`
 every candidate directory (`sub`). Remedy: judge every directory any `cd` in the chain could
 land in.
 
+### N316 — docs QA `pointer-resolves` reads a link shape inside an inline code span
+
+**Source**: coordinator, landing Plan 00483's INVENTORY.md.
+
+**Evidence**: a line quoting the `curl_pipe_shell` regex in one backtick span drew "Link target
+does not exist" with the interpreter alternation as the target. The span held a square-bracketed
+`path/` group immediately followed by the parenthesised `bash|sh|…` group, which is the inline-link
+shape. Text inside inline code is never a link in Markdown. In INVENTORY.md it was `advise`. Quoting
+the same span in this entry drew `[block]` (the edit was not refused). Both lines were reworded to
+prose.
+
+**Status**: ⬜ Open. Remedy: strip inline code spans (and fenced blocks, if not already) before
+the link scan.
+
 ### N315 — the post-commit docs QA report judges a vendored remote-docs page that lint and sweep exclude
 
 **Source**: coordinator, committing Plan 00470 Task 1.1 (81338abb3).

@@ -59,19 +59,25 @@ other than defeating a parser. Everything else, every ordinary respelling includ
 
 ### Phase 1: Inventory the guards
 
-- [ ] ⬜ **Task 1.1**: List every blocking PreToolUse handler. For each, record what it matches
+- [x] ✅ **Task 1.1**: List every blocking PreToolUse handler. For each, record what it matches
   and the shapes its parsing handles, from the code rather than its docs. Start with the
   guards that parse shell:
   - `secret_file_guard`, `quarantine_artefact_read_guard`, `flaggable_content_channel_guard`;
   - `sensitive_content` and the commit gates;
   - `destructive_git`, `git_stash`, `sed_blocker`, `pipe_blocker`;
   - the plan-folder `mkdir` guard, `project_containment`, `upgrade_approval_guard`.
-- [ ] ⬜ **Task 1.2**: For each guard, classify each parsing branch as in-scope or out-of-scope
+- [x] ✅ **Task 1.2**: For each guard, classify each parsing branch as in-scope or out-of-scope
   under the two-part test. Mark every out-of-scope branch that causes an in-scope false
   positive, with a reproducing command. Use the evaluation-error and false-positive evidence
   from Plan 00481 where it exists.
-- [ ] ⬜ **Task 1.3**: Write the inventory to `INVENTORY.md` in this folder, one table per
-  guard. Add the list of out-of-scope-only code for the owner (open question 2).
+- [x] ✅ **Task 1.3**: Write the inventory to `INVENTORY.md` in this folder, one table per
+  guard. Add the list of out-of-scope-only code for the owner (open question 2). Done:
+  [INVENTORY.md](INVENTORY.md). 62 of 74 PreToolUse handler files can deny; 38 shell-parsing
+  guards have tables, the other 24 are triaged at file level (part G, UNVERIFIED). 15 guards
+  cause an in-scope false positive. About 3,500 lines of out-of-scope-only code are listed for
+  the owner. The two headline false positives were reproduced live by the coordinator: a
+  `cd "$DIR" &&` before a quoted heredoc makes `git_stash` deny prose, and `${P:-"/usr"}`
+  before an `awk '{…}'` is denied as unreadable. Both feed Task 3.2.
 
 ### Phase 2: Triage the backlog
 
