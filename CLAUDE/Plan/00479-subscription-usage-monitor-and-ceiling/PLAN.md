@@ -61,8 +61,8 @@ hosts:
   needs the user's credential and is rate-limited.
 - Moving `persistent_crons` job host selection into the new `hosts:` block. That is a
   possible follow-on (open question 4), not part of this plan.
-- Changing the ccy supervisor. It is outside this repository, and its live instance is not
-  touched.
+- Restarting the running ccy supervisor session. Its code changes in this repository and
+  reaches the running worker by hot-reload only.
 
 ## Tasks
 
@@ -126,13 +126,19 @@ the daemon directs the model and then verifies what it did.
 - [ ] ⬜ **Task 4.4**: Nothing re-arms the crons while paused. `persistent_cron_assertor` and
   the failsafe-cron advisors stay quiet, including on the compact's SessionStart, and the
   pause is recorded in a durable marker the daemon reads.
-- [ ] ⬜ **Task 4.5**: The supervisor compact.
-  - **Daemon side**: expose the pause state, with its reason and resume time, where the ccy
-    supervisor can read it. Specify exactly what the supervisor sends: a `/compact` whose
-    instruction is to do nothing until the resume cron fires.
-  - **Supervisor side**: the ccy change lives outside this repository. Track it as an
-    interface spec here and as an issue or request for the supervisor's owner. The live
-    supervisor is not touched.
+- [ ] ⬜ **Task 4.5**: The supervisor compact, in this repository. The supervisor is
+  `.claude/ccy/claude-supervise.py`, tested under `tests/unit/supervise/`, with its
+  injection rules in `CLAUDE/development/CcySupervisor.md`. It already decides every
+  `/compact`, `continue` and `/goal` injection.
+  - **Daemon side**: the daemon records the pause state (reason and resume time) where the
+    supervisor already reads daemon state, such as the `<session>.compacting` record.
+  - **Supervisor side**, built TDD:
+    - once the pause is recorded and the session has stopped, inject ONE `/compact` whose
+      instruction is to do nothing until the resume cron fires;
+    - inject no `continue` or goal nudges while paused;
+    - resume normal behaviour when the pause lifts.
+  - **Rollout**: verify the change on a branch, then apply it by the worker hot-reload in
+    `CcySupervisor.md`. The running supervisor session is never restarted.
 - [ ] ⬜ **Task 4.6**: Resume. When the resume cron fires, the gate re-reads usage. A window
   past its `resets_at` reads as absent, so a snapshot from before the reset cannot keep
   the session paused. Then:
