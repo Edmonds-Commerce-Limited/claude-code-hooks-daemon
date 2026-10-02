@@ -38,6 +38,7 @@ Full write-ups are in [NIGGLES.md](NIGGLES.md). One line each here:
 
 | #          | Verdict                                                                                                          | Origin              | Status                      |
 | ---------- | ---------------------------------------------------------------------------------------------------------------- | ------------------- | --------------------------- |
+| N298       | `R-PLAN-NUMBER-DISCOVERY` denies a read-only `ls CLAUDE/Plan/*/PLAN.md`, even as quoted text                     | P483 triage         | ⬜ Open                     |
 | N297       | The coordinator merged `merge_qa_advisor` without a targeted run; main failed two tests (N278 again)             | Coordinator         | ✅ Fixed (3dadb3d8c)        |
 | N296       | `audit_error_hiding.py` sees log-and-continue only as a direct `logger.<level>()`; a helper call evades it       | N294 review         | ⬜ Open                     |
 | N295       | The prompt-cache chip parses every sub-agent sidecar (3,369 files) on every render: 84–427 ms                    | Coordinator         | ✅ Fixed (b44e395a5)        |
