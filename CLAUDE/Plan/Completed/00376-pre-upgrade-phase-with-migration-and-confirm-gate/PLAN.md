@@ -1,6 +1,6 @@
 # Plan 00376: pre upgrade phase with migration and confirm gate
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-09-11
 **Owner**: joseph
 **Priority**: High
@@ -512,11 +512,17 @@ rather than only matching syntax.
 - [x] Plan 00375's rename ships through this path rather than through a
   deprecation window (as a pre-upgrade task for every upgrade that crosses
   v3.64.0; see Task 5.1 for why v3.64.0 itself stays a minor).
-- [ ] Full QA passes and CI is green. Targeted QA passes on the branch. Full
-  QA and CI run when the branch is merged, which is not this plan's call.
+- [x] CI is green. Targeted QA passed on the branch. Main's full three-Python
+  CI is green on 92bf94c00 (workflow_dispatch run 36806392136, plus two nightly
+  runs). Under CLAUDE/QA.md's tiers, `llm_qa.py all` runs at release
+  preparation and is not this plan's step. Release-bound consequences are in
+  the holding area: release note 180, plus the v3.68.0 config-changes and
+  truth-changes manifests.
 
 ## Delivery & Milestones
 
+- Delivered to `main` in 2584ee7e4 (merge of `worktree-d-00376`). Main's CI
+  was green on 92bf94c00.
 - Motivated by Plan 00375 and the owner's ruling against deprecation windows:
   "i dont like delay - its over complex".
 - Reconciled with the upgrade-scripts redesign (Plan 00464 work), which

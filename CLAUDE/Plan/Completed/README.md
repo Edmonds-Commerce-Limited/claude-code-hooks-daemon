@@ -96,6 +96,8 @@ Plans older than the 30 highest-numbered completed plans (see [../README.md](../
 
 - [00377: niggles ledger](00377-niggles-ledger/PLAN.md) - Complete + the archiving commit (the first niggles ledger: eleven small defects recorded the turn they were found, nine fixed here and two graduated — N10 to Plan 00378, N3 to Plan 00376. The NEXT niggle opens a new ledger; SOP in `CLAUDE/PlanWorkflow.md`)
 
+- [00376: pre-upgrade phase with migration and confirm gate](00376-pre-upgrade-phase-with-migration-and-confirm-gate/PLAN.md) - Complete at `2584ee7e4` + the archiving commit (an upgrade said what changed only after changing it. Now a pre-upgrade phase names affected call sites at file:line before anything is installed, a proceed/abort gate works for a non-interactive agent, and a breaking upgrade waits for the owner's approval. Replaces deprecation windows; Plan 00375's rename ships through it)
+
 - [00375: `plan-qa` and `docs-qa` JSON disagree on the severity key](00375-plan-qa-and-docs-qa-json-disagree-on-the-severity-key/PLAN.md) - Complete + the archiving commit (one concept under two names — `docs-qa` emitted `severity`, `plan-qa` emitted `level` — converged on `severity` with no deprecation window, since two live names IS the defect)
 
 - [00374: the global `--project-root` is clobbered by a subparser default](00374-global-project-root-clobbered-by-subparser-default/PLAN.md) - Complete at `05d526be`…`692b32c5` + the archiving commit (`bin/hooks-daemon` refuses to run rather than let the CLI fall back to the caller's directory, but argparse's subparser default silently discarded the anchor it passed, and the anchoring suite asserted the argv rather than the behaviour)
