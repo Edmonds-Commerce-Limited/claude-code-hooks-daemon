@@ -953,6 +953,26 @@ class HandlerID:
         config_key="cron_subagent_stop_enforcer",
         display_name="cron-subagent-stop-enforcer",
     )
+    # Usage pause gates (Plan 00479 Phase 4). A session whose host usage
+    # ceiling is reached is PAUSED, not ended: the prompt gate records the pause
+    # and directs the model to replace its crons with one resume cron; the tool
+    # gate allows only the three cron tools meanwhile; the stop gate lets the
+    # session stop only once exactly that one cron remains.
+    USAGE_PAUSE_GATE = HandlerIDMeta(
+        class_name="UsagePauseGateHandler",
+        config_key="usage_pause_gate",
+        display_name="usage-pause-gate",
+    )
+    USAGE_PAUSE_TOOL_GATE = HandlerIDMeta(
+        class_name="UsagePauseToolGateHandler",
+        config_key="usage_pause_tool_gate",
+        display_name="usage-pause-tool-gate",
+    )
+    USAGE_PAUSE_STOP_GATE = HandlerIDMeta(
+        class_name="UsagePauseStopGateHandler",
+        config_key="usage_pause_stop_gate",
+        display_name="usage-pause-stop-gate",
+    )
     # Subagent cron-delete blocker (PreToolUse handler) -- Plan 00423 Task 3.2,
     # issue #40's reported incident: a finished subagent deleted the session's
     # single failsafe recovery cron on its own initiative to stop the nudges,

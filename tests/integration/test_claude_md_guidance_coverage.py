@@ -80,6 +80,12 @@ _EARNS_GUIDANCE: dict[str, str] = {
     "ProjectContainmentHandler": "T1 denies a write named outside the repo root",
     "PlanJournalGuardHandler": "T1 denies a journal entry written by hand",
     "SubagentCronDeleteBlockerHandler": "T1 denies CronDelete inside a subagent",
+    "UsagePauseToolGateHandler": "T1 denies every tool but the cron tools while usage-paused",
+    "UsagePauseGateHandler": (
+        "T2 changes what the agent must do: the pause directive says to replace every cron "
+        "and stop, and to ignore the triggering request"
+    ),
+    "UsagePauseStopGateHandler": "T1 denies a paused session's stop until only the resume cron remains",
     "SubagentFullQaBlockerHandler": "T1 denies a full-suite QA run inside a subagent",
     "SubagentWorktreeWriteGuardHandler": (
         "T1 denies a subagent's Write/Edit into another checkout of its repository"

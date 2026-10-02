@@ -176,6 +176,29 @@ entry, or no ceiling on the matches, means no ceiling. Unknown keys are
 rejected at config load. The resolver is
 `utils.host_usage_ceiling.resolve_host_usage_ceiling`.
 
+### What a ceiling does: the usage pause
+
+A session whose host has a ceiling PAUSES when a live usage window reaches it;
+it does not end. Three handlers (`usage_pause_gate`, `usage_pause_tool_gate`,
+`usage_pause_stop_gate`) run it, inert unless a ceiling is set:
+
+- The prompt that trips the ceiling carries a directive to replace every cron
+  with ONE one-shot resume cron at the window's reset plus two minutes, then
+  stop. The cron's schedule is a local-time expression, with the UTC time stated
+  beside it.
+- While paused, other prompts are dropped before the model, every tool but
+  `CronList`/`CronDelete`/`CronCreate` is denied (and halts the turn), and a stop
+  is accepted only once exactly the resume cron remains.
+- The resume cron's prompt starts `[tick:usage-resume]`. When it fires, usage is
+  re-read: under the ceiling the pause lifts and the declared crons are
+  re-created; still over it, the next resume cron is scheduled.
+- The status line shows `⏸ usage HH:MM` (local resume time).
+
+No ceiling, an unknown hostname or missing usage data never pauses a session.
+The pause record is `<session>.usage-paused` in the context sidecar directory,
+which the ccy supervisor also reads
+([CcySupervisor.md](../../CLAUDE/development/CcySupervisor.md)).
+
 ---
 
 ## Projects (monorepo boundaries)
@@ -337,14 +360,14 @@ convenience:
 
 <!-- ssot-quote: CLAUDE/HANDLER_DEVELOPMENT.md#priority-guide -->
 
-| Priority Range | Type         | Examples                                                                                                                                                                                                                                                          |
-| -------------- | ------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 0-9            | Test         | Test fixtures (`Priority.TEST_HANDLER`), plus the Stop-family handlers that MUST run before a terminal Stop catch-all: `cron_stop_enforcer`, `cron_subagent_stop_enforcer`, `teammate_reap_advisor`, `subagent_report_path_verifier`, `subagent_cache_aggregator` |
-| 10-20          | Safety       | `destructive_git`, `sed_blocker`, `secret_file_guard`                                                                                                                                                                                                             |
-| 25-35          | Code Quality | `qa_suppression`, `lint_on_edit`, `comment_changelog`                                                                                                                                                                                                             |
-| 36-55          | Workflow     | `lsp_enforcement`, `plan_qa_edit`, `npm_command`                                                                                                                                                                                                                  |
-| 56-73          | Advisory     | `british_english`, `flaggable_work_advisor`, `model_fallback_detector`                                                                                                                                                                                            |
-| 100+           | Logging      | Reserved for logging/metrics/cleanup; no built-in handlers ship here                                                                                                                                                                                              |
+| Priority Range | Type         | Examples                                                                                                                                                                                                                                                                                                                                                          |
+| -------------- | ------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 0-9            | Test         | Test fixtures (`Priority.TEST_HANDLER`), plus the Stop-family handlers that MUST run before a terminal Stop catch-all: `cron_stop_enforcer`, `cron_subagent_stop_enforcer`, `teammate_reap_advisor`, `subagent_report_path_verifier`, `subagent_cache_aggregator`, and the usage pause gates `usage_pause_gate`, `usage_pause_tool_gate`, `usage_pause_stop_gate` |
+| 10-20          | Safety       | `destructive_git`, `sed_blocker`, `secret_file_guard`                                                                                                                                                                                                                                                                                                             |
+| 25-35          | Code Quality | `qa_suppression`, `lint_on_edit`, `comment_changelog`                                                                                                                                                                                                                                                                                                             |
+| 36-55          | Workflow     | `lsp_enforcement`, `plan_qa_edit`, `npm_command`                                                                                                                                                                                                                                                                                                                  |
+| 56-73          | Advisory     | `british_english`, `flaggable_work_advisor`, `model_fallback_detector`                                                                                                                                                                                                                                                                                            |
+| 100+           | Logging      | Reserved for logging/metrics/cleanup; no built-in handlers ship here                                                                                                                                                                                                                                                                                              |
 
 <!-- /ssot-quote -->
 

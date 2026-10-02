@@ -172,6 +172,13 @@ handlers:
       enabled: true
       priority: 14
 
+    # Plan 00479 Task 4.2: while a session is paused on its host usage ceiling
+    # (usage_pause_gate), only CronList/CronDelete/CronCreate are allowed; any
+    # other tool is denied and the turn halted. Inert unless a pause is recorded.
+    usage_pause_tool_gate:
+      enabled: true
+      priority: 9
+
     # Ledger 00474 N264: a sub-agent's edits landed, uncommitted, in a SIBLING
     # branch's worktree and would have been committed under the wrong branch's
     # name. Denies a subagent's Write/Edit/NotebookEdit from inside a linked
@@ -1070,6 +1077,10 @@ handlers:
 
   # UserPromptSubmit handlers (run when user submits prompt)
   user_prompt_submit:
+    usage_pause_gate:  # Pauses the session at its host usage ceiling, holds the pause, resumes it (Plan 00479)
+      enabled: true  # Inert unless `hosts:` gives this host a usage_ceiling; never terminal
+      priority: 9
+
     git_context_injector:  # Injects git context into user prompts
       enabled: true
       priority: 10
@@ -1145,6 +1156,10 @@ handlers:
   # cannot shadow auto_continue_stop in turn. See
   # tests/integration/test_stop_chain_terminal_shadowing.py.
   stop:
+    usage_pause_stop_gate:  # A usage-paused session stops only once its crons are exactly the one resume cron (Plan 00479)
+      enabled: true  # Inert unless a usage pause is recorded for the session; never terminal
+      priority: 6
+
     cron_stop_enforcer:  # Blocks a stop while a declared persistent_crons job is verified missing (Plan 00416)
       enabled: true  # Silent unless persistent_crons.enabled and at least one job is declared
       priority: 7

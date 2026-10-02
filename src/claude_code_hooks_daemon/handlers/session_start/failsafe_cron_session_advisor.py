@@ -48,6 +48,7 @@ from claude_code_hooks_daemon.handlers.post_tool_use.recovery_cron_advisor impor
 from claude_code_hooks_daemon.utils.config_cache import load_config_cached
 from claude_code_hooks_daemon.utils.cron_hosts import effective_hostname
 from claude_code_hooks_daemon.utils.session_helpers import is_resume_session
+from claude_code_hooks_daemon.utils.usage_pause_gate import hook_is_usage_paused
 
 logger = logging.getLogger(__name__)
 
@@ -117,7 +118,15 @@ class FailsafeCronSessionAdvisorHandler(SessionStartHandlerBase):
             return Config()
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
-        """A new session, the failsafe advice on, and no declaration covering it."""
+        """A new session, the failsafe advice on, and no declaration covering it.
+
+        Silent while the session is paused on its usage ceiling (Plan 00479),
+        including on the SessionStart that follows the pause's compact: the
+        failsafe cron is one of the crons the pause removed. The usage gate
+        names it again when the pause lifts.
+        """
+        if hook_is_usage_paused(hook_input):
+            return False
         if is_resume_session(hook_input):
             return False
         config = self._load_config()

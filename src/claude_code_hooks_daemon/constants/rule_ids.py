@@ -631,6 +631,22 @@ class RuleID:
     DECLARED_CRON_SUPPRESSED: str = "R-DECLARED-CRON-SUPPRESSED"
 
     # ------------------------------------------------------------------
+    # usage pause gates (Plan 00479 Phase 4)
+    # ------------------------------------------------------------------
+
+    #: A prompt (cron tick, supervisor message or human) refused while the
+    #: session is paused on its host usage ceiling.
+    USAGE_PAUSE_PROMPT: str = "R-USAGE-PAUSE-PROMPT"
+
+    #: A tool call other than CronList/CronDelete/CronCreate refused, and the
+    #: turn halted, while the session is paused on its host usage ceiling.
+    USAGE_PAUSE_TOOL: str = "R-USAGE-PAUSE-TOOL"
+
+    #: A Stop refused while a usage-paused session's crons are not yet exactly
+    #: the one resume cron.
+    USAGE_PAUSE_STOP: str = "R-USAGE-PAUSE-STOP"
+
+    # ------------------------------------------------------------------
     # lsp_noise_checker handler (Plan 00368) — both advisory
     # ------------------------------------------------------------------
 

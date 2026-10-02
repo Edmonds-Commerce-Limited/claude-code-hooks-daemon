@@ -45,6 +45,7 @@ from claude_code_hooks_daemon.utils.cron_pause import (
     load_live_pauses,
     render_paused_note,
 )
+from claude_code_hooks_daemon.utils.usage_pause_gate import hook_is_usage_paused
 
 logger = logging.getLogger(__name__)
 
@@ -105,7 +106,15 @@ class PersistentCronAssertorHandler(SessionStartHandlerBase):
         return self._load_config().persistent_crons.active_jobs(effective_hostname(hook_input))
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
-        """Fire only when the project has at least one active job declared for this host."""
+        """Fire only when the project has at least one active job declared for this host.
+
+        Silent while the session is paused on its usage ceiling (Plan 00479),
+        including on the SessionStart that follows the pause's compact: asking
+        for the declared crons back would re-arm exactly what the pause removed.
+        The usage gate names them again when the pause lifts.
+        """
+        if hook_is_usage_paused(hook_input):
+            return False
         return bool(self._active_jobs(hook_input))
 
     @staticmethod
