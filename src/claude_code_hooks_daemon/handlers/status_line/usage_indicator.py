@@ -38,8 +38,6 @@ from collections.abc import Callable
 from datetime import datetime
 from typing import Any, Final
 
-from pydantic import ValidationError
-
 from claude_code_hooks_daemon.config.models import Config
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, HookInputField, Priority
 from claude_code_hooks_daemon.core import AdvisoryResult
@@ -144,11 +142,8 @@ class UsageIndicatorHandler(StatusLineHandlerBase):
         labelled (``⛔ 5h 80% 7d 95%``). None when no ``hosts:`` entry matches
         or the matching entries set no ceiling.
         """
-        try:
-            ceiling = session_ceiling(self._config_loader(), hook_input)
-        except (ValidationError, OSError, ValueError) as exc:
-            logger.debug("Skipping usage ceiling: %s", exc)
-            return None
+        # The default loader degrades an unloadable config to no ceiling itself.
+        ceiling = session_ceiling(self._config_loader(), hook_input)
         if ceiling.five_hour is None and ceiling.seven_day is None:
             return None
         if ceiling.five_hour == ceiling.seven_day:
