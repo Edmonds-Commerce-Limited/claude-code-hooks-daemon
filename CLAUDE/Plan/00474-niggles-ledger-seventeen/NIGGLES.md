@@ -1341,7 +1341,13 @@ on read-only `grep -c`, `awk`, `--help` and `bin/hooks-daemon … 2>&1` commands
 interpreter's inline-code flag whatever the command is. It is advisory only, but it fires
 on ordinary reads and teaches agents to ignore it.
 
-**Status**: ⬜ Open. Treat `-c`/`-e` as inline code only after a known interpreter.
+**Status**: ✅ Fixed on branch worktree-n302-n314. `_runs_inline_code` now skips a named set of
+search and text tools (`grep`, `egrep`, `fgrep`, `rg`, `awk` family, `wc`, `sort`, `head`, `tail`,
+`cut`, `jq`), by exact program name. The alternative, an allowlist of known interpreters, would
+have undone the round-10 decision that an unknown program run with `-e` stays UNSEEN; the exclusion
+list keeps `node -e`, `perl -e`, `foo -c '…'` and the rest as they were. `awk` is excluded because
+its program is a positional argument that is not judged either, so flagging `awk -e` protected
+nothing. Pinned by `TestInlineCodeFlagIsNotReadOnSearchAndTextTools`.
 
 ### N303 — the pause-gate merge left `UsagePauseToolGateHandler` unclassified; main was red
 
@@ -1405,10 +1411,12 @@ land in.
 that never flagged the size, and the N302 misclassification sat inside it. Nothing in
 `scripts/qa/` measures module length.
 
-**Status**: ⬜ Open. Remedy: a module-size check in QA with a stated bound. Today's outliers would
-need an exception list, and that is an allowlist, which needs owner approval. Until the owner rules,
-the check can only REPORT modules over the bound, not fail on them. The split of the file itself is a
-separate, sequenced pure-refactor plan.
+**Status**: ✅ Fixed on branch worktree-n302-n314 (report-only; gate awaits owner).
+`scripts/qa/check_module_length.py` reports every module under `src/` over 1000 lines (672
+modules: median 170, p90 558, p95 848; 26 over the bound) and always exits 0. A gate would need an
+exception list for today's outliers, which is an allowlist and needs owner approval. It is not
+wired into `llm_qa.py`: no report-only tool exists there, and a passing tool shows nothing, so the
+report would never be read. The split of the file itself is a separate, sequenced pure-refactor plan.
 
 ### N313 — `git_stash` denies a `grep` naming `git stash` when its output goes into `awk`
 

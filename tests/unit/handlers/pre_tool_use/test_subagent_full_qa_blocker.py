@@ -3138,6 +3138,59 @@ class TestUnrecognisedInterpreterRunningInlineCode:
         assert find_full_qa_invocation("pytest -c pytest.ini tests/unit/x.py", _patterns()) is None
 
 
+class TestInlineCodeFlagIsNotReadOnSearchAndTextTools:
+    """N302: `-c`, `-e`, `-E` and `-r` mean count, pattern, extended and recursive
+    or reverse to a search or text tool, so they are no evidence of inline code
+    there. The generic flag rule still holds for every program that is not one.
+    """
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            'grep -c "^class " src/x.py',
+            "grep -ce foo file.txt",
+            "grep -e foo -e bar file.txt",
+            "grep -E 'a|b' file.txt",
+            "egrep -c foo file.txt",
+            "fgrep -c foo file.txt",
+            "rg -e foo src",
+            "/usr/bin/grep -c foo file.txt",
+            "awk -e 'NR<5' file.txt",
+            "awk -c 'NR<5' file.txt",
+            "gawk -e 'NR<5' file.txt",
+            "wc -c file.txt",
+            "sort -r file.txt",
+            "jq -e .a data.json",
+            "jq -r .a data.json",
+            "cut -c1-5 file.txt",
+            "head -c 10 file.txt",
+            "tail -c 10 file.txt",
+            "grep -c foo file.txt | wc -l",
+            "cat file.txt | grep -c foo",
+        ],
+    )
+    def test_a_search_or_text_tool_is_not_unseen(self, command: str) -> None:
+        assert find_full_qa_invocation(command, _patterns()) is None, command
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "perl -e 'system(\"pytest tests/\")'",
+            'node -e \'require("child_process").execSync("pytest")\'',
+            "ruby -e 'system(\"pytest\")'",
+            "php -r 'system(\"pytest\");'",
+            "foo -c 'pytest tests/'",
+            "some-future-interpreter --eval 'run_everything()'",
+            "grepx -c 'pytest tests/'",
+            "echo hi | perl -e 'system(\"pytest\")'",
+        ],
+    )
+    def test_every_other_program_keeps_its_verdict(self, command: str) -> None:
+        match = find_full_qa_invocation(command, _patterns())
+        assert match is not None, command
+        assert match.fail_closed, command
+
+
 class TestUnseenPolicyIsConfigurable:
     """Review 10 M1: the UNSEEN ruling is an OPTION, not a fact baked into
     shipped code -- and the advisory never claims a backstop a project does
