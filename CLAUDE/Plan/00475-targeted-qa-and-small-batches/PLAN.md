@@ -105,13 +105,17 @@ instead of competing. Today `untracked/qa/.llm_qa.lock` is per checkout, and
 
 ### Phase 1: Measure
 
-- [ ] 🔄 **Task 1.1**: Measure each of the 40 `llm_qa.py` checks on this host.
+- [x] ✅ **Task 1.1**: Measure each of the 40 `llm_qa.py` checks on this host.
   Record which are cheap enough for the targeted tier. First measurement: 27
-  checks together (every check except `tests`, `smoke_test`, `semgrep`,
-  `dependencies`, `github_urls`, `python_var_guidance`, `skip_list_substring`,
-  `dangerous_invocation_corpus`, `security_downgrade_flags`, `capture_corruption`,
-  `sensitive_content`, `git_history` and `british_english`) took 394 seconds
-  wall-clock. The remaining non-test checks still need timing.
+  checks together (every check except `tests`, `smoke_test` and the eleven
+  below) took 394 seconds wall-clock. The eleven, timed one at a time with no
+  lock wait: `capture_corruption` 0.4 s, `dangerous_invocation_corpus` 1.2 s,
+  `python_var_guidance` 1.6 s, `skip_list_substring` 2 s, `sensitive_content`
+  4.3 s, `dependencies` 5.3 s, `british_english` 5.9 s, `git_history` 6.1 s,
+  `github_urls` 14 s, `semgrep` 32 s, `security_downgrade_flags` 49 s. All but
+  `security_downgrade_flags` are cheap enough for the targeted tier. `semgrep`
+  and `dependencies` were failing on main when measured, since neither runs in
+  CI or in `changed` (ledger 00474 N287).
 
 ### Phase 2: Targeted QA
 

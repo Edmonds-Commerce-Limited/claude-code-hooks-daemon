@@ -851,3 +851,21 @@ census, the skip-list checker's whole-tree scan, the live playbook) are full-sui
    compiled `[$`\]`pattern's`.search(path)\`, same behaviour.
 
 **Status**: ✅ Remedied on `worktree-ci-red-n264-n266`.
+
+### N287 — `semgrep` and `dependencies` fail on main; nothing runs them
+
+**Found**: timing the checks outside `changed` for Plan 00475 Task 1.1. Run directly on
+main at 39451c461, `llm_qa.py semgrep` exits 1 with six `pathlib-quadratic-containment`
+findings: `install/upgrade_gate.py` (two), `install/upgrade_guides.py`,
+`install/upgrade_tasks.py` and `scripts/qa/check_daemon_dir_cd_in_docs.py`, all calling
+`Path.relative_to`/`is_relative_to` directly instead of the `utils/path_containment.py`
+helpers. `llm_qa.py dependencies` exits 1 because the workspace venv's installed metadata
+says 3.66.0 while the project is 3.67.0.
+
+**Cause**: neither check is in the CI workflow or in the `changed` tier, so only `all`
+runs them, and `all` runs only at release preparation. The violations arrived with Plan
+00376's upgrade work and sat unseen.
+
+**Status**: 🔄 The six findings are being fixed on `worktree-n287-semgrep-containment`.
+The venv needs a re-sync. The gap itself belongs to Plan 00475 Task 2.1, which puts the
+cheap checks, `semgrep` included, into `changed`.
