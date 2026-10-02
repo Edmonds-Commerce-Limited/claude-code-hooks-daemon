@@ -201,7 +201,11 @@ class UsageIndicatorHandler(StatusLineHandlerBase):
         if failure is None:
             return None
         label = _FAILURE_LABELS.get(failure.error, failure.error)
-        hhmm = f"{datetime.fromtimestamp(failure.recorded_at):%H:%M}"
+        try:
+            hhmm = f"{datetime.fromtimestamp(failure.recorded_at):%H:%M}"
+        except (OverflowError, OSError, ValueError) as exc:
+            logger.debug("Skipping failure chip: unrepresentable time %r: %s", failure, exc)
+            return None
         return f"{_CRITICAL}{_FAILURE_ICON} {label} {hhmm}{_RESET}"
 
     def handle(self, hook_input: dict[str, Any]) -> AdvisoryResult:

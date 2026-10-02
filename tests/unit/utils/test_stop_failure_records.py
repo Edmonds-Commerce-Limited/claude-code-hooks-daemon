@@ -103,6 +103,23 @@ class TestReading:
         assert read_records(path) == [_record(recorded_at=5.0)]
 
 
+class TestNonFiniteTimestamps:
+    @pytest.mark.parametrize("literal", ["NaN", "Infinity", "-Infinity"])
+    @pytest.mark.parametrize("field", ["recorded_at", "resolved_at"])
+    def test_a_non_finite_timestamp_reads_as_no_record(
+        self, tmp_path: Path, literal: str, field: str
+    ) -> None:
+        path = tmp_path / "records.json"
+        recorded = literal if field == "recorded_at" else "1.0"
+        resolved = literal if field == "resolved_at" else "null"
+        path.write_text(
+            '{"records": [{"session_id": "s1", "error": "rate_limit", '
+            f'"recorded_at": {recorded}, "resolved_at": {resolved}}}]}}',
+            encoding="utf-8",
+        )
+        assert read_records(path) == []
+
+
 class TestResolving:
     def test_a_resolved_failure_is_no_longer_unresolved(self, tmp_path: Path) -> None:
         path = tmp_path / "stop-failures.json"

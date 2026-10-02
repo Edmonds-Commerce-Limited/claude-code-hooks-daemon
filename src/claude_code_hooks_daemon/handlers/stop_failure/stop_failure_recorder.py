@@ -78,7 +78,7 @@ class StopFailureRecorderHandler(StopFailureHandlerBase):
         return None
 
     def get_acceptance_tests(self) -> list[Any]:
-        """VERIFIED_BY_LOAD: StopFailure fires only when the API fails a turn."""
+        """One case: a recorded failure is a file, which the harness cannot assert on."""
         from claude_code_hooks_daemon.core import (
             AcceptanceTest,
             Decision,
@@ -89,18 +89,23 @@ class StopFailureRecorderHandler(StopFailureHandlerBase):
         return [
             AcceptanceTest(
                 title="stop_failure_recorder records a rate-limit or credential failure",
-                command='echo "stop failure recording verified by unit tests"',
+                command="Trigger a StopFailure (rate_limit) and verify the hook answers {}.",
+                harness_cannot_produce=(
+                    "StopFailure fires only when the API fails a turn, and the assertion "
+                    "is a file under the daemon's untracked directory, not the hook's "
+                    "answer; the harness compares decisions and message patterns only. "
+                    "Covered by tests/unit/handlers/stop_failure/."
+                ),
                 description=(
                     "A StopFailure with error rate_limit, authentication_failed or "
                     "cloud_credential_error is written to the daemon's untracked "
                     "stop-failures.json; every other error is ignored. Always a clean {}."
                 ),
                 expected_decision=Decision.ALLOW,
-                expected_message_patterns=[r".*"],
-                safety_notes="Untriggerable by tool call; verified by daemon load + unit tests.",
+                expected_message_patterns=[],
+                safety_notes="Observe-only: writes one record to the daemon's untracked dir.",
                 test_type=TestType.CONTEXT,
-                requires_event="StopFailure event",
                 recommended_model=RecommendedModel.SONNET,
-                requires_main_thread=True,
+                requires_main_thread=False,
             ),
         ]

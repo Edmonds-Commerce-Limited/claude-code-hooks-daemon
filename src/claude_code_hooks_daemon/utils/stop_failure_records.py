@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import threading
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -80,10 +81,17 @@ def default_records_path() -> Path | None:
 
 
 def _number(value: object) -> float | None:
-    """``value`` as a float when it is a real number (a bool is not one), else None."""
+    """``value`` as a float when it is a finite real number (a bool is not one), else None.
+
+    ``json.loads`` accepts ``NaN`` and ``Infinity``; neither is a time.
+    """
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         return None
-    return float(value)
+    try:
+        number = float(value)
+    except OverflowError:
+        return None
+    return number if math.isfinite(number) else None
 
 
 def _parse_entry(entry: object) -> StopFailureRecord | None:

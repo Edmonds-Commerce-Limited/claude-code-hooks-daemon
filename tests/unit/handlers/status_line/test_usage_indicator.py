@@ -393,6 +393,26 @@ class TestStopFailureChip:
         assert text is not None
         assert "⚠ something_new" in _plain(text)
 
+    @pytest.mark.parametrize("literal", ["NaN", "Infinity", "-Infinity"])
+    def test_a_non_finite_timestamp_file_renders_without_raising(
+        self, records: Path, literal: str
+    ) -> None:
+        records.write_text(
+            '{"records": [{"session_id": "sess-1", "error": "rate_limit", '
+            f'"recorded_at": {literal}, "resolved_at": null}}]}}',
+            encoding="utf-8",
+        )
+        assert self._render_for(records) is None
+
+    @pytest.mark.parametrize("timestamp", ["1e300", "-1e300"])
+    def test_an_absurd_finite_timestamp_shows_no_chip(self, records: Path, timestamp: str) -> None:
+        records.write_text(
+            '{"records": [{"session_id": "sess-1", "error": "rate_limit", '
+            f'"recorded_at": {timestamp}, "resolved_at": null}}]}}',
+            encoding="utf-8",
+        )
+        assert self._render_for(records) is None
+
     def test_explanation_mentions_the_failure_glyph(self) -> None:
         explanation = UsageIndicatorHandler().explain_segment()
         assert "⚠" in explanation.glyphs
