@@ -635,6 +635,51 @@ def extract_commit_form(command: str) -> CommitForm:
     )
 
 
+#: Characters that make a pathspec word something the shell, not git, resolves.
+#: ``$`` covers a variable and ``$( )``; the rest are a backtick substitution,
+#: a brace expansion and a home directory. A word carrying any of them names a
+#: path this reading cannot state.
+_SHELL_RESOLVED_CHARS: Final[str] = "$`{~"
+#: Global options that point git at a different repository or work tree.
+_REPOSITORY_MOVING_OPTIONS: Final[tuple[str, ...]] = ("-C", "--git-dir", "--work-tree")
+_GIT_ENVIRONMENT_PREFIX: Final[str] = "GIT_"
+
+
+@dataclass(frozen=True)
+class CommitReading:
+    """A command's :class:`CommitForm` and whether it can be taken at its word.
+
+    ``certain`` is True only for the plain shape a careless agent types: ONE
+    ``git commit``, run where the hook runs, in the repository the hook is in,
+    naming literal paths. Only then may a gate narrow what the commit records to
+    the named paths; any other shape is judged as the index with the named paths'
+    working tree laid over it, which is never less than the index alone.
+    """
+
+    form: CommitForm
+    certain: bool
+
+
+def read_commit_form(command: str) -> CommitReading:
+    """The :class:`CommitReading` of ``command``."""
+    form = extract_commit_form(command)
+    if not form.pathspecs:
+        return CommitReading(form=form, certain=True)
+    commits = [run for run in git_invocations(command) if run.subcommand == _COMMIT_TOKEN]
+    if len(commits) != 1:
+        return CommitReading(form=form, certain=False)
+    run = commits[0]
+    moves_repository = any(
+        option.startswith(_REPOSITORY_MOVING_OPTIONS) for option in run.global_options
+    ) or any(assignment.startswith(_GIT_ENVIRONMENT_PREFIX) for assignment in run.assignments)
+    shell_resolved = any(
+        any(char in _SHELL_RESOLVED_CHARS for char in pathspec) for pathspec in form.pathspecs
+    )
+    return CommitReading(
+        form=form, certain=not (run.directory or moves_repository or shell_resolved)
+    )
+
+
 def commit_subcommand_index(words: list[str]) -> int | None:
     """Index of the first ``commit`` subcommand of a ``git`` word, else None."""
     for position, word in enumerate(words):

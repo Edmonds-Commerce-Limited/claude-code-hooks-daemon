@@ -19,9 +19,11 @@ from pathlib import Path
 import pytest
 
 from claude_code_hooks_daemon.constants.timeout import Timeout
+from claude_code_hooks_daemon.utils.git_commit_parsing import read_commit_form
 from claude_code_hooks_daemon.utils.git_facts import (
     GitFactsBase,
     StagedChange,
+    commit_facts,
     project_relative_head_text,
 )
 from tests.support.git_fixtures import run_git as _git
@@ -496,3 +498,106 @@ class TestTheRecordedTreeOfEachCommitForm:
         (messy / "d" / "a.txt").unlink()
 
         assert facts.index_texts(listing, ["d/a.txt"]) is None
+
+
+class TestCommitFactsNarrowsOnlyWhenCertain:
+    """Ledger 00474 N245 round 2: the pathspec view is used only on a certain reading."""
+
+    @staticmethod
+    def _staged_paths(facts: GitFactsBase) -> set[str]:
+        return {change.path for change in facts.staged_changes()}
+
+    def test_a_certain_reading_is_the_named_paths_only(self, messy: Path) -> None:
+        facts = commit_facts(read_commit_form("git commit -m x c.txt"), messy)
+
+        assert self._staged_paths(facts) == {"c.txt"}
+        assert facts.union is False
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "cd d && git commit -m x c.txt",
+            "git commit -m x c.txt nosuch.txt",
+            "git commit -m x c.txt && git commit -m y",
+        ],
+    )
+    def test_an_uncertain_reading_is_the_index_plus_the_named_paths(
+        self, messy: Path, command: str
+    ) -> None:
+        facts = commit_facts(read_commit_form(command), messy)
+
+        assert facts.union is True
+        assert {"c.txt", "d/b.txt", "d/new.txt"} <= self._staged_paths(facts)
+
+    def test_a_bare_commit_is_the_index(self, messy: Path) -> None:
+        facts = commit_facts(read_commit_form("git commit -m x"), messy)
+
+        assert "c.txt" not in self._staged_paths(facts)
+        assert "d/b.txt" in self._staged_paths(facts)
+
+    def test_a_cwd_outside_the_repository_reads_pathspecs_from_the_root(
+        self, messy: Path, tmp_path: Path
+    ) -> None:
+        facts = commit_facts(read_commit_form("git commit -m x c.txt"), messy, tmp_path)
+
+        assert self._staged_paths(facts) == {"c.txt"}
+
+    def test_a_subdirectory_cwd_names_paths_from_the_root_despite_diff_relative(
+        self, messy: Path
+    ) -> None:
+        _git(messy, "config", "diff.relative", "true")
+
+        facts = commit_facts(read_commit_form("git commit -m x a.txt"), messy, messy / "d")
+
+        assert self._staged_paths(facts) == {"d/a.txt"}
+
+    def test_a_fresh_repository_without_head_still_judges_the_index(self, tmp_path: Path) -> None:
+        root = tmp_path / "fresh"
+        root.mkdir()
+        _git(root, "init")
+        _write(root, "a.txt", "x\n")
+        _git(root, "add", "a.txt")
+
+        facts = commit_facts(read_commit_form("git commit -m x a.txt"), root)
+
+        assert self._staged_paths(facts) == {"a.txt"}
+
+
+class TestAPathRemovedFromTheIndexButOnDisk:
+    """``git rm --cached p`` then an edit: ``git commit p`` records the working tree's ``p``."""
+
+    @pytest.fixture
+    def revived(self, tmp_path: Path) -> Path:
+        root = tmp_path / "revived"
+        root.mkdir()
+        _git(root, "init")
+        _git(root, "config", "user.email", "t@example.com")
+        _git(root, "config", "user.name", "T")
+        _write(root, "p.txt", "head\n")
+        _write(root, "q.txt", "head\n")
+        _git(root, "add", "-A")
+        _git(root, "commit", "-m", "initial")
+        _git(root, "rm", "-q", "--cached", "p.txt")
+        _write(root, "p.txt", "head\nedited\n")
+        return root
+
+    def test_it_is_a_modification_not_a_deletion(self, revived: Path) -> None:
+        facts = GitFactsBase(revived, pathspecs=["p.txt"])
+
+        assert [(c.status, c.path) for c in facts.staged_changes()] == [("M", "p.txt")]
+        assert facts.resurrected_paths() == frozenset({"p.txt"})
+
+    def test_the_predicted_tree_matches_the_real_commit(self, revived: Path) -> None:
+        predicted = _predicted_tree(GitFactsBase(revived, pathspecs=["p.txt"]))
+
+        assert predicted == _tree_after_a_real_commit(revived, "p.txt")
+
+    def test_a_deletion_the_disk_confirms_stays_a_deletion(self, revived: Path) -> None:
+        (revived / "p.txt").unlink()
+
+        facts = GitFactsBase(revived, pathspecs=["p.txt"])
+
+        assert facts.resurrected_paths() == frozenset()
+
+    def test_a_bare_commit_has_none(self, revived: Path) -> None:
+        assert GitFactsBase(revived).resurrected_paths() == frozenset()

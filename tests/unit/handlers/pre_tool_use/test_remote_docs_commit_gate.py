@@ -23,7 +23,7 @@ from claude_code_hooks_daemon.core import Decision
 from claude_code_hooks_daemon.handlers.pre_tool_use.remote_docs_commit_gate import (
     RemoteDocsCommitGateHandler,
 )
-from claude_code_hooks_daemon.utils.git_commit_parsing import CommitForm
+from claude_code_hooks_daemon.utils.git_commit_parsing import CommitReading
 
 _VALID = """---
 source_url: https://example.com/p
@@ -46,7 +46,7 @@ def _commit() -> dict[str, Any]:
 def handler(tmp_path: Path) -> RemoteDocsCommitGateHandler:
     instance = RemoteDocsCommitGateHandler()
     instance.project_root_reader = lambda: tmp_path
-    instance.staged_reader = lambda _form: []
+    instance.staged_reader = lambda _reading, _cwd: []
     return instance
 
 
@@ -72,14 +72,14 @@ class TestGate:
     def test_a_commit_with_no_remote_docs_is_allowed(
         self, handler: RemoteDocsCommitGateHandler, tmp_path: Path
     ) -> None:
-        handler.staged_reader = lambda _form: [_write(tmp_path, "src/thing.py", "x = 1\n")]
+        handler.staged_reader = lambda _reading, _cwd: [_write(tmp_path, "src/thing.py", "x = 1\n")]
 
         assert handler.handle(_commit()).decision is Decision.ALLOW
 
     def test_a_valid_vendored_document_is_allowed(
         self, handler: RemoteDocsCommitGateHandler, tmp_path: Path
     ) -> None:
-        handler.staged_reader = lambda _form: [
+        handler.staged_reader = lambda _reading, _cwd: [
             _write(tmp_path, "remote-docs/example.com/p.md", _VALID)
         ]
 
@@ -89,7 +89,7 @@ class TestGate:
         self, handler: RemoteDocsCommitGateHandler, tmp_path: Path
     ) -> None:
         """This is the heredoc hole: it never passed the Write/Edit gate."""
-        handler.staged_reader = lambda _form: [
+        handler.staged_reader = lambda _reading, _cwd: [
             _write(tmp_path, "remote-docs/example.com/p.md", "# just prose\n")
         ]
 
@@ -98,7 +98,7 @@ class TestGate:
     def test_the_denial_names_the_offending_file(
         self, handler: RemoteDocsCommitGateHandler, tmp_path: Path
     ) -> None:
-        handler.staged_reader = lambda _form: [
+        handler.staged_reader = lambda _reading, _cwd: [
             _write(tmp_path, "remote-docs/example.com/p.md", "# just prose\n")
         ]
 
@@ -109,7 +109,7 @@ class TestGate:
     def test_the_denial_names_the_capture_route(
         self, handler: RemoteDocsCommitGateHandler, tmp_path: Path
     ) -> None:
-        handler.staged_reader = lambda _form: [
+        handler.staged_reader = lambda _reading, _cwd: [
             _write(tmp_path, "remote-docs/example.com/p.md", "# just prose\n")
         ]
 
@@ -119,7 +119,7 @@ class TestGate:
         self, handler: RemoteDocsCommitGateHandler, tmp_path: Path
     ) -> None:
         """One file per retry would make a bulk import a slog."""
-        handler.staged_reader = lambda _form: [
+        handler.staged_reader = lambda _reading, _cwd: [
             _write(tmp_path, "remote-docs/example.com/a.md", "# prose\n"),
             _write(tmp_path, "remote-docs/example.com/b.md", "# prose\n"),
         ]
@@ -132,7 +132,9 @@ class TestGate:
     def test_a_non_markdown_file_in_the_tree_is_ignored(
         self, handler: RemoteDocsCommitGateHandler, tmp_path: Path
     ) -> None:
-        handler.staged_reader = lambda _form: [_write(tmp_path, "remote-docs/x/data.json", "{}")]
+        handler.staged_reader = lambda _reading, _cwd: [
+            _write(tmp_path, "remote-docs/x/data.json", "{}")
+        ]
 
         assert handler.handle(_commit()).decision is Decision.ALLOW
 
@@ -140,14 +142,16 @@ class TestGate:
         self, handler: RemoteDocsCommitGateHandler, tmp_path: Path
     ) -> None:
         """Removing a bad document must never be harder than adding one."""
-        handler.staged_reader = lambda _form: ["remote-docs/example.com/gone.md"]
+        handler.staged_reader = lambda _reading, _cwd: ["remote-docs/example.com/gone.md"]
 
         assert handler.handle(_commit()).decision is Decision.ALLOW
 
     def test_a_markdown_file_outside_the_tree_is_ignored(
         self, handler: RemoteDocsCommitGateHandler, tmp_path: Path
     ) -> None:
-        handler.staged_reader = lambda _form: [_write(tmp_path, "docs/guide.md", "# ours\n")]
+        handler.staged_reader = lambda _reading, _cwd: [
+            _write(tmp_path, "docs/guide.md", "# ours\n")
+        ]
 
         assert handler.handle(_commit()).decision is Decision.ALLOW
 
@@ -228,13 +232,88 @@ class TestEachCommitFormJudgesWhatItRecords:
         assert result.decision is Decision.ALLOW
 
 
+class TestPathspecViewIsUsedOnlyWhenTheReadingIsCertain:
+    """Ledger 00474 N245 round 2: never judge LESS of the recorded tree than the index.
+
+    The bad document is staged. Each command records it by a route the pathspec
+    view cannot follow, so the gate must keep reading the index.
+    """
+
+    _git = staticmethod(TestEachCommitFormJudgesWhatItRecords._git)
+    _real = staticmethod(TestEachCommitFormJudgesWhatItRecords._real)
+
+    @pytest.fixture
+    def repo(self, tmp_path: Path) -> Path:
+        root = tmp_path / "repo"
+        root.mkdir()
+        self._git(root, "init")
+        self._git(root, "config", "user.email", "t@example.com")
+        self._git(root, "config", "user.name", "T")
+        _write(root, "src/thing.py", "x = 1\n")
+        self._git(root, "add", "-A")
+        self._git(root, "commit", "-m", "initial")
+        _write(root, "remote-docs/example.com/bad.md", "# prose, no provenance\n")
+        self._git(root, "add", "remote-docs/example.com/bad.md")
+        _write(root, "src/thing.py", "x = 2\n")
+        return root
+
+    @staticmethod
+    def _hook(command: str, cwd: Path | None = None) -> dict[str, Any]:
+        hook_input: dict[str, Any] = {"tool_name": "Bash", "tool_input": {"command": command}}
+        if cwd is not None:
+            hook_input["cwd"] = str(cwd)
+        return hook_input
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "cd remote-docs/example.com && git commit -m x bad.md",
+            "git -C remote-docs/example.com commit -m x bad.md",
+            "(cd remote-docs/example.com; git commit -m x bad.md)",
+            "git commit -m x src/thing.py && git commit -m y",
+            "F=remote-docs/example.com/bad.md; git commit -m x src/thing.py $F",
+            "git commit -m x src/thing.py nosuch.md",
+            "git commit -m x nosuch.md",
+        ],
+    )
+    def test_an_uncertain_reading_keeps_the_index(self, repo: Path, command: str) -> None:
+        result = self._real(repo).handle(self._hook(command, repo))
+
+        assert result.decision is Decision.DENY
+
+    def test_diff_relative_does_not_misplace_a_named_document(self, repo: Path) -> None:
+        self._git(repo, "config", "diff.relative", "true")
+        directory = repo / "remote-docs" / "example.com"
+
+        result = self._real(repo).handle(self._hook("git commit -m x bad.md", directory))
+
+        assert result.decision is Decision.DENY
+        assert "remote-docs/example.com/bad.md" in (result.reason or "")
+
+    def test_a_document_removed_from_the_index_then_edited_is_recorded_from_disk(
+        self, repo: Path
+    ) -> None:
+        _write(repo, "remote-docs/example.com/p.md", _VALID)
+        self._git(repo, "add", "remote-docs/example.com/p.md")
+        self._git(repo, "commit", "-m", "valid")
+        self._git(repo, "rm", "--cached", "remote-docs/example.com/p.md")
+        _write(repo, "remote-docs/example.com/p.md", "# prose now\n")
+
+        result = self._real(repo).handle(
+            self._hook("git commit -m x remote-docs/example.com/p.md", repo)
+        )
+
+        assert result.decision is Decision.DENY
+        assert "remote-docs/example.com/p.md" in (result.reason or "")
+
+
 class TestResilience:
     def test_an_unreadable_git_index_allows_the_commit(
         self, handler: RemoteDocsCommitGateHandler
     ) -> None:
         """A gate that cannot read the index must not block every commit."""
 
-        def boom(_form: CommitForm) -> list[str]:
+        def boom(_reading: CommitReading, _cwd: str | None) -> list[str]:
             raise OSError("no git here")
 
         handler.staged_reader = boom

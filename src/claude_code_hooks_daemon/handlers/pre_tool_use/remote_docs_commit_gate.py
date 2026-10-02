@@ -35,12 +35,12 @@ from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.core.rule import Rule
 from claude_code_hooks_daemon.core.utils import get_bash_command
 from claude_code_hooks_daemon.utils.git_commit_parsing import (
-    CommitForm,
-    extract_commit_form,
+    CommitReading,
     is_git_commit,
+    read_commit_form,
     tokenise_command,
 )
-from claude_code_hooks_daemon.utils.git_facts import GitFactsBase
+from claude_code_hooks_daemon.utils.git_facts import commit_facts
 
 logger = logging.getLogger(__name__)
 
@@ -84,19 +84,18 @@ class RemoteDocsCommitGateHandler(PreToolUseHandlerBase):
         )
         # Injection points for tests; production reads the real index.
         self.project_root_reader: Callable[[], Path] = ProjectContext.project_root
-        self.staged_reader: Callable[[CommitForm], list[str]] = self._read_staged
+        self.staged_reader: Callable[[CommitReading, str | None], list[str]] = self._read_staged
 
-    def _read_staged(self, form: CommitForm) -> list[str]:
+    def _read_staged(self, reading: CommitReading, cwd: str | None) -> list[str]:
         """Repository-relative paths the commit adds, copies or modifies.
 
         What the commit RECORDS, by its form (ledger 00474 N245): the index for
         a bare commit, the named paths' change against HEAD for a pathspec
         commit, and both for ``--include``. A path staged but not named by a
-        pathspec commit is not in it.
+        pathspec commit is not in it, but only when the reading is certain;
+        see :func:`~claude_code_hooks_daemon.utils.git_facts.commit_facts`.
         """
-        facts = GitFactsBase(
-            self.project_root_reader(), pathspecs=form.pathspecs, include=form.include
-        )
+        facts = commit_facts(reading, self.project_root_reader(), cwd)
         return [
             change.path
             for change in facts.staged_changes()
@@ -121,7 +120,11 @@ class RemoteDocsCommitGateHandler(PreToolUseHandlerBase):
         from claude_code_hooks_daemon.remote_docs.provenance import parse_provenance
 
         try:
-            staged = self.staged_reader(extract_commit_form(get_bash_command(hook_input) or ""))
+            cwd = hook_input.get(HookInputField.CWD)
+            staged = self.staged_reader(
+                read_commit_form(get_bash_command(hook_input) or ""),
+                cwd if isinstance(cwd, str) else None,
+            )
             project_root = self.project_root_reader()
         except OSError as exc:
             # A gate that cannot read the index must not block every commit.

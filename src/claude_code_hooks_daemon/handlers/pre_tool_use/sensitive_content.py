@@ -57,10 +57,11 @@ from claude_code_hooks_daemon.utils import secret_redaction as sr
 from claude_code_hooks_daemon.utils.command_evasion import OPTIONAL_PATH, git_subcommand_index
 from claude_code_hooks_daemon.utils.git_commit_parsing import (
     CommitForm,
+    CommitReading,
     commits_working_tree,
-    extract_commit_form,
+    read_commit_form,
 )
-from claude_code_hooks_daemon.utils.git_facts import GitFactsBase
+from claude_code_hooks_daemon.utils.git_facts import NO_RELATIVE, GitFactsBase, commit_facts
 from claude_code_hooks_daemon.utils.git_repo import GitRepo, run_git
 from claude_code_hooks_daemon.utils.message_files import read_message_files
 from claude_code_hooks_daemon.utils.path_containment import path_relative_to
@@ -68,6 +69,7 @@ from claude_code_hooks_daemon.utils.path_exclusion import (
     handler_excludes_path,
     resolve_project_root,
 )
+from claude_code_hooks_daemon.utils.path_predicates import read_text_or_reason
 from claude_code_hooks_daemon.utils.realpath import has_symlink_loop, realpath
 from claude_code_hooks_daemon.utils.scratch_dir import acceptance_path
 
@@ -867,8 +869,12 @@ class SensitiveContentHandler(PreToolUseHandlerBase):
             haystacks.extend(self._message_file_haystacks(command, hook_input))
         is_commit, commits_all = _is_git_commit(command)
         if is_commit:
-            form = CommitForm() if commits_all else extract_commit_form(command)
-            haystacks.extend(self._staged_content_haystacks(hook_input, commits_all, form))
+            reading = (
+                CommitReading(CommitForm(), certain=True)
+                if commits_all
+                else read_commit_form(command)
+            )
+            haystacks.extend(self._staged_content_haystacks(hook_input, commits_all, reading))
         return haystacks
 
     def _message_file_haystacks(self, command: str, hook_input: dict[str, Any]) -> list[_Haystack]:
@@ -917,7 +923,7 @@ class SensitiveContentHandler(PreToolUseHandlerBase):
         return raw.decode(_BODY_FILE_ENCODING, errors=_BODY_FILE_DECODE_ERRORS)
 
     def _staged_content_haystacks(
-        self, hook_input: dict[str, Any], commits_all: bool, form: CommitForm
+        self, hook_input: dict[str, Any], commits_all: bool, reading: CommitReading
     ) -> list[_Haystack]:
         """The ADDED lines of every file this commit would record.
 
@@ -937,17 +943,46 @@ class SensitiveContentHandler(PreToolUseHandlerBase):
         if repo_root is None:
             return []
         directory = self._commit_directory(hook_input) or repo_root
+        facts = commit_facts(reading, repo_root, directory)
         haystacks: list[_Haystack] = []
-        for scan in self._recorded_passes(directory, commits_all, form):
+        for scan in self._recorded_passes(directory, commits_all, reading.form, facts):
             haystacks.extend(
                 self._scan_staged_paths(
                     repo_root, scan.target, self._select_staged_paths(repo_root, scan)
                 )
             )
+        if not commits_all:
+            haystacks.extend(self._resurrected_haystacks(repo_root, facts))
+        return haystacks
+
+    def _resurrected_haystacks(self, repo_root: Path, facts: GitFactsBase) -> list[_Haystack]:
+        """The whole file of each named path the index lacks but the disk has.
+
+        ``git rm --cached p`` then an edit: ``git commit p`` records the working
+        tree's ``p``, which a diff against HEAD can only call deleted, so the
+        passes above see no added line in it. The same exclusions and per-file
+        bound apply as to any other recorded path.
+        """
+        haystacks: list[_Haystack] = []
+        protected_patterns = sfm.resolve_configured_patterns()
+        for relpath in sorted(facts.resurrected_paths() or ()):
+            abs_path = str(repo_root / relpath)
+            if (
+                self._is_excluded(abs_path)
+                or self._is_secret_list_itself(abs_path)
+                or sfm.path_is_protected(abs_path, protected_patterns)
+            ):
+                continue
+            text = read_text_or_reason(abs_path, errors=_BODY_FILE_DECODE_ERRORS).text
+            if not text or len(text.encode(_BODY_FILE_ENCODING)) > MAX_STAGED_FILE_BYTES:
+                continue
+            haystacks.append(_Haystack(subject=f"staged content of {relpath}", text=text))
         return haystacks
 
     @staticmethod
-    def _recorded_passes(directory: Path, commits_all: bool, form: CommitForm) -> list[_ScanPass]:
+    def _recorded_passes(
+        directory: Path, commits_all: bool, form: CommitForm, facts: GitFactsBase
+    ) -> list[_ScanPass]:
         """The questions that, together, cover every line the commit records.
 
         * ``-a``: the working tree against HEAD.
@@ -961,10 +996,10 @@ class SensitiveContentHandler(PreToolUseHandlerBase):
           and the working tree both, each over everything, a superset of any
           form the file could select.
 
-        A pathspec git cannot answer for, or one that matches nothing (a word
-        misread as a path), is judged as the index: the one form that is
-        always a real commit's content, so such a commit is never left
-        unchecked.
+        A reading that is not certain (a second commit, a ``cd`` or ``-C``
+        before it, a pathspec the shell builds, one that matches nothing, or a
+        git that cannot answer) is judged as the index PLUS the named paths'
+        working tree, never less than the index alone.
         """
         index = _ScanPass(target=_INDEX_TARGET)
         if commits_all:
@@ -973,9 +1008,16 @@ class SensitiveContentHandler(PreToolUseHandlerBase):
             return [index, _ScanPass(target=_WORKING_TREE_TARGET)]
         if not form.pathspecs:
             return [index]
-        named = GitFactsBase(
-            directory, pathspecs=form.pathspecs, include=form.include
-        ).named_paths()
+        if facts.union:
+            return [
+                index,
+                _ScanPass(
+                    target=_WORKING_TREE_TARGET,
+                    pathspecs=form.pathspecs,
+                    directory=facts.repo_root,
+                ),
+            ]
+        named = facts.named_paths()
         if not named:
             return [index]
         recorded = _ScanPass(
@@ -1008,6 +1050,7 @@ class SensitiveContentHandler(PreToolUseHandlerBase):
             _NUMSTAT_FLAG,
             _NUL_TERMINATED_FLAG,
             f"--diff-filter={_DIFF_FILTER}",
+            NO_RELATIVE,
             scan.target,
             *pathspec_args,
         )
@@ -1069,6 +1112,7 @@ class SensitiveContentHandler(PreToolUseHandlerBase):
                 "--no-color",
                 _UNIFIED_ZERO_FLAG,
                 f"--diff-filter={_DIFF_FILTER}",
+                NO_RELATIVE,
                 target,
             ]
             if chunk:

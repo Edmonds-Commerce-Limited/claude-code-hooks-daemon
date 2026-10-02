@@ -22,6 +22,7 @@ from claude_code_hooks_daemon.utils.git_commit_parsing import (
     extract_commit_pathspecs,
     git_invocations,
     is_git_commit,
+    read_commit_form,
     tokenise_command,
 )
 
@@ -406,3 +407,46 @@ class TestCommitsWorkingTree:
         token.
         """
         assert commits_working_tree(["-Skeya", "-m", "msg"]) is False
+
+
+class TestReadCommitFormCertainty:
+    """A pathspec view may be trusted only for the plain shape a careless agent types."""
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "git commit -m x a.txt",
+            "git commit -m x a.txt b.txt && git push",
+            "git commit -m x -- a.txt",
+            "git commit -m x",
+        ],
+    )
+    def test_one_plain_commit_is_certain(self, command: str) -> None:
+        assert read_commit_form(command).certain is True
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "cd sub && git commit -m x a.txt",
+            "pushd sub && git commit -m x a.txt",
+            "(cd sub; git commit -m x a.txt)",
+            "git -C sub commit -m x a.txt",
+            "git --git-dir=other/.git commit -m x a.txt",
+            "git --work-tree other commit -m x a.txt",
+            "GIT_DIR=other/.git git commit -m x a.txt",
+            "git commit -m x a.txt && git commit -m y",
+            "git commit -m x a.txt $F",
+            "git commit -m x a.txt $(echo b.txt)",
+            "git commit -m x a.txt `echo b.txt`",
+            "git commit -m x {a,b}.txt",
+            "git commit -m x ~/a.txt",
+        ],
+    )
+    def test_any_other_shape_is_not_certain(self, command: str) -> None:
+        assert read_commit_form(command).certain is False
+
+    def test_a_subshell_cd_that_has_ended_does_not_move_a_later_commit(self) -> None:
+        assert read_commit_form("(cd sub; ls); git commit -m x a.txt").certain is True
+
+    def test_the_form_is_the_first_commits(self) -> None:
+        assert read_commit_form("git commit -m x --include a.txt").form.include is True

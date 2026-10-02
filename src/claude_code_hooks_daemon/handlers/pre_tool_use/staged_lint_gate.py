@@ -58,8 +58,8 @@ from claude_code_hooks_daemon.utils.command_evasion import (
     GIT_INVOCATION,
     normalise_line_continuations,
 )
-from claude_code_hooks_daemon.utils.git_commit_parsing import extract_commit_form
-from claude_code_hooks_daemon.utils.git_facts import GitFactsBase
+from claude_code_hooks_daemon.utils.git_commit_parsing import read_commit_form
+from claude_code_hooks_daemon.utils.git_facts import commit_facts
 from claude_code_hooks_daemon.utils.git_repo import GitRepo
 from claude_code_hooks_daemon.utils.path_predicates import path_exists
 from claude_code_hooks_daemon.utils.shell_segmentation import split_unquoted
@@ -179,8 +179,11 @@ class StagedLintGateHandler(PreToolUseHandlerBase):
         # for a bare commit, the named paths for a pathspec commit, both for
         # `--include`. A git that cannot answer yields no files, so nothing is
         # linted and the commit goes through, as it always did.
-        form = extract_commit_form(get_bash_command(hook_input) or "")
-        facts = GitFactsBase(project_root, pathspecs=form.pathspecs, include=form.include)
+        facts = commit_facts(
+            read_commit_form(get_bash_command(hook_input) or ""),
+            project_root,
+            hook_input.get(HookInputField.CWD),
+        )
         recorded = [
             change.path
             for change in facts.staged_changes()

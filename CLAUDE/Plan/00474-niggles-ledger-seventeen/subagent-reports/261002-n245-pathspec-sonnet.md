@@ -145,3 +145,76 @@ the named paths' working tree). Not done, because three pieces do not exist:
 3. `sensitive_content` reads `git diff` output, and a diff cannot show an
    untracked file's lines. It would need to read those files directly, with the
    same bounds and the same protected-path skip.
+
+## Round 2 (review by Opus, threat-model re-grade)
+
+Rule applied: a gate narrows to the pathspec view only when the reading is
+certain; on every other shape it judges the index PLUS the named paths' working
+tree, never less than main's whole-index read. Branch merged with origin/main
+first (plan docs took main's version; they carry only ledger bookkeeping).
+
+### What changed, per finding
+
+- **B1/B2 (one shared test, three gates).** `git_commit_parsing.read_commit_form`
+  returns a `CommitReading(form, certain)`. Certain means: exactly one
+  `git commit` found by `git_invocations`, no `cd`/`pushd`/subshell-cd before
+  it, no `-C`/`--git-dir`/`--work-tree` global option, no `GIT_*` assignment on
+  it, and no pathspec word carrying `$`, a backtick, `{` or `~`.
+  `git_facts.commit_facts(reading, repo_root, cwd)` is the one factory all three
+  gates call: narrowed facts only when certain AND `every_pathspec_matches()`
+  (each pathspec selects something, git answered); otherwise
+  `GitFactsBase(..., union=True)`, whose `staged_changes()` is the named paths'
+  changes against HEAD plus every staged change. `sensitive_content` uses the
+  same facts: a union is `[index pass, working-tree pass over the pathspecs
+  from the repo root]`. A git that cannot diff HEAD (fresh repository) falls
+  back to the index in `staged_changes()` instead of reporting nothing.
+  `remote_docs_commit_gate` and `staged_lint_gate` now resolve pathspecs from
+  the hook's cwd (when inside the project root), as `sensitive_content` does,
+  and read files from the project root.
+  `remote_docs_commit_gate.staged_reader` now takes `(CommitReading, cwd)`.
+- **B3.** `NO_RELATIVE` (`--no-relative`) is on every `git diff` in
+  `GitFactsBase` (pathspec, `--cached`, `--name-only`) and on both
+  `sensitive_content` calls (`--numstat` and the patch call). `ls-files` has no
+  `--no-relative` option and ignores `diff.relative`, but it reports
+  cwd-relative paths by default (verified: `q` vs `sub/q` from `sub/`), so the
+  pathspec-bearing call keeps `--full-name`, and every other `ls-files`/`ls-tree`
+  call runs from the repo root (`_git_output(..., in_directory=True)` is the
+  only way to run from the command's directory).
+- **S1.** Verified with real git (`untracked/scratch/s1/verify.py`): after
+  `git rm --cached p; echo X >> p`, `git diff HEAD` says `D p` and
+  `git commit -m x p` records `p` WITH the edit. `GitFactsBase.resurrected_paths()`
+  names such paths (status D, file on disk); `staged_changes()` reads them as
+  `M`, `_recorded_listing` maps them to `WORKING_TREE`, and `sensitive_content`
+  scans the whole file (`_resurrected_haystacks`, same exclusions and per-file
+  bound). The extra spawn happens only when the pathspec diff shows a `D`.
+- **S2.** Real-git tests per gate, reusing the reviewer's cases: `cd`, `-C`,
+  subshell `cd`, `pushd`, a second commit, `$F`, `$(...)`, `{a,b}`, a pathspec
+  that matches nothing (alone and among others), `diff.relative` from a
+  subdirectory (staged and unstaged), and the `rm --cached` edit; each also has
+  a counter-test that a certain reading still narrows. Plus unit tests for
+  `read_commit_form` and `commit_facts`.
+
+### Red evidence (on 6daf719cf, new tests only)
+
+`pytest` over the three new classes: `30 failed, 2 passed` (the two passes are
+the "a certain reading still narrows" counter-tests). Per gate: sensitive_content
+12 failed (4 cd/-C/subshell/pushd, second commit, 3 shell-built pathspecs,
+unmatched-among-others, 2 diff.relative, rm --cached), remote_docs 9 failed (7
+uncertain shapes, diff.relative, rm --cached), staged_lint 9 failed (7, diff.relative,
+rm --cached). Output kept in `untracked/scratch/red.txt` of the worktree.
+
+### QA (targeted)
+
+ruff, black --check --target-version py311, mypy on the 10 changed files: clean.
+`audit_error_hiding.py`, `check_input_contract.py`, `run_pyright_check.py --json`:
+exit 0. pytest: the three gate test files, `tests/unit/utils`, `tests/unit/docs_qa`,
+`tests/unit/plan_qa`, the docs/plan/guard-config commit-gate tests and
+`test_qa_package_dependency_direction.py`: all pass (one memoisation test in
+`plan_qa/test_gitfacts.py` caught an extra spawn, fixed by resolving
+resurrection only when the diff shows a `D`).
+
+### Not done
+
+The docs_qa, plan_qa and guard_config gates still read `extract_commit_form`
+directly, so they keep round 1's narrowing on the uncertain shapes; they were
+outside this round's three-gate scope.
