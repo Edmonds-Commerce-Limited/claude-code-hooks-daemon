@@ -4023,8 +4023,13 @@ def bounded_recursive_glob(
     contain a recursive ``**`` component), bounded by entries VISITED.
 
     A pattern rooted at the filesystem root (``base`` is itself an anchor,
-    e.g. ``Path("/")``) is refused outright, without attempting to walk at
-    all, whenever it carries a recursive ``**`` component OR two or more
+    e.g. ``Path("/")``) whose leading non-wildcard components name an
+    existing directory is walked from THAT directory (``/tmp/x/*/*`` is a
+    walk of ``/tmp/x``, not of ``/``); a prefix that resolves back to the
+    root (``/usr/..``, a symlink to ``/``) narrows nothing. Only a walk that
+    still starts at the root is refused. It is refused outright, without
+    attempting to walk at all, whenever it carries a recursive ``**``
+    component OR two or more
     wildcarded path segments (``/*/*/*/…``) -- bounding entries visited
     there still means walking into a hostile or simply huge subtree before
     concluding, and a real client filesystem's `/` has no legitimate reason
@@ -4059,21 +4064,28 @@ def bounded_recursive_glob(
     other branch is still walked, so one bad sibling cannot hide the rest;
     the caller then decides (Plan 00466 N101 round 9).
     """
+    parts = [part for part in pattern.split("/") if part]
     is_root = bool(base.anchor) and str(base) == base.anchor
     if is_root and not _literal_prefix_exists(base, pattern):
         # The pattern's leading non-wildcard components name a path that is
         # not there, so nothing can match and there is nothing to walk.
         return
     if is_root:
-        wildcard_segments = sum(
-            1 for segment in pattern.split("/") if any(char in segment for char in "*?[")
-        )
+        literal = _leading_literal_parts(parts)
+        narrowed = base.joinpath(*literal)
+        if literal and not _is_filesystem_root(narrowed):
+            # An existing literal prefix confines the walk to that one
+            # directory (GitHub #68). The refusal below judges a walk that
+            # starts at the root, so it is not applied to this one.
+            base, parts, is_root = narrowed, parts[len(literal) :], False
+    if is_root:
+        wildcard_segments = sum(1 for segment in parts if _is_glob_component(segment))
         if _RECURSIVE_MARKER in pattern or wildcard_segments >= 2:
             raise TooManyToEnumerateError(
                 f"refusing to walk a broad glob rooted at the filesystem root: {base}/{pattern}"
             )
     walk = _GlobWalk(
-        parts=[part for part in pattern.split("/") if part],
+        parts=parts,
         errors=errors,
         # A pattern with no `**` lists at most one directory per literal
         # prefix, which bounds its own cost; only a recursive walk is capped.
@@ -4082,6 +4094,26 @@ def bounded_recursive_glob(
     )
     if walk.parts:
         yield from walk.select(base, 0)
+
+
+def _leading_literal_parts(parts: list[str]) -> list[str]:
+    """The components before the first wildcard, when a wildcard follows them.
+
+    A pattern with no wildcard at all names one path and has no prefix to
+    narrow: its last component is looked up as the target, not as a directory.
+    """
+    literal: list[str] = []
+    for part in parts:
+        if _is_glob_component(part):
+            return literal
+        literal.append(part)
+    return []
+
+
+def _is_filesystem_root(path: Path) -> bool:
+    """Whether ``path`` is the filesystem root once ``..`` and symlinks are resolved."""
+    real = os.path.realpath(path)
+    return real == os.path.realpath(path.anchor)
 
 
 def _literal_prefix_exists(base: Path, pattern: str) -> bool:
@@ -4114,6 +4146,10 @@ def _literal_prefix_exists(base: Path, pattern: str) -> bool:
 #: shell naming it can read anything through it. They are the lookups
 #: pathlib's own glob ignored.
 _ABSENT_ERRNOS: Final[frozenset[int]] = frozenset({errno.ENOENT, errno.ENOTDIR, errno.ELOOP})
+
+#: ``OSError`` numbers for a lookup the caller may not make: the path's
+#: existence is hidden, but its NAME is whatever was asked for.
+_UNSEARCHABLE_ERRNOS: Final[frozenset[int]] = frozenset({errno.EACCES, errno.EPERM})
 
 #: Name limit assumed when the filesystem cannot be asked (``PC_NAME_MAX``).
 _FALLBACK_NAME_MAX: Final[int] = 255
@@ -4163,12 +4199,34 @@ class _GlobWalk:
         try:
             status = candidate.lstat() if last else candidate.stat()
         except OSError as exc:
-            self._record(exc, directory, part)
+            if (
+                exc.errno in _UNSEARCHABLE_ERRNOS
+                and self._reached_by_wildcard(index)
+                and self._names_one_path(index)
+            ):
+                # A sibling the wildcard selected, which this process cannot
+                # search, hides whether the path exists, not what it is
+                # called. The remaining components are all literal, so the
+                # path is fully named: yield it for the caller to judge by
+                # name, exactly as for a readable one, instead of failing the
+                # whole walk on it. A path the word itself names outright
+                # that cannot be looked up stays an error.
+                yield directory.joinpath(*self.parts[index:])
+            else:
+                self._record(exc, directory, part)
         else:
             if last:
                 yield candidate
             elif stat.S_ISDIR(status.st_mode):
                 yield from self.select(candidate, index + 1)
+
+    def _reached_by_wildcard(self, index: int) -> bool:
+        """Whether a wildcard component chose the directory ``parts[index]`` is in."""
+        return any(_is_glob_component(part) for part in self.parts[:index])
+
+    def _names_one_path(self, index: int) -> bool:
+        """Whether ``parts[index:]`` holds only literal components."""
+        return not any(_is_glob_component(part) for part in self.parts[index:])
 
     def _select_wildcard(self, directory: Path, index: int, last: bool) -> Iterator[Path]:
         # A wildcard component is matched against the directory's entries;

@@ -51,11 +51,13 @@ from claude_code_hooks_daemon.utils.path_exclusion import (
 )
 from claude_code_hooks_daemon.utils.realpath import resolve_checking_loop
 from claude_code_hooks_daemon.utils.shell_segmentation import (
+    UnplaceableSubstitutionError,
     mask_quoted,
     segment_command_word,
     shell_word_spans,
     split_unquoted_spans,
     strip_inert_spans,
+    substitution_inner_spans,
 )
 
 logger = logging.getLogger(__name__)
@@ -1562,6 +1564,11 @@ _GH_HEAD: Final[str] = "gh"
 _TEXT_CONSUMER_HEADS: Final[frozenset[str]] = (
     _ECHO_HEADS | _GREP_HEADS | _AWK_HEADS | frozenset({_RG_HEAD, _GH_HEAD})
 )
+#: Text consumers whose quoted operand never reaches their output (it is the
+#: matched content of the files read), the only ones relaxed inside a
+#: substitution. Not ``rg`` (``-r`` prints its replacement text) and not ``awk``
+#: (a program prints its string literals).
+_SEARCH_HEADS: Final[frozenset[str]] = _GREP_HEADS
 #: ``gh`` flags whose value is prose published as written.
 _GH_TEXT_FLAGS: Final[frozenset[str]] = frozenset(
     {"--body", "-b", "--title", "-t", "--notes", "-n"}
@@ -1621,26 +1628,65 @@ def _without_text_operands(command: str) -> str:
     What is left is what bash or a program can still expand. Unquoted words,
     tool glob options, and any quoted text given to a program that globs or
     runs it (``python -c``, ``bash -c``, ``find -name``) are untouched.
+
+    The command text of each substitution (command, backtick, process) is a
+    command of its own, so it is segmented and judged the same way as the top
+    level (ledger 00474 N291), with one difference: a substitution's OUTPUT
+    becomes words of the outer command, and an unquoted result is glob-expanded.
+    ``echo``/``printf``/``gh`` operands ARE their output, so inside a
+    substitution only the operands of ``grep`` (:data:`_SEARCH_HEADS`), whose
+    output is matched content rather than the pattern, are relaxed. A
+    text the scanner cannot place with certainty is judged at top level only.
     """
     if "'" not in command and '"' not in command and "<<" not in command:
         return command
     text = strip_inert_spans(command)
+    try:
+        inner_regions = substitution_inner_spans(text)
+    except UnplaceableSubstitutionError as exc:
+        # Nothing inside a substitution can be placed, so only the top level is relaxed.
+        logger.debug("text operands: substitution not placeable, top level only: %s", exc)
+        inner_regions = []
+    regions = [(0, len(text)), *inner_regions]
+    operands: dict[tuple[int, int], str] = {}
+    for region_start, region_end in regions:
+        region = text[region_start:region_end]
+        for start, end in split_unquoted_spans(region, _SEGMENT_SEPARATORS):
+            head, spans = _segment_text_operands(region[start:end], region_start + start)
+            operands.update(dict.fromkeys(spans, head))
     pieces: list[str] = []
     copied_to = 0
-    for start, end in split_unquoted_spans(text, _SEGMENT_SEPARATORS):
-        segment = text[start:end]
-        head = segment_command_word(segment)
-        if head not in _TEXT_CONSUMER_HEADS:
+    for (operand_start, operand_end), head in sorted(operands.items()):
+        if operand_start < copied_to:
             continue
-        spans = shell_word_spans(segment)
-        for index, (word_start, word_end) in enumerate(spans):
-            previous = segment[spans[index - 1][0] : spans[index - 1][1]] if index else ""
-            if _is_text_operand(segment[word_start:word_end], previous, head):
-                pieces.append(text[copied_to : start + word_start])
-                pieces.append(_TEXT_OPERAND_PLACEHOLDER)
-                copied_to = start + word_end
+        # By start offset: an outer-pass word can run on past the closing delimiter.
+        inside_substitution = any(start <= operand_start < end for start, end in inner_regions)
+        if inside_substitution and head not in _SEARCH_HEADS:
+            continue
+        pieces.append(text[copied_to:operand_start])
+        pieces.append(_TEXT_OPERAND_PLACEHOLDER)
+        copied_to = operand_end
     pieces.append(text[copied_to:])
     return "".join(pieces)
+
+
+def _segment_text_operands(segment: str, offset: int) -> tuple[str, list[tuple[int, int]]]:
+    """The segment's command word and the absolute ``(start, end)`` of each
+    text operand in it; ``segment`` begins at ``offset`` in the command. No
+    operands unless the command word is a pure text consumer."""
+    head = segment_command_word(segment) or ""
+    if head not in _TEXT_CONSUMER_HEADS:
+        return head, []
+    spans = shell_word_spans(segment)
+    return head, [
+        (offset + word_start, offset + word_end)
+        for index, (word_start, word_end) in enumerate(spans)
+        if _is_text_operand(
+            segment[word_start:word_end],
+            segment[spans[index - 1][0] : spans[index - 1][1]] if index else "",
+            head,
+        )
+    ]
 
 
 class _GlobExpansionGate:

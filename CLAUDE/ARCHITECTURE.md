@@ -780,6 +780,41 @@ plugins:
 
 ## Security Considerations
 
+### Threat model: the agent is careless, not hostile
+
+This is an owner ruling. The daemon helps an agent that makes mistakes. It does not defend
+against an agent that sets out to defeat it. A hostile agent wins anyway, because it can stop
+the daemon process. So no guard is judged on whether it survives deliberate evasion.
+
+What this decides:
+
+- **In scope**: what a well-meaning agent writes in ordinary work. Some examples:
+
+  - `git add x && git commit`;
+  - `git commit <paths>`;
+  - `cd sub && git commit`;
+  - a protected file read by an ordinary `cat`, `grep` or interpreter one-liner;
+  - a careless secret in a commit.
+
+  A bypass found through one of these is a defect.
+
+- **Out of scope**: shapes only an adversary writes. Examples:
+
+  - a command assembled from text (`bash -c "$X"`, `eval`, `printf`-built words);
+  - a git alias defined to hide a subcommand;
+  - arithmetic or substitution nesting chosen to slip past a parser;
+  - `/proc/self/...` or file-descriptor tricks;
+  - anything that disables or routes around the daemon itself.
+
+  A finding that needs one of these is recorded and dismissed under this ruling, not fixed.
+
+- **False positives cost real work.** A guard that denies ordinary commands to catch
+  obfuscated ones fails the agents it exists to help. Prefer the simpler guard that lets the
+  adversarial shape through.
+
+Reviews and security sweeps apply the same test before raising a bypass: would a careless
+agent plausibly type this?
+
 ### Input Validation
 
 - All hook input from stdin treated as untrusted

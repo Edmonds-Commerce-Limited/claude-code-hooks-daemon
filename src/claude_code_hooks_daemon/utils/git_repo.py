@@ -27,7 +27,7 @@ from __future__ import annotations
 import logging
 import os
 import subprocess  # nosec B404 — only ever runs the trusted system ``git`` binary
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
@@ -144,6 +144,69 @@ def run_git(
         )
     except (OSError, subprocess.SubprocessError) as exc:
         return subprocess.CompletedProcess(argv, _GIT_UNAVAILABLE, "", str(exc))
+
+
+def read_blobs(
+    cwd: Path, shas: Sequence[str], timeout: float = Timeout.GIT_CONTEXT
+) -> dict[str, bytes] | None:
+    """Raw content of every blob in ``shas``, from ONE ``git cat-file --batch``.
+
+    A commit gate that parses every plan document in a tree of hundreds cannot
+    afford a ``git show`` per file inside a PreToolUse budget; one batch process
+    answers them all. The reply is size-prefixed BYTES, so it is read as bytes:
+    :func:`run_git` decodes lossily, and a single non-UTF-8 byte changes the
+    length of what it returns, which would shift every later blob.
+
+    Returns ``None`` when git could not answer (absent binary, timeout, non-zero
+    exit, or a reply that does not parse) — the same "fact not available" signal
+    :func:`run_git` gives, never a partial result. A sha git reports ``missing``
+    is simply absent from the mapping.
+    """
+    if not shas:
+        return {}
+    argv = ["git", "-C", str(cwd), "cat-file", "--batch"]
+    child_env = {**os.environ, _OPTIONAL_LOCKS_VAR: _OPTIONAL_LOCKS_DECLINED}
+    request = "".join(f"{sha}\n" for sha in shas).encode("ascii")
+    try:
+        result = subprocess.run(  # nosec B603 B607 — fixed argv, no shell, trusted binary
+            argv,
+            input=request,
+            capture_output=True,
+            timeout=timeout,
+            env=child_env,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        # Reported as `run_git` reports it: a non-zero status with the reason
+        # attached, so "git could not run" and "git said no" are one answer.
+        logger.warning("git cat-file --batch unavailable: %s", exc)
+        result = subprocess.CompletedProcess(argv, _GIT_UNAVAILABLE, b"", str(exc).encode())
+    if result.returncode != 0:
+        return None
+    return _parse_cat_file_batch(result.stdout)
+
+
+def _parse_cat_file_batch(output: bytes) -> dict[str, bytes] | None:
+    """Parse ``cat-file --batch`` output: ``<sha> blob <size>\\n<bytes>\\n`` per object."""
+    blobs: dict[str, bytes] = {}
+    position = 0
+    while position < len(output):
+        header_end = output.find(b"\n", position)
+        if header_end == -1:
+            return None
+        fields = output[position:header_end].split(b" ")
+        position = header_end + 1
+        if len(fields) == 2 and fields[1] == b"missing":
+            continue
+        if len(fields) != 3 or not fields[2].isdigit():
+            return None
+        size = int(fields[2])
+        body_end = position + size
+        if body_end > len(output):
+            return None
+        blobs[fields[0].decode("ascii")] = output[position:body_end]
+        position = body_end + 1
+    return blobs
 
 
 def project_path_is_protected(rel_path: str) -> bool:

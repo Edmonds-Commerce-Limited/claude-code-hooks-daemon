@@ -294,6 +294,7 @@ def resolve_secret_terms(config_path: Path, repo: Path) -> tuple[str, ...]:
     """Secret-list terms via ``utils/secret_redaction`` — the single source of truth."""
     try:
         from claude_code_hooks_daemon.utils.secret_redaction import (
+            SecretWordListUnreadableError,
             load_secret_terms,
             resolve_secret_word_list_path,
         )
@@ -304,7 +305,12 @@ def resolve_secret_terms(config_path: Path, repo: Path) -> tuple[str, ...]:
     path = resolve_secret_word_list_path(configured if isinstance(configured, str) else None, repo)
     if path is None:
         return ()
-    return load_secret_terms(path)
+    try:
+        return load_secret_terms(path)
+    except SecretWordListUnreadableError as exc:
+        # A list the project opted into but that cannot be read must fail the
+        # sweep: scanning history with no terms would report it clean unchecked.
+        raise ConfigError(str(exc)) from exc
 
 
 def grandfathered_commits(repo: Path, config_path: Path) -> set[str]:

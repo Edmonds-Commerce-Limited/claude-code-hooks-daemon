@@ -508,6 +508,14 @@ class HandlerID:
         config_key="conflict_marker_commit_gate",
         display_name="conflict-marker-commit-gate",
     )
+    # Merge QA advisor (PreToolUse handler) — Plan 00475 Task 4.2 (ledger 00474
+    # N278): a `git merge` of a work branch whose head has no recorded green
+    # `llm_qa.py changed` run. Advisory only.
+    MERGE_QA_ADVISOR = HandlerIDMeta(
+        class_name="MergeQaAdvisorHandler",
+        config_key="merge_qa_advisor",
+        display_name="merge-qa-advisor",
+    )
     # Remote-docs commit gate (PreToolUse handler) — Plan 00326: the backstop
     # for the write-time gate, which keys on Write/Edit and so cannot see a
     # heredoc or redirect into the tree.

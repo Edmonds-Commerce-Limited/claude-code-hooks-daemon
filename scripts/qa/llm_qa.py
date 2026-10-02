@@ -1889,6 +1889,60 @@ def certify_head(
     return head
 
 
+#: Plan 00475 Task 4.2. The per-tool ``provenance.json`` is written under the
+#: checkout a run happened in, which for a work branch is its own worktree, not
+#: the checkout the coordinator merges from. Refs are shared by every worktree,
+#: so a passing run of the whole ``changed`` selection also records the commit
+#: it judged here, keyed by branch. ``changed_green_ref`` is read by the daemon's
+#: ``merge_qa_advisor`` handler, which cannot import this script: keep the two
+#: spellings of the template in step.
+_CHANGED_GREEN_REF_TEMPLATE: Final[str] = "refs/integration/changed-green/{branch}"
+
+
+def changed_green_ref(branch: str) -> str:
+    """The ref holding the head a passing ``changed`` run judged, for ``branch``."""
+    return _CHANGED_GREEN_REF_TEMPLATE.format(branch=branch)
+
+
+def record_changed_pass(
+    root: Path, judged: dict[str, str] | None, *, git: GitBytesRunner = _run_git_bytes
+) -> str:
+    """Record HEAD as the head a passing ``changed`` run judged, and return it.
+
+    ``judged`` is the tree the passing run judged; it must still be the tree,
+    and the tree must be clean, because what is merged is the commit and nothing
+    uncommitted.
+
+    Raises:
+        MainMovedError: HEAD is detached, the tree is dirty, or it changed (or
+            could not be read) since the run judged it.
+    """
+    branch = integration_branch(root, git)
+    dirty = uncommitted_paths(root, git)
+    if dirty:
+        shown = ", ".join(dirty[:3]) + (", ..." if len(dirty) > 3 else "")
+        raise MainMovedError(
+            f"the tree has uncommitted changes ({shown}), so this run judged no commit"
+        )
+    if judged is None or worktree_state(root, git=git) != judged:
+        raise MainMovedError("the tree changed since the run judged it, so no commit was judged")
+    head = _commit_of("HEAD", root, git)
+    ref = changed_green_ref(branch)
+    _git_text(["update-ref", ref, head], root, git, f"could not record {ref}")
+    return head
+
+
+def clear_changed_pass(root: Path, *, git: GitBytesRunner = _run_git_bytes) -> None:
+    """Drop this branch's record after a failing ``changed`` run: its head is not green.
+
+    A detached HEAD has no record to drop.
+    """
+    code, output = git(["symbolic-ref", "--quiet", "--short", "HEAD"], root)
+    branch = output.decode().strip()
+    if code == 0 and branch:
+        _delete_ref(changed_green_ref(branch), root, git)
+
+
 def _head_uncertified(root: Path, git: GitBytesRunner) -> str | None:
     """Why HEAD is not the head a gate passed on a clean tree, or None when it is."""
     certified = _ref_commit(certified_ref(root, git), root, git)
@@ -2527,6 +2581,22 @@ def _certify_gate(judged: dict[str, str] | None) -> None:
             print(f"\nGATE: {head[:_SHORT_SHA]} certified for {MAIN_MOVED_COMMAND}")
 
 
+def _record_changed(all_passed: bool, judged: dict[str, str] | None) -> None:
+    """After a run of the whole ``changed`` selection, record or drop this branch's green head."""
+    if not all_passed:
+        try:
+            clear_changed_pass(PROJECT_ROOT)
+        except MainMovedError as exc:
+            print(f"\n{_TREE_WARNING_LABEL} the earlier green record could not be dropped: {exc}")
+        return
+    try:
+        head = record_changed_pass(PROJECT_ROOT, judged)
+    except MainMovedError as exc:
+        print(f"\n{_TREE_WARNING_LABEL} no green `changed` head recorded: {exc}")
+    else:
+        print(f"\nCHANGED: {head[:_SHORT_SHA]} recorded green for the merge-time advisory")
+
+
 def _run_tools(
     tools: list[str],
     *,
@@ -2589,6 +2659,8 @@ def _run_tools(
 
     if not read_only:
         _record_run(run_records, before)
+        if set(CHANGED_TOOL_NAMES) <= set(tools):
+            _record_changed(all_passed, before)
         if all_passed and set(ALL_TOOL_NAMES) <= set(tools):
             _certify_gate(before)
 

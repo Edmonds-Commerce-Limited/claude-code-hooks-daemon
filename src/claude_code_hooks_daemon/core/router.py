@@ -11,10 +11,7 @@ from claude_code_hooks_daemon.core.chain import ChainExecutionResult, HandlerCha
 from claude_code_hooks_daemon.core.event import EventType
 from claude_code_hooks_daemon.core.hook_result import Decision, HookResult
 from claude_code_hooks_daemon.core.session_start_tiers import prefix_context_with_tier
-from claude_code_hooks_daemon.utils.secret_redaction import (
-    get_active_secret_terms,
-    redact_structure,
-)
+from claude_code_hooks_daemon.utils.secret_redaction import redact_structure_active
 
 if TYPE_CHECKING:
     from claude_code_hooks_daemon.core.handler import Handler
@@ -198,8 +195,7 @@ class EventRouter:
         if event_type == EventType.PRE_TOOL_USE:
             import json
 
-            terms = get_active_secret_terms()
-            payload = redact_structure(hook_input, terms) if terms else hook_input
+            payload = redact_structure_active(hook_input)
             logger.debug(
                 "PRE_TOOL_USE hook_input:\n%s",
                 json.dumps(payload, indent=2, default=str),

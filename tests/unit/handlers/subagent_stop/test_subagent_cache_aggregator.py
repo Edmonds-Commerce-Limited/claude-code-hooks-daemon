@@ -20,6 +20,10 @@ clobbering each other, with no lock to get wrong.
 from __future__ import annotations
 
 import json
+import os
+import shutil
+import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -31,7 +35,9 @@ from claude_code_hooks_daemon.daemon.synthetic_traffic import (
     SYNTHETIC_SOURCE_FIELD,
 )
 from claude_code_hooks_daemon.handlers.subagent_stop.subagent_cache_aggregator import (
+    _MAX_MEMOISED_SESSIONS,
     SubagentCacheAggregatorHandler,
+    _scans,
     read_subagent_cache_totals,
 )
 
@@ -266,3 +272,157 @@ class TestSubagentCacheAggregatorHandler:
             {"agent_transcript_path": str(tmp_path / "gone.jsonl"), "agent_id": "a1"}
         )
         assert result.decision == Decision.ALLOW
+
+
+def _age_session(root: Path, session: str, seconds: int = 60) -> None:
+    """Back-date a session directory and its files so the memo may trust them."""
+    directory = root / "cache-sidecar" / session
+    old = time.time() - seconds
+    for entry in directory.iterdir():
+        os.utime(entry, (old, old))
+    os.utime(directory, (old, old))
+
+
+class TestReadCostDoesNotScaleWithAgentCount:
+    """N295: a render re-parsed every agent's file; it must cost one stat instead."""
+
+    @pytest.fixture
+    def handler(self) -> SubagentCacheAggregatorHandler:
+        return SubagentCacheAggregatorHandler()
+
+    @pytest.fixture
+    def transcript(self, tmp_path: Path) -> Path:
+        target = tmp_path / "agent.jsonl"
+        _write_agent_transcript(target, _AGENT_RECORDS)
+        return target
+
+    @pytest.fixture
+    def json_loads_spy(self, monkeypatch: pytest.MonkeyPatch) -> list[str]:
+        calls: list[str] = []
+        real = json.loads
+
+        def _counting(text, *args, **kwargs):
+            calls.append(text)
+            return real(text, *args, **kwargs)
+
+        monkeypatch.setattr(json, "loads", _counting)
+        return calls
+
+    def _record_many(self, handler, transcript: Path, root: Path, count: int) -> None:
+        for index in range(count):
+            handler.record(
+                session_id="sess", agent_id=f"agent-{index}", transcript=transcript, root=root
+            )
+
+    def test_repeated_reads_parse_nothing_after_the_first(
+        self, handler, transcript, tmp_path, json_loads_spy
+    ):
+        self._record_many(handler, transcript, tmp_path, 40)
+        _age_session(tmp_path, "sess")
+        first = read_subagent_cache_totals("sess", root=tmp_path)
+        json_loads_spy.clear()
+        for _ in range(25):
+            assert read_subagent_cache_totals("sess", root=tmp_path) == first
+        assert json_loads_spy == []
+        assert first["agents_seen"] == 40
+        assert first["cache_read_tokens"] == 40 * 300
+
+    def test_the_cold_read_parses_each_file_once(
+        self, handler, transcript, tmp_path, json_loads_spy
+    ):
+        self._record_many(handler, transcript, tmp_path, 10)
+        json_loads_spy.clear()
+        read_subagent_cache_totals("sess", root=tmp_path)
+        assert len(json_loads_spy) == 10
+
+    def test_a_newly_stopped_agent_shows_on_the_very_next_read(
+        self, handler, transcript, tmp_path, json_loads_spy
+    ):
+        self._record_many(handler, transcript, tmp_path, 5)
+        _age_session(tmp_path, "sess")
+        assert read_subagent_cache_totals("sess", root=tmp_path)["agents_seen"] == 5
+        handler.record(session_id="sess", agent_id="late", transcript=transcript, root=tmp_path)
+        json_loads_spy.clear()
+        after = read_subagent_cache_totals("sess", root=tmp_path)
+        assert after["agents_seen"] == 6
+        assert after["cache_read_tokens"] == 6 * 300
+        assert len(json_loads_spy) == 1, "only the new file may be parsed"
+
+    def test_a_rewritten_agent_is_replaced_not_double_counted(self, handler, transcript, tmp_path):
+        handler.record(session_id="sess", agent_id="one", transcript=transcript, root=tmp_path)
+        _age_session(tmp_path, "sess")
+        assert read_subagent_cache_totals("sess", root=tmp_path)["cache_read_tokens"] == 300
+        _write_agent_transcript(transcript, _AGENT_RECORDS + _AGENT_RECORDS)
+        handler.record(session_id="sess", agent_id="one", transcript=transcript, root=tmp_path)
+        after = read_subagent_cache_totals("sess", root=tmp_path)
+        assert after["agents_seen"] == 1
+        assert after["requests"] == 4
+        assert after["cache_read_tokens"] == 600
+
+    def test_writes_inside_one_timestamp_tick_are_never_missed(self, handler, transcript, tmp_path):
+        """Fresh stamps are untrusted, so same-tick writes between reads still land."""
+        for index in range(30):
+            handler.record(
+                session_id="sess", agent_id=f"a{index}", transcript=transcript, root=tmp_path
+            )
+            seen = read_subagent_cache_totals("sess", root=tmp_path)
+            assert seen["agents_seen"] == index + 1
+            assert seen["cache_read_tokens"] == (index + 1) * 300
+
+    def test_an_in_place_edit_inside_one_tick_is_picked_up(self, handler, transcript, tmp_path):
+        handler.record(session_id="sess", agent_id="one", transcript=transcript, root=tmp_path)
+        target = tmp_path / "cache-sidecar" / "sess" / "one.json"
+        assert read_subagent_cache_totals("sess", root=tmp_path)["cache_read_tokens"] == 300
+        target.write_text(json.dumps({"cache_read_tokens": 7}), encoding="utf-8")
+        assert read_subagent_cache_totals("sess", root=tmp_path)["cache_read_tokens"] == 7
+
+    def test_a_removed_agent_file_stops_counting(self, handler, transcript, tmp_path):
+        handler.record(session_id="sess", agent_id="one", transcript=transcript, root=tmp_path)
+        handler.record(session_id="sess", agent_id="two", transcript=transcript, root=tmp_path)
+        _age_session(tmp_path, "sess")
+        assert read_subagent_cache_totals("sess", root=tmp_path)["agents_seen"] == 2
+        (tmp_path / "cache-sidecar" / "sess" / "two.json").unlink()
+        assert read_subagent_cache_totals("sess", root=tmp_path)["agents_seen"] == 1
+
+    def test_a_vanished_session_directory_reads_empty_after_being_memoised(
+        self, handler, transcript, tmp_path
+    ):
+        handler.record(session_id="sess", agent_id="one", transcript=transcript, root=tmp_path)
+        _age_session(tmp_path, "sess")
+        read_subagent_cache_totals("sess", root=tmp_path)
+        shutil.rmtree(tmp_path / "cache-sidecar" / "sess")
+        assert read_subagent_cache_totals("sess", root=tmp_path)["agents_seen"] == 0
+
+    def test_the_memo_is_bounded(self, handler, transcript, tmp_path):
+        for index in range(_MAX_MEMOISED_SESSIONS + 5):
+            handler.record(
+                session_id=f"s{index}", agent_id="one", transcript=transcript, root=tmp_path
+            )
+            read_subagent_cache_totals(f"s{index}", root=tmp_path)
+        assert len(_scans) <= _MAX_MEMOISED_SESSIONS
+
+    def test_concurrent_readers_and_a_writer_stay_consistent(self, handler, transcript, tmp_path):
+        """Every read sees a whole number of agents, and the last read sees them all."""
+        errors: list[str] = []
+        stop = threading.Event()
+
+        def _reader() -> None:
+            while not stop.is_set():
+                seen = read_subagent_cache_totals("sess", root=tmp_path)
+                if seen["cache_read_tokens"] != seen["agents_seen"] * 300:
+                    errors.append(f"torn read: {seen}")
+
+        readers = [threading.Thread(target=_reader) for _ in range(4)]
+        for thread in readers:
+            thread.start()
+        try:
+            for index in range(40):
+                handler.record(
+                    session_id="sess", agent_id=f"a{index}", transcript=transcript, root=tmp_path
+                )
+        finally:
+            stop.set()
+            for thread in readers:
+                thread.join()
+        assert errors == []
+        assert read_subagent_cache_totals("sess", root=tmp_path)["agents_seen"] == 40

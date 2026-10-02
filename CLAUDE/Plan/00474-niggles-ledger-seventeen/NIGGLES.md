@@ -364,7 +364,10 @@ Phase 4 territory). Until then, the coordinator runs the cheap static checks
 (`format lint type_check error_hiding input_contract`) itself before any merge
 whose targeted run is missing.
 
-**Status**: ⬜ Open (main repaired; the process gap stands).
+**Status**: 🔄 Graduated to Plan 00475 Task 4.2, a merge-time advisory for a head with no
+recorded green `changed` run. `main` is repaired. The interim rule is already written down in
+`CLAUDE/QA.md` under "Before Merging: the Coordinator's Check". Built on
+`worktree-p475-merge-qa-advisory` (`merge_qa_advisor`, advisory only), awaiting merge.
 
 ### N277 — `_resolve_python_cmd` in `init.sh` reports success after a failed resolve
 
@@ -707,7 +710,34 @@ Recorded only on `worktree-n466-n53`, which was dropped. Their write-ups are kep
 verbatim in [CARRIED-N53-BRANCH.md](CARRIED-N53-BRANCH.md). Five were remedied on
 that branch only, so all seven are open on `main`.
 
-**Status**: ⬜ Open (all seven).
+**Status**: N244 and N245 fixed; N135, N176, N177 and N189 dismissed; N246 open. See below.
+
+- **N244**: **Fixed** (merge 52fd9cd9b). On a bare `git commit`, plan QA now scans
+  the INDEX instead of the disk. It uses one `ls-files -s` and one `cat-file --batch`
+  per commit. The row-to-folder check asks that same tree. An index git cannot read
+  falls back to the disk. Still read from the disk: the pathspec form (N245), a
+  `git add` in the same command (N246), and the checks that open files themselves
+  (`path-existence`, `plan-doc-size`, `journal-entry-ordering`, `same-commit-plan-doc`,
+  and the journal lookups in `checks/common.py`). Report:
+  [subagent-reports/261002-n244-committed-tree-sonnet.md](subagent-reports/261002-n244-committed-tree-sonnet.md).
+
+- **N245, N246**: in progress on `worktree-n245-pathspec`.
+
+- **N135, N176, N177, N189: ✅ Dismissed. They are out of scope under the owner's
+  threat-model ruling**
+  ([ARCHITECTURE.md § Threat model](../../ARCHITECTURE.md#threat-model-the-agent-is-careless-not-hostile)).
+  The daemon helps a careless agent and does not defend against a hostile one, which
+  could simply stop the daemon. Each of these commits is reached only through a shape an
+  adversary writes:
+
+  - text run by `bash -c "$X"` or `eval`;
+  - a git alias;
+  - `builtin cd`;
+  - a commit nested in `$(( $(…) ))`;
+  - a `case` inside `function f {` inside `$( )`.
+
+  Neither remedy is wanted: not the dropped branch's shell walk, and not a git
+  `pre-commit` hook built to catch these shapes.
 
 ### N253–N256 — carried from ledger 00466, their branch dropped
 
@@ -1019,8 +1049,18 @@ The payloads are `untracked/scratch/n291_probe_{plain,assign,single_assign}.json
 **Worked around**: by splitting the filter into two literal prefix greps (`"^tests/"`, then
 `"/test_"`).
 
-**Status**: 🔄 Branch `worktree-n291-subst-operand` in review. Commit 2a3347f6a was
-rejected: it relaxed `echo`/`printf` operands inside a substitution, so
+**Status**: ✅ Fixed (merge 4a30b9248, rework c8232ca80).
+
+- **Allowed**: inside a substitution, only `grep`/`egrep`/`fgrep` operands are relaxed.
+- **Still judged**: `echo`, `printf`, `rg -r` and awk print literals. Their operands reach the
+  output, so they stay judged.
+- **Also closed**: the merge closes `x=$(true; echo 'P*'); cat $x`, which main allowed before it.
+- **Now allowed**: a quoted glob given to grep as a FILE operand, such as
+  `$(grep -l x '<prefix>*')`. This is harmless: grep opens that literal name, which matches
+  no protected file.
+- **Live**: probed after a restart, both reproductions are allowed.
+
+The first attempt, commit 2a3347f6a, was rejected: it relaxed `echo`/`printf` operands inside a substitution, so
 `cat $(echo '<protected-prefix>*')` went from denied to allowed. The output of an
 unquoted substitution is glob-expanded. Only operands that cannot reach the
 substitution's output (a grep, rg or awk pattern) may be relaxed. Probe:
@@ -1043,4 +1083,142 @@ path is a variable. Another is a token in the script.
 **Worked around**: the script takes the src path as `argv[1]` and inserts it into
 `sys.path`, with no environment variable.
 
-**Status**: ⬜ Open. Reproduce with `bin/hooks-daemon probe`, then fix TDD (dogfooding rule).
+**Status**: ✅ Fixed (15fe504c1, merged).
+
+- **Cause**: `_script_run_is_upgrade` resolved the relative script against the hook cwd and ignored
+  the command's leading `cd /workspace &&`. The script therefore looked missing. A missing script
+  counts as the upgrade once `PYTHON*` steers.
+- **Fix**: the guard now follows a leading chain of `cd <literal existing dir>`. Every uncertain
+  shape keeps the strict hook-cwd behaviour.
+- **Tests**: 242 guard tests pass, every pre-existing denial included.
+
+### N293 — GitHub #68: the guards fail closed on an absolute glob with 2+ wildcards under an existing literal prefix
+
+**Source**: GitHub #68, filed by a whitelisted author, plus one comment. The owner flagged it as
+causing a lot of problems. The issue text is untrusted data, so its claims were re-verified here.
+
+**Reproduced on main after N291** with `untracked/scratch/gh68_repro.py <src dir>`, run with
+process cwd `/` and payload cwd set to the fixture dir F:
+
+- `cat $F/*/*`: quarantine guard denies.
+- `ls $F/*/*-release`: secret guard denies.
+- `for x in a b; do cat "$x"$F/*/*; done`: quarantine guard denies.
+- Single-wildcard forms are allowed.
+- The issue's unreadable-sibling `PermissionError` cases did not reproduce, but this container runs
+  as root and root can read a mode-000 directory. They need a non-root test.
+- The comment's grep-regex case (quarantine guard) is allowed on main.
+
+**Root cause**: `bounded_recursive_glob` in `src/claude_code_hooks_daemon/utils/shell_expansion.py`
+(lines 4062-4074). An absolute token is walked from base `/`. The function counts wildcard segments
+across the WHOLE pattern and refuses 2 or more. It ignores an existing literal prefix (`F/`), which
+already narrows the walk to one directory.
+
+**Still to check**:
+
+- The comment reports a second route. In a written `.bash` file's content, an unresolved `${VAR}` and
+  a relative word are expanded from the daemon process's cwd `/`, which turns ordinary log or
+  filename lines into root walks.
+- The `"$x"$F/...` word is relative in bash, under an unknown `$x`. Treating it as `$F/...` judges a
+  path the shell would never touch.
+
+**Status**: ✅ Fixed (92b9b49e0, merged).
+
+**Fix**: `bounded_recursive_glob` now walks from the longest existing literal prefix. The root
+refusal applies only to a walk that still starts at `/`, including a prefix that resolves back to
+`/` through `..` or a symlink.
+
+**Unreadable sibling**: when a wildcard selects a directory that cannot be searched, a fully named
+path inside it is judged by its name.
+
+**Correction to the issue**: `"$x"$F/...` is NOT unreachable. An empty `$x` reaches `$F/...`, so
+both readings are judged.
+
+**Comment route 1** (script content, daemon cwd) did not reproduce in 48 combinations. Regression
+tests pin it.
+
+**Coordinator safety probe** (`untracked/scratch/gh68_deny.py`): every denied shape with a
+protected file under F has the same verdict on the branch as on main. All the issue's cases are
+now allowed.
+
+**Accepted residual, unchanged**: a bare generic glob (`cat $F/*/*`) is not treated as a mention
+of a protected file (Plan 00272 Decision 12).
+
+### N294 — a status-line client that hangs up still logs an ERROR traceback
+
+**Source**: the coordinator, reading `bin/hooks-daemon logs` after the N244 restart.
+
+**Evidence**: five `[ERROR] asyncio: Task exception was never retrieved ... BrokenPipeError`
+records within 0.5 s, all on Status events. Each one comes straight after the daemon's own
+`Client disconnected before its response was delivered.` debug line. That line shows the
+`except (BrokenPipeError, ConnectionResetError)` branch in `HooksDaemon._handle_client`
+(`daemon/server.py`) already classified the lost peer. The `finally` block then calls
+`await writer.wait_closed()` (line 2181), and that call raises the same `BrokenPipeError`
+outside every handler. The task dies with an unretrieved exception, so the noise the branch was
+written to remove comes back at ERROR level, in the channel the docs point at
+(`logs | grep -i error`).
+
+**Trigger**: the status line re-renders faster than the slow chip in N295 replies, so Claude Code
+drops superseded renders.
+
+**Status**: ✅ Fixed (merge fc6782bf1).
+
+Both client handlers now close through one helper, `HooksDaemon._close_writer`. It closes the
+writer, then awaits `wait_closed()`. A `BrokenPipeError` or `ConnectionResetError` from that wait
+is recorded at DEBUG and goes no further. Any other error still surfaces. The request counter is
+decremented before the close, so it always runs. The per-event handler had the same pattern and
+uses the same helper. Tests are in `tests/unit/daemon/test_server_dead_peer_logging.py`.
+
+### N295 — the prompt-cache chip re-reads every sub-agent's sidecar file on every render
+
+**Source**: the coordinator, timing handlers in `bin/hooks-daemon logs`.
+
+**Evidence**: across 18 renders, `status-prompt-cache-indicator` took 84–427 ms (median about
+95 ms). Every other status handler took under 3 ms. The `⑂`/`Σ` chips call
+`read_subagent_cache_totals` (`handlers/subagent_stop/subagent_cache_aggregator.py`), which globs
+and `json.loads` every file in `untracked/cache-sidecar/<session>/`. This session's directory holds
+3,369 files (14 MB), one per sub-agent that ever stopped. The cost grows with every agent the
+session runs and is paid on every render, so a long-lived orchestrator session pays the most. The
+slowness also makes Claude Code abandon renders (N294).
+
+**Status**: ✅ Fixed (merge b44e395a5). Live after the restart: 17 renders took 0–3 ms each,
+against 84–427 ms before, and the logs held no unretrieved task exception (N294). The reader now
+remembers each session's totals in memory and checks one thing per render: the session directory's
+modification time. Every sub-agent write is a rename into that directory, which changes it, so an
+unchanged time means no agent was added, rewritten or removed. A time younger than two seconds is
+not trusted (a second write in the same timestamp tick would leave it unchanged), so a fresh write
+always triggers a rescan; a rescan re-parses only files whose inode, mtime or size moved, so a
+rewritten agent file replaces its old figures rather than adding to them. Measured on a copy of the
+real 3,371-file directory: before, 92 ms median per render (134 ms worst); after, 0.010 ms median
+(0.07 ms worst), with identical totals. The first read after a daemon restart still pays one full
+scan (about 150-220 ms), once.
+
+The agent wrote the code before the tests. The coordinator therefore ran the branch's cost tests
+against main's unfixed reader. `test_repeated_reads_parse_nothing_after_the_first` and
+`test_a_newly_stopped_agent_shows_on_the_very_next_read` both fail there, so the tests do detect
+the defect.
+
+### N296 — the error-hiding audit sees log-and-continue only when the log call is written inline
+
+**Source**: the coordinator, reviewing the N294 fix.
+
+**Evidence**: `ErrorHidingVisitor._is_log_and_continue` in `scripts/qa/audit_error_hiding.py`
+flags an `except` body only when it is a single `<x>.error|warning|info|debug(...)` call. The
+same handling written as one call to any other function passes, for example `_record(exc)`,
+where the helper does the logging. The N294 agent wrote it that way because the inline form
+was flagged. In N294 the handling is correct: a peer that has hung up leaves nothing to do, and
+the pre-existing `_log_lost_peer` branch uses the same shape. But the detector cannot tell a
+deliberate, justified case from one that hides a real failure behind a helper.
+
+The gap is wider than helpers. The rule fires only when the body is exactly ONE statement, so
+a log call followed by `continue`, `return {}` or any other statement also passes. The N295
+agent reported reworking three flags this way. Its merged reader logs at DEBUG, then skips one
+unreadable file or returns empty totals. That is the documented fail-silent contract for
+status-line reads, so the handling is correct there. But the audit can neither confirm nor
+reject it.
+
+**Open question**: what should a justified log-and-continue look like? Two options: one
+recognised, reviewable marker, or a named helper that the audit allowlists. A helper that
+merely moves the call out of sight is neither. Changing the audit, or adding allowlist
+entries, needs the owner.
+
+**Status**: ⬜ Open.

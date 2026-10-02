@@ -207,6 +207,61 @@ class TestDeadPeerIsNotAnError:
         assert b'"error"' not in written
 
 
+class TestPeerThatHangsUpDuringCloseIsNotAnError:
+    """``wait_closed()`` re-raises the transport's stored error, so a peer that
+    vanished mid-response made the SAME BrokenPipeError escape the ``finally``
+    block, outside every handler, as an unretrieved task exception."""
+
+    @pytest.mark.anyio
+    @pytest.mark.parametrize("error", [BrokenPipeError("gone"), ConnectionResetError("reset")])
+    async def test_wait_closed_disconnect_does_not_escape_handle_client(
+        self, tmp_path: Path, logged: _Collector, error: OSError
+    ) -> None:
+        daemon = _make_daemon(tmp_path)
+        reader, writer = _streams(drain_error=BrokenPipeError("peer is gone"))
+        writer.wait_closed.side_effect = error
+
+        with _returning(_ALLOW_RESPONSE):
+            await daemon._handle_client(reader, writer)
+
+        assert _at_least(logged, logging.ERROR) == []
+        assert any(
+            record.levelno == logging.DEBUG and "closing" in record.getMessage().lower()
+            for record in logged.records
+        ), "the lost peer at close must be recorded at DEBUG, not swallowed"
+        writer.close.assert_called_once()
+        assert daemon._active_requests == 0
+
+    @pytest.mark.anyio
+    async def test_wait_closed_disconnect_does_not_escape_handle_event_client(
+        self, tmp_path: Path, logged: _Collector
+    ) -> None:
+        daemon = _make_daemon(tmp_path)
+        reader = AsyncMock(spec=asyncio.StreamReader)
+        writer = AsyncMock(spec=asyncio.StreamWriter)
+        reader.read.side_effect = BrokenPipeError("peer is gone")
+        writer.wait_closed.side_effect = BrokenPipeError("peer is gone")
+
+        await daemon._handle_event_client("Status", reader, writer)
+
+        assert _at_least(logged, logging.ERROR) == []
+        writer.close.assert_called_once()
+        assert daemon._active_requests == 0
+
+    @pytest.mark.anyio
+    async def test_an_unrelated_wait_closed_oserror_is_not_demoted(self, tmp_path: Path) -> None:
+        """Only the two hang-up subclasses are classified; anything else is a
+        real fault and must still surface."""
+        daemon = _make_daemon(tmp_path)
+        reader, writer = _streams()
+        writer.wait_closed.side_effect = OSError("disk is on fire")
+
+        with _returning(_ALLOW_RESPONSE), pytest.raises(OSError, match="disk is on fire"):
+            await daemon._handle_client(reader, writer)
+
+        assert daemon._active_requests == 0
+
+
 class TestAnUndeliveredBlockDecisionIsWorthAWarning:
     @pytest.mark.anyio
     async def test_lost_blocking_response_warns(self, tmp_path: Path, logged: _Collector) -> None:

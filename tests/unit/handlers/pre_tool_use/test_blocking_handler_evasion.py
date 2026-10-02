@@ -140,6 +140,22 @@ _EVASION_CASES: dict[str, tuple[str, tuple[str, ...]]] = {
             "(git commit -m x)",
         ),
     ),
+    "MergeQaAdvisorHandler": (
+        "git merge worktree-x",
+        (
+            f"git -C {_SAFE_PATH} merge worktree-x",
+            "git --no-pager merge worktree-x",
+            "git \\\n  merge worktree-x",
+            "/usr/bin/git merge worktree-x",
+            "env git merge worktree-x",
+            "sudo git merge worktree-x",
+            "command git merge worktree-x",
+            "xargs git merge worktree-x",
+            "eval 'git merge worktree-x'",
+            "sh -c 'git merge worktree-x'",
+            "(git merge worktree-x)",
+        ),
+    ),
     "SubagentFullQaBlockerHandler": (
         "./scripts/qa/llm_qa.py all",
         (
@@ -383,6 +399,12 @@ _MUST_NOT_MATCH: dict[str, tuple[str, ...]] = {
         "git status",
         "git commit --dry-run",
         "echo 'git commit -m x'",
+    ),
+    "MergeQaAdvisorHandler": (
+        "git status",
+        "git merge --abort",
+        "git merge-base main worktree-x",
+        "echo 'git merge worktree-x'",
     ),
     "GithubAutoCloseKeywordsHandler": (
         # The keyword alone is prose; a reference alone is a link, not a

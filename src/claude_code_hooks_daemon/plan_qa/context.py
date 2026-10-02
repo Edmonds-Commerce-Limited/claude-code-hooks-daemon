@@ -12,6 +12,16 @@ Surface cost profile:
 - :func:`staged_context` / :func:`sweep_context` scan the plan tree, parse
   the README, and construct :class:`GitFacts` — acceptable for commit gates
   and session sweeps, never for per-edit dispatch.
+
+Which tree a surface judges (ledger 00474 N244): the sweep and the edit read
+the DISK; a bare ``git commit`` reads the INDEX, because the commit records the
+index and a gate that read the disk would judge a tree no commit holds. Not
+covered, and read from the disk as before: the pathspec form (it records
+working-tree content over the index), operations the same command performs
+before committing (``git add x && git commit``), and the checks that open
+files themselves rather than asking the tree (``path-existence``,
+``plan-doc-size``, ``journal-entry-ordering``, ``same-commit-plan-doc``, and
+the journal day-file lookups in ``checks/common.py``).
 """
 
 from collections.abc import Sequence
@@ -21,10 +31,12 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
 from claude_code_hooks_daemon.plan_qa.gitfacts import GitFacts
-from claude_code_hooks_daemon.plan_qa.model import README_FILENAME, PlanTree
+from claude_code_hooks_daemon.plan_qa.model import PLAN_DOC_FILENAME, README_FILENAME, PlanTree
 from claude_code_hooks_daemon.plan_qa.readme_index import ReadmeIndex
+from claude_code_hooks_daemon.plan_qa.tree_view import DiskTreeView, IndexTreeView, TreeView
 from claude_code_hooks_daemon.plan_qa.types import CheckContext, PlanDocSizeLimits
 from claude_code_hooks_daemon.utils.authored_paths import authored_path
+from claude_code_hooks_daemon.utils.path_containment import path_is_relative_to, path_relative_to
 
 if TYPE_CHECKING:
     from claude_code_hooks_daemon.core.project_layout import ProjectLayout
@@ -125,16 +137,70 @@ def _normalised_exclude_paths(exclude_paths: Sequence[str] | None) -> tuple[str,
     return () if exclude_paths is None else tuple(exclude_paths)
 
 
+def _committed_view(
+    project_root: Path, plan_dir: Path, policy: QaPolicy, gitfacts: GitFacts
+) -> TreeView | None:
+    """The plan directory as the commit will record it, or ``None`` if git cannot say.
+
+    Ledger 00474 N244. Two git spawns however many plan folders there are: one
+    ``ls-files -s`` for the listing, one ``cat-file --batch`` for every document
+    the scan parses (each ``PLAN.md`` and the two index READMEs).
+
+    ``None`` is an unreadable index, and the caller keeps reading the disk, as it
+    did before this view existed: fail-open stays fail-open.
+    """
+    if not path_is_relative_to(plan_dir, project_root):
+        return None
+    prefix = path_relative_to(plan_dir, project_root).as_posix()
+    listing = gitfacts.index_listing(prefix)
+    if listing is None:
+        return None
+    index_readmes = {
+        f"{prefix}/{README_FILENAME}",
+        f"{prefix}/{policy.completed_dir}/{README_FILENAME}",
+    }
+    wanted = [
+        path
+        for path in listing
+        if path.rsplit("/", 1)[-1] == PLAN_DOC_FILENAME or path in index_readmes
+    ]
+    texts = gitfacts.index_texts(listing, wanted)
+    if texts is None:
+        return None
+    # Git cannot record an empty directory, so an archive directory a project
+    # keeps empty until its first plan is archived is in no listing. It is the
+    # plan directory's own structure, not a plan, and no commit could add it
+    # without a placeholder file: keep it where the disk has it.
+    archive_dirs = [
+        authored_path(plan_dir, name)
+        for name in (policy.completed_dir, policy.cancelled_dir)
+        if name is not None
+    ]
+    return IndexTreeView(
+        files=[project_root / path for path in listing],
+        texts={project_root / path: text for path, text in texts.items()},
+        empty_dirs=[directory for directory in archive_dirs if directory.is_dir()],
+    )
+
+
 def _tree_and_readme(
     project_root: Path,
     plan_dir_rel: str,
     policy: QaPolicy,
+    committed_from: GitFacts | None = None,
 ) -> tuple[PlanTree, ReadmeIndex | None]:
     """Scan the plan tree and parse the index README when present.
 
+    ``committed_from`` makes the scan read the INDEX through that
+    :class:`GitFacts` instead of the disk (ledger 00474 N244): the commit gate
+    judges the tree the commit will record. ``None`` reads the disk, which is
+    right for a sweep, and is what a commit gate falls back to when git cannot
+    produce the listing.
+
     Raises:
         FileNotFoundError: when the configured plan directory is missing —
-            FAIL FAST; callers surface it as a structural problem.
+            FAIL FAST; callers surface it as a structural problem. For a
+            committed view that means the commit records nothing under it.
     """
     # Normalised, NOT contained, and the difference is deliberate. Containment
     # is used where a "not there" branch already exists to fall into (the
@@ -143,14 +209,22 @@ def _tree_and_readme(
     # misconfigured tree -- a decision that belongs with the wider
     # config-validation question, not smuggled into a path-hygiene pass.
     plan_dir = authored_path(project_root, plan_dir_rel)
+    view: TreeView | None = (
+        _committed_view(project_root, plan_dir, policy, committed_from)
+        if committed_from is not None
+        else None
+    )
+    if view is None:
+        view = DiskTreeView()
     tree = PlanTree.scan(
         plan_dir,
         completed_dir=policy.completed_dir,
         cancelled_dir=policy.cancelled_dir,
         extra_root_files=policy.extra_root_files,
+        view=view,
     )
     readme_path = authored_path(plan_dir, README_FILENAME)
-    readme = ReadmeIndex.parse(readme_path.read_text()) if readme_path.is_file() else None
+    readme = ReadmeIndex.parse(view.read_text(readme_path)) if view.is_file(readme_path) else None
 
     # Plan 00310: aged-out completed rows live verbatim in an archive index
     # inside the completed dir (CLAUDE/Plan/Completed/README.md). Merge its
@@ -164,8 +238,8 @@ def _tree_and_readme(
     # completed dir, not ``plan_dir`` — rewritten here so link resolution
     # (relative to ``plan_dir``) still finds the real folder.
     archive_path = authored_path(plan_dir, f"{policy.completed_dir}/{README_FILENAME}")
-    if readme is not None and archive_path.is_file():
-        archive_readme = ReadmeIndex.parse(archive_path.read_text())
+    if readme is not None and view.is_file(archive_path):
+        archive_readme = ReadmeIndex.parse(view.read_text(archive_path))
         rewritten_rows = tuple(
             replace(row, link=f"{policy.completed_dir}/{row.link}") if row.link else row
             for row in archive_readme.rows
@@ -270,7 +344,14 @@ def staged_context(
             Task 2.9); the runner drops every finding about an excluded path.
     """
     excluded = _normalised_exclude_paths(exclude_paths)
-    tree, readme = _tree_and_readme(project_root, plan_dir_rel, policy)
+    gitfacts = GitFacts(project_root, pathspecs=pathspecs)
+    # A bare commit records the INDEX, so the tree is read from it. A
+    # `git commit <pathspec>` records the WORKING-TREE content of the named
+    # paths over the index, which no listing of the index describes, so that
+    # form keeps reading the disk (see the module note on what is not covered).
+    tree, readme = _tree_and_readme(
+        project_root, plan_dir_rel, policy, committed_from=None if pathspecs else gitfacts
+    )
     return _with_journal(
         CheckContext(
             project_root=project_root,
@@ -283,7 +364,7 @@ def staged_context(
             collision_allowlist=frozenset(policy.collision_allowlist),
             tree=tree,
             readme=readme,
-            gitfacts=GitFacts(project_root, pathspecs=pathspecs),
+            gitfacts=gitfacts,
             commit_message=commit_message,
             layout=layout,
             exclude_paths=excluded,

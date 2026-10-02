@@ -169,6 +169,20 @@ read the plan index, ledgers and docs. So markdown is narrowed, not skipped.
   with the owner. The advisory (`branch_count_advisor`) merged in d6caefded and
   fired live on a repository with 5 `worktree-*` branches. Whether it should ever
   block awaits the owner.
+- [ ] 🔄 **Task 4.2**: Ledger 00474 N278. A `git merge` of a work branch whose head has
+  no recorded green `llm_qa.py changed` run gets an advisory. The advisory names the
+  head and the static checks to run, as listed in `CLAUDE/QA.md` under "Before Merging:
+  the Coordinator's Check". It is advisory like Task 4.1, and the owner decides whether
+  it ever blocks. This needs `llm_qa.py` to record which commit each `changed` result
+  was for. Establish whether it already does before adding anything. It did not:
+  `provenance.json` records the head per tool but under the checkout the run happened
+  in, which is the branch's worktree, not the one that merges. A passing run of the
+  whole `changed` selection on a clean tree now also records its head in
+  `refs/integration/changed-green/<branch>` (refs are shared by every worktree), and
+  the `merge_qa_advisor` handler reads it. Merged in 301805f1f. A live probe of
+  `git merge --no-ff origin/worktree-p479-pause-gate` drew the advisory, naming head
+  563b78f2a. A branch the remote does not hold yet drew nothing, as designed. Whether it
+  should ever block awaits the owner, as for Task 4.1.
 
 ## Success Criteria
 

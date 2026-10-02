@@ -30,20 +30,23 @@ nested checkout under the project root is a separate repository the
 project root's repo never tracks.
 """
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
 from typing import Final
 
 from claude_code_hooks_daemon.constants.timeout import Timeout
-from claude_code_hooks_daemon.utils.git_repo import GitRepo, run_git
+from claude_code_hooks_daemon.utils.git_repo import GitRepo, read_blobs, run_git
 from claude_code_hooks_daemon.utils.path_containment import path_is_relative_to, path_relative_to
 
 # name-status codes that carry TWO paths (old NUL new) in -z output.
 _TWO_PATH_STATUS_PREFIXES: Final[tuple[str, ...]] = ("R", "C")
 
 _NUL: Final[str] = "\0"
+
+# ``ls-files -s`` mode of a submodule entry: a commit pointer, not a file.
+_GITLINK_MODE: Final[str] = "160000"
 
 
 @dataclass(frozen=True)
@@ -72,6 +75,7 @@ class GitFactsBase:
         self._repo_root = repo_root
         self._pathspecs = tuple(pathspecs) if pathspecs else ()
         self._staged: tuple[StagedChange, ...] | None = None
+        self._index_listings: dict[str, dict[str, str] | None] = {}
 
     def staged_changes(self) -> tuple[StagedChange, ...]:
         """Changes THIS commit will actually contain.
@@ -132,6 +136,50 @@ class GitFactsBase:
     def staged_file_text(self, path: str) -> str | None:
         """Content of ``path`` in the index, or ``None`` when not present."""
         return self._git_output("show", f":{path}")
+
+    def index_listing(self, prefix: str) -> dict[str, str] | None:
+        """Every path the commit will record under ``prefix``, mapped to its blob sha.
+
+        Ledger 00474 N244: a commit gate judges the tree the commit WILL
+        record, and that is the index, never the disk. ``git rm --cached``
+        leaves a file on disk that the commit does not carry; a file deleted
+        on disk but still indexed is still carried.
+
+        ONE ``git ls-files -s`` per prefix, held for the instance's life (the
+        same reason as :meth:`staged_changes`: the answer is asked once per
+        decision, never once per plan folder). Paths are relative to the
+        repository root this instance targets. Submodule entries (mode 160000)
+        are not files and are left out.
+
+        ``None`` means git could not answer, so the caller can fall back to
+        what it did before rather than treat an unreadable index as an empty
+        tree.
+        """
+        if prefix in self._index_listings:
+            return self._index_listings[prefix]
+        output = self._git_output("ls-files", "-s", "-z", "--", prefix)
+        listing = None if output is None else _parse_index_listing(output)
+        self._index_listings[prefix] = listing
+        return listing
+
+    def index_texts(
+        self, listing: Mapping[str, str], paths: Sequence[str]
+    ) -> dict[str, str] | None:
+        """Staged text of each of ``paths`` found in ``listing``, from one batch.
+
+        A path absent from ``listing`` is absent from the result. Decoding is
+        lossy (a mangled character is visible; a gate that cannot read a file
+        is not). ``None`` when git could not answer.
+        """
+        wanted = {path: listing[path] for path in paths if path in listing}
+        blobs = read_blobs(self._repo_root, sorted(set(wanted.values())))
+        if blobs is None:
+            return None
+        return {
+            path: blobs[sha].decode("utf-8", errors="replace")
+            for path, sha in wanted.items()
+            if sha in blobs
+        }
 
     def head_file_text(self, path: str) -> str | None:
         """Content of ``path`` at HEAD, or ``None`` when not present."""
@@ -214,6 +262,20 @@ def project_relative_head_text(file_path: Path, project_root: Path) -> str | Non
     if repo is None or not path_is_relative_to(resolved, repo.root):
         return None
     return GitFactsBase(repo.root).head_file_text(path_relative_to(resolved, repo.root).as_posix())
+
+
+def _parse_index_listing(output: str) -> dict[str, str]:
+    """Parse ``ls-files -s -z`` (``<mode> <sha> <stage>\\t<path>``) into path -> sha."""
+    listing: dict[str, str] = {}
+    for record in output.split(_NUL):
+        if not record:
+            continue
+        meta, _, path = record.partition("\t")
+        mode, sha, _stage = meta.split(" ")
+        if mode == _GITLINK_MODE:
+            continue
+        listing[path] = sha
+    return listing
 
 
 def _parse_name_status_z(output: str) -> tuple[StagedChange, ...]:

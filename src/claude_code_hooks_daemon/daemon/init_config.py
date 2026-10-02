@@ -297,6 +297,7 @@ class ConfigTemplate:
             "    web_search_year: {enabled: true, priority: 55}   # Fix outdated years in searches\n"
             "\n"
             "    # ADVISORY HANDLERS (Priority 56-60)\n"
+            "    merge_qa_advisor: {enabled: true, priority: 56}  # Advise the static checks when a merged work branch has no recorded green llm_qa.py changed run (non-blocking)\n"
             "    daemon_docs_guard: {enabled: true, priority: 57}  # Warn when reading from daemon internal CLAUDE/ docs\n"
             "    flaggable_work_advisor: {enabled: false, priority: 58}  # Delegate-first advisory for safeguard-flaggable work (opt-in; Plan 00278)\n"
             "    british_english: {enabled: true, priority: 60}   # Warn about American English\n"

@@ -101,6 +101,35 @@ config_changes:
         On by default; no project-side action needed. Add the entry to a
         project config that lists its status-line handlers explicitly, or
         disable with handlers.status_line.usage_indicator.enabled: false.
+    - key: handlers.status_line.prompt_cache_indicator.options
+      recommended: false
+      dormant: false
+      description: >-
+        NEW options (Plan 00452) for the prompt-cache status-line segment,
+        which is redesigned as compact background-coloured chips:
+        `⚡ main|⑂|Σ` (main thread, sub-agents, whole session; the last two
+        only once a sub-agent has run). Each chip is coloured by its hit
+        ratio: green at or above `healthy_pct` (default 90), yellow from
+        `warn_pct` (75), orange from `critical_pct` (50), red below it. A
+        high ratio is good, so the direction is the opposite of
+        `usage_indicator`'s thresholds. A green chip is its label alone; any
+        other adds its figures, e.g. `main 82% 1h`. The main chip is also
+        raised by state: COLD is a red `❄ 509k`, EXPIRING is at least yellow
+        with `⏳4m`, a recent miss is at least yellow with `↻ <cause>`.
+      example_yaml: |
+        handlers:
+          status_line:
+            prompt_cache_indicator:
+              enabled: true
+              priority: 15
+              options:
+                healthy_pct: 90
+                warn_pct: 75
+                critical_pct: 50
+      migration_note: >-
+        Optional; the defaults apply when the options are absent. The old
+        `⚡ 99% 1h ⚠EXPIRING 4m sub 87% 5m total 97%` text rendering is
+        replaced, so a script matching it needs updating.
     - key: daemon.expected_version
       recommended: false
       dormant: false
@@ -231,6 +260,31 @@ config_changes:
         `max_open_branches` `worktree-*` branches or one far behind main. Raise
         the options to quieten it; disable with
         handlers.session_start.branch_count_advisor.enabled: false.
+      recommended: true
+      dormant: false
+    - key: handlers.pre_tool_use.merge_qa_advisor
+      description: >-
+        Advises, before a Bash `git merge` of a work branch (`worktree-*`,
+        local or `origin/worktree-*`) whose head has no recorded green
+        `llm_qa.py changed` run (Plan 00475 Task 4.2, ledger 00474 N278). The
+        advisory names the head and the static checks CLAUDE/QA.md lists for the
+        coordinator's check. `llm_qa.py changed` records the commit a passing
+        run of the whole selection judged, on a clean tree, in
+        `refs/integration/changed-green/<branch>`, a ref every worktree shares.
+        Advisory only; silent when the record names the head, for any other
+        branch, for `--abort`, `--continue` and `--quit`, and whenever git
+        cannot answer.
+      example_yaml: |
+        handlers:
+          pre_tool_use:
+            merge_qa_advisor:
+              enabled: true
+              priority: 59
+      migration_note: >-
+        On by default; no project-side action needed. A project that does not
+        use `scripts/qa/llm_qa.py changed` never has a record, so it is advised
+        on every merge of a `worktree-*` branch; disable with
+        handlers.pre_tool_use.merge_qa_advisor.enabled: false.
       recommended: true
       dormant: false
     - key: persistent_crons.jobs[].runs_while_awaiting_human

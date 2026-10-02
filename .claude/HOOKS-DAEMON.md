@@ -76,6 +76,7 @@
 | 50 | markdown_organization | BLOCKING | Enforce markdown file organization rules |
 | 50 | validate_instruction_content | BLOCKING | Validates content being written to CLAUDE.md and README.md files |
 | 55 | web_search_year | ADVISORY | Validate WebSearch queries don't use outdated years |
+| 56 | merge_qa_advisor | ADVISORY | Advise the static checks to run before merging a work branch with no recorded green run |
 | 57 | daemon_docs_guard | ADVISORY | Warn when reading from the hooks-daemon internal CLAUDE/ docs directory |
 | 58 | flaggable_work_advisor | ADVISORY | Advise delegating safeguard-flaggable work BEFORE opening the content |
 | 60 | british_english | ADVISORY | Warn about American English spellings in content files (non-blocking) |
@@ -189,7 +190,7 @@
 | 12 | context_sidecar | NON-TERMINAL | Write an observe-only context-state sidecar for the PTY supervisor |
 | 13 | supervisor_indicator | NON-TERMINAL | Show whether the ccy PTY supervisor is overseeing the session |
 | 14 | current_time | NON-TERMINAL | Display current local time in status line (24-hour format, no seconds) |
-| 15 | prompt_cache_indicator | NON-TERMINAL | Render prompt-cache hit ratio, TTL, and a warning when the cache is cold |
+| 15 | prompt_cache_indicator | NON-TERMINAL | Render prompt-cache health as `main`, `⑂` and `Σ` background-coloured chips |
 | 16 | usage_indicator | NON-TERMINAL | Show 5-hour and weekly subscription usage, colour-coded, with reset countdown |
 | 20 | git_branch | NON-TERMINAL | Show current git branch with magicmonty-style status icons if in a git repo |
 | 25 | git_repo_name | NON-TERMINAL | Show git repository name at start of status line |
