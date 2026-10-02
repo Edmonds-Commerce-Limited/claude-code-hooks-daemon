@@ -4,6 +4,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
+- [00484: DBF adoption and toolchain conformance](00484-dbf-adoption-and-toolchain-conformance/PLAN.md) - Not Started (owner ruling: fully adopt Defence Before Fix and link it, #65 and #67; assess the daemon as a DBF toolchain against TOOLING-SPEC and let DBF tools enumerate its defences)
+
 - [00483: threat model conformance audit](00483-threat-model-conformance-audit/PLAN.md) - In Progress (owner ruling: the daemon is guardrails, not armour; check every guard, open ledger entry and uncovered corpus row against the careless-not-hostile threat model, dismiss the out-of-scope ones on record, fix and narrow the rest)
 
 - [00482: handler crash containment](00482-handler-crash-containment/PLAN.md) - Not Started (owner ruling after #68: handlers must never crash; a crash gets a crash record and a bug-report request, non-safety handlers are disabled after N crashes, safety guards stay fail-closed pending the owner's decision)

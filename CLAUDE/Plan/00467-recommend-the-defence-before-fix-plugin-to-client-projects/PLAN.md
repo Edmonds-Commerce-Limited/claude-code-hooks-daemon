@@ -108,7 +108,9 @@ closest prior art, and the natural home for the recommendation.
   4. The auto-trigger has not been observed live, and a false trigger costs
      roughly 6–20k tokens plus two agents.
      Go once 1–3 are fixed upstream and here, with the measured costs stated.
-     **Waiting on the owner** for the go/no-go, and on one logged-in session
+     **Relationship decided by the owner**: "this repo should fully adopt DBF and should link
+     to it" (Plan 00484). Recommending the plugin still waits on reasons 1–3 above.
+     **Waiting** on those, and on one logged-in session
      (a human-started one, where the plugin is loaded) running the Task 1.2
      trigger probe in `untracked/scratch/p467/trigger-probe/`.
 
