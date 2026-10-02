@@ -108,20 +108,18 @@ def _child_environment(env: Mapping[str, str] | None) -> dict[str, str]:
     prompts); they never replace the environment, because dropping PATH would
     mean git is not found at all.
 
-    Two things are applied AFTER the merge, so a caller that passes a whole
-    ``os.environ`` copy cannot bring either back: the variables in
-    :data:`RELOCATING_VARIABLES` are removed, because ``-C <cwd>`` is the
-    repository the caller asked about and an inherited ``GIT_DIR`` would silently
-    answer for another; and the optional index lock is declined, an inherited
-    ``GIT_OPTIONAL_LOCKS`` would otherwise undo the one property this runner
-    exists to guarantee. A caller that needs a different repository passes
-    ``--git-dir`` as an argument.
+    The variables in :data:`RELOCATING_VARIABLES` are removed from the INHERITED
+    environment only, because ``-C <cwd>`` is the repository the caller asked
+    about and an inherited ``GIT_DIR`` would silently answer for another. A caller
+    that needs another index (a simulated ``git add`` against a scratch
+    ``GIT_INDEX_FILE``) passes it explicitly in ``env`` and it is honoured.
+
+    The optional index lock is declined LAST, so a caller passing a whole
+    ``os.environ`` copy cannot reinstate an inherited ``GIT_OPTIONAL_LOCKS`` and
+    undo the one property this runner exists to guarantee.
     """
-    merged = {**os.environ, **(env or {})}
-    for name in RELOCATING_VARIABLES:
-        merged.pop(name, None)
-    merged[_OPTIONAL_LOCKS_VAR] = _OPTIONAL_LOCKS_DECLINED
-    return merged
+    inherited = {k: v for k, v in os.environ.items() if k not in RELOCATING_VARIABLES}
+    return {**inherited, **(env or {}), _OPTIONAL_LOCKS_VAR: _OPTIONAL_LOCKS_DECLINED}
 
 
 def run_git(

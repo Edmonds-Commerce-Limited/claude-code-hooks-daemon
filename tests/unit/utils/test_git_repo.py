@@ -392,7 +392,7 @@ class TestCallerSuppliedEnvironment:
     def test_a_caller_cannot_re_enable_the_optional_lock(self, tmp_git_repo: Path) -> None:
         """Not theoretical: a caller passing a whole `os.environ` copy would
         otherwise reinstate an inherited value and silently undo the runner's
-        one guarantee. `git_sync._noninteractive_env` does exactly that copy.
+        one guarantee.
         """
         with mock.patch("subprocess.run") as runner:
             runner.return_value = subprocess.CompletedProcess([], 0, "", "")
@@ -428,12 +428,29 @@ class TestARelocatedRepositoryIsNotInherited:
         assert name not in passed
         assert passed["GIT_OPTIONAL_LOCKS"] == "0"
 
-    def test_run_git_drops_a_relocating_variable_a_caller_passes(self, tmp_git_repo: Path) -> None:
+    def test_run_git_honours_a_relocating_variable_a_caller_passes(
+        self, tmp_git_repo: Path
+    ) -> None:
+        """A caller that needs another index passes it explicitly (a simulated add)."""
         with mock.patch("subprocess.run") as runner:
             runner.return_value = subprocess.CompletedProcess([], 0, "", "")
             run_git(tmp_git_repo, "status", env={"GIT_INDEX_FILE": "/elsewhere/index"})
 
-        assert "GIT_INDEX_FILE" not in runner.call_args.kwargs["env"]
+        assert runner.call_args.kwargs["env"]["GIT_INDEX_FILE"] == "/elsewhere/index"
+
+    def test_a_caller_scratch_index_leaves_the_real_index_untouched(
+        self, tmp_git_repo: Path, tmp_path_factory: pytest.TempPathFactory
+    ) -> None:
+        scratch = tmp_path_factory.mktemp("scratch_index") / "index"
+        (tmp_git_repo / "new.txt").write_text("x\n")
+        real_index = tmp_git_repo / ".git" / "index"
+        before = real_index.read_bytes()
+
+        result = run_git(tmp_git_repo, "add", "new.txt", env={"GIT_INDEX_FILE": str(scratch)})
+
+        assert result.returncode == 0
+        assert scratch.exists()
+        assert real_index.read_bytes() == before
 
     def test_read_blobs_drops_an_inherited_relocating_variable(self, tmp_git_repo: Path) -> None:
         with (

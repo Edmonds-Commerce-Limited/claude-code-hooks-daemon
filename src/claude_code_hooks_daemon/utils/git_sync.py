@@ -117,10 +117,15 @@ def _run_git(
 
 
 def _noninteractive_env() -> dict[str, str]:
-    """Return an environment that prevents git from prompting for credentials."""
-    env = os.environ.copy()
-    env[_GIT_TERMINAL_PROMPT_ENV] = _GIT_TERMINAL_PROMPT_DISABLED
-    env.setdefault(_GIT_SSH_COMMAND_ENV, _GIT_SSH_BATCH_MODE)
+    """Return the variables that prevent git from prompting for credentials.
+
+    Only the ADDITIONS: ``run_git`` layers them over the inherited environment,
+    and a whole ``os.environ`` copy here would carry an inherited ``GIT_DIR``
+    past its stripping of relocating variables.
+    """
+    env = {_GIT_TERMINAL_PROMPT_ENV: _GIT_TERMINAL_PROMPT_DISABLED}
+    if _GIT_SSH_COMMAND_ENV not in os.environ:
+        env[_GIT_SSH_COMMAND_ENV] = _GIT_SSH_BATCH_MODE
     return env
 
 
