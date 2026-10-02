@@ -489,3 +489,52 @@ class TestATtlBreachDescribesTheWholeJobNotTheWaiter:
             )
             == []
         )
+
+
+class TestEachProcessGroupIsListedOnce:
+    """Two processes in one group that both carry the tracked command (a wrapper
+    shell and the job it runs, as `ps` shows them) used to be listed as two
+    breaches, so the same `kill -- -<pgid>` appeared twice and a doubled group
+    read as two jobs."""
+
+    _SHARED_GROUP_PS = (
+        "PID PPID PGID ELAPSED %CPU COMMAND\n"
+        "700 65 700 900 0.0 /bin/bash -c eval 'llm_qa.py all'\n"
+        "701 700 700 900 55.0 python llm_qa.py all\n"
+        "800 65 800 900 0.0 /bin/bash -c eval 'llm_qa.py all'\n"
+    )
+
+    @staticmethod
+    def _report(ps: str):
+        return build_report(
+            parse_ps_output(ps),
+            max_wall_seconds=600,
+            max_cpu_percent=400,
+            min_cpu_runtime_seconds=60,
+            tracked_commands=("llm_qa.py all",),
+        )
+
+    def test_a_shared_group_yields_one_breach(self) -> None:
+        pgids = [b["pgid"] for b in self._report(self._SHARED_GROUP_PS)["breaches"]]
+        assert sorted(pgids) == [700, 800]
+
+    def test_the_text_names_each_group_once(self) -> None:
+        text = self._report(self._SHARED_GROUP_PS)["text"]
+        assert text.count("PGID 700") == 1
+        assert "2 runaway process group(s)" in text
+
+    def test_the_merged_entry_keeps_the_busiest_tree_and_every_reason(self) -> None:
+        breaches = self._report(self._SHARED_GROUP_PS)["breaches"]
+        shared = next(b for b in breaches if b["pgid"] == 700)
+        assert shared["tree_pcpu"] == pytest.approx(55.0)
+        assert shared["kill_command"] == "kill -- -700"
+
+    def test_find_breaches_returns_one_per_group(self) -> None:
+        breaches = find_breaches(
+            parse_ps_output(self._SHARED_GROUP_PS),
+            max_wall_seconds=600,
+            max_cpu_percent=400,
+            min_cpu_runtime_seconds=60,
+            tracked_commands=("llm_qa.py all",),
+        )
+        assert [b.record.pgid for b in breaches] == [700, 800]

@@ -19,9 +19,13 @@ Default-ON, rate-limited per session (Plan 00142 user decision) so routine
 backgrounded commands do not spam context.
 """
 
+import logging
 import re
 from typing import Any, Final
 
+from pydantic import ValidationError
+
+from claude_code_hooks_daemon.config.models import Config
 from claude_code_hooks_daemon.constants import (
     HandlerID,
     HandlerTag,
@@ -31,6 +35,7 @@ from claude_code_hooks_daemon.constants import (
 )
 from claude_code_hooks_daemon.core import BlockingResult, Decision
 from claude_code_hooks_daemon.core.handler_bases import PostToolUseHandlerBase
+from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.core.utils import get_bash_command
 from claude_code_hooks_daemon.handlers.utils.session_advice_counter import (
     SessionAdviceCounter,
@@ -39,8 +44,12 @@ from claude_code_hooks_daemon.utils.cli_command import (
     daemon_cli_command,
     daemon_cli_command_for_docs,
 )
-from claude_code_hooks_daemon.utils.cron_tick import TickKind, tick_sentinel
+from claude_code_hooks_daemon.utils.config_cache import load_config_cached
+from claude_code_hooks_daemon.utils.cron_hosts import effective_hostname
+from claude_code_hooks_daemon.utils.cron_tick import TickKind, classify_tick, tick_sentinel
 from claude_code_hooks_daemon.utils.heredoc_operators import scan_heredocs
+
+logger = logging.getLogger(__name__)
 
 # State file under the daemon untracked dir (never /tmp — B108).
 _STATE_FILENAME: Final[str] = "background-processes.jsonl"
@@ -183,16 +192,61 @@ def watchdog_cron_prompt() -> str:
     ``[awaiting-human]`` marker. The leading sentinel is what lets the
     blockage suppressor tell this tick from the human. Computed on demand for
     the same reason as ``_advisory``: it names the deployed wrapper.
+
+    The wrapper is named project-root-relative (Plan 00470 Task 2.4): this text
+    is also declared under ``persistent_crons`` in a tracked file, and a live
+    cron is matched to its declaration on the normalised prompt, so an absolute
+    path would make a worktree's cron fail to satisfy the declaration. A cron
+    fires from the project root, where the relative path runs.
     """
     return (
         f"{tick_sentinel(TickKind.WATCHDOG)}\n"
         "**BACKGROUND WATCHDOG TICK (automated — NOT a heartbeat, NOT human input).**\n"
-        f"Run `{daemon_cli_command('harvest-background')}` and act on any runaway it\n"
+        f"Run `{daemon_cli_command_for_docs('harvest-background')}` and act on any runaway it\n"
         "surfaces: reap the WHOLE process group (`kill -- -<pgid>`), never just the pid.\n"
         "A long task that is deliberately wanted (a build, a server, a QA run) is not a\n"
         'runaway: note KEEP_RUNNING_BECAUSE="<reason>" and leave it alone. If nothing is\n'
         "surfaced, this tick is a no-op — do not interrupt or duplicate work in flight.\n"
-        "Delete this cron (CronDelete) once no backgrounded work remains in the session."
+        "Do NOT delete this cron merely because a tick finds nothing: it is non-durable\n"
+        "and ends with the session, and the next backgrounded job needs it."
+    )
+
+
+def declares_watchdog_cron(config: Config, hostname: str | None = None) -> bool:
+    """Whether ``config`` declares the watchdog cron as an active persistent job.
+
+    A declared watchdog is re-established at session start and required by
+    ``cron_stop_enforcer`` for the whole session, so this advisory has nothing
+    left to ask for (Plan 00470 Task 2.4). Recognised by its ``[tick:watchdog]``
+    sentinel, the same way the failsafe is.
+
+    Args:
+        config: The project's daemon config.
+        hostname: The session's effective hostname; None resolves it from this
+            process's environment.
+    """
+    for job in config.persistent_crons.active_jobs(hostname):
+        tick = classify_tick(job.prompt)
+        if tick is not None and tick.kind is TickKind.WATCHDOG:
+            return True
+    return False
+
+
+def _declared_advisory() -> str:
+    """The advisory for a project that declares the watchdog under ``persistent_crons``."""
+    return (
+        "You launched a background / long-lived process. The daemon will NOT "
+        "auto-kill it — detection is surfaced, you decide.\n\n"
+        "This project DECLARES the background watchdog cron under persistent_crons, "
+        "so it is re-established at session start and covers EVERY tracked "
+        "background process. Create nothing and never add a second; do not "
+        "CronDelete it, even once the background work ends — an idle tick is a "
+        "no-op.\n"
+        f"  • Check now once: run `{daemon_cli_command('harvest-background')}` yourself.\n\n"
+        "If a runaway is surfaced, reap the WHOLE process group (not just the pid):\n"
+        "      kill -- -<pgid>\n"
+        "To deliberately keep a wanted long task (build/server), note "
+        'KEEP_RUNNING_BECAUSE="reason" and move on.'
     )
 
 
@@ -224,7 +278,8 @@ def _advisory() -> str:
         "      kill -- -<pgid>\n"
         "To deliberately keep a wanted long task (build/server), note "
         'KEEP_RUNNING_BECAUSE="reason" and move on.\n'
-        "Delete the watchdog cron (CronDelete) once no backgrounded work remains."
+        "Keep the watchdog cron for the whole session: an idle tick is a no-op, and "
+        "it ends with the session."
     )
 
 
@@ -277,6 +332,20 @@ class BackgroundProcessTrackerHandler(PostToolUseHandlerBase):
         except RuntimeError:
             return None
 
+    def _load_config(self) -> Config:
+        """The project's daemon config; defaults when it cannot be read.
+
+        Defaults mean "no declaration", which keeps the advisory asking for the
+        watchdog -- the safe direction, since the ask is idempotent (CronList
+        first).
+        """
+        try:
+            config_path = ProjectContext.project_root() / ".claude" / "hooks-daemon.yaml"
+            return load_config_cached(config_path)
+        except (ValidationError, OSError, ValueError, RuntimeError) as exc:
+            logger.debug("background_process_tracker: config unavailable: %s", exc)
+            return Config()
+
     def _should_advise(self, session_id: str) -> bool:
         """Record a detection for ``session_id`` and return whether to advise now."""
         return self._advice_counter.should_advise(session_id)
@@ -300,7 +369,9 @@ class BackgroundProcessTrackerHandler(PostToolUseHandlerBase):
 
         if not self._should_advise(session_id):
             return BlockingResult(decision=Decision.ALLOW)
-        return BlockingResult(decision=Decision.ALLOW, context=[_advisory()])
+        declared = declares_watchdog_cron(self._load_config(), effective_hostname(hook_input))
+        advisory = _declared_advisory() if declared else _advisory()
+        return BlockingResult(decision=Decision.ALLOW, context=[advisory])
 
     def get_claude_md(self) -> str | None:
         return (
@@ -313,7 +384,9 @@ class BackgroundProcessTrackerHandler(PostToolUseHandlerBase):
             "When you background a long-lived process:\n\n"
             "- Ensure **EXACTLY ONE** non-durable recurring **watchdog cron** exists — "
             "one covers the whole session, since its prompt harvests ALL tracked "
-            "background processes. `CronList` FIRST: reuse the one already running "
+            "background processes. When the project DECLARES it under `persistent_crons` "
+            "it is re-established at session start: create nothing. Otherwise `CronList` "
+            "FIRST: reuse the one already running "
             "(`CronDelete` any extras), and only if none is listed create it "
             "(CronCreate, durable:false) with the prompt the advisory supplies, "
             "pasted verbatim: it runs "
@@ -325,7 +398,8 @@ class BackgroundProcessTrackerHandler(PostToolUseHandlerBase):
             "- Check on demand: run `harvest-background` (exit 1 == runaways surfaced).\n"
             "- Reap a runaway by its **process group**: `kill -- -<pgid>` (not just the pid).\n"
             '- Keep a wanted long task: note `KEEP_RUNNING_BECAUSE="reason"`.\n'
-            "- Delete the watchdog cron (CronDelete) when no backgrounded work remains.\n\n"
+            "- Keep the watchdog cron for the whole session: an idle tick is a no-op, and "
+            "it ends with the session.\n\n"
             "Advisory is rate-limited per session (default-on). Disable with "
             "`handlers.post_tool_use.background_process_tracker.enabled: false`."
         )

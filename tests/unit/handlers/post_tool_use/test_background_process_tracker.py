@@ -11,6 +11,11 @@ import json
 
 import pytest
 
+from claude_code_hooks_daemon.config.models import (
+    Config,
+    PersistentCronConfig,
+    PersistentCronsConfig,
+)
 from claude_code_hooks_daemon.constants.priority import Priority
 from claude_code_hooks_daemon.core import Decision
 from claude_code_hooks_daemon.handlers.post_tool_use.background_process_tracker import (
@@ -347,3 +352,87 @@ class TestMetadata:
 
     def test_get_acceptance_tests(self, handler):
         assert len(handler.get_acceptance_tests()) > 0
+
+
+class TestADeclaredWatchdogIsNeverAskedForTwice:
+    """Plan 00470 Task 2.4: a project that declares the watchdog under
+    `persistent_crons` has it re-established at session start and required by
+    the Stop enforcer, so the per-process advisory must not ask for a second."""
+
+    @staticmethod
+    def _config(*, declared: bool, section_enabled: bool = True) -> Config:
+        jobs = (
+            [
+                PersistentCronConfig(
+                    id="watchdog", schedule="53 * * * *", prompt=watchdog_cron_prompt()
+                )
+            ]
+            if declared
+            else []
+        )
+        return Config(persistent_crons=PersistentCronsConfig(enabled=section_enabled, jobs=jobs))
+
+    def _advisory(self, monkeypatch: pytest.MonkeyPatch, config: Config) -> str:
+        handler = BackgroundProcessTrackerHandler()
+        monkeypatch.setattr(handler, "_load_config", lambda: config)
+        result = handler.handle(_bash("sleep 600 &", run_in_background=True))
+        assert result.context
+        return "\n".join(result.context)
+
+    def test_a_declared_watchdog_means_no_cron_create_instruction(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        text = self._advisory(monkeypatch, self._config(declared=True))
+        assert "CronCreate" not in text
+        assert watchdog_cron_prompt() not in text
+
+    def test_a_declared_watchdog_is_named_as_the_one_that_covers_the_session(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        text = self._advisory(monkeypatch, self._config(declared=True))
+        assert "persistent_crons" in text
+        assert "harvest-background" in text
+
+    def test_an_undeclared_watchdog_still_gets_the_create_instruction(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        text = self._advisory(monkeypatch, self._config(declared=False))
+        assert "CronCreate" in text
+        assert watchdog_cron_prompt() in text
+
+    def test_a_declaration_under_a_disabled_section_does_not_count(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        text = self._advisory(monkeypatch, self._config(declared=True, section_enabled=False))
+        assert "CronCreate" in text
+
+    def test_no_declaration_at_all_keeps_the_create_instruction(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        text = self._advisory(monkeypatch, Config())
+        assert "CronCreate" in text
+
+
+class TestAnIdleWatchdogTickIsANoOp:
+    """The declared job is required for the whole session, so no surface may tell
+    the agent to delete it once background work ends."""
+
+    def test_no_surface_says_to_delete_the_watchdog(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        handler = BackgroundProcessTrackerHandler()
+        monkeypatch.setattr(handler, "_load_config", lambda: Config())
+        advisory = "\n".join(handler.handle(_bash("sleep 600 &", run_in_background=True)).context)
+        for text in (advisory, handler.get_claude_md() or "", watchdog_cron_prompt()):
+            assert "once no backgrounded work remains" not in text
+            assert "Delete this cron" not in text
+            assert "Delete the watchdog cron" not in text
+
+    def test_the_prompt_says_idle_is_a_no_op_and_not_to_delete(self) -> None:
+        prompt = watchdog_cron_prompt()
+        assert "no-op" in prompt
+        assert "Do NOT delete this cron" in prompt
+
+    def test_the_prompt_is_path_agnostic(self) -> None:
+        """A declared prompt is committed, so it cannot carry the generating
+        machine's absolute path (it is compared normalised against live crons)."""
+        assert "/workspace" not in watchdog_cron_prompt()
+        assert "harvest-background" in watchdog_cron_prompt()
