@@ -1402,6 +1402,22 @@ The uncertain-move union judges the hook directory and the LAST recorded move (`
 every candidate directory (`sub`). Remedy: judge every directory any `cd` in the chain could
 land in.
 
+### N317 — plan QA says "stages no journal entry" when the same command writes and stages it
+
+**Source**: coordinator, commit ea1a8e7ff.
+
+**Evidence**: one Bash command ran `mkplan.bash --journal 483 …`, then `git add <plan folder>`,
+then `git commit`. The commit holds `JOURNAL/00483-Journal-26-10-02.md`
+(`git show --stat HEAD`), yet the PreToolUse advisory reported `journal-entry-with-progress`: no
+journal entry staged. The gate judges before the command runs, so the day-file the command is
+about to create does not exist yet. That is the N246 class: the staging simulation copies the
+working tree as it is now, and a file a prior statement creates is invisible to it. Advisory
+only. Following the advisory's own instruction in one command produces the false report.
+
+**Status**: ⬜ Open. Remedy options: treat a `mkplan.bash --journal <plan>` statement before the
+commit as staging that plan's day-file, or word the advisory as "cannot see a journal entry yet"
+when the command itself runs `--journal`.
+
 ### N316 — docs QA `pointer-resolves` reads a link shape inside an inline code span
 
 **Source**: coordinator, landing Plan 00483's INVENTORY.md.
