@@ -1142,7 +1142,7 @@ written to remove comes back at ERROR level, in the channel the docs point at
 **Trigger**: the status line re-renders faster than the slow chip in N295 replies, so Claude Code
 drops superseded renders.
 
-**Status**: ✅ Fixed (branch `worktree-n294-wait-closed`, not yet merged).
+**Status**: ✅ Fixed (merge fc6782bf1).
 
 Both client handlers now close through one helper, `HooksDaemon._close_writer`. It closes the
 writer, then awaits `wait_closed()`. A `BrokenPipeError` or `ConnectionResetError` from that wait
@@ -1161,5 +1161,24 @@ and `json.loads` every file in `untracked/cache-sidecar/<session>/`. This sessio
 3,369 files (14 MB), one per sub-agent that ever stopped. The cost grows with every agent the
 session runs and is paid on every render, so a long-lived orchestrator session pays the most. The
 slowness also makes Claude Code abandon renders (N294).
+
+**Status**: ⬜ Open.
+
+### N296 — the error-hiding audit sees log-and-continue only when the log call is written inline
+
+**Source**: the coordinator, reviewing the N294 fix.
+
+**Evidence**: `ErrorHidingVisitor._is_log_and_continue` in `scripts/qa/audit_error_hiding.py`
+flags an `except` body only when it is a single `<x>.error|warning|info|debug(...)` call. The
+same handling written as one call to any other function passes, for example `_record(exc)`,
+where the helper does the logging. The N294 agent wrote it that way because the inline form
+was flagged. In N294 the handling is correct: a peer that has hung up leaves nothing to do, and
+the pre-existing `_log_lost_peer` branch uses the same shape. But the detector cannot tell a
+deliberate, justified case from one that hides a real failure behind a helper.
+
+**Open question**: what should a justified log-and-continue look like? Two options: one
+recognised, reviewable marker, or a named helper that the audit allowlists. A helper that
+merely moves the call out of sight is neither. Changing the audit, or adding allowlist
+entries, needs the owner.
 
 **Status**: ⬜ Open.
