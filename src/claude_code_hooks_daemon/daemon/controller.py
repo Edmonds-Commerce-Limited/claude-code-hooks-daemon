@@ -29,6 +29,7 @@ from claude_code_hooks_daemon.core.pseudo_event import (
     merge_pseudo_results,
 )
 from claude_code_hooks_daemon.core.router import EventRouter
+from claude_code_hooks_daemon.core.usage_snapshot import resolve_usage_state_file
 from claude_code_hooks_daemon.daemon.source_fingerprint import (
     HEALTH_KEY_CONFIG_FINGERPRINT,
     HEALTH_KEY_SOURCE_FINGERPRINT,
@@ -1029,7 +1030,12 @@ class DaemonController:
             # Update data layer SessionState on StatusLine events
             if event.event_type == EventType.STATUS_LINE:
                 logger.debug("StatusLine raw hook_input: %s", hook_input_dict)
-                get_data_layer().session.update_from_status_event(hook_input_dict)
+                status_layer = get_data_layer()
+                status_layer.session.update_from_status_event(hook_input_dict)
+                # Plan 00479: account-wide usage, kept for every later handler.
+                status_layer.usage.update_from_status_event(
+                    hook_input_dict, now=time.time(), state_file=resolve_usage_state_file()
+                )
 
             # strict_mode is a narrow config-slice threaded through
             # initialise() (Plan 00466 N24), the same DI idiom as

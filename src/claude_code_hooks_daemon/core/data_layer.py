@@ -4,6 +4,7 @@ Single entry point for handlers to access session-wide data:
 - SessionState: Model info and context usage from StatusLine events
 - TranscriptReader: Conversation history from JSONL transcripts
 - HandlerHistory: Previous handler decisions within the session
+- UsageTracker: Latest subscription usage windows (Plan 00479); read via latest_usage()
 
 Usage:
     from claude_code_hooks_daemon.core.data_layer import get_data_layer
@@ -15,11 +16,17 @@ Usage:
 """
 
 import logging
+import time
 
 from claude_code_hooks_daemon.core.disclosure_tracker import DisclosureTracker
 from claude_code_hooks_daemon.core.handler_history import HandlerHistory
 from claude_code_hooks_daemon.core.session_state import SessionState
 from claude_code_hooks_daemon.core.transcript_reader import TranscriptReader
+from claude_code_hooks_daemon.core.usage_snapshot import (
+    UsageSnapshot,
+    UsageTracker,
+    resolve_usage_state_file,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -31,11 +38,12 @@ class DaemonDataLayer:
     Each component is created once and reused for the session lifetime.
     """
 
-    __slots__ = ("_disclosure", "_history", "_session", "_transcript")
+    __slots__ = ("_disclosure", "_history", "_session", "_transcript", "_usage")
 
     def __init__(self) -> None:
         """Initialise with fresh component instances."""
         self._session = SessionState()
+        self._usage = UsageTracker()
         self._transcript = TranscriptReader()
         self._history = HandlerHistory()
         self._disclosure = DisclosureTracker()
@@ -48,6 +56,16 @@ class DaemonDataLayer:
             SessionState instance updated by StatusLine events
         """
         return self._session
+
+    @property
+    def usage(self) -> UsageTracker:
+        """Access the subscription-usage tracker (Plan 00479).
+
+        Returns:
+            UsageTracker updated by StatusLine events; prefer latest_usage()
+            for reading.
+        """
+        return self._usage
 
     @property
     def transcript(self) -> TranscriptReader:
@@ -83,6 +101,7 @@ class DaemonDataLayer:
         WARNING: Only use in testing or session cleanup.
         """
         self._session.reset()
+        self._usage.reset()
         self._history.reset()
         self._transcript = TranscriptReader()
         self._disclosure = DisclosureTracker()
@@ -113,3 +132,22 @@ def reset_data_layer() -> None:
     """
     global _data_layer
     _data_layer = None
+
+
+def latest_usage(*, now: float | None = None) -> UsageSnapshot | None:
+    """The latest live subscription usage windows, or None when there are none.
+
+    Usage is account-wide, so this is not keyed by session. A window past its
+    ``resets_at`` is absent. Falls back to the host-wide snapshot file when no
+    Status event has been seen by this daemon yet.
+
+    Args:
+        now: Epoch seconds to judge expiry against; defaults to the wall clock.
+
+    Returns:
+        A frozen UsageSnapshot, or None when no window is live.
+    """
+    return get_data_layer().usage.latest(
+        now=time.time() if now is None else now,
+        state_file=resolve_usage_state_file(),
+    )

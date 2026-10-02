@@ -174,7 +174,7 @@
 | 10 | subagent_report_persistence | NON-TERMINAL | Persist every stopping sub-agent's final reply to a gitignored file |
 | 15 | subagent_report_size_blocker | TERMINAL | Block a SubagentStop whose ``last_assistant_message`` is oversized |
 
-### Status (16 handlers)
+### Status (17 handlers)
 
 | Priority | Handler | Behaviour | Description |
 |----------|---------|----------|-------------|
@@ -187,6 +187,7 @@
 | 13 | supervisor_indicator | NON-TERMINAL | Show whether the ccy PTY supervisor is overseeing the session |
 | 14 | current_time | NON-TERMINAL | Display current local time in status line (24-hour format, no seconds) |
 | 15 | prompt_cache_indicator | NON-TERMINAL | Render prompt-cache hit ratio, TTL, and a warning when the cache is cold |
+| 16 | usage_indicator | NON-TERMINAL | Show 5-hour and weekly subscription usage, colour-coded, with reset countdown |
 | 20 | git_branch | NON-TERMINAL | Show current git branch with magicmonty-style status icons if in a git repo |
 | 25 | git_repo_name | NON-TERMINAL | Show git repository name at start of status line |
 | 25 | working_directory | NON-TERMINAL | Display working directory when it differs from project root |
