@@ -16,6 +16,7 @@ from collections.abc import Iterable
 from typing import Final
 
 from claude_code_hooks_daemon.utils.command_evasion import normalise_line_continuations
+from claude_code_hooks_daemon.utils.heredoc_operators import scan_heredocs
 from claude_code_hooks_daemon.utils.shell_segmentation import (
     split_unquoted,
     strip_quoted_heredoc_bodies,
@@ -69,14 +70,41 @@ _OPTION_LETTER: Final = "o"
 _END_OF_OPTIONS: Final = "--"
 
 
-def split_statements(command: str) -> list[str]:
+def _drop_heredoc_bodies(command: str) -> str:
+    """``command`` with each heredoc's body and terminator line removed.
+
+    The opener line stays, so the heredoc counts once; the line break that
+    ended it is kept and leaves an empty statement that the caller drops.
+    """
+    pieces: list[str] = []
+    copied_to = 0
+    for heredoc in sorted(scan_heredocs(command).heredocs, key=lambda item: item.body_start):
+        pieces.append(command[copied_to : heredoc.body_start])
+        copied_to = heredoc.closer_end
+    pieces.append(command[copied_to:])
+    return "".join(pieces)
+
+
+def split_statements(command: str, *, heredoc_bodies_executable: bool = False) -> list[str]:
     """Split ``command`` into stripped, non-empty sequenced statements.
 
-    Line continuations are joined first and quoted-delimiter heredoc bodies
-    removed, so a ``;`` inside a literal heredoc never manufactures a
-    statement boundary.
+    Line continuations are joined first. By default every heredoc (the opener
+    line, its body and its terminator) is ONE statement: the body is input to
+    the receiving command, never a sequence of outer-shell statements, so a
+    ``;`` or newline inside it never manufactures a boundary, whether the
+    delimiter is quoted or not. An interpreter's body (``bash <<'EOF'``) is
+    likewise one outer statement, because the outer shell's ``set -e`` does
+    not govern the inner shell's lines.
+
+    Pass ``heredoc_bodies_executable=True`` to keep the old reading for a
+    caller that must SEE a command inside a body that is executed: sink-fed
+    quoted bodies are still blanked, but any other body stays as its lines.
     """
-    normalised = strip_quoted_heredoc_bodies(normalise_line_continuations(command))
+    normalised = normalise_line_continuations(command)
+    if heredoc_bodies_executable:
+        normalised = strip_quoted_heredoc_bodies(normalised)
+    else:
+        normalised = _drop_heredoc_bodies(normalised)
     return [
         statement.strip()
         for statement in split_unquoted(normalised, STATEMENT_SEPARATORS)

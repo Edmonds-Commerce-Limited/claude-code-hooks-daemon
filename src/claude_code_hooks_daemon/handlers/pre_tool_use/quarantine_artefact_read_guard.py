@@ -508,6 +508,6 @@ def _segments(command: str) -> list[str]:
     guard agrees on what one "command" is.
     """
     segments: list[str] = []
-    for statement in split_statements(command):
+    for statement in split_statements(command, heredoc_bodies_executable=True):
         segments.extend(split_unquoted(statement, SPAN_SEPARATORS))
     return [segment.strip() for segment in segments if segment.strip()]

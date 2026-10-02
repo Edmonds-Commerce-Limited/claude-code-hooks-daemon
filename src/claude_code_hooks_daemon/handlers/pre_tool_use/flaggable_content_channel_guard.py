@@ -403,7 +403,7 @@ def _segments(command: str) -> list[tuple[str, bool]]:
     stdin instead of the working directory.
     """
     segments: list[tuple[str, bool]] = []
-    for statement in split_statements(command):
+    for statement in split_statements(command, heredoc_bodies_executable=True):
         for start, end in split_unquoted_spans(statement, SPAN_SEPARATORS):
             segment = statement[start:end].strip()
             if not segment:
