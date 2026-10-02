@@ -536,7 +536,7 @@ handlers:
           this conftest.py (--noconftest and equivalents bypass it, and are the handler's
           job to catch when SEEN), and it covers pytest only, not llm_qa.py's other steps.
 
-    bash_safe_mode:  # Opt-in safe-prelude forcer (Plan 00270); dogfooded here in block mode
+    bash_safe_mode:  # Safe-prelude forcer (Plan 00270); on and blocking by default
       enabled: true
       priority: 36
       options:
