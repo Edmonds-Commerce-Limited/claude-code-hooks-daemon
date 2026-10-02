@@ -215,6 +215,40 @@ class TestHandle:
         assert result.context == []
 
 
+class TestAMoveIntoAnotherRepository:
+    """Ledger 00474 N305: where the commit runs is the cwd after any move."""
+
+    @pytest.fixture
+    def root(self, tmp_path: Path) -> Path:
+        root = tmp_path / "repo"
+        _init_repo(root)
+        (root / "CLAUDE").mkdir()
+        (root / "CLAUDE" / "Foo.md").write_text("See [missing](Nope.md).\n")
+        _git(root, "add", "-A")
+        return root
+
+    @pytest.mark.parametrize(
+        "form", ["cd {other} && git commit -m x", "git -C {other} commit -m x"]
+    )
+    def test_a_commit_moved_into_another_repo_stands_down(
+        self, root: Path, tmp_path: Path, form: str
+    ) -> None:
+        other = tmp_path / "other"
+        _init_repo(other)
+
+        with _patched_root(root):
+            result = _handler().handle(_bash_input(form.format(other=other), cwd=str(root)))
+
+        assert result.decision == Decision.ALLOW
+        assert result.context == []
+
+    def test_a_move_within_this_repo_is_still_judged(self, root: Path) -> None:
+        with _patched_root(root):
+            result = _handler().handle(_bash_input("cd CLAUDE && git commit -m x", cwd=str(root)))
+
+        assert any("pointer-resolves" in item for item in result.context)
+
+
 class TestPathspecsAreReadWhereTheCommandRuns:
     """Ledger 00474 N299: ``cd CLAUDE && git commit Foo.md`` records ``CLAUDE/Foo.md``."""
 

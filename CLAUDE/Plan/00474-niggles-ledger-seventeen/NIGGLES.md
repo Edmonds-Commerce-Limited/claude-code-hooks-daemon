@@ -1385,7 +1385,9 @@ gates), handling `./`, `..` and `:/` / `:(top)`.
 `remote_docs_commit_gate`.
 
 **Status**: ✅ Fixed on worktree-n304-n305-gate-dirs. The N300 post-move check moved to the shared
-`git_facts.commit_runs_in_foreign_repo`, which `staged_lint_gate` and `remote_docs_commit_gate` both call.
+`git_facts.commit_runs_in_foreign_repo`, which `staged_lint_gate`, `remote_docs_commit_gate`,
+`plan_qa_commit_gate` and `docs_qa_commit_gate` all call (all four gates share the check; the
+local hook-cwd-only copies are deleted).
 
 ### N306 — the commit-move reader records both directories of `cd a || cd b`
 
