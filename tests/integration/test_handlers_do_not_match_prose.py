@@ -102,8 +102,9 @@ _NON_EXECUTING_TEXT: dict[str, str] = {
 # exemption without a reason is indistinguishable from an unnoticed bug.
 _DELIBERATE_TEXT_MATCHERS: dict[str, str] = {
     "SedBlockerHandler": (
-        "Same rationale as destructive_git — a sed invocation quoted inside a "
-        "shell script is still a sed invocation once that script runs."
+        "Deny-by-default on the word `sed`: a sed invocation quoted inside a "
+        "shell script is still a sed invocation once that script runs, and the "
+        "handler does not read command position."
     ),
     "SecurityAntipatternHandler": (
         "Plan 00225 Decision 2: a dangerous construct inside a quoted string can "
@@ -317,17 +318,18 @@ class TestTheGuardHasTeeth:
     """Prove the guard would actually fail on an over-matching handler."""
 
     def test_a_deliberate_text_matcher_really_does_fire_on_text(self) -> None:
-        """`destructive_git` must still match a dangerous command inside a string.
+        """`sed_blocker` must still match a sed invocation quoted in an `echo`.
 
-        This is the inverse of the guard and it is NOT incidental: Plan 00228
-        must not quietly weaken the safety layer, and the acceptance suite
-        depends on exactly this behaviour.
+        This is the inverse of the guard: a handler in
+        `_DELIBERATE_TEXT_MATCHERS` really does fire on text, so an exemption
+        is a statement about a handler that behaves that way and the guard
+        would catch the same behaviour in any handler left off the list.
         """
         handlers = _discover_handler_classes()
-        destructive_git = handlers["DestructiveGitHandler"]()
-        embedded = _bash_input("bash -c 'git reset --hard HEAD~1'")
+        sed_blocker = handlers["SedBlockerHandler"]()
+        embedded = _bash_input("echo \"sed -i 's/foo/bar/' notes.txt\"")
 
-        assert _denies(destructive_git, embedded) is True
+        assert _denies(sed_blocker, embedded) is True
 
 
 @pytest.mark.parametrize("description", sorted(_NON_EXECUTING_TEXT))

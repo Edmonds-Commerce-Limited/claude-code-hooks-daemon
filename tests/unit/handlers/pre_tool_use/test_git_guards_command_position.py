@@ -15,6 +15,7 @@ from typing import Any
 
 import pytest
 
+from claude_code_hooks_daemon.core import Decision
 from claude_code_hooks_daemon.core.data_layer import reset_data_layer
 from claude_code_hooks_daemon.handlers.pre_tool_use.destructive_git import DestructiveGitHandler
 from claude_code_hooks_daemon.handlers.pre_tool_use.git_stash import GitStashHandler
@@ -131,3 +132,102 @@ class TestRecoveryInOneSegmentDoesNotExemptAnother:
     def test_the_escape_hatch_still_passes_a_stash(self) -> None:
         command = 'MUST_STASH_BECAUSE="commit cannot work"; git stash'
         assert GitStashHandler().matches(_input(command)) is False
+
+
+#: Both guards, each with the command it exists to deny.
+_GUARDS: list[tuple[Any, str]] = [
+    (GitStashHandler, "git stash"),
+    (DestructiveGitHandler, "git reset --hard"),
+]
+
+#: Receivers that run, or may run, what is piped into them. A data head's text
+#: is a command whenever the pipeline ends in anything but a known inert sink.
+_RECEIVERS = [
+    "bash",
+    "fish",
+    "busybox sh",
+    "su -c bash",
+    "(bash)",
+    "at now",
+    "parallel",
+    "ssh host",
+    "docker exec -i c sh",
+    "kubectl exec -i p -- sh",
+    "tee >(bash)",
+    "tee log | bash",
+    "python3",
+]
+
+#: Receivers that only read what is piped into them.
+_INERT_RECEIVERS = ["wc -l", "tee log", "sort", "cat | wc -l"]
+
+
+class TestEveryUnlistedReceiverFailsClosed:
+    """M1: the receiver check is an allowlist of inert sinks, never a denylist."""
+
+    @pytest.mark.parametrize("receiver", _RECEIVERS)
+    @pytest.mark.parametrize(("handler", "destructive"), _GUARDS)
+    def test_a_literal_piped_into_a_runner_is_denied(
+        self, handler: Any, destructive: str, receiver: str
+    ) -> None:
+        command = f"echo '{destructive}' | {receiver}"
+        assert handler().matches(_input(command)) is True
+
+    @pytest.mark.parametrize("receiver", _INERT_RECEIVERS)
+    @pytest.mark.parametrize(("handler", "destructive"), _GUARDS)
+    def test_a_literal_piped_into_an_inert_sink_is_allowed(
+        self, handler: Any, destructive: str, receiver: str
+    ) -> None:
+        command = f"echo '{destructive}' | {receiver}"
+        assert handler().matches(_input(command)) is False
+
+
+class TestRedirectOperatorsAreNotSeparators:
+    """M2: the `&` of `2>&1`, `>&`, `<&`, `&>` and `&>>` ends no command."""
+
+    @pytest.mark.parametrize("redirect", ["2>&1", "1>&2", ">&2", "&>/dev/null", "&>>log"])
+    @pytest.mark.parametrize(("handler", "destructive"), _GUARDS)
+    def test_a_redirected_literal_piped_into_a_shell_is_denied(
+        self, handler: Any, destructive: str, redirect: str
+    ) -> None:
+        command = f"echo '{destructive}' {redirect} | bash"
+        assert handler().matches(_input(command)) is True
+
+    @pytest.mark.parametrize(("handler", "destructive"), _GUARDS)
+    def test_a_redirect_alone_is_not_a_command(self, handler: Any, destructive: str) -> None:
+        assert handler().matches(_input("git status 2>&1")) is False
+
+    @pytest.mark.parametrize(("handler", "destructive"), _GUARDS)
+    def test_a_lone_ampersand_still_separates(self, handler: Any, destructive: str) -> None:
+        assert handler().matches(_input(f"echo hi & {destructive}")) is True
+
+
+class TestRgPreRunsItsValue:
+    """S1: `rg --pre CMD` runs CMD for each file."""
+
+    @pytest.mark.parametrize("flag", ["--pre 'git stash'", "--pre='git stash'"])
+    def test_rg_with_pre_is_not_a_data_head(self, flag: str) -> None:
+        assert GitStashHandler().matches(_input(f"rg {flag} x")) is True
+
+    def test_rg_without_pre_is_still_data(self) -> None:
+        assert GitStashHandler().matches(_input("rg 'git stash' docs")) is False
+
+
+class TestAcceptanceCommandsNeverExecute:
+    """M3: an acceptance command runs through the real Bash tool, so it must parse only."""
+
+    @pytest.mark.parametrize("handler_class", [GitStashHandler, DestructiveGitHandler])
+    def test_every_wrapped_acceptance_command_is_parse_only_and_still_denied(
+        self, handler_class: Any
+    ) -> None:
+        wrapped = [
+            test
+            for test in handler_class().get_acceptance_tests()
+            if test.command.startswith("bash")
+        ]
+
+        assert wrapped
+        for test in wrapped:
+            assert test.command.startswith("bash -n -c "), test.title
+            if test.expected_decision == Decision.DENY:
+                assert handler_class().matches(_input(test.command)) is True, test.title

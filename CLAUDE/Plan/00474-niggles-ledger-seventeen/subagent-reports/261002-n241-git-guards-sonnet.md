@@ -42,6 +42,38 @@ New tests `test_git_guards_command_position.py`: 19 failed on main (all N241 pro
 rows, the N200 rows, the `x\'` row, the nested `bash -c` message). After the fix all
 pass; the new util tests (`test_command_position.py`) pass.
 
+## Round 2 (Opus review fixes M1-M4, S1-S3)
+
+Red first: the new rows in `test_git_guards_command_position.py` gave
+`34 failed, 70 passed` on the round 1 code (22 receiver rows, 10 redirect rows,
+2 `rg --pre` rows). After the fix the file and `test_command_position.py` gave
+`124 passed`; the wider targeted set (touched tests, destructive_git, git_stash,
+prose, `test_shell_segmentation*`) gave `1459 passed`.
+
+- **M1**: `_EXECUTORS` is deleted. A data head is blanked only when every
+  downstream `|` stage satisfies `is_inert_pipeline_stage`, a new public
+  wrapper in `shell_segmentation.py` over the existing `_stage_is_inert_sink`
+  (no second list; fds assumed able to reach a process). Fish, busybox, su,
+  `(bash)`, at, parallel, ssh, docker/kubectl exec and `tee >(bash)` deny on
+  both handlers; `| wc -l`, `| tee log`, `| sort` stay allowed.
+- **M2**: `command_position._segment_spans` masks the `&` of `>&`, `<&`, `&>`,
+  `&>>` (same length) before splitting. `2>&1 | bash` denies; `git status 2>&1`
+  allowed; `a & b` still splits.
+- **M3**: every `bash -c` acceptance command in both handlers is now
+  `bash -n -c '...'`. Verified in-process that both guards still deny every
+  DENY row in that form (all 12 destructive_git rows, both git_stash rows; the
+  tag `-f` ALLOW row does not match). The `[[ ... $(git push --force) ... ]]`
+  row also executed its substitution for real, so it is now
+  `bash -n -c 'git commit -m "$(git push --force)"'` (still denied). False
+  safety notes ("guard denies it before it executes", "only clears stash")
+  replaced. GENERATING.md Layer 1, its example and the `command` field are
+  updated. A new unit test asserts every wrapped acceptance command is `bash -n -c`.
+- **M4**: the teeth test now uses `SedBlockerHandler` on an `echo "sed -i ..."`
+  input; the SedBlocker exemption reason is restated in its own words.
+- **S1**: an `rg` segment with `--pre`/`--pre=` (or an unreadable word) is not
+  a data head. **S2**: `_head` strips a trailing `)`. **S3**: HANDLER_REFERENCE.md
+  wording updated.
+
 ## Not changed
 
 No handling for variables, `eval` of a variable or ANSI-C quoting (out of scope per

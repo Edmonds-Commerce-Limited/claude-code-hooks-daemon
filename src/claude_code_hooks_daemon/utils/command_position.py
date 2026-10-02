@@ -16,7 +16,7 @@ matcher, so this module removes only text that cannot run:
   (:func:`strip_inert_spans`);
 * the arguments of a command that only prints or searches them
   (:data:`DATA_HEADS`), unless an expansion in them could run something or the
-  output feeds an interpreter further down the pipeline;
+  pipeline carries the output to any stage that is not a known inert sink;
 * a `gh pr|issue|release` title, body or notes value;
 * and, inside a literal `bash -c '<body>'`, the same rules applied to the body.
 
@@ -26,7 +26,10 @@ read is judged as before: a false positive, never a bypass.
 
 from __future__ import annotations
 
+import re
+
 from claude_code_hooks_daemon.utils.shell_segmentation import (
+    is_inert_pipeline_stage,
     resolve_shell_word,
     segment_command_chain,
     shell_word_spans,
@@ -46,8 +49,12 @@ DATA_HEADS: frozenset[str] = frozenset({"echo", "printf", "grep", "egrep", "fgre
 #: Shells that run the string given to `-c`.
 _SHELLS: frozenset[str] = frozenset({"bash", "sh", "zsh", "dash", "ksh"})
 
-#: Commands that run text handed to them, so data piped into one is a command.
-_EXECUTORS: frozenset[str] = _SHELLS | frozenset({"xargs", "eval", "source", ".", "env", "sudo"})
+#: `rg --pre CMD` runs CMD on every file, so an `rg` carrying it is not data.
+_RG_PREPROCESSOR = "--pre"
+
+#: Redirect operators whose `&` is part of the operator, not a separator:
+#: `2>&1`, `>&2`, `<&3`, `&>f`, `&>>f`.
+_REDIRECT_AMPERSAND = re.compile(r"[<>]&|(?<!&)&>>?")
 
 #: What replaces the arguments of a data segment.
 _DATA_PLACEHOLDER = "_"
@@ -65,17 +72,28 @@ _MAX_NESTING = 3
 _PIPE = "|"
 
 
+def _segment_spans(text: str) -> list[tuple[int, int]]:
+    """Offsets of the command segments of ``text``.
+
+    A redirect's `&` is masked for the split only (same length, so the offsets
+    still index ``text``): `echo x 2>&1 | bash` is ONE pipeline, not two
+    commands joined by a background operator.
+    """
+    masked = _REDIRECT_AMPERSAND.sub(lambda match: match.group().replace("&", "_"), text)
+    return split_unquoted_spans(masked, SEGMENT_SEPARATORS)
+
+
 def command_position_view(command: str, _depth: int = 0) -> str:
     """``command`` with every span that cannot run replaced by a placeholder."""
     stripped = strip_inert_spans(command)
-    spans = split_unquoted_spans(stripped, SEGMENT_SEPARATORS)
+    spans = _segment_spans(stripped)
     segments = [stripped[start:end] for start, end in spans]
     pieces: list[str] = []
     previous_end = 0
     for index, (start, end) in enumerate(spans):
         pieces.append(stripped[previous_end:start])
-        feeds_executor = _pipeline_feeds_executor(stripped, spans, segments, index)
-        pieces.append(_narrow(segments[index], feeds_executor, _depth))
+        may_run_output = _pipeline_may_run_output(stripped, spans, segments, index)
+        pieces.append(_narrow(segments[index], may_run_output, _depth))
         previous_end = end
     pieces.append(stripped[previous_end:])
     return "".join(pieces)
@@ -89,37 +107,42 @@ def command_position_segments(command: str) -> list[str]:
     commands.
     """
     view = command_position_view(command)
-    return [view[start:end] for start, end in split_unquoted_spans(view, SEGMENT_SEPARATORS)]
+    return [view[start:end] for start, end in _segment_spans(view)]
 
 
 def _head(segment: str) -> str | None:
     chain = segment_command_chain(segment)
-    return None if chain is None else chain[-1].rsplit("/", 1)[-1]
+    return None if chain is None else chain[-1].rstrip(")").rsplit("/", 1)[-1]
 
 
-def _pipeline_feeds_executor(
+def _pipeline_may_run_output(
     text: str, spans: list[tuple[int, int]], segments: list[str], index: int
 ) -> bool:
-    """Whether a later stage of the pipeline starting at ``index`` runs its input.
+    """Whether the pipeline starting at ``index`` hands its output to anything
+    but a known inert sink.
 
-    An unreadable stage counts as an executor: withholding the exemption is the
-    cheap error.
+    An ALLOWLIST (:func:`is_inert_pipeline_stage`): a stage that is unreadable,
+    unlisted, or reads its input through a process substitution may run what it
+    is given, so a missing entry costs a false positive, never a guard.
     """
     for follower in range(index + 1, len(spans)):
         if text[spans[follower - 1][1] : spans[follower][0]] != _PIPE:
             return False
-        head = _head(segments[follower])
-        if head is None or head in _EXECUTORS:
+        if not is_inert_pipeline_stage(segments[follower]):
             return True
     return False
 
 
-def _narrow(segment: str, feeds_executor: bool, depth: int) -> str:
+def _narrow(segment: str, may_run_output: bool, depth: int) -> str:
     head = _head(segment)
     if head is None:
         return segment
     if head in DATA_HEADS:
-        if feeds_executor or any(marker in segment for marker in _EXPANSION_MARKERS):
+        if (
+            may_run_output
+            or any(marker in segment for marker in _EXPANSION_MARKERS)
+            or (head == "rg" and _has_rg_preprocessor(segment))
+        ):
             return segment
         return f" {head} {_DATA_PLACEHOLDER} "
     if head in _SHELLS and depth < _MAX_NESTING:
@@ -127,6 +150,15 @@ def _narrow(segment: str, feeds_executor: bool, depth: int) -> str:
     if head == "gh":
         return _narrow_gh_prose(segment)
     return segment
+
+
+def _has_rg_preprocessor(segment: str) -> bool:
+    """Whether an `rg` segment passes `--pre`, or a word that cannot be read."""
+    for start, end in shell_word_spans(segment):
+        value = resolve_shell_word(segment[start:end])
+        if value is None or value == _RG_PREPROCESSOR or value.startswith(_RG_PREPROCESSOR + "="):
+            return True
+    return False
 
 
 def _narrow_shell_body(segment: str, depth: int) -> str:

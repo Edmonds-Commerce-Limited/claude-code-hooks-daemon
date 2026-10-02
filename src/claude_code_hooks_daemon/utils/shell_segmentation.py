@@ -2011,6 +2011,17 @@ def _downstream_is_all_data_sinks(
     )
 
 
+def is_inert_pipeline_stage(stage: str) -> bool:
+    """Is ``stage`` a recognised data sink that only READS its stdin?
+
+    The same allowlist the quoted-heredoc exemption applies to a body's
+    receivers. An unrecognised or unnameable stage is not inert. A process
+    substitution anywhere in the stage is refused, and fds are assumed able to
+    reach a process, so the answer errs towards "may run".
+    """
+    return _stage_is_inert_sink(stage, fds_may_run=True)
+
+
 def quoted_heredoc_receivers(command: str) -> list[str]:
     """Return the command words each quoted-delimiter heredoc is fed to.
 

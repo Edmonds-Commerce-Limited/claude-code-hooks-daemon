@@ -802,7 +802,7 @@ handlers:
 
 **Not matched:** `$(...)`. It substitutes identically, but unlike a backtick it has a legitimate deliberate use in a message (`git commit -m "Release $(cat VERSION)"`). Backticks in a message are essentially always markdown that was meant to be single-quoted.
 
-**Scope:** this handler covers the *corruption* half only. A **dangerous** command inside the backticks is already denied by the full-command-string matching in [`destructive_git`](#destructive_git) and its siblings, which run at a lower priority and give the more useful reason.
+**Scope:** this handler covers the *corruption* half only. A **dangerous** command inside the backticks is already denied by command-position matching, substitutions included, in [`destructive_git`](#destructive_git) and its siblings, which run at a lower priority and give the more useful reason.
 
 **Example trigger:**
 
