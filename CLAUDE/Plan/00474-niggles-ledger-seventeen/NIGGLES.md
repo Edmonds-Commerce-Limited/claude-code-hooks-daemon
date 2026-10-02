@@ -1008,7 +1008,13 @@ CONTENT, and names no path. Its `.*` runs make it match any glob, so the guard r
 possibly naming a protected file.
 
 **Related**: N269 fixed the single-quoted form, where a grep regex was expanded as a
-filename glob. This is the double-quoted form, inside a `$( )` assignment.
+filename glob.
+
+**Reproduced with `bin/hooks-daemon probe`**: the trigger is the `$( )` assignment, not the
+quoting. `x=$(grep '<regex>' f)` and `x=$(grep "<regex>" f)` are both denied
+(R-SECRET-BASH-MENTION), while the bare `grep "<regex>" f` is allowed. N269's pure text
+consumer exemption is therefore not applied to a command inside a command substitution.
+The payloads are `untracked/scratch/n291_probe_{plain,assign,single_assign}.json`.
 
 **Worked around**: by splitting the filter into two literal prefix greps (`"^tests/"`, then
 `"/test_"`).
