@@ -275,6 +275,33 @@ class TestTheBashSurface:
         assignment earlier in the call pins inside the root."""
         assert handler.matches(_bash(command)) is False
 
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "D=untracked/scratch/q && python p.py > $D/a.json",
+            'D=untracked/scratch/q && python p.py > "$D/a.json"',
+            "set -euo pipefail; D=untracked/scratch/q && python p.py > $D/a.json",
+        ],
+    )
+    def test_an_in_root_assignment_joined_by_and_pins_the_target(
+        self, handler: ProjectContainmentHandler, command: str
+    ) -> None:
+        """N320: `&&` after a literal assignment is as good as `;`."""
+        assert handler.matches(_bash(command)) is False
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "D=/tmp && echo x > $D/a.json",
+            'D=/tmp && echo x > "$D/a.json"',
+            "D=untracked/scratch/q || echo x > $D/a.json",
+        ],
+    )
+    def test_the_and_join_still_denies_an_out_of_root_or_uncertain_target(
+        self, handler: ProjectContainmentHandler, command: str
+    ) -> None:
+        assert handler.matches(_bash(command)) is True
+
     def test_a_target_nothing_pins_matches(self, handler: ProjectContainmentHandler) -> None:
         """Plan 00466 N101 round 12, N215: where ``$OUT`` writes is unknown
         until the command runs, so it is judged fail closed."""
