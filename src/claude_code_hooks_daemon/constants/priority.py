@@ -298,6 +298,13 @@ class Priority:
     # is not load-bearing)
     PLAN_FACT_CHECK_FEED = 37
 
+    # Stop failure pair (Plan 00470 Task 3.1). The recorder is alone on
+    # StopFailure, so 50 is free. The resolver runs after usage_pause_gate (9),
+    # whose terminal deny ends the chain: a held prompt continues nothing and
+    # so never reaches it.
+    STOP_FAILURE_RECORDER = 50
+    STOP_FAILURE_RESOLVER = 38
+
     # QA enforcement handlers (Priority: 30-35)
     QA_SUPPRESSION = 30
     PLAN_NUMBER_HELPER = 30

@@ -24,6 +24,11 @@ from claude_code_hooks_daemon.handlers.status_line.usage_indicator import (
     UsageIndicatorHandler,
     format_countdown,
 )
+from claude_code_hooks_daemon.utils.stop_failure_records import (
+    StopFailureRecord,
+    record_failure,
+    resolve_session,
+)
 from claude_code_hooks_daemon.utils.usage_pause import (
     WINDOW_FIVE_HOUR,
     UsagePause,
@@ -302,6 +307,96 @@ class TestPausedSession:
         explanation = UsageIndicatorHandler().explain_segment()
         assert "⏸" in explanation.glyphs
         assert "paused" in explanation.how_to_read.lower()
+
+
+class TestStopFailureChip:
+    """Plan 00470 Task 3.1: an unresolved StopFailure shows ``⚠ <what> HH:MM``."""
+
+    _SESSION = "sess-1"
+    _FAILED_AT = NOW - 600
+
+    @pytest.fixture
+    def records(self, tmp_path: Path) -> Path:
+        return tmp_path / "stop-failures.json"
+
+    def _fail(self, records: Path, *, error: str = "rate_limit", session: str = "sess-1") -> None:
+        record_failure(
+            records, StopFailureRecord(session_id=session, error=error, recorded_at=self._FAILED_AT)
+        )
+
+    def _render_for(self, records: Path | None, session: str | None = "sess-1") -> str | None:
+        payload = {} if session is None else {"session_id": session}
+        with patch(
+            "claude_code_hooks_daemon.handlers.status_line.usage_indicator.default_records_path",
+            return_value=records,
+        ):
+            result = UsageIndicatorHandler().handle(payload)
+        return result.context[0] if result.context else None
+
+    @pytest.mark.parametrize(
+        ("error", "label"),
+        [
+            ("rate_limit", "usage limit"),
+            ("authentication_failed", "auth failed"),
+            ("cloud_credential_error", "cloud credential"),
+        ],
+    )
+    def test_each_error_has_its_label_and_the_failure_time(
+        self, records: Path, error: str, label: str
+    ) -> None:
+        self._fail(records, error=error)
+        text = self._render_for(records)
+        assert text is not None
+        assert f"⚠ {label} {datetime.fromtimestamp(self._FAILED_AT):%H:%M}" in _plain(text)
+
+    def test_the_chip_is_red_and_reset(self, records: Path) -> None:
+        self._fail(records)
+        text = self._render_for(records)
+        assert text is not None
+        assert _CRITICAL in text
+        assert text.endswith("\033[0m")
+
+    def test_shown_even_with_no_usage_data(self, records: Path) -> None:
+        self._fail(records)
+        text = self._render_for(records)
+        assert text is not None
+        assert "📈" not in text
+
+    def test_keeps_the_usage_chips_when_there_is_a_snapshot(self, records: Path) -> None:
+        self._fail(records)
+        _feed("main_thread_fractional.json")
+        text = self._render_for(records)
+        assert text is not None
+        plain = _plain(text)
+        assert "⚠ usage limit" in plain
+        assert "5h 67%" in plain
+
+    def test_a_resolved_failure_is_not_shown(self, records: Path) -> None:
+        self._fail(records)
+        resolve_session(records, "sess-1", now=NOW)
+        assert self._render_for(records) is None
+
+    def test_another_sessions_failure_is_not_shown(self, records: Path) -> None:
+        self._fail(records, session="someone-else")
+        assert self._render_for(records) is None
+
+    def test_a_payload_without_a_session_shows_nothing(self, records: Path) -> None:
+        self._fail(records)
+        assert self._render_for(records, session=None) is None
+
+    def test_no_project_context_shows_nothing(self) -> None:
+        assert self._render_for(None) is None
+
+    def test_a_record_with_an_unknown_error_is_shown_by_its_name(self, records: Path) -> None:
+        self._fail(records, error="something_new")
+        text = self._render_for(records)
+        assert text is not None
+        assert "⚠ something_new" in _plain(text)
+
+    def test_explanation_mentions_the_failure_glyph(self) -> None:
+        explanation = UsageIndicatorHandler().explain_segment()
+        assert "⚠" in explanation.glyphs
+        assert "resolved" in explanation.how_to_read.lower()
 
 
 class TestCeilingSegment:
