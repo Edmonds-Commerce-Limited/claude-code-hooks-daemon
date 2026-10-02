@@ -138,7 +138,9 @@ the daemon directs the model and then verifies what it did.
   Nothing re-arms the crons while paused. `persistent_cron_assertor` and
   the failsafe-cron advisors stay quiet, including on the compact's SessionStart, and the
   pause is recorded in a durable marker the daemon reads.
-- [ ] ⬜ **Task 4.5**: The supervisor compact, in this repository. The supervisor is
+- [x] ✅ **Task 4.5** (merged; record `src/claude_code_hooks_daemon/utils/usage_pause.py`,
+  `<session>.usage-paused` in the context sidecar; supervisor `_usage_pause_outcome`; live
+  worker reloaded cleanly): The supervisor compact, in this repository. The supervisor is
   `.claude/ccy/claude-supervise.py`, tested under `tests/unit/supervise/`, with its
   injection rules in `CLAUDE/development/CcySupervisor.md`. It already decides every
   `/compact`, `continue` and `/goal` injection.
