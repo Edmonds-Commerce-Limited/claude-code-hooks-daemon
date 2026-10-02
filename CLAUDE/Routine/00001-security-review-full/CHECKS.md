@@ -11,6 +11,11 @@ full routine's folder, because the full routine is the one that owns the
 complete set; the delta routine owns a subset and names it by reference rather
 than restating it.
 
+**Scope of every check**: the daemon guards a careless agent, not a hostile one
+([ARCHITECTURE.md § Threat model](../../ARCHITECTURE.md#threat-model-the-agent-is-careless-not-hostile)).
+A bypass that needs a deliberately obfuscated or evasive shape is out of scope.
+Record it as dismissed under that ruling; do not raise it as a finding.
+
 ## The distinction that matters
 
 A check is **delta-able** when the interval's diff contains everything needed
