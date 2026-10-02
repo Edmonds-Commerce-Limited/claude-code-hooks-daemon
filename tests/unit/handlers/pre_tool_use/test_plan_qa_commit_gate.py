@@ -440,6 +440,59 @@ class TestACommandThatStagesOrCommitsMoreThanOnce:
         assert self._decision(flipped, command) == Decision.ALLOW
 
 
+class TestAJournalEntryTheCommandWritesItself:
+    """Ledger 00474 N317: `mkplan.bash --journal` before the commit is the journal entry."""
+
+    _ADVISORY = "journal-entry-with-progress"
+    _MKPLAN = f'{_PLAN_DIR_REL}/mkplan.bash --journal 1 finding body.md --title "x"'
+
+    @pytest.fixture
+    def ticked(self, repo: Path) -> Path:
+        """A task ticked in the working tree, with no journal entry anywhere."""
+        plan = repo / _PLAN_DIR_REL / "00001-first" / "PLAN.md"
+        plan.write_text(plan.read_text().replace("[ ] ⬜", "[x] ✅"))
+        return repo
+
+    def _advised(self, root: Path, command: str) -> bool:
+        with _patched_root(root):
+            result = _handler("warn").handle(_bash_input(command, cwd=str(root)))
+        return any(self._ADVISORY in line for line in result.context)
+
+    def test_the_bare_commit_is_advised(self, ticked: Path) -> None:
+        command = f'git add {_PLAN_DIR_REL}/00001-first && git commit -m "Plan 00001: x"'
+
+        assert self._advised(ticked, command)
+
+    def test_mkplan_then_add_then_commit_is_not_advised(self, ticked: Path) -> None:
+        command = (
+            f"{self._MKPLAN} && git add {_PLAN_DIR_REL}/00001-first "
+            '&& git commit -m "Plan 00001: x"'
+        )
+
+        assert not self._advised(ticked, command)
+
+    def test_mkplan_for_a_different_plan_is_still_advised(self, ticked: Path) -> None:
+        command = (
+            f"{self._MKPLAN.replace('--journal 1', '--journal 2')} "
+            f'&& git add {_PLAN_DIR_REL}/00001-first && git commit -m "Plan 00001: x"'
+        )
+
+        assert self._advised(ticked, command)
+
+    def test_mkplan_without_a_covering_add_is_still_advised(self, ticked: Path) -> None:
+        command = (
+            f"{self._MKPLAN} && git add {_PLAN_DIR_REL}/00001-first/PLAN.md "
+            '&& git commit -m "Plan 00001: x"'
+        )
+
+        assert self._advised(ticked, command)
+
+    def test_mkplan_after_the_commit_is_still_advised(self, ticked: Path) -> None:
+        command = f'git add {_PLAN_DIR_REL}/00001-first && git commit -m "Plan 00001: x" && {self._MKPLAN}'
+
+        assert self._advised(ticked, command)
+
+
 class TestGuardRails:
     def test_noop_when_cwd_in_foreign_repo(self, repo: Path, tmp_path: Path) -> None:
         other = tmp_path / "other-repo"

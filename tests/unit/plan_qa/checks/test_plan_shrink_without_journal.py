@@ -94,6 +94,11 @@ class TestDetection:
         _shrink(repo, with_journal_entry=True)
         assert CHECK.run(_context(repo)) == []
 
+    def test_a_journal_entry_the_command_writes_itself_is_silent(self, repo: Path) -> None:
+        _shrink(repo, with_journal_entry=False)
+        context = _context(repo, command_journal_plans=frozenset({200}))
+        assert CHECK.run(context) == []
+
     def test_message_names_relocation_not_restoration(self, repo: Path) -> None:
         _shrink(repo, with_journal_entry=False)
         finding = CHECK.run(_context(repo))[0]

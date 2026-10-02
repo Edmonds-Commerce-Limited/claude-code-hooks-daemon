@@ -334,6 +334,7 @@ def staged_context(
     scopes: Sequence[PathspecScope] = (),
     union: bool = False,
     index_env: Mapping[str, str] | None = None,
+    command_journal_plans: frozenset[int] = frozenset(),
 ) -> CheckContext:
     """Build the Stage 2 (COMMIT) context: staged git facts + tree views.
 
@@ -347,6 +348,8 @@ def staged_context(
             is not certain is.
         index_env: Environment that reads the index a same-command ``git add``
             leaves (ledger 00474 N246).
+        command_journal_plans: Plans whose journal entry the same command
+            writes and stages before it commits (ledger 00474 N317).
         pathspecs: The commit's explicit pathspec arguments, when the
             inspected ``git commit`` invocation names paths directly
             (``git commit <pathspec>...``). Threaded straight into
@@ -393,6 +396,7 @@ def staged_context(
             readme=readme,
             gitfacts=gitfacts,
             commit_message=commit_message,
+            command_journal_plans=command_journal_plans,
             layout=layout,
             exclude_paths=excluded,
         ),

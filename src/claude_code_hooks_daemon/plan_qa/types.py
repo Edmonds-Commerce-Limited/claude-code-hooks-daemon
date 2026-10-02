@@ -164,6 +164,9 @@ class CheckContext:
     # Stage 2 (COMMIT).
     gitfacts: "GitFacts | None" = None
     commit_message: str | None = None
+    # Plans whose journal entry the commit's own command writes and stages
+    # before committing (ledger 00474 N317); the gate runs before it exists.
+    command_journal_plans: frozenset[int] = frozenset()
 
     # Stage 2 + 3 (COMMIT / SWEEP): parsed tree state.
     tree: "PlanTree | None" = None

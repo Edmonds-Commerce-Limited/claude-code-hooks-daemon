@@ -710,6 +710,8 @@ class StagingRun:
     arguments: tuple[str, ...]
     moves: tuple[str | None, ...]
     optional_moves: int
+    #: The :attr:`SimpleCommand.position` of the ``git add``.
+    position: int = 0
 
 
 def _commit_moves(run: GitInvocation) -> tuple[str | None, ...]:
@@ -789,7 +791,10 @@ def _staging_runs(invocations: Sequence[GitInvocation]) -> tuple[StagingRun, ...
     )
     return tuple(
         StagingRun(
-            arguments=run.arguments, moves=_commit_moves(run), optional_moves=_optional_moves(run)
+            arguments=run.arguments,
+            moves=_commit_moves(run),
+            optional_moves=_optional_moves(run),
+            position=run.position,
         )
         for run in invocations[:last_commit]
         if run.subcommand == _ADD_TOKEN
@@ -874,6 +879,42 @@ class GitInvocation:
     assignments: tuple[str, ...]
     directory: tuple[str | None, ...]
     moves_certain: bool = True
+    #: Index of the simple command in :func:`simple_commands` order.
+    position: int = 0
+
+
+@dataclass(frozen=True)
+class SimpleCommand:
+    """One simple command of a command line, in the order the shell reads them.
+
+    ``operator`` is the list operator just before it (``&&``, ``;``, ``||``...;
+    empty for the first). ``directory`` and ``moves_certain`` are as on
+    :class:`GitInvocation`. ``git`` is the git run it is, if any.
+    """
+
+    words: tuple[str, ...]
+    directory: tuple[str | None, ...]
+    moves_certain: bool
+    operator: str
+    position: int
+    git: GitInvocation | None = None
+
+
+def simple_commands(command: str) -> list[SimpleCommand]:
+    """The simple commands of ``command`` (a string run by ``eval``/``sh -c`` is inlined)."""
+    return [
+        SimpleCommand(
+            words=tuple(segment),
+            directory=directory,
+            moves_certain=not uncertain,
+            operator=operator,
+            position=position,
+            git=_git_run(segment, directory, uncertain, position),
+        )
+        for position, (segment, directory, uncertain, operator) in enumerate(
+            _walk(command_words(command), ())
+        )
+    ]
 
 
 def git_invocations(command: str) -> list[GitInvocation]:
@@ -886,7 +927,7 @@ def git_invocations(command: str) -> list[GitInvocation]:
     read as a command of its own, in the directory in effect. A subshell's
     ``cd`` ends with the subshell.
     """
-    return _invocations(command_words(command), ())
+    return [step.git for step in simple_commands(command) if step.git is not None]
 
 
 #: Operators a ``cd`` may not follow: the left side of ``||`` decides whether it
@@ -896,10 +937,13 @@ _AND_OPERATOR: Final[str] = "&&"
 _SUBSHELL_CHARS: Final[str] = "()"
 
 
-def _invocations(
+_Step = tuple[list[str], tuple[str | None, ...], bool, str]
+
+
+def _walk(
     words: list[str], directory: tuple[str | None, ...], uncertain: bool = False
-) -> list[GitInvocation]:
-    """The git runs of ``words``.
+) -> list[_Step]:
+    """The simple commands of ``words``: ``(segment, directory, uncertain, operator)``.
 
     A move is CERTAIN only when git cannot run unless it took effect: every
     operator from the ``cd`` on is ``&&``, and the operator before it neither
@@ -907,7 +951,7 @@ def _invocations(
     (``cd nosuch; git commit``, ``cd sub & git commit``, ``a || cd sub``) may
     leave git running where it started, which ``uncertain`` records.
     """
-    found: list[GitInvocation] = []
+    found: list[_Step] = []
     stack: list[tuple[tuple[str | None, ...], bool]] = []
     previous_operator = ""
     index = 0
@@ -934,37 +978,35 @@ def _invocations(
         if moved != directory and previous_operator in _MOVE_DOUBTING_PRECEDING_OPERATORS:
             uncertain = True
         directory = moved
-        found.extend(_segment_invocations(segment, directory, uncertain))
+        body = _evaluated_string(segment)
+        if body is not None:
+            found.extend(_walk(command_words(body), directory, uncertain))
+        else:
+            found.append((segment, directory, uncertain, previous_operator))
         index = end
     return found
 
 
-def _segment_invocations(
-    segment: list[str], directory: tuple[str | None, ...], uncertain: bool
-) -> list[GitInvocation]:
-    """The git runs of one simple command, including an ``eval``/``sh -c`` string."""
-    body = _evaluated_string(segment)
-    if body is not None:
-        return _invocations(command_words(body), directory, uncertain)
-    for position, word in enumerate(segment):
+def _git_run(
+    segment: list[str], directory: tuple[str | None, ...], uncertain: bool, position: int
+) -> GitInvocation | None:
+    """The git run ``segment`` is, or None."""
+    for offset, word in enumerate(segment):
         if command_word(word) != _GIT_TOKEN:
             continue
-        subcommand = git_subcommand_index(segment, position)
+        subcommand = git_subcommand_index(segment, offset)
         if subcommand is None:
-            return []
-        return [
-            GitInvocation(
-                subcommand=segment[subcommand],
-                global_options=tuple(segment[position + 1 : subcommand]),
-                arguments=tuple(segment[subcommand + 1 :]),
-                assignments=tuple(
-                    word for word in segment[:position] if _ASSIGNMENT_WORD.match(word)
-                ),
-                directory=directory,
-                moves_certain=not uncertain,
-            )
-        ]
-    return []
+            return None
+        return GitInvocation(
+            subcommand=segment[subcommand],
+            global_options=tuple(segment[offset + 1 : subcommand]),
+            arguments=tuple(segment[subcommand + 1 :]),
+            assignments=tuple(word for word in segment[:offset] if _ASSIGNMENT_WORD.match(word)),
+            directory=directory,
+            moves_certain=not uncertain,
+            position=position,
+        )
+    return None
 
 
 def _evaluated_string(segment: list[str]) -> str | None:
