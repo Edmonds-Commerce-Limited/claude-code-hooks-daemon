@@ -44,7 +44,7 @@ from claude_code_hooks_daemon.utils.path_containment import path_is_relative_to,
 from claude_code_hooks_daemon.utils.path_predicates import read_text_or_reason
 
 if TYPE_CHECKING:
-    import subprocess
+    import subprocess  # nosec B404 — only the CompletedProcess type is named
 
 # name-status codes that carry TWO paths (old NUL new) in -z output.
 _TWO_PATH_STATUS_PREFIXES: Final[tuple[str, ...]] = ("R", "C")
