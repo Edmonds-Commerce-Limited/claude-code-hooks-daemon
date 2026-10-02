@@ -152,7 +152,45 @@ spawn worktree, recorded at dispatch) rather than the shared cwd. Meanwhile, the
 coordinator reviews worktrees with `git -C`/absolute paths and never `cd`s into
 them.
 
-**Status**: ⬜ Open.
+**Phase A findings** (branch `worktree-n282-teammate-own-checkout`,
+[report](subagent-reports/261002-n282-own-checkout-sonnet.md)):
+
+- Observed: the PreToolUse contract and the daemon's scope module list the
+  fields a teammate's payload can carry: `session_id`, `transcript_path`, `cwd`,
+  `agent_id` (30 characters for a teammate), `agent_type`. None names an assigned
+  worktree. `transcript_path` is the session's, `cwd` is the session's working
+  directory (Plan 00464 saw `/workspace` on a teammate working in a worktree).
+- Observed: the harness reports that an Agent thread's own Bash `cd` is reset
+  between calls, so a teammate has no persistent cwd of its own to report.
+- Observed: `WorktreeCreate` carries `name`, `cwd`, `session_id` and no
+  `agent_id`, and a coordinator-assigned worktree (the usual case here) fires no
+  such event at all, so no spawn-time record exists to read.
+- NOT observed: a live teammate PreToolUse payload. Payload capture is off and
+  the shared daemon was not to be reconfigured or restarted; the worktree's own
+  `hooks-daemon logs` reported no daemon. So whether `cwd` is always the shared
+  one, or follows a coordinator `cd`, stays inferred, as the question above says.
+- Decision: no reliable per-agent own-worktree signal exists in the payload, so
+  the guard is unchanged. Three characterisation tests pin the current behaviour.
+
+**Design options** (none implemented):
+
+1. Trust on first use: bind `agent_id` to the checkout of its first write (or
+   Bash `cd`) and judge later writes against it. Needs state, and a teammate
+   whose first write is the wrong one is bound wrong. Reverses N264's "never
+   reads agent_id" for a stated reason: cwd cannot carry the role-local fact.
+2. Dispatch declaration: the coordinator names each teammate's worktree in the
+   Agent prompt and `dispatch_declaration` (already on PreToolUse Agent) records
+   `agent_id -> worktree` when it can be matched. The harness gives no agent_id
+   at dispatch, so the match is by prompt text; fragile.
+3. Fail-open on disagreement: allow when cwd is a linked worktree that the
+   teammate has not been shown to own. Removes the false deny, widens the gap.
+4. Process: the coordinator never `cd`s into worktrees (`git -C`/absolute paths);
+   removes the false deny at no code cost, leaves the fail-open direction.
+5. Ask upstream for a per-agent `cwd` or worktree field in the payload; the only
+   option that fixes both directions reliably.
+
+**Status**: 🟡 Findings recorded; no reliable signal, so no behaviour change. Needs a
+live payload capture to settle the inferred half, then option 5 or 1.
 
 ### N281 — a hostile-input sweep measured host speed: the 100,000-character scan timed out (and denied) on slow runners
 

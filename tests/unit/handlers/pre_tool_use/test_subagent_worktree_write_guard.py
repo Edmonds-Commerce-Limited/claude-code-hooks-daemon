@@ -330,6 +330,43 @@ class TestUndecidableAllowsAndSaysSo:
         assert result.decision is Decision.ALLOW
 
 
+class TestOwnCheckoutIsTheCwdAlone:
+    """Ledger 00474 N282: the payload ``cwd`` is the ONLY own-checkout signal.
+
+    A PreToolUse payload from an in-process teammate carries ``agent_id``,
+    ``agent_type``, ``session_id``, ``transcript_path`` and ``cwd``, and none of
+    them names the worktree the teammate was assigned. When ``cwd`` is the
+    session's shared directory, the guard therefore judges the coordinator's
+    location, not the teammate's. These tests pin that behaviour so a fix
+    (which needs a new signal, see NIGGLES.md N282) must change them on purpose.
+    """
+
+    def test_a_teammate_in_its_worktree_is_denied_when_cwd_follows_the_coordinator(
+        self, handler: SubagentWorktreeWriteGuardHandler, wt_a: Path, wt_b: Path
+    ) -> None:
+        """False deny: the teammate's assigned worktree is B, but the shared cwd
+        is A (the coordinator ``cd``ed there), so its write into B reads as a
+        crossing."""
+        assert handler.matches(_event(wt_b / "src" / "mod.py", cwd=wt_a)) is True
+
+    def test_a_teammate_writing_into_a_sibling_is_not_stopped_when_cwd_is_the_main_tree(
+        self, handler: SubagentWorktreeWriteGuardHandler, repo: Path, wt_a: Path, wt_b: Path
+    ) -> None:
+        """Fail-open: the N264 incident's own shape is invisible while the
+        shared cwd is the main working tree, which the guard never judges."""
+        assert handler.matches(_event(wt_b / "src" / "mod.py", cwd=repo)) is False
+        assert wt_a.exists()
+
+    def test_agent_identity_fields_do_not_change_the_verdict(
+        self, handler: SubagentWorktreeWriteGuardHandler, wt_a: Path, wt_b: Path
+    ) -> None:
+        """The handler reads no agent field beyond the scope gate, by design."""
+        event = _event(wt_b / "src" / "mod.py", cwd=wt_a)
+        event["agent_type"] = "general-purpose"
+        event["transcript_path"] = str(wt_b / "transcript.jsonl")
+        assert handler.matches(event) is True
+
+
 class TestGuidanceAndAcceptance:
     def test_the_claude_md_guidance_states_the_standing_rule(
         self, handler: SubagentWorktreeWriteGuardHandler
