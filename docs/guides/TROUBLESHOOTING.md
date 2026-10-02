@@ -348,6 +348,10 @@ handlers:
 
 Blocking handlers usually suggest safe alternatives in their error messages. Read the block message carefully for recommended alternatives.
 
+### Symptom: a command got past a handler (a bypass)
+
+The daemon is a guardrail for a careless agent, not armour against one trying to defeat it, and it makes no claim to stop prompt injection. A command whose text the daemon cannot see at call time (`eval`, `bash -c "$VAR"`) or a shape built only to defeat a parser is a known limit. A bypass through an ordinary respelling (`git -C`, quoting, a literal `bash -c '…'`) is a defect: see [BUG_REPORTING.md](../../BUG_REPORTING.md) and [Guardrails, not armour](../../README.md#guardrails-not-armour). For an agent you do not trust, add real isolation (container, VM, restricted user).
+
 ---
 
 ## 6. Performance Issues

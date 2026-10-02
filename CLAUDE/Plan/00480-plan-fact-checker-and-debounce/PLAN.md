@@ -103,7 +103,7 @@ as principle 1.
 
 - [x] ✅ **Task 4.1**: A `PostToolUse` handler on writes and edits under the plan directory feeds
   the debouncer, keyed by plan folder (default quiet period 5 s, configurable).
-  - **Handler**: `PlanFactCheckFeedHandler` (`plan_fact_check_feed`, priority 36), non-terminal,
+  - **Handler**: `PlanFactCheckFeedHandler` (`plan_fact_check_feed`, priority 37), non-terminal,
     never blocks, ships `default_enabled = False` and is off in the template and in this repo's
     config. Option `quiet_seconds`.
   - **Scope**: any tracked markdown document of a plan folder, written by `Write`, `Edit` or a

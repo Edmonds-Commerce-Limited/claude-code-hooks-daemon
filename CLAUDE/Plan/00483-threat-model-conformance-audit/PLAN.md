@@ -59,19 +59,25 @@ other than defeating a parser. Everything else, every ordinary respelling includ
 
 ### Phase 1: Inventory the guards
 
-- [ ] ⬜ **Task 1.1**: List every blocking PreToolUse handler. For each, record what it matches
+- [x] ✅ **Task 1.1**: List every blocking PreToolUse handler. For each, record what it matches
   and the shapes its parsing handles, from the code rather than its docs. Start with the
   guards that parse shell:
   - `secret_file_guard`, `quarantine_artefact_read_guard`, `flaggable_content_channel_guard`;
   - `sensitive_content` and the commit gates;
   - `destructive_git`, `git_stash`, `sed_blocker`, `pipe_blocker`;
   - the plan-folder `mkdir` guard, `project_containment`, `upgrade_approval_guard`.
-- [ ] ⬜ **Task 1.2**: For each guard, classify each parsing branch as in-scope or out-of-scope
+- [x] ✅ **Task 1.2**: For each guard, classify each parsing branch as in-scope or out-of-scope
   under the two-part test. Mark every out-of-scope branch that causes an in-scope false
   positive, with a reproducing command. Use the evaluation-error and false-positive evidence
   from Plan 00481 where it exists.
-- [ ] ⬜ **Task 1.3**: Write the inventory to `INVENTORY.md` in this folder, one table per
-  guard. Add the list of out-of-scope-only code for the owner (open question 2).
+- [x] ✅ **Task 1.3**: Write the inventory to `INVENTORY.md` in this folder, one table per
+  guard. Add the list of out-of-scope-only code for the owner (open question 2). Done:
+  [INVENTORY.md](INVENTORY.md). 62 of 74 PreToolUse handler files can deny; 38 shell-parsing
+  guards have tables, the other 24 are triaged at file level (part G, UNVERIFIED). 15 guards
+  cause an in-scope false positive. About 3,500 lines of out-of-scope-only code are listed for
+  the owner. The two headline false positives were reproduced live by the coordinator: a
+  `cd "$DIR" &&` before a quoted heredoc makes `git_stash` deny prose, and `${P:-"/usr"}`
+  before an `awk '{…}'` is denied as unreadable. Both feed Task 3.2.
 
 ### Phase 2: Triage the backlog
 
@@ -89,9 +95,16 @@ other than defeating a parser. Everything else, every ordinary respelling includ
   the 65 entries still open in archived ledger 00466. Each entry is either an in-scope defect,
   dismissed under the threat model with the shape named, or already fixed on main (verified
   by reproduction, not assumed).
-- [ ] ⬜ **Task 2.2**: Classify the 14 `UNCOVERED-open` rows in
+- [x] ✅ **Task 2.2**: Classify the `UNCOVERED-open` rows in
   `scripts/qa/dangerous-invocation-corpus.yaml` the same way. Move dismissals to
-  `UNCOVERED-accepted` with the reason.
+  `UNCOVERED-accepted` with the reason. Done by the coordinator. 9 rows are open, not 14: 5 were
+  closed as COVERED since this task was written (`checkout -f`, `switch -f`, `reflog expire`,
+  `gc --prune=now`, `filter-branch`). None is dismissed. Each is an ordinary command typed in full
+  (`git reset --keep`, `rm -rf`, `truncate -s 0`, `git push --delete`, `git tag -d`,
+  `pip install --index-url`, `gh auth token`, `crontab -r`, `docker run -v /:/host`), so neither
+  limb applies: the text is visible at call time, and each has ordinary uses rather than existing
+  only to defeat a parser. All 9 are in scope and stay `UNCOVERED-open`. The corpus header makes
+  every new deny owner-gated per row, so they go to the owner as one batch.
 - [ ] 🔄 **Task 2.3**: Done for the carried entries (merge 56677e3c6). That added 9
   `UNCOVERED-accepted` corpus rows. N201, N228 and N257 have no row, because main denies the
   representative command anyway. Record every dismissal: in the ledger, mark it
@@ -102,19 +115,27 @@ other than defeating a parser. Everything else, every ordinary respelling includ
 
 - [ ] ⬜ **Task 3.1**: Fix the in-scope defects through the ledger, at most 3 branches open at
   once (Plan 00475).
-- [ ] ⬜ **Task 3.2**: Narrow each guard that causes an in-scope false positive while catching
-  an out-of-scope shape (TDD: the false positive is the red test).
+- [ ] 🔄 **Task 3.2**: Narrow each guard that causes an in-scope false positive while catching
+  an out-of-scope shape (TDD: the false positive is the red test). X-1 fixed on branch
+  worktree-p483-x1-rebind-heredoc: the shared rebinding check no longer withholds the heredoc
+  exemption for `cd`/`pushd`/`popd`, `source`/`.` or a non-special `export X=$Y`; alias,
+  function and PATH bindings still do. Report:
+  [subagent-reports/261002-x1-sonnet.md](subagent-reports/261002-x1-sonnet.md).
 - [ ] ⬜ **Task 3.3**: Bring the owner's removal decisions on out-of-scope-only code into
   effect, if any were taken.
 
 ### Phase 4: Keep it applied
 
-- [ ] ⬜ **Task 4.1**: Check that the review routines apply the test: Routine 00001's check
+- [x] ✅ **Task 4.1**: Check that the review routines apply the test: Routine 00001's check
   inventory, the delta routine, the `security-reviewer` and `code-reviewer` agents, and the
-  evasion test table. Fix any that still ask for adversarial coverage.
-- [ ] ⬜ **Task 4.2**: Check that the user-facing docs say "guardrails, not armour" where a
+  evasion test table. Fix any that still ask for adversarial coverage. Done: CHECKS.md scope
+  note carries both clauses and the dismissal record; F-BYPS, F-GAP, D-SEC bounded; both
+  routines and both agents point at the test; evasion docstring bounded. Review:
+  [subagent-reports/261002-phase4-review-sonnet.md](subagent-reports/261002-phase4-review-sonnet.md).
+- [x] ✅ **Task 4.2**: Check that the user-facing docs say "guardrails, not armour" where a
   client would look before filing an obfuscated bypass upstream (the README, troubleshooting,
-  bug reporting).
+  bug reporting). Done: BUG_REPORTING.md first check, 1-defect.yml intro and optional
+  checkbox, TROUBLESHOOTING.md section 5 subsection. config.yml skipped by instruction.
 
 ## Open questions for the owner
 

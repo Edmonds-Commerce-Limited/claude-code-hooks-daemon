@@ -51,6 +51,7 @@ from pydantic import ValidationError as PydanticValidationError
 from claude_code_hooks_daemon.config.loader import ConfigLoader
 from claude_code_hooks_daemon.config.models import Config, handler_options
 from claude_code_hooks_daemon.constants import DaemonPath, HandlerID, Timeout
+from claude_code_hooks_daemon.constants.dbf import DefenceBeforeFix
 from claude_code_hooks_daemon.constants.modes import DaemonMode
 from claude_code_hooks_daemon.constants.permissions import FileMode
 from claude_code_hooks_daemon.core.event import EventType
@@ -8586,6 +8587,7 @@ def cmd_explain_rule(args: argparse.Namespace) -> int:
     print(f"Handler: {handler.config_key} ({handler.class_name})")
     print()
     print(formatter.verbose(rule))
+    print(DefenceBeforeFix.EXPLAIN_LINE)
     return 0
 
 
@@ -8664,6 +8666,7 @@ def cmd_explain_handler(args: argparse.Namespace) -> int:
     else:
         print("CLAUDE.md guidance: (none)")
 
+    print(DefenceBeforeFix.EXPLAIN_LINE)
     return 0
 
 

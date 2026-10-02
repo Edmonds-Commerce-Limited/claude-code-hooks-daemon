@@ -13,8 +13,14 @@ than restating it.
 
 **Scope of every check**: the daemon guards a careless agent, not a hostile one
 ([ARCHITECTURE.md § Threat model](../../ARCHITECTURE.md#threat-model-the-agent-is-careless-not-hostile)).
-A bypass that needs a deliberately obfuscated or evasive shape is out of scope.
-Record it as dismissed under that ruling; do not raise it as a finding.
+Prompt injection is not defended against. A shape is out of scope when either
+the operative text is not visible to the daemon at call time, or the shape has
+no working purpose other than defeating a parser. A literal body, one level of
+`$( )`, a glob, `find -exec`, `xargs` and git global options are in scope.
+Record a dismissal as `Dismissed (threat model)`, naming the shape, and for a
+command add an `UNCOVERED-accepted` row to
+`scripts/qa/dangerous-invocation-corpus.yaml`; do not raise it as a finding,
+and never because the agent "might have been injected".
 
 ## The distinction that matters
 
@@ -39,16 +45,16 @@ checks it did not run**, and why the two routines keep separate ledgers.
 
 Each is answerable from the diff over the run's interval.
 
-| ID       | Check                                                                                                                                                    |
-| -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `D-EXEC` | New or changed process spawns: `shell=True`, a string-built command line, a spawn that does not go through `utils.git_repo.run_git` where it should.     |
-| `D-EVAL` | New dynamic execution or deserialisation: `eval`, `exec`, `pickle`, `yaml.load`, a regex assembled from input.                                           |
-| `D-PATH` | New filesystem writes, and whether each is inside project containment; new path handling that a `..` or a symlink could walk out of.                     |
-| `D-NET`  | New network egress — any new fetch, and what it does with the response.                                                                                  |
-| `D-SEC`  | New reads of protected material: the secret word list, `.env`, credentials, anything `secret_file_guard` covers, by any route including a subprocess.    |
-| `D-RULE` | **Changed rules.** A deny that became an allow, an exemption widened, a severity lowered, a handler default flipped to disabled. The reason, per change. |
-| `D-DEP`  | Dependencies added or bumped in the interval, and what the new code is trusted to do.                                                                    |
-| `D-PUB`  | New code paths that publish outward — a `gh` body, an issue, a comment — and what they can carry out of a private tree.                                  |
+| ID       | Check                                                                                                                                                           |
+| -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `D-EXEC` | New or changed process spawns: `shell=True`, a string-built command line, a spawn that does not go through `utils.git_repo.run_git` where it should.            |
+| `D-EVAL` | New dynamic execution or deserialisation: `eval`, `exec`, `pickle`, `yaml.load`, a regex assembled from input.                                                  |
+| `D-PATH` | New filesystem writes, and whether each is inside project containment; new path handling that a `..` or a symlink could walk out of.                            |
+| `D-NET`  | New network egress — any new fetch, and what it does with the response.                                                                                         |
+| `D-SEC`  | New reads of protected material: the secret word list, `.env`, credentials, anything `secret_file_guard` covers, by any ordinary route, including a subprocess. |
+| `D-RULE` | **Changed rules.** A deny that became an allow, an exemption widened, a severity lowered, a handler default flipped to disabled. The reason, per change.        |
+| `D-DEP`  | Dependencies added or bumped in the interval, and what the new code is trusted to do.                                                                           |
+| `D-PUB`  | New code paths that publish outward — a `gh` body, an issue, a comment — and what they can carry out of a private tree.                                         |
 
 ## Full-only checks
 
@@ -59,8 +65,8 @@ attempt these, and says so.
 | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `F-CVE`  | Every pin in `uv.lock` against current advisories, runtime closure reported separately from dev-only. **And: is anything automated checking these at all?** | The lock file is unchanged and the advisory is new. The canonical case. The second question is worse: a scanner that never runs reports nothing, which reads exactly like reporting clean. |
 | `F-EXPT` | The **union** of every exemption: `exclude_paths`, whitelists, `extra_whitelist`, per-handler opt-outs. Is any guard now hollow?                            | Each entry was fine alone. Only the accumulated set is the finding.                                                                                                                        |
-| `F-BYPS` | The bypass inventory: for each guard, every route that reaches its protected outcome without passing it.                                                    | A bypass is created by the INTERACTION of files, and both can be unchanged. The Bash-write-vs-Write-tool split is the known example.                                                       |
-| `F-GAP`  | Dangerous constructs no handler judges at all.                                                                                                              | An absent handler appears in no diff, ever. This is the `routine-never-run` argument applied to coverage.                                                                                  |
+| `F-BYPS` | The bypass inventory: for each guard, every in-scope route that reaches its protected outcome without passing it.                                           | A bypass is created by the INTERACTION of files, and both can be unchanged. The Bash-write-vs-Write-tool split is the known example.                                                       |
+| `F-GAP`  | Constructs a careless agent plausibly types, dangerous, that no handler judges at all.                                                                      | An absent handler appears in no diff, ever. This is the `routine-never-run` argument applied to coverage.                                                                                  |
 | `F-DEPL` | Deployed artefacts in client installs against their templates here.                                                                                         | Drift is a property of the other repository's state, not of this diff.                                                                                                                     |
 | `F-HYG`  | On-disk hygiene of protected material: modes, gitignore coverage, stray copies under `untracked/`.                                                          | A stray copy is created by a command, not a commit.                                                                                                                                        |
 | `F-PRIV` | What this repository's public surface — issues, releases, generated bodies — has actually disclosed to date.                                                | The disclosure is in published output, not in the tree.                                                                                                                                    |

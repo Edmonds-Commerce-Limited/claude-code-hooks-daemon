@@ -1341,7 +1341,13 @@ on read-only `grep -c`, `awk`, `--help` and `bin/hooks-daemon … 2>&1` commands
 interpreter's inline-code flag whatever the command is. It is advisory only, but it fires
 on ordinary reads and teaches agents to ignore it.
 
-**Status**: ⬜ Open. Treat `-c`/`-e` as inline code only after a known interpreter.
+**Status**: ✅ Fixed (merge 1078e4291). `_runs_inline_code` now skips a named set of
+search and text tools (`grep`, `egrep`, `fgrep`, `rg`, `awk` family, `wc`, `sort`, `head`, `tail`,
+`cut`, `jq`), by exact program name. The alternative, an allowlist of known interpreters, would
+have undone the round-10 decision that an unknown program run with `-e` stays UNSEEN; the exclusion
+list keeps `node -e`, `perl -e`, `foo -c '…'` and the rest as they were. `awk` is excluded because
+its program is a positional argument that is not judged either, so flagging `awk -e` protected
+nothing. Pinned by `TestInlineCodeFlagIsNotReadOnSearchAndTextTools`.
 
 ### N303 — the pause-gate merge left `UsagePauseToolGateHandler` unclassified; main was red
 
@@ -1396,6 +1402,51 @@ The uncertain-move union judges the hook directory and the LAST recorded move (`
 every candidate directory (`sub`). Remedy: judge every directory any `cd` in the chain could
 land in.
 
+### N317 — plan QA says "stages no journal entry" when the same command writes and stages it
+
+**Source**: coordinator, commit ea1a8e7ff.
+
+**Evidence**: one Bash command ran `mkplan.bash --journal 483 …`, then `git add <plan folder>`,
+then `git commit`. The commit holds `JOURNAL/00483-Journal-26-10-02.md`
+(`git show --stat HEAD`), yet the PreToolUse advisory reported `journal-entry-with-progress`: no
+journal entry staged. The gate judges before the command runs, so the day-file the command is
+about to create does not exist yet. That is the N246 class: the staging simulation copies the
+working tree as it is now, and a file a prior statement creates is invisible to it. Advisory
+only. Following the advisory's own instruction in one command produces the false report.
+
+**Status**: ⬜ Open. Remedy options: treat a `mkplan.bash --journal <plan>` statement before the
+commit as staging that plan's day-file, or word the advisory as "cannot see a journal entry yet"
+when the command itself runs `--journal`.
+
+### N316 — docs QA `pointer-resolves` reads a link shape inside an inline code span
+
+**Source**: coordinator, landing Plan 00483's INVENTORY.md.
+
+**Evidence**: a line quoting the `curl_pipe_shell` regex in one backtick span drew "Link target
+does not exist" with the interpreter alternation as the target. The span held a square-bracketed
+`path/` group immediately followed by the parenthesised `bash|sh|…` group, which is the inline-link
+shape. Text inside inline code is never a link in Markdown. In INVENTORY.md it was `advise`. Quoting
+the same span in this entry drew `[block]` (the edit was not refused). Both lines were reworded to
+prose.
+
+**Status**: ⬜ Open. Remedy: strip inline code spans (and fenced blocks, if not already) before
+the link scan.
+
+### N315 — the post-commit docs QA report judges a vendored remote-docs page that lint and sweep exclude
+
+**Source**: coordinator, committing Plan 00470 Task 1.1 (81338abb3).
+
+**Evidence**: the commit staged `remote-docs/code.claude.com/docs/en/scheduled-tasks.md`, vendored
+by `remote-docs add`. The PostToolUse "Docs QA drift report" then listed 19 `[block]`
+`pointer-resolves` findings for its site-relative links (`/docs/en/mcp`, `/docs/en/goal`, …). The
+commit itself was not blocked. The same file is out of scope everywhere else:
+`docs-qa --lint <file>` exits 2 with "not a documentation file", and `docs-qa --sweep` reports 0
+findings for the tree. The fidelity rule forbids editing vendored text, so a finding there can never
+be acted on. A `[block]` label the gate did not enforce also misreports what happened.
+
+**Status**: ⬜ Open. Remedy: the post-commit report uses the same corpus scope as lint, sweep and
+the commit gate, so `remote-docs/` is excluded there too.
+
 ### N314 — no QA check bounds a module's size, so a handler reached 5,301 lines unnoticed
 
 **Source**: owner-delegated Fable ruling on 00466 N96
@@ -1405,10 +1456,13 @@ land in.
 that never flagged the size, and the N302 misclassification sat inside it. Nothing in
 `scripts/qa/` measures module length.
 
-**Status**: ⬜ Open. Remedy: a module-size check in QA with a stated bound. Today's outliers would
-need an exception list, and that is an allowlist, which needs owner approval. Until the owner rules,
-the check can only REPORT modules over the bound, not fail on them. The split of the file itself is a
-separate, sequenced pure-refactor plan.
+**Status**: ✅ Fixed (merge 1078e4291; `scripts/qa/check_module_length.py`, bound 1000 lines,
+report-only; making it a gate awaits an owner decision on the exception list).
+`scripts/qa/check_module_length.py` reports every module under `src/` over 1000 lines (672
+modules: median 170, p90 558, p95 848; 26 over the bound) and always exits 0. A gate would need an
+exception list for today's outliers, which is an allowlist and needs owner approval. It is not
+wired into `llm_qa.py`: no report-only tool exists there, and a passing tool shows nothing, so the
+report would never be read. The split of the file itself is a separate, sequenced pure-refactor plan.
 
 ### N313 — `git_stash` denies a `grep` naming `git stash` when its output goes into `awk`
 

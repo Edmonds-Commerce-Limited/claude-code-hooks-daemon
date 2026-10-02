@@ -18,8 +18,9 @@ Rigorous process to fix bugs with confidence that they won't return.
 **Canonical source: <https://defence-before-fix.github.io/>** — the method
 specification (`/SPEC.html`), the detector specification
 (`/DETECTOR-SPEC.html`) and the agent instruction guide
-(`/defence-before-fix-project-prompt.md`). Vendored copies live in the
-remote-docs tree; read those before the network. This project follows the
+(`/defence-before-fix-project-prompt.md`). Vendored copies live in
+[remote-docs/defence-before-fix.github.io/](../../remote-docs/defence-before-fix.github.io/SPEC.md);
+read those before the network. This project follows the
 method as written there; nothing below replaces it.
 
 DBF runs BEFORE the cycle below. A defect in front of you is evidence of a

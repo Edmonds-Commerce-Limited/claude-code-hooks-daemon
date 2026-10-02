@@ -516,12 +516,6 @@ handlers:
       #     - id: project-motto
       #       text: "All findings are logged to {plan_path}/REPORTS/."
 
-    plan_fact_check_feed:  # Debounces plan edits into one pending fact-check record (Plan 00480)
-      enabled: false  # Opt-in: the check is recorded but its delivery is not built yet
-      priority: 36
-      # options:
-      #   quiet_seconds: 5.0  # quiet period after the last edit to a plan before it fires
-
     markdown_table_formatter:  # Auto-format markdown tables via mdformat + mdformat-gfm
       enabled: false           # Enable for automatic markdown table alignment
       priority: 31  # Ledger 00466 RV6-M1: MUST stay above goal_injection's priority
@@ -556,6 +550,16 @@ handlers:
       #                                      # from the running daemon. SET THIS if your project uses a
       #                                      # non-default `project_handlers.path` -- it is not injected
       #                                      # here, so the default would watch the wrong directory.
+
+    cron_record_keeper:  # Record when each CronCreate happened and forget each CronDelete, so the stop enforcers can refresh a job before the 7-day expiry (Plan 00470)
+      enabled: true   # On by default; silent bookkeeping in cron-records.json in the daemon's untracked directory, never blocks. The refresh in cron_stop_enforcer relies on it.
+      priority: 36
+
+    plan_fact_check_feed:  # Debounces plan edits into one pending fact-check record (Plan 00480)
+      enabled: false  # Opt-in: the check is recorded but its delivery is not built yet
+      priority: 37
+      # options:
+      #   quiet_seconds: 5.0  # quiet period after the last edit to a plan before it fires
 
     validate_eslint_on_write:  # Runs ESLint after file writes
       enabled: false           # Enable for automatic ESLint validation
@@ -806,9 +810,11 @@ handlers:
       enabled: true         # Inert unless a usage pause is recorded for the session; never terminal
       priority: 6
 
-    cron_stop_enforcer:  # Blocks a stop while a declared persistent_crons job is verified missing (Plan 00416)
+    cron_stop_enforcer:  # Blocks a stop while a declared persistent_crons job is verified missing, or is due a refresh (Plan 00416, 00470)
       enabled: true       # Silent unless persistent_crons.enabled AND a job is declared
       priority: 7
+      # options:
+      #   refresh_after_days: 6   # A live declared job older than this is refreshed (CronDelete + CronCreate) before the 7-day expiry; must be above 0 and below 7
 
     teammate_reap_advisor:  # Reports the Stop payload's background_tasks count and names TaskStop (Plan 00419 N5)
       enabled: true          # Advisory only, rate-limited; silent when the list is absent or empty

@@ -36,7 +36,7 @@ Perform rigorous, expert-level code review looking for real issues that matter: 
 5. **Violations of YAGNI** - Over-engineering, premature abstraction
 6. **Violations of DRY** - Copy-paste code, duplicate logic
 7. **Workarounds** - Hacks instead of proper fixes
-8. **Security Issues** - Real vulnerabilities, not theoretical ones
+8. **Security Issues** - Real vulnerabilities, not theoretical ones. In guard code apply the [threat model](../../CLAUDE/ARCHITECTURE.md#threat-model-the-agent-is-careless-not-hostile): a bypass that needs an out-of-scope shape is not a finding, and a fix that adds false positives on ordinary commands to catch one is itself a defect
 9. **Architectural Problems** - Wrong patterns, tight coupling
 
 ### What This Reviewer Ignores

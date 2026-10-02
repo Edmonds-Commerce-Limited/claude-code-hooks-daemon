@@ -2391,12 +2391,13 @@ def segment_may_rebind_commands(segment: str) -> bool:
 
     - a head that is not plain literal text (``$X``, ``"cat"``, ``\\cat``,
       ``$'cat'``, ``~/x``);
-    - a head from :data:`_REBINDING_HEADS`, ``command`` other than the
-      ``command -v``/``-V`` lookup, or ``cd``/``pushd`` other than to one
-      literal target (:func:`_directory_change_may_rebind`);
+    - a head from :data:`_REBINDING_HEADS`, or ``command`` other than the
+      ``command -v``/``-V`` lookup. ``cd``/``pushd``/``popd`` and
+      ``source`` never count (Plan 00483 X-1);
     - a name-binding builtin (:data:`_NAME_BINDING_HEADS`, ``unset``
-      among them) binding a special name, or a name or value that is not
-      literal, or declaring a nameref or an integer;
+      among them) binding a special name, or a name that is not literal
+      (a value that is not literal only counts for a special name), or
+      declaring a nameref or an integer;
     - ``set`` with an option off :data:`_SET_INERT_LETTERS`/
       :data:`_SET_INERT_NAMES`, or ``printf -v``;
     - an assignment to a name bash or a helper program reads
@@ -2520,19 +2521,16 @@ def _arithmetic_may_rebind(expression: str) -> bool:
 #: ruling's name-binding builtins are judged by the names they bind
 #: (:data:`_NAME_BINDING_HEADS`), ``for``/``select`` by their loop name
 #: (:data:`_LOOP_HEADS`), ``let`` by its arithmetic and ``command`` by
-#: whether it is a lookup. ``cd``/``pushd`` by their target
-#: (:func:`_directory_change_may_rebind`).
+#: whether it is a lookup.
 _REBINDING_HEADS: frozenset[str] = frozenset(
-    {"alias", "unalias", "hash", "enable", "builtin", "eval", "source", "."}
-    | {"exec", "shopt", "trap", "popd", "coproc", "function"}
+    {"alias", "unalias", "hash", "enable", "builtin", "eval"}
+    | {"exec", "shopt", "trap", "coproc", "function"}
 )
-#: Heads that change directory, and so what a relative ``PATH`` entry means.
-_DIRECTORY_CHANGE_HEADS: frozenset[str] = frozenset({"cd", "pushd"})
-#: The only ``cd``/``pushd`` options that leave a literal target literal.
-_DIRECTORY_CHANGE_OPTIONS: frozenset[str] = frozenset({"-L", "-P"})
-#: ``cd -``: back to ``OLDPWD``.
-_PREVIOUS_DIRECTORY = "-"
-_TILDE = "~"
+#: Heads that change directory. They define no command name, and `source`/`.`
+#: runs a file whose text the command does not show, so neither is judged
+#: (Plan 00483 X-1): a heredoc after `cd "$DIR" &&` stays data.
+_DIRECTORY_CHANGE_HEADS: frozenset[str] = frozenset({"cd", "pushd", "popd"})
+_SOURCE_HEADS: frozenset[str] = frozenset({"source", "."})
 _LOOP_HEADS: frozenset[str] = frozenset({"for", "select"})
 #: Builtins whose operands are the names they bind (``NAME`` or
 #: ``NAME=value``). ``getopts``' first operand is its option string.
@@ -2715,8 +2713,8 @@ def _command_may_rebind(piece: str) -> bool:
         return _names_may_rebind(head, arguments)
     if head == _COMMAND:
         return not _is_lookup(arguments)
-    if head in _DIRECTORY_CHANGE_HEADS:
-        return _directory_change_may_rebind(arguments)
+    if head in _DIRECTORY_CHANGE_HEADS or head in _SOURCE_HEADS:
+        return False
     if head == _LET:
         return any(
             text is None or _arithmetic_may_rebind(text)
@@ -2749,15 +2747,20 @@ def _binding_picks_programs(name: str, value: str | None) -> bool:
 
 def _names_may_rebind(head: str, arguments: list[str]) -> bool:
     """May the name-binding builtin ``head`` rebind? Only when it binds a
-    special name, when a name, value or option is not literal, or when an
-    option in :data:`_REBINDING_OPTION_LETTERS` is given. An option's value
-    is judged as a name, which can only refuse more."""
+    special name, when a name or option is not literal, or when an option in
+    :data:`_REBINDING_OPTION_LETTERS` is given. A non-special name's value
+    never picks a program, literal or not. An option's value is judged as a
+    name, which can only refuse more."""
     rebinding_letters = _REBINDING_OPTION_LETTERS.get(head, frozenset())
     operands: list[str] = []
     options_end = False
     for word in _without_redirections(arguments):
         text = resolve_shell_word(word)
         if text is None:
+            # `export X=$Y`: only a special name's value picks programs.
+            name = word.partition("=")[0]
+            if "=" in word and _SHELL_NAME.fullmatch(name) and not _is_special_variable(name):
+                continue
             return True
         if not options_end and not operands and text == _END_OF_OPTIONS:
             options_end = True
@@ -2788,23 +2791,6 @@ def _is_lookup(arguments: list[str]) -> bool:
         if set(text[1:]) & {"v", "V"}:
             return True
     return False
-
-
-def _directory_change_may_rebind(arguments: list[str]) -> bool:
-    """May ``cd``/``pushd`` given ``arguments`` rebind? Not with one literal
-    target (``/abs``, ``./x``, ``../x``, ``name``, ``-``), after at most
-    ``-L``/``-P`` (the round 13b ruling). No target, a ``~``, an expansion,
-    a second target, a stack rotation (``+1``) or any other option may."""
-    texts = [resolve_shell_word(word) for word in arguments]
-    if any(text is None for text in texts) or any(word.startswith(_TILDE) for word in arguments):
-        return True
-    words = [text for text in texts if text is not None]
-    while words and words[0] in _DIRECTORY_CHANGE_OPTIONS:
-        words = words[1:]
-    if len(words) != 1:
-        return True
-    target = words[0]
-    return not target or (target != _PREVIOUS_DIRECTORY and target.startswith(("-", "+")))
 
 
 def _without_redirections(words: list[str]) -> list[str]:

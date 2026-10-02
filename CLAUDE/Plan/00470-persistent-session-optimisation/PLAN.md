@@ -41,13 +41,16 @@ Evidence, with verified facts marked apart from inferences, is in
 
 ### Phase 1: Probes (owner: orchestrator, main thread)
 
-- [ ] ⬜ **Task 1.1**: Vendor `scheduled-tasks`, `model-config` and `interactive-mode` docs via `hooks-daemon remote-docs add`.
+- [x] ✅ **Task 1.1**: Vendor `scheduled-tasks`, `model-config` and `interactive-mode` docs via `hooks-daemon remote-docs add`. `model-config` and `interactive-mode` were already vendored; `scheduled-tasks` added (`remote-docs/code.claude.com/docs/en/scheduled-tasks.md`). It confirms the 7-day recurring expiry (one final fire, then self-delete) and says `--resume`/`--continue` restore unexpired `CronCreate` tasks, which bears on Task 1.2.
 - [ ] ⬜ **Task 1.2**: Probe the four open questions in RESEARCH.md §4 and record the results in RESEARCH.md.
 
 ### Phase 2: Cron expiry (owner: python-developer sub-agent, TDD)
 
-- [ ] ⬜ **Task 2.1**: PostToolUse handler records CronCreate/CronDelete (`session_id`, id, schedule, prompt hash, created_at) in a daemon state file. Tests: record, delete, prune dead sessions.
-- [ ] ⬜ **Task 2.2**: `cron_stop_enforcer` (and its SubagentStop twin) block a stop when a live job's record is older than `refresh_after`, naming the CronDelete + CronCreate. Unrecorded jobs get stamped, not blocked. Tests: age boundary, unknown age, pause respected, priority/terminal invariants unchanged.
+- [x] ✅ **Task 2.1**: PostToolUse handler records CronCreate/CronDelete (`session_id`, id, schedule, prompt hash, created_at) in a daemon state file. Tests: record, delete, prune dead sessions.
+  - `cron_record_keeper` (priority 36, default on) writes `cron-records.json` in the daemon's untracked dir (`utils/cron_records.py`). The `CronCreate` result shape is not contract-documented, so the id is read from a mapping key or `id: <token>` text; an unreadable result is not recorded and Task 1.2 should confirm the real shape.
+  - Liveness signal: the daemon has no session registry, so a record is dead when older than 7 days (the cron cannot exist) or when its session's `session_crons` no longer lists its id.
+- [x] ✅ **Task 2.2**: `cron_stop_enforcer` (and its SubagentStop twin) block a stop when a live job's record is older than `refresh_after`, naming the CronDelete + CronCreate. Unrecorded jobs get stamped, not blocked. Tests: age boundary, unknown age, pause respected, priority/terminal invariants unchanged.
+  - Option `refresh_after_days`, default 6 (the day left before expiry is the margin for dropped ticks), shared logic in `utils/cron_refresh.py`. The `[awaiting-human]` marker is deliberately not consulted: it silences ticks, which is when a job ages unnoticed. The usage pause and `cron-pause` are respected.
 - [ ] ⬜ **Task 2.3**: ccy supervisor watchdog: no hook traffic while every recorded job is past expiry triggers the reconcile prompt. Tests in the supervisor suite.
 - [ ] ⬜ **Task 2.4**: Make the background-process watchdog cron a standing job. The owner's decision: it is a sensible safety net for a long-running session, so every session gets it.
   - Declare it under `persistent_crons` next to `issue-sdlc` and `failsafe-recovery`.
@@ -70,7 +73,9 @@ Evidence, with verified facts marked apart from inferences, is in
 
   Both times, each agent had to be re-briefed by hand from its worktree state. The queue must hold enough per agent (worktree, task brief, last sha) that a respawn is mechanical.
 
-- [ ] ⬜ **Task 3.4**: Regression test that a teammate or sub-agent stop never writes the lead's `[awaiting-human]` marker.
+- [x] ✅ **Task 3.4**: Regression test that a teammate or sub-agent stop never writes the lead's `[awaiting-human]` marker.
+
+  - No bug found: `auto_continue_stop` is the only writer and is scoped to the main thread, which a teammate's `agent_id` fails. Pinned in `tests/unit/handlers/stop/test_awaiting_human_marker_scope.py`, through the real chain, with a positive control and a sensitivity check.
 
 - [ ] ⬜ **Task 3.5**: Server runbook: systemd/ccy restart with `--continue`, `autoContinueAtUsageLimit` on.
 
