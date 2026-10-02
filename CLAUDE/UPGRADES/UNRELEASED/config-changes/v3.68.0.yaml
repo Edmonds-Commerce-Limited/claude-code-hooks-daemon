@@ -12,12 +12,12 @@ config_changes:
       dormant: false
       description: >-
         NEW (Plan 00479). A status-line segment showing subscription usage,
-        for example `5h 13% (3h 20m) · 7d 3%`, read from the `rate_limits`
-        Claude Code sends on every status render. The 5-hour window always
-        shows its reset countdown; the weekly window shows it from
-        `seven_day_countdown_pct`. Each window is coloured by its own
-        percentage (yellow from `warn_pct`, orange from `high_pct`, bold red
-        from `critical_pct`). Hidden when there is no usage data.
+        for example `📊 5h|7d`, read from the `rate_limits` Claude Code sends
+        on every status render. Each window is a chip whose background is
+        coloured by its own percentage (green, yellow from `warn_pct`, orange
+        from `high_pct`, red from `critical_pct`). A green window shows only
+        its label; from `warn_pct` it adds its percentage and reset
+        countdown, e.g. `5h 67% 3h 20m`. Hidden when there is no usage data.
       example_yaml: |
         handlers:
           status_line:
@@ -28,7 +28,6 @@ config_changes:
                 warn_pct: 60
                 high_pct: 80
                 critical_pct: 90
-                seven_day_countdown_pct: 80
       migration_note: >-
         On by default; no project-side action needed. Add the entry to a
         project config that lists its status-line handlers explicitly, or

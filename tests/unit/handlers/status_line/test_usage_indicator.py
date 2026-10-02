@@ -1,7 +1,10 @@
 """Tests for UsageIndicatorHandler (Plan 00479 Task 2.2).
 
 The segment renders the 5-hour and weekly subscription windows, read from the
-daemon's usage snapshot, e.g. ``5h 13% (3h 0m) · 7d 3%``.
+daemon's usage snapshot, as compact background-coloured chips after a graph
+icon. A window below the warning level is its label alone (``📊 5h|7d``); a
+window at or above it adds its percentage and reset countdown
+(``📊 5h 67% 3h 0m|7d``) (owner ruling: green needs no number).
 """
 
 import re
@@ -19,10 +22,11 @@ from claude_code_hooks_daemon.handlers.status_line.usage_indicator import (
 
 _ANSI = re.compile(r"\033\[[0-9;]*m")
 
-_GREEN = "\033[32m"
-_YELLOW = "\033[33m"
-_ORANGE = "\033[38;5;208m"
-_CRITICAL = "\033[1;91m"
+# Background bands, the same sequences model_context uses for its chips.
+_GREEN = "\033[42m\033[30m"
+_YELLOW = "\033[43m\033[30m"
+_ORANGE = "\033[48;5;208m\033[30m"
+_CRITICAL = "\033[41m\033[97m"
 
 
 def _plain(text: str) -> str:
@@ -72,49 +76,51 @@ class TestVisibility:
 
 
 class TestRendering:
-    def test_both_windows_with_five_hour_countdown(self) -> None:
-        _feed("main_thread_integer.json")
+    def test_both_windows_green_are_labels_only(self) -> None:
+        _feed("main_thread_integer.json")  # 5h 13, 7d 3: both green
         rendered = _render()
         assert rendered is not None
-        assert _plain(rendered) == "| 5h 13% (3h 0m) · 7d 3%"
+        assert _plain(rendered) == "| 📊 5h|7d"
 
-    def test_fractional_percentage_shows_the_whole_number_below(self) -> None:
-        _feed("main_thread_fractional.json")
+    def test_a_warning_window_shows_its_percentage_and_countdown(self) -> None:
+        _feed("main_thread_fractional.json")  # 5h 67.4 yellow, 7d 81.9 orange
         rendered = _render()
         assert rendered is not None
-        assert _plain(rendered).startswith("| 5h 67% (3h 0m) · 7d 81%")
+        assert _plain(rendered) == "| 📊 5h 67% 3h 0m|7d 81% 6d 22h"
+
+    def test_only_the_window_over_the_warning_level_gets_detail(self) -> None:
+        payload = load_status_payload("main_thread_integer.json")
+        payload["rate_limits"]["seven_day"]["used_percentage"] = 75
+        get_data_layer().usage.update_from_status_event(payload, now=NOW)
+        rendered = _render()
+        assert rendered is not None
+        assert _plain(rendered) == "| 📊 5h|7d 75% 6d 22h"
 
     def test_seven_day_only_has_no_five_hour_part(self) -> None:
-        _feed("seven_day_only.json")
+        _feed("seven_day_only.json")  # 7d 42: green
         rendered = _render()
         assert rendered is not None
-        assert _plain(rendered) == "| 7d 42%"
+        assert _plain(rendered) == "| 📊 7d"
 
     def test_expired_five_hour_is_dropped_and_seven_day_stays(self) -> None:
         _feed("five_hour_expired.json")
         rendered = _render()
         assert rendered is not None
-        assert _plain(rendered) == "| 7d 3%"
+        assert _plain(rendered) == "| 📊 7d"
 
     def test_agent_thread_payload_renders_like_the_main_thread(self) -> None:
         _feed("agent_thread.json")
         rendered = _render()
         assert rendered is not None
-        assert _plain(rendered) == "| 5h 13% (3h 0m) · 7d 3%"
+        assert _plain(rendered) == "| 📊 5h|7d"
 
-    def test_seven_day_countdown_shown_when_it_is_high(self) -> None:
-        _feed("main_thread_fractional.json")
+    def test_percentage_is_rounded_down(self) -> None:
+        payload = load_status_payload("main_thread_integer.json")
+        payload["rate_limits"]["five_hour"]["used_percentage"] = 79.9
+        get_data_layer().usage.update_from_status_event(payload, now=NOW)
         rendered = _render()
         assert rendered is not None
-        assert _plain(rendered) == "| 5h 67% (3h 0m) · 7d 81% (6d 22h)"
-
-    def test_seven_day_countdown_threshold_is_an_option(self) -> None:
-        _feed("main_thread_integer.json")
-        handler = UsageIndicatorHandler()
-        handler._seven_day_countdown_pct = 3
-        rendered = _render(handler)
-        assert rendered is not None
-        assert _plain(rendered).endswith("7d 3% (6d 22h)")
+        assert "5h 79% " in _plain(rendered)
 
 
 class TestColour:
@@ -131,13 +137,13 @@ class TestColour:
             (100, _CRITICAL),
         ],
     )
-    def test_five_hour_colour_by_threshold(self, used: float, colour: str) -> None:
+    def test_five_hour_background_by_threshold(self, used: float, colour: str) -> None:
         payload = load_status_payload("main_thread_integer.json")
         payload["rate_limits"]["five_hour"]["used_percentage"] = used
         get_data_layer().usage.update_from_status_event(payload, now=NOW)
         rendered = _render()
         assert rendered is not None
-        assert f"{colour}5h " in rendered
+        assert f"{colour}5h" in rendered
 
     def test_each_window_is_coloured_by_its_own_percentage(self) -> None:
         _feed("main_thread_fractional.json")  # 5h 67.4 -> yellow, 7d 81.9 -> orange
@@ -155,13 +161,19 @@ class TestColour:
         rendered = _render(handler)
         assert rendered is not None
         assert f"{_CRITICAL}5h 13%" in rendered
-        assert f"{_GREEN}7d 3%" in rendered
+        assert f"{_GREEN}7d\033[0m" in rendered
 
-    def test_every_coloured_part_is_reset(self) -> None:
+    def test_every_chip_is_reset(self) -> None:
         _feed("main_thread_integer.json")
         rendered = _render()
         assert rendered is not None
         assert rendered.count("\033[0m") == 2
+
+    def test_the_separator_carries_no_background(self) -> None:
+        _feed("main_thread_integer.json")
+        rendered = _render()
+        assert rendered is not None
+        assert "\033[0m|" in rendered
 
 
 class TestFormatCountdown:
@@ -206,13 +218,14 @@ class TestHandlerContract:
     def test_explanation_names_its_glyphs_and_thresholds(self) -> None:
         explanation = UsageIndicatorHandler().explain_segment()
         assert explanation.name == "Subscription Usage"
+        assert "📊" in explanation.glyphs
         assert "5h" in explanation.glyphs and "7d" in explanation.glyphs
         assert "60" in explanation.how_to_read and "90" in explanation.how_to_read
 
     def test_explanation_current_value_reflects_the_snapshot(self) -> None:
         assert "no usage" in UsageIndicatorHandler().explain_segment().current_value.lower()
-        _feed("main_thread_integer.json")
-        assert "5h 13%" in UsageIndicatorHandler().explain_segment().current_value
+        _feed("main_thread_fractional.json")
+        assert "5h 67%" in UsageIndicatorHandler().explain_segment().current_value
 
     def test_acceptance_tests_declared(self) -> None:
         assert UsageIndicatorHandler().get_acceptance_tests()

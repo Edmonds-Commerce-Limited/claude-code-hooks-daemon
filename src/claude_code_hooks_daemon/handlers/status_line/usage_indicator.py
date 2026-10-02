@@ -1,6 +1,10 @@
 """UsageIndicatorHandler - subscription usage in the status line (Plan 00479).
 
-Renders the 5-hour and weekly usage windows, e.g. ``5h 13% (3h 20m) · 7d 3%``.
+Renders the 5-hour and weekly usage windows as compact background-coloured
+chips after a graph icon. A window below the warning level is its label alone
+(``📊 5h|7d``); a window at or above it adds its percentage and reset countdown
+(``📊 5h 67% 3h 20m|7d``). Owner ruling: green needs no number, so the segment
+stays narrow until there is something worth reading.
 
 The figures come from the daemon's usage snapshot
 (:func:`claude_code_hooks_daemon.core.data_layer.latest_usage`), which the
@@ -14,20 +18,15 @@ every other consumer: a window past its ``resets_at`` is gone.
 before its first response, and a plan without usage windows have nothing
 honest to show, and ``0%`` would be a claim rather than an absence.
 
-**Countdown.** The 5-hour window always shows the time to its reset, because
-it rolls over within the working day and that is the number that decides
-whether to wait. The weekly window shows its countdown only once it is at or
-above ``seven_day_countdown_pct`` (default 80): at 3% used a reset six days
-away is noise, and at 85% it is the thing worth knowing.
-
-**Colour** follows the context-usage bands (``model_context``): green, yellow,
-orange, and bold bright red. Each window is coloured by its own percentage.
-Percentages display rounded DOWN, so a ceiling of 80 is never displayed as
-reached while the real figure is 79.9.
+**Background colour** follows the context-usage chip bands (``model_context``):
+green, yellow, orange and red, each window coloured by its own percentage. The
+``|`` between chips carries no background. Percentages display rounded DOWN,
+so a ceiling of 80 is never displayed as reached while the real figure is 79.9.
 """
 
 import logging
 import math
+import re
 import time
 from typing import Any, Final
 
@@ -42,18 +41,19 @@ from claude_code_hooks_daemon.core.usage_snapshot import UsageSnapshot, UsageWin
 logger = logging.getLogger(__name__)
 
 _RESET: Final[str] = "\033[0m"
-# The same SGR sequences model_context uses for its green/yellow/orange/critical bands.
-_GREEN: Final[str] = "\033[32m"
-_YELLOW: Final[str] = "\033[33m"
-_ORANGE: Final[str] = "\033[38;5;208m"
-_CRITICAL: Final[str] = "\033[1;91m"
+# The same background chips model_context uses for its green/yellow/orange/critical bands.
+_GREEN: Final[str] = "\033[42m\033[30m"
+_YELLOW: Final[str] = "\033[43m\033[30m"
+_ORANGE: Final[str] = "\033[48;5;208m\033[30m"
+_CRITICAL: Final[str] = "\033[41m\033[97m"
+_ANSI: Final[re.Pattern[str]] = re.compile(r"\033\[[0-9;]*m")
 
 _DEFAULT_WARN_PCT: Final[int] = 60
 _DEFAULT_HIGH_PCT: Final[int] = 80
 _DEFAULT_CRITICAL_PCT: Final[int] = 90
-_DEFAULT_SEVEN_DAY_COUNTDOWN_PCT: Final[int] = 80
 
-_SEPARATOR: Final[str] = " · "
+_ICON: Final[str] = "📊"
+_SEPARATOR: Final[str] = "|"
 _SECONDS_PER_MINUTE: Final[int] = 60
 _SECONDS_PER_HOUR: Final[int] = 3600
 _SECONDS_PER_DAY: Final[int] = 86400
@@ -86,7 +86,6 @@ class UsageIndicatorHandler(StatusLineHandlerBase):
         self._warn_pct: float = _DEFAULT_WARN_PCT
         self._high_pct: float = _DEFAULT_HIGH_PCT
         self._critical_pct: float = _DEFAULT_CRITICAL_PCT
-        self._seven_day_countdown_pct: float = _DEFAULT_SEVEN_DAY_COUNTDOWN_PCT
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """Always run for status line events."""
@@ -101,20 +100,21 @@ class UsageIndicatorHandler(StatusLineHandlerBase):
             return _YELLOW
         return _GREEN
 
-    def _part(self, label: str, window: UsageWindow, now: float, *, countdown: bool) -> str:
-        text = f"{label} {math.floor(window.used_percentage)}%"
-        if countdown:
-            text += f" ({format_countdown(window.seconds_until_reset(now))})"
+    def _chip(self, label: str, window: UsageWindow, now: float) -> str:
+        """One window: the label alone below the warning level, else with % and countdown."""
+        text = label
+        if window.used_percentage >= self._warn_pct:
+            countdown = format_countdown(window.seconds_until_reset(now))
+            text = f"{label} {math.floor(window.used_percentage)}% {countdown}"
         return f"{self._colour(window.used_percentage)}{text}{_RESET}"
 
     def _render(self, snapshot: UsageSnapshot, now: float) -> str:
-        parts: list[str] = []
+        chips: list[str] = []
         if snapshot.five_hour is not None:
-            parts.append(self._part("5h", snapshot.five_hour, now, countdown=True))
+            chips.append(self._chip("5h", snapshot.five_hour, now))
         if snapshot.seven_day is not None:
-            show_countdown = snapshot.seven_day.used_percentage >= self._seven_day_countdown_pct
-            parts.append(self._part("7d", snapshot.seven_day, now, countdown=show_countdown))
-        return _SEPARATOR.join(parts)
+            chips.append(self._chip("7d", snapshot.seven_day, now))
+        return f"{_ICON} {_SEPARATOR.join(chips)}"
 
     def handle(self, hook_input: dict[str, Any]) -> AdvisoryResult:
         """Return the usage segment, or no segment when there is no live usage data."""
@@ -142,23 +142,21 @@ class UsageIndicatorHandler(StatusLineHandlerBase):
                 "of a claude.ai Pro or Max session."
             )
         else:
-            plain = self._render(snapshot, now)
-            for colour in (_GREEN, _YELLOW, _ORANGE, _CRITICAL, _RESET):
-                plain = plain.replace(colour, "")
-            current_value = f"Currently shows: {plain}"
+            current_value = f"Currently shows: {_ANSI.sub('', self._render(snapshot, now))}"
         return SegmentExplanation(
-            glyphs=("5h", "7d"),
+            glyphs=(_ICON, "5h", "7d"),
             name="Subscription Usage",
             what_it_is=(
                 "How much of the claude.ai subscription's 5-hour and weekly usage windows "
                 "is used, read from the `rate_limits` Claude Code ships on each status render."
             ),
             how_to_read=(
-                "`5h 13% (3h 20m)` is 13% of the 5-hour window used, resetting in 3h 20m. "
-                "`7d 3%` is the weekly window; its reset countdown appears once it reaches "
-                f"{self._seven_day_countdown_pct:g}%. Green below {self._warn_pct:g}%, "
-                f"yellow from {self._warn_pct:g}%, orange from {self._high_pct:g}%, bold red "
-                f"from {self._critical_pct:g}%. Percentages are rounded down. A window past "
+                "`📊 5h|7d` are the 5-hour and weekly windows, each on a background "
+                f"coloured by its usage: green below {self._warn_pct:g}%, yellow from "
+                f"{self._warn_pct:g}%, orange from {self._high_pct:g}%, red from "
+                f"{self._critical_pct:g}%. A green window shows only its label; from "
+                f"{self._warn_pct:g}% it adds its percentage and reset countdown, e.g. "
+                "`5h 67% 3h 20m`. Percentages are rounded down. A window past "
                 "its reset is dropped; nothing is shown when no usage data exists (API-key "
                 "sessions, or before the first response)."
             ),
@@ -177,7 +175,7 @@ class UsageIndicatorHandler(StatusLineHandlerBase):
                 title="usage indicator renders subscription usage",
                 command='echo "test"',
                 description=(
-                    "Verify the status line carries a '5h NN% (..) · 7d NN%' segment on a "
+                    "Verify the status line carries a '📊 5h|7d' usage segment on a "
                     "claude.ai subscription session. Absent when Claude Code reports no "
                     "usage data. Confirmed active by the daemon loading without errors."
                 ),
