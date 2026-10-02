@@ -1392,6 +1392,26 @@ persistent_crons:
         non-durable and ends automatically when the session exits, and a still-live
         session stays exposed to the next rate limit without it. Remove it (CronDelete)
         only once the session is genuinely finished with no further work.
+    # Plan 00470 Task 2.4: the background-process watchdog is a standing job, so
+    # every session has the safety net for a runaway while the REPL is idle. The
+    # prompt MUST stay byte-identical to background_process_tracker's
+    # watchdog_cron_prompt() in self-install form (a test pins it). Declared
+    # means cron_stop_enforcer requires it for the whole session, and an idle
+    # tick is a no-op rather than a reason to delete it.
+    - id: background-watchdog
+      schedule: "37 * * * *"   # Off the :00 mark, and distinct from the 23 and 47 jobs above
+      description: "Background-process watchdog: harvests runaway processes while the REPL is idle"
+      enabled: true
+      prompt: |
+        [tick:watchdog]
+        **BACKGROUND WATCHDOG TICK (automated — NOT a heartbeat, NOT human input).**
+        Run `bin/hooks-daemon harvest-background` and act on any runaway it
+        surfaces: reap the WHOLE process group (`kill -- -<pgid>`), never just the pid.
+        A long task that is deliberately wanted (a build, a server, a QA run) is not a
+        runaway: note KEEP_RUNNING_BECAUSE="<reason>" and leave it alone. If nothing is
+        surfaced, this tick is a no-op — do not interrupt or duplicate work in flight.
+        Do NOT delete this cron merely because a tick finds nothing: it is non-durable
+        and ends with the session, and the next backgrounded job needs it.
 
 # Plan workflow configuration (single source of truth for plan tracking)
 plan_workflow:

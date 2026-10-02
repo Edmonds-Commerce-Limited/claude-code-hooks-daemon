@@ -229,7 +229,31 @@ def find_breaches(
                     tree_pgids=tuple(sorted({r.pgid for r in tree} - excluded)),
                 )
             )
-    return breaches
+    return _one_breach_per_group(breaches)
+
+
+def _one_breach_per_group(breaches: Sequence[Breach]) -> list[Breach]:
+    """Collapse breaches that share a process group into one entry.
+
+    A wrapper shell and the job it runs sit in one group and both carry the
+    tracked command, so each breaches on its own; listing both names one
+    ``kill -- -<pgid>`` twice and reads as two jobs. The first record seen
+    represents the group, and the entry keeps every reason, the busiest tree
+    and every group any member's tree spans.
+    """
+    merged: dict[int, Breach] = {}
+    for breach in breaches:
+        first = merged.get(breach.record.pgid)
+        if first is None:
+            merged[breach.record.pgid] = breach
+            continue
+        merged[breach.record.pgid] = Breach(
+            record=first.record,
+            reasons=tuple(dict.fromkeys((*first.reasons, *breach.reasons))),
+            tree_pcpu=max(first.tree_pcpu, breach.tree_pcpu),
+            tree_pgids=tuple(sorted({*first.tree_pgids, *breach.tree_pgids})),
+        )
+    return list(merged.values())
 
 
 def _descendants(records: Sequence[ProcessRecord], root_pid: int) -> list[ProcessRecord]:
