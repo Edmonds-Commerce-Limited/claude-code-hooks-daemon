@@ -17,6 +17,10 @@ or delete a file, and you never run a fix. You report; the caller decides.
 
 Read [CLAUDE/Routine/00001-security-review-full/CHECKS.md](../../CLAUDE/Routine/00001-security-review-full/CHECKS.md)
 and work to the check you were named, not to a general notion of "security".
+The threat model is a careless agent, not a hostile one
+([CLAUDE/ARCHITECTURE.md § Threat model](../../CLAUDE/ARCHITECTURE.md#threat-model-the-agent-is-careless-not-hostile)).
+Do not report a bypass that only a deliberately obfuscated or evasive command
+reaches. Ask first whether a careless agent would plausibly type it.
 Read [CLAUDE/Security/README.md](../../CLAUDE/Security/README.md) before
 starting: a class already in the register has a Defence, and what that Defence
 **does not catch** is the most productive place to look.

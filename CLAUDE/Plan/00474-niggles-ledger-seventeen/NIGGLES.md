@@ -710,7 +710,7 @@ Recorded only on `worktree-n466-n53`, which was dropped. Their write-ups are kep
 verbatim in [CARRIED-N53-BRANCH.md](CARRIED-N53-BRANCH.md). Five were remedied on
 that branch only, so all seven are open on `main`.
 
-**Status**: ⬜ Open (five of seven). N244 and N245 are fixed, see below.
+**Status**: N244 and N245 fixed; N135, N176, N177 and N189 dismissed; N246 open. See below.
 
 - **N244**: **Fixed** (merge 52fd9cd9b). On a bare `git commit`, plan QA now scans
   the INDEX instead of the disk. It uses one `ls-files -s` and one `cat-file --batch`
@@ -720,20 +720,24 @@ that branch only, so all seven are open on `main`.
   (`path-existence`, `plan-doc-size`, `journal-entry-ordering`, `same-commit-plan-doc`,
   and the journal lookups in `checks/common.py`). Report:
   [subagent-reports/261002-n244-committed-tree-sonnet.md](subagent-reports/261002-n244-committed-tree-sonnet.md).
-- **N245**: **Fixed** (branch `worktree-n245-pathspec`, not yet merged). Every commit
-  gate now judges the tree the commit records, by its form. `git commit <paths>` records
-  HEAD plus the named paths' working-tree content. `--include` records the index plus
-  that overlay. Before, `staged_lint_gate`, `remote_docs_commit_gate`, plan QA and docs QA
-  read the whole index, so a staged break the disk had repaired was denied. Worse,
-  `sensitive_content` read only the index, so a term in a named file's unstaged edit
-  reached the commit unseen. `GitFactsBase` takes `include=` and lists the recorded tree
-  (a listing value of `working-tree` means "read the disk"); the gates build on it.
-  `guard_config_commit_gate` now reads the index for `--include`. A pathspec held in a
-  file (`--pathspec-from-file`) is scanned as the index and the working tree together.
-  Still not covered: `-a` in plan and docs QA, an unborn HEAD with a pathspec, a bare
-  commit's file content in `remote_docs_commit_gate` (it reads the disk), and N246.
-  Report:
-  [subagent-reports/261002-n245-pathspec-sonnet.md](subagent-reports/261002-n245-pathspec-sonnet.md).
+
+- **N245, N246**: in progress on `worktree-n245-pathspec`.
+
+- **N135, N176, N177, N189: ✅ Dismissed. They are out of scope under the owner's
+  threat-model ruling**
+  ([ARCHITECTURE.md § Threat model](../../ARCHITECTURE.md#threat-model-the-agent-is-careless-not-hostile)).
+  The daemon helps a careless agent and does not defend against a hostile one, which
+  could simply stop the daemon. Each of these commits is reached only through a shape an
+  adversary writes:
+
+  - text run by `bash -c "$X"` or `eval`;
+  - a git alias;
+  - `builtin cd`;
+  - a commit nested in `$(( $(…) ))`;
+  - a `case` inside `function f {` inside `$( )`.
+
+  Neither remedy is wanted: not the dropped branch's shell walk, and not a git
+  `pre-commit` hook built to catch these shapes.
 
 ### N253–N256 — carried from ledger 00466, their branch dropped
 
@@ -1176,7 +1180,8 @@ and `json.loads` every file in `untracked/cache-sidecar/<session>/`. This sessio
 session runs and is paid on every render, so a long-lived orchestrator session pays the most. The
 slowness also makes Claude Code abandon renders (N294).
 
-**Status**: ✅ Fixed (merge of `worktree-n295-cache-sidecar`). The reader now
+**Status**: ✅ Fixed (merge b44e395a5). Live after the restart: 17 renders took 0–3 ms each,
+against 84–427 ms before, and the logs held no unretrieved task exception (N294). The reader now
 remembers each session's totals in memory and checks one thing per render: the session directory's
 modification time. Every sub-agent write is a rename into that directory, which changes it, so an
 unchanged time means no agent was added, rewritten or removed. A time younger than two seconds is
@@ -1203,6 +1208,13 @@ where the helper does the logging. The N294 agent wrote it that way because the 
 was flagged. In N294 the handling is correct: a peer that has hung up leaves nothing to do, and
 the pre-existing `_log_lost_peer` branch uses the same shape. But the detector cannot tell a
 deliberate, justified case from one that hides a real failure behind a helper.
+
+The gap is wider than helpers. The rule fires only when the body is exactly ONE statement, so
+a log call followed by `continue`, `return {}` or any other statement also passes. The N295
+agent reported reworking three flags this way. Its merged reader logs at DEBUG, then skips one
+unreadable file or returns empty totals. That is the documented fail-silent contract for
+status-line reads, so the handling is correct there. But the audit can neither confirm nor
+reject it.
 
 **Open question**: what should a justified log-and-continue look like? Two options: one
 recognised, reviewable marker, or a named helper that the audit allowlists. A helper that

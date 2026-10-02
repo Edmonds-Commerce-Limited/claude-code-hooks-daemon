@@ -507,8 +507,10 @@ class Priority:
     NITPICK_DISMISSIVE = 10
     NITPICK_HEDGING = 20
     # Plan 00475 Task 4.2: an advisory on a Bash `git merge`, in the advisory
-    # band ahead of the other PreToolUse advisories at 57-58.
-    MERGE_QA_ADVISOR = 56
+    # band after the other PreToolUse advisories at 57-58. Not 56: this
+    # repository's `orchestrator-simulate` project handler holds that slot
+    # (tests/integration/test_project_handler_priority_collisions.py).
+    MERGE_QA_ADVISOR = 59
     DAEMON_DOCS_GUARD = 57
     FLAGGABLE_WORK_ADVISOR = 58
     BRITISH_ENGLISH = 60

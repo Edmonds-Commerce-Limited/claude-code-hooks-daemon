@@ -115,6 +115,9 @@ _FIELD_COMMAND: Final[str] = "command"
 # Write/Edit, a command line for Bash. It was "File:" while only file writes
 # were guarded, which now reads as a lie half the time.
 _SUBJECT_LABEL: Final[str] = "Offending input"
+_WORD_LIST_UNREADABLE_FINDING: Final[str] = (
+    "cannot be checked: the secret word list exists but cannot be read"
+)
 
 # Git METADATA write surfaces. Contents and paths are only two of the seven
 # places a term can enter a repository; the other five are metadata, and every
@@ -698,7 +701,10 @@ class SensitiveContentHandler(PreToolUseHandlerBase):
             name = public_match.get(_PATTERN_KEY_NAME, "unnamed pattern")
             return f"matches the sensitive-content pattern `{name}`"
 
-        terms = self._secret_terms()
+        try:
+            terms = self._secret_terms()
+        except sr.SecretWordListUnreadableError:
+            return _WORD_LIST_UNREADABLE_FINDING
         for index, term in enumerate(terms, start=1):
             if sr.find_first_match_index(content, (term,)) is not None:
                 return f"matches entry {index} of {len(terms)} in the secret word list"
@@ -748,7 +754,11 @@ class SensitiveContentHandler(PreToolUseHandlerBase):
         ):
             return True
 
-        terms = self._secret_terms()
+        try:
+            terms = self._secret_terms()
+        except sr.SecretWordListUnreadableError:
+            # Nothing can be checked, so nothing may be allowed: handle() denies.
+            return True
         return any(sr.find_first_match_index(hay.text, terms) is not None for hay in haystacks)
 
     def _dispatch_key(self, hook_input: dict[str, Any]) -> _DispatchKey:
@@ -1333,7 +1343,18 @@ class SensitiveContentHandler(PreToolUseHandlerBase):
             if public_match is not None:
                 return self._deny_public_pattern(transcript_path, hay.subject, public_match)
 
-        terms = self._secret_terms()
+        try:
+            terms = self._secret_terms()
+        except sr.SecretWordListUnreadableError as exc:
+            # The path is named; the message carries no content or term.
+            return GatingResult(
+                decision=Decision.DENY,
+                reason=(
+                    "BLOCKED: the secret word list exists but cannot be read, so this "
+                    f"write cannot be checked against it. {exc}. Restore read access "
+                    "to the list (or remove it to opt out) and retry."
+                ),
+            )
         for hay in haystacks:
             index = sr.find_first_match_index(hay.text, terms)
             if index is not None:

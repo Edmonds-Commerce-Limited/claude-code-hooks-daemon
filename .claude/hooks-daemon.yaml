@@ -739,7 +739,7 @@ handlers:
 
     merge_qa_advisor:      # Advises the static checks when a merged work branch has no recorded green llm_qa.py changed run (Plan 00475 Task 4.2)
       enabled: true        # Advisory only; silent when the head's green run is recorded or git cannot answer
-      priority: 56
+      priority: 59
 
     daemon_docs_guard:     # Warns when reading from hooks-daemon internal CLAUDE/ docs (wrong directory)
       enabled: true

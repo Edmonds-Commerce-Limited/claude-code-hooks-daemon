@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import logging
 import re
+import stat
 from pathlib import Path
 from typing import Any, Final
 
@@ -42,6 +43,9 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_SECRET_WORD_LIST_PATH: Final[str] = ".claude/block-words.secret"
 REDACTED_PLACEHOLDER: Final[str] = "[REDACTED]"
+# Stands in for a payload a sink could not redact because the word list is
+# unreadable: with no terms to match, the only safe output is none of it.
+WITHHELD_PLACEHOLDER: Final[str] = "[WITHHELD: secret word list unreadable]"
 
 _COMMENT_PREFIX: Final[str] = "#"
 
@@ -64,6 +68,18 @@ _MISSING_FILE_MTIME: Final[float] = -1.0
 # Process-lifetime cache for the CONFIGURED path (see module docstring).
 _ACTIVE_PATH_RESOLVED: bool = False
 _ACTIVE_PATH: Path | None = None
+
+
+class SecretWordListUnreadableError(OSError):
+    """The secret word list EXISTS but cannot be read as a list of terms.
+
+    An absent list is the documented opt-out and stays inert. A list the
+    project did create but the daemon cannot read is a different fact: treating
+    it as "no terms" would silently disable every guard and redaction sink that
+    depends on it. Subclasses ``OSError`` so best-effort sinks that already
+    catch ``OSError`` skip their write rather than emit unredacted output. The
+    message names the path and the failure kind only, never any content.
+    """
 
 
 def resolve_secret_word_list_path(configured_path: str | None, project_root: Path) -> Path:
@@ -137,21 +153,41 @@ def describe_secret_word_list_degradation(configured_path: str | None) -> str | 
     return None
 
 
+def _unreadable(path: Path, reason: str) -> SecretWordListUnreadableError:
+    return SecretWordListUnreadableError(
+        f"secret word list exists but cannot be read: {path} ({reason})"
+    )
+
+
 def load_secret_terms(path: Path) -> tuple[str, ...]:
     """Load terms from ``path``: one per line, ``#`` comments, blanks ignored.
 
     Order is preserved (never sorted/deduplicated) so a 1-based index into
-    the returned tuple is stable and meaningful in a deny message. A missing
-    or unreadable file is a documented no-match, not an error — the feature
-    must stay inert until a project opts in by creating the file.
+    the returned tuple is stable and meaningful in a deny message. An ABSENT
+    file is a documented no-match: the feature must stay inert until a project
+    opts in by creating the file.
+
+    Anything else at ``path`` counts as opting in, so it must be a readable
+    regular file: a dangling symlink, a directory, a FIFO or a read error is
+    never an empty term set.
+
+    Raises:
+        SecretWordListUnreadableError: ``path`` exists but cannot be read.
     """
-    if not path.is_file():
+    try:
+        mode = path.stat().st_mode
+    except (FileNotFoundError, NotADirectoryError):
+        if path.is_symlink():
+            raise _unreadable(path, "dangling symlink") from None
         return ()
+    except OSError as exc:
+        raise _unreadable(path, exc.strerror or type(exc).__name__) from exc
+    if not stat.S_ISREG(mode):
+        raise _unreadable(path, "not a regular file")
     try:
         text = path.read_text(encoding="utf-8", errors="replace")
     except OSError as exc:
-        logger.debug("Could not read secret word list %s: %s", path, exc)
-        return ()
+        raise _unreadable(path, exc.strerror or type(exc).__name__) from exc
 
     terms: list[str] = []
     for raw_line in text.splitlines():
@@ -167,11 +203,21 @@ def get_cached_secret_terms(path: Path) -> tuple[str, ...]:
 
     A missing file is cached too (as :data:`_MISSING_FILE_MTIME`) so repeated
     lookups for an absent file are a dict lookup, not a repeated ``stat()``.
+    An unreadable list is never cached: the error propagates on every call, so
+    it cannot be remembered as "no terms".
+
+    Raises:
+        SecretWordListUnreadableError: ``path`` exists but cannot be read.
     """
     try:
         mtime = path.stat().st_mtime
-    except OSError:
+    except (FileNotFoundError, NotADirectoryError):
         mtime = _MISSING_FILE_MTIME
+    except OSError:
+        return load_secret_terms(path)
+
+    if mtime == _MISSING_FILE_MTIME and path.is_symlink():
+        return load_secret_terms(path)
 
     cached = _TERMS_CACHE.get(path)
     if cached is not None and cached[0] == mtime:
@@ -257,7 +303,12 @@ def get_active_secret_terms() -> tuple[str, ...]:
     The one entry point every leak-vector site (payload capture, router
     debug log, front-controller error log, transcript archiver) calls.
     Empty tuple whenever the feature is inert (no file, no config, no
-    initialised project) — never raises.
+    initialised project).
+
+    Raises:
+        SecretWordListUnreadableError: the configured list exists but cannot
+            be read. Callers either fail closed or use
+            :func:`redact_structure_active`.
     """
     path = _resolve_active_path()
     if path is None:
@@ -404,3 +455,19 @@ def redact_structure(obj: Any, terms: tuple[str, ...]) -> Any:
     if isinstance(obj, list):
         return [redact_structure(item, terms) for item in obj]
     return obj
+
+
+def redact_structure_active(obj: Any) -> Any:
+    """Redact ``obj`` with the active word list, or withhold it entirely.
+
+    The one entry point for sinks that log or persist a payload. When the
+    configured list is unreadable there are no terms to redact with, so the
+    payload is replaced by :data:`WITHHELD_PLACEHOLDER` rather than written
+    through as if nothing needed redacting.
+    """
+    try:
+        terms = get_active_secret_terms()
+    except SecretWordListUnreadableError as exc:
+        logger.warning("Withholding a logged payload: %s", exc)
+        return WITHHELD_PLACEHOLDER
+    return redact_structure(obj, terms) if terms else obj

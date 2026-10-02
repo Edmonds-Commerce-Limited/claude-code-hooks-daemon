@@ -47,7 +47,9 @@ the second question, which is the one that survives.
 - **Not a threat model.** It records what has actually been found, not what
   might exist. The full sweep's [check
   inventory](../Routine/00001-security-review-full/CHECKS.md) is where "what
-  should we look for" lives.
+  should we look for" lives, and the threat model it works to (a careless
+  agent, never a hostile one) is in
+  [ARCHITECTURE.md](../ARCHITECTURE.md#threat-model-the-agent-is-careless-not-hostile).
 - **Not a findings dump.** A finding with no category and no Defence is not
   finished being understood, and filing it here would make it look finished.
 

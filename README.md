@@ -60,6 +60,22 @@ good at the time — that is the property you want.
 That is the whole argument in one line: **when you have an agent that can go
 off the rails, the thing enforcing the rails must not be another agent.**
 
+### Guardrails, not armour
+
+The daemon catches a well-meaning agent doing something careless. It does not
+defend against an agent trying to defeat it, and it cannot: an agent that wants
+to get past it can stop the daemon process. So the guards are built for the
+commands an agent writes in ordinary work, such as a stray `git reset --hard`,
+a `cat` of a secrets file, or a credential in a commit. They do not chase
+commands built to evade them, such as a commit assembled from text and run
+through `eval`. A guard that denies ordinary work to catch an obfuscated trick
+would fail the agents it exists to help.
+
+The daemon is one safety layer, not a sandbox. For an untrusted agent, use
+real isolation as well: a container, a VM, or a restricted user. The full
+statement is in
+[ARCHITECTURE.md § Threat model](CLAUDE/ARCHITECTURE.md#threat-model-the-agent-is-careless-not-hostile).
+
 ---
 
 ## Where this came from

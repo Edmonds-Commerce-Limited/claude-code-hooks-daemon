@@ -15,6 +15,7 @@ from claude_code_hooks_daemon.core.front_controller import (
 )
 from claude_code_hooks_daemon.core.handler import Handler
 from claude_code_hooks_daemon.core.hook_result import Decision, HookResult
+from claude_code_hooks_daemon.utils import secret_redaction
 
 # Test Fixtures
 
@@ -903,7 +904,7 @@ class TestLogErrorToFile:
 class TestLogErrorToFileSecretRedaction:
     """Plan 00201: a secret term in hook_input must never reach hook-errors.log."""
 
-    @patch("claude_code_hooks_daemon.core.front_controller.get_active_secret_terms")
+    @patch.object(secret_redaction, "get_active_secret_terms")
     @patch("claude_code_hooks_daemon.core.front_controller.get_workspace_root")
     @patch("pathlib.Path.open", new_callable=mock_open)
     @patch("pathlib.Path.exists")
@@ -923,7 +924,7 @@ class TestLogErrorToFileSecretRedaction:
         written = "".join(call.args[0] for call in mock_file().write.call_args_list)
         assert "zzqx-nonsense-term" not in written
 
-    @patch("claude_code_hooks_daemon.core.front_controller.get_active_secret_terms")
+    @patch.object(secret_redaction, "get_active_secret_terms")
     @patch("claude_code_hooks_daemon.core.front_controller.get_workspace_root")
     @patch("pathlib.Path.open", new_callable=mock_open)
     @patch("pathlib.Path.exists")
