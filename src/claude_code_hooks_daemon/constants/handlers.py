@@ -673,6 +673,21 @@ class HandlerID:
         display_name="cron-record-keeper",
     )
 
+    # Stop failure pair -- Plan 00470 Task 3.1: the recorder writes down a turn
+    # that ended on a rate limit or a credential error (StopFailure), the
+    # resolver marks it resolved once the session submits its next prompt, and
+    # the usage indicator shows the unresolved one in the status line.
+    STOP_FAILURE_RECORDER = HandlerIDMeta(
+        class_name="StopFailureRecorderHandler",
+        config_key="stop_failure_recorder",
+        display_name="stop-failure-recorder",
+    )
+    STOP_FAILURE_RESOLVER = HandlerIDMeta(
+        class_name="StopFailureResolverHandler",
+        config_key="stop_failure_resolver",
+        display_name="stop-failure-resolver",
+    )
+
     # Advisory handlers (Priority: 55-60)
     CRITICAL_THINKING_ADVISORY = HandlerIDMeta(
         class_name="CriticalThinkingAdvisoryHandler",

@@ -143,13 +143,14 @@
 | 15 | disclosure_reset_pre_compact | NON-TERMINAL | Reset DisclosureTracker state for the firing agent on PreCompact |
 | 20 | compaction_signal | NON-TERMINAL | Write a ``<session>.compacting`` signal on PreCompact for the supervisor |
 
-### UserPromptSubmit (7 handlers)
+### UserPromptSubmit (8 handlers)
 
 | Priority | Handler | Behaviour | Description |
 |----------|---------|----------|-------------|
 | 9 | usage_pause_gate | BLOCKING | Record and enforce the usage pause on UserPromptSubmit |
 | 10 | git_context_injector | CONTEXT | Inject current git status as context when user submits a prompt |
 | 37 | failsafe_cron_blockage_suppressor | BLOCKING | Suppress a delivered failsafe-cron tick while the session is stably |
+| 38 | stop_failure_resolver | ADVISORY | Resolve this session's recorded StopFailure when it submits a prompt |
 | 55 | critical_thinking_advisory | ADVISORY | Periodically inject advisory context encouraging critical evaluation |
 | 56 | idle_housekeeping_advisory | ADVISORY | After N consecutive no-op recovery ticks, advise a report-first |
 | 57 | standing_authorisations | ADVISORY | Inject the authorisations a project has recorded in its config |
@@ -219,6 +220,12 @@
 | Priority | Handler | Behaviour | Description |
 |----------|---------|----------|-------------|
 | 10 | agent_terminated_early_failure_detector | ADVISORY | PostToolUseFailure advisory: surfaces a foreground Agent/Task dispatch killed by a harness usage limit |
+
+### StopFailure (1 handler)
+
+| Priority | Handler | Behaviour | Description |
+|----------|---------|----------|-------------|
+| 50 | stop_failure_recorder | ADVISORY | Record each rate-limit or credential StopFailure, silently |
 
 ### Daemon Plugin (1 handler)
 

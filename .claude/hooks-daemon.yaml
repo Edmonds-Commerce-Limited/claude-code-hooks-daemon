@@ -1102,6 +1102,10 @@ handlers:
       enabled: true  # On by default (dogfooding purpose); never terminal
       priority: 37
 
+    stop_failure_resolver:  # A later prompt resolves the session's recorded StopFailure, so the status line drops its chip (Plan 00470)
+      enabled: true  # Silent bookkeeping; never terminal
+      priority: 38
+
     critical_thinking_advisory:  # Periodic advisory encouraging critical evaluation
       enabled: true
       priority: 55
@@ -1325,6 +1329,10 @@ handlers:
             # sharing one copy is correct.
             - .claude/hooks-daemon.env
 
+  stop_failure:  # StopFailure event (a turn that ended on an API error)
+    stop_failure_recorder:  # Records a rate_limit / authentication_failed / cloud_credential_error turn; the usage indicator shows it (Plan 00470)
+      enabled: true  # Silent bookkeeping; never terminal
+      priority: 50
 
 # Project-level handlers (custom handlers in .claude/hooks/handlers/)
 plugins:

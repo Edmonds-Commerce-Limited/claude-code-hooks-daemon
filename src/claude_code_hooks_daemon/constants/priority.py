@@ -145,6 +145,13 @@ class Priority:
     USAGE_PAUSE_TOOL_GATE = 9
     USAGE_PAUSE_STOP_GATE = 6
 
+    # Stop failure pair (Plan 00470 Task 3.1). The recorder is alone on
+    # StopFailure, so 50 is free. The resolver is a UserPromptSubmit handler
+    # and runs after usage_pause_gate (9), whose terminal deny ends the chain:
+    # a held prompt continues nothing and so never reaches it.
+    STOP_FAILURE_RECORDER = 50
+    STOP_FAILURE_RESOLVER = 38
+
     # Plan 00419 Task 1.7: the last free slot BELOW AUTO_CONTINUE_STOP's 10 in
     # this project's config, for the same shadowing reason as the pair above.
     # 9 rather than 6: this handler never denies, so it has no claim to run

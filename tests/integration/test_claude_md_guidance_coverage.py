@@ -477,6 +477,15 @@ _EXEMPT_FROM_GUIDANCE: dict[str, str] = {
         "CronDelete + CronCreate, is in cron_stop_enforcer's guidance and in its "
         "deny reason, so a section here would only repeat them"
     ),
+    "StopFailureRecorderHandler": (
+        "silent state-file writer, never denies and never speaks (T1 no, T3 no); "
+        "Claude Code ignores a StopFailure hook's output, and the failure it records "
+        "is shown to the human by the usage indicator in the status line"
+    ),
+    "StopFailureResolverHandler": (
+        "silent state-file writer, never denies and never speaks (T1 no, T3 no); "
+        "it only marks the recorded failure resolved when the session is prompted again"
+    ),
     "MonorepoDetectorHandler": (
         "never denies (T1 no); one-shot correction delivered fully at fire-time "
         "(paste-ready projects: block), not a standing policy to hold across "

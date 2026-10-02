@@ -63,7 +63,7 @@ Evidence, with verified facts marked apart from inferences, is in
 
 ### Phase 3: Limits, restarts, durable queue (owner: python-developer sub-agent, TDD)
 
-- [ ] ⬜ **Task 3.1**: StopFailure handler package: record `rate_limit`, `authentication_failed`, `cloud_credential_error` to a durable file and surface them in the status line.
+- [x] ✅ **Task 3.1**: StopFailure handler package: record `rate_limit`, `authentication_failed`, `cloud_credential_error` to a durable file and surface them in the status line. `stop_failure_recorder` writes `stop-failures.json` (bounded to 50); `stop_failure_resolver` (UserPromptSubmit) marks a session's failure resolved at its next prompt; the usage indicator shows `⚠ usage limit HH:MM` until then. Report: `subagent-reports/261002-p470-stopfail-sonnet.md`.
 
 - [ ] ⬜ **Task 3.2**: Notification handler records `quota_auto_resume_*`; on resume, inject a re-brief pointing at the queue. Also surface a BACKGROUND or teammate agent killed by a session or weekly limit, naming the agent so it can be re-briefed. Plan 00466 N46 covers only foreground dispatches, whose death arrives as a PostToolUse:Agent result. The 264 of 351 real dispatches that ran in the background report their death through a task notification instead.
 

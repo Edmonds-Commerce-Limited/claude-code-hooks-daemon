@@ -28,6 +28,12 @@ segment ends with ``⛔ 80%`` (one figure when both windows share the limit,
 else ``⛔ 5h 80% 7d 95%``, each limited window labelled). It is plain text,
 carries no background, and is hidden when no ceiling applies or there is no
 usage data to sit beside.
+
+**Failed turn.** A session whose last turn ended on a rate limit or a credential
+error leads with ``⚠ usage limit HH:MM`` (red), read from the record
+``stop_failure_recorder`` keeps and shown until the session's next prompt
+resolves it (``stop_failure_resolver``; Plan 00470 Task 3.1). Like the pause
+chip it shows even when there is no usage snapshot.
 """
 
 import logging
@@ -46,6 +52,10 @@ from claude_code_hooks_daemon.core.data_layer import latest_usage
 from claude_code_hooks_daemon.core.handler_bases import StatusLineHandlerBase
 from claude_code_hooks_daemon.core.segment_explanation import SegmentExplanation
 from claude_code_hooks_daemon.core.usage_snapshot import UsageSnapshot, UsageWindow
+from claude_code_hooks_daemon.utils.stop_failure_records import (
+    default_records_path,
+    latest_unresolved,
+)
 from claude_code_hooks_daemon.utils.usage_pause_gate import (
     active_usage_pause,
     load_project_config,
@@ -69,6 +79,13 @@ _DEFAULT_CRITICAL_PCT: Final[int] = 90
 _ICON: Final[str] = "📈"
 _PAUSE_ICON: Final[str] = "⏸"
 _CEILING_ICON: Final[str] = "⛔"
+_FAILURE_ICON: Final[str] = "⚠"
+#: How each recorded StopFailure error reads in the chip; an error not named here shows as is.
+_FAILURE_LABELS: Final[dict[str, str]] = {
+    "rate_limit": "usage limit",
+    "authentication_failed": "auth failed",
+    "cloud_credential_error": "cloud credential",
+}
 _SEPARATOR: Final[str] = "|"
 _SECONDS_PER_MINUTE: Final[int] = 60
 _SECONDS_PER_HOUR: Final[int] = 3600
@@ -168,13 +185,38 @@ class UsageIndicatorHandler(StatusLineHandlerBase):
         hhmm = f"{datetime.fromtimestamp(pause.resume_at):%H:%M}"
         return f"{_CRITICAL}{_PAUSE_ICON} usage {hhmm}{_RESET}"
 
+    @staticmethod
+    def _failure_chip(hook_input: dict[str, Any]) -> str | None:
+        """``⚠ usage limit HH:MM`` while this session's last turn ended on an API error.
+
+        Shown from the session's newest unresolved StopFailure record until its
+        next prompt resolves it. HH:MM is when the turn failed, in the machine's
+        local zone. None without a session id, a project context, or a failure.
+        """
+        session_id = str(hook_input.get(HookInputField.SESSION_ID) or "")
+        path = default_records_path()
+        if not session_id or path is None:
+            return None
+        failure = latest_unresolved(path, session_id)
+        if failure is None:
+            return None
+        label = _FAILURE_LABELS.get(failure.error, failure.error)
+        try:
+            hhmm = f"{datetime.fromtimestamp(failure.recorded_at):%H:%M}"
+        except (OverflowError, OSError, ValueError) as exc:
+            logger.debug("Skipping failure chip: unrepresentable time %r: %s", failure, exc)
+            return None
+        return f"{_CRITICAL}{_FAILURE_ICON} {label} {hhmm}{_RESET}"
+
     def handle(self, hook_input: dict[str, Any]) -> AdvisoryResult:
         """Return the usage segment, or no segment when there is no live usage data.
 
         A session paused on its usage ceiling leads with ``⏸ usage HH:MM``, and
-        shows it even when there is no usage snapshot.
+        shows it even when there is no usage snapshot. A session whose last turn
+        ended on an API error leads with ``⚠ usage limit HH:MM`` the same way.
         """
         now = time.time()
+        failure_chip = self._failure_chip(hook_input)
         pause_chip = self._pause_chip(hook_input, now)
         try:
             snapshot = latest_usage(now=now)
@@ -182,7 +224,7 @@ class UsageIndicatorHandler(StatusLineHandlerBase):
             logger.warning("Skipping usage indicator: %s", exc)
             snapshot = None
         usage = self._render(snapshot, now, self._ceiling_text(hook_input)) if snapshot else None
-        parts = [part for part in (pause_chip, usage) if part]
+        parts = [part for part in (failure_chip, pause_chip, usage) if part]
         if not parts:
             return AdvisoryResult(context=[])
         return AdvisoryResult(context=[f"| {' '.join(parts)}"])
@@ -203,7 +245,7 @@ class UsageIndicatorHandler(StatusLineHandlerBase):
         else:
             current_value = f"Currently shows: {_ANSI.sub('', self._render(snapshot, now))}"
         return SegmentExplanation(
-            glyphs=(_ICON, "5h", "7d", _PAUSE_ICON, _CEILING_ICON),
+            glyphs=(_ICON, "5h", "7d", _PAUSE_ICON, _CEILING_ICON, _FAILURE_ICON),
             name="Subscription Usage",
             what_it_is=(
                 "How much of the claude.ai subscription's 5-hour and weekly usage windows "
@@ -221,7 +263,10 @@ class UsageIndicatorHandler(StatusLineHandlerBase):
                 "sessions, or before the first response). `⏸ usage 14:35` in red means the "
                 "session is paused on its host's usage ceiling and resumes at that local time. "
                 "`⛔ 80%` is the ceiling this host runs under (`⛔ 5h 80% 7d 95%` when the "
-                "windows differ); it is absent when no ceiling applies."
+                "windows differ); it is absent when no ceiling applies. `⚠ usage limit 14:02` "
+                "in red means this session's last turn ended on an API error at that local "
+                "time (`usage limit`, `auth failed` or `cloud credential`) and the session has "
+                "not been prompted since; it is resolved, and disappears, at the next prompt."
             ),
             current_value=current_value,
         )
