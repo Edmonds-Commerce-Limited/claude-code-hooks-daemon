@@ -77,6 +77,29 @@ class TestTheChangedSelection:
         """Ledger 00466: an `eacces_safe` break reached main because `changed` skipped it."""
         assert tool in llm_qa.CHANGED_TOOL_NAMES
 
+    @pytest.mark.parametrize(
+        "tool",
+        [
+            "capture_corruption",
+            "dangerous_invocation_corpus",
+            "python_var_guidance",
+            "skip_list_substring",
+            "sensitive_content",
+            "british_english",
+            "git_history",
+            "github_urls",
+            "semgrep",
+        ],
+    )
+    def test_the_measured_cheap_checks_run_every_time(self, tool: str) -> None:
+        """Plan 00475 Task 2.1: each of these measured at 32 s or less on one host."""
+        assert tool in llm_qa.CHANGED_TOOL_NAMES
+
+    @pytest.mark.parametrize("tool", ["security_downgrade_flags", "smoke_test", "dependencies"])
+    def test_the_slow_or_environment_bound_checks_stay_out(self, tool: str) -> None:
+        """`dependencies` judges the local venv and runs `uv lock --check`; the rest are slow."""
+        assert tool not in llm_qa.CHANGED_TOOL_NAMES
+
     def test_no_changed_tool_needs_a_live_daemon(self) -> None:
         live = [n for n in llm_qa.CHANGED_TOOL_NAMES if llm_qa.TOOL_REGISTRY[n].live_daemon]
         assert live == []
