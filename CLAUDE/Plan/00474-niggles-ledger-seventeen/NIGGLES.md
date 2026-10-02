@@ -1402,6 +1402,20 @@ The uncertain-move union judges the hook directory and the LAST recorded move (`
 every candidate directory (`sub`). Remedy: judge every directory any `cd` in the chain could
 land in.
 
+### N319 — a stale local relay build fails 29 relay tests instead of being rebuilt or skipped
+
+**Source**: coordinator, the full `tests/integration` run on main after the N310 lesson.
+
+**Evidence**: 29 tests in `tests/integration/test_relay_guard_fail_open.py` failed on main, in a
+full run and again alone. They read the gitignored build
+`untracked/relay-build/hooks-relay-x86_64-unknown-linux-musl`, which is used whenever it exists.
+That file was older than `relay/hooks_relay.rs`: `grep -a 'is over the cap'` found the message in
+the source and not in the binary. After `bash relay/build.sh`, the relay suites passed (129).
+Nothing tells a developer the binary is stale, so the failures look like a relay regression.
+
+**Status**: ⬜ Open. Remedy: the relay tests build the binary when it is older than
+`relay/hooks_relay.rs`, or fail with one message saying "rebuild with `relay/build.sh`".
+
 ### N318 — N314's merge left main red: `check_module_length.py` was never classified as a walker
 
 **Source**: coordinator, red main after merge 1078e4291.
@@ -1412,7 +1426,7 @@ failed with `unclassified: ['check_module_length.py']`. The script also enumerat
 semgrep's `pathlib-quadratic-containment` reports. The sixth/fifth instance of the N310 class: a
 new QA script lands without the pins that every other walker already meets.
 
-**Status**: ✅ Fixed on worktree-n318-module-length-walker. The script walks through
+**Status**: ✅ Fixed (merge 9377f68af; both tests green on main). The script walks through
 `scan_scope.walk_files`, exits 2 when it examined nothing, reports `files_scanned`, uses
 `path_relative_to`, and is classified in `WALKERS` and `ROOT_OPTIONS`. Findings stay report-only.
 A second red test of the same class: merge bf8d40aa9 made `bash_safe_mode` block-by-default and
@@ -1559,6 +1573,11 @@ sub-agent's `changed` run caught it.
 A fourth instance came from the same merge: `tests/integration/test_handlers_do_not_match_prose.py`
 failed two cases because bash-safe-mode counted heredoc lines as statements (N312, fixed by
 d719ccac0). That suite is now on the coordinator's by-hand list too.
+
+A fifth instance followed (N318): `test_every_check_is_classified` and the stale
+`BashSafeModeHandler` exemption in `test_acceptance_test_coverage.py`. Hand-picked suites keep
+missing reds, so on a merge touching core code the coordinator now runs all of
+`tests/integration`.
 
 **Status**: ✅ Fixed for all four (2be30049c: all three usage-pause handlers are in the
 template and the priority is 59; the commit that records this entry rewrites the corpus row
