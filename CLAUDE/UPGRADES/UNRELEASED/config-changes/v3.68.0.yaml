@@ -81,12 +81,12 @@ config_changes:
       dormant: false
       description: >-
         NEW (Plan 00479). A status-line segment showing subscription usage,
-        for example `📈 5h|7d`, read from the `rate_limits` Claude Code sends
+        for example `📈 5h10%|7d5%`, read from the `rate_limits` Claude Code sends
         on every status render. Each window is a chip whose background is
         coloured by its own percentage (green, yellow from `warn_pct`, orange
-        from `high_pct`, red from `critical_pct`). A green window shows only
-        its label; from `warn_pct` it adds its percentage and reset
-        countdown, e.g. `5h 67% 3h 20m`. Hidden when there is no usage data.
+        from `high_pct`, red from `critical_pct`). A window below `warn_pct`
+        is its label and percentage run together; from `warn_pct` it is
+        spaced out and adds its reset countdown, e.g. `5h 67% 3h 20m`. Hidden when there is no usage data.
       example_yaml: |
         handlers:
           status_line:
