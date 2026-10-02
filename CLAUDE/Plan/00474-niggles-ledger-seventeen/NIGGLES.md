@@ -1380,6 +1380,30 @@ The uncertain-move union judges the hook directory and the LAST recorded move (`
 every candidate directory (`sub`). Remedy: judge every directory any `cd` in the chain could
 land in.
 
+### N310 — "unmapped [too-broad]" was treated as benign, and main stayed red twice
+
+**Source**: the strict-mode agent's `llm_qa changed`. The coordinator reproduced it on main.
+
+**Evidence**: two tests failed on main from 47ae8e2c7 and 506fd3f5e until 2be30049c:
+
+- `tests/daemon/test_init_config.py::test_all_pre_tool_use_handlers_in_config` failed because
+  `usage_pause_tool_gate` was missing from the init template.
+- `tests/integration/test_template_priorities_match_the_constants.py` failed because the template
+  shipped `merge_qa_advisor` at 56 against the constant's 59.
+
+The coordinator's range QA over those merges reported "0 failed", because `constants/priority.py`,
+`constants/handlers.py` and the handler set are "unmapped [too-broad]", so their tests are never
+selected. Every merge since was accepted with "too-broad is the expected non-defect, the full gate
+covers it". No full gate runs between releases, so main can stay red until release prep. N303 was
+the same mechanism.
+
+**Status**: ✅ Fixed for these two (2be30049c: all three usage-pause handlers are in the template
+and the priority is 59). ⬜ Open as a class. A "too-broad" verdict must not mean that no tests
+run. When the unmapped set touches constants, handler registration or templates, `changed`
+should also run the invariant suites that guard them: template/handler-set, priority,
+guidance-coverage and evasion classification. The coordinator runs those by hand on such merges
+until it does. This belongs with Plan 00475 Task 4.2.
+
 ### N309 — a docs page with an example session UUID cannot be vendored
 
 **Source**: Plan 00479 Task 1.1 agent.
