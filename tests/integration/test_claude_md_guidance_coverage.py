@@ -381,6 +381,11 @@ _EARNS_GUIDANCE: dict[str, str] = {
         "exclude gap this check happens to catch at session start"
     ),
     "MarkdownTableFormatterHandler": "T3 the daemon rewrites your .md files after every write",
+    "MergeQaAdvisorHandler": (
+        "T2 the green targeted run has to exist before the `git merge` this "
+        "fires on; at fire time the only remedy left is the slower static "
+        "check list"
+    ),
     "SecretFileHygieneCheckerHandler": "T3 the remediation commands must survive to be actioned",
     "ModelFallbackDetectorHandler": (
         "T3 'your session runs a substituted model' must persist until the "

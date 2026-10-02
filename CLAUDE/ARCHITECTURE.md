@@ -783,37 +783,85 @@ plugins:
 ### Threat model: the agent is careless, not hostile
 
 This is an owner ruling. The daemon helps an agent that makes mistakes. It does not defend
-against an agent that sets out to defeat it. A hostile agent wins anyway, because it can stop
-the daemon process. So no guard is judged on whether it survives deliberate evasion.
+against an agent that sets out to defeat it. A hostile agent wins anyway: it can stop the
+daemon process, and the hook layer fails open when the daemon does not answer (see
+[Security/FailOpenBoundaries.md](Security/FailOpenBoundaries.md)). So no guard is judged on
+whether it survives an out-of-scope shape. It is still judged on every ordinary respelling, such
+as a global option, quoting, or a path with `git` in it, because a careless agent produces those
+without trying.
+
+**Prompt injection is not defended against.** This is also an owner ruling. The daemon makes
+no claim to protect an agent that is following instructions planted in untrusted content, such
+as an issue body, a fetched page or a file in a cloned repository. It judges commands, never
+motive. So such an agent is caught exactly as far as its instructions produce in-scope shapes.
+Beyond that, the defence lies upstream: the permission mode, the human, and OS isolation. A
+finding is never raised as in scope because the agent "might have been injected". A
+prompt-injection defence would be its own project, possibly a future major version, and is
+not part of this model.
+
+What is protected is the outcome: uncommitted work, protected file contents, what reaches
+GitHub, repository history, the system Python. The test below decides whether a route to one
+of those is the daemon's job.
 
 What this decides:
 
 - **In scope**: what a well-meaning agent writes in ordinary work. Some examples:
 
+  - `git commit -am x` after an unrelated edit;
   - `git add x && git commit`;
   - `git commit <paths>`;
-  - `cd sub && git commit`;
-  - a protected file read by an ordinary `cat`, `grep` or interpreter one-liner;
-  - a careless secret in a commit.
+  - `cd sub && git commit`, `git -C sub commit`;
+  - a protected file read by an ordinary `cat`, `grep`, `find -exec` or interpreter
+    one-liner.
 
   A bypass found through one of these is a defect.
 
-- **Out of scope**: shapes only an adversary writes. Examples:
+- **Out of scope**: a shape is out of scope when EITHER of these holds.
 
-  - a command assembled from text (`bash -c "$X"`, `eval`, `printf`-built words);
-  - a git alias defined to hide a subcommand;
-  - arithmetic or substitution nesting chosen to slip past a parser;
-  - `/proc/self/...` or file-descriptor tricks;
-  - anything that disables or routes around the daemon itself.
+  1. The operative text is not visible to the daemon at the time of the call. It comes from
+     a variable, a file or a substitution's output: `bash -c "$X"`, `eval "$cmd"`,
+     `source f`, a git alias resolved at run time, words built by `printf -v` or arithmetic.
+  2. The shape has no working purpose other than defeating a parser. Examples:
+     `$(( $(…) ))` around a command, a `case` inside `function f {` inside `$( )`,
+     `/proc/self/fd` reads of a file that has a name, and anything that stops or routes
+     around the daemon.
 
-  A finding that needs one of these is recorded and dismissed under this ruling, not fixed.
+  A LITERAL body is visible and in scope: `bash -c 'git commit -m x'`,
+  `timeout 3600 bash -c '…'`, `python -c "open('.env').read()"`. These are in scope however
+  rarely typed: one level of `$( )`, a glob, `find -exec`, `xargs`, and git's global options
+  (`-C`, `-c`, `--git-dir`).
+
+  A finding that needs an out-of-scope shape is dismissed, not fixed. Recording it means two
+  things. The ledger or plan that raised it marks it `Dismissed (threat model)` and names the
+  shape. Where the finding is a command, a row goes into
+  `scripts/qa/dangerous-invocation-corpus.yaml` with verdict `UNCOVERED-accepted`, so the
+  corpus keeps asserting the verdict and the next sweep does not raise it again.
 
 - **False positives cost real work.** A guard that denies ordinary commands to catch
-  obfuscated ones fails the agents it exists to help. Prefer the simpler guard that lets the
-  adversarial shape through.
+  obfuscated ones fails the agents it exists to help. If catching an out-of-scope shape costs
+  an in-scope false positive, let the shape through. If it costs nothing, there is nothing to
+  remove.
 
-Reviews and security sweeps apply the same test before raising a bypass: would a careless
-agent plausibly type this?
+**What this ruling does not change:**
+
+- A guard that cannot read what it judges still fails closed. That covers
+  `R-SECRET-COMMAND-UNREADABLE`, the `*-EVALUATION-ERROR` rules and `JUDGED UNSEEN`. The
+  ruling caps what a guard must catch; it does not oblige a guard to allow what it cannot see.
+  The same shape can be dismissed for one gate and denied by another, and both are right.
+- No guard gains an escape hatch an agent can type (Plan 00259). An agent talking itself into
+  an exception is the careless agent, not the hostile one.
+- Human-gated steps stay human-gated: release, `approve-upgrade`, and protected-path
+  disclosure. Their guards keep the shapes they already close.
+- A protected file stays protected against every ORDINARY read route, including `Grep -l`
+  and an interpreter one-liner.
+- The fail-open behaviour under "Error Handling & Fail-Open Philosophy" is about
+  infrastructure failure: config, JSON, a crashed handler. It is not a statement about guards.
+- Code that already catches an out-of-scope shape is kept while it causes no in-scope false
+  positive, and it is not extended. A false positive it causes is fixed by narrowing it, not
+  by adding a parser. Removing it is a plan decision with the owner, never a review finding.
+
+Reviews and security sweeps apply the two-part test above before raising a bypass. "Would an
+agent plausibly type this?" is only a tiebreaker when the test does not settle it.
 
 ### Input Validation
 

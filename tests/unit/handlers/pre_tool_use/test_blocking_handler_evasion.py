@@ -342,6 +342,10 @@ _EVASION_CASES: dict[str, tuple[str, tuple[str, ...]]] = {
 # pattern match every ordinary `pip install` — caught here, in review, before it
 # ran. Nothing in the evasion table above would have noticed: every "must block"
 # case still passed. Both directions need a guard.
+#
+# The evasion table holds ORDINARY respellings only (global options, quoting,
+# wrappers), never shapes built to defeat a parser: those are out of scope
+# (CLAUDE/ARCHITECTURE.md, "Threat model: the agent is careless, not hostile").
 _MUST_NOT_MATCH: dict[str, tuple[str, ...]] = {
     "SubagentFullQaBlockerHandler": (
         # A mention is not a run, and a targeted run is the allowed path the

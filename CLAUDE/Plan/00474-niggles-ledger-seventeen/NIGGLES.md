@@ -1222,3 +1222,41 @@ merely moves the call out of sight is neither. Changing the audit, or adding all
 entries, needs the owner.
 
 **Status**: ⬜ Open.
+
+### N297 — the coordinator merged the merge advisor itself without a targeted QA run, and main broke twice
+
+**Source**: the coordinator, finding its own mistake.
+
+**Evidence**: the Plan 00475 Task 4.2 merge (301805f1f) added `merge_qa_advisor`. The
+coordinator merged it on static checks and the handler's own tests, and did not run
+`llm_qa.py changed`. Two of its effects were outside those tests:
+
+- Its priority (56) collided with the `orchestrator-simulate` project handler, so their order
+  was arbitrary. `test_project_handler_priority_collisions` failed.
+- It was not classified in `test_claude_md_guidance_coverage`.
+
+Both were found later, by targeted runs over other merges (N231, and the pause-gate branch).
+This is the N278 failure again: a branch merged with its targeted QA never run. The advisor
+built to catch that was not loaded yet when it merged.
+
+**Status**: ✅ Fixed. The priority is now 59 (47ae8e2c7) and the handler is classified
+(3dadb3d8c). The advisor is now live and fired on every merge since. The coordinator now runs
+`llm_qa.py changed` over each merge whose touched code reaches a core or cross-cutting file.
+
+### N298 — `R-PLAN-NUMBER-DISCOVERY` denies read-only listings of plan files, even inside quoted text
+
+**Source**: two Plan 00483 triage agents found it independently, and the coordinator
+reproduced it.
+
+**Evidence**: `plan_number_helper` denies these with `R-PLAN-NUMBER-DISCOVERY`:
+
+- `ls CLAUDE/Plan/*/PLAN.md` and `ls CLAUDE/Plan/*/release-notes*`. These list files; they do
+  not look for the next number.
+- A `printf '%s' '{…"command":"ls CLAUDE/Plan/*/PLAN.md"…}' > payload.json`, which runs no
+  `ls` at all. The text is a quoted argument written to a file.
+
+Under the threat model these are ordinary commands and a false positive is in scope. The rule
+exists to stop a scan that derives the next plan number (`ls | sort | tail`). A plain listing,
+or quoted text, is neither.
+
+**Status**: ⬜ Open (Plan 00483 Phase 3: narrow the match to number-discovery shapes).

@@ -232,6 +232,12 @@ def __init__(self):
 
 ### 3. Match Logic
 
+A guard catches what a careless agent types, not what an adversary builds to evade it. Match
+every ordinary spelling, including global options, quoting and `cd`. Do not grow the parser to
+chase out-of-scope shapes, and never widen a pattern into an ordinary false positive. The
+criterion is in
+[ARCHITECTURE.md § Threat model](ARCHITECTURE.md#threat-model-the-agent-is-careless-not-hostile).
+
 ```python
 def matches(self, hook_input: dict) -> bool:
     """Check if this handler applies to the given input.

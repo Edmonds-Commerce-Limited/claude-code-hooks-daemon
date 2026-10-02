@@ -38,6 +38,8 @@ Full write-ups are in [NIGGLES.md](NIGGLES.md). One line each here:
 
 | #          | Verdict                                                                                                          | Origin              | Status                      |
 | ---------- | ---------------------------------------------------------------------------------------------------------------- | ------------------- | --------------------------- |
+| N298       | `R-PLAN-NUMBER-DISCOVERY` denies a read-only `ls CLAUDE/Plan/*/PLAN.md`, even as quoted text                     | P483 triage         | ⬜ Open                     |
+| N297       | The coordinator merged `merge_qa_advisor` without a targeted run; main failed two tests (N278 again)             | Coordinator         | ✅ Fixed (3dadb3d8c)        |
 | N296       | `audit_error_hiding.py` sees log-and-continue only as a direct `logger.<level>()`; a helper call evades it       | N294 review         | ⬜ Open                     |
 | N295       | The prompt-cache chip parses every sub-agent sidecar (3,369 files) on every render: 84–427 ms                    | Coordinator         | ✅ Fixed (b44e395a5)        |
 | N294       | A status-line client that hangs up still logs an ERROR: `writer.wait_closed()` raises in `finally`               | Coordinator         | ✅ Fixed (fc6782bf1)        |
@@ -70,10 +72,10 @@ Full write-ups are in [NIGGLES.md](NIGGLES.md). One line each here:
 | N267       | Dropping a stale branch always needs a human, even when nothing can be lost                                      | Owner               | ✅ Fixed (74dbdc970)        |
 | 65 entries | Still open in the archived ledger 00466 ([index](../Completed/00466-niggles-ledger-sixteen/PLAN.md))             | 00466 close-out     | ⬜ Open                     |
 | N222 work  | Unfinished `tests/scaling.py` change saved from a merged branch's worktree ([saved](UNFINISHED-N252-SCALING.md)) | 00466 cleanup       | ⬜ Open                     |
-| 22 entries | Carried from the dropped `worktree-n466-small-a` branch ([list](CARRIED-REFIX-BRANCHES.md))                      | 00466 cleanup       | ⬜ Open                     |
-| 15 entries | Carried from the dropped `worktree-p422-close` branch ([list](CARRIED-REFIX-BRANCHES.md))                        | 00466 cleanup       | ⬜ Open                     |
-| 14 entries | Carried from the dropped `worktree-d-00421` branch ([list](CARRIED-REFIX-BRANCHES.md))                           | 00466 cleanup       | ⬜ Open                     |
-| 4 entries  | Carried from the dropped upgrade-scripts, 464 and N38 branches ([list](CARRIED-REFIX-BRANCHES.md))               | 00466 cleanup       | ⬜ Open                     |
+| 22 entries | Carried from the dropped `worktree-n466-small-a` branch ([list](CARRIED-REFIX-BRANCHES.md))                      | 00466 cleanup       | ⬜ 12 open (triaged)        |
+| 15 entries | Carried from the dropped `worktree-p422-close` branch ([list](CARRIED-REFIX-BRANCHES.md))                        | 00466 cleanup       | ⬜ 6 open (triaged)         |
+| 14 entries | Carried from the dropped `worktree-d-00421` branch ([list](CARRIED-REFIX-BRANCHES.md))                           | 00466 cleanup       | ⬜ 8 open (triaged)         |
+| 4 entries  | Carried from the dropped upgrade-scripts, 464 and N38 branches ([list](CARRIED-REFIX-BRANCHES.md))               | 00466 cleanup       | ✅ 0 open (triaged)         |
 | N266       | `flaggable_content_channel_guard` denies greps that never touch a flagged path                                   | Coordinator         | ✅ Fixed (ba47e2459)        |
 | N265       | `secret_file_guard` spends about 2.2 s of CPU on one realistic Python program                                    | N101 CI red         | ✅ Fixed (e39b1f98f)        |
 | N264       | A sub-agent's edits landed, uncommitted, in another branch's worktree                                            | 00466 landing       | ✅ Fixed (7ebef17fb)        |
