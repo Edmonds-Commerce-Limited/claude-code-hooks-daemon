@@ -1,0 +1,6 @@
+# Callout: the upgrade-approval guard no longer denies a variable interpreter running pytest or a QA script
+
+**Plan**: 00474
+**Audience**: operators
+
+`upgrade_approval_guard` (R-UPGRADE-APPROVAL-ENV-BYPASS) treated any command whose program was a variable (`$PY/python`, `$P`) as "cannot tell whether this is the upgrade" whenever an interpreter-steering variable such as `PYTHONPATH` was set on the same command. So `PY=/x/venv/bin; PYTHONPATH=$PWD/src $PY/python -m pytest tests/unit/foo.py` was denied while the identical command with a literal interpreter path was allowed. A program held in a variable is now judged by what it is given to run: a literal `-m <module>` (other than the daemon's own package) or a literal script path that is readable and does not carry the upgrade is allowed. The deny stays where the command cannot be read: `-c`, stdin, no operand, a computed module or script (`$P "$SCRIPT"`, `-m "$MOD"`), a script that cannot be found or read, `-m claude_code_hooks_daemon...`, any upgrade entry point by name, `--uv <path>`, and any `HOOKS_DAEMON_UPGRADE_HANDOFF` assignment. Expect one new allowance: a steered `$PY -m pytest ...` or `$PY scripts/qa/<script>.py` is no longer denied.
