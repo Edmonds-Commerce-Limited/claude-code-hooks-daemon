@@ -4,6 +4,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
+- [00483: threat model conformance audit](00483-threat-model-conformance-audit/PLAN.md) - Not Started (owner ruling: the daemon is guardrails, not armour; check every guard, open ledger entry and uncovered corpus row against the careless-not-hostile threat model, dismiss the out-of-scope ones on record, fix and narrow the rest)
+
 - [00482: handler crash containment](00482-handler-crash-containment/PLAN.md) - Not Started (owner ruling after #68: handlers must never crash; a crash gets a crash record and a bug-report request, non-safety handlers are disabled after N crashes, safety guards stay fail-closed pending the owner's decision)
 
 - [00481: release 3.67 retrospective - how #68 shipped, and the QA gaps](00481-release-3-67-retrospective-qa-gaps/PLAN.md) - Not Started (owner request: a causal account, gate by gate, of how #68 reached a release, then a realistic-command corpus gate and an evaluation-error release signal, each proven against the pre-fix tree)
@@ -288,11 +290,11 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 ## Plan Statistics
 
-- **Total Plans Created**: 482 (count = `hooksdaemon.latestPlanNumber` git counter)
+- **Total Plans Created**: 483 (count = `hooksdaemon.latestPlanNumber` git counter)
 
 - **Completed**: 415 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 44 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 45 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 
