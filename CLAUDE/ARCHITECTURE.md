@@ -721,6 +721,13 @@ remedy instead (upgrade, else report upstream) — see the handler's entry in
 
 ## Extension Points
 
+### Debounced background work
+
+Handlers that need "act once after a burst of events goes quiet" use the
+daemon-wide keyed debouncer (`core/debouncer.py`); it is cancelled on daemon
+shutdown. Contract and usage:
+[HANDLER_DEVELOPMENT.md](HANDLER_DEVELOPMENT.md#acting-once-a-burst-of-events-goes-quiet-the-debouncer).
+
 ### Adding Custom Handlers
 
 1. **Create Handler Class**:

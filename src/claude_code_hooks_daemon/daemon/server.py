@@ -34,6 +34,7 @@ from claude_code_hooks_daemon.constants import Timeout
 from claude_code_hooks_daemon.constants.events import wired_event_metas
 from claude_code_hooks_daemon.constants.modes import DaemonMode, ModeConstant
 from claude_code_hooks_daemon.constants.protocol import HookInputField, SocketLimit
+from claude_code_hooks_daemon.core.debouncer import shutdown_debouncer
 from claude_code_hooks_daemon.core.hook_result import HookResult
 from claude_code_hooks_daemon.core.input_schemas import get_input_schema
 from claude_code_hooks_daemon.core.project_context import ProjectContext
@@ -2021,6 +2022,10 @@ class HooksDaemon:
                 if self._active_requests == 0:
                     break
                 await asyncio.sleep(0.1)
+
+        # Pending debounced triggers are dropped, not flushed: they live in
+        # memory only and the next event for each key re-triggers it.
+        shutdown_debouncer()
 
         # Close server
         if self.server:

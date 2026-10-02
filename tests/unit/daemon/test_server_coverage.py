@@ -623,3 +623,26 @@ class TestMonitorStragglerHealth:
                 )
 
         mock_shutdown.assert_not_called()
+
+
+class TestShutdownDropsDebouncedTriggers:
+    """Daemon shutdown drops pending debounced triggers (Plan 00480 Task 3.1)."""
+
+    @pytest.mark.anyio
+    async def test_shutdown_shuts_down_the_daemon_wide_debouncer(self) -> None:
+        from claude_code_hooks_daemon.core.debouncer import get_debouncer, reset_debouncer
+
+        reset_debouncer()
+        try:
+            fired: list[object] = []
+            debouncer = get_debouncer()
+            debouncer.trigger("k", quiet_seconds=30.0, callback=fired.append)
+            daemon = HooksDaemon(config=_make_config(), controller=FakeController())
+
+            await daemon.shutdown()
+
+            assert debouncer.pending() == {}
+            assert debouncer.trigger("k", quiet_seconds=1.0, callback=fired.append) is False
+            assert fired == []
+        finally:
+            reset_debouncer()
