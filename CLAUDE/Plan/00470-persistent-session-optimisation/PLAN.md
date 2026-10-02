@@ -77,7 +77,10 @@ Evidence, with verified facts marked apart from inferences, is in
 
   - No bug found: `auto_continue_stop` is the only writer and is scoped to the main thread, which a teammate's `agent_id` fails. Pinned in `tests/unit/handlers/stop/test_awaiting_human_marker_scope.py`, through the real chain, with a positive control and a sensitivity check.
 
-- [ ] ⬜ **Task 3.5**: Server runbook: systemd/ccy restart with `--continue`, `autoContinueAtUsageLimit` on.
+- [ ] 🔄 **Task 3.5**: Server runbook: systemd/ccy restart with `--continue`, `autoContinueAtUsageLimit` on.
+
+  - [RUNBOOK.md](RUNBOOK.md) holds the verified parts. `autoContinueAtUsageLimit` belongs in user settings: a project settings file turns it off. `--continue` is what restores crons.
+  - Owner input: the host's restart unit around ccy is outside this repository. It is recorded in RUNBOOK.md §3 once it exists.
 
 ### Phase 4: Housekeeping and cost (owner: orchestrator; code by sub-agents)
 
