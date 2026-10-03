@@ -1406,6 +1406,14 @@ The uncertain-move union judges the hook directory and the LAST recorded move (`
 every candidate directory (`sub`). Remedy: judge every directory any `cd` in the chain could
 land in.
 
+### N329 — the N323 merge added a root-conditioned skip, and main carried it until the next post-merge integration run
+
+**Source**: coordinator, post-merge `tests/integration` on 62d9e6292, the N328 merge.
+
+**Evidence**: `tests/integration/test_no_root_conditioned_skips.py` failed on `tests/unit/install/test_upgrade_gate.py`. N323 (b8b99c007, merged in 954dde9f1) added `skipif(os.geteuid() == 0)` to a mode-000 marker test. Its sibling test already monkeypatches the read to raise `PermissionError`, so the case was covered as root. The branch's `changed` run never ran `tests/integration`. After 954dde9f1 merged, the coordinator ran only `tests/acceptance`, because integration had passed on the earlier 744125f1a. This is a process gap: a post-merge integration run counts only for the merge it ran after.
+
+**Status**: ✅ Fixed on main. The skipped test is removed, and the monkeypatched sibling stays. The gate tests and the guard pass, 1598 tests in total. From now on, each merge gets its own post-merge integration run, and a run on an earlier merge does not count.
+
 ### N328 — `set -e` has no effect in the Claude Code Bash tool, so the prelude `bash_safe_mode` asks for protects nothing
 
 **Source**: coordinator, 2026-10-03. Twice in one session a `set -euo pipefail` command kept running after a

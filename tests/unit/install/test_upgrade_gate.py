@@ -20,7 +20,6 @@ from __future__ import annotations
 import errno
 import io
 import json
-import os
 import sys
 from pathlib import Path
 
@@ -757,18 +756,6 @@ class TestUnreadableApprovalMarker:
             "read_text_or_reason",
             lambda path, **_: TextOrReason(reason="[Errno 13] Permission denied"),
         )
-
-    @pytest.mark.skipif(os.geteuid() == 0, reason="root can read a mode 000 file")
-    def test_a_mode_000_marker_is_unreadable_not_absent(
-        self, daemon_dir: Path, project: Path, untracked: Path
-    ) -> None:
-        marker = _approve(untracked, daemon_dir, project, "3.66.0", "4.0.0")
-        marker.chmod(0)
-        try:
-            state = self._state(daemon_dir, project, untracked)
-        finally:
-            marker.chmod(0o600)
-        assert state is ApprovalState.UNREADABLE
 
     def test_a_marker_the_read_refuses_is_unreadable_not_absent(
         self,
