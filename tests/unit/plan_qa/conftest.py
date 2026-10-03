@@ -14,7 +14,9 @@ import pytest
 from _pytest.monkeypatch import MonkeyPatch
 
 from claude_code_hooks_daemon.constants.timeout import Timeout
-from claude_code_hooks_daemon.utils import git_facts as gitfacts_module
+from claude_code_hooks_daemon.utils.git_repo import run_git
+
+_GIT_FACTS_RUN_GIT = "claude_code_hooks_daemon.utils.git_facts.run_git"
 
 
 @pytest.fixture
@@ -30,7 +32,6 @@ def git_diff_spawns(monkeypatch: MonkeyPatch) -> Iterator[list[tuple[str, ...]]]
     call count while proving nothing about the answer.
     """
     spawned: list[tuple[str, ...]] = []
-    real_run_git = gitfacts_module.run_git
 
     def recording(
         cwd: Path,
@@ -40,7 +41,7 @@ def git_diff_spawns(monkeypatch: MonkeyPatch) -> Iterator[list[tuple[str, ...]]]
     ) -> CompletedProcess[str]:
         if args and args[0] == "diff":
             spawned.append(args)
-        return real_run_git(cwd, *args, timeout=timeout, env=env)
+        return run_git(cwd, *args, timeout=timeout, env=env)
 
-    monkeypatch.setattr(gitfacts_module, "run_git", recording)
+    monkeypatch.setattr(_GIT_FACTS_RUN_GIT, recording)
     yield spawned

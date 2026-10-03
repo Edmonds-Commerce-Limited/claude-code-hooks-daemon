@@ -59,6 +59,7 @@ from claude_code_hooks_daemon.utils.guard_config_drift import (
     DriftReport,
     compare_guard_config,
 )
+from claude_code_hooks_daemon.utils.path_containment import path_relative_to
 from claude_code_hooks_daemon.utils.path_predicates import read_text_or_reason
 
 logger = logging.getLogger(__name__)
@@ -148,7 +149,7 @@ def _pathspec_bases(run: CommitRun, cwd: str | None, project_root: Path | None) 
         return ("",)
     root = project_root.resolve()
     directories = run_directories(run.moves, run.optional_moves, cwd, root)
-    relatives = (directory.relative_to(root).as_posix() for directory in directories)
+    relatives = (path_relative_to(directory, root).as_posix() for directory in directories)
     return tuple("" if relative == "." else relative for relative in relatives)
 
 
