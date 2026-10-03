@@ -1406,6 +1406,21 @@ The uncertain-move union judges the hook directory and the LAST recorded move (`
 every candidate directory (`sub`). Remedy: judge every directory any `cd` in the chain could
 land in.
 
+### N343 — agents add entries under an already-released CHANGELOG section
+
+**Source**: coordinator, 2026-10-03. The Plan 00483 batch B and batch C agents
+(`worktree-p483-segment`, `worktree-p483-config`) each added their release note under `## [3.68.0]` in
+`CHANGELOG.md`. v3.68.0 was tagged and published days earlier. Each brief asked for a callout under
+`CLAUDE/UPGRADES/UNRELEASED/release-notes/` instead. Both were caught at coordinator review and sent back.
+
+**Evidence**: two independent agents made the same mistake in one batch, so the cause is the environment and not
+the individual agents. Nothing stops an edit to a released section. An agent that looks for "where release notes go"
+finds the newest section at the top of `CHANGELOG.md` and appends to it.
+
+**Status**: ⬜ Open. Remedy: a check, either at commit time or as a QA tool, that a CHANGELOG section whose version
+has a published tag is immutable. Its message names `UNRELEASED/release-notes/` as the place for new notes. Also
+check whether any doc tells contributors to edit `CHANGELOG.md` directly.
+
 ### N338–N342 — false positives and a setup limit met by the Plan 00487 host agent
 
 **Source**: Plan 00487 host agent, Task 3.1, working on this repository and on a fedora-desktop clone under
