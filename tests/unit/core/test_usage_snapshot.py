@@ -207,6 +207,20 @@ class TestPersistence:
         )
         assert [p.name for p in state_file.parent.iterdir()] == [state_file.name]
 
+    def test_failed_rename_leaves_no_temp_file_behind(
+        self, state_file: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        # A non-empty directory where the snapshot belongs makes the rename fail.
+        state_file.mkdir(parents=True)
+        (state_file / "occupant").write_text("x", "utf-8")
+        tracker = UsageTracker()
+        with caplog.at_level("WARNING"):
+            tracker.update_from_status_event(
+                load_status_payload("main_thread_integer.json"), now=NOW, state_file=state_file
+            )
+        assert "usage snapshot" in caplog.text.lower()
+        assert [p.name for p in state_file.parent.iterdir()] == [state_file.name]
+
     def test_fresh_tracker_reads_the_file(self, state_file: Path) -> None:
         UsageTracker().update_from_status_event(
             load_status_payload("main_thread_integer.json"), now=NOW, state_file=state_file

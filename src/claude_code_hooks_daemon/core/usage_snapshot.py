@@ -162,15 +162,28 @@ def _write_state_file(state_file: Path, payload: dict[str, dict[str, float | int
     Private temp file then ``replace``, so a concurrent reader (another daemon
     on the host) never sees a half-written file.
     """
+    tmp_path = unique_temp_path(state_file)
     try:
         state_file.parent.mkdir(parents=True, exist_ok=True)
-        tmp_path = unique_temp_path(state_file)
         tmp_path.write_text(json.dumps(payload), encoding="utf-8")
         tmp_path.replace(state_file)
     except OSError as exc:
         logger.warning("Could not persist usage snapshot to %s: %s", state_file, exc)
+        _discard_temp_file(tmp_path)
         return False
     return True
+
+
+def _discard_temp_file(tmp_path: Path) -> None:
+    """Remove a temp file a failed write left behind.
+
+    The write failure is already reported, so a failed cleanup is logged at
+    debug level only (it usually means the temp file was never created).
+    """
+    try:
+        tmp_path.unlink(missing_ok=True)
+    except OSError as exc:
+        logger.debug("Could not remove usage snapshot temp file %s: %s", tmp_path, exc)
 
 
 def usage_state_file(daemon_untracked_dir: Path) -> Path:
