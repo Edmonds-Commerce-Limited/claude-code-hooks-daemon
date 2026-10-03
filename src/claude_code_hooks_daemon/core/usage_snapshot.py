@@ -3,10 +3,7 @@
 Every Status payload on a claude.ai Pro or Max session carries
 ``rate_limits.five_hour`` and ``rate_limits.seven_day``, each with
 ``used_percentage`` (0 to 100, possibly fractional) and ``resets_at`` (epoch
-seconds). Behind a Claude apps gateway the payload also carries
-``rate_limits.spend_limit`` in the same shape; it is kept beside them as
-``UsageSnapshot.spend_limit`` and never counted as subscription usage. No other
-hook event carries usage, so the daemon keeps the last
+seconds). No other hook event carries usage, so the daemon keeps the last
 reading here for every handler that wants it: the status-line segment today,
 a host usage ceiling later.
 
@@ -53,7 +50,6 @@ RATE_LIMITS_KEY: Final[str] = "rate_limits"
 #: Window keys, as the payload and the persisted file spell them.
 FIVE_HOUR_KEY: Final[str] = "five_hour"
 SEVEN_DAY_KEY: Final[str] = "seven_day"
-SPEND_LIMIT_KEY: Final[str] = "spend_limit"
 
 _USED_PERCENTAGE: Final[str] = "used_percentage"
 _RESETS_AT: Final[str] = "resets_at"
@@ -90,21 +86,13 @@ class UsageWindow:
 
 @dataclass(frozen=True)
 class UsageSnapshot:
-    """The live usage windows; a window that is absent or expired is ``None``.
-
-    ``spend_limit`` is the Claude apps gateway spend limit
-    (``rate_limits.spend_limit``, Claude Code v2.1.251 or later). It rides
-    beside the subscription windows and is deliberately not one of them: it is
-    never counted by :meth:`highest_used_percentage`, and a snapshot exists only
-    when a subscription window does.
-    """
+    """The live usage windows; a window that is absent or expired is ``None``."""
 
     five_hour: UsageWindow | None
     seven_day: UsageWindow | None
-    spend_limit: UsageWindow | None = None
 
     def highest_used_percentage(self) -> float | None:
-        """The larger used percentage of the present subscription windows, or None."""
+        """The larger used percentage of the present windows, or None if neither is."""
         values = [w.used_percentage for w in (self.five_hour, self.seven_day) if w is not None]
         return max(values) if values else None
 
@@ -144,14 +132,6 @@ def _window_to_json(window: UsageWindow) -> dict[str, float | int]:
     }
 
 
-_Reading = tuple[float, int] | None
-
-
-def _reading(window: UsageWindow | None) -> _Reading:
-    """The (percentage, resets_at) pair that identifies a window's reading."""
-    return None if window is None else (window.used_percentage, window.resets_at)
-
-
 def _live(window: UsageWindow | None, now: float) -> UsageWindow | None:
     """``window`` unless it has reached its reset instant."""
     if window is None or window.resets_at <= now:
@@ -159,24 +139,20 @@ def _live(window: UsageWindow | None, now: float) -> UsageWindow | None:
     return window
 
 
-_Windows = tuple[UsageWindow | None, UsageWindow | None, UsageWindow | None]
-
-
-def _read_file(state_file: Path) -> _Windows:
-    """The persisted (five_hour, seven_day, spend_limit), all None when the file is unusable."""
+def _read_file(state_file: Path) -> tuple[UsageWindow | None, UsageWindow | None]:
+    """The persisted windows, or (None, None) when the file is absent or unusable."""
     try:
         data: Any = json.loads(state_file.read_text(encoding="utf-8"))
     except FileNotFoundError:
-        return (None, None, None)
+        return (None, None)
     except (OSError, ValueError) as exc:
         logger.debug("Usage snapshot file unreadable (%s): %s", state_file, exc)
-        return (None, None, None)
+        return (None, None)
     if not isinstance(data, dict):
-        return (None, None, None)
+        return (None, None)
     return (
         _parse_persisted_window(data.get(FIVE_HOUR_KEY)),
         _parse_persisted_window(data.get(SEVEN_DAY_KEY)),
-        _parse_persisted_window(data.get(SPEND_LIMIT_KEY)),
     )
 
 
@@ -234,9 +210,8 @@ class UsageTracker:
         self._lock = threading.Lock()
         self._five_hour: UsageWindow | None = None
         self._seven_day: UsageWindow | None = None
-        self._spend_limit: UsageWindow | None = None
         # (percentage, resets_at) pairs last handed to the persister, and when.
-        self._persisted_key: tuple[_Reading, _Reading, _Reading] | None = None
+        self._persisted_key: tuple[tuple[float, int] | None, tuple[float, int] | None] | None = None
         self._persisted_at: float = 0.0
 
     def reset(self) -> None:
@@ -244,7 +219,6 @@ class UsageTracker:
         with self._lock:
             self._five_hour = None
             self._seven_day = None
-            self._spend_limit = None
             self._persisted_key = None
             self._persisted_at = 0.0
 
@@ -267,16 +241,13 @@ class UsageTracker:
             return
         five = _parse_window(rate_limits.get(FIVE_HOUR_KEY), now)
         seven = _parse_window(rate_limits.get(SEVEN_DAY_KEY), now)
-        spend = _parse_window(rate_limits.get(SPEND_LIMIT_KEY), now)
-        if five is None and seven is None and spend is None:
+        if five is None and seven is None:
             return
         with self._lock:
             if five is not None:
                 self._five_hour = five
             if seven is not None:
                 self._seven_day = seven
-            if spend is not None:
-                self._spend_limit = spend
             self._persist_locked(state_file, now)
 
     def _persist_locked(self, state_file: Path | None, now: float) -> None:
@@ -284,9 +255,16 @@ class UsageTracker:
         if state_file is None:
             return
         key = (
-            _reading(self._five_hour),
-            _reading(self._seven_day),
-            _reading(self._spend_limit),
+            (
+                (self._five_hour.used_percentage, self._five_hour.resets_at)
+                if self._five_hour
+                else None
+            ),
+            (
+                (self._seven_day.used_percentage, self._seven_day.resets_at)
+                if self._seven_day
+                else None
+            ),
         )
         if key == self._persisted_key and now - self._persisted_at < PERSIST_HEARTBEAT_SECONDS:
             return
@@ -296,11 +274,7 @@ class UsageTracker:
         self._persisted_at = now
         payload = {
             name: _window_to_json(window)
-            for name, window in (
-                (FIVE_HOUR_KEY, self._five_hour),
-                (SEVEN_DAY_KEY, self._seven_day),
-                (SPEND_LIMIT_KEY, self._spend_limit),
-            )
+            for name, window in ((FIVE_HOUR_KEY, self._five_hour), (SEVEN_DAY_KEY, self._seven_day))
             if window is not None
         }
         _write_state_file(state_file, payload)
@@ -316,10 +290,10 @@ class UsageTracker:
             state_file: Host-wide file to fall back to, or None for memory only.
         """
         with self._lock:
-            five, seven, spend = self._five_hour, self._seven_day, self._spend_limit
-        if five is None and seven is None and spend is None and state_file is not None:
-            five, seven, spend = _read_file(state_file)
-        five, seven, spend = _live(five, now), _live(seven, now), _live(spend, now)
+            five, seven = self._five_hour, self._seven_day
+        if five is None and seven is None and state_file is not None:
+            five, seven = _read_file(state_file)
+        five, seven = _live(five, now), _live(seven, now)
         if five is None and seven is None:
             return None
-        return UsageSnapshot(five_hour=five, seven_day=seven, spend_limit=spend)
+        return UsageSnapshot(five_hour=five, seven_day=seven)

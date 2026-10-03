@@ -2,17 +2,12 @@
 
 Evidence: the changelog at `https://code.claude.com/docs/en/changelog` and the statusline page at `https://code.claude.com/docs/en/statusline`, both fetched with `curl` on 2026-10-03 into `untracked/scratch/`; `claude --version` = 2.1.288; the vendored `remote-docs` tree (which holds neither a statusline nor a memory page, so it could not settle N330 or N331).
 
-## N330 (adopt `rate_limits.spend_limit`): verified, fixed
+## N330 (adopt `rate_limits.spend_limit`): verified, left open (owner call)
 
 - The statusline page documents `rate_limits.spend_limit.used_percentage` and `.resets_at` ("Behind a Claude apps gateway ... Requires Claude Code v2.1.251 or later"), plus `used_usd`, `limit_usd` and `period` ("These fields can be absent"). It also says each window "may be independently absent".
 - The changelog agrees (the dollar fields arrived in 2.1.284).
-- Change: `core/usage_snapshot.py` reads `spend_limit` with the existing `_parse_window`, keeps it in memory and in the host-wide state file, expires it like the other windows, and exposes `UsageSnapshot.spend_limit` (default `None`).
-- Not changed (decisions):
-  - It is not counted in `highest_used_percentage()`, the ceiling or the pause gate. It is a gateway dollar budget, not subscription usage.
-  - A snapshot still exists only when `five_hour` or `seven_day` does. Making a spend-only payload yield a snapshot would make `usage_indicator._render` print an icon with no chips. A consumer that wants gateway-only sessions must handle that first.
-  - `used_usd`, `limit_usd` and `period` are not read: no consumer, and they may be absent.
-- Absent-field behaviour is unchanged: every existing test passes, and the old "spend_limit is ignored" test is replaced by an unknown-key test plus seven spend_limit tests in `tests/unit/core/test_usage_snapshot.py`.
-- Docs: `CLAUDE/Architecture/StatusLine.md` no longer lists the percentage fields as UNUSED.
+- Outcome: no code change. An implementation (reading `spend_limit` into `UsageSnapshot`, with tests and a StatusLine.md note) was written and then reverted at the coordinator's request, because nothing consumes the field and a consumer such as a statusline chip is a feature the owner has not asked for. `core/usage_snapshot.py`, its tests and `StatusLine.md` are byte-identical to their state before the item.
+- Notes for whoever adopts it: keep it out of `highest_used_percentage()`, the ceiling and the pause gate (a gateway dollar budget is not subscription usage), and note that a spend-only payload yielding a snapshot would make `usage_indicator._render` print an icon with no chips.
 - Not observed live: no gateway session is available in this container.
 
 ## N331 (`.claude/rules` write-time loading): not a defect
@@ -32,4 +27,4 @@ Evidence: the changelog at `https://code.claude.com/docs/en/changelog` and the s
 
 ## Ledger
 
-`CLAUDE/Plan/00474-niggles-ledger-seventeen/NIGGLES.md`: N330 and N332 marked Fixed, N331 marked Not a defect with its evidence.
+`CLAUDE/Plan/00474-niggles-ledger-seventeen/NIGGLES.md`: N330 is Open (verified, adopt when a consumer is wanted), N332 is Fixed, N331 is Not a defect with its evidence.
