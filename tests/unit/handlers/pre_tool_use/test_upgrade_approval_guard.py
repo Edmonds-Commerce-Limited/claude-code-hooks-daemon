@@ -1226,6 +1226,87 @@ class TestWrapperOptionsThatTakeAValue:
         assert handler.matches(_bash(command)) is False
 
 
+class TestEveryWrapperIsReadWithoutError:
+    """Each wrapper the skipper knows has option tables, so an option never raises."""
+
+    def test_every_wrapper_head_has_both_option_tables(self) -> None:
+        from claude_code_hooks_daemon.handlers.pre_tool_use import upgrade_approval_guard as guard
+
+        assert set(guard._WRAPPER_SHORT_VALUE_OPTIONS) == guard._WRAPPER_HEADS
+        assert set(guard._WRAPPER_LONG_VALUE_OPTIONS) == guard._WRAPPER_HEADS
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "command -v git",
+            "command -p ls",
+            "setsid -f sleep 1",
+            "nohup -- sleep 1",
+            "flock -w 5 /tmp/lock true",
+            "strace -o out.txt ls",
+            "ltrace -o out.txt ls",
+        ],
+    )
+    def test_an_ordinary_command_behind_a_wrapper_option_is_allowed(
+        self, handler: UpgradeApprovalGuardHandler, command: str
+    ) -> None:
+        assert handler.matches(_bash(command)) is False
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "PATH=/x:$PATH command -p scripts/upgrade.sh",
+            "PATH=/x:$PATH setsid -f scripts/upgrade.sh",
+            "PATH=/x:$PATH flock -w 5 /tmp/lock scripts/upgrade.sh",
+            "PATH=/x:$PATH flock /tmp/lock bash scripts/upgrade_version.sh",
+            "PATH=/x:$PATH strace -o out.txt scripts/upgrade.sh",
+            "PATH=/x:$PATH ltrace -o out.txt scripts/upgrade.sh",
+        ],
+    )
+    def test_a_steered_upgrade_behind_a_wrapper_option_is_denied(
+        self, handler: UpgradeApprovalGuardHandler, command: str
+    ) -> None:
+        assert handler.matches(_bash(command)) is True
+
+
+class TestAttachedValuesAndPythonClusters:
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "PATH=/x:$PATH env -S'bash scripts/upgrade.sh'",
+            "PATH=/x:$PATH env --split-string='bash scripts/upgrade.sh'",
+            "PATH=/x:$PATH env -iS'bash scripts/upgrade.sh'",
+            "PYTHONPATH=/x python3 -uW ignore scripts/upgrade_gate_standalone.py",
+            "PYTHONPATH=/x python3 -IX dev scripts/upgrade_gate_standalone.py",
+            "PYTHONPATH=/x python3 - < scripts/upgrade_gate_standalone.py",
+            "PYTHONPATH=/x python3 -u - < scripts/upgrade_gate_standalone.py",
+            "PYTHONPATH=/x python3 < scripts/upgrade_gate_standalone.py",
+        ],
+    )
+    def test_denies_a_steered_upgrade_hidden_by_an_attached_value_or_a_cluster(
+        self, handler: UpgradeApprovalGuardHandler, command: str
+    ) -> None:
+        assert handler.matches(_bash(command)) is True
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "PATH=/x:$PATH env -S'cat scripts/upgrade.sh'",
+            "PYTHONPATH=src python3 -uW ignore scripts/qa/check.py scripts/upgrade.sh",
+            "PYTHONPATH=src python3 -um pytest tests/x -k upgrade.sh",
+            "PYTHONPATH=src python3 -mpytest tests/x -k upgrade.sh",
+            "PYTHONPATH=src python3 -uc 'print(1)' scripts/upgrade.sh",
+            "python3 - < scripts/upgrade_gate_standalone.py",
+            "PYTHONPATH=src python3 --version",
+            "PYTHONPATH=src python3 < scratch/probe.py",
+        ],
+    )
+    def test_still_allows_a_reader_or_an_unsteered_stdin_run(
+        self, handler: UpgradeApprovalGuardHandler, command: str
+    ) -> None:
+        assert handler.matches(_bash(command)) is False
+
+
 class TestShellInlineAndSyntaxCheckAreNotARun:
     @pytest.mark.parametrize(
         "command",
