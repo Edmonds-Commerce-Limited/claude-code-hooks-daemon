@@ -3851,6 +3851,7 @@ class PluginRuntime:
         load_budget_seconds: float = _PLUGIN_LOAD_BUDGET_SECONDS,
         monotonic: Callable[[], float] = time.monotonic,
         wall_clock: Callable[[], float] = time.time,
+        status_sink: Callable[[str, str, str, float], object] | None = None,
     ) -> None:
         self._state_root = state_root
         self._status_dir = status_dir
@@ -3867,7 +3868,18 @@ class PluginRuntime:
         self._disabled: set[str] = set()
         self._failures: list[PluginFailure] = []
         self._audit_lines: list[str] = []
+        # In-memory only (never sent to the host): the traceback behind each
+        # failure, for `PluginTestHarness` to show a plugin author.
+        self._tracebacks: dict[str, str] = {}
+        # Where `api.status` goes: the status-line message file, unless a test
+        # harness substitutes a recorder.
+        self._status_sink = status_sink if status_sink is not None else self._post_status
         self._lock = threading.Lock()
+
+    @property
+    def state_root(self) -> Path:
+        """Parent of every plugin's private `state_dir`."""
+        return self._state_root
 
     @property
     def loaded(self) -> list[tuple[str, str]]:
@@ -3882,6 +3894,10 @@ class PluginRuntime:
     def half(self, name: str) -> WorkerHalf:
         """The loaded worker half called ``name`` (test and harness access)."""
         return self._halves[name]
+
+    def traceback_for(self, name: str) -> str:
+        """The traceback behind ``name``'s failure, or "" (kept in memory, for a test harness)."""
+        return self._tracebacks.get(name, "")
 
     def disable(self, name: str) -> None:
         """Stop calling ``name`` (the host disabled it for a failure it detected)."""
@@ -3915,7 +3931,7 @@ class PluginRuntime:
             name=name,
             state_dir=state_dir,
             session_ids=self._session_ids,
-            status_sink=self._post_status,
+            status_sink=self._status_sink,
             audit_sink=self._record_audit,
         )
         self._write_marker(name, _PLUGIN_HOOK_LOAD)
@@ -3927,6 +3943,8 @@ class PluginRuntime:
             self._clear_marker()
         if result.status == _BUDGET_OVERRUN:
             raise PluginLoadError(_LOAD_REASON_TIMEOUT)
+        if result.status != _BUDGET_OK:
+            self._tracebacks[name] = result.traceback_text
         if isinstance(result.error, PluginLoadError):
             raise PluginLoadError(result.error.reason)
         if result.status != _BUDGET_OK:
@@ -4028,6 +4046,7 @@ class PluginRuntime:
             self._fail(name, _PLUGIN_KIND_OVERRUN, hook)
         else:
             append_worker_error(f"plugin {name} {hook} raised:\n{result.traceback_text}")
+            self._tracebacks[name] = result.traceback_text
             self._fail(name, _PLUGIN_KIND_EXCEPTION, hook)
         return None
 
@@ -4072,6 +4091,95 @@ class PluginRuntime:
         with self._lock:
             self._audit_lines.append(line)
             del self._audit_lines[:-_PLUGIN_AUDIT_MAX_PENDING]
+
+
+class PluginHarnessError(Exception):
+    """A plugin failed (or was misused) under `PluginTestHarness`."""
+
+
+_HARNESS_SESSION_ID = "harness-session"
+
+
+class PluginTestHarness:
+    """Unit-test a plugin's worker half without a live session (Plan 00487).
+
+    Loads the half through the REAL loader -- the same vetting, API-major check
+    and budgeted hook calls the supervisor uses -- with no worker process, no
+    PTY and nothing written outside ``work_dir``. Where the supervisor disables
+    a failing plugin and carries on, the harness RAISES `PluginHarnessError`
+    with the traceback, because a test wants the failure.
+
+    ``session_ids`` is what the plugin's ``api.session_id()`` sees (exactly one
+    id yields that id; none or several yield None). ``api.status`` calls are
+    recorded in `status_messages` as ``(text, level, ttl)`` instead of being
+    written to the status line.
+    """
+
+    def __init__(
+        self,
+        name: str,
+        plugin_path: Path,
+        *,
+        work_dir: Path,
+        session_ids: Collection[str] = (_HARNESS_SESSION_ID,),
+        allowed_uids: Collection[int] | None = None,
+    ) -> None:
+        self.status_messages: list[tuple[str, str, float]] = []
+        self._name = name
+        self._plugin_path = plugin_path
+        self._audit: list[str] = []
+        self._started = False
+        self._runtime = PluginRuntime(
+            state_root=work_dir / "state",
+            status_dir=work_dir / "untracked",
+            marker_path=work_dir / "in-hook.json",
+            session_ids=lambda: frozenset(session_ids),
+            allowed_uids=allowed_uids if allowed_uids is not None else _default_plugin_uids(),
+            status_sink=self._record_status,
+        )
+
+    @property
+    def half(self) -> WorkerHalf:
+        """The loaded worker half (after `start`)."""
+        return self._runtime.half(self._name)
+
+    @property
+    def state_dir(self) -> Path:
+        """The plugin's private 0700 state directory."""
+        return self._runtime.state_root / self._name
+
+    def audit_lines(self) -> tuple[str, ...]:
+        """Every `decision.log` line the plugin wrote through ``api.audit`` so far."""
+        self._audit.extend(self._runtime.take_audit_lines())
+        return tuple(self._audit)
+
+    def start(self) -> None:
+        """Load the half and run ``on_start``; raise on any failure."""
+        self._runtime.load([(self._name, self._plugin_path)], frozenset())
+        self._raise_on_failure()
+        self._runtime.start()
+        self._raise_on_failure()
+        self._started = True
+
+    def idle(self, now: float | None = None) -> PluginExitRequest | None:
+        """Ask the plugin ``on_idle`` once; return its exit request, if any; raise on failure."""
+        if not self._started:
+            raise PluginHarnessError("call start() before idle()")
+        request = self._runtime.run_idle(time.time() if now is None else now)
+        self._raise_on_failure()
+        return request
+
+    def _record_status(self, _name: str, text: str, level: str, ttl: float) -> None:
+        self.status_messages.append((text, level, ttl))
+
+    def _raise_on_failure(self) -> None:
+        failures = self._runtime.failures
+        if failures:
+            failure = failures[0]
+            raise PluginHarnessError(
+                f"plugin {failure.plugin} failed: {_failure_reason(failure)}\n"
+                f"{self._runtime.traceback_for(failure.plugin)}"
+            )
 
 
 @dataclass
