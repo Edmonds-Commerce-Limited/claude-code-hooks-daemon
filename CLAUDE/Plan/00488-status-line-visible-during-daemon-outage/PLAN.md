@@ -57,16 +57,31 @@ read `⚠️ DAEMON FAILED`, which misdescribes a normal, self-healing state.
 - [ ] ⬜ **Task 2.2**: GREEN — set those texts in `init.sh` where `_HOOKS_DAEMON_VENV_MISSING` / `_HOOKS_DAEMON_VERSION_MISMATCH` / the bootstrap state are decided; keep each line short enough for a status bar
 - [ ] ⬜ **Task 2.3**: Check `status-line-explained` (Plan 00369) and `CLAUDE/Architecture/StatusLine.md` describe the down texts; update the one canonical home
 
-### Phase 3: Verify live
+### Phase 3: Fresh clone recovers with no human step
 
-- [ ] ⬜ **Task 3.1**: Live check in a real Claude Code session: stop the daemon and make it unstartable (or move the venv aside in a scratch checkout), then confirm the status bar shows the specific down text rather than going blank
-- [ ] ⬜ **Task 3.2**: Targeted QA per `CLAUDE/QA.md`, daemon restart, commit and push; comment the implementation summary on #72 and close it
+The owner's requirement: cloning to a new laptop with no venv must be detected
+and resolved automatically. Here it was: the Plan 00456 self-heal built the
+venv and the next hook started the daemon. But for that window (about 2
+minutes) every safety handler was inactive, and nothing showed the owner it
+was happening.
+
+- [ ] ⬜ **Task 3.1**: Acceptance test from a genuinely fresh clone, in BOTH install modes (self-install and a client project with `.claude/hooks-daemon/`): no venv anywhere, open a session, take no manual step. Assert the venv builds, the daemon starts, and the status line goes from "venv building" to normal. Record gaps found
+- [ ] ⬜ **Task 3.2**: Decide (owner input) how to treat the unprotected build window. Options: PreToolUse waits on the build lock up to a bound, or denies with "daemon still building" instead of failing open, or keep failing open but announce it every turn. Record the decision in the plan's owner-decisions file and implement it
+- [ ] ⬜ **Task 3.3**: Plan counter drift on a new checkout. `hooksdaemon.latestPlanNumber` read 414 against 487 plans on disk, and `mkplan.bash` refused until it was reconciled by hand. The counter lives in `.git/config`, so a fresh clone or a second view drifts. When the on-disk maximum is ahead, reconcile it automatically (the counter can only move forward) instead of refusing
+
+### Phase 4: Verify live
+
+- [ ] ⬜ **Task 4.1**: Live check in a real Claude Code session: stop the daemon and make it unstartable (or move the venv aside in a scratch checkout), then confirm the status bar shows the specific down text rather than going blank
+- [ ] ⬜ **Task 4.2**: Targeted QA per `CLAUDE/QA.md`, daemon restart, commit and push; comment the implementation summary on #72 and close it
 
 ## Success Criteria
 
 - [ ] With the daemon down, a live Claude Code session shows a non-blank status line naming the outage
 - [ ] During a first-session venv build the line says the venv is building
 - [ ] The WorktreeCreate forwarder's daemon-down exit code is unchanged
+- [ ] A fresh clone with no venv reaches a running daemon with no manual step, in both install modes
+- [ ] The build window is handled per the owner's decision (not silently unprotected)
+- [ ] `mkplan.bash` works first time on a fresh clone
 - [ ] Targeted QA green
 
 ## Delivery & Milestones
