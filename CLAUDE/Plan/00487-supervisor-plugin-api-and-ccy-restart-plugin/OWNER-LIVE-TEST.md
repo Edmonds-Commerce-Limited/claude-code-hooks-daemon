@@ -10,7 +10,7 @@ Nothing in this checklist can run inside a ccy container: it needs the host, an 
 ## 0. Prepare (host)
 
 - [ ] Check out `feature/ccy-hooks-daemon-plugin` in your fedora-desktop checkout and run the claude-yolo play. It copies `supervisor-plugins/` into the build context.
-- [ ] `ccy --rebuild`. The image should report container version 2.41, and the launcher should report ccy 3.75.0.
+- [ ] `ccy --rebuild`. The image should report container version 2.42, and the launcher should report ccy 3.76.0. (The host review fixes moved both from 2.41/3.75.0; the branch head is in this plan's JOURNAL.)
 - [ ] Run fedora-desktop's `./scripts/qa-all.bash` on the host. It cannot run in a container here, because ruff and semgrep are absent and shellcheck is not the pinned 0.11.0.
 
 ## 1. No options means no change
@@ -28,6 +28,9 @@ Nothing in this checklist can run inside a ccy container: it needs the host, an 
   - `.claude/ccy/state/restart-request.json` is gone after the relaunch;
   - the resumed session gets the "restarted, now on Claude Code X" notice, once.
 - [ ] The max-age clock restarts with the new container: the next restart waits for the full configured age again.
+- [ ] Unattended relaunch: run `ccy --max-age 30m` with NO other flag, answering every prompt (token, key, network). At the restart the relaunch asks nothing and carries the choices made at the prompts.
+- [ ] Repeat with an SSH key that needs a passphrase. The restart stops before any image update, with the reason and `ccy --resume <id>`, instead of waiting at a prompt.
+- [ ] Two sessions in one project, both with `--max-age`: restarting or reloading one does not reset the other's age.
 
 ## 3. Deadlines
 
@@ -37,6 +40,7 @@ Nothing in this checklist can run inside a ccy container: it needs the host, an 
 ## 4. Refusals and limits
 
 - [ ] Each of these fails before any prompt, with an example of the right form: `--max-age 3days`, `--until 25:00`, `--run-for 2h --until 17:30` and `--max-age 3d --no-supervise`.
+- [ ] `ccy --max-age 3d` in a project whose hooks daemon predates the plugin API (any project other than this one, until a release carries it) fails before any prompt and says to upgrade the hooks daemon. It must not reach the container's argparse error.
 - [ ] Restart budget: force more restart requests than `CCY_RESTART_MAX` allows inside `CCY_RESTART_WINDOW_SECONDS`, for example with a short `--max-age`. The request over the budget stops with the budget message and the manual `ccy --resume <id>` command.
 - [ ] Hand-written requests: an exit 75 with no request file, or with a malformed one, behaves as before and says so on stderr. A malformed file is discarded.
 
