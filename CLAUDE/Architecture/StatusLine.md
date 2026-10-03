@@ -180,9 +180,9 @@ When Claude Code forwards the real terminal width, the joined line wraps onto mu
 
 Claude Code sends a JSON payload on every status-line call. The daemon accepts unknown keys (`additionalProperties: True`), so any field is reachable from a handler even before the schema names it.
 
-**Currently READ by handlers**: `model.{id,display_name}`, `context_window.*`, `workspace.{current_dir,project_dir}`, `cost`, `effort.level`, `session_id`, `session_name`, `agent_type`, `rate_limits.{five_hour,seven_day}.{used_percentage,resets_at}` and `prompt_cache.*` (see below), plus the forwarded `terminal_columns` / `terminal_lines` (see wrapping, above).
+**Currently READ by handlers**: `model.{id,display_name}`, `context_window.*`, `workspace.{current_dir,project_dir}`, `cost`, `effort.level`, `session_id`, `session_name`, `agent_type`, `rate_limits.{five_hour,seven_day}.{used_percentage,resets_at}` and `prompt_cache.*` (see below), plus the forwarded `terminal_columns` / `terminal_lines` (see wrapping, above). `rate_limits.spend_limit.{used_percentage,resets_at}` is kept on the usage snapshot (`UsageSnapshot.spend_limit`) but no handler displays or gates on it.
 
-**Documented but currently UNUSED** (available opportunistically): top-level `version`, `cwd`, `output_style`, `exceeds_200k_tokens`, `prompt_id`, `rate_limits.spend_limit`, and nested `agent.*`, `pr.*`, `worktree.*`, `vim.*`.
+**Documented but currently UNUSED** (available opportunistically): top-level `version`, `cwd`, `output_style`, `exceeds_200k_tokens`, `prompt_id`, `rate_limits.spend_limit.{used_usd,limit_usd,period}`, and nested `agent.*`, `pr.*`, `worktree.*`, `vim.*`.
 
 ### `rate_limits` is READ: the usage snapshot and the usage segment
 

@@ -118,13 +118,79 @@ class TestUpdate:
         tracker.update_from_status_event({"rate_limits": "x"}, now=NOW)
         assert tracker.latest(now=NOW) is None
 
-    def test_spend_limit_and_unknown_keys_are_ignored(self) -> None:
+    def test_unknown_window_keys_are_ignored(self) -> None:
         tracker = UsageTracker()
         tracker.update_from_status_event(
-            {"rate_limits": {"spend_limit": {"used_percentage": 140, "resets_at": 1800010800}}},
+            {"rate_limits": {"thirty_day": {"used_percentage": 40, "resets_at": 1800010800}}},
             now=NOW,
         )
         assert tracker.latest(now=NOW) is None
+
+    def test_spend_limit_is_carried_beside_the_subscription_windows(self) -> None:
+        """N330: ``rate_limits.spend_limit`` (gateway users) is read like the other windows."""
+        tracker = UsageTracker()
+        payload = load_status_payload("main_thread_integer.json")
+        payload["rate_limits"]["spend_limit"] = {
+            "used_percentage": 25.5,
+            "resets_at": SEVEN_DAY_RESETS_AT,
+            "used_usd": 127.5,
+            "limit_usd": 500.0,
+            "period": "month",
+        }
+        tracker.update_from_status_event(payload, now=NOW)
+        snap = tracker.latest(now=NOW)
+        assert snap is not None
+        assert snap.spend_limit == UsageWindow(25.5, SEVEN_DAY_RESETS_AT, NOW)
+
+    def test_spend_limit_absent_leaves_it_none(self) -> None:
+        tracker = UsageTracker()
+        tracker.update_from_status_event(load_status_payload("main_thread_integer.json"), now=NOW)
+        snap = tracker.latest(now=NOW)
+        assert snap is not None and snap.spend_limit is None
+
+    def test_spend_limit_never_counts_towards_the_subscription_percentage(self) -> None:
+        snap = UsageSnapshot(
+            five_hour=UsageWindow(10.0, SEVEN_DAY_RESETS_AT, NOW),
+            seven_day=None,
+            spend_limit=UsageWindow(99.0, SEVEN_DAY_RESETS_AT, NOW),
+        )
+        assert snap.highest_used_percentage() == 10.0
+
+    def test_spend_limit_alone_leaves_no_snapshot(self) -> None:
+        """A snapshot still means subscription windows exist; consumers render chips from it."""
+        tracker = UsageTracker()
+        tracker.update_from_status_event(
+            {"rate_limits": {"spend_limit": {"used_percentage": 40, "resets_at": SEVEN_DAY_RESETS_AT}}},
+            now=NOW,
+        )
+        assert tracker.latest(now=NOW) is None
+
+    def test_malformed_spend_limit_is_ignored(self) -> None:
+        tracker = UsageTracker()
+        payload = load_status_payload("main_thread_integer.json")
+        payload["rate_limits"]["spend_limit"] = {"used_percentage": "lots"}
+        tracker.update_from_status_event(payload, now=NOW)
+        snap = tracker.latest(now=NOW)
+        assert snap is not None and snap.spend_limit is None
+
+    def test_expired_spend_limit_reads_as_absent(self) -> None:
+        tracker = UsageTracker()
+        payload = load_status_payload("main_thread_integer.json")
+        payload["rate_limits"]["spend_limit"] = {"used_percentage": 40, "resets_at": NOW + 10}
+        tracker.update_from_status_event(payload, now=NOW)
+        snap = tracker.latest(now=NOW + 20)
+        assert snap is not None and snap.spend_limit is None
+
+    def test_spend_limit_survives_a_restart_through_the_state_file(self, state_file: Path) -> None:
+        payload = load_status_payload("main_thread_integer.json")
+        payload["rate_limits"]["spend_limit"] = {
+            "used_percentage": 25.5,
+            "resets_at": SEVEN_DAY_RESETS_AT,
+        }
+        UsageTracker().update_from_status_event(payload, now=NOW, state_file=state_file)
+        snap = UsageTracker().latest(now=NOW, state_file=state_file)
+        assert snap is not None
+        assert snap.spend_limit == UsageWindow(25.5, SEVEN_DAY_RESETS_AT, NOW)
 
     def test_reset_clears_memory(self) -> None:
         tracker = UsageTracker()
