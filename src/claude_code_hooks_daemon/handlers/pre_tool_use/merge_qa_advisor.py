@@ -45,6 +45,7 @@ from claude_code_hooks_daemon.utils.git_invocation_directory import (
     placement_problem,
 )
 from claude_code_hooks_daemon.utils.git_repo import HEADS_PREFIX, run_git
+from claude_code_hooks_daemon.utils.path_predicates import path_is_file
 
 logger = logging.getLogger(__name__)
 
@@ -212,7 +213,8 @@ class MergeQaAdvisorHandler(PreToolUseHandlerBase):
 
     def handle(self, hook_input: dict[str, Any]) -> GatingResult:
         """Name each merged work branch's head that has no green ``changed`` record."""
-        if not (ProjectContext.project_root() / QA_SCRIPT).is_file():
+        # A script that cannot be looked at cannot be run either: stay silent.
+        if not path_is_file(ProjectContext.project_root() / QA_SCRIPT, unreadable_means=False):
             return GatingResult(decision=Decision.ALLOW)
         command = get_bash_command(hook_input) or ""
         cwd = self._cwd(hook_input)
