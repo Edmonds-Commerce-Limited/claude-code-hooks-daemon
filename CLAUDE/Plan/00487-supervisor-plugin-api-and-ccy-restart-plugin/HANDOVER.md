@@ -49,11 +49,7 @@ Reports for each step are in [subagent-reports/](subagent-reports/). The round-3
 4. **Fix what fails, on the side where the fault is.** A supervisor fault is fixed in a hooks-daemon worktree, TDD, under this repo's merge discipline (below). A launcher or plugin fault is fixed on the fedora-desktop branch, under that repository's rules (below). Re-run the failed section afterwards.
 5. **Record everything here.** Write journal entries with `CLAUDE/Plan/mkplan.bash --journal 00487 <category> <body-file>`, tick Task 3.1 in PLAN.md, and commit and push after each unit.
 6. **Task 3.2.** Comment the outcome on hooks-daemon #71 and fedora-desktop#61. Write "Addresses #N" and never a closing keyword.
-7. **Owner decisions to put to the owner, not to take:**
-   - opening and merging the fedora-desktop PR;
-   - whether Tasks 1.4 and 1.5 stay in this plan;
-   - confirming or reversing the agent rulings in [DECISIONS.md](DECISIONS.md);
-   - when a hooks-daemon release carries the API, which other projects need before they can use it.
+7. **Owner decisions live in [OWNER-DECISIONS.md](OWNER-DECISIONS.md).** That file lists each decision that is the owner's, not an agent's, with its options, a recommendation and the evidence. When the live test produces something new, add it there, then commit and push. Every session (this one and the container one) works from that file after a `git pull`, so no decision is passed by chat. Record the owner's answer in the same file, against its item. Nothing listed there is acted on until it has an answer.
 8. **Close the plan** (once the owner settles item 7) per the Plan Completion Checklist in `CLAUDE/PlanWorkflow.md`: Status Complete, `git mv` into `Completed/`, and the README row and statistics, all in one commit.
 
 ## Rules that bind the desktop agent
