@@ -45,6 +45,7 @@ from claude_code_hooks_daemon.utils.git_invocation_directory import (
     placement_problem,
 )
 from claude_code_hooks_daemon.utils.git_repo import HEADS_PREFIX, run_git
+from claude_code_hooks_daemon.utils.path_predicates import path_is_file
 
 logger = logging.getLogger(__name__)
 
@@ -81,6 +82,10 @@ _WORK_REF: Final[re.Pattern[str]] = re.compile(
     rf"^(?:(?P<heads>{re.escape(HEADS_PREFIX)})|(?P<remote>(?:refs/remotes/)?{_REMOTE}/))?"
     rf"(?P<branch>{re.escape(WORK_BRANCH_PREFIX)}\S+)$"
 )
+
+#: The advice names this repository's QA scripts, so it applies only where this
+#: script exists; a client project has none and could never satisfy it.
+QA_SCRIPT: Final[Path] = Path("scripts") / "qa" / "llm_qa.py"
 
 _SHORT_SHA: Final[int] = 12
 _ICON: Final[str] = "🔍"
@@ -208,6 +213,9 @@ class MergeQaAdvisorHandler(PreToolUseHandlerBase):
 
     def handle(self, hook_input: dict[str, Any]) -> GatingResult:
         """Name each merged work branch's head that has no green ``changed`` record."""
+        # A script that cannot be looked at cannot be run either: stay silent.
+        if not path_is_file(ProjectContext.project_root() / QA_SCRIPT, unreadable_means=False):
+            return GatingResult(decision=Decision.ALLOW)
         command = get_bash_command(hook_input) or ""
         cwd = self._cwd(hook_input)
         unrecorded: list[tuple[str, str]] = []

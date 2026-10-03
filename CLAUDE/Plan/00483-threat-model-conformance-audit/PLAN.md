@@ -127,6 +127,10 @@ other than defeating a parser. Everything else, every ordinary respelling includ
   `$(git rev-parse --show-toplevel)` resolve to the hook cwd and its repository root, judged
   as any path. Loop variables, `$DEST`, `$TMPDIR` and `$HOME` are untouched. Report:
   [subagent-reports/261002-fp-batch2-sonnet.md](subagent-reports/261002-fp-batch2-sonnet.md).
+  Issue #70 class fixed (merged on main): a regex pattern operand of grep/rg given through `-e`
+  or `--regexp`, and the pattern of `git grep`, is text and not a glob of a protected name. File
+  operands, `--include` values, revisions and pathspecs stay judged as paths. Tests pin the
+  reported `'.*WORD'` shapes, which had been allowed on main without any test.
 - [ ] ⬜ **Task 3.3**: Bring the owner's removal decisions on out-of-scope-only code into
   effect, if any were taken.
 

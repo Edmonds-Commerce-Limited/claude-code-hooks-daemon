@@ -51,6 +51,15 @@ config_changes:
   changed: []
 """
 
+_STAGED_CALLOUT = """\
+# Callout: a staged acceptance document
+
+**Plan**: 99999
+**Audience**: client projects
+
+Staged for the next release, so a branch install has something to read.
+"""
+
 
 def _run(args: list[str], *, cwd: Path, env: dict[str, str]) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
@@ -87,6 +96,42 @@ def _clone_daemon(daemon_dir: Path) -> None:
         capture_output=True,
         text=True,
     )
+
+
+def _commit_staged_documents(daemon_dir: Path) -> None:
+    """Commit this test's own UNRELEASED documents into the clone.
+
+    The reading list a branch install is stopped on holds the staged markdown
+    documents of UNRELEASED/ (a config-changes manifest is not one), and the
+    repository's own UNRELEASED/ is empty right after a release. The target
+    commit therefore carries its own staged callout and manifest, so the test
+    holds whatever state the repository is in when it runs.
+    """
+    staged_root = daemon_dir / "CLAUDE" / "UPGRADES" / "UNRELEASED"
+    (staged_root / "config-changes").mkdir(parents=True, exist_ok=True)
+    (staged_root / "config-changes" / "v99.0.0.yaml").write_text(_STAGED_MANIFEST)
+    (staged_root / "release-notes").mkdir(parents=True, exist_ok=True)
+    (staged_root / "release-notes" / "999-staged-acceptance-callout.md").write_text(_STAGED_CALLOUT)
+    for git_args in (
+        ["add", "CLAUDE/UPGRADES/UNRELEASED"],
+        [
+            "-c",
+            "user.name=acceptance",
+            "-c",
+            "user.email=acceptance@example.invalid",
+            "commit",
+            "--quiet",
+            "--no-verify",
+            "-m",
+            "Stage the acceptance test's UNRELEASED documents",
+        ],
+    ):
+        subprocess.run(
+            ["git", "-C", str(daemon_dir), *git_args],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
 
 
 def _pyproject_version(daemon_dir: Path) -> str:
@@ -136,9 +181,7 @@ def test_guarded_branch_install_is_stamped_and_flagged_everywhere(tmp_path: Path
         daemon_dir / ".claude" / "hooks-daemon.yaml.example",
         project_root / ".claude" / "hooks-daemon.yaml",
     )
-    staged = daemon_dir / "CLAUDE" / "UPGRADES" / "UNRELEASED" / "config-changes"
-    staged.mkdir(parents=True, exist_ok=True)
-    (staged / "v99.0.0.yaml").write_text(_STAGED_MANIFEST)
+    _commit_staged_documents(daemon_dir)
 
     short_sha = subprocess.run(
         ["git", "-C", str(daemon_dir), "rev-parse", "--short", "HEAD"],

@@ -1216,6 +1216,57 @@ class TestHandlerChain:
             for ctx in result.result.context
         )
 
+    def test_a_budget_that_runs_out_in_the_commit_after_a_terminal_deny_names_nobody(self) -> None:
+        """The loop broke at a terminal handler that finished; the budget ran out
+        in the post-decision commit. Neither that handler nor the ones behind it
+        (which were never going to run) did not finish."""
+
+        class SlowCommit(MockHandler):
+            def commit_side_effects(
+                self, hook_input: dict[str, Any], chain_decision: Decision
+            ) -> None:
+                time.sleep(5.0)
+
+        chain = HandlerChain()
+        chain.add(
+            SlowCommit(
+                "terminal-denier",
+                priority=10,
+                terminal=True,
+                result=HookResult.deny(reason="no"),
+            )
+        )
+        chain.add(MockHandler("never-reached", priority=20))
+
+        result = chain.execute({"tool_name": "Bash"}, deadline_seconds=0.3)
+
+        notes = [ctx for ctx in result.result.context if "Chain cut short" in ctx]
+        assert len(notes) == 1
+        assert "did not finish" not in notes[0]
+        assert "terminal-denier" not in notes[0]
+        assert "never-reached" not in notes[0]
+        assert notes[0].endswith("the output of the 1 handler(s) that finished is kept")
+
+    def test_a_budget_that_runs_out_after_every_handler_ran_names_nobody(self) -> None:
+        """All handlers ran; the budget ran out afterwards, in the commit."""
+
+        class SlowCommit(MockHandler):
+            def commit_side_effects(
+                self, hook_input: dict[str, Any], chain_decision: Decision
+            ) -> None:
+                time.sleep(5.0)
+
+        chain = HandlerChain()
+        chain.add(MockHandler("first", priority=10))
+        chain.add(SlowCommit("last", priority=20))
+
+        result = chain.execute({"tool_name": "Bash"}, deadline_seconds=0.3)
+
+        notes = [ctx for ctx in result.result.context if "Chain cut short" in ctx]
+        assert len(notes) == 1
+        assert "did not finish" not in notes[0]
+        assert notes[0].endswith("the output of the 2 handler(s) that finished is kept")
+
     def test_cut_short_response_is_not_mutated_by_the_abandoned_thread(self) -> None:
         """The abandoned thread keeps running and, when its loop ends, merges
         its own results. That must not reach the response already returned."""

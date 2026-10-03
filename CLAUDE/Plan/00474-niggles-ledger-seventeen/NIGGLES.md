@@ -1406,6 +1406,22 @@ The uncertain-move union judges the hook directory and the LAST recorded move (`
 every candidate directory (`sub`). Remedy: judge every directory any `cd` in the chain could
 land in.
 
+### N321 — strict-by-default left four acceptance probes denied, and merge checks never ran `tests/acceptance/`
+
+**Source**: coordinator, release prep full QA (`llm_qa.py all`) on c818d43e5.
+
+**Evidence**: `tests/acceptance/test_playbook_harness.py` failed with 4 of 241 probes denied by
+`R-BASH-SAFE-MODE-PRELUDE-MISSING`. Three were `self_matching_process_probe` ALLOW probes (`… & wait $!`, an `until …; do …; done` loop) and one was `verification_result_gate`'s newline-separated
+pair. Their commands were written before `bash_safe_mode` became strict by default, which denies
+any unguarded sequence before those handlers speak. The coordinator's per-merge check ran
+`tests/integration/` in full but never `tests/acceptance/`, so the break surfaced only at release.
+Sixth instance of the N310 class: a suite the merge routine does not run went red silently.
+
+**Status**: ✅ Fixed on main. The sequenced allow probes carry `set -euo pipefail;`, and the
+verification-gate probe declares `MUST_SKIP_SAFE_MODE_BECAUSE`, because a prelude would make the
+gate stand down. Harness 5/5 green. Remaining: the merge routine runs `tests/acceptance/` beside
+`tests/integration/`.
+
 ### N320 — `D=path && cmd > $D/f` is denied as a write outside the project; the `;` form is allowed
 
 **Source**: coordinator, a live deny while probing after the Plan 00483 batch 2 merge.

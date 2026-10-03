@@ -125,7 +125,7 @@ class PlanQaCommitGateHandler(PreToolUseHandlerBase):
         ):
             return GatingResult(decision=Decision.ALLOW, context=[])
         try:
-            with simulated_staging(reading, cwd, project_root) as env:
+            with simulated_staging(reading, cwd, project_root, include_tracked_changes=True) as env:
                 try:
                     context = staged_context(
                         project_root=project_root,
@@ -136,6 +136,7 @@ class PlanQaCommitGateHandler(PreToolUseHandlerBase):
                         include=form.include,
                         scopes=commit_scopes(reading, cwd, project_root),
                         union=len(reading.runs) > 1,
+                        commits_all=reading.commits_all,
                         index_env=env,
                         command_journal_plans=command_journal_plans(
                             command,

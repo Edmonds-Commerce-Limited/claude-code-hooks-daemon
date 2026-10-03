@@ -3,8 +3,8 @@
 **Plan**: 00479
 **Audience**: operators
 
-A session paused on its usage ceiling is meant to sit idle until its resume
-cron fires at the window reset. The supervisor used to know nothing of that and
+A session paused on its usage ceiling is meant to sit idle until the first
+tick of its resume cron at or after the window reset. The supervisor used to know nothing of that and
 would have nudged it awake with `continue` or `/goal`. The daemon now records a
 pause as a `<session>.usage-paused` file beside the other supervisor signals
 (`claude_code_hooks_daemon.utils.usage_pause` writes, reads and clears it).
@@ -18,5 +18,6 @@ When the record is cleared, or expires an hour after the resume time, it
 behaves as before. An unreadable record counts as no pause.
 
 The rule ships by the worker hot-reload, with no session restart. The record is
-written by the daemon's usage gate, which is separate work. See
+written by the daemon's usage gate (see "A session pauses at its host usage
+ceiling and resumes at the window reset"). See
 `CLAUDE/development/CcySupervisor.md`.

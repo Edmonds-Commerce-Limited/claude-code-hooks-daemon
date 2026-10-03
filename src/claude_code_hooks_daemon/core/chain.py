@@ -323,6 +323,20 @@ class _ChainProgress:
     # How many handlers the loop has begun. The last one begun was still
     # running when the budget expired; every one after it never started.
     entered: int = 0
+    # True once the handler loop has exited (ran out of handlers, or broke at a
+    # terminal one). From then on no handler is running or waiting to run, so a
+    # budget that expires afterwards (in the commit) cut short nobody's output.
+    loop_exited: bool = False
+
+    def unfinished(self, handlers: "list[Handler]") -> "list[Handler]":
+        """The handlers whose output was cut off: none once the loop has exited.
+
+        While the loop is still going, the last one begun was running and every
+        one after it was still waiting to run.
+        """
+        if self.loop_exited:
+            return []
+        return handlers[max(self.entered - 1, 0) :]
 
     def snapshot(self) -> "_ChainProgress":
         """A copy the caller can read and mutate while the run's thread keeps going.
@@ -344,6 +358,7 @@ class _ChainProgress:
             denials=denials,
             advisories=advisories,
             entered=self.entered,
+            loop_exited=self.loop_exited,
         )
 
     def leading_result(self) -> HookResult | None:
@@ -783,7 +798,7 @@ class HandlerChain:
         # Whatever the abandoned thread produces after this point is discarded
         # (it is only logged), so the handlers it never completed are named:
         # their findings reach nobody, and that must not be silent (N289).
-        unfinished = ", ".join(h.name for h in self.handlers[max(finished.entered - 1, 0) :])
+        unfinished = ", ".join(h.name for h in finished.unfinished(self.handlers))
         dropped = f"; did not finish: {unfinished} (their output is dropped)" if unfinished else ""
         if not finished.handlers_executed and not finished.accumulated_context:
             allowed_result = HookResult.allow()
@@ -1175,6 +1190,7 @@ class HandlerChain:
                     accumulated_context.append(error_context)
                     # Continue to next handler
 
+        progress.loop_exited = True
         final_result = _assemble_final_result(final_result, progress, collect_all=collect_all)
 
         # Post-decision commit (Plan 00242 Phase 2): every handler that ran
