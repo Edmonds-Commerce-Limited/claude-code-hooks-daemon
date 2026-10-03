@@ -1620,8 +1620,10 @@ nothing consuming the verifier's exit status. A NEWLINE separates commands
 exactly as `;` does — the motivating incident put the lint on one line and the
 commit on the next, so the lint failed and the commit ran anyway.
 
-Any of these stands the handler down: `verifier && mutator`; `verifier || { …; exit 1; }`; `rc=$?` followed by an `if`/`case` on it; `set -euo pipefail`
-at the top of the invocation. Printing `$?` is NOT consuming it.
+Any of these stands the handler down: `verifier && mutator`; `verifier || { …; exit 1; }`; `rc=$?` followed by an `if`/`case` on it; the statements
+run in a fresh process whose own script sets errexit (`bash -c 'set -euo pipefail; …'`, or `bash <<'EOF'` with the `set` inside the body). A top-level
+`set -euo pipefail` does NOT stand it down: under the current Claude Code Bash tool the command runs inside an `&&` list, where bash ignores errexit.
+Printing `$?` is NOT consuming it.
 `ansible-playbook` appears on both tables and is classified by its flags —
 `--syntax-check`/`--check` make it a verifier, their absence a mutator.
 
@@ -1669,12 +1671,15 @@ Plan 00268 deferred. When enabled, a Bash invocation with multiple sequenced
 statements (`;` or newline separated) must declare the required `set` safety
 flags — by default `set -e` (errexit) and `set -o pipefail` (`set -euo pipefail` satisfies both). A command already carrying a satisfying prelude, a
 single statement, and a pure `&&` chain (which splits to one statement) are
-never flagged. The message and resident guidance teach `set -e`'s blind spots
+never flagged, and neither is a command that runs its body in a fresh `bash -c 'set -euo pipefail; …'`. The message and resident guidance lead
+with the forms that actually stop on a failing step (`&&`, `|| exit 1`, a `bash -c` wrapper) and teach `set -e`'s blind spots
 (disabled inside `if`/`while` conditions and under `!`; non-final `&&`/`||`
-operands; `local x=$(fail)` masking; SIGPIPE under `pipefail`) so the prelude
-is never mistaken for a guarantee. Complementary to
-`verification_result_gate`, which stands down when a prelude is present — the
-two never double-fire.
+operands; `local x=$(fail)` masking; SIGPIPE under `pipefail`; and, under the
+current Claude Code Bash tool, a top-level `set -e` not stopping the command at
+all because the tool runs it inside an `&&` list) so the prelude is never
+mistaken for a guarantee. The prelude is still accepted, and `pipefail`/`-u`
+still work. Its sibling `verification_result_gate` does not treat a top-level
+`set -e` as consuming a verifier's result, for the same reason.
 
 `mode: inject` (auto-prepending the prelude via PreToolUse `updatedInput`) is
 reserved but NOT implemented: the daemon's PreToolUse response schema does not

@@ -1430,10 +1430,11 @@ fix line says "add `set -euo pipefail` at the top", and the prelude satisfies th
 harness it gives no protection. The guard therefore produces a false sense of safety. `pipefail` and `-u`
 still work; only `-e` is lost. Whether the harness behaviour is intended upstream is unverified.
 
-**Status**: ⬜ Open. Remedy: the handler's guidance should stop presenting a bare `set -e` prelude as
-protection. It should recommend `&&` chaining, `|| exit 1` on each step, or a `bash -c 'set -euo pipefail; …'`
-wrapper, and the gate should accept those forms. Whether a bare prelude should still satisfy the gate is a
-design decision to be taken with the fix.
+**Status**: ✅ Fixed on worktree-n328-errexit-harness. `verification_result_gate` no longer stands down for a
+top-level `set -e` (only a fresh `bash -c` / interpreter-heredoc script that sets errexit), and `bash_safe_mode`
+still accepts the prelude but its deny text, fix line and guidance now lead with `&&`, `|| exit 1` and the
+`bash -c 'set -euo pipefail; …'` wrapper and state that a top-level `set -e` does not stop the command under the
+current Claude Code Bash tool.
 
 ### N327 — a fresh install of v3.68.0 leaves no gated-install record, so its same-version re-run is stopped for the owner
 

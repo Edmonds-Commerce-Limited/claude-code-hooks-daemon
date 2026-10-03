@@ -32,6 +32,7 @@ See ``CLAUDE/Plan/00268-*/DESIGN-verifier-mutator.md``.
 from __future__ import annotations
 
 import re
+from collections import Counter
 from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Any, Final
@@ -150,6 +151,33 @@ _GIT: Final = "git"
 _GIT_SPAN_HEAD: Final = rf"{COMMAND_POSITION}{GIT_INVOCATION}"
 
 
+#: N328: why a top-level `set -e` is not offered as a remedy. Worded around the
+#: CURRENT harness behaviour, which could change upstream.
+_PRELUDE_NOT_A_GATE: Final = (
+    "A top-level `set -e` / `set -euo pipefail` is NOT a remedy: under the current "
+    "Claude Code Bash tool the command runs inside an `&&` list, where bash ignores "
+    "errexit, so the mutator still runs after the verifier fails."
+)
+
+_NOT_A_STYLE_RULE: Final = (
+    "This is NOT a rule about `;` versus `&&`. Chaining every command is "
+    "explicitly rejected — `grep -q` exits 1 on a legitimate no-match, and a "
+    "diagnostic sweep wants every section. Only this specific pair is flagged."
+)
+
+
+def _remedy_block(verifier: str, mutator: str) -> str:
+    """The list of forms that really consume a verifier's result."""
+    return (
+        "ANY of these consumes the result:\n"
+        f"  {verifier} … && {mutator} …\n"
+        f"  {verifier} … || {{ echo 'failed'; exit 1; }}\n"
+        f'  {verifier} …; rc=$?; if [ "$rc" -ne 0 ]; then exit 1; fi\n'
+        f"  bash -c 'set -euo pipefail; {verifier} …; {mutator} …'   "
+        "# a fresh process, outside the harness's && list"
+    )
+
+
 def _compile_signature(name: str) -> re.Pattern[str]:
     """Anchor ``name`` at the start of a command span.
 
@@ -261,19 +289,16 @@ class VerificationResultGateHandler(PreToolUseHandlerBase):
             rule_id=RuleID.VERIFICATION_RESULT_NOT_CONSUMED,
             blocked="a verifier followed by a mutator with nothing consuming the result",
             why="The verifier can fail and the mutator would still run",
-            fix="Gate with `&&`, an explicit exit-code check, or `set -euo pipefail`",
+            fix=(
+                "Gate with `&&`, `|| exit 1`, an explicit exit-code check, or run the "
+                "statements in `bash -c 'set -euo pipefail; …'`"
+            ),
             verbose=(
                 "Note a NEWLINE separates commands exactly as `;` does — the two "
                 "halves being on different lines does not gate anything.\n\n"
-                "ANY of these consumes the result:\n"
-                "  verifier … && mutator …\n"
-                "  verifier … || { echo 'failed'; exit 1; }\n"
-                '  verifier …; rc=$?; if [ "$rc" -ne 0 ]; then exit 1; fi\n'
-                "  set -euo pipefail   # at the top of the invocation\n\n"
-                "This is NOT a rule about `;` versus `&&`. Chaining every command is "
-                "explicitly rejected — `grep -q` exits 1 on a legitimate no-match, and "
-                "a diagnostic sweep wants every section. Only this specific pair is "
-                "flagged."
+                f"{_remedy_block('verifier', 'mutator')}\n\n"
+                f"{_PRELUDE_NOT_A_GATE}\n\n"
+                f"{_NOT_A_STYLE_RULE}"
             ),
         )
         self._formatter = RuleFormatter()
@@ -335,7 +360,7 @@ class VerificationResultGateHandler(PreToolUseHandlerBase):
 
         statements = split_statements(command, heredoc_bodies_executable=True)
 
-        if has_errexit(statements):
+        if self._fresh_process_sets_errexit(command, statements):
             return None
 
         verifiers = _COMPILED_VERIFIERS + _compile_table(self._extra("_extra_verifiers"))
@@ -356,6 +381,21 @@ class VerificationResultGateHandler(PreToolUseHandlerBase):
                 pending = found
 
         return None
+
+    @staticmethod
+    def _fresh_process_sets_errexit(command: str, statements: list[str]) -> bool:
+        """True when errexit is declared by a script a FRESH bash process runs.
+
+        N328: the Claude Code Bash tool runs the whole command inside an `&&`
+        list, where bash ignores errexit, so a top-level `set -e` (or one in a
+        `{ }` group or subshell) stops nothing and consumes no result. Only a
+        script run by a new process -- a heredoc body fed to an interpreter --
+        is outside that list. Those body statements are exactly the ones the
+        executable-body view has that the outer view does not.
+        """
+        outer = Counter(split_statements(command))
+        body_statements = list((Counter(statements) - outer).elements())
+        return has_errexit(body_statements)
 
     @staticmethod
     def _classify(
@@ -409,14 +449,9 @@ class VerificationResultGateHandler(PreToolUseHandlerBase):
             "would still run. A check whose outcome nothing acts on is not a check.\n\n"
             "Note a NEWLINE separates commands exactly as `;` does — the two halves "
             "being on different lines does not gate anything.\n\n"
-            "ANY of these consumes the result:\n"
-            f"  {finding.verifier} … && {finding.mutator} …\n"
-            f"  {finding.verifier} … || {{ echo 'failed'; exit 1; }}\n"
-            f'  {finding.verifier} …; rc=$?; if [ "$rc" -ne 0 ]; then exit 1; fi\n'
-            "  set -euo pipefail   # at the top of the invocation\n\n"
-            "This is NOT a rule about `;` versus `&&`. Chaining every command is "
-            "explicitly rejected — `grep -q` exits 1 on a legitimate no-match, and a "
-            "diagnostic sweep wants every section. Only this specific pair is flagged."
+            f"{_remedy_block(finding.verifier, finding.mutator)}\n\n"
+            f"{_PRELUDE_NOT_A_GATE}\n\n"
+            f"{_NOT_A_STYLE_RULE}"
         )
 
     @staticmethod
@@ -435,14 +470,9 @@ class VerificationResultGateHandler(PreToolUseHandlerBase):
             "would still run. A check whose outcome nothing acts on is not a check.\n\n"
             "Note a NEWLINE separates commands exactly as `;` does — the two halves "
             "being on different lines does not gate anything.\n\n"
-            "ANY of these consumes the result:\n"
-            f"  {finding.verifier} … && {finding.mutator} …\n"
-            f"  {finding.verifier} … || {{ echo 'failed'; exit 1; }}\n"
-            f'  {finding.verifier} …; rc=$?; if [ "$rc" -ne 0 ]; then exit 1; fi\n'
-            "  set -euo pipefail   # at the top of the invocation\n\n"
-            "This is NOT a rule about `;` versus `&&`. Chaining every command is "
-            "explicitly rejected — `grep -q` exits 1 on a legitimate no-match, and a "
-            "diagnostic sweep wants every section. Only this specific pair is flagged."
+            f"{_remedy_block(finding.verifier, finding.mutator)}\n\n"
+            f"{_PRELUDE_NOT_A_GATE}\n\n"
+            f"{_NOT_A_STYLE_RULE}"
         )
 
     def get_claude_md(self) -> str | None:
@@ -464,7 +494,13 @@ class VerificationResultGateHandler(PreToolUseHandlerBase):
             "- `verifier … && mutator …`\n"
             "- `verifier … || { echo failed; exit 1; }`\n"
             "- `verifier …; rc=$?` then an `if`/`case` that branches on it\n"
-            "- `set -euo pipefail` at the top of the invocation\n\n"
+            "- the statements run in a fresh process whose own script sets errexit: "
+            "`bash -c 'set -euo pipefail; verifier …; mutator …'` or "
+            "`bash <<'EOF'` with `set -euo pipefail` inside the body\n\n"
+            "**A top-level `set -e` / `set -euo pipefail` is NOT accepted.** Under the "
+            "current Claude Code Bash tool the command runs inside an `&&` list, where "
+            "bash ignores errexit, so a failing verifier does not stop the mutator. "
+            "`{ set -e; …; }` and `( set -e; … )` are no different.\n\n"
             "**This is NOT a style rule about `;` versus `&&`.** Blanket chaining was "
             "considered and rejected: `grep -q p f; echo done` exits 1 on a legitimate "
             'no-match, `cmd > f 2>&1; echo "exit=$?"` exists to observe a failure, and '
@@ -499,6 +535,25 @@ class VerificationResultGateHandler(PreToolUseHandlerBase):
                     "by default: the command runs and the context names the pair. "
                     "bash_safe_mode (strict by default) denies an unguarded sequence "
                     "before this gate speaks, so the probe declares the skip."
+                ),
+                expected_decision=Decision.ALLOW,
+                expected_message_patterns=[r"yamllint", r"git tag"],
+                safety_notes="--version and --list are read-only; nothing is tagged.",
+                test_type=TestType.ADVISORY,
+                recommended_model=RecommendedModel.HAIKU,
+                requires_main_thread=False,
+            ),
+            AcceptanceTest(
+                title="Verification result gate - a set -e prelude does not gate the pair",
+                command="set -euo pipefail; yamllint --version; git tag --list",
+                dispatch_as_bash=True,
+                description=(
+                    "Under the current Claude Code Bash tool a top-level `set -e` "
+                    "does not stop the command, so it must not count as consuming "
+                    "the verifier's result (N328). The prelude satisfies "
+                    "bash_safe_mode, so only this gate speaks. Advisory by default: "
+                    "the command runs and the context names the pair; a project in "
+                    "`mode: block` denies it."
                 ),
                 expected_decision=Decision.ALLOW,
                 expected_message_patterns=[r"yamllint", r"git tag"],

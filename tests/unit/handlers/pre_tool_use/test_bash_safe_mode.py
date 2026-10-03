@@ -313,6 +313,80 @@ class TestFalsePositiveShapesFrom00268:
         assert handler.matches(_bash(command)) is False
 
 
+class TestErrexitUnderTheClaudeCodeHarness:
+    """N328: the Bash tool runs a command inside an `&&` list, where bash
+    ignores errexit, so a top-level `set -e` stops nothing. The guard keeps
+    accepting the prelude (pipefail and -u still work) but must not present it
+    as protection, and must accept the forms that DO stop on failure."""
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "pytest tests/ && git commit -m x",
+            "pytest tests/ && git add . && git commit -m x",
+            "bash -c 'set -euo pipefail; pytest tests/; git commit -m x'",
+            "bash -euo pipefail -c 'pytest tests/; git commit -m x'",
+            "bash <<'EOF'\nset -euo pipefail\npytest tests/\ngit commit -m x\nEOF",
+            "pytest tests/ || exit 1 && git commit -m x",
+        ],
+    )
+    def test_forms_that_stop_on_failure_are_accepted(
+        self, handler: BashSafeModeHandler, command: str
+    ) -> None:
+        assert handler.matches(_bash(command)) is False
+
+    def test_a_declared_prelude_is_still_accepted(self, handler: BashSafeModeHandler) -> None:
+        assert handler.matches(_bash("set -euo pipefail\npytest tests/\ngit commit -m x")) is False
+
+    def test_the_deny_message_leads_with_forms_that_stop_on_failure(
+        self, handler: BashSafeModeHandler
+    ) -> None:
+        result = handler.handle(_bash("pytest tests/\ngit commit -m x"))
+        assert result.decision == Decision.DENY
+        reason = result.reason or ""
+        assert reason.index("&&") < reason.index("set -euo pipefail")
+        assert "|| exit 1" in reason
+        assert "bash -c 'set -euo pipefail" in reason
+        assert "does not stop the command" in reason
+        assert "current Claude Code Bash tool" in reason
+
+    def test_the_terse_deny_does_not_recommend_a_bare_set_e(
+        self, handler: BashSafeModeHandler
+    ) -> None:
+        hook_input = _bash("pytest tests/\ngit commit -m x")
+        hook_input["transcript_path"] = "/tmp/n328/transcript.jsonl"
+        handler.handle(hook_input)
+        reason = handler.handle(hook_input).reason or ""
+        assert "Add: `set -e" not in reason
+        assert "bash -c" in reason
+
+    def test_the_rule_fix_leads_with_forms_that_stop_on_failure(
+        self, handler: BashSafeModeHandler
+    ) -> None:
+        fix = handler.get_rules()[0].fix
+        assert fix.index("&&") < fix.index("set -euo pipefail")
+        assert "bash -c" in fix
+
+    def test_the_blind_spots_state_the_harness_behaviour(
+        self, handler: BashSafeModeHandler
+    ) -> None:
+        rule = handler.get_rules()[0]
+        assert "current Claude Code Bash tool" in (rule.verbose or "")
+        warn = BashSafeModeHandler()
+        warn._mode = "warn"
+        guidance = warn.handle(_bash("pytest tests/\ngit commit -m x")).guidance or ""
+        assert "current Claude Code Bash tool" in guidance
+        assert "already stands down when a prelude is present" not in guidance
+
+    def test_resident_guidance_does_not_sell_the_prelude_as_protection(
+        self, handler: BashSafeModeHandler
+    ) -> None:
+        guidance = handler.get_claude_md() or ""
+        assert "current Claude Code Bash tool" in guidance
+        assert "**Fix when blocked**: put `set -euo pipefail`" not in guidance
+        assert "bash -c 'set -euo pipefail" in guidance
+
+
 class TestResidentGuidance:
     def test_get_claude_md_is_present_and_teaches(self, handler: BashSafeModeHandler) -> None:
         guidance = handler.get_claude_md()
