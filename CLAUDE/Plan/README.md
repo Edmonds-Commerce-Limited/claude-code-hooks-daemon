@@ -4,7 +4,7 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
-- [00487: Supervisor plugin API and the ccy restart plugin](00487-supervisor-plugin-api-and-ccy-restart-plugin/PLAN.md) - Not Started (owner request, #71: plugin API for the ccy supervisor per the fedora-desktop 00146 draft; first consumer is a ccy max-age restart and deadline plugin on a fedora-desktop branch, tracked here)
+- [00487: Supervisor plugin API and the ccy restart plugin](00487-supervisor-plugin-api-and-ccy-restart-plugin/PLAN.md) - In Progress (owner request, #71: plugin API for the ccy supervisor per the fedora-desktop 00146 draft; first consumer is a ccy max-age restart and deadline plugin on a fedora-desktop branch, tracked here)
 
 - [00486: Claude Code version tracking](00486-claude-code-version-tracking/PLAN.md) - Not Started (owner request: record the Claude Code version each release was built against, review the Claude Code changelog per release for adopt/redundant/conflict, detect a newer running version)
 

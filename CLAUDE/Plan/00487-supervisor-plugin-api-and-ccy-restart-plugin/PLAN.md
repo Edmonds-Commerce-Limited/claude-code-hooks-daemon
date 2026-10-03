@@ -1,6 +1,6 @@
 # Plan 00487: Supervisor plugin API and the ccy restart plugin
 
-**Status**: Not Started
+**Status**: In Progress
 **Created**: 2026-10-03
 **Owner**: dev
 **Priority**: High
@@ -43,29 +43,47 @@ The agent's rulings on ordering, plugin location and restart policy, made while 
 
 ### Phase 1: Plugin API in the supervisor (this repository, worktree branch)
 
-- [ ] ⬜ **Task 1.1**: Read the draft and its research report (fedora-desktop Plan 00146 `subagent-reports/261002-supervisor-plugin-research-opus.md`) against the current `claude-supervise.py`. Record any drift.
+- [x] ✅ **Task 1.1**: Read the draft and its research report (fedora-desktop Plan 00146 `subagent-reports/261002-supervisor-plugin-research-opus.md`) against the current `claude-supervise.py`. Record any drift. Result: [report](subagent-reports/261003-task-1.1-draft-drift-explore-sonnet.md). The draft still fits; it lists the insertion points, and the plugin hook goes after the session-actions family.
+
 - [ ] ⬜ **Task 1.2**: TDD the loader:
+
   - `--plugin` and `--plugin-host` flags;
   - ownership and mode checks on each file;
   - a `PLUGIN_API` major version check;
   - `--disable-plugin` carried across worker restarts;
   - plugin status in `supervisor-status.json`.
+
 - [ ] ⬜ **Task 1.3**: TDD the worker hooks. `on_start` and `on_idle` run on a budgeted thread, are called only at NOOP in MONITOR with an empty box, and are asked in flag order.
-- [ ] ⬜ **Task 1.4**: TDD the `Restart` primitive in the host:
+
+- [ ] ⬜ **Task 1.3b**: TDD the update-restart exit (DECISIONS.md, item 5). A worker result of `ExitForRestart` makes the host:
+
+  - send `/exit` at idle;
+  - write the session id to a state file on the persistent mount;
+  - exit with a dedicated status.
+
+  Refuse when the session id is ambiguous, and abandon the restart if the child ignores `/exit`.
+
+- [ ] ⬜ **Task 1.4**: TDD the in-container `Restart` primitive, which the credential switch needs. It is not on this plan's critical path:
+
   - refuse when the session id is ambiguous;
   - `/exit` through the injection path, with a deadline;
   - re-fork with `--resume <id>`, after stripping `--continue`, `-c`, `--resume`, `-r` and `--fork-session`;
   - abandon the restart if the child ignores `/exit`.
+
 - [ ] ⬜ **Task 1.5**: TDD the host half: `before_spawn` runs in the forked child, behind the `env_keys` allowlist and the denylist, with a close-on-exec result pipe and a `SIGKILL` deadline. If it fails, the supervisor falls back to a plain respawn.
+
 - [ ] ⬜ **Task 1.6**: TDD the uniform failure path and the plugin notice family:
+
   - the notice is built from a fixed template, typed only at an idle point, and capped;
   - it is also shown as a status-line warning and written to the audit log;
   - every failure kind in the draft's test list is covered.
+
 - [ ] ⬜ **Task 1.7**: Document the API in `CLAUDE/development/CcySupervisor.md`, add a release-notes callout, and run the merge checks (static checks, semgrep, `tests/unit/supervise`). Then verify the worker reload as the CcySupervisor doc requires.
 
 ### Phase 2: ccy plugin (fedora-desktop feature branch, cloned under `untracked/repos/`)
 
-- [ ] ⬜ **Task 2.1**: Establish from the fedora-desktop source how ccy installs and updates Claude Code, and how it builds the wrapper line. Record which restart picks up a new version (DECISIONS.md, item 5).
+- [x] ✅ **Task 2.1**: Establish from the fedora-desktop source how ccy installs and updates Claude Code, and how it builds the wrapper line. Record which restart picks up a new version (DECISIONS.md, item 5). Result: [report](subagent-reports/261003-task-2.1-ccy-update-path-explore-sonnet.md). Claude Code is baked into the image, so only a ccy relaunch on the host picks up a new version.
+- [ ] ⬜ **Task 2.1b**: Make the ccy launcher act on the supervisor's restart exit status: update the image, then relaunch with `--resume <id>`, read from the state file. Bound it so a crash loop cannot relaunch for ever.
 - [ ] ⬜ **Task 2.2**: Write the worker half: track session age and deadlines in `state_dir`, send the restart-warning notice, then return `Restart` at the next idle point. Include the forced-restart fallback. Unit-test it against the API's test harness.
 - [ ] ⬜ **Task 2.3**: Add the ccy launcher options (`--max-age`, `--run-for`, `--until`) that build the `--plugin` flags. Follow fedora-desktop's own rules: IaC only, the ccy version bump, and `qa-all.bash` plus its `qa-reviewer`.
 - [ ] ⬜ **Task 2.4**: Have the supervisor send a post-restart message naming the new Claude Code version.
