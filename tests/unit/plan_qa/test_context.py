@@ -631,6 +631,22 @@ class TestStagedContextReadsTheCommittedTree:
         assert context.tree is not None
         assert [folder.number for folder in context.tree.folders] == [1]
 
+    def test_a_commit_dash_a_reads_the_disk_not_the_index(self, tmp_path: Path) -> None:
+        """`git commit -a` records the working tree: a staged `git mv` plus an
+        unstaged README fix is judged on the disk content."""
+        root = self._committed(tmp_path)
+        _git(root, "mv", "CLAUDE/Plan/00001-first", "CLAUDE/Plan/00001-renamed")
+        (root / "CLAUDE/Plan/README.md").write_text(
+            "# Plans Index\n\n## Active Plans\n\n- [00001: renamed](00001-renamed/PLAN.md) - x\n"
+        )
+
+        index_read = staged_context(root, "CLAUDE/Plan", _Policy())
+        disk_read = staged_context(root, "CLAUDE/Plan", _Policy(), commits_all=True)
+
+        assert index_read.readme is not None and disk_read.readme is not None
+        assert index_read.readme.rows == ()
+        assert 1 in disk_read.readme.numbers()
+
     @staticmethod
     def _statuses(context: CheckContext) -> list[str | None]:
         assert context.tree is not None

@@ -137,6 +137,7 @@ class PlanQaCommitGateHandler(PreToolUseHandlerBase):
                         include=form.include,
                         scopes=commit_scopes(reading, cwd, project_root),
                         union=len(reading.runs) > 1,
+                        commits_all=reading.commits_all,
                         index_env=env,
                         command_journal_plans=command_journal_plans(
                             command,
