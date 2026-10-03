@@ -285,7 +285,7 @@ class TestOnlyInAProjectThatHasTheQaScript:
             "ProjectContext.project_root",
             classmethod(lambda cls: client_root),
         )
-        assert not handler.matches(_bash(f"git merge {_BRANCH}", repo))
+        assert _advice(handler, f"git merge {_BRANCH}", repo) == ""
 
     def test_advises_when_the_project_has_the_qa_script(
         self,
@@ -303,7 +303,22 @@ class TestOnlyInAProjectThatHasTheQaScript:
             "ProjectContext.project_root",
             classmethod(lambda cls: root),
         )
-        assert handler.matches(_bash(f"git merge {_BRANCH}", repo))
+        assert _BRANCH in _advice(handler, f"git merge {_BRANCH}", repo)
+
+    def test_matching_needs_no_project_context(
+        self, handler: MergeQaAdvisorHandler, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """``matches`` reads only the command; the project is consulted in ``handle``."""
+
+        def _uninitialised(cls: object) -> Path:
+            raise RuntimeError("ProjectContext not initialized")
+
+        monkeypatch.setattr(
+            "claude_code_hooks_daemon.handlers.pre_tool_use.merge_qa_advisor."
+            "ProjectContext.project_root",
+            classmethod(_uninitialised),
+        )
+        assert handler.matches(_bash(f"git merge {_BRANCH}", None))
 
 
 class TestDoesNotMatch:

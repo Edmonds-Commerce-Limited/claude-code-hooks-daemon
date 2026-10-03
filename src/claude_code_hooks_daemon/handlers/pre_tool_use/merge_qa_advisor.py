@@ -189,8 +189,6 @@ class MergeQaAdvisorHandler(PreToolUseHandlerBase):
         """True for a Bash command that starts a ``git merge``; git is asked in handle()."""
         if hook_input.get(HookInputField.TOOL_NAME) != ToolName.BASH:
             return False
-        if not (ProjectContext.project_root() / QA_SCRIPT).is_file():
-            return False
         command = get_bash_command(hook_input)
         return command is not None and bool(_merges(command))
 
@@ -214,6 +212,8 @@ class MergeQaAdvisorHandler(PreToolUseHandlerBase):
 
     def handle(self, hook_input: dict[str, Any]) -> GatingResult:
         """Name each merged work branch's head that has no green ``changed`` record."""
+        if not (ProjectContext.project_root() / QA_SCRIPT).is_file():
+            return GatingResult(decision=Decision.ALLOW)
         command = get_bash_command(hook_input) or ""
         cwd = self._cwd(hook_input)
         unrecorded: list[tuple[str, str]] = []
