@@ -58,8 +58,9 @@ from claude_code_hooks_daemon.utils.command_evasion import (
     GIT_INVOCATION,
     normalise_line_continuations,
 )
+from claude_code_hooks_daemon.utils.commit_location import commit_runs_in_foreign_repo
 from claude_code_hooks_daemon.utils.git_commit_parsing import read_commit_form
-from claude_code_hooks_daemon.utils.git_facts import commit_facts, commit_runs_in_foreign_repo
+from claude_code_hooks_daemon.utils.git_facts import commit_facts
 from claude_code_hooks_daemon.utils.path_predicates import path_exists
 from claude_code_hooks_daemon.utils.shell_segmentation import split_unquoted
 from claude_code_hooks_daemon.utils.staging_simulation import (

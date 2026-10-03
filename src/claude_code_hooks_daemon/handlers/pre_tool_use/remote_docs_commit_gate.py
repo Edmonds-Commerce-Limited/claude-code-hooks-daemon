@@ -34,13 +34,14 @@ from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.core.rule import Rule
 from claude_code_hooks_daemon.core.utils import get_bash_command
+from claude_code_hooks_daemon.utils.commit_location import commit_runs_in_foreign_repo
 from claude_code_hooks_daemon.utils.git_commit_parsing import (
     CommitReading,
     is_git_commit,
     read_commit_form,
     tokenise_command,
 )
-from claude_code_hooks_daemon.utils.git_facts import commit_facts, commit_runs_in_foreign_repo
+from claude_code_hooks_daemon.utils.git_facts import commit_facts
 from claude_code_hooks_daemon.utils.staging_simulation import (
     SimulationIncompleteError,
     simulated_staging,

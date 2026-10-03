@@ -30,6 +30,7 @@ from claude_code_hooks_daemon.plan_qa.report import format_advisory, format_bloc
 from claude_code_hooks_daemon.plan_qa.runner import run_stage
 from claude_code_hooks_daemon.plan_qa.types import Level, Stage
 from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command_for_docs
+from claude_code_hooks_daemon.utils.commit_location import commit_runs_in_foreign_repo
 from claude_code_hooks_daemon.utils.git_commit_parsing import (
     extract_commit_message as _extract_commit_message,
 )
@@ -40,7 +41,7 @@ from claude_code_hooks_daemon.utils.git_commit_parsing import read_commit_form
 from claude_code_hooks_daemon.utils.git_commit_parsing import (
     tokenise_command as _tokenise,
 )
-from claude_code_hooks_daemon.utils.git_facts import commit_runs_in_foreign_repo, commit_scopes
+from claude_code_hooks_daemon.utils.git_facts import commit_scopes
 from claude_code_hooks_daemon.utils.staging_simulation import (
     SimulationIncompleteError,
     simulated_staging,
