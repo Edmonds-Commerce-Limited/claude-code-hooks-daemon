@@ -290,6 +290,16 @@ class TestAdvises:
         assert result.guidance is not None
         assert "timeout 3600" in result.guidance
 
+    def test_the_loop_advisory_states_the_limit_applies_only_when_unattended(
+        self, handler: SelfMatchingProcessProbeHandler
+    ) -> None:
+        """Claude Code 2.1.288: the background time limit is for unattended sessions only."""
+        result = handler.handle(_bash('until ! kill -0 "$pid"; do sleep 5; done'))
+        assert result.guidance is not None
+        assert "no time limit" not in result.guidance
+        assert "only in unattended sessions" in result.guidance
+        assert any("only in unattended sessions" in entry for entry in result.context)
+
     def test_a_capped_loop_says_nothing(self, handler: SelfMatchingProcessProbeHandler) -> None:
         command = 'until ! kill -0 "$pid"; do sleep 5; i=$((i+1)); done'
         assert handler.matches(_bash(command)) is False

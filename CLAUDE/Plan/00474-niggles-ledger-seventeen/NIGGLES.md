@@ -1427,16 +1427,16 @@ reproduction before it is fixed.
 branch `worktree-p486-cc-versions` until it merges). The report filtered the 2.1.273 to 2.1.285 entries by keyword
 and did not read them in full, so each item below has to be verified before anyone acts on it.
 
-| Id   | Finding                                                                                                                     | Status  |
-| ---- | --------------------------------------------------------------------------------------------------------------------------- | ------- |
-| N330 | Read `rate_limits.spend_limit` in `core/usage_snapshot.py` (adopt).                                                         | ⬜ Open |
-| N331 | Verify `.claude/rules` write-time loading on 2.1.288 and correct `CLAUDE/DirectoryRoles.md` if it changed.                  | ⬜ Open |
-| N332 | Guidance claims "run_in_background has no time limit"; reported false for unattended sessions since 2.1.285.                | ⬜ Open |
-| N333 | Define how `usage_pause` interacts with Claude Code's "Continue automatically at usage limit" wait.                         | ⬜ Open |
-| N334 | Re-check the supervisor's post-compaction `/goal` and `continue` re-injection against the 2.1.274 fix (possibly redundant). | ⬜ Open |
-| N335 | Compare `/doctor prompt-audit` with `skill_scan` and `docs_qa` (possible overlap).                                          | ⬜ Open |
-| N336 | Make the supervisor's red-zone `/compact` aware of the `/autocompact` window.                                               | ⬜ Open |
-| N337 | Gate the supervisor's idle `/compact` on `prompt_cache.warm`, so that compaction does not run against a cold cache.         | ⬜ Open |
+| Id   | Finding                                                                                                                     | Status                                                                                                                                   |
+| ---- | --------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| N330 | Read `rate_limits.spend_limit` in `core/usage_snapshot.py` (adopt).                                                         | ⬜ Open — verified (statusline docs list rate_limits.spend_limit, 2.1.251+); adopt when a consumer is wanted (owner call)                |
+| N331 | Verify `.claude/rules` write-time loading on 2.1.288 and correct `CLAUDE/DirectoryRoles.md` if it changed.                  | ❌ Not a defect — `DirectoryRoles.md` says "when matching files are touched", which 2.1.288 made true for Write and Edit as well as Read |
+| N332 | Guidance claims "run_in_background has no time limit"; reported false for unattended sessions since 2.1.285.                | ✅ Fixed                                                                                                                                 |
+| N333 | Define how `usage_pause` interacts with Claude Code's "Continue automatically at usage limit" wait.                         | ⬜ Open                                                                                                                                  |
+| N334 | Re-check the supervisor's post-compaction `/goal` and `continue` re-injection against the 2.1.274 fix (possibly redundant). | ⬜ Open                                                                                                                                  |
+| N335 | Compare `/doctor prompt-audit` with `skill_scan` and `docs_qa` (possible overlap).                                          | ⬜ Open                                                                                                                                  |
+| N336 | Make the supervisor's red-zone `/compact` aware of the `/autocompact` window.                                               | ⬜ Open                                                                                                                                  |
+| N337 | Gate the supervisor's idle `/compact` on `prompt_cache.warm`, so that compaction does not run against a cold cache.         | ⬜ Open                                                                                                                                  |
 
 Idle compaction: the review found none in the Claude Code changelog or the vendored prompt-caching docs, so the
 owner's report is unconfirmed. Claude Code compacts by window size. The idle-gated `/compact` seen in sessions is the
