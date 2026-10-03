@@ -117,6 +117,26 @@ def _isolate_worker_error_log(
     monkeypatch.setattr(_mod, "worker_error_log_path", lambda: sink)
 
 
+LIVE_OWN_SESSION = "plugin-sess-1"
+
+
+@pytest.fixture
+def live_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """A project root a real worker subprocess resolves to ``tmp_path / untracked``.
+
+    Also points the plugin state directory at ``tmp_path / ccy-state`` so a real
+    worker never writes into the checkout, and fixes the own session id in the
+    test process.
+    """
+    (tmp_path / "src" / "claude_code_hooks_daemon").mkdir(parents=True)
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
+    monkeypatch.setenv("CCY_SUPERVISOR_STATE_DIR", str(tmp_path / "ccy-state"))
+    monkeypatch.setattr(
+        _mod, "cached_own_session_ids", lambda *a, **k: frozenset({LIVE_OWN_SESSION})
+    )
+    return tmp_path
+
+
 @pytest.fixture
 def plugin_harness(tmp_path: Path) -> Callable[..., Any]:
     """Factory for a `PluginTestHarness`: ``plugin_harness(name, path, session_ids=...)``.

@@ -202,6 +202,7 @@ import fcntl
 import functools
 import hashlib
 import importlib.util
+import io
 import json
 import os
 import pty
@@ -1868,6 +1869,34 @@ def _redirect_worker_stderr_to_log() -> None:
         # swap the Python-level handle only -- still never a terminal.
         append_worker_error(f"stderr dup2 failed, using handle swap: {exc}")
     sys.stderr = stream
+
+
+def _isolate_worker_channels() -> tuple[TextIO, TextIO]:
+    """Give the worker private protocol streams and repoint the standard ones.
+
+    The worker's stdin/stdout are the tick and reply pipes to the PTY host, and
+    plugin code runs in this process. Returns ``(requests, replies)`` over
+    private duplicates of fds 0 and 1, then points fd 0 at ``/dev/null`` and fd
+    1 (plus ``sys.stdin``/``sys.stdout``) at whatever stderr is -- the worker
+    error log once `_redirect_worker_stderr_to_log` ran. Anything plugin code
+    prints, writes to ``sys.stdout`` or writes to fd 1 therefore lands in the
+    log and can never be parsed as a reply or steal a tick. Call it before any
+    plugin is loaded.
+    """
+    sys.stdout.flush()
+    request_fd = os.dup(0)
+    reply_fd = os.dup(1)
+    devnull_fd = os.open(os.devnull, os.O_RDONLY)
+    try:
+        os.dup2(devnull_fd, 0)
+    finally:
+        os.close(devnull_fd)
+    os.dup2(sys.stderr.fileno(), 1)
+    sys.stdin = io.StringIO("")
+    sys.stdout = sys.stderr
+    requests = os.fdopen(request_fd, "r", encoding="utf-8")
+    replies = os.fdopen(reply_fd, "w", encoding="utf-8", buffering=1)
+    return requests, replies
 
 
 def compute_source_hash(path: Path) -> str:
@@ -7800,7 +7829,12 @@ class PolicyWorker:
                 return None
             try:
                 outcome = _outcome_from_json(line)
-            except (ValueError, KeyError):
+            except Exception as exc:
+                # TOTAL on purpose: whatever is on the pipe is parsed untrusted,
+                # and a TypeError/AttributeError from a JSON scalar or list must
+                # be a bad reply (the host falls back), never an exception
+                # reaching the PTY loop and ending the session.
+                append_worker_error(f"bad worker reply ({type(exc).__name__}): {exc}")
                 return None
             if outcome.tick_id == tick_id:
                 return outcome
@@ -8847,10 +8881,13 @@ def main(argv: list[str] | None = None) -> int:
         # tty either). See Plan 00166.
         _redirect_worker_stderr_to_log()
         try:
+            # Plan 00487: plugin code runs in this process, so the protocol
+            # pipes are made private BEFORE any plugin is loaded.
+            requests, replies = _isolate_worker_channels()
             worker_sidecar_dir = _default_sidecar_dir()
             return run_worker(
-                sys.stdin,
-                sys.stdout,
+                requests,
+                replies,
                 dry_run="--arm" not in argv,
                 sidecar_dir=worker_sidecar_dir,
                 policy=CompactPolicy(),

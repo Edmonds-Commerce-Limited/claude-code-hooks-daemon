@@ -625,16 +625,6 @@ sys.exit(7)
 """
 
 
-@pytest.fixture
-def live_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """A project root the real worker subprocess resolves to ``tmp_path / untracked``."""
-    (tmp_path / "src" / "claude_code_hooks_daemon").mkdir(parents=True)
-    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
-    monkeypatch.setenv("CCY_SUPERVISOR_STATE_DIR", str(tmp_path / "ccy-state"))
-    monkeypatch.setattr(_mod, "cached_own_session_ids", lambda *a, **k: frozenset({OWN_SESSION}))
-    return tmp_path
-
-
 def _live_supervise(
     tmp_path: Path, body: str, *, linger: float
 ) -> tuple[int, Path, Any, _Recorder]:
