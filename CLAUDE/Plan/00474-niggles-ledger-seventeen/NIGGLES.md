@@ -1482,7 +1482,7 @@ real tag once a release carries the fix. Residual: whoever can delete the venv a
 
 **Evidence**: Step 6 of a release empties `CLAUDE/UPGRADES/UNRELEASED/` into the versioned guide. `tests/acceptance/test_guarded_branch_install.py` then failed, because the pre-deploy gate it drives found nothing staged to stop on. Its expectation depended on the repository's own `UNRELEASED/` contents, not on a fixture. The manifest example test had the same dependency. Both were found only at release time, because between releases `UNRELEASED/` is never empty. Fixed for the guarded install in 3f0311e8e: the test commits its own staged callout and manifest into the clone.
 
-**Status**: ✅ Fixed for the two instances. ⬜ Open as a class: a test that reads the live `UNRELEASED/` tree should build its own fixture. Remedy: a check, or one test run with `UNRELEASED/` emptied, so the dependency fails between releases instead of at release prep.
+**Status**: ✅ Fixed on worktree-n326-unreleased-dependency. `tests/integration/test_suite_passes_on_a_released_unreleased_tree.py` runs every test file that mentions the holding area against a clone whose `UNRELEASED/` holds README scaffolding only, so a dependency on staged content fails between releases.
 
 ### N325 — `staging_simulation` warns "add -A" when the command ran `add -u`
 
