@@ -103,8 +103,18 @@ ever delivered (``install_input_signal_guards``: SIGTSTP + SIGQUIT, plus ignored
 SIGTTIN/SIGTTOU). Ctrl+C (SIGINT) is deliberately left working. Each swallow
 surfaces a transient status-line notice via the message channel below.
 
+PLUGINS (Plan 00487). A launcher can extend the supervisor without forking it:
+each ``--plugin <name>=<worker.py>`` flag names a stdlib-only worker half (never
+found by scanning), vetted before it is imported and imported only by the
+``--worker`` subprocess. Its ``on_idle`` is asked at the END of the
+``decide_once`` cascade and may return ``ExitForRestart``; a plugin that fails
+in ANY way is disabled, the supervisor recovers, and the session is told once
+by a fixed-template notice. See ``CLAUDE/development/CcySupervisor.md`` for the
+contract, the failure path and the exit status.
+
 Usage:
-    claude-supervise.py [--dry-run | --arm] [--log PATH] -- <child argv...>
+    claude-supervise.py [--dry-run | --arm] [--log PATH]
+                        [--plugin NAME=WORKER.PY ...] -- <child argv...>
 
 HOST-TIER SURFACE (Plan 00317). The PTY host (`supervise()`/`_forward_io()`)
 never reloads -- it owns the live child. Everything it does beyond raw byte
@@ -3474,6 +3484,7 @@ _PLUGIN_KINDS_NEEDING_WORKER_RESTART = frozenset({_PLUGIN_KIND_OVERRUN, _PLUGIN_
 _PLUGIN_STATE_LOADED = "loaded"
 _PLUGIN_STATE_FAILED = "failed"
 _PLUGIN_STATE_DISABLED = "disabled"
+_DISABLED_BY_FLAG_REASON = f"disabled by {_DISABLE_PLUGIN_FLAG}"
 
 _BUDGET_OK = "ok"
 _BUDGET_EXCEPTION = "exception"
@@ -4212,6 +4223,7 @@ class PluginHost:
         state_root: Path | None = None,
         status_dir: Path | None = None,
         marker_path: Path | None = None,
+        disabled: Collection[str] = (),
     ) -> None:
         self._write_status = write_status
         self._allowed_uids = allowed_uids
@@ -4224,6 +4236,12 @@ class PluginHost:
         self._runtime: PluginRuntime | None = None
         for raw in raw_specs:
             self._add(raw)
+        # A plugin the command line itself names in `--disable-plugin` starts off.
+        for name in disabled:
+            entry = self._by_name.get(name)
+            if entry is not None and entry.state == _PLUGIN_STATE_LOADED:
+                entry.state = _PLUGIN_STATE_DISABLED
+                entry.reason = _DISABLED_BY_FLAG_REASON
         if self._entries:
             self._publish()
 
@@ -8887,6 +8905,7 @@ def main(argv: list[str] | None = None) -> int:
             state_root=_plugin_state_root(),
             status_dir=untracked_dir,
             marker_path=_plugin_marker_path(untracked_dir, os.getpid()),
+            disabled=flags.disable_plugin,
         )
         if flags.plugin
         else None

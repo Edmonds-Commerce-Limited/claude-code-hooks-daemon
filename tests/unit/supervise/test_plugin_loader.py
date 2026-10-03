@@ -269,6 +269,30 @@ class TestPluginHost:
         assert len(written) == 3
         assert written[-1][0]["state"] == _mod._PLUGIN_STATE_DISABLED
 
+    def test_a_plugin_named_by_disable_plugin_starts_disabled_and_stays_off(
+        self, tmp_path: Path
+    ) -> None:
+        a = write_plugin(tmp_path, "a")
+        b = write_plugin(tmp_path, "b")
+        host = _mod.PluginHost(
+            [spec("a", a), spec("b", b)],
+            write_status=lambda entries: None,
+            allowed_uids=_OWN_UIDS,
+            disabled=["a", "ghost"],
+        )
+        by_name = {e["name"]: e for e in host.status_entries()}
+        assert by_name["a"]["state"] == _mod._PLUGIN_STATE_DISABLED
+        assert by_name["a"]["reason"] == _mod._DISABLED_BY_FLAG_REASON
+        assert by_name["b"]["state"] == _mod._PLUGIN_STATE_LOADED
+        assert host.worker_argv() == [
+            "--plugin",
+            spec("a", a),
+            "--plugin",
+            spec("b", b),
+            "--disable-plugin",
+            "a",
+        ]
+
     def test_no_specs_means_no_plugin_key_is_ever_written(self) -> None:
         written: list[list[dict[str, str]]] = []
         _host([], written)

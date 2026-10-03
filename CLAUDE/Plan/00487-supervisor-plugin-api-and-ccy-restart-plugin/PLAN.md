@@ -45,7 +45,7 @@ The agent's rulings on ordering, plugin location and restart policy, made while 
 
 - [x] ✅ **Task 1.1**: Read the draft and its research report (fedora-desktop Plan 00146 `subagent-reports/261002-supervisor-plugin-research-opus.md`) against the current `claude-supervise.py`. Record any drift. Result: [report](subagent-reports/261003-task-1.1-draft-drift-explore-sonnet.md). The draft still fits; it lists the insertion points, and the plugin hook goes after the session-actions family.
 
-- [ ] ⬜ **Task 1.2**: TDD the loader:
+- [x] ✅ **Task 1.2**: TDD the loader. Built; [report](subagent-reports/261003-phase-1-tasks-1.2-1.3-1.3b-1.6-implementation-sonnet.md). The `--plugin-host` flag is Task 1.5's:
 
   - `--plugin` and `--plugin-host` flags;
   - ownership and mode checks on each file;
@@ -53,9 +53,9 @@ The agent's rulings on ordering, plugin location and restart policy, made while 
   - `--disable-plugin` carried across worker restarts;
   - plugin status in `supervisor-status.json`.
 
-- [ ] ⬜ **Task 1.3**: TDD the worker hooks. `on_start` and `on_idle` run on a budgeted thread, are called only at NOOP in MONITOR with an empty box, and are asked in flag order.
+- [x] ✅ **Task 1.3**: TDD the worker hooks. Built; [report](subagent-reports/261003-phase-1-tasks-1.2-1.3-1.3b-1.6-implementation-sonnet.md). `on_start` and `on_idle` run on a budgeted thread, are called only at NOOP in MONITOR with an empty box, and are asked in flag order.
 
-- [ ] ⬜ **Task 1.3b**: TDD the update-restart exit (DECISIONS.md, item 5). A worker result of `ExitForRestart` makes the host:
+- [x] ✅ **Task 1.3b**: TDD the update-restart exit (DECISIONS.md, item 5). Built; exit status 75, request file `.claude/ccy/state/restart-request.json`; [report](subagent-reports/261003-phase-1-tasks-1.2-1.3-1.3b-1.6-implementation-sonnet.md). A worker result of `ExitForRestart` makes the host:
 
   - send `/exit` at idle;
   - write the session id to a state file on the persistent mount;
@@ -72,13 +72,13 @@ The agent's rulings on ordering, plugin location and restart policy, made while 
 
 - [ ] ⬜ **Task 1.5**: TDD the host half: `before_spawn` runs in the forked child, behind the `env_keys` allowlist and the denylist, with a close-on-exec result pipe and a `SIGKILL` deadline. If it fails, the supervisor falls back to a plain respawn.
 
-- [ ] ⬜ **Task 1.6**: TDD the uniform failure path and the plugin notice family:
+- [x] ✅ **Task 1.6**: TDD the uniform failure path and the plugin notice family. Built; [report](subagent-reports/261003-phase-1-tasks-1.2-1.3-1.3b-1.6-implementation-sonnet.md):
 
   - the notice is built from a fixed template, typed only at an idle point, and capped;
   - it is also shown as a status-line warning and written to the audit log;
   - every failure kind in the draft's test list is covered.
 
-- [ ] ⬜ **Task 1.7**: Document the API in `CLAUDE/development/CcySupervisor.md`, add a release-notes callout, and run the merge checks (static checks, semgrep, `tests/unit/supervise`). Then verify the worker reload as the CcySupervisor doc requires.
+- [ ] ⬜ **Task 1.7**: Document the API in `CLAUDE/development/CcySupervisor.md`, add a release-notes callout, and run the merge checks (static checks, semgrep, `tests/unit/supervise`). Then verify the worker reload as the CcySupervisor doc requires. Progress: the documentation and the callout (`001-ccy-supervisor-plugin-api.md`) are written for Tasks 1.2 to 1.6 and the checks ran green; what remains is the live worker-reload verification, and the documentation for Tasks 1.4 and 1.5 once they exist.
 
 ### Phase 2: ccy plugin (fedora-desktop feature branch, cloned under `untracked/repos/`)
 

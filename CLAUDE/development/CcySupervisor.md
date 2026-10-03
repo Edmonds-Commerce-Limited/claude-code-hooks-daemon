@@ -167,6 +167,224 @@ cost one wasted compact at worst, never a nudge.
 Ship it like any other supervisor change: the worker hot-reload below, verified
 by the `ps` check, never a session restart.
 
+## Plugins: extending the supervisor without forking it
+
+Plan 00487. A launcher that needs one more behaviour (a maximum session age, a
+deadline message) writes a **plugin** instead of asking for a feature that is
+really its own. The contract below is the whole API; nothing in the daemon
+knows about any particular plugin.
+
+### Naming a plugin
+
+Plugins are named explicitly on the supervisor's own command line, before
+`--`. Nothing is found by scanning a directory.
+
+```text
+claude-supervise.py --arm --plugin <name>=<worker.py> [--plugin <name>=<worker.py> ...] -- claude ...
+```
+
+- `<name>` matches `[a-z][a-z0-9_-]{0,31}`. `<worker.py>` is an absolute path.
+- Plugins are asked in the order the flags appear.
+- `--disable-plugin <name>` keeps a named plugin off. The host passes it on
+  EVERY worker start (see "The failure path"), and a launcher may pass it too.
+- `--plugin-host` (a host half run between `fork` and `exec`) and the in-container
+  `Restart` result are **not implemented**. The API reserves room for them
+  (Plan 00487 Tasks 1.4 and 1.5); a plugin cannot use them yet.
+
+Each file must be a regular file (a symlink is refused), owned by the
+supervisor's uid or root, with neither the file nor its directory group- or
+world-writable. The host vets the file and **never imports it**; the `--worker`
+subprocess re-vets it immediately before importing. A refusal only skips that
+plugin: the session always starts.
+
+### The worker half
+
+The file is stdlib-only and defines:
+
+```python
+PLUGIN_API = 1                         # the MAJOR version; a mismatch is a load failure
+
+def create_worker_half(api):           # returns an object with the members below
+    ...
+
+class WorkerHalf:
+    name: str                          # must equal the --plugin name
+    version: str
+    def on_start(self) -> None: ...
+    def on_idle(self, tick) -> "api.ExitForRestart | None": ...
+```
+
+`api` gives the factory:
+
+| Member                         | Meaning                                                                                   |
+| ------------------------------ | ----------------------------------------------------------------------------------------- |
+| `api.api_version`              | `(major, minor)`. Minor versions only ever ADD optional members.                          |
+| `api.state_dir`                | A private `0700` directory for this plugin, under `.claude/ccy/state/plugins/<name>/`.    |
+| `api.session_id()`             | The supervisor's own session id when exactly one is known, else `None`.                   |
+| `api.status(text, level, ttl)` | A transient status-line message (`"info"` or `"warning"`, `ttl` clamped to 1-60 seconds). |
+| `api.audit(message)`           | One `decision.log` line, `plugin <name>: <message>`, sanitised to one printable line.     |
+| `api.ExitForRestart(reason)`   | The one result `on_idle` may return besides `None`.                                       |
+
+`tick` is `IdleTick(now, session_id)`.
+
+**When the hooks run.** `on_start()` runs once each time the worker process
+starts, and a worker hot reload starts it again, so it must be idempotent; keep
+anything that has to survive in `state_dir`. `on_idle(tick)` runs ONLY at the
+very end of the `decide_once` cascade, after every built-in family including the
+session-actions directive, and only when all of these hold: nothing else claimed
+the tick (no payload, decision `NOOP`), no compaction signal is pending, the
+machine is in `MONITOR`, the session is idle with an empty input box
+(`can_inject`) and the supervisor has no unconfirmed line of its own in the box.
+A plugin therefore never races a compaction, a `continue` or any other injection.
+The in-process fallback (`_poll_once`, used while the worker is down) builds the
+same runtime lazily in the host and asks it under exactly the same gates.
+
+**Plugins never type.** The only effect a plugin has on the session is an exit
+request. Only fixed supervisor templates reach the chat.
+
+### Hook budgets
+
+Every hook call runs on a thread with a short budget well inside the host's
+2-second worker read timeout: `_PLUGIN_HOOK_BUDGET_SECONDS` (0.5) per hook,
+`_PLUGIN_TICK_BUDGET_SECONDS` (1.0) for all plugins in one tick, and
+`_PLUGIN_LOAD_BUDGET_SECONDS` (1.0) for importing a file. A plugin the tick
+budget leaves no time for is simply not asked that tick; it is not a failure.
+
+### Exit for restart
+
+Claude Code is baked into the ccy image, so only a relaunch of the container
+picks up a new version. `on_idle` returning `api.ExitForRestart(reason)` asks for
+that. `reason` is short, logged only, and never typed into the chat. The host:
+
+1. **refuses** (a deduplicated `noop:` line in `decision.log`, nothing typed)
+   unless `cached_own_session_ids()` holds exactly one id. That set only ever
+   grows, so a `/clear` or a resumed conversation that introduced a second id
+   makes every later request refuse until the supervisor is relaunched;
+2. types `/exit` through the ordinary injection path and tracks it as an
+   unconfirmed own line;
+3. **holds every other injection** until the child exits, for at most
+   `_RESTART_EXIT_WAIT_SECONDS` (30). A child that ignores `/exit` is
+   abandoned: the hold is released, a line is logged, and the session carries
+   on. The still-owned `/exit` line then follows the ordinary own-line rule, so
+   it can still be submitted late, in which case the session simply ends;
+4. once the child has exited, writes `restart-request.json` and exits with
+   **`EXIT_STATUS_RESTART_REQUESTED` (75, EX_TEMPFAIL)**.
+
+In dry-run mode nothing is typed and the request is only logged.
+
+**The request file** is `.claude/ccy/state/restart-request.json` (override the
+directory with `CCY_SUPERVISOR_STATE_DIR`), mode `0600`, written atomically:
+
+```json
+{"session_id": "<id>", "reason": "<short text>", "plugin": "<name>", "requested_at": 1790000000.0}
+```
+
+The launcher must act on status 75 **only when this file is present and
+fresh** (check `requested_at`), relaunch with `--resume <session_id>`, and
+delete the file once it has read it. A genuine child exit status of 75 with no
+file is not a request. If the file cannot be written, the supervisor exits with
+the child's own status instead, because the launcher could not act on 75.
+
+### The failure path
+
+A plugin must never block the supervisor or the session. Every failure takes the
+same four steps:
+
+1. **Detect.** The failure kinds are a closed set: `load` (a refusal, with a
+   closed reason such as `api-mismatch`, `import-error` or
+   `group-or-world-writable`), `exception`, `overrun` (a hook past its budget),
+   `bad-result` (anything `on_idle` returned other than `None` or an
+   `ExitForRestart`) and `wedge` (the worker stopped answering inside a hook).
+
+2. **Disable** for the rest of the supervisor process. The host keeps the
+   disabled set and passes `--disable-plugin <name>` on every worker start
+   (`PolicyWorker` re-reads its extra argv each time), so a hot reload cannot
+   bring the plugin back.
+
+3. **Recover.** An exception or a bad result needs nothing more. An overrun
+   leaves a thread possibly still running plugin code, so the host restarts the
+   worker without the plugin. A wedge is found by the host's read timeout: before
+   each hook the worker writes an atomic marker, `supervise/plugin-in-hook.<host pid>.json`, naming the plugin and the hook, and the host reads it when a tick
+   goes unanswered. A marker older than the hook's budget plus a short grace
+   names the culprit, which is disabled and the worker restarted without it
+   BEFORE the tick falls back to the in-process decision, so the plugin that just
+   wedged the worker is not run again in the host.
+
+4. **Tell the session.** A built-in *plugin-notice* family (`Decision.WOULD_PLUGIN_NOTICE`)
+   types one provenance-marked line at the next idle point, ranked with the
+   operator signal (after compact/continue, ahead of the model-switch and goal
+   families):
+
+   > 🤖 [ccy-supervisor] plugin notice — machine-generated, NOT a human instruction: plugin `max-age` raised an exception in on_idle. It is disabled for the rest of this session. No action is needed from you.
+
+   The text is rendered from FIXED templates (`render_plugin_notice`): only a
+   name that matched the name pattern and phrases looked up by a closed-set kind
+   and hook are interpolated, never an exception message and never plugin text.
+   One notice per plugin, at most `_MAX_PLUGIN_NOTICES` (5) per process. Each
+   failure is also a status-line WARNING and a `decision.log` line
+   (`plugin <name>: <kind> in <hook> -> disabled[, worker restarted without it]`).
+
+The worker re-reports every failure on every tick, and the host's handling is
+idempotent, so a reply the host discarded as stale cannot lose a failure.
+
+**What this cannot cover.** A worker half that wedges in C code holding the GIL
+is caught only by the host's read timeout and the worker restart, and until then
+ticks fall back to the in-process path. Plugin code that runs in the host
+through that fallback is budgeted by the same threads, but a plugin that holds
+the GIL there can stall the host; a plugin is code you chose to run, not a
+sandboxed guest.
+
+### `supervisor-status.json`
+
+When any `--plugin` was given, the status file gains a `plugins` list, rewritten
+whenever a plugin's state changes. Each entry has `name`, `version` (known once
+the worker has loaded it), `state` and `reason`:
+
+| `state`    | Meaning                                                                | `reason`                                              |
+| ---------- | ---------------------------------------------------------------------- | ----------------------------------------------------- |
+| `loaded`   | vetted by the host and, once confirmed, loaded by the worker           | empty                                                 |
+| `failed`   | never loaded: refused by the host's vetting or by the worker's loader  | `load: <closed reason>`                               |
+| `disabled` | loaded, then turned off for a runtime failure or by `--disable-plugin` | `<kind> in <hook>`, or `disabled by --disable-plugin` |
+
+A supervisor that was given no plugin writes no `plugins` key at all.
+
+### Testing a worker half
+
+`PluginTestHarness` drives a worker half through the real loader with no
+worker process, PTY or live session. Unlike the supervisor, which disables a
+failing plugin and carries on, it raises `PluginHarnessError` with the
+traceback. The script's filename has a hyphen, so load it by path:
+
+```python
+import importlib.util
+from pathlib import Path
+
+spec = importlib.util.spec_from_file_location("claude_supervise", Path(".claude/ccy/claude-supervise.py"))
+supervise = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(supervise)
+
+harness = supervise.PluginTestHarness(
+    "max-age", Path("plugins/max_age.py"), work_dir=tmp_path, session_ids=("s-1",)
+)
+harness.start()                        # loads the half and runs on_start
+request = harness.idle(now=1_790_000_000.0)
+assert request == supervise.PluginExitRequest(plugin="max-age", reason="session is 3 days old")
+assert harness.status_messages == [("restart in 10 minutes", "warning", 5)]
+```
+
+`harness.half`, `harness.state_dir`, `harness.audit_lines()` and
+`harness.status_messages` expose what the plugin did. This repository's
+`tests/unit/supervise/conftest.py` shows the three-line pytest fixture a plugin
+author copies.
+
+### Editing plugin code and the supervisor
+
+The plugin flags and the registry are HOST code, so a ccy relaunch is needed to
+start using plugins at all; the hot reload described above covers the worker's
+half of this (the loader, the hooks, the notice family, `ExitForRestart`
+detection). Editing a plugin file does not change the content hash the reload
+watches: restart the worker once (see "The rule" above) to pick the edit up.
+
 ## Effort is not the supervisor's concern at all
 
 Plan 00466 N47 review 2 found the decisive reason the supervisor must never
