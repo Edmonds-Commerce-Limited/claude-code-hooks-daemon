@@ -3592,6 +3592,28 @@ class PluginExitRequest:
     reason: str
 
 
+# What `on_idle` may return is judged INSIDE the hook's time budget (on the
+# budgeted thread), because reading a plugin-controlled value -- an attribute
+# access, a property, a ``__str__`` -- can run plugin code or hang.
+_BAD_IDLE_RESULT = object()
+
+
+def _validated_idle_result(value: object) -> object:
+    """None, a cleaned `ExitForRestart`, or `_BAD_IDLE_RESULT` for anything else.
+
+    The reason must be a plain ``str`` (not a subclass, whose ``__str__`` could
+    run plugin code later); it is cleaned and bounded here.
+    """
+    if value is None:
+        return None
+    if isinstance(value, ExitForRestart):
+        reason = value.reason
+        if type(reason) is not str:
+            return _BAD_IDLE_RESULT
+        return ExitForRestart(_clean_text(reason, _PLUGIN_REASON_MAX_CHARS))
+    return _BAD_IDLE_RESULT
+
+
 def _clean_text(value: object, limit: int) -> str:
     """One printable line of at most ``limit`` characters from any value.
 
@@ -3816,6 +3838,11 @@ def _run_budgeted(fn: Callable[[], object], budget_seconds: float) -> _BudgetedR
     if not box:
         return _BudgetedResult(_BUDGET_EXCEPTION, None, "plugin hook thread ended with no result")
     return box[0]
+
+
+def _ask_idle(half: WorkerHalf, tick: IdleTick) -> object:
+    """Call ``half.on_idle(tick)`` and validate what it returned (runs on the budgeted thread)."""
+    return _validated_idle_result(half.on_idle(tick))
 
 
 class WorkerHalf(Protocol):
@@ -4067,15 +4094,13 @@ class PluginRuntime:
             outcome = self._call(
                 name,
                 _PLUGIN_HOOK_ON_IDLE,
-                functools.partial(half.on_idle, tick),
+                functools.partial(_ask_idle, half, tick),
                 min(self._hook_budget, remaining),
             )
             if outcome is None or outcome.value is None:
                 continue
             if isinstance(outcome.value, ExitForRestart):
-                return PluginExitRequest(
-                    plugin=name, reason=_clean_text(outcome.value.reason, _PLUGIN_REASON_MAX_CHARS)
-                )
+                return PluginExitRequest(plugin=name, reason=outcome.value.reason)
             self._fail(name, _PLUGIN_KIND_BAD_RESULT, _PLUGIN_HOOK_ON_IDLE)
         return None
 
@@ -4275,7 +4300,16 @@ class PluginHost:
         self._by_name: dict[str, _PluginEntry] = {}
         self._startup_failures: list[PluginFailure] = []
         for raw in raw_specs:
-            self._add(raw)
+            try:
+                self._add(raw)
+            except Exception as error:
+                # A bug while vetting one flag skips that plugin, never the session.
+                append_worker_error(f"could not vet --plugin {raw!r}: {error!r}")
+                name = raw.partition(_PLUGIN_SPEC_SEPARATOR)[0]
+                if _PLUGIN_NAME_PATTERN.fullmatch(name) is None or name in self._by_name:
+                    self._refuse(_PLUGIN_UNNAMED, None, _LOAD_REASON_UNSPECIFIED, notify=None)
+                else:
+                    self._refuse(name, None, _LOAD_REASON_UNSPECIFIED, notify=name)
         # A plugin the command line itself names in `--disable-plugin` starts off.
         for name in disabled:
             entry = self._by_name.get(name)
@@ -7747,7 +7781,11 @@ class PolicyWorker:
         if not self._dry_run:
             argv.append("--arm")
         if self._extra_argv is not None:
-            argv.extend(self._extra_argv())
+            try:
+                argv.extend(self._extra_argv())
+            except Exception as error:
+                # The worker starts without plugins rather than not at all.
+                append_worker_error(f"could not build the worker plugin flags: {error!r}")
         # The worker's stderr MUST go to a file (or /dev/null), NEVER the PTY the
         # host inherited: an uncaught per-tick traceback would otherwise flood
         # the live Claude session. Open the error log; fall back to devnull.
@@ -8518,12 +8556,31 @@ def supervise(
             f"supervisor active ({mode}); polling {sidecar_dir} every "
             f"{poll_seconds}s; wrapping: {argv}"
         )
-    if plugin_host is not None:
-        # Plan 00487: a plugin the loader refused is skipped, never fatal; say so
-        # in the log, on the status line, and (once, at an idle point) to the session.
+    # Plan 00487: host-side plugin handling is contained as a whole. The first
+    # unexpected exception in it switches the handling off for the rest of the
+    # process (logged once); the session itself carries on regardless.
+    plugin_handling = [True]
+
+    def _contained(step: Callable[[], None]) -> None:
+        if not plugin_handling[0]:
+            return
+        try:
+            step()
+        except Exception as error:
+            plugin_handling[0] = False
+            append_worker_error("plugin handling failed:\n" + traceback.format_exc())
+            _log_line(log, f"plugin handling failed ({type(error).__name__}): plugins ignored")
+
+    def _report_startup_refusals() -> None:
+        # A plugin the loader refused is skipped, never fatal; say so in the
+        # log, on the status line, and (once, at an idle point) to the session.
+        assert plugin_host is not None
         for refusal in plugin_host.take_startup_failures():
             _log_line(log, failure_log_line(refusal))
             report_plugin_failure(machine, refusal, status_dir=sidecar_dir.parent, now=time.time())
+
+    if plugin_host is not None:
+        _contained(_report_startup_refusals)
 
     # Startup banner + spinner (Plan 00164 Phase 2): give the launching ccy
     # session immediate, informative feedback during the perceptible start-up
@@ -8571,16 +8628,18 @@ def supervise(
         # Plan 00487: what the plugin runtime told the host this tick -- audit
         # lines, failures, an exit-for-restart request -- handled by ONE function
         # whether the tick was decided by the worker or in-process.
-        handle_plugin_outcome(
-            outcome,
-            machine=machine,
-            restart=restart,
-            write_master=_write_master,
-            log=log,
-            dry_run=dry_run,
-            session_ids=cached_own_session_ids(),
-            plugin_host=plugin_host,
-            restart_worker=restart_worker,
+        _contained(
+            lambda: handle_plugin_outcome(
+                outcome,
+                machine=machine,
+                restart=restart,
+                write_master=_write_master,
+                log=log,
+                dry_run=dry_run,
+                session_ids=cached_own_session_ids(),
+                plugin_host=plugin_host,
+                restart_worker=restart_worker,
+            )
         )
 
     def _on_poll() -> None:
@@ -8592,14 +8651,16 @@ def supervise(
                 return
             capped = restart.abandon(log)
             if capped is not None:
-                _disable_stuck_exit_plugin(
-                    capped,
-                    plugin_host=plugin_host,
-                    machine=machine,
-                    restart_worker=restart_worker,
-                    log=log,
-                    status_dir=sidecar_dir.parent,
-                    now_wall=time.time(),
+                _contained(
+                    lambda: _disable_stuck_exit_plugin(
+                        capped,
+                        plugin_host=plugin_host,
+                        machine=machine,
+                        restart_worker=restart_worker,
+                        log=log,
+                        status_dir=sidecar_dir.parent,
+                        now_wall=time.time(),
+                    )
                 )
         now_monotonic = os.times().elapsed
         idle = _is_idle(
@@ -8652,16 +8713,19 @@ def supervise(
             if outcome is None and plugin_host is not None:
                 # Plan 00487: before this tick falls back to the in-process
                 # decision, take out any plugin the silent worker is stuck in.
-                handle_worker_silence(
-                    plugin_host=plugin_host,
-                    machine=machine,
-                    restart_worker=restart_worker,
-                    log=log,
-                    status_dir=sidecar_dir.parent,
-                    # A fresh reading, not this tick's: the worker was waited on
-                    # for up to its read timeout, and the marker's age is judged
-                    # against NOW.
-                    now_wall=time.time(),
+                silent_host = plugin_host
+                _contained(
+                    lambda: handle_worker_silence(
+                        plugin_host=silent_host,
+                        machine=machine,
+                        restart_worker=restart_worker,
+                        log=log,
+                        status_dir=sidecar_dir.parent,
+                        # A fresh reading, not this tick's: the worker was waited
+                        # on for up to its read timeout, and the marker's age is
+                        # judged against NOW.
+                        now_wall=time.time(),
+                    )
                 )
         if outcome is not None:
             # Plan 00182: pass the host's authoritative PRE-tick state so a stale
@@ -8991,18 +9055,7 @@ def main(argv: list[str] | None = None) -> int:
     # Plan 00487: plugins named with `--plugin`. Vetting a file never imports it
     # and a refusal only skips that plugin -- the session always starts. The host
     # rewrites the status file's plugin list whenever a plugin's state changes.
-    plugin_host = (
-        PluginHost(
-            flags.plugin,
-            write_status=_write_status,
-            state_root=_plugin_state_root(),
-            status_dir=untracked_dir,
-            marker_path=_plugin_marker_path(untracked_dir, os.getpid()),
-            disabled=flags.disable_plugin,
-        )
-        if flags.plugin
-        else None
-    )
+    plugin_host = _make_plugin_host(flags, _write_status, untracked_dir)
     if plugin_host is None:
         _write_status(None)
 
@@ -9025,6 +9078,32 @@ def main(argv: list[str] | None = None) -> int:
         if worker is not None:
             worker.close()
         remove_supervisor_status(untracked_dir)
+
+
+def _make_plugin_host(
+    flags: argparse.Namespace,
+    write_status: Callable[[list[dict[str, str]]], object],
+    untracked_dir: Path,
+) -> PluginHost | None:
+    """Build the host's plugin registry from the flags, or None. Never raises.
+
+    No ``--plugin`` flag means no registry. An unexpected error while building
+    it also means none: the session starts without plugins rather than not at all.
+    """
+    if not flags.plugin:
+        return None
+    try:
+        return PluginHost(
+            flags.plugin,
+            write_status=write_status,
+            state_root=_plugin_state_root(),
+            status_dir=untracked_dir,
+            marker_path=_plugin_marker_path(untracked_dir, os.getpid()),
+            disabled=flags.disable_plugin,
+        )
+    except Exception as error:
+        append_worker_error(f"plugin setup failed, starting without plugins: {error!r}")
+        return None
 
 
 def _make_worker_plugin_runtime(argv: Sequence[str], untracked_dir: Path) -> PluginRuntime | None:
