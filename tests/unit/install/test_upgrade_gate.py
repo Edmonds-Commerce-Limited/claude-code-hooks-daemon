@@ -20,11 +20,13 @@ from __future__ import annotations
 import errno
 import io
 import json
+import os
 import sys
 from pathlib import Path
 
 import pytest
 
+from claude_code_hooks_daemon.install import upgrade_gate as upgrade_gate_module
 from claude_code_hooks_daemon.install.upgrade_gate import (
     APPROVAL_SUBDIR,
     ApprovalState,
@@ -45,6 +47,7 @@ from claude_code_hooks_daemon.install.upgrade_gate import (
     write_approval,
 )
 from claude_code_hooks_daemon.utils.one_shot_approval import OneShotApprovalStore
+from claude_code_hooks_daemon.utils.path_predicates import TextOrReason
 
 _REPO_UPGRADES_ROOT = Path(__file__).resolve().parents[3]
 
@@ -732,6 +735,67 @@ class TestApprovalMarker:
         assert check_approval(untracked, **kwargs) is ApprovalState.VALID
         marker.write_text("4.0.0 approved\n", encoding="utf-8")
         assert check_approval(untracked, **kwargs) is ApprovalState.INVALID
+
+
+class TestUnreadableApprovalMarker:
+    """N323: a marker that exists but cannot be read is not a missing one."""
+
+    @staticmethod
+    def _state(daemon_dir: Path, project: Path, untracked: Path) -> ApprovalState:
+        return check_approval(
+            untracked,
+            to_version="4.0.0",
+            from_version="3.66.0",
+            daemon_dir=daemon_dir,
+            project_root=project,
+        )
+
+    @staticmethod
+    def _refuse_reads(monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(
+            upgrade_gate_module,
+            "read_text_or_reason",
+            lambda path, **_: TextOrReason(reason="[Errno 13] Permission denied"),
+        )
+
+    @pytest.mark.skipif(os.geteuid() == 0, reason="root can read a mode 000 file")
+    def test_a_mode_000_marker_is_unreadable_not_absent(
+        self, daemon_dir: Path, project: Path, untracked: Path
+    ) -> None:
+        marker = _approve(untracked, daemon_dir, project, "3.66.0", "4.0.0")
+        marker.chmod(0)
+        try:
+            state = self._state(daemon_dir, project, untracked)
+        finally:
+            marker.chmod(0o600)
+        assert state is ApprovalState.UNREADABLE
+
+    def test_a_marker_the_read_refuses_is_unreadable_not_absent(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        daemon_dir: Path,
+        project: Path,
+        untracked: Path,
+    ) -> None:
+        _approve(untracked, daemon_dir, project, "3.66.0", "4.0.0")
+        self._refuse_reads(monkeypatch)
+        assert self._state(daemon_dir, project, untracked) is ApprovalState.UNREADABLE
+
+    def test_an_unreadable_marker_fails_closed_and_the_message_names_permissions(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        daemon_dir: Path,
+        project: Path,
+        untracked: Path,
+    ) -> None:
+        _approve(untracked, daemon_dir, project, "3.66.0", "4.0.0")
+        self._refuse_reads(monkeypatch)
+        report = _acked(daemon_dir, project, untracked, "3.66.0", "4.0.0")
+        assert report.verdict is GateVerdict.NEEDS_APPROVAL
+        assert report.approval_state is ApprovalState.UNREADABLE
+        text = format_gate_report(report)
+        assert "unreadable" in text
+        assert "permissions" in text
 
 
 class _FakeTty(io.StringIO):
