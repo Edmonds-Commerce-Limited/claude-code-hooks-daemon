@@ -341,8 +341,11 @@ def staged_context(
 
     Args:
         commits_all: The commit is ``git commit -a``/``--all``: it records the
-            working tree, not the index, so the tree and README are read from
-            the disk.
+            working tree, not the index. ``index_env`` should then name an
+            index with the tracked changes staged (`simulated_staging(...,
+            include_tracked_changes=True)`), which the tree, README and commit
+            blame all read; without it the tree and README are read from the
+            disk.
         directory: Where the commit's pathspecs are read from (ledger 00474
             N299: ``cd sub && git commit f.txt`` names ``sub/f.txt``); the
             project root when omitted.
@@ -384,7 +387,9 @@ def staged_context(
     # of the named paths, which no listing of the index describes, so those
     # forms read the disk (see the module note on what is not covered), as does
     # `git commit -a`, which records the working tree.
-    reads_disk = bool(pathspecs) or commits_all
+    # With `index_env` a `-a` commit's tracked changes are already in the index
+    # that env names, so the index describes it and blame agrees with the tree.
+    reads_disk = bool(pathspecs) or (commits_all and index_env is None)
     tree, readme = _tree_and_readme(
         project_root, plan_dir_rel, policy, committed_from=None if reads_disk else gitfacts
     )

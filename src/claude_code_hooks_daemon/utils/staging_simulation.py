@@ -45,6 +45,7 @@ logger = logging.getLogger(__name__)
 
 _ADD: Final[str] = "add"
 _ADD_EVERYTHING: Final[tuple[str, ...]] = ("-A", "--ignore-errors")
+_ADD_TRACKED: Final[tuple[str, ...]] = ("-u",)
 _NO_SPLIT_INDEX: Final[tuple[str, ...]] = ("-c", "core.splitIndex=false")
 
 #: ``git add --ignore-errors`` stages what it can and exits 1 for what it could
@@ -104,7 +105,11 @@ class SimulationIncompleteError(Exception):
 
 @contextmanager
 def simulated_staging(
-    reading: CommitReading, cwd: str | Path | None, repo_root: Path
+    reading: CommitReading,
+    cwd: str | Path | None,
+    repo_root: Path,
+    *,
+    include_tracked_changes: bool = False,
 ) -> Iterator[dict[str, str] | None]:
     """Yield the environment of the index ``reading``'s ``git add`` runs leave, else ``None``.
 
@@ -112,11 +117,17 @@ def simulated_staging(
     the copy up; the caller then reads the real index, as it always did. The
     scratch copy is removed when the block ends.
 
+    ``include_tracked_changes`` also simulates the ``git add -u`` that a
+    ``git commit -a``/``--all`` performs, so the copy holds what that commit
+    records: every modified or deleted tracked file, and no untracked one.
+    Off by default, because most callers judge the index as it stands.
+
     Raises:
         SimulationIncompleteError: If an add could not be applied to the copy,
             so the copy is not the index the commit will record.
     """
-    if not reading.stagings:
+    commits_tracked = include_tracked_changes and reading.commits_all
+    if not reading.stagings and not commits_tracked:
         yield None
         return
     with tempfile.TemporaryDirectory(prefix=_SCRATCH_PREFIX, ignore_cleanup_errors=True) as scratch:
@@ -124,6 +135,8 @@ def simulated_staging(
         if env is not None:
             for staging in reading.stagings:
                 _apply(staging, cwd, repo_root, env)
+            if commits_tracked:
+                _add_tracked_changes(repo_root, env)
         yield env
 
 
@@ -206,13 +219,23 @@ def _add(
 
 
 def _add_everything(repo_root: Path, env: Mapping[str, str]) -> None:
-    """Stage every working-tree change git can into the scratch index.
+    """Stage every working-tree change git can into the scratch index."""
+    _run_complete_add(repo_root, _ADD_EVERYTHING, env)
+
+
+def _add_tracked_changes(repo_root: Path, env: Mapping[str, str]) -> None:
+    """Stage every modified or deleted tracked file, as `git commit -a` does."""
+    _run_complete_add(repo_root, _ADD_TRACKED, env)
+
+
+def _run_complete_add(repo_root: Path, options: Sequence[str], env: Mapping[str, str]) -> None:
+    """``git add <options>`` at the repository root against the scratch index.
 
     Raises:
         SimulationIncompleteError: If git did not run to the end (timeout, or a
             failure other than files it had to skip).
     """
-    result = run_git(repo_root, *_NO_SPLIT_INDEX, _ADD, *_ADD_EVERYTHING, env=env)
+    result = run_git(repo_root, *_NO_SPLIT_INDEX, _ADD, *options, env=env)
     if result.returncode not in (0, _PARTIAL_ADD_EXIT):
         logger.warning("staging simulation: add -A failed in %s: %s", repo_root, result.stderr)
         raise SimulationIncompleteError(

@@ -126,7 +126,7 @@ class PlanQaCommitGateHandler(PreToolUseHandlerBase):
         form = reading.form
         cwd = hook_input.get(HookInputField.CWD)
         try:
-            with simulated_staging(reading, cwd, project_root) as env:
+            with simulated_staging(reading, cwd, project_root, include_tracked_changes=True) as env:
                 try:
                     context = staged_context(
                         project_root=project_root,

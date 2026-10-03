@@ -86,6 +86,41 @@ class TestNothingToSimulate:
             assert _staged(repo, env) == set()
 
 
+class TestCommitDashAStagesTrackedChangesOnTheCopy:
+    """`git commit -a` records every modified tracked file, never an untracked one."""
+
+    def test_the_opt_in_stages_tracked_edits_and_deletions_only(self, repo: Path) -> None:
+        _write(repo, "a.txt", "edited\n")
+        (repo / "sub" / "f.txt").unlink()
+        reading = read_commit_form("git commit -a -m x")
+
+        with simulated_staging(reading, repo, repo, include_tracked_changes=True) as env:
+            assert env is not None
+            assert _staged(repo, env) == {"a.txt", "sub/f.txt"}
+        assert _staged(repo, None) == set()
+
+    def test_it_is_off_unless_asked_for(self, repo: Path) -> None:
+        _write(repo, "a.txt", "edited\n")
+
+        with simulated_staging(read_commit_form("git commit -a -m x"), repo, repo) as env:
+            assert env is None
+
+    def test_a_commit_that_is_not_dash_a_stays_unsimulated(self, repo: Path) -> None:
+        _write(repo, "a.txt", "edited\n")
+
+        with simulated_staging(
+            read_commit_form("git commit -m x"), repo, repo, include_tracked_changes=True
+        ) as env:
+            assert env is None
+
+    def test_it_follows_an_add_in_the_same_command(self, repo: Path) -> None:
+        _write(repo, "a.txt", "edited\n")
+        reading = read_commit_form("git add leak.txt && git commit -a -m x")
+
+        with simulated_staging(reading, repo, repo, include_tracked_changes=True) as env:
+            assert _staged(repo, env) == {"a.txt", "leak.txt"}
+
+
 class TestTheAddIsAppliedToACopy:
     @pytest.mark.parametrize(
         ("command", "expected"),
