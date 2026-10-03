@@ -1,10 +1,10 @@
 """Notification handlers for claude-code-hooks-daemon.
 
-Empty since Plan 00237 removed ``notification_logger``, the only handler here:
-it appended every Notification event to ``notifications.jsonl``, which nothing
-in the codebase — and no doc prescribing a diagnostic step — has ever read. The
-package stays so Notification remains a registered, dispatchable event with a
-home for future handlers.
+Plan 00237 removed ``notification_logger``, which appended every Notification event
+to ``notifications.jsonl`` that nothing read. The one handler here now records only
+what something reads: ``quota_resume_recorder`` writes down how a usage-limit wait
+ended (Plan 00470 Task 3.2), and ``user_prompt_submit.limit_rebrief`` acts on it,
+because a Notification hook cannot inject context.
 """
 
 __all__: list[str] = []

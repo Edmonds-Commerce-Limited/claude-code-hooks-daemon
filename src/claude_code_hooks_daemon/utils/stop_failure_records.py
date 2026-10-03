@@ -84,7 +84,7 @@ def default_records_path() -> Path | None:
     return ProjectContext.daemon_untracked_dir() / STOP_FAILURE_RECORDS_FILENAME
 
 
-def _number(value: object) -> float | None:
+def epoch_seconds(value: object) -> float | None:
     """``value`` as a float when it is a representable epoch time, else None.
 
     A bool is not a number here. ``json.loads`` accepts ``NaN``, ``Infinity`` and
@@ -104,9 +104,9 @@ def _parse_entry(entry: object) -> StopFailureRecord | None:
         return None
     session_id = entry.get(_FIELD_SESSION_ID)
     error = entry.get(_FIELD_ERROR)
-    recorded_at = _number(entry.get(_FIELD_RECORDED_AT))
+    recorded_at = epoch_seconds(entry.get(_FIELD_RECORDED_AT))
     raw_resolved = entry.get(_FIELD_RESOLVED_AT)
-    resolved_at = _number(raw_resolved)
+    resolved_at = epoch_seconds(raw_resolved)
     if not isinstance(session_id, str) or not isinstance(error, str) or recorded_at is None:
         return None
     if raw_resolved is not None and resolved_at is None:

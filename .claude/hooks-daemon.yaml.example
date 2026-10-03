@@ -762,6 +762,10 @@ handlers:
       enabled: true  # Silent bookkeeping; never terminal
       priority: 38
 
+    limit_rebrief:  # One-shot re-brief after a usage-limit resume; names a background/teammate agent a limit killed (Plan 00470)
+      enabled: true  # Never denies; never terminal
+      priority: 39
+
     critical_thinking_advisory:  # Periodic advisory encouraging critical evaluation
       enabled: false              # Enable for critical thinking nudges on substantial prompts
       priority: 55
@@ -1013,6 +1017,11 @@ handlers:
   worktree_remove:  # WorktreeRemove event (worktree teardown)
     worktree_remove:  # Prunes stale worktree registrations; removes a named worktree
       enabled: true
+      priority: 50
+
+  notification:  # Notification event
+    quota_resume_recorder:  # Records a quota_auto_resume_* notification; limit_rebrief delivers the re-brief at the next prompt (Plan 00470)
+      enabled: true  # Silent bookkeeping; never terminal
       priority: 50
 
   stop_failure:  # StopFailure event (a turn that ended on an API error)

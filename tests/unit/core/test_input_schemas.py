@@ -282,7 +282,20 @@ class TestNotificationValidation:
 
     def test_valid_notification_types(self):
         """All documented notification types are valid."""
-        valid_types = ["permission_prompt", "idle_prompt", "auth_success"]
+        valid_types = [
+            "permission_prompt",
+            "idle_prompt",
+            "auth_success",
+            "elicitation_dialog",
+            "elicitation_url_dialog",
+            "elicitation_complete",
+            "elicitation_response",
+            "agent_needs_input",
+            "agent_completed",
+            "quota_auto_resume_fired",
+            "quota_auto_resume_stale",
+            "quota_auto_resume_disabled",
+        ]
 
         for notif_type in valid_types:
             hook_input = {

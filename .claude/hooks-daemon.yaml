@@ -1106,6 +1106,10 @@ handlers:
       enabled: true  # Silent bookkeeping; never terminal
       priority: 38
 
+    limit_rebrief:  # One-shot re-brief after a usage-limit resume; names a background/teammate agent a limit killed (Plan 00470)
+      enabled: true  # Never denies; never terminal
+      priority: 39
+
     critical_thinking_advisory:  # Periodic advisory encouraging critical evaluation
       enabled: true
       priority: 55
@@ -1159,10 +1163,12 @@ handlers:
       enabled: true
       priority: 10
 
-  # Notification handlers — none ship today. `notification_logger` was the only
-  # one and was removed in Plan 00237 (it wrote a JSONL nothing ever read).
-  # The section stays so Notification remains a declared, dispatchable event.
-  notification: {}
+  # Notification handlers. `notification_logger` was removed in Plan 00237 (it wrote
+  # a JSONL nothing ever read); the one handler now records what limit_rebrief acts on.
+  notification:
+    quota_resume_recorder:  # Records a quota_auto_resume_* notification; limit_rebrief delivers the re-brief at the next prompt (Plan 00470)
+      enabled: true  # Silent bookkeeping; never terminal
+      priority: 50
 
   # auto_continue_stop is terminal at priority 10 and matches nearly every Stop,
   # so ANY handler added ABOVE (numerically greater than) it is unreachable on

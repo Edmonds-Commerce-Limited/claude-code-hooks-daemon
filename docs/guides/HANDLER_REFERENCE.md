@@ -4234,6 +4234,31 @@ handlers:
 
 ---
 
+#### limit_rebrief
+
+| Property       | Value            |
+| -------------- | ---------------- |
+| **Config key** | `limit_rebrief`  |
+| **Priority**   | 39               |
+| **Type**       | Advisory         |
+| **Event**      | UserPromptSubmit |
+
+**Description:** Answers a usage limit at the session's next prompt (Plan 00470 Task 3.2). A Notification hook cannot inject context, so `quota_resume_recorder` (Notification) writes down a `quota_auto_resume_fired`, `_stale` or `_disabled` notification in `limit-events.json` under the daemon's untracked dir, and this handler delivers a one-shot re-brief at the next prompt: what the notification said, the last recorded limit hit, where to look for what was in flight (`git worktree list`, each worktree's `git status` and `git log -1`, the active plan's `JOURNAL/`), and any agent recorded as killed. The event is then marked delivered.
+
+It also names a BACKGROUND or teammate agent a session or weekly limit killed. A foreground dispatch's death is `agent_terminated_early_failure_detector`'s; a background agent reports its death through a prompt-borne notification instead. A prompt that OPENS with `<task-notification` and quotes the harness's `You've hit your session|weekly limit · resets` sentence, or with a `<teammate-message` carrying a failed `idle_notification` that quotes it, gets an advisory naming the agent (the notification's `<summary>` element, or its whole text with markup stripped when there is none; for a teammate, the `teammate_id`) and demanding a re-brief once the limit resets. The markup inside a `<task-notification>` is not documented upstream, so only the optional `<summary>` is read. A human prompt quoting the sentence is ignored.
+
+Never denies, never terminal, fails open. No options. Remove `quota_resume_recorder` or set `enabled: false` to stop recording resumes.
+
+```yaml
+handlers:
+  user_prompt_submit:
+    limit_rebrief:
+      enabled: true
+      priority: 39
+```
+
+---
+
 #### standing_authorisations
 
 | Property       | Value                     |
@@ -4288,7 +4313,26 @@ Remove an entry (or set `enabled: false`) to withdraw that authorisation. Note t
 
 ## Notification Handlers
 
-None ship today. `notification_logger`, the only one, was removed in Plan 00237: it appended every Notification event to a JSONL file that nothing in the codebase has ever read. Notification remains a dispatchable event, so a project-level handler can be registered under `notification` in the usual way.
+#### quota_resume_recorder
+
+| Property       | Value                   |
+| -------------- | ----------------------- |
+| **Config key** | `quota_resume_recorder` |
+| **Priority**   | 50                      |
+| **Type**       | Advisory                |
+| **Event**      | Notification            |
+
+**Description:** Records a `quota_auto_resume_fired`, `quota_auto_resume_stale` or `quota_auto_resume_disabled` notification (session, type, time; never the notification's text) in `limit-events.json` under the daemon's untracked dir, bounded to the newest 50. A Notification hook cannot block or inject context, so the recorded event is acted on by `limit_rebrief` at the next prompt. Every other notification type is ignored. Silent, never terminal, fails open.
+
+```yaml
+handlers:
+  notification:
+    quota_resume_recorder:
+      enabled: true
+      priority: 50
+```
+
+`notification_logger`, which appended every Notification event to a JSONL file nothing read, was removed in Plan 00237. A project-level handler can still be registered under `notification` in the usual way.
 
 ---
 

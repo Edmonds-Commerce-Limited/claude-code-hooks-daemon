@@ -688,6 +688,21 @@ class HandlerID:
         display_name="stop-failure-resolver",
     )
 
+    # Usage-limit resume pair -- Plan 00470 Task 3.2: a Notification cannot inject
+    # context, so the recorder writes down how a limit wait ended and the
+    # UserPromptSubmit handler delivers the re-brief at the next prompt. The same
+    # handler surfaces a background or teammate agent a limit killed.
+    QUOTA_RESUME_RECORDER = HandlerIDMeta(
+        class_name="QuotaResumeRecorderHandler",
+        config_key="quota_resume_recorder",
+        display_name="quota-resume-recorder",
+    )
+    LIMIT_REBRIEF = HandlerIDMeta(
+        class_name="LimitRebriefHandler",
+        config_key="limit_rebrief",
+        display_name="limit-rebrief",
+    )
+
     # Advisory handlers (Priority: 55-60)
     CRITICAL_THINKING_ADVISORY = HandlerIDMeta(
         class_name="CriticalThinkingAdvisoryHandler",

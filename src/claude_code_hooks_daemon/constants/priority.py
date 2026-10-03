@@ -152,6 +152,14 @@ class Priority:
     STOP_FAILURE_RECORDER = 50
     STOP_FAILURE_RESOLVER = 38
 
+    # Usage-limit resume pair (Plan 00470 Task 3.2). The recorder is alone on
+    # Notification, so 50 is free. The re-brief reads the stop-failure records
+    # without relying on the resolver (38) having run, so its slot only has to
+    # sit after usage_pause_gate (9): a held prompt continues nothing and must
+    # not spend a one-shot re-brief.
+    QUOTA_RESUME_RECORDER = 50
+    LIMIT_REBRIEF = 39
+
     # Plan 00419 Task 1.7: the last free slot BELOW AUTO_CONTINUE_STOP's 10 in
     # this project's config, for the same shadowing reason as the pair above.
     # 9 rather than 6: this handler never denies, so it has no claim to run
