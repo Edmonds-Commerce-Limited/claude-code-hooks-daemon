@@ -265,8 +265,85 @@ _MAX_INLINE_DEPTH: Final[int] = 4
 _SHELL_HEADS: Final[frozenset[str]] = frozenset({"bash", "sh", "dash", "zsh", "ksh", "source", "."})
 #: Words that run the rest of the segment as a command.
 _WRAPPER_HEADS: Final[frozenset[str]] = frozenset(
-    {"env", "exec", "nohup", "command", "time", "timeout", "nice", "setsid", "stdbuf", "sudo"}
+    {
+        "env",
+        "exec",
+        "nohup",
+        "command",
+        "time",
+        "timeout",
+        "nice",
+        "setsid",
+        "stdbuf",
+        "sudo",
+        "xargs",
+        "ionice",
+        "chrt",
+        "taskset",
+    }
 )
+#: Per wrapper, the SHORT options that take a separate value (`nice -n 10`,
+#: `sudo -u root`). Without this the value is mistaken for the command the
+#: wrapper runs and the real program is never examined. An option missing here
+#: is read as a flag without a value.
+_WRAPPER_SHORT_VALUE_OPTIONS: Final[dict[str, frozenset[str]]] = {
+    "env": frozenset("uCS"),
+    "exec": frozenset("a"),
+    "time": frozenset("fo"),
+    "timeout": frozenset("ks"),
+    "nice": frozenset("n"),
+    "stdbuf": frozenset("ioe"),
+    "sudo": frozenset("ugChprtUDRT"),
+    "xargs": frozenset("adEILnPs"),
+    "ionice": frozenset("cnpPu"),
+    "chrt": frozenset(),
+    "taskset": frozenset("c"),
+}
+#: Per wrapper, the LONG options that take a separate value (`--user root`).
+_WRAPPER_LONG_VALUE_OPTIONS: Final[dict[str, frozenset[str]]] = {
+    "env": frozenset({"--unset", "--chdir", "--split-string", "--argv0"}),
+    "exec": frozenset(),
+    "time": frozenset({"--format", "--output"}),
+    "timeout": frozenset({"--kill-after", "--signal"}),
+    "nice": frozenset({"--adjustment"}),
+    "stdbuf": frozenset({"--input", "--output", "--error"}),
+    "sudo": frozenset(
+        {
+            "--user",
+            "--group",
+            "--close-from",
+            "--chdir",
+            "--host",
+            "--prompt",
+            "--role",
+            "--type",
+            "--other-user",
+            "--chroot",
+            "--command-timeout",
+        }
+    ),
+    "xargs": frozenset(
+        {
+            "--arg-file",
+            "--delimiter",
+            "--eof",
+            "--replace",
+            "--max-lines",
+            "--max-args",
+            "--max-procs",
+            "--max-chars",
+        }
+    ),
+    "ionice": frozenset({"--class", "--classdata", "--pid", "--pgid", "--uid"}),
+    "chrt": frozenset(),
+    "taskset": frozenset(),
+}
+#: Wrappers whose first operand after their options is not the command:
+#: `timeout`'s duration, `chrt`'s priority, `taskset`'s CPU mask.
+_WRAPPER_LEADING_OPERAND_HEADS: Final[frozenset[str]] = frozenset({"timeout", "chrt", "taskset"})
+#: Python options that take a separate value, so the word after them is not
+#: the script (`-W ignore`, `-X dev`, `-m module`, `-c code`, `-Q arg`).
+_PYTHON_VALUE_OPTIONS: Final[frozenset[str]] = frozenset({"-W", "-X", "-m", "-c", "-Q"})
 
 # --- the daemon clone moved by hand ------------------------------------------
 
@@ -418,8 +495,11 @@ def _past_wrappers(words: list[str]) -> list[str]:
     """``words`` from the command a wrapper chain finally runs.
 
     Skips `VAR=value` prefixes and the wrappers in `_WRAPPER_HEADS` with their
-    options, `env`'s assignments and `timeout`'s duration.
+    options (a valued option's value too), `env`'s assignments and the leading
+    operand of `timeout`/`chrt`/`taskset`. `env -S` carries a command string,
+    which is spliced in as the words that follow.
     """
+    words = list(words)
     index = 0
     while index < len(words):
         word = words[index]
@@ -430,11 +510,46 @@ def _past_wrappers(words: list[str]) -> list[str]:
         if head not in _WRAPPER_HEADS:
             return words[index:]
         index += 1
+        leading_operand = head in _WRAPPER_LEADING_OPERAND_HEADS
         while index < len(words) and (words[index].startswith("-") or "=" in words[index]):
+            option = words[index]
             index += 1
-        if head == "timeout" and index < len(words):
+            if option == "--" or not option.startswith("-"):
+                continue
+            value, split_string = _wrapper_option_value(head, option, words, index)
+            if head == "taskset" and option.startswith("-c"):
+                leading_operand = False
+            if value is not None:
+                index += 1
+                if split_string:
+                    words[index:index] = _shell_words(value)
+        if leading_operand and index < len(words):
             index += 1
     return []
+
+
+def _wrapper_option_value(
+    head: str, option: str, words: list[str], index: int
+) -> tuple[str | None, bool]:
+    """The separate value word of wrapper ``head``'s ``option``, if it takes one.
+
+    Returns ``(value, is_split_string)``; ``value`` is ``None`` when the option
+    is a flag, carries its value attached (`-n10`, `--user=root`) or the value
+    word is missing. ``is_split_string`` marks `env -S`, whose value is itself a
+    command line.
+    """
+    if option.startswith("--"):
+        name = option.partition("=")[0]
+        takes = "=" not in option and name in _WRAPPER_LONG_VALUE_OPTIONS[head]
+        split_string = name == "--split-string"
+    else:
+        takes_chars = _WRAPPER_SHORT_VALUE_OPTIONS[head]
+        flag_position = next((i for i, char in enumerate(option[1:]) if char in takes_chars), None)
+        takes = flag_position is not None and flag_position == len(option) - 2
+        split_string = head == "env" and takes and option.endswith("S")
+    if not takes or index >= len(words):
+        return None, False
+    return words[index], split_string
 
 
 def _script_carries_the_upgrade(script: Path) -> bool:
@@ -528,6 +643,8 @@ def _shell_run_is_upgrade(
         if flag == "--":
             break
         if not flag.startswith("--"):
+            if "n" in flag[1:]:
+                return False  # `-n` reads the script for syntax errors only
             inline = inline or "c" in flag[1:]
             reads_stdin = reads_stdin or "s" in flag[1:]
     if inline:
@@ -539,6 +656,65 @@ def _shell_run_is_upgrade(
             return True
         return _UPGRADE_SHAPED_ARG_RE.search(" ".join(operands)) is not None
     return _script_run_is_upgrade(operands[0], operands[1:], cwd, steered=steered)
+
+
+def _python_runs_entry_point(arguments: list[str]) -> bool:
+    """Whether a python interpreter given ``arguments`` runs an entry point.
+
+    The first non-option word is the script (the value of `-W`/`-X`/`-Q` is
+    skipped), judged by name. `-m <module>` runs a module, whose own operands
+    count only when positional (`-m pytest scripts/upgrade.sh`, not `-k
+    upgrade.sh`). `-c` runs inline code, which is not a script.
+    """
+    index = 0
+    while index < len(arguments):
+        word = arguments[index]
+        if word == "-m":
+            return _positional_names_entry_point(arguments[index + 2 :], arguments[index + 1 :])
+        if word.startswith("-") and not word.startswith("--") and "c" in word[1:]:
+            return False
+        if word == "--" and index + 1 < len(arguments):
+            return _UPGRADE_ENTRY_RE.search(arguments[index + 1]) is not None
+        if not word.startswith("-"):
+            return _UPGRADE_ENTRY_RE.search(word) is not None
+        index += 2 if word in _PYTHON_VALUE_OPTIONS else 1
+    return False
+
+
+def _positional_names_entry_point(words: list[str], preceded_by: list[str]) -> bool:
+    """Whether a word of ``words`` that no dash-word precedes names an entry point.
+
+    A word following a dash-word is taken to be that flag's value
+    (`-k upgrade.sh`). ``preceded_by`` starts with the word before ``words``.
+    """
+    previous = preceded_by[0] if preceded_by else "-"
+    for word in words:
+        if (
+            not previous.startswith("-")
+            and not word.startswith("-")
+            and _UPGRADE_ENTRY_RE.search(word) is not None
+        ):
+            return True
+        previous = word
+    return False
+
+
+def _shell_script_operand_is_entry_point(arguments: list[str]) -> bool:
+    """Whether a shell (or `source`) given ``arguments`` runs an entry point.
+
+    `-c` runs a string (judged by recursion, not here) and `-n` only checks
+    syntax, so neither runs a script operand. Otherwise the first non-option
+    word is the script.
+    """
+    for word in arguments:
+        if word.startswith("--"):
+            continue
+        if word.startswith("-"):
+            if "c" in word[1:] or "n" in word[1:]:
+                return False
+            continue
+        return _UPGRADE_ENTRY_RE.search(word) is not None
+    return False
 
 
 def _runs_upgrade_entry_point(words: list[str]) -> bool:
@@ -553,9 +729,10 @@ def _runs_upgrade_entry_point(words: list[str]) -> bool:
         return True
     head = command_word(words[0])
     if head in _SHELL_HEADS or head in _SCRIPT_RUNNER_HEADS:
-        operand = next((word for word in words[1:] if not word.startswith("-")), None)
-        return operand is not None and _UPGRADE_ENTRY_RE.search(operand) is not None
-    if words[0].startswith("$") or _PYTHON_INTERPRETER_RE.fullmatch(head):
+        return _shell_script_operand_is_entry_point(words[1:])
+    if _PYTHON_INTERPRETER_RE.fullmatch(head):
+        return _python_runs_entry_point(words[1:])
+    if words[0].startswith("$"):
         # An interpreter's (or an unexpanded program's) positional operands:
         # a word following a dash-word is a flag's value (`-k upgrade.sh`).
         return any(

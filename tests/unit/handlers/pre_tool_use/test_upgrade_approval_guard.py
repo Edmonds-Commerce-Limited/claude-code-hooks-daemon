@@ -1173,6 +1173,76 @@ class TestEntryPointNamedAsDataIsNotARun:
         assert handler.matches(_bash(command)) is True
 
 
+class TestWrapperOptionsThatTakeAValue:
+    """A wrapper's valued option (`nice -n 10`) must not hide the program."""
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "PATH=/x:$PATH nice -n 10 scripts/upgrade.sh",
+            "PATH=/x:$PATH nice --adjustment 10 scripts/upgrade.sh",
+            "PATH=/x:$PATH nice -n 10 bash scripts/upgrade_version.sh",
+            "PATH=/x:$PATH timeout -k 5 600 scripts/upgrade.sh",
+            "PATH=/x:$PATH timeout -s KILL 600 bash scripts/upgrade_version.sh",
+            "PATH=/x:$PATH timeout --kill-after=5 600 scripts/upgrade.sh",
+            "PATH=/x:$PATH sudo -u root scripts/upgrade.sh",
+            "PATH=/x:$PATH sudo -u root -g wheel -E scripts/upgrade.sh",
+            "PATH=/x:$PATH sudo --user root scripts/upgrade.sh",
+            "PATH=/x:$PATH env -u FOO scripts/upgrade.sh",
+            "PATH=/x:$PATH env -C /tmp scripts/upgrade.sh",
+            "PATH=/x:$PATH env -S 'bash scripts/upgrade.sh'",
+            "PATH=/x:$PATH stdbuf -o L scripts/upgrade.sh",
+            "PATH=/x:$PATH ionice -c 3 scripts/upgrade.sh",
+            "PATH=/x:$PATH chrt -f 10 scripts/upgrade.sh",
+            "PATH=/x:$PATH taskset -c 0-3 scripts/upgrade.sh",
+            "PATH=/x:$PATH taskset 0x3 scripts/upgrade.sh",
+            "PATH=/x:$PATH xargs -a /dev/null scripts/upgrade.sh",
+            "PATH=/x:$PATH nohup nice -n 5 timeout -k 1 60 scripts/upgrade.sh",
+            "PYTHONPATH=/x python3 -u scripts/upgrade_gate_standalone.py",
+            "PYTHONPATH=/x python3 -I scripts/upgrade_gate_standalone.py",
+            "PYTHONPATH=/x python3 -W ignore scripts/upgrade_gate_standalone.py",
+            "PYTHONPATH=/x .venv/bin/python -X dev scripts/upgrade_gate_standalone.py",
+        ],
+    )
+    def test_denies_a_steered_run_behind_a_valued_wrapper_option(
+        self, handler: UpgradeApprovalGuardHandler, command: str
+    ) -> None:
+        assert handler.matches(_bash(command)) is True
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "PATH=/x:$PATH nice -n 10 cat scripts/upgrade.sh",
+            "PATH=/x:$PATH timeout -k 5 600 grep upgrade.sh file",
+            "PATH=/x:$PATH sudo -u root git log -- scripts/upgrade.sh",
+            "PATH=/x:$PATH env -u FOO shellcheck scripts/upgrade.sh",
+            "PYTHONPATH=src python3 -u scripts/qa/check.py scripts/upgrade.sh",
+            "PYTHONPATH=src python3 -m pytest tests/x -k upgrade.sh",
+        ],
+    )
+    def test_still_allows_a_valued_wrapper_around_a_reader(
+        self, handler: UpgradeApprovalGuardHandler, command: str
+    ) -> None:
+        assert handler.matches(_bash(command)) is False
+
+
+class TestShellInlineAndSyntaxCheckAreNotARun:
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "PATH=/x:$PATH bash -c 'shellcheck scripts/upgrade.sh'",
+            "PATH=/x:$PATH bash -n scripts/upgrade.sh",
+        ],
+    )
+    def test_allows_a_steered_inline_reader_or_syntax_check(
+        self, handler: UpgradeApprovalGuardHandler, command: str
+    ) -> None:
+        assert handler.matches(_bash(command)) is False
+
+    def test_still_denies_a_steered_inline_run(self, handler: UpgradeApprovalGuardHandler) -> None:
+        assert handler.matches(_bash("PATH=/x:$PATH bash -c 'scripts/upgrade.sh'")) is True
+
+
 class TestGetRules:
     def test_returns_two_rules(self, handler: UpgradeApprovalGuardHandler) -> None:
         rules = handler.get_rules()
