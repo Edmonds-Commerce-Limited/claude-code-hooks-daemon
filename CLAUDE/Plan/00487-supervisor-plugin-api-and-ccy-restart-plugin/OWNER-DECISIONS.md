@@ -39,3 +39,13 @@ Other projects get the plugin API only from a release. A release starts only whe
 
 - **Recommendation:** release after the live test passes, so that the release carries a tested API.
 - **Answer:** _pending_
+
+## D5. How the branch gets deployed for the live test (raised by the host agent)
+
+The claude-yolo play can only run from the owner's own fedora-desktop checkout. The inventory `host_vars` and the vault password file are gitignored and exist only there, so a clone or worktree of the branch cannot run it. That checkout is on `F44`, and another session was committing in it while the host agent worked, so the agent will not switch its branch on its own.
+
+- **Option A (recommended):** the owner runs the play from a checkout of `feature/ccy-hooks-daemon-plugin`, for example `git switch feature/ccy-hooks-daemon-plugin && ./playbooks/imports/play-claude-yolo.yml && git switch F44` once no other session is using that checkout, then `ccy --rebuild`. The agent then drives the live test.
+- **Option B:** the agent switches the owner's checkout to the branch, runs the play, and switches back to `F44`, at a time the owner names when no other session is using it.
+- **Option C:** merge `origin/F44` into the branch first, so that a deploy carries the 15 newer F44 commits too. None of them touch ccy files, so this is optional for the test.
+- **Evidence:** the 15 commits on `origin/F44` that the branch lacks change no file under `files/var/local/claude-yolo`, `playbooks/imports/play-claude-yolo.yml` or `docs/ccy-changelog.md`, so deploying the claude-yolo play from the branch rolls back no ccy change. The JOURNAL entry "fedora-desktop qa-all on the host" has the details.
+- **Answer:** _pending_
