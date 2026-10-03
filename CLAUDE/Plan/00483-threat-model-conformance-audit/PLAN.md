@@ -117,6 +117,8 @@ other than defeating a parser. Everything else, every ordinary respelling includ
   once (Plan 00475). N154 and N230 (Fable FIX rulings) were verified already fixed on main at
   c7271043f, so branch worktree-p483-inscope changes no code for them. Report:
   [subagent-reports/261003-task-3.1-n154-n230-sonnet.md](subagent-reports/261003-task-3.1-n154-n230-sonnet.md).
+  Segmentation batch on branch worktree-p483-segment: N48 (sed_blocker splits on newline), N87 (`$'...'` bodies decoded), N93 (`eval` body judged like `bash -c`) fixed; N85 no longer reproduces. Report:
+  [subagent-reports/261003-task-3.1-batch-b-segmentation-sonnet.md](subagent-reports/261003-task-3.1-batch-b-segmentation-sonnet.md).
 - [ ] 🔄 **Task 3.2**: Narrow each guard that causes an in-scope false positive while catching
   an out-of-scope shape (TDD: the false positive is the red test). X-1 fixed on branch
   worktree-p483-x1-rebind-heredoc: the shared rebinding check no longer withholds the heredoc

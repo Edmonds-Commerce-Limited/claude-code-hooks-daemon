@@ -801,7 +801,6 @@ class TestQuotedHeredocCommandWords:
             "ca?",
             "c*",
             "{cat,bash}",
-            "$'cat'",
             '"$c"',
             "sudo -u $u cat",
             "sudo $w",
@@ -814,7 +813,9 @@ class TestQuotedHeredocCommandWords:
         split into more words. Such a word resolves to nothing."""
         assert quoted_heredoc_command_words(f"{prefix} <<'EOF'\nb\nEOF") == []
 
-    @pytest.mark.parametrize("prefix", ["'cat'", '"cat"', "\\cat", "c\\at", "c'a't", "/bin/cat"])
+    @pytest.mark.parametrize(
+        "prefix", ["'cat'", '"cat"', "\\cat", "c\\at", "c'a't", "/bin/cat", "$'cat'", "$'\\x63at'"]
+    )
     def test_a_quoted_or_escaped_name_resolves_after_quote_removal(self, prefix: str) -> None:
         assert quoted_heredoc_command_words(f"{prefix} <<'EOF'\nb\nEOF") == ["cat"]
 

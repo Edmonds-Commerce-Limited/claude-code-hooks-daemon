@@ -56,6 +56,7 @@ _A daemon-robustness, guard-correctness and usage-control release. The headline 
 
 ### Fixed
 
+- `sed_blocker` no longer lets a `sed` on the line after `git commit` through, `project_containment` judges a literal `eval` body like a `bash -c` body, and a `$'...'` body handed to a shell is decoded before it is judged (Plan 00483).
 - The plan-number lock now covers every linked worktree (Plan 00474; Addresses #59).
 - `secret_file_guard` no longer fails closed on an ordinary `python3 - <<'EOF'` program (Plan 00466).
 - The secret guard no longer reads a quoted pattern, or a grep/rg/git-grep regex operand, as a glob (Plan 00474, Plan 00483; Addresses #66, #70).

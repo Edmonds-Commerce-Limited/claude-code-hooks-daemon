@@ -21,7 +21,12 @@ from claude_code_hooks_daemon.core.utils import (
     scan_bash_write_destinations,
 )
 from claude_code_hooks_daemon.utils.command_evasion import RESERVED_WORD_PREFIX
+from claude_code_hooks_daemon.utils.command_position import SEGMENT_SEPARATORS
 from claude_code_hooks_daemon.utils.scratch_dir import acceptance_path
+from claude_code_hooks_daemon.utils.shell_segmentation import (
+    split_unquoted_spans,
+    strip_quoted_heredoc_bodies,
+)
 
 #: Acceptance subdirectory for this handler's acceptance-test fixtures.
 _FIXTURE_DIR = "acceptance-test-sed"
@@ -120,10 +125,7 @@ _SED_VIA_XARGS = re.compile(
     re.IGNORECASE,
 )
 
-# Detects a shell command separator (&&, ||, ;, |). Used to decide whether sed that
-# appears after a git commit is part of the commit message (no separator → safe) or a
-# separate chained command (separator present → NOT safe).
-_COMMAND_SEPARATOR = re.compile(r"[;&|]")
+_GIT_COMMIT = re.compile(r"\bgit\s+commit\b")
 
 
 class SedBlockerHandler(PreToolUseHandlerBase):
@@ -241,27 +243,24 @@ class SedBlockerHandler(PreToolUseHandlerBase):
 
         Key: sed must appear AFTER 'git commit' in the command string.
         """
-        # Check if this is a git commit command with sed appearing after it
-        # This handles: git commit -m "...sed..." and heredocs
-        git_match = re.search(r"\bgit\s+commit\b", command)
-        if git_match:
-            git_pos = git_match.start()
-            # Find position of 'sed'
-            sed_match = self._sed_pattern.search(command)
-            if sed_match:
-                sed_pos = sed_match.start()
-                # sed must come AFTER git commit to be part of the message
-                if sed_pos > git_pos:
-                    # Reject if a command separator (&&, ||, ;, |) appears between
-                    # 'git commit' and sed — that means sed is a SEPARATE command
-                    # (e.g. git commit -m "msg" && sed -i s/a/b/ f.py), NOT part of
-                    # the commit message. Mirrors _is_gh_command's separator check.
-                    text_between = command[git_pos:sed_pos]
-                    if _COMMAND_SEPARATOR.search(text_between):
-                        return False
-                    return True
-
-        return False
+        # Text a data-sink heredoc carries is prose, so it is blanked first; what
+        # remains is split where bash splits it (quote-aware, newline included),
+        # and EVERY sed must sit in the same command as a `git commit` before it.
+        if self._sed_pattern.search(command) is None:
+            return False
+        text = strip_quoted_heredoc_bodies(command)
+        if _GIT_COMMIT.search(text) is None:
+            return False
+        segments = split_unquoted_spans(text, SEGMENT_SEPARATORS)
+        for sed_match in self._sed_pattern.finditer(text):
+            sed_pos = sed_match.start()
+            segment_start = next(start for start, end in segments if start <= sed_pos <= end)
+            commit = _GIT_COMMIT.search(text, segment_start, sed_pos)
+            if commit is None:
+                # sed is a SEPARATE command (`git commit -m x && sed -i ...`, or
+                # the same after a newline), not part of the commit message.
+                return False
+        return True
 
     def _is_gh_command(self, command: str) -> bool:
         """Check if command is a GitHub CLI (gh) operation with sed in text content.
