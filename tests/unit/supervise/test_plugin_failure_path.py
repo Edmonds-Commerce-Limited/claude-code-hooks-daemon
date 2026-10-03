@@ -122,6 +122,11 @@ class TestNoticeRendering:
             ("overrun", "on_idle", "ran past its time budget in on_idle"),
             ("wedge", "on_idle", "stopped the policy worker answering in on_idle"),
             ("bad-result", "on_idle", "returned a result the supervisor does not accept"),
+            (
+                "exit-stuck",
+                "on_idle",
+                "asked to end the session for a restart, but the session did not end",
+            ),
         ],
     )
     def test_each_failure_kind_has_a_fixed_sentence(

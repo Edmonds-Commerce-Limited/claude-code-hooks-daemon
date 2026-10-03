@@ -3498,6 +3498,9 @@ _PLUGIN_KIND_EXCEPTION = "exception"
 _PLUGIN_KIND_OVERRUN = "overrun"
 _PLUGIN_KIND_WEDGE = "wedge"
 _PLUGIN_KIND_BAD_RESULT = "bad-result"
+# The plugin kept asking to end the session and the session kept not ending
+# (`RestartCoordinator` gave up on it `_RESTART_MAX_ABANDONED` times).
+_PLUGIN_KIND_EXIT_STUCK = "exit-stuck"
 _PLUGIN_KINDS = frozenset(
     {
         _PLUGIN_KIND_LOAD,
@@ -3505,11 +3508,14 @@ _PLUGIN_KINDS = frozenset(
         _PLUGIN_KIND_OVERRUN,
         _PLUGIN_KIND_WEDGE,
         _PLUGIN_KIND_BAD_RESULT,
+        _PLUGIN_KIND_EXIT_STUCK,
     }
 )
 # A failure of these kinds leaves a thread (or the whole worker) possibly still
 # running plugin code, so the host recovers by restarting the worker.
-_PLUGIN_KINDS_NEEDING_WORKER_RESTART = frozenset({_PLUGIN_KIND_OVERRUN, _PLUGIN_KIND_WEDGE})
+_PLUGIN_KINDS_NEEDING_WORKER_RESTART = frozenset(
+    {_PLUGIN_KIND_OVERRUN, _PLUGIN_KIND_WEDGE, _PLUGIN_KIND_EXIT_STUCK}
+)
 
 _PLUGIN_STATE_LOADED = "loaded"
 _PLUGIN_STATE_FAILED = "failed"
@@ -3697,6 +3703,7 @@ _PLUGIN_KIND_PHRASES = {
     _PLUGIN_KIND_OVERRUN: "ran past its time budget",
     _PLUGIN_KIND_WEDGE: "stopped the policy worker answering",
     _PLUGIN_KIND_BAD_RESULT: "returned a result the supervisor does not accept",
+    _PLUGIN_KIND_EXIT_STUCK: "asked to end the session for a restart, but the session did not end",
 }
 _PLUGIN_HOOK_PHRASES = {
     _PLUGIN_HOOK_LOAD: "",
@@ -3712,6 +3719,10 @@ _PLUGIN_RECOVERY_SENTENCES = {
         "restarted without it."
     ),
     _PLUGIN_KIND_WEDGE: (
+        "It is disabled for the rest of this session, and the policy worker was "
+        "restarted without it."
+    ),
+    _PLUGIN_KIND_EXIT_STUCK: (
         "It is disabled for the rest of this session, and the policy worker was "
         "restarted without it."
     ),
@@ -8011,6 +8022,11 @@ _RESTART_REQUEST_FILENAME = "restart-request.json"
 _RESTART_EXIT_COMMAND = "/exit"
 _RESTART_EXIT_WAIT_SECONDS = 30.0
 _RESTART_REQUEST_FILE_MODE = 0o600
+# After a request is abandoned (the child ignored `/exit`) the same ask is not
+# acted on again for this long, and a plugin whose asks have been abandoned this
+# many times in one process is disabled through the uniform failure path.
+_RESTART_RETRY_COOLDOWN_SECONDS = 600.0
+_RESTART_MAX_ABANDONED = 3
 
 
 def _restart_request_path() -> Path:
@@ -8045,12 +8061,18 @@ class RestartCoordinator:
         *,
         state_path: Path,
         wait_seconds: float = _RESTART_EXIT_WAIT_SECONDS,
+        cooldown_seconds: float = _RESTART_RETRY_COOLDOWN_SECONDS,
+        max_abandoned: int = _RESTART_MAX_ABANDONED,
         monotonic: Callable[[], float] = time.monotonic,
         wall_clock: Callable[[], float] = time.time,
         sleep: Callable[[float], None] = time.sleep,
     ) -> None:
         self._state_path = state_path
         self._wait_seconds = wait_seconds
+        self._cooldown_seconds = cooldown_seconds
+        self._max_abandoned = max_abandoned
+        self._abandoned: dict[str, int] = {}
+        self._cooldown_until = float("-inf")
         self._monotonic = monotonic
         self._wall_clock = wall_clock
         self._sleep = sleep
@@ -8084,6 +8106,15 @@ class RestartCoordinator:
                 log, f"noop: plugin {plugin} asked to exit for restart (dry-run: not exiting)"
             )
             return False
+        if self._monotonic() < self._cooldown_until:
+            _log_noop(
+                log,
+                f"noop: exit for restart asked by plugin {plugin} ignored: cooldown after an "
+                "abandoned attempt",
+            )
+            return False
+        if self._abandoned.get(plugin, 0) >= self._max_abandoned:
+            return False
         if len(session_ids) != 1:
             _log_noop(
                 log,
@@ -8108,15 +8139,26 @@ class RestartCoordinator:
         )
         return True
 
-    def abandon(self, log: DecisionLog | None) -> None:
-        """Give up on a child that did not exit; the session carries on."""
+    def abandon(self, log: DecisionLog | None) -> str | None:
+        """Give up on a child that did not exit; the session carries on.
+
+        Starts the retry cooldown and counts the attempt against the plugin.
+        Returns the plugin's name when this abandon reached the cap (the caller
+        then disables it), else None.
+        """
         pending, self._pending = self._pending, None
-        if pending is not None:
-            _log_line(
-                log,
-                f"exit for restart: abandoned -- the child did not exit within "
-                f"{self._wait_seconds:g}s of {_RESTART_EXIT_COMMAND} (plugin {pending.plugin})",
-            )
+        if pending is None:
+            return None
+        self._cooldown_until = self._monotonic() + self._cooldown_seconds
+        count = self._abandoned.get(pending.plugin, 0) + 1
+        self._abandoned[pending.plugin] = count
+        _log_line(
+            log,
+            f"exit for restart: abandoned -- the child did not exit within "
+            f"{self._wait_seconds:g}s of {_RESTART_EXIT_COMMAND} (plugin {pending.plugin}, "
+            f"attempt {count} of {self._max_abandoned})",
+        )
+        return pending.plugin if count >= self._max_abandoned else None
 
     def finish(self, exit_code: int, log: DecisionLog | None) -> int:
         """The supervisor's exit status once the child has exited.
@@ -8231,6 +8273,33 @@ def handle_worker_silence(
     _log_line(log, failure_log_line(failure))
     report_plugin_failure(machine, failure, status_dir=status_dir, now=now_wall)
     plugin_host.clear_marker()
+    if restart_worker is not None:
+        restart_worker()
+
+
+def _disable_stuck_exit_plugin(
+    plugin: str,
+    *,
+    plugin_host: PluginHost | None,
+    machine: CompactStateMachine,
+    restart_worker: Callable[[], bool] | None,
+    log: DecisionLog | None,
+    status_dir: Path,
+    now_wall: float,
+) -> None:
+    """A plugin's exit-for-restart asks keep being abandoned: take it out.
+
+    The same four steps as every other plugin failure -- disable (surviving a
+    worker reload), recover (restart the worker without it), log, and owe the
+    session its one fixed-template notice.
+    """
+    if plugin_host is None:
+        return
+    failure = PluginFailure(plugin, _PLUGIN_KIND_EXIT_STUCK, _PLUGIN_HOOK_ON_IDLE)
+    if not plugin_host.record_failure(failure.plugin, failure.kind, failure.hook):
+        return
+    _log_line(log, failure_log_line(failure))
+    report_plugin_failure(machine, failure, status_dir=status_dir, now=now_wall)
     if restart_worker is not None:
         restart_worker()
 
@@ -8521,7 +8590,17 @@ def supervise(
             # abandon the request and carry on with the session.
             if not restart.expired():
                 return
-            restart.abandon(log)
+            capped = restart.abandon(log)
+            if capped is not None:
+                _disable_stuck_exit_plugin(
+                    capped,
+                    plugin_host=plugin_host,
+                    machine=machine,
+                    restart_worker=restart_worker,
+                    log=log,
+                    status_dir=sidecar_dir.parent,
+                    now_wall=time.time(),
+                )
         now_monotonic = os.times().elapsed
         idle = _is_idle(
             activity,

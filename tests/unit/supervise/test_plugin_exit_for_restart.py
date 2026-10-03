@@ -367,3 +367,183 @@ class TestSuperviseExitForRestart:
         )
         assert code == 6
         assert not received.exists() or b"/exit" not in received.read_bytes()
+
+
+# -- review defect 3: an abandoned request is not re-made straight away ------
+
+
+def _abandon_one(coordinator: Any, clock: _Clock, plugin: str = "max-age") -> str | None:
+    assert coordinator.request(
+        plugin,
+        "r",
+        session_ids=frozenset({_SESSION}),
+        machine=_mod.CompactStateMachine(_mod.CompactPolicy()),
+        write_master=_Writer(),
+        log=None,
+        dry_run=False,
+    )
+    clock.now += 31.0
+    assert coordinator.expired()
+    result: str | None = coordinator.abandon(None)
+    return result
+
+
+class TestCooldownAndCap:
+    def test_the_constants_are_named_and_sane(self) -> None:
+        assert _mod._RESTART_RETRY_COOLDOWN_SECONDS > _mod._RESTART_EXIT_WAIT_SECONDS
+        assert _mod._RESTART_MAX_ABANDONED >= 1
+
+    def test_a_request_during_the_cooldown_types_nothing(self, tmp_path: Path) -> None:
+        clock = _Clock()
+        coordinator = _coordinator(tmp_path, clock)
+        _abandon_one(coordinator, clock)
+        writer = _Writer()
+        log = _mod.DecisionLog(tmp_path / "decision.log")
+        assert not _request(coordinator, writer, log=log)
+        assert writer.chunks == []
+        assert not coordinator.pending
+        assert "cooldown" in (tmp_path / "decision.log").read_text()
+
+    def test_a_request_after_the_cooldown_is_honoured_again(self, tmp_path: Path) -> None:
+        clock = _Clock()
+        coordinator = _coordinator(tmp_path, clock)
+        _abandon_one(coordinator, clock)
+        clock.now += _mod._RESTART_RETRY_COOLDOWN_SECONDS + 1.0
+        writer = _Writer()
+        assert _request(coordinator, writer)
+        assert "/exit" in writer.text
+
+    def test_the_cap_ends_the_attempts_and_names_the_plugin_to_disable(
+        self, tmp_path: Path
+    ) -> None:
+        clock = _Clock()
+        coordinator = _coordinator(tmp_path, clock)
+        results: list[str | None] = []
+        for _ in range(_mod._RESTART_MAX_ABANDONED):
+            results.append(_abandon_one(coordinator, clock))
+            clock.now += _mod._RESTART_RETRY_COOLDOWN_SECONDS + 1.0
+        # Only the abandon that reaches the cap names a plugin.
+        assert results[:-1] == [None] * (_mod._RESTART_MAX_ABANDONED - 1)
+        assert results[-1] == "max-age"
+        writer = _Writer()
+        assert not _request(coordinator, writer)  # cooldown long over, still refused
+        assert writer.chunks == []
+
+    def test_the_cap_is_per_plugin(self, tmp_path: Path) -> None:
+        clock = _Clock()
+        coordinator = _coordinator(tmp_path, clock)
+        for _ in range(_mod._RESTART_MAX_ABANDONED):
+            _abandon_one(coordinator, clock, plugin="one")
+            clock.now += _mod._RESTART_RETRY_COOLDOWN_SECONDS + 1.0
+        writer = _Writer()
+        assert coordinator.request(
+            "two",
+            "r",
+            session_ids=frozenset({_SESSION}),
+            machine=_mod.CompactStateMachine(_mod.CompactPolicy()),
+            write_master=writer,
+            log=None,
+            dry_run=False,
+        )
+
+    def test_a_successful_exit_is_not_counted_against_the_cap(self, tmp_path: Path) -> None:
+        clock = _Clock()
+        coordinator = _coordinator(tmp_path, clock)
+        _request(coordinator, _Writer())
+        assert coordinator.finish(0, None) == _mod.EXIT_STATUS_RESTART_REQUESTED
+
+    def test_abandoning_nothing_names_nobody(self, tmp_path: Path) -> None:
+        assert _coordinator(tmp_path).abandon(None) is None
+
+
+def _run_with_failure_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, decider: Any, host: Any, restarts: list[int]
+) -> tuple[int, Path]:
+    monkeypatch.setattr(_mod, "cached_own_session_ids", lambda *a, **k: frozenset({_SESSION}))
+    received = tmp_path / "received.bin"
+    stdin_fd = os.open(os.devnull, os.O_RDONLY)
+    try:
+        code = _mod.supervise(
+            [_mod.sys.executable, "-c", _CHILD, str(received), "3.0", "never-matches", "4"],
+            dry_run=False,
+            log=_mod.DecisionLog(tmp_path / "decision.log"),
+            stdin_fd=stdin_fd,
+            poll_seconds=0.05,
+            sidecar_dir=tmp_path / "untracked" / "context-sidecar",
+            decider=decider,
+            plugin_host=host,
+            restart_worker=lambda: restarts.append(1) or True,
+            restart_coordinator=_mod.RestartCoordinator(
+                state_path=tmp_path / "state" / "restart-request.json",
+                wait_seconds=0.2,
+                cooldown_seconds=0.2,
+                max_abandoned=2,
+            ),
+        )
+    finally:
+        os.close(stdin_fd)
+    return int(code), received
+
+
+class TestSuperviseCapDisablesThePlugin:
+    def test_a_plugin_that_keeps_asking_is_disabled_with_the_uniform_notice(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from tests.unit.supervise._plugin_helpers import spec, write_plugin
+
+        path = write_plugin(tmp_path / "plugins", "pest")
+        host = _mod.PluginHost(
+            [spec("pest", path)],
+            write_status=lambda entries: None,
+            allowed_uids=frozenset({os.getuid(), 0}),
+            marker_path=tmp_path / "untracked" / "supervise" / "marker.json",
+        )
+        calls = {"n": 0}
+
+        def decider(facts: object) -> Any | None:
+            calls["n"] += 1
+            # Always asks, as a stuck plugin would on every idle tick, until the
+            # host has taken it out; then the worker (restarted) is quiet.
+            if host.status_entries()[0]["state"] == "loaded":
+                return _noop(exit_for_restart=("pest", "r"))
+            return None  # the restarted worker is silent: the host's own fallback decides
+
+        restarts: list[int] = []
+        code, received = _run_with_failure_path(
+            tmp_path, monkeypatch, decider=decider, host=host, restarts=restarts
+        )
+        assert code == 4  # the session was never ended by the stuck request
+        entry = host.status_entries()[0]
+        assert entry["state"] == "disabled"
+        assert entry["reason"] == "exit-stuck in on_idle"
+        assert restarts == [1]  # the worker was restarted without it
+        typed = received.read_bytes().decode()
+        assert typed.count("/exit") == 2  # exactly the capped number of attempts
+        # The uniform path warned on the status line (the typed notice itself
+        # waits behind the abandoned `/exit` line, like every own-line family).
+        status = json.loads(
+            (tmp_path / "untracked" / "supervise" / "status-message.json").read_text()
+        )
+        assert "pest" in status["text"]
+        assert "did not end" in status["text"]
+        assert "plugin pest: exit-stuck in on_idle" in (tmp_path / "decision.log").read_text()
+
+    def test_the_hold_never_outlasts_its_bound(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Compaction (any injection) is held only while a request is pending, and
+        # a pending request is abandoned at its bound -- so the injection arrives.
+        calls = {"n": 0}
+
+        def decider(facts: object) -> Any:
+            calls["n"] += 1
+            if calls["n"] == 1:
+                return _noop(exit_for_restart=("pest", "r"))
+            return _noop(payload="COMPACT-AFTER-BOUND") if calls["n"] > 8 else _noop()
+
+        restarts: list[int] = []
+        code, received = _run_with_failure_path(
+            tmp_path, monkeypatch, decider=decider, host=None, restarts=restarts
+        )
+        assert code == 4
+        assert b"COMPACT-AFTER-BOUND" in received.read_bytes()
