@@ -54,7 +54,7 @@ The third fedora-desktop review ([report](subagent-reports/261003-task-3.1-fedor
 `ccy-relabel-preflight` fails 36 cases on this host because the `script` command (package `util-linux-script`) is not installed, and no playbook installs it. This is on F44, not on the branch.
 
 - **Recommendation:** add `util-linux-script` to the QA toolchain in `play-python.yml` on F44.
-- **Answer:** _pending_
+- **Answer (owner, 2026-10-03):** already handed to a fedora-desktop session, which is adding it. Nothing for this plan to do.
 
 ## D5. How the branch gets deployed for the live test (raised by the host agent)
 
