@@ -1489,7 +1489,7 @@ real tag once a release carries the fix. Residual: whoever can delete the venv a
 
 **Evidence**: `release-slate-check` reads the `qa.yml` run for HEAD. HEAD can have more than one run: a push tier run plus a dispatched full-matrix run, or a cancelled run plus its re-run. Which one wins should be explicit (the newest completed full-matrix run), and the check should name it.
 
-**Status**: ⬜ Open. Remedy: select the newest completed run with the matrix jobs, report its id, and add a test with two runs on one sha.
+**Status**: ✅ Fixed on worktree-n324-ci-run-lookup. The lookup now picks the newest completed, non-cancelled run that carries the matrix jobs (a newer failure is not hidden by an older green), and the slate output names that run's id.
 
 ### N323 — `check_approval` should report INVALID on an unreadable approval marker
 
