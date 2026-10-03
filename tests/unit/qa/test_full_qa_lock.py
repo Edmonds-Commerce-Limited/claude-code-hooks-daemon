@@ -271,5 +271,26 @@ class TestSecondAcquisitionIsRefused:
             os.close(fd)
 
 
+class TestReuseInheritedWithoutProc:
+    def test_a_platform_without_proc_falls_through_to_a_normal_acquire(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import fcntl
+
+        main, _ = _init_repo_with_worktree(tmp_path)
+        monkeypatch.setattr(
+            "claude_code_hooks_daemon.qa.full_qa_lock.PROC_SELF_FD", tmp_path / "no-proc" / "fd"
+        )
+
+        with acquire_full_qa_lock(main, reuse_inherited=True) as fd:
+            other = open_lock_fd(main)
+            try:
+                with pytest.raises(BlockingIOError):
+                    fcntl.flock(other, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            finally:
+                os.close(other)
+            assert fd >= 0
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

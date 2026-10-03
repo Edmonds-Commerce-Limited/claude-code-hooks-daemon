@@ -47,6 +47,8 @@ logger = logging.getLogger(__name__)
 #: `untracked/` is exactly what this lock must be visible ACROSS).
 LOCK_FILE_NAME = "hooksdaemon-full-qa.lock"
 _LOCK_FILE_MODE = 0o644
+#: This process's open descriptors; absent on platforms without /proc (macOS).
+PROC_SELF_FD = Path("/proc/self/fd")
 
 
 def git_common_dir(project_root: Path) -> Path:
@@ -119,7 +121,9 @@ def acquire_full_qa_lock(
     Raises:
         BlockingIOError: `blocking=False` and the lock is already held.
     """
-    if reuse_inherited:
+    # Without /proc (macOS) no inherited descriptor can be listed, so there is
+    # nothing to reuse: fall through to a normal acquire.
+    if reuse_inherited and PROC_SELF_FD.is_dir():
         inherited = find_inherited_lock_fd(project_root)
         if inherited is not None:
             yield inherited
@@ -187,7 +191,7 @@ def find_inherited_lock_fd(project_root: Path) -> int | None:
             unreadable, so nothing can be established either way.
     """
     lock_path = host_lock_path(project_root).resolve()
-    candidates = list(Path("/proc/self/fd").iterdir())
+    candidates = list(PROC_SELF_FD.iterdir())
 
     skipped_unresolvable = 0
     skipped_not_the_holder = 0
