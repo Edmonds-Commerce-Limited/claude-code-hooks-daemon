@@ -485,9 +485,7 @@ class TestCarriesMatrixJobs:
         assert carries_matrix_jobs([_job("QA (Python3.11)", "failure")])
 
     def test_a_skipped_templated_matrix_job_does_not_count(self) -> None:
-        assert not carries_matrix_jobs(
-            [_job("QA (Python${{ matrix.python-version }})", "skipped")]
-        )
+        assert not carries_matrix_jobs([_job("QA (Python${{ matrix.python-version }})", "skipped")])
 
     def test_no_matrix_job_does_not_count(self) -> None:
         assert not carries_matrix_jobs([_job("QA (docs or code tier)", "success")])

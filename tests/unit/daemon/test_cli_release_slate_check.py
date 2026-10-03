@@ -260,9 +260,7 @@ class TestTheCiLookupRequiresTheFullMatrix:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         failed_jobs = [*_MATRIX_JOBS[:3], {"name": "QA (Python3.13)", "conclusion": "failure"}]
-        gh = _FakeGh(
-            [_run(3, conclusion="failure"), _run(2)], {3: failed_jobs, 2: _MATRIX_JOBS}
-        )
+        gh = _FakeGh([_run(3, conclusion="failure"), _run(2)], {3: failed_jobs, 2: _MATRIX_JOBS})
         _install(monkeypatch, gh)
         state = cli._gh_ci_lookup(_HEAD)
         assert state is not None
