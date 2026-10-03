@@ -20,6 +20,7 @@ from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.core import Decision
 from claude_code_hooks_daemon.handlers.pre_tool_use.merge_qa_advisor import (
     CHANGED_GREEN_REF_TEMPLATE,
+    QA_SCRIPT,
     MergeQaAdvisorHandler,
 )
 
@@ -62,6 +63,16 @@ def _bash(command: str, cwd: Path | None) -> dict[str, Any]:
     if cwd is not None:
         payload["cwd"] = str(cwd)
     return payload
+
+
+@pytest.fixture(autouse=True)
+def _daemon_checkout_is_the_project(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Default the project root to this checkout, which carries the QA script."""
+    monkeypatch.setattr(
+        "claude_code_hooks_daemon.handlers.pre_tool_use.merge_qa_advisor."
+        "ProjectContext.project_root",
+        classmethod(lambda cls: _PROJECT_ROOT),
+    )
 
 
 @pytest.fixture
@@ -256,6 +267,58 @@ class TestSilent:
             "claude_code_hooks_daemon.handlers.pre_tool_use.merge_qa_advisor.run_git", failing
         )
         assert _advice(handler, f"git merge {_BRANCH}", repo) == ""
+
+
+class TestOnlyInAProjectThatHasTheQaScript:
+    """The advice names this repo's scripts, so a client project without them hears nothing."""
+
+    def test_silent_when_the_project_has_no_qa_script(
+        self,
+        handler: MergeQaAdvisorHandler,
+        repo: Path,
+        tmp_path_factory: pytest.TempPathFactory,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        client_root = tmp_path_factory.mktemp("client")
+        monkeypatch.setattr(
+            "claude_code_hooks_daemon.handlers.pre_tool_use.merge_qa_advisor."
+            "ProjectContext.project_root",
+            classmethod(lambda cls: client_root),
+        )
+        assert _advice(handler, f"git merge {_BRANCH}", repo) == ""
+
+    def test_advises_when_the_project_has_the_qa_script(
+        self,
+        handler: MergeQaAdvisorHandler,
+        repo: Path,
+        tmp_path_factory: pytest.TempPathFactory,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        root = tmp_path_factory.mktemp("daemon_checkout")
+        script = root / QA_SCRIPT
+        script.parent.mkdir(parents=True)
+        script.write_text("", encoding="utf-8")
+        monkeypatch.setattr(
+            "claude_code_hooks_daemon.handlers.pre_tool_use.merge_qa_advisor."
+            "ProjectContext.project_root",
+            classmethod(lambda cls: root),
+        )
+        assert _BRANCH in _advice(handler, f"git merge {_BRANCH}", repo)
+
+    def test_matching_needs_no_project_context(
+        self, handler: MergeQaAdvisorHandler, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """``matches`` reads only the command; the project is consulted in ``handle``."""
+
+        def _uninitialised(cls: object) -> Path:
+            raise RuntimeError("ProjectContext not initialized")
+
+        monkeypatch.setattr(
+            "claude_code_hooks_daemon.handlers.pre_tool_use.merge_qa_advisor."
+            "ProjectContext.project_root",
+            classmethod(_uninitialised),
+        )
+        assert handler.matches(_bash(f"git merge {_BRANCH}", None))
 
 
 class TestDoesNotMatch:

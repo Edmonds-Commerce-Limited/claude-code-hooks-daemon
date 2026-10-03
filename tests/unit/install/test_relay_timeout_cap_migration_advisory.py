@@ -32,7 +32,7 @@ _MANIFESTS_DIR: Final[Path] = _REPO_ROOT / "CLAUDE" / "UPGRADES" / "config-chang
 
 _KEY: Final[str] = "daemon.transport.timeout_seconds"
 _FROM: Final[str] = "3.66.0"
-_TO: Final[str] = "3.67.0"
+_TO: Final[str] = "3.68.0"
 
 
 def _config(timeout: object | None) -> dict[str, Any]:

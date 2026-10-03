@@ -86,6 +86,60 @@ class TestNothingToSimulate:
             assert _staged(repo, env) == set()
 
 
+class TestARacilyCleanFileIsStillStaged:
+    """The copy keeps the real index's timestamp, so git's racy-timestamp check
+    reads a same-size edit made within the index's own timestamp tick as modified."""
+
+    def test_a_same_size_edit_inside_the_index_timestamp_is_staged(self, repo: Path) -> None:
+        tick = 1_700_000_000_000_000_000
+        target = repo / "a.txt"
+        os.utime(target, ns=(tick, tick))
+        _git(repo, "update-index", "--refresh")
+        os.utime(repo / ".git" / "index", ns=(tick, tick))
+        _write(repo, "a.txt", "dirty\n")  # same size as "clean\n"
+        os.utime(target, ns=(tick, tick))
+        assert _staged(repo, None) == set()
+
+        reading = read_commit_form("git add a.txt && git commit -m x")
+        with simulated_staging(reading, repo, repo) as env:
+            assert _staged(repo, env) == {"a.txt"}
+
+
+class TestCommitDashAStagesTrackedChangesOnTheCopy:
+    """`git commit -a` records every modified tracked file, never an untracked one."""
+
+    def test_the_opt_in_stages_tracked_edits_and_deletions_only(self, repo: Path) -> None:
+        _write(repo, "a.txt", "edited\n")
+        (repo / "sub" / "f.txt").unlink()
+        reading = read_commit_form("git commit -a -m x")
+
+        with simulated_staging(reading, repo, repo, include_tracked_changes=True) as env:
+            assert env is not None
+            assert _staged(repo, env) == {"a.txt", "sub/f.txt"}
+        assert _staged(repo, None) == set()
+
+    def test_it_is_off_unless_asked_for(self, repo: Path) -> None:
+        _write(repo, "a.txt", "edited\n")
+
+        with simulated_staging(read_commit_form("git commit -a -m x"), repo, repo) as env:
+            assert env is None
+
+    def test_a_commit_that_is_not_dash_a_stays_unsimulated(self, repo: Path) -> None:
+        _write(repo, "a.txt", "edited\n")
+
+        with simulated_staging(
+            read_commit_form("git commit -m x"), repo, repo, include_tracked_changes=True
+        ) as env:
+            assert env is None
+
+    def test_it_follows_an_add_in_the_same_command(self, repo: Path) -> None:
+        _write(repo, "a.txt", "edited\n")
+        reading = read_commit_form("git add leak.txt && git commit -a -m x")
+
+        with simulated_staging(reading, repo, repo, include_tracked_changes=True) as env:
+            assert _staged(repo, env) == {"a.txt", "leak.txt"}
+
+
 class TestTheAddIsAppliedToACopy:
     @pytest.mark.parametrize(
         ("command", "expected"),

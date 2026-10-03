@@ -1141,6 +1141,189 @@ class TestNonMatchingCalls:
         assert handler.matches(_bash("git status")) is False
 
 
+class TestEntryPointNamedAsDataIsNotARun:
+    """An upgrade script's NAME as an operand of another command is data."""
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "GIT_PAGER=cat git log -p -- scripts/upgrade.sh",
+            "TMPDIR=untracked/tmp shellcheck scripts/upgrade.sh",
+            "PYTHONPATH=src python3 -m pytest tests/x -k upgrade.sh",
+            "export PATH=$PATH:/x && cat scripts/upgrade.sh",
+        ],
+    )
+    def test_allows_a_command_that_only_names_the_entry_point(
+        self, handler: UpgradeApprovalGuardHandler, command: str
+    ) -> None:
+        assert handler.matches(_bash(command)) is False
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "GIT_PAGER=cat scripts/upgrade.sh --project-root /x",
+            "TMPDIR=/x bash scripts/upgrade.sh",
+            "TMPDIR=/x sh -x scripts/upgrade_version.sh",
+            "PYTHONPATH=/x python3 scripts/upgrade_gate_standalone.py",
+        ],
+    )
+    def test_still_denies_a_steered_run_of_the_entry_point(
+        self, handler: UpgradeApprovalGuardHandler, command: str
+    ) -> None:
+        assert handler.matches(_bash(command)) is True
+
+
+class TestWrapperOptionsThatTakeAValue:
+    """A wrapper's valued option (`nice -n 10`) must not hide the program."""
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "PATH=/x:$PATH nice -n 10 scripts/upgrade.sh",
+            "PATH=/x:$PATH nice --adjustment 10 scripts/upgrade.sh",
+            "PATH=/x:$PATH nice -n 10 bash scripts/upgrade_version.sh",
+            "PATH=/x:$PATH timeout -k 5 600 scripts/upgrade.sh",
+            "PATH=/x:$PATH timeout -s KILL 600 bash scripts/upgrade_version.sh",
+            "PATH=/x:$PATH timeout --kill-after=5 600 scripts/upgrade.sh",
+            "PATH=/x:$PATH sudo -u root scripts/upgrade.sh",
+            "PATH=/x:$PATH sudo -u root -g wheel -E scripts/upgrade.sh",
+            "PATH=/x:$PATH sudo --user root scripts/upgrade.sh",
+            "PATH=/x:$PATH env -u FOO scripts/upgrade.sh",
+            "PATH=/x:$PATH env -C /tmp scripts/upgrade.sh",
+            "PATH=/x:$PATH env -S 'bash scripts/upgrade.sh'",
+            "PATH=/x:$PATH stdbuf -o L scripts/upgrade.sh",
+            "PATH=/x:$PATH ionice -c 3 scripts/upgrade.sh",
+            "PATH=/x:$PATH chrt -f 10 scripts/upgrade.sh",
+            "PATH=/x:$PATH taskset -c 0-3 scripts/upgrade.sh",
+            "PATH=/x:$PATH taskset 0x3 scripts/upgrade.sh",
+            "PATH=/x:$PATH xargs -a /dev/null scripts/upgrade.sh",
+            "PATH=/x:$PATH nohup nice -n 5 timeout -k 1 60 scripts/upgrade.sh",
+            "PYTHONPATH=/x python3 -u scripts/upgrade_gate_standalone.py",
+            "PYTHONPATH=/x python3 -I scripts/upgrade_gate_standalone.py",
+            "PYTHONPATH=/x python3 -W ignore scripts/upgrade_gate_standalone.py",
+            "PYTHONPATH=/x .venv/bin/python -X dev scripts/upgrade_gate_standalone.py",
+        ],
+    )
+    def test_denies_a_steered_run_behind_a_valued_wrapper_option(
+        self, handler: UpgradeApprovalGuardHandler, command: str
+    ) -> None:
+        assert handler.matches(_bash(command)) is True
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "PATH=/x:$PATH nice -n 10 cat scripts/upgrade.sh",
+            "PATH=/x:$PATH timeout -k 5 600 grep upgrade.sh file",
+            "PATH=/x:$PATH sudo -u root git log -- scripts/upgrade.sh",
+            "PATH=/x:$PATH env -u FOO shellcheck scripts/upgrade.sh",
+            "PYTHONPATH=src python3 -u scripts/qa/check.py scripts/upgrade.sh",
+            "PYTHONPATH=src python3 -m pytest tests/x -k upgrade.sh",
+        ],
+    )
+    def test_still_allows_a_valued_wrapper_around_a_reader(
+        self, handler: UpgradeApprovalGuardHandler, command: str
+    ) -> None:
+        assert handler.matches(_bash(command)) is False
+
+
+class TestEveryWrapperIsReadWithoutError:
+    """Each wrapper the skipper knows has option tables, so an option never raises."""
+
+    def test_every_wrapper_head_has_both_option_tables(self) -> None:
+        from claude_code_hooks_daemon.handlers.pre_tool_use import upgrade_approval_guard as guard
+
+        assert set(guard._WRAPPER_SHORT_VALUE_OPTIONS) == guard._WRAPPER_HEADS
+        assert set(guard._WRAPPER_LONG_VALUE_OPTIONS) == guard._WRAPPER_HEADS
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "command -v git",
+            "command -p ls",
+            "setsid -f sleep 1",
+            "nohup -- sleep 1",
+            "flock -w 5 /tmp/lock true",
+            "strace -o out.txt ls",
+            "ltrace -o out.txt ls",
+        ],
+    )
+    def test_an_ordinary_command_behind_a_wrapper_option_is_allowed(
+        self, handler: UpgradeApprovalGuardHandler, command: str
+    ) -> None:
+        assert handler.matches(_bash(command)) is False
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "PATH=/x:$PATH command -p scripts/upgrade.sh",
+            "PATH=/x:$PATH setsid -f scripts/upgrade.sh",
+            "PATH=/x:$PATH flock -w 5 /tmp/lock scripts/upgrade.sh",
+            "PATH=/x:$PATH flock /tmp/lock bash scripts/upgrade_version.sh",
+            "PATH=/x:$PATH strace -o out.txt scripts/upgrade.sh",
+            "PATH=/x:$PATH ltrace -o out.txt scripts/upgrade.sh",
+        ],
+    )
+    def test_a_steered_upgrade_behind_a_wrapper_option_is_denied(
+        self, handler: UpgradeApprovalGuardHandler, command: str
+    ) -> None:
+        assert handler.matches(_bash(command)) is True
+
+
+class TestAttachedValuesAndPythonClusters:
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "PATH=/x:$PATH env -S'bash scripts/upgrade.sh'",
+            "PATH=/x:$PATH env --split-string='bash scripts/upgrade.sh'",
+            "PATH=/x:$PATH env -iS'bash scripts/upgrade.sh'",
+            "PYTHONPATH=/x python3 -uW ignore scripts/upgrade_gate_standalone.py",
+            "PYTHONPATH=/x python3 -IX dev scripts/upgrade_gate_standalone.py",
+            "PYTHONPATH=/x python3 - < scripts/upgrade_gate_standalone.py",
+            "PYTHONPATH=/x python3 -u - < scripts/upgrade_gate_standalone.py",
+            "PYTHONPATH=/x python3 < scripts/upgrade_gate_standalone.py",
+        ],
+    )
+    def test_denies_a_steered_upgrade_hidden_by_an_attached_value_or_a_cluster(
+        self, handler: UpgradeApprovalGuardHandler, command: str
+    ) -> None:
+        assert handler.matches(_bash(command)) is True
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "PATH=/x:$PATH env -S'cat scripts/upgrade.sh'",
+            "PYTHONPATH=src python3 -uW ignore scripts/qa/check.py scripts/upgrade.sh",
+            "PYTHONPATH=src python3 -um pytest tests/x -k upgrade.sh",
+            "PYTHONPATH=src python3 -mpytest tests/x -k upgrade.sh",
+            "PYTHONPATH=src python3 -uc 'print(1)' scripts/upgrade.sh",
+            "python3 - < scripts/upgrade_gate_standalone.py",
+            "PYTHONPATH=src python3 --version",
+            "PYTHONPATH=src python3 < scratch/probe.py",
+        ],
+    )
+    def test_still_allows_a_reader_or_an_unsteered_stdin_run(
+        self, handler: UpgradeApprovalGuardHandler, command: str
+    ) -> None:
+        assert handler.matches(_bash(command)) is False
+
+
+class TestShellInlineAndSyntaxCheckAreNotARun:
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "PATH=/x:$PATH bash -c 'shellcheck scripts/upgrade.sh'",
+            "PATH=/x:$PATH bash -n scripts/upgrade.sh",
+        ],
+    )
+    def test_allows_a_steered_inline_reader_or_syntax_check(
+        self, handler: UpgradeApprovalGuardHandler, command: str
+    ) -> None:
+        assert handler.matches(_bash(command)) is False
+
+    def test_still_denies_a_steered_inline_run(self, handler: UpgradeApprovalGuardHandler) -> None:
+        assert handler.matches(_bash("PATH=/x:$PATH bash -c 'scripts/upgrade.sh'")) is True
+
+
 class TestGetRules:
     def test_returns_two_rules(self, handler: UpgradeApprovalGuardHandler) -> None:
         rules = handler.get_rules()

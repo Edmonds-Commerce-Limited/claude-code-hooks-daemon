@@ -337,6 +337,7 @@ _SINGLE_QUOTE: Final[str] = "'"
 _DOUBLE_QUOTE: Final[str] = '"'
 _BACKSLASH: Final[str] = "\\"
 _NEWLINE: Final[str] = "\n"
+_COMMENT_CHAR: Final[str] = "#"
 
 
 def _skip_heredoc_bodies(command: str, start: int, pending: list[tuple[str, bool]]) -> int:
@@ -390,6 +391,12 @@ def _lexable_text(command: str) -> str:
             index += 2
             word_start = False
             continue
+        if char == _COMMENT_CHAR and word_start:
+            # An unquoted `#` opening a word is a comment to the end of ITS
+            # line only; the newline stays so the next line is still read.
+            end = text.find(_NEWLINE, index)
+            index = len(text) if end < 0 else end
+            continue
         if word_start:
             io_number = _IO_NUMBER.match(text, index)
             if io_number is not None:
@@ -424,6 +431,9 @@ def command_words(command: str) -> list[str]:
     try:
         lexer = shlex.shlex(text, posix=True, punctuation_chars=True)
         lexer.whitespace_split = True
+        # Comments were removed by _lexable_text, line by line; shlex's own
+        # `#` handling would eat every later line and cut `issue#12` short.
+        lexer.commenters = ""
         return list(lexer)
     except ValueError:
         # Unbalanced quoting: bash would not run it either, but a guard must
