@@ -240,7 +240,12 @@ def _run_complete_add(repo_root: Path, options: Sequence[str], env: Mapping[str,
     """
     result = run_git(repo_root, *_NO_SPLIT_INDEX, _ADD, *options, env=env)
     if result.returncode not in (0, _PARTIAL_ADD_EXIT):
-        logger.warning("staging simulation: add -A failed in %s: %s", repo_root, result.stderr)
+        logger.warning(
+            "staging simulation: add %s failed in %s: %s",
+            " ".join(options),
+            repo_root,
+            result.stderr,
+        )
         raise SimulationIncompleteError(
             INCOMPLETE_SIMULATION_REASON.format(
                 why=result.stderr.strip() or f"git exited {result.returncode}"

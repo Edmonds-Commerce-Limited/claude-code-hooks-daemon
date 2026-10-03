@@ -344,6 +344,34 @@ class TestAnIncompleteSimulationIsNotAnAnswer:
             with pytest.raises(SimulationIncompleteError), simulated_staging(reading, repo, repo):
                 pass
 
+    def test_the_warning_names_the_flag_of_an_add_everything(
+        self, repo: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        refused = subprocess.CompletedProcess(["git"], 128, "", "fatal: unable to index file")
+        reading = read_commit_form("F=leak.txt; git add $F && git commit -m x")
+
+        with patch.object(staging_module, "run_git") as spy, caplog.at_level("WARNING"):
+            spy.side_effect = _fail_every_add(refused)
+            with pytest.raises(SimulationIncompleteError), simulated_staging(reading, repo, repo):
+                pass
+
+        assert "add -A" in caplog.text
+
+    def test_the_warning_names_the_flag_of_an_add_of_tracked_changes(
+        self, repo: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        refused = subprocess.CompletedProcess(["git"], 128, "", "fatal: unable to index file")
+        reading = read_commit_form("git commit -a -m x")
+
+        with patch.object(staging_module, "run_git") as spy, caplog.at_level("WARNING"):
+            spy.side_effect = _fail_every_add(refused)
+            with pytest.raises(SimulationIncompleteError):
+                with simulated_staging(reading, repo, repo, include_tracked_changes=True):
+                    pass
+
+        assert "add -u" in caplog.text
+        assert "add -A" not in caplog.text
+
     def test_an_add_that_times_out_raises(self, repo: Path) -> None:
         timed_out = subprocess.CompletedProcess(["git"], 127, "", "timed out after 5s")
         reading = read_commit_form("git add leak.txt && git commit -m x")

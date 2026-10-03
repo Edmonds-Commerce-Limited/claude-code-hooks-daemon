@@ -441,6 +441,35 @@ class TestForeignRepoExempt:
         assert result.decision == Decision.ALLOW
         assert not result.context
 
+    @pytest.mark.parametrize(
+        "form", ["cd {other} && git commit -m x", "git -C {other} commit -m x"]
+    )
+    def test_a_command_that_moves_into_another_repo_is_ignored(
+        self, handler: StagedLintGateHandler, repo: Path, tmp_path: Path, form: str
+    ) -> None:
+        """Ledger 00474 N305: where the commit runs is the cwd after the move."""
+        other = tmp_path / "other-repo"
+        other.mkdir()
+        _git(other, "init")
+        _stage_file(repo, "broken.py", "def broken(\n")
+
+        with _patched_root(repo):
+            result = handler.handle(_bash(form.format(other=other), cwd=str(repo)))
+
+        assert result.decision == Decision.ALLOW
+        assert not result.context
+
+    def test_a_move_that_stays_in_this_repo_is_still_judged(
+        self, handler: StagedLintGateHandler, repo: Path
+    ) -> None:
+        (repo / "sub").mkdir()
+        _stage_file(repo, "broken.py", "def broken(\n")
+
+        with _patched_root(repo):
+            result = handler.handle(_bash("cd sub && git commit -m x", cwd=str(repo)))
+
+        assert result.context
+
 
 class TestGuidance:
     def test_publishes_resident_guidance(self, handler: StagedLintGateHandler) -> None:

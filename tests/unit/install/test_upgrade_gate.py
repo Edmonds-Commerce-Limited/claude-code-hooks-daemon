@@ -20,11 +20,13 @@ from __future__ import annotations
 import errno
 import io
 import json
+import os
 import sys
 from pathlib import Path
 
 import pytest
 
+from claude_code_hooks_daemon.install import upgrade_gate as upgrade_gate_module
 from claude_code_hooks_daemon.install.upgrade_gate import (
     APPROVAL_SUBDIR,
     ApprovalState,
@@ -40,10 +42,12 @@ from claude_code_hooks_daemon.install.upgrade_gate import (
     installed_version,
     main,
     record_gated_install,
+    record_install_main,
     run_approval,
     write_approval,
 )
 from claude_code_hooks_daemon.utils.one_shot_approval import OneShotApprovalStore
+from claude_code_hooks_daemon.utils.path_predicates import TextOrReason
 
 _REPO_UPGRADES_ROOT = Path(__file__).resolve().parents[3]
 
@@ -733,6 +737,67 @@ class TestApprovalMarker:
         assert check_approval(untracked, **kwargs) is ApprovalState.INVALID
 
 
+class TestUnreadableApprovalMarker:
+    """N323: a marker that exists but cannot be read is not a missing one."""
+
+    @staticmethod
+    def _state(daemon_dir: Path, project: Path, untracked: Path) -> ApprovalState:
+        return check_approval(
+            untracked,
+            to_version="4.0.0",
+            from_version="3.66.0",
+            daemon_dir=daemon_dir,
+            project_root=project,
+        )
+
+    @staticmethod
+    def _refuse_reads(monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(
+            upgrade_gate_module,
+            "read_text_or_reason",
+            lambda path, **_: TextOrReason(reason="[Errno 13] Permission denied"),
+        )
+
+    @pytest.mark.skipif(os.geteuid() == 0, reason="root can read a mode 000 file")
+    def test_a_mode_000_marker_is_unreadable_not_absent(
+        self, daemon_dir: Path, project: Path, untracked: Path
+    ) -> None:
+        marker = _approve(untracked, daemon_dir, project, "3.66.0", "4.0.0")
+        marker.chmod(0)
+        try:
+            state = self._state(daemon_dir, project, untracked)
+        finally:
+            marker.chmod(0o600)
+        assert state is ApprovalState.UNREADABLE
+
+    def test_a_marker_the_read_refuses_is_unreadable_not_absent(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        daemon_dir: Path,
+        project: Path,
+        untracked: Path,
+    ) -> None:
+        _approve(untracked, daemon_dir, project, "3.66.0", "4.0.0")
+        self._refuse_reads(monkeypatch)
+        assert self._state(daemon_dir, project, untracked) is ApprovalState.UNREADABLE
+
+    def test_an_unreadable_marker_fails_closed_and_the_message_names_permissions(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        daemon_dir: Path,
+        project: Path,
+        untracked: Path,
+    ) -> None:
+        _approve(untracked, daemon_dir, project, "3.66.0", "4.0.0")
+        self._refuse_reads(monkeypatch)
+        report = _acked(daemon_dir, project, untracked, "3.66.0", "4.0.0")
+        assert report.verdict is GateVerdict.NEEDS_APPROVAL
+        assert report.approval_state is ApprovalState.UNREADABLE
+        text = format_gate_report(report)
+        assert "unreadable" in text
+        assert "permissions" in text
+
+
 class _FakeTty(io.StringIO):
     def __init__(self, text: str, *, tty: bool) -> None:
         super().__init__(text)
@@ -1121,3 +1186,70 @@ class TestMain:
         )
         assert main(argv) == 0
         assert main([*argv, "--include-unreleased"]) == GateVerdict.NEEDS_ACKNOWLEDGEMENT.exit_code
+
+
+class TestRecordInstall:
+    """N327: a fresh install must leave the same receipt a gated upgrade leaves.
+
+    Without it the first idempotent re-run of the version a project was freshly
+    installed at finds a venv stamp naming the target and no receipt, and the
+    gate sends the project to its owner with every guide since v2.0.
+    """
+
+    def _argv(self, daemon_dir: Path, project: Path, untracked: Path, stamp: str) -> list[str]:
+        return [
+            "--daemon-dir",
+            str(daemon_dir),
+            "--project-root",
+            str(project),
+            "--untracked-dir",
+            str(untracked),
+            "--stamp",
+            stamp,
+        ]
+
+    def test_it_writes_the_receipt_a_gated_upgrade_would_write(
+        self, daemon_dir: Path, project: Path, untracked: Path
+    ) -> None:
+        assert record_install_main(self._argv(daemon_dir, project, untracked, "v3.68.0")) == 0
+        assert (
+            gated_install_stamp(untracked, daemon_dir=daemon_dir, project_root=project) == "v3.68.0"
+        )
+
+    def test_a_rerun_at_the_installed_version_then_proceeds_without_the_owner(
+        self, daemon_dir: Path, project: Path, untracked: Path
+    ) -> None:
+        record_install_main(self._argv(daemon_dir, project, untracked, "v3.68.0"))
+        report = _gate(
+            daemon_dir,
+            project,
+            untracked,
+            "3.68.0",
+            "3.68.0",
+            installed_stamp="v3.68.0",
+            target_stamp="v3.68.0",
+        )
+        assert report.verdict is GateVerdict.PROCEED
+        assert report.already_installed
+
+    def test_an_install_with_no_receipt_still_goes_to_the_owner(
+        self, daemon_dir: Path, project: Path, untracked: Path
+    ) -> None:
+        report = _gate(
+            daemon_dir,
+            project,
+            untracked,
+            "3.68.0",
+            "3.68.0",
+            installed_stamp="v3.68.0",
+            target_stamp="v3.68.0",
+        )
+        assert report.verdict is not GateVerdict.PROCEED
+        assert not report.already_installed
+
+    def test_an_empty_stamp_is_refused_and_writes_nothing(
+        self, daemon_dir: Path, project: Path, untracked: Path
+    ) -> None:
+        with pytest.raises(SystemExit):
+            record_install_main(self._argv(daemon_dir, project, untracked, ""))
+        assert gated_install_stamp(untracked, daemon_dir=daemon_dir, project_root=project) is None

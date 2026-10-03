@@ -1373,8 +1373,9 @@ green run) is Plan 00475 Task 4.2, which waits on the owner.
 the repository root, so `cd .claude && git commit -m x hooks-daemon.yaml` is not seen as covering
 the config, and the gate reads no config change. This is an existing miss, not something N299 caused.
 
-**Status**: ⬜ Open. Resolve the pathspecs with `pathspec_directory`, as N299 did for the
-other gates.
+**Status**: ✅ Fixed on worktree-n304-n305-gate-dirs. `recorded_config_source` resolves each
+pathspec against every directory its commit may run in (`run_directories`, as N299 did for the other
+gates), handling `./`, `..` and `:/` / `:(top)`.
 
 ### N305 — `staged_lint_gate._is_foreign_repo` ignores the command's own `cd` / `-C`
 
@@ -1383,7 +1384,10 @@ other gates.
 **Evidence**: the stand-down looks at the hook's working directory only. A `cd other-repo && git commit` from this checkout is linted as this repository's commit. N300 fixed the same gap in
 `remote_docs_commit_gate`.
 
-**Status**: ⬜ Open. Use the same post-move check as N300.
+**Status**: ✅ Fixed on worktree-n304-n305-gate-dirs. The N300 post-move check moved to the shared
+`git_facts.commit_runs_in_foreign_repo`, which `staged_lint_gate`, `remote_docs_commit_gate`,
+`plan_qa_commit_gate` and `docs_qa_commit_gate` all call (all four gates share the check; the
+local hook-cwd-only copies are deleted).
 
 ### N306 — the commit-move reader records both directories of `cd a || cd b`
 
@@ -1402,6 +1406,78 @@ The uncertain-move union judges the hook directory and the LAST recorded move (`
 every candidate directory (`sub`). Remedy: judge every directory any `cd` in the chain could
 land in.
 
+### N327 — a fresh install of v3.68.0 leaves no gated-install record, so its same-version re-run is stopped for the owner
+
+**Source**: coordinator, post-merge `tests/acceptance` on e82a57a4a once v3.68.0 was the newest published tag
+(`test_upgrade_metadata_emission.py` x2, `test_skill_upgrade_end_to_end.py`,
+`test_skill_upgrade_legacy_shim_end_to_end.py`). Report:
+[subagent-reports/261003-n327-fresh-install-gate-record-sonnet.md](subagent-reports/261003-n327-fresh-install-gate-record-sonnet.md).
+
+**Evidence**: `scripts/install_version.sh` stamps the venv (`ensure_venv`) but never calls the gate, and
+`upgrade_gate.record_gated_install` runs only from `upgrade_gate.main` on a PROCEED. So a fresh install has a venv
+stamp and no receipt. `evaluate_gate` (`upgrade_gate.py`, the `installed_stamp == target_stamp` branch, line 611)
+then reads "stamped, not gated" as an unknown history (the Plan 00376 fresh-review MAJOR 1 defence against checkout
+plus `repair`) and stops with exit 3, listing 11 guides back to v2.0. The gate that runs is the TARGET tag's own
+copy: `upgrade.sh` on main hands over to the checked-out `scripts/upgrade_version.sh`, which runs that tree's
+`upgrade_gate_standalone.py`. A fix on main therefore does not change what a v3.68.0 install does.
+
+**Impact**: only the SAME-version re-run (v3.68.0 onto v3.68.0). An upgrade to any other release has a stamp that
+differs from the target, takes the normal range path with the stamp as a trusted FROM, and records itself on PROCEED,
+so it is not stopped by this and it heals the install. An install that upgraded INTO v3.68.0 through the gate has
+the record; a fresh one does not.
+
+**Decision for existing v3.68.0 installs without the record**: unchanged, still stopped for the owner. The record is
+the only thing that tells a gated install from a stamp a manual checkout plus `repair` wrote, and an agent could use
+that equality to land a MAJOR without approval; a missing record is exactly that unknown history. The remedy for an
+affected project is an upgrade to the next release or `hooks-daemon approve-upgrade`. Nothing in this repository can
+reach the v3.68.0 copy of the gate, so a patch release would only help NEW installs.
+
+**Status**: ✅ Fixed on worktree-fix-gate-fresh-install. `install_version.sh` records the install through
+`upgrade_gate_standalone.py record-install`, only when no venv stamp existed before it (a pre-existing stamp may be a
+repair's). The acceptance fixture tags the clone's HEAD as the next patch inside the throwaway clone while the newest
+published tag's installer lacks `record-install`, so those four tests exercise the fixed code; they run against the
+real tag once a release carries the fix. Residual: whoever can delete the venv and run the installer can mint a record.
+
+### N326 — release prep exposed tests that pass only while `UNRELEASED/` holds content
+
+**Source**: coordinator, v3.68.0 release prep (CI run on 072a4da2f).
+
+**Evidence**: Step 6 of a release empties `CLAUDE/UPGRADES/UNRELEASED/` into the versioned guide. `tests/acceptance/test_guarded_branch_install.py` then failed, because the pre-deploy gate it drives found nothing staged to stop on. Its expectation depended on the repository's own `UNRELEASED/` contents, not on a fixture. The manifest example test had the same dependency. Both were found only at release time, because between releases `UNRELEASED/` is never empty. Fixed for the guarded install in 3f0311e8e: the test commits its own staged callout and manifest into the clone.
+
+**Status**: ✅ Fixed for the two instances. ⬜ Open as a class: a test that reads the live `UNRELEASED/` tree should build its own fixture. Remedy: a check, or one test run with `UNRELEASED/` emptied, so the dependency fails between releases instead of at release prep.
+
+### N325 — `staging_simulation` warns "add -A" when the command ran `add -u`
+
+**Source**: v3.68.0 release code review, round 3 (a non-defect suggestion).
+
+**Evidence**: when the simulation degrades, its warning text names `git add -A` even when the command it simulated was `git add -u`. Only the wording is wrong; the staged-set computation is right.
+
+**Status**: ✅ Fixed in 1ca156987. The warning now names the flags the add actually ran (`add -u`, or `add -A --ignore-errors`).
+
+### N324 — the CI-run lookup does not say which run it read when HEAD has several
+
+**Source**: v3.68.0 release code review (a non-defect suggestion).
+
+**Evidence**: `release-slate-check` reads the `qa.yml` run for HEAD. HEAD can have more than one run: a push tier run plus a dispatched full-matrix run, or a cancelled run plus its re-run. Which one wins should be explicit (the newest completed full-matrix run), and the check should name it.
+
+**Status**: ⬜ Open. Remedy: select the newest completed run with the matrix jobs, report its id, and add a test with two runs on one sha.
+
+### N323 — `check_approval` should report INVALID on an unreadable approval marker
+
+**Source**: v3.68.0 release code review (a non-defect suggestion).
+
+**Evidence**: an approval marker under `upgrade-approvals/` that exists but cannot be read is treated like a missing one. The gate still fails closed, but the message sends the owner to approve again, when what needs fixing is the file's permissions.
+
+**Status**: ✅ Fixed in b8b99c007. A distinct `ApprovalState.UNREADABLE` (fail-closed, read through `path_predicates`) whose gate message points at the file's permissions; the standalone gate loader now loads `utils/path_predicates.py`.
+
+### N322 — `usage_snapshot` can leave its temp file behind when the rename fails
+
+**Source**: v3.68.0 release code review (a non-defect suggestion).
+
+**Evidence**: the snapshot writer writes a temp file and renames it into place. If the rename raises, the temp file stays in the state directory. Nothing reads it, but it accumulates.
+
+**Status**: ✅ Fixed in 4b0c3dcd5. The writer unlinks its temp file when the write or rename fails, and a test drives the failed rename.
+
 ### N321 — strict-by-default left four acceptance probes denied, and merge checks never ran `tests/acceptance/`
 
 **Source**: coordinator, release prep full QA (`llm_qa.py all`) on c818d43e5.
@@ -1416,7 +1492,12 @@ Sixth instance of the N310 class: a suite the merge routine does not run went re
 **Status**: ✅ Fixed on main. The sequenced allow probes carry `set -euo pipefail;`, and the
 verification-gate probe declares `MUST_SKIP_SAFE_MODE_BECAUSE`, because a prelude would make the
 gate stand down. Harness 5/5 green. Remaining: the merge routine runs `tests/acceptance/` beside
-`tests/integration/`.
+`tests/integration/`. The v3.68.0 release added a lesson: the merge routine also needs
+`llm_qa.py semgrep`. The N317 semgrep finding and the merge_qa_advisor EACCES finding both
+reached main past the per-merge checks and surfaced only in the release's full QA and CI. Since
+the release, the coordinator runs `tests/integration`, `tests/acceptance`, `semgrep` and
+`dangerous_invocation_corpus` on main after each core merge. The routine itself still has to say
+so (Plan 00475 Task 4.2).
 
 ### N320 — `D=path && cmd > $D/f` is denied as a write outside the project; the `;` form is allowed
 

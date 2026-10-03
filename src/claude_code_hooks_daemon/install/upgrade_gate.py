@@ -71,6 +71,7 @@ from claude_code_hooks_daemon.install.upgrade_tasks import (
 from claude_code_hooks_daemon.install.version_parse import strip_tag_prefix
 from claude_code_hooks_daemon.utils.one_shot_approval import OneShotApprovalStore
 from claude_code_hooks_daemon.utils.path_containment import path_is_relative_to, path_relative_to
+from claude_code_hooks_daemon.utils.path_predicates import path_is_file, read_text_or_reason
 
 logger = logging.getLogger(__name__)
 
@@ -148,6 +149,7 @@ class ApprovalState(Enum):
     ABSENT = "absent"
     VALID = "valid"
     INVALID = "invalid"
+    UNREADABLE = "unreadable"
 
 
 @dataclass(frozen=True)
@@ -373,10 +375,16 @@ def check_approval(
         project_root=project_root,
     )
     marker = OneShotApprovalStore(APPROVAL_SUBDIR).path(untracked_dir, expected[_FIELD_TO])
-    if not marker.is_file():
+    is_file = path_is_file(marker, unreadable_means=None)
+    if is_file is None:
+        return ApprovalState.UNREADABLE
+    if not is_file:
         return ApprovalState.ABSENT
+    read = read_text_or_reason(marker, errors="replace")
+    if read.text is None:
+        return ApprovalState.UNREADABLE
     try:
-        recorded = json.loads(marker.read_text(encoding="utf-8"))
+        recorded = json.loads(read.text)
     except json.JSONDecodeError:
         return ApprovalState.INVALID
     if not isinstance(recorded, dict):
@@ -789,6 +797,11 @@ def _approval_lines(report: GateReport) -> list[str]:
             f"(The marker at {report.approval_marker} was not written by approve-upgrade "
             "for this upgrade, so it does not count.)"
         )
+    if report.approval_state is ApprovalState.UNREADABLE:
+        lines.append(
+            f"(The marker at {report.approval_marker} exists but is unreadable, so it does "
+            "not count. Fix the file's permissions or ownership rather than approving again.)"
+        )
     lines.extend(
         [
             "The owner approves ONE run of exactly this upgrade, in their own terminal (it",
@@ -966,6 +979,50 @@ def main(argv: list[str] | None = None) -> int:
     if args.verdict_file is not None:
         _write_verdict(Path(args.verdict_file), str(args.nonce), report)
     return report.verdict.exit_code
+
+
+def _build_record_install_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="upgrade-gate record-install",
+        description="Record a fresh install as what the gate would have let through (N327).",
+    )
+    parser.add_argument("--daemon-dir", type=Path, required=True, help="The daemon checkout")
+    parser.add_argument("--project-root", type=Path, required=True, help="The installed project")
+    parser.add_argument("--stamp", required=True, help="The stamp the fresh install wrote")
+    parser.add_argument(
+        "--untracked-dir",
+        type=Path,
+        default=None,
+        help="Where approvals live (default: the project's daemon untracked dir)",
+    )
+    return parser
+
+
+def record_install_main(argv: list[str] | None = None) -> int:
+    """Record a FRESH install's stamp as a gated install; return 0.
+
+    A fresh install runs no upgrade, so the gate never records it, and its
+    first idempotent re-run then finds a venv stamp naming the target with no
+    receipt (N327). The caller (``scripts/install_version.sh``) calls this only
+    when no venv stamp existed before the install, which is what makes the
+    stamp the install's own and not one a manual checkout plus ``repair`` wrote.
+    An empty stamp is refused: a receipt for nothing vouches for nothing.
+    """
+    args = _build_record_install_parser().parse_args(argv)
+    if not str(args.stamp).strip():
+        _build_record_install_parser().error("--stamp must name the installed stamp")
+    project_root = Path(args.project_root).resolve()
+    untracked_dir = (
+        Path(args.untracked_dir) if args.untracked_dir else get_untracked_dir(project_root)
+    )
+    path = record_gated_install(
+        untracked_dir,
+        stamp=str(args.stamp),
+        daemon_dir=Path(args.daemon_dir).resolve(),
+        project_root=project_root,
+    )
+    print(f"Recorded {args.stamp} as a gated install: {path}", file=sys.stderr)
+    return 0
 
 
 def run_approval(

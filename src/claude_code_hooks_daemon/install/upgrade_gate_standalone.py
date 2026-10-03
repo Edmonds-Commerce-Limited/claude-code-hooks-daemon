@@ -11,9 +11,15 @@ do not invoke it via ``-m``:
     python3 .../upgrade_gate_standalone.py approve --daemon-dir <daemon_dir> \\
         --project-root <root> --from <installed> --to <target>
 
+    python3 .../upgrade_gate_standalone.py record-install --daemon-dir <daemon_dir> \\
+        --project-root <root> --stamp <stamp>
+
 The second form is the project owner's approval, from the target's own code
 (an installed daemon older than the gate has no ``approve-upgrade``). It needs
 a terminal and a typed phrase, so an agent's shell cannot run it.
+
+The third form is what a FRESH install calls, so its first re-run is not sent
+to the owner as an install of unknown history (N327).
 
 Layer 2 (``scripts/upgrade_version.sh``) runs the gate BEFORE it builds the
 target's venv, so a stopped upgrade has changed nothing but the checkout,
@@ -58,6 +64,7 @@ _LOAD_ORDER: tuple[tuple[str, str], ...] = (
     ("claude_code_hooks_daemon.install.version_parse", "install/version_parse.py"),
     ("claude_code_hooks_daemon.install.install_stamp", "install/install_stamp.py"),
     ("claude_code_hooks_daemon.utils.path_containment", "utils/path_containment.py"),
+    ("claude_code_hooks_daemon.utils.path_predicates", "utils/path_predicates.py"),
     ("claude_code_hooks_daemon.install.upgrade_guides", "install/upgrade_guides.py"),
     ("claude_code_hooks_daemon.install.upgrade_tasks", "install/upgrade_tasks.py"),
     ("claude_code_hooks_daemon.utils.one_shot_approval", "utils/one_shot_approval.py"),
@@ -92,8 +99,11 @@ else:
 
 
 _APPROVE_SUBCOMMAND = "approve"
+_RECORD_INSTALL_SUBCOMMAND = "record-install"
 
 if __name__ == "__main__":
     if sys.argv[1:2] == [_APPROVE_SUBCOMMAND]:
         sys.exit(upgrade_gate.approve_main(sys.argv[2:]))
+    if sys.argv[1:2] == [_RECORD_INSTALL_SUBCOMMAND]:
+        sys.exit(upgrade_gate.record_install_main(sys.argv[2:]))
     sys.exit(upgrade_gate.main())

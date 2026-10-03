@@ -31,7 +31,10 @@ class is about.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
+
+import pytest
 
 from claude_code_hooks_daemon.core import Decision
 from claude_code_hooks_daemon.handlers.pre_tool_use.guard_config_commit_gate import (
@@ -182,6 +185,62 @@ class TestWhichVersionTheCommitRecords:
         command = "git commit -m 'fix the -a flag handling'"
 
         assert recorded_config_source(command, CONFIG_RELATIVE_PATH) is RecordedSource.INDEX
+
+
+class TestPathspecsAreReadFromWhereTheCommitRuns:
+    """Ledger 00474 N304: a pathspec is relative to the directory the commit runs in."""
+
+    @pytest.fixture
+    def root(self, tmp_path: Path) -> Path:
+        (tmp_path / ".claude").mkdir()
+        (tmp_path / "docs").mkdir()
+        return tmp_path
+
+    def _source(self, root: Path, command: str, cwd: Path | None = None) -> RecordedSource | None:
+        return recorded_config_source(
+            command, CONFIG_RELATIVE_PATH, cwd=str(cwd or root), project_root=root
+        )
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "cd .claude && git commit -m x hooks-daemon.yaml",
+            "git -C .claude commit -m x hooks-daemon.yaml",
+            "cd .claude && git commit -m x ./hooks-daemon.yaml",
+            "cd docs && git commit -m x ../.claude/hooks-daemon.yaml",
+            "cd docs && git commit -m x :/.claude/hooks-daemon.yaml",
+            "cd docs && git commit -m x ':(top).claude'",
+            "cd .claude && git commit -m x .",
+        ],
+    )
+    def test_a_pathspec_that_reaches_the_config_from_the_moved_directory_counts(
+        self, root: Path, command: str
+    ) -> None:
+        assert self._source(root, command) is RecordedSource.WORKING_TREE
+
+    def test_the_hook_directory_alone_also_anchors_a_pathspec(self, root: Path) -> None:
+        source = self._source(root, "git commit -m x hooks-daemon.yaml", cwd=root / ".claude")
+
+        assert source is RecordedSource.WORKING_TREE
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "cd docs && git commit -m x hooks-daemon.yaml",
+            "cd docs && git commit -m x .claude/hooks-daemon.yaml",
+            "cd .claude && git commit -m x .claude/hooks-daemon.yaml",
+            "cd docs && git commit -m x ../../outside.yaml",
+        ],
+    )
+    def test_a_pathspec_that_does_not_reach_the_config_from_there_does_not(
+        self, root: Path, command: str
+    ) -> None:
+        assert self._source(root, command) is None
+
+    def test_without_a_project_root_the_pathspec_is_read_from_the_root(self) -> None:
+        assert recorded_config_source("git commit -m x .claude", CONFIG_RELATIVE_PATH) is (
+            RecordedSource.WORKING_TREE
+        )
 
 
 class TestTheGateReportsAWeakening:
