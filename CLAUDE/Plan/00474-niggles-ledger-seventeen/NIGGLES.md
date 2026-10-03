@@ -1406,6 +1406,35 @@ The uncertain-move union judges the hook directory and the LAST recorded move (`
 every candidate directory (`sub`). Remedy: judge every directory any `cd` in the chain could
 land in.
 
+### N328 — `set -e` has no effect in the Claude Code Bash tool, so the prelude `bash_safe_mode` asks for protects nothing
+
+**Source**: coordinator, 2026-10-03. Twice in one session a `set -euo pipefail` command kept running after a
+failing step: semgrep ran after pytest failed, and a commit ran after `mkplan.bash --journal` exited 1.
+
+**Evidence**: probes run through the Bash tool:
+
+| Probe                                          | Result                 |
+| ---------------------------------------------- | ---------------------- |
+| `set -euo pipefail; false; echo STILL RUNNING` | prints `STILL RUNNING` |
+| `bash -c 'set -e; false; echo x'`              | stops, exit 1          |
+| `( set -e; false; echo x )`                    | prints `x`             |
+| `false && echo x`                              | stops                  |
+| `set -o pipefail; false \| cat; echo $?`       | `1` (pipefail works)   |
+
+The harness runs each command as `… && eval '<command>' < /dev/null && pwd -P >| …`. Bash ignores errexit
+for any command that is part of an `&&` list, and this includes everything inside the `eval` and inside
+subshells. Only a fresh `bash -c` process or explicit `&&` / `|| exit` gating stops on a failure.
+
+**Impact**: `bash_safe_mode` (R-BASH-SAFE-MODE-PRELUDE-MISSING) is strict by default since v3.68.0. Its
+fix line says "add `set -euo pipefail` at the top", and the prelude satisfies the gate, but under this
+harness it gives no protection. The guard therefore produces a false sense of safety. `pipefail` and `-u`
+still work; only `-e` is lost. Whether the harness behaviour is intended upstream is unverified.
+
+**Status**: ⬜ Open. Remedy: the handler's guidance should stop presenting a bare `set -e` prelude as
+protection. It should recommend `&&` chaining, `|| exit 1` on each step, or a `bash -c 'set -euo pipefail; …'`
+wrapper, and the gate should accept those forms. Whether a bare prelude should still satisfy the gate is a
+design decision to be taken with the fix.
+
 ### N327 — a fresh install of v3.68.0 leaves no gated-install record, so its same-version re-run is stopped for the owner
 
 **Source**: coordinator, post-merge `tests/acceptance` on e82a57a4a once v3.68.0 was the newest published tag
