@@ -63,6 +63,19 @@ The agent's rulings on ordering, plugin location and restart policy, made while 
 
   Refuse when the session id is ambiguous, and abandon the restart if the child ignores `/exit`.
 
+- [x] ✅ **Task 1.3c**: TDD fixed-template session notices a worker plugin can request. Built (`tests/unit/supervise/test_session_notices.py`):
+
+  - `Notify(kind, minutes=None)` is a closed-set `on_idle` result: `RESTART_SOON` (integer minutes, 1 to 240) and `DEADLINE_REACHED`; the plugin supplies no text;
+  - the supervisor renders a provenance-marked line (`🤖 [ccy-supervisor] session notice — machine-generated, NOT a human instruction`) from its own templates, types it at the idle choke point through the existing injection path, and rate-limits it per kind;
+  - a supervisor-owned RESTARTED notice: a separate marker `.claude/ccy/state/restarted.json` is left at exit-for-restart and consumed once by the supervisor that resumes that session, which types the new Claude Code version (from a bounded, validated `<child> --version`, else "the installed version"). This is the supervisor's half of Task 2.4.
+
+- [x] ✅ **Phase 1 review fixes** (opus review, [report](subagent-reports/261003-phase-1-review-opus.md), verdict CHANGES REQUIRED): all five defects fixed test-first, version skew re-verified against `main` in both directions (`test_plugin_version_skew.py`):
+
+  - a plugin's stdout cannot reach the worker reply channel, and the host's reply decode is total (`test_plugin_reply_channel.py`);
+  - plugin code never runs in the PTY host; the in-process fallback runs the built-in families only (`test_plugin_not_in_host.py`);
+  - an abandoned exit-for-restart has a cooldown and a per-plugin cap, after which the plugin is disabled with its notice (`test_plugin_exit_for_restart.py`);
+  - the exit reason is read inside the hook budget and must be a plain `str`; host-side plugin setup and handling are contained (`test_plugin_containment.py`).
+
 - [ ] ⬜ **Task 1.4**: TDD the in-container `Restart` primitive, which the credential switch needs. It is not on this plan's critical path:
 
   - refuse when the session id is ambiguous;
@@ -78,7 +91,7 @@ The agent's rulings on ordering, plugin location and restart policy, made while 
   - it is also shown as a status-line warning and written to the audit log;
   - every failure kind in the draft's test list is covered.
 
-- [ ] ⬜ **Task 1.7**: Document the API in `CLAUDE/development/CcySupervisor.md`, add a release-notes callout, and run the merge checks (static checks, semgrep, `tests/unit/supervise`). Then verify the worker reload as the CcySupervisor doc requires. Progress: the documentation and the callout (`001-ccy-supervisor-plugin-api.md`) are written for Tasks 1.2 to 1.6 and the checks ran green; what remains is the live worker-reload verification, and the documentation for Tasks 1.4 and 1.5 once they exist.
+- [ ] ⬜ **Task 1.7**: Document the API in `CLAUDE/development/CcySupervisor.md`, add a release-notes callout, and run the merge checks (static checks, semgrep, `tests/unit/supervise`). Then verify the worker reload as the CcySupervisor doc requires. Progress: the documentation and the callout (`001-ccy-supervisor-plugin-api.md`) are written for Tasks 1.2 to 1.6, the review fixes and Task 1.3c, and the checks ran green; what remains is the live worker-reload verification, and the documentation for Tasks 1.4 and 1.5 once they exist.
 
 ### Phase 2: ccy plugin (fedora-desktop feature branch, cloned under `untracked/repos/`)
 
@@ -86,7 +99,7 @@ The agent's rulings on ordering, plugin location and restart policy, made while 
 - [ ] ⬜ **Task 2.1b**: Make the ccy launcher act on the supervisor's restart exit status: update the image, then relaunch with `--resume <id>`, read from the state file. Bound it so a crash loop cannot relaunch for ever.
 - [ ] ⬜ **Task 2.2**: Write the worker half: track session age and deadlines in `state_dir`, send the restart-warning notice, then return `Restart` at the next idle point. Include the forced-restart fallback. Unit-test it against the API's test harness.
 - [ ] ⬜ **Task 2.3**: Add the ccy launcher options (`--max-age`, `--run-for`, `--until`) that build the `--plugin` flags. Follow fedora-desktop's own rules: IaC only, the ccy version bump, and `qa-all.bash` plus its `qa-reviewer`.
-- [ ] ⬜ **Task 2.4**: Have the supervisor send a post-restart message naming the new Claude Code version.
+- [x] ✅ **Task 2.4**: Have the supervisor send a post-restart message naming the new Claude Code version. Built with Task 1.3c (the RESTARTED notice); the launcher must leave `restarted.json` in place when it removes `restart-request.json`.
 - [ ] ⬜ **Task 2.5**: Push the branch and write an owner test script in the fedora-desktop plan folder, so the owner can run the live restart test on the host.
 
 ### Phase 3: Close out

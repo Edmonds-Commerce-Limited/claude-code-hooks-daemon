@@ -211,7 +211,7 @@ class WorkerHalf:
     name: str                          # must equal the --plugin name
     version: str
     def on_start(self) -> None: ...
-    def on_idle(self, tick) -> "api.ExitForRestart | None": ...
+    def on_idle(self, tick) -> "api.ExitForRestart | api.Notify | None": ...
 ```
 
 `api` gives the factory:
@@ -223,7 +223,10 @@ class WorkerHalf:
 | `api.session_id()`             | The supervisor's own session id when exactly one is known, else `None`.                   |
 | `api.status(text, level, ttl)` | A transient status-line message (`"info"` or `"warning"`, `ttl` clamped to 1-60 seconds). |
 | `api.audit(message)`           | One `decision.log` line, `plugin <name>: <message>`, sanitised to one printable line.     |
-| `api.ExitForRestart(reason)`   | The one result `on_idle` may return besides `None`.                                       |
+| `api.ExitForRestart(reason)`   | A result `on_idle` may return: end the session for a relaunch (see "Exit for restart").   |
+| `api.Notify(kind, minutes)`    | A result `on_idle` may return: ask for a fixed session notice (see "Session notices").    |
+| `api.RESTART_SOON`             | `Notify` kind `"restart-soon"`; `minutes` is required, an `int` from 1 to 240.            |
+| `api.DEADLINE_REACHED`         | `Notify` kind `"deadline-reached"`; takes no `minutes`.                                   |
 
 `tick` is `IdleTick(now, session_id)`.
 
@@ -236,11 +239,31 @@ the tick (no payload, decision `NOOP`), no compaction signal is pending, the
 machine is in `MONITOR`, the session is idle with an empty input box
 (`can_inject`) and the supervisor has no unconfirmed line of its own in the box.
 A plugin therefore never races a compaction, a `continue` or any other injection.
-The in-process fallback (`_poll_once`, used while the worker is down) builds the
-same runtime lazily in the host and asks it under exactly the same gates.
 
-**Plugins never type.** The only effect a plugin has on the session is an exit
-request. Only fixed supervisor templates reach the chat.
+**Plugin code never runs in the PTY host.** When the worker is silent or dead the
+host's in-process fallback (`_poll_once`) decides with the built-in families
+only: no plugin is imported, started or asked there, whether the silence lasts one
+tick or the rest of the process. Plugins resume on their own when a worker answers
+again. The host never imports a plugin file either; it only vets it. (A plugin that
+holds the GIL, or leaks a thread, in the host would take the session with it, which
+is exactly what the worker split exists to prevent.)
+
+**Plugins never type.** The only effects a plugin has on the session are an exit
+request and a `Notify` request, and the host validates both. Only fixed supervisor
+templates reach the chat.
+
+### The worker's reply channel is private
+
+The worker's stdin and stdout are the tick and reply pipes to the PTY host, and
+plugin code runs in that process. Before any plugin is loaded the worker
+(`_isolate_worker_channels`) duplicates the real stdin and stdout to private
+streams, points fd 0 at `/dev/null`, and points fd 1 and `sys.stdout` at the
+worker error log (`untracked/claude-supervise-worker.err.log`). Anything a plugin
+prints, writes to `sys.stdout` or writes to file descriptor 1 therefore lands in
+that log, can never be parsed as a reply, and cannot steal a tick from stdin. The
+host's decode of a reply is also total: any exception while parsing a worker reply
+is a bad reply (the tick falls back to the host's own decision), never an exception
+in the PTY loop.
 
 ### Hook budgets
 
@@ -249,6 +272,49 @@ Every hook call runs on a thread with a short budget well inside the host's
 `_PLUGIN_TICK_BUDGET_SECONDS` (1.0) for all plugins in one tick, and
 `_PLUGIN_LOAD_BUDGET_SECONDS` (1.0) for importing a file. A plugin the tick
 budget leaves no time for is simply not asked that tick; it is not a failure.
+
+### Session notices
+
+`on_idle` may return `api.Notify(api.RESTART_SOON, minutes)` or
+`api.Notify(api.DEADLINE_REACHED)`. The plugin supplies **no text**: only the closed
+kind and, for `RESTART_SOON`, an integer from 1 to `_NOTIFY_MINUTES_MAX` (240)
+cross from the plugin; anything else (an unknown kind, a missing, `bool`, `float`
+or out-of-range `minutes`, `minutes` on a deadline notice, a property that hangs)
+is a `bad-result` or `overrun` failure like any other. The value is read inside
+the hook's time budget.
+
+The supervisor renders the line from its own templates
+(`render_session_notice`), marks it as machine-generated, and types it at the same
+idle choke point and under the same gates as the plugin-failure notice (after it,
+ahead of the model-switch family; never over a non-empty box, a busy session or an
+unconfirmed own line). `Decision.WOULD_SESSION_NOTICE` is the decision; a dry run
+types a marked demonstration. A notice is **rate-limited per kind**
+(`_NOTIFY_MIN_INTERVAL_SECONDS`: 600 s for `restart-soon`, 1800 s for
+`deadline-reached`), so a plugin may return the same `Notify` on every idle tick
+and be typed once per interval. The plugin is not asked while a notice is waiting
+to be typed.
+
+> 🤖 [ccy-supervisor] session notice — machine-generated, NOT a human instruction: this session will be restarted in about 25 minutes to pick up a newer Claude Code. Finish the current unit of work, commit and push, and note where you are; the conversation resumes automatically after the restart.
+
+> 🤖 [ccy-supervisor] session notice — machine-generated, NOT a human instruction: this session's time limit has been reached. Finish the current unit of work, commit, push, write a hand-off note, then stop.
+
+**The RESTARTED notice** is supervisor-owned (no plugin involved). When a plugin's
+`ExitForRestart` ends a session, the supervisor leaves a second, separate file
+`.claude/ccy/state/restarted.json` (mode `0600`, same directory as the request
+file) holding `{"session_id": ..., "requested_at": ...}`. The launcher removes
+`restart-request.json` before it relaunches; it does **not** touch
+`restarted.json`. The next supervisor consumes the marker **once**, at start, only
+when its child argv is a resume (`--resume <id>`, `--resume=<id>` or `-r <id>`) of
+exactly that session id and the marker is under a day old; a marker for another
+session is left alone, and a garbled or stale one is removed. It then runs
+`<child> --version` (bounded to 3 seconds, no shell, first token validated against
+a version pattern) and types, once, at the first idle point:
+
+> 🤖 [ccy-supervisor] session notice — machine-generated, NOT a human instruction: this session was restarted to pick up a newer Claude Code and is now on version 2.1.99. Carry on with the work.
+
+When the version cannot be read, the wording is "is now on the installed version".
+Nothing on this path can stop the session starting: any failure just means no
+notice.
 
 ### Exit for restart
 
@@ -265,10 +331,19 @@ that. `reason` is short, logged only, and never typed into the chat. The host:
 3. **holds every other injection** until the child exits, for at most
    `_RESTART_EXIT_WAIT_SECONDS` (30). A child that ignores `/exit` is
    abandoned: the hold is released, a line is logged, and the session carries
-   on. The still-owned `/exit` line then follows the ordinary own-line rule, so
-   it can still be submitted late, in which case the session simply ends;
-4. once the child has exited, writes `restart-request.json` and exits with
+   on. The hold is the only thing that delays a compaction, so a compaction is
+   never delayed beyond that bound. The still-owned `/exit` line then follows the
+   ordinary own-line rule, so it can still be submitted late, in which case the
+   session simply ends;
+4. once the child has exited, writes `restart-request.json` (and the separate
+   `restarted.json` marker, see "Session notices") and exits with
    **`EXIT_STATUS_RESTART_REQUESTED` (75, EX_TEMPFAIL)**.
+
+**An abandoned request is not re-made straight away.** After an abandon the same
+ask is ignored for `_RESTART_RETRY_COOLDOWN_SECONDS` (600), and a plugin whose
+requests have been abandoned `_RESTART_MAX_ABANDONED` (3) times in one process is
+disabled through the uniform failure path (kind `exit-stuck`, the worker restarted
+without it, one fixed-template notice).
 
 In dry-run mode nothing is typed and the request is only logged.
 
@@ -293,8 +368,10 @@ same four steps:
 1. **Detect.** The failure kinds are a closed set: `load` (a refusal, with a
    closed reason such as `api-mismatch`, `import-error` or
    `group-or-world-writable`), `exception`, `overrun` (a hook past its budget),
-   `bad-result` (anything `on_idle` returned other than `None` or an
-   `ExitForRestart`) and `wedge` (the worker stopped answering inside a hook).
+   `bad-result` (anything `on_idle` returned other than `None`, an
+   `ExitForRestart` with a plain `str` reason, or a valid `Notify`), `wedge` (the
+   worker stopped answering inside a hook) and `exit-stuck` (its exit-for-restart
+   requests kept being abandoned).
 
 2. **Disable** for the rest of the supervisor process. The host keeps the
    disabled set and passes `--disable-plugin <name>` on every worker start
@@ -327,12 +404,17 @@ same four steps:
 The worker re-reports every failure on every tick, and the host's handling is
 idempotent, so a reply the host discarded as stale cannot lose a failure.
 
+**Host-side containment.** Every host-side step that touches plugins (vetting the
+flags, building the registry, building the worker argv, reporting load refusals,
+handling a worker reply, judging a silent worker) is wrapped: an unexpected
+exception skips that plugin or, in the PTY loop, switches plugin handling off for
+the rest of the process with one `decision.log` line. The session always starts
+and keeps running.
+
 **What this cannot cover.** A worker half that wedges in C code holding the GIL
-is caught only by the host's read timeout and the worker restart, and until then
-ticks fall back to the in-process path. Plugin code that runs in the host
-through that fallback is budgeted by the same threads, but a plugin that holds
-the GIL there can stall the host; a plugin is code you chose to run, not a
-sandboxed guest.
+is caught only by the host's read timeout and the worker restart; the PTY host is
+never affected, because no plugin code runs there. A plugin is code you chose to
+run, not a sandboxed guest: it runs with the worker's privileges.
 
 ### `supervisor-status.json`
 
@@ -372,7 +454,8 @@ assert request == supervise.PluginExitRequest(plugin="max-age", reason="session 
 assert harness.status_messages == [("restart in 10 minutes", "warning", 5)]
 ```
 
-`harness.half`, `harness.state_dir`, `harness.audit_lines()` and
+`harness.half`, `harness.state_dir`, `harness.audit_lines()`,
+`harness.notifications` (the `Notify` results of the latest `idle`) and
 `harness.status_messages` expose what the plugin did. This repository's
 `tests/unit/supervise/conftest.py` shows the three-line pytest fixture a plugin
 author copies.
@@ -381,8 +464,8 @@ author copies.
 
 The plugin flags and the registry are HOST code, so a ccy relaunch is needed to
 start using plugins at all; the hot reload described above covers the worker's
-half of this (the loader, the hooks, the notice family, `ExitForRestart`
-detection). Editing a plugin file does not change the content hash the reload
+half of this (the loader, the hooks, the notice families, `ExitForRestart` and
+`Notify` handling in `decide_once`, the reply-channel isolation). Editing a plugin file does not change the content hash the reload
 watches: restart the worker once (see "The rule" above) to pick the edit up.
 
 ## Effort is not the supervisor's concern at all
