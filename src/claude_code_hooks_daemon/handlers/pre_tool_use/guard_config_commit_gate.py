@@ -30,6 +30,7 @@ unnamed difference earns no line.
 from __future__ import annotations
 
 import logging
+import posixpath
 from collections.abc import Callable
 from enum import StrEnum
 from pathlib import Path
@@ -48,14 +49,17 @@ from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.core.utils import get_bash_command
 from claude_code_hooks_daemon.utils.command_evasion import git_subcommand_index
 from claude_code_hooks_daemon.utils.git_commit_parsing import (
+    CommitRun,
     read_commit_form,
     tokenise_command,
 )
+from claude_code_hooks_daemon.utils.git_facts import run_directories
 from claude_code_hooks_daemon.utils.git_repo import run_git
 from claude_code_hooks_daemon.utils.guard_config_drift import (
     DriftReport,
     compare_guard_config,
 )
+from claude_code_hooks_daemon.utils.path_containment import path_relative_to
 from claude_code_hooks_daemon.utils.path_predicates import read_text_or_reason
 
 logger = logging.getLogger(__name__)
@@ -65,6 +69,8 @@ _HEAD_REF: Final[str] = f"HEAD:{CONFIG_RELATIVE_PATH}"
 _INDEX_REF: Final[str] = f":{CONFIG_RELATIVE_PATH}"
 _GIT_COMMIT_SUBCOMMAND: Final[str] = "commit"
 _GIT_EXECUTABLE: Final[str] = "git"
+#: Pathspec magic that anchors a pathspec at the repository root.
+_TOP_MAGIC: Final[tuple[str, ...]] = (":/", ":(top)")
 
 
 class RecordedSource(StrEnum):
@@ -74,8 +80,18 @@ class RecordedSource(StrEnum):
     WORKING_TREE = "working-tree"
 
 
-def recorded_config_source(command: str, config_path: str) -> RecordedSource | None:
+def recorded_config_source(
+    command: str,
+    config_path: str,
+    cwd: str | None = None,
+    project_root: Path | None = None,
+) -> RecordedSource | None:
     """Where ``command`` takes the config content from, or None if it takes none.
+
+    ``cwd`` and ``project_root`` anchor the pathspecs (ledger 00474 N304): a
+    pathspec is relative to where the commit runs, so ``cd .claude && git
+    commit hooks-daemon.yaml`` names the config. Without them pathspecs are
+    read from the repository root.
 
     Three shapes, and reading the wrong one makes the gate look clean on a
     commit it never examined:
@@ -89,15 +105,22 @@ def recorded_config_source(command: str, config_path: str) -> RecordedSource | N
       index too, so a config not named is read from the index.
     * anything else records the INDEX.
     """
-    runs = read_commit_form(command).runs
+    reading = read_commit_form(command)
+    runs = reading.runs
     if not runs:
         return None
 
     if any(run.commits_all for run in runs):
         return RecordedSource.WORKING_TREE
 
-    if any(_pathspec_covers(spec, config_path) for run in runs for spec in run.form.pathspecs):
-        return RecordedSource.WORKING_TREE
+    for run in runs:
+        bases = _pathspec_bases(run, cwd, project_root)
+        if any(
+            _pathspec_covers(spec, config_path, base)
+            for base in bases
+            for spec in run.form.pathspecs
+        ):
+            return RecordedSource.WORKING_TREE
     # A commit with no pathspec records the index, and so does `--include`
     # (a config staged earlier lands even though no pathspec names it).
     if any(not run.form.pathspecs or run.form.include for run in runs):
@@ -116,22 +139,41 @@ def _commit_subcommand_index(tokens: list[str]) -> int | None:
     return None
 
 
-def _pathspec_covers(spec: str, config_path: str) -> bool:
+def _pathspec_bases(run: CommitRun, cwd: str | None, project_root: Path | None) -> tuple[str, ...]:
+    """Each repository-relative directory ``run``'s pathspecs may be read from.
+
+    ``""`` is the root. A ``cd`` that may not have taken effect leaves several,
+    and the config is covered when any of them reaches it.
+    """
+    if project_root is None:
+        return ("",)
+    root = project_root.resolve()
+    directories = run_directories(run.moves, run.optional_moves, cwd, root)
+    relatives = (path_relative_to(directory, root).as_posix() for directory in directories)
+    return tuple("" if relative == "." else relative for relative in relatives)
+
+
+def _pathspec_covers(spec: str, config_path: str, base: str = "") -> bool:
     """Whether ``spec`` names the config, or a directory containing it.
 
     A directory pathspec commits everything beneath it, so ``git commit
-    .claude`` carries the config even though it never names the file. A
-    literal prefix comparison with no normalisation misses two spellings of
-    "the whole working tree" (``.``, ``./``) and a ``./``-prefixed config
-    path, all three of which git accepts and none of which compares equal to
-    or prefixes ``config_path`` unnormalised.
+    .claude`` carries the config even though it never names the file. The
+    spec is resolved against ``base`` (where the commit runs, relative to the
+    repository root) and normalised, which covers ``.``, ``./``, ``..`` and a
+    ``:/`` / ``:(top)`` prefix that anchors it at the root instead.
     """
-    normalised = spec.rstrip("/")
-    if normalised.startswith("./"):
-        normalised = normalised[2:]
-    if normalised in ("", "."):
+    anchored = spec
+    for top in _TOP_MAGIC:
+        if spec.startswith(top):
+            anchored = spec[len(top) :]
+            base = ""
+            break
+    resolved = posixpath.normpath(posixpath.join(base, anchored))
+    if resolved == ".":
         return True
-    return config_path == normalised or config_path.startswith(f"{normalised}/")
+    if resolved == ".." or resolved.startswith("../"):
+        return False
+    return config_path == resolved or config_path.startswith(f"{resolved}/")
 
 
 class GuardConfigCommitGateHandler(PreToolUseHandlerBase):
@@ -161,7 +203,13 @@ class GuardConfigCommitGateHandler(PreToolUseHandlerBase):
 
     def handle(self, hook_input: dict[str, Any]) -> GatingResult:
         command = get_bash_command(hook_input) or ""
-        source = recorded_config_source(command, CONFIG_RELATIVE_PATH)
+        cwd = hook_input.get(HookInputField.CWD)
+        source = recorded_config_source(
+            command,
+            CONFIG_RELATIVE_PATH,
+            cwd=cwd if isinstance(cwd, str) else None,
+            project_root=self._project_root(),
+        )
         if source is None:
             return GatingResult(decision=Decision.ALLOW, context=[])
 

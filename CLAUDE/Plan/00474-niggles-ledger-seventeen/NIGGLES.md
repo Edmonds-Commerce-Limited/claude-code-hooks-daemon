@@ -1373,8 +1373,9 @@ green run) is Plan 00475 Task 4.2, which waits on the owner.
 the repository root, so `cd .claude && git commit -m x hooks-daemon.yaml` is not seen as covering
 the config, and the gate reads no config change. This is an existing miss, not something N299 caused.
 
-**Status**: ⬜ Open. Resolve the pathspecs with `pathspec_directory`, as N299 did for the
-other gates.
+**Status**: ✅ Fixed on worktree-n304-n305-gate-dirs. `recorded_config_source` resolves each
+pathspec against every directory its commit may run in (`run_directories`, as N299 did for the other
+gates), handling `./`, `..` and `:/` / `:(top)`.
 
 ### N305 — `staged_lint_gate._is_foreign_repo` ignores the command's own `cd` / `-C`
 
@@ -1383,7 +1384,10 @@ other gates.
 **Evidence**: the stand-down looks at the hook's working directory only. A `cd other-repo && git commit` from this checkout is linted as this repository's commit. N300 fixed the same gap in
 `remote_docs_commit_gate`.
 
-**Status**: ⬜ Open. Use the same post-move check as N300.
+**Status**: ✅ Fixed on worktree-n304-n305-gate-dirs. The N300 post-move check moved to the shared
+`git_facts.commit_runs_in_foreign_repo`, which `staged_lint_gate`, `remote_docs_commit_gate`,
+`plan_qa_commit_gate` and `docs_qa_commit_gate` all call (all four gates share the check; the
+local hook-cwd-only copies are deleted).
 
 ### N306 — the commit-move reader records both directories of `cd a || cd b`
 

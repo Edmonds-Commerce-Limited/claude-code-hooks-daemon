@@ -505,6 +505,36 @@ class TestGuardRails:
         assert result.decision == Decision.ALLOW
         assert result.context == []
 
+    @pytest.mark.parametrize(
+        "form", ["cd {other} && git commit -m x", "git -C {other} commit -m x"]
+    )
+    def test_a_commit_moved_into_another_repo_stands_down(self, tmp_path: Path, form: str) -> None:
+        """Ledger 00474 N305: where the commit runs is the cwd after any move."""
+        bare = tmp_path / "bare-repo"
+        bare.mkdir()
+        _git(bare, "init")
+        other = tmp_path / "other-repo"
+        other.mkdir()
+        _git(other, "init")
+
+        with _patched_root(bare):
+            result = _handler("block").handle(_bash_input(form.format(other=other), cwd=str(bare)))
+
+        assert result.decision == Decision.ALLOW
+        assert result.context == []
+
+    def test_a_move_within_this_repo_is_still_judged(self, tmp_path: Path) -> None:
+        bare = tmp_path / "bare-repo"
+        (bare / "sub").mkdir(parents=True)
+        _git(bare, "init")
+
+        with _patched_root(bare):
+            result = _handler("block").handle(
+                _bash_input("cd sub && git commit -m x", cwd=str(bare))
+            )
+
+        assert _PLAN_DIR_REL in "\n".join(result.context)
+
     def test_missing_plan_dir_warns_instead_of_crashing(self, tmp_path: Path) -> None:
         bare = tmp_path / "bare-repo"
         bare.mkdir()
