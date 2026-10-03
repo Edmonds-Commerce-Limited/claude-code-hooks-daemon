@@ -23,12 +23,12 @@ def test_install_records_the_gated_install_after_the_venv_is_stamped() -> None:
     text = _text()
     assert "upgrade_gate_standalone.py" in text
     assert "record-install" in text
-    assert text.index("ensure_venv \"$DAEMON_DIR\"") < text.index("record-install")
+    assert text.index('ensure_venv "$DAEMON_DIR"') < text.index("record-install")
 
 
 def test_the_prior_stamp_is_read_before_ensure_venv_stamps_the_venv() -> None:
     text = _text()
-    assert text.index("PRIOR_VENV_STAMP") < text.index("ensure_venv \"$DAEMON_DIR\"")
+    assert text.index("PRIOR_VENV_STAMP") < text.index('ensure_venv "$DAEMON_DIR"')
 
 
 def test_the_record_is_written_only_for_a_fresh_install() -> None:

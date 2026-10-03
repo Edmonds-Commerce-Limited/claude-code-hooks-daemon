@@ -274,7 +274,9 @@ _FRESH_INSTALL_RECORD_MARKER = "record-install"
 
 def _tag_records_fresh_installs(daemon_dir: Path, tag: str) -> bool:
     """True when ``tag``'s own installer leaves the gated-install receipt (N327)."""
-    installer = _git_allowing_failure("-C", str(daemon_dir), "show", f"{tag}:scripts/install_version.sh")
+    installer = _git_allowing_failure(
+        "-C", str(daemon_dir), "show", f"{tag}:scripts/install_version.sh"
+    )
     return _FRESH_INSTALL_RECORD_MARKER in installer
 
 
