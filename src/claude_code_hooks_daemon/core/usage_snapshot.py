@@ -174,8 +174,8 @@ def _write_state_file(state_file: Path, payload: dict[str, dict[str, float | int
     return True
 
 
-def _discard_temp_file(tmp_path: Path) -> None:
-    """Remove a temp file a failed write left behind.
+def _discard_temp_file(tmp_path: Path) -> bool:
+    """Remove a temp file a failed write left behind; False when it could not be removed.
 
     The write failure is already reported, so a failed cleanup is logged at
     debug level only (it usually means the temp file was never created).
@@ -184,6 +184,8 @@ def _discard_temp_file(tmp_path: Path) -> None:
         tmp_path.unlink(missing_ok=True)
     except OSError as exc:
         logger.debug("Could not remove usage snapshot temp file %s: %s", tmp_path, exc)
+        return False
+    return True
 
 
 def usage_state_file(daemon_untracked_dir: Path) -> Path:
