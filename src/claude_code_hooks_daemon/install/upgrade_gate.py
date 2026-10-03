@@ -968,6 +968,50 @@ def main(argv: list[str] | None = None) -> int:
     return report.verdict.exit_code
 
 
+def _build_record_install_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="upgrade-gate record-install",
+        description="Record a fresh install as what the gate would have let through (N327).",
+    )
+    parser.add_argument("--daemon-dir", type=Path, required=True, help="The daemon checkout")
+    parser.add_argument("--project-root", type=Path, required=True, help="The installed project")
+    parser.add_argument("--stamp", required=True, help="The stamp the fresh install wrote")
+    parser.add_argument(
+        "--untracked-dir",
+        type=Path,
+        default=None,
+        help="Where approvals live (default: the project's daemon untracked dir)",
+    )
+    return parser
+
+
+def record_install_main(argv: list[str] | None = None) -> int:
+    """Record a FRESH install's stamp as a gated install; return 0.
+
+    A fresh install runs no upgrade, so the gate never records it, and its
+    first idempotent re-run then finds a venv stamp naming the target with no
+    receipt (N327). The caller (``scripts/install_version.sh``) calls this only
+    when no venv stamp existed before the install, which is what makes the
+    stamp the install's own and not one a manual checkout plus ``repair`` wrote.
+    An empty stamp is refused: a receipt for nothing vouches for nothing.
+    """
+    args = _build_record_install_parser().parse_args(argv)
+    if not str(args.stamp).strip():
+        _build_record_install_parser().error("--stamp must name the installed stamp")
+    project_root = Path(args.project_root).resolve()
+    untracked_dir = (
+        Path(args.untracked_dir) if args.untracked_dir else get_untracked_dir(project_root)
+    )
+    path = record_gated_install(
+        untracked_dir,
+        stamp=str(args.stamp),
+        daemon_dir=Path(args.daemon_dir).resolve(),
+        project_root=project_root,
+    )
+    print(f"Recorded {args.stamp} as a gated install: {path}", file=sys.stderr)
+    return 0
+
+
 def run_approval(
     *,
     project_root: Path,

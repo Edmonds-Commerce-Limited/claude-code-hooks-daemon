@@ -40,6 +40,7 @@ from claude_code_hooks_daemon.install.upgrade_gate import (
     installed_version,
     main,
     record_gated_install,
+    record_install_main,
     run_approval,
     write_approval,
 )
@@ -1121,3 +1122,70 @@ class TestMain:
         )
         assert main(argv) == 0
         assert main([*argv, "--include-unreleased"]) == GateVerdict.NEEDS_ACKNOWLEDGEMENT.exit_code
+
+
+class TestRecordInstall:
+    """N327: a fresh install must leave the same receipt a gated upgrade leaves.
+
+    Without it the first idempotent re-run of the version a project was freshly
+    installed at finds a venv stamp naming the target and no receipt, and the
+    gate sends the project to its owner with every guide since v2.0.
+    """
+
+    def _argv(self, daemon_dir: Path, project: Path, untracked: Path, stamp: str) -> list[str]:
+        return [
+            "--daemon-dir",
+            str(daemon_dir),
+            "--project-root",
+            str(project),
+            "--untracked-dir",
+            str(untracked),
+            "--stamp",
+            stamp,
+        ]
+
+    def test_it_writes_the_receipt_a_gated_upgrade_would_write(
+        self, daemon_dir: Path, project: Path, untracked: Path
+    ) -> None:
+        assert record_install_main(self._argv(daemon_dir, project, untracked, "v3.68.0")) == 0
+        assert (
+            gated_install_stamp(untracked, daemon_dir=daemon_dir, project_root=project) == "v3.68.0"
+        )
+
+    def test_a_rerun_at_the_installed_version_then_proceeds_without_the_owner(
+        self, daemon_dir: Path, project: Path, untracked: Path
+    ) -> None:
+        record_install_main(self._argv(daemon_dir, project, untracked, "v3.68.0"))
+        report = _gate(
+            daemon_dir,
+            project,
+            untracked,
+            "3.68.0",
+            "3.68.0",
+            installed_stamp="v3.68.0",
+            target_stamp="v3.68.0",
+        )
+        assert report.verdict is GateVerdict.PROCEED
+        assert report.already_installed
+
+    def test_an_install_with_no_receipt_still_goes_to_the_owner(
+        self, daemon_dir: Path, project: Path, untracked: Path
+    ) -> None:
+        report = _gate(
+            daemon_dir,
+            project,
+            untracked,
+            "3.68.0",
+            "3.68.0",
+            installed_stamp="v3.68.0",
+            target_stamp="v3.68.0",
+        )
+        assert report.verdict is not GateVerdict.PROCEED
+        assert not report.already_installed
+
+    def test_an_empty_stamp_is_refused_and_writes_nothing(
+        self, daemon_dir: Path, project: Path, untracked: Path
+    ) -> None:
+        with pytest.raises(SystemExit):
+            record_install_main(self._argv(daemon_dir, project, untracked, ""))
+        assert gated_install_stamp(untracked, daemon_dir=daemon_dir, project_root=project) is None

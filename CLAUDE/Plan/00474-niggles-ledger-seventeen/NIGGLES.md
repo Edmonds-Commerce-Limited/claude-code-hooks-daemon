@@ -1406,6 +1406,38 @@ The uncertain-move union judges the hook directory and the LAST recorded move (`
 every candidate directory (`sub`). Remedy: judge every directory any `cd` in the chain could
 land in.
 
+### N327 — a fresh install of v3.68.0 leaves no gated-install record, so its same-version re-run is stopped for the owner
+
+**Source**: coordinator, post-merge `tests/acceptance` on e82a57a4a once v3.68.0 was the newest published tag
+(`test_upgrade_metadata_emission.py` x2, `test_skill_upgrade_end_to_end.py`,
+`test_skill_upgrade_legacy_shim_end_to_end.py`). Report:
+[subagent-reports/261003-n327-fresh-install-gate-record-sonnet.md](subagent-reports/261003-n327-fresh-install-gate-record-sonnet.md).
+
+**Evidence**: `scripts/install_version.sh` stamps the venv (`ensure_venv`) but never calls the gate, and
+`upgrade_gate.record_gated_install` runs only from `upgrade_gate.main` on a PROCEED. So a fresh install has a venv
+stamp and no receipt. `evaluate_gate` (`upgrade_gate.py`, the `installed_stamp == target_stamp` branch, line 611)
+then reads "stamped, not gated" as an unknown history (the Plan 00376 fresh-review MAJOR 1 defence against checkout
+plus `repair`) and stops with exit 3, listing 11 guides back to v2.0. The gate that runs is the TARGET tag's own
+copy: `upgrade.sh` on main hands over to the checked-out `scripts/upgrade_version.sh`, which runs that tree's
+`upgrade_gate_standalone.py`. A fix on main therefore does not change what a v3.68.0 install does.
+
+**Impact**: only the SAME-version re-run (v3.68.0 onto v3.68.0). An upgrade to any other release has a stamp that
+differs from the target, takes the normal range path with the stamp as a trusted FROM, and records itself on PROCEED,
+so it is not stopped by this and it heals the install. An install that upgraded INTO v3.68.0 through the gate has
+the record; a fresh one does not.
+
+**Decision for existing v3.68.0 installs without the record**: unchanged, still stopped for the owner. The record is
+the only thing that tells a gated install from a stamp a manual checkout plus `repair` wrote, and an agent could use
+that equality to land a MAJOR without approval; a missing record is exactly that unknown history. The remedy for an
+affected project is an upgrade to the next release or `hooks-daemon approve-upgrade`. Nothing in this repository can
+reach the v3.68.0 copy of the gate, so a patch release would only help NEW installs.
+
+**Status**: ✅ Fixed on worktree-fix-gate-fresh-install. `install_version.sh` records the install through
+`upgrade_gate_standalone.py record-install`, only when no venv stamp existed before it (a pre-existing stamp may be a
+repair's). The acceptance fixture tags the clone's HEAD as the next patch inside the throwaway clone while the newest
+published tag's installer lacks `record-install`, so those four tests exercise the fixed code; they run against the
+real tag once a release carries the fix. Residual: whoever can delete the venv and run the installer can mint a record.
+
 ### N326 — release prep exposed tests that pass only while `UNRELEASED/` holds content
 
 **Source**: coordinator, v3.68.0 release prep (CI run on 072a4da2f).

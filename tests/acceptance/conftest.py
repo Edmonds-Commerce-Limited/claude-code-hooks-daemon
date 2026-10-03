@@ -258,11 +258,40 @@ def create_daemon_clone(daemon_dir: Path) -> str:
     tag = _git("-C", str(daemon_dir), "describe", "--tags", "--abbrev=0").strip()
     if not tag:
         raise AssertionError(f"No tag reachable from HEAD in the clone at {daemon_dir}")
+    if not _tag_records_fresh_installs(daemon_dir, tag):
+        tag = _tag_head_as_next_patch(daemon_dir, tag)
 
     # Pin BEFORE the baseline install, so the install is stamped with the same
     # version the upgrade will target.
     _git("-C", str(daemon_dir), "checkout", "--quiet", tag)
     return tag
+
+
+#: What a release's ``scripts/install_version.sh`` contains once a fresh install
+#: records itself for the pre-deploy gate (N327).
+_FRESH_INSTALL_RECORD_MARKER = "record-install"
+
+
+def _tag_records_fresh_installs(daemon_dir: Path, tag: str) -> bool:
+    """True when ``tag``'s own installer leaves the gated-install receipt (N327)."""
+    installer = _git_allowing_failure("-C", str(daemon_dir), "show", f"{tag}:scripts/install_version.sh")
+    return _FRESH_INSTALL_RECORD_MARKER in installer
+
+
+def _tag_head_as_next_patch(daemon_dir: Path, published_tag: str) -> str:
+    """Tag the clone's HEAD as the next patch release, inside the clone only.
+
+    A release that predates N327 installs a project the pre-deploy gate then
+    refuses to re-run at the same version, whatever this repository's code
+    does, so the idempotent gates would fail on the published tag until a
+    release carries the fix. Until then the fixture tests the code that carries
+    it: HEAD, tagged locally in the throwaway clone. Once the newest published
+    tag contains the fix this is never reached and the real tag is used.
+    """
+    major, minor, patch = (int(part) for part in published_tag.lstrip("v").split("."))
+    local_tag = f"v{major}.{minor}.{patch + 1}"
+    _git("-C", str(daemon_dir), "tag", local_tag, "HEAD")
+    return local_tag
 
 
 def clone_install_script(daemon_dir: Path) -> Path:

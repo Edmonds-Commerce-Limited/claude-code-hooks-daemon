@@ -361,6 +361,15 @@ else
     fi
     INSTALLED_VERSION="v$PYPROJECT_VERSION"
 fi
+# N327: a venv stamp that was already there before this install is not this
+# install's own (a manual checkout plus `hooks-daemon repair` writes one), so
+# only a run that finds none may record itself as a gated install below.
+PRIOR_VENV_STAMP=""
+for _prior_venv in "$DAEMON_DIR"/untracked/venv*; do
+    [ -d "$_prior_venv" ] || continue
+    PRIOR_VENV_STAMP="$(get_venv_version "$_prior_venv")"
+    [ -z "$PRIOR_VENV_STAMP" ] || break
+done
 VENV_PATH=$(ensure_venv "$DAEMON_DIR" "$INSTALLED_VERSION" "${HOOKS_DAEMON_PYTHON:-python3}")
 if [ -z "$VENV_PATH" ]; then
     fail_fast "ensure_venv returned empty path"
@@ -369,6 +378,17 @@ VENV_PYTHON="$VENV_PATH/bin/python"
 
 if ! verify_venv "$VENV_PYTHON" "$DAEMON_DIR"; then
     fail_fast "Virtual environment verification failed"
+fi
+
+# N327: a fresh install runs no upgrade, so the pre-deploy gate never records
+# it, and its first idempotent re-run (venv stamp == target, no receipt) is
+# stopped for the owner as an install of unknown history. Leave the receipt a
+# gated upgrade would leave, from the same code that reads it back.
+if [ -z "$PRIOR_VENV_STAMP" ]; then
+    "$VENV_PYTHON" -I "$DAEMON_DIR/src/claude_code_hooks_daemon/install/upgrade_gate_standalone.py" \
+        record-install --daemon-dir "$DAEMON_DIR" --project-root "$PROJECT_ROOT" \
+        --stamp "$INSTALLED_VERSION" \
+        || fail_fast "could not record this install for the pre-deploy gate"
 fi
 
 # Plan 00099: clean up any pre-v3.7.0 legacy venv that may have been left by a
