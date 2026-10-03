@@ -8,7 +8,7 @@ Each item here is the owner's call. An agent adds the item, with its options, a 
 
 - **Recommendation:** open the PR once `qa-all.bash` and the live test pass on the host. Merging is a separate step.
 - **Evidence:** the OWNER-LIVE-TEST.md results and the qa-all output, recorded in this plan's JOURNAL.
-- **Answer:** _pending_
+- **Answer (owner, 2026-10-03, by voice in the host session):** open the PR now, before the live test. The owner merges it and runs the rebuild; the agent does not touch the owner's fedora-desktop checkout, which is in active development.
 
 ## D2. Tasks 1.4 and 1.5 (in-container `Restart` and the host half)
 
@@ -40,6 +40,22 @@ Other projects get the plugin API only from a release. A release starts only whe
 - **Recommendation:** release after the live test passes, so that the release carries a tested API.
 - **Answer:** _pending_
 
+## D6. Round-3 review items F and G: before or after the merge? (raised by the host agent)
+
+The third fedora-desktop review ([report](subagent-reports/261003-task-3.1-fedora-desktop-qa-reviewer-round-3-opus.md)) fixed everything from round 2 and left two "should fix" items.
+
+- **F:** the docs and the refusal message do not say that a key unlocked through F44 3.76.0's askpass route cannot restart unattended, and they still recommend `--ssh-agent`, which 3.76.0 labels as exposing every key. This is a docs fix.
+- **G:** the forwarded-agent GitHub probe (`ssh-handling.bash:729-739`) has no timeout. If an agent asks before it signs (a key added with `ssh-add -c`, or gpg-agent once its cache expires), the relaunch waits. This is not new on the branch, but the unattended relaunch makes it matter. The fix is a `timeout` on that probe when relaunching.
+- **Recommendation:** fix both on the branch before merging. They are small, and G is the last known way a restart can wait.
+- **Answer:** _pending_
+
+## D7. `util-linux-script` on the host (raised by the host agent)
+
+`ccy-relabel-preflight` fails 36 cases on this host because the `script` command (package `util-linux-script`) is not installed, and no playbook installs it. This is on F44, not on the branch.
+
+- **Recommendation:** add `util-linux-script` to the QA toolchain in `play-python.yml` on F44.
+- **Answer:** _pending_
+
 ## D5. How the branch gets deployed for the live test (raised by the host agent)
 
 The claude-yolo play can only run from the owner's own fedora-desktop checkout. The inventory `host_vars` and the vault password file are gitignored and exist only there, so a clone or worktree of the branch cannot run it. That checkout is on `F44`, and another session was committing in it while the host agent worked, so the agent will not switch its branch on its own.
@@ -48,4 +64,4 @@ The claude-yolo play can only run from the owner's own fedora-desktop checkout. 
 - **Option B:** the agent switches the owner's checkout to the branch, runs the play, and switches back to `F44`, at a time the owner names when no other session is using it.
 - **Option C:** merge `origin/F44` into the branch first, so that a deploy carries the 15 newer F44 commits too. None of them touch ccy files, so this is optional for the test.
 - **Evidence:** the 15 commits on `origin/F44` that the branch lacks change no file under `files/var/local/claude-yolo`, `playbooks/imports/play-claude-yolo.yml` or `docs/ccy-changelog.md`, so deploying the claude-yolo play from the branch rolls back no ccy change. The JOURNAL entry "fedora-desktop qa-all on the host" has the details.
-- **Answer:** _pending_
+- **Answer (owner, 2026-10-03):** neither A nor B. The branch goes in as a PR (see D1). The owner merges it into F44 and then deploys and rebuilds from their own checkout. The branch has since merged F44, which settles option C.
