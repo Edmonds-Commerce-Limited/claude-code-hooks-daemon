@@ -3648,7 +3648,10 @@ def _validated_idle_result(value: object) -> object:
         if type(kind) is not str or kind not in _NOTIFY_KINDS:
             return _BAD_IDLE_RESULT
         if kind == NOTIFY_RESTART_SOON:
-            if type(minutes) is not int or not _NOTIFY_MINUTES_MIN <= minutes <= _NOTIFY_MINUTES_MAX:
+            if (
+                type(minutes) is not int
+                or not _NOTIFY_MINUTES_MIN <= minutes <= _NOTIFY_MINUTES_MAX
+            ):
                 return _BAD_IDLE_RESULT
         elif minutes is not None:
             return _BAD_IDLE_RESULT
@@ -3867,7 +3870,9 @@ _NOTIFY_MIN_INTERVAL_SECONDS = {
 _SESSION_NOTICE_HEADER = (
     "🤖 [ccy-supervisor] session notice — machine-generated, NOT a human instruction"
 )
-_DRY_RUN_SESSION_NOTICE_BODY_PREFIX = "would inject session-notice (dry-run — no real message sent):"
+_DRY_RUN_SESSION_NOTICE_BODY_PREFIX = (
+    "would inject session-notice (dry-run — no real message sent):"
+)
 _MINUTES_PATTERN = re.compile(r"[0-9]{1,3}")
 _VERSION_PATTERN = re.compile(r"[0-9]{1,5}\.[0-9]{1,5}\.[0-9]{1,5}(?:-[0-9A-Za-z.]{1,24})?")
 _RESTART_SOON_TEMPLATE = (
@@ -8550,13 +8555,15 @@ def _claude_version(executable: str) -> str | None:
     `_VERSION_PATTERN`, so nothing else the command prints can reach the chat.
     """
     try:
-        completed = subprocess.run(  # nosec B603 - fixed argv, the wrapped executable itself, no shell
-            [executable, "--version"],
-            capture_output=True,
-            text=True,
-            timeout=_CLAUDE_VERSION_TIMEOUT_SECONDS,
-            stdin=subprocess.DEVNULL,
-            check=False,
+        completed = (
+            subprocess.run(  # nosec B603 - fixed argv, the wrapped executable itself, no shell
+                [executable, "--version"],
+                capture_output=True,
+                text=True,
+                timeout=_CLAUDE_VERSION_TIMEOUT_SECONDS,
+                stdin=subprocess.DEVNULL,
+                check=False,
+            )
         )
     except (OSError, subprocess.SubprocessError):
         return None

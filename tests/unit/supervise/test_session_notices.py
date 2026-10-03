@@ -89,7 +89,7 @@ class TestApiShape:
         assert (notice.kind, notice.minutes) == ("restart-soon", 30)
         assert _mod.Notify(_mod.NOTIFY_DEADLINE_REACHED).minutes is None
         with pytest.raises(AttributeError):
-            setattr(notice, "kind", "other")
+            notice.kind = "other"
 
     def test_the_kinds_are_a_closed_set(self) -> None:
         assert _mod._NOTIFY_KINDS == {"restart-soon", "deadline-reached"}

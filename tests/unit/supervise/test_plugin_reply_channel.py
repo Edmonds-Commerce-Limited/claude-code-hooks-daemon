@@ -24,6 +24,7 @@ if TYPE_CHECKING:
 
 _mod = load_supervisor_module()
 _OWN_UIDS = frozenset({os.getuid(), 0})
+_CHILD_INTERPRETER_TIMEOUT_SECONDS = 30.0
 
 # Each on_idle writes to the process's stdout in a different way, then records
 # that it ran (so the test can prove the hook was really called).
@@ -35,7 +36,7 @@ _NOISE = {
     "sys-stdout-write": "sys.stdout.write('x\\n'); sys.stdout.flush()",
     "raw-fd-one": "os.write(1, b'raw bytes\\n')",
     "raw-fd-one-no-newline": "os.write(1, b'no newline at all')",
-    "print-fake-reply": "print('{\"decision_value\": \"noop\", \"tick_id\": 999999}')",
+    "print-fake-reply": 'print(\'{"decision_value": "noop", "tick_id": 999999}\')',
 }
 
 
@@ -209,7 +210,7 @@ class TestPluginOutputNeverReachesTheReplyChannel:
             input="TICK\n",
             capture_output=True,
             text=True,
-            timeout=30,
+            timeout=_CHILD_INTERPRETER_TIMEOUT_SECONDS,
             check=False,
             env={**os.environ, "CLAUDE_PROJECT_DIR": str(tmp_path)},
         )

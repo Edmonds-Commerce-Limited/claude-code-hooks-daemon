@@ -44,9 +44,7 @@ def _asking_body(expression: str, preamble: str = "") -> str:
 """
 
 
-_SUBCLASS = (
-    "        class Sub(str):\n            def __str__(self):\n                raise RuntimeError('boom')\n"
-)
+_SUBCLASS = "        class Sub(str):\n            def __str__(self):\n                raise RuntimeError('boom')\n"
 
 
 class TestReasonIsReadInsideTheBudget:
