@@ -1406,6 +1406,36 @@ The uncertain-move union judges the hook directory and the LAST recorded move (`
 every candidate directory (`sub`). Remedy: judge every directory any `cd` in the chain could
 land in.
 
+### N330–N337 — findings from the Plan 00486 backfill changelog review (Claude Code 2.1.272 to 2.1.288)
+
+**Source**: Plan 00486 Task 1.4,
+`CLAUDE/Plan/00486-claude-code-version-tracking/subagent-reports/261003-task-1.4-backfill-review-sonnet.md` (on
+branch `worktree-p486-cc-versions` until it merges). The report filtered the 2.1.273 to 2.1.285 entries by keyword
+and did not read them in full, so each item below has to be verified before anyone acts on it.
+
+| Id   | Finding                                                                                                                     | Status  |
+| ---- | --------------------------------------------------------------------------------------------------------------------------- | ------- |
+| N330 | Read `rate_limits.spend_limit` in `core/usage_snapshot.py` (adopt).                                                         | ⬜ Open |
+| N331 | Verify `.claude/rules` write-time loading on 2.1.288 and correct `CLAUDE/DirectoryRoles.md` if it changed.                  | ⬜ Open |
+| N332 | Guidance claims "run_in_background has no time limit"; reported false for unattended sessions since 2.1.285.                | ⬜ Open |
+| N333 | Define how `usage_pause` interacts with Claude Code's "Continue automatically at usage limit" wait.                         | ⬜ Open |
+| N334 | Re-check the supervisor's post-compaction `/goal` and `continue` re-injection against the 2.1.274 fix (possibly redundant). | ⬜ Open |
+| N335 | Compare `/doctor prompt-audit` with `skill_scan` and `docs_qa` (possible overlap).                                          | ⬜ Open |
+| N336 | Make the supervisor's red-zone `/compact` aware of the `/autocompact` window.                                               | ⬜ Open |
+| N337 | Gate the supervisor's idle `/compact` on `prompt_cache.warm`, so that compaction does not run against a cold cache.         | ⬜ Open |
+
+Idle compaction: the review found none in the Claude Code changelog or the vendored prompt-caching docs, so the
+owner's report is unconfirmed. Claude Code compacts by window size. The idle-gated `/compact` seen in sessions is the
+ccy supervisor's own.
+
+### N329 — the N323 merge added a root-conditioned skip, and main carried it until the next post-merge integration run
+
+**Source**: coordinator, post-merge `tests/integration` on 62d9e6292, the N328 merge.
+
+**Evidence**: `tests/integration/test_no_root_conditioned_skips.py` failed on `tests/unit/install/test_upgrade_gate.py`. N323 (b8b99c007, merged in 954dde9f1) added `skipif(os.geteuid() == 0)` to a mode-000 marker test. Its sibling test already monkeypatches the read to raise `PermissionError`, so the case was covered as root. The branch's `changed` run never ran `tests/integration`. After 954dde9f1 merged, the coordinator ran only `tests/acceptance`, because integration had passed on the earlier 744125f1a. This is a process gap: a post-merge integration run counts only for the merge it ran after.
+
+**Status**: ✅ Fixed on main. The skipped test is removed, and the monkeypatched sibling stays. The gate tests and the guard pass, 1598 tests in total. From now on, each merge gets its own post-merge integration run, and a run on an earlier merge does not count.
+
 ### N328 — `set -e` has no effect in the Claude Code Bash tool, so the prelude `bash_safe_mode` asks for protects nothing
 
 **Source**: coordinator, 2026-10-03. Twice in one session a `set -euo pipefail` command kept running after a
@@ -1490,7 +1520,7 @@ real tag once a release carries the fix. Residual: whoever can delete the venv a
 
 **Evidence**: `release-slate-check` reads the `qa.yml` run for HEAD. HEAD can have more than one run: a push tier run plus a dispatched full-matrix run, or a cancelled run plus its re-run. Which one wins should be explicit (the newest completed full-matrix run), and the check should name it.
 
-**Status**: ⬜ Open. Remedy: select the newest completed run with the matrix jobs, report its id, and add a test with two runs on one sha.
+**Status**: ✅ Fixed on worktree-n324-ci-run-lookup. The lookup now picks the newest completed, non-cancelled run that carries the matrix jobs (a newer failure is not hidden by an older green), and the slate output names that run's id.
 
 ### N323 — `check_approval` should report INVALID on an unreadable approval marker
 
@@ -1747,6 +1777,10 @@ exits 1: "the fetched content matches the sensitive-content pattern `session-uui
 written." The page's example payload carries a UUID-shaped `session_id`, which the pattern cannot
 tell from a real one. The remote-docs fidelity rule forbids changing vendored text, so the
 two rules conflict, and neither can be bent by an agent.
+
+**Second instance (Plan 00486 Task 1.3)**: `remote-docs add https://code.claude.com/docs/en/changelog` is refused
+on the same pattern, even with `--verbatim`. The check runs before any capture exists, so the stand-down that
+`RemoteDocs.md` describes for unaltered captures never applies. This now also blocks Plan 00486 Task 1.3.
 
 **Status**: ⬜ Owner decision. Options: (a) allow `remote-docs add` to store a documented
 placeholder for pattern matches and record the substitution in the provenance frontmatter; (b)

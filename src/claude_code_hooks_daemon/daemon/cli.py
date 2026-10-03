@@ -3826,6 +3826,8 @@ RELEASE_SLATE_UNDETERMINED = 1
 RELEASE_SLATE_IN_FLIGHT = 2
 _GH_RUN_LIST_LIMIT = "30"
 _GH_QA_WORKFLOW = "qa.yml"
+# A cancelled or skipped run says nothing about the sha, so it never decides.
+_GH_NON_EVIDENCE_CONCLUSIONS = frozenset({"cancelled", "skipped"})
 
 
 def _gh_ci_lookup(sha: str) -> "CiRunState | None":
@@ -3835,7 +3837,11 @@ def _gh_ci_lookup(sha: str) -> "CiRunState | None":
     filed was green on a sha three commits behind HEAD. Only a run whose
     ``headSha`` IS the given sha counts; absent means None.
     """
-    from claude_code_hooks_daemon.core.release_slate import CiRunState, full_matrix_green
+    from claude_code_hooks_daemon.core.release_slate import (
+        CiRunState,
+        carries_matrix_jobs,
+        full_matrix_green,
+    )
 
     branch_result = run_git(Path.cwd(), "rev-parse", "--abbrev-ref", "HEAD")
     if branch_result.returncode != 0:
@@ -3856,24 +3862,40 @@ def _gh_ci_lookup(sha: str) -> "CiRunState | None":
     runs = json.loads(listing)
     if not isinstance(runs, list) or not all(isinstance(run, dict) for run in runs):
         raise ValueError("gh run list returned something other than a list of runs")
-    # Newest first. A run that did not succeed has no matrix to inspect, and the
-    # newest run of the sha stands in for it unless a run proves the full matrix.
-    found: CiRunState | None = None
+    # Newest first. The run that decides is the newest COMPLETED run that carries
+    # the matrix jobs (a failed one included, so a newer failure is never hidden
+    # by an older green). Still-running, cancelled and tier-only runs are passed
+    # over; if nothing qualifies, the newest run of the sha stands in, not green.
+    fallback: CiRunState | None = None
     for run in runs:
         if run.get("headSha") != sha:
             continue
-        state = CiRunState(sha=sha, status=run.get("status"), conclusion=run.get("conclusion"))
-        if state.is_green:
-            run_id = run.get("databaseId")
-            if not isinstance(run_id, int):
-                raise ValueError(f"gh run list gave run {run!r} no databaseId")
-            if full_matrix_green(_gh_run_jobs(run_id)):
-                return state
-            state = CiRunState(
-                sha=sha, status=state.status, conclusion=state.conclusion, full_matrix=False
+        run_id = run.get("databaseId")
+        if not isinstance(run_id, int):
+            raise ValueError(f"gh run list gave run {run!r} no databaseId")
+        state = CiRunState(
+            sha=sha, status=run.get("status"), conclusion=run.get("conclusion"), run_id=run_id
+        )
+        if state.status != "completed" or state.conclusion in _GH_NON_EVIDENCE_CONCLUSIONS:
+            fallback = fallback or state
+            continue
+        jobs = _gh_run_jobs(run_id)
+        if carries_matrix_jobs(jobs):
+            return CiRunState(
+                sha=sha,
+                status=state.status,
+                conclusion=state.conclusion,
+                full_matrix=full_matrix_green(jobs),
+                run_id=run_id,
             )
-        found = found or state
-    return found
+        fallback = fallback or CiRunState(
+            sha=sha,
+            status=state.status,
+            conclusion=state.conclusion,
+            full_matrix=False,
+            run_id=run_id,
+        )
+    return fallback
 
 
 def _gh_stdout(*args: str) -> str:

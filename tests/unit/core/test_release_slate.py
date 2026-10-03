@@ -16,6 +16,7 @@ from claude_code_hooks_daemon.core.release_slate import (
     CiLookup,
     CiRunState,
     SlateReport,
+    carries_matrix_jobs,
     collect_slate,
     full_matrix_green,
 )
@@ -477,3 +478,30 @@ class TestFullMatrixGreenReadsTheJobConclusions:
 
     def test_no_jobs_is_not_green(self) -> None:
         assert not full_matrix_green([])
+
+
+class TestCarriesMatrixJobs:
+    def test_executed_matrix_jobs_count(self) -> None:
+        assert carries_matrix_jobs([_job("QA (Python3.11)", "failure")])
+
+    def test_a_skipped_templated_matrix_job_does_not_count(self) -> None:
+        assert not carries_matrix_jobs([_job("QA (Python${{ matrix.python-version }})", "skipped")])
+
+    def test_no_matrix_job_does_not_count(self) -> None:
+        assert not carries_matrix_jobs([_job("QA (docs or code tier)", "success")])
+
+
+class TestTheRunReadIsNamed:
+    def test_describe_names_the_run_id(self) -> None:
+        state = CiRunState(sha=_HEAD, status="completed", conclusion="success", run_id=42)
+        assert state.describe() == "completed, success (run 42)"
+
+    def test_describe_without_a_run_id_is_unchanged(self) -> None:
+        state = CiRunState(sha=_HEAD, status="completed", conclusion="success")
+        assert state.describe() == "completed, success"
+
+    def test_the_tier_message_names_the_run_too(self) -> None:
+        state = CiRunState(
+            sha=_HEAD, status="completed", conclusion="success", full_matrix=False, run_id=7
+        )
+        assert "(run 7)" in state.describe()
