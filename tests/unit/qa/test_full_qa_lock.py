@@ -319,7 +319,7 @@ class TestInheritedLockWithoutProc:
                 pass_fds=(parent_fd,),
                 capture_output=True,
                 text=True,
-                timeout=30,
+                timeout=Timeout.QA_TEST_TIMEOUT,
                 check=False,
             )
         finally:
@@ -346,7 +346,7 @@ class TestInheritedLockWithoutProc:
                 ],
                 capture_output=True,
                 text=True,
-                timeout=30,
+                timeout=Timeout.QA_TEST_TIMEOUT,
                 check=False,
             )
         finally:
