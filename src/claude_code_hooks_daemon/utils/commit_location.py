@@ -5,7 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 
 from claude_code_hooks_daemon.utils.git_commit_parsing import CommitReading
-from claude_code_hooks_daemon.utils.git_facts import GitRepo, commit_directory
+from claude_code_hooks_daemon.utils.git_facts import commit_directory
+from claude_code_hooks_daemon.utils.git_repo import GitRepo
 
 
 def commit_runs_in_foreign_repo(
