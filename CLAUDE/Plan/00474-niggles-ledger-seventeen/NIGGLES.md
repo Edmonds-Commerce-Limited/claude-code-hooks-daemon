@@ -1497,8 +1497,8 @@ shape. Text inside inline code is never a link in Markdown. In INVENTORY.md it w
 the same span in this entry drew `[block]` (the edit was not refused). Both lines were reworded to
 prose.
 
-**Status**: ⬜ Open. Remedy: strip inline code spans (and fenced blocks, if not already) before
-the link scan.
+**Status**: ✅ Fixed on worktree-n315-n316-docs-qa. The shared link extractor now drops inline
+code spans, as well as fenced blocks, before scanning for links.
 
 ### N315 — the post-commit docs QA report judges a vendored remote-docs page that lint and sweep exclude
 
@@ -1512,8 +1512,8 @@ commit itself was not blocked. The same file is out of scope everywhere else:
 findings for the tree. The fidelity rule forbids editing vendored text, so a finding there can never
 be acted on. A `[block]` label the gate did not enforce also misreports what happened.
 
-**Status**: ⬜ Open. Remedy: the post-commit report uses the same corpus scope as lint, sweep and
-the commit gate, so `remote-docs/` is excluded there too.
+**Status**: ✅ Fixed on worktree-n315-n316-docs-qa. The STAGED view now admits a path only through
+the shared lint scope predicate, so `remote-docs/` pages never reach the post-commit report.
 
 ### N314 — no QA check bounds a module's size, so a handler reached 5,301 lines unnoticed
 

@@ -22,13 +22,17 @@ from claude_code_hooks_daemon.utils.markdown_fences import lines_outside_fences
 MARKDOWN_LINK_RE: Final[re.Pattern[str]] = re.compile(r"\[[^\]]*\]\(([^)\s]+)(?:\s+\"[^\"]*\")?\)")
 
 
-def extract_link_targets(text: str) -> list[str]:
-    """Every plain markdown link target in ``text``, outside fenced code blocks.
+_INLINE_CODE_SPAN_RE: Final[re.Pattern[str]] = re.compile(r"(?<!`)(`+)(?!`)(.+?)(?<!`)\1(?!`)")
 
-    Backticked prose paths (``\\`src/foo.py\\```) are not markdown link
-    syntax and are never matched — no special-casing needed.
+
+def extract_link_targets(text: str) -> list[str]:
+    """Every plain markdown link target in ``text``, outside code.
+
+    Fenced blocks and inline code spans are dropped first: text inside code is
+    never a link in Markdown, so a span quoting a link-shaped regex is not one.
     """
     targets: list[str] = []
     for line in lines_outside_fences(text):
-        targets.extend(match.group(1) for match in MARKDOWN_LINK_RE.finditer(line))
+        prose = _INLINE_CODE_SPAN_RE.sub("", line)
+        targets.extend(match.group(1) for match in MARKDOWN_LINK_RE.finditer(prose))
     return targets

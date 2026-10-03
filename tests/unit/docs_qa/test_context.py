@@ -384,3 +384,20 @@ class TestProjectExcludePaths:
         context = staged_context(project_root=root, policy=policy)
 
         assert context.staged_documents == {"CLAUDE/A.md": "# a\n"}
+
+
+class TestStagedScope:
+    """The STAGED view judges the same corpus scope as lint, sweep and the gate."""
+
+    def test_vendored_remote_docs_page_never_enters_the_staged_view(self, tmp_path: Path) -> None:
+        root = tmp_path / "repo"
+        _init_repo(root)
+        (root / "remote-docs" / "site").mkdir(parents=True)
+        (root / "remote-docs" / "site" / "page.md").write_text("[x](/docs/en/mcp)\n")
+        (root / "CLAUDE").mkdir()
+        (root / "CLAUDE" / "Foo.md").write_text("# Foo\n")
+        _git(root, "add", "-A")
+
+        context = staged_context(project_root=root, policy=DocumentationPolicy())
+
+        assert context.staged_documents == {"CLAUDE/Foo.md": "# Foo\n"}

@@ -25,3 +25,17 @@ class TestExtractLinkTargets:
 
     def test_a_titled_link_yields_only_the_target(self) -> None:
         assert extract_link_targets('[a](docs/Guide.md "Title")') == ["docs/Guide.md"]
+
+    def test_a_link_shape_inside_an_inline_code_span_is_not_a_link(self) -> None:
+        text = "the regex `(?:[path/](bash|sh))` quoted\n"
+        assert extract_link_targets(text) == []
+
+    def test_a_link_shape_inside_a_double_backtick_span_is_not_a_link(self) -> None:
+        assert extract_link_targets("see ``[a](Gone.md)`` here\n") == []
+
+    def test_a_real_link_beside_a_code_span_is_kept(self) -> None:
+        text = "`[a](Gone.md)` but [b](Real.md)\n"
+        assert extract_link_targets(text) == ["Real.md"]
+
+    def test_a_link_whose_text_is_a_code_span_is_kept(self) -> None:
+        assert extract_link_targets("[`Foo`](Foo.md)\n") == ["Foo.md"]
