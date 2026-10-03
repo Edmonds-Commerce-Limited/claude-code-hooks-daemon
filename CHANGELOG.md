@@ -5,6 +5,76 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.68.0] - 2026-10-03
+
+_A daemon-robustness, guard-correctness and usage-control release. The headline themes: the daemon start/stop/recovery path is proven by owner, socket and answer rather than trusted (Plan 00466); upgrades stop before deploying until you have read what they list (Plan 00376); a session can pause itself at a host usage ceiling and resume at the window reset, with a subscription-usage status line (Plan 00479); `bash_safe_mode` is now ON by default and denies unguarded sequenced commands (Plan 00270); an opt-in handler with no config block no longer runs (Plan 00483); and a long run of secret-guard, glob and heredoc correctness fixes. `breaking: false` - no config key is renamed or removed and no handler is removed, so no upgrade guide is needed; review the two changed defaults in the release notes._
+
+### Added
+
+- `conflict_marker_commit_gate` denies a commit whose added lines carry a merge-conflict marker, and the markdown formatter leaves a conflicted file untouched (Plan 00466).
+- Every upgrade runs a pre-deploy gate that stops until you have read what it lists, and a breaking upgrade waits for the owner; it follows a leading `cd` when judging a relative script, and its approval guard does not deny a variable interpreter running pytest or a QA script (Plan 00376, Plan 00474).
+- `subagent_worktree_write_guard` denies a subagent's Write/Edit/NotebookEdit into another checkout of the repository, binding each subagent to the worktree of its first write (Plan 00474).
+- A turn that ends on an API error (rate limit, credentials) is recorded, shown as a status-line chip, and cleared by the next prompt (Plan 00470).
+- A session pauses at its host usage ceiling and resumes at the window reset (Plan 00479).
+- The status line shows subscription usage for the 5-hour and weekly windows (Plan 00479).
+- A top-level `hosts:` block holds per-host settings, starting with a usage ceiling (Plan 00479).
+- The ccy supervisor compacts once, then stays quiet, while a usage pause holds (Plan 00479).
+- A declared cron can keep running while the session awaits the owner, via `runs_while_awaiting_human` (Plan 00470).
+- A declared cron can be limited to named hosts, via `hosts` (Plan 00470; Addresses #60, #62).
+- A declared cron is refreshed before its 7-day expiry (Plan 00470).
+- `provision` builds a fresh checkout's daemon at the version the project names (Plan 00477).
+- A fresh clone without a daemon now says so loudly and names `provision` (Plan 00477).
+- A pulled daemon version change is reported as drift, and a downgrade is named as one (Plan 00477).
+- An upgrade finds uv in Homebrew and pipx locations, and takes `--uv` (Plan 00474).
+- Merging a work branch with no recorded green targeted QA run draws an advisory (Plan 00475).
+- Session start names open work branches beyond the limit, or far behind main (Plan 00475).
+- The release slate gate requires a full three-Python matrix CI run on HEAD (Plan 00475).
+- The daemon answers an `identity` request naming its project and pid, which the hooks use as proof (Plan 00466).
+- The README names and links Defence Before Fix, and `explain-rule` / `explain-handler` print its line (Plan 00484; Addresses #65, #67).
+
+### Changed
+
+- **Bash strict mode is now on by default**: `bash_safe_mode` ships `enabled: true` with `mode: block`, so a Bash command of two or more `;`- or newline-sequenced statements with no `set -euo pipefail` prelude is denied. Opt out with `enabled: false`, or keep it advisory with `options.mode: warn` (Plan 00270).
+- **An opt-in handler with no config block no longer runs**; a present block, even a bare key, still enables it unless it says `enabled: false` (Plan 00483).
+- The write-location guards now judge every command bash runs, and fail closed on text they cannot read (Plan 00466).
+- The daemon-down recovery exemption now checks the launcher it runs, and that `HOOKS_DAEMON_ROOT_DIR` belongs to the project (Plan 00466).
+- Transport deny reasons now say whether the daemon was reached (Plan 00466).
+- `PreToolUse` now denies input the hook cannot parse, and no longer depends on `python3` to deny (Plan 00466).
+- `daemon.transport.timeout_seconds` is capped at 45, and the relay clamps an old forwarder's timeout (Plan 00466).
+- The hook denies in time, and proves which process is the daemon (Plan 00466).
+- `start` and `restart` wait on a starting daemon, one start runs at a time, and `stop` pins the process it proves (Plan 00466).
+- `stop` leaves a successor's PID file and socket alone, and corrupt PID files and the start lock are handled safely (Plan 00466).
+- A missing declared cron denies one stop per chain, and the deny names the pause (Plan 00470; Addresses #60).
+- A forced branch delete is allowed when a remote already holds the tip (Plan 00474).
+- A targeted QA run that selects test files and executes none fails and says why (Plan 00474).
+- An unattended project still lets a question through when a human has just typed (Plan 00474).
+- The prompt-cache status segment is now compact colour-coded chips (Plan 00452).
+- SessionStart sweeps run about twice as fast, skip virtualenvs and package trees, and a cut-off chain names what it dropped (Plan 00474).
+- The deployed core docs name the project's QA gate for the change, not its full suite (Plan 00475).
+- Truth-changes reconcile agents now leave daemon-owned docs alone, and the core plan doc lists the correction category (Plan 00474; Addresses #63).
+- Documentation: the changed defaults and new options are recorded in the 3.68.0 config-changes and truth-changes manifests.
+
+### Fixed
+
+- The plan-number lock now covers every linked worktree (Plan 00474; Addresses #59).
+- `secret_file_guard` no longer fails closed on an ordinary `python3 - <<'EOF'` program (Plan 00466).
+- The secret guard no longer reads a quoted pattern, or a grep/rg/git-grep regex operand, as a glob (Plan 00474, Plan 00483; Addresses #66, #70).
+- The secret and quarantine guards no longer glob from the daemon's own directory (Plan 00474; Addresses #64, #66).
+- An absolute glob under an existing directory is judged, not refused (Plan 00474; Addresses #68).
+- A grep pattern inside a command substitution is no longer read as a glob (Plan 00474).
+- The secret guard reads the path after a `rev:` or `host:` prefix, and no longer judges a commit message or a text-filtered heredoc body (Plan 00474).
+- The secret file guard scans a large program in about half the time, and its exemptions no longer skip options they do not know (Plan 00474).
+- A recursive grep or rg is judged by the directories it can reach (Plan 00474).
+- The sensitive-content guard and the redaction sinks now read the same word list (Plan 00474).
+- An Edit of a workflow or source file is no longer denied as an unreadable shell command (Plan 00474).
+- The pipe blocker no longer reads an escaped bar or an uppercase `HEAD` as a pipe (Plan 00474).
+- The plan QA commit gate judges what `git commit -a` records, not just the index (Plan 00474).
+- A wedged daemon no longer denies its own restart on the relay (Plan 00466).
+- A daemon owned by another user is no longer read as stopped (Plan 00466).
+- A hook writes one answer, not two, when its transport fails after answering (Plan 00466).
+- A slow SessionStart no longer drops the cheap handlers (Plan 00474).
+- A finished subagent is no longer told to create the coordinator's crons (Plan 00470; Addresses #62).
+
 ## [3.67.0] - 2026-09-30
 
 _A hardening-and-tooling release. The headline themes: PreToolUse now fails closed (a client timeout, an unreachable daemon, a transport failure or a slow handler denies instead of allowing); `daemon.strict_mode` finally reaches the daemon; the secret-path and containment guards stay fail-closed and share one evaluation between `matches()` and `handle()`; full QA becomes the coordinator's gate, with the new opt-in `subagent_full_qa_blocker`, `llm_qa.py changed` and `llm_qa.py main-moved`; Claude Code plugins are documented and recognised; hand-written plan journal entries are denied; and a long run of smaller correctness fixes across the installer, `gitignore` handling, crons and QA gates. `breaking: false` - no config keys renamed or removed, so no upgrade guide is needed; review the five post-upgrade tasks._

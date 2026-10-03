@@ -544,3 +544,25 @@ class TestShellResolvedWords:
     @pytest.mark.parametrize("word", ["a.txt", "dir/*.py", "-f"])
     def test_a_literal_word_is_not(self, word: str) -> None:
         assert is_shell_resolved(word) is False
+
+
+class TestCommentsEndAtTheirOwnLine:
+    """A `#` comment ends at its newline; `#` inside a word is not a comment."""
+
+    def test_a_trailing_comment_does_not_hide_the_next_line(self) -> None:
+        form = read_commit_form("git add new.txt  # stage it\ngit commit -m x")
+        assert len(form.runs) == 1
+        assert [staging.arguments for staging in form.stagings] == [("new.txt",)]
+
+    def test_a_leading_comment_line_does_not_hide_the_commit(self) -> None:
+        form = read_commit_form("# commit the fix\ngit commit -m x -- a.py")
+        assert len(form.runs) == 1
+        assert form.form.pathspecs == ("a.py",)
+
+    def test_every_forced_delete_after_a_comment_is_seen(self) -> None:
+        command = "git branch -D a  # merged\ngit branch -D b"
+        assert [g.arguments for g in git_invocations(command)] == [("-D", "a"), ("-D", "b")]
+
+    def test_a_hash_inside_a_word_is_kept(self) -> None:
+        seen = [g.arguments for g in git_invocations("git push origin x#y")]
+        assert seen == [("origin", "x#y")]

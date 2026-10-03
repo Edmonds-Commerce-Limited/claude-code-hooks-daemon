@@ -1,7 +1,7 @@
 # Drafted by Plan 00376. The VERSION in the filename and the `version:` key are
 # a target, not a decision; the release agent confirms or renames this file.
 version: "3.68.0"
-date: "UNRELEASED"
+date: "2026-10-03"
 
 breaking: false
 
@@ -14,12 +14,14 @@ config_changes:
         NEW (Plan 00479). Pauses a session at its host usage ceiling. When
         `hosts:` gives the host a `usage_ceiling` and a live usage window
         reaches it, the pause is recorded and the model is told to replace
-        every cron with ONE one-shot resume cron at the window reset, then
+        every cron with ONE recurring resume cron on `*/10 * * * *` (it names
+        no clock time; a tick before the resume time is dropped), then
         stop. While paused every later prompt (cron tick, supervisor message,
         human) is dropped before it reaches the model. The resume cron's
         prompt starts `[tick:usage-resume]`; when it fires, usage is re-read:
         below the ceiling the declared crons are re-established and work
-        continues, still over it the next resume cron is scheduled. No
+        continues, still over it the pause is renewed and the same resume cron
+        stays in place. No
         ceiling, no usage data or an unknown host never pauses a session.
         `hooks-daemon usage-pause clear` (run in a terminal) removes a pause
         and records an override until the latest reset among the windows over
@@ -40,12 +42,14 @@ config_changes:
       dormant: true
       description: >-
         NEW (Plan 00479). While a session is usage-paused, only CronList,
-        CronDelete, CronCreate and ToolSearch (which loads the deferred cron
-        tools) are allowed; any other tool is denied with `continue: false`
-        and a `stopReason`, so a turn already running halts at its next tool
-        call. A session over its ceiling that has not yet been paused is
-        paused by its next main-thread tool call, which is refused without a
-        halt and carries the full directive; a subagent never starts a pause.
+        CronDelete, CronCreate, ToolSearch (which loads the deferred cron
+        tools), SendMessage and TaskStop are allowed; any other tool is denied
+        with `continue: false` and a `stopReason`, so a turn already running
+        halts at its next tool call. A session over its ceiling that has not
+        yet been paused is paused by its next main-thread tool call, which is
+        refused without a halt and carries the full directive; a subagent over
+        the ceiling starts the pause too, but a subagent's own calls are never
+        denied.
         Inert unless a pause is recorded or a ceiling is reached.
       example_yaml: |
         handlers:
@@ -185,11 +189,14 @@ config_changes:
         HOOKS_DAEMON_UPGRADE_BASE_URL, HOOKS_DAEMON_UPGRADE_PREVIOUS_VERSION,
         HOOKS_DAEMON_UPGRADE_SECOND_PASS, UPGRADE_FLAGS, GIT_*, BASH_ENV, ENV,
         BASH_FUNC_*, SHELLOPTS, BASHOPTS, LD_*, DYLD_*, PYTHON*,
-        HOOKS_DAEMON_OLD_DEFAULT_*, the uv index/find-links/config/python
+        HOOKS_DAEMON_OLD_DEFAULT_*, PIPX_BIN_DIR, the uv index/find-links/config/python
         variables, CA bundles and proxies) by any spelling (NAME=, read or
         printf -v into it, an indirect name, an x-flagged declare/typeset/local,
-        a computed export; and set -a, eval or sourcing another file) or
-        exporting a shell function -- the upgrade recognised by name, by Layer 1's
+        a computed export; and set -a, eval or sourcing another file),
+        exporting a shell function, or passing --uv <path> -- the upgrade
+        recognised by name when it is the program run or the script a shell,
+        an interpreter or source/. runs (past wrappers such as env, nice,
+        timeout, sudo, flock), by Layer 1's
         --skip-reading-confirmation, by a script carrying
         HOOKS_DAEMON_UPGRADE_HANDOFF, or by an unreadable script (`bash
         "$tmp"`, stdin) run with --project-root or the daemon clone as an
@@ -198,7 +205,9 @@ config_changes:
         pull, merge, rebase, reset, cherry-pick, am, revert) or writing into
         its .git/. Never denied: reading (ls/cat/stat/grep/find -print/test -f),
         merely reading the env var, fetching, showing or logging the daemon
-        clone, a git commit message, non-executing
+        clone, a command that only names an upgrade script as data (`git log
+        -- scripts/upgrade.sh`, `shellcheck scripts/upgrade.sh`, `bash -n`), a
+        git commit message, non-executing
         echo/printf prose, a grep search, or a quoted-delimiter heredoc body
         written to a file.
       example_yaml: |
@@ -281,12 +290,107 @@ config_changes:
               enabled: true
               priority: 59
       migration_note: >-
-        On by default; no project-side action needed. A project that does not
-        use `scripts/qa/llm_qa.py changed` never has a record, so it is advised
-        on every merge of a `worktree-*` branch; disable with
+        On by default; no project-side action needed. Silent in a project that
+        does not ship `scripts/qa/llm_qa.py`, because the advice names that
+        script and such a project could never satisfy it. Disable with
         handlers.pre_tool_use.merge_qa_advisor.enabled: false.
       recommended: true
       dormant: false
+    - key: handlers.pre_tool_use.conflict_marker_commit_gate
+      description: >-
+        NEW (Plan 00466 N211). Denies a `git commit` whose ADDED lines carry a
+        merge-conflict marker in either spelling. It reads what the commit
+        would record: the index, the working tree for `git commit -a`, or the
+        named paths for a pathspec commit. A marker already in history, or one
+        being removed, is never denied. A file that legitimately holds marker
+        text (a fixture, documentation of the markers) is exempted with
+        `options.exclude_paths` or the project-wide `daemon.exclude_paths`.
+      example_yaml: |
+        handlers:
+          pre_tool_use:
+            conflict_marker_commit_gate:
+              enabled: true
+              priority: 42
+              options:
+                exclude_paths: []
+      migration_note: >-
+        On by default; no project-side action needed. Add the entry to a
+        project config that lists its PreToolUse handlers explicitly. Disable
+        with handlers.pre_tool_use.conflict_marker_commit_gate.enabled: false.
+      recommended: true
+      dormant: false
+    - key: handlers.stop_failure.stop_failure_recorder
+      description: >-
+        NEW (Plan 00470 Task 3.1). A silent StopFailure recorder: a turn that
+        ends on a `rate_limit`, `authentication_failed` or
+        `cloud_credential_error` API error is written down (the error type
+        only, never the API's own text) and shown as a status-line chip by
+        `usage_indicator`. Never speaks and fails open.
+      example_yaml: |
+        handlers:
+          stop_failure:
+            stop_failure_recorder:
+              enabled: true
+              priority: 50
+      migration_note: >-
+        On by default; no project-side action needed. Add the entry to a
+        project config that lists its StopFailure handlers explicitly.
+      recommended: true
+      dormant: false
+    - key: handlers.user_prompt_submit.stop_failure_resolver
+      description: >-
+        NEW (Plan 00470 Task 3.1). The next prompt a session submits (a human,
+        a cron tick or a resume) clears that session's unresolved StopFailure
+        record, so the status-line chip goes away once the session moves on.
+        Silent and fails open; an ordinary prompt costs one small file read.
+      example_yaml: |
+        handlers:
+          user_prompt_submit:
+            stop_failure_resolver:
+              enabled: true
+              priority: 38
+      migration_note: >-
+        On by default; no project-side action needed. Add the entry to a
+        project config that lists its UserPromptSubmit handlers explicitly.
+      recommended: true
+      dormant: false
+    - key: handlers.pre_tool_use.ask_user_question_blocker.options.human_presence_minutes
+      description: >-
+        NEW option (default 30; absent in v3.67.0). A genuine human prompt
+        received in this session within this many minutes proves a human is
+        present, so the session counts as attended for that window and a
+        question is judged by the strict-mode rules (the `ASKING BECAUSE:`
+        prefix). Cron ticks, supervisor lines and task notifications are not
+        human prompts. 0 disables the window.
+      example_yaml: |
+        handlers:
+          pre_tool_use:
+            ask_user_question_blocker:
+              options:
+                human_presence_minutes: 30
+      migration_note: >-
+        Optional. The default applies when the option is absent.
+      recommended: false
+      dormant: false
+    - key: handlers.post_tool_use.plan_fact_check_feed
+      description: >-
+        NEW, opt-in (Plan 00480 Task 4.1). Watches writes to a plan's tracked
+        documents and, once the plan has been quiet for `quiet_seconds`
+        (default 5), stores the diff since its last fact-checked content as a
+        pending fact-check record. Nothing is delivered yet. Never blocks and
+        never speaks. Off unless a block names it.
+      example_yaml: |
+        handlers:
+          post_tool_use:
+            plan_fact_check_feed:
+              enabled: true
+              options:
+                quiet_seconds: 5
+      migration_note: >-
+        Optional and inert until a later release delivers the check. Add the
+        block only to try it.
+      recommended: false
+      dormant: true
     - key: persistent_crons.jobs[].runs_while_awaiting_human
       recommended: false
       dormant: true
@@ -349,8 +453,6 @@ config_changes:
         5-hour and 7-day windows, with optional `five_hour` and `seven_day`
         overrides. When several entries match, the lowest limit wins per
         window. Unknown keys and out-of-range percentages are config errors.
-        This release adds the model and resolver only; nothing enforces a
-        ceiling yet.
       example_yaml: |
         hosts:
           sdlc-runner:
@@ -360,8 +462,9 @@ config_changes:
               five_hour: 85
               seven_day: 70
       migration_note: >-
-        Optional and inert on its own. Declare a host only when a later release's
-        usage-pause handlers are wanted on it.
+        Optional and inert on its own. Declaring a usage_ceiling makes the
+        usage-pause handlers pause a session on that host when a window
+        reaches it.
     - key: handlers.pre_tool_use.bash_safe_mode
       recommended: true
       dormant: false
@@ -444,6 +547,24 @@ config_changes:
         Optional. The default applies when the option is absent. Lower it to
         refresh sooner; it cannot be raised to 7 or more.
   changed:
+    - key: daemon.transport.timeout_seconds
+      description: >-
+        Now at most 45. hooks-relay waits this long for the daemon, then may
+        spend up to 10s handing a failed PreToolUse call to the bash
+        forwarder, and Claude Code cancels the hook at the 60s timeout the
+        daemon registers. A larger value is lowered to 45 with a warning
+        rather than refused.
+      example_yaml: |
+        daemon:
+          transport:
+            timeout_seconds: 45
+      migration_note: >-
+        Set daemon.transport.timeout_seconds to 45 or less in
+        .claude/hooks-daemon.yaml. Until you do, the daemon uses 45 and warns
+        at every start.
+      recommended: true
+      dormant: false
+      maximum: 45
     # Plan 00483 N55 (owner-delegated ruling): an opt-in handler with NO block
     # under `handlers.<event>` no longer runs. Documentation-only entries (no
     # `recommended_value`): promoting every one would tell every project to
@@ -456,7 +577,7 @@ config_changes:
         `default_enabled = False`; a block that is present, even a bare
         `key:`, enables it unless it says `enabled: false`. `init full`
         configs already carry `enabled: false` for each, so are unaffected.
-      example_yaml: &opt_in_example |
+      example_yaml: |
         handlers:
           pre_tool_use:
             lsp_enforcement:
@@ -466,61 +587,121 @@ config_changes:
         affected: add the handler's block (`enabled: true`) to keep it.
     - key: handlers.pre_tool_use.flaggable_content_channel_guard
       description: *opt_in_description
-      example_yaml: *opt_in_example
+      example_yaml: |
+        handlers:
+          pre_tool_use:
+            flaggable_content_channel_guard:
+              enabled: true
       migration_note: *opt_in_note
     - key: handlers.pre_tool_use.flaggable_work_advisor
       description: *opt_in_description
-      example_yaml: *opt_in_example
+      example_yaml: |
+        handlers:
+          pre_tool_use:
+            flaggable_work_advisor:
+              enabled: true
       migration_note: *opt_in_note
     - key: handlers.pre_tool_use.quarantine_artefact_read_guard
       description: *opt_in_description
-      example_yaml: *opt_in_example
+      example_yaml: |
+        handlers:
+          pre_tool_use:
+            quarantine_artefact_read_guard:
+              enabled: true
       migration_note: *opt_in_note
     - key: handlers.pre_tool_use.subagent_full_qa_blocker
       description: *opt_in_description
-      example_yaml: *opt_in_example
+      example_yaml: |
+        handlers:
+          pre_tool_use:
+            subagent_full_qa_blocker:
+              enabled: true
       migration_note: *opt_in_note
     - key: handlers.post_tool_use.goal_injection
       description: *opt_in_description
-      example_yaml: *opt_in_example
+      example_yaml: |
+        handlers:
+          post_tool_use:
+            goal_injection:
+              enabled: true
       migration_note: *opt_in_note
     - key: handlers.pre_compact.compaction_signal
       description: *opt_in_description
-      example_yaml: *opt_in_example
+      example_yaml: |
+        handlers:
+          pre_compact:
+            compaction_signal:
+              enabled: true
       migration_note: *opt_in_note
     - key: handlers.session_start.model_fallback_detector
       description: *opt_in_description
-      example_yaml: *opt_in_example
+      example_yaml: |
+        handlers:
+          session_start:
+            model_fallback_detector:
+              enabled: true
       migration_note: *opt_in_note
     - key: handlers.session_start.routine_qa_sweep
       description: *opt_in_description
-      example_yaml: *opt_in_example
+      example_yaml: |
+        handlers:
+          session_start:
+            routine_qa_sweep:
+              enabled: true
       migration_note: *opt_in_note
     - key: handlers.session_start.session_actions_directive
       description: *opt_in_description
-      example_yaml: *opt_in_example
+      example_yaml: |
+        handlers:
+          session_start:
+            session_actions_directive:
+              enabled: true
       migration_note: *opt_in_note
     - key: handlers.session_start.skill_opportunity_detector
       description: *opt_in_description
-      example_yaml: *opt_in_example
+      example_yaml: |
+        handlers:
+          session_start:
+            skill_opportunity_detector:
+              enabled: true
       migration_note: *opt_in_note
     - key: handlers.session_start.tool_disable_advisor
       description: *opt_in_description
-      example_yaml: *opt_in_example
+      example_yaml: |
+        handlers:
+          session_start:
+            tool_disable_advisor:
+              enabled: true
       migration_note: *opt_in_note
     - key: handlers.status_line.context_sidecar
       description: *opt_in_description
-      example_yaml: *opt_in_example
+      example_yaml: |
+        handlers:
+          status_line:
+            context_sidecar:
+              enabled: true
       migration_note: *opt_in_note
     - key: handlers.status_line.daemon_stats
       description: *opt_in_description
-      example_yaml: *opt_in_example
+      example_yaml: |
+        handlers:
+          status_line:
+            daemon_stats:
+              enabled: true
       migration_note: *opt_in_note
     - key: handlers.status_line.host_hostname
       description: *opt_in_description
-      example_yaml: *opt_in_example
+      example_yaml: |
+        handlers:
+          status_line:
+            host_hostname:
+              enabled: true
       migration_note: *opt_in_note
     - key: handlers.user_prompt_submit.idle_housekeeping_advisory
       description: *opt_in_description
-      example_yaml: *opt_in_example
+      example_yaml: |
+        handlers:
+          user_prompt_submit:
+            idle_housekeeping_advisory:
+              enabled: true
       migration_note: *opt_in_note

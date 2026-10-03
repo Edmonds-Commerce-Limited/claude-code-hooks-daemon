@@ -607,6 +607,51 @@ _ROW = "- [00001: first](00001-first/PLAN.md) - In Progress\n"
 _README_WITHOUT_ROW = "# Plans Index\n\n## Active Plans\n"
 
 
+_README_ROW_IN_COMPLETED = (
+    "# Plans Index\n\n## Active Plans\n\n## Completed Plans\n\n"
+    "- [00001: first](00001-first/PLAN.md) - In Progress\n"
+)
+
+
+class TestCommitDashAJudgesWhatItRecords:
+    """`git commit -a` records the working tree of tracked files, so a finding it
+    introduces from an UNSTAGED edit blocks exactly as the same edit staged does."""
+
+    def _edit_unstaged(self, repo: Path) -> None:
+        (repo / _PLAN_DIR_REL / "README.md").write_text(_README_ROW_IN_COMPLETED)
+        plan = repo / _PLAN_DIR_REL / "00001-first" / "PLAN.md"
+        plan.write_text(plan.read_text() + "\nedit\n")
+
+    def test_an_unstaged_edit_that_dash_a_records_blocks(self, repo: Path) -> None:
+        self._edit_unstaged(repo)
+
+        with _patched_root(repo):
+            result = _handler("block").handle(_bash_input('git commit -a -m "Plan 00001: x"'))
+
+        assert result.decision == Decision.DENY
+        assert result.reason is not None
+        assert "row-folder-bijection" in result.reason
+
+    def test_the_same_edit_staged_first_blocks_too(self, repo: Path) -> None:
+        self._edit_unstaged(repo)
+        _git(repo, "add", "-A")
+
+        with _patched_root(repo):
+            result = _handler("block").handle(_bash_input('git commit -m "Plan 00001: x"'))
+
+        assert result.decision == Decision.DENY
+
+    def test_an_untracked_plan_folder_is_not_part_of_dash_a(self, repo: Path) -> None:
+        folder = repo / _PLAN_DIR_REL / "00002-new"
+        folder.mkdir()
+        (folder / "PLAN.md").write_text("# Plan 00002: new\n\n**Status**: In Progress\n")
+
+        with _patched_root(repo):
+            result = _handler("block").handle(_bash_input('git commit -a -m "docs"'))
+
+        assert result.decision == Decision.ALLOW
+
+
 class TestJudgesTheCommittedTree:
     """Ledger 00474 N244: the gate judges the tree the commit WILL record.
 
