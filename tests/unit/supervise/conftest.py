@@ -21,13 +21,14 @@ from __future__ import annotations
 
 import json
 import os
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import pytest
 
 from tests.unit.supervise._load import load_supervisor_module
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from pathlib import Path
 
 _mod = load_supervisor_module()
@@ -114,3 +115,38 @@ def _isolate_worker_error_log(
     """
     sink = tmp_path_factory.mktemp("worker-error-log") / "worker.err.log"
     monkeypatch.setattr(_mod, "worker_error_log_path", lambda: sink)
+
+
+LIVE_OWN_SESSION = "plugin-sess-1"
+
+
+@pytest.fixture
+def live_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """A project root a real worker subprocess resolves to ``tmp_path / untracked``.
+
+    Also points the plugin state directory at ``tmp_path / ccy-state`` so a real
+    worker never writes into the checkout, and fixes the own session id in the
+    test process.
+    """
+    (tmp_path / "src" / "claude_code_hooks_daemon").mkdir(parents=True)
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
+    monkeypatch.setenv("CCY_SUPERVISOR_STATE_DIR", str(tmp_path / "ccy-state"))
+    monkeypatch.setattr(
+        _mod, "cached_own_session_ids", lambda *a, **k: frozenset({LIVE_OWN_SESSION})
+    )
+    return tmp_path
+
+
+@pytest.fixture
+def plugin_harness(tmp_path: Path) -> Callable[..., Any]:
+    """Factory for a `PluginTestHarness`: ``plugin_harness(name, path, session_ids=...)``.
+
+    The harness drives a plugin's worker half through the real loader with no
+    live session; its scratch state lives under ``tmp_path``. Plugin authors
+    copy this fixture (it is three lines) into their own test suite.
+    """
+
+    def build(name: str, plugin_path: Path, **kwargs: Any) -> Any:
+        return _mod.PluginTestHarness(name, plugin_path, work_dir=tmp_path / "harness", **kwargs)
+
+    return build
