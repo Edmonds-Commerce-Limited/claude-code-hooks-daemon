@@ -30,6 +30,7 @@ from claude_code_hooks_daemon.utils.git_commit_parsing import (
     is_shell_resolved,
     simple_commands,
 )
+from claude_code_hooks_daemon.utils.path_containment import path_is_relative_to
 
 _JOURNAL_FLAG = "--journal"
 _COMMIT = "commit"
@@ -76,7 +77,7 @@ def _journal_plan_number(step: SimpleCommand, script: Path, start: Path) -> int 
 
 
 def _covers(target: Path, journal_dir: Path) -> bool:
-    return journal_dir == target or target in journal_dir.parents
+    return path_is_relative_to(journal_dir, target)
 
 
 def _names(where: Path, pathspecs: Sequence[str], journal_dir: Path) -> bool:
