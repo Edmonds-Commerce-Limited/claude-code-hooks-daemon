@@ -15,8 +15,9 @@ the refusal true when the handler is evaded.
 
 **"Holds the lock" is PROVEN, never claimed.** A child (a worker, a test
 process spawned by `llm_qa.py` or `run_tests.sh`) proves possession by an
-INHERITED file descriptor pointing at this exact lock file -- checked via
-`/proc/self/fd` -- confirmed by flock semantics: a fresh probe descriptor on
+INHERITED file descriptor pointing at this exact lock file -- found via
+`/proc/self/fd`, or by `fstat` on each descriptor number where there is no
+`/proc` (macOS) -- confirmed by flock semantics: a fresh probe descriptor on
 the same path finds it already exclusively locked. An environment variable
 alone proves nothing, because any evasion could set one for itself; this
 module never reads one to decide possession.
@@ -34,6 +35,7 @@ from __future__ import annotations
 import fcntl
 import logging
 import os
+import resource
 from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
@@ -49,6 +51,10 @@ LOCK_FILE_NAME = "hooksdaemon-full-qa.lock"
 _LOCK_FILE_MODE = 0o644
 #: This process's open descriptors; absent on platforms without /proc (macOS).
 PROC_SELF_FD = Path("/proc/self/fd")
+#: Without /proc, descriptor numbers are probed with `fstat` from here (0-2 are
+#: the standard streams) up to the soft fd limit, capped at `_FD_SCAN_LIMIT`.
+_FIRST_INHERITABLE_FD = 3
+_FD_SCAN_LIMIT = 4096
 
 
 def git_common_dir(project_root: Path) -> Path:
@@ -121,9 +127,7 @@ def acquire_full_qa_lock(
     Raises:
         BlockingIOError: `blocking=False` and the lock is already held.
     """
-    # Without /proc (macOS) no inherited descriptor can be listed, so there is
-    # nothing to reuse: fall through to a normal acquire.
-    if reuse_inherited and PROC_SELF_FD.is_dir():
+    if reuse_inherited:
         inherited = find_inherited_lock_fd(project_root)
         if inherited is not None:
             yield inherited
@@ -149,6 +153,68 @@ def full_qa_lock_is_held(project_root: Path) -> bool:
         return find_inherited_lock_fd(project_root) is not None
     except OSError:
         return False
+
+
+def _fds_open_on(lock_path: Path) -> tuple[list[int], int]:
+    """This process's descriptors open on ``lock_path``, and how many could not be judged.
+
+    Via `/proc/self/fd` where it exists. Without it (macOS) each descriptor
+    number up to `_FD_SCAN_LIMIT` is `fstat`ed and matched to the lock file by
+    `(st_dev, st_ino)`, which names the same file whatever path it was opened
+    through. Either way this only NOMINATES candidates; possession is proven by
+    the `flock` check in :func:`find_inherited_lock_fd`.
+
+    Raises:
+        OSError: the lock file cannot be stat'ed, or `/proc` is unreadable.
+    """
+    if not PROC_SELF_FD.is_dir():
+        return _fds_matching_inode(lock_path), 0
+
+    matches: list[int] = []
+    unresolvable = 0
+    for entry in PROC_SELF_FD.iterdir():
+        try:
+            target = entry.readlink()
+        except OSError:
+            # /proc/self/fd is inherently racy against THIS process's own
+            # fds opening and closing between the listdir above and this
+            # readlink -- not resolving one candidate is not evidence about
+            # the lock, so keep scanning the rest. Counted, not silently
+            # dropped, so a caller logging the summary can see it.
+            unresolvable += 1
+            continue
+        if target != lock_path:
+            continue
+        try:
+            matches.append(int(entry.name))
+        except ValueError:
+            # Entries here are numeric by definition; a non-numeric one means
+            # the listing does not match what the kernel reports.
+            unresolvable += 1
+    return matches, unresolvable
+
+
+def _fds_matching_inode(lock_path: Path) -> list[int]:
+    """Descriptors 3.._FD_SCAN_LIMIT that are open on the file at ``lock_path``."""
+    if not lock_path.exists():
+        return []  # nothing has created the lock file, so no descriptor can be open on it
+    wanted = lock_path.stat()
+    soft_limit = resource.getrlimit(resource.RLIMIT_NOFILE)[0]
+    upper = (
+        _FD_SCAN_LIMIT if soft_limit == resource.RLIM_INFINITY else min(soft_limit, _FD_SCAN_LIMIT)
+    )
+    matches: list[int] = []
+    not_open = 0
+    for fd in range(_FIRST_INHERITABLE_FD, upper):
+        try:
+            seen = os.fstat(fd)
+        except OSError:
+            not_open += 1  # EBADF: the number is simply not an open descriptor
+            continue
+        if (seen.st_dev, seen.st_ino) == (wanted.st_dev, wanted.st_ino):
+            matches.append(fd)
+    logger.debug("probed fds %d..%d: %d not open", _FIRST_INHERITABLE_FD, upper, not_open)
+    return matches
 
 
 def find_inherited_lock_fd(project_root: Path) -> int | None:
@@ -191,30 +257,10 @@ def find_inherited_lock_fd(project_root: Path) -> int | None:
             unreadable, so nothing can be established either way.
     """
     lock_path = host_lock_path(project_root).resolve()
-    candidates = list(PROC_SELF_FD.iterdir())
+    candidates, skipped_unresolvable = _fds_open_on(lock_path)
 
-    skipped_unresolvable = 0
     skipped_not_the_holder = 0
-    for entry in candidates:
-        try:
-            target = entry.readlink()
-        except OSError:
-            # /proc/self/fd is inherently racy against THIS process's own
-            # fds opening and closing between the listdir above and this
-            # readlink -- not resolving one candidate is not evidence about
-            # the lock, so keep scanning the rest. Counted, not silently
-            # dropped, so a caller logging the summary below can see it.
-            skipped_unresolvable += 1
-            continue
-        if target != lock_path:
-            continue
-        try:
-            fd = int(entry.name)
-        except ValueError:
-            # /proc/self/fd entries are always numeric; this would mean the
-            # directory listing no longer matches what it reports.
-            skipped_unresolvable += 1
-            continue
+    for fd in candidates:
         try:
             fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except OSError:

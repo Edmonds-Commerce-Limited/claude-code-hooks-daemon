@@ -292,5 +292,69 @@ class TestReuseInheritedWithoutProc:
             assert fd >= 0
 
 
+_NO_PROC_CHILD = """
+import sys
+from pathlib import Path
+import claude_code_hooks_daemon.qa.full_qa_lock as m
+m.PROC_SELF_FD = Path("/nonexistent/proc/self/fd")
+root = Path(sys.argv[1])
+print("held", m.full_qa_lock_is_held(root), flush=True)
+with m.acquire_full_qa_lock(root, reuse_inherited=True) as fd:
+    print("reused", fd, flush=True)
+"""
+
+
+class TestInheritedLockWithoutProc:
+    """A child of a lock holder proves possession on a host with no /proc."""
+
+    def test_a_child_reuses_its_parents_lock_instead_of_waiting_on_it(self, tmp_path: Path) -> None:
+        import fcntl
+
+        main, _ = _init_repo_with_worktree(tmp_path)
+        parent_fd = open_lock_fd(main)
+        try:
+            fcntl.flock(parent_fd, fcntl.LOCK_EX)
+            result = subprocess.run(
+                [sys.executable, "-c", _NO_PROC_CHILD, str(main)],
+                pass_fds=(parent_fd,),
+                capture_output=True,
+                text=True,
+                timeout=30,
+                check=False,
+            )
+        finally:
+            os.close(parent_fd)
+
+        assert result.returncode == 0, result.stderr
+        assert "held True" in result.stdout
+        assert f"reused {parent_fd}" in result.stdout
+
+    def test_an_unrelated_holder_is_not_proof_without_proc(self, tmp_path: Path) -> None:
+        """The child inherits nothing: someone else holding the lock proves nothing."""
+        import fcntl
+
+        main, _ = _init_repo_with_worktree(tmp_path)
+        holder_fd = open_lock_fd(main)
+        try:
+            fcntl.flock(holder_fd, fcntl.LOCK_EX)
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    "-c",
+                    _NO_PROC_CHILD.split("with m.acquire")[0],
+                    str(main),
+                ],
+                capture_output=True,
+                text=True,
+                timeout=30,
+                check=False,
+            )
+        finally:
+            os.close(holder_fd)
+
+        assert result.returncode == 0, result.stderr
+        assert "held False" in result.stdout
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
