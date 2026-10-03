@@ -637,7 +637,7 @@ Denied wherever it appears, not only inside a loop: an advisory in a background 
 - `kill -0 "$pid"` / `ps -o pid= -p "$pid"` with a real captured pid
 - `ps aux | grep foo | grep -v grep`
 
-**Advisory, never blocking:** `R-UNBOUNDED-LIVENESS-LOOP` for a `while`/`until` wait on a process with a sleep-only body and no cap (a `run_in_background` call has no time limit), and `R-PGREP-UNRESOLVED-PATTERN` for a pattern built by expansion, which the daemon cannot read.
+**Advisory, never blocking:** `R-UNBOUNDED-LIVENESS-LOOP` for a `while`/`until` wait on a process with a sleep-only body and no cap (a `run_in_background` call has a time limit only in unattended sessions), and `R-PGREP-UNRESOLVED-PATTERN` for a pattern built by expansion, which the daemon cannot read.
 
 **Config example:**
 

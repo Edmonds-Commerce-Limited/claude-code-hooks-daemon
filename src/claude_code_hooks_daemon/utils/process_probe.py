@@ -216,8 +216,8 @@ class LivenessLoop:
     probe and whose BODY is nothing but ``sleep`` has no way to stop except by
     the probe changing its answer — so when the probe is wrong, the loop is a
     silent, unbounded wait. The Bash tool caps a FOREGROUND call at ten
-    minutes; a ``run_in_background`` call has no cap, which is where the
-    reported night went.
+    minutes; a ``run_in_background`` call is capped only in unattended sessions
+    (``-p``, Agent SDK, CI, cloud), which is where the reported night went.
 
     Attributes:
         keyword: ``while`` or ``until``.

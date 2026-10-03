@@ -27,8 +27,9 @@ Four rules, one family — a liveness signal that cannot be trusted:
   finished while it was in its fourth minute.
 * ``R-UNBOUNDED-LIVENESS-LOOP`` (advise) — a ``while``/``until`` wait on a
   process, with a sleep-only body and nothing capping it. The Bash tool caps a
-  FOREGROUND call at ten minutes; ``run_in_background`` has no cap, and that is
-  where the night went.
+  FOREGROUND call at ten minutes; ``run_in_background`` is capped only in
+  unattended sessions, so elsewhere it has no cap, and that is where the night
+  went.
 * ``R-PGREP-UNRESOLVED-PATTERN`` (advise) — the pattern is built by expansion,
   so it cannot be judged. Never denied: the daemon does not know what it says.
 
@@ -273,8 +274,9 @@ def _loop_detail(loop: LivenessLoop) -> str:
     return (
         f"Loop: `{loop.keyword} {loop.condition.strip()}` with a sleep-only body "
         "and no iteration cap.\n"
-        "WHY: a run_in_background call has no time limit, so if the probe is "
-        "ever wrong this waits for ever and looks exactly like patience."
+        "WHY: a run_in_background call has a time limit only in unattended "
+        "sessions, so if the probe is ever wrong this waits for ever and looks "
+        "exactly like patience."
     )
 
 
@@ -337,12 +339,17 @@ class SelfMatchingProcessProbeHandler(PreToolUseHandlerBase):
         self._loop_rule = Rule(
             rule_id=RuleID.UNBOUNDED_LIVENESS_LOOP,
             blocked="a `while`/`until` wait on a process with a sleep-only body and no cap",
-            why="run_in_background has no time limit, so a wrong probe waits for ever",
+            why=(
+                "run_in_background has a time limit only in unattended sessions, "
+                "so a wrong probe waits for ever"
+            ),
             fix="Wrap it in `timeout 3600 bash -c '…'`, add a counter, or wait on a log marker",
             verbose=(
                 "The Bash tool caps a FOREGROUND call at ten minutes. A "
-                "`run_in_background` call has no cap at all, so an uncapped wait "
-                "on a process can idle indefinitely — and it looks exactly like "
+                "`run_in_background` call is capped (30 minutes by default) only "
+                "in unattended sessions (`-p`, Agent SDK, CI, cloud); in a "
+                "terminal, desktop or VS Code session an uncapped wait on a "
+                "process can idle indefinitely — and it looks exactly like "
                 "patience the whole time.\n\n"
                 "Bound it, or remove the need for it:\n"
                 "  timeout 3600 bash -c 'until ! <probe>; do sleep 10; done'\n"
