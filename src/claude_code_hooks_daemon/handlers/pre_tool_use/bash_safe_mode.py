@@ -71,6 +71,14 @@ _FLAG_SPELLING: Final[dict[str, str]] = {
     "nounset": "set -u",
 }
 
+#: N328: worded around the CURRENT harness behaviour, which could change.
+_HARNESS_ERREXIT: Final = (
+    "Under the current Claude Code Bash tool a top-level `set -e` does not stop "
+    "the command: the tool runs it inside an `&&` list, where bash ignores "
+    "errexit (this includes `{ }` groups and subshells). `pipefail` and `-u` "
+    "still work; only a fresh `bash -c` process stops on errexit."
+)
+
 #: The blind-spot education block. Shown verbatim wherever the handler
 #: speaks, so an enabling project never mistakes the prelude for a guarantee.
 #: Deliberately does NOT claim `rc=$?` capture survives `set -e` — it does
@@ -83,7 +91,17 @@ _BLIND_SPOTS: Final = (
     "status; the assignment succeeds.\n"
     "- `cmd | head` under `pipefail` can fail on SIGPIPE alone — `pipefail` "
     "turns some benign shapes into failures, which is the point but surprises "
-    "people."
+    "people.\n"
+    f"- {_HARNESS_ERREXIT}"
+)
+
+#: N328: the forms that really stop on failure, led with wherever the handler
+#: speaks. The first two need no errexit at all.
+_STOPPING_FORMS: Final = (
+    "Forms that actually stop on a failing step:\n"
+    "  step_one && step_two                 # `&&` chaining\n"
+    "  step_one || exit 1                   # explicit exit on each step\n"
+    "  bash -c 'set -euo pipefail; step_one; step_two'   # a fresh process"
 )
 
 
@@ -134,7 +152,11 @@ class BashSafeModeHandler(PreToolUseHandlerBase):
             rule_id=RuleID.BASH_SAFE_MODE_PRELUDE_MISSING,
             blocked="a sequenced Bash invocation with no `set` safety prelude",
             why="Errors in earlier statements can be silently ignored",
-            fix="Add `set -euo pipefail` at the top, or gate explicitly with `&&`/`|| exit 1`",
+            fix=(
+                "Gate with `&&` or `|| exit 1`, or run the body in "
+                "`bash -c 'set -euo pipefail; …'` -- a top-level `set -e` does not "
+                "stop the command under the current Claude Code Bash tool"
+            ),
             verbose=_BLIND_SPOTS,
         )
         self._formatter = RuleFormatter()
@@ -246,9 +268,12 @@ class BashSafeModeHandler(PreToolUseHandlerBase):
 
     @staticmethod
     def _missing_detail(missing: tuple[str, ...]) -> str:
-        """One-line naming of the missing flags and their remedy spelling."""
-        remedy = "; ".join(_FLAG_SPELLING[flag] for flag in missing)
-        return f"Missing: {', '.join(missing)}. Add: `{remedy}`."
+        """One-line naming of the missing flags, pointing at forms that stop."""
+        return (
+            f"Missing: {', '.join(missing)}. Prefer `&&` / `|| exit 1` or "
+            "`bash -c 'set -euo pipefail; …'`: a top-level `set -e` does not stop "
+            "the command under the current Claude Code Bash tool."
+        )
 
     def _missing_flags(self, command: str) -> tuple[str, ...]:
         """Required flags the command does not declare, or () when out of scope."""
@@ -289,20 +314,31 @@ class BashSafeModeHandler(PreToolUseHandlerBase):
         return any(pattern.search(command) for pattern in self._exempt_patterns)
 
     def _message(self, missing: tuple[str, ...]) -> str:
-        remedy = "; ".join(_FLAG_SPELLING[flag] for flag in missing)
         return (
             "BASH SAFE MODE: this multi-statement invocation declares no "
-            f"safety prelude for: {', '.join(missing)}.\n\n"
-            f"Add the prelude at the top of the invocation (e.g. `{remedy}`, "
-            "or the combined `set -euo pipefail`), or gate the statements "
-            "explicitly with `&&` / `|| { ...; exit 1; }`.\n\n"
+            f"safety prelude for: {', '.join(missing)}.\n\n{self._remedy_body(missing)}"
+        )
+
+    @staticmethod
+    def _remedy_body(missing: tuple[str, ...]) -> str:
+        """The shared body of the warn and block messages (N328).
+
+        Leads with the forms that stop on failure under Claude Code; the
+        prelude is still accepted, and still worth having for ``pipefail``.
+        """
+        remedy = "; ".join(_FLAG_SPELLING[flag] for flag in missing)
+        return (
+            f"{_STOPPING_FORMS}\n\n"
+            f"A declared prelude (e.g. `{remedy}`, or the combined "
+            "`set -euo pipefail`) still satisfies this check and still gives you "
+            "`pipefail` and `-u`, but it is not what stops a failing step.\n\n"
             f"{_BLIND_SPOTS}\n\n"
             "If this command legitimately must run every statement regardless "
             "of failures (a diagnostic sweep, an exit-code observer), declare "
             "it in the command itself:\n"
             f'  {_ESCAPE_HATCH}="explain why"; <command>\n\n'
-            "Its sibling `verification_result_gate` already stands down when a "
-            "prelude is present, so the two never double-fire."
+            "Its sibling `verification_result_gate` does NOT accept a top-level "
+            "`set -e` as consuming a verifier's result, for the same reason."
         )
 
     def _block_message(self, missing: tuple[str, ...]) -> str:
@@ -313,21 +349,10 @@ class BashSafeModeHandler(PreToolUseHandlerBase):
         static ``Rule.verbose`` cannot carry — Migration Pattern) with the
         rule_id prefix the Plan 00116 parity contract requires.
         """
-        remedy = "; ".join(_FLAG_SPELLING[flag] for flag in missing)
         return (
             f"BLOCKED [{RuleID.BASH_SAFE_MODE_PRELUDE_MISSING}]: this "
             f"multi-statement invocation declares no safety prelude for: "
-            f"{', '.join(missing)}.\n\n"
-            f"Add the prelude at the top of the invocation (e.g. `{remedy}`, "
-            "or the combined `set -euo pipefail`), or gate the statements "
-            "explicitly with `&&` / `|| { ...; exit 1; }`.\n\n"
-            f"{_BLIND_SPOTS}\n\n"
-            "If this command legitimately must run every statement regardless "
-            "of failures (a diagnostic sweep, an exit-code observer), declare "
-            "it in the command itself:\n"
-            f'  {_ESCAPE_HATCH}="explain why"; <command>\n\n'
-            "Its sibling `verification_result_gate` already stands down when a "
-            "prelude is present, so the two never double-fire."
+            f"{', '.join(missing)}.\n\n{self._remedy_body(missing)}"
         )
 
     def get_claude_md(self) -> str | None:
@@ -341,12 +366,15 @@ class BashSafeModeHandler(PreToolUseHandlerBase):
             "is only checked where configured). A command already carrying the "
             "prelude, a single statement, and a pure `&&` chain are never "
             "flagged.\n\n"
-            "**Fix when blocked**: put `set -euo pipefail` at the top of the "
-            "command, or chain the statements with `&&`.\n\n"
+            "**Fix when blocked**: chain the statements with `&&`, add "
+            "`|| exit 1` to each step, or run the body in "
+            "`bash -c 'set -euo pipefail; …'`. A top-level prelude "
+            "(`set -euo pipefail`) is still accepted, but it does not stop a "
+            "failing step: " + _HARNESS_ERREXIT + "\n\n"
             f"{_BLIND_SPOTS}\n\n"
             "Because of those blind spots, do NOT drop explicit gating "
-            "(`&&`, `|| exit 1`) just because the prelude is present — the "
-            "prelude is a floor, not a replacement for consuming results.\n\n"
+            "(`&&`, `|| exit 1`) just because a prelude is present — the "
+            "prelude is not a replacement for consuming results.\n\n"
             "**Escape hatch** for commands that must run every statement "
             "(diagnostic sweeps, exit-code observers):\n\n"
             "```\n"

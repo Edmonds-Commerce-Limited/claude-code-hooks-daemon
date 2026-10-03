@@ -161,10 +161,74 @@ class TestConsumedResults:
     @pytest.mark.parametrize(
         "set_line", ["set -e", "set -euo pipefail", "set -o errexit", "set -eu"]
     )
-    def test_set_e_gates_the_whole_invocation(
+    def test_a_top_level_set_e_does_not_gate_the_invocation(
         self, handler: VerificationResultGateHandler, set_line: str
     ) -> None:
-        assert not _fires(handler, f"{set_line}\nansible-lint x\ngit commit -m y")
+        """N328: the Claude Code Bash tool runs the command inside an `&&`
+        list, where bash ignores errexit, so a top-level `set -e` stops
+        nothing and must not count as consuming the verifier's result."""
+        assert _fires(handler, f"{set_line}\nansible-lint x\ngit commit -m y")
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "set -euo pipefail; pytest tests/x; git commit -m x",
+            "{ set -e; pytest tests/x; git commit -m x; }",
+            "( set -e; pytest tests/x; git commit -m x )",
+        ],
+    )
+    def test_set_e_prelude_shapes_are_still_flagged(
+        self, handler: VerificationResultGateHandler, command: str
+    ) -> None:
+        assert _fires(handler, command)
+
+    def test_a_fresh_bash_c_process_with_errexit_is_not_flagged(
+        self, handler: VerificationResultGateHandler
+    ) -> None:
+        """A `bash -c` is a new process outside the harness's `&&` list, so
+        its own `set -e` does stop on failure."""
+        assert not _fires(handler, "bash -c 'set -euo pipefail; pytest tests/x; git commit -m x'")
+        assert not _fires(handler, "bash -euo pipefail -c 'pytest tests/x; git commit -m x'")
+
+    def test_a_bash_heredoc_script_that_sets_errexit_is_not_flagged(
+        self, handler: VerificationResultGateHandler
+    ) -> None:
+        command = "bash <<'EOF'\nset -euo pipefail\npytest tests/x\ngit commit -m x\nEOF"
+        assert not _fires(handler, command)
+
+    def test_a_bash_heredoc_script_without_errexit_is_flagged(
+        self, handler: VerificationResultGateHandler
+    ) -> None:
+        command = "bash <<'EOF'\npytest tests/x\ngit commit -m x\nEOF"
+        assert _fires(handler, command)
+
+    def test_an_outer_set_e_does_not_excuse_a_bash_heredoc_script(
+        self, handler: VerificationResultGateHandler
+    ) -> None:
+        command = "set -e\nbash <<'EOF'\npytest tests/x\ngit commit -m x\nEOF"
+        assert _fires(handler, command)
+
+    def test_the_fix_text_no_longer_offers_set_e(
+        self, handler: VerificationResultGateHandler
+    ) -> None:
+        fix = handler.get_rules()[0].fix
+        assert "bash -c 'set -euo pipefail" in fix
+        assert fix.index("bash -c") < fix.index("set -euo pipefail")
+        assert "or `set -euo pipefail`" not in fix
+        rendered = handler.handle(_bash("pytest tests/x\ngit commit -m x")).guidance or ""
+        assert "set -euo pipefail   #" not in rendered
+        assert "bash -c" in rendered
+        claude_md = handler.get_claude_md() or ""
+        assert "at the top of the invocation" not in claude_md
+        assert "bash -c" in claude_md
+        assert "current Claude Code Bash tool" in claude_md
+
+    def test_an_acceptance_test_denies_a_set_e_prelude(
+        self, handler: VerificationResultGateHandler
+    ) -> None:
+        fixture = next(t for t in handler.get_acceptance_tests() if "set -e prelude" in t.title)
+        assert fixture.expected_decision == Decision.ALLOW
+        assert _fires(handler, fixture.command)
 
     def test_a_mutator_inside_a_quoted_heredoc_body_is_not_executed(
         self, handler: VerificationResultGateHandler
