@@ -421,7 +421,6 @@ def _host_for(tmp_path: Path, names: list[str]) -> Any:
         specs,
         write_status=lambda entries: None,
         allowed_uids=_OWN_UIDS,
-        state_root=tmp_path / "state",
         status_dir=tmp_path / "untracked",
         marker_path=tmp_path / "untracked" / "supervise" / "marker.json",
     )
@@ -629,7 +628,6 @@ def _live_supervise(
         [spec("culprit", path)],
         write_status=lambda entries: None,
         allowed_uids=_OWN_UIDS,
-        state_root=tmp_path / "ccy-state" / "plugins",
         status_dir=untracked,
         marker_path=_mod._plugin_marker_path(untracked, os.getpid()),
     )
@@ -711,7 +709,6 @@ class TestLoadRefusalsReachTheSession:
             [spec("loose", path)],
             write_status=lambda entries: None,
             allowed_uids=_OWN_UIDS,
-            state_root=tmp_path / "state",
             status_dir=tmp_path / "untracked",
             marker_path=tmp_path / "untracked" / "supervise" / "marker.json",
         )

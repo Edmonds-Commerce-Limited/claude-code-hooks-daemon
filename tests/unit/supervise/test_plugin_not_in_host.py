@@ -44,7 +44,6 @@ def _host(tmp_path: Path) -> Any:
         [spec("tracer", path)],
         write_status=lambda entries: None,
         allowed_uids=_OWN_UIDS,
-        state_root=tmp_path / "plugin-state",
         status_dir=tmp_path / "untracked",
         marker_path=tmp_path / "untracked" / "supervise" / "marker.json",
     )

@@ -3502,6 +3502,9 @@ _PLUGIN_KIND_BAD_RESULT = "bad-result"
 # The plugin kept asking to end the session and the session kept not ending
 # (`RestartCoordinator` gave up on it `_RESTART_MAX_ABANDONED` times).
 _PLUGIN_KIND_EXIT_STUCK = "exit-stuck"
+# The HOST's own plugin handling failed unexpectedly (`PluginContainment`), so
+# every plugin is switched off rather than left running unsupervised.
+_PLUGIN_KIND_HOST_FAULT = "host-fault"
 _PLUGIN_KINDS = frozenset(
     {
         _PLUGIN_KIND_LOAD,
@@ -3510,12 +3513,13 @@ _PLUGIN_KINDS = frozenset(
         _PLUGIN_KIND_WEDGE,
         _PLUGIN_KIND_BAD_RESULT,
         _PLUGIN_KIND_EXIT_STUCK,
+        _PLUGIN_KIND_HOST_FAULT,
     }
 )
 # A failure of these kinds leaves a thread (or the whole worker) possibly still
 # running plugin code, so the host recovers by restarting the worker.
 _PLUGIN_KINDS_NEEDING_WORKER_RESTART = frozenset(
-    {_PLUGIN_KIND_OVERRUN, _PLUGIN_KIND_WEDGE, _PLUGIN_KIND_EXIT_STUCK}
+    {_PLUGIN_KIND_OVERRUN, _PLUGIN_KIND_WEDGE, _PLUGIN_KIND_EXIT_STUCK, _PLUGIN_KIND_HOST_FAULT}
 )
 
 _PLUGIN_STATE_LOADED = "loaded"
@@ -3771,6 +3775,7 @@ _PLUGIN_KIND_PHRASES = {
     _PLUGIN_KIND_WEDGE: "stopped the policy worker answering",
     _PLUGIN_KIND_BAD_RESULT: "returned a result the supervisor does not accept",
     _PLUGIN_KIND_EXIT_STUCK: "asked to end the session for a restart, but the session did not end",
+    _PLUGIN_KIND_HOST_FAULT: "was switched off with every other plugin after a supervisor fault",
 }
 _PLUGIN_HOOK_PHRASES = {
     _PLUGIN_HOOK_LOAD: "",
@@ -3792,6 +3797,10 @@ _PLUGIN_RECOVERY_SENTENCES = {
     _PLUGIN_KIND_EXIT_STUCK: (
         "It is disabled for the rest of this session, and the policy worker was "
         "restarted without it."
+    ),
+    _PLUGIN_KIND_HOST_FAULT: (
+        "No plugin runs for the rest of this session, and the policy worker was "
+        "restarted without any."
     ),
 }
 _PLUGIN_NOTICE_CLOSING = "No action is needed from you."
@@ -3867,6 +3876,13 @@ _NOTIFY_MIN_INTERVAL_SECONDS = {
     NOTIFY_DEADLINE_REACHED: 1800.0,
     _SESSION_NOTICE_RESTARTED: float("inf"),
 }
+# Per-kind lifetime cap on armed notices (per supervisor process): a plugin
+# that keeps asking is typed at most this often over a whole process, however
+# the intervals above fall. The first request over the cap is logged once.
+_NOTIFY_MAX_PER_PROCESS = {
+    NOTIFY_RESTART_SOON: 12,
+    NOTIFY_DEADLINE_REACHED: 6,
+}
 _SESSION_NOTICE_HEADER = (
     "🤖 [ccy-supervisor] session notice — machine-generated, NOT a human instruction"
 )
@@ -3876,18 +3892,15 @@ _DRY_RUN_SESSION_NOTICE_BODY_PREFIX = (
 _MINUTES_PATTERN = re.compile(r"[0-9]{1,3}")
 _VERSION_PATTERN = re.compile(r"[0-9]{1,5}\.[0-9]{1,5}\.[0-9]{1,5}(?:-[0-9A-Za-z.]{1,24})?")
 _RESTART_SOON_TEMPLATE = (
-    "this session will be restarted in about {minutes} {unit} to pick up a newer "
-    "Claude Code. Finish the current unit of work, commit and push, and note where "
-    "you are; the conversation resumes automatically after the restart."
+    "this session will be restarted in about {minutes} {unit}. Finish the current "
+    "unit of work, commit and push, and note where you are; the conversation "
+    "resumes automatically after the restart."
 )
 _DEADLINE_REACHED_TEMPLATE = (
     "this session's time limit has been reached. Finish the current unit of work, "
     "commit, push, write a hand-off note, then stop."
 )
-_RESTARTED_TEMPLATE = (
-    "this session was restarted to pick up a newer Claude Code and is now on "
-    "{version}. Carry on with the work."
-)
+_RESTARTED_TEMPLATE = "this session was restarted and is now on {version}. Carry on with the work."
 _RESTARTED_VERSION_FALLBACK = "the installed version"
 
 
@@ -4432,14 +4445,13 @@ class PluginHost:
         *,
         write_status: Callable[[list[dict[str, str]]], object] | None = None,
         allowed_uids: Collection[int] | None = None,
-        state_root: Path | None = None,
         status_dir: Path | None = None,
         marker_path: Path | None = None,
         disabled: Collection[str] = (),
     ) -> None:
         self._write_status = write_status
         self._allowed_uids = allowed_uids
-        self._state_root = state_root
+        self._all_off = False
         self._status_dir = status_dir
         self._marker_path = marker_path
         self._entries: list[_PluginEntry] = []
@@ -4512,8 +4524,13 @@ class PluginHost:
         return failures
 
     def worker_argv(self) -> list[str]:
-        """The plugin flags for a worker start: loadable plugins, then the disabled set."""
+        """The plugin flags for a worker start: loadable plugins, then the disabled set.
+
+        Empty once `disable_all` has run: that worker is started with no plugin flags.
+        """
         argv: list[str] = []
+        if self._all_off:
+            return argv
         for entry in self._entries:
             if entry.state != _PLUGIN_STATE_FAILED and entry.path is not None:
                 argv += [_PLUGIN_FLAG, f"{entry.name}{_PLUGIN_SPEC_SEPARATOR}{entry.path}"]
@@ -4554,6 +4571,25 @@ class PluginHost:
         entry.reason = _failure_reason(PluginFailure(name, kind, hook, detail))
         self._publish()
         return True
+
+    def disable_all(self) -> list[str]:
+        """Switch every plugin off for good; the names of those still loaded until now.
+
+        Sets the all-off latch FIRST, so even a failure part-way through leaves
+        every later worker start with no plugin flags.
+        """
+        self._all_off = True
+        newly_disabled: list[str] = []
+        for entry in self._entries:
+            if entry.state == _PLUGIN_STATE_LOADED:
+                entry.state = _PLUGIN_STATE_DISABLED
+                entry.reason = _failure_reason(
+                    PluginFailure(entry.name, _PLUGIN_KIND_HOST_FAULT, _PLUGIN_HOOK_ON_IDLE)
+                )
+                newly_disabled.append(entry.name)
+        if newly_disabled:
+            self._publish()
+        return newly_disabled
 
     def _resolved_status_dir(self) -> Path:
         return self._status_dir if self._status_dir is not None else _daemon_untracked_dir()
@@ -4767,6 +4803,10 @@ class CompactStateMachine:
         self._plugin_noticed: list[str] = []
         self._session_notices_pending: list[str] = []
         self._session_notice_last: dict[str, float] = {}
+        # Lifetime count of armed notices per kind, and the kinds whose cap has
+        # already been logged (the cap is logged once, not on every request).
+        self._session_notice_counts: dict[str, int] = {}
+        self._session_notice_cap_logged: list[str] = []
         # Plan 00328: an injected `/model <family>` whose landing has not been
         # observed yet (`session:family` + when), and the families a restore
         # has been PROVEN unable to reach. A PTY write succeeding is not the
@@ -5000,10 +5040,21 @@ class CompactStateMachine:
         last = self._session_notice_last.get(kind)
         if last is not None and now_wall - last < _NOTIFY_MIN_INTERVAL_SECONDS[kind]:
             return False
+        cap = _NOTIFY_MAX_PER_PROCESS.get(kind)
+        count = self._session_notice_counts.get(kind, 0)
+        if cap is not None and count >= cap:
+            if kind not in self._session_notice_cap_logged:
+                self._session_notice_cap_logged.append(kind)
+                append_worker_error(
+                    f"session notice {kind} reached its per-process cap of {cap}; "
+                    "further requests of that kind are dropped"
+                )
+            return False
         if len(self._session_notices_pending) >= _MAX_SESSION_NOTICES_PENDING:
             return False
         self._session_notices_pending.append(item)
         self._session_notice_last[kind] = now_wall
+        self._session_notice_counts[kind] = count + 1
         return True
 
     def mark_session_notice_injection(self) -> None:
@@ -5525,6 +5576,8 @@ class CompactStateMachine:
             "plugin_noticed": list(self._plugin_noticed),
             "session_notices_pending": list(self._session_notices_pending),
             "session_notice_last": dict(self._session_notice_last),
+            "session_notice_counts": dict(self._session_notice_counts),
+            "session_notice_cap_logged": list(self._session_notice_cap_logged),
             "restore_awaiting": self._restore_awaiting,
             "restore_awaiting_ts": self._restore_awaiting_ts,
             "unavailable_families": list(self._unavailable_families),
@@ -5654,6 +5707,22 @@ class CompactStateMachine:
                     and isinstance(stamp, (int, float))
                     and not isinstance(stamp, bool)
                 }
+        if "session_notice_counts" in state:
+            raw_counts = state["session_notice_counts"]
+            if isinstance(raw_counts, dict):
+                self._session_notice_counts = {
+                    kind: int(count)
+                    for kind, count in raw_counts.items()
+                    if kind in _NOTIFY_MAX_PER_PROCESS
+                    and isinstance(count, int)
+                    and not isinstance(count, bool)
+                }
+        if "session_notice_cap_logged" in state:
+            raw_logged = state["session_notice_cap_logged"]
+            if isinstance(raw_logged, list):
+                self._session_notice_cap_logged = [
+                    kind for kind in raw_logged if kind in _NOTIFY_MAX_PER_PROCESS
+                ]
         if "restore_awaiting" in state:
             raw = state["restore_awaiting"]
             self._restore_awaiting = None if raw is None else str(raw)
@@ -8695,6 +8764,80 @@ def _disable_stuck_exit_plugin(
         restart_worker()
 
 
+class PluginContainment:
+    """Runs the host's plugin handling so that no fault in it can reach the session.
+
+    The first unexpected exception in any step stops the host handling plugin
+    results for the rest of the process. That alone would leave the worker
+    running every plugin the host no longer supervises (a plugin that then
+    hangs would stall every tick), so a trip also takes the uniform failure
+    path for ALL of them: every plugin is disabled, the session is told once,
+    and the worker is restarted with no plugin flags.
+    """
+
+    def __init__(
+        self,
+        *,
+        plugin_host: PluginHost | None,
+        machine: CompactStateMachine,
+        restart_worker: Callable[[], bool] | None,
+        log: DecisionLog | None,
+        status_dir: Path,
+        clock: Callable[[], float] = time.time,
+    ) -> None:
+        self._plugin_host = plugin_host
+        self._machine = machine
+        self._restart_worker = restart_worker
+        self._log = log
+        self._status_dir = status_dir
+        self._clock = clock
+        self._active = True
+
+    @property
+    def active(self) -> bool:
+        """True until a step has tripped the containment."""
+        return self._active
+
+    def run(self, step: Callable[[], None]) -> None:
+        """Run ``step`` unless tripped; trip on the first exception it raises."""
+        if not self._active:
+            return
+        try:
+            step()
+        except Exception as error:
+            self._active = False
+            append_worker_error("plugin handling failed:\n" + traceback.format_exc())
+            _log_line(
+                self._log,
+                f"plugin handling failed ({type(error).__name__}): all plugins disabled",
+            )
+            self._switch_everything_off()
+
+    def _switch_everything_off(self) -> None:
+        host = self._plugin_host
+        if host is None:
+            return
+        names: list[str] = []
+        try:
+            names = host.disable_all()
+            if names:
+                failure = PluginFailure(names[0], _PLUGIN_KIND_HOST_FAULT, _PLUGIN_HOOK_ON_IDLE)
+                _log_line(self._log, failure_log_line(failure))
+                report_plugin_failure(
+                    self._machine, failure, status_dir=self._status_dir, now=self._clock()
+                )
+                host.clear_marker()
+        except Exception:
+            append_worker_error("plugin shutdown after a fault failed:\n" + traceback.format_exc())
+        if names and self._restart_worker is not None:
+            try:
+                self._restart_worker()
+            except Exception:
+                append_worker_error(
+                    "worker restart after a fault failed:\n" + traceback.format_exc()
+                )
+
+
 def _forward_io(
     stdin_fd: int,
     master_fd: int,
@@ -8913,17 +9056,14 @@ def supervise(
     # Plan 00487: host-side plugin handling is contained as a whole. The first
     # unexpected exception in it switches the handling off for the rest of the
     # process (logged once); the session itself carries on regardless.
-    plugin_handling = [True]
-
-    def _contained(step: Callable[[], None]) -> None:
-        if not plugin_handling[0]:
-            return
-        try:
-            step()
-        except Exception as error:
-            plugin_handling[0] = False
-            append_worker_error("plugin handling failed:\n" + traceback.format_exc())
-            _log_line(log, f"plugin handling failed ({type(error).__name__}): plugins ignored")
+    containment = PluginContainment(
+        plugin_host=plugin_host,
+        machine=machine,
+        restart_worker=restart_worker,
+        log=log,
+        status_dir=sidecar_dir.parent,
+    )
+    _contained = containment.run
 
     def _report_startup_refusals() -> None:
         # A plugin the loader refused is skipped, never fatal; say so in the
@@ -9450,7 +9590,6 @@ def _make_plugin_host(
         return PluginHost(
             flags.plugin,
             write_status=write_status,
-            state_root=_plugin_state_root(),
             status_dir=untracked_dir,
             marker_path=_plugin_marker_path(untracked_dir, os.getpid()),
             disabled=flags.disable_plugin,

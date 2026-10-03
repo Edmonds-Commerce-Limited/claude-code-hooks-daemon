@@ -108,12 +108,12 @@ class TestRendering:
         text = _mod.render_session_notice("restart-soon", "25")
         assert text.startswith(f"{_HEADER}: ")
         assert "restarted in about 25 minutes" in text
-        assert "newer Claude Code" in text
+        assert "Claude Code" not in text  # a restart can be for session age, not a new version
         assert "commit and push" in text
         assert "resumes automatically" in text
 
     def test_one_minute_is_singular(self) -> None:
-        assert "in about 1 minute " in _mod.render_session_notice("restart-soon", "1")
+        assert "in about 1 minute. " in _mod.render_session_notice("restart-soon", "1")
 
     def test_deadline_reached(self) -> None:
         text = _mod.render_session_notice("deadline-reached", "")
@@ -125,8 +125,8 @@ class TestRendering:
     def test_restarted_names_the_version(self) -> None:
         text = _mod.render_session_notice("restarted", "2.1.99")
         assert text.startswith(f"{_HEADER}: ")
-        assert "restarted to pick up a newer Claude Code" in text
-        assert "now on version 2.1.99" in text
+        assert "was restarted and is now on version 2.1.99" in text
+        assert "newer" not in text
         assert "carry on" in text.lower()
 
     def test_restarted_without_a_version_says_the_installed_version(self) -> None:
@@ -198,6 +198,52 @@ class TestQueueAndRateLimit:
         assert not machine.arm_session_notice("restart-soon", "0", now_wall=1.0)
         assert not machine.arm_session_notice("made-up", "", now_wall=1.0)
         assert machine.session_notices_pending == ()
+
+    def test_a_notify_kind_has_a_lifetime_cap_after_which_it_is_dropped(self) -> None:
+        machine = _machine()
+        interval = _mod._NOTIFY_MIN_INTERVAL_SECONDS["restart-soon"]
+        cap = _mod._NOTIFY_MAX_PER_PROCESS["restart-soon"]
+        now = 100.0
+        for _ in range(cap):
+            assert machine.arm_session_notice("restart-soon", "30", now_wall=now)
+            machine.mark_session_notice_injection()
+            now += interval + 1
+        assert not machine.arm_session_notice("restart-soon", "30", now_wall=now)
+        assert machine.session_notices_pending == ()
+        # Another kind has its own count.
+        assert machine.arm_session_notice("deadline-reached", "", now_wall=now)
+
+    def test_the_cap_is_logged_once(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        errors: list[str] = []
+        monkeypatch.setattr(_mod, "append_worker_error", errors.append)
+        machine = _machine()
+        interval = _mod._NOTIFY_MIN_INTERVAL_SECONDS["restart-soon"]
+        cap = _mod._NOTIFY_MAX_PER_PROCESS["restart-soon"]
+        now = 100.0
+        for _ in range(cap + 3):
+            machine.arm_session_notice("restart-soon", "30", now_wall=now)
+            machine.mark_session_notice_injection()
+            now += interval + 1
+        assert len(errors) == 1
+        assert "restart-soon" in errors[0]
+
+    def test_the_count_and_the_logged_flag_survive_a_state_round_trip(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        errors: list[str] = []
+        monkeypatch.setattr(_mod, "append_worker_error", errors.append)
+        machine = _machine()
+        interval = _mod._NOTIFY_MIN_INTERVAL_SECONDS["restart-soon"]
+        cap = _mod._NOTIFY_MAX_PER_PROCESS["restart-soon"]
+        now = 100.0
+        for _ in range(cap + 1):
+            machine.arm_session_notice("restart-soon", "30", now_wall=now)
+            machine.mark_session_notice_injection()
+            now += interval + 1
+        other = _machine()
+        other.import_state(machine.export_state())
+        assert not other.arm_session_notice("restart-soon", "30", now_wall=now)
+        assert len(errors) == 1  # not logged again by the peer
 
     def test_restarted_is_armed_only_once_per_process(self) -> None:
         machine = _machine()

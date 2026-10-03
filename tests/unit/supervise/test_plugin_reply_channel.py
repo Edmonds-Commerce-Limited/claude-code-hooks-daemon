@@ -64,7 +64,6 @@ def _live_worker(live_env: Path, name: str, body: str) -> Any:
         [spec(name, path)],
         write_status=lambda entries: None,
         allowed_uids=_OWN_UIDS,
-        state_root=live_env / "ccy-state" / "plugins",
         status_dir=live_env / "untracked",
         marker_path=_mod._plugin_marker_path(live_env / "untracked", os.getpid()),
     )

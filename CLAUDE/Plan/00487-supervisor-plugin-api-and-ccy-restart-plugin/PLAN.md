@@ -76,6 +76,12 @@ The agent's rulings on ordering, plugin location and restart policy, made while 
   - an abandoned exit-for-restart has a cooldown and a per-plugin cap, after which the plugin is disabled with its notice (`test_plugin_exit_for_restart.py`);
   - the exit reason is read inside the hook budget and must be a plain `str`; host-side plugin setup and handling are contained (`test_plugin_containment.py`).
 
+- [x] ✅ **Phase 1 review fixes, round 2** (opus review, [report](subagent-reports/261003-phase-1-review-round-2-opus.md), verdict APPROVE with three required fixes), all test-first:
+
+  - a tripped host containment now disables every plugin (one notice, kind `host-fault`) and restarts the worker with no plugin flags, so a plugin that hangs afterwards can no longer stall the tick loop (`test_plugin_trip.py`, including a live hang-after-trip run);
+  - each Notify kind has a per-process lifetime cap, logged once when reached (`test_session_notices.py`);
+  - the RESTART_SOON and RESTARTED sentences no longer claim a newer Claude Code (a restart can be for session age); the unused `state_root` parameter of `PluginHost` is removed.
+
 - [ ] ⬜ **Task 1.4**: TDD the in-container `Restart` primitive, which the credential switch needs. It is not on this plan's critical path:
 
   - refuse when the session id is ambiguous;

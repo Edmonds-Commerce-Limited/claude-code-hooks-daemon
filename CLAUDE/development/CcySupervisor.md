@@ -291,10 +291,12 @@ unconfirmed own line). `Decision.WOULD_SESSION_NOTICE` is the decision; a dry ru
 types a marked demonstration. A notice is **rate-limited per kind**
 (`_NOTIFY_MIN_INTERVAL_SECONDS`: 600 s for `restart-soon`, 1800 s for
 `deadline-reached`), so a plugin may return the same `Notify` on every idle tick
-and be typed once per interval. The plugin is not asked while a notice is waiting
-to be typed.
+and be typed once per interval. Each Notify kind also has a **per-process lifetime
+cap** (`_NOTIFY_MAX_PER_PROCESS`: 12 for `restart-soon`, 6 for `deadline-reached`);
+past it further requests of that kind are dropped and the cap is logged once. The
+plugin is not asked while a notice is waiting to be typed.
 
-> 🤖 [ccy-supervisor] session notice — machine-generated, NOT a human instruction: this session will be restarted in about 25 minutes to pick up a newer Claude Code. Finish the current unit of work, commit and push, and note where you are; the conversation resumes automatically after the restart.
+> 🤖 [ccy-supervisor] session notice — machine-generated, NOT a human instruction: this session will be restarted in about 25 minutes. Finish the current unit of work, commit and push, and note where you are; the conversation resumes automatically after the restart.
 
 > 🤖 [ccy-supervisor] session notice — machine-generated, NOT a human instruction: this session's time limit has been reached. Finish the current unit of work, commit, push, write a hand-off note, then stop.
 
@@ -310,7 +312,7 @@ session is left alone, and a garbled or stale one is removed. It then runs
 `<child> --version` (bounded to 3 seconds, no shell, first token validated against
 a version pattern) and types, once, at the first idle point:
 
-> 🤖 [ccy-supervisor] session notice — machine-generated, NOT a human instruction: this session was restarted to pick up a newer Claude Code and is now on version 2.1.99. Carry on with the work.
+> 🤖 [ccy-supervisor] session notice — machine-generated, NOT a human instruction: this session was restarted and is now on version 2.1.99. Carry on with the work.
 
 When the version cannot be read, the wording is "is now on the installed version".
 Nothing on this path can stop the session starting: any failure just means no
@@ -407,9 +409,13 @@ idempotent, so a reply the host discarded as stale cannot lose a failure.
 **Host-side containment.** Every host-side step that touches plugins (vetting the
 flags, building the registry, building the worker argv, reporting load refusals,
 handling a worker reply, judging a silent worker) is wrapped: an unexpected
-exception skips that plugin or, in the PTY loop, switches plugin handling off for
-the rest of the process with one `decision.log` line. The session always starts
-and keeps running.
+exception skips that plugin or, in the PTY loop, trips `PluginContainment`: the
+host stops handling plugin results for the rest of the process, **disables every
+plugin** through the uniform failure path (kind `host-fault`, one notice, one
+`decision.log` line), and restarts the worker with **no plugin flags**, so nothing
+the host no longer supervises keeps running (a plugin that then hangs would
+otherwise stall every tick for the worker's read timeout). The session always
+starts and keeps running.
 
 **What this cannot cover.** A worker half that wedges in C code holding the GIL
 is caught only by the host's read timeout and the worker restart; the PTY host is
