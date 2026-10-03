@@ -73,6 +73,14 @@ class TestRecordShape:
             if value != UNKNOWN:
                 assert (REPO_ROOT / value).is_file(), f"{key}: {value}"
 
+    def test_reviewed_entry_names_the_version_reviewed_through(
+        self, releases: dict[str, dict[str, Any]]
+    ) -> None:
+        """The session drift advisory compares against `reviewed_through` (Plan 00486 Task 2.1)."""
+        for key, entry in releases.items():
+            if entry["review_date"] != UNKNOWN:
+                assert _CC_VERSION.match(str(entry.get("reviewed_through", ""))), key
+
     def test_known_version_names_its_evidence(self, releases: dict[str, dict[str, Any]]) -> None:
         for key, entry in releases.items():
             if entry["claude_code_version"] != UNKNOWN:

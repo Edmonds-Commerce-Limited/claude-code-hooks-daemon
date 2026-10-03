@@ -660,7 +660,10 @@ one, pointing at the refresh procedure in
 summarising fetch layer once fabricated a contract value). That procedure is
 maintainer work on this repo, so a client install is given a client-shaped
 remedy instead (upgrade, else report upstream) — see the handler's entry in
-`docs/guides/HANDLER_REFERENCE.md`.
+`docs/guides/HANDLER_REFERENCE.md`. The same handler's second check (Plan 00486,
+daemon repo only) advises once per version when the running Claude Code is newer
+than the newest changelog-reviewed version in
+`CLAUDE/development/claude-code-versions.yaml`.
 
 ---
 

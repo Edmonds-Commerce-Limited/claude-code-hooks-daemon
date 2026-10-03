@@ -3674,6 +3674,8 @@ handlers:
 
 **Description:** Advises a refresh of the vendored Claude Code hooks contract (`contracts/claude-code-hooks/`) when the installed Claude Code version is newer than `META.json`'s `last_audited_claude_code_version`. **The remedy depends on the install (Plan 00322):** in the daemon repo itself the advisory points at the refresh procedure in `docs/guides/HOOK-CONTRACT-REFRESH.md` (raw-fetch-only extraction); in a client install — where the vendored copy lives under the upgrade-overwritten `.claude/hooks-daemon/` and the refresh is upstream maintainer work — it instead says to upgrade the daemon, or report it upstream if already current. An unresolvable install mode falls back to the client message. Runs on new sessions only, caches the `claude --version` probe for 24 hours, and stays silent when the vendored contract is absent or unreadable — the `hook_contract` QA check owns that failure. Advisory by design, never an auto-refresh (Plan 00271 Decision 3).
 
+**Second check (Plan 00486):** in the daemon repository only, the installed Claude Code is also compared with the newest `reviewed_through` version in `CLAUDE/development/claude-code-versions.yaml`. A newer one gets a single advisory per version naming both versions and the `claude-code-changelog-reviewer` agent to run (RELEASING.md Step 1c). The record exists only in the daemon repo, so the check is silent in a client install and wherever the file is absent or has no reviewed version. The once-per-version marker lives in the same cache file as the probed version.
+
 **Config example:**
 
 ```yaml
@@ -4488,27 +4490,27 @@ Priorities below are the **shipped defaults** from `constants/priority.py`. Seve
 
 ### All Advisory Handlers
 
-| Config Key                 | Event            | Priority | What It Does                                   |
-| -------------------------- | ---------------- | -------- | ---------------------------------------------- |
-| `verification_result_gate` | PreToolUse       | 34       | Verifier result unconsumed before a mutator    |
-| `bash_safe_mode`           | PreToolUse       | 36       | Opt-in safe-prelude forcer (ships disabled)    |
-| `staged_lint_gate`         | PreToolUse       | 43       | Cheap syntax check over staged files           |
-| `plan_close_approval`      | PreToolUse       | 43       | A human closes a plan when the key says so     |
-| `global_npm_advisor`       | PreToolUse       | 40       | Suggests npx over global installs              |
-| `plan_workflow`            | PreToolUse       | 45       | Guidance for plan creation                     |
-| `web_search_year`          | PreToolUse       | 55       | Warns about outdated search years              |
-| `british_english`          | PreToolUse       | 60       | Warns about American spellings                 |
-| `validate_eslint_on_write` | PostToolUse      | 10       | Runs ESLint after .ts/.tsx writes              |
-| `command_hints`            | PostToolUse      | 28       | Config-driven reminder after a command         |
-| `goal_injection`           | PostToolUse      | 30       | Goal-intent signal on plan flip to In Progress |
-| `optimal_config_checker`   | SessionStart     | 52       | Audits Claude Code settings                    |
-| `git_filemode_checker`     | SessionStart     | 53       | Warns when core.fileMode=false                 |
-| `suggest_status_line`      | SessionStart     | 55       | Suggests status line setup                     |
-| `version_check`            | SessionStart     | 55       | Checks for daemon updates                      |
-| `plan_qa_sweep`            | SessionStart     | 57       | Reports plan-tree drift once a session         |
-| `contract_staleness`       | SessionStart     | 60       | Advises a hooks-contract audit refresh         |
-| `git_context_injector`     | UserPromptSubmit | 20       | Injects git status context                     |
-| `nitpick.hedging_language` | Nitpick          | 20       | Detects guessing language per turn             |
+| Config Key                 | Event            | Priority | What It Does                                     |
+| -------------------------- | ---------------- | -------- | ------------------------------------------------ |
+| `verification_result_gate` | PreToolUse       | 34       | Verifier result unconsumed before a mutator      |
+| `bash_safe_mode`           | PreToolUse       | 36       | Opt-in safe-prelude forcer (ships disabled)      |
+| `staged_lint_gate`         | PreToolUse       | 43       | Cheap syntax check over staged files             |
+| `plan_close_approval`      | PreToolUse       | 43       | A human closes a plan when the key says so       |
+| `global_npm_advisor`       | PreToolUse       | 40       | Suggests npx over global installs                |
+| `plan_workflow`            | PreToolUse       | 45       | Guidance for plan creation                       |
+| `web_search_year`          | PreToolUse       | 55       | Warns about outdated search years                |
+| `british_english`          | PreToolUse       | 60       | Warns about American spellings                   |
+| `validate_eslint_on_write` | PostToolUse      | 10       | Runs ESLint after .ts/.tsx writes                |
+| `command_hints`            | PostToolUse      | 28       | Config-driven reminder after a command           |
+| `goal_injection`           | PostToolUse      | 30       | Goal-intent signal on plan flip to In Progress   |
+| `optimal_config_checker`   | SessionStart     | 52       | Audits Claude Code settings                      |
+| `git_filemode_checker`     | SessionStart     | 53       | Warns when core.fileMode=false                   |
+| `suggest_status_line`      | SessionStart     | 55       | Suggests status line setup                       |
+| `version_check`            | SessionStart     | 55       | Checks for daemon updates                        |
+| `plan_qa_sweep`            | SessionStart     | 57       | Reports plan-tree drift once a session           |
+| `contract_staleness`       | SessionStart     | 60       | Advises a hooks-contract audit or review refresh |
+| `git_context_injector`     | UserPromptSubmit | 20       | Injects git status context                       |
+| `nitpick.hedging_language` | Nitpick          | 20       | Detects guessing language per turn               |
 
 ---
 

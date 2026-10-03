@@ -10,6 +10,13 @@ Advisory by design, never an auto-refresh: extraction from prose docs must be
 verified, not trusted (a summarising fetch layer once fabricated a
 ``permissionDecision: "escalate"`` value — Plan 00271 Decision 3).
 
+Second check (Plan 00486): the INSTALLED Claude Code is also compared with the
+newest version whose changelog was reviewed (``reviewed_through`` in
+``CLAUDE/development/claude-code-versions.yaml``). A newer one gets a single
+advisory per version to run the ``claude-code-changelog-reviewer`` agent. That
+record exists only in the daemon repository, so the check is silent in a client
+install and wherever the file is absent.
+
 Install-layout note: the vendored contract ships in the REPOSITORY
 (self-install mode, or a client's .claude/hooks-daemon/ clone), not in the
 Python package — a bare wheel/site-packages install has no
@@ -27,6 +34,8 @@ import time
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Final
+
+import yaml
 
 from claude_code_hooks_daemon.constants import (
     HandlerID,
@@ -73,6 +82,19 @@ _CACHE_TTL_SECONDS: Final[int] = 86400
 _CACHE_TIME_KEY: Final[str] = "cached_at"
 _CACHE_VERSION_KEY: Final[str] = "installed_version"
 
+#: The per-release Claude Code version record (Plan 00486). It lives under
+#: CLAUDE/development/, which is the daemon repository's own contributor docs,
+#: so a client install has no use for it; the review-drift check is silent
+#: there (and wherever the file is absent).
+_VERSIONS_RECORD_RELATIVE: Final[str] = "CLAUDE/development/claude-code-versions.yaml"
+_DEFAULT_VERSIONS_PATH: Final[Path] = (
+    Path(__file__).resolve().parents[4] / _VERSIONS_RECORD_RELATIVE
+)
+_RECORD_REVIEWED_KEY: Final[str] = "reviewed_through"
+
+#: Cache key holding the version the review-drift advisory last fired for.
+_CACHE_DRIFT_KEY: Final[str] = "drift_advised_version"
+
 
 class ContractStalenessHandler(SessionStartHandlerBase):
     """Advise a vendored-contract refresh when Claude Code has moved on."""
@@ -90,6 +112,9 @@ class ContractStalenessHandler(SessionStartHandlerBase):
         )
         self.config: dict[str, Any] = {"enabled": True}
         self.meta_path: Path = _DEFAULT_META_PATH
+        self.versions_path: Path = _DEFAULT_VERSIONS_PATH
+        #: Overrides the cache location (tests); None resolves the daemon untracked dir.
+        self.cache_path: Path | None = None
         # Injection points for tests; production reads `claude --version` and
         # the resolved project context.
         self.installed_version_reader: Callable[[], str | None] = self._read_installed_version
@@ -116,29 +141,89 @@ class ContractStalenessHandler(SessionStartHandlerBase):
         return not is_resume_session(hook_input)
 
     def handle(self, hook_input: dict[str, Any]) -> AdvisoryResult:
-        """Compare installed Claude Code with the last-audited version."""
-        meta = self._read_meta()
-        if meta is None:
-            return AdvisoryResult(decision=Decision.ALLOW, reason=None, context=[])
-        audited = meta.get(_META_VERSION_KEY)
-        installed = self.installed_version_reader()
-        if not isinstance(audited, str) or installed is None:
-            return AdvisoryResult(decision=Decision.ALLOW, reason=None, context=[])
-        if not self._is_newer(installed, audited):
-            return AdvisoryResult(decision=Decision.ALLOW, reason=None, context=[])
+        """Run both staleness checks and join whatever advice they produce.
 
+        The contract check (installed Claude Code vs the last-audited hooks
+        contract) and the review-drift check (installed Claude Code vs the
+        newest changelog-reviewed version, Plan 00486) are independent: either
+        can speak without the other.
+        """
+        meta = self._read_meta()
+        reviewed = self._newest_reviewed_version()
+        installed = self.installed_version_reader() if (meta or reviewed) else None
+        context: list[str] = []
+        if installed is not None:
+            if meta is not None:
+                context.extend(self._contract_context(meta, installed))
+            if reviewed is not None:
+                drift = self._drift_context(installed, reviewed)
+                if drift:
+                    context.extend([""] if context else [])
+                    context.extend(drift)
+        return AdvisoryResult(decision=Decision.ALLOW, reason=None, context=context)
+
+    def _contract_context(self, meta: dict[str, Any], installed: str) -> list[str]:
+        """Advice when the installed Claude Code is newer than the audited contract."""
+        audited = meta.get(_META_VERSION_KEY)
+        if not isinstance(audited, str) or not self._is_newer(installed, audited):
+            return []
         refresh_doc = str(meta.get(_META_REFRESH_KEY) or _FALLBACK_REFRESH_DOC)
         if self._is_self_install():
-            return AdvisoryResult(
-                decision=Decision.ALLOW,
-                reason=None,
-                context=self._maintainer_context(installed, audited, refresh_doc),
-            )
-        return AdvisoryResult(
-            decision=Decision.ALLOW,
-            reason=None,
-            context=self._client_context(installed, audited),
-        )
+            return self._maintainer_context(installed, audited, refresh_doc)
+        return self._client_context(installed, audited)
+
+    def _drift_context(self, installed: str, reviewed: str) -> list[str]:
+        """Advice, once per version, when Claude Code is newer than the last changelog review."""
+        if not self._is_newer(installed, reviewed):
+            return []
+        if self.read_cache().get(_CACHE_DRIFT_KEY) == installed:
+            return []
+        self.write_cache({_CACHE_DRIFT_KEY: installed})
+        return [
+            (
+                f"🔄 Claude Code v{installed} is running, but the newest Claude Code "
+                f"changelog review covers only up to v{reviewed}."
+            ),
+            "",
+            (
+                f"Run the `claude-code-changelog-reviewer` agent over v{reviewed} to "
+                f"v{installed} and record the result in `{_VERSIONS_RECORD_RELATIVE}` "
+                f"(CLAUDE/development/RELEASING.md, Step 1c). The review finds "
+                f"Claude Code features the daemon should adopt, duplicates, or fights. "
+                f"This advisory shows once for v{installed}."
+            ),
+        ]
+
+    def _newest_reviewed_version(self) -> str | None:
+        """Newest ``reviewed_through`` in the record, or None when it cannot apply.
+
+        None (and so silence) for a client install, an absent record, or a
+        record with no usable reviewed version: the record is daemon-repo-only
+        and a client has no review to act on. An EXISTING record that cannot
+        be read or parsed is a defect in this repository and raises.
+
+        Raises:
+            ValueError: The record exists but is not valid YAML.
+        """
+        if not self._is_self_install() or not self.versions_path.is_file():
+            return None
+        try:
+            data = yaml.safe_load(self.versions_path.read_text(encoding="utf-8"))
+        except yaml.YAMLError as exc:
+            raise ValueError(f"{self.versions_path} is not valid YAML: {exc}") from exc
+        releases = data.get("releases") if isinstance(data, dict) else None
+        if not isinstance(releases, dict):
+            return None
+        newest: str | None = None
+        for entry in releases.values():
+            if not isinstance(entry, dict):
+                continue
+            version = entry.get(_RECORD_REVIEWED_KEY)
+            if not isinstance(version, str) or not _VERSION_PATTERN.fullmatch(version):
+                continue
+            if newest is None or self._is_newer(version, newest):
+                newest = version
+        return newest
 
     def _is_self_install(self) -> bool:
         """Whether this is the daemon repo itself, where a refresh belongs.
@@ -212,7 +297,36 @@ class ContractStalenessHandler(SessionStartHandlerBase):
         match = _VERSION_PATTERN.search(output)
         return match.group(1) if match else None
 
+    def read_cache(self) -> dict[str, Any]:
+        """The cache file's contents, or an empty dict when absent or unreadable."""
+        try:
+            data = json.loads(self._cache_file().read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            logger.debug("contract staleness cache unreadable: %s", exc)
+            return {}
+        return data if isinstance(data, dict) else {}
+
+    def write_cache(self, updates: dict[str, Any]) -> bool:
+        """Merge ``updates`` into the cache file, keeping the keys it does not touch.
+
+        Returns:
+            True when written; False (logged at warning) when the cache is
+            unwritable. The cache is an optimisation and a dedupe marker, so
+            callers carry on without it rather than failing session start.
+        """
+        merged = {**self.read_cache(), **updates}
+        cache_file = self._cache_file()
+        try:
+            cache_file.parent.mkdir(parents=True, exist_ok=True)
+            cache_file.write_text(json.dumps(merged), encoding="utf-8")
+        except OSError as exc:
+            logger.warning("contract staleness cache unwritable (%s): %s", cache_file, exc)
+            return False
+        return True
+
     def _cache_file(self) -> Path:
+        if self.cache_path is not None:
+            return self.cache_path
         try:
             return ProjectContext.daemon_untracked_dir() / _CACHE_FILENAME
         except (OSError, RuntimeError):
@@ -221,15 +335,14 @@ class ContractStalenessHandler(SessionStartHandlerBase):
             return fallback / _CACHE_FILENAME
 
     def _read_installed_version(self) -> str | None:
-        cache_file = self._cache_file()
+        cached = self.read_cache()
         try:
-            cached = json.loads(cache_file.read_text(encoding="utf-8"))
             if time.time() - float(cached.get(_CACHE_TIME_KEY, 0)) < _CACHE_TTL_SECONDS:
                 version = cached.get(_CACHE_VERSION_KEY)
                 if isinstance(version, str):
                     return version
-        except (OSError, json.JSONDecodeError, TypeError, ValueError) as exc:
-            logger.debug("contract staleness cache unreadable: %s", exc)
+        except (TypeError, ValueError) as exc:
+            logger.debug("contract staleness cache timestamp unusable: %s", exc)
 
         binary = shutil.which(_CLAUDE_BINARY)
         if binary is None:
@@ -250,13 +363,7 @@ class ContractStalenessHandler(SessionStartHandlerBase):
             return None
         version = self.parse_version_output(result.stdout)
         if version is not None:
-            try:
-                cache_file.parent.mkdir(parents=True, exist_ok=True)
-                cache_file.write_text(
-                    json.dumps({_CACHE_TIME_KEY: time.time(), _CACHE_VERSION_KEY: version})
-                )
-            except OSError as exc:
-                logger.debug("contract staleness cache unwritable: %s", exc)
+            self.write_cache({_CACHE_TIME_KEY: time.time(), _CACHE_VERSION_KEY: version})
         return version
 
     def _is_newer(self, installed: str, audited: str) -> bool:
@@ -273,6 +380,12 @@ class ContractStalenessHandler(SessionStartHandlerBase):
         return installed_parts > audited_parts
 
     def get_claude_md(self) -> str | None:
+        """No CLAUDE.md guidance: both checks fire at session start carrying their full remedy.
+
+        ``tests/integration/test_claude_md_guidance_coverage.py`` exempts this
+        handler on exactly that ground, so a standing section would only
+        repeat what the advisory already says.
+        """
         return None
 
     def get_acceptance_tests(self) -> list[Any]:
@@ -291,6 +404,23 @@ class ContractStalenessHandler(SessionStartHandlerBase):
                     "On a new session with Claude Code newer than the vendored "
                     "contract's last-audited version, an advisory recommends the "
                     "refresh procedure; otherwise silent"
+                ),
+                expected_decision=Decision.ALLOW,
+                expected_message_patterns=[r".*"],
+                safety_notes="Advisory handler - read-only version comparison",
+                test_type=TestType.CONTEXT,
+                requires_event="SessionStart event (new session, not resume)",
+                recommended_model=RecommendedModel.SONNET,
+                requires_main_thread=True,
+            ),
+            AcceptanceTest(
+                title="claude code review drift advisory",
+                command='echo "test"',
+                description=(
+                    "In the daemon repo, on a new session with Claude Code newer than "
+                    "the newest reviewed_through in claude-code-versions.yaml, a single "
+                    "advisory names both versions and the claude-code-changelog-reviewer "
+                    "agent; silent in a client install or when the record is absent"
                 ),
                 expected_decision=Decision.ALLOW,
                 expected_message_patterns=[r".*"],
