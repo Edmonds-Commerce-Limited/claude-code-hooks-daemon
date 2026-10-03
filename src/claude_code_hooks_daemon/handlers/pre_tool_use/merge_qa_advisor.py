@@ -82,6 +82,10 @@ _WORK_REF: Final[re.Pattern[str]] = re.compile(
     rf"(?P<branch>{re.escape(WORK_BRANCH_PREFIX)}\S+)$"
 )
 
+#: The advice names this repository's QA scripts, so it applies only where this
+#: script exists; a client project has none and could never satisfy it.
+QA_SCRIPT: Final[Path] = Path("scripts") / "qa" / "llm_qa.py"
+
 _SHORT_SHA: Final[int] = 12
 _ICON: Final[str] = "🔍"
 
@@ -184,6 +188,8 @@ class MergeQaAdvisorHandler(PreToolUseHandlerBase):
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """True for a Bash command that starts a ``git merge``; git is asked in handle()."""
         if hook_input.get(HookInputField.TOOL_NAME) != ToolName.BASH:
+            return False
+        if not (ProjectContext.project_root() / QA_SCRIPT).is_file():
             return False
         command = get_bash_command(hook_input)
         return command is not None and bool(_merges(command))
