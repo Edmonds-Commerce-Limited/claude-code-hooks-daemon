@@ -158,9 +158,7 @@ class TestHooks:
         assert runtime.half("p").tick == _mod.IdleTick(now=NOW, session_id=OWN_SESSION)
 
     def test_plugins_are_asked_in_flag_order(self, tmp_path: Path) -> None:
-        runtime = make_runtime(
-            tmp_path, {"zeta": _recording("zeta"), "alpha": _recording("alpha")}
-        )
+        runtime = make_runtime(tmp_path, {"zeta": _recording("zeta"), "alpha": _recording("alpha")})
         runtime.run_idle(NOW)
         assert _order(tmp_path) == ["zeta", "alpha"]
 
@@ -383,7 +381,10 @@ class TestOutcomeCodec:
             submit=True,
             consume_signal_path=None,
             deferred_log=None,
-            plugin_failures=(("a", "exception", "on_idle", ""), ("b", "load", "load", "api-mismatch")),
+            plugin_failures=(
+                ("a", "exception", "on_idle", ""),
+                ("b", "load", "load", "api-mismatch"),
+            ),
             plugin_versions=(("a", "1.0"),),
             plugin_log_lines=("plugin a: hi",),
             exit_for_restart=("a", "max age"),

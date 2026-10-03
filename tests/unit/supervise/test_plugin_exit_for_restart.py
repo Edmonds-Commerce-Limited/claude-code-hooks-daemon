@@ -309,7 +309,12 @@ class TestSuperviseExitForRestart:
 
         # The child ignores /exit for 0.6s, during which ticks keep arriving.
         code, received = _run_supervise(
-            tmp_path, monkeypatch, decider=decider, linger=0.6, exit_marker="never-matches", own_exit=0
+            tmp_path,
+            monkeypatch,
+            decider=decider,
+            linger=0.6,
+            exit_marker="never-matches",
+            own_exit=0,
         )
         assert b"HELD-INJECTION" not in received.read_bytes()
         assert code == _mod.EXIT_STATUS_RESTART_REQUESTED

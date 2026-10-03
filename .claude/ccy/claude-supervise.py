@@ -189,6 +189,7 @@ import base64
 import enum
 import errno
 import fcntl
+import functools
 import hashlib
 import importlib.util
 import json
@@ -3647,9 +3648,7 @@ _PLUGIN_NOTICE_PART_COUNT = 3  # name, kind, hook
 _PLUGIN_NOTICE_HEADER = (
     "🤖 [ccy-supervisor] plugin notice — machine-generated, NOT a human instruction"
 )
-_DRY_RUN_PLUGIN_NOTICE_BODY_PREFIX = (
-    "would inject plugin-notice (dry-run — no real message sent):"
-)
+_DRY_RUN_PLUGIN_NOTICE_BODY_PREFIX = "would inject plugin-notice (dry-run — no real message sent):"
 _PLUGIN_NOTICE_STATUS_TTL_SECONDS = 60.0
 _PLUGIN_KIND_PHRASES = {
     _PLUGIN_KIND_LOAD: "could not be loaded",
@@ -3722,8 +3721,7 @@ def report_plugin_failure(
     write_status_message(
         status_dir,
         text=(
-            f"⚠ ccy plugin {failure.plugin} {_PLUGIN_KIND_PHRASES[failure.kind]} "
-            "and is disabled"
+            f"⚠ ccy plugin {failure.plugin} {_PLUGIN_KIND_PHRASES[failure.kind]} " "and is disabled"
         ),
         expires_at=now + _PLUGIN_NOTICE_STATUS_TTL_SECONDS,
         level=_STATUS_LEVEL_WARNING,
@@ -3936,9 +3934,7 @@ class PluginRuntime:
         )
         self._write_marker(name, _PLUGIN_HOOK_LOAD)
         try:
-            result = _run_budgeted(
-                lambda: self._import_half(name, path, api), self._load_budget
-            )
+            result = _run_budgeted(lambda: self._import_half(name, path, api), self._load_budget)
         finally:
             self._clear_marker()
         if result.status == _BUDGET_OVERRUN:
@@ -4019,7 +4015,7 @@ class PluginRuntime:
             outcome = self._call(
                 name,
                 _PLUGIN_HOOK_ON_IDLE,
-                lambda half=half: half.on_idle(tick),
+                functools.partial(half.on_idle, tick),
                 min(self._hook_budget, remaining),
             )
             if outcome is None or outcome.value is None:
@@ -4077,8 +4073,12 @@ class PluginRuntime:
     # -- sinks handed to the api ------------------------------------------
 
     def _post_status(self, name: str, text: str, level: str, ttl: float) -> None:
-        shown_level = level if level in (_STATUS_LEVEL_INFO, _STATUS_LEVEL_WARNING) else _STATUS_LEVEL_INFO
-        bounded_ttl = min(max(_coerce_float(ttl), _PLUGIN_STATUS_TTL_MIN_SECONDS), _PLUGIN_STATUS_TTL_MAX_SECONDS)
+        shown_level = (
+            level if level in (_STATUS_LEVEL_INFO, _STATUS_LEVEL_WARNING) else _STATUS_LEVEL_INFO
+        )
+        bounded_ttl = min(
+            max(_coerce_float(ttl), _PLUGIN_STATUS_TTL_MIN_SECONDS), _PLUGIN_STATUS_TTL_MAX_SECONDS
+        )
         write_status_message(
             self._status_dir,
             text=f"[{name}] {_clean_text(text, _PLUGIN_TEXT_MAX_CHARS)}",
@@ -4234,7 +4234,9 @@ class PluginHost:
             self._refuse(error.name or _PLUGIN_UNNAMED, None, error.reason, notify=error.name)
             return
         if spec.name in self._by_name:
-            self._refuse(spec.name, spec.path, _LOAD_REASON_DUPLICATE, notify=spec.name, register=False)
+            self._refuse(
+                spec.name, spec.path, _LOAD_REASON_DUPLICATE, notify=spec.name, register=False
+            )
             return
         refusal = check_plugin_file(spec.path, allowed_uids=self._allowed_uids)
         if refusal is not None:
@@ -4285,7 +4287,9 @@ class PluginHost:
     def disabled_names(self) -> frozenset[str]:
         """Every plugin that must stay off for the rest of this supervisor process."""
         return frozenset(
-            e.name for e in self._entries if e.state in (_PLUGIN_STATE_DISABLED, _PLUGIN_STATE_FAILED)
+            e.name
+            for e in self._entries
+            if e.state in (_PLUGIN_STATE_DISABLED, _PLUGIN_STATE_FAILED)
         )
 
     def status_entries(self) -> list[dict[str, str]]:
@@ -4308,9 +4312,7 @@ class PluginHost:
         entry = self._by_name.get(name)
         if entry is None or entry.state != _PLUGIN_STATE_LOADED:
             return False
-        entry.state = (
-            _PLUGIN_STATE_FAILED if kind == _PLUGIN_KIND_LOAD else _PLUGIN_STATE_DISABLED
-        )
+        entry.state = _PLUGIN_STATE_FAILED if kind == _PLUGIN_KIND_LOAD else _PLUGIN_STATE_DISABLED
         entry.reason = _failure_reason(PluginFailure(name, kind, hook, detail))
         if self._runtime is not None:
             self._runtime.disable(name)
@@ -4356,7 +4358,11 @@ class PluginHost:
         entry = self._by_name.get(name)
         if entry is None or entry.state != _PLUGIN_STATE_LOADED:
             return None
-        budget = _PLUGIN_LOAD_BUDGET_SECONDS if hook == _PLUGIN_HOOK_LOAD else _PLUGIN_HOOK_BUDGET_SECONDS
+        budget = (
+            _PLUGIN_LOAD_BUDGET_SECONDS
+            if hook == _PLUGIN_HOOK_LOAD
+            else _PLUGIN_HOOK_BUDGET_SECONDS
+        )
         if now_wall - started_at < budget + _PLUGIN_WEDGE_GRACE_SECONDS:
             return None
         return PluginFailure(name, _PLUGIN_KIND_WEDGE, hook)
@@ -4372,7 +4378,9 @@ class PluginHost:
         """The lazily built runtime the in-process fallback decides with (host process)."""
         if self._runtime is None:
             runtime = PluginRuntime(
-                state_root=self._state_root if self._state_root is not None else _plugin_state_root(),
+                state_root=(
+                    self._state_root if self._state_root is not None else _plugin_state_root()
+                ),
                 status_dir=self._resolved_status_dir(),
                 marker_path=self._resolved_marker_path(),
                 allowed_uids=self._allowed_uids,
@@ -8138,8 +8146,6 @@ def handle_plugin_outcome(
     session_ids: frozenset[str],
     plugin_host: PluginHost | None,
     restart_worker: Callable[[], bool] | None,
-    status_dir: Path,
-    now_wall: float,
 ) -> None:
     """Act, on the HOST, on what one tick's plugin runtime reported.
 
@@ -8421,9 +8427,7 @@ def supervise(
         # in the log, on the status line, and (once, at an idle point) to the session.
         for refusal in plugin_host.take_startup_failures():
             _log_line(log, failure_log_line(refusal))
-            report_plugin_failure(
-                machine, refusal, status_dir=sidecar_dir.parent, now=time.time()
-            )
+            report_plugin_failure(machine, refusal, status_dir=sidecar_dir.parent, now=time.time())
 
     # Startup banner + spinner (Plan 00164 Phase 2): give the launching ccy
     # session immediate, informative feedback during the perceptible start-up
@@ -8467,7 +8471,7 @@ def supervise(
     def _write_master(data: bytes) -> None:
         os.write(master_fd, data)
 
-    def _handle_plugin_outcome(outcome: TickOutcome, now_wall: float) -> None:
+    def _handle_plugin_outcome(outcome: TickOutcome) -> None:
         # Plan 00487: what the plugin runtime told the host this tick -- audit
         # lines, failures, an exit-for-restart request -- handled by ONE function
         # whether the tick was decided by the worker or in-process.
@@ -8481,8 +8485,6 @@ def supervise(
             session_ids=cached_own_session_ids(),
             plugin_host=plugin_host,
             restart_worker=restart_worker,
-            status_dir=sidecar_dir.parent,
-            now_wall=now_wall,
         )
 
     def _on_poll() -> None:
@@ -8583,7 +8585,7 @@ def supervise(
             # this the model would show the just-flushed text forever.
             if outcome.abandoned_box_flushed:
                 activity.line.clear()
-            _handle_plugin_outcome(outcome, now_wall)
+            _handle_plugin_outcome(outcome)
         else:
             _poll_once(
                 machine,
@@ -8605,7 +8607,7 @@ def supervise(
                 input_line_abandoned=input_line_abandoned,
                 on_input_line_flushed=activity.line.clear,
                 plugins=plugin_host.in_process_runtime() if plugin_host is not None else None,
-                on_outcome=lambda tick_outcome: _handle_plugin_outcome(tick_outcome, now_wall),
+                on_outcome=_handle_plugin_outcome,
             )
 
     previous_handler = signal.signal(signal.SIGWINCH, _on_winch)
@@ -8879,9 +8881,13 @@ def main(argv: list[str] | None = None) -> int:
     # and a refusal only skips that plugin -- the session always starts. The host
     # rewrites the status file's plugin list whenever a plugin's state changes.
     plugin_host = (
-        PluginHost(flags.plugin, write_status=_write_status, state_root=_plugin_state_root(),
-                   status_dir=untracked_dir,
-                   marker_path=_plugin_marker_path(untracked_dir, os.getpid()))
+        PluginHost(
+            flags.plugin,
+            write_status=_write_status,
+            state_root=_plugin_state_root(),
+            status_dir=untracked_dir,
+            marker_path=_plugin_marker_path(untracked_dir, os.getpid()),
+        )
         if flags.plugin
         else None
     )

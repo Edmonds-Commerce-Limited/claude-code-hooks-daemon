@@ -13,7 +13,7 @@ from __future__ import annotations
 import json
 import os
 import stat
-from typing import TYPE_CHECKING, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar
 
 import pytest
 
@@ -142,9 +142,7 @@ class TestFileChecks:
     def test_a_group_or_world_writable_file_is_refused(self, tmp_path: Path, mode: int) -> None:
         path = write_plugin(tmp_path, "p")
         path.chmod(mode)
-        assert _mod.check_plugin_file(path, allowed_uids=_OWN_UIDS) == (
-            _mod._LOAD_REASON_WRITABLE
-        )
+        assert _mod.check_plugin_file(path, allowed_uids=_OWN_UIDS) == (_mod._LOAD_REASON_WRITABLE)
 
     @pytest.mark.parametrize("mode", [0o770, 0o707, 0o777])
     def test_a_group_or_world_writable_directory_is_refused(
@@ -161,9 +159,7 @@ class TestFileChecks:
 
     def test_a_file_owned_by_someone_else_is_refused(self, tmp_path: Path) -> None:
         path = write_plugin(tmp_path, "p")
-        assert _mod.check_plugin_file(path, allowed_uids=_FOREIGN_UIDS) == (
-            _mod._LOAD_REASON_OWNER
-        )
+        assert _mod.check_plugin_file(path, allowed_uids=_FOREIGN_UIDS) == (_mod._LOAD_REASON_OWNER)
 
     def test_the_default_allowed_owners_are_this_uid_and_root(self) -> None:
         assert _mod._default_plugin_uids() == frozenset({os.getuid(), 0})
@@ -172,9 +168,7 @@ class TestFileChecks:
 # -- the host registry (no imports) -----------------------------------------
 
 
-def _host(
-    specs: list[str], written: list[list[dict[str, str]]] | None = None
-) -> _mod.PluginHost:
+def _host(specs: list[str], written: list[list[dict[str, str]]] | None = None) -> Any:
     sink = written if written is not None else []
     return _mod.PluginHost(
         specs,
@@ -238,9 +232,7 @@ class TestPluginHost:
         host = _host([spec("a", a), spec("bad", bad), spec("b", b)])
         assert host.worker_argv() == ["--plugin", spec("a", a), "--plugin", spec("b", b)]
 
-    def test_record_failure_disables_once_and_survives_in_worker_argv(
-        self, tmp_path: Path
-    ) -> None:
+    def test_record_failure_disables_once_and_survives_in_worker_argv(self, tmp_path: Path) -> None:
         a = write_plugin(tmp_path, "a")
         host = _host([spec("a", a)])
         assert host.record_failure("a", _mod._PLUGIN_KIND_EXCEPTION, _mod._PLUGIN_HOOK_ON_IDLE)
@@ -385,7 +377,7 @@ class TestPolicyWorkerArgv:
 # -- the worker half of the loader ------------------------------------------
 
 
-def _bare_runtime(tmp_path: Path) -> _mod.PluginRuntime:
+def _bare_runtime(tmp_path: Path) -> Any:
     return _mod.PluginRuntime(
         state_root=tmp_path / "state",
         status_dir=tmp_path / "untracked",
@@ -395,7 +387,7 @@ def _bare_runtime(tmp_path: Path) -> _mod.PluginRuntime:
     )
 
 
-def _failures(runtime: _mod.PluginRuntime) -> list[tuple[str, str, str]]:
+def _failures(runtime: Any) -> list[tuple[str, str, str]]:
     return [(f.plugin, f.kind, f.hook) for f in runtime.failures]
 
 

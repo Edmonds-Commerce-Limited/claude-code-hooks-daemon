@@ -8,13 +8,15 @@ the loader accepts, and build the idle tick the cascade needs.
 from __future__ import annotations
 
 import os
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from tests.unit.supervise._load import load_supervisor_module
 
 if TYPE_CHECKING:
     from pathlib import Path
 
+# `Any` throughout: the supervisor is a hyphenated script loaded at runtime, so
+# its classes have no static type a checker can see.
 _mod = load_supervisor_module()
 
 PLUGIN_FILE_MODE = 0o600
@@ -24,7 +26,7 @@ OWN_SESSION = "plugin-sess-1"
 
 # A worker half that does nothing, parameterised on its name. `@NAME@` is
 # replaced; every other body below is spliced into the class body.
-_TEMPLATE = '''
+_TEMPLATE = """
 PLUGIN_API = {api}
 class Half:
     name = "@NAME@"
@@ -36,7 +38,7 @@ class Half:
 {body}
 def create_worker_half(api):
     return Half(api)
-'''
+"""
 
 GOOD_BODY = """
     def on_start(self):
@@ -69,7 +71,7 @@ def spec(name: str, path: Path) -> str:
     return f"{name}={path}"
 
 
-def idle_facts(*, now: float = NOW, idle: bool = True, input_line_empty: bool = True) -> object:
+def idle_facts(*, now: float = NOW, idle: bool = True, input_line_empty: bool = True) -> Any:
     """A TickFacts for a settled session whose input box is empty."""
     return _mod.TickFacts(
         now_wall=now,
@@ -88,7 +90,7 @@ def make_runtime(
     hook_budget: float | None = None,
     tick_budget: float | None = None,
     disabled: frozenset[str] = frozenset(),
-) -> object:
+) -> Any:
     """Load a ``PluginRuntime`` over freshly written plugin files and start it."""
     plugin_dir = tmp_path / "plugins"
     specs = [

@@ -332,9 +332,7 @@ class TestNoticeTyping:
         machine.mark_own_line_typed("/goal x", NOW)
         assert _tick(tmp_path, runtime, machine).payload is None
 
-    def test_ranked_with_the_operator_signal_ahead_of_a_model_switch(
-        self, tmp_path: Path
-    ) -> None:
+    def test_ranked_with_the_operator_signal_ahead_of_a_model_switch(self, tmp_path: Path) -> None:
         runtime = make_runtime(tmp_path, {"p": _RAISING_BODY})
         machine = _machine()
         _tick(tmp_path, runtime, machine)
@@ -345,9 +343,7 @@ class TestNoticeTyping:
         outcome = _tick(tmp_path, runtime, machine)
         assert outcome.decision_value == _mod.Decision.WOULD_PLUGIN_NOTICE.value
 
-    def test_the_operator_signal_is_typed_first_when_both_are_pending(
-        self, tmp_path: Path
-    ) -> None:
+    def test_the_operator_signal_is_typed_first_when_both_are_pending(self, tmp_path: Path) -> None:
         runtime = make_runtime(tmp_path, {"p": _RAISING_BODY})
         machine = _machine()
         _tick(tmp_path, runtime, machine)
@@ -438,9 +434,7 @@ def _outcome(**fields: Any) -> Any:
     )
 
 
-def _handle(
-    tmp_path: Path, host: Any, outcome: Any, recorder: _Recorder, log: Any = None
-) -> None:
+def _handle(tmp_path: Path, host: Any, outcome: Any, recorder: _Recorder, log: Any = None) -> None:
     _mod.handle_plugin_outcome(
         outcome,
         machine=_machine(),
@@ -451,8 +445,6 @@ def _handle(
         session_ids=frozenset({OWN_SESSION}),
         plugin_host=host,
         restart_worker=recorder.restart,
-        status_dir=tmp_path / "untracked",
-        now_wall=NOW,
     )
 
 
@@ -472,9 +464,9 @@ class TestHostHandling:
         assert recorder.restarts == 0
         assert host.status_entries()[0]["state"] == "disabled"
         assert "--disable-plugin" in host.worker_argv()
-        assert "plugin p: exception in on_idle -> disabled" in (
-            tmp_path / "decision.log"
-        ).read_text()
+        assert (
+            "plugin p: exception in on_idle -> disabled" in (tmp_path / "decision.log").read_text()
+        )
 
     @pytest.mark.parametrize("kind", ["overrun", "wedge"])
     def test_an_overrun_or_wedge_restarts_the_worker_without_the_plugin(
@@ -725,7 +717,9 @@ class TestLoadRefusalsReachTheSession:
     def test_a_refused_plugin_is_skipped_and_the_notice_is_typed(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.setattr(_mod, "cached_own_session_ids", lambda *a, **k: frozenset({OWN_SESSION}))
+        monkeypatch.setattr(
+            _mod, "cached_own_session_ids", lambda *a, **k: frozenset({OWN_SESSION})
+        )
         path = write_plugin(tmp_path / "plugins", "loose")
         path.chmod(0o666)
         host = _mod.PluginHost(
@@ -754,9 +748,9 @@ class TestLoadRefusalsReachTheSession:
         assert code == 7
         assert received.read_bytes().decode().count("plugin notice") == 1
         assert "plugin `loose` could not be loaded" in received.read_bytes().decode()
-        assert "plugin loose: load: group-or-world-writable" in (
-            tmp_path / "decision.log"
-        ).read_text()
+        assert (
+            "plugin loose: load: group-or-world-writable" in (tmp_path / "decision.log").read_text()
+        )
 
 
 class TestStateDirOverride:
