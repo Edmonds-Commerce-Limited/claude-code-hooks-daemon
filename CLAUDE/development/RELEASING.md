@@ -298,7 +298,9 @@ what changed since the previous one.
    `claude-code-changelog-reviewer` agent with FROM, TO and the report path
    `untracked/release-artifacts/claude-code-review-vX.Y.Z.md`.
 4. Add `vX.Y.Z` to `claude-code-versions.yaml`: `claude_code_version` (TO), `evidence`,
-   `review_date`, and `review_report` (the path above). Every adopt, redundant or conflict
+   `review_date`, `reviewed_through` (TO again; the `contract_staleness` SessionStart
+   advisory compares the running Claude Code against the newest of these) and
+   `review_report` (the path above). Every adopt, redundant or conflict
    row in the report becomes a plan or ledger entry before Step 13; the report is copied
    into that plan's folder, because `untracked/` does not survive a container restart.
 

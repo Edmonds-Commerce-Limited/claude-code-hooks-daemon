@@ -41,7 +41,28 @@ def handler(tmp_path: Path) -> ContractStalenessHandler:
     # The refresh procedure is maintainer work, so the default fixture is the
     # daemon repo itself (Plan 00322); client installs get their own class.
     h.self_install_reader = lambda: True
+    # Isolate the drift check from the repository's real record and from the
+    # real advisory cache: absent record, cache under tmp_path.
+    h.versions_path = tmp_path / "absent" / "claude-code-versions.yaml"
+    h.cache_path = tmp_path / "cache.json"
     return h
+
+
+_RECORD = """\
+releases:
+  v3.59.0:
+    claude_code_version: "2.1.252"
+    review_date: unknown
+    review_report: unknown
+  v3.68.0:
+    claude_code_version: unknown
+    review_date: "2026-10-03"
+    reviewed_through: "2.1.288"
+  v3.60.0:
+    claude_code_version: "2.1.260"
+    review_date: "2026-09-01"
+    reviewed_through: "2.1.270"
+"""
 
 
 class TestInit:
@@ -103,6 +124,7 @@ class TestHandle:
     def test_silent_when_meta_missing(self, tmp_path: Path) -> None:
         h = ContractStalenessHandler()
         h.meta_path = tmp_path / "absent" / "META.json"
+        h.versions_path = tmp_path / "absent" / "claude-code-versions.yaml"
         h.installed_version_reader = lambda: "9.9.9"
         assert h.handle(_hook_input()).context == []
 
@@ -110,6 +132,7 @@ class TestHandle:
         h = ContractStalenessHandler()
         h.meta_path = tmp_path / "META.json"
         h.meta_path.write_text("not json")
+        h.versions_path = tmp_path / "absent" / "claude-code-versions.yaml"
         h.installed_version_reader = lambda: "9.9.9"
         assert h.handle(_hook_input()).context == []
 
@@ -210,6 +233,170 @@ class TestClientInstallAdvisory:
         assert "skill=hooks-daemon, args=upgrade" in text
 
 
+class TestReviewDriftAdvisory:
+    """Plan 00486 Task 2.1: running Claude Code newer than the last reviewed version.
+
+    The second check of this handler. The record
+    (``CLAUDE/development/claude-code-versions.yaml``) exists only in the
+    daemon repository, so every path where it is absent, or where this is a
+    client install, must be silent -- never an error, never an advisory.
+    """
+
+    @pytest.fixture
+    def drift_handler(
+        self, handler: ContractStalenessHandler, tmp_path: Path
+    ) -> ContractStalenessHandler:
+        handler.versions_path = tmp_path / "claude-code-versions.yaml"
+        handler.versions_path.write_text(_RECORD, encoding="utf-8")
+        # The contract is audited far ahead of every version these tests run,
+        # so only the drift check can speak (the both-stale test overrides it).
+        handler.meta_path.write_text(
+            json.dumps({"last_audited_claude_code_version": "2.1.400"}), encoding="utf-8"
+        )
+        handler.installed_version_reader = lambda: "2.1.246"
+        return handler
+
+    def _text(self, h: ContractStalenessHandler) -> str:
+        result = h.handle(_hook_input())
+        assert result.decision == Decision.ALLOW
+        return "\n".join(result.context)
+
+    def test_advises_when_running_newer_than_newest_reviewed(
+        self, drift_handler: ContractStalenessHandler
+    ) -> None:
+        drift_handler.installed_version_reader = lambda: "2.1.300"
+        text = self._text(drift_handler)
+        assert "2.1.300" in text
+        assert "2.1.288" in text, "the newest reviewed_through across all entries"
+        assert "claude-code-changelog-reviewer" in text
+        assert "claude-code-versions.yaml" in text
+        assert "RELEASING.md" in text
+
+    def test_silent_when_running_the_reviewed_version(
+        self, drift_handler: ContractStalenessHandler
+    ) -> None:
+        drift_handler.installed_version_reader = lambda: "2.1.288"
+        assert self._text(drift_handler) == ""
+
+    def test_silent_when_running_older_than_reviewed(
+        self, drift_handler: ContractStalenessHandler
+    ) -> None:
+        drift_handler.installed_version_reader = lambda: "2.1.280"
+        assert self._text(drift_handler) == ""
+
+    def test_advises_once_per_unreviewed_version(
+        self, drift_handler: ContractStalenessHandler
+    ) -> None:
+        drift_handler.installed_version_reader = lambda: "2.1.300"
+        assert "claude-code-changelog-reviewer" in self._text(drift_handler)
+        assert self._text(drift_handler) == "", "second session on the same version"
+        drift_handler.installed_version_reader = lambda: "2.1.301"
+        assert "2.1.301" in self._text(drift_handler), "a newer unreviewed version re-arms"
+
+    def test_dedupe_survives_the_installed_version_cache_write(
+        self, drift_handler: ContractStalenessHandler
+    ) -> None:
+        """The marker shares the cache file with the probed version; neither clobbers the other."""
+        drift_handler.installed_version_reader = lambda: "2.1.300"
+        self._text(drift_handler)
+        cache = json.loads(drift_handler.cache_path.read_text(encoding="utf-8"))
+        assert cache["drift_advised_version"] == "2.1.300"
+        drift_handler.write_cache({"installed_version": "2.1.300"})
+        cache = json.loads(drift_handler.cache_path.read_text(encoding="utf-8"))
+        assert cache["drift_advised_version"] == "2.1.300"
+        assert cache["installed_version"] == "2.1.300"
+
+    def test_unwritable_marker_still_advises(
+        self, drift_handler: ContractStalenessHandler, tmp_path: Path
+    ) -> None:
+        blocker = tmp_path / "file"
+        blocker.write_text("x")
+        drift_handler.cache_path = blocker / "cache.json"
+        drift_handler.installed_version_reader = lambda: "2.1.300"
+        assert "claude-code-changelog-reviewer" in self._text(drift_handler)
+
+    def test_silent_when_record_absent(self, drift_handler: ContractStalenessHandler) -> None:
+        """A client install has no record: no error, no advisory."""
+        drift_handler.versions_path = drift_handler.versions_path.parent / "absent.yaml"
+        drift_handler.installed_version_reader = lambda: "2.1.300"
+        assert self._text(drift_handler) == ""
+
+    def test_silent_in_client_install_even_if_record_present(
+        self, drift_handler: ContractStalenessHandler
+    ) -> None:
+        drift_handler.self_install_reader = lambda: False
+        drift_handler.installed_version_reader = lambda: "2.1.300"
+        assert "claude-code-changelog-reviewer" not in self._text(drift_handler)
+
+    def test_silent_when_install_mode_unresolvable(
+        self, drift_handler: ContractStalenessHandler
+    ) -> None:
+        def _explode() -> bool:
+            raise RuntimeError("ProjectContext not initialized")
+
+        drift_handler.self_install_reader = _explode
+        drift_handler.installed_version_reader = lambda: "2.1.300"
+        assert "claude-code-changelog-reviewer" not in self._text(drift_handler)
+
+    @pytest.mark.parametrize(
+        "body",
+        [
+            "not: [valid",
+            "- a list\n- not a mapping\n",
+            "releases: nope\n",
+            "releases:\n  v3.1.0: just-a-string\n",
+            "releases:\n  v3.1.0:\n    review_date: unknown\n",
+            'releases:\n  v3.1.0:\n    review_date: "2026-10-03"\n    reviewed_through: unknown\n',
+            'releases:\n  v3.1.0:\n    review_date: "2026-10-03"\n    reviewed_through: "dev"\n',
+        ],
+        ids=[
+            "bad-yaml",
+            "not-a-mapping",
+            "releases-not-a-mapping",
+            "entry-not-a-mapping",
+            "nothing-reviewed",
+            "reviewed-through-unknown",
+            "reviewed-through-non-numeric",
+        ],
+    )
+    def test_silent_when_record_has_no_usable_reviewed_version(
+        self, drift_handler: ContractStalenessHandler, body: str
+    ) -> None:
+        drift_handler.versions_path.write_text(body, encoding="utf-8")
+        drift_handler.installed_version_reader = lambda: "2.1.300"
+        assert self._text(drift_handler) == ""
+
+    def test_silent_when_installed_version_unreadable(
+        self, drift_handler: ContractStalenessHandler
+    ) -> None:
+        drift_handler.installed_version_reader = lambda: None
+        assert self._text(drift_handler) == ""
+
+    def test_drift_advisory_does_not_depend_on_contract_meta(
+        self, drift_handler: ContractStalenessHandler, tmp_path: Path
+    ) -> None:
+        """The two checks are independent: no META must not hide the drift advisory."""
+        drift_handler.meta_path = tmp_path / "absent" / "META.json"
+        drift_handler.installed_version_reader = lambda: "2.1.300"
+        assert "claude-code-changelog-reviewer" in self._text(drift_handler)
+
+    def test_both_advisories_when_both_stale(
+        self, drift_handler: ContractStalenessHandler
+    ) -> None:
+        drift_handler.installed_version_reader = lambda: "2.1.401"
+        text = self._text(drift_handler)
+        assert "HOOK-CONTRACT-REFRESH.md" in text
+        assert "claude-code-changelog-reviewer" in text
+
+    def test_real_record_is_silent_on_the_reviewed_version(self) -> None:
+        """Against the repository's real record (Plan 00486 backfill: through 2.1.288)."""
+        h = ContractStalenessHandler()
+        assert h.versions_path.is_file(), "the record ships in the daemon repository"
+        h.installed_version_reader = lambda: "2.1.288"
+        h.self_install_reader = lambda: True
+        assert "claude-code-changelog-reviewer" not in "\n".join(h.handle(_hook_input()).context)
+
+
 class TestVersionParsing:
     def test_parses_claude_version_output(self) -> None:
         h = ContractStalenessHandler()
@@ -223,5 +410,10 @@ class TestVersionParsing:
 class TestContract:
     def test_guidance_and_acceptance_hooks(self) -> None:
         h = ContractStalenessHandler()
-        assert h.get_claude_md() is None
-        assert isinstance(h.get_acceptance_tests(), list)
+        guidance = h.get_claude_md()
+        assert guidance is not None
+        assert "claude-code-changelog-reviewer" in guidance
+        assert "HOOK-CONTRACT-REFRESH.md" in guidance
+        tests = h.get_acceptance_tests()
+        assert isinstance(tests, list)
+        assert any("review" in t.title.lower() for t in tests)

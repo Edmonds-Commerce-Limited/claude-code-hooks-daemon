@@ -9,6 +9,10 @@
 #   evidence             Where the version comes from. Required when it is known.
 #   review_date          ISO date the changelog review ran, or `unknown`.
 #   review_report        Repository path of the review report, or `unknown`.
+#   reviewed_through     The TO version of the review (the newest Claude Code version the
+#                        review covered). Required when review_date is not `unknown`. The
+#                        contract_staleness SessionStart advisory compares the running
+#                        Claude Code against the newest of these.
 #   note                 Optional context.
 #
 # `unknown` means no evidence in the repository establishes the value. It is
@@ -59,6 +63,7 @@ releases:
     claude_code_version: unknown
     evidence: ""
     review_date: "2026-10-03"
+    reviewed_through: "2.1.288"
     review_report: CLAUDE/Plan/00486-claude-code-version-tracking/subagent-reports/261003-task-1.4-backfill-review-sonnet.md
     note: >-
       The report is the Plan 00486 backfill review of Claude Code 2.1.272 to
