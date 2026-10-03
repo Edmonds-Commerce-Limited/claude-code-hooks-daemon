@@ -1,6 +1,6 @@
 # Plan 00486: Claude Code version tracking
 
-**Status**: Not Started
+**Status**: In Progress
 **Created**: 2026-10-03
 **Owner**: dev
 **Priority**: Medium
@@ -33,18 +33,18 @@ Prior art: Plan 00327 audited the hook contracts once and recorded `last_audited
 
 ### Phase 1: Record and review
 
-- [ ] ⬜ **Task 1.1**: Decide where the per-release record lives. Candidates:
+- [x] ✅ **Task 1.1**: Decide where the per-release record lives (decided: the YAML map, see [DECISIONS.md](DECISIONS.md) D1; file is `CLAUDE/development/claude-code-versions.yaml`). Candidates:
 
   - a `claude_code_version` field in the RELEASES notes front matter;
   - a `CLAUDE/development/claude-code-versions.yaml` map from daemon release to Claude Code version and review date.
 
   Reuse `contract_status.py`'s version reading rather than adding a second reader.
 
-- [ ] ⬜ **Task 1.2**: Add a RELEASING.md step that records the version and runs the review. The review is a dedicated read-only subagent definition, `claude-code-changelog-reviewer`. It reads the vendored changelog (`hooks-daemon remote-docs`) between the two versions. It writes its report into the release's plan folder or `untracked/release-artifacts/`.
+- [x] ✅ **Task 1.2** (RELEASING.md sub-step 1c and `.claude/agents/claude-code-changelog-reviewer.md`): Add a RELEASING.md step that records the version and runs the review. The review is a dedicated read-only subagent definition, `claude-code-changelog-reviewer`. It reads the vendored changelog (`hooks-daemon remote-docs`) between the two versions. It writes its report into the release's plan folder or `untracked/release-artifacts/`.
 
-- [ ] ⬜ **Task 1.3**: Vendor `https://code.claude.com/docs/en/changelog` through remote-docs so the review reads a provenance-stamped copy.
+- [ ] ⬜ **Task 1.3** (BLOCKED: `remote-docs add` refuses the page on the `session-uuid` sensitive-content pattern before any capture exists; see the Task 1.4 report): Vendor `https://code.claude.com/docs/en/changelog` through remote-docs so the review reads a provenance-stamped copy.
 
-- [ ] ⬜ **Task 1.4**: Run a first backfill review from the version current at v3.67.0 to today's version. Include the idle compaction question: confirm whether it exists and where it overlaps the daemon's compaction handling and its prompt-cache and usage features.
+- [x] ✅ **Task 1.4** (report: `subagent-reports/261003-task-1.4-backfill-review-sonnet.md`, range 2.1.272 to 2.1.288; ledger entries still to be filed by the coordinator): Run a first backfill review from the version current at v3.67.0 to today's version. Include the idle compaction question: confirm whether it exists and where it overlaps the daemon's compaction handling and its prompt-cache and usage features.
 
 ### Phase 2: Detect drift in a session
 

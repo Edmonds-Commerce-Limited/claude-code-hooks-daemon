@@ -286,6 +286,25 @@ blindness.
 
 **ANY failure = IMMEDIATE ABORT. NO auto-fixing.**
 
+**1c. Claude Code version record and changelog review (Plan 00486).** The daemon is
+built on Claude Code, and nothing else notices what Claude Code added between two daemon
+releases. This sub-step records the version this release was tested against and reviews
+what changed since the previous one.
+
+1. Run `claude --version`. That is the TO version.
+2. Refresh the vendored changelog: `bin/hooks-daemon remote-docs refresh --all`.
+3. FROM is the newest `claude_code_version` that is not `unknown` in
+   `CLAUDE/development/claude-code-versions.yaml`. Dispatch the
+   `claude-code-changelog-reviewer` agent with FROM, TO and the report path
+   `untracked/release-artifacts/claude-code-review-vX.Y.Z.md`.
+4. Add `vX.Y.Z` to `claude-code-versions.yaml`: `claude_code_version` (TO), `evidence`,
+   `review_date`, and `review_report` (the path above). Every adopt, redundant or conflict
+   row in the report becomes a plan or ledger entry before Step 13; the report is copied
+   into that plan's folder, because `untracked/` does not survive a container restart.
+
+A release with no entry for its own version, or whose entry names a report that does not
+exist, is an ABORT at Step 7.
+
 ### 2. Version Detection
 
 Auto-detects from commits since last tag:
@@ -518,6 +537,7 @@ Opus reviews **documentation only** (not code/QA):
 - `UNRELEASED/post-upgrade-tasks/` contains only `README.md` (all tasks moved in Step 6)
 - Moved tasks have populated the versioned guide's `post-upgrade-tasks/README.md` task index
 - `UNRELEASED/pre-upgrade-tasks/` contains only `README.md`, and any moved pre-upgrade tasks are indexed in the guide's `pre-upgrade-tasks/README.md`
+- `CLAUDE/development/claude-code-versions.yaml` has an entry for this release (Step 1c) whose `review_report` file exists
 - Release notes reference post-upgrade tasks if any are `critical` or `recommended`
 - Every callout moved out of `UNRELEASED/release-notes/` in Step 6 appears in the release notes, and that directory contains only `README.md`
 - **Did this release change a documented truth?** (a workflow, command, or convention a project's own docs are likely to assert) — if so, a `truth-changes/v{X.Y.Z}.yaml` entry exists (`was → now`, or `now: ~` to retire it) and `UNRELEASED/truth-changes/` contains only `README.md`
