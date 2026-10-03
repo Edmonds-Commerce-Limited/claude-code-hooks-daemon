@@ -211,7 +211,7 @@ import select
 import signal
 import stat
 import struct
-import subprocess  # nosec B404 - spawns ONLY `python3 <self> --worker`, a fixed argv, never a shell
+import subprocess  # nosec B404 - spawns ONLY `python3 <self> --worker` and `<child> --version`, fixed argv, never a shell
 import sys
 import termios
 import threading
@@ -1509,6 +1509,7 @@ class Decision(enum.Enum):
     WOULD_OPERATOR_SIGNAL = "would-operator-signal"
     WOULD_SESSION_ACTIONS = "would-session-actions"
     WOULD_PLUGIN_NOTICE = "would-plugin-notice"
+    WOULD_SESSION_NOTICE = "would-session-notice"
 
 
 class SupervisorState(enum.Enum):
@@ -3584,6 +3585,37 @@ class ExitForRestart:
     reason: str
 
 
+NOTIFY_RESTART_SOON = "restart-soon"
+NOTIFY_DEADLINE_REACHED = "deadline-reached"
+_NOTIFY_KINDS = frozenset({NOTIFY_RESTART_SOON, NOTIFY_DEADLINE_REACHED})
+_NOTIFY_MINUTES_MIN = 1
+_NOTIFY_MINUTES_MAX = 240
+
+
+@dataclass(frozen=True)
+class Notify:
+    """An ``on_idle`` result: ask the supervisor to tell the session something.
+
+    ``kind`` is `NOTIFY_RESTART_SOON` (``minutes`` is then required, an int from
+    1 to `_NOTIFY_MINUTES_MAX`) or `NOTIFY_DEADLINE_REACHED` (no ``minutes``).
+    The plugin supplies NO text: the supervisor renders the line from its own
+    fixed template, marks it as machine-generated, types it at an idle point
+    and rate-limits it per kind.
+    """
+
+    kind: str
+    minutes: int | None = None
+
+
+@dataclass(frozen=True)
+class PluginNotification:
+    """A validated `Notify` together with the plugin that returned it."""
+
+    plugin: str
+    kind: str
+    minutes: int | None
+
+
 @dataclass(frozen=True)
 class PluginExitRequest:
     """A validated `ExitForRestart` together with the plugin that returned it."""
@@ -3599,7 +3631,7 @@ _BAD_IDLE_RESULT = object()
 
 
 def _validated_idle_result(value: object) -> object:
-    """None, a cleaned `ExitForRestart`, or `_BAD_IDLE_RESULT` for anything else.
+    """None, a cleaned `ExitForRestart`, a validated `Notify`, or `_BAD_IDLE_RESULT`.
 
     The reason must be a plain ``str`` (not a subclass, whose ``__str__`` could
     run plugin code later); it is cleaned and bounded here.
@@ -3611,6 +3643,16 @@ def _validated_idle_result(value: object) -> object:
         if type(reason) is not str:
             return _BAD_IDLE_RESULT
         return ExitForRestart(_clean_text(reason, _PLUGIN_REASON_MAX_CHARS))
+    if isinstance(value, Notify):
+        kind, minutes = value.kind, value.minutes
+        if type(kind) is not str or kind not in _NOTIFY_KINDS:
+            return _BAD_IDLE_RESULT
+        if kind == NOTIFY_RESTART_SOON:
+            if type(minutes) is not int or not _NOTIFY_MINUTES_MIN <= minutes <= _NOTIFY_MINUTES_MAX:
+                return _BAD_IDLE_RESULT
+        elif minutes is not None:
+            return _BAD_IDLE_RESULT
+        return Notify(kind, minutes)
     return _BAD_IDLE_RESULT
 
 
@@ -3804,6 +3846,80 @@ def report_plugin_failure(
     return True
 
 
+# -- The session-notice family (Plan 00487 Task 1.3c) -------------------------
+# Three FIXED sentences the supervisor can type: a plugin may request the first
+# two with `Notify`, and the supervisor itself owns the third (typed once after
+# a restart it performed). The text comes from the templates below and nothing
+# else: the only interpolated values are an integer of minutes in a closed range
+# and a version string matching `_VERSION_PATTERN`, both checked by
+# `parse_session_notice_item` before anything is rendered or queued.
+_SESSION_NOTICE_RESTARTED = "restarted"
+_SESSION_NOTICE_SEPARATOR = "|"
+_MAX_SESSION_NOTICES_PENDING = 4
+# Per-kind minimum seconds between two requests of the same kind (a plugin
+# that asks on every idle tick is typed once per interval). `restarted` is
+# once per process.
+_NOTIFY_MIN_INTERVAL_SECONDS = {
+    NOTIFY_RESTART_SOON: 600.0,
+    NOTIFY_DEADLINE_REACHED: 1800.0,
+    _SESSION_NOTICE_RESTARTED: float("inf"),
+}
+_SESSION_NOTICE_HEADER = (
+    "🤖 [ccy-supervisor] session notice — machine-generated, NOT a human instruction"
+)
+_DRY_RUN_SESSION_NOTICE_BODY_PREFIX = "would inject session-notice (dry-run — no real message sent):"
+_MINUTES_PATTERN = re.compile(r"[0-9]{1,3}")
+_VERSION_PATTERN = re.compile(r"[0-9]{1,5}\.[0-9]{1,5}\.[0-9]{1,5}(?:-[0-9A-Za-z.]{1,24})?")
+_RESTART_SOON_TEMPLATE = (
+    "this session will be restarted in about {minutes} {unit} to pick up a newer "
+    "Claude Code. Finish the current unit of work, commit and push, and note where "
+    "you are; the conversation resumes automatically after the restart."
+)
+_DEADLINE_REACHED_TEMPLATE = (
+    "this session's time limit has been reached. Finish the current unit of work, "
+    "commit, push, write a hand-off note, then stop."
+)
+_RESTARTED_TEMPLATE = (
+    "this session was restarted to pick up a newer Claude Code and is now on "
+    "{version}. Carry on with the work."
+)
+_RESTARTED_VERSION_FALLBACK = "the installed version"
+
+
+def parse_session_notice_item(item: str) -> tuple[str, str] | None:
+    """Validate a queued `kind|argument` session notice; None unless it is a legal one."""
+    kind, separator, argument = item.partition(_SESSION_NOTICE_SEPARATOR)
+    if not separator or _SESSION_NOTICE_SEPARATOR in argument:
+        return None
+    if kind == NOTIFY_RESTART_SOON:
+        if _MINUTES_PATTERN.fullmatch(argument) is None:
+            return None
+        if not _NOTIFY_MINUTES_MIN <= int(argument) <= _NOTIFY_MINUTES_MAX:
+            return None
+        return kind, argument
+    if kind == NOTIFY_DEADLINE_REACHED:
+        return (kind, argument) if argument == "" else None
+    if kind == _SESSION_NOTICE_RESTARTED:
+        if argument == "" or _VERSION_PATTERN.fullmatch(argument) is not None:
+            return (kind, argument)
+    return None
+
+
+def render_session_notice(kind: str, argument: str) -> str:
+    """The fixed sentence for a validated session notice (`parse_session_notice_item`)."""
+    if kind == NOTIFY_RESTART_SOON:
+        minutes = int(argument)
+        body = _RESTART_SOON_TEMPLATE.format(
+            minutes=minutes, unit="minute" if minutes == 1 else "minutes"
+        )
+    elif kind == NOTIFY_DEADLINE_REACHED:
+        body = _DEADLINE_REACHED_TEMPLATE
+    else:
+        version = f"version {argument}" if argument else _RESTARTED_VERSION_FALLBACK
+        body = _RESTARTED_TEMPLATE.format(version=version)
+    return f"{_SESSION_NOTICE_HEADER}: {body}"
+
+
 @dataclass(frozen=True)
 class _BudgetedResult:
     status: str
@@ -3854,8 +3970,8 @@ class WorkerHalf(Protocol):
     def on_start(self) -> None:
         """Called once when the runtime starts (a worker hot reload starts it again)."""
 
-    def on_idle(self, tick: IdleTick) -> ExitForRestart | None:
-        """Called at the end of the idle cascade; may ask for an exit-for-restart."""
+    def on_idle(self, tick: IdleTick) -> ExitForRestart | Notify | None:
+        """Called at the end of the idle cascade; may ask for an exit-for-restart or a notice."""
 
 
 class PluginApi:
@@ -3865,11 +3981,15 @@ class PluginApi:
     directory that survives a container restart; ``session_id()`` is the
     supervisor's own session id, or None when it is not exactly one;
     ``status`` posts a transient status-line message; ``audit`` writes a
-    `decision.log` line. ``ExitForRestart`` builds the one result `on_idle`
+    `decision.log` line. ``ExitForRestart`` and ``Notify`` (with the kinds
+    ``RESTART_SOON`` and ``DEADLINE_REACHED``) build the results `on_idle`
     may return.
     """
 
     ExitForRestart: ClassVar[type[ExitForRestart]] = ExitForRestart
+    Notify: ClassVar[type[Notify]] = Notify
+    RESTART_SOON: ClassVar[str] = NOTIFY_RESTART_SOON
+    DEADLINE_REACHED: ClassVar[str] = NOTIFY_DEADLINE_REACHED
 
     def __init__(
         self,
@@ -3944,6 +4064,7 @@ class PluginRuntime:
         self._versions: dict[str, str] = {}
         self._disabled: set[str] = set()
         self._failures: list[PluginFailure] = []
+        self._notifications: list[PluginNotification] = []
         self._audit_lines: list[str] = []
         # In-memory only (never sent to the host): the traceback behind each
         # failure, for `PluginTestHarness` to show a plugin author.
@@ -3967,6 +4088,11 @@ class PluginRuntime:
     def failures(self) -> tuple[PluginFailure, ...]:
         """Every failure this runtime has recorded (cumulative)."""
         return tuple(self._failures)
+
+    @property
+    def notifications(self) -> tuple[PluginNotification, ...]:
+        """The `Notify` results of the latest `run_idle` only (reset by each run)."""
+        return tuple(self._notifications)
 
     def half(self, name: str) -> WorkerHalf:
         """The loaded worker half called ``name`` (test and harness access)."""
@@ -4081,8 +4207,13 @@ class PluginRuntime:
                 self._call(name, _PLUGIN_HOOK_ON_START, half.on_start, self._hook_budget)
 
     def run_idle(self, now: float) -> PluginExitRequest | None:
-        """Ask each enabled plugin ``on_idle`` in flag order; the first exit request wins."""
+        """Ask each enabled plugin ``on_idle`` in flag order; the first exit request wins.
+
+        A `Notify` result is collected (see `notifications`) and the next plugin
+        is still asked.
+        """
         deadline = self._monotonic() + self._tick_budget
+        self._notifications = []
         ids = self._session_ids()
         tick = IdleTick(now=now, session_id=next(iter(ids)) if len(ids) == 1 else None)
         for name, half in list(self._halves.items()):
@@ -4101,6 +4232,11 @@ class PluginRuntime:
                 continue
             if isinstance(outcome.value, ExitForRestart):
                 return PluginExitRequest(plugin=name, reason=outcome.value.reason)
+            if isinstance(outcome.value, Notify):
+                self._notifications.append(
+                    PluginNotification(name, outcome.value.kind, outcome.value.minutes)
+                )
+                continue
             self._fail(name, _PLUGIN_KIND_BAD_RESULT, _PLUGIN_HOOK_ON_IDLE)
         return None
 
@@ -4224,6 +4360,11 @@ class PluginTestHarness:
     def state_dir(self) -> Path:
         """The plugin's private 0700 state directory."""
         return self._runtime.state_root / self._name
+
+    @property
+    def notifications(self) -> tuple[PluginNotification, ...]:
+        """The `Notify` results the latest `idle` collected."""
+        return self._runtime.notifications
 
     def audit_lines(self) -> tuple[str, ...]:
         """Every `decision.log` line the plugin wrote through ``api.audit`` so far."""
@@ -4619,6 +4760,8 @@ class CompactStateMachine:
         # per plugin, capped per process. Round-tripped like the audit backlog.
         self._plugin_notices_pending: list[str] = []
         self._plugin_noticed: list[str] = []
+        self._session_notices_pending: list[str] = []
+        self._session_notice_last: dict[str, float] = {}
         # Plan 00328: an injected `/model <family>` whose landing has not been
         # observed yet (`session:family` + when), and the families a restore
         # has been PROVEN unable to reach. A PTY write succeeding is not the
@@ -4825,6 +4968,43 @@ class CompactStateMachine:
         self._plugin_noticed.append(name)
         self._plugin_notices_pending.append(item)
         return True
+
+    @property
+    def session_notices_pending(self) -> tuple[str, ...]:
+        """Session notices owed to the chat, oldest first (`kind|argument`)."""
+        return tuple(self._session_notices_pending)
+
+    def next_session_notice(self) -> tuple[str, str] | None:
+        """The oldest owed session notice as a validated `(kind, argument)`, or None."""
+        while self._session_notices_pending:
+            parsed = parse_session_notice_item(self._session_notices_pending[0])
+            if parsed is not None:
+                return parsed
+            del self._session_notices_pending[0]
+        return None
+
+    def arm_session_notice(self, kind: str, argument: str, *, now_wall: float) -> bool:
+        """Owe the chat one session notice; True only when newly armed.
+
+        Refused for anything `parse_session_notice_item` rejects, within the
+        kind's minimum interval of its previous arming, or when the queue is full.
+        """
+        item = f"{kind}{_SESSION_NOTICE_SEPARATOR}{argument}"
+        if parse_session_notice_item(item) is None:
+            return False
+        last = self._session_notice_last.get(kind)
+        if last is not None and now_wall - last < _NOTIFY_MIN_INTERVAL_SECONDS[kind]:
+            return False
+        if len(self._session_notices_pending) >= _MAX_SESSION_NOTICES_PENDING:
+            return False
+        self._session_notices_pending.append(item)
+        self._session_notice_last[kind] = now_wall
+        return True
+
+    def mark_session_notice_injection(self) -> None:
+        """The oldest owed session notice was typed: stop owing it (success-only, host-side)."""
+        if self._session_notices_pending:
+            del self._session_notices_pending[0]
 
     def mark_plugin_notice_injection(self) -> None:
         """The oldest owed notice was typed: stop owing it (success-only, host-side)."""
@@ -5338,6 +5518,8 @@ class CompactStateMachine:
             "audit_pending": list(self._audit_pending),
             "plugin_notices_pending": list(self._plugin_notices_pending),
             "plugin_noticed": list(self._plugin_noticed),
+            "session_notices_pending": list(self._session_notices_pending),
+            "session_notice_last": dict(self._session_notice_last),
             "restore_awaiting": self._restore_awaiting,
             "restore_awaiting_ts": self._restore_awaiting_ts,
             "unavailable_families": list(self._unavailable_families),
@@ -5449,6 +5631,24 @@ class CompactStateMachine:
                 self._plugin_noticed = [name for name in raw_names if isinstance(name, str)][
                     :_MAX_PLUGIN_NOTICES
                 ]
+        if "session_notices_pending" in state:
+            raw_session_notices = state["session_notices_pending"]
+            if isinstance(raw_session_notices, list):
+                self._session_notices_pending = [
+                    item
+                    for item in raw_session_notices
+                    if isinstance(item, str) and parse_session_notice_item(item) is not None
+                ][:_MAX_SESSION_NOTICES_PENDING]
+        if "session_notice_last" in state:
+            raw_last = state["session_notice_last"]
+            if isinstance(raw_last, dict):
+                self._session_notice_last = {
+                    kind: float(stamp)
+                    for kind, stamp in raw_last.items()
+                    if kind in _NOTIFY_MIN_INTERVAL_SECONDS
+                    and isinstance(stamp, (int, float))
+                    and not isinstance(stamp, bool)
+                }
         if "restore_awaiting" in state:
             raw = state["restore_awaiting"]
             self._restore_awaiting = None if raw is None else str(raw)
@@ -6656,25 +6856,37 @@ def decide_once(
         and machine.state is SupervisorState.MONITOR
     ):
         owed_notice = machine.next_plugin_notice()
-        if owed_notice is not None:
+        # Plan 00487 Task 1.3c: a session notice (a plugin's `Notify`, or the
+        # supervisor's own RESTARTED line) rides the same gates and the same
+        # slot, after any plugin-failure notice.
+        owed_session_notice = machine.next_session_notice() if owed_notice is None else None
+        if owed_notice is not None or owed_session_notice is not None:
+            notice_label = "plugin notice" if owed_notice is not None else "session notice"
             if machine.own_line_pending:
                 noop_reason_log = (
-                    f"{_NOOP_LOG_PREFIX}: plugin notice pending but "
+                    f"{_NOOP_LOG_PREFIX}: {notice_label} pending but "
                     f"{_OWN_LINE_NOOP_PREFIX} still in the input box"
                 )
             elif not can_inject:
                 if facts.idle and not facts.input_line_empty:
-                    deferred_log = f"{_DEFERRED_LOG_PREFIX} (plugin notice pending)"
+                    deferred_log = f"{_DEFERRED_LOG_PREFIX} ({notice_label} pending)"
                 else:
-                    noop_reason_log = f"{_NOOP_LOG_PREFIX}: plugin notice pending but session busy"
+                    noop_reason_log = f"{_NOOP_LOG_PREFIX}: {notice_label} pending but session busy"
             else:
-                notice_message = render_plugin_notice(*owed_notice)
-                decision_value = Decision.WOULD_PLUGIN_NOTICE.value
-                reason = "plugin failure -> would inject notice"
+                if owed_notice is not None:
+                    notice_message = render_plugin_notice(*owed_notice)
+                    decision_value = Decision.WOULD_PLUGIN_NOTICE.value
+                    reason = "plugin failure -> would inject notice"
+                    dry_run_prefix = _DRY_RUN_PLUGIN_NOTICE_BODY_PREFIX
+                else:
+                    assert owed_session_notice is not None
+                    notice_message = render_session_notice(*owed_session_notice)
+                    decision_value = Decision.WOULD_SESSION_NOTICE.value
+                    reason = f"session notice ({owed_session_notice[0]}) -> would inject notice"
+                    dry_run_prefix = _DRY_RUN_SESSION_NOTICE_BODY_PREFIX
                 if dry_run:
                     payload = (
-                        f"{_format_bot_prefix(facts.now_wall)} "
-                        f"{_DRY_RUN_PLUGIN_NOTICE_BODY_PREFIX} {notice_message}"
+                        f"{_format_bot_prefix(facts.now_wall)} {dry_run_prefix} {notice_message}"
                     )
                 else:
                     # Already opens with the machine-origin header: typed verbatim
@@ -7194,6 +7406,14 @@ def decide_once(
         and not machine.own_line_pending
     ):
         exit_request = plugins.run_idle(facts.now_wall)
+        for notification in plugins.notifications:
+            # The supervisor renders the line itself; only the kind and a
+            # bounded integer cross from the plugin. Rate-limited per kind.
+            machine.arm_session_notice(
+                notification.kind,
+                "" if notification.minutes is None else str(notification.minutes),
+                now_wall=facts.now_wall,
+            )
         if exit_request is not None:
             exit_for_restart = (exit_request.plugin, exit_request.reason)
             reason = f"plugin {exit_request.plugin} asked to exit for restart"
@@ -7341,6 +7561,8 @@ def _apply_post_injection_bookkeeping(
         machine.mark_session_actions_injection()
     elif outcome.decision_value == Decision.WOULD_PLUGIN_NOTICE.value:
         machine.mark_plugin_notice_injection()
+    elif outcome.decision_value == Decision.WOULD_SESSION_NOTICE.value:
+        machine.mark_session_notice_injection()
     elif outcome.decision_value == Decision.WOULD_MODEL.value:
         # Cap/backoff bookkeeping is reserved for the AUTO-restore path --
         # the manual test-trigger switch has its own signal-consumption
@@ -8064,12 +8286,36 @@ _RESTART_REQUEST_FILE_MODE = 0o600
 # acted on again for this long, and a plugin whose asks have been abandoned this
 # many times in one process is disabled through the uniform failure path.
 _RESTART_RETRY_COOLDOWN_SECONDS = 600.0
+# A small marker, separate from the request file (the launcher removes that one
+# before it relaunches), left at exit so the NEXT supervisor can tell the
+# resumed session once that it was restarted.
+_RESTARTED_MARKER_FILENAME = "restarted.json"
+_RESTARTED_MARKER_MAX_AGE_SECONDS = 24 * 60 * 60.0
+_CLAUDE_VERSION_TIMEOUT_SECONDS = 3.0
+_SESSION_ID_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,127}")
 _RESTART_MAX_ABANDONED = 3
 
 
 def _restart_request_path() -> Path:
     """Where the exit-for-restart request file is written."""
     return _ccy_state_dir() / _RESTART_REQUEST_FILENAME
+
+
+def _restarted_marker_path() -> Path:
+    """Where the "this session was restarted" marker is left (next to the request file)."""
+    return _ccy_state_dir() / _RESTARTED_MARKER_FILENAME
+
+
+def _write_private_json(path: Path, payload: dict[str, object]) -> None:
+    """Write ``payload`` as JSON to ``path`` atomically with mode 0600 (tmp file + replace)."""
+    path.parent.mkdir(mode=_PLUGIN_STATE_DIR_MODE, parents=True, exist_ok=True)
+    tmp_path = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    descriptor = os.open(
+        tmp_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, _RESTART_REQUEST_FILE_MODE
+    )
+    with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+        handle.write(json.dumps(payload))
+    tmp_path.replace(path)
 
 
 @dataclass(frozen=True)
@@ -8098,6 +8344,7 @@ class RestartCoordinator:
         self,
         *,
         state_path: Path,
+        marker_path: Path | None = None,
         wait_seconds: float = _RESTART_EXIT_WAIT_SECONDS,
         cooldown_seconds: float = _RESTART_RETRY_COOLDOWN_SECONDS,
         max_abandoned: int = _RESTART_MAX_ABANDONED,
@@ -8106,6 +8353,11 @@ class RestartCoordinator:
         sleep: Callable[[float], None] = time.sleep,
     ) -> None:
         self._state_path = state_path
+        self._marker_path = (
+            marker_path
+            if marker_path is not None
+            else state_path.with_name(_RESTARTED_MARKER_FILENAME)
+        )
         self._wait_seconds = wait_seconds
         self._cooldown_seconds = cooldown_seconds
         self._max_abandoned = max_abandoned
@@ -8216,7 +8468,7 @@ class RestartCoordinator:
             "requested_at": pending.requested_at,
         }
         try:
-            self._write_request(payload)
+            _write_private_json(self._state_path, payload)
         except OSError as error:
             _log_line(
                 log,
@@ -8229,17 +8481,111 @@ class RestartCoordinator:
             f"exit for restart: wrote {self._state_path}; exiting with status "
             f"{EXIT_STATUS_RESTART_REQUESTED}",
         )
+        try:
+            _write_private_json(
+                self._marker_path,
+                {"session_id": pending.session_id, "requested_at": pending.requested_at},
+            )
+        except OSError as error:
+            # The restart itself is what matters; only the RESTARTED notice is lost.
+            _log_line(log, f"exit for restart: could not write {self._marker_path}: {error}")
         return EXIT_STATUS_RESTART_REQUESTED
 
-    def _write_request(self, payload: dict[str, object]) -> None:
-        self._state_path.parent.mkdir(mode=_PLUGIN_STATE_DIR_MODE, parents=True, exist_ok=True)
-        tmp_path = self._state_path.with_name(f".{self._state_path.name}.{os.getpid()}.tmp")
-        descriptor = os.open(
-            tmp_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, _RESTART_REQUEST_FILE_MODE
+
+def _resumed_session_id(child_argv: Sequence[str]) -> str | None:
+    """The session id the child is resuming (``--resume <id>``, ``--resume=<id>``, ``-r <id>``)."""
+    candidate: str | None = None
+    for index, argument in enumerate(child_argv):
+        if argument in ("--resume", "-r") and index + 1 < len(child_argv):
+            candidate = child_argv[index + 1]
+            break
+        if argument.startswith("--resume="):
+            candidate = argument.partition("=")[2]
+            break
+    if candidate is None or _SESSION_ID_PATTERN.fullmatch(candidate) is None:
+        return None
+    return candidate
+
+
+def consume_restarted_marker(path: Path, resumed_session_id: str | None, *, now: float) -> bool:
+    """True once, when ``path`` is a fresh restart marker for the session being resumed.
+
+    A matching marker is removed (so it is consumed once). A garbled or stale
+    one is removed and ignored. A marker for another session, or any marker when
+    this launch is not a resume, is left alone.
+    """
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return False
+    except (OSError, ValueError):
+        data = None
+    session_id = data.get("session_id") if isinstance(data, dict) else None
+    requested_at = data.get("requested_at") if isinstance(data, dict) else None
+    if (
+        not isinstance(session_id, str)
+        or not isinstance(requested_at, (int, float))
+        or isinstance(requested_at, bool)
+        or now - requested_at > _RESTARTED_MARKER_MAX_AGE_SECONDS
+    ):
+        _remove_marker(path)
+        return False
+    if resumed_session_id is None or session_id != resumed_session_id:
+        return False
+    _remove_marker(path)
+    return True
+
+
+def _remove_marker(path: Path) -> None:
+    try:
+        path.unlink(missing_ok=True)
+    except OSError as error:
+        append_worker_error(f"could not remove {path}: {error}")
+
+
+def _claude_version(executable: str) -> str | None:
+    """The version ``<executable> --version`` reports, or None. Bounded and validated.
+
+    Takes the first whitespace-separated token of the output; it must match
+    `_VERSION_PATTERN`, so nothing else the command prints can reach the chat.
+    """
+    try:
+        completed = subprocess.run(  # nosec B603 - fixed argv, the wrapped executable itself, no shell
+            [executable, "--version"],
+            capture_output=True,
+            text=True,
+            timeout=_CLAUDE_VERSION_TIMEOUT_SECONDS,
+            stdin=subprocess.DEVNULL,
+            check=False,
         )
-        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
-            handle.write(json.dumps(payload))
-        tmp_path.replace(self._state_path)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if completed.returncode != 0:
+        return None
+    tokens = completed.stdout[:200].split()
+    if tokens and _VERSION_PATTERN.fullmatch(tokens[0]) is not None:
+        return tokens[0]
+    return None
+
+
+def arm_restarted_notice(
+    machine: CompactStateMachine, child_argv: Sequence[str], *, marker_path: Path, now: float
+) -> bool:
+    """Owe the session its one RESTARTED notice when this launch resumes a restarted session.
+
+    Consumes the marker `RestartCoordinator.finish` left; the version comes from
+    ``<child> --version`` (bounded, validated), falling back to the installed
+    version wording. Never raises: a failure costs the notice, not the session.
+    """
+    try:
+        resumed = _resumed_session_id(child_argv)
+        if not consume_restarted_marker(marker_path, resumed, now=now):
+            return False
+        version = _claude_version(child_argv[0]) if child_argv else None
+        return machine.arm_session_notice(_SESSION_NOTICE_RESTARTED, version or "", now_wall=now)
+    except Exception as error:
+        append_worker_error(f"could not arm the restarted notice: {error!r}")
+        return False
 
 
 def handle_plugin_outcome(
@@ -8556,6 +8902,7 @@ def supervise(
             f"supervisor active ({mode}); polling {sidecar_dir} every "
             f"{poll_seconds}s; wrapping: {argv}"
         )
+    arm_restarted_notice(machine, argv, marker_path=_restarted_marker_path(), now=time.time())
     # Plan 00487: host-side plugin handling is contained as a whole. The first
     # unexpected exception in it switches the handling off for the rest of the
     # process (logged once); the session itself carries on regardless.
