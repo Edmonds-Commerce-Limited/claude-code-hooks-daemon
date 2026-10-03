@@ -71,6 +71,7 @@ from claude_code_hooks_daemon.install.upgrade_tasks import (
 from claude_code_hooks_daemon.install.version_parse import strip_tag_prefix
 from claude_code_hooks_daemon.utils.one_shot_approval import OneShotApprovalStore
 from claude_code_hooks_daemon.utils.path_containment import path_is_relative_to, path_relative_to
+from claude_code_hooks_daemon.utils.path_predicates import path_is_file, read_text_or_reason
 
 logger = logging.getLogger(__name__)
 
@@ -148,6 +149,7 @@ class ApprovalState(Enum):
     ABSENT = "absent"
     VALID = "valid"
     INVALID = "invalid"
+    UNREADABLE = "unreadable"
 
 
 @dataclass(frozen=True)
@@ -373,10 +375,16 @@ def check_approval(
         project_root=project_root,
     )
     marker = OneShotApprovalStore(APPROVAL_SUBDIR).path(untracked_dir, expected[_FIELD_TO])
-    if not marker.is_file():
+    is_file = path_is_file(marker, unreadable_means=None)
+    if is_file is None:
+        return ApprovalState.UNREADABLE
+    if not is_file:
         return ApprovalState.ABSENT
+    read = read_text_or_reason(marker, errors="replace")
+    if read.text is None:
+        return ApprovalState.UNREADABLE
     try:
-        recorded = json.loads(marker.read_text(encoding="utf-8"))
+        recorded = json.loads(read.text)
     except json.JSONDecodeError:
         return ApprovalState.INVALID
     if not isinstance(recorded, dict):
@@ -788,6 +796,11 @@ def _approval_lines(report: GateReport) -> list[str]:
         lines.append(
             f"(The marker at {report.approval_marker} was not written by approve-upgrade "
             "for this upgrade, so it does not count.)"
+        )
+    if report.approval_state is ApprovalState.UNREADABLE:
+        lines.append(
+            f"(The marker at {report.approval_marker} exists but is unreadable, so it does "
+            "not count. Fix the file's permissions or ownership rather than approving again.)"
         )
     lines.extend(
         [

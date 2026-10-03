@@ -58,6 +58,7 @@ _LOAD_ORDER: tuple[tuple[str, str], ...] = (
     ("claude_code_hooks_daemon.install.version_parse", "install/version_parse.py"),
     ("claude_code_hooks_daemon.install.install_stamp", "install/install_stamp.py"),
     ("claude_code_hooks_daemon.utils.path_containment", "utils/path_containment.py"),
+    ("claude_code_hooks_daemon.utils.path_predicates", "utils/path_predicates.py"),
     ("claude_code_hooks_daemon.install.upgrade_guides", "install/upgrade_guides.py"),
     ("claude_code_hooks_daemon.install.upgrade_tasks", "install/upgrade_tasks.py"),
     ("claude_code_hooks_daemon.utils.one_shot_approval", "utils/one_shot_approval.py"),
