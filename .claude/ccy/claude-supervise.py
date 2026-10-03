@@ -3389,8 +3389,9 @@ def reap_stale_sidecars(
 # uid or root, neither it nor its directory group/world-writable) and never
 # imported by the PTY HOST: the host only vets the file and keeps a registry
 # (`PluginHost`); the ``--worker`` subprocess imports the files the host passed
-# on (`PluginRuntime`). The in-process fallback builds a runtime lazily, only
-# when the worker is down, so plugins do not go silent with it.
+# on (`PluginRuntime`). Plugin code runs ONLY in that worker: when the worker
+# is silent or down the host's in-process fallback runs the built-in families
+# alone, and plugins resume when a worker answers again.
 #
 # A worker half is ``create_worker_half(api)`` returning an object with
 # ``on_start()`` and ``on_idle(tick)``. ``on_idle`` runs ONLY at the end of the
@@ -4262,7 +4263,6 @@ class PluginHost:
         self._entries: list[_PluginEntry] = []
         self._by_name: dict[str, _PluginEntry] = {}
         self._startup_failures: list[PluginFailure] = []
-        self._runtime: PluginRuntime | None = None
         for raw in raw_specs:
             self._add(raw)
         # A plugin the command line itself names in `--disable-plugin` starts off.
@@ -4361,8 +4361,6 @@ class PluginHost:
             return False
         entry.state = _PLUGIN_STATE_FAILED if kind == _PLUGIN_KIND_LOAD else _PLUGIN_STATE_DISABLED
         entry.reason = _failure_reason(PluginFailure(name, kind, hook, detail))
-        if self._runtime is not None:
-            self._runtime.disable(name)
         self._publish()
         return True
 
@@ -4420,29 +4418,6 @@ class PluginHost:
             self._resolved_marker_path().unlink(missing_ok=True)
         except OSError as error:
             append_worker_error(f"could not clear plugin in-hook marker: {error}")
-
-    def in_process_runtime(self) -> PluginRuntime:
-        """The lazily built runtime the in-process fallback decides with (host process)."""
-        if self._runtime is None:
-            runtime = PluginRuntime(
-                state_root=(
-                    self._state_root if self._state_root is not None else _plugin_state_root()
-                ),
-                status_dir=self._resolved_status_dir(),
-                marker_path=self._resolved_marker_path(),
-                allowed_uids=self._allowed_uids,
-            )
-            runtime.load(
-                [
-                    (e.name, e.path)
-                    for e in self._entries
-                    if e.state != _PLUGIN_STATE_FAILED and e.path is not None
-                ],
-                self.disabled_names(),
-            )
-            runtime.start()
-            self._runtime = runtime
-        return self._runtime
 
     def _publish(self) -> None:
         if self._write_status is not None:
@@ -8658,7 +8633,9 @@ def supervise(
                 goal_signal_ttl_seconds=policy.goal_signal_ttl_seconds,
                 input_line_abandoned=input_line_abandoned,
                 on_input_line_flushed=activity.line.clear,
-                plugins=plugin_host.in_process_runtime() if plugin_host is not None else None,
+                # NEVER a plugin runtime: this fallback runs in the PTY host
+                # process, and plugin code does not (Plan 00487).
+                plugins=None,
                 on_outcome=_handle_plugin_outcome,
             )
 

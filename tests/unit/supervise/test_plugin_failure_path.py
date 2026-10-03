@@ -511,16 +511,6 @@ class TestHostHandling:
         _handle(tmp_path, host, _outcome(plugin_versions=(("p", "4.5.6"),)), recorder)
         assert host.status_entries()[0]["version"] == "4.5.6"
 
-    def test_a_disabled_plugin_is_also_taken_out_of_the_in_process_runtime(
-        self, tmp_path: Path
-    ) -> None:
-        host, recorder = _host_for(tmp_path, ["p"]), _Recorder()
-        runtime = host.in_process_runtime()
-        _handle(
-            tmp_path, host, _outcome(plugin_failures=(("p", "exception", "on_idle", ""),)), recorder
-        )
-        assert runtime.loaded == []
-
 
 # -- a wedged worker ------------------------------------------------------------
 

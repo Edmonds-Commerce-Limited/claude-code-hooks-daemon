@@ -298,21 +298,15 @@ class TestPluginHost:
         _host([], written)
         assert written == []
 
-    def test_the_in_process_runtime_is_built_lazily_from_loadable_plugins(
-        self, tmp_path: Path
-    ) -> None:
+    def test_vetting_a_plugin_never_imports_it(self, tmp_path: Path) -> None:
         a = write_plugin(tmp_path, "a")
-        host = _mod.PluginHost(
+        _mod.PluginHost(
             [spec("a", a)],
             write_status=lambda entries: None,
             allowed_uids=_OWN_UIDS,
-            state_root=tmp_path / "state",
-            status_dir=tmp_path / "untracked",
             marker_path=tmp_path / "marker.json",
         )
-        runtime = host.in_process_runtime()
-        assert [name for name, _version in runtime.loaded] == ["a"]
-        assert host.in_process_runtime() is runtime
+        assert f"{_mod._PLUGIN_MODULE_PREFIX}a" not in _mod.sys.modules
 
 
 # -- supervisor-status.json --------------------------------------------------
