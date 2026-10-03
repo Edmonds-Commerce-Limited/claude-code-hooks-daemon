@@ -1420,7 +1420,7 @@ land in.
 
 **Evidence**: when the simulation degrades, its warning text names `git add -A` even when the command it simulated was `git add -u`. Only the wording is wrong; the staged-set computation is right.
 
-**Status**: ⬜ Open. Remedy: name the flag the command actually used.
+**Status**: ✅ Fixed in 1ca156987. The warning now names the flags the add actually ran (`add -u`, or `add -A --ignore-errors`).
 
 ### N324 — the CI-run lookup does not say which run it read when HEAD has several
 
@@ -1436,7 +1436,7 @@ land in.
 
 **Evidence**: an approval marker under `upgrade-approvals/` that exists but cannot be read is treated like a missing one. The gate still fails closed, but the message sends the owner to approve again, when what needs fixing is the file's permissions.
 
-**Status**: ⬜ Open. Remedy: a distinct INVALID verdict with an "unreadable" reason, read through `path_predicates`.
+**Status**: ✅ Fixed in b8b99c007. A distinct `ApprovalState.UNREADABLE` (fail-closed, read through `path_predicates`) whose gate message points at the file's permissions; the standalone gate loader now loads `utils/path_predicates.py`.
 
 ### N322 — `usage_snapshot` can leave its temp file behind when the rename fails
 
@@ -1444,7 +1444,7 @@ land in.
 
 **Evidence**: the snapshot writer writes a temp file and renames it into place. If the rename raises, the temp file stays in the state directory. Nothing reads it, but it accumulates.
 
-**Status**: ⬜ Open. Remedy: unlink the temp file on the failure path, and test that path.
+**Status**: ✅ Fixed in 4b0c3dcd5. The writer unlinks its temp file when the write or rename fails, and a test drives the failed rename.
 
 ### N321 — strict-by-default left four acceptance probes denied, and merge checks never ran `tests/acceptance/`
 
