@@ -197,17 +197,20 @@ class ContractStalenessHandler(SessionStartHandlerBase):
     def _newest_reviewed_version(self) -> str | None:
         """Newest ``reviewed_through`` in the record, or None when it cannot apply.
 
-        None (and so silence) for a client install, an absent or unreadable
-        record, or a record with no usable reviewed version: the record is
-        daemon-repo-only and a client has no review to act on.
+        None (and so silence) for a client install, an absent record, or a
+        record with no usable reviewed version: the record is daemon-repo-only
+        and a client has no review to act on. An EXISTING record that cannot
+        be read or parsed is a defect in this repository and raises.
+
+        Raises:
+            ValueError: The record exists but is not valid YAML.
         """
-        if not self._is_self_install():
+        if not self._is_self_install() or not self.versions_path.is_file():
             return None
         try:
             data = yaml.safe_load(self.versions_path.read_text(encoding="utf-8"))
-        except (OSError, yaml.YAMLError) as exc:
-            logger.debug("version record unreadable (%s): %s", self.versions_path, exc)
-            return None
+        except yaml.YAMLError as exc:
+            raise ValueError(f"{self.versions_path} is not valid YAML: {exc}") from exc
         releases = data.get("releases") if isinstance(data, dict) else None
         if not isinstance(releases, dict):
             return None
@@ -303,15 +306,23 @@ class ContractStalenessHandler(SessionStartHandlerBase):
             return {}
         return data if isinstance(data, dict) else {}
 
-    def write_cache(self, updates: dict[str, Any]) -> None:
-        """Merge ``updates`` into the cache file, keeping the keys it does not touch."""
+    def write_cache(self, updates: dict[str, Any]) -> bool:
+        """Merge ``updates`` into the cache file, keeping the keys it does not touch.
+
+        Returns:
+            True when written; False (logged at warning) when the cache is
+            unwritable. The cache is an optimisation and a dedupe marker, so
+            callers carry on without it rather than failing session start.
+        """
         merged = {**self.read_cache(), **updates}
         cache_file = self._cache_file()
         try:
             cache_file.parent.mkdir(parents=True, exist_ok=True)
             cache_file.write_text(json.dumps(merged), encoding="utf-8")
         except OSError as exc:
-            logger.debug("contract staleness cache unwritable: %s", exc)
+            logger.warning("contract staleness cache unwritable (%s): %s", cache_file, exc)
+            return False
+        return True
 
     def _cache_file(self) -> Path:
         if self.cache_path is not None:
@@ -369,15 +380,13 @@ class ContractStalenessHandler(SessionStartHandlerBase):
         return installed_parts > audited_parts
 
     def get_claude_md(self) -> str | None:
-        """Guidance for the generated CLAUDE.md section."""
-        return (
-            "SessionStart advisories when Claude Code is newer than the vendored "
-            "hooks contract's last audit (refresh: `docs/guides/HOOK-CONTRACT-REFRESH.md`) "
-            "or, in the daemon repo only, than the newest changelog-reviewed version "
-            "(run the `claude-code-changelog-reviewer` agent and record it in "
-            "`CLAUDE/development/claude-code-versions.yaml`). Each fires on new "
-            "sessions; the review advisory once per version."
-        )
+        """No CLAUDE.md guidance: both checks fire at session start carrying their full remedy.
+
+        ``tests/integration/test_claude_md_guidance_coverage.py`` exempts this
+        handler on exactly that ground, so a standing section would only
+        repeat what the advisory already says.
+        """
+        return None
 
     def get_acceptance_tests(self) -> list[Any]:
         """Acceptance tests rendered into the release playbook."""

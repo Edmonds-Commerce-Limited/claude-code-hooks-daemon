@@ -294,17 +294,35 @@ class TestReviewDriftAdvisory:
         assert "2.1.301" in self._text(drift_handler), "a newer unreviewed version re-arms"
 
     def test_dedupe_survives_the_installed_version_cache_write(
-        self, drift_handler: ContractStalenessHandler
+        self, drift_handler: ContractStalenessHandler, tmp_path: Path
     ) -> None:
         """The marker shares the cache file with the probed version; neither clobbers the other."""
+        cache_file = tmp_path / "cache.json"
         drift_handler.installed_version_reader = lambda: "2.1.300"
         self._text(drift_handler)
-        cache = json.loads(drift_handler.cache_path.read_text(encoding="utf-8"))
-        assert cache["drift_advised_version"] == "2.1.300"
-        drift_handler.write_cache({"installed_version": "2.1.300"})
-        cache = json.loads(drift_handler.cache_path.read_text(encoding="utf-8"))
+        assert json.loads(cache_file.read_text(encoding="utf-8"))["drift_advised_version"] == (
+            "2.1.300"
+        )
+        assert drift_handler.write_cache({"installed_version": "2.1.300"}) is True
+        cache = json.loads(cache_file.read_text(encoding="utf-8"))
         assert cache["drift_advised_version"] == "2.1.300"
         assert cache["installed_version"] == "2.1.300"
+
+    def test_corrupt_record_raises_rather_than_hiding(
+        self, drift_handler: ContractStalenessHandler
+    ) -> None:
+        """An existing record that is not YAML is a repository defect, not silence."""
+        drift_handler.versions_path.write_text("not: [valid", encoding="utf-8")
+        drift_handler.installed_version_reader = lambda: "2.1.300"
+        with pytest.raises(ValueError, match="not valid YAML"):
+            drift_handler.handle(_hook_input())
+
+    def test_record_that_is_a_directory_is_treated_as_absent(
+        self, drift_handler: ContractStalenessHandler, tmp_path: Path
+    ) -> None:
+        drift_handler.versions_path = tmp_path
+        drift_handler.installed_version_reader = lambda: "2.1.300"
+        assert self._text(drift_handler) == ""
 
     def test_unwritable_marker_still_advises(
         self, drift_handler: ContractStalenessHandler, tmp_path: Path
@@ -341,7 +359,6 @@ class TestReviewDriftAdvisory:
     @pytest.mark.parametrize(
         "body",
         [
-            "not: [valid",
             "- a list\n- not a mapping\n",
             "releases: nope\n",
             "releases:\n  v3.1.0: just-a-string\n",
@@ -350,7 +367,6 @@ class TestReviewDriftAdvisory:
             'releases:\n  v3.1.0:\n    review_date: "2026-10-03"\n    reviewed_through: "dev"\n',
         ],
         ids=[
-            "bad-yaml",
             "not-a-mapping",
             "releases-not-a-mapping",
             "entry-not-a-mapping",
@@ -380,9 +396,7 @@ class TestReviewDriftAdvisory:
         drift_handler.installed_version_reader = lambda: "2.1.300"
         assert "claude-code-changelog-reviewer" in self._text(drift_handler)
 
-    def test_both_advisories_when_both_stale(
-        self, drift_handler: ContractStalenessHandler
-    ) -> None:
+    def test_both_advisories_when_both_stale(self, drift_handler: ContractStalenessHandler) -> None:
         drift_handler.installed_version_reader = lambda: "2.1.401"
         text = self._text(drift_handler)
         assert "HOOK-CONTRACT-REFRESH.md" in text
@@ -410,10 +424,7 @@ class TestVersionParsing:
 class TestContract:
     def test_guidance_and_acceptance_hooks(self) -> None:
         h = ContractStalenessHandler()
-        guidance = h.get_claude_md()
-        assert guidance is not None
-        assert "claude-code-changelog-reviewer" in guidance
-        assert "HOOK-CONTRACT-REFRESH.md" in guidance
+        assert h.get_claude_md() is None, "exempt in test_claude_md_guidance_coverage: fires once"
         tests = h.get_acceptance_tests()
         assert isinstance(tests, list)
         assert any("review" in t.title.lower() for t in tests)
