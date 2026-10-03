@@ -1496,6 +1496,7 @@ class Decision(enum.Enum):
     WOULD_AUDIT = "would-audit"
     WOULD_OPERATOR_SIGNAL = "would-operator-signal"
     WOULD_SESSION_ACTIONS = "would-session-actions"
+    WOULD_PLUGIN_NOTICE = "would-plugin-notice"
 
 
 class SupervisorState(enum.Enum):
@@ -3386,6 +3387,7 @@ _ROOT_UID = 0
 # gitignored by that directory's `.gitignore`). Plugin state dirs live under
 # `plugins/<name>/`; the exit-for-restart request lives at the top level.
 _CCY_STATE_SUBDIRECTORY = "state"
+_CCY_STATE_DIR_ENV = "CCY_SUPERVISOR_STATE_DIR"
 _PLUGIN_STATE_SUBDIRECTORY = "plugins"
 
 # Hook time budgets. A tick's reply is awaited for `_WORKER_READ_TIMEOUT_SECONDS`
@@ -3397,7 +3399,7 @@ _PLUGIN_TICK_BUDGET_SECONDS = 1.0
 _PLUGIN_LOAD_BUDGET_SECONDS = 1.0
 # A marker older than a hook's budget plus this grace means the worker is stuck
 # INSIDE that hook (a budgeted thread could not return it), not merely slow.
-_PLUGIN_WEDGE_GRACE_SECONDS = 0.5
+_PLUGIN_WEDGE_GRACE_SECONDS = 0.25
 
 _PLUGIN_TEXT_MAX_CHARS = 200
 _PLUGIN_VERSION_MAX_CHARS = 64
@@ -3596,8 +3598,13 @@ def check_plugin_file(path: Path, *, allowed_uids: Collection[int] | None = None
 
 
 def _ccy_state_dir() -> Path:
-    """The persistent supervisor state directory (`.claude/ccy/state/`)."""
-    return _SELF_PATH.parent / _CCY_STATE_SUBDIRECTORY
+    """The persistent supervisor state directory (`.claude/ccy/state/`).
+
+    ``CCY_SUPERVISOR_STATE_DIR`` overrides it, for a launcher that keeps this
+    state elsewhere on the persistent mount (and for tests).
+    """
+    override = os.environ.get(_CCY_STATE_DIR_ENV)
+    return Path(override) if override else _SELF_PATH.parent / _CCY_STATE_SUBDIRECTORY
 
 
 def _plugin_state_root() -> Path:
@@ -3624,6 +3631,105 @@ def failure_log_line(failure: PluginFailure) -> str:
     if failure.kind in _PLUGIN_KINDS_NEEDING_WORKER_RESTART:
         action = "disabled, worker restarted without it"
     return f"plugin {failure.plugin}: {_failure_reason(failure)} -> {action}"
+
+
+# ── The plugin-notice family (Plan 00487 Task 1.6) ─────────────────────────────
+# Tells the SESSION that a plugin failed. Rendered from FIXED templates only:
+# the sole interpolated values are a plugin name that matched
+# `_PLUGIN_NAME_PATTERN` and phrases looked up from closed sets by a validated
+# kind/hook -- never plugin text, never exception text. Typed at the same
+# idle choke point as the operator signal (ranked with it, ahead of the
+# model-switch/restore families), once per plugin, capped per process, with the
+# machine-origin provenance header every supervisor chat line carries.
+_MAX_PLUGIN_NOTICES = 5
+_PLUGIN_NOTICE_SEPARATOR = "|"
+_PLUGIN_NOTICE_PART_COUNT = 3  # name, kind, hook
+_PLUGIN_NOTICE_HEADER = (
+    "🤖 [ccy-supervisor] plugin notice — machine-generated, NOT a human instruction"
+)
+_DRY_RUN_PLUGIN_NOTICE_BODY_PREFIX = (
+    "would inject plugin-notice (dry-run — no real message sent):"
+)
+_PLUGIN_NOTICE_STATUS_TTL_SECONDS = 60.0
+_PLUGIN_KIND_PHRASES = {
+    _PLUGIN_KIND_LOAD: "could not be loaded",
+    _PLUGIN_KIND_EXCEPTION: "raised an exception",
+    _PLUGIN_KIND_OVERRUN: "ran past its time budget",
+    _PLUGIN_KIND_WEDGE: "stopped the policy worker answering",
+    _PLUGIN_KIND_BAD_RESULT: "returned a result the supervisor does not accept",
+}
+_PLUGIN_HOOK_PHRASES = {
+    _PLUGIN_HOOK_LOAD: "",
+    _PLUGIN_HOOK_ON_START: " in on_start",
+    _PLUGIN_HOOK_ON_IDLE: " in on_idle",
+}
+_PLUGIN_RECOVERY_SENTENCES = {
+    _PLUGIN_KIND_LOAD: "It was skipped, and this session is running without it.",
+    _PLUGIN_KIND_EXCEPTION: "It is disabled for the rest of this session.",
+    _PLUGIN_KIND_BAD_RESULT: "It is disabled for the rest of this session.",
+    _PLUGIN_KIND_OVERRUN: (
+        "It is disabled for the rest of this session, and the policy worker was "
+        "restarted without it."
+    ),
+    _PLUGIN_KIND_WEDGE: (
+        "It is disabled for the rest of this session, and the policy worker was "
+        "restarted without it."
+    ),
+}
+_PLUGIN_NOTICE_CLOSING = "No action is needed from you."
+
+
+def parse_plugin_notice_item(item: str) -> tuple[str, str, str] | None:
+    """Validate a queued `name|kind|hook` notice; None unless every part is legal."""
+    parts = item.split(_PLUGIN_NOTICE_SEPARATOR)
+    if len(parts) != _PLUGIN_NOTICE_PART_COUNT:
+        return None
+    name, kind, hook = parts
+    if (
+        _PLUGIN_NAME_PATTERN.fullmatch(name) is None
+        or kind not in _PLUGIN_KINDS
+        or hook not in _PLUGIN_HOOKS
+    ):
+        return None
+    return name, kind, hook
+
+
+def render_plugin_notice(name: str, kind: str, hook: str) -> str:
+    """The fixed sentence telling the session that plugin ``name`` failed.
+
+    ``name``, ``kind`` and ``hook`` must already be validated
+    (`parse_plugin_notice_item`); they select or fill literal templates and
+    nothing else reaches the text.
+    """
+    return (
+        f"{_PLUGIN_NOTICE_HEADER}: plugin `{name}` {_PLUGIN_KIND_PHRASES[kind]}"
+        f"{_PLUGIN_HOOK_PHRASES[hook]}. {_PLUGIN_RECOVERY_SENTENCES[kind]} "
+        f"{_PLUGIN_NOTICE_CLOSING}"
+    )
+
+
+def report_plugin_failure(
+    machine: CompactStateMachine, failure: PluginFailure, *, status_dir: Path, now: float
+) -> bool:
+    """Owe the session a notice for ``failure`` and warn on the status line.
+
+    Idempotent per plugin: True only the first time (the notice is armed and the
+    WARNING posted), so a worker that re-reports every failure on every tick
+    costs nothing.
+    """
+    if not machine.arm_plugin_notice(failure.plugin, failure.kind, failure.hook):
+        return False
+    write_status_message(
+        status_dir,
+        text=(
+            f"⚠ ccy plugin {failure.plugin} {_PLUGIN_KIND_PHRASES[failure.kind]} "
+            "and is disabled"
+        ),
+        expires_at=now + _PLUGIN_NOTICE_STATUS_TTL_SECONDS,
+        level=_STATUS_LEVEL_WARNING,
+        now=now,
+    )
+    return True
 
 
 @dataclass(frozen=True)
@@ -4103,18 +4209,64 @@ class PluginHost:
         self._publish()
         return True
 
+    def _resolved_status_dir(self) -> Path:
+        return self._status_dir if self._status_dir is not None else _daemon_untracked_dir()
+
+    def _resolved_marker_path(self) -> Path:
+        if self._marker_path is not None:
+            return self._marker_path
+        return _plugin_marker_path(self._resolved_status_dir(), os.getpid())
+
+    def detect_wedge(self, now_wall: float) -> PluginFailure | None:
+        """Name the plugin a silent worker is stuck inside, from its in-hook marker.
+
+        The worker writes the marker atomically before each hook call and clears
+        it after, so a marker that has outlived the hook's budget (plus a
+        grace) means the worker is stuck INSIDE that hook -- a budgeted thread
+        could not return it. A fresh marker is a slow hook, not a wedge, and
+        anything outside the closed sets blames nobody.
+        """
+        try:
+            payload = json.loads(self._resolved_marker_path().read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return None
+        if not isinstance(payload, dict):
+            return None
+        name, hook, started_at = (
+            payload.get("plugin"),
+            payload.get("hook"),
+            payload.get("started_at"),
+        )
+        if (
+            not isinstance(name, str)
+            or not isinstance(hook, str)
+            or hook not in _PLUGIN_HOOKS
+            or isinstance(started_at, bool)
+            or not isinstance(started_at, (int, float))
+        ):
+            return None
+        entry = self._by_name.get(name)
+        if entry is None or entry.state != _PLUGIN_STATE_LOADED:
+            return None
+        budget = _PLUGIN_LOAD_BUDGET_SECONDS if hook == _PLUGIN_HOOK_LOAD else _PLUGIN_HOOK_BUDGET_SECONDS
+        if now_wall - started_at < budget + _PLUGIN_WEDGE_GRACE_SECONDS:
+            return None
+        return PluginFailure(name, _PLUGIN_KIND_WEDGE, hook)
+
+    def clear_marker(self) -> None:
+        """Forget the in-hook marker (the worker that wrote it has been replaced)."""
+        try:
+            self._resolved_marker_path().unlink(missing_ok=True)
+        except OSError as error:
+            append_worker_error(f"could not clear plugin in-hook marker: {error}")
+
     def in_process_runtime(self) -> PluginRuntime:
         """The lazily built runtime the in-process fallback decides with (host process)."""
         if self._runtime is None:
-            status_dir = self._status_dir if self._status_dir is not None else _daemon_untracked_dir()
             runtime = PluginRuntime(
                 state_root=self._state_root if self._state_root is not None else _plugin_state_root(),
-                status_dir=status_dir,
-                marker_path=(
-                    self._marker_path
-                    if self._marker_path is not None
-                    else _plugin_marker_path(status_dir, os.getpid())
-                ),
+                status_dir=self._resolved_status_dir(),
+                marker_path=self._resolved_marker_path(),
                 allowed_uids=self._allowed_uids,
             )
             runtime.load(
@@ -4279,6 +4431,11 @@ class CompactStateMachine:
         # (/model) since the last flush. Flushed as ONE visible bot-prefixed
         # message on the next injectable tick; bounded FIFO.
         self._audit_pending: list[str] = []
+        # Plan 00487: plugin failures owed to the chat, as `name|kind|hook`
+        # items, and the names already told (pending or typed) -- one notice
+        # per plugin, capped per process. Round-tripped like the audit backlog.
+        self._plugin_notices_pending: list[str] = []
+        self._plugin_noticed: list[str] = []
         # Plan 00328: an injected `/model <family>` whose landing has not been
         # observed yet (`session:family` + when), and the families a restore
         # has been PROVEN unable to reach. A PTY write succeeding is not the
@@ -4455,6 +4612,41 @@ class CompactStateMachine:
         self._audit_pending.append(item)
         if len(self._audit_pending) > _MAX_AUDIT_ITEMS:
             del self._audit_pending[0]
+
+    @property
+    def plugin_notices_pending(self) -> tuple[str, ...]:
+        """Plugin-failure notices owed to the chat, oldest first (`name|kind|hook`)."""
+        return tuple(self._plugin_notices_pending)
+
+    def next_plugin_notice(self) -> tuple[str, str, str] | None:
+        """The oldest owed plugin notice as validated `(name, kind, hook)`, or None."""
+        while self._plugin_notices_pending:
+            parsed = parse_plugin_notice_item(self._plugin_notices_pending[0])
+            if parsed is not None:
+                return parsed
+            del self._plugin_notices_pending[0]
+        return None
+
+    def arm_plugin_notice(self, name: str, kind: str, hook: str) -> bool:
+        """Owe the chat one notice for a plugin failure; True only when newly armed.
+
+        One notice per plugin (a repeated report of the same failure is a
+        no-op), capped at `_MAX_PLUGIN_NOTICES` per process, and only for a
+        validated name and closed-set kind/hook.
+        """
+        item = f"{name}{_PLUGIN_NOTICE_SEPARATOR}{kind}{_PLUGIN_NOTICE_SEPARATOR}{hook}"
+        if parse_plugin_notice_item(item) is None or name in self._plugin_noticed:
+            return False
+        if len(self._plugin_noticed) >= _MAX_PLUGIN_NOTICES:
+            return False
+        self._plugin_noticed.append(name)
+        self._plugin_notices_pending.append(item)
+        return True
+
+    def mark_plugin_notice_injection(self) -> None:
+        """The oldest owed notice was typed: stop owing it (success-only, host-side)."""
+        if self._plugin_notices_pending:
+            del self._plugin_notices_pending[0]
 
     def mark_audit_injection(self) -> None:
         """Clear the audit backlog once the banner for it has been posted.
@@ -4961,6 +5153,8 @@ class CompactStateMachine:
             "flag_compactions": self._flag_compactions,
             "pause_compacted_for": self._pause_compacted_for,
             "audit_pending": list(self._audit_pending),
+            "plugin_notices_pending": list(self._plugin_notices_pending),
+            "plugin_noticed": list(self._plugin_noticed),
             "restore_awaiting": self._restore_awaiting,
             "restore_awaiting_ts": self._restore_awaiting_ts,
             "unavailable_families": list(self._unavailable_families),
@@ -5058,6 +5252,20 @@ class CompactStateMachine:
             raw_items = state["audit_pending"]
             if isinstance(raw_items, list):
                 self._audit_pending = [str(item) for item in raw_items[:_MAX_AUDIT_ITEMS]]
+        if "plugin_notices_pending" in state:
+            raw_notices = state["plugin_notices_pending"]
+            if isinstance(raw_notices, list):
+                self._plugin_notices_pending = [
+                    item
+                    for item in raw_notices
+                    if isinstance(item, str) and parse_plugin_notice_item(item) is not None
+                ][:_MAX_PLUGIN_NOTICES]
+        if "plugin_noticed" in state:
+            raw_names = state["plugin_noticed"]
+            if isinstance(raw_names, list):
+                self._plugin_noticed = [name for name in raw_names if isinstance(name, str)][
+                    :_MAX_PLUGIN_NOTICES
+                ]
         if "restore_awaiting" in state:
             raw = state["restore_awaiting"]
             self._restore_awaiting = None if raw is None else str(raw)
@@ -6251,6 +6459,47 @@ def decide_once(
                 consume_signal_path = str(operator_path)
                 deferred_log = None
                 noop_reason_log = None
+    # ── Plugin notice (Plan 00487): a plugin failed, the session is told once ─
+    # Ranked with the operator signal -- ahead of the model-switch/restore and
+    # goal families -- and under the same gates: strictly subordinate to
+    # compact/continue/escape, and typed only at the idle + empty-box choke
+    # point, never over a still-unconfirmed own line. The text is rendered from
+    # fixed templates by `render_plugin_notice`; the status-line WARNING and the
+    # audit line were produced when the failure was observed.
+    if (
+        payload is None
+        and evaluation.decision is Decision.NOOP
+        and signal_path is None
+        and machine.state is SupervisorState.MONITOR
+    ):
+        owed_notice = machine.next_plugin_notice()
+        if owed_notice is not None:
+            if machine.own_line_pending:
+                noop_reason_log = (
+                    f"{_NOOP_LOG_PREFIX}: plugin notice pending but "
+                    f"{_OWN_LINE_NOOP_PREFIX} still in the input box"
+                )
+            elif not can_inject:
+                if facts.idle and not facts.input_line_empty:
+                    deferred_log = f"{_DEFERRED_LOG_PREFIX} (plugin notice pending)"
+                else:
+                    noop_reason_log = f"{_NOOP_LOG_PREFIX}: plugin notice pending but session busy"
+            else:
+                notice_message = render_plugin_notice(*owed_notice)
+                decision_value = Decision.WOULD_PLUGIN_NOTICE.value
+                reason = "plugin failure -> would inject notice"
+                if dry_run:
+                    payload = (
+                        f"{_format_bot_prefix(facts.now_wall)} "
+                        f"{_DRY_RUN_PLUGIN_NOTICE_BODY_PREFIX} {notice_message}"
+                    )
+                else:
+                    # Already opens with the machine-origin header: typed verbatim
+                    # as one user-role line, no slash command, no extra chrome.
+                    payload = notice_message
+                submit = True
+                deferred_log = None
+                noop_reason_log = None
     # ── Manual model-switch override (test trigger / deliberate override) ────
     # Checked ahead of goal and auto-model-restore so a deliberate switch is
     # never starved by them -- but still strictly after compact/continue/escape
@@ -6765,6 +7014,15 @@ def decide_once(
         if exit_request is not None:
             exit_for_restart = (exit_request.plugin, exit_request.reason)
             reason = f"plugin {exit_request.plugin} asked to exit for restart"
+    if plugins is not None:
+        # Plan 00487 Task 1.6: owe the session a notice (and warn on the status
+        # line) for every plugin failure seen so far. Idempotent, so the
+        # cumulative list is walked on every tick: a failure whose armed notice
+        # was lost with a discarded reply is armed again by the next tick.
+        for plugin_failure in plugins.failures:
+            report_plugin_failure(
+                machine, plugin_failure, status_dir=sidecar_dir.parent, now=facts.now_wall
+            )
     # Remember a submitted own LINE (never a raw keypress, never a dry-run
     # marker) as unconfirmed box content -- recorded at decision time, like
     # the audit trail, so the follow-up ships by worker hot-reload alone. A
@@ -6898,6 +7156,8 @@ def _apply_post_injection_bookkeeping(
         machine.mark_standing_auth_injection()
     elif outcome.decision_value == Decision.WOULD_SESSION_ACTIONS.value:
         machine.mark_session_actions_injection()
+    elif outcome.decision_value == Decision.WOULD_PLUGIN_NOTICE.value:
+        machine.mark_plugin_notice_injection()
     elif outcome.decision_value == Decision.WOULD_MODEL.value:
         # Cap/backoff bookkeeping is reserved for the AUTO-restore path --
         # the manual test-trigger switch has its own signal-consumption
@@ -7780,6 +8040,17 @@ def handle_plugin_outcome(
     """
     for line in outcome.plugin_log_lines:
         _log_line(log, line)
+    if plugin_host is not None:
+        for plugin, version in outcome.plugin_versions:
+            plugin_host.record_loaded(plugin, version)
+        for plugin, kind, hook, detail in outcome.plugin_failures:
+            # The worker's words are only ever used if they are in the closed sets.
+            if kind not in _PLUGIN_KINDS or hook not in _PLUGIN_HOOKS:
+                continue
+            if plugin_host.record_failure(plugin, kind, hook, detail):
+                _log_line(log, failure_log_line(PluginFailure(plugin, kind, hook, detail)))
+                if kind in _PLUGIN_KINDS_NEEDING_WORKER_RESTART and restart_worker is not None:
+                    restart_worker()
     if outcome.exit_for_restart is not None:
         plugin, reason = outcome.exit_for_restart
         restart.request(
@@ -7791,6 +8062,36 @@ def handle_plugin_outcome(
             log=log,
             dry_run=dry_run,
         )
+
+
+def handle_worker_silence(
+    *,
+    plugin_host: PluginHost,
+    machine: CompactStateMachine,
+    restart_worker: Callable[[], bool] | None,
+    log: DecisionLog | None,
+    status_dir: Path,
+    now_wall: float,
+) -> None:
+    """The worker did not answer a tick: if a plugin hook is why, take the plugin out.
+
+    Disables the culprit named by the in-hook marker, restarts the worker
+    WITHOUT it (the new worker is started with ``--disable-plugin``), and owes the
+    session a notice. Must run BEFORE the tick falls back to the in-process
+    decision, so a plugin that just wedged the worker is not run again in the
+    host. Silence with no culprit (a dead or merely slow worker) is not this
+    function's business.
+    """
+    failure = plugin_host.detect_wedge(now_wall)
+    if failure is None:
+        return
+    if not plugin_host.record_failure(failure.plugin, failure.kind, failure.hook):
+        return
+    _log_line(log, failure_log_line(failure))
+    report_plugin_failure(machine, failure, status_dir=status_dir, now=now_wall)
+    plugin_host.clear_marker()
+    if restart_worker is not None:
+        restart_worker()
 
 
 def _forward_io(
@@ -8007,10 +8308,14 @@ def supervise(
             f"supervisor active ({mode}); polling {sidecar_dir} every "
             f"{poll_seconds}s; wrapping: {argv}"
         )
-    if plugin_host is not None and log is not None:
-        # Plan 00487: a plugin the loader refused is skipped, never fatal; say so.
+    if plugin_host is not None:
+        # Plan 00487: a plugin the loader refused is skipped, never fatal; say so
+        # in the log, on the status line, and (once, at an idle point) to the session.
         for refusal in plugin_host.take_startup_failures():
-            log.write(failure_log_line(refusal))
+            _log_line(log, failure_log_line(refusal))
+            report_plugin_failure(
+                machine, refusal, status_dir=sidecar_dir.parent, now=time.time()
+            )
 
     # Startup banner + spinner (Plan 00164 Phase 2): give the launching ccy
     # session immediate, informative feedback during the perceptible start-up
@@ -8128,6 +8433,20 @@ def supervise(
             transition = fallback_transitions.note(worker_answered=outcome is not None)
             if transition is not None and log is not None:
                 log.write(transition)
+            if outcome is None and plugin_host is not None:
+                # Plan 00487: before this tick falls back to the in-process
+                # decision, take out any plugin the silent worker is stuck in.
+                handle_worker_silence(
+                    plugin_host=plugin_host,
+                    machine=machine,
+                    restart_worker=restart_worker,
+                    log=log,
+                    status_dir=sidecar_dir.parent,
+                    # A fresh reading, not this tick's: the worker was waited on
+                    # for up to its read timeout, and the marker's age is judged
+                    # against NOW.
+                    now_wall=time.time(),
+                )
         if outcome is not None:
             # Plan 00182: pass the host's authoritative PRE-tick state so a stale
             # WOULD_COMPACT reply (worker still MONITOR, host already awaiting)
