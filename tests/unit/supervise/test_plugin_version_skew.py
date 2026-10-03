@@ -2,8 +2,11 @@
 
 The host is long-lived and the worker hot-reloads, so a new worker can answer
 an old host and, after a relaunch, a new host can briefly meet an old worker.
-Both directions must keep working. The baseline here is the supervisor as it
-is on ``main`` (read with ``git show``), so the test stays true as main moves.
+Both directions must keep working. The baseline here is the supervisor as
+released at ``v3.68.0``, the last release before the plugin API (read with
+``git show``). It is pinned to a tag, not to ``main``, because once the API
+merged, ``main`` and the module under test were the same code, and a skew test
+that compares a version with itself proves nothing.
 """
 
 from __future__ import annotations
@@ -21,12 +24,12 @@ from tests.unit.supervise._load import SCRIPT_PATH, load_supervisor_module
 _mod = load_supervisor_module()
 _REPO_ROOT = SCRIPT_PATH.parents[2]
 _RELATIVE_PATH = ".claude/ccy/claude-supervise.py"
-_BASELINE_REF = "main"
+_BASELINE_REF = "v3.68.0"
 
 
 @pytest.fixture(scope="module")
 def baseline(tmp_path_factory: pytest.TempPathFactory) -> Any:
-    """The supervisor module as committed on ``main``; the test skips if it cannot be read."""
+    """The supervisor module as released at the baseline tag; the test skips if it cannot be read."""
     completed = subprocess.run(  # nosec B603 B607 - fixed argv, no shell
         ["git", "-C", str(_REPO_ROOT), "show", f"{_BASELINE_REF}:{_RELATIVE_PATH}"],
         capture_output=True,
