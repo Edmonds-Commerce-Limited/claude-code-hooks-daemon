@@ -74,6 +74,7 @@ import logging
 import re
 import shlex
 from dataclasses import dataclass
+from itertools import pairwise
 from pathlib import Path
 from typing import Any, Final
 
@@ -239,6 +240,8 @@ _OPAQUE_CODE_HEADS: Final[frozenset[str]] = frozenset({"eval", "source", "."})
 _UPGRADE_ENTRY_RE: Final[re.Pattern[str]] = re.compile(
     r"(?:^|[\s/])(?:upgrade\.sh|upgrade_version\.sh|upgrade_gate_standalone\.py)\b"
 )
+#: Commands that run the script named by their first operand in the current shell.
+_SCRIPT_RUNNER_HEADS: Final[frozenset[str]] = frozenset({"source", "."})
 #: An argument only the upgrade takes: Layer 1's acknowledgement flag.
 _UPGRADE_ONLY_ARG_RE: Final[re.Pattern[str]] = re.compile(r"(?:^|\s)--skip-reading-confirmation\b")
 #: Arguments the upgrade's scripts take: Layer 1's required `--project-root`,
@@ -538,13 +541,40 @@ def _shell_run_is_upgrade(
     return _script_run_is_upgrade(operands[0], operands[1:], cwd, steered=steered)
 
 
+def _runs_upgrade_entry_point(words: list[str]) -> bool:
+    """Whether the command in ``words`` (past its wrappers) RUNS an entry point.
+
+    The entry point counts only in program position, or as the script operand
+    of a shell, an interpreter, or `source`/`.`. Anywhere else (`git log --
+    scripts/upgrade.sh`, `shellcheck scripts/upgrade.sh`, `pytest -k
+    upgrade.sh`) it is data the command reads, not something it runs.
+    """
+    if _UPGRADE_ENTRY_RE.search(words[0]):
+        return True
+    head = command_word(words[0])
+    if head in _SHELL_HEADS or head in _SCRIPT_RUNNER_HEADS:
+        operand = next((word for word in words[1:] if not word.startswith("-")), None)
+        return operand is not None and _UPGRADE_ENTRY_RE.search(operand) is not None
+    if words[0].startswith("$") or _PYTHON_INTERPRETER_RE.fullmatch(head):
+        # An interpreter's (or an unexpanded program's) positional operands:
+        # a word following a dash-word is a flag's value (`-k upgrade.sh`).
+        return any(
+            _UPGRADE_ENTRY_RE.search(word) is not None
+            for previous, word in pairwise(words)
+            if not previous.startswith("-") and not word.startswith("-")
+        )
+    return False
+
+
 def _segment_runs_upgrade(segment: str, cwd: str | None, depth: int, *, steered: bool) -> bool:
     """Whether ``segment`` runs the upgrade, by name, argument or content."""
-    if _UPGRADE_ENTRY_RE.search(segment) or _UPGRADE_ONLY_ARG_RE.search(segment):
+    if _UPGRADE_ONLY_ARG_RE.search(segment):
         return True
     words = _past_wrappers(_shell_words(segment))
     if not words:
         return False
+    if _runs_upgrade_entry_point(words):
+        return True
     head = command_word(words[0])
     if head in _SHELL_HEADS:
         return _shell_run_is_upgrade(words[1:], cwd, depth, steered=steered)

@@ -1141,6 +1141,38 @@ class TestNonMatchingCalls:
         assert handler.matches(_bash("git status")) is False
 
 
+class TestEntryPointNamedAsDataIsNotARun:
+    """An upgrade script's NAME as an operand of another command is data."""
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "GIT_PAGER=cat git log -p -- scripts/upgrade.sh",
+            "TMPDIR=untracked/tmp shellcheck scripts/upgrade.sh",
+            "PYTHONPATH=src python3 -m pytest tests/x -k upgrade.sh",
+            "export PATH=$PATH:/x && cat scripts/upgrade.sh",
+        ],
+    )
+    def test_allows_a_command_that_only_names_the_entry_point(
+        self, handler: UpgradeApprovalGuardHandler, command: str
+    ) -> None:
+        assert handler.matches(_bash(command)) is False
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "GIT_PAGER=cat scripts/upgrade.sh --project-root /x",
+            "TMPDIR=/x bash scripts/upgrade.sh",
+            "TMPDIR=/x sh -x scripts/upgrade_version.sh",
+            "PYTHONPATH=/x python3 scripts/upgrade_gate_standalone.py",
+        ],
+    )
+    def test_still_denies_a_steered_run_of_the_entry_point(
+        self, handler: UpgradeApprovalGuardHandler, command: str
+    ) -> None:
+        assert handler.matches(_bash(command)) is True
+
+
 class TestGetRules:
     def test_returns_two_rules(self, handler: UpgradeApprovalGuardHandler) -> None:
         rules = handler.get_rules()
