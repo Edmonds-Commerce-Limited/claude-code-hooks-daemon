@@ -157,7 +157,10 @@ def _scratch_environment(repo_root: Path, scratch: Path) -> dict[str, str] | Non
         return None
     copied = scratch / _INDEX_NAME
     if index.is_file():
-        shutil.copyfile(index, copied)
+        # copy2, not copyfile: git decides whether a file edited within the
+        # index's own timestamp tick is modified by comparing entries with the
+        # index file's mtime, and a copy stamped "now" hides such an edit.
+        shutil.copy2(index, copied)
     written = scratch / _OBJECTS_NAME
     written.mkdir()
     alternates = [str(objects), *filter(None, [os.environ.get(_ALTERNATE_OBJECTS_VAR)])]

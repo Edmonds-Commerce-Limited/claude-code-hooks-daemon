@@ -86,6 +86,25 @@ class TestNothingToSimulate:
             assert _staged(repo, env) == set()
 
 
+class TestARacilyCleanFileIsStillStaged:
+    """The copy keeps the real index's timestamp, so git's racy-timestamp check
+    reads a same-size edit made within the index's own timestamp tick as modified."""
+
+    def test_a_same_size_edit_inside_the_index_timestamp_is_staged(self, repo: Path) -> None:
+        tick = 1_700_000_000_000_000_000
+        target = repo / "a.txt"
+        os.utime(target, ns=(tick, tick))
+        _git(repo, "update-index", "--refresh")
+        os.utime(repo / ".git" / "index", ns=(tick, tick))
+        _write(repo, "a.txt", "dirty\n")  # same size as "clean\n"
+        os.utime(target, ns=(tick, tick))
+        assert _staged(repo, None) == set()
+
+        reading = read_commit_form("git add a.txt && git commit -m x")
+        with simulated_staging(reading, repo, repo) as env:
+            assert _staged(repo, env) == {"a.txt"}
+
+
 class TestCommitDashAStagesTrackedChangesOnTheCopy:
     """`git commit -a` records every modified tracked file, never an untracked one."""
 
