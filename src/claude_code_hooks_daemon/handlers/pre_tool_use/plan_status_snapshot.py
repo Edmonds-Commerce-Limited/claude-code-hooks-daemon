@@ -75,7 +75,7 @@ from claude_code_hooks_daemon.core.relevance import Relevance, RelevanceContext
 from claude_code_hooks_daemon.handlers.utils.would_be_content import would_be_content
 from claude_code_hooks_daemon.plan_qa.model import PlanDoc
 from claude_code_hooks_daemon.utils.ccy_supervisor import supervisor_relevance
-from claude_code_hooks_daemon.utils.config_cache import load_config_cached
+from claude_code_hooks_daemon.utils.config_cache import default_config, load_config_cached
 from claude_code_hooks_daemon.utils.path_predicates import path_is_file
 from claude_code_hooks_daemon.utils.plan_status_snapshot import (
     hash_plan_text,
@@ -137,7 +137,7 @@ class PlanStatusSnapshotHandler(PreToolUseHandlerBase):
             return load_config_cached(config_path)
         except (ValidationError, OSError, ValueError, RuntimeError) as exc:
             logger.debug("plan_status_snapshot: config unavailable: %s", exc)
-            return Config()
+            return default_config()
 
     def _goal_injection_enabled(self) -> bool:
         """RV6-m1/RV7-m1: whether `goal_injection` (PostToolUse) is enabled

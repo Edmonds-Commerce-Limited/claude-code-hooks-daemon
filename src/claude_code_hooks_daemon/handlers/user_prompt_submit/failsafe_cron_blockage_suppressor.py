@@ -101,7 +101,7 @@ from claude_code_hooks_daemon.utils.blockage_marker import (
     marker_is_valid,
     read_marker,
 )
-from claude_code_hooks_daemon.utils.config_cache import load_config_cached
+from claude_code_hooks_daemon.utils.config_cache import default_config, load_config_cached
 from claude_code_hooks_daemon.utils.cron_cadence import (
     CADENCE_FILENAME,
     next_tick_decision,
@@ -379,7 +379,7 @@ class FailsafeCronBlockageSuppressorHandler(UserPromptSubmitHandlerBase):
             return load_config_cached(config_path)
         except (RuntimeError, ValidationError, OSError, ValueError) as exc:
             logger.debug("failsafe_cron_blockage_suppressor: cannot load config: %s", exc)
-            return Config()
+            return default_config()
 
     def _handle_other_tick(
         self, tick: DaemonTick, *, declared: bool, session_id: str, hostname: str

@@ -36,6 +36,7 @@ _A daemon-robustness, guard-correctness and usage-control release. The headline 
 
 - **Bash strict mode is now on by default**: `bash_safe_mode` ships `enabled: true` with `mode: block`, so a Bash command of two or more `;`- or newline-sequenced statements with no `set -euo pipefail` prelude is denied. Opt out with `enabled: false`, or keep it advisory with `options.mode: warn` (Plan 00270).
 - **An opt-in handler with no config block no longer runs**; a present block, even a bare key, still enables it unless it says `enabled: false` (Plan 00483).
+- **A handler option that names a method or starts with `_` is refused and reported** at session start instead of being applied: a stale or renamed option such as `human_docs_dir` or `pauses_path` used to overwrite the handler's method and crash it. A config that fails to load no longer switches secret redaction off: it redacts with the default word list path, or the one the raw config names (Plan 00483).
 - The write-location guards now judge every command bash runs, and fail closed on text they cannot read (Plan 00466).
 - The daemon-down recovery exemption now checks the launcher it runs, and that `HOOKS_DAEMON_ROOT_DIR` belongs to the project (Plan 00466).
 - Transport deny reasons now say whether the daemon was reached (Plan 00466).

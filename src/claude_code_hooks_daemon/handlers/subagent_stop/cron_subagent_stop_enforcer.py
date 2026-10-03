@@ -42,7 +42,7 @@ from claude_code_hooks_daemon.core.handler_scope import HandlerScope
 from claude_code_hooks_daemon.handlers.utils.session_advice_counter import (
     SessionAdviceCounter,
 )
-from claude_code_hooks_daemon.utils.config_cache import load_config_cached
+from claude_code_hooks_daemon.utils.config_cache import default_config, load_config_cached
 from claude_code_hooks_daemon.utils.cron_hosts import effective_hostname
 from claude_code_hooks_daemon.utils.cron_pause import PAUSE_ADVISE_INTERVAL, default_pauses_path
 from claude_code_hooks_daemon.utils.cron_records import (
@@ -112,7 +112,7 @@ class CronSubagentStopEnforcerHandler(SubagentStopHandlerBase):
             return load_config_cached(config_path)
         except (ValidationError, OSError, ValueError) as exc:
             logger.debug("cron_subagent_stop_enforcer: cannot load %s: %s", config_path, exc)
-            return Config()
+            return default_config()
 
     def _active_jobs(self, hook_input: dict[str, Any]) -> list[PersistentCronConfig]:
         """The jobs declared for the session's hostname (``hosts:``, Plan 00470)."""
