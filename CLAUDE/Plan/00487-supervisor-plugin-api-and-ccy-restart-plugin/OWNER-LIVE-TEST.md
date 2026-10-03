@@ -10,7 +10,7 @@ Nothing in this checklist can run inside a ccy container: it needs the host, an 
 ## 0. Prepare (host)
 
 - [ ] Check out `feature/ccy-hooks-daemon-plugin` in your fedora-desktop checkout and run the claude-yolo play. It copies `supervisor-plugins/` into the build context.
-- [ ] `ccy --rebuild`. The image should report container version 2.42, and the launcher should report ccy 3.77.0. The branch is folded into that one release on top of F44's own 3.76.0 / 2.41; the branch head is in this plan's JOURNAL. If F44 has moved again by the time you deploy, merge it first, and move these two numbers above F44's.
+- [ ] `ccy --rebuild`. The image should report container version 2.42, and the launcher should report ccy 3.77.1 (fedora-desktop PR 66, merged by the owner). The branch is folded into that one release on top of F44's own 3.76.0 / 2.41; the branch head is in this plan's JOURNAL. If F44 has moved again by the time you deploy, merge it first, and move these two numbers above F44's.
 - [ ] Run fedora-desktop's `./scripts/qa-all.bash` on the host. It cannot run in a container here, because ruff and semgrep are absent and shellcheck is not the pinned 0.11.0.
 
 ## 1. No options means no change

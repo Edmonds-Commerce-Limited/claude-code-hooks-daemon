@@ -15,7 +15,7 @@ Each item here is the owner's call. An agent adds the item, with its options, a 
 These serve the credential switch (fedora-desktop Plan 00146), not this plan's goals. Should they stay here, move to fedora-desktop Plan 00146, or move to a new hooks-daemon plan?
 
 - **Recommendation:** move them to a new hooks-daemon plan, so that 00487 can close when the live test passes. The API code lives in this repository.
-- **Answer:** _pending_
+- **Answer (owner, 2026-10-03):** "whatever you think makes sense; no strong opinion." The agent therefore follows its recommendation: Tasks 1.4 and 1.5 move to a new hooks-daemon plan.
 
 ## D3. The agent rulings in [DECISIONS.md](DECISIONS.md)
 
@@ -31,14 +31,14 @@ The rulings in DECISIONS.md were made by an agent while the owner was away. Shou
    - at most 3 restarts per hour.
 5. An update restarts through a host relaunch on exit 75.
 
-- **Answer:** _pending_
+- **Answer (owner, 2026-10-03):** confirmed. The ccy plugin belongs in the fedora-desktop repository: plugins exist so that third-party systems can bring their own and plug them into the hooks daemon. Maximum age off by default and at most 3 restarts an hour are both fine. Rulings 1, 2 and 5 drew no objection; 2 is superseded by D1.
 
 ## D4. A hooks-daemon release carrying the API
 
 Other projects get the plugin API only from a release. A release starts only when the owner types `/release`.
 
 - **Recommendation:** release after the live test passes, so that the release carries a tested API.
-- **Answer:** _pending_
+- **Answer (owner, 2026-10-03):** a hooks-daemon release is needed, and the owner makes it. The agent's part is only to get the functionality merged, which it is (on `main` since `14f2f11f8`). `--max-age` and the other options working only where the hooks daemon provides the plugin API is the intended behaviour.
 
 ## D6. Round-3 review items F and G: before or after the merge? (raised by the host agent)
 
@@ -47,7 +47,7 @@ The third fedora-desktop review ([report](subagent-reports/261003-task-3.1-fedor
 - **F:** the docs and the refusal message do not say that a key unlocked through F44 3.76.0's askpass route cannot restart unattended, and they still recommend `--ssh-agent`, which 3.76.0 labels as exposing every key. This is a docs fix.
 - **G:** the forwarded-agent GitHub probe (`ssh-handling.bash:729-739`) has no timeout. If an agent asks before it signs (a key added with `ssh-add -c`, or gpg-agent once its cache expires), the relaunch waits. This is not new on the branch, but the unattended relaunch makes it matter. The fix is a `timeout` on that probe when relaunching.
 - **Recommendation:** fix both on the branch before merging. They are small, and G is the last known way a restart can wait.
-- **Answer:** _pending_
+- **Answer (owner, 2026-10-03):** fix them before the merge. Done in fedora-desktop `dc12846e` (ccy 3.77.1), with a comment on PR 66.
 
 ## D7. `util-linux-script` on the host (raised by the host agent)
 
