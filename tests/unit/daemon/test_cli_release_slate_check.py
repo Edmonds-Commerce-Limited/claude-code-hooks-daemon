@@ -247,17 +247,87 @@ class TestTheCiLookupRequiresTheFullMatrix:
         assert state is not None
         assert state.is_green
 
+    def test_the_run_that_was_read_is_named_in_the_output(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _install(monkeypatch, _FakeGh([_run(2), _run(1)], {2: _TIER_JOBS, 1: _MATRIX_JOBS}))
+        state = cli._gh_ci_lookup(_HEAD)
+        assert state is not None
+        assert state.run_id == 1
+        assert "run 1" in state.describe()
+
+    def test_the_newest_full_matrix_run_wins_over_an_older_one(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        failed_jobs = [*_MATRIX_JOBS[:3], {"name": "QA (Python3.13)", "conclusion": "failure"}]
+        gh = _FakeGh([_run(3, conclusion="failure"), _run(2)], {3: failed_jobs, 2: _MATRIX_JOBS})
+        _install(monkeypatch, gh)
+        state = cli._gh_ci_lookup(_HEAD)
+        assert state is not None
+        assert state.run_id == 3
+        assert not state.is_green
+
+    def test_a_cancelled_run_is_passed_over_for_its_rerun(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        gh = _FakeGh([_run(2, conclusion="cancelled"), _run(1)], {1: _MATRIX_JOBS})
+        _install(monkeypatch, gh)
+        state = cli._gh_ci_lookup(_HEAD)
+        assert state is not None
+        assert state.is_green
+        assert state.run_id == 1
+        assert all(call[3] != "2" for call in gh.calls if call[2] == "view")
+
+    def test_a_newer_rerun_beats_an_older_cancelled_run(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        gh = _FakeGh([_run(2), _run(1, conclusion="cancelled")], {2: _MATRIX_JOBS})
+        _install(monkeypatch, gh)
+        state = cli._gh_ci_lookup(_HEAD)
+        assert state is not None
+        assert state.run_id == 2
+
+    def test_an_in_progress_newer_run_does_not_hide_a_completed_older_one(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        running = {**_run(2), "status": "in_progress", "conclusion": ""}
+        gh = _FakeGh([running, _run(1)], {1: _MATRIX_JOBS})
+        _install(monkeypatch, gh)
+        state = cli._gh_ci_lookup(_HEAD)
+        assert state is not None
+        assert state.is_green
+        assert state.run_id == 1
+
+    def test_with_no_qualifying_run_the_newest_run_is_reported_not_green(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        running = {**_run(2), "status": "in_progress", "conclusion": ""}
+        _install(monkeypatch, _FakeGh([running], {}))
+        state = cli._gh_ci_lookup(_HEAD)
+        assert state is not None
+        assert not state.is_green
+        assert state.run_id == 2
+        assert "in_progress" in state.describe()
+
     def test_a_run_for_another_sha_is_ignored(self, monkeypatch: pytest.MonkeyPatch) -> None:
         _install(monkeypatch, _FakeGh([_run(1, sha="f" * 40)], {1: _MATRIX_JOBS}))
         assert cli._gh_ci_lookup(_HEAD) is None
 
-    def test_a_failed_run_is_not_asked_for_its_jobs(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        gh = _FakeGh([_run(1, conclusion="failure")], {})
-        _install(monkeypatch, gh)
+    def test_a_failed_matrix_run_is_not_green_and_is_named(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        failed_jobs = [*_MATRIX_JOBS[:3], {"name": "QA (Python3.13)", "conclusion": "failure"}]
+        _install(monkeypatch, _FakeGh([_run(1, conclusion="failure")], {1: failed_jobs}))
         state = cli._gh_ci_lookup(_HEAD)
         assert state is not None
         assert not state.is_green
-        assert all(call[2] != "view" for call in gh.calls)
+        assert state.run_id == 1
+
+    def test_a_failed_tier_run_is_not_green(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        _install(monkeypatch, _FakeGh([_run(1, conclusion="failure")], {1: _TIER_JOBS}))
+        state = cli._gh_ci_lookup(_HEAD)
+        assert state is not None
+        assert not state.is_green
 
     def test_a_failing_job_listing_raises_so_the_gate_fails_closed(
         self, monkeypatch: pytest.MonkeyPatch

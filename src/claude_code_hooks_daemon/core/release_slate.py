@@ -32,6 +32,7 @@ _PLAN_FILENAME: Final[str] = "PLAN.md"
 _MAIN_BRANCH: Final[str] = "main"
 _CI_SUCCESS: Final[str] = "success"
 _CI_COMPLETED: Final[str] = "completed"
+_CI_SKIPPED: Final[str] = "skipped"
 # The full tier's jobs are named after the matrix key (`QA (Python3.11)`); the
 # tier job is `QA (docs or code tier)`, so the prefix tells them apart. A
 # skipped matrix job keeps the literal template name and so matches too, which
@@ -78,6 +79,9 @@ class CiRunState:
     # or code tier run succeeds without ever running the matrix (Plan 00475
     # Task 3b.2), and a release needs the matrix, so this is part of "green".
     full_matrix: bool = True
+    # The CI run this state was read from, so the output can name it when HEAD
+    # has several runs. None when no run was found or the lookup failed.
+    run_id: int | None = None
 
     @property
     def _succeeded(self) -> bool:
@@ -89,6 +93,10 @@ class CiRunState:
         return self._succeeded and self.full_matrix
 
     def describe(self) -> str:
+        text = self._describe_state()
+        return f"{text} (run {self.run_id})" if self.run_id is not None else text
+
+    def _describe_state(self) -> str:
         if self.problem:
             return f"could not determine ({self.problem})"
         if self.status is None:
@@ -103,6 +111,19 @@ class CiRunState:
         if not self.conclusion:
             return self.status
         return f"{self.status}, {self.conclusion}"
+
+
+def carries_matrix_jobs(jobs: Sequence[Mapping[str, object]]) -> bool:
+    """True when the run executed at least one matrix job (a skipped one does not count).
+
+    A tier run lists the matrix job under its template name with a ``skipped``
+    conclusion; that is the absence of the matrix, not a matrix failure.
+    """
+    return any(
+        str(job.get("name", "")).startswith(_MATRIX_JOB_PREFIX)
+        and job.get("conclusion") != _CI_SKIPPED
+        for job in jobs
+    )
 
 
 def full_matrix_green(jobs: Sequence[Mapping[str, object]]) -> bool:
