@@ -190,11 +190,14 @@ import enum
 import errno
 import fcntl
 import hashlib
+import importlib.util
 import json
 import os
 import pty
+import re
 import select
 import signal
+import stat
 import struct
 import subprocess  # nosec B404 - spawns ONLY `python3 <self> --worker`, a fixed argv, never a shell
 import sys
@@ -203,11 +206,11 @@ import threading
 import time
 import traceback
 import tty
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, ClassVar, Protocol, cast
 
 if TYPE_CHECKING:
     from types import FrameType
@@ -270,7 +273,10 @@ def _front_truncate_file(path: Path, *, max_bytes: int, retain_bytes: int) -> No
 # (Plan 00164 Phase 3). Lives in the same 'supervise' subdir as the decision log.
 _SUPERVISOR_STATUS_FILENAME = "supervisor-status.json"
 
-_USAGE = "Usage: claude-supervise.py [--dry-run | --arm] [--log PATH] -- <child argv...>\n"
+_USAGE = (
+    "Usage: claude-supervise.py [--dry-run | --arm] [--log PATH] "
+    "[--plugin NAME=WORKER.PY ...] -- <child argv...>\n"
+)
 
 # CLI test-trigger mode: writes a manual model-switch signal and exits --
 # never starts a supervisor. See `_run_emit_model_switch`.
@@ -1864,6 +1870,7 @@ def write_supervisor_status(
     source_hash: str,
     pid: int,
     started_at: float,
+    plugins: Sequence[Mapping[str, str]] | None = None,
 ) -> Path | None:
     """Atomically write the running supervisor's identity for staleness checks.
 
@@ -1876,12 +1883,17 @@ def write_supervisor_status(
         The status file path on success, or None on failure.
     """
     status_path = _supervisor_status_path(untracked_dir)
-    payload = {
+    payload: dict[str, object] = {
         "version": version,
         "source_hash": source_hash,
         "pid": pid,
         "started_at": started_at,
     }
+    if plugins is not None:
+        # Plan 00487: name/version/state(loaded|failed|disabled)/reason per plugin.
+        # Omitted entirely when no plugin was named, so a consumer that predates
+        # the key sees exactly the payload it always saw.
+        payload["plugins"] = [dict(plugin) for plugin in plugins]
     try:
         status_path.parent.mkdir(parents=True, exist_ok=True)
         tmp_path = status_path.parent / f".{_SUPERVISOR_STATUS_FILENAME}.{pid}.tmp"
@@ -3314,6 +3326,828 @@ def reap_stale_sidecars(
     if reaped and log is not None:
         log.write(f"reaped {len(reaped)} stale sidecar/signal file(s)")
     return reaped
+
+
+# ---------------------------------------------------------------------------
+# Plugin API (Plan 00487)
+#
+# A project names plugins EXPLICITLY, with a repeatable
+# ``--plugin <name>=<worker.py>`` flag before ``--``. Nothing is found by
+# scanning. A plugin file is stdlib-only, vetted (regular file, owned by this
+# uid or root, neither it nor its directory group/world-writable) and never
+# imported by the PTY HOST: the host only vets the file and keeps a registry
+# (`PluginHost`); the ``--worker`` subprocess imports the files the host passed
+# on (`PluginRuntime`). The in-process fallback builds a runtime lazily, only
+# when the worker is down, so plugins do not go silent with it.
+#
+# A worker half is ``create_worker_half(api)`` returning an object with
+# ``on_start()`` and ``on_idle(tick)``. ``on_idle`` runs ONLY at the end of the
+# `decide_once` cascade, after every built-in family, when the same gates hold
+# as for those families plus ``can_inject`` and no own line pending.
+#
+# A plugin can never block the supervisor or the session. Every hook call runs
+# on a thread with a short budget well inside the host's worker read timeout,
+# and every failure takes ONE path: detect (exception, overrun, wedge, bad
+# result, load failure), disable for the rest of the supervisor process (the
+# host passes ``--disable-plugin`` on every worker (re)start), recover (an
+# overrun or wedge restarts the worker without the plugin), and tell the
+# session through the built-in plugin-notice family, which is rendered from
+# FIXED templates only -- a validated name plus closed-set values, never
+# plugin text or exception text.
+# ---------------------------------------------------------------------------
+
+_PLUGIN_API_MAJOR = 1
+_PLUGIN_API_VERSION = (_PLUGIN_API_MAJOR, 0)
+_PLUGIN_FLAG = "--plugin"
+_DISABLE_PLUGIN_FLAG = "--disable-plugin"
+_PLUGIN_NAME_PATTERN = re.compile(r"[a-z][a-z0-9_-]{0,31}")
+_PLUGIN_SPEC_SEPARATOR = "="
+_PLUGIN_UNNAMED = "(unnamed)"
+_PLUGIN_MODULE_PREFIX = "_ccy_plugin_"
+_PLUGIN_API_ATTRIBUTE = "PLUGIN_API"
+_PLUGIN_FACTORY_NAME = "create_worker_half"
+_PLUGIN_STATE_DIR_MODE = 0o700
+_PLUGIN_UNSAFE_MODE_BITS = stat.S_IWGRP | stat.S_IWOTH
+_ROOT_UID = 0
+
+# Where the supervisor keeps state that must outlive a container restart: under
+# the project's own `.claude/ccy/` (the directory this script is deployed in,
+# gitignored by that directory's `.gitignore`). Plugin state dirs live under
+# `plugins/<name>/`; the exit-for-restart request lives at the top level.
+_CCY_STATE_SUBDIRECTORY = "state"
+_PLUGIN_STATE_SUBDIRECTORY = "plugins"
+
+# Hook time budgets. A tick's reply is awaited for `_WORKER_READ_TIMEOUT_SECONDS`
+# (2.0s), so the whole plugin share of a tick stays at half of that and a single
+# hook gets less still. Plugins past the tick budget are simply not asked this
+# tick (not a failure).
+_PLUGIN_HOOK_BUDGET_SECONDS = 0.5
+_PLUGIN_TICK_BUDGET_SECONDS = 1.0
+_PLUGIN_LOAD_BUDGET_SECONDS = 1.0
+# A marker older than a hook's budget plus this grace means the worker is stuck
+# INSIDE that hook (a budgeted thread could not return it), not merely slow.
+_PLUGIN_WEDGE_GRACE_SECONDS = 0.5
+
+_PLUGIN_TEXT_MAX_CHARS = 200
+_PLUGIN_VERSION_MAX_CHARS = 64
+_PLUGIN_REASON_MAX_CHARS = 120
+_PLUGIN_AUDIT_MAX_PENDING = 20
+_PLUGIN_STATUS_TTL_DEFAULT_SECONDS = 10.0
+_PLUGIN_STATUS_TTL_MIN_SECONDS = 1.0
+_PLUGIN_STATUS_TTL_MAX_SECONDS = 60.0
+_PLUGIN_MARKER_PREFIX = "plugin-in-hook"
+
+# Reasons a plugin was refused at load: a CLOSED set, because they reach
+# `supervisor-status.json` and a notice is rendered only from closed values.
+_LOAD_REASON_BAD_SPEC = "bad-spec"
+_LOAD_REASON_BAD_NAME = "bad-name"
+_LOAD_REASON_NOT_ABSOLUTE = "not-absolute"
+_LOAD_REASON_NOT_A_FILE = "not-a-file"
+_LOAD_REASON_OWNER = "wrong-owner"
+_LOAD_REASON_WRITABLE = "group-or-world-writable"
+_LOAD_REASON_DUPLICATE = "duplicate-name"
+_LOAD_REASON_API = "api-mismatch"
+_LOAD_REASON_IMPORT = "import-error"
+_LOAD_REASON_NO_FACTORY = "no-factory"
+_LOAD_REASON_FACTORY = "factory-error"
+_LOAD_REASON_BAD_HALF = "bad-half"
+_LOAD_REASON_STATE_DIR = "state-dir"
+_LOAD_REASON_TIMEOUT = "timeout"
+_LOAD_REASON_UNSPECIFIED = "unspecified"
+_PLUGIN_LOAD_REASONS = frozenset(
+    {
+        _LOAD_REASON_BAD_SPEC,
+        _LOAD_REASON_BAD_NAME,
+        _LOAD_REASON_NOT_ABSOLUTE,
+        _LOAD_REASON_NOT_A_FILE,
+        _LOAD_REASON_OWNER,
+        _LOAD_REASON_WRITABLE,
+        _LOAD_REASON_DUPLICATE,
+        _LOAD_REASON_API,
+        _LOAD_REASON_IMPORT,
+        _LOAD_REASON_NO_FACTORY,
+        _LOAD_REASON_FACTORY,
+        _LOAD_REASON_BAD_HALF,
+        _LOAD_REASON_STATE_DIR,
+        _LOAD_REASON_TIMEOUT,
+        _LOAD_REASON_UNSPECIFIED,
+    }
+)
+
+# The closed sets a failure is described with.
+_PLUGIN_HOOK_LOAD = "load"
+_PLUGIN_HOOK_ON_START = "on_start"
+_PLUGIN_HOOK_ON_IDLE = "on_idle"
+_PLUGIN_HOOKS = frozenset({_PLUGIN_HOOK_LOAD, _PLUGIN_HOOK_ON_START, _PLUGIN_HOOK_ON_IDLE})
+_PLUGIN_KIND_LOAD = "load"
+_PLUGIN_KIND_EXCEPTION = "exception"
+_PLUGIN_KIND_OVERRUN = "overrun"
+_PLUGIN_KIND_WEDGE = "wedge"
+_PLUGIN_KIND_BAD_RESULT = "bad-result"
+_PLUGIN_KINDS = frozenset(
+    {
+        _PLUGIN_KIND_LOAD,
+        _PLUGIN_KIND_EXCEPTION,
+        _PLUGIN_KIND_OVERRUN,
+        _PLUGIN_KIND_WEDGE,
+        _PLUGIN_KIND_BAD_RESULT,
+    }
+)
+# A failure of these kinds leaves a thread (or the whole worker) possibly still
+# running plugin code, so the host recovers by restarting the worker.
+_PLUGIN_KINDS_NEEDING_WORKER_RESTART = frozenset({_PLUGIN_KIND_OVERRUN, _PLUGIN_KIND_WEDGE})
+
+_PLUGIN_STATE_LOADED = "loaded"
+_PLUGIN_STATE_FAILED = "failed"
+_PLUGIN_STATE_DISABLED = "disabled"
+
+_BUDGET_OK = "ok"
+_BUDGET_EXCEPTION = "exception"
+_BUDGET_OVERRUN = "overrun"
+
+
+class PluginLoadError(Exception):
+    """A plugin was refused at load; ``reason`` is a member of ``_PLUGIN_LOAD_REASONS``.
+
+    ``name`` is set only once the plugin's name has been validated, because a
+    notice may name only a validated name.
+    """
+
+    def __init__(self, reason: str, name: str | None = None) -> None:
+        super().__init__(reason)
+        self.reason = reason
+        self.name = name
+
+
+@dataclass(frozen=True)
+class PluginSpec:
+    """A parsed ``--plugin <name>=<path>`` flag value."""
+
+    name: str
+    path: Path
+
+
+@dataclass(frozen=True)
+class PluginFailure:
+    """One plugin failure, described ONLY by validated or closed-set values.
+
+    ``kind`` is a member of ``_PLUGIN_KINDS``, ``hook`` of ``_PLUGIN_HOOKS``
+    and ``detail`` (load failures only) of ``_PLUGIN_LOAD_REASONS``. Never
+    exception text, never plugin text.
+    """
+
+    plugin: str
+    kind: str
+    hook: str
+    detail: str = ""
+
+
+@dataclass(frozen=True)
+class IdleTick:
+    """What a worker half's ``on_idle`` is told."""
+
+    now: float
+    session_id: str | None
+
+
+@dataclass(frozen=True)
+class ExitForRestart:
+    """An ``on_idle`` result: end the session at this idle point and exit for a relaunch.
+
+    The host types ``/exit``, and once the child has exited, writes the restart
+    request file and exits with `EXIT_STATUS_RESTART_REQUESTED` so the launcher
+    can relaunch with ``--resume <id>``. ``reason`` is short, logged only and
+    never typed into the chat.
+    """
+
+    reason: str
+
+
+@dataclass(frozen=True)
+class PluginExitRequest:
+    """A validated `ExitForRestart` together with the plugin that returned it."""
+
+    plugin: str
+    reason: str
+
+
+def _clean_text(value: object, limit: int) -> str:
+    """One printable line of at most ``limit`` characters from any value.
+
+    Plugin-supplied text only ever reaches a log or the status line, never the
+    chat, but control characters (escape sequences, newlines) are still removed
+    so a plugin cannot forge log lines or terminal output.
+    """
+    printable = "".join(ch if ch.isprintable() else " " for ch in str(value))
+    return " ".join(printable.split())[:limit]
+
+
+def parse_plugin_spec(raw: str) -> PluginSpec:
+    """Parse ``<name>=<absolute path>``; raise `PluginLoadError` naming the closed reason."""
+    name, separator, path_text = raw.partition(_PLUGIN_SPEC_SEPARATOR)
+    if not separator or not path_text:
+        raise PluginLoadError(_LOAD_REASON_BAD_SPEC)
+    if _PLUGIN_NAME_PATTERN.fullmatch(name) is None:
+        raise PluginLoadError(_LOAD_REASON_BAD_NAME)
+    path = Path(path_text)
+    if not path.is_absolute():
+        raise PluginLoadError(_LOAD_REASON_NOT_ABSOLUTE, name=name)
+    return PluginSpec(name=name, path=path)
+
+
+def _default_plugin_uids() -> frozenset[int]:
+    """The owners a plugin file may have: this supervisor's uid, or root."""
+    return frozenset({os.getuid(), _ROOT_UID})
+
+
+def check_plugin_file(path: Path, *, allowed_uids: Collection[int] | None = None) -> str | None:
+    """Vet a plugin file WITHOUT importing it; return a closed refusal reason or None.
+
+    It must be a regular file (a symlink is refused: the vetted bytes must be
+    the ones imported), and both it and its directory must be owned by an
+    allowed uid and not group- or world-writable. The same check runs again in
+    the worker immediately before the import.
+    """
+    uids = allowed_uids if allowed_uids is not None else _default_plugin_uids()
+    try:
+        file_info = path.lstat()
+        directory_info = path.parent.stat()
+    except OSError:
+        return _LOAD_REASON_NOT_A_FILE
+    if not stat.S_ISREG(file_info.st_mode):
+        return _LOAD_REASON_NOT_A_FILE
+    for info in (file_info, directory_info):
+        if info.st_uid not in uids:
+            return _LOAD_REASON_OWNER
+        if info.st_mode & _PLUGIN_UNSAFE_MODE_BITS:
+            return _LOAD_REASON_WRITABLE
+    return None
+
+
+def _ccy_state_dir() -> Path:
+    """The persistent supervisor state directory (`.claude/ccy/state/`)."""
+    return _SELF_PATH.parent / _CCY_STATE_SUBDIRECTORY
+
+
+def _plugin_state_root() -> Path:
+    """Parent of every plugin's private `state_dir`."""
+    return _ccy_state_dir() / _PLUGIN_STATE_SUBDIRECTORY
+
+
+def _plugin_marker_path(untracked_dir: Path, supervisor_pid: int) -> Path:
+    """The atomic "a hook is running" marker for the supervisor with ``supervisor_pid``."""
+    return untracked_dir / _LOG_SUBDIRECTORY / f"{_PLUGIN_MARKER_PREFIX}.{supervisor_pid}.json"
+
+
+def _failure_reason(failure: PluginFailure) -> str:
+    """The status-file reason string for a failure (closed values only)."""
+    if failure.kind == _PLUGIN_KIND_LOAD:
+        detail = failure.detail if failure.detail in _PLUGIN_LOAD_REASONS else ""
+        return f"{_PLUGIN_KIND_LOAD}: {detail or _LOAD_REASON_UNSPECIFIED}"
+    return f"{failure.kind} in {failure.hook}"
+
+
+def failure_log_line(failure: PluginFailure) -> str:
+    """The `decision.log` audit line for a failure (closed values only)."""
+    action = "disabled"
+    if failure.kind in _PLUGIN_KINDS_NEEDING_WORKER_RESTART:
+        action = "disabled, worker restarted without it"
+    return f"plugin {failure.plugin}: {_failure_reason(failure)} -> {action}"
+
+
+@dataclass(frozen=True)
+class _BudgetedResult:
+    status: str
+    value: object = None
+    traceback_text: str = ""
+    error: BaseException | None = None
+
+
+def _run_budgeted(fn: Callable[[], object], budget_seconds: float) -> _BudgetedResult:
+    """Run ``fn`` on a daemon thread and wait at most ``budget_seconds`` for it.
+
+    A thread cannot be killed, so an overrun thread is abandoned (it may
+    still be running); the caller's recovery is to restart the whole worker.
+    """
+    box: list[_BudgetedResult] = []
+
+    def _target() -> None:
+        try:
+            value = fn()
+        except BaseException as error:
+            # Deliberately broad: a plugin may raise anything, SystemExit
+            # included, and none of it may reach the supervisor.
+            box.append(_BudgetedResult(_BUDGET_EXCEPTION, None, traceback.format_exc(), error))
+        else:
+            box.append(_BudgetedResult(_BUDGET_OK, value))
+
+    thread = threading.Thread(target=_target, name="ccy-plugin-hook", daemon=True)
+    thread.start()
+    thread.join(budget_seconds)
+    if thread.is_alive():
+        return _BudgetedResult(_BUDGET_OVERRUN)
+    if not box:
+        return _BudgetedResult(_BUDGET_EXCEPTION, None, "plugin hook thread ended with no result")
+    return box[0]
+
+
+class WorkerHalf(Protocol):
+    """The shape a plugin's `create_worker_half(api)` must return."""
+
+    name: str
+    version: str
+
+    def on_start(self) -> None:
+        """Called once when the runtime starts (a worker hot reload starts it again)."""
+
+    def on_idle(self, tick: IdleTick) -> ExitForRestart | None:
+        """Called at the end of the idle cascade; may ask for an exit-for-restart."""
+
+
+class PluginApi:
+    """What a worker half's factory is handed.
+
+    ``api_version`` is ``(major, minor)``; ``state_dir`` is a per-plugin 0700
+    directory that survives a container restart; ``session_id()`` is the
+    supervisor's own session id, or None when it is not exactly one;
+    ``status`` posts a transient status-line message; ``audit`` writes a
+    `decision.log` line. ``ExitForRestart`` builds the one result `on_idle`
+    may return.
+    """
+
+    ExitForRestart: ClassVar[type[ExitForRestart]] = ExitForRestart
+
+    def __init__(
+        self,
+        *,
+        name: str,
+        state_dir: Path,
+        session_ids: Callable[[], frozenset[str]],
+        status_sink: Callable[[str, str, str, float], object],
+        audit_sink: Callable[[str, str], object],
+    ) -> None:
+        self.api_version = _PLUGIN_API_VERSION
+        self.state_dir = state_dir
+        self._name = name
+        self._session_ids = session_ids
+        self._status_sink = status_sink
+        self._audit_sink = audit_sink
+
+    def session_id(self) -> str | None:
+        """The one own session id, or None when there are none or several."""
+        ids = self._session_ids()
+        return next(iter(ids)) if len(ids) == 1 else None
+
+    def status(
+        self,
+        text: str,
+        level: str = _STATUS_LEVEL_INFO,
+        ttl: float = _PLUGIN_STATUS_TTL_DEFAULT_SECONDS,
+    ) -> None:
+        """Post ``text`` to the status line for about ``ttl`` seconds."""
+        self._status_sink(self._name, text, level, ttl)
+
+    def audit(self, message: str) -> None:
+        """Write ``message`` as one `decision.log` line."""
+        self._audit_sink(self._name, message)
+
+
+class PluginRuntime:
+    """The worker-side plugin runner: loads worker halves and calls their hooks.
+
+    Plugins are asked in the order they were named. Every call is budgeted
+    (`_run_budgeted`); any failure disables that plugin for the rest of the
+    process and is recorded in `failures`, which the caller reports on EVERY
+    tick (the report is idempotent) so a lost reply cannot lose a failure.
+    """
+
+    def __init__(
+        self,
+        *,
+        state_root: Path,
+        status_dir: Path,
+        marker_path: Path,
+        session_ids: Callable[[], frozenset[str]] = cached_own_session_ids,
+        allowed_uids: Collection[int] | None = None,
+        hook_budget_seconds: float = _PLUGIN_HOOK_BUDGET_SECONDS,
+        tick_budget_seconds: float = _PLUGIN_TICK_BUDGET_SECONDS,
+        load_budget_seconds: float = _PLUGIN_LOAD_BUDGET_SECONDS,
+        monotonic: Callable[[], float] = time.monotonic,
+        wall_clock: Callable[[], float] = time.time,
+    ) -> None:
+        self._state_root = state_root
+        self._status_dir = status_dir
+        self._marker_path = marker_path
+        self._session_ids = session_ids
+        self._allowed_uids = allowed_uids
+        self._hook_budget = hook_budget_seconds
+        self._tick_budget = tick_budget_seconds
+        self._load_budget = load_budget_seconds
+        self._monotonic = monotonic
+        self._wall_clock = wall_clock
+        self._halves: dict[str, WorkerHalf] = {}
+        self._versions: dict[str, str] = {}
+        self._disabled: set[str] = set()
+        self._failures: list[PluginFailure] = []
+        self._audit_lines: list[str] = []
+        self._lock = threading.Lock()
+
+    @property
+    def loaded(self) -> list[tuple[str, str]]:
+        """``(name, version)`` of every plugin still enabled, in flag order."""
+        return [(name, self._versions[name]) for name in self._halves if name not in self._disabled]
+
+    @property
+    def failures(self) -> tuple[PluginFailure, ...]:
+        """Every failure this runtime has recorded (cumulative)."""
+        return tuple(self._failures)
+
+    def half(self, name: str) -> WorkerHalf:
+        """The loaded worker half called ``name`` (test and harness access)."""
+        return self._halves[name]
+
+    def disable(self, name: str) -> None:
+        """Stop calling ``name`` (the host disabled it for a failure it detected)."""
+        self._disabled.add(name)
+
+    def take_audit_lines(self) -> tuple[str, ...]:
+        """The `decision.log` lines plugins wrote since the last call."""
+        with self._lock:
+            lines, self._audit_lines = tuple(self._audit_lines), []
+        return lines
+
+    # -- loading ---------------------------------------------------------
+
+    def load(self, specs: Sequence[tuple[str, Path]], disabled: Collection[str]) -> None:
+        """Import and instantiate each named plugin, in order; a failure skips only it."""
+        self._disabled.update(disabled)
+        for name, path in specs:
+            if name in self._disabled:
+                continue
+            try:
+                self._load_one(name, path)
+            except PluginLoadError as error:
+                self._fail(name, _PLUGIN_KIND_LOAD, _PLUGIN_HOOK_LOAD, detail=error.reason)
+
+    def _load_one(self, name: str, path: Path) -> None:
+        refusal = check_plugin_file(path, allowed_uids=self._allowed_uids)
+        if refusal is not None:
+            raise PluginLoadError(refusal)
+        state_dir = self._make_state_dir(name)
+        api = PluginApi(
+            name=name,
+            state_dir=state_dir,
+            session_ids=self._session_ids,
+            status_sink=self._post_status,
+            audit_sink=self._record_audit,
+        )
+        self._write_marker(name, _PLUGIN_HOOK_LOAD)
+        try:
+            result = _run_budgeted(
+                lambda: self._import_half(name, path, api), self._load_budget
+            )
+        finally:
+            self._clear_marker()
+        if result.status == _BUDGET_OVERRUN:
+            raise PluginLoadError(_LOAD_REASON_TIMEOUT)
+        if isinstance(result.error, PluginLoadError):
+            raise PluginLoadError(result.error.reason)
+        if result.status != _BUDGET_OK:
+            append_worker_error(f"plugin {name} failed to load:\n{result.traceback_text}")
+            raise PluginLoadError(_LOAD_REASON_IMPORT)
+        half = cast("WorkerHalf", result.value)
+        self._halves[name] = half
+        self._versions[name] = _clean_text(getattr(half, "version", ""), _PLUGIN_VERSION_MAX_CHARS)
+
+    def _make_state_dir(self, name: str) -> Path:
+        state_dir = self._state_root / name
+        try:
+            state_dir.mkdir(mode=_PLUGIN_STATE_DIR_MODE, parents=True, exist_ok=True)
+            state_dir.chmod(_PLUGIN_STATE_DIR_MODE)
+        except OSError as error:
+            raise PluginLoadError(_LOAD_REASON_STATE_DIR) from error
+        return state_dir
+
+    @staticmethod
+    def _import_half(name: str, path: Path, api: PluginApi) -> object:
+        """Import ``path`` and build its worker half; raise `PluginLoadError` on any refusal."""
+        module_name = f"{_PLUGIN_MODULE_PREFIX}{name}"
+        spec = importlib.util.spec_from_file_location(module_name, path)
+        if spec is None or spec.loader is None:
+            raise PluginLoadError(_LOAD_REASON_IMPORT)
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[module_name] = module
+        try:
+            spec.loader.exec_module(module)
+        except BaseException as error:
+            # A plugin's import can raise anything; none of it escapes the loader.
+            sys.modules.pop(module_name, None)
+            raise PluginLoadError(_LOAD_REASON_IMPORT) from error
+        declared = getattr(module, _PLUGIN_API_ATTRIBUTE, None)
+        if type(declared) is not int or declared != _PLUGIN_API_MAJOR:
+            raise PluginLoadError(_LOAD_REASON_API)
+        factory = getattr(module, _PLUGIN_FACTORY_NAME, None)
+        if not callable(factory):
+            raise PluginLoadError(_LOAD_REASON_NO_FACTORY)
+        try:
+            half = factory(api)
+        except Exception as error:
+            raise PluginLoadError(_LOAD_REASON_FACTORY) from error
+        if (
+            getattr(half, "name", None) != name
+            or not isinstance(getattr(half, "version", None), str)
+            or not callable(getattr(half, "on_start", None))
+            or not callable(getattr(half, "on_idle", None))
+        ):
+            raise PluginLoadError(_LOAD_REASON_BAD_HALF)
+        return half
+
+    # -- hooks -----------------------------------------------------------
+
+    def start(self) -> None:
+        """Call every enabled half's ``on_start`` once, in flag order."""
+        for name, half in list(self._halves.items()):
+            if name not in self._disabled:
+                self._call(name, _PLUGIN_HOOK_ON_START, half.on_start, self._hook_budget)
+
+    def run_idle(self, now: float) -> PluginExitRequest | None:
+        """Ask each enabled plugin ``on_idle`` in flag order; the first exit request wins."""
+        deadline = self._monotonic() + self._tick_budget
+        ids = self._session_ids()
+        tick = IdleTick(now=now, session_id=next(iter(ids)) if len(ids) == 1 else None)
+        for name, half in list(self._halves.items()):
+            if name in self._disabled:
+                continue
+            remaining = deadline - self._monotonic()
+            if remaining <= 0:
+                break
+            outcome = self._call(
+                name,
+                _PLUGIN_HOOK_ON_IDLE,
+                lambda half=half: half.on_idle(tick),
+                min(self._hook_budget, remaining),
+            )
+            if outcome is None or outcome.value is None:
+                continue
+            if isinstance(outcome.value, ExitForRestart):
+                return PluginExitRequest(
+                    plugin=name, reason=_clean_text(outcome.value.reason, _PLUGIN_REASON_MAX_CHARS)
+                )
+            self._fail(name, _PLUGIN_KIND_BAD_RESULT, _PLUGIN_HOOK_ON_IDLE)
+        return None
+
+    def _call(
+        self, name: str, hook: str, fn: Callable[[], object], budget: float
+    ) -> _BudgetedResult | None:
+        """Run one hook under its budget; record a failure and return None if it failed."""
+        self._write_marker(name, hook)
+        try:
+            result = _run_budgeted(fn, budget)
+        finally:
+            self._clear_marker()
+        if result.status == _BUDGET_OK:
+            return result
+        if result.status == _BUDGET_OVERRUN:
+            self._fail(name, _PLUGIN_KIND_OVERRUN, hook)
+        else:
+            append_worker_error(f"plugin {name} {hook} raised:\n{result.traceback_text}")
+            self._fail(name, _PLUGIN_KIND_EXCEPTION, hook)
+        return None
+
+    def _fail(self, name: str, kind: str, hook: str, *, detail: str = "") -> None:
+        if name in self._disabled and any(f.plugin == name for f in self._failures):
+            return
+        self._disabled.add(name)
+        self._failures.append(PluginFailure(name, kind, hook, detail))
+
+    # -- the in-hook marker ------------------------------------------------
+
+    def _write_marker(self, name: str, hook: str) -> None:
+        payload = {"plugin": name, "hook": hook, "started_at": self._wall_clock()}
+        try:
+            self._marker_path.parent.mkdir(parents=True, exist_ok=True)
+            tmp_path = self._marker_path.with_name(f".{self._marker_path.name}.{os.getpid()}.tmp")
+            tmp_path.write_text(json.dumps(payload), encoding="utf-8")
+            tmp_path.replace(self._marker_path)
+        except OSError as error:
+            append_worker_error(f"could not write plugin in-hook marker: {error}")
+
+    def _clear_marker(self) -> None:
+        try:
+            self._marker_path.unlink(missing_ok=True)
+        except OSError as error:
+            append_worker_error(f"could not clear plugin in-hook marker: {error}")
+
+    # -- sinks handed to the api ------------------------------------------
+
+    def _post_status(self, name: str, text: str, level: str, ttl: float) -> None:
+        shown_level = level if level in (_STATUS_LEVEL_INFO, _STATUS_LEVEL_WARNING) else _STATUS_LEVEL_INFO
+        bounded_ttl = min(max(_coerce_float(ttl), _PLUGIN_STATUS_TTL_MIN_SECONDS), _PLUGIN_STATUS_TTL_MAX_SECONDS)
+        write_status_message(
+            self._status_dir,
+            text=f"[{name}] {_clean_text(text, _PLUGIN_TEXT_MAX_CHARS)}",
+            expires_at=self._wall_clock() + bounded_ttl,
+            level=shown_level,
+        )
+
+    def _record_audit(self, name: str, message: str) -> None:
+        line = f"plugin {name}: {_clean_text(message, _PLUGIN_TEXT_MAX_CHARS)}"
+        with self._lock:
+            self._audit_lines.append(line)
+            del self._audit_lines[:-_PLUGIN_AUDIT_MAX_PENDING]
+
+
+@dataclass
+class _PluginEntry:
+    """One configured plugin as the HOST sees it (never imported here)."""
+
+    name: str
+    path: Path | None
+    version: str = ""
+    state: str = _PLUGIN_STATE_LOADED
+    reason: str = ""
+
+
+class PluginHost:
+    """The PTY host's registry of configured plugins -- it never imports one.
+
+    Vets each ``--plugin`` file, builds the argv a worker is started with
+    (the loadable plugins plus the disabled set, re-read on EVERY worker
+    start so a hot reload cannot bring a disabled plugin back), records
+    failures reported by the worker or detected here, and keeps the plugin
+    list in `supervisor-status.json` current.
+    """
+
+    def __init__(
+        self,
+        raw_specs: Sequence[str],
+        *,
+        write_status: Callable[[list[dict[str, str]]], object] | None = None,
+        allowed_uids: Collection[int] | None = None,
+        state_root: Path | None = None,
+        status_dir: Path | None = None,
+        marker_path: Path | None = None,
+    ) -> None:
+        self._write_status = write_status
+        self._allowed_uids = allowed_uids
+        self._state_root = state_root
+        self._status_dir = status_dir
+        self._marker_path = marker_path
+        self._entries: list[_PluginEntry] = []
+        self._by_name: dict[str, _PluginEntry] = {}
+        self._startup_failures: list[PluginFailure] = []
+        self._runtime: PluginRuntime | None = None
+        for raw in raw_specs:
+            self._add(raw)
+        if self._entries:
+            self._publish()
+
+    def _add(self, raw: str) -> None:
+        try:
+            spec = parse_plugin_spec(raw)
+        except PluginLoadError as error:
+            self._refuse(error.name or _PLUGIN_UNNAMED, None, error.reason, notify=error.name)
+            return
+        if spec.name in self._by_name:
+            self._refuse(spec.name, spec.path, _LOAD_REASON_DUPLICATE, notify=spec.name, register=False)
+            return
+        refusal = check_plugin_file(spec.path, allowed_uids=self._allowed_uids)
+        if refusal is not None:
+            self._refuse(spec.name, spec.path, refusal, notify=spec.name)
+            return
+        entry = _PluginEntry(name=spec.name, path=spec.path)
+        self._entries.append(entry)
+        self._by_name[spec.name] = entry
+
+    def _refuse(
+        self,
+        name: str,
+        path: Path | None,
+        reason: str,
+        *,
+        notify: str | None,
+        register: bool = True,
+    ) -> None:
+        failure = PluginFailure(name, _PLUGIN_KIND_LOAD, _PLUGIN_HOOK_LOAD, reason)
+        entry = _PluginEntry(
+            name=name,
+            path=path,
+            state=_PLUGIN_STATE_FAILED,
+            reason=_failure_reason(failure),
+        )
+        self._entries.append(entry)
+        if register and notify is not None:
+            self._by_name[name] = entry
+        if notify is not None:
+            self._startup_failures.append(failure)
+
+    def take_startup_failures(self) -> list[PluginFailure]:
+        """Load refusals found while vetting the flags (once), for the notice family."""
+        failures, self._startup_failures = self._startup_failures, []
+        return failures
+
+    def worker_argv(self) -> list[str]:
+        """The plugin flags for a worker start: loadable plugins, then the disabled set."""
+        argv: list[str] = []
+        for entry in self._entries:
+            if entry.state != _PLUGIN_STATE_FAILED and entry.path is not None:
+                argv += [_PLUGIN_FLAG, f"{entry.name}{_PLUGIN_SPEC_SEPARATOR}{entry.path}"]
+        for entry in self._entries:
+            if entry.state == _PLUGIN_STATE_DISABLED:
+                argv += [_DISABLE_PLUGIN_FLAG, entry.name]
+        return argv
+
+    def disabled_names(self) -> frozenset[str]:
+        """Every plugin that must stay off for the rest of this supervisor process."""
+        return frozenset(
+            e.name for e in self._entries if e.state in (_PLUGIN_STATE_DISABLED, _PLUGIN_STATE_FAILED)
+        )
+
+    def status_entries(self) -> list[dict[str, str]]:
+        """The plugin list as written to `supervisor-status.json`."""
+        return [
+            {"name": e.name, "version": e.version, "state": e.state, "reason": e.reason}
+            for e in self._entries
+        ]
+
+    def record_loaded(self, name: str, version: str) -> None:
+        """The worker confirmed ``name`` loaded at ``version``."""
+        entry = self._by_name.get(name)
+        if entry is None or entry.state != _PLUGIN_STATE_LOADED or entry.version == version:
+            return
+        entry.version = _clean_text(version, _PLUGIN_VERSION_MAX_CHARS)
+        self._publish()
+
+    def record_failure(self, name: str, kind: str, hook: str, detail: str = "") -> bool:
+        """Disable ``name`` for a failure; True only the first time (idempotent)."""
+        entry = self._by_name.get(name)
+        if entry is None or entry.state != _PLUGIN_STATE_LOADED:
+            return False
+        entry.state = (
+            _PLUGIN_STATE_FAILED if kind == _PLUGIN_KIND_LOAD else _PLUGIN_STATE_DISABLED
+        )
+        entry.reason = _failure_reason(PluginFailure(name, kind, hook, detail))
+        if self._runtime is not None:
+            self._runtime.disable(name)
+        self._publish()
+        return True
+
+    def in_process_runtime(self) -> PluginRuntime:
+        """The lazily built runtime the in-process fallback decides with (host process)."""
+        if self._runtime is None:
+            status_dir = self._status_dir if self._status_dir is not None else _daemon_untracked_dir()
+            runtime = PluginRuntime(
+                state_root=self._state_root if self._state_root is not None else _plugin_state_root(),
+                status_dir=status_dir,
+                marker_path=(
+                    self._marker_path
+                    if self._marker_path is not None
+                    else _plugin_marker_path(status_dir, os.getpid())
+                ),
+                allowed_uids=self._allowed_uids,
+            )
+            runtime.load(
+                [
+                    (e.name, e.path)
+                    for e in self._entries
+                    if e.state != _PLUGIN_STATE_FAILED and e.path is not None
+                ],
+                self.disabled_names(),
+            )
+            runtime.start()
+            self._runtime = runtime
+        return self._runtime
+
+    def _publish(self) -> None:
+        if self._write_status is not None:
+            self._write_status(self.status_entries())
+
+
+def _parse_worker_plugin_flags(argv: Sequence[str]) -> tuple[list[str], frozenset[str]]:
+    """The ``--plugin`` specs and ``--disable-plugin`` names on a ``--worker`` argv."""
+    parser = argparse.ArgumentParser(add_help=False)
+    _add_plugin_arguments(parser)
+    known, _unknown = parser.parse_known_args(list(argv))
+    return list(known.plugin), frozenset(known.disable_plugin)
+
+
+def _add_plugin_arguments(parser: argparse.ArgumentParser) -> None:
+    """Register the plugin flags shared by the host and the worker command lines."""
+    parser.add_argument(
+        _PLUGIN_FLAG,
+        dest="plugin",
+        action="append",
+        default=[],
+        help="Load a plugin: <name>=<absolute path of its worker half>. Repeatable; "
+        "plugins are asked in the order given.",
+    )
+    parser.add_argument(
+        _DISABLE_PLUGIN_FLAG,
+        dest="disable_plugin",
+        action="append",
+        default=[],
+        help="Keep a plugin off. Passed by the host on every worker (re)start.",
+    )
 
 
 class CompactStateMachine:
@@ -5121,6 +5955,7 @@ def decide_once(
     own_sessions: frozenset[str] | None = None,
     goal_signal_ttl_seconds: float = _DEFAULT_GOAL_SIGNAL_TTL_SECONDS,
     model_confirm_enters: int = _DEFAULT_MODEL_CONFIRM_ENTERS,
+    plugins: PluginRuntime | None = None,
 ) -> TickOutcome:
     """Decide what to inject this tick WITHOUT touching the PTY (Plan 00164 P4).
 
@@ -6215,6 +7050,7 @@ def run_worker(
     dry_run: bool,
     sidecar_dir: Path,
     policy: CompactPolicy,
+    plugins: PluginRuntime | None = None,
 ) -> int:
     """Policy-worker loop: read TickFacts lines, emit TickOutcome lines.
 
@@ -6247,6 +7083,9 @@ def run_worker(
     """
     machine = CompactStateMachine(policy)
     line_recognizer = HumanInputLine()
+    if plugins is not None:
+        # Plan 00487: once per worker start (a hot reload starts it again).
+        plugins.start()
     for raw in in_stream:
         line = raw.strip()
         if not line:
@@ -6301,6 +7140,7 @@ def run_worker(
                 own_sessions=cached_own_session_ids(),  # Plan 00166: only our own sessions
                 goal_signal_ttl_seconds=policy.goal_signal_ttl_seconds,
                 model_confirm_enters=policy.model_confirm_enters,
+                plugins=plugins,
             )
         except Exception:
             # SAFETY NET: a single tick's exception must not kill the worker
@@ -6357,10 +7197,14 @@ class PolicyWorker:
         *,
         dry_run: bool,
         read_timeout: float = _WORKER_READ_TIMEOUT_SECONDS,
+        extra_argv: Callable[[], list[str]] | None = None,
     ) -> None:
         self._self_path = self_path
         self._dry_run = dry_run
         self._read_timeout = read_timeout
+        # Plan 00487: read afresh on EVERY start so the disabled-plugin set rides
+        # on each worker (re)start and a hot reload cannot bring a plugin back.
+        self._extra_argv = extra_argv
         self._proc: subprocess.Popen[str] | None = None
         self._err_stream: TextIO | None = None
         self._source_fingerprint = self._current_fingerprint()
@@ -6396,6 +7240,8 @@ class PolicyWorker:
         argv = [sys.executable, str(self._self_path), _WORKER_FLAG]
         if not self._dry_run:
             argv.append("--arm")
+        if self._extra_argv is not None:
+            argv.extend(self._extra_argv())
         # The worker's stderr MUST go to a file (or /dev/null), NEVER the PTY the
         # host inherited: an uncaught per-tick traceback would otherwise flood
         # the live Claude session. Open the error log; fall back to devnull.
@@ -6767,6 +7613,8 @@ def supervise(
     work_settle_seconds: float = _DEFAULT_WORK_SETTLE_SECONDS,
     input_line_abandon_seconds: float = _DEFAULT_INPUT_LINE_ABANDON_SECONDS,
     decider: Callable[[TickFacts], TickOutcome | None] | None = None,
+    plugin_host: PluginHost | None = None,
+    restart_worker: Callable[[], bool] | None = None,
 ) -> int:
     """Run `argv` under a PTY, forwarding I/O and polling the context sidecar.
 
@@ -6842,6 +7690,10 @@ def supervise(
             f"supervisor active ({mode}); polling {sidecar_dir} every "
             f"{poll_seconds}s; wrapping: {argv}"
         )
+    if plugin_host is not None and log is not None:
+        # Plan 00487: a plugin the loader refused is skipped, never fatal; say so.
+        for refusal in plugin_host.take_startup_failures():
+            log.write(failure_log_line(refusal))
 
     # Startup banner + spinner (Plan 00164 Phase 2): give the launching ccy
     # session immediate, informative feedback during the perceptible start-up
@@ -7099,6 +7951,7 @@ def _parse_supervisor_flags(argv: list[str]) -> argparse.Namespace:
         default=None,
         help="Decision log file path (default: $CLAUDE_PROJECT_DIR/untracked/supervise/).",
     )
+    _add_plugin_arguments(parser)
     return parser.parse_args(supervisor_argv)
 
 
@@ -7200,12 +8053,14 @@ def main(argv: list[str] | None = None) -> int:
         # tty either). See Plan 00166.
         _redirect_worker_stderr_to_log()
         try:
+            worker_sidecar_dir = _default_sidecar_dir()
             return run_worker(
                 sys.stdin,
                 sys.stdout,
                 dry_run="--arm" not in argv,
-                sidecar_dir=_default_sidecar_dir(),
+                sidecar_dir=worker_sidecar_dir,
                 policy=CompactPolicy(),
+                plugins=_make_worker_plugin_runtime(argv, worker_sidecar_dir.parent),
             )
         except Exception:
             # Plan 00361: an escaped exception (typically a half-edited source
@@ -7233,34 +8088,92 @@ def main(argv: list[str] | None = None) -> int:
     # supervisor on disk than the one still running (Plan 00164 Phase 3). The
     # status is removed on exit so a clean shutdown leaves nothing stale behind.
     untracked_dir = _daemon_untracked_dir()
-    write_supervisor_status(
-        untracked_dir,
-        version=__version__,
-        source_hash=compute_source_hash(_SELF_PATH),
-        pid=os.getpid(),
-        started_at=time.time(),
+    source_hash = compute_source_hash(_SELF_PATH)
+    started_at = time.time()
+
+    def _write_status(plugins: list[dict[str, str]] | None) -> Path | None:
+        return write_supervisor_status(
+            untracked_dir,
+            version=__version__,
+            source_hash=source_hash,
+            pid=os.getpid(),
+            started_at=started_at,
+            plugins=plugins,
+        )
+
+    # Plan 00487: plugins named with `--plugin`. Vetting a file never imports it
+    # and a refusal only skips that plugin -- the session always starts. The host
+    # rewrites the status file's plugin list whenever a plugin's state changes.
+    plugin_host = (
+        PluginHost(flags.plugin, write_status=_write_status, state_root=_plugin_state_root(),
+                   status_dir=untracked_dir,
+                   marker_path=_plugin_marker_path(untracked_dir, os.getpid()))
+        if flags.plugin
+        else None
     )
+    if plugin_host is None:
+        _write_status(None)
 
     # Run the decision logic in a restartable worker subprocess (Plan 00164
     # Phase 4) so it can hot-reload from a freshly-deployed supervisor without
     # disturbing this PTY host. Worker failure is invisible — the host falls back
     # to an identical in-process decision — so the session is never at risk.
-    worker = _make_policy_worker(flags.dry_run)
+    worker = _make_policy_worker(flags.dry_run, plugin_host=plugin_host)
     decider = _make_worker_decider(worker, log=log) if worker is not None else None
     try:
-        return supervise(child_argv, dry_run=flags.dry_run, log=log, decider=decider)
+        return supervise(
+            child_argv,
+            dry_run=flags.dry_run,
+            log=log,
+            decider=decider,
+            plugin_host=plugin_host,
+            restart_worker=worker.restart if worker is not None else None,
+        )
     finally:
         if worker is not None:
             worker.close()
         remove_supervisor_status(untracked_dir)
 
 
-def _make_policy_worker(dry_run: bool) -> PolicyWorker | None:
+def _make_worker_plugin_runtime(argv: Sequence[str], untracked_dir: Path) -> PluginRuntime | None:
+    """Build the ``--worker`` subprocess's plugin runtime from its argv, or None.
+
+    The host passed the loadable plugins (``--plugin``) and the disabled set
+    (``--disable-plugin``). The in-hook marker is keyed by the HOST's pid -- this
+    process's parent -- so the host can find it when this worker stops answering.
+    """
+    raw_specs, disabled = _parse_worker_plugin_flags(argv)
+    if not raw_specs:
+        return None
+    runtime = PluginRuntime(
+        state_root=_plugin_state_root(),
+        status_dir=untracked_dir,
+        marker_path=_plugin_marker_path(untracked_dir, os.getppid()),
+    )
+    specs: list[tuple[str, Path]] = []
+    for raw in raw_specs:
+        try:
+            parsed = parse_plugin_spec(raw)
+        except PluginLoadError as error:
+            append_worker_error(f"worker got an unusable --plugin value: {error.reason}")
+            continue
+        specs.append((parsed.name, parsed.path))
+    runtime.load(specs, disabled)
+    return runtime
+
+
+def _make_policy_worker(
+    dry_run: bool, plugin_host: PluginHost | None = None
+) -> PolicyWorker | None:
     """Create + start the policy worker, or None (in-process) when opted out /
     unstartable. Never raises — a worker problem must not break a launch."""
     if os.environ.get(_NO_WORKER_ENV):
         return None
-    worker = PolicyWorker(_SELF_PATH, dry_run=dry_run)
+    worker = PolicyWorker(
+        _SELF_PATH,
+        dry_run=dry_run,
+        extra_argv=plugin_host.worker_argv if plugin_host is not None else None,
+    )
     if not worker.start():
         return None
     return worker
