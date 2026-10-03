@@ -160,7 +160,11 @@ class TestUpdate:
         """A snapshot still means subscription windows exist; consumers render chips from it."""
         tracker = UsageTracker()
         tracker.update_from_status_event(
-            {"rate_limits": {"spend_limit": {"used_percentage": 40, "resets_at": SEVEN_DAY_RESETS_AT}}},
+            {
+                "rate_limits": {
+                    "spend_limit": {"used_percentage": 40, "resets_at": SEVEN_DAY_RESETS_AT}
+                }
+            },
             now=NOW,
         )
         assert tracker.latest(now=NOW) is None
