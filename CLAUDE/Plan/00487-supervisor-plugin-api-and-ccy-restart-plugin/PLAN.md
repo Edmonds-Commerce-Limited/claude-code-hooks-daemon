@@ -97,20 +97,26 @@ The agent's rulings on ordering, plugin location and restart policy, made while 
   - it is also shown as a status-line warning and written to the audit log;
   - every failure kind in the draft's test list is covered.
 
-- [ ] ⬜ **Task 1.7**: Document the API in `CLAUDE/development/CcySupervisor.md`, add a release-notes callout, and run the merge checks (static checks, semgrep, `tests/unit/supervise`). Then verify the worker reload as the CcySupervisor doc requires. Progress: the documentation and the callout (`001-ccy-supervisor-plugin-api.md`) are written for Tasks 1.2 to 1.6, the review fixes and Task 1.3c, and the checks ran green; what remains is the live worker-reload verification, and the documentation for Tasks 1.4 and 1.5 once they exist.
+- [x] ✅ **Task 1.7**: Document the API in `CLAUDE/development/CcySupervisor.md`, add a release-notes callout, and run the merge checks (static checks, semgrep, `tests/unit/supervise`). Then verify the worker reload as the CcySupervisor doc requires. Done:
+
+  - The documentation and the callout (`001-ccy-supervisor-plugin-api.md`) are written.
+  - Reviews: three Opus rounds; the third approved.
+  - Merged to main as `14f2f11f8`. On main the skew test then compared the new code with itself; `4bb315985` pins its baseline to v3.68.0, and `tests/unit/supervise` passes 1283.
+  - The live worker hot-reloaded under the long-lived host and kept deciding normally.
+  - Tasks 1.4 and 1.5 will document themselves when built.
 
 ### Phase 2: ccy plugin (fedora-desktop feature branch, cloned under `untracked/repos/`)
 
 - [x] ✅ **Task 2.1**: Establish from the fedora-desktop source how ccy installs and updates Claude Code, and how it builds the wrapper line. Record which restart picks up a new version (DECISIONS.md, item 5). Result: [report](subagent-reports/261003-task-2.1-ccy-update-path-explore-sonnet.md). Claude Code is baked into the image, so only a ccy relaunch on the host picks up a new version.
-- [ ] ⬜ **Task 2.1b**: Make the ccy launcher act on the supervisor's restart exit status: update the image, then relaunch with `--resume <id>`, read from the state file. Bound it so a crash loop cannot relaunch for ever.
-- [ ] ⬜ **Task 2.2**: Write the worker half: track session age and deadlines in `state_dir`, send the restart-warning notice, then return `Restart` at the next idle point. Include the forced-restart fallback. Unit-test it against the API's test harness.
-- [ ] ⬜ **Task 2.3**: Add the ccy launcher options (`--max-age`, `--run-for`, `--until`) that build the `--plugin` flags. Follow fedora-desktop's own rules: IaC only, the ccy version bump, and `qa-all.bash` plus its `qa-reviewer`.
+- [x] ✅ **Task 2.1b**: Make the ccy launcher act on the supervisor's restart exit status: update the image, then relaunch with `--resume <id>`, read from the state file. Bound it so a crash loop cannot relaunch for ever. Done on fedora-desktop `feature/ccy-hooks-daemon-plugin` (`6e6cb688`, ccy 3.74.0), with a budget of 3 restarts per hour per project and 101 tests. [Report](subagent-reports/261003-task-2.1b-ccy-launcher-relaunch-sonnet.md).
+- [x] ✅ **Task 2.2**: Write the worker half: track session age and deadlines in `state_dir`, send the restart-warning notice, then return `ExitForRestart` at the next idle point. Unit-test it against the API's test harness. Done: `ccy_lifecycle.py` (`e35379c9`, strict-typed in `d9488a15`), 30 tests, and the real harness check. The forced-restart fallback is dropped, because the supervisor calls plugins only at idle; a never-idle session restarts at its first idle point after its maximum age ([DECISIONS.md](DECISIONS.md), item 4).
+- [x] ✅ **Task 2.3**: Add the ccy launcher options (`--max-age`, `--run-for`, `--until`) that build the `--plugin` flags. Follow fedora-desktop's own rules: IaC only, the ccy version bump, and `qa-all.bash` plus its `qa-reviewer`. Done (ccy 3.75.0, container 2.41), with 181 option tests. `qa-all.bash` and the `qa-reviewer` cannot run in this container (missing toolchain), so they move to the owner's host run in [OWNER-LIVE-TEST.md](OWNER-LIVE-TEST.md). [Report](subagent-reports/261003-task-2.2-2.4-ccy-worker-plugin-sonnet.md).
 - [x] ✅ **Task 2.4**: Have the supervisor send a post-restart message naming the new Claude Code version. Built with Task 1.3c (the RESTARTED notice); the launcher must leave `restarted.json` in place when it removes `restart-request.json`.
-- [ ] ⬜ **Task 2.5**: Push the branch and write an owner test script in the fedora-desktop plan folder, so the owner can run the live restart test on the host.
+- [x] ✅ **Task 2.5**: Push the branch and write the owner's live-test checklist. Done: pushed at `d9488a15`. The checklist is [OWNER-LIVE-TEST.md](OWNER-LIVE-TEST.md), kept in this plan rather than in fedora-desktop, per the owner's ruling that this plan tracks both sides.
 
 ### Phase 3: Close out
 
-- [ ] ⬜ **Task 3.1**: The owner runs the live test. Fix what it finds, then merge this repository's branch after v3.68.0.
+- [ ] ⬜ **Task 3.1**: The owner runs the live test ([OWNER-LIVE-TEST.md](OWNER-LIVE-TEST.md)) and fixes what it finds; opening the fedora-desktop PR is the owner's call. This repository's side is already merged.
 - [ ] ⬜ **Task 3.2**: Comment the outcome on #71 and fedora-desktop#61, using "Addresses" wording.
 
 ## Success Criteria

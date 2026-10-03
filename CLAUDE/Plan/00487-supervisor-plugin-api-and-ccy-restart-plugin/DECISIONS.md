@@ -2,7 +2,7 @@
 
 These are agent rulings, made while the owner was away. Each is open to reversal and is marked as an agent ruling, not an owner ruling. The owner asked for questions before leaving, and these are the defaults that apply until the owner answers.
 
-1. **Ordering.** The release comes first: nothing from this plan merges to main until v3.68.0 is tagged and published. All work happens on worktree branches.
+1. **Ordering.** The release comes first: nothing from this plan merges to main until v3.68.0 is tagged and published. All work happens on worktree branches. Held: v3.68.0 was published before the Phase 1 merge (`14f2f11f8`).
 
 2. **fedora-desktop.** The feature branch is pushed as a backup (the repository's own "always push" rule). No PR is opened and nothing is merged there.
 
@@ -10,11 +10,12 @@ These are agent rulings, made while the owner was away. Each is open to reversal
 
 4. **Restart policy.** These are configuration defaults, not schedule estimates:
 
-   - The maximum session age is 3 days, set per session.
-   - The restart warning goes out 10 minutes before the restart.
-   - The restart happens at the first idle point after the warning, never in the middle of a turn.
-   - If the session is still busy 30 minutes after the warning, the restart is forced.
-   - After the restart, the session gets a "restarted, now on Claude Code X.Y.Z, carry on" message.
+   - The maximum session age is OFF unless `--max-age` (or the host's `CCY_MAX_AGE`) sets it. 3 days is the documented example, not a default. This is more conservative than the first draft of this ruling, because a restart the operator did not ask for is the riskier mistake.
+   - The restart warning goes out 10 minutes before the restart (`CCY_RESTART_WARN_MINUTES`).
+   - The restart happens at the first idle point after the maximum age, never in the middle of a turn.
+   - **Revised:** there is no forced restart for a busy session. The first draft promised one 30 minutes after the warning. The supervisor only calls plugins at an idle point, and forcing `/exit` into a busy turn is the mid-turn interruption this policy forbids. A session that never goes idle therefore restarts at its first idle point after its maximum age.
+   - After the restart, the session gets a "restarted, now on Claude Code X.Y.Z, carry on" message. The supervisor's wording is neutral about why the restart happened.
+   - At most 3 restarts per hour per project (`CCY_RESTART_MAX`, `CCY_RESTART_WINDOW_SECONDS`), so a crash loop cannot relaunch forever.
 
 5. **What gets restarted: the container, through ccy on the host.** Task 2.1 found ([report](subagent-reports/261003-task-2.1-ccy-update-path-explore-sonnet.md)) that Claude Code is baked into the ccy image (`npm install -g` in the Dockerfile). The host updates the image (`update_claude_inplace`, at most daily per image), and containers run with `--rm`, so the install is image-only. Respawning `claude` inside a running container re-runs the same binary. An update restart therefore works like this:
 
