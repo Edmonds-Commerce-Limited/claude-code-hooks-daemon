@@ -1406,6 +1406,28 @@ The uncertain-move union judges the hook directory and the LAST recorded move (`
 every candidate directory (`sub`). Remedy: judge every directory any `cd` in the chain could
 land in.
 
+### N330–N337 — findings from the Plan 00486 backfill changelog review (Claude Code 2.1.272 to 2.1.288)
+
+**Source**: Plan 00486 Task 1.4,
+`CLAUDE/Plan/00486-claude-code-version-tracking/subagent-reports/261003-task-1.4-backfill-review-sonnet.md` (on
+branch `worktree-p486-cc-versions` until it merges). The report filtered the 2.1.273 to 2.1.285 entries by keyword
+and did not read them in full, so each item below has to be verified before anyone acts on it.
+
+| Id   | Finding                                                                                                                     | Status  |
+| ---- | --------------------------------------------------------------------------------------------------------------------------- | ------- |
+| N330 | Read `rate_limits.spend_limit` in `core/usage_snapshot.py` (adopt).                                                         | ⬜ Open |
+| N331 | Verify `.claude/rules` write-time loading on 2.1.288 and correct `CLAUDE/DirectoryRoles.md` if it changed.                  | ⬜ Open |
+| N332 | Guidance claims "run_in_background has no time limit"; reported false for unattended sessions since 2.1.285.                | ⬜ Open |
+| N333 | Define how `usage_pause` interacts with Claude Code's "Continue automatically at usage limit" wait.                         | ⬜ Open |
+| N334 | Re-check the supervisor's post-compaction `/goal` and `continue` re-injection against the 2.1.274 fix (possibly redundant). | ⬜ Open |
+| N335 | Compare `/doctor prompt-audit` with `skill_scan` and `docs_qa` (possible overlap).                                          | ⬜ Open |
+| N336 | Make the supervisor's red-zone `/compact` aware of the `/autocompact` window.                                               | ⬜ Open |
+| N337 | Gate the supervisor's idle `/compact` on `prompt_cache.warm`, so that compaction does not run against a cold cache.         | ⬜ Open |
+
+Idle compaction: the review found none in the Claude Code changelog or the vendored prompt-caching docs, so the
+owner's report is unconfirmed. Claude Code compacts by window size. The idle-gated `/compact` seen in sessions is the
+ccy supervisor's own.
+
 ### N329 — the N323 merge added a root-conditioned skip, and main carried it until the next post-merge integration run
 
 **Source**: coordinator, post-merge `tests/integration` on 62d9e6292, the N328 merge.
@@ -1755,6 +1777,10 @@ exits 1: "the fetched content matches the sensitive-content pattern `session-uui
 written." The page's example payload carries a UUID-shaped `session_id`, which the pattern cannot
 tell from a real one. The remote-docs fidelity rule forbids changing vendored text, so the
 two rules conflict, and neither can be bent by an agent.
+
+**Second instance (Plan 00486 Task 1.3)**: `remote-docs add https://code.claude.com/docs/en/changelog` is refused
+on the same pattern, even with `--verbatim`. The check runs before any capture exists, so the stand-down that
+`RemoteDocs.md` describes for unaltered captures never applies. This now also blocks Plan 00486 Task 1.3.
 
 **Status**: ⬜ Owner decision. Options: (a) allow `remote-docs add` to store a documented
 placeholder for pattern matches and record the substitution in the provenance frontmatter; (b)
