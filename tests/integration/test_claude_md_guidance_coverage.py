@@ -486,6 +486,16 @@ _EXEMPT_FROM_GUIDANCE: dict[str, str] = {
         "silent state-file writer, never denies and never speaks (T1 no, T3 no); "
         "it only marks the recorded failure resolved when the session is prompted again"
     ),
+    "QuotaResumeRecorderHandler": (
+        "silent state-file writer, never denies and never speaks (T1 no, T3 no); "
+        "a Notification hook cannot inject context, and limit_rebrief delivers the "
+        "re-brief it feeds"
+    ),
+    "LimitRebriefHandler": (
+        "never denies (T1 no); each message is a one-shot delivered in full at "
+        "fire-time, naming the agent and the places to look, not a standing policy "
+        "to hold across turns"
+    ),
     "MonorepoDetectorHandler": (
         "never denies (T1 no); one-shot correction delivered fully at fire-time "
         "(paste-ready projects: block), not a standing policy to hold across "

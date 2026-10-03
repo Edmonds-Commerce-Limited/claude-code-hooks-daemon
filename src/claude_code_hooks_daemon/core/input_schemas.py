@@ -132,7 +132,21 @@ NOTIFICATION_INPUT_SCHEMA: Final[dict[str, Any]] = {
         "hook_event_name": {"const": "Notification"},
         "notification_type": {
             "type": "string",
-            "enum": ["permission_prompt", "idle_prompt", "auth_success"],
+            # The twelve types hooks.md's Notification table lists.
+            "enum": [
+                "permission_prompt",
+                "idle_prompt",
+                "auth_success",
+                "elicitation_dialog",
+                "elicitation_url_dialog",
+                "elicitation_complete",
+                "elicitation_response",
+                "agent_needs_input",
+                "agent_completed",
+                "quota_auto_resume_fired",
+                "quota_auto_resume_stale",
+                "quota_auto_resume_disabled",
+            ],
             "description": "Type of notification from Claude Code",
         },
         "message": {"type": "string"},
