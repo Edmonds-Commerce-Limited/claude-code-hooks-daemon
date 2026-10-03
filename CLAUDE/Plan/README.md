@@ -4,6 +4,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
+- [00487: Supervisor plugin API and the ccy restart plugin](00487-supervisor-plugin-api-and-ccy-restart-plugin/PLAN.md) - Not Started (owner request, #71: plugin API for the ccy supervisor per the fedora-desktop 00146 draft; first consumer is a ccy max-age restart and deadline plugin on a fedora-desktop branch, tracked here)
+
 - [00486: Claude Code version tracking](00486-claude-code-version-tracking/PLAN.md) - Not Started (owner request: record the Claude Code version each release was built against, review the Claude Code changelog per release for adopt/redundant/conflict, detect a newer running version)
 
 - [00485: split subagent full qa blocker](00485-split-subagent-full-qa-blocker/PLAN.md) - Not Started (owner-delegated Fable ruling on 00466 N96: pure-refactor split of the 5,300-line handler along its class seams; starts only once no open branch touches the file)
@@ -296,11 +298,11 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 ## Plan Statistics
 
-- **Total Plans Created**: 486 (count = `hooksdaemon.latestPlanNumber` git counter)
+- **Total Plans Created**: 487 (count = `hooksdaemon.latestPlanNumber` git counter)
 
 - **Completed**: 415 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 48 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 49 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 
