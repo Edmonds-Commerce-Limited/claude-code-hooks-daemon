@@ -1703,6 +1703,17 @@ class TickOutcome:
     # would show the just-flushed text as non-empty forever. False for every
     # other decision and for legacy replies without the field.
     abandoned_box_flushed: bool = False
+    # Plan 00487: what the plugin runtime has to tell the HOST. Failures and
+    # versions are CUMULATIVE for the worker's lifetime and re-sent every tick
+    # (the host's handling is idempotent), so a reply the host discarded as
+    # stale cannot lose a failure. Each failure is `(plugin, kind, hook,
+    # detail)`, closed-set values only. `plugin_log_lines` are the lines
+    # plugins wrote through `api.audit`. `exit_for_restart` is `(plugin,
+    # reason)` when a plugin asked the session to exit for a relaunch.
+    plugin_failures: tuple[tuple[str, str, str, str], ...] = ()
+    plugin_versions: tuple[tuple[str, str], ...] = ()
+    plugin_log_lines: tuple[str, ...] = ()
+    exit_for_restart: tuple[str, str] | None = None
 
 
 def _coerce_float(value: object) -> float:
@@ -6733,6 +6744,27 @@ def decide_once(
                 consume_signal_path = str(actions_path)
                 deferred_log = None
                 noop_reason_log = None
+    # ── Plugins (Plan 00487) ────────────────────────────────────────────────
+    # LAST of everything: a plugin's `on_idle` is asked only when no built-in
+    # family claimed the tick, i.e. the same gates as the families above plus
+    # `can_inject` (idle, empty box) and no unconfirmed own line. Plugins are
+    # asked in the order they were named; the first to return an
+    # `ExitForRestart` wins. A plugin never types anything: its only effect on
+    # the session is the exit request, which the HOST validates and performs.
+    exit_for_restart: tuple[str, str] | None = None
+    if (
+        plugins is not None
+        and payload is None
+        and evaluation.decision is Decision.NOOP
+        and signal_path is None
+        and machine.state is SupervisorState.MONITOR
+        and can_inject
+        and not machine.own_line_pending
+    ):
+        exit_request = plugins.run_idle(facts.now_wall)
+        if exit_request is not None:
+            exit_for_restart = (exit_request.plugin, exit_request.reason)
+            reason = f"plugin {exit_request.plugin} asked to exit for restart"
     # Remember a submitted own LINE (never a raw keypress, never a dry-run
     # marker) as unconfirmed box content -- recorded at decision time, like
     # the audit trail, so the follow-up ships by worker hot-reload alone. A
@@ -6761,6 +6793,14 @@ def decide_once(
             audit_flush_log_line if decision_value != Decision.WOULD_AUDIT.value else None
         ),
         abandoned_box_flushed=evaluation.abandoned_box_flush,
+        plugin_failures=(
+            tuple((f.plugin, f.kind, f.hook, f.detail) for f in plugins.failures)
+            if plugins is not None
+            else ()
+        ),
+        plugin_versions=tuple(plugins.loaded) if plugins is not None else (),
+        plugin_log_lines=plugins.take_audit_lines() if plugins is not None else (),
+        exit_for_restart=exit_for_restart,
     )
 
 
@@ -6897,6 +6937,8 @@ def _poll_once(
     model_confirm_enters: int = _DEFAULT_MODEL_CONFIRM_ENTERS,
     input_line_abandoned: bool = False,
     on_input_line_flushed: Callable[[], None] | None = None,
+    plugins: PluginRuntime | None = None,
+    on_outcome: Callable[[TickOutcome], None] | None = None,
 ) -> Evaluation:
     """One in-process supervisor tick: decide (``decide_once``) then inject.
 
@@ -6911,6 +6953,12 @@ def _poll_once(
     to reset whatever tracked ``HumanInputLine`` it owns, which this function
     has no reference to (``input_line_empty``/``input_line_abandoned`` arrive
     as plain booleans, same as every other fact here).
+
+    ``plugins`` (Plan 00487) is the in-process plugin runtime, asked exactly as
+    the worker asks its own; ``on_outcome`` receives the tick's `TickOutcome`
+    after it was applied, so the caller can act on what the plugins reported
+    (failures, an exit-for-restart request) through the same code the worker
+    path uses.
     """
     facts = TickFacts(
         now_wall=now_wall,
@@ -6933,11 +6981,14 @@ def _poll_once(
         own_sessions=own_sessions,
         goal_signal_ttl_seconds=goal_signal_ttl_seconds,
         model_confirm_enters=model_confirm_enters,
+        plugins=plugins,
     )
     injected = _apply_decision(outcome, master_writer=master_writer, log=log)
     _apply_post_injection_bookkeeping(machine, outcome, injected=injected, now_wall=now_wall)
     if outcome.abandoned_box_flushed and on_input_line_flushed is not None:
         on_input_line_flushed()
+    if on_outcome is not None:
+        on_outcome(outcome)
     return Evaluation(decision=Decision(outcome.decision_value), reason=outcome.reason)
 
 
@@ -7005,8 +7056,50 @@ def _outcome_to_json(outcome: TickOutcome) -> str:
             "is_flag_compact": outcome.is_flag_compact,
             "audit_flush_log": outcome.audit_flush_log,
             "abandoned_box_flushed": outcome.abandoned_box_flushed,
+            "plugin_failures": [list(failure) for failure in outcome.plugin_failures],
+            "plugin_versions": [list(pair) for pair in outcome.plugin_versions],
+            "plugin_log_lines": list(outcome.plugin_log_lines),
+            "exit_for_restart": (
+                list(outcome.exit_for_restart) if outcome.exit_for_restart is not None else None
+            ),
         }
     )
+
+
+def _decode_plugin_failures(raw: object) -> tuple[tuple[str, str, str, str], ...]:
+    """Well-formed `(plugin, kind, hook, detail)` entries of a decoded JSON list; the rest are dropped."""
+    if not isinstance(raw, list):
+        return ()
+    return tuple(
+        (item[0], item[1], item[2], item[3])
+        for item in raw
+        if isinstance(item, list) and len(item) == 4 and all(isinstance(part, str) for part in item)
+    )
+
+
+def _decode_plugin_versions(raw: object) -> tuple[tuple[str, str], ...]:
+    """Well-formed `(plugin, version)` entries of a decoded JSON list; the rest are dropped."""
+    if not isinstance(raw, list):
+        return ()
+    return tuple(
+        (item[0], item[1])
+        for item in raw
+        if isinstance(item, list) and len(item) == 2 and all(isinstance(part, str) for part in item)
+    )
+
+
+def _decode_plugin_log_lines(raw: object) -> tuple[str, ...]:
+    """The string entries of a decoded JSON list; anything else is dropped."""
+    if not isinstance(raw, list):
+        return ()
+    return tuple(line for line in raw if isinstance(line, str))
+
+
+def _decode_exit_for_restart(raw: object) -> tuple[str, str] | None:
+    """The `(plugin, reason)` pair of a decoded JSON list, or None when malformed."""
+    if isinstance(raw, list) and len(raw) == 2 and all(isinstance(part, str) for part in raw):
+        return (raw[0], raw[1])
+    return None
 
 
 def _outcome_from_json(line: str) -> TickOutcome:
@@ -7028,6 +7121,10 @@ def _outcome_from_json(line: str) -> TickOutcome:
         is_flag_compact=bool(data.get("is_flag_compact", False)),
         audit_flush_log=data.get("audit_flush_log"),
         abandoned_box_flushed=bool(data.get("abandoned_box_flushed", False)),
+        plugin_failures=_decode_plugin_failures(data.get("plugin_failures")),
+        plugin_versions=_decode_plugin_versions(data.get("plugin_versions")),
+        plugin_log_lines=_decode_plugin_log_lines(data.get("plugin_log_lines")),
+        exit_for_restart=_decode_exit_for_restart(data.get("exit_for_restart")),
     )
 
 
