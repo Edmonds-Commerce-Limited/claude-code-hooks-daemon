@@ -1402,6 +1402,46 @@ The uncertain-move union judges the hook directory and the LAST recorded move (`
 every candidate directory (`sub`). Remedy: judge every directory any `cd` in the chain could
 land in.
 
+### N326 — release prep exposed tests that pass only while `UNRELEASED/` holds content
+
+**Source**: coordinator, v3.68.0 release prep (CI run on 072a4da2f).
+
+**Evidence**: Step 6 of a release empties `CLAUDE/UPGRADES/UNRELEASED/` into the versioned guide. `tests/acceptance/test_guarded_branch_install.py` then failed, because the pre-deploy gate it drives found nothing staged to stop on. Its expectation depended on the repository's own `UNRELEASED/` contents, not on a fixture. The manifest example test had the same dependency. Both were found only at release time, because between releases `UNRELEASED/` is never empty. Fixed for the guarded install in 3f0311e8e: the test commits its own staged callout and manifest into the clone.
+
+**Status**: ✅ Fixed for the two instances. ⬜ Open as a class: a test that reads the live `UNRELEASED/` tree should build its own fixture. Remedy: a check, or one test run with `UNRELEASED/` emptied, so the dependency fails between releases instead of at release prep.
+
+### N325 — `staging_simulation` warns "add -A" when the command ran `add -u`
+
+**Source**: v3.68.0 release code review, round 3 (a non-defect suggestion).
+
+**Evidence**: when the simulation degrades, its warning text names `git add -A` even when the command it simulated was `git add -u`. Only the wording is wrong; the staged-set computation is right.
+
+**Status**: ⬜ Open. Remedy: name the flag the command actually used.
+
+### N324 — the CI-run lookup does not say which run it read when HEAD has several
+
+**Source**: v3.68.0 release code review (a non-defect suggestion).
+
+**Evidence**: `release-slate-check` reads the `qa.yml` run for HEAD. HEAD can have more than one run: a push tier run plus a dispatched full-matrix run, or a cancelled run plus its re-run. Which one wins should be explicit (the newest completed full-matrix run), and the check should name it.
+
+**Status**: ⬜ Open. Remedy: select the newest completed run with the matrix jobs, report its id, and add a test with two runs on one sha.
+
+### N323 — `check_approval` should report INVALID on an unreadable approval marker
+
+**Source**: v3.68.0 release code review (a non-defect suggestion).
+
+**Evidence**: an approval marker under `upgrade-approvals/` that exists but cannot be read is treated like a missing one. The gate still fails closed, but the message sends the owner to approve again, when what needs fixing is the file's permissions.
+
+**Status**: ⬜ Open. Remedy: a distinct INVALID verdict with an "unreadable" reason, read through `path_predicates`.
+
+### N322 — `usage_snapshot` can leave its temp file behind when the rename fails
+
+**Source**: v3.68.0 release code review (a non-defect suggestion).
+
+**Evidence**: the snapshot writer writes a temp file and renames it into place. If the rename raises, the temp file stays in the state directory. Nothing reads it, but it accumulates.
+
+**Status**: ⬜ Open. Remedy: unlink the temp file on the failure path, and test that path.
+
 ### N321 — strict-by-default left four acceptance probes denied, and merge checks never ran `tests/acceptance/`
 
 **Source**: coordinator, release prep full QA (`llm_qa.py all`) on c818d43e5.
@@ -1416,7 +1456,12 @@ Sixth instance of the N310 class: a suite the merge routine does not run went re
 **Status**: ✅ Fixed on main. The sequenced allow probes carry `set -euo pipefail;`, and the
 verification-gate probe declares `MUST_SKIP_SAFE_MODE_BECAUSE`, because a prelude would make the
 gate stand down. Harness 5/5 green. Remaining: the merge routine runs `tests/acceptance/` beside
-`tests/integration/`.
+`tests/integration/`. The v3.68.0 release added a lesson: the merge routine also needs
+`llm_qa.py semgrep`. The N317 semgrep finding and the merge_qa_advisor EACCES finding both
+reached main past the per-merge checks and surfaced only in the release's full QA and CI. Since
+the release, the coordinator runs `tests/integration`, `tests/acceptance`, `semgrep` and
+`dangerous_invocation_corpus` on main after each core merge. The routine itself still has to say
+so (Plan 00475 Task 4.2).
 
 ### N320 — `D=path && cmd > $D/f` is denied as a write outside the project; the `;` form is allowed
 
