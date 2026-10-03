@@ -18,5 +18,6 @@ When the record is cleared, or expires an hour after the resume time, it
 behaves as before. An unreadable record counts as no pause.
 
 The rule ships by the worker hot-reload, with no session restart. The record is
-written by the daemon's usage gate, which is separate work. See
+written by the daemon's usage gate (see "A session pauses at its host usage
+ceiling and resumes at the window reset"). See
 `CLAUDE/development/CcySupervisor.md`.
