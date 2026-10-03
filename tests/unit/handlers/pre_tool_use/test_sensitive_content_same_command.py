@@ -165,6 +165,21 @@ class TestACommandThatStagesThenCommits:
         )
         assert _decision(handler, repo, "git add -A && git commit -q -m x") == Decision.ALLOW
 
+    def test_a_public_pattern_match_in_a_force_added_file_is_judged(
+        self, repo: Path, tmp_path: Path
+    ) -> None:
+        """Ledger 00466 N61 as reported: an ignored ``leak`` file matching a public pattern."""
+        (repo / ".gitignore").write_text("leak\n")
+        _git(repo, "add", ".gitignore")
+        _git(repo, "commit", "-q", "-m", "ignore leak")
+        (repo / "leak").write_text("marker ZZLEAKZZ here\n")
+        gate = SensitiveContentHandler()
+        gate._public_patterns = [{"name": "zz-marker", "pattern": "ZZLEAKZZ", "description": "d"}]
+        gate._project_root_override = tmp_path
+
+        assert _decision(gate, repo, "git add -f leak && git commit -q -m x") == Decision.DENY
+        assert _decision(gate, repo, "git add leak; git commit -q -m x") == Decision.ALLOW
+
     def test_a_clean_add_then_commit_is_allowed(
         self, repo: Path, handler: SensitiveContentHandler
     ) -> None:

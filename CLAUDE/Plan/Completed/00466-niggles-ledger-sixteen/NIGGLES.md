@@ -1407,6 +1407,10 @@ between two identical commands also keeps the stale answer.
 handler for per-instance per-request state, and extends the static detector
 to catch it. It lands with N38.
 
+**Status**: FIXED (Plan 00483 Task 3.1, worktree-p483-leak). The N38 remedy never reached
+main: the memo was still keyed by command text. It is now keyed by the hook_input object
+(held), so a repeated command with an edited `-F` file or another cwd is judged afresh.
+
 ### N93 — `project_containment` misses writes inside `eval '…'` and nested heredocs
 
 **Found by N38 review 8 (ledger candidate).** A write outside the project
@@ -1880,6 +1884,10 @@ review 3's MA-2 shapes, so it is fixed on the N53 branch. RED tests:
 - `git add leak.txt && git commit -m x` denies;
 - `git add . && git commit -m x` with a leaking untracked file denies;
 - a clean add-then-commit is allowed.
+
+**Status**: FIXED (merge 530ffc83d, Plan 00474 N246). Plan 00483 Task 3.1 re-checked it on
+worktree-p483-leak: `git add -f leak && git commit` with an ignored `leak` matching a public
+pattern denies, and a regression test now pins that exact shape.
 
 ### N60 — `curl_pipe_shell` denies a double-quoted `echo` argument that only mentions the pattern
 

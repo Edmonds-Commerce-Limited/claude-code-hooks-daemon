@@ -232,6 +232,67 @@ class TestScratchFileRoute:
         assert not handler.matches(_bash(f"grep -F {probe} src && git commit -m 'clean message'"))
 
 
+class TestVerdictIsNotCarriedBetweenDispatches:
+    """Ledger 00466 N94: the verdict was cached by command text alone."""
+
+    def test_editing_the_message_file_clears_a_denied_command(self, tmp_path: Path) -> None:
+        msg = tmp_path / "msg.txt"
+        msg.write_text("Fixes #123\n", encoding="utf-8")
+        handler = GithubAutoCloseKeywordsHandler()
+        command = f"git commit -F {msg}"
+        assert handler.matches(_bash(command))
+
+        msg.write_text("Addresses #123\n", encoding="utf-8")
+
+        assert not handler.matches(_bash(command))
+        assert handler.handle(_bash(command)).decision == Decision.ALLOW
+
+    def test_editing_the_message_file_to_a_closing_keyword_is_denied(self, tmp_path: Path) -> None:
+        msg = tmp_path / "msg.txt"
+        msg.write_text("Addresses #123\n", encoding="utf-8")
+        handler = GithubAutoCloseKeywordsHandler()
+        command = f"git commit -F {msg}"
+        assert not handler.matches(_bash(command))
+
+        msg.write_text("Fixes #123\n", encoding="utf-8")
+
+        assert handler.matches(_bash(command))
+        assert handler.handle(_bash(command)).decision == Decision.DENY
+
+    def test_the_same_relative_command_in_another_cwd_is_judged_afresh(
+        self, tmp_path: Path
+    ) -> None:
+        clean = tmp_path / "clean"
+        closing = tmp_path / "closing"
+        for directory, text in ((clean, "Addresses #1\n"), (closing, "Fixes #1\n")):
+            directory.mkdir()
+            (directory / "msg.txt").write_text(text, encoding="utf-8")
+        handler = GithubAutoCloseKeywordsHandler()
+
+        def _in(directory: Path) -> dict[str, object]:
+            return {
+                "tool_name": "Bash",
+                "tool_input": {"command": "git commit -F msg.txt"},
+                "cwd": str(directory),
+            }
+
+        assert not handler.matches(_in(clean))
+        assert handler.matches(_in(closing))
+        assert not handler.matches(_in(clean))
+
+    def test_one_dispatch_reads_the_message_file_once(self, tmp_path: Path) -> None:
+        """matches() then handle() on the SAME hook_input share one read."""
+        msg = tmp_path / "msg.txt"
+        msg.write_text("Fixes #123\n", encoding="utf-8")
+        handler = GithubAutoCloseKeywordsHandler()
+        hook_input = _bash(f"git commit -F {msg}")
+        assert handler.matches(hook_input)
+
+        msg.write_text("Addresses #123\n", encoding="utf-8")
+
+        assert handler.handle(hook_input).decision == Decision.DENY
+
+
 class TestGhPrBodies:
     def test_pr_create_body_with_closing_reference_is_denied(self) -> None:
         handler = GithubAutoCloseKeywordsHandler()
