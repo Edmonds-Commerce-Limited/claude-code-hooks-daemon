@@ -180,3 +180,51 @@ class TestEndToEndWithoutVenv:
         assert result.returncode == 1
         assert "terminal" in result.stdout
         assert not untracked.exists()
+
+
+class TestRecordInstallWithoutVenv:
+    def test_record_install_writes_the_receipt_the_gate_then_accepts(self, tmp_path: Path) -> None:
+        daemon_dir = tmp_path / "daemon"
+        daemon_dir.mkdir()
+        project = tmp_path / "project"
+        project.mkdir()
+        untracked = tmp_path / "untracked"
+        common = ["--daemon-dir", str(daemon_dir), "--project-root", str(project)]
+        recorded = subprocess.run(
+            [
+                str(_SYSTEM_PYTHON),
+                str(SCRIPT_PATH),
+                "record-install",
+                *common,
+                "--untracked-dir",
+                str(untracked),
+                "--stamp",
+                "v3.68.0",
+            ],
+            capture_output=True,
+            text=True,
+            env=_clean_env(),
+            check=False,
+        )
+        assert recorded.returncode == 0, recorded.stderr
+        rerun = subprocess.run(
+            [
+                str(_SYSTEM_PYTHON),
+                str(SCRIPT_PATH),
+                *common,
+                "--untracked-dir",
+                str(untracked),
+                "--installed-stamp",
+                "v3.68.0",
+                "--to",
+                "3.68.0",
+                "--target-stamp",
+                "v3.68.0",
+            ],
+            capture_output=True,
+            text=True,
+            env=_clean_env(),
+            check=False,
+        )
+        assert rerun.returncode == 0, rerun.stderr
+        assert "already installed" in rerun.stderr
