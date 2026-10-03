@@ -1,0 +1,66 @@
+# Claude Code version each daemon release was built and tested against (Plan 00486).
+#
+# One entry per daemon release, newest last. The release step in RELEASING.md
+# (Step 1c) appends the entry for the release being cut. Phase 2's drift check
+# reads this file, so keep it machine-readable.
+#
+# Fields:
+#   claude_code_version  The Claude Code version, or `unknown`. Never a guess.
+#   evidence             Where the version comes from. Required when it is known.
+#   review_date          ISO date the changelog review ran, or `unknown`.
+#   review_report        Repository path of the review report, or `unknown`.
+#   note                 Optional context.
+#
+# `unknown` means no evidence in the repository establishes the value. It is
+# not a default. Versions before v3.59.0 were not recorded anywhere.
+#
+# The newest known `claude_code_version` here must equal
+# contracts/claude-code-hooks/META.json `last_audited_claude_code_version`;
+# tests/integration/test_claude_code_version_record.py enforces it.
+
+releases:
+  v3.59.0:
+    claude_code_version: "2.1.252"
+    evidence: >-
+      Commit b28db7b1d refreshed the vendored hooks contract for Claude Code
+      2.1.252; v3.59.0 is the first tag containing it.
+    review_date: unknown
+    review_report: unknown
+  v3.63.0:
+    claude_code_version: "2.1.263"
+    evidence: >-
+      Commit 9beec2f92 (Plan 00362 Task 2.11) re-audited the hooks contract
+      against Claude Code 2.1.263; v3.63.0 is the first tag containing it.
+    review_date: unknown
+    review_report: unknown
+  v3.65.0:
+    claude_code_version: "2.1.272"
+    evidence: >-
+      Commit 12131aea9 refreshed the vendored hooks contract against Claude
+      Code 2.1.272 (META.json last_audited_claude_code_version); v3.65.0 is
+      the first tag containing it.
+    review_date: unknown
+    review_report: unknown
+  v3.66.0:
+    claude_code_version: unknown
+    evidence: ""
+    review_date: unknown
+    review_report: unknown
+    note: >-
+      No audit or recorded version after 2.1.272. The ccy supervisor docs cite
+      2.1.282 on 2026-09-25, but that is the version one session ran, not a
+      version the release was tested against.
+  v3.67.0:
+    claude_code_version: unknown
+    evidence: ""
+    review_date: unknown
+    review_report: unknown
+  v3.68.0:
+    claude_code_version: unknown
+    evidence: ""
+    review_date: "2026-10-03"
+    review_report: CLAUDE/Plan/00486-claude-code-version-tracking/subagent-reports/261003-task-1.4-backfill-review-sonnet.md
+    note: >-
+      The report is the Plan 00486 backfill review of Claude Code 2.1.272 to
+      2.1.288, covering the changes since the last audited version. It does not
+      establish the version v3.68.0 was tested against.
