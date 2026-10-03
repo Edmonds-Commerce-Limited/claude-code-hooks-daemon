@@ -347,6 +347,25 @@ def apply_handler_config(
     apply_handler_options(instance, options)
 
 
+def _withhold_invalid_options(handler_cls: type[Handler], options: dict[str, Any]) -> str | None:
+    """Drop the options a handler refuses from ``options``; say why, or None.
+
+    A handler opts in by defining ``validate_options(options) -> {key: problem}``.
+    Options are applied by ``setattr`` inside the per-handler instantiation
+    guard, so a value that raised there would drop the WHOLE handler with only a
+    warning. Withholding the bad value instead keeps the handler on its default
+    for that option, and the returned text reaches ``option_failures`` (the
+    session-start alert).
+    """
+    validate = getattr(handler_cls, "validate_options", None)
+    if validate is None:
+        return None
+    problems: dict[str, str] = validate(options)
+    for key in problems:
+        del options[key]
+    return "; ".join(problems.values()) or None
+
+
 def apply_handler_options(instance: object, options: Mapping[str, Any]) -> None:
     """Give ``instance`` its options the way ``register_all`` does: ``self._<key>``.
 
@@ -637,6 +656,15 @@ class HandlerRegistry:
                                 )
                                 self._option_failures[registry_key] = f"{type(exc).__name__}: {exc}"
                                 continue
+                            invalid = _withhold_invalid_options(attr, options)
+                            if invalid is not None:
+                                logger.error(
+                                    "Invalid options for handler '%s'; it runs on its defaults"
+                                    " for them: %s",
+                                    registry_key,
+                                    invalid,
+                                )
+                                self._option_failures[registry_key] = invalid
                             # Include workspace_root in options if available
                             if self._workspace_root:
                                 options["workspace_root"] = self._workspace_root

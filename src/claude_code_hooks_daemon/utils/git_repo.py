@@ -28,7 +28,7 @@ import logging
 import os
 import subprocess  # nosec B404 — only ever runs the trusted system ``git`` binary
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Final
 
@@ -99,6 +99,54 @@ def strip_branch_ref(refname: str) -> str:
     every ``git branch -d <name>`` a caller offers a human (Plan 00254/00255).
     """
     return refname.removeprefix(HEADS_PREFIX)
+
+
+_WORKTREE_LINE_PREFIX: Final[str] = "worktree "
+_BRANCH_LINE_PREFIX: Final[str] = "branch " + HEADS_PREFIX
+_LOCKED_MARKER: Final[str] = "locked"
+_PRUNABLE_MARKER: Final[str] = "prunable"
+
+
+@dataclass(frozen=True)
+class WorktreeRecord:
+    """One ``git worktree list --porcelain`` record.
+
+    Attributes:
+        path: Where git says the worktree is.
+        branch: The bare branch it has checked out, or None when detached.
+        locked: Whether it carries a ``locked`` line (a deliberate hold).
+        prunable: Whether git marks it ``prunable`` (its directory is gone).
+    """
+
+    path: Path
+    branch: str | None
+    locked: bool
+    prunable: bool
+
+
+def parse_worktree_porcelain(listing: str) -> tuple[WorktreeRecord, ...]:
+    """Parse ``git worktree list --porcelain`` output, the main checkout first.
+
+    The one parser every reader of that listing shares, so two of them cannot
+    disagree about what git said. A record opens at its ``worktree <path>`` line
+    and owns every line up to the next one, so a stray branch line can never
+    attach itself to the record before it.
+    """
+    records: list[WorktreeRecord] = []
+    for line in listing.splitlines():
+        if line.startswith(_WORKTREE_LINE_PREFIX):
+            path = Path(line[len(_WORKTREE_LINE_PREFIX) :].strip())
+            records.append(WorktreeRecord(path=path, branch=None, locked=False, prunable=False))
+        elif not records:
+            continue
+        elif line.startswith(_BRANCH_LINE_PREFIX):
+            branch = line[len(_BRANCH_LINE_PREFIX) :].strip()
+            records[-1] = replace(records[-1], branch=branch)
+        elif line.split(" ", 1)[0] == _LOCKED_MARKER:
+            records[-1] = replace(records[-1], locked=True)
+        elif line.split(" ", 1)[0] == _PRUNABLE_MARKER:
+            records[-1] = replace(records[-1], prunable=True)
+    return tuple(records)
 
 
 def _child_environment(env: Mapping[str, str] | None) -> dict[str, str]:

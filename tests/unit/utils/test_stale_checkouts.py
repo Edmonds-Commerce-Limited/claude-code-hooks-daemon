@@ -10,15 +10,18 @@ import shutil
 import subprocess
 import tempfile
 import time
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
 
 from claude_code_hooks_daemon.core.worktree_reaping import MINIMUM_AGE_SECONDS
-from claude_code_hooks_daemon.daemon.paths import get_pid_path, pid_file_name
+from claude_code_hooks_daemon.daemon.paths import get_pid_path, pid_file_name, pid_path_for
 from claude_code_hooks_daemon.daemon.process_verification import RootProof
 from claude_code_hooks_daemon.utils.stale_checkouts import (
+    SCAN_BUDGET_SECONDS,
     DaemonProcess,
+    ScanDeadline,
     StaleDaemon,
     StaleWorktree,
     _last_commit_time,
@@ -335,6 +338,10 @@ def _untracked(root: Path) -> Path:
     return root / "untracked"
 
 
+def _pid_path_of(root: Path) -> Path:
+    return _untracked(root) / pid_file_name()
+
+
 def _alive(_pid: int) -> bool:
     return True
 
@@ -371,7 +378,7 @@ class TestFindStaleDaemons:
             (root,),
             processes_fn=lambda: (DaemonProcess(pid=4242, root=str(root), root_exists=True),),
             pid_alive_fn=_alive,
-            untracked_dir_fn=_untracked,
+            pid_path_fn=_pid_path_of,
         )
 
         assert found == ()
@@ -384,7 +391,7 @@ class TestFindStaleDaemons:
             (root,),
             processes_fn=_no_daemons,
             pid_alive_fn=_dead,
-            untracked_dir_fn=_untracked,
+            pid_path_fn=_pid_path_of,
         )
 
         assert len(found) == 1
@@ -405,7 +412,7 @@ class TestFindStaleDaemons:
             (root,),
             processes_fn=_no_daemons,
             pid_alive_fn=_dead,
-            untracked_dir_fn=_untracked,
+            pid_path_fn=_pid_path_of,
         )
 
         assert shlex.split(found[0].commands[0]) == ["rm", "--", str(pid_file)]
@@ -418,7 +425,7 @@ class TestFindStaleDaemons:
             (root,),
             processes_fn=_no_daemons,
             pid_alive_fn=_alive,
-            untracked_dir_fn=_untracked,
+            pid_path_fn=_pid_path_of,
         )
 
         assert len(found) == 1
@@ -433,7 +440,7 @@ class TestFindStaleDaemons:
             (root,),
             processes_fn=_no_daemons,
             pid_alive_fn=_dead,
-            untracked_dir_fn=_untracked,
+            pid_path_fn=_pid_path_of,
         )
 
         assert found == ()
@@ -446,6 +453,25 @@ class TestFindStaleDaemons:
         with tempfile.TemporaryDirectory(dir="/tmp", prefix="hk") as short_root:
             assert get_pid_path(Path(short_root)).name == pid_file_name()
 
+    def test_a_pid_file_the_daemon_relocated_for_a_long_path_is_scanned(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The default lookup finds the file ``get_pid_path`` really names, not its twin."""
+        monkeypatch.delenv("CLAUDE_HOOKS_PID_PATH", raising=False)
+        runtime = tmp_path / "run"
+        runtime.mkdir()
+        monkeypatch.setenv("XDG_RUNTIME_DIR", str(runtime))
+        root = tmp_path / ("d" * 120) / "project"
+        root.mkdir(parents=True)
+        relocated = pid_path_for(root)
+        assert relocated.parent == runtime
+        relocated.write_text("4242\n")
+
+        found = find_stale_daemons((root,), processes_fn=_no_daemons, pid_alive_fn=_dead)
+
+        assert [daemon.subject for daemon in found] == [str(relocated)]
+        assert list(root.iterdir()) == []
+
     def test_checkout_without_untracked_dir_is_skipped(self, tmp_path: Path) -> None:
         root = tmp_path / "proj"
         root.mkdir()
@@ -454,7 +480,7 @@ class TestFindStaleDaemons:
             (root,),
             processes_fn=_no_daemons,
             pid_alive_fn=_dead,
-            untracked_dir_fn=_untracked,
+            pid_path_fn=_pid_path_of,
         )
 
         assert found == ()
@@ -464,7 +490,7 @@ class TestFindStaleDaemons:
             (),
             processes_fn=lambda: (DaemonProcess(pid=777, root="/gone", root_exists=False),),
             pid_alive_fn=_alive,
-            untracked_dir_fn=_untracked,
+            pid_path_fn=_pid_path_of,
         )
 
         assert len(found) == 1
@@ -481,7 +507,7 @@ class TestFindStaleDaemons:
             (),
             processes_fn=lambda: (DaemonProcess(pid=777, root=None, root_exists=None),),
             pid_alive_fn=_alive,
-            untracked_dir_fn=_untracked,
+            pid_path_fn=_pid_path_of,
         )
 
         assert found == ()
@@ -491,7 +517,7 @@ class TestFindStaleDaemons:
             (),
             processes_fn=lambda: (DaemonProcess(pid=777, root="/x", root_exists=None),),
             pid_alive_fn=_alive,
-            untracked_dir_fn=_untracked,
+            pid_path_fn=_pid_path_of,
         )
 
         assert found == ()
@@ -501,7 +527,7 @@ class TestFindStaleDaemons:
             (),
             processes_fn=lambda: (DaemonProcess(pid=777, root="/x", root_exists=True),),
             pid_alive_fn=_alive,
-            untracked_dir_fn=_untracked,
+            pid_path_fn=_pid_path_of,
         )
 
         assert found == ()
@@ -646,3 +672,135 @@ class TestRenderStaleReport:
         assert report is not None
         assert "Stale worktrees" not in report
         assert "Stale daemons" in report
+
+    def test_incomplete_scan_is_stated_even_when_nothing_was_found(self) -> None:
+        report = render_stale_report((), (), incomplete=True)
+
+        assert report is not None
+        assert "INCOMPLETE" in report
+
+    def test_complete_scan_does_not_claim_to_be_incomplete(self) -> None:
+        daemon = StaleDaemon(subject="s", reason="r", commands=("true",))
+
+        report = render_stale_report((), (daemon,))
+
+        assert report is not None
+        assert "INCOMPLETE" not in report
+
+
+class _Clock:
+    def __init__(self) -> None:
+        self.now = 0.0
+
+    def __call__(self) -> float:
+        return self.now
+
+
+_Calls = list[tuple[tuple[str, ...], float]]
+
+
+def _recording_run(calls: _Calls) -> Callable[..., subprocess.CompletedProcess[str]]:
+    def run_fn(cwd: Path, *args: str, timeout: float) -> subprocess.CompletedProcess[str]:
+        calls.append((args, timeout))
+        return subprocess.CompletedProcess(args, 0, stdout="ok", stderr="")
+
+    return run_fn
+
+
+class TestScanDeadline:
+    def test_budget_is_one_named_constant(self) -> None:
+        assert SCAN_BUDGET_SECONDS > 0
+
+    def test_runs_git_within_the_remaining_budget(self) -> None:
+        calls: _Calls = []
+        clock = _Clock()
+        deadline = ScanDeadline(3.0, run_fn=_recording_run(calls), clock=clock)
+
+        clock.now = 1.0
+        result = deadline.run(Path("/r"), "status")
+
+        assert result.stdout == "ok"
+        assert calls == [(("status",), 2.0)]
+        assert deadline.exhausted is False
+
+    def test_a_call_after_the_deadline_is_not_made_and_marks_the_scan_incomplete(self) -> None:
+        calls: _Calls = []
+        clock = _Clock()
+        deadline = ScanDeadline(3.0, run_fn=_recording_run(calls), clock=clock)
+
+        clock.now = 3.0
+        result = deadline.run(Path("/r"), "status")
+
+        assert result.returncode != 0
+        assert calls == []
+        assert deadline.exhausted is True
+
+    def test_a_call_that_failed_by_running_out_the_clock_marks_the_scan_incomplete(self) -> None:
+        clock = _Clock()
+
+        def slow_failure(cwd: Path, *args: str, timeout: float) -> subprocess.CompletedProcess[str]:
+            clock.now = 5.0
+            return subprocess.CompletedProcess(args, 127, stdout="", stderr="timed out")
+
+        deadline = ScanDeadline(3.0, run_fn=slow_failure, clock=clock)
+
+        deadline.run(Path("/r"), "log")
+
+        assert deadline.exhausted is True
+
+    def test_a_slow_call_that_succeeded_is_not_incomplete(self) -> None:
+        clock = _Clock()
+
+        def slow_success(cwd: Path, *args: str, timeout: float) -> subprocess.CompletedProcess[str]:
+            clock.now = 5.0
+            return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+
+        deadline = ScanDeadline(3.0, run_fn=slow_success, clock=clock)
+
+        deadline.run(Path("/r"), "log")
+
+        assert deadline.exhausted is False
+
+
+class TestCollectStaleReportDeadline:
+    def test_a_spent_budget_yields_an_incomplete_report_not_a_silent_empty_one(
+        self, repo: Path, tmp_path: Path
+    ) -> None:
+        wt = _add_worktree(repo, tmp_path, "done")
+        _commit(wt, "new.txt")
+        _git(repo, "merge", "--no-ff", "done", "-m", "merge done")
+
+        report = collect_stale_report(repo, "main", processes_fn=_no_daemons, budget_seconds=0.0)
+
+        assert report is not None
+        assert "INCOMPLETE" in report
+
+    def test_the_default_branch_lookup_is_inside_the_budget(self, repo: Path) -> None:
+        """Resolving an unset base branch must not run git past the deadline."""
+        report = collect_stale_report(repo, None, processes_fn=_no_daemons, budget_seconds=0.0)
+
+        assert report is not None
+        assert "INCOMPLETE" in report
+
+    def test_an_unset_base_branch_is_the_repos_default_branch(self, tmp_path: Path) -> None:
+        root = tmp_path / "master-repo"
+        root.mkdir()
+        _git(root, "init", "-b", "master")
+        _commit(root, "base.txt")
+        wt = _add_worktree(root, tmp_path, "done")
+        _commit(wt, "new.txt")
+        _git(root, "merge", "--no-ff", "done", "-m", "merge done")
+        # A missing directory reports on merge status without the age gate.
+        shutil.rmtree(wt)
+
+        report = collect_stale_report(root, None, processes_fn=_no_daemons)
+
+        assert report is not None
+        # The fallback would have said `main`; only the lookup finds `master`.
+        assert "fully merged into master" in report
+
+    def test_a_generous_budget_is_complete(self, repo: Path) -> None:
+        assert (
+            collect_stale_report(repo, "main", processes_fn=_no_daemons, budget_seconds=60.0)
+            is None
+        )

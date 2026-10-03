@@ -17,8 +17,9 @@ GitHub issue.
 """
 
 import logging
+from collections.abc import Mapping
 from pathlib import Path
-from typing import Any, Final
+from typing import Any, Final, TypeGuard
 
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, HookInputField, Priority
 from claude_code_hooks_daemon.core import BlockingResult, Decision, ProjectContext
@@ -43,7 +44,6 @@ _RECOVERY_MARKER: Final[str] = "FAILSAFE RECOVERY CHECK"
 _DEFAULT_NOOP_THRESHOLD: Final[int] = 2
 _DEFAULT_MAX_PASSES_PER_SESSION: Final[int] = 1
 _DEFAULT_REPORTS_DIR: Final[str] = "untracked/reports"
-_DEFAULT_BASE_BRANCH: Final[str] = "main"
 
 # Custom project guidance (Plan 00161): a project may point the handler at its own
 # housekeeping doc, either ADDED to the default guidance or REPLACING it entirely.
@@ -57,6 +57,25 @@ _MAX_TRACKED_SESSIONS: Final[int] = 256
 _TOOL_USE_BLOCK: Final[str] = "tool_use"
 _ASSISTANT_ROLE: Final[str] = "assistant"
 _USER_ROLES: Final[frozenset[str]] = frozenset({"user", "human"})
+
+
+_STALE_DAYS_OPTION: Final[str] = "stale_worktree_days"
+
+
+def _is_day_count(value: object) -> TypeGuard[int]:
+    """Whether ``value`` is a usable ``stale_worktree_days``.
+
+    ``True`` is an ``int`` to Python but never a day count, and ``0`` would call
+    every branch idle.
+    """
+    return isinstance(value, int) and not isinstance(value, bool) and value >= 1
+
+
+def _stale_worktree_days_problem(value: object) -> str | None:
+    """Why ``value`` is not a usable ``stale_worktree_days``, or None when it is."""
+    if _is_day_count(value):
+        return None
+    return f"stale_worktree_days must be an integer >= 1, got {value!r}"
 
 
 def count_trailing_noop_recovery_ticks(messages: list[TranscriptMessage], marker: str) -> int:
@@ -120,14 +139,44 @@ class IdleHousekeepingAdvisoryHandler(UserPromptSubmitHandlerBase):
         self._custom_guidance_mode: str = _DEFAULT_CUSTOM_GUIDANCE_MODE
         # Stale worktree/daemon report (Plan 00470 Task 4.2).
         self._report_stale_checkouts: bool = True
-        self._base_branch: str = _DEFAULT_BASE_BRANCH
-        self._stale_worktree_days: int = DEFAULT_MAX_IDLE_DAYS
+        # Empty means "the repository's own default branch".
+        self._base_branch: str = ""
+        self._stale_worktree_days = DEFAULT_MAX_IDLE_DAYS
         # Per-session housekeeping-pass counter (in-memory; resets on daemon
         # restart, which is acceptable for a bounded beta safety-net feature).
         # Bounded with atomic FIFO eviction.
         self._passes_by_session: BoundedFifoMap[str, int] = BoundedFifoMap(
             max_entries=_MAX_TRACKED_SESSIONS
         )
+
+    @property
+    def _stale_worktree_days(self) -> int:
+        return self.__stale_worktree_days
+
+    @_stale_worktree_days.setter
+    def _stale_worktree_days(self, value: object) -> None:
+        """Accept only a whole number of days >= 1, rejecting bad config AT LOAD.
+
+        ``True`` is an ``int`` to Python but never a day count, and ``0`` would
+        call every branch idle, so both are refused with a message naming why.
+        """
+        if not _is_day_count(value):
+            raise ValueError(_stale_worktree_days_problem(value))
+        self.__stale_worktree_days = value
+
+    @staticmethod
+    def validate_options(options: Mapping[str, Any]) -> dict[str, str]:
+        """The configured options this handler refuses, keyed by option name.
+
+        Read by ``register_all`` before any value is applied, so a bad one is
+        reported at session start while the handler runs on its default.
+        """
+        problems: dict[str, str] = {}
+        if _STALE_DAYS_OPTION in options:
+            problem = _stale_worktree_days_problem(options[_STALE_DAYS_OPTION])
+            if problem is not None:
+                problems[_STALE_DAYS_OPTION] = problem
+        return problems
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """Match any string prompt (branching happens in handle)."""
@@ -219,8 +268,9 @@ class IdleHousekeepingAdvisoryHandler(UserPromptSubmitHandlerBase):
         """
         if not self._report_stale_checkouts:
             return None
+        # An unset base branch is resolved INSIDE the scan, under its time budget.
         return collect_stale_report(
-            ProjectContext.project_root(), self._base_branch, self._stale_worktree_days
+            ProjectContext.project_root(), self._base_branch or None, self._stale_worktree_days
         )
 
     def _load_custom_guidance(self) -> str | None:

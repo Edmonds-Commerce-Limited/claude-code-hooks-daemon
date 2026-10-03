@@ -1823,11 +1823,22 @@ def get_pid_path(project_dir: Path | str) -> Path:
     # Self-install mode uses shorter path: {project}/untracked/
     # Normal mode uses: {project}/.claude/hooks-daemon/untracked/
     project_path = Path(project_dir).resolve()
-    untracked_dir = _get_untracked_dir(project_path)
-    untracked_dir.mkdir(parents=True, exist_ok=True)
+    _get_untracked_dir(project_path).mkdir(parents=True, exist_ok=True)
+    return pid_path_for(project_path)
 
-    # Add hostname-based suffix for isolation
-    path = untracked_dir / pid_file_name()
+
+def pid_path_for(project_dir: Path | str) -> Path:
+    """Where ``project_dir``'s daemon records its pid, creating nothing.
+
+    The single computation behind :func:`get_pid_path`, minus its ``mkdir`` and
+    its ``CLAUDE_HOOKS_PID_PATH`` override (that variable names THIS process's
+    daemon, not another checkout's). Includes the AF_UNIX-overflow relocation,
+    so a read-only scan finds the file a daemon with a long project path really
+    wrote rather than the one in its untracked directory.
+    """
+    project_path = Path(project_dir).resolve()
+    # Hostname-based suffix for isolation.
+    path = _get_untracked_dir(project_path) / pid_file_name()
 
     # Fallback if path exceeds AF_UNIX socket length limit (consistency with socket)
     if len(str(path)) > _UNIX_SOCKET_PATH_LIMIT:
