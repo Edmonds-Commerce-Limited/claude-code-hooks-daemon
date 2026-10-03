@@ -24,4 +24,6 @@ These are agent rulings, made while the owner was away. Each is open to reversal
    3. The ccy launcher on the host sees that status, updates the image, and relaunches with `--resume <id>`.
    4. The new supervisor's first idle point sends the "restarted, now on Claude Code X.Y.Z" notice.
 
+   A relaunch inherits the first launch's record of compose services it started (`CCY_COMPOSE_WAS_STARTED`, `CCY_COMPOSE_CMD`), so the resumed session is the one that offers to stop them when it ends. That is the single-session behaviour. It does not inherit the key staging directory or the token values (host agent, Task 3.1, review round 2 finding A).
+
    This is the draft's "outer wrapper loop plus a built-in exit at idle" alternative, which it accepted as a fallback. It sits alongside the plugin API rather than replacing it. The draft's in-container `Restart` primitive stays in scope for the credential-switch case, which needs no new binary. It is not on the critical path for this plan, and can be deferred to Plan 00146 if it grows.

@@ -10,7 +10,7 @@ Nothing in this checklist can run inside a ccy container: it needs the host, an 
 ## 0. Prepare (host)
 
 - [ ] Check out `feature/ccy-hooks-daemon-plugin` in your fedora-desktop checkout and run the claude-yolo play. It copies `supervisor-plugins/` into the build context.
-- [ ] `ccy --rebuild`. The image should report container version 2.42, and the launcher should report ccy 3.76.0. (The host review fixes moved both from 2.41/3.75.0; the branch head is in this plan's JOURNAL.)
+- [ ] `ccy --rebuild`. The image should report container version 2.42, and the launcher should report ccy 3.77.0. The branch is folded into that one release on top of F44's own 3.76.0 / 2.41; the branch head is in this plan's JOURNAL. If F44 has moved again by the time you deploy, merge it first, and move these two numbers above F44's.
 - [ ] Run fedora-desktop's `./scripts/qa-all.bash` on the host. It cannot run in a container here, because ruff and semgrep are absent and shellcheck is not the pinned 0.11.0.
 
 ## 1. No options means no change
@@ -28,7 +28,8 @@ Nothing in this checklist can run inside a ccy container: it needs the host, an 
   - `.claude/ccy/state/restart-request.json` is gone after the relaunch;
   - the resumed session gets the "restarted, now on Claude Code X" notice, once.
 - [ ] The max-age clock restarts with the new container: the next restart waits for the full configured age again.
-- [ ] Unattended relaunch: run `ccy --max-age 30m` with NO other flag, answering every prompt (token, key, network). At the restart the relaunch asks nothing and carries the choices made at the prompts.
+- [ ] Unattended relaunch: run `ccy --max-age 30m` with NO other flag, answering every prompt (token, key, network). At the key prompt pick a key FILE with no passphrase, not the agent (the menu now defaults to the agent, which would skip the SELinux key-staging path). At the restart the relaunch asks nothing, carries the choices made at the prompts, and stages the key again.
+- [ ] Repeat once choosing the agent at the key prompt: the relaunch passes `--ssh-agent`.
 - [ ] Repeat with an SSH key that needs a passphrase. The restart stops before any image update, with the reason and `ccy --resume <id>`, instead of waiting at a prompt.
 - [ ] Two sessions in one project, both with `--max-age`: restarting or reloading one does not reset the other's age.
 

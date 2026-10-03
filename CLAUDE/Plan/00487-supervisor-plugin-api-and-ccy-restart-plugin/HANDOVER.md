@@ -4,13 +4,13 @@ Read this first, then [PLAN.md](PLAN.md), [DECISIONS.md](DECISIONS.md) and [OWNE
 
 ## Where things stand
 
-| Side                                                  | State                                                                                                                                                                    |
-| ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| hooks-daemon (this repo), the supervisor plugin API   | Merged to `main`: `14f2f11f8` (Phase 1) and `4bb315985` (skew-test baseline pinned to `v3.68.0`). Not in any release yet. Review round 3 approved.                       |
-| fedora-desktop, the ccy plugin and launcher           | Branch `feature/ccy-hooks-daemon-plugin`, head `3a1aa635` (ccy 3.76.0, container 2.42, after the host review fixes), pushed. No PR, nothing merged. Based on `3597b29e`. |
-| Live test                                             | Not run. This is the remaining critical-path work (Task 3.1).                                                                                                            |
-| Tasks 1.4 and 1.5 (in-container `Restart`, host half) | Open. They serve the credential-switch case, not this plan's goals. They may be split out to fedora-desktop Plan 00146 or a new plan; the owner decides.                 |
-| Task 3.2 (comments on #71 and fedora-desktop#61)      | After the live test.                                                                                                                                                     |
+| Side                                                  | State                                                                                                                                                                                                                    |
+| ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| hooks-daemon (this repo), the supervisor plugin API   | Merged to `main`: `14f2f11f8` (Phase 1) and `4bb315985` (skew-test baseline pinned to `v3.68.0`). Not in any release yet. Review round 3 approved.                                                                       |
+| fedora-desktop, the ccy plugin and launcher           | Branch `feature/ccy-hooks-daemon-plugin`, head `3461967c` (one release, ccy 3.77.0 / container 2.42, above F44's 3.76.0, after two host reviews and two F44 merges), pushed. No PR, nothing merged. Based on `3597b29e`. |
+| Live test                                             | Not run. This is the remaining critical-path work (Task 3.1).                                                                                                                                                            |
+| Tasks 1.4 and 1.5 (in-container `Restart`, host half) | Open. They serve the credential-switch case, not this plan's goals. They may be split out to fedora-desktop Plan 00146 or a new plan; the owner decides.                                                                 |
+| Task 3.2 (comments on #71 and fedora-desktop#61)      | After the live test.                                                                                                                                                                                                     |
 
 ## The contract between the two sides
 
