@@ -7579,6 +7579,220 @@ def _exit_code_from_status(status: int) -> int:
     return 1
 
 
+# ---------------------------------------------------------------------------
+# Exit for restart (Plan 00487 Task 1.3b)
+#
+# Claude Code is baked into the ccy image, so only a relaunch of the container
+# picks up a new version. A plugin that wants one returns `ExitForRestart` from
+# `on_idle`; the host then ends the session cleanly and tells the launcher so:
+#
+#   1. refuse unless exactly one own session id is known (the relaunch has to
+#      resume THE conversation, and a wrong id would resume another);
+#   2. type `/exit` through the ordinary injection path;
+#   3. HOLD every other injection until the child exits -- bounded: a child
+#      that ignores `/exit` is abandoned after `_RESTART_EXIT_WAIT_SECONDS` and
+#      the session carries on as if nothing had been asked;
+#   4. once the child has exited, write `.claude/ccy/state/restart-request.json`
+#      (session_id, reason, plugin, requested_at) and exit with
+#      `EXIT_STATUS_RESTART_REQUESTED` so the launcher relaunches with
+#      `--resume <session_id>`.
+#
+# The launcher must treat the status as a request only when the file is present
+# and fresh, and delete the file once it has read it.
+# ---------------------------------------------------------------------------
+
+# sysexits.h EX_TEMPFAIL: "temporary failure, retry". Never `claude`'s own
+# 0/1/2, never the exec failure 127, and below 128 so it cannot be a signal.
+EXIT_STATUS_RESTART_REQUESTED = 75
+_RESTART_REQUEST_FILENAME = "restart-request.json"
+_RESTART_EXIT_COMMAND = "/exit"
+_RESTART_EXIT_WAIT_SECONDS = 30.0
+_RESTART_REQUEST_FILE_MODE = 0o600
+
+
+def _restart_request_path() -> Path:
+    """Where the exit-for-restart request file is written."""
+    return _ccy_state_dir() / _RESTART_REQUEST_FILENAME
+
+
+@dataclass(frozen=True)
+class _PendingRestart:
+    plugin: str
+    reason: str
+    session_id: str
+    requested_at: float
+    deadline: float
+
+
+def _log_noop(log: DecisionLog | None, line: str) -> None:
+    if log is not None:
+        log.write_noop(line)
+
+
+def _log_line(log: DecisionLog | None, line: str) -> None:
+    if log is not None:
+        log.write(line)
+
+
+class RestartCoordinator:
+    """Host-side state of one exit-for-restart request (see the section above)."""
+
+    def __init__(
+        self,
+        *,
+        state_path: Path,
+        wait_seconds: float = _RESTART_EXIT_WAIT_SECONDS,
+        monotonic: Callable[[], float] = time.monotonic,
+        wall_clock: Callable[[], float] = time.time,
+        sleep: Callable[[float], None] = time.sleep,
+    ) -> None:
+        self._state_path = state_path
+        self._wait_seconds = wait_seconds
+        self._monotonic = monotonic
+        self._wall_clock = wall_clock
+        self._sleep = sleep
+        self._pending: _PendingRestart | None = None
+
+    @property
+    def pending(self) -> bool:
+        """True from the moment `/exit` was typed until the child exits or the wait is abandoned."""
+        return self._pending is not None
+
+    def expired(self) -> bool:
+        """True when a pending request has waited out its bound."""
+        return self._pending is not None and self._monotonic() >= self._pending.deadline
+
+    def request(
+        self,
+        plugin: str,
+        reason: str,
+        *,
+        session_ids: frozenset[str],
+        machine: CompactStateMachine,
+        write_master: Callable[[bytes], None],
+        log: DecisionLog | None,
+        dry_run: bool,
+    ) -> bool:
+        """Start an exit for restart; True only when `/exit` was actually typed."""
+        if self._pending is not None:
+            return False
+        if dry_run:
+            _log_noop(
+                log, f"noop: plugin {plugin} asked to exit for restart (dry-run: not exiting)"
+            )
+            return False
+        if len(session_ids) != 1:
+            _log_noop(
+                log,
+                f"noop: exit for restart asked by plugin {plugin} refused: the own session id "
+                f"is not unambiguous ({len(session_ids)} known)",
+            )
+            return False
+        (session_id,) = session_ids
+        _perform_injection(write_master, _RESTART_EXIT_COMMAND, submit=True, sleep=self._sleep)
+        machine.mark_own_line_typed(_RESTART_EXIT_COMMAND, self._wall_clock())
+        self._pending = _PendingRestart(
+            plugin=plugin,
+            reason=reason,
+            session_id=session_id,
+            requested_at=self._wall_clock(),
+            deadline=self._monotonic() + self._wait_seconds,
+        )
+        _log_line(
+            log,
+            f"exit for restart: plugin {plugin} asked ({reason}); typed {_RESTART_EXIT_COMMAND}, "
+            "holding injections until the child exits",
+        )
+        return True
+
+    def abandon(self, log: DecisionLog | None) -> None:
+        """Give up on a child that did not exit; the session carries on."""
+        pending, self._pending = self._pending, None
+        if pending is not None:
+            _log_line(
+                log,
+                f"exit for restart: abandoned -- the child did not exit within "
+                f"{self._wait_seconds:g}s of {_RESTART_EXIT_COMMAND} (plugin {pending.plugin})",
+            )
+
+    def finish(self, exit_code: int, log: DecisionLog | None) -> int:
+        """The supervisor's exit status once the child has exited.
+
+        With a pending request: write the request file and return
+        `EXIT_STATUS_RESTART_REQUESTED`. If the file cannot be written the
+        launcher could not act on the status, so the child's own status is
+        returned instead and the failure is logged.
+        """
+        pending, self._pending = self._pending, None
+        if pending is None:
+            return exit_code
+        payload = {
+            "session_id": pending.session_id,
+            "reason": pending.reason,
+            "plugin": pending.plugin,
+            "requested_at": pending.requested_at,
+        }
+        try:
+            self._write_request(payload)
+        except OSError as error:
+            _log_line(
+                log,
+                f"exit for restart: could not write {self._state_path}: {error}; "
+                f"exiting with the child's status {exit_code}",
+            )
+            return exit_code
+        _log_line(
+            log,
+            f"exit for restart: wrote {self._state_path}; exiting with status "
+            f"{EXIT_STATUS_RESTART_REQUESTED}",
+        )
+        return EXIT_STATUS_RESTART_REQUESTED
+
+    def _write_request(self, payload: dict[str, object]) -> None:
+        self._state_path.parent.mkdir(mode=_PLUGIN_STATE_DIR_MODE, parents=True, exist_ok=True)
+        tmp_path = self._state_path.with_name(f".{self._state_path.name}.{os.getpid()}.tmp")
+        descriptor = os.open(
+            tmp_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, _RESTART_REQUEST_FILE_MODE
+        )
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            handle.write(json.dumps(payload))
+        tmp_path.replace(self._state_path)
+
+
+def handle_plugin_outcome(
+    outcome: TickOutcome,
+    *,
+    machine: CompactStateMachine,
+    restart: RestartCoordinator,
+    write_master: Callable[[bytes], None],
+    log: DecisionLog | None,
+    dry_run: bool,
+    session_ids: frozenset[str],
+    plugin_host: PluginHost | None,
+    restart_worker: Callable[[], bool] | None,
+    status_dir: Path,
+    now_wall: float,
+) -> None:
+    """Act, on the HOST, on what one tick's plugin runtime reported.
+
+    The same function serves a worker-decided tick and an in-process one, so
+    plugins behave identically whichever path the tick took.
+    """
+    for line in outcome.plugin_log_lines:
+        _log_line(log, line)
+    if outcome.exit_for_restart is not None:
+        plugin, reason = outcome.exit_for_restart
+        restart.request(
+            plugin,
+            reason,
+            session_ids=session_ids,
+            machine=machine,
+            write_master=write_master,
+            log=log,
+            dry_run=dry_run,
+        )
+
+
 def _forward_io(
     stdin_fd: int,
     master_fd: int,
@@ -7712,6 +7926,7 @@ def supervise(
     decider: Callable[[TickFacts], TickOutcome | None] | None = None,
     plugin_host: PluginHost | None = None,
     restart_worker: Callable[[], bool] | None = None,
+    restart_coordinator: RestartCoordinator | None = None,
 ) -> int:
     """Run `argv` under a PTY, forwarding I/O and polling the context sidecar.
 
@@ -7775,6 +7990,11 @@ def supervise(
     sidecar_dir = sidecar_dir if sidecar_dir is not None else _default_sidecar_dir()
     policy = policy if policy is not None else CompactPolicy()
     machine = CompactStateMachine(policy)
+    restart = (
+        restart_coordinator
+        if restart_coordinator is not None
+        else RestartCoordinator(state_path=_restart_request_path())
+    )
     mode = "dry-run (injects marker)" if dry_run else "ARMED (injects /compact)"
     # Transient supervisor->status-line message channel (GENERAL; the Ctrl+Z
     # input guard is its first consumer). Co-located with the sidecar dir's
@@ -7834,7 +8054,32 @@ def supervise(
     def _write_master(data: bytes) -> None:
         os.write(master_fd, data)
 
+    def _handle_plugin_outcome(outcome: TickOutcome, now_wall: float) -> None:
+        # Plan 00487: what the plugin runtime told the host this tick -- audit
+        # lines, failures, an exit-for-restart request -- handled by ONE function
+        # whether the tick was decided by the worker or in-process.
+        handle_plugin_outcome(
+            outcome,
+            machine=machine,
+            restart=restart,
+            write_master=_write_master,
+            log=log,
+            dry_run=dry_run,
+            session_ids=cached_own_session_ids(),
+            plugin_host=plugin_host,
+            restart_worker=restart_worker,
+            status_dir=sidecar_dir.parent,
+            now_wall=now_wall,
+        )
+
     def _on_poll() -> None:
+        if restart.pending:
+            # Plan 00487 Task 1.3b: `/exit` was typed. Hold EVERYTHING until the
+            # child exits (the select loop then ends) -- or, past the bound,
+            # abandon the request and carry on with the session.
+            if not restart.expired():
+                return
+            restart.abandon(log)
         now_monotonic = os.times().elapsed
         idle = _is_idle(
             activity,
@@ -7911,6 +8156,7 @@ def supervise(
             # this the model would show the just-flushed text forever.
             if outcome.abandoned_box_flushed:
                 activity.line.clear()
+            _handle_plugin_outcome(outcome, now_wall)
         else:
             _poll_once(
                 machine,
@@ -7931,6 +8177,8 @@ def supervise(
                 goal_signal_ttl_seconds=policy.goal_signal_ttl_seconds,
                 input_line_abandoned=input_line_abandoned,
                 on_input_line_flushed=activity.line.clear,
+                plugins=plugin_host.in_process_runtime() if plugin_host is not None else None,
+                on_outcome=lambda tick_outcome: _handle_plugin_outcome(tick_outcome, now_wall),
             )
 
     previous_handler = signal.signal(signal.SIGWINCH, _on_winch)
@@ -7996,7 +8244,9 @@ def supervise(
             termios.tcsetattr(resolved_stdin_fd, termios.TCSAFLUSH, old_termios)
 
     _pid, status = os.waitpid(pid, 0)
-    exit_code = _exit_code_from_status(status)
+    # A pending exit-for-restart turns the child's clean exit into the dedicated
+    # status (and the request file) the ccy launcher relaunches on.
+    exit_code = restart.finish(_exit_code_from_status(status), log)
 
     if log is not None:
         log.write(
