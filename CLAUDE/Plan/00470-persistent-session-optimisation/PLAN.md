@@ -81,7 +81,12 @@ Evidence, with verified facts marked apart from inferences, is in
 
   Both times, each agent had to be re-briefed by hand from its worktree state. The queue must hold enough per agent (worktree, task brief, last sha) that a respawn is mechanical.
 
-  - `work-queue.json` plus `hooks-daemon work-queue add|update|done|list`, the `work_queue_rebrief` SessionStart handler and the `limit_rebrief` listing are advisory only (nothing is respawned); four owner questions are open in the report. Report: `subagent-reports/261004-task-3.3-work-queue-sonnet.md`.
+  - `work-queue.json` plus `hooks-daemon work-queue add|update|done|list`, the `work_queue_rebrief` SessionStart handler and the `limit_rebrief` listing are advisory only (nothing is respawned). Report: `subagent-reports/261004-task-3.3-work-queue-sonnet.md`.
+  - Owner questions, not decided:
+    1. Auto-respawn: should a resumed session re-dispatch queued agents itself, or only list them as now?
+    2. Retention: `done`/`abandoned` records are kept and hidden from the default list. Prune them, and when?
+    3. Stale `running` records whose coordinator is gone: should the re-brief age them out?
+    4. Several coordinators share one queue: should each record carry its dispatching session?
 
 - [x] ✅ **Task 3.4**: Regression test that a teammate or sub-agent stop never writes the lead's `[awaiting-human]` marker.
 
