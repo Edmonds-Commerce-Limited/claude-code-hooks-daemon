@@ -31,7 +31,7 @@ import logging
 import posixpath
 import re
 import shlex
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Final
 
@@ -45,10 +45,17 @@ from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.core.utils import get_bash_command
 from claude_code_hooks_daemon.handlers.utils.quarantine import quarantine_agent_relevance
 from claude_code_hooks_daemon.utils import secret_file_matching as sfm
-from claude_code_hooks_daemon.utils.bash_flags import SPAN_SEPARATORS, split_statements
 from claude_code_hooks_daemon.utils.command_evasion import GIT_INVOCATION
 from claude_code_hooks_daemon.utils.path_exclusion import resolve_project_root
-from claude_code_hooks_daemon.utils.shell_segmentation import split_unquoted_spans
+from claude_code_hooks_daemon.utils.recursive_search import (
+    TOOL_GIT,
+    TOOL_GREP,
+    TOOL_RG,
+    SearchArguments,
+    command_segments,
+    scan_options,
+    search_command,
+)
 
 _RULE = Rule(
     rule_id=RuleID.FLAGGABLE_CONTENT_CHANNEL,
@@ -236,7 +243,7 @@ class FlaggableContentChannelGuardHandler(PreToolUseHandlerBase):
 
         raw_cwd = hook_input.get(HookInputField.CWD)
         cwd = raw_cwd if isinstance(raw_cwd, str) else None
-        for segment, piped_in in _segments(command):
+        for segment, piped_in in command_segments(command):
             for label, pattern in shapes:
                 if pattern.search(segment):
                     mention = sfm.find_protected_mention(segment, globs)
@@ -392,26 +399,6 @@ class FlaggableContentChannelGuardHandler(PreToolUseHandlerBase):
         ]
 
 
-def _segments(command: str) -> list[tuple[str, bool]]:
-    """Top-level command segments: statements, then pipe/&&/|| spans within each.
-
-    Mirrors ``verification_result_gate``'s decomposition so both handlers
-    agree on what one "command" is — quote-aware and heredoc-safe via
-    ``split_statements``/``split_unquoted_spans``. Each segment carries
-    whether a pipe feeds it, because a search with no path operand reads that
-    stdin instead of the working directory.
-    """
-    segments: list[tuple[str, bool]] = []
-    for statement in split_statements(command, heredoc_bodies_executable=True):
-        for start, end in split_unquoted_spans(statement, SPAN_SEPARATORS):
-            segment = statement[start:end].strip()
-            if not segment:
-                continue
-            before = statement[:start].rstrip()
-            segments.append((segment, before.endswith("|") and not before.endswith("||")))
-    return segments
-
-
 # ── Recursive searches: which directories can they reach? ───────────────────
 #
 # A grep/rg that descends a directory reads every file under it, so naming
@@ -427,55 +414,10 @@ _NO_REMEDY: Final[str] = (
     "not contain it."
 )
 _GREP_SHAPE: Final[re.Pattern[str]] = re.compile(r"\b(?:grep|egrep|fgrep|zgrep|rg)\b")
-_GREP_COMMANDS: Final[frozenset[str]] = frozenset({"grep", "egrep", "fgrep", "zgrep"})
-_TOOL_GREP: Final[str] = "grep"
-_TOOL_RG: Final[str] = "rg"
-_TOOL_GIT: Final[str] = "git"
-# Global git options that move the search somewhere the payload cwd does not describe.
-_GIT_RELOCATING_OPTIONS: Final[frozenset[str]] = frozenset({"-C", "--git-dir", "--work-tree"})
-_GIT_OPTIONS_TAKING_VALUE: Final[frozenset[str]] = frozenset(
-    {"-c", "--namespace", "--exec-path"} | _GIT_RELOCATING_OPTIONS
-)
-_PATTERN_OPTIONS: Final[frozenset[str]] = frozenset({"-e", "-f", "--regexp", "--file"})
-# Options whose value is the next word; without this the value would be read
-# as the pattern or as a search root.
-_OPTIONS_TAKING_VALUE: Final[frozenset[str]] = frozenset(
-    {
-        "-A", "-B", "-C", "-m", "-d", "-D", "-g", "-t", "-T", "-j", "-M",
-        "--after-context", "--before-context", "--context", "--max-count",
-        "--directories", "--devices", "--include", "--exclude", "--exclude-dir",
-        "--exclude-from", "--glob", "--iglob", "--type", "--type-not", "--color", "--label",
-    }
-)  # fmt: skip
-_RECURSIVE_LONG_OPTIONS: Final[frozenset[str]] = frozenset(
-    {"--recursive", "--dereference-recursive"}
-)
-_GLOB_OPTIONS: Final[frozenset[str]] = frozenset({"-g", "--glob", "--iglob"})
-_DIRECTORIES_OPTIONS: Final[frozenset[str]] = frozenset({"-d", "--directories"})
-_EXCLUDE_DIR_OPTION: Final[str] = "--exclude-dir"
 _NEGATION: Final[str] = "!"
 _GIT_EXCLUDE_MAGIC: Final[tuple[str, ...]] = (":(exclude)", ":!", ":^")
 _WILDCARD_CHARS: Final[str] = "*?[{"
 _SHELL_EXPANSION: Final[re.Pattern[str]] = re.compile(r"[$`]")
-
-
-@dataclass
-class _SearchArguments:
-    """What a grep-family invocation's arguments say about where it searches."""
-
-    recursive: bool
-    operands: list[str] = field(default_factory=list)
-    exclude_dirs: list[str] = field(default_factory=list)
-    globs: list[str] = field(default_factory=list)
-    pattern_given: bool = False
-
-    def take_value(self, option: str, value: str) -> None:
-        if option == _EXCLUDE_DIR_OPTION:
-            self.exclude_dirs.append(value)
-        elif option in _GLOB_OPTIONS:
-            self.globs.append(value)
-        elif option in _DIRECTORIES_OPTIONS and value == "recurse":
-            self.recursive = True
 
 
 @dataclass(frozen=True)
@@ -532,72 +474,6 @@ def _is_prefix(shorter: list[str], longer: list[str]) -> bool:
     return longer[: len(shorter)] == shorter
 
 
-def _search_command(words: list[str]) -> tuple[str, int, bool] | None:
-    """``(tool, index of the first argument, relocated)`` of a grep-family call, else None.
-
-    ``relocated`` is True for a ``git -C``/``--git-dir``/``--work-tree`` search,
-    whose working directory the payload cwd does not describe.
-    """
-    for index, word in enumerate(words):
-        name = posixpath.basename(word)
-        if name in _GREP_COMMANDS:
-            return _TOOL_GREP, index + 1, False
-        if name == _TOOL_RG:
-            return _TOOL_RG, index + 1, False
-        if name == _TOOL_GIT:
-            position = index + 1
-            relocated = False
-            while position < len(words) and words[position].startswith("-"):
-                option = words[position].partition("=")[0]
-                relocated = relocated or option in _GIT_RELOCATING_OPTIONS
-                position += 2 if words[position] in _GIT_OPTIONS_TAKING_VALUE else 1
-            if position < len(words) and words[position] == "grep":
-                return _TOOL_GIT, position + 1, relocated
-            return None
-    return None
-
-
-def _scan_options(arguments: list[str], *, tool: str) -> _SearchArguments:
-    """Read options and operands of a grep-family invocation's arguments."""
-    scan = _SearchArguments(recursive=tool != _TOOL_GREP)
-    pending: str | None = None
-    options_ended = False
-    for word in arguments:
-        if pending is not None:
-            scan.take_value(pending, word)
-            pending = None
-        elif options_ended or not word.startswith("-") or word == "-":
-            scan.operands.append(word)
-        elif word == "--":
-            options_ended = True
-        elif word.startswith("--"):
-            name, has_value, value = word.partition("=")
-            scan.recursive = scan.recursive or name in _RECURSIVE_LONG_OPTIONS
-            scan.pattern_given = scan.pattern_given or name in _PATTERN_OPTIONS
-            if name in _OPTIONS_TAKING_VALUE or name in _PATTERN_OPTIONS:
-                if has_value:
-                    scan.take_value(name, value)
-                else:
-                    pending = name
-        else:
-            cluster = word[1:]
-            for offset, char in enumerate(cluster):
-                option = f"-{char}"
-                if char in "rR":
-                    scan.recursive = True
-                elif option in _PATTERN_OPTIONS or option in _OPTIONS_TAKING_VALUE:
-                    scan.pattern_given = scan.pattern_given or option in _PATTERN_OPTIONS
-                    attached = cluster[offset + 1 :]
-                    if attached:
-                        scan.take_value(option, attached)
-                    else:
-                        pending = option
-                    break
-    if not scan.pattern_given and scan.operands:
-        scan.operands = scan.operands[1:]
-    return scan
-
-
 def _recursive_search_reaches(
     segment: str, globs: tuple[str, ...], *, cwd: str | None, piped_in: bool
 ) -> _Reach | None:
@@ -615,18 +491,18 @@ def _recursive_search_reaches(
         words = shlex.split(segment)
     except ValueError:
         return unplaceable
-    found = _search_command(words)
+    found = search_command(words)
     if found is None:
         return None
     tool, start, relocated = found
-    scan = _scan_options(words[start:], tool=tool)
+    scan = scan_options(words[start:], tool=tool)
     if not scan.recursive:
         return None
     if relocated:
         return unplaceable
     pathspec_excludes: list[str] = []
     roots = scan.operands
-    if tool == _TOOL_GIT:
+    if tool == TOOL_GIT:
         roots = []
         for operand in scan.operands:
             magic = next((m for m in _GIT_EXCLUDE_MAGIC if operand.startswith(m)), None)
@@ -638,7 +514,7 @@ def _recursive_search_reaches(
                 roots.append(operand)
     if not roots:
         # rg reads a piped stdin instead; grep -r and git grep search the cwd.
-        if tool == _TOOL_RG and piped_in:
+        if tool == TOOL_RG and piped_in:
             return None
         roots = ["."]
     project_root = resolve_project_root()
@@ -718,7 +594,7 @@ def _excludes_flagged(
     flagged: list[str],
     searched: list[str],
     cwd_components: list[str] | None,
-    scan: _SearchArguments,
+    scan: SearchArguments,
     *,
     tool: str,
     pathspecs: list[str],
@@ -730,11 +606,11 @@ def _excludes_flagged(
     """
     if not flagged or len(searched) >= len(flagged):
         return False
-    if tool == _TOOL_GREP:
+    if tool == TOOL_GREP:
         return any(
             _excluded_name(name.rstrip("/"), flagged, searched) for name in scan.exclude_dirs
         )
-    if tool == _TOOL_GIT:
+    if tool == TOOL_GIT:
         return any(
             _excluded_directory(path, flagged, searched, cwd_components) for path in pathspecs
         )
@@ -768,9 +644,9 @@ def _remedy(
         if cwd_components is not None and flagged[: len(cwd_components)] == cwd_components
         else None
     )
-    if tool == _TOOL_GREP:
+    if tool == TOOL_GREP:
         flag: str | None = f"--exclude-dir={flagged[-1]}"
-    elif tool == _TOOL_RG:
+    elif tool == TOOL_RG:
         flag = f"-g '!{relative}/**'" if relative else f"-g '!{flagged[-1]}'"
     else:
         flag = f"':!{relative}'" if relative else None

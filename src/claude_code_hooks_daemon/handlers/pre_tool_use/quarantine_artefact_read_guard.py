@@ -47,8 +47,8 @@ from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.relevance import Relevance, RelevanceContext
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.handlers.utils.quarantine import quarantine_agent_relevance
+from claude_code_hooks_daemon.utils import recursive_search, shell_expansion
 from claude_code_hooks_daemon.utils import secret_file_matching as sfm
-from claude_code_hooks_daemon.utils import shell_expansion
 from claude_code_hooks_daemon.utils.bash_flags import SPAN_SEPARATORS, split_statements
 from claude_code_hooks_daemon.utils.command_evasion import compile_command_name_pattern
 from claude_code_hooks_daemon.utils.shell_segmentation import split_unquoted
@@ -327,7 +327,10 @@ class QuarantineArtefactReadGuardHandler(PreToolUseHandlerBase):
                 mention = sfm.find_protected_mention_strict(segment, patterns, cwd=cwd)
                 if mention is not None:
                     return mention
-        return None
+        # A recursive search reads every artefact under its roots without
+        # naming one (Plan 00483 D1, ledger 00474 N144).
+        reached = recursive_search.protected_reached_by_search(command, patterns, cwd=cwd)
+        return None if reached is None else reached[0]
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         return self._matched_pattern(hook_input) is not None

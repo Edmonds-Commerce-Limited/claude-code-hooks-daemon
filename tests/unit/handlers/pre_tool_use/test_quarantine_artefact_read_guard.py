@@ -149,6 +149,43 @@ class TestToolLevelPathChecks:
         assert handler.matches(payload) is False
 
 
+class TestBashRecursiveSearch:
+    """Plan 00483 D1 (ledger 00474 N144): a recursive search reads a DETAIL artefact."""
+
+    @pytest.fixture
+    def holding_dir(self, tmp_path: Path) -> Path:
+        (tmp_path / "reports").mkdir()
+        (tmp_path / "reports" / "topic-opus-security-DETAIL.md").write_text("raw")
+        (tmp_path / "other").mkdir()
+        (tmp_path / "other" / "ordinary.md").write_text("fine")
+        return tmp_path
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "grep -r x .",
+            "grep -rl x reports",
+            "rg x",
+            "find . | xargs rg x",
+            "find . -name '*.md' -exec grep x {} +",
+            "bash -c 'grep -r x .'",
+        ],
+    )
+    def test_search_over_a_tree_holding_an_artefact_matches(
+        self, handler: QuarantineArtefactReadGuardHandler, holding_dir: Path, command: str
+    ) -> None:
+        payload = _hook_input("Bash", {"command": command}, cwd=holding_dir)
+        assert handler.matches(payload) is True
+        assert handler.handle(payload).decision == Decision.DENY
+
+    @pytest.mark.parametrize("command", ["grep -r x other", "rg x other", "grep x ."])
+    def test_search_over_a_clean_tree_does_not_match(
+        self, handler: QuarantineArtefactReadGuardHandler, holding_dir: Path, command: str
+    ) -> None:
+        payload = _hook_input("Bash", {"command": command}, cwd=holding_dir)
+        assert handler.matches(payload) is False
+
+
 class TestBashRevealingVerbs:
     def test_cat_of_detail_artefact_matches(
         self, handler: QuarantineArtefactReadGuardHandler

@@ -2708,6 +2708,7 @@ def directory_contains_protected(
     patterns: tuple[str, ...],
     max_entries: int = DIRECTORY_SCAN_MAX_ENTRIES,
     is_exempt: Callable[[str], bool] | None = None,
+    skip: Callable[[str, bool], bool] | None = None,
 ) -> str | None:
     """First protected glob matched by any file under ``directory``, else None.
 
@@ -2721,6 +2722,10 @@ def directory_contains_protected(
     ``is_exempt`` skips a protected file the caller has confirmed safe to
     read (Plan 00459: encrypted at rest), so a tree holding only such files
     is not flagged while one plaintext file beside them still is.
+
+    ``skip(path, is_dir)`` drops an entry the searching tool would not read
+    (a hidden entry, an excluded directory); a skipped directory is not
+    descended into and a skipped file does not count against the cap.
     """
     if not patterns:
         return None
@@ -2729,7 +2734,10 @@ def directory_contains_protected(
         return None
     project_root = resolve_project_root()
     seen = 0
-    for current_dir, _subdirs, files in os.walk(root):
+    for current_dir, subdirs, files in os.walk(root):
+        if skip is not None:
+            subdirs[:] = [d for d in subdirs if not skip(str(Path(current_dir) / d), True)]
+            files = [f for f in files if not skip(str(Path(current_dir) / f), False)]
         for name in files:
             seen += 1
             if seen > max_entries:

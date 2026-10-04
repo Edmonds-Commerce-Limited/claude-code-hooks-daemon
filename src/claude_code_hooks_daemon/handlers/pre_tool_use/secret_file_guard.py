@@ -42,7 +42,7 @@ from claude_code_hooks_daemon.core import Decision, GatingResult, get_data_layer
 from claude_code_hooks_daemon.core.handler import WorkspaceScope
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
-from claude_code_hooks_daemon.utils import encrypted_at_rest, shell_expansion
+from claude_code_hooks_daemon.utils import encrypted_at_rest, recursive_search, shell_expansion
 from claude_code_hooks_daemon.utils import secret_file_matching as sfm
 from claude_code_hooks_daemon.utils.path_exclusion import (
     handler_excludes_path,
@@ -103,6 +103,17 @@ _ERROR_ROUTE: Final[str] = "error"
 # under (Plan 00466 N101 round 12). That is a property of the command, not a
 # defect in the guard, so it must not ask for a bug report.
 _UNREADABLE_ROUTE: Final[str] = "unreadable"
+
+# The route a recursive Bash search that reaches a protected file under its
+# roots is filed under (Plan 00483 D1). It is the `read` rule plus the way out:
+# the walk DISCOVERED the file, so the reason names the remedy, never the file.
+_SEARCH_ROUTE: Final[str] = "search"
+_SEARCH_REMEDY: Final[str] = (
+    "This recursive search would read a protected file under its roots. Search a "
+    "narrower subdirectory, or exclude the directory that holds it "
+    "(`grep -r --exclude-dir=<dir>`, `rg -g '!<dir>'`). `rg` and `ag` already skip "
+    "hidden and gitignored files; `--hidden`, `-u` and `--no-ignore` make them read those."
+)
 
 # The `_ERROR_ROUTE` detail for a path argument carrying a NUL byte: the
 # input, not the guard, is what cannot be evaluated.
@@ -1427,25 +1438,25 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
                     command, patterns, deadline=deadline, cwd=cwd, words=shared_words
                 )
                 if one_liner_mention is None:
-                    return None
+                    return self._search_reach(command, patterns, cwd)
                 return (*one_liner_mention, "bash")
             # The EFFECTIVE patterns are passed through (review finding 1):
             # the flag-position check re-tests bare consumer arguments, and
             # testing the shipped defaults there would blind it to every
             # project-configured pattern — all of them under mode: replace.
             if sfm.is_exempt_invocation(command, self._consumers(), patterns, deadline=deadline):
-                return None
+                return self._search_reach(command, patterns, cwd)
             if sfm.is_encrypted_target_invocation(
                 command, patterns, cwd=cwd, is_encrypted=self._is_encrypted, deadline=deadline
             ):
-                return None
+                return self._search_reach(command, patterns, cwd)
             # Plan 00466 niggle (gd5_fp): a grep-family search PATTERN that
             # happens to spell a protected name is not a read of that file
             # -- only a FILE-TARGET argument is (see the function's own
             # docstring for the position-based distinction and every shape
             # this must NOT unlock).
             if sfm.is_grep_pattern_only_mention(command, patterns, deadline=deadline):
-                return None
+                return self._search_reach(command, patterns, cwd)
             return (mention[0], mention[1], "bash")
 
         path_field = _PATH_FIELD_BY_TOOL.get(str(tool_name or ""))
@@ -1485,6 +1496,24 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
                 return None
             return (script_mention[0], script_mention[1], "script")
         return None
+
+    def _search_reach(
+        self, command: str, patterns: tuple[str, ...], cwd: str | None
+    ) -> tuple[str, str, str] | None:
+        """A protected file a recursive search in ``command`` reads, or None (D1).
+
+        Judged after the text scan has cleared the command, and also where an
+        exemption cleared it: a search PATTERN that spells a protected name is
+        not a read of that file, but the tree the search walks still can be.
+        Routed as ``search`` (the ``read`` rule plus the remedy) with the searched
+        root as the detail, so the discovered filename is never echoed.
+        """
+        reached = recursive_search.protected_reached_by_search(
+            command, patterns, cwd=cwd, is_exempt=self._is_encrypted
+        )
+        if reached is None:
+            return None
+        return (reached[0], reached[1], _SEARCH_ROUTE)
 
     def _is_encrypted(self, absolute_path: str) -> bool:
         """Is this path a whole-file vault payload right now? (Plan 00459)
@@ -1665,8 +1694,11 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
             return GatingResult(
                 decision=Decision.DENY, reason=self._disclosed(hook_input, _UNREADABLE_RULE)
             )
-        message = self._disclosed(hook_input, _RULES_BY_ROUTE[route])
+        rule_route = "read" if route == _SEARCH_ROUTE else route
+        message = self._disclosed(hook_input, _RULES_BY_ROUTE[rule_route])
         message += f"\n\nMatched protected glob: `{pattern}`"
+        if route == _SEARCH_ROUTE:
+            message += f"\n{_SEARCH_REMEDY}"
         # Naming the TOKEN turns a bisection hunt into a read (Plan 00356):
         # the glob alone does not say which of a command's -- or a whole
         # file's -- many words tripped it.

@@ -822,7 +822,7 @@ name answers `UNRESOLVABLE_IMPORT` and is denied. Release notes 146 and 148.
 
 ### N143 — A search fed its files by another command checks no tree
 
-**Status on the branch**: ✅ Remedied. **On main**: ⬜ Open: in-scope defect (Plan 00483 triage, see TRIAGE-carried-b.md)
+**Status on the branch**: ✅ Remedied. **On main**: ✅ Fixed on worktree-p483-recur (Plan 00483 Task 3.1): a recursive search is walked with the Grep tool's bounded directory walk, honouring rg/ag hidden and gitignore defaults and grep/rg exclusions
 
 **Found by small-a round 3.** In `find . | xargs rg x`, the guard saw an
 `rg` after a pipe with no path and treated it as reading stdin data. A
@@ -843,7 +843,7 @@ action and no redirect. RED: `TestFilesFedByAnotherCommand`,
 
 ### N144 — The quarantine guard has no Bash recursive-search check
 
-**Status on the branch**: ✅ Remedied. **On main**: ⬜ Open: in-scope defect (Plan 00483 triage, see TRIAGE-carried-b.md)
+**Status on the branch**: ✅ Remedied. **On main**: ✅ Fixed on worktree-p483-recur (Plan 00483 Task 3.1): a recursive search is walked with the Grep tool's bounded directory walk, honouring rg/ag hidden and gitignore defaults and grep/rg exclusions
 
 **Found by small-a round 3.** `quarantine_artefact_read_guard` walked a tree
 only for the Grep tool. A `grep -r x <dir holding a DETAIL artefact>` was
@@ -895,7 +895,7 @@ differential `rg --files` check. Release note 148.
 
 ### N152 — A command the lexer cannot segment is read as holding no search
 
-**Status on the branch**: ✅ Remedied. **On main**: ⬜ Open: in-scope defect for the literal wrapper (`bash -c 'grep -r x .'`, `sh -c`, `eval`; Plan 00483 triage, see TRIAGE-carried-b.md); ✅ Dismissed (threat model, limbs 1 and 2) for `g\rep`, `"grep"`, `$G`; the fail-closed deny on an unclosed quote stays
+**Status on the branch**: ✅ Remedied. **On main**: ✅ Fixed on worktree-p483-recur (Plan 00483 Task 3.1): a recursive search is walked with the Grep tool's bounded directory walk, honouring rg/ag hidden and gitignore defaults and grep/rg exclusions; for the literal wrapper only (`bash -c`, `sh -c`, `eval`). ✅ Dismissed (threat model, limbs 1 and 2) for `g\rep`, `"grep"`, `$G`; the fail-closed deny on an unclosed quote stays
 
 **Found by the small-a D-PATH and D-RULE re-reviews (M4).** When
 `recursive_searches` could not segment a command (a stray apostrophe in a
@@ -958,7 +958,7 @@ the new cases in `TestAVariableWhoseValueIsKnownIsRead`,
 
 ### N153 — `git grep`, `ugrep`, `ag` and `ack` search a tree unchecked
 
-**Status on the branch**: ✅ Remedied. **On main**: ⬜ Open: in-scope defect (Plan 00483 triage, see TRIAGE-carried-b.md)
+**Status on the branch**: ✅ Remedied. **On main**: ✅ Fixed on worktree-p483-recur (Plan 00483 Task 3.1): a recursive search is walked with the Grep tool's bounded directory walk, honouring rg/ag hidden and gitignore defaults and grep/rg exclusions
 
 **Found by the small-a D-PATH re-review.** The recursive-search check knew
 only grep and rg, so these read a protected file under the cwd without
