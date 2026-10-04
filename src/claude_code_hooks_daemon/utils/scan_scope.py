@@ -22,6 +22,23 @@ from pathlib import Path
 _GIT_ENTRY = ".git"
 
 
+class WalkError(OSError):
+    """A directory below the scan root could not be listed.
+
+    ``os.walk`` drops such a directory silently, so a walker would report the
+    files in it clean without having read them. A scan that cannot read part
+    of its tree has not passed.
+    """
+
+
+def _refuse_unlistable(error: OSError) -> None:
+    """``os.walk`` ``onerror`` hook: fail the walk instead of skipping the directory."""
+    raise WalkError(
+        f"cannot list {error.filename}: {error.strerror or error}; "
+        "the files in it were not scanned, so this is not a pass"
+    ) from error
+
+
 def walk_files(root: Path, pattern: str = "*") -> list[Path]:
     """Every file below ``root`` whose name matches ``pattern``, sorted.
 
@@ -35,9 +52,14 @@ def walk_files(root: Path, pattern: str = "*") -> list[Path]:
     Args:
         root: The directory to walk; a missing one yields nothing.
         pattern: An ``fnmatch`` pattern for the file NAME, as ``rglob`` takes.
+
+    Raises:
+        WalkError: A directory below the root could not be listed.
     """
     found: list[Path] = []
-    for directory, dirnames, filenames in os.walk(root):
+    if not root.is_dir():
+        return found
+    for directory, dirnames, filenames in os.walk(root, onerror=_refuse_unlistable):
         here = Path(directory)
         if here != root and (_GIT_ENTRY in dirnames or _GIT_ENTRY in filenames):
             dirnames.clear()

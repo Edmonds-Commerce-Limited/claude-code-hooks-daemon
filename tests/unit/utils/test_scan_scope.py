@@ -10,11 +10,15 @@ open exactly where branches are verified.
 from __future__ import annotations
 
 import ast
+import os
 import sys
 from pathlib import Path
 
+import pytest
+
 from claude_code_hooks_daemon.utils import scan_scope
 from claude_code_hooks_daemon.utils.scan_scope import (
+    WalkError,
     relative_parts,
     vacuous_scan_failure,
     walk_files,
@@ -82,6 +86,22 @@ class TestWalkFiles:
 
     def test_a_missing_root_yields_nothing(self, tmp_path: Path) -> None:
         assert walk_files(tmp_path / "absent") == []
+
+    def test_an_unreadable_subdirectory_fails_the_walk(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Root ignores permission bits, so the listing failure is simulated."""
+        _touch(tmp_path / "sub" / "a.py")
+        real_scandir = os.scandir
+
+        def deny_sub(path: str | os.PathLike[str]) -> object:
+            if Path(path).name == "sub":
+                raise PermissionError(13, "Permission denied", str(path))
+            return real_scandir(path)
+
+        monkeypatch.setattr(os, "scandir", deny_sub)
+        with pytest.raises(WalkError, match="sub"):
+            walk_files(tmp_path, "*.py")
 
 
 class TestRelativeParts:
