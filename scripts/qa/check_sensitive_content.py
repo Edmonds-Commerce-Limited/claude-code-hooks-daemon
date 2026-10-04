@@ -146,17 +146,18 @@ def load_exclude_paths(config_path: Path) -> list[str]:
 def resolve_secret_word_list_file(config_path: Path, repo_root: Path) -> Path | None:
     """Resolved secret-word-list path via ``utils/secret_redaction`` — the SSoT.
 
-    ``None`` when the daemon package is not importable in whatever
-    interpreter ran this script (e.g. system Python rather than the venv) —
-    matching ``audit_error_hiding.py``'s own precedent of importing the
-    daemon package from a QA script.
+    Raises:
+        ConfigError: The daemon package is not importable by whatever
+            interpreter ran this script (e.g. system Python rather than the
+            venv). Returning no list would report a clean run with no term
+            checked.
     """
     try:
         from claude_code_hooks_daemon.utils.secret_redaction import (
             resolve_secret_word_list_path,
         )
-    except ImportError:
-        return None
+    except ImportError as exc:
+        raise _term_rule_unavailable(exc) from exc
 
     options = _sensitive_content_options(_load_config(config_path))
     configured = options.get("secret_word_list_path")
@@ -239,14 +240,17 @@ def _compile_public_patterns(
     return compiled, invalid
 
 
-def _never_matches(_text: str, _term: str) -> bool:
-    """Stand-in matcher used when the daemon package is not importable.
+def _term_rule_unavailable(exc: ImportError) -> ConfigError:
+    """The error for a secret-term rule that this interpreter cannot load.
 
-    ``resolve_secret_terms`` already returns an empty tuple in that case, so
-    this is never consulted with a real term — it exists so the matcher is
-    always a callable and callers need no None-handling.
+    Without it the run would have no word list, no terms and a matcher that
+    never matches, and report the tree clean without checking any term.
     """
-    return False
+    return ConfigError(
+        "the daemon package is not importable by this interpreter, so the secret-term "
+        f"rule cannot be loaded and no term was checked ({exc}); run this check with "
+        "the project's venv python"
+    )
 
 
 def _without_protected_paths(files: list[Path]) -> list[Path]:
@@ -318,11 +322,14 @@ def resolve_term_matcher() -> Callable[[str, str], bool]:
     see a path term's venv-slug spelling and so reported a clean tree while a
     tracked file still carried one. Importing the real predicate is what
     makes the two enforcement surfaces provably agree.
+
+    Raises:
+        ConfigError: The daemon package is not importable.
     """
     try:
         from claude_code_hooks_daemon.utils.secret_redaction import term_matches
-    except ImportError:
-        return _never_matches
+    except ImportError as exc:
+        raise _term_rule_unavailable(exc) from exc
     return term_matches
 
 
@@ -494,6 +501,9 @@ def main() -> int:
         secret_terms = resolve_secret_terms(config_path, scan_root_for_terms)
         exclude_globs = load_exclude_paths(config_path)
         exempt_public = resolve_public_pattern_exemption(config_path)
+        # Resolved once, not per file: the predicate is shared with the live
+        # handler so both surfaces agree on what counts as a match.
+        term_matcher = resolve_term_matcher()
     except ConfigError as exc:
         violations.append(
             Violation(
@@ -520,10 +530,6 @@ def main() -> int:
 
         files = _without_protected_paths(files)
         files = filter_excluded_files(files, exclude_globs, scan_root_for_terms)
-
-        # Resolved once, not per file: the predicate is shared with the live
-        # handler so both surfaces agree on what counts as a match.
-        term_matcher = resolve_term_matcher()
 
         for file_path in files:
             violations.extend(

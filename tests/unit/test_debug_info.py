@@ -289,6 +289,53 @@ class TestTheOutputIsScrubbed:
 
         assert str(project) not in out.read_text()
 
+    def test_a_configured_secret_term_is_redacted_without_a_project_context(
+        self, debug_info_module, tmp_path: Path
+    ) -> None:
+        """The script is a standalone process: nothing initialises ProjectContext.
+
+        It used to ask the context-bound lookup, get an empty tuple as if that
+        were a real answer, and ship the report with the terms in it and no
+        banner.
+        """
+        project = _make_client_project(tmp_path)
+        (project / "words.txt").write_text("zzqx-nonsense-term\n")
+        (project / ".claude" / "hooks-daemon.yaml").write_text(
+            "handlers:\n"
+            "  pre_tool_use:\n"
+            "    sensitive_content:\n"
+            "      options:\n"
+            "        secret_word_list_path: words.txt\n"
+        )
+        gen = debug_info_module.DebugInfoGenerator(
+            output_file=str(tmp_path / "out.md"), project_root=project
+        )
+
+        scrubbed = gen._scrub("the branch zzqx-nonsense-term was here")
+
+        assert "zzqx-nonsense-term" not in scrubbed
+        assert "Secret word list not applied" not in scrubbed
+
+    def test_a_word_list_that_cannot_be_read_is_announced_on_the_report(
+        self, debug_info_module, tmp_path: Path
+    ) -> None:
+        project = _make_client_project(tmp_path)
+        (project / "words.txt").mkdir()  # a directory cannot be read as a list
+        (project / ".claude" / "hooks-daemon.yaml").write_text(
+            "handlers:\n"
+            "  pre_tool_use:\n"
+            "    sensitive_content:\n"
+            "      options:\n"
+            "        secret_word_list_path: words.txt\n"
+        )
+        gen = debug_info_module.DebugInfoGenerator(
+            output_file=str(tmp_path / "out.md"), project_root=project
+        )
+
+        scrubbed = gen._scrub("an ordinary line")
+
+        assert "Secret word list not applied" in scrubbed
+
     def test_the_closing_message_does_not_say_to_paste_the_file(self) -> None:
         """The script must not undo the guidance the docs now carry.
 

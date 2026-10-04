@@ -10,11 +10,15 @@ anywhere in this file (including comments/docstrings) — otherwise editing
 this very file would trip that live handler.
 """
 
+import importlib.util
 import json
 import subprocess  # nosec B404 - subprocess used for running the QA checker only
 import sys
 from pathlib import Path
+from types import ModuleType
 from typing import Any
+
+import pytest
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _CHECKER = _REPO_ROOT / "scripts" / "qa" / "check_sensitive_content.py"
@@ -579,3 +583,36 @@ class TestUnreadableFileIsReportedNotSilentlyDropped:
         rules = {v["rule"] for v in data["violations"]}
         assert "secret-word-list" in rules
         assert "unreadable-file" in rules
+
+
+class TestAnInterpreterWithoutTheDaemonPackageFailsRatherThanChecksNothing:
+    """Run by a bare ``python3``, the term rule used to switch itself off.
+
+    The helpers returned no word list, no terms and a matcher that never
+    matches, so the run reported a clean tree while checking no term.
+    """
+
+    _TERM_RULE_MODULE = "claude_code_hooks_daemon.utils." + "secret" + "_redaction"
+
+    @pytest.fixture
+    def unimportable(self, monkeypatch: pytest.MonkeyPatch) -> ModuleType:
+        spec = importlib.util.spec_from_file_location(
+            "check_sensitive_content_under_test", _CHECKER
+        )
+        assert spec is not None and spec.loader is not None, f"cannot load {_CHECKER}"
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = module
+        spec.loader.exec_module(module)
+        # A None entry makes the import statement raise ImportError.
+        monkeypatch.setitem(sys.modules, self._TERM_RULE_MODULE, None)
+        return module
+
+    def test_an_unimportable_matcher_is_a_config_error(self, unimportable: ModuleType) -> None:
+        with pytest.raises(unimportable.ConfigError, match="daemon package"):
+            unimportable.resolve_term_matcher()
+
+    def test_an_unimportable_word_list_resolver_is_a_config_error(
+        self, unimportable: ModuleType, tmp_path: Path
+    ) -> None:
+        with pytest.raises(unimportable.ConfigError, match="daemon package"):
+            unimportable.resolve_secret_word_list_file(tmp_path / "hooks-daemon.yaml", tmp_path)

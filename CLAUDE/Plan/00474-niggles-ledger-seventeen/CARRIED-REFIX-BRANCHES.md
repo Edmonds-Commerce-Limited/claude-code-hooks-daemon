@@ -154,7 +154,7 @@ forms, including `cd /proj && …`, `git -C /repo rm --cached` and `time`.
 
 ### N171 — `scan_scope.walk_files` skipped a directory it could not list, so every pinned walker reported it clean
 
-**Status on the branch**: ✅ Remedied. **On main**: ⬜ Open: in-scope defect (Plan 00483 triage, see TRIAGE-carried-a.md)
+**Status on the branch**: ✅ Remedied. **On main**: ✅ Fixed on worktree-p483-ordin (Plan 00483 Task 3.1): `walk_files` raises `WalkError` for a directory it cannot list; a missing root still yields nothing
 
 **Found:** Plan 00421 review 4, shared finding S-a.
 
@@ -170,7 +170,7 @@ because a chmod-based test proves nothing when tests run as root. RED on
 
 ### N172 — An `ImportError` of the shared secret-term rule switched the term rule off in the batch checks
 
-**Status on the branch**: ✅ Remedied. **On main**: ⬜ Open: in-scope defect (Plan 00483 triage, see TRIAGE-carried-a.md)
+**Status on the branch**: ✅ Remedied. **On main**: ✅ Fixed on worktree-p483-ordin (Plan 00483 Task 3.1): the term matcher, redactor, term list and word-list resolver raise `ConfigError` in both checks, which each reports as a failing finding
 
 **Found:** Plan 00421 review 4, shared finding S-b.
 
@@ -511,7 +511,7 @@ recording script at every place bash could go:
 
 ### N248 — `scripts/debug_info.py` never initialised `ProjectContext`, so it never applied the project's word lists
 
-**Status on the branch**: ✅ Remedied. **On main**: ⬜ Open: in-scope defect (Plan 00483 triage, see TRIAGE-carried-a.md)
+**Status on the branch**: ✅ Remedied. **On main**: ✅ Fixed on worktree-p483-ordin (Plan 00483 Task 3.1): `secret_redaction.project_secret_terms` resolves the list from the project's own config; an unobtainable list still shows the "not applied" banner
 
 **Found:** Plan 00421 fix round 7a, while routing the scrubs through one
 resolution. Shared with main: main's `debug_info.py` has the same lookup.
@@ -536,7 +536,7 @@ RED on `0e0098de2`: `test_an_additional_only_term_is_redacted` and
 
 ### N250 — `remote-docs` captured a page UNSCANNED when the sensitive-content scanner could not load
 
-**Status on the branch**: ✅ Remedied. **On main**: ⬜ Open: in-scope defect (Plan 00483 triage, see TRIAGE-carried-a.md)
+**Status on the branch**: ✅ Remedied. **On main**: ✅ Fixed on worktree-p483-ordin (Plan 00483 Task 3.1): `add` and `refresh` refuse and write nothing when the scanner cannot be built
 
 **Found:** Plan 00421 round 7c, while routing the word lists through one
 resolution (N246). Shared with main: main `84afc8804` has the same code.

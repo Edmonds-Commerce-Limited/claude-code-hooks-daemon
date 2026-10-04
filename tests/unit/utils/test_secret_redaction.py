@@ -619,6 +619,40 @@ class TestConfiguredWordListPathReachesEveryLeakVector:
         assert sr.REDACTED_PLACEHOLDER in caplog.text
 
 
+class TestProjectSecretTerms:
+    """Resolution for a process that never initialises ProjectContext."""
+
+    def test_reads_the_list_the_config_names(self, tmp_path: Path) -> None:
+        (tmp_path / "words.txt").write_text("alpha-term\n")
+        config = tmp_path / "hooks-daemon.yaml"
+        config.write_text(
+            "handlers:\n  pre_tool_use:\n    sensitive_content:\n      options:\n"
+            "        secret_word_list_path: words.txt\n"
+        )
+        assert sr.project_secret_terms(tmp_path, config) == ("alpha-term",)
+
+    def test_a_config_that_does_not_parse_still_uses_the_default_path(self, tmp_path: Path) -> None:
+        default = tmp_path / sr.DEFAULT_SECRET_WORD_LIST_PATH
+        default.parent.mkdir(parents=True, exist_ok=True)
+        default.write_text("beta-term\n")
+        config = tmp_path / "hooks-daemon.yaml"
+        config.write_text("handlers: [unclosed\n")
+        assert sr.project_secret_terms(tmp_path, config) == ("beta-term",)
+
+    def test_a_missing_list_is_no_terms(self, tmp_path: Path) -> None:
+        assert sr.project_secret_terms(tmp_path, tmp_path / "absent.yaml") == ()
+
+    def test_an_unreadable_list_raises(self, tmp_path: Path) -> None:
+        (tmp_path / "words.txt").mkdir()
+        config = tmp_path / "hooks-daemon.yaml"
+        config.write_text(
+            "handlers:\n  pre_tool_use:\n    sensitive_content:\n      options:\n"
+            "        secret_word_list_path: words.txt\n"
+        )
+        with pytest.raises(sr.SecretWordListUnreadableError):
+            sr.project_secret_terms(tmp_path, config)
+
+
 @pytest.fixture(autouse=True)
 def _reset_module_caches() -> Generator[None, None, None]:
     """Isolate every test from the process-lifetime caches this module keeps."""

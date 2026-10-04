@@ -639,3 +639,35 @@ class TestMalformedConfigFailsRatherThanBeingIgnored:
 
         assert data["summary"]["passed"] is False
         assert any(v["surface"] == "config" for v in data["violations"])
+
+
+class TestAnInterpreterWithoutTheDaemonPackageFailsRatherThanChecksNothing:
+    """The shared term rule lives in the daemon package.
+
+    Run by a bare ``python3``, the sweep used to get a matcher that never
+    matches and no terms, and reported the history clean without checking a
+    single term. A rule that cannot be loaded is a configuration error.
+    """
+
+    _TERM_RULE_MODULE = "claude_code_hooks_daemon.utils." + "secret" + "_redaction"
+
+    @pytest.fixture
+    def unimportable(self, monkeypatch: pytest.MonkeyPatch) -> ModuleType:
+        module = _load_module()
+        # A None entry makes the import statement raise ImportError.
+        monkeypatch.setitem(sys.modules, self._TERM_RULE_MODULE, None)
+        return module
+
+    def test_an_unimportable_matcher_is_a_config_error(self, unimportable: ModuleType) -> None:
+        with pytest.raises(unimportable.ConfigError, match="daemon package"):
+            unimportable.resolve_term_matcher()
+
+    def test_unimportable_terms_are_a_config_error(
+        self, unimportable: ModuleType, tmp_path: Path
+    ) -> None:
+        with pytest.raises(unimportable.ConfigError, match="daemon package"):
+            unimportable.resolve_secret_terms(tmp_path / "hooks-daemon.yaml", tmp_path)
+
+    def test_an_unimportable_redactor_is_a_config_error(self, unimportable: ModuleType) -> None:
+        with pytest.raises(unimportable.ConfigError, match="daemon package"):
+            unimportable._redactor()

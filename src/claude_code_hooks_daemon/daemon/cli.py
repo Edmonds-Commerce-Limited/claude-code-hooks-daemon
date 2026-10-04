@@ -7664,8 +7664,18 @@ def cmd_docs_qa(args: argparse.Namespace) -> int:
     return 1 if findings else 0
 
 
+class _ContentGuardUnavailableError(RuntimeError):
+    """The sensitive-content scanner for a capture could not be built."""
+
+
+def _capture_content_guard(args: argparse.Namespace, project_root: Path) -> Any:
+    """The scanner a capture or refresh applies: the injected one, else the project's."""
+    injected = getattr(args, "content_guard", None)
+    return injected or _sensitive_content_guard(project_root)
+
+
 def _sensitive_content_guard(project_root: Path) -> Any:
-    """The project's configured sensitive-content scanner, or None.
+    """The project's configured sensitive-content scanner.
 
     A capture writes to disk from this CLI, so the ``Write``-tool hook that
     normally inspects content never fires. Reusing the handler's own matching
@@ -7678,12 +7688,11 @@ def _sensitive_content_guard(project_root: Path) -> Any:
     because this CLI need not have initialised the project context the
     handler would otherwise resolve it against.
 
-    Returns None when the handler cannot be built. Capture then proceeds
-    UNSCANNED rather than failing, matching how the daemon degrades
-    elsewhere — but it says so on stderr rather than only at debug level. A
-    silent downgrade here would mean fetching an authenticated page vendors
-    its secrets with nothing to show that the check was skipped, which is
-    the one degradation in this subsystem worth interrupting someone over.
+    Raises:
+        _ContentGuardUnavailableError: The handler cannot be built (a config
+            that does not parse, an import failure). The capture is refused:
+            proceeding would vendor a fetched page, possibly holding a secret
+            term, with no scan at all.
     """
     import yaml
 
@@ -7703,13 +7712,11 @@ def _sensitive_content_guard(project_root: Path) -> Any:
         return handler.scan_text
     except (ImportError, RuntimeError, OSError, ValueError, yaml.YAMLError) as exc:
         logger.warning("sensitive-content guard unavailable for capture: %s", exc)
-        print(
-            "remote-docs: WARNING — the sensitive-content scanner is "
-            f"unavailable ({exc}); this capture is NOT being scanned before "
-            "it reaches disk. Review the captured file before committing.",
-            file=sys.stderr,
-        )
-        return None
+        raise _ContentGuardUnavailableError(
+            f"the sensitive-content scanner is unavailable ({exc}); nothing was written, "
+            "because a page cannot be vendored unscanned. Fix the project config or "
+            "environment and retry."
+        ) from exc
 
 
 def _remote_docs_tree(project_root: Path) -> Path:
@@ -7833,6 +7840,12 @@ def _remote_docs_add(
     force = bool(getattr(args, "force", False))
 
     try:
+        content_guard = _capture_content_guard(args, project_root)
+    except _ContentGuardUnavailableError as exc:
+        print(f"remote-docs add failed: {exc}", file=sys.stderr)
+        return 1
+
+    try:
         # Read BEFORE the write so a replacement can report both hashes --
         # `write_capture` itself only ever knows the NEW one.
         previous_sha256: str | None = None
@@ -7850,8 +7863,7 @@ def _remote_docs_add(
             now=now,
             licence=licence,
             stale_after_days=stale_after_days,
-            content_guard=getattr(args, "content_guard", None)
-            or _sensitive_content_guard(project_root),
+            content_guard=content_guard,
             force=force,
         )
     except CaptureError as exc:
@@ -8004,6 +8016,14 @@ def _remote_docs_refresh(
         print("remote-docs refresh: name a PATH or pass --all", file=sys.stderr)
         return 2
 
+    # The same guard `remote-docs add` applies. A refresh writes from a CLI
+    # just as a capture does, so it bypasses the same hook.
+    try:
+        content_guard = _capture_content_guard(args, project_root)
+    except _ContentGuardUnavailableError as exc:
+        print(f"remote-docs refresh failed: {exc}", file=sys.stderr)
+        return 1
+
     failed = 0
     for target in targets:
         outcome = refresh_document(
@@ -8012,10 +8032,7 @@ def _remote_docs_refresh(
             fidelity=fetcher.fidelity,
             fetch_method=fetcher.method,
             now=now,
-            # The same guard `remote-docs add` applies. A refresh writes from a
-            # CLI just as a capture does, so it bypasses the same hook.
-            content_guard=getattr(args, "content_guard", None)
-            or _sensitive_content_guard(project_root),
+            content_guard=content_guard,
         )
         print(f"{target}: {outcome.value}")
         if outcome is RefreshOutcome.REFUSED:
