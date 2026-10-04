@@ -192,6 +192,20 @@ other than defeating a parser. Everything else, every ordinary respelling includ
      the threat-model ruling as written.
    - O4: the quarantine guard fails closed past the cap, under a new `R-QUARANTINE-SCAN-INCOMPLETE`.
    - O5: the mtime-validated index is deferred.
+4. **Effort and breakage in the secret-guard area.** The owner asked for this review:
+   [261004-guard-effort-pragmatism-review-opus.md](subagent-reports/261004-guard-effort-pragmatism-review-opus.md).
+   It finds that the area has become disproportionately costly, and that it breaks ordinary sessions more often than
+   it closes bypasses.
+   - Coordinator call, not an owner ruling: new tightening in this area is frozen. Only narrow fixes for false denials
+     proceed. Phase 3 Task 3.1 batches stay paused until the owner decides.
+   - Owner decisions the review asks for:
+     - R2: a regression gate built from ordinary commands, so that an ALLOW flipping to a deny fails the change.
+     - R3: amend the fail-closed rule. Deny only on a literal protected name or an unparseable command. Allow with an
+       advisory when a cap or deadline is exhausted.
+     - R4: remove the bare-glob filesystem expansion and the per-call tree walk, in favour of a cached index.
+     - R5: an effort budget for the area. One open branch, at most 2 review rounds, net non-positive lines, and p99 of
+       50 ms or less per Bash call. Return bash_safe_mode to `only_with_mutator`.
+     - The keep/narrow/drop list for the remaining Task 3.1 items.
 
 ## Success Criteria
 
