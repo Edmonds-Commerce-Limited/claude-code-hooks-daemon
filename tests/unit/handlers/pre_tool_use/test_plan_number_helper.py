@@ -834,6 +834,14 @@ class TestHandRolledPlanFolderCreation:
         """Creating the folder and its JOURNAL in one call still creates the folder."""
         assert handler.matches(_bash("mkdir -p CLAUDE/Plan/00250-some-feature/JOURNAL"))
 
+    def test_mkdir_inside_a_branch_name_is_not_a_command(
+        self, handler: PlanNumberHelperHandler
+    ) -> None:
+        """Ledger 00474 N347: a ref word containing ``mkdir`` is not a ``mkdir`` command."""
+        command = "git show worktree-x-mkdir:CLAUDE/Plan/00999-x/PLAN.md"
+
+        assert not handler.matches(_bash(command))
+
     def test_journal_dir_inside_existing_plan_is_allowed(
         self, handler: PlanNumberHelperHandler
     ) -> None:

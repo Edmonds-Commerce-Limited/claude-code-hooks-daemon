@@ -601,7 +601,7 @@ matches it exactly. Tests: `test_git_command_target_eval_walks.py`
 
 ### N124 — `secret_file_guard` reads a grep/rg regex argument as a path and denies it
 
-**Status on the branch**: ✅ Remedied. **On main**: ✅ Fixed on main (Plan 00483 triage) for the three shapes in the entry; ⬜ Open: in-scope defect for the residual false positive on an escaped-dot or alternation grep pattern and other regex-text tools (see TRIAGE-carried-b.md)
+**Status on the branch**: ✅ Remedied. **On main**: ✅ Fixed on main (Plan 00483 triage) for the three shapes in the entry; ✅ Fixed on worktree-p483-glob (Plan 00483 Task 3.1) for the residual escaped-dot or alternation grep/rg pattern: the positional pattern is text; ⬜ Open: other regex-text tools such as `find -regex` and a `python3 -c` regex (see TRIAGE-carried-b.md)
 
 **Found by the small-a fixer.** `grep -n "def .*repair\|uv" f`,
 `grep -v '^tests/.*:.*#'` and `grep "^tests/.*test_.*\.py$"` were each denied
@@ -1068,7 +1068,7 @@ grep). Release note 150.
 
 ### N220 — A glob whose last component is a bare `*` is never expanded, so `cat dir/*` reads a protected file
 
-**Status on the branch**: ✅ Remedied. **On main**: ⬜ Open: in-scope defect (Plan 00483 triage, see TRIAGE-carried-b.md)
+**Status on the branch**: ✅ Remedied. **On main**: ✅ Fixed on worktree-p483-glob (Plan 00483 Task 3.1): a glob whose last component has no literal text is expanded against the filesystem, capped at 5000 paths and failing closed past it
 
 **Found by the small-a D-PATH re-review 5 (shared MAJOR; main has it
 too).** `_token_mention` skipped a glob whose last component has no
@@ -1106,7 +1106,7 @@ An unreadable `cd` target stays unverifiable. RED:
 
 ### N249 — An interpreter one-liner's path is missed when the code is double-quoted with escaped inner quotes
 
-**Status on the branch**: ⬜ Open. **On main**: ⬜ Open: in-scope defect for the double-quoted one-liner with escaped inner quotes (Plan 00483 triage, see TRIAGE-carried-b.md); ✅ Dismissed (threat model, limb 2) for `$'...'`
+**Status on the branch**: ⬜ Open. **On main**: ✅ No longer reproduces for the double-quoted one-liner with escaped inner quotes; pinned on worktree-p483-glob (Plan 00483 Task 3.1); ✅ Dismissed (threat model, limb 2) for `$'...'`
 
 **Found by small-a round 9b ("Found, not fixed", main-proven; S-D).**
 `python3 -c "print(open(\"w1-key\").read())"` is allowed on main
