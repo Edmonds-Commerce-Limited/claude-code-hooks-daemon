@@ -496,6 +496,11 @@ _EXEMPT_FROM_GUIDANCE: dict[str, str] = {
         "fire-time, naming the agent and the places to look, not a standing policy "
         "to hold across turns"
     ),
+    "WorkQueueRebriefHandler": (
+        "never denies (T1 no); the list of running agents is delivered in full at "
+        "fire-time, with each agent's respawn facts, and is not a standing policy to "
+        "hold across turns (T3 no)"
+    ),
     "MonorepoDetectorHandler": (
         "never denies (T1 no); one-shot correction delivered fully at fire-time "
         "(paste-ready projects: block), not a standing policy to hold across "
