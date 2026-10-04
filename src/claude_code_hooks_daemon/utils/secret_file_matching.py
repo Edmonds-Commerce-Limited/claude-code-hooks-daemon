@@ -2563,13 +2563,10 @@ def effective_cwds(command: str, cwd: str | None) -> tuple[str, ...]:
     placed (``cd -``, a relative step with no absolute directory to start
     from) is not tracked -- out of scope, as before.
     """
-    directories: list[str] = [cwd] if cwd is not None and os.path.isabs(cwd) else []
+    directories: list[str] = [cwd] if cwd is not None and Path(cwd).is_absolute() else []
     for segment in _COMMAND_SEGMENT_SEPARATORS.split(command):
-        try:
-            words = shlex.split(segment)
-        except ValueError:
-            continue
-        if len(words) < 2 or words[0] not in _DIRECTORY_CHANGE_COMMANDS:
+        words = _shell_words(segment)
+        if words is None or len(words) < 2 or words[0] not in _DIRECTORY_CHANGE_COMMANDS:
             continue
         operands = [word for word in words[1:] if not word.startswith("-") or word == "-"]
         if not operands:
@@ -2577,10 +2574,10 @@ def effective_cwds(command: str, cwd: str | None) -> tuple[str, ...]:
         target = operands[0]
         if target == "-" or any(char in _WORD_EXPANDING_CHARACTERS for char in target):
             continue
-        if not os.path.isabs(target):
+        if not Path(target).is_absolute():
             if not directories:
                 continue
-            target = os.path.join(directories[-1], target)
+            target = str(Path(directories[-1]) / target)
         directories.append(os.path.normpath(target))
     return tuple(dict.fromkeys(directories))
 
@@ -2601,7 +2598,7 @@ def _anchored_spellings(form: str, cwds: tuple[str, ...]) -> list[str]:
         bases = cwds
     spellings: list[str] = []
     for base in bases:
-        collapsed = os.path.normpath(os.path.join(base, form) if base else form)
+        collapsed = os.path.normpath(str(Path(base) / form) if base else form)
         if collapsed != form and collapsed not in spellings:
             spellings.append(collapsed)
     return spellings
