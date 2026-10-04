@@ -114,9 +114,7 @@ class TestAScanThatRanOutOfBudgetIsNotAFinding:
         assert "no protected path was found" in reason
         assert "narrow the glob" in reason
 
-    def test_a_deadline_is_denied_under_its_own_rule_and_says_to_retry(
-        self, project: Path
-    ) -> None:
+    def test_a_deadline_is_denied_under_its_own_rule_and_says_to_retry(self, project: Path) -> None:
         with patch.object(sfm, "find_protected_mention_detail", side_effect=TimeoutError("late")):
             reason = _deny_reason(project, "cat safe/*")
         assert RuleID.SECRET_SCAN_INCOMPLETE in reason
