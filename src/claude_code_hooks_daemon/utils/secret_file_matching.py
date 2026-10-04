@@ -1439,6 +1439,50 @@ def _both_edges_glob_mention(
     return None
 
 
+#: Ledger 00474 N220: cap on entries one bare-wildcard token may examine on
+#: disk before the scan fails closed.
+_MAX_BARE_GLOB_FS_EXPANSIONS: Final[int] = 5000
+
+
+def _bare_glob_mention(
+    expansions: list[str],
+    patterns: tuple[str, ...],
+    project_root: str | None,
+    cwds: tuple[str | None, ...],
+    *,
+    deadline: float | None = None,
+) -> str | None:
+    """First protected pattern a glob whose last component has no literal text
+    to judge (``dir/*``, ``*/*``, ``?``) actually expands to on disk, else ``None``.
+
+    Every text route above needs literal residue in the last component to
+    compare with a protected name, so ``cat dir/*`` was never expanded
+    (ledger 00474 N220). The filesystem is the oracle instead, tried from the
+    project root and each directory the command may run in. A word that
+    expands past :data:`_MAX_BARE_GLOB_FS_EXPANSIONS` examined paths raises
+    ``TooManyToEnumerateError``, which the caller's fail-closed wrapper turns
+    into a deny.
+    """
+    for form in expansions:
+        if not _is_glob_shaped(form):
+            continue
+        basename = form.rsplit("/", maxsplit=1)[-1]
+        if len(_token_literal_residue(basename)) >= _MIN_GLOB_OVERLAP_CHARS:
+            continue
+        for base in dict.fromkeys(cwds):
+            match = _expand_glob_token(
+                form,
+                patterns,
+                project_root,
+                cwd=base,
+                max_expansions=_MAX_BARE_GLOB_FS_EXPANSIONS,
+                deadline=deadline,
+            )
+            if match is not None:
+                return match
+    return None
+
+
 #: Which surface a mention scan is judging (n466-n24 review 4 addendum,
 #: false-positive fold-in b). ``"bash"`` (the default, and every pre-existing
 #: caller) is a real shell command: the AGGRESSIVE glob-shaped heuristics
@@ -1818,6 +1862,13 @@ class _GlobExpansionGate:
             self._resolved = True
         return self._expandable is None or token in self._expandable
 
+    def is_quoted_literal(self, token: str) -> bool:
+        """True when ``token`` occurs only as a whole quoted word, which bash
+        passes on as written (``cat 'dir/*'``), never glob-expanded."""
+        if f"'{token}'" not in self._command and f'"{token}"' not in self._command:
+            return False
+        return token not in set(self._tokenise(mask_quoted(self._command, keep_double=False)))
+
 
 def iter_protected_mentions(
     command: str,
@@ -1978,6 +2029,7 @@ def iter_protected_mentions(
                 both_edges_stems=both_edges_stems,
                 context=context,
                 expands_globs=functools.partial(glob_gate.expands, token),
+                is_quoted_literal=functools.partial(glob_gate.is_quoted_literal, token),
                 effective_cwds=effective,
             )
             mention_cache[token] = pattern
@@ -2224,6 +2276,7 @@ def _token_mention(
     realpath_cache: dict[str, str | None] | None = None,
     expands_globs: Callable[[], bool] = lambda: True,
     effective_cwds: tuple[str, ...] = (),
+    is_quoted_literal: Callable[[], bool] = lambda: False,
 ) -> str | None:
     """The first protected glob ``token`` names (or could glob-expand to), else None.
 
@@ -2386,6 +2439,16 @@ def _token_mention(
             )
             if match is not None:
                 return match
+            if not is_quoted_literal():
+                match = _bare_glob_mention(
+                    expansions,
+                    patterns,
+                    project_root,
+                    (cwd, *effective_cwds) if effective_cwds else (cwd,),
+                    deadline=deadline,
+                )
+                if match is not None:
+                    return match
     # Own live finding (team-lead's 1 MB timing follow-up to review 3): the
     # symlink-alias check exists for the `worktree_create` seeding case --
     # an innocuous LINK name pointing at a protected TARGET -- which is
@@ -3178,7 +3241,7 @@ def _is_encrypted_target_reader(words: list[str]) -> bool:
 
 #: grep-family binaries: their FIRST positional argument (or an `-e`
 #: flag's value) is a search PATTERN, not a filesystem path.
-_GREP_FAMILY_COMMANDS: Final[frozenset[str]] = frozenset({"grep", "egrep", "fgrep"})
+_GREP_FAMILY_COMMANDS: Final[frozenset[str]] = frozenset({"grep", "egrep", "fgrep", _RG_HEAD})
 
 #: Long flag whose VALUE is pattern content, never a file target.
 _GREP_PATTERN_VALUE_LONG_FLAG: Final[str] = "--regexp"
@@ -3280,6 +3343,36 @@ _GREP_FILE_SELECTOR_LONG_OPTIONS: Final[frozenset[str]] = frozenset(
 _GREP_SHORT_FLAG_OPTS: Final[frozenset[str]] = frozenset("EFGPiwxzsvVbnHhoqaIrRLlcTZU0123456789")
 
 
+def _without_single_quoted_content(command: str) -> str:
+    """``command`` with the inside of each plain ``'...'`` span blanked.
+
+    Bash reads everything between single quotes literally, so a regex
+    metacharacter there (``'foo\\.bar'``, ``'a|b'``) expands nothing and does
+    not move any word. An ANSI-C ``$'...'`` span is left alone (its escapes
+    DO decode), as is everything inside double quotes and any escaped quote.
+    """
+    out = list(command)
+    index = 0
+    in_double = False
+    while index < len(command):
+        char = command[index]
+        if char == "\\":
+            index += 2
+            continue
+        if char == '"':
+            in_double = not in_double
+        elif char == "'" and not in_double:
+            if index > 0 and command[index - 1] == "$":
+                return command
+            close = command.find("'", index + 1)
+            if close < 0:
+                return command
+            out[index + 1 : close] = " " * (close - index - 1)
+            index = close
+        index += 1
+    return "".join(out)
+
+
 def is_grep_pattern_only_mention(
     command: str,
     patterns: tuple[str, ...] = DEFAULT_PROTECTED_PATTERNS,
@@ -3325,7 +3418,7 @@ def is_grep_pattern_only_mention(
     ``deadline`` (Plan 00466 review 8 L1) is forwarded to
     :func:`iter_protected_mentions`.
     """
-    if any(char in _EXPANSION_CHARS for char in command):
+    if any(char in _EXPANSION_CHARS for char in _without_single_quoted_content(command)):
         return False
     words = _shell_words(strip_transparent_reserved_words(command))
     if not words or not _is_single_simple_command(words):
