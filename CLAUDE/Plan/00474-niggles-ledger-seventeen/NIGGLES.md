@@ -1406,6 +1406,22 @@ The uncertain-move union judges the hook directory and the LAST recorded move (`
 every candidate directory (`sub`). Remedy: judge every directory any `cd` in the chain could
 land in.
 
+### N346 — commit-time gates with a fixed subprocess timeout deny ordinary commits under host load
+
+**Source**: the Plan 00483 batch F agent, committing on `worktree-p483-paths` on 2026-10-04 while the host load
+average was about 45.
+
+**Evidence**: `conflict_marker_commit_gate` denied several ordinary commits after its 5 s `git grep --cached` timed
+out. The same commits passed unchanged once load dropped. In the same window, `llm_qa.py changed` failed on
+`project_handlers` and `semgrep` only through their 300 s-or-longer timeouts, and both passed when re-run alone at
+the same HEAD.
+
+**Impact**: a deny that depends on host load and not on the staged content. A careful agent re-tries. A careless
+one may read the deny as a real conflict marker and edit content that is fine. This is the commit-gate twin of N344.
+
+**Status**: ⬜ Open. Remedy: tell a timed-out scan apart from a finding in the deny reason, and say "retry"; or scale
+the bound. Failing closed on a timeout stays, because the gate could not read the tree.
+
 ### N345 — a merge conflict in a past journal day-file has no sanctioned resolution
 
 **Source**: coordinator, merging Plan 00483 batches B and C on 2026-10-04. Each branch had added an entry to
@@ -1442,6 +1458,10 @@ load average reached 55 on 8 CPUs.
 
 Re-run at load average 17, both files passed 19/19, but took 25 minutes. The full integration suite took 1:47:48
 against its usual 27 minutes. This is the N222 class in Plan 00483's triage: a verdict that depends on host load.
+
+It happened again in the post-merge run on main at 9b2e15be1 (load average about 45). The same two files failed, plus
+`test_venv_bootstrap_driver.py::TestTheWatchdogNeverOutlivesItsBuild::test_a_killed_build_process_takes_its_watchdog_with_it`.
+That third test asserted that a list of surviving pids was empty, rather than timing out.
 
 **Impact**: a post-merge or CI run on a busy host reports false failures, and each one costs a manual re-run to
 tell load from a regression. The N326 test is the heaviest single test in the suite.
