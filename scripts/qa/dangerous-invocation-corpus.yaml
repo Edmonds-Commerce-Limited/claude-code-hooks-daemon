@@ -280,6 +280,47 @@ rows:
       fix on the dropped branch would deny `.venv/bin/ansible-playbook`, an
       ordinary spelling, so it would add an in-scope false positive.
 
+  # ------------------------------------------- recursive searches (ledger N130)
+  #
+  # A row runs against this checkout, so a tree past the scan's entry cap, an
+  # ignored protected file or a tracked one listed after position 5000 cannot be
+  # built here; those shapes are asserted with generated trees in
+  # tests/unit/handlers/pre_tool_use/test_secret_file_guard_tree_scan.py and
+  # tests/unit/utils/test_protected_tree_scan.py. These rows hold the two ends a
+  # checkout can show: an ordinary search of a clean tree stays allowed, and a
+  # whole-checkout `grep -r` stays denied.
+  - id: recursive-search-rg-clean-subtree
+    command: "rg needle src"
+    axis: protected-file-read
+    verdict: UNCOVERED-accepted
+    note: >-
+      ACCEPTED, and the point of the git-listing view. `rg` reads git's
+      non-ignored set, so a search of a clean source tree is allowed however
+      much ignored bulk (virtualenvs, worktrees) sits elsewhere in the
+      checkout. A guard that walked every entry would deny it as an incomplete
+      scan; that false positive is what the view exists to avoid.
+
+  - id: recursive-search-git-grep-clean-pathspec
+    command: "git grep needle -- src"
+    axis: protected-file-read
+    verdict: UNCOVERED-accepted
+    note: >-
+      ACCEPTED. `git grep` reads the index, listed whole and untruncated, so a
+      search of a clean pathspec is allowed. The listing used to be cut at 5000
+      tracked files and answered on those alone; a tracked protected file
+      listed after that was allowed (ledger N130).
+
+  - id: recursive-search-grep-r-whole-checkout
+    command: "grep -r needle ."
+    axis: protected-file-read
+    verdict: COVERED
+    note: >-
+      Denied today by flaggable_content_channel_guard, whose fixture directory
+      lies under the root. On a checkout with ignored bulk past 250000 entries
+      `secret_file_guard` also denies it, as R-SECRET-SCAN-INCOMPLETE: the walk
+      reads every entry, fails closed past its cap, and never answers a tree it
+      did not finish as clean (ledger N130).
+
   # ---------------------------------------------------------------- the controls
   #
   # These rows exist so a clean run is evidence. If the harness stopped reading

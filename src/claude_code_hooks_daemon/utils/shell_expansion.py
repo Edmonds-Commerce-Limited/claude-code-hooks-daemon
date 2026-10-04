@@ -68,11 +68,16 @@ class TooManyToEnumerateError(Exception):
 
     ``limit`` is the cap that was exceeded, when it is a count of examined
     paths, so a guard can tell the user what ran out (ledger 00474 N348).
+    ``tree_walk`` says the cap counted entries of a recursive search's tree
+    rather than the paths one glob expands to.
     """
 
-    def __init__(self, message: str = "", *, limit: int | None = None) -> None:
+    def __init__(
+        self, message: str = "", *, limit: int | None = None, tree_walk: bool = False
+    ) -> None:
         super().__init__(message)
         self.limit = limit
+        self.tree_walk = tree_walk
 
 
 # ── Brace expansion ──────────────────────────────────────────────────────

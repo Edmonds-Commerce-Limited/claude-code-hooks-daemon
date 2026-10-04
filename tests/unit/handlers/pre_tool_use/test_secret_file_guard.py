@@ -26,7 +26,7 @@ from claude_code_hooks_daemon.handlers.pre_tool_use import secret_file_guard as 
 from claude_code_hooks_daemon.handlers.pre_tool_use.secret_file_guard import (
     SecretFileGuardHandler,
 )
-from claude_code_hooks_daemon.utils import encrypted_at_rest
+from claude_code_hooks_daemon.utils import encrypted_at_rest, protected_tree_scan
 from claude_code_hooks_daemon.utils import secret_file_matching as sfm
 
 
@@ -927,7 +927,7 @@ class TestFailsClosedOnEvaluationError:
         def _raise(*_args: object, **_kwargs: object) -> None:
             raise OSError("synthetic directory-walk failure")
 
-        monkeypatch.setattr(sfm, "directory_contains_protected", _raise)
+        monkeypatch.setattr(protected_tree_scan, "find_protected_in_tree", _raise)
         handler = _handler()
         hook_input = _hook_input("Grep", {"path": "/proj/some-dir", "pattern": "x"})
 

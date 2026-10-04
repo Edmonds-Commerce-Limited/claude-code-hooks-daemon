@@ -6,11 +6,14 @@ roots are walked with the same bounded walk the Grep tool route uses.
 
 import subprocess  # nosec B404 - fixed git argv in a tmp repository
 from pathlib import Path
+from typing import Any
 
 import pytest
 
+from claude_code_hooks_daemon.utils import protected_tree_scan as pts
 from claude_code_hooks_daemon.utils import recursive_search as rs
-from claude_code_hooks_daemon.utils import secret_file_matching as sfm
+from claude_code_hooks_daemon.utils.protected_tree_scan import TreeView
+from claude_code_hooks_daemon.utils.shell_expansion import TooManyToEnumerateError
 
 PROTECTED_GLOB = "*.p483vault"
 PATTERNS = (PROTECTED_GLOB,)
@@ -122,17 +125,62 @@ def test_exempt_file_does_not_flag_the_tree(tree: Path) -> None:
     assert found is None
 
 
-def test_the_walk_is_the_shared_bounded_walk(tree: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """The cap and the answer past it belong to the directory walk, not to this module."""
+def test_the_walk_is_the_shared_bounded_scan(tree: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The cap and the answer past it belong to the tree scan, not to this module."""
     roots: list[str] = []
+    views: list[TreeView] = []
+    deadlines: list[float | None] = []
 
-    def _walk(directory: str, patterns: tuple[str, ...], **kwargs: object) -> str | None:
+    def _scan(directory: str, patterns: tuple[str, ...], **kwargs: Any) -> str | None:
         roots.append(directory)
+        views.append(kwargs["view"])
+        deadlines.append(kwargs["deadline"])
         return None
 
-    monkeypatch.setattr(sfm, "directory_contains_protected", _walk)
-    assert _reach("grep -r x .", tree) is None
+    monkeypatch.setattr(pts, "find_protected_in_tree", _scan)
+    found = rs.protected_reached_by_search("grep -r x .", PATTERNS, cwd=str(tree), deadline=12.5)
+    assert found is None
     assert roots == [str(tree)]
+    assert views == [TreeView.ALL]
+    assert deadlines == [12.5]
+
+
+@pytest.mark.parametrize(
+    ("command", "view"),
+    [
+        ("grep -r x .", TreeView.ALL),
+        ("ack x", TreeView.ALL),
+        ("rg --no-ignore x", TreeView.ALL),
+        ("rg -uu x", TreeView.ALL),
+        ("ag -u x", TreeView.ALL),
+        ("rg x", TreeView.UNIGNORED),
+        ("ag x", TreeView.UNIGNORED),
+        ("git grep x", TreeView.TRACKED),
+        ("git grep --no-index x", TreeView.ALL),
+        ("git grep --untracked x", TreeView.ALL),
+    ],
+)
+def test_each_tool_reads_the_view_it_reads(
+    tree: Path, monkeypatch: pytest.MonkeyPatch, command: str, view: TreeView
+) -> None:
+    views: list[TreeView] = []
+
+    def _scan(directory: str, patterns: tuple[str, ...], **kwargs: Any) -> str | None:
+        views.append(kwargs["view"])
+        return None
+
+    monkeypatch.setattr(pts, "find_protected_in_tree", _scan)
+    rs.protected_reached_by_search(command, PATTERNS, cwd=str(tree))
+    assert views == [view]
+
+
+def test_a_tree_past_the_cap_raises_for_grep_r_never_clean(
+    tree: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(pts, "TREE_SCAN_MAX_ENTRIES", 1)
+    (tree / "clean" / "b.txt").write_text("x\n")
+    with pytest.raises(TooManyToEnumerateError):
+        rs.protected_reached_by_search("grep -r x clean", PATTERNS, cwd=str(tree))
 
 
 def _git(root: Path, *args: str) -> None:
@@ -281,10 +329,28 @@ def test_an_exclusion_that_misses_the_protected_path_does_not_allow_it(
     assert _reach(command, tree) == PROTECTED_GLOB
 
 
-def test_the_walk_skips_what_the_caller_prunes(tree: Path) -> None:
-    pruned = sfm.directory_contains_protected(
-        str(tree), PATTERNS, skip=lambda path, is_dir: is_dir and path.endswith("sub")
-    )
-    assert pruned is None
-    kept = sfm.directory_contains_protected(str(tree), PATTERNS, skip=lambda path, is_dir: False)
-    assert kept == PROTECTED_GLOB
+def test_rg_over_a_big_ignored_directory_and_a_clean_tracked_set_is_allowed(
+    ignored_repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The ignored bulk is git's to skip: the entry cap is never reached for it."""
+    (ignored_repo / ".gitignore").write_text("local/\nbulk/\n")
+    (ignored_repo / "bulk").mkdir()
+    for index in range(300):
+        (ignored_repo / "bulk" / f"f{index}.txt").write_text("x\n")
+    monkeypatch.setattr(pts, "TREE_SCAN_MAX_ENTRIES", 50)
+    assert _reach("rg x .", ignored_repo) is None
+    with pytest.raises(TooManyToEnumerateError):
+        _reach("grep -r x .", ignored_repo)
+
+
+def test_git_grep_finds_a_tracked_protected_file_listed_after_position_six_thousand(
+    tmp_path: Path,
+) -> None:
+    _git(tmp_path, "init", "-q")
+    (tmp_path / "a").mkdir()
+    for index in range(6000):
+        (tmp_path / "a" / f"f{index:05d}.txt").write_text("x\n")
+    (tmp_path / "z").mkdir()
+    (tmp_path / "z" / PROTECTED_NAME).write_text("x\n")
+    _git(tmp_path, "add", "-A")
+    assert _reach("git grep needle", tmp_path) == PROTECTED_GLOB
