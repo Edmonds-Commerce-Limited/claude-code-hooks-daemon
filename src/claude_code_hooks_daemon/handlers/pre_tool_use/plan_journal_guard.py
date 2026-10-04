@@ -479,7 +479,7 @@ class PlanJournalGuardHandler(PreToolUseHandlerBase):
                 ]
             )
 
-        number =_PLAN_NUMBER_PLACEHOLDER if target.plan_number is None else str(target.plan_number)
+        number = _PLAN_NUMBER_PLACEHOLDER if target.plan_number is None else str(target.plan_number)
         script = target.checkout / plan_dir / MKPLAN_SCRIPT_NAME
         stamp = datetime.now(UTC).strftime(_BODY_FILE_STAMP)
         suffix = secrets.token_hex(_BODY_FILE_SUFFIX_BYTES)

@@ -164,9 +164,7 @@ class TestUnion:
         result = _resolve(repo, _PAST_DAYFILE)
 
         assert result.returncode == 0, result.stderr
-        assert (repo / _PAST_DAYFILE).read_text() == (
-            _HEADER + _entry("09:30", "Branch.") + fenced
-        )
+        assert (repo / _PAST_DAYFILE).read_text() == (_HEADER + _entry("09:30", "Branch.") + fenced)
 
     def test_add_add_conflict_with_no_common_base(self, repo: Path) -> None:
         """Both branches create the day-file: git has no stage 1."""
