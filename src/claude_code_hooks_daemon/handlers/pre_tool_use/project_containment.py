@@ -134,6 +134,8 @@ _ALL_ARG_DEST_COMMANDS = frozenset({"mkdir"})
 #: argument — otherwise `sh -c "echo x > /tmp/y"` walks straight through.
 _NESTED_SHELL_COMMANDS = frozenset({"sh", "bash", "zsh", "dash", "ksh"})
 _NESTED_SHELL_FLAG = "-c"
+#: `eval` runs its (space-joined) arguments as a command, like a `-c` body.
+_EVAL_COMMAND = "eval"
 _MAX_NESTED_DEPTH = 2
 
 #: `tar` is the awkward one: the same `-f` names the archive whether reading or
@@ -640,6 +642,10 @@ class ProjectContainmentHandler(PreToolUseHandlerBase):
                 named = positional[-1:]
             elif name in _NESTED_SHELL_COMMANDS and depth < _MAX_NESTED_DEPTH:
                 targets.extend(self._nested_shell_targets(arguments, depth))
+            elif name == _EVAL_COMMAND and depth < _MAX_NESTED_DEPTH and arguments:
+                # `eval` joins its arguments with spaces and runs the result: a
+                # literal body is a command exactly as a `bash -c` body is.
+                targets.extend(self._inner_command_targets(" ".join(arguments), depth))
             targets.extend((target, True) for target in named)
 
         return targets
@@ -720,7 +726,17 @@ class ProjectContainmentHandler(PreToolUseHandlerBase):
         if index + 1 >= len(arguments):
             return []
 
-        inner = arguments[index + 1]
+        return self._inner_command_targets(arguments[index + 1], depth)
+
+    def _inner_command_targets(self, inner: str, depth: int) -> list[tuple[str, bool]]:
+        """Destinations named by a command string a shell or ``eval`` will run.
+
+        A target the accessor could not resolve is returned as written, so the
+        caller judges it unknown.
+
+        Raises:
+            UnreadableCommandError: The inner text cannot be tokenised.
+        """
         scan = scan_bash_write_targets(
             {"tool_name": ToolName.BASH, "tool_input": {"command": inner}}
         )

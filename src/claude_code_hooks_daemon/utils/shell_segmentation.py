@@ -973,7 +973,7 @@ def resolve_shell_word(word: str) -> str | None:
     compared against the word as written is defeated by punctuation
     (Plan 00466 N101 round 3, D-RULE B1 and M1). ``None`` when anything but
     quote removal could change the word -- an expansion, a glob, a brace
-    group, ANSI-C quoting or an unterminated quote -- because a caller
+    group or an unterminated quote -- because a caller
     comparing names must treat a word it cannot resolve as any name at all.
     """
     out: list[str] = []
@@ -998,6 +998,14 @@ def resolve_shell_word(word: str) -> str | None:
             if closed is None:
                 return None
             index = closed
+        elif word.startswith(_ANSI_C_OPEN, index):
+            # `$'...'` is quote removal plus fixed escapes, so it resolves
+            # exactly (`\n` is a newline, a command separator).
+            ansi_c = ansi_c_string(word, index + len(_ANSI_C_OPEN))
+            if ansi_c is None:
+                return None
+            out.append(ansi_c[0])
+            index = ansi_c[1]
         elif char in _EXPANDING_CHARS:
             return None
         else:

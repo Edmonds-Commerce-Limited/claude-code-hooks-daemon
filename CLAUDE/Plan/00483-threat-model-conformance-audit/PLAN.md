@@ -121,6 +121,8 @@ other than defeating a parser. Everything else, every ordinary respelling includ
   with a public-pattern test); N94 fixed (the auto-close verdict memo is keyed by the hook_input
   object, not the command text). Report:
   [subagent-reports/261003-task-3.1-batch-a-n61-n94-sonnet.md](subagent-reports/261003-task-3.1-batch-a-n61-n94-sonnet.md).
+  Segmentation batch on branch worktree-p483-segment: N48 (sed_blocker splits on newline), N87 (`$'...'` bodies decoded), N93 (`eval` body judged like `bash -c`) fixed; N85 no longer reproduces. Report:
+  [subagent-reports/261003-task-3.1-batch-b-segmentation-sonnet.md](subagent-reports/261003-task-3.1-batch-b-segmentation-sonnet.md).
 - [ ] 🔄 **Task 3.2**: Narrow each guard that causes an in-scope false positive while catching
   an out-of-scope shape (TDD: the false positive is the red test). X-1 fixed on branch
   worktree-p483-x1-rebind-heredoc: the shared rebinding check no longer withholds the heredoc

@@ -1420,6 +1420,10 @@ heredoc closer is not seen. Every tree allows it, main included.
 **Remedy:** judge executed bodies as commands, as the guards now do. It
 belongs on the executed-body branch with N87 to N89.
 
+**Status:** FIXED for `eval` (worktree-p483-segment, Plan 00483 Task 3.1):
+`project_containment` judges a literal `eval` body as it judges a `bash -c`
+body. The `bash <<'OUTER'` form was already denied.
+
 ### N92 — `pipe_blocker` reads a `|` inside a double-quoted regex as a pipe
 
 **Found by N38 review 8 (ledger candidate).** `grep -E "a|HEAD|b" f` is
@@ -1498,6 +1502,10 @@ guards see one `echo` with a literal `\n`, and allow it. Main allows it too.
 The same applies wherever an executed body arrives through `$'…'`: `sh -c`,
 `eval`, and a here-string fed to a shell.
 
+**Status:** FIXED for a `$'…'` word handed to a shell (worktree-p483-segment,
+Plan 00483 Task 3.1): `resolve_shell_word` decodes the standard escapes, so
+a `-c` body carrying `\n` is split into its commands.
+
 **Remedy:** decode `$'…'` (the full escape set: `\n`, `\t`, `\xHH`,
 `\nnn`, `\uHHHH`, `\cX`) before an executed body is lexed. If a string cannot
 be decoded, treat the command as unparseable and fail closed. It uses the
@@ -1535,6 +1543,10 @@ allow it.
 **Remedy:** the single-quote alternative becomes `'[^']*'`. Sweep `src/` for
 the same mistake in any other single-quote matcher. Round 6 of the N38 fix
 branch carries it, with a RED test through the real chain.
+
+**Status:** FIXED (worktree-p483-segment, Plan 00483 Task 3.1): no longer
+reproduces on main (already fixed by the N241 command-position work, merge
+f3d13077e); regression tests added through the real `destructive_git` handler.
 
 ### N84 — The `daemon_process` test fixture never checks that `stop` succeeded, so daemons leak
 
@@ -2247,6 +2259,10 @@ ends the `git commit` segment. The exemption then covers only a `sed` inside
 that segment's message argument. RED tests: sed on the next line is denied;
 sed after a newline inside a quoted message is still exempt. This belongs to
 the shell-parser consolidation (N41).
+
+**Status:** FIXED (worktree-p483-segment, Plan 00483 Task 3.1): the exemption
+splits the command with the shared quote-aware segmenter, newline included,
+and every `sed` must sit in the same command as a `git commit` before it.
 
 ### N47 — The ccy supervisor and Claude Code's settings.json both own effort, and they fight
 
