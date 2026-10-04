@@ -1504,6 +1504,9 @@ It happened again in the post-merge run on main at 9b2e15be1 (load average about
 `test_venv_bootstrap_driver.py::TestTheWatchdogNeverOutlivesItsBuild::test_a_killed_build_process_takes_its_watchdog_with_it`.
 That third test asserted that a list of surviving pids was empty, rather than timing out.
 
+A fourth file timed out in the post-merge run on main at aace64fb4, with a load average of about 13 to 20:
+`test_doc_truth_check.py::test_real_repository_docs_are_truthful`. Re-run alone, the file passed 17/17 in 37 s.
+
 **Impact**: a post-merge or CI run on a busy host reports false failures, and each one costs a manual re-run to
 tell load from a regression. The N326 test is the heaviest single test in the suite.
 
