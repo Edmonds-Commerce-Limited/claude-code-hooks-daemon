@@ -68,6 +68,23 @@ _full_qa_lock_inherited() {
     FULL_QA_LOCK_FD="${fd}"
 }
 
+# Replace the lock file's content with THIS shell's holder line (pid, checkout,
+# start time), in the same `key=value` form llm_qa.py's `_stamp_holder` writes.
+# Called only once the flock is held. The `>` truncates the same inode the
+# lock is on; the file is never unlinked, because a flock on an unlinked inode
+# excludes nobody. Diagnostic only: the decision is flock's, never this text.
+#
+# Design (N351): nothing clears the line when this shell exits, because the
+# kernel drops the flock on exit and an EXIT trap here would clobber the
+# caller's own. A line left behind therefore names a dead pid, which every
+# reader treats as "no holder" (`describe_holder` checks the pid is alive), and
+# EVERY acquirer, bash or Python, overwrites the whole file on acquire.
+_full_qa_lock_stamp_holder() {
+    local lock_file="$1"
+    printf 'pid=%s\ncheckout=%s\nstarted=%s\n' \
+        "$$" "${PROJECT_ROOT:-${PWD}}" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >"${lock_file}"
+}
+
 acquire_full_qa_lock_or_die() {
     local lock_file="$1" holders
     if _full_qa_lock_inherited "${lock_file}"; then
@@ -75,6 +92,7 @@ acquire_full_qa_lock_or_die() {
     fi
     exec {FULL_QA_LOCK_FD}>>"${lock_file}"
     if flock -w "${FULL_QA_LOCK_WAIT_SECONDS}" "${FULL_QA_LOCK_FD}"; then
+        _full_qa_lock_stamp_holder "${lock_file}"
         return 0
     fi
     holders="$(_full_qa_lock_holders "${lock_file}")"

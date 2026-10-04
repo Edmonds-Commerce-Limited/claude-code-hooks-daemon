@@ -137,10 +137,10 @@ class TestHolderStampIsTheContractTheDaemonReads:
         finally:
             os.close(fd)
 
-        assert lock_path.read_text().splitlines() == [
-            f"pid={os.getpid()}",
-            "checkout=/some/checkout",
-        ]
+        lines = lock_path.read_text().splitlines()
+        assert lines[:2] == [f"pid={os.getpid()}", "checkout=/some/checkout"]
+        assert lines[2].startswith("started=")
+        assert len(lines) == 3
 
     def test_daemon_reads_the_stamp_the_runner_writes(self, tmp_path: Path) -> None:
         from claude_code_hooks_daemon.daemon.cli import _recorded_qa_lock_holder
