@@ -1087,9 +1087,7 @@ class TestHandRolledPlanFolderCreation:
     ) -> None:
         """Every operand is judged, not just the first plan-shaped one."""
         (handler._workspace_root / "CLAUDE" / "Plan" / "00250-some-feature").mkdir()
-        assert handler.matches(
-            _bash("mkdir -p CLAUDE/Plan/00250-some-feature CLAUDE/Plan/00999-x")
-        )
+        assert handler.matches(_bash("mkdir -p CLAUDE/Plan/00250-some-feature CLAUDE/Plan/00999-x"))
 
     def test_ledger_n186_brace_list_of_non_plan_names_stays_allowed(
         self, handler: PlanNumberHelperHandler
