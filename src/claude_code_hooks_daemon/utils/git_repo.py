@@ -56,10 +56,15 @@ RELOCATING_VARIABLES: Final[frozenset[str]] = frozenset(
     {"GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR"}
 )
 
-#: Reported when git could not be run at all (absent binary, timeout). Mirrors
-#: the shell's "command not found" so callers branching on ``returncode`` need
-#: no special case for it.
+#: Reported when git could not be run at all (absent binary). Mirrors the
+#: shell's "command not found" so callers branching on ``returncode`` need no
+#: special case for it.
 _GIT_UNAVAILABLE: Final[int] = 127
+
+#: Reported when git ran out of time. Mirrors ``timeout(1)``'s status, and is
+#: its own value so a gate that fails closed can tell "retry, the host is
+#: loaded" from "git is absent or said no" (ledger 00474 N346).
+GIT_TIMED_OUT: Final[int] = 124
 
 #: Local branches live under this. Ask git about a branch with the FULL ref and
 #: read listings back with ``%(refname)``, never ``%(refname:short)`` — see
@@ -210,6 +215,8 @@ def run_git(
             env=child_env,
             check=False,
         )
+    except subprocess.TimeoutExpired as exc:
+        return subprocess.CompletedProcess(argv, GIT_TIMED_OUT, "", str(exc))
     except (OSError, subprocess.SubprocessError) as exc:
         return subprocess.CompletedProcess(argv, _GIT_UNAVAILABLE, "", str(exc))
 
