@@ -1436,9 +1436,18 @@ reaches a protected file. A lone `*` suggests a tokenisation artefact: the `*` w
 expanded from the `untracked/` cwd, where a protected file does sit. No one has reproduced this with
 `hooks-daemon probe` yet.
 
-**Status**: ⬜ Open, unverified. Remedy: reproduce with `hooks-daemon probe`. If it is confirmed, find where the
-bare-glob route (merge 2ba5b72a2) receives a lone `*` from a `for … in` word list. Then judge each `dir/*` word as
-written.
+**Status**: ✅ Fixed. Reproduced with the handler driven from a unit test (a project whose `untracked/` holds a
+protected file, cwd there or `cd untracked` first): `for d in repos/*; do git -C "$d" ls-files; done` is denied as
+R-SECRET-BASH-MENTION, `Matched on this token from your input: *`. The `dir/*` list words were never the cause:
+`for d in repos/one; do ls "$d"; done` is denied too. The lone `*` is `"$d"`, which the word scanner collapses to `*`
+for every variable it cannot resolve, and the bare-glob route then expands against the cwd. A loop run from the project
+root was allowed, which is why it looked intermittent. `utils/shell_for_loops.py` now reads a `for` loop statically,
+and `shell_expansion` replaces `$d`/`${d}` inside that loop's body with the words the loop lists, so each is judged as
+written. It binds nothing (the `*` and the denial stay) when the name is assigned, read, declared, unset or `eval`ed
+anywhere, is used by two loops, or when the command holds a heredoc, `$'...'` or a substitution in the list; a use
+before the loop, outside the body, with an operator (`${d%/}`) or inside a nested `$(...)` also keeps the `*`. A listed
+word that reaches a protected file is still denied. Tests: `tests/unit/utils/test_shell_for_loops.py`,
+`tests/unit/handlers/pre_tool_use/test_secret_file_guard_for_loop_globs.py`.
 
 ### N349 — the linear-scaling harness divides by zero when both timings read 0 CPU seconds
 

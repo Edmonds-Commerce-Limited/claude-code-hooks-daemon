@@ -35,7 +35,7 @@ import re
 import stat
 import time
 import tokenize
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Final, NamedTuple
@@ -44,6 +44,11 @@ from claude_code_hooks_daemon.utils.heredoc_operators import (
     Heredoc,
     scan_heredocs,
     substitution_end,
+)
+from claude_code_hooks_daemon.utils.shell_for_loops import (
+    LoopBinding,
+    active_bindings,
+    find_for_loop_bindings,
 )
 from claude_code_hooks_daemon.utils.shell_segmentation import (
     resolve_shell_word,
@@ -2847,8 +2852,23 @@ def _consume_balanced(text: str, start: int, open_ch: str, close_ch: str) -> int
     return n
 
 
+#: Marks where a ``for`` loop variable stood in a decoded word, until
+#: :func:`_loop_variants` replaces it with the loop's words. NUL cannot occur
+#: in a command line, so no real word can collide with it.
+_LOOP_VARIABLE_MARK: Final[str] = "\x00"
+_LOOP_VARIABLE_RE: Final[re.Pattern[str]] = re.compile(r"\x00([A-Za-z0-9_]+)\x00")
+
+#: Most spellings one word may take once its loop variables are replaced; past
+#: it the word keeps its fail-closed ``*``.
+_MAX_LOOP_VARIANTS: Final[int] = 64
+
+
 def _consume_dollar(
-    text: str, start: int, *, substitutions: list[str] | None = None
+    text: str,
+    start: int,
+    *,
+    substitutions: list[str] | None = None,
+    loop_variables: Mapping[str, tuple[str, ...]] | None = None,
 ) -> tuple[str, int]:
     """At ``text[start] == '$'``: ``(piece, end)``.
 
@@ -2894,9 +2914,14 @@ def _consume_dollar(
                 substitutions.append(body)
         return "*", end
     if nxt == "{":
-        return "*", _consume_balanced(text, start + 1, "{", "}")
+        end = _consume_balanced(text, start + 1, "{", "}")
+        if loop_variables and text[end - 1 : end] == "}" and text[start + 2 : end - 1] in loop_variables:
+            return f"{_LOOP_VARIABLE_MARK}{text[start + 2 : end - 1]}{_LOOP_VARIABLE_MARK}", end
+        return "*", end
     match = _DOLLAR_VAR_NAME_RE.match(text, start + 1)
     if match and match.end() > start + 1:
+        if loop_variables and match.group(0) in loop_variables:
+            return f"{_LOOP_VARIABLE_MARK}{match.group(0)}{_LOOP_VARIABLE_MARK}", match.end()
         return "*", match.end()
     return "$", start + 1
 
@@ -2936,7 +2961,12 @@ def _close_backtick(text: str, start: int) -> tuple[int, str]:
 
 
 def _decode_span(
-    text: str, start: int, stop_chars: str, *, substitutions: list[str] | None = None
+    text: str,
+    start: int,
+    stop_chars: str,
+    *,
+    substitutions: list[str] | None = None,
+    loop_variables: Mapping[str, tuple[str, ...]] | None = None,
 ) -> tuple[str, int]:
     """Quote/escape/substitution-decode ``text`` from ``start``, stopping at
     the first UNQUOTED character in ``stop_chars`` (or at the end of
@@ -2977,7 +3007,9 @@ def _decode_span(
                     i += 2
                     continue
                 if text[i] == "$":
-                    piece, end = _consume_dollar(text, i, substitutions=substitutions)
+                    piece, end = _consume_dollar(
+                        text, i, substitutions=substitutions, loop_variables=loop_variables
+                    )
                     out.append(piece)
                     i = end
                     continue
@@ -3009,7 +3041,9 @@ def _decode_span(
             i += 1
             continue
         if ch == "$":
-            piece, end = _consume_dollar(text, i, substitutions=substitutions)
+            piece, end = _consume_dollar(
+                text, i, substitutions=substitutions, loop_variables=loop_variables
+            )
             out.append(piece)
             i = end
             continue
@@ -3218,6 +3252,58 @@ def _recurse_into_nested_command(
 _DEADLINE_CHECK_INTERVAL: Final[int] = 200
 
 
+def _loop_variants(
+    marked: str, loop_variables: Mapping[str, tuple[str, ...]]
+) -> list[str] | None:
+    """Every spelling ``marked`` takes once each loop variable mark is replaced
+    by one of its loop's words (ledger 00474 N350), or ``None`` past
+    :data:`_MAX_LOOP_VARIANTS` so the caller keeps its fail-closed ``*``.
+
+    A loop word is decoded like any other word, so one that holds a
+    substitution still contributes a ``*``.
+    """
+    pieces = _LOOP_VARIABLE_RE.split(marked)
+    # split() alternates literal text (even) and captured variable names (odd).
+    choices: list[list[str]] = [
+        [piece] if position % 2 == 0 else [normalise_word(raw) for raw in loop_variables[piece]]
+        for position, piece in enumerate(pieces)
+    ]
+    total = 1
+    for options in choices:
+        total *= len(options)
+        if total > _MAX_LOOP_VARIANTS:
+            return None
+    return ["".join(combination) for combination in itertools.product(*choices)]
+
+
+def _decode_word(
+    command: str,
+    start: int,
+    loops: tuple[LoopBinding, ...],
+) -> tuple[str, int, list[str], list[str]]:
+    """``(decoded, end, substitutions, words)`` for the word at ``start``.
+
+    ``decoded`` and ``substitutions`` are the decode every state decision is
+    made on, with each unresolvable ``$VAR`` a ``*``. ``words`` is what the
+    scan yields: the same, except that a ``for`` loop variable inside its own
+    loop body is replaced by the words the loop lists, so each is judged as
+    written rather than as a lone ``*``.
+    """
+    substitutions: list[str] = []
+    decoded, end = _decode_span(command, start, _WORD_SEPARATOR_CHARS, substitutions=substitutions)
+    words = [decoded]
+    loop_variables = active_bindings(loops, start) if loops and "$" in command[start:end] else {}
+    if loop_variables:
+        marked, _ = _decode_span(
+            command, start, _WORD_SEPARATOR_CHARS, loop_variables=loop_variables
+        )
+        if _LOOP_VARIABLE_MARK in marked:
+            variants = _loop_variants(marked, loop_variables)
+            if variants is not None:
+                words = variants
+    return decoded, end, substitutions, words
+
+
 def _iter_normalised_shell_words(
     command: str,
     *,
@@ -3235,6 +3321,7 @@ def _iter_normalised_shell_words(
     count = 0
     i = 0
     n = len(command)
+    for_loops = find_for_loop_bindings(command)
 
     # `<interpreter> [options...] -c <code>` option walk (also entered for
     # the `su`/`script`/`flock` wrapper shapes below).
@@ -3343,12 +3430,9 @@ def _iter_normalised_shell_words(
 
         this_word_operators = last_operators
         last_operators = ""
-        nested_substitutions: list[str] = []
-        decoded, end = _decode_span(
-            command, i, _WORD_SEPARATOR_CHARS, substitutions=nested_substitutions
-        )
+        decoded, end, nested_substitutions, words = _decode_word(command, i, for_loops)
         count += 1
-        yield decoded
+        yield from words
         # Review 7 MAJOR-2: every `$(...)`/backtick body this word's decode
         # just collapsed to a bare `*` is a genuine nested COMMAND -- judged
         # by its OWN text the same way `eval`'s/a process substitution's
