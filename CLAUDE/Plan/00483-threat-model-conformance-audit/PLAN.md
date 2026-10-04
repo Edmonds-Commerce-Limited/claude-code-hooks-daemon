@@ -117,6 +117,10 @@ other than defeating a parser. Everything else, every ordinary respelling includ
   once (Plan 00475). N154 and N230 (Fable FIX rulings) were verified already fixed on main at
   c7271043f, so branch worktree-p483-inscope changes no code for them. Report:
   [subagent-reports/261003-task-3.1-n154-n230-sonnet.md](subagent-reports/261003-task-3.1-n154-n230-sonnet.md).
+  Batch A on branch worktree-p483-leak: N61 no longer reproduces (fixed by 530ffc83d, now pinned
+  with a public-pattern test); N94 fixed (the auto-close verdict memo is keyed by the hook_input
+  object, not the command text). Report:
+  [subagent-reports/261003-task-3.1-batch-a-n61-n94-sonnet.md](subagent-reports/261003-task-3.1-batch-a-n61-n94-sonnet.md).
 - [ ] 🔄 **Task 3.2**: Narrow each guard that causes an in-scope false positive while catching
   an out-of-scope shape (TDD: the false positive is the red test). X-1 fixed on branch
   worktree-p483-x1-rebind-heredoc: the shared rebinding check no longer withholds the heredoc

@@ -173,8 +173,11 @@ class GithubAutoCloseKeywordsHandler(PreToolUseHandlerBase):
         self._mode = _MODE_BLOCK
         # Per-dispatch cache: matches() and handle() see the same hook_input,
         # so the -F/--body-file content is stat'd and read ONCE (avoids a
-        # read-twice TOCTOU between the two calls).
-        self._cached_command: str | None = None
+        # read-twice TOCTOU between the two calls). Keyed on the hook_input
+        # OBJECT (held, so its identity cannot be reused), never on the
+        # command text: the verdict also depends on the message file's
+        # content and the cwd, which the text does not carry (Plan 00466 N94).
+        self._cached_input: dict[str, Any] | None = None
         self._cached_span: str | None = None
         self._rule = Rule(
             rule_id=RuleID.GH_AUTO_CLOSE_KEYWORD,
@@ -237,11 +240,10 @@ class GithubAutoCloseKeywordsHandler(PreToolUseHandlerBase):
 
     def _find_match(self, hook_input: dict[str, Any]) -> str | None:
         """Cached wrapper around :meth:`_compute_match` (one read per dispatch)."""
-        command = get_bash_command(hook_input)
-        if command is not None and command == self._cached_command:
+        if hook_input is self._cached_input:
             return self._cached_span
         span = self._compute_match(hook_input)
-        self._cached_command = command
+        self._cached_input = hook_input
         self._cached_span = span
         return span
 
