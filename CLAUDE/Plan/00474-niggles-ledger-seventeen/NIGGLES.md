@@ -1406,6 +1406,29 @@ The uncertain-move union judges the hook directory and the LAST recorded move (`
 every candidate directory (`sub`). Remedy: judge every directory any `cd` in the chain could
 land in.
 
+### N344 — integration tests with fixed wall-clock timeouts fail falsely under host load
+
+**Source**: coordinator, post-merge `tests/integration` on main at 2c0d76087 and later, 2026-10-03/04, while the host
+load average reached 55 on 8 CPUs.
+
+**Evidence**: the run reported 1 failed and 6 errors, all `subprocess.TimeoutExpired`:
+
+- six fixtures in `test_upgrade_pre_deploy_phase_runs_on_layer1.py` hit the 120 s limit on `git add -A --force`;
+- the N326 test `test_suite_passes_on_a_released_unreleased_tree.py` hit its run timeout.
+
+Re-run at load average 17, both files passed 19/19, but took 25 minutes. The full integration suite took 1:47:48
+against its usual 27 minutes. This is the N222 class in Plan 00483's triage: a verdict that depends on host load.
+
+**Impact**: a post-merge or CI run on a busy host reports false failures, and each one costs a manual re-run to
+tell load from a regression. The N326 test is the heaviest single test in the suite.
+
+**Status**: ⬜ Open. Remedy:
+
+- scale or remove fixed wall-clock bounds in test fixtures (a CPU-time or work-count bound, or none, where the
+  fixture is only setup);
+- consider restricting the N326 suite-on-an-emptied-tree test to the files that changed since the last release, or
+  to the full CI matrix only.
+
 ### N343 — agents add entries under an already-released CHANGELOG section
 
 **Source**: coordinator, 2026-10-03. The Plan 00483 batch B and batch C agents
