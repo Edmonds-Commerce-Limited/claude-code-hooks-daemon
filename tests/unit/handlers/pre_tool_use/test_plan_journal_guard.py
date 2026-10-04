@@ -28,6 +28,7 @@ from claude_code_hooks_daemon.core.chain import HandlerChain
 from claude_code_hooks_daemon.core.hook_result import Decision
 from claude_code_hooks_daemon.handlers.pre_tool_use.plan_journal_guard import (
     PlanJournalGuardHandler,
+    conflict_checkout_paths,
 )
 from claude_code_hooks_daemon.utils.path_predicates import TextOrReason
 
@@ -84,6 +85,7 @@ def _deploy_scaffolder(plan_root: Path) -> None:
     plan_root.mkdir(parents=True, exist_ok=True)
     (plan_root / "mkplan.bash").write_text(
         "#!/usr/bin/env bash\n# Usage:\n#   mkplan.bash --journal <plan-number> ...\n"
+        "#   mkplan.bash --resolve-conflict <day-file>\n"
     )
     (plan_root / "_JOURNAL_TEMPLATE_.md").write_text("# Plan {{PLAN_NUMBER}} — Journal\n")
 
@@ -571,6 +573,125 @@ class TestBashSurfaceIsAllowed:
         self, handler: PlanJournalGuardHandler, project: Path, command: str
     ) -> None:
         assert handler.matches(_bash(command, project)) is False, command
+
+
+class TestConflictCheckoutAdvisory:
+    """`git checkout --ours/--theirs` of a day-file discards the other side's entries.
+
+    Advisory, not a deny (ledger 00474 N345): the discarded entries stay in the
+    other commit, so the loss is recoverable, and keeping one side is sometimes
+    exactly what is wanted. The advisory names `mkplan.bash --resolve-conflict`.
+    """
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            f"git checkout --ours {_relative_live()}",
+            f"git checkout --theirs {_relative_live()}",
+            f"git checkout --ours -- {_relative_live()}",
+            f"git checkout --theirs -- README.md {_relative_live()}",
+            f"git restore --ours {_relative_live()}",
+            f"git -C . checkout --ours {_relative_live()}",
+            f"git add -A && git checkout --ours {_relative_live()}",
+            f"git checkout --ours 'CLAUDE/Plan/{LIVE_FOLDER}/JOURNAL/{LIVE_DAYFILE}'",
+        ],
+    )
+    def test_names_resolve_conflict_and_does_not_deny(
+        self, handler: PlanJournalGuardHandler, project: Path, command: str
+    ) -> None:
+        hook_input = _bash(command, project)
+
+        assert handler.matches(hook_input) is True, command
+        result = handler.handle(hook_input)
+
+        assert result.decision == Decision.ALLOW
+        advice = "\n".join(result.context)
+        assert f"{project}/{PLAN_DIR}/mkplan.bash --resolve-conflict" in advice
+        assert _relative_live() in advice
+        assert "discards" in advice
+
+    def test_the_worktrees_script_is_named_for_a_worktree_day_file(
+        self, handler: PlanJournalGuardHandler, project: Path
+    ) -> None:
+        worktree = project / WORKTREE
+        command = f"git checkout --theirs {PLAN_DIR}/{WORKTREE_FOLDER}/JOURNAL/{WORKTREE_DAYFILE}"
+
+        hook_input = _bash(command, worktree)
+
+        assert handler.matches(hook_input) is True
+        advice = "\n".join(handler.handle(hook_input).context)
+        assert f"{worktree}/{PLAN_DIR}/mkplan.bash --resolve-conflict" in advice
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "git checkout --ours README.md",
+            f"git checkout main -- {_relative_live()}",
+            f"git checkout {_relative_live()}",
+            f"git add {_relative_live()}",
+            f"git diff --ours {_relative_live()}",
+            f"git merge --no-ff other && tail -n 5 {_relative_live()}",
+            f"{PLAN_DIR}/mkplan.bash --resolve-conflict {_relative_live()}",
+            f"bash {PLAN_DIR}/mkplan.bash --resolve-conflict {_relative_live()}",
+            f"git checkout --ours {PLAN_DIR}/{LIVE_FOLDER}/PLAN.md",
+        ],
+    )
+    def test_everything_else_is_left_alone(
+        self, handler: PlanJournalGuardHandler, project: Path, command: str
+    ) -> None:
+        assert handler.matches(_bash(command, project)) is False, command
+
+    @pytest.mark.parametrize(
+        ("command", "expected"),
+        [
+            ("git checkout --ours a.md", [(None, "a.md")]),
+            ("git checkout --theirs -- a.md b.md", [(None, "a.md"), (None, "b.md")]),
+            ("git -C sub checkout --ours a.md", [("sub", "a.md")]),
+            ("git -c core.x=1 restore --theirs a.md", [(None, "a.md")]),
+            ("git add . ; git checkout --ours a.md | cat", [(None, "a.md")]),
+            ("git checkout a.md", []),
+            ("git status --ours", []),
+            ("git", []),
+            ("echo git checkout --ours a.md", []),
+            ("git checkout --ours 'unclosed a.md", []),
+        ],
+    )
+    def test_conflict_checkout_paths(
+        self, command: str, expected: list[tuple[str | None, str]]
+    ) -> None:
+        assert conflict_checkout_paths(command) == expected
+
+    def test_a_git_directory_is_joined_to_the_cwd(
+        self, handler: PlanJournalGuardHandler, project: Path
+    ) -> None:
+        command = f"git -C {project} checkout --ours {_relative_live()}"
+
+        assert handler.matches(_bash(command, Path("/elsewhere"))) is True
+
+    def test_a_relative_git_directory_is_joined_to_the_cwd(
+        self, handler: PlanJournalGuardHandler, project: Path
+    ) -> None:
+        command = f"git -C {WORKTREE} checkout --ours {PLAN_DIR}/{WORKTREE_FOLDER}/JOURNAL/{WORKTREE_DAYFILE}"
+
+        assert handler.matches(_bash(command, project)) is True
+
+    def test_stands_down_when_the_scaffolder_has_no_resolve_conflict_mode(
+        self, handler: PlanJournalGuardHandler, project: Path
+    ) -> None:
+        (project / PLAN_DIR / "mkplan.bash").write_text(
+            "#!/usr/bin/env bash\n#   mkplan.bash --journal <plan-number> ...\n"
+        )
+
+        hook_input = _bash(f"git checkout --ours {_relative_live()}", project)
+
+        assert handler.matches(hook_input) is False
+
+    def test_a_hand_edit_is_still_denied_not_advised(
+        self, handler: PlanJournalGuardHandler, project: Path
+    ) -> None:
+        hook_input = _bash(f"echo x >> {_relative_live()}", project)
+
+        assert handler.handle(hook_input).decision == Decision.DENY
 
 
 class TestCommandShapes:

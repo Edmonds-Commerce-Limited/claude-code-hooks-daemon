@@ -226,6 +226,46 @@ the journal directory left at its default `JOURNAL` name. When any of those
 fails it is inert and logs which one, once, at INFO. A coordinator that asks a
 sub-agent to journal puts the two-step pattern above in the brief.
 
+### Resolving a merge conflict in a day-file
+
+Two branches that each journal the same plan on the same day both append to
+the end of one day-file, so the merge conflicts there. This also happens after
+midnight UTC, when the conflicted file is yesterday's and `journal-dayfile-is-today`
+refuses an `Edit` of it. Resolve it with the scaffolder, not by hand:
+
+```bash
+git merge other-branch            # stops: conflict in 00190-Journal-26-10-03.md
+CLAUDE/Plan/mkplan.bash --resolve-conflict CLAUDE/Plan/00190-my-plan/JOURNAL/00190-Journal-26-10-03.md
+git commit --no-edit              # the day-file is already staged
+```
+
+`--resolve-conflict` writes the **union** of both sides and runs `git add` on it:
+
+- the header text once;
+- every entry exactly once, so an entry present on both sides (including every
+  entry from before the branches diverged) is not duplicated;
+- entries in time order, each keeping its **original time and day**. Entries
+  with the same `HH:MM` keep ours (the branch you are merging into) first,
+  then theirs;
+- fenced blocks stay inside their entry, so a quoted `## HH:MM` line is not
+  taken for an entry.
+
+It reads git's index stages (`:2:` ours, `:3:` theirs) and falls back to the
+conflict markers in the working file when the index holds no stages. It
+**refuses**, exits non-zero and writes nothing when the path is not a
+`NNNNN-Journal-YY-MM-DD.md` file in a `JOURNAL/` folder, when there is no
+conflict, when only one side exists (one branch deleted the file), or when
+either side has text it cannot read as a header followed by `## HH:MM` entries:
+an unclosed code fence, a `## ` heading that is not an entry, or headers that
+differ between the two sides. Those cases need a person.
+
+Do not use `git checkout --ours <day-file>` or `--theirs`: it keeps one side
+and discards the other side's entries. `plan_journal_guard` does not deny it,
+since keeping one side is occasionally right and the discarded entries remain
+in the other commit, but it adds an advisory naming `--resolve-conflict`.
+Re-recording a lost entry with `--journal` is the worst fallback, because it
+stamps the entry with today's time and day instead of its own.
+
 ### Append-only discipline
 
 A journal is **append-only**. New entries go at the **bottom**; earlier entries
