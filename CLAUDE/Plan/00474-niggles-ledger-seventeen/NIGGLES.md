@@ -1478,7 +1478,11 @@ wrong day, with a pointer.
 **Impact**: any parallel work that journals the same plan on the same day and merges after midnight hits this.
 Worktree agents met the same conflict before midnight and could resolve it.
 
-**Status**: ⬜ Open. Remedy: let both guards accept an edit that only removes conflict markers from a day-file and
+**Status**: ✅ Fixed on worktree-n345-jconf (commits 0f72d5238 and 662a8013c): `mkplan.bash --resolve-conflict <day-file>` writes the union of both sides in time order and stages it, and `git checkout|restore --ours|--theirs` of
+a day-file draws an advisory from `plan_journal_guard` (not a deny: the discarded entries survive in the other commit,
+and keeping one side is sometimes right). Neither guard judges the mode, which is a Bash command that writes no
+day-file by any route they know; `plan_qa_edit` only judges Edit/Write. Original remedy text: let both guards accept
+an edit that only removes conflict markers from a day-file and
 keeps every entry from both sides. The test is that the result equals the union of the two stages. Alternatively,
 give `mkplan.bash` a `--resolve-conflict <day-file>` mode that writes the union in time order. Also decide whether
 `git checkout --ours/--theirs` into a JOURNAL path should be judged at all.

@@ -9,6 +9,13 @@ the clock had passed the wrong time (ledger 00422 N3 and N21). An advisory, in
 effect, already existed and changed nothing, so this handler DENIES and names
 the exact command for the plan in question.
 
+One advisory rides along (ledger 00474 N345): ``git checkout|restore --ours|--theirs``
+of a day-file overwrites it with one side and loses the other side's entries.
+It is not denied, because those entries survive in the other commit and keeping
+one side is sometimes right; the result is an ALLOW whose context names
+``mkplan.bash --resolve-conflict``, the union route. Only where the checkout's
+scaffolder offers that mode.
+
 Every checkout is guarded, not just this one. A worktree under
 ``untracked/worktrees/`` or ``.claude/worktrees/`` sends its sub-agents' hooks
 to the MAIN daemon, so a day-file is located with
@@ -48,7 +55,8 @@ import logging
 import os.path
 import re
 import secrets
-from dataclasses import dataclass
+import shlex
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Final
@@ -90,6 +98,19 @@ logger = logging.getLogger(__name__)
 #: The scaffolder's journal mode. Its presence in the deployed script is the
 #: proof that the remedy this handler prints actually exists there.
 _JOURNAL_FLAG: Final[str] = "--journal"
+
+#: The scaffolder's conflict mode, named by the advisory on a `git checkout --ours`.
+_RESOLVE_CONFLICT_FLAG: Final[str] = "--resolve-conflict"
+
+#: `git checkout|restore --ours|--theirs <path>` overwrites a conflicted file
+#: with one side, so the other side's journal entries are lost.
+_GIT: Final[str] = "git"
+_GIT_CONFLICT_SUBCOMMANDS: Final[frozenset[str]] = frozenset({"checkout", "restore"})
+_CONFLICT_SIDE_FLAGS: Final[frozenset[str]] = frozenset({"--ours", "--theirs"})
+_GIT_DIRECTORY_OPTION: Final[str] = "-C"
+_GIT_GLOBAL_OPTIONS_WITH_VALUE: Final[frozenset[str]] = frozenset({"-C", "-c"})
+#: What the tokeniser returns for `;`, `&&`, `||`, `|` (and `(`/`)`/`&`).
+_SEGMENT_PUNCTUATION: Final[frozenset[str]] = frozenset(";&|()")
 
 #: Decode policy for the files this handler reads: it looks only for ASCII
 #: markers and headings, so a replaced byte can neither create nor hide one.
@@ -134,6 +155,8 @@ class _JournalTarget:
     plan_number: int | None
     checkout: Path
     placed: bool = True
+    #: A `git checkout --ours/--theirs` of the day-file: advised on, never denied.
+    conflict_checkout: bool = False
 
 
 class PlanJournalGuardHandler(PreToolUseHandlerBase):
@@ -230,15 +253,15 @@ class PlanJournalGuardHandler(PreToolUseHandlerBase):
             return None
         return plan_dir
 
-    def _remedy_is_deployed(self, plan_root: Path) -> bool:
-        """Whether `mkplan.bash --journal` exists in this checkout and can run.
+    def _remedy_is_deployed(self, plan_root: Path, flag: str = _JOURNAL_FLAG) -> bool:
+        """Whether `mkplan.bash <flag>` exists in this checkout and can run.
 
         Read only once a call has already been found to target a day-file, so
         the cost falls on the rare matching call and never on ordinary traffic.
         """
         template = plan_root / JOURNAL_TEMPLATE_NAME
         if self._file_state(template) is not True:
-            self._log_inert(f"{template} is missing, so `mkplan.bash {_JOURNAL_FLAG}` cannot run")
+            self._log_inert(f"{template} is missing, so `mkplan.bash {flag}` cannot run")
             return False
         script = plan_root / MKPLAN_SCRIPT_NAME
         if self._file_state(script) is not True:
@@ -253,8 +276,8 @@ class PlanJournalGuardHandler(PreToolUseHandlerBase):
                 read.reason,
             )
             return False
-        if _JOURNAL_FLAG not in read.text:
-            self._log_inert(f"{script} has no {_JOURNAL_FLAG} mode")
+        if flag not in read.text:
+            self._log_inert(f"{script} has no {flag} mode")
             return False
         return True
 
@@ -356,6 +379,24 @@ class PlanJournalGuardHandler(PreToolUseHandlerBase):
                 return self._unplaced_target(text.strip(), writes.directories, cwd, plan_dir)
         return None
 
+    def _conflict_checkout_target(
+        self, hook_input: dict[str, Any], plan_dir: str
+    ) -> _JournalTarget | None:
+        """The day-file a `git checkout --ours/--theirs` would overwrite, else None."""
+        command = get_bash_command(hook_input)
+        if not command or not _BASH_PREFILTER_RE.search(command):
+            return None
+        raw_cwd = hook_input.get(HookInputField.CWD)
+        cwd = raw_cwd if isinstance(raw_cwd, str) and raw_cwd else None
+        for git_dir, raw in conflict_checkout_paths(command):
+            base: str | None = cwd
+            if git_dir is not None:
+                base = git_dir if cwd is None else str(Path(cwd) / git_dir)
+            target = self._dayfile_target(raw, base, plan_dir)
+            if target is not None:
+                return replace(target, conflict_checkout=True)
+        return None
+
     def _unplaced_target(
         self, raw: str, directories: tuple[str, ...], cwd: str | None, plan_dir: str
     ) -> _JournalTarget:
@@ -400,9 +441,14 @@ class PlanJournalGuardHandler(PreToolUseHandlerBase):
             return None
         if tool_name == ToolName.BASH:
             target = self._bash_target(hook_input, plan_dir)
+            if target is None:
+                target = self._conflict_checkout_target(hook_input, plan_dir)
         else:
             target = self._file_tool_target(hook_input, plan_dir)
-        if target is None or not self._remedy_is_deployed(target.checkout / plan_dir):
+        if target is None:
+            return None
+        flag = _RESOLVE_CONFLICT_FLAG if target.conflict_checkout else _JOURNAL_FLAG
+        if not self._remedy_is_deployed(target.checkout / plan_dir, flag):
             return None
         return target, plan_dir
 
@@ -416,6 +462,22 @@ class PlanJournalGuardHandler(PreToolUseHandlerBase):
         # Precondition: matches() found a target on this same input.
         assert resolved is not None, "Handler called without matches check"
         target, plan_dir = resolved
+
+        if target.conflict_checkout:
+            script = target.checkout / plan_dir / MKPLAN_SCRIPT_NAME
+            return GatingResult.allow(
+                context=[
+                    f"JOURNAL CONFLICT: `git checkout --ours/--theirs` on `{target.display}` "
+                    "discards every entry the other side added to that day-file. "
+                    "If you are resolving a merge conflict, keep both sides instead:\n\n"
+                    f"       {script} {_RESOLVE_CONFLICT_FLAG} {target.display}\n\n"
+                    "It writes the union of both sides in time order, each entry once, "
+                    "keeping each entry's original time, and stages the file. Advisory "
+                    "only: this command was not blocked. Keeping one side is correct "
+                    "only when the other side's entries are duplicates or are recorded "
+                    "elsewhere."
+                ]
+            )
 
         number = _PLAN_NUMBER_PLACEHOLDER if target.plan_number is None else str(target.plan_number)
         script = target.checkout / plan_dir / MKPLAN_SCRIPT_NAME
@@ -487,6 +549,12 @@ class PlanJournalGuardHandler(PreToolUseHandlerBase):
             "**Allowed**: the tool itself, `git` (moving a plan folder into "
             "`Completed/`), reading a journal, and an Edit that adds no line (removing "
             "conflict markers, reordering, a same-line redaction).\n\n"
+            "**A merge conflict in a day-file** is resolved with "
+            "`CLAUDE/Plan/mkplan.bash --resolve-conflict <day-file>`, which writes the "
+            "union of both sides in time order and stages it. No hand edit can resolve "
+            "it, and `git checkout --ours/--theirs` on a day-file draws an ADVISORY "
+            "(not a deny) naming that command, because it discards the other side's "
+            "entries.\n\n"
             "**Active only when** the plan workflow is on, journalling is on with its "
             "directory named `JOURNAL`, and the checkout's plan directory holds "
             "`_JOURNAL_TEMPLATE_.md` and a `mkplan.bash` that offers `--journal`. "
@@ -545,7 +613,73 @@ class PlanJournalGuardHandler(PreToolUseHandlerBase):
                 recommended_model=RecommendedModel.HAIKU,
                 requires_main_thread=False,
             ),
+            AcceptanceTest(
+                title="Allow resolving a journal conflict through mkplan.bash --resolve-conflict",
+                command=f"CLAUDE/Plan/mkplan.bash --resolve-conflict {probe_dayfile}",
+                dispatch_as_bash=True,
+                description=(
+                    "The conflict-resolving mode is the sanctioned route for a "
+                    "merge conflict in a day-file, so invoking it must never be "
+                    "blocked (ledger 00474 N345)."
+                ),
+                expected_decision=Decision.ALLOW,
+                expected_message_patterns=[],
+                safety_notes=(
+                    "If executed, mkplan.bash refuses before writing: the "
+                    "day-file does not exist, so it exits with an error."
+                ),
+                test_type=TestType.BLOCKING,
+                recommended_model=RecommendedModel.HAIKU,
+                requires_main_thread=False,
+            ),
         ]
+
+
+def conflict_checkout_paths(command: str) -> list[tuple[str | None, str]]:
+    """Every ``(git -C directory, path)`` a ``git checkout/restore --ours/--theirs`` names.
+
+    Reads each simple command of ``command`` (split on ``;``, ``&&``, ``||``,
+    ``|``). Text the shell cannot tokenise yields nothing: this feeds an
+    advisory, and a command that unreadable is already judged by the
+    write analysis.
+    """
+    lexer = shlex.shlex(command, posix=True, punctuation_chars=True)
+    lexer.whitespace_split = True
+    try:
+        tokens = list(lexer)
+    except ValueError:
+        return []
+
+    found: list[tuple[str | None, str]] = []
+    segment: list[str] = []
+    for token in tokens:
+        if token and set(token) <= _SEGMENT_PUNCTUATION:
+            found.extend(_segment_conflict_paths(segment))
+            segment = []
+        else:
+            segment.append(token)
+    found.extend(_segment_conflict_paths(segment))
+    return found
+
+
+def _segment_conflict_paths(words: list[str]) -> list[tuple[str | None, str]]:
+    """The paths of one simple command, when it is a `--ours/--theirs` git checkout."""
+    if not words or words[0] != _GIT:
+        return []
+    git_dir: str | None = None
+    index = 1
+    while index < len(words) and words[index].startswith("-"):
+        option = words[index]
+        takes_value = option in _GIT_GLOBAL_OPTIONS_WITH_VALUE
+        if option == _GIT_DIRECTORY_OPTION and index + 1 < len(words):
+            git_dir = words[index + 1]
+        index += 2 if takes_value else 1
+    if index >= len(words) or words[index] not in _GIT_CONFLICT_SUBCOMMANDS:
+        return []
+    arguments = words[index + 1 :]
+    if not any(argument in _CONFLICT_SIDE_FLAGS for argument in arguments):
+        return []
+    return [(git_dir, argument) for argument in arguments if not argument.startswith("-")]
 
 
 def _non_blank_lines(text: str) -> int:
