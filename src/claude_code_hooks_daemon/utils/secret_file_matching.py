@@ -1462,6 +1462,10 @@ def _bare_glob_mention(
     expands past :data:`_MAX_BARE_GLOB_FS_EXPANSIONS` examined paths raises
     ``TooManyToEnumerateError``, which the caller's fail-closed wrapper turns
     into a deny.
+
+    The cap counts what bash would produce: dot-entries a ``*`` does not
+    match are neither judged nor counted, and the project root is walked once
+    however many directories the command may run in.
     """
     for form in expansions:
         if not _is_glob_shaped(form):
@@ -1469,7 +1473,9 @@ def _bare_glob_mention(
         basename = form.rsplit("/", maxsplit=1)[-1]
         if len(_token_literal_residue(basename)) >= _MIN_GLOB_OVERLAP_CHARS:
             continue
-        for base in dict.fromkeys(cwds):
+        for position, base in enumerate(dict.fromkeys(cwds)):
+            if position and Path(form).is_absolute():
+                break  # an absolute word reads the same from every directory.
             match = _expand_glob_token(
                 form,
                 patterns,
@@ -1477,6 +1483,8 @@ def _bare_glob_mention(
                 cwd=base,
                 max_expansions=_MAX_BARE_GLOB_FS_EXPANSIONS,
                 deadline=deadline,
+                skip_hidden=True,
+                include_project_root=position == 0,
             )
             if match is not None:
                 return match
@@ -2527,8 +2535,15 @@ def _expand_glob_token(
     cwd: str | None = None,
     max_expansions: int | None = None,
     deadline: float | None = None,
+    skip_hidden: bool = False,
+    include_project_root: bool = True,
 ) -> str | None:
     """First protected pattern matched by a file ``token`` actually expands to.
+
+    ``skip_hidden`` reads wildcards the way bash does by default (see
+    :func:`shell_expansion.bounded_recursive_glob`), and
+    ``include_project_root=False`` leaves the project root out of the bases for
+    a caller that has already walked it.
 
     Tried against each plausible base (the project root, then ``cwd`` when
     given — a Bash tool call runs relative to one of these) so a relative
@@ -2561,7 +2576,7 @@ def _expand_glob_token(
         ]
     else:
         bases: list[Path] = []
-        if project_root:
+        if project_root and include_project_root:
             bases.append(Path(project_root))
         if cwd is not None:
             try:
@@ -2595,7 +2610,7 @@ def _expand_glob_token(
             continue
         seen.add(key)
         for match in shell_expansion.bounded_recursive_glob(
-            base, pattern_str, deadline=deadline, errors=errors
+            base, pattern_str, deadline=deadline, errors=errors, skip_hidden=skip_hidden
         ):
             examined += 1
             if max_expansions is not None and examined > max_expansions:

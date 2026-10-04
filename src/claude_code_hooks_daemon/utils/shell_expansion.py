@@ -4074,9 +4074,15 @@ def bounded_recursive_glob(
     max_entries_visited: int = DEFAULT_MAX_GLOB_ENTRIES_VISITED,
     deadline: float | None = None,
     errors: list[OSError] | None = None,
+    skip_hidden: bool = False,
 ) -> Iterator[Path]:
     """Lazily yield paths under ``base`` matching ``pattern`` (which may
     contain a recursive ``**`` component), bounded by entries VISITED.
+
+    ``skip_hidden`` follows bash's default: a wildcard or ``**`` component
+    does not match an entry whose name starts with ``.`` unless the pattern
+    component itself starts with ``.``. Off by default, so every other caller
+    still sees dot-entries.
 
     A pattern rooted at the filesystem root (``base`` is itself an anchor,
     e.g. ``Path("/")``) whose leading non-wildcard components name an
@@ -4147,6 +4153,7 @@ def bounded_recursive_glob(
         # prefix, which bounds its own cost; only a recursive walk is capped.
         max_entries_visited=max_entries_visited if _RECURSIVE_MARKER in pattern else None,
         deadline=deadline,
+        skip_hidden=skip_hidden,
     )
     if walk.parts:
         yield from walk.select(base, 0)
@@ -4233,6 +4240,7 @@ class _GlobWalk:
     errors: list[OSError] | None
     max_entries_visited: int | None
     deadline: float | None
+    skip_hidden: bool = False
     visited: int = 0
     listings: dict[Path, list[os.DirEntry[str]]] = field(default_factory=dict)
 
@@ -4289,6 +4297,8 @@ class _GlobWalk:
         # bash never opens it, so its own length proves nothing.
         part = self.parts[index]
         for entry in self._list(directory):
+            if self.skip_hidden and entry.name.startswith(".") and not part.startswith("."):
+                continue
             if not fnmatch.fnmatchcase(entry.name, part):
                 continue
             if last:
@@ -4303,6 +4313,8 @@ class _GlobWalk:
         if not last:
             yield from self.select(directory, index + 1)
         for entry in self._list(directory):
+            if self.skip_hidden and entry.name.startswith("."):
+                continue
             if last:
                 yield Path(entry.path)
             if entry.name in _PRUNED_DIR_NAMES:

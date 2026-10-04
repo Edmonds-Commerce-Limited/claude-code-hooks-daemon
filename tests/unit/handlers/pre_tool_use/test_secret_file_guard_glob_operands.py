@@ -76,6 +76,58 @@ class TestBareStarLastComponent:
         assert _verdict(project, "cat 'dir/*'") == Decision.ALLOW
 
 
+class TestBareStarFollowsBashRules:
+    """N220 review round 1: the expansion and its cap read the way bash reads the glob."""
+
+    def test_dot_entries_do_not_count_towards_the_cap(self, project: Path) -> None:
+        # `safe/*` yields plain.txt and extra.txt in bash; the five dot-entries are skipped.
+        (project / "safe" / "extra.txt").write_bytes(b"x\n")
+        for number in range(5):
+            (project / "safe" / f".hidden{number}").write_bytes(b"x\n")
+        with patch.object(sfm, "_MAX_BARE_GLOB_FS_EXPANSIONS", 3):
+            assert _verdict(project, "cat safe/*") == Decision.ALLOW
+
+    def test_star_does_not_reach_a_protected_dot_entry(self, project: Path) -> None:
+        (project / "safe" / _NAME).write_bytes(b"x\n")
+        assert _verdict(project, "cat safe/*") == Decision.ALLOW
+
+    def test_dot_led_component_reaches_dot_entries(self, project: Path) -> None:
+        (project / "safe" / _NAME).write_bytes(b"x\n")
+        assert _verdict(project, "cat safe/.*") == Decision.DENY
+
+    def test_dot_directory_is_not_descended_by_a_star_component(self, project: Path) -> None:
+        (project / ".hid").mkdir()
+        for number in range(5):
+            (project / ".hid" / f"n{number}").write_bytes(b"x\n")
+        (project / _PROTECTED).unlink()
+        # bash yields dir/plain.txt and safe/plain.txt only.
+        with patch.object(sfm, "_MAX_BARE_GLOB_FS_EXPANSIONS", 2):
+            assert _verdict(project, "ls */*") == Decision.ALLOW
+
+    def test_project_root_is_walked_once_across_working_directories(self, project: Path) -> None:
+        walked: list[str] = []
+        original = sfm.shell_expansion.bounded_recursive_glob
+
+        def recording(base: Path, pattern: str, **kwargs: Any) -> Any:
+            walked.append(str(base))
+            return original(base, pattern, **kwargs)
+
+        sub = str(project / "safe")
+        with patch.object(sfm.shell_expansion, "bounded_recursive_glob", recording):
+            sfm._bare_glob_mention(["*"], (), str(project), (str(project), sub, sub))
+        assert sorted(walked) == sorted([str(project), sub])
+
+    def test_a_walk_over_the_cap_but_a_result_count_under_it_is_allowed(
+        self, project: Path
+    ) -> None:
+        # Naive walk: 4 entries listed under `safe`; bash yields 2 of them.
+        (project / "safe" / "extra.txt").write_bytes(b"x\n")
+        (project / "safe" / ".a").write_bytes(b"x\n")
+        (project / "safe" / ".b").write_bytes(b"x\n")
+        with patch.object(sfm, "_MAX_BARE_GLOB_FS_EXPANSIONS", 2):
+            assert _verdict(project, "cat safe/*") == Decision.ALLOW
+
+
 class TestDoubleQuotedOneLiner:
     """N249."""
 
