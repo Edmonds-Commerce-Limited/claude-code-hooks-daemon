@@ -1406,6 +1406,21 @@ The uncertain-move union judges the hook directory and the LAST recorded move (`
 every candidate directory (`sub`). Remedy: judge every directory any `cd` in the chain could
 land in.
 
+### N347 — the plan-folder mkdir guard read `mkdir` inside a branch name as a command
+
+**Source**: coordinator, resolving the batch D merge on 2026-10-04.
+
+**Evidence**: the command `git show worktree-p483-mkdir:CLAUDE/Plan/00483-…/JOURNAL/<day-file>` was denied as
+R-PLAN-FOLDER-MKDIR, naming `mkdir :CLAUDE/Plan/00483-…`. The `mkdir` inside the ref word was read as a command
+word. `hooks-daemon probe` reproduced it on main at e7e92a430. The same probe is allowed on main at c953b0c62, which
+includes batch D (merge 76bf848aa), because that change judges real `mkdir` commands only.
+
+**Impact**: a false positive on any read-only command whose word contains `mkdir`, such as a branch name, a ref or a
+path.
+
+**Status**: 🔄 Fixed incidentally by 76bf848aa, but no test pins it. Remedy: add a unit test in
+`test_plan_number_helper.py` that allows `git show <x>-mkdir:CLAUDE/Plan/NNNNN-name/PLAN.md`.
+
 ### N346 — commit-time gates with a fixed subprocess timeout deny ordinary commits under host load
 
 **Source**: the Plan 00483 batch F agent, committing on `worktree-p483-paths` on 2026-10-04 while the host load
