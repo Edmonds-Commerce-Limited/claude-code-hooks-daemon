@@ -24,7 +24,6 @@ from __future__ import annotations
 
 import logging
 import re
-import subprocess
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
@@ -194,11 +193,11 @@ class _GitTimedOut(_UnreadableTree):
     """git ran out of time, so this commit could not be checked; retrying may work."""
 
 
-def _raise_unreadable(result: subprocess.CompletedProcess[str], what: str) -> NoReturn:
+def _raise_unreadable(returncode: int, stderr: str, what: str) -> NoReturn:
     """Raise for a git result that is neither success nor the answer 'no match'."""
-    if result.returncode == GIT_TIMED_OUT:
+    if returncode == GIT_TIMED_OUT:
         raise _GitTimedOut(what)
-    raise _UnreadableTree(result.stderr.strip() or f"{what} exited {result.returncode}")
+    raise _UnreadableTree(stderr.strip() or f"{what} exited {returncode}")
 
 
 def _commit_sources(subcommand: str, options: list[str]) -> tuple[_Source, ...] | None:
@@ -256,7 +255,7 @@ def _commits(command: str, cwd: Path) -> Iterator[_Commit | _Unplaceable]:
 def _git_or_raise(root: Path, *args: str) -> str:
     result = run_git(root, *args)
     if result.returncode != 0:
-        _raise_unreadable(result, f"git {args[0]}")
+        _raise_unreadable(result.returncode, result.stderr, f"git {args[0]}")
     return result.stdout
 
 
@@ -313,7 +312,7 @@ def _grep(root: Path, source: _Source, prefilter: str, *flags: str) -> str:
     if result.returncode == _GREP_NO_MATCH:
         return ""
     if result.returncode != 0:
-        _raise_unreadable(result, "git grep")
+        _raise_unreadable(result.returncode, result.stderr, "git grep")
     return result.stdout
 
 
