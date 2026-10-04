@@ -28,11 +28,11 @@ import time
 from collections.abc import Callable
 from enum import StrEnum
 from pathlib import Path
-from subprocess import CompletedProcess
 from typing import Final
 
 from claude_code_hooks_daemon.utils import secret_file_matching as sfm
 from claude_code_hooks_daemon.utils.git_repo import GIT_TIMED_OUT, run_git
+from claude_code_hooks_daemon.utils.path_containment import path_relative_to
 from claude_code_hooks_daemon.utils.path_exclusion import (
     first_matching_glob,
     literal_screen,
@@ -194,8 +194,11 @@ def _walk(
     return None
 
 
-def _git(directory: str, budget: _Budget, *args: str) -> CompletedProcess[str]:
-    """``git -C directory args``, bounded by the scan deadline; a timeout raises."""
+def _git(directory: str, budget: _Budget, *args: str) -> tuple[int, str]:
+    """``(returncode, stdout)`` of ``git -C directory args``, bounded by the scan deadline.
+
+    A git timeout raises, as the scan's answer would otherwise be a guess.
+    """
     timeout = budget.remaining()
     if timeout is None:
         result = run_git(Path(directory), *args)
@@ -203,15 +206,15 @@ def _git(directory: str, budget: _Budget, *args: str) -> CompletedProcess[str]:
         result = run_git(Path(directory), *args, timeout=timeout)
     if result.returncode == GIT_TIMED_OUT:
         raise TimeoutError(f"git did not answer for {directory!r} within the scan deadline")
-    return result
+    return result.returncode, result.stdout
 
 
 def _listing(directory: str, budget: _Budget, *args: str) -> list[str] | None:
     """Names ``git ls-files`` lists (relative to ``directory``), or None when git cannot answer."""
-    result = _git(directory, budget, "ls-files", "-z", *args)
-    if result.returncode != 0:
+    returncode, stdout = _git(directory, budget, "ls-files", "-z", *args)
+    if returncode != 0:
         return None
-    names = [name for name in result.stdout.split("\0") if name]
+    names = [name for name in stdout.split("\0") if name]
     budget.spend(len(names))
     return names
 
@@ -324,16 +327,17 @@ def _root_is_read_despite_ignore(root: str, budget: _Budget) -> bool:
     Naming such a root outright makes the tool read it, while git's listing of
     non-ignored files has nothing under it.
     """
-    top = _git(root, budget, "rev-parse", "--show-toplevel")
-    if top.returncode != 0:
+    returncode, toplevel = _git(root, budget, "rev-parse", "--show-toplevel")
+    if returncode != 0:
         return False
+    real_root = os.path.realpath(root)
     try:
-        relative = Path(os.path.realpath(root)).relative_to(os.path.realpath(top.stdout.strip()))
+        relative = path_relative_to(Path(real_root), os.path.realpath(toplevel.strip()))
     except ValueError:
         return True  # a root git places outside its own toplevel is walked, not trusted.
     if any(part.startswith(".") for part in relative.parts):
         return True
-    return _git(root, budget, "check-ignore", "-q", "--", os.path.realpath(root)).returncode == 0
+    return _git(root, budget, "check-ignore", "-q", "--", real_root)[0] == 0
 
 
 def _also_git_ignored(is_exempt: ExemptHook | None) -> ExemptHook:

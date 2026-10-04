@@ -20,6 +20,7 @@ from tests.bash_sandbox import run_sandboxed_bash
 
 from claude_code_hooks_daemon.constants import HandlerID, Priority
 from claude_code_hooks_daemon.constants.rule_ids import RuleID
+from claude_code_hooks_daemon.constants.tools import ToolName
 from claude_code_hooks_daemon.core import Decision
 from claude_code_hooks_daemon.core.chain import HandlerChain
 from claude_code_hooks_daemon.core.data_layer import reset_data_layer
@@ -852,7 +853,10 @@ class TestAScanThatRanOutOfBudgetHasItsOwnRule:
 
     @pytest.mark.parametrize(
         ("tool_name", "tool_input"),
-        [("Grep", {"pattern": "x"}), ("Bash", {"command": "grep -r x ."})],
+        [
+            (ToolName.GREP, {"pattern": "x"}),
+            (ToolName.BASH, {"command": "grep -r x ."}),
+        ],
     )
     def test_a_search_over_a_tree_past_the_cap_is_denied_as_incomplete(
         self,
@@ -861,7 +865,7 @@ class TestAScanThatRanOutOfBudgetHasItsOwnRule:
         tool_name: str,
         tool_input: dict[str, Any],
     ) -> None:
-        if tool_name == "Grep":
+        if tool_name == ToolName.GREP:
             tool_input = {**tool_input, "path": str(clean_tree)}
         result = handler.handle(_hook_input(tool_name, tool_input, cwd=clean_tree))
         assert result.decision == Decision.DENY
