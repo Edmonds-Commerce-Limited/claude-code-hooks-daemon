@@ -481,3 +481,45 @@ class TestModeAwareAcceptanceTests:
         for fixture in (chain, prelude):
             assert fixture.expected_decision == Decision.ALLOW
             assert not current.matches(_bash(fixture.command))
+
+
+class TestCompoundCommandSyntaxIsNotSequencing:
+    """N339: fully gated groups and loops must not be read as ungated sequences."""
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            'cd X && mkdir -p d && { ./qa.bash > d/o.txt 2>&1 && echo "exit=0" || echo "exit=$?"; }',
+            "cd X && for b in a b c; do git -C x/$b rev-parse HEAD || exit 1; done",
+            "while read -r l; do echo $l || exit 1; done < f",
+            "if test -f x; then echo y || exit 1; fi",
+            "case $x in a) foo;; b) bar;; esac",
+        ],
+    )
+    def test_gated_compound_command_is_allowed(
+        self, handler: BashSafeModeHandler, command: str
+    ) -> None:
+        assert handler.matches(_bash(command)) is False
+        assert handler.handle(_bash(command)).decision == Decision.ALLOW
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "for x in y; do a; b; done",
+            "{ a; b; }",
+            "if c; then a; b; fi",
+            "cd X && for b in a b; do git rev-parse $b || exit 1; done; echo done",
+            "for x in $(ls); do a; b; done",
+            "a; done",
+        ],
+    )
+    def test_ungated_sequencing_inside_a_compound_command_still_denies(
+        self, handler: BashSafeModeHandler, command: str
+    ) -> None:
+        assert handler.matches(_bash(command)) is True
+        assert handler.handle(_bash(command)).decision == Decision.DENY
+
+    def test_compound_acceptance_fixture_allows(self, handler: BashSafeModeHandler) -> None:
+        fixture = next(t for t in handler.get_acceptance_tests() if "compound" in t.title)
+        assert fixture.expected_decision == Decision.ALLOW
+        assert not handler.matches(_bash(fixture.command))
