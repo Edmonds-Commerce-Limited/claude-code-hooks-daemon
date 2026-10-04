@@ -104,7 +104,10 @@ class TestIdentity:
     def test_identity_priority_and_rule(self, handler: ConflictMarkerCommitGateHandler) -> None:
         assert handler.handler_id == HandlerID.CONFLICT_MARKER_COMMIT_GATE
         assert handler.priority == Priority.CONFLICT_MARKER_COMMIT_GATE
-        assert [rule.rule_id for rule in handler.get_rules()] == [RuleID.CONFLICT_MARKER_COMMIT]
+        assert [rule.rule_id for rule in handler.get_rules()] == [
+            RuleID.CONFLICT_MARKER_COMMIT,
+            RuleID.CONFLICT_MARKER_SCAN_TIMED_OUT,
+        ]
 
     def test_guidance_names_both_spellings(self, handler: ConflictMarkerCommitGateHandler) -> None:
         guidance = handler.get_claude_md()
@@ -408,6 +411,60 @@ class TestAGitFailureIsReportedNotSilent:
         assert result.decision == Decision.DENY
         assert "NOT checked" in result.reason
         assert "boom" in result.reason
+
+
+class TestATimedOutScanIsNotAFinding:
+    """Ledger 00474 N346: a deny from a git timeout must not read as a conflict marker."""
+
+    @staticmethod
+    def _git_times_out_on(verb: str) -> Any:
+        real_run = subprocess.run
+
+        def _run(argv: list[str], *args: Any, **kwargs: Any) -> Any:
+            if verb in argv:
+                raise subprocess.TimeoutExpired(argv, kwargs.get("timeout", 0))
+            return real_run(argv, *args, **kwargs)
+
+        return patch("claude_code_hooks_daemon.utils.git_repo.subprocess.run", side_effect=_run)
+
+    @pytest.mark.parametrize("verb", ["grep", "diff", "check-attr"])
+    def test_a_git_timeout_denies_under_its_own_rule(
+        self, handler: ConflictMarkerCommitGateHandler, repo: Path, verb: str
+    ) -> None:
+        _stage(repo, "doc.md", "# Doc\n\nfirst\nmore\n")
+        with self._git_times_out_on(verb):
+            result = _verdict(handler, "git commit -m x", repo)
+        assert result.decision == Decision.DENY
+        assert RuleID.CONFLICT_MARKER_SCAN_TIMED_OUT in result.reason
+        assert f"{RuleID.CONFLICT_MARKER_COMMIT}:" not in result.reason
+
+    def test_the_reason_says_what_ran_out_that_nothing_was_found_and_to_retry(
+        self, handler: ConflictMarkerCommitGateHandler, repo: Path
+    ) -> None:
+        _stage(repo, "doc.md", "# Doc\n\nfirst\nmore\n")
+        with self._git_times_out_on("grep"):
+            result = _verdict(handler, "git commit -m x", repo)
+        assert f"{Timeout.GIT_CONTEXT} s" in result.reason
+        assert "no conflict marker was found" in result.reason
+        assert "retry" in result.reason.lower()
+
+    def test_a_real_finding_keeps_its_own_rule(
+        self, handler: ConflictMarkerCommitGateHandler, repo: Path
+    ) -> None:
+        _stage(repo, "doc.md", f"# Doc\n\nfirst\n{OPEN} HEAD\n")
+        result = _verdict(handler, "git commit -m x", repo)
+        assert result.decision == Decision.DENY
+        assert RuleID.CONFLICT_MARKER_COMMIT in result.reason
+        assert RuleID.CONFLICT_MARKER_SCAN_TIMED_OUT not in result.reason
+
+    def test_a_non_timeout_git_failure_keeps_the_unchecked_rule(
+        self, handler: ConflictMarkerCommitGateHandler, repo: Path
+    ) -> None:
+        failed = subprocess.CompletedProcess(args=["git"], returncode=128, stdout="", stderr="boom")
+        with patch(f"{_MODULE}.run_git", return_value=failed):
+            result = _verdict(handler, "git commit -m x", repo)
+        assert RuleID.CONFLICT_MARKER_COMMIT in result.reason
+        assert RuleID.CONFLICT_MARKER_SCAN_TIMED_OUT not in result.reason
 
 
 class TestCommandShapes:

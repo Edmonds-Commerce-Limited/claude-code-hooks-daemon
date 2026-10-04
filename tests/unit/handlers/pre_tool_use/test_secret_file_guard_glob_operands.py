@@ -12,6 +12,7 @@ from unittest.mock import patch
 
 import pytest
 
+from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.core import Decision
 from claude_code_hooks_daemon.handlers.pre_tool_use import secret_file_guard as guard_module
 from claude_code_hooks_daemon.handlers.pre_tool_use.secret_file_guard import (
@@ -74,6 +75,75 @@ class TestBareStarLastComponent:
 
     def test_a_quoted_star_is_a_literal_and_is_allowed(self, project: Path) -> None:
         assert _verdict(project, "cat 'dir/*'") == Decision.ALLOW
+
+
+def _deny_reason(root: Path, command: str) -> str:
+    hook_input: dict[str, Any] = {
+        "tool_name": "Bash",
+        "tool_input": {"command": command},
+        "cwd": str(root),
+    }
+    handler = SecretFileGuardHandler()
+    assert handler.matches(hook_input), command
+    result = handler.handle(hook_input)
+    assert result.decision == Decision.DENY, command
+    return result.reason or ""
+
+
+class TestAScanThatRanOutOfBudgetIsNotAFinding:
+    """Ledger 00474 N348: failing closed past a cap must not read as 'mentions a protected path'."""
+
+    def test_a_cap_overflow_is_denied_under_its_own_rule(self, project: Path) -> None:
+        for number in range(3):
+            (project / "safe" / f"more{number}.txt").write_bytes(b"x\n")
+        with patch.object(sfm, "_MAX_BARE_GLOB_FS_EXPANSIONS", 2):
+            reason = _deny_reason(project, "cat safe/*")
+        assert RuleID.SECRET_SCAN_INCOMPLETE in reason
+        assert RuleID.SECRET_BASH_MENTION not in reason
+        assert RuleID.SECRET_READ not in reason
+        assert RuleID.SECRET_EVALUATION_ERROR not in reason
+
+    def test_a_cap_overflow_says_what_ran_out_that_nothing_was_found_and_to_narrow(
+        self, project: Path
+    ) -> None:
+        for number in range(3):
+            (project / "safe" / f"more{number}.txt").write_bytes(b"x\n")
+        with patch.object(sfm, "_MAX_BARE_GLOB_FS_EXPANSIONS", 2):
+            reason = _deny_reason(project, "cat safe/*")
+        assert "2 examined paths" in reason
+        assert "no protected path was found" in reason
+        assert "narrow the glob" in reason
+
+    def test_a_deadline_is_denied_under_its_own_rule_and_says_to_retry(self, project: Path) -> None:
+        with patch.object(sfm, "find_protected_mention_detail", side_effect=TimeoutError("late")):
+            reason = _deny_reason(project, "cat safe/*")
+        assert RuleID.SECRET_SCAN_INCOMPLETE in reason
+        assert RuleID.SECRET_EVALUATION_ERROR not in reason
+        assert f"{sfm.SCAN_DEADLINE_SECONDS:g} s" in reason
+        assert "no protected path was found" in reason
+        assert "retry" in reason.lower()
+
+    def test_a_cap_with_no_stated_limit_still_names_a_cap(self, project: Path) -> None:
+        error = sfm.shell_expansion.TooManyToEnumerateError("too many")
+        with patch.object(sfm, "find_protected_mention_detail", side_effect=error):
+            reason = _deny_reason(project, "cat safe/*")
+        assert RuleID.SECRET_SCAN_INCOMPLETE in reason
+        assert "cap" in reason
+
+    def test_the_reason_never_echoes_the_exception_text(self, project: Path) -> None:
+        error = sfm.shell_expansion.TooManyToEnumerateError("walked into /hidden/discovered-name")
+        with patch.object(sfm, "find_protected_mention_detail", side_effect=error):
+            reason = _deny_reason(project, "cat safe/*")
+        assert "discovered-name" not in reason
+
+    def test_a_real_finding_keeps_its_own_rule(self, project: Path) -> None:
+        reason = _deny_reason(project, "cat dir/*")
+        assert RuleID.SECRET_BASH_MENTION in reason
+        assert RuleID.SECRET_SCAN_INCOMPLETE not in reason
+
+    def test_the_new_rule_is_declared_by_the_handler(self) -> None:
+        rule_ids = [rule.rule_id for rule in SecretFileGuardHandler().get_rules()]
+        assert RuleID.SECRET_SCAN_INCOMPLETE in rule_ids
 
 
 class TestBareStarFollowsBashRules:

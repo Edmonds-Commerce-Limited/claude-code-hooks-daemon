@@ -47,6 +47,7 @@ from tests.scaling import SIZE_FACTOR, SUPERLINEAR_RATIO, counted_ratio, scaling
 from claude_code_hooks_daemon.config.loader import ConfigLoader
 from claude_code_hooks_daemon.config.models import Config
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
+from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.core.acceptance_test import AcceptanceTest
 from claude_code_hooks_daemon.core.event import EventType
 from claude_code_hooks_daemon.core.handler import Handler
@@ -293,7 +294,8 @@ class TestSweepVerdictIsHostIndependent:
         handler = SecretFileGuardHandler()
         result = handler.handle(_bash_input(_hostile_bash_command_at("wildcards", 12_500)))
         assert result.reason is not None
-        assert sfm.SCAN_COULD_NOT_FINISH in result.reason
+        assert RuleID.SECRET_SCAN_INCOMPLETE in result.reason
+        assert RuleID.SECRET_EVALUATION_ERROR not in result.reason
 
 
 class TestBashCommandShapesStayLinear:

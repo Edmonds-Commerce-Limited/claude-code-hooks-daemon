@@ -2615,7 +2615,8 @@ def _expand_glob_token(
             examined += 1
             if max_expansions is not None and examined > max_expansions:
                 raise shell_expansion.TooManyToEnumerateError(
-                    f"glob {token!r} expands past {max_expansions} examined paths"
+                    f"glob {token!r} expands past {max_expansions} examined paths",
+                    limit=max_expansions,
                 )
             matched = first_matching_glob(str(match), patterns, project_root=project_root)
             if matched is not None:

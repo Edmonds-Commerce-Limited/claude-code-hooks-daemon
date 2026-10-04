@@ -27,13 +27,14 @@ import re
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Final
+from typing import Any, Final, NoReturn
 
 from claude_code_hooks_daemon.constants import (
     HandlerID,
     HandlerTag,
     HookInputField,
     Priority,
+    Timeout,
     ToolName,
 )
 from claude_code_hooks_daemon.constants.rule_ids import RuleID
@@ -61,7 +62,7 @@ from claude_code_hooks_daemon.utils.git_invocation_directory import (
     invocation_directory,
     placement_problem,
 )
-from claude_code_hooks_daemon.utils.git_repo import GitRepo, run_git
+from claude_code_hooks_daemon.utils.git_repo import GIT_TIMED_OUT, GitRepo, run_git
 from claude_code_hooks_daemon.utils.path_exclusion import handler_excludes_path
 from claude_code_hooks_daemon.utils.path_predicates import path_is_dir
 
@@ -134,6 +135,24 @@ _RULE: Final[Rule] = Rule(
 )
 
 
+_TIMED_OUT_RULE: Final[Rule] = Rule(
+    rule_id=RuleID.CONFLICT_MARKER_SCAN_TIMED_OUT,
+    blocked="a commit git could not finish reading for conflict markers within its time limit",
+    why=(
+        "An unchecked commit is not a clean one, so it is denied; but no conflict "
+        "marker was found, and the content is not at fault"
+    ),
+    fix="Retry the same commit; the limit is hit when the host is loaded",
+    verbose=(
+        f"git did not answer within {Timeout.GIT_CONTEXT} s while this gate read what "
+        "the commit records, so the commit was NOT checked, and no conflict marker was "
+        "found: this is not a finding and the staged content needs no edit. The gate "
+        "fails closed because it could not read the tree. Retry the same commit "
+        "unchanged; the limit is hit when the host is under load."
+    ),
+)
+
+
 @dataclass(frozen=True)
 class _Source:
     """One thing a commit records: the index, or the working tree (some paths)."""
@@ -168,6 +187,17 @@ class _Unplaceable:
 
 class _UnreadableTree(Exception):
     """git could not answer, so this commit could not be checked."""
+
+
+class _GitTimedOut(_UnreadableTree):
+    """git ran out of time, so this commit could not be checked; retrying may work."""
+
+
+def _raise_unreadable(returncode: int, stderr: str, what: str) -> NoReturn:
+    """Raise for a git result that is neither success nor the answer 'no match'."""
+    if returncode == GIT_TIMED_OUT:
+        raise _GitTimedOut(what)
+    raise _UnreadableTree(stderr.strip() or f"{what} exited {returncode}")
 
 
 def _commit_sources(subcommand: str, options: list[str]) -> tuple[_Source, ...] | None:
@@ -225,7 +255,7 @@ def _commits(command: str, cwd: Path) -> Iterator[_Commit | _Unplaceable]:
 def _git_or_raise(root: Path, *args: str) -> str:
     result = run_git(root, *args)
     if result.returncode != 0:
-        raise _UnreadableTree(result.stderr.strip() or f"git {args[0]} exited {result.returncode}")
+        _raise_unreadable(result.returncode, result.stderr, f"git {args[0]}")
     return result.stdout
 
 
@@ -282,7 +312,7 @@ def _grep(root: Path, source: _Source, prefilter: str, *flags: str) -> str:
     if result.returncode == _GREP_NO_MATCH:
         return ""
     if result.returncode != 0:
-        raise _UnreadableTree(result.stderr.strip() or f"git grep exited {result.returncode}")
+        _raise_unreadable(result.returncode, result.stderr, "git grep")
     return result.stdout
 
 
@@ -451,6 +481,14 @@ def _unchecked(reason: str) -> GatingResult:
     )
 
 
+def _timed_out() -> GatingResult:
+    """Deny a commit git ran out of time reading, saying plainly that nothing was found."""
+    return GatingResult(
+        decision=Decision.DENY,
+        reason=f"{RuleID.CONFLICT_MARKER_SCAN_TIMED_OUT}: {_TIMED_OUT_RULE.verbose}",
+    )
+
+
 class ConflictMarkerCommitGateHandler(PreToolUseHandlerBase):
     """Deny a commit that would record a merge-conflict marker."""
 
@@ -512,6 +550,9 @@ class ConflictMarkerCommitGateHandler(PreToolUseHandlerBase):
             try:
                 for source in commit.sources:
                     findings.extend(_findings(repo.root, commit.directory, source, self._excluded))
+            except _GitTimedOut as exc:
+                logger.warning("conflict_marker_commit_gate: %s timed out in %s", exc, repo.root)
+                return _timed_out()
             except _UnreadableTree as exc:
                 logger.warning(
                     "conflict_marker_commit_gate: %s was NOT checked: %s", repo.root, exc
@@ -537,8 +578,8 @@ class ConflictMarkerCommitGateHandler(PreToolUseHandlerBase):
         return self._formatter.verbose(_RULE)
 
     def get_rules(self) -> list[Rule]:
-        """The Rule backing this handler's denial."""
-        return [_RULE]
+        """The Rules backing this handler's denials: a finding, and a timed-out scan."""
+        return [_RULE, _TIMED_OUT_RULE]
 
     def get_claude_md(self) -> str | None:
         return (
@@ -563,6 +604,10 @@ class ConflictMarkerCommitGateHandler(PreToolUseHandlerBase):
             "`GIT_INDEX_FILE`; `--pathspec-from-file`; `git am <patch>`; a directory "
             "outside any repository; or a git error. Rephrase as "
             "`git -C /absolute/path/to/repo commit ...`.\n\n"
+            "**A git timeout is denied under its own rule, "
+            "`R-CONFLICT-MARKER-SCAN-TIMED-OUT`** — git did not answer within its "
+            f"{Timeout.GIT_CONTEXT} s limit, nothing was found, and the content is "
+            "fine. Retry the same commit unchanged.\n\n"
             "**A documented example** is judged even inside a fenced code block, "
             "because a real conflict can land there. Shorten the marker run, or keep "
             "the file under this handler's `options.exclude_paths` (or the "

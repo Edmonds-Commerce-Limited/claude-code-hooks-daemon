@@ -22,6 +22,7 @@ import pytest
 
 from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.utils.git_repo import (
+    GIT_TIMED_OUT,
     RELOCATING_VARIABLES,
     GitRepo,
     git_visible_paths,
@@ -357,6 +358,18 @@ class TestEveryGitCallIsBounded:
             result = run_git(tmp_git_repo, "status")
 
         assert result.returncode != 0
+
+    def test_a_timeout_is_told_apart_from_an_absent_git(self, tmp_git_repo: Path) -> None:
+        """A caller that denies on failure can say 'retry' only for a timeout."""
+        with mock.patch("subprocess.run") as runner:
+            runner.side_effect = subprocess.TimeoutExpired(["git"], 1)
+            timed_out = run_git(tmp_git_repo, "status")
+            runner.side_effect = FileNotFoundError("git")
+            absent = run_git(tmp_git_repo, "status")
+
+        assert timed_out.returncode == GIT_TIMED_OUT
+        assert absent.returncode != GIT_TIMED_OUT
+        assert absent.returncode != 0
 
 
 class TestCallerSuppliedEnvironment:

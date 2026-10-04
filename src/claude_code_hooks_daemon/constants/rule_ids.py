@@ -199,6 +199,10 @@ class RuleID:
     #: A commit whose added lines carry a merge-conflict marker.
     CONFLICT_MARKER_COMMIT: str = "R-CONFLICT-MARKER-COMMIT"
 
+    #: git ran out of time reading what a commit records (ledger 00474 N346):
+    #: denied, because nothing was checked, but nothing was found either.
+    CONFLICT_MARKER_SCAN_TIMED_OUT: str = "R-CONFLICT-MARKER-SCAN-TIMED-OUT"
+
     # ------------------------------------------------------------------
     # auto_continue_stop handler (stop event; concept-level granularity)
     # ------------------------------------------------------------------
@@ -440,6 +444,11 @@ class RuleID:
     #: A Bash command whose structure the shell reader cannot establish with
     #: certainty (Plan 00466 N101 round 12): denied, with a rephrase.
     SECRET_COMMAND_UNREADABLE: str = "R-SECRET-COMMAND-UNREADABLE"
+
+    #: A scan that hit its deadline or an entry cap before it could finish
+    #: (ledger 00474 N348): denied, because it is unchecked, not because a
+    #: protected path was found.
+    SECRET_SCAN_INCOMPLETE: str = "R-SECRET-SCAN-INCOMPLETE"
 
     # ------------------------------------------------------------------
     # sensitive_content handler — 2 rules (two independent sources)
