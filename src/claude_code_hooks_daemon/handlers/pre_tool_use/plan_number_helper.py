@@ -51,6 +51,10 @@ from claude_code_hooks_daemon.utils.command_position import (
 from claude_code_hooks_daemon.utils.path_containment import path_is_relative_to
 from claude_code_hooks_daemon.utils.path_predicates import path_is_dir
 from claude_code_hooks_daemon.utils.quoted_spans import blank_shell_literal_spans
+from claude_code_hooks_daemon.utils.shell_expansion import (
+    TooManyToEnumerateError,
+    expand_braces,
+)
 from claude_code_hooks_daemon.utils.shell_segmentation import (
     is_wholly_inert_command,
     strip_inert_spans,
@@ -99,6 +103,18 @@ _TRUNCATE_TO_LAST_PATTERN: Final[str] = r"tail\s+(-n\s*)?-?\d+"
 # atomically, so the gap is closed by redirecting to it rather than by adding
 # bookkeeping to a path that was never synchronised.
 _MKDIR_COMMAND: Final[str] = "mkdir"
+
+# A redirection is not an operand, and its `&` is not a command separator:
+# `mkdir 2>&1 <dir>` is one command. Both spellings are blanked before the
+# command is cut into segments (ledger 00474 N179).
+_REDIRECTION_RE: Final[re.Pattern[str]] = re.compile(
+    r"(?:\d*>&\d+-?|&>>?[ \t]*(?!\()[^\s;&|<>]+|\d*>>?[ \t]*(?!\()[^\s;&|<>]+)"
+)
+
+# `cd <dir>` ahead of a `mkdir` re-roots its relative operands (ledger 00474
+# N141). A `cd` that is not the whole segment is left alone.
+_CD_SEGMENT_RE: Final[re.Pattern[str]] = re.compile(r"^\s*(?:cd|pushd)\s+(?:--\s+)?(\S+)\s*$")
+_MKDIR_WORD_RE: Final[re.Pattern[str]] = re.compile(rf"{_MKDIR_COMMAND}(?=\s|$)")
 
 
 class PlanNumberHelperHandler(PreToolUseHandlerBase):
@@ -221,15 +237,54 @@ class PlanNumberHelperHandler(PreToolUseHandlerBase):
             return None
         scannable = remove_word_quoting(strip_inert_spans(command))
 
-        match = re.search(
-            rf"{_MKDIR_COMMAND}[^{_COMMAND_SEPARATORS}]*?"
-            rf"([^\s\"']*{re.escape(plan_dir)}/\d{{1,{PLAN_NUMBER_WIDTH}}}-[^\s/\"']+)",
-            scannable,
-        )
-        if match is None:
-            return None
+        for candidate in self._mkdir_plan_folder_candidates(scannable, plan_dir):
+            if self._candidate_is_new_folder(candidate, plan_dir):
+                return candidate
+        return None
 
-        candidate = match.group(1)
+    @staticmethod
+    def _mkdir_plan_folder_candidates(scannable: str, plan_dir: str) -> list[str]:
+        """Every ``<plan-dir>/NNNNN-name`` spelling a ``mkdir`` operand can take.
+
+        An operand is read as bash reads it: a redirection is not an operand
+        (ledger 00474 N179), a brace list is several (N186), and a relative
+        operand after ``cd <dir>`` is also read from that directory (N141). The
+        operand as written is always a candidate too, so a ``cd`` only ever
+        ADDS spellings.
+        """
+        folder = re.compile(
+            rf"[^\s\"']*{re.escape(plan_dir)}/\d{{1,{PLAN_NUMBER_WIDTH}}}-[^\s/\"']+"
+        )
+        candidates: list[str] = []
+        cwd: str | None = None
+        for segment in re.split(f"[{_COMMAND_SEPARATORS}]", _REDIRECTION_RE.sub(" ", scannable)):
+            cd_match = _CD_SEGMENT_RE.match(segment)
+            if cd_match is not None:
+                cwd = cd_match.group(1)
+                continue
+            mkdir_match = _MKDIR_WORD_RE.search(segment)
+            if mkdir_match is None:
+                continue
+            for operand in segment[mkdir_match.end() :].split():
+                try:
+                    spellings = expand_braces(operand)
+                except TooManyToEnumerateError:
+                    # Cannot rule a plan folder out, so a plan-dir operand is one.
+                    if plan_dir in operand:
+                        candidates.append(operand)
+                    continue
+                for spelling in spellings:
+                    rooted = [spelling]
+                    if cwd is not None and not spelling.startswith("/"):
+                        rooted.append(os.path.normpath(f"{cwd}/{spelling}"))
+                    for path in rooted:
+                        found = folder.search(path)
+                        if found is not None:
+                            candidates.append(found.group(0))
+        return candidates
+
+    def _candidate_is_new_folder(self, candidate: str, plan_dir: str) -> bool:
+        """Whether creating ``candidate`` would claim a number the scaffolder must allocate."""
         # An ABSOLUTE candidate replaces the base under pathlib's `/`, so this
         # single expression resolves both the relative and absolute spellings.
         # `normpath` is then required, not cosmetic: pathlib joins LEXICALLY and
@@ -240,19 +295,16 @@ class PlanNumberHelperHandler(PreToolUseHandlerBase):
         # is what the containment question actually needs.
         target = Path(os.path.normpath(self._workspace_root / candidate))
         if not path_is_relative_to(target, self._workspace_root):
-            return None
+            return False
         # A folder that is already there makes this a `-p` re-create, which is
         # allowed. A folder the daemon cannot STAT is not known to be there, so
         # answering True would stand the redirect down for exactly the paths it
         # can see least about.
         if path_is_dir(target, unreadable_means=False):
-            return None
+            return False
         # eacces-safe-exempt: the deployed scaffolder under the CONFIGURED plan
         # directory. Both halves are daemon config, not the mkdir target above.
-        if not (self._workspace_root / plan_dir / MKPLAN_SCRIPT_NAME).exists():
-            return None
-
-        return candidate
+        return (self._workspace_root / plan_dir / MKPLAN_SCRIPT_NAME).exists()
 
     def _deny_hand_rolled_creation(
         self, plan_folder: str, hook_input: dict[str, Any]
@@ -466,6 +518,15 @@ class PlanNumberHelperHandler(PreToolUseHandlerBase):
         # Get the plan directory path (relative to workspace)
         plan_dir = self._track_plans_in_project
 
+        # CREATION, not discovery. `mkdir CLAUDE/Plan/NNNNN-name` does not ask
+        # for a number, it CLAIMS one -- unsynchronised, and unrecorded until
+        # PLAN.md lands. Checked FIRST, before every discovery exemption below:
+        # a `| wc`, a mention of `Completed/` or a trailing comment excuses a
+        # SCAN, and says nothing about whether the same command also creates a
+        # folder (ledger 00474 N141).
+        if self._new_plan_folder_in_mkdir(command) is not None:
+            return True
+
         # A command piped to `wc` COUNTS lines/words/bytes; it can never be
         # part of a "find the latest/highest plan number" idiom (which needs
         # sort+tail or similar to extract ONE value, not a count). A count
@@ -508,13 +569,6 @@ class PlanNumberHelperHandler(PreToolUseHandlerBase):
         # that, at the cost of nothing a caller legitimately wants.
         if self._is_git_commit_message_mentioning_plans(command, plan_dir):
             return False
-
-        # 0. CREATION, not discovery. `mkdir CLAUDE/Plan/NNNNN-name` does not ask
-        # for a number, it CLAIMS one -- unsynchronised, and unrecorded until
-        # PLAN.md lands. Checked before the discovery rules because it is the
-        # most specific shape and the only one that changes the plan tree.
-        if self._new_plan_folder_in_mkdir(command) is not None:
-            return True
 
         # Pattern detection: Commands trying to discover plan numbers
         # These patterns indicate Claude is trying to find the latest plan

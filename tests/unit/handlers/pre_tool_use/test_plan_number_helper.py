@@ -1015,6 +1015,86 @@ class TestHandRolledPlanFolderCreation:
         """
         assert handler.matches(_bash("echo CLAUDE/Plan/0*"))
 
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "mkdir -p CLAUDE/Plan/00999-x CLAUDE/Plan/Completed",
+            "mkdir CLAUDE/Plan/00999-x; echo done | wc -c",
+            "mkdir CLAUDE/Plan/00999-x # see CLAUDE/Plan/Completed/",
+            "cd CLAUDE/Plan && mkdir 00999-x",
+            "cd CLAUDE && mkdir Plan/00999-x",
+            "cd CLAUDE/Plan; mkdir -p 00999-x",
+        ],
+    )
+    def test_ledger_n141_creation_shapes_are_denied(
+        self, handler: PlanNumberHelperHandler, command: str
+    ) -> None:
+        """Ledger 00474 N141: an archive path, a later pipe, a comment or a `cd` hid the folder."""
+        assert handler.matches(_bash(command))
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "cd CLAUDE/Plan && mkdir Completed",
+            "cd CLAUDE/Plan && mkdir -p 00250-some-feature/JOURNAL",
+            "cd untracked && mkdir 00999-x",
+            "cd /tmp && mkdir 00999-x",
+        ],
+    )
+    def test_ledger_n141_cd_form_keeps_allowed_shapes_allowed(
+        self, handler: PlanNumberHelperHandler, command: str
+    ) -> None:
+        """A `cd` into the plan dir does not make every mkdir a creation."""
+        (handler._workspace_root / "CLAUDE" / "Plan" / "00250-some-feature").mkdir()
+        assert not handler.matches(_bash(command))
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "mkdir 2>&1 CLAUDE/Plan/00999-x",
+            "mkdir -p 2>/dev/null CLAUDE/Plan/00999-x",
+            "mkdir >/dev/null 2>&1 CLAUDE/Plan/00999-x",
+        ],
+    )
+    def test_ledger_n179_redirect_before_operand_is_denied(
+        self, handler: PlanNumberHelperHandler, command: str
+    ) -> None:
+        """Ledger 00474 N179: words after a leading redirect were read as a new command."""
+        assert handler.matches(_bash(command))
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "mkdir CLAUDE/Plan/0{0999,1000}-x",
+            "mkdir -p CLAUDE/Plan/{00999,01000}-x",
+            "mkdir CLAUDE/Plan/00999-{a,b}",
+        ],
+    )
+    def test_ledger_n186_brace_list_in_folder_name_is_denied(
+        self, handler: PlanNumberHelperHandler, command: str
+    ) -> None:
+        """Ledger 00474 N186: a brace list expands to plan folders the pattern never saw."""
+        assert handler.matches(_bash(command))
+
+    def test_ledger_n186_unenumerable_brace_list_in_plan_dir_fails_closed(
+        self, handler: PlanNumberHelperHandler
+    ) -> None:
+        """A brace list past the expansion cap cannot be ruled out, so it is denied."""
+        assert handler.matches(_bash("mkdir CLAUDE/Plan/" + "{a,b}" * 9))
+
+    def test_a_new_folder_after_an_existing_one_is_still_a_creation(
+        self, handler: PlanNumberHelperHandler
+    ) -> None:
+        """Every operand is judged, not just the first plan-shaped one."""
+        (handler._workspace_root / "CLAUDE" / "Plan" / "00250-some-feature").mkdir()
+        assert handler.matches(_bash("mkdir -p CLAUDE/Plan/00250-some-feature CLAUDE/Plan/00999-x"))
+
+    def test_ledger_n186_brace_list_of_non_plan_names_stays_allowed(
+        self, handler: PlanNumberHelperHandler
+    ) -> None:
+        """`mkdir -p CLAUDE/Plan/{Completed,Archive}` creates no numbered folder."""
+        assert not handler.matches(_bash("mkdir -p CLAUDE/Plan/{Completed,Archive}"))
+
 
 class TestGetRules:
     """get_rules() declares the 2 Rule objects (Decision B)."""

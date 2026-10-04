@@ -130,6 +130,8 @@ other than defeating a parser. Everything else, every ordinary respelling includ
   N170, N242 and N136 fixed on branch worktree-p483-secret: the `secret-meta`/`git rm --cached`
   exemption refuses `&`, `$( )` and backticks, and a `python -m` module or a later `-c` import is not a path.
   Report: [subagent-reports/261004-task-3.1-batch-e-secret-sonnet.md](subagent-reports/261004-task-3.1-batch-e-secret-sonnet.md).
+  N141 (SH1, `cd` form), N179 and N186 (brace form) fixed on branch worktree-p483-mkdir: the plan-folder `mkdir` guard runs before the discovery exemptions, reads redirections, `cd` and brace lists, and judges every operand. Report:
+  [subagent-reports/261004-task-3.1-batch-d-mkdir-sonnet.md](subagent-reports/261004-task-3.1-batch-d-mkdir-sonnet.md).
 - [ ] 🔄 **Task 3.2**: Narrow each guard that causes an in-scope false positive while catching
   an out-of-scope shape (TDD: the false positive is the red test). X-1 fixed on branch
   worktree-p483-x1-rebind-heredoc: the shared rebinding check no longer withholds the heredoc

@@ -1218,7 +1218,7 @@ read-only shapes with RED tests.
 
 ### N141 — The plan-folder `mkdir` guard is waved past by exemptions, quoted spaces, `CDPATH` and same-command links
 
-**Status on the branch**: ✅ Remedied. **On main**: ⬜ Open: in-scope defect for the `mkdir -p` with an archive path, a later `| wc`, a trailing comment and the `cd ... && mkdir` form (Plan 00483 triage, see TRIAGE-carried-c.md); ✅ Dismissed (threat model, limb 2) for the quoted-space spelling and `ln -s` then `mkdir`
+**Status on the branch**: ✅ Remedied. **On main**: ✅ Fixed on worktree-p483-mkdir for the `mkdir -p` with an archive path, a later `| wc`, a trailing comment and the `cd ... && mkdir` form (Plan 00483 Task 3.1 batch D); ✅ Dismissed (threat model, limb 2) for the quoted-space spelling and `ln -s` then `mkdir`
 
 **Found by the p422 D-RULE re-review** (review of `fe14348e7..3f7fafeaf`,
 report
@@ -1310,7 +1310,7 @@ remedy; team-lead ruled that it must be denied too, which N188 does.
 
 ### N179 — The `&` or \`\\
 
-**Status on the branch**: p422 D-RULE review 4. **On main**: ⬜ Open: in-scope defect (Plan 00483 triage, see TRIAGE-carried-c.md)
+**Status on the branch**: p422 D-RULE review 4. **On main**: ✅ Fixed on worktree-p483-mkdir (Plan 00483 Task 3.1 batch D)
 
 **Found by the p422 D-RULE review 4** (same report, finding SH-1). Main and
 the round-4 branch both allow `mkdir 2>&1 CLAUDE/Plan/00999-x`, and the same
@@ -1374,7 +1374,7 @@ The bare-duration skip is now `timeout`'s one positional word. Tests:
 
 ### N186 — After an expanded command word, a folder name in `$'…'` quoting or braces is not decoded
 
-**Status on the branch**: ✅ Remedied. **On main**: ⬜ Open: in-scope defect for the brace form `mkdir CLAUDE/Plan/0{0999,1000}-x` (Plan 00483 triage, see TRIAGE-carried-c.md); ✅ Dismissed (threat model, limbs 1 and 2) for the `$'...'`, `$"..."` and `$m` forms
+**Status on the branch**: ✅ Remedied. **On main**: ✅ Fixed on worktree-p483-mkdir for the brace form `mkdir CLAUDE/Plan/0{0999,1000}-x` (Plan 00483 Task 3.1 batch D); ✅ Dismissed (threat model, limbs 1 and 2) for the `$'...'`, `$"..."` and `$m` forms
 
 **Found by the p422 D-RULE review 5** (same report, finding SH-B). Main and
 the round-5 branch both allow `$m CLAUDE/Plan/$'00999-x'`, `$"…"` and
