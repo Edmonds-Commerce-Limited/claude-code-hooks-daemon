@@ -18,6 +18,7 @@ from typing import Final
 from claude_code_hooks_daemon.utils.command_evasion import normalise_line_continuations
 from claude_code_hooks_daemon.utils.heredoc_operators import scan_heredocs
 from claude_code_hooks_daemon.utils.shell_segmentation import (
+    iter_shell_words,
     split_unquoted,
     strip_quoted_heredoc_bodies,
 )
@@ -110,6 +111,93 @@ def split_statements(command: str, *, heredoc_bodies_executable: bool = False) -
         for statement in split_unquoted(normalised, STATEMENT_SEPARATORS)
         if statement.strip()
     ]
+
+
+#: Compound-command openers and the word that closes each. `for`/`select` are
+#: followed by a word list, `case` by a subject, so neither starts a command.
+_CLOSER_FOR_OPENER: Final[dict[str, str]] = {
+    "{": "}",
+    "if": "fi",
+    "while": "done",
+    "until": "done",
+    "for": "done",
+    "select": "done",
+    "case": "esac",
+}
+_CLOSERS: Final[frozenset[str]] = frozenset(_CLOSER_FOR_OPENER.values())
+
+#: Words that continue the construct a `;` or newline just ended: they run
+#: inside it, so the break before them is grammar, not sequencing.
+_CONTINUATIONS: Final[frozenset[str]] = frozenset({"do", "then", "else", "elif"})
+
+#: A bare opener keyword: the statement after it is the body it introduces.
+_BARE_OPENERS: Final[frozenset[str]] = frozenset({"do", "then", "else", "{"})
+
+#: Words after which the next word is again a command.
+_COMMAND_POSITION_AFTER: Final[frozenset[str]] = frozenset(
+    {"&&", "||", "|", "|&", "!", "{", "then", "do", "else", "elif", "if", "while", "until", "time"}
+)
+
+#: `a)`, `a|b)`, `*)` at the start of a case clause.
+_CASE_CLAUSE: Final[re.Pattern[str]] = re.compile(r"^\(?[^\s()]+\)(?:\s|$)")
+
+
+def _opened_constructs(words: list[str]) -> list[str]:
+    """Closing words for each compound command opened by ``words``, in order."""
+    opened: list[str] = []
+    command_position = True
+    for word in words:
+        if command_position and word in _CLOSER_FOR_OPENER:
+            opened.append(_CLOSER_FOR_OPENER[word])
+            command_position = word in _COMMAND_POSITION_AFTER
+        else:
+            command_position = word in _COMMAND_POSITION_AFTER
+    return opened
+
+
+def sequenced_statements(command: str) -> list[str]:
+    """The statements of ``command`` that are genuinely sequenced (N339).
+
+    :func:`split_statements` cuts at every ``;`` and newline, but inside
+    ``{ …; }``, ``for … ; do …; done``, ``if …; then …; fi`` and ``case``
+    some of those are the construct's own grammar. Counting them reports a
+    fully ``&&``/``||``-gated group as ungated sequencing. This folds each
+    grammar break into the statement it belongs to: the closer (``}``,
+    ``done``, ``fi``, ``esac``), the continuation (``do``, ``then``,
+    ``else``, ``elif``), the first statement after a bare opener, and a case
+    clause start. A real ``a; b`` INSIDE a body stays two statements.
+
+    Fails closed: anything it cannot place with certainty (a word hidden by
+    a substitution, a closer that matches no open construct, a construct
+    left open) returns the plain :func:`split_statements` result, so the
+    answer can only err toward reporting more sequencing, never less.
+    """
+    statements = split_statements(command)
+    stack: list[str] = []
+    counted: list[str] = []
+    after_bare_opener = False
+    for statement in statements:
+        plain: list[str] = []
+        for word in iter_shell_words(statement):
+            if word is None:
+                return statements
+            plain.append(word)
+        first = plain[0] if plain else ""
+        if first in _CLOSERS:
+            if not stack or stack[-1] != first:
+                return statements
+            stack.pop()
+            after_bare_opener = False
+            continue
+        if first in _CONTINUATIONS and not stack:
+            return statements
+        in_case = bool(stack) and stack[-1] == "esac"
+        is_clause = in_case and _CASE_CLAUSE.match(statement) is not None
+        if not (first in _CONTINUATIONS or after_bare_opener or is_clause):
+            counted.append(statement)
+        stack.extend(_opened_constructs(plain))
+        after_bare_opener = len(plain) == 1 and plain[0] in _BARE_OPENERS
+    return counted if not stack else statements
 
 
 def detect_safe_mode_flags(statements: Iterable[str]) -> frozenset[str]:

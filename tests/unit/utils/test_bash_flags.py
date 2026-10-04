@@ -16,6 +16,7 @@ from claude_code_hooks_daemon.utils.bash_flags import (
     STATEMENT_SEPARATORS,
     detect_safe_mode_flags,
     has_errexit,
+    sequenced_statements,
     split_statements,
 )
 
@@ -156,3 +157,67 @@ class TestHasErrexit:
 
     def test_false_without_errexit(self) -> None:
         assert has_errexit(["set -o pipefail", "pytest"]) is False
+
+
+class TestSequencedStatements:
+    """N339: a `;` that is compound-command SYNTAX is not a sequencing point."""
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            'cd X && mkdir -p d && { ./qa.bash > d/o.txt 2>&1 && echo "exit=0" || echo "exit=$?"; }',
+            "cd X && for b in a b c; do git -C x/$b rev-parse HEAD || exit 1; done",
+            "while read -r l; do echo $l || exit 1; done < f",
+            "until test -f x; do sleep 1 || exit 1; done",
+            "if test -f x; then echo y || exit 1; fi",
+            "if test -f x; then echo y; else echo z; fi",
+            "if a; then b; elif c; then d; else e; fi",
+            "for x in a b\ndo\n  echo $x || exit 1\ndone",
+            "{\n  a && b\n}",
+            "case $x in a) foo;; b) bar;; esac",
+            "case $x in\n  a) foo\n  ;;\n  *) bar\n  ;;\nesac",
+            "( a && b )",
+            "for x in a; do for y in b; do echo $x$y || exit 1; done; done",
+        ],
+    )
+    def test_grammar_semicolons_are_one_statement(self, command: str) -> None:
+        assert len(sequenced_statements(command)) == 1
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "for x in y; do a; b; done",
+            "{ a; b; }",
+            "if c; then a; b; fi",
+            "for x in y\ndo\n a\n b\ndone",
+            "case $x in a) foo; bar;; esac",
+            "( a; b )",
+            "a; for x in y; do b || exit 1; done",
+            "for x in y; do b || exit 1; done; echo after",
+            "for x in y; do b || exit 1; done\necho after",
+        ],
+    )
+    def test_real_sequencing_still_counts(self, command: str) -> None:
+        assert len(sequenced_statements(command)) >= 2
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "a; done",
+            "a; }",
+            "a; fi",
+            "for x in y; do a; b",
+            "if c; then a; fi; fi",
+            "for x in $(ls); do a; b; done",
+            "f() { a; b; }",
+            "for x in y; do a; esac",
+        ],
+    )
+    def test_unparseable_or_unbalanced_falls_back_to_the_plain_split(self, command: str) -> None:
+        assert sequenced_statements(command) == split_statements(command)
+
+    def test_keyword_words_outside_command_position_are_inert(self) -> None:
+        assert len(sequenced_statements("echo for; echo done")) == 2
+
+    def test_quoted_keywords_are_inert(self) -> None:
+        assert len(sequenced_statements("echo a; 'done'")) == 2

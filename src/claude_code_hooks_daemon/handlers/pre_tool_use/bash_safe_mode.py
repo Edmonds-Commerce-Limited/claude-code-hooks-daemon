@@ -42,6 +42,7 @@ from claude_code_hooks_daemon.utils.bash_flags import (
     FLAG_PIPEFAIL,
     SAFE_MODE_FLAGS,
     detect_safe_mode_flags,
+    sequenced_statements,
     split_statements,
 )
 from claude_code_hooks_daemon.utils.option_coercion import coerce_int_option
@@ -282,7 +283,7 @@ class BashSafeModeHandler(PreToolUseHandlerBase):
         if self._matches_exempt_pattern(command):
             return ()
         statements = split_statements(command)
-        if len(statements) < self._threshold():
+        if len(sequenced_statements(command)) < self._threshold():
             return ()
         declared = detect_safe_mode_flags(statements)
         missing = tuple(flag for flag in self._required_flags() if flag not in declared)
@@ -429,6 +430,22 @@ class BashSafeModeHandler(PreToolUseHandlerBase):
                 expected_decision=Decision.ALLOW,
                 expected_message_patterns=[],
                 safety_notes="Both commands are read-only; --list tags nothing.",
+                test_type=TestType.ADVISORY,
+                recommended_model=RecommendedModel.HAIKU,
+                requires_main_thread=False,
+            ),
+            AcceptanceTest(
+                title="Bash safe mode - a gated compound command is exempt",
+                command='for b in main; do git rev-parse "$b" || exit 1; done',
+                dispatch_as_bash=True,
+                description=(
+                    "The `;` in `for … ; do … ; done` (and in `{ …; }`, "
+                    "`if …; then …; fi`) is syntax, not sequencing, so a fully "
+                    "gated compound command needs no prelude in either mode."
+                ),
+                expected_decision=Decision.ALLOW,
+                expected_message_patterns=[],
+                safety_notes="Read-only: rev-parse prints a commit id.",
                 test_type=TestType.ADVISORY,
                 recommended_model=RecommendedModel.HAIKU,
                 requires_main_thread=False,
