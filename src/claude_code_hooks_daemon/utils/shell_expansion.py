@@ -65,7 +65,14 @@ class TooManyToEnumerateError(Exception):
     one, past its own cap, fell back to SOME smaller but still-eager
     computation instead of giving up outright. One shared failure mode,
     raised from one shared place, is the structural fix.
+
+    ``limit`` is the cap that was exceeded, when it is a count of examined
+    paths, so a guard can tell the user what ran out (ledger 00474 N348).
     """
+
+    def __init__(self, message: str = "", *, limit: int | None = None) -> None:
+        super().__init__(message)
+        self.limit = limit
 
 
 # ── Brace expansion ──────────────────────────────────────────────────────

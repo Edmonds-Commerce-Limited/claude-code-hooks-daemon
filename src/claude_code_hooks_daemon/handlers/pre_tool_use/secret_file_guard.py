@@ -197,6 +197,55 @@ _UNREADABLE_RULE: Final[Rule] = Rule(
     ),
 )
 
+# The route a scan that ran out of budget (its deadline, or an entry cap) is
+# filed under (ledger 00474 N348). Still a deny -- an unfinished scan is not a
+# clean one -- but not a finding and not a guard defect, so it has its own rule
+# and its own reason, which says what ran out and what to do about it.
+_INCOMPLETE_ROUTE: Final[str] = "incomplete"
+_INCOMPLETE_PATTERN: Final[str] = "<scan-incomplete>"
+_NARROW_ADVICE: Final[str] = "narrow the glob or the search root, or name the files"
+
+_INCOMPLETE_RULE: Final[Rule] = Rule(
+    rule_id=RuleID.SECRET_SCAN_INCOMPLETE,
+    blocked="a scan that ran out of time or entries before it could finish",
+    why=(
+        "An unfinished scan is never treated as clean, so the command is denied; "
+        "but no protected path was found, and none is claimed"
+    ),
+    fix=(
+        "Past a cap, narrow the glob or the search root, or name the files; past "
+        "the deadline, retry the command"
+    ),
+    verbose=(
+        "secret_file_guard could not finish checking this command, and denies it "
+        "rather than treating the unfinished scan as clean (this guard fails "
+        "CLOSED). This is not a finding: no protected path was found, and it is "
+        "not a bug in the guard. Either a glob or recursive search reached more "
+        "entries than the scan's cap, in which case narrow the glob or the search "
+        "root, or name the files; or the scan deadline passed under load, in "
+        "which case retry the command."
+    ),
+)
+
+
+def _incomplete_detail(exc: shell_expansion.TooManyToEnumerateError | TimeoutError) -> str:
+    """What ran out, for the deny reason. Never the exception text, which may name a path."""
+    if isinstance(exc, TimeoutError):
+        return (
+            f"the {sfm.SCAN_DEADLINE_SECONDS:g} s scan deadline passed; no protected path "
+            "was found; retry, and if it keeps timing out, name the files or narrow the glob"
+        )
+    if exc.limit is None:
+        return (
+            f"an expansion or entry cap was reached; no protected path was found; "
+            f"{_NARROW_ADVICE}"
+        )
+    return (
+        f"the glob expands past its cap of {exc.limit} examined paths; no protected "
+        f"path was found; {_NARROW_ADVICE}"
+    )
+
+
 # Routes whose deny message names the matched token (Plan 00356). Both scan a
 # HAYSTACK the caller supplied -- a whole command line, a whole authored file
 # -- so the offending word is not otherwise identifiable. The `read` route is
@@ -1360,9 +1409,10 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
         except (shell_expansion.TooManyToEnumerateError, TimeoutError) as exc:
             # Ledger 00466 N134: a cap or the deadline means "could not
             # verify", which the caller can act on -- still a deny, but not
-            # the internal-error route, whose text calls it a guard bug.
+            # the internal-error route, whose text calls it a guard bug, and
+            # (N348) not the finding routes either.
             logger.info("secret_file_guard: scan did not finish (%s); denying", type(exc).__name__)
-            return (f"{sfm.SCAN_COULD_NOT_FINISH} ({type(exc).__name__})", "", "read")
+            return (_INCOMPLETE_PATTERN, _incomplete_detail(exc), _INCOMPLETE_ROUTE)
         except Exception as exc:
             # Deliberately broad: ANY exception during evaluation must deny,
             # never propagate (Plan 00466 N11) -- see the docstring above.
@@ -1643,8 +1693,8 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
         return self._compute_and_cache_matched(hook_input) is not None
 
     def get_rules(self) -> list[Rule]:
-        """Return the 5 Rule objects backing this handler's blocking behaviour."""
-        return [*_RULES_BY_ROUTE.values(), _ERROR_RULE, _UNREADABLE_RULE]
+        """Return the 6 Rule objects backing this handler's blocking behaviour."""
+        return [*_RULES_BY_ROUTE.values(), _ERROR_RULE, _UNREADABLE_RULE, _INCOMPLETE_RULE]
 
     def handle(self, hook_input: dict[str, Any]) -> GatingResult:
         """Deny with a verbose-first/terse-after explanation.
@@ -1693,6 +1743,11 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
         if route == _UNREADABLE_ROUTE:
             return GatingResult(
                 decision=Decision.DENY, reason=self._disclosed(hook_input, _UNREADABLE_RULE)
+            )
+        if route == _INCOMPLETE_ROUTE:
+            message = self._disclosed(hook_input, _INCOMPLETE_RULE)
+            return GatingResult(
+                decision=Decision.DENY, reason=f"{message}\n\nWhat ran out: {token}."
             )
         rule_route = "read" if route == _SEARCH_ROUTE else route
         message = self._disclosed(hook_input, _RULES_BY_ROUTE[rule_route])
@@ -1795,6 +1850,11 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
             "the project, or YAML with only inline `!vault` values stays "
             "protected. Authoring a script that names an encrypted file stays "
             "denied: the script runs later, when the file may be plaintext.\n\n"
+            "**A scan that runs out of budget is denied under its own rule, "
+            "`R-SECRET-SCAN-INCOMPLETE`** — a glob past its cap of examined "
+            "paths, or the scan deadline passing under load. No protected path "
+            "was found; the reason says what ran out. Narrow the glob or the "
+            "search root, name the files, or retry after a deadline.\n\n"
             "**Honest limits — this is defence in depth, not a sandbox.** "
             "Literal path mentions are reliably denied. Heuristics catch glob "
             "tokens (`cat .vault-p*`), `~`/`$HOME` spellings and symlink "

@@ -829,9 +829,9 @@ class TestGetRules:
     plus the evaluation-error rule added by Plan 00466 N11 and the
     unreadable-command rule added by N101 round 12)."""
 
-    def test_returns_five_rules(self) -> None:
+    def test_returns_six_rules(self) -> None:
         rules = _handler().get_rules()
-        assert len(rules) == 5
+        assert len(rules) == 6
         assert all(isinstance(rule, Rule) for rule in rules)
 
     def test_rule_ids_match_constants(self) -> None:
@@ -841,6 +841,7 @@ class TestGetRules:
             RuleID.SECRET_SCRIPT_AUTHOR,
             RuleID.SECRET_EVALUATION_ERROR,
             RuleID.SECRET_COMMAND_UNREADABLE,
+            RuleID.SECRET_SCAN_INCOMPLETE,
         }
         actual = {rule.rule_id for rule in _handler().get_rules()}
         assert actual == expected
@@ -915,7 +916,8 @@ class TestFailsClosedOnEvaluationError:
         result = handler.handle(hook_input)
         assert result.decision == Decision.DENY
         assert result.reason is not None
-        assert "TimeoutError" in result.reason
+        assert RuleID.SECRET_SCAN_INCOMPLETE in result.reason
+        assert "deadline" in result.reason
 
     def test_grep_directory_route_exception_still_denies(
         self, monkeypatch: pytest.MonkeyPatch
@@ -1467,7 +1469,11 @@ class TestEncryptedFileGuidance:
         was never evaluated would mislead, not help. So is the
         unreadable-command rule (N101 round 12): no path was read at all."""
         for rule in _handler().get_rules():
-            if rule.rule_id in (RuleID.SECRET_EVALUATION_ERROR, RuleID.SECRET_COMMAND_UNREADABLE):
+            if rule.rule_id in (
+                RuleID.SECRET_EVALUATION_ERROR,
+                RuleID.SECRET_COMMAND_UNREADABLE,
+                RuleID.SECRET_SCAN_INCOMPLETE,
+            ):
                 continue
             assert "encrypted" in rule.verbose.lower(), rule.rule_id
 
@@ -2123,7 +2129,7 @@ def _deny_reason(command: str) -> str:
 def _could_not_finish(reason: str) -> bool:
     """Is ``reason`` the named deny for a scan past its cap, and not the
     guard-bug route (ledger 00466 N238)?"""
-    return sfm.SCAN_COULD_NOT_FINISH in reason and RuleID.SECRET_EVALUATION_ERROR not in reason
+    return RuleID.SECRET_SCAN_INCOMPLETE in reason and RuleID.SECRET_EVALUATION_ERROR not in reason
 
 
 class TestTheExemptionIsOnlyPythonProgramTextNoShellReads:
