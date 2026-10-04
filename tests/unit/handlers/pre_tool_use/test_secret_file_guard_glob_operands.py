@@ -63,9 +63,7 @@ class TestBareStarLastComponent:
     ) -> None:
         assert _verdict(project, command) == Decision.DENY
 
-    def test_glob_over_a_directory_without_a_protected_file_is_allowed(
-        self, project: Path
-    ) -> None:
+    def test_glob_over_a_directory_without_a_protected_file_is_allowed(self, project: Path) -> None:
         assert _verdict(project, "cat safe/*") == Decision.ALLOW
 
     def test_expansion_past_the_cap_fails_closed(self, project: Path) -> None:
@@ -121,7 +119,7 @@ class TestPositionalGrepPatternIsText:
     def test_single_quote_blanking_leaves_ansi_c_and_double_quotes_alone(self) -> None:
         assert sfm._without_single_quoted_content("grep 'a|b' f") == "grep '   ' f"
         assert sfm._without_single_quoted_content("grep $'a|b' f") == "grep $'a|b' f"
-        assert sfm._without_single_quoted_content("grep \"'a|b\" f") == "grep \"'a|b\" f"
+        assert sfm._without_single_quoted_content('grep "\'a|b" f') == 'grep "\'a|b" f'
 
     def test_file_operand_after_the_pattern_stays_a_path(self, project: Path) -> None:
         assert _verdict(project, f"grep -n 'x' {_PROTECTED}") == Decision.DENY
