@@ -8,9 +8,9 @@ re-brief it from what is on disk.
 usage-limit wait ended. A Notification hook cannot speak to the model, so this
 handler delivers the re-brief at the session's next prompt -- a one-shot, then the
 event is marked delivered. It points at what exists today (the worktrees, the
-active plan's JOURNAL, the last recorded limit hit) and lists any agent recorded as
-killed; ``_REBRIEF_PLACES`` is where a durable work queue (Plan 00470 Task 3.3)
-adds itself.
+active plan's JOURNAL, the last recorded limit hit), lists the agents the durable
+work queue (Plan 00470 Task 3.3) records as still running, and lists any agent
+recorded as killed.
 
 **Name a killed background or teammate agent.** ``agent_terminated_early_failure_detector``
 covers a FOREGROUND dispatch, whose death arrives as a tool result. A background
@@ -66,6 +66,7 @@ from claude_code_hooks_daemon.utils.stop_failure_records import (
 from claude_code_hooks_daemon.utils.stop_failure_records import (
     default_records_path as default_stop_failures_path,
 )
+from claude_code_hooks_daemon.utils.work_queue import default_queue_path, queue_briefing
 
 logger = logging.getLogger(__name__)
 
@@ -104,9 +105,11 @@ _RESUME_MEANING: Final[dict[str, str]] = {
     ),
 }
 
-#: Where to look for what was in flight, in the order to look. A durable work queue
-#: (Plan 00470 Task 3.3) belongs at the head of this tuple.
+#: Where to look for what was in flight, in the order to look. The durable work queue
+#: (Plan 00470 Task 3.3) heads it: it holds the brief, which no other place does.
 _REBRIEF_PLACES: Final[tuple[str, ...]] = (
+    "`bin/hooks-daemon work-queue list`, the durable queue of dispatched agents "
+    "(worktree, branch, brief, last sha) listed below",
     "`git worktree list`, then `git status` and `git log -1` inside each worktree that "
     "held in-flight work",
     "the newest entries of the active plan's JOURNAL/ day-file",
@@ -161,7 +164,10 @@ def _last_limit_hit(records: list[StopFailureRecord], session_id: str) -> StopFa
 
 
 def _rebrief(
-    resumes: list[LimitEvent], agents: list[LimitEvent], last_hit: StopFailureRecord | None
+    resumes: list[LimitEvent],
+    agents: list[LimitEvent],
+    last_hit: StopFailureRecord | None,
+    queue_lines: list[str],
 ) -> str:
     lines = ["USAGE LIMIT: RE-BRIEF WHAT WAS IN FLIGHT", ""]
     for event in resumes:
@@ -177,6 +183,8 @@ def _rebrief(
         "re-dispatches it for you. Before carrying on, rebuild the picture from disk:",
     ]
     lines += [f"{number}. {place}" for number, place in enumerate(_REBRIEF_PLACES, start=1)]
+    if queue_lines:
+        lines += ["", *queue_lines]
     if agents:
         lines += ["", "Agents recorded as killed by a limit (re-brief each to a fresh agent):"]
         lines += [f"- {event.detail}" for event in agents]
@@ -213,6 +221,10 @@ class LimitRebriefHandler(UserPromptSubmitHandlerBase):
     def _stop_failures_path(self) -> Path | None:
         """Where the StopFailure records live; None without a project context."""
         return default_stop_failures_path()
+
+    def _queue_path(self) -> Path | None:
+        """Where the durable work queue lives; None without a project context."""
+        return default_queue_path()
 
     def _now(self) -> float:
         return time.time()
@@ -273,7 +285,8 @@ class LimitRebriefHandler(UserPromptSubmitHandlerBase):
                 if stop_failures is not None
                 else None
             )
-            context.append(_rebrief(resumes, agents, last_hit))
+            queue_lines = queue_briefing(self._queue_path(), now=self._now())
+            context.append(_rebrief(resumes, agents, last_hit, queue_lines))
             mark_delivered(path, session_id, now=self._now())
         return BlockingResult(decision=Decision.ALLOW, context=context)
 

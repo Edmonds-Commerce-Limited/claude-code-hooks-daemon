@@ -115,6 +115,7 @@ from claude_code_hooks_daemon.daemon.validation import (
     is_inside_daemon_directory,
 )
 from claude_code_hooks_daemon.daemon.venv_lock import VenvLockTimeout, venv_lock
+from claude_code_hooks_daemon.daemon.work_queue_cli import add_work_queue_parser
 from claude_code_hooks_daemon.docs_qa.comment_finder import DEFAULT_MIN_BLOCK_LINES
 from claude_code_hooks_daemon.install.install_stamp import read_install_stamp
 from claude_code_hooks_daemon.install.release_notes import load_release_notes_between
@@ -11295,6 +11296,9 @@ def build_parser() -> argparse.ArgumentParser:
         help="Project root override (default: auto-detected)",
     )
     parser_usage_pause.set_defaults(func=cmd_usage_pause)
+
+    # work-queue (Plan 00470 Task 3.3): the durable record of dispatched agents
+    add_work_queue_parser(subparsers)
 
     # verdicts command (Plan 00209): report on the handler decision log
     parser_verdicts = subparsers.add_parser(

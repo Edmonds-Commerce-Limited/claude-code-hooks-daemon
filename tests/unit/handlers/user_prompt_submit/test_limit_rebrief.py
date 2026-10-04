@@ -10,6 +10,7 @@ import pytest
 from claude_code_hooks_daemon.constants import HandlerID, Priority
 from claude_code_hooks_daemon.core import Decision
 from claude_code_hooks_daemon.handlers.user_prompt_submit.limit_rebrief import (
+    _REBRIEF_PLACES,
     LimitRebriefHandler,
 )
 from claude_code_hooks_daemon.utils.limit_events import (
@@ -20,6 +21,7 @@ from claude_code_hooks_daemon.utils.limit_events import (
     record_event,
 )
 from claude_code_hooks_daemon.utils.stop_failure_records import StopFailureRecord, record_failure
+from claude_code_hooks_daemon.utils.work_queue import STATUS_DONE, add_record, update_record
 
 _NOW = 6_000_000.0
 
@@ -42,6 +44,9 @@ class _Handler(LimitRebriefHandler):
 
     def _stop_failures_path(self) -> Path | None:
         return self.failures
+
+    def _queue_path(self) -> Path | None:
+        return None
 
     def _now(self) -> float:
         return _NOW
@@ -69,6 +74,68 @@ def _resume(kind: str = "quota_auto_resume_fired", session_id: str = "s1") -> Li
 
 def _context(result: Any) -> str:
     return "\n".join(result.context or [])
+
+
+class _QueuedHandler(_Handler):
+    """The handler with a work queue file under ``tmp_path``."""
+
+    def __init__(self, events: Path, queue: Path | None) -> None:
+        super().__init__(events)
+        self.queue = queue
+
+    def _queue_path(self) -> Path | None:
+        return self.queue
+
+
+def _queue_one(queue: Path, worktree: Path, *, name: str = "builder") -> None:
+    add_record(
+        queue,
+        name,
+        worktree=str(worktree),
+        branch="worktree-builder",
+        brief="Implement the thing.",
+        brief_file=None,
+        last_sha="abc1234",
+        now=_NOW - 600,
+    )
+
+
+class TestWorkQueueRebrief:
+    """Plan 00470 Task 3.3: the re-brief after a resume lists the durable work queue."""
+
+    def test_the_queue_heads_the_places_to_look(self) -> None:
+        assert "work-queue list" in _REBRIEF_PLACES[0]
+
+    def test_running_agents_are_listed_with_their_respawn_facts(self, tmp_path: Path) -> None:
+        events, queue = tmp_path / "e.json", tmp_path / "q.json"
+        record_event(events, _resume())
+        _queue_one(queue, tmp_path)
+        text = _context(_QueuedHandler(events, queue).handle(_prompt()))
+        assert "builder" in text
+        assert "worktree-builder" in text
+        assert "abc1234" in text
+        assert "Implement the thing." in text
+
+    def test_a_closed_agent_is_not_listed(self, tmp_path: Path) -> None:
+        events, queue = tmp_path / "e.json", tmp_path / "q.json"
+        record_event(events, _resume())
+        _queue_one(queue, tmp_path)
+        update_record(queue, "builder", now=_NOW, status=STATUS_DONE)
+        assert "WORK QUEUE" not in _context(_QueuedHandler(events, queue).handle(_prompt()))
+
+    def test_an_unreadable_queue_is_reported_not_called_empty(self, tmp_path: Path) -> None:
+        events, queue = tmp_path / "e.json", tmp_path / "q.json"
+        record_event(events, _resume())
+        queue.write_text("{oops", encoding="utf-8")
+        text = _context(_QueuedHandler(events, queue).handle(_prompt()))
+        assert "WORK QUEUE UNREADABLE" in text
+
+    def test_no_queue_file_leaves_the_rebrief_as_it_was(self, tmp_path: Path) -> None:
+        events = tmp_path / "e.json"
+        record_event(events, _resume())
+        text = _context(_QueuedHandler(events, tmp_path / "none.json").handle(_prompt()))
+        assert "WORK QUEUE" not in text
+        assert "RE-BRIEF WHAT WAS IN FLIGHT" in text
 
 
 class TestIdentity:
@@ -218,10 +285,10 @@ class TestResumeRebrief:
         text = _context(_Handler(events, failures).handle(_prompt()))
         assert "authentication_failed" not in text
 
-    def test_it_does_not_claim_a_work_queue_exists(self, tmp_path: Path) -> None:
+    def test_it_lists_no_queued_agent_when_there_is_no_queue(self, tmp_path: Path) -> None:
         path = tmp_path / "e.json"
         record_event(path, _resume())
-        assert "queue" not in _context(_Handler(path).handle(_prompt())).lower()
+        assert "WORK QUEUE" not in _context(_Handler(path).handle(_prompt()))
 
 
 class TestKilledAgentNotice:

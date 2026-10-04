@@ -167,7 +167,9 @@ Answer these in order; the first YES decides:
    restarting it. Confirm the branch has a red-test-then-fix shape before
    trusting it; a branch with only a fix and no test fails Step 6 anyway.
 
-3. **Does a worktree still exist for it?** `git worktree list`. A worktree with
+3. **Does a worktree still exist for it?** `bin/hooks-daemon work-queue list` names
+   every agent recorded as running with its worktree, branch and last sha; a
+   resumed session is also told this at start. Then `git worktree list`. A worktree with
    no commits is a dead start — reap it (`bin/hooks-daemon worktree-reap --only <name>`) and resume at Step 4 with a fresh one.
 
 4. **None of the above?** Nothing survived. Remove `agent-working`, comment
@@ -313,6 +315,20 @@ Dispatch an implementation sub-agent into that worktree with:
   that silently elides an oversized inline report, so an undeclared long report
   is not just untidy, it can arrive truncated without saying so.
 
+**Record the dispatch in the work queue, in the same step.** A usage-limit restart
+or a user interrupt kills the sub-agent and leaves the next session with no memory
+of it; the durable queue is what makes the respawn mechanical (Plan 00470 Task 3.3).
+
+```bash
+bin/hooks-daemon work-queue add issue-<N>-<short-name> \
+  --worktree <worktree path> --branch worktree-issue-<N>-<short-name> \
+  --brief-file <the brief you gave the sub-agent, saved under untracked/>
+```
+
+`--sha` defaults to the worktree's HEAD. When the sub-agent reports a commit,
+`work-queue update <name> --sha <commit>`. Use `--brief-file` for a real brief:
+an inline `--brief` is capped, and the file is what a respawn re-reads.
+
 **Reproduce before fixing, always.** A fix with no red test is a guess. If the
 defect cannot be reproduced, that is a triage answer, not a licence to change
 code.
@@ -370,7 +386,10 @@ Never force-push. If `worktree.merge_to_main_requires_human_approval` is ever
 switched on, the merge is denied: that is the configured answer, so report the
 branch as verified and ready, and stop.
 
-Then reap the worktree: `bin/hooks-daemon worktree-reap`.
+Then reap the worktree: `bin/hooks-daemon worktree-reap`, and close the queue
+record: `bin/hooks-daemon work-queue done <name> --sha <merged head>`. An agent you
+give up on is closed with `work-queue update <name> --status abandoned`, so a
+later re-brief does not list it as running.
 
 ## Step 8 — verify, comment, close
 

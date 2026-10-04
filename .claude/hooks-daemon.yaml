@@ -901,6 +901,10 @@ handlers:
       enabled: true
       priority: 15
 
+    work_queue_rebrief:  # On resume/compact, list the agents the durable work queue records as running (Plan 00470 Task 3.3)
+      enabled: true      # Advisory only; silent unless a queue exists and something is running
+      priority: 48
+
     guard_config_drift:  # Report an uncommitted config change that weakens a guard (Plan 00412 class 2)
       enabled: true
       priority: 49
