@@ -258,14 +258,18 @@ def _compile_public_patterns(
     return compiled, invalid
 
 
-def _never_matches(_text: str, _term: str) -> bool:
-    """Stand-in matcher when the daemon package is not importable.
+def _term_rule_unavailable(exc: ImportError) -> ConfigError:
+    """The error for a secret-term rule that this interpreter cannot load.
 
-    ``resolve_secret_terms`` returns an empty tuple in that case, so this is
-    never consulted with a real term; it exists so the matcher is always a
-    callable and callers need no None-handling.
+    Run by an interpreter without the daemon package, the sweep would
+    otherwise have no terms and a matcher that never matches, and report the
+    history clean without checking any term.
     """
-    return False
+    return ConfigError(
+        "the daemon package is not importable by this interpreter, so the secret-term "
+        f"rule cannot be loaded and no term was checked ({exc}); run this check with "
+        "the project's venv python"
+    )
 
 
 def resolve_term_matcher() -> Callable[[str, str], bool]:
@@ -274,19 +278,22 @@ def resolve_term_matcher() -> Callable[[str, str], bool]:
     Re-deriving this test is exactly how the 00201 tree scanner came to report
     a clean tree over a contaminated one: its hand-rolled substring check could
     not see a path term's venv-slug spelling.
+
+    Raises:
+        ConfigError: The daemon package is not importable.
     """
     try:
         from claude_code_hooks_daemon.utils.secret_redaction import term_matches
-    except ImportError:
-        return _never_matches
+    except ImportError as exc:
+        raise _term_rule_unavailable(exc) from exc
     return term_matches
 
 
 def _redactor() -> Callable[[str, tuple[str, ...]], str]:
     try:
         from claude_code_hooks_daemon.utils.secret_redaction import redact_text
-    except ImportError:
-        return lambda text, _terms: text
+    except ImportError as exc:
+        raise _term_rule_unavailable(exc) from exc
     return redact_text
 
 
@@ -298,8 +305,8 @@ def resolve_secret_terms(config_path: Path, repo: Path) -> tuple[str, ...]:
             load_secret_terms,
             resolve_secret_word_list_path,
         )
-    except ImportError:
-        return ()
+    except ImportError as exc:
+        raise _term_rule_unavailable(exc) from exc
 
     configured = sensitive_content_options(config_path).get("secret_word_list_path")
     path = resolve_secret_word_list_path(configured if isinstance(configured, str) else None, repo)
