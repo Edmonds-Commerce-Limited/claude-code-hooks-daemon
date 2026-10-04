@@ -12,6 +12,7 @@ Escape hatch: ``MUST_SCAN_ROOT_BECAUSE="reason"`` (mirrors git_stash's
 
 import pytest
 
+from claude_code_hooks_daemon.constants.priority import Priority
 from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.core import Decision
 from claude_code_hooks_daemon.core.data_layer import reset_data_layer
@@ -49,7 +50,14 @@ class TestRootRecursionGuardInit:
         assert handler.name == "root-recursion-guard"
 
     def test_priority(self, handler):
-        assert handler.priority == 16
+        assert handler.priority == 13
+
+    def test_runs_before_secret_file_guard(self, handler):
+        # The secret guard walks the search root of a recursive scan; this guard
+        # judges the command text alone. Running first denies a catastrophic
+        # root (/, ~, $HOME) with no tree walk and with the better guidance.
+        assert Priority.ROOT_RECURSION_GUARD < Priority.SECRET_FILE_GUARD
+        assert handler.priority < Priority.SECRET_FILE_GUARD
 
     def test_terminal(self, handler):
         assert handler.terminal is True
