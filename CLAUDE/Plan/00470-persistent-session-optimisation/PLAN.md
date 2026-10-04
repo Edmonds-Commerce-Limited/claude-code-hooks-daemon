@@ -74,12 +74,14 @@ Evidence, with verified facts marked apart from inferences, is in
 
   - A Notification cannot inject context, so `quota_resume_recorder` (Notification) writes `limit-events.json` and `limit_rebrief` (UserPromptSubmit, priority 39) delivers the one-shot re-brief at the next prompt. The same handler names a limit-killed background or teammate agent from the prompt-borne notification. No queue exists yet: the re-brief points at the worktrees, the plan JOURNAL and the last StopFailure record, and `_REBRIEF_PLACES` is where Task 3.3 adds the queue. Report: `subagent-reports/261003-task-3.2-notifications-sonnet.md`.
 
-- [ ] ⬜ **Task 3.3**: Durable work-queue file format + the `issue-sdlc` skill writes and reads it; SessionStart (`resume`/`compact`) re-briefs from it. Observed on 2026-09-25, in two separate ways:
+- [x] ✅ **Task 3.3**: Durable work-queue file format + the `issue-sdlc` skill writes and reads it; SessionStart (`resume`/`compact`) re-briefs from it. Observed on 2026-09-25, in two separate ways:
 
   - After a usage-limit restart, a new session had no teammates.
   - A user interrupt of the lead's turn killed all 11 running in-process agents.
 
   Both times, each agent had to be re-briefed by hand from its worktree state. The queue must hold enough per agent (worktree, task brief, last sha) that a respawn is mechanical.
+
+  - `work-queue.json` plus `hooks-daemon work-queue add|update|done|list`, the `work_queue_rebrief` SessionStart handler and the `limit_rebrief` listing are advisory only (nothing is respawned); four owner questions are open in the report. Report: `subagent-reports/261004-task-3.3-work-queue-sonnet.md`.
 
 - [x] ✅ **Task 3.4**: Regression test that a teammate or sub-agent stop never writes the lead's `[awaiting-human]` marker.
 

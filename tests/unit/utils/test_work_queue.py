@@ -20,6 +20,7 @@ from claude_code_hooks_daemon.utils.work_queue import (
     active_records,
     add_record,
     default_queue_path,
+    queue_briefing,
     read_queue,
     render_rebrief,
     update_record,
@@ -237,3 +238,24 @@ class TestRender:
 
     def test_no_active_record_renders_nothing(self) -> None:
         assert render_rebrief([], now=_NOW) == []
+
+
+class TestQueueBriefing:
+    def test_no_path_and_no_file_are_silent(self, queue: Path) -> None:
+        assert queue_briefing(None, now=_NOW) == []
+        assert queue_briefing(queue, now=_NOW) == []
+
+    def test_running_records_are_briefed(self, queue: Path) -> None:
+        _add(queue)
+        assert "p470-queue" in "\n".join(queue_briefing(queue, now=_NOW))
+
+    def test_an_all_closed_queue_is_silent(self, queue: Path) -> None:
+        _add(queue)
+        update_record(queue, "p470-queue", now=_NOW, status=STATUS_DONE)
+        assert queue_briefing(queue, now=_NOW) == []
+
+    def test_an_unreadable_queue_says_so(self, queue: Path) -> None:
+        queue.write_text("{oops", encoding="utf-8")
+        lines = queue_briefing(queue, now=_NOW)
+        assert lines[0] == "WORK QUEUE UNREADABLE"
+        assert "unreadable" in "\n".join(lines)

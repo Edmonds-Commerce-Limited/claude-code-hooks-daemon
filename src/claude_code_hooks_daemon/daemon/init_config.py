@@ -359,6 +359,7 @@ class ConfigTemplate:
             "    reference_repo_sweep: {enabled: true, priority: 71}  # Fetch governed reference clones; silent when all are current\n"
             "    routine_qa_sweep: {enabled: false, priority: 72}  # Report recurring work that has stopped recurring; silent when the Routine tree is clean (opt-in)\n"
             "    session_actions_directive: {enabled: false, priority: 73}  # Write <session>.session-actions so the ccy supervisor types one directive when a SessionStart verifier is failing (opt-in)\n"
+            "    work_queue_rebrief: {enabled: true, priority: 48}  # On resume/compact, list the agents the durable work queue records as running; silent when none\n"
             "    guard_config_drift: {enabled: true, priority: 49}  # Report a working-tree hooks-daemon.yaml that weakens a guard relative to the committed one; silent when they agree\n"
             "    suggest_status_line: {enabled: true, priority: 55}  # Suggest status line setup\n"
             "    version_check: {enabled: true, priority: 55}  # Check for daemon updates on new sessions\n"

@@ -37,6 +37,13 @@ tick that dies mid-implementation has to be cheap to recover.
 4. **Stopping is a success.** A tick that records why it stopped did its job. A
    tick that guesses to look productive is the failure the runbook prevents.
 
+## Work queue
+
+Each sub-agent dispatch is recorded with `bin/hooks-daemon work-queue add`, and
+closed with `work-queue done` at merge, so a restart or an interrupt can be
+re-briefed from the queue (listed by `work-queue list`, and at session start on
+resume/compact). The runbook's Steps 1, 4 and 7 say exactly when.
+
 ## Invocation
 
 ```claude-code

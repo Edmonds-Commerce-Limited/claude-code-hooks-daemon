@@ -989,6 +989,13 @@ class HandlerID:
         config_key="failsafe_cron_session_advisor",
         display_name="failsafe-cron-session-advisor",
     )
+    # Plan 00470 Task 3.3: on a resumed or compacted session, list the agents the
+    # durable work queue records as still running, with their respawn facts.
+    WORK_QUEUE_REBRIEF = HandlerIDMeta(
+        class_name="WorkQueueRebriefHandler",
+        config_key="work_queue_rebrief",
+        display_name="work-queue-rebrief",
+    )
     # Cron Stop enforcer (Stop handler) -- Plan 00416 Task 1.1: the teeth
     # PERSISTENT_CRON_ASSERTOR cannot have. session_crons reaches Stop (unlike
     # SessionStart), so this VERIFIES declared persistent_crons jobs against

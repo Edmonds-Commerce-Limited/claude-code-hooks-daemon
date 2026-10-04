@@ -318,3 +318,22 @@ def render_rebrief(records: list[WorkRecord], *, now: float) -> list[str]:
         lines += _render_record(record, now)
     lines += ["", "Full briefs: `bin/hooks-daemon work-queue list --json`."]
     return lines
+
+
+def queue_briefing(path: Path | None, *, now: float) -> list[str]:
+    """What a session should be told about the queue at ``path``; ``[]`` when nothing.
+
+    A missing file, or one with no running record, is silent. An unreadable one is
+    reported rather than called empty: silence there would hide the lost agents.
+    """
+    if path is None:
+        return []
+    try:
+        return render_rebrief(active_records(read_queue(path)), now=now)
+    except WorkQueueError as exc:
+        return [
+            "WORK QUEUE UNREADABLE",
+            "",
+            f"{exc}. Dispatched agents cannot be listed from it; rebuild the picture "
+            "from `git worktree list` and the plan JOURNAL, and repair or remove the file.",
+        ]

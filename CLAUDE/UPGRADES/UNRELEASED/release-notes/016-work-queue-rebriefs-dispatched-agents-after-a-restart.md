@@ -1,0 +1,6 @@
+# Callout: a restart or interrupt no longer loses track of dispatched agents
+
+**Plan**: 00470
+**Audience**: everyone
+
+A usage-limit restart used to leave a new session with no teammates, and a user interrupt killed every in-process agent; each had to be re-briefed by hand from its worktree. The daemon now keeps a durable work queue, `work-queue.json` in its untracked directory: one record per dispatched agent with its worktree, branch, brief (inline, or the path of a brief file), last known sha and status. A coordinator writes it with `bin/hooks-daemon work-queue add|update|done|list`, and the `issue-sdlc` runbook now does so at dispatch and at merge. A new SessionStart handler, `work_queue_rebrief` (on by default, priority 48), lists the agents still recorded as running, with the exact respawn facts, when a session starts from `resume` or `compact`, and the usage-limit re-brief (`limit_rebrief`) lists the same queue. It is advisory: nothing is respawned for you. It is silent when no agent is running, and an unreadable queue file is reported rather than treated as empty. Projects with a `hooks-daemon.yaml` get the handler by default; to opt out set `handlers.session_start.work_queue_rebrief.enabled: false`.

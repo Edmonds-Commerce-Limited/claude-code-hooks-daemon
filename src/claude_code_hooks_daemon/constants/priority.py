@@ -455,6 +455,10 @@ class Priority:
     # report that the guards themselves were weakened is the one every other
     # advisory's value depends on, so it is read first and cannot be buried.
     GUARD_CONFIG_DRIFT = 49
+    # Plan 00470 Task 3.3: the work queue is the first thing a resumed or compacted
+    # session needs (it names the agents to re-brief), so it speaks ahead of the
+    # guard-drift report, which only fires on a new session in practice.
+    WORK_QUEUE_REBRIEF = 48
     PROJECT_HANDLER_LOAD_CHECKER = 50
     HOOK_REGISTRATION_CHECKER = 51
     # Plan 00468 G1: same slot as hook_registration_checker. That one reports

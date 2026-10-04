@@ -3563,6 +3563,29 @@ handlers:
 
 These handlers run when a new Claude Code session begins. They provide environment information and configuration checks.
 
+#### work_queue_rebrief
+
+| Property       | Value                |
+| -------------- | -------------------- |
+| **Config key** | `work_queue_rebrief` |
+| **Priority**   | 48                   |
+| **Type**       | Advisory             |
+| **Event**      | SessionStart         |
+
+**Description:** On a `resume` or `compact` session start, lists the agents the durable work queue (`work-queue.json` in the daemon's untracked dir) records as still running (Plan 00470 Task 3.3): each one's worktree, branch, last known sha and brief (or the path of its brief file), whether its worktree still exists, and a reminder that nothing is respawned for you. Re-dispatching is the coordinator's call. The queue is written with `bin/hooks-daemon work-queue add|update|done|list`, which the `issue-sdlc` runbook calls at dispatch and completion. `limit_rebrief` lists the same queue after a usage-limit resume.
+
+Silent on `startup` and `clear`, and when the queue is missing or holds no running record. An unreadable queue (corrupt, or a newer schema) is reported rather than treated as empty. Never denies, never terminal. No options.
+
+```yaml
+handlers:
+  session_start:
+    work_queue_rebrief:
+      enabled: true
+      priority: 48
+```
+
+---
+
 #### optimal_config_checker
 
 | Property       | Value                    |
@@ -4245,7 +4268,7 @@ handlers:
 | **Type**       | Advisory         |
 | **Event**      | UserPromptSubmit |
 
-**Description:** Answers a usage limit at the session's next prompt (Plan 00470 Task 3.2). A Notification hook cannot inject context, so `quota_resume_recorder` (Notification) writes down a `quota_auto_resume_fired`, `_stale` or `_disabled` notification in `limit-events.json` under the daemon's untracked dir, and this handler delivers a one-shot re-brief at the next prompt: what the notification said, the last recorded limit hit, where to look for what was in flight (`git worktree list`, each worktree's `git status` and `git log -1`, the active plan's `JOURNAL/`), and any agent recorded as killed. The event is then marked delivered.
+**Description:** Answers a usage limit at the session's next prompt (Plan 00470 Task 3.2). A Notification hook cannot inject context, so `quota_resume_recorder` (Notification) writes down a `quota_auto_resume_fired`, `_stale` or `_disabled` notification in `limit-events.json` under the daemon's untracked dir, and this handler delivers a one-shot re-brief at the next prompt: what the notification said, the last recorded limit hit, where to look for what was in flight (the work queue first, then `git worktree list`, each worktree's `git status` and `git log -1`, the active plan's `JOURNAL/`), the agents the durable work queue records as still running (see `work_queue_rebrief`), and any agent recorded as killed. The event is then marked delivered.
 
 It also names a BACKGROUND or teammate agent a session or weekly limit killed. A foreground dispatch's death is `agent_terminated_early_failure_detector`'s; a background agent reports its death through a prompt-borne notification instead. A prompt that OPENS with `<task-notification` and quotes the harness's `You've hit your session|weekly limit · resets` sentence, or with a `<teammate-message` carrying a failed `idle_notification` that quotes it, gets an advisory naming the agent (the notification's `<summary>` element, or its whole text with markup stripped when there is none; for a teammate, the `teammate_id`) and demanding a re-brief once the limit resets. The markup inside a `<task-notification>` is not documented upstream, so only the optional `<summary>` is read. A human prompt quoting the sentence is ignored.
 
