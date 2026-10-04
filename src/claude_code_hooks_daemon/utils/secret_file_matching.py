@@ -1550,6 +1550,7 @@ def find_protected_mention_detail(
     context: MentionContext = "bash",
     normalised_words: list[str] | None = None,
     bash_tool_command: bool = False,
+    cwds: tuple[str, ...] | None = None,
 ) -> tuple[str, str] | None:
     """``(pattern, token)`` for the first protected mention, else ``None``.
 
@@ -1579,6 +1580,7 @@ def find_protected_mention_detail(
             context=context,
             normalised_words=normalised_words,
             bash_tool_command=bash_tool_command,
+            cwds=cwds,
         ),
         None,
     )
@@ -1826,8 +1828,14 @@ def iter_protected_mentions(
     context: MentionContext = "bash",
     normalised_words: list[str] | None = None,
     bash_tool_command: bool = False,
+    cwds: tuple[str, ...] | None = None,
 ) -> Iterator[tuple[str, str]]:
     """``(pattern, token)`` for EVERY protected mention in ``command``, in order.
+
+    ``cwds`` are the directories a relative word may be read from (see
+    :func:`effective_cwds`); ``None`` derives them from ``command`` and ``cwd``.
+    A caller judging a fragment of a longer command passes the whole
+    command's.
 
     One entry per mentioning token, carrying the first glob it trips. The
     encrypted-target exemption (Plan 00459) needs them all: a command is let
@@ -1909,6 +1917,7 @@ def iter_protected_mentions(
     if not command or not patterns:
         return
     project_root = resolve_project_root()
+    effective = effective_cwds(command, cwd) if cwds is None else cwds
     stem_pairs = _pattern_literal_stems(patterns)
     both_edges_patterns = tuple(
         pattern
@@ -1969,6 +1978,7 @@ def iter_protected_mentions(
                 both_edges_stems=both_edges_stems,
                 context=context,
                 expands_globs=functools.partial(glob_gate.expands, token),
+                effective_cwds=effective,
             )
             mention_cache[token] = pattern
         if pattern is not None and token not in yielded_tokens:
@@ -2213,8 +2223,13 @@ def _token_mention(
     context: MentionContext = "bash",
     realpath_cache: dict[str, str | None] | None = None,
     expands_globs: Callable[[], bool] = lambda: True,
+    effective_cwds: tuple[str, ...] = (),
 ) -> str | None:
     """The first protected glob ``token`` names (or could glob-expand to), else None.
+
+    ``effective_cwds`` (:func:`effective_cwds`) are the directories a relative
+    ``token`` may be read from: a directory or absolute-path pattern is matched
+    against the path the word reaches there too, not only as spelled.
 
     ``expands_globs`` answers, only when ``token`` is glob-shaped, whether the
     word can be glob-expanded at all (:class:`_GlobExpansionGate`). ``False``
@@ -2259,6 +2274,10 @@ def _token_mention(
             matched = first_matching_glob(form, patterns, project_root=project_root)
             if matched is not None:
                 return matched
+            for anchored in _anchored_spellings(form, effective_cwds if context == "bash" else ()):
+                matched = first_matching_glob(anchored, patterns, project_root=project_root)
+                if matched is not None:
+                    return matched
         if context != "bash":
             continue
         # Everything below judges a word bash would glob-expand. Text that a
@@ -2526,6 +2545,63 @@ def _expand_glob_token(
     if errors:
         raise errors[0]
     return None
+
+
+_DIRECTORY_CHANGE_COMMANDS: Final[frozenset[str]] = frozenset({"cd", "pushd"})
+_COMMAND_SEGMENT_SEPARATORS: Final[re.Pattern[str]] = re.compile(r"&&|\|\||[;|&\n]")
+
+
+def effective_cwds(command: str, cwd: str | None) -> tuple[str, ...]:
+    """The directories ``command`` may run in: the hook's ``cwd``, then each literal ``cd`` target.
+
+    Ledger 00474 N221. A relative path in a command is read from where the
+    command is, so ``cd vault && cat r.md`` reaches ``vault/r.md``. Every
+    ``cd``/``pushd`` is tracked cumulatively and ALL the resulting directories
+    are returned, because a word is judged against each: the over-approximation
+    errs towards denying and needs no per-word ordering. A target bash computes
+    (a variable, substitution, glob, brace list, tilde) or that cannot be
+    placed (``cd -``, a relative step with no absolute directory to start
+    from) is not tracked -- out of scope, as before.
+    """
+    directories: list[str] = [cwd] if cwd is not None and Path(cwd).is_absolute() else []
+    for segment in _COMMAND_SEGMENT_SEPARATORS.split(command):
+        words = _shell_words(segment)
+        if words is None or len(words) < 2 or words[0] not in _DIRECTORY_CHANGE_COMMANDS:
+            continue
+        operands = [word for word in words[1:] if not word.startswith("-") or word == "-"]
+        if not operands:
+            continue
+        target = operands[0]
+        if target == "-" or any(char in _WORD_EXPANDING_CHARACTERS for char in target):
+            continue
+        if not Path(target).is_absolute():
+            if not directories:
+                continue
+            target = str(Path(directories[-1]) / target)
+        directories.append(os.path.normpath(target))
+    return tuple(dict.fromkeys(directories))
+
+
+def _anchored_spellings(form: str, cwds: tuple[str, ...]) -> list[str]:
+    """The lexically collapsed paths ``form`` reaches, when they differ from its spelling.
+
+    Ledger 00474 N184: an absolute ``form`` has its ``..`` collapsed
+    (``os.path.normpath``, symlinks untouched). N221: a relative ``form`` is
+    joined to each of ``cwds`` and collapsed. A home-relative or NUL-bearing
+    word is left alone.
+    """
+    if not form or "\0" in form or form.startswith("~"):
+        return []
+    if form.startswith("/"):
+        bases: tuple[str, ...] = ("",)
+    else:
+        bases = cwds
+    spellings: list[str] = []
+    for base in bases:
+        collapsed = os.path.normpath(str(Path(base) / form) if base else form)
+        if collapsed != form and collapsed not in spellings:
+            spellings.append(collapsed)
+    return spellings
 
 
 def _realpath_if_resolvable(token: str) -> str | None:

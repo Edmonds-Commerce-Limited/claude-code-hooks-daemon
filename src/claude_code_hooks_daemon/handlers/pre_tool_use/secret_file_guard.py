@@ -1093,6 +1093,8 @@ def _bash_interpreter_one_liner_mention(
         if words is not None
         else list(shell_expansion.iter_normalised_shell_words(command, deadline=deadline))
     )
+    # A literal runs in the directory the WHOLE command has moved to.
+    cwds = sfm.effective_cwds(command, cwd)
     for index, word in enumerate(resolved_words):
         basename = word.rsplit("/", 1)[-1]
         family = _match_one_liner_family(basename)
@@ -1123,7 +1125,7 @@ def _bash_interpreter_one_liner_mention(
         if code_index is None or code_index >= len(resolved_words):
             continue
         mention = _shell_exec_literal_mention(
-            family, resolved_words[code_index], patterns, deadline=deadline, cwd=cwd
+            family, resolved_words[code_index], patterns, deadline=deadline, cwd=cwd, cwds=cwds
         )
         if mention is not None:
             return mention
@@ -1138,7 +1140,7 @@ def _bash_interpreter_one_liner_mention(
         if heredoc_family is None:
             continue
         mention = _shell_exec_literal_mention(
-            heredoc_family, heredoc.body, patterns, deadline=deadline, cwd=cwd
+            heredoc_family, heredoc.body, patterns, deadline=deadline, cwd=cwd, cwds=cwds
         )
         if mention is not None:
             return mention
@@ -1152,13 +1154,14 @@ def _shell_exec_literal_mention(
     *,
     deadline: float,
     cwd: str | None,
+    cwds: tuple[str, ...],
 ) -> tuple[str, str] | None:
     """A protected mention in a shell-exec call's literal inside ``code``,
     a program in ``family``'s language, judged as shell text."""
     pseudo_path = "one_liner" + family.pseudo_ext
     for literal in _shell_exec_call_literals(pseudo_path, code):
         mention = sfm.find_protected_mention_detail(
-            literal, patterns, deadline=deadline, cwd=cwd, context="bash"
+            literal, patterns, deadline=deadline, cwd=cwd, context="bash", cwds=cwds
         )
         if mention is not None:
             return mention

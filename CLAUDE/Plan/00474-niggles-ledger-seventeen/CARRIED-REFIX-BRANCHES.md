@@ -1029,7 +1029,7 @@ clean tree, which main allows; it is now a budget of 100k entries or
 
 ### N184 — A Bash read through `<link>/..` misses an absolute-path pattern
 
-**Status on the branch**: ✅ Remedied. **On main**: ⬜ Open: in-scope defect (Plan 00483 triage, see TRIAGE-carried-b.md)
+**Status on the branch**: ✅ Remedied. **On main**: ✅ Fixed on worktree-p483-paths (Plan 00483 Task 3.1): `..` is collapsed lexically before a directory or absolute-path pattern is matched
 
 **Found by the small-a D-PATH re-review 3 (shared minor; main has it too).**
 The Bash mention scan matched a word as spelled, and resolved it only when
@@ -1088,7 +1088,7 @@ tests `TestAGlobWithABareStarIsExpanded` and the `bare_star*` cases of
 
 ### N221 — A path in an interpreter one-liner after a `cd` is judged from the hook's cwd
 
-**Status on the branch**: ✅ Remedied. **On main**: ⬜ Open: in-scope defect (Plan 00483 triage, see TRIAGE-carried-b.md)
+**Status on the branch**: ✅ Remedied. **On main**: ✅ Fixed on worktree-p483-paths (Plan 00483 Task 3.1): a relative word is also judged from the hook's cwd and each literal `cd` target
 
 **Found by the small-a D-PATH re-review 5 (shared minor; main has it too).**
 With a protected pattern that names a directory, `cd CLAUDE && python3 -c 'print(open("Plan/…/r.md").read())'` was allowed on main and on the
