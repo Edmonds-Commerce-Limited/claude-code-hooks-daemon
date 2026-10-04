@@ -391,7 +391,7 @@ class PlanJournalGuardHandler(PreToolUseHandlerBase):
         for git_dir, raw in conflict_checkout_paths(command):
             base: str | None = cwd
             if git_dir is not None:
-                base = git_dir if cwd is None else os.path.join(cwd, git_dir)
+                base = git_dir if cwd is None else str(Path(cwd) / git_dir)
             target = self._dayfile_target(raw, base, plan_dir)
             if target is not None:
                 return replace(target, conflict_checkout=True)
