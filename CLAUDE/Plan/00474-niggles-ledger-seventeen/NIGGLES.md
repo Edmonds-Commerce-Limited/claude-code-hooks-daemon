@@ -1442,12 +1442,15 @@ About 470 more files at depth 3 and `ls */*/*` is denied too. Failing closed pas
 that could not finish reading, but the deny reason should say "too many paths to check", not "mentions a protected
 path".
 
-**Status**: ⬜ Open. Remedy:
+**Status**: 🟡 Partly fixed. The reason and rule part is fixed on worktree-n346-capmsg (commit 495217e2c): a scan
+past its cap or deadline is denied as `R-SECRET-SCAN-INCOMPLETE`, whose reason says what ran out (the cap of examined
+paths, or the scan deadline), that no protected path was found, and to narrow the glob or search root or name the
+files, or retry after a deadline. A real finding keeps `R-SECRET-BASH-MENTION` or `R-SECRET-READ`. Caps and deadline
+are unchanged. The recursive-search walk (`utils/recursive_search.py`) has no deny past its cap to relabel:
+`directory_contains_protected` answers none past the cap, the documented residual limit. Still Open:
 
 - check each protected pattern against the glob, which is bounded by the number of patterns rather than the size of
-  the tree, before or instead of walking the filesystem;
-- or give the cap-exceeded verdict its own reason and rule ID, so an agent can narrow the glob rather than suspect
-  a secret.
+  the tree, before or instead of walking the filesystem, so the verdict stops depending on tree size.
 
 ### N347 — the plan-folder mkdir guard read `mkdir` inside a branch name as a command
 
@@ -1477,8 +1480,13 @@ the same HEAD.
 **Impact**: a deny that depends on host load and not on the staged content. A careful agent re-tries. A careless
 one may read the deny as a real conflict marker and edit content that is fine. This is the commit-gate twin of N344.
 
-**Status**: ⬜ Open. Remedy: tell a timed-out scan apart from a finding in the deny reason, and say "retry"; or scale
-the bound. Failing closed on a timeout stays, because the gate could not read the tree.
+**Status**: ✅ Fixed on worktree-n346-capmsg (commit f24046993). `run_git` reports a timeout as its own status
+(`GIT_TIMED_OUT`, 124), and `conflict_marker_commit_gate` denies it as `R-CONFLICT-MARKER-SCAN-TIMED-OUT`: the reason
+names the 5 s limit, says no marker was found and the content needs no edit, and says to retry the same commit. The
+bound is unchanged and the gate still fails closed. The sibling commit gates were checked: `sensitive_content`'s
+staged-diff reads and `staged_lint_gate` stand down (allow) on a git or tool timeout, and the docs, plan and
+remote-docs QA gates deny with the staging simulation's own message, which already names the failed `git add`
+and is not a finding.
 
 ### N345 — a merge conflict in a past journal day-file has no sanctioned resolution
 
