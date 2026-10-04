@@ -1421,9 +1421,11 @@ failed on their ratio and then passed on re-run.
 **Impact**: a flaky failure in a gate test that is meant to catch super-linear guards. A reader cannot tell a real
 regression from clock resolution, so a branch's QA needs re-runs that prove nothing.
 
-**Status**: ⬜ Open. Remedy: floor the denominator at the clock's measured resolution
-(`time.clock_getres(time.CLOCK_PROCESS_CPUTIME_ID)`), or repeat the small case until it reaches a minimum
-measurable duration. Report a ratio that is "unmeasurably small" as a pass, never as an exception.
+**Status**: ✅ Fixed (d97464d6e). `tests/scaling.py` now floors the `scaling_ratio` denominator at
+`clock_resolution_seconds()`, one tick of `time.thread_time` measured by spinning across two consecutive advances
+(falls back to `clock_getres`, then 16 ms). `clock_getres` alone was not used because it reports 1 ns on a coarse
+clock. A measurable denominator is unchanged, so `SUPERLINEAR_RATIO` and the measured inputs are untouched.
+`counted_ratio` divides by an integer count floored at 1 and had no hazard. Harness tests: `tests/unit/test_scaling.py`.
 
 ### N348 — the secret guard's bare-glob cap denies ordinary deep globs as a repository grows
 
