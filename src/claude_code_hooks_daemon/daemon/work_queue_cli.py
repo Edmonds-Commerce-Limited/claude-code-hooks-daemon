@@ -149,7 +149,9 @@ def add_work_queue_parser(subparsers: Any) -> None:
     )
     actions = parser.add_subparsers(dest="work_queue_action", required=True)
 
-    add = actions.add_parser("add", help="Record a dispatch as running (re-adding a name resets it)")
+    add = actions.add_parser(
+        "add", help="Record a dispatch as running (re-adding a name resets it)"
+    )
     add.add_argument("name", help="The agent's name")
     add.add_argument("--worktree", required=True, help="The agent's worktree path")
     add.add_argument("--branch", required=True, help="The agent's branch")

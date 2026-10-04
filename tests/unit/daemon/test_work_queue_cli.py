@@ -48,7 +48,17 @@ def worktree(tmp_path: Path) -> Path:
     checkout.mkdir()
     for argv in (
         ["init", "-q"],
-        ["-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-q", "--allow-empty", "-m", "x"],
+        [
+            "-c",
+            "user.name=t",
+            "-c",
+            "user.email=t@example.com",
+            "commit",
+            "-q",
+            "--allow-empty",
+            "-m",
+            "x",
+        ],
     ):
         subprocess.run(["git", "-C", str(checkout), *argv], check=True, capture_output=True)
     return checkout
@@ -56,7 +66,10 @@ def worktree(tmp_path: Path) -> Path:
 
 def _head(checkout: Path) -> str:
     done = subprocess.run(
-        ["git", "-C", str(checkout), "rev-parse", "HEAD"], check=True, capture_output=True, text=True
+        ["git", "-C", str(checkout), "rev-parse", "HEAD"],
+        check=True,
+        capture_output=True,
+        text=True,
     )
     return done.stdout.strip()
 
@@ -191,7 +204,9 @@ class TestList:
     def test_all_includes_closed_records(
         self, project: Path, worktree: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        _run(project, "add", "finished", "--worktree", str(worktree), "--branch", "b", "--brief", "x")
+        _run(
+            project, "add", "finished", "--worktree", str(worktree), "--branch", "b", "--brief", "x"
+        )
         _run(project, "done", "finished")
         capsys.readouterr()
         _run(project, "list", "--all")
