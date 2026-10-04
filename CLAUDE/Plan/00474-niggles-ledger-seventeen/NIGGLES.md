@@ -1420,9 +1420,11 @@ give-up message reads the holders from `/proc`, so the waiter's report is right;
 **Impact**: a person or agent who diagnoses a stuck queue by reading the lock file is told the holder is a process
 that no longer exists, and may conclude the lock is stale and try to break it.
 
-**Status**: ⬜ Open. Remedy: have both routes write their own holder line on acquiring the lock, and truncate it on
-release. Alternatively, write nothing to the file and give `hooks-daemon` a command that reports holders from
-`/proc`.
+**Status**: ✅ Fixed in 1999db05c. Both routes write their own `pid=`/`checkout=`/`started=` lines once they hold the
+flock, and every acquirer overwrites the whole file. `llm_qa.py` also empties the file on release. The bash route
+(`run_tests.sh`) does not clear on exit: the kernel drops the flock when the shell dies, and an EXIT trap would clobber
+the caller's own, so a stale line from a finished bash holder names a dead pid, which `describe_holder` reads as "no
+holder", until the next acquirer overwrites it. The file is never unlinked.
 
 ### N350 — a `for … in dir/*` loop was denied on a lone `*` token
 
