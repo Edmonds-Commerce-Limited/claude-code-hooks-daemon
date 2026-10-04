@@ -631,9 +631,7 @@ class TestProjectSecretTerms:
         )
         assert sr.project_secret_terms(tmp_path, config) == ("alpha-term",)
 
-    def test_a_config_that_does_not_parse_still_uses_the_default_path(
-        self, tmp_path: Path
-    ) -> None:
+    def test_a_config_that_does_not_parse_still_uses_the_default_path(self, tmp_path: Path) -> None:
         default = tmp_path / sr.DEFAULT_SECRET_WORD_LIST_PATH
         default.parent.mkdir(parents=True, exist_ok=True)
         default.write_text("beta-term\n")

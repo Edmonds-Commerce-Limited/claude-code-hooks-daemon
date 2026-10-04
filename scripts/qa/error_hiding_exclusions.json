@@ -853,12 +853,6 @@
       "reason": "Plan 00200 Task 5.4: `validate_worktree \"$wt\" || true` inside a loop -- deliberately continues validating remaining worktrees after one fails. validate_worktree() records the failure in FAILED_WTS BEFORE returning 1, and the script's own final summary exits 1 if FAILED_WTS is non-empty -- the opposite of hiding: every failure is aggregated and the overall exit code reflects it. The `|| true` exists only to stop `set -e` short-circuiting the loop on the first failure."
     },
     {
-      "file": "scripts/qa/check_sensitive_content.py",
-      "function": "resolve_secret_word_list_file",
-      "rule": "return-none-on-error",
-      "reason": "Plan 00200 Task 5.4: ImportError when the daemon package isn't importable in whatever interpreter ran this QA script -- documented inline as matching audit_error_hiding.py's own precedent of importing the daemon package from a QA script (see this file's docstrings, and this exclusions file's daemon/cli.py::cmd_start entry for the general shape)."
-    },
-    {
       "file": "daemon/controller.py",
       "function": "_record_verdicts",
       "rule": "log-and-continue",
@@ -1031,12 +1025,6 @@
       "function": "_collect_secret_redaction_status_lines",
       "rule": "silent-continue",
       "reason": "Plan 00306 Task 2.1: per-root loop over the ProjectRegistry roots -- a single declared sub-project's own .claude/hooks-daemon.yaml being unreadable or malformed must not stop the advisory sweep of every OTHER root, so that root is skipped and the loop continues. Mirrors _collect_enforcement_status_lines's per-root best-effort contract (this file); the primary root's config is already validated (and any error reported) by the outer try/except this function starts with."
-    },
-    {
-      "file": "daemon/cli.py",
-      "function": "_sensitive_content_guard",
-      "rule": "return-none-on-error",
-      "reason": "Plan 00326 Task 2.5: the capture path writes to disk from the CLI, so the Write-tool hook that would normally scan content never fires and this injects the handler's own scanner instead. When the handler cannot be built (no ProjectContext in a CLI probe, an import failure), capture proceeds UNSCANNED rather than failing -- but the degradation is NOT silent: it logs at WARNING and prints an explicit 'this capture is NOT being scanned' notice to stderr, which a test pins. Raising instead would make every capture depend on handler construction succeeding, which is a heavier failure mode than a loud, actioned warning."
     },
     {
       "file": "handlers/pre_tool_use/remote_docs_routing.py",

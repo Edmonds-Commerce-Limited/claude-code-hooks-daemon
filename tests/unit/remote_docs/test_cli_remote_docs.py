@@ -395,9 +395,7 @@ class TestUnscannedCaptureIsAnnounced:
         with pytest.raises(_ContentGuardUnavailableError, match="not valid|Invalid YAML"):
             _sensitive_content_guard(tmp_path)
 
-    def test_add_writes_nothing_when_the_guard_is_unavailable(
-        self, tmp_path: Path, capsys
-    ) -> None:
+    def test_add_writes_nothing_when_the_guard_is_unavailable(self, tmp_path: Path, capsys) -> None:
         from claude_code_hooks_daemon.daemon.cli import (
             _ContentGuardUnavailableError,
             cmd_remote_docs,
