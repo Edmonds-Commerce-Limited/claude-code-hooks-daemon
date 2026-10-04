@@ -70,6 +70,19 @@ past 6000) and `test_quarantine_artefact_read_guard.py` (incomplete rule via Gre
 deadline forwarded, timeout). Removed: the five `directory_contains_protected` tests from `test_secret_file_matching.py`
 (moved and rewritten in the new file).
 
+### What would fail on main (stated, not run)
+
+Tests that fail on main's code, by main line (c2f1a3cd5):
+
+- `test_protected_file_after_five_thousand_clean_files_is_found` (scan tests) and
+  `test_the_grep_tool_finds_a_protected_file_after_five_thousand_clean_ones` (guard): `directory_contains_protected`
+  (`secret_file_matching.py:2744-2745`) returns None once `seen > max_entries` (5000), before reaching `zdeep/`.
+- `test_protected_file_listed_after_position_six_thousand_is_found` and the `git grep` guard / caller variants:
+  `_tracked_protected` (`recursive_search.py:540-543`) slices `listed[: DIRECTORY_SCAN_MAX_ENTRIES]`, so a file at
+  position 6000 is never examined.
+- The small-cap and deadline raise tests, the incomplete-rule guard tests and the `R-QUARANTINE-SCAN-INCOMPLETE` tests:
+  main answers None past the cap, never raises, and has no deadline in the walk.
+
 ## Measurements
 
 Guard classes run from this worktree's code with the project root and cwd `/workspace`, read-only
