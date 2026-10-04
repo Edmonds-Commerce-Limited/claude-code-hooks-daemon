@@ -47,9 +47,8 @@ from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.relevance import Relevance, RelevanceContext
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.handlers.utils.quarantine import quarantine_agent_relevance
-from claude_code_hooks_daemon.utils import recursive_search
+from claude_code_hooks_daemon.utils import recursive_search, shell_expansion
 from claude_code_hooks_daemon.utils import secret_file_matching as sfm
-from claude_code_hooks_daemon.utils import shell_expansion
 from claude_code_hooks_daemon.utils.bash_flags import SPAN_SEPARATORS, split_statements
 from claude_code_hooks_daemon.utils.command_evasion import compile_command_name_pattern
 from claude_code_hooks_daemon.utils.shell_segmentation import split_unquoted
