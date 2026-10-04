@@ -63,6 +63,7 @@ from claude_code_hooks_daemon.install.upgrade_gate import (
 )
 from claude_code_hooks_daemon.utils.one_shot_approval import OneShotApprovalStore
 from claude_code_hooks_daemon.version import __version__
+from tests.load_scaling import scaled_seconds
 
 _REPO_ROOT: Final[Path] = Path(__file__).resolve().parents[2]
 _LAYER1: Final[Path] = _REPO_ROOT / "scripts" / "upgrade.sh"
@@ -70,8 +71,11 @@ _LAYER2_REL: Final[str] = "scripts/upgrade_version.sh"
 #: The last release whose Layer 1 predates the gate (review MAJOR 2).
 _PRE_GATE_RELEASE: Final[str] = "v3.66.0"
 _BASH: Final[str] = shutil.which("bash") or "/bin/bash"
+#: Idle-host budgets, each multiplied by the host load when used (N344). All
+#: three only stop a hang in fixture setup, an upgrade run or a teardown.
 _UPGRADE_TIMEOUT_SECONDS: Final[int] = 600
 _GIT_TIMEOUT_SECONDS: Final[int] = 120
+_DAEMON_STOP_TIMEOUT_SECONDS: Final[int] = 3 * Timeout.DAEMON_SHUTDOWN
 _BRANCH: Final[str] = "e2e-staged"
 _GUIDE_TASK: Final[str] = "01-e2e-fixture-task.md"
 _PRE_TASK: Final[str] = "01-e2e-pre-task.md"
@@ -140,7 +144,7 @@ def _git(cwd: Path, *args: str) -> str:
         capture_output=True,
         text=True,
         check=True,
-        timeout=_GIT_TIMEOUT_SECONDS,
+        timeout=scaled_seconds(_GIT_TIMEOUT_SECONDS),
     )
     return result.stdout
 
@@ -252,7 +256,7 @@ def _stop_daemon(project: Path, env: dict[str, str]) -> None:
             capture_output=True,
             text=True,
             check=False,
-            timeout=Timeout.DAEMON_SHUTDOWN,
+            timeout=scaled_seconds(_DAEMON_STOP_TIMEOUT_SECONDS),
             env=env,
         )
 
@@ -267,7 +271,7 @@ def _run(argv: list[str], cwd: Path, env: dict[str, str]) -> subprocess.Complete
         text=True,
         check=False,
         env=env,
-        timeout=_UPGRADE_TIMEOUT_SECONDS,
+        timeout=scaled_seconds(_UPGRADE_TIMEOUT_SECONDS),
     )
 
 

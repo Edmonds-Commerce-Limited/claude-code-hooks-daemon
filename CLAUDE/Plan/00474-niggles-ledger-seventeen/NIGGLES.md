@@ -1510,12 +1510,15 @@ A fourth file timed out in the post-merge run on main at aace64fb4, with a load 
 **Impact**: a post-merge or CI run on a busy host reports false failures, and each one costs a manual re-run to
 tell load from a regression. The N326 test is the heaviest single test in the suite.
 
-**Status**: ⬜ Open. Remedy:
-
-- scale or remove fixed wall-clock bounds in test fixtures (a CPU-time or work-count bound, or none, where the
-  fixture is only setup);
-- consider restricting the N326 suite-on-an-emptied-tree test to the files that changed since the last release, or
-  to the full CI matrix only.
+**Status**: ✅ Fixed on worktree-n344-load (eaab931b9). `tests/load_scaling.py` gives `scaled_seconds(base)`, the idle
+budget times the larger of the 1 and 5 minute load averages per CPU (floor 1, cap 16), with unit tests. The four
+named files use it for their hang-guard timeouts. The watchdog test polls up to a load-stretched build bound; the
+first scaling attempt failed under synthetic load (24 spinners on 8 CPUs) because the orphaned job's venv work
+outlasted a deadline derived from the lagging load average, so the bound itself now carries the stretch. Passed
+under that load afterwards. The N326 test is not restricted to changed files: it exists to catch a dependency on
+staged content in a test nobody touched, so a changed-files filter would hide exactly that case; CI-only would
+move the failure to release time, which is what N326 was written to prevent. Other integration files with fixed
+`timeout=` values were out of scope and are not scaled.
 
 ### N343 — agents add entries under an already-released CHANGELOG section
 

@@ -23,11 +23,16 @@ from typing import Final
 
 import pytest
 
+from tests.load_scaling import scaled_seconds
+
 REPO_ROOT: Final[Path] = Path(__file__).resolve().parents[2]
 TESTS_DIR: Final[Path] = REPO_ROOT / "tests"
 UNRELEASED_DIR: Final[str] = "CLAUDE/UPGRADES/UNRELEASED"
 SCAFFOLDING_NAME: Final[str] = "README.md"
 FIXTURE_DIRNAME: Final[str] = "cyber-flag"
+#: Idle-host budget for the whole nested run. It only stops a hang, so it is
+#: multiplied by the host load when used (N344); the nested run took 25 minutes
+#: at a load average of 17.
 RUN_TIMEOUT_SECONDS: Final[int] = 900
 FAILURE_TAIL_CHARS: Final[int] = 40000
 
@@ -159,7 +164,7 @@ def test_the_holding_area_readers_pass_with_nothing_staged(released_tree: Path) 
         cwd=released_tree,
         capture_output=True,
         text=True,
-        timeout=RUN_TIMEOUT_SECONDS,
+        timeout=scaled_seconds(RUN_TIMEOUT_SECONDS),
         check=False,
     )
     assert result.returncode == 0, (
