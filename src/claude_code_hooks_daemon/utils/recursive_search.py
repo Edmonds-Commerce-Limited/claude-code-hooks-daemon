@@ -3,12 +3,11 @@
 ``grep -r x .``, ``rg x``, ``find . | xargs rg x`` and ``git grep x`` read
 every file under their roots, so a protected file or a quarantined DETAIL
 artefact is disclosed although no word of the command names it. The text scan
-of a command cannot see that; this module finds the roots such a command reads
-and asks the one bounded directory walk the Grep tool route already uses
-(:func:`secret_file_matching.directory_contains_protected`) whether any file
-under them matches. The cap and the answer past it are that walk's, not this
-module's: it adds no walk of its own, so a verdict depends on tree size exactly
-as the Grep tool's does (ledger 00474 N348).
+of a command cannot see that; this module finds the roots such a command reads,
+and which files the tool reads under them (:class:`TreeView`), and asks
+:func:`protected_tree_scan.find_protected_in_tree` whether any of them matches.
+The cap, the deadline and the answer past them are that scan's, not this
+module's: a scan that could not finish raises and is never answered as clean.
 
 The option reader (:func:`search_command`, :func:`scan_options`) and the
 command splitter (:func:`command_segments`) live here because
@@ -30,9 +29,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Final
 
-from claude_code_hooks_daemon.utils import secret_file_matching as sfm
+from claude_code_hooks_daemon.utils import protected_tree_scan
 from claude_code_hooks_daemon.utils.bash_flags import SPAN_SEPARATORS, split_statements
-from claude_code_hooks_daemon.utils.git_repo import run_git
+from claude_code_hooks_daemon.utils.protected_tree_scan import TreeView
 from claude_code_hooks_daemon.utils.shell_segmentation import (
     peel_command_wrappers,
     split_unquoted_spans,
@@ -290,17 +289,16 @@ def _tool_rules(name: str, arguments: list[str], scan: SearchArguments) -> _Rule
 
 @dataclass(frozen=True)
 class _Read:
-    """One tree a search reads: a directory, and what the tool leaves out of it.
+    """One tree a search reads: a directory, which files the tool reads, and what it skips.
 
-    ``tracked_only`` is ``git grep`` (the index); ``skip`` is the walk hook for
-    hidden and excluded entries; ``ignore_aware`` means a file git ignores is
-    not read either.
+    ``view`` is ``TRACKED`` for ``git grep`` (the index), ``UNIGNORED`` for a
+    tool that honours ignore files and ``ALL`` for one that reads everything;
+    ``skip`` is the hook for hidden and excluded entries.
     """
 
     root: str
-    tracked_only: bool = False
+    view: TreeView = TreeView.ALL
     skip: Callable[[str, bool], bool] | None = None
-    ignore_aware: bool = False
 
 
 def protected_reached_by_search(
@@ -309,6 +307,7 @@ def protected_reached_by_search(
     *,
     cwd: str | None,
     is_exempt: Callable[[str], bool] | None = None,
+    deadline: float | None = None,
 ) -> tuple[str, str] | None:
     """``(pattern, searched root)`` when a search in ``command`` reads a protected file.
 
@@ -316,38 +315,24 @@ def protected_reached_by_search(
     cannot be placed and are not judged. A root that is not a directory is
     skipped: a file named as an operand is the text scan's business.
     ``is_exempt`` skips a protected file the caller confirmed safe to read.
+    ``deadline`` (a ``time.monotonic()`` instant) bounds the scan: a tree past
+    the entry cap or the deadline raises (``TooManyToEnumerateError``,
+    ``TimeoutError``) rather than being answered as clean.
     """
     if not patterns:
         return None
     for read in _reads(command, cwd, 0):
-        if read.tracked_only:
-            hit = _tracked_protected(read.root, patterns, cwd, is_exempt)
-        else:
-            exempt = _also_git_ignored(is_exempt) if read.ignore_aware else is_exempt
-            hit = sfm.directory_contains_protected(
-                read.root, patterns, is_exempt=exempt, skip=read.skip
-            )
+        hit = protected_tree_scan.find_protected_in_tree(
+            read.root,
+            patterns,
+            view=read.view,
+            skip=read.skip,
+            is_exempt=is_exempt,
+            deadline=deadline,
+        )
         if hit is not None:
             return hit, read.root
     return None
-
-
-def _also_git_ignored(
-    is_exempt: Callable[[str], bool] | None,
-) -> Callable[[str], bool]:
-    """``is_exempt`` widened to a file git ignores, which an ignore-aware tool never opens.
-
-    Only a file ``git check-ignore`` reports counts: outside a repository, or on
-    any git failure, the file is read as before (fail closed).
-    """
-
-    def exempt(path: str) -> bool:
-        if is_exempt is not None and is_exempt(path):
-            return True
-        result = run_git(Path(posixpath.dirname(path)), "check-ignore", "-q", "--", path)
-        return result.returncode == 0
-
-    return exempt
 
 
 # Nested wrappers (`bash -c "bash -c ..."`) end here rather than recursing for ever.
@@ -439,14 +424,19 @@ def _git_grep_reads(
     magic (``:(exclude)``) cannot be placed and is left out, so the search is
     judged over the rest.
     """
-    tracked_only = not any(word in _GIT_GREP_WORKING_TREE_FLAGS for word in arguments)
+    # `--untracked` is really tracked plus non-ignored untracked files; ALL is the safe superset.
+    view = (
+        TreeView.ALL
+        if any(word in _GIT_GREP_WORKING_TREE_FLAGS for word in arguments)
+        else TreeView.TRACKED
+    )
     if _END_OF_OPTIONS in arguments:
         candidates = arguments[arguments.index(_END_OF_OPTIONS) + 1 :]
     else:
         candidates = [operand for operand in scan.operands if _exists(operand, cwd)]
     roots = tuple(c for c in candidates if not c.startswith(_PATHSPEC_MAGIC_PREFIX)) or (".",)
     for root in _placed(roots, cwd):
-        yield _Read(root, tracked_only=tracked_only)
+        yield _Read(root, view=view)
 
 
 def _exists(operand: str, cwd: str | None) -> bool:
@@ -515,34 +505,5 @@ def _reads_of_roots(
     roots: tuple[str, ...], cwd: str | None, rules: _Rules = _NO_RULES
 ) -> Iterator[_Read]:
     for root in _placed(roots, cwd):
-        yield _Read(root, skip=rules.predicate(root), ignore_aware=rules.honour_ignore)
-
-
-def _tracked_protected(
-    root: str,
-    patterns: tuple[str, ...],
-    cwd: str | None,
-    is_exempt: Callable[[str], bool] | None,
-) -> str | None:
-    """First protected glob matched by a file git tracks under ``root``, else None.
-
-    One ``git ls-files`` call, which is the set ``git grep`` reads; an ignored
-    file is not in it. Outside a repository git cannot answer, and neither can
-    ``git grep``. The listing is cut at the directory walk's own cap, with the
-    walk's own answer past it.
-    """
-    if cwd is None or not posixpath.isabs(cwd):
-        return None
-    result = run_git(Path(cwd), "ls-files", "-z", "--cached", "--", root)
-    if result.returncode != 0:
-        return None
-    listed = [name for name in result.stdout.split("\0") if name]
-    paths = [
-        posixpath.normpath(posixpath.join(cwd, name))
-        for name in listed[: sfm.DIRECTORY_SCAN_MAX_ENTRIES]
-    ]
-    for path in sfm.protected_among(paths, patterns):
-        if is_exempt is not None and is_exempt(path):
-            continue
-        return sfm.protecting_pattern(path, patterns)
-    return None
+        view = TreeView.UNIGNORED if rules.honour_ignore else TreeView.ALL
+        yield _Read(root, view=view, skip=rules.predicate(root))

@@ -42,12 +42,18 @@ from claude_code_hooks_daemon.core import Decision, GatingResult, get_data_layer
 from claude_code_hooks_daemon.core.handler import WorkspaceScope
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
-from claude_code_hooks_daemon.utils import encrypted_at_rest, recursive_search, shell_expansion
+from claude_code_hooks_daemon.utils import (
+    encrypted_at_rest,
+    protected_tree_scan,
+    recursive_search,
+    shell_expansion,
+)
 from claude_code_hooks_daemon.utils import secret_file_matching as sfm
 from claude_code_hooks_daemon.utils.path_exclusion import (
     handler_excludes_path,
     resolve_project_root,
 )
+from claude_code_hooks_daemon.utils.protected_tree_scan import TreeView
 from claude_code_hooks_daemon.utils.shell_segmentation import strip_quoted_heredoc_bodies
 
 logger = logging.getLogger(__name__)
@@ -203,7 +209,7 @@ _UNREADABLE_RULE: Final[Rule] = Rule(
 # and its own reason, which says what ran out and what to do about it.
 _INCOMPLETE_ROUTE: Final[str] = "incomplete"
 _INCOMPLETE_PATTERN: Final[str] = "<scan-incomplete>"
-_NARROW_ADVICE: Final[str] = "narrow the glob or the search root, or name the files"
+_FOUND_NOTHING: Final[str] = "no protected path was found"
 
 _INCOMPLETE_RULE: Final[Rule] = Rule(
     rule_id=RuleID.SECRET_SCAN_INCOMPLETE,
@@ -226,24 +232,6 @@ _INCOMPLETE_RULE: Final[Rule] = Rule(
         "which case retry the command."
     ),
 )
-
-
-def _incomplete_detail(exc: shell_expansion.TooManyToEnumerateError | TimeoutError) -> str:
-    """What ran out, for the deny reason. Never the exception text, which may name a path."""
-    if isinstance(exc, TimeoutError):
-        return (
-            f"the {sfm.SCAN_DEADLINE_SECONDS:g} s scan deadline passed; no protected path "
-            "was found; retry, and if it keeps timing out, name the files or narrow the glob"
-        )
-    if exc.limit is None:
-        return (
-            f"an expansion or entry cap was reached; no protected path was found; "
-            f"{_NARROW_ADVICE}"
-        )
-    return (
-        f"the glob expands past its cap of {exc.limit} examined paths; no protected "
-        f"path was found; {_NARROW_ADVICE}"
-    )
 
 
 # Routes whose deny message names the matched token (Plan 00356). Both scan a
@@ -1412,7 +1400,8 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
             # the internal-error route, whose text calls it a guard bug, and
             # (N348) not the finding routes either.
             logger.info("secret_file_guard: scan did not finish (%s); denying", type(exc).__name__)
-            return (_INCOMPLETE_PATTERN, _incomplete_detail(exc), _INCOMPLETE_ROUTE)
+            detail = sfm.scan_incomplete_detail(exc, found_nothing=_FOUND_NOTHING)
+            return (_INCOMPLETE_PATTERN, detail, _INCOMPLETE_ROUTE)
         except Exception as exc:
             # Deliberately broad: ANY exception during evaluation must deny,
             # never propagate (Plan 00466 N11) -- see the docstring above.
@@ -1488,25 +1477,25 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
                     command, patterns, deadline=deadline, cwd=cwd, words=shared_words
                 )
                 if one_liner_mention is None:
-                    return self._search_reach(command, patterns, cwd)
+                    return self._search_reach(command, patterns, cwd, deadline)
                 return (*one_liner_mention, "bash")
             # The EFFECTIVE patterns are passed through (review finding 1):
             # the flag-position check re-tests bare consumer arguments, and
             # testing the shipped defaults there would blind it to every
             # project-configured pattern — all of them under mode: replace.
             if sfm.is_exempt_invocation(command, self._consumers(), patterns, deadline=deadline):
-                return self._search_reach(command, patterns, cwd)
+                return self._search_reach(command, patterns, cwd, deadline)
             if sfm.is_encrypted_target_invocation(
                 command, patterns, cwd=cwd, is_encrypted=self._is_encrypted, deadline=deadline
             ):
-                return self._search_reach(command, patterns, cwd)
+                return self._search_reach(command, patterns, cwd, deadline)
             # Plan 00466 niggle (gd5_fp): a grep-family search PATTERN that
             # happens to spell a protected name is not a read of that file
             # -- only a FILE-TARGET argument is (see the function's own
             # docstring for the position-based distinction and every shape
             # this must NOT unlock).
             if sfm.is_grep_pattern_only_mention(command, patterns, deadline=deadline):
-                return self._search_reach(command, patterns, cwd)
+                return self._search_reach(command, patterns, cwd, deadline)
             return (mention[0], mention[1], "bash")
 
         path_field = _PATH_FIELD_BY_TOOL.get(str(tool_name or ""))
@@ -1528,13 +1517,16 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
                 return (protecting, path, "read")
 
         if tool_name == ToolName.GREP and path:
-            # Partial enforcement for directory-rooted content search
-            # (review finding 2): a Grep rooted at an ancestor of a
-            # protected file reads its content without naming it. Bounded
-            # walk — a tree over the cap is NOT fully checked, which the
-            # guidance names as a residual limit.
-            directory_mention = sfm.directory_contains_protected(
-                path, patterns, is_exempt=self._is_encrypted
+            # A Grep rooted at an ancestor of a protected file reads its
+            # content without naming it. Every entry is examined (the Grep
+            # tool's own ignore handling is not relied on); a tree past the
+            # entry cap or the deadline raises and is denied as incomplete.
+            directory_mention = protected_tree_scan.find_protected_in_tree(
+                path,
+                patterns,
+                view=TreeView.ALL,
+                is_exempt=self._is_encrypted,
+                deadline=time.monotonic() + sfm.SCAN_DEADLINE_SECONDS,
             )
             if directory_mention is None:
                 return None
@@ -1548,7 +1540,7 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
         return None
 
     def _search_reach(
-        self, command: str, patterns: tuple[str, ...], cwd: str | None
+        self, command: str, patterns: tuple[str, ...], cwd: str | None, deadline: float
     ) -> tuple[str, str, str] | None:
         """A protected file a recursive search in ``command`` reads, or None (D1).
 
@@ -1559,7 +1551,7 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
         root as the detail, so the discovered filename is never echoed.
         """
         reached = recursive_search.protected_reached_by_search(
-            command, patterns, cwd=cwd, is_exempt=self._is_encrypted
+            command, patterns, cwd=cwd, is_exempt=self._is_encrypted, deadline=deadline
         )
         if reached is None:
             return None
@@ -1852,16 +1844,19 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
             "denied: the script runs later, when the file may be plaintext.\n\n"
             "**A scan that runs out of budget is denied under its own rule, "
             "`R-SECRET-SCAN-INCOMPLETE`** — a glob past its cap of examined "
-            "paths, or the scan deadline passing under load. No protected path "
+            "paths, a recursive search (`Grep` on a directory, `grep -r`, "
+            "`rg`, `git grep`) whose tree has more entries than the scan's "
+            "cap, or the scan deadline passing under load. No protected path "
             "was found; the reason says what ran out. Narrow the glob or the "
-            "search root, name the files, or retry after a deadline.\n\n"
+            "search root, search with `rg` (which skips gitignored trees), "
+            "add `--exclude-dir`, name the files, or retry after a "
+            "deadline.\n\n"
             "**Honest limits — this is defence in depth, not a sandbox.** "
             "Literal path mentions are reliably denied. Heuristics catch glob "
             "tokens (`cat .vault-p*`), `~`/`$HOME` spellings and symlink "
-            "aliases; a `Grep` rooted at a DIRECTORY is checked by a bounded "
-            "walk (capped, so a very large tree is not fully checked). NOT "
-            "covered: a Bash recursive content search rooted at an ancestor "
-            "directory (`grep -r`/`rg` over a tree containing the file), "
+            "aliases; a `Grep` or Bash recursive search rooted at a DIRECTORY "
+            "is checked by examining the tree it reads, and a tree too large "
+            "to examine is denied, never allowed. NOT covered: "
             "string-assembled paths, shell state carried across invocations, "
             "pre-existing hard links or copies made before the guard was "
             "enabled (realpath cannot see them), pre-existing scripts/binaries "

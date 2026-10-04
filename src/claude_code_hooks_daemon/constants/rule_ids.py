@@ -578,6 +578,10 @@ class RuleID:
     #: SECRET_EVALUATION_ERROR's own N11 rationale.
     QUARANTINE_ARTEFACT_READ_EVALUATION_ERROR: str = "R-QUARANTINE-ARTEFACT-READ-EVALUATION-ERROR"
 
+    #: A scan that hit its deadline or an entry cap before it could finish (ledger
+    #: 00483 N130): denied, because it is unchecked, not because an artefact was found.
+    QUARANTINE_SCAN_INCOMPLETE: str = "R-QUARANTINE-SCAN-INCOMPLETE"
+
     # ------------------------------------------------------------------
     # flaggable_content_channel_guard handler (ships disabled)
     # ------------------------------------------------------------------

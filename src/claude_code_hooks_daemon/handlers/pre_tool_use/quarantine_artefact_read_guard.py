@@ -37,6 +37,7 @@ from __future__ import annotations
 
 import logging
 import re
+import time
 from typing import Any, Final
 
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, HookInputField, Priority
@@ -47,10 +48,11 @@ from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.relevance import Relevance, RelevanceContext
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.handlers.utils.quarantine import quarantine_agent_relevance
-from claude_code_hooks_daemon.utils import recursive_search, shell_expansion
+from claude_code_hooks_daemon.utils import protected_tree_scan, recursive_search, shell_expansion
 from claude_code_hooks_daemon.utils import secret_file_matching as sfm
 from claude_code_hooks_daemon.utils.bash_flags import SPAN_SEPARATORS, split_statements
 from claude_code_hooks_daemon.utils.command_evasion import compile_command_name_pattern
+from claude_code_hooks_daemon.utils.protected_tree_scan import TreeView
 from claude_code_hooks_daemon.utils.shell_segmentation import split_unquoted
 
 logger = logging.getLogger(__name__)
@@ -114,10 +116,38 @@ _ERROR_RULE: Final[Rule] = Rule(
     ),
 )
 
-# Sentinel for `_matched_pattern`'s fail-closed wrapper: never a real glob
-# (those come from `_effective_globs()`), so it can never collide with a
+# A scan that ran out of budget (its deadline, or an entry cap) is unchecked,
+# not clean, and not a guard defect: denied under its own rule (ledger 00483
+# N130), which says what ran out and that no artefact was found.
+_INCOMPLETE_RULE: Final[Rule] = Rule(
+    rule_id=RuleID.QUARANTINE_SCAN_INCOMPLETE,
+    blocked="a scan that ran out of time or entries before it could finish",
+    why=(
+        "An unfinished scan is never treated as clean, so the call is denied; "
+        "but no quarantined artefact was found, and none is claimed"
+    ),
+    fix=(
+        "Past a cap, search a narrower root, search with `rg`, or add "
+        "`--exclude-dir`; past the deadline, retry the command"
+    ),
+    verbose=(
+        "quarantine_artefact_read_guard could not finish checking this call, and "
+        "denies it rather than treating the unfinished scan as clean (this guard "
+        "fails CLOSED). This is not a finding: no quarantined artefact was found, "
+        "and it is not a bug in the guard. Either a recursive search or glob "
+        "reached more entries than the scan's cap, in which case search a "
+        "narrower root, search with `rg` (which skips gitignored trees) or add "
+        "`--exclude-dir`; or the scan deadline passed under load, in which case "
+        "retry the command."
+    ),
+)
+_FOUND_NOTHING: Final[str] = "no quarantined artefact was found"
+
+# Sentinels for `_matched_pattern`'s fail-closed wrapper: never a real glob
+# (those come from `_effective_globs()`), so they can never collide with a
 # genuine match.
 _INTERNAL_ERROR_PATTERN: Final[str] = "<internal-error>"
+_INCOMPLETE_PATTERN: Final[str] = "<scan-incomplete>"
 
 # ── Config modes (command_hints' clobber-or-extend convention) ──────────────
 _MODE_ADDITIVE: Final[str] = "additive"
@@ -254,9 +284,14 @@ class QuarantineArtefactReadGuardHandler(PreToolUseHandlerBase):
             pattern = self._evaluate_matched_pattern(hook_input)
         except (shell_expansion.TooManyToEnumerateError, TimeoutError) as exc:
             # Ledger 00466 N134: a cap or the deadline is "could not verify",
-            # still denied, but not reported as a guard bug.
-            logger.info("quarantine_artefact_read_guard: scan did not finish (%s)", exc)
-            pattern = f"{sfm.SCAN_COULD_NOT_FINISH} ({type(exc).__name__})"
+            # still denied, but not reported as a guard bug (nor, N130, as a find).
+            logger.info(
+                "quarantine_artefact_read_guard: scan did not finish (%s)", type(exc).__name__
+            )
+            return (
+                _INCOMPLETE_PATTERN,
+                sfm.scan_incomplete_detail(exc, found_nothing=_FOUND_NOTHING),
+            )
         except Exception as exc:
             logger.exception(
                 "quarantine_artefact_read_guard: evaluation raised; denying "
@@ -279,12 +314,13 @@ class QuarantineArtefactReadGuardHandler(PreToolUseHandlerBase):
         patterns = self._effective_globs()
         if not patterns:
             return None
+        deadline = time.monotonic() + sfm.SCAN_DEADLINE_SECONDS
 
         if tool_name == ToolName.BASH:
             command = str(tool_input.get(_FIELD_COMMAND, "") or "")
             raw_cwd = hook_input.get(HookInputField.CWD)
             cwd = raw_cwd if isinstance(raw_cwd, str) else None
-            return self._bash_mention(command, patterns, cwd)
+            return self._bash_mention(command, patterns, cwd, deadline)
 
         path_field = _PATH_FIELD_BY_TOOL.get(str(tool_name or ""))
         if path_field is None:
@@ -297,14 +333,20 @@ class QuarantineArtefactReadGuardHandler(PreToolUseHandlerBase):
                 return pattern
 
         if tool_name == ToolName.GREP:
-            # Partial enforcement for directory-rooted content search
-            # (mirrors secret_file_guard): a Grep rooted at a directory
-            # containing a DETAIL artefact reads it without naming it.
-            return sfm.directory_contains_protected(path, patterns)
+            # Directory-rooted content search (mirrors secret_file_guard): a
+            # Grep rooted at a directory containing a DETAIL artefact reads it
+            # without naming it. A tree too large to examine raises.
+            return protected_tree_scan.find_protected_in_tree(
+                path, patterns, view=TreeView.ALL, deadline=deadline
+            )
         return None
 
     def _bash_mention(
-        self, command: str, patterns: tuple[str, ...], cwd: str | None = None
+        self,
+        command: str,
+        patterns: tuple[str, ...],
+        cwd: str | None = None,
+        deadline: float | None = None,
     ) -> str | None:
         """First quarantine glob mentioned by a content-REVEALING segment, or None."""
         if not command:
@@ -329,15 +371,17 @@ class QuarantineArtefactReadGuardHandler(PreToolUseHandlerBase):
                     return mention
         # A recursive search reads every artefact under its roots without
         # naming one (Plan 00483 D1, ledger 00474 N144).
-        reached = recursive_search.protected_reached_by_search(command, patterns, cwd=cwd)
+        reached = recursive_search.protected_reached_by_search(
+            command, patterns, cwd=cwd, deadline=deadline
+        )
         return None if reached is None else reached[0]
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         return self._matched_pattern(hook_input) is not None
 
     def get_rules(self) -> list[Rule]:
-        """Return the 2 Rule objects backing this handler's blocking behaviour."""
-        return [_RULE, _ERROR_RULE]
+        """Return the 3 Rule objects backing this handler's blocking behaviour."""
+        return [_RULE, _ERROR_RULE, _INCOMPLETE_RULE]
 
     # ── Handling ────────────────────────────────────────────────────────────
 
@@ -355,6 +399,8 @@ class QuarantineArtefactReadGuardHandler(PreToolUseHandlerBase):
         pattern, detail = matched
         if pattern == _INTERNAL_ERROR_PATTERN:
             return self._deny_for_evaluation_error(hook_input, detail)
+        if pattern == _INCOMPLETE_PATTERN:
+            return self._deny_with_ladder(hook_input, _INCOMPLETE_RULE, f"What ran out: {detail}.")
 
         transcript_path = hook_input.get(HookInputField.TRANSCRIPT_PATH)
         tracker = get_data_layer().disclosure
@@ -381,22 +427,23 @@ class QuarantineArtefactReadGuardHandler(PreToolUseHandlerBase):
         report that fixes the underlying bug does not need to reproduce it
         from scratch.
         """
+        return self._deny_with_ladder(hook_input, _ERROR_RULE, f"Internal error: {detail}")
+
+    def _deny_with_ladder(self, hook_input: dict[str, Any], rule: Rule, note: str) -> GatingResult:
+        """Deny under ``rule`` with the verbose-first/terse-after disclosure ladder,
+        keyed on that rule's own id, followed by ``note``."""
         transcript_path = hook_input.get(HookInputField.TRANSCRIPT_PATH)
         tracker = get_data_layer().disclosure
         formatter = RuleFormatter()
 
-        if transcript_path and tracker.was_disclosed(
-            transcript_path, RuleID.QUARANTINE_ARTEFACT_READ_EVALUATION_ERROR
-        ):
-            message = formatter.terse(_ERROR_RULE)
+        if transcript_path and tracker.was_disclosed(transcript_path, rule.rule_id):
+            message = formatter.terse(rule)
         else:
             if transcript_path:
-                tracker.mark_disclosed(
-                    transcript_path, RuleID.QUARANTINE_ARTEFACT_READ_EVALUATION_ERROR
-                )
-            message = formatter.verbose(_ERROR_RULE)
+                tracker.mark_disclosed(transcript_path, rule.rule_id)
+            message = formatter.verbose(rule)
 
-        message += f"\n\nInternal error: {detail}"
+        message += f"\n\n{note}"
         return GatingResult(decision=Decision.DENY, reason=message)
 
     # ── Guidance surfaces ───────────────────────────────────────────────────

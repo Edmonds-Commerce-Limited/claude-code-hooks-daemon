@@ -49,7 +49,6 @@ from claude_code_hooks_daemon.utils.path_containment import path_relative_to
 from claude_code_hooks_daemon.utils.path_exclusion import (
     first_matching_glob,
     literal_screen,
-    path_matches_globs,
     resolve_project_root,
 )
 from claude_code_hooks_daemon.utils.realpath import resolve_checking_loop
@@ -1440,8 +1439,10 @@ def _both_edges_glob_mention(
 
 
 #: Ledger 00474 N220: cap on entries one bare-wildcard token may examine on
-#: disk before the scan fails closed.
-_MAX_BARE_GLOB_FS_EXPANSIONS: Final[int] = 5000
+#: disk before the scan fails closed. Measured (ledger 00474 N348): about 0.3 s
+#: per 30k paths, expansion included, so this stays well inside the 5 s scan
+#: deadline, which remains the backstop.
+_MAX_BARE_GLOB_FS_EXPANSIONS: Final[int] = 100_000
 
 
 def _bare_glob_mention(
@@ -1556,14 +1557,39 @@ def find_protected_mention(
 SCAN_DEADLINE_SECONDS: Final[float] = 5.0
 
 
-#: What a guard reports, in place of a matched glob, when its scan of a
-#: command could not finish: a glob past its expansion cap, or the scan
-#: deadline. Unverifiable is denied, but it is not a guard bug (ledger 00466
-#: N134), so it is not sent down the internal-error route.
-SCAN_COULD_NOT_FINISH: Final[str] = (
-    "<this command could not be verified: a glob or scan in it did not finish within its "
-    "entry cap or deadline: name the files, or narrow the glob or directory>"
+_NARROW_ADVICE: Final[str] = "narrow the glob or the search root, or name the files"
+_TREE_ADVICE: Final[str] = (
+    "search with `rg`, which skips gitignored trees, add `--exclude-dir`, or search a "
+    "narrower root"
 )
+
+
+def scan_incomplete_detail(
+    exc: shell_expansion.TooManyToEnumerateError | TimeoutError, *, found_nothing: str
+) -> str:
+    """What ran out, for the deny reason of a scan that could not finish.
+
+    Unverifiable is denied, but it is not a guard bug (ledger 00466 N134) and
+    not a finding (N348), so each guard files it under its own rule and says
+    what ran out. ``found_nothing`` is that guard's "no protected path was
+    found". Never the exception text, which may name a path.
+    """
+    if isinstance(exc, TimeoutError):
+        return (
+            f"the {SCAN_DEADLINE_SECONDS:g} s scan deadline passed; {found_nothing}; "
+            "retry, and if it keeps timing out, name the files or narrow the glob"
+        )
+    if exc.limit is None:
+        return f"an expansion or entry cap was reached; {found_nothing}; {_NARROW_ADVICE}"
+    if exc.tree_walk:
+        return (
+            f"a recursive search reads more than {exc.limit} entries; {found_nothing}; "
+            f"{_TREE_ADVICE}"
+        )
+    return (
+        f"the glob expands past its cap of {exc.limit} examined paths; {found_nothing}; "
+        f"{_NARROW_ADVICE}"
+    )
 
 
 def bash_route_word_stream(command: str, *, deadline: float | None = None) -> list[str] | None:
@@ -2593,6 +2619,7 @@ def _expand_glob_token(
 
     seen: set[str] = set()
     examined = 0
+    screen = literal_screen(patterns)
     # Fail CLOSED (team-lead's review-4 refinement): an expansion that could
     # not be completed is not a decision this function made. The walker
     # itself skips a lookup that proves absence (a missing prefix, or a
@@ -2618,7 +2645,13 @@ def _expand_glob_token(
                     f"glob {token!r} expands past {max_expansions} examined paths",
                     limit=max_expansions,
                 )
-            matched = first_matching_glob(str(match), patterns, project_root=project_root)
+            text = str(match)
+            # A path lacking every pattern's literal runs cannot match, and the
+            # screen is a substring test where the matcher is a sweep: it cut a
+            # path's cost about 7x (ledger 00474 N348).
+            if screen is not None and not screen(text):
+                continue
+            matched = first_matching_glob(text, patterns, project_root=project_root)
             if matched is not None:
                 return matched
     if errors:
@@ -2697,60 +2730,10 @@ def _realpath_if_resolvable(token: str) -> str | None:
     return None
 
 
-# Bounded-walk cap for directory-rooted content-search checks. A PreToolUse
-# handler runs in the dispatch hot path, so the walk must have a hard ceiling;
-# a tree larger than this is NOT fully checked (documented residual — the
-# guidance names directory-rooted search as a limit for exactly this reason).
+# Cap on the files ``secret_file_hygiene_checker``'s non-git fallback lists
+# before it reports the listing as truncated. The guards' own tree scan is
+# ``protected_tree_scan``, which fails closed past its cap instead.
 DIRECTORY_SCAN_MAX_ENTRIES: Final[int] = 5000
-
-
-def directory_contains_protected(
-    directory: str,
-    patterns: tuple[str, ...],
-    max_entries: int = DIRECTORY_SCAN_MAX_ENTRIES,
-    is_exempt: Callable[[str], bool] | None = None,
-    skip: Callable[[str, bool], bool] | None = None,
-) -> str | None:
-    """First protected glob matched by any file under ``directory``, else None.
-
-    Best-effort partial enforcement for directory-rooted content search
-    (review finding 2): a Grep rooted at an ancestor of a protected file
-    reads its content without ever naming it. The walk is BOUNDED by
-    ``max_entries`` — once the cap is hit the scan stops and answers None,
-    so a huge tree cannot stall dispatch; that residue is a documented
-    limit, not a guarantee.
-
-    ``is_exempt`` skips a protected file the caller has confirmed safe to
-    read (Plan 00459: encrypted at rest), so a tree holding only such files
-    is not flagged while one plaintext file beside them still is.
-
-    ``skip(path, is_dir)`` drops an entry the searching tool would not read
-    (a hidden entry, an excluded directory); a skipped directory is not
-    descended into and a skipped file does not count against the cap.
-    """
-    if not patterns:
-        return None
-    root = Path(directory)
-    if not root.is_dir():
-        return None
-    project_root = resolve_project_root()
-    seen = 0
-    for current_dir, subdirs, files in os.walk(root):
-        if skip is not None:
-            subdirs[:] = [d for d in subdirs if not skip(str(Path(current_dir) / d), True)]
-            files = [f for f in files if not skip(str(Path(current_dir) / f), False)]
-        for name in files:
-            seen += 1
-            if seen > max_entries:
-                return None
-            full_path = str(Path(current_dir) / name)
-            for pattern in patterns:
-                if not path_matches_globs(full_path, (pattern,), project_root=project_root):
-                    continue
-                if is_exempt is not None and is_exempt(full_path):
-                    break
-                return pattern
-    return None
 
 
 _CD_EXECUTABLE: Final[str] = "cd"

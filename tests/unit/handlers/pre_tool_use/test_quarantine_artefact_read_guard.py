@@ -13,6 +13,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 from typing import Any
+from unittest.mock import patch
 
 import pytest
 from tests.bash_sandbox import run_sandboxed_bash
@@ -26,7 +27,7 @@ from claude_code_hooks_daemon.core.rule import Rule
 from claude_code_hooks_daemon.handlers.pre_tool_use.quarantine_artefact_read_guard import (
     QuarantineArtefactReadGuardHandler,
 )
-from claude_code_hooks_daemon.utils import secret_file_matching as sfm
+from claude_code_hooks_daemon.utils import protected_tree_scan
 
 
 @pytest.fixture(autouse=True)
@@ -625,14 +626,19 @@ class TestEdgeBranches:
 
 
 class TestQuarantineArtefactReadGuardGetRules:
-    """get_rules() declares the 2 Rules backing this handler (Plan 00116; the
+    """get_rules() declares the 3 Rules backing this handler (Plan 00116; the
     evaluation-error Rule added n466-n24 review 4 mirrors secret_file_guard's
-    own N11 fail-closed wrapper)."""
+    own N11 fail-closed wrapper; the incomplete-scan Rule is ledger 00483 N130)."""
 
-    def test_returns_two_rules(self, handler: QuarantineArtefactReadGuardHandler) -> None:
+    def test_returns_three_rules(self, handler: QuarantineArtefactReadGuardHandler) -> None:
         rules = handler.get_rules()
-        assert len(rules) == 2
+        assert len(rules) == 3
         assert all(isinstance(rule, Rule) for rule in rules)
+
+    def test_incomplete_rule_id_matches_constant(
+        self, handler: QuarantineArtefactReadGuardHandler
+    ) -> None:
+        assert handler.get_rules()[2].rule_id == RuleID.QUARANTINE_SCAN_INCOMPLETE
 
     def test_rule_id_matches_constant(self, handler: QuarantineArtefactReadGuardHandler) -> None:
         assert handler.get_rules()[0].rule_id == RuleID.QUARANTINE_ARTEFACT_READ
@@ -813,7 +819,7 @@ class TestAQuotedGlobIsNeverEnumerated:
         result = handler.handle(_hook_input("Bash", {"command": command}, cwd=tmp_path))
         assert result.decision == Decision.DENY
         assert result.reason is not None
-        assert sfm.SCAN_COULD_NOT_FINISH in result.reason
+        assert RuleID.QUARANTINE_SCAN_INCOMPLETE in result.reason
         assert RuleID.QUARANTINE_ARTEFACT_READ_EVALUATION_ERROR not in result.reason
 
     def test_a_two_wildcard_glob_within_the_budget_is_allowed(
@@ -828,3 +834,76 @@ class TestAQuotedGlobIsNeverEnumerated:
         monkeypatch.chdir(tmp_path)
         hook_input = _hook_input("Bash", {"command": "awk '/x/,0' d*/*p421*"})
         assert handler.matches(hook_input) is False
+
+
+class TestAScanThatRanOutOfBudgetHasItsOwnRule:
+    """Ledger 00483 N130: a tree past the entry cap is unchecked, not clean.
+
+    It is denied under ``R-QUARANTINE-SCAN-INCOMPLETE``, which is neither a
+    finding nor the evaluation-error route whose text calls it a guard bug.
+    """
+
+    @pytest.fixture
+    def clean_tree(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+        for index in range(30):
+            (tmp_path / f"ordinary{index}.md").touch()
+        monkeypatch.setattr(protected_tree_scan, "TREE_SCAN_MAX_ENTRIES", 10)
+        return tmp_path
+
+    @pytest.mark.parametrize(
+        ("tool_name", "tool_input"),
+        [("Grep", {"pattern": "x"}), ("Bash", {"command": "grep -r x ."})],
+    )
+    def test_a_search_over_a_tree_past_the_cap_is_denied_as_incomplete(
+        self,
+        handler: QuarantineArtefactReadGuardHandler,
+        clean_tree: Path,
+        tool_name: str,
+        tool_input: dict[str, Any],
+    ) -> None:
+        if tool_name == "Grep":
+            tool_input = {**tool_input, "path": str(clean_tree)}
+        result = handler.handle(_hook_input(tool_name, tool_input, cwd=clean_tree))
+        assert result.decision == Decision.DENY
+        assert result.reason is not None
+        assert RuleID.QUARANTINE_SCAN_INCOMPLETE in result.reason
+        assert RuleID.QUARANTINE_ARTEFACT_READ_EVALUATION_ERROR not in result.reason
+        assert "no quarantined artefact was found" in result.reason
+
+    def test_a_finding_keeps_its_own_rule(
+        self, handler: QuarantineArtefactReadGuardHandler, tmp_path: Path
+    ) -> None:
+        (tmp_path / "topic-opus-security-DETAIL.md").touch()
+        result = handler.handle(_hook_input("Bash", {"command": "grep -r x ."}, cwd=tmp_path))
+        assert result.reason is not None
+        assert RuleID.QUARANTINE_SCAN_INCOMPLETE not in result.reason
+        assert result.reason.startswith(f"BLOCKED [{RuleID.QUARANTINE_ARTEFACT_READ}]")
+
+    def test_the_deadline_is_forwarded_to_the_scan(
+        self,
+        handler: QuarantineArtefactReadGuardHandler,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        seen: list[float | None] = []
+
+        def _scan(*_args: object, **kwargs: Any) -> None:
+            seen.append(kwargs.get("deadline"))
+
+        monkeypatch.setattr(protected_tree_scan, "find_protected_in_tree", _scan)
+        handler.matches(_hook_input("Grep", {"path": str(tmp_path), "pattern": "x"}))
+        handler.matches(_hook_input("Bash", {"command": "grep -r x ."}, cwd=tmp_path))
+        assert len(seen) == 2
+        assert all(deadline is not None for deadline in seen)
+
+    def test_a_passed_deadline_is_denied_as_incomplete(
+        self, handler: QuarantineArtefactReadGuardHandler, tmp_path: Path
+    ) -> None:
+        with patch.object(protected_tree_scan, "find_protected_in_tree", side_effect=TimeoutError):
+            result = handler.handle(
+                _hook_input("Grep", {"path": str(tmp_path), "pattern": "x"}, cwd=tmp_path)
+            )
+        assert result.decision == Decision.DENY
+        assert result.reason is not None
+        assert RuleID.QUARANTINE_SCAN_INCOMPLETE in result.reason
+        assert "deadline" in result.reason
