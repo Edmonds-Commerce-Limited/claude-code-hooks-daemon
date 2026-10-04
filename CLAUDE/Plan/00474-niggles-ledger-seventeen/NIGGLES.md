@@ -1406,6 +1406,24 @@ The uncertain-move union judges the hook directory and the LAST recorded move (`
 every candidate directory (`sub`). Remedy: judge every directory any `cd` in the chain could
 land in.
 
+### N351 — the full-QA lock file names a dead holder while `run_tests.sh` holds the lock
+
+**Source**: coordinator, 2026-10-04, during a post-merge full run.
+
+**Evidence**: `run_tests.sh` held `.git/hooksdaemon-full-qa.lock`. The file contained `pid=3241890` and
+`checkout=…/worktree-p470-queue`. That process had exited hours earlier and its worktree had been deleted. Meanwhile
+another agent's `llm_qa.py changed` was queued behind the real holder. The bash route,
+`scripts/qa/acquire_full_qa_lock.bash` `acquire_full_qa_lock_or_die`, takes the `flock` and writes nothing into the
+file. The Python route writes `pid=`/`checkout=` and leaves it there after it releases the lock. The bash
+give-up message reads the holders from `/proc`, so the waiter's report is right; only the file's content misleads.
+
+**Impact**: a person or agent who diagnoses a stuck queue by reading the lock file is told the holder is a process
+that no longer exists, and may conclude the lock is stale and try to break it.
+
+**Status**: ⬜ Open. Remedy: have both routes write their own holder line on acquiring the lock, and truncate it on
+release. Alternatively, write nothing to the file and give `hooks-daemon` a command that reports holders from
+`/proc`.
+
 ### N350 — a `for … in dir/*` loop was denied on a lone `*` token
 
 **Source**: the N130/N348 design agent (Opus) on 2026-10-04, while it was measuring. This is side observation S2 in
