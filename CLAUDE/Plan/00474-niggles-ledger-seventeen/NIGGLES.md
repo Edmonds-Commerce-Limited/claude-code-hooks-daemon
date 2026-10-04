@@ -1406,6 +1406,25 @@ The uncertain-move union judges the hook directory and the LAST recorded move (`
 every candidate directory (`sub`). Remedy: judge every directory any `cd` in the chain could
 land in.
 
+### N349 — the linear-scaling harness divides by zero when both timings read 0 CPU seconds
+
+**Source**: the Plan 00483 batch H agent's targeted QA on `worktree-p483-recur`, 2026-10-04.
+
+**Evidence**:
+`tests/unit/handlers/test_safety_handlers_hostile_input_performance.py::TestBashCommandShapesStayLinear::test_every_safety_handler_stays_linear[backslashes]`
+raised `ZeroDivisionError: float division by zero` at `tests/scaling.py:75`. That line is
+`large / max(small, linear_baseline_seconds(large_text))`. Both `small` and the baseline are `min_cpu_seconds(...)`
+readings, which can be 0.0 when the process CPU clock's resolution is coarser than the work. The same file passed
+41/41 twice on main and twice on the branch shortly afterwards. In the same QA runs, different `stays_linear` cases
+failed on their ratio and then passed on re-run.
+
+**Impact**: a flaky failure in a gate test that is meant to catch super-linear guards. A reader cannot tell a real
+regression from clock resolution, so a branch's QA needs re-runs that prove nothing.
+
+**Status**: ⬜ Open. Remedy: floor the denominator at the clock's measured resolution
+(`time.clock_getres(time.CLOCK_PROCESS_CPUTIME_ID)`), or repeat the small case until it reaches a minimum
+measurable duration. Report a ratio that is "unmeasurably small" as a pass, never as an exception.
+
 ### N348 — the secret guard's bare-glob cap denies ordinary deep globs as a repository grows
 
 **Source**: coordinator review of Plan 00483 batch G (N220, branch `worktree-p483-glob` at bbabec672) on 2026-10-04.
