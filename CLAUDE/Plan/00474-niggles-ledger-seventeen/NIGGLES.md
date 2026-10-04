@@ -1406,6 +1406,22 @@ The uncertain-move union judges the hook directory and the LAST recorded move (`
 every candidate directory (`sub`). Remedy: judge every directory any `cd` in the chain could
 land in.
 
+### N350 — a `for … in dir/*` loop was denied on a lone `*` token
+
+**Source**: the N130/N348 design agent (Opus) on 2026-10-04, while it was measuring. This is side observation S2 in
+`CLAUDE/Plan/00483-threat-model-conformance-audit/subagent-reports/261004-n130-n348-capped-walk-design-opus.md`.
+
+**Evidence**: secret_file_guard denied
+`cd untracked; for d in repos/* worktrees/* fd-worktrees/*; do … git -C "$d" ls-files …; done` as
+R-SECRET-BASH-MENTION. The matched token it reported was a lone `*`. The agent believes none of the three globs
+reaches a protected file. A lone `*` suggests a tokenisation artefact: the `*` was split out of the loop list and
+expanded from the `untracked/` cwd, where a protected file does sit. No one has reproduced this with
+`hooks-daemon probe` yet.
+
+**Status**: ⬜ Open, unverified. Remedy: reproduce with `hooks-daemon probe`. If it is confirmed, find where the
+bare-glob route (merge 2ba5b72a2) receives a lone `*` from a `for … in` word list. Then judge each `dir/*` word as
+written.
+
 ### N349 — the linear-scaling harness divides by zero when both timings read 0 CPU seconds
 
 **Source**: the Plan 00483 batch H agent's targeted QA on `worktree-p483-recur`, 2026-10-04.

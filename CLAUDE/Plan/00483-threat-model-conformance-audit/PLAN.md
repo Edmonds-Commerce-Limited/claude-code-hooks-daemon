@@ -179,6 +179,18 @@ other than defeating a parser. Everything else, every ordinary respelling includ
    major version, as a separate project.
 2. **Code serving only out-of-scope shapes**: keep it while it costs nothing, which is the
    current text; or remove it to cut maintenance. Decide per item from the Phase 1 list.
+3. **N130/N348, the capped tree walk.** Design:
+   [261004-n130-n348-capped-walk-design-opus.md](subagent-reports/261004-n130-n348-capped-walk-design-opus.md).
+   The coordinator is building it with defaults, which are the coordinator's calls and not owner rulings. The owner
+   may overturn any of them:
+   - O1: the caps are constants, not options. The walk takes 250k entries and the bare glob 100k paths.
+   - O2: the Grep tool gets the ALL view, as the safe default. Neither the design agent nor the coordinator
+     session had a Grep tool to probe whether Claude Code's Grep skips gitignored and hidden files. The UNIGNORED
+     view would remove the deny of a root-level Grep in a repository holding an ignored protected file.
+   - O3: `grep -r` and `ack` over trees above the cap, and bare globs above it, are denied as incomplete, which is
+     the threat-model ruling as written.
+   - O4: the quarantine guard fails closed past the cap, under a new `R-QUARANTINE-SCAN-INCOMPLETE`.
+   - O5: the mtime-validated index is deferred.
 
 ## Success Criteria
 
