@@ -476,6 +476,33 @@ _IMPORT_MODULE_INLINE_RE: Final[re.Pattern[str]] = re.compile(
 )
 
 
+#: The quoted script argument of a ``-c`` flag. Imports after the first
+#: statement of that script (``import sys; import a.b``) are found inside it.
+_DASH_C_SCRIPT_RE: Final[re.Pattern[str]] = re.compile(
+    r"(-c[ \t]+)([\"'])(.*?)(?<!\\)\2", re.DOTALL
+)
+
+#: An import statement at the start of a ``-c`` script body, or after a ``;``
+#: or newline inside it. Applied to the script body only, never the whole command.
+_IMPORT_STATEMENT_IN_SCRIPT_RE: Final[re.Pattern[str]] = re.compile(
+    r"(?:(?<=;)|^)[ \t]*(?:from|import)[ \t]+([A-Za-z_][A-Za-z0-9_.]*)", re.MULTILINE
+)
+
+#: ``python -m <module>``: the interpreter word, plain option clusters
+#: (``-I``, ``-u``), then ``-m`` and the dotted module. An option that takes a
+#: value (``-W ignore``) is not recognised, so that shape stays denied.
+_PYTHON_DASH_M_RE: Final[re.Pattern[str]] = re.compile(
+    r"(?:^|(?<=[\s/]))(?:python|pypy)\d*(?:\.\d+)*(?:[ \t]+-[A-Za-z]+)*[ \t]+-m[ \t]+"
+    r"([A-Za-z_][A-Za-z0-9_.]*)"
+)
+
+
+def _drop_dash_c_script_imports(match: re.Match[str]) -> str:
+    """Drop the module path of each import statement inside one ``-c`` script."""
+    body = _IMPORT_STATEMENT_IN_SCRIPT_RE.sub(_drop_module_path, match.group(3))
+    return f"{match.group(1)}{match.group(2)}{body}{match.group(2)}"
+
+
 def _drop_module_path(match: re.Match[str]) -> str:
     """Shared substitution callback for both import-statement regexes above.
 
@@ -527,7 +554,9 @@ def _without_import_module_paths(command: str) -> str:
     changing it would be a fix for a problem it does not have.
     """
     without_line_anchored = _IMPORT_MODULE_RE.sub(_drop_module_path, command)
-    return _IMPORT_MODULE_INLINE_RE.sub(_drop_module_path, without_line_anchored)
+    without_inline = _IMPORT_MODULE_INLINE_RE.sub(_drop_module_path, without_line_anchored)
+    without_script_imports = _DASH_C_SCRIPT_RE.sub(_drop_dash_c_script_imports, without_inline)
+    return _PYTHON_DASH_M_RE.sub(_drop_module_path, without_script_imports)
 
 
 def _normalised_token_forms(token: str) -> list[str]:
@@ -2566,6 +2595,7 @@ _AND_SEPARATOR: Final[str] = "&&"
 # A substitution in the cd TARGET runs a command and puts its output on the
 # argument, so `cd $(cat <protected>)` really does disclose. A bare `cd` does
 # not, and that difference is the whole basis for stripping the prefix.
+_COMPOUND_MARKERS: Final[tuple[str, ...]] = ("&", "$(", "`")
 _SUBSTITUTION_MARKERS: Final[tuple[str, ...]] = ("$(", "`", "${", _PROCESS_SUBSTITUTION)
 
 
@@ -2658,6 +2688,8 @@ def is_exempt_invocation(
     if _PROCESS_SUBSTITUTION in stripped:
         return False
     if any(separator in stripped for separator in _COMMAND_SEPARATORS):
+        return False
+    if any(marker in stripped for marker in _COMPOUND_MARKERS):
         return False
 
     words = stripped.split()

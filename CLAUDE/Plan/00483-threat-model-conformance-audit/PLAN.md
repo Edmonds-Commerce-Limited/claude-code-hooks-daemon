@@ -127,6 +127,9 @@ other than defeating a parser. Everything else, every ordinary respelling includ
   property or `_` name is refused and reported, one cached default `Config` replaces the
   per-Stop rebuild, and redaction falls back to the default word list when the config fails.
   Report: [subagent-reports/261003-task-3.1-batch-c-config-sonnet.md](subagent-reports/261003-task-3.1-batch-c-config-sonnet.md).
+  N170, N242 and N136 fixed on branch worktree-p483-secret: the `secret-meta`/`git rm --cached`
+  exemption refuses `&`, `$( )` and backticks, and a `python -m` module or a later `-c` import is not a path.
+  Report: [subagent-reports/261004-task-3.1-batch-e-secret-sonnet.md](subagent-reports/261004-task-3.1-batch-e-secret-sonnet.md).
 - [ ] 🔄 **Task 3.2**: Narrow each guard that causes an in-scope false positive while catching
   an out-of-scope shape (TDD: the false positive is the red test). X-1 fixed on branch
   worktree-p483-x1-rebind-heredoc: the shared rebinding check no longer withholds the heredoc

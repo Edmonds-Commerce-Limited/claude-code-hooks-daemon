@@ -1042,6 +1042,80 @@ class TestPythonDashCImportStatements:
         assert sfm.find_protected_mention(command, ("id_rsa",)) == "id_rsa"
 
 
+class TestDottedModuleNamesAreNotPaths:
+    """Ledger 00474 N242 / N136: a dotted MODULE name is not a filesystem path.
+
+    ``python -m pkg.secret_x`` and an import that is not the first statement of
+    a ``-c`` script were denied as mentions of ``*.secret*``. Only the module
+    span is exempt; every file operand and every later token is still judged.
+    """
+
+    PROTECTED = ("*.secret*",)
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "python -m pkg.secret_x",
+            "python3 -m scripts.secret_tool --help",
+            "python3.12 -I -m a.b.secret_x",
+            "/usr/bin/python3 -u -m a.b.secret_x",
+            'python3 -c "import sys; import a.b.secret_x as s"',
+            "python3 -c 'x = 1; from a.b.secret_x import y'",
+            'python3 -c "import sys\nimport a.b.secret_x"',
+        ],
+    )
+    def test_a_module_name_is_not_a_mention(self, command: str) -> None:
+        assert sfm.find_protected_mention(command, self.PROTECTED) is None
+
+    def test_a_file_operand_after_dash_m_is_still_judged(self) -> None:
+        command = "python -m pytest tests/test_x.secret"
+        assert sfm.find_protected_mention(command, self.PROTECTED) == "*.secret*"
+
+    def test_a_file_operand_after_a_dash_m_module_is_still_judged(self) -> None:
+        command = "python -m pkg.secret_x .claude/block-words.secret"
+        assert sfm.find_protected_mention(command, self.PROTECTED) == "*.secret*"
+
+    def test_the_same_name_read_elsewhere_is_still_caught(self) -> None:
+        command = "python -m pkg.secret_x && cat pkg.secret_x"
+        assert sfm.find_protected_mention(command, self.PROTECTED) == "*.secret*"
+
+    def test_a_path_in_the_dash_c_body_after_an_import_is_still_caught(self) -> None:
+        command = "python3 -c \"import a.secret_x; open('.claude/block-words.secret')\""
+        assert sfm.find_protected_mention(command, self.PROTECTED) == "*.secret*"
+
+    def test_a_semicolon_import_outside_dash_c_does_not_hide_the_read(self) -> None:
+        command = "echo 'x; import mykeys.secret'; cat mykeys.secret"
+        assert sfm.find_protected_mention(command, self.PROTECTED) == "*.secret*"
+
+
+class TestExemptInvocationIsOnlyThatInvocation:
+    """Ledger 00474 N170: a lone ``&``, ``$( )`` or backticks ride along."""
+
+    PATTERNS = sfm.DEFAULT_PROTECTED_PATTERNS
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "bin/hooks-daemon secret-meta x & cat .vault-pass",
+            "git rm --cached foo & cat .vault-pass",
+            "bin/hooks-daemon secret-meta $(cat .vault-pass)",
+            "bin/hooks-daemon secret-meta `cat .vault-pass`",
+            "git rm --cached foo $(cat .vault-pass)",
+            "git rm --cached foo `cat .vault-pass`",
+            "ansible-playbook --vault-password-file .vault-pass x.yml & cat .vault-pass",
+        ],
+    )
+    def test_a_compound_is_not_exempt(self, command: str) -> None:
+        assert not sfm.is_exempt_invocation(command, sfm.DEFAULT_ALLOWED_CONSUMERS, self.PATTERNS)
+
+    def test_the_plain_invocations_stay_exempt(self) -> None:
+        for command in (
+            "bin/hooks-daemon secret-meta .vault-pass",
+            "git rm --cached .vault-pass",
+        ):
+            assert sfm.is_exempt_invocation(command, sfm.DEFAULT_ALLOWED_CONSUMERS, self.PATTERNS)
+
+
 class TestBareHomePrefixTokenDoesNotCrash:
     """N5 (Plan 00466), security fail-open: a token that is EXACTLY one of
     ``_HOME_PREFIXES`` (the prefix with nothing following it, e.g. a quoted
