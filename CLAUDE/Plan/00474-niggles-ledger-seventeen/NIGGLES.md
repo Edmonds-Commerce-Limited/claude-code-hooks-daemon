@@ -1406,6 +1406,30 @@ The uncertain-move union judges the hook directory and the LAST recorded move (`
 every candidate directory (`sub`). Remedy: judge every directory any `cd` in the chain could
 land in.
 
+### N345 — a merge conflict in a past journal day-file has no sanctioned resolution
+
+**Source**: coordinator, merging Plan 00483 batches B and C on 2026-10-04. Each branch had added an entry to
+`00483-Journal-26-10-03.md`, as had main, so both merges conflicted in that day-file.
+
+**Evidence**: these resolutions were all refused:
+
+- `Edit` to remove the markers: `plan_qa_edit` refused it under `journal-dayfile-is-today`, because the file is
+  dated yesterday.
+- `cp` of a `git merge-file --union` result: `plan_journal_guard` refused it as R-JOURNAL-HAND-WRITTEN-ENTRY.
+
+`git checkout --ours <day-file>` was allowed and wrote the day-file. So the guards block the careful route, a union
+of both sides, but let through the route that discards one side. The coordinator kept main's side and re-recorded
+each branch's entry in today's file with `mkplan.bash --journal`, so the history now carries the entries under the
+wrong day, with a pointer.
+
+**Impact**: any parallel work that journals the same plan on the same day and merges after midnight hits this.
+Worktree agents met the same conflict before midnight and could resolve it.
+
+**Status**: ⬜ Open. Remedy: let both guards accept an edit that only removes conflict markers from a day-file and
+keeps every entry from both sides. The test is that the result equals the union of the two stages. Alternatively,
+give `mkplan.bash` a `--resolve-conflict <day-file>` mode that writes the union in time order. Also decide whether
+`git checkout --ours/--theirs` into a JOURNAL path should be judged at all.
+
 ### N344 — integration tests with fixed wall-clock timeouts fail falsely under host load
 
 **Source**: coordinator, post-merge `tests/integration` on main at 2c0d76087 and later, 2026-10-03/04, while the host
