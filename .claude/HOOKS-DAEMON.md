@@ -105,7 +105,7 @@
 | Priority | Handler | Behaviour | Description |
 |----------|---------|----------|-------------|
 | 15 | disclosure_reset_session_start | NON-TERMINAL | Reset DisclosureTracker state for the firing agent on SessionStart |
-| 48 | work_queue_rebrief | ADVISORY | On resume or compact, list the agents the durable work queue records as running |
+| 48 | work_queue_rebrief | ADVISORY | List the agents the durable work queue records as still running |
 | 49 | guard_config_drift | ADVISORY | Name any uncommitted change that weakens this project's guards |
 | 50 | project_handler_load_checker | ADVISORY | Loudly alert at session start when project handlers failed to load |
 | 51 | hook_registration_checker | ADVISORY | Validate hook registrations in Claude Code settings on session start |
