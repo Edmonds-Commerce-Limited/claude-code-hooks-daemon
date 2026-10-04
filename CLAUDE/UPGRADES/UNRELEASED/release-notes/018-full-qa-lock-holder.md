@@ -1,4 +1,4 @@
-# Fix: the full-QA lock file names the process that holds the lock
+# Callout: the full-QA lock file names the process that holds the lock
 
 **Plan**: 00474
 **Audience**: contributors who run QA
