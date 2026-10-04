@@ -10,6 +10,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
 from claude_code_hooks_daemon.daemon.cli import cmd_remote_docs
 
 _NOW = datetime(2026, 9, 3, 10, 0, tzinfo=UTC)
@@ -365,17 +367,69 @@ class TestUnscannedCaptureIsAnnounced:
     the check was skipped.
     """
 
-    def test_an_unavailable_guard_is_reported_on_stderr(self, tmp_path: Path, capsys) -> None:
-        from claude_code_hooks_daemon.daemon.cli import _sensitive_content_guard
+    def test_an_unavailable_guard_refuses_rather_than_scanning_nothing(
+        self, tmp_path: Path
+    ) -> None:
+        from claude_code_hooks_daemon.daemon.cli import (
+            _ContentGuardUnavailableError,
+            _sensitive_content_guard,
+        )
 
         with patch(
             "claude_code_hooks_daemon.handlers.pre_tool_use.sensitive_content"
             ".SensitiveContentHandler",
             side_effect=RuntimeError("no project context"),
         ):
-            assert _sensitive_content_guard(tmp_path) is None
+            with pytest.raises(_ContentGuardUnavailableError, match="no project context"):
+                _sensitive_content_guard(tmp_path)
 
-        assert "NOT being scanned" in capsys.readouterr().err
+    def test_a_config_that_does_not_parse_refuses_the_guard(self, tmp_path: Path) -> None:
+        from claude_code_hooks_daemon.daemon.cli import (
+            _ContentGuardUnavailableError,
+            _sensitive_content_guard,
+        )
+
+        (tmp_path / ".claude").mkdir()
+        (tmp_path / ".claude" / "hooks-daemon.yaml").write_text("handlers: [unclosed\n  bad: {\n")
+
+        with pytest.raises(_ContentGuardUnavailableError, match="not valid|Invalid YAML"):
+            _sensitive_content_guard(tmp_path)
+
+    def test_add_writes_nothing_when_the_guard_is_unavailable(
+        self, tmp_path: Path, capsys
+    ) -> None:
+        from claude_code_hooks_daemon.daemon.cli import (
+            _ContentGuardUnavailableError,
+            cmd_remote_docs,
+        )
+
+        with patch(
+            "claude_code_hooks_daemon.daemon.cli._sensitive_content_guard",
+            side_effect=_ContentGuardUnavailableError("scanner broken"),
+        ):
+            code = cmd_remote_docs(_args(tmp_path, "add", url="https://example.com/p"))
+
+        assert code == 1
+        assert "scanner broken" in capsys.readouterr().err
+        assert not (_tree(tmp_path) / "example.com" / "p.md").exists()
+
+    def test_refresh_changes_nothing_when_the_guard_is_unavailable(
+        self, tmp_path: Path, capsys
+    ) -> None:
+        from claude_code_hooks_daemon.daemon.cli import _ContentGuardUnavailableError
+
+        cmd_remote_docs(_args(tmp_path, "add", url="https://example.com/p"))
+        stored = (_tree(tmp_path) / "example.com" / "p.md").read_text()
+
+        with patch(
+            "claude_code_hooks_daemon.daemon.cli._sensitive_content_guard",
+            side_effect=_ContentGuardUnavailableError("scanner broken"),
+        ):
+            code = cmd_remote_docs(_args(tmp_path, "refresh", all_docs=True))
+
+        assert code == 1
+        assert "scanner broken" in capsys.readouterr().err
+        assert (_tree(tmp_path) / "example.com" / "p.md").read_text() == stored
 
     def test_an_available_guard_says_nothing(self, tmp_path: Path, capsys) -> None:
         from claude_code_hooks_daemon.daemon.cli import _sensitive_content_guard

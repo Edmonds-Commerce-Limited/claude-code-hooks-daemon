@@ -336,6 +336,24 @@ def reset_active_path_cache() -> None:
     _ACTIVE_PATH = None
 
 
+def project_secret_terms(project_root: Path, config_path: Path) -> tuple[str, ...]:
+    """Terms of the word list ``config_path`` names, for a process with no ``ProjectContext``.
+
+    A standalone script (``scripts/debug_info.py``) never initialises the
+    context, so :func:`get_active_secret_terms` answers ``()`` for it, which
+    reads as "no terms" rather than "not resolved". This resolves the same
+    list from the project's own config instead. The option is read from the raw
+    YAML, so a config the schema rejects still yields its word list path (the
+    N43 rule), and a missing config falls back to the shipped default path.
+
+    Raises:
+        SecretWordListUnreadableError: the list exists but cannot be read.
+        ImportError: PyYAML is not installed in this interpreter.
+    """
+    configured = _configured_path_from_raw_yaml(config_path)
+    return get_cached_secret_terms(resolve_secret_word_list_path(configured, project_root))
+
+
 def get_active_secret_terms() -> tuple[str, ...]:
     """Terms from the currently configured secret word list.
 

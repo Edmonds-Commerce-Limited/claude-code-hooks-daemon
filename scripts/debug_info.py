@@ -150,18 +150,24 @@ class DebugInfoGenerator:
     def _secret_terms(self) -> tuple[str, ...] | None:
         """The project's declared secret terms, or ``None`` if unobtainable.
 
-        Resolving them reads project config through `ProjectContext`, which
-        needs the daemon's dependencies — so this fails on a bare interpreter
-        even though the redaction module itself does not. Returning ``None``
-        rather than raising is the point: failing to load a word list must
-        degrade the report to a warned, partially-scrubbed one, never abort it.
-        A missing report helps nobody diagnose anything.
+        This process never initialises `ProjectContext`, so the context-bound
+        lookup would answer ``()`` as if the project had no terms. The list is
+        resolved from this project's own root and config instead. Reading it
+        needs PyYAML and the package's path helper, so a bare interpreter can
+        fail here. Returning ``None`` rather than raising is the point: failing
+        to load a word list must degrade the report to a warned,
+        partially-scrubbed one, never abort it. A missing report helps nobody
+        diagnose anything.
         """
         secrets = self._load_daemon_util("secret_redaction")
         if secrets is None:
             return None
         try:
-            return tuple(secrets.get_active_secret_terms())
+            return tuple(
+                secrets.project_secret_terms(
+                    self.project_root, self.project_root / ".claude" / "hooks-daemon.yaml"
+                )
+            )
         except (ImportError, OSError, ValueError) as exc:
             print(f"warning: secret word list unavailable: {exc}", file=sys.stderr)
             return None
