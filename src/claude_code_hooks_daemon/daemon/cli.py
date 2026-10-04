@@ -170,6 +170,7 @@ if TYPE_CHECKING:
     from claude_code_hooks_daemon.core.worktree_reaping import ProcessCwdsFn, RunGit, WorktreeAgeFn
     from claude_code_hooks_daemon.daemon.branch_safety import BranchClassification
     from claude_code_hooks_daemon.daemon.controller import DaemonController
+    from claude_code_hooks_daemon.daemon.docs_generator import DocsGenerator
     from claude_code_hooks_daemon.daemon.project_handler_health import (
         ProjectHandlerHealthState,
     )
@@ -3518,6 +3519,71 @@ def cmd_generate_playbook(args: argparse.Namespace) -> int:
         return 1
 
 
+def _build_docs_generator(config: Config, project_path: Path) -> "DocsGenerator":
+    """Build a ``DocsGenerator`` over the loaded config and every handler source.
+
+    Shared by ``generate-docs`` and ``defences`` so both list the same handlers.
+    """
+    from claude_code_hooks_daemon.daemon.docs_generator import DocsGenerator
+    from claude_code_hooks_daemon.handlers.registry import HandlerRegistry
+    from claude_code_hooks_daemon.plugins.loader import PluginLoader
+
+    registry = HandlerRegistry()
+    registry.discover()
+
+    return DocsGenerator(
+        config=config.handlers.model_dump(),
+        registry=registry,
+        plugins=PluginLoader.load_from_plugins_config(config.plugins, project_path),
+        # Shared with generate-playbook — see the helper.
+        project_handlers=_load_project_handlers(config, project_path),
+        pseudo_events=config.pseudo_events or None,
+    )
+
+
+def cmd_defences(args: argparse.Namespace) -> int:
+    """List every active defence: rule ID, handler, docs route and entry point.
+
+    Built from the loaded config through the same generator ``generate-docs``
+    uses and the same rule index ``explain-rule`` reads (Plan 00484 Task 3.2).
+
+    Args:
+        args: Parsed CLI arguments with ``as_json`` (``--json``) and ``project_root``.
+
+    Returns:
+        0 on success, 1 when the project or its config cannot be loaded.
+    """
+    from claude_code_hooks_daemon.rule_explain.defences import collect_active_defences
+    from claude_code_hooks_daemon.rule_explain.lookup import discover_handler_rules
+
+    try:
+        project_path = get_project_path(getattr(args, "project_root", None))
+    except SystemExit:
+        return 1
+
+    config_path = project_path / ".claude" / "hooks-daemon.yaml"
+    if not config_path.exists():
+        print(f"No configuration file found at: {config_path}", file=sys.stderr)
+        return 1
+
+    config = Config.load(config_path)
+    _init_project_context_for_cli(args)
+    records = collect_active_defences(
+        _build_docs_generator(config, project_path).active_handlers(),
+        discover_handler_rules(include_project_handlers=True),
+    )
+
+    if getattr(args, "as_json", False):
+        print(json.dumps([record.to_dict() for record in records], indent=2))
+        return 0
+    for record in records:
+        print(
+            f"{record.rule_id or '-'}\t{record.handler}\t{record.event}\t"
+            f"{record.priority}\t{record.statement or '-'}"
+        )
+    return 0
+
+
 def cmd_generate_docs(args: argparse.Namespace) -> int:
     """Generate .claude/HOOKS-DAEMON.md from live config and handler metadata.
 
@@ -3544,32 +3610,7 @@ def cmd_generate_docs(args: argparse.Namespace) -> int:
         # Load configuration
         config = Config.load(config_path)
 
-        # Create handler registry and discover handlers
-        from claude_code_hooks_daemon.handlers.registry import HandlerRegistry
-
-        registry = HandlerRegistry()
-        registry.discover()
-
-        # Load plugin handlers
-        from claude_code_hooks_daemon.plugins.loader import PluginLoader
-
-        plugins = PluginLoader.load_from_plugins_config(config.plugins, project_path)
-
-        # Load project handlers (shared with generate-playbook — see the helper)
-        project_handlers_list = _load_project_handlers(config, project_path)
-
-        # Create docs generator
-        from claude_code_hooks_daemon.daemon.docs_generator import DocsGenerator
-
-        handlers_dict = config.handlers.model_dump()
-
-        generator = DocsGenerator(
-            config=handlers_dict,
-            registry=registry,
-            plugins=plugins,
-            project_handlers=project_handlers_list,
-            pseudo_events=config.pseudo_events or None,
-        )
+        generator = _build_docs_generator(config, project_path)
 
         include_disabled = getattr(args, "include_disabled", False)
         markdown = generator.generate_markdown(include_disabled=include_disabled)
@@ -10579,6 +10620,27 @@ def build_parser() -> argparse.ArgumentParser:
         help="Project root override (default: auto-detected from cwd)",
     )
     parser_explain_handler.set_defaults(func=cmd_explain_handler)
+
+    # defences (Plan 00484 Task 3.2) — the active defences, for a DBF tool to read
+    parser_defences = subparsers.add_parser(
+        "defences",
+        help="List every active defence (rule ID, handler, docs route, entry point)",
+    )
+    parser_defences.add_argument(
+        "--json",
+        dest="as_json",
+        action="store_true",
+        help="Emit one JSON record per defence instead of tab-separated lines",
+    )
+    parser_defences.add_argument(
+        "--project-root",
+        dest="project_root",
+        metavar="PATH",
+        type=Path,
+        default=None,
+        help="Project root override (default: auto-detected from cwd)",
+    )
+    parser_defences.set_defaults(func=cmd_defences)
 
     # status-line-explained command (Plan 00369) — explain every status-line
     # segment: icon(s), what it is, how to read it, current value.

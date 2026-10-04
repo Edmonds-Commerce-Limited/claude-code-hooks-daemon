@@ -124,6 +124,17 @@ class DocsGenerator:
 
         return "\n\n".join(sections) + "\n"
 
+    def active_handlers(self) -> list[CollectedHandler]:
+        """List every enabled handler, the same set ``generate_markdown`` renders.
+
+        Returns:
+            One ``CollectedHandler`` per enabled built-in, pseudo-event, plugin and
+            project handler, in no guaranteed order.
+        """
+        handlers_by_event: dict[str, list[CollectedHandler]] = {}
+        self._collect_handlers(handlers_by_event, include_disabled=False)
+        return [info for event_handlers in handlers_by_event.values() for info in event_handlers]
+
     def _render_header(self) -> str:
         """Render document header with version and timestamp."""
         from claude_code_hooks_daemon.version import __version__

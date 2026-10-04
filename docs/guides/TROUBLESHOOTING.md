@@ -807,3 +807,15 @@ came from it.
 | `init-config`       | Generate a configuration template                                                             |
 | `repair`            | Repair broken virtual environment                                                             |
 | `generate-playbook` | Generate acceptance test playbook                                                             |
+| `defences`          | List every active defence, one record each (see below)                                        |
+
+`defences --json` is the machine-readable listing of active defences for a Defence Before Fix
+tool. It reads the loaded config through the same generator as `generate-docs`, and each
+handler's rules from the index `explain-rule` uses, so it adds no list of its own. One record
+per rule of each enabled handler, plus one rule-less record per enabled blocking handler that
+declares none (`rule_id` and `statement` are `null`). Fields: `rule_id`, `handler`,
+`handler_class`, `event`, `priority`, `behavior`, `statement`, `defect_class`, `docs` (the
+command that prints the full text) and `detector_entry_point` (`hooks-daemon probe <event>`).
+`defect_class` is always `null`: no source maps a rule to a `CLAUDE/Security/` category.
+`detector_entry_point` is `null` for a handler whose event is not a wired hook event. Without
+`--json` it prints one tab-separated line per record.

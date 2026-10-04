@@ -1165,3 +1165,33 @@ class TestDocsGeneratorNullPriority:
         assert null_key in output
         assert set_key in output
         assert "| 42 |" in output
+
+
+class TestDocsGeneratorActiveHandlers:
+    """`active_handlers` is the enabled-handler list `generate_markdown` renders."""
+
+    def test_returns_only_enabled_handlers_with_event_and_priority(self) -> None:
+        from claude_code_hooks_daemon.daemon.docs_generator import DocsGenerator
+        from claude_code_hooks_daemon.handlers.registry import _to_snake_case
+
+        on_cls = _make_handler_class(
+            name="zzz-on",
+            priority=11,
+            tags=["blocking"],
+            module_name="claude_code_hooks_daemon.handlers.pre_tool_use.zzz_on",
+        )
+        off_cls = _make_handler_class(
+            name="zzz-off",
+            priority=12,
+            tags=["blocking"],
+            module_name="claude_code_hooks_daemon.handlers.pre_tool_use.zzz_off",
+        )
+        config: dict[str, Any] = {
+            "pre_tool_use": {
+                _to_snake_case(on_cls.__name__): {"enabled": True},
+                _to_snake_case(off_cls.__name__): {"enabled": False},
+            },
+        }
+        gen = DocsGenerator(config=config, registry=_make_registry(on_cls, off_cls))
+        active = gen.active_handlers()
+        assert [(h[0], h[2], h[3]) for h in active] == [(on_cls.__name__, "pre_tool_use", 11)]

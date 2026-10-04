@@ -114,9 +114,9 @@ agent.
 ### Phase 3: Close the gaps and hook in
 
 - [ ] ⬜ **Task 3.1**: Close the accepted gaps through the ledger, at most 3 branches at once.
-- [ ] ⬜ **Task 3.2**: A machine-readable enumeration of active defences (§5): rule ID,
+- [x] ✅ **Task 3.2**: A machine-readable enumeration of active defences (§5): rule ID,
   handler, defect class, docs link, and the detector entry point, so a DBF tool can read
-  them. Reuse the generate-docs data rather than a second source.
+  them. Reuse the generate-docs data rather than a second source. Done: `hooks-daemon defences --json`, see [the report](subagent-reports/261004-task-3.2-defence-enumeration-sonnet.md).
 - [ ] ⬜ **Task 3.3**: Publish the conformance declaration (§9.2), with its known gaps, from
   the README.
 
