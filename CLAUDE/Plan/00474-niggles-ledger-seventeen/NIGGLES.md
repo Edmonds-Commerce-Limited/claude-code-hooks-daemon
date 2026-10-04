@@ -1436,9 +1436,15 @@ reaches a protected file. A lone `*` suggests a tokenisation artefact: the `*` w
 expanded from the `untracked/` cwd, where a protected file does sit. No one has reproduced this with
 `hooks-daemon probe` yet.
 
-**Status**: ⬜ Open, unverified. Remedy: reproduce with `hooks-daemon probe`. If it is confirmed, find where the
-bare-glob route (merge 2ba5b72a2) receives a lone `*` from a `for … in` word list. Then judge each `dir/*` word as
-written.
+**Status**: 🚫 Reproduced; the fix is parked, pending owner decisions. The cause is wider than the loop list. The
+word scanner turns every unresolved `$VAR`, including a loop's `"$d"`, into a lone `*`, and the bare-glob route
+expands that `*` against the cwd. So `cd untracked; for d in repos/one; do ls "$d"; done` is denied whenever the cwd
+holds a protected file.
+
+A 286-line fix exists, substituting loop words inside the loop's body. It is on branch
+`agent-a388f9611b6f8f3d1-1f7c8c8f` (cb8dc34ab). It is not merged, because it is the kind of growth the guard-effort
+review (Plan 00483 open question 4) argues against. The review's R4 would remove the bare-glob filesystem expansion,
+and that removes this false positive at no extra cost. Wait for the owner's ruling on R3/R4 before choosing a fix.
 
 ### N349 — the linear-scaling harness divides by zero when both timings read 0 CPU seconds
 
