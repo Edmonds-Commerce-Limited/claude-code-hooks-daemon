@@ -6,6 +6,7 @@ are DENIED — except the ``secret-meta`` helper and allowlisted consumers with
 the path in flag position. No escape hatch (Decision 3).
 """
 
+import subprocess  # nosec B404 - fixed git argv in a tmp repository
 import time
 from collections.abc import Iterator
 from pathlib import Path
@@ -3225,3 +3226,96 @@ class TestExemptionOptionListsAreClosedThroughTheHandler:
     )
     def test_documented_exempt_shape_stays_allowed(self, command: str) -> None:
         assert not _handler().matches(_hook_input("Bash", {"command": command}))
+
+
+class TestRecursiveSearchReachesProtectedFile:
+    """Plan 00483 D1 (ledger 00474 N143, N152, N153): a recursive search reads a tree."""
+
+    @pytest.fixture
+    def project_tree(self, tmp_path: Path) -> Path:
+        (tmp_path / "sub").mkdir()
+        (tmp_path / "sub" / ".vault-pass").write_text("x\n")
+        (tmp_path / "clean").mkdir()
+        (tmp_path / "clean" / "a.txt").write_text("x\n")
+        return tmp_path
+
+    @staticmethod
+    def _bash(command: str, cwd: Path) -> dict[str, Any]:
+        return {"tool_name": "Bash", "tool_input": {"command": command}, "cwd": str(cwd)}
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "grep -r x .",
+            "grep -rl x sub",
+            "rg --hidden x",
+            "rg -uu x",
+            "find . | xargs rg x",
+            "find . -name '*.txt' -exec grep x {} +",
+            "bash -c 'grep -r x .'",
+            'sh -c "rg --hidden x"',
+            'eval "grep -r x ."',
+            "ugrep -r x .",
+            "ag --hidden x",
+            "ack x",
+            "grep -rn --regexp=.vault-pass .",
+        ],
+    )
+    def test_search_over_a_tree_holding_a_protected_file_is_denied(
+        self, project_tree: Path, command: str
+    ) -> None:
+        handler = _handler()
+        hook_input = self._bash(command, project_tree)
+        assert handler.matches(hook_input)
+        assert handler.handle(hook_input).decision == Decision.DENY
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "grep -r x clean",
+            "rg x clean",
+            "find clean | xargs rg x",
+            "grep x .",
+            "grep -rn x docs",
+            "rg x",
+            "ag x",
+            "grep -r --exclude-dir=sub x .",
+            "rg -g '!sub' --hidden x",
+        ],
+    )
+    def test_search_over_a_clean_tree_is_allowed(self, project_tree: Path, command: str) -> None:
+        assert not _handler().matches(self._bash(command, project_tree))
+
+    def test_deny_names_the_remedy_not_the_file(self, project_tree: Path) -> None:
+        result = _handler().handle(self._bash("grep -r x .", project_tree))
+        assert "--exclude-dir" in (result.reason or "")
+        assert str(project_tree / "sub") not in (result.reason or "")
+
+    def test_rg_does_not_open_a_gitignored_protected_file(self, project_tree: Path) -> None:
+        for args in (["init", "-q"], ["add", "clean"]):
+            subprocess.run(  # nosec B603 B607 - fixed git argv in a tmp repository
+                ["git", "-C", str(project_tree), *args], check=True, capture_output=True
+            )
+        (project_tree / ".gitignore").write_text("sub/\n")
+        (project_tree / "sub" / "key.vault-password").write_text("x\n")
+        assert not _handler().matches(self._bash("rg x", project_tree))
+        assert _handler().matches(self._bash("grep -r x .", project_tree))
+
+    def test_deny_does_not_echo_the_discovered_filename(self, project_tree: Path) -> None:
+        result = _handler().handle(self._bash("grep -r x .", project_tree))
+        assert result.decision == Decision.DENY
+        assert str(project_tree / "sub") not in (result.reason or "")
+
+    def test_search_over_a_tree_of_only_encrypted_files_is_allowed(self, project: Path) -> None:
+        assert _verdict(_in(project, "Bash", {"command": "grep -r x group_vars"})) == Decision.ALLOW
+
+    def test_search_over_a_tree_with_a_plaintext_sibling_is_denied(self, project: Path) -> None:
+        _put(project, "group_vars/all/.vault-pass", b"not-a-real-secret\n")
+        assert _verdict(_in(project, "Bash", {"command": "grep -r x group_vars"})) == Decision.DENY
+
+    def test_git_grep_reaches_a_tracked_protected_file(self, project_tree: Path) -> None:
+        for args in (["init", "-q"], ["add", "sub"]):
+            subprocess.run(  # nosec B603 B607 - fixed git argv in a tmp repository
+                ["git", "-C", str(project_tree), *args], check=True, capture_output=True
+            )
+        assert _handler().matches(self._bash("git grep needle", project_tree))
