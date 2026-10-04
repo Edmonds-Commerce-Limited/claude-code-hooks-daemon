@@ -1406,6 +1406,27 @@ The uncertain-move union judges the hook directory and the LAST recorded move (`
 every candidate directory (`sub`). Remedy: judge every directory any `cd` in the chain could
 land in.
 
+### N352 — an ordinary Python heredoc is denied when the host is busy (scan deadline)
+
+**Source**: the coordinator's post-merge full run for the N130 merge (012915bd9), 2026-10-04.
+
+**Evidence**: three tests failed in the full run (3 h 15 min, against 2 h 47 min for the previous full run).
+
+- `test_secret_file_guard.py::TestRoundThreeFindingsAreClosed::test_an_inert_sibling_keeps_the_exemption[echo "$(pwd)"]`
+  was denied as R-SECRET-SCAN-INCOMPLETE. The 5 s scan deadline passed while the guard judged `echo "$(pwd)"` followed
+  by a Python heredoc with code braces. It passes when re-run with nothing else running.
+- `test_safety_handlers_hostile_input_performance.py::…[wildcards]` reported superlinear. It passes when re-run alone.
+- The playbook probe for RootRecursionGuardHandler (#108, `grep -rl … /`) is now denied first by secret_file_guard's tree
+  walk, as R-SECRET-READ, instead of by the root guard. This is deterministic. The fix is to run the root guard before
+  the secret guard; it is in flight.
+
+**Impact**: the first item is a load-dependent verdict on a command that names no protected path, the N101 shape
+again. A real session on a busy host gets the same deny.
+
+**Status**: ⬜ Open. This is evidence for the guard-effort review's R3: a deadline or cap running out allows with an
+advisory instead of denying. Plan 00483 open question 4 holds that owner decision. No guard change is made here
+during the freeze.
+
 ### N351 — the full-QA lock file names a dead holder while `run_tests.sh` holds the lock
 
 **Source**: coordinator, 2026-10-04, during a post-merge full run.
