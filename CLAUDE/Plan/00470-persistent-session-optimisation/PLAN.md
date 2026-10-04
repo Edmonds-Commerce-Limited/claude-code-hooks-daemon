@@ -51,7 +51,12 @@ Evidence, with verified facts marked apart from inferences, is in
   - Liveness signal: the daemon has no session registry, so a record is dead when older than 7 days (the cron cannot exist) or when its session's `session_crons` no longer lists its id.
 - [x] ✅ **Task 2.2**: `cron_stop_enforcer` (and its SubagentStop twin) block a stop when a live job's record is older than `refresh_after`, naming the CronDelete + CronCreate. Unrecorded jobs get stamped, not blocked. Tests: age boundary, unknown age, pause respected, priority/terminal invariants unchanged.
   - Option `refresh_after_days`, default 6 (the day left before expiry is the margin for dropped ticks), shared logic in `utils/cron_refresh.py`. The `[awaiting-human]` marker is deliberately not consulted: it silences ticks, which is when a job ages unnoticed. The usage pause and `cron-pause` are respected.
-- [ ] ⬜ **Task 2.3**: ccy supervisor watchdog: no hook traffic while every recorded job is past expiry triggers the reconcile prompt. Tests in the supervisor suite.
+- [ ] 🚫 **Task 2.3**: ccy supervisor watchdog: no hook traffic while every recorded job is past expiry triggers the reconcile prompt. Tests in the supervisor suite.
+  - Blocked on the owner (2026-10-04). The plan sets no value for N, and nothing records hook traffic the supervisor can read. Owner questions:
+    1. The quiet threshold N, in hours.
+    2. What counts as hook traffic: (a) PTY output quiet as a proxy, with no daemon change; or (b) the daemon stamps a last-hook-event marker the supervisor reads, at the cost of one write per hook event.
+    3. The reconcile prompt text: new fixed text, or reuse the `persistent_cron_assertor` "CronList and reconcile" wording.
+  - Agent proposal once answered: the supervisor reads `cron-records.json` read-only with its own copy of the 7-day expiry, pinned to `utils/cron_records.py` by a test. It fires only when at least one record exists, all are past expiry and the quiet time has reached N. It is a last-in-line injection family with its own cap, below session-actions, and it respects the usage pause and the empty-input-box guard.
 - [x] ✅ **Task 2.4**: Make the background-process watchdog cron a standing job. The owner's decision: it is a sensible safety net for a long-running session, so every session gets it.
   - Declare it under `persistent_crons` next to `issue-sdlc` and `failsafe-recovery`.
   - Its prompt must be byte-identical to `background_process_tracker`'s canonical `[tick:watchdog]` text, pinned by a test the way the failsafe prompt is pinned.
