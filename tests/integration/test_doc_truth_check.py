@@ -37,9 +37,14 @@ import subprocess
 import sys
 from pathlib import Path
 
+from tests.load_scaling import scaled_seconds
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CHECKER = REPO_ROOT / "scripts" / "qa" / "check_doc_truth.py"
-_TIMEOUT_SECONDS = 60
+#: Idle-host budget for one checker run; it only stops a hang, so it is
+#: multiplied by the host load when used (N344). The real-repository run took
+#: 37 s alone and timed out at 60 s under a load average of 13 to 20.
+_TIMEOUT_SECONDS = 120
 
 _GENERATED_DOC = """# Hooks Daemon - Active Configuration
 
@@ -65,7 +70,7 @@ def _run_checker(root: Path) -> tuple[int, dict]:
         [sys.executable, str(CHECKER), "--root", str(root), "--report-stdout"],
         capture_output=True,
         text=True,
-        timeout=_TIMEOUT_SECONDS,
+        timeout=scaled_seconds(_TIMEOUT_SECONDS),
         check=False,
     )
     assert result.stdout, f"checker produced no report. stderr: {result.stderr[:500]}"
@@ -348,7 +353,7 @@ def _git(repo: Path, *args: str) -> None:
         ["git", "-C", str(repo), *args],
         capture_output=True,
         check=True,
-        timeout=_TIMEOUT_SECONDS,
+        timeout=scaled_seconds(_TIMEOUT_SECONDS),
     )
 
 

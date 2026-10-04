@@ -25,6 +25,7 @@ interpreter, so the metadata write and the resolver see a working venv.
 from __future__ import annotations
 
 import hashlib
+import math
 import os
 import shutil
 import signal
@@ -38,6 +39,7 @@ from typing import Final
 import psutil
 import pytest
 
+from tests.load_scaling import load_factor, scaled_seconds
 from tests.venv_bootstrap_sandbox import fake_clock_ahead
 
 REPO_ROOT: Final[Path] = Path(__file__).resolve().parents[2]
@@ -197,7 +199,7 @@ def _run(verb: str, daemon_dir: Path, env: dict[str, str]) -> subprocess.Complet
         capture_output=True,
         text=True,
         env=env,
-        timeout=_TIMEOUT_SECONDS,
+        timeout=scaled_seconds(_TIMEOUT_SECONDS),
         check=False,
     )
 
@@ -773,6 +775,9 @@ def _build_processes(daemon_dir: Path) -> list[int]:
 
 #: The watchdog checks on its build process once a second.
 _WATCHDOG_POLL_SECONDS: Final[float] = 1.0
+#: The build's bound on an idle host, long enough that a watchdog which missed
+#: the KILL is still clearly alive when the job it left behind has finished.
+_WATCHDOG_IDLE_BOUND_SECONDS: Final[int] = 15
 
 
 @pytest.mark.skipif(not Path("/proc/self/cmdline").is_file(), reason="reads /proc")
@@ -782,11 +787,17 @@ class TestTheWatchdogNeverOutlivesItsBuild:
     the bound the build's process group id may belong to someone else."""
 
     def test_a_killed_build_process_takes_its_watchdog_with_it(self, tmp_path: Path) -> None:
+        # The bound is stretched by the host load (N344). The orphaned job
+        # still has to finish its venv work after the KILL, and on a busy host
+        # that takes several times longer than the 2s uv run. The claim is
+        # only that the watchdog is gone before the bound, so the bound is
+        # what grows and the wait below polls up to it.
+        bound = _WATCHDOG_IDLE_BOUND_SECONDS * math.ceil(load_factor())
         daemon_dir = _daemon_dir(tmp_path)
         env = _env(
             tmp_path,
             with_uv=_stub_uv(tmp_path, sleep=2),
-            extra={"HOOKS_DAEMON_VENV_BUILD_TIMEOUT": "6"},
+            extra={"HOOKS_DAEMON_VENV_BUILD_TIMEOUT": str(bound)},
         )
         started = time.monotonic()
         first = _fields(_run("hook", daemon_dir, env).stdout)
@@ -795,15 +806,16 @@ class TestTheWatchdogNeverOutlivesItsBuild:
 
         _signal_build(build_pid, signal.SIGKILL, tmp_path)
 
-        # The orphaned job finishes its 2s uv run; the watchdog must be gone
-        # one poll after the KILL, well inside the 6s bound.
-        deadline = time.monotonic() + 2 + _WATCHDOG_POLL_SECONDS + 1.5
+        # The orphaned job finishes its uv run; the watchdog must be gone
+        # one poll after the KILL, inside the bound. Had it not noticed the
+        # KILL it would still be here at the bound.
+        deadline = started + bound - _WATCHDOG_POLL_SECONDS
         while _build_processes(daemon_dir) and time.monotonic() < deadline:
             time.sleep(0.1)
         assert _build_processes(daemon_dir) == []
-        assert time.monotonic() - started < 6, "the check must land before the bound"
+        assert time.monotonic() - started < bound, "the check must land before the bound"
 
-        time.sleep(max(0.0, started + 7.5 - time.monotonic()))
+        time.sleep(max(0.0, started + bound + 1.5 - time.monotonic()))
         log = Path(first["log"][0]).read_text()
         assert "reached its" not in log, log
         assert _resolves(daemon_dir, env)
