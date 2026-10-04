@@ -1406,6 +1406,28 @@ The uncertain-move union judges the hook directory and the LAST recorded move (`
 every candidate directory (`sub`). Remedy: judge every directory any `cd` in the chain could
 land in.
 
+### N348 — the secret guard's bare-glob cap denies ordinary deep globs as a repository grows
+
+**Source**: coordinator review of Plan 00483 batch G (N220, branch `worktree-p483-glob` at bbabec672) on 2026-10-04.
+
+**Evidence**: on this repository, with the guard as fixed in review round 1:
+
+- `ls */*/*` expands to 4530 bash-visible paths and is allowed, 470 under the 5000-path cap.
+- `ls */*/*/*` expands to 18373 paths and is denied, failing closed past the cap. None of those paths needs to be
+  protected for the deny to happen.
+
+**Impact**: the verdict on an ordinary read-only glob depends on how big the tree is, not on what the glob reaches.
+About 470 more files at depth 3 and `ls */*/*` is denied too. Failing closed past the cap is correct for a guard
+that could not finish reading, but the deny reason should say "too many paths to check", not "mentions a protected
+path".
+
+**Status**: ⬜ Open. Remedy:
+
+- check each protected pattern against the glob, which is bounded by the number of patterns rather than the size of
+  the tree, before or instead of walking the filesystem;
+- or give the cap-exceeded verdict its own reason and rule ID, so an agent can narrow the glob rather than suspect
+  a secret.
+
 ### N347 — the plan-folder mkdir guard read `mkdir` inside a branch name as a command
 
 **Source**: coordinator, resolving the batch D merge on 2026-10-04.
