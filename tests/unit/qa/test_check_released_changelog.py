@@ -44,27 +44,25 @@ def repo(tmp_path: Path) -> Path:
 
 
 def test_untouched_changelog_passes(repo: Path) -> None:
-    assert _load().find_violations(repo) == []
+    assert _load().find_violations(repo) == ([], 1)
 
 
 def test_new_unreleased_section_is_allowed(repo: Path) -> None:
     new = _HEADER + "## [1.1.0] - 2026-02-01\n\n- new\n\n" + _RELEASED
     (repo / "CHANGELOG.md").write_text(new, encoding="utf-8")
-    assert _load().find_violations(repo) == []
+    assert _load().find_violations(repo) == ([], 1)
 
 
 def test_edit_inside_released_section_fails_and_names_destination(repo: Path) -> None:
     edited = _HEADER + _RELEASED + "- sneaky note\n"
     (repo / "CHANGELOG.md").write_text(edited, encoding="utf-8")
-    violations = _load().find_violations(repo)
+    violations, _ = _load().find_violations(repo)
     assert [v["rule"] for v in violations] == ["released-changelog-section-edited"]
     assert "1.0.0" in violations[0]["message"]
     assert "CLAUDE/UPGRADES/UNRELEASED/release-notes/" in violations[0]["message"]
 
 
-def test_section_without_tag_may_change(repo: Path) -> None:
-    text = _HEADER + "## [2.0.0] - 2026-03-01\n\n- a\n\n" + _RELEASED
-    (repo / "CHANGELOG.md").write_text(text, encoding="utf-8")
-    _git(repo, "commit", "-q", "-am", "wip")
-    (repo / "CHANGELOG.md").write_text(text + "", encoding="utf-8")
-    assert _load().find_violations(repo) == []
+def test_repo_without_a_release_tag_has_nothing_to_check(tmp_path: Path) -> None:
+    _git(tmp_path, "init", "-q")
+    (tmp_path / "CHANGELOG.md").write_text(_HEADER + _RELEASED, encoding="utf-8")
+    assert _load().find_violations(tmp_path) == ([], 0)
