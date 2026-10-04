@@ -357,13 +357,43 @@ def _withhold_invalid_options(handler_cls: type[Handler], options: dict[str, Any
     for that option, and the returned text reaches ``option_failures`` (the
     session-start alert).
     """
+    problems: dict[str, str] = dict(unsettable_option_reasons(handler_cls, options))
     validate = getattr(handler_cls, "validate_options", None)
-    if validate is None:
-        return None
-    problems: dict[str, str] = validate(options)
+    if validate is not None:
+        problems.update(validate({k: v for k, v in options.items() if k not in problems}))
     for key in problems:
-        del options[key]
+        options.pop(key, None)
     return "; ".join(problems.values()) or None
+
+
+def unsettable_option_reasons(handler_cls: type, options: Mapping[str, Any]) -> dict[str, str]:
+    """``{key: reason}`` for each option that must not become ``self._<key>``.
+
+    Options are applied as ``setattr(instance, "_<key>", value)``. That is only
+    safe for a data attribute. A key that starts with an underscore would reach
+    a dunder or a second-level private name, and a key whose ``_<key>`` is a
+    method or property on the class would REPLACE it with the option's value,
+    so the handler's next call crashes (Plan 00466 N50, a stale or renamed
+    option). Both are refused here, the way an unknown key is reported.
+    """
+    reasons: dict[str, str] = {}
+    for key in options:
+        if key.startswith("_"):
+            reasons[key] = f"option '{key}' is not allowed: option names cannot start with '_'"
+            continue
+        declared = inspect.getattr_static(handler_cls, f"_{key}", None)
+        # A property WITH a setter is a declared option attribute (validating
+        # setters); a read-only property, method, static or class method is not.
+        if isinstance(declared, property):
+            settable = declared.fset is not None
+        else:
+            settable = declared is None or not callable(declared)
+        if not settable:
+            reasons[key] = (
+                f"option '{key}' is not a handler option: '_{key}' is a method of "
+                f"{handler_cls.__name__}, and applying it would replace that method"
+            )
+    return reasons
 
 
 def apply_handler_options(instance: object, options: Mapping[str, Any]) -> None:
@@ -372,9 +402,14 @@ def apply_handler_options(instance: object, options: Mapping[str, Any]) -> None:
     Handlers are constructed with no arguments and read their options from
     these attributes, so a handler built anywhere else without this call runs
     on its defaults. That is how ``remote-docs add`` scanned captures with no
-    public patterns at all (Plan 00466 N15).
+    public patterns at all (Plan 00466 N15). An option that would overwrite a
+    method or an underscore name is skipped (:func:`unsettable_option_reasons`);
+    ``register_all`` reports it on ``option_failures``.
     """
+    refused = unsettable_option_reasons(type(instance), options)
     for option_key, option_value in options.items():
+        if option_key in refused:
+            continue
         setattr(instance, f"_{option_key}", option_value)
 
 

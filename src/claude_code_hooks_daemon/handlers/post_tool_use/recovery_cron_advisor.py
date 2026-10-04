@@ -58,7 +58,7 @@ from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.core.side_effect_journal import SideEffectJournal
 from claude_code_hooks_daemon.core.utils import get_bash_command, get_file_path
 from claude_code_hooks_daemon.handlers.utils.bounded_fifo_map import BoundedFifoMap
-from claude_code_hooks_daemon.utils.config_cache import load_config_cached
+from claude_code_hooks_daemon.utils.config_cache import default_config, load_config_cached
 from claude_code_hooks_daemon.utils.cron_hosts import effective_hostname
 from claude_code_hooks_daemon.utils.cron_tick import TickKind, classify_tick, tick_sentinel
 from claude_code_hooks_daemon.utils.git_facts import project_relative_head_text
@@ -543,7 +543,7 @@ class RecoveryCronAdvisorHandler(PostToolUseHandlerBase):
             return load_config_cached(config_path)
         except (ValidationError, OSError, ValueError, RuntimeError) as exc:
             logger.debug("recovery_cron_advisor: config unavailable: %s", exc)
-            return Config()
+            return default_config()
 
     def _plan_dir(self) -> str:
         """Configured plan directory (facade, or the matching default)."""

@@ -45,7 +45,7 @@ from claude_code_hooks_daemon.handlers.post_tool_use.recovery_cron_advisor impor
     CANONICAL_CRON_PROMPT,
     declares_failsafe_cron,
 )
-from claude_code_hooks_daemon.utils.config_cache import load_config_cached
+from claude_code_hooks_daemon.utils.config_cache import default_config, load_config_cached
 from claude_code_hooks_daemon.utils.cron_enforcement import FAILSAFE_CRON_SCHEDULE_HINT
 from claude_code_hooks_daemon.utils.cron_hosts import effective_hostname
 from claude_code_hooks_daemon.utils.session_helpers import is_resume_session
@@ -116,7 +116,7 @@ class FailsafeCronSessionAdvisorHandler(SessionStartHandlerBase):
             return load_config_cached(config_path)
         except (ValidationError, OSError, ValueError, RuntimeError) as exc:
             logger.debug("failsafe_cron_session_advisor: config unavailable: %s", exc)
-            return Config()
+            return default_config()
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """A new session, the failsafe advice on, and no declaration covering it.

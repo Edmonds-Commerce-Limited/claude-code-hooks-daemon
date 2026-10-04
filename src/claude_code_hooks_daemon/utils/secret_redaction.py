@@ -238,8 +238,10 @@ def _resolve_active_path() -> Path | None:
 
     Imports ``ProjectContext``/``Config`` lazily to avoid a util-\\>core
     import cycle at module load (mirrors ``utils/path_exclusion.py``'s
-    ``resolve_project_root``). Never raises: any failure to resolve degrades
-    to ``None`` (feature inert), matching the sanctioned fail-open contract
+    ``resolve_project_root``). Never raises. An unusable CONFIG falls back to
+    the raw-YAML or shipped default word list path (Plan 00466 N43), so a typo
+    never disables redaction; only an unknown project root degrades to ``None``
+    (feature inert), matching the sanctioned fail-open contract
     already used by ``context_sidecar``/``compaction_signal``/
     ``payload_capture`` for daemon-adjacent, best-effort I/O.
 
@@ -267,27 +269,64 @@ def _resolve_active_path() -> Path | None:
         _ACTIVE_PATH = None
         return None
 
+    project_root: Path | None = None
+    config_path: Path | None = None
+    try:
+        project_root = ProjectContext.project_root()
+        config_path = ProjectContext.config_path()
+    except (OSError, RuntimeError, ValueError) as exc:
+        logger.warning(
+            "Secret redaction is INERT: the project root is unknown (%s). "
+            "No terms will be matched or redacted.",
+            exc,
+        )
+        project_root = None
+    if project_root is None or config_path is None:
+        _ACTIVE_PATH = None
+        return _ACTIVE_PATH
+
     try:
         from claude_code_hooks_daemon.config.models import Config, handler_options
 
-        project_root = ProjectContext.project_root()
-        config = Config.load_or_default(ProjectContext.config_path())
+        config = Config.load_or_default(config_path)
         options = handler_options(config.handlers.pre_tool_use.get("sensitive_content"))
         configured = options.get("secret_word_list_path")
-        _ACTIVE_PATH = resolve_secret_word_list_path(configured, project_root)
     except (OSError, RuntimeError, ValueError) as exc:
         # A missing config loads the defaults without raising, so every one of
-        # these means the config IS there and cannot be used, which an operator
-        # can fix -- and until they do, redaction and the sensitive-content
-        # guard have no terms, so the degradation is security-relevant and must
-        # not be a debug line nobody reads.
+        # these means the config IS there and cannot be used. A config typo is
+        # ordinary, and a typo must never switch redaction off (Plan 00466
+        # N43): fall toward redaction, using the path the raw YAML names or the
+        # shipped default. Logged at WARNING because it is security-relevant.
+        configured = _configured_path_from_raw_yaml(config_path)
         logger.warning(
-            "Secret redaction is INERT: project config unreadable (%s). "
-            "No terms will be matched or redacted until it can be read and validates.",
+            "Secret redaction: project config unusable (%s). Redacting with the "
+            "default word list path (or the one the raw config names) until it validates.",
             exc,
         )
-        _ACTIVE_PATH = None
+    _ACTIVE_PATH = resolve_secret_word_list_path(configured, project_root)
     return _ACTIVE_PATH
+
+
+def _configured_path_from_raw_yaml(config_path: Path) -> str | None:
+    """``secret_word_list_path`` read straight from the YAML, or ``None``.
+
+    For a config that fails validation: the rest of the file is untrusted, but
+    this one option can still be recovered so a project that moved its word
+    list keeps it redacted. Never raises; anything unusable yields ``None``
+    (the shipped default path).
+    """
+    import yaml
+
+    node: object = None
+    try:
+        node = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, yaml.YAMLError) as exc:
+        logger.warning("Secret redaction: the raw config could not be read either (%s)", exc)
+        node = None
+    for key in ("handlers", "pre_tool_use", "sensitive_content", "options"):
+        node = node.get(key) if isinstance(node, dict) else None
+    value = node.get("secret_word_list_path") if isinstance(node, dict) else None
+    return value if isinstance(value, str) else None
 
 
 def reset_active_path_cache() -> None:

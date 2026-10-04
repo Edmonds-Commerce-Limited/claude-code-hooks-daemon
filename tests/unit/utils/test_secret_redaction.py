@@ -397,7 +397,7 @@ class TestActiveSecretTerms:
         # Going inert means no terms are matched, which weakens the guard this
         # module exists to power -- so it is reported at WARNING, not debug.
         assert any(
-            record.levelno == logging.WARNING and "INERT" in record.getMessage()
+            record.levelno == logging.WARNING and "default word list" in record.getMessage()
             for record in caplog.records
         )
 
@@ -467,9 +467,71 @@ class TestActiveSecretTerms:
                 assert sr.get_active_secret_terms() == ()
 
         assert any(
-            record.levelno == logging.WARNING and "INERT" in record.getMessage()
+            record.levelno == logging.WARNING and "default word list" in record.getMessage()
             for record in caplog.records
         )
+
+    def _terms_with_broken_config(
+        self, tmp_path: Path, config_text: str, word_list: str, terms: str
+    ) -> tuple[str, ...]:
+        """Terms resolved while the project config fails to load (ledger 00466 N43)."""
+        sr.reset_active_path_cache()
+        sr.reset_terms_cache()
+        (tmp_path / ".claude").mkdir(exist_ok=True)
+        (tmp_path / ".claude" / "hooks-daemon.yaml").write_text(config_text)
+        (tmp_path / word_list).write_text(terms)
+        with (
+            patch(
+                "claude_code_hooks_daemon.core.project_context.ProjectContext._initialized", True
+            ),
+            patch(
+                "claude_code_hooks_daemon.core.project_context.ProjectContext.project_root",
+                return_value=tmp_path,
+            ),
+            patch(
+                "claude_code_hooks_daemon.core.project_context.ProjectContext.config_path",
+                return_value=tmp_path / ".claude" / "hooks-daemon.yaml",
+            ),
+        ):
+            return sr.get_active_secret_terms()
+
+    def test_a_config_that_fails_to_load_still_redacts_with_the_default_word_list(
+        self, tmp_path: Path
+    ) -> None:
+        """A config typo is ordinary; it must not turn redaction off (N43)."""
+        terms = self._terms_with_broken_config(
+            tmp_path,
+            'version: "1.0"\nhandlers:\n  pre_tool_use:\n   bad: [unclosed\n',
+            sr.DEFAULT_SECRET_WORD_LIST_PATH,
+            "alpha\n",
+        )
+        assert terms == ("alpha",)
+
+    def test_a_schema_rejected_config_still_redacts_with_the_default_word_list(
+        self, tmp_path: Path
+    ) -> None:
+        terms = self._terms_with_broken_config(
+            tmp_path,
+            'version: "1.0"\nhandlers:\n  pre_tool_use:\n    markdown_organization:\n'
+            "      enabled: true\n      stale_key: x\n",
+            sr.DEFAULT_SECRET_WORD_LIST_PATH,
+            "beta\n",
+        )
+        assert terms == ("beta",)
+
+    def test_a_broken_config_still_honours_a_configured_word_list_path(
+        self, tmp_path: Path
+    ) -> None:
+        """The path is read from the raw YAML when the rest of it does not validate."""
+        terms = self._terms_with_broken_config(
+            tmp_path,
+            'version: "1.0"\nhandlers:\n  pre_tool_use:\n    sensitive_content:\n'
+            "      options:\n        secret_word_list_path: custom-terms.txt\n"
+            "    markdown_organization:\n      enabled: true\n      stale_key: x\n",
+            "custom-terms.txt",
+            "gamma\n",
+        )
+        assert terms == ("gamma",)
 
 
 class TestConfiguredWordListPathReachesEveryLeakVector:

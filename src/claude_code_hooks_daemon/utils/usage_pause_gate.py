@@ -54,7 +54,7 @@ from claude_code_hooks_daemon.constants.tools import ToolName
 from claude_code_hooks_daemon.core.data_layer import latest_usage
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.core.usage_snapshot import UsageSnapshot, UsageWindow
-from claude_code_hooks_daemon.utils.config_cache import load_config_cached
+from claude_code_hooks_daemon.utils.config_cache import default_config, load_config_cached
 from claude_code_hooks_daemon.utils.cron_enforcement import (
     FAILSAFE_CRON_SCHEDULE_HINT,
     declared_tick_prompt,
@@ -441,7 +441,7 @@ def load_project_config() -> Config:
         return load_config_cached(ProjectContext.project_root() / ".claude" / "hooks-daemon.yaml")
     except (RuntimeError, ValidationError, OSError, ValueError) as exc:
         logger.debug("usage_pause_gate: cannot load config, so no ceiling: %s", exc)
-        return Config()
+        return default_config()
 
 
 def default_usage_loader(now: float) -> UsageSnapshot | None:

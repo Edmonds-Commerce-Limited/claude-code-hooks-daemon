@@ -44,7 +44,7 @@ from claude_code_hooks_daemon.utils.cli_command import (
     daemon_cli_command,
     daemon_cli_command_for_docs,
 )
-from claude_code_hooks_daemon.utils.config_cache import load_config_cached
+from claude_code_hooks_daemon.utils.config_cache import default_config, load_config_cached
 from claude_code_hooks_daemon.utils.cron_hosts import effective_hostname
 from claude_code_hooks_daemon.utils.cron_tick import TickKind, classify_tick, tick_sentinel
 from claude_code_hooks_daemon.utils.heredoc_operators import scan_heredocs
@@ -344,7 +344,7 @@ class BackgroundProcessTrackerHandler(PostToolUseHandlerBase):
             return load_config_cached(config_path)
         except (ValidationError, OSError, ValueError, RuntimeError) as exc:
             logger.debug("background_process_tracker: config unavailable: %s", exc)
-            return Config()
+            return default_config()
 
     def _should_advise(self, session_id: str) -> bool:
         """Record a detection for ``session_id`` and return whether to advise now."""

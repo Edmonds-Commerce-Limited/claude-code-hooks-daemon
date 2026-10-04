@@ -41,6 +41,7 @@ driven low enough to interleave.
 
 from __future__ import annotations
 
+import functools
 import threading
 from pathlib import Path
 from typing import Final
@@ -176,6 +177,18 @@ def load_config_cached(path: str | Path) -> Config:
             raise
         _CACHE[resolved] = (signature, config)
         return config
+
+
+@functools.cache
+def default_config() -> Config:
+    """The bare-defaults ``Config``, built once per process.
+
+    The fallback a handler uses when :func:`load_config_cached` fails. Building
+    it costs about 50 ms, so rebuilding it on every Stop while the config is
+    broken (Plan 00466 N54) turned one typo into per-turn latency. Read-only by
+    convention: callers read fields and never assign to the shared instance.
+    """
+    return Config()
 
 
 def reset_config_cache() -> None:
