@@ -135,6 +135,8 @@ other than defeating a parser. Everything else, every ordinary respelling includ
   N184 and N221 fixed on branch worktree-p483-paths: a directory or absolute-path pattern is matched
   after `..` is collapsed and from the hook's cwd and each literal `cd` target.
   Report: [subagent-reports/261004-task-3.1-batch-f-paths-sonnet.md](subagent-reports/261004-task-3.1-batch-f-paths-sonnet.md).
+  N220 and N124 (grep/rg pattern) fixed and N249 pinned on branch worktree-p483-glob; report:
+  [subagent-reports/261004-task-3.1-batch-g-glob-sonnet.md](subagent-reports/261004-task-3.1-batch-g-glob-sonnet.md).
 - [ ] 🔄 **Task 3.2**: Narrow each guard that causes an in-scope false positive while catching
   an out-of-scope shape (TDD: the false positive is the red test). X-1 fixed on branch
   worktree-p483-x1-rebind-heredoc: the shared rebinding check no longer withholds the heredoc

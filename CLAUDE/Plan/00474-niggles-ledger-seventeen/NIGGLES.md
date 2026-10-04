@@ -1418,7 +1418,7 @@ includes batch D (merge 76bf848aa), because that change judges real `mkdir` comm
 **Impact**: a false positive on any read-only command whose word contains `mkdir`, such as a branch name, a ref or a
 path.
 
-**Status**: 🔄 Fixed incidentally by 76bf848aa, but no test pins it. Remedy: add a unit test in
+**Status**: ✅ Fixed incidentally by 76bf848aa and pinned in 63163f185 by a unit test in
 `test_plan_number_helper.py` that allows `git show <x>-mkdir:CLAUDE/Plan/NNNNN-name/PLAN.md`.
 
 ### N346 — commit-time gates with a fixed subprocess timeout deny ordinary commits under host load
