@@ -140,6 +140,7 @@ other than defeating a parser. Everything else, every ordinary respelling includ
   N143, N144, N152 (literal wrappers) and N153 fixed on branch worktree-p483-recur: a recursive search is judged by the files it would read; report:
   [subagent-reports/261004-task-3.1-batch-h-recursive-sonnet.md](subagent-reports/261004-task-3.1-batch-h-recursive-sonnet.md).
   N171, N172, N248 and N250 fixed on branch worktree-p483-ordin: an unlistable directory, a missing daemon package, an unresolved word list and an unbuildable capture scanner each fail loudly instead of passing; report: [subagent-reports/261004-task-3.1-batch-i-ordinary-sonnet.md](subagent-reports/261004-task-3.1-batch-i-ordinary-sonnet.md).
+  N130 (and N348's cap half) fixed on branch worktree-n130-walk: a recursive search is examined by a capped scan that raises past 250000 entries or the deadline and is denied as incomplete, never answered as clean, and `rg`, `ag` and `git grep` read git's file lists; report: [subagent-reports/261004-n130-n348-implementation-sonnet.md](subagent-reports/261004-n130-n348-implementation-sonnet.md).
 - [ ] 🔄 **Task 3.2**: Narrow each guard that causes an in-scope false positive while catching
   an out-of-scope shape (TDD: the false positive is the red test). X-1 fixed on branch
   worktree-p483-x1-rebind-heredoc: the shared rebinding check no longer withholds the heredoc

@@ -1461,12 +1461,17 @@ path".
 **Status**: 🟡 Partly fixed. The reason and rule part is fixed on worktree-n346-capmsg (commit 495217e2c): a scan
 past its cap or deadline is denied as `R-SECRET-SCAN-INCOMPLETE`, whose reason says what ran out (the cap of examined
 paths, or the scan deadline), that no protected path was found, and to narrow the glob or search root or name the
-files, or retry after a deadline. A real finding keeps `R-SECRET-BASH-MENTION` or `R-SECRET-READ`. Caps and deadline
-are unchanged. The recursive-search walk (`utils/recursive_search.py`) has no deny past its cap to relabel:
-`directory_contains_protected` answers none past the cap, the documented residual limit. Still Open:
+files, or retry after a deadline. A real finding keeps `R-SECRET-BASH-MENTION` or `R-SECRET-READ`.
 
-- check each protected pattern against the glob, which is bounded by the number of patterns rather than the size of
-  the tree, before or instead of walking the filesystem, so the verdict stops depending on tree size.
+**Status update**: ✅ Fixed on worktree-n130-walk (Addresses ledger 00474 N348 and 00483 N130): fixed: fail closed past
+a measured cap; git listings for git-shaped tools. The bare-glob cap is 100000 examined paths (about 0.3 s per 30k
+paths), and a literal screen runs before the glob matcher, so `ls */*/*/*` (18373 paths here) is judged on what it
+reaches and no longer denied for its size. The recursive-search scan (`utils/protected_tree_scan.py`) raises past 250000
+entries or the deadline and is denied as `R-SECRET-SCAN-INCOMPLETE` (`R-QUARANTINE-SCAN-INCOMPLETE` in the quarantine
+guard); `rg`, `ag` and `git grep` read git's file lists, so ignored bulk is not counted. The "check each pattern against
+the glob" idea was analysed and rejected: an unanchored name pattern, which every shipped default is, can match in any
+directory, so no pattern-side check bounds the walk. Report:
+[261004-n130-n348-implementation-sonnet.md](../00483-threat-model-conformance-audit/subagent-reports/261004-n130-n348-implementation-sonnet.md).
 
 ### N347 — the plan-folder mkdir guard read `mkdir` inside a branch name as a command
 
