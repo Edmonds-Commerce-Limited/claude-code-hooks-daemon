@@ -14,10 +14,15 @@ cost, in the same process and on the same large input, of a reference scan
 that is linear by construction. A linear handler, whatever its constant
 factor, then has a ratio of at most ``SIZE_FACTOR``; a handler that costs
 nothing measurable has a ratio near zero.
+
+The CPU clock only advances in ticks, so a cost can read exactly 0.0. The
+denominator is therefore also never smaller than one tick of that clock, which
+keeps the ratio finite and meaningful: an unmeasurably cheap case is a pass.
 """
 
 from __future__ import annotations
 
+import functools
 import time
 from collections.abc import Callable
 from typing import Final
@@ -26,6 +31,40 @@ SIZE_FACTOR: Final = 8
 SUPERLINEAR_RATIO: Final = 24
 # Each cost is the minimum over this many runs: noise only ever adds time.
 REPEATS: Final = 3
+# Longest the clock is spun while looking for its next tick.
+_RESOLUTION_PROBE_SECONDS: float = 0.05
+# One tick where the platform cannot report the clock's resolution (Windows
+# advances its CPU clocks in about 15.6 ms steps).
+FALLBACK_RESOLUTION_SECONDS: Final = 0.016
+
+
+@functools.cache
+def clock_resolution_seconds() -> float:
+    """The granularity of ``time.thread_time``: one whole tick of it.
+
+    Spins the calling thread across two consecutive advances of the clock, so
+    the step is the one this host really exhibits (the first advance starts
+    mid-tick and is discarded) rather than the nanosecond a coarse clock may
+    claim. If the clock does not advance twice within the probe window, the
+    platform's reported resolution is used, else ``FALLBACK_RESOLUTION_SECONDS``.
+    """
+    previous = time.thread_time()
+    advanced_from: float | None = None
+    deadline = time.perf_counter() + _RESOLUTION_PROBE_SECONDS
+    while time.perf_counter() < deadline:
+        now = time.thread_time()
+        if now == previous:
+            continue
+        if advanced_from is not None:
+            return now - advanced_from
+        advanced_from = now
+        previous = now
+    clock_getres = getattr(time, "clock_getres", None)
+    clock_id = getattr(time, "CLOCK_THREAD_CPUTIME_ID", None)
+    if clock_getres is None or clock_id is None:
+        return FALLBACK_RESOLUTION_SECONDS
+    reported: float = clock_getres(clock_id)
+    return reported if reported > 0.0 else FALLBACK_RESOLUTION_SECONDS
 
 
 def cpu_seconds(work: Callable[[], object]) -> float:
@@ -72,7 +111,8 @@ def scaling_ratio(work_at: Callable[[int], object], n: int, large_text: str) -> 
     """
     small = min_cpu_seconds(lambda: work_at(n))
     large = min_cpu_seconds(lambda: work_at(SIZE_FACTOR * n))
-    return large / max(small, linear_baseline_seconds(large_text))
+    floor = max(linear_baseline_seconds(large_text), clock_resolution_seconds())
+    return large / max(small, floor)
 
 
 def counted_ratio(count_at: Callable[[int], int], n: int) -> float:
