@@ -161,7 +161,9 @@ def format_changes(changes: list[HandlerChange], from_version: str, to_version: 
     if snippet:
         lines.append("")
         lines.append("To keep the ones you want, add them to .claude/hooks-daemon.yaml")
-        lines.append("(name only the handlers you want; several are noisy and four deny tool calls):")
+        lines.append(
+            "(name only the handlers you want; several are noisy and four deny tool calls):"
+        )
         lines.append("")
         lines.extend(f"    {line}" for line in snippet.splitlines())
     return "\n".join(lines)

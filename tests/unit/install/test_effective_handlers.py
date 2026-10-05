@@ -51,7 +51,9 @@ _NEW_IN_V368: Final[str] = "plan_fact_check_feed"
 
 def _opt_in_keys() -> set[str]:
     return {
-        ref.config_key for ref in iter_builtin_handler_classes() if not ref.handler_cls.default_enabled
+        ref.config_key
+        for ref in iter_builtin_handler_classes()
+        if not ref.handler_cls.default_enabled
     }
 
 

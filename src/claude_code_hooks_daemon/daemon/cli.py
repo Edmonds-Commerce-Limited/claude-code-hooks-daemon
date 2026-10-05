@@ -10291,7 +10291,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="List handlers an upgrade starts or stops running for this project's config",
     )
     parser_effective.add_argument(
-        "--from", dest="from_version", required=True, metavar="VERSION", help="Version upgraded from"
+        "--from",
+        dest="from_version",
+        required=True,
+        metavar="VERSION",
+        help="Version upgraded from",
     )
     parser_effective.add_argument(
         "--to", dest="to_version", required=True, metavar="VERSION", help="Version upgraded to"
