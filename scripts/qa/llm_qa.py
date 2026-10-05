@@ -624,6 +624,11 @@ TOOL_REGISTRY: dict[str, ToolConfig] = {
         json_file="github_urls.json",
         jq_hint="jq '.violations[] | {file, line, rule, message}'",
     ),
+    "released_changelog": ToolConfig(
+        command=_python("check_released_changelog.py", "--json"),
+        json_file="released_changelog.json",
+        jq_hint="jq '.violations[] | {file, rule, message}'",
+    ),
     "canonical_callers": ToolConfig(
         command=_bash("run_canonical_callers_check.sh"),
         json_file="canonical_callers.json",
@@ -839,6 +844,7 @@ CHANGED_TOOL_NAMES: Final[list[str]] = [
     "british_english",
     "git_history",
     "github_urls",
+    "released_changelog",
     "semgrep",
     "changed_tests",
 ]
@@ -1151,6 +1157,7 @@ SUMMARIZERS: dict[str, Summarizer] = {
     "shell_audit": _summarize_violations,
     "skill_refs": _summarize_violations,
     "github_urls": _summarize_violations,
+    "released_changelog": _summarize_violations,
     "canonical_callers": _summarize_violations,
     "capture_corruption": _summarize_violations,
     "python_var_guidance": _summarize_violations,

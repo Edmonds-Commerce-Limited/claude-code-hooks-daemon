@@ -1626,9 +1626,9 @@ move the failure to release time, which is what N326 was written to prevent. Oth
 the individual agents. Nothing stops an edit to a released section. An agent that looks for "where release notes go"
 finds the newest section at the top of `CHANGELOG.md` and appends to it.
 
-**Status**: ⬜ Open. Remedy: a check, either at commit time or as a QA tool, that a CHANGELOG section whose version
-has a published tag is immutable. Its message names `UNRELEASED/release-notes/` as the place for new notes. Also
-check whether any doc tells contributors to edit `CHANGELOG.md` directly.
+**Status**: ✅ Fixed. The `released_changelog` QA tool (`scripts/qa/check_released_changelog.py`, run by `llm_qa.py changed`) fails when a section present in the latest `v*` tag's `CHANGELOG.md` differs in the working tree. Its message
+names `CLAUDE/UPGRADES/UNRELEASED/release-notes/`. A new section is allowed, so the release process passes. No doc
+tells contributors to edit `CHANGELOG.md`; `RELEASING.md` already forbids it outside `/release`.
 
 ### N338–N342 — false positives and a setup limit met by the Plan 00487 host agent
 
