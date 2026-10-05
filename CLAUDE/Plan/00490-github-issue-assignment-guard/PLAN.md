@@ -163,7 +163,9 @@ client projects, until it has run here for a while.
 
 ### Phase 4: Verify
 
-- [ ] ⬜ **Task 4.1**: Do a live dogfood check in this repository after a daemon restart:
+- [ ] ⬜ **Task 4.2**: Confirm, or make, `issue-validity --list-eligible` refuse to run when no
+  `approved_issue_authors` list is configured, so the issue-sdlc selection never fails open (open question 4).
+- [x] ✅ **Task 4.1**: Do a live dogfood check in this repository after a daemon restart:
   - an untied edit is silent;
   - an edit in a plan tied to an issue assigned to self is allowed;
   - an unassigned issue is denied with the claim command;
@@ -191,7 +193,7 @@ Question 1 also settles whether auto-claim belongs in the hook: the `auto_claim`
 
 - [x] All verdict rows are pinned by tests, and the untied path makes no `gh` call.
 - [x] The issue-sdlc runbook claims before working, stops on someone else's issue, and reads its author list from config.
-- [ ] The live dogfood check (Task 4.1) passes after a daemon restart.
+- [x] The live dogfood check (Task 4.1) passes after a daemon restart.
 
 ## Delivery & Milestones
 
