@@ -61,7 +61,23 @@ fixed or accepted.
 - `gh auth token` is "probably not something that should be done".
 - The owner did not know what `pip install --index-url` and `git push --delete` do, and wants them explained.
 
-**Status:** awaiting the coordinator's revised proposal. Task 2.2 stays open on this point.
+**Revised proposal accepted by the owner (2026-10-05, "A6, your table of proposals is accepted"):**
+
+| Command                                                | Verdict                                               |
+| ------------------------------------------------------ | ----------------------------------------------------- |
+| `docker run -v /:/host …` (host root mounted)          | Block                                                 |
+| `git push --delete <name>` and `git push <r> :<name>`  | Human only: deny, and tell the agent to ask the human |
+| `git tag -d <tag>` (local only)                        | Allow                                                 |
+| `gh auth token` (prints the token into the transcript) | Block                                                 |
+| `pip install --index-url <url>` (non-PyPI index)       | Human only                                            |
+| `crontab -r`                                           | Human only                                            |
+| `git reset --keep`                                     | Allow                                                 |
+| `truncate -s 0 <file>`                                 | Allow                                                 |
+| `rm -rf`                                               | Allow (the owner's ruling above)                      |
+
+Each new deny gets rows in the ordinary-command regression gate (R2), so it cannot catch everyday commands.
+
+**Status:** settled. Task 2.2 can proceed on this table.
 
 ## B1: 00484 G2 and the 00483 INVENTORY escape hatches
 
