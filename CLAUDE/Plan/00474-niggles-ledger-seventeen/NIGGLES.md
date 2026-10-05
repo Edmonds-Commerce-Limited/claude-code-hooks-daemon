@@ -1410,6 +1410,21 @@ The uncertain-move union judges the hook directory and the LAST recorded move (`
 every candidate directory (`sub`). Remedy: judge every directory any `cd` in the chain could
 land in.
 
+### N354 — the upgrade-approval guard denies a `PYTHONPATH=… python -c` probe that runs no upgrade
+
+**Source**: the coordinator, 2026-10-05, probing a worktree branch's handler code from the main checkout.
+
+**Evidence**: `PYTHONPATH=<worktree>/src /workspace/.venv/bin/python -c "…import ProjectContainmentHandler…"` was
+denied as R-UPGRADE-APPROVAL-ENV-BYPASS. The command runs no upgrade: no `upgrade.sh`, `upgrade_version.sh`, gate
+script, `--project-root` or `.claude/hooks-daemon` clone path appears in it. The likely trigger is the "script that
+cannot be read" limb treating an inline `python -c` program as an unreadable upgrade script, with `PYTHON*` set.
+
+**Impact**: medium for this repository. Running branch code with `PYTHONPATH` is an ordinary development idiom. The
+workaround is a script file under `untracked/scratch/` with `sys.path.insert`.
+
+**Status**: ⬜ Open. Remedy: an unreadable-script limb must also require one of the upgrade's own arguments, as its
+guidance says; a `-c` program that names none of them is not an upgrade. Reproduce with a TDD row first.
+
 ### N353 — the dismissive-language advisory flags a citation of the threat model's own scope rule
 
 **Source**: the coordinator, 2026-10-05, on a stop that asked the owner the guard-review questions.
