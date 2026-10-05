@@ -117,6 +117,15 @@ _BASH_BLINDNESS_VERDICT: dict[str, tuple[str, str]] = {
         "(not a literal and not a named day-file) cannot be followed, and a "
         "file written by a script on disk is not read",
     ),
+    "GithubIssueAssignmentGuardHandler": (
+        _PARTIAL,
+        "Plan 00490: a Write/Edit inside an issue-tied plan folder is judged, "
+        "and so is a `git commit` citing the plan and its issue, which is the "
+        "point where Bash-route work on that plan is recorded. A heredoc or "
+        "redirect into the plan folder itself is not judged before the "
+        "commit; the guard's premise is ownership of the work, not the bytes "
+        "reaching disk, so the commit gate is where it matters",
+    ),
     "AbsolutePathHandler": (
         _OUT_OF_FRAME,
         "premise is about a TOOL ARGUMENT being absolute, not a file on disk; "
