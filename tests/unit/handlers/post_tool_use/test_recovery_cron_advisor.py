@@ -1011,6 +1011,25 @@ class TestPhaseCacheContract:
         result = handler.handle(hook_input)
         assert "CronDelete" in " ".join(result.context)
 
+    def test_interleaved_requests_each_advise_on_their_own_phase(
+        self, handler: RecoveryCronAdvisorHandler
+    ) -> None:
+        """B's matches() between A's matches() and handle() must not change A's advice."""
+        creation = _write_input(
+            "/workspace/CLAUDE/Plan/00042-my-plan/PLAN.md",
+            "# Plan\n\n**Status**: Not Started\n",
+        )
+        completion = _write_input(
+            "/workspace/CLAUDE/Plan/00043-other-plan/PLAN.md",
+            "**Status**: Complete\n",
+        )
+        assert handler.matches(creation) is True
+        assert handler.matches(completion) is True
+        advice_a = " ".join(handler.handle(creation).context or [])
+        advice_b = " ".join(handler.handle(completion).context or [])
+        assert "CronCreate" in advice_a
+        assert "CronDelete" in advice_b
+
     def test_stale_cache_not_reused_across_events(
         self, handler: RecoveryCronAdvisorHandler
     ) -> None:

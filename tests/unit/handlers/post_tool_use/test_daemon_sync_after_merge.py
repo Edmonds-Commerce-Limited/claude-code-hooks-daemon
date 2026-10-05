@@ -10,6 +10,7 @@ technically necessary: the daemon serves this hook in-process, so a daemon that
 restarted itself here would kill the process still owing a response.
 """
 
+import subprocess
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
@@ -117,6 +118,37 @@ class TestSilence:
         """`.claude/project-handlers-old/` is a different directory."""
         result = _handle(_handler(), {".claude/project-handlers-old/x.py"})
         assert not result.context
+
+
+class TestCdIntoAnotherCheckout:
+    """N35: a merge run after `cd <other checkout>` is judged by THAT repo, not the session root."""
+
+    @staticmethod
+    def _init_repo(path: Path) -> Path:
+        path.mkdir()
+        subprocess.run(["git", "init", "-q", str(path)], check=True)
+        return path
+
+    def _handle_in(self, project: Path, command: str) -> Any:
+        hook_input = _pull(command)
+        hook_input["cwd"] = str(project)
+        with (
+            patch(_PROJECT_ROOT_TARGET, return_value=project),
+            patch(_CONFIG_PATH_TARGET, return_value=project / ".claude" / "hooks-daemon.yaml"),
+            patch(_CHANGED_PATHS_TARGET, return_value=frozenset({".claude/hooks-daemon.yaml"})),
+        ):
+            return _handler().handle(hook_input)
+
+    def test_merge_after_cd_into_a_different_repo_is_silent(self, tmp_path: Path) -> None:
+        project = self._init_repo(tmp_path / "project")
+        other = self._init_repo(tmp_path / "other")
+        result = self._handle_in(project, f"cd {other} && git merge main")
+        assert not result.context
+
+    def test_merge_in_the_session_repo_still_advises(self, tmp_path: Path) -> None:
+        project = self._init_repo(tmp_path / "project")
+        result = self._handle_in(project, "git merge main")
+        assert result.context
 
 
 _TRACKED_VERSION_TARGET = (

@@ -55,6 +55,7 @@ from claude_code_hooks_daemon.utils.merge_scope import (
     is_git_merge_pull_rebase_command,
 )
 from claude_code_hooks_daemon.utils.path_containment import path_is_relative_to, path_relative_to
+from claude_code_hooks_daemon.utils.secret_file_matching import effective_cwds
 
 
 def _running_version() -> str:
@@ -191,7 +192,10 @@ class DaemonSyncAfterMergeHandler(PostToolUseHandlerBase):
         cwd_raw = hook_input.get(HookInputField.CWD)
         if not cwd_raw:
             return False
-        repo = GitRepo.resolve_for(Path(cwd_raw))
+        # The merge runs where the command's last literal `cd` leaves it, not
+        # where the session started (ledger 00483 N35).
+        cwds = effective_cwds(get_bash_command(hook_input) or "", cwd_raw)
+        repo = GitRepo.resolve_for(Path(cwds[-1] if cwds else cwd_raw))
         return repo is not None and repo.root != project_root
 
     @staticmethod
