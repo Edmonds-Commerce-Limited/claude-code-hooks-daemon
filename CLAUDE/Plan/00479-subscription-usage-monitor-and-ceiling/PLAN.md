@@ -73,6 +73,9 @@ hosts:
   Blocked: `remote-docs add https://code.claude.com/docs/en/statusline` refuses the page
   (its content matches the `session-uuid` sensitive-content pattern; nothing written).
   StatusLine.md records the read and the URL; the vendoring needs an owner decision.
+  **Owner ruling (2026-10-05):** unblocked by the fake-values registry plan `docs-fake-values-registry`: the page is vendored
+  with unlisted fakes swapped for listed ones, recorded in its provenance — see
+  [OWNER-RULINGS-261005.md](../00483-threat-model-conformance-audit/OWNER-RULINGS-261005.md) (D1). Blocked until that plan lands.
 - [x] ✅ **Task 1.2** (merged ee58adb7c): Capture real Status payloads into test fixtures: a main thread with
   data, before the first response (absent), a subagent or `--agent` thread, and integer and
   fractional percentages. Establish whether subagent threads carry `rate_limits`.

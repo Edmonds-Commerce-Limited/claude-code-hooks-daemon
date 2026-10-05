@@ -1013,6 +1013,8 @@ off.
 `untracked/scratch` (13 GB). Deleting them is the owner's call, since that is a bulk deletion
 of earlier runs' evidence.
 
+**Owner ruling (2026-10-05):** resolved: yes, clean up (keep anything a live worktree or an open report points at), and add a housekeeping step to the release process — see [OWNER-RULINGS-261005.md](../00483-threat-model-conformance-audit/OWNER-RULINGS-261005.md) (D3).
+
 ### N290 — the coordinator stated a confident, unverified, false claim about the codebase
 
 **Found**: by the owner ("supervisor lives outside this repository?? what????"). While
@@ -1242,7 +1244,9 @@ recognised, reviewable marker, or a named helper that the audit allowlists. A he
 merely moves the call out of sight is neither. Changing the audit, or adding allowlist
 entries, needs the owner.
 
-**Status**: ⬜ Open.
+**Owner ruling (2026-10-05):** resolved: one named helper with a required reason argument, and the audit widened to catch log-then-continue bodies — see [OWNER-RULINGS-261005.md](../00483-threat-model-conformance-audit/OWNER-RULINGS-261005.md) (B4).
+
+**Status**: ⬜ Open (ruling given; implementation not started).
 
 ### N297 — the coordinator merged the merge advisor itself without a targeted QA run, and main broke twice
 
@@ -1935,6 +1939,8 @@ exception list for today's outliers, which is an allowlist and needs owner appro
 wired into `llm_qa.py`: no report-only tool exists there, and a passing tool shows nothing, so the
 report would never be read. The split of the file itself is a separate, sequenced pure-refactor plan.
 
+**Owner ruling (2026-10-05):** resolved: not just a size gate; a new plan, `code-quality-and-architecture-review`, covers module size, DRY, architecture and code quality, and N314 folds into it — see [OWNER-RULINGS-261005.md](../00483-threat-model-conformance-audit/OWNER-RULINGS-261005.md) (B5).
+
 ### N313 — `git_stash` denies a `grep` naming `git stash` when its output goes into `awk`
 
 **Source**: coordinator, live, while reading a test file.
@@ -2048,6 +2054,8 @@ on the same pattern, even with `--verbatim`. The check runs before any capture e
 placeholder for pattern matches and record the substitution in the provenance frontmatter; (b)
 exempt the remote-docs tree from that one public pattern; (c) leave such pages unvendored.
 
+**Owner ruling (2026-10-05):** resolved: a single registry of approved FAKE values; docs may use any listed fake, and an unlisted fake-looking value is swapped for a listed one or the list is extended. Work: plan `docs-fake-values-registry` — see [OWNER-RULINGS-261005.md](../00483-threat-model-conformance-audit/OWNER-RULINGS-261005.md) (D1).
+
 ### N308 — unguarded `;` chaining is only advised against, not blocked
 
 **Source**: owner ruling, verbatim: "we should be blocking ; command chaining — either use set
@@ -2063,6 +2071,8 @@ advisory all session.
 on by default - it should be harmless and provides a LOT of safety". Under it, the SHIPPED default is
 now enabled and blocking: a config-changes entry, release note 215, and templates updated. The
 acceptance tests follow the configured mode. Live once the daemon restarts.
+
+**Owner ruling (2026-10-05):** reverses the second ruling above for this repository's config: `bash_safe_mode` goes back to `only_with_mutator: true` (R6) — see [OWNER-RULINGS-261005.md](../00483-threat-model-conformance-audit/OWNER-RULINGS-261005.md) (A3).
 
 ### N307 — the second commit in one command has its pathspecs left unscanned
 

@@ -4,6 +4,10 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
+- [00492: docs fake values registry](00492-docs-fake-values-registry/PLAN.md) - Not Started (owner ruling D1: one registry of approved fake values for docs; a QA check, a sensitive-content allowance and remote-docs swaps recorded in provenance; settles N309 and unblocks 00479 Task 1.1 and 00486 Task 1.3)
+
+- [00491: code quality and architecture review](00491-code-quality-and-architecture-review/PLAN.md) - Not Started (owner ruling B5: a read-only review of module size, DRY, architecture and code quality, then owner-chosen refactoring; N314 folds in)
+
 - [00490: github issue assignment guard](00490-github-issue-assignment-guard/PLAN.md) - Not Started (owner request: issue-tied work requires the issue assigned to the signed-in GitHub account; claim it when unassigned, stop when it is someone else's)
 
 - [00489: supervisor in-container restart primitive](00489-supervisor-in-container-restart-primitive/PLAN.md) - Not Started (owner decision D2 in Plan 00487, #71: 00487's Tasks 1.4 and 1.5, the in-container `Restart` and the host-half `before_spawn` that the fedora-desktop 00146 credential switch needs)
@@ -308,7 +312,7 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 - **Completed**: 415 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 52 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 54 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 

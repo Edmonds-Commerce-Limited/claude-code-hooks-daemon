@@ -105,6 +105,8 @@ other than defeating a parser. Everything else, every ordinary respelling includ
   limb applies: the text is visible at call time, and each has ordinary uses rather than existing
   only to defeat a parser. All 9 are in scope and stay `UNCOVERED-open`. The corpus header makes
   every new deny owner-gated per row, so they go to the owner as one batch.
+  Owner: revisit; see [OWNER-RULINGS-261005.md](OWNER-RULINGS-261005.md) (A6). A revised proposal is
+  owed by the coordinator.
 - [ ] 🔄 **Task 2.3**: Done for the carried entries (merge 56677e3c6). That added 9
   `UNCOVERED-accepted` corpus rows. N201, N228 and N257 have no row, because main denies the
   representative command anyway. Record every dismissal: in the ledger, mark it
@@ -158,7 +160,8 @@ other than defeating a parser. Everything else, every ordinary respelling includ
   operands, `--include` values, revisions and pathspecs stay judged as paths. Tests pin the
   reported `'.*WORD'` shapes, which had been allowed on main without any test.
 - [ ] ⬜ **Task 3.3**: Bring the owner's removal decisions on out-of-scope-only code into
-  effect, if any were taken.
+  effect, if any were taken. **Owner ruling (2026-10-05):** remove the whole R4 table, and
+  amend the fail-closed rule (R3); unblocked, see [OWNER-RULINGS-261005.md](OWNER-RULINGS-261005.md) (A1, A2).
 
 ### Phase 4: Keep it applied
 
@@ -183,6 +186,7 @@ Owner questions sent 2026-10-05 as chunks A–D; see the backlog report
    major version, as a separate project.
 2. **Code serving only out-of-scope shapes**: keep it while it costs nothing, which is the
    current text; or remove it to cut maintenance. Decide per item from the Phase 1 list.
+   **Owner ruling (2026-10-05):** resolved: remove it, as part of R4 — see [OWNER-RULINGS-261005.md](OWNER-RULINGS-261005.md) (A2).
 3. **N130/N348, the capped tree walk.** Design:
    [261004-n130-n348-capped-walk-design-opus.md](subagent-reports/261004-n130-n348-capped-walk-design-opus.md).
    The coordinator is building it with defaults, which are the coordinator's calls and not owner rulings. The owner
@@ -197,6 +201,7 @@ Owner questions sent 2026-10-05 as chunks A–D; see the backlog report
    - O5: the mtime-validated index is deferred.
    - **Coordinator call (2026-10-05, under the owner's "go with the clear winners" instruction):** O1 to O5 are folded
      into R3 and R4 below and will be decided with them. They are not decided separately. Not an owner ruling.
+   - **Owner ruling (2026-10-05):** resolved: O1 to O5 are superseded by R3 and R4 — see [OWNER-RULINGS-261005.md](OWNER-RULINGS-261005.md) (A1, A2).
 4. **Effort and breakage in the secret-guard area.** The owner asked for this review:
    [261004-guard-effort-pragmatism-review-opus.md](subagent-reports/261004-guard-effort-pragmatism-review-opus.md).
    It finds that the area has become disproportionately costly, and that it breaks ordinary sessions more often than
@@ -211,17 +216,24 @@ Owner questions sent 2026-10-05 as chunks A–D; see the backlog report
      - R2: **resolved (coordinator call)**: a regression gate built from ordinary commands, so that an ALLOW flipping to a deny fails the change.
      - R3: amend the fail-closed rule. Deny only on a literal protected name or an unparseable command. Allow with an
        advisory when a cap or deadline is exhausted.
+       **Owner ruling (2026-10-05):** resolved: fail-closed is dropped; deny only on a positive finding — see [OWNER-RULINGS-261005.md](OWNER-RULINGS-261005.md) (A1).
      - R4: remove the bare-glob filesystem expansion and the per-call tree walk, in favour of a cached index.
+       **Owner ruling (2026-10-05):** resolved: remove the whole R4 table — see [OWNER-RULINGS-261005.md](OWNER-RULINGS-261005.md) (A2).
      - R5: **resolved (coordinator call)**: an effort budget for the area. One open branch, at most 2 review rounds,
        net non-positive lines, and p99 of 50 ms or less per Bash call.
-     - R6: **open, owner**: return bash_safe_mode to `only_with_mutator`.
+     - R6: **resolved (owner)**: return bash_safe_mode to `only_with_mutator`.
+       **Owner ruling (2026-10-05):** yes — see [OWNER-RULINGS-261005.md](OWNER-RULINGS-261005.md) (A3).
+     - R2b: **resolved (owner)**: an open client-filed false-positive issue blocks the next minor release.
+       **Owner ruling (2026-10-05):** yes — see [OWNER-RULINGS-261005.md](OWNER-RULINGS-261005.md) (A5).
      - The keep/narrow/drop list for the remaining Task 3.1 items.
+       **Owner ruling (2026-10-05):** resolved: accept the review's R7 list — see [OWNER-RULINGS-261005.md](OWNER-RULINGS-261005.md) (A4).
 5. **N98 (00466 numbering): the fallback socket path is shared across hostnames.** A fix exists at 094676360, kept
    on the remote branch `agent-a852e66b72ca67937-652324e9`. It adds a hostname tag to the fallback socket, PID, log
    and events-dir names. Installs that already use the `$XDG_RUNTIME_DIR`, `/run/user` or `/tmp` fallback would get
    new paths on upgrade, and generated forwarders bake the events dir in, so they would need regenerating. The
    coordinator parked it because the collision is rare. Owner decision: take the fix, with a forwarder regeneration
    step on upgrade, or leave it.
+   **Owner ruling (2026-10-05):** resolved: take the fix at the next minor, with the forwarder-regeneration step — see [OWNER-RULINGS-261005.md](OWNER-RULINGS-261005.md) (D2).
 
 ## Success Criteria
 

@@ -1028,6 +1028,13 @@ gh release view vX.Y.Z --json tagName,isDraft,isPrerelease,url \
 # Expected: draft=false, prerelease=false
 ```
 
+### Step 15.1: Housekeeping (owner ruling 2026-10-05)
+
+A standing task list, run after every release. Add tracked housekeeping here as it is agreed.
+
+- [ ] Clean stale files under `untracked/`: scratch, old probe copies, dead worktree venvs. Keep anything a live
+  worktree (`git worktree list`) or an open report points at.
+
 ---
 
 ## Rollback

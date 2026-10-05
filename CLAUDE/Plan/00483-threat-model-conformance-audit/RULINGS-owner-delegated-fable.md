@@ -27,6 +27,8 @@ them.
 are confirmed (resolved). N74 is decided together with R4 (see the plan's open question 4), because the review's R7
 proposes resolving it through R4's cached index. Not owner rulings.
 
+**Owner ruling (2026-10-05):** N74 is resolved with R4 (the whole R4 table goes; N74 via the cached index) — see [OWNER-RULINGS-261005.md](OWNER-RULINGS-261005.md) (A2).
+
 ---
 
 ## N230 — `secret-meta --project-root <dir>` reads `allow_plain_hash` from a config the agent wrote

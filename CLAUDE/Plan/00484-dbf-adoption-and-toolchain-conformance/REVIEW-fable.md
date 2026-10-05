@@ -143,16 +143,20 @@ One line per decision. Everything not listed is a close within the plan's existi
 - **Defence set (decides G2, G14 text):** Are the action guards (destructive git, stash,
   squash, pipe, sed, safe-mode, root-scan) DBF Defences, or guardrails outside the Defence set?
   — Recommended: **outside**; declare the content and commit gates as the Defence set.
+  **Owner ruling (2026-10-05):** outside the Defence set; resolved — see [OWNER-RULINGS-261005.md](../00483-threat-model-conformance-audit/OWNER-RULINGS-261005.md) (C1).
 - **G1:** Close by moving the 62 live `# nosec` into a wrapper-applied record file with reasons,
   deleting the ~173 inert markers, and failing any inline `nosec`/`type: ignore`/`shellcheck disable` under `llm_qa.py`? — Recommended: **yes**.
+  **Owner ruling (2026-10-05):** NO central record file; suppressions stay inline, each with its reasoning, and as many as possible are deleted — see [OWNER-RULINGS-261005.md](../00483-threat-model-conformance-audit/OWNER-RULINGS-261005.md) (B2).
 - **G2:** Keep the four command hatches (if outside the Defence set) with the no-reason and
   closer defects fixed and the generic-reason check applied; if inside, declare them a known
   gap? — Recommended: **keep, fix, outside**.
+  **Owner ruling (2026-10-05):** keep and fix; resolved — see [OWNER-RULINGS-261005.md](../00483-threat-model-conformance-audit/OWNER-RULINGS-261005.md) (B1).
 - **G3:** Close the two in-file `MUST_EXCEED_*_BECAUSE` tokens by listing and reason-checking
   them, or accept as a known gap? — Recommended: **close**.
   **Resolved.** **Coordinator call (2026-10-05, under the owner's "go with the clear winners" instruction):** close.
 - **G4:** Accept `{pattern, reason}` alongside bare strings now, require the reason under
   `strict_mode`, and make it mandatory at the next major? — Recommended: **yes**.
+  **Owner ruling (2026-10-05):** yes; resolved — see [OWNER-RULINGS-261005.md](../00483-threat-model-conformance-audit/OWNER-RULINGS-261005.md) (B3).
 - **G10:** Confirm the statement "no DBF Defence is routed through ruff, mypy, pyright, bandit
   or shellcheck; they run as checks" for the declaration? — Recommended: **confirm**; not a gap.
   **Resolved.** **Coordinator call (2026-10-05, under the owner's "go with the clear winners" instruction):** confirm.
