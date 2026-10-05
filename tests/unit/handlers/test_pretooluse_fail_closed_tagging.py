@@ -170,6 +170,12 @@ _AUDITED_BLOCKING_ONLY_REASONS: dict[str, str] = {
     ),
     "dispatch_declaration": "Workflow gate: a subagent must declare where its report goes.",
     "gh_issue_comments": "Workflow completeness gate: forces --comments on gh issue view.",
+    "github_issue_assignment_guard": (
+        "Plan 00490: an ownership workflow gate (claim the issue, do not work "
+        "someone else's). A fail-open costs a possible duplicate effort, "
+        "visible on the issue, never a dangerous action; and the plan requires "
+        "that it never breaks a session, so failing closed would contradict it."
+    ),
     "gh_pr_comments": "Workflow completeness gate: forces --comments on gh pr view.",
     "lsp_enforcement": "Steers Grep/Bash-grep toward LSP tools; opt-in, off by default; a speed/precision nudge, not a guard.",
     "markdown_organization": "Documentation-placement gate (which directory a new .md belongs in).",
