@@ -39,6 +39,10 @@ from claude_code_hooks_daemon.config.models import Config
 logger = logging.getLogger(__name__)
 
 SUPERVISOR_SCRIPT_NAME: Final[str] = "claude-supervise.py"
+# The POSIX shell launcher ccy.env points CCY_CLAUDE_WRAPPER at. It runs BEFORE
+# Python parses the supervisor, picks a supported interpreter (>= 3.11) and, when
+# there is none, starts claude unsupervised with a loud warning instead of crashing.
+SUPERVISOR_LAUNCHER_NAME: Final[str] = "claude-supervise"
 CCY_ENV_NAME: Final[str] = "ccy.env"
 _DOCKERFILE_NAME: Final[str] = "Dockerfile"
 _GITIGNORE_NAME: Final[str] = ".gitignore"
@@ -55,9 +59,10 @@ _CCY_TRACKED_WHITELIST: Final[tuple[str, ...]] = (
     _DOCKERFILE_NAME,
     CCY_ENV_NAME,
     SUPERVISOR_SCRIPT_NAME,
+    SUPERVISOR_LAUNCHER_NAME,
 )
 # Owner rwx, group/other rx — least-privilege executable (matches deploy_skills /
-# mkplan deployment). The supervisor is exec'd directly by the ccy launcher.
+# mkplan deployment). The launcher is exec'd directly by the ccy launcher.
 _SUPERVISOR_MODE: Final[int] = 0o755
 
 # The env var the ccy launcher sources from ccy.env and prepends to `claude`.
@@ -73,7 +78,7 @@ _WRAPPER_EXPORT_KEY: Final[str] = "CCY_CLAUDE_WRAPPER"
 _ARMED_WRAPPER_LINE: Final[str] = (
     'export CCY_CLAUDE_WRAPPER="${CCY_CLAUDE_WRAPPER:-'
     '$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)/'
-    f'{SUPERVISOR_SCRIPT_NAME} --arm --}}"'
+    f'{SUPERVISOR_LAUNCHER_NAME} --arm --}}"'
 )
 
 # Comment block written immediately above the armed line (fresh file or append).
@@ -110,6 +115,9 @@ class CcySupervisorDeployResult:
             into the target's ``ccy.env`` (i.e. actually enabled the supervisor).
             False when arming was skipped (flag off, no ccy dir, or the user
             already has a stance on ``CCY_CLAUDE_WRAPPER``).
+        wrapper_migrated: True when this run repointed an existing, active
+            ``CCY_CLAUDE_WRAPPER`` from the bare ``claude-supervise.py`` to the
+            ``claude-supervise`` launcher (the upgrade path for existing installs).
         gitignore_updated: True when this run added whitelist exceptions to the
             target's ``.claude/ccy/.gitignore`` (or created it) so the supervisor
             files are trackable rather than silently git-ignored.
@@ -121,6 +129,7 @@ class CcySupervisorDeployResult:
 
     deployed: bool = False
     armed: bool = False
+    wrapper_migrated: bool = False
     gitignore_updated: bool = False
     recommend_enable: bool = False
     messages: list[str] = field(default_factory=list)
@@ -129,6 +138,27 @@ class CcySupervisorDeployResult:
 def ccy_supervisor_source_path(daemon_root: Path) -> Path:
     """Absolute path to the canonical bundled supervisor within the daemon clone."""
     return daemon_root.joinpath(*_CCY_DIR_PARTS, SUPERVISOR_SCRIPT_NAME)
+
+
+def ccy_launcher_source_path(daemon_root: Path) -> Path:
+    """Absolute path to the canonical bundled launcher within the daemon clone."""
+    return daemon_root.joinpath(*_CCY_DIR_PARTS, SUPERVISOR_LAUNCHER_NAME)
+
+
+def _copy_asset(source: Path, target: Path, result: CcySupervisorDeployResult) -> bool:
+    """Copy ``source`` over ``target`` (mode 0755); no-op for a self-install.
+
+    Returns True when bytes were written.
+    """
+    if target.exists() and source.resolve() == target.resolve():
+        result.messages.append(f"{target.name} already in place (self-install); no copy")
+        logger.info("ccy asset source == target (%s); no copy needed", target)
+        return False
+    target.write_bytes(source.read_bytes())
+    target.chmod(_SUPERVISOR_MODE)
+    result.messages.append(f"Deployed {target.name} to {target} (chmod {_SUPERVISOR_MODE:o})")
+    logger.info("Deployed %s to %s (mode %o)", target.name, target, _SUPERVISOR_MODE)
+    return True
 
 
 def deploy_ccy_supervisor_if_enabled(
@@ -177,26 +207,24 @@ def deploy_ccy_supervisor_if_enabled(
     # copy is physically needed (covers the self-install no-op below too).
     result.recommend_enable = flag is None
 
-    target = target_ccy_dir / SUPERVISOR_SCRIPT_NAME
-    if target.exists() and source.resolve() == target.resolve():
-        # Self-install: source and target are the same file — no copy needed. We
-        # still fall through to arming so the env is enabled uniformly.
-        result.messages.append(
-            "Supervisor already in place (self-install; source == target); no copy"
-        )
-        logger.info("ccy supervisor source == target (%s); no copy needed", target)
-    else:
-        target.write_bytes(source.read_bytes())
-        target.chmod(_SUPERVISOR_MODE)
-        result.deployed = True
-        result.messages.append(
-            f"Deployed {SUPERVISOR_SCRIPT_NAME} to {target} (chmod {_SUPERVISOR_MODE:o})"
-        )
-        logger.info("Deployed %s to %s (mode %o)", SUPERVISOR_SCRIPT_NAME, target, _SUPERVISOR_MODE)
+    # Arming points ccy.env at the launcher, so without it the supervisor would be
+    # armed on a path that does not exist (or, worse, on the bare script, which
+    # crashes on an unsupported Python). Skip the whole deploy instead.
+    launcher_source = ccy_launcher_source_path(daemon_root)
+    if not launcher_source.is_file():
+        result.messages.append(f"Supervisor launcher not found at {launcher_source} (skipped)")
+        logger.warning("ccy launcher source missing at %s; skipping deploy", launcher_source)
+        return result
+
+    # A self-install source == target is a no-op copy; arming still runs so the
+    # env is enabled uniformly.
+    copied_script = _copy_asset(source, target_ccy_dir / SUPERVISOR_SCRIPT_NAME, result)
+    copied_launcher = _copy_asset(launcher_source, target_ccy_dir / SUPERVISOR_LAUNCHER_NAME, result)
+    result.deployed = copied_script or copied_launcher
 
     # Arming is the whole point: a deployed-but-unarmed supervisor is inert
     # because the launcher only wraps `claude` when ccy.env exports the wrapper.
-    result.armed, arm_message = _arm_ccy_supervisor(target_ccy_dir)
+    result.armed, result.wrapper_migrated, arm_message = _arm_ccy_supervisor(target_ccy_dir)
     result.messages.append(arm_message)
 
     # Ensure the supervisor files are TRACKABLE — a blanket-ignore ccy dir would
@@ -205,28 +233,47 @@ def deploy_ccy_supervisor_if_enabled(
     result.messages.append(gitignore_message)
     result.messages.append(
         "Commit .claude/ccy/{"
-        f"{_GITIGNORE_NAME},{CCY_ENV_NAME},{SUPERVISOR_SCRIPT_NAME}"
+        f"{_GITIGNORE_NAME},{CCY_ENV_NAME},{SUPERVISOR_SCRIPT_NAME},{SUPERVISOR_LAUNCHER_NAME}"
         "} so teammates get the supervisor system"
     )
     return result
 
 
-def _arm_ccy_supervisor(target_ccy_dir: Path) -> tuple[bool, str]:
+def _migrate_wrapper_to_launcher(content: str) -> str:
+    """Repoint every ACTIVE wrapper export from the bare script to the launcher.
+
+    Only non-comment lines that export ``CCY_CLAUDE_WRAPPER`` and name
+    ``claude-supervise.py`` change; every other byte is preserved. The launcher
+    passes all arguments through, so the rewritten line means the same thing on
+    a supported Python and degrades safely on an unsupported one.
+    """
+    lines = content.split("\n")
+    for index, line in enumerate(lines):
+        if line.lstrip().startswith("#"):
+            continue
+        if _WRAPPER_EXPORT_KEY in line and SUPERVISOR_SCRIPT_NAME in line:
+            lines[index] = line.replace(SUPERVISOR_SCRIPT_NAME, SUPERVISOR_LAUNCHER_NAME)
+    return "\n".join(lines)
+
+
+def _arm_ccy_supervisor(target_ccy_dir: Path) -> tuple[bool, bool, str]:
     """Ensure ``ccy.env`` exports an armed ``CCY_CLAUDE_WRAPPER``, idempotently.
 
     Behaviour:
 
     - ``ccy.env`` absent → create it with a header + the armed wrapper block.
     - ``ccy.env`` present WITHOUT the wrapper key → append the armed block.
-    - ``ccy.env`` present WITH the wrapper key (set OR commented out) → leave it
-      untouched; the user has a stance on arming and we never override it.
+    - ``ccy.env`` present WITH the wrapper key (set OR commented out) → leave the
+      user's stance on arming alone, with one exception: an ACTIVE line that
+      still execs the bare ``claude-supervise.py`` is repointed at the launcher,
+      so existing installs stop crashing on an unsupported Python.
 
     Args:
         target_ccy_dir: The target project's ``.claude/ccy/`` directory.
 
     Returns:
-        ``(armed, message)`` where ``armed`` is True only when this call wrote
-        the wrapper export.
+        ``(armed, migrated, message)``: ``armed`` is True only when this call
+        wrote the wrapper export; ``migrated`` only when it repointed one.
     """
     env_path = target_ccy_dir / CCY_ENV_NAME
     armed_block = f"{_ARMED_WRAPPER_COMMENT}{_ARMED_WRAPPER_LINE}\n"
@@ -234,18 +281,32 @@ def _arm_ccy_supervisor(target_ccy_dir: Path) -> tuple[bool, str]:
     if env_path.is_file():
         content = env_path.read_text(encoding="utf-8")
         if _WRAPPER_EXPORT_KEY in content:
+            migrated_content = _migrate_wrapper_to_launcher(content)
+            if migrated_content != content:
+                env_path.write_text(migrated_content, encoding="utf-8")
+                logger.info("Migrated %s in %s to the launcher", _WRAPPER_EXPORT_KEY, env_path)
+                return (
+                    False,
+                    True,
+                    f"Migrated {_WRAPPER_EXPORT_KEY} in {env_path} to the "
+                    f"{SUPERVISOR_LAUNCHER_NAME} launcher",
+                )
             logger.info(
                 "ccy.env already references %s at %s; left untouched", _WRAPPER_EXPORT_KEY, env_path
             )
-            return False, f"ccy.env already configures {_WRAPPER_EXPORT_KEY}; left untouched"
+            return (
+                False,
+                False,
+                f"ccy.env already configures {_WRAPPER_EXPORT_KEY}; left untouched",
+            )
         new_content = f"{content.rstrip(chr(10))}\n\n{armed_block}"
         env_path.write_text(new_content, encoding="utf-8")
         logger.info("Appended armed %s to existing %s", _WRAPPER_EXPORT_KEY, env_path)
-        return True, f"Armed supervisor: appended {_WRAPPER_EXPORT_KEY} to {env_path}"
+        return True, False, f"Armed supervisor: appended {_WRAPPER_EXPORT_KEY} to {env_path}"
 
     env_path.write_text(f"{_FRESH_ENV_HEADER}{armed_block}", encoding="utf-8")
     logger.info("Created armed %s at %s", CCY_ENV_NAME, env_path)
-    return True, f"Armed supervisor: created {env_path}"
+    return True, False, f"Armed supervisor: created {env_path}"
 
 
 def _ensure_ccy_gitignore_allows(target_ccy_dir: Path) -> tuple[bool, str]:

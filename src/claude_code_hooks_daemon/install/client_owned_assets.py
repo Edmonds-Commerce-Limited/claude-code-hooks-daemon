@@ -189,6 +189,19 @@ CLIENT_OWNED_ASSETS: Final[tuple[ClientOwnedAsset, ...]] = (
         ),
     ),
     ClientOwnedAsset(
+        source=".claude/ccy/claude-supervise",
+        deployed_to=".claude/ccy/claude-supervise",
+        language=AssetLanguage.SHELL,
+        deployed_by="ccy_supervisor",
+        why=(
+            "The POSIX shell launcher ccy.env's CCY_CLAUDE_WRAPPER execs. It runs "
+            "before Python parses the supervisor, so an unsupported system Python "
+            "(older than 3.11) gets a loud warning and an unsupervised claude "
+            "instead of an import-time crash that stops Claude Code opening. "
+            "Committed beside the supervisor for the same reasons."
+        ),
+    ),
+    ClientOwnedAsset(
         source=".claude/ccy/claude-supervise.py",
         deployed_to=".claude/ccy/claude-supervise.py",
         language=AssetLanguage.PYTHON,

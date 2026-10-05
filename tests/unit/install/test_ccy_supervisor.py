@@ -12,7 +12,9 @@ from pathlib import Path
 
 from claude_code_hooks_daemon.install.ccy_supervisor import (
     CCY_ENV_NAME,
+    SUPERVISOR_LAUNCHER_NAME,
     SUPERVISOR_SCRIPT_NAME,
+    ccy_launcher_source_path,
     ccy_supervisor_source_path,
     deploy_ccy_supervisor_if_enabled,
 )
@@ -20,13 +22,15 @@ from claude_code_hooks_daemon.install.ccy_supervisor import (
 _WRAPPER_KEY = "CCY_CLAUDE_WRAPPER"
 
 _SOURCE_CONTENT = "#!/usr/bin/env python3\n# canonical supervisor stub\nprint('hi')\n"
+_LAUNCHER_CONTENT = "#!/bin/sh\n# canonical launcher stub\n"
 
 
 def _make_source(daemon_root: Path, content: str = _SOURCE_CONTENT) -> Path:
-    """Create ``<daemon_root>/.claude/ccy/claude-supervise.py`` with content."""
+    """Create the daemon clone's supervisor AND its launcher; return the supervisor."""
     src = daemon_root / ".claude" / "ccy" / SUPERVISOR_SCRIPT_NAME
     src.parent.mkdir(parents=True, exist_ok=True)
     src.write_text(content)
+    (src.parent / SUPERVISOR_LAUNCHER_NAME).write_text(_LAUNCHER_CONTENT)
     return src
 
 
@@ -62,6 +66,37 @@ class TestDeployCcySupervisorIfEnabled:
         assert target.read_text() == _SOURCE_CONTENT
         assert stat.S_IMODE(target.stat().st_mode) == 0o755
         assert result.recommend_enable is False
+
+    def test_deploys_the_launcher_beside_the_supervisor(self, tmp_path: Path) -> None:
+        daemon_root = tmp_path / "daemon"
+        project_root = tmp_path / "project"
+        _make_source(daemon_root)
+        _make_target_ccy(project_root)
+        config_path = _write_config(project_root, "ccy:\n  deploy_supervisor: true\n")
+
+        deploy_ccy_supervisor_if_enabled(daemon_root, project_root, config_path)
+
+        launcher = project_root / ".claude" / "ccy" / SUPERVISOR_LAUNCHER_NAME
+        assert launcher.read_text() == _LAUNCHER_CONTENT
+        assert stat.S_IMODE(launcher.stat().st_mode) == 0o755
+
+    def test_missing_launcher_source_skips_instead_of_arming_the_bare_script(
+        self, tmp_path: Path
+    ) -> None:
+        """Arming without the launcher would recreate the unsupported-Python crash."""
+        daemon_root = tmp_path / "daemon"
+        project_root = tmp_path / "project"
+        _make_source(daemon_root)
+        ccy_launcher_source_path(daemon_root).unlink()
+        ccy = _make_target_ccy(project_root)
+        config_path = _write_config(project_root, "ccy:\n  deploy_supervisor: true\n")
+
+        result = deploy_ccy_supervisor_if_enabled(daemon_root, project_root, config_path)
+
+        assert result.deployed is False
+        assert result.armed is False
+        assert not (ccy / CCY_ENV_NAME).exists()
+        assert any("launcher" in message for message in result.messages)
 
     def test_flag_false_skips(self, tmp_path: Path) -> None:
         daemon_root = tmp_path / "daemon"
@@ -280,7 +315,7 @@ class TestArmCcySupervisor:
         ccy = root / ".claude" / "ccy"
         env_file = ccy / CCY_ENV_NAME
         tracked = (
-            'export CCY_CLAUDE_WRAPPER="${CCY_CLAUDE_WRAPPER:-/w/claude-supervise.py --arm --}"\n'
+            'export CCY_CLAUDE_WRAPPER="${CCY_CLAUDE_WRAPPER:-/w/claude-supervise --arm --}"\n'
         )
         env_file.write_text(tracked)
         config_path = _write_config(root, "ccy:\n  deploy_supervisor: true\n")
@@ -289,7 +324,50 @@ class TestArmCcySupervisor:
 
         assert result.deployed is False  # script self-install no-op
         assert result.armed is False  # env already configured
+        assert result.wrapper_migrated is False
         assert env_file.read_text() == tracked
+
+    def test_existing_install_is_migrated_from_the_bare_script_to_the_launcher(
+        self, tmp_path: Path
+    ) -> None:
+        """An upgrade must repoint a wrapper that execs claude-supervise.py directly."""
+        daemon_root = tmp_path / "daemon"
+        project_root = tmp_path / "project"
+        _make_source(daemon_root)
+        ccy = _make_target_ccy(project_root)
+        env_file = ccy / CCY_ENV_NAME
+        env_file.write_text(
+            "export FOO=bar\n"
+            "# was: claude-supervise.py --arm --\n"
+            'export CCY_CLAUDE_WRAPPER="${CCY_CLAUDE_WRAPPER:-/w/claude-supervise.py --arm --}"\n'
+        )
+        config_path = _write_config(project_root, "ccy:\n  deploy_supervisor: true\n")
+
+        result = deploy_ccy_supervisor_if_enabled(daemon_root, project_root, config_path)
+
+        assert result.wrapper_migrated is True
+        assert env_file.read_text() == (
+            "export FOO=bar\n"
+            "# was: claude-supervise.py --arm --\n"
+            'export CCY_CLAUDE_WRAPPER="${CCY_CLAUDE_WRAPPER:-/w/claude-supervise --arm --}"\n'
+        )
+        again = deploy_ccy_supervisor_if_enabled(daemon_root, project_root, config_path)
+        assert again.wrapper_migrated is False
+
+    def test_a_commented_out_wrapper_is_not_migrated(self, tmp_path: Path) -> None:
+        daemon_root = tmp_path / "daemon"
+        project_root = tmp_path / "project"
+        _make_source(daemon_root)
+        ccy = _make_target_ccy(project_root)
+        env_file = ccy / CCY_ENV_NAME
+        disabled = '# export CCY_CLAUDE_WRAPPER="/x/claude-supervise.py --arm --"\n'
+        env_file.write_text(disabled)
+        config_path = _write_config(project_root, "ccy:\n  deploy_supervisor: true\n")
+
+        result = deploy_ccy_supervisor_if_enabled(daemon_root, project_root, config_path)
+
+        assert result.wrapper_migrated is False
+        assert env_file.read_text() == disabled
 
     def test_generated_wrapper_sources_to_absolute_supervisor_path(self, tmp_path: Path) -> None:
         """The armed line must resolve, in bash, to an absolute armed wrapper.
@@ -320,7 +398,7 @@ class TestArmCcySupervisor:
             text=True,
             check=True,
         )
-        expected = f"{ccy.resolve()}/{SUPERVISOR_SCRIPT_NAME} --arm --"
+        expected = f"{ccy.resolve()}/{SUPERVISOR_LAUNCHER_NAME} --arm --"
         assert proc.stdout == expected
 
 
@@ -387,7 +465,10 @@ class TestEnsureCcyFilesTracked:
         _make_source(daemon_root)
         ccy = _make_target_ccy(project_root)
         gitignore = ccy / ".gitignore"
-        whitelisted = f"*\n!.gitignore\n!Dockerfile\n!{CCY_ENV_NAME}\n!{SUPERVISOR_SCRIPT_NAME}\n"
+        whitelisted = (
+            f"*\n!.gitignore\n!Dockerfile\n!{CCY_ENV_NAME}\n"
+            f"!{SUPERVISOR_SCRIPT_NAME}\n!{SUPERVISOR_LAUNCHER_NAME}\n"
+        )
         gitignore.write_text(whitelisted)
         config_path = _write_config(project_root, "ccy:\n  deploy_supervisor: true\n")
 
@@ -423,7 +504,7 @@ class TestEnsureCcyFilesTracked:
         deploy_ccy_supervisor_if_enabled(daemon_root, project_root, config_path)
 
         # git check-ignore exits 0 when the path IS ignored, 1 when it is NOT.
-        for name in (SUPERVISOR_SCRIPT_NAME, CCY_ENV_NAME):
+        for name in (SUPERVISOR_SCRIPT_NAME, SUPERVISOR_LAUNCHER_NAME, CCY_ENV_NAME):
             check = subprocess.run(
                 ["git", "-C", str(project_root), "check-ignore", "-q", f".claude/ccy/{name}"],
             )
@@ -446,6 +527,13 @@ class TestCcySupervisorSourcePath:
         """
         repo_root = Path(__file__).resolve().parents[3]
         assert ccy_supervisor_source_path(repo_root).is_file()
+
+    def test_launcher_source_path_shape_and_real_file(self, tmp_path: Path) -> None:
+        assert (
+            ccy_launcher_source_path(tmp_path)
+            == tmp_path / ".claude" / "ccy" / SUPERVISOR_LAUNCHER_NAME
+        )
+        assert ccy_launcher_source_path(Path(__file__).resolve().parents[3]).is_file()
 
     def test_deploys_the_real_canonical_supervisor(self, tmp_path: Path) -> None:
         """End-to-end: the REAL 32K supervisor deploys from this repo into a client.
