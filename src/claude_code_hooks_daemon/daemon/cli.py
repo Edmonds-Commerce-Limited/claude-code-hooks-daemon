@@ -6265,10 +6265,14 @@ def cmd_test_project_handlers(args: argparse.Namespace) -> int:
         return 1
 
     # Build pytest command using current Python interpreter
+    # CI runs the bare `pytest` entry-point script, which does NOT put the
+    # working directory on sys.path (`python -m pytest` does), so the two see
+    # different import failures (N260). Run the venv's script when it exists.
+    pytest_script = Path(sys.executable).parent / _PYTEST_MODULE
+    pytest_launch = [str(pytest_script)] if pytest_script.is_file() else ["-m", _PYTEST_MODULE]
     cmd = [
         sys.executable,
-        "-m",
-        _PYTEST_MODULE,
+        *pytest_launch,
         str(handlers_path),
         "--import-mode=importlib",
         # `pyproject.toml`'s `addopts` force-loads the daemon's own whole-suite

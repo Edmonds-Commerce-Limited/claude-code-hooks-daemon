@@ -194,11 +194,14 @@ def resolve_configured_patterns() -> tuple[str, ...]:
     if _CONFIGURED_PATTERNS_RESOLVED:
         return _CONFIGURED_PATTERNS
 
-    _CONFIGURED_PATTERNS_RESOLVED = True
     from claude_code_hooks_daemon.core.project_context import ProjectContext
 
+    # Not latched before init: a call that precedes init returns the defaults
+    # without caching them, so the configured extra paths are picked up later.
     if not ProjectContext.is_initialized():
         return _CONFIGURED_PATTERNS
+
+    _CONFIGURED_PATTERNS_RESOLVED = True
 
     try:
         from claude_code_hooks_daemon.config.models import Config, handler_options
