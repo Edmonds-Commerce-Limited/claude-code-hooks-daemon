@@ -135,7 +135,8 @@ already-upgraded clients is a short note, not a project.
 - [x] An upgrade from v3.67.0 on an `init minimal` fixture prints every
   handler that stops running, by name.
 - [x] `config_diff_summary` reflects real config changes.
-- [x] The Task 1.3 regression test is green, and was red before Task 1.1.
+- [ ] The Task 1.3 regression test is green, and was red before Task 1.1.
+  (Green on the branch; the red run before Task 1.1 was not captured.)
 - [x] The client remedy note is published.
 
 ## Delivery & Milestones
