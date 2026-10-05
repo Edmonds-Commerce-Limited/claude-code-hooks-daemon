@@ -1,4 +1,4 @@
-# The upgrade names every handler it stops or starts running, and a remedy for projects already upgraded
+# Callout: the upgrade names every handler it stops or starts running, and a remedy for projects already upgraded
 
 **Plan**: 00493
 **Audience**: operators
