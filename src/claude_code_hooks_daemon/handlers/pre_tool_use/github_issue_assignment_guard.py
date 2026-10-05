@@ -73,7 +73,7 @@ from claude_code_hooks_daemon.utils.github_issue_validity import (
     ValidityCheck,
     ValidityReport,
     Verdict,
-    approved_authors_from_options,
+    approved_authors_problem,
     make_gh_runner,
 )
 from claude_code_hooks_daemon.utils.plan_fact_check import plan_folder_match
@@ -183,10 +183,9 @@ class GithubIssueAssignmentGuardHandler(PreToolUseHandlerBase):
     def validate_options(options: Mapping[str, Any]) -> dict[str, str]:
         """Refuse a malformed option value; the handler stays on its default."""
         problems: dict[str, str] = {}
-        try:
-            approved_authors_from_options(options)
-        except ValueError as exc:
-            problems[APPROVED_AUTHORS_OPTION] = str(exc)
+        authors_problem = approved_authors_problem(options)
+        if authors_problem is not None:
+            problems[APPROVED_AUTHORS_OPTION] = authors_problem
         if AUTO_CLAIM_OPTION in options and not isinstance(options[AUTO_CLAIM_OPTION], bool):
             problems[AUTO_CLAIM_OPTION] = f"{AUTO_CLAIM_OPTION} must be true or false"
         return problems
@@ -196,12 +195,13 @@ class GithubIssueAssignmentGuardHandler(PreToolUseHandlerBase):
     # ------------------------------------------------------------------
 
     def _root(self) -> Path | None:
-        if self._project_root is not None:
-            return self._project_root
-        try:
-            return ProjectContext.project_root()
-        except RuntimeError:
-            return None
+        root = self._project_root
+        if root is None:
+            try:
+                root = ProjectContext.project_root()
+            except RuntimeError as exc:
+                _LOGGER.warning("github_issue_assignment_guard: no project root: %s", exc)
+        return root
 
     def _issues_in_header(self, plan_md: Path) -> tuple[int, ...]:
         try:

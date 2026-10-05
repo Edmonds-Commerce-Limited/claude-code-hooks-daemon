@@ -38,6 +38,7 @@ because dropping an assignee could turn "assigned to someone else" into
 from __future__ import annotations
 
 import json
+import logging
 import re
 import subprocess  # nosec B404 - trusted system tool (gh), list form, no shell
 import time
@@ -50,6 +51,8 @@ from typing import Any, Final, Protocol
 from pydantic import BaseModel, ValidationError
 
 from claude_code_hooks_daemon.constants import Timeout
+
+_LOGGER = logging.getLogger(__name__)
 
 #: Shown in place of a login that does not match GitHub's login grammar.
 UNRECOGNISED_LOGIN: Final[str] = "<unrecognised login>"
@@ -297,18 +300,25 @@ class AuthorWhitelistCheck:
         )
 
 
+def approved_authors_problem(options: Mapping[str, Any]) -> str | None:
+    """What is wrong with the approved-author option, or None when it is fine."""
+    value = options.get(APPROVED_AUTHORS_OPTION)
+    if value is None or (isinstance(value, list) and all(isinstance(i, str) for i in value)):
+        return None
+    return f"{APPROVED_AUTHORS_OPTION} must be a list of GitHub logins"
+
+
 def approved_authors_from_options(options: Mapping[str, Any]) -> tuple[str, ...] | None:
     """The approved-author list from handler options; None when absent.
 
     Raises:
         ValueError: The option is present but is not a list of strings.
     """
-    if APPROVED_AUTHORS_OPTION not in options:
-        return None
-    value = options[APPROVED_AUTHORS_OPTION]
-    if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
-        raise ValueError(f"{APPROVED_AUTHORS_OPTION} must be a list of GitHub logins")
-    return tuple(value)
+    problem = approved_authors_problem(options)
+    if problem is not None:
+        raise ValueError(problem)
+    value = options.get(APPROVED_AUTHORS_OPTION)
+    return None if value is None else tuple(value)
 
 
 class _Login(BaseModel):
@@ -400,15 +410,20 @@ class IssueValidityService:
         if self._identity_failed_until > now:
             return None
         self._asked = True
+        login: str | None = None
         try:
-            login = self._runner(["api", "user", "--jq", ".login"]).strip()
-        except GhError:
+            candidate = self._runner(["api", "user", "--jq", ".login"]).strip()
+        except GhError as exc:
+            _LOGGER.info("gh could not resolve the signed-in login: %s", exc)
+        else:
+            if _LOGIN_PATTERN.match(candidate):
+                login = candidate
+            else:
+                _LOGGER.info("gh returned an unreadable login; ignoring it")
+        if login is None:
             self._identity_failed_until = now + self._failure_ttl
-            return None
-        if not _LOGIN_PATTERN.match(login):
-            self._identity_failed_until = now + self._failure_ttl
-            return None
-        self._identity_login = login
+        else:
+            self._identity_login = login
         return login
 
     def _facts_for(self, number: int) -> tuple[IssueFacts | None, str | None]:

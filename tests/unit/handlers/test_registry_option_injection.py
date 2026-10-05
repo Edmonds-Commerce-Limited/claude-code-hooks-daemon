@@ -282,6 +282,9 @@ _READ_OUTSIDE_THE_HANDLER: dict[tuple[str, str], str] = {
 _VALID_NON_DEFAULTS: dict[tuple[str, str], object] = {
     ("bash_safe_mode", "mode"): "warn",
     ("bash_safe_mode", "exempt_patterns"): [r"^zzqx-exempt\b"],
+    # validate_options refuses anything but a list of logins and a bool
+    ("github_issue_assignment_guard", "approved_issue_authors"): ["zzqx-login"],
+    ("github_issue_assignment_guard", "auto_claim"): True,
 }
 
 

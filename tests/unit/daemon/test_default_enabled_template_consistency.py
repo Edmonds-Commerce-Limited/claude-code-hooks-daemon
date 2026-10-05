@@ -58,6 +58,9 @@ _EXPECTED_OPT_IN_CONFIG_KEYS = {
     # Plan 00480 Task 4.1: feeds the debouncer, but delivery of the fact check
     # is not built yet, so it ships off until Task 4.3 lands.
     "plan_fact_check_feed",
+    # Plan 00490: opt-in until it has run in the daemon's own repository for a
+    # while; only plans that record `**GitHub Issue**: #N` are ever judged.
+    "github_issue_assignment_guard",
 }
 
 
