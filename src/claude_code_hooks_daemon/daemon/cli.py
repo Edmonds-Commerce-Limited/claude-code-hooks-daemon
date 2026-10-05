@@ -4259,6 +4259,43 @@ def cmd_check_config_migrations(args: argparse.Namespace) -> int:
     return 1 if has_issues else 0
 
 
+def cmd_check_effective_handlers(args: argparse.Namespace) -> int:
+    """List the handlers an upgrade starts or stops running for this config (Plan 00493).
+
+    Args:
+        args: Parsed CLI arguments with from_version, to_version, config, format.
+
+    Returns:
+        0 if the effective handler set is unchanged, 1 if any handler starts
+        or stops, 2 on error.
+    """
+    from claude_code_hooks_daemon.install.config_cli import run_check_effective_handlers
+
+    if args.config:
+        config_path = Path(args.config)
+    else:
+        config_path = (
+            get_project_path(getattr(args, "project_root", None)) / ".claude" / "hooks-daemon.yaml"
+        )
+
+    try:
+        result = run_check_effective_handlers(
+            from_version=args.from_version,
+            to_version=args.to_version,
+            config_path=config_path,
+            output_format=args.format,
+        )
+    except (FileNotFoundError, ValueError) as e:
+        print(f"ERROR: {e}", file=sys.stderr)
+        return 2
+
+    if args.format == "json":
+        print(json.dumps(result, indent=2))
+    elif result["has_changes"]:
+        print(result["text"])
+    return 1 if result["has_changes"] else 0
+
+
 def cmd_audit_handler_keys(args: argparse.Namespace) -> int:
     """Report handler keys the registry does not know for their event (Plan 00362).
 
@@ -10247,6 +10284,31 @@ def build_parser() -> argparse.ArgumentParser:
         parser_check_migrations, default_subdir=_REPORT_OFFLOAD_CONFIG_SUBDIR
     )
     parser_check_migrations.set_defaults(func=cmd_check_config_migrations)
+
+    # check-effective-handlers command (Plan 00493)
+    parser_effective = subparsers.add_parser(
+        "check-effective-handlers",
+        help="List handlers an upgrade starts or stops running for this project's config",
+    )
+    parser_effective.add_argument(
+        "--from", dest="from_version", required=True, metavar="VERSION", help="Version upgraded from"
+    )
+    parser_effective.add_argument(
+        "--to", dest="to_version", required=True, metavar="VERSION", help="Version upgraded to"
+    )
+    parser_effective.add_argument(
+        "--config",
+        metavar="PATH",
+        default=None,
+        help="Path to hooks-daemon.yaml (default: auto-detect from project root)",
+    )
+    parser_effective.add_argument(
+        "--format",
+        choices=["text", "json"],
+        default="text",
+        help="Output format: text (default) or json",
+    )
+    parser_effective.set_defaults(func=cmd_check_effective_handlers)
 
     # audit-handler-keys command (Plan 00362)
     parser_audit_keys = subparsers.add_parser(

@@ -25,6 +25,11 @@ from claude_code_hooks_daemon.install.config_migrations import (
     list_known_versions as _list_known_versions,
 )
 from claude_code_hooks_daemon.install.config_validator import ConfigValidator
+from claude_code_hooks_daemon.install.effective_handlers import (
+    effective_handler_changes,
+    format_changes,
+    restore_snippet,
+)
 from claude_code_hooks_daemon.install.handler_key_audit import (
     applied_relocations,
     audit_handler_keys,
@@ -322,6 +327,46 @@ def run_check_worktree_seed(
         ),
         **({"text": format_report_for_llm(report)} if output_format == "text" else {}),
     }
+
+
+def run_check_effective_handlers(
+    from_version: str,
+    to_version: str,
+    config_path: Path,
+    output_format: str = "text",
+) -> dict[str, Any]:
+    """Report the handlers an upgrade starts or stops running for this config.
+
+    Plan 00493. Unlike :func:`run_check_config_migrations` this reads no
+    manifest: the answer is the project's own config resolved under the old
+    and the new version's rules, so it holds for a change that leaves the
+    config file untouched.
+
+    Args:
+        from_version: Version the project upgrades from.
+        to_version: Version it upgrades to.
+        config_path: Path to the project's hooks-daemon.yaml.
+        output_format: 'text' adds a ``text`` report; 'json' leaves it out.
+
+    Returns:
+        Dictionary with ``has_changes``, ``changes``, ``restore_snippet`` and
+        ``text`` (if format='text').
+
+    Raises:
+        FileNotFoundError: If the config file doesn't exist.
+        ValueError: If the config is not a YAML mapping or a version is invalid.
+    """
+    changes = effective_handler_changes(_load_yaml(config_path), from_version, to_version)
+    result: dict[str, Any] = {
+        "from_version": from_version,
+        "to_version": to_version,
+        "has_changes": bool(changes),
+        "changes": [c.to_dict() for c in changes],
+        "restore_snippet": restore_snippet(changes),
+    }
+    if output_format == "text":
+        result["text"] = format_changes(changes, from_version, to_version) if changes else ""
+    return result
 
 
 def run_audit_handler_keys(
