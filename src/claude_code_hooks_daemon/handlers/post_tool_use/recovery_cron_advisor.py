@@ -515,10 +515,6 @@ class RecoveryCronAdvisorHandler(PostToolUseHandlerBase):
         # advice state a call records is rolled back in commit_side_effects()
         # if the Write/Edit that triggered it ends up denied.
         self._journal = SideEffectJournal()
-        # Phase computed in matches() and reused in handle() (avoids running the
-        # detection twice per event).  Set per-call; never relied on across
-        # events.
-        self._cached_phase: LifecyclePhase | None = None
 
     def get_default_enabled(self) -> bool:
         """Opt-OUT handler — ON by default (Plan 00139 follow-up).
@@ -561,22 +557,16 @@ class RecoveryCronAdvisorHandler(PostToolUseHandlerBase):
         advice is to establish the failsafe cron the pause just removed.
         """
         if hook_is_usage_paused(hook_input):
-            self._cached_phase = None
             return False
-        self._cached_phase = _detect_lifecycle_phase(hook_input, self._plan_dir())
-        return self._cached_phase is not None
+        return _detect_lifecycle_phase(hook_input, self._plan_dir()) is not None
 
     def _resolve_phase(self, hook_input: dict[str, Any]) -> LifecyclePhase | None:
-        """Return the phase for this event, reusing the matches() cache if set.
+        """Detect the phase for this event.
 
-        Consumes the cache (resets it to None) so a stale value from a prior
-        event can never leak into a later handle() call invoked without a
-        preceding matches().
+        Nothing is carried from matches() to handle(): the handler is a
+        daemon-lifetime singleton served from a thread pool, so per-call state
+        parked on it could be swapped by a concurrent request (ledger N23).
         """
-        cached = self._cached_phase
-        self._cached_phase = None
-        if cached is not None:
-            return cached
         return _detect_lifecycle_phase(hook_input, self._plan_dir())
 
     def _should_advise_progress(self, plan_folder: str) -> bool:
