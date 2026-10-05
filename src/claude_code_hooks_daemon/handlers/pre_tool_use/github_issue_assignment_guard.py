@@ -195,13 +195,9 @@ class GithubIssueAssignmentGuardHandler(PreToolUseHandlerBase):
     # ------------------------------------------------------------------
 
     def _root(self) -> Path | None:
-        root = self._project_root
-        if root is None:
-            try:
-                root = ProjectContext.project_root()
-            except RuntimeError as exc:
-                _LOGGER.warning("github_issue_assignment_guard: no project root: %s", exc)
-        return root
+        # ProjectContext is initialised before any handler runs; an uninitialised
+        # one is a daemon defect and fails fast rather than being judged around.
+        return self._project_root or ProjectContext.project_root()
 
     def _issues_in_header(self, plan_md: Path) -> tuple[int, ...]:
         try:

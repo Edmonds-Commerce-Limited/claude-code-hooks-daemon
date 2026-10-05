@@ -415,15 +415,14 @@ class IssueValidityService:
             candidate = self._runner(["api", "user", "--jq", ".login"]).strip()
         except GhError as exc:
             _LOGGER.info("gh could not resolve the signed-in login: %s", exc)
+            self._identity_failed_until = now + self._failure_ttl
         else:
             if _LOGIN_PATTERN.match(candidate):
                 login = candidate
+                self._identity_login = login
             else:
                 _LOGGER.info("gh returned an unreadable login; ignoring it")
-        if login is None:
-            self._identity_failed_until = now + self._failure_ttl
-        else:
-            self._identity_login = login
+                self._identity_failed_until = now + self._failure_ttl
         return login
 
     def _facts_for(self, number: int) -> tuple[IssueFacts | None, str | None]:
