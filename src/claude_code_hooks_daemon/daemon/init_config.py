@@ -137,6 +137,7 @@ class ConfigTemplate:
             "    sed_blocker: {enabled: true, priority: 10}       # Block sed (use Edit tool instead)\n"
             "    pip_break_system: {enabled: true, priority: 10}  # Block pip --break-system-packages\n"
             "    sudo_pip: {enabled: true, priority: 10}          # Block sudo pip\n"
+            "    host_command_guard: {enabled: true, priority: 10}  # Block docker host-root mounts, gh auth token; human only: non-PyPI pip index, crontab -r\n"
             "    curl_pipe_shell: {enabled: true, priority: 10}   # Block curl | bash patterns\n"
             "    lock_file_edit_blocker: {enabled: true, priority: 10}  # Block direct editing of package manager lock files\n"
             # On by default (Plan 00117): prefix-positive gate on AskUserQuestion

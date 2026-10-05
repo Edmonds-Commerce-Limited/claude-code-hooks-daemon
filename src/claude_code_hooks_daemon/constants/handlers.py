@@ -81,6 +81,14 @@ class HandlerID:
         config_key="sudo_pip",
         display_name="block-sudo-pip",
     )
+    # Plan 00483 Task 2.2 (owner ruling A6): four commands whose reach goes past
+    # the project -- host-root container mounts, the GitHub token, a non-PyPI
+    # package index and a crontab wipe.
+    HOST_COMMAND_GUARD = HandlerIDMeta(
+        class_name="HostCommandGuardHandler",
+        config_key="host_command_guard",
+        display_name="host-command-guard",
+    )
     LOCK_FILE_EDIT_BLOCKER = HandlerIDMeta(
         class_name="LockFileEditBlockerHandler",
         config_key="lock_file_edit_blocker",

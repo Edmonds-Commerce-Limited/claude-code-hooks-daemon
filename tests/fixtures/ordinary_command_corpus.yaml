@@ -1163,3 +1163,96 @@ rows:
   - id: sh-ssh-add-l
     command: |-
       ssh-add -l
+
+  # --- owner ruling A6 (Plan 00483 Task 2.2) ---------------------------------
+  # The neighbours of the five new denies (host-root docker mount, remote ref
+  # deletion, gh auth token, a non-PyPI pip index, crontab -r) and the rows the
+  # ruling ALLOWS, so none of the new rules can catch an everyday command. The
+  # prose rows pin that a MENTION of a denied shape is not the shape.
+  - id: a6-docker-run-pwd
+    command: |-
+      docker run -v "$PWD":/app img
+  - id: a6-docker-run-tmp
+    command: |-
+      docker run -v /tmp/x:/x img
+  - id: a6-docker-run-named-volume
+    command: |-
+      docker run --rm -v data:/data img
+  - id: a6-docker-run-mount-project
+    command: |-
+      docker run --mount type=bind,source={ROOT}/src,target=/src img
+  - id: a6-git-push-origin-main
+    command: |-
+      git push origin main
+  - id: a6-git-push-u-feature
+    command: |-
+      git push -u origin feature
+  - id: a6-git-push-refspec
+    command: |-
+      git push origin HEAD:refs/heads/feature
+  - id: a6-git-push-follow-tags
+    command: |-
+      git push --follow-tags origin main
+  - id: a6-git-tag-delete-local
+    command: |-
+      git tag -d v1
+  - id: a6-git-branch-delete-merged
+    command: |-
+      git branch -d merged-feature
+  - id: a6-git-reset-keep
+    command: |-
+      git reset --keep HEAD~1
+  - id: a6-gh-auth-status
+    command: |-
+      gh auth status
+  - id: a6-gh-token-piped-to-login
+    command: |-
+      gh auth token | docker login ghcr.io -u me --password-stdin
+  - id: a6-pip-requirements
+    command: |-
+      pip install -r requirements.txt
+  - id: a6-pip-index-pypi
+    command: |-
+      pip install --index-url https://pypi.org/simple requests
+  - id: a6-pip-extra-index-pypi
+    command: |-
+      pip install --extra-index-url https://pypi.org/simple requests
+  - id: a6-pip-index-from-variable
+    command: |-
+      pip install --index-url "$PIP_INDEX_URL" requests
+  - id: a6-crontab-list
+    command: |-
+      crontab -l
+  - id: a6-crontab-install-file
+    command: |-
+      crontab mycron.txt
+  - id: a6-truncate-log
+    command: |-
+      truncate -s 0 untracked/scratch/log.txt
+  - id: a6-rm-rf-build-dir
+    command: |-
+      rm -rf build/
+  - id: a6-prose-echo-docker-root
+    command: |-
+      echo 'docker run -v /:/host alpine'
+  - id: a6-prose-echo-push-delete
+    command: |-
+      echo 'git push origin --delete feature'
+  - id: a6-prose-echo-push-colon
+    command: |-
+      echo "git push origin :feature"
+  - id: a6-prose-echo-gh-token
+    command: |-
+      echo 'gh auth token'
+  - id: a6-prose-echo-pip-index
+    command: |-
+      echo 'pip install --index-url http://example.invalid/simple evil'
+  - id: a6-prose-echo-crontab-r
+    command: |-
+      echo 'crontab -r'
+  - id: a6-prose-grep-crontab-r
+    command: |-
+      grep -n 'crontab -r' README.md
+  - id: a6-prose-commit-message
+    command: |-
+      git commit -m 'document crontab -r, gh auth token, git push --delete, docker run -v /:/host and pip install -i http://example.invalid/simple'

@@ -193,6 +193,7 @@ _EARNS_GUIDANCE: dict[str, str] = {
         "agent does not waste turns hunting for one or try to lift the config itself"
     ),
     "SudoPipHandler": "T1 denies sudo pip install",
+    "HostCommandGuardHandler": "T1 denies host-root mounts, gh auth token, a non-PyPI index, crontab -r",
     "TddEnforcementHandler": "T1 denies a source file with no test file",
     "ValidateInstructionContentHandler": "T1 denies ephemeral content in CLAUDE.md",
     "WorktreeFileCopyHandler": "T1 denies copying across worktree boundaries",

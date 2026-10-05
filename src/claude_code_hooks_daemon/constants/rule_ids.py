@@ -77,6 +77,9 @@ class RuleID:
     #: git filter-branch / filter-repo — rewrites every commit in the history.
     GIT_FILTER_HISTORY: str = "R-GIT-FILTER-HISTORY"
 
+    #: git push --delete / git push <remote> :<name> — deletes a ref on the remote; human only.
+    GIT_PUSH_DELETE_REMOTE: str = "R-GIT-PUSH-DELETE-REMOTE"
+
     # ------------------------------------------------------------------
     # sed_blocker handler
     # ------------------------------------------------------------------
@@ -132,6 +135,22 @@ class RuleID:
 
     #: pip install --break-system-packages — bypasses PEP 668 protection.
     PIP_BREAK_SYSTEM_PACKAGES: str = "R-PIP-BREAK-SYSTEM-PACKAGES"
+
+    # ------------------------------------------------------------------
+    # host_command_guard handler (Plan 00483 Task 2.2, owner ruling A6)
+    # ------------------------------------------------------------------
+
+    #: docker run -v /:/host — mounts the host root into a container.
+    DOCKER_ROOT_MOUNT: str = "R-DOCKER-ROOT-MOUNT"
+
+    #: gh auth token — prints the GitHub OAuth token into the transcript.
+    GH_AUTH_TOKEN: str = "R-GH-AUTH-TOKEN"
+
+    #: pip install --index-url / -i / --extra-index-url naming a non-PyPI index; human only.
+    PIP_NON_PYPI_INDEX: str = "R-PIP-NON-PYPI-INDEX"
+
+    #: crontab -r — deletes every scheduled job with no undo; human only.
+    CRONTAB_REMOVE: str = "R-CRONTAB-REMOVE"
 
     # ------------------------------------------------------------------
     # plan_time_estimates handler
