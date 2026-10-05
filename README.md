@@ -509,7 +509,9 @@ New team members get the same hooks automatically on first use. If your root `.g
 
 ## Requirements
 
-- Python 3.11, 3.12, or 3.13
+- Supported Python: 3.11 or later (tested on 3.11, 3.12 and 3.13). An older Python
+  never stops Claude Code opening; the daemon and ccy supervisor go inert and say
+  why. See [Supported Python](CLAUDE/LLM-INSTALL.md#supported-python)
 - Linux or macOS (Windows has limited support — Unix sockets)
 - Dependencies auto-installed: `pyyaml`, `pydantic`, `jsonschema`
 

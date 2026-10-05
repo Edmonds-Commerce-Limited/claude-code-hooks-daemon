@@ -12,6 +12,28 @@ Before running the installer, verify:
 4. **WEBFETCH**: If you fetched this via WebFetch, ensure you disabled summarisation. Missing steps cause failure.
 5. **SESSION RESTART**: After install completes, user MUST restart their Claude session for hooks to activate.
 
+### Supported Python
+
+**Supported Python: 3.11 or later** (tested on 3.11, 3.12 and 3.13). The floor is
+`requires-python` in `pyproject.toml`, the single source of truth; every other
+statement of it, including this one, follows that line. Python 3.10 and older is
+unsupported, and a distribution's system `python3` is often that old (RHEL-family
+9 ships 3.9).
+
+An unsupported Python never stops Claude Code from opening. The daemon and the ccy
+supervisor go **inert** and say so loudly instead:
+
+- **Hooks daemon**: `init.sh` reports that the Python found is too old, which
+  version it found, the version required, and to upgrade Python (or install
+  `python3.11`+ beside it), rather than a bare "not installed". Hooks stay
+  fail-open.
+- **ccy supervisor**: the `.claude/ccy/claude-supervise` shell launcher picks the
+  first interpreter that is 3.11 or later (`$CCY_PYTHON`, then `python3.14`,
+  `python3.13`, `python3.12`, `python3.11`, `python3`). With none, it prints a
+  multi-line warning on stderr, states that supervision is OFF, and starts
+  `claude` directly. The launcher contract is in
+  [development/CcySupervisor.md](development/CcySupervisor.md#supported-python-and-the-launcher).
+
 ---
 
 ## Quick Install (Recommended)
@@ -755,6 +777,7 @@ fact puts daemon-owned source inside your linters' default scope.
 | `.claude/skills/hooks-daemon/scripts/*.sh` | Skill helper scripts                                                                                                                                          | Claude Code only discovers skills under `.claude/skills/`                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | `CLAUDE/Plan/mkplan.bash`                  | Plan scaffolder (plan workflow only)                                                                                                                          | Runs inside your plan directory and is documented that way                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | `.claude/agents/hooks-daemon-*.md`         | Daemon-shipped sub-agents (config-gated: the plan-dedupe scout with the plan workflow, the opus-security quarantine agent via `agents.opus_security.enabled`) | Claude Code discovers sub-agents only under `.claude/agents/`; the `hooks-daemon-` prefix keeps them from colliding with your own agents, since a name clash there silently drops one definition instead of erroring. Managed by the agent-asset subsystem (`hooks-daemon agents list\|status\|install\|remove`): a pristine copy is refreshed on upgrade, a customised copy is never touched — but customising daemon-owned agents is strongly discouraged; copy the file under a name of your own instead |
+| `.claude/ccy/claude-supervise`             | POSIX shell launcher for the supervisor: needs Python 3.11 or later, otherwise warns and starts `claude` unsupervised (ccy projects only)                     | `exec`'d by the ccy launcher through `CCY_CLAUDE_WRAPPER`; committed so teammates get it                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | `.claude/ccy/claude-supervise.py`          | Standalone PTY supervisor (ccy projects only)                                                                                                                 | `exec`'d by the ccy launcher; committed so teammates get it                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 
 Every path in that table is asserted against
