@@ -22,7 +22,6 @@ Escape hatch (mirrors git_stash's ``MUST_STASH_BECAUSE=``):
 """
 
 import re
-import shlex
 from typing import Any, Final
 
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, HookInputField, Priority
@@ -31,6 +30,7 @@ from claude_code_hooks_daemon.core import Decision, GatingResult, get_data_layer
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.core.utils import get_bash_command
+from claude_code_hooks_daemon.utils import linear_shlex
 
 # Full first-fire teaching content (Plan 00116), preserving the pre-migration
 # handler's rich prose verbatim.
@@ -109,7 +109,7 @@ def _is_dangerous_root(token: str) -> bool:
 def _tokenize(segment: str) -> list[str]:
     """Tokenize a command segment, tolerating shell syntax shlex cannot parse."""
     try:
-        return shlex.split(segment)
+        return linear_shlex.split(segment)
     except ValueError:
         # Unbalanced quotes etc. — fall back to whitespace splitting so detection
         # still runs (fail-safe toward catching the dangerous case).

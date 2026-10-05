@@ -65,12 +65,12 @@ Deliberately a classifier, not a shell parser. It reports; the handler decides.
 from __future__ import annotations
 
 import re
-import shlex
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from typing import Final
 
+from claude_code_hooks_daemon.utils import linear_shlex
 from claude_code_hooks_daemon.utils.command_evasion import normalise_line_continuations
 from claude_code_hooks_daemon.utils.shell_segmentation import (
     END_OF_OPTIONS,
@@ -770,7 +770,7 @@ def _is_quoted_script(text: str) -> bool:
 def _unquote(text: str) -> str:
     """The value bash would pass, with quoting removed."""
     try:
-        parsed = shlex.split(text)
+        parsed = linear_shlex.split(text)
     except ValueError:
         return text.replace(_DOUBLE_QUOTE, "").replace(_SINGLE_QUOTE, "")
     return parsed[0] if parsed else ""

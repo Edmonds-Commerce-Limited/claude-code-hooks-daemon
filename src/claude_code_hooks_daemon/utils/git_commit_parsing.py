@@ -27,6 +27,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Final
 
+from claude_code_hooks_daemon.utils import linear_shlex
 from claude_code_hooks_daemon.utils.command_evasion import (
     SHELL_RESERVED_COMMAND_PREFIXES,
     git_subcommand_index,
@@ -120,7 +121,7 @@ _LONG_FLAGS_WITH_VALUE: Final[frozenset[str]] = frozenset(
 def tokenise_command(command: str) -> list[str]:
     """Shell-tokenise ``command``; empty list when unparseable."""
     try:
-        return shlex.split(command)
+        return linear_shlex.split(command)
     except ValueError:
         return []
 
@@ -429,7 +430,7 @@ def command_words(command: str) -> list[str]:
     """
     text = _lexable_text(command)
     try:
-        lexer = shlex.shlex(text, posix=True, punctuation_chars=True)
+        lexer = linear_shlex.LinearShlex(text, posix=True, punctuation_chars=True)
         lexer.whitespace_split = True
         # Comments were removed by _lexable_text, line by line; shlex's own
         # `#` handling would eat every later line and cut `issue#12` short.

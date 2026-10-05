@@ -23,13 +23,12 @@ import fnmatch
 import os
 import posixpath
 import re
-import shlex
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Final
 
-from claude_code_hooks_daemon.utils import protected_tree_scan
+from claude_code_hooks_daemon.utils import linear_shlex, protected_tree_scan
 from claude_code_hooks_daemon.utils.bash_flags import SPAN_SEPARATORS, split_statements
 from claude_code_hooks_daemon.utils.protected_tree_scan import TreeView
 from claude_code_hooks_daemon.utils.shell_segmentation import (
@@ -376,7 +375,7 @@ def _command_words(segment: str) -> list[str]:
     unclosed quote, and nothing here can place its roots.
     """
     try:
-        words = shlex.split(segment)
+        words = linear_shlex.split(segment)
     except ValueError:
         return []
     while words and _ASSIGNMENT.match(words[0]):

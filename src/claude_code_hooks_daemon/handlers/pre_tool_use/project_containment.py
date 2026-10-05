@@ -40,7 +40,6 @@ separate handler rather than weakening an existing one to make room.
 
 import json
 import logging
-import shlex
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -67,6 +66,7 @@ from claude_code_hooks_daemon.core.utils import (
     split_heredocs,
     substitute_cwd_expansions,
 )
+from claude_code_hooks_daemon.utils import linear_shlex
 from claude_code_hooks_daemon.utils.claude_config import claude_config_dir, session_config_dir
 from claude_code_hooks_daemon.utils.command_evasion import strip_reserved_word_prefix
 from claude_code_hooks_daemon.utils.heredoc_operators import scan_heredocs
@@ -660,7 +660,7 @@ class ProjectContainmentHandler(PreToolUseHandlerBase):
         skip is observable instead of silent.
         """
         try:
-            return shlex.split(segment)
+            return linear_shlex.split(segment)
         except ValueError as exc:
             logger.debug("Could not tokenise segment for containment check: %s", exc)
             return []

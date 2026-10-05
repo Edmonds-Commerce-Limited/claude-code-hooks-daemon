@@ -1,0 +1,29 @@
+# Semgrep expression of the quadratic-tokenisation defect class (Plan 00483 N197).
+#
+# The stdlib `shlex.shlex.read_token` grows each token with
+# `self.token += nextchar`. On an attribute that copies the whole token so far
+# for every character, so one long word costs O(length^2): 0.25 s for a 100 KB
+# word, 3.3 s for 400 KB. A hook command is caller-supplied and unbounded, so a
+# guard that tokenises it with the stdlib can be made slow at will.
+#
+# claude_code_hooks_daemon.utils.linear_shlex gives the same tokens, and the
+# same ValueError on an unterminated quote or escape, at a cost linear in the
+# token (`split` for `shlex.split`, `LinearShlex` for `shlex.shlex`). Only the
+# tokenisers are matched: `shlex.quote` and `shlex.join` build strings and are
+# linear. The implementation module subclasses `shlex.shlex`, so it is the one
+# exclusion.
+
+rules:
+  - id: stdlib-shlex-quadratic
+    languages: [python]
+    severity: WARNING
+    message: >-
+      The stdlib shlex tokeniser is O(n^2) in the length of one word. Use
+      split / LinearShlex from claude_code_hooks_daemon.utils.linear_shlex,
+      which return the same tokens at linear cost.
+    pattern-either:
+      - pattern: shlex.split(...)
+      - pattern: shlex.shlex(...)
+    paths:
+      exclude:
+        - "**/utils/linear_shlex.py"

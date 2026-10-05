@@ -71,7 +71,6 @@ import logging
 import os
 import posixpath
 import re
-import shlex
 import stat
 import string
 import sys
@@ -95,6 +94,7 @@ from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.handler_scope import HandlerScope
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.core.utils import get_bash_command
+from claude_code_hooks_daemon.utils import linear_shlex
 from claude_code_hooks_daemon.utils.command_evasion import normalise_line_continuations
 from claude_code_hooks_daemon.utils.path_predicates import path_exists
 from claude_code_hooks_daemon.utils.shell_segmentation import (
@@ -1564,7 +1564,7 @@ def _invocations(
     for segment in split_unquoted(protected, _COMMAND_BOUNDARIES):
         restored = _restore(segment, substitutions)
         try:
-            words = [_restore(word, substitutions) for word in shlex.split(segment)]
+            words = [_restore(word, substitutions) for word in linear_shlex.split(segment)]
         except ValueError:
             # An unbalanced quote: judged as unparsed, never guessed at.
             parsed.append((restored, None))
@@ -1893,7 +1893,10 @@ def _is_a_listing(stages: Sequence[str], substitutions: Sequence[str] = ()) -> b
     word is judged with its own put back.
     """
     try:
-        words = [[_restore(word, substitutions) for word in shlex.split(stage)] for stage in stages]
+        words = [
+            [_restore(word, substitutions) for word in linear_shlex.split(stage)]
+            for stage in stages
+        ]
     except ValueError as error:
         logger.debug("Listing not recognised, unsplittable (%s)", error)
         return False
@@ -1956,7 +1959,7 @@ def _is_merge_base_substitution(word: str) -> bool:
     if len(segments) != 1:
         return False
     try:
-        words = shlex.split(segments[0])
+        words = linear_shlex.split(segments[0])
     except ValueError:
         return False
     if len(words) < 3 or command_word(words[0]) != _GIT or words[1] != _GIT_MERGE_BASE_SUBCOMMAND:
@@ -2010,7 +2013,7 @@ def _consumers_of_a_listing(text: str, substitutions: Sequence[str]) -> frozense
         stages = split_unquoted(pipeline, _PIPE)
         for position in range(1, len(stages)):
             try:
-                consumer = _strip_prefixes(shlex.split(stages[position]))
+                consumer = _strip_prefixes(linear_shlex.split(stages[position]))
             except ValueError as error:
                 logger.debug("Consumer left to the unparsed check (%s)", error)
                 continue
@@ -2203,7 +2206,7 @@ def _code_on_stdin(
     known = variables or {}
     for pipeline in split_unquoted(text, _PIPELINE_BOUNDARIES):
         try:
-            stages = [shlex.split(stage) for stage in split_unquoted(pipeline, _PIPE)]
+            stages = [linear_shlex.split(stage) for stage in split_unquoted(pipeline, _PIPE)]
         except ValueError as error:
             logger.debug("Pipeline left to the unparsed check (%s): %r", error, pipeline)
             continue
@@ -2212,7 +2215,7 @@ def _code_on_stdin(
             yield from _fed(_producer_output(producer), consumer, pipeline, depth, producer)
     for consumer, producer_code in _process_substitutions(text):
         try:
-            producer = shlex.split(producer_code)
+            producer = linear_shlex.split(producer_code)
         except ValueError as error:
             logger.debug("Substitution left to the unparsed check (%s)", error)
             continue
@@ -2250,7 +2253,7 @@ def _process_substitutions(text: str) -> Iterator[tuple[list[str], str]]:
 def _process_substitution_consumer(head: str) -> list[str]:
     """The words of the command a ``<(...)`` belongs to, when it may read code from it."""
     try:
-        consumer = shlex.split(head)
+        consumer = linear_shlex.split(head)
     except ValueError as error:
         logger.debug("Consumer left to the unparsed check (%s)", error)
         return []
@@ -2322,7 +2325,7 @@ def _python_heredocs(text: str) -> Iterator[_PythonHeredoc]:
             continue
         stages = split_unquoted(text[line_start : found.start()], (*_PIPELINE_BOUNDARIES, *_PIPE))
         try:
-            receiver = shlex.split(stages[-1]) if stages else []
+            receiver = linear_shlex.split(stages[-1]) if stages else []
         except ValueError as error:
             logger.debug("Heredoc receiver left to the unparsed check (%s)", error)
             continue
@@ -2607,7 +2610,7 @@ def _substituted_command(
     producer that only sets up shell state runs nothing.
     """
     try:
-        producer = shlex.split(inner)
+        producer = linear_shlex.split(inner)
     except ValueError as error:
         logger.debug("Substituted command judged unparsed (%s)", error)
         # `arguments` is unread for `_UNPARSED` (`_full_run_of` judges only
@@ -2647,7 +2650,7 @@ def _reads_a_file(word: str, here: Path | None) -> bool:
     if inner is None or here is None:
         return False
     try:
-        words = shlex.split(inner)
+        words = linear_shlex.split(inner)
     except ValueError as error:
         logger.debug("Substitution words unsplittable, read as a file reader (%s)", error)
         return True
@@ -2722,7 +2725,7 @@ def _code_of(
         yield from _code_runs(kind, code, argv, segment, depth)
         return
     try:
-        producer = shlex.split(inner)
+        producer = linear_shlex.split(inner)
     except ValueError as error:
         logger.debug("Code substitution judged unparsed (%s)", error)
         # See the twin site in `_substituted_command`: `str(error)` here
@@ -4221,7 +4224,7 @@ def _addopts(text: str) -> list[str]:
             words.append(_ADDOPTS_UNSEEN)
             continue
         try:
-            words.extend(shlex.split(value))
+            words.extend(linear_shlex.split(value))
         except ValueError:
             words.append(_ADDOPTS_UNSEEN)
     return words
@@ -4782,7 +4785,7 @@ def _path_substitution(code: str, depth: int) -> str | None:
     commands: list[list[str]] | None
     try:
         commands = [
-            _without_redirects([_restore(word, originals) for word in shlex.split(segment)])
+            _without_redirects([_restore(word, originals) for word in linear_shlex.split(segment)])
             for segment in split_unquoted(protected, _COMMAND_BOUNDARIES)
             if segment.strip()
         ]

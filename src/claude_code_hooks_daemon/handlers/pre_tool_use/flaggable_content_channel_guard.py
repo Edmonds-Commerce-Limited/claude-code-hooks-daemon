@@ -30,7 +30,6 @@ from __future__ import annotations
 import logging
 import posixpath
 import re
-import shlex
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Final
@@ -44,6 +43,7 @@ from claude_code_hooks_daemon.core.relevance import Relevance, RelevanceContext
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.core.utils import get_bash_command
 from claude_code_hooks_daemon.handlers.utils.quarantine import quarantine_agent_relevance
+from claude_code_hooks_daemon.utils import linear_shlex
 from claude_code_hooks_daemon.utils import secret_file_matching as sfm
 from claude_code_hooks_daemon.utils.command_evasion import GIT_INVOCATION
 from claude_code_hooks_daemon.utils.path_exclusion import resolve_project_root
@@ -488,7 +488,7 @@ def _recursive_search_reaches(
         return None
     unplaceable = _Reach(globs[0], None)
     try:
-        words = shlex.split(segment)
+        words = linear_shlex.split(segment)
     except ValueError:
         return unplaceable
     found = search_command(words)

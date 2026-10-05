@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import random
 import shlex
+from collections.abc import Callable
 
 import pytest
 
-from claude_code_hooks_daemon.utils.linear_shlex import LinearShlex
+from claude_code_hooks_daemon.utils.linear_shlex import LinearShlex, split
 from tests.scaling import SIZE_FACTOR, SUPERLINEAR_RATIO, scaling_ratio
 
 # Every character class the state machine branches on: word characters,
@@ -92,6 +93,31 @@ class TestTokensMatchTheStdlib:
             if ours != theirs:
                 mismatches.append(f"{text!r}: {ours!r} != {theirs!r}")
         assert not mismatches, "\n".join(mismatches[:10])
+
+    @pytest.mark.parametrize("comments", [True, False])
+    @pytest.mark.parametrize("text", _CORPUS)
+    def test_split_matches_the_stdlib_split(self, text: str, comments: bool) -> None:
+        def outcome(function: Callable[..., list[str]]) -> list[str] | str:
+            try:
+                return function(text, comments=comments)
+            except ValueError as exc:
+                return f"ValueError: {exc}"
+
+        assert outcome(split) == outcome(shlex.split)
+
+    def test_random_text_splits_identically(self) -> None:
+        generator = random.Random(483197)
+        for _ in range(3000):
+            text = "".join(generator.choice(_ALPHABET) for _ in range(generator.randint(0, 24)))
+            try:
+                expected: list[str] | str = shlex.split(text)
+            except ValueError as exc:
+                expected = f"ValueError: {exc}"
+            try:
+                actual: list[str] | str = split(text)
+            except ValueError as exc:
+                actual = f"ValueError: {exc}"
+            assert actual == expected, repr(text)
 
     def test_the_token_attribute_is_reset_after_each_token(self) -> None:
         lexer = LinearShlex("alpha beta", posix=True)

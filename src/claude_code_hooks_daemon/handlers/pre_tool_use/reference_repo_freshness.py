@@ -29,7 +29,6 @@ unusable rather than merely wrong:
 """
 
 import logging
-import shlex
 from pathlib import Path
 from typing import Any, Final
 
@@ -53,6 +52,7 @@ from claude_code_hooks_daemon.reference_repos.report import (
     unconfirmed_note,
 )
 from claude_code_hooks_daemon.reference_repos.sweep import governed_roots
+from claude_code_hooks_daemon.utils import linear_shlex
 from claude_code_hooks_daemon.utils.command_evasion import strip_reserved_word_prefix
 from claude_code_hooks_daemon.utils.path_containment import path_is_relative_to, path_relative_to
 from claude_code_hooks_daemon.utils.path_predicates import path_exists
@@ -218,7 +218,7 @@ def _tokenise(segment: str) -> list[str]:
     match; raising here would cost the user their tool call.
     """
     try:
-        return shlex.split(segment, comments=False)
+        return linear_shlex.split(segment, comments=False)
     except ValueError:
         return segment.split()
 
