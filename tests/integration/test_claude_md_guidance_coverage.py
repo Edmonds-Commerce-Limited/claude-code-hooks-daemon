@@ -80,6 +80,7 @@ _EARNS_GUIDANCE: dict[str, str] = {
     "ProjectContainmentHandler": "T1 denies a write named outside the repo root",
     "PlanJournalGuardHandler": "T1 denies a journal entry written by hand",
     "SubagentCronDeleteBlockerHandler": "T1 denies CronDelete inside a subagent",
+    "GithubIssueAssignmentGuardHandler": "T1 denies issue-tied work on an unclaimed or foreign issue",
     "UsagePauseToolGateHandler": "T1 denies every tool but the cron tools while usage-paused",
     "UsagePauseGateHandler": (
         "T2 changes what the agent must do: the pause directive says to replace every cron "

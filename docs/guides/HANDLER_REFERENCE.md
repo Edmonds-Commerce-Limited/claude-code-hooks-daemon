@@ -2428,6 +2428,39 @@ handlers:
 
 ---
 
+#### github_issue_assignment_guard
+
+| Property       | Value                           |
+| -------------- | ------------------------------- |
+| **Config key** | `github_issue_assignment_guard` |
+| **Priority**   | 53                              |
+| **Type**       | Blocking (terminal)             |
+| **Event**      | PreToolUse                      |
+
+**Description:** Issue-tied work needs a valid GitHub issue. Work is tied to an issue when it is a `Write`/`Edit` inside a plan folder whose `PLAN.md` header carries `**GitHub Issue**: #N`, or a `git commit` that cites `#N` and names a plan with that header. The handler asks deterministic code (`bin/hooks-daemon issue-validity`) two questions: is the issue assigned to the signed-in GitHub account, and, when `approved_issue_authors` is configured, was it opened by an approved author. Unassigned: denied with the one command to run, `bin/hooks-daemon issue-validity N --claim`. Assigned only to others, or an unapproved author: denied; do not work on it or claim it. A failed lookup (no `gh`, offline, not signed in) only advises, and untied work is never judged and makes no `gh` call. Ships **disabled** for client projects.
+
+**Options:**
+
+| Option                   | Default | Meaning                                                                                                                                                                  |
+| ------------------------ | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `approved_issue_authors` | unset   | GitHub logins (case-insensitive). Unset or empty: the author check does not apply. The one home of the list: the handler, the CLI and the issue-sdlc runbook all read it |
+| `auto_claim`             | `false` | `true` lets the hook claim an unassigned, otherwise valid issue itself. Default: the agent runs the CLI                                                                  |
+
+**Config example:**
+
+```yaml
+handlers:
+  pre_tool_use:
+    github_issue_assignment_guard:
+      enabled: true
+      priority: 53
+      options:
+        auto_claim: false
+        approved_issue_authors: [LTSCommerce, lts-bob]
+```
+
+---
+
 #### gh_pr_comments
 
 | Property       | Value            |
@@ -4551,6 +4584,7 @@ Priorities below are the **shipped defaults** from `constants/priority.py`. Seve
 | `gh_pr_comments`                | PreToolUse        | 40       | gh pr view without --comments                                            |
 | `plan_time_estimates`           | PreToolUse        | 40       | Time estimates in plan docs                                              |
 | `npm_command`                   | PreToolUse        | 50       | Non-llm: npm commands                                                    |
+| `github_issue_assignment_guard` | PreToolUse        | 53       | Issue-tied work on an unclaimed, foreign or unapproved-author issue      |
 | `validate_instruction_content`  | PreToolUse        | 50       | Ephemeral content in CLAUDE.md                                           |
 | `auto_continue_stop`            | Stop              | 15       | Stops after confirmation questions                                       |
 | `auto_approve_reads`            | PermissionRequest | 10       | (Approves) read-only tools in bypassPermissions mode                     |

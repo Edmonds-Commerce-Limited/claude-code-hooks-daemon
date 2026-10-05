@@ -260,6 +260,19 @@ class RuleID:
     GH_ISSUE_VIEW_NO_COMMENTS: str = "R-GH-ISSUE-VIEW-NO-COMMENTS"
 
     # ------------------------------------------------------------------
+    # github_issue_assignment_guard handler (ships disabled for clients)
+    # ------------------------------------------------------------------
+
+    #: Issue-tied work on an issue nobody has claimed yet.
+    GH_ISSUE_UNASSIGNED: str = "R-GH-ISSUE-UNASSIGNED"
+
+    #: Issue-tied work on an issue that is assigned to someone else only.
+    GH_ISSUE_ASSIGNED_ELSEWHERE: str = "R-GH-ISSUE-ASSIGNED-ELSEWHERE"
+
+    #: Issue-tied work on an issue opened by an author nobody approved.
+    GH_ISSUE_AUTHOR_NOT_APPROVED: str = "R-GH-ISSUE-AUTHOR-NOT-APPROVED"
+
+    # ------------------------------------------------------------------
     # gh_pr_comments handler
     # ------------------------------------------------------------------
 

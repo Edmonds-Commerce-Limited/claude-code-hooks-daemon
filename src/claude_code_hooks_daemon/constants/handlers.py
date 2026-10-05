@@ -865,6 +865,16 @@ class HandlerID:
         display_name="issue-filing-gate",
     )
 
+    # GitHub issue assignment guard (PreToolUse handler) -- Plan 00490: work tied
+    # to a GitHub issue (a plan whose header names one, or a commit citing it)
+    # needs the issue assigned to the signed-in account and opened by an approved
+    # author. A thin consumer of utils/github_issue_validity.
+    GITHUB_ISSUE_ASSIGNMENT_GUARD = HandlerIDMeta(
+        class_name="GithubIssueAssignmentGuardHandler",
+        config_key="github_issue_assignment_guard",
+        display_name="github-issue-assignment-guard",
+    )
+
     # ccy supervisor integrity checker (SessionStart handler) — Plan 00148:
     # warn when the ccy supervisor is armed but its files are missing, not
     # executable, or git-ignored (a brick risk for teammates)

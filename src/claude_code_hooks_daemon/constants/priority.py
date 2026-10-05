@@ -404,6 +404,10 @@ class Priority:
     PLAN_TIME_ESTIMATES = 40
     GLOBAL_NPM_ADVISOR = 40
 
+    # Plan 00490: judges issue-tied work only, after the cheap safety handlers
+    # have had their say. A workflow guard, so it sits in the workflow band.
+    GITHUB_ISSUE_ASSIGNMENT_GUARD = 53
+
     # Plan 00466 N211: the one staged-tree gate that denies by default, so it
     # speaks before the warn-first staged_lint_gate at 43 on the same commit.
     # Not 41: this project's own enforce-llm-qa handler holds that slot. The

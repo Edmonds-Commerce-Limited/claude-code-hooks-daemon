@@ -122,6 +122,10 @@ class Timeout:
     # Handler-specific timeouts (seconds, used in subprocess calls)
     ESLINT_CHECK = 30  # 30 seconds (ESLint validation)
     LINT_CHECK = 15  # 15 seconds (generic lint validation)
+    # 8 seconds (one `gh` call: identity, issue view/list, or the claim edit).
+    # Short on purpose: a lookup that cannot answer in this time degrades to an
+    # advisory, never a denial, so waiting longer buys nothing.
+    GH_LOOKUP = 8
     GIT_STATUS_SHORT = 0.5  # 0.5 seconds (quick git status check)
     GIT_CONTEXT = 5  # 5 seconds (git context gathering)
     GIT_FETCH_BACKGROUND = 30  # 30 seconds (background git fetch in status line)

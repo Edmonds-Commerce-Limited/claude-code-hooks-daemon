@@ -657,6 +657,23 @@ handlers:
       enabled: true
       priority: 40
 
+    # Plan 00490: work tied to a GitHub issue (a plan whose header names one, or
+    # a commit citing it) needs that issue assigned to the signed-in account and
+    # opened by an approved author. `bin/hooks-daemon issue-validity N --claim`
+    # claims it. `approved_issue_authors` is the ONE home of the author list:
+    # this handler, the issue-validity CLI and the issue-sdlc runbook all read it
+    # (case-insensitive). `auto_claim: false` keeps the hook judge-only.
+    github_issue_assignment_guard:
+      enabled: true
+      priority: 53
+      options:
+        auto_claim: false
+        approved_issue_authors:
+          - LTSCommerce
+          - edmondscommerce
+          - lts-bob
+          - ballidev
+
     global_npm_advisor:    # Advises against global npm installs
       enabled: true
       priority: 42
