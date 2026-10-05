@@ -2206,7 +2206,8 @@ class TestAStartNeverRunsTheHookPastItsTimeout:
         )
 
         assert _verdict(result) == "deny", result.stderr
-        assert "ci_enabled: true" in json.loads(result.stdout)["reason"], result.stdout
+        reason = json.loads(result.stdout)["hookSpecificOutput"]["permissionDecisionReason"]
+        assert "ci_enabled: true" in reason, result.stdout
 
     def test_in_ci_without_enforcement_a_start_under_way_denies_as_starting(
         self, project: Path, tmp_path: Path

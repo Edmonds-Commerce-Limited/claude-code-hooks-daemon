@@ -224,7 +224,7 @@ def _run_hook_via_forwarder(
                 "Failed to start hooks daemon"
             exit 0
         fi
-        jq -c '{{event: "{event_name}", hook_input: .}}' | send_request_stdin
+        jq -c '{{event: "{event_name}", hook_input: .}}' | send_request_stdin "{event_name}"
     """)
 
     return subprocess.run(
@@ -236,6 +236,17 @@ def _run_hook_via_forwarder(
         env=env,
         cwd=str(project_path),
     )
+
+
+def _pretooluse_deny_reason(parsed: dict[str, Any]) -> str:
+    """The reason of a PreToolUse deny in the contract's shape, or fail.
+
+    PreToolUse defines no top-level ``decision``; a deny is
+    ``hookSpecificOutput.permissionDecision``.
+    """
+    hso = parsed["hookSpecificOutput"]
+    assert hso["permissionDecision"] == "deny", f"Expected deny, got: {parsed}"
+    return str(hso["permissionDecisionReason"])
 
 
 # Minimal valid hook input
@@ -512,8 +523,7 @@ class TestCIEnforcedFailClosed:
         assert result.returncode == 0
         stdout = result.stdout.strip()
         parsed = json.loads(stdout)
-        assert parsed.get("decision") == "deny", f"Expected deny, got: {parsed}"
-        reason = parsed.get("reason", "")
+        reason = _pretooluse_deny_reason(parsed)
         assert "STOP" in reason
         assert "ci_enabled" in reason
         assert "NOT installed" in reason or "not installed" in reason.lower()
@@ -545,8 +555,8 @@ class TestCIEnforcedFailClosed:
 
         parsed1 = json.loads(result1.stdout.strip())
         parsed2 = json.loads(result2.stdout.strip())
-        assert parsed1.get("decision") == "deny"
-        assert parsed2.get("decision") == "deny"
+        assert _pretooluse_deny_reason(parsed1)
+        assert _pretooluse_deny_reason(parsed2)
 
     def test_message_tells_agent_to_stop(self, tmp_path: Path) -> None:
         """The deny reason should clearly instruct the agent to stop working."""
@@ -554,7 +564,7 @@ class TestCIEnforcedFailClosed:
         result = _run_hook_via_forwarder("pre-tool-use", _PRE_TOOL_INPUT, project)
 
         parsed = json.loads(result.stdout.strip())
-        reason = parsed.get("reason", "")
+        reason = _pretooluse_deny_reason(parsed)
         assert "STOP" in reason
         assert "do not use any tools" in reason.lower() or "DO NOT" in reason
         assert "report to the user" in reason.lower()

@@ -468,17 +468,19 @@ class TestStatesThatAreNotNeedsProvision:
 
         out = _json(_run(project, "pre-tool-use", _bash_call("ls")))
 
-        assert out["decision"] == "deny"
-        assert "ci_enabled: true" in out["reason"]
-        assert "NEEDS PROVISIONING" not in out["reason"]
+        hso = out["hookSpecificOutput"]
+        assert hso["permissionDecision"] == "deny"
+        assert "ci_enabled: true" in hso["permissionDecisionReason"]
+        assert "NEEDS PROVISIONING" not in hso["permissionDecisionReason"]
 
     def test_ci_enabled_wins_over_block_mode(self, tmp_path: Path) -> None:
         config = CONFIG_BLOCK + "  ci_enabled: true\n"
 
         out = _json(_run(_fresh_clone(tmp_path, config), "pre-tool-use", _bash_call("ls")))
 
-        assert out["decision"] == "deny"
-        assert "NEEDS PROVISIONING" not in out["reason"]
+        hso = out["hookSpecificOutput"]
+        assert hso["permissionDecision"] == "deny"
+        assert "NEEDS PROVISIONING" not in hso["permissionDecisionReason"]
 
     def test_a_clone_with_no_venv_is_the_repair_state(self, tmp_path: Path) -> None:
         project = _fresh_clone(tmp_path)
