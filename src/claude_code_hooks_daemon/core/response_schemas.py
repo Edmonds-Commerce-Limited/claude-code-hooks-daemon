@@ -438,10 +438,17 @@ def _permissive_response_schema() -> dict[str, Any]:
     ever emits a passthrough response (``{}`` for an empty chain, or an advisory
     ``systemMessage`` / ``hookSpecificOutput`` if a client attaches a handler).
     Accept any object rather than constraining a contract we do not yet exercise.
+
+    One exception: a top-level ``decision`` is refused. ``to_json`` emits the
+    undefined ``{"decision": "deny"}`` token for a refusal the event cannot
+    carry, precisely so validation rejects it; accepting it here put that
+    schema-invalid document on the wire. Rejected, the enforcement substitutes
+    a loud ``systemMessage`` instead.
     """
     return {
         "type": "object",
         "additionalProperties": True,
+        "not": {"required": ["decision"]},
     }
 
 
