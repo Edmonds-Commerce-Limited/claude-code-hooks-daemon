@@ -1395,17 +1395,6 @@ def _pick_short_path_root_dir(*, warn_message: str) -> Path:
     return Path("/tmp")  # nosec B108 - /tmp is last resort fallback
 
 
-def _host_tag() -> str:
-    """Short, bounded tag for this host, so fallback names differ per hostname (N98).
-
-    The fallbacks live in a directory every host on a shared filesystem may
-    see, and unlike the natural paths they carry no ``-{hostname}`` suffix.
-    """
-    return hashlib.md5(_get_hostname_suffix().encode("utf-8"), usedforsecurity=False).hexdigest()[
-        :6
-    ]
-
-
 def _get_fallback_runtime_dir(project_dir: Path, filename: str) -> Path:
     """
     Get fallback path when project path exceeds Unix socket length limit.
@@ -1423,7 +1412,7 @@ def _get_fallback_runtime_dir(project_dir: Path, filename: str) -> Path:
         Path in a shorter directory using project hash for uniqueness
     """
     project_hash = get_project_hash(project_dir)
-    base_name = f"hooks-daemon-{project_hash}-{_host_tag()}"
+    base_name = f"hooks-daemon-{project_hash}"
     root = _pick_short_path_root_dir(
         warn_message=(
             "Socket path too long and no XDG_RUNTIME_DIR or /run/user available. "
@@ -1675,7 +1664,7 @@ def _get_event_socket_fallback_dir(untracked_dir: Path) -> Path:
     dir_hash = hashlib.md5(str(untracked_dir).encode("utf-8"), usedforsecurity=False).hexdigest()[
         :8
     ]
-    base_name = f"hooks-daemon-{dir_hash}-{_host_tag()}-events"
+    base_name = f"hooks-daemon-{dir_hash}-events"
     root = _pick_short_path_root_dir(
         warn_message=(
             "Event socket dir too long and no XDG_RUNTIME_DIR or /run/user available. "
