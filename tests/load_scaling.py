@@ -54,22 +54,6 @@ def load_factor(
     return min(max(per_cpu, 1.0), MAX_LOAD_FACTOR)
 
 
-#: Idle-host budget for a git command that only BUILDS a test fixture. The
-#: production ``Timeout.GIT_CONTEXT`` (5 s) bounds the daemon's own hook-path git
-#: calls and must not be borrowed by setup, which is not what is under test
-#: (ledger 00466 N95). Assertions about the product's timing keep the product constant.
-GIT_SETUP_BASE_SECONDS: Final[float] = 30.0
-
-
-def git_setup_timeout(
-    *,
-    load_averages: tuple[float, float, float] | None = None,
-    cpu_count: int | None = None,
-) -> float:
-    """Load-scaled time budget for a fixture's setup ``git`` subprocess."""
-    return scaled_seconds(GIT_SETUP_BASE_SECONDS, load_averages=load_averages, cpu_count=cpu_count)
-
-
 def scaled_seconds(
     base_seconds: float,
     *,

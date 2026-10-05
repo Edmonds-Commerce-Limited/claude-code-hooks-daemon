@@ -16,7 +16,7 @@ from typing import Any
 from unittest.mock import patch
 
 import pytest
-from tests.load_scaling import git_setup_timeout
+from tests.support.git_fixtures import git_setup_timeout
 
 from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.core import Decision

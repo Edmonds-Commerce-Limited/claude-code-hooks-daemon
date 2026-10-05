@@ -33,11 +33,11 @@ from claude_code_hooks_daemon.qa.full_qa_gate import pytest_collection_modifyite
 # conftest. It sits at `tests/` root rather than in a subdirectory because the
 # relay-dependent gates it covers straddle `acceptance/` and `integration/`.
 # Outside CI it does nothing at all — see the module docstring.
-from tests.load_scaling import git_setup_timeout
 from tests.relay_gate_guard import fresh_relay_build, pytest_runtest_makereport
 from tests.signal_safety_net import install as install_signal_safety_net
 from tests.signal_safety_net import uninstall as uninstall_signal_safety_net
 from tests.source_tree_guard import assert_package_is_this_checkout
+from tests.support.git_fixtures import git_setup_timeout
 
 __all__ = ["fresh_relay_build", "pytest_collection_modifyitems", "pytest_runtest_makereport"]
 
