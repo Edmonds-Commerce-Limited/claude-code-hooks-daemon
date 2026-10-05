@@ -81,9 +81,10 @@ agent.
   (`CLAUDE/Security/README.md`, `CLAUDE/CodeLifecycle/Bugs.md`, `CLAUDE/HANDLER_DEVELOPMENT.md`).
   Each gets one pointer to the vendored spec, not a restatement (DocumentationStrategy.md).
   Done: Bugs.md already carried the section, so its vendored-copy mention now links the path.
-- [ ] ⬜ **Task 1.4**: Comment on #65 and #67 with the ruling and this plan. Use
+- [x] ✅ **Task 1.4**: Comment on #65 and #67 with the ruling and this plan. Use
   `Addresses #N`, never a closing keyword. Remove `agent-needs-human`.
-  **Owner ruling (2026-10-05):** yes, post it — see [OWNER-RULINGS-261005.md](../00483-threat-model-conformance-audit/OWNER-RULINGS-261005.md) (C2). Unblocked.
+  **Owner ruling (2026-10-05):** yes, post it — see [OWNER-RULINGS-261005.md](../00483-threat-model-conformance-audit/OWNER-RULINGS-261005.md) (C2). Done 2026-10-05: comments posted on #65 and #67 ("Addresses", no closing keyword), and `agent-needs-human`
+  removed from both.
 
 ### Phase 2: Conformance assessment
 
