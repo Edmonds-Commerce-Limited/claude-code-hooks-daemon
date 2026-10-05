@@ -43,7 +43,6 @@ import re
 import textwrap
 import time
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any, ClassVar, Final
 
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, HookInputField, Priority
@@ -64,6 +63,7 @@ from claude_code_hooks_daemon.utils.path_exclusion import (
     handler_excludes_path,
     resolve_project_root,
 )
+from claude_code_hooks_daemon.utils.path_predicates import path_is_dir
 from claude_code_hooks_daemon.utils.protected_file_index import ProtectedFileIndex, TreeView
 from claude_code_hooks_daemon.utils.shell_segmentation import strip_quoted_heredoc_bodies
 
@@ -1471,7 +1471,7 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
 
     def _directory_reach(self, path: str, patterns: tuple[str, ...]) -> tuple[str, str, str] | None:
         """A protected file under the directory a Grep tool call is rooted at, or None."""
-        if not Path(path).is_dir():
+        if not path_is_dir(path, unreadable_means=False):
             return None
         index = self._index(patterns)
         if index is None:

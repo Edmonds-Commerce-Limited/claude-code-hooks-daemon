@@ -269,7 +269,7 @@ class TestTheCache:
     def test_a_miss_is_none_and_starts_a_background_build(self, repo: Path) -> None:
         assert index_for(repo, PATTERNS) is None
 
-        pfi.wait_for_builds(timeout=30)
+        pfi.wait_for_builds(timeout=Timeout.INDEX_BUILD_WAIT)
 
         served = index_for(repo, PATTERNS)
         assert served is not None
@@ -284,7 +284,7 @@ class TestTheCache:
 
         def slow(root: Path, patterns: tuple[str, ...]) -> ProtectedFileIndex | None:
             calls.append(root)
-            release.wait(timeout=10)
+            release.wait(timeout=Timeout.INDEX_BUILD_WAIT)
             return real(root, patterns)
 
         monkeypatch.setattr(pfi, "build_index", slow)
@@ -293,7 +293,7 @@ class TestTheCache:
         assert index_for(repo, PATTERNS) is None
         assert index_for(repo, PATTERNS) is None
         release.set()
-        pfi.wait_for_builds(timeout=30)
+        pfi.wait_for_builds(timeout=Timeout.INDEX_BUILD_WAIT)
 
         assert len(calls) == 1
 
@@ -308,7 +308,7 @@ class TestTheCache:
 
         assert index_for(repo, PATTERNS) is stale
 
-        pfi.wait_for_builds(timeout=30)
+        pfi.wait_for_builds(timeout=Timeout.INDEX_BUILD_WAIT)
         refreshed = index_for(repo, PATTERNS)
         assert refreshed is not None
         assert refreshed is not stale
@@ -328,10 +328,10 @@ class TestTheCache:
         monkeypatch.setattr(pfi, "build_index", failing)
 
         assert index_for(plain, PATTERNS) is None
-        pfi.wait_for_builds(timeout=30)
+        pfi.wait_for_builds(timeout=Timeout.INDEX_BUILD_WAIT)
         assert index_for(plain, PATTERNS) is None
         assert index_for(plain, PATTERNS) is None
-        pfi.wait_for_builds(timeout=30)
+        pfi.wait_for_builds(timeout=Timeout.INDEX_BUILD_WAIT)
 
         assert len(calls) == 1
         assert pfi.cached_index(plain, PATTERNS) is None
@@ -341,7 +341,7 @@ class TestTheCache:
 
         assert index_for(repo, PATTERNS) is not None
         assert index_for(repo, ("other",)) is None
-        pfi.wait_for_builds(timeout=30)
+        pfi.wait_for_builds(timeout=Timeout.INDEX_BUILD_WAIT)
 
     def test_the_cache_is_bounded(self, tmp_path: Path) -> None:
         total = pfi.MAX_CACHED_INDEXES + 3

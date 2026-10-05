@@ -35,6 +35,7 @@ from enum import StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING, Final
 
+from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.utils.git_repo import run_git
 
 if TYPE_CHECKING:
@@ -346,7 +347,7 @@ def wait_for_builds(timeout: float) -> None:
 
 def reset_index_cache() -> None:
     """Forget every index and failure; for tests."""
-    wait_for_builds(timeout=30)
+    wait_for_builds(timeout=Timeout.INDEX_BUILD_WAIT)
     with _lock:
         _cache.clear()
         _failed_at.clear()

@@ -37,7 +37,6 @@ from __future__ import annotations
 
 import logging
 import re
-from pathlib import Path
 from typing import Any, Final
 
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, HookInputField, Priority
@@ -53,6 +52,7 @@ from claude_code_hooks_daemon.utils import secret_file_matching as sfm
 from claude_code_hooks_daemon.utils.bash_flags import SPAN_SEPARATORS, split_statements
 from claude_code_hooks_daemon.utils.command_evasion import compile_command_name_pattern
 from claude_code_hooks_daemon.utils.path_exclusion import resolve_project_root
+from claude_code_hooks_daemon.utils.path_predicates import path_is_dir
 from claude_code_hooks_daemon.utils.protected_file_index import ProtectedFileIndex, TreeView
 from claude_code_hooks_daemon.utils.shell_segmentation import split_unquoted
 
@@ -295,7 +295,7 @@ class QuarantineArtefactReadGuardHandler(PreToolUseHandlerBase):
             # Directory-rooted content search (mirrors secret_file_guard): a
             # Grep rooted at a directory containing a DETAIL artefact reads it
             # without naming it.
-            if not Path(path).is_dir():
+            if not path_is_dir(path, unreadable_means=False):
                 return None
             index = self._index(patterns)
             if index is None:
