@@ -88,7 +88,9 @@ def scan_git_file_states(
     if ignored_untracked is None:
         return None
     ignored_untracked = _without_foreign_trees(ignored_untracked)
-    ignored_tracked = _git_paths(project_root, timeout, "--cached", "--ignored", "--exclude-standard")
+    ignored_tracked = _git_paths(
+        project_root, timeout, "--cached", "--ignored", "--exclude-standard"
+    )
     if ignored_tracked is None:
         return None
     return GitFileStates(

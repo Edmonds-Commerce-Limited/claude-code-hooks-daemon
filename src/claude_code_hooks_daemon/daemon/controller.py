@@ -434,7 +434,9 @@ class DaemonController:
                     handler.prewarm_index()
                 except Exception as exc:
                     logger.warning(
-                        "Index pre-warm failed for %s: %s", type(handler).__name__, type(exc).__name__
+                        "Index pre-warm failed for %s: %s",
+                        type(handler).__name__,
+                        type(exc).__name__,
                     )
 
     def _compute_startup_source_fingerprint(
