@@ -2,10 +2,19 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
+from claude_code_hooks_daemon.constants.timeout import Timeout
 from tests import load_scaling
-from tests.load_scaling import MAX_LOAD_FACTOR, load_factor, scaled_seconds
+from tests.load_scaling import (
+    GIT_SETUP_BASE_SECONDS,
+    MAX_LOAD_FACTOR,
+    git_setup_timeout,
+    load_factor,
+    scaled_seconds,
+)
 
 
 class TestLoadFactor:
@@ -63,3 +72,31 @@ class TestScaledSeconds:
     def test_a_non_positive_base_is_refused(self) -> None:
         with pytest.raises(ValueError, match="positive"):
             scaled_seconds(0)
+
+
+class TestGitSetupTimeout:
+    def test_the_idle_budget_is_well_above_the_hook_path_budget(self) -> None:
+        assert GIT_SETUP_BASE_SECONDS > Timeout.GIT_CONTEXT
+
+    def test_an_idle_host_gets_the_base_budget(self) -> None:
+        got = git_setup_timeout(load_averages=(0.0, 0.0, 0.0), cpu_count=8)
+        assert got == GIT_SETUP_BASE_SECONDS
+
+    def test_a_loaded_host_gets_a_longer_budget(self) -> None:
+        got = git_setup_timeout(load_averages=(24.0, 24.0, 0.0), cpu_count=8)
+        assert got == pytest.approx(GIT_SETUP_BASE_SECONDS * 3)
+
+    def test_the_host_is_read_when_nothing_is_passed(self) -> None:
+        assert git_setup_timeout() >= GIT_SETUP_BASE_SECONDS
+
+
+class TestFixturesDoNotBorrowTheHookBudget:
+    """N95: shared git fixtures must not run setup under the production 5 s budget."""
+
+    @pytest.mark.parametrize(
+        "relative",
+        ["tests/conftest.py", "tests/support/git_fixtures.py"],
+    )
+    def test_shared_fixture_modules_do_not_use_the_hook_path_budget(self, relative: str) -> None:
+        source = (Path(__file__).resolve().parents[2] / relative).read_text(encoding="utf-8")
+        assert "Timeout.GIT_CONTEXT" not in source

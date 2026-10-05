@@ -9,7 +9,7 @@ one suppression -- reused, not re-derived.
 import subprocess
 from pathlib import Path
 
-from claude_code_hooks_daemon.constants.timeout import Timeout
+from tests.load_scaling import git_setup_timeout
 
 
 def run_git(root: Path, *args: str) -> None:
@@ -18,5 +18,5 @@ def run_git(root: Path, *args: str) -> None:
         ["git", "-C", str(root), *args],
         check=True,
         capture_output=True,
-        timeout=Timeout.GIT_CONTEXT,
+        timeout=git_setup_timeout(),
     )
