@@ -2945,6 +2945,36 @@ class TestResolveConfiguredPatterns:
         second = sfm.resolve_configured_patterns()
         assert first == second
 
+    def test_call_before_init_does_not_pin_the_defaults(self, tmp_path: Path) -> None:
+        """N91: a first call before ProjectContext init must not latch the defaults.
+
+        The configured extra paths have to be picked up by a later call once
+        the context is initialised.
+        """
+        from unittest.mock import patch
+
+        from claude_code_hooks_daemon.core.project_context import ProjectContext
+
+        config_path = tmp_path / "hooks-daemon.yaml"
+        config_path.write_text(
+            "version: '2.0'\n"
+            "handlers:\n"
+            "  pre_tool_use:\n"
+            "    secret_file_guard:\n"
+            "      options:\n"
+            "        protected_paths:\n"
+            "          - '*.late-configured-shape'\n"
+        )
+
+        with patch.object(ProjectContext, "is_initialized", return_value=False):
+            assert sfm.resolve_configured_patterns() == sfm.DEFAULT_PROTECTED_PATTERNS
+
+        with (
+            patch.object(ProjectContext, "is_initialized", return_value=True),
+            patch.object(ProjectContext, "config_path", return_value=config_path),
+        ):
+            assert "*.late-configured-shape" in sfm.resolve_configured_patterns()
+
     def test_reset_clears_the_cache(self) -> None:
         sfm.resolve_configured_patterns()
         sfm.reset_configured_patterns_cache()

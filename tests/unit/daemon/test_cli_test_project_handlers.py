@@ -290,6 +290,31 @@ class TestTestProjectHandlers:
             plugin_index = cmd_list.index("-p") + 1
             assert cmd_list[plugin_index] == f"no:{_FULL_QA_GATE_PLUGIN}"
 
+    def test_runs_the_pytest_entry_point_script_like_ci(self, tmp_path: Path) -> None:
+        """N260: CI runs the bare ``pytest`` script, which (unlike ``python -m
+        pytest``) does not put the working directory on ``sys.path``. The
+        local run must start pytest the same way or it cannot see import
+        failures that only CI hits.
+        """
+        from claude_code_hooks_daemon.daemon.cli import cmd_test_project_handlers
+
+        project_path = _setup_project(tmp_path)
+        (project_path / ".claude" / "project-handlers").mkdir()
+        args = argparse.Namespace(project_root=project_path, verbose=False)
+
+        script = tmp_path / "pytest"
+        script.write_text("")
+        mock_result = MagicMock(returncode=0, stdout="", stderr="")
+        with (
+            patch("claude_code_hooks_daemon.daemon.cli.sys.executable", str(tmp_path / "python")),
+            patch("subprocess.run", return_value=mock_result) as mock_run,
+        ):
+            cmd_test_project_handlers(args)
+
+        cmd_list = mock_run.call_args[0][0]
+        assert cmd_list[:2] == [str(tmp_path / "python"), str(script)]
+        assert "-m" not in cmd_list
+
     def test_uses_current_python(self, tmp_path: Path) -> None:
         """test-project-handlers uses sys.executable as the Python interpreter."""
         from claude_code_hooks_daemon.daemon.cli import cmd_test_project_handlers
