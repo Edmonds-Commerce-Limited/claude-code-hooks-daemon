@@ -86,3 +86,40 @@ class TestDirectoryRoleRulesSyncOnInitialise:
         )
         controller = _initialise(workspace)
         assert controller.is_initialised
+
+
+class TestIndexPrewarmOnInitialise:
+    def teardown_method(self) -> None:
+        ProjectContext.reset()
+
+    def test_guards_are_asked_to_start_their_index_build(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from claude_code_hooks_daemon.handlers.pre_tool_use.secret_file_guard import (
+            SecretFileGuardHandler,
+        )
+
+        started: list[str] = []
+        monkeypatch.setattr(
+            SecretFileGuardHandler, "prewarm_index", lambda self: started.append(self.name)
+        )
+
+        _initialise(_make_workspace(tmp_path))
+
+        assert started
+
+    def test_a_guard_that_cannot_prewarm_does_not_break_daemon_start(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from claude_code_hooks_daemon.handlers.pre_tool_use.secret_file_guard import (
+            SecretFileGuardHandler,
+        )
+
+        def _boom(self: SecretFileGuardHandler) -> None:
+            raise OSError("no threads")
+
+        monkeypatch.setattr(SecretFileGuardHandler, "prewarm_index", _boom)
+
+        controller = _initialise(_make_workspace(tmp_path))
+
+        assert controller.is_initialised

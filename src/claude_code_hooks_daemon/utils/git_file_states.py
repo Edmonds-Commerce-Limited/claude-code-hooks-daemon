@@ -11,14 +11,18 @@ rules. Git also evaluates negations (``!path``) and rule order exactly as it
 will when the file is added, which a hand-rolled gitignore matcher would not.
 """
 
+import logging
 import re
 import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Final
 
+from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.utils.git_repo import run_git
 from claude_code_hooks_daemon.utils.secret_file_matching import protected_among
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -62,23 +66,29 @@ class GitFileStates:
         return list(cached)
 
 
-def scan_git_file_states(project_root: Path) -> GitFileStates | None:
+def scan_git_file_states(
+    project_root: Path, timeout: float = Timeout.GIT_CONTEXT
+) -> GitFileStates | None:
     """The file states of the repository at ``project_root``, or ``None``.
 
-    ``None`` means git could not answer (not a repository, or git missing).
-    Callers must treat that as "unknown", never as "nothing is ignored".
+    ``None`` means git could not answer (not a repository, git missing, or a
+    listing that outran ``timeout``, which applies to each of the four listings).
+    Callers must treat that as "unknown", never as "nothing is ignored". The
+    reason is logged, so a scan that never answers is not silent.
     """
-    tracked = _git_paths(project_root, "--cached")
+    tracked = _git_paths(project_root, timeout, "--cached")
     if tracked is None:
         return None
-    visible = _git_paths(project_root, "--others", "--exclude-standard")
+    visible = _git_paths(project_root, timeout, "--others", "--exclude-standard")
     if visible is None:
         return None
-    ignored_untracked = _git_paths(project_root, "--others", "--ignored", "--exclude-standard")
+    ignored_untracked = _git_paths(
+        project_root, timeout, "--others", "--ignored", "--exclude-standard"
+    )
     if ignored_untracked is None:
         return None
     ignored_untracked = _without_foreign_trees(ignored_untracked)
-    ignored_tracked = _git_paths(project_root, "--cached", "--ignored", "--exclude-standard")
+    ignored_tracked = _git_paths(project_root, timeout, "--cached", "--ignored", "--exclude-standard")
     if ignored_tracked is None:
         return None
     return GitFileStates(
@@ -188,8 +198,15 @@ def unignore_advice(relpath: str) -> str:
     return _UNIGNORE_ADVICE.format(negation=gitignore_negation(relpath), relpath=relpath)
 
 
-def _git_paths(project_root: Path, *flags: str) -> frozenset[str] | None:
-    result = run_git(project_root, "ls-files", *flags)
+def _git_paths(project_root: Path, timeout: float, *flags: str) -> frozenset[str] | None:
+    result = run_git(project_root, "ls-files", *flags, timeout=timeout)
     if result.returncode != 0:
+        # Exit 124 is run_git's "ran out of time"; 127 is "git could not run".
+        logger.warning(
+            "git ls-files %s failed with exit %d (124 = timed out after %gs)",
+            " ".join(flags),
+            result.returncode,
+            timeout,
+        )
         return None
     return frozenset(line for line in result.stdout.splitlines() if line)

@@ -211,3 +211,21 @@ class TestNoIndexIsAnAdvisory:
         handler = SecretFileGuardHandler()
         hook_input = _hook_input("Grep", {"path": str(tmp_path), "pattern": "x"})
         assert "index of protected files is not available" in _advisory(handler.handle(hook_input))
+
+
+class TestPrewarmIndex:
+    def test_starts_the_build_for_its_own_patterns(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        asked: list[tuple[object, tuple[str, ...]]] = []
+        handler = SecretFileGuardHandler()
+        monkeypatch.setattr(guard_module, "resolve_project_root", lambda: tmp_path)
+        monkeypatch.setattr(
+            protected_file_index,
+            "index_for",
+            lambda root, patterns: asked.append((root, patterns)),
+        )
+
+        handler.prewarm_index()
+
+        assert asked == [(tmp_path, tuple(handler._patterns()))]

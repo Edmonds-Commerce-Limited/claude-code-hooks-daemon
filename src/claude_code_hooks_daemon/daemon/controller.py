@@ -36,6 +36,7 @@ from claude_code_hooks_daemon.daemon.source_fingerprint import (
 )
 from claude_code_hooks_daemon.daemon.verdict_log import append_verdicts
 from claude_code_hooks_daemon.handlers.registry import HandlerRegistry
+from claude_code_hooks_daemon.utils.protected_file_index import IndexPrewarmer
 
 if TYPE_CHECKING:
     from claude_code_hooks_daemon.config.models import (
@@ -361,6 +362,7 @@ class DaemonController:
         total_count = count + plugin_count + project_count
         logger.info("DaemonController initialised with %d total handlers", total_count)
         self._initialised = True
+        self._prewarm_indexes()
 
         # Content fingerprint of the code just loaded above (Plan 00371):
         # this daemon's own package directory plus -- only when project
@@ -417,6 +419,23 @@ class DaemonController:
         # fresh paths: glob without waiting for a reinstall. Same best-effort
         # contract — never fatal to daemon startup.
         self._sync_directory_role_rules(workspace_root, config_path)
+
+    def _prewarm_indexes(self) -> None:
+        """Start each guard's protected-file index build, so the first search is judged sooner.
+
+        Non-blocking (each build is a background thread) and best-effort: a guard
+        that cannot start its build is logged and never fatal to daemon startup.
+        """
+        for handlers in self._router.get_all_handlers().values():
+            for handler in handlers:
+                if not isinstance(handler, IndexPrewarmer):
+                    continue
+                try:
+                    handler.prewarm_index()
+                except Exception as exc:
+                    logger.warning(
+                        "Index pre-warm failed for %s: %s", type(handler).__name__, type(exc).__name__
+                    )
 
     def _compute_startup_source_fingerprint(
         self,
