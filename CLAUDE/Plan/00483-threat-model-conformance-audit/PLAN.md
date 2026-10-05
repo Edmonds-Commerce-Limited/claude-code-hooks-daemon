@@ -175,6 +175,9 @@ other than defeating a parser. Everything else, every ordinary respelling includ
 
 ## Open questions for the owner
 
+Owner questions sent 2026-10-05 as chunks A–D; see the backlog report
+[261005-owner-decision-backlog-opus.md](subagent-reports/261005-owner-decision-backlog-opus.md), Part 3.
+
 1. **Prompt injection: resolved (owner).** The daemon makes no claim to defend against it.
    The threat model and the README say so. A prompt-injection defence may become a future
    major version, as a separate project.
