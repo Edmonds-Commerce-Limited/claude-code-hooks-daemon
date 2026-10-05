@@ -81,6 +81,7 @@ FIXED_INPUT_CHECKS: frozenset[str] = frozenset(
         "check_hook_contract.py",
         "check_input_contract.py",
         "check_project_handler_tests.py",
+        "check_released_changelog.py",
     }
 )
 
