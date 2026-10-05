@@ -568,7 +568,7 @@ config_changes:
     # Plan 00483 N55 (owner-delegated ruling): an opt-in handler with NO block
     # under `handlers.<event>` no longer runs. Documentation-only entries (no
     # `recommended_value`): promoting every one would tell every project to
-    # enable all sixteen. A project that relied on the old behaviour names the
+    # enable every one of the seventeen. A project that relied on the old behaviour names the
     # handler; naming it, even as a bare key, enables it.
     - key: handlers.pre_tool_use.lsp_enforcement
       description: &opt_in_description >-

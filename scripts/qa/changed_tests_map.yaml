@@ -107,6 +107,16 @@ rules:
   - glob: "CLAUDE/UPGRADES/*/config-changes/*.yaml"
     tests: [tests/integration/test_config_changes_manifest_examples.py]
     why: config-changes manifests and their example YAML
+  - glob: "CLAUDE/UPGRADES/config-changes/*.yaml"
+    tests:
+      - tests/integration/test_config_changes_manifest_examples.py
+      - tests/unit/install/test_config_migrations.py
+    why: the released config-changes manifests, loaded by the migration advisory
+  - glob: "CLAUDE/UPGRADES/truth-changes/*.yaml"
+    tests:
+      - tests/unit/install/test_truth_changes.py
+      - tests/unit/install/test_truth_changes_template_guard.py
+    why: the released truth-changes manifests, loaded by the truth-change report
   - glob: "CLAUDE/UPGRADES/*/release-notes/*.md"
     tests: [tests/integration/test_pending_release_notes_holding_area.py]
     why: the release-notes holding area

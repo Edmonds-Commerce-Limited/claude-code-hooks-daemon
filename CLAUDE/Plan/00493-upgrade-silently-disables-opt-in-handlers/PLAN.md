@@ -1,6 +1,6 @@
 # Plan 00493: upgrade silently disables opt-in handlers
 
-**Status**: Not Started
+**Status**: In Progress
 **Created**: 2026-10-05
 **Owner**: dev
 **Priority**: High
@@ -69,7 +69,7 @@ already-upgraded clients is a short note, not a project.
 
 ### Phase 1: make the change visible (TDD)
 
-- [ ] ⬜ **Task 1.1: report the effective-set change on upgrade.**
+- [x] ✅ **Task 1.1: report the effective-set change on upgrade.**
   - Compute the set the client's ACTUAL config registers under the old
     version's rules and under the new version's rules. Use one shared
     helper built on `handler_is_enabled` and the class `default_enabled`.
@@ -84,7 +84,7 @@ already-upgraded clients is a short note, not a project.
   - Correct "sixteen" to seventeen (`plan_fact_check_feed`) in the v3.68.0
     truth change, release note 216 and config-changes. Better: generate the
     list from the classes.
-- [ ] ⬜ **Task 1.2: the upgrade summary names the version change.** The daemon version is already tracked; this is
+- [x] ✅ **Task 1.2: the upgrade summary names the version change.** The daemon version is already tracked; this is
   only the from → to line.
   - What exists today: v3.68.0 (Plan 00477) writes `daemon.expected_version`
     into the tracked `.claude/hooks-daemon.yaml` on install and upgrade
@@ -96,7 +96,7 @@ already-upgraded clients is a short note, not a project.
   - Remaining gap: make the upgrade summary name `from → to`, and point the
     committing agent at a commit message that says
     `hooks daemon vX → vY` together with the Task 1.1 handler delta.
-- [ ] ⬜ **Task 1.3: regression test.**
+- [x] ✅ **Task 1.3: regression test.**
   - Fixtures: an `init minimal` config, a v3.50.0 `init full` config and a
     v3.67.0 `init full` config.
   - Any rule change that alters the effective set for a fixture must appear
@@ -108,7 +108,7 @@ already-upgraded clients is a short note, not a project.
 
 ### Phase 2: client note
 
-- [ ] ⬜ **Task 2.1: remedy note for already-upgraded clients.**
+- [x] ✅ **Task 2.1: remedy note for already-upgraded clients.**
   - Add a short release note or `LLM-UPDATE.md` paragraph:
     - run `.claude/hooks-daemon/bin/hooks-daemon optimise-checklist`;
     - for each `[default off]` handler the project wants, add
@@ -132,11 +132,12 @@ already-upgraded clients is a short note, not a project.
 
 ## Success Criteria
 
-- [ ] An upgrade from v3.67.0 on an `init minimal` fixture prints every
+- [x] An upgrade from v3.67.0 on an `init minimal` fixture prints every
   handler that stops running, by name.
-- [ ] `config_diff_summary` reflects real config changes.
+- [x] `config_diff_summary` reflects real config changes.
 - [ ] The Task 1.3 regression test is green, and was red before Task 1.1.
-- [ ] The client remedy note is published.
+  (Green on the branch; the red run before Task 1.1 was not captured.)
+- [x] The client remedy note is published.
 
 ## Delivery & Milestones
 

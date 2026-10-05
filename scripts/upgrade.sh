@@ -880,6 +880,14 @@ fi
 # the pre-deploy gate's stop codes tell the caller WHY it stopped. Captured
 # with `||`, not inside `if !`, where $? is the negation's status (always 0).
 export UPGRADE_FLAGS
+# Plan 00493: Layer 2 writes `hooks-daemon.yaml.backup-<timestamp>`; the summary
+# below needs THIS run's backup, so remember which ones exist beforehand.
+_PRE_UPGRADE_BACKUPS=""
+for _prior_backup in "$PROJECT_ROOT"/.claude/hooks-daemon.yaml.backup-*; do
+    if [ -f "$_prior_backup" ]; then
+        _PRE_UPGRADE_BACKUPS="${_PRE_UPGRADE_BACKUPS}${_prior_backup}"$'\n'
+    fi
+done
 LAYER2_EXIT=0
 _LAYER2_ARGS=("$PROJECT_ROOT" "$DAEMON_DIR" "$TARGET_VERSION")
 if [ -n "$UV_OVERRIDE" ]; then
@@ -950,13 +958,28 @@ if [ -d "$PROJECT_ROOT/.git" ]; then
     fi
 fi
 
+# Newest hooks-daemon.yaml.backup-<timestamp> that this run created (the
+# timestamp format sorts lexically, so the glob's last match is the newest).
+# Empty when this run wrote none.
+_find_new_config_backup() {
+    local _found="" _candidate
+    for _candidate in "$PROJECT_ROOT"/.claude/hooks-daemon.yaml.backup-*; do
+        if [ -f "$_candidate" ] && ! printf '%s' "$_PRE_UPGRADE_BACKUPS" | grep -qxF -- "$_candidate"; then
+            _found="$_candidate"
+        fi
+    done
+    printf '%s' "$_found"
+}
+
 # config_diff_summary: human-readable summary of hooks-daemon.yaml changes.
-# Layer 2's installer writes hooks-daemon.yaml.backup before applying config
-# migration. Absent backup = no config changes this run.
+# Layer 2's installer writes hooks-daemon.yaml.backup-<timestamp> before
+# applying config migration (scripts/install/config_preserve.sh backup_config).
+# No new backup = the file was not touched this run. The summary can still not
+# say "no config changes" when the effective handler set changed (below).
 _metadata_config_summary="no config changes"
 _metadata_config_file="$PROJECT_ROOT/.claude/hooks-daemon.yaml"
-_metadata_config_backup="$PROJECT_ROOT/.claude/hooks-daemon.yaml.backup"
-if [ -f "$_metadata_config_backup" ] && [ -f "$_metadata_config_file" ]; then
+_metadata_config_backup="$(_find_new_config_backup)"
+if [ -n "$_metadata_config_backup" ] && [ -f "$_metadata_config_file" ]; then
     # Capture diff output via `if cmd=$(...); then`. diff returns 0 when
     # files are identical, 1 when they differ. awk counts diff markers and
     # always exits 0 (even with zero matches via END {print c+0}).
@@ -1121,6 +1144,50 @@ if [ -n "$_metadata_venv_python" ] && [ -x "$_metadata_venv_python" ]; then
 fi
 
 # ------------------------------------------------------------
+# Version change and effective handler set (Plan 00493)
+# ------------------------------------------------------------
+# A rule change can switch handlers off while the config file stays byte
+# identical, so neither the file diff above nor a manifest entry can say so.
+# check-effective-handlers resolves THIS project's config under the old and the
+# new version's rules and names every handler that stops or starts running.
+# Exit 1 = changes (normal!), 0 none, 2 error or an older target.
+echo ""
+_info "${_BOLD}Daemon version: ${FROM_VERSION:-unknown} -> ${TARGET_DISPLAY}${_NC}"
+_metadata_handler_changes=""
+if [ -n "$_metadata_venv_python" ] && [ -x "$_metadata_venv_python" ]; then
+    _eff_rc=0
+    if _eff_out="$("$_metadata_venv_python" -m claude_code_hooks_daemon.daemon.cli \
+        check-effective-handlers \
+        --from "${FROM_VERSION#v}" \
+        --to "${TARGET_SEMVER#v}" \
+        --config "$_metadata_config_file" 2>&1)"; then
+        _eff_rc=0
+    else
+        _eff_rc=$?
+    fi
+
+    if [ "$_eff_rc" -eq 1 ]; then
+        echo ""
+        _warn "${_BOLD}HANDLERS THAT CHANGE STATE WITH THIS UPGRADE${_NC}"
+        echo "$_eff_out"
+        _metadata_handler_changes="$(printf '%s\n' "$_eff_out" | awk '
+            /handler\(s\) STOP/ {kind = "stops"}
+            /handler\(s\) START/ {kind = "starts"}
+            /^  - handlers\./ {printf "%s%s:%s", sep, kind, $2; sep = ","}')"
+        _info "Commit message: hooks daemon ${FROM_VERSION#v} -> ${TARGET_SEMVER#v}, and name the handlers above that stop or start running."
+        if [ "$_metadata_config_summary" = "no config changes" ]; then
+            _metadata_config_summary="config file unchanged, but the effective handler set changed"
+        else
+            _metadata_config_summary="${_metadata_config_summary}; the effective handler set changed"
+        fi
+    elif [ "$_eff_rc" -eq 0 ]; then
+        _ok "Effective handler set: unchanged by this upgrade."
+    else
+        _warn "Effective handler summary unavailable (check-effective-handlers exit $_eff_rc; older target?)."
+    fi
+fi
+
+# ------------------------------------------------------------
 # Post-upgrade tasks (Plan 00376 Task 4.3)
 # ------------------------------------------------------------
 # A third mirror of the two blocks above, and the post-upgrade tasks' runner
@@ -1200,6 +1267,7 @@ printf 'daemon_dir=%s\n' "$DAEMON_DIR"
 printf 'project_root=%s\n' "$PROJECT_ROOT"
 printf 'modified_files=%s\n' "$_metadata_modified_files"
 printf 'config_diff_summary=%s\n' "$_metadata_config_summary"
+printf 'handler_changes=%s\n' "$_metadata_handler_changes"
 printf 'UPGRADE_METADATA>>>\n'
 
 exit 0
