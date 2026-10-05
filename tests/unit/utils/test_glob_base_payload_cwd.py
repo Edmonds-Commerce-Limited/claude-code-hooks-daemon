@@ -15,7 +15,6 @@ from typing import Any
 
 import pytest
 
-from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.core import Decision
 from claude_code_hooks_daemon.core.chain import HandlerChain
 from claude_code_hooks_daemon.core.data_layer import reset_data_layer
@@ -26,7 +25,6 @@ from claude_code_hooks_daemon.handlers.pre_tool_use.secret_file_guard import (
     SecretFileGuardHandler,
 )
 from claude_code_hooks_daemon.utils import secret_file_matching as sfm
-from claude_code_hooks_daemon.utils import shell_expansion
 
 _QUARANTINE_GLOBS = ("*-opus-security-DETAIL*", "*-opus-security-DETAIL.md")
 
@@ -59,23 +57,6 @@ def _through_chain(handler: Any, command: str, cwd: Path) -> tuple[Decision, str
     return result.result.decision, result.result.reason or ""
 
 
-class TestBoundedRecursiveGlobAtTheRoot:
-    """A glob whose literal prefix is absent matches nothing; it is not an error."""
-
-    @pytest.mark.parametrize("pattern", ["!a/**", "nothing/**", "nothing/*/*", "no-such-dir/*/x/*"])
-    def test_an_absent_literal_prefix_yields_nothing(self, pattern: str) -> None:
-        assert list(shell_expansion.bounded_recursive_glob(Path("/"), pattern)) == []
-
-    @pytest.mark.parametrize("pattern", ["**", "*/*", "**/x", "*/*/y"])
-    def test_a_broad_glob_with_no_literal_prefix_still_fails_closed(self, pattern: str) -> None:
-        with pytest.raises(shell_expansion.TooManyToEnumerateError):
-            list(shell_expansion.bounded_recursive_glob(Path("/"), pattern))
-
-    def test_a_broad_glob_under_an_existing_prefix_at_the_root_still_fails_closed(self) -> None:
-        with pytest.raises(shell_expansion.TooManyToEnumerateError):
-            list(shell_expansion.bounded_recursive_glob(Path("/"), "usr/**"))
-
-
 class TestQuarantineGuardUsesPayloadCwd:
     """Issue #64."""
 
@@ -106,11 +87,10 @@ class TestQuarantineGuardUsesPayloadCwd:
         self, tmp_path: Path
     ) -> None:
         (tmp_path / "report-opus-security-DETAIL.md").write_text("x")
-        decision, reason = _through_chain(
+        decision, _ = _through_chain(
             QuarantineArtefactReadGuardHandler(), "cat *-opus-security-DETAIL*", tmp_path
         )
         assert decision == Decision.DENY
-        assert RuleID.QUARANTINE_ARTEFACT_READ_EVALUATION_ERROR not in reason
 
     def test_a_recursive_glob_reaching_an_artefact_below_the_payload_cwd_is_denied(
         self, tmp_path: Path
@@ -135,11 +115,8 @@ class TestSecretGuardUsesPayloadCwd:
         self, tmp_path: Path
     ) -> None:
         (tmp_path / _PROTECTED).write_text("x")
-        decision, reason = _through_chain(
-            SecretFileGuardHandler(), f"cat {_PROTECTED[:-1]}*", tmp_path
-        )
+        decision, _ = _through_chain(SecretFileGuardHandler(), f"cat {_PROTECTED[:-1]}*", tmp_path)
         assert decision == Decision.DENY
-        assert RuleID.SECRET_EVALUATION_ERROR not in reason
 
     def test_an_unquoted_glob_reaching_a_protected_file_below_the_cwd_is_denied(
         self, tmp_path: Path

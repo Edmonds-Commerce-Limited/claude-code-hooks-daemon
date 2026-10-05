@@ -104,10 +104,7 @@ class TestHandlerIdentity:
         assert handler.terminal is True
 
     def test_it_exposes_its_rule(self, handler: ProjectContainmentHandler) -> None:
-        assert [rule.rule_id for rule in handler.get_rules()] == [
-            RuleID.WRITE_OUTSIDE_PROJECT_ROOT,
-            RuleID.PROJECT_CONTAINMENT_EVALUATION_ERROR,
-        ]
+        assert [rule.rule_id for rule in handler.get_rules()] == [RuleID.WRITE_OUTSIDE_PROJECT_ROOT]
 
 
 class TestTheWriteEditSurface:
@@ -427,14 +424,16 @@ class TestUnexpandableTokensAreDeclinedNotFabricated:
     def test_an_unexpandable_token_is_declined_not_fabricated(
         self, handler: ProjectContainmentHandler, label: str, command: str
     ) -> None:
-        """No path is fabricated, and since round 12 (N215) the token is not
-        allowed either: where it writes is unknown, so it is denied as
-        written, never as a cwd-joined path."""
+        """No path is fabricated, and the token is not denied either (Plan 00483
+        A1): where it writes is unknown, so the call is allowed with an advisory
+        saying so, never judged as a cwd-joined path."""
         hook_input = _bash(command, cwd="/tmp/work")
         assert handler.matches(hook_input) is True, label
-        reason = handler.handle(hook_input).reason or ""
-        assert "/tmp/work/" not in reason, f"{label} was fabricated into a path"
-        assert "unknown until the command runs" in reason, label
+        result = handler.handle(hook_input)
+        assert result.decision == Decision.ALLOW, label
+        assert result.context, label
+        assert "/tmp/work/" not in result.context[0], f"{label} was fabricated into a path"
+        assert "unknown until the command runs" in result.context[0], label
 
     def test_a_leading_tilde_is_EXPANDED_rather_than_declined(
         self, handler: ProjectContainmentHandler, monkeypatch: pytest.MonkeyPatch
@@ -731,18 +730,11 @@ class TestTheDenial:
         assert handler.handle(_write("/repo/README.md")).decision == Decision.ALLOW
 
 
-class TestFailsClosedOnEvaluationError:
-    """Plan 00466 N11 (major M4): audited alongside secret_file_guard.
+class TestEvaluationErrorIsAnAdvisory:
+    """Plan 00466 N11 and Plan 00483 A1: `matches()`/`handle()` never propagate an
+    exception, and an exception never denies: the call is allowed with an advisory."""
 
-    `_resolved_root()` calls `ProjectContext.project_root()` directly with no
-    try/except -- an uninitialised `ProjectContext` raises `RuntimeError`
-    there, uncaught, which `core/chain.py`'s per-handler catch treats as "did
-    not match" under the daemon's default (non-strict) `strict_mode`,
-    fail-opening this SAFETY+BLOCKING guard for that call. Fixed the same way
-    as `secret_file_guard`: `matches()`/`handle()` never propagate.
-    """
-
-    def test_an_uninitialised_project_root_still_denies(
+    def test_an_uninitialised_project_root_is_an_advisory(
         self, handler: ProjectContainmentHandler, _project_root: Any
     ) -> None:
         """Reconfigures the class-wide `_project_root` fixture's OWN mock
@@ -757,29 +749,23 @@ class TestFailsClosedOnEvaluationError:
 
         assert handler.matches(hook_input) is True
         result = handler.handle(hook_input)
-        assert result.decision == Decision.DENY
-        assert result.reason is not None
-        assert "RuntimeError" in result.reason
+        assert result.decision == Decision.ALLOW
+        assert result.context
+        assert "could NOT fully judge" in result.context[0]
+        assert "RuntimeError" in result.context[0]
 
-    def test_an_evaluation_error_denial_uses_its_own_rule_id(
+    def test_the_advisory_never_echoes_the_exception_message(
         self, handler: ProjectContainmentHandler, _project_root: Any
     ) -> None:
-        """Same fixture-reconfiguration fix as the test above (N39)."""
-
-        def _raise() -> Path:
-            raise RuntimeError("synthetic")
-
-        _project_root.side_effect = _raise
+        _project_root.side_effect = RuntimeError("a message that must never be echoed")
         result = handler.handle(_write("/tmp/notes.md"))
 
-        assert result.reason is not None
-        assert result.reason.startswith(f"BLOCKED [{RuleID.PROJECT_CONTAINMENT_EVALUATION_ERROR}]")
+        assert result.decision == Decision.ALLOW
+        assert "must never be echoed" not in " ".join(result.context or [])
+        assert "must never be echoed" not in (result.guidance or "")
 
-    def test_get_rules_includes_the_evaluation_error_rule(
-        self, handler: ProjectContainmentHandler
-    ) -> None:
-        rule_ids = {rule.rule_id for rule in handler.get_rules()}
-        assert RuleID.PROJECT_CONTAINMENT_EVALUATION_ERROR in rule_ids
+    def test_only_the_finding_rule_is_declared(self, handler: ProjectContainmentHandler) -> None:
+        assert {rule.rule_id for rule in handler.get_rules()} == {RuleID.WRITE_OUTSIDE_PROJECT_ROOT}
 
 
 class TestDispatchKeyMalformedToolInput:
@@ -849,11 +835,11 @@ class TestMatchesAndHandleShareOneEvaluation:
 
         with patch.object(ProjectContainmentHandler, "_resolved_root", staticmethod(_flaky)):
             hook_input = _write("/tmp/notes.md")
-            assert handler.matches(hook_input) is True  # error route
+            assert handler.matches(hook_input) is True  # advisory route
             result = handler.handle(hook_input)
-        assert result.decision == Decision.DENY
-        assert result.reason is not None
-        assert "RuntimeError" in result.reason
+        assert result.decision == Decision.ALLOW
+        assert result.context
+        assert "RuntimeError" in result.context[0]
 
 
 class TestChainLevelFailClosedBehaviour:
@@ -877,7 +863,7 @@ class TestChainLevelFailClosedBehaviour:
         result = chain.execute(hook_input, strict_mode=False)
         assert result.result.decision == Decision.DENY
 
-    def test_an_evaluation_exception_still_denies_through_the_chain(
+    def test_an_evaluation_exception_is_an_allow_through_the_chain(
         self, handler: ProjectContainmentHandler, _project_root: Any
     ) -> None:
         """Reconfigures the class-wide `_project_root` fixture's OWN mock
@@ -893,7 +879,7 @@ class TestChainLevelFailClosedBehaviour:
         hook_input = _write("/tmp/notes.md")
 
         result = chain.execute(hook_input, strict_mode=False)
-        assert result.result.decision == Decision.DENY
+        assert result.result.decision == Decision.ALLOW
 
 
 class TestHandleTailFailsClosed:
@@ -921,7 +907,7 @@ class TestHandleTailFailsClosed:
         result = handler.handle(hook_input)
         assert result.decision == Decision.DENY
         assert result.reason is not None
-        assert "RuntimeError" in result.reason
+        assert "/tmp/notes.md" in result.reason
 
     def test_rule_formatter_exception_still_denies(
         self, handler: ProjectContainmentHandler, monkeypatch: pytest.MonkeyPatch
@@ -936,7 +922,7 @@ class TestHandleTailFailsClosed:
         result = handler.handle(hook_input)
         assert result.decision == Decision.DENY
         assert result.reason is not None
-        assert "RuntimeError" in result.reason
+        assert "/tmp/notes.md" in result.reason
 
     def test_unhashable_transcript_path_still_denies(
         self, handler: ProjectContainmentHandler
@@ -1293,7 +1279,7 @@ class TestAnUnresolvedRootDoesNotLockOutTargetlessCommands:
         assert handler.matches(_bash("git status")) is False
         _project_root.assert_not_called()
 
-    def test_a_targeted_command_still_fails_closed_when_the_root_is_unresolved(
+    def test_a_targeted_command_is_an_advisory_when_the_root_is_unresolved(
         self, handler: ProjectContainmentHandler, _project_root: Any
     ) -> None:
         _project_root.side_effect = RuntimeError(
@@ -1305,15 +1291,14 @@ class TestAnUnresolvedRootDoesNotLockOutTargetlessCommands:
 
         assert handler.matches(hook_input) is True
         result = handler.handle(hook_input)
-        assert result.decision == Decision.DENY
-        assert result.reason is not None
-        assert result.reason.startswith(f"BLOCKED [{RuleID.PROJECT_CONTAINMENT_EVALUATION_ERROR}]")
+        assert result.decision == Decision.ALLOW
+        assert result.context
 
-    def test_a_raise_while_naming_targets_still_denies(
+    def test_a_raise_while_naming_targets_is_an_advisory(
         self, handler: ProjectContainmentHandler
     ) -> None:
-        """The early return sits inside the N11 wrapper, so a fault in
-        ``_named_targets`` itself is an evaluation error, never an empty list."""
+        """The early return sits inside the wrapper, so a fault in
+        ``_named_targets`` itself is an advisory, never an empty list."""
 
         def _raise(self: object, _hook_input: object) -> list[str]:
             raise RuntimeError("synthetic target-naming failure")
@@ -1322,7 +1307,8 @@ class TestAnUnresolvedRootDoesNotLockOutTargetlessCommands:
             hook_input = _bash("git status")
             assert handler.matches(hook_input) is True
             result = handler.handle(hook_input)
-        assert result.decision == Decision.DENY
+        assert result.decision == Decision.ALLOW
+        assert result.context
 
 
 class TestProjectRootDoublePatchDoesNotLeakAcrossFiles:
@@ -1338,8 +1324,8 @@ class TestProjectRootDoublePatchDoesNotLeakAcrossFiles:
     def test_the_polluter_and_a_victim_pass_together_in_one_process(self) -> None:
         polluter = (
             "tests/unit/handlers/pre_tool_use/test_project_containment.py"
-            "::TestFailsClosedOnEvaluationError"
-            "::test_an_uninitialised_project_root_still_denies"
+            "::TestEvaluationErrorIsAnAdvisory"
+            "::test_an_uninitialised_project_root_is_an_advisory"
         )
         victim = (
             "tests/unit/handlers/test_absolute_path.py"
@@ -1360,7 +1346,7 @@ class TestProjectRootDoublePatchDoesNotLeakAcrossFiles:
         assert "2 passed" in completed.stdout
 
 
-class TestUnreadableCommandTextFailsClosed:
+class TestUnreadableCommandText:
     """Plan 00466 N120: bash runs every complete command before one it cannot
     parse, and text the tokeniser cannot read may write anywhere. Judged
     through ``HandlerChain`` with the client-default non-strict mode.
@@ -1412,13 +1398,13 @@ class TestUnreadableCommandTextFailsClosed:
         result = self._decide(handler, f"cat > /repo/o.md <<{opener}\nit's done\n{closer}")
         assert result.decision == Decision.ALLOW
 
-    def test_an_unterminated_ansi_c_string_denies_as_unreadable(
+    def test_an_unterminated_ansi_c_string_is_an_advisory(
         self, handler: ProjectContainmentHandler
     ) -> None:
         result = self._decide(handler, "echo $'it > /opt/x")
-        assert result.decision == Decision.DENY
-        assert RuleID.PROJECT_CONTAINMENT_EVALUATION_ERROR in (result.reason or "")
-        assert "could not be read" in (result.reason or "")
+        assert result.decision == Decision.ALLOW
+        assert result.context
+        assert "could not be read" in result.context[0]
 
     @pytest.mark.parametrize(
         "command",
@@ -1451,12 +1437,13 @@ class TestUnreadableCommandTextFailsClosed:
     ) -> None:
         assert self._decide(handler, command).decision == Decision.ALLOW
 
-    def test_an_unreadable_tail_after_an_in_root_write_denies(
+    def test_an_unreadable_tail_after_an_in_root_write_is_an_advisory(
         self, handler: ProjectContainmentHandler
     ) -> None:
         result = self._decide(handler, 'echo x > /repo/in.md\nx="u')
-        assert result.decision == Decision.DENY
-        assert RuleID.PROJECT_CONTAINMENT_EVALUATION_ERROR in (result.reason or "")
+        assert result.decision == Decision.ALLOW
+        assert result.context
+        assert "could not be read" in result.context[0]
 
     def test_an_unreadable_heredoc_body_does_not_deny(
         self, handler: ProjectContainmentHandler
@@ -1497,10 +1484,10 @@ class TestUnreadableCommandTextFailsClosed:
     ) -> None:
         assert self._decide(handler, command).decision == Decision.ALLOW
 
-    def test_a_body_that_never_closes_denies_as_unreadable(
+    def test_a_body_that_never_closes_is_an_advisory(
         self, handler: ProjectContainmentHandler
     ) -> None:
         result = self._decide(handler, "cat > /repo/a.md <<EOF\nbody\necho hi > /opt/x")
-        assert result.decision == Decision.DENY
-        assert RuleID.PROJECT_CONTAINMENT_EVALUATION_ERROR in (result.reason or "")
-        assert "unbalanced quote or heredoc" in (result.reason or "")
+        assert result.decision == Decision.ALLOW
+        assert result.context
+        assert "unbalanced quote or heredoc" in result.context[0]

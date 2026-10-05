@@ -847,10 +847,18 @@ What this decides:
 
 **What this ruling does not change:**
 
-- A guard that cannot read what it judges still fails closed. That covers
-  `R-SECRET-COMMAND-UNREADABLE`, the `*-EVALUATION-ERROR` rules and `JUDGED UNSEEN`. The
-  ruling caps what a guard must catch; it does not oblige a guard to allow what it cannot see.
-  The same shape can be dismissed for one gate and denied by another, and both are right.
+- The secret-file, quarantine-artefact and project-containment guards deny only on a positive
+  finding. When one cannot read what it judges, or its scan hits a cap, the deadline or an
+  internal error, it does not deny: it allows the call with a loud advisory that says what was
+  not checked (owner ruling A1, Plan 00483). A positive finding is a literal protected path or
+  name in the command, or a protected file that a recursive read provably reaches. The secret
+  and quarantine guards judge the second by a cached index of protected files, built from
+  `git ls-files` at session start and refreshed in the background, and never by walking the
+  tree during a call. The ruling caps what a guard must catch: a deny that depends on something
+  the guard cannot see is a guess, and a guess costs ordinary work. A call that cannot be
+  judged is still covered by the commit gate, which scans what reaches git. Other guards keep
+  their own fail policy until the owner rules on them (`JUDGED UNSEEN` stays an advisory
+  unless a project opts into `unseen_policy: deny`).
 - No guard gains an escape hatch an agent can type (Plan 00259). An agent talking itself into
   an exception is the careless agent, not the hostile one.
 - Human-gated steps stay human-gated: release, `approve-upgrade`, and protected-path

@@ -159,7 +159,8 @@ other than defeating a parser. Everything else, every ordinary respelling includ
   or `--regexp`, and the pattern of `git grep`, is text and not a glob of a protected name. File
   operands, `--include` values, revisions and pathspecs stay judged as paths. Tests pin the
   reported `'.*WORD'` shapes, which had been allowed on main without any test.
-- [ ] ⬜ **Task 3.3**: Bring the owner's removal decisions on out-of-scope-only code into
+- [x] ✅ **Task 3.3**: (A1, A2, R2 done: guards deny only on a finding, a protected-file index replaces the
+  bare-glob expansion and the tree walk, the ordinary-command regression gate is green, all xfails flipped.) Bring the owner's removal decisions on out-of-scope-only code into
   effect, if any were taken. **Owner ruling (2026-10-05):** remove the whole R4 table, and
   amend the fail-closed rule (R3); unblocked, see [OWNER-RULINGS-261005.md](OWNER-RULINGS-261005.md) (A1, A2).
 

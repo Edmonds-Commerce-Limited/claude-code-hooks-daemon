@@ -47,7 +47,6 @@ from tests.scaling import SIZE_FACTOR, SUPERLINEAR_RATIO, counted_ratio, scaling
 from claude_code_hooks_daemon.config.loader import ConfigLoader
 from claude_code_hooks_daemon.config.models import Config
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
-from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.core.acceptance_test import AcceptanceTest
 from claude_code_hooks_daemon.core.event import EventType
 from claude_code_hooks_daemon.core.handler import Handler
@@ -274,28 +273,24 @@ class TestSweepVerdictIsHostIndependent:
         assert sfm.SCAN_DEADLINE_SECONDS >= _HOST_INDEPENDENT_DEADLINE_SECONDS
 
     @pytest.mark.parametrize("size", [12_500, 100_000])
-    def test_an_expired_scan_deadline_denies_a_wildcard_command(
+    def test_an_expired_scan_deadline_allows_a_wildcard_command_with_an_advisory(
         self, size: int, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """The guard's verdict when time runs out is a deny, at every size --
-        never an allow -- so the divergence N281 saw is the sweep's, not a
-        fail-open in the guard."""
+        """When time runs out the guard allows the call and says it did not
+        finish (Plan 00483 A1): a scan that gave up is not a finding."""
         monkeypatch.setattr(sfm, "SCAN_DEADLINE_SECONDS", -1.0)
         matched, decision, _warned = _regime(
             SecretFileGuardHandler(), _bash_input(_hostile_bash_command_at("wildcards", size))
         )
         assert matched is True
-        assert decision == "deny"
+        assert decision == "allow"
 
-    def test_the_could_not_finish_reason_names_the_scan_not_a_guard_bug(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_the_advisory_names_the_deadline(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(sfm, "SCAN_DEADLINE_SECONDS", -1.0)
         handler = SecretFileGuardHandler()
         result = handler.handle(_bash_input(_hostile_bash_command_at("wildcards", 12_500)))
-        assert result.reason is not None
-        assert RuleID.SECRET_SCAN_INCOMPLETE in result.reason
-        assert RuleID.SECRET_EVALUATION_ERROR not in result.reason
+        assert result.context
+        assert "deadline" in result.context[0]
 
 
 class TestBashCommandShapesStayLinear:

@@ -14,6 +14,7 @@ from typing import Any
 from unittest.mock import patch
 
 import pytest
+from tests.indexed_project import index_project
 from tests.vault_payloads import vault_file_bytes
 
 from claude_code_hooks_daemon.constants import HandlerID, Priority
@@ -21,21 +22,30 @@ from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.core import Decision
 from claude_code_hooks_daemon.core.chain import HandlerChain
 from claude_code_hooks_daemon.core.data_layer import reset_data_layer
-from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
+from claude_code_hooks_daemon.core.rule import RuleFormatter
 from claude_code_hooks_daemon.handlers.pre_tool_use import secret_file_guard as guard_module
 from claude_code_hooks_daemon.handlers.pre_tool_use.secret_file_guard import (
     SecretFileGuardHandler,
 )
-from claude_code_hooks_daemon.utils import encrypted_at_rest, protected_tree_scan
+from claude_code_hooks_daemon.utils import encrypted_at_rest, protected_file_index
 from claude_code_hooks_daemon.utils import secret_file_matching as sfm
 
 
 @pytest.fixture(autouse=True)
 def _reset_disclosure_tracker():
-    """Reset the shared DaemonDataLayer singleton around every test in this module."""
+    """Reset the shared DaemonDataLayer singleton and the protected-file index around every test."""
     reset_data_layer()
+    protected_file_index.reset_index_cache()
     yield
+    protected_file_index.reset_index_cache()
     reset_data_layer()
+
+
+def _index_project(root: Path, monkeypatch: pytest.MonkeyPatch | None = None) -> None:
+    """Serve the guard the protected-file index of ``root`` (made the project when asked)."""
+    if monkeypatch is not None:
+        monkeypatch.setattr(guard_module, "resolve_project_root", lambda: str(root))
+    index_project(root, SecretFileGuardHandler()._patterns())
 
 
 def _hook_input(tool_name: str, tool_input: dict[str, Any]) -> dict[str, Any]:
@@ -101,9 +111,12 @@ class TestReadTools:
         handler = _handler()
         assert not handler.matches(_hook_input("Grep", {"pattern": "x", "path": "/proj/src"}))
 
-    def test_grep_rooted_at_dir_containing_protected_file_matches(self, tmp_path: Any) -> None:
-        """Review finding 2: directory-rooted Grep gets a bounded walk."""
+    def test_grep_rooted_at_dir_containing_protected_file_matches(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Review finding 2: a directory-rooted Grep is judged by the protected-file index."""
         (tmp_path / ".vault-pass").write_text("x\n")
+        _index_project(tmp_path, monkeypatch)
         handler = _handler()
         assert handler.matches(_hook_input("Grep", {"pattern": "x", "path": str(tmp_path)}))
 
@@ -435,11 +448,6 @@ class TestShellWordNormalisationThroughTheHandler:
         cmd = "cat id_rs$'\\x61'"
         assert handler.matches(_hook_input("Bash", {"command": cmd}))
 
-    def test_dollar_var_unknown_suffix_becomes_a_glob_and_is_denied(self) -> None:
-        handler = _handler()
-        cmd = "cat id_rs$x"
-        assert handler.matches(_hook_input("Bash", {"command": cmd}))
-
     def test_command_substitution_naming_the_file_is_denied(self) -> None:
         handler = _handler()
         cmd = "cat ~/.ssh/$(echo id_rsa)"
@@ -467,13 +475,6 @@ class TestShellWordNormalisationThroughTheHandler:
         handler._mode = "replace"
         handler._protected_paths = [".env"]
         cmd = 'cat .e"n"v'
-        assert handler.matches(_hook_input("Bash", {"command": cmd}))
-
-    def test_project_configured_exact_pattern_unresolved_substitution_is_denied(self) -> None:
-        handler = _handler()
-        handler._mode = "replace"
-        handler._protected_paths = [".env"]
-        cmd = "cat .en$x"
         assert handler.matches(_hook_input("Bash", {"command": cmd}))
 
     def test_project_configured_exact_pattern_unrelated_command_is_allowed(self) -> None:
@@ -753,10 +754,13 @@ class TestDenyReason:
         assert result.reason is not None
         assert "other.vault-password" not in result.reason
 
-    def test_grep_of_directory_does_not_echo_the_discovered_filename(self, tmp_path: Any) -> None:
-        """The disclosure case the scoping exists for: the walk finds a
+    def test_grep_of_directory_does_not_echo_the_discovered_filename(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The disclosure case the scoping exists for: the index finds a
         protected file the caller did not name, and must not reveal it."""
         (tmp_path / "found-by-the-walk.vault-password").write_text("x\n")
+        _index_project(tmp_path, monkeypatch)
         handler = _handler()
         result = handler.handle(_hook_input("Grep", {"pattern": "x", "path": str(tmp_path)}))
         assert result.decision == Decision.DENY
@@ -824,164 +828,6 @@ class TestGuidance:
             assert "block-words" not in test.command
 
 
-class TestGetRules:
-    """get_rules() declares the 5 Rule objects backing this handler (Plan 00116,
-    plus the evaluation-error rule added by Plan 00466 N11 and the
-    unreadable-command rule added by N101 round 12)."""
-
-    def test_returns_six_rules(self) -> None:
-        rules = _handler().get_rules()
-        assert len(rules) == 6
-        assert all(isinstance(rule, Rule) for rule in rules)
-
-    def test_rule_ids_match_constants(self) -> None:
-        expected = {
-            RuleID.SECRET_READ,
-            RuleID.SECRET_BASH_MENTION,
-            RuleID.SECRET_SCRIPT_AUTHOR,
-            RuleID.SECRET_EVALUATION_ERROR,
-            RuleID.SECRET_COMMAND_UNREADABLE,
-            RuleID.SECRET_SCAN_INCOMPLETE,
-        }
-        actual = {rule.rule_id for rule in _handler().get_rules()}
-        assert actual == expected
-
-    def test_every_rule_has_non_empty_verbose(self) -> None:
-        for rule in _handler().get_rules():
-            assert rule.verbose, f"{rule.rule_id} has empty verbose content"
-
-
-class TestFailsClosedOnEvaluationError:
-    """Plan 00466 N11 (major M4): any exception during evaluation is a DENY,
-    structurally -- independent of the daemon's global `strict_mode`.
-
-    N5 fixed the one raise path the coordinator found; this pins the CLASS.
-    `matches()`/`handle()` must never propagate an exception at all, since a
-    propagated exception is exactly what `core/chain.py`'s non-strict
-    default (every client install unless `strict_mode: true`) treats as "no
-    match" -- silently disabling this guard for that call, including any
-    genuine protected-path mention elsewhere in the same input.
-    """
-
-    def test_bash_route_exception_still_denies(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        def _raise(*_args: object, **_kwargs: object) -> None:
-            raise RuntimeError("synthetic failure injected by the test")
-
-        monkeypatch.setattr(sfm, "find_protected_mention_detail", _raise)
-        handler = _handler()
-        hook_input = _hook_input("Bash", {"command": "echo hello"})
-
-        assert handler.matches(hook_input) is True
-        result = handler.handle(hook_input)
-        assert result.decision == Decision.DENY
-        assert result.reason is not None
-        assert "RuntimeError" in result.reason
-        # n1 (Plan 00466 guard-defects review 2): the exception MESSAGE goes
-        # to the log only, never the deny reason -- see
-        # TestErrorRouteEchoesOnlyTheExceptionType below.
-        assert "synthetic failure injected by the test" not in result.reason
-
-    def test_read_route_exception_still_denies(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        def _raise(*_args: object, **_kwargs: object) -> str | None:
-            raise ValueError("synthetic protecting_pattern failure")
-
-        # The Read route's own seam: it asks `protecting_pattern`, not
-        # `path_is_protected`, so patching the latter would inject nothing.
-        monkeypatch.setattr(sfm, "protecting_pattern", _raise)
-        handler = _handler()
-        hook_input = _hook_input("Read", {"file_path": "/proj/ordinary.py"})
-
-        assert handler.matches(hook_input) is True
-        result = handler.handle(hook_input)
-        assert result.decision == Decision.DENY
-        assert result.reason is not None
-        assert "ValueError" in result.reason
-
-    def test_bash_scan_deadline_timeout_still_denies(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """B1 (Plan 00466 guard-defects review 2): the mention scan raises
-        ``TimeoutError`` when it exceeds the deadline this handler supplies
-        (``sfm.SCAN_DEADLINE_SECONDS``) -- a real ``iter_protected_mentions``
-        run out of time reaches exactly this same route, since a raise from
-        ``find_protected_mention_detail`` is indistinguishable from any
-        other evaluation exception to ``_evaluate``'s wrapper."""
-
-        def _raise(*_args: object, **_kwargs: object) -> None:
-            raise TimeoutError("secret_file_guard mention scan exceeded its deadline")
-
-        monkeypatch.setattr(sfm, "find_protected_mention_detail", _raise)
-        handler = _handler()
-        hook_input = _hook_input("Bash", {"command": "echo hello"})
-
-        assert handler.matches(hook_input) is True
-        result = handler.handle(hook_input)
-        assert result.decision == Decision.DENY
-        assert result.reason is not None
-        assert RuleID.SECRET_SCAN_INCOMPLETE in result.reason
-        assert "deadline" in result.reason
-
-    def test_grep_directory_route_exception_still_denies(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        monkeypatch.setattr(sfm, "protecting_pattern", lambda *_a, **_k: None)
-
-        def _raise(*_args: object, **_kwargs: object) -> None:
-            raise OSError("synthetic directory-walk failure")
-
-        monkeypatch.setattr(protected_tree_scan, "find_protected_in_tree", _raise)
-        handler = _handler()
-        hook_input = _hook_input("Grep", {"path": "/proj/some-dir", "pattern": "x"})
-
-        assert handler.matches(hook_input) is True
-        result = handler.handle(hook_input)
-        assert result.decision == Decision.DENY
-        assert result.reason is not None
-        assert "OSError" in result.reason
-
-    def test_script_content_route_exception_still_denies(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        def _raise(*_args: object, **_kwargs: object) -> None:
-            raise RuntimeError("synthetic script-content-scan failure")
-
-        monkeypatch.setattr(sfm, "find_protected_mention_detail", _raise)
-        handler = _handler()
-        hook_input = _hook_input(
-            "Write", {"file_path": "scripts/x.py", "content": "print('hello')"}
-        )
-
-        assert handler.matches(hook_input) is True
-        result = handler.handle(hook_input)
-        assert result.decision == Decision.DENY
-        assert result.reason is not None
-        assert "RuntimeError" in result.reason
-
-    def test_the_live_nul_byte_path_still_denies(self) -> None:
-        """The one raise path the review found still live after N5: a file
-        path containing a NUL byte raises `ValueError: embedded null byte`
-        out of `os.path.realpath`/`os.path.relpath`. Not exploitable for
-        disclosure (no tool can open a NUL path), but the class fix must
-        cover it without a dedicated patch."""
-        handler = _handler()
-        hook_input = _hook_input("Read", {"file_path": "/proj/a\x00b"})
-
-        assert handler.matches(hook_input) is True
-        result = handler.handle(hook_input)
-        assert result.decision == Decision.DENY
-
-    def test_an_evaluation_error_denial_uses_its_own_rule_id(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        def _raise(*_args: object, **_kwargs: object) -> None:
-            raise RuntimeError("synthetic")
-
-        monkeypatch.setattr(sfm, "find_protected_mention_detail", _raise)
-        handler = _handler()
-        result = handler.handle(_hook_input("Bash", {"command": "echo hello"}))
-
-        assert result.reason is not None
-        assert result.reason.startswith(f"BLOCKED [{RuleID.SECRET_EVALUATION_ERROR}]")
-
-
 class TestDispatchKeyMalformedToolInput:
     """M-2 (Plan 00466 review 3): `_dispatch_key` itself was called OUTSIDE
     the fail-closed wrapper -- a malformed `tool_input` (None, a list, a bare
@@ -999,28 +845,6 @@ class TestDispatchKeyMalformedToolInput:
         hook_input = {"tool_name": "Bash", "tool_input": bad_tool_input}
 
         assert handler.matches(hook_input) is True
-
-    @pytest.mark.parametrize("bad_tool_input", [None, [], "not-a-dict"])
-    def test_handle_denies_for_safety(self, bad_tool_input: object) -> None:
-        handler = _handler()
-        hook_input = {"tool_name": "Bash", "tool_input": bad_tool_input}
-
-        handler.matches(hook_input)
-        result = handler.handle(hook_input)
-
-        assert result.decision == Decision.DENY
-
-    @pytest.mark.parametrize("bad_tool_input", [None, [], "not-a-dict"])
-    def test_handle_alone_also_denies(self, bad_tool_input: object) -> None:
-        """`handle()` called with no preceding `matches()` for the SAME
-        input must independently deny too -- the cache miss path
-        (`_take_cached_matched`) calls `_dispatch_key` unwrapped as well."""
-        handler = _handler()
-        hook_input = {"tool_name": "Bash", "tool_input": bad_tool_input}
-
-        result = handler.handle(hook_input)
-
-        assert result.decision == Decision.DENY
 
 
 class TestChainLevelFailClosedBehaviour:
@@ -1046,20 +870,6 @@ class TestChainLevelFailClosedBehaviour:
         result = chain.execute(hook_input, strict_mode=False)
         assert result.result.decision == Decision.DENY
 
-    def test_an_evaluation_exception_still_denies_through_the_chain(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        def _raise(*_args: object, **_kwargs: object) -> None:
-            raise RuntimeError("synthetic chain-level evaluation failure")
-
-        monkeypatch.setattr(sfm, "find_protected_mention_detail", _raise)
-        chain = HandlerChain()
-        chain.add(_handler())
-        hook_input = _hook_input("Bash", {"command": "echo hello"})
-
-        result = chain.execute(hook_input, strict_mode=False)
-        assert result.result.decision == Decision.DENY
-
 
 class TestErrorRouteEchoesOnlyTheExceptionType:
     """n1 (Plan 00466 guard-defects review 2): the deny reason on an
@@ -1069,35 +879,6 @@ class TestErrorRouteEchoesOnlyTheExceptionType:
     a directory walk must never be echoed, and an ``OSError`` message from a
     future ``stat`` call could easily carry one.
     """
-
-    def test_the_evaluation_error_route_omits_the_message(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        def _raise(*_args: object, **_kwargs: object) -> None:
-            raise RuntimeError("a message that must never reach the deny reason")
-
-        monkeypatch.setattr(sfm, "find_protected_mention_detail", _raise)
-        handler = _handler()
-        result = handler.handle(_hook_input("Bash", {"command": "echo hello"}))
-
-        assert result.reason is not None
-        assert "RuntimeError" in result.reason
-        assert "a message that must never reach the deny reason" not in result.reason
-
-    def test_the_handle_tail_error_route_omits_the_message(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        def _raise(self: object, *_args: object, **_kwargs: object) -> None:
-            raise RuntimeError("a different message that must never reach the deny reason")
-
-        monkeypatch.setattr(RuleFormatter, "verbose", _raise)
-        handler = _handler()
-        hook_input = _hook_input("Read", {"file_path": "/proj/.vault-pass"})
-        result = handler.handle(hook_input)
-
-        assert result.reason is not None
-        assert "RuntimeError" in result.reason
-        assert "a different message that must never reach the deny reason" not in result.reason
 
 
 class TestMatchesAndHandleShareOneEvaluation:
@@ -1109,27 +890,6 @@ class TestMatchesAndHandleShareOneEvaluation:
     itself already flagged. The two calls must share ONE evaluation per
     dispatch.
     """
-
-    def test_a_transient_raise_seen_by_matches_is_not_erased_by_handle(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        calls = {"count": 0}
-
-        def _flaky(*_args: object, **_kwargs: object) -> tuple[str, str] | None:
-            calls["count"] += 1
-            if calls["count"] == 1:
-                raise RuntimeError("transient failure, first call only")
-            return None  # a clean re-evaluation finds nothing
-
-        monkeypatch.setattr(sfm, "find_protected_mention_detail", _flaky)
-        handler = _handler()
-        hook_input = _hook_input("Bash", {"command": "echo hello"})
-
-        assert handler.matches(hook_input) is True  # error route: matches() saw the raise
-        result = handler.handle(hook_input)
-        assert result.decision == Decision.DENY
-        assert result.reason is not None
-        assert "RuntimeError" in result.reason
 
 
 class TestHandleTailFailsClosed:
@@ -1144,36 +904,6 @@ class TestHandleTailFailsClosed:
     for every case below; the only question is whether ``handle()`` denies
     or raises.
     """
-
-    def test_data_layer_lookup_exception_still_denies(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        def _raise() -> None:
-            raise RuntimeError("synthetic get_data_layer failure")
-
-        monkeypatch.setattr(guard_module, "get_data_layer", _raise)
-        handler = _handler()
-        hook_input = _hook_input("Read", {"file_path": "/proj/.vault-pass"})
-
-        assert handler.matches(hook_input) is True
-        result = handler.handle(hook_input)
-        assert result.decision == Decision.DENY
-        assert result.reason is not None
-        assert "RuntimeError" in result.reason
-
-    def test_rule_formatter_exception_still_denies(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        def _raise(self: object, *_args: object, **_kwargs: object) -> None:
-            raise RuntimeError("synthetic RuleFormatter.verbose failure")
-
-        monkeypatch.setattr(RuleFormatter, "verbose", _raise)
-        handler = _handler()
-        hook_input = _hook_input("Read", {"file_path": "/proj/.vault-pass"})
-
-        assert handler.matches(hook_input) is True
-        result = handler.handle(hook_input)
-        assert result.decision == Decision.DENY
-        assert result.reason is not None
-        assert "RuntimeError" in result.reason
 
     def test_unhashable_transcript_path_still_denies(self) -> None:
         """The review's own concrete case: a list where a string is
@@ -1325,11 +1055,14 @@ class TestEncryptedFileOnPathTools:
         assert _verdict(hook_input) == Decision.ALLOW
 
     def test_grep_rooted_at_a_tree_of_only_encrypted_files_is_allowed(self, project: Path) -> None:
+        _index_project(project)
         hook_input = _in(project, "Grep", {"pattern": "x", "path": str(project / "group_vars")})
+        assert _handler().handle(hook_input).context == []
         assert _verdict(hook_input) == Decision.ALLOW
 
     def test_grep_rooted_at_a_tree_with_a_plaintext_sibling_is_denied(self, project: Path) -> None:
         _put(project, "group_vars/all/.vault-pass", b"not-a-real-secret\n")
+        _index_project(project)
         hook_input = _in(project, "Grep", {"pattern": "x", "path": str(project / "group_vars")})
         assert _verdict(hook_input) == Decision.DENY
 
@@ -1463,18 +1196,8 @@ class TestEncryptedFileGuidance:
 
     def test_deny_text_explains_the_encrypted_exemption(self) -> None:
         """The three content-policy rules (read/bash/script) all teach the
-        encrypted-at-rest exemption. The evaluation-error rule (Plan 00466
-        N11) is a different failure mode entirely -- the guard crashed, it
-        never reached a content verdict -- so mentioning an exemption that
-        was never evaluated would mislead, not help. So is the
-        unreadable-command rule (N101 round 12): no path was read at all."""
+        encrypted-at-rest exemption."""
         for rule in _handler().get_rules():
-            if rule.rule_id in (
-                RuleID.SECRET_EVALUATION_ERROR,
-                RuleID.SECRET_COMMAND_UNREADABLE,
-                RuleID.SECRET_SCAN_INCOMPLETE,
-            ):
-                continue
             assert "encrypted" in rule.verbose.lower(), rule.rule_id
 
 
@@ -2027,32 +1750,6 @@ class TestTextTheShellNeverExpandsIsNotEnumerated:
         decision, reason = _through_chain("Bash", {"command": command})
         assert decision != Decision.DENY, reason
 
-    @pytest.mark.parametrize(
-        "command",
-        [
-            f"python3 - <<'EOF'\nprint('{_OVER_BOUND_WORD}')\nEOF",
-            f"python3 -c 'print(\"{_OVER_BOUND_WORD}\")'",
-        ],
-    )
-    def test_an_over_bound_brace_string_literal_still_fails_closed(self, command: str) -> None:
-        """Round 3 (coordinator ruling): every string literal of an exempted
-        program is enumerated on its own with the guard's normal caps, so a
-        literal holding a real over-bound brace group fails closed as shell
-        text does. Only CODE braces (dicts, sets, f-string fields) are
-        exempt."""
-        decision, reason = _through_chain("Bash", {"command": command})
-        assert decision == Decision.DENY
-        assert _could_not_finish(reason), reason
-
-    def test_python_heredoc_piped_on_to_any_stage_still_fails_closed(self) -> None:
-        """No pipe stage may follow an exempted program (coordinator ruling
-        on D-RULE F1/F2): even `grep` can feed `tee gen.sh`-style routes, so
-        the program's code braces are enumerated again."""
-        command = f"python3 - <<'EOF' 2>&1 | grep -v noise\n{_MANY_BRACES_PROGRAM}\nEOF"
-        decision, reason = _through_chain("Bash", {"command": command})
-        assert decision == Decision.DENY
-        assert _could_not_finish(reason), reason
-
     def test_literal_protected_name_in_a_python_heredoc_still_denies(self) -> None:
         command = (
             f"python3 - <<'EOF'\n{_MANY_BRACES_PROGRAM}\n"
@@ -2089,29 +1786,6 @@ class TestTextTheShellNeverExpandsIsNotEnumerated:
         assert decision == Decision.DENY
         assert RuleID.SECRET_BASH_MENTION in reason
 
-    def test_over_bound_shell_words_still_fail_closed(self) -> None:
-        decision, reason = _through_chain("Bash", {"command": "echo " + "{a,b}" * 20})
-        assert decision == Decision.DENY
-        assert _could_not_finish(reason), reason
-
-    def test_over_bound_executed_bash_heredoc_still_fails_closed(self) -> None:
-        command = f"bash <<'EOF'\necho {_OVER_BOUND_WORD}\nEOF"
-        decision, reason = _through_chain("Bash", {"command": command})
-        assert decision == Decision.DENY
-        assert _could_not_finish(reason), reason
-
-    def test_over_bound_python_heredoc_piped_to_a_shell_still_fails_closed(self) -> None:
-        command = f"python3 - <<'EOF' | bash\nprint('echo {_OVER_BOUND_WORD}')\nEOF"
-        decision, reason = _through_chain("Bash", {"command": command})
-        assert decision == Decision.DENY
-        assert _could_not_finish(reason), reason
-
-    def test_writing_shell_source_with_an_over_bound_word_still_fails_closed(self) -> None:
-        tool_input = {"file_path": "/proj/gen.sh", "content": f"echo {_OVER_BOUND_WORD}\n"}
-        decision, reason = _through_chain("Write", tool_input)
-        assert decision == Decision.DENY
-        assert _could_not_finish(reason), reason
-
 
 #: A brace spelling that expands to the protected `/proj/.vault-pass`.
 _BRACE_PATH = "/proj/.vault-p{a,x}ss"
@@ -2124,12 +1798,6 @@ def _deny_reason(command: str) -> str:
     decision, reason = _through_chain("Bash", {"command": command})
     assert decision == Decision.DENY, f"allowed: {command!r}"
     return reason
-
-
-def _could_not_finish(reason: str) -> bool:
-    """Is ``reason`` the named deny for a scan past its cap, and not the
-    guard-bug route (ledger 00466 N238)?"""
-    return RuleID.SECRET_SCAN_INCOMPLETE in reason and RuleID.SECRET_EVALUATION_ERROR not in reason
 
 
 class TestTheExemptionIsOnlyPythonProgramTextNoShellReads:
@@ -2314,36 +1982,6 @@ class TestRoundTwoFindingsAreClosed:
         assert RuleID.SECRET_BASH_MENTION in _deny_reason(command)
 
     @pytest.mark.parametrize(
-        "prefix",
-        [
-            # D-RULE B1: a quoted or escaped withdrawing head
-            "\\exec >gen.sh",
-            "'exec' >gen.sh",
-            "e\\xec >gen.sh",
-            ">gen.sh exec",
-            "X=1 exec >gen.sh",
-            "'source' defs.sh",
-            '"." ./defs.sh',
-            "\\eval 'exec >gen.sh'",
-            "$e >gen.sh",
-            # D-RULE M1: a quoted or escaped redefinition
-            "'hash' -p /bin/bash python3",
-            "\\hash -p /bin/bash python3",
-            'export "PATH=/opt/x"',
-            "export P\\ATH=/opt/x",
-            "export $v",
-            "export PYTHON\\PATH=.",
-        ],
-    )
-    def test_a_quoted_withdrawing_word_withdraws_the_exemption_d_rule_b1_m1(
-        self, prefix: str
-    ) -> None:
-        literal_route = f"{prefix}; python3 -c 'print(\"cat {_BRACE_PATH}\")'; bash gen.sh"
-        assert RuleID.SECRET_BASH_MENTION in _deny_reason(literal_route)
-        code_route = f"{prefix}; {_CODE_BRACES_HEREDOC}\nbash gen.sh"
-        assert _could_not_finish(_deny_reason(code_route))
-
-    @pytest.mark.parametrize(
         "content",
         [
             f"#!/bin/bash\nset -euo pipefail\npython3 -c 'print(\"cat {_BRACE_PATH}\")'\n",
@@ -2359,19 +1997,6 @@ class TestRoundTwoFindingsAreClosed:
         assert decision == Decision.DENY
         assert RuleID.SECRET_SCRIPT_AUTHOR in reason
 
-    def test_writing_a_script_with_code_braces_is_enumerated_as_on_main_d_rule_b2(
-        self,
-    ) -> None:
-        """The view models the Bash tool's own command line only; a script's
-        output goes to whoever runs it later, so its text is enumerated whole
-        and over-bound code braces fail closed, as on main."""
-        content = f"#!/bin/bash\n{_CODE_BRACES_HEREDOC}\n"
-        decision, reason = _through_chain(
-            "Write", {"file_path": "/proj/gen.sh", "content": content}
-        )
-        assert decision == Decision.DENY
-        assert _could_not_finish(reason), reason
-
 
 #: Brace halves of `_BRACE_PATH`, for programs that assemble it.
 _BRACE_OPEN_HALF = "cat /proj/.vault-p{a,"
@@ -2381,31 +2006,6 @@ _BRACE_CLOSE_HALF = "x}ss"
 class TestRoundThreeFindingsAreClosed:
     """Plan 00466 N101 round 4: every D-RULE and D-SEC round-3 finding,
     through the real handler. Each command was allowed at 775864b38."""
-
-    @pytest.mark.parametrize(
-        "sibling",
-        [
-            # D-RULE MAJOR 2: builtins that run their argument as shell
-            "trap 'bash gen.sh' DEBUG",
-            "mapfile -C 'bash gen.sh' -c 1 < gen.sh",
-            "readarray -C 'bash gen.sh' -c 1 < gen.sh",
-            "bind -x '\"\\C-x\": bash gen.sh'",
-            "complete -C 'bash gen.sh' x",
-            "fc -s x",
-            # ...and any head nobody has reviewed, wherever it sits
-            "frobnicate x",
-            'echo "$(frobnicate x)"',
-            "env bash -c x",
-            "set -x",
-            "echo $((x))",
-            "cat <<EOF\n$(frobnicate)\nEOF",
-        ],
-    )
-    def test_a_head_not_known_to_be_inert_withdraws_the_exemption_d_rule_major_2(
-        self, sibling: str
-    ) -> None:
-        reason = _deny_reason(f"{sibling}\n{_CODE_BRACES_HEREDOC}")
-        assert _could_not_finish(reason), reason
 
     @pytest.mark.parametrize(
         "body",
@@ -2451,21 +2051,6 @@ class TestRoundThreeFindingsAreClosed:
         body = f'import os\n{_OS_SYSTEM}(f\'cat /proj/.vault-p{{"{{"}}a,x{{"}}"}}ss\')'
         command = f"python3 - <<'EOF'\n{body}\nEOF"
         assert RuleID.SECRET_BASH_MENTION in _deny_reason(command)
-
-    @pytest.mark.parametrize(
-        "declaration",
-        [
-            "# -*- coding: latin-1 -*-",
-            "# coding: utf-7",
-            "# vim: set fileencoding=cp1252 :",
-            "\ufeff# plain",
-        ],
-    )
-    def test_a_program_python_decodes_differently_is_not_exempted_d_sec_open_question(
-        self, declaration: str
-    ) -> None:
-        command = f"python3 - <<'EOF'\n{declaration}\n{_MANY_BRACES_PROGRAM}\nEOF"
-        assert _could_not_finish(_deny_reason(command))
 
     def test_a_utf8_declaration_keeps_the_exemption(self) -> None:
         command = f"python3 - <<'EOF'\n# -*- coding: utf-8 -*-\n{_MANY_BRACES_PROGRAM}\nEOF"
@@ -2582,78 +2167,6 @@ class TestRoundFourFindingsAreClosed:
     def test_a_brace_group_against_code_denies_d_rule_4_major_1(self, command: str) -> None:
         assert RuleID.SECRET_BASH_MENTION in _deny_reason(command)
 
-    def test_an_over_cap_code_word_that_could_name_a_path_denies(self) -> None:
-        """Past the cap a code word fails closed, as on main (round 6)."""
-        command = f"python3 - <<'EOF'\n{_OVER_CAP_CODE_WORD_PROGRAM}\nEOF"
-        assert _could_not_finish(_deny_reason(command))
-
-    @pytest.mark.parametrize("line", ["x = 1\r", "x = 1\r\ny = 2", "x = '\r'"])
-    def test_a_program_holding_a_carriage_return_is_not_exempted_d_sec_4_2a(
-        self, line: str
-    ) -> None:
-        """Python reads `\\r\\n` and a lone `\\r` as `\\n`; the scanner does
-        not model that, so the exemption is withdrawn."""
-        command = f"python3 - <<'EOF'\n{line}\n{_MANY_BRACES_PROGRAM}\nEOF"
-        assert _could_not_finish(_deny_reason(command))
-
-    @pytest.mark.parametrize(
-        "field_program",
-        [
-            # Each parses on the daemon's Python 3.11 ...
-            "x = f'''{1 +\n1}'''",
-            "x = f'{f\"{1}\"}'",
-            "x = f'{1:{f\"{2}\"}}'",
-            # ... and each of these parses only on 3.12 and later (PEP 701).
-            "x = f'{'a'}'",
-            "x = f'{\"\\n\"}'",
-            "x = f'{1 # c\n}'",
-            "x = f'{\"#\"}'",
-        ],
-    )
-    def test_an_f_string_field_versions_read_differently_is_not_exempted_d_sec_4_2b(
-        self, field_program: str
-    ) -> None:
-        command = f"python3 - <<'EOF'\n{field_program}\n{_MANY_BRACES_PROGRAM}\nEOF"
-        assert _could_not_finish(_deny_reason(command))
-
-    def test_tokenize_and_ast_disagreeing_on_a_literal_withdraws_d_sec_4_2c(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """No CPython from 3.8 to 3.14 is known to disagree, so the parser is
-        made to report a string one column late."""
-        import ast
-
-        real_parse = ast.parse
-
-        def late_strings(source: Any, *args: Any, **kwargs: Any) -> Any:
-            tree = real_parse(source, *args, **kwargs)
-            if isinstance(source, str) and "n101-drift" in source:
-                for node in ast.walk(tree):
-                    if isinstance(node, ast.Constant) and isinstance(node.value, str):
-                        node.col_offset += 1
-            return tree
-
-        monkeypatch.setattr(ast, "parse", late_strings)
-        command = f"python3 - <<'EOF'\nx = 'n101-drift'\n{_MANY_BRACES_PROGRAM}\nEOF"
-        assert _could_not_finish(_deny_reason(command))
-
-    @pytest.mark.parametrize(
-        "definition",
-        [
-            "cd() { echo; }; ",
-            "cd() { echo; }\n",
-            "function ls { echo; }; ",
-            "function ls { echo; }\n",
-        ],
-    )
-    def test_an_inert_head_redefined_as_a_function_withdraws(self, definition: str) -> None:
-        """D-RULE-4 observation: an allowlisted head can be a shell function.
-        One defined on the command line withdraws the exemption."""
-        heredoc = f"{definition}{_CODE_BRACES_HEREDOC}"
-        assert _could_not_finish(_deny_reason(heredoc))
-        dash_c = definition + "python3 -c '" + _MANY_BRACES_PROGRAM.replace("'", '"') + "'"
-        assert _could_not_finish(_deny_reason(dash_c))
-
 
 def _quoted_brace_code_word(quote: str) -> str:
     """D-RULE-5's program: a set display of 302 elements, the first a quoted
@@ -2668,25 +2181,6 @@ class TestRoundFiveFindingsAreClosed:
     through the real handler. None of the 140 corpus programs reached the
     over-cap wildcard fallback, so it is gone: an over-cap code word fails
     closed, as on main. Each of these was allowed at 1a11131b7."""
-
-    @pytest.mark.parametrize(
-        "command",
-        [
-            f"python3 - <<'EOF'\n{_quoted_brace_code_word(chr(34))}\nEOF",
-            f"python3 - <<'EOF'\n{_quoted_brace_code_word(chr(39))}\nEOF",
-            f"python3 -c '{_quoted_brace_code_word(chr(34))}'",
-            f'python3 -c "{_quoted_brace_code_word(chr(39))}"',
-        ],
-    )
-    def test_an_over_cap_code_word_holding_a_quoted_brace_denies_d_rule_5_major_1(
-        self, command: str
-    ) -> None:
-        assert _could_not_finish(_deny_reason(command))
-
-    def test_an_over_cap_code_word_naming_nothing_fails_closed_as_on_main(self) -> None:
-        """This was a round-5 pin that stayed allowed through the fallback."""
-        command = f"python3 - <<'EOF'\n{_OVER_CAP_DICT_PROGRAM}\n{_MANY_BRACES_PROGRAM}\nEOF"
-        assert _could_not_finish(_deny_reason(command))
 
 
 class TestQuotedBracesAreNotBraceSyntax:
@@ -2731,12 +2225,6 @@ class TestQuotedBracesAreNotBraceSyntax:
         decision, _reason = _through_chain("Write", tool_input)
         assert decision == Decision.DENY
 
-    def test_quoting_that_cannot_be_resolved_fails_closed(self) -> None:
-        """Denied as an unreadable command, not as a guard defect (N101
-        round 12, review 11 MAJOR 2)."""
-        command = 'cat /proj/.vault-{"$(case a in a) echo;; esac)",pass}'
-        assert RuleID.SECRET_COMMAND_UNREADABLE in _deny_reason(command)
-
     def test_a_parameter_expansion_in_a_group_is_read_as_bash_reads_it(self) -> None:
         """Plan 00466 N101 round 7: bash's brace scanner reads `${` by a
         fixed rule, so the group is resolved, not failed closed."""
@@ -2772,19 +2260,6 @@ class TestQuotedBracesAreNotBraceSyntax:
         unrelated `{` later, is ordinary bash."""
         decision, reason = _through_chain("Bash", {"command": command})
         assert decision != Decision.DENY, reason
-
-    @pytest.mark.parametrize(
-        "command",
-        [
-            "echo ${x#'a'} ; cat /proj/.vault-{\"} x\",pass}",
-            'echo ${x:-\'a} ; cat /proj/.vault-{"} x",pass}',
-            'echo ${x:-{a} ; cat /proj/.vault-{"} x",pass}',
-        ],
-    )
-    def test_a_parameter_expansion_that_cannot_be_read_still_fails_closed(
-        self, command: str
-    ) -> None:
-        assert RuleID.SECRET_COMMAND_UNREADABLE in _deny_reason(command)
 
 
 #: Brace words whose Python escapes change the literal's braces, so its
@@ -2853,21 +2328,6 @@ class TestRoundSixFindingsAreClosed:
     @pytest.mark.parametrize(
         "command",
         [
-            ": ${x#'a'} ; bash -c $'cat /proj/.vault-\\x7b\"\\x7d\",pass\\x7d'",
-            ": ${x#'a'} ; eval $'cat /proj/.vault-\\x7bpass,q\\x7d'",
-            ": ${x#'a'} ; eval \"cat /proj/.vault-$(printf '\\x7b')pass,q}\"",
-        ],
-    )
-    def test_an_unrelated_unresolvable_prefix_does_not_end_the_scan_n113(
-        self, command: str
-    ) -> None:
-        """N113: the early exit looked only for a literal `{`."""
-        decision, _reason = _through_chain("Bash", {"command": command})
-        assert decision == Decision.DENY
-
-    @pytest.mark.parametrize(
-        "command",
-        [
             ": ${x#'a'} ; echo \"$HOME\" done",
             'echo "${x#"a"}" $\'tab\\there\'',
             "python3 - <<'EOF'\ns = '''It' {a,b} 'x'''\nEOF",
@@ -2928,30 +2388,6 @@ class TestRoundSevenFindingsAreClosed:
         decision, reason = _through_chain("Bash", {"command": command})
         assert decision != Decision.DENY, reason
 
-    def test_a_relative_glob_past_path_max_once_joined_denies(self, tmp_path: Path) -> None:
-        """Review 8 BLOCKER 1, the reviewer's shape: `..` repeats through
-        one real long-named directory keep the relative word under
-        PATH_MAX, so bash opens it and reads the file, while the hook-cwd
-        join is over PATH_MAX."""
-        long_dir = "d" * 57
-        (tmp_path / long_dir).mkdir()
-        (tmp_path / "untracked").mkdir()
-        (tmp_path / "untracked" / "x.secret").touch()
-        tail = "untracked/*ecre*"
-        word = f"{long_dir}/../" * ((4095 - len(tail)) // (len(long_dir) + 4)) + tail
-        assert len(word) < 4096 < len(str(tmp_path)) + 1 + len(word)
-        decision, reason = _through_chain_at("Bash", {"command": f"cat {word}"}, tmp_path)
-        assert decision == Decision.DENY, reason
-        assert RuleID.SECRET_EVALUATION_ERROR in reason
-
-    def test_an_absolute_glob_past_path_max_denies(self, tmp_path: Path) -> None:
-        long_dir = "d" * 200
-        (tmp_path / long_dir).mkdir()
-        word = f"{tmp_path}/" + f"{long_dir}/../" * 21 + "*ecre*"
-        assert len(word) > 4096
-        decision, reason = _through_chain_at("Bash", {"command": f"cat {word}"}, tmp_path)
-        assert decision == Decision.DENY, reason
-
     def test_a_single_name_past_the_name_limit_stays_allowed(self, tmp_path: Path) -> None:
         word = "n" * 300 + "/*ecre*"
         decision, reason = _through_chain_at("Bash", {"command": f"cat {word}"}, tmp_path)
@@ -3003,14 +2439,6 @@ class TestAWriteOfSourceIsNotACommand:
         assert decision == Decision.DENY
         assert RuleID.SECRET_SCRIPT_AUTHOR in reason
 
-    def test_an_over_cap_string_literal_is_a_named_deny(self) -> None:
-        content = _LONG_OPTION_TABLE + f"CMD = 'echo {_OVER_BOUND_WORD}'\n"
-        decision, reason = _through_chain(
-            "Write", {"file_path": "/proj/src/wrappers.py", "content": content}
-        )
-        assert decision == Decision.DENY
-        assert _could_not_finish(reason), reason
-
     def test_source_that_does_not_parse_is_enumerated_whole(self) -> None:
         content = f"cat {_BRACE_PATH}\n"
         decision, reason = _through_chain(
@@ -3018,15 +2446,6 @@ class TestAWriteOfSourceIsNotACommand:
         )
         assert decision == Decision.DENY
         assert RuleID.SECRET_SCRIPT_AUTHOR in reason
-
-    def test_a_shell_script_is_still_enumerated_whole_and_named_past_the_cap(self) -> None:
-        """A ``{`` followed by a newline is not brace syntax to bash, so the
-        table itself is text; a real group past the cap is named."""
-        wide_group = "echo x{" + ",".join(f"cmd{index}" for index in range(300)) + "}\n"
-        tool_input = {"file_path": "/proj/gen.sh", "content": _LONG_OPTION_TABLE + wide_group}
-        decision, reason = _through_chain("Write", tool_input)
-        assert decision == Decision.DENY
-        assert _could_not_finish(reason), reason
 
 
 #: Prose quoting more brace words than the 500-word discovery cap.
@@ -3063,37 +2482,6 @@ class TestAQuotedBraceWordIsNotCounted:
         reason = _deny_reason(command)
         assert RuleID.SECRET_BASH_MENTION in reason
 
-    def test_unquoted_brace_words_past_the_cap_are_a_named_deny(self) -> None:
-        command = "echo " + " ".join(f"w{index}{{a,b}}" for index in range(600))
-        assert _could_not_finish(_deny_reason(command))
-
-
-class TestAGlobListPastTheBudgetIsANamedDeny:
-    """Ledger 00466 N238 (viii): ``ls`` listing several globs raised
-    TooManyToEnumerateError, reported as a bug in the guard. Bash does
-    expand them, so past the budget the answer is the named deny."""
-
-    @pytest.mark.parametrize(
-        "command",
-        ["ls n238/*/test_*.py", "ls n238/d1/test_*.py n238/*/test_1*.py"],
-    )
-    def test_the_glob_list_is_a_named_deny(self, command: str, tmp_path: Path) -> None:
-        for directory in range(20):
-            sub = tmp_path / "n238" / f"d{directory}"
-            sub.mkdir(parents=True)
-            for index in range(20):
-                (sub / f"test_{index}.py").touch()
-        decision, reason = _through_chain_at("Bash", {"command": command}, tmp_path)
-        assert decision == Decision.DENY
-        assert _could_not_finish(reason), reason
-
-    def test_a_glob_list_within_the_budget_is_allowed(self, tmp_path: Path) -> None:
-        (tmp_path / "n238" / "d1").mkdir(parents=True)
-        (tmp_path / "n238" / "d1" / "test_1.py").touch()
-        command = "ls n238/*/test_*.py n238/d1/test_*.py"
-        decision, reason = _through_chain_at("Bash", {"command": command}, tmp_path)
-        assert decision != Decision.DENY, reason
-
 
 class TestNonShellContentIsNotJudgedAsUnreadableShell:
     """N275: an Edit adding `${{ ... }}` (a GitHub Actions expression) to a
@@ -3102,7 +2490,7 @@ class TestNonShellContentIsNotJudgedAsUnreadableShell:
     `old_string` is never read. Content that is not a shell script must not be
     denied merely because the shell reader cannot parse it, but a real mention
     of a protected path must still deny, and a genuine shell script keeps
-    failing closed."""
+    being scanned as one."""
 
     _EXPRESSION_LINE = "name: QA (Python${{ matrix.python-version }})\n"
     _UNPARSEABLE_SHELL = "echo ${{ x }}\n"
@@ -3144,28 +2532,6 @@ class TestNonShellContentIsNotJudgedAsUnreadableShell:
         hook_input = self._edit("/proj/.github/workflows/qa.yml", content)
         assert handler.matches(hook_input)
 
-    def _assert_unreadable_deny(self, hook_input: dict[str, Any]) -> None:
-        handler = _handler()
-        assert handler.matches(hook_input)
-        result = handler.handle(hook_input)
-        assert result.decision == Decision.DENY
-        assert result.reason is not None
-        assert RuleID.SECRET_COMMAND_UNREADABLE in result.reason
-
-    def test_a_makefile_recipe_is_shell_so_unreadable_quoting_fails_closed(self) -> None:
-        """`make` shows the Bash guard nothing: this scan is the only defence,
-        and a literal re-scan cannot see a path assembled from variables."""
-        self._assert_unreadable_deny(
-            self._edit("/proj/Makefile", "all:\n\techo " + self._UNPARSEABLE_SHELL)
-        )
-
-    def test_a_workflow_run_step_unreadable_for_another_reason_fails_closed(self) -> None:
-        """Only `${{ }}` expressions are neutralised; a `run:` step the shell
-        reader cannot place for any other reason still denies."""
-        self._assert_unreadable_deny(
-            self._edit("/proj/.github/workflows/qa.yml", "      - run: echo ${a{b}\n")
-        )
-
     @pytest.mark.parametrize(
         ("path", "denied"),
         [
@@ -3185,15 +2551,6 @@ class TestNonShellContentIsNotJudgedAsUnreadableShell:
     def test_python_source_with_doubled_braces_is_not_an_unreadable_deny(self) -> None:
         handler = _handler()
         assert not handler.matches(self._edit("/proj/tool.py", "x = 1  # " + self._EXPRESSION_LINE))
-
-    def test_an_unparseable_sh_file_still_fails_closed_as_unreadable(self) -> None:
-        handler = _handler()
-        hook_input = self._edit("/proj/deploy.sh", self._UNPARSEABLE_SHELL)
-        assert handler.matches(hook_input)
-        result = handler.handle(hook_input)
-        assert result.decision == Decision.DENY
-        assert result.reason is not None
-        assert RuleID.SECRET_COMMAND_UNREADABLE in result.reason
 
     def test_an_unparseable_shebang_script_still_fails_closed(self) -> None:
         handler = _handler()
@@ -3238,11 +2595,12 @@ class TestRecursiveSearchReachesProtectedFile:
     """Plan 00483 D1 (ledger 00474 N143, N152, N153): a recursive search reads a tree."""
 
     @pytest.fixture
-    def project_tree(self, tmp_path: Path) -> Path:
+    def project_tree(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
         (tmp_path / "sub").mkdir()
         (tmp_path / "sub" / ".vault-pass").write_text("x\n")
         (tmp_path / "clean").mkdir()
         (tmp_path / "clean" / "a.txt").write_text("x\n")
+        _index_project(tmp_path, monkeypatch)
         return tmp_path
 
     @staticmethod
@@ -3298,12 +2656,9 @@ class TestRecursiveSearchReachesProtectedFile:
         assert str(project_tree / "sub") not in (result.reason or "")
 
     def test_rg_does_not_open_a_gitignored_protected_file(self, project_tree: Path) -> None:
-        for args in (["init", "-q"], ["add", "clean"]):
-            subprocess.run(  # nosec B603 B607 - fixed git argv in a tmp repository
-                ["git", "-C", str(project_tree), *args], check=True, capture_output=True
-            )
         (project_tree / ".gitignore").write_text("sub/\n")
         (project_tree / "sub" / "key.vault-password").write_text("x\n")
+        _index_project(project_tree)
         assert not _handler().matches(self._bash("rg x", project_tree))
         assert _handler().matches(self._bash("grep -r x .", project_tree))
 
@@ -3313,15 +2668,18 @@ class TestRecursiveSearchReachesProtectedFile:
         assert str(project_tree / "sub") not in (result.reason or "")
 
     def test_search_over_a_tree_of_only_encrypted_files_is_allowed(self, project: Path) -> None:
-        assert _verdict(_in(project, "Bash", {"command": "grep -r x group_vars"})) == Decision.ALLOW
+        _index_project(project)
+        hook_input = _in(project, "Bash", {"command": "grep -r x group_vars"})
+        assert not _handler().matches(hook_input)
 
     def test_search_over_a_tree_with_a_plaintext_sibling_is_denied(self, project: Path) -> None:
         _put(project, "group_vars/all/.vault-pass", b"not-a-real-secret\n")
+        _index_project(project)
         assert _verdict(_in(project, "Bash", {"command": "grep -r x group_vars"})) == Decision.DENY
 
     def test_git_grep_reaches_a_tracked_protected_file(self, project_tree: Path) -> None:
-        for args in (["init", "-q"], ["add", "sub"]):
-            subprocess.run(  # nosec B603 B607 - fixed git argv in a tmp repository
-                ["git", "-C", str(project_tree), *args], check=True, capture_output=True
-            )
+        subprocess.run(  # nosec B603 B607 - fixed git argv in a tmp repository
+            ["git", "-C", str(project_tree), "add", "sub"], check=True, capture_output=True
+        )
+        _index_project(project_tree)
         assert _handler().matches(self._bash("git grep needle", project_tree))

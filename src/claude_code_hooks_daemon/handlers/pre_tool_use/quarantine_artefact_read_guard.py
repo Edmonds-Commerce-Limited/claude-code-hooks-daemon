@@ -37,7 +37,7 @@ from __future__ import annotations
 
 import logging
 import re
-import time
+from pathlib import Path
 from typing import Any, Final
 
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, HookInputField, Priority
@@ -48,11 +48,12 @@ from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.relevance import Relevance, RelevanceContext
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.handlers.utils.quarantine import quarantine_agent_relevance
-from claude_code_hooks_daemon.utils import protected_tree_scan, recursive_search, shell_expansion
+from claude_code_hooks_daemon.utils import protected_file_index, recursive_search, shell_expansion
 from claude_code_hooks_daemon.utils import secret_file_matching as sfm
 from claude_code_hooks_daemon.utils.bash_flags import SPAN_SEPARATORS, split_statements
 from claude_code_hooks_daemon.utils.command_evasion import compile_command_name_pattern
-from claude_code_hooks_daemon.utils.protected_tree_scan import TreeView
+from claude_code_hooks_daemon.utils.path_exclusion import resolve_project_root
+from claude_code_hooks_daemon.utils.protected_file_index import ProtectedFileIndex, TreeView
 from claude_code_hooks_daemon.utils.shell_segmentation import split_unquoted
 
 logger = logging.getLogger(__name__)
@@ -83,71 +84,19 @@ _RULE = Rule(
     ),
 )
 
-# n466-n24 review 4: an exception anywhere in evaluation is not a decision
-# this guard actually made -- `core/chain.py`'s per-handler catch treats a
-# propagated exception as "did not match" whenever the daemon's global
-# `strict_mode` is the client default (`false`), fail-opening this
-# SAFETY+BLOCKING guard. Mirrors `secret_file_guard`'s own N11 rule/wrapper
-# (Plan 00466 N11) rather than depending on N24's separate handler-wide
-# fail-closed sweep, which lives on another branch.
-_ERROR_RULE: Final[Rule] = Rule(
-    rule_id=RuleID.QUARANTINE_ARTEFACT_READ_EVALUATION_ERROR,
-    blocked="a call this guard could not finish evaluating",
-    why=(
-        "An exception during evaluation is not a decision the guard actually made "
-        '-- treating it as "no match" would let a genuine DETAIL-artefact read '
-        "through unexamined whenever the SAME defect crashed the scan"
-    ),
-    fix=(
-        "This is a bug in the guard itself, not something to work around -- "
-        "report it via the hooks-daemon skill (issue-report)"
-    ),
-    verbose=(
-        "quarantine_artefact_read_guard could not finish judging this call -- an "
-        "exception was raised mid-evaluation rather than a real ALLOW or DENY "
-        "verdict being reached.\n\n"
-        "This guard fails CLOSED on that outcome, structurally, independent of "
-        "the daemon's global `strict_mode` setting: an unfinished judgement is "
-        'denied, never silently treated as "did not match" -- the same '
-        'position `secret_file_guard` takes for its own "could not finish '
-        'evaluating" case (Plan 00466 N11).\n\n'
-        "This is a bug in the guard, not something to configure around. Report "
-        "it via the hooks-daemon skill (issue-report)."
-    ),
+# The sentinel of a call this guard could not judge (Plan 00483 A1). It is NOT
+# a deny: ``handle()`` allows it and says what was not checked. Never a real
+# glob (those come from ``_effective_globs()``), so it cannot collide with one.
+_NOT_JUDGED_PATTERN: Final[str] = "<not-judged>"
+_NO_INDEX_REASON: Final[str] = (
+    "a recursive search or directory read was not checked, because the index of "
+    "quarantined artefacts is not available yet (the daemon has just started, or "
+    "the project is not a git repository)"
 )
-
-# A scan that ran out of budget (its deadline, or an entry cap) is unchecked,
-# not clean, and not a guard defect: denied under its own rule (ledger 00483
-# N130), which says what ran out and that no artefact was found.
-_INCOMPLETE_RULE: Final[Rule] = Rule(
-    rule_id=RuleID.QUARANTINE_SCAN_INCOMPLETE,
-    blocked="a scan that ran out of time or entries before it could finish",
-    why=(
-        "An unfinished scan is never treated as clean, so the call is denied; "
-        "but no quarantined artefact was found, and none is claimed"
-    ),
-    fix=(
-        "Past a cap, search a narrower root, search with `rg`, or add "
-        "`--exclude-dir`; past the deadline, retry the command"
-    ),
-    verbose=(
-        "quarantine_artefact_read_guard could not finish checking this call, and "
-        "denies it rather than treating the unfinished scan as clean (this guard "
-        "fails CLOSED). This is not a finding: no quarantined artefact was found, "
-        "and it is not a bug in the guard. Either a recursive search or glob "
-        "reached more entries than the scan's cap, in which case search a "
-        "narrower root, search with `rg` (which skips gitignored trees) or add "
-        "`--exclude-dir`; or the scan deadline passed under load, in which case "
-        "retry the command."
-    ),
+_ADVISORY_HEADLINE: Final[str] = (
+    "quarantine_artefact_read_guard could NOT fully judge this call, so it was ALLOWED. "
+    "No quarantined artefact was found by the checks that did run."
 )
-_FOUND_NOTHING: Final[str] = "no quarantined artefact was found"
-
-# Sentinels for `_matched_pattern`'s fail-closed wrapper: never a real glob
-# (those come from `_effective_globs()`), so they can never collide with a
-# genuine match.
-_INTERNAL_ERROR_PATTERN: Final[str] = "<internal-error>"
-_INCOMPLETE_PATTERN: Final[str] = "<scan-incomplete>"
 
 # ── Config modes (command_hints' clobber-or-extend convention) ──────────────
 _MODE_ADDITIVE: Final[str] = "additive"
@@ -267,40 +216,52 @@ class QuarantineArtefactReadGuardHandler(PreToolUseHandlerBase):
     def _matched_pattern(self, hook_input: dict[str, Any]) -> tuple[str, str] | None:
         """``(pattern, detail)`` for this tool call, or ``None`` -- NEVER raises.
 
-        n466-n24 review 4: wraps ``_evaluate_matched_pattern`` so this method
-        -- and therefore ``matches()``/``handle()`` -- never propagates an
-        exception. An exception anywhere in evaluation is filed under
-        ``_INTERNAL_ERROR_PATTERN`` and denied, mirroring
-        ``secret_file_guard``'s own N11 fail-closed wrapper (Plan 00466 N11)
-        rather than depending on N24's separate handler-wide sweep, which
-        lives on another branch.
-
-        ``detail`` is the matched glob on a genuine match, or the raised
-        exception's TYPE NAME on an evaluation error -- never its full
-        message, which could itself carry flaggable content discovered by a
-        directory walk (the same restraint ``secret_file_guard`` N11 takes).
+        A quarantined artefact is denied only on a positive finding (Plan 00483
+        A1). A cap, the deadline, a command the reader cannot parse or an
+        internal error ends the full scan; the call is then judged on the
+        literal artefact paths in its text alone, and if none is found it is
+        allowed with an advisory (``_NOT_JUDGED_PATTERN``). ``detail`` is the
+        matched glob, or on the advisory what was not judged.
         """
         try:
             pattern = self._evaluate_matched_pattern(hook_input)
-        except (shell_expansion.TooManyToEnumerateError, TimeoutError) as exc:
-            # Ledger 00466 N134: a cap or the deadline is "could not verify",
-            # still denied, but not reported as a guard bug (nor, N130, as a find).
-            logger.info(
-                "quarantine_artefact_read_guard: scan did not finish (%s)", type(exc).__name__
-            )
-            return (
-                _INCOMPLETE_PATTERN,
-                sfm.scan_incomplete_detail(exc, found_nothing=_FOUND_NOTHING),
-            )
+        except shell_expansion.UnresolvableBraceQuotingError:
+            return self._literal_finding_or_advisory(hook_input, "the command could not be parsed")
+        except TimeoutError:
+            return self._literal_finding_or_advisory(hook_input, "the scan deadline passed")
+        except shell_expansion.TooManyToEnumerateError:
+            return self._literal_finding_or_advisory(hook_input, "the scan reached a size limit")
         except Exception as exc:
-            logger.exception(
-                "quarantine_artefact_read_guard: evaluation raised; denying "
-                "for safety (n466-n24 review 4)"
+            logger.exception("quarantine_artefact_read_guard: evaluation raised; not denying")
+            return self._literal_finding_or_advisory(
+                hook_input, f"an internal error ({type(exc).__name__})"
             )
-            return (_INTERNAL_ERROR_PATTERN, type(exc).__name__)
         if pattern is None:
             return None
+        if pattern == _NOT_JUDGED_PATTERN:
+            return (_NOT_JUDGED_PATTERN, _NO_INDEX_REASON)
         return (pattern, pattern)
+
+    def _literal_finding_or_advisory(
+        self, hook_input: dict[str, Any], reason: str
+    ) -> tuple[str, str]:
+        """The literal artefact path in a Bash command whose full scan gave up, else an advisory."""
+        tool_input = hook_input.get(HookInputField.TOOL_INPUT)
+        command = tool_input.get(_FIELD_COMMAND) if isinstance(tool_input, dict) else None
+        if hook_input.get(HookInputField.TOOL_NAME) == ToolName.BASH and isinstance(command, str):
+            try:
+                literal = sfm.find_protected_mention_strict(command, self._effective_globs())
+            except Exception:
+                logger.exception("quarantine_artefact_read_guard: the literal re-check raised")
+                literal = None
+            if literal is not None:
+                return (literal, literal)
+        return (_NOT_JUDGED_PATTERN, reason)
+
+    def _index(self, patterns: tuple[str, ...]) -> ProtectedFileIndex | None:
+        """The index of quarantined artefacts for this project, or None while there is none."""
+        root = resolve_project_root()
+        return None if root is None else protected_file_index.index_for(root, patterns)
 
     def _evaluate_matched_pattern(self, hook_input: dict[str, Any]) -> str | None:
         """The real evaluation ``_matched_pattern`` wraps."""
@@ -314,13 +275,11 @@ class QuarantineArtefactReadGuardHandler(PreToolUseHandlerBase):
         patterns = self._effective_globs()
         if not patterns:
             return None
-        deadline = time.monotonic() + sfm.SCAN_DEADLINE_SECONDS
-
         if tool_name == ToolName.BASH:
             command = str(tool_input.get(_FIELD_COMMAND, "") or "")
             raw_cwd = hook_input.get(HookInputField.CWD)
             cwd = raw_cwd if isinstance(raw_cwd, str) else None
-            return self._bash_mention(command, patterns, cwd, deadline)
+            return self._bash_mention(command, patterns, cwd)
 
         path_field = _PATH_FIELD_BY_TOOL.get(str(tool_name or ""))
         if path_field is None:
@@ -335,10 +294,13 @@ class QuarantineArtefactReadGuardHandler(PreToolUseHandlerBase):
         if tool_name == ToolName.GREP:
             # Directory-rooted content search (mirrors secret_file_guard): a
             # Grep rooted at a directory containing a DETAIL artefact reads it
-            # without naming it. A tree too large to examine raises.
-            return protected_tree_scan.find_protected_in_tree(
-                path, patterns, view=TreeView.ALL, deadline=deadline
-            )
+            # without naming it.
+            if not Path(path).is_dir():
+                return None
+            index = self._index(patterns)
+            if index is None:
+                return _NOT_JUDGED_PATTERN
+            return index.find_under(path, view=TreeView.ALL)
         return None
 
     def _bash_mention(
@@ -346,7 +308,6 @@ class QuarantineArtefactReadGuardHandler(PreToolUseHandlerBase):
         command: str,
         patterns: tuple[str, ...],
         cwd: str | None = None,
-        deadline: float | None = None,
     ) -> str | None:
         """First quarantine glob mentioned by a content-REVEALING segment, or None."""
         if not command:
@@ -366,22 +327,28 @@ class QuarantineArtefactReadGuardHandler(PreToolUseHandlerBase):
                 # `secret_file_guard` keeps the heuristic-only variant
                 # deliberately, since a false positive there is far cheaper
                 # than the false negative it guards against.
-                mention = sfm.find_protected_mention_strict(segment, patterns, cwd=cwd)
+                mention = sfm.find_protected_mention_strict(
+                    segment, patterns, cwd=cwd, index=self._index(patterns)
+                )
                 if mention is not None:
                     return mention
         # A recursive search reads every artefact under its roots without
         # naming one (Plan 00483 D1, ledger 00474 N144).
-        reached = recursive_search.protected_reached_by_search(
-            command, patterns, cwd=cwd, deadline=deadline
-        )
+        reads = recursive_search.search_reads(command, cwd)
+        if not reads:
+            return None
+        index = self._index(patterns)
+        if index is None:
+            return _NOT_JUDGED_PATTERN
+        reached = recursive_search.protected_reached(reads, index)
         return None if reached is None else reached[0]
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         return self._matched_pattern(hook_input) is not None
 
     def get_rules(self) -> list[Rule]:
-        """Return the 3 Rule objects backing this handler's blocking behaviour."""
-        return [_RULE, _ERROR_RULE, _INCOMPLETE_RULE]
+        """Return the Rule object backing this handler's blocking behaviour."""
+        return [_RULE]
 
     # ── Handling ────────────────────────────────────────────────────────────
 
@@ -397,10 +364,12 @@ class QuarantineArtefactReadGuardHandler(PreToolUseHandlerBase):
         if matched is None:
             return GatingResult(decision=Decision.ALLOW)
         pattern, detail = matched
-        if pattern == _INTERNAL_ERROR_PATTERN:
-            return self._deny_for_evaluation_error(hook_input, detail)
-        if pattern == _INCOMPLETE_PATTERN:
-            return self._deny_with_ladder(hook_input, _INCOMPLETE_RULE, f"What ran out: {detail}.")
+        if pattern == _NOT_JUDGED_PATTERN:
+            return GatingResult(
+                decision=Decision.ALLOW,
+                context=[f"{_ADVISORY_HEADLINE} Not judged: {detail}."],
+                guidance=f"{_ADVISORY_HEADLINE}\n\nNot judged: {detail}.",
+            )
 
         transcript_path = hook_input.get(HookInputField.TRANSCRIPT_PATH)
         tracker = get_data_layer().disclosure
@@ -417,33 +386,6 @@ class QuarantineArtefactReadGuardHandler(PreToolUseHandlerBase):
 
         message += f"\n\nMatched glob: `{pattern}`"
 
-        return GatingResult(decision=Decision.DENY, reason=message)
-
-    def _deny_for_evaluation_error(self, hook_input: dict[str, Any], detail: str) -> GatingResult:
-        """Deny for the ``_INTERNAL_ERROR_PATTERN`` case (n466-n24 review 4):
-        the guard raised rather than reaching a real verdict. Same verbose-
-        first/terse-after disclosure ladder as the real route, keyed on
-        ``_ERROR_RULE``'s own rule_id, plus the exception TYPE NAME so the
-        report that fixes the underlying bug does not need to reproduce it
-        from scratch.
-        """
-        return self._deny_with_ladder(hook_input, _ERROR_RULE, f"Internal error: {detail}")
-
-    def _deny_with_ladder(self, hook_input: dict[str, Any], rule: Rule, note: str) -> GatingResult:
-        """Deny under ``rule`` with the verbose-first/terse-after disclosure ladder,
-        keyed on that rule's own id, followed by ``note``."""
-        transcript_path = hook_input.get(HookInputField.TRANSCRIPT_PATH)
-        tracker = get_data_layer().disclosure
-        formatter = RuleFormatter()
-
-        if transcript_path and tracker.was_disclosed(transcript_path, rule.rule_id):
-            message = formatter.terse(rule)
-        else:
-            if transcript_path:
-                tracker.mark_disclosed(transcript_path, rule.rule_id)
-            message = formatter.verbose(rule)
-
-        message += f"\n\n{note}"
         return GatingResult(decision=Decision.DENY, reason=message)
 
     # ── Guidance surfaces ───────────────────────────────────────────────────

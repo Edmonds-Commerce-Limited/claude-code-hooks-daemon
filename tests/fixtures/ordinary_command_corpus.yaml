@@ -47,7 +47,6 @@ rows:
   - id: ls-glob-3
     command: |-
       ls */*/*
-    xfail: "N348: bare-glob filesystem expansion reaches a visible ignored file at depth 3"
   - id: ls-glob-4
     command: |-
       ls */*/*/*
@@ -63,7 +62,6 @@ rows:
   - id: ls-abs-glob-2
     command: |-
       ls {ROOT}/*/*
-    xfail: "N293: absolute glob with two wildcards expands against disk"
   - id: ls-home
     command: |-
       ls ~
@@ -261,8 +259,7 @@ rows:
       grep -rn "def foo" --include=*.py src
   - id: grep-r-exclude-dir
     command: |-
-      grep -rn needle --exclude-dir=untracked --exclude-dir=.git .
-    xfail: "N74: grep -r at the root reaches the ignored protected files, yet --exclude-dir names the directories that hold them"
+      grep -rn needle --exclude-dir=er deep
   - id: grep-rl-docs
     command: |-
       grep -rl "install" docs README.md
@@ -376,14 +373,12 @@ rows:
   - id: cd-untracked-loop-N350
     command: |-
       set -euo pipefail; cd untracked; for d in repos/one; do ls "$d"; done
-    xfail: "N350: the loop variable becomes a lone * that the bare-glob route expands against a cwd holding a protected file"
   - id: cd-untracked-glob-loop-N350
     command: |-
       set -euo pipefail; cd untracked; for d in repos/* worktrees/*; do echo "$d"; done
   - id: cd-untracked-git-loop
     command: |-
-      set -euo pipefail; cd untracked; for d in repos/*; do git -C "$d" ls-files | head -n 3; done
-    xfail: "N350: the loop variable becomes a lone * that the bare-glob route expands against a cwd holding a protected file"
+      set -euo pipefail; cd untracked; for d in repos/*; do git -C "$d" ls-files; done
   - id: for-dir-glob
     command: |-
       set -euo pipefail; for d in repos/*; do ls "$d"; done
@@ -442,15 +437,12 @@ rows:
   - id: var-trim-awk-FP1
     command: |-
       set -euo pipefail; echo ${x#"pre"}; awk '{print $1}' README.md
-    xfail: "FP-1: a ${...} holding a quote, then any later { fails closed as unreadable"
   - id: var-quoted-underscore-FP3
     command: |-
       set -euo pipefail; d=src; ls "$d"_rsa
-    xfail: "FP-3: a variable fused to an edge of a protected stem becomes a glob that can reach it"
   - id: var-path-name-FP3
     command: |-
       set -euo pipefail; name=app; cat "$HOME"/.ssh/"$name"_rsa
-    xfail: "FP-3: a variable fused to an edge of a protected stem becomes a glob that can reach it"
   - id: cmd-sub-date
     command: |-
       set -euo pipefail; echo "built at $(date -u)"
@@ -510,19 +502,15 @@ rows:
   - id: brace-echo-1-300-FP4
     command: |-
       echo {1..300}
-    xfail: "FP-4: past the brace-spelling cap the reader fails closed"
   - id: brace-touch-1000-FP4
     command: |-
       touch untracked/f{1..1000}
-    xfail: "FP-4: past the brace-spelling cap the reader fails closed"
   - id: brace-printf-1000-FP4
     command: |-
       printf '%s\n' {1..1000}
-    xfail: "FP-4: past the brace-spelling cap the reader fails closed"
   - id: brace-az-product-FP4
     command: |-
       echo {a..z}{a..z}
-    xfail: "FP-4: past the brace-spelling cap the reader fails closed"
   - id: brace-mkdir
     command: |-
       mkdir -p untracked/a/{b,c,d}/{e,f,g}
@@ -1009,7 +997,6 @@ rows:
     cwd: src
     command: |-
       ls */*
-    xfail: "N348: a bare glob is expanded against more than the cwd it runs in"
   - id: cwd-tests-grep
     cwd: tests
     command: |-
@@ -1030,7 +1017,6 @@ rows:
     cwd: untracked
     command: |-
       set -euo pipefail; for d in repos/*; do ls "$d"; done
-    xfail: "N350: the loop variable becomes a lone * that the bare-glob route expands against a cwd holding a protected file"
   - id: cd-twice
     command: |-
       set -euo pipefail; cd src && cd util && ls
@@ -1044,7 +1030,6 @@ rows:
   - id: cd-abs-src-grep
     command: |-
       set -euo pipefail; cd {ROOT}/src && grep -rn "import" .
-    xfail: "N184: a recursive root of . is also judged from the hook cwd, not only from the directory the cd moved to"
   - id: git-c-abs
     command: |-
       git -C {ROOT} log --oneline -n 3

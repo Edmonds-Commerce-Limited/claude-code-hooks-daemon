@@ -1955,10 +1955,16 @@ the handler's guidance (`bin/hooks-daemon explain-handler secret_file_guard`).
 **No agent escape hatch** (same doctrine as `artifact_publish_blocker`): a
 human edits this config block to lift protection. Honest limits: this is
 defence in depth over an OS boundary the project must set independently.
-A `Grep` rooted at a DIRECTORY gets a bounded protected-name walk (capped —
-a very large tree is not fully checked); NOT covered at all: a Bash
-recursive content search rooted at an ancestor directory (`grep -r`/`rg`
-over a tree containing the file), string-assembled paths, cross-invocation
+**The guard denies only on a positive finding** (Plan 00483): a literal
+protected path or name in the command, or a protected file that a recursive
+read provably reaches. A `Grep` rooted at a directory, a Bash recursive search
+(`grep -r`, `rg`, `git grep`) and a glob are judged against a cached index of
+the protected files that exist, built from `git ls-files` at session start and
+refreshed in the background, so the size of the tree costs nothing; `rg` and
+`ag` are judged on the files git does not ignore. A call the guard cannot judge
+(a command it cannot read, a cap or the scan deadline, an unresolved variable,
+an internal error, no index yet) is ALLOWED with an advisory that says what was
+not checked. NOT covered at all: string-assembled paths, cross-invocation
 shell state, pre-existing hard links or copies made before the guard was
 enabled, pre-existing scripts that open the file internally, and a
 look-alike consumer created in-session (the allowlist matches the command

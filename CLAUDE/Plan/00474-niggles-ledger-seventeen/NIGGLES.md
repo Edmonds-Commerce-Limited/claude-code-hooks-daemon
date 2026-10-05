@@ -1447,9 +1447,8 @@ This touches no guard in the frozen secret-guard area.
 **Impact**: the first item is a load-dependent verdict on a command that names no protected path, the N101 shape
 again. A real session on a busy host gets the same deny.
 
-**Status**: ⬜ Open. This is evidence for the guard-effort review's R3: a deadline or cap running out allows with an
-advisory instead of denying. Plan 00483 open question 4 holds that owner decision. No guard change is made here
-during the freeze.
+**Status**: ✅ Fixed by Plan 00483 (owner rulings A1/A2): a deadline or cap running out now allows with an advisory
+instead of denying, and the tree walk is gone. See release-note callout 027.
 
 ### N351 — the full-QA lock file names a dead holder while `run_tests.sh` holds the lock
 
@@ -1483,7 +1482,8 @@ reaches a protected file. A lone `*` suggests a tokenisation artefact: the `*` w
 expanded from the `untracked/` cwd, where a protected file does sit. No one has reproduced this with
 `hooks-daemon probe` yet.
 
-**Status**: 🚫 Reproduced; the fix is parked, pending owner decisions. The cause is wider than the loop list. The
+**Status**: ✅ Fixed by Plan 00483 (owner rulings A1/A2): an unresolved `$VAR` no longer becomes `*` and the
+bare-glob filesystem expansion is replaced by a protected-file index. The original analysis follows. The cause is wider than the loop list. The
 word scanner turns every unresolved `$VAR`, including a loop's `"$d"`, into a lone `*`, and the bare-glob route
 expands that `*` against the cwd. So `cd untracked; for d in repos/one; do ls "$d"; done` is denied whenever the cwd
 holds a protected file.

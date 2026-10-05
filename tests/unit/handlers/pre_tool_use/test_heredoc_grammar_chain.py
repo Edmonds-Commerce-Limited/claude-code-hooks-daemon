@@ -18,7 +18,6 @@ from unittest.mock import patch
 import pytest
 from tests.bash_sandbox import run_sandboxed_bash
 
-from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.core import Decision
 from claude_code_hooks_daemon.core.chain import HandlerChain
 from claude_code_hooks_daemon.core.data_layer import reset_data_layer
@@ -546,14 +545,21 @@ class TestCaseAsAnArgumentIsRead:
         assert "syntax error" not in _bash_run(command, tmp_path)
         assert _decision(handler(), command) == Decision.ALLOW
 
-    def test_an_unreadable_command_is_named_not_reported_as_a_bug(self) -> None:
-        """A command the scanner cannot read is denied with its own reason and
-        a rephrase, never the evaluation-error rule that asks for a report."""
-        command = "n=$(case a in a) echo {a,b};; esac)"
-        reason = _reason(SecretFileGuardHandler(), command)
-        assert reason.startswith(f"BLOCKED [{RuleID.SECRET_COMMAND_UNREADABLE}]")
-        assert RuleID.SECRET_EVALUATION_ERROR not in reason
-        assert "Rephrase" in reason
+    def test_an_unreadable_command_is_allowed_with_an_advisory(self) -> None:
+        """A command the scanner cannot read is allowed, and the advisory says
+        it was not fully judged (Plan 00483 A1)."""
+        command = "n=$" + "(case a in a) echo {a,b};; esac)"
+        payload: dict[str, Any] = {
+            "tool_name": "Bash",
+            "tool_input": {"command": command},
+            "cwd": str(_ROOT),
+        }
+        handler = SecretFileGuardHandler()
+        assert handler.matches(payload)
+        result = handler.handle(payload)
+        assert result.decision == Decision.ALLOW
+        assert result.context
+        assert "could NOT fully judge" in result.context[0]
 
 
 # -- Round 12: N212, N214 and N215, each run in bash first --------------------

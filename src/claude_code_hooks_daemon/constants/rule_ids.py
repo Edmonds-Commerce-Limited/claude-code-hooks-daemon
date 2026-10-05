@@ -282,10 +282,6 @@ class RuleID:
     #: escapes them all rather than violating any one of them.
     WRITE_OUTSIDE_PROJECT_ROOT: str = "R-WRITE-OUTSIDE-PROJECT-ROOT"
 
-    #: A call this guard could not finish evaluating (Plan 00466 N11): denied
-    #: structurally, independent of the daemon's global strict_mode.
-    PROJECT_CONTAINMENT_EVALUATION_ERROR: str = "R-PROJECT-CONTAINMENT-EVALUATION-ERROR"
-
     # ------------------------------------------------------------------
     # plan_number_helper handler — 2 rules
     # ------------------------------------------------------------------
@@ -424,8 +420,7 @@ class RuleID:
     ESLINT_RUN_FAILURE: str = "R-ESLINT-RUN-FAILURE"
 
     # ------------------------------------------------------------------
-    # secret_file_guard handler — 5 rules (Decision B: per-route granularity,
-    # plus the evaluation-error and unreadable-command rules, Plan 00466)
+    # secret_file_guard handler — 3 rules (Decision B: per-route granularity)
     # ------------------------------------------------------------------
 
     #: Read/Write/Edit/NotebookEdit/Grep targeting a protected path directly.
@@ -436,19 +431,6 @@ class RuleID:
 
     #: A script authored via Write/Edit whose content references a protected path.
     SECRET_SCRIPT_AUTHOR: str = "R-SECRET-SCRIPT-AUTHOR"
-
-    #: A call this guard could not finish evaluating (Plan 00466 N11): denied
-    #: structurally, independent of the daemon's global strict_mode.
-    SECRET_EVALUATION_ERROR: str = "R-SECRET-EVALUATION-ERROR"
-
-    #: A Bash command whose structure the shell reader cannot establish with
-    #: certainty (Plan 00466 N101 round 12): denied, with a rephrase.
-    SECRET_COMMAND_UNREADABLE: str = "R-SECRET-COMMAND-UNREADABLE"
-
-    #: A scan that hit its deadline or an entry cap before it could finish
-    #: (ledger 00474 N348): denied, because it is unchecked, not because a
-    #: protected path was found.
-    SECRET_SCAN_INCOMPLETE: str = "R-SECRET-SCAN-INCOMPLETE"
 
     # ------------------------------------------------------------------
     # sensitive_content handler — 2 rules (two independent sources)
@@ -572,15 +554,6 @@ class RuleID:
 
     #: Reading a quarantined *-opus-security-DETAIL* artefact back into the coordinator.
     QUARANTINE_ARTEFACT_READ: str = "R-QUARANTINE-ARTEFACT-READ"
-
-    #: A call this guard could not finish evaluating (n466-n24 review 4): denied
-    #: structurally, independent of the daemon's global strict_mode -- mirrors
-    #: SECRET_EVALUATION_ERROR's own N11 rationale.
-    QUARANTINE_ARTEFACT_READ_EVALUATION_ERROR: str = "R-QUARANTINE-ARTEFACT-READ-EVALUATION-ERROR"
-
-    #: A scan that hit its deadline or an entry cap before it could finish (ledger
-    #: 00483 N130): denied, because it is unchecked, not because an artefact was found.
-    QUARANTINE_SCAN_INCOMPLETE: str = "R-QUARANTINE-SCAN-INCOMPLETE"
 
     # ------------------------------------------------------------------
     # flaggable_content_channel_guard handler (ships disabled)

@@ -186,55 +186,48 @@ _RULE = Rule(
     ),
 )
 
-# Plan 00466 N11 (major M4, audited alongside secret_file_guard): a raise
-# anywhere in evaluation (`_resolved_root()` calls `ProjectContext.project_root()`
-# with no try/except -- an uninitialised context raises `RuntimeError` there)
-# is not a decision this guard made. `core/chain.py`'s per-handler catch treats
-# a propagated exception as "did not match" whenever the daemon's global
-# `strict_mode` is the client default (`false`), fail-opening this
-# SAFETY+BLOCKING guard. This rule and the wrapper below make evaluation
-# structurally fail closed, independent of `strict_mode`.
-_ERROR_RULE = Rule(
-    rule_id=RuleID.PROJECT_CONTAINMENT_EVALUATION_ERROR,
-    blocked="a call this guard could not finish evaluating",
-    why=(
-        "An exception during evaluation is not a decision the guard actually made "
-        '-- treating it as "no match" would let a genuine out-of-root write '
-        "through unexamined whenever the SAME defect crashed the check"
-    ),
-    fix=(
-        "This is a bug in the guard itself, not something to work around -- "
-        "report it via the hooks-daemon skill (issue-report)"
-    ),
-    verbose=(
-        "project_containment could not finish evaluating this call and is "
-        'denying it for safety rather than treating the crash as "no match" '
-        "(Plan 00466 N11 -- this guard fails CLOSED on any internal error, "
-        "independent of the daemon's global strict_mode). This is a bug in "
-        "the guard itself: report it via the hooks-daemon skill "
-        "(issue-report) rather than retrying -- retrying the same call will "
-        "crash the same way."
-    ),
+# Plan 00483 A1: a guard denies only on a positive finding. A write target whose
+# value is unknown until the command runs, command text the tokeniser could not
+# read, and an exception during evaluation are not findings: the call is allowed
+# and the advisory says what was not judged.
+_ADVISORY_HEADLINE = (
+    "project_containment could NOT fully judge this call, so it was ALLOWED. "
+    "No out-of-root write target was found by the checks that did run."
+)
+_ADVISORY_CLOSING = (
+    "A deny here would depend on something the guard cannot see, so it does not "
+    "guess. If this call writes outside the repository, that is yours to prevent: "
+    f"write scratch to `{SCRATCH_DIR}/`."
 )
 
 #: How much of the unread text a deny message quotes.
 _UNREADABLE_EXCERPT_LENGTH = 200
 
-#: Appended to a write target whose value is unknown until the command runs
+#: Said of a write target whose value is unknown until the command runs
 #: (Plan 00466 N101 round 12, N215).
 _UNRESOLVED_NOTE = (
-    "  (its value is unknown until the command runs, so it may be anywhere: "
-    'assign it a literal path earlier in the same call, e.g. OUT=untracked/scratch/o.md; ... "$OUT", '
-    "or write the path out)"
+    "its value is unknown until the command runs, so it may be anywhere: assign it "
+    'a literal path earlier in the same call, e.g. OUT=untracked/scratch/o.md; ... "$OUT", '
+    "or write the path out"
 )
+
+
+class NotJudgedError(Exception):
+    """Write targets whose value is unknown until the command runs (Plan 00483 A1).
+
+    RETURNED, never raised to the chain: the call is allowed, with an advisory.
+    """
+
+    def __init__(self, targets: list[str]) -> None:
+        listed = ", ".join(f"`{target}`" for target in targets)
+        super().__init__(f"the write target {listed} is not known until the command runs")
 
 
 class UnreadableCommandError(Exception):
     """Command text the write-target tokeniser could not read (Plan 00466 N120).
 
-    Not a crash, so it is RETURNED as the evaluation error rather than logged
-    with a traceback -- but it denies through the same fail-closed route,
-    because what the unread text writes is unknown, not nothing.
+    Not a crash, so it is RETURNED rather than logged with a traceback. What the
+    unread text writes is unknown, so the call is allowed with an advisory.
     """
 
     def __init__(self, unreadable: str) -> None:
@@ -431,9 +424,10 @@ class ProjectContainmentHandler(PreToolUseHandlerBase):
         The single dispatch point shared by ``matches()`` and ``handle()``, so
         the two can never disagree, and so ``handle()`` can build its message
         from the SAME resolved ``root`` rather than re-resolving it (which
-        would reopen the exact raise this wrapper closes). On exception,
-        returns an empty target list, no root, and the exception itself,
-        rather than propagating — see ``_ERROR_RULE`` for why.
+        would reopen the exact raise this wrapper closes). When the call could
+        not be judged -- an exception, unreadable text or a target whose value
+        is unknown -- it returns an empty target list, no root, and the reason
+        as the third element, which ``handle()`` allows with an advisory.
         """
         try:
             named_targets, unreadable, unresolved = self._named_targets(hook_input)
@@ -442,27 +436,27 @@ class ProjectContainmentHandler(PreToolUseHandlerBase):
                 # 00466 N90) matters because resolving it can itself fail
                 # (`ProjectContext.project_root()` raises when uninitialised)
                 # -- and a command naming no write target cannot escape the
-                # project either way, so there is nothing fail-closed protects
-                # here. A raise from `_named_targets` itself still denies below.
+                # project either way, so there is nothing to judge here.
                 if unreadable is not None:
                     return [], None, UnreadableCommandError(unreadable)
                 return [], None, None
             root = self._resolved_root()
             offending = self._offending_targets(hook_input, root, named_targets)
-            offending.extend(f"{target}{_UNRESOLVED_NOTE}" for target in unresolved)
-            if not offending and unreadable is not None:
-                # A named out-of-root target is the more useful answer, so
-                # the unread text denies only when nothing else did.
+            if offending:
+                # A named out-of-root target is a finding; whatever else could
+                # not be judged does not soften it.
+                return offending, root, None
+            if unreadable is not None:
                 return [], None, UnreadableCommandError(unreadable)
+            if unresolved:
+                return [], None, NotJudgedError(unresolved)
             return offending, root, None
         except UnreadableCommandError as exc:
             return [], None, exc
         except Exception as exc:
-            # Deliberately broad: ANY exception during evaluation must deny,
-            # never propagate (Plan 00466 N11) -- see the docstring above.
-            logger.exception(
-                "project_containment: evaluation raised; denying for safety (Plan 00466 N11)"
-            )
+            # Deliberately broad: no exception propagates to the chain (Plan 00466
+            # N11), and none denies: it is an advisory (Plan 00483 A1).
+            logger.exception("project_containment: evaluation raised; allowing with an advisory")
             return [], None, exc
 
     @staticmethod
@@ -803,44 +797,41 @@ class ProjectContainmentHandler(PreToolUseHandlerBase):
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """True when this call names at least one out-of-root write target,
-        or (Plan 00466 N11) evaluation could not be completed at all."""
+        or could not be fully judged (``handle()`` then allows with an advisory)."""
         offending, _root, error = self._compute_and_cache(hook_input)
         return bool(offending) or error is not None
 
     def get_rules(self) -> list[Rule]:
-        return [_RULE, _ERROR_RULE]
+        return [_RULE]
 
     def handle(self, hook_input: dict[str, Any]) -> GatingResult:
         """Deny, naming every offending path and the sanctioned location.
 
-        The whole body after a real match is wrapped in its own fail-closed
-        net (m1, Plan 00466 review 2): ``_offending_targets_or_error`` only
-        guarantees reaching a VERDICT, not that everything downstream of a
-        real match (the disclosure tracker, ``RuleFormatter``, string
-        building) can never raise -- and an exception escaping ``handle()``
-        unwrapped is exactly what a non-strict chain treats as "no match"
-        for a call that had a genuine out-of-root write target.
+        A call that could not be judged is allowed with an advisory (Plan
+        00483 A1). The whole body after a real match is wrapped in its own
+        net (m1, Plan 00466 review 2): a finding is never lost to a defect in
+        building its message, which falls back to the short form of the deny.
         """
         offending, root, error = self._take_cached(hook_input)
         if error is not None:
-            return self._deny_for_evaluation_error(hook_input, error)
+            return self._advise_not_judged(error)
         if not offending:
             return GatingResult(decision=Decision.ALLOW)
         assert root is not None  # error is None here, so _resolved_root() succeeded
 
         try:
             return self._build_deny_result(hook_input, offending, root)
-        except Exception as exc:
+        except Exception:
             logger.exception(
                 "project_containment: handle() raised after a real match; "
                 "denying for safety (Plan 00466 m1)"
             )
+            listed = ", ".join(offending)
             return GatingResult(
                 decision=Decision.DENY,
                 reason=(
-                    f"BLOCKED [{RuleID.PROJECT_CONTAINMENT_EVALUATION_ERROR}]: "
-                    f"project_containment matched an out-of-root write but could not build "
-                    f"its explanation: {type(exc).__name__}: {exc}\n\nDenying for safety."
+                    f"BLOCKED [{RuleID.WRITE_OUTSIDE_PROJECT_ROOT}]: {_RULE.blocked}\n\n"
+                    f"OUTSIDE THE REPOSITORY: {listed}\nWRITE IT HERE INSTEAD: {SCRATCH_DIR}/"
                 ),
             )
 
@@ -877,32 +868,20 @@ class ProjectContainmentHandler(PreToolUseHandlerBase):
 
         return GatingResult(decision=Decision.DENY, reason=message, context=[], guidance=None)
 
-    def _deny_for_evaluation_error(
-        self, hook_input: dict[str, Any], error: Exception
-    ) -> GatingResult:
-        """Deny for the evaluation-error case (Plan 00466 N11): the guard
-        raised rather than reaching a real verdict. Same verbose-first/
-        terse-after disclosure ladder as the real rule, keyed on
-        ``_ERROR_RULE``'s own rule_id, plus the exception detail so the
-        report that fixes the underlying bug does not need to reproduce it
-        from scratch.
-        """
-        transcript_path = hook_input.get(HookInputField.TRANSCRIPT_PATH)
-        tracker = get_data_layer().disclosure
-        formatter = RuleFormatter()
-
-        if transcript_path and tracker.was_disclosed(transcript_path, _ERROR_RULE.rule_id):
-            message = formatter.terse(_ERROR_RULE)
+    @staticmethod
+    def _advise_not_judged(error: Exception) -> GatingResult:
+        """The ALLOW, with an advisory, for a call that could not be judged."""
+        if isinstance(error, (NotJudgedError, UnreadableCommandError)):
+            what = str(error)
         else:
-            if transcript_path:
-                tracker.mark_disclosed(transcript_path, _ERROR_RULE.rule_id)
-            message = formatter.verbose(_ERROR_RULE)
-
-        if isinstance(error, UnreadableCommandError):
-            message += f"\n\n{error}"
-        else:
-            message += f"\n\nInternal error: {type(error).__name__}: {error}"
-        return GatingResult(decision=Decision.DENY, reason=message)
+            what = f"an internal error ({type(error).__name__})"
+        if isinstance(error, NotJudgedError):
+            what = f"{what}: {_UNRESOLVED_NOTE}"
+        return GatingResult(
+            decision=Decision.ALLOW,
+            context=[f"{_ADVISORY_HEADLINE} Not judged: {what}."],
+            guidance=f"{_ADVISORY_HEADLINE}\n\nNot judged: {what}.\n\n{_ADVISORY_CLOSING}",
+        )
 
     def get_claude_md(self) -> str | None:
         return (
@@ -935,12 +914,14 @@ class ProjectContainmentHandler(PreToolUseHandlerBase):
             "itself at runtime (pytest's `tmp_path`, a package manager's build dir) — "
             "this rule judges paths your command NAMES, not what a tool does "
             "internally.\n\n"
-            '**A variable target is resolved or denied.** `> "$OUT"` is judged at '
+            '**A variable target is judged where it can be.** `> "$OUT"` is judged at '
             "the path a plain literal assignment earlier in the same call gives it "
             '(`OUT=untracked/scratch/o.md; cat > "$OUT"`). With no such assignment '
             "-- a loop variable, `read`, a substitution, a variable bash sets -- where "
-            "it writes is unknown until the command runs, so it is DENIED. Write the "
-            "path out, or assign it literally first.\n\n"
+            "it writes is unknown until the command runs, so the guard cannot judge it: "
+            "the call is ALLOWED with an advisory saying so, and keeping the write "
+            "inside the repository is yours to do. Write the path out, or assign it "
+            "literally first.\n\n"
             "**Claude Code's own state directory is allowed** (`$CLAUDE_CONFIG_DIR`, "
             "else `~/.claude`, and the session's own, read from the transcript path "
             "in the payload). It is not scratch, and it is not ephemeral where it is "

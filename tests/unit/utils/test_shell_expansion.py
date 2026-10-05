@@ -14,11 +14,8 @@ a smaller-but-still-eager computation.
 
 from __future__ import annotations
 
-import errno
-import os
 import time
 from collections.abc import Callable, Iterator
-from pathlib import Path
 from types import SimpleNamespace
 from typing import NamedTuple
 
@@ -29,7 +26,6 @@ from claude_code_hooks_daemon.utils.shell_expansion import (
     DEFAULT_MAX_BRACE_DEPTH,
     TooManyToEnumerateError,
     UnresolvableBraceQuotingError,
-    bounded_recursive_glob,
     expand_braces,
     iter_brace_words,
     iter_normalised_shell_words,
@@ -38,7 +34,6 @@ from claude_code_hooks_daemon.utils.shell_expansion import (
     shell_word_spellings,
 )
 from tests.scaling import SIZE_FACTOR, SUPERLINEAR_RATIO, counted_ratio, scaling_ratio
-from tests.support.directory_reads import record_directory_reads
 
 
 def _assert_grows_linearly(
@@ -266,7 +261,7 @@ class TestQuotedBracesAreNotBraceSyntax:
         assert ".p-a,b" in _spellings('.p-{"a,b",q}')
 
     def test_a_parameter_expansion_is_not_a_group(self) -> None:
-        assert {"*a", "*b"} <= _spellings("${x}{a,b}")
+        assert {"a", "b"} <= _spellings("${x}{a,b}")
 
     def test_a_word_without_quoting_reads_as_before(self) -> None:
         assert expand_braces("a{b,c}d") == ["abd", "acd"]
@@ -300,7 +295,7 @@ class TestQuotedBracesAreNotBraceSyntax:
         [
             ('.p-{"${x:-"}"}",q}', ".p-q"),
             (".p-{${x:-'}'},q}", ".p-q"),
-            (".p-{a,b}${x", ".p-a*"),
+            (".p-{a,b}${x", ".p-a"),
         ],
     )
     def test_a_parameter_expansion_is_read_as_bash_s_brace_scanner_reads_it(
@@ -551,205 +546,6 @@ class TestIterBraceWords:
             lambda text: list(iter_brace_words(text)),
             200_000 // SIZE_FACTOR,
         )
-
-
-class TestBoundedRecursiveGlob:
-    """M-1 (Plan 00466 review 3): the FS walk must be bounded by ENTRIES
-    VISITED, not matches yielded -- a `Path.glob("**/…")` whose final
-    component matches nothing yields nothing, so a matches-only cap never
-    trips and the walk runs to completion however large the tree."""
-
-    def test_refuses_a_recursive_pattern_rooted_at_the_filesystem_root(self) -> None:
-        with pytest.raises(TooManyToEnumerateError):
-            list(
-                bounded_recursive_glob(
-                    Path("/"), "**/nonexistent-zq9x-marker", max_entries_visited=100
-                )
-            )
-
-    def test_refusal_at_the_root_is_immediate(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Immediate means no directory is read at all (00466 N222: counted,
-        not timed)."""
-        reads = record_directory_reads(monkeypatch)
-        with pytest.raises(TooManyToEnumerateError):
-            list(bounded_recursive_glob(Path("/"), "**/*.se?ret-zq9x", max_entries_visited=100))
-        assert reads == [], f"the refused walk read {reads[:5]}"
-
-    def test_refuses_a_multi_wildcard_pattern_with_no_recursive_marker(self) -> None:
-        """n466-n24 review 4, m-1: two or more wildcarded segments trip the
-        root refusal even with no literal `**` anywhere in the pattern --
-        the own live finding from review 3's docstring, still without its
-        own RED pin until now."""
-        with pytest.raises(TooManyToEnumerateError):
-            list(
-                bounded_recursive_glob(
-                    Path("/"), "*/*/*/*/*/*/*.se?ret-zq9x", max_entries_visited=100
-                )
-            )
-
-    def test_root_refusal_with_recursive_marker_is_not_masked_by_a_huge_cap(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """The refusal must fire from the root check itself, not merely
-        because `max_entries_visited` happens to be small -- raise the cap
-        far past anything a real walk would hit and confirm it still
-        refuses without reading a single directory."""
-        reads = record_directory_reads(monkeypatch)
-        with pytest.raises(TooManyToEnumerateError):
-            list(
-                bounded_recursive_glob(
-                    Path("/"), "**/*.se?ret-zq9x", max_entries_visited=10_000_000
-                )
-            )
-        assert reads == [], f"the refused walk read {reads[:5]}"
-
-    def test_finds_a_real_match_under_a_small_tree(self, tmp_path: Path) -> None:
-        target = tmp_path / "nested" / "dir"
-        target.mkdir(parents=True)
-        (target / "findme.zzz-marker-9f2c").touch()
-        matches = list(
-            bounded_recursive_glob(tmp_path, "**/*.zzz-marker-9f2c", max_entries_visited=100)
-        )
-        assert any(match.name == "findme.zzz-marker-9f2c" for match in matches)
-
-    def test_a_tree_with_no_match_still_trips_the_visited_cap(self, tmp_path: Path) -> None:
-        """The defect this function exists to fix: a wide tree with NOTHING
-        matching the final component must still raise past the cap, not
-        silently walk to completion and return an empty result."""
-        for index in range(50):
-            (tmp_path / f"file-{index}.txt").touch()
-        with pytest.raises(TooManyToEnumerateError):
-            list(
-                bounded_recursive_glob(tmp_path, "**/*.se?ret-nomatch-zq9x", max_entries_visited=10)
-            )
-
-    def test_prunes_a_named_huge_or_ignored_directory(self, tmp_path: Path) -> None:
-        ignored = tmp_path / "node_modules"
-        ignored.mkdir()
-        for index in range(50):
-            (ignored / f"pkg-{index}").mkdir()
-        (tmp_path / "real.zzz-marker-9f2c").touch()
-        matches = list(
-            bounded_recursive_glob(tmp_path, "**/*.zzz-marker-9f2c", max_entries_visited=20)
-        )
-        assert any(match.name == "real.zzz-marker-9f2c" for match in matches)
-
-    def test_deadline_exceeded_raises_timeout_error(self, tmp_path: Path) -> None:
-        for index in range(20):
-            (tmp_path / f"file-{index}.txt").touch()
-        past_deadline = time.monotonic() - 1.0
-        with pytest.raises(TimeoutError):
-            list(
-                bounded_recursive_glob(
-                    tmp_path,
-                    "**/*.se?ret-nomatch",
-                    max_entries_visited=10_000,
-                    deadline=past_deadline,
-                )
-            )
-
-    def test_a_subdirectory_that_vanishes_mid_walk_is_skipped(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """ENOENT on a directory ENTERED during the walk (a race with a
-        deletion, or a prefix that plain does not exist) proves there is
-        nothing under it -- the walk continues and still finds a real match
-        elsewhere (n466-n24 review 4)."""
-        (tmp_path / "gone").mkdir()
-        (tmp_path / "real.zzz-marker-9f2c").touch()
-        real_scandir = os.scandir
-
-        def _fake_scandir(path: str | os.PathLike[str]) -> Iterator[os.DirEntry[str]]:
-            if Path(path) == tmp_path / "gone":
-                raise FileNotFoundError(errno.ENOENT, "No such file or directory")
-            return real_scandir(path)
-
-        monkeypatch.setattr(
-            "claude_code_hooks_daemon.utils.shell_expansion.os.scandir", _fake_scandir
-        )
-        matches = list(
-            bounded_recursive_glob(tmp_path, "**/*.zzz-marker-9f2c", max_entries_visited=100)
-        )
-        assert any(match.name == "real.zzz-marker-9f2c" for match in matches)
-
-    def test_a_permission_denied_subdirectory_raises(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """A directory that could not be READ (not merely absent) is NOT
-        proof of a non-match -- it must propagate, not be treated as
-        "contributes nothing" (n466-n24 review 4)."""
-        (tmp_path / "locked").mkdir()
-        (tmp_path / "real.zzz-marker-9f2c").touch()
-        real_scandir = os.scandir
-
-        def _fake_scandir(path: str | os.PathLike[str]) -> Iterator[os.DirEntry[str]]:
-            if Path(path) == tmp_path / "locked":
-                raise PermissionError(errno.EACCES, "Permission denied")
-            return real_scandir(path)
-
-        monkeypatch.setattr(
-            "claude_code_hooks_daemon.utils.shell_expansion.os.scandir", _fake_scandir
-        )
-        with pytest.raises(PermissionError):
-            list(bounded_recursive_glob(tmp_path, "**/*.zzz-marker-9f2c", max_entries_visited=100))
-
-
-class TestGlobErrorsAreCollectedPerBranch:
-    """Plan 00466 N101 round 9 (review 8 BLOCKER 1): one failed lookup must
-    not end the walk. With an ``errors`` list the walker records the error,
-    keeps examining every other branch, and leaves the verdict to the
-    caller."""
-
-    def test_an_unreadable_sibling_does_not_hide_a_later_match(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        (tmp_path / "a").mkdir()
-        (tmp_path / "b").mkdir()
-        (tmp_path / "b" / "f.zzz-marker-9f2c").touch()
-        real_scandir = os.scandir
-
-        def _fake_scandir(path: str | os.PathLike[str]) -> Iterator[os.DirEntry[str]]:
-            if Path(path) == tmp_path / "a":
-                raise PermissionError(errno.EACCES, "Permission denied")
-            return real_scandir(path)
-
-        monkeypatch.setattr(
-            "claude_code_hooks_daemon.utils.shell_expansion.os.scandir", _fake_scandir
-        )
-        errors: list[OSError] = []
-        matches = list(bounded_recursive_glob(tmp_path, "*/*.zzz-marker-9f2c", errors=errors))
-        assert [match.name for match in matches] == ["f.zzz-marker-9f2c"]
-        assert [error.errno for error in errors] == [errno.EACCES]
-
-    def test_a_whole_path_overflow_is_an_error_not_an_absence(self, tmp_path: Path) -> None:
-        """Every component is short; only the joined path is past PATH_MAX."""
-        long_dir = "d" * 200
-        (tmp_path / long_dir).mkdir()
-        pattern = f"{long_dir}/../" * 25 + "*.zzz-marker-9f2c"
-        errors: list[OSError] = []
-        assert list(bounded_recursive_glob(tmp_path, pattern, errors=errors)) == []
-        assert [error.errno for error in errors] == [errno.ENAMETOOLONG]
-        with pytest.raises(OSError) as raised:
-            list(bounded_recursive_glob(tmp_path, pattern))
-        assert raised.value.errno == errno.ENAMETOOLONG
-
-    def test_a_single_name_past_the_name_limit_is_an_absence(self, tmp_path: Path) -> None:
-        """No entry can carry that name, and bash opens the same component."""
-        errors: list[OSError] = []
-        pattern = "a" * 300 + "/*.zzz-marker-9f2c"
-        assert list(bounded_recursive_glob(tmp_path, pattern, errors=errors)) == []
-        assert errors == []
-
-    def test_a_wildcard_component_past_the_name_limit_is_matched_not_opened(
-        self, tmp_path: Path
-    ) -> None:
-        """Bash matches a wildcard component against directory entries; it
-        never opens it, so its length proves nothing."""
-        (tmp_path / "f.zzz-marker-9f2c").touch()
-        pattern = "*" * 300 + ".zzz-marker-9f2c"
-        assert [match.name for match in bounded_recursive_glob(tmp_path, pattern)] == [
-            "f.zzz-marker-9f2c"
-        ]
 
 
 class TestIterNormalisedShellWordsNestedCommands:
@@ -1347,10 +1143,11 @@ class TestIterNormalisedShellWordsCommandSubstitution:
         words = list(iter_normalised_shell_words(command))
         assert "world" in words
 
-    def test_a_dollar_var_reference_does_not_raise_or_falsely_match(self) -> None:
-        """Control: an ordinary `$VAR` (no parens) is unaffected."""
+    def test_a_dollar_var_reference_contributes_no_text(self) -> None:
+        """An unresolvable `$VAR` is judged on the text around it, never guessed at."""
         words = list(iter_normalised_shell_words("echo $HOME/project"))
-        assert any("*" in word for word in words)
+        assert "/project" in words
+        assert not any("*" in word for word in words)
 
 
 class TestIterNormalisedShellWordsWrapperOptionWalk:
