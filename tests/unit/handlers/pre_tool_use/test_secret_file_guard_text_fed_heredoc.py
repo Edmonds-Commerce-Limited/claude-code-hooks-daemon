@@ -8,14 +8,18 @@ message used to walk the tree, and a prose mention of a protected name denied
 the commit. Every receiver that DOES open or run the body's words keeps it.
 """
 
+from collections.abc import Iterator
+from pathlib import Path
 from typing import Any
 
 import pytest
+from tests.indexed_project import index_project
 
+from claude_code_hooks_daemon.handlers.pre_tool_use import secret_file_guard as guard_module
 from claude_code_hooks_daemon.handlers.pre_tool_use.secret_file_guard import (
     SecretFileGuardHandler,
 )
-from claude_code_hooks_daemon.utils import secret_file_matching as sfm
+from claude_code_hooks_daemon.utils import protected_file_index
 
 # Spelled in pieces so this file does not itself name a protected path or
 # carry shell syntax a scan of the file's text would try to read.
@@ -38,17 +42,21 @@ def _fed(head: str, body: str, opener: str = _OPEN) -> str:
 
 
 @pytest.fixture
-def walked(monkeypatch: pytest.MonkeyPatch) -> list[str]:
-    """Record every word that reaches a filesystem glob walk."""
+def walked(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[list[str]]:
+    """Record every word judged as a glob against the protected-file index."""
+    monkeypatch.setattr(guard_module, "resolve_project_root", lambda: str(tmp_path))
+    protected_file_index.reset_index_cache()
+    index_project(tmp_path, SecretFileGuardHandler()._patterns())
     seen: list[str] = []
-    real = sfm._expand_glob_token
+    real = protected_file_index.ProtectedFileIndex.glob_matches
 
-    def _spy(token: str, *args: Any, **kwargs: Any) -> str | None:
+    def _spy(self: Any, token: str, *args: Any, **kwargs: Any) -> str | None:
         seen.append(token)
-        return real(token, *args, **kwargs)
+        return real(self, token, *args, **kwargs)
 
-    monkeypatch.setattr(sfm, "_expand_glob_token", _spy)
-    return seen
+    monkeypatch.setattr(protected_file_index.ProtectedFileIndex, "glob_matches", _spy)
+    yield seen
+    protected_file_index.reset_index_cache()
 
 
 _TEXT_READERS = [
@@ -79,30 +87,6 @@ class TestATextFedBodyIsData:
 
     def test_the_double_quoted_delimiter_is_data(self) -> None:
         assert not _matches(_fed("git commit -F -", _PROSE, opener='<<"EOF"'))
-
-
-class TestAGlobBehindAnOverLongNameIsNotAGuardDefect:
-    """Plan 00474 N255: a commit message holding two apostrophes
-    (`someone's` ... `N5's`) quotes the prose between them into ONE shell
-    word. When that word held `CLAUDE/core/*.core.md` behind a component past
-    the name limit, Python 3.11's ``Path.glob`` raised ENAMETOOLONG and the
-    guard denied `git commit -F - <<'EOF'` as R-SECRET-EVALUATION-ERROR. The
-    body is judged here through a receiver that is NOT a text reader, so the
-    word really reaches the glob walk."""
-
-    _LONG = "and the rest of this paragraph just keeps going " * 8
-    _PROSE_WITH_GLOB = (
-        f"discarding someone's edits\n{_LONG}\nleft CLAUDE/core/*.core.md stale. N5's body"
-    )
-
-    @pytest.mark.parametrize("head", ["awk 1", "git commit -F -", "cat"])
-    def test_the_message_is_allowed(self, head: str) -> None:
-        handler = SecretFileGuardHandler()
-        hook_input = {
-            "tool_name": "Bash",
-            "tool_input": {"command": _fed(head, self._PROSE_WITH_GLOB)},
-        }
-        assert not handler.matches(hook_input)
 
 
 class TestWhatTheBodyStillCannotHide:

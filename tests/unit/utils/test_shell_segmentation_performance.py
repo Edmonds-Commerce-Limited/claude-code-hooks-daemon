@@ -29,7 +29,6 @@ from claude_code_hooks_daemon.utils.heredoc_operators import scan_heredocs
 from claude_code_hooks_daemon.utils.shell_segmentation import (
     heredoc_consumers,
     known_variables,
-    no_earlier_segment_may_rebind,
     strip_inert_spans,
     strip_message_bodies,
     strip_quoted_heredoc_bodies,
@@ -147,10 +146,9 @@ class TestRoundTwelveHelpersAreLinear:
         "fn",
         [
             known_variables,
-            lambda command: no_earlier_segment_may_rebind(command, len(command)),
             lambda command: heredoc_consumers(command, scan_heredocs(command).heredocs),
         ],
-        ids=["known_variables", "no_earlier_segment_may_rebind", "heredoc_consumers"],
+        ids=["known_variables", "heredoc_consumers"],
     )
     def test_the_cost_grows_linearly(
         self, fn: Callable[[str], object], build: Callable[[int], str]

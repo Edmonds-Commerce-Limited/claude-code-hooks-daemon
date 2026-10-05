@@ -22,6 +22,16 @@ flag position (``ansible-playbook --vault-password-file ...``;
 an agent that can type its own justification has self-authorised disclosure.
 A HUMAN lifts protection by editing config.
 
+**Deny only on a positive finding** (the owner's ruling, Plan 00483 A1): a
+protected path or name literally in the input, or a protected file that a
+recursive search or a glob provably reaches according to the protected-file
+index (``utils.protected_file_index``). Anything the guard could not judge -- a
+cap or the deadline reached, an unresolved variable, a command it cannot parse,
+a working directory it cannot place, an index not built yet -- is ALLOWED with a
+loud advisory. It is never denied: a deny that depends on tree size, host load or
+how a command happens to be spelt costs ordinary work, and a guard for a careless
+agent cannot stop a hostile one anyway.
+
 Honest limits: this is DEFENCE IN DEPTH over an OS boundary (permissions,
 ownership) the project must set independently — see the plan's
 RESEARCH-read-routes.md for the class-(b)/(c)/(d) route classification.
@@ -44,7 +54,7 @@ from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.utils import (
     encrypted_at_rest,
-    protected_tree_scan,
+    protected_file_index,
     recursive_search,
     shell_expansion,
 )
@@ -53,7 +63,8 @@ from claude_code_hooks_daemon.utils.path_exclusion import (
     handler_excludes_path,
     resolve_project_root,
 )
-from claude_code_hooks_daemon.utils.protected_tree_scan import TreeView
+from claude_code_hooks_daemon.utils.path_predicates import path_is_dir
+from claude_code_hooks_daemon.utils.protected_file_index import ProtectedFileIndex, TreeView
 from claude_code_hooks_daemon.utils.shell_segmentation import strip_quoted_heredoc_bodies
 
 logger = logging.getLogger(__name__)
@@ -99,20 +110,9 @@ _VERBOSE: Final[str] = (
     "command is itself a mention, and is denied."
 )
 
-# The route a raise during evaluation is filed under (Plan 00466 N11). Not in
-# `_RULES_BY_ROUTE`'s three real routes -- its Rule needs its own `why`/`fix`,
-# distinct from "a protected path was mentioned", and `handle()` renders it
-# separately rather than looking it up there.
-_ERROR_ROUTE: Final[str] = "error"
-
-# The route a command the shell reader cannot read with certainty is filed
-# under (Plan 00466 N101 round 12). That is a property of the command, not a
-# defect in the guard, so it must not ask for a bug report.
-_UNREADABLE_ROUTE: Final[str] = "unreadable"
-
 # The route a recursive Bash search that reaches a protected file under its
 # roots is filed under (Plan 00483 D1). It is the `read` rule plus the way out:
-# the walk DISCOVERED the file, so the reason names the remedy, never the file.
+# the index DISCOVERED the file, so the reason names the remedy, never the file.
 _SEARCH_ROUTE: Final[str] = "search"
 _SEARCH_REMEDY: Final[str] = (
     "This recursive search would read a protected file under its roots. Search a "
@@ -121,11 +121,27 @@ _SEARCH_REMEDY: Final[str] = (
     "hidden and gitignored files; `--hidden`, `-u` and `--no-ignore` make them read those."
 )
 
-# The `_ERROR_ROUTE` detail for a path argument carrying a NUL byte: the
-# input, not the guard, is what cannot be evaluated.
-_NUL_PATH_DETAIL: Final[str] = (
-    "the path contains an embedded NUL byte, which no real filesystem path can "
-    "hold, so what it names cannot be resolved"
+# The route of a call the guard could not judge (Plan 00483 A1). It is NOT a
+# deny: `handle()` allows it and says what was not checked, so the agent is
+# told, loudly, that this call got no protection from the guard.
+_ADVISORY_ROUTE: Final[str] = "advisory"
+_NOT_JUDGED_PATTERN: Final[str] = "<not-judged>"
+_NO_INDEX_REASON: Final[str] = (
+    "a recursive search or directory read was not checked, because the index of "
+    "protected files is not available yet (the daemon has just started, or the "
+    "project is not a git repository)"
+)
+#: A command with none of these has no glob for the index to judge.
+_MAY_GLOB: Final[re.Pattern[str]] = re.compile(r"[*?\[]")
+_ADVISORY_HEADLINE: Final[str] = (
+    "secret_file_guard could NOT fully judge this call, so it was ALLOWED. "
+    "No protected path was found by the checks that did run."
+)
+_ADVISORY_CLOSING: Final[str] = (
+    "A deny here would depend on something the guard cannot see, so it does not "
+    "guess. The commit gate still blocks secrets from reaching git. If this call "
+    "reads a protected file, that is yours to prevent: the contents must never "
+    "enter context by any route."
 )
 
 _RULES_BY_ROUTE: Final[dict[str, Rule]] = {
@@ -152,94 +168,13 @@ _RULES_BY_ROUTE: Final[dict[str, Rule]] = {
     ),
 }
 
-# Plan 00466 N11 (major M4): a raise anywhere in evaluation is not a decision
-# this guard made -- `core/chain.py`'s per-handler catch treats a propagated
-# exception as "did not match" whenever the daemon's global `strict_mode` is
-# the client default (`false`), fail-opening a SAFETY+BLOCKING guard. N5
-# fixed the one raise path found live; this rule and the wrapper below make
-# the whole CLASS structurally fail closed, independent of `strict_mode`.
-_ERROR_RULE: Final[Rule] = Rule(
-    rule_id=RuleID.SECRET_EVALUATION_ERROR,
-    blocked="a call this guard could not finish evaluating",
-    why=(
-        "An exception during evaluation is not a decision the guard actually made "
-        '-- treating it as "no match" would let a genuine protected-path mention '
-        "through unexamined whenever the SAME defect crashed the scan"
-    ),
-    fix=(
-        "This is a bug in the guard itself, not something to work around -- "
-        "report it via the hooks-daemon skill (issue-report)"
-    ),
-    verbose=(
-        "secret_file_guard could not finish evaluating this call and is denying "
-        'it for safety rather than treating the crash as "no match" (Plan 00466 '
-        "N11 -- this guard fails CLOSED on any internal error, independent of the "
-        "daemon's global strict_mode). This is a bug in the guard itself: report "
-        "it via the hooks-daemon skill (issue-report) rather than retrying -- "
-        "retrying the same call will crash the same way."
-    ),
-)
-
-_UNREADABLE_RULE: Final[Rule] = Rule(
-    rule_id=RuleID.SECRET_COMMAND_UNREADABLE,
-    blocked="a Bash command whose structure could not be read with certainty",
-    why=(
-        "A protected path could hide in a part of the command the reader cannot "
-        "place, so an unreadable command is never treated as clean"
-    ),
-    fix=(
-        "Rephrase the command: move a `case` inside `$( )` into an `if`, or put "
-        "the logic in a script file under untracked/scratch/ and run that"
-    ),
-    verbose=(
-        "secret_file_guard could not read this command's structure with "
-        "certainty -- for example a `case` command inside `$( )`, whose "
-        "patterns end in a `)` that closes nothing, or quoting inside `${...}` "
-        "whose extent is ambiguous. This is not a bug in the guard: the "
-        "command itself cannot be read, so it is denied rather than treated as "
-        "mentioning no protected path. Rephrase the command: move a `case` "
-        "inside `$( )` into an `if`, split the command into simpler calls, or "
-        "put the logic in a script file under untracked/scratch/ and run that."
-    ),
-)
-
-# The route a scan that ran out of budget (its deadline, or an entry cap) is
-# filed under (ledger 00474 N348). Still a deny -- an unfinished scan is not a
-# clean one -- but not a finding and not a guard defect, so it has its own rule
-# and its own reason, which says what ran out and what to do about it.
-_INCOMPLETE_ROUTE: Final[str] = "incomplete"
-_INCOMPLETE_PATTERN: Final[str] = "<scan-incomplete>"
-_FOUND_NOTHING: Final[str] = "no protected path was found"
-
-_INCOMPLETE_RULE: Final[Rule] = Rule(
-    rule_id=RuleID.SECRET_SCAN_INCOMPLETE,
-    blocked="a scan that ran out of time or entries before it could finish",
-    why=(
-        "An unfinished scan is never treated as clean, so the command is denied; "
-        "but no protected path was found, and none is claimed"
-    ),
-    fix=(
-        "Past a cap, narrow the glob or the search root, or name the files; past "
-        "the deadline, retry the command"
-    ),
-    verbose=(
-        "secret_file_guard could not finish checking this command, and denies it "
-        "rather than treating the unfinished scan as clean (this guard fails "
-        "CLOSED). This is not a finding: no protected path was found, and it is "
-        "not a bug in the guard. Either a glob or recursive search reached more "
-        "entries than the scan's cap, in which case narrow the glob or the search "
-        "root, or name the files; or the scan deadline passed under load, in "
-        "which case retry the command."
-    ),
-)
-
 
 # Routes whose deny message names the matched token (Plan 00356). Both scan a
 # HAYSTACK the caller supplied -- a whole command line, a whole authored file
 # -- so the offending word is not otherwise identifiable. The `read` route is
 # excluded: its token is the caller's single path argument (nothing to
 # locate), and a directory-rooted Grep reaches it carrying a protected
-# filename the walk DISCOVERED rather than one the caller typed.
+# filename the index DISCOVERED rather than one the caller typed.
 _TOKEN_ECHO_ROUTES: Final[frozenset[str]] = frozenset({"bash", "script"})
 
 _FIELD_FILE_PATH: Final[str] = "file_path"
@@ -1313,33 +1248,18 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
         )
 
     def _compute_and_cache_matched(self, hook_input: dict[str, Any]) -> tuple[str, str, str] | None:
-        """Evaluate ONCE and leave the result for this same dispatch's
-        ``handle()`` (m2, Plan 00466 review 2).
+        """Evaluate ONCE and leave the result for this same dispatch's ``handle()``.
 
-        ``matches()`` and ``handle()`` used to call
-        ``_matched_pattern_and_route`` independently, so a raise
-        ``matches()`` correctly turned into a DENY (via ``_ERROR_ROUTE``)
-        could be silently overwritten by a CLEAN re-evaluation inside
-        ``handle()`` if the underlying fault was transient -- exactly the
-        gap the fail-closed wrapper (N11) exists to close, reopened one
-        layer up.
-
-        M-2 (Plan 00466 review 3): ``_dispatch_key`` itself is NOT wrapped
-        by ``_matched_pattern_and_route``'s try/except -- a malformed
-        ``tool_input`` (``None``, a list, a bare string instead of a dict)
-        makes its own ``.get()`` calls raise ``AttributeError``, one line
-        below a ``matched`` that (via ``_evaluate``'s IDENTICAL raise,
-        already caught) correctly reflects the fail-closed error route.
-        Catching it here just means "do not cache" -- ``matched`` is
-        already the right, safe answer.
+        ``matches()`` and ``handle()`` would otherwise each evaluate, and a
+        transient difference between the two runs could make them disagree about
+        one call. A malformed ``tool_input`` makes ``_dispatch_key`` itself
+        raise; then nothing is cached and ``handle()`` evaluates afresh.
         """
         matched = self._matched_pattern_and_route(hook_input)
         try:
             key = self._dispatch_key(hook_input)
         except Exception:
-            logger.exception(
-                "secret_file_guard: _dispatch_key raised; not caching " "(Plan 00466 review 3 M-2)"
-            )
+            logger.exception("secret_file_guard: _dispatch_key raised; not caching")
             self._cached_dispatch = None
             return matched
         self._cached_dispatch = (key, matched)
@@ -1350,22 +1270,13 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
 
         Reading the entry consumes it, so a later dispatch never inherits a
         stale verdict; the key check guards the case ``handle()`` is called
-        without a prior ``matches()`` for the SAME input (defensive, not
-        expected in the real chain).
-
-        M-2 (Plan 00466 review 3): see ``_compute_and_cache_matched`` for
-        why ``_dispatch_key`` must be called inside its own try/except here
-        too -- a raise falls back to a fresh, still fail-closed,
-        ``_matched_pattern_and_route`` call rather than escaping.
+        without a prior ``matches()`` for the SAME input.
         """
         cached = self._cached_dispatch
         try:
             key = self._dispatch_key(hook_input)
         except Exception:
-            logger.exception(
-                "secret_file_guard: _dispatch_key raised; re-evaluating "
-                "(Plan 00466 review 3 M-2)"
-            )
+            logger.exception("secret_file_guard: _dispatch_key raised; re-evaluating")
             self._cached_dispatch = None
             return self._matched_pattern_and_route(hook_input)
         if cached is not None and cached[0] == key:
@@ -1374,45 +1285,54 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
         return self._matched_pattern_and_route(hook_input)
 
     def _matched_pattern_and_route(self, hook_input: dict[str, Any]) -> tuple[str, str, str] | None:
-        """``(pattern, token, route)`` for this tool call, or ``None``.
+        """``(pattern, token, route)`` for this tool call, or ``None``. NEVER raises.
 
-        The single dispatch point shared by ``matches()`` and ``handle()`` so
-        the two can never disagree about what was inspected. Wraps
-        ``_evaluate`` so this method — and therefore ``matches()``/``handle()``
-        — NEVER raises (Plan 00466 N11, major M4): an exception anywhere in
-        evaluation is filed under ``_ERROR_ROUTE`` and denied, rather than
-        propagating to ``core/chain.py``'s per-handler catch, which treats a
-        propagated exception as "did not match" under the daemon's default
-        (non-strict) ``strict_mode`` — fail-opening this SAFETY+BLOCKING guard
-        for that call, including any genuine protected-path mention elsewhere
-        in the same input. This guard fails closed structurally, independent
-        of the global setting.
+        The single dispatch point shared by ``matches()`` and ``handle()``. It
+        denies only on a positive finding (Plan 00483 A1). A cap, the deadline,
+        a command the reader cannot parse or an internal error ends the full
+        scan; the call is then judged on the literal paths in its text alone, and
+        if none is found it is allowed with an advisory (the ``advisory`` route).
         """
         try:
             return self._evaluate(hook_input)
         except shell_expansion.UnresolvableBraceQuotingError as exc:
-            # A command the reader cannot place is denied as unreadable, not
-            # as a guard defect (N101 round 12, review 11 MAJOR 2).
-            return ("<unreadable>", type(exc).__name__, _UNREADABLE_ROUTE)
-        except (shell_expansion.TooManyToEnumerateError, TimeoutError) as exc:
-            # Ledger 00466 N134: a cap or the deadline means "could not
-            # verify", which the caller can act on -- still a deny, but not
-            # the internal-error route, whose text calls it a guard bug, and
-            # (N348) not the finding routes either.
-            logger.info("secret_file_guard: scan did not finish (%s); denying", type(exc).__name__)
-            detail = sfm.scan_incomplete_detail(exc, found_nothing=_FOUND_NOTHING)
-            return (_INCOMPLETE_PATTERN, detail, _INCOMPLETE_ROUTE)
+            logger.info("secret_file_guard: command not fully readable (%s)", type(exc).__name__)
+            return self._literal_finding_or_advisory(hook_input, "the command could not be parsed")
+        except TimeoutError:
+            logger.info("secret_file_guard: scan deadline passed")
+            return self._literal_finding_or_advisory(hook_input, "the scan deadline passed")
+        except shell_expansion.TooManyToEnumerateError:
+            logger.info("secret_file_guard: scan hit a size limit")
+            return self._literal_finding_or_advisory(hook_input, "the scan reached a size limit")
         except Exception as exc:
-            # Deliberately broad: ANY exception during evaluation must deny,
-            # never propagate (Plan 00466 N11) -- see the docstring above.
-            # n1 (Plan 00466 review 2): only the exception TYPE goes into the
-            # deny reason -- the full message (which could carry a filename
-            # discovered by a directory walk, Plan 00356) is logged here and
-            # never echoed back to the caller.
-            logger.exception(
-                "secret_file_guard: evaluation raised; denying for safety (Plan 00466 N11)"
+            logger.exception("secret_file_guard: evaluation raised; allowing with an advisory")
+            return self._literal_finding_or_advisory(
+                hook_input, f"an internal error ({type(exc).__name__})"
             )
-            return ("<internal-error>", type(exc).__name__, _ERROR_ROUTE)
+
+    def _literal_finding_or_advisory(
+        self, hook_input: dict[str, Any], reason: str
+    ) -> tuple[str, str, str]:
+        """The literal protected path in a Bash command whose full scan gave up, else an advisory."""
+        tool_input = hook_input.get(HookInputField.TOOL_INPUT)
+        command = tool_input.get(_FIELD_COMMAND) if isinstance(tool_input, dict) else None
+        if hook_input.get(HookInputField.TOOL_NAME) == ToolName.BASH and isinstance(command, str):
+            raw_cwd = hook_input.get(HookInputField.CWD)
+            try:
+                literal = sfm.find_protected_mention_strict(
+                    command, self._patterns(), raw_cwd if isinstance(raw_cwd, str) else None
+                )
+            except Exception:
+                logger.exception("secret_file_guard: the literal re-check raised")
+                literal = None
+            if literal is not None:
+                return (literal, literal, "bash")
+        return (_NOT_JUDGED_PATTERN, reason, _ADVISORY_ROUTE)
+
+    def _index(self, patterns: tuple[str, ...]) -> ProtectedFileIndex | None:
+        """The protected-file index for this project, or None while there is none."""
+        root = resolve_project_root()
+        return None if root is None else protected_file_index.index_for(root, patterns)
 
     def _evaluate(self, hook_input: dict[str, Any]) -> tuple[str, str, str] | None:
         """The real evaluation ``_matched_pattern_and_route`` wraps.
@@ -1458,6 +1378,7 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
             # that stopped matching once fed stripped words) -- so each
             # consumer decodes separately for correctness, same as before.
             shared_words = sfm.bash_route_word_stream(command, deadline=deadline)
+            index = self._index(patterns) if _MAY_GLOB.search(command) else None
             mention = sfm.find_protected_mention_detail(
                 command,
                 patterns,
@@ -1465,6 +1386,7 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
                 cwd=cwd,
                 normalised_words=shared_words,
                 bash_tool_command=True,
+                index=index,
             )
             if mention is None:
                 # review 6 minor-2: an interpreter one-liner's own
@@ -1477,37 +1399,31 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
                     command, patterns, deadline=deadline, cwd=cwd, words=shared_words
                 )
                 if one_liner_mention is None:
-                    return self._search_reach(command, patterns, cwd, deadline)
+                    return self._search_reach(command, patterns, cwd)
                 return (*one_liner_mention, "bash")
             # The EFFECTIVE patterns are passed through (review finding 1):
             # the flag-position check re-tests bare consumer arguments, and
             # testing the shipped defaults there would blind it to every
             # project-configured pattern — all of them under mode: replace.
             if sfm.is_exempt_invocation(command, self._consumers(), patterns, deadline=deadline):
-                return self._search_reach(command, patterns, cwd, deadline)
+                return self._search_reach(command, patterns, cwd)
             if sfm.is_encrypted_target_invocation(
                 command, patterns, cwd=cwd, is_encrypted=self._is_encrypted, deadline=deadline
             ):
-                return self._search_reach(command, patterns, cwd, deadline)
+                return self._search_reach(command, patterns, cwd)
             # Plan 00466 niggle (gd5_fp): a grep-family search PATTERN that
             # happens to spell a protected name is not a read of that file
             # -- only a FILE-TARGET argument is (see the function's own
             # docstring for the position-based distinction and every shape
             # this must NOT unlock).
             if sfm.is_grep_pattern_only_mention(command, patterns, deadline=deadline):
-                return self._search_reach(command, patterns, cwd, deadline)
+                return self._search_reach(command, patterns, cwd)
             return (mention[0], mention[1], "bash")
 
         path_field = _PATH_FIELD_BY_TOOL.get(str(tool_name or ""))
         if path_field is None:
             return None
         path = str(tool_input.get(path_field, ""))
-        if "\x00" in path:
-            # `protecting_pattern` matches a NUL-bearing path as spelled
-            # (the OS cannot realpath it), but nothing here can resolve what
-            # it would name either -- lower layers stop reading at the NUL.
-            # Unevaluable is not "allowed" (Plan 00466 N11): deny.
-            return ("<nul-byte>", _NUL_PATH_DETAIL, _ERROR_ROUTE)
         protecting = sfm.protecting_pattern(path, patterns)
         if protecting is not None:
             # Ciphertext is not the secret (Plan 00459). Checked on EVERY
@@ -1518,19 +1434,9 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
 
         if tool_name == ToolName.GREP and path:
             # A Grep rooted at an ancestor of a protected file reads its
-            # content without naming it. Every entry is examined (the Grep
-            # tool's own ignore handling is not relied on); a tree past the
-            # entry cap or the deadline raises and is denied as incomplete.
-            directory_mention = protected_tree_scan.find_protected_in_tree(
-                path,
-                patterns,
-                view=TreeView.ALL,
-                is_exempt=self._is_encrypted,
-                deadline=time.monotonic() + sfm.SCAN_DEADLINE_SECONDS,
-            )
-            if directory_mention is None:
-                return None
-            return (directory_mention, path, "read")
+            # content without naming it. Every indexed file under the root
+            # counts (the Grep tool's own ignore handling is not relied on).
+            return self._directory_reach(path, patterns)
 
         if tool_name in (ToolName.WRITE, ToolName.EDIT):
             script_mention = self._script_content_mention(path, tool_input, patterns, cwd)
@@ -1540,22 +1446,38 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
         return None
 
     def _search_reach(
-        self, command: str, patterns: tuple[str, ...], cwd: str | None, deadline: float
+        self, command: str, patterns: tuple[str, ...], cwd: str | None
     ) -> tuple[str, str, str] | None:
         """A protected file a recursive search in ``command`` reads, or None (D1).
 
         Judged after the text scan has cleared the command, and also where an
         exemption cleared it: a search PATTERN that spells a protected name is
-        not a read of that file, but the tree the search walks still can be.
+        not a read of that file, but the tree the search reads still can be.
         Routed as ``search`` (the ``read`` rule plus the remedy) with the searched
-        root as the detail, so the discovered filename is never echoed.
+        root as the detail, so the discovered filename is never echoed. With no
+        index to look the roots up in, the search is not judged and the call is
+        allowed with an advisory.
         """
-        reached = recursive_search.protected_reached_by_search(
-            command, patterns, cwd=cwd, is_exempt=self._is_encrypted, deadline=deadline
-        )
+        reads = recursive_search.search_reads(command, cwd)
+        if not reads:
+            return None
+        index = self._index(patterns)
+        if index is None:
+            return (_NOT_JUDGED_PATTERN, _NO_INDEX_REASON, _ADVISORY_ROUTE)
+        reached = recursive_search.protected_reached(reads, index, is_exempt=self._is_encrypted)
         if reached is None:
             return None
         return (reached[0], reached[1], _SEARCH_ROUTE)
+
+    def _directory_reach(self, path: str, patterns: tuple[str, ...]) -> tuple[str, str, str] | None:
+        """A protected file under the directory a Grep tool call is rooted at, or None."""
+        if not path_is_dir(path, unreadable_means=False):
+            return None
+        index = self._index(patterns)
+        if index is None:
+            return (_NOT_JUDGED_PATTERN, _NO_INDEX_REASON, _ADVISORY_ROUTE)
+        found = index.find_under(path, view=TreeView.ALL, is_exempt=self._is_encrypted)
+        return None if found is None else (found, path, "read")
 
     def _is_encrypted(self, absolute_path: str) -> bool:
         """Is this path a whole-file vault payload right now? (Plan 00459)
@@ -1610,12 +1532,10 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
         N275: a CI workflow's GitHub ``${{ ... }}`` expressions are
         neutralised first (the runner substitutes them before any shell).
         Anything scanned as shell (``.sh``/``.bash``, shebang scripts,
-        Makefiles, CI YAML) that the reader still cannot place fails closed
-        as unreadable: a literal re-scan cannot see a path assembled from
-        variables, and nothing else checks a Makefile recipe. Only a file
-        scanned as ``"content"`` (``.py``, ``.ts``, ...) is re-scanned
-        literally (``${`` spaced apart) instead of denied for being
-        unparseable as shell; a real mention there still denies.
+        Makefiles, CI YAML) that the reader cannot place raises, and the
+        caller allows it with an advisory. A file scanned as ``"content"``
+        (``.py``, ``.ts``, ...) is instead re-scanned literally (``${``
+        spaced apart); a real mention there still denies.
 
         Review 6 item 3: when ``context == "content"`` (a non-shell-script
         language), string-literal arguments to a KNOWN shell-executing call
@@ -1685,62 +1605,43 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
         return self._compute_and_cache_matched(hook_input) is not None
 
     def get_rules(self) -> list[Rule]:
-        """Return the 6 Rule objects backing this handler's blocking behaviour."""
-        return [*_RULES_BY_ROUTE.values(), _ERROR_RULE, _UNREADABLE_RULE, _INCOMPLETE_RULE]
+        """Return the 3 Rule objects backing this handler's blocking behaviour."""
+        return list(_RULES_BY_ROUTE.values())
 
     def handle(self, hook_input: dict[str, Any]) -> GatingResult:
-        """Deny with a verbose-first/terse-after explanation.
+        """Deny a positive finding; allow with an advisory a call it could not judge.
 
-        Verbosity is decided per (transcript_path, rule_id) via the shared
-        DisclosureTracker (Plan 00116, Decision G). The matched glob is
-        appended on every fire — it changes per invocation, so it is not
-        part of the static teaching content.
-
-        The whole body after a real match is wrapped in its own fail-closed
-        net (m1, Plan 00466 review 2): ``_matched_pattern_and_route`` only
-        guarantees reaching a VERDICT, not that everything downstream of a
-        real match (the disclosure tracker, ``RuleFormatter``, string
-        building) can never raise -- and an exception escaping `handle()`
-        unwrapped is exactly what a non-strict chain treats as "no match"
-        for a call that had a genuine protected mention.
+        The deny is verbose-first/terse-after, decided per (transcript_path,
+        rule_id) via the shared DisclosureTracker (Plan 00116, Decision G). The
+        matched glob is appended on every fire — it changes per invocation, so
+        it is not part of the static teaching content. A finding is never lost to
+        a defect in building its message: that falls back to the short form.
         """
         matched = self._take_cached_matched(hook_input)
         if matched is None:
             return GatingResult(decision=Decision.ALLOW)
+        pattern, token, route = matched
+        if route == _ADVISORY_ROUTE:
+            return GatingResult(
+                decision=Decision.ALLOW,
+                context=[f"{_ADVISORY_HEADLINE} Not judged: {token}."],
+                guidance=f"{_ADVISORY_HEADLINE}\n\nNot judged: {token}.\n\n{_ADVISORY_CLOSING}",
+            )
         try:
             return self._build_deny_result(hook_input, matched)
-        except Exception as exc:
-            logger.exception(
-                "secret_file_guard: handle() raised after a real match; "
-                "denying for safety (Plan 00466 m1)"
-            )
-            # n1 (Plan 00466 review 2): only the exception TYPE goes into the
-            # deny reason -- the message is logged above, never echoed back.
+        except Exception:
+            logger.exception("secret_file_guard: could not build the explanation of a real match")
+            rule = _RULES_BY_ROUTE["read" if route == _SEARCH_ROUTE else route]
             return GatingResult(
                 decision=Decision.DENY,
-                reason=(
-                    f"BLOCKED [{RuleID.SECRET_EVALUATION_ERROR}]: secret_file_guard matched a "
-                    f"protected path but could not build its explanation: "
-                    f"{type(exc).__name__}\n\nDenying for safety."
-                ),
+                reason=f"BLOCKED [{rule.rule_id}]: {rule.blocked}\n\nMatched protected glob: `{pattern}`",
             )
 
     def _build_deny_result(
         self, hook_input: dict[str, Any], matched: tuple[str, str, str]
     ) -> GatingResult:
-        """The real ``handle()`` body, run inside its caller's try/except."""
+        """The deny message of a positive finding."""
         pattern, token, route = matched
-        if route == _ERROR_ROUTE:
-            return self._deny_for_evaluation_error(hook_input, token)
-        if route == _UNREADABLE_ROUTE:
-            return GatingResult(
-                decision=Decision.DENY, reason=self._disclosed(hook_input, _UNREADABLE_RULE)
-            )
-        if route == _INCOMPLETE_ROUTE:
-            message = self._disclosed(hook_input, _INCOMPLETE_RULE)
-            return GatingResult(
-                decision=Decision.DENY, reason=f"{message}\n\nWhat ran out: {token}."
-            )
         rule_route = "read" if route == _SEARCH_ROUTE else route
         message = self._disclosed(hook_input, _RULES_BY_ROUTE[rule_route])
         message += f"\n\nMatched protected glob: `{pattern}`"
@@ -1754,22 +1655,10 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
         # the `read` route the path is the caller's single argument, already
         # in hand, so naming it teaches nothing -- and the directory-rooted
         # Grep case reaches that route having DISCOVERED a protected filename
-        # by walking a tree, which the caller never typed and must not learn.
+        # in the index, which the caller never typed and must not learn.
         if route in _TOKEN_ECHO_ROUTES and token and token != pattern:
             message += f"\nMatched on this token from your input: `{token}`"
 
-        return GatingResult(decision=Decision.DENY, reason=message)
-
-    def _deny_for_evaluation_error(self, hook_input: dict[str, Any], detail: str) -> GatingResult:
-        """Deny for the ``_ERROR_ROUTE`` case (Plan 00466 N11): the guard
-        raised rather than reaching a real verdict. Same verbose-first/
-        terse-after disclosure ladder as the three real routes, keyed on
-        ``_ERROR_RULE``'s own rule_id, plus the exception detail so the
-        report that fixes the underlying bug does not need to reproduce it
-        from scratch.
-        """
-        message = self._disclosed(hook_input, _ERROR_RULE)
-        message += f"\n\nInternal error: {detail}"
         return GatingResult(decision=Decision.DENY, reason=message)
 
     @staticmethod
@@ -1837,26 +1726,30 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
             "and `git diff|log|show|blame`, because Ansible finds the vault "
             "password from its config without the command naming it. The "
             "check runs on EVERY call with no cache: after `ansible-vault "
-            "decrypt` the same path is fully protected again. It fails "
-            "closed — a file it cannot read, one over 4 MiB, a symlink out of "
-            "the project, or YAML with only inline `!vault` values stays "
-            "protected. Authoring a script that names an encrypted file stays "
-            "denied: the script runs later, when the file may be plaintext.\n\n"
-            "**A scan that runs out of budget is denied under its own rule, "
-            "`R-SECRET-SCAN-INCOMPLETE`** — a glob past its cap of examined "
-            "paths, a recursive search (`Grep` on a directory, `grep -r`, "
-            "`rg`, `git grep`) whose tree has more entries than the scan's "
-            "cap, or the scan deadline passing under load. No protected path "
-            "was found; the reason says what ran out. Narrow the glob or the "
-            "search root, search with `rg` (which skips gitignored trees), "
-            "add `--exclude-dir`, name the files, or retry after a "
-            "deadline.\n\n"
+            "decrypt` the same path is fully protected again. A file it "
+            "cannot read, one over 4 MiB, a symlink out of the project, or "
+            "YAML with only inline `!vault` values stays protected. Authoring "
+            "a script that names an encrypted file stays denied: the script "
+            "runs later, when the file may be plaintext.\n\n"
+            "**What the guard could not judge is ALLOWED, with a loud "
+            "advisory — never denied** (the owner's ruling). A cap or the scan "
+            "deadline reached, an unresolved variable, a command it cannot "
+            "parse, a working directory it cannot place, or the index of "
+            "protected files not built yet: no deny is issued, because a deny "
+            "would depend on tree size, host load or how a command happens to "
+            "be spelt. A protected path literally in the command is still "
+            "denied, and the `sensitive_content` commit gate stays the "
+            "backstop for secrets reaching git.\n\n"
             "**Honest limits — this is defence in depth, not a sandbox.** "
             "Literal path mentions are reliably denied. Heuristics catch glob "
             "tokens (`cat .vault-p*`), `~`/`$HOME` spellings and symlink "
-            "aliases; a `Grep` or Bash recursive search rooted at a DIRECTORY "
-            "is checked by examining the tree it reads, and a tree too large "
-            "to examine is denied, never allowed. NOT covered: "
+            "aliases; a glob (`cat keys/*`), a `Grep` on a directory and a "
+            "recursive Bash search (`grep -r`, `rg`, `git grep`) are judged "
+            "against an INDEX of the protected files that exist, built at "
+            "session start and refreshed in the background, so a protected "
+            "file created since the last build is not seen until the next "
+            "one. A glob of only wildcards (`ls */*/*`) names no place and is "
+            "not judged. NOT covered: "
             "string-assembled paths, shell state carried across invocations, "
             "pre-existing hard links or copies made before the guard was "
             "enabled (realpath cannot see them), pre-existing scripts/binaries "

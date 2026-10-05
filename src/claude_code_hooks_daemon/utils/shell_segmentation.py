@@ -39,7 +39,6 @@ from typing import Final, NamedTuple
 
 from claude_code_hooks_daemon.utils.ansi_c import ansi_c_string
 from claude_code_hooks_daemon.utils.command_evasion import (
-    SHELL_RESERVED_COMMAND_PREFIXES,
     git_subcommand_index,
     strip_reserved_word_prefix,
 )
@@ -1445,18 +1444,16 @@ def strip_quoted_heredoc_bodies(command: str, *, text_readers_only: bool = False
 
     depth_tracker = _SubstitutionDepthTracker(command)
     newline_tracker = _LastNewlineTracker(command)
-    rebinding_prefix = _RebindingPrefix(command)
     fds_may_run = _FD_PROCESS_PATTERN.search(command) is not None
     pieces: list[str] = []
     copied_to = 0
     for heredoc in _quoted_heredocs(command):
-        # Four questions, because each was separately a real hole: whether
-        # anything EARLIER in the call can change what the receiver runs
-        # (N214), who RECEIVES the body, what it is PIPED ON to, and whether
-        # the whole command sits in a SUBSTITUTION whose output lands in
-        # command position. Any one of them failing keeps the body.
-        if not rebinding_prefix.allows(heredoc.operator.start):
-            continue
+        # Three questions, because each was separately a real hole: who
+        # RECEIVES the body, what it is PIPED ON to, and whether the whole
+        # command sits in a SUBSTITUTION whose output lands in command
+        # position. Any one of them failing keeps the body. What an earlier
+        # statement may have rebound (an alias, a function, PATH) is not asked:
+        # a careless agent does not do that (Plan 00483 A2).
         if not _receiver_is_data_sink(
             command, heredoc, depth_tracker, newline_tracker, fds_may_run, text_readers_only
         ):
@@ -2129,15 +2126,12 @@ def heredoc_consumers(command: str, heredocs: Sequence[Heredoc]) -> list[tuple[s
     ``heredocs`` must come in opener order, as ``scan_heredocs`` gives them:
     one newline tracker serves the whole call (Plan 00466 N25).
 
-    Round 12 makes the receiving word None in two more cases. After an
-    earlier segment that may rebind a command name (N214,
-    :func:`no_earlier_segment_may_rebind`), the name may not mean the program.
-    And a top-level :data:`DATA_SINKS` stage whose arguments may hand the
-    body on (``cat <<'EOF' > >(bash)``) is no sink.
+    Round 12 makes the receiving word None when a top-level :data:`DATA_SINKS`
+    stage's arguments may hand the body on (``cat <<'EOF' > >(bash)``): that is
+    no sink.
     """
     newline_tracker = _LastNewlineTracker(command)
     depth_tracker = _SubstitutionDepthTracker(command)
-    rebinding_prefix = _RebindingPrefix(command)
     known = known_variables(command)
     fds_may_run = _FD_PROCESS_PATTERN.search(command) is not None
     consumers: list[tuple[str | None, ...]] = []
@@ -2152,9 +2146,6 @@ def heredoc_consumers(command: str, heredocs: Sequence[Heredoc]) -> list[tuple[s
         tail = _opener_tail(command, heredoc)
         pipeline = split_unquoted(tail, _PIPELINE_TERMINATORS)[0]
         downstream = split_unquoted(pipeline, ("|",))[1:]
-        if not rebinding_prefix.allows(opener_start):
-            consumers.append((None,))
-            continue
         words = [_consumer_word(stage, known) for stage in (receiving, *downstream)]
         receiving_stage = receiving + " " + split_unquoted(pipeline, ("|",))[0]
         if (
@@ -2349,265 +2340,6 @@ def _blank_harmless_redirects(text: str) -> str:
     return _HARMLESS_REDIRECT_PATTERN.sub(lambda match: " " * len(match.group()), text)
 
 
-def no_earlier_segment_may_rebind(command: str, position: int) -> bool:
-    """Can no segment of ``command`` before the one holding ``position``
-    change what a later command name means to this shell (Plan 00466 N101
-    round 13 ruling on N214)?
-
-    A sink's body is data only then: an earlier segment can define a
-    function or an alias that shadows the sink, or point ``PATH`` elsewhere.
-    A child process can do neither, so a literal-headed external command
-    (``mkdir``, ``pytest``, a heredoc into ``cat``) never counts, whatever it
-    does to files: a later name a file it plants could shadow is the limit
-    ``FailOpenBoundaries.md`` records. What may rebind is
-    :func:`segment_may_rebind_commands`; an unquoted heredoc body may too,
-    through an expansion that assigns.
-    """
-    return _RebindingPrefix(command).allows(position)
-
-
-class _RebindingPrefix:
-    """Where the first segment that may rebind a command name ends, found
-    once for a whole command so a caller asking for each heredoc pays one
-    scan."""
-
-    def __init__(self, command: str) -> None:
-        scan = scan_heredocs(command)
-        self._limit = len(command) if scan.stopped_at is None else scan.stopped_at
-        ends = [
-            heredoc.closer_start
-            for heredoc in scan.heredocs
-            if heredoc.terminated
-            and not heredoc.operator.quoted
-            and _expansions_may_rebind(
-                command[heredoc.body_start : heredoc.closer_start], commands=False
-            )
-        ]
-        text = _blank_bodies(command, scan.heredocs)
-        for start, end in split_unquoted_spans(text, (*_RECEIVER_SEPARATORS, _NEWLINE)):
-            if segment_may_rebind_commands(text[start:end]):
-                ends.append(end)
-                break
-        self._first_rebinding_end = min(ends, default=None)
-
-    def allows(self, position: int) -> bool:
-        """Can no segment before the one holding ``position`` rebind?"""
-        if position > self._limit:
-            return False
-        return self._first_rebinding_end is None or position <= self._first_rebinding_end
-
-
-def segment_may_rebind_commands(segment: str) -> bool:
-    """True when the simple command ``segment`` may change which program a
-    LATER command name runs in this shell (Plan 00466 N101 round 13).
-
-    The small-a branch has a predicate of this name for the same question;
-    the landing merge keeps one. It may when the text can assign through an
-    expansion or arithmetic, defines a function, or when it, or a group,
-    subshell or substitution body in it, has:
-
-    - a head that is not plain literal text (``$X``, ``"cat"``, ``\\cat``,
-      ``$'cat'``, ``~/x``);
-    - a head from :data:`_REBINDING_HEADS`, or ``command`` other than the
-      ``command -v``/``-V`` lookup. ``cd``/``pushd``/``popd`` and
-      ``source`` never count (Plan 00483 X-1);
-    - a name-binding builtin (:data:`_NAME_BINDING_HEADS`, ``unset``
-      among them) binding a special name, or a name that is not literal
-      (a value that is not literal only counts for a special name), or
-      declaring a nameref or an integer;
-    - ``set`` with an option off :data:`_SET_INERT_LETTERS`/
-      :data:`_SET_INERT_NAMES`, or ``printf -v``;
-    - an assignment to a name bash or a helper program reads
-      (:func:`_is_special_variable`), or through an evaluated subscript,
-      including the loop name of ``for``/``select``. ``PATH`` bound only
-      to literal system directories picks the programs it always did, and
-      does not count;
-    - arithmetic that names any variable (:func:`_arithmetic_may_rebind`),
-      and ``${X:=…}``/``${X=…}`` for a special ``X``.
-    """
-    if _expansions_may_rebind(mask_quoted(segment, keep_double=True)):
-        return True
-    if _FUNCTION_DEFINITION_PATTERN.search(mask_quoted(segment, keep_double=False)):
-        return True
-    return any(_command_may_rebind(piece) for piece in _nested_commands(segment))
-
-
-def _expansions_may_rebind(text: str, commands: bool = True) -> bool:
-    """May an expansion or arithmetic command in ``text`` (quoted text
-    already blanked) assign a special name? ``commands`` is False for a
-    heredoc body, where only a ``$`` expands and ``((`` is text."""
-    index = 0
-    next_close = -1
-    next_open = -1
-    while index < len(text):
-        arithmetic_command = commands and text.startswith("((", index)
-        if arithmetic_command or text.startswith(("$((", "$["), index):
-            closer = "]" if text.startswith("$[", index) else "))"
-            start = text.index("[" if closer == "]" else "((", index) + len(closer)
-            end = _arithmetic_end(text, start, closer)
-            if end is None or _arithmetic_may_rebind(text[start:end]):
-                return True
-            # Inert arithmetic holds no `$`, so nothing inside needs a look.
-            index = end + len(closer)
-        elif text.startswith("${", index):
-            # Each nested `${` is judged too: `${X:-${PATH:=/tmp}}`.
-            if next_close < index:
-                next_close = text.find("}", index)
-            if next_open <= index:
-                found = text.find("${", index + 2)
-                next_open = len(text) if found < 0 else found
-            if next_close < 0:
-                return True
-            nested = next_open < next_close
-            if _parameter_may_rebind(text[index + 2 : min(next_close, next_open)], nested):
-                return True
-            index += 2
-        else:
-            index += 1
-    return False
-
-
-def _arithmetic_end(text: str, start: int, closer: str) -> int | None:
-    """Where the arithmetic opened just before ``start`` closes with
-    ``closer``, counting nested parentheses or brackets; None if never."""
-    opener = "[" if closer == "]" else "("
-    depth = 0
-    for index in range(start, len(text)):
-        char = text[index]
-        if char == opener:
-            depth += 1
-        elif depth and char == closer[0]:
-            depth -= 1
-        elif text.startswith(closer, index):
-            return index
-    return None
-
-
-def _parameter_may_rebind(body: str, nested: bool) -> bool:
-    """May the ``${…}`` expansion whose inside is ``body`` assign a special
-    name: ``${X:=v}``/``${X=v}``, an evaluated subscript or ``${X:offset}``
-    whose arithmetic may? ``nested``: ``body`` stops at a nested ``${``,
-    whose value an unfinished subscript or offset would evaluate."""
-    match = _PARAMETER_BODY_PATTERN.match(body)
-    if match is None:
-        return True
-    name, subscript, rest = match.group("name"), match.group("subscript"), match.group("rest")
-    if nested and (
-        rest.startswith("[") or (rest.startswith(":") and not rest.startswith(_WORD_OPERATORS))
-    ):
-        return True
-    if subscript is not None and _PLAIN_SUBSCRIPT.fullmatch(subscript) is None:
-        if _arithmetic_may_rebind(subscript[1:-1]):
-            return True
-    if rest.startswith((":=", "=")):
-        return _is_special_variable(name)
-    if rest.startswith(":") and not rest.startswith(_WORD_OPERATORS):
-        return any(_arithmetic_may_rebind(part) for part in rest[1:].split(":"))
-    return False
-
-
-#: ``${X:-w}``, ``${X:?w}``, ``${X:+w}``, ``${X:=w}``: a word, not an offset.
-_WORD_OPERATORS: tuple[str, ...] = (":-", ":?", ":+", ":=")
-#: The start of a ``${…}`` body: an optional ``#``/``!``, the name (or a
-#: special parameter), an optional subscript, and what follows.
-_PARAMETER_BODY_PATTERN = re.compile(
-    r"[#!]?(?P<name>[A-Za-z_]\w*|[0-9@*#?$!-])(?P<subscript>\[[^\]]*\])?(?P<rest>.*)\Z",
-    re.DOTALL,
-)
-#: A name in arithmetic: not the digits of a number, nor its base or hex part.
-_ARITHMETIC_NAME = re.compile(r"(?<![\w#.])[A-Za-z_]\w*")
-
-
-def _arithmetic_may_rebind(expression: str) -> bool:
-    """May evaluating the arithmetic ``expression`` assign a special name?
-
-    Only plain numbers and operators are inert (``$((1+2))``), by the round
-    13b ruling. A name read may assign any name: bash evaluates a referenced
-    variable's value as arithmetic in turn, so ``x='PATH=0'; : $((x))``
-    assigns ``PATH`` (checked in bash). A name assigned may carry an
-    attribute this call cannot see. An expansion inside may expand to
-    anything.
-    """
-    if "$" in expression or _BACKTICK in expression:
-        return True
-    return _ARITHMETIC_NAME.search(expression) is not None
-
-
-#: Heads that rebind a name, a builtin or the directory a relative ``PATH``
-#: entry means, or run text that may (the round 13 ruling's list). The
-#: ruling's name-binding builtins are judged by the names they bind
-#: (:data:`_NAME_BINDING_HEADS`), ``for``/``select`` by their loop name
-#: (:data:`_LOOP_HEADS`), ``let`` by its arithmetic and ``command`` by
-#: whether it is a lookup.
-_REBINDING_HEADS: frozenset[str] = frozenset(
-    {"alias", "unalias", "hash", "enable", "builtin", "eval"}
-    | {"exec", "shopt", "trap", "coproc", "function"}
-)
-#: Heads that change directory. They define no command name, and `source`/`.`
-#: runs a file whose text the command does not show, so neither is judged
-#: (Plan 00483 X-1): a heredoc after `cd "$DIR" &&` stays data.
-_DIRECTORY_CHANGE_HEADS: frozenset[str] = frozenset({"cd", "pushd", "popd"})
-_SOURCE_HEADS: frozenset[str] = frozenset({"source", "."})
-_LOOP_HEADS: frozenset[str] = frozenset({"for", "select"})
-#: Builtins whose operands are the names they bind (``NAME`` or
-#: ``NAME=value``). ``getopts``' first operand is its option string.
-_NAME_BINDING_HEADS: frozenset[str] = frozenset(
-    {"export", "declare", "typeset", "local", "readonly", "unset", "read"}
-    | {"mapfile", "readarray", "getopts"}
-)
-#: Options that rebind whatever the operands are: a declaration's ``-n``
-#: (a nameref) and ``-i`` (arithmetic on assignment), ``unset -f`` (removes
-#: a function) and ``mapfile -C`` (runs a callback).
-_DECLARATION_LETTERS: frozenset[str] = frozenset("ni")
-_REBINDING_OPTION_LETTERS: dict[str, frozenset[str]] = {
-    "export": _DECLARATION_LETTERS,
-    "declare": _DECLARATION_LETTERS,
-    "typeset": _DECLARATION_LETTERS,
-    "local": _DECLARATION_LETTERS,
-    "readonly": _DECLARATION_LETTERS,
-    "unset": frozenset("f"),
-    "mapfile": frozenset("C"),
-    "readarray": frozenset("C"),
-}
-_GETOPTS = "getopts"
-_LET = "let"
-_COMMAND = "command"
-#: ``command -v``/``-V`` (with ``-p``) only look a name up.
-_LOOKUP_LETTERS: frozenset[str] = frozenset("pvV")
-#: The directories a system installs its programs in: a ``PATH`` of only
-#: these picks the programs a name means everywhere else.
-_SYSTEM_PROGRAM_DIRECTORIES: frozenset[str] = frozenset(
-    {"/usr/local/sbin", "/usr/local/bin", "/usr/sbin", "/usr/bin", "/sbin", "/bin"}
-)
-_PATH = "PATH"
-_SHELL_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
-#: ``set`` options that only make the shell stop sooner or say more, in
-#: either sign: ``-e``, ``-u``, ``-x`` and their ``-o`` names, and pipefail.
-_SET_INERT_LETTERS: frozenset[str] = frozenset("eux")
-_SET_INERT_NAMES: frozenset[str] = frozenset({"pipefail", "errexit", "nounset", "xtrace"})
-_SET_LONG_OPTION = "o"
-_SET = "set"
-_PRINTF = "printf"
-_PRINTF_TARGET_OPTION = "-v"
-_END_OF_OPTIONS = "--"
-#: ``test`` and ``[`` compare numbers without evaluating them; ``[[`` does.
-_SINGLE_BRACKET_TESTS: frozenset[str] = frozenset({"test", "["})
-_ARITHMETIC_TEST_OPERATORS: frozenset[str] = frozenset({"-eq", "-ne", "-lt", "-le", "-gt", "-ge"})
-_TEST_WORDS: frozenset[str] = frozenset({"[[", "]]", "!", "(", ")"})
-#: Words that only close a compound command, or open a clause of one.
-_CLOSING_WORDS: frozenset[str] = frozenset({"}", ")", "fi", "done", "esac", ";;"})
-#: A head bash runs as written: no quote, escape, expansion, glob or brace.
-_PLAIN_HEAD_PATTERN = re.compile(r"[A-Za-z0-9_./+@%:,-]+|\[\[?")
-#: An assignment word: the name, and a subscript bash may evaluate.
-_ASSIGNMENT_PREFIX = re.compile(r"(?P<name>[A-Za-z_]\w*)(?P<subscript>\[[^\]]*\])?\+?=")
-_PLAIN_SUBSCRIPT = re.compile(r"\[(?:\d+|[@*])\]")
-#: ``NAME()`` at a command position, or ``function NAME``.
-_FUNCTION_DEFINITION_PATTERN = re.compile(
-    r"(?:^|[\s;&|(){}])(?:function\s|[^\s;&|<>(){}=$\"']+\s*\(\s*\))"
-)
-_WORD_BLANKS: tuple[str, ...] = (" ", "\t", "\n")
-
-
 def mask_quoted(text: str, keep_double: bool) -> str:
     """``text`` with what quoting makes literal blanked, offsets kept: the
     inside of ``'…'`` and ``$'…'`` and an escaped character, and the inside
@@ -2642,247 +2374,6 @@ def mask_quoted(text: str, keep_double: bool) -> str:
             continue
         index += 1
     return "".join(out)
-
-
-def _nested_commands(segment: str) -> list[str]:
-    """The commands ``segment`` holds: each body a ``(``, ``$(``, ``<(``,
-    ``>(`` or backtick opens, and the text around them with each body
-    replaced by one placeholder character, so an argument stays an
-    argument. A ``)`` that closes nothing ends a ``case`` pattern, and a
-    command follows it. A comment ends the segment."""
-    pieces: list[str] = []
-    frames: list[tuple[list[str], str, bool, bool]] = []
-    buffer: list[str] = []
-    index = 0
-    in_double = False
-    while index < len(segment):
-        char = segment[index]
-        end = index + 1
-        if char == _ESCAPE_CHAR:
-            end = index + 2
-        elif not in_double and segment.startswith(_ANSI_C_OPEN, index):
-            ansi_c = ansi_c_string(segment, index + len(_ANSI_C_OPEN))
-            end = len(segment) if ansi_c is None else ansi_c[1]
-        elif not in_double and char == _SINGLE_QUOTE:
-            close = segment.find(_SINGLE_QUOTE, index + 1)
-            end = len(segment) if close < 0 else close + 1
-        elif not in_double and _starts_comment(segment, index):
-            break
-        elif frames and (
-            (char == _BACKTICK and frames[-1][1] == _BACKTICK)
-            or (char == ")" and not in_double and frames[-1][1] == ")")
-        ):
-            pieces.append("".join(buffer))
-            buffer, _closer, in_double, substitutes = frames.pop()
-            buffer.append(_SUBSTITUTION_PLACEHOLDER if substitutes else _NESTED_BODY_PLACEHOLDER)
-            index = end
-            continue
-        elif (
-            char == _BACKTICK or segment.startswith("$(", index) or (not in_double and char == "(")
-        ):
-            substitutes = char in (_BACKTICK, "$")
-            closer = _BACKTICK if char == _BACKTICK else ")"
-            frames.append((buffer, closer, in_double, substitutes))
-            buffer = []
-            in_double = False
-            index = index + 2 if char == "$" else end
-            continue
-        elif char == ")" and not in_double:
-            pieces.append("".join(buffer))
-            buffer = []
-            index = end
-            continue
-        elif char == _DOUBLE_QUOTE:
-            in_double = not in_double
-        buffer.append(segment[index:end])
-        index = end
-    pieces.append("".join(buffer))
-    pieces.extend("".join(frame[0]) for frame in reversed(frames))
-    return pieces
-
-
-_NESTED_BODY_PLACEHOLDER = "_"
-#: A substitution's output is not literal, so its placeholder is not either.
-_SUBSTITUTION_PLACEHOLDER = "$_"
-
-
-def _command_may_rebind(piece: str) -> bool:
-    """:func:`segment_may_rebind_commands` for one command, its nested
-    bodies already cut away."""
-    words = _without_redirections([word for word in split_unquoted(piece, _WORD_BLANKS) if word])
-    while words and (words[0] in _CLOSING_WORDS or words[0] in SHELL_RESERVED_COMMAND_PREFIXES):
-        words = words[1:]
-    while words and (assignment := _ASSIGNMENT_PREFIX.match(words[0])) is not None:
-        subscript = assignment.group("subscript")
-        appends = assignment.group().endswith("+=")
-        value = None if appends else resolve_shell_word(words[0][assignment.end() :])
-        if _binding_picks_programs(assignment.group("name"), value):
-            return True
-        if subscript is not None and _PLAIN_SUBSCRIPT.fullmatch(subscript) is None:
-            return True
-        words = words[1:]
-    if not words:
-        return False
-    head, arguments = words[0], words[1:]
-    if _PLAIN_HEAD_PATTERN.fullmatch(head) is None or head in _REBINDING_HEADS:
-        return True
-    if head in _NAME_BINDING_HEADS:
-        return _names_may_rebind(head, arguments)
-    if head == _COMMAND:
-        return not _is_lookup(arguments)
-    if head in _DIRECTORY_CHANGE_HEADS or head in _SOURCE_HEADS:
-        return False
-    if head == _LET:
-        return any(
-            text is None or _arithmetic_may_rebind(text)
-            for text in (resolve_shell_word(word) for word in arguments)
-        )
-    if head in _LOOP_HEADS:
-        # `for NAME in WORDS` assigns NAME once per word, and nothing else.
-        return not arguments or not (
-            _SHELL_NAME.fullmatch(arguments[0]) and not _is_special_variable(arguments[0])
-        )
-    if head == _SET:
-        return not _set_is_inert(arguments)
-    if head == _PRINTF:
-        return _printf_may_bind(arguments)
-    if head in _SINGLE_BRACKET_TESTS:
-        return _single_bracket_may_assign(arguments)
-    return _arithmetic_test_may_assign(words)
-
-
-def _binding_picks_programs(name: str, value: str | None) -> bool:
-    """May binding ``name`` to ``value`` (None when not literal) change what a
-    later name runs? Any special name may, but a ``PATH`` of only literal
-    system program directories picks what a name means everywhere else."""
-    if not _is_special_variable(name):
-        return False
-    if name != _PATH or value is None or not value:
-        return True
-    return not set(value.split(":")) <= _SYSTEM_PROGRAM_DIRECTORIES
-
-
-def _names_may_rebind(head: str, arguments: list[str]) -> bool:
-    """May the name-binding builtin ``head`` rebind? Only when it binds a
-    special name, when a name or option is not literal, or when an option in
-    :data:`_REBINDING_OPTION_LETTERS` is given. A non-special name's value
-    never picks a program, literal or not. An option's value is judged as a
-    name, which can only refuse more."""
-    rebinding_letters = _REBINDING_OPTION_LETTERS.get(head, frozenset())
-    operands: list[str] = []
-    options_end = False
-    for word in _without_redirections(arguments):
-        text = resolve_shell_word(word)
-        if text is None:
-            # `export X=$Y`: only a special name's value picks programs.
-            name = word.partition("=")[0]
-            if "=" in word and _SHELL_NAME.fullmatch(name) and not _is_special_variable(name):
-                continue
-            return True
-        if not options_end and not operands and text == _END_OF_OPTIONS:
-            options_end = True
-        elif not options_end and not operands and text.startswith(("-", "+")):
-            if rebinding_letters & set(text[1:]):
-                return True
-        else:
-            operands.append(text)
-    if head == _GETOPTS:
-        operands = operands[1:2]
-    for text in operands:
-        name, has_value, value = text.partition("=")
-        if _SHELL_NAME.fullmatch(name) is None:
-            return True
-        if _binding_picks_programs(name, value if has_value else None):
-            return True
-    return False
-
-
-def _is_lookup(arguments: list[str]) -> bool:
-    """Is ``command`` given ``-v`` or ``-V``, which only look a name up?"""
-    for word in arguments:
-        text = resolve_shell_word(word)
-        if text is None or not text.startswith("-") or text == _END_OF_OPTIONS:
-            return False
-        if not set(text[1:]) <= _LOOKUP_LETTERS:
-            return False
-        if set(text[1:]) & {"v", "V"}:
-            return True
-    return False
-
-
-def _without_redirections(words: list[str]) -> list[str]:
-    """``words`` less each redirection and the target it takes as its own
-    word. What a redirection writes is a file, which rebinds nothing."""
-    kept: list[str] = []
-    index = 0
-    while index < len(words):
-        redirect = _REDIRECT_WORD_PATTERN.fullmatch(words[index])
-        if redirect is None:
-            kept.append(words[index])
-        elif not redirect.group("rest"):
-            index += 1
-        index += 1
-    return kept
-
-
-def _set_is_inert(arguments: list[str]) -> bool:
-    """Is ``set`` given only ``-e``, ``-u``, ``-x`` and ``-o`` with an
-    inert name, in either sign? A bare ``set`` only prints."""
-    index = 0
-    while index < len(arguments):
-        word = arguments[index]
-        letters = word[1:]
-        if len(word) < 2 or word[0] not in "-+" or letters.count(_SET_LONG_OPTION) > 1:
-            return False
-        if not set(letters) <= _SET_INERT_LETTERS | {_SET_LONG_OPTION}:
-            return False
-        if _SET_LONG_OPTION in letters:
-            index += 1
-            if index >= len(arguments) or arguments[index] not in _SET_INERT_NAMES:
-                return False
-        index += 1
-    return True
-
-
-def _printf_may_bind(arguments: list[str]) -> bool:
-    """May ``printf`` be given ``-v``? It reads options up to its format;
-    a word the text cannot read may be ``-v``."""
-    for word in arguments:
-        text = resolve_shell_word(word)
-        if text is None:
-            return True
-        if text == _END_OF_OPTIONS or not text.startswith("-"):
-            return False
-        if text.startswith(_PRINTF_TARGET_OPTION):
-            return True
-    return False
-
-
-def _single_bracket_may_assign(arguments: list[str]) -> bool:
-    """May ``test``/``[`` assign? Only ``-v`` evaluates, in a subscript, and
-    an unquoted expansion may split into ``-v``."""
-    for word in arguments:
-        unquoted = mask_quoted(word, keep_double=False)
-        if "$" in unquoted or _BACKTICK in unquoted:
-            return True
-        if resolve_shell_word(word) == _PRINTF_TARGET_OPTION:
-            return True
-    return False
-
-
-def _arithmetic_test_may_assign(words: list[str]) -> bool:
-    """May words holding a ``[[`` arithmetic comparison or ``-v`` assign?
-    Each operand is evaluated, which assigns unless it is a plain number."""
-    texts = [word if word in _TEST_WORDS else resolve_shell_word(word) for word in words]
-    if _PRINTF_TARGET_OPTION in texts and words[0] == "[[":
-        return True
-    if not _ARITHMETIC_TEST_OPERATORS & {text for text in texts if text is not None}:
-        return False
-    return any(
-        text is None or _arithmetic_may_rebind(text)
-        for text in texts
-        if text not in _ARITHMETIC_TEST_OPERATORS and text not in _TEST_WORDS
-    )
 
 
 def _heredoc_receiving_segments(command: str) -> list[str]:

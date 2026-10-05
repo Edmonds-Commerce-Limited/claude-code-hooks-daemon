@@ -316,10 +316,10 @@ rows:
     verdict: COVERED
     note: >-
       Denied today by flaggable_content_channel_guard, whose fixture directory
-      lies under the root. On a checkout with ignored bulk past 250000 entries
-      `secret_file_guard` also denies it, as R-SECRET-SCAN-INCOMPLETE: the walk
-      reads every entry, fails closed past its cap, and never answers a tree it
-      did not finish as clean (ledger N130).
+      lies under the root. `secret_file_guard` also denies it whenever the
+      protected-file index holds a protected file under the root, however large
+      the checkout is: the index is built from `git ls-files` and never walks the
+      tree, so a big checkout costs the call nothing (Plan 00483 A2).
 
   # ---------------------------------------------------------------- the controls
   #

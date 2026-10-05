@@ -26,6 +26,7 @@ from claude_code_hooks_daemon.core import Decision
 from claude_code_hooks_daemon.handlers.session_start import (
     secret_file_hygiene_checker as hygiene_module,
 )
+from claude_code_hooks_daemon.utils import protected_file_index
 
 _PATTERNS = ("*.dummy-fixture-glob",)
 
@@ -84,6 +85,31 @@ class TestInitialisation:
         assert handler.handler_id == HandlerID.SECRET_FILE_HYGIENE_CHECKER
         assert handler.priority == Priority.SECRET_FILE_HYGIENE_CHECKER
         assert handler.terminal is False
+
+
+class TestSeedsTheProtectedFileIndex:
+    """The guards judge recursive reads and globs by the index this sweep leaves behind."""
+
+    @pytest.fixture(autouse=True)
+    def _fresh_cache(self) -> Any:
+        protected_file_index.reset_index_cache()
+        yield
+        protected_file_index.reset_index_cache()
+
+    def test_a_git_sweep_leaves_the_index(self, handler: Any, repo: Path) -> None:
+        (repo / "fixture.dummy-fixture-glob").write_text("x")
+        with _patched_root(repo), _patched_patterns():
+            handler.handle({"source": "startup"})
+        index = protected_file_index.cached_index(repo, _PATTERNS)
+        assert index is not None
+        assert [entry.relpath for entry in index.files] == ["fixture.dummy-fixture-glob"]
+
+    def test_a_non_git_project_leaves_no_index(self, handler: Any, tmp_path: Path) -> None:
+        plain = tmp_path / "plain-dir"
+        plain.mkdir()
+        with _patched_root(plain), _patched_patterns():
+            handler.handle({"source": "startup"})
+        assert protected_file_index.cached_index(plain, _PATTERNS) is None
 
 
 class TestMatches:
@@ -249,7 +275,7 @@ class TestNonGitFallback:
         with (
             _patched_root(not_a_repo),
             _patched_patterns(),
-            patch.object(hygiene_module.sfm, "DIRECTORY_SCAN_MAX_ENTRIES", 0),
+            patch.object(hygiene_module, "_FALLBACK_MAX_ENTRIES", 0),
         ):
             result = handler.handle({"source": "startup"})
         assert result.decision == Decision.ALLOW
@@ -442,7 +468,7 @@ class TestGitNativeEnumeration:
         with (
             _patched_root(repo),
             _patched_patterns(),
-            patch.object(hygiene_module.sfm, "DIRECTORY_SCAN_MAX_ENTRIES", 10),
+            patch.object(hygiene_module, "_FALLBACK_MAX_ENTRIES", 10),
         ):
             result = handler.handle({"source": "startup"})
         # The git-native route ignores the walk-only bound entirely.

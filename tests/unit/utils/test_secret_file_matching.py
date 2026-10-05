@@ -7,11 +7,10 @@ realpath), and Bash path-mention detection with its two narrow exemptions
 position).
 """
 
-import errno
 import itertools
 import os
 import time
-from collections.abc import Callable, Iterator
+from collections.abc import Callable
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -21,8 +20,8 @@ import pytest
 from claude_code_hooks_daemon.utils import secret_file_matching as sfm
 from claude_code_hooks_daemon.utils import shell_expansion
 from claude_code_hooks_daemon.utils.shell_expansion import TooManyToEnumerateError
+from tests.indexed_project import index_project
 from tests.scaling import SIZE_FACTOR, SUPERLINEAR_RATIO, scaling_ratio
-from tests.support.directory_reads import record_directory_reads
 
 
 def _assert_scan_grows_linearly(command_at: Callable[[int], str], small_n: int) -> None:
@@ -1881,45 +1880,6 @@ class TestBraceAndFsWalkAreBounded:
             )
         _assert_scan_grows_linearly(command_at, max(1, repetitions // SIZE_FACTOR))
 
-    def test_a_recursive_glob_token_rooted_at_the_filesystem_root_denies_fast(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """M-1's own reproducer: `cat /**/*.se?ret-zq9x; cat .vault-password`
-        took 9.5s pre-fix on this small container alone -- a real client
-        filesystem (large home dir, node_modules, mounted volumes) can push
-        a single such token well past the client's 30s chain budget. A
-        `/**/` token rooted at the bare filesystem root is refused
-        OUTRIGHT (fail closed) rather than walked at all, so this raises --
-        exactly like the deadline case above, ``secret_file_guard``'s own
-        wrapper is what turns the raise into a deny. "Not walked at all" is
-        pinned as a count: not one directory is read (00466 N222)."""
-        directories_read = record_directory_reads(monkeypatch)
-        command = "cat /**/*.se?ret-zq9x; cat .vault-password"
-        with pytest.raises(TooManyToEnumerateError):
-            sfm.find_protected_mention_detail(
-                command,
-                sfm.DEFAULT_PROTECTED_PATTERNS,
-                deadline=time.monotonic() + sfm.SCAN_DEADLINE_SECONDS,
-            )
-        assert directories_read == [], f"the root-rooted glob read {directories_read[:5]}"
-
-    def test_ten_root_rooted_recursive_glob_tokens_deny_fast(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """M-1's own multi-token reproducer -- 10 x `cat /**/*.se?ret-zq9x`
-        tokens, 9.0s pre-fix (the deadline caught it between tokens, but
-        the FIRST token alone already ran multiple seconds). The FIRST
-        token alone is refused outright now, so no directory is read."""
-        directories_read = record_directory_reads(monkeypatch)
-        command = " ".join(["cat /**/*.se?ret-zq9x"] * 10) + "; cat .vault-password"
-        with pytest.raises(TooManyToEnumerateError):
-            sfm.find_protected_mention_detail(
-                command,
-                sfm.DEFAULT_PROTECTED_PATTERNS,
-                deadline=time.monotonic() + sfm.SCAN_DEADLINE_SECONDS,
-            )
-        assert directories_read == [], f"the root-rooted globs read {directories_read[:5]}"
-
     @pytest.mark.parametrize("size_kb", [94, 200])
     def test_huge_no_op_regex_shaped_input_with_a_real_mention_denies_fast(
         self, size_kb: int
@@ -2113,10 +2073,6 @@ class TestShellWordNormalisation:
         result = sfm.find_protected_mention_detail(
             "cat id_rs$'\\x61'", sfm.DEFAULT_PROTECTED_PATTERNS
         )
-        assert result is not None
-
-    def test_dollar_var_unknown_suffix_becomes_a_glob_and_still_denies(self) -> None:
-        result = sfm.find_protected_mention_detail("cat id_rs$x", sfm.DEFAULT_PROTECTED_PATTERNS)
         assert result is not None
 
     def test_command_substitution_naming_the_file_still_denies(self) -> None:
@@ -2346,10 +2302,13 @@ class TestBothEdgesFilesystemTruthRoute:
         assert result is not None
         assert result[0] == "*.secret*"
 
-    def test_interior_star_spelling_denies_when_the_file_is_real(self, tmp_path: Path) -> None:
+    def test_interior_star_spelling_denies_when_the_file_is_in_the_index(
+        self, tmp_path: Path
+    ) -> None:
         (tmp_path / "demo.secret").write_text("x")
+        index = index_project(tmp_path, sfm.DEFAULT_PROTECTED_PATTERNS)
         result = sfm.find_protected_mention_detail(
-            "cat demo.s*t", sfm.DEFAULT_PROTECTED_PATTERNS, cwd=str(tmp_path)
+            "cat demo.s*t", sfm.DEFAULT_PROTECTED_PATTERNS, cwd=str(tmp_path), index=index
         )
         assert result is not None
         assert result[0] == "*.secret*"
@@ -2375,200 +2334,6 @@ class TestBothEdgesFilesystemTruthRoute:
             "cat demo.s*t", sfm.DEFAULT_PROTECTED_PATTERNS, cwd=str(tmp_path)
         )
         assert result is None
-
-
-class _SortedListing:
-    """A directory listing in a fixed order, usable as ``os.scandir``'s
-    result both in a ``with`` block and as a plain iterable."""
-
-    def __init__(self, entries: list[os.DirEntry[str]]) -> None:
-        self._entries = entries
-
-    def __enter__(self) -> "_SortedListing":
-        return self
-
-    def __exit__(self, *_: object) -> None:
-        return None
-
-    def __iter__(self) -> Iterator[os.DirEntry[str]]:
-        return iter(self._entries)
-
-
-class TestExpandGlobTokenErrorHandling:
-    """n466-n24 review 4: ``_expand_glob_token`` must fail CLOSED (propagate)
-    on an expansion failure it cannot prove is a non-match -- except the one
-    narrow case that genuinely proves a negative: ENOENT on a directory
-    prefix that simply is not there."""
-
-    def test_a_missing_directory_prefix_allows(self, tmp_path: Path) -> None:
-        """A literal directory prefix that does not exist on disk proves,
-        by itself, that nothing under it can be a mention -- no exception
-        needed to reach that verdict, but it must still return ``None``
-        rather than raise."""
-        result = sfm._expand_glob_token(
-            "nonexistent_prefix_xyz/secret.txt",
-            sfm.DEFAULT_PROTECTED_PATTERNS,
-            None,
-            cwd=str(tmp_path),
-        )
-        assert result is None
-
-    def test_enoent_raised_mid_expansion_allows(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """Forcing an ENOENT (rather than relying on it never firing) pins
-        the actual except-branch: it must be swallowed, not propagated."""
-
-        def _raise_enoent(self: Path) -> os.stat_result:
-            raise OSError(errno.ENOENT, "No such file or directory")
-
-        monkeypatch.setattr(Path, "lstat", _raise_enoent)
-        result = sfm._expand_glob_token(
-            "somefile.secret", sfm.DEFAULT_PROTECTED_PATTERNS, None, cwd=str(tmp_path)
-        )
-        assert result is None
-
-    def test_a_name_too_long_to_exist_allows_n117(self, tmp_path: Path) -> None:
-        """Plan 00466 N117: a component longer than the filesystem's name
-        limit raises ENAMETOOLONG. No file can have that name, and a shell
-        naming it fails the same way, so it proves absence as ENOENT does."""
-        result = sfm._expand_glob_token(
-            "a" * 300 + "/*.txt", sfm.DEFAULT_PROTECTED_PATTERNS, None, cwd=str(tmp_path)
-        )
-        assert result is None
-
-    @pytest.mark.parametrize(
-        "token",
-        [
-            "CLAUDE/core/*.core.md " + "x" * 300,
-            "CLAUDE/core/*.core.md " + "x" * 300 + "/y",
-            "CLAUDE/" + "x" * 300 + "/*.core.md",
-            "CLAUDE/*/" + "x" * 300,
-            "*/" + "x" * 300 + "/*.md",
-            "s CLAUDE/core/*.core.md " + "x" * 300 + " N5",
-        ],
-    )
-    def test_a_glob_behind_an_over_long_component_is_not_an_error_n255(
-        self, tmp_path: Path, token: str
-    ) -> None:
-        """Plan 00474 N255: prose quoted into one word by two apostrophes
-        held a glob behind a component longer than any name, and Python
-        3.11's ``Path.glob`` raised ENAMETOOLONG for it, denying a commit
-        message as a guard defect. The walk now reads each lookup itself, so
-        the over-long name is a proof of absence on every Python."""
-        (tmp_path / "CLAUDE" / "core").mkdir(parents=True)
-        (tmp_path / "CLAUDE" / "core" / "a.core.md").touch()
-        result = sfm._expand_glob_token(
-            token, sfm.DEFAULT_PROTECTED_PATTERNS, str(tmp_path), cwd=str(tmp_path)
-        )
-        assert result is None
-
-    @pytest.mark.parametrize("lookup", ["stat", "lstat"])
-    def test_enametoolong_on_an_over_long_name_allows_whatever_raised_it_n255(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, lookup: str
-    ) -> None:
-        """The same fact with the raise forced, so the test holds on a
-        filesystem or Python that would answer ENOENT instead."""
-        long_name = "x" * 300
-
-        def _raise(self: Path, *args: object, **kwargs: object) -> os.stat_result:
-            raise OSError(errno.ENAMETOOLONG, "File name too long", str(self))
-
-        monkeypatch.setattr(Path, lookup, _raise)
-        result = sfm._expand_glob_token(
-            f"{long_name}/*.core.md", sfm.DEFAULT_PROTECTED_PATTERNS, None, cwd=str(tmp_path)
-        )
-        assert result is None
-
-    def test_a_relative_glob_whose_joined_path_is_too_long_denies(self, tmp_path: Path) -> None:
-        """Review 8 BLOCKER 1: bash opens the relative path, which is under
-        PATH_MAX, while the base-joined path is over it. The overflow says
-        nothing about the target, so the expansion fails closed."""
-        long_dir = "d" * 200
-        (tmp_path / long_dir).mkdir()
-        (tmp_path / "x.secret").touch()
-        token = f"{long_dir}/../" * 20 + "*ecre*"
-        assert len(token) < 4096 < len(str(tmp_path)) + 1 + len(token)
-        with pytest.raises(OSError) as raised:
-            sfm._expand_glob_token(token, ("*.secret*",), None, cwd=str(tmp_path))
-        assert raised.value.errno == errno.ENAMETOOLONG
-
-    def test_an_error_in_one_branch_does_not_stop_the_others(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """Review 8 BLOCKER 1: the first error used to end the whole walk.
-        The protected match in a later branch must still be found."""
-        (tmp_path / "a").mkdir()
-        (tmp_path / "b").mkdir()
-        (tmp_path / "b" / "x.secret").touch()
-        real_scandir = os.scandir
-
-        def _fake_scandir(path: str | os.PathLike[str]) -> _SortedListing:
-            if Path(path) == tmp_path / "a":
-                raise OSError(errno.ENAMETOOLONG, "File name too long", str(path))
-            with real_scandir(path) as listing:
-                return _SortedListing(sorted(listing, key=lambda entry: entry.name))
-
-        monkeypatch.setattr(os, "scandir", _fake_scandir)
-        result = sfm._expand_glob_token("*/*ecre*", ("*.secret*",), None, cwd=str(tmp_path))
-        assert result == "*.secret*"
-
-    def test_a_branch_error_with_no_protected_match_denies(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        (tmp_path / "a").mkdir()
-        (tmp_path / "b").mkdir()
-        real_scandir = os.scandir
-
-        def _fake_scandir(path: str | os.PathLike[str]) -> Iterator[os.DirEntry[str]]:
-            if Path(path) == tmp_path / "a":
-                raise PermissionError(errno.EACCES, "Permission denied")
-            return real_scandir(path)
-
-        monkeypatch.setattr(os, "scandir", _fake_scandir)
-        with pytest.raises(PermissionError):
-            sfm._expand_glob_token("*/*ecre*", ("*.secret*",), None, cwd=str(tmp_path))
-
-    def test_matches_past_the_examination_cap_deny(self, tmp_path: Path) -> None:
-        """A match that was never examined cannot be judged."""
-        for index in range(5):
-            (tmp_path / f"f{index}.txt").touch()
-        with pytest.raises(TooManyToEnumerateError):
-            sfm._expand_glob_token(
-                "*.txt", ("*.secret*",), None, cwd=str(tmp_path), max_expansions=3
-            )
-
-    def test_permission_denied_directory_in_the_glob_path_denies(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """A directory that could not be READ (permission denied) is NOT
-        proof of a non-match -- it must propagate, not degrade to
-        "no mention", so the caller's fail-closed wrapper denies."""
-
-        def _raise_eacces(self: Path) -> os.stat_result:
-            raise PermissionError(errno.EACCES, "Permission denied")
-
-        monkeypatch.setattr(Path, "lstat", _raise_eacces)
-        with pytest.raises(PermissionError):
-            sfm._expand_glob_token(
-                "somefile.secret", sfm.DEFAULT_PROTECTED_PATTERNS, None, cwd=str(tmp_path)
-            )
-
-    def test_a_malformed_pattern_value_error_always_denies(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """A ``ValueError`` (a malformed glob pattern) is never a proof of
-        absence -- always propagates, with no ENOENT-style exception."""
-
-        def _raise_value_error(base: Path, pattern: str, **_: object) -> Iterator[Path]:
-            raise ValueError("malformed glob pattern")
-            yield  # pragma: no cover -- makes this a generator function
-
-        monkeypatch.setattr(shell_expansion, "bounded_recursive_glob", _raise_value_error)
-        with pytest.raises(ValueError):
-            sfm._expand_glob_token(
-                "somefile.secret", sfm.DEFAULT_PROTECTED_PATTERNS, None, cwd=str(tmp_path)
-            )
 
 
 _CWD = "/proj"

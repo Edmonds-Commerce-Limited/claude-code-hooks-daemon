@@ -4,10 +4,13 @@
 every file under their roots, so a protected file or a quarantined DETAIL
 artefact is disclosed although no word of the command names it. The text scan
 of a command cannot see that; this module finds the roots such a command reads,
-and which files the tool reads under them (:class:`TreeView`), and asks
-:func:`protected_tree_scan.find_protected_in_tree` whether any of them matches.
-The cap, the deadline and the answer past them are that scan's, not this
-module's: a scan that could not finish raises and is never answered as clean.
+and which files the tool reads under them (:class:`TreeView`), and asks the
+protected-file index (:mod:`protected_file_index`) whether any of them is
+protected. The answer is a lookup in memory: nothing here walks the filesystem.
+
+The roots are placed from the directory the command runs in, which follows a
+literal ``cd`` earlier in the command. A root that cannot be placed (a variable,
+a glob, a ``cd`` whose target is computed) is not judged.
 
 The option reader (:func:`search_command`, :func:`scan_options`) and the
 command splitter (:func:`command_segments`) live here because
@@ -23,14 +26,18 @@ import fnmatch
 import os
 import posixpath
 import re
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Final
 
-from claude_code_hooks_daemon.utils import linear_shlex, protected_tree_scan
+from claude_code_hooks_daemon.utils import linear_shlex
 from claude_code_hooks_daemon.utils.bash_flags import SPAN_SEPARATORS, split_statements
-from claude_code_hooks_daemon.utils.protected_tree_scan import TreeView
+from claude_code_hooks_daemon.utils.protected_file_index import (
+    ExemptHook,
+    ProtectedFileIndex,
+    TreeView,
+)
 from claude_code_hooks_daemon.utils.shell_segmentation import (
     peel_command_wrappers,
     split_unquoted_spans,
@@ -287,7 +294,7 @@ def _tool_rules(name: str, arguments: list[str], scan: SearchArguments) -> _Rule
 
 
 @dataclass(frozen=True)
-class _Read:
+class Read:
     """One tree a search reads: a directory, which files the tool reads, and what it skips.
 
     ``view`` is ``TRACKED`` for ``git grep`` (the index), ``UNIGNORED`` for a
@@ -300,35 +307,25 @@ class _Read:
     skip: Callable[[str, bool], bool] | None = None
 
 
-def protected_reached_by_search(
-    command: str,
-    patterns: tuple[str, ...],
-    *,
-    cwd: str | None,
-    is_exempt: Callable[[str], bool] | None = None,
-    deadline: float | None = None,
-) -> tuple[str, str] | None:
-    """``(pattern, searched root)`` when a search in ``command`` reads a protected file.
+def search_reads(command: str, cwd: str | None) -> list[Read]:
+    """Every tree a recursive search anywhere in ``command`` reads.
 
-    Relative roots are placed against ``cwd``; with no absolute ``cwd`` they
-    cannot be placed and are not judged. A root that is not a directory is
-    skipped: a file named as an operand is the text scan's business.
-    ``is_exempt`` skips a protected file the caller confirmed safe to read.
-    ``deadline`` (a ``time.monotonic()`` instant) bounds the scan: a tree past
-    the entry cap or the deadline raises (``TooManyToEnumerateError``,
-    ``TimeoutError``) rather than being answered as clean.
+    Relative roots are placed from ``cwd``, moved by any literal ``cd`` that
+    precedes the search; with no absolute directory to place them from they are
+    left out, because a guess at where a search reads is worse than no answer.
     """
-    if not patterns:
-        return None
-    for read in _reads(command, cwd, 0):
-        hit = protected_tree_scan.find_protected_in_tree(
-            read.root,
-            patterns,
-            view=read.view,
-            skip=read.skip,
-            is_exempt=is_exempt,
-            deadline=deadline,
-        )
+    return list(_reads(command, cwd, 0))
+
+
+def protected_reached(
+    reads: Sequence[Read], index: ProtectedFileIndex, *, is_exempt: ExemptHook | None = None
+) -> tuple[str, str] | None:
+    """``(pattern, searched root)`` when one of ``reads`` reaches a protected file in ``index``.
+
+    ``is_exempt`` skips a protected file the caller confirmed safe to read.
+    """
+    for read in reads:
+        hit = index.find_under(read.root, view=read.view, skip=read.skip, is_exempt=is_exempt)
         if hit is not None:
             return hit, read.root
     return None
@@ -336,13 +333,23 @@ def protected_reached_by_search(
 
 # Nested wrappers (`bash -c "bash -c ..."`) end here rather than recursing for ever.
 _MAX_WRAPPER_DEPTH: Final[int] = 4
+_DIRECTORY_CHANGERS: Final[frozenset[str]] = frozenset({"cd", "pushd"})
 
 
-def _reads(command: str, cwd: str | None, depth: int) -> Iterator[_Read]:
+def _after_directory_change(words: list[str], current: str | None) -> str | None:
+    """The directory a ``cd``/``pushd`` leaves the command in; None when it cannot be told."""
+    operands = [word for word in words[1:] if not word.startswith("-")]
+    if not operands or operands[0] == "-":
+        return None
+    return _place(operands[0], current)
+
+
+def _reads(command: str, cwd: str | None, depth: int) -> Iterator[Read]:
     """Every tree a search anywhere in ``command`` reads."""
     if depth > _MAX_WRAPPER_DEPTH:
         return
     feeder: tuple[str, ...] | None = None
+    current = cwd
     for segment, piped_in in command_segments(command):
         words = _command_words(segment)
         fed_by = feeder if piped_in else None
@@ -350,22 +357,24 @@ def _reads(command: str, cwd: str | None, depth: int) -> Iterator[_Read]:
         if not words:
             continue
         head = posixpath.basename(words[0])
-        if head in _SHELLS and _SHELL_COMMAND_FLAG in words[1:-1]:
+        if head in _DIRECTORY_CHANGERS:
+            current = _after_directory_change(words, current)
+        elif head in _SHELLS and _SHELL_COMMAND_FLAG in words[1:-1]:
             inner = words[words.index(_SHELL_COMMAND_FLAG, 1) + 1]
-            yield from _reads(inner, cwd, depth + 1)
+            yield from _reads(inner, current, depth + 1)
         elif head == _EVAL:
-            yield from _reads(" ".join(words[1:]), cwd, depth + 1)
+            yield from _reads(" ".join(words[1:]), current, depth + 1)
         elif head == _FIND:
             feeder = _find_roots(words)
             if _find_execs_a_search(words):
-                yield from _reads_of_roots(feeder, cwd)
+                yield from _reads_of_roots(feeder, current)
         elif head == _XARGS:
             inner_words = _xargs_command(words)
             if inner_words and _is_search(inner_words):
-                yield from _search_reads(inner_words, cwd, piped_in=True)
-                yield from _reads_of_roots(fed_by or (), cwd)
+                yield from _search_reads(inner_words, current, piped_in=True)
+                yield from _reads_of_roots(fed_by or (), current)
         elif _is_search(words):
-            yield from _search_reads(words, cwd, piped_in=piped_in)
+            yield from _search_reads(words, current, piped_in=piped_in)
 
 
 def _command_words(segment: str) -> list[str]:
@@ -390,7 +399,7 @@ def _is_search(words: list[str]) -> bool:
     return head in _GREP_COMMANDS or head in _RG_COMMANDS or head == TOOL_GIT
 
 
-def _search_reads(words: list[str], cwd: str | None, *, piped_in: bool) -> Iterator[_Read]:
+def _search_reads(words: list[str], cwd: str | None, *, piped_in: bool) -> Iterator[Read]:
     """The trees one grep-family command reads, if it recurses."""
     found = search_command(words)
     if found is None:
@@ -413,9 +422,7 @@ def _search_reads(words: list[str], cwd: str | None, *, piped_in: bool) -> Itera
     yield from _reads_of_roots(roots, cwd, rules)
 
 
-def _git_grep_reads(
-    arguments: list[str], scan: SearchArguments, cwd: str | None
-) -> Iterator[_Read]:
+def _git_grep_reads(arguments: list[str], scan: SearchArguments, cwd: str | None) -> Iterator[Read]:
     """The trees ``git grep`` reads: tracked files, or the working tree with ``--no-index``.
 
     Operands before a ``--`` are revisions and pathspecs are the words after it;
@@ -435,7 +442,7 @@ def _git_grep_reads(
         candidates = [operand for operand in scan.operands if _exists(operand, cwd)]
     roots = tuple(c for c in candidates if not c.startswith(_PATHSPEC_MAGIC_PREFIX)) or (".",)
     for root in _placed(roots, cwd):
-        yield _Read(root, view=view)
+        yield Read(root, view=view)
 
 
 def _exists(operand: str, cwd: str | None) -> bool:
@@ -502,7 +509,7 @@ def _placed(roots: tuple[str, ...], cwd: str | None) -> list[str]:
 
 def _reads_of_roots(
     roots: tuple[str, ...], cwd: str | None, rules: _Rules = _NO_RULES
-) -> Iterator[_Read]:
+) -> Iterator[Read]:
     for root in _placed(roots, cwd):
         view = TreeView.UNIGNORED if rules.honour_ignore else TreeView.ALL
-        yield _Read(root, view=view, skip=rules.predicate(root))
+        yield Read(root, view=view, skip=rules.predicate(root))

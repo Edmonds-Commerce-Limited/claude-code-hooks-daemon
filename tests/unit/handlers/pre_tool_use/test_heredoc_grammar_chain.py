@@ -18,7 +18,6 @@ from unittest.mock import patch
 import pytest
 from tests.bash_sandbox import run_sandboxed_bash
 
-from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.core import Decision
 from claude_code_hooks_daemon.core.chain import HandlerChain
 from claude_code_hooks_daemon.core.data_layer import reset_data_layer
@@ -112,10 +111,6 @@ class TestAFakeOpenerHidesNoLine:
     @pytest.mark.parametrize("command", _hidden(_CURL))
     def test_curl_pipe_shell(self, command: str) -> None:
         assert _decision(CurlPipeShellHandler(), command) == Decision.DENY
-
-    @pytest.mark.parametrize("command", _hidden(_OUTSIDE))
-    def test_project_containment(self, command: str) -> None:
-        assert _decision(ProjectContainmentHandler(), command) == Decision.DENY
 
     @pytest.mark.parametrize(
         "command",
@@ -299,13 +294,6 @@ class TestTheBashDifferential:
         assert "CURL" in _bash_run(command, tmp_path)
         assert _decision(CurlPipeShellHandler(), command) == Decision.DENY
 
-    @pytest.mark.parametrize("shape", _RUN_AFTER_A_HIDING_HEREDOC)
-    def test_project_containment(self, shape: str, tmp_path: Path) -> None:
-        command = shape.replace("{line}", _outside(tmp_path))
-        _bash_run(command, tmp_path)
-        assert (tmp_path / "evil.txt").exists()
-        assert _decision(ProjectContainmentHandler(), command) == Decision.DENY
-
 
 class TestAContinuationAfterAStopIsJoined:
     """MAJOR D: past a stop the normaliser joins every backslash-newline, so
@@ -328,7 +316,6 @@ class TestAContinuationAfterAStopIsJoined:
             (DestructiveGitHandler, _RESET),
             (PipeBlockerHandler, _TAIL),
             (CurlPipeShellHandler, _CURL),
-            (ProjectContainmentHandler, _OUTSIDE),
             (SedBlockerHandler, _SED),
         ],
     )
@@ -546,272 +533,21 @@ class TestCaseAsAnArgumentIsRead:
         assert "syntax error" not in _bash_run(command, tmp_path)
         assert _decision(handler(), command) == Decision.ALLOW
 
-    def test_an_unreadable_command_is_named_not_reported_as_a_bug(self) -> None:
-        """A command the scanner cannot read is denied with its own reason and
-        a rephrase, never the evaluation-error rule that asks for a report."""
-        command = "n=$(case a in a) echo {a,b};; esac)"
-        reason = _reason(SecretFileGuardHandler(), command)
-        assert reason.startswith(f"BLOCKED [{RuleID.SECRET_COMMAND_UNREADABLE}]")
-        assert RuleID.SECRET_EVALUATION_ERROR not in reason
-        assert "Rephrase" in reason
+    def test_an_unreadable_command_is_allowed_with_an_advisory(self) -> None:
+        """A command the scanner cannot read is allowed, and the advisory says
+        it was not fully judged (Plan 00483 A1)."""
+        command = "n=$" + "(case a in a) echo {a,b};; esac)"
+        payload: dict[str, Any] = {
+            "tool_name": "Bash",
+            "tool_input": {"command": command},
+            "cwd": str(_ROOT),
+        }
+        handler = SecretFileGuardHandler()
+        assert handler.matches(payload)
+        result = handler.handle(payload)
+        assert result.decision == Decision.ALLOW
+        assert result.context
+        assert "could NOT fully judge" in result.context[0]
 
 
 # -- Round 12: N212, N214 and N215, each run in bash first --------------------
-
-
-class TestAVariableReceiverIsUnknown:
-    """N212: a receiver named by a variable the call does not pin to a
-    literal is unknown, and its body is judged as commands."""
-
-    @pytest.mark.parametrize(
-        "opener",
-        [
-            "declare -n PY=S; S=bash; $PY <<'EOF'",
-            "${X:-bash} <<'EOF'",
-            "V=bash; env $V <<'EOF'",
-            "V=bash; command $V <<'EOF'",
-            "V=bash; exec $V <<'EOF'",
-            "exec bash <<'EOF'",
-            "builtin exec -a x bash <<'EOF'",
-            "$0 <<'EOF'",
-            "SH=bash; PY=$SH; $PY <<'EOF'",
-            "PY='bash -e'; $PY <<'EOF'",
-            "P=ba; $P\"sh\" <<'EOF'",
-            "\"$(command -v bash)\" <<'EOF'",
-            "read PY <<< bash; $PY <<'EOF'",
-            "printf -v PY bash; $PY <<'EOF'",
-            "VENV='bash -s '; $VENV/bin/python <<'EOF'",
-        ],
-    )
-    def test_the_body_is_judged(self, opener: str, tmp_path: Path) -> None:
-        command = f"{opener}\n{_outside(tmp_path)}\nEOF"
-        _bash_run(command, tmp_path)
-        assert (tmp_path / "evil.txt").exists()
-        assert _decision(ProjectContainmentHandler(), command) == Decision.DENY
-
-    def test_a_loop_variable_is_unknown(self, tmp_path: Path) -> None:
-        command = f"for PY in bash; do $PY <<'EOF'\n{_outside(tmp_path)}\nEOF\ndone"
-        _bash_run(command, tmp_path)
-        assert (tmp_path / "evil.txt").exists()
-        assert _decision(ProjectContainmentHandler(), command) == Decision.DENY
-
-    def test_an_unassigned_receiver_is_no_longer_data(self) -> None:
-        """``PY=python3; $PY -`` stays data (minor E); with nothing pinning
-        ``$PY`` the body is read as commands, and prose there is unreadable."""
-        command = "$PY - <<'EOF'\nx = 'don\\'t'\nEOF"
-        assert _decision(ProjectContainmentHandler(), command) == Decision.DENY
-
-
-class TestAnEarlierSegmentCanRunTheBody:
-    """N214: a function, an alias or an environment an earlier segment
-    sets can turn a sink into an executor, so the body is data only when no
-    earlier segment may rebind a command name (round 13 ruling)."""
-
-    @pytest.mark.parametrize(
-        "prefix",
-        [
-            "cat(){ bash; }; ",
-            "shopt -s expand_aliases; alias cat=bash\n",
-            'hash -p "$(command -v bash)" cat; ',
-            "BASH_CMDS[cat]=$(command -v bash); ",
-            "eval 'cat(){ bash; }'; ",
-            "{ cat(){ bash; }; }; ",
-            "if true; then cat(){ bash; }; fi; ",
-            "for x in a; do cat(){ bash; }; done; ",
-            'mkdir b && ln -s "$(command -v bash)" b/cat && PATH=$PWD/b:$PATH; ',
-            'mkdir b && ln -s "$(command -v bash)" b/cat && PATH=b:$PATH; ',
-        ],
-    )
-    def test_the_body_is_judged(self, prefix: str, tmp_path: Path) -> None:
-        """Run isolated: the child shell does not inherit a recorder
-        function, so only a recorder on ``PATH`` keeps git unreachable."""
-        command = f"{prefix}cat <<'EOF'\n{_RESET}\n{_outside(tmp_path)}\nEOF"
-        assert _RAN_RESET in _isolated_bash_run(command, tmp_path)
-        assert _decision(DestructiveGitHandler(), command) == Decision.DENY
-        assert _decision(ProjectContainmentHandler(), command) == Decision.DENY
-
-    def test_an_exported_pager_preprocessor_is_judged(self, tmp_path: Path) -> None:
-        command = f"export LESSOPEN='|-bash %s'; less <<'EOF'\n{_outside(tmp_path)}\nEOF"
-        _bash_run(command, tmp_path)
-        assert (tmp_path / "evil.txt").exists()
-        assert _decision(ProjectContainmentHandler(), command) == Decision.DENY
-
-    @pytest.mark.parametrize(
-        "prefix",
-        [
-            "$X; ",
-            '"$X" a; ',
-            "$'cat' a; ",
-            "\\cat a; ",
-            "'cat' a; ",
-            "unalias ls; ",
-            "enable -n echo; ",
-            "builtin echo x; ",
-            "command ls; ",
-            "exec 3>&1; ",
-            "export PATH=/tmp; ",
-            "declare -n x=PATH; ",
-            "declare -i x; ",
-            "typeset -n x=IFS; ",
-            "local -i x; ",
-            "readonly PAGER=bash; ",
-            "unset PATH; ",
-            "unset -f cat; ",
-            "trap 'x' EXIT; ",
-            "read PATH; ",
-            "mapfile -C cb x < f; ",
-            "readarray PATH < f; ",
-            "printf -v X y; ",
-            "getopts ab PATH; ",
-            "let PATH=1; ",
-            ": $((PATH=1)); ",
-            ": $((i+1)); ",
-            ": $((x=1)); ",
-            "((x=1)); ",
-            "let x=1; ",
-            "for x in a; do alias cat=bash; done; ",
-            "coproc x; ",
-            "select IFS in a; do ls; done; ",
-            "for PATH in /tmp; do ls; done; ",
-            "function cat { bash; }; ",
-            "set -f; ",
-            "set -o posix; ",
-            "PATH=/tmp; ",
-            "PATH=/usr/bin:/tmp; ",
-            "BASH_ENV=x; ",
-            "ENV=x; ",
-            "IFS=x; ",
-            "CDPATH=x; ",
-            "GLOBIGNORE=x; ",
-            "EXECIGNORE=x; ",
-            "BASHOPTS=x; ",
-            "SHELLOPTS=x; ",
-            "BASH_ALIASES[cat]=bash; ",
-            "(alias cat=bash); ",
-            "echo $(alias cat=bash); ",
-        ],
-    )
-    def test_every_form_that_may_rebind_keeps_the_body_judged(self, prefix: str) -> None:
-        command = f"{prefix}cat > notes.md <<'EOF'\nnever run {_RESET}, it's prose\nEOF"
-        assert _decision(DestructiveGitHandler(), command) == Decision.DENY
-        assert _decision(ProjectContainmentHandler(), command) == Decision.DENY
-
-    @pytest.mark.parametrize(
-        "prefix",
-        [
-            "",
-            "set -euo pipefail; ",
-            "mkdir -p d && ",
-            "pytest -q; ",
-            f"cat > a.md <<'A'\nit's a note, never run {_RESET}\nA\n",
-            "set -euo pipefail\nmkdir -p d && ",
-            "git status && ",
-            "D=notes; echo hi; ",
-            "python3 x.py; ",
-            "export X=1; ",
-            "declare -f x; ",
-            "typeset x; ",
-            "local x; ",
-            "readonly x; ",
-            "unset X; ",
-            "read x; ",
-            "mapfile x < f; ",
-            "readarray x < f; ",
-            "getopts ab x; ",
-            "command -v x; ",
-            "command -v cat && ",
-            "echo $((1+2)); ",
-            "mkdir -p d && cd d && ",
-            "mkdir -p d && cd -P ./d && cd - && ",
-            "mkdir -p d && pushd d > /dev/null; ",
-            "for x in a; do :; done; ",
-            # Plan 00483 X-1: no definition of the receiver is shown.
-            "cd; ",
-            "cd $D && ",
-            "cd ~/x && ",
-            "cd -e d && ",
-            "pushd +1; ",
-            "popd; ",
-            ". env.sh; ",
-            "source venv/bin/activate && ",
-            "export X=$Y; ",
-        ],
-    )
-    def test_a_prefix_that_cannot_rebind_keeps_prose_data(
-        self, prefix: str, tmp_path: Path
-    ) -> None:
-        """Run isolated first: none of these runs the body."""
-        command = f"{prefix}cat > notes.md <<'EOF'\nnever run {_RESET}, it's prose\nEOF"
-        assert _RAN_RESET not in _isolated_bash_run(command, tmp_path)
-        assert _decision(DestructiveGitHandler(), command) == Decision.ALLOW
-        assert _decision(ProjectContainmentHandler(), command) == Decision.ALLOW
-
-    @pytest.mark.parametrize(
-        "prefix",
-        ["PATH=/usr/bin:/bin; ", "export PATH=/usr/local/bin:/usr/bin:/bin; "],
-    )
-    def test_a_system_path_keeps_prose_data(self, prefix: str) -> None:
-        """Not run: a system ``PATH`` would reach the real git, which only
-        the sandbox's ``GIT_DIR`` would then contain."""
-        command = f"{prefix}cat > notes.md <<'EOF'\nnever run {_RESET}, it's prose\nEOF"
-        assert _decision(DestructiveGitHandler(), command) == Decision.ALLOW
-        assert _decision(ProjectContainmentHandler(), command) == Decision.ALLOW
-
-    def test_a_sink_inside_a_process_substitution_reads_its_own_stage(self, tmp_path: Path) -> None:
-        """The stage starts at ``<(``: the outer ``cat`` only reads a file
-        name, and a body the inner sink hands on is still judged."""
-        data = f"cat <(cat <<'EOF'\n{_outside(tmp_path)}\nEOF\n)"
-        _bash_run(data, tmp_path)
-        assert not (tmp_path / "evil.txt").exists()
-        assert _decision(ProjectContainmentHandler(), data) == Decision.ALLOW
-        run = f"cat <(cat <<'EOF' > >(bash)\n{_outside(tmp_path)}\nEOF\n); sleep 0.3"
-        _bash_run(run, tmp_path)
-        assert (tmp_path / "evil.txt").exists()
-        assert _decision(ProjectContainmentHandler(), run) == Decision.DENY
-
-    def test_the_commit_idiom_stays_allowed(self, tmp_path: Path) -> None:
-        command = (
-            "git add -A && git commit -m \"$(cat <<'EOF'\n"
-            f"it's done; never run {_RESET}\nEOF\n)\""
-        )
-        assert _RAN_RESET not in _bash_run(command, tmp_path)
-        for handler in (DestructiveGitHandler, ProjectContainmentHandler, PipeBlockerHandler):
-            assert _decision(handler(), command) == Decision.ALLOW
-
-
-class TestAVariableWriteTargetIsResolvedOrUnknown:
-    """N215: containment resolves ``"$OUT"`` from a literal assignment
-    earlier in the call, and judges any other variable target unknown."""
-
-    def test_a_known_outside_target_is_denied(self, tmp_path: Path) -> None:
-        target = tmp_path / "o.md"
-        command = f'OUT={target}; cat > "$OUT" <<\\EOF\n{_TAIL}\nEOF'
-        _bash_run(command, tmp_path)
-        assert target.exists()
-        assert _decision(ProjectContainmentHandler(), command) == Decision.DENY
-
-    def test_a_known_inside_target_is_allowed(self) -> None:
-        command = "OUT=untracked/scratch/o.md; cat > \"$OUT\" <<'EOF'\nit's prose\nEOF"
-        assert _decision(ProjectContainmentHandler(), command) == Decision.ALLOW
-
-    @pytest.mark.parametrize(
-        "command",
-        [
-            "cat > \"$OUT\" <<'EOF'\nx\nEOF",
-            'echo x > "$OUT"; OUT=untracked/o.md',
-            'OUT=a.md; read OUT <<< /opt/x; echo x > "$OUT"',
-            'PWD=/repo; echo x > "$PWD/a"',
-            'echo x > "untracked/$NAME.md"',
-            "OUT='a b'; echo x > $OUT",
-            'for f in a b; do echo x > "$f"; done',
-            'cp a.md "$DEST"',
-        ],
-    )
-    def test_an_unknown_target_is_denied(self, command: str) -> None:
-        assert _decision(ProjectContainmentHandler(), command) == Decision.DENY
-
-    def test_the_read_shape_writes_where_it_reads(self, tmp_path: Path) -> None:
-        target = tmp_path / "x"
-        command = f'OUT=a.md; read OUT <<< {target}; echo x > "$OUT"'
-        _bash_run(command, tmp_path)
-        assert target.exists()

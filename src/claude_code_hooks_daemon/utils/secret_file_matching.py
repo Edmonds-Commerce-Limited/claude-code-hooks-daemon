@@ -35,7 +35,7 @@ import urllib.parse
 from collections.abc import Callable, Iterable, Iterator, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Final, Literal
+from typing import TYPE_CHECKING, Any, Final, Literal
 
 import yaml
 
@@ -44,7 +44,6 @@ from claude_code_hooks_daemon.utils.command_evasion import (
     git_subcommand_index,
     strip_transparent_reserved_words,
 )
-from claude_code_hooks_daemon.utils.path_containment import path_relative_to
 from claude_code_hooks_daemon.utils.path_exclusion import (
     first_matching_glob,
     literal_screen,
@@ -60,6 +59,10 @@ from claude_code_hooks_daemon.utils.shell_segmentation import (
     strip_inert_spans,
     substitution_inner_spans,
 )
+
+if TYPE_CHECKING:
+    # Typing only: the index imports git_repo, which imports this module.
+    from claude_code_hooks_daemon.utils.protected_file_index import ProtectedFileIndex
 
 logger = logging.getLogger(__name__)
 
@@ -1352,148 +1355,6 @@ def _dp_intersection_is_meaningful(token_basename: str, pattern: str) -> bool:
     return token_leading == pattern_leading
 
 
-#: M2c (Plan 00466 guard-defects review 2): cap on how many filesystem
-#: expansions of one glob-shaped token this route will walk before giving up
-#: -- a PreToolUse hot path must not pay for an unbounded directory listing.
-_MAX_BOTH_EDGES_FS_EXPANSIONS: Final[int] = 200
-
-
-def _shares_min_literal_substring(a: str, b: str, min_len: int) -> bool:
-    """True when some length-``min_len`` (or longer) run of ``a`` is a
-    substring of ``b``, ignoring position entirely.
-
-    Own live finding, own RED test (not in the review report): calling
-    ``_expand_glob_token`` -- real filesystem I/O -- for EVERY glob-shaped
-    token, unconditionally, measurably broke this module's own pre-existing
-    timing budgets (a 60000-``*`` token went from well under 0.1s to 8.45s;
-    twenty short wide-bracket tokens went from comfortably under 0.05s to
-    0.082s) -- B1's own bypass class, reintroduced by M2c's own fix. This is
-    the cheap, no-I/O gate that runs first: a genuine truncation of a
-    protected stem must share SOME literal text with it, so a token whose
-    residue shares nothing with any both-edges stem is skipped before it
-    ever reaches the disk. O(len(a) * len(b)) in the worst case, but both
-    operands here are short (a token's literal residue, a shipped pattern's
-    stem), so this costs microseconds where the route it gates costs a real
-    directory listing.
-    """
-    if len(a) < min_len or len(b) < min_len:
-        return False
-    return any(a[start : start + min_len] in b for start in range(len(a) - min_len + 1))
-
-
-def _both_edges_glob_mention(
-    expansions: list[str],
-    both_edges_patterns: tuple[str, ...],
-    both_edges_stems: tuple[str, ...],
-    project_root: str | None,
-    cwd: str | None,
-    *,
-    deadline: float | None = None,
-) -> str | None:
-    """First both-edges protected pattern a glob-shaped token's filesystem
-    expansion actually matches, else ``None`` (M2c, Plan 00466 review 2).
-
-    A both-edges pattern (``*.secret*``) asserts only "contains this text
-    anywhere", so neither the overlap heuristic nor the DP-intersection
-    check above will fire for it (see ``_glob_intersection_mention``'s own
-    docstring for why not). The filesystem is the one oracle that cannot
-    itself be gamed into a false positive here: a genuine interior/edge
-    truncation of a real protected file expands, on disk, to that file's
-    exact name; an unrelated word does not expand to anything at all. A
-    glob that expands to nothing reads nothing, so there is nothing to deny.
-
-    Gated by :func:`_shares_min_literal_substring` first -- see its
-    docstring for why a real disk call cannot run unconditionally here.
-
-    ``cwd`` is the HOOK's working directory (threaded from the PreToolUse
-    payload), never the daemon process's own -- a Bash tool call resolves a
-    relative glob against where IT ran, not where this long-lived daemon
-    process happens to sit.
-
-    ``deadline`` (M-1, Plan 00466 review 3) is forwarded to
-    :func:`_expand_glob_token`'s own recursive-glob walk -- see that
-    function's docstring for why the whole-scan deadline must be checked
-    INSIDE the filesystem walk, not only between tokens.
-    """
-    if not both_edges_patterns:
-        return None
-    for form in expansions:
-        if not _is_glob_shaped(form):
-            continue
-        basename = form.rsplit("/", maxsplit=1)[-1]
-        residue = _token_literal_residue(basename)
-        if not residue or not any(
-            _shares_min_literal_substring(residue, stem, _MIN_GLOB_OVERLAP_CHARS)
-            for stem in both_edges_stems
-        ):
-            continue
-        match = _expand_glob_token(
-            form,
-            both_edges_patterns,
-            project_root,
-            cwd=cwd,
-            max_expansions=_MAX_BOTH_EDGES_FS_EXPANSIONS,
-            deadline=deadline,
-        )
-        if match is not None:
-            return match
-    return None
-
-
-#: Ledger 00474 N220: cap on entries one bare-wildcard token may examine on
-#: disk before the scan fails closed. Measured (ledger 00474 N348): about 0.3 s
-#: per 30k paths, expansion included, so this stays well inside the 5 s scan
-#: deadline, which remains the backstop.
-_MAX_BARE_GLOB_FS_EXPANSIONS: Final[int] = 100_000
-
-
-def _bare_glob_mention(
-    expansions: list[str],
-    patterns: tuple[str, ...],
-    project_root: str | None,
-    cwds: tuple[str | None, ...],
-    *,
-    deadline: float | None = None,
-) -> str | None:
-    """First protected pattern a glob whose last component has no literal text
-    to judge (``dir/*``, ``*/*``, ``?``) actually expands to on disk, else ``None``.
-
-    Every text route above needs literal residue in the last component to
-    compare with a protected name, so ``cat dir/*`` was never expanded
-    (ledger 00474 N220). The filesystem is the oracle instead, tried from the
-    project root and each directory the command may run in. A word that
-    expands past :data:`_MAX_BARE_GLOB_FS_EXPANSIONS` examined paths raises
-    ``TooManyToEnumerateError``, which the caller's fail-closed wrapper turns
-    into a deny.
-
-    The cap counts what bash would produce: dot-entries a ``*`` does not
-    match are neither judged nor counted, and the project root is walked once
-    however many directories the command may run in.
-    """
-    for form in expansions:
-        if not _is_glob_shaped(form):
-            continue
-        basename = form.rsplit("/", maxsplit=1)[-1]
-        if len(_token_literal_residue(basename)) >= _MIN_GLOB_OVERLAP_CHARS:
-            continue
-        for position, base in enumerate(dict.fromkeys(cwds)):
-            if position and Path(form).is_absolute():
-                break  # an absolute word reads the same from every directory.
-            match = _expand_glob_token(
-                form,
-                patterns,
-                project_root,
-                cwd=base,
-                max_expansions=_MAX_BARE_GLOB_FS_EXPANSIONS,
-                deadline=deadline,
-                skip_hidden=True,
-                include_project_root=position == 0,
-            )
-            if match is not None:
-                return match
-    return None
-
-
 #: Which surface a mention scan is judging (n466-n24 review 4 addendum,
 #: false-positive fold-in b). ``"bash"`` (the default, and every pre-existing
 #: caller) is a real shell command: the AGGRESSIVE glob-shaped heuristics
@@ -1559,41 +1420,6 @@ def find_protected_mention(
 SCAN_DEADLINE_SECONDS: Final[float] = 5.0
 
 
-_NARROW_ADVICE: Final[str] = "narrow the glob or the search root, or name the files"
-_TREE_ADVICE: Final[str] = (
-    "search with `rg`, which skips gitignored trees, add `--exclude-dir`, or search a "
-    "narrower root"
-)
-
-
-def scan_incomplete_detail(
-    exc: shell_expansion.TooManyToEnumerateError | TimeoutError, *, found_nothing: str
-) -> str:
-    """What ran out, for the deny reason of a scan that could not finish.
-
-    Unverifiable is denied, but it is not a guard bug (ledger 00466 N134) and
-    not a finding (N348), so each guard files it under its own rule and says
-    what ran out. ``found_nothing`` is that guard's "no protected path was
-    found". Never the exception text, which may name a path.
-    """
-    if isinstance(exc, TimeoutError):
-        return (
-            f"the {SCAN_DEADLINE_SECONDS:g} s scan deadline passed; {found_nothing}; "
-            "retry, and if it keeps timing out, name the files or narrow the glob"
-        )
-    if exc.limit is None:
-        return f"an expansion or entry cap was reached; {found_nothing}; {_NARROW_ADVICE}"
-    if exc.tree_walk:
-        return (
-            f"a recursive search reads more than {exc.limit} entries; {found_nothing}; "
-            f"{_TREE_ADVICE}"
-        )
-    return (
-        f"the glob expands past its cap of {exc.limit} examined paths; {found_nothing}; "
-        f"{_NARROW_ADVICE}"
-    )
-
-
 def bash_route_word_stream(command: str, *, deadline: float | None = None) -> list[str] | None:
     """The single decoded word list safe to share between BOTH consumers on
     the Bash route: the ordinary mention scan (:func:`iter_protected_
@@ -1631,6 +1457,7 @@ def find_protected_mention_detail(
     normalised_words: list[str] | None = None,
     bash_tool_command: bool = False,
     cwds: tuple[str, ...] | None = None,
+    index: "ProtectedFileIndex | None" = None,
 ) -> tuple[str, str] | None:
     """``(pattern, token)`` for the first protected mention, else ``None``.
 
@@ -1661,6 +1488,7 @@ def find_protected_mention_detail(
             normalised_words=normalised_words,
             bash_tool_command=bash_tool_command,
             cwds=cwds,
+            index=index,
         ),
         None,
     )
@@ -1916,8 +1744,14 @@ def iter_protected_mentions(
     normalised_words: list[str] | None = None,
     bash_tool_command: bool = False,
     cwds: tuple[str, ...] | None = None,
+    index: "ProtectedFileIndex | None" = None,
 ) -> Iterator[tuple[str, str]]:
     """``(pattern, token)`` for EVERY protected mention in ``command``, in order.
+
+    ``index`` is the protected-file index (:mod:`protected_file_index`): a
+    glob-shaped word is also a mention when it matches a protected file that
+    exists, read from each of the ``cwds``. With no index only the literal and
+    stem checks judge a glob.
 
     ``cwds`` are the directories a relative word may be read from (see
     :func:`effective_cwds`); ``None`` derives them from ``command`` and ``cwd``.
@@ -2006,12 +1840,6 @@ def iter_protected_mentions(
     project_root = resolve_project_root()
     effective = effective_cwds(command, cwd) if cwds is None else cwds
     stem_pairs = _pattern_literal_stems(patterns)
-    both_edges_patterns = tuple(
-        pattern
-        for pattern in patterns
-        if _has_leading_wildcard(pattern) and _has_trailing_wildcard(pattern)
-    )
-    both_edges_stems = tuple(stem for stem, _pattern in _pattern_literal_stems(both_edges_patterns))
     tokens = _mention_token_stream(
         command,
         deadline=deadline,
@@ -2032,7 +1860,7 @@ def iter_protected_mentions(
     # Own live finding (team-lead's 1 MB timing follow-up to review 3): real
     # content is full of REPEATED short tokens (log lines, minified code,
     # boilerplate) -- every one of `patterns`/`stem_pairs`/`project_root`/
-    # `cwd`/`both_edges_patterns`/`both_edges_stems` is fixed for the WHOLE
+    # `cwd`/`index` is fixed for the WHOLE
     # call, so the verdict for a given token text can never differ between
     # two occurrences of it in the same command. Caching by token text turns
     # a scan that redid the full DP/bracket/filesystem work for every
@@ -2059,14 +1887,11 @@ def iter_protected_mentions(
                 patterns,
                 stem_pairs,
                 project_root,
-                cwd=cwd,
-                deadline=deadline,
-                both_edges_patterns=both_edges_patterns,
-                both_edges_stems=both_edges_stems,
                 context=context,
                 expands_globs=functools.partial(glob_gate.expands, token),
                 is_quoted_literal=functools.partial(glob_gate.is_quoted_literal, token),
                 effective_cwds=effective,
+                index=index,
             )
             mention_cache[token] = pattern
         if pattern is not None and token not in yielded_tokens:
@@ -2304,21 +2129,20 @@ def _token_mention(
     stem_pairs: list[tuple[str, str]],
     project_root: str | None,
     *,
-    cwd: str | None = None,
-    deadline: float | None = None,
-    both_edges_patterns: tuple[str, ...] = (),
-    both_edges_stems: tuple[str, ...] = (),
     context: MentionContext = "bash",
     realpath_cache: dict[str, str | None] | None = None,
     expands_globs: Callable[[], bool] = lambda: True,
     effective_cwds: tuple[str, ...] = (),
     is_quoted_literal: Callable[[], bool] = lambda: False,
+    index: "ProtectedFileIndex | None" = None,
 ) -> str | None:
     """The first protected glob ``token`` names (or could glob-expand to), else None.
 
     ``effective_cwds`` (:func:`effective_cwds`) are the directories a relative
     ``token`` may be read from: a directory or absolute-path pattern is matched
-    against the path the word reaches there too, not only as spelled.
+    against the path the word reaches there too, not only as spelled, and a
+    glob-shaped token is matched against ``index`` (the protected files that
+    exist) from each of them.
 
     ``expands_globs`` answers, only when ``token`` is glob-shaped, whether the
     word can be glob-expanded at all (:class:`_GlobExpansionGate`). ``False``
@@ -2465,26 +2289,12 @@ def _token_mention(
             match = _glob_intersection_mention(expansions, stem_pairs)
             if match is not None:
                 return match
-            match = _both_edges_glob_mention(
-                expansions,
-                both_edges_patterns,
-                both_edges_stems,
-                project_root,
-                cwd,
-                deadline=deadline,
-            )
-            if match is not None:
-                return match
-            if not is_quoted_literal():
-                match = _bare_glob_mention(
-                    expansions,
-                    patterns,
-                    project_root,
-                    (cwd, *effective_cwds) if effective_cwds else (cwd,),
-                    deadline=deadline,
-                )
-                if match is not None:
-                    return match
+            if index is not None and not is_quoted_literal():
+                for form in expansions:
+                    if _is_glob_shaped(form):
+                        match = index.glob_matches(form, effective_cwds)
+                        if match is not None:
+                            return match
     # Own live finding (team-lead's 1 MB timing follow-up to review 3): the
     # symlink-alias check exists for the `worktree_create` seeding case --
     # an innocuous LINK name pointing at a protected TARGET -- which is
@@ -2509,10 +2319,16 @@ def _token_mention(
 
 
 def find_protected_mention_strict(
-    command: str, patterns: tuple[str, ...], cwd: str | None = None
+    command: str,
+    patterns: tuple[str, ...],
+    cwd: str | None = None,
+    index: "ProtectedFileIndex | None" = None,
 ) -> str | None:
     """First protected glob a token of ``command`` mentions, requiring a REAL
-    on-disk match for any glob-shaped token, else ``None``.
+    match in ``index`` (the protected files that exist) for any glob-shaped
+    token, else ``None``. Without an ``index`` a glob-shaped token never counts.
+
+    The rest of this docstring describes the on-disk-truth rationale.
 
     ``find_protected_mention`` treats a glob-shaped token (``.vault-p*``) as a
     possible mention purely from its literal SPELLING, on purpose: for a
@@ -2537,14 +2353,15 @@ def find_protected_mention_strict(
         return None
     project_root = resolve_project_root()
     unquoted = mask_quoted(command, keep_double=False)
+    bases = effective_cwds(command, cwd) if index is not None else ()
     for token, start in _tokenise_with_offsets(command):
         globbed = any(char in _GLOB_CHARACTERS for char in unquoted[start : start + len(token)])
         for form in _normalised_token_forms(token):
             matched = first_matching_glob(form, patterns, project_root=project_root)
             if matched is not None:
                 return matched
-            if globbed and _is_glob_shaped(form):
-                match = _expand_glob_token(form, patterns, project_root, cwd=cwd)
+            if index is not None and globbed and _is_glob_shaped(form):
+                match = index.glob_matches(form, bases)
                 if match is not None:
                     return match
         real = _realpath_if_resolvable(token)
@@ -2552,112 +2369,6 @@ def find_protected_mention_strict(
             matched = first_matching_glob(real, patterns, project_root=project_root)
             if matched is not None:
                 return matched
-    return None
-
-
-def _expand_glob_token(
-    token: str,
-    patterns: tuple[str, ...],
-    project_root: str | None,
-    *,
-    cwd: str | None = None,
-    max_expansions: int | None = None,
-    deadline: float | None = None,
-    skip_hidden: bool = False,
-    include_project_root: bool = True,
-) -> str | None:
-    """First protected pattern matched by a file ``token`` actually expands to.
-
-    ``skip_hidden`` reads wildcards the way bash does by default (see
-    :func:`shell_expansion.bounded_recursive_glob`), and
-    ``include_project_root=False`` leaves the project root out of the bases for
-    a caller that has already walked it.
-
-    Tried against each plausible base (the project root, then ``cwd`` when
-    given — a Bash tool call runs relative to one of these) so a relative
-    glob like ``docs/*.md`` is resolved the way the shell would resolve it.
-    ``cwd`` is the HOOK's working directory (Plan 00466 review 2, M2c). The
-    daemon PROCESS's own cwd is never a base: the long-lived daemon sits at
-    ``/``, which no tool call runs in, and a broad glob rooted there is
-    refused outright (issues #64, #66). A caller with neither a project root
-    nor a hook cwd has no relative base to try. An
-    absolute token is tried as-is, split into its anchor plus the remaining
-    pattern so ``Path.glob`` (which only accepts a RELATIVE pattern) can
-    still expand it. A token that expands to nothing, or only to unrelated
-    files, returns ``None`` — this is the filesystem-truth check the
-    heuristic stem-overlap match in ``find_protected_mention`` does not have.
-
-    ``max_expansions`` bounds how many glob RESULTS are examined across all
-    bases (``None`` means unbounded) — a PreToolUse hot path must not pay
-    for an unbounded directory listing. A result past the bound was never
-    examined, so it raises ``TooManyToEnumerateError`` rather than allowing.
-
-    Every pattern is walked by :func:`shell_expansion.bounded_recursive_glob`
-    (M-1, Plan 00466 review 3: a recursive ``**`` walk is capped on entries
-    VISITED, not matches yielded). ``deadline`` is forwarded to it so it is
-    checked INSIDE the filesystem walk, not only between tokens.
-    """
-    token_path = Path(token)
-    if token_path.is_absolute():
-        search_specs = [
-            (Path(token_path.anchor), str(path_relative_to(token_path, token_path.anchor)))
-        ]
-    else:
-        bases: list[Path] = []
-        if project_root and include_project_root:
-            bases.append(Path(project_root))
-        if cwd is not None:
-            try:
-                hook_cwd = Path(cwd)
-            except (OSError, ValueError) as exc:
-                # An unparseable `cwd` string (e.g. embedded NUL) means no
-                # extra base -- the project-root base still applies, so this
-                # is a narrowing, not a total failure.
-                logger.debug("secret_file_matching: could not parse hook cwd %r: %s", cwd, exc)
-                hook_cwd = None
-            if hook_cwd is not None and hook_cwd.is_absolute() and hook_cwd not in bases:
-                bases.append(hook_cwd)
-        search_specs = [(base, token) for base in bases]
-
-    seen: set[str] = set()
-    examined = 0
-    screen = literal_screen(patterns)
-    # Fail CLOSED (team-lead's review-4 refinement): an expansion that could
-    # not be completed is not a decision this function made. The walker
-    # itself skips a lookup that proves absence (a missing prefix, or a
-    # component longer than any name can be) and collects every other
-    # failure here while it goes on examining the other branches and bases,
-    # so one failure never hides a later match (Plan 00466 N101 round 9).
-    # A protected match anywhere wins; otherwise the first collected
-    # failure propagates to the caller's own fail-closed wrapper.
-    # TooManyToEnumerateError, TimeoutError and ValueError propagate as
-    # they arise.
-    errors: list[OSError] = []
-    for base, pattern_str in search_specs:
-        key = f"{base}:{pattern_str}"
-        if key in seen:
-            continue
-        seen.add(key)
-        for match in shell_expansion.bounded_recursive_glob(
-            base, pattern_str, deadline=deadline, errors=errors, skip_hidden=skip_hidden
-        ):
-            examined += 1
-            if max_expansions is not None and examined > max_expansions:
-                raise shell_expansion.TooManyToEnumerateError(
-                    f"glob {token!r} expands past {max_expansions} examined paths",
-                    limit=max_expansions,
-                )
-            text = str(match)
-            # A path lacking every pattern's literal runs cannot match, and the
-            # screen is a substring test where the matcher is a sweep: it cut a
-            # path's cost about 7x (ledger 00474 N348).
-            if screen is not None and not screen(text):
-                continue
-            matched = first_matching_glob(text, patterns, project_root=project_root)
-            if matched is not None:
-                return matched
-    if errors:
-        raise errors[0]
     return None
 
 
@@ -2730,12 +2441,6 @@ def _realpath_if_resolvable(token: str) -> str | None:
     if is_symlink:
         return os.path.realpath(token)
     return None
-
-
-# Cap on the files ``secret_file_hygiene_checker``'s non-git fallback lists
-# before it reports the listing as truncated. The guards' own tree scan is
-# ``protected_tree_scan``, which fails closed past its cap instead.
-DIRECTORY_SCAN_MAX_ENTRIES: Final[int] = 5000
 
 
 _CD_EXECUTABLE: Final[str] = "cd"
@@ -3516,12 +3221,6 @@ def is_grep_pattern_only_mention(
 
     project_root = resolve_project_root()
     stem_pairs = _pattern_literal_stems(patterns)
-    both_edges_patterns = tuple(
-        pattern
-        for pattern in patterns
-        if _has_leading_wildcard(pattern) and _has_trailing_wildcard(pattern)
-    )
-    both_edges_stems = tuple(stem for stem, _pattern in _pattern_literal_stems(both_edges_patterns))
     # Team-lead's memoisation cut: this loop calls `_token_mention` directly,
     # outside `iter_protected_mentions`'s own per-scan `mention_cache`, so a
     # file-target word repeated across several positional arguments would
@@ -3536,8 +3235,6 @@ def is_grep_pattern_only_mention(
                 patterns,
                 stem_pairs,
                 project_root,
-                both_edges_patterns=both_edges_patterns,
-                both_edges_stems=both_edges_stems,
                 realpath_cache=realpath_cache,
             )
             is not None

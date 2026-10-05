@@ -13,10 +13,10 @@ from __future__ import annotations
 import re
 from pathlib import Path
 from typing import Any
-from unittest.mock import patch
 
 import pytest
 from tests.bash_sandbox import run_sandboxed_bash
+from tests.indexed_project import index_project
 
 from claude_code_hooks_daemon.constants import HandlerID, Priority
 from claude_code_hooks_daemon.constants.rule_ids import RuleID
@@ -25,10 +25,11 @@ from claude_code_hooks_daemon.core import Decision
 from claude_code_hooks_daemon.core.chain import HandlerChain
 from claude_code_hooks_daemon.core.data_layer import reset_data_layer
 from claude_code_hooks_daemon.core.rule import Rule
+from claude_code_hooks_daemon.handlers.pre_tool_use import quarantine_artefact_read_guard as guard
 from claude_code_hooks_daemon.handlers.pre_tool_use.quarantine_artefact_read_guard import (
     QuarantineArtefactReadGuardHandler,
 )
-from claude_code_hooks_daemon.utils import protected_tree_scan
+from claude_code_hooks_daemon.utils import protected_file_index
 
 
 @pytest.fixture(autouse=True)
@@ -53,9 +54,25 @@ def _hook_input(
     return payload
 
 
+@pytest.fixture(autouse=True)
+def _fresh_index_cache():
+    """No protected-file index survives from one test to the next."""
+    protected_file_index.reset_index_cache()
+    yield
+    protected_file_index.reset_index_cache()
+
+
 @pytest.fixture
 def handler() -> QuarantineArtefactReadGuardHandler:
     return QuarantineArtefactReadGuardHandler()
+
+
+def _indexed(
+    handler: QuarantineArtefactReadGuardHandler, root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Make ``root`` the project and serve the handler its index of quarantined artefacts."""
+    monkeypatch.setattr(guard, "resolve_project_root", lambda: root)
+    index_project(root, handler._effective_globs())
 
 
 class TestInitialisation:
@@ -137,16 +154,24 @@ class TestToolLevelPathChecks:
         assert handler.matches(payload) is False
 
     def test_grep_rooted_at_directory_containing_detail_artefact_matches(
-        self, handler: QuarantineArtefactReadGuardHandler, tmp_path: Path
+        self,
+        handler: QuarantineArtefactReadGuardHandler,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         (tmp_path / "topic-opus-security-DETAIL.md").write_text("raw")
+        _indexed(handler, tmp_path, monkeypatch)
         payload = _hook_input("Grep", {"pattern": "x", "path": str(tmp_path)})
         assert handler.matches(payload) is True
 
     def test_grep_rooted_at_directory_without_detail_artefact_does_not_match(
-        self, handler: QuarantineArtefactReadGuardHandler, tmp_path: Path
+        self,
+        handler: QuarantineArtefactReadGuardHandler,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         (tmp_path / "ordinary.md").write_text("fine")
+        _indexed(handler, tmp_path, monkeypatch)
         payload = _hook_input("Grep", {"pattern": "x", "path": str(tmp_path)})
         assert handler.matches(payload) is False
 
@@ -155,11 +180,17 @@ class TestBashRecursiveSearch:
     """Plan 00483 D1 (ledger 00474 N144): a recursive search reads a DETAIL artefact."""
 
     @pytest.fixture
-    def holding_dir(self, tmp_path: Path) -> Path:
+    def holding_dir(
+        self,
+        tmp_path: Path,
+        handler: QuarantineArtefactReadGuardHandler,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> Path:
         (tmp_path / "reports").mkdir()
         (tmp_path / "reports" / "topic-opus-security-DETAIL.md").write_text("raw")
         (tmp_path / "other").mkdir()
         (tmp_path / "other" / "ordinary.md").write_text("fine")
+        _indexed(handler, tmp_path, monkeypatch)
         return tmp_path
 
     @pytest.mark.parametrize(
@@ -309,8 +340,8 @@ class TestBashGlobTokenExpansion:
         docs = tmp_path / "docs"
         docs.mkdir()
         (docs / "ordinary.md").write_text("fine")
-        monkeypatch.chdir(tmp_path)
-        payload = _hook_input("Bash", {"command": "grep -c pattern docs/*.md"})
+        _indexed(handler, tmp_path, monkeypatch)
+        payload = _hook_input("Bash", {"command": "grep -c pattern docs/*.md"}, cwd=tmp_path)
         assert handler.matches(payload) is False
 
     def test_glob_token_that_expands_to_a_real_detail_artefact_still_matches(
@@ -322,7 +353,7 @@ class TestBashGlobTokenExpansion:
         docs = tmp_path / "docs"
         docs.mkdir()
         (docs / "topic-opus-security-DETAIL.md").write_text("raw")
-        monkeypatch.chdir(tmp_path)
+        _indexed(handler, tmp_path, monkeypatch)
         payload = _hook_input("Bash", {"command": "grep -c pattern docs/*.md"}, cwd=tmp_path)
         assert handler.matches(payload) is True
 
@@ -332,8 +363,8 @@ class TestBashGlobTokenExpansion:
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        monkeypatch.chdir(tmp_path)
-        payload = _hook_input("Bash", {"command": "grep -c pattern *.md"})
+        _indexed(handler, tmp_path, monkeypatch)
+        payload = _hook_input("Bash", {"command": "grep -c pattern *.md"}, cwd=tmp_path)
         assert handler.matches(payload) is False
 
     def test_a_malformed_recursive_wildcard_is_judged_rather_than_raising(
@@ -350,8 +381,8 @@ class TestBashGlobTokenExpansion:
         docs = tmp_path / "docs"
         docs.mkdir()
         (docs / "topic-opus-security-DETAIL.md").write_text("raw")
-        monkeypatch.chdir(tmp_path)
-        payload = _hook_input("Bash", {"command": "grep -c pattern docs/a**b.md"})
+        _indexed(handler, tmp_path, monkeypatch)
+        payload = _hook_input("Bash", {"command": "grep -c pattern docs/a**b.md"}, cwd=tmp_path)
         assert handler.matches(payload) is False
 
     def test_a_malformed_wildcard_does_not_hide_a_literal_detail_token(
@@ -365,29 +396,6 @@ class TestBashGlobTokenExpansion:
         monkeypatch.chdir(tmp_path)
         payload = _hook_input("Bash", {"command": "cat docs/a**b.md topic-opus-security-DETAIL.md"})
         assert handler.matches(payload) is True
-
-    def test_a_relative_glob_past_path_max_once_joined_denies(
-        self,
-        handler: QuarantineArtefactReadGuardHandler,
-        tmp_path: Path,
-        monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
-        """Plan 00466 N101 round 9 (review 8 BLOCKER 1), strict route: the
-        relative word is under PATH_MAX and bash reads the artefact, while
-        the base-joined path is over it."""
-        long_dir = "d" * 57
-        (tmp_path / long_dir).mkdir()
-        (tmp_path / "topic-opus-security-DETAIL.md").write_text("raw")
-        word = f"{long_dir}/../" * ((4095 - len("*.md")) // (len(long_dir) + 4)) + "*.md"
-        assert len(word) < 4096 < len(str(tmp_path)) + 1 + len(word)
-        monkeypatch.chdir(tmp_path)
-        chain = HandlerChain()
-        chain.add(handler)
-        result = chain.execute(
-            _hook_input("Bash", {"command": f"grep -c pattern {word}"}, cwd=tmp_path),
-            strict_mode=False,
-        )
-        assert result.result.decision == Decision.DENY, result.result.reason
 
     def test_a_single_name_past_the_name_limit_stays_allowed(
         self,
@@ -460,50 +468,50 @@ class TestHandle:
         assert result.decision == Decision.ALLOW
 
 
-class TestFailClosedOnEvaluationError:
-    """n466-n24 review 4: an exception during evaluation must deny, with a
-    reason naming the error -- the same posture as secret_file_guard's N11
-    fail-closed wrapper. A failing glob-expansion base is exactly the shape
-    that regressed here: `_expand_glob_token` propagating on a non-ENOENT
-    OSError (Plan 00466 guard-defects) reaches this handler via
-    `find_protected_mention_strict`, which has no wrapper of its own."""
+class TestEvaluationErrorIsAllowedWithAdvisory:
+    """Plan 00483 A1: a call the guard could not finish judging is allowed with
+    an advisory, never denied -- unless the command itself names an artefact."""
 
-    def test_matches_is_true_when_evaluation_raises(
-        self, handler: QuarantineArtefactReadGuardHandler, monkeypatch: pytest.MonkeyPatch
+    @pytest.mark.parametrize("error", [OSError, PermissionError, ValueError, TimeoutError])
+    def test_an_error_is_an_advisory_not_a_deny(
+        self,
+        handler: QuarantineArtefactReadGuardHandler,
+        monkeypatch: pytest.MonkeyPatch,
+        error: type[Exception],
     ) -> None:
         def _raise(self: Any, hook_input: dict[str, Any]) -> str | None:
-            raise OSError("simulated glob-expansion failure")
+            raise error("simulated failure")
 
         monkeypatch.setattr(QuarantineArtefactReadGuardHandler, "_evaluate_matched_pattern", _raise)
-        payload = _hook_input("Bash", {"command": "cat some-opus-security-DETAIL-token"})
+        payload = _hook_input("Bash", {"command": "cat some-ordinary-file"})
         assert handler.matches(payload) is True
+        result = handler.handle(payload)
+        assert result.decision == Decision.ALLOW
+        assert result.context
+        assert "could NOT fully judge" in result.context[0]
 
-    def test_handle_denies_when_a_failing_glob_base_raises(
+    def test_a_literal_artefact_in_the_command_still_denies(
         self, handler: QuarantineArtefactReadGuardHandler, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         def _raise(self: Any, hook_input: dict[str, Any]) -> str | None:
-            raise PermissionError("simulated permission-denied glob base")
+            raise TimeoutError("deadline")
 
         monkeypatch.setattr(QuarantineArtefactReadGuardHandler, "_evaluate_matched_pattern", _raise)
-        payload = _hook_input("Bash", {"command": "cat some-opus-security-DETAIL-token"})
+        payload = _hook_input("Bash", {"command": "cat topic-opus-security-DETAIL.md"})
         result = handler.handle(payload)
         assert result.decision == Decision.DENY
         assert result.reason is not None
-        assert "PermissionError" in result.reason
-        assert RuleID.QUARANTINE_ARTEFACT_READ_EVALUATION_ERROR in result.reason
+        assert RuleID.QUARANTINE_ARTEFACT_READ in result.reason
 
-    def test_allow_is_never_returned_when_evaluation_raises(
+    def test_a_raise_on_the_read_tool_is_an_advisory(
         self, handler: QuarantineArtefactReadGuardHandler, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """A raise must never be indistinguishable from "no match found"."""
-
         def _raise(self: Any, hook_input: dict[str, Any]) -> str | None:
             raise ValueError("simulated malformed-pattern failure")
 
         monkeypatch.setattr(QuarantineArtefactReadGuardHandler, "_evaluate_matched_pattern", _raise)
-        payload = _hook_input("Read", {"file_path": "/p/src/app.py"})
-        result = handler.handle(payload)
-        assert result.decision == Decision.DENY
+        result = handler.handle(_hook_input("Read", {"file_path": "/p/src/app.py"}))
+        assert result.decision == Decision.ALLOW
 
 
 class TestMalformedToolInputNeverRaises:
@@ -627,27 +635,15 @@ class TestEdgeBranches:
 
 
 class TestQuarantineArtefactReadGuardGetRules:
-    """get_rules() declares the 3 Rules backing this handler (Plan 00116; the
-    evaluation-error Rule added n466-n24 review 4 mirrors secret_file_guard's
-    own N11 fail-closed wrapper; the incomplete-scan Rule is ledger 00483 N130)."""
+    """get_rules() declares the one Rule backing this handler's deny (Plan 00116)."""
 
-    def test_returns_three_rules(self, handler: QuarantineArtefactReadGuardHandler) -> None:
+    def test_returns_one_rule(self, handler: QuarantineArtefactReadGuardHandler) -> None:
         rules = handler.get_rules()
-        assert len(rules) == 3
+        assert len(rules) == 1
         assert all(isinstance(rule, Rule) for rule in rules)
-
-    def test_incomplete_rule_id_matches_constant(
-        self, handler: QuarantineArtefactReadGuardHandler
-    ) -> None:
-        assert handler.get_rules()[2].rule_id == RuleID.QUARANTINE_SCAN_INCOMPLETE
 
     def test_rule_id_matches_constant(self, handler: QuarantineArtefactReadGuardHandler) -> None:
         assert handler.get_rules()[0].rule_id == RuleID.QUARANTINE_ARTEFACT_READ
-
-    def test_error_rule_id_matches_constant(
-        self, handler: QuarantineArtefactReadGuardHandler
-    ) -> None:
-        assert handler.get_rules()[1].rule_id == RuleID.QUARANTINE_ARTEFACT_READ_EVALUATION_ERROR
 
     def test_rule_has_non_empty_verbose(self, handler: QuarantineArtefactReadGuardHandler) -> None:
         assert handler.get_rules()[0].verbose
@@ -710,16 +706,6 @@ class TestQuarantineArtefactReadGuardDisclosureLadder:
         assert "SUMMARY" in result.reason
 
 
-def _tree_past_the_walk_cap(root: Path) -> None:
-    """More entries than the recursive glob walk may visit, holding one
-    ordinary markdown file per directory and no artefact."""
-    for directory in range(60):
-        sub = root / f"d{directory}"
-        sub.mkdir()
-        for index in range(40):
-            (sub / f"f{index}.md").touch()
-
-
 def _bash_words(command: str, cwd: Path) -> list[str]:
     """The words bash passes to a program for ``command``'s arguments."""
     return run_sandboxed_bash(f"printf '%s\\n' {command}", cwd, "/usr/bin:/bin").splitlines()
@@ -749,10 +735,11 @@ class TestAQuotedGlobIsNeverEnumerated:
         command: str,
         argument: str,
     ) -> None:
-        _tree_past_the_walk_cap(tmp_path)
+        (tmp_path / "d1").mkdir()
+        (tmp_path / "d1" / "ordinary.md").touch()
         assert len(_bash_words(argument, tmp_path)) == 1
-        monkeypatch.chdir(tmp_path)
-        assert handler.matches(_hook_input("Bash", {"command": command})) is False
+        _indexed(handler, tmp_path, monkeypatch)
+        assert handler.matches(_hook_input("Bash", {"command": command}, cwd=tmp_path)) is False
 
     def test_a_quoted_artefact_name_is_still_a_mention(
         self,
@@ -791,37 +778,9 @@ class TestAQuotedGlobIsNeverEnumerated:
         monkeypatch: pytest.MonkeyPatch,
         command: str,
     ) -> None:
-        _tree_past_the_walk_cap(tmp_path)
-        monkeypatch.chdir(tmp_path)
-        hook_input = _hook_input("Bash", {"command": command})
+        _indexed(handler, tmp_path, monkeypatch)
+        hook_input = _hook_input("Bash", {"command": command}, cwd=tmp_path)
         assert handler.matches(hook_input) is False
-
-    @pytest.mark.parametrize(
-        "command",
-        [
-            "cat **/*.md",
-            "awk '/x/,0' **/f1*.md",
-            # (viii) several globs listed.
-            "head -n 1 d1/*.md **/f2*.md",
-        ],
-    )
-    def test_an_unquoted_glob_past_the_budget_is_a_named_deny(
-        self,
-        handler: QuarantineArtefactReadGuardHandler,
-        tmp_path: Path,
-        monkeypatch: pytest.MonkeyPatch,
-        command: str,
-    ) -> None:
-        """Bash does expand these, and the walk past its budget cannot say
-        whether an artefact is among them."""
-        _tree_past_the_walk_cap(tmp_path)
-        assert len(_bash_words(command.split()[-1], tmp_path)) > 1
-        monkeypatch.chdir(tmp_path)
-        result = handler.handle(_hook_input("Bash", {"command": command}, cwd=tmp_path))
-        assert result.decision == Decision.DENY
-        assert result.reason is not None
-        assert RuleID.QUARANTINE_SCAN_INCOMPLETE in result.reason
-        assert RuleID.QUARANTINE_ARTEFACT_READ_EVALUATION_ERROR not in result.reason
 
     def test_a_two_wildcard_glob_within_the_budget_is_allowed(
         self,
@@ -832,24 +791,20 @@ class TestAQuotedGlobIsNeverEnumerated:
         for directory in range(3):
             (tmp_path / f"d{directory}").mkdir()
             (tmp_path / f"d{directory}" / "f-p421.md").touch()
-        monkeypatch.chdir(tmp_path)
-        hook_input = _hook_input("Bash", {"command": "awk '/x/,0' d*/*p421*"})
+        _indexed(handler, tmp_path, monkeypatch)
+        hook_input = _hook_input("Bash", {"command": "awk '/x/,0' d*/*p421*"}, cwd=tmp_path)
         assert handler.matches(hook_input) is False
 
 
-class TestAScanThatRanOutOfBudgetHasItsOwnRule:
-    """Ledger 00483 N130: a tree past the entry cap is unchecked, not clean.
-
-    It is denied under ``R-QUARANTINE-SCAN-INCOMPLETE``, which is neither a
-    finding nor the evaluation-error route whose text calls it a guard bug.
-    """
+class TestUnjudgedCallsAreAllowedWithAdvisory:
+    """Plan 00483 A1: with no index to judge a recursive search by, the call is
+    allowed and the advisory says what was not checked."""
 
     @pytest.fixture
-    def clean_tree(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-        for index in range(30):
-            (tmp_path / f"ordinary{index}.md").touch()
-        monkeypatch.setattr(protected_tree_scan, "TREE_SCAN_MAX_ENTRIES", 10)
-        return tmp_path
+    def no_index(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(
+            QuarantineArtefactReadGuardHandler, "_index", lambda self, patterns: None
+        )
 
     @pytest.mark.parametrize(
         ("tool_name", "tool_input"),
@@ -858,56 +813,46 @@ class TestAScanThatRanOutOfBudgetHasItsOwnRule:
             (ToolName.BASH, {"command": "grep -r x ."}),
         ],
     )
-    def test_a_search_over_a_tree_past_the_cap_is_denied_as_incomplete(
+    def test_a_search_with_no_index_is_allowed_with_an_advisory(
         self,
         handler: QuarantineArtefactReadGuardHandler,
-        clean_tree: Path,
+        tmp_path: Path,
+        no_index: None,
         tool_name: str,
         tool_input: dict[str, Any],
     ) -> None:
         if tool_name == ToolName.GREP:
-            tool_input = {**tool_input, "path": str(clean_tree)}
-        result = handler.handle(_hook_input(tool_name, tool_input, cwd=clean_tree))
-        assert result.decision == Decision.DENY
-        assert result.reason is not None
-        assert RuleID.QUARANTINE_SCAN_INCOMPLETE in result.reason
-        assert RuleID.QUARANTINE_ARTEFACT_READ_EVALUATION_ERROR not in result.reason
-        assert "no quarantined artefact was found" in result.reason
+            tool_input = {**tool_input, "path": str(tmp_path)}
+        result = handler.handle(_hook_input(tool_name, tool_input, cwd=tmp_path))
+        assert result.decision == Decision.ALLOW
+        assert result.context
+        assert "index of quarantined artefacts is not available" in result.context[0]
 
     def test_a_finding_keeps_its_own_rule(
-        self, handler: QuarantineArtefactReadGuardHandler, tmp_path: Path
-    ) -> None:
-        (tmp_path / "topic-opus-security-DETAIL.md").touch()
-        result = handler.handle(_hook_input("Bash", {"command": "grep -r x ."}, cwd=tmp_path))
-        assert result.reason is not None
-        assert RuleID.QUARANTINE_SCAN_INCOMPLETE not in result.reason
-        assert result.reason.startswith(f"BLOCKED [{RuleID.QUARANTINE_ARTEFACT_READ}]")
-
-    def test_the_deadline_is_forwarded_to_the_scan(
         self,
         handler: QuarantineArtefactReadGuardHandler,
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        seen: list[float | None] = []
-
-        def _scan(*_args: object, **kwargs: Any) -> None:
-            seen.append(kwargs.get("deadline"))
-
-        monkeypatch.setattr(protected_tree_scan, "find_protected_in_tree", _scan)
-        handler.matches(_hook_input("Grep", {"path": str(tmp_path), "pattern": "x"}))
-        handler.matches(_hook_input("Bash", {"command": "grep -r x ."}, cwd=tmp_path))
-        assert len(seen) == 2
-        assert all(deadline is not None for deadline in seen)
-
-    def test_a_passed_deadline_is_denied_as_incomplete(
-        self, handler: QuarantineArtefactReadGuardHandler, tmp_path: Path
-    ) -> None:
-        with patch.object(protected_tree_scan, "find_protected_in_tree", side_effect=TimeoutError):
-            result = handler.handle(
-                _hook_input("Grep", {"path": str(tmp_path), "pattern": "x"}, cwd=tmp_path)
-            )
-        assert result.decision == Decision.DENY
+        (tmp_path / "topic-opus-security-DETAIL.md").touch()
+        _indexed(handler, tmp_path, monkeypatch)
+        result = handler.handle(_hook_input("Bash", {"command": "grep -r x ."}, cwd=tmp_path))
         assert result.reason is not None
-        assert RuleID.QUARANTINE_SCAN_INCOMPLETE in result.reason
-        assert "deadline" in result.reason
+        assert result.reason.startswith(f"BLOCKED [{RuleID.QUARANTINE_ARTEFACT_READ}]")
+
+    def test_a_passed_deadline_is_an_advisory(
+        self,
+        handler: QuarantineArtefactReadGuardHandler,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        def _expired(*_args: object, **_kwargs: object) -> None:
+            raise TimeoutError
+
+        monkeypatch.setattr(
+            QuarantineArtefactReadGuardHandler, "_evaluate_matched_pattern", _expired
+        )
+        result = handler.handle(_hook_input("Bash", {"command": "ls"}, cwd=tmp_path))
+        assert result.decision == Decision.ALLOW
+        assert result.context
+        assert "deadline" in result.context[0]

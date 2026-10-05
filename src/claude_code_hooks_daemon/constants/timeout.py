@@ -164,6 +164,10 @@ class Timeout:
     # generous of the short bounds — but bounded, because an unbounded network
     # call in a CLI command is a hang with no error to read.
     GH_API_QUERY = 30
+    # 30 seconds (waiting for a protected-file index build to finish, in tests
+    # and at shutdown). A build is one `git ls-files`; the ceiling only stops a
+    # wedged git holding the caller.
+    INDEX_BUILD_WAIT = 30
 
     # QA runner timeouts (seconds)
     QA_TEST_TIMEOUT = 120  # 2 minutes (mypy, individual tool checks)

@@ -1,0 +1,1165 @@
+# The ordinary-command regression corpus (Plan 00483 R2).
+#
+# Every row is a command a careless-but-well-meaning agent types in normal work.
+# tests/integration/test_ordinary_command_regression_gate.py runs each one
+# through EVERY PreToolUse handler, over a fixture tree that holds protected
+# files in their usual places (see that test for the tree), and requires ALLOW.
+# An ALLOW that flips to DENY fails the change. A row is never edited to make a
+# guard change pass: the owner adds or drops rows deliberately.
+#
+# Row keys:
+#   id       unique slug (the pytest id)
+#   command  the Bash command; {ROOT} is the fixture project root (absolute)
+#   cwd      directory the command runs in, relative to the project root
+#            (default: the project root)
+#   tool     Bash (default), Read, Write, Edit or Grep; for those the row's
+#            `command` holds the path (Read, Grep) or the file path (Write, Edit)
+#   xfail    the ledger id or inventory label of a KNOWN false positive the
+#            current guards deny; the test is xfail(strict) so fixing it fails
+#            the run until the marker is removed
+#
+# Sequenced commands carry the `set -euo pipefail;` prelude that bash_safe_mode
+# asks for, exactly as an agent types them in this repository.
+rows:
+  # --- listing and reading ---------------------------------------------------
+  - id: ls-plain
+    command: |-
+      ls
+  - id: ls-la
+    command: |-
+      ls -la
+  - id: ls-l-src
+    command: |-
+      ls -l src
+  - id: ls-R-src
+    command: |-
+      ls -R src
+  - id: ls-dir-slash
+    command: |-
+      ls -d */
+  - id: ls-star-py
+    command: |-
+      ls *.py
+    cwd: src
+  - id: ls-src-star
+    command: |-
+      ls src/*.py
+  - id: ls-glob-3
+    command: |-
+      ls */*/*
+  - id: ls-glob-4
+    command: |-
+      ls */*/*/*
+  - id: ls-glob-5
+    command: |-
+      ls */*/*/*/*
+  - id: ls-doublestar-py
+    command: |-
+      ls **/*.py
+  - id: ls-abs-glob
+    command: |-
+      ls {ROOT}/src/*
+  - id: ls-abs-glob-2
+    command: |-
+      ls {ROOT}/*/*
+  - id: ls-home
+    command: |-
+      ls ~
+  - id: ls-tmpdir
+    command: |-
+      ls -la ${TMPDIR:-/tmp}
+  - id: ls-pipe-wc
+    command: |-
+      ls src | wc -l
+  - id: ls-sort-time
+    command: |-
+      ls -lt | head -n 5
+  - id: tree-d
+    command: |-
+      tree -L 2 src
+  - id: cat-readme
+    command: |-
+      cat README.md
+  - id: cat-glob-md
+    command: |-
+      cat docs/*.md
+  - id: cat-src-glob
+    command: |-
+      cat src/*.md
+  - id: cat-n
+    command: |-
+      cat -n src/app.py
+  - id: cat-two
+    command: |-
+      cat README.md docs/guide.md
+  - id: cat-gitignore
+    command: |-
+      cat .gitignore
+  - id: cat-dotclaude-config
+    command: |-
+      cat .claude/hooks-daemon.yaml
+  - id: head-n
+    command: |-
+      head -n 20 README.md
+  - id: tail-n
+    command: |-
+      tail -n 40 src/app.py
+  - id: tail-f
+    command: |-
+      tail -f untracked/daemon.log
+  - id: wc-l
+    command: |-
+      wc -l README.md src/app.py
+  - id: wc-glob
+    command: |-
+      wc -l src/*.py
+  - id: less-readme
+    command: |-
+      less README.md
+  - id: file-readme
+    command: |-
+      file README.md
+  - id: stat-readme
+    command: |-
+      stat README.md
+  - id: du-sh
+    command: |-
+      du -sh src docs
+  - id: df-h
+    command: |-
+      df -h .
+  - id: pwd
+    command: |-
+      pwd
+  - id: whoami
+    command: |-
+      whoami
+  - id: date
+    command: |-
+      date -u +%Y-%m-%dT%H:%M:%SZ
+  - id: env-sorted
+    command: |-
+      env | sort
+  - id: echo-home
+    command: |-
+      echo $HOME
+  - id: echo-var-unset
+    command: |-
+      echo $UNSET_VAR
+  - id: echo-var-path
+    command: |-
+      cat $DATA_DIR/output.csv
+  - id: echo-brace-var
+    command: |-
+      cat ${CONFIG}/app.conf
+  - id: echo-pwd-sub
+    command: |-
+      echo "$(pwd)"
+  - id: echo-pwd-then-python
+    command: |-
+      set -euo pipefail
+      echo "$(pwd)"
+      python3 - <<'EOF'
+      import json
+      data = {"a": 1, "b": [1, 2, 3]}
+      for key, value in sorted(data.items()):
+          print(key, json.dumps(value))
+      EOF
+  - id: export-path
+    command: |-
+      export PATH=$PATH:/usr/local/bin
+  - id: which-python
+    command: |-
+      which python3
+  - id: type-git
+    command: |-
+      type git
+  - id: sort-file
+    command: |-
+      sort src/app.py
+  - id: uniq-count
+    command: |-
+      sort src/app.py | uniq -c
+  - id: diff-two
+    command: |-
+      diff README.md docs/guide.md
+  - id: diff-unified
+    command: |-
+      diff -u src/app.py src/util/helpers.py
+  - id: md5sum
+    command: |-
+      md5sum README.md
+  - id: realpath
+    command: |-
+      realpath src/app.py
+  - id: basename
+    command: |-
+      basename src/app.py .py
+  - id: dirname
+    command: |-
+      dirname src/util/helpers.py
+  - id: readlink-f
+    command: |-
+      readlink -f src
+  - id: test-f
+    command: |-
+      test -f README.md && echo present
+  - id: bracket-d
+    command: |-
+      [ -d src ] && echo yes
+  - id: bracket-f-or
+    command: |-
+      [ -f README.md ] || echo missing
+
+  # --- finding and searching -------------------------------------------------
+  - id: find-py
+    command: |-
+      find . -name '*.py'
+  - id: find-py-src
+    command: |-
+      find src -name '*.py' -type f
+  - id: find-type-d
+    command: |-
+      find . -maxdepth 2 -type d
+  - id: find-mtime
+    command: |-
+      find . -name '*.log' -mtime -1
+  - id: find-pyc-delete
+    command: |-
+      find . -name '*.pyc' -delete
+  - id: find-exec-ls
+    command: |-
+      find src -name '*.py' -exec ls -l {} \;
+  - id: find-exec-wc
+    command: |-
+      find src -name '*.py' -exec wc -l {} +
+  - id: find-print0-xargs
+    command: |-
+      find src -name '*.py' -print0 | xargs -0 wc -l
+  - id: find-xargs-grep-src
+    command: |-
+      find src -name '*.py' | xargs grep -l "def "
+  - id: find-empty-dirs
+    command: |-
+      find . -type d -empty -not -path './.git/*'
+  - id: find-newer
+    command: |-
+      find src -newer README.md
+  - id: find-name-test
+    command: |-
+      find tests -name 'test_*.py'
+  - id: grep-r-src
+    command: |-
+      grep -r x src
+  - id: grep-rn-todo-src
+    command: |-
+      grep -rn TODO src tests
+  - id: grep-rn-include
+    command: |-
+      grep -rn "def foo" --include=*.py src
+  - id: grep-r-exclude-dir
+    command: |-
+      grep -rn needle --exclude-dir=er deep
+  - id: grep-rl-docs
+    command: |-
+      grep -rl "install" docs README.md
+  - id: grep-file
+    command: |-
+      grep -n "import" src/app.py
+  - id: grep-c
+    command: |-
+      grep -c "def " src/app.py
+  - id: grep-i
+    command: |-
+      grep -i "error" src/app.py
+  - id: grep-v
+    command: |-
+      grep -v "^#" src/app.py
+  - id: grep-e-alt
+    command: |-
+      grep -E "foo|bar" src/app.py
+  - id: grep-regex-dot-star
+    command: |-
+      grep '.*ErrorCount' src/app.py
+  - id: grep-glob-files
+    command: |-
+      grep -l 'secret' *.txt
+  - id: grep-pipe
+    command: |-
+      cat src/app.py | grep "import"
+  - id: grep-regex-in-sub
+    command: |-
+      echo "$(grep -c 'a.*b' src/app.py)"
+  - id: grep-q-if
+    command: |-
+      if grep -q "import" src/app.py; then echo yes; fi
+  - id: grep-docs-name
+    command: |-
+      grep 'ssh-agent' docs/guide.md
+  - id: rg-plain
+    command: |-
+      rg x
+  - id: rg-n-src
+    command: |-
+      rg -n "def " src
+  - id: rg-files
+    command: |-
+      rg --files
+  - id: rg-files-glob
+    command: |-
+      rg --files -g '*.py'
+  - id: rg-type-py
+    command: |-
+      rg -t py "import"
+  - id: rg-l
+    command: |-
+      rg -l TODO
+  - id: rg-fixed
+    command: |-
+      rg -F "a.b" src
+  - id: rg-no-ignore-src
+    command: |-
+      rg --no-ignore needle src
+  - id: git-grep
+    command: |-
+      git grep x
+  - id: git-grep-n
+    command: |-
+      git grep -n TODO -- '*.py'
+  - id: git-grep-l
+    command: |-
+      git grep -l "import"
+  - id: git-grep-tree
+    command: |-
+      git grep "import" HEAD -- src
+  - id: ack-src
+    command: |-
+      ack TODO src
+  - id: awk-print
+    command: |-
+      awk '{print $1}' README.md
+  - id: awk-nr
+    command: |-
+      awk 'NR>=1 && NR<=20' README.md
+  - id: awk-f
+    command: |-
+      awk -F: '{print $1}' src/app.py
+  - id: cut-d
+    command: |-
+      cut -d: -f1 src/app.py
+  - id: jq-keys
+    command: |-
+      jq 'keys' package.json
+  - id: jq-select
+    command: |-
+      jq '.[] | select(.a > 1)' data.json
+  - id: yq-read
+    command: |-
+      yq '.version' .claude/hooks-daemon.yaml
+  - id: xargs-echo
+    command: |-
+      printf '%s\n' a b c | xargs -n1 echo
+
+  # --- cd, loops and compound commands ---------------------------------------
+  - id: cd-ls
+    command: |-
+      cd src && ls
+  - id: cd-pwd-ls
+    command: |-
+      set -euo pipefail; cd src && pwd && ls -la
+  - id: cd-grep-sub
+    command: |-
+      cd tests && grep -r x unit
+  - id: cd-untracked-loop-N350
+    command: |-
+      set -euo pipefail; cd untracked; for d in repos/one; do ls "$d"; done
+  - id: cd-untracked-glob-loop-N350
+    command: |-
+      set -euo pipefail; cd untracked; for d in repos/* worktrees/*; do echo "$d"; done
+  - id: cd-untracked-git-loop
+    command: |-
+      set -euo pipefail; cd untracked; for d in repos/*; do git -C "$d" ls-files; done
+  - id: for-dir-glob
+    command: |-
+      set -euo pipefail; for d in repos/*; do ls "$d"; done
+  - id: for-two-globs
+    command: |-
+      set -euo pipefail; for d in repos/* worktrees/*; do echo "$d"; done
+  - id: for-files-txt
+    command: |-
+      set -euo pipefail; for f in *.txt; do wc -l "$f"; done
+  - id: for-seq
+    command: |-
+      set -euo pipefail; for i in 1 2 3; do echo $i; done
+  - id: for-brace-seq
+    command: |-
+      set -euo pipefail; for i in {1..10}; do echo $i; done
+  - id: for-literal-list
+    command: |-
+      set -euo pipefail; for d in src tests docs; do ls "$d"; done
+  - id: for-multiline
+    command: |-
+      set -euo pipefail
+      for d in repos/one repos/two; do
+        echo "== $d"
+        ls "$d"
+      done
+  - id: while-read
+    command: |-
+      set -euo pipefail; ls src | while read -r f; do echo "$f"; done
+  - id: while-read-file
+    command: |-
+      set -euo pipefail; while read -r line; do echo "$line"; done < README.md
+  - id: if-then
+    command: |-
+      set -euo pipefail; if [ -d src ]; then echo yes; else echo no; fi
+  - id: case-esac
+    command: |-
+      set -euo pipefail; case "$1" in a) echo a ;; *) echo other ;; esac
+  - id: brace-group
+    command: |-
+      set -euo pipefail; { echo a; echo b; } > untracked/scratch-out.txt
+  - id: subshell-cd
+    command: |-
+      set -euo pipefail; (cd src && ls)
+  - id: var-assign-then-use
+    command: |-
+      set -euo pipefail; D=untracked/scratch && mkdir -p $D && echo hi > $D/f.txt
+  - id: var-assign-quote
+    command: |-
+      set -euo pipefail; D="untracked/scratch"; mkdir -p "$D"; ls "$D"
+  - id: var-default-awk-FP1
+    command: |-
+      set -euo pipefail; x=${PREFIX:-"/usr"}; awk '{print $1}' README.md
+  - id: var-default-find-exec-FP1
+    command: |-
+      set -euo pipefail; x=${PREFIX:-"/usr"}; find . -name '*.md' -exec ls {} \;
+  - id: var-trim-awk-FP1
+    command: |-
+      set -euo pipefail; echo ${x#"pre"}; awk '{print $1}' README.md
+  - id: var-quoted-underscore-FP3
+    command: |-
+      set -euo pipefail; d=src; ls "$d"_rsa
+  - id: var-path-name-FP3
+    command: |-
+      set -euo pipefail; name=app; cat "$HOME"/.ssh/"$name"_rsa
+  - id: cmd-sub-date
+    command: |-
+      set -euo pipefail; echo "built at $(date -u)"
+  - id: cmd-sub-git
+    command: |-
+      set -euo pipefail; echo "$(git rev-parse --show-toplevel)/src"
+  - id: pipe-chain
+    command: |-
+      cat README.md | tr a-z A-Z | sort | uniq | head -n 3
+  - id: and-chain
+    command: |-
+      mkdir -p untracked/scratch && ls untracked/scratch
+  - id: or-chain
+    command: |-
+      ls missing 2>/dev/null || echo none
+  - id: semicolons
+    command: |-
+      set -euo pipefail; echo one; echo two; echo three
+  - id: redirect-out
+    command: |-
+      echo hello > untracked/scratch-note.txt
+  - id: redirect-append
+    command: |-
+      echo hello >> untracked/scratch-note.txt
+  - id: redirect-err
+    command: |-
+      ls nowhere 2>&1
+  - id: tee-file
+    command: |-
+      echo hi | tee untracked/scratch-tee.txt
+  - id: process-sub-diff
+    command: |-
+      diff <(ls src) <(ls tests)
+  - id: time-cmd
+    command: |-
+      time ls src
+  - id: timeout-cmd
+    command: |-
+      timeout 30 ls src
+  - id: nohup-cmd
+    command: |-
+      nohup sleep 1 > untracked/nohup.out 2>&1 &
+  - id: sleep-1
+    command: |-
+      sleep 1
+  - id: env-prefix
+    command: |-
+      LC_ALL=C sort README.md
+  - id: xargs-rm
+    command: |-
+      ls untracked/*.tmp | xargs rm -f
+
+  # --- brace expansion -------------------------------------------------------
+  - id: brace-echo-1-255
+    command: |-
+      echo {1..255}
+  - id: brace-echo-1-300-FP4
+    command: |-
+      echo {1..300}
+  - id: brace-touch-1000-FP4
+    command: |-
+      touch untracked/f{1..1000}
+  - id: brace-printf-1000-FP4
+    command: |-
+      printf '%s\n' {1..1000}
+  - id: brace-az-product-FP4
+    command: |-
+      echo {a..z}{a..z}
+  - id: brace-mkdir
+    command: |-
+      mkdir -p untracked/a/{b,c,d}/{e,f,g}
+  - id: brace-cp-bak
+    command: |-
+      cp README.md{,.bak}
+  - id: brace-cat-reports
+    command: |-
+      cat report-{1,2,3}.txt
+  - id: brace-seq-logs
+    command: |-
+      cat file{01..10}.log
+  - id: brace-rm
+    command: |-
+      rm -f untracked/tmp-{a,b}.txt
+  - id: brace-in-quotes
+    command: |-
+      echo '{a,b}'
+  - id: brace-json-curl
+    command: |-
+      curl -s -X POST -d '{"a": 1}' https://example.com/api
+
+  # --- heredocs and inline code ---------------------------------------------
+  - id: heredoc-cat-write
+    command: |-
+      cat > untracked/notes.txt <<'EOF'
+      some notes
+      EOF
+  - id: heredoc-cat-stdout
+    command: |-
+      cat <<'EOF'
+      hello
+      EOF
+  - id: heredoc-commit
+    command: |-
+      git commit -F - <<'EOF'
+      Fix the parser
+
+      The parser dropped a trailing newline.
+      EOF
+  - id: heredoc-commit-braces
+    command: |-
+      git commit -F - <<'EOF'
+      Fix {x} handling in ${y} expansion
+
+      Handles `a` and $(b) literally.
+      EOF
+  - id: heredoc-python-stdin
+    command: |-
+      python3 - <<'EOF'
+      import sys
+      print(sys.version)
+      EOF
+  - id: heredoc-python-program
+    command: |-
+      python3 - <<'EOF'
+      import json
+      import os
+      from pathlib import Path
+
+      def walk(root: Path) -> list[str]:
+          found = []
+          for path in sorted(root.rglob("*.py")):
+              if "venv" in path.parts:
+                  continue
+              found.append(str(path))
+          return found
+
+      payload = {"files": walk(Path(".")), "cwd": os.getcwd(), "n": {1, 2, 3}.__len__()}
+      print(json.dumps({k: v for k, v in payload.items() if k != "n"}, indent=2))
+      EOF
+  - id: heredoc-python-braces-sub
+    command: |-
+      set -euo pipefail; echo "$(pwd)"; python3 - <<'EOF'
+      data = {"a": {"b": [1, 2]}, "c": "{x}"}
+      print(f"{data['a']} and {len(data)}")
+      EOF
+  - id: python-c
+    command: |-
+      python3 -c "print(1)"
+  - id: python-c-json
+    command: |-
+      python3 -c "import json; print(json.dumps({'a': 1}))"
+  - id: python-c-open-readme
+    command: |-
+      python3 -c "print(open('README.md').read()[:20])"
+  - id: python-m-pytest
+    command: |-
+      python3 -m pytest tests/ -q
+  - id: python-m-json-tool
+    command: |-
+      python3 -m json.tool data.json
+  - id: node-e
+    command: |-
+      node -e 'console.log(1)'
+  - id: bash-c-literal
+    command: |-
+      bash -c 'ls src && echo done'
+  - id: sh-c-literal
+    command: |-
+      sh -c "echo hi"
+  - id: eval-literal
+    command: |-
+      eval 'ls src'
+  - id: bash-script
+    command: |-
+      bash scripts/run.sh
+  - id: source-venv
+    command: |-
+      source untracked/v/bin/activate
+  - id: perl-e
+    command: |-
+      perl -e 'print "hi\n"'
+  - id: ruby-e
+    command: |-
+      ruby -e 'puts 1'
+
+  # --- git ------------------------------------------------------------------
+  - id: git-status
+    command: |-
+      git status
+  - id: git-status-short
+    command: |-
+      git status --short
+  - id: git-log-oneline
+    command: |-
+      git log --oneline -n 10
+  - id: git-log-graph
+    command: |-
+      git log --oneline --graph --all -n 20
+  - id: git-diff
+    command: |-
+      git diff
+  - id: git-diff-stat
+    command: |-
+      git diff --stat HEAD~1
+  - id: git-diff-name-only
+    command: |-
+      git diff --name-only main...HEAD
+  - id: git-show
+    command: |-
+      git show HEAD --stat
+  - id: git-branch
+    command: |-
+      git branch -a
+  - id: git-ls-files
+    command: |-
+      git ls-files
+  - id: git-ls-files-others
+    command: |-
+      git ls-files --others --exclude-standard
+  - id: git-ls-files-glob
+    command: |-
+      git ls-files 'src/*.py'
+  - id: git-add-file
+    command: |-
+      git add README.md
+  - id: git-add-dir
+    command: |-
+      git add src tests
+  - id: git-commit-m
+    command: |-
+      git commit -m 'fix bug'
+  - id: git-commit-am
+    command: |-
+      git commit -am 'update docs'
+  - id: git-checkout-b
+    command: |-
+      git checkout -b feature/x
+  - id: git-switch
+    command: |-
+      git switch main
+  - id: git-merge-noff
+    command: |-
+      git merge --no-ff feature/x
+  - id: git-pull
+    command: |-
+      git pull --ff-only
+  - id: git-fetch
+    command: |-
+      git fetch origin
+  - id: git-push
+    command: |-
+      git push origin HEAD
+  - id: git-remote
+    command: |-
+      git remote -v
+  - id: git-rev-parse
+    command: |-
+      git rev-parse --abbrev-ref HEAD
+  - id: git-blame
+    command: |-
+      git blame src/app.py
+  - id: git-stash-list
+    command: |-
+      git stash list
+  - id: git-tag-list
+    command: |-
+      git tag -l
+  - id: git-c-ls-files
+    command: |-
+      git -C repos/one ls-files
+  - id: git-check-ignore
+    command: |-
+      git check-ignore -v untracked
+  - id: git-worktree-list
+    command: |-
+      git worktree list
+  - id: git-cat-file
+    command: |-
+      git cat-file -p HEAD
+  - id: git-config-get
+    command: |-
+      git config --get remote.origin.url
+  - id: git-mv
+    command: |-
+      git mv src/app.py src/app2.py
+  - id: git-rm-cached
+    command: |-
+      git rm --cached README.md
+  - id: gh-pr-list
+    command: |-
+      gh pr list
+  - id: gh-issue-view
+    command: |-
+      gh issue view 12 --comments
+
+  # --- build, test and tooling -----------------------------------------------
+  - id: pytest-q
+    command: |-
+      pytest tests/ -q
+  - id: pytest-k
+    command: |-
+      pytest -k "parser and not slow" tests/unit
+  - id: pytest-cov
+    command: |-
+      pytest --cov=src tests
+  - id: ruff-check
+    command: |-
+      ruff check src
+  - id: ruff-format
+    command: |-
+      ruff format --check src
+  - id: mypy-src
+    command: |-
+      mypy src
+  - id: black-check
+    command: |-
+      black --check src
+  - id: uv-sync
+    command: |-
+      uv sync --frozen --all-extras
+  - id: uv-run
+    command: |-
+      uv run pytest -q
+  - id: pip-install
+    command: |-
+      pip install -e .
+  - id: pip-list
+    command: |-
+      pip list
+  - id: npm-install
+    command: |-
+      npm install
+  - id: npm-run-test
+    command: |-
+      npm run test
+  - id: npx-tsc
+    command: |-
+      npx tsc --noEmit
+  - id: make-test
+    command: |-
+      make test
+  - id: make-j
+    command: |-
+      make -j4 build
+  - id: docker-build
+    command: |-
+      docker build -t app .
+  - id: docker-ps
+    command: |-
+      docker ps
+  - id: docker-run
+    command: |-
+      docker run --rm -v "$PWD":/work app ls
+  - id: kubectl-get
+    command: |-
+      kubectl get pods
+  - id: terraform-plan
+    command: |-
+      terraform plan
+  - id: ansible-playbook-plain
+    command: |-
+      ansible-playbook site.yml
+  - id: ansible-playbook-check
+    command: |-
+      ansible-playbook site.yml --check --diff
+  - id: curl-url
+    command: |-
+      curl https://example.com/api
+  - id: curl-o
+    command: |-
+      curl -fsSL https://example.com/x.tar.gz -o untracked/x.tar.gz
+  - id: wget-url
+    command: |-
+      wget -q https://example.com/x -O untracked/x
+  - id: tar-create
+    command: |-
+      tar czf untracked/backup.tar.gz src/
+  - id: tar-extract
+    command: |-
+      tar xzf untracked/backup.tar.gz -C untracked
+  - id: zip-r
+    command: |-
+      zip -r untracked/out.zip src
+  - id: unzip-l
+    command: |-
+      unzip -l untracked/out.zip
+  - id: gzip-k
+    command: |-
+      gzip -k untracked/big.log
+  - id: sed-free-awk-replace
+    command: |-
+      awk '{gsub(/a/, "b"); print}' README.md
+  - id: ssh-keygen-pub
+    command: |-
+      ssh-keygen -y -f mykey.pub
+  - id: cat-known-hosts
+    command: |-
+      cat known_hosts
+  - id: cat-authorized-keys
+    command: |-
+      cat authorized_keys
+  - id: cat-pub-key
+    command: |-
+      cat id_dsa.pub
+  - id: cat-env-example
+    command: |-
+      cat .env.example
+  - id: cp-env-example
+    command: |-
+      cp .env.example .env.local
+  - id: cat-environment-yml
+    command: |-
+      cat environment.yml
+  - id: cat-security-md
+    command: |-
+      cat SECURITY.md
+  - id: cat-docs-secrets-md
+    command: |-
+      cat docs/secrets.md
+  - id: echo-prose-password
+    command: |-
+      echo 'set your password in the config'
+  - id: mkdir-p
+    command: |-
+      mkdir -p a/b/c
+  - id: mkdir-scratch
+    command: |-
+      mkdir -p untracked/scratch
+  - id: touch-file
+    command: |-
+      touch untracked/scratch/f.txt
+  - id: cp-file
+    command: |-
+      cp README.md untracked/scratch/README.copy
+  - id: cp-r
+    command: |-
+      cp -r src untracked/scratch/src-copy
+  - id: mv-file
+    command: |-
+      mv untracked/scratch/f.txt untracked/scratch/g.txt
+  - id: rm-file
+    command: |-
+      rm untracked/scratch/g.txt
+  - id: rm-rf-build
+    command: |-
+      rm -rf build/
+  - id: rm-rf-scratch
+    command: |-
+      rm -rf untracked/scratch
+  - id: chmod-x
+    command: |-
+      chmod +x scripts/run.sh
+  - id: chmod-600
+    command: |-
+      chmod 600 untracked/scratch/key.txt
+  - id: ln-s
+    command: |-
+      ln -s src untracked/src-link
+  - id: ps-aux
+    command: |-
+      ps aux
+  - id: ps-grep-bracket
+    command: |-
+      ps aux | grep '[s]leep'
+  - id: kill-pid
+    command: |-
+      kill 12345
+  - id: lsof-port
+    command: |-
+      lsof -i :8080
+  - id: bin-hooks-daemon-status
+    command: |-
+      bin/hooks-daemon status
+  - id: bin-hooks-daemon-find-plan
+    command: |-
+      bin/hooks-daemon find-plan "jobs"
+  - id: bin-hooks-daemon-probe
+    command: |-
+      bin/hooks-daemon probe PreToolUse --file untracked/scratch/payload.json
+  - id: bin-hooks-daemon-explain
+    command: |-
+      bin/hooks-daemon explain-handler secret_file_guard
+
+  # --- tool inputs (not Bash) -------------------------------------------------
+  - id: tool-read-readme
+    tool: Read
+    command: |-
+      {ROOT}/README.md
+  - id: tool-read-source
+    tool: Read
+    command: |-
+      {ROOT}/src/app.py
+  - id: tool-read-config
+    tool: Read
+    command: |-
+      {ROOT}/.claude/hooks-daemon.yaml
+  - id: tool-grep-src
+    tool: Grep
+    command: |-
+      {ROOT}/src
+  - id: tool-grep-tests
+    tool: Grep
+    command: |-
+      {ROOT}/tests
+  - id: tool-grep-docs
+    tool: Grep
+    command: |-
+      {ROOT}/docs
+  - id: tool-edit-source
+    tool: Edit
+    command: |-
+      {ROOT}/src/app.py
+  - id: tool-write-source
+    tool: Write
+    command: |-
+      {ROOT}/tests/unit/test_new.py
+  - id: tool-write-script
+    tool: Write
+    command: |-
+      {ROOT}/scripts/new.sh
+
+  # --- a different working directory ----------------------------------------
+  - id: cwd-src-ls
+    cwd: src
+    command: |-
+      ls
+  - id: cwd-src-ls-parent
+    cwd: src
+    command: |-
+      ls ..
+  - id: cwd-src-ls-parent-docs
+    cwd: src
+    command: |-
+      ls ../docs
+  - id: cwd-src-cat-parent
+    cwd: src
+    command: |-
+      cat ../README.md
+  - id: cwd-src-grep-r-dot
+    cwd: src
+    command: |-
+      grep -rn "def " .
+  - id: cwd-src-rg
+    cwd: src
+    command: |-
+      rg "import"
+  - id: cwd-src-find
+    cwd: src
+    command: |-
+      find . -name '*.py'
+  - id: cwd-src-glob
+    cwd: src
+    command: |-
+      ls */*
+  - id: cwd-tests-grep
+    cwd: tests
+    command: |-
+      grep -rn "def test" .
+  - id: cwd-docs-glob
+    cwd: docs
+    command: |-
+      cat *.md
+  - id: cwd-repos-loop
+    cwd: repos
+    command: |-
+      set -euo pipefail; for d in *; do ls "$d"; done
+  - id: cwd-untracked-ls
+    cwd: untracked
+    command: |-
+      ls -la
+  - id: cwd-untracked-star-loop
+    cwd: untracked
+    command: |-
+      set -euo pipefail; for d in repos/*; do ls "$d"; done
+  - id: cd-twice
+    command: |-
+      set -euo pipefail; cd src && cd util && ls
+  - id: cd-up-ls
+    cwd: src
+    command: |-
+      set -euo pipefail; cd .. && ls
+  - id: cd-abs-root
+    command: |-
+      set -euo pipefail; cd {ROOT} && git status
+  - id: cd-abs-src-grep
+    command: |-
+      set -euo pipefail; cd {ROOT}/src && grep -rn "import" .
+  - id: git-c-abs
+    command: |-
+      git -C {ROOT} log --oneline -n 3
+
+  # --- everyday shell shapes ---------------------------------------------------
+  - id: sh-arith
+    command: |-
+      set -euo pipefail; n=0; n=$(( n + 1 )); echo $n
+  - id: sh-trap
+    command: |-
+      set -euo pipefail; trap 'rm -f untracked/t' EXIT; touch untracked/t
+  - id: sh-shopt
+    command: |-
+      set -euo pipefail; shopt -s nullglob; ls *.py
+  - id: sh-function
+    command: |-
+      set -euo pipefail; f() { echo hi; }; f
+  - id: sh-alias-ll
+    command: |-
+      alias ll='ls -la'
+  - id: sh-export-assign
+    command: |-
+      export FOO=bar
+  - id: sh-printf-var
+    command: |-
+      set -euo pipefail; x=a; printf '%s\n' "$x"
+  - id: sh-git-ls-files-loop
+    command: |-
+      set -euo pipefail; for f in $(git ls-files src); do echo "$f"; done
+  - id: sh-git-ls-files-xargs
+    command: |-
+      git ls-files -z | xargs -0 wc -l
+  - id: sh-xargs-I
+    command: |-
+      printf '%s\n' a b | xargs -I{} echo {}
+  - id: sh-find-not-path
+    command: |-
+      find . -type f -name '*.py' -not -path './untracked/*' -not -path './.git/*'
+  - id: sh-find-prune
+    command: |-
+      find . -path ./untracked -prune -o -name '*.py' -print
+  - id: sh-ls-grep-total
+    command: |-
+      ls -la | grep -v '^total'
+  - id: sh-tr-pipe
+    command: |-
+      echo "a|b" | tr '|' ' '
+  - id: sh-curl-jq
+    command: |-
+      curl -s https://example.com/api | jq '.items[] | .name'
+  - id: sh-rsync
+    command: |-
+      rsync -a src/ untracked/backup/
+  - id: sh-docker-compose
+    command: |-
+      docker compose up -d
+  - id: sh-ssh-remote
+    command: |-
+      ssh build-host 'ls /srv'
+  - id: sh-scp
+    command: |-
+      scp README.md build-host:/tmp/
+  - id: sh-sleep-then
+    command: |-
+      set -euo pipefail; sleep 1; echo ok
+  - id: sh-here-string
+    command: |-
+      grep -c a <<< "banana"
+  - id: sh-cat-pipe-wc
+    command: |-
+      cat README.md | wc -l
+  - id: sh-sort-u-glob
+    command: |-
+      sort -u docs/*.md src/*.md
+  - id: sh-git-log-format
+    command: |-
+      git log --format='%h %s' -n 5
+  - id: sh-git-log-since
+    command: |-
+      git log --since='2 weeks ago' --oneline
+  - id: sh-git-diff-paths
+    command: |-
+      git diff HEAD -- src tests
+  - id: sh-git-commit-multiline-m
+    command: |-
+      git commit -m "Fix the parser
+
+      It dropped a trailing newline."
+  - id: sh-python-version
+    command: |-
+      python3 --version
+  - id: sh-pip-show
+    command: |-
+      pip show pytest
+  - id: sh-which-all
+    command: |-
+      which -a python3 pip
+  - id: sh-id
+    command: |-
+      id -un
+  - id: sh-uname
+    command: |-
+      uname -a
+  - id: sh-cal
+    command: |-
+      date +%s
+  - id: sh-seq
+    command: |-
+      seq 1 5
+  - id: sh-mktemp
+    command: |-
+      mktemp -d untracked/tmp.XXXXXX
+  - id: sh-cmp
+    command: |-
+      cmp README.md docs/guide.md
+  - id: sh-comm
+    command: |-
+      comm -12 <(sort README.md) <(sort docs/guide.md)
+  - id: sh-split
+    command: |-
+      split -l 100 README.md untracked/part-
+  - id: sh-base64-text
+    command: |-
+      echo aGk= | base64 -d
+  - id: sh-openssl-rand
+    command: |-
+      openssl rand -hex 8
+  - id: sh-gpg-list
+    command: |-
+      gpg --list-keys
+  - id: sh-ssh-add-l
+    command: |-
+      ssh-add -l

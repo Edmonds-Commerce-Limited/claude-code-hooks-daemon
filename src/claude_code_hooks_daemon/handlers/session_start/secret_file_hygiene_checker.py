@@ -53,6 +53,7 @@ from claude_code_hooks_daemon.constants.permissions import FileMode
 from claude_code_hooks_daemon.core import AdvisoryResult, Decision
 from claude_code_hooks_daemon.core.handler_bases import SessionStartHandlerBase
 from claude_code_hooks_daemon.core.project_context import ProjectContext
+from claude_code_hooks_daemon.utils import protected_file_index
 from claude_code_hooks_daemon.utils import secret_file_matching as sfm
 from claude_code_hooks_daemon.utils import secret_redaction as sr
 from claude_code_hooks_daemon.utils.encrypted_at_rest import AtRestFormat, classify_at_rest
@@ -96,6 +97,8 @@ _NOT_A_REPO_NOTICE: Final[str] = (
     "not a git repository (or git is unavailable): gitignore/tracked checks "
     "were SKIPPED -- only permissions were checked"
 )
+#: The most files the non-git fallback walk looks at before it stops and says so.
+_FALLBACK_MAX_ENTRIES: Final[int] = 20_000
 _TRUNCATED_NOTICE: Final[str] = (
     "the non-git fallback scan hit its file-count bound before finishing -- "
     "this result is INCOMPLETE, not a clean bill of health"
@@ -202,6 +205,11 @@ class SecretFileHygieneCheckerHandler(SessionStartHandlerBase):
         absence = self._absent_to_report(project_root)
 
         if scan is not None:
+            # The guards judge recursive reads and globs against this index, so
+            # the sweep that already made the git scan seeds it for them.
+            protected_file_index.remember(
+                protected_file_index.index_from_states(project_root, patterns, scan)
+            )
             findings, encrypted = self._collect_findings_git(project_root, patterns, scan)
             # A project whose only matches are encrypted gets no output at
             # all: the warning simply stops (Plan 00459).
@@ -438,7 +446,7 @@ class SecretFileHygieneCheckerHandler(SessionStartHandlerBase):
                 subdirs.remove(_GIT_DIR_NAME)
             for name in files:
                 seen += 1
-                if seen > sfm.DIRECTORY_SCAN_MAX_ENTRIES:
+                if seen > _FALLBACK_MAX_ENTRIES:
                     return found, True
                 full_path = Path(current_dir) / name
                 if sfm.path_is_protected(str(full_path), patterns):

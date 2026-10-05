@@ -1,37 +1,54 @@
-"""Tests for the recursive-search reach check (Plan 00483 batch H, D1).
+"""Tests for the recursive-search reach check (Plan 00483 batch H, D1; A2).
 
 A recursive search reads every file under its roots without naming one, so the
-roots are walked with the same bounded walk the Grep tool route uses.
+roots are looked up in the protected-file index. Nothing here walks a tree.
 """
 
 import subprocess  # nosec B404 - fixed git argv in a tmp repository
 from pathlib import Path
-from typing import Any
 
 import pytest
 
-from claude_code_hooks_daemon.utils import protected_tree_scan as pts
 from claude_code_hooks_daemon.utils import recursive_search as rs
-from claude_code_hooks_daemon.utils.protected_tree_scan import TreeView
-from claude_code_hooks_daemon.utils.shell_expansion import TooManyToEnumerateError
+from claude_code_hooks_daemon.utils.protected_file_index import (
+    ProtectedFileIndex,
+    TreeView,
+    build_index,
+)
 
 PROTECTED_GLOB = "*.p483vault"
 PATTERNS = (PROTECTED_GLOB,)
 PROTECTED_NAME = "key.p483vault"
 
 
+def _git(root: Path, *args: str) -> None:
+    subprocess.run(
+        ["git", "-C", str(root), *args], check=True, capture_output=True
+    )  # nosec B603 B607
+
+
+def _index(root: Path) -> ProtectedFileIndex:
+    index = build_index(root, PATTERNS)
+    assert index is not None
+    return index
+
+
 @pytest.fixture
 def tree(tmp_path: Path) -> Path:
     """``sub`` holds a protected file; ``clean`` holds none."""
+    _git(tmp_path, "init", "-q")
     (tmp_path / "sub").mkdir()
     (tmp_path / "sub" / PROTECTED_NAME).write_text("x\n")
     (tmp_path / "clean").mkdir()
     (tmp_path / "clean" / "a.txt").write_text("x\n")
+    _git(tmp_path, "add", "-A")
     return tmp_path
 
 
-def _reach(command: str, cwd: Path) -> str | None:
-    found = rs.protected_reached_by_search(command, PATTERNS, cwd=str(cwd))
+def _reach(command: str, cwd: Path | None, root: Path | None = None) -> str | None:
+    """The protected glob a search in ``command`` reads, judged against ``root``'s index."""
+    reads = rs.search_reads(command, None if cwd is None else str(cwd))
+    found = rs.protected_reached(reads, _index(root if root is not None else cwd or Path()))
     return None if found is None else found[0]
 
 
@@ -92,12 +109,12 @@ def test_other_commands_are_not_reported(tree: Path, command: str) -> None:
 
 
 def test_relative_roots_follow_the_payload_cwd(tree: Path) -> None:
-    assert _reach("grep -r x .", tree / "clean") is None
-    assert _reach("grep -r x ..", tree / "clean") == PROTECTED_GLOB
+    assert _reach("grep -r x .", tree / "clean", root=tree) is None
+    assert _reach("grep -r x ..", tree / "clean", root=tree) == PROTECTED_GLOB
 
 
-def test_absolute_root_is_walked(tree: Path) -> None:
-    assert _reach(f"grep -r x {tree / 'sub'}", tree / "clean") == PROTECTED_GLOB
+def test_absolute_root_is_judged(tree: Path) -> None:
+    assert _reach(f"grep -r x {tree / 'sub'}", tree / "clean", root=tree) == PROTECTED_GLOB
 
 
 def test_piped_rg_without_a_root_reads_stdin(tree: Path) -> None:
@@ -109,40 +126,59 @@ def test_xargs_after_a_non_find_producer_names_no_root(tree: Path) -> None:
 
 
 def test_missing_cwd_leaves_relative_roots_unjudged(tree: Path) -> None:
-    assert rs.protected_reached_by_search("grep -r x .", PATTERNS, cwd=None) is None
+    assert rs.search_reads("grep -r x .", None) == []
 
 
-def test_detail_is_the_searched_root(tree: Path) -> None:
-    found = rs.protected_reached_by_search("grep -r x sub", PATTERNS, cwd=str(tree))
-    assert found == (PROTECTED_GLOB, str(tree / "sub"))
+def test_the_read_is_the_searched_root_and_its_view(tree: Path) -> None:
+    (read,) = rs.search_reads("grep -r x sub", str(tree))
+
+    assert read.root == str(tree / "sub")
+    assert read.view is TreeView.ALL
+    assert rs.protected_reached([read], _index(tree)) == (PROTECTED_GLOB, str(tree / "sub"))
 
 
 def test_exempt_file_does_not_flag_the_tree(tree: Path) -> None:
     exempt = str(tree / "sub" / PROTECTED_NAME)
-    found = rs.protected_reached_by_search(
-        "grep -r x .", PATTERNS, cwd=str(tree), is_exempt=lambda path: path == exempt
-    )
+    reads = rs.search_reads("grep -r x .", str(tree))
+
+    found = rs.protected_reached(reads, _index(tree), is_exempt=lambda path: path == exempt)
+
     assert found is None
 
 
-def test_the_walk_is_the_shared_bounded_scan(tree: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """The cap and the answer past it belong to the tree scan, not to this module."""
-    roots: list[str] = []
-    views: list[TreeView] = []
-    deadlines: list[float | None] = []
+class TestWorkingDirectoryFollowsCd:
+    """A literal ``cd`` before the search moves the root it is placed from."""
 
-    def _scan(directory: str, patterns: tuple[str, ...], **kwargs: Any) -> str | None:
-        roots.append(directory)
-        views.append(kwargs["view"])
-        deadlines.append(kwargs["deadline"])
-        return None
+    def test_a_search_after_cd_into_a_clean_directory_reads_that_directory(
+        self, tree: Path
+    ) -> None:
+        assert _reach(f"cd {tree / 'clean'} && grep -rn x .", tree) is None
 
-    monkeypatch.setattr(pts, "find_protected_in_tree", _scan)
-    found = rs.protected_reached_by_search("grep -r x .", PATTERNS, cwd=str(tree), deadline=12.5)
-    assert found is None
-    assert roots == [str(tree)]
-    assert views == [TreeView.ALL]
-    assert deadlines == [12.5]
+    def test_a_search_after_cd_into_the_protected_directory_reads_it(self, tree: Path) -> None:
+        assert _reach("cd sub && grep -rn x .", tree) == PROTECTED_GLOB
+
+    def test_cd_steps_accumulate(self, tree: Path) -> None:
+        assert _reach("cd clean && cd .. && grep -r x sub", tree) == PROTECTED_GLOB
+        assert _reach("cd sub && cd .. && cd clean && grep -r x .", tree) is None
+
+    def test_a_cd_with_a_computed_target_leaves_relative_roots_unplaced(self, tree: Path) -> None:
+        assert rs.search_reads('cd "$D" && grep -r x .', str(tree)) == []
+        assert rs.search_reads("cd $(pwd)/x && grep -r x .", str(tree)) == []
+
+    def test_a_bare_cd_goes_home_which_is_unknown(self, tree: Path) -> None:
+        assert rs.search_reads("cd && grep -r x .", str(tree)) == []
+
+    def test_cd_dash_is_unknown(self, tree: Path) -> None:
+        assert rs.search_reads("cd - && grep -r x .", str(tree)) == []
+
+    def test_an_absolute_root_is_still_judged_after_an_unplaceable_cd(self, tree: Path) -> None:
+        reads = rs.search_reads(f'cd "$D" && grep -r x {tree / "sub"}', str(tree))
+
+        assert [read.root for read in reads] == [str(tree / "sub")]
+
+    def test_a_cd_inside_a_nested_shell_moves_only_that_shell(self, tree: Path) -> None:
+        assert _reach("bash -c 'cd sub && grep -r x .'", tree) == PROTECTED_GLOB
+        assert _reach("bash -c 'cd clean' && grep -r x .", tree) == PROTECTED_GLOB
 
 
 @pytest.mark.parametrize(
@@ -160,33 +196,8 @@ def test_the_walk_is_the_shared_bounded_scan(tree: Path, monkeypatch: pytest.Mon
         ("git grep --untracked x", TreeView.ALL),
     ],
 )
-def test_each_tool_reads_the_view_it_reads(
-    tree: Path, monkeypatch: pytest.MonkeyPatch, command: str, view: TreeView
-) -> None:
-    views: list[TreeView] = []
-
-    def _scan(directory: str, patterns: tuple[str, ...], **kwargs: Any) -> str | None:
-        views.append(kwargs["view"])
-        return None
-
-    monkeypatch.setattr(pts, "find_protected_in_tree", _scan)
-    rs.protected_reached_by_search(command, PATTERNS, cwd=str(tree))
-    assert views == [view]
-
-
-def test_a_tree_past_the_cap_raises_for_grep_r_never_clean(
-    tree: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setattr(pts, "TREE_SCAN_MAX_ENTRIES", 1)
-    (tree / "clean" / "b.txt").write_text("x\n")
-    with pytest.raises(TooManyToEnumerateError):
-        rs.protected_reached_by_search("grep -r x clean", PATTERNS, cwd=str(tree))
-
-
-def _git(root: Path, *args: str) -> None:
-    subprocess.run(
-        ["git", "-C", str(root), *args], check=True, capture_output=True
-    )  # nosec B603 B607
+def test_each_tool_reads_the_view_it_reads(tree: Path, command: str, view: TreeView) -> None:
+    assert [read.view for read in rs.search_reads(command, str(tree))] == [view]
 
 
 @pytest.fixture
@@ -211,7 +222,7 @@ def test_git_grep_with_a_clean_pathspec_is_not_reported(repo: Path) -> None:
     assert _reach("git grep needle -- plain.txt", repo) is None
 
 
-def test_git_grep_does_not_read_an_ignored_file(repo: Path) -> None:
+def test_git_grep_does_not_read_an_untracked_file(repo: Path) -> None:
     _git(repo, "rm", "-q", "--cached", "-r", "tracked")
     assert _reach("git grep needle", repo) is None
 
@@ -221,16 +232,14 @@ def test_git_grep_no_index_reads_the_working_tree(repo: Path) -> None:
     assert _reach("git grep --no-index needle", repo) == PROTECTED_GLOB
 
 
-def test_git_grep_outside_a_repository_is_not_reported(tree: Path) -> None:
-    assert _reach("git grep needle", tree) is None
-
-
 @pytest.fixture
 def hidden_tree(tmp_path: Path) -> Path:
     """The only protected files sit in a hidden directory and under a hidden name."""
+    _git(tmp_path, "init", "-q")
     (tmp_path / ".hid").mkdir()
     (tmp_path / ".hid" / PROTECTED_NAME).write_text("x\n")
     (tmp_path / "a.txt").write_text("x\n")
+    _git(tmp_path, "add", "-A")
     return tmp_path
 
 
@@ -258,7 +267,10 @@ def test_hidden_entries_are_read_when_the_tool_reads_them(hidden_tree: Path, com
 
 
 def test_rg_skips_a_hidden_protected_file_name(tmp_path: Path) -> None:
+    _git(tmp_path, "init", "-q")
     (tmp_path / f".{PROTECTED_NAME}").write_text("x\n")
+    _git(tmp_path, "add", "-A")
+
     assert _reach("rg x", tmp_path) is None
     assert _reach("rg --hidden x", tmp_path) == PROTECTED_GLOB
 
@@ -292,6 +304,10 @@ def test_gitignore_is_not_honoured_by_the_tools_that_do_not(
     ignored_repo: Path, command: str
 ) -> None:
     assert _reach(command, ignored_repo) == PROTECTED_GLOB
+
+
+def test_an_ignored_directory_named_outright_is_read_by_rg(ignored_repo: Path) -> None:
+    assert _reach("rg x local", ignored_repo) == PROTECTED_GLOB
 
 
 @pytest.mark.parametrize(
@@ -329,18 +345,17 @@ def test_an_exclusion_that_misses_the_protected_path_does_not_allow_it(
     assert _reach(command, tree) == PROTECTED_GLOB
 
 
-def test_rg_over_a_big_ignored_directory_and_a_clean_tracked_set_is_allowed(
+def test_the_size_of_the_tree_does_not_change_the_answer(
     ignored_repo: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The ignored bulk is git's to skip: the entry cap is never reached for it."""
+    """The index lists protected files, so a big ignored directory costs nothing and caps nothing."""
     (ignored_repo / ".gitignore").write_text("local/\nbulk/\n")
     (ignored_repo / "bulk").mkdir()
-    for index in range(300):
-        (ignored_repo / "bulk" / f"f{index}.txt").write_text("x\n")
-    monkeypatch.setattr(pts, "TREE_SCAN_MAX_ENTRIES", 50)
+    for number in range(300):
+        (ignored_repo / "bulk" / f"f{number}.txt").write_text("x\n")
+
     assert _reach("rg x .", ignored_repo) is None
-    with pytest.raises(TooManyToEnumerateError):
-        _reach("grep -r x .", ignored_repo)
+    assert _reach("grep -r x local", ignored_repo) == PROTECTED_GLOB
 
 
 def test_git_grep_finds_a_tracked_protected_file_listed_after_position_six_thousand(
@@ -348,9 +363,10 @@ def test_git_grep_finds_a_tracked_protected_file_listed_after_position_six_thous
 ) -> None:
     _git(tmp_path, "init", "-q")
     (tmp_path / "a").mkdir()
-    for index in range(6000):
-        (tmp_path / "a" / f"f{index:05d}.txt").write_text("x\n")
+    for number in range(6000):
+        (tmp_path / "a" / f"f{number:05d}.txt").write_text("x\n")
     (tmp_path / "z").mkdir()
     (tmp_path / "z" / PROTECTED_NAME).write_text("x\n")
     _git(tmp_path, "add", "-A")
+
     assert _reach("git grep needle", tmp_path) == PROTECTED_GLOB
