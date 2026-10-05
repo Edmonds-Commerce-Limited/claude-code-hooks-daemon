@@ -206,6 +206,12 @@ other than defeating a parser. Everything else, every ordinary respelling includ
      - R5: an effort budget for the area. One open branch, at most 2 review rounds, net non-positive lines, and p99 of
        50 ms or less per Bash call. Return bash_safe_mode to `only_with_mutator`.
      - The keep/narrow/drop list for the remaining Task 3.1 items.
+5. **N98 (00466 numbering): the fallback socket path is shared across hostnames.** A fix exists at 094676360, kept
+   on the remote branch `agent-a852e66b72ca67937-652324e9`. It adds a hostname tag to the fallback socket, PID, log
+   and events-dir names. Installs that already use the `$XDG_RUNTIME_DIR`, `/run/user` or `/tmp` fallback would get
+   new paths on upgrade, and generated forwarders bake the events dir in, so they would need regenerating. The
+   coordinator parked it because the collision is rare. Owner decision: take the fix, with a forwarder regeneration
+   step on upgrade, or leave it.
 
 ## Success Criteria
 
