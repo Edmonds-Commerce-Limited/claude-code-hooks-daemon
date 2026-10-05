@@ -342,7 +342,7 @@ handlers:
 
     root_recursion_guard:  # Blocks recursive scans (grep -r, find, rg) rooted at / /proc /sys ~ $HOME
       enabled: true
-      priority: 15
+      priority: 13  # Before secret_file_guard (14): judges text only, so no tree walk for a catastrophic root
 
     # Plan 00363: a `pgrep -f`/`pkill -f`/`ps | grep` whose literal pattern is
     # in the calling shell's own argv always finds itself, so a waiter never

@@ -191,7 +191,7 @@ class ConfigTemplate:
             # harness does not enforce its own documented read-before-overwrite
             # contract under bypassPermissions. New files are never blocked.
             "    write_clobber_guard: {enabled: true, priority: 16}  # Block Write to an existing file not read this session\n"
-            "    root_recursion_guard: {enabled: true, priority: 16}  # Block recursive scans (grep -r, find, rg) rooted at / /proc /sys ~ $HOME\n"
+            "    root_recursion_guard: {enabled: true, priority: 13}  # Block recursive scans (grep -r, find, rg) rooted at / /proc /sys ~ $HOME\n"
             # Plan 00363: the Bash tool runs every command through
             # `bash -c "<command>"`, so a `pgrep -f` pattern is always in the
             # calling shell's own argv and the probe finds itself. A reported

@@ -569,7 +569,7 @@ handlers:
 | Property       | Value                  |
 | -------------- | ---------------------- |
 | **Config key** | `root_recursion_guard` |
-| **Priority**   | 16                     |
+| **Priority**   | 13                     |
 | **Type**       | Blocking               |
 | **Event**      | PreToolUse             |
 
@@ -597,7 +597,7 @@ handlers:
   pre_tool_use:
     root_recursion_guard:
       enabled: true
-      priority: 16
+      priority: 13
 ```
 
 ---
@@ -4530,7 +4530,7 @@ Priorities below are the **shipped defaults** from `constants/priority.py`. Seve
 | `pipe_blocker`                  | PreToolUse        | 15       | Expensive commands piped to tail/head                                    |
 | `dangerous_permissions`         | PreToolUse        | 15       | chmod 777, chmod a+rwx                                                   |
 | `tdd_enforcement`               | PreToolUse        | 15       | Production code without tests (11 languages)                             |
-| `root_recursion_guard`          | PreToolUse        | 16       | Recursive scans rooted at /, /home, $HOME, ...                           |
+| `root_recursion_guard`          | PreToolUse        | 13       | Recursive scans rooted at /, /home, $HOME, ...                           |
 | `self_matching_process_probe`   | PreToolUse        | 17       | A pgrep/pkill/ps-grep probe that matches the calling shell's own argv    |
 | `github_auto_close_keywords`    | PreToolUse        | 18       | GitHub auto-closing keyword refs (Fixes #N) in git/gh pr messages        |
 | `git_stash`                     | PreToolUse        | 20       | git stash creation (deny by default; configurable)                       |

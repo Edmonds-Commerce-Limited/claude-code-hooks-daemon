@@ -105,12 +105,18 @@ class Priority:
     # under the wrong branch's name.
     SUBAGENT_WORKTREE_WRITE_GUARD = 14
 
-    ROOT_RECURSION_GUARD = 16
+    # Runs BEFORE SECRET_FILE_GUARD (14) on purpose: it judges the command text
+    # alone, whereas the secret guard walks the search root of a recursive scan.
+    # A catastrophic root (/, ~, $HOME) is therefore denied with no tree walk,
+    # and with this guard's better guidance. Shares 13 with ERROR_HIDING_BLOCKER,
+    # which only sees Write/Edit, so the two never match the same call.
+    ROOT_RECURSION_GUARD = 13
+
     # Runs after the blocking safety handlers on purpose: a Read they DENY never
     # happened, so it must not be recorded as knowledge of the file.
     WRITE_CLOBBER_GUARD = 16
 
-    # Plan 00363: safety band, beside root_recursion_guard (16) -- both deny a
+    # Plan 00363: safety band, beside root_recursion_guard (13) -- both deny a
     # Bash command shape that costs the session unbounded time rather than
     # breaking anything. Sits one slot later so a probe inside a catastrophic
     # recursive scan is reported as the scan first, which is the larger hazard.
