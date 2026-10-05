@@ -1349,6 +1349,16 @@ from the socket's stem, and the forwarder and the relay use the events dir.
 It touches the same runtime-path code as N86, so it goes on N86's branch
 after N24 merges.
 
+**Status:** parked: the fix changes existing fallback paths, needs an owner
+decision. A working fix (Plan 00483 Task 3.1, batch B) is recoverable from
+commit `094676360` on branch `agent-a852e66b72ca67937-652324e9`: a `_host_tag()`
+helper in `daemon/paths.py` adds a 6-hex hostname hash to both fallback names
+(`hooks-daemon-<hash>-<hosttag>.<ext>`, `hooks-daemon-<hash>-<hosttag>-events`),
+with tests in `tests/unit/daemon/test_fallback_paths_per_host.py`. It removes
+the collision but moves every existing fallback socket, PID file, log and
+events dir on upgrade. Natural paths do not change. Consumers that may compute
+the fallback name independently of `paths.py` are listed in the 00483 report.
+
 ### N97 — `block-curl-pipe-shell` denies prose that only mentions curl and bash
 
 **Found by N38 review 9 (ledger candidate 8), and on base too.** A
@@ -1529,6 +1539,12 @@ then fails open until N24 lands, and fails closed after it.
 forwarder (`init.sh`) computes the same `/tmp` fallback name the Python CLI
 does, instead of depending only on the discovery file. It touches `init.sh`,
 so it starts after N24 merges.
+
+**Status:** FIXED in part (Plan 00483 Task 3.1, batch B): `_probe_socket_liveness`
+reports an over-length path as NOT_LIVE (a connect that fails with no errno on
+a path past the limit). The `init.sh` fallback-name computation was not built:
+`init.sh` never computes the fallback name, it reads the discovery file and the
+generation-time events dir override, so there is nothing there to align.
 
 ### N85 — `_MESSAGE_BODY_PATTERN` reads `\'` as an escape inside single quotes, which hides a command from every guard
 

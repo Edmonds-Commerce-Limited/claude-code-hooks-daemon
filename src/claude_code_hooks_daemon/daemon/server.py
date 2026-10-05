@@ -40,7 +40,12 @@ from claude_code_hooks_daemon.core.input_schemas import get_input_schema
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.daemon.config import DaemonConfig
 from claude_code_hooks_daemon.daemon.memory_log_handler import MemoryLogHandler
-from claude_code_hooks_daemon.daemon.paths import get_untracked_dir, is_pid_alive, parse_pid_text
+from claude_code_hooks_daemon.daemon.paths import (
+    get_untracked_dir,
+    is_pid_alive,
+    parse_pid_text,
+    socket_path_overflow,
+)
 from claude_code_hooks_daemon.daemon.payload_capture import capture_payload, resolve_capture_dir
 from claude_code_hooks_daemon.utils import secret_file_matching as sfm
 from claude_code_hooks_daemon.utils.cli_command import recovery_command
@@ -797,9 +802,16 @@ async def _probe_socket_liveness(path: Path) -> _SocketLiveness:
         )
     except (ConnectionRefusedError, FileNotFoundError):
         return _SocketLiveness.NOT_LIVE
-    except (TimeoutError, OSError):
-        # Not a definitive not-listening signal — could be a busy-but-live
-        # daemon or transient resource exhaustion in THIS process. Fail safe.
+    except TimeoutError:
+        # Not a definitive not-listening signal: could be a busy-but-live daemon.
+        return _SocketLiveness.INDETERMINATE
+    except OSError as exc:
+        # N86: past the kernel's sun_path size Python refuses before any connect
+        # ("AF_UNIX path too long", no errno). Nothing can be bound at such a
+        # path, so nothing is listening: definitive, unlike EMFILE/EACCES.
+        if exc.errno is None and socket_path_overflow(path) > 0:
+            return _SocketLiveness.NOT_LIVE
+        # Transient resource exhaustion in THIS process etc. Fail safe.
         return _SocketLiveness.INDETERMINATE
     else:
         writer.close()
