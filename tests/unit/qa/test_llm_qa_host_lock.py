@@ -508,6 +508,121 @@ class TestWholeSuiteInsideARunDoesNotDeadlock:
         assert reentered == "False"
 
 
+class TestLockFileNamesTheLiveHolder:
+    """N351: the lock file must never name a holder that has gone."""
+
+    def test_python_route_stamps_pid_checkout_and_start_time(self, tmp_path: Path) -> None:
+        lock = tmp_path / "lock"
+        fd = os.open(lock, os.O_RDWR | os.O_CREAT, 0o644)
+        llm_qa._stamp_holder(fd, Path("/some/checkout"))
+        os.close(fd)
+
+        fields = dict(line.split("=", 1) for line in lock.read_text().splitlines())
+        assert fields["pid"] == str(os.getpid())
+        assert fields["checkout"] == "/some/checkout"
+        assert fields["started"]
+
+    def test_python_route_empties_the_file_on_release(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        worktrees: tuple[Path, Path, Path],
+    ) -> None:
+        _main, one, _two = worktrees
+        monkeypatch.setattr(llm_qa, "PROJECT_ROOT", one)
+        monkeypatch.setattr(llm_qa, "venv_python", lambda: Path(sys.executable))
+        monkeypatch.setattr(llm_qa, "_run_tools", lambda tools, **kwargs: llm_qa.EXIT_SUCCESS)
+        monkeypatch.setenv("FULL_QA_LOCK_WAIT_SECONDS", "0")
+        monkeypatch.setattr(sys, "argv", ["llm_qa.py", "format"])
+
+        assert llm_qa.main() == llm_qa.EXIT_SUCCESS
+
+        lock = llm_qa.host_lock_path(one)
+        assert lock.exists()
+        assert lock.read_text() == ""
+
+    def test_python_route_empties_the_file_when_the_run_raises(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        worktrees: tuple[Path, Path, Path],
+    ) -> None:
+        _main, one, _two = worktrees
+
+        def boom(tools: list[str], **kwargs: Any) -> int:
+            raise RuntimeError("tool loop blew up")
+
+        monkeypatch.setattr(llm_qa, "PROJECT_ROOT", one)
+        monkeypatch.setattr(llm_qa, "venv_python", lambda: Path(sys.executable))
+        monkeypatch.setattr(llm_qa, "_run_tools", boom)
+        monkeypatch.setenv("FULL_QA_LOCK_WAIT_SECONDS", "0")
+        monkeypatch.setattr(sys, "argv", ["llm_qa.py", "format"])
+
+        with pytest.raises(RuntimeError):
+            llm_qa.main()
+
+        assert llm_qa.host_lock_path(one).read_text() == ""
+
+    def _bash_acquire(self, lock: Path, tail: str) -> subprocess.CompletedProcess[str]:
+        script = (
+            "set -euo pipefail\n"
+            f'source "{PROJECT_ROOT}/scripts/qa/acquire_full_qa_lock.bash"\n'
+            f'acquire_full_qa_lock_or_die "{lock}"\n'
+            f"{tail}\n"
+        )
+        return subprocess.run(
+            ["bash", "-c", script],
+            cwd=lock.parent,
+            capture_output=True,
+            text=True,
+            timeout=Timeout.QA_TEST_TIMEOUT,
+            check=False,
+            env={
+                k: v
+                for k, v in os.environ.items()
+                if k not in {"FULL_QA_LOCK_INHERITED_FD", "PROJECT_ROOT"}
+            },
+        )
+
+    def test_bash_route_stamps_its_own_pid_checkout_and_start_time(self, tmp_path: Path) -> None:
+        lock = tmp_path / "lock"
+
+        result = self._bash_acquire(lock, f'echo "shell=$$"\ncat "{lock}"')
+
+        assert result.returncode == 0, result.stderr
+        shell_pid = result.stdout.splitlines()[0].removeprefix("shell=")
+        fields = dict(line.split("=", 1) for line in result.stdout.splitlines()[1:])
+        assert fields["pid"] == shell_pid
+        assert fields["checkout"] == str(tmp_path)
+        assert fields["started"]
+
+    def test_bash_route_overwrites_a_stale_holder_line(self, tmp_path: Path) -> None:
+        lock = tmp_path / "lock"
+        lock.write_text("pid=1\ncheckout=/gone\nstarted=long ago\n" * 3)
+
+        result = self._bash_acquire(lock, f'cat "{lock}"')
+
+        assert result.returncode == 0, result.stderr
+        assert "/gone" not in result.stdout
+        assert result.stdout.count("pid=") == 1
+
+    def test_python_route_overwrites_a_stale_bash_holder_line(self, tmp_path: Path) -> None:
+        lock = tmp_path / "lock"
+        lock.write_text("pid=1\ncheckout=/gone\nstarted=long ago\nextra=padding to be longer\n")
+        fd = os.open(lock, os.O_RDWR)
+
+        llm_qa._stamp_holder(fd, Path("/live"))
+        os.close(fd)
+
+        assert "/gone" not in lock.read_text()
+        assert "extra" not in lock.read_text()
+
+    def test_describe_holder_reads_the_bash_stamp(self, tmp_path: Path) -> None:
+        lock = tmp_path / "lock"
+        result = self._bash_acquire(lock, "sleep 0")
+        assert result.returncode == 0, result.stderr
+        # The bash holder has exited, so its line names a dead pid.
+        assert "unknown" in llm_qa.describe_holder(lock)
+
+
 class TestReuseInheritedOnThePackageLock:
     def test_default_acquire_still_contends_with_a_held_descriptor(
         self, worktrees: tuple[Path, Path, Path]

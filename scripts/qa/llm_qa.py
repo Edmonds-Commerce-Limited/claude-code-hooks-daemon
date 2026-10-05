@@ -28,6 +28,7 @@ import subprocess
 import sys
 import time
 from collections.abc import Callable, Mapping, Sequence
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Final, NamedTuple, TypeAlias
 
@@ -160,6 +161,7 @@ _POLL_SECONDS: Final = 0.5
 _REANNOUNCE_SECONDS: Final = 60
 _PID_KEY: Final = "pid"
 _CHECKOUT_KEY: Final = "checkout"
+_STARTED_KEY: Final = "started"
 _UNKNOWN_HOLDER = "unknown (a run that predates this lock's stamp, or one that has exited)"
 _LOCK_FILE_MODE = 0o644
 _GIT_COMMON_DIR_TIMEOUT_SECONDS: Final = 60
@@ -238,7 +240,19 @@ def _stamp_holder(fd: int, checkout: Path) -> None:
     """
     os.ftruncate(fd, 0)
     os.lseek(fd, 0, os.SEEK_SET)
-    os.write(fd, f"{_PID_KEY}={os.getpid()}\n{_CHECKOUT_KEY}={checkout}\n".encode())
+    started = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+    stamp = f"{_PID_KEY}={os.getpid()}\n{_CHECKOUT_KEY}={checkout}\n{_STARTED_KEY}={started}\n"
+    os.write(fd, stamp.encode())
+
+
+def _clear_holder(fd: int) -> None:
+    """Empty the lock file while the lock is still held, so it names no one.
+
+    The file itself stays: unlinking it would leave later runs flocking a new
+    inode while a holder still has the old one. The bash route's counterpart
+    is documented in ``acquire_full_qa_lock.bash``.
+    """
+    os.ftruncate(fd, 0)
 
 
 def _pid_is_alive(pid: int) -> bool:
@@ -2546,6 +2560,7 @@ def main() -> int:
         _stamp_holder(lock_fd, PROJECT_ROOT)
         return _run_tools(tools, read_only=False, forwarded=forwarded, lock_fd=lock_fd)
     finally:
+        _clear_holder(lock_fd)
         os.close(lock_fd)
 
 
