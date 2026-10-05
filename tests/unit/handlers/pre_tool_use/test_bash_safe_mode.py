@@ -90,7 +90,9 @@ class TestOnlyWithMutatorDefault:
     ) -> None:
         assert handler.matches(_bash("set -euo pipefail\nrm x\ngit commit -m x")) is False
 
-    def test_opting_out_restores_the_strict_scope(self, strict_handler: BashSafeModeHandler) -> None:
+    def test_opting_out_restores_the_strict_scope(
+        self, strict_handler: BashSafeModeHandler
+    ) -> None:
         assert strict_handler.matches(_bash("grep x a; grep y b")) is True
 
 

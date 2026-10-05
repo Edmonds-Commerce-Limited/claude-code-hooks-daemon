@@ -170,6 +170,8 @@ client projects, until it has run here for a while.
   - an edit in a plan tied to an issue assigned to self is allowed;
   - an unassigned issue is denied with the claim command;
   - `bin/hooks-daemon issue-validity --list-eligible` lists only approved authors' issues.
+- [ ] ⬜ **Task 4.3**: The coordinator merges the Task 4.2 branch and the full QA run on the merged tree passes; then
+  close and archive this plan.
 
 ## Open questions for the owner
 
@@ -183,7 +185,8 @@ decided as the defaults below. Resolved; not owner rulings.
 
 Question 1 also settles whether auto-claim belongs in the hook: the `auto_claim` option exists and defaults to off.
 
-4. **Open.** Should an empty or absent `approved_issue_authors` mean "no author check" or "nobody is approved"? The
+4. **Resolved (Task 4.2)**: the handler keeps "no author check"; the `issue-validity` CLI refuses (exit 4) with no
+   list. Original question: should an empty or absent `approved_issue_authors` mean "no author check" or "nobody is approved"? The
    build's default is "no author check", which avoids a lockout from a mis-edited config. Coordinator's
    recommendation: keep that for the handler. But the issue-sdlc selection (`issue-validity --list-eligible`) should
    refuse to run with no list configured, because the runbook requires that gate never to fail open. It is not yet
