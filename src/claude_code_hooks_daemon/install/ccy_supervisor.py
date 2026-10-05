@@ -219,7 +219,9 @@ def deploy_ccy_supervisor_if_enabled(
     # A self-install source == target is a no-op copy; arming still runs so the
     # env is enabled uniformly.
     copied_script = _copy_asset(source, target_ccy_dir / SUPERVISOR_SCRIPT_NAME, result)
-    copied_launcher = _copy_asset(launcher_source, target_ccy_dir / SUPERVISOR_LAUNCHER_NAME, result)
+    copied_launcher = _copy_asset(
+        launcher_source, target_ccy_dir / SUPERVISOR_LAUNCHER_NAME, result
+    )
     result.deployed = copied_script or copied_launcher
 
     # Arming is the whole point: a deployed-but-unarmed supervisor is inert

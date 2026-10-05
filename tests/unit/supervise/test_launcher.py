@@ -24,6 +24,7 @@ import pytest
 _REPO_ROOT: Final[Path] = Path(__file__).resolve().parents[3]
 _LAUNCHER_SOURCE: Final[Path] = _REPO_ROOT / ".claude" / "ccy" / "claude-supervise"
 
+_RUN_TIMEOUT_SECONDS: Final[int] = 30
 _FAKE_CLAUDE: Final[str] = '#!/bin/sh\necho "CLAUDE-RAN $*"\n'
 
 
@@ -71,7 +72,7 @@ class Sandbox:
             text=True,
             env=env,
             check=False,
-            timeout=30,
+            timeout=_RUN_TIMEOUT_SECONDS,
         )
 
 
@@ -183,7 +184,7 @@ class TestMinimumVersionIsSingleSourced:
     def test_launcher_minimum_equals_pyproject_requires_python(self) -> None:
         pyproject = (_REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8")
         match = re.search(r'^requires-python\s*=\s*">=(\d+)\.(\d+)"', pyproject, re.MULTILINE)
-        assert match, "pyproject.toml has no `requires-python = \">=X.Y\"`"
+        assert match, 'pyproject.toml has no `requires-python = ">=X.Y"`'
         launcher = _LAUNCHER_SOURCE.read_text(encoding="utf-8")
         assert f"MIN_MAJOR={match.group(1)}\n" in launcher
         assert f"MIN_MINOR={match.group(2)}\n" in launcher
