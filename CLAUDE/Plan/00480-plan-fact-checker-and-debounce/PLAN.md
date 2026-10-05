@@ -139,8 +139,12 @@ as principle 1.
 
    Recommended: (a) when a supervisor is present, else an advisory on the next hook event.
 
+   **Coordinator call (2026-10-05, under the owner's "go with the clear winners" instruction):** (a), the session via the supervisor. Resolved; not an owner ruling.
+
 2. **Should an unresolved REFUTED claim block the plan commit**, or only report? Recommended:
    report first, and decide on blocking once Task 2.2 shows the false-refutation rate.
+
+   **Coordinator call (2026-10-05, under the owner's "go with the clear winners" instruction):** report, do not block yet. Resolved; not an owner ruling.
 
 ## Success Criteria
 

@@ -23,6 +23,10 @@ The second group (N55, N62, N74, N96) was added under the same delegation, exten
 four by the coordinator rather than named by the owner directly; the owner may overrule any of
 them.
 
+**Coordinator call (2026-10-05, under the owner's "go with the clear winners" instruction):** N55, N62 and N96
+are confirmed (resolved). N74 is decided together with R4 (see the plan's open question 4), because the review's R7
+proposes resolving it through R4's cached index. Not owner rulings.
+
 ---
 
 ## N230 — `secret-meta --project-root <dir>` reads `allow_plain_hash` from a config the agent wrote

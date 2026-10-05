@@ -104,6 +104,10 @@ agent.
     installed (fresh clone), venv missing, version mismatch, repo unconfigured, and CI. G14
     is therefore mostly met. The declaration should state exactly those states, not a
     blanket fail-open.
+  - **Coordinator call (2026-10-05, under the owner's "go with the clear winners" instruction), for the owner batch in
+    [REVIEW-fable.md](REVIEW-fable.md):** G3 close; G10 confirm; G11 follow-up plan (`probe --only` stays here); G16
+    grade both levels before publishing; G14 use the corrected wording above, not Fable's "fail open" text. Resolved;
+    not owner rulings. G1, G2, G4, DEFSET and Task 1.4 remain with the owner.
 - [ ] ⬜ **Task 2.3**: Put the gaps to the owner as one batch: close, accept as a known gap, or
   out of scope. Expected questions:
   - §4.3 against the `MUST_..._BECAUSE` declarations: is an in-command justification a

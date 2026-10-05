@@ -150,14 +150,19 @@ One line per decision. Everything not listed is a close within the plan's existi
   gap? — Recommended: **keep, fix, outside**.
 - **G3:** Close the two in-file `MUST_EXCEED_*_BECAUSE` tokens by listing and reason-checking
   them, or accept as a known gap? — Recommended: **close**.
+  **Resolved.** **Coordinator call (2026-10-05, under the owner's "go with the clear winners" instruction):** close.
 - **G4:** Accept `{pattern, reason}` alongside bare strings now, require the reason under
   `strict_mode`, and make it mandatory at the next major? — Recommended: **yes**.
 - **G10:** Confirm the statement "no DBF Defence is routed through ruff, mypy, pyright, bandit
   or shellcheck; they run as checks" for the declaration? — Recommended: **confirm**; not a gap.
+  **Resolved.** **Coordinator call (2026-10-05, under the owner's "go with the clear winners" instruction):** confirm.
 - **G11:** Build the `scan <handler> <paths>` sweep mode in this plan, or file it as a
   follow-up? — Recommended: **follow-up**; `probe --only` stays here.
+  **Resolved.** **Coordinator call (2026-10-05, under the owner's "go with the clear winners" instruction):** follow-up plan; `probe --only` stays in this plan.
 - **G14:** State in the declaration that hook-time defences deny a tool call, fail open, and are
   not the acceptance gate? — Recommended: **yes**, verbatim from the threat model.
+  **Resolved.** **Coordinator call (2026-10-05, under the owner's "go with the clear winners" instruction):** use the coordinator's corrected wording (PLAN.md, Task 2.2), not the "fail open" text above, because it matches the code: defences fail closed except in the named setup states (not installed, venv missing, version mismatch, repository unconfigured, CI), per `.claude/init.sh`.
 - **G16:** Grade SPEC §7 and declare `detector` before publishing, or publish `toolchain` only
   with "method and detector levels not assessed" as known gaps? — Recommended: **grade both**;
   it is a short job and the declaration is the claim.
+  **Resolved.** **Coordinator call (2026-10-05, under the owner's "go with the clear winners" instruction):** grade both before publishing.

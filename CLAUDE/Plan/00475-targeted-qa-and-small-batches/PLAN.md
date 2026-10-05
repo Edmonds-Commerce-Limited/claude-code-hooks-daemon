@@ -169,6 +169,7 @@ read the plan index, ledgers and docs. So markdown is narrowed, not skipped.
   with the owner. The advisory (`branch_count_advisor`) merged in d6caefded and
   fired live on a repository with 5 `worktree-*` branches. Whether it should ever
   block awaits the owner.
+  - **Coordinator call (2026-10-05, under the owner's "go with the clear winners" instruction):** the advisory stays advisory. Resolved; not an owner ruling.
 - [ ] 🔄 **Task 4.2**: Ledger 00474 N278. A `git merge` of a work branch whose head has
   no recorded green `llm_qa.py changed` run gets an advisory. The advisory names the
   head and the static checks to run, as listed in `CLAUDE/QA.md` under "Before Merging:
@@ -183,6 +184,7 @@ read the plan index, ledgers and docs. So markdown is narrowed, not skipped.
   `git merge --no-ff origin/worktree-p479-pause-gate` drew the advisory, naming head
   563b78f2a. A branch the remote does not hold yet drew nothing, as designed. Whether it
   should ever block awaits the owner, as for Task 4.1.
+  - **Coordinator call (2026-10-05, under the owner's "go with the clear winners" instruction):** stays advisory for now. The coordinator records a targeted-QA result in every merge message, and lock contention would make a block stall work. Resolved for now; not an owner ruling.
 
 ## Success Criteria
 

@@ -3,7 +3,7 @@
 Nothing in this checklist can run inside a ccy container: it needs the host, an image rebuild and real container exits. Both halves are written and unit-tested:
 
 - **hooks-daemon:** the supervisor plugin API is merged to main (`14f2f11f8`, plus the test fix `4bb315985`). The live worker reload was verified on this session.
-- **fedora-desktop:** branch `feature/ccy-hooks-daemon-plugin` (head `d9488a15`). It is pushed, but has no PR and nothing is merged.
+- **fedora-desktop:** branch `feature/ccy-hooks-daemon-plugin` (head `d9488a15`). It is pushed, and fedora-desktop PR 66 exists for it (owner decisions D1 and D6).
 
 **Which project to test in.** A project receives the supervisor (`.claude/ccy/claude-supervise.py`) from its hooks-daemon install, and no release carries the plugin API yet. Until one does, test in this repository, which runs the supervisor from main. Any other project needs a hooks-daemon release first.
 

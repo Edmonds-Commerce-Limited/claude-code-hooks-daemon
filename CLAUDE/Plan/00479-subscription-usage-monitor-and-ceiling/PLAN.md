@@ -194,13 +194,17 @@ the daemon directs the model and then verifies what it did.
 
 1. **Resolved (owner)**: pause, then resume through a scheduled cron at the predicted reset,
    with a supervisor compact before it (Phase 4).
-2. **Several matching entries**: being built with the recommended default, the lowest
+   **Coordinator call (2026-10-05, under the owner's "go with the clear winners" instruction):** Q2 lowest ceiling wins; Q3 one number with per-window overrides; Q4 fold cron host lists into the `hosts:` block at the next major, keeping the old form working until then. Q2 to Q4 resolved; not owner rulings.
+
+2. **Resolved (coordinator call)**: several matching entries: being built with the recommended default, the lowest
    ceiling wins, as the safer choice. The owner can overrule it with first match in file
    order.
-3. **One threshold or one per window**: being built with the recommended default.
+
+3. **Resolved (coordinator call)**: one threshold or one per window: being built with the recommended default.
    `max_used_percent` applies to both windows, with optional `five_hour` and `seven_day`
    overrides.
-4. **Folding `persistent_crons` host selection** into the `hosts:` block later.
+
+4. **Resolved (coordinator call)**: folding `persistent_crons` host selection into the `hosts:` block at the next major, with the old form working until then.
 
 ## Success Criteria
 

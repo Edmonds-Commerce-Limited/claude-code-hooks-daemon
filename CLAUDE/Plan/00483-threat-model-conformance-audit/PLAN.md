@@ -192,19 +192,26 @@ other than defeating a parser. Everything else, every ordinary respelling includ
      the threat-model ruling as written.
    - O4: the quarantine guard fails closed past the cap, under a new `R-QUARANTINE-SCAN-INCOMPLETE`.
    - O5: the mtime-validated index is deferred.
+   - **Coordinator call (2026-10-05, under the owner's "go with the clear winners" instruction):** O1 to O5 are folded
+     into R3 and R4 below and will be decided with them. They are not decided separately. Not an owner ruling.
 4. **Effort and breakage in the secret-guard area.** The owner asked for this review:
    [261004-guard-effort-pragmatism-review-opus.md](subagent-reports/261004-guard-effort-pragmatism-review-opus.md).
    It finds that the area has become disproportionately costly, and that it breaks ordinary sessions more often than
    it closes bypasses.
    - Coordinator call, not an owner ruling: new tightening in this area is frozen. Only narrow fixes for false denials
      proceed. Phase 3 Task 3.1 batches stay paused until the owner decides.
+   - **Coordinator call (2026-10-05, under the owner's "go with the clear winners" instruction):** R1, the freeze, is
+     confirmed (resolved). R2, the ordinary-command corpus, becomes a merge gate (resolved), seeded from N79's 171
+     commands. R5, the effort budget, is adopted (resolved), except its `bash_safe_mode` part, which is R6 and stays
+     with the owner. Not owner rulings.
    - Owner decisions the review asks for:
-     - R2: a regression gate built from ordinary commands, so that an ALLOW flipping to a deny fails the change.
+     - R2: **resolved (coordinator call)**: a regression gate built from ordinary commands, so that an ALLOW flipping to a deny fails the change.
      - R3: amend the fail-closed rule. Deny only on a literal protected name or an unparseable command. Allow with an
        advisory when a cap or deadline is exhausted.
      - R4: remove the bare-glob filesystem expansion and the per-call tree walk, in favour of a cached index.
-     - R5: an effort budget for the area. One open branch, at most 2 review rounds, net non-positive lines, and p99 of
-       50 ms or less per Bash call. Return bash_safe_mode to `only_with_mutator`.
+     - R5: **resolved (coordinator call)**: an effort budget for the area. One open branch, at most 2 review rounds,
+       net non-positive lines, and p99 of 50 ms or less per Bash call.
+     - R6: **open, owner**: return bash_safe_mode to `only_with_mutator`.
      - The keep/narrow/drop list for the remaining Task 3.1 items.
 5. **N98 (00466 numbering): the fallback socket path is shared across hostnames.** A fix exists at 094676360, kept
    on the remote branch `agent-a852e66b72ca67937-652324e9`. It adds a hostname tag to the fallback socket, PID, log
