@@ -84,7 +84,8 @@ already-upgraded clients is a short note, not a project.
   - Correct "sixteen" to seventeen (`plan_fact_check_feed`) in the v3.68.0
     truth change, release note 216 and config-changes. Better: generate the
     list from the classes.
-- [ ] ⬜ **Task 1.2: git-visible daemon version.**
+- [ ] ⬜ **Task 1.2: the upgrade summary names the version change.** The daemon version is already tracked; this is
+  only the from → to line.
   - What exists today: v3.68.0 (Plan 00477) writes `daemon.expected_version`
     into the tracked `.claude/hooks-daemon.yaml` on install and upgrade
     (`install/expected_version.py`; `upgrade_version.sh:1046,1636`). The
