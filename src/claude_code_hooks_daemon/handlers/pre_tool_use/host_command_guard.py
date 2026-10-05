@@ -92,13 +92,13 @@ _RULES: Final[dict[str, Rule]] = {
         rule_id=RuleID.DOCKER_ROOT_MOUNT,
         blocked="`docker run -v /:/host …` (the host root mounted into a container)",
         why="The container then reads and writes the whole host, past every path-scoped guard",
-        fix="Mount the specific directory the container needs, e.g. `-v \"$PWD\":/app`",
+        fix='Mount the specific directory the container needs, e.g. `-v "$PWD":/app`',
         verbose=(
             "Mounting the host root (`-v /:/host`, `--volume /:…`, `--mount "
             "type=bind,source=/,…`) gives the container the whole host filesystem. Every "
             "path-scoped guard in this daemon stops at the project root, so none of them "
             "sees what happens through that mount.\n\n"
-            "Mount only the specific directory the container needs: `-v \"$PWD\":/app` "
+            'Mount only the specific directory the container needs: `-v "$PWD":/app` '
             "for the project, or `-v /tmp/x:/x` for a scratch directory. If a container "
             "genuinely needs the host root, the human has to run that command themselves."
         ),
@@ -145,8 +145,7 @@ _RULES: Final[dict[str, Rule]] = {
             "backup. This project can depend on declared crons, and a missing one is "
             "discovered only when the work it ran stops.\n\n"
             "`crontab -l` lists and `crontab -e` edits, and neither is blocked. "
-            "Removing one job means installing the edited list, not wiping it.\n\n"
-            + _ASK_THE_HUMAN
+            "Removing one job means installing the edited list, not wiping it.\n\n" + _ASK_THE_HUMAN
         ),
     ),
 }
@@ -407,7 +406,7 @@ class HostCommandGuardHandler(PreToolUseHandlerBase):
             title: str,
             command: str,
             description: str,
-            decision: str,
+            decision: Decision,
             patterns: list[str],
         ) -> AcceptanceTest:
             return AcceptanceTest(
