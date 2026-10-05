@@ -27,7 +27,6 @@ No-LSP modes (when no enabled plugin serves the searched file type):
 
 import logging
 import re
-import shlex
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, Final
@@ -46,6 +45,7 @@ from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.core.relevance import Relevance, RelevanceContext
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.core.utils import get_bash_command
+from claude_code_hooks_daemon.utils import linear_shlex
 from claude_code_hooks_daemon.utils.claude_config import session_config_dir
 from claude_code_hooks_daemon.utils.claude_plugins import resolve_enabled_plugins
 from claude_code_hooks_daemon.utils.scratch_dir import acceptance_path
@@ -144,7 +144,7 @@ def _grep_tool_suffixes(tool_input: Mapping[str, Any]) -> frozenset[str]:
 def _invocation_suffixes(invocation: str) -> frozenset[str]:
     """File suffixes one grep/rg invocation's options and file targets name."""
     try:
-        tokens = shlex.split(invocation)
+        tokens = linear_shlex.split(invocation)
     except ValueError as exc:
         logger.debug("lsp_enforcement: unquoted split of %r: %s", invocation, exc)
         tokens = invocation.split()

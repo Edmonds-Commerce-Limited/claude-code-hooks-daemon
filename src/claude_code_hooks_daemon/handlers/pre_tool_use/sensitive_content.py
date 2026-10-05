@@ -35,7 +35,6 @@ last two part of this ONE guard rather than a sibling):
 
 import logging
 import re
-import shlex
 from collections.abc import Iterator, Mapping
 from pathlib import Path
 from typing import Any, ClassVar, Final, NamedTuple
@@ -52,6 +51,7 @@ from claude_code_hooks_daemon.remote_docs.provenance import (
     is_faithful_vendored_copy,
     is_remote_tree_document,
 )
+from claude_code_hooks_daemon.utils import linear_shlex
 from claude_code_hooks_daemon.utils import secret_file_matching as sfm
 from claude_code_hooks_daemon.utils import secret_redaction as sr
 from claude_code_hooks_daemon.utils.command_evasion import OPTIONAL_PATH, git_subcommand_index
@@ -405,7 +405,7 @@ def _shell_tokens(command: str) -> list[str]:
     direction for a guard.
     """
     try:
-        return shlex.split(command)
+        return linear_shlex.split(command)
     except ValueError:
         return command.split()
 

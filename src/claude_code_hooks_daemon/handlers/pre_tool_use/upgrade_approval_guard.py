@@ -72,7 +72,6 @@ from __future__ import annotations
 
 import logging
 import re
-import shlex
 from dataclasses import dataclass
 from itertools import pairwise
 from pathlib import Path
@@ -93,6 +92,7 @@ from claude_code_hooks_daemon.core.utils import get_bash_command, get_file_path
 from claude_code_hooks_daemon.handlers.utils.bash_file_writes import bash_file_writes
 from claude_code_hooks_daemon.install.install_stamp import STAMP_FILENAME
 from claude_code_hooks_daemon.install.upgrade_gate import APPROVAL_SUBDIR
+from claude_code_hooks_daemon.utils import linear_shlex
 from claude_code_hooks_daemon.utils.path_predicates import (
     TextOrReason,
     path_is_dir,
@@ -451,7 +451,7 @@ def _shell_words(segment: str) -> list[str]:
     `_words`).
     """
     try:
-        return shlex.split(segment)
+        return linear_shlex.split(segment)
     except ValueError as exc:
         logger.debug("upgrade_approval_guard: shlex could not parse %r (%s)", segment, exc)
         return segment.split()

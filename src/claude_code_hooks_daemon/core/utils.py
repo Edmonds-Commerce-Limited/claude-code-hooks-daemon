@@ -3,12 +3,12 @@
 import logging
 import os
 import re
-import shlex
 from pathlib import Path
 from typing import Any, Final, NamedTuple, cast
 
 from claude_code_hooks_daemon.constants import HookInputField, ToolName
 from claude_code_hooks_daemon.core.project_context import ProjectContext
+from claude_code_hooks_daemon.utils import linear_shlex
 from claude_code_hooks_daemon.utils.ansi_c import ansi_c_string
 from claude_code_hooks_daemon.utils.command_evasion import normalise_line_continuations
 from claude_code_hooks_daemon.utils.heredoc_operators import (
@@ -731,7 +731,7 @@ def _tokenise(text: str) -> list[str] | None:
     normalised = bash_text_for_shlex(text)
     if normalised is None:
         return None
-    lexer = shlex.shlex(normalised, posix=True, punctuation_chars=True)
+    lexer = linear_shlex.LinearShlex(normalised, posix=True, punctuation_chars=True)
     lexer.whitespace_split = True
     lexer.commenters = ""
     return list(lexer)

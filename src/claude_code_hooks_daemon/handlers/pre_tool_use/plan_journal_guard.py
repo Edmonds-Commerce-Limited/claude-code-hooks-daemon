@@ -55,7 +55,6 @@ import logging
 import os.path
 import re
 import secrets
-import shlex
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
@@ -87,6 +86,7 @@ from claude_code_hooks_daemon.plan_qa.model import (
     parse_journal_dayfile_name,
 )
 from claude_code_hooks_daemon.plan_qa.types import DEFAULT_JOURNAL_DIR_NAME, JOURNAL_MODE_OFF
+from claude_code_hooks_daemon.utils import linear_shlex
 from claude_code_hooks_daemon.utils.path_predicates import (
     TextOrReason,
     path_is_file,
@@ -643,7 +643,7 @@ def conflict_checkout_paths(command: str) -> list[tuple[str | None, str]]:
     advisory, and a command that unreadable is already judged by the
     write analysis.
     """
-    lexer = shlex.shlex(command, posix=True, punctuation_chars=True)
+    lexer = linear_shlex.LinearShlex(command, posix=True, punctuation_chars=True)
     lexer.whitespace_split = True
     try:
         tokens = list(lexer)

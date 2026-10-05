@@ -164,3 +164,19 @@ class LinearShlex(shlex.shlex):
         if self.posix and not quoted and result == "":
             return None
         return result
+
+
+def split(s: str, comments: bool = False, posix: bool = True) -> list[str]:
+    """``shlex.split`` on :class:`LinearShlex`: the stdlib's words, linear cost.
+
+    Same signature and body as the stdlib function, so a caller swaps one name
+    for the other.
+
+    Raises:
+        ValueError: A quote or an escape is not closed before the input ends.
+    """
+    lexer = LinearShlex(s, posix=posix)
+    lexer.whitespace_split = True
+    if not comments:
+        lexer.commenters = ""
+    return list(lexer)

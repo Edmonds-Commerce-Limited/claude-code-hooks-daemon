@@ -19,7 +19,6 @@ from __future__ import annotations
 
 import logging
 import re
-import shlex
 from pathlib import Path
 from typing import Any, Final
 
@@ -30,6 +29,7 @@ from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.core.utils import get_bash_command
+from claude_code_hooks_daemon.utils import linear_shlex
 from claude_code_hooks_daemon.utils.cli_command import (
     daemon_cli_command,
     daemon_cli_command_for_docs,
@@ -180,7 +180,7 @@ def _segment_tokens(segment: str) -> list[str]:
     its handler IS the next strategy rather than a fallback value.
     """
     try:
-        return shlex.split(segment)
+        return linear_shlex.split(segment)
     except ValueError as exc:
         logger.debug("Merge segment is not balanced shell quoting (%s): %r", exc, segment)
         return _unbalanced_segment_tokens(segment)
@@ -191,7 +191,7 @@ def _unbalanced_segment_tokens(segment: str) -> list[str]:
     trimmed = segment.rstrip()
     if trimmed[-1:] in ('"', "'"):
         try:
-            return shlex.split(trimmed[:-1])
+            return linear_shlex.split(trimmed[:-1])
         except ValueError as exc:
             logger.debug("Trimmed merge segment is still unbalanced (%s)", exc)
             return _whitespace_tokens(segment)

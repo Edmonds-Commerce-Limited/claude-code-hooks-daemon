@@ -30,7 +30,6 @@ import itertools
 import logging
 import os
 import re
-import shlex
 import time
 import urllib.parse
 from collections.abc import Callable, Iterable, Iterator, Sequence
@@ -40,7 +39,7 @@ from typing import Any, Final, Literal
 
 import yaml
 
-from claude_code_hooks_daemon.utils import shell_expansion
+from claude_code_hooks_daemon.utils import linear_shlex, shell_expansion
 from claude_code_hooks_daemon.utils.command_evasion import (
     git_subcommand_index,
     strip_transparent_reserved_words,
@@ -3217,7 +3216,7 @@ def is_encrypted_target_invocation(
 
 def _shell_words(command: str) -> list[str] | None:
     """POSIX shell words with operators split out, or ``None`` if unparseable."""
-    lexer = shlex.shlex(command, posix=True, punctuation_chars=True)
+    lexer = linear_shlex.LinearShlex(command, posix=True, punctuation_chars=True)
     lexer.whitespace_split = True
     # `#` starts a comment only at the start of a word in bash; left as a word
     # character, nothing that bash would read is ever dropped from the view.

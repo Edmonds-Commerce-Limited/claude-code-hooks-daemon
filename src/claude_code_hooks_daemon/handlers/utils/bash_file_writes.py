@@ -29,7 +29,6 @@ writing into it.
 
 import logging
 import re
-import shlex
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -42,6 +41,7 @@ from claude_code_hooks_daemon.core.utils import (
     scan_bash_write_destinations,
     split_heredocs,
 )
+from claude_code_hooks_daemon.utils import linear_shlex
 from claude_code_hooks_daemon.utils.command_evasion import strip_reserved_word_prefix
 from claude_code_hooks_daemon.utils.heredoc_operators import find_heredoc_operators
 from claude_code_hooks_daemon.utils.path_predicates import TextOrReason
@@ -462,7 +462,7 @@ def _words(stage: str) -> list[str]:
     """
     stage = strip_reserved_word_prefix(stage)
     try:
-        words = shlex.split(stage)
+        words = linear_shlex.split(stage)
     except ValueError as exc:
         # Whitespace words keep the command name and any path visible; the
         # command scan reports the text as unreadable.
