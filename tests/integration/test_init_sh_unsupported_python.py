@@ -21,6 +21,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.support.event_output_contract import contract_violations, load_event_contracts
+
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _INIT_SH = _REPO_ROOT / "init.sh"
 _RUN_TIMEOUT_SECONDS = 30
@@ -128,6 +130,21 @@ class TestUnsupportedPythonIsNamed:
     def test_a_supported_python_keeps_the_existing_answer(self, tmp_path: Path, state: str) -> None:
         context = _context(_answer(tmp_path, "SessionStart", state, None))
         assert "UNSUPPORTED PYTHON" not in context
+
+
+@pytest.mark.parametrize("state", ["_HOOKS_DAEMON_NOT_INSTALLED", "_HOOKS_DAEMON_VENV_MISSING"])
+class TestUnsupportedPythonAnswerIsValidForEveryEvent:
+    def test_every_event_gets_a_contract_valid_answer_carrying_the_message(
+        self, tmp_path: Path, state: str
+    ) -> None:
+        for event in sorted(load_event_contracts()):
+            workdir = tmp_path / event
+            workdir.mkdir()
+            answer = _answer(workdir, event, state, "3.9.18")
+
+            assert contract_violations(event, answer) == [], (event, answer)
+            if event not in ("Stop", "SubagentStop"):  # their block reason is fixed
+                assert "UNSUPPORTED PYTHON" in json.dumps(answer), (event, answer)
 
 
 class TestMinimumIsSingleSourced:
