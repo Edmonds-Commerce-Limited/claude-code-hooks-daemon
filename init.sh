@@ -74,6 +74,17 @@ _HOOKS_DAEMON_REPO_UNCONFIGURED=false
 _HOOKS_DAEMON_VENV_MISSING=false
 _HOOKS_DAEMON_VENV_MISSING_VERSION=""
 
+# Set by _detect_unsupported_python while an answer is being built: the version
+# of the system python3 when it is OLDER than the daemon's minimum, else empty.
+# It turns the "not installed" / "venv missing" advice (install the daemon),
+# which cannot succeed on such a Python, into one that names the versions and
+# says to upgrade Python. _HOOKS_DAEMON_MIN_PYTHON_FALLBACK is used only when the
+# clone's pyproject.toml (the source of truth, `requires-python`) is unreadable;
+# tests/integration/test_init_sh_unsupported_python.py pins the two together.
+_HOOKS_DAEMON_UNSUPPORTED_PYTHON=""
+_HOOKS_DAEMON_MIN_PYTHON=""
+_HOOKS_DAEMON_MIN_PYTHON_FALLBACK="3.11"
+
 # Set by start_daemon when this hook's start deadline came while the daemon
 # it launched was still starting (Plan 00466 review 8, R8-1): nothing is
 # wrong, and the call is denied with a "retry" rather than a diagnosis.
@@ -995,6 +1006,28 @@ Nothing has been changed: hooks never move the daemon to another version themsel
             "$_hd_advice")
     fi
 
+    # An unsupported system Python is the real cause behind a "not installed" or
+    # "venv missing" answer, and the advice those give (install the daemon) cannot
+    # succeed on it. Say what is wrong instead: the version found, the version
+    # required, and to upgrade. Only the MESSAGE changes; every flag, and so every
+    # event's allow/block decision below, is untouched, so this stays fail-open.
+    if [[ "$_HOOKS_DAEMON_NOT_INSTALLED" == "true" || "$_HOOKS_DAEMON_VENV_MISSING" == "true" ]]; then
+        _detect_unsupported_python
+        if [[ -n "$_HOOKS_DAEMON_UNSUPPORTED_PYTHON" ]]; then
+            context_msg=$(printf '%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s' \
+                "HOOKS DAEMON: INACTIVE - UNSUPPORTED PYTHON VERSION" \
+                "" \
+                "The python3 in this environment is $_HOOKS_DAEMON_UNSUPPORTED_PYTHON, but the hooks daemon requires Python $_HOOKS_DAEMON_MIN_PYTHON or later." \
+                "Checkout: $_hooks_daemon_checkout" \
+                "" \
+                "ALL safety handlers, code quality checks, and workflow enforcement are INACTIVE. Claude Code itself works normally." \
+                "" \
+                "TO FIX - upgrade Python: install Python $_HOOKS_DAEMON_MIN_PYTHON or later (for example python3.12) and make it the python3 on PATH." \
+                "Then use the hooks-daemon skill to install or upgrade the daemon (Skill tool: skill=hooks-daemon, args=install)," \
+                "and restart your Claude session for hooks to activate.")
+        fi
+    fi
+
     # Event-specific JSON formatting. jq is used only on this pure-error path
     # (the hot-path transport is jq-free since Plan 00156); a jq-less fallback
     # follows below for hosts without it.
@@ -1270,6 +1303,44 @@ fi
 # (HOOKS_DAEMON_PYTHON or a discovered venv-*/bin/python), never bare
 # `python3`. The scan-fallback handles cross-fingerprint resolution.
 PYTHON_CMD=""  # populated lazily by _resolve_python_cmd
+
+# _detect_unsupported_python() - Is the system python3 older than the daemon needs?
+#
+# Sets _HOOKS_DAEMON_UNSUPPORTED_PYTHON to the python3 version when it is below
+# the minimum, and _HOOKS_DAEMON_MIN_PYTHON to that minimum; both are empty
+# otherwise. Always returns 0 and never fails the caller: a missing python3, an
+# unreadable pyproject.toml or an unparseable version all mean "not shown to be
+# unsupported", which leaves the existing answer unchanged (fail-open).
+_detect_unsupported_python() {
+    _HOOKS_DAEMON_UNSUPPORTED_PYTHON=""
+    _HOOKS_DAEMON_MIN_PYTHON=""
+    if [[ -z "$(command -v python3)" ]]; then
+        return 0
+    fi
+
+    local min="$_HOOKS_DAEMON_MIN_PYTHON_FALLBACK"
+    local pyproject="${HOOKS_DAEMON_ROOT_DIR:-}/pyproject.toml"
+    local line=""
+    if [[ -n "${HOOKS_DAEMON_ROOT_DIR:-}" && -f "$pyproject" ]]; then
+        line="$(grep -E '^requires-python' "$pyproject")" || line=""
+    fi
+    if [[ "$line" =~ ([0-9]+\.[0-9]+) ]]; then
+        min="${BASH_REMATCH[1]}"
+    fi
+
+    local found=""
+    found="$(python3 -c 'import sys; v = sys.version_info; print("%d.%d.%d" % (v[0], v[1], v[2]))')" || found=""
+    if [[ ! "$found" =~ ^([0-9]+)\.([0-9]+)\. ]]; then
+        return 0
+    fi
+    local found_major="${BASH_REMATCH[1]}" found_minor="${BASH_REMATCH[2]}"
+    local min_major="${min%%.*}" min_minor="${min#*.}"
+    if (( found_major < min_major || (found_major == min_major && found_minor < min_minor) )); then
+        _HOOKS_DAEMON_UNSUPPORTED_PYTHON="$found"
+        _HOOKS_DAEMON_MIN_PYTHON="$min"
+    fi
+    return 0
+}
 
 # Plan 00104 Phase 4: delegate to canonical library at
 # ${HOOKS_DAEMON_ROOT_DIR}/scripts/lib/resolve_venv.sh. The library invokes

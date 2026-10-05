@@ -19,6 +19,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 from pathlib import Path
 from typing import Any, Final
 
@@ -29,6 +30,10 @@ logger = logging.getLogger(__name__)
 _CCY_DIR_PARTS: Final[tuple[str, str]] = (".claude", "ccy")
 _CCY_ENV_NAME: Final[str] = "ccy.env"
 _SUPERVISOR_SCRIPT_NAME: Final[str] = "claude-supervise.py"
+# The shell launcher ccy.env's wrapper points at (see install/ccy_supervisor.py).
+# It is a prefix of the script name, so one substring test recognises a wrapper
+# that names either the launcher or the bare script (a pre-launcher install).
+_SUPERVISOR_LAUNCHER_NAME: Final[str] = "claude-supervise"
 _WRAPPER_EXPORT_KEY: Final[str] = "CCY_CLAUDE_WRAPPER"
 _COMMENT_PREFIX: Final[str] = "#"
 
@@ -64,22 +69,44 @@ def ccy_dir(project_root: Path) -> Path:
     return project_root.joinpath(*_CCY_DIR_PARTS)
 
 
-def is_armed(ccy_env: Path) -> bool:
-    """Armed = a non-comment line exports the wrapper referencing the script."""
+def _active_wrapper_lines(ccy_env: Path) -> list[str]:
+    """Non-comment lines of ``ccy.env`` that export the wrapper and name the supervisor."""
     if not ccy_env.is_file():
-        return False
+        return []
     try:
         content = ccy_env.read_text(encoding="utf-8", errors="replace")
     except OSError as exc:
         logger.debug("Could not read %s: %s", ccy_env, exc)
-        return False
+        return []
+    lines: list[str] = []
     for raw in content.splitlines():
         stripped = raw.strip()
         if stripped.startswith(_COMMENT_PREFIX):
             continue
-        if _WRAPPER_EXPORT_KEY in stripped and _SUPERVISOR_SCRIPT_NAME in stripped:
-            return True
-    return False
+        if _WRAPPER_EXPORT_KEY in stripped and _SUPERVISOR_LAUNCHER_NAME in stripped:
+            lines.append(stripped)
+    return lines
+
+
+def is_armed(ccy_env: Path) -> bool:
+    """Armed = a non-comment line exports the wrapper referencing the supervisor."""
+    return bool(_active_wrapper_lines(ccy_env))
+
+
+def wrapper_execs_bare_script(ccy_env: Path) -> bool:
+    """True when an active wrapper line still execs ``claude-supervise.py`` directly.
+
+    Such an install bypasses the version-gating launcher, so an unsupported
+    system Python crashes the supervisor and Claude Code cannot start. A daemon
+    upgrade repoints the line at the launcher.
+    """
+    return any(_SUPERVISOR_SCRIPT_NAME in line for line in _active_wrapper_lines(ccy_env))
+
+
+def wrapper_names_launcher(ccy_env: Path) -> bool:
+    """True when an active wrapper line names the launcher (not just the bare script)."""
+    pattern = re.compile(re.escape(_SUPERVISOR_LAUNCHER_NAME) + r"(?!\.py)")
+    return any(pattern.search(line) for line in _active_wrapper_lines(ccy_env))
 
 
 def supervisor_relevance(context: RelevanceContext) -> Relevance:

@@ -28,6 +28,7 @@ logger = logging.getLogger(__name__)
 
 _CCY_DIR_PARTS: tuple[str, str] = (".claude", "ccy")
 _SUPERVISOR_SCRIPT_NAME = "claude-supervise.py"
+_LAUNCHER_NAME = "claude-supervise"
 _CCY_ENV_NAME = "ccy.env"
 _CONFIG_REL_PARTS: tuple[str, str] = (".claude", "hooks-daemon.yaml")
 _GIT_CHECK_IGNORE_TIMEOUT_SECONDS = 5
@@ -217,7 +218,31 @@ class CcySupervisorIntegrityHandler(SessionStartHandlerBase):
                 f"Fix: chmod +x {script_rel}"
             )
 
-        for rel in (script_rel, env_rel):
+        env_path = ccy_dir / _CCY_ENV_NAME
+        launcher = ccy_dir / _LAUNCHER_NAME
+        launcher_rel = f"{_CCY_DIR_PARTS[0]}/{_CCY_DIR_PARTS[1]}/{_LAUNCHER_NAME}"
+        tracked_rels = [script_rel, env_rel]
+        if ccy_supervisor.wrapper_execs_bare_script(env_path):
+            problems.append(
+                f"{env_rel} execs claude-supervise.py directly, bypassing the {_LAUNCHER_NAME} "
+                "launcher. On a system Python older than 3.11 the supervisor crashes at "
+                "import and Claude Code cannot start. Fix: run a daemon upgrade, which "
+                f"repoints CCY_CLAUDE_WRAPPER at {launcher_rel}."
+            )
+        if ccy_supervisor.wrapper_names_launcher(env_path):
+            tracked_rels.append(launcher_rel)
+            if not launcher.is_file():
+                problems.append(
+                    f"{launcher_rel} is MISSING — CCY_CLAUDE_WRAPPER execs it, so ccy cannot "
+                    "start the wrapped claude. Redeploy it (daemon upgrade) or restore it from git."
+                )
+            elif not os.access(launcher, os.X_OK):
+                problems.append(
+                    f"{launcher_rel} is not executable — the launcher's `exec` will fail. "
+                    f"Fix: chmod +x {launcher_rel}"
+                )
+
+        for rel in tracked_rels:
             if self._git_ignored(project_root, rel):
                 problems.append(
                     f"{rel} is GIT-IGNORED — it will not be committed, so teammates "
@@ -287,6 +312,12 @@ class CcySupervisorIntegrityHandler(SessionStartHandlerBase):
             "- **git-ignored** → it won't be committed; teammates get a broken supervisor. "
             "Add a `!claude-supervise.py` / `!ccy.env` whitelist line to "
             "`.claude/ccy/.gitignore` and commit the files.\n"
+            "- **`claude-supervise` launcher missing, not executable or git-ignored** → "
+            "`CCY_CLAUDE_WRAPPER` execs this shell launcher, which picks a Python >= 3.11 "
+            "(or starts claude unsupervised with a warning). Same fixes as the script.\n"
+            "- **wrapper still execs `claude-supervise.py` directly** → on a system Python "
+            "older than 3.11 Claude Code cannot start; a daemon upgrade repoints it at "
+            "the launcher.\n"
             "- **`ccy.deploy_supervisor: false` while armed+present** → the installer "
             "skips deploy on `false`, so upgrades never refresh `claude-supervise.py` and "
             "the project runs an increasingly stale supervisor. Set it to `true` (or "

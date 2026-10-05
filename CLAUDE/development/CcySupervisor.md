@@ -167,6 +167,38 @@ cost one wasted compact at worst, never a nudge.
 Ship it like any other supervisor change: the worker hot-reload below, verified
 by the `ps` check, never a session restart.
 
+## Supported Python and the launcher
+
+**Supported Python: 3.11 or later** — the canonical statement is
+[Supported Python](../LLM-INSTALL.md#supported-python); the floor is
+`requires-python` in `pyproject.toml`.
+
+The supervisor runs on the container's system `python3`, which can be older (RHEL
+9 ships 3.9). Newer syntax fails when Python PARSES `claude-supervise.py`, so a
+version check inside it can never run. A shell launcher therefore sits in front:
+`.claude/ccy/claude-supervise` (no extension, POSIX `sh`, deployed with the
+supervisor). `ccy.env` points `CCY_CLAUDE_WRAPPER` at it; ccy runs
+`<wrapper> claude <args>`, so the launcher receives
+`[supervisor flags] -- <claude argv...>`.
+
+The contract:
+
+1. Interpreter, first that reports Python 3.11 or later: `$CCY_PYTHON`, then
+   `python3.14`, `python3.13`, `python3.12`, `python3.11`, `python3`.
+2. Found: `exec <python> claude-supervise.py "$@"`, every argument unchanged. The
+   `--worker` subprocess starts from `sys.executable`, so it uses the same Python.
+3. None found, or `claude-supervise.py` missing: a multi-line warning on stderr
+   (the version found, the 3.11 requirement, that supervision is OFF, how to fix
+   it), held for `CCY_UNSUPPORTED_PYTHON_PAUSE` seconds (default 5) on an
+   interactive terminal, then `exec` of everything after the first `--`, i.e.
+   `claude` unsupervised. Claude Code always opens.
+4. No `--` in the arguments: exit 2, as the supervisor does.
+
+`MIN_MAJOR` / `MIN_MINOR` in the launcher must equal `requires-python`; a test
+pins them. An upgrade repoints a `ccy.env` that still execs the bare script at the
+launcher (`wrapper_migrated`), and `ccy_supervisor_integrity` warns about one that
+does not yet.
+
 ## Plugins: extending the supervisor without forking it
 
 Plan 00487. A launcher that needs one more behaviour (a maximum session age, a

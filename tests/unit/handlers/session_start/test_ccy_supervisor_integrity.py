@@ -21,8 +21,9 @@ from claude_code_hooks_daemon.handlers.session_start.ccy_supervisor_integrity im
 
 _ARMED_ENV = (
     'export CCY_CLAUDE_WRAPPER="${CCY_CLAUDE_WRAPPER:-'
-    '$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)/claude-supervise.py --arm --}"\n'
+    '$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)/claude-supervise --arm --}"\n'
 )
+_BARE_SCRIPT_ENV = _ARMED_ENV.replace("claude-supervise --arm", "claude-supervise.py --arm")
 
 
 def _make_ccy(project_root: Path) -> Path:
@@ -35,7 +36,15 @@ def _write_script(ccy: Path, *, executable: bool = True) -> Path:
     script = ccy / "claude-supervise.py"
     script.write_text("#!/usr/bin/env python3\nprint('supervise')\n")
     script.chmod(0o755 if executable else 0o644)
+    _write_launcher(ccy)
     return script
+
+
+def _write_launcher(ccy: Path, *, executable: bool = True) -> Path:
+    launcher = ccy / "claude-supervise"
+    launcher.write_text("#!/bin/sh\nexit 0\n")
+    launcher.chmod(0o755 if executable else 0o644)
+    return launcher
 
 
 def _run(handler: CcySupervisorIntegrityHandler, project_root: Path | None) -> HookResult:
@@ -175,10 +184,54 @@ class TestHandle:
         ccy = _make_ccy(tmp_path)
         (ccy / "ccy.env").write_text(_ARMED_ENV)
         _write_script(ccy, executable=True)
-        (ccy / ".gitignore").write_text("*\n!.gitignore\n!ccy.env\n!claude-supervise.py\n")
+        (ccy / ".gitignore").write_text(
+            "*\n!.gitignore\n!ccy.env\n!claude-supervise.py\n!claude-supervise\n"
+        )
         subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
 
         assert _run(handler, tmp_path).context == []
+
+    def test_launcher_missing_warns(
+        self, handler: CcySupervisorIntegrityHandler, tmp_path: Path
+    ) -> None:
+        ccy = _make_ccy(tmp_path)
+        (ccy / "ccy.env").write_text(_ARMED_ENV)
+        _write_script(ccy)
+        (ccy / "claude-supervise").unlink()
+        text = "\n".join(_run(handler, tmp_path).context)
+        assert ".claude/ccy/claude-supervise is MISSING" in text
+
+    def test_launcher_not_executable_warns(
+        self, handler: CcySupervisorIntegrityHandler, tmp_path: Path
+    ) -> None:
+        ccy = _make_ccy(tmp_path)
+        (ccy / "ccy.env").write_text(_ARMED_ENV)
+        _write_script(ccy)
+        _write_launcher(ccy, executable=False)
+        text = "\n".join(_run(handler, tmp_path).context)
+        assert ".claude/ccy/claude-supervise is not executable" in text
+
+    def test_launcher_git_ignored_warns(
+        self, handler: CcySupervisorIntegrityHandler, tmp_path: Path
+    ) -> None:
+        ccy = _make_ccy(tmp_path)
+        (ccy / "ccy.env").write_text(_ARMED_ENV)
+        _write_script(ccy)
+        # The pre-launcher whitelist: the script is kept, the launcher is not.
+        (ccy / ".gitignore").write_text("*\n!.gitignore\n!ccy.env\n!claude-supervise.py\n")
+        subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+        text = "\n".join(_run(handler, tmp_path).context)
+        assert ".claude/ccy/claude-supervise is GIT-IGNORED" in text
+
+    def test_wrapper_that_execs_the_bare_script_warns_to_upgrade(
+        self, handler: CcySupervisorIntegrityHandler, tmp_path: Path
+    ) -> None:
+        ccy = _make_ccy(tmp_path)
+        (ccy / "ccy.env").write_text(_BARE_SCRIPT_ENV)
+        _write_script(ccy)
+        text = "\n".join(_run(handler, tmp_path).context)
+        assert "execs claude-supervise.py directly" in text
+        assert "older than 3.11" in text
 
     def test_project_root_none_is_silent(self, handler: CcySupervisorIntegrityHandler) -> None:
         assert _run(handler, None).context == []
@@ -351,6 +404,7 @@ class TestStaleness:
         ccy = _make_ccy(tmp_path)
         (ccy / "ccy.env").write_text(_ARMED_ENV)
         _write_versioned_script(ccy, version=version)
+        _write_launcher(ccy)
         return ccy
 
     def test_no_status_file_is_silent(

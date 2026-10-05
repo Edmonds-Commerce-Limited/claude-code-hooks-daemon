@@ -23,10 +23,10 @@ Reproductions and evidence are in the three triage files:
 | Branch                               | Entries | Fixed on main | Dismissed | Folded | In-scope defect | Needs owner | Still open |
 | ------------------------------------ | ------- | ------------- | --------- | ------ | --------------- | ----------- | ---------- |
 | `worktree-upgrade-scripts`, 464, N38 | 4       | 4             | 0         | 0      | 0               | 0           | 0          |
-| `worktree-d-00421`                   | 14      | 2             | 4         | 0      | 7               | 1           | 8          |
-| `worktree-n466-small-a`              | 22      | 6             | 2         | 2      | 11              | 1           | 12         |
-| `worktree-p422-close`                | 15      | 1             | 8         | 0      | 5               | 1           | 6          |
-| Total                                | 55      | 13            | 14        | 2      | 23              | 3           | 26         |
+| `worktree-d-00421`                   | 14      | 2             | 4         | 0      | 7               | 0           | 7          |
+| `worktree-n466-small-a`              | 22      | 6             | 2         | 2      | 11              | 0           | 11         |
+| `worktree-p422-close`                | 15      | 1             | 8         | 0      | 5               | 0           | 5          |
+| Total                                | 55      | 13            | 14        | 2      | 23              | 0           | 23         |
 
 Entries with a split verdict count under the part that keeps them open (N141, N186, N200,
 N124, N130, N152, N249, N242, N131 and N228 name both parts on their line). N134 appears under
@@ -53,8 +53,8 @@ In-scope defects, grouped:
   (`debug_info.py` redacts no secret terms and shows no banner), N250 (`remote-docs add`
   captures unscanned when the project config does not parse).
 
-Needs owner: N240 (N154 and N230 are already fixed on main at c7271043f)
-(`script` writes an out-of-root log).
+Needs owner: none. N154 and N230 are fixed on main (c7271043f) and N240 (`script` writes an
+out-of-root log) was ruled no change.
 
 Dismissed entries whose subject is a command have a row in
 `scripts/qa/dangerous-invocation-corpus.yaml` with verdict `UNCOVERED-accepted`.

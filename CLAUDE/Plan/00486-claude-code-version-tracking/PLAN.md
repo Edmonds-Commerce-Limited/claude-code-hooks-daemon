@@ -42,7 +42,7 @@ Prior art: Plan 00327 audited the hook contracts once and recorded `last_audited
 
 - [x] ✅ **Task 1.2** (RELEASING.md sub-step 1c and `.claude/agents/claude-code-changelog-reviewer.md`): Add a RELEASING.md step that records the version and runs the review. The review is a dedicated read-only subagent definition, `claude-code-changelog-reviewer`. It reads the vendored changelog (`hooks-daemon remote-docs`) between the two versions. It writes its report into the release's plan folder or `untracked/release-artifacts/`.
 
-- [ ] ⬜ **Task 1.3** (BLOCKED: `remote-docs add` refuses the page on the `session-uuid` sensitive-content pattern before any capture exists; see the Task 1.4 report): Vendor `https://code.claude.com/docs/en/changelog` through remote-docs so the review reads a provenance-stamped copy.
+- [ ] ⬜ **Task 1.3** (BLOCKED: `remote-docs add` refuses the page on the `session-uuid` sensitive-content pattern before any capture exists; see the Task 1.4 report): Vendor `https://code.claude.com/docs/en/changelog` through remote-docs so the review reads a provenance-stamped copy. **Owner ruling (2026-10-05):** the owner chose the fake-values registry route (plan `docs-fake-values-registry`), which unblocks this task once it lands — see [OWNER-RULINGS-261005.md](../00483-threat-model-conformance-audit/OWNER-RULINGS-261005.md) (D1).
 
 - [x] ✅ **Task 1.4** (report: `subagent-reports/261003-task-1.4-backfill-review-sonnet.md`, range 2.1.272 to 2.1.288; ledger entries still to be filed by the coordinator): Run a first backfill review from the version current at v3.67.0 to today's version. Include the idle compaction question: confirm whether it exists and where it overlaps the daemon's compaction handling and its prompt-cache and usage features.
 
@@ -50,6 +50,7 @@ Prior art: Plan 00327 audited the hook contracts once and recorded `last_audited
 
 - [x] ✅ **Task 2.1** (report: `subagent-reports/261003-task-2.1-drift-advisory-sonnet.md`): Extend `contract_staleness`, or add a sibling handler, to compare the running Claude Code version with the last *reviewed* version. It advises once per new version. Prefer one handler with two checks over two near-identical handlers.
 - [ ] ⬜ **Task 2.2**: Brainstorm and decide with the owner on routine vs release-only review. Option: a Routine (CLAUDE/Routine) that runs the review when a new Claude Code version is first seen, between releases.
+  - **Coordinator call (2026-10-05, under the owner's "go with the clear winners" instruction):** release-only for now. The drift advisory (Task 2.1) already tells a session it is on an unreviewed version, and a per-version routine would spend a review every few days. Resolved; not an owner ruling.
 
 ## Success Criteria
 

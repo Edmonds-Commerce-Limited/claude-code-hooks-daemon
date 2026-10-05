@@ -1292,6 +1292,10 @@ Order of magnitude: about 3,500 lines of out-of-scope-only code reachable from t
 2,000 lines are in the two shared parsers (SEG, SE) and 1,400-1,700 in subagent_full_qa_blocker alone. Most of it
 causes no in-scope false positive; the rows marked YES are the Task 3.2 candidates.
 
+**Owner ruling (2026-10-05):** remove all of the table above; resolved — see [OWNER-RULINGS-261005.md](OWNER-RULINGS-261005.md) (A2).
+
 Agent-typable escape hatches found that pre-date the Plan 00259 rule (flagged for the owner, not classified under the
 threat model): `MUST_SQUASH_BECAUSE` (ancestry_preserving_merge), `MUST_STASH_BECAUSE` (git_stash),
 `MUST_SCAN_ROOT_BECAUSE` (root_recursion_guard), `MUST_SKIP_SAFE_MODE_BECAUSE` (bash_safe_mode).
+
+**Owner ruling (2026-10-05):** keep the four hatches, with the review's hygiene fixes; resolved — see [OWNER-RULINGS-261005.md](OWNER-RULINGS-261005.md) (B1).

@@ -113,11 +113,13 @@ for client projects, until it has run here for a while.
 
 ## Open questions for the owner
 
-1. Should the handler claim unassigned issues itself rather than tell the agent to? The default is to tell, because
-   assignment publishes to GitHub.
-2. Should it be on by default for client projects? The default is off in the client template and on here.
-3. When `gh` cannot answer (offline, not signed in, several accounts), should it advise or deny? The default is
-   advise, per the pragmatism review.
+**Coordinator call (2026-10-05, under the owner's "go with the clear winners" instruction):** all three are decided as
+the defaults below. Resolved; not owner rulings.
+
+1. **Resolved (coordinator call)**: tell the agent, do not auto-claim. Assignment publishes to GitHub.
+2. **Resolved (coordinator call)**: off for client projects (the client template), on here.
+3. **Resolved (coordinator call)**: advise, not deny, when `gh` cannot answer (offline, not signed in, several
+   accounts), per the pragmatism review.
 
 ## Success Criteria
 

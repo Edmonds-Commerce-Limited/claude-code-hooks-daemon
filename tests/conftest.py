@@ -12,7 +12,6 @@ import pytest
 
 from claude_code_hooks_daemon.config.models import LayoutConfig
 from claude_code_hooks_daemon.constants.layout import CORE_VENDORED_BUILD_DIR_NAMES
-from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.core.project_layout import ProjectLayout
 from claude_code_hooks_daemon.core.response_schemas import (
@@ -38,6 +37,7 @@ from tests.relay_gate_guard import fresh_relay_build, pytest_runtest_makereport
 from tests.signal_safety_net import install as install_signal_safety_net
 from tests.signal_safety_net import uninstall as uninstall_signal_safety_net
 from tests.source_tree_guard import assert_package_is_this_checkout
+from tests.support.git_fixtures import git_setup_timeout
 
 __all__ = ["fresh_relay_build", "pytest_collection_modifyitems", "pytest_runtest_makereport"]
 
@@ -269,7 +269,7 @@ class GitIndexWatch:
             capture_output=True,
             text=True,
             check=True,
-            timeout=Timeout.GIT_CONTEXT,
+            timeout=git_setup_timeout(),
         ).stdout
         tracked = [name for name in listing.split("\0") if name]
         if not tracked:
@@ -397,7 +397,7 @@ def tmp_git_repo(tmp_path: Path) -> Path:
     )
     for command in commands:
         subprocess.run(  # nosec B603
-            command, cwd=repo, capture_output=True, check=True, timeout=Timeout.GIT_CONTEXT
+            command, cwd=repo, capture_output=True, check=True, timeout=git_setup_timeout()
         )
     (repo / "tracked.txt").write_text("one\n", encoding="utf-8")
     subprocess.run(  # nosec B603
@@ -405,14 +405,14 @@ def tmp_git_repo(tmp_path: Path) -> Path:
         cwd=repo,
         capture_output=True,
         check=True,
-        timeout=Timeout.GIT_CONTEXT,
+        timeout=git_setup_timeout(),
     )
     subprocess.run(  # nosec B603
         ["git", "commit", "-m", "init"],
         cwd=repo,
         capture_output=True,
         check=True,
-        timeout=Timeout.GIT_COMMIT,
+        timeout=git_setup_timeout(),
     )
     return repo
 

@@ -3,6 +3,9 @@
 Rulings in this file are marked by who made them. An agent ruling is the coordinator's
 and can be overturned by the owner; it is not an owner decision.
 
+**Coordinator call (2026-10-05, under the owner's "go with the clear winners" instruction):** D1, D2 and D3 are
+confirmed (resolved). They are internal, already built and reversible. Not owner rulings.
+
 ## D1: The per-release record is a YAML map (agent ruling, coordinator)
 
 `CLAUDE/development/claude-code-versions.yaml` maps each daemon release to the Claude Code

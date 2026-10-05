@@ -81,8 +81,10 @@ agent.
   (`CLAUDE/Security/README.md`, `CLAUDE/CodeLifecycle/Bugs.md`, `CLAUDE/HANDLER_DEVELOPMENT.md`).
   Each gets one pointer to the vendored spec, not a restatement (DocumentationStrategy.md).
   Done: Bugs.md already carried the section, so its vendored-copy mention now links the path.
-- [ ] ⬜ **Task 1.4**: Comment on #65 and #67 with the ruling and this plan. Use
+- [x] ✅ **Task 1.4**: Comment on #65 and #67 with the ruling and this plan. Use
   `Addresses #N`, never a closing keyword. Remove `agent-needs-human`.
+  **Owner ruling (2026-10-05):** yes, post it — see [OWNER-RULINGS-261005.md](../00483-threat-model-conformance-audit/OWNER-RULINGS-261005.md) (C2). Done 2026-10-05: comments posted on #65 and #67 ("Addresses", no closing keyword), and `agent-needs-human`
+  removed from both.
 
 ### Phase 2: Conformance assessment
 
@@ -104,6 +106,14 @@ agent.
     installed (fresh clone), venv missing, version mismatch, repo unconfigured, and CI. G14
     is therefore mostly met. The declaration should state exactly those states, not a
     blanket fail-open.
+  - **Coordinator call (2026-10-05, under the owner's "go with the clear winners" instruction), for the owner batch in
+    [REVIEW-fable.md](REVIEW-fable.md):** G3 close; G10 confirm; G11 follow-up plan (`probe --only` stays here); G16
+    grade both levels before publishing; G14 use the corrected wording above, not Fable's "fail open" text. Resolved;
+    not owner rulings. G1, G2, G4, DEFSET and Task 1.4 remain with the owner.
+  - **Owner ruling (2026-10-05):** all five resolved — see [OWNER-RULINGS-261005.md](../00483-threat-model-conformance-audit/OWNER-RULINGS-261005.md).
+    DEFSET (C1): the action guards are outside the Defence set. G1 (B2): no central exceptions file; suppressions stay
+    inline, each with its reasoning, delete as many as possible. G2 (B1): keep the `MUST_*_BECAUSE` hatches with the
+    hygiene fixes. G4 (B3): reasons on config exceptions now, required at the next major. Task 1.4 (C2): post.
 - [ ] ⬜ **Task 2.3**: Put the gaps to the owner as one batch: close, accept as a known gap, or
   out of scope. Expected questions:
   - §4.3 against the `MUST_..._BECAUSE` declarations: is an in-command justification a
