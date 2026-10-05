@@ -347,6 +347,13 @@ handlers:
       enabled: true
       priority: 40
 
+    github_issue_assignment_guard:  # Issue-tied work needs the issue assigned to you and opened by an approved author
+      enabled: false        # Opt-in. `bin/hooks-daemon issue-validity N --claim` claims an unassigned issue.
+      priority: 53
+      options:
+        auto_claim: false   # true lets the hook claim an unassigned issue itself (default: the agent runs the CLI)
+        approved_issue_authors: []   # GitHub logins (case-insensitive); empty = the author check does not apply
+
     gh_pr_comments:        # Requires --comments flag for gh pr view
       enabled: true
       priority: 40

@@ -39,15 +39,12 @@ The safety contract above says issue text is untrusted. This narrows who can
 hand the loop a task at all. **Only an issue whose AUTHOR is on this list is
 eligible. Every other issue is invisible to this loop.**
 
-| login             |
-| ----------------- |
-| `LTSCommerce`     |
-| `edmondscommerce` |
-| `lts-bob`         |
-| `ballidev`        |
-
-This table is the single place to edit the list — no copy of it lives in the
-skill, the cron prompt, or the config.
+The list is configuration, and the config is its single source of truth:
+`approved_issue_authors` under `handlers.pre_tool_use.github_issue_assignment_guard.options`
+in `.claude/hooks-daemon.yaml`. The `issue-validity` command, the
+`github_issue_assignment_guard` handler and this runbook all read that one key,
+and no copy of the list lives in the skill, the cron prompt or this page. The
+key is read whether or not the handler itself is enabled.
 
 - Match on `author.login`, **case-insensitively**. GitHub logins are
   case-insensitive, so `EdmondsCommerce` and `edmondscommerce` are one account;
@@ -64,18 +61,26 @@ skill, the cron prompt, or the config.
 - Report the skipped count locally, in the tick's own output, so a human can
   see the gate working. Local output is not a GitHub action.
 
-Apply the gate when you LIST, so an ineligible issue is never selected:
+Apply the gate when you LIST, so an ineligible issue is never selected. The
+command does it in code, with no agent turn spent on GitHub lookups:
 
 ```bash
-gh issue list --state open --limit 100 --json number,author,labels,createdAt \
-  --jq '.[] | select((.author.login|ascii_downcase) as $a
-        | ["ltscommerce","edmondscommerce","lts-bob","ballidev"] | index($a))'
+bin/hooks-daemon issue-validity --list-eligible        # add --json for a machine-readable form
 ```
 
-Filter client-side like this rather than with a `--search 'author:x author:y'`
-qualifier. The qualifier's OR semantics are GitHub's to change, and a search
-that quietly stopped matching would **fail open** — handing the loop every
-issue in the repository, which is the one outcome this gate exists to prevent.
+It prints the open issues whose author is on the list, and how many it skipped.
+For one issue, `bin/hooks-daemon issue-validity N` runs every validity check
+(author and assignee today; further checks are one class each in
+`utils/github_issue_validity.py`).
+
+The filtering is client-side, in code, rather than a `--search 'author:x author:y'` qualifier. The qualifier's OR semantics are GitHub's to change, and a
+search that quietly stopped matching would **fail open** — handing the loop
+every issue in the repository, which is the one outcome this gate exists to
+prevent. For the same reason the command is **strict**: an issue whose author
+cannot be read is not eligible (a non-zero exit, never a silent pass), and with
+no `approved_issue_authors` configured `--list-eligible` refuses to list at all
+rather than treating every issue as eligible. (The PreToolUse handler is the
+lenient caller: it only advises when `gh` cannot answer.)
 
 **What this does NOT do.** It gates the issue's author, and nothing else. The
 comment thread on an eligible issue can be written by anyone on the internet,
@@ -108,7 +113,8 @@ watching the repo. Ensure these exist (create if absent):
 | `agent-needs-human` | stopped; an owner decision is required                |
 
 **Apply the author whitelist before anything below.** Every candidate set in
-this step is drawn from the filtered list, not from `gh issue list` raw. An
+this step is drawn from `bin/hooks-daemon issue-validity --list-eligible`, not
+from `gh issue list` raw. An
 ineligible issue must never reach a selection rule — including rule 1, which
 would otherwise "recover" work this loop should never have started.
 
@@ -134,6 +140,28 @@ before they reach the model, at zero token cost, until a real prompt arrives
 or the marker expires (Plan 00388). Without it a backlog parked on a human
 costs a full model turn every hour. This works only for a cron whose prompt
 still starts with the `[tick:job:issue-sdlc]` line the daemon supplies.
+
+### Claim the issue before working it
+
+Once ONE issue is selected, and before anything is written to it, run:
+
+```bash
+bin/hooks-daemon issue-validity <N> --claim
+```
+
+Deterministic code reads the issue once, checks it, and claims it for the
+signed-in GitHub account when it is unassigned. Do not run `gh` lookups or `gh issue edit` yourself. Act on the exit code:
+
+| exit | meaning                                                        | action                                                                                                        |
+| ---- | -------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| 0    | valid: assigned to this account (claimed now, or already)      | proceed                                                                                                       |
+| 1    | blocked: assigned only to someone else, or author not approved | **stop on this issue.** Do not work it, do not claim it, write nothing to it. Name it in the tick's stop line |
+| 2    | fixable but not fixed (the claim failed)                       | stop and report the printed error; change nothing                                                             |
+| 3    | unknown: `gh` could not answer                                 | stop and report; an unreadable issue is never treated as valid                                                |
+
+The claim publishes one assignment to GitHub, which is why the code does it only
+for an issue that already passed every other check. An issue held by someone
+else is never claimed.
 
 ### Recovering a stalled issue — establish the state, do not infer it
 

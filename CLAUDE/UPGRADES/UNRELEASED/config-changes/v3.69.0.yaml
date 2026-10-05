@@ -1,0 +1,60 @@
+# Drafted by Plan 00490. The VERSION in the filename and the `version:` key are
+# a target, not a decision; the release agent confirms or renames this file.
+version: "3.69.0"
+date: "UNRELEASED"
+
+breaking: false
+
+config_changes:
+  added:
+    - key: handlers.pre_tool_use.github_issue_assignment_guard
+      recommended: false
+      dormant: true
+      description: >-
+        NEW (Plan 00490). Work tied to a GitHub issue (a Write/Edit inside a
+        plan whose PLAN.md header carries `**GitHub Issue**: #N`, or a
+        `git commit` citing that issue and naming that plan) is denied unless
+        the issue is assigned to the signed-in GitHub account and, when an
+        author list is configured, opened by an approved author. An unassigned
+        issue is claimed with `bin/hooks-daemon issue-validity N --claim`;
+        work not tied to an issue is never judged. A lookup that fails only
+        advises. Off by default.
+      example_yaml: |
+        handlers:
+          pre_tool_use:
+            github_issue_assignment_guard:
+              enabled: true
+              priority: 53
+      migration_note: >-
+        Opt in only if your plans record `**GitHub Issue**: #N` and your
+        sessions are signed in to `gh`.
+    - key: handlers.pre_tool_use.github_issue_assignment_guard.options.approved_issue_authors
+      recommended: false
+      dormant: true
+      description: >-
+        NEW (Plan 00490). The list of GitHub logins (case-insensitive) whose
+        issues agents may pick up. The single home of the list: the
+        `github_issue_assignment_guard` handler, `bin/hooks-daemon issue-validity`
+        (including `--list-eligible`) and the issue-sdlc runbook all read it.
+        Unset or empty, the author check does not apply, and `--list-eligible`
+        refuses to list rather than treat every issue as eligible.
+      example_yaml: |
+        handlers:
+          pre_tool_use:
+            github_issue_assignment_guard:
+              options:
+                approved_issue_authors: [your-login]
+    - key: handlers.pre_tool_use.github_issue_assignment_guard.options.auto_claim
+      recommended: false
+      dormant: true
+      description: >-
+        NEW (Plan 00490). Default `false`: the hook only judges, and the agent
+        runs the claim command. `true` lets the hook claim an unassigned,
+        otherwise valid issue itself, which publishes an assignment to GitHub
+        from inside a hook.
+      example_yaml: |
+        handlers:
+          pre_tool_use:
+            github_issue_assignment_guard:
+              options:
+                auto_claim: false

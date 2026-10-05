@@ -4,7 +4,7 @@
 
 ## Active Handlers
 
-### PreToolUse (72 handlers)
+### PreToolUse (73 handlers)
 
 | Priority | Handler | Behaviour | Description |
 |----------|---------|----------|-------------|
@@ -75,6 +75,7 @@
 | 49 | npm_command | ADVISORY | Enforce llm: prefixed npm commands and block direct npx tool usage |
 | 50 | markdown_organization | BLOCKING | Enforce markdown file organization rules |
 | 50 | validate_instruction_content | BLOCKING | Validates content being written to CLAUDE.md and README.md files |
+| 53 | github_issue_assignment_guard | BLOCKING | Deny issue-tied work on an unclaimed, foreign or unapproved issue |
 | 55 | web_search_year | ADVISORY | Validate WebSearch queries don't use outdated years |
 | 57 | daemon_docs_guard | ADVISORY | Warn when reading from the hooks-daemon internal CLAUDE/ docs directory |
 | 58 | flaggable_work_advisor | ADVISORY | Advise delegating safeguard-flaggable work BEFORE opening the content |

@@ -1,6 +1,6 @@
 # Plan 00490: github issue assignment guard
 
-**Status**: Not Started
+**Status**: In Progress
 **Created**: 2026-10-05
 **Owner**: dev
 **Priority**: Medium
@@ -20,17 +20,22 @@ Sessions do not always work on GitHub issues, so nothing may force every session
 when the work is tied to an issue. The main case is a plan that names its issue in the existing PLAN.md header
 convention, `**GitHub Issue**: #N` (see CLAUDE/Plan/CLAUDE.md, "Plan sources").
 
-The owner left the mechanism open ("exactly how you go about that I don't mind"). The design below is the
-coordinator's proposal. Items marked **[coordinator call]** are defaults the owner may overturn. This plan follows
-the guard-effort pragmatism review (Plan 00483 open question 4): it must not break ordinary sessions, and it stays off
-the hot path for anything not tied to an issue.
+The owner left the mechanism open ("exactly how you go about that I don't mind"), then steered it twice: the assignee
+work is to be **deterministic code, with no agent turns spent on basic GitHub lookups**, wrapped in a **GitHub issue
+validity** module with the assignee as one check among several; and an **author whitelist** is a major validity flag,
+so agents only pick up issues created by approved identities, and that list is configurable. Items marked
+**[coordinator call]** are defaults the owner may overturn. The plan follows the guard-effort pragmatism review
+(Plan 00483 open question 4): it must not break ordinary sessions, and it stays off the hot path for anything not tied
+to an issue.
 
 ## Goals
 
-- A session cannot start or continue issue-tied work on an issue assigned only to someone else.
-- A session working on an unassigned issue is told to claim it, with the exact command, before work continues.
-- Work on an issue assigned to self is never interrupted.
+- A session cannot start or continue issue-tied work on an issue assigned only to someone else, or opened by an author
+  nobody approved.
+- A session working on an unassigned issue is told to claim it with one deterministic command before work continues.
+- Work on a valid issue is never interrupted.
 - Work not tied to an issue is never judged, slowed or denied by this handler.
+- Looking up and claiming an issue costs no agent reasoning: code does it.
 
 ## Non-Goals
 
@@ -39,91 +44,146 @@ the hot path for anything not tied to an issue.
   only advises.
 - Judging issues in repositories other than the one the work is in.
 - Changing who may be assigned. Org permissions are GitHub's business.
+- The other validity checks listed below. The structure admits them; none is built now.
 
-## Design (proposal)
+## Design
 
-**Identity.** The signed-in login is `gh api user --jq .login`, resolved once per daemon process and cached. If `gh`
-is missing, unauthenticated or fails, the handler cannot decide. It emits an advisory and never denies. **\[coordinator
-call: fail open, per the pragmatism review's R3 direction\]**
+### The validity module (the owner's steer)
 
-**When work is "tied to an issue".** Detection is cheap and needs no network:
+`src/claude_code_hooks_daemon/utils/github_issue_validity.py` is a deterministic checker with pluggable checks.
 
-1. A Write/Edit inside a plan folder whose PLAN.md header carries `**GitHub Issue**: #N`.
-2. A `git commit` whose message references the issue (`Addresses #N`, the project's non-closing form) while in a plan
-   or branch tied to it.
-3. The issue-sdlc runbook's own "start work on issue N" step (CLAUDE/development/IssueSdlc.md), which claims
-   explicitly.
+- **`ValidityCheck`** is a protocol: a `name`, a `needs_identity` flag, and `evaluate(facts, identity) -> CheckResult`.
+  A result has a status (`ok`, `fixable`, `blocking`, `unknown`, or `n/a`), a message, and an optional deterministic
+  **`FixAction`** (a `gh` argument list).
+- **`IssueFacts`** come from ONE `gh issue view N --json assignees,state,author,labels` call per issue, cached with a
+  TTL, with a timeout and an injectable runner, so no test touches the network. The signed-in login comes from
+  `gh api user --jq .login`, resolved once per process. It is fetched only when a check needs it.
+- **`check_issue(number, checks) -> ValidityReport`** returns the per-check results and an overall verdict. Precedence:
+  blocked, fixable, unknown, valid.
+- Only a settled state stays cached. A fixable or blocked report drops its cached facts, so the retry after a claim
+  sees the new assignee at once. A failure is remembered for a minute, so an offline machine does not pay a timeout on
+  every edit.
+- Every login read from GitHub is validated against GitHub's login grammar. An unreadable login is replaced by a
+  placeholder, never dropped: dropping an assignee could turn "someone else's" into "unassigned", which is claimable.
 
-Everything else exits in `matches()` before any lookup.
+**Checks that ship:**
 
-**Assignee lookup.** `gh issue view N --json assignees` against the repository's default remote, with a short timeout.
-The result is cached per issue for a few minutes, so one plan's many edits cost one lookup. A timeout or error means
-advise, not deny.
+| Check                  | ok                          | fixable                      | blocking                                 | unknown               | n/a                          |
+| ---------------------- | --------------------------- | ---------------------------- | ---------------------------------------- | --------------------- | ---------------------------- |
+| `AssigneeCheck`        | self among the assignees    | nobody assigned; fix = claim | assigned to others only                  | no identity, no facts |                              |
+| `AuthorWhitelistCheck` | author on the approved list |                              | author not on the list, or none recorded | no facts              | no list configured, or empty |
 
-**Verdicts:**
+Author matching is case-insensitive (GitHub logins are). An empty list is treated like an absent one, never as a
+lockout.
 
-| Assignees                       | Verdict                                                                   |
-| ------------------------------- | ------------------------------------------------------------------------- |
-| includes self                   | allow, silently                                                           |
-| empty                           | deny; tell the agent to claim with `gh issue edit N --add-assignee @me`   |
-| others only                     | deny; the issue belongs to someone else, so do not work on it or claim it |
-| lookup failed / identity absent | allow with an advisory naming what could not be checked                   |
+**Candidate checks, one new class each, NOT built now:** issue open or closed (a closed issue is not work to start);
+a label rule (for example the issue-sdlc `agent-needs-human` label); a repository check (the issue belongs to this
+repository, not a cross-reference); a "not already worked by another live plan" check.
 
-**[coordinator call]** The handler does NOT claim the issue itself. Assigning is an outward-facing write to GitHub,
-so the agent runs the command and the action is visible in its transcript. The deny reason gives the exact command.
-Once the agent has claimed, it retries, the cache is refreshed, and the work goes ahead.
+### Strictness belongs to the caller
 
-**[coordinator call]** Defaults: enabled in this repository's own config, and off by default in the shipped template
-for client projects, until it has run here for a while.
+The module reports `unknown` and decides nothing about it.
+
+- **The PreToolUse handler is lenient:** `unknown` only advises, once per failure window, and never denies.
+- **The CLI is strict:** `unknown` is not eligible and exits non-zero, because the issue-sdlc author gate must never
+  fail open. With no list configured, `--list-eligible` refuses to list at all.
+
+### The author list: one home
+
+The list is the handler option `approved_issue_authors` under
+`handlers.pre_tool_use.github_issue_assignment_guard.options` in `.claude/hooks-daemon.yaml`. The config schema has no
+shared `github` section, so the handler's own options are the home. The CLI reads the same key whether or not the handler
+is enabled, so the handler, the CLI and the issue-sdlc runbook share one source. This repository's config is seeded with
+the four logins the runbook used to carry in a table.
+
+### The CLI: `bin/hooks-daemon issue-validity`
+
+- `issue-validity N [--claim] [--json]` prints the report. With `--claim` code performs the claim
+  (`gh issue edit N --add-assignee @me`) when, and only when, the verdict is fixable, so nothing is ever written to a
+  blocked or unreadable issue. Exit codes: 0 valid, 1 blocked, 2 fixable and not fixed, 3 unknown, 4 usage or config.
+- `issue-validity --list-eligible [--json]` prints the open issues that pass the author check, and how many it skipped.
+
+### The handler: a thin consumer
+
+`github_issue_assignment_guard` (PreToolUse) is judge-only. **Work is tied to an issue** when it is:
+
+1. a Write/Edit of a tracked document inside a plan folder whose PLAN.md header carries `**GitHub Issue**: #N` (archived
+   plans and the JOURNAL are never tied; a header with several issues ties to each);
+2. a `git commit` that cites `#N` and names a plan (`Plan 00490`) whose header carries that same `#N`. A commit citing
+   some other `#N`, such as a PR number, is not issue work.
+
+Everything else exits in `matches()` after a string test or a path regex: no subprocess, no network, no file read.
+A tied candidate reads one plan header, cached per plan file against its mtime.
+
+| Report verdict | Handler                                                                                                   |
+| -------------- | --------------------------------------------------------------------------------------------------------- |
+| valid          | allow, silently                                                                                           |
+| fixable        | deny, naming the ONE command: `bin/hooks-daemon issue-validity N --claim`, then retry                     |
+| blocked        | deny: assigned to someone else, or author not approved. Do not work on it, do not claim it, write nothing |
+| unknown        | allow with an advisory naming what could not be checked                                                   |
+
+**[coordinator call]** The handler never writes to GitHub unless the option **`auto_claim`** is on (default off). With
+it on, an otherwise valid unassigned issue is claimed inside the hook and the work goes ahead; a blocked issue is never
+claimed.
+
+**[coordinator call]** Defaults: enabled in this repository's own config, off by default in the shipped template for
+client projects, until it has run here for a while.
 
 ## Tasks
 
 ### Phase 1: Confirm the ground
 
-- [ ] ⬜ **Task 1.1**: Inventory where the `**GitHub Issue**: #N` header appears today (live and archived plans), and
-  how issue-sdlc and agents start issue work. Confirm the detection points above, or adjust them.
-- [ ] ⬜ **Task 1.2**: Probe `gh` behaviour here: `gh api user`, `gh issue view --json assignees`, and
-  `gh issue edit --add-assignee @me`, using a read-only probe of an existing issue (no assignment changes made
-  for the probe). Also probe the failure shapes: no auth, no network, an issue that does not exist.
+- [x] ✅ **Task 1.1**: Inventory where the `**GitHub Issue**: #N` header appears today, and how issue-sdlc starts issue
+  work. Found 39 plan files carrying the header, in the forms `#N`, `#N, #M`, `#N (note)` and `(to be opened ...)`. The
+  last form names no issue and is untied. The detection points above stand, with two adjustments: a header can name
+  several issues, and the issue-sdlc runbook's "start work" step is the claim step (Task 3.1) rather than a hook
+  detection point, because it happens before any plan exists.
+- [x] ✅ **Task 1.2**: Probe `gh` read-only. `gh api user --jq .login` returns the login. `gh issue view N --json assignees,state,author,labels` returns the fields in one call, with `assignees: []` for an unassigned issue.
+  Failure shapes: a missing issue exits 1 with "Could not resolve to an issue"; no auth exits 4 ("gh auth login"); a bad
+  token exits 1 ("Bad credentials (HTTP 401)"); no network exits 1 with the dial error. Nothing was written to GitHub.
 
-### Phase 2: The handler (TDD)
+### Phase 2: The validity module, the CLI and the handler (TDD)
 
-- [ ] ⬜ **Task 2.1**: Failing tests first, for each row of the verdict table and the "not tied to an issue" fast path.
-  Use a faked `gh` runner; there is no network in the tests.
-- [ ] ⬜ **Task 2.2**: Implement the PreToolUse handler, with identity and assignee caches and timeouts. Detection
-  stays in `matches()`, with no I/O for untied work.
-- [ ] ⬜ **Task 2.3**: Add the handler's `get_acceptance_tests()`, its CLAUDE.md guidance, its config entries
-  (enabled here, off in the client template) and its rule IDs.
-- [ ] ⬜ **Task 2.4**: Add a regression check that a corpus of ordinary non-issue commands and edits stays allowed and
-  makes no `gh` call.
+- [x] ✅ **Task 2.1**: Failing tests first for the module (every check, every verdict, caching, the author list absent,
+  empty and present, case-insensitive matching), the CLI (exit codes, `--claim`, `--list-eligible` with the injected
+  runner) and the handler (each verdict row, the tied and untied detection, the no-`gh` corpus).
+- [x] ✅ **Task 2.2**: Implement `utils/github_issue_validity.py` with `AssigneeCheck` and `AuthorWhitelistCheck`.
+- [x] ✅ **Task 2.3**: Implement the `issue-validity` CLI, with the claim performed by code, never for a blocked issue.
+- [x] ✅ **Task 2.4**: Implement the handler as a consumer of `check_issue`, with the `auto_claim` option and its
+  `get_acceptance_tests()`, CLAUDE.md guidance, rule IDs and config entries (enabled here, off in the client template).
+- [x] ✅ **Task 2.5**: A regression corpus of ordinary non-issue commands and edits stays allowed and makes no `gh` call.
 
 ### Phase 3: Workflow and docs
 
-- [ ] ⬜ **Task 3.1**: Add a claim step to the issue-sdlc runbook: check the assignees, claim when unassigned, stop when
-  the issue belongs to someone else.
-- [ ] ⬜ **Task 3.2**: Add a release note under CLAUDE/UPGRADES/UNRELEASED/release-notes/ and the handler reference
-  entry.
+- [x] ✅ **Task 3.1**: The issue-sdlc runbook selects issues with `issue-validity --list-eligible`, claims with
+  `issue-validity N --claim` and acts on the exit code. Its author table and `jq` filter are replaced by a pointer to the
+  config key; its safety reasoning (client-side filtering, untrusted comments, nothing written to an ineligible issue)
+  stays.
+- [x] ✅ **Task 3.2**: A release note, the config-changes entry and the handler reference entry.
 
 ### Phase 4: Verify
 
 - [ ] ⬜ **Task 4.1**: Do a live dogfood check in this repository after a daemon restart:
   - an untied edit is silent;
   - an edit in a plan tied to an issue assigned to self is allowed;
-  - an unassigned issue is denied with the claim command.
+  - an unassigned issue is denied with the claim command;
+  - `bin/hooks-daemon issue-validity --list-eligible` lists only approved authors' issues.
 
 ## Open questions for the owner
 
 1. Should the handler claim unassigned issues itself rather than tell the agent to? The default is to tell, because
-   assignment publishes to GitHub.
-2. Should it be on by default for client projects? The default is off in the client template and on here.
-3. When `gh` cannot answer (offline, not signed in, several accounts), should it advise or deny? The default is
-   advise, per the pragmatism review.
+   assignment publishes to GitHub. The `auto_claim` option exists for the owner who answers yes.
+2. Auto-claim from the hook (default off), or via the CLI only?
+3. Should the handler be on by default for client projects? The default is off in the client template and on here.
+4. When `gh` cannot answer (offline, not signed in, several accounts), should the handler advise or deny? The default
+   is advise, per the pragmatism review. The CLI is strict regardless.
+5. Should an empty `approved_issue_authors` mean "no author check" (the default) or "nobody is approved"? The default
+   avoids a lockout from a mis-edited config.
 
 ## Success Criteria
 
-- [ ] All verdict-table rows are pinned by tests, and the not-tied path makes no `gh` call and adds no measurable
-  latency.
-- [ ] The issue-sdlc runbook claims before working and stops on someone else's issue.
+- [x] All verdict rows are pinned by tests, and the untied path makes no `gh` call.
+- [x] The issue-sdlc runbook claims before working, stops on someone else's issue, and reads its author list from config.
 - [ ] The live dogfood check (Task 4.1) passes after a daemon restart.
 
 ## Delivery & Milestones

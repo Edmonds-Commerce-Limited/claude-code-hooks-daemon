@@ -511,6 +511,12 @@ _MUST_NOT_MATCH: dict[str, tuple[str, ...]] = {
 # assumption that let the git bypasses survive.
 _NOT_COMMAND_ANCHORED: dict[str, str] = {
     "AbsolutePathHandler": "matches on the file_path parameter, not a command",
+    "GithubIssueAssignmentGuardHandler": (
+        "matches on a Write/Edit path inside a plan folder whose PLAN.md header names an "
+        "issue, or on a `git commit` message citing that issue while naming the plan; the "
+        "commit half reuses GIT_INVOCATION, so global options and quoting are already "
+        "covered, and the denial is advice about a claim rather than a command to evade"
+    ),
     "UsagePauseToolGateHandler": (
         "matches on session state (a live usage pause or a host ceiling crossed) and "
         "on tool_name against a fixed allow-list of Claude Code TOOLS; it never reads "

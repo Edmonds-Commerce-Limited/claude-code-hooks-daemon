@@ -4,7 +4,7 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
-- [00490: github issue assignment guard](00490-github-issue-assignment-guard/PLAN.md) - Not Started (owner request: issue-tied work requires the issue assigned to the signed-in GitHub account; claim it when unassigned, stop when it is someone else's)
+- [00490: github issue assignment guard](00490-github-issue-assignment-guard/PLAN.md) - In Progress (owner request: issue-tied work requires the issue assigned to the signed-in GitHub account and opened by an approved author; deterministic `issue-validity` checker and CLI, claim when unassigned, stop when it is someone else's)
 
 - [00489: supervisor in-container restart primitive](00489-supervisor-in-container-restart-primitive/PLAN.md) - Not Started (owner decision D2 in Plan 00487, #71: 00487's Tasks 1.4 and 1.5, the in-container `Restart` and the host-half `before_spawn` that the fedora-desktop 00146 credential switch needs)
 

@@ -279,6 +279,8 @@ class ConfigTemplate:
             "      #     - Dart\n"
             "    gh_issue_comments: {enabled: true, priority: 40}  # Require --comments on gh issue view\n"
             "    gh_pr_comments: {enabled: true, priority: 40}    # Require --comments on gh pr view\n"
+            # Plan 00490: opt-in until it has run in the daemon's own repository for a while.
+            "    github_issue_assignment_guard: {enabled: false, priority: 53}  # Issue-tied work needs the issue assigned to you and an approved author\n"
             "    plan_time_estimates: {enabled: true, priority: 40}  # Block time estimates in plans\n"
             "    conflict_marker_commit_gate: {enabled: true, priority: 42, options: {exclude_paths: []}}  # Deny a commit whose added lines carry a merge-conflict marker, raw or formatter-disguised; exclude_paths for documented examples\n"
             "    staged_lint_gate: {enabled: true, priority: 43}  # Cheap syntax-check backstop over staged files on git commit (warn-first)\n"

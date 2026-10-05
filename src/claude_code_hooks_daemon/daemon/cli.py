@@ -6649,6 +6649,45 @@ def cmd_secret_meta(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_issue_validity(args: argparse.Namespace) -> int:
+    """Check whether a GitHub issue may be worked on; optionally claim it.
+
+    Plan 00490: deterministic code answers the assignee and author questions so
+    no agent turn is spent on GitHub lookups. ``--claim`` assigns an unassigned
+    issue to the signed-in account (never a blocked or unreadable one);
+    ``--list-eligible`` prints the open issues by approved authors.
+
+    Returns:
+        0 valid, 1 blocked, 2 fixable and not fixed, 3 unknown, 4 usage/config.
+    """
+    from claude_code_hooks_daemon.daemon.issue_validity_cli import (
+        EXIT_USAGE,
+        load_approved_authors,
+        run_issue_validity,
+    )
+    from claude_code_hooks_daemon.utils.github_issue_validity import (
+        IssueValidityService,
+        make_gh_runner,
+    )
+
+    project_root = Path(getattr(args, "project_root", None) or get_project_path(None))
+    try:
+        approved = load_approved_authors(project_root)
+    except ValueError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return EXIT_USAGE
+    return run_issue_validity(
+        number=args.number,
+        claim=args.claim,
+        as_json=args.json,
+        list_eligible=args.list_eligible,
+        approved=approved,
+        service=IssueValidityService(make_gh_runner(cwd=project_root)),
+        stdout=sys.stdout,
+        stderr=sys.stderr,
+    )
+
+
 def cmd_probe(args: argparse.Namespace) -> int:
     """Send one hand-built payload through the project's hook entry point, marked.
 
@@ -11509,6 +11548,33 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser_secret_meta.set_defaults(func=cmd_secret_meta)
+
+    # issue-validity (Plan 00490) — deterministic GitHub issue lookup and claim
+    parser_issue_validity = subparsers.add_parser(
+        "issue-validity",
+        help=(
+            "Check a GitHub issue (assignee, approved author); --claim assigns it to the "
+            "signed-in account; --list-eligible lists open issues by approved authors"
+        ),
+    )
+    parser_issue_validity.add_argument(
+        "number", nargs="?", type=int, help="Issue number (omit with --list-eligible)"
+    )
+    parser_issue_validity.add_argument(
+        "--claim",
+        action="store_true",
+        help="Assign an unassigned issue to the signed-in account (never a blocked one)",
+    )
+    parser_issue_validity.add_argument(
+        "--list-eligible",
+        action="store_true",
+        help="List open issues whose author is in approved_issue_authors",
+    )
+    parser_issue_validity.add_argument("--json", action="store_true", help="Emit JSON")
+    parser_issue_validity.add_argument(
+        "--project-root", type=Path, help="Project root (auto-detected by default)"
+    )
+    parser_issue_validity.set_defaults(func=cmd_issue_validity)
 
     # probe (Plan 00466 N12) — a hand-built payload, marked as synthetic traffic
     parser_probe = subparsers.add_parser(
