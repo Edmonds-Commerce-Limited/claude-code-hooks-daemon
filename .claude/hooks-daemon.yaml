@@ -540,12 +540,11 @@ handlers:
       enabled: true
       priority: 36
       options:
-        # Owner ruling: "we should be blocking ; command chaining -- either use
-        # set -e and/or force && chaining". Every ;/newline-sequenced Bash
-        # command needs `set -euo pipefail` or `&&` chaining, not just
-        # mutator-bearing ones.
+        # Owner ruling A3 (Plan 00483): only a ;/newline-sequenced Bash command
+        # that contains a mutator (git commit, git push, ...) needs
+        # `set -euo pipefail` or `&&` chaining; read-only chains are allowed.
         mode: block
-        only_with_mutator: false
+        only_with_mutator: true
       #   mode: warn              # warn | block (inject is reserved and rejected at load)
       #   require: [errexit, pipefail]  # nounset available but off-default
       #   min_statements: 2

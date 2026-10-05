@@ -58,3 +58,26 @@ config_changes:
             github_issue_assignment_guard:
               options:
                 auto_claim: false
+  changed:
+    - key: handlers.pre_tool_use.bash_safe_mode.options.only_with_mutator
+      recommended: true
+      dormant: false
+      description: >-
+        DEFAULT CHANGED (owner ruling A3, Plan 00483). `only_with_mutator` now
+        defaults to `true`, reversing the block-everything default that
+        3.68.0 shipped. A `;`- or newline-sequenced Bash command with no `set`
+        safety prelude is denied only when it contains a mutator (`git add`,
+        `git commit`, `git push`, `git tag`, ...); a read-only chain such as
+        `grep x a; grep y b` is allowed. The handler stays enabled and in
+        `mode: block`.
+      example_yaml: |
+        handlers:
+          pre_tool_use:
+            bash_safe_mode:
+              options:
+                only_with_mutator: true
+      migration_note: >-
+        No action needed to adopt the new default. A project that wants the
+        strict scope (every sequenced command needs a prelude or `&&`
+        chaining) sets `only_with_mutator: false`; a project config that
+        pinned `only_with_mutator: false` keeps that behaviour.
