@@ -47,6 +47,20 @@ _KEY_NAME = "name"
 _KEY_PROMPT_ID = "prompt_id"
 
 
+class _WorktreeAddError(subprocess.CalledProcessError):
+    """``git worktree add`` failure whose message carries git's own reason.
+
+    ``CalledProcessError.__str__`` prints only the exit status, so a 127 from
+    ``run_git`` (git could not be spawned; the cause is in stderr) reached the
+    user as an unexplained number (00466 N53).
+    """
+
+    def __str__(self) -> str:
+        stderr = (self.stderr or "").strip()
+        base = super().__str__()
+        return f"{base}: {stderr}" if stderr else base
+
+
 class WorktreeCreateHandler(WorktreeCreateHandlerBase):
     """Create a git worktree at a semantic path and return its absolute path."""
 
@@ -151,9 +165,7 @@ class WorktreeCreateHandler(WorktreeCreateHandlerBase):
             Path(cwd), "worktree", "add", "-b", branch, str(path), timeout=Timeout.GIT_WORKTREE
         )
         if result.returncode != 0:
-            raise subprocess.CalledProcessError(
-                result.returncode, result.args, result.stdout, result.stderr
-            )
+            raise _WorktreeAddError(result.returncode, result.args, result.stdout, result.stderr)
 
     def get_claude_md(self) -> str | None:
         """Guidance injected into the project CLAUDE.md.
