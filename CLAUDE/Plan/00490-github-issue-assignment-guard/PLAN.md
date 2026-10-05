@@ -163,7 +163,7 @@ client projects, until it has run here for a while.
 
 ### Phase 4: Verify
 
-- [ ] ⬜ **Task 4.2**: Confirm, or make, `issue-validity --list-eligible` refuse to run when no
+- [x] ✅ **Task 4.2**: Confirm, or make, `issue-validity --list-eligible` refuse to run when no
   `approved_issue_authors` list is configured, so the issue-sdlc selection never fails open (open question 4).
 - [x] ✅ **Task 4.1**: Do a live dogfood check in this repository after a daemon restart:
   - an untied edit is silent;

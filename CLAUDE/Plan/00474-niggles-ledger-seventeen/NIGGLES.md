@@ -2066,8 +2066,9 @@ mode, scoped to mutator-bearing commands (`only_with_mutator: true`). So `cd nos
 and any other `;`-sequenced command run with no prelude. The coordinator's own commands drew the
 advisory all session.
 
-**Status**: ✅ Fixed (merge bf8d40aa9). This repository runs `mode: block` with
-`only_with_mutator: false`. A second owner ruling, verbatim: "lets make the bash strict mode
+**Status**: ✅ Fixed (merge bf8d40aa9), then REVERSED by owner ruling A3 (2026-10-05): `only_with_mutator` is `true`
+again, in the shipped default and in this repository. Historical record of the original fix follows. This repository ran
+`mode: block` with `only_with_mutator: false`. A second owner ruling, verbatim: "lets make the bash strict mode
 on by default - it should be harmless and provides a LOT of safety". Under it, the SHIPPED default is
 now enabled and blocking: a config-changes entry, release note 215, and templates updated. The
 acceptance tests follow the configured mode. Live once the daemon restarts.

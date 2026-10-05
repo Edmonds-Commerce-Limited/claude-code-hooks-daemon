@@ -130,13 +130,6 @@ def _list_eligible(
     stderr: TextIO,
 ) -> int:
     author_check = AuthorWhitelistCheck(approved)
-    if not author_check.is_configured:
-        stderr.write(
-            "refusing to list issues: no approved_issue_authors configured. Set it under "
-            "handlers.pre_tool_use.github_issue_assignment_guard.options in "
-            ".claude/hooks-daemon.yaml; an unconfigured list would make every issue eligible.\n"
-        )
-        return EXIT_USAGE
     try:
         reports = service.check_open_issues([author_check])
     except GhError as exc:
@@ -165,7 +158,19 @@ def run_issue_validity(
     stdout: TextIO,
     stderr: TextIO,
 ) -> int:
-    """Run the command; returns the process exit code."""
+    """Run the command; returns the process exit code.
+
+    Refuses (``EXIT_USAGE``, no ``gh`` call) when no author list is configured:
+    this is the strict caller, and an unconfigured list would make every issue
+    eligible. The PreToolUse handler keeps "no list = author check n/a".
+    """
+    if not AuthorWhitelistCheck(approved).is_configured:
+        stderr.write(
+            "refusing to judge issues: no approved_issue_authors configured. Set it under "
+            "handlers.pre_tool_use.github_issue_assignment_guard.options in "
+            ".claude/hooks-daemon.yaml; an unconfigured list would make every issue eligible.\n"
+        )
+        return EXIT_USAGE
     if list_eligible:
         return _list_eligible(as_json, approved, service, stdout, stderr)
     if number is None:

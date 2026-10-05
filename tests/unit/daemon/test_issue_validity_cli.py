@@ -161,11 +161,18 @@ class TestSingleIssue:
         assert code == EXIT_UNKNOWN
         assert not [c for c in gh.calls if c[:2] == ("issue", "edit")]
 
-    def test_no_approved_list_means_the_author_check_is_not_applicable(self, gh: FakeGh) -> None:
-        gh.issues[5] = _issue(5, [ME], author="anyone")
-        code, out, _ = _run(gh, number=5, approved=None)
-        assert code == EXIT_OK
-        assert "n/a" in out
+    @pytest.mark.parametrize("approved", [None, ()])
+    @pytest.mark.parametrize("claim", [False, True])
+    def test_refuses_to_judge_an_issue_without_a_configured_list(
+        self, gh: FakeGh, approved: Sequence[str] | None, claim: bool
+    ) -> None:
+        """Issue selection must never fail open: no list, no verdict, no gh call."""
+        gh.issues[5] = _issue(5, author="anyone")
+        code, out, err = _run(gh, number=5, claim=claim, approved=approved)
+        assert code == EXIT_USAGE
+        assert out == ""
+        assert "approved_issue_authors" in err
+        assert gh.calls == []
 
     def test_json_output(self, gh: FakeGh) -> None:
         gh.issues[5] = _issue(5)

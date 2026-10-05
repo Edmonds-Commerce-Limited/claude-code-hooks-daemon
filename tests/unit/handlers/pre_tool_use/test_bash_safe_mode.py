@@ -1,9 +1,10 @@
-"""Tests for the opt-in bash safe-mode forcer (Plan 00270).
+"""Tests for the bash safe-mode forcer (Plan 00270).
 
-The handler ships ``enabled: false`` and, when enabled, defaults to
-``mode: warn``. Every Plan 00268 §6 false-positive shape must be an ALLOW
-decision under the defaults, and never flagged at all under
-``only_with_mutator: true``.
+The handler ships ``enabled: true``, ``mode: block`` and, by owner ruling A3
+(Plan 00483), ``only_with_mutator: true``: only a chain containing a mutator
+needs a prelude. Tests of the sequencing rules themselves use
+``strict_handler`` (``only_with_mutator: false``) so non-mutator commands
+exercise them.
 """
 
 from __future__ import annotations
@@ -42,6 +43,57 @@ def handler() -> BashSafeModeHandler:
     return BashSafeModeHandler()
 
 
+@pytest.fixture
+def strict_handler() -> BashSafeModeHandler:
+    """The handler with ``only_with_mutator: false``: every sequenced command is in scope."""
+    strict = BashSafeModeHandler()
+    strict._only_with_mutator = False
+    return strict
+
+
+class TestOnlyWithMutatorDefault:
+    """Owner ruling A3: the handler speaks only where a mutator is in the command."""
+
+    def test_ships_scoped_to_mutators(self, handler: BashSafeModeHandler) -> None:
+        assert handler._only_with_mutator is True
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "grep x a; grep y b",
+            "cat f && ls",
+            "cat f; ls",
+            "grep -q pattern file.txt; echo done",
+            "git status --short\ngit log --oneline",
+        ],
+    )
+    def test_read_only_chain_is_allowed(self, handler: BashSafeModeHandler, command: str) -> None:
+        assert handler.matches(_bash(command)) is False
+        assert handler.handle(_bash(command)).decision == Decision.ALLOW
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "rm x; git commit -m x",
+            "ls\ngit push origin main",
+            "git add -A; git commit -m x",
+        ],
+    )
+    def test_chain_with_a_mutator_still_needs_the_prelude(
+        self, handler: BashSafeModeHandler, command: str
+    ) -> None:
+        assert handler.matches(_bash(command)) is True
+        assert handler.handle(_bash(command)).decision == Decision.DENY
+
+    def test_chain_with_a_mutator_and_a_prelude_is_allowed(
+        self, handler: BashSafeModeHandler
+    ) -> None:
+        assert handler.matches(_bash("set -euo pipefail\nrm x\ngit commit -m x")) is False
+
+    def test_opting_out_restores_the_strict_scope(self, strict_handler: BashSafeModeHandler) -> None:
+        assert strict_handler.matches(_bash("grep x a; grep y b")) is True
+
+
 class TestInitialization:
     def test_identity(self, handler: BashSafeModeHandler) -> None:
         assert handler.handler_id == HandlerID.BASH_SAFE_MODE
@@ -57,8 +109,8 @@ class TestMatchesPositive:
     def test_multi_statement_without_prelude(self, handler: BashSafeModeHandler) -> None:
         assert handler.matches(_bash("pytest tests/\ngit commit -m x")) is True
 
-    def test_semicolon_separated(self, handler: BashSafeModeHandler) -> None:
-        assert handler.matches(_bash("grep -q pattern file.txt; echo done")) is True
+    def test_semicolon_separated(self, strict_handler: BashSafeModeHandler) -> None:
+        assert strict_handler.matches(_bash("grep -q pattern file.txt; echo done")) is True
 
     def test_partial_prelude_still_matches(self, handler: BashSafeModeHandler) -> None:
         # errexit present, pipefail (also required by default) missing.
@@ -89,9 +141,9 @@ class TestMatchesNegative:
         assert handler.matches(_bash(command)) is False
 
     def test_heredoc_followed_by_command_is_two_statements(
-        self, handler: BashSafeModeHandler
+        self, strict_handler: BashSafeModeHandler
     ) -> None:
-        assert handler.matches(_bash("cat > a <<'EOF'\nbody\nEOF\necho x")) is True
+        assert strict_handler.matches(_bash("cat > a <<'EOF'\nbody\nEOF\necho x")) is True
 
     def test_pure_and_chain_is_one_statement(self, handler: BashSafeModeHandler) -> None:
         # `&&`-only chaining IS consumption; split on (";", "\n") yields one
@@ -115,15 +167,15 @@ class TestConfigurableOptions:
         handler._require = ["errexit"]
         assert handler.matches(_bash("set -e\npytest tests/\ngit commit -m x")) is False
 
-    def test_require_including_nounset(self, handler: BashSafeModeHandler) -> None:
-        handler._require = ["errexit", "pipefail", "nounset"]
-        assert handler.matches(_bash("set -eo pipefail\na\nb")) is True
-        assert handler.matches(_bash("set -euo pipefail\na\nb")) is False
+    def test_require_including_nounset(self, strict_handler: BashSafeModeHandler) -> None:
+        strict_handler._require = ["errexit", "pipefail", "nounset"]
+        assert strict_handler.matches(_bash("set -eo pipefail\na\nb")) is True
+        assert strict_handler.matches(_bash("set -euo pipefail\na\nb")) is False
 
-    def test_min_statements_raised(self, handler: BashSafeModeHandler) -> None:
-        handler._min_statements = 3
-        assert handler.matches(_bash("a\nb")) is False
-        assert handler.matches(_bash("a\nb\nc")) is True
+    def test_min_statements_raised(self, strict_handler: BashSafeModeHandler) -> None:
+        strict_handler._min_statements = 3
+        assert strict_handler.matches(_bash("a\nb")) is False
+        assert strict_handler.matches(_bash("a\nb\nc")) is True
 
     def test_only_with_mutator_spares_pure_diagnostics(self, handler: BashSafeModeHandler) -> None:
         handler._only_with_mutator = True
@@ -497,10 +549,10 @@ class TestCompoundCommandSyntaxIsNotSequencing:
         ],
     )
     def test_gated_compound_command_is_allowed(
-        self, handler: BashSafeModeHandler, command: str
+        self, strict_handler: BashSafeModeHandler, command: str
     ) -> None:
-        assert handler.matches(_bash(command)) is False
-        assert handler.handle(_bash(command)).decision == Decision.ALLOW
+        assert strict_handler.matches(_bash(command)) is False
+        assert strict_handler.handle(_bash(command)).decision == Decision.ALLOW
 
     @pytest.mark.parametrize(
         "command",
@@ -514,10 +566,10 @@ class TestCompoundCommandSyntaxIsNotSequencing:
         ],
     )
     def test_ungated_sequencing_inside_a_compound_command_still_denies(
-        self, handler: BashSafeModeHandler, command: str
+        self, strict_handler: BashSafeModeHandler, command: str
     ) -> None:
-        assert handler.matches(_bash(command)) is True
-        assert handler.handle(_bash(command)).decision == Decision.DENY
+        assert strict_handler.matches(_bash(command)) is True
+        assert strict_handler.handle(_bash(command)).decision == Decision.DENY
 
     def test_compound_acceptance_fixture_allows(self, handler: BashSafeModeHandler) -> None:
         fixture = next(t for t in handler.get_acceptance_tests() if "compound" in t.title)

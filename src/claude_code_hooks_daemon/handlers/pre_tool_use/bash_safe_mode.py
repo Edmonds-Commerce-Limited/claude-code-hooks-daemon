@@ -61,6 +61,11 @@ _DEFAULT_REQUIRE: Final[tuple[str, ...]] = (FLAG_ERREXIT, FLAG_PIPEFAIL)
 #: splits to ONE statement, so correct explicit gating is exempt for free.
 _DEFAULT_MIN_STATEMENTS: Final = 2
 
+#: Owner ruling A3 (Plan 00483): the handler speaks only where a MUTATOR (the
+#: shared table in ``verification_result_gate``) is in the command, so a
+#: read-only chain like `grep x a; grep y b` is never blocked.
+_DEFAULT_ONLY_WITH_MUTATOR: Final = True
+
 #: In-command escape hatch, following the daemon's MUST_..._BECAUSE
 #: convention (git_stash, root_recursion_guard, comment_size).
 _ESCAPE_HATCH: Final = "MUST_SKIP_SAFE_MODE_BECAUSE"
@@ -116,8 +121,9 @@ class BashSafeModeHandler(PreToolUseHandlerBase):
         require: list of flags to demand — any of "errexit", "pipefail",
             "nounset". Default ["errexit", "pipefail"].
         min_statements: sequenced-statement threshold (default 2).
-        only_with_mutator: if true, only commands containing an entry from
-            the shared mutator table are in scope (default false).
+        only_with_mutator: if true (default), only commands containing an
+            entry from the shared mutator table are in scope; false covers
+            every sequenced command.
         exempt_patterns: additive regexes matched against the whole command.
     """
 
@@ -142,7 +148,7 @@ class BashSafeModeHandler(PreToolUseHandlerBase):
         self._mode = _MODE_BLOCK
         self._require: Any = list(_DEFAULT_REQUIRE)
         self._min_statements: Any = _DEFAULT_MIN_STATEMENTS
-        self._only_with_mutator: Any = False
+        self._only_with_mutator: Any = _DEFAULT_ONLY_WITH_MUTATOR
         self._exempt_patterns = []
         # Single deny concept (Plan 00116): the block-mode path only. The
         # warn-mode advisory (context/guidance) is UNCHANGED — Decision C
@@ -365,8 +371,9 @@ class BashSafeModeHandler(PreToolUseHandlerBase):
             "required `set` flags — by default `set -e` (errexit) and "
             "`set -o pipefail` (`set -euo pipefail` satisfies both; `nounset` "
             "is only checked where configured). A command already carrying the "
-            "prelude, a single statement, and a pure `&&` chain are never "
-            "flagged.\n\n"
+            "prelude, a single statement, a pure `&&` chain, and (by default, "
+            "`only_with_mutator: true`) a read-only chain with no mutator such "
+            "as `git commit` or `git push` are never flagged.\n\n"
             "**Fix when blocked**: chain the statements with `&&`, add "
             "`|| exit 1` to each step, or run the body in "
             "`bash -c 'set -euo pipefail; …'`. A top-level prelude "

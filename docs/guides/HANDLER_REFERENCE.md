@@ -1696,7 +1696,7 @@ sweeps, exit-code observers): `MUST_SKIP_SAFE_MODE_BECAUSE="explain why"; <comma
 | `mode`              | `str`       | `warn`                    | `warn` injects advisory context; `block` denies. `inject` is rejected at load. |
 | `require`           | `list[str]` | `["errexit", "pipefail"]` | Flags to demand: `errexit`, `pipefail`, `nounset`. `nounset` is off-default.   |
 | `min_statements`    | `int`       | `2`                       | Sequenced-statement threshold; single statements are never flagged.            |
-| `only_with_mutator` | `bool`      | `false`                   | Scope to commands containing an entry from the shared mutator table.           |
+| `only_with_mutator` | `bool`      | `true`                    | Scope to commands containing an entry from the shared mutator table.           |
 | `exempt_patterns`   | `list[str]` | `[]`                      | Additive regexes matched against the whole command.                            |
 
 **Config example:**
@@ -1711,7 +1711,7 @@ handlers:
         mode: warn
         require: [errexit, pipefail]
         min_statements: 2
-        only_with_mutator: false
+        only_with_mutator: true
 ```
 
 ---
