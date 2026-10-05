@@ -1406,6 +1406,25 @@ The uncertain-move union judges the hook directory and the LAST recorded move (`
 every candidate directory (`sub`). Remedy: judge every directory any `cd` in the chain could
 land in.
 
+### N353 — the dismissive-language advisory flags a citation of the threat model's own scope rule
+
+**Source**: the coordinator, 2026-10-05, on a stop that asked the owner the guard-review questions.
+
+**Evidence**: the Stop advisory "Dismissive language detected (out of scope)" fired on a message whose only match was
+"The threat model already treats that kind of deliberate evasion as out of scope." That sentence stated the real risk
+of the owner's decision A1 (Plan 00483 R3). It cited the threat model's limb-1/limb-2 scope rule, which this
+repository uses as a term of art in plans, rulings and handler guidance. It did not deflect any work.
+
+**Impact**: low. The advisory never blocks. But it nudges the agent to soften or drop an accurate risk statement, and
+in this repository "out of scope" is mostly that technical sense, so the advisory is mostly noise here.
+
+**Status**: ⬜ Open. Remedy candidates:
+
+- do not flag "out of scope" when the same sentence names the threat model, a plan's Non-Goals or a limb;
+- or make the phrase configurable per project, so this repository can exempt its term of art.
+
+This touches no guard in the frozen secret-guard area.
+
 ### N352 — an ordinary Python heredoc is denied when the host is busy (scan deadline)
 
 **Source**: the coordinator's post-merge full run for the N130 merge (012915bd9), 2026-10-04.
