@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import subprocess
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
@@ -196,6 +197,24 @@ class TestRepoRootResolution:
         handler = WorktreeCreateHandler()
         with pytest.raises(subprocess.CalledProcessError):
             handler.handle(self._input(outside))
+
+
+class TestFailureNamesTheReason:
+    """N53: exit 127 reached the user with git's reason (stderr) discarded."""
+
+    def test_unavailable_git_reason_is_in_the_message(self, tmp_path: Path) -> None:
+        failed = subprocess.CompletedProcess(
+            ["git"], 127, "", "[Errno 2] No such file or directory: 'git'"
+        )
+        with patch(
+            "claude_code_hooks_daemon.handlers.worktree_create.worktree_create_handler.run_git",
+            return_value=failed,
+        ):
+            with pytest.raises(subprocess.CalledProcessError) as excinfo:
+                WorktreeCreateHandler._git_worktree_add(str(tmp_path), tmp_path / "w", "b")
+
+        assert "No such file or directory: 'git'" in str(excinfo.value)
+        assert "127" in str(excinfo.value)
 
 
 class TestSeedOptionPlumbing:
