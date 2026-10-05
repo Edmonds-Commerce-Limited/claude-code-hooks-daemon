@@ -1,6 +1,6 @@
-# Fix: fail-open hook output is valid for every event under Claude Code 2.1.289
+# Callout: fail-open hook output is now valid for every event under Claude Code 2.1.289
 
-**Plan**: none (urgent field report)
+**Plan**: 00483
 **Audience**: everyone
 
 Claude Code 2.1.289 validates hook JSON output strictly. In a project where the daemon was not installed, not running, or its venv was missing, `init.sh` answered every non-Stop event with `hookSpecificOutput`, which most events do not define (SessionEnd, PreCompact, PostCompact, Notification, Setup and others). Claude Code rejected the whole document, so the SessionEnd hook failed with "Hook JSON output validation failed" and the explanation was lost with it.

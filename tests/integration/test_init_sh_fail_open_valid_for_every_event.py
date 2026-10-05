@@ -110,7 +110,7 @@ def _run_answers(tmp_path: Path, branch: str, *, with_jq: bool) -> dict[str, str
     bindir = _curated_bin(tmp_path, with_jq=with_jq)
     script = (
         f'source "{checkout / ".claude" / "init.sh"}" >/dev/null 2>&1\n'
-        "for event in \"$@\"; do\n"
+        'for event in "$@"; do\n'
         f'    printf "%s%s\\n" "{_MARKER}" "$event"\n'
         f"    ( {_BRANCHES[branch]}\n"
         '      emit_hook_error "$event" "daemon_not_installed" "no daemon here" '
@@ -224,7 +224,7 @@ class TestTheTransportFailOpen:
         env["CLAUDE_HOOKS_SOCKET_PATH"] = str(missing_socket)
         env["CLAUDE_HOOKS_SOCKET_TIMEOUT"] = "5"
         script = (
-            'source .claude/init.sh >/dev/null 2>&1\n'
+            "source .claude/init.sh >/dev/null 2>&1\n"
             'for event in "$@"; do\n'
             f'    printf "%s%s\\n" "{_MARKER}" "$event"\n'
             "    printf '{}' | send_request_stdin \"$event\" 2>/dev/null\n"
@@ -245,7 +245,5 @@ class TestTheTransportFailOpen:
             if not body.strip():
                 problems.append(f"{event}: no output")
                 continue
-            problems.extend(
-                f"{event}: {p}" for p in contract_violations(event, json.loads(body))
-            )
+            problems.extend(f"{event}: {p}" for p in contract_violations(event, json.loads(body)))
         assert not problems, "; ".join(problems)
