@@ -1418,7 +1418,8 @@ land in.
 - `test_safety_handlers_hostile_input_performance.py::…[wildcards]` reported superlinear. It passes when re-run alone.
 - The playbook probe for RootRecursionGuardHandler (#108, `grep -rl … /`) is now denied first by secret_file_guard's tree
   walk, as R-SECRET-READ, instead of by the root guard. This is deterministic. The fix is to run the root guard before
-  the secret guard; it is in flight.
+  the secret guard. That fix is now merged: root_recursion_guard has priority 13. After the restart a live probe denies
+  as R-ROOT-RECURSION-CATASTROPHIC in 0.5 s, where it took 1.9 s before.
 
 **Impact**: the first item is a load-dependent verdict on a command that names no protected path, the N101 shape
 again. A real session on a busy host gets the same deny.
