@@ -93,6 +93,29 @@ rules:
     why: a handler's acceptance tests (its declared probes) are dispatched to the
       real daemon only by the playbook harness; no unit test names the handler
       code that a probe exercises
+  - glob: "src/claude_code_hooks_daemon/handlers/pre_tool_use/*.py"
+    tests: [tests/integration/test_ordinary_command_regression_gate.py]
+    why: the ordinary-command regression gate (Plan 00483 R2) judges its corpus
+      through EVERY PreToolUse handler, so a change to any one can flip an ALLOW
+      to a deny; no unit test of the changed handler names that corpus
+  - glob: "src/claude_code_hooks_daemon/utils/secret_file_matching.py"
+    tests: [tests/integration/test_ordinary_command_regression_gate.py]
+    why: the matcher behind secret_file_guard, which the ordinary-command gate drives
+  - glob: "src/claude_code_hooks_daemon/utils/shell_*.py"
+    tests: [tests/integration/test_ordinary_command_regression_gate.py]
+    why: the shell reader every guard shares, which the ordinary-command gate drives
+  - glob: "src/claude_code_hooks_daemon/utils/recursive_search.py"
+    tests: [tests/integration/test_ordinary_command_regression_gate.py]
+    why: the recursive-search reader behind the secret and quarantine guards
+  - glob: "src/claude_code_hooks_daemon/utils/protected_file_index.py"
+    tests: [tests/integration/test_ordinary_command_regression_gate.py]
+    why: the protected-file index the secret guard judges a search or a glob against
+  - glob: "src/claude_code_hooks_daemon/utils/command_*.py"
+    tests: [tests/integration/test_ordinary_command_regression_gate.py]
+    why: command-position reading shared by the guards the ordinary-command gate drives
+  - glob: "tests/fixtures/ordinary_command_corpus.yaml"
+    tests: [tests/integration/test_ordinary_command_regression_gate.py]
+    why: the corpus the ordinary-command regression gate reads
   - glob: ".claude/project-handlers/*"
     tools: [project_handlers]
     why: the project handlers' own co-located suite
