@@ -1410,6 +1410,22 @@ The uncertain-move union judges the hook directory and the LAST recorded move (`
 every candidate directory (`sub`). Remedy: judge every directory any `cd` in the chain could
 land in.
 
+### N356 — a grep regex inside a quoted `bash -c` string is read as a protected-path glob
+
+**Source**: the coordinator, 2026-10-05, after the Plan 00483 Phase 2 merge (dc5c9263b).
+
+**Evidence**: `bash -c 'set -o pipefail; … | grep -a -E "^(src|tests)/.*:[0-9]+|StopIteration" | …'` was denied as
+R-SECRET-BASH-MENTION, "Matched on this token from your input: `/.*:[0-9]+`" against a protected `.vault-pass*`
+glob. The token is a regular expression passed to `grep -E`, inside double quotes inside a single-quoted `bash -c`
+program. It names no file. Ruling A1 says deny only on a positive finding; a regex fragment whose `.*` could
+glob-match a hidden protected name is not one.
+
+**Impact**: medium. Searching test output for `path:line` is an ordinary debugging command. The ordinary-command
+gate has no row for a regex containing `/.*` as a grep pattern.
+
+**Status**: ⬜ Open. Remedy: a grep/rg PATTERN operand (the first non-option argument, or the `-e`/`-E` value) is text,
+not a path, and must not be expanded as a glob; add the command above as a gate row.
+
 ### N354 — the upgrade-approval guard denies a `PYTHONPATH=… python -c` probe that runs no upgrade
 
 **Source**: the coordinator, 2026-10-05, probing a worktree branch's handler code from the main checkout.
