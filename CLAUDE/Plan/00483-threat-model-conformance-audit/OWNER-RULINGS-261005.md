@@ -77,7 +77,13 @@ fixed or accepted.
 
 Each new deny gets rows in the ordinary-command regression gate (R2), so it cannot catch everyday commands.
 
-**Status:** settled. Task 2.2 can proceed on this table.
+**Status:** settled. Task 2.2 can proceed on this table. Implemented in merge `745dc2d68` and verified live.
+
+**Open follow-up for the owner (raised by the coordinator 2026-10-06, not a ruling):** the remote-delete row also
+denies the coordinator's routine clean-up, `git push origin --delete <agent-branch>` after a `--no-ff` merge. Such a
+branch is fully reachable from `main`, so deleting it loses nothing. Until the owner decides, the coordinator leaves
+merged agent branches on the remote and lists them for the owner to delete. Option: exempt the deletion of a remote
+branch whose tip is already an ancestor of the default branch.
 
 ## B1: 00484 G2 and the 00483 INVENTORY escape hatches
 
