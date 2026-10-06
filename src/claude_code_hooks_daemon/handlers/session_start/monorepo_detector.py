@@ -20,6 +20,7 @@ from claude_code_hooks_daemon.core.handler import WorkspaceScope
 from claude_code_hooks_daemon.core.handler_bases import SessionStartHandlerBase
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.core.workspace import _manifest_in
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.path_containment import path_relative_to
 from claude_code_hooks_daemon.utils.session_helpers import is_resume_session
 
@@ -70,7 +71,12 @@ def _find_manifest_dirs(
         try:
             entries = sorted(directory.iterdir())
         except OSError as exc:
-            logger.debug("Could not list %s during monorepo scan: %s", directory, exc)
+            log_and_continue(
+                logger,
+                exc,
+                reason="a directory that cannot be listed is skipped in the monorepo scan; the scan reports what the readable directories show",
+                level=logging.DEBUG,
+            )
             return
 
         for entry in entries:

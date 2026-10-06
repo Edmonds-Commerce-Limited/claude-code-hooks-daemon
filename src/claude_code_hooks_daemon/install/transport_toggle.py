@@ -49,6 +49,7 @@ from claude_code_hooks_daemon.install.transport_verify import (
     resolve_events_dir,
     run_probes,
 )
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.version import __version__
 
 logger = logging.getLogger(__name__)
@@ -225,10 +226,10 @@ def read_last_toggle_state(project_root: Path) -> dict[str, Any] | None:
     except (OSError, json.JSONDecodeError) as exc:
         # A corrupt/unreadable state file must not break `transport status`;
         # surface it and report the honest answer: no trustworthy record.
-        logger.warning(
-            "transport toggle state file %s is unreadable (%s); reporting no last toggle",
-            path,
+        log_and_continue(
+            logger,
             exc,
+            reason="a corrupt or unreadable toggle state file must not break `transport status`; it reports 'no trustworthy record' (None) and the WARNING names the file",
         )
         loaded = None
     return loaded if isinstance(loaded, dict) else None

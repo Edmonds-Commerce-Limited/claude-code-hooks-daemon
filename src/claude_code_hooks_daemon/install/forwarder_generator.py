@@ -41,6 +41,7 @@ from claude_code_hooks_daemon.daemon.paths import (
     get_event_socket_dir_from_untracked,
     get_untracked_dir,
 )
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 
 #: The line every current forwarder sources init.sh through. The guard block
 #: is inserted directly above this line (DESIGN §6.1) — it is the anchor that
@@ -715,7 +716,15 @@ def regenerate_deployed_hooks(project_root: Path, hooks_dir: Path) -> list[str]:
             # A single unreadable/non-UTF-8 file must not abort the pass for
             # every sibling — skip it, report it, and keep going. The
             # unconditional F1 guard-strip still runs on every OTHER file.
-            logger.warning("skipping unreadable forwarder %s: %s", path, exc)
+            log_and_continue(
+                logger,
+                exc,
+                reason=(
+                    f"skipping unreadable forwarder {path}: a single unreadable or non-UTF-8 "
+                    "forwarder must not abort the pass for its siblings, and the guard-strip "
+                    "still runs on every other file"
+                ),
+            )
             continue
         generated = generate_forwarder_content(
             source, path.name, transport, untracked_dir, project_root

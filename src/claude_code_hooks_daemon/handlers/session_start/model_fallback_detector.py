@@ -48,6 +48,7 @@ from claude_code_hooks_daemon.core.relevance import Relevance, RelevanceContext
 from claude_code_hooks_daemon.handlers.utils.bounded_fifo_map import BoundedFifoMap
 from claude_code_hooks_daemon.utils import secret_redaction
 from claude_code_hooks_daemon.utils.ccy_supervisor import supervisor_relevance
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.model_fallback_records import (
     KEY_FALLBACK_MODEL,
     KEY_ORIGINAL_MODEL,
@@ -400,7 +401,12 @@ class ModelFallbackDetectorHandler(SessionStartHandlerBase):
 
             return ProjectContext.daemon_untracked_dir() / _STATE_SUBDIR / _STATE_FILENAME
         except (RuntimeError, OSError) as exc:
-            logger.debug("model_fallback_detector: no project root for state file (%s)", exc)
+            log_and_continue(
+                logger,
+                exc,
+                reason="no project root resolves, so there is nowhere to keep the dedupe state (None); the detector then dedupes in memory only",
+                level=logging.DEBUG,
+            )
             return None
 
     def _load_state(self) -> None:
@@ -416,12 +422,22 @@ class ModelFallbackDetectorHandler(SessionStartHandlerBase):
         try:
             text = path.read_text(encoding="utf-8")
         except OSError as exc:
-            logger.debug("model_fallback_detector: no persisted state yet (%s)", exc)
+            log_and_continue(
+                logger,
+                exc,
+                reason="no persisted dedupe state is readable yet (first run or unreadable file), so the detector starts with empty state",
+                level=logging.DEBUG,
+            )
             return
         try:
             data: Any = json.loads(text)
         except ValueError as exc:
-            logger.debug("model_fallback_detector: corrupt state file, ignoring (%s)", exc)
+            log_and_continue(
+                logger,
+                exc,
+                reason="a corrupt dedupe state file is ignored, so the detector starts with empty state and rewrites it on the next save",
+                level=logging.DEBUG,
+            )
             return
         if not isinstance(data, dict):
             return

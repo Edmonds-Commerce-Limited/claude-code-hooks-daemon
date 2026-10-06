@@ -43,6 +43,7 @@ from claude_code_hooks_daemon.core import BlockingResult, Decision, ProjectConte
 from claude_code_hooks_daemon.core.acceptance_test import AcceptanceTest
 from claude_code_hooks_daemon.core.handler_bases import SubagentStopHandlerBase
 from claude_code_hooks_daemon.daemon.synthetic_traffic import is_synthetic_event
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.temp_names import unique_temp_path
 
 logger = logging.getLogger(__name__)
@@ -138,7 +139,12 @@ def _parse_agent_file(path: Path) -> dict[str, int]:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
         # One unreadable file must not hide the agents that recorded fine.
-        logger.debug("Skipping unreadable sub-agent cache file %s: %s", path, exc)
+        log_and_continue(
+            logger,
+            exc,
+            reason="one unreadable cache file must not hide the agents that recorded fine; it contributes nothing (empty)",
+            level=logging.DEBUG,
+        )
         return {}
     if not isinstance(payload, dict):
         return {}
@@ -163,7 +169,12 @@ def _scan_session(
         try:
             stat = entry.stat()
         except OSError as exc:
-            logger.debug("Sub-agent cache file vanished mid-scan %s: %s", entry.path, exc)
+            log_and_continue(
+                logger,
+                exc,
+                reason="a cache file that vanished mid-scan has nothing to aggregate and is skipped",
+                level=logging.DEBUG,
+            )
             continue
         signature = _FileSignature(stat.st_ino, stat.st_mtime_ns, stat.st_size)
         cached = known.get(entry.name)

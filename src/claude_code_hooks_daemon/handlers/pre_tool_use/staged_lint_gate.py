@@ -59,6 +59,7 @@ from claude_code_hooks_daemon.utils.command_evasion import (
     normalise_line_continuations,
 )
 from claude_code_hooks_daemon.utils.commit_location import commit_runs_in_foreign_repo
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.git_commit_parsing import read_commit_form
 from claude_code_hooks_daemon.utils.git_facts import commit_facts
 from claude_code_hooks_daemon.utils.path_predicates import path_exists
@@ -347,11 +348,14 @@ class StagedLintGateHandler(PreToolUseHandlerBase):
             # never-block-on-absence convention). It is logged at WARNING: the
             # commit goes through with this file unchecked, which is not the
             # same as the file passing.
-            logger.warning(
-                "staged_lint_gate: %s was NOT checked: %s could not run (%s)",
-                file_path,
-                parts[0],
+            log_and_continue(
+                logger,
                 exc,
+                reason=(
+                    f"staged_lint_gate: {file_path} was NOT checked: {parts[0]} could not run; "
+                    "a tool that cannot run or times out never looked at the file, so there is "
+                    "no diagnosis to block on (the never-block-on-absence convention)"
+                ),
             )
             result = None
 

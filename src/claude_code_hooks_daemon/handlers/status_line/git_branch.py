@@ -19,6 +19,7 @@ from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority, 
 from claude_code_hooks_daemon.core import AdvisoryResult, Decision
 from claude_code_hooks_daemon.core.handler_bases import StatusLineHandlerBase
 from claude_code_hooks_daemon.core.segment_explanation import SegmentExplanation
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.git_repo import is_linked_worktree, run_git
 
 logger = logging.getLogger(__name__)
@@ -503,10 +504,20 @@ class GitBranchHandler(StatusLineHandlerBase):
                 stashed=stashed,
             )
         except (subprocess.TimeoutExpired, subprocess.CalledProcessError, FileNotFoundError) as e:
-            logger.debug("Failed to render git status icons: %s", e)
+            log_and_continue(
+                logger,
+                e,
+                reason="git status could not be run or parsed, so the icons are omitted (empty segment); the status line fails silent by contract",
+                level=logging.DEBUG,
+            )
             return ""
         except Exception as e:
-            logger.error("Unexpected error in git status icons: %s", e, exc_info=True)
+            log_and_continue(
+                logger,
+                e,
+                reason="an unexpected error rendering git status icons omits the segment; the status line fails silent by contract and the ERROR carries the traceback",
+                level=logging.ERROR,
+            )
             return ""
 
     @staticmethod

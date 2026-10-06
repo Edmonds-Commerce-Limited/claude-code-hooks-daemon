@@ -47,6 +47,7 @@ from claude_code_hooks_daemon.constants import (
 from claude_code_hooks_daemon.core import AdvisoryResult, ProjectContext
 from claude_code_hooks_daemon.core.handler_bases import SessionStartHandlerBase
 from claude_code_hooks_daemon.core.hook_result import Decision
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.session_helpers import is_resume_session
 
 logger = logging.getLogger(__name__)
@@ -235,7 +236,12 @@ class ContractStalenessHandler(SessionStartHandlerBase):
         try:
             return self.self_install_reader()
         except (RuntimeError, OSError) as exc:
-            logger.debug("install mode unresolvable, assuming client install: %s", exc)
+            log_and_continue(
+                logger,
+                exc,
+                reason="an unresolvable install mode is taken to be a client install (False), the default mode",
+                level=logging.DEBUG,
+            )
             return False
 
     def _maintainer_context(self, installed: str, audited: str, refresh_doc: str) -> list[str]:
@@ -288,7 +294,12 @@ class ContractStalenessHandler(SessionStartHandlerBase):
         except (OSError, json.JSONDecodeError) as exc:
             # An install without the vendored contract (or with a corrupt one)
             # must not fail session start — the QA guard owns that failure.
-            logger.debug("contract META unreadable (%s): %s", self.meta_path, exc)
+            log_and_continue(
+                logger,
+                exc,
+                reason="an install without the vendored contract, or with a corrupt one, must not fail session start; the QA guard owns that failure and None means 'no metadata'",
+                level=logging.DEBUG,
+            )
             return None
         return data if isinstance(data, dict) else None
 
@@ -302,7 +313,12 @@ class ContractStalenessHandler(SessionStartHandlerBase):
         try:
             data = json.loads(self._cache_file().read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as exc:
-            logger.debug("contract staleness cache unreadable: %s", exc)
+            log_and_continue(
+                logger,
+                exc,
+                reason="an unreadable staleness cache is treated as empty, so the check is simply recomputed; only the cached result is lost",
+                level=logging.DEBUG,
+            )
             return {}
         return data if isinstance(data, dict) else {}
 
@@ -320,7 +336,11 @@ class ContractStalenessHandler(SessionStartHandlerBase):
             cache_file.parent.mkdir(parents=True, exist_ok=True)
             cache_file.write_text(json.dumps(merged), encoding="utf-8")
         except OSError as exc:
-            logger.warning("contract staleness cache unwritable (%s): %s", cache_file, exc)
+            log_and_continue(
+                logger,
+                exc,
+                reason="an unwritable staleness cache only means the result is recomputed next session; False tells the caller it was not saved",
+            )
             return False
         return True
 

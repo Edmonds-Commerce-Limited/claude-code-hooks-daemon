@@ -11,6 +11,7 @@ import stat
 from pathlib import Path
 from typing import Final
 
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.path_containment import path_relative_to
 
 logger = logging.getLogger(__name__)
@@ -195,7 +196,11 @@ def _looks_daemon_deployed(skill_dir: Path, marker: str) -> bool:
     try:
         text = skill_md.read_text(encoding="utf-8", errors="replace")
     except OSError as e:
-        logger.warning("Cannot read %s to confirm provenance (%s) — not removing", skill_md, e)
+        log_and_continue(
+            logger,
+            e,
+            reason="the skill file cannot be read to confirm provenance, so it is not removed (False); keeping an unconfirmed file is the safe answer",
+        )
         return False
     return marker.lower() in text.lower()
 

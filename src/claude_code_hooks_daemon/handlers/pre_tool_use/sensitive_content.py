@@ -1245,7 +1245,12 @@ class SensitiveContentHandler(PreToolUseHandlerBase):
             try:
                 content = (repo_root / relpath).read_text(encoding=_BODY_FILE_ENCODING)
             except (OSError, UnicodeDecodeError) as error:
-                _LOGGER.debug("sensitive_content: %s could not be read: %s", relpath, error)
+                log_and_continue(
+                    _LOGGER,
+                    error,
+                    reason="a staged file that cannot be read or decoded is skipped in the commit-time scan; only that file's scan is lost and False says it matched nothing",
+                    level=logging.DEBUG,
+                )
                 return False
         else:
             result = run_git(repo_root, "show", f":{relpath}", env=scan.env)

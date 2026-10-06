@@ -21,6 +21,7 @@ from claude_code_hooks_daemon.core import AdvisoryResult, Decision
 from claude_code_hooks_daemon.core.handler_bases import SessionStartHandlerBase
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.utils import ccy_supervisor
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.git_repo import run_git
 from claude_code_hooks_daemon.utils.session_helpers import is_resume_session
 
@@ -111,7 +112,12 @@ class CcySupervisorIntegrityHandler(SessionStartHandlerBase):
         try:
             config = Config.load_or_default(config_path)
         except (OSError, ValueError) as exc:
-            logger.debug("Could not load config for ccy deploy check: %s", exc)
+            log_and_continue(
+                logger,
+                exc,
+                reason="an unreadable config means the ccy deploy cannot be shown to be missing, so no warning is raised (False); config errors are reported on their own path",
+                level=logging.DEBUG,
+            )
             return False
         return config.ccy.deploy_supervisor is False
 

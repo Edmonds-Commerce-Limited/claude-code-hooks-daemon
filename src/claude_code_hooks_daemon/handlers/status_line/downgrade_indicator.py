@@ -27,6 +27,7 @@ from claude_code_hooks_daemon.handlers.status_line.downgrade_state import (
     resolve_model_family,
     state_dir,
 )
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.model_downgrade_signal import read_downgrade_signal
 
 logger = logging.getLogger(__name__)
@@ -111,10 +112,18 @@ class DowngradeIndicatorHandler(StatusLineHandlerBase):
                 label += self._counts_format.format(down=down, up=up)
             return f"{self._color}{label}{_RESET}"
         except RuntimeError as e:
-            logger.warning("Skipping downgrade indicator (no project context): %s", e)
+            log_and_continue(
+                logger,
+                e,
+                reason="without a project context there is no daemon state directory, so there is nothing to read or write; the indicator renders nothing",
+            )
             return ""
         except OSError as e:
-            logger.warning("Failed to read/write downgrade-indicator state: %s", e)
+            log_and_continue(
+                logger,
+                e,
+                reason="the downgrade-indicator state could not be read or written, so the segment is omitted; the status line fails silent by contract",
+            )
             return ""
 
     def explain_segment(self) -> SegmentExplanation:
@@ -132,7 +141,12 @@ class DowngradeIndicatorHandler(StatusLineHandlerBase):
                     try:
                         data = json.loads(state_file.read_text(encoding="utf-8"))
                     except (OSError, ValueError) as e:
-                        logger.debug("Skipping unreadable downgrade state %s: %s", state_file, e)
+                        log_and_continue(
+                            logger,
+                            e,
+                            reason="an unreadable downgrade state file is skipped; the indicator uses the other state files",
+                            level=logging.DEBUG,
+                        )
                         continue
                     if isinstance(data, dict) and data.get("downgraded"):
                         active_sessions += 1

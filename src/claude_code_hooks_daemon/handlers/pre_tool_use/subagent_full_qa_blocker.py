@@ -96,6 +96,7 @@ from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.core.utils import get_bash_command
 from claude_code_hooks_daemon.utils import linear_shlex
 from claude_code_hooks_daemon.utils.command_evasion import normalise_line_continuations
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.path_predicates import path_exists
 from claude_code_hooks_daemon.utils.shell_segmentation import (
     END_OF_OPTIONS,
@@ -1898,7 +1899,12 @@ def _is_a_listing(stages: Sequence[str], substitutions: Sequence[str] = ()) -> b
             for stage in stages
         ]
     except ValueError as error:
-        logger.debug("Listing not recognised, unsplittable (%s)", error)
+        log_and_continue(
+            logger,
+            error,
+            reason="shlex cannot split this text, so the structured check abstains and the unparsed text check that runs afterwards still judges it; nothing is allowed on this path",
+            level=logging.DEBUG,
+        )
         return False
     if not words or not all(words):
         return False
@@ -2015,7 +2021,12 @@ def _consumers_of_a_listing(text: str, substitutions: Sequence[str]) -> frozense
             try:
                 consumer = _strip_prefixes(linear_shlex.split(stages[position]))
             except ValueError as error:
-                logger.debug("Consumer left to the unparsed check (%s)", error)
+                log_and_continue(
+                    logger,
+                    error,
+                    reason="shlex cannot split this text, so the structured check abstains and the unparsed text check that runs afterwards still judges it; nothing is allowed on this path",
+                    level=logging.DEBUG,
+                )
                 continue
             if (
                 consumer
@@ -2208,7 +2219,12 @@ def _code_on_stdin(
         try:
             stages = [linear_shlex.split(stage) for stage in split_unquoted(pipeline, _PIPE)]
         except ValueError as error:
-            logger.debug("Pipeline left to the unparsed check (%s): %r", error, pipeline)
+            log_and_continue(
+                logger,
+                error,
+                reason="shlex cannot split this text, so the structured check abstains and the unparsed text check that runs afterwards still judges it; nothing is allowed on this path",
+                level=logging.DEBUG,
+            )
             continue
         for producer, consumer in pairwise(stages):
             producer = _expand_variables(producer, known, positional)
@@ -2217,7 +2233,12 @@ def _code_on_stdin(
         try:
             producer = linear_shlex.split(producer_code)
         except ValueError as error:
-            logger.debug("Substitution left to the unparsed check (%s)", error)
+            log_and_continue(
+                logger,
+                error,
+                reason="shlex cannot split this text, so the structured check abstains and the unparsed text check that runs afterwards still judges it; nothing is allowed on this path",
+                level=logging.DEBUG,
+            )
             continue
         producer = _expand_variables(producer, known, positional)
         yield from _fed(_producer_output(producer), consumer, producer_code, depth, producer)
@@ -2255,7 +2276,12 @@ def _process_substitution_consumer(head: str) -> list[str]:
     try:
         consumer = linear_shlex.split(head)
     except ValueError as error:
-        logger.debug("Consumer left to the unparsed check (%s)", error)
+        log_and_continue(
+            logger,
+            error,
+            reason="shlex cannot split this text, so the structured check abstains and the unparsed text check that runs afterwards still judges it; nothing is allowed on this path",
+            level=logging.DEBUG,
+        )
         return []
     if consumer and consumer[-1] == _STDIN_REDIRECT_WORD:
         consumer = consumer[:-1]
@@ -2327,7 +2353,12 @@ def _python_heredocs(text: str) -> Iterator[_PythonHeredoc]:
         try:
             receiver = linear_shlex.split(stages[-1]) if stages else []
         except ValueError as error:
-            logger.debug("Heredoc receiver left to the unparsed check (%s)", error)
+            log_and_continue(
+                logger,
+                error,
+                reason="shlex cannot split this text, so the structured check abstains and the unparsed text check that runs afterwards still judges it; nothing is allowed on this path",
+                level=logging.DEBUG,
+            )
             continue
         argv = _python_stdin_argv(receiver)
         if argv is None:
@@ -3681,7 +3712,12 @@ def _is_path_like(operand: str, cwd: Path | None) -> bool:
     except ValueError as error:
         # Unrepresentable as a path (an embedded NUL): it names nothing on
         # disk, so it cannot be what the run targets.
-        logger.debug("%r is no path, so it targets nothing (%s)", operand, error)
+        log_and_continue(
+            logger,
+            error,
+            reason="an operand that cannot be a path (an embedded NUL) names nothing on disk, so it cannot be what the run targets and False is the right answer",
+            level=logging.DEBUG,
+        )
         return False
 
 
@@ -4390,7 +4426,11 @@ def _resolved_code_path(path: str, here: Path | None) -> str | None:
             # Surfaced at warning, not debug (00466 N29): this local's fallback
             # is what the caller below returns, so a debug-level log here
             # would be error-hiding-via-local by the audit's own definition.
-            logger.warning("No home directory to place %r in (%s)", path, error)
+            log_and_continue(
+                logger,
+                error,
+                reason="no home directory resolves, so the path is judged without home expansion (home is None); the WARNING names the path so the degraded judgement is visible",
+            )
             home = None
         if home is None:
             return None
@@ -4430,7 +4470,11 @@ def _symlink_declared_name(
         target = link.resolve() if link.is_symlink() else None
     except OSError as error:
         # Surfaced at warning, not debug (00466 N29): see _resolved_code_path.
-        logger.warning("Could not check %r for a symlink target (%s)", resolved, error)
+        log_and_continue(
+            logger,
+            error,
+            reason="the symlink target cannot be checked, so the path is judged as it is written (target is None); the WARNING names the path so the degraded judgement is visible",
+        )
         target = None
     if target is None:
         return None
@@ -4791,7 +4835,11 @@ def _path_substitution(code: str, depth: int) -> str | None:
         ]
     except ValueError as error:
         # Surfaced at warning, not debug (00466 N29): see _resolved_code_path.
-        logger.warning("Substitution not computable, unsplittable (%s): %r", error, code)
+        log_and_continue(
+            logger,
+            error,
+            reason="the substitution cannot be split, so no commands are extracted from it (None) and the caller falls back to its unparsed text check; the WARNING names the code",
+        )
         commands = None
     if commands is None:
         return None

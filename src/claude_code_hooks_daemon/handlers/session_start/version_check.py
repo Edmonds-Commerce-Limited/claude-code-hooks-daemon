@@ -22,6 +22,7 @@ from claude_code_hooks_daemon.core.handler_bases import SessionStartHandlerBase
 from claude_code_hooks_daemon.core.hook_result import Decision
 from claude_code_hooks_daemon.install.expected_version import read_expected_version
 from claude_code_hooks_daemon.install.install_stamp import InstallStamp, read_install_stamp
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.git_repo import run_git
 from claude_code_hooks_daemon.utils.session_helpers import is_resume_session
 from claude_code_hooks_daemon.version import __version__
@@ -299,7 +300,15 @@ class VersionCheckHandler(SessionStartHandlerBase):
         except (OSError, ValueError) as exc:
             # A config that cannot be read or parsed is reported by config
             # validation; this advisory must not guess at what it said.
-            logger.warning("Version drift check skipped: %s", exc)
+            log_and_continue(
+                logger,
+                exc,
+                reason=(
+                    "Version drift check skipped: a config that cannot be read or parsed is "
+                    "reported by config validation, and this advisory must not guess at what "
+                    "it said, so no drift is reported"
+                ),
+            )
             return []
         if expected is None or expected == __version__:
             return []
