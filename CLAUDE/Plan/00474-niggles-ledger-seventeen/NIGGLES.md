@@ -1433,6 +1433,16 @@ reads. Test both sides through the real handler.
 
 **Status**: ⬜ Open.
 
+### N365 — an `[awaiting-human]` token quoted inside a fenced block is read as the stop's own declaration
+
+**Found**: by the coordinator, 2026-10-06. Its stop message gave the owner a fenced copy-paste block for ANOTHER
+session, and that block contained the `[awaiting-human]` token. The coordinator's own `STOPPING BECAUSE:` line did not
+declare it, and background QA was still running. The Stop hook nevertheless treated the stop as awaiting-human and
+denied it until a stand-in cron was created. The token should count only where the stop declares it (immediately
+after the `STOPPING BECAUSE:` prefix), never inside fenced or quoted text.
+
+**Status**: ⬜ Open.
+
 ### N363 — a pipe inside a `bash -c` string is blamed on `bash`, not on its real producer
 
 **Found**: by the coordinator, twice on 2026-10-06.
