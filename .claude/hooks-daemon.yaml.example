@@ -192,6 +192,10 @@ handlers:
       enabled: true
       priority: 21
 
+    host_command_guard:    # docker run -v /:/host, gh auth token; HUMAN ONLY: non-PyPI pip index, crontab -r
+      enabled: true         # No agent-side escape hatch: only a human sets this to false.
+      priority: 21
+
     ask_user_question_blocker: # Blocks AskUserQuestion so Claude works autonomously (for unattended workflows)
       enabled: false           # Enable for fully unattended operation
       priority: 23

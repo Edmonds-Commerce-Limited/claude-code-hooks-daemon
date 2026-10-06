@@ -1,10 +1,10 @@
 # Hooks Daemon - Active Configuration
 
-> Generated on 2026-10-05 (v3.68.0) by `generate-docs`. Regenerate: `bin/hooks-daemon generate-docs`
+> Generated on 2026-10-06 (v3.68.0) by `generate-docs`. Regenerate: `bin/hooks-daemon generate-docs`
 
 ## Active Handlers
 
-### PreToolUse (73 handlers)
+### PreToolUse (74 handlers)
 
 | Priority | Handler | Behaviour | Description |
 |----------|---------|----------|-------------|
@@ -39,6 +39,7 @@
 | 20 | merge_to_main_approval | BLOCKING | Deny a merge into the main checkout's default branch while the key is on |
 | 20 | upgrade_approval_guard | BLOCKING | Deny an agent action that grants or bypasses the owner's upgrade approval |
 | 21 | pip_break_system | BLOCKING | Block pip install --break-system-packages commands |
+| 22 | host_command_guard | BLOCKING | Deny the four commands of owner ruling A6 that reach past the project |
 | 22 | sudo_pip | BLOCKING | Block sudo pip install commands |
 | 23 | ask_user_question_blocker | BLOCKING | Allow AskUserQuestion only when every question is prefix-justified |
 | 30 | plan_status_snapshot | ADVISORY | Record a PLAN.md's pre-write status for `goal_injection` to consume |

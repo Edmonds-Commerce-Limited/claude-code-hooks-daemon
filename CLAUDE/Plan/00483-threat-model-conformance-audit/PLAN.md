@@ -105,8 +105,14 @@ other than defeating a parser. Everything else, every ordinary respelling includ
   limb applies: the text is visible at call time, and each has ordinary uses rather than existing
   only to defeat a parser. All 9 are in scope and stay `UNCOVERED-open`. The corpus header makes
   every new deny owner-gated per row, so they go to the owner as one batch.
-  Owner: revisit; see [OWNER-RULINGS-261005.md](OWNER-RULINGS-261005.md) (A6). A revised proposal is
-  owed by the coordinator.
+  Owner ruling A6 (2026-10-05) accepted the coordinator's table, see
+  [OWNER-RULINGS-261005.md](OWNER-RULINGS-261005.md). Implemented: `git push --delete` and
+  `git push <remote> :<name>` are human-only in `destructive_git` (R-GIT-PUSH-DELETE-REMOTE);
+  the new `host_command_guard` denies `docker run -v /:/host` (R-DOCKER-ROOT-MOUNT) and
+  `gh auth token` (R-GH-AUTH-TOKEN), and makes a non-PyPI pip index (R-PIP-NON-PYPI-INDEX) and
+  `crontab -r` (R-CRONTAB-REMOVE) human-only. `git tag -d`, `git reset --keep`, `truncate -s 0`
+  and `rm -rf` are `UNCOVERED-accepted`; the other five rows are `COVERED`. Ordinary-command
+  gate rows are the `a6-` ids.
 - [ ] 🔄 **Task 2.3**: Done for the carried entries (merge 56677e3c6). That added 9
   `UNCOVERED-accepted` corpus rows. N201, N228 and N257 have no row, because main denies the
   representative command anyway. Record every dismissal: in the ledger, mark it

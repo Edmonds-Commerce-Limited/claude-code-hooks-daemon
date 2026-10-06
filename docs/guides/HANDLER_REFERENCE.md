@@ -245,6 +245,7 @@ Safety handlers protect against destructive or dangerous operations. Most are bl
 - `git push --force` / `git push <remote> +<refspec>` -- overwrites remote history (a leading `+` on a refspec forces the update exactly like `--force`)
 - `git branch -D` / `git update-ref -d refs/heads/<name>` -- force-deletes a branch without checking it is merged (lowercase `-d` is allowed; `update-ref` is the plumbing equivalent, scoped to `refs/heads/` targets)
 - `git commit --amend` -- rewrites the previous commit; create a new commit instead
+- `git push --delete <name>` / `git push -d <remote> <name>` / `git push <remote> :<name>` -- deletes a branch or tag on the **remote** (`R-GIT-PUSH-DELETE-REMOTE`). **Human only**: the denial tells the agent to stop and ask the human to run it, and there is no escape hatch. Deleting a **local** ref (`git tag -d`, `git branch -d`) and `git reset --keep` are not blocked.
 
 **To delete a branch, always try `git branch -d` first (v3.52.0).** It is
 allowed, battle-tested, and refuses unless the branch is genuinely merged.
@@ -1279,6 +1280,44 @@ sudo pip install requests
 handlers:
   pre_tool_use:
     sudo_pip:
+      enabled: true
+      priority: 10
+```
+
+---
+
+#### host_command_guard
+
+| Property       | Value                |
+| -------------- | -------------------- |
+| **Config key** | `host_command_guard` |
+| **Priority**   | 10                   |
+| **Type**       | Blocking (terminal)  |
+| **Event**      | PreToolUse           |
+
+**Description:** Blocks four commands whose reach goes past the project (owner ruling A6 of Plan 00483). A command is judged only when it is the command itself: an `echo`/`grep` argument, a `git commit -m` message and a command the reading cannot place (`--index-url "$INDEX"`) are never denied.
+
+| Rule                   | Command                                                                                          | Verdict                                                              |
+| ---------------------- | ------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------- |
+| `R-DOCKER-ROOT-MOUNT`  | `docker run -v /:/host` (also `--volume`, `--mount type=bind,source=/,...`, `docker create`)     | Blocked: the container reaches the whole host, past every path guard |
+| `R-GH-AUTH-TOKEN`      | `gh auth token`                                                                                  | Blocked: prints the OAuth token into the transcript                  |
+| `R-PIP-NON-PYPI-INDEX` | `pip install --index-url <url>` / `-i <url>` / `--extra-index-url <url>` naming a non-PyPI index | **Human only**: the agent stops and asks the human to run it         |
+| `R-CRONTAB-REMOVE`     | `crontab -r`                                                                                     | **Human only**: deletes every scheduled job with no undo             |
+
+**What counts as PyPI:** `https://pypi.org/...` and `https://files.pythonhosted.org/...` only. `test.pypi.org`, plain `http://`, `file://` and every other host are not PyPI. `pip install -r requirements.txt` and an index held in a variable are not judged.
+
+**`gh auth token` in a pipe or `$(...)`** (`gh auth token | docker login --password-stdin`, `TOKEN=$(gh auth token)`) hands the value to another command rather than the transcript, and is allowed. A consumer that prints its input (`echo`, `printf`, `cat`, `tee`, `head`, `tail`, `grep`, `sort`, `xargs echo`...) puts it in the transcript, and is denied. A receiver that cannot be identified (a variable) is allowed.
+
+**Always allowed (owner ruling A6):** `git tag -d`, `git reset --keep`, `truncate -s 0`, `rm -rf`. Remote ref deletion (`git push --delete`) is human-only under [`destructive_git`](#destructive_git).
+
+**Options:** none beyond `enabled` and `priority`. No agent-side escape hatch: the human-only rows are lifted only by the human running the command, or by a config edit visible in review.
+
+**Config example:**
+
+```yaml
+handlers:
+  pre_tool_use:
+    host_command_guard:
       enabled: true
       priority: 10
 ```
@@ -4554,6 +4593,7 @@ Priorities below are the **shipped defaults** from `constants/priority.py`. Seve
 | `lock_file_edit_blocker`        | PreToolUse        | 10       | Direct editing of lock files                                             |
 | `pip_break_system`              | PreToolUse        | 10       | pip --break-system-packages                                              |
 | `sudo_pip`                      | PreToolUse        | 10       | sudo pip install                                                         |
+| `host_command_guard`            | PreToolUse        | 10       | docker host-root mount, gh auth token, non-PyPI pip index, crontab -r    |
 | `ask_user_question_blocker`     | PreToolUse        | 10       | AskUserQuestion without an `ASKING BECAUSE:` prefix                      |
 | `daemon_location_guard`         | PreToolUse        | 11       | cd/pushd into .claude/hooks-daemon/                                      |
 | `absolute_path`                 | PreToolUse        | 12       | Relative paths in Read/Write/Edit                                        |

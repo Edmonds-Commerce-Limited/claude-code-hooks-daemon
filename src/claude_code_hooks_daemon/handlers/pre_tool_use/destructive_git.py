@@ -94,6 +94,28 @@ _GIT_PUSH_FORCE_PATTERN = (
     r"|(?<!\S)\+\S)"
 )
 
+# Remote ref deletion (Plan 00483 Task 2.2, owner ruling A6), scoped to the `git push`
+# segment exactly like the force-push pattern above, and with the same token rule:
+# every marker must START a whitespace-delimited argument. Three spellings delete a
+# ref on the remote:
+#
+#   - `--delete`, exactly (never a prefix, so a branch NAME like `my-delete-branch`
+#     is untouched);
+#   - a SHORT cluster containing `d` (`-d`, `-ud`), because git groups short
+#     options, mirroring the force-push cluster branch;
+#   - a refspec with an EMPTY source, `:<name>` -- no flag at all, one key away
+#     from the `+<name>` force refspec. `main:feature` and `HEAD:refs/heads/x`
+#     have a source and are ordinary pushes.
+#
+# Deleting a LOCAL ref (`git tag -d`, `git branch -d`) is a different command and a
+# different pattern; the owner ruled `git tag -d` allowed.
+_GIT_PUSH_DELETE_PATTERN = (
+    rf"{_GIT_INVOCATION}push\b[^{_SUBCOMMAND_SEPARATOR_CHARS}]*?"
+    r"(?:(?<!\S)--delete(?!\S)"
+    r"|(?<!\S)-(?!-)[A-Za-z0-9]*d[A-Za-z0-9]*(?!\S)"
+    r"|(?<!\S):[^\s:]\S*)"
+)
+
 # SINGLE SOURCE OF TRUTH: ordered (pattern, reason) pairs consumed by BOTH matches()
 # and handle(). Order matters — handle() returns the reason of the FIRST matching
 # pattern, exactly mirroring matches()' first-hit semantics. Keeping one ordered
@@ -231,6 +253,11 @@ _DESTRUCTIVE_PATTERN_REASONS: tuple[tuple[str, str], ...] = (
         rf"{_GIT_INVOCATION}filter-(?:branch|repo)\b",
         "git filter-branch/filter-repo rewrites every commit in the history",
     ),
+    (
+        _GIT_PUSH_DELETE_PATTERN,
+        "git push --delete (or a `:<name>` refspec) deletes a branch or tag on the remote, "
+        "in the shared repository",
+    ),
 )
 
 # Parallel, index-aligned RuleID for each entry in _DESTRUCTIVE_PATTERN_REASONS
@@ -255,6 +282,7 @@ _PATTERN_RULE_IDS: tuple[str, ...] = (
     RuleID.GIT_REFLOG_EXPIRE,
     RuleID.GIT_GC_PRUNE_NOW,
     RuleID.GIT_FILTER_HISTORY,
+    RuleID.GIT_PUSH_DELETE_REMOTE,
 )
 
 # Shared teaching content appended after the rule-specific "why" in every
@@ -290,7 +318,21 @@ _BRANCH_DELETE_VERBOSE: Final[str] = (
     "To proceed: push each branch named below (`git push -u origin <name>`), then retry. "
     "`git branch -d` (lowercase) remains the merge-checked delete."
 )
-_VERBOSE_OVERRIDES: Final[dict[str, str]] = {RuleID.GIT_BRANCH_FORCE_DELETE: _BRANCH_DELETE_VERBOSE}
+# A remote ref deletion removes the ref from the SHARED repository, where this
+# checkout's reflog cannot bring it back and other people may be working from it.
+# Owner ruling A6: a human runs it. There is no verification route and no hatch.
+_PUSH_DELETE_VERBOSE: Final[str] = (
+    "This command deletes a branch or tag on the REMOTE repository. Other people and other "
+    "machines share that ref, and nothing in this checkout (reflog included) restores it.\n\n"
+    "Do not run it, and do not look for another spelling of it. Stop and ask the human to run "
+    "it themselves: tell them the remote, the ref and why it should go.\n\n"
+    "Local clean-up is not affected: `git tag -d <tag>` and `git branch -d <name>` only touch "
+    "this checkout and are allowed."
+)
+_VERBOSE_OVERRIDES: Final[dict[str, str]] = {
+    RuleID.GIT_BRANCH_FORCE_DELETE: _BRANCH_DELETE_VERBOSE,
+    RuleID.GIT_PUSH_DELETE_REMOTE: _PUSH_DELETE_VERBOSE,
+}
 
 
 class _Unverifiable(Exception):
@@ -524,6 +566,12 @@ _RULE_DEFINITIONS: tuple[tuple[str, str, str, str], ...] = (
         "`git filter-branch` / `git filter-repo`",
         "Rewrites every commit in the history",
         "Ask the user to run it manually, on a fresh clone with a backup ref",
+    ),
+    (
+        RuleID.GIT_PUSH_DELETE_REMOTE,
+        "`git push --delete <name>` / `git push <remote> :<name>`",
+        "Deletes a branch or tag in the shared remote repository, beyond any local recovery",
+        "Do not run it; stop and ask the human to run it themselves",
     ),
 )
 
@@ -759,7 +807,11 @@ class DestructiveGitHandler(PreToolUseHandlerBase):
             "| Destroys the reflog — a real window such as `--expire=90.days.ago` is allowed |\n"
             "| `git gc --prune=now` "
             "| Drops unreachable objects at once; plain `git gc` and `--auto` are allowed |\n"
-            "| `git filter-branch` / `git filter-repo` | Rewrites every commit in the history |\n\n"
+            "| `git filter-branch` / `git filter-repo` | Rewrites every commit in the history |\n"
+            "| `git push --delete <name>` / `git push <remote> :<name>` "
+            "| HUMAN ONLY: deletes a ref on the shared remote. Stop and ask the human to run "
+            "it; there is no escape hatch. Local `git tag -d` and `git reset --keep` are "
+            "allowed |\n\n"
             "The last four rows close spellings that reached an outcome this handler "
             "already guarded: `git checkout -- <file>` was blocked while "
             "`git checkout -f` was not, and the reflog rules matter because the "
@@ -1084,6 +1136,39 @@ class DestructiveGitHandler(PreToolUseHandlerBase):
                     "bash -n -c only parses the command, so the substitution "
                     "inside it is never run and no push is attempted"
                 ),
+                test_type=TestType.BLOCKING,
+                recommended_model=RecommendedModel.HAIKU,
+                requires_main_thread=False,
+            ),
+            AcceptanceTest(
+                title="git push --delete (remote ref deletion, human only)",
+                command="bash -n -c 'git push origin --delete NONEXISTENT_SAFE_TEST_BRANCH'",
+                dispatch_as_bash=True,
+                description=(
+                    "Blocks deleting a ref on the remote (owner ruling A6); the denial "
+                    "tells the agent to ask the human to run it"
+                ),
+                expected_decision=Decision.DENY,
+                expected_message_patterns=[
+                    r"REMOTE",
+                    r"ask the human",
+                ],
+                safety_notes="Uses non-existent branch - and bash -n -c only parses the command, never executes it",
+                test_type=TestType.BLOCKING,
+                recommended_model=RecommendedModel.HAIKU,
+                requires_main_thread=False,
+            ),
+            AcceptanceTest(
+                title="git tag -d is a local delete and is allowed",
+                command="bash -n -c 'git tag -d NONEXISTENT_SAFE_TEST_TAG'",
+                dispatch_as_bash=True,
+                description=(
+                    "A local tag delete touches only this checkout and is not blocked "
+                    "(owner ruling A6); only the REMOTE deletion is human-only"
+                ),
+                expected_decision=Decision.ALLOW,
+                expected_message_patterns=[],
+                safety_notes="Runs under bash -n -c, which only parses the command and never executes it",
                 test_type=TestType.BLOCKING,
                 recommended_model=RecommendedModel.HAIKU,
                 requires_main_thread=False,

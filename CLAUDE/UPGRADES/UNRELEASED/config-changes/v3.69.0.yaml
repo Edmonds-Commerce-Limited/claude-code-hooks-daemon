@@ -7,6 +7,30 @@ breaking: false
 
 config_changes:
   added:
+    - key: handlers.pre_tool_use.host_command_guard
+      recommended: true
+      dormant: false
+      description: >-
+        NEW (owner ruling A6, Plan 00483 Task 2.2). On by default. Denies
+        `docker run -v /:/host` (a host-root mount, also `--volume`,
+        `--mount type=bind,source=/` and `docker create`) and `gh auth token`
+        (a token piped to or substituted into another command is allowed). Human
+        only, with no agent-side escape hatch: `pip install --index-url`, `-i`
+        or `--extra-index-url` naming a non-PyPI index (PyPI is
+        https://pypi.org and https://files.pythonhosted.org only), and
+        `crontab -r`. `destructive_git` gains the same human-only denial for
+        `git push --delete` and `git push <remote> :<name>` (R-GIT-PUSH-DELETE-REMOTE)
+        with no config change. Only `enabled` and `priority` are options.
+      example_yaml: |
+        handlers:
+          pre_tool_use:
+            host_command_guard:
+              enabled: true
+              priority: 10
+      migration_note: >-
+        No action needed. A project that installs from a private PyPI mirror
+        and wants agents to do so sets `enabled: false` (a human config edit),
+        or asks the human to run those installs.
     - key: handlers.pre_tool_use.github_issue_assignment_guard
       recommended: false
       dormant: true

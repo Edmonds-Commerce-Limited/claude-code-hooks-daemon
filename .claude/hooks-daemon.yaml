@@ -422,6 +422,15 @@ handlers:
       enabled: true
       priority: 22
 
+    # Plan 00483 Task 2.2, owner ruling A6: four commands whose reach goes past the
+    # project. Blocked: `docker run -v /:/host` (host root mounted), `gh auth token`
+    # (prints the token into the transcript). Human only (stop and ask the human):
+    # `pip install --index-url/-i/--extra-index-url` naming a non-PyPI index, and
+    # `crontab -r`. No agent-side escape hatch; only a human edits this.
+    host_command_guard:
+      enabled: true
+      priority: 22
+
     ask_user_question_blocker: # UNATTENDED: blocks EVERY AskUserQuestion, justified or not
       enabled: true
       priority: 23
