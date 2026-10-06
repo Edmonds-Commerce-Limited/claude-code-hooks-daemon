@@ -41,6 +41,16 @@ Globs support `*` (within a segment), `?` (single char), and `**` (zero-or-more 
 
 A file is exempt if it matches the union of the project-wide list, the handler's own list, and the handler's built-in defaults. The three sources are additive; none overrides another.
 
+**Say why (`reason`).** Every entry of `exclude_paths` (either level) and of `extra_whitelist` may be a plain string or a `{pattern, reason}` mapping. Handlers only ever see the pattern; the reason is for the human who reads the config later. A placeholder reason (`tbd`, `because`, `n/a` and similar) is a config error. With `daemon.strict_mode: true` a plain string is a config error too, so every exception must carry a reason; for everyone else that becomes the rule at the next major release.
+
+```yaml
+daemon:
+  exclude_paths:
+    - pattern: "vendor/**"
+      reason: "third-party code we do not edit"
+    - "legacy/**"        # still accepted when strict_mode is off
+```
+
 **Two of them are not content scanners**, and for those an exclusion means something different — worth understanding before reaching for it:
 
 - `tdd_enforcement` (PreToolUse, blocking) -- excluding a path turns the TDD gate OFF for it. Where the tests merely live somewhere the resolver cannot infer, prefer that handler's `test_path_map` option, which keeps the gate ON and declares the directory instead.

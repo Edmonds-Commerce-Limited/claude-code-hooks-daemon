@@ -125,6 +125,9 @@ agent.
 ### Phase 3: Close the gaps and hook in
 
 - [ ] ⬜ **Task 3.1**: Close the accepted gaps through the ledger, at most 3 branches at once.
+  G4 (B3) is partly closed: reasons accepted and required under `strict_mode`. Planned for the
+  next major (breaking config change): a reason required for every project on `exclude_paths`
+  and `extra_whitelist`. `CLAUDE/UPGRADES/` keeps no upcoming-major notes, so it is tracked here.
 - [x] ✅ **Task 3.2**: A machine-readable enumeration of active defences (§5): rule ID,
   handler, defect class, docs link, and the detector entry point, so a DBF tool can read
   them. Reuse the generate-docs data rather than a second source. Done: `hooks-daemon defences --json`, see [the report](subagent-reports/261004-task-3.2-defence-enumeration-sonnet.md).
