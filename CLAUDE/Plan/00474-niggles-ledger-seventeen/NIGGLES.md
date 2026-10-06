@@ -1414,6 +1414,34 @@ The uncertain-move union judges the hook directory and the LAST recorded move (`
 every candidate directory (`sub`). Remedy: judge every directory any `cd` in the chain could
 land in.
 
+### N359 — the plan fact-check feed points at the wrong files, diffs whole folders, and can consume a check unseen
+
+**Found**: by the coordinator in the Plan 00480 Task 4.4 live run, after the daemon restart that loaded N358
+(merged `87c02719a`). Four owed checks arrived together on the next PostToolUse; then a deliberate false claim was added
+to `CLAUDE/Plan/00480-plan-fact-checker-and-debounce/PLAN.md`.
+
+**Four defects seen live**:
+
+- **Worktree paths.** Two delivered instructions named a PLAN.md inside a sub-agent's worktree
+  (`.claude/worktrees/agent-…/CLAUDE/Plan/00483-…/PLAN.md` and `…/00484-…/PLAN.md`), both worktrees already removed.
+  A sub-agent's plan edit in its own worktree feeds the coordinator's debouncer under the worktree path.
+- **Archived plans.** The 00493 instruction named `CLAUDE/Plan/00493-…/PLAN.md` after the plan had moved to
+  `Completed/`.
+- **First check diffs the whole folder.** A plan with no checked content yet is diffed against nothing, so the first
+  instruction carries the whole plan folder: 290 KB for 00474 and 500 KB for 00483, NIGGLES and reports included.
+  The first sighting should record a baseline and deliver nothing.
+- **A delivery consumed unseen.** The check for the false claim fired at 09:22:29 (UTC, 2026-10-06): the diff file
+  holds the claim and the plan was recorded as checked, but no "PLAN FACT-CHECK OWED" text reached the session on that
+  tool call, while the earlier batch had. The cause is not established; the in-memory log no longer held that window.
+  Because delivery advances the checked content before anything confirms the text arrived, a lost message loses the
+  check for good.
+
+**Remedies to weigh**: ignore (or map to the main root) edits under a worktree path; resolve the plan folder at
+delivery time and drop records for archived plans; baseline on first sight; and only advance the checked content once
+the delivery is known to have been emitted (or re-offer an undelivered check on the next event).
+
+**Status**: ⬜ Open. Plan 00480 Task 4.4 stays open on it.
+
 ### N358 — one pending fact-check record from the pre-delivery build stops every delivery
 
 **Found**: by the coordinator, in `bin/hooks-daemon logs -l WARNING` after the daemon restart that loaded Plan 00480
