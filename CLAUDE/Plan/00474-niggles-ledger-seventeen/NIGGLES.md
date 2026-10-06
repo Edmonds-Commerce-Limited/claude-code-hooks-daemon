@@ -1444,6 +1444,12 @@ Also stale, found by the fact checker on the corrected plan: the template commen
 (the `plan_fact_check_feed` block) and `src/claude_code_hooks_daemon/daemon/init_config.py` (the same handler) still
 say delivery is not built.
 
+**Fifth, seen later the same day: a correction loop.** Fixing a fact checker's finding in a plan is itself a plan edit,
+so it owes another check, whose finding prompts another edit. On Plan 00480 this went edit, check, one-line
+correction copied from the checker's own report, then a third check owed. The coordinator skipped the third and
+recorded it here. A remedy to weigh: run one check per burst plus its corrections, for example by widening the
+quiet period, or by not re-offering a check whose diff only restates the last report's findings.
+
 **Status**: ⬜ Open. Plan 00480 Task 4.4 stays open on it.
 
 ### N358 — one pending fact-check record from the pre-delivery build stops every delivery
