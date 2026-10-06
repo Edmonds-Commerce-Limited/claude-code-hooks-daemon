@@ -139,7 +139,11 @@ as principle 1.
     placed under `pre_tool_use/`), and `plan-fact-checker` refuted it from the diff, along with four
     stale claims in this plan, now corrected. But the delivery text never reached the session, and
     the delivered instructions showed three more defects. All four are 00474 N359.
-  - **Remains**: N359, then a clean live run with the delivery text seen in the session.
+  - **Delivery seen (2026-10-06)**: filing Plan 00495 produced "PLAN FACT-CHECK OWED for
+    00495-performance-improvement-programme" in the session on the next PostToolUse. The path was correct and the
+    diff file existed. The coordinator dispatched `plan-fact-checker` on it.
+  - **Remains**: the N359 path defects (worktree and archived-plan paths, whole-folder first diffs), then one more live
+    run free of them.
 
 ## Open questions for the owner
 

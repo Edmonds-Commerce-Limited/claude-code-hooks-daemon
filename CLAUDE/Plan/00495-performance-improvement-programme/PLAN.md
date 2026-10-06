@@ -59,7 +59,8 @@ Evidence already seen in this session (2026-10-06), not yet explained:
   start, SessionStart, or neither). Part of the same dispatch.
 - [ ] ⬜ **Task 1.3**: Bisect to the commit or plan responsible, if Task 1.1 shows a clear jump.
 - [ ] ⬜ **Task 1.4**: Refresh `CLAUDE/Performance/BASELINE.md` with the new figures, including the dispatch figure it
-  marks "not re-measured".
+  marks "not re-measured". Also correct `CLAUDE/Performance/README.md:72`, which still lists the Rust transport
+  forwarder as "Never, until…" although `relay/hooks_relay.rs` exists (found by the plan's fact check).
 
 ### Phase 2: Fix (TDD, one branch per fix)
 
