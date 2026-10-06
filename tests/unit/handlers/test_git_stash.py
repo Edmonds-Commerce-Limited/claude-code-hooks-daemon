@@ -313,6 +313,15 @@ class TestGitStashHandler:
         }
         assert handler.matches(hook_input) is True
 
+    @pytest.mark.parametrize("reason", ["because", "n/a", "needed", "TBD"])
+    def test_escape_hatch_generic_reason_still_blocked(self, handler, reason):
+        """A placeholder reason is not honoured (Plan 00484 G2)."""
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": f'MUST_STASH_BECAUSE="{reason}"; git stash'},
+        }
+        assert handler.matches(hook_input) is True
+
     def test_escape_hatch_missing_entirely_still_blocked(self, handler):
         """Plain git stash without escape hatch stays blocked."""
         hook_input = {"tool_name": "Bash", "tool_input": {"command": "git stash"}}

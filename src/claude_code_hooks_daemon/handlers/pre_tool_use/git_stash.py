@@ -11,6 +11,7 @@ from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.core.utils import get_bash_command
 from claude_code_hooks_daemon.utils.command_evasion import GIT_INVOCATION, remove_word_quoting
 from claude_code_hooks_daemon.utils.command_position import command_position_segments
+from claude_code_hooks_daemon.utils.escape_hatch import command_declares_hatch
 
 # Shared teaching content for the (only) deny path — preserves the deny-mode
 # block message verbatim (Plan 00116, Task 3.2).
@@ -36,10 +37,7 @@ _RULE_VERBOSE = (
 
 # Escape hatch: MUST_STASH_BECAUSE="non-empty reason" before git stash
 # Requires a non-empty quoted reason to pass through.
-_ESCAPE_HATCH_PATTERN = re.compile(
-    r"""MUST_STASH_BECAUSE=["']([^"']+)["']""",
-    re.IGNORECASE,
-)
+_ESCAPE_HATCH = "MUST_STASH_BECAUSE"
 
 # Recovery/query operations are allowed unconditionally: pop, apply, list, show
 # retrieve stashed work. drop/clear are blocked by DestructiveGitHandler.
@@ -115,7 +113,7 @@ class GitStashHandler(PreToolUseHandlerBase):
             return False
 
         # Escape hatch: MUST_STASH_BECAUSE="non-empty reason" bypasses block
-        if _ESCAPE_HATCH_PATTERN.search(command):
+        if command_declares_hatch(command, _ESCAPE_HATCH):
             return False
 
         return True
@@ -170,6 +168,9 @@ class GitStashHandler(PreToolUseHandlerBase):
             "```\n"
             'MUST_STASH_BECAUSE="explain why"; git stash\n'
             "```\n\n"
+            "The reason must be specific: an empty value or a placeholder such as "
+            "`because` or `n/a` is not honoured, and the block applies as if no "
+            "hatch were given.\n\n"
             "Configure via `handlers.pre_tool_use.git_stash.options.mode: warn` "
             "for advisory-only mode."
         )

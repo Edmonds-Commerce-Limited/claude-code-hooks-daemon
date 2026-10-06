@@ -303,6 +303,38 @@ class TestEscapeHatch:
         assert result.decision == Decision.DENY
 
 
+class TestEscapeHatchHygiene:
+    """Plan 00484 G2: a closer-only or placeholder reason is not a reason."""
+
+    @pytest.mark.parametrize(
+        "marker",
+        [
+            "# MUST_EXCEED_COMMENT_SIZE_BECAUSE: */",
+            "<!-- MUST_EXCEED_COMMENT_SIZE_BECAUSE: -->",
+            "# MUST_EXCEED_COMMENT_SIZE_BECAUSE: n/a",
+            "# MUST_EXCEED_COMMENT_SIZE_BECAUSE: because",
+        ],
+    )
+    def test_unspecific_reason_does_not_downgrade(
+        self, handler: CommentSizeHandler, marker: str
+    ) -> None:
+        old = "x = 1  # short\n"
+        new = "x = 1  # " + ("y" * 60) + "\n" + marker + "\n"
+        result = handler.handle(_make_edit_input("/workspace/src/mod.py", old, new))
+        assert result.decision == Decision.DENY
+
+    def test_specific_reason_before_a_closer_still_counts(
+        self, handler: CommentSizeHandler
+    ) -> None:
+        old = "x = 1  # short\n"
+        new = (
+            "x = 1  # " + ("y" * 60) + "\n"
+            "/* MUST_EXCEED_COMMENT_SIZE_BECAUSE: verbatim upstream licence text */\n"
+        )
+        result = handler.handle(_make_edit_input("/workspace/src/mod.py", old, new))
+        assert result.decision == Decision.ALLOW
+
+
 class TestWarnMode:
     def test_warn_mode_downgrades_growth_block_to_advisory(
         self, handler: CommentSizeHandler

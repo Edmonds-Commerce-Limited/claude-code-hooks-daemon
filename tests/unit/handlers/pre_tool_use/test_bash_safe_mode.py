@@ -163,6 +163,22 @@ class TestMatchesNegative:
         command = 'MUST_SKIP_SAFE_MODE_BECAUSE="diagnostic sweep"; pytest tests/; git commit -m x'
         assert handler.matches(_bash(command)) is False
 
+    @pytest.mark.parametrize(
+        "marker",
+        [
+            "MUST_SKIP_SAFE_MODE_BECAUSE",
+            'MUST_SKIP_SAFE_MODE_BECAUSE=""',
+            "MUST_SKIP_SAFE_MODE_BECAUSE=",
+            'MUST_SKIP_SAFE_MODE_BECAUSE="because"',
+            "MUST_SKIP_SAFE_MODE_BECAUSE='n/a'",
+        ],
+    )
+    def test_hatch_without_a_specific_reason_is_not_honoured(
+        self, handler: BashSafeModeHandler, marker: str
+    ) -> None:
+        command = f"{marker}; pytest tests/; git commit -m x"
+        assert handler.matches(_bash(command)) is True
+
 
 class TestConfigurableOptions:
     def test_require_errexit_only(self, handler: BashSafeModeHandler) -> None:

@@ -28,6 +28,7 @@ from claude_code_hooks_daemon.utils.command_evasion import (
     GIT_INVOCATION,
     SUBCOMMAND_SEPARATOR_CHARS,
 )
+from claude_code_hooks_daemon.utils.escape_hatch import command_declares_hatch
 
 # Mode values (mirrors git_stash's mode option, Plan 00207 Task 1.2).
 _MODE_BLOCK = "block"
@@ -36,10 +37,7 @@ _MODE_WARN = "warn"
 # Escape hatch: MUST_SQUASH_BECAUSE="non-empty reason" before the command.
 # Covers BOTH ancestry-severing spellings this handler blocks (squash and
 # rebase-merge) -- Plan 00207 Task 1.2 names this one hatch for both.
-_ESCAPE_HATCH_PATTERN = re.compile(
-    r"""MUST_SQUASH_BECAUSE=["']([^"']+)["']""",
-    re.IGNORECASE,
-)
+_ESCAPE_HATCH = "MUST_SQUASH_BECAUSE"
 
 # A command segment does not cross a shell sub-command separator, matching the
 # scoping already used by destructive_git's force-push pattern and
@@ -223,7 +221,7 @@ class AncestryPreservingMergeHandler(PreToolUseHandlerBase):
             return False
 
         # Escape hatch: MUST_SQUASH_BECAUSE="non-empty reason" bypasses the block.
-        if _ESCAPE_HATCH_PATTERN.search(command):
+        if command_declares_hatch(command, _ESCAPE_HATCH):
             return False
 
         return True

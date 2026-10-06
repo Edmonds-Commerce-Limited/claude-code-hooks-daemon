@@ -235,6 +235,13 @@ class TestEscapeHatch:
         hook_input = _bash('MUST_SQUASH_BECAUSE=""; git merge --squash feature-branch')
         assert handler.matches(hook_input) is True
 
+    @pytest.mark.parametrize("reason", ["because", "n/a", "needed"])
+    def test_generic_reason_still_blocked(
+        self, handler: AncestryPreservingMergeHandler, reason: str
+    ) -> None:
+        hook_input = _bash(f'MUST_SQUASH_BECAUSE="{reason}"; git merge --squash feature-branch')
+        assert handler.matches(hook_input) is True
+
     def test_missing_escape_hatch_still_blocked(
         self, handler: AncestryPreservingMergeHandler
     ) -> None:
