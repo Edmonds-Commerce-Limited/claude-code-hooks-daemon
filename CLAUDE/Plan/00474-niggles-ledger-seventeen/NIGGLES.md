@@ -1437,8 +1437,16 @@ glob-match a hidden protected name is not one.
 **Impact**: medium. Searching test output for `path:line` is an ordinary debugging command. The ordinary-command
 gate has no row for a regex containing `/.*` as a grep pattern.
 
-**Status**: ⬜ Open. Remedy: a grep/rg PATTERN operand (the first non-option argument, or the `-e`/`-E` value) is text,
-not a path, and must not be expanded as a glob; add the command above as a gate row.
+**Status**: ✅ Fixed (this branch, commit recorded at merge). Root cause: the N269/N291 text-operand view
+(`_without_text_operands` in `utils/secret_file_matching.py`) segmented the top level and each substitution, but not the
+program string of `bash -c '...'`, which is one quoted word at top level; a grep pattern inside it kept its glob
+characters and `/.*:[0-9]+` matched the protected dotfile glob. The plain `grep -E "..." file` and `rg` shapes were
+already allowed. Fix: `_text_operand_spans` also descends (three layers) into the content of a single-quoted `-c`
+program of `bash`/`sh`/`dash`/`zsh`/`ksh` (`_shell_dash_c_program_span`; single quotes keep offsets exact, so a
+double-quoted program is left to the ordinary scan), so grep/rg/echo operands there are text. A grep FILE operand that
+names or globs to a protected path stays denied, as does a protected path read anywhere else in the program. Not
+covered: a `FOO=1 bash -c` prefix (the command word is unresolved, so it fails closed). Pinned by
+`tests/unit/utils/test_bash_c_text_operands.py` (red before the fix) and four gate rows (`n356-*`).
 
 ### N354 — the upgrade-approval guard denies a `PYTHONPATH=… python -c` probe that runs no upgrade
 
@@ -1452,8 +1460,16 @@ cannot be read" limb treating an inline `python -c` program as an unreadable upg
 **Impact**: medium for this repository. Running branch code with `PYTHONPATH` is an ordinary development idiom. The
 workaround is a script file under `untracked/scratch/` with `sys.path.insert`.
 
-**Status**: ⬜ Open. Remedy: an unreadable-script limb must also require one of the upgrade's own arguments, as its
-guidance says; a `-c` program that names none of them is not an upgrade. Reproduce with a TDD row first.
+**Status**: ✅ Fixed (this branch, commit recorded at merge). Root cause: not the "script that cannot be read" limb but
+its sibling for interpreters, `_variable_program_is_upgrade` in `handlers/pre_tool_use/upgrade_approval_guard.py`: any
+`-c` flag returned `_cannot_tell_script`, which is "the upgrade" once a steering assignment (`PYTHONPATH`) is present,
+even when the program text was literal. Fix: `_inline_program_is_upgrade` judges a literal `-c` program by the
+upgrade's own signals (`upgrade.sh`, `upgrade_version.sh`, `upgrade_gate_standalone.py`, `--project-root`, the
+`.claude/hooks-daemon` clone path); a program with `$` or a backtick, or no text, stays "cannot tell". Three existing
+rows that pinned `-c 'import os'` under a steering variable as denied were changed to `-c "$CODE"` (still denied) and
+a literal program naming `scripts/upgrade.sh` (still denied); the literal `import os` shape is now pinned allowed in
+`TestSteeredLiteralInlineProgramNamesNoUpgrade`, plus gate row `n354-pythonpath-python-c-probe`. Residual, by the
+threat model's limb-1/limb-2 rule: a literal program that builds the upgrade's name at run time is not seen.
 
 ### N353 — the dismissive-language advisory flags a citation of the threat model's own scope rule
 
