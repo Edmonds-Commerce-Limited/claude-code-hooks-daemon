@@ -9,3 +9,4 @@
 # CLAUDE.md deliberately NOT whitelisted: ccy's startup gate refuses to launch
 # when it is tracked. Kept on disk untracked; see untracked/fedora-desktop-ccy-CLAUDE-bug.md
 !mounts
+!ccy.env.local.dist
