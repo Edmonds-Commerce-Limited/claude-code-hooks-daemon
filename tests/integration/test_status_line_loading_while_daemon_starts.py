@@ -20,6 +20,7 @@ from pathlib import Path
 import pytest
 
 from claude_code_hooks_daemon.constants import Timeout
+from claude_code_hooks_daemon.daemon.synthetic_traffic import SYNTHETIC_SOURCE_FIELD, TEST_PROBE
 from tests.daemon_teardown import stop_daemons_of
 from tests.integration.test_a_retried_hook_never_restarts_a_slow_start import (
     _INIT_DELAY_SECONDS,
@@ -70,7 +71,7 @@ def _status_hook(
         [BASH, "-c", script],
         cwd=project,
         env=env,
-        input=_stdin_text({"hook_event_name": "Status"}),
+        input=_stdin_text({"hook_event_name": "Status", SYNTHETIC_SOURCE_FIELD: TEST_PROBE}),
         capture_output=True,
         text=True,
         timeout=Timeout.REQUEST_LONG,
