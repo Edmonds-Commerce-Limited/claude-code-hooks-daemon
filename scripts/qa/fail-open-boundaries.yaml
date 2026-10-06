@@ -525,3 +525,21 @@ boundaries:
     reason: >-
       The touch sits inside `if ! touch ...; then`, so an unwritable flag path
       is handled rather than ignored.
+
+  # ------------------------------------------------------------ controller.py
+  - surface: src/claude_code_hooks_daemon/daemon/controller.py
+    scope: prewarm_indexes
+    construct: "except Exception"
+    ordinal: 0
+    verdict: fail-open
+    induced_by: >-
+      a handler's prewarm_index() raising during daemon startup (an unusual
+      config that makes its patterns or project root unresolvable, or a
+      third-party or project handler implementing IndexPrewarmer)
+    caller_controlled: false
+    trace: >-
+      A warning naming the handler and the exception, and the handler's class
+      name in the method's return value. The pre-warm is only an optimisation
+      at startup: failing closed would stop the daemon and break every session,
+      and the guard's hot path still builds and judges against its own index,
+      so no verdict is skipped.
