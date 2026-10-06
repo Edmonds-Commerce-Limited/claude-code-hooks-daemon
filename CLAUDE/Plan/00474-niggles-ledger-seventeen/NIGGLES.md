@@ -1414,6 +1414,18 @@ The uncertain-move union judges the hook directory and the LAST recorded move (`
 every candidate directory (`sub`). Remedy: judge every directory any `cd` in the chain could
 land in.
 
+### N364 — a read-only `git config --get-regexp` naming `user.name` is judged as an identity write
+
+**Found**: by the Plan 00487 host agent on 2026-10-06. `cd <clone> && git config --show-origin --get-regexp '^(commit\.gpgsign|…|user\.name|user\.email|…)$'; git log …` was denied as `R-SENSITIVE-SECRET-TERM` (a secret word
+list entry matched elsewhere on the command line). `--get-regexp` only reads. The handler's own guidance says only
+commands that WRITE metadata are candidates and reading is never blocked, and `git config user.name|user.email` is
+listed as a surface only because it sets the author identity.
+
+**Fix**: treat `git config` as an identity write only when it assigns a value (`git config [--scope] user.name <value>`, `--add`, `--replace-all`), never for `--get`, `--get-all`, `--get-regexp`, `--list`/`-l` or `--show-origin`
+reads. Test both sides through the real handler.
+
+**Status**: ⬜ Open.
+
 ### N363 — a pipe inside a `bash -c` string is blamed on `bash`, not on its real producer
 
 **Found**: by the coordinator, twice on 2026-10-06.
