@@ -504,6 +504,12 @@ class SegmentExplanation:
 
 ## Troubleshooting
 
+### Status line shows "⏳ hooks daemon loading…"
+
+The daemon is still starting (a cold start can take 15-30 s under load). The status line never waits on the start: it
+answers at once with this baseline line while the start carries on in the background, and the real status line returns
+once the daemon answers. Only a start that has genuinely failed shows "DAEMON FAILED".
+
 ### Status line shows "DAEMON FAILED"
 
 The daemon is not running. Check:

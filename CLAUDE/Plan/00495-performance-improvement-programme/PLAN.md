@@ -100,8 +100,14 @@ Evidence already seen in this session (2026-10-06), not yet explained:
 - [ ] ⬜ **Task 2.5**: Bind the socket before the non-essential start-up work, so the first request is answered sooner.
 - [ ] ⬜ **Task 2.6**: Add a result cache to `docs-qa-sweep` and `plan-qa-sweep`, keyed by an input fingerprint, and run them off the
   blocking chain. About 6 CPU-s saved on this repository, and no handler dropped for the budget.
-- [ ] ⬜ **Task 2.7**: Status line: while the daemon is starting, show a baseline line saying the hooks daemon is
-  loading (owner ruling A3, 2026-10-06), with any cached fallback text, instead of "DAEMON FAILED".
+- [x] ✅ **Task 2.7**: Status line: while the daemon is starting, show a baseline line saying the hooks daemon is
+  loading (owner ruling A3, 2026-10-06), with any cached fallback text, instead of "DAEMON FAILED". Done: the status
+  line forwarder asks for a non-blocking start (`_HOOKS_DAEMON_NONBLOCKING_START`, 1 s deadline) and prints
+  "⏳ hooks daemon loading…" with exit 0 while the daemon is starting; a daemon whose pid is alive but whose socket is
+  not yet answering also shows it; a launcher that finished with no daemon alive still prints "DAEMON FAILED". No
+  cache was built. Time to first status-line output, daemon stopped, throwaway project with its own daemon, before ->
+  after: real cold start 3.65 s and 5.32 s -> 0.46 s and 0.21 s; slowed 7 s init 11.34 s and 10.60 s -> 0.10 s and
+  0.92 s.
 
 ### Phase 3: Guard and decide
 

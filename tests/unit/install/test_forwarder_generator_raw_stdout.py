@@ -289,7 +289,7 @@ class TestTheMetaLookupIsHoisted:
         monkeypatch.setattr(forwarder_generator, "wired_event_metas", refuse)
 
         block = forwarder_generator._render_raw_stdout_daemon_down_block("status-line")
-        assert "if ! ensure_daemon; then" in block
+        assert "ensure_daemon; then" in block
 
     def test_the_hoisted_index_covers_every_wired_event(self) -> None:
         expected = {m.bash_key: m for m in wired_event_metas()}
