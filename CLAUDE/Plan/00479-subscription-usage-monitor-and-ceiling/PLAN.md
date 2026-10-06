@@ -236,7 +236,10 @@ the daemon directs the model and then verifies what it did.
   Owner ruling (same day): that file is written by IaC only, never by an agent, so the copy
   the coordinator had written was removed. The alias, and with it this check, waits for IaC
   to write the file; it then takes effect at the next ccy launch, and also makes this session
-  the `issue-sdlc` cron's host.
+  the `issue-sdlc` cron's host. Live since the 2026-10-06 host reboot: the session after it
+  has `HOOKS_DAEMON_HOSTNAME=cchd-sdlc-runner`, and the stop enforcer demanded the
+  host-limited `issue-sdlc` cron, which was created. The ceiling pause itself is now armed
+  in this session and is observed the first time a window reaches 80%.
 
 - [x] Missing or stale usage data never stops a session (Task 4.7; acceptance step 6 and the
   chain test).

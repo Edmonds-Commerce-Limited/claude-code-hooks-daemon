@@ -27,10 +27,9 @@ owner ruling D8). ccy 3.80.0+ sources the file after `ccy.env`.
 
 **Readability, found 2026-10-06.** A `ccy.env.local` appeared in that checkout after the agent-written copy was
 removed. Inside the container, root cannot stat it (`Permission denied`; `ls -la` prints `?????????`), and it is not
-a bind mount. That pattern fits an SELinux label the container is not allowed to read. If so:
-
-- ccy may be unable to source it, so the role would not take effect;
-- agents cannot read it, though the ruling allows reading.
+a bind mount. That pattern fits an SELinux label the container is not allowed to read. ccy itself does
+source it: after the host reboot the session had `HOOKS_DAEMON_HOSTNAME=cchd-sdlc-runner`. Only the in-container read
+fails, so agents cannot read it, though the ruling allows reading.
 
 Please write it with a label and mode the container can read, for example the same context as the sibling
 `ccy.env`. Confirm with `cat .claude/ccy/ccy.env.local` inside a ccy session.
