@@ -261,10 +261,22 @@ def build_index(project_root: Path, patterns: tuple[str, ...]) -> ProtectedFileI
 
     ``None`` means git could not answer (not a repository, or no git): there is no
     index, which is different from an index that lists nothing.
+
+    Git is asked only for the paths a protected glob can select
+    (:func:`~claude_code_hooks_daemon.utils.protected_pathspecs.git_pathspecs`):
+    listing every ignored file of a working copy that keeps virtualenvs and
+    worktrees under an ignored directory took longer than the build's timeout, so
+    the index never built (N355). A pattern set no pathspec can express soundly
+    is listed in full.
     """
     from claude_code_hooks_daemon.utils.git_file_states import scan_git_file_states
+    from claude_code_hooks_daemon.utils.protected_pathspecs import git_pathspecs
 
-    states = scan_git_file_states(project_root, timeout=Timeout.INDEX_BUILD_GIT)
+    states = scan_git_file_states(
+        project_root,
+        timeout=Timeout.INDEX_BUILD_GIT,
+        pathspecs=git_pathspecs(patterns, project_root),
+    )
     if states is None:
         return None
     return index_from_states(project_root, patterns, states)

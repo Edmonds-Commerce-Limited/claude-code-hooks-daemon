@@ -20,6 +20,7 @@ from typing import Final
 
 from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.utils.git_repo import run_git
+from claude_code_hooks_daemon.utils.protected_pathspecs import PATHSPEC_MAGIC
 from claude_code_hooks_daemon.utils.secret_file_matching import protected_among
 
 logger = logging.getLogger(__name__)
@@ -67,7 +68,9 @@ class GitFileStates:
 
 
 def scan_git_file_states(
-    project_root: Path, timeout: float = Timeout.GIT_CONTEXT
+    project_root: Path,
+    timeout: float = Timeout.GIT_CONTEXT,
+    pathspecs: tuple[str, ...] | None = None,
 ) -> GitFileStates | None:
     """The file states of the repository at ``project_root``, or ``None``.
 
@@ -75,6 +78,16 @@ def scan_git_file_states(
     listing that outran ``timeout``, which applies to each of the four listings).
     Callers must treat that as "unknown", never as "nothing is ignored". The
     reason is logged, so a scan that never answers is not silent.
+
+    ``pathspecs`` narrows ONE listing, the untracked-and-ignored one: in a working
+    copy that keeps virtualenvs and worktrees in an ignored directory it is
+    orders of magnitude larger than the other three (N355). The result then lacks
+    the ignored files no pathspec selects, so it is for callers that only judge
+    protected files (the index build), with ``pathspecs`` from
+    :func:`~claude_code_hooks_daemon.utils.protected_pathspecs.git_pathspecs`.
+    The marker that makes a directory a virtualenv is added to it so the
+    foreign-tree rule below still sees its trees. The other three listings stay
+    whole: what git tracks or shows is the project's own and bounded.
     """
     tracked = _git_paths(project_root, timeout, "--cached")
     if tracked is None:
@@ -83,7 +96,12 @@ def scan_git_file_states(
     if visible is None:
         return None
     ignored_untracked = _git_paths(
-        project_root, timeout, "--others", "--ignored", "--exclude-standard"
+        project_root,
+        timeout,
+        "--others",
+        "--ignored",
+        "--exclude-standard",
+        pathspecs=None if pathspecs is None else (*pathspecs, _VENV_MARKER_PATHSPEC),
     )
     if ignored_untracked is None:
         return None
@@ -131,6 +149,8 @@ def scan_git_file_states_for_event(project_root: Path, event: object) -> GitFile
 _VENV_MARKER_FILE: Final[str] = "pyvenv.cfg"
 #: A path component that is a package manager's install tree.
 _PACKAGE_TREE_COMPONENT: Final[str] = "node_modules"
+#: Selects the virtualenv marker at any depth, for a narrowed listing.
+_VENV_MARKER_PATHSPEC: Final[str] = f"{PATHSPEC_MAGIC}**/{_VENV_MARKER_FILE}"
 
 
 def _without_foreign_trees(ignored_untracked: frozenset[str]) -> frozenset[str]:
@@ -200,8 +220,15 @@ def unignore_advice(relpath: str) -> str:
     return _UNIGNORE_ADVICE.format(negation=gitignore_negation(relpath), relpath=relpath)
 
 
-def _git_paths(project_root: Path, timeout: float, *flags: str) -> frozenset[str] | None:
-    result = run_git(project_root, "ls-files", *flags, timeout=timeout)
+def _git_paths(
+    project_root: Path,
+    timeout: float,
+    *flags: str,
+    pathspecs: tuple[str, ...] | None = None,
+) -> frozenset[str] | None:
+    # ``--`` ends the flags, so a pathspec can never be read as one.
+    pathspec_args = () if pathspecs is None else ("--", *pathspecs)
+    result = run_git(project_root, "ls-files", *flags, *pathspec_args, timeout=timeout)
     if result.returncode != 0:
         # Exit 124 is run_git's "ran out of time"; 127 is "git could not run".
         logger.warning(
