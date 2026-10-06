@@ -143,7 +143,7 @@ gh release delete vX.Y.Z --yes
 ## Pipeline Overview
 
 ```
-1.  Pre-Release Validation (Agent)
+1.  Pre-Release Validation (Agent)     1a slate gate, 1H Housekeeping phase, 1b full QA, 1c Claude Code review
 2.  Version Detection
 3.  Version Update (Agent)
 4.  Changelog Generation (Agent)
@@ -157,8 +157,11 @@ gh release delete vX.Y.Z --yes
 12. Acceptance Testing Gate              <- BLOCKING
 13. Commit & Push
 14. Tag & GitHub Release
-15. Post-Release Verification
+15. Post-Release Verification         15.1 Housekeeping phase, post-release items
 ```
+
+The **Housekeeping phase** ([below](#housekeeping-phase-every-release)) hooks into every release: chores that are not
+about what is being released but need doing regularly, with the release as the checkpoint.
 
 **ANY blocking gate failure = ABORT release immediately. No exceptions.**
 
@@ -282,6 +285,10 @@ prints and the exit becomes `0`, so the decision is in the invocation record.
 `--accept` does NOT rescue exit `1` — acknowledging WIP is not acknowledging
 blindness.
 
+**1H. Housekeeping phase — runs after 1a, before 1b.** See
+[Housekeeping Phase](#housekeeping-phase-every-release). Its commits land before 1b, so the full QA run and every
+later gate cover them.
+
 **1b. Full QA on this HEAD, then agent validation.** The release agent is a sub-agent, and the full suite is the main thread's gate (Plan 00463), so main Claude runs `./scripts/qa/llm_qa.py all` on the clean HEAD first. Then the agent verifies: clean git state, all QA passes (`llm_qa.py --read-only all`, which fails any result recorded for a tree other than this HEAD as `STALE`), version consistency across files (pyproject.toml, version.py, README.md), no existing tag, gh CLI authenticated. (`CLAUDE.md` carries no version string — it is a daemon-regenerated doc, not a version-bump target.)
 
 **ANY failure = IMMEDIATE ABORT. NO auto-fixing.**
@@ -292,7 +299,8 @@ releases. This sub-step records the version this release was tested against and 
 what changed since the previous one.
 
 1. Run `claude --version`. That is the TO version.
-2. Refresh the vendored changelog: `bin/hooks-daemon remote-docs refresh --all`.
+2. The vendored changelog was refreshed by the Housekeeping phase (1H). Use that copy; refresh it again only if
+   the refresh failed there.
 3. FROM is the newest `claude_code_version` that is not `unknown` in
    `CLAUDE/development/claude-code-versions.yaml`. Dispatch the
    `claude-code-changelog-reviewer` agent with FROM, TO and the report path
@@ -1028,11 +1036,30 @@ gh release view vX.Y.Z --json tagName,isDraft,isPrerelease,url \
 # Expected: draft=false, prerelease=false
 ```
 
-### Step 15.1: Housekeeping (owner ruling 2026-10-05)
+### Step 15.1: Housekeeping phase, post-release items
 
-A standing task list, run after every release. Add tracked housekeeping here as it is agreed.
+Run the post-release list in [Housekeeping Phase](#housekeeping-phase-every-release).
 
-- [ ] Clean stale files under `untracked/`: scratch, old probe copies, dead worktree venvs. Keep anything a live
+## Housekeeping Phase (every release)
+
+Owner rulings 2026-10-05 (D3) and 2026-10-06. Every release is also a checkpoint for chores that are not about what is
+being released but need doing regularly. They are listed here and run each time, in two halves. Add a chore here when
+it is agreed; a chore that would change what the release contains goes in the pre-gate half, so the gates cover it.
+
+### Pre-gate items (Step 1H: after the 1a slate gate, before 1b full QA)
+
+Each item that changes tracked files is committed and pushed before 1b, so the full QA run and every later gate judge
+the result.
+
+- [ ] **Refetch and resave every vendored remote doc.** Run `bin/hooks-daemon remote-docs refresh --all`, then
+  `bin/hooks-daemon remote-docs check`. Commit the refreshed files under `remote-docs/` and `.claude/REMOTE-DOCS.md`;
+  their provenance frontmatter is rewritten by the tool, and the commit gate rejects any file without it. A page that
+  fails to refresh keeps its old copy: record the URL and the error in the release's working notes, and do not hand-edit
+  the file. This also provides the fresh Claude Code changelog that Step 1c reviews.
+
+### Post-release items (Step 15.1)
+
+- [ ] **Clean stale files under `untracked/`**: scratch, old probe copies, dead worktree venvs. Keep anything a live
   worktree (`git worktree list`) or an open report points at.
 
 ---
