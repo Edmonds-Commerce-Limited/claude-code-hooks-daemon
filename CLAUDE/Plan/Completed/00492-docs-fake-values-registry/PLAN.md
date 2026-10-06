@@ -1,6 +1,6 @@
 # Plan 00492: docs fake values registry
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-10-05
 **Owner**: dev
 **Priority**: Medium
@@ -85,6 +85,8 @@ This plan builds that registry and wires it into the docs QA, the sensitive-cont
 - [x] Sensitive-content allows a listed fake and still blocks an unlisted real-looking value.
 - [x] Both Claude Code docs pages are vendored, each with its swaps recorded in provenance.
 - [x] N309, Plan 00479 Task 1.1 and Plan 00486 Task 1.3 are closed.
+- [x] The release-bound consequence is in the holding area:
+  `CLAUDE/UPGRADES/UNRELEASED/release-notes/036-a-registry-of-approved-fake-values.md`.
 
 ## Delivery & Milestones
 

@@ -6,8 +6,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00493: upgrade silently disables opt-in handlers](00493-upgrade-silently-disables-opt-in-handlers/PLAN.md) - In Progress (client report: v3.67.0 to v3.68.0 drops opt-in handlers a config does not name, per N55's absent-block rule, with no per-project report; loud effective-set delta on upgrade, fix the always-"no config changes" summary, regression test, client remedy note)
 
-- [00492: docs fake values registry](00492-docs-fake-values-registry/PLAN.md) - In Progress (all tasks delivered, awaiting merge; owner ruling D1: one registry of approved fake values for docs; a QA check, a sensitive-content allowance and remote-docs swaps recorded in provenance; settles N309 and unblocks 00479 Task 1.1 and 00486 Task 1.3)
-
 - [00491: code quality and architecture review](00491-code-quality-and-architecture-review/PLAN.md) - Not Started (owner ruling B5: a read-only review of module size, DRY, architecture and code quality, then owner-chosen refactoring; N314 folds in)
 
 - [00489: supervisor in-container restart primitive](00489-supervisor-in-container-restart-primitive/PLAN.md) - Not Started (owner decision D2 in Plan 00487, #71: 00487's Tasks 1.4 and 1.5, the in-container `Restart` and the host-half `before_spawn` that the fedora-desktop 00146 credential switch needs)
@@ -195,6 +193,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Completed Plans
 
+- [00492: docs fake values registry](Completed/00492-docs-fake-values-registry/PLAN.md) - Complete at `f6cb38ee0` + the QA fix-up + the archiving commit (owner ruling D1: one registry of approved fake values for docs, `.claude/fake-values.yaml`; an `unlisted-fake-value` docs QA check, a sensitive-content allowance for listed fakes only, and remote-docs swaps recorded in provenance as `value_swaps`; settles N309 and unblocks 00479 Task 1.1 and 00486 Task 1.3)
+
 - [00475: targeted qa and small batches](Completed/00475-targeted-qa-and-small-batches/PLAN.md) - Complete at `d6caefded` + `301805f1f` + `b4576108a` (all shipped in v3.68.0) + the archiving commit (owner request: targeted QA for every change, the full gate only at release preparation, one QA run at a time, and small batches of branches; the branch-count and merge-QA advisories stay advisory by coordinator call)
 
 - [00490: github issue assignment guard](Completed/00490-github-issue-assignment-guard/PLAN.md) - Complete at `8846f9d77` + `bb9bf1a98` + the archiving commit (owner request: issue-tied work requires the issue assigned to the signed-in GitHub account and opened by an approved author; a deterministic `issue-validity` checker and CLI claim an unassigned issue and stop on someone else's; the CLI refuses with no author list configured)
@@ -253,8 +253,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00433: setup worktree refuses to nest](Completed/00433-setup-worktree-refuses-to-nest/PLAN.md) - Complete at `ba7192b9` + the archiving commit (from 00422 N9: an agent already isolated in a worktree ran the copy of the setup script sitting right there, nesting a second one under it)
 
-- [00432: scoped qa scan overwrites repo artefact](Completed/00432-scoped-qa-scan-overwrites-repo-artefact/PLAN.md) - Complete at the delivery-and-archiving commit (from 00422 N10: seven checkers wrote this repository's published artefact even when pointed elsewhere, so a full run left three of them describing a pytest fixture)
-
 Older completed plans (below the retention window of the 30 highest-numbered) are archived verbatim in [Completed/README.md](Completed/README.md).
 
 ## Blocked / On Hold Plans
@@ -306,11 +304,11 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 ## Plan Statistics
 
-- **Total Plans Created**: 487 (count = `hooksdaemon.latestPlanNumber` git counter)
+- **Total Plans Created**: 493 (count = `hooksdaemon.latestPlanNumber` git counter)
 
-- **Completed**: 417 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
+- **Completed**: 418 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 53 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 52 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 
