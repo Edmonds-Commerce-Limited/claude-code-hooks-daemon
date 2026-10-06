@@ -51,9 +51,11 @@ older local copy tells the agent to report it to a human, not to edit it.
   - a Bash command that authors a listed path (redirect, `tee`, heredoc, `sed -i`, `dd of=`), relocates onto it
     (`cp`, `mv`, `install`, `ln`), or deletes or truncates it (`rm`, `truncate`, `: >`).
 
-  Reuse the accessor `lint_on_edit` uses to find the files a Bash command writes, and extend it for
-  relocation and deletion targets. A command it cannot parse is denied when it names a listed path. Reading is never
-  denied. Tests first, through the real handler.
+  Use `scan_bash_write_targets` (`core/utils.py`) with `authored_only=False`, not `get_written_file_paths`: that
+  wrapper sets `authored_only=True`, which drops `cp`/`mv`/`install`/`dd`. The scan already covers redirects
+  (including `: >`), `tee`, heredoc redirects, `cp`/`mv`/`install` and `dd of=`. `sed -i`, `ln`, `rm` and `truncate`
+  are new verbs to add. Fail closed on the scan's `unreadable` and `unresolved` results when the command names a
+  listed path. Reading is never denied. Tests first, through the real handler.
 
 - [ ] ⬜ **Task 1.2**: Guidance (`get_claude_md()`), a rule ID and acceptance tests. The deny message says that the
   file is maintained outside the agent (IaC or a human), and to ask the human for any change.
@@ -63,14 +65,17 @@ older local copy tells the agent to report it to a human, not to edit it.
 
 ### Phase 2: #88, corrected
 
-- [ ] ⬜ **Task 2.1**: Install and upgrade write a tracked `.claude/ccy/ccy.env.local.dist` beside
+- [ ] ⬜ **Task 2.1**: Nothing writes `ccy.env.local.dist` today: ccy 3.81.0 only adds its exception to the generated
+  `.claude/ccy/.gitignore`, and the fedora-desktop clone documents the file but writes none. Install and upgrade
+  write a tracked `.claude/ccy/ccy.env.local.dist` beside
   `claude-supervise.py`. Its first line is a version marker naming the daemon version that wrote it. Its first entry
   is the role override `HOOKS_DAEMON_HOSTNAME`, commented out, documented with:
 
   - the precedence: `HOOKS_DAEMON_HOSTNAME`, then `CCY_HOST_HOSTNAME`, then the system hostname;
   - how `persistent_crons` `hosts:`, the top-level `hosts:` block and `autonomy.hosts` match it.
 
-  Then `HOOKS_DAEMON_HOST_HOSTNAME` (`utils/host_identity.py`). No secrets. The header says the real
+  Then `HOOKS_DAEMON_HOST_HOSTNAME` (`utils/host_identity.py`), documented as the separate display-name ladder it
+  is, not a role override. No secrets. The header says the real
   `ccy.env.local` is written by IaC or a human, never by an agent, and that its first line should record the dist
   version it is based on.
 
