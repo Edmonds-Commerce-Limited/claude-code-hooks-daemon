@@ -9,6 +9,7 @@ tick's prompt. Every cron prompt the daemon hands an agent to paste into
 ``[tick:failsafe]``     the failsafe recovery cron (``recovery_cron_advisor``)
 ``[tick:watchdog]``     the background-process watchdog
 ``[tick:usage-resume]`` the one-shot resume cron of a usage pause (Plan 00479)
+``[tick:stand-in]``     the one-off timed stand-in of an awaiting-human stop
 ``[tick:job:<id>]``     a job declared under ``persistent_crons``
 ======================  =====================================================
 
@@ -47,6 +48,10 @@ class TickKind(StrEnum):
     #: The one-shot cron that resumes a session paused on its usage ceiling
     #: (Plan 00479 Task 4.6).
     USAGE_RESUME = "usage-resume"
+    #: The one-off cron a main-thread ``[awaiting-human]`` stop schedules; it
+    #: exists to fire WHILE the marker is live, so it is never suppressed by it
+    #: (Plan 00470 Task 5.2).
+    STAND_IN = "stand-in"
     DECLARED = "job"
 
 
@@ -63,7 +68,8 @@ class DaemonTick:
 #: parse, and its ticks read as the human (the safe direction).
 _SENTINEL_RE: Final[re.Pattern[str]] = re.compile(
     re.escape(TICK_SENTINEL_PREFIX)
-    + rf"(?:(?P<fixed>{TickKind.FAILSAFE}|{TickKind.WATCHDOG}|{TickKind.USAGE_RESUME})"
+    + rf"(?:(?P<fixed>{TickKind.FAILSAFE}|{TickKind.WATCHDOG}|{TickKind.USAGE_RESUME}"
+    + rf"|{TickKind.STAND_IN})"
     + rf"|{TickKind.DECLARED}{_JOB_SEPARATOR}(?P<job>[^\]\s]+))"
     + re.escape(_SENTINEL_SUFFIX)
 )
