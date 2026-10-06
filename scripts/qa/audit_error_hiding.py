@@ -503,9 +503,28 @@ def _hands_the_failure_to_a_reader(call: ast.Call) -> bool:
     Appending to a collection or setting the exception on a future is
     surfacing, not swallowing, so a handler containing one is not flagged.
     """
-    return _is_console_report(call) or (
-        isinstance(call.func, ast.Attribute)
-        and (call.func.attr in _LIST_RECORDING_METHODS or call.func.attr == "set_exception")
+    return (
+        _is_console_report(call)
+        or _is_report_buffer_write(call)
+        or (
+            isinstance(call.func, ast.Attribute)
+            and (call.func.attr in _LIST_RECORDING_METHODS or call.func.attr == "set_exception")
+        )
+    )
+
+
+def _is_report_buffer_write(call: ast.Call) -> bool:
+    """``self.output(...)``: a diagnostic report writing a line into its own body.
+
+    The report is what the reader is handed, so a failure written into it is
+    surfaced, not logged and forgotten.
+    """
+    func = call.func
+    return (
+        isinstance(func, ast.Attribute)
+        and func.attr == "output"
+        and isinstance(func.value, ast.Name)
+        and func.value.id == "self"
     )
 
 
@@ -553,11 +572,36 @@ def _is_log_like_call(call: ast.Call, exc_name: str | None) -> bool:
     if exc_name is None:
         return False
     operands = [*call.args, *(kw.value for kw in call.keywords)]
-    return any(
-        isinstance(node, ast.Name) and node.id == exc_name
-        for operand in operands
-        for node in ast.walk(operand)
-    )
+    return any(_carries_the_exception(operand, exc_name) for operand in operands)
+
+
+def _carries_the_exception(expr: ast.expr, exc_name: str) -> bool:
+    """Whether ``expr`` hands the caught exception itself over as a value.
+
+    The exception counts when it is the operand, sits in an f-string, a
+    ``%``-format, a container, or is an argument of a nested call
+    (``str(exc)``). An attribute read off it or off ``type(exc)`` does not:
+    ``digest.update(type(exc).__name__.encode())`` folds the failure into a
+    computed value, it does not log anything.
+    """
+    if isinstance(expr, ast.Name):
+        return expr.id == exc_name
+    if isinstance(expr, ast.FormattedValue):
+        return _carries_the_exception(expr.value, exc_name)
+    if isinstance(expr, ast.JoinedStr):
+        return any(_carries_the_exception(part, exc_name) for part in expr.values)
+    if isinstance(expr, ast.BinOp):
+        return _carries_the_exception(expr.left, exc_name) or _carries_the_exception(
+            expr.right, exc_name
+        )
+    if isinstance(expr, ast.List | ast.Tuple | ast.Set):
+        return any(_carries_the_exception(elt, exc_name) for elt in expr.elts)
+    if isinstance(expr, ast.Call):
+        return any(
+            _carries_the_exception(operand, exc_name)
+            for operand in (*expr.args, *(kw.value for kw in expr.keywords))
+        )
+    return False
 
 
 class ErrorHidingVisitor(ast.NodeVisitor):

@@ -308,6 +308,20 @@ class TestLogThenContinueIsWidened:
         body = "cleanup()"
         assert "log-and-continue" not in _rules(_audit_source(_handler(body)))
 
+    def test_folding_the_exception_type_into_a_digest_is_not_a_log(self) -> None:
+        # The failure becomes part of the computed value; nothing is logged.
+        body = "digest.update(type(exc).__name__.encode())"
+        assert "log-and-continue" not in _rules(_audit_source(_handler(body)))
+
+    def test_passing_the_exception_through_a_formatter_is_still_a_log(self) -> None:
+        body = "record(f'failed: {exc}')\nreturn None"
+        assert "log-and-continue" in _rules(_audit_source(_handler(body)))
+
+    def test_writing_the_failure_into_the_report_buffer_is_not_hiding(self) -> None:
+        # A diagnostic report whose own output line IS the surfacing.
+        body = "self.output(f'(could not be read: {exc})')"
+        assert "log-and-continue" not in _rules(_audit_source(_handler(body)))
+
     @pytest.mark.parametrize(
         ("level_kwarg", "flagged"),
         [("", False), (", level=logging.ERROR", False), (", level=logging.DEBUG", True)],
