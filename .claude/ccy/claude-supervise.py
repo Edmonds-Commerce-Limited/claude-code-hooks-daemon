@@ -6219,8 +6219,17 @@ _DRY_RUN_COMPACT_BODY = "compact suggestion fired (dry-run — not a real /compa
 # "resume and continue" -- with no provenance framing: the agent should act on
 # what it is told regardless of who initiated it (reinforced by the `continue`
 # keystroke the supervisor injects once compaction ends).
+# Why the note exists: the supervisor presses Esc to flush a /compact queued
+# behind an in-flight turn, and Claude Code reports the interrupted tool call as
+# "The user doesn't want to proceed with this tool use... STOP", which an agent
+# reads as a human rejection and stops to wait. The note says it was not.
+_ESC_INTERRUPT_NOTE = (
+    "Any tool call interrupted or reported as rejected just before this compact "
+    "was the supervisor pressing Esc to make the compact run, NOT a human rejection."
+)
 _ARMED_COMPACT_BODY = (
-    "After compacting, immediately resume and continue the work that was in progress."
+    f"{_ESC_INTERRUPT_NOTE} After compacting, retry any tool call that was "
+    "interrupted, then immediately resume and continue the work that was in progress."
 )
 # Plan 00281: the instruction body for a flag-cleaning /compact. Phrased WITHOUT
 # the trigger vocabulary itself (naming those categories would re-seed the very
@@ -6232,7 +6241,8 @@ _FLAG_COMPACT_BODY = (
     "sensitive or security-adjacent material, keep only what was done and the "
     "outcome — leave out the low-level technical specifics, sample text, and "
     "sensitive strings, which are preserved in git and the plan docs. This keeps "
-    "the continuing context from re-triggering content classifiers. Then resume "
+    "the continuing context from re-triggering content classifiers. "
+    f"{_ESC_INTERRUPT_NOTE} Then retry any tool call that was interrupted, resume "
     "and continue the work in progress."
 )
 _DRY_RUN_FLAG_COMPACT_BODY = (
@@ -6246,7 +6256,9 @@ _DRY_RUN_FLAG_COMPACT_BODY = (
 _PAUSE_COMPACT_BODY = (
     "Usage ceiling reached: this session is PAUSED until {resume}. After "
     "compacting, do nothing further — take no action, send no message and do "
-    "not continue any work — until the scheduled resume cron fires at {resume}."
+    "not continue any work — until the scheduled resume cron fires at {resume}. "
+    "(Any interrupted tool call was the supervisor's Esc, NOT a human rejection; "
+    "do not retry it now.)"
 )
 _DRY_RUN_PAUSE_COMPACT_BODY = (
     "usage-pause compact fired (dry-run — not a real /compact, not human input)"
