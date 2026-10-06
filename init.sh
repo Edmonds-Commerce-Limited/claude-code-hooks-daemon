@@ -1571,6 +1571,19 @@ DAEMON_STARTUP_TIMEOUT=150
 # Twin of Timeout.HOOK_START_DEADLINE_SEC.
 _HOOKS_DAEMON_START_DEADLINE=15
 
+# Plan 00495 Task 2.7: a DISPLAY-line forwarder (the status line) sets
+# _HOOKS_DAEMON_NONBLOCKING_START=true in front of ensure_daemon. Its start
+# is then waited on for only _HOOKS_DAEMON_NONBLOCKING_DEADLINE seconds, and
+# a daemon that is alive but not yet answering counts as STARTING (not
+# failed) however long it takes: the start carries on in the background and
+# the forwarder prints the loading line. Hooks that judge a call never set it.
+_HOOKS_DAEMON_NONBLOCKING_START=false
+_HOOKS_DAEMON_NONBLOCKING_DEADLINE=1
+
+# What the status line shows while the daemon is starting. Twin of
+# EventID.STATUS_LINE.daemon_loading_stdout.
+_HOOKS_DAEMON_STATUS_LOADING_TEXT="⏳ hooks daemon loading…"
+
 # Export paths for use by forwarder scripts
 export HOOKS_DAEMON_ROOT_DIR
 export SOCKET_PATH
@@ -1978,6 +1991,9 @@ start_daemon() {
     # launcher that has finished leaves DAEMON_STARTUP_TIMEOUT for its
     # daemon to answer, and never more than the budget.
     local deadline=$_HOOKS_DAEMON_START_DEADLINE settle_end=""
+    if [[ "$_HOOKS_DAEMON_NONBLOCKING_START" == "true" ]]; then
+        deadline=$_HOOKS_DAEMON_NONBLOCKING_DEADLINE
+    fi
     while ((SECONDS < deadline)); do
         if is_daemon_running && [[ -S "$SOCKET_PATH" ]]; then
             _hooks_daemon_end_launch
@@ -2002,7 +2018,14 @@ start_daemon() {
 
     # The launcher is still at work: the daemon is starting, and nothing is
     # known to be wrong. This hook answers now, before its timeout.
-    if [[ "$launch_done" == false ]]; then
+    #
+    # A non-blocking caller also counts a launcher that has finished while its
+    # daemon is alive and the settle time has not passed: that daemon is
+    # still coming up. A daemon that is not running by then has failed.
+    if [[ "$launch_done" == false ]] ||
+        { [[ "$_HOOKS_DAEMON_NONBLOCKING_START" == "true" ]] &&
+            { [[ -z "$settle_end" ]] || ((SECONDS < settle_end)); } &&
+            is_daemon_running; }; then
         _HOOKS_DAEMON_STARTING=true
         echo "HOOKS DAEMON: the daemon is still starting ${deadline}s into this hook, which answers now rather than run past its timeout" >&2
         return 1
@@ -2860,6 +2883,9 @@ response_mode = sys.argv[2] if len(sys.argv) > 2 else ''
 # list _HOOKS_DAEMON_CONTEXT_EVENTS, expanded when this source is built.
 context_events = '$_HOOKS_DAEMON_CONTEXT_EVENTS'.split()
 
+# The status line's baseline while the daemon is starting (_HOOKS_DAEMON_STATUS_LOADING_TEXT).
+status_loading_text = '$_HOOKS_DAEMON_STATUS_LOADING_TEXT'
+
 # Socket budget for the whole connect+send+recv exchange. Default 30s; operators
 # can raise it via CLAUDE_HOOKS_SOCKET_TIMEOUT (also lets tests drive the timeout
 # path fast). A non-numeric or non-positive value falls back to the default.
@@ -3202,7 +3228,13 @@ def fail(error_type, error_details):
         # diagnostic on stderr — no silent error suppression (Plan 00156 review
         # finding 3). (The non-status path logs stderr inside emit_error_json.)
         print(f'HOOKS DAEMON ERROR [{error_type}]: {error_details}', file=sys.stderr)
-        print('⚠️ NO STATUS DATA')
+        # Plan 00495 Task 2.7: the daemon's process is alive (the wrapper
+        # gated on it) but its socket is not answering yet: it is still
+        # starting, which is not the same as having no status data.
+        if error_type in ('socket_not_found', 'connection_refused'):
+            print(status_loading_text)
+        else:
+            print('⚠️ NO STATUS DATA')
     elif response_mode == 'worktree':
         # WorktreeCreate stdout is parsed as a path; a transport failure has no
         # valid path to offer. Fail creation cleanly (non-zero) with the reason
