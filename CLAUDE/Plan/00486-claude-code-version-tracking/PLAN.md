@@ -49,7 +49,7 @@ Prior art: Plan 00327 audited the hook contracts once and recorded `last_audited
 ### Phase 2: Detect drift in a session
 
 - [x] ✅ **Task 2.1** (report: `subagent-reports/261003-task-2.1-drift-advisory-sonnet.md`): Extend `contract_staleness`, or add a sibling handler, to compare the running Claude Code version with the last *reviewed* version. It advises once per new version. Prefer one handler with two checks over two near-identical handlers.
-- [ ] ⬜ **Task 2.2**: Brainstorm and decide with the owner on routine vs release-only review. Option: a Routine (CLAUDE/Routine) that runs the review when a new Claude Code version is first seen, between releases.
+- [x] ✅ **Task 2.2**: Brainstorm and decide with the owner on routine vs release-only review. Option: a Routine (CLAUDE/Routine) that runs the review when a new Claude Code version is first seen, between releases.
   - **Coordinator call (2026-10-05, under the owner's "go with the clear winners" instruction):** release-only for now. The drift advisory (Task 2.1) already tells a session it is on an unreviewed version, and a per-version routine would spend a review every few days. Resolved; not an owner ruling.
 
 ## Success Criteria
