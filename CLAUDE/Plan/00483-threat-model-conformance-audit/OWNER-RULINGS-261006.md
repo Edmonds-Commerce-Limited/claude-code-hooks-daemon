@@ -38,6 +38,18 @@ supervisor change (branch `a223c2895`).
 - **Owner question:** how do mods get updated? If a hooks-daemon release upgrades the mod, how do projects end up on the
   correct mod version, and how are they helped to upgrade it?
 
+**Owner, later the same day, after the proposal** (`00494/subagent-reports/261006-hooks-daemon-mod-proposal-opus.md`):
+"everything else around the mods is approved, [and] the deployment process is approved". That covers the build order,
+and deployment inside the daemon (copied into the project by install and upgrade, no marketplace). One feature added:
+
+- **Suggested prompts, mainly at session start.** Each prompt has a short title the user sees and a verbose prompt the
+  user need not see (for example "do a hooks daemon upgrade", "fix the plan QA issues"). The user ticks any number of
+  them, all or some, and presses submit; the full verbose prompts are then injected into the session for the agent.
+
+**Coordinator's reading:** `$.prompt.submit({ text })` starts a turn when the session is idle
+(`remote-docs/.../plugins/mods/api.md:142`). The mod UI has `Button`, `Input` and a single-choice `Select`, but no
+checkbox (`interface.md:433,494`), so multi-select is built from toggle buttons plus a submit button.
+
 ## A3: performance (Plan 00495)
 
 **Owner ruling:** a baseline status bar that says something like "hooks daemon is loading" while the daemon starts.
@@ -126,5 +138,5 @@ passes, as RELEASING.md requires.
   or research. These are not branches to finish, so the release proceeds over them with `accept-wip`.
 - **Branch `agent-a388f9611b6f8f3d1-1f7c8c8f`:** a deliberately parked alternative fix for N350 (fixed on main by
   another route). It is not WIP.
-- **Open point for the owner:** Plan 00487's desktop live test started the same day, and this release's notes headline
-  the ccy supervisor plugin API it tests.
+- **Plan 00487's desktop live test:** the owner ruled the release waits for it ("that's what I'm running right now ...
+  I'd say it should wait"). This release's notes headline the ccy supervisor plugin API it tests.
