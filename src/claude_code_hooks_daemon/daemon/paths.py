@@ -27,6 +27,8 @@ from pathlib import Path
 from types import ModuleType
 from typing import Any
 
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
+
 logger = logging.getLogger(__name__)
 
 # AF_UNIX socket path limit (108 bytes on Linux, 104 bytes on macOS)
@@ -1960,7 +1962,11 @@ def read_socket_discovery_file(project_dir: Path | str) -> Path | None:
     try:
         content = discovery_file.read_text().strip()
     except OSError as e:
-        logger.warning("Failed to read socket discovery file %s: %s", discovery_file, e)
+        log_and_continue(
+            logger,
+            e,
+            reason="an unreadable socket discovery file means no discovered socket (None); the caller falls back to the computed default socket path",
+        )
         return None
     return Path(content) if content else None
 
@@ -2004,10 +2010,20 @@ def is_pid_alive(pid: int) -> bool:
         # Process exists but we can't access it
         return True
     except (OSError, TypeError, ValueError) as e:
-        logger.debug("PID check failed for %d: %s", pid, e)
+        log_and_continue(
+            logger,
+            e,
+            reason="a PID liveness probe that cannot complete answers 'not alive', and the caller falls back to its stale-PID handling; nothing is lost beyond this one liveness answer",
+            level=logging.DEBUG,
+        )
         return False
     except Exception as e:
-        logger.error("Unexpected error checking PID %d: %s", pid, e, exc_info=True)
+        log_and_continue(
+            logger,
+            e,
+            reason="an unexpected error probing a PID answers 'not alive' so the caller takes its stale-PID path; it is logged at ERROR so a persistent cause is visible",
+            level=logging.ERROR,
+        )
         return False
 
 
@@ -2040,7 +2056,12 @@ def is_daemon_pid(pid: int) -> bool:
     try:
         cmdline = psutil.Process(pid).cmdline()
     except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess) as e:
-        logger.debug("Cannot inspect PID %d cmdline: %s", pid, e)
+        log_and_continue(
+            logger,
+            e,
+            reason="a process whose cmdline cannot be inspected (gone or access denied) cannot be shown to be the daemon, so it is reported as not a match, the conservative answer for an identity check",
+            level=logging.DEBUG,
+        )
         return False
     return _is_daemon_server_process(cmdline)
 
@@ -2164,10 +2185,20 @@ def read_pid_record(pid_path: Path | str, verify_daemon: bool = False) -> PidRec
     except FileNotFoundError:
         return None
     except UnicodeDecodeError as e:
-        logger.debug("Corrupt PID file %s: %s", pid_path, e)
+        log_and_continue(
+            logger,
+            e,
+            reason="a corrupt PID file is treated as no PID (None), the same answer as an absent file",
+            level=logging.DEBUG,
+        )
         return None
     except (OSError, PermissionError) as e:
-        logger.debug("Failed to read PID file %s: %s", pid_path, e)
+        log_and_continue(
+            logger,
+            e,
+            reason="an unreadable PID file is treated as no PID (None), the same answer as an absent file",
+            level=logging.DEBUG,
+        )
         return None
 
 

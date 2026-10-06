@@ -40,6 +40,7 @@ from claude_code_hooks_daemon.core import BlockingResult, Decision
 from claude_code_hooks_daemon.core.handler_bases import PostToolUseHandlerBase
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.handlers.status_line.downgrade_state import resolve_model_family
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.model_downgrade_signal import (
     SIGNAL_SUBDIR,
     SIGNAL_SUFFIX,
@@ -109,7 +110,11 @@ def publish(signal: DowngradeSignal, *, now: float) -> Path | None:
     try:
         daemon_untracked_dir = ProjectContext.daemon_untracked_dir()
     except RuntimeError as exc:
-        logger.warning("model_downgrade_recorder: no project context: %s", exc)
+        log_and_continue(
+            logger,
+            exc,
+            reason="without a project context there is no daemon state directory, so no downgrade is recorded and None tells the caller so",
+        )
         return None
     return write_downgrade_signal(daemon_untracked_dir, signal, now=now)
 

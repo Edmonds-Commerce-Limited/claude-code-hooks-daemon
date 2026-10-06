@@ -61,6 +61,7 @@ from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.core.utils import get_bash_command, get_file_path
 from claude_code_hooks_daemon.utils.command_evasion import GIT_INVOCATION
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.github_issue_validity import (
     APPROVED_AUTHORS_OPTION,
     CLAIM_FIX_NAME,
@@ -211,7 +212,11 @@ class GithubIssueAssignmentGuardHandler(PreToolUseHandlerBase):
             with plan_md.open("rb") as handle:
                 text = handle.read(_HEADER_READ_BYTES).decode("utf-8", errors="replace")
         except OSError as exc:
-            _LOGGER.warning("github_issue_assignment_guard: cannot read %s: %s", plan_md, exc)
+            log_and_continue(
+                _LOGGER,
+                exc,
+                reason="an unreadable PLAN.md yields no issue references, so the guard has nothing to judge for it (fail-open by design); the warning names the file",
+            )
             return ()
         header = _HEADER_PATTERN.search(text)
         issues = tuple(int(n) for n in _ISSUE_NUMBER.findall(header.group(1))) if header else ()

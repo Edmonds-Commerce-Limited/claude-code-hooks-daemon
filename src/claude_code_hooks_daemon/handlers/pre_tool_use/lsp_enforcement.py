@@ -48,6 +48,7 @@ from claude_code_hooks_daemon.core.utils import get_bash_command
 from claude_code_hooks_daemon.utils import linear_shlex
 from claude_code_hooks_daemon.utils.claude_config import session_config_dir
 from claude_code_hooks_daemon.utils.claude_plugins import resolve_enabled_plugins
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.scratch_dir import acceptance_path
 
 logger = logging.getLogger(__name__)
@@ -490,7 +491,14 @@ class LspEnforcementHandler(PreToolUseHandlerBase):
                 self.name, session_id=session_id
             )
         except RuntimeError as exc:
-            logger.warning("LSP enforcement could not read block history: %s", exc)
+            log_and_continue(
+                logger,
+                exc,
+                reason=(
+                    "unreadable block history counts as zero prior blocks, so the session is "
+                    "treated as fresh; the enforcement advice itself is unaffected"
+                ),
+            )
             return 0
 
     def matches(self, hook_input: dict[str, Any]) -> bool:

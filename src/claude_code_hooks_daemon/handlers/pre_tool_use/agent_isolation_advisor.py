@@ -41,6 +41,7 @@ from claude_code_hooks_daemon.handlers.status_line.thread_registry import (
     _REGISTRY_SUBDIR,
     read_live_entries,
 )
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.subagent_tool_resolution import (
     resolve_agent_definition,
     resolve_lookup_root,
@@ -99,7 +100,12 @@ class AgentIsolationAdvisorHandler(PreToolUseHandlerBase):
             registry_dir = ProjectContext.daemon_untracked_dir() / _REGISTRY_SUBDIR
             return len(read_live_entries(registry_dir, time.time()))
         except (OSError, ValueError, RuntimeError) as exc:
-            logger.debug("Thread registry unreadable, skipping isolation advice: %s", exc)
+            log_and_continue(
+                logger,
+                exc,
+                reason="an unreadable thread registry counts as zero threads, so the isolation advice is skipped; the advisory never blocks anything",
+                level=logging.DEBUG,
+            )
             return 0
 
     def _definition_declares_isolation(self, subagent_type: Any) -> bool:

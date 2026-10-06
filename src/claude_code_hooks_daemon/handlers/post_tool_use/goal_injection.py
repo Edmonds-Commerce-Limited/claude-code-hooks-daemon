@@ -105,6 +105,7 @@ from claude_code_hooks_daemon.daemon.synthetic_traffic import is_synthetic_event
 from claude_code_hooks_daemon.handlers.utils.bounded_fifo_map import BoundedFifoMap
 from claude_code_hooks_daemon.plan_qa.model import TERMINAL_STATUSES, PlanDoc, PlanStatus
 from claude_code_hooks_daemon.utils.ccy_supervisor import supervisor_relevance
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.git_facts import project_relative_head_text
 from claude_code_hooks_daemon.utils.goal_ledger import LEDGER_FILENAME, GoalLedger, LivePlanRef
 from claude_code_hooks_daemon.utils.markdown_fences import line_spans_outside_fences
@@ -508,10 +509,18 @@ def write_goal_signal(
         tmp_path.replace(final_path)
         return final_path
     except RuntimeError as e:
-        logger.warning("goal_injection: skipping signal (no project context): %s", e)
+        log_and_continue(
+            logger,
+            e,
+            reason="without a project context there is no signal directory, so no goal signal is written and None tells the caller so",
+        )
         return None
     except OSError as e:
-        logger.warning("goal_injection: failed to write goal signal: %s", e)
+        log_and_continue(
+            logger,
+            e,
+            reason="the goal signal file is a best-effort notification; None tells the caller it was not written",
+        )
         return None
 
 
@@ -549,10 +558,18 @@ def clear_goal_signal(session_id: str) -> bool:
         tmp_path.replace(clear_path)
         return True
     except RuntimeError as e:
-        logger.warning("goal_injection: skipping signal clear (no project context): %s", e)
+        log_and_continue(
+            logger,
+            e,
+            reason="without a project context there is no signal directory, so there is no signal to clear and False tells the caller so",
+        )
         return False
     except OSError as e:
-        logger.warning("goal_injection: failed to clear goal signal: %s", e)
+        log_and_continue(
+            logger,
+            e,
+            reason="the goal signal file is a best-effort notification; False tells the caller it was not cleared",
+        )
         return False
 
 
@@ -1073,7 +1090,11 @@ class GoalInjectionHandler(PostToolUseHandlerBase):
         try:
             ledger = self._open_ledger()
         except RuntimeError as e:
-            logger.warning("goal_injection: live-plan check skipped (no project context): %s", e)
+            log_and_continue(
+                logger,
+                e,
+                reason="without a project context there is no goal ledger to consult, so the live-plan check answers False",
+            )
             return False
         return ledger.is_plan_live(plan_number)
 
@@ -1537,7 +1558,11 @@ class GoalInjectionHandler(PostToolUseHandlerBase):
         try:
             ledger = self._open_ledger()
         except RuntimeError as e:
-            logger.warning("goal_injection: ledger record skipped (no project context): %s", e)
+            log_and_continue(
+                logger,
+                e,
+                reason="without a project context there is no goal ledger, so nothing is recorded and an empty result is returned",
+            )
             return []
         plan_dir = plan_md_path.parent.parent
         return ledger.record_emission(session_id, plan_number, joined, plan_dir)

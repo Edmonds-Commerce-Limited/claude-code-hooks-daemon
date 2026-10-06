@@ -21,6 +21,7 @@ from typing import Final
 from claude_code_hooks_daemon.strategies.comments.extractor import extract_comment_spans
 from claude_code_hooks_daemon.strategies.comments.registry import CommentStrategyRegistry
 from claude_code_hooks_daemon.utils.claude_config import claude_config_dir, is_in_claude_config_dir
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.git_repo import (
     GitRepo,
     git_visible_paths,
@@ -104,17 +105,18 @@ def _iter_dir_files_git_filtered(directory: Path) -> list[Path]:
             continue
         try:
             rel = path_relative_to(candidate, root).as_posix()
-        except ValueError:
+        except ValueError as exc:
             # Should not happen: `candidate` was reached by rglob-ing
             # `directory`, which `root` is either equal to or (via
             # `GitRepo.resolve_for`) an ancestor of -- so `candidate` is
             # always under it. Logged rather than silently dropped in case
             # that invariant is ever violated (a symlink escaping the tree,
             # say).
-            logger.info(
-                "comment_finder: %s is not under resolved root %s; skipping",
-                candidate,
-                root,
+            log_and_continue(
+                logger,
+                exc,
+                reason="a candidate outside the resolved root cannot be shown relative to it, so it is skipped; the rglob that produced it stays under the root, so this is a violated-invariant trace",
+                level=logging.INFO,
             )
             continue
         if git_visible is not None and rel not in git_visible:

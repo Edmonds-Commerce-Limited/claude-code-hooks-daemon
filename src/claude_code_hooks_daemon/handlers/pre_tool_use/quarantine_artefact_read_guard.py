@@ -51,6 +51,7 @@ from claude_code_hooks_daemon.utils import protected_file_index, recursive_searc
 from claude_code_hooks_daemon.utils import secret_file_matching as sfm
 from claude_code_hooks_daemon.utils.bash_flags import SPAN_SEPARATORS, split_statements
 from claude_code_hooks_daemon.utils.command_evasion import compile_command_name_pattern
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.path_exclusion import resolve_project_root
 from claude_code_hooks_daemon.utils.path_predicates import path_is_dir
 from claude_code_hooks_daemon.utils.protected_file_index import ProtectedFileIndex, TreeView
@@ -251,8 +252,13 @@ class QuarantineArtefactReadGuardHandler(PreToolUseHandlerBase):
         if hook_input.get(HookInputField.TOOL_NAME) == ToolName.BASH and isinstance(command, str):
             try:
                 literal = sfm.find_protected_mention_strict(command, self._effective_globs())
-            except Exception:
-                logger.exception("quarantine_artefact_read_guard: the literal re-check raised")
+            except Exception as exc:
+                log_and_continue(
+                    logger,
+                    exc,
+                    reason="the literal re-check is a second opinion on a scan that already gave up; if it raises too, the not-judged advisory is still returned, so the command is reported unjudged",
+                    level=logging.ERROR,
+                )
                 literal = None
             if literal is not None:
                 return (literal, literal)

@@ -511,7 +511,16 @@ def _hands_the_failure_to_a_reader(call: ast.Call) -> bool:
 
 def _is_console_report(call: ast.Call) -> bool:
     """``print(...)`` or ``sys.stderr.write(...)``: the user is told on the console."""
-    return _call_name(call.func) == "print" or ast.unparse(call.func) == "sys.stderr.write"
+    if _call_name(call.func) in ("print", "handleError"):
+        # ``logging.Handler.handleError`` is the logging machinery's own report
+        # of a failed emit: it prints the traceback to stderr.
+        return True
+    func = call.func
+    return (
+        isinstance(func, ast.Attribute)
+        and func.attr == "write"
+        and any(stream in ast.unparse(func.value).lower() for stream in ("stderr", "stdout"))
+    )
 
 
 def _is_sanctioned_helper_call(call: ast.Call) -> bool:

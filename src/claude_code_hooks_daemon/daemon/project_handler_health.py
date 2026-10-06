@@ -33,6 +33,7 @@ from typing import Any, Final
 
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.handlers.project_loader import ProjectHandlerLoadFailure
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 
 logger = logging.getLogger(__name__)
 
@@ -187,11 +188,10 @@ def read_load_failures_at(untracked_dir: Path) -> ProjectHandlerHealthState:
         # Plan 00200 Task 5.5: match the visibility already given to the two
         # parse failures above (JSON decode / non-dict payload) rather than
         # silently defaulting the summary count to 0.
-        logger.warning(
-            "project-handler health state at %s has a malformed %s field: %s",
-            path,
-            _KEY_LOADED_COUNT,
+        log_and_continue(
+            logger,
             exc,
+            reason="a malformed loaded-count in the health state defaults to 0; the other fields still render and this warning names the field",
         )
         loaded_count = 0
 

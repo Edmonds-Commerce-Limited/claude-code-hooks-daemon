@@ -49,6 +49,7 @@ from claude_code_hooks_daemon.utils.authored_paths import (
     authored_path,
     contained_authored_path,
 )
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.path_containment import path_relative_to
 
 logger = logging.getLogger(__name__)
@@ -188,7 +189,12 @@ def _run_sweep(context: CheckContext) -> list[Finding]:
             # An unreadable or undecodable file must not abort the whole
             # SessionStart sweep (Plan 00287 N5) -- skip it, matching the
             # corpus's own UnicodeDecodeError handling.
-            logger.debug("quote-drift: skipping unreadable %s: %s", rel_path, exc)
+            log_and_continue(
+                logger,
+                exc,
+                reason="an unreadable or undecodable file is skipped so one bad file cannot abort the whole SessionStart sweep; the check omits only that file",
+                level=logging.DEBUG,
+            )
             continue
         for block in parse_quote_blocks(content):
             finding = _verify_block(context.project_root, rel_path, block, Severity.ADVISE)

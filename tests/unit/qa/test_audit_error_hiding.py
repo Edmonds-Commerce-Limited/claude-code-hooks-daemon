@@ -292,6 +292,14 @@ class TestLogThenContinueIsWidened:
         body = "future.set_exception(exc)"
         assert "log-and-continue" not in _rules(_audit_source(_handler(body)))
 
+    def test_a_logging_handler_reporting_through_handle_error_is_not_hiding(self) -> None:
+        body = "logger.error('emit failed: %s', exc)\nself.handleError(record)"
+        assert "log-and-continue" not in _rules(_audit_source(_handler(body)))
+
+    def test_writing_to_an_injected_stderr_stream_is_not_hiding(self) -> None:
+        body = "stderr.write(f'claim failed: {exc}')"
+        assert "log-and-continue" not in _rules(_audit_source(_handler(body)))
+
     def test_writing_to_stderr_is_not_a_log_call(self) -> None:
         body = "sys.stderr.write(str(exc))\nreturn None"
         assert "log-and-continue" not in _rules(_audit_source(_handler(body)))

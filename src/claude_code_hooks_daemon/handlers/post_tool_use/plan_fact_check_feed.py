@@ -39,6 +39,7 @@ from claude_code_hooks_daemon.core.handler import WorkspaceScope
 from claude_code_hooks_daemon.core.handler_bases import PostToolUseHandlerBase
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.core.utils import get_written_file_paths
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.plan_fact_check import (
     STATE_SUBDIR,
     PlanFactCheckState,
@@ -121,9 +122,14 @@ class PlanFactCheckFeedHandler(PostToolUseHandlerBase):
             )
         try:
             instructions = deliver_pending(state)
-        except PlanFactCheckStateError:
+        except PlanFactCheckStateError as exc:
             # An advisory must never cost the session its tool result.
-            logger.exception("plan_fact_check: owed fact-check unreadable; delete it to reset")
+            log_and_continue(
+                logger,
+                exc,
+                reason="an unreadable owed fact-check record yields no instructions, because an advisory must never cost the session its tool result; the ERROR names how to reset it",
+                level=logging.ERROR,
+            )
             instructions = []
         if not instructions:
             return BlockingResult(decision=Decision.ALLOW)

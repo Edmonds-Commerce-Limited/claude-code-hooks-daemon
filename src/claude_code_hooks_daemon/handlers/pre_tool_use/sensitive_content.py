@@ -55,6 +55,7 @@ from claude_code_hooks_daemon.utils import linear_shlex
 from claude_code_hooks_daemon.utils import secret_file_matching as sfm
 from claude_code_hooks_daemon.utils import secret_redaction as sr
 from claude_code_hooks_daemon.utils.command_evasion import OPTIONAL_PATH, git_subcommand_index
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.fake_values import (
     FakeValuesError,
     FakeValuesRegistry,
@@ -597,10 +598,13 @@ def _compiled_public_pattern(pattern: str) -> "re.Pattern[str] | None":
     try:
         compiled: re.Pattern[str] | None = re.compile(pattern, re.IGNORECASE)
     except re.error as exc:
-        _LOGGER.warning(
-            "sensitive_content: public pattern %r does not compile (%s) and will never match",
-            pattern,
+        log_and_continue(
+            _LOGGER,
             exc,
+            reason=(
+                f"public pattern {pattern!r} does not compile and will never match; it is "
+                "dropped, the other patterns still apply, and this warning names it"
+            ),
         )
         compiled = None
     _COMPILED_PATTERN_CACHE[pattern] = compiled
@@ -957,7 +961,12 @@ class SensitiveContentHandler(PreToolUseHandlerBase):
                 return ""
             raw = path.read_bytes()
         except OSError as error:
-            _LOGGER.debug("sensitive_content: gh body file %s could not be read: %s", path, error)
+            log_and_continue(
+                _LOGGER,
+                error,
+                reason="an unreadable gh body file is treated as having no content to scan (empty string); only that file's scan is lost",
+                level=logging.DEBUG,
+            )
             return ""
         return raw.decode(_BODY_FILE_ENCODING, errors=_BODY_FILE_DECODE_ERRORS)
 

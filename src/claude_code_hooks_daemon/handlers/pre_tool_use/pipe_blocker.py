@@ -39,6 +39,7 @@ from claude_code_hooks_daemon.utils.command_evasion import (
     SHELL_RESERVED_COMMAND_PREFIXES,
     strip_reserved_word_prefix,
 )
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.shell_segmentation import (
     split_unquoted,
     strip_inert_spans,
@@ -66,11 +67,11 @@ def _compiled_extra_pattern(pattern: str) -> "re.Pattern[str] | None":
     try:
         compiled: re.Pattern[str] | None = re.compile(pattern, re.IGNORECASE)
     except re.error as exc:
-        logger.error(
-            "pipe_blocker: ignoring unparseable configured pattern %r (%s). "
-            "Fix it in handlers.pre_tool_use.pipe_blocker.options.",
-            pattern,
+        log_and_continue(
+            logger,
             exc,
+            reason="an unparseable configured pattern is ignored and never matches; the built-in rules still apply, and the error names the option to fix",
+            level=logging.ERROR,
         )
         compiled = None
     _COMPILED_EXTRA_CACHE[pattern] = compiled

@@ -31,6 +31,7 @@ from claude_code_hooks_daemon.docs_qa.types import (
 )
 from claude_code_hooks_daemon.remote_docs.provenance import parse_provenance
 from claude_code_hooks_daemon.utils.authored_paths import authored_path
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.fake_values import (
     REGISTRY_RELATIVE_PATH,
     FakeValuesError,
@@ -120,7 +121,12 @@ def _run_sweep(context: CheckContext) -> list[Finding]:
             content = abs_path.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError) as exc:
             # One unreadable document must not abort the whole sweep.
-            logger.debug("unlisted-fake-value: skipping unreadable %s: %s", rel_path, exc)
+            log_and_continue(
+                logger,
+                exc,
+                reason="an unreadable or undecodable file is skipped so one bad file cannot abort the whole SessionStart sweep; the check omits only that file",
+                level=logging.DEBUG,
+            )
             continue
         findings.extend(_findings_for(rel_path, content, registry))
     return findings

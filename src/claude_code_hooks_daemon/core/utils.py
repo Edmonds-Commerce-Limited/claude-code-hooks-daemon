@@ -11,6 +11,7 @@ from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.utils import linear_shlex
 from claude_code_hooks_daemon.utils.ansi_c import ansi_c_string
 from claude_code_hooks_daemon.utils.command_evasion import normalise_line_continuations
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.heredoc_operators import (
     COMMENT_PRECEDERS,
     HeredocScan,
@@ -663,12 +664,10 @@ def resolve_bash_write_destination(candidate: BashWriteDestination, cwd: Any) ->
         # error-hiding auditor exists to catch: without a record, "the guard
         # decided this is not a directory" and "the guard could not look" are
         # indistinguishable to whoever is asking why a policy did not fire.
-        logger.warning(
-            "Could not stat write destination %r (%s) -- treating it as a "
-            "non-directory. A path-keyed guard may see a different target "
-            "than the shell will write.",
-            destination,
+        log_and_continue(
+            logger,
             exc,
+            reason="an unstattable write destination is treated as a non-directory (the answer pathlib gives for expected stat failures); the copy-verb expansion stays suppressed, so a path-keyed guard loses only the directory-target inference and nothing is fabricated",
         )
         # An unstattable destination is not KNOWN to be a directory, so it is
         # treated as not one -- the same answer pathlib already gives for every

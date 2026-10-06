@@ -50,6 +50,7 @@ from claude_code_hooks_daemon.docs_qa.types import (
     Finding,
     Severity,
 )
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.path_containment import path_relative_to
 
 logger = logging.getLogger(__name__)
@@ -268,7 +269,12 @@ def _run_sweep(context: CheckContext) -> list[Finding]:
             # An unreadable or undecodable file must not abort the whole
             # SessionStart sweep (Plan 00287 N5) -- skip it, matching the
             # corpus's own UnicodeDecodeError handling.
-            logger.debug("rules-file-shape: skipping unreadable %s: %s", rel_path, exc)
+            log_and_continue(
+                logger,
+                exc,
+                reason="an unreadable or undecodable file is skipped so one bad file cannot abort the whole SessionStart sweep; the check omits only that file",
+                level=logging.DEBUG,
+            )
             continue
         metrics = _measure(content)
         findings.extend(_element_findings_always_advise(rel_path, metrics))

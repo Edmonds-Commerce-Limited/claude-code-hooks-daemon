@@ -15,6 +15,7 @@ from typing import Final, NoReturn
 import psutil
 
 from claude_code_hooks_daemon.daemon.paths import is_self_install_mode, prospective_socket_path
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 
 logger = logging.getLogger(__name__)
 
@@ -254,7 +255,12 @@ def _extract_project_root(proc: psutil.Process) -> str | None:
     try:
         cmdline = proc.cmdline()
     except (psutil.NoSuchProcess, psutil.AccessDenied) as exc:
-        logger.debug("cmdline unavailable for pid %s (%s): %s", proc.pid, type(exc).__name__, exc)
+        log_and_continue(
+            logger,
+            exc,
+            reason="the cmdline of a process that vanished or denies access is unavailable and is treated as an empty command line, which never matches the daemon, so the process is not acted on",
+            level=logging.DEBUG,
+        )
         cmdline = []
     return _attributed_root(proc, cmdline).root
 
@@ -317,7 +323,12 @@ def _root_from_environ(proc: psutil.Process) -> str | None:
     try:
         env = proc.environ()
     except (psutil.NoSuchProcess, psutil.AccessDenied, OSError) as exc:
-        logger.debug("environ unavailable for pid %s (%s): %s", proc.pid, type(exc).__name__, exc)
+        log_and_continue(
+            logger,
+            exc,
+            reason="the environ of a process that vanished or denies access is unavailable and is treated as None, so no environment-based identity evidence is used for it",
+            level=logging.DEBUG,
+        )
         env = None
     if env is None or not isinstance(env, dict):
         return None
@@ -401,8 +412,13 @@ def bound_socket_paths(pid: int) -> list[str]:
     for descriptor in (_PROC / str(pid) / "fd").iterdir():
         try:
             link = str(descriptor.readlink())
-        except FileNotFoundError:
-            logger.debug("%s closed since it was listed, so it is no socket held", descriptor)
+        except FileNotFoundError as exc:
+            log_and_continue(
+                logger,
+                exc,
+                reason="the descriptor closed since it was listed, so it holds no socket and is skipped",
+                level=logging.DEBUG,
+            )
             continue
         if link.startswith(_SOCKET_LINK_PREFIX) and link.endswith(_SOCKET_LINK_SUFFIX):
             inodes.add(link[len(_SOCKET_LINK_PREFIX) : -len(_SOCKET_LINK_SUFFIX)])
@@ -433,8 +449,11 @@ def _root_from_listening_socket(process: psutil.Process) -> str | None:
     try:
         paths = bound_socket_paths(process.pid)
     except OSError as exc:
-        logger.debug(
-            "Cannot read the sockets of PID %s, so none names its root: %s", process.pid, exc
+        log_and_continue(
+            logger,
+            exc,
+            reason="the sockets of this PID cannot be read, so none is taken to name the root; the PID is not matched by socket and other identity evidence still applies",
+            level=logging.DEBUG,
         )
         paths = []
     roots: set[str] = set()
@@ -462,7 +481,12 @@ def is_this_users_process(pid: int) -> bool:
     try:
         uids = psutil.Process(pid).uids()
     except psutil.Error as e:
-        logger.debug("Cannot read the owner of PID %d: %s", pid, e)
+        log_and_continue(
+            logger,
+            e,
+            reason="the owner of this PID cannot be read, so it is not shown to be ours; False is the conservative answer for 'safe to signal'",
+            level=logging.DEBUG,
+        )
         return False
     euid = os.geteuid()
     return bool(uids.real == euid and uids.effective == euid)

@@ -53,6 +53,7 @@ from claude_code_hooks_daemon.utils.cron_hosts import (
     PeerHostname,
     hostname_override_of_process,
 )
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.log_elision import elide_record_arguments
 from claude_code_hooks_daemon.utils.scratch_dir import ensure_scratch_dir
 from claude_code_hooks_daemon.utils.secret_redaction import (
@@ -61,7 +62,6 @@ from claude_code_hooks_daemon.utils.secret_redaction import (
     get_active_secret_terms,
     redact_text,
 )
-from claude_code_hooks_daemon.utils.strict_mode import handle_tier2_error
 
 # Global memory log handler - accessible for log queries
 _memory_log_handler: MemoryLogHandler | None = None
@@ -611,7 +611,12 @@ def start_under_way(path: Path) -> StartUnderWay | None:
             try:
                 holder: int | None = _lock_holder(fd)
             except _LockHolderUnknown as unknown:
-                logger.info("The launch lock's holder is unknown: %s", unknown)
+                log_and_continue(
+                    logger,
+                    unknown,
+                    reason="the launch lock's holder identity cannot be read and is recorded as None ('holder unknown'); the lock itself is still honoured",
+                    level=logging.INFO,
+                )
                 holder = None
             return StartUnderWay(pid=None, written_at=written_at, holder=holder)
         fcntl.flock(fd, fcntl.LOCK_UN)
@@ -667,14 +672,24 @@ def _holds_open(pid: int, target: os.stat_result) -> bool:
     try:
         descriptors = list(Path(f"/proc/{pid}/fd").iterdir())
     except OSError as exc:
-        logger.debug("Cannot list the open files of pid %d: %s", pid, exc)
+        log_and_continue(
+            logger,
+            exc,
+            reason="a process whose open files cannot be listed (gone or denied) is reported as not holding the file, since nothing shows that it does",
+            level=logging.DEBUG,
+        )
         return False
     for descriptor in descriptors:
         try:
             opened = descriptor.stat()
         except OSError as exc:
             # Closed since it was listed, or not a file: not this one.
-            logger.debug("Cannot stat %s: %s", descriptor, exc)
+            log_and_continue(
+                logger,
+                exc,
+                reason="the descriptor closed since it was listed or is not a file, so it is not the one sought",
+                level=logging.DEBUG,
+            )
             continue
         if (opened.st_dev, opened.st_ino) == (target.st_dev, target.st_ino):
             return True
@@ -710,10 +725,18 @@ def remove_stale_pid_file(pid_path: Path, socket_path: Path, seen: str) -> bool:
             pid_path.unlink()
             return True
     except StartLockTimeout as exc:
-        logger.warning("A daemon start holds %s; leaving the PID file", exc)
+        log_and_continue(
+            logger,
+            exc,
+            reason="a daemon start holds the start lock, so the stale PID file is left in place and False is reported; removing it now would race that start",
+        )
         return False
     except (OSError, UnicodeDecodeError) as exc:
-        logger.warning("Cannot remove stale PID file %s under the start lock: %s", pid_path, exc)
+        log_and_continue(
+            logger,
+            exc,
+            reason="the stale PID file could not be removed under the start lock; False is reported and the next start retries the removal",
+        )
         return False
 
 
@@ -735,10 +758,18 @@ def remove_dead_socket(socket_path: Path) -> bool:
             socket_path.unlink(missing_ok=True)
             return True
     except StartLockTimeout as exc:
-        logger.warning("A daemon start holds %s; leaving the socket", exc)
+        log_and_continue(
+            logger,
+            exc,
+            reason="a daemon start holds the start lock, so the socket is left in place and False is reported; removing it now would race that start",
+        )
         return False
     except OSError as exc:
-        logger.warning("Cannot remove socket %s under the start lock: %s", socket_path, exc)
+        log_and_continue(
+            logger,
+            exc,
+            reason="the socket could not be removed under the start lock; False is reported and the next start retries the removal",
+        )
         return False
 
 
@@ -1280,14 +1311,19 @@ class HooksDaemon:
                     self._input_validators[event_type] = Draft7Validator(schema)
                 except ImportError as e:
                     # TIER 2: Crash in strict_mode, log warning in non-strict
-                    handle_tier2_error(
-                        error=e,
-                        strict_mode=self.config.strict_mode,
-                        error_message=(
+                    if self.config.strict_mode:
+                        raise RuntimeError(
                             "Input validation is required in strict_mode but jsonschema is not installed. "
                             "Install with: pip install jsonschema"
+                        ) from e
+                    log_and_continue(
+                        logger,
+                        e,
+                        reason=(
+                            "jsonschema is not installed, so input validation is disabled "
+                            "outside strict mode; hook inputs are then handled unvalidated "
+                            "rather than refusing every hook"
                         ),
-                        graceful_message="jsonschema not installed - input validation disabled",
                     )
                     return None
         return self._input_validators.get(event_type)
@@ -1767,10 +1803,10 @@ class HooksDaemon:
                     timeout=min(_OVERSIZED_REQUEST_DRAIN_PER_READ_TIMEOUT_SECONDS, remaining),
                 )
             except (TimeoutError, ConnectionResetError, BrokenPipeError, OSError) as e:
-                logger.warning(
-                    "Oversized-request drain stopped early after %d bytes (%s)",
-                    drained,
+                log_and_continue(
+                    logger,
                     e,
+                    reason="the oversized request is already rejected; a peer that is gone or too slow only cuts short the discard of its remaining bytes",
                 )
                 break
             if not chunk:
@@ -1987,8 +2023,13 @@ class HooksDaemon:
 
                 try:
                     health = self.controller.get_health()
-                except Exception:
-                    logger.exception("Straggler health check failed; skipping this cycle")
+                except Exception as exc:
+                    log_and_continue(
+                        logger,
+                        exc,
+                        reason="a failing straggler health check skips this cycle; the next cycle repeats it, so only one check is lost and a persistent failure keeps logging at ERROR",
+                        level=logging.ERROR,
+                    )
                     continue
 
                 stragglers = health.get("stragglers")
@@ -2214,12 +2255,15 @@ class HooksDaemon:
         try:
             await writer.wait_closed()
         except (BrokenPipeError, ConnectionResetError) as exc:
-            HooksDaemon._record_peer_gone_at_close(exc)
-
-    @staticmethod
-    def _record_peer_gone_at_close(exc: OSError) -> None:
-        """Record, at DEBUG, a client that hung up while its connection closed."""
-        logger.debug("Client already gone while closing its connection: %r", exc)
+            log_and_continue(
+                logger,
+                exc,
+                reason=(
+                    "the client hung up while its connection was closing; the response was "
+                    "already delivered or abandoned, so there is nothing left to do"
+                ),
+                level=logging.DEBUG,
+            )
 
     @staticmethod
     def _log_lost_peer(response: dict[str, Any] | None) -> None:

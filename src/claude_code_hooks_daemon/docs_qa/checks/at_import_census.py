@@ -33,6 +33,7 @@ from claude_code_hooks_daemon.docs_qa.types import (
     Severity,
 )
 from claude_code_hooks_daemon.utils.authored_paths import authored_path
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.markdown_fences import lines_outside_fences
 from claude_code_hooks_daemon.utils.path_containment import path_relative_to
 
@@ -120,7 +121,12 @@ def _run_sweep(context: CheckContext) -> list[Finding]:
             # An unreadable or undecodable file must not abort the whole
             # SessionStart sweep (Plan 00287 N5) -- skip it, matching the
             # corpus's own UnicodeDecodeError handling.
-            logger.debug("at-import-census: skipping unreadable %s: %s", rel_path, exc)
+            log_and_continue(
+                logger,
+                exc,
+                reason="an unreadable or undecodable file is skipped so one bad file cannot abort the SessionStart sweep; the census omits only that file",
+                level=logging.DEBUG,
+            )
             continue
         for target in extract_at_imports(content):
             if _is_resident(target, resident):
