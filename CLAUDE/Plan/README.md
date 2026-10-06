@@ -4,6 +4,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
+- [00498: autonomy only where allowed](00498-autonomy-only-where-allowed/PLAN.md) - Not Started, High (owner request after a desktop agent drifted off its one task: one config switch, keyed on the detected environment (host, docker, podman, lxc) and role alias, decides whether any crons, goal pressure or resume advice run; this repo turns them off on the desktop)
+
 - [00496: upstream feature requests and issue kinds](00496-upstream-feature-requests-and-issue-kinds/PLAN.md) - Not Started (owner request: a formal process for project agents to file feature requests and other non-defect issues, mirroring the defect generator, guard and forms; security reports routed privately)
 
 - [00495: performance improvement programme](00495-performance-improvement-programme/PLAN.md) - In Progress (owner report: daemon startup and the status bar at session start got much slower; profile current main against earlier releases, fix the ranked causes, add a regression guard, and re-answer the Rust question from new numbers)
@@ -306,11 +308,11 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 ## Plan Statistics
 
-- **Total Plans Created**: 497 (count = `hooksdaemon.latestPlanNumber` git counter)
+- **Total Plans Created**: 498 (count = `hooksdaemon.latestPlanNumber` git counter)
 
 - **Completed**: 421 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 53 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 54 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 
