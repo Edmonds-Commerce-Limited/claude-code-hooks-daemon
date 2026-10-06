@@ -241,6 +241,7 @@ Owner questions sent 2026-10-05 as chunks A–D; see the backlog report
    coordinator parked it because the collision is rare. Owner decision: take the fix, with a forwarder regeneration
    step on upgrade, or leave it.
    **Owner ruling (2026-10-05):** resolved: take the fix at the next minor, with the forwarder-regeneration step — see [OWNER-RULINGS-261005.md](OWNER-RULINGS-261005.md) (D2).
+   D2 is implemented at `7c525415e`: the upgrade's unconditional hook redeploy already regenerates forwarders, pinned by a test, so no extra step was needed.
 
 ## Success Criteria
 

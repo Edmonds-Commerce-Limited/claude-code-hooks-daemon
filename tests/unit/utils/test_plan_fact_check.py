@@ -5,6 +5,7 @@ fact-check" record. :func:`deliver_pending` (run on the next hook event) turns
 each record into an instruction for the session, once.
 """
 
+import logging
 from pathlib import Path
 
 import pytest
@@ -189,11 +190,45 @@ class TestDelivery:
         assert "+new claim" in diff
         assert "+old" not in diff
 
-    def test_corrupt_pending_fails_loudly(self, tmp_path: Path) -> None:
+    def test_unreadable_pending_is_set_aside_not_raised(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
         state = PlanFactCheckState(tmp_path)
-        (tmp_path / f"{FOLDER}.pending.json").write_text("{nope", encoding="utf-8")
-        with pytest.raises(PlanFactCheckStateError):
-            deliver_pending(state)
+        bad = tmp_path / f"{FOLDER}.pending.json"
+        bad.write_text("{nope", encoding="utf-8")
+        with caplog.at_level(logging.INFO, logger="claude_code_hooks_daemon.utils.plan_fact_check"):
+            assert deliver_pending(state) == []
+        assert not bad.exists()
+        assert (tmp_path / f"{FOLDER}.pending.json.unreadable").is_file()
+        warnings = [r for r in caplog.records if r.levelno >= logging.WARNING]
+        assert len(warnings) == 1
+        assert warnings[0].levelno == logging.WARNING
+        assert warnings[0].exc_info is None
+        assert f"{FOLDER}.pending.json" in warnings[0].getMessage()
+
+    def test_old_format_record_is_never_re_read(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        state = PlanFactCheckState(tmp_path)
+        (tmp_path / f"{FOLDER}.pending.json").write_text('{"folder": "x"}', encoding="utf-8")
+        deliver_pending(state)
+        caplog.clear()
+        with caplog.at_level(logging.INFO, logger="claude_code_hooks_daemon.utils.plan_fact_check"):
+            assert deliver_pending(state) == []
+        assert state.pending_folders() == []
+        assert not [r for r in caplog.records if r.levelno >= logging.WARNING]
+
+    def test_valid_record_after_a_malformed_one_is_delivered(self, tmp_path: Path) -> None:
+        state = PlanFactCheckState(tmp_path / "state")
+        (tmp_path / "state").mkdir()
+        (tmp_path / "state" / "00001-aaa.pending.json").write_text('{"folder": "x"}', "utf-8")
+        root = _plan(tmp_path, {"PLAN.md": "claim\n"})
+        process_quiet_plan(root, FOLDER, state, trigger_count=1, now=1.0)
+        assert state.pending_folders() == ["00001-aaa", FOLDER]
+        messages = deliver_pending(state)
+        assert len(messages) == 1
+        assert FOLDER in messages[0]
+        assert state.pending_folders() == []
 
 
 class TestCorruptState:

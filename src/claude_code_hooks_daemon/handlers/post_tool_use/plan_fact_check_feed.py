@@ -42,7 +42,6 @@ from claude_code_hooks_daemon.core.utils import get_written_file_paths
 from claude_code_hooks_daemon.utils.plan_fact_check import (
     STATE_SUBDIR,
     PlanFactCheckState,
-    PlanFactCheckStateError,
     PlanFolderMatch,
     deliver_pending,
     plan_folder_match,
@@ -119,12 +118,7 @@ class PlanFactCheckFeedHandler(PostToolUseHandlerBase):
                 callback=partial(_on_quiet, plan_root=match.plan_root, state_dir=state.state_dir),
                 payload=match.folder,
             )
-        try:
-            instructions = deliver_pending(state)
-        except PlanFactCheckStateError:
-            # An advisory must never cost the session its tool result.
-            logger.exception("plan_fact_check: owed fact-check unreadable; delete it to reset")
-            instructions = []
+        instructions = deliver_pending(state)
         if not instructions:
             return BlockingResult(decision=Decision.ALLOW)
         return BlockingResult(decision=Decision.ALLOW, context=instructions)

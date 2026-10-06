@@ -7,4 +7,4 @@ The `plan_fact_check_feed` PostToolUse handler (still `default_enabled = False`,
 
 The daemon still runs no model, and the ccy supervisor channel is not used: its signal carries only a count and points at `hooks-daemon session-actions`, which lists SessionStart items only. A refutation does not block `plan_qa_commit_gate`.
 
-Pending records now store the plan root and content snapshot. A record written by an earlier build is reported as unreadable (logged, never blocking); delete it from the `plan-fact-check/` directory to reset that plan.
+Pending records now store the plan root and content snapshot. A record written by an earlier build (or any unreadable one) is renamed to `<folder>.pending.json.unreadable` in the `plan-fact-check/` directory with one WARNING naming it, and is never read again. Delivery carries on with the next record, so valid records are still delivered in the same pass; that plan's next edit simply starts a fresh record. Delete the `.unreadable` file at leisure.
