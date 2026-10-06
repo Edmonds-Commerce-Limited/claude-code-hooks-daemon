@@ -211,6 +211,7 @@ class TestLogThenContinueIsWidened:
             "logger.warning('boom')\nreturn False",
             "logger.warning('boom')\nreturn",
             "logger.warning('boom')\nresult = None",
+            "logger.warning('boom')\nheld = False",
             "logger.warning('boom')\nself._reset()",
         ],
         ids=[
@@ -220,6 +221,7 @@ class TestLogThenContinueIsWidened:
             "return-const",
             "bare-return",
             "fallback",
+            "falsy-flag",
             "extra-call",
         ],
     )
@@ -278,6 +280,10 @@ class TestLogThenContinueIsWidened:
         body = "print(f'ERROR: {exc}', file=sys.stderr)\nreturn 1"
         assert "log-and-continue" not in _rules(_audit_source(_handler(body)))
 
+    def test_logging_and_telling_the_user_on_stderr_is_not_hiding(self) -> None:
+        body = "logger.debug('boom', exc_info=True)\nprint(f'WARNING: {exc}', file=sys.stderr)"
+        assert "log-and-continue" not in _rules(_audit_source(_handler(body)))
+
     def test_logging_and_recording_on_a_surfaced_list_is_not_hiding(self) -> None:
         body = "logger.exception('boom')\ncontext.append(str(exc))"
         assert "log-and-continue" not in _rules(_audit_source(_handler(body)))
@@ -293,6 +299,27 @@ class TestLogThenContinueIsWidened:
     def test_a_call_that_never_sees_the_exception_is_not_a_log(self) -> None:
         body = "cleanup()"
         assert "log-and-continue" not in _rules(_audit_source(_handler(body)))
+
+    @pytest.mark.parametrize(
+        ("level_kwarg", "flagged"),
+        [("", False), (", level=logging.ERROR", False), (", level=logging.DEBUG", True)],
+        ids=["default-warning", "error", "debug"],
+    )
+    def test_the_named_helper_counts_as_saying_so_only_at_warning_or_above(
+        self, level_kwarg: str, flagged: bool
+    ) -> None:
+        source = (
+            "def f():\n"
+            "    fd = 1\n"
+            "    try:\n"
+            "        risky()\n"
+            "    except OSError as exc:\n"
+            f"        log_and_continue(logger, exc, reason='cannot tell, so no warning'{level_kwarg})\n"
+            "        fd = None\n"
+            "    return fd\n"
+        )
+        rules = _rules(_audit_source(source))
+        assert ("return-none-via-local" in rules) is flagged
 
     def test_finding_is_reported_once_per_try(self) -> None:
         violations = _audit_source(_handler("logger.warning('boom')\nreturn None"))

@@ -290,11 +290,25 @@ def _walk_own_scope(node: ast.AST) -> Iterator[ast.AST]:
             yield from _walk_own_scope(child)
 
 
+#: ``level=`` spellings of the named helper that stay below warning.
+_QUIET_LEVELS: frozenset[str] = frozenset({"logging.DEBUG", "logging.INFO", "DEBUG", "INFO"})
+
+
+def _is_surfacing_sanctioned_call(call: ast.Call) -> bool:
+    """The named helper with a reason, logging at warning or above (its default)."""
+    if not _is_sanctioned_helper_call(call):
+        return False
+    level = next((kw.value for kw in call.keywords if kw.arg == "level"), None)
+    return level is None or ast.unparse(level) not in _QUIET_LEVELS
+
+
 def _handler_surfaces_the_error(handler: ast.ExceptHandler, surfaced_lists: set[str]) -> bool:
     """Does the handler re-raise, log at warning or above, or record a
     problem on a list that its function returns, raises, logs or reports?"""
     for child in _walk_own_scope(handler):
         if isinstance(child, ast.Raise):
+            return True
+        if isinstance(child, ast.Call) and _is_surfacing_sanctioned_call(child):
             return True
         if isinstance(child, ast.Call) and isinstance(child.func, ast.Attribute):
             if child.func.attr in _SURFACING_LOG_LEVELS:
@@ -477,7 +491,10 @@ def _is_trivial_continuation(stmt: ast.stmt) -> bool:
         if isinstance(value, ast.Constant):
             return not value.value
         return _is_none(value) or _is_fallback_value(value)
-    return isinstance(stmt, ast.Assign) and any(True for _ in _fallback_bindings(stmt))
+    if isinstance(stmt, ast.Assign):
+        falsy_constant = isinstance(stmt.value, ast.Constant) and not stmt.value.value
+        return falsy_constant or any(True for _ in _fallback_bindings(stmt))
+    return False
 
 
 def _hands_the_failure_to_a_reader(call: ast.Call) -> bool:
@@ -486,9 +503,15 @@ def _hands_the_failure_to_a_reader(call: ast.Call) -> bool:
     Appending to a collection or setting the exception on a future is
     surfacing, not swallowing, so a handler containing one is not flagged.
     """
-    return isinstance(call.func, ast.Attribute) and (
-        call.func.attr in _LIST_RECORDING_METHODS or call.func.attr == "set_exception"
+    return _is_console_report(call) or (
+        isinstance(call.func, ast.Attribute)
+        and (call.func.attr in _LIST_RECORDING_METHODS or call.func.attr == "set_exception")
     )
+
+
+def _is_console_report(call: ast.Call) -> bool:
+    """``print(...)`` or ``sys.stderr.write(...)``: the user is told on the console."""
+    return _call_name(call.func) == "print" or ast.unparse(call.func) == "sys.stderr.write"
 
 
 def _is_sanctioned_helper_call(call: ast.Call) -> bool:
@@ -511,7 +534,7 @@ def _is_log_like_call(call: ast.Call, exc_name: str | None) -> bool:
     """A logger-level call, or a call that is handed the caught exception."""
     func = call.func
     # Telling the user on stdout/stderr is surfacing the failure, not logging it.
-    if _call_name(func) == "print" or ast.unparse(func) == "sys.stderr.write":
+    if _is_console_report(call):
         return False
     if isinstance(func, ast.Attribute):
         if func.attr in _ALL_LOG_LEVELS:

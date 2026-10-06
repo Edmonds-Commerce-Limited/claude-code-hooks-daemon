@@ -105,12 +105,6 @@
       "reason": "FileNotFoundError is expected when config file disappears between exists() check and read (TOCTOU). Falls through to return cls() which creates a safe default. This is not hiding an error — it IS the intended fallback."
     },
     {
-      "file": "core/claude_md_injector.py",
-      "function": "inject",
-      "rule": "return-none-on-error",
-      "reason": "ClaudeMdInjector.inject() is a strictly advisory feature — it must never crash daemon startup. Both OSError and broad Exception are caught, logged with full traceback (exc_info=exc), and swallowed so daemon continues. The return is just the early-exit path, not hiding a real error."
-    },
-    {
       "file": "core/front_controller.py",
       "function": "_inject_config_key_footer",
       "rule": "return-none-on-error",

@@ -125,6 +125,7 @@ from claude_code_hooks_daemon.qa.full_qa_lock import host_lock_path as qa_host_l
 from claude_code_hooks_daemon.utils.claude_config import claude_config_dir, is_in_claude_config_dir
 from claude_code_hooks_daemon.utils.claude_plugins import resolve_enabled_plugins
 from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.git_repo import (
     git_visible_ancestor_dirs,
     git_visible_paths,
@@ -436,8 +437,17 @@ def send_daemon_request(
         sock.close()
         return cast("dict[str, Any]", json.loads(response.decode("utf-8")))
 
-    except Exception:
-        logger.exception("Failed to communicate with daemon")
+    except Exception as exc:
+        log_and_continue(
+            logger,
+            exc,
+            reason=(
+                "Failed to communicate with daemon; the documented contract of "
+                "send_daemon_request is None on any transport failure, and every caller "
+                "reports a missing response itself"
+            ),
+            level=logging.ERROR,
+        )
         return None
 
 
@@ -1115,7 +1125,15 @@ class _StartProgress:
             self.exited = True
             return False
         except psutil.AccessDenied as exc:
-            logger.debug("Cannot read the starting daemon's CPU time: %s", exc)
+            log_and_continue(
+                logger,
+                exc,
+                reason=(
+                    "Cannot read the starting daemon's CPU time; no CPU progress is "
+                    "reported, which the start wait treats as 'not yet spending CPU'"
+                ),
+                level=logging.DEBUG,
+            )
             return False
         spent = times.user + times.system + times.children_user + times.children_system
         if spent <= self._cpu_seconds:
@@ -1480,11 +1498,16 @@ def cmd_status(args: argparse.Namespace) -> int:
     try:
         transport_config = Config.find_and_load(project_path).daemon.transport
     except (FileNotFoundError, PydanticValidationError) as exc:
-        # Config is legitimately absent/invalid for a bare `status` probe (no
-        # project config yet, or a config mid-edit) -- fall back to "transport
-        # section unknown" rather than crashing status reporting, but log so
-        # the failure is never indistinguishable from "no config file at all".
-        logger.debug("cmd_status: could not resolve daemon.transport config: %s", exc)
+        log_and_continue(
+            logger,
+            exc,
+            reason=(
+                "cmd_status: could not resolve daemon.transport config; config is "
+                "legitimately absent/invalid for a bare `status` probe (no project config "
+                "yet, or a config mid-edit), so the transport section is shown as unknown"
+            ),
+            level=logging.DEBUG,
+        )
         transport_config = None
     if transport_config is not None and (
         transport_config.relay_enabled or transport_config.nc_enabled
@@ -1676,7 +1699,14 @@ def _acknowledged_plugins(project_path: Path) -> list[str]:
     try:
         config = Config.load_or_default(config_path)
     except (ValueError, OSError) as exc:
-        logger.warning("health: cannot read %s, no plugin acknowledged: %s", config_path, exc)
+        log_and_continue(
+            logger,
+            exc,
+            reason=(
+                f"health: cannot read {config_path}; an unreadable config acknowledges "
+                "nothing, so every plugin is shown without the mark"
+            ),
+        )
         return []
     options = config.get_handler_config(
         "session_start", HandlerID.PLUGIN_HOOKS_ADVISOR.config_key
@@ -2284,7 +2314,11 @@ def _qa_run_lock_holder(project_root: Path) -> str | None:
     try:
         lock_path = qa_host_lock_path(project_root)
     except OSError as exc:
-        logger.warning(_QA_LOCK_CANNOT_TELL, f"its lock location is unknown ({exc})")
+        log_and_continue(
+            logger,
+            exc,
+            reason=_QA_LOCK_CANNOT_TELL % "its lock location is unknown",
+        )
         lock_path = None
     if lock_path is None or not lock_path.is_file():
         return None
@@ -2302,7 +2336,11 @@ def _qa_run_lock_holder(project_root: Path) -> str | None:
     try:
         fd = os.open(lock_path, os.O_RDWR)
     except OSError as exc:
-        logger.warning(_QA_LOCK_CANNOT_TELL, f"its lock could not be opened ({exc})")
+        log_and_continue(
+            logger,
+            exc,
+            reason=_QA_LOCK_CANNOT_TELL % "its lock could not be opened",
+        )
         fd = None
 
     if fd is None:
@@ -2311,7 +2349,11 @@ def _qa_run_lock_holder(project_root: Path) -> str | None:
     try:
         held = _qa_lock_is_held(fd)
     except OSError as exc:
-        logger.warning(_QA_LOCK_CANNOT_TELL, f"its lock could not be tested ({exc})")
+        log_and_continue(
+            logger,
+            exc,
+            reason=_QA_LOCK_CANNOT_TELL % "its lock could not be tested",
+        )
         held = False
     finally:
         # Closing the descriptor releases an flock we acquired, so there is no

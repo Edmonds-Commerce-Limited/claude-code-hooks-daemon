@@ -36,6 +36,7 @@ from claude_code_hooks_daemon.daemon.source_fingerprint import (
 )
 from claude_code_hooks_daemon.daemon.verdict_log import append_verdicts
 from claude_code_hooks_daemon.handlers.registry import HandlerRegistry
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.protected_file_index import IndexPrewarmer
 
 if TYPE_CHECKING:
@@ -483,7 +484,15 @@ class DaemonController:
         try:
             return compute_daemon_identity_fingerprint(*extra_roots)
         except OSError as exc:
-            logger.error("Could not compute source fingerprint (daemon continues): %s", exc)
+            log_and_continue(
+                logger,
+                exc,
+                reason=(
+                    "Could not compute source fingerprint; the fingerprint is only a "
+                    "staleness hint, so the daemon continues without one"
+                ),
+                level=logging.ERROR,
+            )
             return None
 
     def _sync_agent_assets(self, workspace_root: Path, config_path: Path) -> None:
@@ -773,8 +782,16 @@ class DaemonController:
         for name, pe_data in pseudo_events_config.items():
             try:
                 pe_config = PseudoEventConfig.from_dict(name, pe_data)
-            except ValueError:
-                logger.exception("Invalid pseudo-event config for %r, skipping", name)
+            except ValueError as exc:
+                log_and_continue(
+                    logger,
+                    exc,
+                    reason=(
+                        f"Invalid pseudo-event config for {name!r}, skipping; one bad "
+                        "pseudo-event entry must not stop the others registering"
+                    ),
+                    level=logging.ERROR,
+                )
                 continue
 
             if not pe_config.enabled:
