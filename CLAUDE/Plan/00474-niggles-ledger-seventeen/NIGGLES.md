@@ -1440,6 +1440,10 @@ to `CLAUDE/Plan/00480-plan-fact-checker-and-debounce/PLAN.md`.
 delivery time and drop records for archived plans; baseline on first sight; and only advance the checked content once
 the delivery is known to have been emitted (or re-offer an undelivered check on the next event).
 
+Also stale, found by the fact checker on the corrected plan: the template comments at `.claude/hooks-daemon.yaml.example`
+(the `plan_fact_check_feed` block) and `src/claude_code_hooks_daemon/daemon/init_config.py` (the same handler) still
+say delivery is not built.
+
 **Status**: ⬜ Open. Plan 00480 Task 4.4 stays open on it.
 
 ### N358 — one pending fact-check record from the pre-delivery build stops every delivery
