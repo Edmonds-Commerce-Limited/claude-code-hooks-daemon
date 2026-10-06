@@ -1421,7 +1421,14 @@ list entry matched elsewhere on the command line). `--get-regexp` only reads. Th
 commands that WRITE metadata are candidates and reading is never blocked, and `git config user.name|user.email` is
 listed as a surface only because it sets the author identity.
 
-**Fix**: treat `git config` as an identity write only when it assigns a value (`git config [--scope] user.name <value>`, `--add`, `--replace-all`), never for `--get`, `--get-all`, `--get-regexp`, `--list`/`-l` or `--show-origin`
+The read exemption is exact-token membership against `--grep --list -l --get` (`sensitive_content.py:164`, `:1294`),
+and the whole `config` subcommand is a write surface (`_GIT_METADATA_WRITE_SUBCOMMANDS`), so `--get-regexp`,
+`--get-all`, `--show-origin` and a bare `git config user.name` read are all judged as writes
+([fact-check](subagent-reports/261006-n364-fact-check-sonnet.md)). A second shape points the same way: `cd <clone> && git switch -c fix/ccy-lifecycle-daemon-launcher origin/F44` was denied on the same entry, and the identical `git switch -c` with no `cd` in the command was allowed. So the term matched the `cd` path, not the branch name: once a metadata
+surface is present, the whole command line is scanned, not the metadata value.
+
+**Fix**: scan only the metadata value (the message, tag, branch name or identity value), never the rest of the command
+line. Treat `git config` as an identity write only when it assigns a value (`git config [--scope] user.name <value>`, `--add`, `--replace-all`), never for `--get`, `--get-all`, `--get-regexp`, `--list`/`-l` or `--show-origin`
 reads. Test both sides through the real handler.
 
 **Status**: ⬜ Open.
