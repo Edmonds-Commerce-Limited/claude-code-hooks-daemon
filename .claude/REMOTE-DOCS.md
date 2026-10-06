@@ -23,9 +23,12 @@ Re-render the index: `bin/hooks-daemon remote-docs index`
 | `code.claude.com/docs/en/managed-settings.md` | https://code.claude.com/docs/en/managed-settings | 2026-10-06 | 2027-01-04 |
 | `code.claude.com/docs/en/permissions.md` | https://code.claude.com/docs/en/permissions | 2026-10-06 | 2027-01-04 |
 | `code.claude.com/docs/en/plugin-marketplaces.md` | https://code.claude.com/docs/en/plugin-marketplaces.md | 2026-09-24 | 2026-12-23 |
+| `code.claude.com/docs/en/plugins/cli-reference.md` | https://code.claude.com/docs/en/plugins/cli-reference | 2026-10-06 | 2027-01-04 |
 | `code.claude.com/docs/en/plugins/components.md` | https://code.claude.com/docs/en/plugins/components | 2026-10-06 | 2027-01-04 |
+| `code.claude.com/docs/en/plugins/install.md` | https://code.claude.com/docs/en/plugins/install | 2026-10-06 | 2027-01-04 |
 | `code.claude.com/docs/en/plugins/loading.md` | https://code.claude.com/docs/en/plugins/loading | 2026-10-06 | 2027-01-04 |
 | `code.claude.com/docs/en/plugins/manifest-reference.md` | https://code.claude.com/docs/en/plugins/manifest-reference | 2026-10-06 | 2027-01-04 |
+| `code.claude.com/docs/en/plugins/marketplace-reference.md` | https://code.claude.com/docs/en/plugins/marketplace-reference | 2026-10-06 | 2027-01-04 |
 | `code.claude.com/docs/en/plugins/mods/admin.md` | https://code.claude.com/docs/en/plugins/mods/admin | 2026-10-06 | 2027-01-04 |
 | `code.claude.com/docs/en/plugins/mods/api.md` | https://code.claude.com/docs/en/plugins/mods/api | 2026-10-06 | 2027-01-04 |
 | `code.claude.com/docs/en/plugins/mods/create.md` | https://code.claude.com/docs/en/plugins/mods/create | 2026-10-06 | 2027-01-04 |
