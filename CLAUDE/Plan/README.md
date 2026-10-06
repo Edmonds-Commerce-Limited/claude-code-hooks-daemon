@@ -6,7 +6,7 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00493: upgrade silently disables opt-in handlers](00493-upgrade-silently-disables-opt-in-handlers/PLAN.md) - In Progress (client report: v3.67.0 to v3.68.0 drops opt-in handlers a config does not name, per N55's absent-block rule, with no per-project report; loud effective-set delta on upgrade, fix the always-"no config changes" summary, regression test, client remedy note)
 
-- [00492: docs fake values registry](00492-docs-fake-values-registry/PLAN.md) - Not Started (owner ruling D1: one registry of approved fake values for docs; a QA check, a sensitive-content allowance and remote-docs swaps recorded in provenance; settles N309 and unblocks 00479 Task 1.1 and 00486 Task 1.3)
+- [00492: docs fake values registry](00492-docs-fake-values-registry/PLAN.md) - In Progress (all tasks delivered, awaiting merge; owner ruling D1: one registry of approved fake values for docs; a QA check, a sensitive-content allowance and remote-docs swaps recorded in provenance; settles N309 and unblocks 00479 Task 1.1 and 00486 Task 1.3)
 
 - [00491: code quality and architecture review](00491-code-quality-and-architecture-review/PLAN.md) - Not Started (owner ruling B5: a read-only review of module size, DRY, architecture and code quality, then owner-chosen refactoring; N314 folds in)
 

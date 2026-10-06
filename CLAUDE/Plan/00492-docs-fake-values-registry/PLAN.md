@@ -72,17 +72,19 @@ This plan builds that registry and wires it into the docs QA, the sensitive-cont
 
 - [x] ✅ **Task 3.1**: `remote-docs add` swaps an unknown fake for a listed one of the same kind and records the swap in
   the provenance frontmatter. TDD. `refresh` swaps the same way.
-- [ ] ⬜ **Task 3.2**: Vendor the statusline page (unblocks Plan 00479 Task 1.1) and the changelog page (unblocks Plan
-  00486 Task 1.3).
-- [ ] ⬜ **Task 3.3**: Close N309 in the niggles ledger and mark the two plan tasks unblocked.
+- [x] ✅ **Task 3.2**: Vendor the statusline page (unblocks Plan 00479 Task 1.1) and the changelog page (unblocks Plan
+  00486 Task 1.3). Both captured with `bin/hooks-daemon remote-docs add`; each recorded one swapped session id
+  (replacement all zeros), `fidelity: converted`.
+- [x] ✅ **Task 3.3**: Close N309 in the niggles ledger and mark the two plan tasks unblocked. N309 closed; Plan 00479
+  Task 1.1 and Plan 00486 Task 1.3 ticked.
 
 ## Success Criteria
 
-- [ ] One registry file is the only list of approved fakes.
-- [ ] The docs QA check flags an unlisted fake-looking value and passes on listed ones.
-- [ ] Sensitive-content allows a listed fake and still blocks an unlisted real-looking value.
-- [ ] Both Claude Code docs pages are vendored, each with its swaps recorded in provenance.
-- [ ] N309, Plan 00479 Task 1.1 and Plan 00486 Task 1.3 are closed.
+- [x] One registry file is the only list of approved fakes.
+- [x] The docs QA check flags an unlisted fake-looking value and passes on listed ones.
+- [x] Sensitive-content allows a listed fake and still blocks an unlisted real-looking value.
+- [x] Both Claude Code docs pages are vendored, each with its swaps recorded in provenance.
+- [x] N309, Plan 00479 Task 1.1 and Plan 00486 Task 1.3 are closed.
 
 ## Delivery & Milestones
 
