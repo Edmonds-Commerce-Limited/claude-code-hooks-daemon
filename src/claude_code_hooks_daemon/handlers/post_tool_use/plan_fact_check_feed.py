@@ -7,13 +7,23 @@ This PostToolUse handler watches writes to a plan's tracked documents (a
 debouncer, keyed by plan folder. When the plan has been quiet for
 ``quiet_seconds`` (default 5), :func:`_on_quiet` runs.
 
-**Delivery boundary (Plan 00480 open question 1).** :func:`_on_quiet` dispatches
-NOTHING. It logs at info level and stores the diff since the plan's last
-fact-checked content as a *pending fact-check* record, via
-:func:`~claude_code_hooks_daemon.utils.plan_fact_check.process_quiet_plan`. A
-later task delivers it; until then this handler ships default-DISABLED.
+**Delivery (Plan 00480 open question 1, option a).** The daemon runs no model.
+:func:`_on_quiet` runs on the debouncer's timer thread, where there is no hook
+to speak through, so it dispatches NOTHING: it logs at info level and stores the
+diff since the plan's last fact-checked content as a *pending fact-check*
+record, via
+:func:`~claude_code_hooks_daemon.utils.plan_fact_check.process_quiet_plan`.
+The next PostToolUse event, whatever the tool, delivers it as ``additionalContext``
+telling the session to dispatch the ``plan-fact-checker`` agent with the diff,
+and to treat REFUTED claims as work to fix. Each record is delivered once, which
+also marks that content as checked.
 
-Never blocks and never speaks.
+The supervisor turn channel (``session_actions_directive``) is deliberately not
+used: its signal carries a bare count and its text is a fixed template that
+points at ``hooks-daemon session-actions``, which lists SessionStart items only,
+so a signal for a fact-check would send the agent to a list that omits it.
+
+Ships default-DISABLED. Never blocks (owner ruling A1).
 """
 
 import logging
@@ -32,7 +42,9 @@ from claude_code_hooks_daemon.core.utils import get_written_file_paths
 from claude_code_hooks_daemon.utils.plan_fact_check import (
     STATE_SUBDIR,
     PlanFactCheckState,
+    PlanFactCheckStateError,
     PlanFolderMatch,
+    deliver_pending,
     plan_folder_match,
     process_quiet_plan,
 )
@@ -60,7 +72,7 @@ class PlanFactCheckFeedHandler(PostToolUseHandlerBase):
     # REPO-scoped: the plan tree is repository-singular.
     workspace_scope: ClassVar[WorkspaceScope] = WorkspaceScope.REPO
 
-    # Opt-in: delivery of the check is not built yet (Plan 00480 Task 4.3).
+    # Opt-in: it asks the session to spend an agent run per quiet plan edit.
     default_enabled = False
 
     def __init__(self) -> None:
@@ -83,25 +95,39 @@ class PlanFactCheckFeedHandler(PostToolUseHandlerBase):
                 found[str(match.plan_root)] = match
         return list(found.values())
 
+    @staticmethod
+    def _state() -> PlanFactCheckState:
+        return PlanFactCheckState(ProjectContext.daemon_untracked_dir() / STATE_SUBDIR)
+
     def matches(self, hook_input: dict[str, Any]) -> bool:
-        """True when the event wrote a tracked document of a plan."""
-        return bool(self._plan_matches(hook_input))
+        """True when the event wrote a plan document, or a fact-check is owed.
+
+        An owed check is delivered on ANY next event: the debounce fire runs on
+        a timer thread with no hook to speak through, so the next event is the
+        earliest the session can be told.
+        """
+        return bool(self._plan_matches(hook_input)) or bool(self._state().pending_folders())
 
     def handle(self, hook_input: dict[str, Any]) -> BlockingResult:
-        """Trigger the debouncer once per touched plan. Always ALLOW."""
-        matches = self._plan_matches(hook_input)
-        if not matches:
-            return BlockingResult(decision=Decision.ALLOW)
-        state_dir = ProjectContext.daemon_untracked_dir() / STATE_SUBDIR
+        """Feed the debouncer, and deliver any owed fact-check. Always ALLOW."""
+        state = self._state()
         debouncer = get_debouncer()
-        for match in matches:
+        for match in self._plan_matches(hook_input):
             debouncer.trigger(
                 str(match.plan_root),
                 quiet_seconds=float(self._quiet_seconds),
-                callback=partial(_on_quiet, plan_root=match.plan_root, state_dir=state_dir),
+                callback=partial(_on_quiet, plan_root=match.plan_root, state_dir=state.state_dir),
                 payload=match.folder,
             )
-        return BlockingResult(decision=Decision.ALLOW)
+        try:
+            instructions = deliver_pending(state)
+        except PlanFactCheckStateError:
+            # An advisory must never cost the session its tool result.
+            logger.exception("plan_fact_check: owed fact-check unreadable; delete it to reset")
+            instructions = []
+        if not instructions:
+            return BlockingResult(decision=Decision.ALLOW)
+        return BlockingResult(decision=Decision.ALLOW, context=instructions)
 
     def get_claude_md(self) -> str | None:
         """Silent sensor: nothing an agent acts on, so no resident guidance."""
@@ -131,6 +157,33 @@ class PlanFactCheckFeedHandler(PostToolUseHandlerBase):
                 expected_decision=Decision.ALLOW,
                 expected_message_patterns=[],
                 safety_notes="Opt-in handler; writes only under the daemon untracked dir.",
+                test_type=TestType.CONTEXT,
+                recommended_model=RecommendedModel.SONNET,
+                requires_main_thread=False,
+            ),
+            AcceptanceTest(
+                title="an owed plan fact-check is delivered to the session once",
+                command=(
+                    "After the plan edit above has gone quiet, run any tool call "
+                    "(for example Read a small file) and verify the tool result "
+                    "carries an instruction to dispatch the 'plan-fact-checker' "
+                    "agent with a '<plan folder>.diff' path, and that a second "
+                    "tool call carries no such instruction."
+                ),
+                harness_cannot_produce=(
+                    "The owed check is a record written by a debounce timer "
+                    "seconds before this event, and the harness feeds one event "
+                    "with no timer. Covered by "
+                    "tests/unit/handlers/post_tool_use/test_plan_fact_check_feed.py "
+                    "(TestDelivery)."
+                ),
+                description=(
+                    "The next hook event after a debounced fire delivers the "
+                    "fact-check as additionalContext, once, and never blocks."
+                ),
+                expected_decision=Decision.ALLOW,
+                expected_message_patterns=[r"plan-fact-checker", r"REFUTED"],
+                safety_notes="Opt-in handler; advisory only, never blocks.",
                 test_type=TestType.CONTEXT,
                 recommended_model=RecommendedModel.SONNET,
                 requires_main_thread=False,

@@ -109,7 +109,7 @@ as principle 1.
   - **Scope**: any tracked markdown document of a plan folder, written by `Write`, `Edit` or a
     Bash command whose authored paths `get_written_file_paths` can name. `subagent-reports/` and
     `JOURNAL/` are excluded, so the checker's own reports cannot re-trigger it.
-- [ ] 🔄 **Task 4.2**: When the debouncer fires, compute the diff since the last fact-checked
+- [x] ✅ **Task 4.2**: When the debouncer fires, compute the diff since the last fact-checked
   content of that plan (record a per-plan checked hash), and deliver the check (open
   question 1).
   - **Done**: `utils/plan_fact_check.py` keeps per-plan state under the daemon untracked dir
@@ -117,13 +117,25 @@ as principle 1.
     fire computes the diff since that content and stores it as a **pending fact-check**.
   - **Boundary**: the fire callback does NO dispatch. It logs at info level and stores the
     pending record. Delivery is owner open question 1.
-  - **Remains**: deliver the pending record, and call `PlanFactCheckState.record_checked` once a
-    check has been delivered (firing never advances the checked content).
-- [ ] ⬜ **Task 4.3**: Deliver the result. REFUTED claims reach the session as work, naming the
+  - **Done (delivery)**: the pending record also stores the plan root and the content snapshot.
+    `deliver_pending` writes the diff to `<folder>.diff`, calls `record_checked` with the stored
+    snapshot, clears the record and returns the instruction, once per record.
+- [x] ✅ **Task 4.3**: Deliver the result. REFUTED claims reach the session as work, naming the
   claim, the evidence and the file. Decide whether an unresolved REFUTED claim blocks the
   plan's next commit through `plan_qa_commit_gate` (open question 2).
-- [ ] ⬜ **Task 4.4**: Acceptance tests, plus a live run: edit a plan to add a false claim, see
+  - **Done**: the next PostToolUse event of any tool delivers the instruction as
+    `additionalContext` (the feed handler now also matches when a check is owed). It tells the
+    session to dispatch `plan-fact-checker` on the plan with the diff file, and to fix every
+    REFUTED claim (claim, evidence, file).
+  - **Route**: not the supervisor channel. Its signal carries a bare count and a fixed
+    template pointing at `hooks-daemon session-actions`, which lists SessionStart items only.
+  - **Blocking**: none (open question 2 ruling and owner ruling A1); `plan_qa_commit_gate` is
+    untouched.
+- [ ] 🔄 **Task 4.4**: Acceptance tests, plus a live run: edit a plan to add a false claim, see
   one debounced check fire, and see the refutation delivered.
+  - **Done**: automated tests (`TestDelivery` in the feed handler and util tests) and the
+    handler's acceptance tests.
+  - **Remains**: the live run, for the coordinator after merge.
 
 ## Open questions for the owner
 
