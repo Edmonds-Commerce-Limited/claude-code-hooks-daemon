@@ -114,8 +114,9 @@ agent.
     DEFSET (C1): the action guards are outside the Defence set. G1 (B2): no central exceptions file; suppressions stay
     inline, each with its reasoning, delete as many as possible. G2 (B1): keep the `MUST_*_BECAUSE` hatches with the
     hygiene fixes. G4 (B3): reasons on config exceptions now, required at the next major. Task 1.4 (C2): post.
-- [ ] ⬜ **Task 2.3**: Put the gaps to the owner as one batch: close, accept as a known gap, or
-  out of scope. Expected questions:
+- [x] ✅ **Task 2.3** (answered by the owner rulings of 2026-10-05, B1–B4 and C1, recorded under Task 2.2; the
+  coordinator calls there cover G3, G10, G11, G14 and G16): Put the gaps to the owner as one batch: close, accept as a
+  known gap, or out of scope. Expected questions:
   - §4.3 against the `MUST_..._BECAUSE` declarations: is an in-command justification a
     project-record entry, or a suppression route that bypasses it?
   - §6.1/§6.2: is `.claude/hooks-daemon.yaml` (`exclude_paths`, `extra_whitelist`) the project
