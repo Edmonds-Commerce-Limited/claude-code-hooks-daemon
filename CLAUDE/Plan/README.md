@@ -38,8 +38,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00476: release through a pr with ci tagging](00476-release-through-a-pr-with-ci-tagging/PLAN.md) - Not Started (owner direction: a release branch and pull request exist for QA, running the whole suite in CI; acceptance tests, tagging and publishing stay local in `/release`; follows 00475's first batch)
 
-- [00475: targeted qa and small batches](00475-targeted-qa-and-small-batches/PLAN.md) - In Progress (owner request: targeted QA for every change, the full gate only at release preparation, one QA run at a time, and small batches of branches finished before the next start, after ledger 00466 left 21 stale branches)
-
 - [00474: niggles ledger seventeen](00474-niggles-ledger-seventeen/PLAN.md) - In Progress, the OPEN ledger for new niggles (00466 reached its PLAN.md size limit with N261; numbering continues, opening with N262: the release procedure has no check that the notes fit a GitHub release body)
 
 - [00473: post merge handlers judge the command repository](00473-post-merge-handlers-judge-the-command-repository/PLAN.md) - Not Started (graduated from 00468 G9: `daemon_sync_after_merge` and `merge_qa_report` judge the repository the payload `cwd` names, not the one the command ran in; blocked on Plan 00464's command-directory resolver)
@@ -197,6 +195,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Completed Plans
 
+- [00475: targeted qa and small batches](Completed/00475-targeted-qa-and-small-batches/PLAN.md) - Complete at `d6caefded` + `301805f1f` + `b4576108a` (all shipped in v3.68.0) + the archiving commit (owner request: targeted QA for every change, the full gate only at release preparation, one QA run at a time, and small batches of branches; the branch-count and merge-QA advisories stay advisory by coordinator call)
+
 - [00490: github issue assignment guard](Completed/00490-github-issue-assignment-guard/PLAN.md) - Complete at `8846f9d77` + `bb9bf1a98` + the archiving commit (owner request: issue-tied work requires the issue assigned to the signed-in GitHub account and opened by an approved author; a deterministic `issue-validity` checker and CLI claim an unassigned issue and stop on someone else's; the CLI refuses with no author list configured)
 
 - [00466: niggles ledger sixteen](Completed/00466-niggles-ledger-sixteen/PLAN.md) - Superseded by [00474](00474-niggles-ledger-seventeen/PLAN.md) (the ledger for N1-N261; its 65 entries still open in the index are tracked from 00474, and every branch was landed or dropped with its branch-only entries carried into 00474. Opened when 00422 passed its size warning with N29, with N1: the venv fallback accepts an interpreter that cannot run on this host)
@@ -255,8 +255,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00432: scoped qa scan overwrites repo artefact](Completed/00432-scoped-qa-scan-overwrites-repo-artefact/PLAN.md) - Complete at the delivery-and-archiving commit (from 00422 N10: seven checkers wrote this repository's published artefact even when pointed elsewhere, so a full run left three of them describing a pytest fixture)
 
-- [00431: socket path preflight needs no venv](Completed/00431-socket-path-preflight-needs-no-venv/PLAN.md) - Complete at `18a9b01b` + the archiving commit (from 00422 N8: the worktree socket-path pre-flight needed a venv to do arithmetic, so it stood down in a nested worktree — exactly where the path is long enough to matter)
-
 Older completed plans (below the retention window of the 30 highest-numbered) are archived verbatim in [Completed/README.md](Completed/README.md).
 
 ## Blocked / On Hold Plans
@@ -310,9 +308,9 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 - **Total Plans Created**: 487 (count = `hooksdaemon.latestPlanNumber` git counter)
 
-- **Completed**: 416 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
+- **Completed**: 417 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 54 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 53 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 

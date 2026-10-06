@@ -1,6 +1,6 @@
 # Plan 00475: targeted qa and small batches
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-09-30
 **Owner**: dev
 **Priority**: High
@@ -164,13 +164,13 @@ read the plan index, ledgers and docs. So markdown is narrowed, not skipped.
 
 ### Phase 4: Enforcement
 
-- [ ] 🔄 **Task 4.1**: A SessionStart advisory counts open work branches and names
+- [x] ✅ **Task 4.1**: A SessionStart advisory counts open work branches and names
   any beyond the limit, or any far behind `main`. Decide advisory or blocking
   with the owner. The advisory (`branch_count_advisor`) merged in d6caefded and
   fired live on a repository with 5 `worktree-*` branches. Whether it should ever
   block awaits the owner.
   - **Coordinator call (2026-10-05, under the owner's "go with the clear winners" instruction):** the advisory stays advisory. Resolved; not an owner ruling.
-- [ ] 🔄 **Task 4.2**: Ledger 00474 N278. A `git merge` of a work branch whose head has
+- [x] ✅ **Task 4.2**: Ledger 00474 N278. A `git merge` of a work branch whose head has
   no recorded green `llm_qa.py changed` run gets an advisory. The advisory names the
   head and the static checks to run, as listed in `CLAUDE/QA.md` under "Before Merging:
   the Coordinator's Check". It is advisory like Task 4.1, and the owner decides whether
@@ -193,6 +193,8 @@ read the plan index, ledgers and docs. So markdown is narrowed, not skipped.
 - [x] Two concurrent `llm_qa.py` runs in different worktrees serialise. Seen
   live: the cron-hosts branch's `llm_qa.py changed` queued behind the provision
   branch's run.
+- [x] This plan has no release-bound consequences left in the holding area: its delivery commits (d6caefded,
+  301805f1f, b4576108a) all shipped in v3.68.0.
 - [x] No doc outside the release documents requires `llm_qa.py all`. Merged in
   b4576108a. The deployed core docs now name the project's own QA gate.
 - [x] The branch-count advisory fires on a repository with more than 3 open work
