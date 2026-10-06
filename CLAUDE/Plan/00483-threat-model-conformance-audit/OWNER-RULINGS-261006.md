@@ -114,3 +114,17 @@ a stable place."
 **Coordinator's reading:** RELEASING.md makes a `/release` typed by a human in the current session the only release
 authorisation. When the coordinator judges the tree stable, it reports that and the owner types `/release`, unless the
 owner says this message alone is enough.
+
+**Owner, the same day:** typed `/release once you have current WIP resolved and we are in a good state to do a release` in the coordinator's session. That is the release authorisation, deferred until its condition holds. The
+release starts at Stage 0 (the slate gate) only then; `untracked/release-state.json` is written only once that gate
+passes, as RELEASING.md requires.
+
+**Coordinator's reading of "current WIP":**
+
+- **Open work branches:** B2, B3, B4 and the supervisor Esc fix are merged, and a full post-merge QA run is green.
+- **Long-running plans:** the slate check lists 12 In Progress plans, most of them ledgers, items blocked on the owner,
+  or research. These are not branches to finish, so the release proceeds over them with `accept-wip`.
+- **Branch `agent-a388f9611b6f8f3d1-1f7c8c8f`:** a deliberately parked alternative fix for N350 (fixed on main by
+  another route). It is not WIP.
+- **Open point for the owner:** Plan 00487's desktop live test started the same day, and this release's notes headline
+  the ccy supervisor plugin API it tests.
