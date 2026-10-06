@@ -1546,7 +1546,9 @@ fetch); keep the deny, with the same message, otherwise. Tags are out of scope. 
 
 **Status**: ✅ Fixed on branch `agent-a7777897724c1db4b-1ed0e9c0` (merge pending). `destructive_git` allows a
 `git push <remote> --delete|-d <branch>` / `:<branch>` when `refs/remotes/<remote>/<branch>` is an ancestor of the
-default branch (`git merge-base --is-ancestor`, local facts only, no fetch); tags, the default branch, a missing ref,
+default branch (`git merge-base --is-ancestor`) and `git ls-remote <remote> refs/heads/<branch>` reports a tip equal
+to it (a stale tracking ref, an absent remote branch, a failure or a timeout is denied with "run `git fetch` and
+retry"; the handler never fetches); tags, the default branch, a missing ref,
 a tag-named branch, substitutions and any git failure stay denied, and every ref in the command must pass. Tests in
 `tests/unit/handlers/pre_tool_use/test_destructive_git_remote_delete_merged.py`:
 `test_deleting_a_merged_remote_branch_is_allowed` (five spellings),
@@ -1554,7 +1556,9 @@ a tag-named branch, substitutions and any git failure stay denied, and every ref
 `test_deleting_a_tag_stays_denied`, `test_a_branch_sharing_its_name_with_a_tag_is_denied`,
 `test_the_default_branch_is_never_deletable`, `test_every_ref_must_be_merged`, `test_several_merged_refs_are_allowed`,
 `test_a_merged_delete_cannot_carry_a_force_push_along`, `test_a_merged_delete_chained_with_an_unmerged_one_is_denied`,
-`test_a_substitution_is_not_trusted`, `test_an_unknown_directory_is_denied`,
+`test_a_substitution_is_not_trusted`, `test_an_unknown_directory_is_denied`, `test_a_stale_tracking_ref_is_denied_and_says_to_fetch`,
+`test_a_fetched_tracking_ref_that_is_now_unmerged_is_denied`, `test_a_branch_already_gone_from_the_remote_is_denied`,
+`test_an_unreachable_remote_is_denied`,
 `test_the_rule_documentation_describes_the_merged_exception`.
 
 ### N361 — the fake-values registry is not pre-filled, and nothing says its entries must look fake

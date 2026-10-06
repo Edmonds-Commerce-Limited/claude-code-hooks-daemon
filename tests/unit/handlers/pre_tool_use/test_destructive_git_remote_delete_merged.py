@@ -178,6 +178,57 @@ def test_an_unknown_directory_is_denied(handler: DestructiveGitHandler, tmp_path
     assert handler.handle(_input("git push origin --delete merged", tmp_path)).decision == "deny"
 
 
+def _push_from_second_clone(clone: Path, branch: str) -> None:
+    """Advance origin's ``branch`` from another clone, leaving ``clone``'s tracking ref stale."""
+    origin = clone.parent / "origin.git"
+    other = clone.parent / "other"
+    run_git(clone.parent, "clone", "-q", str(origin), str(other))
+    run_git(other, "config", "user.email", "t@example.invalid")
+    run_git(other, "config", "user.name", "Tester")
+    run_git(other, "config", "commit.gpgsign", "false")
+    run_git(other, "checkout", branch)
+    run_git(other, "commit", "--allow-empty", "-m", "pushed after our last fetch")
+    run_git(other, "push", "origin", branch)
+
+
+@pytest.mark.parametrize("command", ["git push origin --delete merged", "git push origin :merged"])
+def test_a_stale_tracking_ref_is_denied_and_says_to_fetch(
+    handler: DestructiveGitHandler, clone: Path, command: str
+) -> None:
+    _push_from_second_clone(clone, "merged")
+    result = handler.handle(_input(command, clone))
+    assert result.decision == "deny"
+    assert result.reason is not None
+    assert "could not be confirmed as merged" in result.reason
+    assert "git fetch" in result.reason
+
+
+def test_a_fetched_tracking_ref_that_is_now_unmerged_is_denied(
+    handler: DestructiveGitHandler, clone: Path
+) -> None:
+    _push_from_second_clone(clone, "merged")
+    run_git(clone, "fetch", "origin")
+    assert handler.handle(_input("git push origin --delete merged", clone)).decision == "deny"
+
+
+def test_a_branch_already_gone_from_the_remote_is_denied(
+    handler: DestructiveGitHandler, clone: Path
+) -> None:
+    run_git(clone.parent / "origin.git", "branch", "-D", "merged")
+    result = handler.handle(_input("git push origin --delete merged", clone))
+    assert result.decision == "deny"
+    assert result.reason is not None
+    assert "git fetch" in result.reason
+
+
+def test_an_unreachable_remote_is_denied(handler: DestructiveGitHandler, clone: Path) -> None:
+    run_git(clone, "remote", "set-url", "origin", str(clone.parent / "nowhere.git"))
+    result = handler.handle(_input("git push origin --delete merged", clone))
+    assert result.decision == "deny"
+    assert result.reason is not None
+    assert "could not be confirmed as merged" in result.reason
+
+
 def test_the_rule_documentation_describes_the_merged_exception(
     handler: DestructiveGitHandler,
 ) -> None:

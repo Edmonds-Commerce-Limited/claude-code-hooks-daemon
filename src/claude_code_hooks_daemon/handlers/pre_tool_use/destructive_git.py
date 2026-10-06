@@ -327,8 +327,9 @@ _PUSH_DELETE_VERBOSE: Final[str] = (
     "This command deletes a branch or tag on the REMOTE repository. Other people and other "
     "machines share that ref, and nothing in this checkout (reflog included) restores it.\n\n"
     "It is ALLOWED when every named branch's remote-tracking ref is already merged into the "
-    "default branch (`git merge-base --is-ancestor`), judged in the repository the command "
-    "runs in; nothing is lost then. Tags, the default branch, an unmerged branch and anything "
+    "default branch (`git merge-base --is-ancestor`) AND `git ls-remote` shows the remote's "
+    "live tip equal to it (a stale tracking ref is denied: run `git fetch` and retry), judged "
+    "in the repository the command runs in; nothing is lost then. Tags, the default branch, an unmerged branch and anything "
     "the check cannot establish are denied.\n\n"
     "Otherwise do not run it, and do not look for another spelling of it. Stop and ask the "
     "human to run it themselves: tell them the remote, the ref and why it should go.\n\n"
@@ -585,8 +586,34 @@ def _remote_branch_problem(directory: Path, remote: str, ref: str, default: str)
             timeout=Timeout.GIT_CONTEXT,
         )
         if merged.returncode == 0:
-            return None
+            return _remote_tip_problem(directory, remote, name, tip.stdout.strip())
     return f"`{name}` is not merged into `{default}`"
+
+
+def _remote_tip_problem(directory: Path, remote: str, name: str, local_tip: str) -> str | None:
+    """Why the remote's live tip of ``name`` is not the merged ``local_tip``, else None.
+
+    The remote-tracking ref is only as fresh as the last fetch: a commit pushed since
+    would be lost by the delete. ``git ls-remote`` asks the remote itself; it never
+    fetches. Fails closed: a mismatch, an absent branch, a failure and a timeout all
+    give a reason.
+    """
+    listing = run_git(
+        directory,
+        "ls-remote",
+        remote,
+        f"{HEADS_PREFIX}{name}",
+        timeout=Timeout.GIT_CONTEXT,
+        env={"GIT_TERMINAL_PROMPT": "0"},
+    )
+    lines = listing.stdout.strip().splitlines() if listing.returncode == 0 else []
+    if lines == [f"{local_tip}\t{HEADS_PREFIX}{name}"]:
+        return None
+    return (
+        f"the remote tip of `{name}` could not be confirmed as merged (it differs from "
+        f"`{_REMOTES_PREFIX}{remote}/{name}`, is gone, or `git ls-remote {remote}` failed); "
+        "run `git fetch` and retry"
+    )
 
 
 def _remote_delete_note(command: str, cwd: Path) -> str | None:
@@ -967,7 +994,9 @@ class DestructiveGitHandler(PreToolUseHandlerBase):
             "| `git push --delete <name>` / `git push <remote> :<name>` "
             "| ALLOWED when every named branch is already merged into the default branch "
             "(its `refs/remotes/<remote>/<name>` is an ancestor of the default branch, "
-            "judged locally; `git -C` and `cd` are honoured). Otherwise HUMAN ONLY — an "
+            "and `git ls-remote` confirms the remote's live tip equals it, so a stale "
+            "tracking ref is denied until `git fetch`; `git -C` and `cd` are honoured). "
+            "Otherwise HUMAN ONLY — an "
             "unmerged branch, a tag, the default branch, a missing remote-tracking ref or "
             "any check failure is denied: stop and ask the human to run it. Local "
             "`git tag -d` and `git reset --keep` are allowed |\n\n"
