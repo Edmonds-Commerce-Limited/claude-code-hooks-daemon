@@ -1255,12 +1255,12 @@ entries, needs the owner.
 audit's `log-and-continue` rule now flags any non-raising handler body that logs (inline or by passing
 the exception to a helper) and then continues, passes, breaks or returns a fallback. The sanctioned
 form is the helper called with a specific `reason`. Console reports (`print`, `sys.stderr.write`) and
-failures recorded on a list or future count as surfacing. The widened rule first surfaced 240 findings
-(after those exemptions); 27 handlers are converted so far, and 210 remain in `src/` and `scripts/`
-(listed by the audit, `./scripts/qa/llm_qa.py error_hiding`). Until they are
-converted the repo self-scan (`TestRealRepoSelfScan`) and the error_hiding gate stay red.
-The 99 existing function-keyed `log-and-continue` exclusions still mask any new finding in the same
-function; migrating them to the helper (then deleting them) is part of what remains.
+failures recorded on a list or future, stderr/stdout stream writes and logging `handleError` count as
+surfacing. About 160 handlers are converted across 58bbd0e05 and earlier. 166 `log-and-continue`
+sites remain unfiltered, of which 81 show in the audit and 85 sit behind the function-keyed
+`error_hiding_exclusions.json` entries (68 `log-and-continue` entries left). Convert those sites,
+delete each entry as its function is done, and the gate goes green; until then
+`TestRealRepoSelfScan` and the error_hiding gate stay red.
 
 ### N297 — the coordinator merged the merge advisor itself without a targeted QA run, and main broke twice
 
