@@ -163,6 +163,142 @@ class TestSilentFallbackRule:
         assert "silent-fallback" in _rules(visitor.violations)
 
 
+def _audit_source(source: str) -> list[dict[str, Any]]:
+    visitor = ErrorHidingVisitor(REPO_ROOT / "scripts" / "qa" / "fake.py")
+    visitor.visit(ast.parse(source))
+    return visitor.violations
+
+
+def _handler(body: str) -> str:
+    indented = "\n".join(f"        {line}" for line in body.splitlines())
+    return f"def f():\n    try:\n        risky()\n    except OSError as exc:\n{indented}\n"
+
+
+class TestLogThenContinueIsWidened:
+    """Owner ruling B4 (N296): a handler that only logs and carries on is flagged
+    however the log is spelt, unless it goes through the named helper."""
+
+    @pytest.mark.parametrize(
+        "body",
+        [
+            "logger.warning('boom')",
+            "logger.exception('boom')",
+            "logger.debug('boom')",
+        ],
+        ids=["inline-warning", "inline-exception", "inline-debug"],
+    )
+    def test_inline_log_alone_is_flagged(self, body: str) -> None:
+        assert "log-and-continue" in _rules(_audit_source(_handler(body)))
+
+    @pytest.mark.parametrize(
+        "body",
+        [
+            "_record(exc)",
+            "self._note_failure(exc)",
+            "_log_lost_peer(str(exc))",
+        ],
+        ids=["helper-with-exc", "method-with-exc", "helper-with-wrapped-exc"],
+    )
+    def test_indirected_log_is_flagged(self, body: str) -> None:
+        assert "log-and-continue" in _rules(_audit_source(_handler(body)))
+
+    @pytest.mark.parametrize(
+        "body",
+        [
+            "logger.debug('boom')\npass",
+            "logger.warning('boom', exc_info=True)\nreturn None",
+            "logger.warning('boom')\nreturn {}",
+            "logger.warning('boom')\nreturn False",
+            "logger.warning('boom')\nreturn",
+            "logger.warning('boom')\nresult = None",
+            "logger.warning('boom')\nself._reset()",
+        ],
+        ids=[
+            "pass",
+            "return-none",
+            "return-empty",
+            "return-const",
+            "bare-return",
+            "fallback",
+            "extra-call",
+        ],
+    )
+    def test_log_followed_by_a_trivial_statement_is_flagged(self, body: str) -> None:
+        assert "log-and-continue" in _rules(_audit_source(_handler(body)))
+
+    def test_log_then_continue_in_a_loop_is_flagged(self) -> None:
+        source = (
+            "def f(items):\n"
+            "    for item in items:\n"
+            "        try:\n"
+            "            risky(item)\n"
+            "        except OSError as exc:\n"
+            "            logger.debug('skip %s', exc)\n"
+            "            continue\n"
+        )
+        assert "log-and-continue" in _rules(_audit_source(source))
+
+    def test_named_helper_with_a_reason_is_the_sanctioned_form(self) -> None:
+        body = "log_and_continue(logger, exc, reason='peer hung up; nothing left to do')"
+        assert "log-and-continue" not in _rules(_audit_source(_handler(body)))
+
+    def test_named_helper_through_a_module_attribute_is_sanctioned(self) -> None:
+        body = "deliberate_swallow.log_and_continue(logger, exc, reason='best-effort cache')"
+        assert "log-and-continue" not in _rules(_audit_source(_handler(body)))
+
+    @pytest.mark.parametrize(
+        "call",
+        [
+            "log_and_continue(logger, exc)",
+            "log_and_continue(logger, exc, reason='')",
+            "log_and_continue(logger, exc, reason='todo')",
+        ],
+        ids=["no-reason", "empty-reason", "placeholder-reason"],
+    )
+    def test_named_helper_without_a_real_reason_is_not_sanctioned(self, call: str) -> None:
+        assert "log-and-continue" in _rules(_audit_source(_handler(call)))
+
+    def test_a_handler_that_reraises_is_not_flagged(self) -> None:
+        body = "logger.warning('boom')\nraise"
+        assert "log-and-continue" not in _rules(_audit_source(_handler(body)))
+
+    def test_a_handler_that_raises_a_new_error_is_not_flagged(self) -> None:
+        body = "logger.warning('boom')\nraise RuntimeError('x') from exc"
+        assert "log-and-continue" not in _rules(_audit_source(_handler(body)))
+
+    def test_a_handler_doing_real_work_after_logging_is_not_flagged(self) -> None:
+        body = "logger.warning('boom')\nreturn fallback_config(exc)"
+        assert "log-and-continue" not in _rules(_audit_source(_handler(body)))
+
+    def test_recording_the_exception_on_a_list_is_not_a_log_call(self) -> None:
+        body = "errors.append(exc)"
+        assert "log-and-continue" not in _rules(_audit_source(_handler(body)))
+
+    def test_reporting_to_the_user_and_failing_the_exit_code_is_not_hiding(self) -> None:
+        body = "print(f'ERROR: {exc}', file=sys.stderr)\nreturn 1"
+        assert "log-and-continue" not in _rules(_audit_source(_handler(body)))
+
+    def test_logging_and_recording_on_a_surfaced_list_is_not_hiding(self) -> None:
+        body = "logger.exception('boom')\ncontext.append(str(exc))"
+        assert "log-and-continue" not in _rules(_audit_source(_handler(body)))
+
+    def test_capturing_the_exception_on_a_future_is_not_hiding(self) -> None:
+        body = "future.set_exception(exc)"
+        assert "log-and-continue" not in _rules(_audit_source(_handler(body)))
+
+    def test_writing_to_stderr_is_not_a_log_call(self) -> None:
+        body = "sys.stderr.write(str(exc))\nreturn None"
+        assert "log-and-continue" not in _rules(_audit_source(_handler(body)))
+
+    def test_a_call_that_never_sees_the_exception_is_not_a_log(self) -> None:
+        body = "cleanup()"
+        assert "log-and-continue" not in _rules(_audit_source(_handler(body)))
+
+    def test_finding_is_reported_once_per_try(self) -> None:
+        violations = _audit_source(_handler("logger.warning('boom')\nreturn None"))
+        assert _rules(violations).count("log-and-continue") == 1
+
+
 class TestAGeneratorThatYieldsTheFailure:
     """A bare ``return`` ends a generator; it returns no None to a caller.
 
