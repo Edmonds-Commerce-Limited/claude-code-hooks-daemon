@@ -1442,7 +1442,7 @@ ordinary-command regression gate. That test finds handlers through the registry,
 reach it for a new handler file. Checked in the map and the test, not by replaying A6's run. Candidate remedy, not done
 here: add a map rule for `handlers/pre_tool_use/*.py` naming the performance test.
 
-**Status**: ✅ Fixed (commit COMMIT_HASH). `_walk` takes a `depth` and inlines an evaluated string only while
+**Status**: ✅ Fixed (commit 4b2235800). `_walk` takes a `depth` and inlines an evaluated string only while
 `depth < MAX_EVAL_NESTING` (4, the nested-shell cap the performance test's shapes are built around); past it the
 command stays one ordinary step and its body goes unjudged, per ruling A1. Pinned by `TestEvalNestingIsCapped` in
 `tests/unit/utils/test_git_commit_parsing.py`.
