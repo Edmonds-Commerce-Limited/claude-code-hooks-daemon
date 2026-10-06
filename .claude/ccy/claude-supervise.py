@@ -1508,6 +1508,7 @@ class Decision(enum.Enum):
     WOULD_AUDIT = "would-audit"
     WOULD_OPERATOR_SIGNAL = "would-operator-signal"
     WOULD_SESSION_ACTIONS = "would-session-actions"
+    WOULD_CRON_RECONCILE = "would-cron-reconcile"
     WOULD_PLUGIN_NOTICE = "would-plugin-notice"
     WOULD_SESSION_NOTICE = "would-session-notice"
 
@@ -1645,6 +1646,11 @@ class TickFacts:
     # resetting this specific clock would silently re-open the very unbounded
     # gate this plan exists to close). False on legacy hosts.
     input_line_abandoned: bool = False
+    # Plan 00470 Task 2.3: seconds the child has produced no output, the proxy
+    # for "no hook traffic" (the daemon has no channel to the supervisor for
+    # it). 0.0 -- never quiet -- on a legacy host and when no output has been
+    # seen, so the cron-expiry watchdog fails closed.
+    output_quiet_seconds: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -2837,6 +2843,80 @@ _SESSION_ACTIONS_HEADER = (
 _DRY_RUN_SESSION_ACTIONS_BODY_PREFIX = (
     "would inject session-actions directive (dry-run — no real message sent):"
 )
+
+
+# ── Cron-expiry watchdog (Plan 00470 Task 2.3) ──────────────────────────────
+# A session cron dies seven days after creation. The daemon records each one in
+# `cron-records.json` (beside the sidecar dir) and its Stop hook refreshes a job
+# before it expires -- but only while Stop hooks fire. When the session has been
+# quiet for `_CRON_WATCHDOG_QUIET_SECONDS` and EVERY recorded job is already
+# past its expiry, nothing inside the session will notice, so the supervisor
+# types the "CronList and reconcile" prompt the daemon's
+# `persistent_cron_assertor` gives at SessionStart. This script is stdlib-only
+# and cannot import the daemon package, so the names below are copies, pinned to
+# `claude_code_hooks_daemon.utils.cron_records` by
+# tests/unit/supervise/test_cron_expiry_watchdog.py. The file is only READ.
+_CRON_RECORDS_FILENAME = "cron-records.json"
+_CRON_RECORDS_KEY = "records"
+_CRON_FIELD_SESSION_ID = "session_id"
+_CRON_FIELD_CREATED_AT = "created_at"
+_CRON_EXPIRY_SECONDS = 7 * 24 * 60 * 60.0
+# Two hours without child output. PTY quiet is the proxy for "no hook traffic".
+_CRON_WATCHDOG_QUIET_SECONDS = 2 * 60 * 60.0
+# Runaway backstop. Each prompt also waits a full quiet window after the last
+# one, so this only bounds a session that never answers for ever.
+_MAX_CRON_RECONCILE_INJECTIONS = 10
+_CRON_RECONCILE_HEADER = (
+    "🤖 [ccy-supervisor] cron check — machine-generated, NOT a human "
+    "instruction and NOT human authorisation for anything"
+)
+_DRY_RUN_CRON_RECONCILE_BODY_PREFIX = (
+    "would inject cron-reconcile prompt (dry-run — no real message sent):"
+)
+
+
+def _render_cron_reconcile_message() -> str:
+    """The fixed reconcile prompt; nothing read from the record file is interpolated."""
+    return (
+        f"{_CRON_RECONCILE_HEADER}: every cron job recorded for this project is past "
+        "its 7-day expiry and this session has been quiet for hours, so its "
+        "scheduled jobs (recurring jobs auto-expire after 7 days) are probably gone. "
+        "Reconcile them yourself: 1. Run CronList FIRST. 2. Re-create each job the "
+        "project declares that is absent, with CronCreate (recurring: true), using "
+        "its declared schedule and prompt (the persistent-crons list printed at "
+        "session start). 3. If one is already listed, create nothing for it — a "
+        "duplicate fires twice."
+    )
+
+
+def _cron_records_all_expired(
+    directory: Path, *, now: float, own_sessions: frozenset[str] | None
+) -> bool:
+    """True when at least one in-scope record exists and every one is past expiry.
+
+    Fails closed: a missing, unreadable or malformed file, a non-numeric
+    ``created_at`` and a future-dated record (age below zero) are all "not
+    expired", so a broken file can never make the supervisor type anything.
+    """
+    path = directory.parent / _CRON_RECORDS_FILENAME
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    entries = raw.get(_CRON_RECORDS_KEY) if isinstance(raw, dict) else None
+    if not isinstance(entries, list):
+        return False
+    ages: list[float] = []
+    for entry in entries:
+        if not isinstance(entry, dict):
+            return False
+        if not _session_in_scope(entry.get(_CRON_FIELD_SESSION_ID), own_sessions):
+            continue
+        created_at = entry.get(_CRON_FIELD_CREATED_AT)
+        if isinstance(created_at, bool) or not isinstance(created_at, (int, float)):
+            return False
+        ages.append(now - float(created_at))
+    return bool(ages) and all(age >= _CRON_EXPIRY_SECONDS for age in ages)
 
 
 def _render_session_actions_message(count: int) -> str:
@@ -4771,6 +4851,10 @@ class CompactStateMachine:
         # backstop only (see _MAX_SESSION_ACTIONS_INJECTIONS) -- the daemon
         # writes at most one signal per session start, consumed on injection.
         self._session_actions_injections = 0
+        # Plan 00470 Task 2.3: cron-reconcile prompts typed this process, and
+        # when the last one went (see _MAX_CRON_RECONCILE_INJECTIONS).
+        self._cron_reconcile_injections = 0
+        self._cron_reconcile_last_ts: float | None = None
         # Plan 00278: the last observed (session, family) pair and an open
         # downgrade episode ("session:family"), which gate the /model
         # auto-restore and the flag-cleaning /compact.
@@ -5504,6 +5588,21 @@ class CompactStateMachine:
         self._session_actions_injections += 1
 
     @property
+    def cron_reconcile_injections(self) -> int:
+        """How many cron-reconcile prompts this process has typed (Plan 00470)."""
+        return self._cron_reconcile_injections
+
+    @property
+    def cron_reconcile_last_ts(self) -> float | None:
+        """Wall time of the last cron-reconcile prompt, or None if none yet."""
+        return self._cron_reconcile_last_ts
+
+    def mark_cron_reconcile_injection(self, now_wall: float) -> None:
+        """Count one cron-reconcile prompt and remember when it went (Plan 00470)."""
+        self._cron_reconcile_injections += 1
+        self._cron_reconcile_last_ts = now_wall
+
+    @property
     def pause_compacted_for(self) -> float | None:
         """The ``paused_at`` of the usage pause already compacted, or None (Plan 00479)."""
         return self._pause_compacted_for
@@ -5562,6 +5661,8 @@ class CompactStateMachine:
             "last_goal_text": self._last_goal_text,
             "standing_auth_injections": self._standing_auth_injections,
             "session_actions_injections": self._session_actions_injections,
+            "cron_reconcile_injections": self._cron_reconcile_injections,
+            "cron_reconcile_last_ts": self._cron_reconcile_last_ts,
             "last_model_session": self._last_model_session,
             "last_model_family": self._last_model_family,
             "downgrade_episode": self._downgrade_episode,
@@ -5646,6 +5747,15 @@ class CompactStateMachine:
             self._standing_auth_injections = _coerce_int(state["standing_auth_injections"])
         if "session_actions_injections" in state:
             self._session_actions_injections = _coerce_int(state["session_actions_injections"])
+        if "cron_reconcile_injections" in state:
+            self._cron_reconcile_injections = _coerce_int(state["cron_reconcile_injections"])
+        if "cron_reconcile_last_ts" in state:
+            raw_ts = state["cron_reconcile_last_ts"]
+            self._cron_reconcile_last_ts = (
+                float(raw_ts)
+                if isinstance(raw_ts, (int, float)) and not isinstance(raw_ts, bool)
+                else None
+            )
         if "last_model_session" in state:
             raw = state["last_model_session"]
             self._last_model_session = None if raw is None else str(raw)
@@ -6501,6 +6611,18 @@ def _is_work_idle(
     if output_activity.last_output_monotonic is None:
         return True
     return (now_monotonic - output_activity.last_output_monotonic) >= work_settle_seconds
+
+
+def _output_quiet_seconds(output_activity: OutputActivity, *, now_monotonic: float) -> float:
+    """Seconds since the child last produced output; 0.0 when none was seen yet.
+
+    Plan 00470 Task 2.3: unlike :func:`_is_work_idle` a child that has produced
+    nothing is NOT reported quiet, so the cron-expiry watchdog cannot fire on a
+    session whose output the supervisor never observed.
+    """
+    if output_activity.last_output_monotonic is None:
+        return 0.0
+    return max(0.0, now_monotonic - output_activity.last_output_monotonic)
 
 
 def _is_benign_not_red(reading: SidecarReading | None) -> bool:
@@ -7462,6 +7584,54 @@ def decide_once(
                 consume_signal_path = str(actions_path)
                 deferred_log = None
                 noop_reason_log = None
+    # ── Cron-expiry watchdog (Plan 00470 Task 2.3) ──────────────────────────
+    # LAST of the built-in families, below session-actions: it fires only on a
+    # tick nothing else claimed, after a long quiet spell, when every recorded
+    # cron job is past its seven-day expiry. The usage pause above has already
+    # returned for a paused session, so it never reaches here. Nothing is
+    # consumed (the trigger is a file the daemon owns), so the spacing rule --
+    # one prompt per quiet window -- and the cap keep it from repeating.
+    if (
+        payload is None
+        and evaluation.decision is Decision.NOOP
+        and signal_path is None
+        and machine.state is SupervisorState.MONITOR
+        and facts.output_quiet_seconds >= _CRON_WATCHDOG_QUIET_SECONDS
+        and (
+            machine.cron_reconcile_last_ts is None
+            or facts.now_wall - machine.cron_reconcile_last_ts >= _CRON_WATCHDOG_QUIET_SECONDS
+        )
+        and _cron_records_all_expired(sidecar_dir, now=facts.now_wall, own_sessions=own_sessions)
+    ):
+        if own_line_blocks_text:
+            noop_reason_log = (
+                f"{_NOOP_LOG_PREFIX}: cron-reconcile prompt pending but "
+                f"{_OWN_LINE_NOOP_PREFIX} still in the input box"
+            )
+        elif not can_inject:
+            if facts.idle and not facts.input_line_empty:
+                deferred_log = f"{_DEFERRED_LOG_PREFIX} (cron-reconcile prompt pending)"
+            else:
+                noop_reason_log = (
+                    f"{_NOOP_LOG_PREFIX}: cron-reconcile prompt pending but session busy"
+                )
+        elif machine.cron_reconcile_injections >= _MAX_CRON_RECONCILE_INJECTIONS:
+            noop_reason_log = f"{_NOOP_LOG_PREFIX}: cron-reconcile injection cap reached"
+        else:
+            decision_value = Decision.WOULD_CRON_RECONCILE.value
+            reason = (
+                "every recorded cron expired and the session is quiet -> would inject reconcile"
+            )
+            if dry_run:
+                payload = (
+                    f"{_format_bot_prefix(facts.now_wall)} "
+                    f"{_DRY_RUN_CRON_RECONCILE_BODY_PREFIX} {_render_cron_reconcile_message()}"
+                )
+            else:
+                payload = _render_cron_reconcile_message()
+            submit = True
+            deferred_log = None
+            noop_reason_log = None
     # ── Plugins (Plan 00487) ────────────────────────────────────────────────
     # LAST of everything: a plugin's `on_idle` is asked only when no built-in
     # family claimed the tick, i.e. the same gates as the families above plus
@@ -7633,6 +7803,8 @@ def _apply_post_injection_bookkeeping(
         machine.mark_standing_auth_injection()
     elif outcome.decision_value == Decision.WOULD_SESSION_ACTIONS.value:
         machine.mark_session_actions_injection()
+    elif outcome.decision_value == Decision.WOULD_CRON_RECONCILE.value:
+        machine.mark_cron_reconcile_injection(now_wall if now_wall is not None else time.time())
     elif outcome.decision_value == Decision.WOULD_PLUGIN_NOTICE.value:
         machine.mark_plugin_notice_injection()
     elif outcome.decision_value == Decision.WOULD_SESSION_NOTICE.value:
@@ -7678,6 +7850,7 @@ def _poll_once(
     on_input_line_flushed: Callable[[], None] | None = None,
     plugins: PluginRuntime | None = None,
     on_outcome: Callable[[TickOutcome], None] | None = None,
+    output_quiet_seconds: float = 0.0,
 ) -> Evaluation:
     """One in-process supervisor tick: decide (``decide_once``) then inject.
 
@@ -7706,6 +7879,7 @@ def _poll_once(
         human_compact_submitted=human_compact_submitted,
         work_idle=work_idle,
         input_line_abandoned=input_line_abandoned,
+        output_quiet_seconds=output_quiet_seconds,
     )
     outcome = decide_once(
         machine,
@@ -7756,6 +7930,7 @@ def _facts_to_json(facts: TickFacts) -> str:
             "machine_state": facts.machine_state,
             "tick_id": facts.tick_id,
             "input_line_abandoned": facts.input_line_abandoned,
+            "output_quiet_seconds": facts.output_quiet_seconds,
         }
     )
 
@@ -7773,6 +7948,7 @@ def _facts_from_json(line: str) -> TickFacts:
         machine_state=data.get("machine_state"),
         tick_id=int(data.get("tick_id", 0)),
         input_line_abandoned=bool(data.get("input_line_abandoned", False)),
+        output_quiet_seconds=float(data.get("output_quiet_seconds", 0.0)),
     )
 
 
@@ -9168,6 +9344,9 @@ def supervise(
             now_monotonic=now_monotonic,
             work_settle_seconds=work_settle_seconds,
         )
+        # Plan 00470 Task 2.3: how long the child has been silent, for the
+        # cron-expiry watchdog.
+        output_quiet_seconds = _output_quiet_seconds(output_activity, now_monotonic=now_monotonic)
         # Consume the human-/compact edge exactly once per tick so a human
         # compaction defers the supervisor's own, never suppresses it forever.
         human_compact = activity.take_compact_submitted()
@@ -9199,6 +9378,7 @@ def supervise(
                     # decides on it -- never on divergent worker-local state.
                     machine_state=machine.export_state(),
                     input_line_abandoned=input_line_abandoned,
+                    output_quiet_seconds=output_quiet_seconds,
                 )
             )
             transition = fallback_transitions.note(worker_answered=outcome is not None)
@@ -9269,6 +9449,7 @@ def supervise(
                 own_sessions=cached_own_session_ids(),  # Plan 00166: only our own sessions
                 goal_signal_ttl_seconds=policy.goal_signal_ttl_seconds,
                 input_line_abandoned=input_line_abandoned,
+                output_quiet_seconds=output_quiet_seconds,
                 on_input_line_flushed=activity.line.clear,
                 # NEVER a plugin runtime: this fallback runs in the PTY host
                 # process, and plugin code does not (Plan 00487).
