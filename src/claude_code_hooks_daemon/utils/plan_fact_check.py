@@ -3,11 +3,12 @@
 Plan 00480 Tasks 4.1/4.2. The ``plan_fact_check_feed`` handler feeds the
 debouncer; when a plan's edits go quiet, :func:`process_quiet_plan` runs.
 
-**Delivery boundary.** Who runs the fact check, and how its verdict reaches the
-session, is an open owner question (Plan 00480 open question 1). This module
-therefore does NO dispatch. It computes the diff since the last fact-checked
-content and stores it as a *pending fact-check* record
-(:class:`PendingFactCheck`) for a later task to deliver. Only delivery may call
+**Delivery.** The daemon runs no model (Plan 00480 open question 1, option a).
+The debounce fire (:func:`process_quiet_plan`) dispatches nothing: it computes
+the diff since the last fact-checked content and stores it as a *pending
+fact-check* record (:class:`PendingFactCheck`). The next hook event calls
+:func:`deliver_pending`, which hands the session an instruction to dispatch the
+``plan-fact-checker`` agent with that diff, once per record. Only delivery calls
 :meth:`PlanFactCheckState.record_checked`: firing never advances the
 "last checked" content, because nothing has been checked yet.
 
@@ -39,6 +40,8 @@ logger = logging.getLogger(__name__)
 STATE_SUBDIR: Final[str] = "plan-fact-check"
 CHECKED_SUFFIX: Final[str] = ".checked.json"
 PENDING_SUFFIX: Final[str] = ".pending.json"
+DIFF_SUFFIX: Final[str] = ".diff"
+FACT_CHECKER_AGENT: Final[str] = "plan-fact-checker"
 
 #: Directory names inside a plan folder whose files are never fact-checked.
 EXCLUDED_SEGMENTS: Final[frozenset[str]] = frozenset({"subagent-reports", "JOURNAL"})
@@ -135,6 +138,8 @@ class PendingFactCheck:
         diff: Unified diff since the last fact-checked content.
         trigger_count: Edits coalesced into the debounce fire.
         recorded_at: Wall-clock seconds when the record was stored.
+        plan_root: The plan folder on disk, so delivery can name its documents.
+        files: The plan content the diff leads to; becomes the checked content on delivery.
     """
 
     folder: str
@@ -142,6 +147,8 @@ class PendingFactCheck:
     diff: str
     trigger_count: int
     recorded_at: float
+    plan_root: str
+    files: dict[str, str]
 
 
 class PlanFactCheckState:
@@ -149,6 +156,11 @@ class PlanFactCheckState:
 
     def __init__(self, state_dir: Path) -> None:
         self._dir = state_dir
+
+    @property
+    def state_dir(self) -> Path:
+        """The directory holding every state file."""
+        return self._dir
 
     def _path(self, folder: str, suffix: str) -> Path:
         if "/" in folder or folder.startswith("."):
@@ -210,6 +222,9 @@ class PlanFactCheckState:
         if not path.is_file():
             return None
         data = self._read(path)
+        files = data.get("files")
+        if not isinstance(files, dict):
+            raise PlanFactCheckStateError(f"malformed pending state {path}: no files")
         try:
             return PendingFactCheck(
                 folder=str(data["folder"]),
@@ -217,6 +232,8 @@ class PlanFactCheckState:
                 diff=str(data["diff"]),
                 trigger_count=int(str(data["trigger_count"])),
                 recorded_at=float(str(data["recorded_at"])),
+                plan_root=str(data["plan_root"]),
+                files={str(k): str(v) for k, v in files.items()},
             )
         except (KeyError, ValueError) as exc:
             raise PlanFactCheckStateError(f"malformed pending state {path}: {exc}") from exc
@@ -224,6 +241,29 @@ class PlanFactCheckState:
     def store_pending(self, pending: PendingFactCheck) -> None:
         """Store (replacing any earlier) the pending fact-check for its plan."""
         self._write(self._path(pending.folder, PENDING_SUFFIX), asdict(pending))
+
+    def clear_pending(self, folder: str) -> None:
+        """Drop the pending fact-check of ``folder`` (it has been delivered)."""
+        self._path(folder, PENDING_SUFFIX).unlink(missing_ok=True)
+
+    def pending_folders(self) -> list[str]:
+        """Folders with an owed fact-check, sorted; cheap enough for every hook event."""
+        if not self._dir.is_dir():
+            return []
+        return sorted(
+            p.name.removesuffix(PENDING_SUFFIX) for p in self._dir.glob(f"*{PENDING_SUFFIX}")
+        )
+
+    def diff_path(self, folder: str) -> Path:
+        """Where the diff handed to the fact-checker agent is written."""
+        return self._path(folder, DIFF_SUFFIX)
+
+    def write_diff(self, folder: str, diff: str) -> Path:
+        """Write ``diff`` for the agent to read and return its path."""
+        path = self.diff_path(folder)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(diff, encoding="utf-8")
+        return path
 
 
 def process_quiet_plan(
@@ -263,6 +303,8 @@ def process_quiet_plan(
         diff=snapshot_diff(baseline, snapshot),
         trigger_count=trigger_count,
         recorded_at=now,
+        plan_root=str(plan_root),
+        files=snapshot,
     )
     state.store_pending(pending)
     logger.info(
@@ -271,3 +313,44 @@ def process_quiet_plan(
         trigger_count,
     )
     return pending
+
+
+def render_instruction(pending: PendingFactCheck, diff_path: Path) -> str:
+    """The work item handed to the session for one owed fact-check.
+
+    The daemon runs no model: it asks the session to dispatch the agent, and to
+    treat what comes back as work, not scenery.
+    """
+    plan_file = Path(pending.plan_root) / "PLAN.md"
+    return (
+        f"PLAN FACT-CHECK OWED for {pending.folder} "
+        f"({pending.trigger_count} edit(s) went quiet).\n"
+        f"Dispatch the `{FACT_CHECKER_AGENT}` agent now on `{plan_file}`, giving it the diff "
+        f"of what changed since the last checked content at `{diff_path}` "
+        "(it checks only the claims that diff adds or changes).\n"
+        "Treat every REFUTED claim in its report as work to fix, not background: for each, "
+        "name the claim, the evidence and the file, then correct the plan (or the code) "
+        "before you carry on. This is a report only; nothing is blocked."
+    )
+
+
+def deliver_pending(state: PlanFactCheckState) -> list[str]:
+    """Turn every owed fact-check into a session instruction, once each.
+
+    For each pending record: write its diff for the agent, record the plan
+    content as checked (firing alone never does), drop the record, and return
+    the rendered instruction.
+
+    Raises:
+        PlanFactCheckStateError: If a pending record is corrupt.
+    """
+    messages: list[str] = []
+    for folder in state.pending_folders():
+        pending = state.read_pending(folder)
+        if pending is None:
+            continue
+        diff_path = state.write_diff(folder, pending.diff)
+        state.record_checked(folder, pending.files)
+        state.clear_pending(folder)
+        messages.append(render_instruction(pending, diff_path))
+    return messages

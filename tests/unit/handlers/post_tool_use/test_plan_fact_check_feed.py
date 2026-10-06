@@ -1,4 +1,4 @@
-"""Tests for PlanFactCheckFeedHandler (Plan 00480 Task 4.1, Task 4.2 partial).
+"""Tests for PlanFactCheckFeedHandler (Plan 00480 Tasks 4.1 to 4.3).
 
 The debouncer is injected with a fake clock and an inline runner, so no test
 sleeps.
@@ -20,6 +20,9 @@ from claude_code_hooks_daemon.handlers.post_tool_use.plan_fact_check_feed import
     PlanFactCheckFeedHandler,
 )
 from claude_code_hooks_daemon.utils.plan_fact_check import PlanFactCheckState
+
+# matches() also looks for owed checks in the daemon untracked dir.
+pytestmark = pytest.mark.usefixtures("state_dir")
 
 
 class FakeClock:
@@ -219,6 +222,100 @@ class TestDebouncedFeed:
         # No delivery: the only artefact is the pending record in the state dir.
         files = sorted(p.name for p in (state_dir / "plan-fact-check").iterdir())
         assert files == ["00001-a.pending.json"]
+
+
+class TestDelivery:
+    """A pending fact-check is delivered to the session on the next hook event."""
+
+    def _fire(
+        self,
+        handler: PlanFactCheckFeedHandler,
+        debouncer: Debouncer,
+        clock: FakeClock,
+        tmp_path: Path,
+        text: str = "x\n",
+    ) -> None:
+        handler.handle(_write(_plan_file(tmp_path, "00001-a", text=text)))
+        clock.advance(6.0)
+        debouncer.run_due()
+
+    def test_next_unrelated_event_delivers_the_instruction(
+        self,
+        handler: PlanFactCheckFeedHandler,
+        debouncer: Debouncer,
+        clock: FakeClock,
+        state_dir: Path,
+        tmp_path: Path,
+    ) -> None:
+        self._fire(handler, debouncer, clock, tmp_path, "a false claim\n")
+        unrelated = {"tool_name": "Read", "tool_input": {"file_path": "/x"}}
+        assert handler.matches(unrelated) is True
+        result = handler.handle(unrelated)
+        assert result.decision == Decision.ALLOW
+        text = "\n".join(result.context)
+        assert "plan-fact-checker" in text
+        assert "00001-a" in text
+        assert "REFUTED" in text
+        diff_file = state_dir / "plan-fact-check" / "00001-a.diff"
+        assert str(diff_file) in text
+        assert "+a false claim" in diff_file.read_text(encoding="utf-8")
+
+    def test_each_pending_record_is_delivered_once(
+        self,
+        handler: PlanFactCheckFeedHandler,
+        debouncer: Debouncer,
+        clock: FakeClock,
+        state_dir: Path,
+        tmp_path: Path,
+    ) -> None:
+        self._fire(handler, debouncer, clock, tmp_path)
+        unrelated = {"tool_name": "Read", "tool_input": {"file_path": "/x"}}
+        assert handler.handle(unrelated).context
+        assert handler.matches(unrelated) is False
+        assert not handler.handle(unrelated).context
+
+    def test_delivery_advances_the_checked_content(
+        self,
+        handler: PlanFactCheckFeedHandler,
+        debouncer: Debouncer,
+        clock: FakeClock,
+        state_dir: Path,
+        tmp_path: Path,
+    ) -> None:
+        self._fire(handler, debouncer, clock, tmp_path)
+        state = PlanFactCheckState(state_dir / "plan-fact-check")
+        assert state.read_checked("00001-a") is None
+        handler.handle({"tool_name": "Read", "tool_input": {"file_path": "/x"}})
+        assert state.read_checked("00001-a") is not None
+
+    def test_a_plan_edit_event_also_delivers_an_earlier_pending_check(
+        self,
+        handler: PlanFactCheckFeedHandler,
+        debouncer: Debouncer,
+        clock: FakeClock,
+        state_dir: Path,
+        tmp_path: Path,
+    ) -> None:
+        self._fire(handler, debouncer, clock, tmp_path)
+        result = handler.handle(_write(_plan_file(tmp_path, "00001-a", text="more\n")))
+        assert result.decision == Decision.ALLOW
+        assert result.context
+        assert len(debouncer.pending()) == 1  # the new edit still feeds the debouncer
+
+    def test_corrupt_pending_record_never_blocks(
+        self, handler: PlanFactCheckFeedHandler, state_dir: Path
+    ) -> None:
+        folder = state_dir / "plan-fact-check"
+        folder.mkdir()
+        (folder / "00001-a.pending.json").write_text("{nope", encoding="utf-8")
+        result = handler.handle({"tool_name": "Read", "tool_input": {"file_path": "/x"}})
+        assert result.decision == Decision.ALLOW
+        assert not result.context
+
+    def test_no_state_dir_means_nothing_to_deliver(
+        self, handler: PlanFactCheckFeedHandler, state_dir: Path
+    ) -> None:
+        assert handler.matches({"tool_name": "Read", "tool_input": {"file_path": "/x"}}) is False
 
 
 class TestGuidance:

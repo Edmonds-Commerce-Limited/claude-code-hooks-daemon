@@ -1,7 +1,8 @@
 """Tests for the plan fact-check state and diff (Plan 00480 Tasks 4.1/4.2 partial).
 
 The debounced fire records NOTHING about delivery: it stores a "pending
-fact-check" record that a later task will deliver (owner open question 1).
+fact-check" record. :func:`deliver_pending` (run on the next hook event) turns
+each record into an instruction for the session, once.
 """
 
 from pathlib import Path
@@ -11,6 +12,7 @@ import pytest
 from claude_code_hooks_daemon.utils.plan_fact_check import (
     PlanFactCheckState,
     PlanFactCheckStateError,
+    deliver_pending,
     plan_folder_match,
     process_quiet_plan,
     snapshot_hash,
@@ -134,6 +136,64 @@ class TestProcessQuietPlan:
         missing = tmp_path / "CLAUDE" / "Plan" / FOLDER
         assert process_quiet_plan(missing, FOLDER, state, trigger_count=1, now=1.0) is None
         assert state.read_pending(FOLDER) is None
+
+
+class TestDelivery:
+    def _pending(self, tmp_path: Path, text: str = "claim\n") -> tuple[Path, PlanFactCheckState]:
+        root = _plan(tmp_path, {"PLAN.md": text})
+        state = PlanFactCheckState(tmp_path / "state")
+        process_quiet_plan(root, FOLDER, state, trigger_count=1, now=1.0)
+        return root, state
+
+    def test_pending_folders_lists_owed_checks(self, tmp_path: Path) -> None:
+        _, state = self._pending(tmp_path)
+        assert state.pending_folders() == [FOLDER]
+
+    def test_pending_folders_empty_without_state_dir(self, tmp_path: Path) -> None:
+        assert PlanFactCheckState(tmp_path / "nope").pending_folders() == []
+
+    def test_delivery_returns_instruction_naming_agent_plan_and_diff_file(
+        self, tmp_path: Path
+    ) -> None:
+        root, state = self._pending(tmp_path)
+        messages = deliver_pending(state)
+        assert len(messages) == 1
+        text = messages[0]
+        assert "plan-fact-checker" in text
+        assert str(root / "PLAN.md") in text
+        assert "REFUTED" in text
+        diff_file = tmp_path / "state" / f"{FOLDER}.diff"
+        assert str(diff_file) in text
+        assert "+claim" in diff_file.read_text(encoding="utf-8")
+
+    def test_delivery_records_checked_and_clears_pending(self, tmp_path: Path) -> None:
+        root, state = self._pending(tmp_path)
+        deliver_pending(state)
+        checked = state.read_checked(FOLDER)
+        assert checked is not None
+        assert checked.files == snapshot_plan(root)
+        assert state.read_pending(FOLDER) is None
+
+    def test_each_pending_record_is_delivered_once(self, tmp_path: Path) -> None:
+        _, state = self._pending(tmp_path)
+        assert len(deliver_pending(state)) == 1
+        assert deliver_pending(state) == []
+
+    def test_next_diff_is_since_the_delivered_content(self, tmp_path: Path) -> None:
+        root, state = self._pending(tmp_path, "old\n")
+        deliver_pending(state)
+        (root / "PLAN.md").write_text("old\nnew claim\n", encoding="utf-8")
+        process_quiet_plan(root, FOLDER, state, trigger_count=1, now=2.0)
+        deliver_pending(state)
+        diff = (tmp_path / "state" / f"{FOLDER}.diff").read_text(encoding="utf-8")
+        assert "+new claim" in diff
+        assert "+old" not in diff
+
+    def test_corrupt_pending_fails_loudly(self, tmp_path: Path) -> None:
+        state = PlanFactCheckState(tmp_path)
+        (tmp_path / f"{FOLDER}.pending.json").write_text("{nope", encoding="utf-8")
+        with pytest.raises(PlanFactCheckStateError):
+            deliver_pending(state)
 
 
 class TestCorruptState:
