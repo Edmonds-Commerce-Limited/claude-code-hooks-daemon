@@ -142,8 +142,8 @@ as principle 1.
   - **Delivery seen (2026-10-06)**: filing Plan 00495 produced "PLAN FACT-CHECK OWED for
     00495-performance-improvement-programme" in the session on the next PostToolUse. The path was correct and the
     diff file existed. The coordinator dispatched `plan-fact-checker` on it.
-  - **Remains**: the N359 path defects (worktree and archived-plan paths, whole-folder first diffs), then one more live
-    run free of them.
+  - **Remains**: the rest of N359 (worktree and archived-plan paths, whole-folder first diffs, and the earlier delivery
+    that was consumed unseen, which this run did not repeat), then one more live run free of them.
 
 ## Open questions for the owner
 
