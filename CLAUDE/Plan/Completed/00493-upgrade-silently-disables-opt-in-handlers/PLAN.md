@@ -1,6 +1,6 @@
 # Plan 00493: upgrade silently disables opt-in handlers
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-10-05
 **Owner**: dev
 **Priority**: High
@@ -135,9 +135,14 @@ already-upgraded clients is a short note, not a project.
 - [x] An upgrade from v3.67.0 on an `init minimal` fixture prints every
   handler that stops running, by name.
 - [x] `config_diff_summary` reflects real config changes.
-- [ ] The Task 1.3 regression test is green, and was red before Task 1.1.
-  (Green on the branch; the red run before Task 1.1 was not captured.)
+- [x] The Task 1.3 regression test is green, and was red before Task 1.1. Green on main at `accde1c23` (24 passed).
+  Red on `8c03dbdcd` (the parent of `3d696453b`) with only the test files added: the integration file failed 9 of 10.
+  The red is coarse: eight failures are the report logic being absent from `upgrade.sh`, which is the defect itself,
+  and one is behavioural (the script read the bare `.backup` path it never wrote, the cause of the "no config
+  changes" summary). The unit file cannot import the new symbol there, so it proves nothing pre-fix.
 - [x] The client remedy note is published.
+- [x] The release-bound consequence is in the holding area:
+  `CLAUDE/UPGRADES/UNRELEASED/release-notes/026-the-upgrade-names-the-handlers-it-stops-running.md`.
 
 ## Delivery & Milestones
 

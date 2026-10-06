@@ -4,6 +4,8 @@ Plans older than the 30 highest-numbered completed plans (see [../README.md](../
 
 ## Completed Plans (Archive)
 
+- [00434: dedupe scout count checked externally](00434-dedupe-scout-count-checked-externally/PLAN.md) - Complete at `e4429677` + `408cc759` + the archiving commit (from 00422 N13: the scout's `Checked N live plans.` could only be reconciled against the enumeration that went wrong, so `mkplan.bash` states the count instead; its step 3b also named a shell grep it has no Bash tool to run)
+
 - [00433: setup worktree refuses to nest](00433-setup-worktree-refuses-to-nest/PLAN.md) - Complete at `ba7192b9` + the archiving commit (from 00422 N9: an agent already isolated in a worktree ran the copy of the setup script sitting right there, nesting a second one under it)
 
 - [00432: scoped qa scan overwrites repo artefact](00432-scoped-qa-scan-overwrites-repo-artefact/PLAN.md) - Complete at the delivery-and-archiving commit (from 00422 N10: seven checkers wrote this repository's published artefact even when pointed elsewhere, so a full run left three of them describing a pytest fixture)

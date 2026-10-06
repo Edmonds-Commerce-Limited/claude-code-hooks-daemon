@@ -4,8 +4,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
-- [00493: upgrade silently disables opt-in handlers](00493-upgrade-silently-disables-opt-in-handlers/PLAN.md) - In Progress (client report: v3.67.0 to v3.68.0 drops opt-in handlers a config does not name, per N55's absent-block rule, with no per-project report; loud effective-set delta on upgrade, fix the always-"no config changes" summary, regression test, client remedy note)
-
 - [00491: code quality and architecture review](00491-code-quality-and-architecture-review/PLAN.md) - Not Started (owner ruling B5: a read-only review of module size, DRY, architecture and code quality, then owner-chosen refactoring; N314 folds in)
 
 - [00489: supervisor in-container restart primitive](00489-supervisor-in-container-restart-primitive/PLAN.md) - Not Started (owner decision D2 in Plan 00487, #71: 00487's Tasks 1.4 and 1.5, the in-container `Restart` and the host-half `before_spawn` that the fedora-desktop 00146 credential switch needs)
@@ -191,6 +189,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Completed Plans
 
+- [00493: upgrade silently disables opt-in handlers](Completed/00493-upgrade-silently-disables-opt-in-handlers/PLAN.md) - Complete at `3d696453b`, merged `4030e688f` + the archiving commit (client report: the v3.68.0 upgrade dropped unnamed opt-in handlers silently; the upgrade now names every handler it stops or starts, prints the restore snippet and the from-to version, and the config diff summary finds the real backup; auto-restore stays an owner question)
+
 - [00486: Claude Code version tracking](Completed/00486-claude-code-version-tracking/PLAN.md) - Complete at `af0237910` + `b9e01a690` + `4d507be1a` + the archiving commit (owner request: each release records the Claude Code version it was built against, RELEASING.md Step 1c reviews the changelog per release, and `contract_staleness` advises once on a newer running version; backfill findings are 00474 N330–N337)
 
 - [00492: docs fake values registry](Completed/00492-docs-fake-values-registry/PLAN.md) - Complete at `f6cb38ee0` + the QA fix-up + the archiving commit (owner ruling D1: one registry of approved fake values for docs, `.claude/fake-values.yaml`; an `unlisted-fake-value` docs QA check, a sensitive-content allowance for listed fakes only, and remote-docs swaps recorded in provenance as `value_swaps`; settles N309 and unblocks 00479 Task 1.1 and 00486 Task 1.3)
@@ -249,8 +249,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00435: priority band table contradicts shipped handlers](Completed/00435-priority-band-table-contradicts-shipped-handlers/PLAN.md) - Complete at `96577149` + the archiving commit (from 00422 N5 rows (a) and (d): the documented 0-9 band said no built-in ships there while three Stop-family handlers must sit there to be reachable at all, and the Advisory row read 56-69 against an ADVISORY_MAX of 73 — a test now compares the table with the constants it cites)
 
-- [00434: dedupe scout count checked externally](Completed/00434-dedupe-scout-count-checked-externally/PLAN.md) - Complete at `e4429677` + `408cc759` + the archiving commit (from 00422 N13: the scout's `Checked N live plans.` could only be reconciled against the enumeration that went wrong, so `mkplan.bash` states the count instead; its step 3b also named a shell grep it has no Bash tool to run)
-
 Older completed plans (below the retention window of the 30 highest-numbered) are archived verbatim in [Completed/README.md](Completed/README.md).
 
 ## Blocked / On Hold Plans
@@ -304,9 +302,9 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 - **Total Plans Created**: 493 (count = `hooksdaemon.latestPlanNumber` git counter)
 
-- **Completed**: 419 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
+- **Completed**: 420 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 51 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 50 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 
