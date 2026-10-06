@@ -67,6 +67,12 @@ The live test found that `--max-age`, `--run-for` and `--until` get through ever
   - C: change the hooks daemon's `ccy.env` line to name `claude-supervise.py` instead. This is not recommended: it drops the launcher's Python-version guard in every client.
 - **Recommendation:** A or B. Until it ships, `ccy --supervise` is the workaround.
 - **Answer:** (open)
+- **Outcome (coordinator, from the fedora-desktop reference clone, 2026-10-06):** option B happened. The host agent's
+  report handed the fix to a fedora-desktop session, and F44 now carries it as ccy 3.82.1 / container 2.44 (merge
+  `244bd7c9`, from commit `a6401a8f`, not the branch's `3850bc28`). The entrypoint accepts both wrapper forms. The
+  branch `fix/ccy-lifecycle-daemon-launcher` is superseded. What is left for the owner is a host on ccy 3.82.1 or
+  later (`ccy --version`). Evidence:
+  [261006-plan-fact-checker-fedora-desktop-sonnet.md](subagent-reports/261006-plan-fact-checker-fedora-desktop-sonnet.md).
 
 ## D5. How the branch gets deployed for the live test (raised by the host agent)
 

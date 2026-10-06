@@ -1414,6 +1414,19 @@ The uncertain-move union judges the hook directory and the LAST recorded move (`
 every candidate directory (`sub`). Remedy: judge every directory any `cd` in the chain could
 land in.
 
+### N368 — the plan fact-checker marked claims unverifiable while the reference clone that settles them was on disk
+
+**Found**: by the owner, 2026-10-06. A fact-check of Plan 00487's live-test checklist reported 7 claims about ccy and
+fedora-desktop as UNVERIFIABLE-HERE, saying there was no fedora-desktop clone under `untracked/`. The governed
+reference clone was at `untracked/repos/fedora-desktop` all along. A re-check against it verified all 7 and REFUTED 2
+more: F1 was already fixed on F44 in ccy 3.82.1, so the checklist was telling the owner to use a superseded branch.
+
+**Fix**: the `plan-fact-checker` agent definition should list the governed reference clones (from the
+`reference_repos` config) and require a claim about an external repository to be checked there before it is
+called unverifiable. The coordinator should name the clone in the dispatch too.
+
+**Status**: ⬜ Open.
+
 ### N367 — the coordinator's branch-QA venv recipe installs off-lock tool versions, so three tests fail falsely
 
 **Found**: by the coordinator, 2026-10-06, in B2's uncapped test run (4 failed, 8469 passed). The recipe it uses to give
