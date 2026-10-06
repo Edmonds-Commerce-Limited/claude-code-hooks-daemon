@@ -41,7 +41,7 @@ from typing import TYPE_CHECKING
 
 from claude_code_hooks_daemon.utils.secret_redaction import find_first_match_index
 
-if TYPE_CHECKING:  # pragma: no cover - types only; a runtime import would cycle
+if TYPE_CHECKING:
     from claude_code_hooks_daemon.issue_report.assemble import ReportFields
 
 

@@ -303,7 +303,7 @@ class TestShellAssetsAreCleanUnderShellcheckDefaults:
 
     def test_shell_assets_are_clean(self) -> None:
         """Every deployed shell asset passes shellcheck with no rc."""
-        if not shutil.which(_SHELLCHECK_BINARY):  # pragma: no cover - reported above
+        if not shutil.which(_SHELLCHECK_BINARY):
             pytest.fail(f"{_SHELLCHECK_BINARY} missing; see test_shellcheck_is_available")
 
         paths = [path for _asset, path in _assets_for(AssetLanguage.SHELL)]

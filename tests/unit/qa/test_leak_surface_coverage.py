@@ -275,7 +275,7 @@ def _contaminate(repo: Path, surface: str) -> None:
         _git(repo, "tag", "-a", "v1.0.0", "-m", f"ships {_TERM}")
     elif surface == "branch-name":
         _git(repo, "branch", f"{_TERM}-work")
-    else:  # pragma: no cover - a new surface with no fixture must fail loudly
+    else:
         raise AssertionError(
             f"No contamination fixture for surface '{surface}'. A surface added to "
             "_GIT_SURFACES without one would otherwise pass by doing nothing."
