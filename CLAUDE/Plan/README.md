@@ -8,7 +8,7 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00495: performance improvement programme](00495-performance-improvement-programme/PLAN.md) - In Progress (owner report: daemon startup and the status bar at session start got much slower; profile current main against earlier releases, fix the ranked causes, add a regression guard, and re-answer the Rust question from new numbers)
 
-- [00494: Claude Code mods review](00494-claude-code-mods-review/PLAN.md) - In Progress (owner request: vendor every upstream doc on Claude Code's new mod feature, review it, and brainstorm which of this repository's responsibilities would be better served by, or complemented with, a mod)
+- [00497: hooks daemon mod](00497-hooks-daemon-mod/PLAN.md) - Not Started (owner-approved build from Plan 00494: daemon mod awareness with an exceptionally loud warning, a human task and question queue, one mod deployed by install and upgrade, suggested prompts, SessionStart messages, then session resilience)
 
 - [00491: code quality and architecture review](00491-code-quality-and-architecture-review/PLAN.md) - Not Started (owner ruling B5: a read-only review of module size, DRY, architecture and code quality, then owner-chosen refactoring; N314 folds in)
 
@@ -195,6 +195,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Completed Plans
 
+- [00494: Claude Code mods review](Completed/00494-claude-code-mods-review/PLAN.md) - Complete at `f794f4cd1` + the archiving commit (owner request: 21 mod docs vendored, an Opus review and brainstorm, then a one-mod proposal the owner approved with its build order and deployment route; the build is Plan 00497)
+
 - [00493: upgrade silently disables opt-in handlers](Completed/00493-upgrade-silently-disables-opt-in-handlers/PLAN.md) - Complete at `3d696453b`, merged `4030e688f` + the archiving commit (client report: the v3.68.0 upgrade dropped unnamed opt-in handlers silently; the upgrade now names every handler it stops or starts, prints the restore snippet and the from-to version, and the config diff summary finds the real backup; auto-restore stays an owner question)
 
 - [00486: Claude Code version tracking](Completed/00486-claude-code-version-tracking/PLAN.md) - Complete at `af0237910` + `b9e01a690` + `4d507be1a` + the archiving commit (owner request: each release records the Claude Code version it was built against, RELEASING.md Step 1c reviews the changelog per release, and `contract_staleness` advises once on a newer running version; backfill findings are 00474 N330–N337)
@@ -253,8 +255,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00436: empty truncated cron prompt matches anything](Completed/00436-empty-truncated-cron-prompt-matches-anything/PLAN.md) - Complete at `0e4c2d11` + the archiving commit (from 00422 N5 row (g): a delivered cron prompt that is nothing but a truncation marker strips to an empty prefix, which every declaration starts with, so a cron that was never created was reported as live)
 
-- [00435: priority band table contradicts shipped handlers](Completed/00435-priority-band-table-contradicts-shipped-handlers/PLAN.md) - Complete at `96577149` + the archiving commit (from 00422 N5 rows (a) and (d): the documented 0-9 band said no built-in ships there while three Stop-family handlers must sit there to be reachable at all, and the Advisory row read 56-69 against an ADVISORY_MAX of 73 — a test now compares the table with the constants it cites)
-
 Older completed plans (below the retention window of the 30 highest-numbered) are archived verbatim in [Completed/README.md](Completed/README.md).
 
 ## Blocked / On Hold Plans
@@ -306,9 +306,9 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 ## Plan Statistics
 
-- **Total Plans Created**: 496 (count = `hooksdaemon.latestPlanNumber` git counter)
+- **Total Plans Created**: 497 (count = `hooksdaemon.latestPlanNumber` git counter)
 
-- **Completed**: 420 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
+- **Completed**: 421 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
 - **Active**: 53 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 

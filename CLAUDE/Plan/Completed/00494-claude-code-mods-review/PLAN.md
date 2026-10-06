@@ -1,6 +1,6 @@
 # Plan 00494: Claude Code mods review
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-10-06
 **Owner**: dev
 **Priority**: Medium
@@ -48,7 +48,7 @@ relate to hooks, plugins, skills, agents and settings.
 ### Phase 2: Owner decision
 
 - [x] ✅ **Task 2.1**: The owner's choice (2026-10-06, A2 of
-  [OWNER-RULINGS-261006.md](../00483-threat-model-conformance-audit/OWNER-RULINGS-261006.md)):
+  [OWNER-RULINGS-261006.md](../../00483-threat-model-conformance-audit/OWNER-RULINGS-261006.md)):
   - **Approved:** daemon mod awareness, with an exceptionally loud warning for mods that can interfere with hooks.
   - **One mod only:** a single hooks-daemon mod carrying several features, never several mods.
   - **New candidates:** a user to-do and question list in the sidebar, and SessionStart messages.
@@ -58,15 +58,17 @@ relate to hooks, plugins, skills, agents and settings.
   SessionStart messages, session resilience, and a concrete spec for daemon mod awareness. It also answers the owner's
   question of how mods are updated and how projects are kept on the right mod version. Report:
   `subagent-reports/261006-hooks-daemon-mod-proposal-opus.md`.
-- [ ] ⬜ **Task 2.3**: Build daemon mod awareness (approved), TDD, from the Task 2.2 spec.
-- [ ] ⬜ **Task 2.4**: Put the Task 2.2 proposal to the owner; file a build plan for the mod features chosen. Put to
-  the owner on 2026-10-06; waiting on the choice.
+- [x] ✅ **Task 2.3**: Build daemon mod awareness (approved), TDD, from the Task 2.2 spec. Moved to
+  [Plan 00497](../../00497-hooks-daemon-mod/PLAN.md) Task 1.1, so the whole build lives in one plan.
+- [x] ✅ **Task 2.4**: Put the Task 2.2 proposal to the owner; file a build plan for the mod features chosen. The owner
+  approved the design, the build order and the deployment route on 2026-10-06, and added suggested prompts. Build plan:
+  [Plan 00497](../../00497-hooks-daemon-mod/PLAN.md).
 
 ## Success Criteria
 
 - [x] All reachable mod docs are vendored with valid provenance.
-- [ ] The review and the brainstorm are written, cite the vendored pages, and have reached the owner.
-- [ ] The owner has chosen which candidates to pursue, and each chosen one has a plan or ledger entry.
+- [x] The review and the brainstorm are written, cite the vendored pages, and have reached the owner.
+- [x] The owner has chosen which candidates to pursue, and each chosen one has a plan or ledger entry (Plan 00497).
 
 ## Delivery & Milestones
 
