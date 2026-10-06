@@ -56,9 +56,10 @@ def test_remote_ref_deletion_is_denied(handler: DestructiveGitHandler, command: 
 def test_the_denial_says_a_human_runs_it_and_offers_no_hatch(
     handler: DestructiveGitHandler,
 ) -> None:
-    result = handler.handle(_bash("git push origin --delete feature"))
-    assert "ask the human" in result.reason.lower()
-    assert "MUST_" not in result.reason
+    reason = handler.handle(_bash("git push origin --delete feature")).reason
+    assert reason is not None
+    assert "ask the human" in reason.lower()
+    assert "MUST_" not in reason
 
 
 def test_the_force_push_rule_still_wins_when_both_apply(handler: DestructiveGitHandler) -> None:

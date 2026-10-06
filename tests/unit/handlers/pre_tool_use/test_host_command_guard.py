@@ -33,6 +33,13 @@ def _bash(command: str) -> dict[str, Any]:
     return {"tool_name": "Bash", "tool_input": {"command": command}}
 
 
+def _reason(handler: HostCommandGuardHandler, hook_input: dict[str, Any]) -> str:
+    """The deny reason; fails when the call is not a denial carrying one."""
+    result = handler.handle(hook_input)
+    assert result.reason is not None
+    return result.reason
+
+
 def _denied_rule(handler: HostCommandGuardHandler, command: str) -> str:
     """The rule id the denial names; fails when the command is not denied."""
     hook_input = _bash(command)
@@ -117,7 +124,7 @@ class TestDockerHostRootMount:
         assert handler.matches(_bash(command)) is False
 
     def test_the_denial_names_the_alternative(self, handler: HostCommandGuardHandler) -> None:
-        reason = handler.handle(_bash("docker run -v /:/host alpine")).reason
+        reason = _reason(handler, _bash("docker run -v /:/host alpine"))
         assert "specific directory" in reason
         assert "ask the human" not in reason.lower()
 
@@ -163,7 +170,7 @@ class TestGhAuthToken:
         assert handler.matches(_bash(command)) is False
 
     def test_the_denial_points_at_gh_auth_status(self, handler: HostCommandGuardHandler) -> None:
-        assert "gh auth status" in handler.handle(_bash("gh auth token")).reason
+        assert "gh auth status" in _reason(handler, _bash("gh auth token"))
 
 
 class TestPipNonPypiIndex:
@@ -220,7 +227,7 @@ class TestPipNonPypiIndex:
         assert handler.matches(_bash(command)) is False
 
     def test_the_denial_is_human_only_with_no_hatch(self, handler: HostCommandGuardHandler) -> None:
-        reason = handler.handle(_bash("pip install -i https://mirror.example/simple y")).reason
+        reason = _reason(handler, _bash("pip install -i https://mirror.example/simple y"))
         assert "ask the human" in reason.lower()
         assert "MUST_" not in reason
 
@@ -263,7 +270,7 @@ class TestCrontabRemove:
         assert handler.matches(_bash(command)) is False
 
     def test_the_denial_is_human_only_with_no_hatch(self, handler: HostCommandGuardHandler) -> None:
-        reason = handler.handle(_bash("crontab -r")).reason
+        reason = _reason(handler, _bash("crontab -r"))
         assert "ask the human" in reason.lower()
         assert "MUST_" not in reason
 
@@ -289,8 +296,8 @@ class TestDisclosureAndDocs:
     def test_a_repeat_fire_is_terse(self, handler: HostCommandGuardHandler) -> None:
         hook_input = _bash("crontab -r")
         hook_input["transcript_path"] = "/tmp/host-command-guard-transcript.jsonl"
-        first = handler.handle(hook_input).reason
-        second = handler.handle(hook_input).reason
+        first = _reason(handler, hook_input)
+        second = _reason(handler, hook_input)
         assert len(second) < len(first)
         assert RuleID.CRONTAB_REMOVE in second
 
