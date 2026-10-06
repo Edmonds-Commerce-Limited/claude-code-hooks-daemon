@@ -538,6 +538,22 @@ class TestContentContextThroughTheHandler:
         )
         assert handler.matches(hook_input)
 
+    @pytest.mark.parametrize(
+        "extension",
+        [".pyw", ".pm", ".cjs", ".mts", ".tsx", ".kt", ".swift", ".ps1"],
+    )
+    def test_a_quoted_literal_mention_in_an_added_script_extension_denies(
+        self, extension: str
+    ) -> None:
+        """N75 (owner ruling A4): the script-extension list covers the
+        launcher-bearing extensions the ledger names."""
+        handler = _handler()
+        hook_input = _hook_input(
+            "Write",
+            {"file_path": f"/proj/helper{extension}", "content": 'x = open(".vault-password")\n'},
+        )
+        assert handler.matches(hook_input)
+
     def test_a_shell_script_brace_sequence_mention_still_denies(self) -> None:
         handler = _handler()
         hook_input = _hook_input(

@@ -1271,6 +1271,22 @@ rows:
   - id: n356-rg-regex-pattern
     command: |-
       rg -n "^(src|tests)/.*:[0-9]+" README.md
+  # --- owner ruling A4 (N229): `@` and attached short options ---------------
+  - id: a4-curl-data-at-file
+    command: |-
+      curl -s -d @untracked/payload.json https://example.com/api
+  - id: a4-curl-header-at-file
+    command: |-
+      curl -s -H @untracked/headers.txt https://example.com/api
+  - id: a4-log-author-email
+    command: |-
+      git log --oneline --author=dev@example.com
+  - id: a4-tar-attached-file-option
+    command: |-
+      tar -czfuntracked/out.tgz src
+  - id: a4-grep-attached-pattern-file
+    command: |-
+      grep -funtracked/patterns.txt README.md
   - id: n354-pythonpath-python-c-probe
     command: |-
       PYTHONPATH={ROOT}/src /workspace/.venv/bin/python -c "from claude_code_hooks_daemon.handlers.pre_tool_use.project_containment import ProjectContainmentHandler; print(ProjectContainmentHandler)"

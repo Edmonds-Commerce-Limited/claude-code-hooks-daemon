@@ -351,7 +351,7 @@ Six of them failed only because `_literal_shell_words` did not exist yet.
 
 ### N229 — The consumer exemption skipped every word starting with `-`, so a path inside an option value was never judged
 
-**Status on the branch**: ✅ Remedied. **On main**: ⬜ Open: in-scope defect (Plan 00483 triage, see TRIAGE-carried-a.md)
+**Status on the branch**: ✅ Remedied. **On main**: ✅ Narrowed under owner ruling A4 (commit ebaa51151): a leading `@` and a short option's attached value are now read as the path they carry; the full remedy above is dropped
 
 **Found:** Plan 00421 review 5, D-RULE check: SH3 (shared with main) and B1
 (this branch's snapshot floor).
