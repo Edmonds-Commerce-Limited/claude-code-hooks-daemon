@@ -46,7 +46,7 @@ Nothing in this checklist can run inside a ccy container: it needs the host, an 
 
 - [ ] Each of these fails before any prompt, with an example of the right form: `--max-age 3days`, `--until 25:00`, `--run-for 2h --until 17:30` and `--max-age 3d --no-supervise`.
 - [ ] `ccy --max-age 3d` in a project whose hooks daemon predates the plugin API (any project other than this one, until a release carries it) fails before any prompt and says to upgrade the hooks daemon. It must not reach the container's argparse error.
-- [ ] Restart budget: force more restart requests than `CCY_RESTART_MAX` allows inside `CCY_RESTART_WINDOW_SECONDS`, for example with a short `--max-age`. It is only reachable inside the 30-minute minimum age with `CCY_RESTART_MAX` lowered (for example to 1). The request over the budget stops with the budget message and the manual `ccy --resume <id>` command. The refused relaunch leaves `restarted.json` behind; the supervisor clears it after a day, and it does no harm.
+- [ ] Restart budget: force more restart requests than `CCY_RESTART_MAX` allows inside `CCY_RESTART_WINDOW_SECONDS`, for example with a short `--max-age`. It is only reachable inside the 30-minute minimum age with `CCY_RESTART_MAX` lowered (for example to 1). The request over the budget stops with the budget message and the manual `ccy --resume <id>` command. The refused relaunch leaves `restarted.json` behind; the supervisor removes it at the next launch once it is over a day old, and it does no harm.
 - [ ] Hand-written requests: an exit 75 with no request file, or with a malformed one, behaves as before and says so on stderr. A malformed file is discarded.
 
 ## 5. A plugin cannot take the session down (supervisor side)
