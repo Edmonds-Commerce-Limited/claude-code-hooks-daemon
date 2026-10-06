@@ -1459,7 +1459,7 @@ No open issue had two assignees when this was recorded, so the fix is prevention
 
 Test each case through `issue-validity` and the guard.
 
-**Status**: Fixed on branch agent-a39b84caa49481833-8f3c52ec at HASH_PLACEHOLDER.
+**Status**: Fixed on branch agent-a39b84caa49481833-8f3c52ec at 88f41369e.
 
 ### N365 — an `[awaiting-human]` token quoted inside a fenced block is read as the stop's own declaration
 
