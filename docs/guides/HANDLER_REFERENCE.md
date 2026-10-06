@@ -1306,7 +1306,7 @@ handlers:
 
 **What counts as PyPI:** `https://pypi.org/...` and `https://files.pythonhosted.org/...` only. `test.pypi.org`, plain `http://`, `file://` and every other host are not PyPI. `pip install -r requirements.txt` and an index held in a variable are not judged.
 
-**`gh auth token` in a pipe or `$(...)`** (`gh auth token | docker login --password-stdin`, `TOKEN=$(gh auth token)`) hands the value to another command rather than the transcript, and is allowed. Inside `echo`/`printf` it is printed, and denied.
+**`gh auth token` in a pipe or `$(...)`** (`gh auth token | docker login --password-stdin`, `TOKEN=$(gh auth token)`) hands the value to another command rather than the transcript, and is allowed. A consumer that prints its input (`echo`, `printf`, `cat`, `tee`, `head`, `tail`, `grep`, `sort`, `xargs echo`...) puts it in the transcript, and is denied. A receiver that cannot be identified (a variable) is allowed.
 
 **Always allowed (owner ruling A6):** `git tag -d`, `git reset --keep`, `truncate -s 0`, `rm -rf`. Remote ref deletion (`git push --delete`) is human-only under [`destructive_git`](#destructive_git).
 

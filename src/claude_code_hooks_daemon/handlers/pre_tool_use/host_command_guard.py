@@ -65,6 +65,14 @@ _VOLUME_OPTIONS: Final[frozenset[str]] = frozenset({"-v", "--volume"})
 _MOUNT_OPTION: Final[str] = "--mount"
 _MOUNT_SOURCE_KEYS: Final[frozenset[str]] = frozenset({"source", "src"})
 
+#: Commands that show their input or arguments, so a token fed to one reaches the
+#: transcript. ``DATA_HEADS`` (echo, printf, grep, rg...) plus the pagers, filters and
+#: copiers that pass text through to stdout.
+PRINTING_COMMANDS: Final[frozenset[str]] = DATA_HEADS | frozenset(
+    {"cat", "tac", "tee", "head", "tail", "less", "more", "sort", "uniq", "tr", "cut", "awk"}
+)
+_XARGS: Final[str] = "xargs"
+
 _GH: Final[str] = "gh"
 _GH_AUTH_TOKEN: Final[tuple[str, str]] = ("auth", "token")
 
@@ -274,22 +282,34 @@ def _crontab_remove(arguments: Sequence[str]) -> bool:
     )
 
 
+def _prints_its_input(program: str, arguments: Sequence[str]) -> bool:
+    """Whether a command shows what it is given: ``cat``, ``tee``, ``head``, ``xargs echo``..."""
+    if program == _XARGS:
+        operands = [argument for argument in arguments if not argument.startswith(_SHORT_PREFIX)]
+        # `xargs` with no command runs `echo`.
+        return not operands or operands[0] in PRINTING_COMMANDS
+    return program in PRINTING_COMMANDS
+
+
 def _token_is_consumed(steps: Sequence[SimpleCommand], index: int) -> bool:
-    """Whether the ``gh auth token`` at ``steps[index]`` feeds another command.
+    """Whether the ``gh auth token`` at ``steps[index]`` feeds a command that does not print it.
 
     Piped on (``gh auth token | docker login --password-stdin``) or substituted into
     one (``TOKEN=$(gh auth token)``) the value reaches a consumer, not the transcript.
-    A substitution inside ``echo``/``printf`` prints it, so that is still a finding.
+    A consumer that prints its input (``| cat``, ``| tee f``, ``| head -c 50``,
+    ``echo $(...)``) still puts it there, so that is a finding. A receiver this
+    reading cannot identify (a variable) is not a finding (owner ruling A1).
     """
     if index + 1 < len(steps) and steps[index + 1].operator == _PIPE:
-        return True
+        receiver = _program(steps[index + 1].words)
+        return receiver is None or not _prints_its_input(*receiver)
     if index == 0 or steps[index].operator:
         return False
     before = steps[index - 1].words
     if not before or not before[-1].endswith(_ENDS_IN_SUBSTITUTION):
         return False
     owner = _program(before)
-    return owner is None or owner[0] not in DATA_HEADS
+    return owner is None or not _prints_its_input(*owner)
 
 
 def _check_step(program: str, arguments: list[str]) -> str | None:
@@ -380,8 +400,9 @@ class HostCommandGuardHandler(PreToolUseHandlerBase):
             "`--mount type=bind,source=/,…`, `docker create`) | Mount only the directory "
             'needed: `-v "$PWD":/app` |\n'
             f"| {RuleID.GH_AUTH_TOKEN} | `gh auth token` | Prints the token into the "
-            "transcript. Use `gh auth status`; a pipe or `$(...)` that hands it to another "
-            "command is allowed |\n"
+            "transcript. Use `gh auth status`; a pipe or `$(...)` that hands it to a command that "
+            "does not print it (`| docker login --password-stdin`) is allowed; `| cat`, "
+            "`| tee`, `| head` and `echo $(...)` print it and are denied |\n"
             f"| {RuleID.PIP_NON_PYPI_INDEX} | `pip install --index-url <url>` / `-i` / "
             "`--extra-index-url` naming a non-PyPI index | HUMAN ONLY: stop and ask the "
             "human to run it |\n"

@@ -1208,6 +1208,9 @@ rows:
   - id: a6-gh-token-piped-to-login
     command: |-
       gh auth token | docker login ghcr.io -u me --password-stdin
+  - id: a6-gh-token-piped-to-gh-login
+    command: |-
+      gh auth token | gh auth login --with-token
   - id: a6-pip-requirements
     command: |-
       pip install -r requirements.txt
