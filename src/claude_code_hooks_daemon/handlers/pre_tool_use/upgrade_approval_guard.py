@@ -849,6 +849,28 @@ def _segment_runs_upgrade(segment: str, cwd: str | None, depth: int, *, steered:
     return False
 
 
+def _inline_program_is_upgrade(arguments: list[str], index: int, *, steered: bool) -> bool:
+    """Whether the `-c` program at ``arguments[index]`` (the flag) runs the upgrade
+    (ledger 00474 N354).
+
+    A literal program is text this handler can read: it runs the upgrade only
+    if it names one of the upgrade's own entry points or arguments, exactly the
+    signals every other branch requires. A program with no text, or one the
+    shell expands (`$CODE`, a backtick), cannot be read, and stays "cannot
+    tell", which counts as the upgrade once something steers.
+    """
+    flag = arguments[index]
+    attached = flag[flag.index("c") + 1 :]
+    following = arguments[index + 1] if index + 1 < len(arguments) else ""
+    program = f"{attached} {following}".strip()
+    if not program or "$" in program or "`" in program:
+        return _cannot_tell_script(arguments, steered=steered)
+    return (
+        _UPGRADE_ENTRY_RE.search(program) is not None
+        or _UPGRADE_SHAPED_ARG_RE.search(program) is not None
+    )
+
+
 def _variable_program_is_upgrade(arguments: list[str], cwd: str | None, *, steered: bool) -> bool:
     """Whether a command whose program is a variable (`$PY`, `$PY/python`)
     runs the upgrade, judged by what its ARGUMENTS name (ledger 00474 N285).
@@ -863,7 +885,9 @@ def _variable_program_is_upgrade(arguments: list[str], cwd: str | None, *, steer
     index = 0
     while index < len(arguments) and arguments[index].startswith("-"):
         flag = arguments[index]
-        if flag in ("-", "--") or ("c" in flag[1:] and not flag.startswith("--")):
+        if "c" in flag[1:] and not flag.startswith("--"):
+            return _inline_program_is_upgrade(arguments, index, steered=steered)
+        if flag in ("-", "--"):
             return _cannot_tell_script(arguments, steered=steered)
         if flag == "-m":
             module = arguments[index + 1] if index + 1 < len(arguments) else ""

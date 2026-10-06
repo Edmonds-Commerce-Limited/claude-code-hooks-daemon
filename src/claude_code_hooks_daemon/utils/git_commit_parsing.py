@@ -950,9 +950,17 @@ _SUBSHELL_CHARS: Final[str] = "()"
 
 _Step = tuple[list[str], tuple[str | None, ...], bool, str]
 
+#: How many levels of ``eval``/``sh -c`` strings are inlined. Each level re-lexes
+#: the whole remaining text, so unbounded nesting costs quadratic time; past the
+#: cap the command is kept as one ordinary step and its body goes unjudged.
+MAX_EVAL_NESTING: Final[int] = 4
+
 
 def _walk(
-    words: list[str], directory: tuple[str | None, ...], uncertain: bool = False
+    words: list[str],
+    directory: tuple[str | None, ...],
+    uncertain: bool = False,
+    depth: int = 0,
 ) -> list[_Step]:
     """The simple commands of ``words``: ``(segment, directory, uncertain, operator)``.
 
@@ -989,9 +997,9 @@ def _walk(
         if moved != directory and previous_operator in _MOVE_DOUBTING_PRECEDING_OPERATORS:
             uncertain = True
         directory = moved
-        body = _evaluated_string(segment)
+        body = _evaluated_string(segment) if depth < MAX_EVAL_NESTING else None
         if body is not None:
-            found.extend(_walk(command_words(body), directory, uncertain))
+            found.extend(_walk(command_words(body), directory, uncertain, depth + 1))
         else:
             found.append((segment, directory, uncertain, previous_operator))
         index = end

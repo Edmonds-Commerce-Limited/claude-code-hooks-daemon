@@ -555,7 +555,7 @@ class TestVariableInterpreterRunningAKnownProgram:
             'PYTHONPATH=x $P "$SCRIPT"',
             "PYTHONPATH=x $P $SCRIPT",
             'PYTHONPATH=x $PY -c "$CODE"',
-            "PYTHONPATH=x $PY -c 'import os'",
+            "PYTHONPATH=x $PY -c 'import os; run(\"$S\")'",
             'PYTHONPATH=x $PY -m "$MOD"',
             "PYTHONPATH=x $PY -m $MOD",
             "PYTHONPATH=x $PY",
@@ -613,7 +613,8 @@ class TestSteeredLiteralInterpreterInAGroupOrAfterAnExport:
     @pytest.mark.parametrize(
         "command",
         [
-            "(PYTHONPATH=x /v/bin/python -c 'import os')",
+            '(PYTHONPATH=x /v/bin/python -c "$CODE")',
+            "(PYTHONPATH=x /v/bin/python -c 'import subprocess; subprocess.run([\"scripts/upgrade.sh\"])')",
             "(PYTHONPATH=x /v/bin/python -m claude_code_hooks_daemon.daemon.cli upgrade)",
             "(PYTHONPATH=x /v/bin/python scripts/qa/missing.py)",
             "(PYTHONPATH=x /v/bin/python -m pytest scripts/upgrade_version.sh)",
@@ -624,7 +625,7 @@ class TestSteeredLiteralInterpreterInAGroupOrAfterAnExport:
             "(PYTHONPATH=x ./run.sh)",
             '(PYTHONPATH=x /v/bin/python "$S")',
             '(PYTHONPATH=x /v/bin/python -m "$M")',
-            "export PYTHONPATH=x && /v/bin/python -c 'import os'",
+            'export PYTHONPATH=x && /v/bin/python -c "$CODE"',
             "export PYTHONPATH=x && /v/bin/python scripts/qa/missing.py",
             "export PYTHONPATH=x && bash scripts/upgrade.sh --project-root .",
             "export PYTHONPATH=x && ./run.sh",
@@ -1322,6 +1323,46 @@ class TestShellInlineAndSyntaxCheckAreNotARun:
 
     def test_still_denies_a_steered_inline_run(self, handler: UpgradeApprovalGuardHandler) -> None:
         assert handler.matches(_bash("PATH=/x:$PATH bash -c 'scripts/upgrade.sh'")) is True
+
+
+class TestSteeredLiteralInlineProgramNamesNoUpgrade:
+    """Ledger 00474 N354: `PYTHONPATH=<src> python -c "<program>"` where the
+    program text is literal and names none of the upgrade's own entry points or
+    arguments runs no upgrade. An inline program that cannot be read (`$CODE`)
+    or that names the upgrade stays denied."""
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            'PYTHONPATH=/w/src /v/bin/python -c "from pkg.mod import Handler; print(Handler)"',
+            "PYTHONPATH=/w/src /v/bin/python -c 'import os'",
+            "PYTHONPATH=/w/src /v/bin/python -Wignore -c 'import os'",
+            "PYTHONPATH=/w/src $PY -c 'import os'",
+            "(PYTHONPATH=x /v/bin/python -c 'import os')",
+            "export PYTHONPATH=x && /v/bin/python -c 'import os'",
+        ],
+    )
+    def test_a_literal_program_that_names_no_upgrade_is_allowed(
+        self, handler: UpgradeApprovalGuardHandler, command: str
+    ) -> None:
+        assert handler.matches(_bash(command, cwd="/nonexistent")) is False, command
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "PYTHONPATH=x /v/bin/python -c 'run(\"bash scripts/upgrade.sh\")'",
+            "PYTHONPATH=x /v/bin/python -c 'main(\"x --project-root .\")'",
+            "PYTHONPATH=x /v/bin/python -c 'run(\" .claude/hooks-daemon \")'",
+            'PYTHONPATH=x /v/bin/python -c "$CODE"',
+            "PYTHONPATH=x /v/bin/python -c `cat /tmp/p`",
+            "PYTHONPATH=x /v/bin/python -c",
+            "PYTHONPATH=x $PY -c 'import os; run(\"$S\")'",
+        ],
+    )
+    def test_an_upgrade_or_unreadable_program_stays_denied(
+        self, handler: UpgradeApprovalGuardHandler, command: str
+    ) -> None:
+        assert handler.matches(_bash(command, cwd="/nonexistent")) is True, command
 
 
 class TestGetRules:
