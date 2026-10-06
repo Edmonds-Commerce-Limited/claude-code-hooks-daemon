@@ -56,6 +56,18 @@ The third fedora-desktop review ([report](subagent-reports/261003-task-3.1-fedor
 - **Recommendation:** add `util-linux-script` to the QA toolchain in `play-python.yml` on F44.
 - **Answer (owner, 2026-10-03):** already handed to a fedora-desktop session, which is adding it. Nothing for this plan to do.
 
+## D10. F1: session limits refuse in every daemon-armed project (raised by the host agent, 2026-10-06)
+
+The live test found that `--max-age`, `--run-for` and `--until` get through every prompt, then refuse inside the container, in every project the hooks daemon armed. The daemon's `ccy.env` names its `claude-supervise` launcher, and the ccy entrypoint accepts only `claude-supervise.py`. Details are in [LIVE-TEST-STATUS-261006.md](LIVE-TEST-STATUS-261006.md).
+
+- **The fix:** fedora-desktop branch `fix/ccy-lifecycle-daemon-launcher`, `3850bc28`, pushed as a backup only. It is signed, written test-first (211/211) and passes `qa-all`. It is numbered ccy 3.79.2 / container 2.43, but F44 has since reached 3.81.0, so the numbers must move above F44's before a merge.
+- **Options:**
+  - A: open a PR from the branch; the owner merges, deploys and rebuilds.
+  - B: hand the fix to a fedora-desktop session to re-apply on top of F44.
+  - C: change the hooks daemon's `ccy.env` line to name `claude-supervise.py` instead. This is not recommended: it drops the launcher's Python-version guard in every client.
+- **Recommendation:** A or B. Until it ships, `ccy --supervise` is the workaround.
+- **Answer:** (open)
+
 ## D5. How the branch gets deployed for the live test (raised by the host agent)
 
 The claude-yolo play can only run from the owner's own fedora-desktop checkout. The inventory `host_vars` and the vault password file are gitignored and exist only there, so a clone or worktree of the branch cannot run it. That checkout is on `F44`, and another session was committing in it while the host agent worked, so the agent will not switch its branch on its own.
