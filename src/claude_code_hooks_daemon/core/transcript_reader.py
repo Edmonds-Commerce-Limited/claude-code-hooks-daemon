@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any
 
 from claude_code_hooks_daemon.constants.tools import ToolName
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 
 logger = logging.getLogger(__name__)
 
@@ -134,7 +135,15 @@ class TranscriptReader:
                 logger.warning("Transcript file not found: %s", transcript_path)
                 return
         except Exception as e:
-            logger.debug("TranscriptReader: Error checking path %s: %s", transcript_path, e)
+            log_and_continue(
+                logger,
+                e,
+                reason=(
+                    f"TranscriptReader: error checking path {transcript_path}; the reader "
+                    "stays unloaded and callers treat an unloaded reader as 'no transcript'"
+                ),
+                level=logging.DEBUG,
+            )
             return
 
         self._parse(path)
@@ -182,9 +191,16 @@ class TranscriptReader:
                 return
             size = path.stat().st_size
         except Exception as e:
-            # Parity with load(): a path-resolution/stat glitch degrades to an
-            # unloaded reader (fail-safe for the Stop dispatch), logged at debug.
-            logger.debug("TranscriptReader: Error checking path %s: %s", transcript_path, e)
+            log_and_continue(
+                logger,
+                e,
+                reason=(
+                    f"TranscriptReader: error checking path {transcript_path}; parity with "
+                    "load(): a path-resolution/stat glitch degrades to an unloaded reader, "
+                    "which is fail-safe for the Stop dispatch"
+                ),
+                level=logging.DEBUG,
+            )
             return
 
         if size > _FILE_START_OFFSET:
@@ -270,8 +286,16 @@ class TranscriptReader:
 
         try:
             data = json.loads(line)
-        except json.JSONDecodeError:
-            logger.debug("TranscriptReader: Skipping malformed JSON line")
+        except json.JSONDecodeError as exc:
+            log_and_continue(
+                logger,
+                exc,
+                reason=(
+                    "TranscriptReader: skipping a malformed JSON line; a transcript being "
+                    "appended to can end mid-record and the other lines are still valid"
+                ),
+                level=logging.DEBUG,
+            )
             return
 
         if not isinstance(data, dict):

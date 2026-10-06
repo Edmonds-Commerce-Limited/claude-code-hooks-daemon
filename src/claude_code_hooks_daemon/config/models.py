@@ -27,6 +27,7 @@ from claude_code_hooks_daemon.core.handler_scope import (
     validate_scope_for_event,
 )
 from claude_code_hooks_daemon.utils.cron_hosts import effective_hostname, hostname_matches
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.repo_relative_path import (
     normalise_repo_relative_path as _normalise_repo_relative_path,
 )
@@ -328,10 +329,15 @@ class HandlersConfig(BaseModel):
                     try:
                         handler_instance = handler_cls()
                     except Exception as e:
-                        # Some handlers require runtime context (ProjectContext, etc.)
-                        # Skip validation for these handlers
-                        logger.debug(
-                            f"Could not instantiate handler '{config_key}' for validation: {e}"
+                        log_and_continue(
+                            logger,
+                            e,
+                            reason=(
+                                f"handler '{config_key}' cannot be instantiated here: some "
+                                "handlers need runtime context (ProjectContext, etc.), so the "
+                                "shares_options_with check is skipped for them"
+                            ),
+                            level=logging.DEBUG,
                         )
                         continue
 
