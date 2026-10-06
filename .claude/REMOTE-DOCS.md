@@ -21,6 +21,7 @@ Re-render the index: `bin/hooks-daemon remote-docs index`
 | `code.claude.com/docs/en/hooks.md` | https://code.claude.com/docs/en/hooks.md | 2026-09-24 | 2026-12-23 |
 | `code.claude.com/docs/en/interactive-mode.md` | https://code.claude.com/docs/en/interactive-mode.md | 2026-09-25 | 2026-12-24 |
 | `code.claude.com/docs/en/managed-settings.md` | https://code.claude.com/docs/en/managed-settings | 2026-10-06 | 2027-01-04 |
+| `code.claude.com/docs/en/permissions.md` | https://code.claude.com/docs/en/permissions | 2026-10-06 | 2027-01-04 |
 | `code.claude.com/docs/en/plugin-marketplaces.md` | https://code.claude.com/docs/en/plugin-marketplaces.md | 2026-09-24 | 2026-12-23 |
 | `code.claude.com/docs/en/plugins/components.md` | https://code.claude.com/docs/en/plugins/components | 2026-10-06 | 2027-01-04 |
 | `code.claude.com/docs/en/plugins/loading.md` | https://code.claude.com/docs/en/plugins/loading | 2026-10-06 | 2027-01-04 |
@@ -57,3 +58,5 @@ Re-render the index: `bin/hooks-daemon remote-docs index`
 | `docs.claude.com/en/docs/claude-code/settings-reference.md` | https://docs.claude.com/en/docs/claude-code/settings-reference | 2026-09-25 | 2026-12-24 |
 | `docs.claude.com/en/docs/claude-code/settings.md` | https://docs.claude.com/en/docs/claude-code/settings | 2026-09-25 | 2026-12-24 |
 | `raw.githubusercontent.com/ansible/ansible/devel/lib/ansible/parsing/vault/__init__.py.md` | https://raw.githubusercontent.com/ansible/ansible/devel/lib/ansible/parsing/vault/__init__.py | 2026-09-24 | 2026-12-23 |
+| `raw.githubusercontent.com/anthropics/claude-code/main/mods/sec-default/README.md` | https://raw.githubusercontent.com/anthropics/claude-code/main/mods/sec-default/README.md | 2026-10-06 | 2027-01-04 |
+| `raw.githubusercontent.com/anthropics/claude-code/main/mods/types/claude-code.d.ts.md` | https://raw.githubusercontent.com/anthropics/claude-code/main/mods/types/claude-code.d.ts | 2026-10-06 | 2027-01-04 |
