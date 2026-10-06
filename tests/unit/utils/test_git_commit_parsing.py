@@ -12,9 +12,13 @@ STAGED check silently passes on a commit it never actually examined.
 
 from __future__ import annotations
 
+import shlex
+
 import pytest
 
+from claude_code_hooks_daemon.utils import git_commit_parsing
 from claude_code_hooks_daemon.utils.git_commit_parsing import (
+    MAX_EVAL_NESTING,
     CommitForm,
     commits_working_tree,
     extract_commit_form,
@@ -24,6 +28,7 @@ from claude_code_hooks_daemon.utils.git_commit_parsing import (
     is_git_commit,
     is_shell_resolved,
     read_commit_form,
+    simple_commands,
     tokenise_command,
 )
 
@@ -566,3 +571,46 @@ class TestCommentsEndAtTheirOwnLine:
     def test_a_hash_inside_a_word_is_kept(self) -> None:
         seen = [g.arguments for g in git_invocations("git push origin x#y")]
         assert seen == [("origin", "x#y")]
+
+
+class TestEvalNestingIsCapped:
+    """A string run by ``eval``/``sh -c`` is inlined only to a fixed nesting depth."""
+
+    def test_nesting_within_the_cap_is_inlined(self) -> None:
+        steps = simple_commands("eval " * MAX_EVAL_NESTING + "true")
+        assert [step.words for step in steps] == [("true",)]
+
+    def test_nesting_past_the_cap_is_kept_as_one_ordinary_command(self) -> None:
+        steps = simple_commands("eval " * (MAX_EVAL_NESTING + 2) + "true")
+        assert [step.words for step in steps] == [("eval", "eval", "true")]
+
+    def test_git_inside_nesting_within_the_cap_is_still_found(self) -> None:
+        command = "eval " * MAX_EVAL_NESTING + "git commit -m x"
+        assert [run.subcommand for run in git_invocations(command)] == ["commit"]
+
+    def test_sh_c_nesting_past_the_cap_is_not_inlined(self) -> None:
+        command = "true"
+        for _ in range(MAX_EVAL_NESTING + 1):
+            command = "sh -c " + shlex.quote(command)
+        steps = simple_commands(command)
+        assert len(steps) == 1
+        assert steps[0].words[:2] == ("sh", "-c")
+
+    def test_nesting_work_grows_linearly_not_quadratically(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        lexed = 0
+        original = git_commit_parsing.command_words
+
+        def counting(text: str) -> list[str]:
+            nonlocal lexed
+            words = original(text)
+            lexed += len(words)
+            return words
+
+        monkeypatch.setattr(git_commit_parsing, "command_words", counting)
+        simple_commands("eval " * 20 + "true")
+        shallow = lexed
+        lexed = 0
+        simple_commands("eval " * 160 + "true")
+        assert lexed < shallow * 10

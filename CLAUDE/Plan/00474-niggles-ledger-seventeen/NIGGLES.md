@@ -1424,6 +1424,29 @@ Second part: an index build started by one test leaked into later tests. Its thr
 
 Third part: with the bound raised the index still never built in the live daemon. On `/workspace` the `git ls-files --others --ignored --exclude-standard` listing is 554,332 paths (58 MB: virtualenvs and worktrees under the ignored `untracked/`); the daemon log showed "failed with exit 124 (124 = timed out after 120s)" and "could not be built ... retrying in 30s" on every attempt, and each attempt read and decoded tens of MB in a thread, which is the likely cause of a 30 s hook socket timeout right after a restart. The listing filtered by pathspec prints about 1,300 lines (72 KB). Fixed by `utils/protected_pathspecs.py` (`git_pathspecs`): the index build hands git each protected glob as a `:(glob)` pathspec through the new `pathspecs` parameter of `scan_git_file_states`, which narrows only the untracked-and-ignored listing (plus `**/pyvenv.cfg`, so the foreign-tree rule still drops virtualenv trees). The narrowing must be a SUPERSET of what `first_matching_glob` selects, so it answers `None` (list everything) for `[`, `\`, a leading `:`, a `**` that is not a whole segment, the vendor token, and any multi-segment pattern whose first segment can match a directory above the project root (the matcher also tries the absolute path). Pinned against real git by `tests/unit/utils/test_protected_pathspecs.py` and `TestBuildAsksGitOnlyForCandidates`. Measured against `/workspace` (default patterns): 554,347 lines / 57.8 MB in 5.5 s unfiltered, 1,300 lines / 72 KB in 7.7 to 8.7 s filtered (git still walks the tree and matches each entry; the saving is the transfer, decode and set-building in the daemon, not git's walk). Known gap, not closed: an ignored, untracked symlink whose own name matches no glob but whose target does is not listed (tracked symlinks are, as the tracked listing is whole). The SessionStart sweeps (`secret_file_hygiene_checker`, `gitignore_safety_checker`) make the same unnarrowed four listings through `scan_git_file_states_for_event`; they were left as they are.
 
+### N357 — `simple_commands` inlined `eval`/`sh -c` with no depth cap, so nested evals cost quadratic time
+
+**Source**: the coordinator, 2026-10-06, in the full post-merge run after the Plan 00483 A6 merge (745dc2d68).
+
+**Evidence**: `tests/unit/handlers/test_safety_handlers_hostile_input_performance.py::TestCombinatorialSmallInputShapesStayLinear::test_bash_command[deep_eval_nesting]`
+failed deterministically on main: "host-command-guard cost grew 26x for 8x input" (`"eval " * depth + "true"`, depths
+5 and 40). `_walk` in `utils/git_commit_parsing.py` recursed into every evaluated string with no limit, and each level
+re-lexes the whole remaining text. `host_command_guard`, new in the A6 merge, calls `simple_commands` on every Bash
+command, which exposed it.
+
+**Impact**: medium. A deeply nested `eval` chain made every Bash command through that guard cost quadratic time.
+
+**Why A6's changed QA missed it**: `scripts/qa/changed_tests_map.yaml` has no rule mapping `handlers/pre_tool_use/*.py`
+(or `utils/git_commit_parsing.py`) to the hostile-input performance test; its only rule for those paths names the
+ordinary-command regression gate. That test finds handlers through the registry, so the name/import inference does not
+reach it for a new handler file. Checked in the map and the test, not by replaying A6's run. Candidate remedy, not done
+here: add a map rule for `handlers/pre_tool_use/*.py` naming the performance test.
+
+**Status**: ✅ Fixed (commit COMMIT_HASH). `_walk` takes a `depth` and inlines an evaluated string only while
+`depth < MAX_EVAL_NESTING` (4, the nested-shell cap the performance test's shapes are built around); past it the
+command stays one ordinary step and its body goes unjudged, per ruling A1. Pinned by `TestEvalNestingIsCapped` in
+`tests/unit/utils/test_git_commit_parsing.py`.
+
 ### N356 — a grep regex inside a quoted `bash -c` string is read as a protected-path glob
 
 **Source**: the coordinator, 2026-10-05, after the Plan 00483 Phase 2 merge (dc5c9263b).
