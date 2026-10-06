@@ -123,6 +123,10 @@ class IdleHousekeepingAdvisoryHandler(UserPromptSubmitHandlerBase):
     # `handlers.user_prompt_submit.idle_housekeeping_advisory.enabled: true`.
     default_enabled = False
 
+    # Sends an idle session off to do housekeeping nobody asked for: gated on the
+    # project's `autonomy:` config (Plan 00498).
+    drives_autonomy = True
+
     def __init__(self) -> None:
         super().__init__(
             handler_id=HandlerID.IDLE_HOUSEKEEPING_ADVISORY,

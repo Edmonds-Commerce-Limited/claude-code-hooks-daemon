@@ -122,10 +122,14 @@ _RULE_ELSEWHERE: Final[Rule] = Rule(
     verbose=(
         "WHY BLOCKED:\n"
         "This issue is assigned to someone other than the account this session is\n"
-        "signed in as, and not to this account.\n\n"
+        "signed in as, and not to this account, or it has two or more assignees\n"
+        "(ambiguous, even when this account is one of them).\n\n"
         "DO INSTEAD:\n"
-        "  Do NOT work on it and do NOT claim it. Tell the user the issue belongs\n"
-        "  to someone else and let them decide. If the plan is not really about\n"
+        "  Do NOT work on it and do NOT claim it. Agents only ever SWITCH an\n"
+        "  assignee on an unassigned issue; they never add one beside another.\n"
+        "  Tell the user the issue belongs to someone else (or has several\n"
+        "  assignees and a human must leave exactly one) and let them decide.\n"
+        "  If the plan is not really about\n"
         "  this issue, the user can correct its `**GitHub Issue**` header.\n"
     ),
 )
@@ -286,7 +290,7 @@ class GithubIssueAssignmentGuardHandler(PreToolUseHandlerBase):
         try:
             for fix in report.fixes:
                 if fix.name == CLAIM_FIX_NAME:
-                    service.apply_fix(fix)
+                    service.claim(fix)
         except GhError as exc:
             _LOGGER.warning("github_issue_assignment_guard: auto-claim failed: %s", exc)
             return report
@@ -395,10 +399,12 @@ class GithubIssueAssignmentGuardHandler(PreToolUseHandlerBase):
             " and, when `approved_issue_authors` is configured, opened by an approved "
             "author.\n\n"
             "- **Unassigned**: run `bin/hooks-daemon issue-validity N --claim`, then "
-            "retry. The CLI does the lookup and the claim; do not run `gh` lookups "
-            "yourself.\n"
-            "- **Assigned only to someone else**, or **author not approved**: do not work "
-            "on it, do not claim it, write nothing to it; tell the user.\n"
+            "retry. The claim SWITCHES the assignee to you and verifies you are the only "
+            "one; it never adds a second assignee. The CLI does the lookup and the claim; "
+            "do not run `gh` lookups yourself.\n"
+            "- **Assigned only to someone else**, **two or more assignees**, or **author "
+            "not approved**: do not work on it, do not claim it, write nothing to it; "
+            "tell the user (several assignees need a human to leave exactly one).\n"
             "- `gh` missing, offline or not signed in: you get an advisory, never a block.\n\n"
             "Work not tied to an issue is never judged."
         )

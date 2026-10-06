@@ -33,6 +33,7 @@ class FakeGh:
         self.identity: str | Exception = ME
         self.assignees: dict[int, list[str] | Exception] = {}
         self.author = "lts-bob"
+        self.race_winner: str | None = None
 
     def __call__(self, args: Sequence[str]) -> str:
         argv = tuple(args)
@@ -54,7 +55,14 @@ class FakeGh:
                 }
             )
         if argv[:2] == ("issue", "edit"):
-            self.assignees[int(argv[2])] = [ME]
+            number = int(argv[2])
+            current = self.assignees[number]
+            assert isinstance(current, list)
+            if "--remove-assignee" in argv:
+                self.assignees[number] = [a for a in current if a != ME]
+            else:
+                winner = [self.race_winner] if self.race_winner else []
+                self.assignees[number] = [*winner, ME]
             return ""
         raise AssertionError(f"unexpected gh call {argv}")
 
@@ -249,11 +257,20 @@ class TestVerdicts:
     def test_assigned_to_self_is_a_silent_allow(
         self, tmp_path: Path, gh: FakeGh, make_handler: Factory
     ) -> None:
-        gh.assignees[5] = [ME, "someone-else"]
+        gh.assignees[5] = [ME]
         result = make_handler(gh).handle(_edit(self._tied(tmp_path)))
         assert result.decision is Decision.ALLOW
         assert not result.context
         assert not result.reason
+
+    def test_two_assignees_including_self_is_denied_as_ambiguous(
+        self, tmp_path: Path, gh: FakeGh, make_handler: Factory
+    ) -> None:
+        gh.assignees[5] = [ME, "someone-else"]
+        result = make_handler(gh).handle(_edit(self._tied(tmp_path)))
+        assert result.decision is Decision.DENY
+        assert "exactly one assignee" in (result.reason or "")
+        assert "--claim`" not in (result.reason or "").split("Issue #5")[-1]
 
     def test_unassigned_denies_with_the_one_command_to_run(
         self, tmp_path: Path, gh: FakeGh, make_handler: Factory
@@ -366,6 +383,17 @@ class TestAutoClaim:
         result = make_handler(gh, auto_claim=True).handle(_edit(plan))
         assert result.decision is Decision.ALLOW
         assert ("issue", "edit", "5", "--add-assignee", "@me") in gh.calls
+
+    def test_a_claim_lost_to_a_race_is_denied_and_backs_off(
+        self, tmp_path: Path, gh: FakeGh, make_handler: Factory
+    ) -> None:
+        plan = _write_plan(tmp_path, "00001-x", "#5")
+        gh.assignees[5] = []
+        gh.race_winner = "alice"
+        result = make_handler(gh, auto_claim=True).handle(_edit(plan))
+        assert result.decision is Decision.DENY
+        assert ("issue", "edit", "5", "--remove-assignee", "@me") in gh.calls
+        assert gh.assignees[5] == ["alice"]
 
     def test_never_claims_for_an_unapproved_author(
         self, tmp_path: Path, gh: FakeGh, make_handler: Factory

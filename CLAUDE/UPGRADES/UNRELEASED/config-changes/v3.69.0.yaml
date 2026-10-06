@@ -7,6 +7,48 @@ breaking: false
 
 config_changes:
   added:
+    - key: autonomy
+      recommended: false
+      dormant: true
+      description: >-
+        NEW (Plan 00498). A top-level `autonomy:` block names where the
+        work-DRIVING machinery may run: declared `persistent_crons` and their
+        Stop enforcers, the failsafe-recovery advice (session start and plan
+        edits), goal injection, the goal-ledger stop challenge, the
+        awaiting-human stand-in cron, the idle-housekeeping advisory, the
+        routine sweep and the session-actions directive. `environments` lists
+        any of `host` (a desktop session, no container detected), `docker`,
+        `podman`, `lxc`, `generic`; `hosts` lists role aliases or globs
+        (`HOOKS_DAEMON_HOSTNAME`) that may run autonomy anywhere. Default: every
+        environment, so a project with no block behaves exactly as before.
+        Guards are never gated, and the plain `STOPPING BECAUSE:` rule applies
+        everywhere.
+      example_yaml: |
+        autonomy:
+          environments: [docker, podman, lxc, generic]   # no autonomy on a desktop
+          hosts: []
+      migration_note: >-
+        No action needed. To keep a desktop session to the task it was given,
+        leave `host` out of `environments`; SessionStart then says once that
+        autonomy is off and the status line shows it.
+    - key: handlers.session_start.autonomy_notice
+      recommended: false
+      dormant: false
+      description: >-
+        NEW (Plan 00498). On by default and silent wherever the `autonomy:`
+        block allows autonomy (every environment, unless the project says
+        otherwise). Where it does not, it states once at session start that
+        autonomy is off, in which environment, and which config to change.
+      example_yaml: |
+        handlers:
+          session_start:
+            autonomy_notice:
+              enabled: true
+              priority: 47
+      migration_note: >-
+        No action needed; it never fires for a project with no `autonomy:`
+        block. Disable with handlers.session_start.autonomy_notice.enabled:
+        false.
     - key: handlers.pre_tool_use.host_command_guard
       recommended: true
       dormant: false

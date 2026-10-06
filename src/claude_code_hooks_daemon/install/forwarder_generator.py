@@ -116,8 +116,14 @@ _STATUS_DOWN_TEXT_VAR = "_HOOKS_DAEMON_STATUS_DOWN_TEXT"
 #: carries — the legacy ``emit_hook_error ...; exit 0`` stanza, or an earlier
 #: rendering of the raw-stdout branch) so the rewrite is idempotent.
 _ENSURE_DAEMON_BLOCK_PATTERN = re.compile(
-    r"^if ! ensure_daemon; then\n(?:(?!^fi\n).*\n)*?^fi\n", re.MULTILINE
+    r"^if ! (?:_HOOKS_DAEMON_NONBLOCKING_START=true )?ensure_daemon; then\n"
+    r"(?:(?!^fi\n).*\n)*?^fi\n",
+    re.MULTILINE,
 )
+
+#: The variable init.sh sets to name its own loading line; the forwarder falls
+#: back to the catalogue's ``daemon_loading_stdout`` when it is unset.
+_STATUS_LOADING_TEXT_VAR = "_HOOKS_DAEMON_STATUS_LOADING_TEXT"
 
 
 def _render_raw_stdout_daemon_down_block(event_file_name: str) -> str:
@@ -144,10 +150,26 @@ def _render_raw_stdout_daemon_down_block(event_file_name: str) -> str:
         )
     else:
         stdout_lines = "    # This stdout is parsed as a VALUE, so nothing may be printed.\n"
+    guard = "ensure_daemon"
+    loading_lines = ""
+    if meta.daemon_loading_stdout:
+        # Plan 00495 Task 2.7: a display line never waits out a daemon start.
+        # The start carries on in the background; this hook answers "loading".
+        loading = _escape_for_double_quotes(meta.daemon_loading_stdout)
+        loading_expansion = "{" + _STATUS_LOADING_TEXT_VAR + ":-" + loading + "}"
+        guard = "_HOOKS_DAEMON_NONBLOCKING_START=true ensure_daemon"
+        loading_lines = (
+            '    if [[ "${_HOOKS_DAEMON_STARTING:-false}" == "true" ]]; then\n'
+            "        # Still starting, not failed: answered, so exit 0.\n"
+            f'        echo "${loading_expansion}"\n'
+            "        exit 0\n"
+            "    fi\n"
+        )
     return (
-        "if ! ensure_daemon; then\n"
+        f"if ! {guard}; then\n"
         "    # raw_stdout event (generated; Plan 00189): Claude Code reads this\n"
         "    # hook's stdout RAW, so a JSON error here would be taken literally.\n"
+        f"{loading_lines}"
         "    # Diagnostic on stderr; non-zero exit = not handled.\n"
         f"{stdout_lines}"
         f'    echo "HOOKS DAEMON ERROR [daemon_startup_failed]: {meta.json_key} hook: '

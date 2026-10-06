@@ -1,6 +1,6 @@
 # Plan 00498: autonomy only where allowed
 
-**Status**: Not Started
+**Status**: In Progress
 **Created**: 2026-10-06
 **Owner**: dev
 **Priority**: High
@@ -63,30 +63,38 @@ autonomy:
 
 ### Phase 1: Design
 
-- [ ] ⬜ **Task 1.1**: List every handler and advisory that drives work rather than protects (start from the list
+- [x] ✅ **Task 1.1**: List every handler and advisory that drives work rather than protects (start from the list
   above; search for cron, goal, stand-in, resume and recovery wording). Settle the config shape, the default, and how
-  `hosts:` aliases combine with environments.
+  `hosts:` aliases combine with environments. Inventory:
+  [subagent-reports/261006-autonomy-inventory-sonnet.md](subagent-reports/261006-autonomy-inventory-sonnet.md).
 
 ### Phase 2: Build (TDD)
 
-- [ ] ⬜ **Task 2.1**: An `autonomy_allowed()` helper over `detect_container_runtime()` and the role alias, and the
+- [x] ✅ **Task 2.1**: An `autonomy_allowed()` helper over `detect_container_runtime()` and the role alias, and the
   `autonomy:` config model with validation and a config-changes manifest entry.
-- [ ] ⬜ **Task 2.2**: Gate every item from Task 1.1 on it, each with a test that it is silent where autonomy is off
+- [x] ✅ **Task 2.2**: Gate every item from Task 1.1 on it, each with a test that it is silent where autonomy is off
   and unchanged where it is on.
-- [ ] ⬜ **Task 2.3**: Status line and SessionStart wording when autonomy is off.
-- [ ] ⬜ **Task 2.4**: This repository's config: autonomy in containers only.
+- [x] ✅ **Task 2.3**: Status line and SessionStart wording when autonomy is off.
+- [x] ✅ **Task 2.4**: This repository's config: autonomy in containers only.
 
 ### Phase 3: Prove
 
 - [ ] ⬜ **Task 3.1**: Live: a desktop (host) session of this repository creates no crons, receives no failsafe or goal
-  pressure, and stops when its one task is done. A container session is unchanged.
+  pressure, and stops when its one task is done. A container session is unchanged. The container half is checked
+  (see Success Criteria). The desktop half needs the owner to start a host session of this repository from a
+  checkout of main that includes Plan 00498 (this repository runs its own source, so no release is needed).
 
 ## Success Criteria
 
 - [ ] On a desktop session of this repository, `CronList` stays empty and no stop is challenged on behalf of other
   plans.
-- [ ] A ccy container session keeps all of today's autonomy.
-- [ ] A client project with no `autonomy:` block behaves exactly as before.
+- [x] A ccy container session keeps all of today's autonomy. Checked on the coordinator's podman session after the
+  merge and daemon restart: `autonomy_allowed()` is true for environment `podman`, and the failsafe and watchdog
+  crons stay live.
+- [x] A client project with no `autonomy:` block behaves exactly as before. Covered by
+  `tests/unit/utils/test_autonomy.py` (`test_on_when_the_project_has_no_autonomy_block`,
+  `test_default_config_allows_everywhere`) and `tests/unit/core/test_chain_autonomy_gate.py`
+  (`test_the_default_is_a_guard_that_always_runs`).
 
 ## Delivery & Milestones
 

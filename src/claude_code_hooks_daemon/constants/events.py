@@ -142,6 +142,11 @@ class EventIDMeta:
             event whose raw stdout is a DISPLAY line (StatusLine), where
             silence would hide the outage. Either way the diagnostic goes to
             stderr and the exit is non-zero. Ignored for JSON-decision events.
+        daemon_loading_stdout: What a DISPLAY-line forwarder prints, and
+            exits 0 on, when the daemon is still STARTING rather than failed
+            (Plan 00495 Task 2.7). The forwarder asks for a non-blocking
+            start, so it answers at once and the start carries on in the
+            background. Empty for an event with no such branch.
     """
 
     enum_value: str
@@ -154,6 +159,7 @@ class EventIDMeta:
     raw_stdout: bool = False
     requires_client_translation: bool = False
     daemon_down_stdout: str = ""
+    daemon_loading_stdout: str = ""
 
     @property
     def relay_eligible(self) -> bool:
@@ -308,6 +314,8 @@ class EventID:
         raw_stdout=True,
         # A DISPLAY line, not a parsed value: keep the outage visible.
         daemon_down_stdout="⚠️ DAEMON FAILED",
+        # A daemon still starting is not a failed one (Plan 00495 Task 2.7).
+        daemon_loading_stdout="⏳ hooks daemon loading…",
     )
 
     # -----------------------------------------------------------------------

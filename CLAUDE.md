@@ -587,6 +587,10 @@ One line each; these fire with their own guidance when relevant. Full text: `bin
 
 - auto_approve_reads — gated on bypassPermissions mode
 
+<!-- handler: autonomy-notice -->
+
+- autonomy_notice — autonomy is off in this environment
+
 <!-- handler: background-process-tracker -->
 
 - background_process_tracker — backgrounded processes are tracked

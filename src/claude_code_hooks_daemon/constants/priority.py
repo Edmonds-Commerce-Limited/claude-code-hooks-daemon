@@ -470,6 +470,10 @@ class Priority:
     # session needs (it names the agents to re-brief), so it speaks ahead of the
     # guard-drift report, which only fires on a new session in practice.
     WORK_QUEUE_REBRIEF = 48
+    # Plan 00498: the first SessionStart advisory. Every cron, goal and recovery
+    # advisory below is silent where autonomy is off, so this one line is what
+    # tells the session the quiet is deliberate; it must not be read last.
+    AUTONOMY_NOTICE = 47
     PROJECT_HANDLER_LOAD_CHECKER = 50
     HOOK_REGISTRATION_CHECKER = 51
     # Plan 00468 G1: same slot as hook_registration_checker. That one reports

@@ -588,6 +588,10 @@ handlers:
       enabled: true
       priority: 15
 
+    autonomy_notice:  # Says once that autonomy is off in this environment, and why (Plan 00498)
+      enabled: true   # Advisory only; silent wherever the top-level `autonomy:` block allows autonomy
+      priority: 47
+
     work_queue_rebrief:  # On resume/compact, list the agents the durable work queue records as running (Plan 00470 Task 3.3)
       enabled: true      # Advisory only; silent unless a queue exists and something is running
       priority: 48
@@ -1043,6 +1047,17 @@ handlers:
     stop_failure_recorder:  # Records a rate_limit / authentication_failed / cloud_credential_error turn; the usage indicator shows it (Plan 00470)
       enabled: true  # Silent bookkeeping; never terminal
       priority: 50
+
+# Where the work-DRIVING machinery may run (Plan 00498): declared crons, the
+# failsafe-recovery advice, goal injection, goal-ledger stop challenges, the
+# awaiting-human stand-in cron, housekeeping and routine sweeps. Guards are never
+# affected. Environments: host (a desktop session), docker, podman, lxc, generic.
+# The default below is every environment, so nothing changes until you remove
+# one; for example drop `host` to keep a desktop session to the task it was given.
+# `hosts:` lists role aliases or globs (HOOKS_DAEMON_HOSTNAME) allowed anywhere.
+autonomy:
+  environments: [host, docker, podman, lxc, generic]
+  hosts: []
 
 # Pseudo-events: handlers driven on a trigger ratio over real events rather
 # than by a hook event of their own. The two nitpick detectors live ONLY here —

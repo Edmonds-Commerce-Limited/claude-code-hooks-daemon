@@ -4,7 +4,7 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
-- [00498: autonomy only where allowed](00498-autonomy-only-where-allowed/PLAN.md) - Not Started, High (owner request after a desktop agent drifted off its one task: one config switch, keyed on the detected environment (host, docker, podman, lxc) and role alias, decides whether any crons, goal pressure or resume advice run; this repo turns them off on the desktop)
+- [00498: autonomy only where allowed](00498-autonomy-only-where-allowed/PLAN.md) - In Progress, High (owner request after a desktop agent drifted off its one task: one config switch, keyed on the detected environment (host, docker, podman, lxc) and role alias, decides whether any crons, goal pressure or resume advice run; this repo turns them off on the desktop)
 
 - [00496: upstream feature requests and issue kinds](00496-upstream-feature-requests-and-issue-kinds/PLAN.md) - Not Started (owner request: a formal process for project agents to file feature requests and other non-defect issues, mirroring the defect generator, guard and forms; security reports routed privately)
 

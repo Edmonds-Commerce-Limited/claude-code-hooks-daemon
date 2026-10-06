@@ -40,6 +40,7 @@ from claude_code_hooks_daemon.core.utils import get_bash_command
 from claude_code_hooks_daemon.handlers.utils.session_advice_counter import (
     SessionAdviceCounter,
 )
+from claude_code_hooks_daemon.utils.autonomy import autonomy_allowed
 from claude_code_hooks_daemon.utils.cli_command import (
     daemon_cli_command,
     daemon_cli_command_for_docs,
@@ -250,6 +251,25 @@ def _declared_advisory() -> str:
     )
 
 
+def _protective_advisory() -> str:
+    """The advisory where autonomy is off: harvest and reap, but no cron (Plan 00498).
+
+    A watchdog cron schedules work the session was not asked to do, so it is
+    left out; running ``harvest-background`` by hand is protective and stays.
+    """
+    return (
+        "You launched a background / long-lived process. The daemon will NOT "
+        "auto-kill it — detection is surfaced, you decide.\n\n"
+        "Autonomy is off in this environment, so no watchdog cron is asked for. "
+        "Check on the process yourself before you finish:\n"
+        f"  • Run `{daemon_cli_command('harvest-background')}` once the work is done.\n\n"
+        "If a runaway is surfaced, reap the WHOLE process group (not just the pid):\n"
+        "      kill -- -<pgid>\n"
+        "To deliberately keep a wanted long task (build/server), note "
+        'KEEP_RUNNING_BECAUSE="reason" and move on.'
+    )
+
+
 def _advisory() -> str:
     """Build the backgrounded-process advisory.
 
@@ -369,6 +389,8 @@ class BackgroundProcessTrackerHandler(PostToolUseHandlerBase):
 
         if not self._should_advise(session_id):
             return BlockingResult(decision=Decision.ALLOW)
+        if not autonomy_allowed(hook_input):
+            return BlockingResult(decision=Decision.ALLOW, context=[_protective_advisory()])
         declared = declares_watchdog_cron(self._load_config(), effective_hostname(hook_input))
         advisory = _declared_advisory() if declared else _advisory()
         return BlockingResult(decision=Decision.ALLOW, context=[advisory])

@@ -37,6 +37,7 @@ class FakeGh:
         self.issues: dict[int, dict[str, Any] | Exception] = {}
         self.listing: list[dict[str, Any]] | Exception = []
         self.edit_error: Exception | None = None
+        self.race_winner: str | None = None
 
     def __call__(self, args: Sequence[str]) -> str:
         argv = tuple(args)
@@ -59,7 +60,11 @@ class FakeGh:
                 raise self.edit_error
             current = self.issues[int(argv[2])]
             assert isinstance(current, dict)
-            current["assignees"] = [{"login": ME}]
+            if "--remove-assignee" in argv:
+                current["assignees"] = [a for a in current["assignees"] if a["login"] != ME]
+            else:
+                winner = [{"login": self.race_winner}] if self.race_winner else []
+                current["assignees"] = [*winner, {"login": ME}]
             return ""
         raise AssertionError(argv)
 
@@ -134,6 +139,23 @@ class TestSingleIssue:
         code, out, _ = _run(gh, number=5, claim=True)
         assert code == EXIT_BLOCKED
         assert "alice" in out
+        assert not [c for c in gh.calls if c[:2] == ("issue", "edit")]
+
+    def test_a_claim_lost_to_a_race_backs_off_and_stays_not_workable(self, gh: FakeGh) -> None:
+        gh.issues[5] = _issue(5)
+        gh.race_winner = "alice"
+        code, out, err = _run(gh, number=5, claim=True)
+        assert code == EXIT_BLOCKED
+        assert "claim failed" in err
+        assert "claimed issue" not in out
+        assert ("issue", "edit", "5", "--remove-assignee", "@me") in gh.calls
+        assert gh.issues[5]["assignees"] == [{"login": "alice"}]
+
+    def test_two_assignees_including_me_is_blocked_and_never_edited(self, gh: FakeGh) -> None:
+        gh.issues[5] = _issue(5, ["alice", ME])
+        code, out, _ = _run(gh, number=5, claim=True)
+        assert code == EXIT_BLOCKED
+        assert "exactly one assignee" in out
         assert not [c for c in gh.calls if c[:2] == ("issue", "edit")]
 
     def test_claim_never_writes_to_an_issue_from_an_unapproved_author(self, gh: FakeGh) -> None:

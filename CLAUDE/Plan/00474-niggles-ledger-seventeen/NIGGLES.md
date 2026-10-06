@@ -1426,6 +1426,33 @@ The uncertain-move union judges the hook directory and the LAST recorded move (`
 every candidate directory (`sub`). Remedy: judge every directory any `cd` in the chain could
 land in.
 
+### N369 — a forwarder integration test fails inside every worktree and passes on main
+
+**Found**: by the coordinator, 2026-10-06, in Plan 00495 Task 2.7's branch QA.
+`tests/integration/test_forwarder_socket_stdin.py::test_stop_forwarder_exits_2_on_block_with_socket_stdin` failed
+with a 15 s "Daemon startup timeout" in the worktree, failed the same way on the branch's parent commit, and passed on
+main (61 of 61 for the forwarder and status-line files after the merge). Each worktree carries an untracked
+`.claude/hooks-daemon.env` copied from main, with `HOOKS_DAEMON_ROOT_DIR="/workspace"`, so a test run from a worktree
+resolves main's root rather than its own.
+
+**Fix**: find where the worktree gets that file. Either point its `HOOKS_DAEMON_ROOT_DIR` at the worktree, or make the
+test hermetic against an inherited root. Then confirm the test passes inside a worktree.
+
+**Status**: ⬜ Open.
+
+### N368 — the plan fact-checker marked claims unverifiable while the reference clone that settles them was on disk
+
+**Found**: by the owner, 2026-10-06. A fact-check of Plan 00487's live-test checklist reported 7 claims about ccy and
+fedora-desktop as UNVERIFIABLE-HERE, saying there was no fedora-desktop clone under `untracked/`. The governed
+reference clone was at `untracked/repos/fedora-desktop` all along. A re-check against it verified all 7 and REFUTED 2
+more: F1 was already fixed on F44 in ccy 3.82.1, so the checklist was telling the owner to use a superseded branch.
+
+**Fix**: the `plan-fact-checker` agent definition should list the governed reference clones (from the
+`reference_repos` config) and require a claim about an external repository to be checked there before it is
+called unverifiable. The coordinator should name the clone in the dispatch too.
+
+**Status**: ⬜ Open.
+
 ### N367 — the coordinator's branch-QA venv recipe installs off-lock tool versions, so three tests fail falsely
 
 **Found**: by the coordinator, 2026-10-06, in B2's uncapped test run (4 failed, 8469 passed). The recipe it uses to give
@@ -1497,7 +1524,7 @@ No open issue had two assignees when this was recorded, so the fix is prevention
 
 Test each case through `issue-validity` and the guard.
 
-**Status**: ⬜ Open. Next branch once a slot frees.
+**Status**: Fixed on branch agent-a39b84caa49481833-8f3c52ec at 88f41369e.
 
 ### N365 — an `[awaiting-human]` token quoted inside a fenced block is read as the stop's own declaration
 

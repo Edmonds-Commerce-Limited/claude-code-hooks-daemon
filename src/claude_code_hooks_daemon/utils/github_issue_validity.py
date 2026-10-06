@@ -244,10 +244,18 @@ class AssigneeCheck:
     needs_identity = True
 
     def evaluate(self, facts: IssueFacts, identity: str | None) -> CheckResult:
-        """Self assigned: ok. Nobody: fixable by claiming. Others only: blocking."""
+        """Only self: ok. Nobody: fixable by claiming. Several or others only: blocking."""
         if identity is None:
             return CheckResult(
                 self.name, CheckStatus.UNKNOWN, "the signed-in GitHub account is unknown"
+            )
+        if len(facts.assignees) > 1:
+            return CheckResult(
+                self.name,
+                CheckStatus.BLOCKING,
+                f"issue #{facts.number} has {len(facts.assignees)} assignees "
+                f"({', '.join(facts.assignees)}); who may work on it is ambiguous. "
+                "A human must leave exactly one assignee.",
             )
         if any(a.casefold() == identity.casefold() for a in facts.assignees):
             return CheckResult(self.name, CheckStatus.OK, f"assigned to {identity}")
@@ -508,6 +516,31 @@ class IssueValidityService:
         """
         self._runner(fix.gh_args)
         self.forget(fix.issue)
+
+    def claim(self, fix: FixAction) -> bool:
+        """Switch the issue to the signed-in account; True only if it is the sole assignee.
+
+        The edit is applied, the issue re-read, and the claim succeeds only when
+        the assignees are exactly the signed-in account. Otherwise another
+        claimant won the race: this claim backs off by removing itself, so an
+        issue is never left with two assignees, and False is returned.
+
+        Raises:
+            GhError: A gh command failed.
+        """
+        self.apply_fix(fix)
+        identity = self.identity()
+        facts, error = self._facts_for(fix.issue)
+        if error is not None or facts is None:
+            raise GhError(f"could not re-read issue #{fix.issue} after claiming: {error}")
+        if identity is not None and [a.casefold() for a in facts.assignees] == [
+            identity.casefold()
+        ]:
+            return True
+        if any(a.casefold() == (identity or "").casefold() for a in facts.assignees):
+            self._runner(["issue", "edit", str(fix.issue), "--remove-assignee", SELF_ASSIGNEE])
+        self.forget(fix.issue)
+        return False
 
 
 _DEFAULT_SERVICE: IssueValidityService | None = None

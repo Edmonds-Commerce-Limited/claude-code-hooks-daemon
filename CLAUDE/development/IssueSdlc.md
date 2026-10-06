@@ -152,12 +152,18 @@ bin/hooks-daemon issue-validity <N> --claim
 Deterministic code reads the issue once, checks it, and claims it for the
 signed-in GitHub account when it is unassigned. Do not run `gh` lookups or `gh issue edit` yourself. Act on the exit code:
 
-| exit | meaning                                                        | action                                                                                                        |
-| ---- | -------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
-| 0    | valid: assigned to this account (claimed now, or already)      | proceed                                                                                                       |
-| 1    | blocked: assigned only to someone else, or author not approved | **stop on this issue.** Do not work it, do not claim it, write nothing to it. Name it in the tick's stop line |
-| 2    | fixable but not fixed (the claim failed)                       | stop and report the printed error; change nothing                                                             |
-| 3    | unknown: `gh` could not answer                                 | stop and report; an unreadable issue is never treated as valid                                                |
+An agent only ever SWITCHES the assignee: after the claim the code re-reads the
+issue and succeeds only when the signed-in account is the sole assignee. If
+another account was assigned at the same moment, the claim backs off (removes
+itself) and exits 2. An issue with two or more assignees is blocked as
+ambiguous, even when this account is one of them: a human must leave exactly one.
+
+| exit | meaning                                                                 | action                                                                                                        |
+| ---- | ----------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| 0    | valid: assigned to this account (claimed now, or already)               | proceed                                                                                                       |
+| 1    | blocked: assigned to someone else or to several, or author not approved | **stop on this issue.** Do not work it, do not claim it, write nothing to it. Name it in the tick's stop line |
+| 2    | fixable but not fixed (the claim failed)                                | stop and report the printed error; change nothing                                                             |
+| 3    | unknown: `gh` could not answer                                          | stop and report; an unreadable issue is never treated as valid                                                |
 
 The claim publishes one assignment to GitHub, which is why the code does it only
 for an issue that already passed every other check. An issue held by someone

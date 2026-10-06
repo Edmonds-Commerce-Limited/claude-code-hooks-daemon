@@ -535,12 +535,14 @@ def test_malformed_payload_stop_reason_is_accurate(
 def test_status_line_transport_failure_emits_stderr_diagnostic(
     strip_jq: bool, tmp_path: Path, live_pid_file: Path
 ) -> None:
-    """A mid-render socket failure still renders the fallback AND logs to stderr.
+    """A mid-render socket failure renders the loading line AND logs to stderr.
 
     Review finding 3: the status branch of fail() must not silently swallow the
     diagnostic (project "no silent error suppression" standard). The pid file is
     live (ensure_daemon proceeds) but the socket does not exist, so the transport
-    raises FileNotFoundError inside send_request_stdin.
+    raises FileNotFoundError inside send_request_stdin. A live process with no
+    socket yet is a daemon still starting (Plan 00495 Task 2.7), so the display
+    line is the loading baseline rather than "NO STATUS DATA".
     """
     missing_sock = tmp_path / "no-such-daemon.sock"  # never created -> connect fails
     result = _run_wrapper(
@@ -548,7 +550,7 @@ def test_status_line_transport_failure_emits_stderr_diagnostic(
     )
 
     assert result.returncode == 0, result.stderr.decode()
-    assert result.stdout.decode().strip() == "⚠️ NO STATUS DATA"
+    assert result.stdout.decode().strip() == "⏳ hooks daemon loading…"
     assert "HOOKS DAEMON ERROR" in result.stderr.decode()
 
 
