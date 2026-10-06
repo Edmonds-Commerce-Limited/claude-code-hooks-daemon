@@ -1,6 +1,6 @@
 # Plan 00495: performance improvement programme
 
-**Status**: In Progress
+**Status**: In Progress (Phase 1 done; Phase 2 fixes queued behind the open-branch limit)
 **Created**: 2026-10-06
 **Owner**: dev
 **Priority**: High
@@ -51,27 +51,55 @@ Evidence already seen in this session (2026-10-06), not yet explained:
 
 ### Phase 1: Measure
 
-- [ ] 🔄 **Task 1.1**: Cross-version startup profile, in isolated throwaway projects (never the live daemon). Cover
-  current main, the latest release and releases about 3, 6 and 10 or more back; take 5 or more samples each, with host
-  load recorded. Report: `untracked/scratch/startup-profile/REPORT.md`, to be copied into this plan's
-  `subagent-reports/` when it lands.
-- [ ] 🔄 **Task 1.2**: Per-handler wall time of the SessionStart chain, and what the status line waits on (daemon
-  start, SessionStart, or neither). Part of the same dispatch.
-- [ ] ⬜ **Task 1.3**: Bisect to the commit or plan responsible, if Task 1.1 shows a clear jump.
+- [x] ✅ **Task 1.1**: Cross-version startup profile, in isolated throwaway projects (never the live daemon). Report:
+  [261006-startup-profile-sonnet.md](subagent-reports/261006-startup-profile-sonnet.md). The host was loaded throughout
+  (load average 24 to 40), so versions are compared on CPU seconds, 5 runs each:
+
+  | Version      | Daemon start CPU |
+  | ------------ | ---------------- |
+  | v3.30, v3.40 | about 1.0 s      |
+  | v3.58        | about 1.5 s      |
+  | v3.65        | about 2.0 s      |
+  | v3.68, main  | about 2.5 s      |
+
+  Top costs on main (cProfile, inflated about 2x):
+
+  - the YAML config parsed about 4 times with the pure-Python loader (2.3 s);
+  - handler registry discovery run 4 times (1.7 s);
+  - imports and pydantic model builds (1.6 s);
+  - the CLAUDE.md markdown formatting on every start (about 0.4 s).
+
+- [x] ✅ **Task 1.2**: The status line waits on daemon START, not on SessionStart. `ensure_daemon` polls up to 15 s
+  for the socket, so a cold start under load shows "DAEMON FAILED / still starting" or arrives late. Once the daemon is
+  warm the status line takes 0.3 s idle, and 0.75 to 1.06 s while a SessionStart chain runs.
+
+  This repository's own SessionStart chain needs about 8 CPU-s: `docs-qa-sweep` 4.1 and `plan-qa-sweep` 1.75, both
+  recomputed in full every start. That overran the 20 s budget and dropped the late handlers. A client with the shipped
+  example config runs the chain in about 1.6 s wall.
+
+  Not measured: network fetches (no external network in the sandbox).
+
+- [x] ✅ **Task 1.3**: Bisect. No single culprit: start-up CPU grew steadily, with the largest steps at v3.50 to v3.58,
+  v3.62 to v3.65 and v3.65 to v3.68. The shipped example config grew from 15 KB to 58 KB over the same span. The
+  report names where to bisect further, if a fix needs it.
+
 - [ ] ⬜ **Task 1.4**: Refresh `CLAUDE/Performance/BASELINE.md` with the new figures, including the dispatch figure it
   marks "not re-measured". Also correct `CLAUDE/Performance/README.md:72`, which still lists the Rust transport
   forwarder as "Never, until…" although `relay/hooks_relay.rs` exists (found by the plan's fact check).
 
 ### Phase 2: Fix (TDD, one branch per fix)
 
-- [ ] ⬜ **Task 2.1**: Rank the fix candidates from Phase 1 by measured saving and choose the clear winners. Candidates
-  to test against the data:
-  - **SessionStart**: move slow checks (network fetches, tree sweeps) off the blocking path, with results delivered on
-    a later turn.
-  - **Handler loading**: import a handler only when it is enabled.
-  - **Config validation**: cache it, keyed by the config file's fingerprint.
-  - **Status line**: render at once from cheap state, without waiting on a full start.
-- [ ] ⬜ **Task 2.2 onwards**: one task per chosen fix, each with its before and after numbers.
+- [x] ✅ **Task 2.1**: Rank the fix candidates by measured saving. The clear winners, each its own branch:
+- [ ] ⬜ **Task 2.2**: Parse the YAML config once per start, with the C loader (`CSafeLoader`) where available. About
+  0.4 s CPU saved.
+- [ ] ⬜ **Task 2.3**: Run handler registry discovery once per start. About 0.4 s CPU saved.
+- [ ] ⬜ **Task 2.4**: Skip the CLAUDE.md markdown formatting when the generated block is unchanged. About 0.4 s CPU
+  saved.
+- [ ] ⬜ **Task 2.5**: Bind the socket before the non-essential start-up work, so the first request is answered sooner.
+- [ ] ⬜ **Task 2.6**: Cache `docs-qa-sweep` and `plan-qa-sweep` by an input fingerprint, and run them off the
+  blocking chain. About 6 CPU-s saved on this repository, and no handler dropped for the budget.
+- [ ] ⬜ **Task 2.7**: Status line: while the daemon is starting, show cached fallback text instead of "DAEMON
+  FAILED".
 
 ### Phase 3: Guard and decide
 
