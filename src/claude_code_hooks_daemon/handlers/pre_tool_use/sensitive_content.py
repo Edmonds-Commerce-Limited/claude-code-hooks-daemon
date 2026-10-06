@@ -55,6 +55,11 @@ from claude_code_hooks_daemon.utils import linear_shlex
 from claude_code_hooks_daemon.utils import secret_file_matching as sfm
 from claude_code_hooks_daemon.utils import secret_redaction as sr
 from claude_code_hooks_daemon.utils.command_evasion import OPTIONAL_PATH, git_subcommand_index
+from claude_code_hooks_daemon.utils.fake_values import (
+    FakeValuesError,
+    FakeValuesRegistry,
+    load_fake_values,
+)
 from claude_code_hooks_daemon.utils.git_commit_parsing import (
     CommitForm,
     CommitReading,
@@ -680,6 +685,7 @@ class SensitiveContentHandler(PreToolUseHandlerBase):
         attached under a synthetic ``_matched`` key) so the caller can build
         an exact, fixable deny reason.
         """
+        fake_values: FakeValuesRegistry | None = None
         for entry in self._public_patterns:
             pattern = entry.get(_PATTERN_KEY_PATTERN, "")
             if not pattern:
@@ -687,10 +693,33 @@ class SensitiveContentHandler(PreToolUseHandlerBase):
             compiled = _compiled_public_pattern(pattern)
             if compiled is None:
                 continue
-            match = compiled.search(content)
-            if match:
+            for match in compiled.finditer(content):
+                # The registry is read only once something has matched, so a
+                # clean write never touches it.
+                if fake_values is None:
+                    fake_values = self._fake_values()
+                if fake_values.allows(entry.get(_PATTERN_KEY_NAME, ""), match.group(0)):
+                    continue
                 return {**entry, "_matched": match.group(0)}
         return None
+
+    def _fake_values(self) -> FakeValuesRegistry:
+        """The project's approved-fakes registry (Plan 00492).
+
+        An unreadable registry allows nothing: the guard stays as strict as it
+        was before the registry existed, and the defect is logged.
+        """
+        resolved_root = resolve_project_root()
+        project_root = self._project_root_override or (
+            Path(resolved_root) if resolved_root is not None else None
+        )
+        if project_root is None:
+            return FakeValuesRegistry()
+        try:
+            return load_fake_values(project_root)
+        except FakeValuesError as error:
+            _LOGGER.warning("sensitive_content: fake-values registry ignored: %s", error)
+            return FakeValuesRegistry()
 
     def scan_text(self, content: str) -> str | None:
         """Reason ``content`` must not be written, or None when it is clean.

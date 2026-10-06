@@ -16,7 +16,7 @@ import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
-from typing import Final
+from typing import Any, Final
 from urllib.parse import urlparse
 
 import yaml
@@ -27,6 +27,7 @@ from claude_code_hooks_daemon.remote_docs.provenance import (
     UNREVIEWED,
     Fidelity,
 )
+from claude_code_hooks_daemon.utils.fake_values import FakeValuesError, ValueSwap, ValueSwapper
 
 
 @dataclass(frozen=True)
@@ -171,11 +172,12 @@ def _render_frontmatter(
     stale_after: date | str,
     fidelity: Fidelity,
     fetch_method: str | None,
+    value_swaps: tuple[ValueSwap, ...] = (),
 ) -> str:
     stale = stale_after if isinstance(stale_after, str) else stale_after.isoformat()
     # Omitted rather than written empty when unknown: an absent optional field
     # parses cleanly, whereas `fetch_method:` with no value does not.
-    fields: dict[str, str] = {
+    fields: dict[str, Any] = {
         "source_url": source_url,
         "fetched_at": fetched_at.isoformat(),
         "fidelity": fidelity.value,
@@ -185,6 +187,16 @@ def _render_frontmatter(
     }
     if fetch_method:
         fields["fetch_method"] = fetch_method
+    if value_swaps:
+        fields["value_swaps"] = [
+            {
+                "kind": swap.kind,
+                "replacement": swap.replacement,
+                "occurrences": swap.occurrences,
+                "original_sha256": swap.original_sha256,
+            }
+            for swap in value_swaps
+        ]
 
     # Serialised BY a YAML writer rather than interpolated into YAML-shaped
     # text. Interpolation let a newline in any value open a new key, and this
@@ -208,8 +220,15 @@ def capture(
     stale_after_days: int | None = DEFAULT_STALE_AFTER_DAYS,
     fidelity: Fidelity = Fidelity.VERBATIM,
     fetch_method: str | None = None,
+    value_swapper: ValueSwapper | None = None,
 ) -> CaptureResult:
     """Fetch ``url`` and render it as a provenance-bearing document.
+
+    ``value_swapper`` replaces fake values the fake-values registry does not
+    list with ones it does (Plan 00492). The swaps are recorded in the
+    provenance, ``source_sha256`` stays the hash of the RAW upstream bytes, and
+    a document with any swap never claims ``verbatim``: its body is no longer
+    the response body.
 
     ``stale_after_days`` of ``None`` records the :data:`NEVER` sentinel, for a
     deliberately frozen archival snapshot (D6).
@@ -256,6 +275,15 @@ def capture(
     )
     digest = hashlib.sha256(raw).hexdigest()
 
+    value_swaps: tuple[ValueSwap, ...] = ()
+    if value_swapper is not None:
+        try:
+            body, value_swaps = value_swapper(body)
+        except FakeValuesError as exc:
+            raise CaptureError(f"cannot vendor {url}: {exc}") from exc
+    if value_swaps and fidelity is Fidelity.VERBATIM:
+        fidelity = Fidelity.CONVERTED
+
     frontmatter = _render_frontmatter(
         source_url=url,
         fetched_at=fetched_at,
@@ -264,6 +292,7 @@ def capture(
         stale_after=stale_after,
         fidelity=fidelity,
         fetch_method=fetch_method,
+        value_swaps=value_swaps,
     )
 
     return CaptureResult(

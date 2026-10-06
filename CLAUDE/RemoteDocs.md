@@ -46,6 +46,7 @@ Every document opens with YAML frontmatter:
 | `stale_after`      | yes      | Date the freshness window expires, or the `never` sentinel.                                                     |
 | `fetch_method`     | no       | Which fetcher produced it, and how — e.g. `agent-browser-lite-headless (accept-markdown)` vs `(html-fallback)`. |
 | `upstream_version` | no       | Version pin, where upstream publishes one.                                                                      |
+| `value_swaps`      | no       | Unlisted fake values capture swapped for listed ones — see [Fake values](#fake-values-and-the-registry).        |
 
 `stale_after` is a **date in the document**, not a policy someone must know
 about: any consumer — a tool, `cat`, a human — can see it without understanding
@@ -214,6 +215,54 @@ The hash proves the body is unchanged since the frontmatter was written, not
 that the bytes came from upstream: an author who writes the frontmatter and
 computes the hash by hand is indistinguishable from a capture. That is why the
 exemption covers only the public patterns, and never the secret word list.
+
+## Fake values and the registry
+
+An upstream page often carries an example value (a session id) that no
+public pattern can tell from a real one. The project owner's ruling (Plan
+00483 D1, built by Plan 00492) is one registry of approved FAKE values,
+`.claude/fake-values.yaml`, by kind. This section is the canonical account of
+it; other docs point here.
+
+- A kind is named after the `sensitive_content` public pattern it exempts
+  (`session-uuid`). `values` are matched EXACTLY. An optional `fake_looking`
+  regex says what a fake of that kind looks like.
+- `sensitive_content` (the write-time handler, the commit scan and
+  `scripts/qa/check_sensitive_content.py`) lets a match through only when it is
+  exactly a listed value of its own pattern's kind. An unlisted real-looking
+  value is blocked as before, and a registry that cannot be parsed allows
+  nothing.
+- The docs QA check `unlisted-fake-value` reports a fake-looking value that is
+  not on the registry, in docs and in vendored pages. Remedy: use a listed
+  fake, or extend the registry for a genuinely new kind.
+- `remote-docs add` and `refresh` swap each unlisted fake the page carries for
+  an unused listed fake of the same kind, before the content scan. A page whose
+  fakes are all listed is stored untouched.
+
+**The swap is a fidelity-rule exception, and the provenance says so.** The
+stored body is no longer the response body, so a document with any swap can
+never declare `verbatim` (the parser rejects it) and is recorded as `converted`.
+`source_sha256` stays the hash of the RAW upstream bytes, so `refresh` can
+still no-op, and the body no longer hashes to it, so a swapped page is scanned
+as ours and is allowed only because its values are listed. The swap is one
+optional field:
+
+```yaml
+value_swaps:
+  - kind: session-uuid          # the registry kind
+    replacement: <listed value> # what the body now holds
+    occurrences: 3              # how many times it was swapped
+    original_sha256: <64 hex>   # hash of the swapped-out value, never the value
+```
+
+The original value is deliberately recorded only as a hash: it is exactly the
+text the sensitive-content patterns refuse, so writing it into the frontmatter
+would be refused too. The hash still lets a reader confirm which upstream value
+was replaced. A page with more distinct unlisted values than the kind has
+unused listed fakes cannot be captured; extend the registry.
+
+An already-vendored page that predates the registry is brought in line by
+`bin/hooks-daemon remote-docs add --force <url>`.
 
 ## Configuration
 
