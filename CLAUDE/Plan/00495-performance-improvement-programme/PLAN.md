@@ -73,8 +73,10 @@ Evidence already seen in this session (2026-10-06), not yet explained:
   for the socket, so a cold start under load shows "DAEMON FAILED / still starting" or arrives late. Once the daemon is
   warm the status line takes 0.3 s idle, and 0.75 to 1.06 s while a SessionStart chain runs.
 
-  This repository's own SessionStart chain needs about 8 CPU-s: `docs-qa-sweep` 4.1 and `plan-qa-sweep` 1.75, both
-  recomputed in full every start. That overran the 20 s budget and dropped the late handlers. A client with the shipped
+  This repository's own SessionStart chain needs about 8 CPU-s: `docs-qa-sweep` 4.1 and `plan-qa-sweep` 1.75. The docs
+  corpus reuses per-file records when mtime and size are unchanged, but the checks themselves rerun on every start,
+  with no result cache. Measured chain runs of 21.1 s and 20.1 s overran the dispatch budget (reported as 20 s
+  in this session's SessionStart notice) and dropped the late handlers. A client with the shipped
   example config runs the chain in about 1.6 s wall.
 
   Not measured: network fetches (no external network in the sandbox).
@@ -96,7 +98,7 @@ Evidence already seen in this session (2026-10-06), not yet explained:
 - [ ] ⬜ **Task 2.4**: Skip the CLAUDE.md markdown formatting when the generated block is unchanged. About 0.4 s CPU
   saved.
 - [ ] ⬜ **Task 2.5**: Bind the socket before the non-essential start-up work, so the first request is answered sooner.
-- [ ] ⬜ **Task 2.6**: Cache `docs-qa-sweep` and `plan-qa-sweep` by an input fingerprint, and run them off the
+- [ ] ⬜ **Task 2.6**: Add a result cache to `docs-qa-sweep` and `plan-qa-sweep`, keyed by an input fingerprint, and run them off the
   blocking chain. About 6 CPU-s saved on this repository, and no handler dropped for the budget.
 - [ ] ⬜ **Task 2.7**: Status line: while the daemon is starting, show cached fallback text instead of "DAEMON
   FAILED".
