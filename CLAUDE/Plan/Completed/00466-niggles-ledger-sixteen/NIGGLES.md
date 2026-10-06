@@ -1349,15 +1349,17 @@ from the socket's stem, and the forwarder and the relay use the events dir.
 It touches the same runtime-path code as N86, so it goes on N86's branch
 after N24 merges.
 
-**Status:** parked: the fix changes existing fallback paths, needs an owner
-decision. A working fix (Plan 00483 Task 3.1, batch B) is recoverable from
-commit `094676360` on branch `agent-a852e66b72ca67937-652324e9`: a `_host_tag()`
+**Status:** FIXED at `7c525415e` (Plan 00483 D2, owner ruling): a `_host_tag()`
 helper in `daemon/paths.py` adds a 6-hex hostname hash to both fallback names
 (`hooks-daemon-<hash>-<hosttag>.<ext>`, `hooks-daemon-<hash>-<hosttag>-events`),
-with tests in `tests/unit/daemon/test_fallback_paths_per_host.py`. It removes
-the collision but moves every existing fallback socket, PID file, log and
-events dir on upgrade. Natural paths do not change. Consumers that may compute
-the fallback name independently of `paths.py` are listed in the 00483 report.
+with tests in `tests/unit/daemon/test_fallback_paths_per_host.py`. Existing
+fallback socket, PID file, log and events dir names move on upgrade; natural
+paths do not change. Forwarders bake the events dir only on the fallback, and
+the upgrade's unconditional hook redeploy (`deploy_all_hooks`) regenerates them,
+pinned by `tests/integration/test_upgrade_rebakes_fallback_events_dir.py`, so no
+separate regeneration step was added. Release note 041. Consumers that may
+compute the fallback name independently of `paths.py` are listed in the 00483
+report.
 
 ### N97 — `block-curl-pipe-shell` denies prose that only mentions curl and bash
 
