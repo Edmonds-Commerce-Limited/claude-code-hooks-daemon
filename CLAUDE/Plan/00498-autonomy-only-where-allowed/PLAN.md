@@ -1,6 +1,6 @@
 # Plan 00498: autonomy only where allowed
 
-**Status**: Not Started
+**Status**: In Progress
 **Created**: 2026-10-06
 **Owner**: dev
 **Priority**: High
