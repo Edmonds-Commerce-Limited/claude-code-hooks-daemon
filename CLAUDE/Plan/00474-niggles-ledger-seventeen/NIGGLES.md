@@ -1250,7 +1250,17 @@ entries, needs the owner.
 
 **Owner ruling (2026-10-05):** resolved: one named helper with a required reason argument, and the audit widened to catch log-then-continue bodies — see [OWNER-RULINGS-261005.md](../00483-threat-model-conformance-audit/OWNER-RULINGS-261005.md) (B4).
 
-**Status**: ⬜ Open (ruling given; implementation not started).
+**Status**: 🟡 Partly fixed (d7ec3ff9b, d8e9aea16, 12a2e17a3). The named helper
+`utils/deliberate_swallow.log_and_continue(logger, exc, *, reason, level=WARNING)` exists, and the
+audit's `log-and-continue` rule now flags any non-raising handler body that logs (inline or by passing
+the exception to a helper) and then continues, passes, breaks or returns a fallback. The sanctioned
+form is the helper called with a specific `reason`. Console reports (`print`, `sys.stderr.write`) and
+failures recorded on a list or future count as surfacing. The widened rule first surfaced 240 findings
+(after those exemptions); 27 handlers are converted so far, and 210 remain in `src/` and `scripts/`
+(listed by the audit, `./scripts/qa/llm_qa.py error_hiding`). Until they are
+converted the repo self-scan (`TestRealRepoSelfScan`) and the error_hiding gate stay red.
+The 99 existing function-keyed `log-and-continue` exclusions still mask any new finding in the same
+function; migrating them to the helper (then deleting them) is part of what remains.
 
 ### N297 — the coordinator merged the merge advisor itself without a targeted QA run, and main broke twice
 
