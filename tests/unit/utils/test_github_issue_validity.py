@@ -18,6 +18,7 @@ from claude_code_hooks_daemon.utils.github_issue_validity import (
     AuthorWhitelistCheck,
     CheckResult,
     CheckStatus,
+    FixAction,
     GhError,
     IssueFacts,
     IssueValidityService,
@@ -55,6 +56,8 @@ class FakeGh:
         self.issues: dict[int, dict[str, Any] | Exception] = {}
         self.issue_list: list[dict[str, Any]] | Exception = []
         self.edit_error: Exception | None = None
+        #: An account that GitHub assigns at the same moment as the claim.
+        self.race_winner: str | None = None
 
     def __call__(self, args: Sequence[str]) -> str:
         argv = tuple(args)
@@ -78,7 +81,11 @@ class FakeGh:
             number = int(argv[2])
             current = self.issues[number]
             assert isinstance(current, dict)
-            current["assignees"] = [{"login": "lts-bob"}]
+            if "--remove-assignee" in argv:
+                current["assignees"] = [a for a in current["assignees"] if a["login"] != "lts-bob"]
+            else:
+                winner = [{"login": self.race_winner}] if self.race_winner else []
+                current["assignees"] = [*winner, {"login": "lts-bob"}]
             return f"https://github.com/o/r/issues/{number}\n"
         raise AssertionError(f"unexpected gh call: {argv}")
 
@@ -142,9 +149,20 @@ class TestAssigneeCheck:
         return IssueFacts(number=7, assignees=tuple(assignees), author="x", state="OPEN", labels=())
 
     def test_self_assigned_is_ok(self) -> None:
-        result = self.check.evaluate(self._facts("other", "LTS-Bob"), "lts-bob")
+        result = self.check.evaluate(self._facts("LTS-Bob"), "lts-bob")
         assert result.status is CheckStatus.OK
         assert result.fix is None
+
+    def test_two_assignees_including_me_is_blocking_and_ambiguous(self) -> None:
+        result = self.check.evaluate(self._facts("other", "LTS-Bob"), "lts-bob")
+        assert result.status is CheckStatus.BLOCKING
+        assert result.fix is None
+        assert "exactly one assignee" in result.message
+
+    def test_two_other_assignees_is_blocking(self) -> None:
+        result = self.check.evaluate(self._facts("alice", "carol"), "lts-bob")
+        assert result.status is CheckStatus.BLOCKING
+        assert "exactly one assignee" in result.message
 
     def test_unassigned_is_fixable_with_a_claim(self) -> None:
         result = self.check.evaluate(self._facts(), "lts-bob")
@@ -334,7 +352,7 @@ class TestCaching:
     ) -> None:
         gh.issues[7] = _payload(["alice"])
         assert check_issue(7, [AssigneeCheck()], service=service).verdict is Verdict.BLOCKED
-        gh.issues[7] = _payload(["alice", "lts-bob"])
+        gh.issues[7] = _payload(["lts-bob"])
         assert check_issue(7, [AssigneeCheck()], service=service).verdict is Verdict.VALID
 
     def test_a_failure_is_remembered_briefly_then_retried(
@@ -384,6 +402,46 @@ class TestApplyFix:
         gh.edit_error = GhError("permission denied")
         with pytest.raises(GhError):
             service.apply_fix(fix)
+
+
+class TestClaim:
+    def _fix(self, service: IssueValidityService) -> FixAction:
+        return check_issue(7, [AssigneeCheck()], service=service).fixes[0]
+
+    def test_a_clean_claim_leaves_me_as_the_only_assignee(
+        self, gh: FakeGh, service: IssueValidityService
+    ) -> None:
+        gh.issues[7] = _payload()
+        assert service.claim(self._fix(service)) is True
+        assert not [c for c in gh.calls if "--remove-assignee" in c]
+        assert check_issue(7, [AssigneeCheck()], service=service).verdict is Verdict.VALID
+
+    def test_losing_a_race_backs_off_and_leaves_the_winner_alone(
+        self, gh: FakeGh, service: IssueValidityService
+    ) -> None:
+        gh.issues[7] = _payload()
+        fix = self._fix(service)
+        gh.race_winner = "alice"
+        assert service.claim(fix) is False
+        assert ("issue", "edit", "7", "--remove-assignee", "@me") in gh.calls
+        assert check_issue(7, [AssigneeCheck()], service=service).verdict is Verdict.BLOCKED
+        issue = gh.issues[7]
+        assert isinstance(issue, dict)
+        assert issue["assignees"] == [{"login": "alice"}]
+
+    def test_a_failed_reread_raises_gh_error(
+        self, gh: FakeGh, service: IssueValidityService
+    ) -> None:
+        gh.issues[7] = _payload()
+        fix = self._fix(service)
+
+        def view_fails(args: Sequence[str]) -> str:
+            if tuple(args[:2]) == ("issue", "view"):
+                raise GhError("offline")
+            return gh(args)
+
+        with pytest.raises(GhError):
+            IssueValidityService(runner=view_fails).claim(fix)
 
 
 class TestListOpenIssues:

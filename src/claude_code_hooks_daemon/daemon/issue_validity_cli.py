@@ -110,8 +110,12 @@ def _check_one(
         try:
             for fix in report.fixes:
                 if fix.name == CLAIM_FIX_NAME:
-                    service.apply_fix(fix)
-                    claimed = True
+                    claimed = service.claim(fix)
+                    if not claimed:
+                        stderr.write(
+                            f"claim failed for #{number}: another account was assigned at the "
+                            "same time; this claim backed off and the issue is not workable\n"
+                        )
         except GhError as exc:
             stderr.write(f"claim failed for #{number}: {exc}\n")
         else:
