@@ -1425,7 +1425,9 @@ more: F1 was already fixed on F44 in ccy 3.82.1, so the checklist was telling th
 `reference_repos` config) and require a claim about an external repository to be checked there before it is
 called unverifiable. The coordinator should name the clone in the dispatch too.
 
-**Status**: ⬜ Open.
+**Status**: ✅ Fixed on this branch (merge pending). `.claude/agents/plan-fact-checker.md` now names the governed
+reference clones and requires a check there first. The coordinator naming the clone in the dispatch is still on the
+coordinator.
 
 ### N367 — the coordinator's branch-QA venv recipe installs off-lock tool versions, so three tests fail falsely
 
@@ -1508,7 +1510,11 @@ declare it, and background QA was still running. The Stop hook nevertheless trea
 denied it until a stand-in cron was created. The token should count only where the stop declares it (immediately
 after the `STOPPING BECAUSE:` prefix), never inside fenced or quoted text.
 
-**Status**: ⬜ Open.
+**Status**: ✅ Fixed on this branch (merge pending). `_declaring_lines` in `auto_continue_stop.py` drops fenced,
+blockquoted and indented lines before the sentinel and the older phrasings are matched. Tests:
+`TestOnlyTheStopsOwnDeclarationCounts::test_a_quoted_declaration_demands_no_stand_in` (six shapes),
+`test_a_fence_before_the_real_declaration_does_not_hide_it`, `test_an_older_phrasing_in_the_stop_line_still_declares`
+in `tests/unit/handlers/stop/test_auto_continue_stop_stand_in.py`.
 
 ### N363 — a pipe inside a `bash -c` string is blamed on `bash`, not on its real producer
 
