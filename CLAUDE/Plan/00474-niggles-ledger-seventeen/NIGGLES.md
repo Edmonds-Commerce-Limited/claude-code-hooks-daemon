@@ -1414,6 +1414,27 @@ The uncertain-move union judges the hook directory and the LAST recorded move (`
 every candidate directory (`sub`). Remedy: judge every directory any `cd` in the chain could
 land in.
 
+### N358 — one pending fact-check record from the pre-delivery build stops every delivery
+
+**Found**: by the coordinator, in `bin/hooks-daemon logs -l WARNING` after the daemon restart that loaded Plan 00480
+Tasks 4.2–4.3 (merged `accde1c23`). This repository's dogfood config had `plan_fact_check_feed` enabled, and
+`untracked/plan-fact-check/` held 14 `*.pending.json` records written by the earlier build, which stored no `files`.
+
+**What happens**: `deliver_pending` reads the pending records in turn, and `read_pending` raises
+`PlanFactCheckStateError: malformed pending state …: no files` on the first old one. The handler catches it, logs an
+ERROR with a traceback ("owed fact-check unreadable; delete it to reset") and allows. The error ends the delivery
+loop, so no record after it is ever delivered, and the same ERROR repeats on every PostToolUse until someone deletes
+the file by hand. Release note 037 calls this "logged, never blocking", which is true but hides that delivery stops.
+The branch agent also reported the handler as off in this repository's config; it was on.
+
+**Why tests missed it**: the tests write pending records only in the new format.
+
+**Remedy**: a record that cannot be read is discarded (renamed aside, or deleted) with one WARNING naming it, and the
+loop goes on to the next record. Then re-enable the dogfood handler and run Task 4.4's live check. Meanwhile the dogfood
+config has the handler off.
+
+**Status**: ⬜ Open.
+
 ### N355 — the protected-file index never becomes available in the live daemon
 
 **Source**: the coordinator, 2026-10-05, right after merge dc5c9263b of Plan 00483 Phase 2.

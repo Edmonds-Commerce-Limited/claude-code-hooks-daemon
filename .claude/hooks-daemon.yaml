@@ -910,8 +910,8 @@ handlers:
       # This repo is the self-install, so `.claude/project-handlers` IS the
       # project-handlers path -- the default is correct here and needs no override.
 
-    plan_fact_check_feed:  # Dogfood: debounce plan edits into one pending fact-check record (Plan 00480)
-      enabled: true  # Opt-in upstream; records only, delivery is not built, never blocks.
+    plan_fact_check_feed:  # Dogfood: debounce plan edits, deliver one fact-check per plan (Plan 00480)
+      enabled: false  # Off until 00474 N358 is fixed: a pre-delivery pending record stops every delivery.
       priority: 37
 
   # PostToolUseFailure handlers (run after a tool call FAILS)
