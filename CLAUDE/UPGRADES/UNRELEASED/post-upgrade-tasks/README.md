@@ -87,7 +87,9 @@ This file's lower half should list the tasks currently in this directory, so an 
 
 <!-- BEGIN TASK INDEX — regenerate when adding/removing tasks -->
 
-- `01-give-strict-mode-exclusions-a-reason.md` — config-migration (recommended): in a `strict_mode` project, rewrite plain `exclude_paths` / `extra_whitelist` entries as `{pattern, reason}`.
+| File                                         | Type             | Severity    | Applies to                                                          | One-line summary                                                                                   |
+| -------------------------------------------- | ---------------- | ----------- | ------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| `01-give-strict-mode-exclusions-a-reason.md` | config-migration | recommended | `strict_mode` projects with plain `exclude_paths`/`extra_whitelist` | Rewrite plain exclusion entries as `{pattern, reason}`, so the SessionStart config problem clears. |
 
 <!-- END TASK INDEX -->
 
