@@ -352,6 +352,8 @@ Either form in your `STOPPING BECAUSE:` line records a marker that makes the dae
 
 **Only when it is the ONLY thing blocking you.** A stop that merely mentions waiting on someone while other work remains must not use these shapes — that would silence a tick you could have used. If there is work you could still do, do it instead of stopping.
 
+**An `[awaiting-human]` stop must also schedule a one-off stand-in.** With `persistent_crons.enabled`, a main-thread stop that declares it is blocked on the human is denied until `session_crons` holds a cron led by `[tick:stand-in]`; the deny gives the exact `CronCreate` (`recurring: false`, about `options.stand_in_delay_hours` = 3 hours out, valid above 0 and below 24). If the marker is still live when it fires, a `model: fable` sub-agent picks among the options you laid out and the choice is journalled as the stand-in's ruling, never the owner's. It may choose only engineering options: releases, force and remote-branch deletes, QA suppressions, history rewrites, upgrade approvals and anything a guard says to ask the user stay blocked. The stand-in tick is not dropped by the live marker, and a sub-agent or teammate stop is never asked for one.
+
 ## All other enforced rules
 
 <!-- handler: bash-safe-mode -->
