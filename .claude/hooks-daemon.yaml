@@ -288,18 +288,27 @@ handlers:
           # exemption for its own secret word list: the file that defines
           # what is blocked is the one file that must be allowed to say it.
           # Narrow by design — this exempts THIS file, not `.claude/`.
-          - '.claude/hooks-daemon.yaml'
-          # Confirmed-legitimate synthetic UUID fixtures (REDACTION-MAP.md
-          # item 4) — these generate UUID-shaped strings on purpose as test
-          # data, they do not contain a real session UUID.
-          - 'tests/unit/handlers/status_line/test_thread_registry.py'
-          - 'tests/unit/supervise/test_session_identity.py'
-          # This handler's own source/tests necessarily demonstrate the
-          # public patterns they implement (e.g. the vhosts-path example in
-          # get_acceptance_tests() and unit-test fixtures) — self-referential
-          # documentation of the feature, not a leak.
-          - 'src/claude_code_hooks_daemon/handlers/pre_tool_use/sensitive_content.py'
-          - 'tests/unit/handlers/pre_tool_use/test_sensitive_content.py'
+          - pattern: '.claude/hooks-daemon.yaml'
+            reason: >-
+              A rules file must be able to contain its own rules: this config declares the
+              patterns, so it necessarily contains text matching them. Narrow by design, this
+              exempts this one file, not `.claude/`.
+          - pattern: 'tests/unit/handlers/status_line/test_thread_registry.py'
+            reason: >-
+              Confirmed-legitimate synthetic UUID fixtures (REDACTION-MAP.md item 4): it
+              generates UUID-shaped strings on purpose as test data, not a real session UUID.
+          - pattern: 'tests/unit/supervise/test_session_identity.py'
+            reason: >-
+              Confirmed-legitimate synthetic UUID fixtures (REDACTION-MAP.md item 4): it
+              generates UUID-shaped strings on purpose as test data, not a real session UUID.
+          - pattern: 'src/claude_code_hooks_daemon/handlers/pre_tool_use/sensitive_content.py'
+            reason: >-
+              This handler's own source necessarily demonstrates the public patterns it
+              implements: self-referential documentation of the feature, not a leak.
+          - pattern: 'tests/unit/handlers/pre_tool_use/test_sensitive_content.py'
+            reason: >-
+              This handler's own tests necessarily demonstrate the public patterns it
+              implements: self-referential documentation of the feature, not a leak.
 
     # Plan 00272: protected files' CONTENTS never enter context. Default globs
     # (*.secret*, .vault-pass*, ...) cover .claude/block-words.secret; use
@@ -314,13 +323,23 @@ handlers:
         # source/tests (and its matching core + docs generator fixtures)
         # necessarily NAME protected paths to test them.
         exclude_paths:
-          - 'src/claude_code_hooks_daemon/handlers/pre_tool_use/secret_file_guard.py'
-          - 'src/claude_code_hooks_daemon/utils/secret_file_matching.py'
-          - 'src/claude_code_hooks_daemon/utils/secret_meta.py'
-          - 'tests/unit/handlers/pre_tool_use/test_secret_file_guard.py'
-          - 'tests/unit/utils/test_secret_file_matching.py'
-          - 'tests/unit/utils/test_secret_meta.py'
-          - 'tests/unit/daemon/test_cli_secret_meta.py'
+          - pattern: 'src/claude_code_hooks_daemon/handlers/pre_tool_use/secret_file_guard.py'
+            reason: &secret_guard_reason >-
+              This handler's own source, tests and matching core necessarily NAME protected
+              paths to test them. Scopes only the authored-script content scan; a protected
+              path itself is never excludable.
+          - pattern: 'src/claude_code_hooks_daemon/utils/secret_file_matching.py'
+            reason: *secret_guard_reason
+          - pattern: 'src/claude_code_hooks_daemon/utils/secret_meta.py'
+            reason: *secret_guard_reason
+          - pattern: 'tests/unit/handlers/pre_tool_use/test_secret_file_guard.py'
+            reason: *secret_guard_reason
+          - pattern: 'tests/unit/utils/test_secret_file_matching.py'
+            reason: *secret_guard_reason
+          - pattern: 'tests/unit/utils/test_secret_meta.py'
+            reason: *secret_guard_reason
+          - pattern: 'tests/unit/daemon/test_cli_secret_meta.py'
+            reason: *secret_guard_reason
 
     # Plan 00278 Phase 3d.1: dogfood-enabled here with the flaggable path
     # pointed at the cyber-flag test fixture (ships disabled upstream via
@@ -841,9 +860,15 @@ handlers:
         # `test_no_probe_acts_on_the_human_scratch_directory` keeps it so.
         # Never add `/untracked/acceptance/**` or anything matching it here.
         exclude_paths:
-          - "/untracked/scratch/**"
-          - "/untracked/qa/**"
-          - "/untracked/worktrees/**"
+          - pattern: "/untracked/scratch/**"
+            reason: &untracked_reason >-
+              `untracked/` is this project's sanctioned scratch location (project_containment
+              and pipe_blocker direct work there), so linting a gitignored throwaway probe
+              there disagrees with what the directory is for (Plan 00422 N2).
+          - pattern: "/untracked/qa/**"
+            reason: *untracked_reason
+          - pattern: "/untracked/worktrees/**"
+            reason: *untracked_reason
 
     git_hooks_executable_fixer:  # Auto-chmod +x git hooks git skipped as non-executable
       enabled: true

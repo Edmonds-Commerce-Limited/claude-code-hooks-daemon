@@ -366,6 +366,36 @@ class TestExcludePaths:
         assert data["summary"]["passed"] is True
         assert data["summary"]["total_violations"] == 0
 
+    def test_mapping_form_entry_still_excludes(self, tmp_path: Path) -> None:
+        """A `{pattern, reason}` entry must exclude exactly like the plain string.
+
+        The checker reads the raw YAML, so a form it does not understand would
+        silently stop excluding and report violations in files the project
+        declared exempt.
+        """
+        config = tmp_path / "hooks-daemon.yaml"
+        _write_config(
+            config,
+            public_patterns=[{"name": "alpha", "pattern": "alpha", "description": ""}],
+        )
+        config.write_text(
+            config.read_text().replace(
+                "options:\n",
+                "options:\n        exclude_paths:\n"
+                "          - pattern: 'fixtures/**'\n"
+                "            reason: 'deliberate sample text for the scanner'\n",
+            )
+        )
+        excluded_dir = tmp_path / "fixtures"
+        excluded_dir.mkdir()
+        (excluded_dir / "sample.txt").write_text("alpha appears here\n")
+        (tmp_path / "clean.txt").write_text("nothing to report\n")
+
+        data = _run_checker(tmp_path, config)
+
+        assert data["summary"]["passed"] is True
+        assert data["summary"]["total_violations"] == 0
+
     def test_excluding_every_file_is_not_a_pass(self, tmp_path: Path) -> None:
         config = tmp_path / "hooks-daemon.yaml"
         _write_config(config, exclude_paths=["fixtures/**"])

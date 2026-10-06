@@ -310,3 +310,31 @@ class TestMalformedInputFailsQuietlyRatherThanCryingWolf:
 
         assert report.has_drift is False
         assert report.guard_changes == ()
+
+
+class TestReasonedExclusionsCompareByPattern:
+    """Adding a reason to an existing exclusion widens nothing (Plan 00484 G4)."""
+
+    def test_plain_to_reasoned_form_is_not_drift(self) -> None:
+        working = _COMMITTED.replace(
+            "    - vendor/**",
+            "    - pattern: vendor/**\n      reason: third-party code we do not edit",
+        ).replace(
+            "          - docs/**",
+            "          - pattern: docs/**\n            reason: generated documentation output",
+        )
+
+        report = compare_guard_config(_COMMITTED, working)
+
+        assert report.guard_changes == ()
+
+    def test_a_new_reasoned_exclusion_is_still_widening(self) -> None:
+        working = _COMMITTED.replace(
+            "    - vendor/**",
+            "    - vendor/**\n    - pattern: src/**\n      reason: a stated reason here",
+        )
+
+        report = compare_guard_config(_COMMITTED, working)
+
+        assert [c.kind for c in report.guard_changes] == [DriftKind.EXCLUSIONS_WIDENED]
+        assert "src/**" in report.guard_changes[0].detail
