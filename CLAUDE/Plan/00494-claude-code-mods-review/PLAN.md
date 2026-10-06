@@ -54,12 +54,13 @@ relate to hooks, plugins, skills, agents and settings.
   - **New candidates:** a user to-do and question list in the sidebar, and SessionStart messages.
   - **Maybe:** the session-resilience features, pending a detailed proposal.
   - **Rejected:** the ccy supervisor as a mod. Mods are not for protection.
-- [ ] 🔄 **Task 2.2**: Detailed proposal for the single hooks-daemon mod: architecture, the to-do/question list,
+- [x] ✅ **Task 2.2** (`f794f4cd1`): Detailed proposal for the single hooks-daemon mod: architecture, the to-do/question list,
   SessionStart messages, session resilience, and a concrete spec for daemon mod awareness. It also answers the owner's
   question of how mods are updated and how projects are kept on the right mod version. Report:
   `subagent-reports/261006-hooks-daemon-mod-proposal-opus.md`.
 - [ ] ⬜ **Task 2.3**: Build daemon mod awareness (approved), TDD, from the Task 2.2 spec.
-- [ ] ⬜ **Task 2.4**: Put the Task 2.2 proposal to the owner; file a build plan for the mod features chosen.
+- [ ] ⬜ **Task 2.4**: Put the Task 2.2 proposal to the owner; file a build plan for the mod features chosen. Put to
+  the owner on 2026-10-06; waiting on the choice.
 
 ## Success Criteria
 
