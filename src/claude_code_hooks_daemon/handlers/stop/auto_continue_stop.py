@@ -28,10 +28,14 @@ import json
 import logging
 import re
 import time
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, ClassVar
 
+from pydantic import ValidationError
+
+from claude_code_hooks_daemon.config.models import Config
 from claude_code_hooks_daemon.constants import (
     HandlerID,
     HandlerTag,
@@ -55,6 +59,7 @@ from claude_code_hooks_daemon.daemon.synthetic_traffic import (
     event_synthetic_source,
 )
 from claude_code_hooks_daemon.utils.blockage_marker import MARKER_FILENAME, write_marker
+from claude_code_hooks_daemon.utils.config_cache import default_config, load_config_cached
 from claude_code_hooks_daemon.utils.goal_ledger import (
     LEDGER_FILENAME,
     GoalLedger,
@@ -62,6 +67,11 @@ from claude_code_hooks_daemon.utils.goal_ledger import (
 )
 from claude_code_hooks_daemon.utils.private_io import make_private_dir, open_private_append
 from claude_code_hooks_daemon.utils.retention import cap_log_file
+from claude_code_hooks_daemon.utils.stand_in_cron import (
+    DEFAULT_STAND_IN_DELAY_HOURS,
+    stand_in_verdict,
+    validate_delay_hours,
+)
 from claude_code_hooks_daemon.utils.stop_hook_helpers import (
     get_transcript_reader,
     has_recent_stop_hook_block,
@@ -609,6 +619,41 @@ class AutoContinueStopHandler(StopHandlerBase):
         )
         self._rules_by_id: dict[str, Rule] = {rule.rule_id: rule for rule in self._rules}
         self._formatter = RuleFormatter()
+        # Plan 00470 Task 5.2: hours until the one-off stand-in cron an
+        # `[awaiting-human]` stop must schedule (option `stand_in_delay_hours`).
+        self.__stand_in_delay_hours: float = DEFAULT_STAND_IN_DELAY_HOURS
+        # Injectable config source (tests substitute a fixed Config).
+        self._config_loader: Callable[[], Config] = self._default_config_loader
+
+    @property
+    def _stand_in_delay_hours(self) -> float:
+        return self.__stand_in_delay_hours
+
+    @_stand_in_delay_hours.setter
+    def _stand_in_delay_hours(self, value: object) -> None:
+        """Validate at config load: a delay that cannot work must not be silent."""
+        self.__stand_in_delay_hours = validate_delay_hours(value)
+
+    def _default_config_loader(self) -> Config:
+        """The project's daemon config; defaults (stand-in off) when unloadable."""
+        try:
+            return load_config_cached(
+                ProjectContext.project_root() / ".claude" / "hooks-daemon.yaml"
+            )
+        except (RuntimeError, ValidationError, OSError, ValueError) as exc:
+            logger.debug("auto_continue_stop: cannot load config: %s", exc)
+            return default_config()
+
+    def _stand_in_block(self, hook_input: dict[str, Any]) -> BlockingResult | None:
+        """The block for an awaiting-human stop that left no stand-in cron.
+
+        Gated on the same ``persistent_crons.enabled`` master switch as the
+        declared-cron enforcers, so a project that has not opted into session
+        crons is never told to create one.
+        """
+        if not self._config_loader().persistent_crons.enabled:
+            return None
+        return stand_in_verdict(hook_input, delay_hours=self._stand_in_delay_hours)
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """Return True for all Stop events unless re-entry or AskUserQuestion.
@@ -714,6 +759,11 @@ class AutoContinueStopHandler(StopHandlerBase):
                     return result
                 logger.info("STOPPING BECAUSE: prefix detected - allowing stop")
                 marker_written = self._maybe_record_human_blocked_marker(hook_input, text)
+                if marker_written:
+                    stand_in = self._stand_in_block(hook_input)
+                    if stand_in is not None:
+                        self._log_stop_event(hook_input, Decision.DENY, stand_in.reason or "")
+                        return stand_in
                 result = BlockingResult(decision=Decision.ALLOW)
                 self._log_stop_event(hook_input, Decision.ALLOW, "", marker_written=marker_written)
                 return result
@@ -1298,7 +1348,20 @@ class AutoContinueStopHandler(StopHandlerBase):
             "merely mentions waiting on someone while other work remains "
             "must not use these shapes — that would silence a tick you could "
             "have used. If there is work you could still do, do it instead of "
-            "stopping."
+            "stopping.\n\n"
+            "**An `[awaiting-human]` stop must also schedule a one-off stand-in.** "
+            "With `persistent_crons.enabled`, a main-thread stop that declares it "
+            "is blocked on the human is denied until `session_crons` holds a cron "
+            "led by `[tick:stand-in]`; the deny gives the exact `CronCreate` "
+            "(`recurring: false`, about `options.stand_in_delay_hours` = 3 hours "
+            "out, valid above 0 and below 24). If the marker is still live when it "
+            "fires, a `model: fable` sub-agent picks among the options you laid out "
+            "and the choice is journalled as the stand-in's ruling, never the "
+            "owner's. It may choose only engineering options: releases, force and "
+            "remote-branch deletes, QA suppressions, history rewrites, upgrade "
+            "approvals and anything a guard says to ask the user stay blocked. The "
+            "stand-in tick is not dropped by the live marker, and a sub-agent or "
+            "teammate stop is never asked for one."
         )
 
     def get_acceptance_tests(self) -> list[Any]:

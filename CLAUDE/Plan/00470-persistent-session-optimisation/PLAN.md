@@ -126,7 +126,7 @@ waited on one bandit decision.
   its work is independent of the pending question. `failsafe-recovery` is
   suppressed, because resuming interrupted work is exactly what waits on the human.
   TDD, with the default unchanged for undeclared jobs.
-- [ ] ⬜ **Task 5.2**: Timed stand-in. When a stop declares `[awaiting-human]`, the
+- [x] ✅ **Task 5.2**: Timed stand-in. When a stop declares `[awaiting-human]`, the
   session also schedules a one-off cron about three hours out. If the marker is
   still live when it fires, a Fable (`claude-fable-5-1`) sub-agent reads the
   pending question and the options the agent laid out, chooses one, and the
@@ -137,6 +137,7 @@ waited on one bandit decision.
     reserves for a human stay blocked: releases, force deletes, QA suppressions,
     history rewrites, and anything the guards say to ask the user for.
   - **Coordinator call (2026-10-05, under the owner's "go with the clear winners" instruction):** the stop hook blocks the stop until the one-off cron shows in `session_crons`, as `cron_stop_enforcer` does for declared jobs. Resolved; not an owner ruling.
+  - Done: `utils/stand_in_cron.py` (prompt, one-off schedule, verdict) and `TickKind.STAND_IN` (`[tick:stand-in]`, so the suppressor lets it through under a live marker). The block lives in `auto_continue_stop` Branch 2 right after the marker is written, because `cron_stop_enforcer` runs first and cannot see the declaration. Option `stand_in_delay_hours` (default 3, validated); gated on `persistent_crons.enabled`; main thread only. Release note 038.
 
 ### Phase 6: Where declared crons run (owner ruling, issues #60 and #62)
 
