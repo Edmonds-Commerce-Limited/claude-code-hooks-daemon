@@ -1763,8 +1763,8 @@ reproduction before it is fixed.
 ### N330–N337 — findings from the Plan 00486 backfill changelog review (Claude Code 2.1.272 to 2.1.288)
 
 **Source**: Plan 00486 Task 1.4,
-`CLAUDE/Plan/00486-claude-code-version-tracking/subagent-reports/261003-task-1.4-backfill-review-sonnet.md` (on
-branch `worktree-p486-cc-versions` until it merges). The report filtered the 2.1.273 to 2.1.285 entries by keyword
+`CLAUDE/Plan/Completed/00486-claude-code-version-tracking/subagent-reports/261003-task-1.4-backfill-review-sonnet.md`.
+The report filtered the 2.1.273 to 2.1.285 entries by keyword
 and did not read them in full, so each item below has to be verified before anyone acts on it.
 
 | Id   | Finding                                                                                                                     | Status                                                                                                                                   |

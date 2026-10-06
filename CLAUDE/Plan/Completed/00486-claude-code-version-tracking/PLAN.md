@@ -1,6 +1,6 @@
 # Plan 00486: Claude Code version tracking
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-10-03
 **Owner**: dev
 **Priority**: Medium
@@ -42,9 +42,9 @@ Prior art: Plan 00327 audited the hook contracts once and recorded `last_audited
 
 - [x] ✅ **Task 1.2** (RELEASING.md sub-step 1c and `.claude/agents/claude-code-changelog-reviewer.md`): Add a RELEASING.md step that records the version and runs the review. The review is a dedicated read-only subagent definition, `claude-code-changelog-reviewer`. It reads the vendored changelog (`hooks-daemon remote-docs`) between the two versions. It writes its report into the release's plan folder or `untracked/release-artifacts/`.
 
-- [x] ✅ **Task 1.3** (was blocked on the `session-uuid` pattern, see the Task 1.4 report; vendored by Plan 00492 at `remote-docs/code.claude.com/docs/en/changelog.md`, one unlisted fake swapped and recorded in its provenance): Vendor `https://code.claude.com/docs/en/changelog` through remote-docs so the review reads a provenance-stamped copy. **Owner ruling (2026-10-05):** the owner chose the fake-values registry route (plan `docs-fake-values-registry`), which unblocks this task once it lands — see [OWNER-RULINGS-261005.md](../00483-threat-model-conformance-audit/OWNER-RULINGS-261005.md) (D1).
+- [x] ✅ **Task 1.3** (was blocked on the `session-uuid` pattern, see the Task 1.4 report; vendored by Plan 00492 at `remote-docs/code.claude.com/docs/en/changelog.md`, one unlisted fake swapped and recorded in its provenance): Vendor `https://code.claude.com/docs/en/changelog` through remote-docs so the review reads a provenance-stamped copy. **Owner ruling (2026-10-05):** the owner chose the fake-values registry route (plan `docs-fake-values-registry`), which unblocks this task once it lands — see [OWNER-RULINGS-261005.md](../../00483-threat-model-conformance-audit/OWNER-RULINGS-261005.md) (D1).
 
-- [x] ✅ **Task 1.4** (report: `subagent-reports/261003-task-1.4-backfill-review-sonnet.md`, range 2.1.272 to 2.1.288; ledger entries still to be filed by the coordinator): Run a first backfill review from the version current at v3.67.0 to today's version. Include the idle compaction question: confirm whether it exists and where it overlaps the daemon's compaction handling and its prompt-cache and usage features.
+- [x] ✅ **Task 1.4** (report: `subagent-reports/261003-task-1.4-backfill-review-sonnet.md`, range 2.1.272 to 2.1.288; findings filed as 00474 N330–N337): Run a first backfill review from the version current at v3.67.0 to today's version. Include the idle compaction question: confirm whether it exists and where it overlaps the daemon's compaction handling and its prompt-cache and usage features.
 
 ### Phase 2: Detect drift in a session
 
@@ -54,9 +54,12 @@ Prior art: Plan 00327 audited the hook contracts once and recorded `last_audited
 
 ## Success Criteria
 
-- [ ] A release cannot complete without the recorded Claude Code version and a review report.
-- [ ] The backfill review is done and its findings are filed.
-- [ ] A session on an unreviewed Claude Code version sees a single advisory.
+- [x] A release cannot complete without the recorded Claude Code version and a review report. RELEASING.md Step 1c,
+  and Step 7's blocking review requires the `claude-code-versions.yaml` entry and its report file.
+- [x] The backfill review is done and its findings are filed (00474 N330–N337).
+- [x] A session on an unreviewed Claude Code version sees a single advisory (Task 2.1, `contract_staleness`).
+- [x] The release-bound consequence is in the holding area:
+  `CLAUDE/UPGRADES/UNRELEASED/release-notes/039-claude-code-version-drift-advisory.md`.
 
 ## Delivery & Milestones
 

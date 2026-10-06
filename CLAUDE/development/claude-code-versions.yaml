@@ -64,7 +64,7 @@ releases:
     evidence: ""
     review_date: "2026-10-03"
     reviewed_through: "2.1.288"
-    review_report: CLAUDE/Plan/00486-claude-code-version-tracking/subagent-reports/261003-task-1.4-backfill-review-sonnet.md
+    review_report: CLAUDE/Plan/Completed/00486-claude-code-version-tracking/subagent-reports/261003-task-1.4-backfill-review-sonnet.md
     note: >-
       The report is the Plan 00486 backfill review of Claude Code 2.1.272 to
       2.1.288, covering the changes since the last audited version. It does not
