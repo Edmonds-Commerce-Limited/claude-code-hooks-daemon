@@ -4,7 +4,7 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
-- [00499: write-protected paths, and the ccy.env.local.dist template](00499-write-protected-paths-and-ccy-env-local-dist/PLAN.md) - Not Started, Low (owner rulings: `ccy.env.local` is written by IaC only, so agents may read it but never write it; a generic `write_protected_paths` guard for any project, and GitHub #88's tracked `ccy.env.local.dist` template with the corrected scope)
+- [00499: write-protected paths, and the ccy.env.local.dist template](00499-write-protected-paths-and-ccy-env-local-dist/PLAN.md) - In Progress, Low (owner rulings: `ccy.env.local` is written by IaC only, so agents may read it but never write it; a generic `write_protected_paths` guard for any project, and GitHub #88's tracked `ccy.env.local.dist` template with the corrected scope)
 
 - [00498: autonomy only where allowed](00498-autonomy-only-where-allowed/PLAN.md) - In Progress, High (owner request after a desktop agent drifted off its one task: one config switch, keyed on the detected environment (host, docker, podman, lxc) and role alias, decides whether any crons, goal pressure or resume advice run; this repo turns them off on the desktop)
 

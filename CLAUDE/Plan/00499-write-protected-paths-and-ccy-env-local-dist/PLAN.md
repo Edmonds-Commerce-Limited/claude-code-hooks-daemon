@@ -1,6 +1,6 @@
 # Plan 00499: write-protected paths, and the ccy.env.local.dist template
 
-**Status**: Not Started
+**Status**: In Progress
 **Created**: 2026-10-06
 **Owner**: dev
 **Priority**: Low
@@ -77,7 +77,8 @@ older local copy tells the agent to report it to a human, not to edit it.
 - [ ] ⬜ **Task 2.2**: A SessionStart advisory. It fires when a real `ccy.env.local` names an older dist version on
   its "based on" line, and tells the agent to report the new entries to a human. It never edits the file.
 
-- [ ] ⬜ **Task 2.3**: Comment on #88 with the corrected scope and link this plan ("Addresses #88").
+- [x] ✅ **Task 2.3**: Comment on #88 with the corrected scope and link this plan ("Addresses #88"). Done: the
+  issue is claimed for this account and carries the correction.
 
 ### Phase 3: IaC hand-off
 
