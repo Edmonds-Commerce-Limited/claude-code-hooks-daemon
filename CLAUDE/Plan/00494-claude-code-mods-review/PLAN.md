@@ -35,20 +35,24 @@ relate to hooks, plugins, skills, agents and settings.
 
 ### Phase 1: Evidence and review
 
-- [ ] 🔄 **Task 1.1**: Vendor every upstream page about mods (and any directly related pages it depends on) with
-  `bin/hooks-daemon remote-docs add <url>`. Record the URLs captured and any that could not be captured, with the reason.
-- [ ] 🔄 **Task 1.2**: Opus review of the feature from the vendored pages, written to `subagent-reports/`. It covers the
-  mechanism, lifecycle, trust and permissions, distribution, and how mods relate to hooks, plugins, skills and agents.
-- [ ] ⬜ **Task 1.3**: Brainstorm against this repository's areas of responsibility, with each candidate classed as
-  better as a mod, complementary, or no fit, and the reasons. Put the shortlist to the owner.
+- [x] ✅ **Task 1.1** (013b4ab38, 0bd1c8ce0): Vendor every upstream page about mods (and any directly related pages it
+  depends on) with `bin/hooks-daemon remote-docs add <url>`. Record the URLs captured and any that could not be
+  captured, with the reason. 21 pages captured, none refused; the list is in the report's Sources section.
+- [x] ✅ **Task 1.2** (a12b69915): Opus review of the feature from the vendored pages, written to `subagent-reports/`.
+  It covers the mechanism, lifecycle, trust and permissions, distribution, and how mods relate to hooks, plugins, skills
+  and agents. Report: [261006-mods-review-opus.md](subagent-reports/261006-mods-review-opus.md).
+- [x] ✅ **Task 1.3** (a12b69915): Brainstorm against this repository's areas of responsibility, with each candidate
+  classed as better as a mod, complementary, or no fit, and the reasons. Put the shortlist to the owner. The shortlist
+  and six open questions are in the report; they went to the owner on 2026-10-06.
 
 ### Phase 2: Owner decision
 
-- [ ] ⬜ **Task 2.1**: File follow-up plans or ledger entries for the candidates the owner chooses.
+- [ ] ⬜ **Task 2.1**: File follow-up plans or ledger entries for the candidates the owner chooses. Waiting on the
+  owner's choice from the shortlist.
 
 ## Success Criteria
 
-- [ ] All reachable mod docs are vendored with valid provenance.
+- [x] All reachable mod docs are vendored with valid provenance.
 - [ ] The review and the brainstorm are written, cite the vendored pages, and have reached the owner.
 - [ ] The owner has chosen which candidates to pursue, and each chosen one has a plan or ledger entry.
 
