@@ -1250,17 +1250,19 @@ entries, needs the owner.
 
 **Owner ruling (2026-10-05):** resolved: one named helper with a required reason argument, and the audit widened to catch log-then-continue bodies — see [OWNER-RULINGS-261005.md](../00483-threat-model-conformance-audit/OWNER-RULINGS-261005.md) (B4).
 
-**Status**: 🟡 Partly fixed (d7ec3ff9b, d8e9aea16, 12a2e17a3). The named helper
+**Status**: ✅ Fixed (d7ec3ff9b through e90cbd63c). The named helper
 `utils/deliberate_swallow.log_and_continue(logger, exc, *, reason, level=WARNING)` exists, and the
-audit's `log-and-continue` rule now flags any non-raising handler body that logs (inline or by passing
+audit's `log-and-continue` rule flags any non-raising handler body that logs (inline or by passing
 the exception to a helper) and then continues, passes, breaks or returns a fallback. The sanctioned
-form is the helper called with a specific `reason`. Console reports (`print`, `sys.stderr.write`) and
-failures recorded on a list or future, stderr/stdout stream writes and logging `handleError` count as
-surfacing. About 160 handlers are converted across 58bbd0e05 and earlier. 166 `log-and-continue`
-sites remain unfiltered, of which 81 show in the audit and 85 sit behind the function-keyed
-`error_hiding_exclusions.json` entries (68 `log-and-continue` entries left). Convert those sites,
-delete each entry as its function is done, and the gate goes green; until then
-`TestRealRepoSelfScan` and the error_hiding gate stay red.
+form is the helper called with a specific `reason`. Console reports (`print`, `sys.stderr.write`), a
+report's own `self.output(...)` line, failures recorded on a list or future, stderr/stdout stream
+writes and logging `handleError` count as surfacing, and the exception counts as handed to a logger
+only when it is passed as a value. Every site is converted: 166 remained at 22c33d242, and
+009a7c9b4 and e90cbd63c finish them. No `log-and-continue` entry is left in
+`error_hiding_exclusions.json`, and the audit and `TestRealRepoSelfScan` are green. Two sites
+could not take the helper as it stood: `measure_instruction_footprint.py` now raises when the
+handler package cannot be imported instead of reporting an empty footprint, and the venv-free
+upgrade gate loads `escape_hatch` and `deliberate_swallow` by path.
 
 ### N297 — the coordinator merged the merge advisor itself without a targeted QA run, and main broke twice
 
