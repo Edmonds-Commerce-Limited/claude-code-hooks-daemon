@@ -25,7 +25,7 @@ guarded against; it must not be the guard.
 
 from __future__ import annotations
 
-import subprocess  # nosec B404 — runs the trusted system `git` and `bash`
+import subprocess
 from pathlib import Path
 from typing import Final
 
@@ -53,7 +53,7 @@ _FAIL_OPEN_EXIT: Final[int] = 0
 
 def _git(repo: Path, *args: str) -> None:
     """Run a git command in `repo`, failing the test on a non-zero exit."""
-    subprocess.run(  # nosec B603 — fixed argv, no shell, trusted input
+    subprocess.run(
         ["git", "-C", str(repo), *args],
         capture_output=True,
         text=True,
@@ -81,7 +81,7 @@ def _throwaway_repo(tmp_path: Path, remote_url: str) -> Path:
 
 def _source(project: Path, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
     """Source the project's `init.sh` and report what it emitted."""
-    return subprocess.run(  # nosec B603 — fixed argv, no shell, trusted input
+    return subprocess.run(
         ["bash", "-c", f'source "{project / ".claude" / "init.sh"}"'],
         capture_output=True,
         text=True,

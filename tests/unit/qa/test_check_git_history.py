@@ -18,7 +18,7 @@ trip the live handler. (It did, on the first draft.)
 import importlib.util
 import json
 import shutil
-import subprocess  # nosec B404 - subprocess used for git fixtures and the QA checker
+import subprocess
 import sys
 from pathlib import Path
 from types import ModuleType
@@ -62,7 +62,7 @@ def _git(repo: Path, *args: str, **env: str) -> None:
         "HOME": str(repo),
         **env,
     }
-    subprocess.run(  # nosec B603 B607 - trusted system tool (git), list form
+    subprocess.run(
         ["git", "-C", str(repo), *args],
         check=True,
         capture_output=True,
@@ -72,7 +72,7 @@ def _git(repo: Path, *args: str, **env: str) -> None:
 
 
 def _head_sha(repo: Path) -> str:
-    return subprocess.run(  # nosec B603 B607 - trusted system tool (git), list form
+    return subprocess.run(
         ["git", "-C", str(repo), "rev-parse", "HEAD"],
         capture_output=True,
         text=True,
@@ -128,7 +128,7 @@ def _secret_list(repo: Path) -> Path:
 
 
 def _run_checker(repo: Path, config_path: Path) -> dict[str, Any]:
-    subprocess.run(  # nosec B603 - trusted first-party checker script
+    subprocess.run(
         [
             sys.executable,
             str(_CHECKER),

@@ -31,7 +31,7 @@ _ECHO_SOCKET = 'printf "%s" "${CLAUDE_HOOKS_SOCKET_PATH:-<unset>}"'
 
 def _spawn(env: dict[str, str] | None) -> str:
     """What a child sees for the socket override, spawned as a dispatcher does."""
-    result = subprocess.run(  # nosec B603 B607 - trusted system tool, list form
+    result = subprocess.run(
         ["bash", "-c", _ECHO_SOCKET],
         capture_output=True,
         text=True,

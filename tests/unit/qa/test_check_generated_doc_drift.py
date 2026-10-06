@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import json
 import shutil
-import subprocess  # nosec B404 - runs the QA checker and the daemon CLI only
+import subprocess
 import sys
 from pathlib import Path
 from typing import Any
@@ -51,7 +51,7 @@ _OLD_MARKER = "> Generated on 2020-01-01 (v1.0.0) by `generate-docs`. Regenerate
 
 
 def _run_checker(root: Path) -> tuple[int, dict[str, Any], str]:
-    result = subprocess.run(  # nosec B603 - fixed argv, trusted checker script
+    result = subprocess.run(
         [sys.executable, str(CHECKER), "--root", str(root), "--report-stdout"],
         capture_output=True,
         text=True,
@@ -79,10 +79,8 @@ def generated_fixture(tmp_path_factory: pytest.TempPathFactory) -> Path:
     # Config validation refuses a project that is not a git repository with an
     # origin remote.
     for git_args in (("init", "-q"), ("remote", "add", "origin", _FIXTURE_REMOTE)):
-        subprocess.run(  # nosec B603 B607 - fixed argv, git only
-            ["git", *git_args], cwd=root, check=True, capture_output=True
-        )
-    result = subprocess.run(  # nosec B603 - fixed argv, the daemon's own CLI
+        subprocess.run(["git", *git_args], cwd=root, check=True, capture_output=True)
+    result = subprocess.run(
         [
             sys.executable,
             "-m",

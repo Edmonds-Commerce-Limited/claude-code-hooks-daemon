@@ -1,7 +1,7 @@
 """Tests for Rust lint strategy."""
 
 import shutil
-import subprocess  # nosec B404 - subprocess used for lint validation only (trusted tools)
+import subprocess
 import tempfile
 from pathlib import Path
 
@@ -130,7 +130,7 @@ class TestRealRustcIntegration:
             rs_file = Path(tmp_dir) / filename
             rs_file.write_text(source)
             command = strategy.default_lint_command.replace("{file}", str(rs_file))
-            return subprocess.run(  # nosec B603 - rustc is trusted, args built from test fixtures
+            return subprocess.run(
                 command.split(),
                 capture_output=True,
                 text=True,
@@ -168,7 +168,7 @@ class TestRealClippyDriverIntegration:
             rs_file = Path(tmp_dir) / filename
             rs_file.write_text(source)
             command = strategy.extended_lint_command.replace("{file}", str(rs_file))
-            return subprocess.run(  # nosec B603 - clippy-driver is trusted, args from test fixtures
+            return subprocess.run(
                 command.split(),
                 capture_output=True,
                 text=True,

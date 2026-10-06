@@ -15,7 +15,7 @@ its own, which is what this file is: the fixture as the subject, not as a tool.
 
 from __future__ import annotations
 
-import subprocess  # nosec B404 - trusted system tool (git) for repo fixtures
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -25,7 +25,7 @@ from tests.conftest import GitIndexWatch
 
 
 def _git(repo: Path, *args: str) -> None:
-    subprocess.run(  # nosec B603 B607 - trusted system tool, list form
+    subprocess.run(
         ["git", "-C", str(repo), *args],
         capture_output=True,
         check=True,
@@ -75,7 +75,7 @@ class TestMakeStaleReachesTrackedFilesAtAnyDepth:
         watch = GitIndexWatch()
 
         with watch.expect_one(nested_repo, "bare git status"):
-            subprocess.run(  # nosec B603 B607 - trusted system tool, list form
+            subprocess.run(
                 ["git", "-C", str(nested_repo), "status", "--porcelain"],
                 capture_output=True,
                 check=True,

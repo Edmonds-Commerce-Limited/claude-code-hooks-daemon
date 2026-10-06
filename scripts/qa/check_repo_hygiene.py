@@ -87,7 +87,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
-import subprocess  # nosec B404 — only ever runs the trusted system ``git`` binary
+import subprocess
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -436,7 +436,7 @@ def tracked_files(root: Path) -> tuple[str, ...]:
             blind-guard failure this check exists to prevent.
     """
     # SECURITY: list-form argv, no shell (B603); git is a trusted tool (B607).
-    result = subprocess.run(  # nosec B603 B607 — fixed argv, no shell, trusted binary
+    result = subprocess.run(
         [_GIT_BINARY, "-C", str(root), "ls-files", "-z"],
         capture_output=True,
         text=True,
@@ -478,7 +478,7 @@ def ignored_plan_documents(root: Path) -> tuple[str, ...]:
     # pattern also matches it, and an untracked-but-not-ignored file is just
     # unstaged work — normal mid-edit, and visible in `git status`.
     # SECURITY: list-form argv, no shell (B603); git is a trusted tool (B607).
-    result = subprocess.run(  # nosec B603 B607 — fixed argv, no shell, trusted binary
+    result = subprocess.run(
         [
             _GIT_BINARY,
             "-C",

@@ -263,9 +263,9 @@ class GitIndexWatch:
         prevent, reintroduced one directory deep, and it would have surfaced the
         first time someone used the fixture with a realistic tree.
         """
-        import subprocess  # nosec B404 - runs the trusted system `git` only
+        import subprocess
 
-        listing = subprocess.run(  # nosec B603 B607 - trusted system tool, list form
+        listing = subprocess.run(
             ["git", "-C", str(repo), "ls-files", "-z"],
             capture_output=True,
             text=True,
@@ -385,7 +385,7 @@ def tmp_git_repo(tmp_path: Path) -> Path:
     failures — a test taking its premise from the environment instead of stating
     it — so the premise is stated here.
     """
-    import subprocess  # nosec B404 - runs the trusted system `git` only
+    import subprocess
 
     repo = tmp_path / "repo"
     repo.mkdir()
@@ -397,18 +397,18 @@ def tmp_git_repo(tmp_path: Path) -> Path:
         ["git", "config", "--local", "tag.gpgsign", "false"],
     )
     for command in commands:
-        subprocess.run(  # nosec B603
+        subprocess.run(
             command, cwd=repo, capture_output=True, check=True, timeout=git_setup_timeout()
         )
     (repo / "tracked.txt").write_text("one\n", encoding="utf-8")
-    subprocess.run(  # nosec B603
+    subprocess.run(
         ["git", "add", "tracked.txt"],
         cwd=repo,
         capture_output=True,
         check=True,
         timeout=git_setup_timeout(),
     )
-    subprocess.run(  # nosec B603
+    subprocess.run(
         ["git", "commit", "-m", "init"],
         cwd=repo,
         capture_output=True,

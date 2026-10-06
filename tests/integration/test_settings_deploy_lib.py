@@ -25,7 +25,7 @@ rather than falling back to the overwrite this function exists to prevent.
 from __future__ import annotations
 
 import json
-import subprocess  # nosec B404 - runs bash on this repo's own shell library
+import subprocess
 import sys
 import textwrap
 from pathlib import Path
@@ -88,7 +88,7 @@ def _invoke(
         {stub}
         deploy_settings_json "{source}" "{target}" "{snapshot}" "{venv_python}" ""
     """)
-    result = subprocess.run(  # nosec B603 B607 - bash, list form, no shell
+    result = subprocess.run(
         ["bash", "-c", script],
         capture_output=True,
         text=True,
@@ -126,7 +126,7 @@ class TestItStillDeploys:
             source "{LIB}"
             deploy_settings_json "{tmp_path}/absent.json" "{tmp_path}/t.json" "" "" ""
         """)
-        result = subprocess.run(  # nosec B603 B607 - bash, list form, no shell
+        result = subprocess.run(
             ["bash", "-c", script],
             capture_output=True,
             text=True,

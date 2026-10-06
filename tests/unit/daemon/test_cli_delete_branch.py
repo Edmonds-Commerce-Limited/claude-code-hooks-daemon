@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import argparse
 import io
-import subprocess  # nosec B404 - trusted system tool (git) for repo fixtures
+import subprocess
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
@@ -51,7 +51,7 @@ _EXIT_REFUSED = 1
 
 
 def _git(repo: Path, *args: str) -> str:
-    result = subprocess.run(  # nosec B603 B607 - trusted system tool, list form
+    result = subprocess.run(
         ["git", "-C", str(repo), *args],
         check=True,
         capture_output=True,
@@ -440,7 +440,7 @@ class TestAPartialBatchIsReportedHonestly:
         git will decline — rather than by mocking git away.
         """
         remote = tmp_path / "remote.git"
-        subprocess.run(  # nosec B603 B607 - trusted system tool, list form
+        subprocess.run(
             ["git", "init", "--quiet", "--bare", str(remote)],
             check=True,
             capture_output=True,

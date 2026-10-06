@@ -74,8 +74,10 @@ class TestLoadHandler:
         handler = PluginLoader.load_handler("another_test_handler", plugin_dir)
 
         assert handler is not None
-        assert handler.config == {}  # type: ignore[attr-defined]
-        assert handler.test_value == "default"  # type: ignore[attr-defined]
+        # The plugin sets these attributes in its own __init__; vars() reads
+        # them without the static type (Handler) having to declare them.
+        assert vars(handler)["config"] == {}
+        assert vars(handler)["test_value"] == "default"
 
     def test_load_handler_version_number_naming(self, plugin_dir):
         """Test loading handler with version number in name."""
@@ -277,7 +279,7 @@ class TestLoadHandlersFromConfig:
         assert len(handlers) == 1
         handler = handlers[0]
         # Handler uses its own default config since loader doesn't pass config
-        assert handler.test_value == "default"  # type: ignore[attr-defined]
+        assert vars(handler)["test_value"] == "default"
 
     def test_load_handlers_skips_disabled_handlers(self, plugin_dir):
         """Test that disabled handlers are not loaded."""

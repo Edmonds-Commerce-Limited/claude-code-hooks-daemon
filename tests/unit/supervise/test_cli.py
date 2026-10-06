@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import os
-import subprocess  # nosec B404 - trusted, args-list only, no shell
+import subprocess
 import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -135,7 +135,7 @@ class TestSystemPythonRuntime:
         return {**os.environ, "CLAUDE_PROJECT_DIR": str(tmp_path)}
 
     def test_runs_under_system_python3_with_no_runtime_warning(self, tmp_path: Path) -> None:
-        result = subprocess.run(  # nosec B603 - fixed argv list, no shell
+        result = subprocess.run(
             [
                 "/usr/bin/python3",
                 str(SCRIPT_PATH),
@@ -157,7 +157,7 @@ class TestSystemPythonRuntime:
         self, tmp_path: Path
     ) -> None:
         """The isolation above is load-bearing, so assert it rather than trust it."""
-        subprocess.run(  # nosec B603 - fixed argv list, no shell
+        subprocess.run(
             ["/usr/bin/python3", str(SCRIPT_PATH), "--", "echo", "SUPERVISED_OK"],
             capture_output=True,
             text=True,
@@ -169,7 +169,7 @@ class TestSystemPythonRuntime:
         assert (tmp_path / "untracked" / "supervise" / "decision.log").is_file()
 
     def test_usage_error_exits_two_under_system_python3(self, tmp_path: Path) -> None:
-        result = subprocess.run(  # nosec B603 - fixed argv list, no shell
+        result = subprocess.run(
             ["/usr/bin/python3", str(SCRIPT_PATH)],
             env=self._isolated_env(tmp_path),
             capture_output=True,

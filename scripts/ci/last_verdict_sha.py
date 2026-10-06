@@ -44,9 +44,7 @@ def pick_verdict_sha(runs: Sequence[dict[str, Any]]) -> str:
 
 
 def _gh_api(endpoint: str) -> str:
-    result = subprocess.run(  # nosec B603 B607 - fixed argv, no shell
-        ["gh", "api", endpoint], capture_output=True, text=True, check=False
-    )
+    result = subprocess.run(["gh", "api", endpoint], capture_output=True, text=True, check=False)
     if result.returncode != 0:
         raise RuntimeError(f"gh exited {result.returncode}: {result.stderr.strip()}")
     return result.stdout

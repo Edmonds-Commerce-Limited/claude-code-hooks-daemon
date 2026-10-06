@@ -45,7 +45,7 @@ _GIT_IDENTITY = ["-c", "user.name=Fixture", "-c", "user.email=fixture@example.in
 
 
 def _git(cwd: Path, *args: str) -> str:
-    result = subprocess.run(  # nosec B603 B607 - fixed argv, test fixture
+    result = subprocess.run(
         ["git", *_GIT_IDENTITY, *args],
         cwd=cwd,
         capture_output=True,

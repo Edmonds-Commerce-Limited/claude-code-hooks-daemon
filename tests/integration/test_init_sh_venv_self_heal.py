@@ -70,7 +70,7 @@ class TestTheHookHealsTheVenv:
     def test_concurrent_hooks_start_exactly_one_build(self, sandbox: Sandbox) -> None:
         sandbox.stub_uv(sleep=3)
         procs = [
-            subprocess.Popen(  # nosec B603 - fixed argv, no shell
+            subprocess.Popen(
                 sandbox.hook_argv(),
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,

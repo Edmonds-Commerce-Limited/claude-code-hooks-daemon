@@ -189,7 +189,7 @@ class GitignoreSafetyCheckerHandler(SessionStartHandlerBase):
                     content += path.read_text(errors="replace")
                 except OSError as exc:
                     logger.debug("Could not read %s for hash: %s", path, exc)
-        return hashlib.md5(content.encode(), usedforsecurity=False).hexdigest()  # nosec B324
+        return hashlib.md5(content.encode(), usedforsecurity=False).hexdigest()
 
     # ------------------------------------------------------------------
     # Missing entry detection

@@ -32,7 +32,7 @@ from __future__ import annotations
 
 import argparse
 import json
-import subprocess  # nosec B404 — runs the project's own daemon CLI, fixed argv
+import subprocess
 import sys
 from pathlib import Path
 from typing import Any, Final
@@ -153,7 +153,7 @@ def run_project_handler_tests(root: Path) -> tuple[int, str]:
         return _EXIT_COULD_NOT_RUN, f"ERROR: daemon CLI wrapper not found at {cli}\n"
 
     try:
-        result = subprocess.run(  # nosec B603 — fixed argv, no shell, trusted input
+        result = subprocess.run(
             [str(cli), _CLI_SUBCOMMAND],
             capture_output=True,
             text=True,

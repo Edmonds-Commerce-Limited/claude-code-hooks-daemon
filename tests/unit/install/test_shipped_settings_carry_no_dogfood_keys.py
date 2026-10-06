@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import json
 import re
-import subprocess  # nosec B404 - runs bash on this repo's own shell library
+import subprocess
 import sys
 import textwrap
 from pathlib import Path
@@ -83,7 +83,7 @@ def test_a_fresh_shell_install_copies_no_dogfood_key(tmp_path: Path, key: str) -
         source "{DEPLOY_LIB}"
         deploy_settings_json "{TEMPLATE}" "{target}" "" "" ""
     """)
-    result = subprocess.run(  # nosec B603 B607 - bash, list form, no shell
+    result = subprocess.run(
         ["bash", "-c", script],
         capture_output=True,
         text=True,

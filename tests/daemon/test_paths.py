@@ -961,7 +961,7 @@ class TestSocketPathLengthFallback(unittest.TestCase):
                 project_hash = get_project_hash(deep_path)
 
                 self.assertTrue(
-                    str(socket_path).startswith("/tmp/"),  # nosec B108
+                    str(socket_path).startswith("/tmp/"),
                     f"Expected /tmp/ prefix, got: {socket_path}",
                 )
                 self.assertIn(f"hooks-daemon-{project_hash}", str(socket_path))

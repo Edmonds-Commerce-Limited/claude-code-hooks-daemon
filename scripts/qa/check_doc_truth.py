@@ -85,7 +85,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
-import subprocess  # nosec B404 - runs the daemon's own CLI to read its registry
+import subprocess
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -455,7 +455,7 @@ def live_cli_subcommands() -> frozenset[str]:
             document while checking nothing, which is the failure mode this
             whole check was written against.
     """
-    result = subprocess.run(  # nosec B603 - fixed argv, no shell, no user input
+    result = subprocess.run(
         [sys.executable, *_HELP_ARGS],
         capture_output=True,
         text=True,

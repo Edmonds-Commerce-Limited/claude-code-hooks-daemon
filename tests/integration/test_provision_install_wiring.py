@@ -22,7 +22,7 @@ BASH = shutil.which("bash") or "/bin/bash"
 
 
 def _run(script: str) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(  # nosec B603 - fixed argv, no shell
+    return subprocess.run(
         [BASH, "-c", script],
         capture_output=True,
         text=True,

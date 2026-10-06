@@ -15,7 +15,7 @@ it as an unverified claim in a plan document.
 
 from __future__ import annotations
 
-import subprocess  # nosec B404 — runs the trusted system `bash`
+import subprocess
 from pathlib import Path
 from typing import Final
 
@@ -32,7 +32,7 @@ def _run(project_root: Path, script: str) -> subprocess.CompletedProcess[str]:
     guard_copy = lib_dir / "project_detection.sh"
     guard_copy.write_text(_PROJECT_DETECTION_SH.read_text(encoding="utf-8"), encoding="utf-8")
     (lib_dir / "output.sh").write_text(_OUTPUT_SH.read_text(encoding="utf-8"), encoding="utf-8")
-    return subprocess.run(  # nosec B603 — fixed argv, no shell, trusted input
+    return subprocess.run(
         ["bash", "-c", f'source "{guard_copy}"\n{script}'],
         capture_output=True,
         text=True,

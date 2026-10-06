@@ -330,7 +330,7 @@ class ClaudeMdInjector:
                 exc_info=exc,
             )
             return  # Advisory feature — daemon continues without CLAUDE.md injection
-        except Exception as exc:  # nosec B110 - advisory, must never crash daemon
+        except Exception as exc:
             logger.warning(
                 "ClaudeMdInjector: unexpected error updating %s (advisory skipped)",
                 self._workspace_root / "CLAUDE.md",
@@ -476,7 +476,7 @@ class ClaudeMdInjector:
         """
         try:
             return format_markdown_document(content)
-        except Exception as exc:  # nosec B110 - fail-safe: never crash daemon startup
+        except Exception as exc:
             logger.warning(
                 "ClaudeMdInjector: markdown formatting failed — writing unformatted "
                 "content (advisory): %s",

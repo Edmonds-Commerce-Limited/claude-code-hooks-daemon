@@ -27,7 +27,7 @@ language boundary, so the contract is asserted instead of assumed.
 
 from __future__ import annotations
 
-import subprocess  # nosec B404 — runs the trusted system `bash`
+import subprocess
 from pathlib import Path
 from typing import Final
 
@@ -91,7 +91,7 @@ def _project(
 
 def _run(project: Path, script: str) -> subprocess.CompletedProcess[str]:
     """Source the project's `init.sh`, then run `script` against its functions."""
-    return subprocess.run(  # nosec B603 — fixed argv, no shell, trusted input
+    return subprocess.run(
         ["bash", "-c", f'source "{project / ".claude" / "init.sh"}"\n{script}'],
         capture_output=True,
         text=True,

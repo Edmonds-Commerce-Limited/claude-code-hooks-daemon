@@ -18,7 +18,7 @@ nothing". Most of what follows is aimed at that.
 from __future__ import annotations
 
 import os
-import subprocess  # nosec B404 - trusted interpreter, list form, for a nested pytest run
+import subprocess
 import sys
 import textwrap
 from pathlib import Path
@@ -178,7 +178,7 @@ class TestASkipInADeclaredGateBecomesAFailure:
         env.pop("HOOKS_DAEMON_RELEASE_GATE", None)
         env.update(env_extra or {})
 
-        return subprocess.run(  # nosec B603 - trusted interpreter, list form
+        return subprocess.run(
             [
                 sys.executable,
                 "-m",

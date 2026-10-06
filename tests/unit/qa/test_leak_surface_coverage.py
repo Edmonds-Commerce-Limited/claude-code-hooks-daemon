@@ -30,7 +30,7 @@ the row does not pass until a real guard actually catches it.
 """
 
 import json
-import subprocess  # nosec B404 - subprocess used for git fixtures and QA checkers
+import subprocess
 import sys
 from collections.abc import Generator
 from pathlib import Path
@@ -110,7 +110,7 @@ def _git(repo: Path, *args: str, **env: str) -> None:
         "HOME": str(repo),
         **env,
     }
-    subprocess.run(  # nosec B603 B607 - trusted system tool (git), list form
+    subprocess.run(
         ["git", "-C", str(repo), *args],
         check=True,
         capture_output=True,
@@ -131,7 +131,7 @@ def _scoped_tree_json(scan_path: Path) -> Path:
 
 
 def _run(checker: Path, output: Path, *args: str) -> dict[str, Any]:
-    subprocess.run(  # nosec B603 - trusted first-party checker script
+    subprocess.run(
         [sys.executable, str(checker), "--json", *args],
         capture_output=True,
         text=True,

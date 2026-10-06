@@ -142,7 +142,7 @@ class TestEventSocketDirFallback(_EventSocketPathTestBase):
             os.environ.pop("XDG_RUNTIME_DIR", None)
             with patch.object(Path, "is_dir", return_value=False):
                 events_dir = get_event_socket_dir_from_untracked(self._DEEP_UNTRACKED_DIR)
-        self.assertTrue(str(events_dir).startswith("/tmp/"))  # nosec B108
+        self.assertTrue(str(events_dir).startswith("/tmp/"))
         self.assertIn("-events", events_dir.name)
 
     def test_fallback_dir_is_deterministic_for_same_untracked_dir(self) -> None:

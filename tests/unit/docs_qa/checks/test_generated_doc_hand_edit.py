@@ -1,6 +1,6 @@
 """Tests for check ``generated-doc-hand-edit`` (Plan 00284, Task 3.1b)."""
 
-import subprocess  # nosec B404 — runs the trusted system `git`
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -46,7 +46,7 @@ _GIT_TIMEOUT_SECONDS = 30
 
 def _git(repo: Path, *args: str) -> None:
     """Run a git command in `repo`, failing the test on a non-zero exit."""
-    subprocess.run(  # nosec B603 B607 — fixed argv, no shell, trusted input
+    subprocess.run(
         ["git", "-C", str(repo), *args],
         capture_output=True,
         text=True,

@@ -38,7 +38,7 @@ from __future__ import annotations
 
 import argparse
 import json
-import subprocess  # nosec B404 — runs this interpreter against a fixed module, argv form
+import subprocess
 import sys
 from collections.abc import Callable
 from pathlib import Path
@@ -99,7 +99,7 @@ def run_sweep(corpus: str, root: Path) -> tuple[int, str, str]:
         "--json",
     ]
     try:
-        completed = subprocess.run(  # nosec B603 — argv form, this interpreter, no shell
+        completed = subprocess.run(
             command,
             capture_output=True,
             text=True,

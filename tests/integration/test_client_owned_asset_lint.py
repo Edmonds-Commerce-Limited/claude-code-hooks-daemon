@@ -43,7 +43,7 @@ from __future__ import annotations
 import os
 import re
 import shutil
-import subprocess  # nosec B404 - runs trusted linters with fixed argument lists
+import subprocess
 import sys
 from pathlib import Path
 from typing import Final
@@ -118,7 +118,7 @@ def _run(argv: list[str]) -> subprocess.CompletedProcess[str]:
     env = {k: v for k, v in os.environ.items() if k not in _COLOUR_FORCING_VARS}
     env["NO_COLOR"] = "1"
     # SECURITY: fixed argv built from a repo-internal manifest; no shell, no user input.
-    return subprocess.run(  # nosec B603 - fixed trusted argv, no shell
+    return subprocess.run(
         argv,
         cwd=_REPO_ROOT,
         capture_output=True,

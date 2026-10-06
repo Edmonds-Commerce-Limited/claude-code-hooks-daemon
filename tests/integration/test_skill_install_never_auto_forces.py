@@ -115,15 +115,13 @@ def _aside_dirs(box: Sandbox) -> list[Path]:
 
 def _dead_pid() -> int:
     """The pid of a process that has already exited and been reaped."""
-    gone = subprocess.Popen(["true"])  # nosec B603 B607 - fixed argv
+    gone = subprocess.Popen(["true"])
     gone.wait()
     return gone.pid
 
 
 def _this_host() -> str:
-    return subprocess.run(  # nosec B603 B607 - fixed argv, no shell
-        ["hostname"], capture_output=True, text=True, check=True
-    ).stdout.strip()
+    return subprocess.run(["hostname"], capture_output=True, text=True, check=True).stdout.strip()
 
 
 def _installer_calls(box: Sandbox) -> list[str]:
@@ -390,7 +388,7 @@ class TestALiveAsideDirIsNotTaken:
 
     def test_an_aside_dir_whose_owner_lives_is_left_alone(self, sandbox: Sandbox) -> None:
         sandbox.stub_uv()
-        owner = subprocess.Popen(["sleep", "30"])  # nosec B603 B607 - fixed argv
+        owner = subprocess.Popen(["sleep", "30"])
         try:
             aside = self._aside_owned_by(sandbox, owner.pid)
             before = snapshot(aside)

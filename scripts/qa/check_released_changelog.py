@@ -24,7 +24,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
-import subprocess  # nosec B404 - fixed git argv, no shell
+import subprocess
 import sys
 from pathlib import Path
 from typing import Any, Final
@@ -38,9 +38,7 @@ _SECTION: Final[re.Pattern[str]] = re.compile(r"^## \[(?P<version>[^\]]+)\]", re
 
 def _git(root: Path, *args: str) -> str:
     """Run git in ``root``; any failure raises, so a broken repo never reads as clean."""
-    result = subprocess.run(  # nosec B603 B607 - fixed argv, no shell
-        ["git", *args], cwd=root, check=True, capture_output=True, text=True
-    )
+    result = subprocess.run(["git", *args], cwd=root, check=True, capture_output=True, text=True)
     return result.stdout
 
 
