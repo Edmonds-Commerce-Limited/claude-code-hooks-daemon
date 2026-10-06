@@ -104,7 +104,10 @@ class TestIndexPrewarmOnInitialise:
             SecretFileGuardHandler, "prewarm_index", lambda self: started.append(self.name)
         )
 
-        _initialise(_make_workspace(tmp_path))
+        controller = _initialise(_make_workspace(tmp_path))
+        assert not started, "initialise must not start background git work"
+
+        controller.prewarm_indexes()
 
         assert started
 
@@ -121,5 +124,6 @@ class TestIndexPrewarmOnInitialise:
         monkeypatch.setattr(SecretFileGuardHandler, "prewarm_index", _boom)
 
         controller = _initialise(_make_workspace(tmp_path))
+        controller.prewarm_indexes()
 
         assert controller.is_initialised

@@ -1420,6 +1420,8 @@ land in.
 
 **Status**: ✅ Fixed (this branch, commit recorded at merge). The scan takes a timeout and the index build passes `Timeout.INDEX_BUILD_GIT` (120 s); a failed listing or a raising build is logged with its reason; a failed build retries after `RETRY_AFTER_FAILURE_SECONDS` (30 s); the controller pre-warms each guard's index at startup (`prewarm_index`). Reproduced first by `TestTheBuildUnderTheDaemon` in `tests/unit/utils/test_protected_file_index.py`. The deleted variable-target containment pin is restored in `test_heredoc_grammar_chain.py`.
 
+Second part: an index build started by one test leaked into later tests. Its thread ran `git` through `subprocess.run` while a later test had patched that with a `side_effect` list, so the thread consumed the effects and the test's own call raised `StopIteration` in fixture setup (the gate's `ls-star-py` row; order-dependent, passes alone). Fixed by an autouse fixture in `tests/conftest.py` that runs `reset_index_cache()` (waits for in-flight builds, clears the cache and `_failed_at`) after every test, and by moving the startup pre-warm out of `DaemonController.initialise()` into the serving path (`controller.prewarm_indexes()` in `cli.py`), so building a controller never starts git work. Pinned by `tests/unit/test_index_build_isolation.py` (red without the fixture).
+
 ### N354 — the upgrade-approval guard denies a `PYTHONPATH=… python -c` probe that runs no upgrade
 
 **Source**: the coordinator, 2026-10-05, probing a worktree branch's handler code from the main checkout.
