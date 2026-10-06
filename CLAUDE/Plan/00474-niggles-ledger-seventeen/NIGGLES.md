@@ -1433,6 +1433,34 @@ reads. Test both sides through the real handler.
 
 **Status**: ⬜ Open.
 
+### N366 — claiming an issue ADDS an assignee, so an issue can end up with two, and that state reads as OK
+
+**Found**: owner ruling, 2026-10-06: "hooks daemon agents only ever SWITCH assignee — we don't want a single issue
+with multiple assignees, or we're back to square one with it being ambiguous who can work on it."
+
+In `src/claude_code_hooks_daemon/utils/github_issue_validity.py` (`AssigneeCheck.evaluate`):
+
+- **The claim adds.** It is `gh issue edit N --add-assignee @me` (line 263). Two agents claiming the same unassigned
+  issue close together both get added.
+- **Several assignees read as OK.** Line 252 returns OK whenever the signed-in account is AMONG the assignees, so
+  `[someone-else, me]` is accepted.
+
+No open issue had two assignees when this was recorded, so the fix is prevention.
+
+**Fix**:
+
+- **The claim switches.** It sets the assignees to exactly the signed-in account (`--add-assignee @me` plus
+  `--remove-assignee` for anyone listed). It then re-reads the issue, and succeeds only if the assignees are exactly
+  `[me]`. In a race the last switch wins and the other claimant's verification fails, so it backs off.
+- **Two or more assignees are BLOCKING (ambiguous)**, even when one of them is the signed-in account. The message
+  asks a human to leave exactly one.
+- **Unchanged:** an issue assigned only to someone else stays BLOCKING. An agent never switches an issue away from
+  another assignee.
+
+Test each case through `issue-validity` and the guard.
+
+**Status**: ⬜ Open. Next branch once a slot frees.
+
 ### N365 — an `[awaiting-human]` token quoted inside a fenced block is read as the stop's own declaration
 
 **Found**: by the coordinator, 2026-10-06. Its stop message gave the owner a fenced copy-paste block for ANOTHER
