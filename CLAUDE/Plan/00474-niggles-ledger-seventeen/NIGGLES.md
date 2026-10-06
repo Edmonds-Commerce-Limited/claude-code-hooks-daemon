@@ -1414,6 +1414,19 @@ The uncertain-move union judges the hook directory and the LAST recorded move (`
 every candidate directory (`sub`). Remedy: judge every directory any `cd` in the chain could
 land in.
 
+### N370 — the sed guard denies a `git -C <dir> commit -m` message that mentions an in-place sed edit
+
+**Found**: by the coordinator, 2026-10-06. `git -C /workspace add <dir> && git -C /workspace commit -q -m '… sed -i …'`
+was denied as `R-SED-FILE-MODIFICATION`. The guidance exempts "a `git commit` message mentioning sed (sed must follow
+`git commit` with no command separator between)". Here sed did follow the commit with no separator, but the commit
+was spelled `git -C <dir> commit`, so the exemption appears to match only the literal `git commit` adjacency. The
+same message without the sed word was allowed.
+
+**Fix**: recognise the commit subcommand after git's global options (`-C <dir>`, `-c k=v`, `--git-dir`,
+`--work-tree`), the way the other git-aware guards parse it. Test both spellings.
+
+**Status**: ⬜ Open.
+
 ### N369 — a forwarder integration test fails inside every worktree and passes on main
 
 **Found**: by the coordinator, 2026-10-06, in Plan 00495 Task 2.7's branch QA.
