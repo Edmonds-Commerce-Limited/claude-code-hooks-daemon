@@ -1414,6 +1414,32 @@ The uncertain-move union judges the hook directory and the LAST recorded move (`
 every candidate directory (`sub`). Remedy: judge every directory any `cd` in the chain could
 land in.
 
+### N367 — the coordinator's branch-QA venv recipe installs off-lock tool versions, so three tests fail falsely
+
+**Found**: by the coordinator, 2026-10-06, in B2's uncapped test run (4 failed, 8469 passed). The recipe it uses to give
+a worktree its own venv is `bin/hooks-daemon repair`, then `uv pip install -e ".[dev]"`. That second step resolves
+the dev extras from `pyproject.toml`, not `uv.lock`, so the worktree venv got pytest 9.1.1 and ruff 0.16.10 while the
+lock (and main's venv) pins pytest 9.0.3 and ruff 0.15.11. Three tests then failed for the toolchain, not the code:
+
+- `test_client_owned_asset_lint.py::TestPythonAssetsAreCleanUnderRuffDefaults`: ruff 0.16 adds ISC004, SIM102 and
+  SIM103 findings in `.claude/ccy/claude-supervise.py`.
+- `test_subagent_full_qa_blocker.py::TestThePytestOptionGrammar`: pytest 9.1 adds `--max-warnings` and
+  `--report-chars` (the same failure as N270).
+- `test_corpus.py::TestRevalidateCorpus::test_a_steady_state_revalidation_logs_nothing`: `markdown_it` debug records
+  are captured under the newer pytest.
+
+All three passed (19 of 19) on main's lock-matched venv against B2's code. The fourth failure was a 120 s shellcheck
+timeout under host load (N344's class).
+
+**Fix**:
+
+- Build branch-QA venvs from the lock (`uv sync --frozen --all-extras` into the resolved venv), never with
+  `uv pip install -e`.
+- Separately, the three tests will fail for everyone once the lock moves to pytest 9.1 and ruff 0.16. Fix the
+  supervisor findings and add the two options before bumping the lock.
+
+**Status**: ⬜ Open.
+
 ### N364 — a read-only `git config --get-regexp` naming `user.name` is judged as an identity write
 
 **Found**: by the Plan 00487 host agent on 2026-10-06. `cd <clone> && git config --show-origin --get-regexp '^(commit\.gpgsign|…|user\.name|user\.email|…)$'; git log …` was denied as `R-SENSITIVE-SECRET-TERM` (a secret word
