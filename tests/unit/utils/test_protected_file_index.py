@@ -135,6 +135,65 @@ class TestBuildIndex:
         assert index.files == ()
 
 
+class TestBuildAsksGitOnlyForCandidates:
+    """The ignored-file listing of a working copy full of virtualenvs outran the build (N355)."""
+
+    @staticmethod
+    def _spy(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, ...]]:
+        from claude_code_hooks_daemon.utils import git_file_states
+
+        calls: list[tuple[str, ...]] = []
+        real_run_git = git_file_states.run_git
+
+        def spy(cwd: Path, *args: str, timeout: float) -> subprocess.CompletedProcess[str]:
+            calls.append(args)
+            return real_run_git(cwd, *args, timeout=timeout)
+
+        monkeypatch.setattr(git_file_states, "run_git", spy)
+        return calls
+
+    def test_the_ignored_listing_carries_a_pathspec_for_each_pattern(
+        self, repo: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        calls = self._spy(monkeypatch)
+
+        assert build_index(repo, PATTERNS) is not None
+
+        ignored = [args for args in calls if "--ignored" in args and "--others" in args]
+        assert len(ignored) == 1
+        pathspecs = ignored[0][ignored[0].index("--") + 1 :]
+        assert f":(glob)**/{KEY}" in pathspecs
+        assert f":(glob)**/{VAULT_GLOB}" in pathspecs
+
+    def test_a_huge_ignored_tree_is_never_listed(self, repo: Path) -> None:
+        for number in range(60):
+            _touch(repo, f"ignored/bulk/d{number % 3}/file{number}.txt")
+
+        index = build_index(repo, PATTERNS)
+
+        assert index is not None
+        assert f"ignored/deep/{KEY}" in {entry.relpath for entry in index.files}
+        from claude_code_hooks_daemon.utils.git_file_states import scan_git_file_states
+        from claude_code_hooks_daemon.utils.protected_pathspecs import git_pathspecs
+
+        narrow = scan_git_file_states(repo, pathspecs=git_pathspecs(PATTERNS, repo))
+        assert narrow is not None
+        assert not any(path.startswith("ignored/bulk/") for path in narrow.ignored_untracked)
+
+    def test_a_pattern_no_pathspec_can_express_lists_in_full(
+        self, repo: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        calls = self._spy(monkeypatch)
+        bracketed = "id_[" + "r]sa"
+
+        index = build_index(repo, (bracketed,))
+
+        assert index is not None
+        assert index.files == ()
+        assert len(calls) == 4
+        assert all("--" not in args for args in calls)
+
+
 class TestFindUnder:
     def test_a_root_above_a_protected_file_reads_it(
         self, index: ProtectedFileIndex, repo: Path
