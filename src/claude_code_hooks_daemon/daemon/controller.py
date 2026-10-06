@@ -425,21 +425,14 @@ class DaemonController:
         Called by the serving daemon only, never by ``initialise``: building a
         controller (the docs CLI, every test) must not start background git work.
 
-        Non-blocking (each build is a background thread) and best-effort: a guard
-        that cannot start its build is logged and never fatal to daemon startup.
+        Non-blocking: each build is a background thread, and a build that fails
+        is logged by the index itself (``protected_file_index``). Starting one
+        raises only on a defect, which is not hidden.
         """
         for handlers in self._router.get_all_handlers().values():
             for handler in handlers:
-                if not isinstance(handler, IndexPrewarmer):
-                    continue
-                try:
+                if isinstance(handler, IndexPrewarmer):
                     handler.prewarm_index()
-                except Exception as exc:
-                    logger.warning(
-                        "Index pre-warm failed for %s: %s",
-                        type(handler).__name__,
-                        type(exc).__name__,
-                    )
 
     def _compute_startup_source_fingerprint(
         self,

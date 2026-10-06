@@ -16,6 +16,7 @@ from pathlib import Path
 
 import pytest
 
+from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.utils import protected_file_index as pfi
 
 _RELEASE = threading.Event()
@@ -28,7 +29,7 @@ class TestABuildStartedByOneTestIsGoneBeforeTheNext:
         _RELEASE.clear()
 
         def slow(root: Path, patterns: tuple[str, ...]) -> None:
-            _RELEASE.wait(timeout=10)
+            _RELEASE.wait(timeout=Timeout.INDEX_BUILD_WAIT)
 
         monkeypatch.setattr(pfi, "build_index", slow)
         threading.Timer(0.3, _RELEASE.set).start()

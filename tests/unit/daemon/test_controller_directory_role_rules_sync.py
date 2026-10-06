@@ -110,20 +110,3 @@ class TestIndexPrewarmOnInitialise:
         controller.prewarm_indexes()
 
         assert started
-
-    def test_a_guard_that_cannot_prewarm_does_not_break_daemon_start(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        from claude_code_hooks_daemon.handlers.pre_tool_use.secret_file_guard import (
-            SecretFileGuardHandler,
-        )
-
-        def _boom(self: SecretFileGuardHandler) -> None:
-            raise OSError("no threads")
-
-        monkeypatch.setattr(SecretFileGuardHandler, "prewarm_index", _boom)
-
-        controller = _initialise(_make_workspace(tmp_path))
-        controller.prewarm_indexes()
-
-        assert controller.is_initialised
