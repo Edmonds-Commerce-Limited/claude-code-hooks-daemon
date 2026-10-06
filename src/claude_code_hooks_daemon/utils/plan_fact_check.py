@@ -40,6 +40,7 @@ logger = logging.getLogger(__name__)
 STATE_SUBDIR: Final[str] = "plan-fact-check"
 CHECKED_SUFFIX: Final[str] = ".checked.json"
 PENDING_SUFFIX: Final[str] = ".pending.json"
+UNREADABLE_SUFFIX: Final[str] = ".unreadable"
 DIFF_SUFFIX: Final[str] = ".diff"
 FACT_CHECKER_AGENT: Final[str] = "plan-fact-checker"
 
@@ -246,6 +247,17 @@ class PlanFactCheckState:
         """Drop the pending fact-check of ``folder`` (it has been delivered)."""
         self._path(folder, PENDING_SUFFIX).unlink(missing_ok=True)
 
+    def set_aside_pending(self, folder: str) -> Path:
+        """Rename an unreadable pending record to ``<name>.unreadable`` and return its path.
+
+        Renamed rather than deleted so the bytes stay inspectable; the new name
+        no longer ends in the pending suffix, so it is never listed or re-read.
+        """
+        path = self._path(folder, PENDING_SUFFIX)
+        aside = path.with_name(path.name + UNREADABLE_SUFFIX)
+        path.replace(aside)
+        return aside
+
     def pending_folders(self) -> list[str]:
         """Folders with an owed fact-check, sorted; cheap enough for every hook event."""
         if not self._dir.is_dir():
@@ -341,12 +353,20 @@ def deliver_pending(state: PlanFactCheckState) -> list[str]:
     content as checked (firing alone never does), drop the record, and return
     the rendered instruction.
 
-    Raises:
-        PlanFactCheckStateError: If a pending record is corrupt.
+    A record that cannot be read (corrupt, or written by an earlier build that
+    stored no ``files``) is set aside by :meth:`PlanFactCheckState.set_aside_pending`
+    with one WARNING, and delivery carries on with the next record.
     """
     messages: list[str] = []
     for folder in state.pending_folders():
-        pending = state.read_pending(folder)
+        try:
+            pending = state.read_pending(folder)
+        except PlanFactCheckStateError as exc:
+            aside = state.set_aside_pending(folder)
+            logger.warning(
+                "plan_fact_check: set aside unreadable pending record as %s: %s", aside, exc
+            )
+            continue
         if pending is None:
             continue
         diff_path = state.write_diff(folder, pending.diff)
