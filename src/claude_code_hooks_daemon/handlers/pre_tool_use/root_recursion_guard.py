@@ -31,6 +31,7 @@ from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.core.utils import get_bash_command
 from claude_code_hooks_daemon.utils import linear_shlex
+from claude_code_hooks_daemon.utils.escape_hatch import command_declares_hatch
 
 # Full first-fire teaching content (Plan 00116), preserving the pre-migration
 # handler's rich prose verbatim.
@@ -52,10 +53,7 @@ _ROOT_RECURSION_VERBOSE_CONTENT = (
 )
 
 # Escape hatch: MUST_SCAN_ROOT_BECAUSE="non-empty reason" bypasses the block.
-_ESCAPE_HATCH_PATTERN: Final[re.Pattern[str]] = re.compile(
-    r"""MUST_SCAN_ROOT_BECAUSE=["']([^"']+)["']""",
-    re.IGNORECASE,
-)
+_ESCAPE_HATCH: Final = "MUST_SCAN_ROOT_BECAUSE"
 
 # Scanners that ALWAYS recurse from their path argument (no flag required).
 _ALWAYS_RECURSIVE_SCANNERS: Final[frozenset[str]] = frozenset(
@@ -169,7 +167,7 @@ class RootRecursionGuardHandler(PreToolUseHandlerBase):
         if not command:
             return False
         # Escape hatch: explicit justification bypasses the block.
-        if _ESCAPE_HATCH_PATTERN.search(command):
+        if command_declares_hatch(command, _ESCAPE_HATCH):
             return False
         return any(_segment_is_dangerous(seg) for seg in _SEGMENT_SPLIT_RE.split(command))
 

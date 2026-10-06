@@ -44,6 +44,7 @@ from claude_code_hooks_daemon.strategies.comments.protocol import CommentStrateg
 from claude_code_hooks_daemon.strategies.comments.registry import (
     CommentStrategyRegistry,
 )
+from claude_code_hooks_daemon.utils.escape_hatch import is_acceptable_reason
 from claude_code_hooks_daemon.utils.path_exclusion import (
     handler_excludes_path,
     resolve_project_root,
@@ -127,7 +128,7 @@ def _has_justified_escape_hatch(content: str) -> bool:
     match = _ESCAPE_HATCH_RE.search(content)
     if match is None:
         return False
-    return bool(match.group("reason").strip())
+    return is_acceptable_reason(match.group("reason"))
 
 
 def _regular_spans(content: str, syntax: Any) -> list[CommentSpan]:
@@ -426,6 +427,8 @@ class CommentSizeHandler(PreToolUseHandlerBase):
             "# MUST_EXCEED_COMMENT_SIZE_BECAUSE: verbatim upstream licence text, "
             "must not be reflowed\n"
             "```\n\n"
+            "A comment closer (`-->`, `*/`) alone, or a placeholder such as `because` "
+            "or `n/a`, is not a reason and the block still applies.\n\n"
             "**Docstrings and JSDoc are API documentation, not comments** — exempt "
             "from this handler entirely (still subject to `comment_changelog`).\n\n"
             "**Excluded paths**: vendor/build/fixture dirs are skipped by default. "

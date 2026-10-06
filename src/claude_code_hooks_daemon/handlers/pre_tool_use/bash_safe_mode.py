@@ -45,6 +45,7 @@ from claude_code_hooks_daemon.utils.bash_flags import (
     sequenced_statements,
     split_statements,
 )
+from claude_code_hooks_daemon.utils.escape_hatch import command_declares_hatch
 from claude_code_hooks_daemon.utils.option_coercion import coerce_int_option
 
 _MODE_WARN: Final = "warn"
@@ -284,7 +285,7 @@ class BashSafeModeHandler(PreToolUseHandlerBase):
 
     def _missing_flags(self, command: str) -> tuple[str, ...]:
         """Required flags the command does not declare, or () when out of scope."""
-        if _ESCAPE_HATCH in command:
+        if command_declares_hatch(command, _ESCAPE_HATCH):
             return ()
         if self._matches_exempt_pattern(command):
             return ()

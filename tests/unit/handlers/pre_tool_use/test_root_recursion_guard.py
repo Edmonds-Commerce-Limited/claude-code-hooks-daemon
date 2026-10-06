@@ -138,6 +138,11 @@ class TestRootRecursionGuardMatchesNegative:
     def test_does_not_match_safe(self, handler, command):
         assert handler.matches(_bash(command)) is False
 
+    @pytest.mark.parametrize("reason", ["because", "n/a", "needed"])
+    def test_generic_escape_reason_still_blocked(self, handler, reason):
+        command = f'MUST_SCAN_ROOT_BECAUSE="{reason}" grep -rl x /'
+        assert handler.matches(_bash(command)) is True
+
     def test_non_bash_tool_ignored(self, handler):
         assert handler.matches({"tool_name": "Read", "tool_input": {"file_path": "/"}}) is False
 

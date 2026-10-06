@@ -276,6 +276,11 @@ class TestEscapeHatch:
         content = "<!-- MUST_EXCEED_PLAN_SIZE_BECAUSE: -->\n" + _body_of_bytes(40_000)
         assert _run(_context(content))[0].level is Level.BLOCK
 
+    @pytest.mark.parametrize("reason", ["because", "n/a", "needed"])
+    def test_generic_reason_does_not_count(self, reason):
+        content = f"<!-- MUST_EXCEED_PLAN_SIZE_BECAUSE: {reason} -->\n" + _body_of_bytes(40_000)
+        assert _run(_context(content))[0].level is Level.BLOCK
+
 
 class TestGrandfathering:
     def test_legacy_plan_only_advises(self):

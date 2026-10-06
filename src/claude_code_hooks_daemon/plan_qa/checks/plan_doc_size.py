@@ -45,6 +45,7 @@ from claude_code_hooks_daemon.plan_qa.types import (
     PlanDocSizeLimits,
     Stage,
 )
+from claude_code_hooks_daemon.utils.escape_hatch import is_acceptable_reason
 
 CHECK_ID: Final[str] = "plan-doc-size"
 
@@ -54,7 +55,6 @@ CHECK_ID: Final[str] = "plan-doc-size"
 _ESCAPE_HATCH_RE: Final[re.Pattern[str]] = re.compile(
     r"MUST_EXCEED_PLAN_SIZE_BECAUSE\s*[:=]\s*(?P<reason>.*)"
 )
-_HTML_COMMENT_CLOSE: Final[str] = "-->"
 
 _TIER_ADVISORY: Final[str] = "advisory"
 _TIER_WARNING: Final[str] = "warning"
@@ -118,10 +118,7 @@ def _has_justified_escape_hatch(content: str) -> bool:
     match = _ESCAPE_HATCH_RE.search(content)
     if match is None:
         return False
-    reason = match.group("reason").strip()
-    if reason.endswith(_HTML_COMMENT_CLOSE):
-        reason = reason[: -len(_HTML_COMMENT_CLOSE)].strip()
-    return bool(reason)
+    return is_acceptable_reason(match.group("reason"))
 
 
 def _folder_has_supporting_docs(plan_folder: Path, journal_dir_name: str) -> bool:
