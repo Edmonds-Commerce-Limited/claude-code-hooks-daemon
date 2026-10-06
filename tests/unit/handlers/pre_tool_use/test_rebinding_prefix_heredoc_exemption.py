@@ -4,8 +4,9 @@ Plan 00483 X-1. ``cd "$DIR" && cat > f.md <<'EOF'`` with a body naming a
 guarded command was denied, while the same heredoc with no ``cd`` was allowed:
 the shared rebinding check read ``cd`` to a non-literal target, ``source`` and
 a non-literal ``export`` as redefining the receiver's name. None of them does
-in text the command shows. An ``alias``/function definition or a ``PATH``
-binding does, and still keeps the body scanned.
+in text the command shows. Redefining the receiver itself (an ``alias``, a
+function, a ``PATH`` binding) is deliberate evasion, which owner ruling A2
+(Plan 00483, OWNER-RULINGS-261005.md) puts out of scope, so it is not pinned.
 
 The guarded text is built by concatenation so the literal never appears in
 this file as a matchable span.
@@ -51,14 +52,6 @@ _ORDINARY_PREFIXES = [
     "export X=$Y && ",
 ]
 
-#: Earlier statements that redefine the receiver (`cat`) in visible text.
-_REBINDING_PREFIXES = [
-    "alias cat=bash\n",
-    "cat(){ bash; }; ",
-    "PATH=/tmp/x:$PATH ",
-    "export PATH=/tmp/x:$PATH && ",
-]
-
 
 @pytest.fixture(autouse=True)
 def _reset_disclosure_tracker() -> Any:
@@ -101,11 +94,4 @@ class TestAnOrdinaryPrefixDoesNotExemptWhatRunsTheBody:
     @pytest.mark.parametrize("prefix", _ORDINARY_PREFIXES)
     def test_a_real_command_after_the_heredoc_is_still_scanned(self, prefix: str) -> None:
         command = f"{prefix}cat > f.md <<'EOF'\nprose\nEOF\n{_STASH}"
-        assert _matches(GitStashHandler(), command) is True
-
-
-class TestARealRebindingStillWithholdsTheExemption:
-    @pytest.mark.parametrize("prefix", _REBINDING_PREFIXES)
-    def test_a_visible_redefinition_keeps_the_body_scanned(self, prefix: str) -> None:
-        command = _command(prefix, f"never run {_STASH} here", "f.md")
         assert _matches(GitStashHandler(), command) is True

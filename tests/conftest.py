@@ -28,6 +28,7 @@ from claude_code_hooks_daemon.daemon.paths import get_pid_path
 # actually enforced — the Bash handler (subagent_full_qa_blocker) is the fast,
 # friendly first line, not the guarantee. See qa/full_qa_gate.py's docstring.
 from claude_code_hooks_daemon.qa.full_qa_gate import pytest_collection_modifyitems
+from claude_code_hooks_daemon.utils import protected_file_index
 
 # Re-exported so pytest collects it as a hook implementation from this
 # conftest. It sits at `tests/` root rather than in a subdirectory because the
@@ -731,6 +732,19 @@ def no_test_writes_tracked_generated_docs():
         + (", ".join(preserved_paths) if preserved_paths else "nothing preserved")
         + "."
     )
+
+
+@pytest.fixture(autouse=True)
+def no_protected_file_index_builds_outlive_a_test():
+    """Wait for, then forget, any protected-file index build a test started.
+
+    ``index_for`` builds in a background thread that runs ``git`` through
+    ``subprocess.run``. A build left running into the next test consumes the
+    ``side_effect`` list of a ``subprocess.run`` mock that test patched, and the
+    test's own call then raises ``StopIteration``.
+    """
+    yield
+    protected_file_index.reset_index_cache()
 
 
 @pytest.fixture(autouse=True)

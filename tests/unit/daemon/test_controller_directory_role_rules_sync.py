@@ -13,6 +13,7 @@ from unittest.mock import Mock, patch
 import pytest
 
 from claude_code_hooks_daemon.core.project_context import ProjectContext
+from claude_code_hooks_daemon.core.router import EventRouter
 from claude_code_hooks_daemon.daemon.controller import DaemonController
 from claude_code_hooks_daemon.install.directory_role_rules import (
     PLAN_DIR_RULE_KEY,
@@ -86,3 +87,60 @@ class TestDirectoryRoleRulesSyncOnInitialise:
         )
         controller = _initialise(workspace)
         assert controller.is_initialised
+
+
+class TestIndexPrewarmOnInitialise:
+    def teardown_method(self) -> None:
+        ProjectContext.reset()
+
+    def test_guards_are_asked_to_start_their_index_build(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from claude_code_hooks_daemon.handlers.pre_tool_use.secret_file_guard import (
+            SecretFileGuardHandler,
+        )
+
+        started: list[str] = []
+        monkeypatch.setattr(
+            SecretFileGuardHandler, "prewarm_index", lambda self: started.append(self.name)
+        )
+
+        controller = _initialise(_make_workspace(tmp_path))
+        assert not started, "initialise must not start background git work"
+
+        controller.prewarm_indexes()
+
+        assert started
+
+    def test_a_handler_whose_prewarm_raises_is_logged_and_the_others_still_run(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        started: list[str] = []
+
+        class Exploding:
+            def prewarm_index(self) -> None:
+                raise OSError("odd config")
+
+        class Fine:
+            def prewarm_index(self) -> None:
+                started.append("fine")
+
+        controller = _initialise(_make_workspace(tmp_path))
+        monkeypatch.setattr(
+            EventRouter,
+            "get_all_handlers",
+            lambda self: {"pre_tool_use": [Exploding(), object(), Fine()]},
+        )
+
+        with caplog.at_level("WARNING"):
+            failed = controller.prewarm_indexes()
+
+        assert failed == ["Exploding"]
+        assert started == ["fine"]
+        assert any(
+            "Exploding" in record.getMessage() and "OSError" in record.getMessage()
+            for record in caplog.records
+        )

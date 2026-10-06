@@ -1329,6 +1329,10 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
                 return (literal, literal, "bash")
         return (_NOT_JUDGED_PATTERN, reason, _ADVISORY_ROUTE)
 
+    def prewarm_index(self) -> None:
+        """Start building the protected-file index now; never waits for it."""
+        self._index(self._patterns())
+
     def _index(self, patterns: tuple[str, ...]) -> ProtectedFileIndex | None:
         """The protected-file index for this project, or None while there is none."""
         root = resolve_project_root()

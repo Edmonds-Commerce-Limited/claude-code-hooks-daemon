@@ -1,6 +1,6 @@
 # Plan 00490: github issue assignment guard
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-10-05
 **Owner**: dev
 **Priority**: Medium
@@ -170,8 +170,10 @@ client projects, until it has run here for a while.
   - an edit in a plan tied to an issue assigned to self is allowed;
   - an unassigned issue is denied with the claim command;
   - `bin/hooks-daemon issue-validity --list-eligible` lists only approved authors' issues.
-- [ ] ⬜ **Task 4.3**: The coordinator merges the Task 4.2 branch and the full QA run on the merged tree passes; then
-  close and archive this plan.
+- [x] ✅ **Task 4.3**: The coordinator merges the Task 4.2 branch and the full QA run on the merged tree passes; then
+  close and archive this plan. Merged as `bb9bf1a98`; the full post-merge run over it (with the Plan 00483 Phase 2
+  merge) found two Plan 00490 registry gaps, fixed in `24c68e67c` and `dd1afbc24`; its remaining findings were
+  Plan 00483's (fixed in `a3b0df28a`, and N355); acceptance and semgrep green.
 
 ## Open questions for the owner
 
@@ -197,7 +199,11 @@ Question 1 also settles whether auto-claim belongs in the hook: the `auto_claim`
 - [x] All verdict rows are pinned by tests, and the untied path makes no `gh` call.
 - [x] The issue-sdlc runbook claims before working, stops on someone else's issue, and reads its author list from config.
 - [x] The live dogfood check (Task 4.1) passes after a daemon restart.
+- [x] Every release-bound consequence is in the pending-release holding area:
+  `UNRELEASED/release-notes/027-issue-validity-command-and-assignment-guard.md`,
+  `UNRELEASED/release-notes/029-issue-validity-refuses-without-an-author-list.md`.
 
 ## Delivery & Milestones
 
-- <!-- milestone or delivery commit hash -->
+- Delivered: merge `8846f9d77` (module, CLI, handler), merge `bb9bf1a98` (Task 4.2 CLI refusal), registry fixes
+  `24c68e67c` and `dd1afbc24`.

@@ -168,6 +168,12 @@ class Timeout:
     # and at shutdown). A build is one `git ls-files`; the ceiling only stops a
     # wedged git holding the caller.
     INDEX_BUILD_WAIT = 30
+    # 120 seconds (each `git ls-files` of a protected-file index build). The build
+    # runs in a background thread, never on a hook call, so it is not held to the
+    # 5 second GIT_CONTEXT bound; on a large working copy the `--ignored` listing
+    # alone takes 3 to 7 seconds, and more while hooks run beside it. A build that
+    # inherited GIT_CONTEXT timed out every time and the daemon never had an index.
+    INDEX_BUILD_GIT = 120
 
     # QA runner timeouts (seconds)
     QA_TEST_TIMEOUT = 120  # 2 minutes (mypy, individual tool checks)

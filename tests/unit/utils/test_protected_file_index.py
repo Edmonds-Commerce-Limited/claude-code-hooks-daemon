@@ -358,3 +358,91 @@ class TestTheCache:
         )
 
         assert held == pfi.MAX_CACHED_INDEXES
+
+
+class TestTheBuildUnderTheDaemon:
+    """The live daemon never got an index: a build that failed did so silently, for good.
+
+    On the real working copy the ``git ls-files --others --ignored`` call alone takes
+    3 to 7 seconds, and the scan inherited the 5 second bound meant for a context
+    lookup on the hot path. A build is off the hot path, so it needs its own bound;
+    and whatever stops it must be logged and retried soon, not cached for ten minutes.
+    """
+
+    def test_a_scan_slower_than_a_hot_path_git_call_still_builds(
+        self, repo: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from claude_code_hooks_daemon.utils import git_file_states
+
+        real_run_git = git_file_states.run_git
+
+        def loaded_host(cwd: Path, *args: str, timeout: float = Timeout.GIT_CONTEXT) -> object:
+            if timeout <= Timeout.GIT_CONTEXT:
+                return subprocess.CompletedProcess(["git", *args], 124, "", "timed out")
+            return real_run_git(cwd, *args, timeout=timeout)
+
+        monkeypatch.setattr(git_file_states, "run_git", loaded_host)
+
+        assert index_for(repo, PATTERNS) is None
+        pfi.wait_for_builds(timeout=Timeout.INDEX_BUILD_WAIT)
+
+        served = index_for(repo, PATTERNS)
+        assert served is not None
+        assert f"keys/{KEY}" in {entry.relpath for entry in served.files}
+
+    def test_a_build_that_finds_no_repository_is_logged(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        plain = tmp_path / "plain"
+        _touch(tmp_path, f"plain/{KEY}")
+
+        with caplog.at_level("WARNING", logger=pfi.__name__):
+            index_for(plain, PATTERNS)
+            pfi.wait_for_builds(timeout=Timeout.INDEX_BUILD_WAIT)
+
+        messages = [record.getMessage() for record in caplog.records]
+        assert any("protected-file index" in message for message in messages)
+        assert not any(KEY in message for message in messages)
+
+    def test_a_build_that_raises_is_logged_and_cleaned_up(
+        self, repo: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        def exploding(root: Path, patterns: tuple[str, ...]) -> ProtectedFileIndex | None:
+            raise RuntimeError("scan blew up")
+
+        monkeypatch.setattr(pfi, "build_index", exploding)
+
+        with caplog.at_level("WARNING", logger=pfi.__name__):
+            index_for(repo, PATTERNS)
+            pfi.wait_for_builds(timeout=Timeout.INDEX_BUILD_WAIT)
+
+        assert any("RuntimeError" in record.getMessage() for record in caplog.records)
+        assert pfi.cached_index(repo, PATTERNS) is None
+
+    def test_a_failed_build_is_retried_once_the_short_retry_interval_has_passed(
+        self, repo: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        results: list[ProtectedFileIndex | None] = [None]
+        real = pfi.build_index
+
+        def flaky(root: Path, patterns: tuple[str, ...]) -> ProtectedFileIndex | None:
+            return results.pop(0) if results else real(root, patterns)
+
+        monkeypatch.setattr(pfi, "build_index", flaky)
+        key = pfi._key(repo, PATTERNS)
+
+        assert index_for(repo, PATTERNS) is None
+        pfi.wait_for_builds(timeout=Timeout.INDEX_BUILD_WAIT)
+        assert pfi.RETRY_AFTER_FAILURE_SECONDS < pfi.REFRESH_AFTER_SECONDS
+        pfi._failed_at[key] = time.monotonic() - pfi.RETRY_AFTER_FAILURE_SECONDS - 1
+
+        assert index_for(repo, PATTERNS) is None
+        pfi.wait_for_builds(timeout=Timeout.INDEX_BUILD_WAIT)
+
+        assert index_for(repo, PATTERNS) is not None
+
+    def test_prewarm_starts_a_build_without_waiting_for_it(self, repo: Path) -> None:
+        pfi.prewarm(repo, PATTERNS)
+        pfi.wait_for_builds(timeout=Timeout.INDEX_BUILD_WAIT)
+
+        assert pfi.cached_index(repo, PATTERNS) is not None

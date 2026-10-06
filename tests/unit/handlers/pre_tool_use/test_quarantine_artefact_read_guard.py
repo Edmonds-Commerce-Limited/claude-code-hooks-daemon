@@ -856,3 +856,32 @@ class TestUnjudgedCallsAreAllowedWithAdvisory:
         assert result.decision == Decision.ALLOW
         assert result.context
         assert "deadline" in result.context[0]
+
+
+class TestPrewarmIndex:
+    def test_starts_the_build_for_its_own_globs(
+        self,
+        handler: QuarantineArtefactReadGuardHandler,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        asked: list[tuple[object, tuple[str, ...]]] = []
+        monkeypatch.setattr(guard, "resolve_project_root", lambda: tmp_path)
+        monkeypatch.setattr(
+            protected_file_index,
+            "index_for",
+            lambda root, patterns: asked.append((root, patterns)),
+        )
+
+        handler.prewarm_index()
+
+        assert asked == [(tmp_path, handler._effective_globs())]
+
+    def test_does_nothing_without_a_project_root(
+        self, handler: QuarantineArtefactReadGuardHandler, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(guard, "resolve_project_root", lambda: None)
+
+        handler.prewarm_index()
+
+        assert protected_file_index.cached_index("/nowhere", ()) is None

@@ -499,6 +499,22 @@ class TestAnUnresolvedTargetMayBeAnOpenFd:
         assert _decision(DestructiveGitHandler(), command) == Decision.ALLOW
 
 
+class TestAVariableWriteTargetIsResolvedByContainment:
+    """A target assigned a literal earlier in the same command is judged by that
+    literal. (A target never assigned is unknown and is allowed with an advisory,
+    owner ruling A1; that is not asserted here.)"""
+
+    def test_a_variable_assigned_an_outside_path_is_denied(self, tmp_path: Path) -> None:
+        command = f"OUT={tmp_path}/o.md; cat > \"$OUT\" <<'EOF'\nx\nEOF"
+
+        assert _decision(ProjectContainmentHandler(), command) == Decision.DENY
+
+    def test_a_variable_assigned_an_inside_path_is_allowed(self) -> None:
+        command = "OUT=untracked/scratch/o.md; cat > \"$OUT\" <<'EOF'\nx\nEOF"
+
+        assert _decision(ProjectContainmentHandler(), command) == Decision.ALLOW
+
+
 # -- Round 12: review 11 MAJOR 2, `case` as an argument -----------------------
 
 

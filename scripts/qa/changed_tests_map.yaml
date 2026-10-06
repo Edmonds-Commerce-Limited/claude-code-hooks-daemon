@@ -158,3 +158,11 @@ rules:
   - glob: "*.bash"
     tools: [shell_check]
     why: shell_check lints .bash scripts as well (run_shell_check.sh)
+  - glob: "*/utils/protected_file_index.py"
+    tests:
+      - tests/unit/utils/test_protected_file_index.py
+      - tests/unit/test_index_build_isolation.py
+      - tests/unit/handlers/pre_tool_use/test_secret_file_guard_advisory.py
+      - tests/unit/handlers/pre_tool_use/test_quarantine_artefact_read_guard.py
+    why: the index build and its cache are read by both guards; the isolation
+      test pins that a build never outlives the test that started it
