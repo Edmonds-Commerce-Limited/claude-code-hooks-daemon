@@ -87,10 +87,10 @@ older local copy tells the agent to report it to a human, not to edit it.
 
 ### Phase 3: IaC hand-off
 
-- [x] ✅ **Task 3.1**: Done: [FEDORA-DESKTOP-REQUEST.md](FEDORA-DESKTOP-REQUEST.md), including the finding that the
-  file now on that VM is unreadable inside the container. Draft the fedora-desktop request for IaC to write this repository's `ccy.env.local` on the
-  sdlc runner VM (`HOOKS_DAEMON_HOSTNAME=cchd-sdlc-runner`, Plan 00479 owner ruling D8). The owner files or
-  hands it on.
+- [x] ✅ **Task 3.1**: Draft the fedora-desktop request for IaC to write this repository's `ccy.env.local` on the
+  sdlc runner VM (`HOOKS_DAEMON_HOSTNAME=cchd-sdlc-runner`, Plan 00479 owner ruling D8). The owner files or hands it
+  on. Done: [FEDORA-DESKTOP-REQUEST.md](FEDORA-DESKTOP-REQUEST.md), including the finding that the file now on that
+  VM is unreadable inside the container.
 
 ## Success Criteria
 
