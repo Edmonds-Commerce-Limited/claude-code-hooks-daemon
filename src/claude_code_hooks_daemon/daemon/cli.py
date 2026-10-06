@@ -859,6 +859,7 @@ def _start_under_launch_lock(
     # regenerates the CLAUDE.md <hooksdaemon> block (via the injector). Shared
     # single source of truth with cmd_regenerate_docs.
     controller = _build_initialised_controller(config, project_path)
+    controller.prewarm_indexes()
     reporter.report(_START_STEP)
 
     # Get the daemon config with proper paths

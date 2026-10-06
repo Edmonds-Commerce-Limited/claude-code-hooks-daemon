@@ -258,6 +258,12 @@ class QuarantineArtefactReadGuardHandler(PreToolUseHandlerBase):
                 return (literal, literal)
         return (_NOT_JUDGED_PATTERN, reason)
 
+    def prewarm_index(self) -> None:
+        """Start building the quarantined-artefact index now; never waits for it."""
+        patterns = self._effective_globs()
+        if patterns:
+            self._index(patterns)
+
     def _index(self, patterns: tuple[str, ...]) -> ProtectedFileIndex | None:
         """The index of quarantined artefacts for this project, or None while there is none."""
         root = resolve_project_root()

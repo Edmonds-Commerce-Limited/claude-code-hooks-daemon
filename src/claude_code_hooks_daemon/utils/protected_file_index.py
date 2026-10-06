@@ -24,6 +24,7 @@ git worktree is a separate repository's business.
 from __future__ import annotations
 
 import fnmatch
+import logging
 import os
 import re
 import threading
@@ -33,7 +34,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
-from typing import TYPE_CHECKING, Final
+from typing import TYPE_CHECKING, Final, Protocol, runtime_checkable
 
 from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.utils.git_repo import run_git
@@ -41,8 +42,14 @@ from claude_code_hooks_daemon.utils.git_repo import run_git
 if TYPE_CHECKING:
     from claude_code_hooks_daemon.utils.git_file_states import GitFileStates
 
+logger = logging.getLogger(__name__)
+
 #: A built index is rebuilt in the background once it is this old.
 REFRESH_AFTER_SECONDS: Final[float] = 600.0
+
+#: A build that failed is tried again after this long, not after a whole refresh
+#: interval: the usual cause is a busy host, and a guard with no index can only advise.
+RETRY_AFTER_FAILURE_SECONDS: Final[float] = 30.0
 
 #: Indexes kept at once (one per project and pattern set; a daemon serves one project).
 MAX_CACHED_INDEXES: Final[int] = 8
@@ -61,6 +68,14 @@ class TreeView(StrEnum):
     ALL = "all"
     UNIGNORED = "unignored"
     TRACKED = "tracked"
+
+
+@runtime_checkable
+class IndexPrewarmer(Protocol):
+    """A handler that reads an index and can start building it ahead of its first call."""
+
+    def prewarm_index(self) -> None:
+        """Start the background build; never wait for it."""
 
 
 SkipHook = Callable[[str, bool], bool]
@@ -249,7 +264,7 @@ def build_index(project_root: Path, patterns: tuple[str, ...]) -> ProtectedFileI
     """
     from claude_code_hooks_daemon.utils.git_file_states import scan_git_file_states
 
-    states = scan_git_file_states(project_root)
+    states = scan_git_file_states(project_root, timeout=Timeout.INDEX_BUILD_GIT)
     if states is None:
         return None
     return index_from_states(project_root, patterns, states)
@@ -310,7 +325,9 @@ def index_for(project_root: Path | str, patterns: tuple[str, ...]) -> ProtectedF
     with _lock:
         held = _cache.get(key)
         stale = held is None or now - held.built_at > REFRESH_AFTER_SECONDS
-        failed_recently = now - _failed_at.get(key, -REFRESH_AFTER_SECONDS) < REFRESH_AFTER_SECONDS
+        failed_recently = (
+            now - _failed_at.get(key, -RETRY_AFTER_FAILURE_SECONDS) < RETRY_AFTER_FAILURE_SECONDS
+        )
         if not stale or key in _building or failed_recently:
             return held
         thread = threading.Thread(
@@ -324,14 +341,38 @@ def index_for(project_root: Path | str, patterns: tuple[str, ...]) -> ProtectedF
     return held
 
 
+def prewarm(project_root: Path | str, patterns: tuple[str, ...]) -> None:
+    """Start the background build now, so the first search after a restart can be judged.
+
+    Cheap and non-blocking: it is :func:`index_for` with the answer discarded.
+    """
+    index_for(project_root, patterns)
+
+
 def _build_and_remember(key: _Key, project_root: Path, patterns: tuple[str, ...]) -> None:
     try:
         built = build_index(project_root, patterns)
         if built is None:
+            logger.warning(
+                "protected-file index for %s could not be built (git gave no answer); "
+                "recursive searches are allowed with an advisory, retrying in %gs",
+                project_root,
+                RETRY_AFTER_FAILURE_SECONDS,
+            )
             with _lock:
                 _failed_at[key] = time.monotonic()
         else:
             remember(built)
+    except Exception as exc:
+        # A thread's uncaught exception goes to stderr, which nothing reads.
+        logger.warning(
+            "protected-file index for %s could not be built: %s; retrying in %gs",
+            project_root,
+            type(exc).__name__,
+            RETRY_AFTER_FAILURE_SECONDS,
+        )
+        with _lock:
+            _failed_at[key] = time.monotonic()
     finally:
         with _lock:
             _building.pop(key, None)

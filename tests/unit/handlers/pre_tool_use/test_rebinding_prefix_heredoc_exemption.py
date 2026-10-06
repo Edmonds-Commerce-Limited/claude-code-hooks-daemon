@@ -52,6 +52,7 @@ _ORDINARY_PREFIXES = [
     "export X=$Y && ",
 ]
 
+
 @pytest.fixture(autouse=True)
 def _reset_disclosure_tracker() -> Any:
     reset_data_layer()

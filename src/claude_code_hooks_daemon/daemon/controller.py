@@ -36,6 +36,7 @@ from claude_code_hooks_daemon.daemon.source_fingerprint import (
 )
 from claude_code_hooks_daemon.daemon.verdict_log import append_verdicts
 from claude_code_hooks_daemon.handlers.registry import HandlerRegistry
+from claude_code_hooks_daemon.utils.protected_file_index import IndexPrewarmer
 
 if TYPE_CHECKING:
     from claude_code_hooks_daemon.config.models import (
@@ -417,6 +418,37 @@ class DaemonController:
         # fresh paths: glob without waiting for a reinstall. Same best-effort
         # contract — never fatal to daemon startup.
         self._sync_directory_role_rules(workspace_root, config_path)
+
+    def prewarm_indexes(self) -> list[str]:
+        """Start each guard's protected-file index build, so the first search is judged sooner.
+
+        Called by the serving daemon only, never by ``initialise``: building a
+        controller (the docs CLI, every test) must not start background git work.
+
+        Non-blocking: each build is a background thread. This is an optimisation
+        that runs during daemon STARTUP, so a handler whose ``prewarm_index``
+        raises (an odd config, a third-party handler) must not stop the daemon
+        from starting: the failure is logged and the next handler still runs.
+        Failing closed would break every session, and the guard's hot path still
+        builds and judges against its own index.
+
+        Returns:
+            The class names of the handlers whose pre-warm raised.
+        """
+        failed: list[str] = []
+        for handlers in self._router.get_all_handlers().values():
+            for handler in handlers:
+                if not isinstance(handler, IndexPrewarmer):
+                    continue
+                try:
+                    handler.prewarm_index()
+                except Exception as exc:
+                    name = type(handler).__name__
+                    logger.warning(
+                        "Index pre-warm failed for %s: %s: %s", name, type(exc).__name__, exc
+                    )
+                    failed.append(name)
+        return failed
 
     def _compute_startup_source_fingerprint(
         self,

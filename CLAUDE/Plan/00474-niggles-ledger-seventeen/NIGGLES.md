@@ -1410,6 +1410,18 @@ The uncertain-move union judges the hook directory and the LAST recorded move (`
 every candidate directory (`sub`). Remedy: judge every directory any `cd` in the chain could
 land in.
 
+### N355 — the protected-file index never becomes available in the live daemon
+
+**Source**: the coordinator, 2026-10-05, right after merge dc5c9263b of Plan 00483 Phase 2.
+
+**Evidence**: more than 10 minutes after `bin/hooks-daemon restart`, every recursive search still drew the "index of protected files is not available yet" advisory from both guards, and the daemon log said nothing. Out of the daemon the same build worked. On `/workspace`, `git ls-files --others --ignored --exclude-standard` alone takes 3.4 s idle (more under hook load), against the 5 s `Timeout.GIT_CONTEXT` that `scan_git_file_states` inherited through `run_git`. A listing past the bound returns exit 124, the scan returns None, and `_build_and_remember` recorded the failure for `REFRESH_AFTER_SECONDS` (600 s) without logging; an exception in the thread went to stderr only.
+
+**Impact**: high. Plan 00483 A2's recursive-search and glob checks were advisory-only for the daemon's whole life on any large tree.
+
+**Status**: ✅ Fixed (this branch, commit recorded at merge). The scan takes a timeout and the index build passes `Timeout.INDEX_BUILD_GIT` (120 s); a failed listing or a raising build is logged with its reason; a failed build retries after `RETRY_AFTER_FAILURE_SECONDS` (30 s); the controller pre-warms each guard's index at startup (`prewarm_index`). Reproduced first by `TestTheBuildUnderTheDaemon` in `tests/unit/utils/test_protected_file_index.py`. The deleted variable-target containment pin is restored in `test_heredoc_grammar_chain.py`.
+
+Second part: an index build started by one test leaked into later tests. Its thread ran `git` through `subprocess.run` while a later test had patched that with a `side_effect` list, so the thread consumed the effects and the test's own call raised `StopIteration` in fixture setup (the gate's `ls-star-py` row; order-dependent, passes alone). Fixed by an autouse fixture in `tests/conftest.py` that runs `reset_index_cache()` (waits for in-flight builds, clears the cache and `_failed_at`) after every test, and by moving the startup pre-warm out of `DaemonController.initialise()` into the serving path (`controller.prewarm_indexes()` in `cli.py`), so building a controller never starts git work. Pinned by `tests/unit/test_index_build_isolation.py` (red without the fixture).
+
 ### N356 — a grep regex inside a quoted `bash -c` string is read as a protected-path glob
 
 **Source**: the coordinator, 2026-10-05, after the Plan 00483 Phase 2 merge (dc5c9263b).
