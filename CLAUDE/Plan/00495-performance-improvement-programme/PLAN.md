@@ -100,15 +100,18 @@ Evidence already seen in this session (2026-10-06), not yet explained:
 - [ ] ⬜ **Task 2.5**: Bind the socket before the non-essential start-up work, so the first request is answered sooner.
 - [ ] ⬜ **Task 2.6**: Add a result cache to `docs-qa-sweep` and `plan-qa-sweep`, keyed by an input fingerprint, and run them off the
   blocking chain. About 6 CPU-s saved on this repository, and no handler dropped for the budget.
-- [ ] ⬜ **Task 2.7**: Status line: while the daemon is starting, show cached fallback text instead of "DAEMON
-  FAILED".
+- [ ] ⬜ **Task 2.7**: Status line: while the daemon is starting, show a baseline line saying the hooks daemon is
+  loading (owner ruling A3, 2026-10-06), with any cached fallback text, instead of "DAEMON FAILED".
 
 ### Phase 3: Guard and decide
 
 - [ ] ⬜ **Task 3.1**: A startup-time regression check (a benchmark with a budget, run where it is cheap enough: a
   release gate or a scheduled routine), so the next slowdown is caught by the project, not the owner.
-- [ ] ⬜ **Task 3.2**: Re-answer the Rust question from the Phase 1 and Phase 2 numbers. If any native step would pay,
-  write it up for the owner with its saving and its auditability cost.
+- [ ] ⬜ **Task 3.2**: Rust helpers for specific hot paths (owner ruling A3, 2026-10-06: no full rewrite was
+  proposed; the question is whether particular heavy paths justify a Rust helper). From the Phase 1 and Phase 2
+  numbers, name each path that stays heavy after the Python fixes (candidates to measure: the content scanners on large
+  writes, the docs and plan QA sweeps, the transport path). For each, give the measured saving a native helper would
+  bring and its auditability cost, and put the list to the owner.
 
 ## Success Criteria
 

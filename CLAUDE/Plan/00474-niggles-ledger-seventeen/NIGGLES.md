@@ -1414,6 +1414,51 @@ The uncertain-move union judges the hook directory and the LAST recorded move (`
 every candidate directory (`sub`). Remedy: judge every directory any `cd` in the chain could
 land in.
 
+### N363 — a pipe inside a `bash -c` string is blamed on `bash`, not on its real producer
+
+**Found**: by the coordinator, twice on 2026-10-06.
+`bash -c '… grep … | sort … | tail -n 2'` and `bash -c '… V=$(ls -d … | head -n 1) …'` were denied as
+"R-PIPE-TO-TAIL/HEAD — bash unrecognized". `sort`, `grep` and `ls` are whitelisted producers. The handler's guidance
+says every pipe is judged on its own producer, and that a pipe inside `$( )` belongs to the command inside it. The
+`bash -c` string should be parsed the same way; instead the whole thing is judged as a pipe from `bash`.
+
+**Status**: ⬜ Open.
+
+### N362 — deleting a MERGED remote branch is denied; only an unmerged delete should be human-only
+
+**Found**: owner ruling D11 of 2026-10-06
+([OWNER-RULINGS-261006.md](../00483-threat-model-conformance-audit/OWNER-RULINGS-261006.md)), amending A6. Deleting a
+branch whose tip is already contained in the default branch is lossless housekeeping, and any agent may do it.
+`R-GIT-PUSH-DELETE-REMOTE` (`destructive_git`) denies every `git push --delete` and `git push <remote> :<name>`.
+
+**Fix**: allow the delete when every named branch's remote tip is an ancestor of the remote default branch (after a
+fetch); keep the deny, with the same message, otherwise. Tags are out of scope. Test both sides through the real chain.
+
+**Status**: ⬜ Open.
+
+### N361 — the fake-values registry is not pre-filled, and nothing says its entries must look fake
+
+**Found**: owner ruling C7 of 2026-10-06. `.claude/fake-values.yaml` (Plan 00492) lets a listed value pass
+`sensitive_content`, and only an agent in this repository writes it. The owner's defence:
+
+- one concerted brainstorm pre-fills it with fakes for every kind that docs might need;
+- a big, clear header comment says any change must be a clear fake;
+- values look visibly fake: long runs of a repeated letter, `fakefakefake`, and similar shapes that never occur in real
+  life.
+
+Worth weighing: a docs-QA or commit check that a new entry matches a "visibly fake" shape.
+
+**Status**: ⬜ Open.
+
+### N360 — an upgrade should keep running the opt-in handlers that were running before it
+
+**Found**: owner ruling C6 of 2026-10-06, following Plan 00493 (archived). The upgrade should write `enabled: true` for
+each opt-in handler that was running before, so the project's real configuration carries across upgrades. It should
+then tell the agent what it did, why, and how to change it. Plan 00493's report found the losses but did not restore
+them.
+
+**Status**: ⬜ Open.
+
 ### N359 — the plan fact-check feed points at the wrong files, diffs whole folders, and can consume a check unseen
 
 **Found**: by the coordinator in the Plan 00480 Task 4.4 live run, after the daemon restart that loaded N358

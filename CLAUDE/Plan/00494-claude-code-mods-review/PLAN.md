@@ -47,8 +47,19 @@ relate to hooks, plugins, skills, agents and settings.
 
 ### Phase 2: Owner decision
 
-- [ ] ⬜ **Task 2.1**: File follow-up plans or ledger entries for the candidates the owner chooses. Waiting on the
-  owner's choice from the shortlist.
+- [x] ✅ **Task 2.1**: The owner's choice (2026-10-06, A2 of
+  [OWNER-RULINGS-261006.md](../00483-threat-model-conformance-audit/OWNER-RULINGS-261006.md)):
+  - **Approved:** daemon mod awareness, with an exceptionally loud warning for mods that can interfere with hooks.
+  - **One mod only:** a single hooks-daemon mod carrying several features, never several mods.
+  - **New candidates:** a user to-do and question list in the sidebar, and SessionStart messages.
+  - **Maybe:** the session-resilience features, pending a detailed proposal.
+  - **Rejected:** the ccy supervisor as a mod. Mods are not for protection.
+- [ ] 🔄 **Task 2.2**: Detailed proposal for the single hooks-daemon mod: architecture, the to-do/question list,
+  SessionStart messages, session resilience, and a concrete spec for daemon mod awareness. It also answers the owner's
+  question of how mods are updated and how projects are kept on the right mod version. Report:
+  `subagent-reports/261006-hooks-daemon-mod-proposal-opus.md`.
+- [ ] ⬜ **Task 2.3**: Build daemon mod awareness (approved), TDD, from the Task 2.2 spec.
+- [ ] ⬜ **Task 2.4**: Put the Task 2.2 proposal to the owner; file a build plan for the mod features chosen.
 
 ## Success Criteria
 

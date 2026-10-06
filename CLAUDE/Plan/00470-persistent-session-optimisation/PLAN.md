@@ -99,6 +99,17 @@ Evidence, with verified facts marked apart from inferences, is in
 
   - [RUNBOOK.md](RUNBOOK.md) holds the verified parts. `autoContinueAtUsageLimit` belongs in user settings: a project settings file turns it off. `--continue` is what restores crons.
   - Owner input: the host's restart unit around ccy is outside this repository. It is recorded in RUNBOOK.md §3 once it exists.
+  - Owner ruling D10 (2026-10-06): inspect the public fedora-desktop reference clone and this VM's server install, then
+    tell the owner what infrastructure agents must do. Report:
+    [261006-ccy-environment-inspection-sonnet.md](subagent-reports/261006-ccy-environment-inspection-sonnet.md).
+    - **Task 2.3**: no restart is needed. The supervisor is this repository's bind-mounted file, and its `--worker`
+      hot-reloaded three seconds after the file's last write. To verify, compare the worker's `lstart` with the file's
+      mtime.
+    - **Task 3.5 gaps, for infrastructure agents**: nothing restarts a crashed `claude` or supervisor while the VM is
+      up; boot restore is fedora-desktop's `ccy-sessions-restore.service` (with `--continue`), unconfirmed on this
+      host; `autoContinueAtUsageLimit` is not provisioned anywhere; `HOOKS_DAEMON_HOSTNAME` is not set.
+  - Owner ruling A1 (2026-10-06): the supervisor's Esc before a forced compact is not a human rejection. The compact
+    instruction now says so and asks for interrupted tool calls to be retried. Branch at `a223c2895`, in QA.
 
 ### Phase 4: Housekeeping and cost (owner: orchestrator; code by sub-agents)
 
@@ -152,7 +163,8 @@ waited on one bandit decision.
 - [x] ✅ **Task 6.2**: This project's `issue-sdlc` job gets
   `hosts: [cchd-sdlc-runner]`. An SDLC runner is started anywhere by exporting
   `HOOKS_DAEMON_HOSTNAME=cchd-sdlc-runner` before launching the session.
-- [ ] ⬜ **Task 6.3**: Probe, by dogfooding, how extra agent threads opened in one
+- [ ] ⬜ **Task 6.3** (paused until the owner is present, owner ruling D10 of 2026-10-06: the owner opens the second
+  thread): Probe, by dogfooding, how extra agent threads opened in one
   Claude Code session (left arrow, then a new thread) appear in hook payloads:
   their `session_id`, transcript and `session_crons`. Record the results in
   RESEARCH.md before any design.
