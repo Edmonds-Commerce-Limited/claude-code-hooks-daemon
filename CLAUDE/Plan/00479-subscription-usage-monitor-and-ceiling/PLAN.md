@@ -231,8 +231,10 @@ the daemon directs the model and then verifies what it did.
   supersedes the earlier rule that this repository's config never carries a ceiling. The
   entry is keyed by the role alias `cchd-sdlc-runner` (owner, same day: a session's alias
   supersedes its hostname), not by the VM's real name, which stays out of the public config.
-  It takes effect once this session is launched with `HOOKS_DAEMON_HOSTNAME=cchd-sdlc-runner`,
-  an infrastructure step; that alias also makes the session the `issue-sdlc` cron's host.
+  The alias is set in the gitignored `.claude/ccy/ccy.env.local` on this VM
+  (`export HOOKS_DAEMON_HOSTNAME=cchd-sdlc-runner`), which ccy 3.80+ sources after `ccy.env`.
+  It takes effect at this project's next ccy launch. The alias also makes this session the
+  `issue-sdlc` cron's host.
 
 - [x] Missing or stale usage data never stops a session (Task 4.7; acceptance step 6 and the
   chain test).
