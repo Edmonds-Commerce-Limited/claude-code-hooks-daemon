@@ -684,6 +684,10 @@ class GoalInjectionHandler(PostToolUseHandlerBase):
     # Opt-in: only useful when a PTY supervisor is watching.
     default_enabled = False
 
+    # Sets a goal for the session: gated on the project's `autonomy:` config
+    # (Plan 00498).
+    drives_autonomy = True
+
     def __init__(self) -> None:
         super().__init__(
             handler_id=HandlerID.GOAL_INJECTION,

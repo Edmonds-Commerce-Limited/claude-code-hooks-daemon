@@ -90,6 +90,14 @@ class Handler(ABC):
     #: the handler. ``False`` marks an opt-in handler.
     default_enabled: ClassVar[bool] = True
 
+    #: Whether the handler DRIVES work (schedules a cron, sets or challenges on a
+    #: goal, tells the session to resume or recover) rather than protecting
+    #: anything (Plan 00498). The chain never consults a driver where the
+    #: project's ``autonomy:`` config turns autonomy off for the session's
+    #: environment. ``False`` for every guard, deliberately: a guard that never
+    #: ran is a guard switched off.
+    drives_autonomy: ClassVar[bool] = False
+
     __slots__ = (
         "_project_exclude_paths",
         "_project_languages",

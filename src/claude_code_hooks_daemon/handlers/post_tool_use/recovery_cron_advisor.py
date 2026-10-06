@@ -485,6 +485,10 @@ class RecoveryCronAdvisorHandler(PostToolUseHandlerBase):
     # CLAUDE/Code/WorkspaceResolution.md).
     workspace_scope: ClassVar[WorkspaceScope] = WorkspaceScope.REPO
 
+    # Tells the session to create a recovery cron when it creates or edits a
+    # plan: gated on the project's `autonomy:` config (Plan 00498).
+    drives_autonomy = True
+
     def __init__(self) -> None:
         super().__init__(
             handler_id=HandlerID.RECOVERY_CRON_ADVISOR,

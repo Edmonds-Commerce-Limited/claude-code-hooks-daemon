@@ -64,6 +64,9 @@ _MAX_TRACKED_PAUSE_KEYS: Final[int] = 256
 class CronSubagentStopEnforcerHandler(SubagentStopHandlerBase):
     """Block a SubagentStop while a declared persistent cron is missing."""
 
+    # Demands crons: gated on the project's `autonomy:` config (Plan 00498).
+    drives_autonomy = True
+
     def __init__(self) -> None:
         """Initialise as a non-terminal blocking handler.
 

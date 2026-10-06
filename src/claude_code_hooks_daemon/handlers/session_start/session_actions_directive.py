@@ -70,6 +70,10 @@ class SessionActionsDirectiveHandler(SessionStartHandlerBase):
     # Opt-in: it types into a human's terminal, so a project chooses it.
     default_enabled = False
 
+    # Types a "go action those items" turn into the session: gated on the
+    # project's `autonomy:` config (Plan 00498).
+    drives_autonomy = True
+
     def __init__(self) -> None:
         """Initialise the session-actions directive handler."""
         super().__init__(

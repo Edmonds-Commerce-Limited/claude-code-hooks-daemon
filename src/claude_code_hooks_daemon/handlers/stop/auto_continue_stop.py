@@ -58,6 +58,7 @@ from claude_code_hooks_daemon.daemon.synthetic_traffic import (
     VERDICT_SYNTHETIC_FIELD,
     event_synthetic_source,
 )
+from claude_code_hooks_daemon.utils.autonomy import autonomy_allowed
 from claude_code_hooks_daemon.utils.blockage_marker import MARKER_FILENAME, write_marker
 from claude_code_hooks_daemon.utils.config_cache import default_config, load_config_cached
 from claude_code_hooks_daemon.utils.goal_ledger import (
@@ -649,8 +650,11 @@ class AutoContinueStopHandler(StopHandlerBase):
 
         Gated on the same ``persistent_crons.enabled`` master switch as the
         declared-cron enforcers, so a project that has not opted into session
-        crons is never told to create one.
+        crons is never told to create one. Silent too where the project's
+        ``autonomy:`` config turns autonomy off for this session (Plan 00498).
         """
+        if not autonomy_allowed(hook_input):
+            return None
         if not self._config_loader().persistent_crons.enabled:
             return None
         return stand_in_verdict(hook_input, delay_hours=self._stand_in_delay_hours)
@@ -816,7 +820,7 @@ class AutoContinueStopHandler(StopHandlerBase):
             # is dynamic per-invocation content (like a QA-gate finding) and
             # stays FULLY present every fire -- never governed by the
             # disclosure ladder that terses the surrounding teaching prose.
-            challenge = self._goal_ledger_challenge()
+            challenge = self._goal_ledger_challenge(hook_input)
             if challenge is not None:
                 reason = f"{reason}\n\n{challenge}"
             result = BlockingResult(decision=Decision.DENY, reason=reason)
@@ -856,8 +860,13 @@ class AutoContinueStopHandler(StopHandlerBase):
             tracker.mark_disclosed(transcript_path, rule_id)
         return self._formatter.verbose(rule)
 
-    def _goal_ledger_challenge(self) -> str | None:
+    def _goal_ledger_challenge(self, hook_input: dict[str, Any]) -> str | None:
         """Return a challenge naming every still-live ledgered goal, or None.
+
+        None, without consulting the ledger, where the project's ``autonomy:``
+        config turns autonomy off for this session: a challenge on behalf of
+        other plans is exactly the push towards unrequested work it exists to
+        prevent (Plan 00498).
 
         Plan 00276: the upstream /goal slot holds one condition (last writer
         wins), so this consults the daemon-side goal ledger and names EVERY
@@ -865,6 +874,8 @@ class AutoContinueStopHandler(StopHandlerBase):
         slot has forgotten. Fail-open: any failure (no project context,
         unreadable ledger) returns None and the default reason stands.
         """
+        if not autonomy_allowed(hook_input):
+            return None
         try:
             ledger_path = ProjectContext.daemon_untracked_dir() / LEDGER_FILENAME
             plan_dir = resolve_plan_dir(ProjectContext.project_root(), self._track_plans_in_project)

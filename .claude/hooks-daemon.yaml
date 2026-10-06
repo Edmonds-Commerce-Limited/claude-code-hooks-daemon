@@ -951,6 +951,10 @@ handlers:
       enabled: true
       priority: 15
 
+    autonomy_notice:  # Says once that autonomy is off in this environment, and why (Plan 00498)
+      enabled: true   # Advisory only; silent wherever the top-level `autonomy:` block allows autonomy
+      priority: 47
+
     work_queue_rebrief:  # On resume/compact, list the agents the durable work queue records as running (Plan 00470 Task 3.3)
       enabled: true      # Advisory only; silent unless a queue exists and something is running
       priority: 48
@@ -1411,6 +1415,17 @@ layout:
   source_dirs: ["src"]
   test_dirs: ["tests"]
   mode: additive
+
+# Where the work-DRIVING machinery may run (Plan 00498): declared crons, the
+# failsafe-recovery advice, goal injection, goal-ledger stop challenges, the
+# awaiting-human stand-in cron, housekeeping and routine sweeps. A desktop session
+# of this repository does only what it was asked: nothing is scheduled and
+# nothing pushes it onto other work. Guards run everywhere. The bare host is
+# `host`, so it is left out; the container runtimes keep full autonomy.
+# `hosts:` may name role aliases (HOOKS_DAEMON_HOSTNAME) allowed anywhere.
+autonomy:
+  environments: [docker, podman, lxc, generic]
+  hosts: []
 
 # Crons this project wants re-established in EVERY session (Plan 00384).
 # Claude Code crons are session-only — CronCreate's `durable` flag has no

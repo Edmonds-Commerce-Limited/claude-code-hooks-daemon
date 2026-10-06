@@ -14,6 +14,7 @@ from claude_code_hooks_daemon.core import AdvisoryResult, ProjectContext
 from claude_code_hooks_daemon.core.acceptance_test import AcceptanceTest
 from claude_code_hooks_daemon.core.handler_bases import StatusLineHandlerBase
 from claude_code_hooks_daemon.core.segment_explanation import SegmentExplanation
+from claude_code_hooks_daemon.utils.autonomy import autonomy_verdict, environment_label
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +43,8 @@ _RUNTIME_DISPLAY: dict[str, tuple[str, str, str]] = {
     "generic": ("📦", "container", _COLOR_GREY),
     "lxc": ("🧊", "lxc", _COLOR_CYAN),
 }
+# Appended when the project's `autonomy:` config turns autonomy off here (Plan 00498).
+_AUTONOMY_OFF_LABEL = "no autonomy"
 # Fallback for an unexpected non-empty runtime label (forward-compatible).
 _UNKNOWN_RUNTIME_ICON = "📦"
 _UNKNOWN_RUNTIME_COLOR = _COLOR_GREY
@@ -76,7 +79,13 @@ class EnvironmentIndicatorHandler(StatusLineHandlerBase):
             icon, label, color = _RUNTIME_DISPLAY.get(
                 runtime, (_UNKNOWN_RUNTIME_ICON, runtime, _UNKNOWN_RUNTIME_COLOR)
             )
-        return AdvisoryResult(context=[f"| {color}{icon} {label}{_COLOR_RESET}"])
+        segment = f"| {color}{icon} {label}{_COLOR_RESET}"
+        # Plan 00498: say when the project's `autonomy:` config turned the
+        # work-driving machinery off here. Judged on the runtime cached above,
+        # never a live probe.
+        if not autonomy_verdict(hook_input, environment=environment_label(runtime)).allowed:
+            segment = f"{segment} {_COLOR_GREY}{_AUTONOMY_OFF_LABEL}{_COLOR_RESET}"
+        return AdvisoryResult(context=[segment])
 
     def explain_segment(self) -> SegmentExplanation:
         """Describe this segment and its current value (read-only, cached at startup)."""
@@ -99,7 +108,9 @@ class EnvironmentIndicatorHandler(StatusLineHandlerBase):
             how_to_read=(
                 f"{_DESKTOP_ICON} desktop (red) = host; 🐳 docker (blue), 📦 podman "
                 "(magenta) / generic container (grey), 🧊 lxc (cyan) otherwise. "
-                "Detected once at daemon startup, never re-probed per render."
+                "Detected once at daemon startup, never re-probed per render. A grey "
+                f"'{_AUTONOMY_OFF_LABEL}' after it means this project's `autonomy:` config "
+                "turned crons, goals and recovery advice off for this environment."
             ),
             current_value=current_value,
         )
