@@ -37,6 +37,10 @@ the diff ADDS or changes. Without one, check the whole document.
      cannot be VERIFIED.
    - **Current tree only.** Judge against the files, never against git history or commit
      messages. History tells you what someone said, not what is true.
+   - **External repositories.** Governed reference clones (the daemon's `reference_repos`
+     config; here `untracked/repos/<name>`) are on disk. Check a claim about an external
+     repository against the matching clone, read-only, before calling it UNVERIFIABLE-HERE.
+     If the freshness guard denies a read, run `bin/hooks-daemon reference-repos`.
 
 3. **Verdict per claim.**
 
@@ -46,7 +50,7 @@ the diff ADDS or changes. Without one, check the whole document.
 
 ## Search hygiene
 
-Pass `--exclude-dir=cyber-flag` to every recursive grep, and never search under `untracked/`.
+Pass `--exclude-dir=cyber-flag` to every recursive grep, and never search under `untracked/` except the reference clones in `untracked/repos/`.
 Run no tests or long jobs.
 
 ## Output
