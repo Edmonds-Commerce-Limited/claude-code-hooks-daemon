@@ -209,6 +209,15 @@ _SCRIPT_EXTENSIONS: Final[tuple[str, ...]] = (
     ".go",
     ".rs",
     ".java",
+    # Plan 00483 owner ruling A4 (N75): launcher-bearing extensions, one list.
+    ".pyw",
+    ".pm",
+    ".cjs",
+    ".mts",
+    ".tsx",
+    ".kt",
+    ".swift",
+    ".ps1",
 )
 
 # n466-n24 review 4, review 5 MAJOR-2: the SUBSET of `_SCRIPT_EXTENSIONS`

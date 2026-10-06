@@ -1959,6 +1959,23 @@ def iter_protected_mentions(
             yield (pattern, token)
 
 
+def _with_option_value_forms(tokens: Iterable[str]) -> Iterator[str]:
+    """Each token, then the path it may carry after a leading ``@`` (``curl -d
+    @FILE``) or a short option's attached value (``-fFILE``, ``-e@FILE``).
+
+    Plan 00483 owner ruling A4 (N229): only these two prefixes, no parser.
+    A form is yielded only when stripping changed the token.
+    """
+    for token in tokens:
+        yield token
+        value = token
+        if len(value) > 2 and value[0] == "-" and value[1] != "-":
+            value = value[2:]
+            yield value
+        if value.startswith("@") and len(value) > 1:
+            yield value[1:]
+
+
 def _mention_token_stream(
     command: str,
     *,
@@ -1989,7 +2006,7 @@ def _mention_token_stream(
             shell_expansion.iter_normalised_shell_words(import_stripped, deadline=deadline)
         )
     return itertools.chain(
-        _tokenise(import_stripped),
+        _with_option_value_forms(_tokenise(import_stripped)),
         _brace_expansion_tokens(
             command, bash_tool_command=bash_tool_command, source_code=source_code
         ),
