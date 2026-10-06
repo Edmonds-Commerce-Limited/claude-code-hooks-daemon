@@ -1015,6 +1015,10 @@ of earlier runs' evidence.
 
 **Owner ruling (2026-10-05):** resolved: yes, clean up (keep anything a live worktree or an open report points at), and add a housekeeping step to the release process — see [OWNER-RULINGS-261005.md](../00483-threat-model-conformance-audit/OWNER-RULINGS-261005.md) (D3).
 
+**Clean-up done (coordinator, 2026-10-06):** removed 3,247 stale entries (12.1 GB) from `untracked/scratch`,
+which went from 14 GB to 294 MB. Kept every entry modified in the last 48 hours and every entry a live (non-Completed)
+plan folder cites. The release housekeeping step is RELEASING.md Step 15.1.
+
 ### N290 — the coordinator stated a confident, unverified, false claim about the codebase
 
 **Found**: by the owner ("supervisor lives outside this repository?? what????"). While
@@ -1424,6 +1428,29 @@ Second part: an index build started by one test leaked into later tests. Its thr
 
 Third part: with the bound raised the index still never built in the live daemon. On `/workspace` the `git ls-files --others --ignored --exclude-standard` listing is 554,332 paths (58 MB: virtualenvs and worktrees under the ignored `untracked/`); the daemon log showed "failed with exit 124 (124 = timed out after 120s)" and "could not be built ... retrying in 30s" on every attempt, and each attempt read and decoded tens of MB in a thread, which is the likely cause of a 30 s hook socket timeout right after a restart. The listing filtered by pathspec prints about 1,300 lines (72 KB). Fixed by `utils/protected_pathspecs.py` (`git_pathspecs`): the index build hands git each protected glob as a `:(glob)` pathspec through the new `pathspecs` parameter of `scan_git_file_states`, which narrows only the untracked-and-ignored listing (plus `**/pyvenv.cfg`, so the foreign-tree rule still drops virtualenv trees). The narrowing must be a SUPERSET of what `first_matching_glob` selects, so it answers `None` (list everything) for `[`, `\`, a leading `:`, a `**` that is not a whole segment, the vendor token, and any multi-segment pattern whose first segment can match a directory above the project root (the matcher also tries the absolute path). Pinned against real git by `tests/unit/utils/test_protected_pathspecs.py` and `TestBuildAsksGitOnlyForCandidates`. Measured against `/workspace` (default patterns): 554,347 lines / 57.8 MB in 5.5 s unfiltered, 1,300 lines / 72 KB in 7.7 to 8.7 s filtered (git still walks the tree and matches each entry; the saving is the transfer, decode and set-building in the daemon, not git's walk). Known gap, not closed: an ignored, untracked symlink whose own name matches no glob but whose target does is not listed (tracked symlinks are, as the tracked listing is whole). The SessionStart sweeps (`secret_file_hygiene_checker`, `gitignore_safety_checker`) make the same unnarrowed four listings through `scan_git_file_states_for_event`; they were left as they are.
 
+### N357 — `simple_commands` inlined `eval`/`sh -c` with no depth cap, so nested evals cost quadratic time
+
+**Source**: the coordinator, 2026-10-06, in the full post-merge run after the Plan 00483 A6 merge (745dc2d68).
+
+**Evidence**: `tests/unit/handlers/test_safety_handlers_hostile_input_performance.py::TestCombinatorialSmallInputShapesStayLinear::test_bash_command[deep_eval_nesting]`
+failed deterministically on main: "host-command-guard cost grew 26x for 8x input" (`"eval " * depth + "true"`, depths
+5 and 40). `_walk` in `utils/git_commit_parsing.py` recursed into every evaluated string with no limit, and each level
+re-lexes the whole remaining text. `host_command_guard`, new in the A6 merge, calls `simple_commands` on every Bash
+command, which exposed it.
+
+**Impact**: medium. A deeply nested `eval` chain made every Bash command through that guard cost quadratic time.
+
+**Why A6's changed QA missed it**: `scripts/qa/changed_tests_map.yaml` has no rule mapping `handlers/pre_tool_use/*.py`
+(or `utils/git_commit_parsing.py`) to the hostile-input performance test; its only rule for those paths names the
+ordinary-command regression gate. That test finds handlers through the registry, so the name/import inference does not
+reach it for a new handler file. Checked in the map and the test, not by replaying A6's run. Candidate remedy, not done
+here: add a map rule for `handlers/pre_tool_use/*.py` naming the performance test.
+
+**Status**: ✅ Fixed (commit 4b2235800). `_walk` takes a `depth` and inlines an evaluated string only while
+`depth < MAX_EVAL_NESTING` (4, the nested-shell cap the performance test's shapes are built around); past it the
+command stays one ordinary step and its body goes unjudged, per ruling A1. Pinned by `TestEvalNestingIsCapped` in
+`tests/unit/utils/test_git_commit_parsing.py`.
+
 ### N356 — a grep regex inside a quoted `bash -c` string is read as a protected-path glob
 
 **Source**: the coordinator, 2026-10-05, after the Plan 00483 Phase 2 merge (dc5c9263b).
@@ -1437,8 +1464,16 @@ glob-match a hidden protected name is not one.
 **Impact**: medium. Searching test output for `path:line` is an ordinary debugging command. The ordinary-command
 gate has no row for a regex containing `/.*` as a grep pattern.
 
-**Status**: ⬜ Open. Remedy: a grep/rg PATTERN operand (the first non-option argument, or the `-e`/`-E` value) is text,
-not a path, and must not be expanded as a glob; add the command above as a gate row.
+**Status**: ✅ Fixed (this branch, commit recorded at merge). Root cause: the N269/N291 text-operand view
+(`_without_text_operands` in `utils/secret_file_matching.py`) segmented the top level and each substitution, but not the
+program string of `bash -c '...'`, which is one quoted word at top level; a grep pattern inside it kept its glob
+characters and `/.*:[0-9]+` matched the protected dotfile glob. The plain `grep -E "..." file` and `rg` shapes were
+already allowed. Fix: `_text_operand_spans` also descends (three layers) into the content of a single-quoted `-c`
+program of `bash`/`sh`/`dash`/`zsh`/`ksh` (`_shell_dash_c_program_span`; single quotes keep offsets exact, so a
+double-quoted program is left to the ordinary scan), so grep/rg/echo operands there are text. A grep FILE operand that
+names or globs to a protected path stays denied, as does a protected path read anywhere else in the program. Not
+covered: a `FOO=1 bash -c` prefix (the command word is unresolved, so it fails closed). Pinned by
+`tests/unit/utils/test_bash_c_text_operands.py` (red before the fix) and four gate rows (`n356-*`).
 
 ### N354 — the upgrade-approval guard denies a `PYTHONPATH=… python -c` probe that runs no upgrade
 
@@ -1452,8 +1487,16 @@ cannot be read" limb treating an inline `python -c` program as an unreadable upg
 **Impact**: medium for this repository. Running branch code with `PYTHONPATH` is an ordinary development idiom. The
 workaround is a script file under `untracked/scratch/` with `sys.path.insert`.
 
-**Status**: ⬜ Open. Remedy: an unreadable-script limb must also require one of the upgrade's own arguments, as its
-guidance says; a `-c` program that names none of them is not an upgrade. Reproduce with a TDD row first.
+**Status**: ✅ Fixed (this branch, commit recorded at merge). Root cause: not the "script that cannot be read" limb but
+its sibling for interpreters, `_variable_program_is_upgrade` in `handlers/pre_tool_use/upgrade_approval_guard.py`: any
+`-c` flag returned `_cannot_tell_script`, which is "the upgrade" once a steering assignment (`PYTHONPATH`) is present,
+even when the program text was literal. Fix: `_inline_program_is_upgrade` judges a literal `-c` program by the
+upgrade's own signals (`upgrade.sh`, `upgrade_version.sh`, `upgrade_gate_standalone.py`, `--project-root`, the
+`.claude/hooks-daemon` clone path); a program with `$` or a backtick, or no text, stays "cannot tell". Three existing
+rows that pinned `-c 'import os'` under a steering variable as denied were changed to `-c "$CODE"` (still denied) and
+a literal program naming `scripts/upgrade.sh` (still denied); the literal `import os` shape is now pinned allowed in
+`TestSteeredLiteralInlineProgramNamesNoUpgrade`, plus gate row `n354-pythonpath-python-c-probe`. Residual, by the
+threat model's limb-1/limb-2 rule: a literal program that builds the upgrade's name at run time is not seen.
 
 ### N353 — the dismissive-language advisory flags a citation of the threat model's own scope rule
 

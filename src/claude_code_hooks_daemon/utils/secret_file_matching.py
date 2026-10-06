@@ -1531,6 +1531,10 @@ _GIT_GREP_VALUE_OPTIONS: Final[frozenset[str]] = frozenset(
     {"-f", "--file", "-A", "-B", "-C", "-m", "--max-depth", "--threads"}
 )
 _TEXT_OPERAND_PLACEHOLDER: Final[str] = "TEXT_OPERAND"
+#: Shells whose ``-c`` program string is read as shell commands (not ``python -c``).
+_SHELL_PROGRAM_HEADS: Final[frozenset[str]] = frozenset({"bash", "sh", "dash", "zsh", "ksh"})
+#: How many ``bash -c '...'`` layers deep text operands are looked for.
+_MAX_SHELL_PROGRAM_DEPTH: Final[int] = 3
 _SEGMENT_SEPARATORS: Final[tuple[str, ...]] = ("&&", "||", ";", "|", "&", "\n")
 #: Unquoted, any of these makes bash compute the word: a glob, a variable or
 #: substitution, a brace list, a tilde.
@@ -1602,33 +1606,89 @@ def _without_text_operands(command: str) -> str:
     if "'" not in command and '"' not in command and "<<" not in command:
         return command
     text = strip_inert_spans(command)
-    try:
-        inner_regions = substitution_inner_spans(text)
-    except UnplaceableSubstitutionError as exc:
-        # Nothing inside a substitution can be placed, so only the top level is relaxed.
-        logger.debug("text operands: substitution not placeable, top level only: %s", exc)
-        inner_regions = []
-    regions = [(0, len(text)), *inner_regions]
-    operands: dict[tuple[int, int], str] = {}
-    for region_start, region_end in regions:
-        region = text[region_start:region_end]
-        for start, end in split_unquoted_spans(region, _SEGMENT_SEPARATORS):
-            head, spans = _segment_text_operands(region[start:end], region_start + start)
-            operands.update(dict.fromkeys(spans, head))
+    operands = _text_operand_spans(text, 0, 0)
     pieces: list[str] = []
     copied_to = 0
-    for (operand_start, operand_end), head in sorted(operands.items()):
+    for operand_start, operand_end in sorted(operands):
         if operand_start < copied_to:
-            continue
-        # By start offset: an outer-pass word can run on past the closing delimiter.
-        inside_substitution = any(start <= operand_start < end for start, end in inner_regions)
-        if inside_substitution and head not in _SEARCH_HEADS:
             continue
         pieces.append(text[copied_to:operand_start])
         pieces.append(_TEXT_OPERAND_PLACEHOLDER)
         copied_to = operand_end
     pieces.append(text[copied_to:])
     return "".join(pieces)
+
+
+def _text_operand_spans(text: str, offset: int, depth: int) -> set[tuple[int, int]]:
+    """Absolute ``(start, end)`` of every text operand in ``text``, which begins
+    at ``offset`` in the whole command.
+
+    Covers the top level, each substitution (only :data:`_SEARCH_HEADS` operands
+    there) and, up to :data:`_MAX_SHELL_PROGRAM_DEPTH` levels deep, the program
+    string of a shell's single-quoted ``-c`` (ledger 00474 N356): that string is
+    a command of its own, handed to a shell that reads its quotes as bash does.
+    """
+    try:
+        inner_regions = substitution_inner_spans(text)
+    except UnplaceableSubstitutionError as exc:
+        # Nothing inside a substitution can be placed, so only the top level is relaxed.
+        logger.debug("text operands: substitution not placeable, top level only: %s", exc)
+        inner_regions = []
+    operands: dict[tuple[int, int], str] = {}
+    programs: list[tuple[int, int]] = []
+    for region_start, region_end in [(0, len(text)), *inner_regions]:
+        region = text[region_start:region_end]
+        for start, end in split_unquoted_spans(region, _SEGMENT_SEPARATORS):
+            segment = region[start:end]
+            head, spans = _segment_text_operands(segment, offset + region_start + start)
+            operands.update(dict.fromkeys(spans, head))
+            program = _shell_dash_c_program_span(segment, head)
+            if program is not None:
+                programs.append(
+                    (region_start + start + program[0], region_start + start + program[1])
+                )
+    found: set[tuple[int, int]] = set()
+    for (operand_start, operand_end), head in operands.items():
+        # By start offset: an outer-pass word can run on past the closing delimiter.
+        inside_substitution = any(
+            start <= operand_start - offset < end for start, end in inner_regions
+        )
+        if inside_substitution and head not in _SEARCH_HEADS:
+            continue
+        found.add((operand_start, operand_end))
+    if depth < _MAX_SHELL_PROGRAM_DEPTH:
+        for program_start, program_end in programs:
+            found |= _text_operand_spans(
+                text[program_start:program_end], offset + program_start, depth + 1
+            )
+    return found
+
+
+def _shell_dash_c_program_span(segment: str, head: str) -> tuple[int, int] | None:
+    """``(start, end)`` within ``segment`` of the CONTENT of a single-quoted
+    program given to a shell's ``-c`` (``bash -c '...'``, ``sh -lc '...'``), or
+    ``None``. Single quotes pass their content on verbatim, so the span maps
+    exactly onto the text the shell runs; a double-quoted program, whose
+    escapes and expansions change it, is left to the ordinary scan."""
+    if head not in _SHELL_PROGRAM_HEADS:
+        return None
+    spans = shell_word_spans(segment)
+    words = [segment[start:end] for start, end in spans]
+    shell_index = next((i for i, word in enumerate(words) if word.rsplit("/", 1)[-1] == head), None)
+    if shell_index is None:
+        return None
+    index = shell_index + 1
+    while index < len(words) and words[index].startswith("-") and not words[index].startswith("--"):
+        if "c" in words[index][1:]:
+            if index + 1 >= len(words):
+                return None
+            program_start, program_end = spans[index + 1]
+            word = words[index + 1]
+            if len(word) >= 2 and word[0] == word[-1] == "'" and "'" not in word[1:-1]:
+                return program_start + 1, program_end - 1
+            return None
+        index += 1
+    return None
 
 
 def _git_grep_pattern_spans(segment: str) -> list[tuple[int, int]]:
