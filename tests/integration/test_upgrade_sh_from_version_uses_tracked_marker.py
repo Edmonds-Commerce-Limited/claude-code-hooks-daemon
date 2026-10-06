@@ -28,7 +28,7 @@ from __future__ import annotations
 
 import re
 import shutil
-import subprocess  # nosec B404 — runs the trusted system `bash`
+import subprocess
 from pathlib import Path
 from typing import Final
 
@@ -108,7 +108,7 @@ def _run_derivation(
             'echo "FROM_VERSION=$FROM_VERSION"',
         ]
     )
-    result = subprocess.run(  # nosec B603 — fixed argv, no shell, trusted input
+    result = subprocess.run(
         [_BASH, "-c", script],
         capture_output=True,
         text=True,
@@ -189,7 +189,7 @@ class TestEveryMarkerParserAgrees:
     def _shell_extract(self, script_body: str, line: str, tmp_path: Path) -> str:
         doc = tmp_path / "HOOKS-DAEMON.md"
         doc.write_text(f"# Header\n\n{line}\n", encoding="utf-8")
-        result = subprocess.run(  # nosec B603 — fixed argv, no shell, trusted input
+        result = subprocess.run(
             [_BASH, "-c", script_body.replace("@DOC@", str(doc))],
             capture_output=True,
             text=True,

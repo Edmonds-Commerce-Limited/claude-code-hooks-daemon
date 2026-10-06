@@ -12,7 +12,7 @@ this very file would trip that live handler.
 
 import importlib.util
 import json
-import subprocess  # nosec B404 - subprocess used for running the QA checker only
+import subprocess
 import sys
 from pathlib import Path
 from types import ModuleType
@@ -31,7 +31,7 @@ _EXAMPLE_PATH = "/var/www" + "/vh" + "osts"
 
 
 def _run_checker(scan_path: Path, config_path: Path) -> dict[str, Any]:
-    subprocess.run(  # nosec B603 - trusted first-party checker script
+    subprocess.run(
         [
             sys.executable,
             str(_CHECKER),

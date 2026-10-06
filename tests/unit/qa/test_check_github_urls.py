@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
-import subprocess  # nosec B404 - subprocess used for running the QA checker only
+import subprocess
 import sys
 from pathlib import Path
 from types import ModuleType
@@ -281,7 +281,7 @@ class TestUnreadableFilesFailTheCheck:
         (tmp_path / "docs").mkdir(parents=True)
         (tmp_path / "docs" / "logo.png").write_bytes(b"\x89PNG\r\n\x1a\n\xff\xfe")
 
-        result = subprocess.run(  # nosec B603 - trusted first-party checker script
+        result = subprocess.run(
             [sys.executable, str(_CHECKER), "--json", "--path", str(tmp_path)],
             capture_output=True,
             text=True,
@@ -310,7 +310,7 @@ class TestUnreadableFilesFailTheCheck:
         """No files is no evidence: it must not read as a clean sweep."""
         (tmp_path / "empty").mkdir()
 
-        result = subprocess.run(  # nosec B603 - trusted first-party checker script
+        result = subprocess.run(
             [sys.executable, str(_CHECKER), "--json", "--path", str(tmp_path / "empty")],
             capture_output=True,
             text=True,
@@ -325,7 +325,7 @@ class TestUnreadableFilesFailTheCheck:
     def test_a_clean_readable_tree_still_passes(self, tmp_path: Path) -> None:
         _write(tmp_path, "docs/guide.md", "nothing to see here\n")
 
-        result = subprocess.run(  # nosec B603 - trusted first-party checker script
+        result = subprocess.run(
             [sys.executable, str(_CHECKER), "--json", "--path", str(tmp_path)],
             capture_output=True,
             text=True,

@@ -27,7 +27,7 @@ shape instead.
 
 from __future__ import annotations
 
-import subprocess  # nosec B404 — runs the trusted system `git` and `bash`
+import subprocess
 from pathlib import Path
 from typing import Final
 
@@ -48,7 +48,7 @@ _DAEMON_PYPROJECT: Final[str] = '[project]\nname = "claude-code-hooks-daemon"\nv
 
 
 def _git(repo: Path, *args: str) -> None:
-    subprocess.run(  # nosec B603 — fixed argv, no shell, trusted input
+    subprocess.run(
         ["git", "-C", str(repo), *args],
         capture_output=True,
         text=True,
@@ -74,7 +74,7 @@ def _throwaway_repo(tmp_path: Path) -> Path:
 
 
 def _source(project: Path) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(  # nosec B603 — fixed argv, no shell, trusted input
+    return subprocess.run(
         ["bash", "-c", f'source "{project / ".claude" / "init.sh"}"'],
         capture_output=True,
         text=True,

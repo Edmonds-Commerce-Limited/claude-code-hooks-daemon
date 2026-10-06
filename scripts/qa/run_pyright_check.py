@@ -42,7 +42,7 @@ from __future__ import annotations
 import argparse
 import json
 import shutil
-import subprocess  # nosec B404 — runs only the resolved pyright binary, argv form
+import subprocess
 import sys
 from collections.abc import Callable
 from pathlib import Path
@@ -198,7 +198,7 @@ def run_pyright(
     if not binary.is_file():
         return None, f"{INSTALL_INSTRUCTION} (looked for {binary})"
     try:
-        completed = subprocess.run(  # nosec B603 — argv form, resolved binary, no shell
+        completed = subprocess.run(
             [
                 str(binary),
                 "--project",

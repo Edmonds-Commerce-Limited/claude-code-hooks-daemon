@@ -40,7 +40,7 @@ DEFAULT_BASENAME_GLOB = DEFAULT_PROTECTED_PATTERNS[0]
 
 
 def _git(repo: Path, *args: str) -> None:
-    subprocess.run(  # nosec B603 B607 - trusted git binary, fixed argv, test fixture only
+    subprocess.run(
         ["git", "-C", str(repo), *args],
         capture_output=True,
         check=True,
@@ -49,7 +49,7 @@ def _git(repo: Path, *args: str) -> None:
 
 
 def _git_lines(repo: Path, *args: str) -> list[str]:
-    return subprocess.run(  # nosec B603 B607 - trusted git binary, fixed argv, test fixture only
+    return subprocess.run(
         ["git", "-C", str(repo), *args],
         capture_output=True,
         text=True,

@@ -49,7 +49,7 @@ from __future__ import annotations
 
 import os
 import socket
-import subprocess  # nosec B404 - trusted system tool (git) for repo fixtures
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -207,7 +207,7 @@ def daemon_socket() -> Path:
 
 
 def _git(*args: str) -> str:
-    result = subprocess.run(  # nosec B603 B607 - trusted system tool, list form
+    result = subprocess.run(
         ["git", *args],
         check=True,
         capture_output=True,
@@ -223,7 +223,7 @@ def _git_allowing_failure(*args: str) -> str:
     an error — ``describe --exact-match`` exits non-zero to say "HEAD is not at
     a tag", which is exactly the condition the caller wants to report on.
     """
-    result = subprocess.run(  # nosec B603 B607 - trusted system tool, list form
+    result = subprocess.run(
         ["git", *args],
         check=False,
         capture_output=True,

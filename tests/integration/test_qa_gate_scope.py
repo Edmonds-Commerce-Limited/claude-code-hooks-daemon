@@ -30,7 +30,7 @@ ends up with no scope test at all.
 from __future__ import annotations
 
 import re
-import subprocess  # nosec B404 — runs the trusted system ``bash`` to read the scope
+import subprocess
 from pathlib import Path
 from typing import Final
 
@@ -62,7 +62,7 @@ def _read_scope(function_name: str) -> list[str]:
     Reads the values the gates ACTUALLY get, rather than re-parsing the file
     with a regex that could drift from what bash does.
     """
-    result = subprocess.run(  # nosec B603 — fixed argv, no shell, trusted input
+    result = subprocess.run(
         [_BASH_BINARY, "-c", f'source "{_SCOPE_FILE}" && {function_name}'],
         capture_output=True,
         text=True,

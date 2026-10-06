@@ -113,7 +113,7 @@ def _run(
         "probe_as": "main",
     }
     body.update(payload or {})
-    return subprocess.run(  # nosec B603 - fixed argv, no shell
+    return subprocess.run(
         [BASH, str(project / ".claude" / "hooks" / event)],
         input=json.dumps(body),
         capture_output=True,

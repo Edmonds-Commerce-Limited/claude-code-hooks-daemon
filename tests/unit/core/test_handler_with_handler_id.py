@@ -4,7 +4,7 @@ Tests the handler_id-based Handler initialization.
 All handlers MUST use HandlerID constants - no magic strings allowed.
 """
 
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
@@ -101,7 +101,7 @@ class TestHandlerWithHandlerID:
     def test_handler_id_is_required(self) -> None:
         """Test that handler_id is a required parameter."""
         with pytest.raises(ValueError, match="Either handler_id or name must be provided"):
-            ConcreteTestHandler()  # type: ignore[call-arg]
+            cast("Any", ConcreteTestHandler)()
 
     def test_handler_with_all_parameters(self) -> None:
         """Test handler initialization with all parameters."""

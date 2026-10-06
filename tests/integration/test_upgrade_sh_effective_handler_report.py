@@ -14,7 +14,7 @@ cannot keep passing after the script changes.
 from __future__ import annotations
 
 import shutil
-import subprocess  # nosec B404 — runs the trusted system `bash`
+import subprocess
 import sys
 from pathlib import Path
 from typing import Any, Final, Literal
@@ -61,7 +61,7 @@ def _finder_function() -> str:
 
 
 def _run(script: str) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(  # nosec B603 — trusted bash, test-authored script
+    return subprocess.run(
         [_BASH, "-c", script],
         capture_output=True,
         text=True,

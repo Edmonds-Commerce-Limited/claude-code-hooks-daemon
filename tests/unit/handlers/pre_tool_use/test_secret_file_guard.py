@@ -6,7 +6,7 @@ are DENIED — except the ``secret-meta`` helper and allowlisted consumers with
 the path in flag position. No escape hatch (Decision 3).
 """
 
-import subprocess  # nosec B404 - fixed git argv in a tmp repository
+import subprocess
 import time
 from collections.abc import Iterator
 from pathlib import Path
@@ -2694,7 +2694,7 @@ class TestRecursiveSearchReachesProtectedFile:
         assert _verdict(_in(project, "Bash", {"command": "grep -r x group_vars"})) == Decision.DENY
 
     def test_git_grep_reaches_a_tracked_protected_file(self, project_tree: Path) -> None:
-        subprocess.run(  # nosec B603 B607 - fixed git argv in a tmp repository
+        subprocess.run(
             ["git", "-C", str(project_tree), "add", "sub"], check=True, capture_output=True
         )
         _index_project(project_tree)

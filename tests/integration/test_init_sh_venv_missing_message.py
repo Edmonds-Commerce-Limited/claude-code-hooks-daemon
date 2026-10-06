@@ -167,7 +167,7 @@ def _run(
 ) -> subprocess.CompletedProcess[str]:
     """Source the project's init.sh, then run `script` against its functions."""
     bindir = _curated_bin(project.parent, with_jq=with_jq)
-    return subprocess.run(  # nosec B603 — fixed argv, no shell, trusted input
+    return subprocess.run(
         ["bash", "-c", f'source "{project / ".claude" / "init.sh"}"\n{script}'],
         capture_output=True,
         text=True,

@@ -4,7 +4,7 @@ A recursive search reads every file under its roots without naming one, so the
 roots are looked up in the protected-file index. Nothing here walks a tree.
 """
 
-import subprocess  # nosec B404 - fixed git argv in a tmp repository
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -22,9 +22,7 @@ PROTECTED_NAME = "key.p483vault"
 
 
 def _git(root: Path, *args: str) -> None:
-    subprocess.run(
-        ["git", "-C", str(root), *args], check=True, capture_output=True
-    )  # nosec B603 B607
+    subprocess.run(["git", "-C", str(root), *args], check=True, capture_output=True)
 
 
 def _index(root: Path) -> ProtectedFileIndex:

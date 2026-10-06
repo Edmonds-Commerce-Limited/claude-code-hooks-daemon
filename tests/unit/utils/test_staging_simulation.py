@@ -26,7 +26,7 @@ from claude_code_hooks_daemon.utils.staging_simulation import (
 
 
 def _git(repo: Path, *args: str) -> str:
-    result = subprocess.run(  # nosec B603 B607 - trusted git binary, fixed argv, test fixture only
+    result = subprocess.run(
         ["git", "-C", str(repo), *args],
         capture_output=True,
         check=True,

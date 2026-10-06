@@ -72,13 +72,11 @@ def _prepare(checker: ScopedChecker, target: Path) -> None:
     """Make `target` a directory the checker will actually scan."""
     (target / "harmless.py").write_text("VALUE = 1\n", encoding="utf-8")
     if checker.needs_git_repo:
-        subprocess.run(  # nosec B603 B607 - fixed argv, no shell
-            ["git", "init", "--quiet", str(target)], check=True, capture_output=True
-        )
+        subprocess.run(["git", "init", "--quiet", str(target)], check=True, capture_output=True)
 
 
 def _run_scoped(checker: ScopedChecker, target: Path) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(  # nosec B603 - fixed argv from a repo-internal table
+    return subprocess.run(
         [sys.executable, str(_QA_DIR / checker.script), "--json", checker.flag, str(target)],
         capture_output=True,
         text=True,
@@ -168,7 +166,7 @@ class TestAnAlternativeInputFileReportsBesideThatFile:
         substitute.write_text(
             (_QA_DIR / checker.default_input).read_text(encoding="utf-8"), encoding="utf-8"
         )
-        result = subprocess.run(  # nosec B603 - fixed argv from a repo-internal table
+        result = subprocess.run(
             [
                 sys.executable,
                 str(_QA_DIR / checker.script),

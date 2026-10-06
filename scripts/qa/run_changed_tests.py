@@ -66,7 +66,7 @@ import fnmatch
 import json
 import logging
 import re
-import subprocess  # nosec B404 — runs git and this interpreter, argv form, no shell
+import subprocess
 import sys
 from collections import Counter
 from collections.abc import Callable, Mapping, Sequence
@@ -229,7 +229,7 @@ class Selection:
 def run_git(args: list[str], root: Path) -> tuple[int, str, str]:
     """Run one git command in ``root``; a failure to run is a non-zero result."""
     try:
-        completed = subprocess.run(  # nosec B603 B607 — git by name, argv form, no shell
+        completed = subprocess.run(
             ["git", *args],
             capture_output=True,
             text=True,
@@ -245,7 +245,7 @@ def run_git(args: list[str], root: Path) -> tuple[int, str, str]:
 def run_pytest(paths: list[str], root: Path) -> tuple[int, str]:
     """Run pytest on explicit paths under this interpreter."""
     try:
-        completed = subprocess.run(  # nosec B603 — this interpreter, argv form, no shell
+        completed = subprocess.run(
             [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", *paths],
             capture_output=True,
             text=True,

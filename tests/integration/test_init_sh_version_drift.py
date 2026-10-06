@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import json
 import re
-import subprocess  # nosec B404 — runs the trusted system `bash`
+import subprocess
 from pathlib import Path
 from typing import Final
 
@@ -214,7 +214,7 @@ class TestTheCheckItselfIsCheap:
         """With the key absent the whole question is answered by builtin reads: bash -x
         shows no external command run by the detector."""
         project = _with_key(_project(tmp_path, clone_version=_CLONE, tracked_version=None), None)
-        result = subprocess.run(  # nosec B603 — fixed argv, no shell, trusted input
+        result = subprocess.run(
             [
                 "bash",
                 "-c",

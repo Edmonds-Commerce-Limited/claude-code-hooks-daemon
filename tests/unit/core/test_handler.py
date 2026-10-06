@@ -1,7 +1,7 @@
 """Comprehensive tests for Handler base class."""
 
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
@@ -787,7 +787,7 @@ class TestHandlerEdgeCases:
         import pytest
 
         with pytest.raises(ValueError, match="Either handler_id or name must be provided"):
-            ConcreteHandler(name=None)  # type: ignore[arg-type]
+            ConcreteHandler(name=cast("Any", None))
 
     def test_handler_with_empty_name(self):
         """Handler can be created with empty name."""
@@ -817,14 +817,14 @@ class TestHandlerEdgeCases:
         # Our ConcreteHandler uses .get() so it won't crash
         with pytest.raises(AttributeError):
             # None has no .get() method
-            handler.matches(None)  # type: ignore[arg-type]
+            handler.matches(cast("Any", None))
 
     def test_handler_handle_with_none_input(self):
         """handle() with None input returns result (implementation-dependent)."""
         handler = ConcreteHandler(name="test")
 
         # Our implementation doesn't use hook_input, so it works
-        result = handler.handle(None)  # type: ignore[arg-type]
+        result = handler.handle(cast("Any", None))
         assert isinstance(result, HookResult)
 
 

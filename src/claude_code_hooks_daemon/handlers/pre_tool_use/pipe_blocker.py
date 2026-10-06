@@ -525,7 +525,7 @@ class PipeBlockerHandler(PreToolUseHandlerBase):
         """
         try:
             match = next(self._pipe_matches(command), None)
-        except Exception:  # nosec B110 - fail-safe: locating the pipe must never raise
+        except Exception:
             return ""
         if not match:
             return ""
@@ -575,7 +575,7 @@ class PipeBlockerHandler(PreToolUseHandlerBase):
 
             return self._command_inside(before_pipe)
 
-        except Exception:  # nosec B110 - fail-safe: extraction error → empty string (unknown)
+        except Exception:
             return ""
 
     @staticmethod

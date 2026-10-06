@@ -10,7 +10,7 @@ import os
 import signal
 import tempfile
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -123,19 +123,14 @@ class TestSignalHandler:
         daemon._shutdown_requested = False
 
         # Patch shutdown on the class to avoid __slots__ issue
-        original_shutdown = HooksDaemon.shutdown
-
         async def mock_shutdown(self_arg: Any) -> None:
             self_arg._shutdown_requested = True
 
-        HooksDaemon.shutdown = mock_shutdown  # type: ignore[assignment]
-        try:
+        with patch.object(HooksDaemon, "shutdown", mock_shutdown):
             daemon._signal_handler(signal.SIGTERM)
             assert daemon._shutdown_task is not None
             await daemon._shutdown_task
             assert daemon._shutdown_requested is True
-        finally:
-            HooksDaemon.shutdown = original_shutdown  # type: ignore[assignment]
 
 
 class TestHandleClientException:
@@ -237,7 +232,7 @@ class TestProcessRequestUnknownController:
         """Line 559: neither Controller nor LegacyController."""
         config = _make_config()
         not_controller = NotAController()
-        daemon = HooksDaemon(config=config, controller=not_controller)  # type: ignore[arg-type]
+        daemon = HooksDaemon(config=config, controller=cast("Any", not_controller))
         # Force flags so neither branch matches
         daemon._is_new_controller = False
 

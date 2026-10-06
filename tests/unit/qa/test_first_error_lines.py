@@ -176,7 +176,7 @@ class TestThePluginInARealRun:
         env = os.environ.copy()
         env.pop("PYTEST_ADDOPTS", None)
 
-        result = subprocess.run(  # nosec B603 - trusted interpreter, list form
+        result = subprocess.run(
             [
                 sys.executable,
                 "-m",
@@ -206,7 +206,7 @@ class TestThePluginInARealRun:
     def test_without_the_option_nothing_is_written(self, tmp_path: Path) -> None:
         (tmp_path / "test_sample.py").write_text("def test_fails():\n    assert False\n")
 
-        result = subprocess.run(  # nosec B603 - trusted interpreter, list form
+        result = subprocess.run(
             [
                 sys.executable,
                 "-m",

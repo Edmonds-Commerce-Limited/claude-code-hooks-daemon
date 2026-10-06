@@ -6,7 +6,7 @@ test that wants a guard to see the files it created under ``tmp_path`` makes the
 directory a git repository, builds the index and registers it here.
 """
 
-import subprocess  # nosec B404 - fixed git argv in a tmp repository
+import subprocess
 from pathlib import Path
 
 from claude_code_hooks_daemon.utils import protected_file_index
@@ -16,9 +16,7 @@ from claude_code_hooks_daemon.utils.protected_file_index import ProtectedFileInd
 def index_project(root: Path, patterns: tuple[str, ...]) -> ProtectedFileIndex:
     """Index ``root`` (made a git repository if it is not one) and serve it to the guards."""
     if not (root / ".git").exists():
-        subprocess.run(
-            ["git", "-C", str(root), "init", "-q"], check=True, capture_output=True
-        )  # nosec B603 B607
+        subprocess.run(["git", "-C", str(root), "init", "-q"], check=True, capture_output=True)
     index = protected_file_index.build_index(root, tuple(patterns))
     assert index is not None
     protected_file_index.remember(index)

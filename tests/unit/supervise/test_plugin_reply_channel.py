@@ -204,7 +204,7 @@ class TestPluginOutputNeverReachesTheReplyChannel:
             "sys.stderr.write('ERR\\n'); sys.stderr.flush()\n"
             "sys.stdout.write(repr(reader.readline()))\n"
         )
-        result = subprocess.run(  # nosec B603 - fixed argv, no shell
+        result = subprocess.run(
             [sys.executable, "-c", script],
             input="TICK\n",
             capture_output=True,

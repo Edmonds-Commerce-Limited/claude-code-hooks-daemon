@@ -28,7 +28,7 @@ import shutil
 
 # SECURITY: subprocess runs only [sys.executable, -m, <this package's CLI>]
 # with fixed argument lists, no shell, no user input.
-import subprocess  # nosec B404
+import subprocess
 import sys
 import tempfile
 import time
@@ -90,7 +90,7 @@ def _clean_env() -> dict[str, str]:
 
 def _run_cli(project: Path, *args: str) -> subprocess.CompletedProcess[str]:
     # SECURITY: fixed argv — this interpreter, this package's CLI. No shell.
-    return subprocess.run(  # nosec B603
+    return subprocess.run(
         [
             sys.executable,
             "-m",
@@ -112,7 +112,7 @@ def _daemon_lifecycle(project: Path, action: str) -> None:
     """start/stop with output to DEVNULL — a captured pipe would make run()
     wait for the daemonised child, not the CLI (daemon-smoke lesson)."""
     # SECURITY: fixed argv — this interpreter, this package's CLI. No shell.
-    subprocess.run(  # nosec B603
+    subprocess.run(
         [
             sys.executable,
             "-m",
@@ -142,7 +142,7 @@ def _wait_for_running(project: Path) -> None:
 
 def _git(project: Path, *args: str) -> None:
     # SECURITY: trusted system tool, list form, fixture-local repo.
-    subprocess.run(["git", *args], cwd=project, check=True, capture_output=True)  # nosec B603 B607
+    subprocess.run(["git", *args], cwd=project, check=True, capture_output=True)
 
 
 @pytest.fixture(scope="module")
@@ -151,7 +151,7 @@ def client_project() -> Iterator[Path]:
         pytest.skip(f"relay binary not built: {REAL_RELAY_BINARY}")
     # A SHORT path, deliberately not tmp_path: the fixture's per-event socket
     # paths must fit the AF_UNIX limit without engaging the fallback root.
-    root = Path(tempfile.mkdtemp(prefix="hdtt-", dir="/tmp"))  # nosec B108
+    root = Path(tempfile.mkdtemp(prefix="hdtt-", dir="/tmp"))
     try:
         claude_dir = root / ".claude"
         (claude_dir / "hooks-daemon" / "untracked").mkdir(parents=True)

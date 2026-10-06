@@ -30,7 +30,7 @@ the row does not pass until a real guard actually catches it.
 """
 
 import json
-import subprocess  # nosec B404 - subprocess used for git fixtures and QA checkers
+import subprocess
 import sys
 from collections.abc import Generator
 from pathlib import Path
@@ -110,7 +110,7 @@ def _git(repo: Path, *args: str, **env: str) -> None:
         "HOME": str(repo),
         **env,
     }
-    subprocess.run(  # nosec B603 B607 - trusted system tool (git), list form
+    subprocess.run(
         ["git", "-C", str(repo), *args],
         check=True,
         capture_output=True,
@@ -131,7 +131,7 @@ def _scoped_tree_json(scan_path: Path) -> Path:
 
 
 def _run(checker: Path, output: Path, *args: str) -> dict[str, Any]:
-    subprocess.run(  # nosec B603 - trusted first-party checker script
+    subprocess.run(
         [sys.executable, str(checker), "--json", *args],
         capture_output=True,
         text=True,
@@ -275,7 +275,7 @@ def _contaminate(repo: Path, surface: str) -> None:
         _git(repo, "tag", "-a", "v1.0.0", "-m", f"ships {_TERM}")
     elif surface == "branch-name":
         _git(repo, "branch", f"{_TERM}-work")
-    else:  # pragma: no cover - a new surface with no fixture must fail loudly
+    else:
         raise AssertionError(
             f"No contamination fixture for surface '{surface}'. A surface added to "
             "_GIT_SURFACES without one would otherwise pass by doing nothing."

@@ -12,7 +12,7 @@ reach the other one, with the canonical library present and its resolver failing
 
 from __future__ import annotations
 
-import subprocess  # nosec B404 - runs the trusted system `bash`
+import subprocess
 from pathlib import Path
 from typing import Final
 
@@ -35,7 +35,7 @@ def _root_whose_resolver_fails(tmp_path: Path, status: int) -> Path:
 
 def _run(tmp_path: Path, root: Path) -> subprocess.CompletedProcess[str]:
     helper = _extract_resolver(tmp_path)
-    return subprocess.run(  # nosec B603 - fixed argv, no shell, trusted input
+    return subprocess.run(
         [
             "bash",
             "-c",

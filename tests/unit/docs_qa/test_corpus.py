@@ -42,7 +42,7 @@ from claude_code_hooks_daemon.utils.vendor_paths import VendorScope
 
 
 def _git(repo: Path, *args: str) -> None:
-    subprocess.run(  # nosec B603 B607 - trusted git binary, fixed argv, test fixture only
+    subprocess.run(
         ["git", "-C", str(repo), *args],
         capture_output=True,
         check=True,
