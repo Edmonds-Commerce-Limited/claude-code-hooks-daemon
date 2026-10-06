@@ -1,7 +1,7 @@
 # Callout: the ccy supervisor reminds a long-quiet session to rebuild its expired crons
 
 **Plan**: 00470
-**Audience**: everyone who runs `ccy`
+**Audience**: operators
 
 A session cron lives at most seven days, and the Stop-hook refresh only runs while Stop hooks fire. A session that has been silent for hours with every recorded cron already past its expiry would therefore stay without its scheduled jobs. The supervisor now types one reconcile prompt in that case, the same "Run CronList FIRST, then re-create what the project declares" wording as the `persistent_cron_assertor` SessionStart message.
 
