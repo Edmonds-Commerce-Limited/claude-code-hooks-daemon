@@ -57,6 +57,17 @@ _RESTRICTIVE_DECISIONS: frozenset[Decision] = frozenset(
 )
 
 
+def autonomy_allowed(hook_input: dict[str, Any]) -> bool:
+    """Whether autonomy runs for this event's session (Plan 00498).
+
+    Imported on use: ``utils.autonomy`` reads the config models and
+    ``ProjectContext``, both of which import this package.
+    """
+    from claude_code_hooks_daemon.utils.autonomy import autonomy_allowed as _allowed
+
+    return _allowed(hook_input)
+
+
 def is_restrictive(decision: Decision | str | None) -> bool:
     """True when ``decision`` restricts the tool call (deny/ask/defer)."""
     return decision in _RESTRICTIVE_DECISIONS
@@ -1103,6 +1114,14 @@ class HandlerChain:
                         handler.name,
                         handler.scope,
                     )
+                    continue
+
+                # Autonomy gate (Plan 00498), same seam and same reasoning as
+                # the scope gate: a handler that DRIVES work is not consulted
+                # at all where the project turned autonomy off for this
+                # session's environment. Guards never set the flag.
+                if handler.drives_autonomy and not autonomy_allowed(hook_input):
+                    logger.debug("Handler %s skipped - autonomy is off here", handler.name)
                     continue
 
                 # A handler's own matches()/handle() call runs DIRECTLY here,

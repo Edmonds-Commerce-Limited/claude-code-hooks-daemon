@@ -1,6 +1,7 @@
 """SessionStart event handlers."""
 
 from . import secret_file_hygiene_checker as _secret_file_hygiene_checker_module
+from .autonomy_notice import AutonomyNoticeHandler
 from .branch_count_advisor import BranchCountAdvisorHandler
 from .ccy_supervisor_integrity import CcySupervisorIntegrityHandler
 from .config_optimisation_reminder import ConfigOptimisationReminderHandler
@@ -28,6 +29,7 @@ SecretFileHygieneCheckerHandler = (
 )
 
 __all__ = [
+    "AutonomyNoticeHandler",
     "BranchCountAdvisorHandler",
     "CcySupervisorIntegrityHandler",
     "ConfigOptimisationReminderHandler",

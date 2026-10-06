@@ -83,6 +83,9 @@ _GUIDANCE: Final[tuple[str, ...]] = (
 class FailsafeCronSessionAdvisorHandler(SessionStartHandlerBase):
     """Advise establishing the failsafe recovery cron at session start."""
 
+    # Schedules work: gated on the project's `autonomy:` config (Plan 00498).
+    drives_autonomy = True
+
     def __init__(self) -> None:
         """Initialise as a non-terminal advisory."""
         super().__init__(

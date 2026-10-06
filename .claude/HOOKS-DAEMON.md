@@ -102,11 +102,12 @@
 | 36 | cron_record_keeper | ADVISORY | Record every CronCreate and forget every CronDelete, silently |
 | 37 | plan_fact_check_feed | ADVISORY | Feed plan edits to the debouncer so a burst yields one pending fact-check |
 
-### SessionStart (32 handlers)
+### SessionStart (33 handlers)
 
 | Priority | Handler | Behaviour | Description |
 |----------|---------|----------|-------------|
 | 15 | disclosure_reset_session_start | NON-TERMINAL | Reset DisclosureTracker state for the firing agent on SessionStart |
+| 47 | autonomy_notice | ADVISORY | State at session start that autonomy is off here, and why |
 | 48 | work_queue_rebrief | ADVISORY | List the agents the durable work queue records as still running |
 | 49 | guard_config_drift | ADVISORY | Name any uncommitted change that weakens this project's guards |
 | 50 | project_handler_load_checker | ADVISORY | Loudly alert at session start when project handlers failed to load |

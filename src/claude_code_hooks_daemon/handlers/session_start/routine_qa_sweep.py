@@ -46,6 +46,10 @@ class RoutineQaSweepHandler(SessionStartHandlerBase):
     # noise on day one is not read later when it has something to say.
     default_enabled = False
 
+    # Names overdue recurring work for the session to do: gated on the project's
+    # `autonomy:` config (Plan 00498).
+    drives_autonomy = True
+
     def __init__(self) -> None:
         super().__init__(
             handler_id=HandlerID.ROUTINE_QA_SWEEP,

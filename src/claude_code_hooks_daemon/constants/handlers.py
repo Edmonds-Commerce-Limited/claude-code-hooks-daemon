@@ -1007,6 +1007,13 @@ class HandlerID:
         config_key="failsafe_cron_session_advisor",
         display_name="failsafe-cron-session-advisor",
     )
+    # Plan 00498: SessionStart says plainly when the project's `autonomy:` config
+    # turns the work-driving machinery off for this environment, and why.
+    AUTONOMY_NOTICE = HandlerIDMeta(
+        class_name="AutonomyNoticeHandler",
+        config_key="autonomy_notice",
+        display_name="autonomy-notice",
+    )
     # Plan 00470 Task 3.3: on a resumed or compacted session, list the agents the
     # durable work queue records as still running, with their respawn facts.
     WORK_QUEUE_REBRIEF = HandlerIDMeta(

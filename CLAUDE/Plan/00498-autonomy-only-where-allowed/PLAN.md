@@ -1,6 +1,6 @@
 # Plan 00498: autonomy only where allowed
 
-**Status**: Not Started
+**Status**: In Progress
 **Created**: 2026-10-06
 **Owner**: dev
 **Priority**: High
@@ -63,18 +63,19 @@ autonomy:
 
 ### Phase 1: Design
 
-- [ ] ⬜ **Task 1.1**: List every handler and advisory that drives work rather than protects (start from the list
+- [x] ✅ **Task 1.1**: List every handler and advisory that drives work rather than protects (start from the list
   above; search for cron, goal, stand-in, resume and recovery wording). Settle the config shape, the default, and how
-  `hosts:` aliases combine with environments.
+  `hosts:` aliases combine with environments. Inventory:
+  [subagent-reports/261006-autonomy-inventory-sonnet.md](subagent-reports/261006-autonomy-inventory-sonnet.md).
 
 ### Phase 2: Build (TDD)
 
-- [ ] ⬜ **Task 2.1**: An `autonomy_allowed()` helper over `detect_container_runtime()` and the role alias, and the
+- [x] ✅ **Task 2.1**: An `autonomy_allowed()` helper over `detect_container_runtime()` and the role alias, and the
   `autonomy:` config model with validation and a config-changes manifest entry.
-- [ ] ⬜ **Task 2.2**: Gate every item from Task 1.1 on it, each with a test that it is silent where autonomy is off
+- [x] ✅ **Task 2.2**: Gate every item from Task 1.1 on it, each with a test that it is silent where autonomy is off
   and unchanged where it is on.
-- [ ] ⬜ **Task 2.3**: Status line and SessionStart wording when autonomy is off.
-- [ ] ⬜ **Task 2.4**: This repository's config: autonomy in containers only.
+- [x] ✅ **Task 2.3**: Status line and SessionStart wording when autonomy is off.
+- [x] ✅ **Task 2.4**: This repository's config: autonomy in containers only.
 
 ### Phase 3: Prove
 

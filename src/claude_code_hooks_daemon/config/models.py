@@ -2337,6 +2337,67 @@ class PersistentCronsConfig(BaseModel):
         )
 
 
+#: The environments ``autonomy.environments`` may name. ``host`` is the bare host
+#: (a desktop session: ``detect_container_runtime()`` returned None); the rest are
+#: that function's own labels.
+AutonomyEnvironment = Literal["host", "docker", "podman", "lxc", "generic"]
+
+#: Every environment, which is what a project that declares nothing gets.
+ALL_AUTONOMY_ENVIRONMENTS: Final[tuple[AutonomyEnvironment, ...]] = (
+    "host",
+    "docker",
+    "podman",
+    "lxc",
+    "generic",
+)
+
+
+class AutonomyConfig(BaseModel):
+    """Where the work-DRIVING machinery may run (Plan 00498).
+
+    Crons, the failsafe-recovery advice, goal injection, goal-ledger stop
+    challenges and the awaiting-human stand-in all push a session towards work
+    nobody asked it for in this conversation. A project that does not want that
+    in some environment (a desktop session, say) lists the environments where it
+    IS wanted. Guards are never gated by this.
+
+    Attributes:
+        environments: Environments where autonomy runs. Default: all of them,
+            so a project with no ``autonomy:`` block behaves as before.
+        hosts: Role aliases or fnmatch globs (matched like ``persistent_crons``
+            ``hosts:``) that may run autonomy in ANY environment.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    environments: list[AutonomyEnvironment] = Field(
+        default_factory=lambda: list(ALL_AUTONOMY_ENVIRONMENTS),
+        description="Environments where autonomy runs: host, docker, podman, lxc, generic",
+    )
+    hosts: list[str] = Field(
+        default_factory=list,
+        description="Role aliases or globs that may run autonomy in any environment",
+    )
+
+    @field_validator("hosts")
+    @classmethod
+    def require_usable_hosts(cls, value: list[str]) -> list[str]:
+        """A blank entry names no hostname; refuse it rather than match nothing silently."""
+        stripped = [entry.strip() for entry in value]
+        if any(not entry for entry in stripped):
+            raise ValueError("autonomy.hosts entries must be non-empty hostnames or globs")
+        return stripped
+
+    def allows(self, environment: str, hostname: str) -> bool:
+        """Whether autonomy runs in ``environment`` for a session named ``hostname``.
+
+        Args:
+            environment: ``host`` or a container runtime label.
+            hostname: The session's effective hostname (role alias included).
+        """
+        return environment in self.environments or hostname_matches(self.hosts, hostname)
+
+
 class UsageCeilingConfig(BaseModel):
     """Subscription-usage ceiling for one host (Plan 00479).
 
@@ -2606,6 +2667,7 @@ class Config(BaseModel):
     worktree: WorktreeConfig = Field(default_factory=WorktreeConfig)
     tool_policy: ToolPolicyConfig = Field(default_factory=ToolPolicyConfig)
     persistent_crons: PersistentCronsConfig = Field(default_factory=PersistentCronsConfig)
+    autonomy: AutonomyConfig = Field(default_factory=AutonomyConfig)
     claude_md: ClaudeMdConfig = Field(default_factory=ClaudeMdConfig)
     hosts: dict[str, HostConfig] = Field(
         default_factory=dict,
