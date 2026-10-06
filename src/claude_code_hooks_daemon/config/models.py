@@ -14,6 +14,7 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    ModelWrapValidatorHandler,
     PrivateAttr,
     ValidationInfo,
     field_validator,
@@ -2618,29 +2619,50 @@ class Config(BaseModel):
     # Legacy field mapping
     settings: dict[str, Any] | None = Field(default=None, exclude=True)
 
-    @model_validator(mode="before")
-    @classmethod
-    def require_reasons_under_strict_mode(cls, data: Any) -> Any:
-        """Under ``daemon.strict_mode`` every config exception carries a reason.
+    #: ``(location, entry)`` of each plain-string config exception met under strict_mode.
+    _unreasoned_exceptions: list[tuple[str, str]] = PrivateAttr(default_factory=list)
 
-        Owner ruling B3 (Plan 00484 G4). Reads the raw document, so the plain
-        entries are still distinguishable from reasoned ones; a malformed
-        mapping entry is left for the field validators to report.
+    @model_validator(mode="wrap")
+    @classmethod
+    def note_unreasoned_exceptions_under_strict_mode(
+        cls, data: Any, handler: ModelWrapValidatorHandler[Self]
+    ) -> Self:
+        """Under ``daemon.strict_mode`` a config exception without a reason is a PROBLEM.
+
+        Owner ruling B3 (Plan 00484 G4), with ruling A1: a missing reason is
+        not a dangerous config, and a config error here would stop the daemon
+        starting for a client that upgraded with plain entries (the hook then
+        denies every PreToolUse call). So it is logged and carried as a
+        ``config_problems`` entry for the SessionStart advisory. Reads the raw
+        document, where plain and reasoned entries are still distinguishable.
         """
-        if not isinstance(data, dict):
-            return data
-        daemon = data.get("daemon")
-        if not (isinstance(daemon, dict) and daemon.get("strict_mode") is True):
-            return data
-        bare = _bare_exception_entries(data)
-        if bare:
-            listing = "; ".join(f"{where}: {entry!r}" for where, entry in bare)
-            raise ValueError(
-                "daemon.strict_mode requires a reason on every config exception, but these "
-                f"are plain strings: {listing}. Write each as "
-                "`{pattern: <value>, reason: <why it is exempt>}`."
+        config = handler(data)
+        if isinstance(data, dict):
+            daemon = data.get("daemon")
+            if isinstance(daemon, dict) and daemon.get("strict_mode") is True:
+                config._unreasoned_exceptions = _bare_exception_entries(data)
+        for where, entry in config._unreasoned_exceptions:
+            logger.warning(
+                "daemon.strict_mode: %s entry %r has no reason; write it as "
+                "{pattern: ..., reason: ...}",
+                where,
+                entry,
             )
-        return data
+        return config
+
+    @property
+    def config_problems(self) -> list[str]:
+        """Values the daemon runs with other than as written, plus reasonless exceptions.
+
+        Handed to the SessionStart config-problem advisory. Not validation
+        errors: the daemon starts and these are only reported.
+        """
+        reasonless = [
+            f"{where}: entry {entry!r} has no reason, which daemon.strict_mode asks for; "
+            "write it as {pattern: <value>, reason: <why it is exempt>}"
+            for where, entry in self._unreasoned_exceptions
+        ]
+        return [*self.daemon.config_problems, *reasonless]
 
     @field_validator("hosts")
     @classmethod

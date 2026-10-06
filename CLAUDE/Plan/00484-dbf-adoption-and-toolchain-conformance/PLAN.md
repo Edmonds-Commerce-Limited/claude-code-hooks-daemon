@@ -125,7 +125,7 @@ agent.
 ### Phase 3: Close the gaps and hook in
 
 - [ ] ⬜ **Task 3.1**: Close the accepted gaps through the ledger, at most 3 branches at once.
-  G4 (B3) is partly closed: reasons accepted and required under `strict_mode`. Planned for the
+  G4 (B3) is partly closed: reasons accepted, and asked for under `strict_mode` (warning, not error). Planned for the
   next major (breaking config change): a reason required for every project on `exclude_paths`
   and `extra_whitelist`. `CLAUDE/UPGRADES/` keeps no upcoming-major notes, so it is tracked here.
 - [x] ✅ **Task 3.2**: A machine-readable enumeration of active defences (§5): rule ID,

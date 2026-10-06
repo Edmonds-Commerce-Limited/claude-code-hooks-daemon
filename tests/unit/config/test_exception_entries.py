@@ -108,9 +108,31 @@ class TestConfigModels:
     def test_non_strict_accepts_plain_strings(self) -> None:
         Config.model_validate(self._config(False, daemon={"exclude_paths": ["a"]}))
 
-    def test_strict_rejects_plain_daemon_exclude(self) -> None:
-        with pytest.raises(ValidationError, match=r"daemon\.exclude_paths.*'a'.*reason"):
-            Config.model_validate(self._config(True, daemon={"exclude_paths": ["a"]}))
+    def test_strict_plain_daemon_exclude_loads_and_warns(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """A missing reason is not a dangerous config, so it must not stop the daemon."""
+        with caplog.at_level("WARNING"):
+            config = Config.model_validate(self._config(True, daemon={"exclude_paths": ["a"]}))
+
+        assert config.daemon.exclude_paths == ["a"]
+        assert len(config.config_problems) == 1
+        assert "daemon.exclude_paths" in config.config_problems[0]
+        assert "'a'" in config.config_problems[0]
+        assert "reason" in config.config_problems[0]
+        assert any("daemon.exclude_paths" in r.getMessage() for r in caplog.records)
+
+    def test_non_strict_has_no_problems(self) -> None:
+        config = Config.model_validate(self._config(False, daemon={"exclude_paths": ["a"]}))
+        assert config.config_problems == []
+
+    def test_reasoned_strict_has_no_problems(self) -> None:
+        config = Config.model_validate(
+            self._config(
+                True, daemon={"exclude_paths": [{"pattern": "a", "reason": "vendored copy"}]}
+            )
+        )
+        assert config.config_problems == []
 
     def test_strict_accepts_reasoned_entries(self) -> None:
         config = Config.model_validate(
@@ -121,12 +143,21 @@ class TestConfigModels:
         )
         assert config.daemon.exclude_paths == ["a"]
 
-    def test_strict_rejects_plain_handler_entry(self) -> None:
+    def test_strict_plain_handler_entry_loads_and_warns(self) -> None:
         raw = self._config(
             True,
             handlers={"pre_tool_use": {"pipe_blocker": {"options": {"extra_whitelist": ["^x"]}}}},
         )
-        with pytest.raises(ValidationError, match=r"pipe_blocker.*extra_whitelist.*'\^x'"):
+        config = Config.model_validate(raw)
+
+        assert config.handlers.pre_tool_use["pipe_blocker"].options["extra_whitelist"] == ["^x"]
+        assert len(config.config_problems) == 1
+        assert "pipe_blocker" in config.config_problems[0]
+        assert "extra_whitelist" in config.config_problems[0]
+
+    def test_placeholder_reason_stays_an_error_under_strict_mode(self) -> None:
+        raw = self._config(True, daemon={"exclude_paths": [{"pattern": "a", "reason": "tbd"}]})
+        with pytest.raises(ValidationError, match="reason"):
             Config.model_validate(raw)
 
     def test_strict_accepts_empty_lists(self) -> None:
