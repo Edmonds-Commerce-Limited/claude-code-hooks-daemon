@@ -143,7 +143,16 @@ def load_exclude_paths(config_path: Path) -> list[str]:
     """
     options = _sensitive_content_options(_load_config(config_path))
     patterns = options.get("exclude_paths", [])
-    return [p for p in patterns if isinstance(p, str)] if isinstance(patterns, list) else []
+    if not isinstance(patterns, list):
+        return []
+    # One normaliser for the `{pattern, reason}` form (Plan 00484 G4). Dropping
+    # an entry this script did not understand would silently stop it excluding.
+    from claude_code_hooks_daemon.config.exception_entries import plain_patterns
+
+    try:
+        return list(plain_patterns(patterns, where="handlers.pre_tool_use.sensitive_content"))
+    except ValueError as exc:
+        raise ConfigError(str(exc)) from exc
 
 
 def resolve_secret_word_list_file(config_path: Path, repo_root: Path) -> Path | None:

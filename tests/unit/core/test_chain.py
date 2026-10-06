@@ -1699,7 +1699,9 @@ class TestHandlerChain:
                 execution_order.append(name)
                 return original_handle(hook_input)
 
-            h.handle = tracked_handle  # type: ignore[method-assign]
+            # object.__setattr__ rebinds the instance method without mypy's
+            # method-assign restriction on direct assignment.
+            object.__setattr__(h, "handle", tracked_handle)
             return h
 
         h1 = make_tracking_handler("h1", priority=50)

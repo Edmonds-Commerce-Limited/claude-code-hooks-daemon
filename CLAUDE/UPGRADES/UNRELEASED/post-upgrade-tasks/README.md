@@ -87,9 +87,9 @@ This file's lower half should list the tasks currently in this directory, so an 
 
 <!-- BEGIN TASK INDEX — regenerate when adding/removing tasks -->
 
-_No tasks are queued for the next release._ Add a row here when you add a task
-file beside this README; the release moves both out into the versioned upgrade
-guide and empties this table again.
+| File                                         | Type             | Severity    | Applies to                                                          | One-line summary                                                                                   |
+| -------------------------------------------- | ---------------- | ----------- | ------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| `01-give-strict-mode-exclusions-a-reason.md` | config-migration | recommended | `strict_mode` projects with plain `exclude_paths`/`extra_whitelist` | Rewrite plain exclusion entries as `{pattern, reason}`, so the SessionStart config problem clears. |
 
 <!-- END TASK INDEX -->
 

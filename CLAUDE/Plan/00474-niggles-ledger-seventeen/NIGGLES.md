@@ -1426,6 +1426,172 @@ The uncertain-move union judges the hook directory and the LAST recorded move (`
 every candidate directory (`sub`). Remedy: judge every directory any `cd` in the chain could
 land in.
 
+### N367 — the coordinator's branch-QA venv recipe installs off-lock tool versions, so three tests fail falsely
+
+**Found**: by the coordinator, 2026-10-06, in B2's uncapped test run (4 failed, 8469 passed). The recipe it uses to give
+a worktree its own venv is `bin/hooks-daemon repair`, then `uv pip install -e ".[dev]"`. That second step resolves
+the dev extras from `pyproject.toml`, not `uv.lock`, so the worktree venv got pytest 9.1.1 and ruff 0.16.10 while the
+lock (and main's venv) pins pytest 9.0.3 and ruff 0.15.11. Three tests then failed for the toolchain, not the code:
+
+- `test_client_owned_asset_lint.py::TestPythonAssetsAreCleanUnderRuffDefaults`: ruff 0.16 adds ISC004, SIM102 and
+  SIM103 findings in `.claude/ccy/claude-supervise.py`.
+- `test_subagent_full_qa_blocker.py::TestThePytestOptionGrammar`: pytest 9.1 adds `--max-warnings` and
+  `--report-chars` (the same failure as N270).
+- `test_corpus.py::TestRevalidateCorpus::test_a_steady_state_revalidation_logs_nothing`: `markdown_it` debug records
+  are captured under the newer pytest.
+
+All three passed (19 of 19) on main's lock-matched venv against B2's code. The fourth failure was a 120 s shellcheck
+timeout under host load (N344's class).
+
+**Fix**:
+
+- Build branch-QA venvs from the lock (`uv sync --frozen --all-extras` into the resolved venv), never with
+  `uv pip install -e`.
+- Separately, the three tests will fail for everyone once the lock moves to pytest 9.1 and ruff 0.16. Fix the
+  supervisor findings and add the two options before bumping the lock.
+
+**Status**: ⬜ Open.
+
+### N364 — a read-only `git config --get-regexp` naming `user.name` is judged as an identity write
+
+**Found**: by the Plan 00487 host agent on 2026-10-06. `cd <clone> && git config --show-origin --get-regexp '^(commit\.gpgsign|…|user\.name|user\.email|…)$'; git log …` was denied as `R-SENSITIVE-SECRET-TERM` (a secret word
+list entry matched elsewhere on the command line). `--get-regexp` only reads. The handler's own guidance says only
+commands that WRITE metadata are candidates and reading is never blocked, and `git config user.name|user.email` is
+listed as a surface only because it sets the author identity.
+
+The read exemption is exact-token membership against `--grep --list -l --get` (`sensitive_content.py:164`, `:1294`),
+and the whole `config` subcommand is a write surface (`_GIT_METADATA_WRITE_SUBCOMMANDS`), so `--get-regexp`,
+`--get-all`, `--show-origin` and a bare `git config user.name` read are all judged as writes
+([fact-check](subagent-reports/261006-n364-fact-check-sonnet.md)). A second shape points the same way: `cd <clone> && git switch -c fix/ccy-lifecycle-daemon-launcher origin/F44` was denied on the same entry, and the identical `git switch -c` with no `cd` in the command was allowed. So the term matched the `cd` path, not the branch name: once a metadata
+surface is present, the whole command line is scanned, not the metadata value.
+
+**Fix**: scan only the metadata value (the message, tag, branch name or identity value), never the rest of the command
+line. Treat `git config` as an identity write only when it assigns a value (`git config [--scope] user.name <value>`, `--add`, `--replace-all`), never for `--get`, `--get-all`, `--get-regexp`, `--list`/`-l` or `--show-origin`
+reads. Test both sides through the real handler.
+
+**Status**: ⬜ Open.
+
+### N366 — claiming an issue ADDS an assignee, so an issue can end up with two, and that state reads as OK
+
+**Found**: owner ruling, 2026-10-06: "hooks daemon agents only ever SWITCH assignee — we don't want a single issue
+with multiple assignees, or we're back to square one with it being ambiguous who can work on it."
+
+In `src/claude_code_hooks_daemon/utils/github_issue_validity.py` (`AssigneeCheck.evaluate`):
+
+- **The claim adds.** It is `gh issue edit N --add-assignee @me` (line 263). Two agents claiming the same unassigned
+  issue close together both get added.
+- **Several assignees read as OK.** Line 252 returns OK whenever the signed-in account is AMONG the assignees, so
+  `[someone-else, me]` is accepted.
+
+No open issue had two assignees when this was recorded, so the fix is prevention.
+
+**Fix**:
+
+- **The claim switches.** It sets the assignees to exactly the signed-in account (`--add-assignee @me` plus
+  `--remove-assignee` for anyone listed). It then re-reads the issue, and succeeds only if the assignees are exactly
+  `[me]`. In a race the last switch wins and the other claimant's verification fails, so it backs off.
+- **Two or more assignees are BLOCKING (ambiguous)**, even when one of them is the signed-in account. The message
+  asks a human to leave exactly one.
+- **Unchanged:** an issue assigned only to someone else stays BLOCKING. An agent never switches an issue away from
+  another assignee.
+
+Test each case through `issue-validity` and the guard.
+
+**Status**: ⬜ Open. Next branch once a slot frees.
+
+### N365 — an `[awaiting-human]` token quoted inside a fenced block is read as the stop's own declaration
+
+**Found**: by the coordinator, 2026-10-06. Its stop message gave the owner a fenced copy-paste block for ANOTHER
+session, and that block contained the `[awaiting-human]` token. The coordinator's own `STOPPING BECAUSE:` line did not
+declare it, and background QA was still running. The Stop hook nevertheless treated the stop as awaiting-human and
+denied it until a stand-in cron was created. The token should count only where the stop declares it (immediately
+after the `STOPPING BECAUSE:` prefix), never inside fenced or quoted text.
+
+**Status**: ⬜ Open.
+
+### N363 — a pipe inside a `bash -c` string is blamed on `bash`, not on its real producer
+
+**Found**: by the coordinator, twice on 2026-10-06.
+`bash -c '… grep … | sort … | tail -n 2'` and `bash -c '… V=$(ls -d … | head -n 1) …'` were denied as
+"R-PIPE-TO-TAIL/HEAD — bash unrecognized". `sort`, `grep` and `ls` are whitelisted producers. The handler's guidance
+says every pipe is judged on its own producer, and that a pipe inside `$( )` belongs to the command inside it. The
+`bash -c` string should be parsed the same way; instead the whole thing is judged as a pipe from `bash`.
+
+**Status**: ⬜ Open.
+
+### N362 — deleting a MERGED remote branch is denied; only an unmerged delete should be human-only
+
+**Found**: owner ruling D11 of 2026-10-06
+([OWNER-RULINGS-261006.md](../00483-threat-model-conformance-audit/OWNER-RULINGS-261006.md)), amending A6. Deleting a
+branch whose tip is already contained in the default branch is lossless housekeeping, and any agent may do it.
+`R-GIT-PUSH-DELETE-REMOTE` (`destructive_git`) denies every `git push --delete` and `git push <remote> :<name>`.
+
+**Fix**: allow the delete when every named branch's remote tip is an ancestor of the remote default branch (after a
+fetch); keep the deny, with the same message, otherwise. Tags are out of scope. Test both sides through the real chain.
+
+**Status**: ⬜ Open.
+
+### N361 — the fake-values registry is not pre-filled, and nothing says its entries must look fake
+
+**Found**: owner ruling C7 of 2026-10-06. `.claude/fake-values.yaml` (Plan 00492) lets a listed value pass
+`sensitive_content`, and only an agent in this repository writes it. The owner's defence:
+
+- one concerted brainstorm pre-fills it with fakes for every kind that docs might need;
+- a big, clear header comment says any change must be a clear fake;
+- values look visibly fake: long runs of a repeated letter, `fakefakefake`, and similar shapes that never occur in real
+  life.
+
+Worth weighing: a docs-QA or commit check that a new entry matches a "visibly fake" shape.
+
+**Status**: ⬜ Open.
+
+### N360 — an upgrade should keep running the opt-in handlers that were running before it
+
+**Found**: owner ruling C6 of 2026-10-06, following Plan 00493 (archived). The upgrade should write `enabled: true` for
+each opt-in handler that was running before, so the project's real configuration carries across upgrades. It should
+then tell the agent what it did, why, and how to change it. Plan 00493's report found the losses but did not restore
+them.
+
+**Status**: ⬜ Open.
+
+### N359 — the plan fact-check feed points at the wrong files, diffs whole folders, and can consume a check unseen
+
+**Found**: by the coordinator in the Plan 00480 Task 4.4 live run, after the daemon restart that loaded N358
+(merged `87c02719a`). Four owed checks arrived together on the next PostToolUse; then a deliberate false claim was added
+to `CLAUDE/Plan/00480-plan-fact-checker-and-debounce/PLAN.md`.
+
+**Four defects seen live**:
+
+- **Worktree paths.** Two delivered instructions named a PLAN.md inside a sub-agent's worktree
+  (`.claude/worktrees/agent-…/CLAUDE/Plan/00483-…/PLAN.md` and `…/00484-…/PLAN.md`), both worktrees already removed.
+  A sub-agent's plan edit in its own worktree feeds the coordinator's debouncer under the worktree path.
+- **Archived plans.** The 00493 instruction named `CLAUDE/Plan/00493-…/PLAN.md` after the plan had moved to
+  `Completed/`.
+- **First check diffs the whole folder.** A plan with no checked content yet is diffed against nothing, so the first
+  instruction carries the whole plan folder: 290 KB for 00474 and 500 KB for 00483, NIGGLES and reports included.
+  The first sighting should record a baseline and deliver nothing.
+- **A delivery consumed unseen.** The check for the false claim fired at 09:22:29 (UTC, 2026-10-06): the diff file
+  holds the claim and the plan was recorded as checked, but no "PLAN FACT-CHECK OWED" text reached the session on that
+  tool call, while the earlier batch had. The cause is not established; the in-memory log no longer held that window.
+  Because delivery advances the checked content before anything confirms the text arrived, a lost message loses the
+  check for good.
+
+**Remedies to weigh**: ignore (or map to the main root) edits under a worktree path; resolve the plan folder at
+delivery time and drop records for archived plans; baseline on first sight; and only advance the checked content once
+the delivery is known to have been emitted (or re-offer an undelivered check on the next event).
+
+Also stale, found by the fact checker on the corrected plan: the template comments at `.claude/hooks-daemon.yaml.example`
+(the `plan_fact_check_feed` block) and `src/claude_code_hooks_daemon/daemon/init_config.py` (the same handler) still
+say delivery is not built.
+
+**Fifth, seen later the same day: a correction loop.** Fixing a fact checker's finding in a plan is itself a plan edit,
+so it owes another check, whose finding prompts another edit. On Plan 00480 this went edit, check, one-line
+correction copied from the checker's own report, then a third check owed. The coordinator skipped the third and
+recorded it here. A remedy to weigh: run one check per burst plus its corrections, for example by widening the
+quiet period, or by not re-offering a check whose diff only restates the last report's findings.
+
+**Status**: ⬜ Open. Plan 00480 Task 4.4 stays open on it.
+
 ### N358 — one pending fact-check record from the pre-delivery build stops every delivery
 
 **Found**: by the coordinator, in `bin/hooks-daemon logs -l WARNING` after the daemon restart that loaded Plan 00480
@@ -1445,7 +1611,7 @@ The branch agent also reported the handler as off in this repository's config; i
 loop goes on to the next record. Then re-enable the dogfood handler and run Task 4.4's live check. Meanwhile the dogfood
 config has the handler off.
 
-**Status**: ⬜ Open.
+**Status**: ✅ Fixed (f0f3f05e5) — `deliver_pending` renames an unreadable pending record to `<name>.pending.json.unreadable` with one WARNING and carries on; dogfood handler re-enabled.
 
 ### N355 — the protected-file index never becomes available in the live daemon
 

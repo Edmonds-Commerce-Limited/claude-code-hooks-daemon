@@ -64,7 +64,7 @@ def _short_hash(name: str | None, prompt_id: str | None, session_id: str | None)
     yield distinct suffixes so two identically-named agents never collide.
     """
     material = "|".join(part or "" for part in (name, prompt_id, session_id))
-    digest = hashlib.md5(material.encode("utf-8"), usedforsecurity=False)  # nosec B324
+    digest = hashlib.md5(material.encode("utf-8"), usedforsecurity=False)
     return digest.hexdigest()[:HASH_SUFFIX_LENGTH]
 
 

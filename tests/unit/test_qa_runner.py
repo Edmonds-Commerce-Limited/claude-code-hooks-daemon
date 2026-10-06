@@ -8,6 +8,7 @@ import subprocess
 import tempfile
 from datetime import UTC
 from pathlib import Path
+from typing import Any, cast
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -1196,7 +1197,7 @@ class TestSaveResults:
     def test_save_results_none_result(self) -> None:
         """Test saving None result returns None."""
         runner = QARunner(project_root="/workspace")
-        filepath = runner.save_results(None)  # type: ignore[arg-type]
+        filepath = runner.save_results(cast("Any", None))
         assert filepath is None
 
     @patch.object(Path, "open")

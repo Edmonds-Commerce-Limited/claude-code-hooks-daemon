@@ -6,7 +6,7 @@ instead of bare 'python -m claude_code_hooks_daemon' or '/hooks-daemon' slash sy
 
 import json
 import os
-import subprocess  # nosec B404 - subprocess used for running QA checker only
+import subprocess
 import sys
 from pathlib import Path
 from typing import Any
@@ -24,7 +24,7 @@ def _run_checker(*args: str, env: dict[str, str] | None = None) -> dict[str, Any
 
     ``env`` adds to the inherited environment, e.g. a ``CLAUDE_CONFIG_DIR``.
     """
-    subprocess.run(  # nosec B603 B607 - trusted checker script
+    subprocess.run(
         [str(PYTHON), str(CHECKER), "--json", *args],
         capture_output=True,
         text=True,

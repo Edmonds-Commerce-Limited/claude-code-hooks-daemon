@@ -341,9 +341,7 @@ class TestAFailedGitCallIsNeverReadAsClean:
 
 def _git(cwd: Path, *args: str) -> None:
     """Drive a real git, failing loudly — these calls build the fixture."""
-    subprocess.run(  # nosec B603 B607 - git, list form, no shell
-        ["git", *args], cwd=cwd, check=True, capture_output=True, text=True
-    )
+    subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True, text=True)
 
 
 class TestAgainstARealGitRepository:
@@ -415,9 +413,7 @@ class TestAgainstARealGitRepository:
         past = time.time() - (MINIMUM_AGE_SECONDS + 60)
         os.utime(worktree / ".git", (past, past))
 
-        proc = subprocess.Popen(  # nosec B603 B607 - trusted system tool, list form
-            ["sleep", "30"], cwd=worktree
-        )
+        proc = subprocess.Popen(["sleep", "30"], cwd=worktree)
         try:
             states = collect_worktree_states(repo, "main")
             assert not is_reapable(states[0])

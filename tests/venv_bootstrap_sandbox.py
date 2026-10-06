@@ -247,7 +247,7 @@ class Sandbox:
         extra_env: dict[str, str] | None = None,
         cwd: Path | None = None,
     ) -> subprocess.CompletedProcess[str]:
-        return subprocess.run(  # nosec B603 - fixed argv built from tmp paths, no shell
+        return subprocess.run(
             argv,
             capture_output=True,
             text=True,
@@ -280,7 +280,7 @@ class Sandbox:
         lock = self.clone / "untracked" / ".venv-bootstrap.lock"
         deadline = time.monotonic() + BUILD_WAIT_SECONDS
         while time.monotonic() < deadline:
-            probe = subprocess.run(  # nosec B603 - fixed argv, no shell
+            probe = subprocess.run(
                 ["flock", "-n", str(lock), "true"], capture_output=True, check=False
             )
             if probe.returncode == 0:

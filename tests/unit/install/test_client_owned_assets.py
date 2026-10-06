@@ -126,7 +126,7 @@ class TestManifestScopeIsTheClientOwnedSurface:
             module_name = f"{_INSTALL_PACKAGE}.{asset.deployed_by}"
             try:
                 importlib.import_module(module_name)
-            except ImportError as exc:  # pragma: no cover - failure path is the message
+            except ImportError as exc:
                 pytest.fail(
                     f"{asset.deployed_to} claims to be deployed by {module_name}, "
                     f"which does not import: {exc}"

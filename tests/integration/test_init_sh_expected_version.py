@@ -45,7 +45,7 @@ def _resolve(project: Path) -> tuple[int, str, str]:
         'printf "%s|%s|%s" "$rc" "$_HOOKS_DAEMON_EXPECTED_VERSION" '
         '"$_HOOKS_DAEMON_EXPECTED_VERSION_SOURCE"\n'
     )
-    result = subprocess.run(  # nosec B603 - fixed argv, no shell
+    result = subprocess.run(
         [BASH, "-c", script],
         capture_output=True,
         text=True,

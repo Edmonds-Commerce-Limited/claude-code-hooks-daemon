@@ -104,7 +104,7 @@ def https_fetch(url: str) -> bytes:
     # against code.claude.com, whose docs the hooks-contract refresh fetches
     # with curl -- so the documented procedure worked while this did not.
     # `Accept` asks for markdown first, matching what the tree stores.
-    request = urllib.request.Request(  # nosec B310 - scheme validated to https above
+    request = urllib.request.Request(
         url,
         headers={
             "User-Agent": _USER_AGENT,

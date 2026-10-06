@@ -129,7 +129,7 @@ class TestToolInput:
         """ToolInput should be immutable."""
         tool_input = ToolInput(command="test")
         with pytest.raises(ValidationError):
-            tool_input.command = "new_value"  # type: ignore[misc]
+            tool_input.__setattr__("command", "new_value")
 
 
 class TestHookInput:
@@ -201,7 +201,7 @@ class TestHookInput:
         """HookInput should be immutable."""
         hook_input = HookInput(tool_name="Bash")
         with pytest.raises(ValidationError):
-            hook_input.tool_name = "Write"  # type: ignore[misc]
+            hook_input.__setattr__("tool_name", "Write")
 
 
 class TestHookEvent:
@@ -353,7 +353,7 @@ class TestHookEvent:
         """HookEvent should be immutable."""
         event = HookEvent(event_type=EventType.PRE_TOOL_USE)
         with pytest.raises(ValidationError):
-            event.event_type = EventType.POST_TOOL_USE  # type: ignore[misc]
+            event.__setattr__("event_type", EventType.POST_TOOL_USE)
 
     def test_event_alias(self) -> None:
         """event field should work with 'event' alias."""

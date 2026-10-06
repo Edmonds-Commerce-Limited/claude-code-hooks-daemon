@@ -22,9 +22,9 @@ generically with no hint, found three things
 ([report](subagent-reports/261002-fact-check-experiment-sonnet.md)):
 
 - **The false claim**, in both places it appeared, refuted with the in-repository paths.
-- **A second real defect the coordinator had missed**: `PRE_TOOL_USE_SCHEMA` cannot carry
-  `continue: false` (`src/claude_code_hooks_daemon/core/response_schemas.py:23-48`,
-  `additionalProperties: False`).
+- **A second real defect the coordinator had missed**: at the time, `PRE_TOOL_USE_SCHEMA` could not
+  carry `continue: false` (`additionalProperties: False`). Since fixed: `core/response_schemas.py`
+  now declares `continue` and `stopReason`.
 - **An existing mechanism the plan overlooked**: `src/claude_code_hooks_daemon/utils/cron_pause.py`.
 
 One caveat: the checker also noticed the correcting commit in git history, so its view of
@@ -39,8 +39,8 @@ Facts this plan builds on, each checked:
   `src/claude_code_hooks_daemon/handlers/session_start/session_actions_directive.py` drops a
   `<session>.session-actions` signal, and the ccy supervisor (`.claude/ccy/claude-supervise.py`)
   types it as a turn.
-- **No debounce or timer**: no debounce or timer primitive exists in `src/` (a search for
-  `threading.Timer`, `call_later` and `call_at` found no timer use), so one has to be built.
+- **No debounce or timer** (at planning time): no debounce or timer primitive existed in `src/`, so one
+  had to be built. Phase 3 built it: `core/debouncer.py` (`get_debouncer()`).
 - **No headless `claude -p`**: nothing in `src/` invokes one (a search found none).
 
 The "always verify, never assume" principle landed in the plan workflow core doc in 51d3ad812,
@@ -72,7 +72,7 @@ as principle 1.
 ### Phase 2: The fact checker
 
 - [x] ✅ **Task 2.1** (2fbb24bbd): Write the agent definition `.claude/agents/plan-fact-checker.md` (Sonnet,
-  read-only tools), turning the experiment's brief into a reusable contract.
+  read-only apart from its report file), turning the experiment's brief into a reusable contract.
   - **Input**: a plan path and a diff, or a whole document.
   - **Output**: a fixed, machine-readable verdict table written to the plan's
     `subagent-reports/`, plus a one-line summary.
@@ -104,8 +104,8 @@ as principle 1.
 - [x] ✅ **Task 4.1**: A `PostToolUse` handler on writes and edits under the plan directory feeds
   the debouncer, keyed by plan folder (default quiet period 5 s, configurable).
   - **Handler**: `PlanFactCheckFeedHandler` (`plan_fact_check_feed`, priority 37), non-terminal,
-    never blocks, ships `default_enabled = False` and is off in the template and in this repo's
-    config. Option `quiet_seconds`.
+    never blocks, ships `default_enabled = False` and is off in the template; this repository enables it to
+    dogfood it. Option `quiet_seconds`.
   - **Scope**: any tracked markdown document of a plan folder, written by `Write`, `Edit` or a
     Bash command whose authored paths `get_written_file_paths` can name. `subagent-reports/` and
     `JOURNAL/` are excluded, so the checker's own reports cannot re-trigger it.
@@ -135,7 +135,15 @@ as principle 1.
   one debounced check fire, and see the refutation delivered.
   - **Done**: automated tests (`TestDelivery` in the feed handler and util tests) and the
     handler's acceptance tests.
-  - **Remains**: the live run, for the coordinator after merge.
+  - **Live run (2026-10-06)**: one debounced check fired for a deliberate false claim (the feed handler
+    placed under `pre_tool_use/`), and `plan-fact-checker` refuted it from the diff, along with four
+    stale claims in this plan, now corrected. But the delivery text never reached the session, and
+    the delivered instructions showed three more defects. All four are 00474 N359.
+  - **Delivery seen (2026-10-06)**: filing Plan 00495 produced "PLAN FACT-CHECK OWED for
+    00495-performance-improvement-programme" in the session on the next PostToolUse. The path was correct and the
+    diff file existed. The coordinator dispatched `plan-fact-checker` on it.
+  - **Remains**: the rest of N359 (worktree and archived-plan paths, whole-folder first diffs, and the earlier delivery
+    that was consumed unseen, which this run did not repeat), then one more live run free of them.
 
 ## Open questions for the owner
 

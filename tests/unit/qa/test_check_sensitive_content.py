@@ -12,7 +12,7 @@ this very file would trip that live handler.
 
 import importlib.util
 import json
-import subprocess  # nosec B404 - subprocess used for running the QA checker only
+import subprocess
 import sys
 from pathlib import Path
 from types import ModuleType
@@ -31,7 +31,7 @@ _EXAMPLE_PATH = "/var/www" + "/vh" + "osts"
 
 
 def _run_checker(scan_path: Path, config_path: Path) -> dict[str, Any]:
-    subprocess.run(  # nosec B603 - trusted first-party checker script
+    subprocess.run(
         [
             sys.executable,
             str(_CHECKER),
@@ -359,6 +359,36 @@ class TestExcludePaths:
         excluded_dir.mkdir()
         (excluded_dir / "sample.txt").write_text("alpha appears here\n")
         # Something left to scan, or the run fails as an empty scan (00466 N26).
+        (tmp_path / "clean.txt").write_text("nothing to report\n")
+
+        data = _run_checker(tmp_path, config)
+
+        assert data["summary"]["passed"] is True
+        assert data["summary"]["total_violations"] == 0
+
+    def test_mapping_form_entry_still_excludes(self, tmp_path: Path) -> None:
+        """A `{pattern, reason}` entry must exclude exactly like the plain string.
+
+        The checker reads the raw YAML, so a form it does not understand would
+        silently stop excluding and report violations in files the project
+        declared exempt.
+        """
+        config = tmp_path / "hooks-daemon.yaml"
+        _write_config(
+            config,
+            public_patterns=[{"name": "alpha", "pattern": "alpha", "description": ""}],
+        )
+        config.write_text(
+            config.read_text().replace(
+                "options:\n",
+                "options:\n        exclude_paths:\n"
+                "          - pattern: 'fixtures/**'\n"
+                "            reason: 'deliberate sample text for the scanner'\n",
+            )
+        )
+        excluded_dir = tmp_path / "fixtures"
+        excluded_dir.mkdir()
+        (excluded_dir / "sample.txt").write_text("alpha appears here\n")
         (tmp_path / "clean.txt").write_text("nothing to report\n")
 
         data = _run_checker(tmp_path, config)

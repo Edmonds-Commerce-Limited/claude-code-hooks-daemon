@@ -32,6 +32,8 @@ import socket
 
 # SECURITY: subprocess runs only ["bash", <repo-owned forwarder path>] with a
 # fixed argument list, no shell, no user input, and a bounded timeout.
+# B404 is kept: _run_argv_with_socket_stdin() spawns the argv under test with subprocess.Popen
+# (fixed argv, no shell, no user input; see the SECURITY note at the call).
 import subprocess  # nosec B404
 import tempfile
 from dataclasses import dataclass

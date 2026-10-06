@@ -303,7 +303,7 @@ class TestItNeedsNoVenv:
         env = {k: v for k, v in os.environ.items() if k not in ("PYTHONPATH", "VIRTUAL_ENV")}
         # -S skips site-packages entirely, so the editable install of this
         # package is invisible: only paths.py's own stdlib imports can load.
-        result = subprocess.run(  # nosec B603 - fixed argv, no shell
+        result = subprocess.run(
             [
                 sys.executable,
                 "-S",

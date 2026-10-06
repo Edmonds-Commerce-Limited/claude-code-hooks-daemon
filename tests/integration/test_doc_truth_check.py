@@ -349,7 +349,7 @@ def test_a_checkout_inside_a_worktrees_directory_is_still_scanned(tmp_path: Path
 
 
 def _git(repo: Path, *args: str) -> None:
-    subprocess.run(  # nosec B603 B607 - trusted git binary, fixed argv, test fixture only
+    subprocess.run(
         ["git", "-C", str(repo), *args],
         capture_output=True,
         check=True,

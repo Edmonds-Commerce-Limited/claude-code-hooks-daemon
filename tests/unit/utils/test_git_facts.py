@@ -340,14 +340,14 @@ def messy(tmp_path: Path) -> Path:
 def _tree_after_a_real_commit(root: Path, *commit_args: str) -> dict[str, str]:
     """Make the real commit and read what it recorded: path -> text."""
     _git(root, "commit", "-q", "-m", "x", *commit_args)
-    names = subprocess.run(  # nosec B603 B607 - trusted system tool, list form
+    names = subprocess.run(
         ["git", "-C", str(root), "ls-tree", "-r", "--name-only", "-z", "HEAD"],
         check=True,
         capture_output=True,
         text=True,
     ).stdout.split("\0")
     return {
-        name: subprocess.run(  # nosec B603 B607 - trusted system tool, list form
+        name: subprocess.run(
             ["git", "-C", str(root), "show", f"HEAD:{name}"],
             check=True,
             capture_output=True,
@@ -439,7 +439,7 @@ class TestTheRecordedTreeOfEachCommitForm:
         predicted = {change.path for change in facts.staged_changes()}
 
         _git(messy, "commit", "-q", "-m", "x", *(["-i"] if include else []), *pathspecs)
-        changed = subprocess.run(  # nosec B603 B607 - trusted system tool, list form
+        changed = subprocess.run(
             ["git", "-C", str(messy), "diff", "--name-only", "-z", "HEAD~1", "HEAD"],
             check=True,
             capture_output=True,

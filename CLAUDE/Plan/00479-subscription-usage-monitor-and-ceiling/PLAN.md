@@ -225,9 +225,16 @@ the daemon directs the model and then verifies what it did.
 
   Verified through the daemon chain with a synthetic host
   (`tests/integration/test_usage_pause_daemon_chain.py`, Task 4.8). Still unobserved: a real
-  session on a configured host making real `CronDelete`/`CronCreate` calls. That needs a
-  `hosts:` ceiling on a host the owner chooses; it is never added to this repository's own
-  config.
+  session on a configured host making real `CronDelete`/`CronCreate` calls. Owner ruling D8
+  (2026-10-06, [OWNER-RULINGS-261006.md](../00483-threat-model-conformance-audit/OWNER-RULINGS-261006.md)):
+  dogfood it in this repository's own always-on session, on its datacentre VM, at 80%. This
+  supersedes the earlier rule that this repository's config never carries a ceiling. The
+  entry is keyed by the role alias `cchd-sdlc-runner` (owner, same day: a session's alias
+  supersedes its hostname), not by the VM's real name, which stays out of the public config.
+  The alias is set in the gitignored `.claude/ccy/ccy.env.local` on this VM
+  (`export HOOKS_DAEMON_HOSTNAME=cchd-sdlc-runner`), which ccy 3.80+ sources after `ccy.env`.
+  It takes effect at this project's next ccy launch. The alias also makes this session the
+  `issue-sdlc` cron's host.
 
 - [x] Missing or stale usage data never stops a session (Task 4.7; acceptance step 6 and the
   chain test).

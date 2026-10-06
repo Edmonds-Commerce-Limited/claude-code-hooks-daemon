@@ -194,7 +194,7 @@ def _env(
 
 
 def _run(verb: str, daemon_dir: Path, env: dict[str, str]) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(  # nosec B603 - fixed argv, no shell
+    return subprocess.run(
         [BASH, str(DRIVER), verb, str(daemon_dir)],
         capture_output=True,
         text=True,
@@ -218,9 +218,7 @@ def _wait_for_lock_release(daemon_dir: Path) -> None:
     lock = daemon_dir / "untracked" / ".venv-bootstrap.lock"
     deadline = time.monotonic() + _BUILD_WAIT_SECONDS
     while time.monotonic() < deadline:
-        probe = subprocess.run(  # nosec B603 - fixed argv, no shell
-            ["flock", "-n", str(lock), "true"], capture_output=True, check=False
-        )
+        probe = subprocess.run(["flock", "-n", str(lock), "true"], capture_output=True, check=False)
         if probe.returncode == 0:
             return
         time.sleep(0.2)
@@ -229,7 +227,7 @@ def _wait_for_lock_release(daemon_dir: Path) -> None:
 
 def _resolves(daemon_dir: Path, env: dict[str, str]) -> bool:
     lib = REPO_ROOT / "scripts" / "lib" / "resolve_venv.sh"
-    probe = subprocess.run(  # nosec B603 - fixed argv, no shell
+    probe = subprocess.run(
         [BASH, str(lib), "python", str(daemon_dir)],
         capture_output=True,
         text=True,
@@ -281,7 +279,7 @@ class TestTheHookStartsOneDetachedBuild:
         env = _env(tmp_path, with_uv=_stub_uv(tmp_path, sleep=3))
 
         procs = [
-            subprocess.Popen(  # nosec B603 - fixed argv, no shell
+            subprocess.Popen(
                 [BASH, str(DRIVER), "hook", str(daemon_dir)],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
@@ -488,7 +486,7 @@ def _wait_for_path_gone(path: Path) -> None:
 def _source_venv_sh(script: str, env: dict[str, str]) -> subprocess.CompletedProcess[str]:
     """Run ``script`` in bash with scripts/install/venv.sh sourced."""
     venv_sh = REPO_ROOT / "scripts" / "install" / "venv.sh"
-    return subprocess.run(  # nosec B603 - fixed argv, no shell
+    return subprocess.run(
         [BASH, "-c", f'set -euo pipefail\nsource "{venv_sh}"\n{script}'],
         capture_output=True,
         text=True,
@@ -558,7 +556,7 @@ class TestSwitchedOffMeansSwitchedOff:
             },
         )
 
-        result = subprocess.run(  # nosec B603 - fixed argv, no shell
+        result = subprocess.run(
             [BASH, str(DRIVER), "build", str(daemon_dir), sys.executable, "fp", "inputs"],
             capture_output=True,
             text=True,
@@ -630,9 +628,7 @@ def _signal_build(pid: int, sig: int, tmp_path: Path) -> None:
 
 def _strays(pattern: str) -> list[str]:
     """Processes whose whole command line is ``pattern`` (pgrep excludes itself)."""
-    probe = subprocess.run(  # nosec B603 B607 - fixed argv, no shell
-        ["pgrep", "-fx", pattern], capture_output=True, text=True, check=False
-    )
+    probe = subprocess.run(["pgrep", "-fx", pattern], capture_output=True, text=True, check=False)
     return probe.stdout.split()
 
 
@@ -665,7 +661,7 @@ class TestOnlyATimeoutIsATimeout:
         assert _run("repair", daemon_dir, env).returncode == 0
         assert _resolves(daemon_dir, env)
 
-        judged = subprocess.run(  # nosec B603 - fixed argv, no shell
+        judged = subprocess.run(
             [
                 BASH,
                 "-c",
@@ -821,7 +817,7 @@ class TestTheWatchdogNeverOutlivesItsBuild:
         assert _resolves(daemon_dir, env)
 
     def test_a_build_that_ignores_term_is_killed_after_the_grace(self, tmp_path: Path) -> None:
-        stopped = subprocess.run(  # nosec B603 - fixed argv, no shell
+        stopped = subprocess.run(
             [
                 BASH,
                 "-c",

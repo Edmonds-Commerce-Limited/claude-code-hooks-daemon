@@ -20,7 +20,7 @@ Task 1.2 left to the owner rather than making on its own.
 
 from __future__ import annotations
 
-import subprocess  # nosec B404 - trusted interpreter, list form, for a nested pytest run
+import subprocess
 import sys
 import textwrap
 from pathlib import Path
@@ -120,7 +120,7 @@ class TestEndToEndInANestedPytestRun:
         if ci is not None:
             env["CI"] = ci
 
-        return subprocess.run(  # nosec B603 - trusted interpreter, list form
+        return subprocess.run(
             [
                 sys.executable,
                 "-m",

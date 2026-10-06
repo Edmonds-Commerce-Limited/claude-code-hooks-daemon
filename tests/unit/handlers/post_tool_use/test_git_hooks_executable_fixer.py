@@ -5,7 +5,7 @@ remediation that makes non-executable git hook files executable.
 """
 
 import stat
-import subprocess  # nosec B404 - git used only to create real repos in test fixtures
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -29,7 +29,7 @@ def _make_git_repo(tmp_path) -> str:
     """Create a real git repo and return its working-directory path."""
     repo = tmp_path / "repo"
     repo.mkdir()
-    subprocess.run(  # nosec B603 B607 - trusted git, isolated tmp repo
+    subprocess.run(
         ["git", "init"],
         cwd=str(repo),
         check=True,

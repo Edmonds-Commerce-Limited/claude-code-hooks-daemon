@@ -116,7 +116,11 @@ The agent's rulings on ordering, plugin location and restart policy, made while 
 
 ### Phase 3: Close out
 
-- [ ] ⬜ **Task 3.1**: Run the live test ([OWNER-LIVE-TEST.md](OWNER-LIVE-TEST.md)) and fix what it finds. By owner ruling, a desktop (host) agent working on both repositories does this, starting from [HANDOVER.md](HANDOVER.md). Opening the fedora-desktop PR is the owner's call. This repository's side is already merged.
+- [ ] ⬜ **Task 3.1**: Run the live test ([OWNER-LIVE-TEST.md](OWNER-LIVE-TEST.md)) and fix what it finds. By owner ruling, a desktop (host) agent working on both repositories does this, starting from [HANDOVER.md](HANDOVER.md). Opening the fedora-desktop PR is the owner's call. This repository's side is already merged. Owner ruling D9
+  (2026-10-06): the coordinator gave the owner copy-paste start text for the desktop agent, pointing it at
+  [HANDOVER.md](HANDOVER.md); the owner starts it.
+  Live test run 2026-10-06: [LIVE-TEST-STATUS-261006.md](LIVE-TEST-STATUS-261006.md). Every step that ran passed
+  except F1 (fix on a fedora-desktop branch, OWNER-DECISIONS D10); three steps were not run.
 - [ ] ⬜ **Task 3.2**: Comment the outcome on #71 and fedora-desktop#61, using "Addresses" wording.
 
 ## Success Criteria

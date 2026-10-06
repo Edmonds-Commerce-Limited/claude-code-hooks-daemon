@@ -12,7 +12,7 @@ that compares a version with itself proves nothing.
 from __future__ import annotations
 
 import importlib.util
-import subprocess  # nosec B404 - runs `git show` with a fixed argv
+import subprocess
 import sys
 from pathlib import Path
 from typing import Any
@@ -30,7 +30,7 @@ _BASELINE_REF = "v3.68.0"
 @pytest.fixture(scope="module")
 def baseline(tmp_path_factory: pytest.TempPathFactory) -> Any:
     """The supervisor module as released at the baseline tag; the test skips if it cannot be read."""
-    completed = subprocess.run(  # nosec B603 B607 - fixed argv, no shell
+    completed = subprocess.run(
         ["git", "-C", str(_REPO_ROOT), "show", f"{_BASELINE_REF}:{_RELATIVE_PATH}"],
         capture_output=True,
         text=True,

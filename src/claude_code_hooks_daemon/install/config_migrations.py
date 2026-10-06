@@ -94,7 +94,7 @@ class _Unset:
             cls._instance = super().__new__(cls)
         return cls._instance
 
-    def __repr__(self) -> str:  # pragma: no cover - debug aid only
+    def __repr__(self) -> str:
         return "<UNSET>"
 
 

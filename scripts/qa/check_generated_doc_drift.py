@@ -53,7 +53,7 @@ import difflib
 import json
 import os
 import re
-import subprocess  # nosec B404 - runs the daemon's own CLI to regenerate the doc
+import subprocess
 import sys
 import tempfile
 from dataclasses import dataclass
@@ -146,7 +146,7 @@ def generate_fresh(root: Path) -> str:
     env["PYTHONPATH"] = os.pathsep.join(filter(None, (str(_SRC_DIR), env.get("PYTHONPATH"))))
     with tempfile.TemporaryDirectory(prefix="generated-doc-drift-") as scratch:
         output = Path(scratch) / _GENERATED_DOC_PARTS[-1]
-        result = subprocess.run(  # nosec B603 - fixed argv, no shell, no user input
+        result = subprocess.run(
             [
                 sys.executable,
                 *_GENERATE_ARGS,

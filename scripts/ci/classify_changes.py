@@ -70,9 +70,7 @@ def classify_paths(paths: Sequence[str]) -> str:
 
 
 def _git(root: Path, *args: str) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(  # nosec B603 B607 - fixed argv, no shell
-        ["git", *args], cwd=root, capture_output=True, text=True, check=False
-    )
+    return subprocess.run(["git", *args], cwd=root, capture_output=True, text=True, check=False)
 
 
 def _base_is_known(base: str, root: Path) -> bool:

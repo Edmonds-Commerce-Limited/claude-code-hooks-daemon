@@ -17,7 +17,7 @@ self-generated marker never does (it is `bin/hooks-daemon` alone).
 
 from __future__ import annotations
 
-import subprocess  # nosec B404 — runs the trusted system `bash`
+import subprocess
 from pathlib import Path
 from typing import Final
 
@@ -45,7 +45,7 @@ def _run(project_root: Path, script: str) -> subprocess.CompletedProcess[str]:
         (_REPO_ROOT / "scripts" / "install" / "output.sh").read_text(encoding="utf-8"),
         encoding="utf-8",
     )
-    return subprocess.run(  # nosec B603 — fixed argv, no shell, trusted input
+    return subprocess.run(
         ["bash", "-c", f'source "{guard_copy}"\n{script}'],
         capture_output=True,
         text=True,

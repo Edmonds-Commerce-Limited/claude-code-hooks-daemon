@@ -1,7 +1,7 @@
 """Tests for the released-CHANGELOG-section immutability check (Plan 00474 N343)."""
 
 import importlib.util
-import subprocess  # nosec B404 - git fixtures
+import subprocess
 import sys
 from pathlib import Path
 from types import ModuleType
@@ -24,7 +24,7 @@ def _load() -> ModuleType:
 
 
 def _git(root: Path, *args: str) -> None:
-    subprocess.run(  # nosec B603 B607 - fixed git argv in a tmp repo
+    subprocess.run(
         ["git", "-c", "user.name=t", "-c", "user.email=t@t", *args],
         cwd=root,
         check=True,

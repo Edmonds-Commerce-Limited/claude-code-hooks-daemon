@@ -74,6 +74,22 @@ class TestResolvePayload:
         assert "human-initiated" not in payload
         assert "NOT human" not in payload
 
+    def test_armed_and_flag_bodies_say_esc_interruption_is_not_a_rejection(self) -> None:
+        # The supervisor presses Esc to flush a queued /compact; Claude Code
+        # reports the interrupted tool call as a user rejection. The compacted
+        # session must be told that was the supervisor, and to retry the call.
+        for body in (_mod._ARMED_COMPACT_BODY, _mod._FLAG_COMPACT_BODY):
+            assert "Esc" in body
+            assert "NOT a human rejection" in body
+            assert "retry" in body.lower()
+            assert "resume and continue" in body
+
+    def test_pause_body_notes_interruption_but_does_not_retry(self) -> None:
+        body = _mod._PAUSE_COMPACT_BODY
+        assert "NOT a human rejection" in body
+        assert "do not retry it now" in body
+        assert "do nothing further" in body
+
     def test_armed_continue_matches_dry_run(self) -> None:
         # `continue` is identical armed vs dry-run for the same tick.
         armed = _mod._resolve_payload(Decision.WOULD_CONTINUE, dry_run=False, now_wall=_FIXED_NOW)

@@ -39,7 +39,7 @@ _HOSTNAME = "discovery-fixture"
 @pytest.fixture
 def bound_socket() -> Iterator[Path]:
     """A real, bound AF_UNIX socket at a path short enough to bind."""
-    short_dir = Path(tempfile.mkdtemp(prefix="hd-", dir="/tmp"))  # nosec B108 - AF_UNIX limit
+    short_dir = Path(tempfile.mkdtemp(prefix="hd-", dir="/tmp"))
     sock_path = short_dir / "hooks-daemon-cafef00d.sock"
     sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     sock.bind(str(sock_path))

@@ -1,7 +1,7 @@
 """Tests for MemoryLogHandler."""
 
 import logging
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -93,12 +93,9 @@ class TestMemoryLogHandler:
         """emit should handle errors gracefully."""
         # Create a record that will cause an error during append
         # We'll mock the handleError method to verify it's called
-        handler.handleError = MagicMock()  # type: ignore[method-assign]
-
         # Force an exception by making records raise on append
-        original_records = handler.records
-        handler.records = MagicMock()  # type: ignore[assignment]
-        handler.records.append.side_effect = RuntimeError("Test error")
+        failing_records = MagicMock()
+        failing_records.append.side_effect = RuntimeError("Test error")
 
         record = logging.LogRecord(
             name="test",
@@ -110,21 +107,19 @@ class TestMemoryLogHandler:
             exc_info=None,
         )
 
-        handler.emit(record)
+        with (
+            patch.object(handler, "handleError") as handle_error,
+            patch.object(handler, "records", failing_records),
+        ):
+            handler.emit(record)
 
         # handleError should have been called
-        handler.handleError.assert_called_once_with(record)
-
-        # Restore original records
-        handler.records = original_records
+        handle_error.assert_called_once_with(record)
 
     def test_emit_handles_memory_error(self, handler: MemoryLogHandler) -> None:
         """emit should handle MemoryError specifically."""
-        handler.handleError = MagicMock()  # type: ignore[method-assign]
-
-        original_records = handler.records
-        handler.records = MagicMock()  # type: ignore[assignment]
-        handler.records.append.side_effect = MemoryError("Out of memory")
+        failing_records = MagicMock()
+        failing_records.append.side_effect = MemoryError("Out of memory")
 
         record = logging.LogRecord(
             name="test",
@@ -136,13 +131,14 @@ class TestMemoryLogHandler:
             exc_info=None,
         )
 
-        handler.emit(record)
+        with (
+            patch.object(handler, "handleError") as handle_error,
+            patch.object(handler, "records", failing_records),
+        ):
+            handler.emit(record)
 
         # handleError should have been called
-        handler.handleError.assert_called_once_with(record)
-
-        # Restore original records
-        handler.records = original_records
+        handle_error.assert_called_once_with(record)
 
     def test_get_logs_all(self, handler: MemoryLogHandler) -> None:
         """get_logs should return all formatted logs when count is None."""

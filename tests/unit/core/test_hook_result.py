@@ -1,5 +1,7 @@
 """Comprehensive tests for HookResult."""
 
+from typing import Any, cast
+
 from claude_code_hooks_daemon.core.hook_result import (
     _DENY_CONTINUATION_SUFFIX,
     Decision,
@@ -552,7 +554,7 @@ class TestHookResultCoercionValidation:
         import pytest
 
         with pytest.raises(ValueError, match="Invalid decision"):
-            HookResult(decision=123)  # type: ignore
+            cast("Any", HookResult)(decision=123)
 
     def test_coerce_decision_with_string(self):
         """Should coerce string decision to Decision enum."""

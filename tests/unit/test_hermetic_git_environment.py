@@ -12,7 +12,7 @@ what a test can observe of git's ambient configuration, which must be nothing.
 from __future__ import annotations
 
 import os
-import subprocess  # nosec B404 - trusted system tool (git) for repo fixtures
+import subprocess
 from pathlib import Path
 
 from claude_code_hooks_daemon.constants.timeout import Timeout
@@ -23,7 +23,7 @@ from tests.conftest import (
 
 
 def _git(cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(  # nosec B603 B607 - trusted system tool, list form
+    return subprocess.run(
         ["git", *args],
         cwd=cwd,
         capture_output=True,

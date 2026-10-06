@@ -22,7 +22,7 @@ pins the difference.
 
 from __future__ import annotations
 
-import subprocess  # nosec B404 - trusted system tool (git) for repo fixtures
+import subprocess
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
@@ -72,7 +72,7 @@ _ENV = {
 
 def _git(repo: Path, *args: str) -> str:
     """Run git in ``repo``, failing loudly, returning stdout."""
-    result = subprocess.run(  # nosec B603 B607 - trusted system tool, list form
+    result = subprocess.run(
         ["git", "-C", str(repo), *args],
         check=True,
         capture_output=True,
@@ -121,7 +121,7 @@ def remote(tmp_path: Path) -> Path:
     the bug they exist for.
     """
     bare = tmp_path / "remote.git"
-    subprocess.run(  # nosec B603 B607 - trusted system tool, list form
+    subprocess.run(
         ["git", "init", "--quiet", "--bare", str(bare)],
         check=True,
         capture_output=True,
@@ -497,7 +497,7 @@ class TestRecoveryBundle:
         bundle = repo.parent / "multi.bundle"
         write_recovery_bundle(repo, ["one", "two"], bundle)
 
-        listing = subprocess.run(  # nosec B603 B607 - trusted system tool, list form
+        listing = subprocess.run(
             ["git", "bundle", "list-heads", str(bundle)],
             capture_output=True,
             text=True,
@@ -533,13 +533,13 @@ class TestMergedButAheadOfItsOwnUpstream:
         """
         _merged_but_ahead_of_its_upstream(repo, remote, "shipped")
 
-        ancestry = subprocess.run(  # nosec B603 B607 - trusted system tool, list form
+        ancestry = subprocess.run(
             ["git", "-C", str(repo), "merge-base", "--is-ancestor", "shipped", "main"],
             check=False,
             capture_output=True,
             env={**_ENV, "HOME": str(repo)},
         )
-        refusal = subprocess.run(  # nosec B603 B607 - trusted system tool, list form
+        refusal = subprocess.run(
             ["git", "-C", str(repo), "branch", "--delete", "shipped"],
             check=False,
             capture_output=True,
@@ -675,7 +675,7 @@ class TestARefusalCarriesItsDiagnosis:
         _git(repo, "checkout", "main")
         new_tip = _git(repo, "rev-parse", "victim").strip()
 
-        listing = subprocess.run(  # nosec B603 B607 - trusted system tool, list form
+        listing = subprocess.run(
             ["git", "bundle", "list-heads", str(bundle)],
             capture_output=True,
             text=True,
@@ -795,13 +795,13 @@ class TestMergedWhileHeadIsElsewhere:
         """Precondition. Without it the rest asserts a shape that does not exist."""
         _merged_but_head_is_elsewhere(repo, "done")
 
-        ancestry = subprocess.run(  # nosec B603 B607 - trusted system tool, list form
+        ancestry = subprocess.run(
             ["git", "-C", str(repo), "merge-base", "--is-ancestor", "done", "main"],
             check=False,
             capture_output=True,
             env={**_ENV, "HOME": str(repo)},
         )
-        refusal = subprocess.run(  # nosec B603 B607 - trusted system tool, list form
+        refusal = subprocess.run(
             ["git", "-C", str(repo), "branch", "--delete", "done"],
             check=False,
             capture_output=True,
@@ -916,7 +916,7 @@ class TestMergedWhileHeadIsElsewhere:
         _git(repo, "checkout", "-b", "elsewhere", "HEAD~1")
 
         classification = classify_branch(repo, "tracks-head")
-        refusal = subprocess.run(  # nosec B603 B607 - trusted system tool, list form
+        refusal = subprocess.run(
             ["git", "-C", str(repo), "branch", "--delete", "tracks-head"],
             check=False,
             capture_output=True,
@@ -1302,7 +1302,7 @@ class TestABranchThatMovedAfterItsProofIsNotDeleted:
         _git(repo, "tag", "done", "main")
         assert (
             "warning: refname 'done' is ambiguous."
-            in subprocess.run(  # nosec B603 B607
+            in subprocess.run(
                 ["git", "-C", str(repo), "rev-parse", "done"],
                 capture_output=True,
                 text=True,
@@ -1453,7 +1453,7 @@ class TestASameNamedTagCannotHijackTheProof:
 
         write_recovery_bundle(repo, ["kept"], bundle)
 
-        listing = subprocess.run(  # nosec B603 B607 - trusted system tool, list form
+        listing = subprocess.run(
             ["git", "-C", str(repo), "bundle", "list-heads", str(bundle)],
             capture_output=True,
             text=True,

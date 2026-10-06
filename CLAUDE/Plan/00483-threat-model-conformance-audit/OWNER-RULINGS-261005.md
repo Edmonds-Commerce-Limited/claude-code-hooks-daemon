@@ -109,6 +109,13 @@ that is kept to see whether it is needed and why it exists.
 
 **Settles:** G4.
 
+**Coordinator's recorded reading (2026-10-06, flagged for the owner to correct):** "required under strict mode" is
+implemented as a loud config warning (logged at load and surfaced by the SessionStart config-problem advisory, plus a
+post-upgrade task), not as a load failure. A load failure stops the daemon starting, and the hook path then denies
+every tool call, so a strict-mode client with plain-string exclusions would lose its sessions on upgrade. That would
+cut against A1 (deny only on a positive finding) and the owner's "don't break normal agent sessions". A malformed
+new-style entry, such as a placeholder reason, is still a validation error, because no existing config can hold one.
+
 ## B4: 00474 N296, error-hiding audit
 
 **Owner ruling:** yes, as recommended. One named helper with a required reason argument, and the audit widened to catch

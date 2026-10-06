@@ -73,7 +73,7 @@ def _run_preflight(project_root: Path, worktree_dir: Path) -> subprocess.Complet
         f"{_NO_VENV_STUB}"
         f'preflight_socket_path "{worktree_dir}"\n'
     )
-    return subprocess.run(  # nosec B603 B607 - fixed argv, repo-internal script text
+    return subprocess.run(
         ["bash", "-c", script],
         capture_output=True,
         text=True,
@@ -225,7 +225,7 @@ def _run_nesting_guard(project_root: Path) -> subprocess.CompletedProcess[str]:
         f"{_nesting_function_source()}"
         "preflight_not_nested\n"
     )
-    return subprocess.run(  # nosec B603 B607 - fixed argv, repo-internal script text
+    return subprocess.run(
         ["bash", "-c", script],
         capture_output=True,
         text=True,
@@ -235,9 +235,7 @@ def _run_nesting_guard(project_root: Path) -> subprocess.CompletedProcess[str]:
 
 
 def _git(*args: str, cwd: Path) -> None:
-    subprocess.run(  # nosec B603 B607 - fixed argv, no shell
-        ["git", *args], cwd=cwd, check=True, capture_output=True
-    )
+    subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True)
 
 
 def _repo_with_a_linked_worktree(tmp_path: Path) -> tuple[Path, Path]:
@@ -336,7 +334,7 @@ class TestTheExtractionItself:
     def test_the_extracted_source_is_a_complete_function(self) -> None:
         """A slice that stopped at the wrong brace would not even parse."""
         source = _preflight_function_source()
-        parsed = subprocess.run(  # nosec B603 B607 - fixed argv, repo-internal script text
+        parsed = subprocess.run(
             ["bash", "-n", "-c", source],
             capture_output=True,
             text=True,

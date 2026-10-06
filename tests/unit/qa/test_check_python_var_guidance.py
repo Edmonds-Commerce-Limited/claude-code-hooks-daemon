@@ -19,7 +19,7 @@ here would reproduce the very defect under test.
 """
 
 import json
-import subprocess  # nosec B404 - subprocess used for running the QA checker only
+import subprocess
 import sys
 from pathlib import Path
 from typing import Any
@@ -31,7 +31,7 @@ _JSON_OUTPUT = _REPO_ROOT / "untracked" / "qa" / "python_var_guidance.json"
 
 def _run_checker(scan_path: Path) -> dict[str, Any]:
     """Run the checker against ``scan_path`` and return its parsed JSON."""
-    subprocess.run(  # nosec B603 - trusted first-party checker script
+    subprocess.run(
         [sys.executable, str(_CHECKER), "--json", "--path", str(scan_path)],
         capture_output=True,
         text=True,
@@ -345,7 +345,7 @@ class TestRepositoryIsClean:
     """The real trees must stay clean — this is the regression lock."""
 
     def test_default_scan_roots_have_no_violations(self) -> None:
-        result = subprocess.run(  # nosec B603 - trusted first-party checker script
+        result = subprocess.run(
             [sys.executable, str(_CHECKER)],
             capture_output=True,
             text=True,

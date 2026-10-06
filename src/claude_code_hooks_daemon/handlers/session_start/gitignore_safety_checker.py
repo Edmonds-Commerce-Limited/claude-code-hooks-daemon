@@ -195,7 +195,7 @@ class GitignoreSafetyCheckerHandler(SessionStartHandlerBase):
                         reason=f"an unreadable {path} drops out of the cache hash, so the hash differs from a readable run and the check simply recomputes",
                         level=logging.DEBUG,
                     )
-        return hashlib.md5(content.encode(), usedforsecurity=False).hexdigest()  # nosec B324
+        return hashlib.md5(content.encode(), usedforsecurity=False).hexdigest()
 
     # ------------------------------------------------------------------
     # Missing entry detection

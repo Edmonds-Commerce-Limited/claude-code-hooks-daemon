@@ -334,7 +334,7 @@ class ClaudeMdInjector:
                     "daemon continues without it"
                 ),
             )
-        except Exception as exc:  # nosec B110 - advisory, must never crash daemon
+        except Exception as exc:
             log_and_continue(
                 logger,
                 exc,
@@ -483,7 +483,7 @@ class ClaudeMdInjector:
         """
         try:
             return format_markdown_document(content)
-        except Exception as exc:  # nosec B110 - fail-safe: never crash daemon startup
+        except Exception as exc:
             logger.warning(
                 "ClaudeMdInjector: markdown formatting failed — writing unformatted "
                 "content (advisory): %s",
