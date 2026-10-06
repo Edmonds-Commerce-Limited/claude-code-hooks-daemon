@@ -1433,7 +1433,7 @@ The branch agent also reported the handler as off in this repository's config; i
 loop goes on to the next record. Then re-enable the dogfood handler and run Task 4.4's live check. Meanwhile the dogfood
 config has the handler off.
 
-**Status**: ⬜ Open.
+**Status**: ✅ Fixed (COMMIT_SHA) — `deliver_pending` renames an unreadable pending record to `<name>.pending.json.unreadable` with one WARNING and carries on; dogfood handler re-enabled.
 
 ### N355 — the protected-file index never becomes available in the live daemon
 
