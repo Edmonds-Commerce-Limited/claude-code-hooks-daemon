@@ -388,6 +388,13 @@ recommendation.
 | G13 | 25 promoted-handler IDs are missing from CLAUDE.md                                                                                                      | T7.1 (SHOULD)              | **Close.** Add one IDs line per promoted section, at a small token cost                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 | G14 | Hook-time defences fail open, and a stopped daemon blocks nothing                                                                                       | Threat model, not a clause | **Out of scope.** State it in the declaration                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 
+**G1 status (owner ruling B2 applied: inline only, no central file or baseline).** Deleted 228
+inline suppressions in commits `b2089aed8` and `ef8192afd` (193 inert `nosec` in tests and
+scripts, 7 `nosec` in `src/` with no finding, 22 `type: ignore` and 6 `pragma: no cover`
+replaced or dropped); 78 kept. Inventory, per-entry reasons and the reasonless lines still
+needing a reason comment: [SUPPRESSIONS.md](SUPPRESSIONS.md). The `scripts/qa` detector and
+`--disable-nosem` parts of G1 remain open.
+
 ### What a DBF tool needs in order to hook in (TOOLING §5, and Task 3.2)
 
 The `/dbf` skill's discovery reads a manifest declaration first. Only `composer.json` and
