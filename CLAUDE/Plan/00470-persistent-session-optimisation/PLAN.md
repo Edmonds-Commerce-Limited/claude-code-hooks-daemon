@@ -109,7 +109,9 @@ Evidence, with verified facts marked apart from inferences, is in
       up; boot restore is fedora-desktop's `ccy-sessions-restore.service` (with `--continue`), unconfirmed on this
       host; `autoContinueAtUsageLimit` is not provisioned anywhere; `HOOKS_DAEMON_HOSTNAME` is not set.
   - Owner ruling A1 (2026-10-06): the supervisor's Esc before a forced compact is not a human rejection. The compact
-    instruction now says so and asks for interrupted tool calls to be retried. Branch at `a223c2895`, in QA.
+    instruction now says so and asks for interrupted tool calls to be retried. Merged `70331d361` on the owner's
+    instruction (77 targeted tests, ruff and black clean; full QA owed in the combined post-merge run). Live: the
+    `--worker` hot-reloaded 4 s after the merge wrote the file.
 
 ### Phase 4: Housekeeping and cost (owner: orchestrator; code by sub-agents)
 
