@@ -25,6 +25,8 @@ from typing import Any, Final
 
 import yaml
 
+from claude_code_hooks_daemon.config.exception_entries import entry_pattern
+
 _LOGGER = logging.getLogger(__name__)
 
 _HANDLERS_KEY: Final[str] = "handlers"
@@ -126,7 +128,7 @@ def _exclusions(spec: dict[str, Any]) -> list[str]:
     if not isinstance(options, dict):
         return []
     paths = options.get(_EXCLUDE_PATHS_KEY)
-    return [str(p) for p in paths] if isinstance(paths, list) else []
+    return [entry_pattern(p) for p in paths] if isinstance(paths, list) else []
 
 
 def _daemon_exclusions(config: dict[str, Any]) -> list[str]:
@@ -134,7 +136,7 @@ def _daemon_exclusions(config: dict[str, Any]) -> list[str]:
     if not isinstance(daemon, dict):
         return []
     paths = daemon.get(_EXCLUDE_PATHS_KEY)
-    return [str(p) for p in paths] if isinstance(paths, list) else []
+    return [entry_pattern(p) for p in paths] if isinstance(paths, list) else []
 
 
 def _is_explicitly_disabled(spec: dict[str, Any]) -> bool:

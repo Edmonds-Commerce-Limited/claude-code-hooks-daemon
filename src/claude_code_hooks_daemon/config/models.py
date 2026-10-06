@@ -20,6 +20,11 @@ from pydantic import (
     model_validator,
 )
 
+from claude_code_hooks_daemon.config.exception_entries import (
+    EXCEPTION_OPTION_KEYS,
+    plain_patterns,
+    unreasoned_entries,
+)
 from claude_code_hooks_daemon.constants import ConfigKey, EventKey, Timeout, wired_event_metas
 from claude_code_hooks_daemon.core.handler_scope import (
     SCOPE_CONFIG_KEY,
@@ -101,7 +106,13 @@ class HandlerConfig(BaseModel):
         """
         if v is None:
             return {}
-        return v
+        if not isinstance(v, dict):
+            return v
+        reduced = dict(v)
+        for key in EXCEPTION_OPTION_KEYS:
+            if key in reduced:
+                reduced[key] = plain_patterns(reduced[key], where=f"options.{key}")
+        return reduced
 
 
 def handler_options(handler_config: object) -> dict[str, Any]:
@@ -127,6 +138,27 @@ def handler_options(handler_config: object) -> dict[str, Any]:
         if isinstance(options, dict):
             return options
     return {}
+
+
+def _bare_exception_entries(data: dict[str, Any]) -> list[tuple[str, str]]:
+    """``(location, entry)`` for every plain-string config exception in raw ``data``."""
+    bare: list[tuple[str, str]] = []
+    daemon = data.get("daemon")
+    if isinstance(daemon, dict):
+        bare.extend(
+            ("daemon.exclude_paths", entry)
+            for entry in unreasoned_entries(
+                daemon.get("exclude_paths"), where="daemon.exclude_paths"
+            )
+        )
+    handlers = data.get("handlers")
+    for event, block in (handlers.items() if isinstance(handlers, dict) else ()):
+        for name, spec in (block.items() if isinstance(block, dict) else ()):
+            options = handler_options(spec)
+            for key in EXCEPTION_OPTION_KEYS:
+                where = f"handlers.{event}.{name}.options.{key}"
+                bare.extend((where, e) for e in unreasoned_entries(options.get(key), where=where))
+    return bare
 
 
 class EventHandlersConfig(BaseModel):
@@ -1948,6 +1980,12 @@ class DaemonConfig(BaseModel):
         description="Number of days before daemon runtime files (sock, pid, socket-path) are considered stale and removed on startup. Active daemons touch their files periodically to stay fresh.",
     )
 
+    @field_validator("exclude_paths", mode="before")
+    @classmethod
+    def reduce_exclude_paths_to_patterns(cls, v: Any) -> Any:
+        """Accept ``{pattern, reason}`` entries; consumers receive plain globs."""
+        return plain_patterns(v, where="daemon.exclude_paths")
+
     @field_validator("socket_path", "pid_file_path", mode="before")
     @classmethod
     def convert_path_to_str(cls, v: str | Path | None) -> str | None:
@@ -2579,6 +2617,30 @@ class Config(BaseModel):
 
     # Legacy field mapping
     settings: dict[str, Any] | None = Field(default=None, exclude=True)
+
+    @model_validator(mode="before")
+    @classmethod
+    def require_reasons_under_strict_mode(cls, data: Any) -> Any:
+        """Under ``daemon.strict_mode`` every config exception carries a reason.
+
+        Owner ruling B3 (Plan 00484 G4). Reads the raw document, so the plain
+        entries are still distinguishable from reasoned ones; a malformed
+        mapping entry is left for the field validators to report.
+        """
+        if not isinstance(data, dict):
+            return data
+        daemon = data.get("daemon")
+        if not (isinstance(daemon, dict) and daemon.get("strict_mode") is True):
+            return data
+        bare = _bare_exception_entries(data)
+        if bare:
+            listing = "; ".join(f"{where}: {entry!r}" for where, entry in bare)
+            raise ValueError(
+                "daemon.strict_mode requires a reason on every config exception, but these "
+                f"are plain strings: {listing}. Write each as "
+                "`{pattern: <value>, reason: <why it is exempt>}`."
+            )
+        return data
 
     @field_validator("hosts")
     @classmethod
