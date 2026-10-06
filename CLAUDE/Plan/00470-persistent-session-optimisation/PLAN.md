@@ -51,7 +51,8 @@ Evidence, with verified facts marked apart from inferences, is in
   - Liveness signal: the daemon has no session registry, so a record is dead when older than 7 days (the cron cannot exist) or when its session's `session_crons` no longer lists its id.
 - [x] ✅ **Task 2.2**: `cron_stop_enforcer` (and its SubagentStop twin) block a stop when a live job's record is older than `refresh_after`, naming the CronDelete + CronCreate. Unrecorded jobs get stamped, not blocked. Tests: age boundary, unknown age, pause respected, priority/terminal invariants unchanged.
   - Option `refresh_after_days`, default 6 (the day left before expiry is the margin for dropped ticks), shared logic in `utils/cron_refresh.py`. The `[awaiting-human]` marker is deliberately not consulted: it silences ticks, which is when a job ages unnoticed. The usage pause and `cron-pause` are respected.
-- [ ] ⬜ **Task 2.3**: ccy supervisor watchdog: no hook traffic while every recorded job is past expiry triggers the reconcile prompt. Tests in the supervisor suite.
+- [x] ✅ **Task 2.3**: ccy supervisor watchdog: no hook traffic while every recorded job is past expiry triggers the reconcile prompt. Tests in the supervisor suite.
+  - Done: `would-cron-reconcile` family in `.claude/ccy/claude-supervise.py`, tests in `tests/unit/supervise/test_cron_expiry_watchdog.py`. It needs a supervisor restart, since the PTY host measures the quiet time.
   - **Coordinator call (2026-10-05, under the owner's "go with the clear winners" instruction):** Q1 a 2 h quiet threshold; Q2 (a) terminal-quiet proxy, no daemon change; Q3 reuse the `persistent_cron_assertor` wording. Unblocked.
   - Resolved questions (coordinator calls, not owner rulings):
     1. The quiet threshold N, in hours: 2 h.
