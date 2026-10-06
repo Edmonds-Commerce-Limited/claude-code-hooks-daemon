@@ -23,6 +23,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from claude_code_hooks_daemon.utils.claude_config import claude_project_dir
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.path_containment import path_relative_to
 
 logger = logging.getLogger(__name__)
@@ -151,7 +152,11 @@ def analyse_transcripts(transcripts_root: Path) -> UsageSummary:
         try:
             malformed_lines += _scan_lines(transcript, file_counts)
         except OSError as exc:
-            logger.warning("tool-report: cannot read %s: %s", transcript, exc)
+            log_and_continue(
+                logger,
+                exc,
+                reason=f"a transcript {transcript} that cannot be read is left out of the tool report; the other transcripts are still analysed and the report is a statistic, not a gate",
+            )
             continue
         for name, count in file_counts.items():
             total_calls[name] += count

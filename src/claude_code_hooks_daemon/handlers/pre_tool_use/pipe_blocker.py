@@ -756,8 +756,10 @@ class PipeBlockerHandler(PreToolUseHandlerBase):
             try:
                 helper.chmod(0o755)
             except OSError as exc:
-                logger.warning(
-                    "Could not restore exec bit on echd-capture helper %s: %s", helper, exc
+                log_and_continue(
+                    logger,
+                    exc,
+                    reason=f"an exec bit that cannot be restored on {helper} makes the os.access check just below fail, so the block message falls back to the temp-file guidance",
                 )
             if not os.access(helper, os.X_OK):
                 return None

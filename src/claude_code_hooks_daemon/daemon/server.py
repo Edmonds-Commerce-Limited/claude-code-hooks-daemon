@@ -1105,7 +1105,12 @@ async def _discard_unsecured_socket(server: asyncio.Server, path: Path) -> None:
     try:
         path.unlink(missing_ok=True)
     except OSError as e:
-        logger.error("Failed to unlink unsecured per-event socket %s: %s", path, e)
+        log_and_continue(
+            logger,
+            e,
+            reason=f"an unremovable unsecured socket {path} is already closed and listens to nothing; aborting daemon startup over it would lose far more than one event",
+            level=logging.ERROR,
+        )
     await server.wait_closed()
 
 
@@ -1463,7 +1468,11 @@ class HooksDaemon:
         try:
             ensure_scratch_dir(ProjectContext.project_root())
         except (OSError, RuntimeError) as exc:
-            logger.warning("Could not ensure the scratch directory: %s", exc)
+            log_and_continue(
+                logger,
+                exc,
+                reason="a scratch directory that cannot be ensured only costs the agents a ready-made scratch location; the daemon must still serve hooks",
+            )
 
     @staticmethod
     def _start_lock_path(socket_path: Path) -> Path:
@@ -1659,7 +1668,12 @@ class HooksDaemon:
                 # need a separate abort path — it just risks the same
                 # per-socket "address already in use" a stale leftover
                 # socket file would raise, which that loop already handles.
-                logger.error("Failed to remove stale per-event socket dir %s: %s", events_dir, e)
+                log_and_continue(
+                    logger,
+                    e,
+                    reason=f"a stale events dir {events_dir} that will not clear only risks per-socket address-in-use errors, which the bind loop below reports and skips one by one",
+                    level=logging.ERROR,
+                )
         events_dir.mkdir(parents=True, mode=0o750, exist_ok=True)
 
         bound: dict[str, asyncio.Server] = {}
@@ -2113,7 +2127,12 @@ class HooksDaemon:
                     shutil.rmtree(events_dir)
                     logger.debug("Removed per-event socket dir: %s", events_dir)
                 except OSError as e:
-                    logger.error("Failed to remove per-event socket dir %s: %s", events_dir, e)
+                    log_and_continue(
+                        logger,
+                        e,
+                        reason=f"an events dir {events_dir} left behind at shutdown is cleared by the next start's stale-dir removal, and shutdown must finish",
+                        level=logging.ERROR,
+                    )
 
         # Cleanup socket file
         if socket_path and socket_path.exists():
@@ -2318,7 +2337,11 @@ class HooksDaemon:
                 protected_patterns=sfm.resolve_configured_patterns(),
             )
         except (OSError, RuntimeError) as exc:
-            logger.warning("Payload capture failed for %s: %s", event, exc)
+            log_and_continue(
+                logger,
+                exc,
+                reason=f"payload capture is a dogfooding aid; a failed capture of {event} loses only that debug record and must never fail the hook it observes",
+            )
 
     async def _process_request(
         self, request_data: str, *, arrival_time: float | None = None
@@ -2604,10 +2627,19 @@ class HooksDaemon:
                         raise DaemonAlreadyRunningError(
                             _ERR_DAEMON_ALREADY_RUNNING.format(socket=socket_path)
                         )
-                except ProcessLookupError:
-                    logger.info("Stale PID file detected (PID %d not running)", old_pid)
+                except ProcessLookupError as lookup_error:
+                    log_and_continue(
+                        logger,
+                        lookup_error,
+                        reason=f"PID {old_pid} is held by no process, the ordinary stale-PID-file case; the file is overwritten with this daemon's PID just below",
+                        level=logging.INFO,
+                    )
             except (ValueError, OSError) as e:
-                logger.warning("Error reading stale PID file: %s", e)
+                log_and_continue(
+                    logger,
+                    e,
+                    reason="an unreadable or malformed old PID file proves no incumbent daemon, so this daemon overwrites it with its own PID just below",
+                )
 
         # Write current PID
         pid_file_path.parent.mkdir(parents=True, exist_ok=True)

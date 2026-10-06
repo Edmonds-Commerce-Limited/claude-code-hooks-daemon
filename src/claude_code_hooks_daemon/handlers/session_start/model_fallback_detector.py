@@ -303,7 +303,12 @@ class ModelFallbackDetectorHandler(SessionStartHandlerBase):
                             assistant_models.append((line_index, model))
                     window.append(line)
         except OSError as exc:
-            logger.debug("model_fallback_detector: cannot read transcript %s: %s", path, exc)
+            log_and_continue(
+                logger,
+                exc,
+                reason=f"an unreadable transcript {path} yields whatever records were scanned before the failure; a missed fallback is reported at a later session start",
+                level=logging.DEBUG,
+            )
         return found, assistant_models
 
     @staticmethod
@@ -479,7 +484,11 @@ class ModelFallbackDetectorHandler(SessionStartHandlerBase):
             tmp_path.write_text(json.dumps(payload), encoding="utf-8")
             tmp_path.replace(path)
         except OSError as exc:
-            logger.warning("model_fallback_detector: could not persist dedupe state: %s", exc)
+            log_and_continue(
+                logger,
+                exc,
+                reason="an unpersisted dedupe state means an already-reported fallback may be reported once more next session; a repeated notice is harmless and the current report is already produced",
+            )
 
     # ── Advisory rendering ──────────────────────────────────────────────────
 

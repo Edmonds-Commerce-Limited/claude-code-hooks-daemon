@@ -23,6 +23,7 @@ from claude_code_hooks_daemon.skill_scan.constants import (
 )
 from claude_code_hooks_daemon.skill_scan.models import Prompt, ScanStats
 from claude_code_hooks_daemon.utils.claude_config import claude_project_dir
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 
 logger = logging.getLogger(__name__)
 
@@ -80,7 +81,12 @@ def extract_prompts(
         try:
             mtime = path.stat().st_mtime
         except OSError as exc:
-            logger.debug("Could not stat transcript %s: %s", path, exc)
+            log_and_continue(
+                logger,
+                exc,
+                reason=f"a transcript {path} that cannot be stat-ed is skipped, so its prompts are missing from the scan; the other transcripts are still scanned",
+                level=logging.DEBUG,
+            )
             continue
         if cutoff is not None and mtime < cutoff:
             continue
@@ -91,7 +97,12 @@ def extract_prompts(
                     stats.lines += 1
                     _consume_line(line, path, mtime, markers, stats, prompts)
         except OSError as exc:
-            logger.debug("Could not read transcript %s: %s", path, exc)
+            log_and_continue(
+                logger,
+                exc,
+                reason=f"a transcript {path} that fails mid-read keeps the prompts extracted so far; the scan is a best-effort statistic and the other transcripts are still scanned",
+                level=logging.DEBUG,
+            )
     return prompts
 
 

@@ -16,6 +16,7 @@ from typing import Any, Final
 
 from claude_code_hooks_daemon.constants import HookInputField
 from claude_code_hooks_daemon.core.transcript_reader import TranscriptReader
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 
 logger = logging.getLogger(__name__)
 
@@ -165,7 +166,12 @@ def has_recent_stop_hook_block(
     except (FileNotFoundError, IsADirectoryError, PermissionError):
         return False
     except OSError as exc:
-        logger.debug("Failed to read transcript %s: %s", transcript_path, exc)
+        log_and_continue(
+            logger,
+            exc,
+            reason=f"an unreadable transcript {transcript_path} shows no recent stop-hook block (False), so the stop proceeds on its other signals",
+            level=logging.DEBUG,
+        )
         return False
 
     for raw in tail:

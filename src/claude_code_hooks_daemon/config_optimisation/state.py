@@ -14,6 +14,8 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
+
 logger = logging.getLogger(__name__)
 
 #: Filename for the state sidecar, placed directly under the daemon untracked
@@ -65,4 +67,9 @@ def record_run(path: Path, version: str, now: float | None = None) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(payload), encoding="utf-8")
     except OSError as exc:
-        logger.debug("Failed to write config-optimisation state %s: %s", path, exc)
+        log_and_continue(
+            logger,
+            exc,
+            reason=f"an unwritable config-optimisation state file {path} only means the review is offered again next time; the review itself already ran",
+            level=logging.DEBUG,
+        )

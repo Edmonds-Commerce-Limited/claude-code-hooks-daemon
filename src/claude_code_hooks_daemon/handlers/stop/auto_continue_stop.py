@@ -1236,7 +1236,12 @@ class AutoContinueStopHandler(StopHandlerBase):
                 retain_bytes=_STOP_EVENTS_MAX_BYTES // 2,
             )
         except (RuntimeError, OSError) as e:
-            logger.debug("_log_stop_event: non-critical write failure: %s", e)
+            log_and_continue(
+                logger,
+                e,
+                reason="the stop-events log is a diagnostic trail; a lost line must never change the stop decision already made",
+                level=logging.DEBUG,
+            )
 
     def _contains_confirmation_pattern(self, text: str) -> bool:
         """Check if text contains a confirmation pattern.

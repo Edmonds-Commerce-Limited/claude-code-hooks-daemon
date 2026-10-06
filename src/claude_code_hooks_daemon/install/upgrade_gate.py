@@ -69,6 +69,7 @@ from claude_code_hooks_daemon.install.upgrade_tasks import (
     tasks_for_range,
 )
 from claude_code_hooks_daemon.install.version_parse import strip_tag_prefix
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.one_shot_approval import OneShotApprovalStore
 from claude_code_hooks_daemon.utils.path_containment import path_is_relative_to, path_relative_to
 from claude_code_hooks_daemon.utils.path_predicates import path_is_file, read_text_or_reason
@@ -446,7 +447,12 @@ def gated_install_stamp(untracked_dir: Path, *, daemon_dir: Path, project_root: 
         # `OSError` catches a permission-denied or otherwise unreadable
         # file. Either way this must fail CLOSED (review3 item 1): a read
         # error on a security-relevant receipt is not license to crash.
-        logger.debug("gated_install_stamp: %s is not readable/valid JSON (%s)", path, exc)
+        log_and_continue(
+            logger,
+            exc,
+            reason=f"an unreadable or invalid receipt {path} is treated as no receipt (None), so the gate cannot vouch for the stamp and fails closed; the reason is worth a record",
+            level=logging.DEBUG,
+        )
         recorded = None
     if not isinstance(recorded, dict):
         return None

@@ -546,7 +546,11 @@ def _relay_binary_facts(project_root: Path, relay_binary_override: str | None) -
         except OSError as exc:
             # Status must still render when the binary is unreadable; say so
             # rather than silently reporting "no digest".
-            logger.warning("could not hash relay binary %s: %s", binary, exc)
+            log_and_continue(
+                logger,
+                exc,
+                reason=f"an unreadable relay binary {binary} is reported with an empty digest; the transport status must still render and says it is present",
+            )
             sha256 = ""
     return {
         "path": str(binary),

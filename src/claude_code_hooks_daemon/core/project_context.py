@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import ClassVar
 
 from claude_code_hooks_daemon.constants import Timeout
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 
 logger = logging.getLogger(__name__)
 
@@ -64,10 +65,10 @@ def _ensure_self_install_cli_symlink(project_root: Path) -> None:
         link_path.parent.mkdir(parents=True, exist_ok=True)
         link_path.symlink_to(_SELF_INSTALL_CLI_SYMLINK_TARGET)
     except OSError as exc:
-        logger.warning(
-            "ProjectContext: could not create conventional CLI symlink at %s: %s",
-            link_path,
+        log_and_continue(
+            logger,
             exc,
+            reason=f"a refused conventional CLI symlink at {link_path} loses only the convenience path; the daemon runs without it and clients use the real bin path",
         )
 
 
@@ -129,10 +130,10 @@ def _ensure_self_install_lsp_venv_symlink(project_root: Path) -> None:
         link_path.parent.mkdir(parents=True, exist_ok=True)
         link_path.symlink_to(target)
     except OSError as exc:
-        logger.warning(
-            "ProjectContext: could not create/repoint lsp-venv symlink at %s: %s",
-            link_path,
+        log_and_continue(
+            logger,
             exc,
+            reason=f"a failed lsp-venv symlink at {link_path} costs only the language server's stable venv path; the daemon must still start and the next start retries",
         )
 
 

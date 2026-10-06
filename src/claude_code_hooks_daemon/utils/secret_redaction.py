@@ -39,6 +39,8 @@ import stat
 from pathlib import Path
 from typing import Any, Final
 
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
+
 logger = logging.getLogger(__name__)
 
 DEFAULT_SECRET_WORD_LIST_PATH: Final[str] = ".claude/block-words.secret"
@@ -275,10 +277,10 @@ def _resolve_active_path() -> Path | None:
         project_root = ProjectContext.project_root()
         config_path = ProjectContext.config_path()
     except (OSError, RuntimeError, ValueError) as exc:
-        logger.warning(
-            "Secret redaction is INERT: the project root is unknown (%s). "
-            "No terms will be matched or redacted.",
+        log_and_continue(
+            logger,
             exc,
+            reason="secret redaction is INERT because the project root is unknown: no terms will be matched or redacted, and there is no config to read the word list path from; the daemon must still serve hooks",
         )
         project_root = None
     if project_root is None or config_path is None:
@@ -321,7 +323,11 @@ def _configured_path_from_raw_yaml(config_path: Path) -> str | None:
     try:
         node = yaml.safe_load(config_path.read_text(encoding="utf-8"))
     except (OSError, ValueError, yaml.YAMLError) as exc:
-        logger.warning("Secret redaction: the raw config could not be read either (%s)", exc)
+        log_and_continue(
+            logger,
+            exc,
+            reason="the raw config could not be read either, so no configured word list path is found and the default path applies; redaction still covers that default",
+        )
         node = None
     for key in ("handlers", "pre_tool_use", "sensitive_content", "options"):
         node = node.get(key) if isinstance(node, dict) else None

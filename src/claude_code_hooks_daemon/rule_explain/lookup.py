@@ -18,6 +18,7 @@ from dataclasses import dataclass
 from claude_code_hooks_daemon.core.handler import Handler
 from claude_code_hooks_daemon.core.rule import Rule
 from claude_code_hooks_daemon.handlers.registry import HandlerRegistry
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.naming import class_name_to_config_key
 
 logger = logging.getLogger(__name__)
@@ -86,8 +87,13 @@ def collect_handler_rules(handler_classes: Iterable[type[Handler]]) -> list[Hand
             instance = handler_class()
             rules = tuple(instance.get_rules())
             claude_md = instance.get_claude_md()
-        except Exception:
-            logger.exception("Failed to inspect handler %s for rule lookup", handler_class.__name__)
+        except Exception as exc:
+            log_and_continue(
+                logger,
+                exc,
+                reason=f"a handler {handler_class.__name__} that cannot be inspected is left out of the rule lookup; one broken handler must not hide every other handler's rules",
+                level=logging.ERROR,
+            )
             continue
         collected.append(
             HandlerRules(
@@ -171,8 +177,13 @@ def _project_handler_classes() -> list[type[Handler]]:
             type(handler)
             for _event_type, handler in ProjectHandlerLoader.discover_handlers(handlers_path)
         ]
-    except Exception:
-        logger.exception("Could not load project handlers for rule lookup")
+    except Exception as exc:
+        log_and_continue(
+            logger,
+            exc,
+            reason="project handlers that cannot be loaded contribute no rules ([]); the lookup still answers for the library handlers",
+            level=logging.ERROR,
+        )
         return []
 
 

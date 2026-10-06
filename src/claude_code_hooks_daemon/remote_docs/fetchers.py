@@ -37,6 +37,7 @@ from typing import Any, Final
 
 from claude_code_hooks_daemon.remote_docs.capture import CaptureError, FetchFn, FetchResult
 from claude_code_hooks_daemon.remote_docs.provenance import Fidelity
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 
 logger = logging.getLogger(__name__)
 
@@ -150,7 +151,11 @@ def _close_session(binary: str, runner: Runner) -> None:
             check=False,
         )
     except (subprocess.TimeoutExpired, FileNotFoundError, OSError) as exc:
-        logger.warning("%s: could not close the browser session: %s", binary, exc)
+        log_and_continue(
+            logger,
+            exc,
+            reason=f"a browser session that {binary} cannot close is cleanup after the page was already fetched; the captured document is unaffected and the session ends on its own",
+        )
 
 
 def _extract(binary: str, url: str, completed: Any) -> tuple[bytes, str]:

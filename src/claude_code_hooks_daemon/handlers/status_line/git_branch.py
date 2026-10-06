@@ -293,9 +293,19 @@ class GitBranchHandler(StatusLineHandlerBase):
                 return [f"| ⎇ {worktree_prefix}{color}{branch}{_COLOR_RESET}{icons}"]
 
         except (subprocess.CalledProcessError, subprocess.TimeoutExpired, FileNotFoundError) as e:
-            logger.debug("Failed to get git branch: %s", e)
+            log_and_continue(
+                logger,
+                e,
+                reason="a git command that fails or times out leaves the branch segment empty ([]); the status line must render without it",
+                level=logging.DEBUG,
+            )
         except Exception as e:
-            logger.error("Unexpected error in git branch handler: %s", e, exc_info=True)
+            log_and_continue(
+                logger,
+                e,
+                reason="an unexpected error in the git segment leaves it empty ([]); a cosmetic segment must never break the status line",
+                level=logging.ERROR,
+            )
 
         return []
 

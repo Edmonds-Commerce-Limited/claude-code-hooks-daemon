@@ -31,6 +31,8 @@ import shutil
 from collections.abc import Collection
 from pathlib import Path
 
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
+
 logger = logging.getLogger(__name__)
 
 
@@ -54,7 +56,11 @@ def cap_log_file(path: Path, *, max_bytes: int, retain_bytes: int | None = None)
     except FileNotFoundError:
         return False
     except OSError as exc:
-        logger.warning("retention: cannot stat %s: %s", path, exc)
+        log_and_continue(
+            logger,
+            exc,
+            reason=f"a log {path} whose size cannot be read is left untrimmed (False); the log only grows until the next successful trim",
+        )
         return False
     if size <= max_bytes:
         return False
@@ -74,7 +80,11 @@ def cap_log_file(path: Path, *, max_bytes: int, retain_bytes: int | None = None)
         tmp.replace(path)
         return True
     except OSError as exc:
-        logger.warning("retention: cannot trim %s: %s", path, exc)
+        log_and_continue(
+            logger,
+            exc,
+            reason=f"a log {path} that cannot be trimmed is left as it is (False); the next append retries the trim and the log's writer must not fail over housekeeping",
+        )
         return False
 
 
@@ -105,7 +115,11 @@ def prune_directory(
     try:
         entries = [p for p in directory.glob(pattern) if p.is_file()]
     except OSError as exc:
-        logger.warning("retention: cannot list %s: %s", directory, exc)
+        log_and_continue(
+            logger,
+            exc,
+            reason=f"a directory {directory} that cannot be listed prunes nothing ([]); its files stay until the next sweep, and pruning is housekeeping",
+        )
         return []
 
     protected = {_resolve(p) for p in protect}
@@ -114,7 +128,11 @@ def prune_directory(
         try:
             mtime = entry.stat().st_mtime
         except OSError as exc:
-            logger.warning("retention: cannot stat %s: %s", entry, exc)
+            log_and_continue(
+                logger,
+                exc,
+                reason=f"a file {entry} whose age cannot be read is left out of the pruning (never deleted blind) and is judged again at the next sweep",
+            )
             continue
         dated.append((mtime, entry))
 
@@ -132,7 +150,11 @@ def prune_directory(
         try:
             entry.unlink()
         except OSError as exc:
-            logger.warning("retention: cannot delete %s: %s", entry, exc)
+            log_and_continue(
+                logger,
+                exc,
+                reason=f"an excess file {entry} that cannot be deleted stays and is not reported as deleted; the sweep goes on and retries it next time",
+            )
             continue
         deleted.append(entry)
     return deleted
@@ -174,7 +196,11 @@ def prune_subdirectories(
     try:
         entries = [p for p in directory.glob(pattern) if p.is_dir()]
     except OSError as exc:
-        logger.warning("retention: cannot list %s: %s", directory, exc)
+        log_and_continue(
+            logger,
+            exc,
+            reason=f"a directory {directory} that cannot be listed prunes nothing ([]); its subdirectories stay until the next sweep, and pruning is housekeeping",
+        )
         return []
 
     protected = {_resolve(p) for p in protect}
@@ -183,7 +209,11 @@ def prune_subdirectories(
         try:
             mtime = entry.stat().st_mtime
         except OSError as exc:
-            logger.warning("retention: cannot stat %s: %s", entry, exc)
+            log_and_continue(
+                logger,
+                exc,
+                reason=f"a subdirectory {entry} whose age cannot be read is left out of the pruning (never deleted blind) and is judged again at the next sweep",
+            )
             continue
         dated.append((mtime, entry))
 
@@ -201,7 +231,11 @@ def prune_subdirectories(
         try:
             shutil.rmtree(entry)
         except OSError as exc:
-            logger.warning("retention: cannot delete %s: %s", entry, exc)
+            log_and_continue(
+                logger,
+                exc,
+                reason=f"an excess subdirectory {entry} that cannot be deleted stays and is not reported as deleted; the sweep goes on and retries it next time",
+            )
             continue
         deleted.append(entry)
     return deleted

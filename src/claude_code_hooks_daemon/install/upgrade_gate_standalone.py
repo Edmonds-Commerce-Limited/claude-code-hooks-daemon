@@ -66,6 +66,8 @@ _LOAD_ORDER: tuple[tuple[str, str], ...] = (
     ("claude_code_hooks_daemon.utils.path_containment", "utils/path_containment.py"),
     ("claude_code_hooks_daemon.utils.path_predicates", "utils/path_predicates.py"),
     ("claude_code_hooks_daemon.install.upgrade_guides", "install/upgrade_guides.py"),
+    ("claude_code_hooks_daemon.utils.escape_hatch", "utils/escape_hatch.py"),
+    ("claude_code_hooks_daemon.utils.deliberate_swallow", "utils/deliberate_swallow.py"),
     ("claude_code_hooks_daemon.install.upgrade_tasks", "install/upgrade_tasks.py"),
     ("claude_code_hooks_daemon.utils.one_shot_approval", "utils/one_shot_approval.py"),
     ("claude_code_hooks_daemon.daemon.install_layout", "daemon/install_layout.py"),

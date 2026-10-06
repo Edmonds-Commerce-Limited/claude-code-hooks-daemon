@@ -120,7 +120,12 @@ class SuggestStatusLineHandler(SessionStartHandlerBase):
             state_file.parent.mkdir(parents=True, exist_ok=True)
             state_file.write_text(json.dumps({_SHOWN_COUNT_KEY: self._shown_count() + 1}))
         except OSError as exc:
-            logger.debug("Could not record statusline suggestion showing: %s", exc)
+            log_and_continue(
+                logger,
+                exc,
+                reason="an unrecorded showing only means the statusline suggestion may be shown again next session; it is a cosmetic hint",
+                level=logging.DEBUG,
+            )
 
     def _is_statusline_configured(self) -> bool:
         """Check if status line is already configured in .claude/settings.json.

@@ -362,7 +362,12 @@ class ContractStalenessHandler(SessionStartHandlerBase):
                 if isinstance(version, str):
                     return version
         except (TypeError, ValueError) as exc:
-            logger.debug("contract staleness cache timestamp unusable: %s", exc)
+            log_and_continue(
+                logger,
+                exc,
+                reason="an unusable cache timestamp makes the cached version look expired, so the claude --version probe below runs instead; only the cache hit is lost",
+                level=logging.DEBUG,
+            )
 
         binary = shutil.which(_CLAUDE_BINARY)
         if binary is None:
@@ -377,7 +382,12 @@ class ContractStalenessHandler(SessionStartHandlerBase):
                 check=False,
             )
         except (OSError, subprocess.TimeoutExpired) as exc:
-            logger.debug("claude --version probe failed: %s", exc)
+            log_and_continue(
+                logger,
+                exc,
+                reason="a claude binary that cannot be probed leaves the installed version unknown (None), so the staleness check is skipped rather than guessing",
+                level=logging.DEBUG,
+            )
             return None
         if result.returncode != 0:
             return None

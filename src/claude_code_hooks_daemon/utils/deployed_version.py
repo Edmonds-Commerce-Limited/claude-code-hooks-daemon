@@ -32,6 +32,8 @@ import re
 from pathlib import Path
 from typing import Final
 
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
+
 logger = logging.getLogger(__name__)
 
 #: Repo-relative location of the tracked generated doc carrying the marker.
@@ -66,6 +68,11 @@ def read_tracked_deployed_version(project_root: Path) -> str | None:
     try:
         text = doc.read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError) as e:
-        logger.debug("tracked deployed version: %s unreadable: %s", doc, e)
+        log_and_continue(
+            logger,
+            e,
+            reason=f"an unreadable or undecodable generated doc {doc} means there is nothing to compare the running version against (None), so the advisory says nothing",
+            level=logging.DEBUG,
+        )
         return None
     return version_marker_in(text)

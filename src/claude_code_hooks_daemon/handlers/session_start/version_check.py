@@ -135,7 +135,12 @@ class VersionCheckHandler(SessionStartHandlerBase):
             with open(cache_file, "w") as f:
                 json.dump(data, f)
         except (OSError, TypeError) as e:
-            logger.debug("Failed to write version cache: %s", e)
+            log_and_continue(
+                logger,
+                e,
+                reason="an unwritable version cache only means the upstream check is repeated at the next session start; the result for this session is already computed",
+                level=logging.DEBUG,
+            )
 
     def _get_latest_version(self) -> str | None:
         """Get latest version tag from GitHub (git ls-remote).

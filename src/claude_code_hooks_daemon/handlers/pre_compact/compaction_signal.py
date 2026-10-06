@@ -36,6 +36,7 @@ from claude_code_hooks_daemon.utils.ccy_supervisor import (
     CCY_SUPERVISOR_MARKER,
     supervisor_relevance,
 )
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 from claude_code_hooks_daemon.utils.temp_names import unique_temp_path
 
 logger = logging.getLogger(__name__)
@@ -138,9 +139,17 @@ class CompactionSignalHandler(PreCompactHandlerBase):
             tmp_path.write_text(json.dumps(payload), encoding="utf-8")
             tmp_path.replace(final_path)
         except RuntimeError as e:
-            logger.warning("Skipping compaction signal (no project context): %s", e)
+            log_and_continue(
+                logger,
+                e,
+                reason="without a project context there is nowhere to write the compaction signal, so the supervisor is not told; compaction itself proceeds",
+            )
         except OSError as e:
-            logger.warning("Failed to write compaction signal: %s", e)
+            log_and_continue(
+                logger,
+                e,
+                reason="an unwritable compaction signal loses only the supervisor's early notice of this compaction; compaction itself proceeds",
+            )
 
     def _safe_session_stem(self, session_id: str) -> str:
         if not session_id:

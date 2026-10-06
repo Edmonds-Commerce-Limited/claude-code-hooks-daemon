@@ -40,6 +40,7 @@ from claude_code_hooks_daemon.utils.blockage_marker import (
     marker_is_valid,
     write_json_atomically,
 )
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 
 logger = logging.getLogger(__name__)
 
@@ -133,7 +134,12 @@ def read_pauses(path: Path) -> list[CronPause]:
     except FileNotFoundError:
         return []
     except (OSError, json.JSONDecodeError) as exc:
-        logger.debug("cron_pause: unreadable %s: %s", path, exc)
+        log_and_continue(
+            logger,
+            exc,
+            reason=f"an unreadable or corrupt pause file {path} reads as no pauses ([]), so ticks are delivered rather than wrongly suppressed",
+            level=logging.DEBUG,
+        )
         return []
     entries = raw.get(_KEY_PAUSES) if isinstance(raw, dict) else None
     if not isinstance(entries, list):

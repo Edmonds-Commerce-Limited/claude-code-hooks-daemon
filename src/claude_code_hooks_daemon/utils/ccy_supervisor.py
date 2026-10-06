@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import Any, Final
 
 from claude_code_hooks_daemon.core.relevance import Relevance, RelevanceContext
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 
 logger = logging.getLogger(__name__)
 
@@ -76,7 +77,12 @@ def _active_wrapper_lines(ccy_env: Path) -> list[str]:
     try:
         content = ccy_env.read_text(encoding="utf-8", errors="replace")
     except OSError as exc:
-        logger.debug("Could not read %s: %s", ccy_env, exc)
+        log_and_continue(
+            logger,
+            exc,
+            reason=f"an unreadable {ccy_env} yields no active wrapper lines ([]), so the supervisor is treated as not configured",
+            level=logging.DEBUG,
+        )
         return []
     lines: list[str] = []
     for raw in content.splitlines():
@@ -156,7 +162,12 @@ def pid_alive(pid: object) -> bool:
     except (OSError, OverflowError) as exc:
         # OverflowError: the status file is external JSON, so a corrupt or
         # oversized pid must be treated as not-alive, never crash the caller.
-        logger.debug("pid liveness check failed for %s: %s", pid, exc)
+        log_and_continue(
+            logger,
+            exc,
+            reason=f"a liveness probe that fails for pid {pid} treats it as not alive (False), so a corrupt pid never reads as a live supervisor",
+            level=logging.DEBUG,
+        )
         return False
     return True
 
@@ -176,7 +187,12 @@ def read_supervisor_status(project_root: Path) -> dict[str, Any]:
     try:
         data = json.loads(status_path.read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
-        logger.debug("Could not read supervisor status %s: %s", status_path, exc)
+        log_and_continue(
+            logger,
+            exc,
+            reason=f"an unreadable or invalid status file {status_path} reads as an empty status ({{}}), so the supervisor is treated as not reporting",
+            level=logging.DEBUG,
+        )
         return {}
     return data if isinstance(data, dict) else {}
 
@@ -208,6 +224,11 @@ def armed_supervisor_live(project_root: Path) -> bool:
     try:
         ondisk_hash = hash_supervisor_source(script)
     except OSError as exc:
-        logger.debug("Could not hash supervisor source %s: %s", script, exc)
+        log_and_continue(
+            logger,
+            exc,
+            reason=f"a supervisor source {script} that cannot be hashed cannot be shown to match the armed one, so it is reported as not live (False)",
+            level=logging.DEBUG,
+        )
         return False
     return running_hash == ondisk_hash

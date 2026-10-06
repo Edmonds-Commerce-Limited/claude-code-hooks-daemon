@@ -19,6 +19,7 @@ from claude_code_hooks_daemon.skill_scan.constants import (
     ATTEMPT_QUIET_SECONDS,
     SECONDS_PER_DAY,
 )
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
 
 logger = logging.getLogger(__name__)
 
@@ -70,7 +71,12 @@ def _write_state(path: Path, state: ScanState) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(payload), encoding="utf-8")
     except OSError as exc:
-        logger.debug("Failed to write skill-scan state %s: %s", path, exc)
+        log_and_continue(
+            logger,
+            exc,
+            reason=f"an unwritable skill-scan state {path} only means the scan is offered again sooner; the scan result itself is already produced",
+            level=logging.DEBUG,
+        )
 
 
 def record_attempt(path: Path, now: float | None = None) -> None:

@@ -373,9 +373,17 @@ class SubagentCacheAggregatorHandler(SubagentStopHandlerBase):
             tmp_path.replace(final_path)
         except RuntimeError as exc:
             # ProjectContext not initialised (standalone entry point).
-            logger.warning("Skipping sub-agent cache sidecar (no project context): %s", exc)
+            log_and_continue(
+                logger,
+                exc,
+                reason="without a project context there is nowhere to write the sub-agent cache sidecar, so this sub-agent's cache totals are not aggregated; the stop proceeds",
+            )
         except OSError as exc:
-            logger.warning("Failed to write sub-agent cache sidecar: %s", exc)
+            log_and_continue(
+                logger,
+                exc,
+                reason="an unwritable sub-agent cache sidecar loses only this sub-agent's totals from the aggregate; the stop proceeds",
+            )
 
     def get_claude_md(self) -> str | None:
         return None

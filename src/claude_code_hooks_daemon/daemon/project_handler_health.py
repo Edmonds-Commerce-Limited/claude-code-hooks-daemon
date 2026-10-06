@@ -120,7 +120,11 @@ def write_load_failures(
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
     except OSError as exc:
-        logger.warning("Failed to persist project-handler health state to %s: %s", path, exc)
+        log_and_continue(
+            logger,
+            exc,
+            reason=f"the health file {path} is observability only; the daemon keeps the failures in memory and a handler's loading is unaffected",
+        )
 
 
 def clear_load_failures() -> None:
@@ -129,7 +133,11 @@ def clear_load_failures() -> None:
     try:
         path.unlink(missing_ok=True)
     except OSError as exc:
-        logger.warning("Failed to clear project-handler health state at %s: %s", path, exc)
+        log_and_continue(
+            logger,
+            exc,
+            reason=f"a health file {path} that cannot be cleared may show an old failure until the next load rewrites it; the load itself succeeded",
+        )
 
 
 def read_load_failures() -> ProjectHandlerHealthState:

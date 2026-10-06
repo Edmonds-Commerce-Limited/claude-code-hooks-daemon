@@ -508,9 +508,13 @@ class DaemonController:
             # invalid config the degraded-mode path already reports
             # (pydantic ValidationError is a ValueError), or a non-Path
             # workspace_root in a mocked unit-test initialise (TypeError) must
-            # not stop the daemon serving hooks. The failure is logged loudly
-            # at ERROR — never swallowed.
-            logger.error("Agent-asset sync failed (daemon continues): %s", exc)
+            # not stop the daemon serving hooks.
+            log_and_continue(
+                logger,
+                exc,
+                reason="a failed agent-asset sync leaves .claude/agents/ as it was; the daemon must keep serving hooks (fail-open startup contract) and the next restart retries",
+                level=logging.ERROR,
+            )
         for message in messages:
             logger.info("Agent assets: %s", message)
 
@@ -528,7 +532,12 @@ class DaemonController:
             # .claude/rules/ (OSError), an invalid config (ValueError), or a
             # non-Path workspace_root in a mocked unit-test initialise
             # (TypeError) must not stop the daemon serving hooks.
-            logger.error("Directory-role-rules sync failed (daemon continues): %s", exc)
+            log_and_continue(
+                logger,
+                exc,
+                reason="a failed directory-role-rules sync leaves .claude/rules/ as it was; the daemon must keep serving hooks (fail-open startup contract) and the next restart retries",
+                level=logging.ERROR,
+            )
         for message in messages:
             logger.info("Directory-role rules: %s", message)
 
@@ -750,10 +759,10 @@ class DaemonController:
                 loaded_count=len(discovery.handlers),
             )
         except RuntimeError as exc:
-            logger.warning(
-                "Could not persist project-handler health state "
-                "(observability only, load unaffected): %s",
+            log_and_continue(
+                logger,
                 exc,
+                reason="the project-handler health file is observability only; the failures are already held in memory for the daemon's own health answer and the handlers' loading is unaffected",
             )
 
     def _register_pseudo_events(
@@ -1213,9 +1222,17 @@ class DaemonController:
                 record_status_events=self._verdict_log_config.record_status_events,
             )
         except RuntimeError as e:
-            logger.warning("Skipping verdict log (no project context): %s", e)
+            log_and_continue(
+                logger,
+                e,
+                reason="without a project context there is nowhere to write the verdict log, so this dispatch's verdicts are not recorded; the hook result itself is unaffected",
+            )
         except OSError as e:
-            logger.warning("Failed to write verdict log: %s", e)
+            log_and_continue(
+                logger,
+                e,
+                reason="an unwritable verdict log loses only this dispatch's audit record; the hook result is already decided and must still be returned",
+            )
 
     def process_request(
         self, request_data: dict[str, Any], *, arrival_time: float | None = None

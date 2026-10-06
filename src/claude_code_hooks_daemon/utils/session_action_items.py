@@ -22,6 +22,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Final
 
+from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
+
 logger = logging.getLogger(__name__)
 
 #: The event directory this collector scans -- SessionStart only. The tier
@@ -67,7 +69,12 @@ def _session_start_config(project_root: Path | None) -> dict[str, Any]:
     try:
         config = Config.load(config_path)
     except (PydanticValidationError, OSError, ValueError) as exc:
-        logger.debug("Could not load config for session-actions: %s", exc)
+        log_and_continue(
+            logger,
+            exc,
+            reason="an unloadable config yields no session-start options ({}), so the actions run with their defaults; config errors are reported by their own path",
+            level=logging.DEBUG,
+        )
         return {}
     return config.handlers.model_dump().get(SESSION_START_EVENT_DIR) or {}
 
@@ -116,8 +123,13 @@ def collect_session_action_items(project_root: Path | None) -> list[SessionActio
 
         try:
             instance = handler_class()
-        except Exception:
-            logger.exception("Failed to instantiate %s for session-actions", handler_class_name)
+        except Exception as exc:
+            log_and_continue(
+                logger,
+                exc,
+                reason=f"a handler {handler_class_name} that cannot be instantiated contributes no session actions; one broken handler must not drop the other handlers' must-do items",
+                level=logging.ERROR,
+            )
             continue
 
         if not handler_is_enabled(

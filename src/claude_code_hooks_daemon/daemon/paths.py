@@ -1929,7 +1929,11 @@ def write_socket_discovery_file(project_dir: Path | str, socket_path: Path | str
         discovery_file.write_text(str(socket_path))
         logger.debug("Wrote socket discovery file: %s -> %s", discovery_file, socket_path)
     except OSError as e:
-        logger.warning("Failed to write socket discovery file: %s", e)
+        log_and_continue(
+            logger,
+            e,
+            reason=f"without the socket discovery file {discovery_file} clients fall back to the computed socket path; the daemon itself is unaffected",
+        )
 
 
 def read_socket_discovery_file(project_dir: Path | str) -> Path | None:
@@ -1987,7 +1991,11 @@ def cleanup_socket_discovery_file(project_dir: Path | str) -> None:
             discovery_file.unlink()
             logger.debug("Removed socket discovery file: %s", discovery_file)
     except OSError as e:
-        logger.warning("Failed to cleanup socket discovery file: %s", e)
+        log_and_continue(
+            logger,
+            e,
+            reason=f"a socket discovery file {discovery_file} left behind is stale but harmless; the next daemon start overwrites it and shutdown must finish",
+        )
 
 
 def is_pid_alive(pid: int) -> bool:
@@ -2227,9 +2235,18 @@ def cleanup_socket(socket_path: Path | str) -> None:
         if socket_path.exists():
             socket_path.unlink()
     except (OSError, PermissionError) as e:
-        logger.warning("Failed to cleanup socket %s: %s", socket_path, e)
+        log_and_continue(
+            logger,
+            e,
+            reason=f"a socket {socket_path} that cannot be removed is rebound or replaced by the next daemon start, and shutdown must finish",
+        )
     except Exception as e:
-        logger.error("Unexpected error cleaning socket %s: %s", socket_path, e, exc_info=True)
+        log_and_continue(
+            logger,
+            e,
+            reason=f"an unexpected error removing socket {socket_path} must not abort shutdown; the next start replaces a stale socket",
+            level=logging.ERROR,
+        )
 
 
 def cleanup_pid_file(pid_path: Path | str, pid: int) -> None:
@@ -2254,9 +2271,18 @@ def cleanup_pid_file(pid_path: Path | str, pid: int) -> None:
             return
         pid_path.unlink()
     except (OSError, PermissionError) as e:
-        logger.warning("Failed to cleanup PID file %s: %s", pid_path, e)
+        log_and_continue(
+            logger,
+            e,
+            reason=f"a PID file {pid_path} that cannot be removed is detected as stale by the next start (dead PID), and shutdown must finish",
+        )
     except Exception as e:
-        logger.error("Unexpected error cleaning PID file %s: %s", pid_path, e, exc_info=True)
+        log_and_continue(
+            logger,
+            e,
+            reason=f"an unexpected error removing PID file {pid_path} must not abort shutdown; the next start treats a dead PID as stale",
+            level=logging.ERROR,
+        )
 
 
 # Prefix for all daemon runtime files
@@ -2301,9 +2327,18 @@ def cleanup_stale_daemon_files(project_dir: Path | str, max_age_days: int = 7) -
                 removed += 1
                 logger.info("Removed stale daemon file: %s", filepath)
         except OSError as e:
-            logger.warning("Failed to remove stale daemon file %s: %s", filepath, e)
+            log_and_continue(
+                logger,
+                e,
+                reason=f"a stale daemon file {filepath} that cannot be removed is retried by the next sweep, and the sweep carries on with the remaining files",
+            )
         except Exception as e:
-            logger.error("Unexpected error removing %s: %s", filepath, e, exc_info=True)
+            log_and_continue(
+                logger,
+                e,
+                reason=f"an unexpected error on {filepath} must not stop the sweep of the remaining files; the next sweep retries it",
+                level=logging.ERROR,
+            )
 
     if removed:
         logger.info(
@@ -2428,7 +2463,12 @@ def touch_daemon_files_in_dir(untracked_dir: Path) -> None:
             filepath.touch()
             logger.debug("Touched daemon file: %s", filepath)
         except OSError as e:
-            logger.debug("Failed to touch daemon file %s: %s", filepath, e)
+            log_and_continue(
+                logger,
+                e,
+                reason=f"an untouched {filepath} only ages toward the stale-file sweep sooner; the other files are still touched and a live daemon recreates what it needs",
+                level=logging.DEBUG,
+            )
 
 
 def touch_daemon_files(project_dir: Path | str) -> None:
@@ -2466,7 +2506,11 @@ def write_cleanup_status(project_dir: Path | str, total_removed: int) -> None:
         status_file.write_text(json.dumps({"count": total_removed, "timestamp": time.time()}))
         logger.debug("Wrote cleanup status: %d files removed", total_removed)
     except OSError as e:
-        logger.warning("Failed to write cleanup status: %s", e)
+        log_and_continue(
+            logger,
+            e,
+            reason="the cleanup status file only feeds the status line's removed-files count; the cleanup itself has already happened",
+        )
 
 
 def _collect_hostname_suffixed_venvs(untracked_dir: Path) -> list[tuple[Path, str]]:

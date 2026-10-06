@@ -248,9 +248,13 @@ def get_project_path(override_path: Path | None = None) -> Path:
             # Validate installation based on config
             try:
                 return _validate_installation(current)
-            except SystemExit:
-                # Invalid installation - keep searching upward
-                logger.debug("Invalid installation at %s, searching upward", current)
+            except SystemExit as exit_signal:
+                log_and_continue(
+                    logger,
+                    exit_signal,
+                    reason=f"an invalid installation at {current} is not the project, so the search moves to the parent directory; the final could-not-find error is raised if none validates",
+                    level=logging.DEBUG,
+                )
         current = current.parent
 
     print(
@@ -4823,8 +4827,13 @@ def cmd_clear_goal(args: argparse.Namespace) -> int:
     context_init_error: str | None = None
     try:
         ProjectContext.initialize(project_path / ".claude" / "hooks-daemon.yaml")
-    except RuntimeError:
-        logger.debug("clear-goal: project context already initialised; reusing it")
+    except RuntimeError as exc:
+        log_and_continue(
+            logger,
+            exc,
+            reason="the project context was already initialised in this process, so clear-goal reuses it; nothing is lost",
+            level=logging.DEBUG,
+        )
     except ValueError as e:
         context_init_error = str(e)
         print(f"WARNING: could not initialise project context: {e}", file=sys.stderr)
@@ -4903,8 +4912,13 @@ def cmd_signal(args: argparse.Namespace) -> int:
     context_init_error: str | None = None
     try:
         ProjectContext.initialize(project_path / ".claude" / "hooks-daemon.yaml")
-    except RuntimeError:
-        logger.debug("signal: project context already initialised; reusing it")
+    except RuntimeError as exc:
+        log_and_continue(
+            logger,
+            exc,
+            reason="the project context was already initialised in this process, so signal reuses it; nothing is lost",
+            level=logging.DEBUG,
+        )
     except ValueError as e:
         context_init_error = str(e)
         print(f"WARNING: could not initialise project context: {e}", file=sys.stderr)
@@ -5473,8 +5487,13 @@ def cmd_inject_goal(args: argparse.Namespace) -> int:
     context_init_error: str | None = None
     try:
         ProjectContext.initialize(config_file)
-    except RuntimeError:
-        logger.debug("inject-goal: project context already initialised; reusing it")
+    except RuntimeError as exc:
+        log_and_continue(
+            logger,
+            exc,
+            reason="the project context was already initialised in this process, so inject-goal reuses it; nothing is lost",
+            level=logging.DEBUG,
+        )
     except ValueError as e:
         context_init_error = str(e)
         print(f"WARNING: could not initialise project context: {e}", file=sys.stderr)
@@ -8995,7 +9014,12 @@ def _collect_status_line_segment_entries(
                 config = Config.load(config_path)
                 event_config = config.handlers.model_dump().get(_STATUS_LINE_EVENT_DIR) or {}
             except (PydanticValidationError, OSError, ValueError) as exc:
-                logger.debug("Could not load config for status-line-explained: %s", exc)
+                log_and_continue(
+                    logger,
+                    exc,
+                    reason="an unloadable config leaves every status-line segment listed with its default enablement and priority; the explanation is still useful and config errors are reported by their own commands",
+                    level=logging.DEBUG,
+                )
 
     registry = HandlerRegistry()
     registry.discover()
