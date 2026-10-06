@@ -1015,6 +1015,10 @@ of earlier runs' evidence.
 
 **Owner ruling (2026-10-05):** resolved: yes, clean up (keep anything a live worktree or an open report points at), and add a housekeeping step to the release process — see [OWNER-RULINGS-261005.md](../00483-threat-model-conformance-audit/OWNER-RULINGS-261005.md) (D3).
 
+**Clean-up done (coordinator, 2026-10-06):** removed 3,247 stale entries (12.1 GB) from `untracked/scratch`,
+which went from 14 GB to 294 MB. Kept every entry modified in the last 48 hours and every entry a live (non-Completed)
+plan folder cites. The release housekeeping step is RELEASING.md Step 15.1.
+
 ### N290 — the coordinator stated a confident, unverified, false claim about the codebase
 
 **Found**: by the owner ("supervisor lives outside this repository?? what????"). While
