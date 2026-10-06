@@ -62,7 +62,8 @@ config_changes:
         https://pypi.org and https://files.pythonhosted.org only), and
         `crontab -r`. `destructive_git` gains the same human-only denial for
         `git push --delete` and `git push <remote> :<name>` (R-GIT-PUSH-DELETE-REMOTE)
-        with no config change. Only `enabled` and `priority` are options.
+        with no config change, except that a branch already merged into the
+        default branch may be deleted (owner ruling D11). Only `enabled` and `priority` are options.
       example_yaml: |
         handlers:
           pre_tool_use:

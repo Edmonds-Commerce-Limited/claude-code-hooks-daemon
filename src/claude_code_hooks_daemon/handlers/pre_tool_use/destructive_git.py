@@ -25,6 +25,7 @@ from claude_code_hooks_daemon.utils.git_invocation_directory import (
     placement_problem,
 )
 from claude_code_hooks_daemon.utils.git_repo import HEADS_PREFIX, branch_ref, run_git
+from claude_code_hooks_daemon.utils.git_sync import default_branch
 from claude_code_hooks_daemon.utils.path_predicates import path_is_dir
 
 logger = logging.getLogger(__name__)
@@ -320,12 +321,17 @@ _BRANCH_DELETE_VERBOSE: Final[str] = (
 )
 # A remote ref deletion removes the ref from the SHARED repository, where this
 # checkout's reflog cannot bring it back and other people may be working from it.
-# Owner ruling A6: a human runs it. There is no verification route and no hatch.
+# Owner ruling A6: a human runs it; ruling D11 (niggle N362) carves out ONE lossless case --
+# a branch whose remote tip is already merged into the default branch. Tags stay human-only.
 _PUSH_DELETE_VERBOSE: Final[str] = (
     "This command deletes a branch or tag on the REMOTE repository. Other people and other "
     "machines share that ref, and nothing in this checkout (reflog included) restores it.\n\n"
-    "Do not run it, and do not look for another spelling of it. Stop and ask the human to run "
-    "it themselves: tell them the remote, the ref and why it should go.\n\n"
+    "It is ALLOWED when every named branch's remote-tracking ref is already merged into the "
+    "default branch (`git merge-base --is-ancestor`), judged in the repository the command "
+    "runs in; nothing is lost then. Tags, the default branch, an unmerged branch and anything "
+    "the check cannot establish are denied.\n\n"
+    "Otherwise do not run it, and do not look for another spelling of it. Stop and ask the "
+    "human to run it themselves: tell them the remote, the ref and why it should go.\n\n"
     "Local clean-up is not affected: `git tag -d <tag>` and `git branch -d <name>` only touch "
     "this checkout and are allowed."
 )
@@ -479,6 +485,148 @@ def _branch_delete_note(command: str, cwd: Path) -> str | None:
     )
 
 
+_PUSH: Final[str] = "push"
+_REMOTES_PREFIX: Final[str] = "refs/remotes/"
+_TAGS_PREFIX: Final[str] = "refs/tags/"
+# `git push` flags a remote delete may carry without changing WHAT it deletes. Anything
+# else (`--repo`, `-o`, `--receive-pack`, ...) can redirect or reshape the push, so a
+# command using one is unverifiable.
+_PUSH_FLAG_LETTERS: Final[frozenset[str]] = frozenset("dqvnu")
+_PUSH_LONG_FLAGS: Final[frozenset[str]] = frozenset(
+    {"--delete", "--quiet", "--verbose", "--dry-run", "--no-verify", "--set-upstream"}
+)
+_REFSPEC_SEPARATOR: Final[str] = ":"
+
+
+def _remote_delete_targets(run: GitInvocation) -> tuple[str, list[str]] | None:
+    """The ``(remote, refs)`` a ``git push`` deletes, or None when ``run`` deletes none.
+
+    A ref is what follows ``--delete`` or an empty-source ``:`` refspec. Refspecs that
+    have a source are ordinary pushes and are not judged here.
+
+    Raises:
+        _Unverifiable: When a flag changes what the push does, or no remote is named.
+    """
+    delete = False
+    positional: list[str] = []
+    options_ended = False
+    for argument in run.arguments:
+        if options_ended or not argument.startswith("-"):
+            positional.append(argument)
+        elif argument == _OPTIONS_END:
+            options_ended = True
+        elif argument.startswith("--"):
+            delete = delete or argument == "--delete"
+            if argument not in _PUSH_LONG_FLAGS:
+                raise _Unverifiable(f"`{argument}` changes what `git push` does")
+        else:
+            letters = set(argument[1:])
+            delete = delete or "d" in letters
+            if not letters <= _PUSH_FLAG_LETTERS:
+                raise _Unverifiable(f"`{argument}` changes what `git push` does")
+    refspecs = positional[1:]
+    if delete:
+        refs = refspecs
+    else:
+        refs = [
+            spec[1:]
+            for spec in refspecs
+            if spec.startswith(_REFSPEC_SEPARATOR) and len(spec) > len(_REFSPEC_SEPARATOR)
+        ]
+    if not refs:
+        return None
+    if not positional:
+        raise _Unverifiable("it names no remote")
+    return positional[0], refs
+
+
+def _remote_branch_problem(directory: Path, remote: str, ref: str, default: str) -> str | None:
+    """Why remote branch ``ref`` may not be deleted, or None when it is merged.
+
+    Merged means: the remote-tracking ref ``refs/remotes/<remote>/<ref>`` exists and
+    is an ancestor of the default branch (its remote-tracking ref or the local one).
+    Fails closed: a missing ref, a failing git and a timeout all give a reason.
+    """
+    name = ref.removeprefix(HEADS_PREFIX)
+    if not _LITERAL_BRANCH_NAME.fullmatch(remote):
+        return f"`{remote}` is not a literal remote name"
+    if name.startswith(_TAGS_PREFIX) or not _LITERAL_BRANCH_NAME.fullmatch(name):
+        return f"`{ref}` is not a literal branch name (tags are never deleted by an agent)"
+    if name == default:
+        return f"`{name}` is the default branch"
+    tag = run_git(
+        directory,
+        "rev-parse",
+        "--verify",
+        "--quiet",
+        f"{_TAGS_PREFIX}{name}",
+        timeout=Timeout.GIT_CONTEXT,
+    )
+    if tag.returncode == 0:
+        return f"`{name}` is also the name of a tag, so the delete is ambiguous"
+    tracking = f"{_REMOTES_PREFIX}{remote}/{name}"
+    tip = run_git(
+        directory,
+        "rev-parse",
+        "--verify",
+        "--quiet",
+        f"{tracking}^{{commit}}",
+        timeout=Timeout.GIT_CONTEXT,
+    )
+    if tip.returncode != 0 or not tip.stdout.strip():
+        return f"`{name}` has no remote-tracking ref `{tracking}` here"
+    for target in (f"{_REMOTES_PREFIX}{remote}/{default}", branch_ref(default)):
+        merged = run_git(
+            directory,
+            "merge-base",
+            "--is-ancestor",
+            tip.stdout.strip(),
+            target,
+            timeout=Timeout.GIT_CONTEXT,
+        )
+        if merged.returncode == 0:
+            return None
+    return f"`{name}` is not merged into `{default}`"
+
+
+def _remote_delete_note(command: str, cwd: Path) -> str | None:
+    """None when every remote ref ``command`` deletes is merged, else why not."""
+    if _SUBSTITUTION.search(command):
+        return _unverified("a command or process substitution can run a delete this reading misses")
+    deletions: list[tuple[GitInvocation, str, list[str]]] = []
+    try:
+        for run in git_invocations(command):
+            targets = _remote_delete_targets(run) if run.subcommand == _PUSH else None
+            if targets is not None:
+                deletions.append((run, *targets))
+    except _Unverifiable as exc:
+        return _unverified(str(exc))
+    if not deletions:
+        return _unverified("no `git push --delete` / `git push <remote> :<name>` could be read")
+    problems: list[str] = []
+    for run, remote, refs in deletions:
+        problem = placement_problem(run)
+        if problem is not None:
+            return _unverified(problem)
+        directory = invocation_directory(run, cwd)
+        if not path_is_dir(directory, unreadable_means=False):
+            return _unverified(f"`{directory}` is not a directory")
+        default = default_branch(directory)
+        if default is None:
+            return _unverified("the default branch could not be determined")
+        for ref in refs:
+            problem = _remote_branch_problem(directory, remote, ref, default)
+            if problem is not None:
+                problems.append(problem)
+    if not problems:
+        return None
+    return (
+        "Not deleted: " + "; ".join(problems) + ". A remote branch that is already merged into "
+        "the default branch may be deleted by an agent; an unmerged branch (or any tag) is "
+        "human-only, so ask the human to run it."
+    )
+
+
 # SINGLE SOURCE OF TRUTH for get_rules(): (rule_id, blocked, why, fix). One
 # entry per unique RuleID in _PATTERN_RULE_IDS (9 rules, Decision B).
 _RULE_DEFINITIONS: tuple[tuple[str, str, str, str], ...] = (
@@ -569,9 +717,11 @@ _RULE_DEFINITIONS: tuple[tuple[str, str, str, str], ...] = (
     ),
     (
         RuleID.GIT_PUSH_DELETE_REMOTE,
-        "`git push --delete <name>` / `git push <remote> :<name>`",
+        "`git push --delete <name>` / `git push <remote> :<name>` of a branch not merged "
+        "into the default branch, or of a tag",
         "Deletes a branch or tag in the shared remote repository, beyond any local recovery",
-        "Do not run it; stop and ask the human to run it themselves",
+        "A branch already merged into the default branch is deleted freely; otherwise do not "
+        "run it, stop and ask the human to run it themselves",
     ),
 )
 
@@ -753,11 +903,17 @@ class DestructiveGitHandler(PreToolUseHandlerBase):
         rule = self._rules_by_id[rule_id]
 
         note: str | None = None
-        if not others:
+        # A remote delete has the same safe case, judged only when it is the sole rule.
+        check = (
+            _branch_delete_note
+            if not others
+            else _remote_delete_note if rule_ids == [RuleID.GIT_PUSH_DELETE_REMOTE] else None
+        )
+        if check is not None:
             try:
-                note = _branch_delete_note(command, self._cwd(hook_input))
+                note = check(command, self._cwd(hook_input))
             except RuntimeError as exc:
-                logger.warning("destructive_git: branch delete not verified: %s", exc)
+                logger.warning("destructive_git: delete not verified: %s", exc)
                 note = _unverified("the directory the command runs in is unknown")
             if note is None:
                 return GatingResult(decision=Decision.ALLOW)
@@ -809,9 +965,12 @@ class DestructiveGitHandler(PreToolUseHandlerBase):
             "| Drops unreachable objects at once; plain `git gc` and `--auto` are allowed |\n"
             "| `git filter-branch` / `git filter-repo` | Rewrites every commit in the history |\n"
             "| `git push --delete <name>` / `git push <remote> :<name>` "
-            "| HUMAN ONLY: deletes a ref on the shared remote. Stop and ask the human to run "
-            "it; there is no escape hatch. Local `git tag -d` and `git reset --keep` are "
-            "allowed |\n\n"
+            "| ALLOWED when every named branch is already merged into the default branch "
+            "(its `refs/remotes/<remote>/<name>` is an ancestor of the default branch, "
+            "judged locally; `git -C` and `cd` are honoured). Otherwise HUMAN ONLY — an "
+            "unmerged branch, a tag, the default branch, a missing remote-tracking ref or "
+            "any check failure is denied: stop and ask the human to run it. Local "
+            "`git tag -d` and `git reset --keep` are allowed |\n\n"
             "The last four rows close spellings that reached an outcome this handler "
             "already guarded: `git checkout -- <file>` was blocked while "
             "`git checkout -f` was not, and the reflog rules matter because the "
@@ -1141,12 +1300,14 @@ class DestructiveGitHandler(PreToolUseHandlerBase):
                 requires_main_thread=False,
             ),
             AcceptanceTest(
-                title="git push --delete (remote ref deletion, human only)",
+                title="git push --delete (unverified remote ref deletion, human only)",
                 command="bash -n -c 'git push origin --delete NONEXISTENT_SAFE_TEST_BRANCH'",
                 dispatch_as_bash=True,
                 description=(
-                    "Blocks deleting a ref on the remote (owner ruling A6); the denial "
-                    "tells the agent to ask the human to run it"
+                    "Blocks deleting a ref on the remote unless it is a branch already "
+                    "merged into the default branch (owner rulings A6, D11); this one has "
+                    "no remote-tracking ref, so the denial tells the agent to ask the "
+                    "human to run it"
                 ),
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[

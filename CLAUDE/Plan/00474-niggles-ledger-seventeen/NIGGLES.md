@@ -1544,7 +1544,18 @@ branch whose tip is already contained in the default branch is lossless housekee
 **Fix**: allow the delete when every named branch's remote tip is an ancestor of the remote default branch (after a
 fetch); keep the deny, with the same message, otherwise. Tags are out of scope. Test both sides through the real chain.
 
-**Status**: ⬜ Open.
+**Status**: ✅ Fixed on branch `agent-a7777897724c1db4b-1ed0e9c0` (merge pending). `destructive_git` allows a
+`git push <remote> --delete|-d <branch>` / `:<branch>` when `refs/remotes/<remote>/<branch>` is an ancestor of the
+default branch (`git merge-base --is-ancestor`, local facts only, no fetch); tags, the default branch, a missing ref,
+a tag-named branch, substitutions and any git failure stay denied, and every ref in the command must pass. Tests in
+`tests/unit/handlers/pre_tool_use/test_destructive_git_remote_delete_merged.py`:
+`test_deleting_a_merged_remote_branch_is_allowed` (five spellings),
+`test_deleting_an_unmerged_remote_branch_is_denied_and_says_so`, `test_a_missing_remote_tracking_ref_is_denied`,
+`test_deleting_a_tag_stays_denied`, `test_a_branch_sharing_its_name_with_a_tag_is_denied`,
+`test_the_default_branch_is_never_deletable`, `test_every_ref_must_be_merged`, `test_several_merged_refs_are_allowed`,
+`test_a_merged_delete_cannot_carry_a_force_push_along`, `test_a_merged_delete_chained_with_an_unmerged_one_is_denied`,
+`test_a_substitution_is_not_trusted`, `test_an_unknown_directory_is_denied`,
+`test_the_rule_documentation_describes_the_merged_exception`.
 
 ### N361 — the fake-values registry is not pre-filled, and nothing says its entries must look fake
 
