@@ -19,7 +19,7 @@ none has declared no fakes. A registry that cannot be parsed is reported once
 against the registry file, never silently read as empty.
 """
 
-from pathlib import Path
+import logging
 from typing import Final
 
 from claude_code_hooks_daemon.docs_qa.types import (
@@ -30,12 +30,16 @@ from claude_code_hooks_daemon.docs_qa.types import (
     Severity,
 )
 from claude_code_hooks_daemon.remote_docs.provenance import parse_provenance
+from claude_code_hooks_daemon.utils.authored_paths import authored_path
 from claude_code_hooks_daemon.utils.fake_values import (
     REGISTRY_RELATIVE_PATH,
     FakeValuesError,
     FakeValuesRegistry,
     load_fake_values,
 )
+from claude_code_hooks_daemon.utils.path_containment import path_relative_to
+
+logger = logging.getLogger(__name__)
 
 CHECK_ID: Final[str] = "unlisted-fake-value"
 
@@ -97,7 +101,7 @@ def _run_edit(context: CheckContext) -> list[Finding]:
     registry, problems = _load(context)
     if registry is None:
         return problems
-    rel_path = context.file_path.relative_to(context.project_root).as_posix()
+    rel_path = path_relative_to(context.file_path, context.project_root).as_posix()
     return _findings_for(rel_path, context.file_content, registry)
 
 
@@ -109,9 +113,14 @@ def _run_sweep(context: CheckContext) -> list[Finding]:
         return []
     findings: list[Finding] = []
     for rel_path in context.markdown_paths or ():
+        abs_path = authored_path(context.project_root, rel_path)
+        if not abs_path.is_file():
+            continue
         try:
-            content = (Path(context.project_root) / rel_path).read_text(encoding="utf-8")
-        except (OSError, UnicodeDecodeError):
+            content = abs_path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError) as exc:
+            # One unreadable document must not abort the whole sweep.
+            logger.debug("unlisted-fake-value: skipping unreadable %s: %s", rel_path, exc)
             continue
         findings.extend(_findings_for(rel_path, content, registry))
     return findings
