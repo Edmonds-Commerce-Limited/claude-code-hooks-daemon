@@ -36,9 +36,12 @@ import sys
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Final
+from typing import TYPE_CHECKING, Any, Final
 
 import yaml
+
+if TYPE_CHECKING:
+    from claude_code_hooks_daemon.utils.fake_values import FakeValuesRegistry
 
 _REPO_ROOT: Final[Path] = Path(__file__).resolve().parents[2]
 _QA_OUTPUT_DIR: Final[Path] = _REPO_ROOT / "untracked" / "qa"
@@ -314,6 +317,35 @@ def resolve_public_pattern_exemption(config_path: Path) -> Callable[[str, str], 
     return exempt
 
 
+def _is_approved_fake(
+    fake_values: FakeValuesRegistry | None, kind: str, match: re.Match[str]
+) -> bool:
+    """Whether ``match`` is exactly a listed fake of ``kind`` (never, without a registry)."""
+    return fake_values is not None and fake_values.allows(kind, match.group(0))
+
+
+def resolve_fake_values(scan_root: Path) -> FakeValuesRegistry:
+    """The approved-fakes registry under ``scan_root`` (Plan 00492).
+
+    Imported from the daemon so this scan and the write-time handler read one
+    definition of "approved". A registry that exists but is malformed is a
+    ``ConfigError``: reading it as empty would report fakes the project
+    approved, and reading it as complete would hide real ones.
+
+    Raises:
+        ConfigError: The registry cannot be parsed, or the daemon package is
+            not importable (no fake could then be told from a real value).
+    """
+    try:
+        from claude_code_hooks_daemon.utils.fake_values import FakeValuesError, load_fake_values
+    except ImportError as exc:
+        raise _term_rule_unavailable(exc) from exc
+    try:
+        return load_fake_values(scan_root)
+    except FakeValuesError as exc:
+        raise ConfigError(str(exc)) from exc
+
+
 def resolve_term_matcher() -> Callable[[str, str], bool]:
     """The shared secret-term predicate from ``utils/secret_redaction``.
 
@@ -340,8 +372,12 @@ def scan_file(
     term_matcher: Callable[[str, str], bool],
     scan_root: Path,
     exempt_public: Callable[[str, str], bool] = _never_exempt,
+    fake_values: FakeValuesRegistry | None = None,
 ) -> list[Violation]:
     """Every violation in one file — the name checks, then content (if readable).
+
+    ``fake_values`` is the project's approved-fakes registry (Plan 00492): a
+    match that is EXACTLY a listed fake of its pattern's kind is not reported.
 
     ``exempt_public`` stands the public patterns down for the BODY of a
     faithful vendored copy. The file name and the secret list are always
@@ -424,9 +460,14 @@ def scan_file(
     )
     for number, line in enumerate(content.splitlines(), start=1):
         for entry, compiled in body_patterns:
-            match = compiled.search(line)
+            name = entry.get(_PATTERN_KEY_NAME, "unnamed")
+            # The first match that is not an approved fake, so a listed value
+            # earlier on the line cannot shelter an unlisted one after it.
+            match = next(
+                (m for m in compiled.finditer(line) if not _is_approved_fake(fake_values, name, m)),
+                None,
+            )
             if match:
-                name = entry.get(_PATTERN_KEY_NAME, "unnamed")
                 description = entry.get(_PATTERN_KEY_DESCRIPTION, "")
                 violations.append(
                     Violation(
@@ -501,6 +542,7 @@ def main() -> int:
         secret_terms = resolve_secret_terms(config_path, scan_root_for_terms)
         exclude_globs = load_exclude_paths(config_path)
         exempt_public = resolve_public_pattern_exemption(config_path)
+        fake_values = resolve_fake_values(scan_root_for_terms)
         # Resolved once, not per file: the predicate is shared with the live
         # handler so both surfaces agree on what counts as a match.
         term_matcher = resolve_term_matcher()
@@ -540,6 +582,7 @@ def main() -> int:
                     term_matcher,
                     scan_root_for_terms,
                     exempt_public,
+                    fake_values,
                 )
             )
 

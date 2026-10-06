@@ -68,14 +68,14 @@ hosts:
 
 ### Phase 1: Ground truth
 
-- [ ] ⬜ **Task 1.1**: Vendor the status line docs page with `hooks-daemon remote-docs add`.
+- [x] ✅ **Task 1.1** (vendored by Plan 00492 at `remote-docs/code.claude.com/docs/en/statusline.md`, one unlisted fake swapped and recorded in its provenance): Vendor the status line docs page with `hooks-daemon remote-docs add`.
   Record in `CLAUDE/Architecture/StatusLine.md` that `rate_limits` is now read.
   Blocked: `remote-docs add https://code.claude.com/docs/en/statusline` refuses the page
   (its content matches the `session-uuid` sensitive-content pattern; nothing written).
   StatusLine.md records the read and the URL; the vendoring needs an owner decision.
   **Owner ruling (2026-10-05):** unblocked by the fake-values registry plan `docs-fake-values-registry`: the page is vendored
   with unlisted fakes swapped for listed ones, recorded in its provenance — see
-  [OWNER-RULINGS-261005.md](../00483-threat-model-conformance-audit/OWNER-RULINGS-261005.md) (D1). Blocked until that plan lands.
+  [OWNER-RULINGS-261005.md](../00483-threat-model-conformance-audit/OWNER-RULINGS-261005.md) (D1). Unblocked: Plan 00492 landed the registry and vendored the page.
 - [x] ✅ **Task 1.2** (merged ee58adb7c): Capture real Status payloads into test fixtures: a main thread with
   data, before the first response (absent), a subagent or `--agent` thread, and integer and
   fractional percentages. Establish whether subagent threads carry `rate_limits`.

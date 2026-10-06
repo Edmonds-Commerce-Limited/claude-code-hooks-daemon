@@ -28,6 +28,7 @@ from urllib.parse import urlparse
 
 import yaml
 
+from claude_code_hooks_daemon.utils.fake_values import ValueSwap
 from claude_code_hooks_daemon.utils.markdown_format import split_frontmatter
 
 #: Licence sentinel: capture happened, licence review did not (D13). Parses
@@ -58,6 +59,7 @@ _FIELD_FIDELITY: Final[str] = "fidelity"
 _FIELD_SOURCE_SHA256: Final[str] = "source_sha256"
 _FIELD_LICENCE: Final[str] = "licence"
 _FIELD_STALE_AFTER: Final[str] = "stale_after"
+_FIELD_VALUE_SWAPS: Final[str] = "value_swaps"
 
 _OPTIONAL_FIELDS: Final[tuple[str, ...]] = (
     "upstream_version",
@@ -99,6 +101,8 @@ class Provenance:
     upstream_version: str | None = None
     fetch_method: str | None = None
     retrieved_by: str | None = None
+    #: Unlisted fakes the capture swapped for listed ones (Plan 00492).
+    value_swaps: tuple[ValueSwap, ...] = ()
 
     @property
     def licence_is_unreviewed(self) -> bool:
@@ -235,6 +239,45 @@ def _parse_stale_after(text: str) -> tuple[date | str | None, ProvenanceError | 
         )
 
 
+def _parse_value_swaps(
+    raw: Any, fidelity: Fidelity | None
+) -> tuple[tuple[ValueSwap, ...], ProvenanceError | None]:
+    """Parse the optional ``value_swaps`` list; an absent field is no swaps."""
+    if raw is None:
+        return (), None
+    shape = (
+        f"`{_FIELD_VALUE_SWAPS}` must be a list of mappings with `kind`, `replacement`, "
+        "`occurrences` (a positive integer) and `original_sha256` (64 hex characters)"
+    )
+    if not isinstance(raw, list):
+        return (), ProvenanceError(_FIELD_VALUE_SWAPS, shape)
+    swaps: list[ValueSwap] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            return (), ProvenanceError(_FIELD_VALUE_SWAPS, shape)
+        kind = str(item.get("kind", "")).strip()
+        replacement = str(item.get("replacement", "")).strip()
+        occurrences = item.get("occurrences")
+        digest = str(item.get("original_sha256", ""))
+        if (
+            not kind
+            or not replacement
+            or not isinstance(occurrences, int)
+            or isinstance(occurrences, bool)
+            or occurrences < 1
+            or _SHA256_RE.match(digest) is None
+        ):
+            return (), ProvenanceError(_FIELD_VALUE_SWAPS, shape)
+        swaps.append(ValueSwap(kind, replacement, occurrences, digest.lower()))
+    if swaps and fidelity is Fidelity.VERBATIM:
+        return (), ProvenanceError(
+            _FIELD_VALUE_SWAPS,
+            f"a document that records `{_FIELD_VALUE_SWAPS}` is not the response body, so it "
+            "cannot declare `fidelity: verbatim`",
+        )
+    return tuple(swaps), None
+
+
 def parse_provenance(content: str) -> ParseResult:
     """Parse a vendored document's provenance frontmatter.
 
@@ -303,6 +346,10 @@ def parse_provenance(content: str) -> ParseResult:
         if err is not None:
             errors.append(err)
 
+    value_swaps, err = _parse_value_swaps(data.get(_FIELD_VALUE_SWAPS), fidelity)
+    if err is not None:
+        errors.append(err)
+
     if errors:
         return ParseResult(provenance=None, errors=tuple(errors), body=body)
 
@@ -322,6 +369,7 @@ def parse_provenance(content: str) -> ParseResult:
             source_sha256=source_sha256,
             licence=licence,
             stale_after=stale_after,
+            value_swaps=value_swaps,
             **optional,
         ),
         errors=(),

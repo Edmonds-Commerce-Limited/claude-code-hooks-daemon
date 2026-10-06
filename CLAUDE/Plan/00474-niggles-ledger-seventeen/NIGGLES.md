@@ -2138,9 +2138,8 @@ two rules conflict, and neither can be bent by an agent.
 on the same pattern, even with `--verbatim`. The check runs before any capture exists, so the stand-down that
 `RemoteDocs.md` describes for unaltered captures never applies. This now also blocks Plan 00486 Task 1.3.
 
-**Status**: ⬜ Owner decision. Options: (a) allow `remote-docs add` to store a documented
-placeholder for pattern matches and record the substitution in the provenance frontmatter; (b)
-exempt the remote-docs tree from that one public pattern; (c) leave such pages unvendored.
+**Status**: ✅ Fixed by Plan 00492 (the owner's registry route; options (a) to (c) superseded). Both pages are now
+vendored, each with its one swap recorded in its provenance.
 
 **Owner ruling (2026-10-05):** resolved: a single registry of approved FAKE values; docs may use any listed fake, and an unlisted fake-looking value is swapped for a listed one or the list is extended. Work: plan `docs-fake-values-registry` — see [OWNER-RULINGS-261005.md](../00483-threat-model-conformance-audit/OWNER-RULINGS-261005.md) (D1).
 

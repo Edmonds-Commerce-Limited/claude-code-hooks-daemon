@@ -1,0 +1,32 @@
+# The ONE list of approved FAKE values used in docs (Plan 00492, owner ruling D1).
+#
+# A value on this list may appear in docs, vendored pages and tests; the
+# sensitive-content handler and its whole-tree scanner let it through. A
+# fake-looking value that is NOT here is a docs QA finding (`unlisted-fake-value`):
+# use a listed fake, or extend this file for a genuinely new kind.
+#
+# A kind is named after the sensitive_content public pattern it exempts.
+# `values` are matched EXACTLY (case and all). `fake_looking` says what a fake
+# of this kind looks like, so an unlisted one can be found. Never list a real
+# credential. See CLAUDE/RemoteDocs.md for how `remote-docs add` swaps an
+# upstream page's unlisted fakes for these.
+kinds:
+  session-uuid:
+    description: >-
+      Example session ids. Every hex digit is the same character, so none can
+      be mistaken for a real session; use a different digit when two must stay
+      distinguishable.
+    fake_looking: '\b([0-9a-f])\1{7}-\1{4}-\1{4}-\1{4}-\1{12}\b'
+    values:
+      - '00000000-0000-0000-0000-000000000000'
+      - '11111111-1111-1111-1111-111111111111'
+      - '22222222-2222-2222-2222-222222222222'
+      - '33333333-3333-3333-3333-333333333333'
+      - '44444444-4444-4444-4444-444444444444'
+      - '55555555-5555-5555-5555-555555555555'
+      - 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'
+      - 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb'
+      - 'cccccccc-cccc-cccc-cccc-cccccccccccc'
+      - 'dddddddd-dddd-dddd-dddd-dddddddddddd'
+      - 'eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee'
+      - 'ffffffff-ffff-ffff-ffff-ffffffffffff'

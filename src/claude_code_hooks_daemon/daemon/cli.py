@@ -7801,6 +7801,53 @@ def _sensitive_content_guard(project_root: Path) -> Any:
         ) from exc
 
 
+def _capture_value_swapper(project_root: Path) -> Any:
+    """The swapper a capture or refresh applies to a fetched page, or ``None``.
+
+    A page may carry example values (a session id) that match a sensitive-content
+    public pattern and are not on the project's fake-values registry. The
+    registry is the approved way out (Plan 00492): such a value is swapped for a
+    listed fake of the same kind and the swap is recorded in provenance. No
+    registry, or one with no kinds, means nothing is swapped and the content
+    guard judges the page as written.
+
+    Raises:
+        _ContentGuardUnavailableError: The registry exists but cannot be read.
+            The capture is refused, because a page cannot be vendored against a
+            list that cannot be trusted.
+    """
+    import re
+
+    from claude_code_hooks_daemon.constants import HandlerID
+    from claude_code_hooks_daemon.utils.fake_values import (
+        FakeValuesError,
+        load_fake_values,
+        swap_unlisted_fakes,
+    )
+
+    try:
+        registry = load_fake_values(project_root)
+    except FakeValuesError as exc:
+        raise _ContentGuardUnavailableError(
+            f"the fake-values registry is unreadable ({exc}); nothing was written, "
+            "because unlisted fakes cannot be swapped against a list that cannot be read. "
+            "Fix the registry and retry."
+        ) from exc
+    if not registry.kinds:
+        return None
+
+    config = Config.load_or_default(project_root / ".claude" / "hooks-daemon.yaml")
+    options = handler_options(
+        config.handlers.pre_tool_use.get(HandlerID.SENSITIVE_CONTENT.config_key)
+    )
+    patterns = {
+        str(entry["name"]): re.compile(str(entry["pattern"]), re.IGNORECASE)
+        for entry in options.get("public_patterns", [])
+        if entry.get("name") in registry.kinds and entry.get("pattern")
+    }
+    return lambda text: swap_unlisted_fakes(text, patterns, registry)
+
+
 def _remote_docs_tree(project_root: Path) -> Path:
     """Resolve the configured remote-docs tree root for ``project_root``."""
     from claude_code_hooks_daemon.config.models import Config
@@ -7923,6 +7970,7 @@ def _remote_docs_add(
 
     try:
         content_guard = _capture_content_guard(args, project_root)
+        value_swapper = _capture_value_swapper(project_root)
     except _ContentGuardUnavailableError as exc:
         print(f"remote-docs add failed: {exc}", file=sys.stderr)
         return 1
@@ -7947,11 +7995,19 @@ def _remote_docs_add(
             stale_after_days=stale_after_days,
             content_guard=content_guard,
             force=force,
+            value_swapper=value_swapper,
         )
     except CaptureError as exc:
         print(f"remote-docs add failed: {exc}", file=sys.stderr)
         return 1
     print(f"captured {args.url} -> {written}")
+    swaps = read_document(written).provenance
+    if swaps is not None and swaps.value_swaps:
+        count = sum(swap.occurrences for swap in swaps.value_swaps)
+        print(
+            f"  swapped {count} unlisted fake value(s) for listed ones "
+            "(recorded as `value_swaps` in the provenance; fidelity is no longer verbatim)"
+        )
     if previous_sha256 is not None:
         new_provenance = read_document(written).provenance
         new_sha256 = new_provenance.source_sha256 if new_provenance is not None else "unknown"
@@ -8102,6 +8158,7 @@ def _remote_docs_refresh(
     # just as a capture does, so it bypasses the same hook.
     try:
         content_guard = _capture_content_guard(args, project_root)
+        value_swapper = _capture_value_swapper(project_root)
     except _ContentGuardUnavailableError as exc:
         print(f"remote-docs refresh failed: {exc}", file=sys.stderr)
         return 1
@@ -8115,6 +8172,7 @@ def _remote_docs_refresh(
             fetch_method=fetcher.method,
             now=now,
             content_guard=content_guard,
+            value_swapper=value_swapper,
         )
         print(f"{target}: {outcome.value}")
         if outcome is RefreshOutcome.REFUSED:

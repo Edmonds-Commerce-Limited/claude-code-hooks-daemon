@@ -32,6 +32,7 @@ from claude_code_hooks_daemon.remote_docs.provenance import (
     ProvenanceError,
     parse_provenance,
 )
+from claude_code_hooks_daemon.utils.fake_values import ValueSwapper
 
 logger = logging.getLogger(__name__)
 
@@ -137,6 +138,7 @@ def write_capture(
     fidelity: Fidelity = Fidelity.VERBATIM,
     fetch_method: str | None = None,
     force: bool = False,
+    value_swapper: ValueSwapper | None = None,
 ) -> Path:
     """Capture ``url`` and write it into ``tree_root``.
 
@@ -178,6 +180,7 @@ def write_capture(
         stale_after_days=stale_after_days,
         fidelity=fidelity,
         fetch_method=fetch_method,
+        value_swapper=value_swapper,
     )
     if content_guard is not None:
         reason = content_guard(result.content)
@@ -201,6 +204,7 @@ def refresh_document(
     fidelity: Fidelity = Fidelity.VERBATIM,
     fetch_method: str | None = None,
     content_guard: ContentGuard | None = None,
+    value_swapper: ValueSwapper | None = None,
 ) -> RefreshOutcome:
     """Re-fetch one stored document from the URL recorded inside it.
 
@@ -243,6 +247,7 @@ def refresh_document(
             stale_after_days=_stale_window_days(previous),
             fidelity=fidelity,
             fetch_method=fetch_method,
+            value_swapper=value_swapper,
         )
     except CaptureError as exc:
         logger.debug("refresh fetch failed for %s: %s", path, exc)
