@@ -1414,6 +1414,18 @@ The uncertain-move union judges the hook directory and the LAST recorded move (`
 every candidate directory (`sub`). Remedy: judge every directory any `cd` in the chain could
 land in.
 
+### N371 — the plan counter is per clone, so a second clone of this repository would reuse plan numbers
+
+**Found**: by the owner's desktop session, 2026-10-07 (Plan 00498 desktop check). In the desktop clone
+`git config --local hooksdaemon.latestPlanNumber` read 489, while plan folders up to 00499 exist on main and the
+container clone reads 499. The counter lives in each clone's local git config, so a clone that has not run
+`mkplan.bash` since plans 00490–00499 were filed elsewhere would hand out 00490 again. The guidance says "the daemon
+keeps it correct across branches"; nothing says across clones. Remedy: `mkplan.bash` takes the maximum of the
+counter and the highest plan number on disk (including `Completed/`) before assigning, or the daemon reconciles it at
+SessionStart.
+
+**Status**: ⬜ Open.
+
 ### N370 — the sed guard denies a `git -C <dir> commit -m` message that mentions an in-place sed edit
 
 **Found**: by the coordinator, 2026-10-06. `git -C /workspace add <dir> && git -C /workspace commit -q -m '… sed -i …'`
