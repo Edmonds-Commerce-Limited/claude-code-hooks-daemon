@@ -1469,7 +1469,7 @@ a `validate_options` like `IdleHousekeepingAdvisoryHandler`'s, so the registry w
 `option_failures` and keeps the handler on its 3-hour default. Tests in
 `tests/unit/handlers/test_registry_option_validation.py` register through `register_all` with 24, 0, -1, `"3"`,
 `True` and NaN. Same class, not fixed: `bash_safe_mode`'s `mode` and `exempt_patterns` setters raise and drop the
-handler. That is unchanged since v3.68.0, and the handler's docstring says it is deliberate; whether it should
+handler. Those setters are unchanged since v3.68.0, and the docstrings describe the rejection at load as intended; whether it should
 report through `option_failures` instead is open.
 
 ### N372 — the daemon-docs guard warns on the project's own `CLAUDE/` when the repo folder ends in `hooks-daemon`
