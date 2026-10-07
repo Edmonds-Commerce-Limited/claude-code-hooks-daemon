@@ -65,6 +65,12 @@ This plan adds timing first, measures the hot spots from it, then makes the gate
 - [ ] ⬜ **Task 2.3**: Give each matrix leg and scope (`unit`, `rest`) its own checkpoint, so a reboot mid-tests loses
   only the leg it interrupted, while coverage is still judged on the whole (parallel coverage mode is disabled today,
   `pyproject.toml:135-136`).
+- [ ] ⬜ **Task 2.4**: Shard the test suite. Split each leg into named shards (by test directory, balanced with the
+  per-test durations from Task 1.3), each a Task 2.3 checkpoint of its own, so a reboot loses one shard rather than a
+  whole leg. Coverage: each shard writes its own data file (`COVERAGE_FILE`, no `--cov-fail-under`), kept with its
+  checkpoint; `coverage combine` then `coverage report --fail-under=95` judges the whole, so the threshold is unchanged.
+  This needs no `parallel = true` in the coverage config (disabled for a fork bomb). Running shards concurrently is
+  Task 3.2's question (the shared daemon, the full-QA lock and its sink plugin) and is not assumed here.
 
 ### Phase 3: Speed
 
