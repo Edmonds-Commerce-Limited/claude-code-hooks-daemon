@@ -975,6 +975,31 @@ def _interpreter_lines(data: QaReport) -> str:
     return "\n   " + "\n   ".join(lines)
 
 
+# How many of the slowest tests (across every leg) the tests summary shows; the
+# full per-leg lists stay in tests.json (Plan 00500 Task 1.3).
+_SLOWEST_TESTS_SHOWN = 10
+
+
+def _slowest_test_lines(data: QaReport) -> str:
+    """The slowest tests across every leg, slowest first, or "" when none were recorded."""
+    records: list[tuple[float, str]] = []
+    for entry in data.get("interpreters", []):
+        leg = f" [py{entry.get('version', '?')} {entry.get('scope', '?')}]"
+        for record in entry.get("slowest_tests", []):
+            records.append((record["seconds"], _slowest_line(record, leg)))
+    if not records:
+        records = [(r["seconds"], _slowest_line(r, "")) for r in data.get("slowest_tests", [])]
+    if not records:
+        return ""
+    records.sort(key=lambda item: item[0], reverse=True)
+    shown = [line for _, line in records[:_SLOWEST_TESTS_SHOWN]]
+    return "\n   slowest tests:\n     " + "\n     ".join(shown)
+
+
+def _slowest_line(record: dict[str, Any], leg: str) -> str:
+    return f"{record['seconds']}s {record['phase']} {record['nodeid']}{leg}"
+
+
 def _summarize_tests(data: QaReport) -> str:
     s = data.get("summary", {})
     passed = s.get("passed", 0)
@@ -989,6 +1014,7 @@ def _summarize_tests(data: QaReport) -> str:
     error_part = f", {errors} errored" if errors else ""
     line = f"{passed} passed, {failed} failed{error_part}, {skipped} skipped | coverage: {cov:.1f}%"
     line += _interpreter_lines(data)
+    line += _slowest_test_lines(data)
 
     # Name a red run the failed/errored counts alone do not explain — a
     # coverage-threshold miss exits non-zero over "0 failed" and a coverage

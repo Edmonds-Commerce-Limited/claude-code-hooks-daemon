@@ -22,6 +22,11 @@ FIRST_ERROR_LINES_FILE="${PROJECT_ROOT}/untracked/qa/first-error-lines.jsonl"
 # coverage starts and leave its import-time code unmeasured (N110).
 FIRST_ERROR_ARGS=(--first-error-lines="${FIRST_ERROR_LINES_FILE}")
 
+# The slowest tests, recorded in tests.json as "slowest_tests" (Plan 00500
+# Task 1.3). Mirrors claude_code_hooks_daemon.qa.pytest_text_report
+# .SLOWEST_DURATIONS_ARGS; a test pins the two together.
+SLOWEST_DURATIONS_ARGS=(--durations=50 --durations-min=1.0)
+
 # Source venv management
 # shellcheck source=../venv-include.bash
 source "${PROJECT_ROOT}/scripts/venv-include.bash"
@@ -73,6 +78,7 @@ if "${VENV_PYTHON}" -c "import pytest_json_report" 2>/dev/null; then
     # Use pytest-json-report if available
     if venv_tool pytest --json-report --json-report-file="${OUTPUT_FILE}.raw" \
               "${FIRST_ERROR_ARGS[@]}" \
+              "${SLOWEST_DURATIONS_ARGS[@]}" \
               --cov=src/claude_code_hooks_daemon \
               --cov=.claude/ccy \
               --cov-branch \
@@ -147,6 +153,7 @@ EOF
 else
     # Fallback: Parse standard pytest output
     if venv_tool pytest "${FIRST_ERROR_ARGS[@]}" \
+              "${SLOWEST_DURATIONS_ARGS[@]}" \
               --cov=src/claude_code_hooks_daemon \
               --cov=.claude/ccy \
               --cov-branch \
@@ -183,6 +190,7 @@ from claude_code_hooks_daemon.qa.pytest_text_report import (
     finalize_passed_all,
     find_unnamed_failure_reason,
     parse_pytest_text_output,
+    parse_slowest_durations,
 )
 
 raw_file = Path("untracked/qa/tests.json.raw")
@@ -239,6 +247,7 @@ output = {
     "summary": summary,
     "tests": tests,
     "coverage": coverage,
+    "slowest_tests": parse_slowest_durations(content),
 }
 
 json.dump(output, sys.stdout, indent=2)
