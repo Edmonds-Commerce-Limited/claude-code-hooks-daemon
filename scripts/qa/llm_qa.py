@@ -27,7 +27,7 @@ import re
 import subprocess
 import sys
 import time
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Collection, Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Final, NamedTuple, TypeAlias
@@ -394,6 +394,9 @@ _RECORD_DURATION: Final[str] = "duration_seconds"
 _TIMING_LABEL: Final[str] = "TIMING"
 _TIMING_TOTAL: Final[str] = "total"
 _DURATION_DECIMALS: Final[int] = 1
+_REUSED_MARK: Final[str] = "(reused)"
+_REUSED_ICON: Final[str] = "♻"
+_RESUME_OPTION: Final[str] = "--resume"
 
 
 class StepTiming(NamedTuple):
@@ -526,12 +529,19 @@ def run_record(
     return record
 
 
-def format_timing_summary(durations: Mapping[str, float]) -> str:
-    """Per-step durations, slowest first, with a total (seconds, one decimal)."""
+def format_timing_summary(durations: Mapping[str, float], reused: Collection[str] = ()) -> str:
+    """Per-step durations, slowest first, with a total (seconds, one decimal).
+
+    A step in ``reused`` shows the duration of the run that produced its result.
+    """
     width = max(len(name) for name in [*durations, _TIMING_TOTAL])
     rows = sorted(durations.items(), key=lambda item: item[1], reverse=True)
     lines = [f"{_TIMING_LABEL} (slowest first)"]
-    lines += [f"  {name:<{width}}  {seconds:.{_DURATION_DECIMALS}f}s" for name, seconds in rows]
+    lines += [
+        f"  {name:<{width}}  {seconds:.{_DURATION_DECIMALS}f}s"
+        + (f"  {_REUSED_MARK}" if name in reused else "")
+        for name, seconds in rows
+    ]
     total = sum(durations.values())
     lines.append(f"  {_TIMING_TOTAL:<{width}}  {total:.{_DURATION_DECIMALS}f}s")
     return "\n".join(lines) + "\n"
@@ -559,11 +569,18 @@ def read_provenance(qa_dir: Path) -> dict[str, ProvenanceRecord]:
 
 
 def record_provenance(qa_dir: Path, records: Mapping[str, ProvenanceRecord]) -> None:
-    """Record each tool's entry, keeping the entries of tools not in ``records``."""
+    """Record each tool's entry, keeping the entries of tools not in ``records``.
+
+    Written to a temp file and renamed over the record, so a run killed
+    part-way leaves the previous complete file rather than a torn one.
+    """
     recorded = read_provenance(qa_dir)
     recorded.update(records)
     qa_dir.mkdir(parents=True, exist_ok=True)
-    (qa_dir / PROVENANCE_FILE).write_text(json.dumps(recorded, indent=2), encoding="utf-8")
+    target = qa_dir / PROVENANCE_FILE
+    temp = qa_dir / f".{PROVENANCE_FILE}.{os.getpid()}.tmp"
+    temp.write_text(json.dumps(recorded, indent=2), encoding="utf-8")
+    temp.replace(target)
 
 
 # A QA tool's parsed JSON report. Every tool writes its own schema, so the
@@ -2570,10 +2587,13 @@ def main() -> int:
     if "--read-only" in args:
         read_only = True
         args.remove("--read-only")
+    resume = _RESUME_OPTION in args
+    if resume:
+        args.remove(_RESUME_OPTION)
 
     if not args or "--help" in args or "-h" in args:
         print(
-            "Usage: llm_qa.py [--read-only] <tool|all|changed> [tool ...] "
+            "Usage: llm_qa.py [--read-only | --resume] <tool|all|changed> [tool ...] "
             f"[{_BASE_OPTION} REF | {_RANGE_OPTION} A..B] [{_ALLOW_UNMAPPED_OPTION}]"
         )
         print(f"  {_SELECTION_ALL}: the full suite (the coordinator's gate)")
@@ -2582,6 +2602,10 @@ def main() -> int:
             f"  {_BASE_OPTION}, {_RANGE_OPTION}, {_ALLOW_UNMAPPED_OPTION}: passed to changed_tests"
         )
         print("  --read-only: summarise; a result recorded for another tree FAILS")
+        print(
+            f"  {_RESUME_OPTION}: re-use each tool that PASSED on this exact tree, run the rest "
+            "(an interrupted run, e.g. a host reboot)"
+        )
         print(
             f"  {MAIN_MOVED_COMMAND} [{_START_OPTION} [{_RESTART_OPTION}] | {_ADVANCE_OPTION} | "
             f"{_FINISH_OPTION}] [MAIN_REF]: the batched gate's check on what would land "
@@ -2607,6 +2631,12 @@ def main() -> int:
     # to inspect a run already in progress. Locking it would block the
     # diagnostic during the one situation the diagnostic is for.
     if read_only:
+        if resume:
+            print(
+                f"llm_qa: {_RESUME_OPTION} runs tools, so it cannot be combined with --read-only",
+                file=sys.stderr,
+            )
+            return EXIT_FAILURE
         return _run_tools(tools, read_only=True)
 
     # Every ``_python(...)`` tool needs the interpreter, so an unresolvable
@@ -2635,7 +2665,9 @@ def main() -> int:
         return EXIT_LOCK_TIMEOUT
     try:
         _stamp_holder(lock_fd, PROJECT_ROOT)
-        return _run_tools(tools, read_only=False, forwarded=forwarded, lock_fd=lock_fd)
+        return _run_tools(
+            tools, read_only=False, forwarded=forwarded, lock_fd=lock_fd, resume=resume
+        )
     finally:
         _clear_holder(lock_fd)
         os.close(lock_fd)
@@ -2645,29 +2677,58 @@ def main() -> int:
 RunOutcome: TypeAlias = tuple[int, bool, str | None, StepTiming]
 
 
-def _record_run(run_records: Mapping[str, RunOutcome], before: dict[str, str] | None) -> None:
-    """Record what this run certifies, and say at once when it certifies no tree."""
+def _record_step(
+    name: str,
+    outcome: RunOutcome,
+    before: dict[str, str] | None,
+    after: dict[str, str] | None,
+) -> None:
+    """Record one finished step now, judged on the tree just before and just after it.
+
+    Says at once when the step certifies no tree. A tree that cannot be read
+    records nothing (the caller says so once per run).
+    """
     if before is None:
-        print(f"\n{_TREE_WARNING_LABEL} the working tree cannot be read, so nothing was recorded")
         return
-    after = worktree_state(PROJECT_ROOT)
     state = before
     if after != before:
         state = {**before, _STATE_DIGEST: _TREE_CHANGED_DURING_RUN}
         print(
-            f"\n{_TREE_WARNING_LABEL} the working tree changed during the run, so these "
-            "results certify no tree: `--read-only` will read them STALE. Re-run on a "
-            "still tree."
+            f"\n{_TREE_WARNING_LABEL} the working tree changed during the run of `{name}`, so its "
+            "result certifies no tree: `--read-only` and `--resume` will read it STALE. "
+            "Re-run on a still tree."
         )
+    exit_code, passed, digest, timing = outcome
     record_provenance(
         QA_OUTPUT_DIR,
         {
             name: run_record(
                 state, exit_code=exit_code, passed=passed, output_sha256=digest, timing=timing
             )
-            for name, (exit_code, passed, digest, timing) in run_records.items()
         },
     )
+
+
+def _reusable_reason(
+    name: str,
+    record: ProvenanceRecord | None,
+    current: dict[str, str] | None,
+    forwarded: Sequence[str],
+) -> str | None:
+    """Why a recorded result cannot stand in for running ``name`` now, or None when it can.
+
+    Only a PASSED result for the identical tree, whose report is still the one
+    that run wrote, is reused. Options forwarded to ``changed_tests`` change what
+    it judges and are not recorded, so that tool is never reused alongside them.
+    """
+    if forwarded and name == _CHANGED_TESTS_TOOL:
+        return "options forwarded to changed_tests are not recorded"
+    reason = stale_reason(record, current)
+    if reason is not None or record is None:
+        return reason
+    if record.get(_RECORD_PASSED) is not True or record.get(_RECORD_EXIT_CODE) != 0:
+        return "the recorded result did not pass"
+    return output_reason(record, QA_OUTPUT_DIR / TOOL_REGISTRY[name].json_file)
 
 
 def _certify_gate(judged: dict[str, str] | None) -> None:
@@ -2704,6 +2765,7 @@ def _run_tools(
     read_only: bool,
     forwarded: Sequence[str] = (),
     lock_fd: int | None = None,
+    resume: bool = False,
     clock: Callable[[], float] = time.monotonic,
     wall_clock: Callable[[], datetime] = lambda: datetime.now(UTC),
 ) -> int:
@@ -2713,18 +2775,26 @@ def _run_tools(
     provenance record, and a timing summary (slowest first) follows the
     verdict. ``clock`` measures the duration, ``wall_clock`` stamps it.
 
-    A run records, per tool, the tree it judged (before and after must agree,
-    or the record matches no tree), the live verdict, the exit code and the
-    hash of the report the tool wrote. A read-only summary fails a result
-    recorded for another tree, a report that is not the one recorded, and
-    re-applies the recorded exit code, so it can never pass what the live run
-    failed.
+    Each step records, the moment it finishes, the tree it judged (the tree
+    just before and just after that step must agree, or the record matches no
+    tree), the live verdict, the exit code and the hash of the report the tool
+    wrote. A read-only summary fails a result recorded for another tree, a
+    report that is not the one recorded, and re-applies the recorded exit code,
+    so it can never pass what the live run failed.
+
+    With ``resume``, a step whose record PASSED on the current tree (see
+    :func:`_reusable_reason`) is printed as reused and not run; any other step
+    runs. Reused steps count in the verdict and show their recorded duration.
     """
     all_passed = True
     tool_results: dict[str, tuple[bool, str]] = {}
     run_records: dict[str, RunOutcome] = {}
+    reused: dict[str, float] = {}
     before = worktree_state(PROJECT_ROOT)
-    recorded = read_provenance(QA_OUTPUT_DIR) if read_only else {}
+    current = before
+    recorded = read_provenance(QA_OUTPUT_DIR) if read_only or resume else {}
+    if not read_only and before is None:
+        print(f"\n{_TREE_WARNING_LABEL} the working tree cannot be read, so nothing is recorded")
 
     for name in tools:
         output = QA_OUTPUT_DIR / TOOL_REGISTRY[name].json_file
@@ -2733,6 +2803,16 @@ def _run_tools(
         digest: str | None = None
         timing: StepTiming | None = None
         record: ProvenanceRecord | None = None
+        step_after: dict[str, str] | None = None
+        if resume and _reusable_reason(name, recorded.get(name), current, forwarded) is None:
+            seconds = recorded_durations(recorded, [name]).get(name)
+            note = "" if seconds is None else f" (took {seconds:.{_DURATION_DECIMALS}f}s)"
+            summary = f"{_REUSED_ICON} {name}: reused, passed on this tree{note}\n"
+            tool_results[name] = (True, summary)
+            if seconds is not None:
+                reused[name] = seconds
+            print(summary, end="")
+            continue
         if read_only:
             record = recorded.get(name)
             stale = stale_reason(record, before) or (
@@ -2754,6 +2834,7 @@ def _run_tools(
             elapsed = clock() - started
             timing = StepTiming(started_wall.isoformat(), wall_clock().isoformat(), elapsed)
             digest = output_digest(output)
+            step_after = worktree_state(PROJECT_ROOT)
 
         # Summarize from JSON, passing exit code for cross-check
         passed, summary = summarize_tool(name, exit_code=exit_code, stale=stale)
@@ -2764,12 +2845,13 @@ def _run_tools(
         tool_results[name] = (passed, summary)
         if exit_code is not None and timing is not None:
             run_records[name] = (exit_code, passed, digest, timing)
+            _record_step(name, run_records[name], current, step_after)
+            current = step_after
         print(summary, end="")
         if not passed:
             all_passed = False
 
     if not read_only:
-        _record_run(run_records, before)
         if set(CHANGED_TOOL_NAMES) <= set(tools):
             _record_changed(all_passed, before)
         if all_passed and set(ALL_TOOL_NAMES) <= set(tools):
@@ -2788,13 +2870,16 @@ def _run_tools(
         recorded_durations(recorded, tools)
         if read_only
         else {
-            name: round(outcome[3].duration_seconds, _DURATION_DECIMALS)
-            for name, outcome in run_records.items()
+            **reused,
+            **{
+                name: round(outcome[3].duration_seconds, _DURATION_DECIMALS)
+                for name, outcome in run_records.items()
+            },
         }
     )
     if durations:
         print()
-        print(format_timing_summary(durations), end="")
+        print(format_timing_summary(durations, reused=reused), end="")
 
     return EXIT_SUCCESS if all_passed else EXIT_FAILURE
 

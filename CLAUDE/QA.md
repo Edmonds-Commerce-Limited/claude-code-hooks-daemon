@@ -540,8 +540,17 @@ A run deletes each tool's old report before running it. A read-only summary
 - Its recorded exit code was non-zero.
 
 So neither an old green run nor a crashed tool's leftover report reads as a
-pass. A tree that changes during a run is said at the end of that run, because
-those results certify no tree.
+pass. Each step writes its record the moment it finishes and judges the tree
+just before and just after that step, so a tree that changes during one step
+is said at once and taints only that step's record.
+
+An interrupted run (for example a host reboot) is resumed with
+`llm_qa.py all --resume`. Each tool whose recorded result PASSED on the
+identical tree (and whose report is still the one that run wrote) is printed as
+reused and not run; a failed, stale or missing record is always re-run. Reused
+steps count in the verdict and show their recorded duration, marked reused.
+`--resume` takes the full-QA lock like any run, and cannot be combined with
+`--read-only`.
 
 ### The Automated Checks
 
