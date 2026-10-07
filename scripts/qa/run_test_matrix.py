@@ -49,8 +49,10 @@ from claude_code_hooks_daemon.qa.first_error_lines import (
 from claude_code_hooks_daemon.qa.first_error_lines import read_first_error_lines
 from claude_code_hooks_daemon.qa.full_qa_lock import acquire_full_qa_lock
 from claude_code_hooks_daemon.qa.pytest_text_report import (
+    SLOWEST_DURATIONS_ARGS,
     finalize_passed_all,
     parse_pytest_text_output,
+    parse_slowest_durations,
 )
 from claude_code_hooks_daemon.utils.path_containment import path_is_relative_to
 
@@ -116,6 +118,8 @@ class RunOutcome(NamedTuple):
     failed_tests: list[str]
     log: Path
     first_error_lines: dict[str, str]
+    #: ``{nodeid, phase, seconds}`` records for the run's slowest tests.
+    slowest_tests: Sequence[dict[str, Any]] = ()
 
 
 class RunResult(NamedTuple):
@@ -317,6 +321,7 @@ def build_report(
                 "passed_all": run_passed,
                 "exit_code": result.outcome.exit_code,
                 "log": str(result.outcome.log),
+                "slowest_tests": list(result.outcome.slowest_tests),
             }
         )
         interpreters.append(entry)
@@ -374,7 +379,12 @@ def outcome_from_log(log: Path, exit_code: int, *, lines: Path) -> RunOutcome:
     summary = {key: parsed[key] for key in _COUNT_KEYS}
     summary["passed_all"] = finalize_passed_all(parsed["passed_all"], exit_code)
     return RunOutcome(
-        exit_code, summary, list(parsed["failed_tests"]), log, read_first_error_lines(lines)
+        exit_code,
+        summary,
+        list(parsed["failed_tests"]),
+        log,
+        read_first_error_lines(lines),
+        parse_slowest_durations(content),
     )
 
 
@@ -391,7 +401,7 @@ def outcome_from_primary_report(path: Path, exit_code: int) -> RunOutcome:
     summary = dict(report.get("summary", {}))
     summary["passed_all"] = bool(summary.get("passed_all", False)) and exit_code == 0
     failed = [t.get("name", "") for t in report.get("tests", []) if t.get("outcome") == "failed"]
-    return RunOutcome(exit_code, summary, failed, path, {})
+    return RunOutcome(exit_code, summary, failed, path, {}, report.get("slowest_tests", []))
 
 
 # ── Real side effects ──────────────────────────────────────────────
@@ -509,6 +519,7 @@ def extra_pytest_argv(python: Path, run: PlannedRun, lines: Path) -> list[str]:
         "no:cacheprovider",
         f"{FIRST_ERROR_LINES_OPTION}={lines}",
         "--tb=short",
+        *SLOWEST_DURATIONS_ARGS,
         *SCOPE_PYTEST_ARGS[run.scope],
     ]
 
