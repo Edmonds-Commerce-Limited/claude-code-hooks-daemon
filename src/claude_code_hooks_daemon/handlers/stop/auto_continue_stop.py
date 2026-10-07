@@ -28,7 +28,7 @@ import json
 import logging
 import re
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, ClassVar
@@ -81,6 +81,9 @@ from claude_code_hooks_daemon.utils.stop_hook_helpers import (
 from claude_code_hooks_daemon.utils.usage_pause_gate import hook_is_usage_paused
 
 logger = logging.getLogger(__name__)
+
+# The handler option whose setter validates the stand-in delay.
+_STAND_IN_DELAY_OPTION = "stand_in_delay_hours"
 
 # Plan 00181: stop-events.jsonl is append-only and was never bounded (644 KB
 # observed). Cap it after each write; on breach keep the newest half so a busy
@@ -664,6 +667,23 @@ class AutoContinueStopHandler(StopHandlerBase):
     def _stand_in_delay_hours(self, value: object) -> None:
         """Validate at config load: a delay that cannot work must not be silent."""
         self.__stand_in_delay_hours = validate_delay_hours(value)
+
+    @staticmethod
+    def validate_options(options: Mapping[str, Any]) -> dict[str, str]:
+        """The configured options this handler refuses, keyed by option name.
+
+        Read by ``register_all`` before any value is applied, so a bad
+        ``stand_in_delay_hours`` is reported at session start while the handler
+        stays registered on its default, instead of the setter's error dropping
+        the whole handler.
+        """
+        problems: dict[str, str] = {}
+        if _STAND_IN_DELAY_OPTION in options:
+            try:
+                validate_delay_hours(options[_STAND_IN_DELAY_OPTION])
+            except ValueError as exc:
+                problems[_STAND_IN_DELAY_OPTION] = str(exc)
+        return problems
 
     def _default_config_loader(self) -> Config:
         """The project's daemon config; defaults (stand-in off) when unloadable."""
