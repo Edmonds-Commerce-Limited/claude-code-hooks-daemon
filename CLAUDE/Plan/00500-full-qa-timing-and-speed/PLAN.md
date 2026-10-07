@@ -42,8 +42,11 @@ This plan adds timing first, measures the hot spots from it, then makes the gate
 
 ### Phase 1: Timing
 
-- [ ] ⬜ **Task 1.1**: Read-only review of where the time goes and of today's timing data. Report:
-  `subagent-reports/261007-qa-speed-review-sonnet.md` (in progress).
+- [x] ✅ **Task 1.1**: Read-only review of where the time goes and of today's timing data. Report:
+  [subagent-reports/261007-qa-speed-review-sonnet.md](subagent-reports/261007-qa-speed-review-sonnet.md). The test
+  body runs about three times per gate (3.11 full with coverage, then 3.12 and 3.13 in unit and rest scopes) and is
+  about 90% of the gate; the slowest tests are unit/qa tests that re-run ruff, bandit and semgrep over the repository.
+  For resume, `provenance.json` is written once after the whole loop, so a killed run records nothing.
 - [x] ✅ **Task 1.2** (merge `ae92258cf`): Record each gate step's start, end and duration in its result file, and print a sorted per-step
   timing summary at the end of `llm_qa.py all` (TDD).
 - [ ] ⬜ **Task 1.3**: Make the dormant per-test durations real (install pytest-json-report through `uv.lock`, or pass
@@ -53,7 +56,9 @@ This plan adds timing first, measures the hot spots from it, then makes the gate
 
 - [ ] ⬜ **Task 2.1**: Confirm the existing provenance (`llm_qa.py:371-520`) is enough to key a checkpoint: every step,
   including each matrix leg, records the tree it ran on, so a stale result can never be taken as a pass.
-- [ ] ⬜ **Task 2.2**: A resume mode that skips steps whose passing result matches the current tree and runs the rest.
+- [ ] ⬜ **Task 2.2**: Write each step's provenance record as the step finishes, with its own tree check (today the
+  file is written once after the loop, `llm_qa.py:2683`), then a resume mode (`all --resume`) that skips steps whose
+  passing result matches the current tree and runs the rest.
 - [ ] ⬜ **Task 2.3**: Give each matrix leg and scope (`unit`, `rest`) its own checkpoint, so a reboot mid-tests loses
   only the leg it interrupted, while coverage is still judged on the whole (parallel coverage mode is disabled today,
   `pyproject.toml:135-136`).
