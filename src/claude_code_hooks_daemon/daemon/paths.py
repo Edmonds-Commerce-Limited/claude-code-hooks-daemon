@@ -27,8 +27,6 @@ from pathlib import Path
 from types import ModuleType
 from typing import Any
 
-from claude_code_hooks_daemon.utils.deliberate_swallow import log_and_continue
-
 logger = logging.getLogger(__name__)
 
 # AF_UNIX socket path limit (108 bytes on Linux, 104 bytes on macOS)
@@ -1509,6 +1507,57 @@ def socket_path_diagnosis(project_path: Path, *, self_install: bool) -> str | No
     )
 
 
+_PACKAGE_DOTTED_ROOT = "claude_code_hooks_daemon"
+_PACKAGE_DIR = Path(__file__).resolve().parent.parent
+
+
+def _load_package_module_by_path(relative_path: str) -> ModuleType:
+    """Load ``<package>/<relative_path>`` by file path, without importing the package.
+
+    The dotted name is derived from the path. Returns the module already in
+    ``sys.modules`` under that name when there is one (so a package that IS
+    importable shares one module object), otherwise executes the file and
+    registers it under its real dotted name so a later normal import of the
+    same module gets this object instead of a second copy. A module loaded
+    this way must itself import only the standard library or modules already
+    loaded the same way.
+    """
+    dotted_name = ".".join((_PACKAGE_DOTTED_ROOT, *relative_path.removesuffix(".py").split("/")))
+    cached = sys.modules.get(dotted_name)
+    if cached is not None:
+        return cached
+    spec = importlib.util.spec_from_file_location(dotted_name, _PACKAGE_DIR / relative_path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"cannot load {dotted_name!r} from {_PACKAGE_DIR / relative_path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    sys.modules.setdefault(dotted_name, module)
+    return module
+
+
+def log_and_continue(
+    log: logging.Logger,
+    exc: BaseException,
+    *,
+    reason: str,
+    level: int = logging.WARNING,
+) -> None:
+    """Sanctioned log-and-continue (``utils/deliberate_swallow.py``), loaded lazily.
+
+    Deliberately NOT ``from claude_code_hooks_daemon.utils.deliberate_swallow
+    import log_and_continue``: THIS file is run standalone by file path
+    (``resolve_venv.sh`` / ``venv_bootstrap.sh`` run ``python3 paths.py ...``
+    during fresh-clone bootstrap) with no venv and no package on ``sys.path``,
+    so a dotted import at module level would crash it at load. The helper's
+    only dependency, ``escape_hatch``, is stdlib-only and is loaded first so
+    its own dotted import resolves from ``sys.modules``. The error-hiding
+    audit recognises the sanctioned form by this name.
+    """
+    _load_package_module_by_path("utils/escape_hatch.py")
+    swallow = _load_package_module_by_path("utils/deliberate_swallow.py")
+    swallow.log_and_continue(log, exc, reason=reason, level=level)
+
+
 _install_layout_module: ModuleType | None = None
 
 
@@ -1531,21 +1580,8 @@ def _install_layout() -> ModuleType:
     global _install_layout_module
     if _install_layout_module is not None:
         return _install_layout_module
-    dotted_name = "claude_code_hooks_daemon.daemon.install_layout"
-    cached = sys.modules.get(dotted_name)
-    if cached is not None:
-        _install_layout_module = cached
-        return cached
-    spec = importlib.util.spec_from_file_location(
-        dotted_name, Path(__file__).resolve().parent / "install_layout.py"
-    )
-    if spec is None or spec.loader is None:
-        raise ImportError(f"cannot load {dotted_name!r} beside {__file__}")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    sys.modules.setdefault(dotted_name, module)
-    _install_layout_module = module
-    return module
+    _install_layout_module = _load_package_module_by_path("daemon/install_layout.py")
+    return _install_layout_module
 
 
 def is_self_install_mode(project_path: Path) -> bool:
