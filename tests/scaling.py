@@ -31,6 +31,11 @@ SIZE_FACTOR: Final = 8
 SUPERLINEAR_RATIO: Final = 24
 # Each cost is the minimum over this many runs: noise only ever adds time.
 REPEATS: Final = 3
+# Cheap work is sampled until this much CPU time has been spent on it, so that
+# a microsecond-scale cost is the minimum of many runs, not of three.
+SAMPLE_BUDGET_SECONDS: float = 0.01
+# Most runs of any one measurement, however cheap the work.
+MAX_REPEATS: Final = 40
 # Longest the clock is spun while looking for its next tick.
 _RESOLUTION_PROBE_SECONDS: float = 0.05
 # One tick where the platform cannot report the clock's resolution (Windows
@@ -75,8 +80,24 @@ def cpu_seconds(work: Callable[[], object]) -> float:
 
 
 def min_cpu_seconds(work: Callable[[], object], repeats: int = REPEATS) -> float:
-    """The least CPU time ``work`` takes over ``repeats`` runs."""
-    return min(cpu_seconds(work) for _ in range(repeats))
+    """The least CPU time ``work`` takes over at least ``repeats`` runs.
+
+    Noise only ever adds time, so the minimum is the estimate. Work that costs
+    microseconds is also the work a scheduler hiccup can swamp, and three
+    samples of it are too few to be sure one escaped the hiccup: it keeps
+    sampling, up to ``MAX_REPEATS`` runs, until it has spent
+    ``SAMPLE_BUDGET_SECONDS`` of CPU. Work that costs more than a third of the
+    budget per run stops at ``repeats`` runs, exactly as before.
+    """
+    best = cpu_seconds(work)
+    spent = best
+    runs = 1
+    while runs < MAX_REPEATS and (runs < repeats or spent < SAMPLE_BUDGET_SECONDS):
+        cost = cpu_seconds(work)
+        best = min(best, cost)
+        spent += cost
+        runs += 1
+    return best
 
 
 def _visit_every_character(text: str) -> int:

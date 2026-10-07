@@ -738,6 +738,51 @@ class TestRegimeIsIndependentOfEarlierWarnings:
         assert first == second == (True, "allow", True)
 
 
+class _CostlyHandler(Handler):
+    """Does ``len(command) ** exponent`` loop iterations on a Bash command."""
+
+    def __init__(self, exponent: int) -> None:
+        super().__init__(handler_id=HandlerID.DESTRUCTIVE_GIT, priority=Priority.DESTRUCTIVE_GIT)
+        self._exponent = exponent
+
+    def matches(self, hook_input: dict) -> bool:
+        return True
+
+    def handle(self, hook_input: dict) -> HookResult:
+        size = len(hook_input["tool_input"]["command"])
+        total = 0
+        for step in range(size**self._exponent):
+            total += step
+        return HookResult(decision=Decision.ALLOW, reason=str(total))
+
+    def get_claude_md(self) -> str | None:
+        return None
+
+    def get_acceptance_tests(self) -> list[AcceptanceTest]:
+        return []
+
+
+class TestTheSweepMeasureSeparatesLinearFromQuadraticHandlers:
+    """The measurement the sweeps share (``scaling_ratio`` via ``_growth_finding``)
+    must keep flagging a real quadratic handler and clearing a linear one, on
+    inputs of the same few-hundred-byte scale as the combinatorial shapes."""
+
+    @staticmethod
+    def _finding(exponent: int) -> str | None:
+        def input_at(size: int) -> dict:
+            return _bash_input("echo " + "x" * size)
+
+        return _growth_finding(_CostlyHandler(exponent), input_at, 60, "echo " + "x" * 480)
+
+    def test_a_quadratic_handler_is_flagged(self) -> None:
+        finding = self._finding(2)
+        assert finding is not None
+        assert finding.startswith("cost grew")
+
+    def test_a_linear_handler_is_not_flagged(self) -> None:
+        assert self._finding(1) is None
+
+
 class TestCombinatorialSmallInputShapesStayLinear:
     """Every swept handler, driven with SHORT combinatorial hostile shapes.
 
