@@ -172,8 +172,9 @@ waited on one bandit decision.
   [RESEARCH.md](RESEARCH.md) "Probe results (Task 6.3)".
 - [ ] ⬜ **Task 6.4**: From the probe: by default only the initial thread of a
   session is required to hold the declared crons. Threads opened later hold none
-  unless explicitly instructed. Needs a signal that tells a later thread from a new session; the 6.3 payloads carry
-  none, so first capture a new thread's SessionStart payload.
+  unless explicitly instructed. No hook payload tells a later thread from a new session (a new thread's SessionStart
+  reports `source: "startup"`). First prove the candidate in RESEARCH.md: threads share one Claude Code process, so
+  the first session seen per process pid is the initial thread.
 
 ## Success Criteria
 

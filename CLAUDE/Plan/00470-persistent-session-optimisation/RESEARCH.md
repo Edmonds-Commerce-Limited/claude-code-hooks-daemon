@@ -200,8 +200,9 @@ was then prompted; thread 1 then read the capture files.
    opened it.
 3. **Only Stop carries `session_crons`.** UserPromptSubmit payloads have no such key, before or after the cron
    existed. Any cron check must keep reading it from Stop.
-4. **Not observed:** whether opening a thread fires SessionStart. Thread 2 was opened before capture was on, and no
-   SessionStart was captured afterwards.
+4. **Opening a thread fires SessionStart, with `source: "startup"`.** A third thread opened with capture on produced
+   the only SessionStart record since the restart: a new `session_id`, its own transcript, and the same `source` a
+   brand-new session reports. No payload field marks it as a thread of an existing session.
 5. **Where it applies:** the owner's ccy stack has removed the new-thread action, so container sessions do not get
    second threads. In this repository, host sessions have autonomy off (Plan 00498), so no crons are demanded there
    either. Task 6.4 matters for client projects that allow autonomy where threads can be opened.
@@ -210,6 +211,9 @@ Consequence for Task 6.4: the daemon sees a later thread as a fresh session with
 compares the declared jobs with the Stop's `session_crons` (`cron_stop_enforcer.py:145-179`), and a present but empty
 list counts as missing, so it would demand the declared crons at every thread's stop, and each thread would then
 run its own copy of every job. `persistent_cron_assertor` does not read `session_crons`; it states the declared jobs
-at SessionStart, so it adds to this only if a new thread fires SessionStart (item 4, not observed). Telling "a thread opened later" apart from "a new session" needs a signal
-these payloads do not carry. The SessionStart payload of a new thread, its `source` field included, is the next thing
-to capture.
+at SessionStart, which a new thread fires (item 4), so it would also tell every thread to create them.
+No hook payload tells "a thread opened later" from "a new session". A candidate signal outside the payload: every
+thread runs inside the same Claude Code process, while a new session is a new process. The hook client could send
+the pid of the Claude Code process it runs under, and the daemon would treat the first session seen for that pid as
+the initial thread. Unverified: Task 6.4 must first show that two threads report the same process and two sessions
+do not.

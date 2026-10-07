@@ -21,17 +21,12 @@ daemon:
 
   # Payload capture (Plan 00158) - dogfooding aid. When enabled the daemon appends
   # the raw hook_input it receives to <untracked>/payload-capture/<event>.jsonl.
-  # Applied by a daemon restart (never a Claude Code relaunch). ON here for Plan
-  # 00470 Task 6.3: how a second thread in one session appears in the
-  # session_id, transcript_path and session_crons of these events. Turn it off
-  # when the probe is recorded. Ships OFF by default.
+  # Applied by a daemon restart (never a Claude Code relaunch). Ships OFF by default.
   payload_capture:
-    enabled: true
+    enabled: false             # off (shipped default); flip to true + restart daemon to dogfood
     dir: null                  # null = <daemon untracked>/payload-capture
     events:                    # empty list = all events; scope e.g. to [Status]
-      - SessionStart
-      - UserPromptSubmit
-      - Stop
+      - Status
 
   # Transport (Plan 00290) - opt-in relay/nc hot-path rungs. Both false is
   # today's behaviour, byte-identical. Relay measured at p50 4.3ms / p95
