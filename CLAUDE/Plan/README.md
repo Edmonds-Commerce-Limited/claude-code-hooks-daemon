@@ -6,8 +6,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00499: write-protected paths, and the ccy.env.local.dist template](00499-write-protected-paths-and-ccy-env-local-dist/PLAN.md) - In Progress, Low (owner rulings: `ccy.env.local` is written by IaC only, so agents may read it but never write it; a generic `write_protected_paths` guard for any project, and GitHub #88's tracked `ccy.env.local.dist` template with the corrected scope)
 
-- [00498: autonomy only where allowed](00498-autonomy-only-where-allowed/PLAN.md) - In Progress, High (owner request after a desktop agent drifted off its one task: one config switch, keyed on the detected environment (host, docker, podman, lxc) and role alias, decides whether any crons, goal pressure or resume advice run; this repo turns them off on the desktop)
-
 - [00496: upstream feature requests and issue kinds](00496-upstream-feature-requests-and-issue-kinds/PLAN.md) - Not Started (owner request: a formal process for project agents to file feature requests and other non-defect issues, mirroring the defect generator, guard and forms; security reports routed privately)
 
 - [00495: performance improvement programme](00495-performance-improvement-programme/PLAN.md) - In Progress (owner report: daemon startup and the status bar at session start got much slower; profile current main against earlier releases, fix the ranked causes, add a regression guard, and re-answer the Rust question from new numbers)
@@ -199,6 +197,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Completed Plans
 
+- [00498: autonomy only where allowed](Completed/00498-autonomy-only-where-allowed/PLAN.md) - Complete at merge `68dd20179` + the archiving commit (owner request after a desktop agent drifted off its one task: a top-level `autonomy:` block, keyed on the detected environment and role alias, decides whether crons, goal pressure and resume advice run; this repo allows them in containers only, and the owner's desktop session showed `no autonomy` with an empty CronList)
+
 - [00494: Claude Code mods review](Completed/00494-claude-code-mods-review/PLAN.md) - Complete at `f794f4cd1` + the archiving commit (owner request: 21 mod docs vendored, an Opus review and brainstorm, then a one-mod proposal the owner approved with its build order and deployment route; the build is Plan 00497)
 
 - [00493: upgrade silently disables opt-in handlers](Completed/00493-upgrade-silently-disables-opt-in-handlers/PLAN.md) - Complete at `3d696453b`, merged `4030e688f` + the archiving commit (client report: the v3.68.0 upgrade dropped unnamed opt-in handlers silently; the upgrade now names every handler it stops or starts, prints the restore snippet and the from-to version, and the config diff summary finds the real backup; auto-restore stays an owner question)
@@ -256,10 +256,7 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 - [00438: kill suggestion can name the protected group](Completed/00438-kill-suggestion-can-name-the-protected-group/PLAN.md) - Complete at `d9990531` + the archiving commit (from 00422 N5 row (i): `exclude_pgids` was honoured when deciding what breaches and ignored when building the `kill --` the report prints, so the harvester could recommend killing its own group)
 
 - [00437: session advice counter is shared and locked](Completed/00437-session-advice-counter-is-shared-and-locked/PLAN.md) - Complete at `2fbe655e` + the archiving commit (from 00422 N5 row (c): two handlers carried the same unlocked eviction on a daemon-lifetime singleton, and dispatch really is threaded — the test had to drive CPython's switch interval to its floor before the KeyError would appear at all)
-
-- [00436: empty truncated cron prompt matches anything](Completed/00436-empty-truncated-cron-prompt-matches-anything/PLAN.md) - Complete at `0e4c2d11` + the archiving commit (from 00422 N5 row (g): a delivered cron prompt that is nothing but a truncation marker strips to an empty prefix, which every declaration starts with, so a cron that was never created was reported as live)
-
-Older completed plans (below the retention window of the 30 highest-numbered) are archived verbatim in [Completed/README.md](Completed/README.md).
+  Older completed plans (below the retention window of the 30 highest-numbered) are archived verbatim in [Completed/README.md](Completed/README.md).
 
 ## Blocked / On Hold Plans
 
@@ -312,9 +309,9 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 - **Total Plans Created**: 499 (count = `hooksdaemon.latestPlanNumber` git counter)
 
-- **Completed**: 421 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
+- **Completed**: 422 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 55 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 54 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 

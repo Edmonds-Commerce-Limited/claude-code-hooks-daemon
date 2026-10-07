@@ -1,6 +1,6 @@
 # Plan 00498: autonomy only where allowed
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-10-06
 **Owner**: dev
 **Priority**: High
@@ -79,14 +79,16 @@ autonomy:
 
 ### Phase 3: Prove
 
-- [ ] ⬜ **Task 3.1**: Live: a desktop (host) session of this repository creates no crons, receives no failsafe or goal
-  pressure, and stops when its one task is done. A container session is unchanged. The container half is checked
-  (see Success Criteria). The desktop half needs the owner to start a host session of this repository from a
-  checkout of main that includes Plan 00498 (this repository runs its own source, so no release is needed).
+- [x] ✅ **Task 3.1**: Live: a desktop (host) session of this repository creates no crons, receives no failsafe or goal
+  pressure, and stops when its one task is done. A container session is unchanged. Container half: see Success
+  Criteria. Desktop half, run by the owner on a host checkout of main: the status line showed
+  `💻 desktop no autonomy`, CronList returned "No scheduled jobs", and the session stopped once its task was done. The
+  one stop challenge it drew was the hedging-language check, a check on what a reply says that runs everywhere, not
+  a challenge on behalf of other plans.
 
 ## Success Criteria
 
-- [ ] On a desktop session of this repository, `CronList` stays empty and no stop is challenged on behalf of other
+- [x] On a desktop session of this repository, `CronList` stays empty and no stop is challenged on behalf of other
   plans.
 - [x] A ccy container session keeps all of today's autonomy. Checked on the coordinator's podman session after the
   merge and daemon restart: `autonomy_allowed()` is true for environment `podman`, and the failsafe and watchdog
@@ -95,6 +97,9 @@ autonomy:
   `tests/unit/utils/test_autonomy.py` (`test_on_when_the_project_has_no_autonomy_block`,
   `test_default_config_allows_everywhere`) and `tests/unit/core/test_chain_autonomy_gate.py`
   (`test_the_default_is_a_guard_that_always_runs`).
+- [x] Every release-bound consequence is in the pending-release holding area:
+  `UNRELEASED/release-notes/044-autonomy-only-where-the-project-allows-it.md` and the `autonomy` entry in
+  `UNRELEASED/config-changes/v3.69.0.yaml`.
 
 ## Delivery & Milestones
 
@@ -103,3 +108,5 @@ autonomy:
      JOURNAL/00498-Journal-YY-MM-DD.md — see CLAUDE/PlanJournalling.md. -->
 
 - Plan filed from the owner's request, after a desktop agent drifted off its one task.
+- Built and merged to main; container half checked on the coordinator's podman session.
+- Desktop half passed live on the owner's host session.
