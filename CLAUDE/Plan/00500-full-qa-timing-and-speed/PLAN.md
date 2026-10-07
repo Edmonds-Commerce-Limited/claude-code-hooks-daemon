@@ -49,14 +49,16 @@ This plan adds timing first, measures the hot spots from it, then makes the gate
   For resume, `provenance.json` is written once after the whole loop, so a killed run records nothing.
 - [x] ✅ **Task 1.2** (merge `ae92258cf`): Record each gate step's start, end and duration in its result file, and print a sorted per-step
   timing summary at the end of `llm_qa.py all` (TDD).
-- [ ] ⬜ **Task 1.3**: Make the dormant per-test durations real (install pytest-json-report through `uv.lock`, or pass
-  `--durations`) and surface the slowest test files and tests in the report.
+- [x] ✅ **Task 1.3** (merge `0c4b9a168`): Make the dormant per-test durations real (install pytest-json-report through
+  `uv.lock`, or pass `--durations`) and surface the slowest test files and tests in the report. Done with
+  `--durations=50 --durations-min=1.0` on every pytest leg; each leg's `slowest_tests` lands in `tests.json` and the
+  tests summary lists the top 10 across legs.
 
 ### Phase 2: Checkpoints and resume
 
 - [ ] ⬜ **Task 2.1**: Confirm the existing provenance (`llm_qa.py:371-520`) is enough to key a checkpoint: every step,
   including each matrix leg, records the tree it ran on, so a stale result can never be taken as a pass.
-- [x] ✅ **Task 2.2**: Write each step's provenance record as the step finishes, with its own tree check (today the
+- [x] ✅ **Task 2.2** (merge `4d8427ea4`): Write each step's provenance record as the step finishes, with its own tree check (today the
   file is written once after the loop, `llm_qa.py:2683`), then a resume mode (`all --resume`) that skips steps whose
   passing result matches the current tree and runs the rest.
 - [ ] ⬜ **Task 2.3**: Give each matrix leg and scope (`unit`, `rest`) its own checkpoint, so a reboot mid-tests loses
