@@ -70,7 +70,9 @@ This plan adds timing first, measures the hot spots from it, then makes the gate
   whole leg. Coverage: each shard writes its own data file (`COVERAGE_FILE`, no `--cov-fail-under`), kept with its
   checkpoint; `coverage combine` then `coverage report --fail-under=95` judges the whole, so the threshold is unchanged.
   This needs no `parallel = true` in the coverage config (disabled for a fork bomb). Running shards concurrently is
-  Task 3.2's question (the shared daemon, the full-QA lock and its sink plugin) and is not assumed here.
+  Task 3.2's question (the shared daemon, the full-QA lock and its sink plugin) and is not assumed here. For WIP QA,
+  untouched tests are already skipped by `llm_qa.py changed` (`scripts/qa/run_changed_tests.py`); shards should
+  narrow its unmapped and too-broad fallback, which today runs the whole suite, to the shards the change can reach.
 
 ### Phase 3: Speed
 
