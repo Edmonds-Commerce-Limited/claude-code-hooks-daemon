@@ -1414,6 +1414,16 @@ The uncertain-move union judges the hook directory and the LAST recorded move (`
 every candidate directory (`sub`). Remedy: judge every directory any `cd` in the chain could
 land in.
 
+### N372 — the daemon-docs guard warns on the project's own `CLAUDE/` when the repo folder ends in `hooks-daemon`
+
+**Found**: by the owner's desktop session, 2026-10-07. Reading `CLAUDE/Plan/README.md` in a clone named
+`claude-code-hooks-daemon/` drew the warning that it was "the hooks-daemon's internal docs copy".
+`daemon_docs_guard.py:20` matches any path containing `hooks-daemon/CLAUDE/`, so every project folder whose name ends
+in `hooks-daemon` trips it. It should match only the `.claude/hooks-daemon/CLAUDE/` segment. Same class as the loose
+path matching fixed in Plan 00458.
+
+**Status**: 🔄 Branch in progress.
+
 ### N371 — the plan counter is per clone, so a second clone of this repository would reuse plan numbers
 
 **Found**: by the owner's desktop session, 2026-10-07 (Plan 00498 desktop check). In the desktop clone
