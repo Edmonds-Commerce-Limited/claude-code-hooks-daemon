@@ -934,7 +934,9 @@ class DestructiveGitHandler(PreToolUseHandlerBase):
         check = (
             _branch_delete_note
             if not others
-            else _remote_delete_note if rule_ids == [RuleID.GIT_PUSH_DELETE_REMOTE] else None
+            else _remote_delete_note
+            if rule_ids == [RuleID.GIT_PUSH_DELETE_REMOTE]
+            else None
         )
         if check is not None:
             try:
