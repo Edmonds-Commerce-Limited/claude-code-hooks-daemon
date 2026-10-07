@@ -186,3 +186,28 @@ deliberately. Decide from a measured A/B (Phase 4), not from this reasoning.
 4. **Answered by Task 3.4**: no. Only `auto_continue_stop` writes the marker, and it is scoped to
    the main thread.
 5. **Done by Task 1.1.**
+
+### Probe results (Task 6.3): a second thread in one session
+
+Run on the owner's desktop session of this repository, with daemon payload capture on for SessionStart,
+UserPromptSubmit and Stop. Thread 1 created a one-off cron (`probe`); thread 2, opened earlier with the left arrow,
+was then prompted; thread 1 then read the capture files.
+
+1. **A thread is a separate session to the hooks.** Thread 2's payloads carry their own `session_id` and their own
+   `transcript_path` (`<id>.jsonl` in the same project folder). Nothing in the captured fields links it to thread 1.
+2. **`session_crons` is per thread.** Thread 1's Stop after the CronCreate listed `probe`. Thread 2's Stop, which
+   came after it, carried an empty list. A thread does not see, and does not hold, the crons of the thread that
+   opened it.
+3. **Only Stop carries `session_crons`.** UserPromptSubmit payloads have no such key, before or after the cron
+   existed. Any cron check must keep reading it from Stop.
+4. **Not observed:** whether opening a thread fires SessionStart. Thread 2 was opened before capture was on, and no
+   SessionStart was captured afterwards.
+5. **Where it applies:** the owner's ccy stack has removed the new-thread action, so container sessions do not get
+   second threads. In this repository, host sessions have autonomy off (Plan 00498), so no crons are demanded there
+   either. Task 6.4 matters for client projects that allow autonomy where threads can be opened.
+
+Consequence for Task 6.4: the daemon sees a later thread as a fresh session with no crons, so
+`persistent_cron_assertor` and `cron_stop_enforcer` would demand the declared crons in every thread, and each thread
+would then run its own copy of every job. Telling "a thread opened later" apart from "a new session" needs a signal
+these payloads do not carry. The SessionStart payload of a new thread, its `source` field included, is the next thing
+to capture.

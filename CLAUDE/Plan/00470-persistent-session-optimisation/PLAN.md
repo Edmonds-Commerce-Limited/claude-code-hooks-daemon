@@ -165,14 +165,15 @@ waited on one bandit decision.
 - [x] ✅ **Task 6.2**: This project's `issue-sdlc` job gets
   `hosts: [cchd-sdlc-runner]`. An SDLC runner is started anywhere by exporting
   `HOOKS_DAEMON_HOSTNAME=cchd-sdlc-runner` before launching the session.
-- [ ] ⬜ **Task 6.3** (paused until the owner is present, owner ruling D10 of 2026-10-06: the owner opens the second
-  thread): Probe, by dogfooding, how extra agent threads opened in one
+- [x] ✅ **Task 6.3**: Probe, by dogfooding, how extra agent threads opened in one
   Claude Code session (left arrow, then a new thread) appear in hook payloads:
-  their `session_id`, transcript and `session_crons`. Record the results in
-  RESEARCH.md before any design.
+  their `session_id`, transcript and `session_crons`. Done on the owner's desktop session: a thread has its own
+  `session_id` and transcript, and its own (empty) `session_crons`; only Stop carries that key. Results in
+  [RESEARCH.md](RESEARCH.md) "Probe results (Task 6.3)".
 - [ ] ⬜ **Task 6.4**: From the probe: by default only the initial thread of a
   session is required to hold the declared crons. Threads opened later hold none
-  unless explicitly instructed.
+  unless explicitly instructed. Needs a signal that tells a later thread from a new session; the 6.3 payloads carry
+  none, so first capture a new thread's SessionStart payload.
 
 ## Success Criteria
 
