@@ -1414,6 +1414,59 @@ The uncertain-move union judges the hook directory and the LAST recorded move (`
 every candidate directory (`sub`). Remedy: judge every directory any `cd` in the chain could
 land in.
 
+### N374 — v3.69.0 release code review: non-blocking findings to work through
+
+**Source**: the v3.69.0 release code review gate (three reviewers over `git diff v3.68.0..HEAD -- src/`):
+[pre-tool-use](subagent-reports/261007-v369-review-pre-tool-use-opus.md),
+[core/daemon/handlers](subagent-reports/261007-v369-review-core-daemon-handlers-opus.md),
+[utils/install/rest](subagent-reports/261007-v369-review-utils-install-rest-opus.md). Each report gives file:line,
+evidence and a fix; several have probe scripts under `untracked/scratch/review-v369/`, `untracked/scratch/rev/` and
+`untracked/scratch/review-rest/`, which are not kept across a container reset.
+
+**Evidence** (all judged non-blocking for the release; the most security-relevant first):
+
+01. `rg -r X needle` is parsed as searching root `needle`, not `.`: `-r`/`--replace` takes a value the recursive
+    search parser does not consume, so protected files under `.` are missed (`utils/recursive_search.py:62-69, 189-201`).
+02. A glob that reaches a protected file is allowed silently while the protected-file index is still building after a
+    restart; the docs promise an advisory (`secret_file_guard.py:1394`, `quarantine_artefact_read_guard.py:337`).
+03. `git push --mirror` and `git push --prune` delete remote refs but miss the human-only remote-delete rule
+    (`destructive_git.py:113`).
+04. `host_command_guard` misses `docker run -itv /:/host` and `docker compose run -v /:/h`
+    (`host_command_guard.py:178-245`); it denies `gh auth token > /dev/null` and treats `pypi.python.org` as non-PyPI
+    (`:294-312`, `:51`).
+05. Plan fact-check delivery has no lock: two concurrent events can deliver one check twice, and an unreadable record
+    can raise `FileNotFoundError`; it goes to whichever session or sub-agent calls next
+    (`utils/plan_fact_check.py:250-259, 349-376`, `plan_fact_check_feed.py:97-124`).
+06. `daemon_sync_after_merge.py:197-198` takes the LAST effective cwd as the merge directory.
+07. `check-effective-handlers` exits 1 on malformed YAML, which `scripts/upgrade.sh` reads as "handlers change
+    state"; its exit codes are untested (`cli.py:4263-4297`).
+08. The upgrade rewrites a `CCY_CLAUDE_WRAPPER` line pointing at a custom directory, possibly to a missing file
+    (`install/ccy_supervisor.py:244-258`).
+09. `find_under` runs `git check-ignore` once per ignored protected file in one PreToolUse call
+    (`utils/protected_file_index.py:136-142, 187-200`); its `index_for` docstring says 600 s where the code retries
+    at 30 s (`:331-333`).
+10. The open-issue listing stops at 100 without saying so (`utils/github_issue_validity.py:75, 486-509`).
+11. Smaller: autonomy re-detects the container runtime per event (`utils/autonomy.py:57-59`); a hard-coded
+    `"completed"` and duplicated pattern compilation in `cli.py:3925, 7751-7756`; the fallback response schema would
+    reject a top-level `decision` (`core/response_schemas.py:451`); an unreadable doc is logged only at DEBUG
+    (`docs_qa/checks/unlisted_fake_value.py:123`); repeated literals in `destructive_git.py:502-536`;
+    `sensitive_content` re-reads `.claude/fake-values.yaml` on every matching write.
+
+**Status**: Open.
+
+### N373 — an invalid `stand_in_delay_hours` silently unregisters the whole Stop enforcement handler
+
+**Source**: the v3.69.0 release code review gate
+([report](subagent-reports/261007-v369-review-core-daemon-handlers-opus.md)), graded BLOCKER.
+
+**Evidence**: the option setter in `handlers/stop/auto_continue_stop.py:653-667` raises on 24, 0 or `"3"`, and
+`handlers/registry.py:350-366, 948-949` catches that around the whole handler, so `AutoContinueStopHandler` (the
+`STOPPING BECAUSE:` enforcement and the awaiting-human marker) is dropped with only a WARNING log. Nothing reaches
+`option_failures`, so the session-start alert stays silent.
+
+**Status**: In progress — fixed before the v3.69.0 release (a `validate_options` like
+`IdleHousekeepingAdvisoryHandler`'s, so a bad value is reported and the handler keeps its default).
+
 ### N372 — the daemon-docs guard warns on the project's own `CLAUDE/` when the repo folder ends in `hooks-daemon`
 
 **Found**: by the owner's desktop session, 2026-10-07. Reading `CLAUDE/Plan/README.md` in a clone named
