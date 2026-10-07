@@ -62,7 +62,7 @@ This plan adds timing first, measures the hot spots from it, then makes the gate
 - [x] ✅ **Task 2.2** (merge `4d8427ea4`): Write each step's provenance record as the step finishes, with its own tree check (before
   this task the file was written once after the whole loop), then a resume mode (`all --resume`) that skips steps whose
   passing result matches the current tree and runs the rest.
-- [x] ✅ **Task 2.3**: Give each matrix leg and scope (`unit`, `rest`) its own checkpoint, so a reboot mid-tests loses
+- [x] ✅ **Task 2.3** (merge `89f8f722e`): Give each matrix leg and scope (`unit`, `rest`) its own checkpoint, so a reboot mid-tests loses
   only the leg it interrupted, while coverage is still judged on the whole (parallel coverage mode is disabled today,
   `pyproject.toml:135-136`).
 - [ ] ⬜ **Task 2.4**: Shard the test suite. Split each leg into named shards (by test directory, balanced with the
