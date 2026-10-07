@@ -44,7 +44,7 @@ This plan adds timing first, measures the hot spots from it, then makes the gate
 
 - [ ] ⬜ **Task 1.1**: Read-only review of where the time goes and of today's timing data. Report:
   `subagent-reports/261007-qa-speed-review-sonnet.md` (in progress).
-- [ ] ⬜ **Task 1.2**: Record each gate step's start, end and duration in its result file, and print a sorted per-step
+- [x] ✅ **Task 1.2** (merge `ae92258cf`): Record each gate step's start, end and duration in its result file, and print a sorted per-step
   timing summary at the end of `llm_qa.py all` (TDD).
 - [ ] ⬜ **Task 1.3**: Make the dormant per-test durations real (install pytest-json-report through `uv.lock`, or pass
   `--durations`) and surface the slowest test files and tests in the report.
