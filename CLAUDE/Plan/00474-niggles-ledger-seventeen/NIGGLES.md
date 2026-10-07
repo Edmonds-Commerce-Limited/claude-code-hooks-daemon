@@ -1418,11 +1418,12 @@ land in.
 
 **Found**: by the owner's desktop session, 2026-10-07 (Plan 00498 desktop check). In the desktop clone
 `git config --local hooksdaemon.latestPlanNumber` read 489, while plan folders up to 00499 exist on main and the
-container clone reads 499. The counter lives in each clone's local git config, so a clone that has not run
-`mkplan.bash` since plans 00490–00499 were filed elsewhere would hand out 00490 again. The guidance says "the daemon
-keeps it correct across branches"; nothing says across clones. Remedy: `mkplan.bash` takes the maximum of the
-counter and the highest plan number on disk (including `Completed/`) before assigning, or the daemon reconciles it at
-SessionStart.
+container clone reads 499. The counter lives in each clone's local git config. `mkplan.bash` already scans the
+plan folders (including `Completed/`) and dies when they run ahead of the counter (lines 764-766), so with
+00490–00499 pulled it refuses rather than reusing a number. It reuses one only when the clone's folders are stale
+too. The daemon's `counter + 1` path (`plan_numbering.py:180`) does not look at the disk. The guidance says "the
+daemon keeps it correct across branches"; nothing says across clones. Remedy: `mkplan.bash` advances the counter to
+the highest plan number on disk instead of dying on that drift, and the daemon's path checks the disk the same way.
 
 **Status**: ⬜ Open.
 
