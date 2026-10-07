@@ -1422,7 +1422,11 @@ land in.
 in `hooks-daemon` trips it. It should match only the `.claude/hooks-daemon/CLAUDE/` segment. Same class as the loose
 path matching fixed in Plan 00458.
 
-**Status**: 🔄 Branch in progress.
+**Status**: ✅ Fixed on this branch (merge pending). The guard now uses `matches_path_segment` from
+`utils/path_segments.py` with `.claude/hooks-daemon/CLAUDE/`. Tests in
+`tests/unit/handlers/pre_tool_use/test_daemon_docs_guard.py`:
+`test_not_matches_project_folder_ending_in_hooks_daemon` (five parametrised paths) and
+`test_matches_daemon_install_inside_project_named_hooks_daemon`.
 
 ### N371 — the plan counter is per clone, so a second clone of this repository would reuse plan numbers
 

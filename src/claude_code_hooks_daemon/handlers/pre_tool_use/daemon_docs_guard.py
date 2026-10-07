@@ -11,13 +11,15 @@ from claude_code_hooks_daemon.constants import (
 )
 from claude_code_hooks_daemon.core import Decision, GatingResult
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
+from claude_code_hooks_daemon.utils.path_segments import matches_path_segment
 from claude_code_hooks_daemon.utils.scratch_dir import acceptance_path
 
 # Pattern that identifies the daemon's internal docs directory.
 # In normal installs, the daemon is cloned to .claude/hooks-daemon/, which brings
 # along the daemon's own CLAUDE/ docs directory. This collides with the project's
-# CLAUDE/ convention — both paths contain "CLAUDE/" as a segment.
-_DAEMON_CLAUDE_PATTERN = "hooks-daemon/CLAUDE/"
+# CLAUDE/ convention — both paths contain "CLAUDE/" as a segment. Matched on
+# whole path segments, so a project folder merely ending in "hooks-daemon" is not it.
+_DAEMON_CLAUDE_PATTERN = ".claude/hooks-daemon/CLAUDE/"
 
 _TARGET_TOOLS = {ToolName.READ, ToolName.WRITE, ToolName.EDIT}
 
@@ -64,7 +66,7 @@ class DaemonDocsGuardHandler(PreToolUseHandlerBase):
         if not file_path:
             return False
 
-        return _DAEMON_CLAUDE_PATTERN in file_path
+        return matches_path_segment(file_path, (_DAEMON_CLAUDE_PATTERN,))
 
     def handle(self, hook_input: dict[str, Any]) -> GatingResult:
         """Allow the operation but inject a warning about the wrong CLAUDE/ directory."""
