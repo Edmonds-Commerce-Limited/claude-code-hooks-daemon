@@ -1464,8 +1464,13 @@ evidence and a fix; several have probe scripts under `untracked/scratch/review-v
 `STOPPING BECAUSE:` enforcement and the awaiting-human marker) is dropped with only a WARNING log. Nothing reaches
 `option_failures`, so the session-start alert stays silent.
 
-**Status**: In progress — fixed before the v3.69.0 release (a `validate_options` like
-`IdleHousekeepingAdvisoryHandler`'s, so a bad value is reported and the handler keeps its default).
+**Status**: ✅ Fixed before the v3.69.0 release (commit f4d3c34a6, merged to main). `AutoContinueStopHandler` gained
+a `validate_options` like `IdleHousekeepingAdvisoryHandler`'s, so the registry withholds a bad value, reports it on
+`option_failures` and keeps the handler on its 3-hour default. Tests in
+`tests/unit/handlers/test_registry_option_validation.py` register through `register_all` with 24, 0, -1, `"3"`,
+`True` and NaN. Same class, not fixed: `bash_safe_mode`'s `mode` and `exempt_patterns` setters raise and drop the
+handler. That is unchanged since v3.68.0, and the handler's docstring says it is deliberate; whether it should
+report through `option_failures` instead is open.
 
 ### N372 — the daemon-docs guard warns on the project's own `CLAUDE/` when the repo folder ends in `hooks-daemon`
 
