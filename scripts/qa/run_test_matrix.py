@@ -25,11 +25,19 @@ time and runs the whole suite under every version in it:
 An extra interpreter that cannot be provisioned FAILS the stage and says so;
 the stage never quietly runs fewer versions than CI. Its report is written
 over ``tests.json`` with a per-run ``interpreters`` list.
+
+Each leg also writes its own checkpoint (:class:`LegCheckpoints`) the moment it
+finishes. ``--resume`` (what ``llm_qa.py all --resume`` passes down) runs only
+the legs with no checkpoint that PASSED on the identical tree; the others run
+as normal. Coverage is judged on the whole: the primary leg is the only one
+with coverage and is reused or re-run as one unit. Without ``--resume`` no leg
+is ever reused.
 """
 
 from __future__ import annotations
 
 import functools
+import importlib
 import json
 import os
 import re
@@ -37,8 +45,10 @@ import shutil
 import subprocess
 import sys
 import time
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from types import ModuleType
 from typing import IO, Any, Final, NamedTuple, Protocol
 
 import yaml
@@ -123,12 +133,17 @@ class RunOutcome(NamedTuple):
 
 
 class RunResult(NamedTuple):
-    """A planned run and what became of it; ``outcome`` is None when it never ran."""
+    """A planned run and what became of it; ``outcome`` is None when it never ran.
+
+    ``reused`` marks a result taken from a checkpoint (``--resume``); its
+    ``duration_seconds`` is then the run that produced it.
+    """
 
     run: PlannedRun
     outcome: RunOutcome | None
     duration_seconds: float
     error: str | None
+    reused: bool = False
 
 
 class Job(Protocol):
@@ -137,13 +152,171 @@ class Job(Protocol):
     def wait(self) -> RunOutcome: ...
 
 
+# ── Per-leg checkpoints ────────────────────────────────────────────
+
+#: The argument ``llm_qa.py all --resume`` passes to this stage.
+RESUME_ARG: Final[str] = "--resume"
+
+#: What a leg records when the tree changed while it ran: matches no tree.
+TREE_CHANGED: Final[str] = "changed-during-run"
+
+_STATE_DIGEST: Final[str] = "tree_digest"
+_CK_PASSED: Final[str] = "passed"
+_CK_EXIT_CODE: Final[str] = "exit_code"
+_CK_DURATION: Final[str] = "duration_seconds"
+_CK_ARTEFACT: Final[str] = "artefact"
+_CK_ARTEFACT_SHA: Final[str] = "artefact_sha256"
+_CK_PAYLOAD: Final[str] = "payload"
+_DURATION_DECIMALS: Final[int] = 1
+
+
+def _load_gate_provenance() -> ModuleType:
+    """``llm_qa``: the one definition of the identical tree, shared with the per-step provenance.
+
+    It is a sibling script rather than a package module (it must run under any
+    python3, before a venv), so it is imported by its directory.
+    """
+    if str(SCRIPTS_DIR) not in sys.path:
+        sys.path.insert(0, str(SCRIPTS_DIR))
+    return importlib.import_module("llm_qa")
+
+
+_GATE: Final[ModuleType] = _load_gate_provenance()
+
+
+def checkout_tree() -> dict[str, str] | None:
+    """HEAD plus a digest of every uncommitted change of this checkout; None when unreadable."""
+    state: dict[str, str] | None = _GATE.worktree_state(PROJECT_ROOT)
+    return state
+
+
+class LegCheckpoint(NamedTuple):
+    """A reusable leg: what it reported, and how long the run that produced it took."""
+
+    payload: dict[str, Any]
+    duration_seconds: float
+
+
+class LegCheckpoints:
+    """The checkpoint files of one QA output directory, one per leg key.
+
+    A checkpoint is reused only when the tree is the one the leg judged (and
+    was unchanged from just before to just after the leg), the leg exited 0
+    and passed, and the artefact it points at hashes to what the leg wrote.
+    """
+
+    def __init__(self, qa_dir: Path, *, tree: Callable[[], dict[str, str] | None]) -> None:
+        self.qa_dir = qa_dir
+        self.tree = tree
+
+    def path(self, key: str) -> Path:
+        """The checkpoint file of the leg ``key``."""
+        return self.qa_dir / f"leg-{key}.checkpoint.json"
+
+    def read(self, key: str) -> dict[str, Any]:
+        """The recorded checkpoint; missing, torn or foreign reads as none at all."""
+        try:
+            data = json.loads(self.path(key).read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return {}
+        return data if isinstance(data, dict) else {}
+
+    def write(self, key: str, record: Mapping[str, Any]) -> None:
+        """Write ``record`` to a temp file and rename it over the checkpoint.
+
+        A run killed part-way leaves the previous complete file, never a torn one.
+        """
+        self.qa_dir.mkdir(parents=True, exist_ok=True)
+        target = self.path(key)
+        temp = target.with_name(f".{target.name}.{os.getpid()}.tmp")
+        temp.write_text(json.dumps(record, indent=2), encoding="utf-8")
+        temp.replace(target)
+
+    def invalidate(self, key: str) -> None:
+        """Drop the checkpoint as a leg starts: an interrupted leg must leave none behind."""
+        self.path(key).unlink(missing_ok=True)
+
+    def save(
+        self,
+        key: str,
+        *,
+        before: dict[str, str] | None,
+        after: dict[str, str] | None,
+        exit_code: int,
+        passed: bool,
+        duration_seconds: float,
+        artefact: Path | None,
+        payload: Mapping[str, Any],
+    ) -> None:
+        """Record a finished leg, judged on the tree just before and just after it.
+
+        A leg that saw the tree change certifies no tree. A tree that could not
+        be read before the leg records nothing.
+        """
+        if before is None:
+            return
+        state = before if after == before else {**before, _STATE_DIGEST: TREE_CHANGED}
+        record: dict[str, Any] = {
+            **state,
+            _CK_PASSED: passed,
+            _CK_EXIT_CODE: exit_code,
+            _CK_DURATION: round(duration_seconds, _DURATION_DECIMALS),
+            _CK_PAYLOAD: dict(payload),
+        }
+        if artefact is not None:
+            record[_CK_ARTEFACT] = str(artefact)
+            record[_CK_ARTEFACT_SHA] = _GATE.output_digest(artefact)
+        self.write(key, record)
+
+    def check(self, key: str) -> LegCheckpoint | str:
+        """The reusable leg, or the reason it must run again."""
+        record = self.read(key)
+        if not record:
+            return "no checkpoint for this leg"
+        stale: str | None = _GATE.stale_reason(record, self.tree())
+        if stale is not None:
+            return stale
+        if record.get(_CK_PASSED) is not True or record.get(_CK_EXIT_CODE) != 0:
+            return "the recorded leg did not pass"
+        payload = record.get(_CK_PAYLOAD)
+        duration = record.get(_CK_DURATION)
+        if (
+            not isinstance(payload, dict)
+            or isinstance(duration, bool)
+            or not isinstance(duration, (int, float))
+        ):
+            return "the checkpoint is incomplete"
+        if _CK_ARTEFACT in record and (
+            record.get(_CK_ARTEFACT_SHA) is None
+            or _GATE.output_digest(Path(str(record[_CK_ARTEFACT]))) != record[_CK_ARTEFACT_SHA]
+        ):
+            return "the artefact on disk is not the one that leg wrote"
+        return LegCheckpoint(payload=payload, duration_seconds=float(duration))
+
+
+def resume_requested(argv: Sequence[str]) -> bool:
+    """Whether ``argv`` asks to resume; any other argument fails fast."""
+    unknown = [argument for argument in argv if argument != RESUME_ARG]
+    if unknown:
+        raise SystemExit(
+            f"run_test_matrix.py: unknown arguments {unknown}; the only option is {RESUME_ARG}"
+        )
+    return RESUME_ARG in argv
+
+
 class MatrixDeps(NamedTuple):
-    """The side effects ``run_matrix`` needs, injectable so tests need no interpreters."""
+    """The side effects ``run_matrix`` needs, injectable so tests need no interpreters.
+
+    ``checkpoints`` records every leg as it finishes; with ``resume`` a leg
+    that passed on the identical tree is reused instead of run.
+    """
 
     provision: Callable[[str], Path]
     launch: Callable[[PlannedRun, Path], Job]
     ensure_daemon: Callable[[], str | None]
     clock: Callable[[], float]
+    checkpoints: LegCheckpoints | None = None
+    resume: bool = False
 
 
 # ── The plan ───────────────────────────────────────────────────────
@@ -244,18 +417,66 @@ def run_matrix(
         reason = provisioned.get(run.version, "not provisioned")
         return RunResult(run, None, 0.0, f"Python {run.version} was NOT tested: {reason}")
 
-    started: list[tuple[PlannedRun, Job, float]] = []
+    checkpoints = deps.checkpoints
+
+    def reuse(run: PlannedRun) -> RunResult | None:
+        """The leg's checkpoint as a result, when ``--resume`` and the checkpoint allow it."""
+        if checkpoints is None or not deps.resume:
+            return None
+        found = checkpoints.check(leg_key(run))
+        if isinstance(found, str):
+            print(f"  {_label(run)}: running ({found})")
+            return None
+        if run.primary:
+            _restore_primary_report(checkpoints, run)
+        print(f"  {_label(run)}: reused, passed on this tree (took {found.duration_seconds}s)")
+        return RunResult(
+            run, _outcome_from_payload(found.payload), found.duration_seconds, None, True
+        )
+
+    def begin(run: PlannedRun) -> dict[str, str] | None:
+        """Drop any old checkpoint as the leg starts; return the tree it starts on."""
+        if checkpoints is None:
+            return None
+        checkpoints.invalidate(leg_key(run))
+        return checkpoints.tree()
+
+    def finish(run: PlannedRun, job: Job, before: dict[str, str] | None, began: float) -> RunResult:
+        """Wait for the leg and checkpoint it at once, whatever else is still running."""
+        outcome = job.wait()
+        duration = deps.clock() - began
+        if checkpoints is not None:
+            _checkpoint_leg(checkpoints, run, outcome, before, duration)
+        return RunResult(run, outcome, duration, None)
+
+    started: list[tuple[PlannedRun, Job, dict[str, str] | None, float]] = []
     for run in (r for r in plan if r.phase == PHASE_PARALLEL):
+        cached = reuse(run)
+        if cached is not None:
+            results[run] = cached
+            continue
         python = python_for(run)
         if python is None:
             results[run] = not_run(run)
             continue
-        started.append((run, deps.launch(run, python), deps.clock()))
-    for run, job, began in started:
-        outcome = job.wait()
-        results[run] = RunResult(run, outcome, deps.clock() - began, None)
+        before = begin(run)
+        started.append((run, deps.launch(run, python), before, deps.clock()))
+    if started:
+        # One waiter per leg, so each leg is checkpointed the moment IT ends
+        # rather than when the slowest leg before it in line does.
+        with ThreadPoolExecutor(max_workers=len(started)) as pool:
+            pending = [
+                (run, pool.submit(finish, run, job, before, began))
+                for run, job, before, began in started
+            ]
+            for run, future in pending:
+                results[run] = future.result()
 
     for run in (r for r in plan if r.phase == PHASE_SERIAL):
+        cached = reuse(run)
+        if cached is not None:
+            results[run] = cached
+            continue
         python = python_for(run)
         if python is None:
             results[run] = not_run(run)
@@ -266,11 +487,81 @@ def run_matrix(
         daemon_note = deps.ensure_daemon()
         if daemon_note is not None:
             print(daemon_note)
+        before = begin(run)
         began = deps.clock()
-        outcome = deps.launch(run, python).wait()
-        results[run] = RunResult(run, outcome, deps.clock() - began, None)
+        results[run] = finish(run, deps.launch(run, python), before, began)
 
     return [results[run] for run in plan]
+
+
+def leg_key(run: PlannedRun) -> str:
+    """The checkpoint key of one leg."""
+    return f"py{run.version}-{run.scope}"
+
+
+def _primary_report_copy(checkpoints: LegCheckpoints, run: PlannedRun) -> Path:
+    """Where the primary leg's report is kept for reuse.
+
+    ``tests.json`` is overwritten by the merged report when the stage ends, so
+    the primary's own report (the only one with coverage) needs a copy the
+    checkpoint can hash.
+    """
+    return checkpoints.qa_dir / f"tests-py{run.version}-{run.scope}.report.json"
+
+
+def _restore_primary_report(checkpoints: LegCheckpoints, run: PlannedRun) -> None:
+    """Put the primary's checkpointed report back as ``tests.json``, for the coverage verdict."""
+    shutil.copyfile(_primary_report_copy(checkpoints, run), TESTS_JSON)
+
+
+def _payload_from_outcome(outcome: RunOutcome) -> dict[str, Any]:
+    return {
+        "exit_code": outcome.exit_code,
+        "summary": outcome.summary,
+        "failed_tests": outcome.failed_tests,
+        "log": str(outcome.log),
+        "first_error_lines": outcome.first_error_lines,
+        "slowest_tests": list(outcome.slowest_tests),
+    }
+
+
+def _outcome_from_payload(payload: Mapping[str, Any]) -> RunOutcome:
+    return RunOutcome(
+        exit_code=int(payload["exit_code"]),
+        summary=dict(payload["summary"]),
+        failed_tests=list(payload["failed_tests"]),
+        log=Path(payload["log"]),
+        first_error_lines=dict(payload["first_error_lines"]),
+        slowest_tests=list(payload["slowest_tests"]),
+    )
+
+
+def _checkpoint_leg(
+    checkpoints: LegCheckpoints,
+    run: PlannedRun,
+    outcome: RunOutcome,
+    before: dict[str, str] | None,
+    duration: float,
+) -> None:
+    """Record a finished leg, judged on the tree just before and just after it."""
+    artefact: Path | None = outcome.log if outcome.log.is_file() else None
+    if run.primary and artefact is not None:
+        # Atomic like the checkpoint itself, so a kill leaves no torn copy.
+        copy = _primary_report_copy(checkpoints, run)
+        temp = copy.with_name(f".{copy.name}.{os.getpid()}.tmp")
+        shutil.copyfile(artefact, temp)
+        temp.replace(copy)
+        artefact = copy
+    checkpoints.save(
+        leg_key(run),
+        before=before,
+        after=checkpoints.tree(),
+        exit_code=outcome.exit_code,
+        passed=bool(outcome.summary.get("passed_all", False)),
+        duration_seconds=duration,
+        artefact=artefact,
+        payload=_payload_from_outcome(outcome),
+    )
 
 
 def _label(run: PlannedRun) -> str:
@@ -303,6 +594,7 @@ def build_report(
             "primary": run.primary,
             "duration_seconds": round(result.duration_seconds, 1),
             "error": result.error,
+            "reused": result.reused,
         }
         if result.outcome is None:
             passed_all = False
@@ -604,11 +896,12 @@ def _print_runs(report: dict[str, Any]) -> None:
         print(
             f"{head}: {verdict} {entry['passed']} passed, {entry['failed']} failed, "
             f"{entry['errors']} errors, {entry['skipped']} skipped "
-            f"in {entry['duration_seconds']}s"
+            f"in {entry['duration_seconds']}s" + (" (reused)" if entry.get("reused") else "")
         )
 
 
 def main() -> int:
+    resume = resume_requested(sys.argv[1:])
     QA_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     primary_version = f"{sys.version_info.major}.{sys.version_info.minor}"
     began = time.monotonic()
@@ -636,6 +929,8 @@ def main() -> int:
             launch=functools.partial(launch, lock_fd=lock_fd),
             ensure_daemon=ensure_daemon,
             clock=time.monotonic,
+            checkpoints=LegCheckpoints(QA_OUTPUT_DIR, tree=checkout_tree),
+            resume=resume,
         )
         results = run_matrix(plan, Path(sys.executable), deps)
 

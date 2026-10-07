@@ -290,3 +290,31 @@ class TestTheFlag:
         assert self._main(monkeypatch, "--read-only", "all", "--resume") == llm_qa.EXIT_FAILURE
         assert calls == []
         assert "--resume" in capsys.readouterr().err
+
+
+class TestResumeReachesTheTestsTool:
+    """Plan 00500 Task 2.3: the tests step checkpoints per leg, and only a resume reuses them."""
+
+    @pytest.fixture
+    def extras(self, qa_dir: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, tuple[str, ...]]:
+        seen: dict[str, tuple[str, ...]] = {}
+
+        def run_tool(name: str, extra_args: Any = (), lock_fd: int | None = None) -> int:
+            seen[name] = tuple(extra_args)
+            (qa_dir / llm_qa.TOOL_REGISTRY[name].json_file).write_text(
+                json.dumps(_GREEN), encoding="utf-8"
+            )
+            return 0
+
+        monkeypatch.setattr(llm_qa, "run_tool", run_tool)
+        return seen
+
+    def test_a_resumed_run_tells_the_tests_tool_to_resume_its_legs(
+        self, extras: dict[str, tuple[str, ...]]
+    ) -> None:
+        llm_qa._run_tools(["tests", "lint"], read_only=False, resume=True)
+        assert extras == {"tests": ("--resume",), "lint": ()}
+
+    def test_a_normal_run_never_does(self, extras: dict[str, tuple[str, ...]]) -> None:
+        llm_qa._run_tools(["tests", "lint"], read_only=False)
+        assert extras == {"tests": (), "lint": ()}

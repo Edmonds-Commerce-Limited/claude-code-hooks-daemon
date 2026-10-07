@@ -552,6 +552,20 @@ steps count in the verdict and show their recorded duration, marked reused.
 `--resume` takes the full-QA lock like any run, and cannot be combined with
 `--read-only`.
 
+The `tests` step is most of the gate, so `--resume` also reaches inside it.
+`run_test_matrix.py` writes a checkpoint per matrix leg
+(`untracked/qa/leg-py<version>-<scope>.checkpoint.json`, written by temp file and
+rename) the moment that leg finishes, keyed to the tree just before and just
+after it. On a resumed run a leg is reused only if it exited 0 and passed on the
+identical tree and the log (or, for the primary, the saved report copy) is still
+the one it wrote; a failed, stale or missing leg runs again, and a leg that
+starts drops its old checkpoint. The primary leg (3.11, full suite, the only one
+with coverage) is reused or re-run as one unit, so coverage and its 95%
+threshold are never split. Reused legs stay in `tests.json` `interpreters[]` with
+`"reused": true` and their recorded counts and `slowest_tests`. A normal `all`
+never reuses a leg: `llm_qa.py` passes `--resume` to the `tests` tool only when
+it was itself resumed.
+
 ### The Automated Checks
 
 `scripts/qa/run_all.sh` is the single source of truth for **which** checks exist
