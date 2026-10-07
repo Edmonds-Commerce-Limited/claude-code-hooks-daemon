@@ -15,9 +15,13 @@ row before one finished. Every reboot sends the gate back to the top, so a relea
 interrupting.
 
 Two things are missing. First, timing: only the Python-version matrix legs record a duration
-(`scripts/qa/run_test_matrix.py:126`), so nobody can see which step or which tests cost the time. Second, resumability:
-the gate has no checkpoints, so an interrupted run cannot pick up where it stopped. pytest-xdist is not installed and
-nothing passes `-n`, so the suite also runs on one core.
+(`scripts/qa/run_test_matrix.py:126`), so nobody can see which step costs the time. Per-test durations are wired in
+`scripts/qa/run_tests.sh:116-122`, but only on the pytest-json-report branch, and that plugin is not installed, so they
+are never recorded. Second, resumability: each step's result is already tied to the tree it ran on (`provenance.json`,
+`llm_qa.py:371-520`), and `--read-only` already rejects a stale one, but there is no mode that re-runs only the stale
+steps, so an interrupted run starts again from the top. The test matrix already splits the suite into `unit` and `rest`
+scopes and runs the interpreters concurrently (`run_test_matrix.py:69-79`); the tool loop in `llm_qa.py` is serial, and
+pytest-xdist is not installed, so each test leg runs on one core.
 
 This plan adds timing first, measures the hot spots from it, then makes the gate resumable and faster.
 
@@ -42,16 +46,17 @@ This plan adds timing first, measures the hot spots from it, then makes the gate
   `subagent-reports/261007-qa-speed-review-sonnet.md` (in progress).
 - [ ] ⬜ **Task 1.2**: Record each gate step's start, end and duration in its result file, and print a sorted per-step
   timing summary at the end of `llm_qa.py all` (TDD).
-- [ ] ⬜ **Task 1.3**: Have the test step record per-file and per-test durations (`--durations` or the json-report
-  timings) and surface the slowest in the report.
+- [ ] ⬜ **Task 1.3**: Make the dormant per-test durations real (install pytest-json-report through `uv.lock`, or pass
+  `--durations`) and surface the slowest test files and tests in the report.
 
 ### Phase 2: Checkpoints and resume
 
-- [ ] ⬜ **Task 2.1**: Key each step's result to the tree it ran on (commit plus a dirty-tree hash), so a stale result
-  can never be taken as a pass.
+- [ ] ⬜ **Task 2.1**: Confirm the existing provenance (`llm_qa.py:371-520`) is enough to key a checkpoint: every step,
+  including each matrix leg, records the tree it ran on, so a stale result can never be taken as a pass.
 - [ ] ⬜ **Task 2.2**: A resume mode that skips steps whose passing result matches the current tree and runs the rest.
-- [ ] ⬜ **Task 2.3**: Split the test step into shards (for example integration and unit, or per directory), each with
-  its own checkpoint, and combine coverage across shards so the 95% threshold still applies to the whole.
+- [ ] ⬜ **Task 2.3**: Give each matrix leg and scope (`unit`, `rest`) its own checkpoint, so a reboot mid-tests loses
+  only the leg it interrupted, while coverage is still judged on the whole (parallel coverage mode is disabled today,
+  `pyproject.toml:135-136`).
 
 ### Phase 3: Speed
 
