@@ -14,10 +14,12 @@ import pytest
 from claude_code_hooks_daemon.core.event import EventType
 from claude_code_hooks_daemon.core.router import EventRouter
 from claude_code_hooks_daemon.handlers.registry import HandlerRegistry
+from claude_code_hooks_daemon.handlers.stop.auto_continue_stop import AutoContinueStopHandler
 from claude_code_hooks_daemon.handlers.user_prompt_submit.idle_housekeeping_advisor import (
     IdleHousekeepingAdvisoryHandler,
 )
 from claude_code_hooks_daemon.utils.stale_checkouts import DEFAULT_MAX_IDLE_DAYS
+from claude_code_hooks_daemon.utils.stand_in_cron import DEFAULT_STAND_IN_DELAY_HOURS
 
 _KEY = "UserPromptSubmit.idle_housekeeping_advisory"
 
@@ -56,3 +58,39 @@ def test_a_valid_stale_worktree_days_is_applied_with_no_failure() -> None:
 
     assert registry.option_failures == {}
     assert handler._stale_worktree_days == 3
+
+
+_STOP_KEY = "Stop.auto_continue_stop"
+
+
+def _register_stop(value: object) -> tuple[HandlerRegistry, AutoContinueStopHandler]:
+    registry = HandlerRegistry()
+    registry.discover()
+    router = EventRouter()
+    config = {
+        "stop": {
+            "auto_continue_stop": {"enabled": True, "options": {"stand_in_delay_hours": value}}
+        }
+    }
+    registry.register_all(router, config=config)
+    for handler in router.get_chain(EventType.STOP).handlers:
+        if isinstance(handler, AutoContinueStopHandler):
+            return registry, handler
+    raise AssertionError("auto_continue_stop was dropped by an invalid stand_in_delay_hours")
+
+
+@pytest.mark.parametrize("bad", [24, 0, -1, "3", True, float("nan")])
+def test_a_bad_stand_in_delay_is_reported_and_the_stop_handler_stays_on_the_default(
+    bad: object,
+) -> None:
+    registry, handler = _register_stop(bad)
+
+    assert "stand_in_delay_hours" in registry.option_failures[_STOP_KEY]
+    assert handler._stand_in_delay_hours == DEFAULT_STAND_IN_DELAY_HOURS
+
+
+def test_a_valid_stand_in_delay_is_applied_with_no_failure() -> None:
+    registry, handler = _register_stop(5)
+
+    assert registry.option_failures == {}
+    assert handler._stand_in_delay_hours == 5.0
